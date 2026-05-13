@@ -1,0 +1,956 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Цветные Горы — memo</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#EDEDEE;
+  --sidebar-bg:#1E2D2F;
+  --sidebar-opacity:1;
+  --brand:#004D56;
+  --brand-light:#006670;
+  --white:#ffffff;
+  --card-bg:#ffffff;
+  --surface:#f4f4f5;
+  --ink:#1a1a1a;
+  --ink-mid:#555;
+  --ink-light:#888;
+  --ink-faint:#ccc;
+  --line:#E0E0E1;
+  --line-dark:rgba(255,255,255,.1);
+  --sidebar-w:230px;
+  --sidebar-collapsed-w:56px;
+  --right-w:260px;
+  --cell-h:60px;
+  --time-w:64px;
+}
+body{font-family:'Inter',sans-serif;font-weight:400;background:var(--bg);color:var(--ink);height:100vh;overflow:hidden;display:flex;font-size:13px}
+
+/* ── SIDEBAR ── */
+.sidebar{
+  width:var(--sidebar-w);
+  background:rgba(30,45,47,var(--sidebar-opacity));
+  display:flex;flex-direction:column;overflow:hidden;flex-shrink:0;
+  transition:width .22s ease;position:relative;
+}
+.sidebar.collapsed{width:var(--sidebar-collapsed-w)}
+
+.sidebar-logo{padding:16px 14px 12px;border-bottom:1px solid var(--line-dark);display:flex;align-items:center;gap:8px;min-height:60px}
+.logo-img{height:32px;mix-blend-mode:screen;filter:brightness(1);display:block;flex-shrink:0;min-width:120px}
+.sidebar.collapsed .logo-img{min-width:28px;width:28px;object-fit:cover;object-position:left}
+
+.collapse-btn{
+  position:absolute;top:14px;right:-12px;
+  width:24px;height:24px;border-radius:50%;
+  background:var(--white);border:1px solid var(--line);
+  cursor:pointer;display:flex;align-items:center;justify-content:center;
+  box-shadow:0 1px 4px rgba(0,0,0,.12);z-index:100;color:var(--ink-mid);
+  transition:transform .22s;
+}
+.collapse-btn:hover{background:var(--surface)}
+.sidebar.collapsed .collapse-btn{transform:rotate(180deg)}
+.collapse-btn svg{width:10px;height:10px}
+
+.mini-cal{padding:14px 14px 10px;border-bottom:1px solid var(--line-dark);overflow:hidden}
+.sidebar.collapsed .mini-cal{display:none}
+.mini-cal-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.mini-cal-title{font-size:13px;font-weight:500;color:rgba(255,255,255,.85)}
+.cal-nav{display:flex;gap:2px}
+.cal-nav button{width:22px;height:22px;border:none;background:transparent;cursor:pointer;color:rgba(255,255,255,.4);border-radius:5px;font-size:14px;display:flex;align-items:center;justify-content:center;transition:background .12s}
+.cal-nav button:hover{background:rgba(255,255,255,.08);color:rgba(255,255,255,.8)}
+.mini-cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:1px}
+.cal-dow{text-align:center;font-size:9.5px;letter-spacing:.06em;color:rgba(255,255,255,.3);padding:2px 0 6px;font-weight:500}
+.cal-day{text-align:center;font-size:11px;color:rgba(255,255,255,.45);cursor:pointer;width:24px;height:24px;display:flex;align-items:center;justify-content:center;margin:1px auto;transition:background .12s,color .12s;border-radius:50%}
+.cal-day:hover{background:rgba(255,255,255,.1);color:rgba(255,255,255,.9)}
+.cal-day.today{background:var(--brand);color:#fff;font-weight:600}
+.cal-day.in-week{background:rgba(255,255,255,.07);color:rgba(255,255,255,.7);border-radius:0}
+.cal-day.week-start{border-radius:50% 0 0 50%}
+.cal-day.week-end{border-radius:0 50% 50% 0}
+.cal-day.other-month{color:rgba(255,255,255,.2)}
+
+.sidebar-nav{padding:8px 8px;overflow:hidden}
+.sidebar.collapsed .nav-label{display:none}
+.nav-item{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;cursor:pointer;color:rgba(255,255,255,.5);font-size:13px;transition:background .12s,color .12s;white-space:nowrap;overflow:hidden}
+.nav-item:hover{background:rgba(255,255,255,.07);color:rgba(255,255,255,.85)}
+.nav-item.active{background:rgba(255,255,255,.1);color:#fff}
+.nav-item svg{width:16px;height:16px;flex-shrink:0}
+.sidebar.collapsed .nav-item{justify-content:center;padding:10px}
+
+.master-legend{padding:10px 14px;border-top:1px solid var(--line-dark);overflow:hidden}
+.sidebar.collapsed .master-legend{display:none}
+.legend-title{font-size:9.5px;letter-spacing:.1em;color:rgba(255,255,255,.3);font-weight:500;margin-bottom:7px;text-transform:uppercase}
+.legend-item{display:flex;align-items:center;gap:8px;padding:3px 0;font-size:12px;color:rgba(255,255,255,.55);cursor:pointer;transition:color .12s}
+.legend-item:hover{color:rgba(255,255,255,.9)}
+.legend-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+
+.sidebar-bottom{padding:10px 10px 12px;border-top:1px solid var(--line-dark);overflow:hidden}
+.sidebar.collapsed .user-btn span,.sidebar.collapsed .user-info,.sidebar.collapsed .user-chevron{display:none}
+.sidebar.collapsed .user-btn{justify-content:center;padding:8px;border:none;background:transparent}
+.sidebar.collapsed .user-avatar{margin:0}
+.bottom-controls{display:flex;align-items:center;gap:6px;margin-bottom:8px;justify-content:space-between}
+.sidebar.collapsed .bottom-controls{flex-direction:column;gap:8px;align-items:center}
+
+/* theme tumbler */
+.theme-tumbler{
+  display:flex;align-items:center;gap:0;
+  background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);
+  border-radius:20px;padding:2px;
+}
+.tumbler-opt{
+  width:28px;height:24px;border:none;background:transparent;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;border-radius:16px;
+  color:rgba(255,255,255,.35);transition:background .15s,color .15s;
+}
+.tumbler-opt.active{background:var(--brand);color:#fff}
+.tumbler-opt svg{width:13px;height:13px}
+
+/* appearance btn */
+.appear-btn{
+  width:28px;height:28px;border:1px solid rgba(255,255,255,.12);border-radius:8px;
+  background:rgba(255,255,255,.06);cursor:pointer;display:flex;align-items:center;justify-content:center;
+  color:rgba(255,255,255,.35);transition:background .12s,color .12s;
+}
+.appear-btn:hover{background:rgba(255,255,255,.12);color:rgba(255,255,255,.8)}
+.appear-btn svg{width:14px;height:14px}
+
+.user-btn{display:flex;align-items:center;gap:10px;width:100%;padding:8px 10px;border-radius:10px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.05);cursor:pointer;color:rgba(255,255,255,.8);font-family:'Inter',sans-serif;font-size:12.5px;font-weight:400;transition:background .12s;text-align:left}
+.user-btn:hover{background:rgba(255,255,255,.1)}
+.user-avatar{width:30px;height:30px;border-radius:50%;background:var(--brand);display:flex;align-items:center;justify-content:center;font-size:11px;color:#fff;flex-shrink:0;font-weight:600}
+.user-info{display:flex;flex-direction:column;gap:1px;flex:1;overflow:hidden}
+.user-name{font-size:12.5px;color:rgba(255,255,255,.85);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:500}
+.user-role{font-size:10px;color:rgba(255,255,255,.35)}
+.user-chevron{color:rgba(255,255,255,.25);font-size:12px}
+.sidebar-version{font-size:10px;color:rgba(255,255,255,.2);text-align:center;margin-top:7px;letter-spacing:.04em}
+.sidebar.collapsed .sidebar-version{display:none}
+
+/* ── APPEARANCE POPUP ── */
+.appear-popup{
+  position:fixed;left:calc(var(--sidebar-w) + 14px);bottom:80px;
+  width:280px;background:var(--white);border:1px solid var(--line);
+  border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.14);z-index:500;
+  display:none;overflow:hidden;
+}
+.appear-popup.open{display:block}
+.ap-header{padding:12px 14px 10px;border-bottom:1px solid var(--line);font-size:13px;font-weight:600;color:var(--ink)}
+.ap-section{padding:12px 14px}
+.ap-section+.ap-section{border-top:1px solid var(--line)}
+.ap-label{font-size:10px;letter-spacing:.08em;color:var(--ink-light);font-weight:500;text-transform:uppercase;margin-bottom:8px;display:block}
+.opacity-btns{display:flex;gap:5px;flex-wrap:wrap}
+.op-btn{padding:4px 10px;border:1px solid var(--line);border-radius:6px;background:var(--surface);font-family:'Inter',sans-serif;font-size:11.5px;color:var(--ink-mid);cursor:pointer;transition:background .12s,border-color .12s}
+.op-btn:hover{background:var(--line)}
+.op-btn.active{background:var(--brand);border-color:var(--brand);color:#fff}
+.color-row{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.color-input{width:36px;height:28px;border:1px solid var(--line);border-radius:6px;cursor:pointer;padding:2px;background:transparent}
+.color-label{font-size:12px;color:var(--ink-mid)}
+.ap-close{float:right;background:transparent;border:none;font-size:18px;cursor:pointer;color:var(--ink-light);line-height:1;padding:0 2px}
+.ap-close:hover{color:var(--ink)}
+
+/* ── MAIN ── */
+.main{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0}
+.toolbar{height:52px;background:var(--white);border-bottom:1px solid var(--line);display:flex;align-items:center;padding:0 18px;gap:10px;flex-shrink:0}
+.week-nav{display:flex;align-items:center;gap:8px}
+.period-label{font-size:15px;font-weight:500;color:var(--ink);min-width:175px;text-align:center;letter-spacing:-.01em}
+.nav-btn{width:30px;height:30px;border:1px solid var(--line);border-radius:8px;background:transparent;cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--ink-mid);transition:background .12s}
+.nav-btn:hover{background:var(--surface);color:var(--ink)}
+.today-btn{height:30px;padding:0 13px;border:1px solid var(--line);border-radius:8px;background:transparent;font-family:'Inter',sans-serif;font-size:12px;color:var(--ink-mid);cursor:pointer;transition:background .12s;white-space:nowrap}
+.today-btn:hover{background:var(--surface)}
+.toolbar-sep{width:1px;height:22px;background:var(--line);flex-shrink:0}
+.toolbar-spacer{flex:1}
+.view-toggle{display:flex;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:2px}
+.vt-btn{padding:4px 13px;border:none;border-radius:6px;background:transparent;font-family:'Inter',sans-serif;font-size:12px;font-weight:400;color:var(--ink-light);cursor:pointer;transition:background .15s,color .15s;white-space:nowrap}
+.vt-btn.active{background:var(--white);color:var(--ink);font-weight:500;box-shadow:0 1px 3px rgba(0,0,0,.07)}
+.filter-select{height:30px;padding:0 26px 0 10px;border:1px solid var(--line);border-radius:8px;background:var(--white);font-family:'Inter',sans-serif;font-size:12px;color:var(--ink);cursor:pointer;appearance:none;-webkit-appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%23aaa' stroke-width='1.3' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 8px center;max-width:156px}
+.filter-select:focus{outline:none;border-color:var(--brand)}
+
+/* ── SCHEDULE ── */
+.sched-wrap{flex:1;overflow:auto;position:relative}
+.sched-bg{position:absolute;inset:0;pointer-events:none;z-index:0}
+
+.day-headers{display:grid;position:sticky;top:0;z-index:50;background:var(--white);border-bottom:1px solid var(--line)}
+.dh-empty{border-right:none}
+.day-hcell{padding:10px 0 8px;text-align:center}
+.day-name{font-size:10px;letter-spacing:.08em;color:var(--ink-light);font-weight:500;text-transform:uppercase}
+.day-num{font-size:22px;font-weight:300;color:var(--ink-mid);line-height:1.1;width:38px;height:38px;display:flex;align-items:center;justify-content:center;border-radius:50%;margin:2px auto 0}
+.day-hcell.today .day-name{color:var(--brand);font-weight:600}
+.day-hcell.today .day-num{background:var(--brand);color:#fff;font-weight:600}
+
+.time-body{display:grid;position:relative;z-index:1}
+.time-col{position:sticky;left:0;background:var(--white);z-index:20;border-right:1px solid var(--line)}
+.time-slot{height:var(--cell-h);display:flex;align-items:flex-start;padding-top:0;padding-right:12px;justify-content:flex-end;border-top:1px solid var(--line);position:relative}
+.time-slot:first-child{border-top:none}
+.time-slot.half{border-top:1px dashed rgba(180,180,182,.4)}
+/* воздушность — метка времени сдвинута вверх от линии */
+.time-label{font-size:10px;color:var(--ink-faint);letter-spacing:.03em;position:absolute;top:-8px;right:10px;background:var(--white);padding:0 2px;line-height:1}
+.time-slot.half .time-label{display:none}
+
+.day-col{border-right:1px solid var(--line);position:relative}
+.day-col:last-child{border-right:none}
+.hour-line{height:var(--cell-h);border-top:1px solid var(--line)}
+.hour-line:first-child{border-top:none}
+.hour-line.half{border-top:1px dashed rgba(180,180,182,.35)}
+.day-col.drag-over .day-bg-layer{background:rgba(0,77,86,.04)}
+
+.day-bg-layer{position:absolute;inset:0;pointer-events:none}
+
+/* ── EVENT CARDS ── */
+.event-card{
+  position:absolute;left:6px;right:6px;
+  border-radius:12px;
+  border:none;
+  padding:0;
+  cursor:grab;overflow:hidden;
+  transition:box-shadow .15s,transform .1s;
+  user-select:none;
+  box-shadow:0 1px 4px rgba(0,0,0,.08);
+  display:flex;flex-direction:column;
+}
+.event-card:hover{box-shadow:0 4px 14px rgba(0,0,0,.13);z-index:10;transform:translateY(-1px)}
+.event-card:active{cursor:grabbing;transform:scale(.99)}
+.event-card.dragging{opacity:.5;box-shadow:0 8px 24px rgba(0,0,0,.18)}
+
+.ev-inner{
+  flex:1;padding:8px 10px 6px;
+  background:var(--ev-bg,rgba(255,255,255,.7));
+  display:flex;flex-direction:column;gap:2px;
+  min-height:0;
+}
+
+/* time pill */
+.ev-time-pill{
+  display:inline-flex;align-items:center;
+  background:var(--ev-color);
+  color:#fff;border-radius:20px;
+  padding:2px 9px;font-size:10.5px;font-weight:600;letter-spacing:.01em;
+  margin-bottom:3px;align-self:flex-start;
+}
+
+.ev-title{font-size:13px;font-weight:600;color:var(--ink);line-height:1.25;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.ev-age{display:flex;align-items:center;gap:4px;font-size:11px;color:var(--ink-mid);margin-top:1px}
+.ev-age svg{width:14px;height:14px;flex-shrink:0;color:var(--ink-mid)}
+.ev-master{font-size:11.5px;color:var(--ink-mid);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ev-loc{font-size:11px;color:var(--ink-light);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* private star */
+.ev-star{
+  position:absolute;top:8px;right:8px;
+  color:var(--brand);
+}
+.ev-star svg{width:20px;height:20px}
+
+/* card footer */
+.ev-footer{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:5px 10px 6px;
+  background:rgba(0,0,0,.04);
+  border-top:1px solid rgba(0,0,0,.05);
+  flex-shrink:0;
+}
+.ev-guests{display:flex;align-items:center;gap:5px;font-size:11.5px;color:var(--ink-mid);font-weight:500}
+.ev-guests svg{width:14px;height:14px;color:var(--ink-light)}
+.ev-action{
+  width:26px;height:26px;border-radius:50%;
+  background:var(--ev-color);color:#fff;
+  border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;
+  font-size:16px;font-weight:500;line-height:1;
+  transition:opacity .12s;
+  flex-shrink:0;
+}
+.ev-action:hover{opacity:.8}
+
+/* private clip */
+.event-card.private .ev-inner{
+  clip-path:polygon(0 0,calc(100% - 18px) 0,100% 18px,100% 100%,0 100%);
+}
+
+/* drop ghost */
+.drop-ghost{position:absolute;left:6px;right:6px;border:2px dashed var(--brand);border-radius:12px;background:rgba(0,77,86,.06);pointer-events:none;display:none;z-index:30}
+.drop-ghost.copy{border-color:#6B8E6E;background:rgba(107,142,110,.07)}
+.slot-hover-el{position:absolute;left:3px;right:3px;border-radius:8px;background:rgba(0,77,86,.04);pointer-events:none;display:none;z-index:5;border:1px dashed rgba(0,77,86,.18)}
+.now-line{position:absolute;left:0;right:0;height:2px;background:var(--brand);z-index:25;pointer-events:none}
+.now-line::before{content:'';position:absolute;left:-3px;top:-3px;width:8px;height:8px;border-radius:50%;background:var(--brand)}
+
+/* ── RIGHT PANEL ── */
+.right-panel{width:0;overflow:hidden;background:rgba(30,45,47,var(--sidebar-opacity));border-left:1px solid rgba(255,255,255,.08);transition:width .22s ease;flex-shrink:0;display:flex;flex-direction:column}
+.right-panel.open{width:var(--right-w)}
+.rp-header{padding:14px 14px 12px;border-bottom:1px solid rgba(255,255,255,.08);display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
+.rp-title{font-size:14px;font-weight:600;color:rgba(255,255,255,.85);white-space:nowrap}
+.rp-close{width:24px;height:24px;border:none;background:transparent;cursor:pointer;color:rgba(255,255,255,.3);border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:18px;transition:background .12s}
+.rp-close:hover{background:rgba(255,255,255,.08);color:rgba(255,255,255,.7)}
+.rp-body{padding:0;flex:1;overflow-y:auto}
+.rp-section{border-bottom:1px solid rgba(255,255,255,.07)}
+.rp-sec-hdr{display:flex;align-items:center;justify-content:space-between;padding:11px 14px 9px;cursor:pointer;user-select:none}
+.rp-sec-title{font-size:9.5px;letter-spacing:.1em;color:rgba(255,255,255,.35);font-weight:600;text-transform:uppercase}
+.rp-arrow{font-size:10px;color:rgba(255,255,255,.25);transition:transform .15s}
+.rp-arrow.open{transform:rotate(180deg)}
+.rp-sec-body{padding:0 14px 14px}
+.rp-sec-body.collapsed{display:none}
+.f-group{margin-bottom:12px}
+.f-label{font-size:9.5px;letter-spacing:.08em;color:rgba(255,255,255,.35);font-weight:500;text-transform:uppercase;margin-bottom:5px;display:block}
+.f-sel{width:100%;height:32px;padding:0 26px 0 10px;border:1px solid rgba(255,255,255,.1);border-radius:8px;background:rgba(255,255,255,.06);font-family:'Inter',sans-serif;font-size:12px;color:rgba(255,255,255,.75);cursor:pointer;appearance:none;-webkit-appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='rgba(255,255,255,.3)' stroke-width='1.3' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 8px center}
+.f-sel:focus{outline:none}
+.f-sel option{background:#1E2D2F;color:#ddd}
+.loc-checks{display:flex;flex-direction:column;gap:5px}
+.loc-ck{display:flex;align-items:center;gap:8px;padding:6px 9px;border:1px solid rgba(255,255,255,.1);border-radius:8px;cursor:pointer;transition:background .1s;user-select:none;font-size:12px;color:rgba(255,255,255,.55)}
+.loc-ck:hover{background:rgba(255,255,255,.07);color:rgba(255,255,255,.8)}
+.loc-ck.checked{background:rgba(0,77,86,.3);border-color:rgba(0,150,165,.4);color:rgba(255,255,255,.9)}
+.loc-ck input{display:none}
+.loc-ck-box{width:14px;height:14px;border:1.5px solid rgba(255,255,255,.2);border-radius:4px;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:background .1s}
+.loc-ck.checked .loc-ck-box{background:var(--brand);border-color:var(--brand)}
+.loc-ck-tick{display:none}
+.loc-ck.checked .loc-ck-tick{display:block}
+.stamp-badge{display:flex;align-items:center;gap:7px;padding:8px 10px;background:rgba(0,77,86,.3);border:1px solid rgba(0,150,165,.3);border-radius:8px;font-size:11.5px;color:rgba(255,255,255,.8);margin-top:6px}
+.stamp-dot{width:7px;height:7px;background:#00C2CC;border-radius:50%;flex-shrink:0;animation:blink 2s infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+.mode-btn{width:100%;display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.04);font-family:'Inter',sans-serif;font-size:12px;color:rgba(255,255,255,.55);cursor:pointer;transition:background .12s;text-align:left;margin-top:6px}
+.mode-btn:hover{background:rgba(255,255,255,.08);color:rgba(255,255,255,.8)}
+.mode-btn.active{background:rgba(180,60,40,.2);border-color:rgba(200,80,60,.35);color:#f87060}
+.mode-btn svg{width:14px;height:14px;flex-shrink:0}
+.action-btn{width:100%;display:flex;align-items:center;gap:8px;padding:9px 10px;border-radius:8px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.04);font-family:'Inter',sans-serif;font-size:12px;color:rgba(255,255,255,.55);cursor:pointer;transition:background .12s;text-align:left}
+.action-btn:hover{background:rgba(255,255,255,.08);color:rgba(255,255,255,.8)}
+.action-btn svg{width:14px;height:14px;flex-shrink:0;opacity:.7}
+.rp-hint{font-size:11px;color:rgba(255,255,255,.25);line-height:1.55;margin-top:8px}
+
+.panel-toggle{position:fixed;right:16px;bottom:18px;width:38px;height:38px;border:1px solid var(--line);border-radius:11px;background:var(--white);cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 10px rgba(0,0,0,.1);transition:background .15s;z-index:200}
+.panel-toggle:hover{background:var(--surface);border-color:var(--brand)}
+.panel-toggle.active{background:var(--brand);border-color:var(--brand)}
+.panel-toggle svg{width:17px;height:17px;color:var(--ink-mid)}
+.panel-toggle.active svg{color:#fff}
+
+/* ── TOAST ── */
+.toast-wrap{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);z-index:1000;pointer-events:none;display:flex;flex-direction:column;align-items:center;gap:6px}
+.toast{display:flex;align-items:center;gap:10px;padding:10px 16px;background:#1a1a1a;color:#eee;border-radius:10px;font-size:12.5px;box-shadow:0 4px 20px rgba(0,0,0,.2);pointer-events:all;animation:tin .18s ease;white-space:nowrap}
+.toast-undo{border:none;background:rgba(255,255,255,.12);color:#eee;font-family:'Inter',sans-serif;font-size:12px;font-weight:500;padding:3px 10px;border-radius:6px;cursor:pointer;transition:background .12s}
+.toast-undo:hover{background:rgba(255,255,255,.22)}
+.toast-x{background:transparent;border:none;color:rgba(255,255,255,.3);cursor:pointer;font-size:16px;padding:0 2px;line-height:1}
+.toast-x:hover{color:rgba(255,255,255,.7)}
+@keyframes tin{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+
+body.delete-mode .event-card{cursor:not-allowed}
+body.delete-mode .event-card:hover{box-shadow:0 0 0 2px rgba(200,80,60,.5)!important}
+
+::-webkit-scrollbar{width:4px;height:4px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--line);border-radius:2px}
+</style>
+</head>
+<body>
+
+<!-- SIDEBAR -->
+<aside class="sidebar" id="sidebar">
+  <button class="collapse-btn" onclick="toggleSidebar()" title="Свернуть">
+    <svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M6.5 1.5L3 5l3.5 3.5"/></svg>
+  </button>
+
+  <div class="sidebar-logo">
+    <img src="/mnt/user-data/uploads/Logo-10.png" class="logo-img" alt="Цветные Горы">
+  </div>
+
+  <div class="mini-cal" id="miniCalWrap">
+    <div class="mini-cal-header">
+      <span class="mini-cal-title" id="calTitle"></span>
+      <div class="cal-nav"><button onclick="prevMonth()">‹</button><button onclick="nextMonth()">›</button></div>
+    </div>
+    <div class="mini-cal-grid" id="calGrid"></div>
+  </div>
+
+  <nav class="sidebar-nav">
+    <div class="nav-item active">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="1.5" y="2.5" width="13" height="12" rx="2"/><path d="M5 1v3M11 1v3M1.5 7h13" stroke-linecap="round"/></svg>
+      <span class="nav-label">Календарь</span>
+    </div>
+    <div class="nav-item"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="8" cy="5.5" r="2.5"/><path d="M2.5 13.5c0-2.76 2.46-5 5.5-5s5.5 2.24 5.5 5" stroke-linecap="round"/></svg><span class="nav-label">Мастера</span></div>
+    <div class="nav-item"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M8 1.5C5.5 1.5 3.5 3.5 3.5 6c0 3.5 4.5 8.5 4.5 8.5S12.5 9.5 12.5 6c0-2.5-2-4.5-4.5-4.5z"/><circle cx="8" cy="6" r="1.5"/></svg><span class="nav-label">Локации</span></div>
+    <div class="nav-item"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M3 12L9 3l2 2-6 9-2-2z" stroke-linejoin="round"/><path d="M9 3l2-1.5L13 3.5 11 5" stroke-linejoin="round"/></svg><span class="nav-label">Услуги</span></div>
+    <div class="nav-item"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2 4h12M2 8h8M2 12h10" stroke-linecap="round"/></svg><span class="nav-label">Клиенты</span></div>
+    <div class="nav-item"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><polyline points="2,12 5,8 8,10 11,5 14,7" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="nav-label">Аналитика</span></div>
+  </nav>
+
+  <div class="master-legend">
+    <div class="legend-title">Мастера</div>
+    <div id="masterLegend"></div>
+  </div>
+
+  <div class="sidebar-bottom">
+    <div class="bottom-controls">
+      <div class="theme-tumbler">
+        <button class="tumbler-opt active" id="tumblerLight" onclick="setTheme('light')" title="Светлая">
+          <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="7" cy="7" r="3"/><path d="M7 1v1.5M7 11.5V13M1 7h1.5M11.5 7H13M2.93 2.93l1.06 1.06M9.01 9.01l1.06 1.06M9.01 4.99l1.06-1.06M2.93 11.07l1.06-1.06" stroke-linecap="round"/></svg>
+        </button>
+        <button class="tumbler-opt" id="tumblerDark" onclick="setTheme('dark')" title="Тёмная">
+          <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M12 7.5A5 5 0 0 1 6.5 2a5 5 0 1 0 5.5 5.5z" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+      <button class="appear-btn" onclick="toggleAppearPopup()" title="Оформление">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="8" cy="8" r="6"/><circle cx="8" cy="8" r="2"/><path d="M8 2v2M8 12v2M2 8h2M12 8h2" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+    <button class="user-btn" onclick="showToast('Личный кабинет в разработке')">
+      <div class="user-avatar">МК</div>
+      <div class="user-info"><span class="user-name">Марина К.</span><span class="user-role">Администратор</span></div>
+      <span class="user-chevron">›</span>
+    </button>
+    <div class="sidebar-version">memo v0.0.1</div>
+  </div>
+</aside>
+
+<!-- APPEARANCE POPUP -->
+<div class="appear-popup" id="appearPopup">
+  <div class="ap-header">Оформление <button class="ap-close" onclick="toggleAppearPopup()">×</button></div>
+  <div class="ap-section">
+    <span class="ap-label">Прозрачность панелей</span>
+    <div class="opacity-btns">
+      <button class="op-btn" onclick="setSidebarOp(0.1)">10%</button>
+      <button class="op-btn" onclick="setSidebarOp(0.25)">25%</button>
+      <button class="op-btn" onclick="setSidebarOp(0.5)">50%</button>
+      <button class="op-btn" onclick="setSidebarOp(0.75)">75%</button>
+      <button class="op-btn active" onclick="setSidebarOp(1)">100%</button>
+    </div>
+  </div>
+  <div class="ap-section">
+    <span class="ap-label">Фон расписания</span>
+    <div class="color-row">
+      <input type="color" class="color-input" id="bgColorPick" value="#EDEDEE" onchange="setBgColor(this.value)">
+      <span class="color-label">Цвет фона</span>
+    </div>
+    <div class="opacity-btns">
+      <button class="op-btn" onclick="setBgOp(0.1)">10%</button>
+      <button class="op-btn" onclick="setBgOp(0.25)">25%</button>
+      <button class="op-btn" onclick="setBgOp(0.5)">50%</button>
+      <button class="op-btn" onclick="setBgOp(0.75)">75%</button>
+      <button class="op-btn active" onclick="setBgOp(1)" id="bgOpActive">100%</button>
+    </div>
+  </div>
+</div>
+
+<!-- MAIN -->
+<main class="main">
+  <div class="toolbar">
+    <div class="week-nav">
+      <button class="nav-btn" onclick="prevPeriod()"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M6.5 1.5L3 5l3.5 3.5"/></svg></button>
+      <span class="period-label" id="periodLabel"></span>
+      <button class="nav-btn" onclick="nextPeriod()"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M3.5 1.5L7 5l-3.5 3.5"/></svg></button>
+    </div>
+    <button class="today-btn" onclick="goToday()">Сегодня</button>
+    <div class="toolbar-sep"></div>
+    <div class="view-toggle">
+      <button class="vt-btn active" id="vtWeek" onclick="setVM('week')">Неделя</button>
+      <button class="vt-btn" id="vtDay" onclick="setVM('day')">День</button>
+    </div>
+    <div class="toolbar-spacer"></div>
+    <select class="filter-select" id="masterFilter" onchange="renderSchedule()">
+      <option value="all">Все мастера</option>
+      <option value="m1">Ольга Середа</option>
+      <option value="m2">Юлия Большакова</option>
+      <option value="m3">Анастасия П.</option>
+      <option value="m4">Дарья Тюльпина</option>
+      <option value="m5">Александра В.</option>
+      <option value="m7">Ирина Горох</option>
+    </select>
+    <select class="filter-select" id="locFilter" onchange="renderSchedule()">
+      <option value="all">Все локации</option>
+      <option value="alpika">Альпика</option>
+      <option value="grand">Гранд Отель Поляна</option>
+      <option value="p1389">Поляна 1389</option>
+    </select>
+  </div>
+
+  <div class="sched-wrap" id="schedWrap">
+    <div class="day-headers" id="dayHeaders"></div>
+    <div class="time-body" id="timeBody"></div>
+  </div>
+</main>
+
+<!-- RIGHT PANEL -->
+<aside class="right-panel" id="rightPanel">
+  <div class="rp-header"><span class="rp-title">Инструменты</span><button class="rp-close" onclick="togglePanel()">×</button></div>
+  <div class="rp-body">
+    <div class="rp-section">
+      <div class="rp-sec-hdr" onclick="toggleSec('stamp')"><span class="rp-sec-title">Штамп</span><span class="rp-arrow open" id="arr-stamp">▾</span></div>
+      <div class="rp-sec-body" id="sec-stamp">
+        <div class="f-group"><label class="f-label">Мастер</label><select class="f-sel" id="stMaster" onchange="updateBadge()"><option value="">— выберите —</option><option value="m1">Ольга Середа</option><option value="m2">Юлия Большакова</option><option value="m3">Анастасия П.</option><option value="m4">Дарья Тюльпина</option><option value="m5">Александра В.</option><option value="m7">Ирина Горох</option></select></div>
+        <div class="f-group"><label class="f-label">Услуга</label><select class="f-sel" id="stService" onchange="updateBadge()"><option value="">— выберите —</option><option>Картина маслом</option><option>Картина акрилом</option><option>Мини-картина акрилом</option><option>Акварель</option><option>Ручная лепка</option><option>Роспись одежды</option></select></div>
+        <div class="f-group"><label class="f-label">Локации</label><div class="loc-checks">
+          <label class="loc-ck" onclick="toggleLoc(this,'alpika')"><input type="checkbox"><div class="loc-ck-box"><svg class="loc-ck-tick" width="8" height="8" viewBox="0 0 8 8" fill="none" stroke="white" stroke-width="1.6" stroke-linecap="round"><path d="M1.5 4l2 2 3-3"/></svg></div>Альпика</label>
+          <label class="loc-ck" onclick="toggleLoc(this,'grand')"><input type="checkbox"><div class="loc-ck-box"><svg class="loc-ck-tick" width="8" height="8" viewBox="0 0 8 8" fill="none" stroke="white" stroke-width="1.6" stroke-linecap="round"><path d="M1.5 4l2 2 3-3"/></svg></div>Гранд Отель Поляна</label>
+          <label class="loc-ck" onclick="toggleLoc(this,'p1389')"><input type="checkbox"><div class="loc-ck-box"><svg class="loc-ck-tick" width="8" height="8" viewBox="0 0 8 8" fill="none" stroke="white" stroke-width="1.6" stroke-linecap="round"><path d="M1.5 4l2 2 3-3"/></svg></div>Поляна 1389</label>
+        </div></div>
+        <div id="stBadge" style="display:none" class="stamp-badge"><div class="stamp-dot"></div><span id="stBadgeText">Штамп настроен</span></div>
+        <button class="mode-btn" id="delBtn" onclick="toggleDel()"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M3 4h10M6 4V2.5h4V4M5 4v8.5h6V4" stroke-linecap="round" stroke-linejoin="round"/><path d="M7 7v3.5M9 7v3.5" stroke-linecap="round"/></svg>Режим удаления</button>
+      </div>
+    </div>
+    <div class="rp-section">
+      <div class="rp-sec-hdr" onclick="toggleSec('week')"><span class="rp-sec-title">Неделя</span><span class="rp-arrow open" id="arr-week">▾</span></div>
+      <div class="rp-sec-body" id="sec-week">
+        <button class="action-btn" onclick="showToast('События прошлой недели скопированы',true)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M3 8a5 5 0 1 0 1.5-3.5" stroke-linecap="round"/><path d="M3 4.5V8h3.5" stroke-linecap="round" stroke-linejoin="round"/></svg>Копировать прошлую неделю</button>
+        <div class="rp-hint">Все события предыдущей недели будут скопированы в текущую.</div>
+      </div>
+    </div>
+  </div>
+</aside>
+
+<button class="panel-toggle" id="panelToggle" onclick="togglePanel()">
+  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="7" height="5" rx="1.5"/><rect x="2" y="13" width="5" height="4" rx="1.5"/><rect x="11" y="8" width="7" height="5" rx="1.5"/><rect x="11" y="2" width="5" height="4" rx="1.5"/></svg>
+</button>
+<div class="toast-wrap" id="toastWrap"></div>
+
+<script>
+const MASTERS={
+  m1:{name:'Ольга Середа',short:'Ольга',color:'#5B8C7A'},
+  m2:{name:'Юлия Большакова',short:'Юлия',color:'#6B7E9C'},
+  m3:{name:'Анастасия П.',short:'Анастасия',color:'#A07060'},
+  m4:{name:'Дарья Тюльпина',short:'Дарья',color:'#7A6E9C'},
+  m5:{name:'Александра В.',short:'Александра',color:'#8A7840'},
+  m7:{name:'Ирина Горох',short:'Ирина',color:'#9A5870'},
+};
+const STUDIOS={alpika:'Альпика',grand:'Гранд Отель Поляна',p1389:'Поляна 1389'};
+const DAYS=['ПН','ВТ','СР','ЧТ','ПТ','СБ','ВС'];
+const MONTHS_T=['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+const MONTHS_G=['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];
+const TS=9,TE=21,CH=60;
+
+let today=new Date();today.setHours(0,0,0,0);
+let weekStart=monday(today);
+let calMonth=new Date(today.getFullYear(),today.getMonth(),1);
+let vm='week',dayV=new Date(today),delMode=false,stLocs=new Set(),panelOpen=false,sidebarCollapsed=false;
+let dragId=null,dragCopy=false;
+
+function monday(d){const r=new Date(d);const dy=r.getDay();r.setDate(r.getDate()+(dy===0?-6:1-dy));r.setHours(0,0,0,0);return r;}
+function fmtDate(d){return d.getDate()+' '+MONTHS_G[d.getMonth()];}
+function timeStr(h){const hh=Math.floor(h);const mm=h%1===.5?'30':'00';return `${hh}:${mm.padStart(2,'0')}`;}
+
+// hex to rgb helper
+function hexToRgb(hex){const r=parseInt(hex.slice(1,3),16);const g=parseInt(hex.slice(3,5),16);const b=parseInt(hex.slice(5,7),16);return`${r},${g},${b}`;}
+
+function makeEvents(ws){
+  return[
+    {day:0,master:'m1',start:10,dur:3,service:'Морской пейзаж',age:'6-12',loc:'grand',occ:3,cap:8,priv:false},
+    {day:0,master:'m2',start:12,dur:1.5,service:'Ручная лепка',age:'5+',loc:'alpika',occ:4,cap:6,priv:false},
+    {day:0,master:'m4',start:14,dur:2,service:'Индивидуальный мастер-класс',age:'12+',loc:'grand',occ:1,cap:1,priv:true},
+    {day:0,master:'m3',start:16,dur:2,service:'Картина акрилом',age:'6+',loc:'p1389',occ:5,cap:10,priv:false},
+    {day:1,master:'m3',start:11,dur:2,service:'Картина акрилом',age:'6+',loc:'alpika',occ:7,cap:10,priv:false},
+    {day:1,master:'m1',start:15,dur:1.5,service:'Мини-картина акрилом',age:'6+',loc:'grand',occ:3,cap:8,priv:false},
+    {day:1,master:'m5',start:17,dur:2.5,service:'Картина маслом',age:'12+',loc:'p1389',occ:5,cap:8,priv:false},
+    {day:2,master:'m2',start:10.5,dur:2,service:'Роспись одежды',age:'8+',loc:'alpika',occ:9,cap:10,priv:false},
+    {day:2,master:'m7',start:13,dur:1.5,service:'Мини-картина',age:'6+',loc:'grand',occ:2,cap:8,priv:false},
+    {day:2,master:'m4',start:16,dur:2.5,service:'Акварель',age:'6-12',loc:'p1389',occ:4,cap:6,priv:false},
+    {day:3,master:'m1',start:11,dur:3,service:'Морской пейзаж',age:'12+',loc:'grand',occ:6,cap:8,priv:false},
+    {day:3,master:'m3',start:14.5,dur:2,service:'Картина акрилом',age:'6+',loc:'alpika',occ:4,cap:10,priv:false},
+    {day:3,master:'m5',start:18,dur:1.5,service:'Индивидуальный урок',age:'12+',loc:'p1389',occ:1,cap:1,priv:true},
+    {day:4,master:'m2',start:10,dur:2.5,service:'Ручная лепка',age:'5+',loc:'alpika',occ:5,cap:6,priv:false},
+    {day:4,master:'m7',start:12,dur:2,service:'Картина акрилом',age:'6+',loc:'grand',occ:8,cap:10,priv:false},
+    {day:4,master:'m1',start:15,dur:2.5,service:'Картина маслом',age:'12+',loc:'grand',occ:7,cap:8,priv:false},
+    {day:4,master:'m4',start:18,dur:1.5,service:'Мини-картина',age:'6+',loc:'p1389',occ:6,cap:8,priv:false},
+    {day:5,master:'m1',start:10,dur:3,service:'Морской пейзаж',age:'12+',loc:'grand',occ:8,cap:8,priv:false},
+    {day:5,master:'m2',start:10,dur:1.5,service:'Мини-картина',age:'6+',loc:'alpika',occ:7,cap:8,priv:false},
+    {day:5,master:'m3',start:12,dur:2,service:'Картина акрилом',age:'6+',loc:'alpika',occ:9,cap:10,priv:false},
+    {day:5,master:'m5',start:13,dur:2.5,service:'Картина маслом',age:'12+',loc:'p1389',occ:6,cap:8,priv:false},
+    {day:5,master:'m7',start:15.5,dur:1.5,service:'Мини-картина',age:'6+',loc:'grand',occ:4,cap:8,priv:false},
+    {day:5,master:'m4',start:16,dur:2.5,service:'Акварель',age:'6-12',loc:'p1389',occ:5,cap:6,priv:false},
+    {day:5,master:'m3',start:14.5,dur:1.5,service:'Индив. керамика',age:'12+',loc:'alpika',occ:1,cap:1,priv:true},
+    {day:6,master:'m1',start:11,dur:2.5,service:'Картина маслом',age:'12+',loc:'grand',occ:5,cap:8,priv:false},
+    {day:6,master:'m2',start:11,dur:1.5,service:'Ручная лепка',age:'5+',loc:'alpika',occ:3,cap:6,priv:false},
+    {day:6,master:'m7',start:14,dur:2,service:'Картина акрилом',age:'6+',loc:'grand',occ:6,cap:10,priv:false},
+    {day:6,master:'m5',start:16.5,dur:2,service:'Роспись одежды',age:'8+',loc:'p1389',occ:4,cap:8,priv:false},
+  ].map((e,i)=>({...e,id:'ev_'+i}));
+}
+
+function buildLegend(){
+  document.getElementById('masterLegend').innerHTML=Object.entries(MASTERS).map(([k,m])=>
+    `<div class="legend-item"><div class="legend-dot" style="background:${m.color}"></div>${m.short}</div>`).join('');
+}
+
+// ─── MINI CAL with prev/next week padding ───
+function buildCal(){
+  document.getElementById('calTitle').textContent=MONTHS_T[calMonth.getMonth()]+' '+calMonth.getFullYear();
+  const grid=document.getElementById('calGrid');
+  let h=DAYS.map(d=>`<div class="cal-dow">${d}</div>`).join('');
+
+  // Show 1 week before month start + 1 week after month end
+  const first=new Date(calMonth.getFullYear(),calMonth.getMonth(),1);
+  let dow=first.getDay();if(dow===0)dow=7;
+  const dim=new Date(calMonth.getFullYear(),calMonth.getMonth()+1,0).getDate();
+  // pad to full weeks, then add one extra week before and after
+  const startPad=dow-1; // days before month start
+  const totalMonthCells=Math.ceil((startPad+dim)/7)*7;
+  const showStart=new Date(first);showStart.setDate(showStart.getDate()-startPad-7);
+  const totalCells=totalMonthCells+14; // +1 week before, +1 after
+
+  const ws=weekStart,we=new Date(ws);we.setDate(we.getDate()+6);
+
+  for(let i=0;i<totalCells;i++){
+    const d=new Date(showStart);d.setDate(showStart.getDate()+i);
+    const inThisMonth=d.getMonth()===calMonth.getMonth()&&d.getFullYear()===calMonth.getFullYear();
+    const isTod=d.toDateString()===today.toDateString();
+    const inW=d>=ws&&d<=we;
+    const wd=(d.getDay()+6)%7;
+    let cls='cal-day';
+    if(!inThisMonth)cls+=' other-month';
+    if(isTod)cls+=' today';
+    else if(inW&&wd===0)cls+=' in-week week-start';
+    else if(inW&&wd===6)cls+=' in-week week-end';
+    else if(inW)cls+=' in-week';
+    h+=`<div class="${cls}" onclick="jumpTo(${d.getTime()})">${d.getDate()}</div>`;
+  }
+  grid.innerHTML=h;
+}
+function prevMonth(){calMonth.setMonth(calMonth.getMonth()-1);buildCal();}
+function nextMonth(){calMonth.setMonth(calMonth.getMonth()+1);buildCal();}
+function jumpTo(ts){
+  const d=new Date(ts);
+  if(vm==='week')weekStart=monday(d);else dayV=new Date(d);
+  renderSchedule();buildCal();
+}
+document.getElementById('miniCalWrap').addEventListener('wheel',e=>{
+  e.preventDefault();if(e.deltaY>0)nextMonth();else prevMonth();
+},{passive:false});
+
+function setVM(m){
+  vm=m;
+  document.getElementById('vtWeek').classList.toggle('active',m==='week');
+  document.getElementById('vtDay').classList.toggle('active',m==='day');
+  renderSchedule();
+}
+function goToday(){if(vm==='week')weekStart=monday(today);else dayV=new Date(today);renderSchedule();buildCal();}
+function prevPeriod(){if(vm==='week')weekStart.setDate(weekStart.getDate()-7);else dayV.setDate(dayV.getDate()-1);renderSchedule();buildCal();}
+function nextPeriod(){if(vm==='week')weekStart.setDate(weekStart.getDate()+7);else dayV.setDate(dayV.getDate()+1);renderSchedule();buildCal();}
+
+function getF(){return{m:document.getElementById('masterFilter').value,l:document.getElementById('locFilter').value};}
+function matchF(e){const f=getF();if(f.m!=='all'&&e.master!==f.m)return false;if(f.l!=='all'&&e.loc!==f.l)return false;return true;}
+
+function renderSchedule(){
+  const evs=makeEvents(weekStart);
+  if(vm==='week'){
+    const end=new Date(weekStart);end.setDate(end.getDate()+6);
+    document.getElementById('periodLabel').textContent=fmtDate(weekStart)+' — '+fmtDate(end);
+    renderWeek(evs);
+  } else {
+    document.getElementById('periodLabel').textContent=DAYS[(dayV.getDay()+6)%7]+', '+dayV.getDate()+' '+MONTHS_G[dayV.getMonth()];
+    const di=(dayV.getDay()+6)%7;
+    renderDay(makeEvents(monday(dayV)),di);
+  }
+}
+
+const TW=64;
+
+function renderWeek(allEvs){
+  const hdr=document.getElementById('dayHeaders');
+  hdr.style.gridTemplateColumns=`${TW}px repeat(7,1fr)`;
+  let h=`<div class="dh-empty" style="width:${TW}px"></div>`;
+  for(let i=0;i<7;i++){
+    const d=new Date(weekStart);d.setDate(d.getDate()+i);
+    const isTod=d.toDateString()===today.toDateString();
+    h+=`<div class="day-hcell${isTod?' today':''}"><div class="day-name">${DAYS[i]}</div><div class="day-num">${d.getDate()}</div></div>`;
+  }
+  hdr.innerHTML=h;
+  buildTimeBody(allEvs,7);
+}
+
+function renderDay(allEvs,di){
+  const hdr=document.getElementById('dayHeaders');
+  hdr.style.gridTemplateColumns=`${TW}px 1fr`;
+  const isTod=dayV.toDateString()===today.toDateString();
+  hdr.innerHTML=`<div class="dh-empty" style="width:${TW}px"></div>
+    <div class="day-hcell${isTod?' today':''}"><div class="day-name">${DAYS[(dayV.getDay()+6)%7]}</div><div class="day-num">${dayV.getDate()}</div></div>`;
+  buildTimeBody(allEvs,1,di);
+}
+
+function buildTimeBody(allEvs,colCount,singleDi){
+  const body=document.getElementById('timeBody');
+  body.style.gridTemplateColumns=`${TW}px repeat(${colCount},1fr)`;
+  const slots=(TE-TS)*2;
+
+  let tc=`<div class="time-col" style="width:${TW}px">`;
+  for(let i=0;i<slots;i++){
+    const half=i%2===1;
+    tc+=`<div class="time-slot${half?' half':''}"><span class="time-label">${half?'':(TS+Math.floor(i/2))+':00'}</span></div>`;
+  }
+  tc+=`</div>`;
+
+  let dc='';
+  for(let ci=0;ci<colCount;ci++){
+    const di=colCount===1?singleDi:ci;
+    const evs=allEvs.filter(e=>e.day===di&&matchF(e));
+    dc+=buildDayCol(di,evs,slots,ci);
+  }
+  body.innerHTML=tc+dc;
+  drawNowLine(colCount,singleDi);
+}
+
+function buildDayCol(di,evs,slots,colIndex){
+  let lines='';
+  for(let i=0;i<slots;i++){
+    const half=i%2===1;
+    lines+=`<div class="hour-line${half?' half':''}" onmouseenter="shHover(${colIndex},${i})" onmouseleave="shLeave(${colIndex})" onclick="slotCk(event,${di},${colIndex},${i})"></div>`;
+  }
+
+  let cards='';
+  evs.forEach(e=>{
+    const m=MASTERS[e.master];
+    const top=(e.start-TS)*2*CH;
+    const h=Math.max(e.dur*2*CH-10,52);
+    const loc=STUDIOS[e.loc]||e.loc;
+    const endT=e.start+e.dur;
+    const pct=e.occ/e.cap; // 0..1
+    // fill opacity: more guests = more opaque. min 0.12, max 0.35
+    const fillOp=(0.12+pct*0.28).toFixed(2);
+    const rgb=hexToRgb(m.color);
+    const bgStyle=`rgba(${rgb},${fillOp})`;
+    const small=h<90;const tiny=h<56;
+
+    // age icon + label
+    const ageHtml=`<div class="ev-age"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="7" cy="6" r="2.5"/><path d="M2 17c0-3 2.24-5 5-5s5 2 5 5" stroke-linecap="round"/><circle cx="14" cy="8" r="1.8"/><path d="M11.5 17c0-2.2 1.12-3.5 2.5-3.5s2.5 1.3 2.5 3.5" stroke-linecap="round"/></svg>${e.age}</div>`;
+
+    cards+=`<div class="event-card${e.priv?' private':''}" id="${e.id}"
+      style="top:${top}px;height:${h}px;--ev-color:${m.color};--ev-bg:${bgStyle}"
+      draggable="true"
+      ondragstart="onDS(event,'${e.id}')"
+      ondragend="onDE(event)"
+      onclick="onCC(event,'${e.id}')">
+      <div class="ev-inner">
+        <div class="ev-time-pill">${timeStr(e.start)} — ${timeStr(endT)}</div>
+        ${!tiny?`<div class="ev-title">${e.service}</div>`:''}
+        ${!small?ageHtml:''}
+        ${!small?`<div class="ev-master">${m.name}</div>`:''}
+        ${!small?`<div class="ev-loc">${loc}</div>`:''}
+        ${e.priv?`<div class="ev-star"><svg viewBox="0 0 24 24" fill="var(--brand)" stroke="none"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg></div>`:''}
+      </div>
+      <div class="ev-footer">
+        <div class="ev-guests"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="7" cy="6" r="2.5"/><path d="M2 17c0-3 2.24-5 5-5s5 2 5 5" stroke-linecap="round"/><circle cx="14" cy="8" r="1.8"/><path d="M11.5 17c0-2.2 1.12-3.5 2.5-3.5s2.5 1.3 2.5 3.5" stroke-linecap="round"/></svg>${e.occ}/${e.cap}</div>
+        <button class="ev-action" onclick="evAction(event,'${e.id}',${e.priv})">${e.priv?'···':'+'}</button>
+      </div>
+    </div>`;
+  });
+
+  return `<div class="day-col" id="dc${colIndex}"
+    ondragover="onDO(event,${colIndex})"
+    ondragleave="onDL(${colIndex})"
+    ondrop="onDD(event,${colIndex},${di})">
+    ${lines}
+    <div style="position:absolute;inset:0;pointer-events:none" id="el${colIndex}">${cards}</div>
+    <div class="drop-ghost" id="dg${colIndex}"></div>
+    <div class="slot-hover-el" id="sh${colIndex}"></div>
+  </div>`;
+}
+
+function drawNowLine(colCount,singleDi){
+  const now=new Date();const h=now.getHours()+now.getMinutes()/60;
+  if(h<TS||h>TE)return;const top=(h-TS)*2*CH;
+  for(let ci=0;ci<colCount;ci++){
+    const di=colCount===1?singleDi:ci;
+    const d=new Date(weekStart);d.setDate(d.getDate()+di);
+    if(d.toDateString()===today.toDateString()){
+      const col=document.getElementById('dc'+ci);
+      if(col){const l=document.createElement('div');l.className='now-line';l.style.top=top+'px';col.appendChild(l);}
+    }
+  }
+}
+
+// slot hover
+function shHover(ci,slot){const sh=document.getElementById('sh'+ci);if(!sh)return;sh.style.display='block';sh.style.top=(slot*CH)+'px';sh.style.height=CH+'px';}
+function shLeave(ci){const sh=document.getElementById('sh'+ci);if(sh)sh.style.display='none';}
+function slotCk(e,di,ci,slot){
+  if(delMode)return;
+  const stM=document.getElementById('stMaster').value;
+  const stS=document.getElementById('stService').value;
+  if(stM&&stS&&stLocs.size>0){
+    stLocs.forEach(loc=>{showToast(`Добавлено: ${stS} · ${MASTERS[stM].short} · ${STUDIOS[loc]}`,true);});
+  }
+}
+function evAction(e,id,priv){
+  e.stopPropagation();
+  if(priv)showToast('Редактирование индивидуального МК');
+  else showToast('Быстрое добавление гостя');
+}
+
+// ─── DRAG & DROP ───
+function onDS(e,id){
+  dragId=id;dragCopy=e.altKey;
+  e.dataTransfer.effectAllowed=e.altKey?'copy':'move';
+  const card=document.getElementById(id);
+  if(card)card.classList.add('dragging');
+}
+function onDE(e){
+  if(dragId){const c=document.getElementById(dragId);if(c)c.classList.remove('dragging');}
+  document.querySelectorAll('.drop-ghost').forEach(g=>g.style.display='none');
+  document.querySelectorAll('.day-col').forEach(c=>c.classList.remove('drag-over'));
+  dragId=null;
+}
+function onDO(e,ci){
+  e.preventDefault();
+  const col=document.getElementById('dc'+ci);if(!col)return;
+  col.classList.add('drag-over');
+  const rect=col.getBoundingClientRect();
+  const snap=Math.floor((e.clientY-rect.top)/CH)*CH;
+  const ghost=document.getElementById('dg'+ci);
+  if(ghost&&dragId){
+    const src=document.getElementById(dragId);
+    const h=src?parseInt(src.style.height):CH*4;
+    ghost.style.display='block';ghost.style.top=snap+'px';ghost.style.height=h+'px';
+    ghost.className='drop-ghost'+(dragCopy?' copy':'');
+  }
+}
+function onDL(ci){
+  const col=document.getElementById('dc'+ci);if(col)col.classList.remove('drag-over');
+  const g=document.getElementById('dg'+ci);if(g)g.style.display='none';
+}
+function onDD(e,ci,di){
+  e.preventDefault();
+  if(!dragId)return;
+  const col=document.getElementById('dc'+ci);if(col)col.classList.remove('drag-over');
+  const g=document.getElementById('dg'+ci);if(g)g.style.display='none';
+  const rect=col.getBoundingClientRect();
+  const snap=Math.floor((e.clientY-rect.top)/CH)*CH;
+  const newStart=TS+snap/CH*.5;
+  const src=document.getElementById(dragId);
+  const title=src?.querySelector('.ev-title')?.textContent||'Событие';
+  const isCopy=dragCopy;
+  if(src){
+    if(!isCopy){
+      src.style.top=snap+'px';
+      const layer=document.getElementById('el'+ci);
+      if(layer&&!layer.contains(src))layer.appendChild(src);
+    } else {
+      const clone=src.cloneNode(true);
+      clone.id='ev_c_'+Date.now();clone.style.top=snap+'px';clone.classList.remove('dragging');
+      clone.setAttribute('draggable','true');
+      clone.addEventListener('dragstart',ev=>onDS(ev,clone.id));
+      clone.addEventListener('dragend',onDE);
+      clone.addEventListener('click',ev=>onCC(ev,clone.id));
+      const layer=document.getElementById('el'+ci);if(layer)layer.appendChild(clone);
+    }
+  }
+  const hh=Math.floor(newStart),mm=newStart%1===.5?'30':'00';
+  showToast((isCopy?'Скопировано: ':'Перемещено: ')+title+' → '+DAYS[di]+' '+hh+':'+mm.padStart(2,'0'),true);
+  dragId=null;
+}
+
+function onCC(e,id){
+  e.stopPropagation();
+  if(!delMode)return;
+  const card=document.getElementById(id);if(!card)return;
+  const title=card.querySelector('.ev-title')?.textContent||'Событие';
+  card.style.transition='opacity .15s,transform .15s';card.style.opacity='0';card.style.transform='scale(.95)';
+  setTimeout(()=>card.remove(),150);
+  showToast('Удалено: '+title,true);
+}
+
+// ── DELETE ──
+function toggleDel(){
+  delMode=!delMode;
+  document.body.classList.toggle('delete-mode',delMode);
+  document.getElementById('delBtn').classList.toggle('active',delMode);
+  if(delMode)showToast('Режим удаления — кликните на событие');
+}
+
+// ── STAMP ──
+function toggleLoc(el,loc){
+  el.classList.toggle('checked');
+  if(el.classList.contains('checked'))stLocs.add(loc);else stLocs.delete(loc);
+  updateBadge();
+}
+function updateBadge(){
+  const m=document.getElementById('stMaster').value;
+  const s=document.getElementById('stService').value;
+  const ready=m&&s&&stLocs.size>0;
+  document.getElementById('stBadge').style.display=ready?'flex':'none';
+  if(ready)document.getElementById('stBadgeText').textContent=(MASTERS[m]?.short||m)+' · '+(s.length>16?s.slice(0,16)+'…':s);
+}
+
+// ── PANEL ──
+function togglePanel(){
+  panelOpen=!panelOpen;
+  document.getElementById('rightPanel').classList.toggle('open',panelOpen);
+  document.getElementById('panelToggle').classList.toggle('active',panelOpen);
+}
+function toggleSec(id){
+  const b=document.getElementById('sec-'+id);
+  const a=document.getElementById('arr-'+id);
+  b.classList.toggle('collapsed');
+  a.classList.toggle('open',!b.classList.contains('collapsed'));
+}
+
+// ── SIDEBAR COLLAPSE ──
+function toggleSidebar(){
+  sidebarCollapsed=!sidebarCollapsed;
+  document.getElementById('sidebar').classList.toggle('collapsed',sidebarCollapsed);
+}
+
+// ── THEME ──
+function setTheme(t){
+  document.getElementById('tumblerLight').classList.toggle('active',t==='light');
+  document.getElementById('tumblerDark').classList.toggle('active',t==='dark');
+  if(t==='dark'){
+    document.documentElement.style.setProperty('--bg','#1a1a1c');
+    document.documentElement.style.setProperty('--white','#252528');
+    document.documentElement.style.setProperty('--card-bg','#2a2a2e');
+    document.documentElement.style.setProperty('--surface','#303035');
+    document.documentElement.style.setProperty('--ink','#e8e8ea');
+    document.documentElement.style.setProperty('--ink-mid','#aaaaae');
+    document.documentElement.style.setProperty('--ink-light','#777780');
+    document.documentElement.style.setProperty('--ink-faint','#555560');
+    document.documentElement.style.setProperty('--line','#3a3a3e');
+    document.body.style.background='#1a1a1c';
+  } else {
+    document.documentElement.style.setProperty('--bg','#EDEDEE');
+    document.documentElement.style.setProperty('--white','#ffffff');
+    document.documentElement.style.setProperty('--card-bg','#ffffff');
+    document.documentElement.style.setProperty('--surface','#f4f4f5');
+    document.documentElement.style.setProperty('--ink','#1a1a1a');
+    document.documentElement.style.setProperty('--ink-mid','#555');
+    document.documentElement.style.setProperty('--ink-light','#888');
+    document.documentElement.style.setProperty('--ink-faint','#ccc');
+    document.documentElement.style.setProperty('--line','#E0E0E1');
+    document.body.style.background='#EDEDEE';
+  }
+  document.querySelectorAll('.time-label').forEach(el=>el.style.background=getComputedStyle(document.documentElement).getPropertyValue('--white'));
+}
+
+// ── APPEAR POPUP ──
+let appearOpen=false;
+function toggleAppearPopup(){
+  appearOpen=!appearOpen;
+  document.getElementById('appearPopup').classList.toggle('open',appearOpen);
+}
+function setSidebarOp(v){
+  document.documentElement.style.setProperty('--sidebar-opacity',v);
+  document.querySelectorAll('.op-btn').forEach((b,i)=>{
+    const vals=[0.1,0.25,0.5,0.75,1];
+    if(i<5)b.classList.toggle('active',vals[i]===v);
+  });
+}
+let bgColor='#EDEDEE',bgOp=1;
+function setBgColor(c){bgColor=c;applyBgColor();}
+function setBgOp(v){
+  bgOp=v;applyBgColor();
+  document.querySelectorAll('.op-btn').forEach((b,i)=>{
+    const vals=[0.1,0.25,0.5,0.75,1];
+    if(i>=5)b.classList.toggle('active',vals[i-5]===v);
+  });
+}
+function applyBgColor(){
+  const rgb=hexToRgb(bgColor);
+  document.getElementById('schedWrap').style.background=`rgba(${rgb},${bgOp})`;
+}
+
+// ── TOAST ──
+let tt={};
+function showToast(msg,undo=false){
+  const wrap=document.getElementById('toastWrap');
+  const id='t'+Date.now()+Math.random();
+  const div=document.createElement('div');div.className='toast';div.id=id;
+  div.innerHTML=`<span>${msg}</span>`+(undo?`<button class="toast-undo" onclick="undoT('${id}')">Отменить</button>`:'')+`<button class="toast-x" onclick="rmT('${id}')">×</button>`;
+  wrap.appendChild(div);
+  tt[id]=setTimeout(()=>rmT(id),4500);
+}
+function rmT(id){clearTimeout(tt[id]);const el=document.getElementById(id);if(el){el.style.opacity='0';el.style.transition='opacity .18s';setTimeout(()=>el?.remove(),200);}}
+function undoT(id){rmT(id);renderSchedule();showToast('Действие отменено');}
+
+// ── INIT ──
+buildLegend();buildCal();renderSchedule();
+</script>
+</body>
+</html>

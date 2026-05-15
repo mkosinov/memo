@@ -52,7 +52,7 @@ export function mixWithWhite(
  * Formula: 0.85 - pct * 0.55
  */
 export function getFillOpacity(occupied: number, capacity: number): number {
-  const pct = Math.min(occupied / capacity, 1);
+  const pct = capacity > 0 ? Math.min(occupied / capacity, 1) : 0;
   return 0.85 - pct * 0.55;
 }
 

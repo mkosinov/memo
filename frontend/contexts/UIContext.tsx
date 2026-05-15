@@ -18,6 +18,8 @@ interface UIContextType {
   toggleSidebar: () => void;
   rightPanelCollapsed: boolean;
   toggleRightPanel: () => void;
+  theme: 'light' | 'dark';
+  toggleTheme: () => void;
 }
 
 const UIContext = createContext<UIContextType | null>(null);
@@ -27,6 +29,7 @@ export function UIProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false);
+  const [theme, setTheme] = useState<'light' | 'dark'>('light');
 
   const toggleDeleteMode = useCallback(() => {
     setDeleteMode(prev => !prev);
@@ -52,6 +55,16 @@ export function UIProvider({ children }: { children: React.ReactNode }) {
     setRightPanelCollapsed(prev => !prev);
   }, []);
 
+  const toggleTheme = useCallback(() => {
+    setTheme(prev => {
+      const next = prev === 'light' ? 'dark' : 'light';
+      if (typeof document !== 'undefined') {
+        document.documentElement.setAttribute('data-theme', next);
+      }
+      return next;
+    });
+  }, []);
+
   return (
     <UIContext.Provider value={{
       deleteMode,
@@ -63,6 +76,8 @@ export function UIProvider({ children }: { children: React.ReactNode }) {
       toggleSidebar,
       rightPanelCollapsed,
       toggleRightPanel,
+      theme,
+      toggleTheme,
     }}>
       {children}
     </UIContext.Provider>

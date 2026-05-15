@@ -7,7 +7,7 @@ import { DayColumn } from './DayColumn';
 import { DAYS, getMonday, TIME_COL_WIDTH } from '@/lib/utils';
 
 export function WeekView() {
-  const { currentWeek, activities } = useSchedule();
+  const { currentWeek, activities, artists } = useSchedule();
   const monday = getMonday(currentWeek);
 
   const days = Array.from({ length: 7 }, (_, i) => {
@@ -53,6 +53,7 @@ export function WeekView() {
             dayIndex={i}
             date={day}
             activities={activities.filter(a => a.day === i)}
+            artists={artists}
           />
         ))}
       </div>

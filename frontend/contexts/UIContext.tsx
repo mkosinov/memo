@@ -24,6 +24,8 @@ interface UIContextType {
 
 const UIContext = createContext<UIContextType | null>(null);
 
+let toastCounter = 0;
+
 export function UIProvider({ children }: { children: React.ReactNode }) {
   const [deleteMode, setDeleteMode] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -36,7 +38,7 @@ export function UIProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const showToast = useCallback((message: string, undo?: () => void) => {
-    const id = `toast_${Date.now()}`;
+    const id = `toast_${++toastCounter}`;
     setToasts(prev => [...prev, { id, message, undo }]);
     setTimeout(() => {
       setToasts(prev => prev.filter(t => t.id !== id));

@@ -177,12 +177,16 @@ const TIME_COL_WIDTH = 64;     // px
 
 ## 6. Activity Card
 
-### Card Formula
+### Card Formula (Fill by Brightness Mix)
+
+Instead of alpha transparency (which hurts readability when cards overlap), fill opacity is controlled by mixing the artist color with white:
+
 ```typescript
 function cardStyle(event: Activity, artist: Artist) {
-  const pct = event.occupied / event.capacity;
-  const fillOpacity = (0.12 + pct * 0.28).toFixed(2);
+  const pct = event.occupied / event.capacity;  // 0..1
+  const mixRatio = 0.85 - pct * 0.55;  // 0.85 (empty) → 0.30 (full)
   const rgb = hexToRgb(artist.color);
+  const mixed = mixWithWhite(rgb, mixRatio);  // mixRatio = how much white to blend in
   const top = (parseTime(event.startTime) - 9) * 120;  // half-hour slots × 60px
   const height = Math.max(event.duration * 120 - 10, 52);
 
@@ -190,32 +194,121 @@ function cardStyle(event: Activity, artist: Artist) {
     position: 'absolute',
     top: `${top}px`,
     height: `${height}px`,
-    backgroundColor: `rgba(${rgb}, ${fillOpacity})`,
+    backgroundColor: `rgb(${mixed.r}, ${mixed.g}, ${mixed.b})`,
     borderLeft: `3px solid ${artist.color}`,
     '--ev-color': artist.color,
   };
 }
+
+// Blend artist color with white: ratio 1.0 = full white, 0.0 = full artist color
+function mixWithWhite(rgb: {r: number, g: number, b: number}, ratio: number) {
+  return {
+    r: Math.round(rgb.r + (255 - rgb.r) * ratio),
+    g: Math.round(rgb.g + (255 - rgb.g) * ratio),
+    b: Math.round(rgb.b + (255 - rgb.b) * ratio),
+  };
+}
 ```
 
+**Visual result:**
+- Empty (0%): very pale tint of artist color (85% white)
+- Half-full (50%): medium tint (57% white)
+- Full (100%): rich, vibrant artist color (30% white)
+- Text remains fully opaque and readable regardless of overlap.
+
 ### Card Layout (inner)
-- Time pill: oval with artist color fill
-- Service name: 2 lines max, font-weight 600, 13px
-- Age: icon + text (5+, 6+, 8+, 10+, 12+, 6-12)
-- Master: full name
-- Location: icon + name
-- Private star (only for private events)
 
-### Footer
-- Occupancy: "👥 {occupied}/{capacity}"
-- Action button: "+" (public) or "···" (private)
+```tsx
+<div className="event-card" style={cardStyle}>
+  <div className="ev-inner">
+    {/* Time pill: oval with artist color fill */}
+    <div className="ev-time-pill">{startTime} — {endTime}</div>
 
-### Collapsing
-- `height < 90px`: hide age + master + location
-- `height < 56px`: hide everything except time pill
+    {/* Service name: 2 lines max, 600 weight, 13px */}
+    <div className="ev-title">{serviceName}</div>
 
-### Private Events
-- Cut corner via `clip-path: polygon(...)`
-- Red action button "···"
+    {/* Age: icon + text (5+, 6+, 8+, 10+, 12+, 6-12) */}
+    <div className="ev-age">👤 {minAge}</div>
+
+    {/* Master: full name */}
+    <div className="ev-master">{artistName}</div>
+
+    {/* Location */}
+    <div className="ev-loc">📍 {locationName}</div>
+
+    {/* Private star (only for private events) */}
+    {isPrivate && <StarIcon />}
+  </div>
+
+  {/* Footer — same fill as card body, no separate background */}
+  <div className="ev-footer">
+    <span>👥 {occupied}/{capacity}</span>
+    <button>{isPrivate ? '···' : '+'}</button>
+  </div>
+</div>
+```
+
+### Card Content Distribution
+
+Cards use flex column with `justify-content: space-between` so content fills available vertical space:
+
+```css
+.event-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 8px 10px;
+}
+
+.ev-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;  /* grows to fill space */
+}
+
+.ev-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+}
+```
+
+### Overlapping Cards (Stacked Display)
+
+When multiple events occupy the same time slot (same or different artists), cards are displayed with a slight offset so users can see there are multiple events:
+
+```css
+/* Base stacked offset */
+.event-card.stacked-1 { transform: translateX(0px); z-index: 10; }
+.event-card.stacked-2 { transform: translateX(6px); z-index: 9; }
+.event-card.stacked-3 { transform: translateX(12px); z-index: 8; }
+
+/* On hover over the time slot: scroll through cards */
+.day-column:hover .event-card.stacked {
+  transition: transform 0.3s ease, opacity 0.3s ease;
+}
+```
+
+**Scroll Carousel on Hover:**
+- When cursor enters a time slot with overlapping cards, a subtle scroll indicator appears (3 dots or "3 events")
+- Mouse wheel / trackpad scroll cycles through cards:
+  - Current card: `opacity: 1, transform: translateX(0)`
+  - Other cards: `opacity: 0.3, transform: translateX(20px)` (or hidden)
+- Smooth 300ms transition between states
+- Clicking a card brings it to front and selects it
+
+**Implementation:**
+```typescript
+interface StackedState {
+  slotKey: string;      // "day-index_start-time" e.g. "3_10.5"
+  visibleIndex: number; // which card is currently visible
+  totalCards: number;
+}
+```
 
 ### Hover/Drag States
 - Hover: subtle shadow increase
@@ -224,15 +317,6 @@ function cardStyle(event: Activity, artist: Artist) {
 ---
 
 ## 7. Drag & Drop (@dnd-kit)
-
-### State
-```typescript
-interface DnDState {
-  dragId: string | null;
-  dragCopy: boolean;        // altKey pressed
-  ghostPosition: { x: number; y: number } | null;
-}
-```
 
 ### Behavior
 1. **DragStart:** Store activity ID, check altKey (copy mode). Add `.dragging` class to card.
@@ -304,20 +388,7 @@ interface StampState {
 
 ---
 
-## 10. Conflict Warning
-
-### Logic
-- On every render: check for each artist if they have 2+ events at overlapping times in different locations
-- Overlap: `(startA < endB) && (endA > startB)`
-- Different locations: `locA !== locB`
-
-### Visual
-- Red bar/indicator in affected day column(s)
-- Tooltip on hover: "Ольга Середа: пересечение в 10:00 (Альпика vs Гранд Отель)"
-
----
-
-## 11. Copy Last Week
+## 10. Copy Last Week
 
 ### Behavior
 - Button in Toolbar
@@ -328,7 +399,7 @@ interface StampState {
 
 ---
 
-## 12. Toast System
+## 11. Toast System
 
 ### API
 ```typescript
@@ -345,7 +416,7 @@ function hideToast(id: string): void;
 
 ---
 
-## 13. Data Flow
+## 12. Data Flow
 
 ```
 Mock Data (lib/mock-data.ts)
@@ -368,7 +439,7 @@ DnD / Stamp / Delete → update ScheduleContext → re-render
 
 ---
 
-## 14. Testing Strategy
+## 13. Testing Strategy
 
 ### Unit Tests (Vitest)
 - `cardStyle()` — correct top/height/opacity calculations
@@ -390,7 +461,7 @@ DnD / Stamp / Delete → update ScheduleContext → re-render
 
 ---
 
-## 15. File Structure (Target)
+## 14. File Structure (Target)
 
 ```
 frontend/
@@ -408,8 +479,7 @@ frontend/
 │       │   ├── DayColumn.tsx
 │       │   ├── TimeColumn.tsx
 │       │   ├── ActivityCard.tsx
-│       │   ├── NowLine.tsx
-│       │   └── ConflictBar.tsx
+│       │   └── NowLine.tsx
 │       ├── stamp/
 │       │   └── StampPanel.tsx
 │       ├── modal/
@@ -438,7 +508,7 @@ frontend/
 
 ---
 
-## 16. Implementation Order (Plan Preview)
+## 15. Implementation Order (Plan Preview)
 
 1. **Task 1:** Next.js init + Tailwind + deps (@dnd-kit)
 2. **Task 2:** Design system (globals.css, types.ts, mock-data.ts)
@@ -447,17 +517,17 @@ frontend/
 5. **Task 5:** ActivityCard component
 6. **Task 6:** DnD integration (@dnd-kit)
 7. **Task 7:** Stamp panel + create activity
-8. **Task 8:** Delete mode + Conflict warning
+8. **Task 8:** Delete mode
 9. **Task 9:** Copy last week + Toast system
 10. **Task 10:** ActivityModal (create/edit)
 11. **Task 11:** Tests + Polish
 
 ---
 
-## 17. Open Questions
+## 16. Open Questions
 
 None. All requirements clarified.
 
 ---
 
-*Self-review: No TBD/TODO placeholders. No contradictions. Scope is P1 only. All requirements from schedule-ui.md, mock-data.md, and v4-design-system.md are covered.*
+*Self-review: No TBD/TODO placeholders. No contradictions. Scope is P1 only. Conflict Warning removed per user request. Card fill changed from alpha transparency to white-mix brightness. Overlapping cards section added. All requirements from schedule-ui.md, mock-data.md, and v4-design-system.md are covered.*

@@ -26,6 +26,21 @@
   --right-w: 260px;
   --cell-h: 60px;
   --time-w: 64px;
+  
+  /* Grid */
+  --grid-line: #E8EDEE;
+  --grid-line-half: #F0F3F4;
+  --grid-bg: #FAFBFC;
+  
+  /* Status */
+  --success: #6B8E6E;
+  --warning: #C8A050;
+  --danger: #C8503C;
+  
+  /* Misc */
+  --radius: 12px;
+  --radius-sm: 8px;
+  --transition: 0.2s ease;
 }
 
 [data-theme="dark"] {

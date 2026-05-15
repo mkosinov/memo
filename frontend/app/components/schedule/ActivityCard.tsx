@@ -1,7 +1,9 @@
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
 import { useDraggable } from '@dnd-kit/core';
+import { useUI } from '@/contexts/UIContext';
+import { useSchedule } from '@/contexts/ScheduleContext';
 import type { Activity, Artist } from '@/lib/types';
 import { HOURS_START, CELL_HEIGHT, hexToRgb, mixWithWhite, formatTime, getFillOpacity } from '@/lib/utils';
 
@@ -12,6 +14,9 @@ interface ActivityCardProps {
 }
 
 export function ActivityCard({ activity, artist, style }: ActivityCardProps) {
+  const { deleteMode, showToast } = useUI();
+  const { deleteActivity, addActivity } = useSchedule();
+  const [deleting, setDeleting] = useState(false);
   const topPx = (activity.startTime - HOURS_START) * CELL_HEIGHT * 2;
   const heightPx = Math.max(activity.duration * 120 - 10, 52);
   const mixRatio = getFillOpacity(activity.occupied, activity.capacity);
@@ -39,17 +44,33 @@ export function ActivityCard({ activity, artist, style }: ActivityCardProps) {
     ? { opacity: 0.5, zIndex: 50, scale: '0.98' }
     : {};
 
+  const handleClick = () => {
+    if (deleteMode) {
+      setDeleting(true);
+      setTimeout(() => {
+        const { id, ...rest } = activity;
+        deleteActivity(activity.id);
+        showToast(
+          `«${activity.serviceName}» удалено`,
+          () => addActivity(rest),
+        );
+      }, 150);
+    }
+  };
+
   return (
     <div
       ref={setNodeRef}
       {...attributes}
       {...listeners}
-      className="absolute left-1 right-1 rounded-lg overflow-hidden flex flex-col cursor-pointer transition-shadow hover:shadow-md"
+      onClick={handleClick}
+      className={`absolute left-1 right-1 rounded-lg overflow-hidden flex flex-col cursor-pointer transition-shadow hover:shadow-md ${deleting ? 'opacity-0 scale-95' : ''}`}
       style={{
         top: topPx,
         height: heightPx,
         backgroundColor: cardBg,
         borderLeft: `3px solid ${artist.color}`,
+        transition: 'opacity 150ms ease, transform 150ms ease',
         ...(activity.isPrivate ? { clipPath: 'polygon(0 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%)' } : {}),
         ...dragStyle,
         ...draggingStyle,

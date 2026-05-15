@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect } from 'react';
 import { useSchedule } from '@/contexts/ScheduleContext';
 import { useUI } from '@/contexts/UIContext';
 import { getMonday, MONTHS_GENITIVE } from '@/lib/utils';
@@ -10,6 +10,12 @@ import { getMonday, MONTHS_GENITIVE } from '@/lib/utils';
 export function Toolbar() {
   const { currentWeek, setCurrentWeek, copyLastWeek } = useSchedule();
   const { deleteMode, toggleDeleteMode, showToast } = useUI();
+
+  // Body class management for delete mode
+  useEffect(() => {
+    document.body.classList.toggle('delete-mode', deleteMode);
+    return () => document.body.classList.remove('delete-mode');
+  }, [deleteMode]);
 
   const monday = getMonday(currentWeek);
   const sunday = new Date(monday);
@@ -36,6 +42,13 @@ export function Toolbar() {
   const handleCopyLastWeek = () => {
     copyLastWeek();
     showToast('Прошлая неделя скопирована');
+  };
+
+  const handleDeleteToggle = () => {
+    toggleDeleteMode();
+    if (!deleteMode) {
+      showToast('Режим удаления — кликните на событие');
+    }
   };
 
   return (
@@ -147,7 +160,7 @@ export function Toolbar() {
 
         {/* Delete mode toggle */}
         <button
-          onClick={toggleDeleteMode}
+          onClick={handleDeleteToggle}
           className={`flex h-8 w-8 items-center justify-center rounded-lg transition-colors ${
             deleteMode ? 'text-white' : 'text-ink-mid hover:bg-surface'
           }`}

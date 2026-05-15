@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render, screen, fireEvent } from '@testing-library/react';
 import React from 'react';
 import { ActivityCard } from '../app/components/schedule/ActivityCard';
 import { getFillOpacity } from '../lib/utils';
@@ -152,5 +152,115 @@ describe('getFillOpacity', () => {
     const result = getFillOpacity(5, 0);
     expect(Number.isNaN(result)).toBe(false);
     expect(Number.isFinite(result)).toBe(true);
+  });
+});
+
+// ─── Delete Mode Tests ────────────────────────────────────────────────────
+
+vi.mock('@/contexts/UIContext', () => ({
+  useUI: vi.fn(),
+}));
+
+vi.mock('@/contexts/ScheduleContext', () => ({
+  useSchedule: vi.fn(),
+}));
+
+import { useUI } from '@/contexts/UIContext';
+import { useSchedule } from '@/contexts/ScheduleContext';
+
+const mockUseUI = vi.mocked(useUI);
+const mockUseSchedule = vi.mocked(useSchedule);
+
+beforeEach(() => {
+  vi.useFakeTimers();
+  mockUseUI.mockReturnValue({
+    deleteMode: false,
+    toggleDeleteMode: vi.fn(),
+    toasts: [],
+    showToast: vi.fn(),
+    hideToast: vi.fn(),
+    sidebarCollapsed: false,
+    toggleSidebar: vi.fn(),
+    rightPanelCollapsed: false,
+    toggleRightPanel: vi.fn(),
+    theme: 'light',
+    toggleTheme: vi.fn(),
+  });
+  mockUseSchedule.mockReturnValue({
+    activities: [],
+    artists: [],
+    services: [],
+    studios: [],
+    currentWeek: new Date(),
+    stamp: { masterId: null, serviceId: null, locations: new Set(), ready: false },
+    setCurrentWeek: vi.fn(),
+    addActivity: vi.fn(),
+    updateActivity: vi.fn(),
+    deleteActivity: vi.fn(),
+    setStamp: vi.fn(),
+    copyLastWeek: vi.fn(),
+  });
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
+
+describe('ActivityCard delete mode', () => {
+  it('does not trigger delete when deleteMode is false', () => {
+    const deleteActivity = vi.fn();
+    mockUseSchedule.mockReturnValue({
+      ...mockUseSchedule(),
+      deleteActivity,
+    } as ReturnType<typeof useSchedule>);
+
+    render(<ActivityCard activity={mockActivity} artist={mockArtist} />);
+    const card = screen.getByTestId('activity-ev_1');
+    fireEvent.click(card);
+
+    expect(deleteActivity).not.toHaveBeenCalled();
+  });
+
+  it('triggers delete with fade-out animation when deleteMode is true', () => {
+    const deleteActivity = vi.fn();
+    const showToast = vi.fn();
+    mockUseUI.mockReturnValue({
+      ...mockUseUI(),
+      deleteMode: true,
+      showToast,
+    } as ReturnType<typeof useUI>);
+    mockUseSchedule.mockReturnValue({
+      ...mockUseSchedule(),
+      deleteActivity,
+    } as ReturnType<typeof useSchedule>);
+
+    const { container } = render(<ActivityCard activity={mockActivity} artist={mockArtist} />);
+    const card = screen.getByTestId('activity-ev_1');
+
+    // Before click: card is visible
+    expect(card).not.toHaveClass('opacity-0');
+
+    // Click to delete
+    fireEvent.click(card);
+
+    // After click: card has fade-out classes
+    expect(card).toHaveClass('opacity-0');
+    expect(card).toHaveClass('scale-95');
+
+    // deleteActivity not called yet (waiting for animation)
+    expect(deleteActivity).not.toHaveBeenCalled();
+
+    // Advance timer past animation duration (150ms)
+    vi.advanceTimersByTime(160);
+
+    // Now deleteActivity should be called
+    expect(deleteActivity).toHaveBeenCalledWith('ev_1');
+
+    // Toast shown with undo
+    expect(showToast).toHaveBeenCalled();
+    const toastCall = showToast.mock.calls[0];
+    expect(toastCall[0]).toContain('удалено');
+    expect(typeof toastCall[0]).toBe('string');
   });
 });

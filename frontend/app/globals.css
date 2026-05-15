@@ -98,3 +98,13 @@ body {
     text-wrap: balance;
   }
 }
+
+/* ===== Delete Mode ===== */
+
+body.delete-mode [data-testid^="activity-"] {
+  cursor: not-allowed !important;
+}
+
+body.delete-mode [data-testid^="activity-"]:hover {
+  box-shadow: 0 0 0 2px rgba(200, 80, 60, 0.5) !important;
+}

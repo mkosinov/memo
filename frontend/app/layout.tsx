@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
+import { ScheduleProvider } from '../contexts/ScheduleContext';
+import { UIProvider } from '../contexts/UIContext';
 
 const inter = Inter({
   subsets: ["latin"],
@@ -21,7 +23,11 @@ export default function RootLayout({
   return (
     <html lang="ru">
       <body className={`${inter.variable} antialiased`}>
-        {children}
+        <UIProvider>
+          <ScheduleProvider>
+            {children}
+          </ScheduleProvider>
+        </UIProvider>
       </body>
     </html>
   );

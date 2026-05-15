@@ -13,17 +13,20 @@ interface DayColumnProps {
   activities: Activity[];
   artists: Artist[];
   dragCopy?: boolean;
+  onCreateActivity?: (dayIndex: number, startTime: number) => void;
 }
 
 interface DroppableSlotProps {
   dayIndex: number;
   slotIndex: number;
+  startTime: number;
   isHour: boolean;
   dragCopy?: boolean;
+  onClick?: (dayIndex: number, startTime: number) => void;
   children?: React.ReactNode;
 }
 
-function DroppableSlot({ dayIndex, slotIndex, isHour, dragCopy, children }: DroppableSlotProps) {
+function DroppableSlot({ dayIndex, slotIndex, startTime, isHour, dragCopy, onClick, children }: DroppableSlotProps) {
   const { isOver, setNodeRef } = useDroppable({
     id: `slot-${dayIndex}-${slotIndex}`,
     data: { dayIndex, slotIndex },
@@ -39,18 +42,27 @@ function DroppableSlot({ dayIndex, slotIndex, isHour, dragCopy, children }: Drop
       }
     : {};
 
+  const handleClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    // Only trigger if clicking the slot itself (not a child card)
+    if (e.target === e.currentTarget && onClick) {
+      onClick(dayIndex, startTime);
+    }
+  };
+
   return (
     <div
       ref={setNodeRef}
+      data-slot-index={slotIndex}
       className={isHour ? 'border-t border-gray-200' : 'border-t border-dashed border-gray-100'}
       style={{ height: CELL_HEIGHT, ...ghostStyle }}
+      onClick={handleClick}
     >
       {children}
     </div>
   );
 }
 
-export function DayColumn({ dayIndex, date, activities, artists, dragCopy }: DayColumnProps) {
+export function DayColumn({ dayIndex, date, activities, artists, dragCopy, onCreateActivity }: DayColumnProps) {
   const [visibleIndices, setVisibleIndices] = useState<Record<string, number>>({});
 
   const slots: number[] = [];
@@ -104,8 +116,10 @@ export function DayColumn({ dayIndex, date, activities, artists, dragCopy }: Day
           key={i}
           dayIndex={dayIndex}
           slotIndex={i}
+          startTime={hour}
           isHour={hour % 1 === 0}
           dragCopy={dragCopy}
+          onClick={onCreateActivity}
         />
       ))}
 

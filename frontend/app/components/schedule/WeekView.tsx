@@ -12,9 +12,39 @@ import { ActivityCard } from './ActivityCard';
 import { DAYS, getMonday, TIME_COL_WIDTH } from '@/lib/utils';
 
 export function WeekView() {
-  const { currentWeek, activities, artists, addActivity, updateActivity } = useSchedule();
+  const { currentWeek, activities, artists, services, stamp, addActivity, updateActivity } = useSchedule();
   const { showToast } = useUI();
   const monday = getMonday(currentWeek);
+
+  const handleCreateActivity = React.useCallback(
+    (dayIndex: number, startTime: number) => {
+      if (!stamp.ready || !stamp.masterId || !stamp.serviceId || stamp.locations.size === 0) return;
+
+      const service = services.find((s) => s.id === stamp.serviceId);
+      if (!service) return;
+
+      const firstLocation = stamp.locations.values().next().value as string;
+
+      addActivity({
+        day: dayIndex,
+        masterId: stamp.masterId,
+        startTime,
+        duration: service.duration,
+        serviceId: stamp.serviceId,
+        serviceName: service.name,
+        minAge: service.minAge,
+        locationId: firstLocation,
+        occupied: 0,
+        capacity: service.maxCapacity,
+        isPrivate: false,
+      });
+
+      showToast(
+        `Создано: ${service.name} — ${DAYS[dayIndex]} ${startTime % 1 === 0 ? `${startTime}:00` : `${Math.floor(startTime)}:30`}`,
+      );
+    },
+    [stamp, services, addActivity, showToast],
+  );
 
   const {
     dragCopy,
@@ -106,6 +136,7 @@ export function WeekView() {
               activities={activities.filter((a) => a.day === i)}
               artists={artists}
               dragCopy={dragCopy}
+              onCreateActivity={handleCreateActivity}
             />
           ))}
         </div>

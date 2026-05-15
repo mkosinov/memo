@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { useUI } from '@/contexts/UIContext';
+import { StampPanel } from '@/app/components/stamp/StampPanel';
 
 // ─── Accordion Section ────────────────────────────────────────────────────
 
@@ -71,9 +72,7 @@ export function RightPanel() {
 
           {/* Штамп Section */}
           <AccordionSection title="Штамп" contentTestId="stamp-content">
-            <p className="text-xs" style={{ color: 'var(--ink-light)' }}>
-              Настройте параметры для быстрого создания событий
-            </p>
+            <StampPanel />
           </AccordionSection>
 
           {/* Неделя Section */}

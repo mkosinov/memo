@@ -1,10 +1,10 @@
 'use client';
 
 import React, { useMemo } from 'react';
-import { useSchedule } from '../../../contexts/ScheduleContext';
-import { useUI } from '../../../contexts/UIContext';
-import { ARTISTS } from '../../../lib/mock-data';
-import { DAYS, getMonday, formatDate } from '../../../lib/utils';
+import { useSchedule } from '@/contexts/ScheduleContext';
+import { useUI } from '@/contexts/UIContext';
+import { ARTISTS } from '@/lib/mock-data';
+import { DAYS, MONTHS, getMonday, formatDate } from '@/lib/utils';
 
 // ─── Navigation Items ─────────────────────────────────────────────────────
 
@@ -86,8 +86,7 @@ function MiniCalendar({ currentWeek, setCurrentWeek, collapsed }: MiniCalendarPr
 
   if (collapsed) return null;
 
-  const monthName = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
-    'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'][currentWeek.getMonth()];
+  const monthName = MONTHS[currentWeek.getMonth()];
 
   return (
     <div className="px-3 py-2">
@@ -195,8 +194,7 @@ export function Sidebar() {
   return (
     <aside
       data-testid="sidebar"
-      className={`fixed left-0 top-0 h-full bg-sidebar z-30 transition-all duration-200 flex flex-col
-        ${sidebarCollapsed ? 'w-[56px]' : 'w-[230px]'}`}
+      className={`fixed left-0 top-0 h-full bg-sidebar z-30 transition-all duration-200 flex flex-col`}
       style={{
         width: sidebarCollapsed ? 'var(--sidebar-collapsed-w)' : 'var(--sidebar-w)',
         backgroundColor: 'var(--sidebar-bg)',

@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useCallback } from 'react';
+import { useDroppable } from '@dnd-kit/core';
 import { HOURS_START, HOURS_END, CELL_HEIGHT } from '@/lib/utils';
 import type { Activity, Artist } from '@/lib/types';
 import { ActivityCard } from './ActivityCard';
@@ -11,9 +12,45 @@ interface DayColumnProps {
   date: Date;
   activities: Activity[];
   artists: Artist[];
+  dragCopy?: boolean;
 }
 
-export function DayColumn({ dayIndex, date, activities, artists }: DayColumnProps) {
+interface DroppableSlotProps {
+  dayIndex: number;
+  slotIndex: number;
+  isHour: boolean;
+  dragCopy?: boolean;
+  children?: React.ReactNode;
+}
+
+function DroppableSlot({ dayIndex, slotIndex, isHour, dragCopy, children }: DroppableSlotProps) {
+  const { isOver, setNodeRef } = useDroppable({
+    id: `slot-${dayIndex}-${slotIndex}`,
+    data: { dayIndex, slotIndex },
+  });
+
+  const ghostStyle: React.CSSProperties = isOver
+    ? {
+        border: `2px dashed ${dragCopy ? '#22c55e' : 'var(--brand, #004D56)'}`,
+        backgroundColor: dragCopy ? 'rgba(34,197,94,0.06)' : 'rgba(0,77,86,0.06)',
+        pointerEvents: 'none',
+        zIndex: 30,
+        position: 'relative' as const,
+      }
+    : {};
+
+  return (
+    <div
+      ref={setNodeRef}
+      className={isHour ? 'border-t border-gray-200' : 'border-t border-dashed border-gray-100'}
+      style={{ height: CELL_HEIGHT, ...ghostStyle }}
+    >
+      {children}
+    </div>
+  );
+}
+
+export function DayColumn({ dayIndex, date, activities, artists, dragCopy }: DayColumnProps) {
   const [visibleIndices, setVisibleIndices] = useState<Record<string, number>>({});
 
   const slots: number[] = [];
@@ -62,16 +99,15 @@ export function DayColumn({ dayIndex, date, activities, artists }: DayColumnProp
       className="relative border-l border-gray-100"
       onWheel={handleWheel}
     >
-      {slots.map((hour, i) => {
-        const isHour = hour % 1 === 0;
-        return (
-          <div
-            key={i}
-            className={isHour ? 'border-t border-gray-200' : 'border-t border-dashed border-gray-100'}
-            style={{ height: CELL_HEIGHT }}
-          />
-        );
-      })}
+      {slots.map((hour, i) => (
+        <DroppableSlot
+          key={i}
+          dayIndex={dayIndex}
+          slotIndex={i}
+          isHour={hour % 1 === 0}
+          dragCopy={dragCopy}
+        />
+      ))}
 
       {/* Render activity cards */}
       {activities.map((activity) => {

@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { useDraggable } from '@dnd-kit/core';
 import type { Activity, Artist } from '@/lib/types';
 import { HOURS_START, CELL_HEIGHT, hexToRgb, mixWithWhite, formatTime, getFillOpacity } from '@/lib/utils';
 
@@ -22,8 +23,27 @@ export function ActivityCard({ activity, artist, style }: ActivityCardProps) {
   const showExtra = heightPx >= 90;
   const showOnlyPill = heightPx < 56;
 
+  // DnD draggable
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
+    id: activity.id,
+    data: { activity, dayIndex: activity.day },
+  });
+
+  const dragStyle: React.CSSProperties = transform
+    ? {
+        transform: `translate3d(${transform.x}px, ${transform.y}px, 0)`,
+      }
+    : {};
+
+  const draggingStyle: React.CSSProperties = isDragging
+    ? { opacity: 0.5, zIndex: 50, scale: '0.98' }
+    : {};
+
   return (
     <div
+      ref={setNodeRef}
+      {...attributes}
+      {...listeners}
       className="absolute left-1 right-1 rounded-lg overflow-hidden flex flex-col cursor-pointer transition-shadow hover:shadow-md"
       style={{
         top: topPx,
@@ -31,9 +51,12 @@ export function ActivityCard({ activity, artist, style }: ActivityCardProps) {
         backgroundColor: cardBg,
         borderLeft: `3px solid ${artist.color}`,
         ...(activity.isPrivate ? { clipPath: 'polygon(0 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%)' } : {}),
+        ...dragStyle,
+        ...draggingStyle,
         ...style,
       }}
       data-testid={`activity-${activity.id}`}
+      data-drag-id={activity.id}
     >
       {/* Time pill */}
       <div className="px-2 pt-1.5">

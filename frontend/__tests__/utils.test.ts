@@ -28,14 +28,14 @@ describe('mixWithWhite', () => {
     expect(result).toEqual({ r: 178, g: 178, b: 178 });
   });
 
-  it('returns white at ratio 0', () => {
-    const result = mixWithWhite({ r: 0, g: 0, b: 0 }, 0);
-    expect(result).toEqual({ r: 255, g: 255, b: 255 });
+  it('returns original at ratio 0', () => {
+    const result = mixWithWhite({ r: 91, g: 140, b: 122 }, 0);
+    expect(result).toEqual({ r: 91, g: 140, b: 122 });
   });
 
-  it('returns original at ratio 1', () => {
-    const result = mixWithWhite({ r: 91, g: 140, b: 122 }, 1);
-    expect(result).toEqual({ r: 91, g: 140, b: 122 });
+  it('returns white at ratio 1', () => {
+    const result = mixWithWhite({ r: 0, g: 0, b: 0 }, 1);
+    expect(result).toEqual({ r: 255, g: 255, b: 255 });
   });
 });
 

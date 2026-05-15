@@ -34,15 +34,15 @@ export function hexToRgb(hex: string): { r: number; g: number; b: number } {
   };
 }
 
-/** Mix an RGB colour with white. ratio=0 → white, ratio=1 → original. */
+/** Mix an RGB colour with white. ratio=0 → original, ratio=1 → white. */
 export function mixWithWhite(
   rgb: { r: number; g: number; b: number },
   ratio: number,
 ): { r: number; g: number; b: number } {
   return {
-    r: Math.round(rgb.r + (255 - rgb.r) * (1 - ratio)),
-    g: Math.round(rgb.g + (255 - rgb.g) * (1 - ratio)),
-    b: Math.round(rgb.b + (255 - rgb.b) * (1 - ratio)),
+    r: Math.round(rgb.r + (255 - rgb.r) * ratio),
+    g: Math.round(rgb.g + (255 - rgb.g) * ratio),
+    b: Math.round(rgb.b + (255 - rgb.b) * ratio),
   };
 }
 

@@ -11,9 +11,10 @@ interface ActivityCardProps {
   activity: Activity;
   artist: Artist;
   style?: React.CSSProperties;
+  onEdit?: (activity: Activity) => void;
 }
 
-export function ActivityCard({ activity, artist, style }: ActivityCardProps) {
+export function ActivityCard({ activity, artist, style, onEdit }: ActivityCardProps) {
   const { deleteMode, showToast } = useUI();
   const { deleteActivity, addActivity } = useSchedule();
   const [deleting, setDeleting] = useState(false);
@@ -48,13 +49,17 @@ export function ActivityCard({ activity, artist, style }: ActivityCardProps) {
     if (deleteMode) {
       setDeleting(true);
       setTimeout(() => {
-        const { id, ...rest } = activity;
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        const { id: _unused, ...rest } = activity;
         deleteActivity(activity.id);
         showToast(
           `«${activity.serviceName}» удалено`,
           () => addActivity(rest),
         );
       }, 150);
+    } else if (onEdit) {
+      // Not in delete mode → open edit modal
+      onEdit(activity);
     }
   };
 

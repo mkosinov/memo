@@ -14,6 +14,9 @@ interface DayColumnProps {
   artists: Artist[];
   dragCopy?: boolean;
   onCreateActivity?: (dayIndex: number, startTime: number) => void;
+  onOpenCreateModal?: (dayIndex: number, startTime: number) => void;
+  onOpenEditModal?: (activity: Activity) => void;
+  stampReady?: boolean;
 }
 
 interface DroppableSlotProps {
@@ -23,10 +26,12 @@ interface DroppableSlotProps {
   isHour: boolean;
   dragCopy?: boolean;
   onClick?: (dayIndex: number, startTime: number) => void;
+  onOpenModal?: (dayIndex: number, startTime: number) => void;
+  stampReady?: boolean;
   children?: React.ReactNode;
 }
 
-function DroppableSlot({ dayIndex, slotIndex, startTime, isHour, dragCopy, onClick, children }: DroppableSlotProps) {
+function DroppableSlot({ dayIndex, slotIndex, startTime, isHour, dragCopy, onClick, onOpenModal, stampReady, children }: DroppableSlotProps) {
   const { isOver, setNodeRef } = useDroppable({
     id: `slot-${dayIndex}-${slotIndex}`,
     data: { dayIndex, slotIndex },
@@ -44,8 +49,14 @@ function DroppableSlot({ dayIndex, slotIndex, startTime, isHour, dragCopy, onCli
 
   const handleClick = (e: React.MouseEvent<HTMLDivElement>) => {
     // Only trigger if clicking the slot itself (not a child card)
-    if (e.target === e.currentTarget && onClick) {
-      onClick(dayIndex, startTime);
+    if (e.target === e.currentTarget) {
+      if (!stampReady && onOpenModal) {
+        // Stamp not ready → open modal for manual creation
+        onOpenModal(dayIndex, startTime);
+      } else if (onClick) {
+        // Stamp ready → quick create with stamp params
+        onClick(dayIndex, startTime);
+      }
     }
   };
 
@@ -62,7 +73,7 @@ function DroppableSlot({ dayIndex, slotIndex, startTime, isHour, dragCopy, onCli
   );
 }
 
-export function DayColumn({ dayIndex, date, activities, artists, dragCopy, onCreateActivity }: DayColumnProps) {
+export function DayColumn({ dayIndex, date, activities, artists, dragCopy, onCreateActivity, onOpenCreateModal, onOpenEditModal, stampReady }: DayColumnProps) {
   const [visibleIndices, setVisibleIndices] = useState<Record<string, number>>({});
 
   const slots: number[] = [];
@@ -120,6 +131,8 @@ export function DayColumn({ dayIndex, date, activities, artists, dragCopy, onCre
           isHour={hour % 1 === 0}
           dragCopy={dragCopy}
           onClick={onCreateActivity}
+          onOpenModal={onOpenCreateModal}
+          stampReady={stampReady}
         />
       ))}
 
@@ -139,6 +152,7 @@ export function DayColumn({ dayIndex, date, activities, artists, dragCopy, onCre
             key={activity.id}
             activity={activity}
             artist={artist}
+            onEdit={onOpenEditModal}
             style={{
               transform: `translateX(${indexInGroup * 6}px)`,
               zIndex: totalInSlot > 1 ? 20 - indexInGroup : 10,

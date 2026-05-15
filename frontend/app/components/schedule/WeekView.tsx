@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useState, useCallback } from 'react';
 import { DndContext, DragOverlay } from '@dnd-kit/core';
 import { useSchedule } from '@/contexts/ScheduleContext';
 import { useUI } from '@/contexts/UIContext';
@@ -9,6 +9,7 @@ import type { Activity } from '@/lib/types';
 import { TimeColumn } from './TimeColumn';
 import { DayColumn } from './DayColumn';
 import { ActivityCard } from './ActivityCard';
+import { ActivityModal } from '../modal/ActivityModal';
 import { DAYS, getMonday, TIME_COL_WIDTH } from '@/lib/utils';
 
 export function WeekView() {
@@ -16,6 +17,41 @@ export function WeekView() {
   const { showToast } = useUI();
   const monday = getMonday(currentWeek);
 
+  // Modal state
+  const [modalOpen, setModalOpen] = useState(false);
+  const [modalActivity, setModalActivity] = useState<Activity | null>(null);
+  const [modalDayIndex, setModalDayIndex] = useState(0);
+  const [modalStartTime, setModalStartTime] = useState(9);
+
+  const openCreateModal = useCallback((dayIndex: number, startTime: number) => {
+    setModalActivity(null);
+    setModalDayIndex(dayIndex);
+    setModalStartTime(startTime);
+    setModalOpen(true);
+  }, []);
+
+  const openEditModal = useCallback((activity: Activity) => {
+    setModalActivity(activity);
+    setModalOpen(true);
+  }, []);
+
+  const closeModal = useCallback(() => {
+    setModalOpen(false);
+    setModalActivity(null);
+  }, []);
+
+  const handleSave = useCallback((data: Omit<Activity, 'id'>) => {
+    if (modalActivity) {
+      updateActivity(modalActivity.id, data);
+      showToast(`«${data.serviceName}» сохранено`);
+    } else {
+      addActivity(data);
+      showToast(`Создано: ${data.serviceName}`);
+    }
+    closeModal();
+  }, [modalActivity, addActivity, updateActivity, showToast, closeModal]);
+
+  // Stamp-based quick creation (when stamp is ready)
   const handleCreateActivity = React.useCallback(
     (dayIndex: number, startTime: number) => {
       if (!stamp.ready || !stamp.masterId || !stamp.serviceId || stamp.locations.size === 0) return;
@@ -137,6 +173,9 @@ export function WeekView() {
               artists={artists}
               dragCopy={dragCopy}
               onCreateActivity={handleCreateActivity}
+              onOpenCreateModal={openCreateModal}
+              onOpenEditModal={openEditModal}
+              stampReady={stamp.ready}
             />
           ))}
         </div>
@@ -149,6 +188,16 @@ export function WeekView() {
           </div>
         ) : null}
       </DragOverlay>
+
+      {/* Activity Modal */}
+      <ActivityModal
+        isOpen={modalOpen}
+        onClose={closeModal}
+        onSave={handleSave}
+        initialActivity={modalActivity}
+        defaultDay={modalDayIndex}
+        defaultStartTime={modalStartTime}
+      />
     </DndContext>
   );
 }

@@ -1,0 +1,85 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ===== Design System Variables (v4) ===== */
+
+:root {
+  /* Light theme */
+  --bg:         #EDEDEE;
+  --sidebar-bg: #1E2D2F;
+  --brand:      #004D56;
+  --brand-light:#006670;
+  --white:      #ffffff;
+  --card-bg:    #ffffff;
+  --surface:    #f4f4f5;
+  --ink:        #1a1a1a;
+  --ink-mid:    #555555;
+  --ink-light:  #888888;
+  --ink-faint:  #cccccc;
+  --line:       #E0E0E1;
+  --line-dark:  rgba(255,255,255,.1);
+
+  /* Layout */
+  --sidebar-w: 230px;
+  --sidebar-collapsed-w: 56px;
+  --right-w: 260px;
+  --cell-h: 60px;
+  --time-w: 64px;
+}
+
+[data-theme="dark"] {
+  --bg:         #1a1a1c;
+  --white:      #252528;
+  --card-bg:    #2a2a2e;
+  --surface:    #303035;
+  --ink:        #e8e8ea;
+  --ink-mid:    #aaaaae;
+  --ink-light:  #777780;
+  --ink-faint:  #555560;
+  --line:       #3a3a3e;
+}
+
+/* ===== Base Styles ===== */
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  color: var(--ink);
+  background: var(--bg);
+  font-family: var(--font-inter), system-ui, -apple-system, sans-serif;
+}
+
+/* ===== Scrollbar ===== */
+
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: 2px;
+}
+
+/* ===== Utilities ===== */
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+}

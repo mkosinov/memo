@@ -6,15 +6,100 @@ import { useUI } from '@/contexts/UIContext';
 import { ARTISTS } from '@/lib/mock-data';
 import { DAYS, MONTHS, getMonday, formatDate } from '@/lib/utils';
 
+// ─── SVG Icon Components ──────────────────────────────────────────────────
+
+function CalendarIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+      <line x1="16" y1="2" x2="16" y2="6" />
+      <line x1="8" y1="2" x2="8" y2="6" />
+      <line x1="3" y1="10" x2="21" y2="10" />
+    </svg>
+  );
+}
+
+function ClipboardIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M16 4h2a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h2" />
+      <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
+    </svg>
+  );
+}
+
+function UsersIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" />
+      <circle cx="9" cy="7" r="4" />
+      <path d="M23 21v-2a4 4 0 00-3-3.87" />
+      <path d="M16 3.13a4 4 0 010 7.75" />
+    </svg>
+  );
+}
+
+function PaletteIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="13.5" cy="6.5" r="0.5" fill="currentColor" />
+      <circle cx="17.5" cy="10.5" r="0.5" fill="currentColor" />
+      <circle cx="8.5" cy="7.5" r="0.5" fill="currentColor" />
+      <circle cx="6.5" cy="12.5" r="0.5" fill="currentColor" />
+      <path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 011.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z" />
+    </svg>
+  );
+}
+
+function ChatIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
+    </svg>
+  );
+}
+
+function SunIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="5" />
+      <line x1="12" y1="1" x2="12" y2="3" />
+      <line x1="12" y1="21" x2="12" y2="23" />
+      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" />
+      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
+      <line x1="1" y1="12" x2="3" y2="12" />
+      <line x1="21" y1="12" x2="23" y2="12" />
+      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" />
+      <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
+    </svg>
+  );
+}
+
+function MoonIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" />
+    </svg>
+  );
+}
+
 // ─── Navigation Items ─────────────────────────────────────────────────────
 
 const NAV_ITEMS = [
-  { label: 'Расписание', icon: '📅', active: true },
-  { label: 'Бронирования', icon: '📋', active: false },
-  { label: 'Клиенты', icon: '👥', active: false },
-  { label: 'Мастера', icon: '🎨', active: false },
-  { label: 'Чат', icon: '💬', active: false },
+  { label: 'Расписание', icon: 'calendar', active: true },
+  { label: 'Бронирования', icon: 'clipboard', active: false },
+  { label: 'Клиенты', icon: 'users', active: false },
+  { label: 'Мастера', icon: 'palette', active: false },
+  { label: 'Чат', icon: 'chat', active: false },
 ] as const;
+
+const ICON_MAP: Record<string, React.FC<{ className?: string }>> = {
+  calendar: CalendarIcon,
+  clipboard: ClipboardIcon,
+  users: UsersIcon,
+  palette: PaletteIcon,
+  chat: ChatIcon,
+};
 
 // ─── MiniCalendar ─────────────────────────────────────────────────────────
 
@@ -28,18 +113,14 @@ function MiniCalendar({ currentWeek, setCurrentWeek, collapsed }: MiniCalendarPr
   const today = new Date();
 
   const calendarDays = useMemo(() => {
-    // Show current month + 1 week before/after
     const firstDayOfMonth = new Date(currentWeek.getFullYear(), currentWeek.getMonth(), 1);
     const lastDayOfMonth = new Date(currentWeek.getFullYear(), currentWeek.getMonth() + 1, 0);
 
-    // Start from the Monday of the week that contains the 1st of the month
     const startDate = getMonday(firstDayOfMonth);
-    // Go back one more week
     startDate.setDate(startDate.getDate() - 7);
 
-    // End: last day of month + 1 week
     const endDate = new Date(lastDayOfMonth);
-    endDate.setDate(endDate.getDate() + 13); // enough to cover the last week
+    endDate.setDate(endDate.getDate() + 13);
 
     const days: Date[] = [];
     const current = new Date(startDate);
@@ -50,7 +131,6 @@ function MiniCalendar({ currentWeek, setCurrentWeek, collapsed }: MiniCalendarPr
     return days;
   }, [currentWeek]);
 
-  // Group into weeks (rows of 7 starting from Monday)
   const weeks = useMemo(() => {
     const result: Date[][] = [];
     let week: Date[] = [];
@@ -94,7 +174,6 @@ function MiniCalendar({ currentWeek, setCurrentWeek, collapsed }: MiniCalendarPr
         <span className="text-xs font-semibold text-white/90">{monthName} {currentWeek.getFullYear()}</span>
       </div>
 
-      {/* Day headers */}
       <div className="grid grid-cols-7 gap-0 mb-1">
         {DAYS.map(d => (
           <div key={d} className="text-center text-[10px] text-white/40 font-medium py-0.5">
@@ -103,7 +182,6 @@ function MiniCalendar({ currentWeek, setCurrentWeek, collapsed }: MiniCalendarPr
         ))}
       </div>
 
-      {/* Calendar grid */}
       <div className="space-y-0.5">
         {weeks.map((week, wi) => {
           const weekMonday = week[0];
@@ -225,22 +303,25 @@ export function Sidebar() {
 
         {/* Navigation */}
         <nav className={`py-2 ${sidebarCollapsed ? 'px-1' : 'px-2'}`}>
-          {NAV_ITEMS.map(item => (
-            <button
-              key={item.label}
-              className={`w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors duration-150
-                ${item.active
-                  ? 'bg-brand text-white font-medium'
-                  : 'text-white/60 hover:bg-white/5 hover:text-white/90'
-                }
-                ${sidebarCollapsed ? 'justify-center px-1' : ''}`}
-              aria-label={item.label}
-              title={sidebarCollapsed ? item.label : undefined}
-            >
-              <span className="text-base">{item.icon}</span>
-              {!sidebarCollapsed && <span>{item.label}</span>}
-            </button>
-          ))}
+          {NAV_ITEMS.map(item => {
+            const IconComponent = ICON_MAP[item.icon];
+            return (
+              <button
+                key={item.label}
+                className={`w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors duration-150
+                  ${item.active
+                    ? 'bg-brand text-white font-medium'
+                    : 'text-white/60 hover:bg-white/5 hover:text-white/90'
+                  }
+                  ${sidebarCollapsed ? 'justify-center px-1' : ''}`}
+                aria-label={item.label}
+                title={sidebarCollapsed ? item.label : undefined}
+              >
+                <IconComponent className={item.active ? 'text-white' : 'text-white/60'} />
+                {!sidebarCollapsed && <span>{item.label}</span>}
+              </button>
+            );
+          })}
         </nav>
 
         {!sidebarCollapsed && <div className="border-t border-white/10 mx-3" />}
@@ -251,15 +332,21 @@ export function Sidebar() {
 
       {/* ── Bottom Section ── */}
       <div className="border-t border-white/10">
-        {/* Theme Toggle + Collapse */}
+        {/* Theme Toggle (slider) + Collapse */}
         <div className={`flex items-center ${sidebarCollapsed ? 'flex-col gap-2 py-3' : 'justify-between px-3 py-2'}`}>
+          {/* Theme slider switch */}
           <button
             onClick={toggleTheme}
-            className="flex items-center justify-center w-8 h-8 rounded-lg text-white/60 hover:bg-white/10 hover:text-white/90 transition-colors"
+            className="flex items-center gap-1 bg-white/10 rounded-full p-0.5 cursor-pointer transition-colors hover:bg-white/15"
             aria-label="Переключить тему"
             title="Переключить тему"
           >
-            {theme === 'light' ? '☀' : '☾'}
+            <div className={`w-6 h-6 flex items-center justify-center rounded-full transition-colors ${theme === 'light' ? 'bg-white/20 text-white' : 'text-white/40'}`}>
+              <SunIcon />
+            </div>
+            <div className={`w-6 h-6 flex items-center justify-center rounded-full transition-colors ${theme === 'dark' ? 'bg-white/20 text-white' : 'text-white/40'}`}>
+              <MoonIcon />
+            </div>
           </button>
 
           <button
@@ -279,7 +366,14 @@ export function Sidebar() {
           </button>
         </div>
 
-        {/* User Avatar + Version */}
+        {/* Version at bottom */}
+        {!sidebarCollapsed && (
+          <div className="px-3 pb-2">
+            <span className="text-[10px] text-white/30">memo v0.0.1</span>
+          </div>
+        )}
+
+        {/* User Avatar */}
         {!sidebarCollapsed && (
           <div className="flex items-center gap-2 px-3 pb-3">
             <div className="w-7 h-7 rounded-full bg-brand-light flex items-center justify-center text-xs text-white font-medium">
@@ -287,7 +381,6 @@ export function Sidebar() {
             </div>
             <div className="flex-1 min-w-0">
               <div className="text-xs text-white/70 truncate">Админ</div>
-              <div className="text-[10px] text-white/30">v0.1.0</div>
             </div>
           </div>
         )}

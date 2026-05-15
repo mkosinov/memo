@@ -41,27 +41,13 @@ describe('Toolbar', () => {
     expect(screen.getByRole('button', { name: 'Сегодня' })).toBeInTheDocument();
   });
 
-  it('renders copy last week button', () => {
+  it('does not render copy last week button (moved to RightPanel)', () => {
     renderWithProviders();
-    expect(screen.getByRole('button', { name: /Копировать/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Копировать/i })).not.toBeInTheDocument();
   });
 
-  it('renders delete mode toggle', () => {
+  it('does not render delete mode toggle (moved to StampPanel)', () => {
     renderWithProviders();
-    expect(screen.getByRole('button', { name: /Режим удаления/i })).toBeInTheDocument();
-  });
-
-  it('toggle delete mode changes button appearance to red when active', () => {
-    renderWithProviders();
-    const deleteBtn = screen.getByRole('button', { name: /Режим удаления/i });
-
-    // Initially not active — should not have danger background
-    expect(deleteBtn).not.toHaveStyle({ backgroundColor: 'var(--danger)' });
-
-    // Click to activate
-    fireEvent.click(deleteBtn);
-
-    // Now active — should have danger background
-    expect(deleteBtn).toHaveStyle({ backgroundColor: 'var(--danger)' });
+    expect(screen.queryByRole('button', { name: /Режим удаления/i })).not.toBeInTheDocument();
   });
 });

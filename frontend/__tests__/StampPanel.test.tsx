@@ -2,10 +2,15 @@ import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { StampPanel } from '../app/components/stamp/StampPanel';
 import { ScheduleProvider, useSchedule } from '../contexts/ScheduleContext';
+import { UIProvider, useUI } from '../contexts/UIContext';
 
-// Wrapper that provides ScheduleContext
+// Wrapper that provides both contexts
 function Wrapper({ children }: { children: React.ReactNode }) {
-  return <ScheduleProvider>{children}</ScheduleProvider>;
+  return (
+    <UIProvider>
+      <ScheduleProvider>{children}</ScheduleProvider>
+    </UIProvider>
+  );
 }
 
 describe('StampPanel', () => {
@@ -123,5 +128,30 @@ describe('StampPanel', () => {
     fireEvent.click(locationCheckbox);
 
     expect(screen.getByTestId('ready-indicator')).toHaveAttribute('data-ready', 'false');
+  });
+
+  it('renders delete mode toggle button', () => {
+    render(
+      <Wrapper>
+        <StampPanel />
+      </Wrapper>,
+    );
+
+    const deleteBtn = screen.getByRole('button', { name: /Режим удаления/i });
+    expect(deleteBtn).toBeInTheDocument();
+  });
+
+  it('delete mode toggle button turns red when active', () => {
+    render(
+      <Wrapper>
+        <StampPanel />
+      </Wrapper>,
+    );
+
+    const deleteBtn = screen.getByRole('button', { name: /Режим удаления/i });
+    expect(deleteBtn).not.toHaveClass('bg-red-500');
+
+    fireEvent.click(deleteBtn);
+    expect(deleteBtn).toHaveClass('bg-red-500');
   });
 });

@@ -44,10 +44,13 @@ describe('Sidebar', () => {
     expect(screen.getByText('Анастасия')).toBeInTheDocument();
   });
 
-  it('renders theme toggle button', () => {
+  it('renders theme toggle as a slider switch', () => {
     renderWithProviders();
-    const toggle = screen.getByRole('button', { name: /Переключить/i });
-    expect(toggle).toBeInTheDocument();
+    // The slider container should be clickable
+    const slider = screen.getByRole('button', { name: /Переключить/i });
+    expect(slider).toBeInTheDocument();
+    // Should contain sun and moon indicators
+    expect(slider.querySelector('svg')).toBeInTheDocument();
   });
 
   it('renders collapse/expand button', () => {
@@ -58,7 +61,7 @@ describe('Sidebar', () => {
 
   it('renders version number at bottom', () => {
     renderWithProviders();
-    expect(screen.getByText(/v0\.1/i)).toBeInTheDocument();
+    expect(screen.getByText(/v0\.0\.1/i)).toBeInTheDocument();
   });
 
   it('renders mini calendar with current month name', () => {

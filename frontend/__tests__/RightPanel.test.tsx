@@ -76,10 +76,44 @@ describe('RightPanel', () => {
         <ScheduleProvider>
           <TestHarness />
         </ScheduleProvider>
-      </UIProvider>
+      </UIProvider>,
     );
 
+    // When collapsed, the panel renders a floating tab instead of the full panel
     const panel = container.querySelector('[data-testid="right-panel"]');
-    expect(panel).toHaveStyle({ width: '0' });
+    expect(panel).not.toBeInTheDocument();
+    // But the floating tab should be present
+    expect(screen.getByRole('button', { name: /Развернуть/i })).toBeInTheDocument();
+  });
+
+  it('renders toggle button in header', () => {
+    renderWithProviders();
+    const toggleBtn = screen.getByRole('button', { name: /Свернуть|Развернуть/i });
+    expect(toggleBtn).toBeInTheDocument();
+  });
+
+  it('shows floating tab when collapsed', () => {
+    function TestHarness() {
+      const { toggleRightPanel } = useUI();
+      React.useEffect(() => { toggleRightPanel(); }, []);
+      return <RightPanel />;
+    }
+
+    render(
+      <UIProvider>
+        <ScheduleProvider>
+          <TestHarness />
+        </ScheduleProvider>
+      </UIProvider>,
+    );
+
+    const floatingTab = screen.getByRole('button', { name: /Развернуть/i });
+    expect(floatingTab).toBeInTheDocument();
+  });
+
+  it('renders copy last week button in Неделя section', () => {
+    renderWithProviders();
+    const copyBtn = screen.getByRole('button', { name: /Копировать прошлую/i });
+    expect(copyBtn).toBeInTheDocument();
   });
 });

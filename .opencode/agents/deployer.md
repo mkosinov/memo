@@ -1,7 +1,7 @@
 ---
 description: Handles deployment to production. Manages releases, CI/CD, monitoring, and rollback.
 mode: subagent
-model: opencode-go/deepseek-v4-flash
+model: opencode/deepseek-v4-flash-free
 temperature: 0.1
 permission:
   read: allow
@@ -46,7 +46,7 @@ You manage production deployments, monitor releases, and handle rollbacks. You e
 
 ## Rules
 
-- ALWAYS read `PLAN.md` and `sketches/memo-full-spec.md` first
+- ALWAYS read `PLAN.md` and `docs/memo-full-spec.md` first
 - NEVER deploy without green tests
 - Tag format: v*.*.* (SemVer)
 - Check GitHub Actions status after deploy

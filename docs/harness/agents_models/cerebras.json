@@ -1,0 +1,15 @@
+{
+  "name": "Cerebras (рекомендованный сет)",
+  "provider": "cerebras",
+  "updated": "2026-05-15",
+  "agents": {
+    "architect":             "cerebras/qwen-3-235b-a22b-instruct-2507",
+    "backend-coder":         "cerebras/gpt-oss-120b",
+    "frontend-coder":        "cerebras/gpt-oss-120b",
+    "debugger":              "cerebras/qwen-3-235b-a22b-instruct-2507",
+    "spec-reviewer":         "cerebras/zai-glm-4.7",
+    "code-quality-reviewer": "cerebras/zai-glm-4.7",
+    "deployer":              "cerebras/llama3.1-8b",
+    "docser":                "cerebras/llama3.1-8b"
+  }
+}

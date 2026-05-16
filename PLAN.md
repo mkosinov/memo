@@ -2,14 +2,34 @@
 
 > Дата: 2026-05-13
 
+## Дедлайны (обновлено 2026-05-13)
+
+| Веха | Дата | Что сдаём |
+|------|------|-----------|
+| **MVP** | **20 мая 2026 (7 дней)** | P1 — Admin Schedule полностью рабочий |
+| **Full release** | **31 мая 2026 (18 дней)** | Все P1–P5 + тесты |
+
 ## Вводная
 
 **Что имеем:**
 1. `memo/memo-frontend/` — рабочий Next.js 14 проект со всеми 6 страницами, мок-данными, контекстами, @dnd-kit, тестами. **Дизайн устарел.**
 2. `memo2/sketches/colour-mountains-v4.html` — новый дизайн (тёмный сайдбар, #004D56, карточки, штамп, тосты, мини-календарь). **Только P1 и в HTML.**
-3. `memo2/sketches/memo-full-spec.md` — полный spec (543 строки) с UI/UX, дизайн-системой, типами, архитектурой.
+3. `memo2/docs/memo-full-spec.md` — полный spec (543 строки) с UI/UX, дизайн-системой, типами, архитектурой.
 
 **Стратегия:** Гибрид — берём логику из `memo-frontend` и переодеваем в дизайн v4.
+
+## График работ (MVP — 13–20 мая)
+
+| День | Дата | Что делаем | Кто |
+|------|------|-----------|-----|
+| День 1 | 13 мая (ср) | Next.js инициализация + дизайн-система | @frontend-coder |
+| День 2 | 14 мая (чт) | Layout: Sidebar, Toolbar, RightPanel | @frontend-coder |
+| День 3 | 15 мая (пт) | P1 — Сетка расписания + карточки | @frontend-coder |
+| День 4 | 16 мая (сб) | P1 — Продолжение (карточки, фильтры) | @frontend-coder |
+| День 5 | 17 мая (вс) | P1 — DnD, штамп, модалка | @frontend-coder |
+| День 6 | 18 мая (пн) | P1 — финальные фичи + тесты | @frontend-coder + @tester |
+| День 7 | 19 мая (вт) | Полировка, фикс багов | @debugger + @tester |
+| Сдача | 20 мая (ср) | **MVP готов** | — |
 
 ---
 
@@ -28,14 +48,14 @@
 | 7 | @deployer | Деплой и CI/CD | subagent | deepseek-v4-flash |
 | 8 | @manager | Связующий — принимает запросы, распределяет между агентами | primary | deepseek-v4-flash |
 
-- [ ] Создать `.opencode/agents/architect.md`
-- [ ] Создать `.opencode/agents/frontend-coder.md`
-- [ ] Создать `.opencode/agents/backend-coder.md`
-- [ ] Создать `.opencode/agents/tester.md`
-- [ ] Создать `.opencode/agents/debugger.md`
-- [ ] Создать `.opencode/agents/docser.md`
-- [ ] Создать `.opencode/agents/deployer.md`
-- [ ] Создать `.opencode/agents/manager.md`
+- [x] Создать `.opencode/agents/architect.md`
+- [x] Создать `.opencode/agents/frontend-coder.md`
+- [x] Создать `.opencode/agents/backend-coder.md`
+- [x] Создать `.opencode/agents/tester.md`
+- [x] Создать `.opencode/agents/debugger.md`
+- [x] Создать `.opencode/agents/docser.md`
+- [x] Создать `.opencode/agents/deployer.md`
+- [x] Создать `.opencode/agents/manager.md`
 
 **Результат:** 8 агентов готовы к работе, распределение ролей зафиксировано
 
@@ -159,18 +179,20 @@
 
 ---
 
-## Приоритеты и время
+## Приоритеты и время (MVP — 13–20 мая)
 
-| Этап | Зависит от | Время |
-|------|-----------|-------|
-| 0 — Подготовка (агенты) | — | 15 мин |
-| 1 — Инфраструктура Next.js | 0 | 30 мин |
-| 2 — Дизайн-система + Layout | 1 | 2 ч |
-| 3 — P1 Schedule | 2 | 4 ч |
-| 4 — P2 Bookings + Client Card | 2 | 1.5 ч |
-| 5 — P3 Booking Flow | 2 | 2 ч |
-| 6 — P4 Artist Schedule | 2 | 1 ч |
-| 7 — P5 Chat | 2 | 1 ч |
-| 8 — Тесты и полировка | 3-7 | 1.5 ч |
+| Этап | Дней | Что делаем | Кто |
+|------|------|-----------|-----|
+| 0 — Подготовка (агенты) | 1 | Создать 8 агентов | @manager |
+| 1 — Инфраструктура Next.js | 1 | Инициализация + депсы | @frontend-coder |
+| 2 — Дизайн-система + Layout | 1 | Sidebar, Toolbar, RightPanel | @frontend-coder |
+| 3 — P1 Schedule | 3 | Сетка, карточки, DnD, штамп, модалка | @frontend-coder |
+| 4–7 — P2–P5 | 4 | Портирование страниц | @frontend-coder |
+| 8 — Тесты и полировка | 2 | Тесты, a11y, build | @tester + @frontend-coder |
 
-**Всего:** ~14-15 часов чистого кода
+**Всего:** ~14-15 дней на MVP
+
+---
+## Changelog
+- 2026-05-13: Updated deadlines — MVP 20 мая, Full release 31 мая. Added daily schedule for MVP sprint.
+- 2026-05-13: Initial PLAN.md created with etapy 0-8.

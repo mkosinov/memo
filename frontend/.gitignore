@@ -9,6 +9,14 @@
 # testing
 /coverage
 
+# Playwright (baseline screenshots are committed; these are temporary)
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+*.actual.png
+*.diff.png
+
 # next.js
 /.next/
 /out/

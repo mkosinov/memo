@@ -1,7 +1,8 @@
 # Memo Frontend v2 — План работ
 
 > Дата: 2026-05-13
-> **P1 Admin Schedule: ✅ Completed 2026-05-15** — 15/15 tasks done, 149 tests passing
+> **P1 Admin Schedule: ✅ Completed 2026-05-15** — 15/15 tasks done
+> **P1 UI Polish: ✅ Completed 2026-05-16** — 4 polish tasks + 1 trivial, 165 tests passing
 
 ## Вводная
 

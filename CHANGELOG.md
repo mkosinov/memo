@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **P1: Admin Schedule — UI Polish Session (2026-05-16)**
+  - ActivityCard restructured to 5-div vertical layout (Header, Title, Age, Location, Footer)
+  - DnD ghost preview — responsive DragOverlay width (`w-full`) + card-shaped slot ghost
+  - Stamp ghost preview on empty slot hover — card-shaped preview with service name, time, artist color
+  - RightPanel toggle — inverted arrows (pointing toward panel content) + stay-visible button style
+  - Vitest config — excluded `e2e/` directory from runner
 - **P1: Admin Schedule** — complete weekly drag-and-drop schedule grid (`/`)
   - WeekView with 7-day column layout, sticky headers, time column (9:00–21:00)
   - ActivityCard with brightness-mix fill, collapsing at small heights, private event indicator
@@ -32,6 +38,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - TypeScript strict mode, Tailwind CSS 3, @dnd-kit/core, Vitest
 - v4 Design System CSS variables (brand, sidebar, grid, cards, text, status)
 - ScheduleContext + UIContext (React Context API)
-- 15 test files with 149 passing tests
+- 15 test files with 165 passing tests
 - Vitest configured with `pool: 'forks'` for subagent compatibility
 - Static prerender build (output: 'export') — `npm run build` passing

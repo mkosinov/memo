@@ -332,6 +332,18 @@ export function Sidebar() {
 
       {/* ── Bottom Section ── */}
       <div className="border-t border-white/10">
+        {/* User Avatar */}
+        {!sidebarCollapsed && (
+          <div className="flex items-center gap-2 px-3 pt-3 pb-2">
+            <div className="w-7 h-7 rounded-full bg-brand-light flex items-center justify-center text-xs text-white font-medium">
+              А
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-xs text-white/70 truncate">Админ</div>
+            </div>
+          </div>
+        )}
+
         {/* Theme Toggle (slider) + Collapse */}
         <div className={`flex items-center ${sidebarCollapsed ? 'flex-col gap-2 py-3' : 'justify-between px-3 py-2'}`}>
           {/* Theme slider switch */}
@@ -370,18 +382,6 @@ export function Sidebar() {
         {!sidebarCollapsed && (
           <div className="px-3 pb-2">
             <span className="text-[10px] text-white/30">memo v0.0.1</span>
-          </div>
-        )}
-
-        {/* User Avatar */}
-        {!sidebarCollapsed && (
-          <div className="flex items-center gap-2 px-3 pb-3">
-            <div className="w-7 h-7 rounded-full bg-brand-light flex items-center justify-center text-xs text-white font-medium">
-              А
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="text-xs text-white/70 truncate">Админ</div>
-            </div>
           </div>
         )}
       </div>

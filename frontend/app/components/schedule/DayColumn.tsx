@@ -119,7 +119,7 @@ export function DayColumn({ dayIndex, date, activities, artists, dragCopy, onCre
   return (
     <div
       data-testid={`day-column-${dayIndex}`}
-      className="relative border-l border-gray-100"
+      className="relative flex-1 border-l border-gray-100"
       onWheel={handleWheel}
     >
       {slots.map((hour, i) => (

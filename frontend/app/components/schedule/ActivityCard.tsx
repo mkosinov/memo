@@ -65,12 +65,10 @@ export function ActivityCard({ activity, artist, studios = [], style, onEdit, is
         );
       }, 150);
     } else if (onEdit) {
-      // Not in delete mode → open edit modal
       onEdit(activity);
     }
   };
 
-  // Quick action: '+' for public, '...' for private
   const handleQuickAction = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (activity.isPrivate) {
@@ -80,7 +78,6 @@ export function ActivityCard({ activity, artist, studios = [], style, onEdit, is
     }
   };
 
-  // Location name from studios
   const locationName = studios.find(s => s.id === activity.locationId)?.name || '';
 
   return (
@@ -104,46 +101,66 @@ export function ActivityCard({ activity, artist, studios = [], style, onEdit, is
       data-testid={`activity-${activity.id}`}
       data-drag-id={activity.id}
     >
-      {/* Time pill — issue 1: increased padding */}
-      <div className="px-3 pt-2 pb-1">
+      {/* 1. HEADER — time pill + private star */}
+      <div className="flex justify-between items-start px-3 pt-2 pb-1">
         <span
           className="inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold text-white"
           style={{ backgroundColor: artist.color }}
         >
           {formatTime(activity.startTime)}–{formatTime(activity.startTime + activity.duration)}
         </span>
+        {activity.isPrivate && (
+          <svg className="w-2.5 h-2.5 flex-shrink-0" viewBox="0 0 24 24" fill={artist.color}>
+            <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
+          </svg>
+        )}
       </div>
 
       {!showOnlyPill && (
         <>
-          {/* Service name + age — issues 2, 3: min-h for 2 lines, age right after */}
-          <div className="px-2 mt-1 min-h-[2.5rem]">
+          {/* 2. TITLE — service name, 2 lines reserved */}
+          <div className="px-2 min-h-[2.5rem]">
             <div className="text-sm font-semibold leading-tight line-clamp-2">
               {activity.serviceName}
             </div>
-            {showExtra && (
-              <div className="flex items-center gap-1 text-[11px] text-gray-600 mt-0.5">
-                <span>{activity.minAge}</span>
-                {/* Issue 4: full artist name with truncation */}
-                <span className="truncate" title={artist.name}>{artist.name}</span>
-              </div>
-            )}
           </div>
 
-          {/* Spacer */}
-          <div className="flex-1" />
+          {/* 3. AGE — icon + digits, only when tall */}
+          {showExtra && (
+            <div className="flex items-center gap-1 px-2 text-[11px] text-gray-600">
+              <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" />
+              </svg>
+              <span>{activity.minAge}</span>
+            </div>
+          )}
 
-          {/* Footer — issue 5: location, issue 6: quick action buttons */}
-          <div className="px-2 pb-1.5 flex items-center justify-between text-[11px]">
-            <div className="flex flex-col">
+          {/* Spacer pushes location down toward footer when card is tall */}
+          {showExtra && <div className="flex-1" />}
+
+          {/* 4. LOCATION — one line, only when tall */}
+          {showExtra && locationName && (
+            <div className="flex items-center gap-1 px-2 pb-1 text-[11px]" style={{ color: 'var(--ink-light)' }}>
+              <svg className="w-3 h-3 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z" />
+                <circle cx="12" cy="10" r="3" />
+              </svg>
+              <span className="truncate">{locationName}</span>
+            </div>
+          )}
+
+          {/* 5. FOOTER — occupancy + quick action */}
+          <div className="flex items-center justify-between px-2 pb-1.5 text-[11px]">
+            <div className="flex items-center gap-1">
+              <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" />
+                <circle cx="9" cy="7" r="4" />
+                <path d="M23 21v-2a4 4 0 00-3-3.87" />
+                <path d="M16 3.13a4 4 0 010 7.75" />
+              </svg>
               <span className="font-medium">
                 {activity.occupied}/{activity.capacity}
               </span>
-              {showExtra && locationName && (
-                <span className="text-[10px]" style={{ color: 'var(--ink-light)' }}>
-                  {locationName}
-                </span>
-              )}
             </div>
             <button
               onClick={handleQuickAction}
@@ -161,18 +178,6 @@ export function ActivityCard({ activity, artist, studios = [], style, onEdit, is
             </button>
           </div>
         </>
-      )}
-
-      {/* Issue 7: Private star icon in clipped top-right corner */}
-      {activity.isPrivate && (
-        <div
-          className="absolute top-0 right-0 flex items-center justify-center"
-          style={{ width: '16px', height: '16px' }}
-        >
-          <svg className="w-2.5 h-2.5" viewBox="0 0 24 24" fill="var(--brand, #004D56)" style={{ color: artist.color }}>
-            <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
-          </svg>
-        </div>
       )}
     </div>
   );

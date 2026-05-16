@@ -95,18 +95,23 @@ describe('ActivityCard', () => {
     });
   });
 
-  it('shows extra info (minAge, full artist name) when height >= 90px', () => {
+  it('shows age and location when height >= 90px', () => {
     const tallActivity = { ...mockActivity, duration: 2 };
-    render(<ActivityCard activity={tallActivity} artist={mockArtist} />);
+    const mockStudios = [{ id: 'loc_1', name: 'Студия А' }];
+    render(<ActivityCard activity={tallActivity} artist={mockArtist} studios={mockStudios} />);
     expect(screen.getByText('6+')).toBeInTheDocument();
-    expect(screen.getByText('Ольга Петрова')).toBeInTheDocument();
+    expect(screen.getByText('Студия А')).toBeInTheDocument();
   });
 
-  it('hides extra info when height < 90px', () => {
-    const mediumActivity = { ...mockActivity, duration: 0.5 };
+  it('hides age and location when height < 90px', () => {
+    // duration=0.6 → height = 0.6*120-10 = 62px (56 <= h < 90, !showExtra)
+    const mediumActivity = { ...mockActivity, duration: 0.6 };
     render(<ActivityCard activity={mediumActivity} artist={mockArtist} />);
     expect(screen.queryByText('6+')).not.toBeInTheDocument();
-    expect(screen.queryByText('Ольга Петрова')).not.toBeInTheDocument();
+    // Service name IS still visible
+    expect(screen.getByText('Картина маслом')).toBeInTheDocument();
+    // Occupancy IS still visible
+    expect(screen.getByText('3/8')).toBeInTheDocument();
   });
 
   it('has data-testid attribute', () => {

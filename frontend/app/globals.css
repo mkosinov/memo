@@ -26,11 +26,13 @@
   --right-w: 260px;
   --cell-h: 60px;
   --time-w: 64px;
+  --toolbar-h: 56px;
   
   /* Grid */
   --grid-line: #E8EDEE;
   --grid-line-half: #F0F3F4;
-  --grid-bg: #FAFBFC;
+  --grid-bg: #FFFFFF;
+  --bg: #FFFFFF;
   
   /* Status */
   --success: #6B8E6E;

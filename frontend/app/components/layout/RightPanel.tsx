@@ -80,7 +80,7 @@ export function RightPanel() {
       style={{
         width: 'var(--right-w)',
         borderColor: 'var(--line)',
-        paddingTop: 'var(--toolbar-h, 56px)',
+        paddingTop: 'var(--toolbar-h)',
         overflow: 'hidden',
       }}
     >
@@ -93,7 +93,7 @@ export function RightPanel() {
           <span>Инструменты</span>
           <button
             onClick={toggleRightPanel}
-            className="flex items-center justify-center w-6 h-6 rounded-md bg-white/80 border border-gray-200 shadow-sm text-ink-mid transition-colors hover:bg-surface"
+            className="flex items-center justify-center w-6 h-6 rounded-md bg-white/80 border border-line shadow-sm text-ink-mid transition-colors hover:bg-surface"
             aria-label="Свернуть панель"
             title="Свернуть"
           >

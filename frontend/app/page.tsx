@@ -14,14 +14,14 @@ export default function Home() {
       <Sidebar />
       <div
         data-testid="center-content"
-        className="flex-1 flex flex-col min-w-0"
+        className="flex-1 flex flex-col min-w-0 ml-[var(--sidebar-w,230px)] mr-[var(--right-w,0px)] transition-all duration-300"
         style={{
-          marginLeft: sidebarCollapsed ? 'var(--sidebar-collapsed-w)' : 'var(--sidebar-w)',
-          marginRight: rightPanelCollapsed ? '0' : 'var(--right-w)',
+          marginLeft: sidebarCollapsed ? 'var(--sidebar-collapsed-w)' : undefined,
+          marginRight: rightPanelCollapsed ? '0' : undefined,
         }}
       >
         <Toolbar />
-        <div className="flex-1 flex overflow-hidden">
+        <div className="flex-1 flex overflow-hidden" style={{ height: 'calc(100vh - var(--toolbar-h, 56px))' }}>
           <div className="flex-1 overflow-auto">
             <WeekView />
           </div>

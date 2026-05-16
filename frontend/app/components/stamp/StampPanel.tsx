@@ -63,7 +63,7 @@ export function StampPanel() {
           className={`h-2 w-2 rounded-full ${
             stamp.ready
               ? 'bg-green-500 animate-pulse'
-              : 'bg-gray-300'
+              : 'bg-ink-faint'
           }`}
         />
         <span className="text-xs" style={{ color: 'var(--ink-light)' }}>
@@ -156,7 +156,7 @@ export function StampPanel() {
       {stamp.ready && (
         <div
           data-testid="stamp-summary"
-          className="rounded-lg bg-gray-50 p-2 text-xs"
+          className="rounded-lg bg-surface p-2 text-xs"
           style={{ color: 'var(--ink-light)' }}
         >
           {selectedMaster?.shortName} — {selectedService?.name}
@@ -173,7 +173,7 @@ export function StampPanel() {
           className={`flex w-full items-center justify-center gap-2 rounded-lg px-3 py-2 text-xs font-medium transition-colors ${
             deleteMode
               ? 'bg-red-500 text-white hover:bg-red-600'
-              : 'text-gray-500 hover:bg-surface'
+              : 'text-ink-mid hover:bg-surface'
           }`}
           aria-label="Режим удаления"
         >

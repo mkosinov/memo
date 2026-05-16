@@ -108,7 +108,7 @@ describe('ScheduleProvider', () => {
     expect(screen.getByTestId('studio-count').textContent).toBe('3');
   });
 
-  it('initializes with 28 activities from generateWeekEvents', () => {
+  it('initializes with 28 activities from getStaticEvents', () => {
     renderWithContext();
     expect(screen.getByTestId('activity-count').textContent).toBe('28');
   });

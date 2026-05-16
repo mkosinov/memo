@@ -34,13 +34,13 @@ describe('Home Page', () => {
   it('center content has left margin matching sidebar width', () => {
     renderHome();
     const centerContent = screen.getByTestId('center-content');
-    expect(centerContent).toHaveStyle({ marginLeft: 'var(--sidebar-w)' });
+    expect(centerContent.className).toContain('ml-[var(--sidebar-w,230px)]');
   });
 
   it('center content has right margin matching right panel width', () => {
     renderHome();
     const centerContent = screen.getByTestId('center-content');
-    expect(centerContent).toHaveStyle({ marginRight: 'var(--right-w)' });
+    expect(centerContent.className).toContain('mr-[var(--right-w,0px)]');
   });
 
   it('center content left margin adjusts when sidebar collapsed', () => {

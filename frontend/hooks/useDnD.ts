@@ -4,6 +4,11 @@ import { useState, useCallback } from 'react';
 import type { Activity } from '@/lib/types';
 import { HOURS_START } from '@/lib/utils';
 
+// Re-export types from @dnd-kit/core for reference.
+// The hook uses simplified event shapes below since it only consumes a subset of fields.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+import type { DragStartEvent as _DragStartEvent, DragEndEvent as _DragEndEvent, DragOverEvent as _DragOverEvent } from '@dnd-kit/core';
+
 interface UseDnDOptions {
   activities: Activity[];
   addActivity: (activity: Omit<Activity, 'id'>) => void;
@@ -11,6 +16,11 @@ interface UseDnDOptions {
   showToast: (message: string, undo?: () => void) => void;
 }
 
+/**
+ * Simplified event types derived from @dnd-kit/core.
+ * The hook only uses a subset of fields (active.id, active.data.current.activity, over.id),
+ * so these interfaces avoid requiring the full library types (rect, disabled, etc.).
+ */
 interface DragStartEvent {
   active: { id: string | number; data: { current?: { activity?: Activity } } };
 }
@@ -66,6 +76,7 @@ export function useDnD({ activities, addActivity, updateActivity, showToast }: U
         setDragId(String(event.active.id));
         setActiveDragActivity(activity);
         setDragCopy(!!input?.altKey);
+        setGhostPosition(null);
       }
     },
     [],

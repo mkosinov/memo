@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest';
 import {
   hexToRgb,
   mixWithWhite,
-  getFillOpacity,
   formatTime,
   getMonday,
   formatDate,
@@ -36,20 +35,6 @@ describe('mixWithWhite', () => {
   it('returns white at ratio 1', () => {
     const result = mixWithWhite({ r: 0, g: 0, b: 0 }, 1);
     expect(result).toEqual({ r: 255, g: 255, b: 255 });
-  });
-});
-
-describe('getFillOpacity', () => {
-  it('returns 0.85 when empty (0/8)', () => {
-    expect(getFillOpacity(0, 8)).toBeCloseTo(0.85);
-  });
-
-  it('returns 0.30 when full (8/8)', () => {
-    expect(getFillOpacity(8, 8)).toBeCloseTo(0.30);
-  });
-
-  it('returns intermediate value for partial fill (4/8)', () => {
-    expect(getFillOpacity(4, 8)).toBeCloseTo(0.575);
   });
 });
 

@@ -1,14 +1,10 @@
 'use client';
 
 import React from 'react';
-import { HOURS_START, HOURS_END, CELL_HEIGHT, formatTime } from '@/lib/utils';
+import { CELL_HEIGHT, formatTime, generateTimeSlots } from '@/lib/utils';
 
 export function TimeColumn() {
-  const hours: number[] = [];
-  for (let h = HOURS_START; h <= HOURS_END; h++) {
-    hours.push(h);
-    if (h < HOURS_END) hours.push(h + 0.5);
-  }
+  const hours = generateTimeSlots();
 
   return (
     <div
@@ -24,7 +20,7 @@ export function TimeColumn() {
             style={{ height: CELL_HEIGHT }}
           >
             {isHour && (
-              <span className="absolute -top-3 right-2 text-xs text-gray-400">
+              <span className="absolute -top-3 right-2 text-xs text-ink-light">
                 {formatTime(hour)}
               </span>
             )}

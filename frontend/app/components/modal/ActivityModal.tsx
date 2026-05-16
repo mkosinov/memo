@@ -107,7 +107,7 @@ export function ActivityModal({
           </h2>
           <button
             onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 text-xl leading-none"
+            className="text-ink-light hover:text-ink-mid text-xl leading-none"
             aria-label="Закрыть"
           >
             ×
@@ -118,7 +118,7 @@ export function ActivityModal({
           {/* Master + Service */}
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="text-xs font-medium text-gray-600" htmlFor="modal-master">
+              <label className="text-xs font-medium text-ink-mid" htmlFor="modal-master">
                 Мастер
               </label>
               <select
@@ -137,7 +137,7 @@ export function ActivityModal({
               </select>
             </div>
             <div>
-              <label className="text-xs font-medium text-gray-600" htmlFor="modal-service">
+              <label className="text-xs font-medium text-ink-mid" htmlFor="modal-service">
                 Услуга
               </label>
               <select
@@ -159,7 +159,7 @@ export function ActivityModal({
 
           {/* Location */}
           <div>
-            <label className="text-xs font-medium text-gray-600" htmlFor="modal-location">
+            <label className="text-xs font-medium text-ink-mid" htmlFor="modal-location">
               Локация
             </label>
             <select
@@ -182,7 +182,7 @@ export function ActivityModal({
           {/* Day + Start Time + Duration */}
           <div className="grid grid-cols-3 gap-4">
             <div>
-              <label className="text-xs font-medium text-gray-600" htmlFor="modal-day">
+              <label className="text-xs font-medium text-ink-mid" htmlFor="modal-day">
                 День
               </label>
               <select
@@ -199,7 +199,7 @@ export function ActivityModal({
               </select>
             </div>
             <div>
-              <label className="text-xs font-medium text-gray-600" htmlFor="modal-start">
+              <label className="text-xs font-medium text-ink-mid" htmlFor="modal-start">
                 Начало
               </label>
               <input
@@ -214,7 +214,7 @@ export function ActivityModal({
               />
             </div>
             <div>
-              <label className="text-xs font-medium text-gray-600" htmlFor="modal-duration">
+              <label className="text-xs font-medium text-ink-mid" htmlFor="modal-duration">
                 Длительность
               </label>
               <input
@@ -232,7 +232,7 @@ export function ActivityModal({
           {/* Occupied + Capacity */}
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="text-xs font-medium text-gray-600" htmlFor="modal-occupied">
+              <label className="text-xs font-medium text-ink-mid" htmlFor="modal-occupied">
                 Занято
               </label>
               <input
@@ -245,7 +245,7 @@ export function ActivityModal({
               />
             </div>
             <div>
-              <label className="text-xs font-medium text-gray-600" htmlFor="modal-capacity">
+              <label className="text-xs font-medium text-ink-mid" htmlFor="modal-capacity">
                 Вместимость
               </label>
               <input
@@ -274,7 +274,7 @@ export function ActivityModal({
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg"
+              className="px-4 py-2 text-sm text-ink-mid hover:bg-surface rounded-lg"
             >
               Отмена
             </button>

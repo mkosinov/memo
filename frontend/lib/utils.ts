@@ -46,16 +46,6 @@ export function mixWithWhite(
   };
 }
 
-/**
- * Calculate fill opacity for event card background.
- * Empty → 0.85, Full → 0.30.
- * Formula: 0.85 - pct * 0.55
- */
-export function getFillOpacity(occupied: number, capacity: number): number {
-  const pct = capacity > 0 ? Math.min(occupied / capacity, 1) : 0;
-  return 0.85 - pct * 0.55;
-}
-
 // ─── Time / Date Utilities ────────────────────────────────────────────────
 
 /** Format hours to "HH:MM" string. 10 → "10:00", 10.5 → "10:30". */
@@ -80,4 +70,22 @@ export function getMonday(date: Date): Date {
 /** Format date as "13 мая" (day + genitive month). */
 export function formatDate(date: Date): string {
   return `${date.getDate()} ${MONTHS_GENITIVE[date.getMonth()]}`;
+}
+
+/** Check if two dates fall on the same calendar day. */
+export function isSameDay(a: Date, b: Date): boolean {
+  return (
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
+  );
+}
+
+/** Generate half-hour time slots from HOURS_START to HOURS_END (exclusive). */
+export function generateTimeSlots(): number[] {
+  const slots: number[] = [];
+  for (let h = HOURS_START; h < HOURS_END; h++) {
+    slots.push(h, h + 0.5);
+  }
+  return slots;
 }

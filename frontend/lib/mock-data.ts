@@ -106,13 +106,14 @@ const RAW_EVENTS: RawActivity[] = [
   { day: 6, master: 'm5', start: 16.5, dur: 2,   service: 'Роспись одежды',       age: '8+',    loc: 'p1389',  occ: 4, cap: 8,  priv: false },
 ];
 
-// ─── Generate Week Events ─────────────────────────────────────────────────
+// ─── Get Static Events ────────────────────────────────────────────────────
 
 /**
- * Generate 28 activities for the given week.
- * @param weekStart Any date within the target week (Monday is computed internally)
+ * Returns 28 static activities for the schedule.
+ * These events use day-of-week indices (0=Mon..6=Sun) rather than absolute dates,
+ * so the same set is returned regardless of which week is requested.
  */
-export function generateWeekEvents(_weekStart: Date): Activity[] {
+export function getStaticEvents(): Activity[] {
   return RAW_EVENTS.map((e, i) => ({
     id: `ev_${i}`,
     day: e.day,

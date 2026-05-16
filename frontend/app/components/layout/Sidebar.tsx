@@ -4,7 +4,7 @@ import React, { useMemo } from 'react';
 import { useSchedule } from '@/contexts/ScheduleContext';
 import { useUI } from '@/contexts/UIContext';
 import { ARTISTS } from '@/lib/mock-data';
-import { DAYS, MONTHS, getMonday, formatDate } from '@/lib/utils';
+import { DAYS, MONTHS, getMonday, formatDate, isSameDay } from '@/lib/utils';
 
 // ─── SVG Icon Components ──────────────────────────────────────────────────
 
@@ -151,11 +151,6 @@ function MiniCalendar({ currentWeek, setCurrentWeek, collapsed }: MiniCalendarPr
     setCurrentWeek(new Date(weekMonday));
   };
 
-  const isToday = (date: Date) =>
-    date.getDate() === today.getDate() &&
-    date.getMonth() === today.getMonth() &&
-    date.getFullYear() === today.getFullYear();
-
   const isInCurrentWeek = (date: Date) => {
     const dMonday = getMonday(date);
     return dMonday.getTime() === currentWeekMonday.getTime();
@@ -196,7 +191,7 @@ function MiniCalendar({ currentWeek, setCurrentWeek, collapsed }: MiniCalendarPr
               aria-label={`Неделя с ${formatDate(weekMonday)}`}
             >
               {week.map((day, di) => {
-                const today = isToday(day);
+                const isDayToday = isSameDay(day, today);
                 const inWeek = isInCurrentWeek(day);
                 const inMonth = isCurrentMonth(day);
 
@@ -204,8 +199,8 @@ function MiniCalendar({ currentWeek, setCurrentWeek, collapsed }: MiniCalendarPr
                   <div key={di} className="flex items-center justify-center">
                     <span
                       className={`relative flex items-center justify-center w-5 h-5 text-[11px] rounded-full
-                        ${!inMonth ? 'text-white/20' : today ? 'text-white font-bold' : inWeek ? 'text-white/90' : 'text-white/50'}
-                        ${today ? 'bg-brand text-white' : ''}
+                        ${!inMonth ? 'text-white/20' : isDayToday ? 'text-white font-bold' : inWeek ? 'text-white/90' : 'text-white/50'}
+                        ${isDayToday ? 'bg-brand text-white' : ''}
                       `}
                     >
                       {day.getDate()}

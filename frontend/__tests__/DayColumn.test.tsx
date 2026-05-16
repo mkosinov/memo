@@ -142,10 +142,10 @@ describe('DayColumn', () => {
     const card1 = screen.getByTestId('activity-a1');
     const card2 = screen.getByTestId('activity-a2');
 
-    // First card: no offset
-    expect(card1).toHaveStyle({ transform: 'translateX(0px)' });
-    // Second card: offset by 6px
-    expect(card2).toHaveStyle({ transform: 'translateX(6px)' });
+    // First card: no offset (index 0 → translate(0, 0))
+    expect(card1).toHaveStyle({ transform: 'translate(0px, 0px)' });
+    // Second card: offset by 12px on both X and Y (index 1 → translate(12px, 12px))
+    expect(card2).toHaveStyle({ transform: 'translate(12px, 12px)' });
   });
 
   it('non-overlapping activity has no offset', () => {
@@ -158,7 +158,7 @@ describe('DayColumn', () => {
       />,
     );
     const card = screen.getByTestId('activity-a3');
-    expect(card).toHaveStyle({ transform: 'translateX(0px)' });
+    expect(card).toHaveStyle({ transform: 'translate(0px, 0px)' });
   });
 
   it('cycles visible card on mouse wheel over overlapping slot', async () => {

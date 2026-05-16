@@ -23,9 +23,9 @@ describe('WeekView', () => {
 
   it('renders time column with hour labels', () => {
     renderWeekView();
-    // Should show at least 9:00 and 21:00
+    // Should show at least 9:00 and 20:00 (slots from 9 to 20.5)
     expect(screen.getByText('09:00')).toBeInTheDocument();
-    expect(screen.getByText('21:00')).toBeInTheDocument();
+    expect(screen.getByText('20:00')).toBeInTheDocument();
   });
 
   it('shows correct day headers', () => {

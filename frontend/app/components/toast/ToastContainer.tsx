@@ -19,7 +19,7 @@ export function ToastContainer() {
       {visible.map((toast) => (
         <div
           key={toast.id}
-          className="flex items-center gap-3 bg-gray-900 text-white px-4 py-3 rounded-lg shadow-lg text-sm animate-slide-up"
+          className="flex items-center gap-3 bg-sidebar text-white px-4 py-3 rounded-lg shadow-lg text-sm animate-slide-up"
         >
           <span className="flex-1">{toast.message}</span>
           {toast.undo && (

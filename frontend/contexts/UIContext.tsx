@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useState, useCallback } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
 
 interface Toast {
   id: string;
@@ -24,28 +24,42 @@ interface UIContextType {
 
 const UIContext = createContext<UIContextType | null>(null);
 
-let toastCounter = 0;
-
 export function UIProvider({ children }: { children: React.ReactNode }) {
   const [deleteMode, setDeleteMode] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false);
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
+  const toastTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+
+  // Clean up all pending toast timers on unmount
+  useEffect(() => {
+    return () => {
+      toastTimers.current.forEach((timerId) => clearTimeout(timerId));
+      toastTimers.current.clear();
+    };
+  }, []);
 
   const toggleDeleteMode = useCallback(() => {
     setDeleteMode(prev => !prev);
   }, []);
 
   const showToast = useCallback((message: string, undo?: () => void) => {
-    const id = `toast_${++toastCounter}`;
+    const id = `toast-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     setToasts(prev => [...prev, { id, message, undo }]);
-    setTimeout(() => {
+    const timerId = setTimeout(() => {
+      toastTimers.current.delete(id);
       setToasts(prev => prev.filter(t => t.id !== id));
     }, 4500);
+    toastTimers.current.set(id, timerId);
   }, []);
 
   const hideToast = useCallback((id: string) => {
+    const timerId = toastTimers.current.get(id);
+    if (timerId) {
+      clearTimeout(timerId);
+      toastTimers.current.delete(id);
+    }
     setToasts(prev => prev.filter(t => t.id !== id));
   }, []);
 

@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import React from 'react';
 import { ActivityCard } from '../app/components/schedule/ActivityCard';
-import { getFillOpacity } from '../lib/utils';
 import type { Activity, Artist } from '../lib/types';
 
 const mockArtist: Artist = {
@@ -74,25 +73,23 @@ describe('ActivityCard', () => {
     expect(screen.getByText('10/5')).toBeInTheDocument();
   });
 
-  it('renders with clipPath when isPrivate is true', () => {
+  it('renders diamond icon when isPrivate is true', () => {
     const privateActivity = { ...mockActivity, isPrivate: true };
-    const { container } = render(
-      <ActivityCard activity={privateActivity} artist={mockArtist} />
-    );
-    const card = container.querySelector('[data-testid]');
-    expect(card).toHaveStyle({
-      clipPath: 'polygon(0 0, 80% 0, 100% 20%, 100% 100%, 0 100%)',
-    });
+    render(<ActivityCard activity={privateActivity} artist={mockArtist} />);
+    // Diamond SVG should be present for private events
+    const diamond = screen.getByLabelText('')?.closest('svg');
+    // Check that a diamond path exists in the card
+    const { container } = render(<ActivityCard activity={privateActivity} artist={mockArtist} />);
+    const paths = container.querySelectorAll('svg path[d="M12 2l10 10-10 10L2 12z"]');
+    expect(paths.length).toBeGreaterThan(0);
   });
 
-  it('does not have clipPath when isPrivate is false', () => {
+  it('does not have diamond icon when isPrivate is false', () => {
     const { container } = render(
       <ActivityCard activity={mockActivity} artist={mockArtist} />
     );
-    const card = container.querySelector('[data-testid]');
-    expect(card).not.toHaveStyle({
-      clipPath: 'polygon(0 0, 80% 0, 100% 20%, 100% 100%, 0 100%)',
-    });
+    const paths = container.querySelectorAll('svg path[d="M12 2l10 10-10 10L2 12z"]');
+    expect(paths.length).toBe(0);
   });
 
   it('shows age and location when height >= 90px', () => {
@@ -136,27 +133,27 @@ describe('ActivityCard', () => {
     render(<ActivityCard activity={fullActivity} artist={mockArtist} />);
     expect(screen.getByText('8/8')).toBeInTheDocument();
   });
-});
 
-describe('getFillOpacity', () => {
-  it('returns valid opacity for normal values', () => {
-    expect(getFillOpacity(3, 8)).toBeCloseTo(0.85 - (3 / 8) * 0.55, 5);
+  it('renders progress bar with width proportional to occupancy', () => {
+    const { container } = render(<ActivityCard activity={mockActivity} artist={mockArtist} />);
+    const filledBar = container.querySelector('[data-testid="activity-ev_1"] [style*="width:"][class*="absolute"]');
+    expect(filledBar).toBeInTheDocument();
+    // mockActivity: occupied=3, capacity=8 → fillPct=0.375 → width=37.5%
+    expect(filledBar).toHaveStyle({ width: '37.5%' });
   });
 
-  it('clamps to full occupancy when occupied exceeds capacity', () => {
-    expect(getFillOpacity(10, 5)).toBeCloseTo(0.85 - 1 * 0.55, 5);
+  it('renders full width progress bar when fully occupied', () => {
+    const fullActivity = { ...mockActivity, occupied: 8, capacity: 8 };
+    const { container } = render(<ActivityCard activity={fullActivity} artist={mockArtist} />);
+    const filledBar = container.querySelector('[data-testid="activity-ev_1"] [style*="width:"][class*="absolute"]');
+    expect(filledBar).toHaveStyle({ width: '100%' });
   });
 
-  it('returns default opacity when capacity is 0', () => {
-    const result = getFillOpacity(0, 0);
-    expect(Number.isNaN(result)).toBe(false);
-    expect(Number.isFinite(result)).toBe(true);
-  });
-
-  it('returns default opacity when capacity is 0 and occupied > 0', () => {
-    const result = getFillOpacity(5, 0);
-    expect(Number.isNaN(result)).toBe(false);
-    expect(Number.isFinite(result)).toBe(true);
+  it('renders zero width progress bar when empty', () => {
+    const emptyActivity = { ...mockActivity, occupied: 0, capacity: 8 };
+    const { container } = render(<ActivityCard activity={emptyActivity} artist={mockArtist} />);
+    const filledBar = container.querySelector('[data-testid="activity-ev_1"] [style*="width:"][class*="absolute"]');
+    expect(filledBar).toHaveStyle({ width: '0%' });
   });
 });
 

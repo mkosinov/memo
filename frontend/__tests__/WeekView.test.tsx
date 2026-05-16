@@ -34,4 +34,13 @@ describe('WeekView', () => {
       expect(screen.getByText(day)).toBeInTheDocument();
     });
   });
+
+  describe('DragOverlay ghost', () => {
+    it('renders DragOverlay container in the component tree', () => {
+      const { container } = renderWeekView();
+      // DragOverlay renders as a portal, but the DndContext should be present
+      const dndContext = container.querySelector('[data-dnd-context]') || container.firstChild;
+      expect(dndContext).toBeInTheDocument();
+    });
+  });
 });

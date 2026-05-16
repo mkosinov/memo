@@ -39,6 +39,20 @@ vi.mock('@/contexts/ScheduleContext', () => ({
   })),
 }));
 
+// Mock useDroppable to control isOver state
+const mockUseDroppable = vi.fn(() => ({
+  isOver: false,
+  setNodeRef: vi.fn(),
+}));
+
+vi.mock('@dnd-kit/core', async () => {
+  const actual = await vi.importActual('@dnd-kit/core');
+  return {
+    ...actual,
+    useDroppable: () => mockUseDroppable(),
+  };
+});
+
 const mockActivities: Activity[] = [
   {
     id: 'a1',
@@ -225,5 +239,97 @@ describe('DayColumn', () => {
     // Click on the column itself — should not throw
     const column = screen.getByTestId('day-column-1');
     expect(() => fireEvent.click(column)).not.toThrow();
+  });
+
+  describe('drop slot ghost preview', () => {
+    beforeEach(() => {
+      mockUseDroppable.mockReset();
+      mockUseDroppable.mockReturnValue({
+        isOver: true,
+        setNodeRef: vi.fn(),
+      });
+    });
+
+    afterEach(() => {
+      mockUseDroppable.mockReset();
+      mockUseDroppable.mockReturnValue({
+        isOver: false,
+        setNodeRef: vi.fn(),
+      });
+    });
+
+    it('applies card-shaped ghost style with borderRadius when slot is hovered', () => {
+      render(
+        <DayColumn
+          dayIndex={0}
+          date={new Date()}
+          activities={[]}
+          artists={ARTISTS}
+        />,
+      );
+
+      const column = screen.getByTestId('day-column-0');
+      const slots = column.querySelectorAll('[data-slot-index]');
+      expect(slots.length).toBeGreaterThan(0);
+
+      // The first slot should have the ghost style applied
+      const firstSlot = slots[0] as HTMLElement;
+      expect(firstSlot).toHaveStyle({ borderRadius: '12px' });
+    });
+
+    it('applies margin to ghost slot to match ActivityCard horizontal padding', () => {
+      render(
+        <DayColumn
+          dayIndex={0}
+          date={new Date()}
+          activities={[]}
+          artists={ARTISTS}
+        />,
+      );
+
+      const column = screen.getByTestId('day-column-0');
+      const slots = column.querySelectorAll('[data-slot-index]');
+      const firstSlot = slots[0] as HTMLElement;
+
+      expect(firstSlot).toHaveStyle({ margin: '1px 6px' });
+    });
+
+    it('applies dashed border in brand color when not in copy mode', () => {
+      render(
+        <DayColumn
+          dayIndex={0}
+          date={new Date()}
+          activities={[]}
+          artists={ARTISTS}
+          dragCopy={false}
+        />,
+      );
+
+      const column = screen.getByTestId('day-column-0');
+      const slots = column.querySelectorAll('[data-slot-index]');
+      const firstSlot = slots[0] as HTMLElement;
+
+      expect(firstSlot.style.border).toContain('dashed');
+    });
+
+    it('applies green dashed border when in copy mode', () => {
+      render(
+        <DayColumn
+          dayIndex={0}
+          date={new Date()}
+          activities={[]}
+          artists={ARTISTS}
+          dragCopy={true}
+        />,
+      );
+
+      const column = screen.getByTestId('day-column-0');
+      const slots = column.querySelectorAll('[data-slot-index]');
+      const firstSlot = slots[0] as HTMLElement;
+
+      expect(firstSlot.style.border).toContain('dashed');
+      // jsdom converts hex #22c55e to rgb(34, 197, 94)
+      expect(firstSlot.style.border).toMatch(/#22c55e|rgb\(34,\s*197,\s*94\)/);
+    });
   });
 });

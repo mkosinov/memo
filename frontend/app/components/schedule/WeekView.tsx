@@ -187,8 +187,8 @@ export function WeekView() {
 
       <DragOverlay dropAnimation={null}>
         {activeDragActivity && dragArtist ? (
-          <div className="opacity-80 scale-95" style={{ width: '200px' }}>
-            <ActivityCard activity={activeDragActivity} artist={dragArtist} />
+          <div className="opacity-80 scale-95 w-full" data-drag-ghost="true">
+            <ActivityCard activity={activeDragActivity} artist={dragArtist} studios={studios} />
           </div>
         ) : null}
       </DragOverlay>

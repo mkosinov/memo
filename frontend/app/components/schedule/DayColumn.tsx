@@ -60,10 +60,12 @@ function DroppableSlot({ dayIndex, slotIndex, startTime, isHour, dragCopy, onCli
     : isOver
       ? {
           border: `2px dashed ${dragCopy ? '#22c55e' : 'var(--brand, #004D56)'}`,
-          backgroundColor: dragCopy ? 'rgba(34,197,94,0.06)' : 'rgba(0,77,86,0.06)',
+          backgroundColor: dragCopy ? 'rgba(34,197,94,0.06)' : 'rgba(0,77,86,0.085)',
+          borderRadius: '12px',
           pointerEvents: 'none',
           zIndex: 30,
           position: 'relative' as const,
+          margin: '1px 6px',
         }
       : {};
 

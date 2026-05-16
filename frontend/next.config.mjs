@@ -1,4 +1,6 @@
 /** @type {import('next').NextConfig} */
-const nextConfig = {};
+const nextConfig = {
+  allowedDevOrigins: ['imac.local', 'localhost', '*.local'],
+};
 
 export default nextConfig;

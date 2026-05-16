@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useDroppable } from '@dnd-kit/core';
-import { CELL_HEIGHT, hexToRgb, mixWithWhite, formatTime, generateTimeSlots } from '@/lib/utils';
+import { CELL_HEIGHT, hexToRgb, mixWithWhite, formatTime, generateTimeSlots, HOURS_START } from '@/lib/utils';
 import type { Activity, Artist, Studio, StampState, Service } from '@/lib/types';
 import { ActivityCard } from './ActivityCard';
 
@@ -15,13 +15,11 @@ const OVERLAP_OFFSET = 12;
 function buildOverlapMap(activities: Activity[]): Map<string, { index: number; total: number }> {
   const result = new Map<string, { index: number; total: number }>();
   const sorted = [...activities].sort((a, b) => a.startTime - b.startTime || a.id.localeCompare(b.id));
-  const active: Activity[] = []; // currently overlapping activities
+  let active: Activity[] = []; // currently overlapping activities
 
   for (const a of sorted) {
     // Remove activities that ended before this one starts
-    while (active.length > 0 && active[0].startTime + active[0].duration <= a.startTime) {
-      active.shift();
-    }
+    active = active.filter(prev => a.startTime < prev.startTime + prev.duration);
 
     const myIndex = active.length;
     const total = active.length + 1;
@@ -190,12 +188,13 @@ function DroppableSlot({ dayIndex, slotIndex, startTime, isHour, dragCopy, onCli
 
 // ─── DayColumn ────────────────────────────────────────────────────────────
 
-export function DayColumn({ dayIndex, date, activities, artists, studios = [], services = [], dragCopy, dragId, ghostHeight, ghostDayIndex, ghostSlotIndex, onCreateActivity, onOpenCreateModal, onOpenEditModal, stampReady, stamp }: DayColumnProps) {
+export function DayColumn({ dayIndex, activities, artists, studios = [], services = [], dragCopy, dragId, ghostHeight, ghostDayIndex, ghostSlotIndex, onCreateActivity, onOpenCreateModal, onOpenEditModal, stampReady, stamp }: DayColumnProps) {
   const [visibleIndices, setVisibleIndices] = useState<Record<string, number>>({});
+  const [prevIndices, setPrevIndices] = useState<Record<string, number>>({});
   const columnRef = useRef<HTMLDivElement>(null);
   const wheelAccum = useRef(0);
   const lastWheelTime = useRef(0);
-  const [hoveredPile, setHoveredPile] = useState<string | null>(null);
+  const [animatingKeys, setAnimatingKeys] = useState<Set<string>>(new Set());
 
   const slots = useMemo(() => generateTimeSlots(), []);
 
@@ -229,11 +228,25 @@ export function DayColumn({ dayIndex, date, activities, artists, studios = [], s
       }
       wheelAccum.current += e.deltaY;
       const rect = el.getBoundingClientRect();
-      const y = e.clientY - rect.top + el.scrollTop;
-      const slotIndex = Math.floor(y / CELL_HEIGHT);
-      if (slotIndex >= 0 && slotIndex < slots.length) {
-        const slotHour = slots[slotIndex];
-        const key = `${dayIndex}_${slotHour}`;
+      const y = e.clientY - rect.top;
+      
+      // Find which stacked group we are hovering over
+      let targetKey: string | null = null;
+      for (const act of activities) {
+        const topPx = (act.startTime - HOURS_START) * CELL_HEIGHT * 2;
+        const heightPx = Math.max(act.duration * 120 - 10, 52);
+        if (y >= topPx && y <= topPx + heightPx) {
+          const key = `${dayIndex}_${act.startTime}`;
+          const group = slotGroupsRef.current[key];
+          if (group && group.length > 1) {
+            targetKey = key;
+            break;
+          }
+        }
+      }
+
+      if (targetKey) {
+        const key = targetKey;
         const group = slotGroupsRef.current[key];
         if (group && group.length > 1) {
           e.preventDefault();
@@ -296,7 +309,31 @@ export function DayColumn({ dayIndex, date, activities, artists, studios = [], s
         const indexInGroup = group.indexOf(activity);
         const totalInSlot = group.length;
         const visibleIndex = visibleIndices[key] || 0;
-        const isVisible = totalInSlot <= 1 || indexInGroup === visibleIndex;
+
+        let carouselOffsetX = 0;
+        let carouselOffsetY = 0;
+        let cardOpacity = 1;
+        let cardScale = 1;
+        let cardZIndex = 20;
+        let isClickable = true;
+        
+        if (totalInSlot > 1) {
+          const diff = (indexInGroup - visibleIndex + totalInSlot) % totalInSlot;
+          isClickable = diff === 0;
+          if (diff === 0) {
+            carouselOffsetX = 0;
+            carouselOffsetY = 0;
+            cardOpacity = 1;
+            cardScale = 1;
+            cardZIndex = 25;
+          } else {
+            carouselOffsetX = diff * 8;
+            carouselOffsetY = diff * 6;
+            cardOpacity = Math.max(0, 1 - (diff * 0.15));
+            cardScale = Math.max(0.8, 1 - (diff * 0.04));
+            cardZIndex = 25 - diff;
+          }
+        }
 
         // Full overlap offset (X + Y)
         const overlapInfo = overlapMap.get(activity.id);
@@ -316,40 +353,46 @@ export function DayColumn({ dayIndex, date, activities, artists, studios = [], s
               isDragging={isThisDragging}
               isDragCopy={dragCopy}
               style={{
-                transform: `translate(${ox}px, ${oy}px)`,
-                zIndex: totalInSlot > 1 ? 20 - indexInGroup : 10,
-                opacity: isVisible ? 1 : 0.3,
-                pointerEvents: isVisible ? 'auto' : 'none',
-                transition: 'opacity 300ms ease',
+                transform: `translate(${ox + carouselOffsetX}px, ${oy + carouselOffsetY}px) scale(${cardScale})`,
+                zIndex: cardZIndex,
+                opacity: cardOpacity,
+                pointerEvents: isClickable ? 'auto' : 'none',
+                transition: 'opacity 300ms ease, transform 300ms ease',
               }}
             />
-            {/* "N cards" badge for multi-event slots — shown on first card only */}
+            {/* "N cards" badge for multi-event slots — clickable to cycle */}
             {totalInSlot > 1 && indexInGroup === 0 && (
-              <div
-                className="absolute right-1 z-[35] px-1.5 py-0.5 rounded-full bg-white/90 border border-gray-300 text-[10px] font-semibold text-gray-500 shadow-sm pointer-events-none"
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setVisibleIndices((prev) => {
+                    const current = prev[key] || 0;
+                    const next = (current + 1 + totalInSlot) % totalInSlot;
+                    setPrevIndices(p => ({ ...p, [key]: current }));
+                    setAnimatingKeys(prev => new Set(prev).add(key));
+                    setTimeout(() => {
+                      setAnimatingKeys(prev => {
+                        const next_set = new Set(prev);
+                        next_set.delete(key);
+                        return next_set;
+                      });
+                    }, 350);
+                    return { ...prev, [key]: next };
+                  });
+                }}
+                className="absolute right-1 z-[35] px-1.5 py-0.5 rounded-full bg-white/90 border border-gray-300 text-[10px] font-semibold text-gray-500 shadow-sm hover:bg-white hover:text-gray-700 transition-colors cursor-pointer"
                 style={{
                   top: (activity.startTime - 9) * CELL_HEIGHT * 2 + 2,
                 }}
+                title="Click to cycle through cards"
               >
                 {totalInSlot} cards
-              </div>
+              </button>
             )}
           </React.Fragment>
         );
       })}
 
-      {/* Pile indicator for multi-event slots on hover */}
-      {hoveredPile && slotGroups[hoveredPile] && slotGroups[hoveredPile].length > 1 && (
-        <div
-          className="absolute right-1 z-[35] px-1.5 py-0.5 rounded-full bg-white/90 border border-gray-200 text-[10px] font-medium text-gray-500 shadow-sm pointer-events-none"
-          style={{
-            top: activities.find(a => `${dayIndex}_${a.startTime}` === hoveredPile) ? 
-              (activities.find(a => `${dayIndex}_${a.startTime}` === hoveredPile)!.startTime - 9) * CELL_HEIGHT * 2 + 4 : 0,
-          }}
-        >
-          {slotGroups[hoveredPile].length} cards
-        </div>
-      )}
     </div>
   );
 }

@@ -143,9 +143,9 @@ describe('DayColumn', () => {
     const card2 = screen.getByTestId('activity-a2');
 
     // First card: no offset (index 0 → translate(0, 0))
-    expect(card1).toHaveStyle({ transform: 'translate(0px, 0px)' });
-    // Second card: offset by 12px on both X and Y (index 1 → translate(12px, 12px))
-    expect(card2).toHaveStyle({ transform: 'translate(12px, 12px)' });
+    expect(card1).toHaveStyle({ transform: 'translate(0px, 0px) scale(1)' });
+    // Second card: offset by X and Y (index 1)
+    expect(card2).toHaveStyle({ transform: 'translate(20px, 18px) scale(0.96)' });
   });
 
   it('non-overlapping activity has no offset', () => {
@@ -158,7 +158,7 @@ describe('DayColumn', () => {
       />,
     );
     const card = screen.getByTestId('activity-a3');
-    expect(card).toHaveStyle({ transform: 'translate(0px, 0px)' });
+    expect(card).toHaveStyle({ transform: 'translate(0px, 0px) scale(1)' });
   });
 
   it('cycles visible card on mouse wheel over overlapping slot', async () => {
@@ -174,8 +174,8 @@ describe('DayColumn', () => {
     const card2 = screen.getByTestId('activity-a2');
 
     // Initially first card is visible
-    expect(card1).not.toHaveStyle({ opacity: '0.3' });
-    expect(card2).toHaveStyle({ opacity: '0.3' });
+    expect(card1).toHaveStyle({ opacity: '1' });
+    expect(card2).toHaveStyle({ opacity: '0.85' });
 
     // Scroll to cycle — dispatch native WheelEvent (component uses addEventListener with passive:false)
     // Need to wait for useEffect to attach the listener
@@ -188,8 +188,8 @@ describe('DayColumn', () => {
     });
 
     // Now second card should be visible
-    expect(card1).toHaveStyle({ opacity: '0.3' });
-    expect(card2).not.toHaveStyle({ opacity: '0.3' });
+    expect(card1).toHaveStyle({ opacity: '0.85' });
+    expect(card2).toHaveStyle({ opacity: '1' });
   });
 
   it('calls onCreateActivity when clicking an empty slot', () => {

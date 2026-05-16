@@ -56,21 +56,9 @@ export function RightPanel() {
     showToast('Прошлая неделя скопирована');
   };
 
-  // Floating tab when collapsed
+  // If collapsed, don't render panel (toggled via StampFab)
   if (rightPanelCollapsed) {
-    return (
-      <button
-        onClick={toggleRightPanel}
-        className="fixed right-0 top-1/2 -translate-y-1/2 z-20 flex items-center justify-center w-6 h-16 rounded-l-lg bg-white border border-l-0 shadow-sm transition-colors hover:bg-surface"
-        style={{ borderColor: 'var(--line)' }}
-        aria-label="Развернуть панель"
-        title="Развернуть"
-      >
-        <svg className="h-4 w-4" style={{ color: 'var(--ink-mid)' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-        </svg>
-      </button>
-    );
+    return null;
   }
 
   return (
@@ -80,7 +68,7 @@ export function RightPanel() {
       style={{
         width: 'var(--right-w)',
         borderColor: 'var(--line)',
-        paddingTop: 'var(--toolbar-h)',
+        paddingTop: 0,
         overflow: 'hidden',
       }}
     >

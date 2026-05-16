@@ -3,6 +3,7 @@
 import { Sidebar } from './components/layout/Sidebar';
 import { Toolbar } from './components/layout/Toolbar';
 import { RightPanel } from './components/layout/RightPanel';
+import { StampFab } from './components/layout/StampFab';
 import { WeekView } from './components/schedule/WeekView';
 import { useUI } from '@/contexts/UIContext';
 
@@ -21,13 +22,14 @@ export default function Home() {
         }}
       >
         <Toolbar />
-        <div className="flex-1 flex overflow-hidden" style={{ height: 'calc(100vh - var(--toolbar-h, 56px))' }}>
+        <div className="flex-1 flex overflow-hidden">
           <div className="flex-1 overflow-auto">
             <WeekView />
           </div>
           <RightPanel />
         </div>
       </div>
+      <StampFab />
     </div>
   );
 }

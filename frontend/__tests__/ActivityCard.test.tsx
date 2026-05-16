@@ -75,13 +75,13 @@ describe('ActivityCard', () => {
 
   it('renders diamond icon when isPrivate is true', () => {
     const privateActivity = { ...mockActivity, isPrivate: true };
-    render(<ActivityCard activity={privateActivity} artist={mockArtist} />);
-    // Diamond SVG should be present for private events
-    const diamond = screen.getByLabelText('')?.closest('svg');
-    // Check that a diamond path exists in the card
     const { container } = render(<ActivityCard activity={privateActivity} artist={mockArtist} />);
-    const paths = container.querySelectorAll('svg path[d="M12 2l10 10-10 10L2 12z"]');
-    expect(paths.length).toBeGreaterThan(0);
+    
+    // Check that the gem paths exist in the card
+    expect(container.querySelector('path[d="M12 2L2 9l10 13 10-13L12 2z"]')).toBeInTheDocument();
+    expect(container.querySelector('path[d="M2 9h20"]')).toBeInTheDocument();
+    expect(container.querySelector('path[d="M12 2v20"]')).toBeInTheDocument();
+    expect(container.querySelector('path[d="M7 9l5 13 5-13"]')).toBeInTheDocument();
   });
 
   it('does not have diamond icon when isPrivate is false', () => {

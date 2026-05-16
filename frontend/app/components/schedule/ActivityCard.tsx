@@ -53,7 +53,7 @@ export function ActivityCard({ activity, artist, studios = [], style, onEdit, is
       deletingRef.current = true;
       setDeleting(true);
       setTimeout(() => {
-        const { id: _unused, ...rest } = activity;
+        const { id: _id, ...rest } = activity;
         deleteActivity(activity.id);
         showToast(`«${activity.serviceName}» удалено`, () => addActivity(rest));
       }, 150);
@@ -84,7 +84,7 @@ export function ActivityCard({ activity, artist, studios = [], style, onEdit, is
         top: topPx,
         height: heightPx,
         backgroundColor: artist.color,
-        borderLeft: `3px solid ${artist.color}`,
+        border: 'none',
         transition: 'opacity 150ms ease, transform 150ms ease',
         ...dragStyle,
         ...draggingStyle,
@@ -93,17 +93,20 @@ export function ActivityCard({ activity, artist, studios = [], style, onEdit, is
       data-testid={`activity-${activity.id}`}
       data-drag-id={activity.id}
     >
-      {/* 1. HEADER — time pill + diamond */}
-      <div className="flex justify-between items-start px-3 pt-2 pb-1">
+      {/* 1. HEADER — time pill + diamond (flush top-left) */}
+      <div className="flex justify-between items-start">
         <span
-          className="inline-block px-2 py-0.5 rounded-full text-[12px] font-semibold text-white"
+          className="inline-block px-2 py-1 rounded-br-lg text-[12px] font-semibold text-white"
           style={{ backgroundColor: 'rgba(0,0,0,0.25)' }}
         >
           {formatTime(activity.startTime)}–{formatTime(activity.startTime + activity.duration)}
         </span>
         {activity.isPrivate && (
-          <svg className="w-5 h-5 flex-shrink-0 drop-shadow-sm" viewBox="0 0 24 24" fill="white" stroke="white" strokeWidth="1.5">
-            <path d="M12 2l10 10-10 10L2 12z" />
+          <svg className="w-5 h-5 flex-shrink-0 drop-shadow-sm mt-1 mr-1" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.5">
+            <path d="M12 2L2 9l10 13 10-13L12 2z" />
+            <path d="M2 9h20" />
+            <path d="M12 2v20" />
+            <path d="M7 9l5 13 5-13" />
           </svg>
         )}
       </div>
@@ -149,7 +152,7 @@ export function ActivityCard({ activity, artist, studios = [], style, onEdit, is
           )}
 
           {/* 5. FOOTER — full-width progress bar */}
-          <div className="mx-1 mb-1 rounded-lg overflow-hidden relative">
+          <div className="mx-0 mb-0 rounded-xl overflow-hidden relative" style={{ border: '1px solid rgba(0,0,0,0.15)' }}>
             {/* Filled portion */}
             <div
               className="absolute inset-0 transition-all duration-300"

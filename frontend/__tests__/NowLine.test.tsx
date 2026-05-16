@@ -1,8 +1,19 @@
+import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { NowLine } from '../app/components/schedule/NowLine';
 
 describe('NowLine', () => {
-  const today = new Date();
+  const today = new Date(2024, 0, 15, 12, 0, 0);
+  
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2024, 0, 15, 12, 0, 0));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   const tomorrow = new Date(today);
   tomorrow.setDate(tomorrow.getDate() + 1);
   const yesterday = new Date(today);

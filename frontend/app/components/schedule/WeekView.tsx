@@ -13,7 +13,7 @@ import { ActivityModal } from '../modal/ActivityModal';
 import { DAYS, getMonday, TIME_COL_WIDTH } from '@/lib/utils';
 
 export function WeekView() {
-  const { currentWeek, activities, artists, services, stamp, addActivity, updateActivity } = useSchedule();
+  const { currentWeek, activities, artists, services, studios, stamp, addActivity, updateActivity } = useSchedule();
   const { showToast } = useUI();
   const monday = getMonday(currentWeek);
 
@@ -83,6 +83,7 @@ export function WeekView() {
   );
 
   const {
+    dragId,
     dragCopy,
     activeDragActivity,
     onDragStart,
@@ -171,11 +172,14 @@ export function WeekView() {
               date={day}
               activities={activities.filter((a) => a.day === i)}
               artists={artists}
+              studios={studios}
               dragCopy={dragCopy}
+              dragId={dragId}
               onCreateActivity={handleCreateActivity}
               onOpenCreateModal={openCreateModal}
               onOpenEditModal={openEditModal}
               stampReady={stamp.ready}
+              stamp={stamp}
             />
           ))}
         </div>

@@ -81,7 +81,7 @@ describe('ActivityCard', () => {
     );
     const card = container.querySelector('[data-testid]');
     expect(card).toHaveStyle({
-      clipPath: 'polygon(0 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%)',
+      clipPath: 'polygon(0 0, calc(100% - 16px) 0, 100% 16px, 100% 100%, 0 100%)',
     });
   });
 
@@ -91,22 +91,22 @@ describe('ActivityCard', () => {
     );
     const card = container.querySelector('[data-testid]');
     expect(card).not.toHaveStyle({
-      clipPath: 'polygon(0 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%)',
+      clipPath: 'polygon(0 0, calc(100% - 16px) 0, 100% 16px, 100% 100%, 0 100%)',
     });
   });
 
-  it('shows extra info (minAge, shortName) when height >= 90px', () => {
+  it('shows extra info (minAge, full artist name) when height >= 90px', () => {
     const tallActivity = { ...mockActivity, duration: 2 };
     render(<ActivityCard activity={tallActivity} artist={mockArtist} />);
     expect(screen.getByText('6+')).toBeInTheDocument();
-    expect(screen.getByText('Ольга')).toBeInTheDocument();
+    expect(screen.getByText('Ольга Петрова')).toBeInTheDocument();
   });
 
   it('hides extra info when height < 90px', () => {
     const mediumActivity = { ...mockActivity, duration: 0.5 };
     render(<ActivityCard activity={mediumActivity} artist={mockArtist} />);
     expect(screen.queryByText('6+')).not.toBeInTheDocument();
-    expect(screen.queryByText('Ольга')).not.toBeInTheDocument();
+    expect(screen.queryByText('Ольга Петрова')).not.toBeInTheDocument();
   });
 
   it('has data-testid attribute', () => {

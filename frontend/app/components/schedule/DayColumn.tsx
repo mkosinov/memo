@@ -2,8 +2,8 @@
 
 import React, { useState, useCallback } from 'react';
 import { useDroppable } from '@dnd-kit/core';
-import { HOURS_START, HOURS_END, CELL_HEIGHT } from '@/lib/utils';
-import type { Activity, Artist } from '@/lib/types';
+import { HOURS_START, HOURS_END, CELL_HEIGHT, hexToRgb, mixWithWhite } from '@/lib/utils';
+import type { Activity, Artist, Studio, StampState } from '@/lib/types';
 import { ActivityCard } from './ActivityCard';
 import { NowLine } from './NowLine';
 
@@ -12,11 +12,14 @@ interface DayColumnProps {
   date: Date;
   activities: Activity[];
   artists: Artist[];
+  studios?: Studio[];
   dragCopy?: boolean;
+  dragId?: string | null;
   onCreateActivity?: (dayIndex: number, startTime: number) => void;
   onOpenCreateModal?: (dayIndex: number, startTime: number) => void;
   onOpenEditModal?: (activity: Activity) => void;
   stampReady?: boolean;
+  stamp?: StampState;
 }
 
 interface DroppableSlotProps {
@@ -28,24 +31,41 @@ interface DroppableSlotProps {
   onClick?: (dayIndex: number, startTime: number) => void;
   onOpenModal?: (dayIndex: number, startTime: number) => void;
   stampReady?: boolean;
+  stamp?: StampState;
+  artists?: Artist[];
   children?: React.ReactNode;
 }
 
-function DroppableSlot({ dayIndex, slotIndex, startTime, isHour, dragCopy, onClick, onOpenModal, stampReady, children }: DroppableSlotProps) {
+function DroppableSlot({ dayIndex, slotIndex, startTime, isHour, dragCopy, onClick, onOpenModal, stampReady, stamp, artists, children }: DroppableSlotProps) {
   const { isOver, setNodeRef } = useDroppable({
     id: `slot-${dayIndex}-${slotIndex}`,
     data: { dayIndex, slotIndex },
   });
 
-  const ghostStyle: React.CSSProperties = isOver
-    ? {
-        border: `2px dashed ${dragCopy ? '#22c55e' : 'var(--brand, #004D56)'}`,
-        backgroundColor: dragCopy ? 'rgba(34,197,94,0.06)' : 'rgba(0,77,86,0.06)',
-        pointerEvents: 'none',
-        zIndex: 30,
-        position: 'relative' as const,
-      }
-    : {};
+  // Issue 10: Stamp ghost preview — show approximate card when stamp is ready and hovering
+  const stampGhostStyle: React.CSSProperties | null = (stampReady && isOver && stamp?.masterId && artists)
+    ? (() => {
+        const master = artists.find(a => a.id === stamp.masterId);
+        if (!master) return null;
+        const rgb = hexToRgb(master.color);
+        const mixed = mixWithWhite(rgb, 0.85);
+        return {
+          border: `2px dashed ${dragCopy ? '#22c55e' : 'var(--brand, #004D56)'}`,
+          backgroundColor: dragCopy ? 'rgba(34,197,94,0.06)' : `rgba(${mixed.r}, ${mixed.g}, ${mixed.b}, 0.15)`,
+          pointerEvents: 'none',
+          zIndex: 30,
+          position: 'relative' as const,
+        };
+      })()
+    : isOver
+      ? {
+          border: `2px dashed ${dragCopy ? '#22c55e' : 'var(--brand, #004D56)'}`,
+          backgroundColor: dragCopy ? 'rgba(34,197,94,0.06)' : 'rgba(0,77,86,0.06)',
+          pointerEvents: 'none',
+          zIndex: 30,
+          position: 'relative' as const,
+        }
+      : {};
 
   const handleClick = (e: React.MouseEvent<HTMLDivElement>) => {
     // Only trigger if clicking the slot itself (not a child card)
@@ -65,7 +85,7 @@ function DroppableSlot({ dayIndex, slotIndex, startTime, isHour, dragCopy, onCli
       ref={setNodeRef}
       data-slot-index={slotIndex}
       className={isHour ? 'border-t border-gray-200' : 'border-t border-dashed border-gray-100'}
-      style={{ height: CELL_HEIGHT, ...ghostStyle }}
+      style={{ height: CELL_HEIGHT, ...stampGhostStyle }}
       onClick={handleClick}
     >
       {children}
@@ -73,7 +93,7 @@ function DroppableSlot({ dayIndex, slotIndex, startTime, isHour, dragCopy, onCli
   );
 }
 
-export function DayColumn({ dayIndex, date, activities, artists, dragCopy, onCreateActivity, onOpenCreateModal, onOpenEditModal, stampReady }: DayColumnProps) {
+export function DayColumn({ dayIndex, date, activities, artists, studios = [], dragCopy, dragId, onCreateActivity, onOpenCreateModal, onOpenEditModal, stampReady, stamp }: DayColumnProps) {
   const [visibleIndices, setVisibleIndices] = useState<Record<string, number>>({});
 
   const slots: number[] = [];
@@ -133,6 +153,8 @@ export function DayColumn({ dayIndex, date, activities, artists, dragCopy, onCre
           onClick={onCreateActivity}
           onOpenModal={onOpenCreateModal}
           stampReady={stampReady}
+          stamp={stamp}
+          artists={artists}
         />
       ))}
 
@@ -146,13 +168,17 @@ export function DayColumn({ dayIndex, date, activities, artists, dragCopy, onCre
         const isVisible = totalInSlot <= 1 || indexInGroup === visibleIndex;
 
         const artist = artists.find((a) => a.id === activity.masterId) || artists[0];
+        const isThisDragging = dragId === activity.id;
 
         return (
           <ActivityCard
             key={activity.id}
             activity={activity}
             artist={artist}
+            studios={studios}
             onEdit={onOpenEditModal}
+            isDragging={isThisDragging}
+            isDragCopy={dragCopy}
             style={{
               transform: `translateX(${indexInGroup * 6}px)`,
               zIndex: totalInSlot > 1 ? 20 - indexInGroup : 10,

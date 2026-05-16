@@ -67,7 +67,7 @@ export function RightPanel() {
         title="Развернуть"
       >
         <svg className="h-4 w-4" style={{ color: 'var(--ink-mid)' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
         </svg>
       </button>
     );
@@ -93,12 +93,12 @@ export function RightPanel() {
           <span>Инструменты</span>
           <button
             onClick={toggleRightPanel}
-            className="flex items-center justify-center w-6 h-6 rounded-md text-ink-mid transition-colors hover:bg-surface"
+            className="flex items-center justify-center w-6 h-6 rounded-md bg-white/80 border border-gray-200 shadow-sm text-ink-mid transition-colors hover:bg-surface"
             aria-label="Свернуть панель"
             title="Свернуть"
           >
             <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
             </svg>
           </button>
         </div>

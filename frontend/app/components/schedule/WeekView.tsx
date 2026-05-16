@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useCallback } from 'react';
-import { DndContext, DragOverlay } from '@dnd-kit/core';
+import { DndContext, DragOverlay, pointerWithin } from '@dnd-kit/core';
 import { useSchedule } from '@/contexts/ScheduleContext';
 import { useUI } from '@/contexts/UIContext';
 import { useDnD } from '@/hooks/useDnD';
@@ -117,6 +117,7 @@ export function WeekView() {
 
   return (
     <DndContext
+      collisionDetection={pointerWithin}
       onDragStart={(event) => {
         const nativeEvent = event.activatorEvent as MouseEvent | undefined;
         const dragData = event.active.data?.current as Record<string, unknown> | undefined;
@@ -173,6 +174,7 @@ export function WeekView() {
               activities={activities.filter((a) => a.day === i)}
               artists={artists}
               studios={studios}
+              services={services}
               dragCopy={dragCopy}
               dragId={dragId}
               onCreateActivity={handleCreateActivity}
@@ -187,7 +189,7 @@ export function WeekView() {
 
       <DragOverlay dropAnimation={null}>
         {activeDragActivity && dragArtist ? (
-          <div className="opacity-80 scale-95 w-full" data-drag-ghost="true">
+          <div className="opacity-80 scale-95" style={{ width: '180px' }} data-drag-ghost="true">
             <ActivityCard activity={activeDragActivity} artist={dragArtist} studios={studios} />
           </div>
         ) : null}

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useDroppable } from '@dnd-kit/core';
 import { HOURS_START, HOURS_END, CELL_HEIGHT, hexToRgb, mixWithWhite, formatTime } from '@/lib/utils';
 import type { Activity, Artist, Studio, StampState, Service } from '@/lib/types';
@@ -157,6 +157,7 @@ function DroppableSlot({ dayIndex, slotIndex, startTime, isHour, dragCopy, onCli
 
 export function DayColumn({ dayIndex, date, activities, artists, studios = [], services = [], dragCopy, dragId, onCreateActivity, onOpenCreateModal, onOpenEditModal, stampReady, stamp }: DayColumnProps) {
   const [visibleIndices, setVisibleIndices] = useState<Record<string, number>>({});
+  const columnRef = useRef<HTMLDivElement>(null);
 
   const slots: number[] = [];
   for (let h = HOURS_START; h <= HOURS_END; h++) {
@@ -172,18 +173,22 @@ export function DayColumn({ dayIndex, date, activities, artists, studios = [], s
     slotGroups[key].push(activity);
   }
 
-  const handleWheel = useCallback(
-    (e: React.WheelEvent) => {
-      // Find which slot the wheel event is over based on Y position
-      const rect = e.currentTarget.getBoundingClientRect();
-      const y = e.clientY - rect.top + e.currentTarget.scrollTop;
-      const slotIndex = Math.floor(y / CELL_HEIGHT);
+  // Store slotGroups in ref so the wheel handler always has fresh data
+  const slotGroupsRef = useRef(slotGroups);
+  slotGroupsRef.current = slotGroups;
 
+  // Non-passive wheel handler for scroll carousel (allows preventDefault)
+  useEffect(() => {
+    const el = columnRef.current;
+    if (!el) return;
+    const handler = (e: WheelEvent) => {
+      const rect = el.getBoundingClientRect();
+      const y = e.clientY - rect.top + el.scrollTop;
+      const slotIndex = Math.floor(y / CELL_HEIGHT);
       if (slotIndex >= 0 && slotIndex < slots.length) {
         const slotHour = slots[slotIndex];
         const key = `${dayIndex}_${slotHour}`;
-        const group = slotGroups[key];
-
+        const group = slotGroupsRef.current[key];
         if (group && group.length > 1) {
           e.preventDefault();
           setVisibleIndices((prev) => {
@@ -194,15 +199,16 @@ export function DayColumn({ dayIndex, date, activities, artists, studios = [], s
           });
         }
       }
-    },
-    [dayIndex, slots, slotGroups],
-  );
+    };
+    el.addEventListener('wheel', handler, { passive: false });
+    return () => el.removeEventListener('wheel', handler);
+  }, [dayIndex]);
 
   return (
     <div
+      ref={columnRef}
       data-testid={`day-column-${dayIndex}`}
       className="relative flex-1 border-l border-gray-100"
-      onWheel={handleWheel}
     >
       {slots.map((hour, i) => (
         <DroppableSlot

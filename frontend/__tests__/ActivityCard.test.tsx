@@ -81,7 +81,7 @@ describe('ActivityCard', () => {
     );
     const card = container.querySelector('[data-testid]');
     expect(card).toHaveStyle({
-      clipPath: 'polygon(0 0, calc(100% - 16px) 0, 100% 16px, 100% 100%, 0 100%)',
+      clipPath: 'polygon(0 0, 80% 0, 100% 20%, 100% 100%, 0 100%)',
     });
   });
 
@@ -91,7 +91,7 @@ describe('ActivityCard', () => {
     );
     const card = container.querySelector('[data-testid]');
     expect(card).not.toHaveStyle({
-      clipPath: 'polygon(0 0, calc(100% - 16px) 0, 100% 16px, 100% 100%, 0 100%)',
+      clipPath: 'polygon(0 0, 80% 0, 100% 20%, 100% 100%, 0 100%)',
     });
   });
 

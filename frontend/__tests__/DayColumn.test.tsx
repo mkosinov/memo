@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, act } from '@testing-library/react';
 import React from 'react';
 import { DayColumn } from '../app/components/schedule/DayColumn';
 import type { Activity, Artist, Service } from '../lib/types';
@@ -161,7 +161,7 @@ describe('DayColumn', () => {
     expect(card).toHaveStyle({ transform: 'translateX(0px)' });
   });
 
-  it('cycles visible card on mouse wheel over overlapping slot', () => {
+  it('cycles visible card on mouse wheel over overlapping slot', async () => {
     render(
       <DayColumn
         dayIndex={0}
@@ -177,10 +177,15 @@ describe('DayColumn', () => {
     expect(card1).not.toHaveStyle({ opacity: '0.3' });
     expect(card2).toHaveStyle({ opacity: '0.3' });
 
-    // Scroll to cycle — clientY needs to land on the slot where activities overlap (startTime=10)
-    // Slot 0 = 9:00, Slot 1 = 9:30, Slot 2 = 10:00 → y = 2 * 60 = 120
-    const column = screen.getByTestId('day-column-0');
-    fireEvent.wheel(column, { deltaY: 100, clientY: 120 });
+    // Scroll to cycle — dispatch native WheelEvent (component uses addEventListener with passive:false)
+    // Need to wait for useEffect to attach the listener
+    await act(async () => {
+      const column = screen.getByTestId('day-column-0');
+      // Mock getBoundingClientRect so the wheel handler can calculate slot position
+      column.getBoundingClientRect = vi.fn(() => ({ top: 0, left: 0, width: 200, height: 1440, bottom: 1440, right: 200, x: 0, y: 0, toJSON: () => {} }));
+      const wheelEvent = new WheelEvent('wheel', { deltaY: 100, clientY: 120, bubbles: true });
+      column.dispatchEvent(wheelEvent);
+    });
 
     // Now second card should be visible
     expect(card1).toHaveStyle({ opacity: '0.3' });

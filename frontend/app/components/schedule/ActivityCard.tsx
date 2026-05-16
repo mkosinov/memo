@@ -93,7 +93,7 @@ export function ActivityCard({ activity, artist, studios = [], style, onEdit, is
         backgroundColor: cardBg,
         borderLeft: `3px solid ${artist.color}`,
         transition: 'opacity 150ms ease, transform 150ms ease',
-        ...(activity.isPrivate ? { clipPath: 'polygon(0 0, calc(100% - 16px) 0, 100% 16px, 100% 100%, 0 100%)' } : {}),
+        ...(activity.isPrivate ? { clipPath: 'polygon(0 0, 80% 0, 100% 20%, 100% 100%, 0 100%)' } : {}),
         ...dragStyle,
         ...draggingStyle,
         ...style,
@@ -110,7 +110,7 @@ export function ActivityCard({ activity, artist, studios = [], style, onEdit, is
           {formatTime(activity.startTime)}–{formatTime(activity.startTime + activity.duration)}
         </span>
         {activity.isPrivate && (
-          <svg className="w-2.5 h-2.5 flex-shrink-0" viewBox="0 0 24 24" fill={artist.color}>
+          <svg className="w-4 h-4 flex-shrink-0" viewBox="0 0 24 24" fill={artist.color}>
             <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
           </svg>
         )}
@@ -132,6 +132,13 @@ export function ActivityCard({ activity, artist, studios = [], style, onEdit, is
                 <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" />
               </svg>
               <span>{activity.minAge}</span>
+            </div>
+          )}
+
+          {/* 3b. MASTER — artist full name, only when tall */}
+          {showExtra && (
+            <div className="px-2 text-[11px] text-gray-500 truncate" title={artist.name}>
+              {artist.name}
             </div>
           )}
 

@@ -2,8 +2,8 @@
 
 import React, { useState, useCallback } from 'react';
 import { useDroppable } from '@dnd-kit/core';
-import { HOURS_START, HOURS_END, CELL_HEIGHT, hexToRgb, mixWithWhite } from '@/lib/utils';
-import type { Activity, Artist, Studio, StampState } from '@/lib/types';
+import { HOURS_START, HOURS_END, CELL_HEIGHT, hexToRgb, mixWithWhite, formatTime } from '@/lib/utils';
+import type { Activity, Artist, Studio, StampState, Service } from '@/lib/types';
 import { ActivityCard } from './ActivityCard';
 import { NowLine } from './NowLine';
 
@@ -13,6 +13,7 @@ interface DayColumnProps {
   activities: Activity[];
   artists: Artist[];
   studios?: Studio[];
+  services?: Service[];
   dragCopy?: boolean;
   dragId?: string | null;
   onCreateActivity?: (dayIndex: number, startTime: number) => void;
@@ -33,14 +34,31 @@ interface DroppableSlotProps {
   stampReady?: boolean;
   stamp?: StampState;
   artists?: Artist[];
+  services?: Service[];
   children?: React.ReactNode;
 }
 
-function DroppableSlot({ dayIndex, slotIndex, startTime, isHour, dragCopy, onClick, onOpenModal, stampReady, stamp, artists, children }: DroppableSlotProps) {
+function DroppableSlot({ dayIndex, slotIndex, startTime, isHour, dragCopy, onClick, onOpenModal, stampReady, stamp, artists, services, children }: DroppableSlotProps) {
   const { isOver, setNodeRef } = useDroppable({
     id: `slot-${dayIndex}-${slotIndex}`,
     data: { dayIndex, slotIndex },
   });
+
+  // Hover-based stamp ghost preview state
+  const [hoveredStampSlot, setHoveredStampSlot] = useState<number | null>(null);
+
+  // Compute stamp ghost data for hover preview
+  const showStampGhost = stampReady && hoveredStampSlot === slotIndex && !isOver;
+  const stampGhostPreview = showStampGhost && stamp?.masterId && stamp?.serviceId
+    ? (() => {
+        const master = artists?.find(a => a.id === stamp.masterId);
+        const service = services?.find(s => s.id === stamp.serviceId);
+        if (!master || !service) return null;
+        const rgb = hexToRgb(master.color);
+        const endTime = startTime + service.duration;
+        return { master, service, rgb, endTime };
+      })()
+    : null;
 
   // Issue 10: Stamp ghost preview — show approximate card when stamp is ready and hovering
   const stampGhostStyle: React.CSSProperties | null = (stampReady && isOver && stamp?.masterId && artists)
@@ -69,6 +87,18 @@ function DroppableSlot({ dayIndex, slotIndex, startTime, isHour, dragCopy, onCli
         }
       : {};
 
+  const handleMouseEnter = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (stampReady && e.target === e.currentTarget) {
+      setHoveredStampSlot(slotIndex);
+    }
+  };
+
+  const handleMouseLeave = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (e.target === e.currentTarget) {
+      setHoveredStampSlot(null);
+    }
+  };
+
   const handleClick = (e: React.MouseEvent<HTMLDivElement>) => {
     // Only trigger if clicking the slot itself (not a child card)
     if (e.target === e.currentTarget) {
@@ -89,13 +119,43 @@ function DroppableSlot({ dayIndex, slotIndex, startTime, isHour, dragCopy, onCli
       className={isHour ? 'border-t border-gray-200' : 'border-t border-dashed border-gray-100'}
       style={{ height: CELL_HEIGHT, ...stampGhostStyle }}
       onClick={handleClick}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
     >
       {children}
+      {stampGhostPreview && (
+        <div
+          data-stamp-ghost
+          className="absolute inset-x-1 rounded-lg pointer-events-none overflow-hidden flex flex-col"
+          style={{
+            top: 0,
+            height: CELL_HEIGHT * 2,
+            border: '2px dashed rgba(0,77,86,0.3)',
+            backgroundColor: `rgba(${stampGhostPreview.rgb.r}, ${stampGhostPreview.rgb.g}, ${stampGhostPreview.rgb.b}, 0.08)`,
+            borderLeft: `3px solid ${stampGhostPreview.master.color}`,
+            zIndex: 25,
+          }}
+        >
+          <div className="px-2 pt-1.5 pb-1">
+            <span
+              className="inline-block px-1.5 py-0.5 rounded-full text-[9px] font-semibold text-white opacity-60"
+              style={{ backgroundColor: stampGhostPreview.master.color }}
+            >
+              {formatTime(startTime)}–{formatTime(stampGhostPreview.endTime)}
+            </span>
+          </div>
+          <div className="px-2 opacity-50">
+            <div className="text-xs font-semibold leading-tight line-clamp-1">
+              {stampGhostPreview.service.name}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-export function DayColumn({ dayIndex, date, activities, artists, studios = [], dragCopy, dragId, onCreateActivity, onOpenCreateModal, onOpenEditModal, stampReady, stamp }: DayColumnProps) {
+export function DayColumn({ dayIndex, date, activities, artists, studios = [], services = [], dragCopy, dragId, onCreateActivity, onOpenCreateModal, onOpenEditModal, stampReady, stamp }: DayColumnProps) {
   const [visibleIndices, setVisibleIndices] = useState<Record<string, number>>({});
 
   const slots: number[] = [];
@@ -157,6 +217,7 @@ export function DayColumn({ dayIndex, date, activities, artists, studios = [], d
           stampReady={stampReady}
           stamp={stamp}
           artists={artists}
+          services={services}
         />
       ))}
 

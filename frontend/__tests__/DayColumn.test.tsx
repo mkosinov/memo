@@ -2,8 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import React from 'react';
 import { DayColumn } from '../app/components/schedule/DayColumn';
-import type { Activity, Artist } from '../lib/types';
-import { ARTISTS } from '../lib/mock-data';
+import type { Activity, Artist, Service } from '../lib/types';
+import { ARTISTS, SERVICES } from '../lib/mock-data';
 
 // Mock contexts used by ActivityCard (rendered inside DayColumn)
 vi.mock('@/contexts/UIContext', () => ({
@@ -330,6 +330,90 @@ describe('DayColumn', () => {
       expect(firstSlot.style.border).toContain('dashed');
       // jsdom converts hex #22c55e to rgb(34, 197, 94)
       expect(firstSlot.style.border).toMatch(/#22c55e|rgb\(34,\s*197,\s*94\)/);
+    });
+  });
+
+  describe('stamp ghost preview on hover', () => {
+    const mockStamp = {
+      masterId: 'm1',
+      serviceId: 's1',
+      locations: new Set(['alpika']),
+      ready: true,
+    };
+
+    it('shows stamp ghost preview when stampReady and hovering an empty slot', () => {
+      render(
+        <DayColumn
+          dayIndex={0}
+          date={new Date()}
+          activities={[]}
+          artists={ARTISTS}
+          services={SERVICES}
+          stampReady={true}
+          stamp={mockStamp}
+        />,
+      );
+
+      const column = screen.getByTestId('day-column-0');
+      const slots = column.querySelectorAll('[data-slot-index]');
+      const firstSlot = slots[0] as HTMLElement;
+
+      // Hover over the slot
+      fireEvent.mouseEnter(firstSlot);
+
+      // Should render the stamp ghost preview
+      const ghost = column.querySelector('[data-stamp-ghost]');
+      expect(ghost).toBeInTheDocument();
+      // Should show the service name
+      expect(ghost?.textContent).toContain('Картина маслом');
+      // Should show the time range (slot 0 = 9:00, service s1 = 2.5h → 9:00–11:30)
+      expect(ghost?.textContent).toContain('09:00');
+    });
+
+    it('hides stamp ghost preview on mouseLeave', () => {
+      render(
+        <DayColumn
+          dayIndex={0}
+          date={new Date()}
+          activities={[]}
+          artists={ARTISTS}
+          services={SERVICES}
+          stampReady={true}
+          stamp={mockStamp}
+        />,
+      );
+
+      const column = screen.getByTestId('day-column-0');
+      const slots = column.querySelectorAll('[data-slot-index]');
+      const firstSlot = slots[0] as HTMLElement;
+
+      // Hover then leave
+      fireEvent.mouseEnter(firstSlot);
+      expect(column.querySelector('[data-stamp-ghost]')).toBeInTheDocument();
+
+      fireEvent.mouseLeave(firstSlot);
+      expect(column.querySelector('[data-stamp-ghost]')).not.toBeInTheDocument();
+    });
+
+    it('does not show stamp ghost when stamp is not ready', () => {
+      render(
+        <DayColumn
+          dayIndex={0}
+          date={new Date()}
+          activities={[]}
+          artists={ARTISTS}
+          services={SERVICES}
+          stampReady={false}
+          stamp={{ masterId: null, serviceId: null, locations: new Set(), ready: false }}
+        />,
+      );
+
+      const column = screen.getByTestId('day-column-0');
+      const slots = column.querySelectorAll('[data-slot-index]');
+      const firstSlot = slots[0] as HTMLElement;
+
+      fireEvent.mouseEnter(firstSlot);
+      expect(column.querySelector('[data-stamp-ghost]')).not.toBeInTheDocument();
     });
   });
 });

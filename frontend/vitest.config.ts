@@ -4,14 +4,16 @@ import path from 'path';
 
 export default defineConfig({
   plugins: [react()],
-  test: {
-    environment: 'jsdom',
-    globals: true,
-    setupFiles: './__tests__/setup.ts',
-  },
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, '.'),
+      '@': path.resolve(__dirname, './'),
     },
+  },
+  test: {
+    environment: 'jsdom',
+    setupFiles: ['__tests__/setup.ts'],
+    globals: true,
+    pool: 'forks',
+    exclude: ['e2e/**', 'node_modules/**'],
   },
 });

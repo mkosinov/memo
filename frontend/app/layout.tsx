@@ -1,19 +1,36 @@
-import type { Metadata } from 'next';
-import './globals.css';
+import type { Metadata } from "next";
+import { Inter } from "next/font/google";
+import "./globals.css";
+import { ScheduleProvider } from '../contexts/ScheduleContext';
+import { UIProvider } from '../contexts/UIContext';
+import { ToastContainer } from './components/toast/ToastContainer';
+
+const inter = Inter({
+  subsets: ["latin"],
+  variable: "--font-inter",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
-  title: 'Memo — Цветные Горы',
-  description: 'Система управления студией рисования',
+  title: "Memo — ColourMountains Studio Manager",
+  description: "Studio management system for Colour Mountains art studio",
 };
 
 export default function RootLayout({
   children,
-}: {
+}: Readonly<{
   children: React.ReactNode;
-}) {
+}>) {
   return (
     <html lang="ru">
-      <body>{children}</body>
+      <body className={`${inter.variable} antialiased`}>
+        <UIProvider>
+          <ScheduleProvider>
+            {children}
+          </ScheduleProvider>
+          <ToastContainer />
+        </UIProvider>
+      </body>
     </html>
   );
 }

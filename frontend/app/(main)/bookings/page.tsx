@@ -6,14 +6,23 @@ import { BookingTable } from './components/BookingTable';
 
 export default function BookingsPage() {
   const [filters, setFilters] = useState({
-    date: '',
+    dateFrom: '',
+    dateTo: '',
     locationId: '',
     serviceId: '',
+    masterId: '',
     status: '',
   });
 
   const handleReset = () => {
-    setFilters({ date: '', locationId: '', serviceId: '', status: '' });
+    setFilters({
+      dateFrom: '',
+      dateTo: '',
+      locationId: '',
+      serviceId: '',
+      masterId: '',
+      status: '',
+    });
   };
 
   return (
@@ -29,13 +38,17 @@ export default function BookingsPage() {
         style={{ borderColor: 'var(--line)', backgroundColor: 'var(--white)' }}
       >
         <BookingFilters
-          date={filters.date}
+          dateFrom={filters.dateFrom}
+          dateTo={filters.dateTo}
           locationId={filters.locationId}
           serviceId={filters.serviceId}
+          masterId={filters.masterId}
           status={filters.status}
-          onDateChange={(v) => setFilters((f) => ({ ...f, date: v }))}
+          onDateFromChange={(v) => setFilters((f) => ({ ...f, dateFrom: v }))}
+          onDateToChange={(v) => setFilters((f) => ({ ...f, dateTo: v }))}
           onLocationChange={(v) => setFilters((f) => ({ ...f, locationId: v }))}
           onServiceChange={(v) => setFilters((f) => ({ ...f, serviceId: v }))}
+          onMasterChange={(v) => setFilters((f) => ({ ...f, masterId: v }))}
           onStatusChange={(v) => setFilters((f) => ({ ...f, status: v }))}
           onReset={handleReset}
         />

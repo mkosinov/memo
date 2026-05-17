@@ -1,42 +1,62 @@
 'use client';
 
 import React from 'react';
-import { LOCATIONS, SERVICES } from '@/lib/mock-data';
+import { LOCATIONS, SERVICES, ARTISTS } from '@/lib/mock-data';
 
 interface BookingFiltersProps {
-  date: string;
+  dateFrom: string;
+  dateTo: string;
   locationId: string;
   serviceId: string;
+  masterId: string;
   status: string;
-  onDateChange: (v: string) => void;
+  onDateFromChange: (v: string) => void;
+  onDateToChange: (v: string) => void;
   onLocationChange: (v: string) => void;
   onServiceChange: (v: string) => void;
+  onMasterChange: (v: string) => void;
   onStatusChange: (v: string) => void;
   onReset: () => void;
 }
 
 export function BookingFilters({
-  date,
+  dateFrom,
+  dateTo,
   locationId,
   serviceId,
+  masterId,
   status,
-  onDateChange,
+  onDateFromChange,
+  onDateToChange,
   onLocationChange,
   onServiceChange,
+  onMasterChange,
   onStatusChange,
   onReset,
 }: BookingFiltersProps) {
   return (
     <div className="flex flex-wrap items-end gap-3">
       <div className="flex flex-col gap-1">
-        <label className="text-xs font-medium" style={{ color: 'var(--ink-light)' }}>Дата</label>
+        <label className="text-xs font-medium" style={{ color: 'var(--ink-light)' }}>Дата от</label>
         <input
           type="date"
-          value={date}
-          onChange={(e) => onDateChange(e.target.value)}
+          value={dateFrom}
+          onChange={(e) => onDateFromChange(e.target.value)}
           className="rounded-lg border px-2 py-1.5 text-xs"
           style={{ borderColor: 'var(--line)', color: 'var(--ink-mid)', backgroundColor: 'var(--white)' }}
-          aria-label="Фильтр по дате"
+          aria-label="Фильтр по дате от"
+        />
+      </div>
+
+      <div className="flex flex-col gap-1">
+        <label className="text-xs font-medium" style={{ color: 'var(--ink-light)' }}>Дата до</label>
+        <input
+          type="date"
+          value={dateTo}
+          onChange={(e) => onDateToChange(e.target.value)}
+          className="rounded-lg border px-2 py-1.5 text-xs"
+          style={{ borderColor: 'var(--line)', color: 'var(--ink-mid)', backgroundColor: 'var(--white)' }}
+          aria-label="Фильтр по дате до"
         />
       </div>
 
@@ -68,6 +88,22 @@ export function BookingFilters({
           <option value="">Все услуги</option>
           {SERVICES.map((s) => (
             <option key={s.id} value={s.id}>{s.name}</option>
+          ))}
+        </select>
+      </div>
+
+      <div className="flex flex-col gap-1">
+        <label className="text-xs font-medium" style={{ color: 'var(--ink-light)' }}>Мастер</label>
+        <select
+          value={masterId}
+          onChange={(e) => onMasterChange(e.target.value)}
+          className="rounded-lg border px-2 py-1.5 text-xs"
+          style={{ borderColor: 'var(--line)', color: 'var(--ink-mid)', backgroundColor: 'var(--white)' }}
+          aria-label="Фильтр по мастеру"
+        >
+          <option value="">Все мастера</option>
+          {ARTISTS.map((a) => (
+            <option key={a.id} value={a.id}>{a.shortName}</option>
           ))}
         </select>
       </div>

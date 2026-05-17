@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
   RECORDS, BOOKING_ACTIVITIES, CLIENTS, VISITS, VISITORS, PAYMENTS,
@@ -14,9 +14,15 @@ function formatPrice(n: number): string {
   return `${n.toLocaleString('ru-RU')}₽`;
 }
 
-function formatDate(dateStr: string): string {
+function formatDateRu(dateStr: string): string {
   const d = new Date(dateStr + 'T00:00:00');
-  return d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
+  return d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' }).replace(' ', ' ');
+}
+
+function formatTime(time: number): string {
+  const h = Math.floor(time);
+  const m = Math.round((time - h) * 60);
+  return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
 }
 
 const STATUS_LABELS: Record<string, string> = {
@@ -35,15 +41,21 @@ const STATUS_COLORS: Record<string, string> = {
 
 interface BookingTableProps {
   filters: {
-    date: string;
+    dateFrom: string;
+    dateTo: string;
     locationId: string;
     serviceId: string;
+    masterId: string;
     status: string;
   };
 }
 
 export function BookingTable({ filters }: BookingTableProps) {
   const [selectedRecord, setSelectedRecord] = useState<BookingRecord | null>(null);
+  const [sortField, setSortField] = useState<string | null>(null);
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+  const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState(10);
 
   const getActivity = (id: string): Activity | undefined =>
     BOOKING_ACTIVITIES.find((a) => a.id === id);
@@ -52,12 +64,82 @@ export function BookingTable({ filters }: BookingTableProps) {
     return RECORDS.filter((r) => {
       const activity = getActivity(r.activityId);
       if (!activity) return false;
-      if (filters.date && activity.date && activity.date !== filters.date) return false;
+      // Date range
+      if (filters.dateFrom && activity.date && activity.date < filters.dateFrom) return false;
+      if (filters.dateTo && activity.date && activity.date > filters.dateTo) return false;
+      // Location
       if (filters.locationId && activity.locationId !== filters.locationId) return false;
+      // Service
       if (filters.serviceId && activity.serviceId !== filters.serviceId) return false;
+      // Master
+      if (filters.masterId && activity.masterId !== filters.masterId) return false;
+      // Status
       if (filters.status && r.status !== filters.status) return false;
       return true;
     });
+  }, [filters]);
+
+  // Sort
+  const handleSort = (field: string) => {
+    if (sortField === field) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortField(field);
+      setSortDir('asc');
+    }
+  };
+
+  const sortIcon = (field: string) => {
+    if (sortField !== field) return ' ↕';
+    return sortDir === 'asc' ? ' ↑' : ' ↓';
+  };
+
+  const sortedRecords = useMemo(() => {
+    if (!sortField) return filteredRecords;
+    const sorted = [...filteredRecords];
+    sorted.sort((a, b) => {
+      const aAct = getActivity(a.activityId);
+      const bAct = getActivity(b.activityId);
+      let cmp = 0;
+      switch (sortField) {
+        case 'date': {
+          const aDate = aAct?.date || '';
+          const bDate = bAct?.date || '';
+          cmp = aDate.localeCompare(bDate);
+          if (cmp === 0) cmp = (aAct?.startTime || 0) - (bAct?.startTime || 0);
+          break;
+        }
+        case 'client': {
+          const aCl = CLIENTS.find((c) => c.id === a.clientId)?.name || '';
+          const bCl = CLIENTS.find((c) => c.id === b.clientId)?.name || '';
+          cmp = aCl.localeCompare(bCl);
+          break;
+        }
+        case 'status':
+          cmp = a.status.localeCompare(b.status);
+          break;
+        case 'total': {
+          const aTot = VISITS.filter((v) => v.recordId === a.id).reduce((s, v) => s + v.priceCharged, 0);
+          const bTot = VISITS.filter((v) => v.recordId === b.id).reduce((s, v) => s + v.priceCharged, 0);
+          cmp = aTot - bTot;
+          break;
+        }
+      }
+      return sortDir === 'asc' ? cmp : -cmp;
+    });
+    return sorted;
+  }, [filteredRecords, sortField, sortDir]);
+
+  // Pagination
+  const paginatedRecords = useMemo(() => {
+    return sortedRecords.slice(page * pageSize, (page + 1) * pageSize);
+  }, [sortedRecords, page, pageSize]);
+
+  const totalPages = Math.ceil(sortedRecords.length / pageSize);
+
+  // Reset page when filters change
+  useEffect(() => {
+    setPage(0);
   }, [filters]);
 
   // Detail helpers
@@ -77,17 +159,37 @@ export function BookingTable({ filters }: BookingTableProps) {
         <table className="w-full">
           <thead>
             <tr className="border-b" style={{ borderColor: 'var(--line)', backgroundColor: 'var(--surface)' }}>
-              <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--ink-light)' }}>Клиент</th>
-              <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--ink-light)' }}>Услуга</th>
-              <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--ink-light)' }}>Дата / Время</th>
-              <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--ink-light)' }}>Локация</th>
-              <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--ink-light)' }}>Статус</th>
-              <th className="text-right px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--ink-light)' }}>Сумма</th>
-              <th className="text-center px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--ink-light)' }}>Оплата</th>
+              <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: 'var(--ink-light)' }} onClick={() => handleSort('date')}>
+                Дата / Время {sortIcon('date')}
+              </th>
+              <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: 'var(--ink-light)' }} onClick={() => handleSort('client')}>
+                Клиент {sortIcon('client')}
+              </th>
+              <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--ink-light)' }}>
+                Услуга
+              </th>
+              <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--ink-light)' }}>
+                Мастер
+              </th>
+              <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--ink-light)' }}>
+                Локация
+              </th>
+              <th className="text-center px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--ink-light)' }}>
+                Гостей
+              </th>
+              <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: 'var(--ink-light)' }} onClick={() => handleSort('status')}>
+                Статус {sortIcon('status')}
+              </th>
+              <th className="text-right px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: 'var(--ink-light)' }} onClick={() => handleSort('total')}>
+                Сумма {sortIcon('total')}
+              </th>
+              <th className="text-center px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--ink-light)' }}>
+                Оплата
+              </th>
             </tr>
           </thead>
           <tbody>
-            {filteredRecords.map((record) => {
+            {paginatedRecords.map((record) => {
               const activity = getActivity(record.activityId);
               const client = CLIENTS.find((c) => c.id === record.clientId);
               const service = activity ? SERVICES.find((s) => s.id === activity.serviceId) : null;
@@ -106,6 +208,21 @@ export function BookingTable({ filters }: BookingTableProps) {
                     backgroundColor: isSelected ? 'var(--surface)' : 'transparent',
                   }}
                 >
+                  {/* Дата / Время */}
+                  <td className="px-4 py-3 text-sm whitespace-nowrap" style={{ color: 'var(--ink-mid)' }}>
+                    {activity ? (
+                      <>
+                        <div className="font-medium" style={{ color: 'var(--ink)' }}>
+                          {activity.date ? formatDateRu(activity.date) : `День ${activity.day + 1}`}
+                        </div>
+                        <div className="text-xs" style={{ color: 'var(--ink-light)' }}>
+                          {formatTime(activity.startTime)}–{formatTime(activity.startTime + activity.duration)}
+                        </div>
+                      </>
+                    ) : '—'}
+                  </td>
+
+                  {/* Клиент */}
                   <td className="px-4 py-3">
                     <Link
                       href={`/clients/${record.clientId}`}
@@ -116,35 +233,51 @@ export function BookingTable({ filters }: BookingTableProps) {
                       {client?.name ?? '—'}
                     </Link>
                   </td>
+
+                  {/* Услуга */}
                   <td className="px-4 py-3 text-sm" style={{ color: 'var(--ink)' }}>
                     <div className="flex items-center gap-2">
                       {activity?.isPrivate ? (
-                        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full text-white" style={{ backgroundColor: 'var(--danger)' }}>ИНД</span>
+                        <span className="text-[10px] mr-1" style={{ color: 'var(--danger)' }}>🟢</span>
                       ) : null}
                       {service?.name ?? '—'}
                     </div>
                   </td>
-                  <td className="px-4 py-3 text-sm" style={{ color: 'var(--ink-mid)' }}>
+
+                  {/* Мастер */}
+                  <td className="px-4 py-3">
                     {activity ? (
-                      <>
-                        <div>{activity.date ? formatDate(activity.date) : `День ${activity.day + 1}`}</div>
-                        <div className="text-xs" style={{ color: 'var(--ink-light)' }}>
-                          {activity.startTime}–{activity.startTime + activity.duration}
-                        </div>
-                      </>
+                      <div
+                        className="w-5 h-5 rounded-full"
+                        style={{ backgroundColor: ARTISTS.find((a) => a.id === activity.masterId)?.color || '#999' }}
+                        title={ARTISTS.find((a) => a.id === activity.masterId)?.shortName}
+                      />
                     ) : '—'}
                   </td>
+
+                  {/* Локация */}
                   <td className="px-4 py-3 text-sm" style={{ color: 'var(--ink-mid)' }}>
                     {location?.name ?? '—'}
                   </td>
+
+                  {/* Гостей */}
+                  <td className="px-4 py-3 text-center text-sm" style={{ color: 'var(--ink-mid)' }}>
+                    {VISITS.filter((v) => v.recordId === record.id).length || '—'}
+                  </td>
+
+                  {/* Статус */}
                   <td className="px-4 py-3">
                     <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-semibold ${STATUS_COLORS[record.status]}`}>
                       {STATUS_LABELS[record.status]}
                     </span>
                   </td>
+
+                  {/* Сумма */}
                   <td className="px-4 py-3 text-sm text-right font-medium" style={{ color: 'var(--ink)' }}>
                     {formatPrice(total)}
                   </td>
+
+                  {/* Оплата */}
                   <td className="px-4 py-3 text-center">
                     {paid >= total ? (
                       <span className="inline-flex items-center gap-1 text-xs font-medium" style={{ color: 'var(--success)' }}>✓ Оплачено</span>
@@ -157,15 +290,66 @@ export function BookingTable({ filters }: BookingTableProps) {
                 </tr>
               );
             })}
-            {filteredRecords.length === 0 && (
+            {paginatedRecords.length === 0 && (
               <tr>
-                <td colSpan={7} className="px-4 py-12 text-center text-sm" style={{ color: 'var(--ink-light)' }}>
+                <td colSpan={9} className="px-4 py-12 text-center text-sm" style={{ color: 'var(--ink-light)' }}>
                   Записи не найдены
                 </td>
               </tr>
             )}
           </tbody>
         </table>
+
+        {/* Pagination */}
+        <div className="flex items-center justify-between px-4 py-3 border-t" style={{ borderColor: 'var(--line)' }}>
+          <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--ink-light)' }}>
+            <span>Строк:</span>
+            <select
+              value={pageSize}
+              onChange={(e) => { setPageSize(Number(e.target.value)); setPage(0); }}
+              className="border rounded px-2 py-1 text-xs"
+              style={{ borderColor: 'var(--line)', backgroundColor: 'var(--white)', color: 'var(--ink)' }}
+            >
+              <option value={10}>10</option>
+              <option value={20}>20</option>
+              <option value={50}>50</option>
+              <option value={100}>100</option>
+            </select>
+            <span>{sortedRecords.length} всего</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setPage(Math.max(0, page - 1))}
+              disabled={page === 0}
+              className="px-3 py-1 text-sm rounded border disabled:opacity-30"
+              style={{ borderColor: 'var(--line)', color: 'var(--ink)' }}
+            >
+              ←
+            </button>
+            {Array.from({ length: totalPages }, (_, i) => (
+              <button
+                key={i}
+                onClick={() => setPage(i)}
+                className={`px-3 py-1 text-sm rounded border ${i === page ? 'font-bold' : ''}`}
+                style={{
+                  borderColor: 'var(--line)',
+                  backgroundColor: i === page ? 'var(--brand)' : 'transparent',
+                  color: i === page ? 'white' : 'var(--ink)',
+                }}
+              >
+                {i + 1}
+              </button>
+            ))}
+            <button
+              onClick={() => setPage(Math.min(totalPages - 1, page + 1))}
+              disabled={page >= totalPages - 1}
+              className="px-3 py-1 text-sm rounded border disabled:opacity-30"
+              style={{ borderColor: 'var(--line)', color: 'var(--ink)' }}
+            >
+              →
+            </button>
+          </div>
+        </div>
       </div>
 
       {/* Detail Panel */}
@@ -205,7 +389,7 @@ export function BookingTable({ filters }: BookingTableProps) {
               {SERVICES.find((s) => s.id === selectedActivity.serviceId)?.name}
             </div>
             <div className="text-xs mt-1" style={{ color: 'var(--ink-light)' }}>
-              {selectedActivity.date ? formatDate(selectedActivity.date) : `День ${selectedActivity.day + 1}`}, {selectedActivity.startTime}–{selectedActivity.startTime + selectedActivity.duration}
+              {selectedActivity.date ? formatDateRu(selectedActivity.date) : `День ${selectedActivity.day + 1}`}, {formatTime(selectedActivity.startTime)}–{formatTime(selectedActivity.startTime + selectedActivity.duration)}
             </div>
             <div className="text-xs" style={{ color: 'var(--ink-light)' }}>
               {LOCATIONS.find((l) => l.id === selectedActivity.locationId)?.name} · {ARTISTS.find((a) => a.id === selectedActivity.masterId)?.name}

@@ -2,7 +2,6 @@
 
 import React from 'react';
 import { Sidebar } from '@/app/components/layout/Sidebar';
-import { RightPanel } from '@/app/components/layout/RightPanel';
 import { useUI } from '@/contexts/UIContext';
 
 export default function MainLayout({
@@ -22,11 +21,8 @@ export default function MainLayout({
           marginRight: rightPanelCollapsed ? '0' : 'var(--right-w)',
         }}
       >
-        <div className="flex-1 flex overflow-hidden">
-          <div className="flex-1 overflow-auto">
-            {children}
-          </div>
-          <RightPanel />
+        <div className="flex-1 overflow-auto">
+          {children}
         </div>
       </div>
     </div>

@@ -1,0 +1,38 @@
+'use client';
+
+import React from 'react';
+import { Sidebar } from '@/app/components/layout/Sidebar';
+import { Toolbar } from '@/app/components/layout/Toolbar';
+import { RightPanel } from '@/app/components/layout/RightPanel';
+import { StampFab } from '@/app/components/layout/StampFab';
+import { useUI } from '@/contexts/UIContext';
+
+export default function MainLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  const { sidebarCollapsed, rightPanelCollapsed } = useUI();
+
+  return (
+    <div className="flex h-screen overflow-hidden">
+      <Sidebar />
+      <div
+        className="flex-1 flex flex-col min-w-0 transition-all duration-300"
+        style={{
+          marginLeft: sidebarCollapsed ? 'var(--sidebar-collapsed-w)' : 'var(--sidebar-w)',
+          marginRight: rightPanelCollapsed ? '0' : 'var(--right-w)',
+        }}
+      >
+        <Toolbar />
+        <div className="flex-1 flex overflow-hidden">
+          <div className="flex-1 overflow-auto">
+            {children}
+          </div>
+          <RightPanel />
+        </div>
+      </div>
+      <StampFab />
+    </div>
+  );
+}

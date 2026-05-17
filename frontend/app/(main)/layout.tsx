@@ -9,7 +9,7 @@ export default function MainLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const { sidebarCollapsed, rightPanelCollapsed } = useUI();
+  const { sidebarCollapsed } = useUI();
 
   return (
     <div className="flex h-screen overflow-hidden">
@@ -18,7 +18,6 @@ export default function MainLayout({
         className="flex-1 flex flex-col min-w-0 transition-all duration-300"
         style={{
           marginLeft: sidebarCollapsed ? 'var(--sidebar-collapsed-w)' : 'var(--sidebar-w)',
-          marginRight: rightPanelCollapsed ? '0' : 'var(--right-w)',
         }}
       >
         <div className="flex-1 overflow-auto">

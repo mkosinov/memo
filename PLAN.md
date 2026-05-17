@@ -130,11 +130,13 @@
 
 ---
 
-## Этап 4: P2 — Booking Management + Client Card
+## Этап 4: P2 — Booking Management + Client Card ✅
 
-- [ ] **BookingPage** (`/bookings`) — портировать из `memo-frontend`, обновить дизайн
-- [ ] **ClientCardPage** (`/clients/[id]`) — портировать, обновить дизайн
-- [ ] Фильтры, статусы (CONFIRMED/CANCELLED/NO_SHOW), детальный просмотр
+- [x] **BookingPage** (`/bookings`) — портировать из `memo-frontend`, обновить дизайн
+- [x] **ClientCardPage** (`/clients/[id]`) — портировать, обновить дизайн
+- [x] Фильтры, статусы (CONFIRMED/CANCELLED/NO_SHOW), детальный просмотр
+- [x] Route group `(main)` — sidebar nav links with Link + active state
+- [x] Bugfixes: test imports, date filter guard, Sidebar usePathname mock
 
 **Результат:** Администратор управляет бронированиями и видит карточки клиентов
 

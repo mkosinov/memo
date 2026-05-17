@@ -32,6 +32,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Toolbar with week navigation, day/week toggle, filters shell, delete mode toggle
   - RightPanel with stamp configuration and week summary
 
+- **P2: Booking Management** (`/bookings`, `/clients/[id]`) — 2026-05-17
+  - Booking types: Client, Visitor, BookingRecord, Visit, Payment
+  - Mock data: 7 clients, 12 visitors, 12 booking records, 16 visits, 9 payments, 7 booking activities
+  - BookingFilters: date, location, service, status with clear button
+  - BookingTable: sortable table with inline detail panel (client card, activity, visitors, pricing, payments, comment)
+  - ClientCardPage: client info, visits history, booking history
+  - Route group `(main)`: pages moved under layout with Sidebar + Toolbar + RightPanel
+  - Sidebar nav links using Next.js Link with `usePathname` active highlighting
+  - 154 tests passing (15 test files)
+
 ### Infrastructure
 
 - Next.js 14 App Router project scaffolded + configured

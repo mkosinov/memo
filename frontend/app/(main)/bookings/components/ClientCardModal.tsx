@@ -5,6 +5,7 @@ import {
   CLIENTS, VISITORS, RECORDS, BOOKING_ACTIVITIES, VISITS, PAYMENTS,
   SERVICES, LOCATIONS, ARTISTS,
 } from '@/lib/mock-data';
+import { DiamondIcon } from '@/app/components/shared/DiamondIcon';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
@@ -26,10 +27,10 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 const STATUS_COLORS: Record<string, string> = {
-  WAITING: 'bg-amber-100 text-amber-700',
+  WAITING: 'bg-gray-100 text-gray-600',
   VISITED: 'bg-emerald-100 text-emerald-700',
-  MISSED: 'bg-gray-100 text-gray-600',
-  CANCELLED: 'bg-red-100 text-red-700',
+  MISSED: 'bg-red-100 text-red-700',
+  CANCELLED: 'bg-amber-100 text-amber-700',
 };
 
 // ─── Component ────────────────────────────────────────────────────────────
@@ -168,12 +169,12 @@ export function ClientCardModal({ clientId, onClose }: ClientCardModalProps) {
                               {STATUS_LABELS[record.status]}
                             </span>
                             {activity?.isPrivate && (
-                              <span className="text-[10px]" style={{ color: 'var(--danger)' }}>🟢</span>
+                              <DiamondIcon className="text-[10px]" />
                             )}
                           </div>
                           <div className="text-xs mt-1.5" style={{ color: 'var(--ink-light)' }}>
                             {activity
-                              ? `${formatTime(activity.startTime)}–${formatTime(activity.startTime + activity.duration)} · ${location?.name ?? '—'}`
+                              ? `${formatTime(activity.startTime)} · ${location?.name ?? '—'}`
                               : '—'}
                           </div>
                           {record.comment && (

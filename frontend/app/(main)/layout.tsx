@@ -3,7 +3,6 @@
 import React from 'react';
 import { Sidebar } from '@/app/components/layout/Sidebar';
 import { RightPanel } from '@/app/components/layout/RightPanel';
-import { StampFab } from '@/app/components/layout/StampFab';
 import { useUI } from '@/contexts/UIContext';
 
 export default function MainLayout({
@@ -30,7 +29,6 @@ export default function MainLayout({
           <RightPanel />
         </div>
       </div>
-      <StampFab />
     </div>
   );
 }

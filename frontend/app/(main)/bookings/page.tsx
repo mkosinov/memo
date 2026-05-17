@@ -4,10 +4,18 @@ import React, { useState } from 'react';
 import { BookingFilters } from './components/BookingFilters';
 import { BookingTable } from './components/BookingTable';
 
+function getDefaultDateRange() {
+  const today = new Date();
+  const from = today.toISOString().slice(0, 10);
+  const to = new Date(today.getTime() + 5 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  return { dateFrom: from, dateTo: to };
+}
+
 export default function BookingsPage() {
+  const defaultRange = getDefaultDateRange();
   const [filters, setFilters] = useState({
-    dateFrom: '',
-    dateTo: '',
+    dateFrom: defaultRange.dateFrom,
+    dateTo: defaultRange.dateTo,
     locationId: '',
     serviceId: '',
     masterId: '',
@@ -15,9 +23,10 @@ export default function BookingsPage() {
   });
 
   const handleReset = () => {
+    const newRange = getDefaultDateRange();
     setFilters({
-      dateFrom: '',
-      dateTo: '',
+      dateFrom: newRange.dateFrom,
+      dateTo: newRange.dateTo,
       locationId: '',
       serviceId: '',
       masterId: '',

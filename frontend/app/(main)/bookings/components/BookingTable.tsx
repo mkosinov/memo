@@ -7,6 +7,7 @@ import {
 import { SERVICES, LOCATIONS, ARTISTS } from '@/lib/mock-data';
 import type { BookingRecord, Activity } from '@/lib/types';
 import { ClientCardModal } from './ClientCardModal';
+import { DiamondIcon } from '@/app/components/shared/DiamondIcon';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
@@ -33,10 +34,10 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 const STATUS_COLORS: Record<string, string> = {
-  WAITING: 'bg-amber-100 text-amber-700',
+  WAITING: 'bg-gray-100 text-gray-600',
   VISITED: 'bg-emerald-100 text-emerald-700',
-  MISSED: 'bg-gray-100 text-gray-600',
-  CANCELLED: 'bg-red-100 text-red-700',
+  MISSED: 'bg-red-100 text-red-700',
+  CANCELLED: 'bg-amber-100 text-amber-700',
 };
 
 interface BookingTableProps {
@@ -116,6 +117,30 @@ export function BookingTable({ filters }: BookingTableProps) {
           cmp = aCl.localeCompare(bCl);
           break;
         }
+        case 'service': {
+          const aSvc = aAct ? SERVICES.find((s) => s.id === aAct.serviceId)?.name || '' : '';
+          const bSvc = bAct ? SERVICES.find((s) => s.id === bAct.serviceId)?.name || '' : '';
+          cmp = aSvc.localeCompare(bSvc);
+          break;
+        }
+        case 'master': {
+          const aMst = aAct ? ARTISTS.find((a) => a.id === aAct.masterId)?.shortName || '' : '';
+          const bMst = bAct ? ARTISTS.find((a) => a.id === bAct.masterId)?.shortName || '' : '';
+          cmp = aMst.localeCompare(bMst);
+          break;
+        }
+        case 'location': {
+          const aLoc = aAct ? LOCATIONS.find((l) => l.id === aAct.locationId)?.name || '' : '';
+          const bLoc = bAct ? LOCATIONS.find((l) => l.id === bAct.locationId)?.name || '' : '';
+          cmp = aLoc.localeCompare(bLoc);
+          break;
+        }
+        case 'guests': {
+          const aG = VISITS.filter((v) => v.recordId === a.id).length;
+          const bG = VISITS.filter((v) => v.recordId === b.id).length;
+          cmp = aG - bG;
+          break;
+        }
         case 'status':
           cmp = a.status.localeCompare(b.status);
           break;
@@ -123,6 +148,16 @@ export function BookingTable({ filters }: BookingTableProps) {
           const aTot = VISITS.filter((v) => v.recordId === a.id).reduce((s, v) => s + v.priceCharged, 0);
           const bTot = VISITS.filter((v) => v.recordId === b.id).reduce((s, v) => s + v.priceCharged, 0);
           cmp = aTot - bTot;
+          break;
+        }
+        case 'payment': {
+          const aTot2 = VISITS.filter((v) => v.recordId === a.id).reduce((s, v) => s + v.priceCharged, 0);
+          const bTot2 = VISITS.filter((v) => v.recordId === b.id).reduce((s, v) => s + v.priceCharged, 0);
+          const aPaid = PAYMENTS.filter((p) => p.recordId === a.id && p.paid).reduce((s, p) => s + p.amount, 0);
+          const bPaid = PAYMENTS.filter((p) => p.recordId === b.id && p.paid).reduce((s, p) => s + p.amount, 0);
+          const aLevel = aPaid >= aTot2 ? 0 : aPaid > 0 ? 1 : 2;
+          const bLevel = bPaid >= bTot2 ? 0 : bPaid > 0 ? 1 : 2;
+          cmp = aLevel - bLevel;
           break;
         }
       }
@@ -166,17 +201,17 @@ export function BookingTable({ filters }: BookingTableProps) {
               <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: 'var(--ink-light)' }} onClick={() => handleSort('client')}>
                 Клиент {sortIcon('client')}
               </th>
-              <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--ink-light)' }}>
-                Услуга
+              <th className="text-center px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: 'var(--ink-light)' }} onClick={() => handleSort('guests')}>
+                Гостей {sortIcon('guests')}
               </th>
-              <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--ink-light)' }}>
-                Мастер
+              <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: 'var(--ink-light)' }} onClick={() => handleSort('service')}>
+                Услуга {sortIcon('service')}
               </th>
-              <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--ink-light)' }}>
-                Локация
+              <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: 'var(--ink-light)' }} onClick={() => handleSort('master')}>
+                Мастер {sortIcon('master')}
               </th>
-              <th className="text-center px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--ink-light)' }}>
-                Гостей
+              <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: 'var(--ink-light)' }} onClick={() => handleSort('location')}>
+                Локация {sortIcon('location')}
               </th>
               <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: 'var(--ink-light)' }} onClick={() => handleSort('status')}>
                 Статус {sortIcon('status')}
@@ -184,8 +219,8 @@ export function BookingTable({ filters }: BookingTableProps) {
               <th className="text-right px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: 'var(--ink-light)' }} onClick={() => handleSort('total')}>
                 Сумма {sortIcon('total')}
               </th>
-              <th className="text-center px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--ink-light)' }}>
-                Оплата
+              <th className="text-center px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: 'var(--ink-light)' }} onClick={() => handleSort('payment')}>
+                Оплата {sortIcon('payment')}
               </th>
             </tr>
           </thead>
@@ -213,12 +248,9 @@ export function BookingTable({ filters }: BookingTableProps) {
                   <td className="px-4 py-3 text-sm whitespace-nowrap" style={{ color: 'var(--ink-mid)' }}>
                     {activity ? (
                       <>
-                        <div className="font-medium" style={{ color: 'var(--ink)' }}>
-                          {activity.date ? formatDateRu(activity.date) : `День ${activity.day + 1}`}
-                        </div>
-                        <div className="text-xs" style={{ color: 'var(--ink-light)' }}>
-                          {formatTime(activity.startTime)}–{formatTime(activity.startTime + activity.duration)}
-                        </div>
+                        {activity.date ? formatDateRu(activity.date) : `День ${activity.day + 1}`}
+                        {' '}
+                        {formatTime(activity.startTime)}
                       </>
                     ) : '—'}
                   </td>
@@ -237,11 +269,16 @@ export function BookingTable({ filters }: BookingTableProps) {
                     </button>
                   </td>
 
+                  {/* Гостей */}
+                  <td className="px-4 py-3 text-center text-sm" style={{ color: 'var(--ink-mid)' }}>
+                    {VISITS.filter((v) => v.recordId === record.id).length || '—'}
+                  </td>
+
                   {/* Услуга */}
                   <td className="px-4 py-3 text-sm" style={{ color: 'var(--ink)' }}>
                     <div className="flex items-center gap-2">
                       {activity?.isPrivate ? (
-                        <span className="text-[10px] mr-1" style={{ color: 'var(--danger)' }}>🟢</span>
+                        <DiamondIcon className="mr-1" />
                       ) : null}
                       {service?.name ?? '—'}
                     </div>
@@ -261,11 +298,6 @@ export function BookingTable({ filters }: BookingTableProps) {
                   {/* Локация */}
                   <td className="px-4 py-3 text-sm" style={{ color: 'var(--ink-mid)' }}>
                     {location?.name ?? '—'}
-                  </td>
-
-                  {/* Гостей */}
-                  <td className="px-4 py-3 text-center text-sm" style={{ color: 'var(--ink-mid)' }}>
-                    {VISITS.filter((v) => v.recordId === record.id).length || '—'}
                   </td>
 
                   {/* Статус */}
@@ -395,7 +427,7 @@ export function BookingTable({ filters }: BookingTableProps) {
               {SERVICES.find((s) => s.id === selectedActivity.serviceId)?.name}
             </div>
             <div className="text-xs mt-1" style={{ color: 'var(--ink-light)' }}>
-              {selectedActivity.date ? formatDateRu(selectedActivity.date) : `День ${selectedActivity.day + 1}`}, {formatTime(selectedActivity.startTime)}–{formatTime(selectedActivity.startTime + selectedActivity.duration)}
+              {selectedActivity.date ? formatDateRu(selectedActivity.date) : `День ${selectedActivity.day + 1}`}, {formatTime(selectedActivity.startTime)}
             </div>
             <div className="text-xs" style={{ color: 'var(--ink-light)' }}>
               {LOCATIONS.find((l) => l.id === selectedActivity.locationId)?.name} · {ARTISTS.find((a) => a.id === selectedActivity.masterId)?.name}

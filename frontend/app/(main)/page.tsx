@@ -2,6 +2,7 @@
 
 import React from 'react';
 import { Toolbar } from '@/app/components/layout/Toolbar';
+import { StampFab } from '@/app/components/layout/StampFab';
 import { WeekView } from '@/app/components/schedule/WeekView';
 
 export default function SchedulePage() {
@@ -11,6 +12,7 @@ export default function SchedulePage() {
       <div className="flex-1 overflow-auto">
         <WeekView />
       </div>
+      <StampFab />
     </div>
   );
 }

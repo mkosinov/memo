@@ -1,0 +1,15 @@
+{
+  "name": "OpenCode Go (текущий провайдер)",
+  "provider": "opencode-go",
+  "updated": "2026-05-15",
+  "agents": {
+    "architect":             "opencode-go/kimi-k2.6",
+    "backend-coder":         "opencode-go/qwen3.6-plus",
+    "frontend-coder":        "opencode-go/qwen3.6-plus",
+    "debugger":              "opencode-go/qwen3.6-plus",
+    "spec-reviewer":         "opencode-go/deepseek-v4-flash",
+    "code-quality-reviewer": "opencode-go/deepseek-v4-flash",
+    "deployer":              "opencode-go/deepseek-v4-flash",
+    "docser":                "opencode-go/deepseek-v4-flash"
+  }
+}

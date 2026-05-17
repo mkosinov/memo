@@ -93,7 +93,7 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
 
   const getBookedCount = useCallback((activityId: string) => {
     const confirmedRecords = RECORDS.filter(
-      r => r.activityId === activityId && r.status === 'CONFIRMED'
+      r => r.activityId === activityId && (r.status === 'WAITING' || r.status === 'VISITED')
     );
     return confirmedRecords.reduce((sum, r) => {
       return sum + VISITS.filter(v => v.recordId === r.id).length;

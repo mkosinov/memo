@@ -6,6 +6,10 @@ import { ScheduleProvider } from '../contexts/ScheduleContext';
 import { UIProvider } from '../contexts/UIContext';
 import { getMonday } from '../lib/utils';
 
+vi.mock('next/navigation', () => ({
+  usePathname: () => '/',
+}));
+
 function renderWithProviders() {
   return render(
     <UIProvider>
@@ -24,16 +28,16 @@ describe('Sidebar', () => {
 
   it('renders navigation links in Russian', () => {
     renderWithProviders();
-    expect(screen.getByRole('button', { name: 'Расписание' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Бронирования' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Клиенты' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Мастера' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Чат' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Расписание' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Записи' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Клиенты' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Мастера' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Чат' })).toBeInTheDocument();
   });
 
   it('highlights the active navigation link (Расписание)', () => {
     renderWithProviders();
-    const activeLink = screen.getByRole('button', { name: 'Расписание' });
+    const activeLink = screen.getByRole('link', { name: 'Расписание' });
     expect(activeLink).toHaveClass('bg-brand');
   });
 

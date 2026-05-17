@@ -1,4 +1,4 @@
-import type { Artist, Studio, Service, Activity } from './types';
+import type { Artist, Studio, Service, Activity, Client, Visitor, BookingRecord, Visit, Payment } from './types';
 
 // ─── Artists ──────────────────────────────────────────────────────────────
 
@@ -18,6 +18,9 @@ export const STUDIOS: Studio[] = [
   { id: 'grand',  name: 'Гранд Отель Поляна', address: 'Гранд Отель, лобби' },
   { id: 'p1389',  name: 'Поляна 1389',        address: 'Поляна 1389, 2 этаж' },
 ];
+
+// Alias for booking components (locations = studios)
+export const LOCATIONS = STUDIOS;
 
 export const STUDIO_MAP: Record<string, string> = {
   alpika: 'Альпика',
@@ -129,3 +132,90 @@ export function getStaticEvents(): Activity[] {
     isPrivate: e.priv,
   }));
 }
+
+// ─── Booking Reference Activities ─────────────────────────────────────────
+// These are activities referenced by booking records.
+// They exist as a separate map so RECORDS can link to them by stable IDs.
+
+export const BOOKING_ACTIVITIES: Activity[] = [
+  { id: 'act1', day: 0, masterId: 'm1', startTime: 10, duration: 2, serviceId: 's5', serviceName: 'Керамика ручной работы', minAge: '6+', locationId: 'alpika', occupied: 5, capacity: 8, isPrivate: false },
+  { id: 'act2', day: 1, masterId: 'm2', startTime: 11, duration: 1.5, serviceId: 's4', serviceName: 'Рисование акварелью', minAge: '8+', locationId: 'grand', occupied: 3, capacity: 6, isPrivate: false },
+  { id: 'act3', day: 1, masterId: 'm1', startTime: 14, duration: 2, serviceId: 's5', serviceName: 'Керамика ручной работы', minAge: '6+', locationId: 'grand', occupied: 1, capacity: 1, isPrivate: true },
+  { id: 'act5', day: 2, masterId: 'm3', startTime: 10, duration: 2, serviceId: 's5', serviceName: 'Керамика ручной работы', minAge: '6+', locationId: 'alpika', occupied: 4, capacity: 8, isPrivate: false },
+  { id: 'act7', day: 3, masterId: 'm4', startTime: 12, duration: 2, serviceId: 's1', serviceName: 'Живопись маслом', minAge: '12+', locationId: 'p1389', occupied: 6, capacity: 10, isPrivate: false },
+  { id: 'act8', day: 4, masterId: 'm1', startTime: 9, duration: 2, serviceId: 's2', serviceName: 'Рисование акрилом', minAge: '10+', locationId: 'grand', occupied: 1, capacity: 1, isPrivate: true },
+  { id: 'act10', day: 5, masterId: 'm5', startTime: 15, duration: 2, serviceId: 's5', serviceName: 'Ручная лепка', minAge: '5+', locationId: 'alpika', occupied: 5, capacity: 10, isPrivate: false },
+];
+
+// ─── Booking Mock Data ────────────────────────────────────────────────────
+
+export const CLIENTS: Client[] = [
+  { id: 'cl1', name: 'Анна Смирнова', phone: '+7 (916) 123-45-67', createdAt: '2025-01-15' },
+  { id: 'cl2', name: 'Ольга Кузнецова', phone: '+7 (925) 987-65-43', createdAt: '2025-02-03' },
+  { id: 'cl3', name: 'Дмитрий Попов', phone: '+7 (903) 555-12-34', createdAt: '2025-03-10' },
+  { id: 'cl4', name: 'Елена Васильева', phone: '+7 (977) 444-33-22', createdAt: '2025-03-22' },
+  { id: 'cl5', name: 'Сергей Новиков', phone: '+7 (926) 111-22-33', createdAt: '2025-04-05' },
+  { id: 'cl6', name: 'Марина Фёдорова', phone: '+7 (915) 777-88-99', createdAt: '2025-04-18' },
+  { id: 'cl7', name: 'Павел Морозов', phone: '+7 (999) 222-33-44', createdAt: '2025-05-01' },
+];
+
+export const VISITORS: Visitor[] = [
+  { id: 'v1', clientId: 'cl1', name: 'Анна Смирнова', isAdult: true },
+  { id: 'v2', clientId: 'cl1', name: 'Маша Смирнова', age: 8, isAdult: false },
+  { id: 'v3', clientId: 'cl2', name: 'Ольга Кузнецова', isAdult: true },
+  { id: 'v4', clientId: 'cl2', name: 'Петя Кузнецов', age: 10, isAdult: false },
+  { id: 'v5', clientId: 'cl3', name: 'Дмитрий Попов', isAdult: true },
+  { id: 'v6', clientId: 'cl4', name: 'Елена Васильева', isAdult: true },
+  { id: 'v7', clientId: 'cl4', name: 'Катя Васильева', age: 6, isAdult: false },
+  { id: 'v8', clientId: 'cl4', name: 'Лиза Васильева', age: 9, isAdult: false },
+  { id: 'v9', clientId: 'cl5', name: 'Сергей Новиков', isAdult: true },
+  { id: 'v10', clientId: 'cl6', name: 'Марина Фёдорова', isAdult: true },
+  { id: 'v11', clientId: 'cl6', name: 'Игорь Фёдоров', age: 12, isAdult: false },
+  { id: 'v12', clientId: 'cl7', name: 'Павел Морозов', isAdult: true },
+];
+
+export const RECORDS: BookingRecord[] = [
+  { id: 'rec1', activityId: 'act1', clientId: 'cl1', status: 'WAITING', createdAt: '2025-05-01', comment: 'День рождения Маши' },
+  { id: 'rec2', activityId: 'act1', clientId: 'cl4', status: 'WAITING', createdAt: '2025-05-02' },
+  { id: 'rec3', activityId: 'act2', clientId: 'cl3', status: 'VISITED', createdAt: '2025-05-03' },
+  { id: 'rec4', activityId: 'act2', clientId: 'cl5', status: 'CANCELLED', createdAt: '2025-05-03', comment: 'Болезнь' },
+  { id: 'rec5', activityId: 'act3', clientId: 'cl1', status: 'VISITED', createdAt: '2025-05-04' },
+  { id: 'rec6', activityId: 'act5', clientId: 'cl2', status: 'VISITED', createdAt: '2025-05-05' },
+  { id: 'rec7', activityId: 'act5', clientId: 'cl6', status: 'MISSED', createdAt: '2025-05-05' },
+  { id: 'rec8', activityId: 'act7', clientId: 'cl4', status: 'WAITING', createdAt: '2025-05-06' },
+  { id: 'rec9', activityId: 'act7', clientId: 'cl7', status: 'WAITING', createdAt: '2025-05-06' },
+  { id: 'rec10', activityId: 'act10', clientId: 'cl1', status: 'VISITED', createdAt: '2025-05-07' },
+  { id: 'rec11', activityId: 'act10', clientId: 'cl3', status: 'CANCELLED', createdAt: '2025-05-07' },
+  { id: 'rec12', activityId: 'act8', clientId: 'cl2', status: 'WAITING', createdAt: '2025-05-08' },
+];
+
+export const VISITS: Visit[] = [
+  { id: 'vis1', recordId: 'rec1', visitorId: 'v1', isPrimary: false, priceCharged: 2500, status: 'VISITED' },
+  { id: 'vis2', recordId: 'rec1', visitorId: 'v2', isPrimary: false, priceCharged: 1800, status: 'VISITED' },
+  { id: 'vis3', recordId: 'rec2', visitorId: 'v6', isPrimary: false, priceCharged: 2500, status: 'VISITED' },
+  { id: 'vis4', recordId: 'rec2', visitorId: 'v7', isPrimary: false, priceCharged: 1800, status: 'VISITED' },
+  { id: 'vis5', recordId: 'rec2', visitorId: 'v8', isPrimary: false, priceCharged: 1800, status: 'VISITED' },
+  { id: 'vis6', recordId: 'rec3', visitorId: 'v5', isPrimary: false, priceCharged: 2800, status: 'VISITED' },
+  { id: 'vis7', recordId: 'rec5', visitorId: 'v1', isPrimary: true, priceCharged: 8200, status: 'VISITED' },
+  { id: 'vis8', recordId: 'rec5', visitorId: 'v2', isPrimary: false, priceCharged: 1800, status: 'VISITED' },
+  { id: 'vis9', recordId: 'rec6', visitorId: 'v3', isPrimary: false, priceCharged: 2500, status: 'VISITED' },
+  { id: 'vis10', recordId: 'rec6', visitorId: 'v4', isPrimary: false, priceCharged: 1800, status: 'VISITED' },
+  { id: 'vis11', recordId: 'rec8', visitorId: 'v6', isPrimary: false, priceCharged: 3500, status: 'VISITED' },
+  { id: 'vis12', recordId: 'rec9', visitorId: 'v12', isPrimary: false, priceCharged: 3500, status: 'WAITING' },
+  { id: 'vis13', recordId: 'rec10', visitorId: 'v1', isPrimary: false, priceCharged: 3000, status: 'VISITED' },
+  { id: 'vis14', recordId: 'rec10', visitorId: 'v2', isPrimary: false, priceCharged: 2200, status: 'VISITED' },
+  { id: 'vis15', recordId: 'rec12', visitorId: 'v3', isPrimary: true, priceCharged: 8200, status: 'WAITING' },
+  { id: 'vis16', recordId: 'rec12', visitorId: 'v4', isPrimary: false, priceCharged: 2000, status: 'WAITING' },
+];
+
+export const PAYMENTS: Payment[] = [
+  { id: 'pay1', recordId: 'rec1', amount: 4300, paid: true, method: 'card', createdAt: '2025-05-01' },
+  { id: 'pay2', recordId: 'rec2', amount: 6100, paid: true, method: 'transfer', createdAt: '2025-05-02' },
+  { id: 'pay3', recordId: 'rec3', amount: 2800, paid: true, method: 'card', createdAt: '2025-05-03' },
+  { id: 'pay4', recordId: 'rec5', amount: 10000, paid: true, method: 'cash', createdAt: '2025-05-04' },
+  { id: 'pay5', recordId: 'rec6', amount: 4300, paid: false, createdAt: '2025-05-05' },
+  { id: 'pay6', recordId: 'rec8', amount: 3500, paid: true, method: 'card', createdAt: '2025-05-06' },
+  { id: 'pay7', recordId: 'rec9', amount: 3500, paid: false, createdAt: '2025-05-06' },
+  { id: 'pay8', recordId: 'rec10', amount: 5200, paid: true, method: 'transfer', createdAt: '2025-05-07' },
+  { id: 'pay9', recordId: 'rec12', amount: 10200, paid: true, method: 'card', createdAt: '2025-05-08' },
+];

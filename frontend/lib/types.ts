@@ -55,3 +55,47 @@ export interface StampState {
   locations: Set<string>;
   ready: boolean;
 }
+
+// ─── Client (Booking) ─────────────────────────────────────────────────────
+
+export interface Client {
+  id: string;
+  name: string;
+  phone: string;
+  createdAt: string;
+}
+
+export interface Visitor {
+  id: string;
+  clientId: string;
+  name: string;
+  age?: number;
+  isAdult: boolean;
+}
+
+export interface BookingRecord {
+  id: string;
+  activityId: string;
+  clientId: string;
+  status: 'WAITING' | 'VISITED' | 'MISSED' | 'CANCELLED';
+  createdAt: string;
+  comment?: string;
+}
+
+export interface Visit {
+  id: string;
+  recordId: string;
+  visitorId: string;
+  isPrimary: boolean;
+  priceCharged: number;
+  status: 'WAITING' | 'VISITED' | 'MISSED' | 'CANCELLED';
+}
+
+export interface Payment {
+  id: string;
+  recordId: string;
+  amount: number;
+  paid: boolean;
+  method?: 'cash' | 'card' | 'transfer';
+  createdAt: string;
+}

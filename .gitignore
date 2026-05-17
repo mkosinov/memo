@@ -54,3 +54,6 @@ venv/
 
 # Docker
 docker-compose.override.yml
+
+# Git Worktrees (Superpowers workflow)
+.worktrees/

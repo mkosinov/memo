@@ -1,12 +1,12 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
-import Link from 'next/link';
 import {
   RECORDS, BOOKING_ACTIVITIES, CLIENTS, VISITS, VISITORS, PAYMENTS,
 } from '@/lib/mock-data';
 import { SERVICES, LOCATIONS, ARTISTS } from '@/lib/mock-data';
 import type { BookingRecord, Activity } from '@/lib/types';
+import { ClientCardModal } from './ClientCardModal';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
@@ -56,6 +56,7 @@ export function BookingTable({ filters }: BookingTableProps) {
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(10);
+  const [clientModalId, setClientModalId] = useState<string | null>(null);
 
   const getActivity = (id: string): Activity | undefined =>
     BOOKING_ACTIVITIES.find((a) => a.id === id);
@@ -224,14 +225,16 @@ export function BookingTable({ filters }: BookingTableProps) {
 
                   {/* Клиент */}
                   <td className="px-4 py-3">
-                    <Link
-                      href={`/clients/${record.clientId}`}
-                      onClick={(e) => e.stopPropagation()}
-                      className="text-sm font-medium transition-colors"
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setClientModalId(record.clientId);
+                      }}
+                      className="text-sm font-medium transition-colors text-left"
                       style={{ color: 'var(--brand)' }}
                     >
                       {client?.name ?? '—'}
-                    </Link>
+                    </button>
                   </td>
 
                   {/* Услуга */}
@@ -370,13 +373,16 @@ export function BookingTable({ filters }: BookingTableProps) {
           {/* Client Card */}
           <div className="rounded-lg border p-3" style={{ borderColor: 'var(--line)', backgroundColor: 'var(--white)' }}>
             <div className="text-xs mb-1" style={{ color: 'var(--ink-light)' }}>Клиент</div>
-            <Link
-              href={`/clients/${selectedRecord.clientId}`}
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setClientModalId(selectedRecord.clientId);
+              }}
               className="text-sm font-medium transition-colors"
               style={{ color: 'var(--brand)' }}
             >
               {selectedClient?.name ?? '—'}
-            </Link>
+            </button>
             {selectedClient && (
               <div className="text-xs mt-1" style={{ color: 'var(--ink-light)' }}>{selectedClient.phone}</div>
             )}
@@ -460,6 +466,14 @@ export function BookingTable({ filters }: BookingTableProps) {
             </div>
           )}
         </div>
+      )}
+
+      {/* Client Card Modal */}
+      {clientModalId && (
+        <ClientCardModal
+          clientId={clientModalId}
+          onClose={() => setClientModalId(null)}
+        />
       )}
     </div>
   );

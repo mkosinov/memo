@@ -2,7 +2,6 @@
 
 import React from 'react';
 import { Sidebar } from '@/app/components/layout/Sidebar';
-import { Toolbar } from '@/app/components/layout/Toolbar';
 import { RightPanel } from '@/app/components/layout/RightPanel';
 import { StampFab } from '@/app/components/layout/StampFab';
 import { useUI } from '@/contexts/UIContext';
@@ -24,7 +23,6 @@ export default function MainLayout({
           marginRight: rightPanelCollapsed ? '0' : 'var(--right-w)',
         }}
       >
-        <Toolbar />
         <div className="flex-1 flex overflow-hidden">
           <div className="flex-1 overflow-auto">
             {children}

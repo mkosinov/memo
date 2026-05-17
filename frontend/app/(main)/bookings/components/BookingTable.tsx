@@ -50,7 +50,7 @@ export function BookingTable({ filters }: BookingTableProps) {
     return RECORDS.filter((r) => {
       const activity = getActivity(r.activityId);
       if (!activity) return false;
-      if (filters.date && activity.date !== filters.date) return false;
+      if (filters.date && activity.date && activity.date !== filters.date) return false;
       if (filters.locationId && activity.locationId !== filters.locationId) return false;
       if (filters.serviceId && activity.serviceId !== filters.serviceId) return false;
       if (filters.status && r.status !== filters.status) return false;
@@ -125,7 +125,7 @@ export function BookingTable({ filters }: BookingTableProps) {
                   <td className="px-4 py-3 text-sm" style={{ color: 'var(--ink-mid)' }}>
                     {activity ? (
                       <>
-                        <div>{formatDate(activity.date || activity.id)}</div>
+                        <div>{activity.date ? formatDate(activity.date) : `День ${activity.day + 1}`}</div>
                         <div className="text-xs" style={{ color: 'var(--ink-light)' }}>
                           {activity.startTime}–{activity.startTime + activity.duration}
                         </div>
@@ -203,7 +203,7 @@ export function BookingTable({ filters }: BookingTableProps) {
               {SERVICES.find((s) => s.id === selectedActivity.serviceId)?.name}
             </div>
             <div className="text-xs mt-1" style={{ color: 'var(--ink-light)' }}>
-              {formatDate(selectedActivity.date || selectedActivity.id)}, {selectedActivity.startTime}–{selectedActivity.startTime + selectedActivity.duration}
+              {selectedActivity.date ? formatDate(selectedActivity.date) : `День ${selectedActivity.day + 1}`}, {selectedActivity.startTime}–{selectedActivity.startTime + selectedActivity.duration}
             </div>
             <div className="text-xs" style={{ color: 'var(--ink-light)' }}>
               {LOCATIONS.find((l) => l.id === selectedActivity.locationId)?.name} · {ARTISTS.find((a) => a.id === selectedActivity.masterId)?.name}

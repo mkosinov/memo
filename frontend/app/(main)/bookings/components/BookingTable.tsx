@@ -105,10 +105,21 @@ export function BookingTable({ filters }: BookingTableProps) {
       let cmp = 0;
       switch (sortField) {
         case 'date': {
-          const aDate = aAct?.date || '';
-          const bDate = bAct?.date || '';
-          cmp = aDate.localeCompare(bDate);
-          if (cmp === 0) cmp = (aAct?.startTime || 0) - (bAct?.startTime || 0);
+          const aDate = aAct?.date;
+          const bDate = bAct?.date;
+          // Activities with dates come first
+          if (aDate && !bDate) { cmp = -1; break; }
+          if (!aDate && bDate) { cmp = 1; break; }
+          if (aDate && bDate) {
+            cmp = aDate.localeCompare(bDate);
+            if (cmp === 0) cmp = (aAct?.startTime || 0) - (bAct?.startTime || 0);
+          } else {
+            // Both don't have dates — sort by day index (0=Mon first), then startTime
+            const aDay = aAct?.day ?? 0;
+            const bDay = bAct?.day ?? 0;
+            cmp = aDay - bDay;
+            if (cmp === 0) cmp = (aAct?.startTime || 0) - (bAct?.startTime || 0);
+          }
           break;
         }
         case 'client': {
@@ -248,9 +259,12 @@ export function BookingTable({ filters }: BookingTableProps) {
                   <td className="px-4 py-3 text-sm whitespace-nowrap" style={{ color: 'var(--ink-mid)' }}>
                     {activity ? (
                       <>
-                        {activity.date ? formatDateRu(activity.date) : `День ${activity.day + 1}`}
-                        {' '}
-                        {formatTime(activity.startTime)}
+                        <div className="font-medium" style={{ color: 'var(--ink)' }}>
+                          {activity.date ? formatDateRu(activity.date) : `День ${activity.day + 1}`}
+                        </div>
+                        <div className="text-xs" style={{ color: 'var(--ink-light)' }}>
+                          {formatTime(activity.startTime)}
+                        </div>
                       </>
                     ) : '—'}
                   </td>
@@ -271,7 +285,7 @@ export function BookingTable({ filters }: BookingTableProps) {
 
                   {/* Гостей */}
                   <td className="px-4 py-3 text-center text-sm" style={{ color: 'var(--ink-mid)' }}>
-                    {VISITS.filter((v) => v.recordId === record.id).length || '—'}
+                    {Math.max(1, VISITS.filter((v) => v.recordId === record.id).length)}
                   </td>
 
                   {/* Услуга */}
@@ -427,7 +441,7 @@ export function BookingTable({ filters }: BookingTableProps) {
               {SERVICES.find((s) => s.id === selectedActivity.serviceId)?.name}
             </div>
             <div className="text-xs mt-1" style={{ color: 'var(--ink-light)' }}>
-              {selectedActivity.date ? formatDateRu(selectedActivity.date) : `День ${selectedActivity.day + 1}`}, {formatTime(selectedActivity.startTime)}
+              {selectedActivity.date ? formatDateRu(selectedActivity.date) : `День ${selectedActivity.day + 1}`} · {formatTime(selectedActivity.startTime)}
             </div>
             <div className="text-xs" style={{ color: 'var(--ink-light)' }}>
               {LOCATIONS.find((l) => l.id === selectedActivity.locationId)?.name} · {ARTISTS.find((a) => a.id === selectedActivity.masterId)?.name}

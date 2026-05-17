@@ -1,7 +1,7 @@
 ---
 description: Project scribe — updates documentation, status files, and tracks progress after any agent completes work.
 mode: subagent
-model: opencode/deepseek-v4-flash-free
+model: google/gemini-3-flash
 temperature: 0.3
 permission:
   read: allow
@@ -120,5 +120,5 @@ This way you always know the full picture of project documents, even if someone 
 - [ ] PLAN.md — mark completed items
 - [ ] CHANGELOG.md — add version entry if needed
 - [ ] docs/memo-full-spec.md — update status tables
-- [ ] docs/v4-design-system.md — update if design changed
+- [ ] docs/design-system.md — update if design changed
 - [ ] docs/mock-data.md — update if data models changed

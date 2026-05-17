@@ -1,7 +1,7 @@
 ---
 description: Frontend developer — implements UI components and pages in Next.js 14 with TypeScript and Tailwind CSS.
 mode: subagent
-model: opencode/qwen3.6-plus-free
+model: google/antigravity-gemini-3.1-pro
 temperature: 0.3
 permission:
   read: allow
@@ -12,6 +12,10 @@ permission:
   skill:
     "test-driven-development": allow
     "platform": allow
+    "react-nextjs-best-practices": allow
+    "tailwind-typescript-patterns": allow
+    "component-testing": allow
+    "dnd-kit-patterns": allow
   bash:
     "npm *": allow
     "npx *": allow
@@ -44,7 +48,7 @@ You build UI components and pages in Next.js 14 (App Router) + TypeScript + Tail
 - **Working dir**: `/root/workspace/memo/`
 - **Full spec**: `docs/memo-full-spec.md`
 - **UI prototype**: `sketches/colour-mountains-v4.html`
-- **Design system**: `docs/v4-design-system.md`
+- **Design system**: `docs/design-system.md`
 - **Schedule patterns**: `docs/schedule-ui.md`
 - **Mock data**: `docs/mock-data.md`
 - **Previous impl**: `/root/workspace/memo-v1/memo-frontend/` (reference for logic/contexts)
@@ -52,7 +56,7 @@ You build UI components and pages in Next.js 14 (App Router) + TypeScript + Tail
 
 ## Rules
 
-- ALWAYS read `docs/memo-full-spec.md`, `docs/v4-design-system.md`, `docs/schedule-ui.md`, `docs/mock-data.md` first
+- ALWAYS read `docs/memo-full-spec.md`, `docs/design-system.md`, `docs/schedule-ui.md`, `docs/mock-data.md` first
 - Follow v4 design strictly — colours, typography, spacing from spec
 - Use Tailwind CSS utility classes. Custom CSS only for advanced cases (clip-path, animations)
 - TypeScript strict, type hints required

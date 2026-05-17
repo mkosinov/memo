@@ -29,7 +29,7 @@ describe('Sidebar', () => {
   it('renders navigation links in Russian', () => {
     renderWithProviders();
     expect(screen.getByRole('link', { name: 'Расписание' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Бронирования' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Записи' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Клиенты' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Мастера' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Чат' })).toBeInTheDocument();

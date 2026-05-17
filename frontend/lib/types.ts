@@ -77,7 +77,7 @@ export interface BookingRecord {
   id: string;
   activityId: string;
   clientId: string;
-  status: 'CONFIRMED' | 'CANCELLED' | 'NO_SHOW';
+  status: 'WAITING' | 'VISITED' | 'MISSED' | 'CANCELLED';
   createdAt: string;
   comment?: string;
 }
@@ -88,7 +88,7 @@ export interface Visit {
   visitorId: string;
   isPrimary: boolean;
   priceCharged: number;
-  visited: boolean;
+  status: 'WAITING' | 'VISITED' | 'MISSED' | 'CANCELLED';
 }
 
 export interface Payment {

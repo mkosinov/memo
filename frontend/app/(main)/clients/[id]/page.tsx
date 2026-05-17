@@ -20,15 +20,17 @@ function formatDate(dateStr: string): string {
 }
 
 const STATUS_LABELS: Record<string, string> = {
-  CONFIRMED: 'Подтверждена',
+  WAITING: 'Ожидание',
+  VISITED: 'Посетили',
+  MISSED: 'Неявка',
   CANCELLED: 'Отменена',
-  NO_SHOW: 'Неявка',
 };
 
 const STATUS_COLORS: Record<string, string> = {
-  CONFIRMED: 'bg-emerald-100 text-emerald-700',
+  WAITING: 'bg-amber-100 text-amber-700',
+  VISITED: 'bg-emerald-100 text-emerald-700',
+  MISSED: 'bg-gray-100 text-gray-600',
   CANCELLED: 'bg-red-100 text-red-700',
-  NO_SHOW: 'bg-gray-100 text-gray-600',
 };
 
 export default function ClientCardPage() {
@@ -52,7 +54,7 @@ export default function ClientCardPage() {
     });
   }, [clientRecords]);
 
-  const totalVisits = clientRecords.filter((r) => r.status === 'CONFIRMED').length;
+  const totalVisits = clientRecords.filter((r) => r.status === 'VISITED').length;
   const totalSpent = recordDetails
     .filter((d) => d.record.status !== 'CANCELLED')
     .reduce((s, d) => s + d.paidAmount, 0);

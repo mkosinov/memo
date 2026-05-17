@@ -89,7 +89,7 @@ function MoonIcon({ className }: { className?: string }) {
 
 const NAV_ITEMS = [
   { label: 'Расписание', icon: 'calendar', href: '/' },
-  { label: 'Бронирования', icon: 'clipboard', href: '/bookings' },
+  { label: 'Записи', icon: 'clipboard', href: '/bookings' },
   { label: 'Клиенты', icon: 'users', href: '/clients' },
   { label: 'Мастера', icon: 'palette', href: '#' },
   { label: 'Чат', icon: 'chat', href: '/chat' },

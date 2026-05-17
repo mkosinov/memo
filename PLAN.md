@@ -197,6 +197,11 @@
 **Всего:** ~14-15 дней на MVP
 
 ---
+## Документы
+
+- **Бизнес-логика:** `docs/business-logic.md` — статусы, оплата, бронирование
+
+---
 ## Changelog
 - 2026-05-13: Updated deadlines — MVP 20 мая, Full release 31 мая. Added daily schedule for MVP sprint.
 - 2026-05-13: Initial PLAN.md created with etapy 0-8.

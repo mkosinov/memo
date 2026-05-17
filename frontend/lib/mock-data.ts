@@ -19,6 +19,9 @@ export const STUDIOS: Studio[] = [
   { id: 'p1389',  name: 'Поляна 1389',        address: 'Поляна 1389, 2 этаж' },
 ];
 
+// Alias for booking components (locations = studios)
+export const LOCATIONS = STUDIOS;
+
 export const STUDIO_MAP: Record<string, string> = {
   alpika: 'Альпика',
   grand: 'Гранд Отель Поляна',

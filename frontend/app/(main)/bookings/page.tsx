@@ -1,8 +1,8 @@
 'use client';
 
 import React, { useState } from 'react';
-import { BookingFilters } from '@/app/bookings/components/BookingFilters';
-import { BookingTable } from '@/app/bookings/components/BookingTable';
+import { BookingFilters } from './components/BookingFilters';
+import { BookingTable } from './components/BookingTable';
 
 export default function BookingsPage() {
   const [filters, setFilters] = useState({

@@ -14,11 +14,35 @@
 ## Вводная
 
 **Что имеем:**
-1. `memo/memo-frontend/` — рабочий Next.js 14 проект со всеми 6 страницами, мок-данными, контекстами, @dnd-kit, тестами. **Дизайн устарел.**
-2. `memo2/sketches/colour-mountains-v4.html` — новый дизайн (тёмный сайдбар, #004D56, карточки, штамп, тосты, мини-календарь). **Только P1 и в HTML.**
-3. `memo2/docs/memo-full-spec.md` — полный spec (543 строки) с UI/UX, дизайн-системой, типами, архитектурой.
+1. `apps/admin/` — рабочий Next.js 14 проект (админ-панель) со всеми страницами, мок-данными, контекстами, @dnd-kit, тестами.
+2. `sketches/colour-mountains-v4.html` — новый дизайн (тёмный сайдбар, #004D56, карточки, штамп, тосты, мини-календарь). **Только P1 и в HTML.**
+3. `docs/memo-full-spec.md` — полный spec (543 строки) с UI/UX, дизайн-системой, типами, архитектурой.
 
-**Стратегия:** Гибрид — берём логику из `memo-frontend` и переодеваем в дизайн v4.
+**Стратегия:** Гибрид — берём логику из старого `memo-frontend` и переодеваем в дизайн v4.
+
+## Архитектура — Turborepo Monorepo
+
+Проект использует **Turborepo + npm workspaces**:
+
+```
+memo/
+├── apps/
+│   ├── admin/          # Админ-панель (Next.js 14, App Router)
+│   ├── web/            # colourmountains.ru (Next.js 14, future)
+│   └── master/         # Приложение для мастеров (future)
+├── packages/
+│   ├── domain/         # Shared TypeScript типы + Zod схемы
+│   └── api-client/     # Shared HTTP клиент к FastAPI
+├── backend/            # FastAPI (отдельный сервис)
+└── turbo.json
+```
+
+**Принципы:**
+- **Shared:** Только типы (`@memo/domain`) и API клиент (`@memo/api-client`)
+- **Не shared:** UI компоненты — каждое приложение имеет свой дизайн
+- **Изоляция бандлов:** `@dnd-kit` и admin-specific deps не попадают в сайт
+
+Детали: `docs/ARCHITECTURE.md`
 
 ## График работ (MVP — 13–20 мая)
 
@@ -63,17 +87,17 @@
 
 ---
 
-## Этап 1: Инфраструктура Next.js
+## Этап 1: Инфраструктура Turborepo
 
-- [ ] Инициализировать Next.js 14 проект в `memo2/frontend/`
-- [ ] Настроить Tailwind CSS, TypeScript, ESLint
-- [ ] Установить зависимости: `@dnd-kit/core`, `@dnd-kit/sortable`
-- [ ] Скопировать `lib/types.ts`, `lib/mock-data.ts` из `memo/memo-frontend/`
-- [ ] Скопировать контексты (`schedule-context`, `booking-context`, `artist-context`, `chat-context`)
-- [ ] Скопировать Vitest + конфиг
-- [ ] `npm run dev` запускается на порту 3000
+- [x] Настроить Turborepo (turbo.json, pnpm-workspace.yaml, root package.json)
+- [x] Создать `packages/domain/` — shared TypeScript типы + Zod схемы
+- [x] Создать `packages/api-client/` — shared HTTP клиент
+- [x] Перенести существующий frontend в `apps/admin/`
+- [x] Обновить импорты: `@/lib/types` → `@memo/domain`
+- [x] Настроить npm workspaces
+- [x] Проверить: `npm install`, тесты проходят (160/160)
 
-**Результат:** Пустой Next.js проект с мок-данными и контекстами, готовый к наполнению
+**Результат:** Turborepo монорепо с admin-приложением и shared packages
 
 ---
 
@@ -183,18 +207,52 @@
 
 ---
 
-## Приоритеты и время (MVP — 13–20 мая)
+## Этап 9: Web — colourmountains.ru (P3 Client Booking Flow)
+
+- [ ] Создать `apps/web/` — Next.js 14 проект для публичного сайта
+- [ ] Настроить SEO: metadata, sitemap, robots
+- [ ] **Главная страница** — hero, галерея, услуги, о студии
+- [ ] **Страница услуг** — список мастер-классов
+- [ ] **Страница записи** (`/booking`) — 4-шаговый флоу:
+  - Шаг 1: LocationSelector (карточки локаций)
+  - Шаг 2: ActivitySchedule (выбор даты и занятия)
+  - Шаг 3: BookingForm (посетители, цены)
+  - Шаг 4: BookingConfirmation (оплата, сводка)
+- [ ] **Страница контактов**
+- [ ] Интеграция с `@memo/domain` и `@memo/api-client`
+
+**Результат:** Полноценный сайт colourmountains.ru с онлайн-записью
+
+---
+
+## Этап 10: Master App — расписание для мастеров
+
+- [ ] Создать `apps/master/` — Next.js 14 проект
+- [ ] **Mobile-first** дизайн
+- [ ] ArtistSelector (если мастер ведёт несколько направлений)
+- [ ] **ArtistWeekView** — расписание на неделю
+- [ ] **ActivityDetail** — детали занятия, список записавшихся
+- [ ] **AvailabilityToggle** — отметить доступность/недоступность
+- [ ] Push-уведомления о новых записях
+
+**Результат:** Мастера видят своё расписание и управляют доступностью
+
+---
+
+## Приоритеты и время
 
 | Этап | Дней | Что делаем | Кто |
 |------|------|-----------|-----|
 | 0 — Подготовка (агенты) | 1 | Создать 8 агентов | @manager |
-| 1 — Инфраструктура Next.js | 1 | Инициализация + депсы | @frontend-coder |
+| 1 — Инфраструктура Turborepo | 1 | Turborepo + shared packages | @architect |
 | 2 — Дизайн-система + Layout | 1 | Sidebar, Toolbar, RightPanel | @frontend-coder |
 | 3 — P1 Schedule | 3 | Сетка, карточки, DnD, штамп, модалка | @frontend-coder |
-| 4–7 — P2–P5 | 4 | Портирование страниц | @frontend-coder |
+| 4–7 — P2–P5 (admin) | 4 | Портирование страниц админки | @frontend-coder |
 | 8 — Тесты и полировка | 2 | Тесты, a11y, build | @tester + @frontend-coder |
+| 9 — Web (colourmountains.ru) | 5 | Сайт + онлайн-запись | @frontend-coder |
+| 10 — Master App | 3 | Приложение для мастеров | @frontend-coder |
 
-**Всего:** ~14-15 дней на MVP
+**Всего:** ~20-25 дней на полный релиз (P1–P5 + Web + Master)
 
 ---
 ## Документы
@@ -203,5 +261,6 @@
 
 ---
 ## Changelog
+- 2026-05-19: **Turborepo миграция.** Переход от единого `frontend/` к монорепо: `apps/admin/`, `packages/domain/`, `packages/api-client/`. Убран дедлайн MVP, добавлены этапы 9 (Web) и 10 (Master App). Обновлена архитектура: `docs/ARCHITECTURE.md`.
 - 2026-05-13: Updated deadlines — MVP 20 мая, Full release 31 мая. Added daily schedule for MVP sprint.
 - 2026-05-13: Initial PLAN.md created with etapy 0-8.

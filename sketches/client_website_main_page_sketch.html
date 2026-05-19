@@ -1,0 +1,673 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+<title>Цветные Горы</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,600;0,700;1,600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet"/>
+<style>
+:root {
+  --gold:        #C49A2E;
+  --gold-btn:    #C49A2E;
+  --gold-light:  #F0C84A;
+  --dark-green:  #1C3C2E;
+  --cream:       #FAF8F4;
+  --white:       #FFFFFF;
+  --text:        #1A1A1A;
+  --text-2:      #555;
+  --text-3:      #999;
+  --border:      #EBEBEB;
+  --tag-adults-bg:  #FFF3DC; --tag-adults-c: #8A5C00;
+  --tag-family-bg:  #E8F5E9; --tag-family-c: #256029;
+  --tag-kids-bg:    #FCE4EC; --tag-kids-c:   #8C0032;
+  --radius: 16px;
+  --card-w: 240px;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html{font-size:16px;scroll-behavior:smooth}
+body{
+  font-family:'Inter',sans-serif;
+  background:var(--cream);
+  color:var(--text);
+  max-width:390px;
+  margin:0 auto;
+  overflow-x:hidden;
+  -webkit-font-smoothing:antialiased;
+  padding-bottom:120px;
+}
+
+/* ══════════════════════════════════
+   HERO  ~35% viewport height
+══════════════════════════════════ */
+.hero{
+  position:relative;
+  height:36svh;
+  min-height:240px;
+  max-height:300px;
+  overflow:hidden;
+  background:#1a1208;
+}
+.hero-img{
+  position:absolute;inset:0;
+  background:url('https://images.unsplash.com/photo-1578301978693-85fa9c0320b9?w=800&q=80') center 20%/cover no-repeat;
+  opacity:.72;
+}
+.hero-grad{
+  position:absolute;inset:0;
+  background:linear-gradient(180deg,rgba(0,0,0,.28) 0%,rgba(0,0,0,.08) 45%,rgba(0,0,0,.72) 100%);
+}
+
+/* header */
+.hero-header{
+  position:absolute;top:0;left:0;right:0;
+  display:flex;align-items:center;justify-content:space-between;
+  padding:14px 18px;
+  z-index:5;
+}
+.logo{display:flex;align-items:center;gap:8px}
+.logo-icon{
+  width:32px;height:32px;
+  background:rgba(255,255,255,.15);
+  border-radius:8px;
+  display:flex;align-items:center;justify-content:center;
+  backdrop-filter:blur(6px);
+  border:0.5px solid rgba(255,255,255,.25);
+}
+.logo-icon svg{width:18px;height:18px;stroke:#fff;fill:none;stroke-width:1.8}
+.logo-text{line-height:1.1}
+.logo-name{font-family:'Playfair Display',serif;font-size:14px;font-weight:700;color:#fff;letter-spacing:.04em}
+.logo-sub{font-size:9px;color:rgba(255,255,255,.55);letter-spacing:.1em;text-transform:uppercase}
+.header-actions{display:flex;gap:8px}
+.hbtn{
+  width:36px;height:36px;border-radius:50%;
+  background:rgba(255,255,255,.15);backdrop-filter:blur(8px);
+  border:0.5px solid rgba(255,255,255,.2);
+  display:flex;align-items:center;justify-content:center;cursor:pointer;
+}
+.hbtn svg{width:17px;height:17px;stroke:#fff;fill:none;stroke-width:1.8}
+
+/* hero copy */
+.hero-copy{
+  position:absolute;bottom:18px;left:18px;right:18px;
+  z-index:5;
+}
+.hero-title{
+  font-family:'Playfair Display',serif;
+  font-size:26px;font-weight:700;line-height:1.18;
+  color:#fff;margin-bottom:10px;
+}
+.hero-title .accent{color:var(--gold-light)}
+.hero-pills{display:flex;align-items:center;gap:0;flex-wrap:nowrap}
+.hero-pill{font-size:12px;color:rgba(255,255,255,.8)}
+.hero-pill-sep{font-size:12px;color:rgba(255,255,255,.35);margin:0 6px}
+
+/* ══════════════════════════════════
+   CONTROLS BAR (tabs + location)
+══════════════════════════════════ */
+.controls-bar{
+  background:var(--white);
+  border-bottom:1px solid var(--border);
+  padding:0 18px;
+  display:flex;align-items:center;justify-content:space-between;
+  position:sticky;top:0;z-index:50;
+}
+.day-tabs{display:flex;gap:0}
+.day-tab{
+  padding:13px 14px;
+  font-size:14px;font-weight:500;color:var(--text-3);
+  cursor:pointer;
+  border-bottom:2px solid transparent;
+  transition:color .2s,border-color .2s;
+  white-space:nowrap;
+}
+.day-tab.active{color:var(--dark-green);border-bottom-color:var(--dark-green)}
+.loc-btn{
+  display:flex;align-items:center;gap:5px;
+  font-size:13px;font-weight:500;color:var(--text);
+  cursor:pointer;
+  padding:6px 10px;
+  border-radius:20px;
+  border:1px solid var(--border);
+  background:var(--cream);
+  white-space:nowrap;
+}
+.loc-btn svg{width:13px;height:13px;stroke:var(--gold);fill:none;stroke-width:2;flex-shrink:0}
+.loc-chevron{width:12px;height:12px;stroke:var(--text-3);fill:none;stroke-width:2}
+
+/* ══════════════════════════════════
+   PILLS FILTER
+══════════════════════════════════ */
+.pills-bar{
+  background:var(--white);
+  padding:10px 18px 12px;
+  display:flex;gap:8px;
+  overflow-x:auto;scrollbar-width:none;
+}
+.pills-bar::-webkit-scrollbar{display:none}
+.pill-btn{
+  padding:6px 16px;border-radius:30px;
+  font-size:13px;font-weight:500;
+  border:1.5px solid var(--border);
+  background:var(--white);color:var(--text-2);
+  cursor:pointer;white-space:nowrap;
+  transition:all .18s;flex-shrink:0;
+}
+.pill-btn.active{
+  background:var(--dark-green);color:#fff;border-color:var(--dark-green);
+}
+
+/* ══════════════════════════════════
+   MK CAROUSEL — horizontal scroll peek
+══════════════════════════════════ */
+.section{padding:18px 0 6px}
+.mk-scroll-wrap{
+  overflow-x:auto;
+  scroll-snap-type:x mandatory;
+  -webkit-overflow-scrolling:touch;
+  scrollbar-width:none;
+  display:flex;
+  gap:14px;
+  padding:4px 18px 16px;
+}
+.mk-scroll-wrap::-webkit-scrollbar{display:none}
+
+.mk-card{
+  scroll-snap-align:start;
+  flex-shrink:0;
+  width:var(--card-w);
+  background:var(--white);
+  border-radius:var(--radius);
+  overflow:hidden;
+  box-shadow:0 2px 16px rgba(0,0,0,.09);
+  cursor:pointer;
+  transition:transform .15s;
+  display:flex;flex-direction:column;
+}
+.mk-card:active{transform:scale(.98)}
+.mk-card-img{
+  position:relative;
+  width:100%;height:148px;
+  background-size:cover;background-position:center;
+  flex-shrink:0;
+}
+.mk-card-img-grad{
+  position:absolute;inset:0;
+  background:linear-gradient(to bottom,transparent 55%,rgba(0,0,0,.22) 100%);
+}
+.mk-fav{
+  position:absolute;top:9px;right:9px;
+  width:28px;height:28px;border-radius:50%;
+  background:rgba(255,255,255,.88);
+  display:flex;align-items:center;justify-content:center;
+  cursor:pointer;
+}
+.mk-fav svg{width:13px;height:13px;stroke:#c05;fill:none;stroke-width:2}
+.mk-fav.on svg{fill:#c05;stroke:#c05}
+.mk-tag{
+  position:absolute;bottom:9px;left:9px;
+  font-size:10px;font-weight:600;letter-spacing:.05em;
+  text-transform:uppercase;padding:3px 8px;border-radius:6px;
+}
+.tag-a{background:var(--tag-adults-bg);color:var(--tag-adults-c)}
+.tag-f{background:var(--tag-family-bg);color:var(--tag-family-c)}
+.tag-k{background:var(--tag-kids-bg);color:var(--tag-kids-c)}
+
+.mk-body{padding:12px 13px 14px;display:flex;flex-direction:column;gap:0;flex:1}
+.mk-title{
+  font-family:'Playfair Display',serif;
+  font-size:18px;font-weight:700;color:var(--text);
+  margin-bottom:9px;line-height:1.2;
+}
+.mk-meta{display:flex;flex-direction:column;gap:5px;margin-bottom:11px}
+.mk-row{display:flex;align-items:center;gap:5px;font-size:12px;color:var(--text-2);line-height:1.3}
+.mk-row svg{width:12px;height:12px;stroke:var(--text-3);fill:none;stroke-width:2;flex-shrink:0}
+.mk-row .mat{
+  display:inline-flex;align-items:center;gap:4px;
+  font-size:11px;font-weight:500;color:var(--text-3);
+}
+.mk-row .mat svg{stroke:var(--gold)}
+.mk-footer{display:flex;align-items:center;justify-content:space-between;margin-top:auto}
+.mk-price{font-size:15px;font-weight:700;color:var(--text)}
+.mk-price small{font-size:11px;font-weight:400;color:var(--text-3);margin-left:1px}
+.book-btn{
+  padding:8px 16px;border-radius:30px;
+  background:var(--gold-btn);color:#fff;
+  font-size:12px;font-weight:600;
+  border:none;cursor:pointer;
+  font-family:'Inter',sans-serif;
+  transition:opacity .15s;
+  white-space:nowrap;
+}
+.book-btn:active{opacity:.85}
+.book-btn.outline{
+  background:transparent;
+  border:1.5px solid var(--gold);
+  color:var(--gold);
+}
+
+/* ══════════════════════════════════
+   GUESTS WITH PAINTINGS — horizontal
+══════════════════════════════════ */
+.sec-header{
+  display:flex;align-items:baseline;justify-content:space-between;
+  padding:20px 18px 12px;
+}
+.sec-title{
+  font-family:'Playfair Display',serif;
+  font-size:20px;font-weight:700;color:var(--text);
+}
+.guests-scroll{
+  overflow-x:auto;scroll-snap-type:x mandatory;
+  -webkit-overflow-scrolling:touch;
+  scrollbar-width:none;
+  display:flex;gap:10px;
+  padding:0 18px 16px;
+}
+.guests-scroll::-webkit-scrollbar{display:none}
+.guest-photo{
+  scroll-snap-align:start;
+  flex-shrink:0;
+  width:130px;height:130px;
+  border-radius:12px;
+  background-size:cover;background-position:center;
+  box-shadow:0 2px 10px rgba(0,0,0,.10);
+}
+
+/* ══════════════════════════════════
+   REVIEWS CAROUSEL
+══════════════════════════════════ */
+.reviews-section{padding:0 0 20px}
+.reviews-header{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:20px 18px 14px;
+}
+.reviews-rating{display:flex;align-items:center;gap:7px}
+.reviews-star{font-size:20px;line-height:1}
+.reviews-score{font-size:16px;font-weight:700;color:var(--text)}
+.reviews-count{font-size:12px;color:var(--text-3);margin-left:2px}
+.reviews-link{font-size:13px;color:var(--dark-green);font-weight:500;text-decoration:none}
+
+.rv-scroll{
+  overflow-x:auto;scroll-snap-type:x mandatory;
+  -webkit-overflow-scrolling:touch;
+  scrollbar-width:none;
+  display:flex;gap:12px;
+  padding:0 18px 8px;
+}
+.rv-scroll::-webkit-scrollbar{display:none}
+.rv-card{
+  scroll-snap-align:start;
+  flex-shrink:0;
+  width:270px;
+  background:var(--white);
+  border-radius:var(--radius);
+  padding:14px;
+  box-shadow:0 2px 12px rgba(0,0,0,.07);
+}
+.rv-stars{display:flex;gap:2px;margin-bottom:8px}
+.rv-star{font-size:13px}
+.rv-text{
+  font-size:13px;color:var(--text);
+  line-height:1.55;margin-bottom:10px;
+  display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden;
+}
+.rv-author{display:flex;align-items:center;gap:6px}
+.rv-name{font-size:12px;font-weight:600;color:var(--text)}
+.rv-source{display:flex;align-items:center;gap:3px;font-size:11px;color:var(--text-3)}
+.rv-ya-dot{width:8px;height:8px;border-radius:50%;background:#FC3F1D;flex-shrink:0}
+.rv-date{font-size:11px;color:var(--text-3);margin-left:auto}
+
+/* ══════════════════════════════════
+   STICKY CHAT BAR
+══════════════════════════════════ */
+.chat-bar{
+  position:fixed;bottom:0;left:50%;transform:translateX(-50%);
+  width:100%;max-width:390px;
+  background:rgba(250,248,244,.96);
+  backdrop-filter:blur(14px);
+  -webkit-backdrop-filter:blur(14px);
+  border-top:1px solid rgba(0,0,0,.08);
+  padding:10px 14px 24px;
+  z-index:100;
+}
+.chat-chips{
+  display:flex;gap:7px;overflow-x:auto;scrollbar-width:none;
+  padding-bottom:9px;
+}
+.chat-chips::-webkit-scrollbar{display:none}
+.chat-chip{
+  flex-shrink:0;
+  padding:5px 11px;border-radius:20px;
+  background:var(--white);border:1px solid var(--border);
+  font-size:12px;color:var(--text-2);cursor:pointer;white-space:nowrap;
+}
+.chat-row{display:flex;align-items:center;gap:9px}
+.chat-spark{
+  width:38px;height:38px;border-radius:50%;
+  background:var(--dark-green);
+  display:flex;align-items:center;justify-content:center;flex-shrink:0;
+}
+.chat-spark svg{width:18px;height:18px}
+.chat-input-wrap{
+  flex:1;display:flex;align-items:center;
+  background:var(--white);
+  border-radius:24px;
+  border:1px solid var(--border);
+  padding:9px 8px 9px 14px;
+  gap:6px;
+}
+.chat-input{
+  flex:1;font-size:14px;color:var(--text);
+  background:transparent;border:none;outline:none;
+  font-family:'Inter',sans-serif;
+}
+.chat-input::placeholder{color:var(--text-3)}
+.chat-attach,.chat-send{
+  width:30px;height:30px;border-radius:50%;
+  border:none;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;flex-shrink:0;
+}
+.chat-attach{background:transparent}
+.chat-attach svg{width:17px;height:17px;stroke:var(--text-3);fill:none;stroke-width:2}
+.chat-send{background:var(--dark-green)}
+.chat-send svg{width:15px;height:15px;stroke:#fff;fill:none;stroke-width:2.2}
+
+/* misc */
+.divider{height:8px;background:var(--cream)}
+</style>
+</head>
+<body>
+
+<!-- ══ HERO ══════════════════════════════════════════ -->
+<section class="hero">
+  <div class="hero-img"></div>
+  <div class="hero-grad"></div>
+
+  <header class="hero-header">
+    <div class="logo">
+      <div class="logo-icon">
+        <svg viewBox="0 0 24 24"><path d="M3 17L9 11L13 15L17 10L21 14"/><path d="M3 21h18"/></svg>
+      </div>
+      <div class="logo-text">
+        <div class="logo-name">ЦВЕТНЫЕ ГОРЫ</div>
+        <div class="logo-sub">студия рисования</div>
+      </div>
+    </div>
+    <div class="header-actions">
+      <div class="hbtn">
+        <svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+      </div>
+      <div class="hbtn">
+        <svg viewBox="0 0 24 24"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+      </div>
+    </div>
+  </header>
+
+  <div class="hero-copy">
+    <div class="hero-title">Рисуйте в горах<br>и <span class="accent">увозите эмоции</span><br>с собой ♡</div>
+    <div class="hero-pills">
+      <span class="hero-pill">Новичкам подходит</span>
+      <span class="hero-pill-sep">•</span>
+      <span class="hero-pill">Всё включено</span>
+      <span class="hero-pill-sep">•</span>
+      <span class="hero-pill">Рядом с вами</span>
+    </div>
+  </div>
+</section>
+
+<!-- ══ CONTROLS ═══════════════════════════════════════ -->
+<div class="controls-bar">
+  <div class="day-tabs">
+    <div class="day-tab active" onclick="setDay(this,'today')">Сегодня</div>
+    <div class="day-tab" onclick="setDay(this,'tomorrow')">Завтра</div>
+    <div class="day-tab" onclick="setDay(this,'cal')">Календарь</div>
+  </div>
+  <div class="loc-btn" onclick="cycleLoc(this)">
+    <svg viewBox="0 0 24 24"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+    <span id="loc-label">Альпика</span>
+    <svg class="loc-chevron" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
+  </div>
+</div>
+
+<!-- ══ PILLS ══════════════════════════════════════════ -->
+<div class="pills-bar" id="pills-bar">
+  <div class="pill-btn active" onclick="setPill(this,'all')">Все</div>
+  <div class="pill-btn" onclick="setPill(this,'kids')">Детям</div>
+  <div class="pill-btn" onclick="setPill(this,'family')">Семьёй</div>
+  <div class="pill-btn" onclick="setPill(this,'adults')">Взрослым</div>
+</div>
+
+<!-- ══ MK CAROUSEL ════════════════════════════════════ -->
+<div class="mk-scroll-wrap" id="mk-scroll"></div>
+
+<div class="divider"></div>
+
+<!-- ══ GUESTS WITH PAINTINGS ═════════════════════════ -->
+<div class="sec-header">
+  <div class="sec-title">Наши гости и их картины</div>
+</div>
+<div class="guests-scroll" id="guests-scroll"></div>
+
+<div class="divider"></div>
+
+<!-- ══ REVIEWS ════════════════════════════════════════ -->
+<div class="reviews-section">
+  <div class="reviews-header">
+    <div class="reviews-rating">
+      <span class="reviews-star">⭐</span>
+      <span class="reviews-score">4.9</span>
+      <span class="reviews-count">в Яндекс Картах · 500+ отзывов</span>
+    </div>
+    <a class="reviews-link" href="#">Все →</a>
+  </div>
+  <div class="rv-scroll" id="rv-scroll"></div>
+</div>
+
+<!-- ══ CHAT BAR ════════════════════════════════════════ -->
+<div class="chat-bar">
+  <div class="chat-chips">
+    <div class="chat-chip">👶 Для ребёнка 8 лет</div>
+    <div class="chat-chip">❤️ Для двоих</div>
+    <div class="chat-chip">🌧 Чем заняться в дождь</div>
+    <div class="chat-chip">⏱ Есть только 1 час</div>
+  </div>
+  <div class="chat-row">
+    <div class="chat-spark">
+      <svg viewBox="0 0 24 24" fill="none"><path d="M12 2L9.5 9H2.5L8 13L6 20.5L12 16.5L18 20.5L16 13L21.5 9H14.5L12 2Z" stroke="#C49A2E" stroke-width="1.8" stroke-linejoin="round"/></svg>
+    </div>
+    <div class="chat-input-wrap">
+      <input class="chat-input" type="text" placeholder="Помочь выбрать мастер-класс?"/>
+      <button class="chat-attach">
+        <svg viewBox="0 0 24 24"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+      </button>
+      <button class="chat-send">
+        <svg viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+      </button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ── DATA ──────────────────────────────────────────── */
+const MKS = [
+  {
+    title:'Горный пейзаж',
+    cat:'adults', tag:'Для взрослых', tagCls:'tag-a',
+    datetime:'Сегодня, 18:00', dur:'2.5 ч',
+    loc:'Альпика', social:'Уже 3 гостя',
+    mat:'Акрил • 30×40', price:'4 000', unit:'₽/чел',
+    img:'https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?w=480&q=75',
+    isPrimary:true
+  },
+  {
+    title:'Морская волна',
+    cat:'adults', tag:'Для взрослых', tagCls:'tag-a',
+    datetime:'Сегодня, 20:00', dur:'2 ч',
+    loc:'Роза Хутор', social:'Уже 2 гостя',
+    mat:'Акрил • 30×40', price:'4 000', unit:'₽/чел',
+    img:'https://images.unsplash.com/photo-1505118380757-91f5f5632de0?w=480&q=75',
+    isPrimary:false
+  },
+  {
+    title:'Закат в горах',
+    cat:'family', tag:'Семейный', tagCls:'tag-f',
+    datetime:'Сегодня, 15:00', dur:'2 ч',
+    loc:'Гранд Отель Поляна', social:'Уже 2 семьи',
+    mat:'Масло • 40×50', price:'от 3 500', unit:'₽/чел',
+    img:'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=480&q=75',
+    isPrimary:false
+  },
+  {
+    title:'Кот на окошке',
+    cat:'kids', tag:'Детям', tagCls:'tag-k',
+    datetime:'Завтра, 11:00', dur:'90 мин',
+    loc:'Альпика', social:'Уже 4 ребёнка',
+    mat:'Акрил • 20×30', price:'2 500', unit:'₽/чел',
+    img:'https://images.unsplash.com/photo-1548802673-380ab8ebc7b7?w=480&q=75',
+    isPrimary:false
+  },
+  {
+    title:'Акрил — первый раз',
+    cat:'adults', tag:'Для взрослых', tagCls:'tag-a',
+    datetime:'Сегодня, 10:30', dur:'2.5 ч',
+    loc:'Поляна 1389', social:'Группа собирается',
+    mat:'Акрил • 30×40', price:'4 000', unit:'₽/чел',
+    img:'https://images.unsplash.com/photo-1541961017774-22349e4a1262?w=480&q=75',
+    isPrimary:false
+  }
+];
+
+const GUESTS = [
+  'https://images.unsplash.com/photo-1607453998774-d533f65dac99?w=300&q=70',
+  'https://images.unsplash.com/photo-1596464716127-f2a82984de30?w=300&q=70',
+  'https://images.unsplash.com/photo-1561214115-f2f134cc4912?w=300&q=70',
+  'https://images.unsplash.com/photo-1534131707746-25d604851a1f?w=300&q=70',
+  'https://images.unsplash.com/photo-1580489944761-15a19d654956?w=300&q=70',
+  'https://images.unsplash.com/photo-1552058544-f2b08422138a?w=300&q=70',
+];
+
+const REVIEWS = [
+  {stars:5,text:'Отличное место! Ребёнок в восторге, картина получилась замечательная',name:'Анна',date:'Сегодня'},
+  {stars:5,text:'Очень уютно и душевно. Красивые виды и замечательные преподаватели!',name:'Сергей',date:'Вчера'},
+  {stars:5,text:'Были всей семьёй — получили море эмоций и классные картины на память',name:'Мария',date:'2 дня назад'},
+  {stars:5,text:'Сразу пошли вдвоём с мужем. Столько позитива! Рекомендую всем туристам',name:'Марина',date:'3 дня назад'},
+];
+
+/* ── RENDER MK ─────────────────────────────────────── */
+let activeFilter = 'all';
+
+function renderMks() {
+  const wrap = document.getElementById('mk-scroll');
+  const list = activeFilter === 'all' ? MKS : MKS.filter(m => m.cat === activeFilter);
+  wrap.innerHTML = '';
+  list.forEach((mk, i) => {
+    const isPrimary = i === 0;
+    const card = document.createElement('div');
+    card.className = 'mk-card';
+    card.innerHTML = `
+      <div class="mk-card-img" style="background-image:url('${mk.img}')">
+        <div class="mk-card-img-grad"></div>
+        <div class="mk-fav" onclick="toggleFav(this,event)">
+          <svg viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+        </div>
+        <span class="mk-tag ${mk.tagCls}">${mk.tag}</span>
+      </div>
+      <div class="mk-body">
+        <div class="mk-title">${mk.title}</div>
+        <div class="mk-meta">
+          <div class="mk-row">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            ${mk.datetime} · ${mk.dur}
+          </div>
+          <div class="mk-row">
+            <svg viewBox="0 0 24 24"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+            ${mk.loc}
+          </div>
+          <div class="mk-row">
+            <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+            ${mk.social}
+          </div>
+          <div class="mk-row mat">
+            <svg viewBox="0 0 24 24" style="width:12px;height:12px;stroke:var(--gold);fill:none;stroke-width:2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
+            ${mk.mat}
+          </div>
+        </div>
+        <div class="mk-footer">
+          <div class="mk-price">${mk.price}<small> ${mk.unit}</small></div>
+          <button class="book-btn ${isPrimary?'':'outline'}" onclick="bookMk(${i},event)">Записаться</button>
+        </div>
+      </div>`;
+    wrap.appendChild(card);
+  });
+}
+
+/* ── RENDER GUESTS ─────────────────────────────────── */
+function renderGuests(){
+  const wrap = document.getElementById('guests-scroll');
+  GUESTS.forEach(url => {
+    const d = document.createElement('div');
+    d.className = 'guest-photo';
+    d.style.backgroundImage = `url('${url}')`;
+    wrap.appendChild(d);
+  });
+}
+
+/* ── RENDER REVIEWS ────────────────────────────────── */
+function renderReviews(){
+  const wrap = document.getElementById('rv-scroll');
+  REVIEWS.forEach(r => {
+    const stars = '⭐'.repeat(r.stars);
+    const card = document.createElement('div');
+    card.className = 'rv-card';
+    card.innerHTML = `
+      <div class="rv-stars">${'<span class="rv-star">⭐</span>'.repeat(r.stars)}</div>
+      <div class="rv-text">${r.text}</div>
+      <div class="rv-author">
+        <div>
+          <div class="rv-name">${r.name}</div>
+          <div class="rv-source"><span class="rv-ya-dot"></span> Яндекс Карты</div>
+        </div>
+        <div class="rv-date">${r.date}</div>
+      </div>`;
+    wrap.appendChild(card);
+  });
+}
+
+/* ── CONTROLS ──────────────────────────────────────── */
+const LOCS = ['Альпика','Роза Хутор','Гранд Отель Поляна','Поляна 1389'];
+let locIdx = 0;
+function cycleLoc(btn){
+  locIdx = (locIdx+1) % LOCS.length;
+  document.getElementById('loc-label').textContent = LOCS[locIdx];
+}
+
+function setDay(el, day){
+  document.querySelectorAll('.day-tab').forEach(t=>t.classList.remove('active'));
+  el.classList.add('active');
+}
+
+function setPill(el, filter){
+  document.querySelectorAll('.pill-btn').forEach(p=>p.classList.remove('active'));
+  el.classList.add('active');
+  activeFilter = filter;
+  renderMks();
+}
+
+function toggleFav(el, e){
+  e.stopPropagation();
+  el.classList.toggle('on');
+}
+
+function bookMk(i, e){
+  e.stopPropagation();
+  alert('→ Запись на: ' + MKS[i]?.title);
+}
+
+/* ── INIT ──────────────────────────────────────────── */
+renderMks();
+renderGuests();
+renderReviews();
+</script>
+</body>
+</html>

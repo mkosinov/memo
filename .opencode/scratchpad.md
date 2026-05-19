@@ -1,40 +1,54 @@
-# Current Mission
+# Session: Turborepo Migration
 
-## Feature: P1 — Admin Schedule
-## Branch: feat-admin-schedule
-## Worktree: /root/workspace/memo/.worktrees/feat-admin-schedule
-## PR: https://github.com/mkosinov/memo/pull/12
+## Date: 2026-05-19
+## Branch: main
 
-## Workflow Status
-- [x] Step 0: Project Reconnaissance (COMPLETED 2026-05-15)
-- [x] Step 1: Brainstorming (design approved)
-- [x] Step 2: Writing Plans (plan approved)
-- [x] Step 3: Git Worktree (created, baseline clean)
-- [x] Step 4: Subagent-Driven Development (ALL 15 TASKS COMPLETE)
-  - [x] Task 1: Next.js init + Tailwind + deps
-  - [x] Task 2: Types, mock data, utils
-  - [x] Task 3: CSS variables + base styles
-  - [x] Task 4: Contexts (Schedule + UI)
-  - [x] Task 5: Sidebar + MiniCalendar
-  - [x] Task 6: Toolbar + RightPanel shell
-  - [x] Task 7: Schedule grid (WeekView, DayColumn, TimeColumn)
-  - [x] Task 8: ActivityCard component
-  - [x] Task 9: Overlapping cards + NowLine
-  - [x] Task 10: DnD integration (@dnd-kit)
-  - [x] Task 11: Stamp panel + create activity
-  - [x] Task 12: Delete mode
-  - [x] Task 13: Toast system + Copy last week
-  - [x] Task 14: ActivityModal (create/edit)
-  - [x] Task 15: Tests + Polish
-- [x] Step 5: Doc commit (session summary committed)
-- [x] Step 6: Finishing (PR created, branch pushed)
+## Context
 
-## Final Results
-- **Tests**: 149/149 passing (15 test files)
-- **TypeScript**: `tsc --noEmit` — clean
-- **Build**: `npm run build` — successful (static prerender)
-- **Commits**: 22 on feat-admin-schedule branch
-- **PR**: https://github.com/mkosinov/memo/pull/12
-- **GitHub Project**: Issue #4 → Done
+Предыдущий workflow (P2 — Booking Management) завершён. PR #38 создан.
 
-## Workflow Complete ✅
+Принято архитектурное решение: миграция из единого `frontend/` в **Turborepo monorepo** для поддержки 3+ frontend приложений (admin, web, master) с shared типами и API клиентом.
+
+## Что сделано
+
+### Архитектурные изменения
+- [x] Создана базовая структура Turborepo (`turbo.json`, `pnpm-workspace.yaml`, root `package.json`)
+- [x] Создан `packages/domain/` — shared TypeScript типы + Zod схемы (`@memo/domain`)
+- [x] Создан `packages/api-client/` — shared HTTP клиент с Zod-валидацией (`@memo/api-client`)
+- [x] Перенесён `frontend/` → `apps/admin/`
+- [x] Обновлены все импорты: `@/lib/types` → `@memo/domain` (13 файлов)
+- [x] Обновлен `PLAN.md` — добавлена архитектура, этапы 9 (Web) и 10 (Master)
+- [x] Создан `docs/ARCHITECTURE.md` — полная документация структуры репо
+
+### Результаты
+- Tests: **160/160 passing** (vitest)
+- npm install: ✅ работает с workspaces
+- TypeScript paths: ✅ `@memo/domain`, `@memo/api-client` резолвятся
+
+## Новая структура
+
+```
+memo/
+├── apps/
+│   └── admin/          # Админ-панель (Next.js 14)
+│   └── web/            # colourmountains.ru (future)
+│   └── master/         # Приложение для мастеров (future)
+├── packages/
+│   ├── domain/         # Shared типы + Zod
+│   └── api-client/     # Shared HTTP клиент
+├── backend/            # FastAPI
+└── docs/
+    ├── ARCHITECTURE.md
+    └── PLAN.md
+```
+
+## Следующие шаги
+
+1. Создать `apps/web/` — начать разработку colourmountains.ru
+2. Backend: начать FastAPI (в `backend/`)
+3. Обновить GitHub Project board — Issue #6 (Web) в In Progress
+
+## Документы
+
+- Архитектура: `docs/ARCHITECTURE.md`
+- План: `docs/PLAN.md` (обновлён)

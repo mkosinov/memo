@@ -1,6 +1,8 @@
 'use client';
 
 import React, { useMemo } from 'react';
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import { useSchedule } from '@/contexts/ScheduleContext';
 import { useUI } from '@/contexts/UIContext';
 import { ARTISTS } from '@/lib/mock-data';
@@ -86,11 +88,11 @@ function MoonIcon({ className }: { className?: string }) {
 // ─── Navigation Items ─────────────────────────────────────────────────────
 
 const NAV_ITEMS = [
-  { label: 'Расписание', icon: 'calendar', active: true },
-  { label: 'Бронирования', icon: 'clipboard', active: false },
-  { label: 'Клиенты', icon: 'users', active: false },
-  { label: 'Мастера', icon: 'palette', active: false },
-  { label: 'Чат', icon: 'chat', active: false },
+  { label: 'Расписание', icon: 'calendar', href: '/' },
+  { label: 'Записи', icon: 'clipboard', href: '/bookings' },
+  { label: 'Клиенты', icon: 'users', href: '/clients' },
+  { label: 'Мастера', icon: 'palette', href: '#' },
+  { label: 'Чат', icon: 'chat', href: '/chat' },
 ] as const;
 
 const ICON_MAP: Record<string, React.FC<{ className?: string }>> = {
@@ -263,6 +265,12 @@ function ArtistLegend({ collapsed }: ArtistLegendProps) {
 export function Sidebar() {
   const { currentWeek, setCurrentWeek } = useSchedule();
   const { sidebarCollapsed, toggleSidebar, theme, toggleTheme } = useUI();
+  const pathname = usePathname();
+
+  const isActive = (href: string) => {
+    if (href === '/') return pathname === '/';
+    return pathname.startsWith(href);
+  };
 
   return (
     <aside
@@ -300,11 +308,13 @@ export function Sidebar() {
         <nav className={`py-2 ${sidebarCollapsed ? 'px-1' : 'px-2'}`}>
           {NAV_ITEMS.map(item => {
             const IconComponent = ICON_MAP[item.icon];
+            const active = isActive(item.href);
             return (
-              <button
+              <Link
                 key={item.label}
+                href={item.href}
                 className={`w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors duration-150
-                  ${item.active
+                  ${active
                     ? 'bg-brand text-white font-medium'
                     : 'text-white/60 hover:bg-white/5 hover:text-white/90'
                   }
@@ -312,9 +322,9 @@ export function Sidebar() {
                 aria-label={item.label}
                 title={sidebarCollapsed ? item.label : undefined}
               >
-                <IconComponent className={item.active ? 'text-white' : 'text-white/60'} />
+                <IconComponent className={active ? 'text-white' : 'text-white/60'} />
                 {!sidebarCollapsed && <span>{item.label}</span>}
-              </button>
+              </Link>
             );
           })}
         </nav>

@@ -1,0 +1,37 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ===== Design System Variables ===== */
+
+:root {
+  --brand: #004D56;
+  --brand-light: #006670;
+  --gold: #C49A2E;
+  --ink: #1a1a1a;
+  --ink-mid: #555555;
+  --ink-light: #888888;
+  --ink-faint: #cccccc;
+  --surface: #f4f4f5;
+  --line: #E0E0E1;
+}
+
+/* ===== Base Styles ===== */
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  color: var(--ink);
+  background: var(--surface);
+  font-family: var(--font-inter), system-ui, -apple-system, sans-serif;
+}

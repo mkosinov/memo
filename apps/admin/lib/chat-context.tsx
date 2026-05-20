@@ -66,9 +66,9 @@ function generateAIResponse(userText: string): { text: string; recommendations?:
           recommendations: [{
             serviceId: service.id,
             name: service.name,
-            adultPrice: service.adultPrice,
-            childPrice: service.childPrice,
-            durationMinutes: service.durationMinutes,
+            adultPrice: service.adultPrice ?? service.defaultAdultPrice ?? 0,
+            childPrice: service.childPrice ?? service.defaultChildPrice ?? 0,
+            durationMinutes: service.durationMinutes ?? Math.round((service.duration ?? 0) * 60),
             artistName: artist?.name ?? '',
             locationName: location?.name ?? '',
           }],
@@ -78,18 +78,21 @@ function generateAIResponse(userText: string): { text: string; recommendations?:
   }
 
   if (lower.includes('ребёнок') || lower.includes('детск') || lower.includes('с ребёнком') || lower.includes('с ребенком') || lower.includes('дети')) {
-    const familyServices = SERVICES.filter(s => s.childPrice > 0).slice(0, 3);
+    const familyServices = SERVICES.filter(s => (s.childPrice ?? s.defaultChildPrice ?? 0) > 0).slice(0, 3);
     return {
       text: 'Конечно! У нас есть мастер-классы, которые отлично подходят для занятий с детьми 👨‍👩‍👧‍👦 Детский тариф доступен на всех МК:',
       recommendations: familyServices.map(s => {
         const artist = ARTISTS.find(a => a.id === 'a1');
         const location = LOCATIONS.find(l => l.id === 'l1');
+        const adultP = s.adultPrice ?? s.defaultAdultPrice ?? 0;
+        const childP = s.childPrice ?? s.defaultChildPrice ?? 0;
+        const dur = s.durationMinutes ?? Math.round((s.duration ?? 0) * 60);
         return {
           serviceId: s.id,
           name: s.name,
-          adultPrice: s.adultPrice,
-          childPrice: s.childPrice,
-          durationMinutes: s.durationMinutes,
+          adultPrice: adultP,
+          childPrice: childP,
+          durationMinutes: dur,
           artistName: artist?.name ?? '',
           locationName: location?.name ?? '',
         };
@@ -103,12 +106,15 @@ function generateAIResponse(userText: string): { text: string; recommendations?:
       recommendations: SERVICES.slice(0, 2).map(s => {
         const artist = ARTISTS.find(a => a.id === 'a1');
         const location = LOCATIONS.find(l => l.id === 'l1');
+        const adultP = s.individualPrice ?? s.defaultIndividualPrice ?? 0;
+        const childP = s.childPrice ?? s.defaultChildPrice ?? 0;
+        const dur = s.durationMinutes ?? Math.round((s.duration ?? 0) * 60);
         return {
           serviceId: s.id,
           name: s.name,
-          adultPrice: s.individualPrice,
-          childPrice: s.childPrice,
-          durationMinutes: s.durationMinutes,
+          adultPrice: adultP,
+          childPrice: childP,
+          durationMinutes: dur,
           artistName: artist?.name ?? '',
           locationName: location?.name ?? '',
         };
@@ -122,12 +128,15 @@ function generateAIResponse(userText: string): { text: string; recommendations?:
       recommendations: SERVICES.map(s => {
         const artist = ARTISTS.find(a => a.id === 'a1');
         const location = LOCATIONS.find(l => l.id === 'l1');
+        const adultP = s.adultPrice ?? s.defaultAdultPrice ?? 0;
+        const childP = s.childPrice ?? s.defaultChildPrice ?? 0;
+        const dur = s.durationMinutes ?? Math.round((s.duration ?? 0) * 60);
         return {
           serviceId: s.id,
           name: s.name,
-          adultPrice: s.adultPrice,
-          childPrice: s.childPrice,
-          durationMinutes: s.durationMinutes,
+          adultPrice: adultP,
+          childPrice: childP,
+          durationMinutes: dur,
           artistName: artist?.name ?? '',
           locationName: location?.name ?? '',
         };
@@ -147,12 +156,15 @@ function generateAIResponse(userText: string): { text: string; recommendations?:
       recommendations: SERVICES.map(s => {
         const artist = ARTISTS.find(a => a.id === 'a1');
         const location = LOCATIONS.find(l => l.id === 'l1');
+        const adultP = s.adultPrice ?? s.defaultAdultPrice ?? 0;
+        const childP = s.childPrice ?? s.defaultChildPrice ?? 0;
+        const dur = s.durationMinutes ?? Math.round((s.duration ?? 0) * 60);
         return {
           serviceId: s.id,
           name: s.name,
-          adultPrice: s.adultPrice,
-          childPrice: s.childPrice,
-          durationMinutes: s.durationMinutes,
+          adultPrice: adultP,
+          childPrice: childP,
+          durationMinutes: dur,
           artistName: artist?.name ?? '',
           locationName: location?.name ?? '',
         };

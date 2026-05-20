@@ -2,7 +2,8 @@
 
 import React, { createContext, useContext, useState, useMemo, useCallback } from 'react';
 import { Activity, Client, Visitor } from '@memo/domain';
-import { ARTISTS, LOCATIONS, SERVICES, INITIAL_ACTIVITIES, CLIENTS, VISITORS, RECORDS, VISITS, addDays, getMonday } from './mock-data';
+import { getStaticEvents, VISITORS, RECORDS, VISITS } from './mock-data';
+import { addDays, getMondayStr } from './utils';
 
 export interface BookingVisitor {
   tempId: string;
@@ -64,7 +65,7 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
   const [step, setStep] = useState<BookingStep>(1);
   const [selectedLocationId, setSelectedLocationId] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState<string>(today);
-  const [weekStart, setWeekStart] = useState<string>(getMonday(new Date()));
+  const [weekStart, setWeekStart] = useState<string>(getMondayStr(new Date()));
   const [selectedActivity, setSelectedActivity] = useState<Activity | null>(null);
   const [visitors, setVisitors] = useState<BookingVisitor[]>([]);
   const [comment, setComment] = useState('');
@@ -82,7 +83,7 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
   }, [weekStart]);
 
   const availableActivities = useMemo(() => {
-    return INITIAL_ACTIVITIES.filter(a => {
+    return getStaticEvents().filter(a => {
       if (!selectedLocationId) return false;
       if (a.locationId !== selectedLocationId) return false;
       if (a.date !== selectedDate) return false;
@@ -128,7 +129,7 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
     setStep(1);
     setSelectedLocationId(null);
     setSelectedDate(today);
-    setWeekStart(getMonday(new Date()));
+    setWeekStart(getMondayStr(new Date()));
     setSelectedActivity(null);
     setVisitors([]);
     setComment('');

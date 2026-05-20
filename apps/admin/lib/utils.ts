@@ -67,6 +67,11 @@ export function getMonday(date: Date): Date {
   return d;
 }
 
+/** Get the Monday of the week containing the given date, as ISO string (YYYY-MM-DD). */
+export function getMondayStr(date: Date): string {
+  return getMonday(date).toISOString().split('T')[0];
+}
+
 /** Format date as "13 мая" (day + genitive month). */
 export function formatDate(date: Date): string {
   return `${date.getDate()} ${MONTHS_GENITIVE[date.getMonth()]}`;
@@ -79,6 +84,22 @@ export function isSameDay(a: Date, b: Date): boolean {
     a.getMonth() === b.getMonth() &&
     a.getDate() === b.getDate()
   );
+}
+
+/** Add/subtract days from a date. Input can be Date or ISO string. Returns ISO string. */
+export function addDays(date: Date | string, days: number): string {
+  const d = typeof date === 'string' ? new Date(date + 'T00:00:00') : new Date(date);
+  d.setDate(d.getDate() + days);
+  return d.toISOString().split('T')[0];
+}
+
+/** Add minutes to a time string ("HH:MM"), returns "HH:MM". */
+export function addMinutes(time: string, minutes: number): string {
+  const [h, m] = time.split(':').map(Number);
+  const totalMinutes = h * 60 + m + minutes;
+  const newH = Math.floor(totalMinutes / 60) % 24;
+  const newM = totalMinutes % 60;
+  return `${String(newH).padStart(2, '0')}:${String(newM).padStart(2, '0')}`;
 }
 
 /** Generate half-hour time slots from HOURS_START to HOURS_END (exclusive). */

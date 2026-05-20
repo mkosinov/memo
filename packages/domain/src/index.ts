@@ -98,7 +98,7 @@ export type Visitor = z.infer<typeof VisitorSchema>;
 
 // ─── BookingRecord ────────────────────────────────────────────────────────
 
-export const BookingStatusSchema = z.enum(['PENDING', 'CONFIRMED', 'CANCELLED', 'NO_SHOW']);
+export const BookingStatusSchema = z.enum(['PENDING', 'CONFIRMED', 'CANCELLED', 'NO_SHOW', 'WAITING', 'VISITED', 'MISSED']);
 export type BookingStatus = z.infer<typeof BookingStatusSchema>;
 
 export const BookingRecordSchema = z.object({
@@ -114,6 +114,9 @@ export type BookingRecord = z.infer<typeof BookingRecordSchema>;
 
 // ─── Visit ────────────────────────────────────────────────────────────────
 
+export const VisitStatusSchema = z.enum(['WAITING', 'VISITED', 'MISSED', 'CANCELLED']);
+export type VisitStatus = z.infer<typeof VisitStatusSchema>;
+
 export const VisitSchema = z.object({
   id: z.string(),
   recordId: z.string(),
@@ -121,6 +124,7 @@ export const VisitSchema = z.object({
   isPrimary: z.boolean(),
   priceCharged: z.number(),
   visited: z.boolean(),
+  status: VisitStatusSchema.optional(),
 });
 
 export type Visit = z.infer<typeof VisitSchema>;
@@ -168,7 +172,7 @@ export type Filters = z.infer<typeof FiltersSchema>;
 export const ConflictSchema = z.object({
   activityId1: z.string(),
   activityId2: z.string(),
-  artistId: z.string(),
+  artistId: z.string().optional(),
   message: z.string(),
 });
 

@@ -190,22 +190,22 @@ export const RECORDS: BookingRecord[] = [
 ];
 
 export const VISITS: Visit[] = [
-  { id: 'vis1', recordId: 'rec1', visitorId: 'v1', isPrimary: false, priceCharged: 2500, status: 'VISITED' },
-  { id: 'vis2', recordId: 'rec1', visitorId: 'v2', isPrimary: false, priceCharged: 1800, status: 'VISITED' },
-  { id: 'vis3', recordId: 'rec2', visitorId: 'v6', isPrimary: false, priceCharged: 2500, status: 'VISITED' },
-  { id: 'vis4', recordId: 'rec2', visitorId: 'v7', isPrimary: false, priceCharged: 1800, status: 'VISITED' },
-  { id: 'vis5', recordId: 'rec2', visitorId: 'v8', isPrimary: false, priceCharged: 1800, status: 'VISITED' },
-  { id: 'vis6', recordId: 'rec3', visitorId: 'v5', isPrimary: false, priceCharged: 2800, status: 'VISITED' },
-  { id: 'vis7', recordId: 'rec5', visitorId: 'v1', isPrimary: true, priceCharged: 8200, status: 'VISITED' },
-  { id: 'vis8', recordId: 'rec5', visitorId: 'v2', isPrimary: false, priceCharged: 1800, status: 'VISITED' },
-  { id: 'vis9', recordId: 'rec6', visitorId: 'v3', isPrimary: false, priceCharged: 2500, status: 'VISITED' },
-  { id: 'vis10', recordId: 'rec6', visitorId: 'v4', isPrimary: false, priceCharged: 1800, status: 'VISITED' },
-  { id: 'vis11', recordId: 'rec8', visitorId: 'v6', isPrimary: false, priceCharged: 3500, status: 'VISITED' },
-  { id: 'vis12', recordId: 'rec9', visitorId: 'v12', isPrimary: false, priceCharged: 3500, status: 'WAITING' },
-  { id: 'vis13', recordId: 'rec10', visitorId: 'v1', isPrimary: false, priceCharged: 3000, status: 'VISITED' },
-  { id: 'vis14', recordId: 'rec10', visitorId: 'v2', isPrimary: false, priceCharged: 2200, status: 'VISITED' },
-  { id: 'vis15', recordId: 'rec12', visitorId: 'v3', isPrimary: true, priceCharged: 8200, status: 'WAITING' },
-  { id: 'vis16', recordId: 'rec12', visitorId: 'v4', isPrimary: false, priceCharged: 2000, status: 'WAITING' },
+  { id: 'vis1', recordId: 'rec1', visitorId: 'v1', isPrimary: false, priceCharged: 2500, visited: true, status: 'VISITED' },
+  { id: 'vis2', recordId: 'rec1', visitorId: 'v2', isPrimary: false, priceCharged: 1800, visited: true, status: 'VISITED' },
+  { id: 'vis3', recordId: 'rec2', visitorId: 'v6', isPrimary: false, priceCharged: 2500, visited: true, status: 'VISITED' },
+  { id: 'vis4', recordId: 'rec2', visitorId: 'v7', isPrimary: false, priceCharged: 1800, visited: true, status: 'VISITED' },
+  { id: 'vis5', recordId: 'rec2', visitorId: 'v8', isPrimary: false, priceCharged: 1800, visited: true, status: 'VISITED' },
+  { id: 'vis6', recordId: 'rec3', visitorId: 'v5', isPrimary: false, priceCharged: 2800, visited: true, status: 'VISITED' },
+  { id: 'vis7', recordId: 'rec5', visitorId: 'v1', isPrimary: true, priceCharged: 8200, visited: true, status: 'VISITED' },
+  { id: 'vis8', recordId: 'rec5', visitorId: 'v2', isPrimary: false, priceCharged: 1800, visited: true, status: 'VISITED' },
+  { id: 'vis9', recordId: 'rec6', visitorId: 'v3', isPrimary: false, priceCharged: 2500, visited: true, status: 'VISITED' },
+  { id: 'vis10', recordId: 'rec6', visitorId: 'v4', isPrimary: false, priceCharged: 1800, visited: true, status: 'VISITED' },
+  { id: 'vis11', recordId: 'rec8', visitorId: 'v6', isPrimary: false, priceCharged: 3500, visited: true, status: 'VISITED' },
+  { id: 'vis12', recordId: 'rec9', visitorId: 'v12', isPrimary: false, priceCharged: 3500, visited: false, status: 'WAITING' },
+  { id: 'vis13', recordId: 'rec10', visitorId: 'v1', isPrimary: false, priceCharged: 3000, visited: true, status: 'VISITED' },
+  { id: 'vis14', recordId: 'rec10', visitorId: 'v2', isPrimary: false, priceCharged: 2200, visited: true, status: 'VISITED' },
+  { id: 'vis15', recordId: 'rec12', visitorId: 'v3', isPrimary: true, priceCharged: 8200, visited: false, status: 'WAITING' },
+  { id: 'vis16', recordId: 'rec12', visitorId: 'v4', isPrimary: false, priceCharged: 2000, visited: false, status: 'WAITING' },
 ];
 
 export const PAYMENTS: Payment[] = [

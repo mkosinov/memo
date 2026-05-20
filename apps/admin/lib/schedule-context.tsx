@@ -1,7 +1,8 @@
 import React, { createContext, useContext, useState, useCallback, useMemo } from 'react';
 import { DndContext } from '@dnd-kit/core';
 import { Activity, Filters, FormatPainterState, ViewMode, Conflict } from '@memo/domain';
-import { ARTISTS, LOCATIONS, SERVICES, INITIAL_ACTIVITIES, addDays, addMinutes, getMonday } from './mock-data';
+import { ARTISTS, LOCATIONS, SERVICES, getStaticEvents } from './mock-data';
+import { addDays, formatTime, getMondayStr } from './utils';
 
 interface ScheduleContextType {
   activities: Activity[];
@@ -32,12 +33,12 @@ export function useSchedule() {
 }
 
 export function ScheduleProvider({ children }: { children: React.ReactNode }) {
-  const [activities, setActivities] = useState<Activity[]>(INITIAL_ACTIVITIES);
+  const [activities, setActivities] = useState<Activity[]>(getStaticEvents());
   const [filters, setFilters] = useState<Filters>({
     locationId: '',
     serviceId: '',
     artistId: '',
-    weekStart: getMonday(new Date()),
+    weekStart: getMondayStr(new Date()),
   });
   const [viewMode, setViewMode] = useState<ViewMode>('week');
   const [formatPainter, setFormatPainter] = useState<FormatPainterState>({
@@ -66,11 +67,14 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
       if (a.id !== id) return a;
       const service = SERVICES.find(s => s.id === a.serviceId);
       const duration = service?.durationMinutes ?? 120;
+      const [h, m] = newStartTime.split(':').map(Number);
+      const startNum = h + (m / 60);
+      const endNum = startNum + (duration / 60);
       return {
         ...a,
         date: newDate,
-        startTime: newStartTime,
-        endTime: addMinutes(newStartTime, duration),
+        startTime: startNum,
+        endTime: formatTime(endNum),
       };
     }));
   }, []);
@@ -95,7 +99,7 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
     const lastWeekStart = addDays(filters.weekStart, -7);
     const lastWeekDays = Array.from({ length: 7 }, (_, i) => addDays(lastWeekStart, i));
     const publicActivities = activities.filter(
-      a => a.isPublic && lastWeekDays.includes(a.date)
+      (a): a is typeof a & { date: string } => !!(a.isPublic && a.date && lastWeekDays.includes(a.date))
     );
     const newActivities = publicActivities.map((a, i) => ({
       ...a,
@@ -107,7 +111,8 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
   }, [activities, filters.weekStart]);
 
   const filteredActivities = useMemo(() => {
-    return activities.filter(a => {
+    return activities.filter((a): a is typeof a & { date: string } => {
+      if (!a.date) return false;
       if (filters.locationId && a.locationId !== filters.locationId) return false;
       if (filters.serviceId && a.serviceId !== filters.serviceId) return false;
       if (filters.artistId && a.artistId !== filters.artistId) return false;
@@ -118,7 +123,7 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
 
   const conflicts = useMemo(() => {
     const result: Conflict[] = [];
-    const weekActivities = activities.filter(a => weekDays.includes(a.date));
+    const weekActivities = activities.filter((a): a is typeof a & { date: string } => !!a.date && weekDays.includes(a.date));
     for (let i = 0; i < weekActivities.length; i++) {
       for (let j = i + 1; j < weekActivities.length; j++) {
         const a = weekActivities[i];
@@ -127,9 +132,9 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
         if (a.date !== b.date) continue;
         if (a.locationId === b.locationId) continue;
         const aStart = timeToMinutes(a.startTime);
-        const aEnd = timeToMinutes(a.endTime);
+        const aEnd = timeToMinutes(a.endTime ?? a.startTime + a.duration / 60);
         const bStart = timeToMinutes(b.startTime);
-        const bEnd = timeToMinutes(b.endTime);
+        const bEnd = timeToMinutes(b.endTime ?? b.startTime + b.duration / 60);
         if (aStart < bEnd && bStart < aEnd) {
           const artist = ARTISTS.find(ar => ar.id === a.artistId);
           const locA = LOCATIONS.find(l => l.id === a.locationId);
@@ -173,7 +178,8 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
   );
 }
 
-function timeToMinutes(time: string): number {
+function timeToMinutes(time: string | number): number {
+  if (typeof time === 'number') return Math.round(time * 60);
   const [h, m] = time.split(':').map(Number);
   return h * 60 + m;
 }

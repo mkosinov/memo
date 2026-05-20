@@ -53,7 +53,7 @@ export function ActivityCard({ activity, artist, studios = [], style, onEdit, is
       deletingRef.current = true;
       setDeleting(true);
       setTimeout(() => {
-        const { id: _id, ...rest } = activity;
+        const { id: _, ...rest } = activity;
         deleteActivity(activity.id);
         showToast(`«${activity.serviceName}» удалено`, () => addActivity(rest));
       }, 150);

@@ -2,7 +2,8 @@
 
 import React, { createContext, useContext, useState, useMemo } from 'react';
 import { Activity, Artist } from '@memo/domain';
-import { ARTISTS, INITIAL_ACTIVITIES, RECORDS, VISITS, VISITORS, PAYMENTS, SERVICES, LOCATIONS, addDays, getMonday } from './mock-data';
+import { ARTISTS, getStaticEvents, RECORDS, VISITS, VISITORS, PAYMENTS } from './mock-data';
+import { addDays, getMondayStr } from './utils';
 
 export interface AvailabilitySlot {
   day: string;
@@ -46,12 +47,12 @@ export function useArtist() {
 
 export function ArtistProvider({ children }: { children: React.ReactNode }) {
   const [selectedArtistId, setSelectedArtistId] = useState(ARTISTS[0].id);
-  const [weekStart, setWeekStart] = useState(getMonday(new Date()));
+  const [weekStart, setWeekStart] = useState(getMondayStr(new Date()));
   const [expandedActivityId, setExpandedActivityId] = useState<string | null>(null);
   const [isOffline, setIsOffline] = useState(true);
   const [availability, setAvailability] = useState<AvailabilitySlot[]>(() => {
     const slots: AvailabilitySlot[] = [];
-    const ws = getMonday(new Date());
+    const ws = getMondayStr(new Date());
     for (let d = 0; d < 7; d++) {
       for (let h = 9; h <= 20; h++) {
         slots.push({ day: addDays(ws, d), hour: h, available: true });
@@ -65,7 +66,7 @@ export function ArtistProvider({ children }: { children: React.ReactNode }) {
   const selectedArtist = useMemo(() => ARTISTS.find(a => a.id === selectedArtistId), [selectedArtistId]);
 
   const artistActivities = useMemo(() =>
-    INITIAL_ACTIVITIES.filter(a => a.artistId === selectedArtistId && weekDays.includes(a.date)),
+    getStaticEvents().filter(a => a.artistId === selectedArtistId && a.date && weekDays.includes(a.date)),
     [selectedArtistId, weekDays]
   );
 

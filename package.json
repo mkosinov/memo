@@ -18,5 +18,8 @@
     "prettier": "^3.2.5",
     "turbo": "^2.0.0"
   },
-  "packageManager": "npm@10.7.0"
+  "packageManager": "npm@10.7.0",
+  "dependencies": {
+    "cac": "^7.0.0"
+  }
 }

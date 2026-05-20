@@ -190,11 +190,11 @@ function DroppableSlot({ dayIndex, slotIndex, startTime, isHour, dragCopy, onCli
 
 export function DayColumn({ dayIndex, activities, artists, studios = [], services = [], dragCopy, dragId, ghostHeight, ghostDayIndex, ghostSlotIndex, onCreateActivity, onOpenCreateModal, onOpenEditModal, stampReady, stamp }: DayColumnProps) {
   const [visibleIndices, setVisibleIndices] = useState<Record<string, number>>({});
-  const [prevIndices, setPrevIndices] = useState<Record<string, number>>({});
+  const [_prevIndices, setPrevIndices] = useState<Record<string, number>>({});
   const columnRef = useRef<HTMLDivElement>(null);
   const wheelAccum = useRef(0);
   const lastWheelTime = useRef(0);
-  const [animatingKeys, setAnimatingKeys] = useState<Set<string>>(new Set());
+  const [_animatingKeys, setAnimatingKeys] = useState<Set<string>>(new Set());
 
   const slots = useMemo(() => generateTimeSlots(), []);
 

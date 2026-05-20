@@ -14,6 +14,7 @@ const config: Config = {
           DEFAULT: "#004D56",
           light: "#006670",
         },
+        gold: "#C49A2E",
         // Theme variables
         background: "var(--bg)",
         foreground: "var(--ink)",
@@ -71,7 +72,7 @@ const config: Config = {
         popup: "0 8px 32px rgba(0,0,0,.14)",
       },
       borderRadius: {
-        card: "12px",
+        card: "16px",
         button: "8px",
       },
       spacing: {

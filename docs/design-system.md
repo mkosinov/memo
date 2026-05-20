@@ -34,6 +34,7 @@ source: sketches/colour-mountains-v4.html + feat-admin-schedule worktree (actual
   --ink-faint:  #cccccc;
   --line:       #E0E0E1;
   --line-dark:  rgba(255,255,255,.1);
+  --gold:       #C49A2E;
 
   /* Layout */
   --sidebar-w:           230px;
@@ -54,7 +55,7 @@ source: sketches/colour-mountains-v4.html + feat-admin-schedule worktree (actual
   --danger:  #C8503C;
 
   /* Misc */
-  --radius:    12px;
+  --radius:    16px;
   --radius-sm: 8px;
   --transition: 0.2s ease;
 }
@@ -118,6 +119,7 @@ const ARTIST_COLORS: Record<string, string> = {
 ## Typography
 
 Font family: `'Inter', sans-serif` (Google Fonts, через `var(--font-inter)`)
+Headings: `'Playfair Display', serif` (Google Fonts)
 
 | Element | Size | Weight | Color |
 |---------|------|--------|-------|
@@ -147,6 +149,8 @@ Font family: `'Inter', sans-serif` (Google Fonts, через `var(--font-inter)`
 ```css
 /* Cards */
 box-shadow: 0 1px 4px rgba(0,0,0,.08);      /* shadow-card */
+/* Site cards */
+box-shadow: 0 2px 16px rgba(0,0,0,.09);     /* shadow-site-card */
 /* Cards hover */
 box-shadow: 0 4px 14px rgba(0,0,0,.13);     /* shadow-card-hover */
 transform: translateY(-1px);
@@ -164,7 +168,7 @@ box-shadow: 0 4px 20px rgba(0,0,0,.2);      /* shadow-toast */
 box-shadow: 0 8px 32px rgba(0,0,0,.14);     /* shadow-popup */
 ```
 
-Tailwind: `shadow-card`, `shadow-card-hover`, `shadow-collapse`, `shadow-panel`, `shadow-toast`, `shadow-popup`.
+Tailwind: `shadow-card`, `shadow-site-card`, `shadow-card-hover`, `shadow-collapse`, `shadow-panel`, `shadow-toast`, `shadow-popup`.
 
 ---
 
@@ -191,7 +195,7 @@ Tailwind: `shadow-card`, `shadow-card-hover`, `shadow-collapse`, `shadow-panel`,
 
 | Element | Radius | Tailwind |
 |---------|--------|----------|
-| Event cards | 12px | `rounded-lg` / `--radius` |
+| Event cards | 16px | `rounded-lg` / `--radius` |
 | Buttons, inputs, selects | 8px | `rounded-lg` / `--radius-sm` |
 | Avatars, day circles | 50% | `rounded-full` |
 | Time pill | `rounded-br-lg` | top-left flush, bottom-right rounded |

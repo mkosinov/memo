@@ -146,7 +146,7 @@ export function MKCard({
       data-card-id={id}
     >
       {/* Photo */}
-      <div className="relative aspect-[2/1] w-full overflow-hidden">
+      <div className="relative aspect-[2/1] w-full overflow-hidden max-h-[140px]">
         <img
           src={imageUrl ?? ""}
           alt={title}

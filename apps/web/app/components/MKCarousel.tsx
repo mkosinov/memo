@@ -68,7 +68,7 @@ export function MKCarousel({
     { y: 80, rotate: -2 },
   ];
   const cardZIndices = [30, 20, 10];
-  const cardWidths = ["90%", "96%", "100%"];
+  const cardWidths = ["85%", "92%", "100%"];
 
   return (
     <div className="relative flex flex-col items-center">
@@ -86,7 +86,9 @@ export function MKCarousel({
             return (
               <motion.div
                 key={card.id}
-                className="absolute left-1/2 top-0 -translate-x-1/2"
+                className={`absolute left-1/2 top-0 -translate-x-1/2 ${
+                  !isTop ? "ring-1 ring-black/10 shadow-lg" : ""
+                }`}
                 style={{
                   width,
                   zIndex,

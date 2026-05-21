@@ -64,15 +64,15 @@ export function MKCarousel({
   const cardScales = [1, 0.94, 0.88];
   const cardOffsets = [
     { y: 0, rotate: 0 },
-    { y: 12, rotate: 2 },
-    { y: 24, rotate: -2 },
+    { y: 40, rotate: 2 },
+    { y: 80, rotate: -2 },
   ];
   const cardZIndices = [30, 20, 10];
 
   return (
     <div className="relative flex flex-col items-center">
       {/* Card stack */}
-      <div className="relative w-full" style={{ minHeight: "480px" }}>
+      <div className="relative w-full" style={{ minHeight: "600px" }}>
         <AnimatePresence mode="popLayout">
           {visibleCards.map((card, index) => {
             const isTop = index === 0;

@@ -102,6 +102,13 @@ describe("MKCard", () => {
     expect(img).toBeInTheDocument();
   });
 
+  it("uses 2/1 aspect ratio for the image container to keep card compact", () => {
+    render(<MKCard {...defaultProps} />);
+    const img = screen.getByRole("img");
+    const imageContainer = img.closest('[class*="aspect-"]');
+    expect(imageContainer).toHaveClass("aspect-[2/1]");
+  });
+
   it("does not render location", () => {
     render(<MKCard {...defaultProps} />);
     expect(screen.queryByRole("img", { name: /pin/i })).not.toBeInTheDocument();

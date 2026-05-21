@@ -15,9 +15,10 @@ const mockActivities = [
     title: "Акварельный пейзаж",
     category: "взрослым" as const,
     imageUrl: "/test-activity.jpg",
+    guestPhotos: ["/guest1.jpg"],
     time: "14:00",
     duration: "2 часа",
-    location: { id: "loc-1", name: "Студия на Арбате" },
+    location: { id: "loc-1", name: "Студия на Арбате", address: "ул. Арбат, 1" },
     guestsCount: 5,
     material: "Акварель",
     size: "30x40",
@@ -29,6 +30,12 @@ const mockActivities = [
     priceFormatted: "2 500 – 3 500 ₽",
     dateFormatted: "20 мая, среда",
     categoryColor: "#C49A2E",
+    nextTimes: [
+      { id: "act-1b", date: "22 мая", time: "14:00" },
+    ],
+    priceDetails: "Включает материалы",
+    materialDetails: "Акварель и бумага",
+    locationDetails: "5 минут от метро",
   },
   {
     id: "act-2",
@@ -37,7 +44,7 @@ const mockActivities = [
     imageUrl: "/test-activity-2.jpg",
     time: "16:00",
     duration: "1.5 часа",
-    location: { id: "loc-2", name: "Парк Горького" },
+    location: { id: "loc-2", name: "Парк Горького", address: "ул. Крымский Вал, 9" },
     guestsCount: 3,
     material: "Акрил",
     size: "20x30",
@@ -48,6 +55,12 @@ const mockActivities = [
     priceFormatted: "1 500 – 2 500 ₽",
     dateFormatted: "21 мая, четверг",
     categoryColor: "#5B8C7A",
+    nextTimes: [
+      { id: "act-2b", date: "24 мая", time: "16:00" },
+    ],
+    priceDetails: "Цена за участника",
+    materialDetails: "Акриловые краски",
+    locationDetails: "Вход через главный вход",
   },
 ];
 

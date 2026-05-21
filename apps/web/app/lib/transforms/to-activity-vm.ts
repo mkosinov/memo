@@ -14,9 +14,10 @@ export function toActivityViewModel(raw: RawActivityDTO): ActivityViewModel {
     title: raw.title,
     category: raw.category,
     imageUrl: raw.image_url,
+    guestPhotos: raw.guest_photos,
     time: raw.time,
     duration: formatDuration(raw.duration_minutes),
-    location: { id: raw.location_id, name: raw.location_name },
+    location: { id: raw.location_id, name: raw.location_name, address: raw.location_address },
     guestsCount: raw.guests_count,
     material: raw.material,
     size: raw.size,
@@ -28,5 +29,9 @@ export function toActivityViewModel(raw: RawActivityDTO): ActivityViewModel {
     priceFormatted: formatPrice(raw.price_min, raw.price_max),
     dateFormatted: formatDate(raw.date),
     categoryColor: CATEGORY_COLORS[raw.category] || '#888888',
+    nextTimes: raw.next_times,
+    priceDetails: raw.price_details,
+    materialDetails: raw.material_details,
+    locationDetails: raw.location_details,
   };
 }

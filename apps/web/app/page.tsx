@@ -44,14 +44,20 @@ function toActivityDetail(vm: ActivityViewModel): React.ComponentProps<typeof Ac
   return {
     id: vm.id,
     imageUrl: vm.imageUrl,
+    guestPhotos: vm.guestPhotos,
     teacherName: vm.teacherName,
     teacherAvatar: vm.teacherAvatar,
     date: vm.dateFormatted,
     time: vm.time,
     material: vm.material,
+    materialDetails: vm.materialDetails,
     priceMin: vm.priceMin,
     priceMax: vm.priceMax,
+    priceDetails: vm.priceDetails,
+    nextTimes: vm.nextTimes,
     location: vm.location.name,
+    locationAddress: vm.location.address,
+    locationDetails: vm.locationDetails,
   };
 }
 

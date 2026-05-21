@@ -79,4 +79,35 @@ describe('toActivityViewModel', () => {
     const vmWithout = toActivityViewModel(makeRawActivity());
     expect(vmWithout.teacherAvatar).toBeUndefined();
   });
+
+  it('maps optional detail fields', () => {
+    const vm = toActivityViewModel(makeRawActivity({
+      price_details: 'Включает материалы',
+      material_details: 'Холст и краски',
+      location_details: '5 минут от входа',
+    }));
+    expect(vm.priceDetails).toBe('Включает материалы');
+    expect(vm.materialDetails).toBe('Холст и краски');
+    expect(vm.locationDetails).toBe('5 минут от входа');
+  });
+
+  it('maps next_times array', () => {
+    const nextTimes = [
+      { id: 'act-2', date: '22 мая', time: '14:00' },
+      { id: 'act-3', date: '25 мая', time: '11:00' },
+    ];
+    const vm = toActivityViewModel(makeRawActivity({ next_times: nextTimes }));
+    expect(vm.nextTimes).toEqual(nextTimes);
+  });
+
+  it('maps guest_photos array', () => {
+    const guestPhotos = ['https://example.com/g1.jpg', 'https://example.com/g2.jpg'];
+    const vm = toActivityViewModel(makeRawActivity({ guest_photos: guestPhotos }));
+    expect(vm.guestPhotos).toEqual(guestPhotos);
+  });
+
+  it('maps location_address', () => {
+    const vm = toActivityViewModel(makeRawActivity({ location_address: 'ул. Тестовая, 1' }));
+    expect(vm.location.address).toBe('ул. Тестовая, 1');
+  });
 });

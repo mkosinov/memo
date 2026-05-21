@@ -33,10 +33,7 @@ function toCardProps(vm: ActivityViewModel): MKCardProps & { id: string } {
     title: vm.title,
     time: vm.time,
     duration: vm.duration,
-    location: vm.location.name,
     guestsCount: vm.guestsCount,
-    material: vm.material,
-    size: vm.size,
     priceMin: vm.priceMin,
     priceMax: vm.priceMax,
   };

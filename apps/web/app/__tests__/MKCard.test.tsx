@@ -9,10 +9,7 @@ const defaultProps = {
   title: "Акварельный пейзаж",
   time: "14:00",
   duration: "2 часа",
-  location: "Студия на Таганке",
   guestsCount: 3,
-  material: "Акрил",
-  size: "30×40",
   priceMin: 3500,
   priceMax: 5500,
 };
@@ -29,11 +26,6 @@ describe("MKCard", () => {
     expect(screen.getByText(/2 часа/)).toBeInTheDocument();
   });
 
-  it("renders the location", () => {
-    render(<MKCard {...defaultProps} />);
-    expect(screen.getByText("Студия на Таганке")).toBeInTheDocument();
-  });
-
   it("renders the social proof text", () => {
     render(<MKCard {...defaultProps} />);
     expect(screen.getByText("Уже 3 гостя")).toBeInTheDocument();
@@ -44,25 +36,20 @@ describe("MKCard", () => {
     expect(screen.getByText("Уже 5 гостей")).toBeInTheDocument();
   });
 
-  it("renders material and size", () => {
-    render(<MKCard {...defaultProps} />);
-    expect(screen.getByText("Акрил • 30×40")).toBeInTheDocument();
-  });
-
   it("renders the price range", () => {
     render(<MKCard {...defaultProps} />);
     expect(screen.getByText("3500 – 5500 ₽")).toBeInTheDocument();
   });
 
-  it("renders the sign up button", () => {
+  it("renders the details button with 'Подробнее' text", () => {
     render(<MKCard {...defaultProps} />);
-    expect(screen.getByRole("button", { name: /записаться/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /подробнее/i })).toBeInTheDocument();
   });
 
-  it("calls onSignUp when sign up button is clicked", () => {
+  it("calls onSignUp when details button is clicked", () => {
     const handleSignUp = vi.fn();
     render(<MKCard {...defaultProps} onSignUp={handleSignUp} />);
-    fireEvent.click(screen.getByRole("button", { name: /записаться/i }));
+    fireEvent.click(screen.getByRole("button", { name: /подробнее/i }));
     expect(handleSignUp).toHaveBeenCalledTimes(1);
   });
 
@@ -113,5 +100,15 @@ describe("MKCard", () => {
     render(<MKCard {...defaultProps} />);
     const img = screen.getByRole("img");
     expect(img).toBeInTheDocument();
+  });
+
+  it("does not render location", () => {
+    render(<MKCard {...defaultProps} />);
+    expect(screen.queryByRole("img", { name: /pin/i })).not.toBeInTheDocument();
+  });
+
+  it("does not render material info", () => {
+    render(<MKCard {...defaultProps} />);
+    expect(screen.queryByText(/Акрил/)).not.toBeInTheDocument();
   });
 });

@@ -7,10 +7,7 @@ export interface MKCardProps {
   title: string;
   time: string;
   duration: string;
-  location: string;
   guestsCount: number;
-  material: string;
-  size: string;
   priceMin: number;
   priceMax: number;
   onSignUp?: () => void;
@@ -48,25 +45,6 @@ function ClockIcon() {
   );
 }
 
-function PinIcon() {
-  return (
-    <svg
-      width="14"
-      height="14"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className="inline-block mr-1"
-    >
-      <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" />
-      <circle cx="12" cy="10" r="3" />
-    </svg>
-  );
-}
-
 export function MKCard({
   id,
   imageUrl,
@@ -74,10 +52,7 @@ export function MKCard({
   title,
   time,
   duration,
-  location,
   guestsCount,
-  material,
-  size,
   priceMin,
   priceMax,
   onSignUp,
@@ -131,20 +106,9 @@ export function MKCard({
           {duration}
         </p>
 
-        {/* Location */}
-        <p className="text-sm text-[#555555] mt-1 flex items-center">
-          <PinIcon />
-          {location}
-        </p>
-
         {/* Social proof */}
         <p className="text-[13px] text-[#888888] mt-2">
           Уже {guestsCount} {guestsLabel(guestsCount)}
-        </p>
-
-        {/* Material + Size */}
-        <p className="text-[13px] text-[#888888] mt-1">
-          {material} • {size}
         </p>
 
         {/* Price */}
@@ -152,7 +116,7 @@ export function MKCard({
           {priceMin} – {priceMax} ₽
         </p>
 
-        {/* Sign up button */}
+        {/* Details button */}
         <div className="mt-3 mb-4">
           <Button
             variant="primary"
@@ -160,7 +124,7 @@ export function MKCard({
             onClick={onSignUp}
             className="w-full"
           >
-            Записаться
+            Подробнее
           </Button>
         </div>
       </div>

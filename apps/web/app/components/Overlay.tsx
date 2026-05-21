@@ -5,7 +5,7 @@ export interface OverlayProps {
   isOpen: boolean;
   onClose: () => void;
   children: ReactNode;
-  size?: "half" | "full";
+  size?: "half" | "three-quarters" | "full";
 }
 
 export function Overlay({ isOpen, onClose, children, size = "half" }: OverlayProps) {
@@ -24,7 +24,7 @@ export function Overlay({ isOpen, onClose, children, size = "half" }: OverlayPro
             data-testid="overlay-panel"
             className={[
               "absolute bottom-0 left-0 right-0 bg-white rounded-t-2xl shadow-lg",
-              size === "half" ? "h-1/2" : "h-full",
+              size === "half" ? "h-1/2" : size === "three-quarters" ? "h-3/4" : "h-full",
             ].join(" ")}
             initial={{ y: "100%" }}
             animate={{ y: 0 }}

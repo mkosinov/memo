@@ -62,4 +62,14 @@ describe("Overlay", () => {
     const panel = screen.getByTestId("overlay-panel");
     expect(panel).toHaveClass("h-full");
   });
+
+  it("applies three-quarters size class", () => {
+    render(
+      <Overlay isOpen onClose={vi.fn()} size="three-quarters">
+        Three Quarters
+      </Overlay>
+    );
+    const panel = screen.getByTestId("overlay-panel");
+    expect(panel).toHaveClass("h-3/4");
+  });
 });

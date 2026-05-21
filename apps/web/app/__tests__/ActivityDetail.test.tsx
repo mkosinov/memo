@@ -15,10 +15,14 @@ const mockActivity = {
   priceMin: 2500,
   priceMax: 3500,
   priceDetails: "Включает материалы и холст",
-  nextTime: "25 мая, 18:00",
-  nextTimeLocation: "Студия на Арбате",
+  nextTimes: [
+    { id: "act-2", date: "17 мая", time: "10:30" },
+    { id: "act-3", date: "18 мая", time: "17:00" },
+    { id: "act-4", date: "20 мая", time: "14:00" },
+  ],
   location: "Студия на Таганке",
   locationAddress: "ул. Таганская, д. 10",
+  locationDetails: "Метро Таганская, 5 минут пешком",
 };
 
 describe("ActivityDetail", () => {
@@ -158,62 +162,90 @@ describe("ActivityDetail", () => {
     expect(handleBook).toHaveBeenCalledTimes(1);
   });
 
-  it("calls onOpenMaterialDetails when Подробнее link is clicked in material section", () => {
-    const handleMaterialDetails = vi.fn();
+  // --- NEW: Hint icon tests (replacing "Подробнее" popup buttons) ---
+
+  it("shows hint icon (i) for material section instead of Подробнее button", () => {
     render(
       <ActivityDetail
         isOpen
         onClose={vi.fn()}
         activity={mockActivity}
-        onOpenMaterialDetails={handleMaterialDetails}
-        onOpenPriceDetails={vi.fn()}
-        onOpenNextTime={vi.fn()}
-        onOpenLocationDetails={vi.fn()}
       />
     );
-    const detailLinks = screen.getAllByText("Подробнее");
-    fireEvent.click(detailLinks[0]);
-    expect(handleMaterialDetails).toHaveBeenCalledTimes(1);
+    // Should have info icons, not "Подробнее" text
+    expect(screen.queryByText("Подробнее")).not.toBeInTheDocument();
+    const infoIcons = screen.getAllByRole("button", { name: /подробнее о/i });
+    expect(infoIcons.length).toBeGreaterThanOrEqual(1);
   });
 
-  it("calls onOpenPriceDetails when Подробнее link is clicked in price section", () => {
-    const handlePriceDetails = vi.fn();
+  it("shows hint icon (i) for price section", () => {
     render(
       <ActivityDetail
         isOpen
         onClose={vi.fn()}
         activity={mockActivity}
-        onOpenMaterialDetails={vi.fn()}
-        onOpenPriceDetails={handlePriceDetails}
-        onOpenNextTime={vi.fn()}
-        onOpenLocationDetails={vi.fn()}
       />
     );
-    const detailLinks = screen.getAllByText("Подробнее");
-    fireEvent.click(detailLinks[1]);
-    expect(handlePriceDetails).toHaveBeenCalledTimes(1);
+    const infoIcons = screen.getAllByRole("button", { name: /подробнее о/i });
+    expect(infoIcons.length).toBeGreaterThanOrEqual(2);
   });
 
-  it("calls onOpenLocationDetails when Подробнее link is clicked in location section", () => {
-    const handleLocationDetails = vi.fn();
+  it("shows hint icon (i) for location section", () => {
     render(
       <ActivityDetail
         isOpen
         onClose={vi.fn()}
         activity={mockActivity}
-        onOpenMaterialDetails={vi.fn()}
-        onOpenPriceDetails={vi.fn()}
-        onOpenNextTime={vi.fn()}
-        onOpenLocationDetails={handleLocationDetails}
       />
     );
-    const detailLinks = screen.getAllByText("Подробнее");
-    // Location section's "Подробнее" is the last one (index 3)
-    fireEvent.click(detailLinks[detailLinks.length - 1]);
-    expect(handleLocationDetails).toHaveBeenCalledTimes(1);
+    const infoIcons = screen.getAllByRole("button", { name: /подробнее о/i });
+    expect(infoIcons.length).toBeGreaterThanOrEqual(3);
   });
 
-  it("displays next time section when nextTime provided", () => {
+  it("shows material details tooltip when hint icon is clicked", () => {
+    render(
+      <ActivityDetail
+        isOpen
+        onClose={vi.fn()}
+        activity={mockActivity}
+      />
+    );
+    const infoIcons = screen.getAllByRole("button", { name: /подробнее о/i });
+    fireEvent.click(infoIcons[0]);
+    expect(screen.getByText("Все материалы включены")).toBeInTheDocument();
+  });
+
+  it("shows price details tooltip when hint icon is clicked", () => {
+    render(
+      <ActivityDetail
+        isOpen
+        onClose={vi.fn()}
+        activity={mockActivity}
+      />
+    );
+    const infoIcons = screen.getAllByRole("button", { name: /подробнее о/i });
+    // Price is the second info icon
+    fireEvent.click(infoIcons[1]);
+    expect(screen.getByText("Включает материалы и холст")).toBeInTheDocument();
+  });
+
+  it("shows location details tooltip when hint icon is clicked", () => {
+    render(
+      <ActivityDetail
+        isOpen
+        onClose={vi.fn()}
+        activity={mockActivity}
+      />
+    );
+    const infoIcons = screen.getAllByRole("button", { name: /подробнее о/i });
+    // Location is the third info icon
+    fireEvent.click(infoIcons[2]);
+    expect(screen.getByText("ул. Таганская, д. 10")).toBeInTheDocument();
+  });
+
+  // --- NEW: "В следующий раз" with clickable date options ---
+
+  it("displays next time section with clickable date options", () => {
     render(
       <ActivityDetail
         isOpen
@@ -222,37 +254,73 @@ describe("ActivityDetail", () => {
       />
     );
     expect(screen.getByText("В следующий раз")).toBeInTheDocument();
-    expect(screen.getByText("25 мая, 18:00")).toBeInTheDocument();
+    expect(screen.getByText("17 мая 10:30")).toBeInTheDocument();
+    expect(screen.getByText("18 мая 17:00")).toBeInTheDocument();
+    expect(screen.getByText("20 мая 14:00")).toBeInTheDocument();
   });
 
-  it("does not display next time section when nextTime not provided", () => {
-    const activityWithoutNextTime = { ...mockActivity, nextTime: undefined };
+  it("does not display next time section when nextTimes not provided", () => {
+    const activityWithoutNextTimes = { ...mockActivity, nextTimes: undefined };
     render(
       <ActivityDetail
         isOpen
         onClose={vi.fn()}
-        activity={activityWithoutNextTime}
+        activity={activityWithoutNextTimes}
       />
     );
     expect(screen.queryByText("В следующий раз")).not.toBeInTheDocument();
   });
 
-  it("calls onOpenNextTime when Подробнее link is clicked in next time section", () => {
-    const handleNextTime = vi.fn();
+  it("calls onNavigateToActivity when a next time date is clicked", () => {
+    const handleNavigate = vi.fn();
     render(
       <ActivityDetail
         isOpen
         onClose={vi.fn()}
         activity={mockActivity}
-        onOpenMaterialDetails={vi.fn()}
-        onOpenPriceDetails={vi.fn()}
-        onOpenNextTime={handleNextTime}
-        onOpenLocationDetails={vi.fn()}
+        onNavigateToActivity={handleNavigate}
       />
     );
-    const detailLinks = screen.getAllByText("Подробнее");
-    // Next time section's "Подробнее" is at index 2
-    fireEvent.click(detailLinks[2]);
-    expect(handleNextTime).toHaveBeenCalledTimes(1);
+    const dateOption = screen.getByText("17 мая 10:30");
+    fireEvent.click(dateOption);
+    expect(handleNavigate).toHaveBeenCalledWith("act-2");
+  });
+
+  it("calls onNavigateToActivity with correct activity id for second date", () => {
+    const handleNavigate = vi.fn();
+    render(
+      <ActivityDetail
+        isOpen
+        onClose={vi.fn()}
+        activity={mockActivity}
+        onNavigateToActivity={handleNavigate}
+      />
+    );
+    const dateOption = screen.getByText("18 мая 17:00");
+    fireEvent.click(dateOption);
+    expect(handleNavigate).toHaveBeenCalledWith("act-3");
+  });
+
+  it("limits next times to 3 options maximum", () => {
+    const activityWithManyNextTimes = {
+      ...mockActivity,
+      nextTimes: [
+        { id: "act-2", date: "17 мая", time: "10:30" },
+        { id: "act-3", date: "18 мая", time: "17:00" },
+        { id: "act-4", date: "20 мая", time: "14:00" },
+        { id: "act-5", date: "22 мая", time: "19:00" },
+      ],
+    };
+    render(
+      <ActivityDetail
+        isOpen
+        onClose={vi.fn()}
+        activity={activityWithManyNextTimes}
+      />
+    );
+    expect(screen.getByText("17 мая 10:30")).toBeInTheDocument();
+    expect(screen.getByText("18 мая 17:00")).toBeInTheDocument();
+    expect(screen.getByText("20 мая 14:00")).toBeInTheDocument();
+    expect(screen.queryByText("22 мая 19:00")).not.toBeInTheDocument();
   });
 });

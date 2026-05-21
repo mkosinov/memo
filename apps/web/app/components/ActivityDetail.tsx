@@ -1,5 +1,14 @@
+"use client";
+
+import { useState } from "react";
 import { Overlay } from "./Overlay";
 import { Button } from "./Button";
+
+export interface NextTimeOption {
+  id: string;
+  date: string;
+  time: string;
+}
 
 export interface ActivityDetailProps {
   isOpen: boolean;
@@ -17,38 +26,49 @@ export interface ActivityDetailProps {
     priceMin: number;
     priceMax: number;
     priceDetails?: string;
-    nextTime?: string;
-    nextTimeLocation?: string;
+    nextTimes?: NextTimeOption[];
     location: string;
     locationAddress?: string;
+    locationDetails?: string;
   };
-  onOpenMaterialDetails?: () => void;
-  onOpenPriceDetails?: () => void;
-  onOpenNextTime?: () => void;
-  onOpenLocationDetails?: () => void;
   onBook?: () => void;
+  onNavigateToActivity?: (activityId: string) => void;
 }
 
 function formatPrice(value: number): string {
   return value.toLocaleString("ru-RU");
 }
 
-function DetailLink({
+function HintIcon({
   label,
-  onClick,
+  details,
 }: {
   label: string;
-  onClick?: () => void;
+  details?: string;
 }) {
-  if (!onClick) return null;
+  const [isOpen, setIsOpen] = useState(false);
+
+  if (!details) return null;
+
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="text-sm text-[#004D56] hover:underline transition"
-    >
-      {label}
-    </button>
+    <div className="relative">
+      <button
+        type="button"
+        aria-label={`Подробнее о ${label}`}
+        onClick={() => setIsOpen(!isOpen)}
+        className="flex items-center justify-center w-5 h-5 rounded-full border border-[#004D56] text-[#004D56] text-xs font-medium hover:bg-[#004D56] hover:text-white transition"
+      >
+        i
+      </button>
+      {isOpen && (
+        <div
+          data-testid="hint-tooltip"
+          className="absolute right-0 top-7 z-10 w-64 p-3 bg-white rounded-lg shadow-lg border border-gray-200 text-sm text-[#1a1a1a]"
+        >
+          {details}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -56,14 +76,11 @@ export function ActivityDetail({
   isOpen,
   onClose,
   activity,
-  onOpenMaterialDetails,
-  onOpenPriceDetails,
-  onOpenNextTime,
-  onOpenLocationDetails,
   onBook,
+  onNavigateToActivity,
 }: ActivityDetailProps) {
   return (
-    <Overlay isOpen={isOpen} onClose={onClose} size="half">
+    <Overlay isOpen={isOpen} onClose={onClose} size="three-quarters">
       <div className="space-y-4 px-4 py-4">
         {/* Main photo */}
         <div className="rounded-t-2xl overflow-hidden -mx-4 -mt-4">
@@ -140,10 +157,7 @@ export function ActivityDetail({
             <div className="text-sm text-[#888888]">Материал</div>
             <div className="text-base text-[#1a1a1a]">{activity.material}</div>
           </div>
-          <DetailLink
-            label="Подробнее"
-            onClick={onOpenMaterialDetails}
-          />
+          <HintIcon label="материале" details={activity.materialDetails} />
         </div>
 
         {/* Price section */}
@@ -154,22 +168,25 @@ export function ActivityDetail({
               {formatPrice(activity.priceMin)} – {formatPrice(activity.priceMax)} ₽
             </div>
           </div>
-          <DetailLink label="Подробнее" onClick={onOpenPriceDetails} />
+          <HintIcon label="стоимости" details={activity.priceDetails} />
         </div>
 
         {/* Next time section */}
-        {activity.nextTime && (
-          <div className="flex items-start justify-between">
-            <div>
-              <div className="text-sm text-[#888888]">В следующий раз</div>
-              <div className="text-base text-[#1a1a1a]">{activity.nextTime}</div>
-              {activity.nextTimeLocation && (
-                <div className="text-sm text-[#555555]">
-                  {activity.nextTimeLocation}
-                </div>
-              )}
+        {activity.nextTimes && activity.nextTimes.length > 0 && (
+          <div>
+            <div className="text-sm text-[#888888] mb-2">В следующий раз</div>
+            <div className="flex flex-wrap gap-2">
+              {activity.nextTimes.slice(0, 3).map((option) => (
+                <button
+                  key={option.id}
+                  type="button"
+                  onClick={() => onNavigateToActivity?.(option.id)}
+                  className="text-base text-[#004D56] hover:underline transition cursor-pointer"
+                >
+                  {option.date} {option.time}
+                </button>
+              ))}
             </div>
-            <DetailLink label="Подробнее" onClick={onOpenNextTime} />
           </div>
         )}
 
@@ -179,7 +196,7 @@ export function ActivityDetail({
             <div className="text-sm text-[#888888]">Локация</div>
             <div className="text-base text-[#1a1a1a]">{activity.location}</div>
           </div>
-          <DetailLink label="Подробнее" onClick={onOpenLocationDetails} />
+          <HintIcon label="локации" details={activity.locationAddress || activity.locationDetails} />
         </div>
 
         {/* Book button */}

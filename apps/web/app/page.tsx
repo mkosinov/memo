@@ -55,6 +55,18 @@ function toActivityDetail(vm: ActivityViewModel): React.ComponentProps<typeof Ac
   };
 }
 
+/** Navigate to another activity when a "next time" date is clicked */
+function handleNavigateToActivity(
+  activityId: string,
+  allActivities: ActivityViewModel[],
+  onSelectActivity: (activity: ActivityViewModel) => void,
+) {
+  const target = allActivities.find((a) => a.id === activityId);
+  if (target) {
+    onSelectActivity(target);
+  }
+}
+
 /** Map ActivityViewModel → BookingOverlay activity prop */
 function toBookingActivity(vm: ActivityViewModel): React.ComponentProps<typeof BookingOverlay>["activity"] {
   return {
@@ -263,6 +275,9 @@ export default function Home() {
           onClose={handleCloseActivityDetail}
           activity={toActivityDetail(selectedActivity)}
           onBook={handleBook}
+          onNavigateToActivity={(activityId) =>
+            handleNavigateToActivity(activityId, activities, setSelectedActivity)
+          }
         />
       )}
 

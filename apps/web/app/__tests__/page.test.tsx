@@ -3,8 +3,12 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import Home from "../page";
 
 // ── Mock hooks ──────────────────────────────────────────────
+// Must use vi.hoisted for variables referenced in vi.mock (which is hoisted)
+const mocks = vi.hoisted(() => ({
+  selectDate: vi.fn(),
+  setTab: vi.fn(),
+}));
 
-const mockSelectDate = vi.fn();
 const mockActivities = [
   {
     id: "act-1",
@@ -58,14 +62,14 @@ const mockGalleryPhotos = [
 ];
 
 const mockToday = new Date(2026, 4, 20);
-const mockCalendarDays = Array.from({ length: 14 }, (_, i) => {
+const mockCalendarDays = Array.from({ length: 4 }, (_, i) => {
   const date = new Date(mockToday);
-  date.setDate(mockToday.getDate() + i);
+  date.setDate(mockToday.getDate() + 1 + i); // Start from tomorrow
   return {
     date,
-    dayName: ["Ср", "Чт", "Пт", "Сб", "Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс", "Пн", "Вт"][i],
-    dayNumber: mockToday.getDate() + i,
-    isToday: i === 0,
+    dayName: ["Чт", "Пт", "Сб", "Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Пт", "Сб", "Вс", "Пн", "Вт"][i],
+    dayNumber: mockToday.getDate() + 1 + i,
+    isToday: false,
     isSelected: i === 0,
   };
 });
@@ -74,7 +78,9 @@ vi.mock("../hooks/useCalendarDays", () => ({
   useCalendarDays: () => ({
     days: mockCalendarDays,
     selectedDate: mockToday,
-    selectDate: mockSelectDate,
+    selectDate: mocks.selectDate,
+    tab: "tomorrow" as const,
+    setTab: mocks.setTab,
   }),
 }));
 
@@ -113,6 +119,8 @@ function renderHome() {
 describe("Home (page.tsx)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.selectDate.mockClear();
+    mocks.setTab.mockClear();
   });
 
   describe("section rendering", () => {
@@ -123,7 +131,8 @@ describe("Home (page.tsx)", () => {
 
     it("renders CalendarLine with day names", () => {
       renderHome();
-      expect(screen.getAllByText("Ср").length).toBeGreaterThanOrEqual(1);
+      // With 'tomorrow' tab active, days start from Чт (Thursday)
+      expect(screen.getAllByText("Чт").length).toBeGreaterThanOrEqual(1);
     });
 
     it("renders FilterPills with category options", () => {
@@ -179,10 +188,10 @@ describe("Home (page.tsx)", () => {
   describe("calendar date selection", () => {
     it("calls selectDate when a calendar day is clicked", () => {
       renderHome();
-      const dayButtons = screen.getAllByRole("button");
-      // Click the second day button
-      fireEvent.click(dayButtons[1]);
-      expect(mockSelectDate).toHaveBeenCalledTimes(1);
+      // Click the day button that shows "21"
+      const dayButton = screen.getByRole("button", { name: /21/ });
+      fireEvent.click(dayButton);
+      expect(mocks.selectDate).toHaveBeenCalled();
     });
   });
 

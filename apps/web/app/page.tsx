@@ -95,7 +95,7 @@ function findNearestLocationId(
 
 export default function Home() {
   // ── Calendar state (managed by hook) ──
-  const { days, selectedDate, selectDate } = useCalendarDays();
+  const { days, selectedDate, selectDate, tab, setTab } = useCalendarDays();
 
   // ── Filter state ──
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
@@ -203,6 +203,8 @@ export default function Home() {
         selectedDate={selectedDate}
         days={days}
         onSelectDay={handleSelectDay}
+        tab={tab}
+        onTabChange={setTab}
       />
 
       {/* 3. FilterPills + LocationFilter */}

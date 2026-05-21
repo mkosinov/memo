@@ -1,6 +1,8 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
 
 const RUSSIAN_DAY_NAMES = ["Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"] as const;
+
+export type CalendarTab = "today" | "tomorrow";
 
 export interface CalendarDay {
   date: Date;
@@ -24,34 +26,59 @@ function isSameDay(a: Date, b: Date): boolean {
 }
 
 export function useCalendarDays(options?: UseCalendarDaysOptions) {
-  const daysCount = options?.daysCount ?? 14;
-  const [selectedDate, setSelectedDate] = useState<Date>(
-    () => options?.selectedDate ?? new Date()
-  );
+  const daysCount = options?.daysCount ?? 4;
+  const [tab, setTab] = useState<CalendarTab>("tomorrow");
+  const [selectedDate, setSelectedDate] = useState<Date>(() => {
+    if (options?.selectedDate) return options.selectedDate;
+    const today = new Date();
+    const tomorrow = new Date(today);
+    tomorrow.setDate(today.getDate() + 1);
+    return tomorrow;
+  });
 
   const days = useMemo<CalendarDay[]>(() => {
     const today = new Date();
+    const startDate = new Date(today);
+
+    // When tab is 'tomorrow', start from tomorrow
+    if (tab === "tomorrow") {
+      startDate.setDate(today.getDate() + 1);
+    }
+
     const result: CalendarDay[] = [];
 
     for (let i = 0; i < daysCount; i++) {
-      const date = new Date(today);
-      date.setDate(today.getDate() + i);
+      const date = new Date(startDate);
+      date.setDate(startDate.getDate() + i);
 
       result.push({
         date,
         dayName: RUSSIAN_DAY_NAMES[date.getDay()],
         dayNumber: date.getDate(),
-        isToday: i === 0,
+        isToday: isSameDay(date, today),
         isSelected: isSameDay(date, selectedDate),
       });
     }
 
     return result;
-  }, [daysCount, selectedDate]);
+  }, [daysCount, selectedDate, tab]);
 
-  const selectDate = (date: Date) => {
+  const selectDate = useCallback((date: Date) => {
     setSelectedDate(date);
-  };
+  }, []);
 
-  return { days, selectedDate, selectDate };
+  const handleSetTab = useCallback((newTab: CalendarTab) => {
+    setTab(newTab);
+    // Update selectedDate to match the tab
+    const today = new Date();
+    if (newTab === "today") {
+      setSelectedDate(today);
+    } else {
+      const tomorrow = new Date(today);
+      tomorrow.setDate(today.getDate() + 1);
+      setSelectedDate(tomorrow);
+    }
+  }, []);
+
+  return { days, selectedDate, selectDate, tab, setTab: handleSetTab };
 }

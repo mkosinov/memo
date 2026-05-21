@@ -2,8 +2,6 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { useCalendarDays } from "../hooks/useCalendarDays";
 
-const RUSSIAN_DAY_NAMES = ["Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"];
-
 describe("useCalendarDays", () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -13,113 +11,178 @@ describe("useCalendarDays", () => {
     vi.useRealTimers();
   });
 
-  it("generates 14 days by default starting from today", () => {
-    const today = new Date(2026, 4, 20); // May 20, 2026
-    vi.setSystemTime(today);
+  describe("tab state", () => {
+    it("defaults to 'tomorrow' tab", () => {
+      const today = new Date(2026, 4, 20);
+      vi.setSystemTime(today);
 
-    const { result } = renderHook(() => useCalendarDays());
+      const { result } = renderHook(() => useCalendarDays());
 
-    expect(result.current.days).toHaveLength(14);
-    expect(result.current.days[0].date.toDateString()).toBe(today.toDateString());
-  });
-
-  it("generates custom number of days when daysCount is provided", () => {
-    const today = new Date(2026, 4, 20);
-    vi.setSystemTime(today);
-
-    const { result } = renderHook(() => useCalendarDays({ daysCount: 7 }));
-
-    expect(result.current.days).toHaveLength(7);
-  });
-
-  it("marks today as isToday", () => {
-    const today = new Date(2026, 4, 20);
-    vi.setSystemTime(today);
-
-    const { result } = renderHook(() => useCalendarDays());
-
-    expect(result.current.days[0].isToday).toBe(true);
-    expect(result.current.days[1].isToday).toBe(false);
-  });
-
-  it("marks the first day as selected by default", () => {
-    const today = new Date(2026, 4, 20);
-    vi.setSystemTime(today);
-
-    const { result } = renderHook(() => useCalendarDays());
-
-    expect(result.current.days[0].isSelected).toBe(true);
-    expect(result.current.days[1].isSelected).toBe(false);
-  });
-
-  it("provides correct Russian day names", () => {
-    const today = new Date(2026, 4, 20); // Wednesday
-    vi.setSystemTime(today);
-
-    const { result } = renderHook(() => useCalendarDays({ daysCount: 7 }));
-
-    expect(result.current.days[0].dayName).toBe("Ср");
-    expect(result.current.days[1].dayName).toBe("Чт");
-    expect(result.current.days[2].dayName).toBe("Пт");
-    expect(result.current.days[3].dayName).toBe("Сб");
-    expect(result.current.days[4].dayName).toBe("Вс");
-    expect(result.current.days[5].dayName).toBe("Пн");
-    expect(result.current.days[6].dayName).toBe("Вт");
-  });
-
-  it("provides correct day numbers", () => {
-    const today = new Date(2026, 4, 20);
-    vi.setSystemTime(today);
-
-    const { result } = renderHook(() => useCalendarDays({ daysCount: 5 }));
-
-    expect(result.current.days[0].dayNumber).toBe(20);
-    expect(result.current.days[1].dayNumber).toBe(21);
-    expect(result.current.days[2].dayNumber).toBe(22);
-    expect(result.current.days[3].dayNumber).toBe(23);
-    expect(result.current.days[4].dayNumber).toBe(24);
-  });
-
-  it("allows selecting a different date", () => {
-    const today = new Date(2026, 4, 20);
-    vi.setSystemTime(today);
-
-    const { result } = renderHook(() => useCalendarDays());
-
-    const tomorrow = result.current.days[1].date;
-
-    act(() => {
-      result.current.selectDate(tomorrow);
+      expect(result.current.tab).toBe("tomorrow");
     });
 
-    expect(result.current.days[0].isSelected).toBe(false);
-    expect(result.current.days[1].isSelected).toBe(true);
-    expect(result.current.selectedDate.toDateString()).toBe(tomorrow.toDateString());
+    it("allows switching to 'today' tab", () => {
+      const today = new Date(2026, 4, 20);
+      vi.setSystemTime(today);
+
+      const { result } = renderHook(() => useCalendarDays());
+
+      act(() => {
+        result.current.setTab("today");
+      });
+
+      expect(result.current.tab).toBe("today");
+    });
   });
 
-  it("returns the selected date", () => {
-    const today = new Date(2026, 4, 20);
-    vi.setSystemTime(today);
+  describe("4-day calendar (tomorrow tab)", () => {
+    it("returns 4 days starting from tomorrow when tab is 'tomorrow'", () => {
+      const today = new Date(2026, 4, 20);
+      vi.setSystemTime(today);
 
-    const { result } = renderHook(() => useCalendarDays());
+      const { result } = renderHook(() => useCalendarDays());
 
-    expect(result.current.selectedDate.toDateString()).toBe(today.toDateString());
+      expect(result.current.days).toHaveLength(4);
+      expect(result.current.days[0].date.getDate()).toBe(21);
+      expect(result.current.days[0].date.getMonth()).toBe(4);
+    });
+
+    it("marks tomorrow as selected when tab is 'tomorrow'", () => {
+      const today = new Date(2026, 4, 20);
+      vi.setSystemTime(today);
+
+      const { result } = renderHook(() => useCalendarDays());
+
+      expect(result.current.days[0].isSelected).toBe(true);
+      expect(result.current.days[0].isToday).toBe(false);
+      expect(result.current.days[1].isSelected).toBe(false);
+    });
   });
 
-  it("respects a custom selectedDate", () => {
-    const today = new Date(2026, 4, 20);
-    vi.setSystemTime(today);
-    const customDate = new Date(2026, 4, 22);
+  describe("4-day calendar (today tab)", () => {
+    it("returns 4 days starting from today when tab is 'today'", () => {
+      const today = new Date(2026, 4, 20);
+      vi.setSystemTime(today);
 
-    const { result } = renderHook(() =>
-      useCalendarDays({ selectedDate: customDate })
-    );
+      const { result } = renderHook(() => useCalendarDays());
+      act(() => {
+        result.current.setTab("today");
+      });
 
-    expect(result.current.selectedDate.toDateString()).toBe(customDate.toDateString());
-    // The custom date should be marked as selected
-    const selectedDay = result.current.days.find(
-      (d) => d.date.toDateString() === customDate.toDateString()
-    );
-    expect(selectedDay?.isSelected).toBe(true);
+      expect(result.current.days).toHaveLength(4);
+      expect(result.current.days[0].date.getDate()).toBe(20);
+      expect(result.current.days[0].date.getMonth()).toBe(4);
+    });
+
+    it("marks today as selected and isToday when tab is 'today'", () => {
+      const today = new Date(2026, 4, 20);
+      vi.setSystemTime(today);
+
+      const { result } = renderHook(() => useCalendarDays());
+      act(() => {
+        result.current.setTab("today");
+      });
+
+      expect(result.current.days[0].isSelected).toBe(true);
+      expect(result.current.days[0].isToday).toBe(true);
+    });
+  });
+
+  describe("selected date reflects active tab", () => {
+    it("selectedDate is tomorrow when tab is 'tomorrow'", () => {
+      const today = new Date(2026, 4, 20);
+      vi.setSystemTime(today);
+      const tomorrow = new Date(2026, 4, 21);
+
+      const { result } = renderHook(() => useCalendarDays());
+
+      expect(result.current.selectedDate.toDateString()).toBe(tomorrow.toDateString());
+    });
+
+    it("selectedDate is today when tab is 'today'", () => {
+      const today = new Date(2026, 4, 20);
+      vi.setSystemTime(today);
+
+      const { result } = renderHook(() => useCalendarDays());
+      act(() => {
+        result.current.setTab("today");
+      });
+
+      expect(result.current.selectedDate.toDateString()).toBe(today.toDateString());
+    });
+  });
+
+  describe("backward compatibility", () => {
+    it("generates custom number of days when daysCount is provided", () => {
+      const today = new Date(2026, 4, 20);
+      vi.setSystemTime(today);
+
+      const { result } = renderHook(() => useCalendarDays({ daysCount: 7 }));
+
+      expect(result.current.days).toHaveLength(7);
+    });
+
+    it("provides correct Russian day names", () => {
+      const today = new Date(2026, 4, 20); // Wednesday
+      vi.setSystemTime(today);
+
+      // With default 'tomorrow' tab, days start from Thursday May 21
+      const { result } = renderHook(() => useCalendarDays({ daysCount: 7 }));
+
+      expect(result.current.days[0].dayName).toBe("Чт");
+      expect(result.current.days[1].dayName).toBe("Пт");
+      expect(result.current.days[2].dayName).toBe("Сб");
+      expect(result.current.days[3].dayName).toBe("Вс");
+      expect(result.current.days[4].dayName).toBe("Пн");
+      expect(result.current.days[5].dayName).toBe("Вт");
+      expect(result.current.days[6].dayName).toBe("Ср");
+    });
+
+    it("provides correct day numbers", () => {
+      const today = new Date(2026, 4, 20);
+      vi.setSystemTime(today);
+
+      // With default 'tomorrow' tab, days start from May 21
+      const { result } = renderHook(() => useCalendarDays({ daysCount: 5 }));
+
+      expect(result.current.days[0].dayNumber).toBe(21);
+      expect(result.current.days[1].dayNumber).toBe(22);
+      expect(result.current.days[2].dayNumber).toBe(23);
+      expect(result.current.days[3].dayNumber).toBe(24);
+      expect(result.current.days[4].dayNumber).toBe(25);
+    });
+
+    it("allows selecting a different date within the visible range", () => {
+      const today = new Date(2026, 4, 20);
+      vi.setSystemTime(today);
+
+      const { result } = renderHook(() => useCalendarDays());
+
+      const secondDay = result.current.days[1].date;
+
+      act(() => {
+        result.current.selectDate(secondDay);
+      });
+
+      expect(result.current.days[0].isSelected).toBe(false);
+      expect(result.current.days[1].isSelected).toBe(true);
+      expect(result.current.selectedDate.toDateString()).toBe(secondDay.toDateString());
+    });
+
+    it("respects a custom selectedDate", () => {
+      const today = new Date(2026, 4, 20);
+      vi.setSystemTime(today);
+      const customDate = new Date(2026, 4, 22);
+
+      const { result } = renderHook(() =>
+        useCalendarDays({ selectedDate: customDate })
+      );
+
+      expect(result.current.selectedDate.toDateString()).toBe(customDate.toDateString());
+      const selectedDay = result.current.days.find(
+        (d) => d.date.toDateString() === customDate.toDateString()
+      );
+      expect(selectedDay?.isSelected).toBe(true);
+    });
   });
 });

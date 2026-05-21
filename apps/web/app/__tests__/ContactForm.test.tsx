@@ -8,7 +8,7 @@ describe("ContactForm", () => {
     expect(screen.getByPlaceholderText(/имя/i)).toBeInTheDocument();
     expect(screen.getByPlaceholderText(/телефон/i)).toBeInTheDocument();
     expect(screen.getByPlaceholderText(/комментарий/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/подтверждение/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/отправить детали/i)).toBeInTheDocument();
   });
 
   it("calls onValidityChange with true when form becomes valid", () => {
@@ -17,7 +17,7 @@ describe("ContactForm", () => {
 
     const nameInput = screen.getByPlaceholderText(/имя/i);
     const phoneInput = screen.getByPlaceholderText(/телефон/i);
-    const confirmSelect = screen.getByLabelText(/подтверждение/i);
+    const confirmSelect = screen.getByLabelText(/отправить детали/i);
 
     fireEvent.change(nameInput, { target: { value: "Анна" } });
     fireEvent.change(phoneInput, { target: { value: "+79001234567" } });
@@ -33,7 +33,7 @@ describe("ContactForm", () => {
 
     const nameInput = screen.getByPlaceholderText(/имя/i);
     const phoneInput = screen.getByPlaceholderText(/телефон/i);
-    const confirmSelect = screen.getByLabelText(/подтверждение/i);
+    const confirmSelect = screen.getByLabelText(/отправить детали/i);
 
     fireEvent.change(nameInput, { target: { value: "А" } });
     fireEvent.change(phoneInput, { target: { value: "+79001234567" } });
@@ -48,16 +48,16 @@ describe("ContactForm", () => {
 
     const nameInput = screen.getByPlaceholderText(/имя/i);
     const phoneInput = screen.getByPlaceholderText(/телефон/i);
-    const confirmSelect = screen.getByLabelText(/подтверждение/i);
+    const confirmSelect = screen.getByLabelText(/отправить детали/i);
 
     fireEvent.change(nameInput, { target: { value: "Анна" } });
     fireEvent.change(phoneInput, { target: { value: "123" } });
-    fireEvent.change(confirmSelect, { target: { value: "telegram" } });
+    fireEvent.change(confirmSelect, { target: { value: "whatsapp" } });
 
     expect(handleValidity).toHaveBeenCalledWith(false);
   });
 
-  it("calls onValidityChange with false when confirmation not selected", () => {
+  it("is valid by default since Telegram is pre-selected", () => {
     const handleValidity = vi.fn();
     render(<ContactForm onValidityChange={handleValidity} />);
 
@@ -66,9 +66,9 @@ describe("ContactForm", () => {
 
     fireEvent.change(nameInput, { target: { value: "Анна" } });
     fireEvent.change(phoneInput, { target: { value: "+79001234567" } });
-    // Don't select confirmation
+    // Telegram is pre-selected, so form should be valid
 
-    expect(handleValidity).toHaveBeenCalledWith(false);
+    expect(handleValidity).toHaveBeenCalledWith(true);
   });
 
   it("accepts optional comment field", () => {
@@ -78,16 +78,20 @@ describe("ContactForm", () => {
     expect(commentInput).toHaveValue("Хочу на утро");
   });
 
-  it("has confirmation options: Max, Telegram, WhatsApp", () => {
+  it("has confirmation options: Telegram, WhatsApp, Max (in that order)", () => {
     render(<ContactForm />);
-    const confirmSelect = screen.getByLabelText(/подтверждение/i);
+    const confirmSelect = screen.getByLabelText(/отправить детали/i);
     expect(confirmSelect).toBeInTheDocument();
 
-    // Check options exist
+    // Check options exist and order
     const options = screen.getAllByRole("option") as HTMLOptionElement[];
     const values = options.map((o) => o.value);
-    expect(values).toContain("max");
-    expect(values).toContain("telegram");
-    expect(values).toContain("whatsapp");
+    expect(values).toEqual(["telegram", "whatsapp", "max"]);
+  });
+
+  it("defaults to Telegram as the selected option", () => {
+    render(<ContactForm />);
+    const confirmSelect = screen.getByLabelText(/отправить детали/i) as HTMLSelectElement;
+    expect(confirmSelect.value).toBe("telegram");
   });
 });

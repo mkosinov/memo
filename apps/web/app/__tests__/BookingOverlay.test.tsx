@@ -7,8 +7,10 @@ const defaultActivity = {
   title: "Тестовое мероприятие",
   time: "14:00",
   location: "Парк Горького",
-  adultPrice: 1500,
-  childPrice: 800,
+  tariffs: [
+    { label: "Взрослый", price: 1500 },
+    { label: "Детский (5–11 лет)", price: 800 },
+  ],
 };
 
 function renderOverlay(props: Partial<React.ComponentProps<typeof BookingOverlay>> = {}) {
@@ -31,22 +33,30 @@ describe("BookingOverlay", () => {
     expect(screen.getByText("Парк Горького")).toBeInTheDocument();
   });
 
-  it("calculates total correctly with adults and children", () => {
+  it("calculates total correctly with tariff-based counters", () => {
     renderOverlay();
 
-    // Initial: 0 adults, 0 children → total 0
+    // Initial: all counters at 0 → total 0
     expect(screen.getByText(/Итого:/)).toHaveTextContent("Итого: 0 ₽");
 
-    // Add 2 adults: 2 * 1500 = 3000
-    const adultPlus = screen.getAllByRole("button", { name: /increase/i })[0];
-    fireEvent.click(adultPlus);
-    fireEvent.click(adultPlus);
+    // Add 2 adults (first tariff): 2 * 1500 = 3000
+    const tariffPlusButtons = screen.getAllByRole("button", { name: /increase/i });
+    fireEvent.click(tariffPlusButtons[0]);
+    fireEvent.click(tariffPlusButtons[0]);
     expect(screen.getByText(/Итого:/)).toHaveTextContent("Итого: 3 000 ₽");
 
-    // Add 1 child: 3000 + 800 = 3800
-    const childPlus = screen.getAllByRole("button", { name: /increase/i })[1];
-    fireEvent.click(childPlus);
+    // Add 1 child (second tariff): 3000 + 800 = 3800
+    fireEvent.click(tariffPlusButtons[1]);
     expect(screen.getByText(/Итого:/)).toHaveTextContent("Итого: 3 800 ₽");
+  });
+
+  it("renders counters based on service tariffs", () => {
+    renderOverlay();
+
+    expect(screen.getByText("Взрослый")).toBeInTheDocument();
+    expect(screen.getByText("1 500 ₽")).toBeInTheDocument();
+    expect(screen.getByText("Детский (5–11 лет)")).toBeInTheDocument();
+    expect(screen.getByText("800 ₽")).toBeInTheDocument();
   });
 
   it("disables submit when no participants selected", () => {
@@ -59,9 +69,9 @@ describe("BookingOverlay", () => {
   it("disables submit when form is invalid", async () => {
     const { container } = renderOverlay();
 
-    // Add 1 adult so total > 0
-    const adultPlus = screen.getAllByRole("button", { name: /increase/i })[0];
-    fireEvent.click(adultPlus);
+    // Add 1 adult (first tariff) so total > 0
+    const tariffPlusButtons = screen.getAllByRole("button", { name: /increase/i });
+    fireEvent.click(tariffPlusButtons[0]);
 
     // Form is invalid (name, phone, confirmation not filled)
     const submitBtn = screen.getByRole("button", { name: /Записаться/i });
@@ -79,13 +89,11 @@ describe("BookingOverlay", () => {
     const phoneInput = screen.getByLabelText("Телефон");
     fireEvent.change(phoneInput, { target: { value: "+79991234567" } });
 
-    // Fill form: confirmation
-    const confirmSelect = screen.getByLabelText("Подтверждение");
-    fireEvent.change(confirmSelect, { target: { value: "whatsapp" } });
+    // Telegram is default, no need to change
 
-    // Add 1 adult
-    const adultPlus = screen.getAllByRole("button", { name: /increase/i })[0];
-    fireEvent.click(adultPlus);
+    // Add 1 adult (first tariff)
+    const tariffPlusButtons = screen.getAllByRole("button", { name: /increase/i });
+    fireEvent.click(tariffPlusButtons[0]);
 
     // Submit
     const submitBtn = screen.getByRole("button", { name: /Записаться/i });

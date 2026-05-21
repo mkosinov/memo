@@ -5,10 +5,9 @@ export interface ContactFormProps {
 }
 
 const CONFIRMATION_OPTIONS = [
-  { value: "", label: "Выберите способ" },
-  { value: "max", label: "Max" },
   { value: "telegram", label: "Telegram" },
   { value: "whatsapp", label: "WhatsApp" },
+  { value: "max", label: "Max" },
 ] as const;
 
 function countDigits(str: string): number {
@@ -19,7 +18,7 @@ export function ContactForm({ onValidityChange }: ContactFormProps) {
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [comment, setComment] = useState("");
-  const [confirmation, setConfirmation] = useState("");
+  const [confirmation, setConfirmation] = useState("telegram");
 
   const isValid =
     name.trim().length >= 2 &&
@@ -120,7 +119,7 @@ export function ContactForm({ onValidityChange }: ContactFormProps) {
           htmlFor="contact-confirm"
           className="block text-sm font-medium text-[#555555] mb-1"
         >
-          Подтверждение
+          Отправить детали записи в:
         </label>
         <select
           id="contact-confirm"

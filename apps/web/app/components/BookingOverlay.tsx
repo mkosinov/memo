@@ -6,6 +6,11 @@ import { Button } from "./Button";
 import { Counter } from "./Counter";
 import { ContactForm } from "./ContactForm";
 
+export interface Tariff {
+  label: string;
+  price: number;
+}
+
 export interface BookingOverlayProps {
   isOpen: boolean;
   onClose: () => void;
@@ -14,19 +19,23 @@ export interface BookingOverlayProps {
     title: string;
     time: string;
     location: string;
-    adultPrice: number;
-    childPrice: number;
+    tariffs: Tariff[];
   };
 }
 
 export function BookingOverlay({ isOpen, onClose, activity }: BookingOverlayProps) {
-  const [adultCount, setAdultCount] = useState(0);
-  const [childCount, setChildCount] = useState(0);
+  const [counts, setCounts] = useState<Record<number, number>>(
+    () => Object.fromEntries(activity.tariffs.map((_, i) => [i, 0])),
+  );
   const [isFormValid, setIsFormValid] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
 
-  const total = adultCount * activity.adultPrice + childCount * activity.childPrice;
-  const canSubmit = adultCount + childCount > 0 && isFormValid;
+  const total = activity.tariffs.reduce(
+    (sum, tariff, i) => sum + counts[i] * tariff.price,
+    0,
+  );
+  const totalCount = Object.values(counts).reduce((sum, c) => sum + c, 0);
+  const canSubmit = totalCount > 0 && isFormValid;
 
   const handleValidityChange = useCallback((valid: boolean) => {
     setIsFormValid(valid);
@@ -70,7 +79,10 @@ export function BookingOverlay({ isOpen, onClose, activity }: BookingOverlayProp
             <p className="text-base">{activity.title}</p>
             <p className="text-sm">{activity.time} · {activity.location}</p>
             <p className="text-sm">
-              Взрослых: {adultCount} · Детей: {childCount}
+              {activity.tariffs
+                .filter((_, i) => counts[i] > 0)
+                .map((tariff, i) => `${tariff.label}: ${counts[i]}`)
+                .join(" · ")}
             </p>
             <p className="text-lg font-semibold text-[#1a1a1a] mt-2">
               Итого: {total.toLocaleString("ru-RU")} ₽
@@ -116,20 +128,16 @@ export function BookingOverlay({ isOpen, onClose, activity }: BookingOverlayProp
 
       {/* Counters */}
       <div className="space-y-4 mb-6">
-        <Counter
-          label="Взрослые"
-          subLabel={`${activity.adultPrice.toLocaleString("ru-RU")} ₽`}
-          value={adultCount}
-          onChange={setAdultCount}
-          min={0}
-        />
-        <Counter
-          label="Дети"
-          subLabel={`${activity.childPrice.toLocaleString("ru-RU")} ₽`}
-          value={childCount}
-          onChange={setChildCount}
-          min={0}
-        />
+        {activity.tariffs.map((tariff, index) => (
+          <Counter
+            key={tariff.label}
+            label={tariff.label}
+            subLabel={`${tariff.price.toLocaleString("ru-RU")} ₽`}
+            value={counts[index]}
+            onChange={(value) => setCounts((prev) => ({ ...prev, [index]: value }))}
+            min={0}
+          />
+        ))}
       </div>
 
       {/* Total */}

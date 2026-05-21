@@ -9,8 +9,10 @@ const mockActivity = {
   title: "Акварельный пейзаж",
   time: "20 мая, 14:00",
   location: "Студия на Арбате",
-  adultPrice: 2500,
-  childPrice: 1800,
+  tariffs: [
+    { label: "Взрослый", price: 2500 },
+    { label: "Детский (5–11 лет)", price: 1800 },
+  ],
 };
 
 export default function BookingPage() {

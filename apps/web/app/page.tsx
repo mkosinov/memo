@@ -80,8 +80,10 @@ function toBookingActivity(vm: ActivityViewModel): React.ComponentProps<typeof B
     title: vm.title,
     time: `${vm.dateFormatted}, ${vm.time}`,
     location: vm.location.name,
-    adultPrice: vm.priceMax,
-    childPrice: Math.round(vm.priceMax * 0.7),
+    tariffs: [
+      { label: "Взрослый", price: vm.priceMax },
+      { label: "Детский (5–11 лет)", price: Math.round(vm.priceMax * 0.7) },
+    ],
   };
 }
 
@@ -302,8 +304,10 @@ export default function Home() {
                   title: "Индивидуальный мастер-класс",
                   time: "По согласованию",
                   location: "На ваш выбор",
-                  adultPrice: 8200,
-                  childPrice: Math.round(8200 * 0.7),
+                  tariffs: [
+                    { label: "Взрослый", price: 8200 },
+                    { label: "Детский (5–11 лет)", price: Math.round(8200 * 0.7) },
+                  ],
                 }
               : toBookingActivity(bookingActivity!)
           }

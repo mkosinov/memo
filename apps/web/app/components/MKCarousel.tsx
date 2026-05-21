@@ -61,30 +61,30 @@ export function MKCarousel({
     [handleSwipe]
   );
 
-  const cardScales = [1, 0.95, 0.90];
+  const cardScales = [1, 0.94, 0.88];
   const cardOffsets = [
     { y: 0, rotate: 0 },
-    { y: 8, rotate: 2 },
-    { y: 16, rotate: -2 },
+    { y: 12, rotate: 2 },
+    { y: 24, rotate: -2 },
   ];
   const cardZIndices = [30, 20, 10];
 
   return (
     <div className="relative flex flex-col items-center">
       {/* Card stack */}
-      <div className="relative w-full" style={{ minHeight: "420px" }}>
+      <div className="relative w-full" style={{ minHeight: "480px" }}>
         <AnimatePresence mode="popLayout">
           {visibleCards.map((card, index) => {
             const isTop = index === 0;
             const isLast = card === lastCard;
-            const scale = cardScales[index] ?? 0.85;
-            const offset = cardOffsets[index] ?? { y: 24, rotate: 0 };
+            const scale = cardScales[index] ?? 0.82;
+            const offset = cardOffsets[index] ?? { y: 32, rotate: 0 };
             const zIndex = cardZIndices[index] ?? 0;
 
             return (
               <motion.div
                 key={card.id}
-                className="absolute inset-0 mx-4"
+                className="absolute left-4 right-4 top-0"
                 style={{
                   zIndex,
                   transformOrigin: "center top",

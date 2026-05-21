@@ -115,4 +115,73 @@ describe("MKCarousel", () => {
     const images = screen.getAllByRole("img");
     expect(images.length).toBeGreaterThanOrEqual(1);
   });
+
+  describe("last card (custom booking card)", () => {
+    const lastCard = {
+      id: "last",
+      variant: "custom" as const,
+      title: "Индивидуальный мастер-класс",
+      description: "В удобное для вас время. Материал — на ваш выбор.",
+      price: 8200,
+    };
+
+    it("renders the last card in the stack (as background card)", () => {
+      render(
+        <MKCarousel
+          cards={mockCards}
+          lastCard={lastCard}
+          onSelectCard={vi.fn()}
+          onTapLastCard={vi.fn()}
+        />
+      );
+
+      // Last card should be in the DOM as a background card
+      expect(screen.getByText("Индивидуальный мастер-класс")).toBeInTheDocument();
+    });
+
+    it("calls onTapLastCard when last card button is clicked", () => {
+      const handleTapLast = vi.fn();
+      render(
+        <MKCarousel
+          cards={mockCards}
+          lastCard={lastCard}
+          onSelectCard={vi.fn()}
+          onTapLastCard={handleTapLast}
+        />
+      );
+
+      // The last card's button should be clickable even in background
+      fireEvent.click(screen.getByRole("button", { name: /записаться/i }));
+      expect(handleTapLast).toHaveBeenCalledTimes(1);
+    });
+
+    it("renders last card without an image", () => {
+      render(
+        <MKCarousel
+          cards={mockCards}
+          lastCard={lastCard}
+          onSelectCard={vi.fn()}
+          onTapLastCard={vi.fn()}
+        />
+      );
+
+      // The last card should not have an img element
+      const lastCardContainer = screen.getByText("Индивидуальный мастер-класс").closest('[data-card-id="last"]');
+      expect(lastCardContainer?.querySelector("img")).not.toBeInTheDocument();
+    });
+
+    it("renders last card with dashed border", () => {
+      render(
+        <MKCarousel
+          cards={mockCards}
+          lastCard={lastCard}
+          onSelectCard={vi.fn()}
+          onTapLastCard={vi.fn()}
+        />
+      );
+
+      const lastCardContainer = screen.getByText("Индивидуальный мастер-класс").closest('[data-card-id="last"]');
+      expect(lastCardContainer).toHaveClass("border-dashed");
+    });
+  });
 });

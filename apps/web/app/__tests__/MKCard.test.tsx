@@ -111,4 +111,58 @@ describe("MKCard", () => {
     render(<MKCard {...defaultProps} />);
     expect(screen.queryByText(/Акрил/)).not.toBeInTheDocument();
   });
+
+  describe("variant='custom' (last card)", () => {
+    const customProps = {
+      id: "custom",
+      variant: "custom" as const,
+      title: "Индивидуальный мастер-класс",
+      description: "В удобное для вас время. Материал — на ваш выбор.",
+      price: 8200,
+      onSignUp: vi.fn(),
+    };
+
+    it("renders without image when variant is custom", () => {
+      render(<MKCard {...customProps} />);
+      expect(screen.queryByRole("img")).not.toBeInTheDocument();
+    });
+
+    it("renders outlined/dashed border style", () => {
+      render(<MKCard {...customProps} />);
+      const card = screen.getByText("Индивидуальный мастер-класс").closest('[data-card-id]');
+      expect(card).toHaveClass("border-2");
+      expect(card).toHaveClass("border-dashed");
+    });
+
+    it("renders the description text", () => {
+      render(<MKCard {...customProps} />);
+      expect(screen.getByText("В удобное для вас время. Материал — на ваш выбор.")).toBeInTheDocument();
+    });
+
+    it("renders the single price", () => {
+      render(<MKCard {...customProps} />);
+      expect(screen.getByText("8 200 ₽")).toBeInTheDocument();
+    });
+
+    it("renders a 'Записаться' button instead of 'Подробнее'", () => {
+      render(<MKCard {...customProps} />);
+      expect(screen.getByRole("button", { name: /записаться/i })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /подробнее/i })).not.toBeInTheDocument();
+    });
+
+    it("calls onSignUp when 'Записаться' button is clicked", () => {
+      const handleSignUp = vi.fn();
+      render(<MKCard {...customProps} onSignUp={handleSignUp} />);
+      fireEvent.click(screen.getByRole("button", { name: /записаться/i }));
+      expect(handleSignUp).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not render category pill, time, duration, or guests", () => {
+      render(<MKCard {...customProps} />);
+      expect(screen.queryByText("взрослым")).not.toBeInTheDocument();
+      expect(screen.queryByText("вместе")).not.toBeInTheDocument();
+      expect(screen.queryByText("детям")).not.toBeInTheDocument();
+      expect(screen.queryByText(/Уже \d+/)).not.toBeInTheDocument();
+    });
+  });
 });

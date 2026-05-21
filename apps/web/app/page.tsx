@@ -102,6 +102,7 @@ export default function Home() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [selectedActivity, setSelectedActivity] = useState<ActivityViewModel | null>(null);
   const [bookingActivity, setBookingActivity] = useState<ActivityViewModel | null>(null);
+  const [bookingFromLastCard, setBookingFromLastCard] = useState(false);
 
   // ── Build filters for activities ──
   const activityFilters = useMemo(() => {
@@ -147,6 +148,19 @@ export default function Home() {
   const locationOptions = useMemo(() => locations.map(toLocationOption), [locations]);
   const guestPhotos = useMemo(() => galleryPhotos.map(toGuestPhoto), [galleryPhotos]);
 
+  // ── Last card (custom booking card) ──
+  const lastCard = useMemo(
+    () =>
+      ({
+        id: "custom-booking",
+        variant: "custom" as const,
+        title: "Индивидуальный мастер-класс",
+        description: "В удобное для вас время. Материал — на ваш выбор.",
+        price: 8200,
+      }) as MKCardProps & { id: string },
+    []
+  );
+
   // ── Handlers ──
   const handleSelectDay = useCallback((date: Date) => {
     selectDate(date);
@@ -190,6 +204,11 @@ export default function Home() {
     setMenuOpen(false);
   }, []);
 
+  const handleTapLastCard = useCallback(() => {
+    setBookingFromLastCard(true);
+    setBookingActivity(null); // Clear any existing booking activity
+  }, []);
+
   return (
     <main className="min-h-screen bg-surface">
       {/* 1. Hero */}
@@ -220,7 +239,9 @@ export default function Home() {
       {/* 4. MKCarousel */}
       <MKCarousel
         cards={cards}
+        lastCard={lastCard}
         onSelectCard={handleSelectCard}
+        onTapLastCard={handleTapLastCard}
       />
 
       {/* 5. Reviews */}
@@ -246,11 +267,25 @@ export default function Home() {
       )}
 
       {/* 10. BookingOverlay */}
-      {bookingActivity && (
+      {(bookingActivity || bookingFromLastCard) && (
         <BookingOverlay
-          isOpen={!!bookingActivity}
-          onClose={handleCloseBooking}
-          activity={toBookingActivity(bookingActivity)}
+          isOpen={!!bookingActivity || bookingFromLastCard}
+          onClose={() => {
+            handleCloseBooking();
+            setBookingFromLastCard(false);
+          }}
+          activity={
+            bookingFromLastCard
+              ? {
+                  imageUrl: "",
+                  title: "Индивидуальный мастер-класс",
+                  time: "По согласованию",
+                  location: "На ваш выбор",
+                  adultPrice: 8200,
+                  childPrice: Math.round(8200 * 0.7),
+                }
+              : toBookingActivity(bookingActivity!)
+          }
         />
       )}
     </main>

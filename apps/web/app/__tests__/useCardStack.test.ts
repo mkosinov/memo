@@ -120,4 +120,57 @@ describe("useCardStack", () => {
     expect(result.current.currentIndex).toBe(0);
     expect(result.current.visibleCards).toHaveLength(0);
   });
+
+  describe("with lastCard (non-cycling terminal card)", () => {
+    it("includes lastCard as the final visible card", () => {
+      const lastCard = { id: "last", title: "Custom MK" };
+      const { result } = renderHook(() =>
+        useCardStack({ cards: mockCards, lastCard })
+      );
+
+      const visibleIds = result.current.visibleCards.map((c) => c.id);
+      expect(visibleIds).toContain("last");
+    });
+
+    it("does not cycle past the last card", () => {
+      const lastCard = { id: "last", title: "Custom MK" };
+      const { result } = renderHook(() =>
+        useCardStack({ cards: mockCards.slice(0, 2), lastCard })
+      );
+
+      // Swipe through all regular cards
+      act(() => result.current.handleSwipe("right")); // index 1
+      act(() => result.current.handleSwipe("right")); // index 2 (lastCard)
+
+      // Should stay at last card, not wrap
+      const visibleIds = result.current.visibleCards.map((c) => c.id);
+      expect(visibleIds[0]).toBe("last");
+    });
+
+    it("returns isLastCard flag when current card is the last card", () => {
+      const lastCard = { id: "last", title: "Custom MK" };
+      const { result } = renderHook(() =>
+        useCardStack({ cards: [{ id: "1", title: "Card 1" }], lastCard })
+      );
+
+      expect(result.current.isLastCard).toBe(false);
+
+      act(() => result.current.handleSwipe("right"));
+
+      expect(result.current.isLastCard).toBe(true);
+    });
+
+    it("handlesTap on last card calls onTap with lastCard", () => {
+      const onTap = vi.fn();
+      const lastCard = { id: "last", title: "Custom MK" };
+      const { result } = renderHook(() =>
+        useCardStack({ cards: [{ id: "1", title: "Card 1" }], lastCard, onTap })
+      );
+
+      act(() => result.current.handleSwipe("right"));
+      act(() => result.current.handleTap());
+
+      expect(onTap).toHaveBeenCalledWith(lastCard);
+    });
+  });
 });

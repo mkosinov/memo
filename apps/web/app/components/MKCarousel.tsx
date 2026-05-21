@@ -10,7 +10,9 @@ type MKCardData = MKCardProps & CardStackItem;
 
 export interface MKCarouselProps {
   cards: MKCardData[];
+  lastCard?: MKCardData;
   onSelectCard: (card: MKCardData) => void;
+  onTapLastCard?: () => void;
   onSwipe?: (card: MKCardData, direction: "left" | "right") => void;
 }
 
@@ -18,7 +20,9 @@ const SWIPE_THRESHOLD = 100;
 
 export function MKCarousel({
   cards,
+  lastCard,
   onSelectCard,
+  onTapLastCard,
   onSwipe,
 }: MKCarouselProps) {
   const [exitDirection, setExitDirection] = useState<"left" | "right" | null>(null);
@@ -27,16 +31,22 @@ export function MKCarousel({
     currentIndex,
     direction,
     visibleCards,
+    isLastCard,
     handleSwipe,
     handleTap,
   } = useCardStack<MKCardData>({
     cards,
+    lastCard,
     onSwipe: (card, dir) => {
       setExitDirection(dir);
       onSwipe?.(card, dir);
     },
     onTap: (card) => {
-      onSelectCard(card);
+      if (card === lastCard) {
+        onTapLastCard?.();
+      } else {
+        onSelectCard(card);
+      }
     },
   });
 
@@ -66,6 +76,7 @@ export function MKCarousel({
         <AnimatePresence mode="popLayout">
           {visibleCards.map((card, index) => {
             const isTop = index === 0;
+            const isLast = card === lastCard;
             const scale = cardScales[index] ?? 0.85;
             const offset = cardOffsets[index] ?? { y: 24, rotate: 0 };
             const zIndex = cardZIndices[index] ?? 0;
@@ -101,12 +112,15 @@ export function MKCarousel({
                   stiffness: 300,
                   damping: 25,
                 }}
-                drag={isTop ? "x" : false}
+                drag={isTop && !isLast ? "x" : false}
                 dragElastic={0.7}
-                onDragEnd={isTop ? handlePanEnd : undefined}
+                onDragEnd={isTop && !isLast ? handlePanEnd : undefined}
                 onClick={isTop ? handleTap : undefined}
               >
-                <MKCard {...card} />
+                <MKCard
+                  {...card}
+                  onSignUp={isLast ? onTapLastCard : card.onSignUp}
+                />
               </motion.div>
             );
           })}

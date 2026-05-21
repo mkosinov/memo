@@ -12,7 +12,7 @@ export function FilterPills({
   onSelectCategory,
 }: FilterPillsProps) {
   return (
-    <div className="flex gap-2 overflow-x-auto no-scrollbar py-2 px-4">
+    <div className="flex gap-2 overflow-x-auto no-scrollbar">
       {CATEGORIES.map((category) => (
         <Pill
           key={category}

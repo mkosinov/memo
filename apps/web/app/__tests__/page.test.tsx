@@ -196,15 +196,22 @@ describe("Home (page.tsx)", () => {
   });
 
   describe("category filter selection", () => {
+    it("has 'вместе' selected by default", () => {
+      renderHome();
+      const pills = screen.getAllByText("вместе");
+      const pillButton = pills[0].closest("button");
+      expect(pillButton).toHaveClass("bg-[#004D56]");
+    });
+
     it("calls onSelectCategory when a category pill is clicked", () => {
       renderHome();
-      // Find the FilterPills button for "вместе" (not the card category span)
-      const pills = screen.getAllByText("вместе");
+      // Find the FilterPills button for "взрослым" (not the card category span)
+      const pills = screen.getAllByText("взрослым");
       const pillButton = pills[0].closest("button");
       expect(pillButton).toBeInTheDocument();
       fireEvent.click(pillButton!);
       // After clicking, the pill should be highlighted (active state)
-      const activePill = screen.getAllByText("вместе")[0].closest("button");
+      const activePill = screen.getAllByText("взрослым")[0].closest("button");
       expect(activePill).toHaveClass("bg-[#004D56]");
     });
   });

@@ -98,7 +98,7 @@ export default function Home() {
   const { days, selectedDate, selectDate, tab, setTab } = useCalendarDays();
 
   // ── Filter state ──
-  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [selectedCategory, setSelectedCategory] = useState<string | null>("вместе");
   const [selectedLocation, setSelectedLocation] = useState<string | null>(null);
 
   // ── UI state ──
@@ -207,16 +207,18 @@ export default function Home() {
         onTabChange={setTab}
       />
 
-      {/* 3. FilterPills + LocationFilter */}
-      <FilterPills
-        selectedCategory={selectedCategory}
-        onSelectCategory={handleSelectCategory}
-      />
-      <LocationFilter
-        locations={locationOptions}
-        selectedLocation={selectedLocation}
-        onSelectLocation={handleSelectLocation}
-      />
+      {/* 3. FilterPills + LocationFilter (single row) */}
+      <div className="flex items-center gap-2 px-4 py-2 overflow-x-auto no-scrollbar">
+        <LocationFilter
+          locations={locationOptions}
+          selectedLocation={selectedLocation}
+          onSelectLocation={handleSelectLocation}
+        />
+        <FilterPills
+          selectedCategory={selectedCategory}
+          onSelectCategory={handleSelectCategory}
+        />
+      </div>
 
       {/* 4. MKCarousel */}
       <MKCarousel

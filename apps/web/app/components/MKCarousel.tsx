@@ -68,6 +68,7 @@ export function MKCarousel({
     { y: 80, rotate: -2 },
   ];
   const cardZIndices = [30, 20, 10];
+  const cardWidths = ["90%", "96%", "100%"];
 
   return (
     <div className="relative flex flex-col items-center">
@@ -80,12 +81,14 @@ export function MKCarousel({
             const scale = cardScales[index] ?? 0.82;
             const offset = cardOffsets[index] ?? { y: 32, rotate: 0 };
             const zIndex = cardZIndices[index] ?? 0;
+            const width = cardWidths[index] ?? "100%";
 
             return (
               <motion.div
                 key={card.id}
-                className="absolute left-4 right-4 top-0"
+                className="absolute left-1/2 top-0 -translate-x-1/2"
                 style={{
+                  width,
                   zIndex,
                   transformOrigin: "center top",
                 }}

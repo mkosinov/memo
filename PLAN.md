@@ -207,21 +207,20 @@ memo/
 
 ---
 
-## Этап 9: Web — colourmountains.ru (P3 Client Booking Flow)
+## Этап 9: Web — colourmountains.ru ✅ Completed 2026-05-20
 
-- [ ] Создать `apps/web/` — Next.js 14 проект для публичного сайта
-- [ ] Настроить SEO: metadata, sitemap, robots
-- [ ] **Главная страница** — hero, галерея, услуги, о студии
-- [ ] **Страница услуг** — список мастер-классов
-- [ ] **Страница записи** (`/booking`) — 4-шаговый флоу:
-  - Шаг 1: LocationSelector (карточки локаций)
-  - Шаг 2: ActivitySchedule (выбор даты и занятия)
-  - Шаг 3: BookingForm (посетители, цены)
-  - Шаг 4: BookingConfirmation (оплата, сводка)
-- [ ] **Страница контактов**
-- [ ] Интеграция с `@memo/domain` и `@memo/api-client`
+- [x] Создать `apps/web/` — Next.js 14 проект для публичного сайта
+- [x] Настроить SEO: metadata, sitemap, robots
+- [x] **Главная страница** — hero, календарь, фильтры, MKCard carousel, отзывы, галерея
+- [x] ActivityDetail + Booking overlays с формой и счётчиками
+- [x] Popup-компоненты: PriceDetails, MaterialDetails, NextTime, LocationDetails
+- [x] Sticky ChatBar с chips
+- [x] **Вспомогательные страницы** (8 шт): /services, /locations, /pleinair, /corporate, /shop, /about, /cabinet, /booking
+- [x] Cookie + geolocation utils
+- [x] Интеграция с `@memo/domain` и `@memo/api-client`
+- [x] 42 теста, 310 passing, build без ошибок
 
-**Результат:** Полноценный сайт colourmountains.ru с онлайн-записью
+**Результат:** Полноценный сайт colourmountains.ru — главная страница с каруселью МК, overlays и онлайн-записью через BookingOverlay, 10 статических страниц.
 
 ---
 
@@ -261,6 +260,7 @@ memo/
 
 ---
 ## Changelog
+- 2026-05-20: **colourtmountains.ru website (Web) завершён.** `apps/web/` — Next.js 14, 18 задач, 42 теста, 310 passing, 10 статических страниц. См. `docs/specs/2026-05-20-colourmountains-website-design.md`.
 - 2026-05-19: **Turborepo миграция.** Переход от единого `frontend/` к монорепо: `apps/admin/`, `packages/domain/`, `packages/api-client/`. Убран дедлайн MVP, добавлены этапы 9 (Web) и 10 (Master App). Обновлена архитектура: `docs/ARCHITECTURE.md`.
 - 2026-05-13: Updated deadlines — MVP 20 мая, Full release 31 мая. Added daily schedule for MVP sprint.
 - 2026-05-13: Initial PLAN.md created with etapy 0-8.

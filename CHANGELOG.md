@@ -11,6 +11,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **colourmountains.ru Website** (`apps/web/`) — 2026-05-20
+  - Next.js 14 App Router проект с 10 статическими страницами
+  - Hero секция (35% viewport, gradients, Playfair Display)
+  - CalendarLine — горизонтальный скролл дней, красный квадрат для выбранного дня (Embla Carousel)
+  - FilterPills + LocationFilter — категории (вместе/взрослым/детям) и выбор локации с cookie-сохранением
+  - MKCarousel — Card Stack карусель (Framer Motion, свайп, 3 карточки в стопке)
+  - ActivityDetail Overlay — слайд-ап панель с деталями МК, popup-ами (PriceDetails, MaterialDetails, NextTime, LocationDetails)
+  - Booking Overlay — полноэкранная форма записи: счётчики участников, контактная форма, итоговая стоимость, success state
+  - Reviews + GuestGallery — секции с Яндекс.Карты ссылкой и горизонтальной галереей
+  - Sticky ChatBar — фиксированный снизу с chips (кнопки быстрых вопросов)
+  - API integration — 3-слойная архитектура: api → model/transforms → hooks (useActivities, useLocations, useGallery)
+  - Cookie и geolocation utils (getLocationCookie / setLocationCookie / getCurrentPosition)
+  - Вспомогательные страницы (8 шт): /services, /locations, /pleinair, /corporate, /shop, /about, /cabinet, /booking
+  - Дизайн-система: --gold accent, Playfair Display, radius 16px (обновлено в админке и design-system.md)
+  - 42 тестовых файла, 310 тестов, TypeScript zero errors, статический экспорт
+
 - **P1: Admin Schedule — UI Polish Session (2026-05-16)**
   - ActivityCard restructured to 5-div vertical layout (Header, Title, Age, Location, Footer)
   - DnD ghost preview — responsive DragOverlay width (`w-full`) + card-shaped slot ghost

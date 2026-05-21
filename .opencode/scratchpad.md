@@ -1,54 +1,64 @@
-# Session: Turborepo Migration
+# Session: colourmountains.ru Website
 
-## Date: 2026-05-19
-## Branch: main
+## Date: 2026-05-20
+## Branch: feat/colourmountains-website
 
-## Context
+## Workflow Status
 
-Предыдущий workflow (P2 — Booking Management) завершён. PR #38 создан.
+- [x] **Step 1: Brainstorming** — DONE, G1 passed
+- [x] **Step 2: Writing Plans** — DONE, G2 passed
+- [x] **Step 3: Git Worktree** — DONE, G3 passed
+- [x] **Pre-existing infra fixes** — DONE (commit `057f045`)
+- [x] **Step 4: Subagent-Driven Development** — DONE (18/18 tasks completed)
+- [x] **Step 5: Documentation Commit** — DONE
+- [ ] Step 6: Finishing Development Branch
 
-Принято архитектурное решение: миграция из единого `frontend/` в **Turborepo monorepo** для поддержки 3+ frontend приложений (admin, web, master) с shared типами и API клиентом.
+## What was built
 
-## Что сделано
+### colourmountains.ru public website (`apps/web/`)
 
-### Архитектурные изменения
-- [x] Создана базовая структура Turborepo (`turbo.json`, `pnpm-workspace.yaml`, root `package.json`)
-- [x] Создан `packages/domain/` — shared TypeScript типы + Zod схемы (`@memo/domain`)
-- [x] Создан `packages/api-client/` — shared HTTP клиент с Zod-валидацией (`@memo/api-client`)
-- [x] Перенесён `frontend/` → `apps/admin/`
-- [x] Обновлены все импорты: `@/lib/types` → `@memo/domain` (13 файлов)
-- [x] Обновлен `PLAN.md` — добавлена архитектура, этапы 9 (Web) и 10 (Master)
-- [x] Создан `docs/ARCHITECTURE.md` — полная документация структуры репо
+All 18 tasks implemented:
 
-### Результаты
-- Tests: **160/160 passing** (vitest)
-- npm install: ✅ работает с workspaces
-- TypeScript paths: ✅ `@memo/domain`, `@memo/api-client` резолвятся
+| # | Task | Classification | Status |
+|---|------|----------------|--------|
+| 1 | Update design-system.md (radius 16px, gold) | Small | ✅ |
+| 2 | Initialize apps/web/ | Standard | ✅ |
+| 3 | Global styles and fonts | Small | ✅ |
+| 4 | Base components (Header, Overlay, Button, Pill, HamburgerMenu) | Standard | ✅ |
+| 5 | Hero section | Small | ✅ |
+| 6 | CalendarLine + useCalendarDays hook | Standard | ✅ |
+| 7 | Filters (FilterPills + LocationFilter) | Small | ✅ |
+| 8 | Card Stack carousel (MKCarousel + MKCard + useCardStack) | Large | ✅ |
+| 9 | ActivityDetail Overlay | Standard | ✅ |
+| 10 | Booking Overlay (Counter + ContactForm + BookingOverlay) | Standard | ✅ |
+| 11 | Popup components (PriceDetails, MaterialDetails, NextTime, LocationDetails) | Standard | ✅ |
+| 12 | Reviews + GuestGallery sections | Small | ✅ |
+| 13 | Sticky Chat Bar | Small | ✅ |
+| 14 | API integration (3-layer: api → model → transforms → hooks) | Standard | ✅ |
+| 15 | Main page assembly (page.tsx) | Standard | ✅ |
+| 16 | Auxiliary pages (8 pages) | Standard | ✅ |
+| 17 | Cookie + geolocation utils | Small | ✅ |
+| 18 | Tests and build verification | Standard | ✅ |
 
-## Новая структура
+### Test Results
+- 42 test files, 310 tests — all passing
+- Build: 10 static pages generated successfully
+- TypeScript: zero errors
 
-```
-memo/
-├── apps/
-│   └── admin/          # Админ-панель (Next.js 14)
-│   └── web/            # colourmountains.ru (future)
-│   └── master/         # Приложение для мастеров (future)
-├── packages/
-│   ├── domain/         # Shared типы + Zod
-│   └── api-client/     # Shared HTTP клиент
-├── backend/            # FastAPI
-└── docs/
-    ├── ARCHITECTURE.md
-    └── PLAN.md
-```
+### Changed Files
+- `apps/web/` (entire Next.js 14 project)
+- `docs/design-system.md` (updated)
+- `apps/admin/tailwind.config.ts` (updated)
 
-## Следующие шаги
+## Worktree
 
-1. Создать `apps/web/` — начать разработку colourmountains.ru
-2. Backend: начать FastAPI (в `backend/`)
-3. Обновить GitHub Project board — Issue #6 (Web) в In Progress
+- Path: `.worktrees/feat-colourmountains-website`
+- Branch: `feat/colourmountains-website`
+- Baseline commit: `057f045`
+- Head commit: `8c011b7` (after init)
 
-## Документы
+## Documents
 
-- Архитектура: `docs/ARCHITECTURE.md`
-- План: `docs/PLAN.md` (обновлён)
+- Design: `docs/specs/2026-05-20-colourmountains-website-design.md`
+- Plan: `docs/plans/2026-05-20-colourmountains-website-plan.md`
+- Project plan: `PLAN.md`

@@ -1,0 +1,142 @@
+import { useState, useEffect, useCallback } from "react";
+
+export interface ContactFormProps {
+  onValidityChange?: (isValid: boolean) => void;
+}
+
+const CONFIRMATION_OPTIONS = [
+  { value: "", label: "Выберите способ" },
+  { value: "max", label: "Max" },
+  { value: "telegram", label: "Telegram" },
+  { value: "whatsapp", label: "WhatsApp" },
+] as const;
+
+function countDigits(str: string): number {
+  return (str.match(/\d/g) || []).length;
+}
+
+export function ContactForm({ onValidityChange }: ContactFormProps) {
+  const [name, setName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [comment, setComment] = useState("");
+  const [confirmation, setConfirmation] = useState("");
+
+  const isValid =
+    name.trim().length >= 2 &&
+    countDigits(phone) >= 10 &&
+    confirmation !== "";
+
+  const notifyValidity = useCallback(
+    (valid: boolean) => {
+      onValidityChange?.(valid);
+    },
+    [onValidityChange],
+  );
+
+  useEffect(() => {
+    notifyValidity(isValid);
+  }, [isValid, notifyValidity]);
+
+  return (
+    <div className="space-y-4">
+      {/* Name */}
+      <div>
+        <label
+          htmlFor="contact-name"
+          className="block text-sm font-medium text-[#555555] mb-1"
+        >
+          Имя
+        </label>
+        <input
+          id="contact-name"
+          type="text"
+          placeholder="Имя"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          className={[
+            "w-full rounded-lg border px-3 py-2 text-sm transition",
+            "border-[#E0E0E1] text-[#1a1a1a] placeholder-[#cccccc]",
+            "focus:border-[#004D56] focus:outline-none",
+            name.length > 0 && name.trim().length < 2 && "border-[#C8503C]",
+          ]
+            .filter(Boolean)
+            .join(" ")}
+        />
+        {name.length > 0 && name.trim().length < 2 && (
+          <p className="text-xs text-[#C8503C] mt-1">Минимум 2 символа</p>
+        )}
+      </div>
+
+      {/* Phone */}
+      <div>
+        <label
+          htmlFor="contact-phone"
+          className="block text-sm font-medium text-[#555555] mb-1"
+        >
+          Телефон
+        </label>
+        <input
+          id="contact-phone"
+          type="tel"
+          placeholder="Телефон"
+          value={phone}
+          onChange={(e) => setPhone(e.target.value)}
+          className={[
+            "w-full rounded-lg border px-3 py-2 text-sm transition",
+            "border-[#E0E0E1] text-[#1a1a1a] placeholder-[#cccccc]",
+            "focus:border-[#004D56] focus:outline-none",
+            phone.length > 0 && countDigits(phone) < 10 && "border-[#C8503C]",
+          ]
+            .filter(Boolean)
+            .join(" ")}
+        />
+        {phone.length > 0 && countDigits(phone) < 10 && (
+          <p className="text-xs text-[#C8503C] mt-1">Минимум 10 цифр</p>
+        )}
+      </div>
+
+      {/* Comment */}
+      <div>
+        <label
+          htmlFor="contact-comment"
+          className="block text-sm font-medium text-[#555555] mb-1"
+        >
+          Комментарий{" "}
+          <span className="text-[#cccccc] font-normal">(необязательно)</span>
+        </label>
+        <textarea
+          id="contact-comment"
+          placeholder="Комментарий"
+          value={comment}
+          onChange={(e) => setComment(e.target.value)}
+          rows={2}
+          className="w-full rounded-lg border border-[#E0E0E1] px-3 py-2 text-sm text-[#1a1a1a] placeholder-[#cccccc] transition focus:border-[#004D56] focus:outline-none resize-none"
+        />
+      </div>
+
+      {/* Confirmation */}
+      <div>
+        <label
+          htmlFor="contact-confirm"
+          className="block text-sm font-medium text-[#555555] mb-1"
+        >
+          Подтверждение
+        </label>
+        <select
+          id="contact-confirm"
+          value={confirmation}
+          onChange={(e) => setConfirmation(e.target.value)}
+          className="w-full rounded-lg border border-[#E0E0E1] px-3 py-2 text-sm text-[#1a1a1a] transition focus:border-[#004D56] focus:outline-none"
+        >
+          {CONFIRMATION_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
+      </div>
+    </div>
+  );
+}
+
+export default ContactForm;

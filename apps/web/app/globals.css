@@ -5,6 +5,9 @@
 /* ===== Design System Variables ===== */
 
 :root {
+  --bg: #EDEDEE;
+  --card-bg: #ffffff;
+  --surface: #f4f4f5;
   --brand: #004D56;
   --brand-light: #006670;
   --gold: #C49A2E;
@@ -12,7 +15,6 @@
   --ink-mid: #555555;
   --ink-light: #888888;
   --ink-faint: #cccccc;
-  --surface: #f4f4f5;
   --line: #E0E0E1;
 }
 
@@ -31,7 +33,35 @@ html {
 }
 
 body {
+  max-width: 390px;
+  margin: 0 auto;
   color: var(--ink);
-  background: var(--surface);
+  background: var(--bg);
   font-family: var(--font-inter), system-ui, -apple-system, sans-serif;
+}
+
+/* ===== Scrollbar Utilities ===== */
+
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Thin scrollbar */
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: 2px;
 }

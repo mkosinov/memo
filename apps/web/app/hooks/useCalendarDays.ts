@@ -1,0 +1,57 @@
+import { useState, useMemo } from "react";
+
+const RUSSIAN_DAY_NAMES = ["Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"] as const;
+
+export interface CalendarDay {
+  date: Date;
+  dayName: string;
+  dayNumber: number;
+  isToday: boolean;
+  isSelected: boolean;
+}
+
+export interface UseCalendarDaysOptions {
+  selectedDate?: Date;
+  daysCount?: number;
+}
+
+function isSameDay(a: Date, b: Date): boolean {
+  return (
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
+  );
+}
+
+export function useCalendarDays(options?: UseCalendarDaysOptions) {
+  const daysCount = options?.daysCount ?? 14;
+  const [selectedDate, setSelectedDate] = useState<Date>(
+    () => options?.selectedDate ?? new Date()
+  );
+
+  const days = useMemo<CalendarDay[]>(() => {
+    const today = new Date();
+    const result: CalendarDay[] = [];
+
+    for (let i = 0; i < daysCount; i++) {
+      const date = new Date(today);
+      date.setDate(today.getDate() + i);
+
+      result.push({
+        date,
+        dayName: RUSSIAN_DAY_NAMES[date.getDay()],
+        dayNumber: date.getDate(),
+        isToday: i === 0,
+        isSelected: isSameDay(date, selectedDate),
+      });
+    }
+
+    return result;
+  }, [daysCount, selectedDate]);
+
+  const selectDate = (date: Date) => {
+    setSelectedDate(date);
+  };
+
+  return { days, selectedDate, selectDate };
+}

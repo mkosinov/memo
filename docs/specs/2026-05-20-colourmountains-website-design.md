@@ -281,7 +281,28 @@
 
 ---
 
-## 12. Ключевые решения
+## 12. Visual Compliance Checks
+
+- [ ] "Сегодня" tab is visible and clickable
+- [ ] "Завтра" tab is visible and clickable
+- [ ] Calendar line shows 4 days (starting with tomorrow)
+- [ ] Filter pills and location dropdown are in one line
+- [ ] "вместе" pill is selected by default
+- [ ] Card stack shows 1-2 cards behind the front card
+- [ ] Last card in stack is "Индивидуальный мастер-класс"
+- [ ] Card shows "Подробнее" button (not "Записаться")
+- [ ] Card does NOT show location or material
+- [ ] ActivityDetail overlay opens on card tap
+- [ ] ActivityDetail is 3/4 screen (not half)
+- [ ] Material, Price, Location show (i) hint icons (not "Подробнее" buttons)
+- [ ] "В следующий раз" shows 3 date options as text
+- [ ] Booking overlay shows counters based on service tariffs
+- [ ] Booking overlay has "Отправить детали записи в:" dropdown with Telegram default
+- [ ] Sticky chat bar is visible at bottom
+
+---
+
+## 13. Ключевые решения
 
 1. **Единая дизайн-система** с админкой, адаптация: `--bg`/`--surface` как в админке, `--gold` accent, Playfair Display для заголовков
 2. **Card Stack паттерн** для МК (не горизонтальный скролл, не peek-effect)

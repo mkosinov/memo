@@ -10,7 +10,7 @@ export interface GuestGalleryProps {
 
 export function GuestGallery({ photos, onPhotoClick }: GuestGalleryProps) {
   return (
-    <section className="py-4 px-4">
+    <section className="py-1 px-4">
       <div className="flex gap-3 overflow-x-auto no-scrollbar">
         {photos.map((photo, index) => (
           <div

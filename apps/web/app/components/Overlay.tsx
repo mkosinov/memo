@@ -6,9 +6,10 @@ export interface OverlayProps {
   onClose: () => void;
   children: ReactNode;
   size?: "half" | "three-quarters" | "full";
+  title?: string;
 }
 
-export function Overlay({ isOpen, onClose, children, size = "half" }: OverlayProps) {
+export function Overlay({ isOpen, onClose, children, size = "half", title }: OverlayProps) {
   return (
     <AnimatePresence>
       {isOpen && (
@@ -32,11 +33,16 @@ export function Overlay({ isOpen, onClose, children, size = "half" }: OverlayPro
             transition={{ type: "spring", damping: 25, stiffness: 200 }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex justify-end p-4">
+            <div className="flex items-center justify-between p-4">
+              {title && (
+                <span className="text-base font-playfair font-bold text-[#1a1a1a] truncate mr-4">
+                  {title}
+                </span>
+              )}
               <button
                 type="button"
                 onClick={onClose}
-                className="text-[#555555] hover:text-[#1a1a1a] text-2xl leading-none transition"
+                className="text-[#555555] hover:text-[#1a1a1a] text-2xl leading-none transition flex-shrink-0"
                 aria-label="Close overlay"
               >
                 &times;

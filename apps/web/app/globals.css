@@ -33,11 +33,10 @@ html {
 }
 
 body {
-  max-width: 390px;
-  margin: 0 auto;
   color: var(--ink);
   background: var(--bg);
   font-family: var(--font-inter), system-ui, -apple-system, sans-serif;
+  overflow-x: hidden;
 }
 
 /* ===== Scrollbar Utilities ===== */

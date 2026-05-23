@@ -1,7 +1,9 @@
 import { useState, useEffect, useCallback } from "react";
+import { isValidPhoneNumber } from "libphonenumber-js";
 
 export interface ContactFormProps {
   onValidityChange?: (isValid: boolean) => void;
+  submitted?: boolean;
 }
 
 const CONFIRMATION_OPTIONS = [
@@ -10,11 +12,7 @@ const CONFIRMATION_OPTIONS = [
   { value: "max", label: "Max" },
 ] as const;
 
-function countDigits(str: string): number {
-  return (str.match(/\d/g) || []).length;
-}
-
-export function ContactForm({ onValidityChange }: ContactFormProps) {
+export function ContactForm({ onValidityChange, submitted }: ContactFormProps) {
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [comment, setComment] = useState("");
@@ -22,7 +20,7 @@ export function ContactForm({ onValidityChange }: ContactFormProps) {
 
   const isValid =
     name.trim().length >= 2 &&
-    countDigits(phone) >= 10 &&
+    isValidPhoneNumber(phone, "RU") &&
     confirmation !== "";
 
   const notifyValidity = useCallback(
@@ -56,13 +54,17 @@ export function ContactForm({ onValidityChange }: ContactFormProps) {
             "w-full rounded-lg border px-3 py-2 text-sm transition",
             "border-[#E0E0E1] text-[#1a1a1a] placeholder-[#cccccc]",
             "focus:border-[#004D56] focus:outline-none",
-            name.length > 0 && name.trim().length < 2 && "border-[#C8503C]",
+            (
+              (name.length > 0 || submitted) && name.trim().length < 2
+            ) ? "border-[#C8503C]" : "",
           ]
             .filter(Boolean)
             .join(" ")}
         />
-        {name.length > 0 && name.trim().length < 2 && (
-          <p className="text-xs text-[#C8503C] mt-1">Минимум 2 символа</p>
+        {((name.length > 0 || submitted) && name.trim().length < 2) && (
+          <p className="text-xs text-[#C8503C] mt-1">
+            {name.trim().length === 0 ? "Обязательное поле" : "Минимум 2 символа"}
+          </p>
         )}
       </div>
 
@@ -84,13 +86,19 @@ export function ContactForm({ onValidityChange }: ContactFormProps) {
             "w-full rounded-lg border px-3 py-2 text-sm transition",
             "border-[#E0E0E1] text-[#1a1a1a] placeholder-[#cccccc]",
             "focus:border-[#004D56] focus:outline-none",
-            phone.length > 0 && countDigits(phone) < 10 && "border-[#C8503C]",
+            (
+              (phone.length > 0 || submitted) && !isValidPhoneNumber(phone, "RU")
+            ) ? "border-[#C8503C]" : "",
           ]
             .filter(Boolean)
             .join(" ")}
         />
-        {phone.length > 0 && countDigits(phone) < 10 && (
-          <p className="text-xs text-[#C8503C] mt-1">Минимум 10 цифр</p>
+        {((phone.length > 0 || submitted) && !isValidPhoneNumber(phone, "RU")) && (
+          <p className="text-xs text-[#C8503C] mt-1">
+            {phone.trim().length === 0
+              ? "Обязательное поле"
+              : "Неверный формат номера"}
+          </p>
         )}
       </div>
 

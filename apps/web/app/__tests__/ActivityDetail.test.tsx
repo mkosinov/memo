@@ -4,6 +4,7 @@ import { ActivityDetail } from "../components/ActivityDetail";
 
 const mockActivity = {
   id: "act-1",
+  title: "Морской пейзаж",
   imageUrl: "/images/activity.jpg",
   guestPhotos: ["/images/guest1.jpg", "/images/guest2.jpg", "/images/guest3.jpg"],
   teacherName: "Анна Иванова",
@@ -23,6 +24,7 @@ const mockActivity = {
   location: "Студия на Таганке",
   locationAddress: "ул. Таганская, д. 10",
   locationDetails: "Метро Таганская, 5 минут пешком",
+  teacherDetails: "Художник-живописец, педагог с 10-летним стажем",
 };
 
 describe("ActivityDetail", () => {

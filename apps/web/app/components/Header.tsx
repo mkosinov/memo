@@ -1,20 +1,23 @@
 export interface HeaderProps {
   onMenuToggle?: () => void;
   isScrolled?: boolean;
+  /** Positioning override — "absolute" for hero overlay, default flows naturally */
+  position?: "absolute" | "relative";
 }
 
-export function Header({ onMenuToggle, isScrolled = false }: HeaderProps) {
+export function Header({ onMenuToggle, isScrolled = false, position }: HeaderProps) {
   return (
     <header
       role="banner"
       className={[
-        "fixed top-0 left-0 right-0 z-30 h-14 px-4 flex items-center justify-between transition-colors duration-200",
+        position ? `${position} top-0 left-0 right-0` : "",
+        "z-30 h-14 px-4 flex items-center justify-between transition-colors duration-200",
         isScrolled ? "bg-white shadow-sm" : "bg-transparent",
-      ].join(" ")}
+      ]
+        .filter(Boolean)
+        .join(" ")}
     >
-      <span className="text-xl font-semibold text-[#004D56]" style={{ fontFamily: "var(--font-playfair)" }}>
-        ЦГ
-      </span>
+      <img src="/logo_horizontal_color.png" alt="Colour Mountains" className="h-8 w-auto" />
       <button
         type="button"
         onClick={onMenuToggle}

@@ -1,12 +1,10 @@
 "use client";
 
-import { useState, useCallback } from "react";
-import { motion, AnimatePresence, PanInfo } from "framer-motion";
-import { useCardStack, type CardStackItem } from "../hooks/useCardStack";
+import { useState, useCallback, useRef, useEffect } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import { MKCard, type MKCardProps } from "./MKCard";
 
-/** MKCardProps structurally satisfies CardStackItem (has id: string) */
-type MKCardData = MKCardProps & CardStackItem;
+type MKCardData = MKCardProps & { id: string };
 
 export interface MKCarouselProps {
   cards: MKCardData[];
@@ -14,9 +12,26 @@ export interface MKCarouselProps {
   onSelectCard: (card: MKCardData) => void;
   onTapLastCard?: () => void;
   onSwipe?: (card: MKCardData, direction: "left" | "right") => void;
+  onShowAgain?: () => void;
+  onNextDay?: () => void;
 }
 
-const SWIPE_THRESHOLD = 100;
+/** Stack config: scale, X offset, z-index per stack position */
+const STACK_COUNT = 7;
+
+const STACK = Array.from({ length: STACK_COUNT }, (_, i) => ({
+  scale: +(1.0 - i * 0.1).toFixed(1),
+  x: i * 30,
+  top: `${1 + i * 5}%`,
+  width: i === 0 ? "80%" : i === 1 ? "88%" : "94%",
+  zIndex: 30 - i * 5,
+}));
+
+// ── Shared swipe constants used both in drag and exit ──
+const SWIPE_THRESHOLD = 80;
+const SWIPE_VELOCITY = 500;
+const FLY_DISTANCE = 500;
+const FLY_DURATION_MS = 250;
 
 export function MKCarousel({
   cards,
@@ -24,111 +39,192 @@ export function MKCarousel({
   onSelectCard,
   onTapLastCard,
   onSwipe,
+  onShowAgain,
+  onNextDay,
 }: MKCarouselProps) {
-  const [exitDirection, setExitDirection] = useState<"left" | "right" | null>(null);
+  const [index, setIndex] = useState(0);
+  const [isEmpty, setIsEmpty] = useState(false);
+  const [flyingDir, setFlyingDir] = useState<"left" | "right" | null>(null);
+  const flyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const wasDragged = useRef(false);
 
-  const {
-    currentIndex,
-    direction,
-    visibleCards,
-    isLastCard,
-    handleSwipe,
-    handleTap,
-  } = useCardStack<MKCardData>({
-    cards,
-    lastCard,
-    onSwipe: (card, dir) => {
-      setExitDirection(dir);
-      onSwipe?.(card, dir);
-    },
-    onTap: (card) => {
-      if (card === lastCard) {
-        onTapLastCard?.();
+  // Reset when cards reference changes (e.g. new date filter)
+  const cardsRef = useRef(cards);
+  useEffect(() => {
+    if (cards !== cardsRef.current) {
+      setIndex(0);
+      setIsEmpty(false);
+      cardsRef.current = cards;
+    }
+  }, [cards]);
+
+  // Clean up fly timer on unmount
+  useEffect(() => {
+    return () => {
+      if (flyTimer.current) clearTimeout(flyTimer.current);
+    };
+  }, []);
+
+  // ── Build visible stack (up to 3 cards) ──
+  const visibleCards: MKCardData[] = [];
+  const regularSlots = lastCard ? 2 : 3;
+  for (let i = 0; i < regularSlots && index + i < cards.length; i++) {
+    visibleCards.push(cards[index + i]);
+  }
+  // Show lastCard at the bottom of the stack if there's room
+  if (!isEmpty && lastCard && visibleCards.length < 3 && index <= cards.length) {
+    visibleCards.push(lastCard);
+  }
+
+  const topCard = visibleCards[0];
+  const showEmpty = isEmpty || (visibleCards.length === 0 && !lastCard);
+
+  // ── Actually remove the top card after fly animation ──
+  const commitSwipe = useCallback(
+    (direction: "left" | "right") => {
+      if (!topCard) return;
+      onSwipe?.(topCard, direction);
+      if (topCard.id === lastCard?.id) {
+        setIsEmpty(true);
       } else {
-        onSelectCard(card);
+        setIndex((i) => i + 1);
       }
     },
-  });
-
-  const handlePanEnd = useCallback(
-    (_: unknown, info: PanInfo) => {
-      const offset = info.offset.x;
-      if (Math.abs(offset) > SWIPE_THRESHOLD) {
-        const dir = offset > 0 ? "right" : "left";
-        handleSwipe(dir);
-      }
-    },
-    [handleSwipe]
+    [topCard, lastCard, onSwipe],
   );
 
-  const cardScales = [1, 0.94, 0.88];
-  const cardOffsets = [
-    { y: 0, rotate: 0 },
-    { y: 40, rotate: 2 },
-    { y: 80, rotate: -2 },
-  ];
-  const cardZIndices = [30, 20, 10];
-  const cardWidths = ["85%", "92%", "100%"];
+  // ── Drag handler (replaces all manual pointer events) ──
+  const handleDragEnd = useCallback(
+    (_: unknown, info: { offset: { x: number }; velocity: { x: number } }) => {
+      const absOffset = Math.abs(info.offset.x);
+      const absVelocity = Math.abs(info.velocity.x);
 
+      if (absOffset < SWIPE_THRESHOLD && absVelocity < SWIPE_VELOCITY) return;
+
+      const dir = info.offset.x > 0 ? "right" : "left";
+      setFlyingDir(dir);
+
+      // After fly animation completes, remove the card from the stack
+      flyTimer.current = setTimeout(() => {
+        commitSwipe(dir);
+        setFlyingDir(null);
+      }, FLY_DURATION_MS);
+    },
+    [commitSwipe],
+  );
+
+  // ── Tap handler ──
+  const handleTap = useCallback(() => {
+    if (!topCard) return;
+    if (topCard.id === lastCard?.id) {
+      onTapLastCard?.();
+    } else {
+      onSelectCard(topCard);
+    }
+  }, [topCard, lastCard, onSelectCard, onTapLastCard]);
+
+  // ── Reset stack ──
+  const handleReset = useCallback(() => {
+    setIndex(0);
+    setIsEmpty(false);
+    onShowAgain?.();
+  }, [onShowAgain]);
+
+  // ── Render ──
   return (
-    <div className="relative flex flex-col items-center">
-      {/* Card stack */}
-      <div className="relative w-full" style={{ minHeight: "600px" }}>
-        <AnimatePresence mode="popLayout">
-          {visibleCards.map((card, index) => {
-            const isTop = index === 0;
-            const isLast = card === lastCard;
-            const scale = cardScales[index] ?? 0.82;
-            const offset = cardOffsets[index] ?? { y: 32, rotate: 0 };
-            const zIndex = cardZIndices[index] ?? 0;
-            const width = cardWidths[index] ?? "100%";
+    <div className="relative w-full h-full overflow-hidden">
+      <div className="relative w-full h-full px-4 py-3">
+        <AnimatePresence>
+          {showEmpty ? (
+            <motion.div
+              key="empty"
+              className="relative flex flex-col items-center justify-center gap-4 px-4 w-full h-full"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.2, duration: 0.4 }}
+            >
+              <p className="text-text-secondary text-center text-lg max-w-xs">
+                Все активности на этот день просмотрены
+              </p>
+              <div className="flex flex-col gap-3 w-64">
+                <button
+                  type="button"
+                  onClick={handleReset}
+                  className="px-5 py-3 rounded-lg bg-brand/20 text-text-primary font-medium text-sm hover:bg-brand/30 transition-colors"
+                >
+                  Показать ещё раз
+                </button>
+                {onNextDay && (
+                  <button
+                    type="button"
+                    onClick={onNextDay}
+                    className="px-5 py-3 rounded-lg bg-brand text-white font-medium text-sm hover:bg-brand/80 transition-colors"
+                  >
+                    Следующий день →
+                  </button>
+                )}
+              </div>
+            </motion.div>
+          ) : (
+            visibleCards.map((card, i) => {
+              const isTop = i === 0;
+              const isLastCard = card.id === lastCard?.id;
+              const cfg = STACK[i] ?? STACK[STACK.length - 1];
+              const canInteract = isTop && !flyingDir;
+              const isFlying = isTop && !!flyingDir;
 
-            return (
-              <motion.div
-                key={card.id}
-                className={`absolute left-1/2 top-0 -translate-x-1/2 ${
-                  !isTop ? "ring-1 ring-black/10 shadow-lg" : ""
-                }`}
-                style={{
-                  width,
-                  zIndex,
-                  transformOrigin: "center top",
-                }}
-                initial={
-                  isTop
-                    ? { scale: 0.9, opacity: 0, x: 100 }
-                    : false
-                }
-                animate={{
-                  scale,
-                  y: offset.y,
-                  rotate: offset.rotate,
-                  opacity: 1,
-                  x: 0,
-                }}
-                exit={{
-                  x: exitDirection === "left" ? -300 : 300,
-                  rotate: exitDirection === "left" ? -20 : 20,
-                  opacity: 0,
-                  transition: { duration: 0.3 },
-                }}
-                transition={{
-                  type: "spring",
-                  stiffness: 300,
-                  damping: 25,
-                }}
-                drag={isTop && !isLast ? "x" : false}
-                dragElastic={0.7}
-                onDragEnd={isTop && !isLast ? handlePanEnd : undefined}
-                onClick={isTop ? handleTap : undefined}
-              >
-                <MKCard
-                  {...card}
-                  onSignUp={isLast ? onTapLastCard : card.onSignUp}
-                />
-              </motion.div>
-            );
-          })}
+              return (
+                <motion.div
+                  key={card.id}
+                  className={`absolute left-[3%] h-[98%] ${!isTop ? "ring-1 ring-black/10 shadow-lg" : ""}`}
+                  style={{
+                    top: cfg.top,
+                    width: cfg.width,
+                    zIndex: isFlying ? 40 : cfg.zIndex,
+                    touchAction: isFlying ? "none" : "pan-y",
+                    transformOrigin: "center top",
+                  }}
+                  exit={{ opacity: 0, transition: { duration: 0.1 } }}
+                  animate={
+                    isFlying
+                      ? {
+                          x: flyingDir === "right" ? FLY_DISTANCE : -FLY_DISTANCE,
+                          scale: cfg.scale,
+                          opacity: 0,
+                        }
+                      : { x: cfg.x, scale: cfg.scale }
+                  }
+                  transition={
+                    isFlying
+                      ? { duration: FLY_DURATION_MS / 1000, ease: "easeIn" }
+                      : {
+                          type: "spring",
+                          stiffness: 280,
+                          damping: 22,
+                          mass: 0.8,
+                        }
+                  }
+                  drag={canInteract ? "x" : false}
+                  dragSnapToOrigin
+                  onDragStart={canInteract ? () => { wasDragged.current = true; } : undefined}
+                  onDragEnd={canInteract ? handleDragEnd : undefined}
+                  onTap={canInteract ? () => {
+                    if (wasDragged.current) {
+                      wasDragged.current = false;
+                      return;
+                    }
+                    handleTap();
+                  } : undefined}
+                >
+                  <MKCard
+                    {...card}
+                    className="h-full"
+                    onSignUp={isLastCard ? onTapLastCard : card.onSignUp}
+                  />
+                </motion.div>
+              );
+            })
+          )}
         </AnimatePresence>
       </div>
     </div>

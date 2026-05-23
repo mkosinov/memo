@@ -13,18 +13,14 @@ export function Reviews({
   yandexMapsUrl = DEFAULT_YANDEX_URL,
 }: ReviewsProps) {
   return (
-    <section className="flex items-center gap-2 py-2 px-4">
-      <span className="text-sm text-ink-mid">
-        Хорошее место {rating}★
-      </span>
-      <span className="text-sm text-ink-mid">·</span>
+    <section className="flex justify-end pt-0.5 px-4">
       <a
         href={yandexMapsUrl}
         target="_blank"
         rel="noopener noreferrer"
-        className="text-sm text-ink-mid hover:text-ink transition-colors"
+        className="text-[11px] text-ink-mid hover:text-ink transition-colors"
       >
-        Посмотреть отзывы <span aria-hidden="true">→</span>
+        {rating}★ Отзывы на Яндекс Картах →
       </a>
     </section>
   );

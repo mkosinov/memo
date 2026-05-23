@@ -29,6 +29,7 @@ export function BookingOverlay({ isOpen, onClose, activity }: BookingOverlayProp
   );
   const [isFormValid, setIsFormValid] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
 
   const total = activity.tariffs.reduce(
     (sum, tariff, i) => sum + counts[i] * tariff.price,
@@ -42,6 +43,7 @@ export function BookingOverlay({ isOpen, onClose, activity }: BookingOverlayProp
   }, []);
 
   const handleSubmit = () => {
+    setSubmitted(true);
     if (canSubmit) {
       setIsSuccess(true);
     }
@@ -90,7 +92,7 @@ export function BookingOverlay({ isOpen, onClose, activity }: BookingOverlayProp
           </div>
 
           <Button variant="primary" size="lg" onClick={onClose}>
-            Получить напоминание в WhatsApp
+            Готово
           </Button>
         </div>
       </Overlay>
@@ -147,7 +149,7 @@ export function BookingOverlay({ isOpen, onClose, activity }: BookingOverlayProp
 
       {/* Contact form */}
       <div className="mb-6">
-        <ContactForm onValidityChange={handleValidityChange} />
+        <ContactForm onValidityChange={handleValidityChange} submitted={submitted} />
       </div>
 
       {/* Submit button */}

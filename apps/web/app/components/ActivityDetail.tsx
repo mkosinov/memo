@@ -15,6 +15,7 @@ export interface ActivityDetailProps {
   onClose: () => void;
   activity: {
     id: string;
+    title: string;
     imageUrl: string;
     guestPhotos?: string[];
     teacherName: string;
@@ -30,6 +31,7 @@ export interface ActivityDetailProps {
     location: string;
     locationAddress?: string;
     locationDetails?: string;
+    teacherDetails?: string;
   };
   onBook?: () => void;
   onNavigateToActivity?: (activityId: string) => void;
@@ -39,36 +41,41 @@ function formatPrice(value: number): string {
   return value.toLocaleString("ru-RU");
 }
 
-function HintIcon({
-  label,
+/** Hint with underlined trigger text */
+function HintText({
   details,
+  align = "left",
+  children,
 }: {
-  label: string;
   details?: string;
+  align?: "left" | "right";
+  children: React.ReactNode;
 }) {
   const [isOpen, setIsOpen] = useState(false);
 
-  if (!details) return null;
+  if (!details) return <>{children}</>;
 
   return (
-    <div className="relative">
-      <button
-        type="button"
-        aria-label={`Подробнее о ${label}`}
-        onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center justify-center w-5 h-5 rounded-full border border-[#004D56] text-[#004D56] text-xs font-medium hover:bg-[#004D56] hover:text-white transition"
-      >
+    <span
+      className="inline-flex items-center gap-1 cursor-pointer group relative"
+      role="button"
+      tabIndex={0}
+      aria-label={`Подробнее о ${children}`}
+      onClick={() => setIsOpen(!isOpen)}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setIsOpen(!isOpen); } }}
+    >
+      <span className="border-b border-dashed border-[#888888]/60 group-hover:border-[#004D56] transition-colors">
+        {children}
+      </span>
+      <span className="w-4 h-4 rounded-full border border-[#888888] text-[10px] text-[#888888] flex items-center justify-center flex-shrink-0 group-hover:border-[#004D56] group-hover:text-[#004D56] transition-colors">
         i
-      </button>
+      </span>
       {isOpen && (
-        <div
-          data-testid="hint-tooltip"
-          className="absolute right-0 top-7 z-10 w-64 p-3 bg-white rounded-lg shadow-lg border border-gray-200 text-sm text-[#1a1a1a]"
-        >
+        <span className={`absolute top-full mt-1 z-10 w-64 p-3 bg-white rounded-lg shadow-lg border border-gray-200 text-sm text-[#1a1a1a] ${align === "right" ? "right-0" : "left-0"}`}>
           {details}
-        </div>
+        </span>
       )}
-    </div>
+    </span>
   );
 }
 
@@ -80,131 +87,96 @@ export function ActivityDetail({
   onNavigateToActivity,
 }: ActivityDetailProps) {
   return (
-    <Overlay isOpen={isOpen} onClose={onClose} size="three-quarters">
-      <div className="space-y-4 px-4 py-4">
-        {/* Main photo */}
-        <div className="rounded-t-2xl overflow-hidden -mx-4 -mt-4">
-          <img
-            src={activity.imageUrl}
-            alt=""
-            className="w-full aspect-video object-cover"
-          />
+    <Overlay isOpen={isOpen} onClose={onClose} size="three-quarters" title={activity.title}>
+      <div className="flex flex-col gap-4 px-4 pb-4 h-full overflow-hidden">
+
+        {/* 1. Photo */}
+        <div className="rounded-xl overflow-hidden flex-shrink-0 -mx-4 -mt-4">
+          <img src={activity.imageUrl} alt="" className="w-full aspect-video object-cover" />
         </div>
 
-        {/* Guest photos strip */}
-        {activity.guestPhotos && activity.guestPhotos.length > 0 && (
-          <div className="flex gap-2 overflow-x-auto pb-1">
-            {activity.guestPhotos.map((photo, index) => (
-              <img
-                key={index}
-                src={photo}
-                alt={`Guest work ${index + 1}`}
-                className="w-[60px] h-[60px] rounded-lg object-cover flex-shrink-0"
-              />
-            ))}
-          </div>
-        )}
-
-        {/* Teacher */}
-        <div className="flex items-center gap-3">
-          {activity.teacherAvatar && (
-            <img
-              src={activity.teacherAvatar}
-              alt=""
-              className="w-10 h-10 rounded-full object-cover"
-            />
-          )}
-          <span className="text-base text-[#1a1a1a] font-medium">
-            {activity.teacherName}
-          </span>
-        </div>
-
-        {/* Date and time */}
-        <div className="flex items-center gap-2">
-          <svg
-            className="w-4 h-4 text-[#888888] flex-shrink-0"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
-            />
+        {/* 2. Date + time */}
+        <div className="flex items-center gap-2 text-sm text-[#1a1a1a]">
+          <svg className="w-4 h-4 text-[#888888] flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
           </svg>
-          <span className="text-base text-[#1a1a1a]">{activity.date}</span>
-          <svg
-            className="w-4 h-4 text-[#888888] flex-shrink-0 ml-2"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
-            />
+          <span>{activity.date}</span>
+          <svg className="w-4 h-4 text-[#888888] flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
-          <span className="text-base text-[#1a1a1a]">{activity.time}</span>
+          <span>{activity.time}</span>
         </div>
 
-        {/* Material section */}
-        <div className="flex items-start justify-between">
+        {/* 3. Location + Teacher — в одну строку */}
+        <div className="flex items-start justify-between text-sm">
           <div>
-            <div className="text-sm text-[#888888]">Материал</div>
-            <div className="text-base text-[#1a1a1a]">{activity.material}</div>
-          </div>
-          <HintIcon label="материале" details={activity.materialDetails} />
-        </div>
-
-        {/* Price section */}
-        <div className="flex items-start justify-between">
-          <div>
-            <div className="text-sm text-[#888888]">Стоимость</div>
-            <div className="text-base text-[#1a1a1a]">
-              {formatPrice(activity.priceMin)} – {formatPrice(activity.priceMax)} ₽
+            <div className="text-[#888888] text-xs">Локация</div>
+            <div className="relative inline-block mt-0.5">
+              <HintText details={activity.locationAddress ?? activity.locationDetails}>
+                {activity.location}
+              </HintText>
             </div>
           </div>
-          <HintIcon label="стоимости" details={activity.priceDetails} />
+          <div className="text-right">
+            <div className="text-[#888888] text-xs">Мастер</div>
+            <div className="flex items-center justify-end gap-2 mt-0.5">
+              {activity.teacherAvatar && (
+                <img src={activity.teacherAvatar} alt="" className="w-5 h-5 rounded-full object-cover" />
+              )}
+              <div className="relative inline-block">
+                <HintText details={activity.teacherDetails} align="right">
+                  {activity.teacherName}
+                </HintText>
+              </div>
+            </div>
+          </div>
         </div>
 
-        {/* Next time section */}
+        {/* 4. Material + Cost — в одну строку */}
+        <div className="flex items-start justify-between text-sm">
+          <div>
+            <div className="text-[#888888] text-xs">Материал</div>
+            <div className="relative inline-block mt-0.5">
+              <HintText details={activity.materialDetails}>{activity.material}</HintText>
+            </div>
+          </div>
+          <div className="text-right">
+            <div className="text-[#888888] text-xs">Стоимость</div>
+            <div className="relative inline-block mt-0.5">
+              <HintText details={activity.priceDetails} align="right">
+                {formatPrice(activity.priceMin)} – {formatPrice(activity.priceMax)} ₽
+              </HintText>
+            </div>
+          </div>
+        </div>
+
+        {/* 5. Next times pills */}
         {activity.nextTimes && activity.nextTimes.length > 0 && (
           <div>
-            <div className="text-sm text-[#888888] mb-2">В следующий раз</div>
-            <div className="flex flex-wrap gap-2">
-              {activity.nextTimes.slice(0, 3).map((option) => (
+            <div className="text-xs text-[#888888] mb-1.5">В следующий раз</div>
+            <div className="flex flex-wrap gap-1.5">
+              {activity.nextTimes.slice(0, 3).map((opt) => (
                 <button
-                  key={option.id}
+                  key={opt.id}
                   type="button"
-                  onClick={() => onNavigateToActivity?.(option.id)}
-                  className="text-base text-[#004D56] hover:underline transition cursor-pointer"
+                  onClick={() => onNavigateToActivity?.(opt.id)}
+                  className="px-3 py-1.5 rounded-full border border-[#004D56]/30 text-xs text-[#004D56] hover:bg-[#004D56] hover:text-white transition"
                 >
-                  {option.date} {option.time}
+                  {opt.date} {opt.time}
                 </button>
               ))}
             </div>
           </div>
         )}
 
-        {/* Location section */}
-        <div className="flex items-start justify-between">
-          <div>
-            <div className="text-sm text-[#888888]">Локация</div>
-            <div className="text-base text-[#1a1a1a]">{activity.location}</div>
-          </div>
-          <HintIcon label="локации" details={activity.locationAddress || activity.locationDetails} />
+        {/* Spacer + 7. Book button */}
+        <div className="mt-auto pt-1">
+          {onBook && (
+            <Button variant="primary" size="lg" onClick={onBook} className="w-full">
+              Участвовать
+            </Button>
+          )}
         </div>
-
-        {/* Book button */}
-        {onBook && (
-          <Button variant="primary" size="lg" onClick={onBook} className="w-full">
-            Участвовать
-          </Button>
-        )}
       </div>
     </Overlay>
   );

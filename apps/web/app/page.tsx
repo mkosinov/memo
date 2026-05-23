@@ -43,6 +43,7 @@ function toCardProps(vm: ActivityViewModel): MKCardProps & { id: string } {
 function toActivityDetail(vm: ActivityViewModel): React.ComponentProps<typeof ActivityDetail>["activity"] {
   return {
     id: vm.id,
+    title: vm.title,
     imageUrl: vm.imageUrl,
     guestPhotos: vm.guestPhotos,
     teacherName: vm.teacherName,
@@ -58,6 +59,7 @@ function toActivityDetail(vm: ActivityViewModel): React.ComponentProps<typeof Ac
     location: vm.location.name,
     locationAddress: vm.location.address,
     locationDetails: vm.locationDetails,
+    teacherDetails: vm.teacherDetails,
   };
 }
 
@@ -112,7 +114,7 @@ function findNearestLocationId(
 
 export default function Home() {
   // ── Calendar state (managed by hook) ──
-  const { days, selectedDate, selectDate, tab, setTab } = useCalendarDays();
+  const { days, selectedDate, selectDate } = useCalendarDays();
 
   // ── Filter state ──
   const [selectedCategory, setSelectedCategory] = useState<string | null>("вместе");
@@ -141,6 +143,7 @@ export default function Home() {
 
   // ── Data hooks ──
   const { activities } = useActivities(activityFilters);
+  const { activities: allActivities } = useActivities(); // unfiltered — for pill navigation
   const { locations } = useLocations();
   const { photos: galleryPhotos } = useGallery(12);
 
@@ -229,46 +232,73 @@ export default function Home() {
     setBookingActivity(null); // Clear any existing booking activity
   }, []);
 
+  const handleShowAgain = useCallback(() => {
+    // Reset carousel to show cards again — handled by MKCarousel.resetToStack()
+  }, []);
+
+  const handleNextDay = useCallback(() => {
+    // Select the next day in the calendar
+    const next = new Date(selectedDate);
+    next.setDate(next.getDate() + 1);
+    selectDate(next);
+  }, [selectedDate, selectDate]);
+
   return (
-    <main className="min-h-screen bg-surface">
+    <main className="bg-surface min-h-screen">
       {/* 1. Hero */}
-      <Hero onMenuToggle={handleMenuToggle} />
 
-      {/* 2. CalendarLine (sticky) */}
-      <CalendarLine
-        selectedDate={selectedDate}
-        days={days}
-        onSelectDay={handleSelectDay}
-        tab={tab}
-        onTabChange={setTab}
+      {/* Hero — scrolls away */}
+      <Hero
+        onMenuToggle={handleMenuToggle}
+        locations={locationOptions}
+        selectedLocation={selectedLocation}
+        onSelectLocation={handleSelectLocation}
       />
 
-      {/* 3. FilterPills + LocationFilter (single row) */}
-      <div className="flex items-center gap-2 px-4 py-2 overflow-x-auto no-scrollbar">
-        <LocationFilter
-          locations={locationOptions}
-          selectedLocation={selectedLocation}
-          onSelectLocation={handleSelectLocation}
+      {/* 2–6. Workspace — sticks to viewport when scrolled into view */}
+      <div className="sticky top-0 h-screen flex flex-col bg-surface">
+        {/* CalendarLine */}
+        <CalendarLine
+          selectedDate={selectedDate}
+          days={days}
+          onSelectDay={handleSelectDay}
         />
-        <FilterPills
-          selectedCategory={selectedCategory}
-          onSelectCategory={handleSelectCategory}
-        />
+
+        {/* FilterPills + LocationFilter — одна строка */}
+        <div className="flex items-center gap-2 px-4 py-2 overflow-x-auto no-scrollbar">
+          <FilterPills
+            selectedCategory={selectedCategory}
+            onSelectCategory={handleSelectCategory}
+          />
+          <LocationFilter
+            locations={locationOptions}
+            selectedLocation={selectedLocation}
+            onSelectLocation={handleSelectLocation}
+          />
+        </div>
+
+        {/* MKCarousel — fills remaining space */}
+        <div className="flex-1 min-h-0">
+          <MKCarousel
+            cards={cards}
+            lastCard={lastCard}
+            onSelectCard={handleSelectCard}
+            onTapLastCard={handleTapLastCard}
+            onShowAgain={handleShowAgain}
+            onNextDay={handleNextDay}
+          />
+        </div>
+
+        {/* GuestGallery */}
+        <div>
+          <GuestGallery photos={guestPhotos} />
+        </div>
+
+        {/* Reviews — padded bottom to avoid ChatBar overlap */}
+        <div className="pb-14">
+          <Reviews />
+        </div>
       </div>
-
-      {/* 4. MKCarousel */}
-      <MKCarousel
-        cards={cards}
-        lastCard={lastCard}
-        onSelectCard={handleSelectCard}
-        onTapLastCard={handleTapLastCard}
-      />
-
-      {/* 5. Reviews */}
-      <Reviews />
-
-      {/* 6. GuestGallery */}
-      <GuestGallery photos={guestPhotos} />
 
       {/* 7. ChatBar (fixed bottom) */}
       <ChatBar />
@@ -284,7 +314,7 @@ export default function Home() {
           activity={toActivityDetail(selectedActivity)}
           onBook={handleBook}
           onNavigateToActivity={(activityId) =>
-            handleNavigateToActivity(activityId, activities, setSelectedActivity)
+            handleNavigateToActivity(activityId, allActivities, setSelectedActivity)
           }
         />
       )}

@@ -26,59 +26,35 @@ function isSameDay(a: Date, b: Date): boolean {
 }
 
 export function useCalendarDays(options?: UseCalendarDaysOptions) {
-  const daysCount = options?.daysCount ?? 4;
-  const [tab, setTab] = useState<CalendarTab>("tomorrow");
+  const daysCount = options?.daysCount ?? 14;
   const [selectedDate, setSelectedDate] = useState<Date>(() => {
     if (options?.selectedDate) return options.selectedDate;
-    const today = new Date();
-    const tomorrow = new Date(today);
-    tomorrow.setDate(today.getDate() + 1);
-    return tomorrow;
+    return new Date();
   });
 
   const days = useMemo<CalendarDay[]>(() => {
     const today = new Date();
-    const startDate = new Date(today);
-
-    // When tab is 'tomorrow', start from tomorrow
-    if (tab === "tomorrow") {
-      startDate.setDate(today.getDate() + 1);
-    }
-
     const result: CalendarDay[] = [];
 
     for (let i = 0; i < daysCount; i++) {
-      const date = new Date(startDate);
-      date.setDate(startDate.getDate() + i);
+      const date = new Date(today);
+      date.setDate(today.getDate() + i);
 
       result.push({
         date,
         dayName: RUSSIAN_DAY_NAMES[date.getDay()],
         dayNumber: date.getDate(),
-        isToday: isSameDay(date, today),
+        isToday: i === 0,
         isSelected: isSameDay(date, selectedDate),
       });
     }
 
     return result;
-  }, [daysCount, selectedDate, tab]);
+  }, [daysCount, selectedDate]);
 
   const selectDate = useCallback((date: Date) => {
     setSelectedDate(date);
   }, []);
 
-  const handleSetTab = useCallback((newTab: CalendarTab) => {
-    setTab(newTab);
-    // Update selectedDate to match the tab
-    const today = new Date();
-    if (newTab === "today") {
-      setSelectedDate(today);
-    } else {
-      const tomorrow = new Date(today);
-      tomorrow.setDate(today.getDate() + 1);
-      setSelectedDate(tomorrow);
-    }
-  }, []);
-
-  return { days, selectedDate, selectDate, tab, setTab: handleSetTab };
+  return { days, selectedDate, selectDate };
 }

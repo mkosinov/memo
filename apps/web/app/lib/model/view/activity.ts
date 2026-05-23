@@ -22,6 +22,7 @@ export interface ActivityViewModel {
   priceMax: number;
   teacherName: string;
   teacherAvatar?: string;
+  teacherDetails?: string;
   date: string;
   priceFormatted: string;
   dateFormatted: string;

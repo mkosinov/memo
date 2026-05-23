@@ -72,7 +72,7 @@ export function MKCard({
     return (
       <div
         className={[
-          "bg-white rounded-2xl overflow-hidden w-full",
+          "bg-white rounded-2xl overflow-hidden w-full flex flex-col",
           "border-2 border-dashed border-[#004D56]/30",
           "shadow-[0_2px_16px_rgba(0,0,0,.09)]",
           className,
@@ -82,7 +82,7 @@ export function MKCard({
         data-card-id={id}
       >
         {/* Content */}
-        <div className="px-5 pt-6 pb-5 flex flex-col items-center text-center">
+        <div className="px-5 pt-6 pb-5 flex flex-col items-center text-center flex-1 justify-center gap-4">
           {/* Palette icon */}
           <div className="w-14 h-14 rounded-full bg-[#004D56]/10 flex items-center justify-center mb-4">
             <svg
@@ -137,7 +137,7 @@ export function MKCard({
   return (
     <div
       className={[
-        "bg-white rounded-2xl overflow-hidden w-full",
+        "bg-white rounded-2xl overflow-hidden w-full flex flex-col",
         "shadow-[0_2px_16px_rgba(0,0,0,.09)]",
         className,
       ]
@@ -146,12 +146,14 @@ export function MKCard({
       data-card-id={id}
     >
       {/* Photo */}
-      <div className="relative aspect-[2/1] w-full overflow-hidden max-h-[140px]">
-        <img
-          src={imageUrl ?? ""}
-          alt={title}
-          className="w-full h-full object-cover rounded-t-2xl"
-        />
+      <div className="relative w-full overflow-hidden flex-shrink-0" style={{ maxHeight: "35%" }}>
+        <div className="aspect-[2/1]">
+          <img
+            src={imageUrl ?? ""}
+            alt={title}
+            className="w-full h-full object-cover rounded-t-2xl"
+          />
+        </div>
         {/* Category pill */}
         {category && (
           <span
@@ -166,7 +168,7 @@ export function MKCard({
       </div>
 
       {/* Content */}
-      <div className="px-4 pt-3">
+      <div className="px-4 pt-3 flex flex-col flex-1">
         {/* Title */}
         <h3
           className="font-playfair text-lg font-bold text-[#1a1a1a] cursor-pointer"
@@ -199,8 +201,8 @@ export function MKCard({
           </p>
         )}
 
-        {/* Details button */}
-        <div className="mt-3 mb-4">
+        {/* Details button — pushed to bottom */}
+        <div className="mt-auto pt-3 pb-4">
           <Button
             variant="primary"
             size="md"

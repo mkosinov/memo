@@ -140,20 +140,31 @@ export function MKCarousel({
   }, [topCard, lastCard, onSelectCard, onTapLastCard]);
 
   // ── Swipe right on empty state → reveal last card ──
-  const handleEmptyDragEnd = useCallback(
-    (_: unknown, info: { offset: { x: number }; velocity: { x: number } }) => {
-      const absOffset = Math.abs(info.offset.x);
-      const absVelocity = Math.abs(info.velocity.x);
-      if (absOffset < SWIPE_THRESHOLD && absVelocity < SWIPE_VELOCITY) return;
-      const dir = info.offset.x > 0 ? "right" : "left";
-      if (dir !== "right") return;
-      lastSwipeDir.current = "right";
-      setIndex((prev) => Math.max(0, prev - 1));
-      setIsEmpty(false);
-      queueMicrotask(() => { lastSwipeDir.current = null; });
-    },
-    [],
-  );
+  const emptyPointerStart = useRef<{ x: number; t: number } | null>(null);
+
+  const handleEmptyPointerDown = useCallback((e: React.PointerEvent) => {
+    emptyPointerStart.current = { x: e.clientX, t: Date.now() };
+    const el = e.currentTarget;
+    el.setPointerCapture(e.pointerId);
+  }, []);
+
+  const handleEmptyPointerUp = useCallback((e: React.PointerEvent) => {
+    if (!emptyPointerStart.current) return;
+    const dx = e.clientX - emptyPointerStart.current.x;
+    const dt = Date.now() - emptyPointerStart.current.t;
+    emptyPointerStart.current = null;
+    const velocity = dx / Math.max(dt, 1) * 1000; // px/s
+    if (dx < SWIPE_THRESHOLD && velocity < SWIPE_VELOCITY) return;
+    if (dx <= 0) return; // only right swipe
+    lastSwipeDir.current = "right";
+    setIndex((prev) => Math.max(0, prev - 1));
+    setIsEmpty(false);
+    queueMicrotask(() => { lastSwipeDir.current = null; });
+  }, []);
+
+  const handleEmptyPointerCancel = useCallback(() => {
+    emptyPointerStart.current = null;
+  }, []);
 
   // ── Reset stack ──
   const handleReset = useCallback(() => {
@@ -170,13 +181,13 @@ export function MKCarousel({
           {showEmpty ? (
             <motion.div
               key="empty"
-              className="relative flex flex-col items-center justify-center gap-4 px-4 w-full h-full"
+              className="relative flex flex-col items-center justify-center gap-4 px-4 w-full h-full select-none"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ delay: 0.2, duration: 0.4 }}
-              drag="x"
-              dragSnapToOrigin
-              onDragEnd={handleEmptyDragEnd}
+              onPointerDown={handleEmptyPointerDown}
+              onPointerUp={handleEmptyPointerUp}
+              onPointerCancel={handleEmptyPointerCancel}
             >
               <p className="text-text-secondary text-center text-lg max-w-xs">
                 Все активности на этот день просмотрены

@@ -43,33 +43,33 @@ describe("Overlay", () => {
     expect(backdrop).toBeInTheDocument();
   });
 
-  it("applies half size class", () => {
+  it("applies half size height", () => {
     render(
       <Overlay isOpen onClose={vi.fn()} size="half">
         Half
       </Overlay>
     );
     const panel = screen.getByTestId("overlay-panel");
-    expect(panel).toHaveClass("h-1/2");
+    expect(panel).toHaveStyle({ height: "50dvh" });
   });
 
-  it("applies full size class", () => {
+  it("applies full size height", () => {
     render(
       <Overlay isOpen onClose={vi.fn()} size="full">
         Full
       </Overlay>
     );
     const panel = screen.getByTestId("overlay-panel");
-    expect(panel).toHaveClass("h-full");
+    expect(panel).toHaveStyle({ height: "100dvh" });
   });
 
-  it("applies three-quarters size class", () => {
+  it("applies three-quarters size height", () => {
     render(
       <Overlay isOpen onClose={vi.fn()} size="three-quarters">
         Three Quarters
       </Overlay>
     );
     const panel = screen.getByTestId("overlay-panel");
-    expect(panel).toHaveClass("h-3/4");
+    expect(panel).toHaveStyle({ height: "80dvh" });
   });
 });

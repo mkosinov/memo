@@ -69,7 +69,7 @@ export function ActivityDetail({
 
   return (
     <Overlay isOpen={isOpen} onClose={onClose} size="three-quarters" title={activity.title}>
-      <div className="flex flex-col gap-4 px-4 pb-4 h-full overflow-hidden">
+      <div className="flex flex-col gap-4 px-4 pb-4 h-full">
 
         {/* 1. Photo */}
         <div className="rounded-xl overflow-hidden flex-shrink-0 -mx-4 -mt-4">
@@ -88,7 +88,7 @@ export function ActivityDetail({
           <span>{activity.time}</span>
         </div>
 
-        {/* 3. Location + Teacher — в одну строку */}
+        {/* 3. Location + Teacher */}
         <div className="flex items-start justify-between text-sm">
           <div>
             <div className="text-[#888888] text-xs">Локация</div>
@@ -113,7 +113,7 @@ export function ActivityDetail({
           </div>
         </div>
 
-        {/* 4. Material + Cost — в одну строку */}
+        {/* 4. Material + Cost */}
         <div className="flex items-start justify-between text-sm">
           <div>
             <div className="text-[#888888] text-xs">Материал</div>
@@ -131,13 +131,13 @@ export function ActivityDetail({
           </div>
         </div>
 
-        {/* 5. Other activities pills — same location, material, tag, sorted by date */}
+        {/* 5. Other activities pills */}
         {activities.length > 1 && (
           <div>
             <div className="text-xs text-[#888888] mb-1.5">В другой раз</div>
             <div className="flex flex-wrap gap-1.5">
               {activities
-                .filter((a) => 
+                .filter((a) =>
                   a.id !== activity.id &&
                   a.location.id === activity.location.id &&
                   a.material === activity.material &&
@@ -159,7 +159,7 @@ export function ActivityDetail({
           </div>
         )}
 
-        {/* Spacer + 7. Book button */}
+        {/* 6. Book button */}
         <div className="mt-auto pt-1">
           {onBook && (
             <Button variant="primary" size="lg" onClick={onBook} className="w-full">

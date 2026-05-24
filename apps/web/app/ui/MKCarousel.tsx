@@ -139,6 +139,22 @@ export function MKCarousel({
     }
   }, [topCard, lastCard, onSelectCard, onTapLastCard]);
 
+  // ── Swipe right on empty state → reveal last card ──
+  const handleEmptyDragEnd = useCallback(
+    (_: unknown, info: { offset: { x: number }; velocity: { x: number } }) => {
+      const absOffset = Math.abs(info.offset.x);
+      const absVelocity = Math.abs(info.velocity.x);
+      if (absOffset < SWIPE_THRESHOLD && absVelocity < SWIPE_VELOCITY) return;
+      const dir = info.offset.x > 0 ? "right" : "left";
+      if (dir !== "right") return;
+      lastSwipeDir.current = "right";
+      setIndex((prev) => Math.max(0, prev - 1));
+      setIsEmpty(false);
+      queueMicrotask(() => { lastSwipeDir.current = null; });
+    },
+    [],
+  );
+
   // ── Reset stack ──
   const handleReset = useCallback(() => {
     setIndex(0);
@@ -158,6 +174,9 @@ export function MKCarousel({
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ delay: 0.2, duration: 0.4 }}
+              drag="x"
+              dragSnapToOrigin
+              onDragEnd={handleEmptyDragEnd}
             >
               <p className="text-text-secondary text-center text-lg max-w-xs">
                 Все активности на этот день просмотрены

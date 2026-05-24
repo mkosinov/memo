@@ -177,35 +177,41 @@ describe("ActivityDetail", () => {
     expect(screen.getByText("ул. Таганская, д. 10")).toBeInTheDocument();
   });
 
-  // --- "В следующий раз" with clickable date options ---
+  // --- "В другой раз" with clickable activity pills ---
 
-  it("displays next time section with clickable date options", () => {
-    renderDetail();
-    expect(screen.getByText("В следующий раз")).toBeInTheDocument();
-    expect(screen.getByText("17 мая 10:30")).toBeInTheDocument();
-    expect(screen.getByText("18 мая 17:00")).toBeInTheDocument();
-    expect(screen.getByText("20 мая 14:00")).toBeInTheDocument();
-  });
-
-  it("does not display next time section when nextTimes not provided", () => {
-    const vm: ActivityView = { ...mockActivity, nextTimes: undefined };
+  it('displays "В другой раз" section with other activities', () => {
+    const act2: ActivityView = {
+      ...mockActivity,
+      id: "act-2",
+      title: "Акварельный этюд",
+      dateFormatted: "17 мая, суббота",
+      time: "10:30 – 12:30",
+    };
     render(
       <ActivityDetail
         isOpen
         onClose={vi.fn()}
         activityId="act-1"
-        activities={[vm]}
+        activities={[mockActivity, act2]}
       />
     );
-    expect(screen.queryByText("В следующий раз")).not.toBeInTheDocument();
+    expect(screen.getByText("В другой раз")).toBeInTheDocument();
+    expect(screen.getByText("17 мая, суббота 10:30 – 12:30")).toBeInTheDocument();
   });
 
-  it("calls onSelectActivity when a next time date is clicked", () => {
+  it("does not display other activities section when only one activity available", () => {
+    renderDetail();
+    expect(screen.queryByText("В другой раз")).not.toBeInTheDocument();
+  });
+
+  it("calls onSelectActivity when an activity pill is clicked", () => {
     const handleSelect = vi.fn();
     const act2: ActivityView = {
       ...mockActivity,
       id: "act-2",
       title: "Акварельный этюд",
+      dateFormatted: "17 мая, суббота",
+      time: "10:30 – 12:30",
     };
     render(
       <ActivityDetail
@@ -216,53 +222,60 @@ describe("ActivityDetail", () => {
         onSelectActivity={handleSelect}
       />
     );
-    const dateOption = screen.getByText("17 мая 10:30");
-    fireEvent.click(dateOption);
+    const pill = screen.getByText("17 мая, суббота 10:30 – 12:30");
+    fireEvent.click(pill);
     expect(handleSelect).toHaveBeenCalledWith(act2);
   });
 
-  it("calls onSelectActivity with correct activity for second date", () => {
+  it("calls onSelectActivity with correct activity when multiple options exist", () => {
     const handleSelect = vi.fn();
+    const act2: ActivityView = {
+      ...mockActivity,
+      id: "act-2",
+      title: "Акварельный этюд",
+      dateFormatted: "17 мая, суббота",
+      time: "10:30 – 12:30",
+    };
     const act3: ActivityView = {
       ...mockActivity,
       id: "act-3",
       title: "Масляная живопись",
+      dateFormatted: "18 мая, воскресенье",
+      time: "17:00 – 19:00",
     };
     render(
       <ActivityDetail
         isOpen
         onClose={vi.fn()}
         activityId="act-1"
-        activities={[mockActivity, act3]}
+        activities={[mockActivity, act2, act3]}
         onSelectActivity={handleSelect}
       />
     );
-    const dateOption = screen.getByText("18 мая 17:00");
-    fireEvent.click(dateOption);
+    const pill = screen.getByText("18 мая, воскресенье 17:00 – 19:00");
+    fireEvent.click(pill);
     expect(handleSelect).toHaveBeenCalledWith(act3);
   });
 
-  it("limits next times to 3 options maximum", () => {
-    const vm: ActivityView = {
+  it("limits other activities to 6 options maximum", () => {
+    const extraActivities = Array.from({ length: 8 }, (_, i) => ({
       ...mockActivity,
-      nextTimes: [
-        { id: "act-2", date: "17 мая", time: "10:30" },
-        { id: "act-3", date: "18 мая", time: "17:00" },
-        { id: "act-4", date: "20 мая", time: "14:00" },
-        { id: "act-5", date: "22 мая", time: "19:00" },
-      ],
-    };
+      id: `act-${i + 2}`,
+      title: `Активность ${i + 2}`,
+      dateFormatted: `${17 + i} мая, пятница`,
+      time: "10:30 – 12:30",
+    }));
     render(
       <ActivityDetail
         isOpen
         onClose={vi.fn()}
         activityId="act-1"
-        activities={[vm]}
+        activities={[mockActivity, ...extraActivities]}
       />
     );
-    expect(screen.getByText("17 мая 10:30")).toBeInTheDocument();
-    expect(screen.getByText("18 мая 17:00")).toBeInTheDocument();
-    expect(screen.getByText("20 мая 14:00")).toBeInTheDocument();
-    expect(screen.queryByText("22 мая 19:00")).not.toBeInTheDocument();
+    const pills = screen.getAllByText(/мая, пятница/);
+    expect(pills.length).toBe(6);
+    const seventh = screen.queryByText("24 мая, пятница 10:30 – 12:30");
+    expect(seventh).not.toBeInTheDocument();
   });
 });

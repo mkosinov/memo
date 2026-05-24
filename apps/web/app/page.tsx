@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { Hero } from "./sections/Hero";
 import { Reviews } from "./sections/Reviews";
 import { GuestGallery } from "./sections/GuestGallery";
@@ -181,6 +181,25 @@ export default function Home() {
     setSelectedActivity(null);
   }, []);
 
+  // ── Switching between activities in ActivityDetail ──
+  const switchTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  const handleSelectActivity = useCallback((activity: ActivityView | null) => {
+    clearTimeout(switchTimerRef.current);
+    if (activity === null) {
+      setSelectedActivity(null);
+      return;
+    }
+    if (selectedActivity !== null && selectedActivity.id !== activity.id) {
+      // Close overlay, then reopen with new activity after exit animation
+      setSelectedActivity(null);
+      switchTimerRef.current = setTimeout(() => {
+        setSelectedActivity(activity);
+      }, 300);
+    } else {
+      setSelectedActivity(activity);
+    }
+  }, [selectedActivity]);
+
   const handleCloseBooking = useCallback(() => {
     setBookingActivity(null);
   }, []);
@@ -281,7 +300,7 @@ export default function Home() {
           activityId={selectedActivity.id}
           activities={allActivities}
           onBook={handleBook}
-          onSelectActivity={setSelectedActivity}
+          onSelectActivity={handleSelectActivity}
         />
       )}
 

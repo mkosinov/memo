@@ -5,12 +5,6 @@ import { useState } from "react";
 import { Overlay } from "./Overlay";
 import { Button } from "./Button";
 
-export interface NextTimeOption {
-  id: string;
-  date: string;
-  time: string;
-}
-
 export interface ActivityDetailProps {
   isOpen: boolean;
   onClose: () => void;
@@ -137,28 +131,24 @@ export function ActivityDetail({
           </div>
         </div>
 
-        {/* 5. Next times pills */}
-        {activity.nextTimes && activity.nextTimes.length > 0 && (
+        {/* 5. Other activities pills */}
+        {activities.length > 1 && (
           <div>
-            <div className="text-xs text-[#888888] mb-1.5">В следующий раз</div>
+            <div className="text-xs text-[#888888] mb-1.5">В другой раз</div>
             <div className="flex flex-wrap gap-1.5">
-              {activity.nextTimes.slice(0, 3).map((opt) => {
-                const targetActivity = activities.find((a) => a.id === opt.id);
-                return (
+              {activities
+                .filter((a) => a.id !== activity.id)
+                .slice(0, 6)
+                .map((a) => (
                   <button
-                    key={opt.id}
+                    key={a.id}
                     type="button"
-                    onClick={() => {
-                      if (targetActivity && onSelectActivity) {
-                        onSelectActivity(targetActivity);
-                      }
-                    }}
+                    onClick={() => onSelectActivity?.(a)}
                     className="px-3 py-1.5 rounded-full border border-[#004D56]/30 text-xs text-[#004D56] hover:bg-[#004D56] hover:text-white transition"
                   >
-                    {opt.date} {opt.time}
+                    {a.dateFormatted} {a.time}
                   </button>
-                );
-              })}
+                ))}
             </div>
           </div>
         )}

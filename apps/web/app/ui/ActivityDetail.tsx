@@ -68,8 +68,14 @@ export function ActivityDetail({
   if (!activity) return null;
 
   return (
-    <Overlay isOpen={isOpen} onClose={onClose} size="three-quarters" title={activity.title}>
-      <div className="flex flex-col gap-4 px-4 pb-4 h-full">
+    <Overlay isOpen={isOpen} onClose={onClose} size="dynamic" title={activity.title}
+      footer={onBook ? (
+        <Button variant="primary" size="lg" onClick={onBook} className="w-full">
+          Участвовать
+        </Button>
+      ) : undefined}
+    >
+      <div className="flex flex-col gap-4">
 
         {/* 1. Photo */}
         <div className="rounded-xl overflow-hidden flex-shrink-0 -mx-4 -mt-4">
@@ -159,14 +165,8 @@ export function ActivityDetail({
           </div>
         )}
 
-        {/* 6. Book button */}
-        <div className="mt-auto pt-1">
-          {onBook && (
-            <Button variant="primary" size="lg" onClick={onBook} className="w-full">
-              Участвовать
-            </Button>
-          )}
-        </div>
+        {/* Spacer so content doesn't get hidden behind the fixed footer */}
+        <div className="h-2" />
       </div>
     </Overlay>
   );

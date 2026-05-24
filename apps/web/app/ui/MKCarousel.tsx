@@ -47,6 +47,7 @@ export function MKCarousel({
   const [flyingDir, setFlyingDir] = useState<"left" | "right" | null>(null);
   const flyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wasDragged = useRef(false);
+  const lastSwipeDir = useRef<"left" | "right" | null>(null);
 
   // Reset when cards reference changes (e.g. new date filter)
   const cardsRef = useRef(cards);
@@ -84,11 +85,16 @@ export function MKCarousel({
     (direction: "left" | "right") => {
       if (!topCard) return;
       onSwipe?.(topCard, direction);
-      if (topCard.id === lastCard?.id) {
+      if (topCard.id === lastCard?.id && direction === "left") {
         setIsEmpty(true);
-      } else {
+      } else if (direction === "left") {
         setIndex((i) => i + 1);
+      } else {
+        setIndex((i) => Math.max(0, i - 1));
       }
+      // Clear direction hint after the render commit, so entering
+      // cards can read it in their initial animation
+      queueMicrotask(() => { lastSwipeDir.current = null; });
     },
     [topCard, lastCard, onSwipe],
   );
@@ -102,15 +108,25 @@ export function MKCarousel({
       if (absOffset < SWIPE_THRESHOLD && absVelocity < SWIPE_VELOCITY) return;
 
       const dir = info.offset.x > 0 ? "right" : "left";
-      setFlyingDir(dir);
 
-      // After fly animation completes, remove the card from the stack
+      // Ignore swipe right at the first card — nowhere to go back
+      if (dir === "right" && index === 0) return;
+      lastSwipeDir.current = dir;
+
+      if (dir === "right") {
+        // Go back immediately — card returns to stack without flying off-screen
+        commitSwipe("right");
+        return;
+      }
+
+      // Forward: fly card left, then commit
+      setFlyingDir("left");
       flyTimer.current = setTimeout(() => {
-        commitSwipe(dir);
+        commitSwipe("left");
         setFlyingDir(null);
       }, FLY_DURATION_MS);
     },
-    [commitSwipe],
+    [commitSwipe, index],
   );
 
   // ── Tap handler ──
@@ -177,14 +193,12 @@ export function MKCarousel({
                 <motion.div
                   key={card.id}
                   className={`absolute left-[3%] h-[98%] ${!isTop ? "ring-1 ring-black/10 shadow-lg" : ""}`}
-                  style={{
-                    top: cfg.top,
-                    width: cfg.width,
-                    zIndex: isFlying ? 40 : cfg.zIndex,
-                    touchAction: isFlying ? "none" : "pan-y",
-                    transformOrigin: "center top",
-                  }}
                   exit={{ opacity: 0, transition: { duration: 0.1 } }}
+                  initial={
+                    i === 0 && lastSwipeDir.current === "right"
+                      ? { x: -FLY_DISTANCE, scale: 0.9, opacity: 0.8 }
+                      : { x: cfg.x, scale: cfg.scale, opacity: 1 }
+                  }
                   animate={
                     isFlying
                       ? {
@@ -192,16 +206,21 @@ export function MKCarousel({
                           scale: cfg.scale,
                           opacity: 0,
                         }
-                      : { x: cfg.x, scale: cfg.scale }
+                      : { x: cfg.x, scale: cfg.scale, top: cfg.top, width: cfg.width }
                   }
+                  style={{
+                    zIndex: isFlying ? 40 : cfg.zIndex,
+                    touchAction: isFlying ? "none" : "pan-y",
+                    transformOrigin: "center top",
+                  }}
                   transition={
                     isFlying
                       ? { duration: FLY_DURATION_MS / 1000, ease: "easeIn" }
                       : {
-                          type: "spring",
-                          stiffness: 280,
-                          damping: 22,
-                          mass: 0.8,
+                          x: { type: "spring", stiffness: 180, damping: 20, mass: 2.4 },
+                          scale: { type: "spring", stiffness: 180, damping: 20, mass: 2.4 },
+                          top: { duration: 0.15, ease: "easeOut" },
+                          width: { duration: 0.15, ease: "easeOut" },
                         }
                   }
                   drag={canInteract ? "x" : false}

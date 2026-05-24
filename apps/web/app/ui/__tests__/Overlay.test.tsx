@@ -72,4 +72,23 @@ describe("Overlay", () => {
     const panel = screen.getByTestId("overlay-panel");
     expect(panel).toHaveStyle({ height: "80dvh" });
   });
+
+  // ── Dynamic size ──
+  it("dynamic mode renders content", () => {
+    render(
+      <Overlay isOpen onClose={vi.fn()} size="dynamic">
+        Dynamic Content
+      </Overlay>
+    );
+    expect(screen.getByText("Dynamic Content")).toBeInTheDocument();
+  });
+
+  it("dynamic mode renders footer", () => {
+    render(
+      <Overlay isOpen onClose={vi.fn()} size="dynamic" footer={<button type="submit">Submit</button>}>
+        Body
+      </Overlay>
+    );
+    expect(screen.getByRole("button", { name: "Submit" })).toBeInTheDocument();
+  });
 });

@@ -131,13 +131,19 @@ export function ActivityDetail({
           </div>
         </div>
 
-        {/* 5. Other activities pills */}
+        {/* 5. Other activities pills — same location, material, tag, sorted by date */}
         {activities.length > 1 && (
           <div>
             <div className="text-xs text-[#888888] mb-1.5">В другой раз</div>
             <div className="flex flex-wrap gap-1.5">
               {activities
-                .filter((a) => a.id !== activity.id)
+                .filter((a) => 
+                  a.id !== activity.id &&
+                  a.location.id === activity.location.id &&
+                  a.material === activity.material &&
+                  a.category === activity.category
+                )
+                .sort((a, b) => a.date.localeCompare(b.date))
                 .slice(0, 6)
                 .map((a) => (
                   <button

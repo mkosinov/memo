@@ -1,6 +1,6 @@
-import type { RawLocationDTO } from '@/app/lib/model/dto/location';
+import type { LocationDTO } from '@/app/lib/model/dto/location';
 
-const MOCK_LOCATIONS: RawLocationDTO[] = [
+const MOCK_LOCATIONS: LocationDTO[] = [
   {
     id: 'alpika',
     name: 'Альпика',
@@ -30,6 +30,6 @@ const MOCK_LOCATIONS: RawLocationDTO[] = [
   },
 ];
 
-export async function getLocations(): Promise<RawLocationDTO[]> {
+export async function getLocations(): Promise<LocationDTO[]> {
   return [...MOCK_LOCATIONS];
 }

@@ -2,12 +2,12 @@
 
 import { useState, useEffect } from 'react';
 import { getLocations } from '@/app/lib/api/locations';
-import { toLocationViewModel } from '@/app/lib/transforms/to-location-vm';
-import type { LocationViewModel } from '@/app/lib/model/view/location';
+import { toLocationView } from '@/app/lib/mappers/to-location-vm';
+import type { LocationView } from '@/app/lib/model/view/location';
 import { ApiError } from '@/app/lib/errors';
 
 export function useLocations() {
-  const [locations, setLocations] = useState<LocationViewModel[]>([]);
+  const [locations, setLocations] = useState<LocationView[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<ApiError | null>(null);
 
@@ -19,7 +19,7 @@ export function useLocations() {
     getLocations()
       .then((raw) => {
         if (!cancelled) {
-          setLocations(raw.map(toLocationViewModel));
+          setLocations(raw.map(toLocationView));
         }
       })
       .catch((err) => {

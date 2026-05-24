@@ -1,8 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { Header } from "../components/Header";
-import { Overlay } from "../components/Overlay";
+import { Header } from "../ui/Header";
+import { Overlay } from "../ui/Overlay";
 
 export interface HeroProps {
   onMenuToggle?: () => void;

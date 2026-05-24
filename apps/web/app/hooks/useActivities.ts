@@ -2,39 +2,60 @@
 
 import { useState, useEffect } from 'react';
 import { getActivities } from '@/app/lib/api/activities';
-import { toActivityViewModel } from '@/app/lib/transforms/to-activity-vm';
-import type { ActivityViewModel, ActivityFilters } from '@/app/lib/model/view/activity';
+import { toActivityView } from '@/app/lib/mappers/to-activity-vm';
+import type { ActivityView, ActivityFiltersView } from '@/app/lib/model/view/activity';
 import { ApiError } from '@/app/lib/errors';
 
-export function useActivities(filters?: ActivityFilters) {
-  const [activities, setActivities] = useState<ActivityViewModel[]>([]);
+export interface UseActivitiesOptions {
+  /** Polling interval in ms. Default: no polling */
+  refetchInterval?: number;
+}
+
+export function useActivities(filters?: ActivityFiltersView, options?: UseActivitiesOptions) {
+  const [activities, setActivities] = useState<ActivityView[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<ApiError | null>(null);
 
   useEffect(() => {
     let cancelled = false;
+    let intervalId: ReturnType<typeof setInterval> | undefined;
+
+    const fetchData = () => {
+      getActivities(filters)
+        .then((raw) => {
+          if (!cancelled) {
+            setActivities(raw.map(toActivityView));
+          }
+        })
+        .catch((err) => {
+          if (!cancelled) {
+            setError(err instanceof ApiError ? err : new ApiError(String(err), 500));
+          }
+        })
+        .finally(() => {
+          if (!cancelled) setIsLoading(false);
+        });
+    };
+
     setIsLoading(true);
     setError(null);
+    fetchData();
 
-    getActivities(filters)
-      .then((raw) => {
-        if (!cancelled) {
-          setActivities(raw.map(toActivityViewModel));
-        }
-      })
-      .catch((err) => {
-        if (!cancelled) {
-          setError(err instanceof ApiError ? err : new ApiError(String(err), 500));
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setIsLoading(false);
-      });
+    if (options?.refetchInterval && options.refetchInterval > 0) {
+      intervalId = setInterval(fetchData, options.refetchInterval);
+    }
 
     return () => {
       cancelled = true;
+      if (intervalId) clearInterval(intervalId);
     };
-  }, [filters?.date, filters?.location, filters?.category]);
+  }, [
+    filters?.date,
+    filters?.dateStart,
+    filters?.dateEnd,
+    filters?.location,
+    options?.refetchInterval,
+  ]);
 
   return { activities, isLoading, error };
 }

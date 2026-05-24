@@ -18,14 +18,14 @@ describe('useActivities', () => {
     expect(result.current.activities[0].dateFormatted).toBeDefined();
   });
 
-  it('filters by category', async () => {
-    const { result } = renderHook(() => useActivities({ category: 'взрослым' }));
+  it('filters by date', async () => {
+    const { result } = renderHook(() => useActivities({ date: '2026-05-24' }));
 
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false);
     });
 
-    expect(result.current.activities.every((a) => a.category === 'взрослым')).toBe(true);
+    expect(result.current.activities.every((a) => a.date === '2026-05-24')).toBe(true);
   });
 
   it('exposes error on failure', async () => {

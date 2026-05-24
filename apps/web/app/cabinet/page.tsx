@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Header } from "../components/Header";
+import { Header } from "../ui/Header";
 
 export default function CabinetPage() {
   const [phone, setPhone] = useState("");

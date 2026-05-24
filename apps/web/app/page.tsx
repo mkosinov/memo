@@ -4,28 +4,32 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import { Hero } from "./sections/Hero";
 import { Reviews } from "./sections/Reviews";
 import { GuestGallery } from "./sections/GuestGallery";
-import { CalendarLine } from "./components/CalendarLine";
-import { FilterPills } from "./components/FilterPills";
-import { LocationFilter } from "./components/LocationFilter";
-import { MKCarousel } from "./components/MKCarousel";
-import { ActivityDetail } from "./components/ActivityDetail";
-import { BookingOverlay } from "./components/BookingOverlay";
-import { ChatBar } from "./components/ChatBar";
-import { HamburgerMenu } from "./components/HamburgerMenu";
+import { CalendarLine } from "./ui/CalendarLine";
+import { FilterPills } from "./ui/FilterPills";
+import { LocationFilter } from "./ui/LocationFilter";
+import { MKCarousel } from "./ui/MKCarousel";
+import { ActivityDetail } from "./ui/ActivityDetail";
+import { BookingActivityOverlay } from "./ui/BookingActivityOverlay";
+import { BookingPrivateOverlay } from "./ui/BookingPrivateOverlay";
+import { ChatBar } from "./ui/ChatBar";
+import { HamburgerMenu } from "./ui/HamburgerMenu";
 import { useCalendarDays } from "./hooks/useCalendarDays";
 import { useActivities } from "./hooks/useActivities";
+import { useFilteredActivities } from "./hooks/useFilteredActivities";
 import { useLocations } from "./hooks/useLocations";
 import { useGallery } from "./hooks/useGallery";
-import type { MKCardProps } from "./components/MKCard";
-import type { ActivityViewModel } from "./lib/model/view/activity";
-import type { LocationViewModel } from "./lib/model/view/location";
-import type { GalleryPhotoViewModel } from "./lib/model/view/gallery";
+import type { MKCardProps } from "./ui/MKCard";
+import type { ActivityView } from "./lib/model/view/activity";
+import type { LocationView } from "./lib/model/view/location";
+import type { GalleryPhotoView } from "./lib/model/view/gallery";
 import type { GuestPhoto } from "./sections/GuestGallery";
 import { getLocationCookie, setLocationCookie } from "./lib/cookies";
 import { getCurrentPosition } from "./lib/geolocation";
 
-/** Map ActivityViewModel → MKCardProps for the carousel */
-function toCardProps(vm: ActivityViewModel): MKCardProps & { id: string } {
+const POLLING_INTERVAL_MS = 3 * 60 * 1000; // 3 minutes
+
+/** Map ActivityView → MKCardProps for the carousel */
+function toCardProps(vm: ActivityView): MKCardProps & { id: string } {
   return {
     id: vm.id,
     imageUrl: vm.imageUrl,
@@ -39,63 +43,15 @@ function toCardProps(vm: ActivityViewModel): MKCardProps & { id: string } {
   };
 }
 
-/** Map ActivityViewModel → ActivityDetail activity prop */
-function toActivityDetail(vm: ActivityViewModel): React.ComponentProps<typeof ActivityDetail>["activity"] {
-  return {
-    id: vm.id,
-    title: vm.title,
-    imageUrl: vm.imageUrl,
-    guestPhotos: vm.guestPhotos,
-    teacherName: vm.teacherName,
-    teacherAvatar: vm.teacherAvatar,
-    date: vm.dateFormatted,
-    time: vm.time,
-    material: vm.material,
-    materialDetails: vm.materialDetails,
-    priceMin: vm.priceMin,
-    priceMax: vm.priceMax,
-    priceDetails: vm.priceDetails,
-    nextTimes: vm.nextTimes,
-    location: vm.location.name,
-    locationAddress: vm.location.address,
-    locationDetails: vm.locationDetails,
-    teacherDetails: vm.teacherDetails,
-  };
-}
 
-/** Navigate to another activity when a "next time" date is clicked */
-function handleNavigateToActivity(
-  activityId: string,
-  allActivities: ActivityViewModel[],
-  onSelectActivity: (activity: ActivityViewModel) => void,
-) {
-  const target = allActivities.find((a) => a.id === activityId);
-  if (target) {
-    onSelectActivity(target);
-  }
-}
 
-/** Map ActivityViewModel → BookingOverlay activity prop */
-function toBookingActivity(vm: ActivityViewModel): React.ComponentProps<typeof BookingOverlay>["activity"] {
-  return {
-    imageUrl: vm.imageUrl,
-    title: vm.title,
-    time: `${vm.dateFormatted}, ${vm.time}`,
-    location: vm.location.name,
-    tariffs: [
-      { label: "Взрослый", price: vm.priceMax },
-      { label: "Детский (5–11 лет)", price: Math.round(vm.priceMax * 0.7) },
-    ],
-  };
-}
-
-/** Map LocationViewModel → LocationFilter location */
-function toLocationOption(vm: LocationViewModel): { id: string; name: string } {
+/** Map LocationView → LocationFilter location */
+function toLocationOption(vm: LocationView): { id: string; name: string } {
   return { id: vm.id, name: vm.name };
 }
 
-/** Map GalleryPhotoViewModel → GuestGallery photo */
-function toGuestPhoto(vm: GalleryPhotoViewModel): GuestPhoto {
+/** Map GalleryPhotoView → GuestGallery photo */
+function toGuestPhoto(vm: GalleryPhotoView): GuestPhoto {
   return { url: vm.url, technique: vm.technique };
 }
 
@@ -117,33 +73,43 @@ export default function Home() {
   const { days, selectedDate, selectDate } = useCalendarDays();
 
   // ── Filter state ──
-  const [selectedCategory, setSelectedCategory] = useState<string | null>("вместе");
+  const [selectedTag, setSelectedTag] = useState<string | null>("вместе");
   const [selectedLocation, setSelectedLocation] = useState<string | null>(null);
 
   // ── UI state ──
   const [menuOpen, setMenuOpen] = useState(false);
-  const [selectedActivity, setSelectedActivity] = useState<ActivityViewModel | null>(null);
-  const [bookingActivity, setBookingActivity] = useState<ActivityViewModel | null>(null);
+  const [selectedActivity, setSelectedActivity] = useState<ActivityView | null>(null);
+  const [bookingActivity, setBookingActivity] = useState<ActivityView | null>(null);
   const [bookingFromLastCard, setBookingFromLastCard] = useState(false);
 
-  // ── Build filters for activities ──
-  const activityFilters = useMemo(() => {
-    const filters: { date?: string; location?: string; category?: string } = {};
-    if (selectedDate) {
-      filters.date = selectedDate.toISOString().split("T")[0];
-    }
-    if (selectedLocation) {
-      filters.location = selectedLocation;
-    }
-    if (selectedCategory) {
-      filters.category = selectedCategory;
-    }
-    return filters;
-  }, [selectedDate, selectedLocation, selectedCategory]);
+  // ── Build 14-day window for background fetch ──
+  const today = new Date();
+  const dateStart = today.toISOString().split("T")[0];
+  const dateEnd = new Date(today);
+  dateEnd.setDate(dateEnd.getDate() + 14);
+  const dateEndStr = dateEnd.toISOString().split("T")[0];
 
   // ── Data hooks ──
-  const { activities } = useActivities(activityFilters);
-  const { activities: allActivities } = useActivities(); // unfiltered — for pill navigation
+  // allActivities = single source of truth for 14-day window
+  const {
+    activities: allActivities,
+    isLoading: isAllActivitiesLoading,
+  } = useActivities(
+    { dateStart, dateEnd: dateEndStr },
+    { refetchInterval: POLLING_INTERVAL_MS },
+  );
+
+  // Client-side filtering by date, location, category
+  const selectedDateStr = selectedDate
+    ? selectedDate.toISOString().split("T")[0]
+    : null;
+  const filteredActivities = useFilteredActivities(
+    allActivities,
+    selectedDateStr,
+    selectedLocation,
+    selectedTag,
+  );
+
   const { locations } = useLocations();
   const { photos: galleryPhotos } = useGallery(12);
 
@@ -167,7 +133,7 @@ export default function Home() {
   }, [locations]);
 
   // ── Derived data ──
-  const cards = useMemo(() => activities.map(toCardProps), [activities]);
+  const cards = useMemo(() => filteredActivities.map(toCardProps), [filteredActivities]);
   const locationOptions = useMemo(() => locations.map(toLocationOption), [locations]);
   const guestPhotos = useMemo(() => galleryPhotos.map(toGuestPhoto), [galleryPhotos]);
 
@@ -189,8 +155,8 @@ export default function Home() {
     selectDate(date);
   }, [selectDate]);
 
-  const handleSelectCategory = useCallback((category: string | null) => {
-    setSelectedCategory(category);
+  const handleSelectTag = useCallback((tag: string | null) => {
+    setSelectedTag(tag);
   }, []);
 
   const handleSelectLocation = useCallback((locationId: string | null) => {
@@ -198,11 +164,11 @@ export default function Home() {
   }, []);
 
   const handleSelectCard = useCallback((card: MKCardProps & { id: string }) => {
-    const activity = activities.find((a) => a.id === card.id);
+    const activity = allActivities.find((a) => a.id === card.id);
     if (activity) {
       setSelectedActivity(activity);
     }
-  }, [activities]);
+  }, [allActivities]);
 
   const handleBook = useCallback(() => {
     if (selectedActivity) {
@@ -262,13 +228,14 @@ export default function Home() {
           selectedDate={selectedDate}
           days={days}
           onSelectDay={handleSelectDay}
+          disabled={isAllActivitiesLoading}
         />
 
         {/* FilterPills + LocationFilter — одна строка */}
         <div className="flex items-center gap-2 px-4 py-2 overflow-x-auto no-scrollbar">
           <FilterPills
-            selectedCategory={selectedCategory}
-            onSelectCategory={handleSelectCategory}
+            selectedCategory={selectedTag}
+            onSelectCategory={handleSelectTag}
           />
           <LocationFilter
             locations={locationOptions}
@@ -311,36 +278,30 @@ export default function Home() {
         <ActivityDetail
           isOpen={!!selectedActivity}
           onClose={handleCloseActivityDetail}
-          activity={toActivityDetail(selectedActivity)}
+          activityId={selectedActivity.id}
+          activities={allActivities}
           onBook={handleBook}
-          onNavigateToActivity={(activityId) =>
-            handleNavigateToActivity(activityId, allActivities, setSelectedActivity)
-          }
+          onSelectActivity={setSelectedActivity}
         />
       )}
 
-      {/* 10. BookingOverlay */}
-      {(bookingActivity || bookingFromLastCard) && (
-        <BookingOverlay
-          isOpen={!!bookingActivity || bookingFromLastCard}
-          onClose={() => {
-            handleCloseBooking();
-            setBookingFromLastCard(false);
-          }}
-          activity={
-            bookingFromLastCard
-              ? {
-                  imageUrl: "",
-                  title: "Индивидуальный мастер-класс",
-                  time: "По согласованию",
-                  location: "На ваш выбор",
-                  tariffs: [
-                    { label: "Взрослый", price: 8200 },
-                    { label: "Детский (5–11 лет)", price: Math.round(8200 * 0.7) },
-                  ],
-                }
-              : toBookingActivity(bookingActivity!)
-          }
+      {/* 10. BookingOverlay (regular) */}
+      {bookingActivity && (
+        <BookingActivityOverlay
+          isOpen={!!bookingActivity}
+          onClose={handleCloseBooking}
+          activityId={bookingActivity.id}
+          activities={allActivities}
+        />
+      )}
+
+      {/* 11. BookingPrivateOverlay (individual MK) */}
+      {bookingFromLastCard && (
+        <BookingPrivateOverlay
+          isOpen={bookingFromLastCard}
+          onClose={() => setBookingFromLastCard(false)}
+          preferredDate={selectedDate ? selectedDate.toISOString().split("T")[0] : undefined}
+          preferredLocation={selectedLocation ?? undefined}
         />
       )}
     </main>

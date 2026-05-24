@@ -108,3 +108,64 @@ All 18 tasks from the plan have been implemented and committed:
 - Design: `docs/specs/2026-05-20-colourmountains-website-design.md`
 - Plan: `docs/plans/2026-05-20-colourmountains-website-plan.md`
 - Project Plan: `PLAN.md`
+
+## User Review Fixes (2026-05-22)
+
+### Fix 1: Logo в Header
+- **Файлы:** `app/components/Header.tsx`, `public/logo.png` (new)
+- **Что:** Заменил текст "ЦГ" на `<img src="/logo.png">` — скопировал из `sketches/Logo.png`
+- **Причина:** Лого не использовалось в коде, только заглушка-текст
+
+### Fix 2: Убрать max-width: 390px — full-width
+- **Файлы:** `app/layout.tsx`, `app/globals.css`
+- **Что:** Убрал `max-width: 390px` из body и layout — контент растянут на всю ширину экрана
+- **Причина:** На десктопе были полосы `--bg` по бокам, full-width выглядит лучше
+
+### Fix 3: Убрать горизонтальный скролл на мобильном (карточки вылезали)
+- **Файлы:** `app/components/MKCarousel.tsx`, `app/page.tsx`, `app/globals.css`
+- **Что:** Добавил `overflow-x-hidden` на контейнер карусели, `<main>`, и `body { overflow-x: hidden }`
+- **Причина:** Framer-motion exit-анимации (`x: ±300`) и абсолютное позиционирование карточек создавали горизонтальный скролл
+
+### Fix 4: Моковые даты — динамические (today, today+1, today+2)
+- **Файлы:** `app/lib/api/activities.ts`
+- **Что:** Заменил хардкод `2026-05-20` на `d(0)`, `d(1)`, `d(2)` — сегодня/завтра/послезавтра. Фильтр по дате включён обратно.
+- **Причина:** Моковые даты стали stale, карточки не показывались
+
+### Fix 5: CalendarLine — единая карусель с Сегодня/Завтра
+- **Файлы:** `app/components/CalendarLine.tsx`, `app/hooks/useCalendarDays.ts`, `app/page.tsx`
+- **Что:**
+  - Убрал табы, теперь единая горизонтальная карусель: "Сегодня" "Завтра" 22 23 24 ... (14 дней)
+  - `useCalendarDays` — 14 дней начиная с сегодня, без tab/setTab
+  - Сегодня/Завтра — текст с тонким подчеркиванием (red при active)
+  - Дни — стиль настенного календаря: белый фон, красная рамка `border-2 border-[#C8503C]` при выборе
+  - Карусель `align: "start"`, начинается слева
+  - Отступы: `pl-6`, `gap-4`
+
+### Fix 6: Фильтры — pills влево, location ниже
+- **Файлы:** `app/page.tsx`
+- **Что:** FilterPills — верхняя строка, прижаты влево. LocationFilter — отдельная строка ниже
+
+### Fix 7: Card Stack — циклическая прокрутка
+- **Файлы:** `app/hooks/useCardStack.ts`, `app/components/MKCarousel.tsx`
+- **Что:** Переделал с линейного index на circular buffer. Свайпнутая карточка возвращается в низ стопки. lastCard (Индивидуальный МК) показывается после свайпа всех обычных карт.
+- **Тесты:** 9/9 passed
+
+### Fix 8: MKCarousel — карточки прижаты влево
+- **Файлы:** `app/components/MKCarousel.tsx`
+- **Что:** `left-1/2 -translate-x-1/2` → `left-4` — карточки начинаются слева с отступом 16px
+
+### Fix 9: Hero — `<img>` вместо `backgroundImage`
+- **Файлы:** `app/sections/Hero.tsx`
+- **Что:** Заменил div с `backgroundImage` на `<img>` — надёжнее для мобильных Safari
+- **Причина:** Серый фон на мобильном вместо hero-картинки
+
+### Fix 10: Logo в Header (записано ранее)
+- **Файлы:** `app/components/Header.tsx`, `public/logo.png`
+
+### Fix 11: Убрать max-width: 390px (записано ранее)
+- **Файлы:** `app/layout.tsx`, `app/globals.css`
+
+## Pending / Known Issues
+- Картинки на мобильном (imac.local:3000) — Hero фон не грузится. Попытка fix через `<img>` вместо `backgroundImage` — статус неизвестен, пользователь начал новую сессию
+- Hero-bg картинка скачана в `public/hero-bg.jpg` но НЕ использована (curl был запущен но прерван)
+- Тесты: 295/298 passed, 3 failed (CalendarLine tests)

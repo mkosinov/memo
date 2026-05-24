@@ -1,4 +1,4 @@
-import type { ActivityCategory } from '../dto/activity';
+export type ActivityTag = 'взрослым' | 'вместе' | 'детям';
 
 export interface NextTimeOption {
   id: string;
@@ -6,10 +6,10 @@ export interface NextTimeOption {
   time: string;
 }
 
-export interface ActivityViewModel {
+export interface ActivityView {
   id: string;
   title: string;
-  category: ActivityCategory;
+  category: ActivityTag;
   imageUrl: string;
   guestPhotos?: string[];
   time: string;
@@ -33,8 +33,27 @@ export interface ActivityViewModel {
   locationDetails?: string;
 }
 
-export interface ActivityFilters {
+export interface ActivityCardView {
+  id: string;
+  imageUrl: string;
+  category: ActivityTag;
+  title: string;
+  time: string;
+  duration: string;
+  guestsCount: number;
+  priceMin: number;
+  priceMax: number;
+}
+
+export interface ActivityFiltersView {
+  /** Filter by exact date (YYYY-MM-DD) */
   date?: string;
+  /** Start of date range (YYYY-MM-DD) */
+  dateStart?: string;
+  /** End of date range (YYYY-MM-DD) */
+  dateEnd?: string;
+  /** Filter by location ID */
   location?: string;
-  category?: string;
+  /** Filter by activity tag (возрастная группа) */
+  tag?: ActivityTag;
 }

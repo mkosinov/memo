@@ -1,6 +1,6 @@
-import type { RawPhotoDTO } from '@/app/lib/model/dto/gallery';
+import type { GalleryPhotoDTO } from '@/app/lib/model/dto/gallery';
 
-const MOCK_PHOTOS: RawPhotoDTO[] = [
+const MOCK_PHOTOS: GalleryPhotoDTO[] = [
   {
     id: 'photo-1',
     url: '/images/guest-1.jpg',
@@ -43,7 +43,7 @@ const MOCK_PHOTOS: RawPhotoDTO[] = [
   },
 ];
 
-export async function getGallery(limit?: number): Promise<RawPhotoDTO[]> {
+export async function getGallery(limit?: number): Promise<GalleryPhotoDTO[]> {
   const photos = [...MOCK_PHOTOS];
   if (limit) return photos.slice(0, limit);
   return photos;

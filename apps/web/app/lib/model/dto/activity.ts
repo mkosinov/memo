@@ -1,15 +1,15 @@
-export type ActivityCategory = 'взрослым' | 'вместе' | 'детям';
+export type ActivityTag = 'взрослым' | 'вместе' | 'детям';
 
-export interface RawNextTimeDTO {
+export interface NextTimeDTO {
   id: string;
   date: string;
   time: string;
 }
 
-export interface RawActivityDTO {
+export interface ActivityDTO {
   id: string;
   title: string;
-  category: ActivityCategory;
+  category: ActivityTag;
   image_url: string;
   guest_photos?: string[];
   time: string;
@@ -25,7 +25,7 @@ export interface RawActivityDTO {
   teacher_name: string;
   teacher_avatar?: string;
   date: string;
-  next_times?: RawNextTimeDTO[];
+  next_times?: NextTimeDTO[];
   price_details?: string;
   material_details?: string;
   location_details?: string;

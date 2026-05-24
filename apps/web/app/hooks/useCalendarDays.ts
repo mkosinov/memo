@@ -1,16 +1,9 @@
 import { useState, useMemo, useCallback } from "react";
+import type { CalendarDay } from "@/app/lib/model/view/calendar";
 
 const RUSSIAN_DAY_NAMES = ["Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"] as const;
 
 export type CalendarTab = "today" | "tomorrow";
-
-export interface CalendarDay {
-  date: Date;
-  dayName: string;
-  dayNumber: number;
-  isToday: boolean;
-  isSelected: boolean;
-}
 
 export interface UseCalendarDaysOptions {
   selectedDate?: Date;

@@ -2,12 +2,12 @@
 
 import { useState, useEffect } from 'react';
 import { getGallery } from '@/app/lib/api/gallery';
-import { toGalleryPhotoViewModel } from '@/app/lib/transforms/to-gallery-vm';
-import type { GalleryPhotoViewModel } from '@/app/lib/model/view/gallery';
+import { toGalleryPhotoView } from '@/app/lib/mappers/to-gallery-vm';
+import type { GalleryPhotoView } from '@/app/lib/model/view/gallery';
 import { ApiError } from '@/app/lib/errors';
 
 export function useGallery(limit?: number) {
-  const [photos, setPhotos] = useState<GalleryPhotoViewModel[]>([]);
+  const [photos, setPhotos] = useState<GalleryPhotoView[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<ApiError | null>(null);
 
@@ -19,7 +19,7 @@ export function useGallery(limit?: number) {
     getGallery(limit)
       .then((raw) => {
         if (!cancelled) {
-          setPhotos(raw.map(toGalleryPhotoViewModel));
+          setPhotos(raw.map(toGalleryPhotoView));
         }
       })
       .catch((err) => {

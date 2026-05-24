@@ -1,4 +1,4 @@
-import { formatPrice, formatDate, formatDuration } from '../format';
+import { formatPrice, formatDate, formatDuration } from '../mappers/format';
 
 describe('formatPrice', () => {
   it('formats single price', () => {

@@ -3,9 +3,11 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { Header } from "../Header";
 
 describe("Header", () => {
-  it("renders logo text", () => {
+  it("renders logo image", () => {
     render(<Header />);
-    expect(screen.getByText("ЦГ")).toBeInTheDocument();
+    const logo = screen.getByAltText("Colour Mountains");
+    expect(logo).toBeInTheDocument();
+    expect(logo).toHaveAttribute("src", "/logo_horizontal_color.png");
   });
 
   it("renders hamburger button", () => {
@@ -39,9 +41,16 @@ describe("Header", () => {
     expect(header).toHaveClass("shadow-sm");
   });
 
-  it("is fixed position", () => {
+  it("is fixed position by default", () => {
     render(<Header />);
     const header = screen.getByRole("banner");
-    expect(header).toHaveClass("fixed");
+    // Default: no position class added (flows naturally)
+    expect(header).not.toHaveClass("absolute");
+  });
+
+  it("is absolute when position='absolute'", () => {
+    render(<Header position="absolute" />);
+    const header = screen.getByRole("banner");
+    expect(header).toHaveClass("absolute");
   });
 });

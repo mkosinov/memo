@@ -3,17 +3,17 @@ import { render, screen } from "@testing-library/react";
 import { Hero } from "../sections/Hero";
 
 describe("Hero", () => {
-  it("renders title 'Цветные Горы'", () => {
+  it("renders heading text", () => {
     render(<Hero />);
     const heading = screen.getByRole("heading", { level: 1 });
-    expect(heading).toHaveTextContent("Цветные Горы");
+    expect(heading).toHaveTextContent(/Рисуйте в горах/);
   });
 
-  it("renders subtitle 'Студия рисования' in gold", () => {
+  it("renders 'эмоции' in gold style", () => {
     render(<Hero />);
-    const subtitle = screen.getByText("Студия рисования");
-    expect(subtitle).toBeInTheDocument();
-    expect(subtitle).toHaveStyle({ color: "#C49A2E" });
+    const emotionsEl = screen.getByText("эмоции");
+    expect(emotionsEl).toBeInTheDocument();
+    expect(emotionsEl).toHaveStyle({ color: "#C49A2E" });
   });
 
   it("renders three pills", () => {

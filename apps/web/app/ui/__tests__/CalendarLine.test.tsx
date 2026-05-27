@@ -77,7 +77,8 @@ describe("CalendarLine", () => {
     );
 
     const segodnyaBtn = screen.getByText("Сегодня");
-    expect(segodnyaBtn).toHaveClass("bg-[#C8503C]");
+    // Highlighted via border color, not background
+    expect(segodnyaBtn).toHaveClass("border-[#C8503C]");
   });
 
   it("highlights 'Завтра' when selectedDate is tomorrow", () => {
@@ -93,7 +94,8 @@ describe("CalendarLine", () => {
     );
 
     const zavtraBtn = screen.getByText("Завтра");
-    expect(zavtraBtn).toHaveClass("bg-[#C8503C]");
+    // Highlighted via border color, not background
+    expect(zavtraBtn).toHaveClass("border-[#C8503C]");
   });
 
   it("has a white background container", () => {

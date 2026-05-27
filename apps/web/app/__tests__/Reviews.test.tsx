@@ -5,18 +5,20 @@ import { Reviews } from "../sections/Reviews";
 describe("Reviews", () => {
   it("renders rating text with default values", () => {
     render(<Reviews />);
-    expect(screen.getByText(/Хорошее место/)).toBeInTheDocument();
-    expect(screen.getByText(/4\.9★/)).toBeInTheDocument();
+    // Link text: "4.9★ Отзывы на Яндекс Картах →"
+    const link = screen.getByRole("link", { name: /4\.9★/ });
+    expect(link).toBeInTheDocument();
   });
 
   it("renders custom rating and review count", () => {
     render(<Reviews rating={4.8} reviewCount={142} />);
-    expect(screen.getByText(/4\.8★/)).toBeInTheDocument();
+    const link = screen.getByRole("link", { name: /4\.8★/ });
+    expect(link).toBeInTheDocument();
   });
 
   it("renders link to Yandex Maps with target='_blank'", () => {
     render(<Reviews />);
-    const link = screen.getByRole("link", { name: /Посмотреть отзывы/ });
+    const link = screen.getByRole("link", { name: /Отзывы на Яндекс/ });
     expect(link).toHaveAttribute("target", "_blank");
     expect(link).toHaveAttribute("rel", "noopener noreferrer");
   });
@@ -35,8 +37,9 @@ describe("Reviews", () => {
     expect(link).toHaveAttribute("href", customUrl);
   });
 
-  it("renders arrow icon (→)", () => {
+  it("renders arrow icon in link text", () => {
     render(<Reviews />);
-    expect(screen.getByText("→")).toBeInTheDocument();
+    const link = screen.getByRole("link");
+    expect(link).toHaveTextContent("→");
   });
 });

@@ -6,7 +6,7 @@ export default defineConfig({
     environment: "jsdom",
     globals: true,
     setupFiles: ["./test/setup.ts"],
-    include: ["**/__tests__/**/*.test.{ts,tsx}"],
+    include: ["./app/__tests__/**/*.test.{ts,tsx}", "./app/**/__tests__/**/*.test.{ts,tsx}"],
     pool: 'forks',
   },
   oxc: {

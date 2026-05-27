@@ -64,6 +64,14 @@ vi.mock("next/font/google", () => ({
     className: "font-playfair",
     variable: "--font-playfair",
   })),
+  Caveat: vi.fn(() => ({
+    className: "font-caveat",
+    variable: "--font-caveat",
+  })),
+  Great_Vibes: vi.fn(() => ({
+    className: "font-great-vibes",
+    variable: "--font-great-vibes",
+  })),
 }));
 
 // Mock next/image
@@ -89,3 +97,33 @@ vi.mock("next/link", () => ({
       )
   ),
 }));
+
+// Disable framer-motion animations in tests — AnimatePresence passes children through,
+// motion elements render as plain divs so initial/exit transforms don't hide content
+vi.mock("framer-motion", async () => {
+  const React = await import("react");
+  const MockMotionComponent = (props: Record<string, unknown>) => {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { children, animate, initial, exit, transition, drag, dragConstraints, dragElastic, onDragEnd, onClick, ...rest } = props;
+    return React.createElement("div", { ...rest, onClick }, children as React.ReactNode);
+  };
+  const mockMotion = new Proxy(
+    {},
+    {
+      get(_, prop: string) {
+        return MockMotionComponent;
+      },
+    },
+  );
+  return {
+    motion: mockMotion,
+    AnimatePresence: (props: Record<string, unknown>) => props.children,
+    useMotionValue: () => ({ get: () => 0, set: () => {} }),
+    useTransform: () => ({ get: () => 0 }),
+    useAnimation: () => ({ start: () => {}, stop: () => {} }),
+    useScroll: () => ({ scrollYProgress: { get: () => 0 } }),
+    useSpring: (v: number) => ({ get: () => v }),
+    useInView: () => false,
+    usePresence: () => [true, null],
+  };
+});

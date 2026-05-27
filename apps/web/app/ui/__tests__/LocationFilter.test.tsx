@@ -9,7 +9,7 @@ describe("LocationFilter", () => {
     { id: "3", name: "Поляна 1389" },
   ];
 
-  it("renders a select element with location icon", () => {
+  it("renders a button trigger with location icon and 'Все локации' text", () => {
     render(
       <LocationFilter
         locations={locations}
@@ -17,11 +17,11 @@ describe("LocationFilter", () => {
         onSelectLocation={vi.fn()}
       />
     );
-    const select = screen.getByRole("combobox");
-    expect(select).toBeInTheDocument();
+    const trigger = screen.getByRole("button", { name: /Все локации/i });
+    expect(trigger).toBeInTheDocument();
   });
 
-  it("shows 'Все локации' as the first option", () => {
+  it("shows 'Все локации' as the default label when no location is selected", () => {
     render(
       <LocationFilter
         locations={locations}
@@ -29,11 +29,22 @@ describe("LocationFilter", () => {
         onSelectLocation={vi.fn()}
       />
     );
-    const select = screen.getByRole("combobox") as HTMLSelectElement;
-    expect(select.options[0].text).toBe("Все локации");
+    expect(screen.getByText("Все локации")).toBeInTheDocument();
   });
 
-  it("renders all location options", () => {
+  it("shows selected location name in trigger when selected", () => {
+    render(
+      <LocationFilter
+        locations={locations}
+        selectedLocation="2"
+        onSelectLocation={vi.fn()}
+      />
+    );
+    expect(screen.getByText("Гранд Отель Поляна")).toBeInTheDocument();
+    expect(screen.queryByText("Все локации")).not.toBeInTheDocument();
+  });
+
+  it("opens overlay with location options when trigger is clicked", () => {
     render(
       <LocationFilter
         locations={locations}
@@ -41,6 +52,11 @@ describe("LocationFilter", () => {
         onSelectLocation={vi.fn()}
       />
     );
+    const trigger = screen.getByRole("button", { name: /Все локации/i });
+    fireEvent.click(trigger);
+    expect(screen.getByText("Выберите локацию")).toBeInTheDocument();
+    // "Все локации" appears twice (trigger + overlay option), use getAllByText
+    expect(screen.getAllByText("Все локации").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("Альпика")).toBeInTheDocument();
     expect(screen.getByText("Гранд Отель Поляна")).toBeInTheDocument();
     expect(screen.getByText("Поляна 1389")).toBeInTheDocument();
@@ -55,12 +71,13 @@ describe("LocationFilter", () => {
         onSelectLocation={onSelect}
       />
     );
-    const select = screen.getByRole("combobox") as HTMLSelectElement;
-    fireEvent.change(select, { target: { value: "2" } });
+    const trigger = screen.getByRole("button", { name: /Все локации/i });
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByText("Гранд Отель Поляна"));
     expect(onSelect).toHaveBeenCalledWith("2");
   });
 
-  it("calls onSelectLocation with null when 'Все локации' is selected", () => {
+  it("calls onSelectLocation with null when 'Все локации' is selected in overlay", () => {
     const onSelect = vi.fn();
     render(
       <LocationFilter
@@ -69,32 +86,11 @@ describe("LocationFilter", () => {
         onSelectLocation={onSelect}
       />
     );
-    const select = screen.getByRole("combobox") as HTMLSelectElement;
-    fireEvent.change(select, { target: { value: "" } });
+    // Trigger shows the selected location name
+    const trigger = screen.getByRole("button", { name: /Альпика/i });
+    fireEvent.click(trigger);
+    // Click "Все локации" in the overlay
+    fireEvent.click(screen.getByText("Все локации"));
     expect(onSelect).toHaveBeenCalledWith(null);
-  });
-
-  it("has the correct option selected based on selectedLocation prop", () => {
-    render(
-      <LocationFilter
-        locations={locations}
-        selectedLocation="2"
-        onSelectLocation={vi.fn()}
-      />
-    );
-    const select = screen.getByRole("combobox") as HTMLSelectElement;
-    expect(select.value).toBe("2");
-  });
-
-  it("has 'Все локации' selected when selectedLocation is null", () => {
-    render(
-      <LocationFilter
-        locations={locations}
-        selectedLocation={null}
-        onSelectLocation={vi.fn()}
-      />
-    );
-    const select = screen.getByRole("combobox") as HTMLSelectElement;
-    expect(select.value).toBe("");
   });
 });

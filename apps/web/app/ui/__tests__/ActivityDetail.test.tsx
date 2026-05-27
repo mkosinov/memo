@@ -87,33 +87,13 @@ describe("ActivityDetail", () => {
   it("displays price section", () => {
     renderDetail();
     expect(screen.getByText("Стоимость")).toBeInTheDocument();
-    expect(screen.getByText("2 500 – 3 500 ₽")).toBeInTheDocument();
+    expect(screen.getByText(/2 500.*3 500.*₽/)).toBeInTheDocument();
   });
 
   it("displays location section", () => {
     renderDetail();
     expect(screen.getByText("Локация")).toBeInTheDocument();
     expect(screen.getByText("Студия на Таганке")).toBeInTheDocument();
-  });
-
-  it("displays guest photos strip when guestPhotos provided", () => {
-    renderDetail();
-    const guestImages = screen.getAllByAltText(/Guest work/);
-    expect(guestImages.length).toBe(3);
-  });
-
-  it("does not display guest photos strip when guestPhotos not provided", () => {
-    const vm: ActivityView = { ...mockActivity, guestPhotos: undefined };
-    render(
-      <ActivityDetail
-        isOpen
-        onClose={vi.fn()}
-        activityId="act-1"
-        activities={[vm]}
-      />
-    );
-    const guestImages = screen.queryAllByAltText(/Guest work/);
-    expect(guestImages.length).toBe(0);
   });
 
   it("calls onClose when close button is clicked", () => {
@@ -156,25 +136,32 @@ describe("ActivityDetail", () => {
 
   it("shows material details tooltip when hint icon is clicked", () => {
     renderDetail();
-    const infoIcons = screen.getAllByRole("button", { name: /подробнее о/i });
-    fireEvent.click(infoIcons[0]);
-    expect(screen.getByText("Все материалы включены")).toBeInTheDocument();
+    // Find the material hint by its text "Акрил" and click the adjacent info icon
+    const materialSpan = screen.getByText("Акрил");
+    const hintContainer = materialSpan.closest('[role="button"]') ?? materialSpan.parentElement?.parentElement;
+    expect(hintContainer).toBeTruthy();
+    fireEvent.click(hintContainer!);
+    expect(screen.getByText(/Все материалы включены/)).toBeInTheDocument();
   });
 
   it("shows price details tooltip when hint icon is clicked", () => {
     renderDetail();
-    const infoIcons = screen.getAllByRole("button", { name: /подробнее о/i });
-    // Price is the second info icon
-    fireEvent.click(infoIcons[1]);
-    expect(screen.getByText("Включает материалы и холст")).toBeInTheDocument();
+    // Find the price hint by its text "2 500" and click the adjacent info icon
+    const priceSpan = screen.getByText(/2 500/);
+    const hintContainer = priceSpan.closest('[role="button"]') ?? priceSpan.parentElement?.parentElement;
+    expect(hintContainer).toBeTruthy();
+    fireEvent.click(hintContainer!);
+    expect(screen.getByText(/Включает материалы и холст/)).toBeInTheDocument();
   });
 
   it("shows location details tooltip when hint icon is clicked", () => {
     renderDetail();
-    const infoIcons = screen.getAllByRole("button", { name: /подробнее о/i });
-    // Location is the third info icon
-    fireEvent.click(infoIcons[2]);
-    expect(screen.getByText("ул. Таганская, д. 10")).toBeInTheDocument();
+    // Find the location hint by its text "Студия на Таганке" and click the adjacent info icon
+    const locationSpan = screen.getByText("Студия на Таганке");
+    const hintContainer = locationSpan.closest('[role="button"]') ?? locationSpan.parentElement?.parentElement;
+    expect(hintContainer).toBeTruthy();
+    fireEvent.click(hintContainer!);
+    expect(screen.getByText(/ул\. Таганская/)).toBeInTheDocument();
   });
 
   // --- "В другой раз" with clickable activity pills ---

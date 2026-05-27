@@ -41,7 +41,8 @@ describe("BookingActivityOverlay", () => {
 
     expect(screen.getByText("Оформление записи")).toBeInTheDocument();
     expect(screen.getByText("Тестовое мероприятие")).toBeInTheDocument();
-    expect(screen.getByText("14:00 – 16:00")).toBeInTheDocument();
+    // Time is rendered as part of "{dateFormatted}, {time}" line
+    expect(screen.getByText(/14:00.*16:00/)).toBeInTheDocument();
     expect(screen.getByText("Парк Горького")).toBeInTheDocument();
   });
 
@@ -52,14 +53,14 @@ describe("BookingActivityOverlay", () => {
     expect(screen.getByText(/Итого:/)).toHaveTextContent("Итого: 0 ₽");
 
     // Add 2 adults (first tariff): 2 * 1500 = 3000
-    const tariffPlusButtons = screen.getAllByRole("button", { name: /increase/i });
-    fireEvent.click(tariffPlusButtons[0]);
-    fireEvent.click(tariffPlusButtons[0]);
+    const increaseButtons = screen.getAllByRole("button", { name: /increase/i });
+    fireEvent.click(increaseButtons[0]);
+    fireEvent.click(increaseButtons[0]);
     expect(screen.getByText(/Итого:/)).toHaveTextContent("Итого: 3 000 ₽");
 
-    // Add 1 child (second tariff): 3000 + 800 = 3800
-    fireEvent.click(tariffPlusButtons[1]);
-    expect(screen.getByText(/Итого:/)).toHaveTextContent("Итого: 3 800 ₽");
+    // Add 1 child (second tariff): 3000 + 1050 = 4050 (child = maxPrice * 0.7 = 1500 * 0.7 = 1050)
+    fireEvent.click(increaseButtons[1]);
+    expect(screen.getByText(/Итого:/)).toHaveTextContent("Итого: 4 050 ₽");
   });
 
   it("renders counters based on service tariffs", () => {
@@ -82,8 +83,8 @@ describe("BookingActivityOverlay", () => {
     renderOverlay();
 
     // Add 1 adult (first tariff) so total > 0
-    const tariffPlusButtons = screen.getAllByRole("button", { name: /increase/i });
-    fireEvent.click(tariffPlusButtons[0]);
+    const increaseButtons = screen.getAllByRole("button", { name: /increase/i });
+    fireEvent.click(increaseButtons[0]);
 
     // Form is invalid (name, phone, confirmation not filled)
     const submitBtn = screen.getByRole("button", { name: /Записаться/i });
@@ -104,8 +105,8 @@ describe("BookingActivityOverlay", () => {
     // Telegram is default, no need to change
 
     // Add 1 adult (first tariff)
-    const tariffPlusButtons = screen.getAllByRole("button", { name: /increase/i });
-    fireEvent.click(tariffPlusButtons[0]);
+    const increaseButtons = screen.getAllByRole("button", { name: /increase/i });
+    fireEvent.click(increaseButtons[0]);
 
     // Submit
     const submitBtn = screen.getByRole("button", { name: /Записаться/i });

@@ -1,26 +1,26 @@
-# Архитектура Memo — Turborepo Monorepo
+# Memo Architecture — Turborepo Monorepo
 
-> Дата: 2026-05-19
-> Статус: Активно (миграция завершена)
+> Date: 2026-05-19
+> Status: Active (migration complete)
 
-## Обзор
+## Overview
 
-Проект Memo использует **Turborepo + npm workspaces** для управления множественными frontend-приложениями и shared packages.
+The Memo project uses **Turborepo + npm workspaces** to manage multiple frontend applications and shared packages.
 
-**Почему Turborepo:**
-- 3+ frontend приложения (admin, web, master) работают с одним backend
-- Shared типы данных и API клиент без дублирования
-- Изолированные бандлы — zero admin-кода в сайте colourmountains.ru
-- Единый CI/CD pipeline
+**Why Turborepo:**
+- 3+ frontend apps (admin, web, master) work with a single backend
+- Shared data types and API client without duplication
+- Isolated bundles — zero admin code in colourmountains.ru website
+- Unified CI/CD pipeline
 
 ---
 
-## Структура репозитория
+## Repository Structure
 
 ```
 memo/
-├── apps/                          # Frontend приложения
-│   ├── admin/                     # Админ-панель (Next.js 14)
+├── apps/                          # Frontend applications
+│   ├── admin/                     # Admin panel (Next.js 14)
 │   │   ├── app/                   # App Router pages
 │   │   ├── components/
 │   │   ├── contexts/
@@ -31,23 +31,23 @@ memo/
 │   │   ├── app/
 │   │   ├── components/
 │   │   └── package.json           # deps: framer-motion
-│   │                              # НЕТ @dnd-kit, НЕТ admin-specific deps
+│   │                              # NO @dnd-kit, NO admin-specific deps
 │   │
-│   └── master/                    # Приложение для мастеров (future)
+│   └── master/                    # Master app (future)
 │       └── package.json           # deps: mobile-first libs
 │
 ├── packages/                      # Shared packages
-│   ├── domain/                    # TypeScript типы + Zod схемы
+│   ├── domain/                    # TypeScript types + Zod schemas
 │   │   ├── src/index.ts           # Artist, Activity, BookingRecord, etc.
 │   │   └── package.json           # deps: zod
 │   │                              # sideEffects: false, zero runtime
 │   │
-│   └── api-client/                # HTTP клиент к FastAPI
-│       ├── src/client.ts          # fetch-обёртка с Zod-валидацией
+│   └── api-client/                # HTTP client for FastAPI
+│       ├── src/client.ts          # fetch wrapper with Zod validation
 │       ├── src/endpoints.ts       # getActivities, getBookings, etc.
 │       └── package.json           # deps: zod, @memo/domain
 │
-├── backend/                       # FastAPI (отдельный сервис)
+├── backend/                       # FastAPI (separate service)
 │   └── app/
 │
 ├── turbo.json                     # Pipeline: build, dev, test
@@ -57,30 +57,30 @@ memo/
 
 ---
 
-## Принципы разделения
+## Separation Principles
 
-### Что shared (packages/)
+### What is shared (packages/)
 
-| Пакет | Что внутри | Почему shared |
-|-------|-----------|---------------|
-| `@memo/domain` | TypeScript интерфейсы + Zod схемы | Activity — это Activity в admin, web и master |
-| `@memo/api-client` | Fetch-функции + runtime валидация | HTTP контракт один для всех |
+| Package | What's inside | Why shared |
+|---------|---------------|------------|
+| `@memo/domain` | TypeScript interfaces + Zod schemas | Activity is the same Activity in admin, web, and master |
+| `@memo/api-client` | Fetch functions + runtime validation | HTTP contract is the same for all |
 
-### Что НЕ shared (каждый app сам)
+### What is NOT shared (each app handles itself)
 
-| Компонент | Причина изоляции |
+| Component | Isolation reason |
 |-----------|-----------------|
-| Button, Input, Card | Разный дизайн: admin (тёмный, плотный) ≠ web (светлый, визуальный) ≠ master (мобильный) |
-| Layout (Sidebar, Header) | Разная структура навигации |
-| @dnd-kit | Только admin нужен drag-n-drop |
-| @radix-ui/react-dialog | Только admin использует сложные модалки |
+| Button, Input, Card | Different design: admin (dark, dense) ≠ web (light, visual) ≠ master (mobile) |
+| Layout (Sidebar, Header) | Different navigation structure |
+| @dnd-kit | Only admin needs drag-n-drop |
+| @radix-ui/react-dialog | Only admin uses complex modals |
 
 ---
 
-## Зависимости между пакетами
+## Package Dependencies
 
 ```
-@memo/domain              ← zero deps (только zod для схем)
+@memo/domain              ← zero deps (only zod for schemas)
     ↑
 @memo/api-client          ← @memo/domain + zod
     ↑
@@ -91,9 +91,9 @@ apps/master               ← @memo/domain + @memo/api-client (future)
 
 ---
 
-## TypeScript резолвинг
+## TypeScript Resolution
 
-Каждое приложение имеет в `tsconfig.json`:
+Each app has in `tsconfig.json`:
 
 ```json
 "paths": {
@@ -103,7 +103,7 @@ apps/master               ← @memo/domain + @memo/api-client (future)
 }
 ```
 
-Это позволяет импортировать без билда packages:
+This allows importing without building packages:
 ```typescript
 import { Activity, Artist } from '@memo/domain';
 import { getActivities } from '@memo/api-client';
@@ -111,16 +111,16 @@ import { getActivities } from '@memo/api-client';
 
 ---
 
-## Деплой
+## Deployment
 
-| App | URL | Vercel проект |
+| App | URL | Vercel project |
 |-----|-----|---------------|
-| admin | `admin.colourmountains.ru` или `/admin` | отдельный |
-| web | `colourmountains.ru` | отдельный |
+| admin | `admin.colourmountains.ru` or `/admin` | separate |
+| web | `colourmountains.ru` | separate |
 | master | `master.colourmountains.ru` | future |
 
 ---
 
-## История изменений
+## Change History
 
-- **2026-05-19**: Миграция из единого `frontend/` в Turborepo. Admin перенесён в `apps/admin/`. Созданы `packages/domain/` и `packages/api-client/`.
+- **2026-05-19**: Migration from a single `frontend/` to Turborepo. Admin moved to `apps/admin/`. Created `packages/domain/` and `packages/api-client/`.

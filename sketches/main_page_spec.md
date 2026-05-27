@@ -1,476 +1,476 @@
-# Главная страница сайта Colour Mountains (Mobile First)
+# Colour Mountains Website Main Page (Mobile First)
 
-## Цель страницы
+## Page Goal
 
-Главная страница должна продавать **эмоцию + быстрый выбор мастер-класса**, а не художественные материалы или сложное расписание.
+The main page should sell **emotion + quick workshop selection**, not art supplies or a complex schedule.
 
-Ключевой JTBD пользователя:
+Key user JTBD:
 
-> «Чем классным заняться сегодня/завтра в моём отеле?»
+> "What fun thing can I do today/tomorrow at my hotel?"
 
-Особенности аудитории:
+Audience specifics:
 
-- большинство пользователей — **туристы**
-- большинство бронирований — **с мобильного**
-- значительная доля гостей — **дети 7–10 лет**
-- пользователь принимает решение быстро (30–90 секунд)
-- пользователь не хочет разбираться в сложном календаре
-
----
-
-# Главные UX принципы
-
-1. **Минимум cognitive load**
-2. **Показать доступные мастер-классы максимально быстро**
-3. **Эмоция > техника**
-4. **Рядом с вами = ключевая ценность**
-5. **Карточки мероприятий должны начинаться на первом экране**
-6. **Минимум визуального шума**
-7. **Максимально быстрый путь к записи**
+- most users are **tourists**
+- most bookings are **from mobile**
+- a significant share of guests are **children aged 7–10**
+- the user makes a decision quickly (30–90 seconds)
+- the user does not want to deal with a complex calendar
 
 ---
 
-# Структура главной страницы
+# Main UX Principles
 
-1. Hero блок
-2. Переключатель `Сегодня / Завтра / Календарь`
-3. Фильтр локации
-4. Тонкие фильтры (pills)
-5. Горизонтальная карусель мастер-классов
-6. Карусель гостей с картинами
-7. Карусель отзывов из Яндекс Карт
-8. Sticky чат-бар снизу
+1. **Minimum cognitive load**
+2. **Show available workshops as fast as possible**
+3. **Emotion > technique**
+4. **Near you = key value**
+5. **Event cards must start on the first screen**
+6. **Minimum visual noise**
+7. **Shortest path to booking**
+
+---
+
+# Main Page Structure
+
+1. Hero block
+2. `Today / Tomorrow / Calendar` toggle
+3. Location filter
+4. Thin filter pills
+5. Horizontal workshop carousel
+6. Guest gallery carousel
+7. Yandex Maps reviews carousel
+8. Sticky chat bar at bottom
 
 ---
 
 # 1. Hero block
 
-### Высота
+### Height
 
-Hero должен занимать примерно **35% экрана**.
+Hero should occupy approximately **35% of the screen**.
 
-Важно:
+Important:
 
-Нижняя часть первой карточки мастер-класса должна быть видна **без скролла**.
+The bottom part of the first workshop card must be visible **without scrolling**.
 
 ---
 
-### Контент hero
+### Hero content
 
-#### Фоновое изображение
+#### Background image
 
-Большая атмосферная фотография:
+Large atmospheric photograph:
 
-- горы
-- процесс рисования
-- тёплая атмосфера
-- эмоциональность
+- mountains
+- painting process
+- warm atmosphere
+- emotionality
 
-Важно:
+Important:
 
-Изображение должно быть эстетичным, premium-feeling, но не перегруженным.
+The image must be aesthetic, premium-feeling, but not cluttered.
 
 ---
 
 ### Header
 
-Содержит:
+Contains:
 
-- логотип
-- иконку профиля
+- logo
+- profile icon
 - hamburger menu
 
-Минималистично.
+Minimalist.
 
 ---
 
-### Основной заголовок
+### Main headline
 
-Крупный headline.
+Large headline.
 
-Пример:
+Example:
 
-> Рисуйте в горах  
-> и увозите эмоции с собой
+> Paint in the mountains  
+> and take the emotions home with you
 
-Допускаются A/B тесты.
-
----
-
-### Под headline
-
-Одна строка преимуществ (не две).
-
-Пример:
-
-`Новичкам подходит • Всё включено • Рядом с вами`
-
-Минимум визуального шума.
+A/B tests are allowed.
 
 ---
 
-# 2. Переключатель времени
+### Below headline
 
-Расположение:
+One line of benefits (not two).
 
-Под hero.
+Example:
+
+`Suitable for beginners • All inclusive • Near you`
+
+Minimum visual noise.
 
 ---
 
-### Вкладки
+# 2. Time toggle
 
-- Сегодня
-- Завтра
-- Календарь
+Location:
+
+Below hero.
+
+---
+
+### Tabs
+
+- Today
+- Tomorrow
+- Calendar
 
 UI:
 
-- тонкий
-- минималистичный
-- без тяжёлых кнопок
+- thin
+- minimalist
+- without heavy buttons
 
-Похоже на segmented control / tabs.
-
----
-
-### Поведение
-
-#### Сегодня
-
-Показывает МК только на сегодня.
-
-#### Завтра
-
-Показывает МК только на завтра.
-
-#### Календарь
-
-Открывает полноценный календарь/даты.
-
-Календарь не должен быть первым экраном.
+Similar to segmented control / tabs.
 
 ---
 
-# 3. Фильтр локации
+### Behavior
 
-Расположение:
+#### Today
 
-Рядом с переключателем времени.
+Shows workshops for today only.
+
+#### Tomorrow
+
+Shows workshops for tomorrow only.
+
+#### Calendar
+
+Opens a full calendar/dates.
+
+The calendar should not be the first screen.
 
 ---
 
-### Назначение
+# 3. Location filter
 
-Ключевая ценность:
+Location:
 
-> «Мастер-классы рядом с вами / в вашем отеле»
+Next to the time toggle.
 
 ---
 
-### Поведение
+### Purpose
 
-По умолчанию:
+Key value:
 
-автовыбор локации или последняя выбранная.
+> "Workshops near you / at your hotel"
 
-Примеры:
+---
 
-`📍 Альпика`
+### Behavior
 
-или
+By default:
 
-`🏨 Ваш отель: Поляна 1389`
+auto-select location or last selected.
+
+Examples:
+
+`📍 Alpika`
+
+or
+
+`🏨 Your hotel: Polyana 1389`
 
 ---
 
 ### UX
 
-Локация — secondary control.
+Location — secondary control.
 
-Не должна визуально конкурировать с выбором даты.
-
----
-
-# 4. Pills фильтры
-
-Тонкие pills над каруселью.
+Should not visually compete with date selection.
 
 ---
 
-### Значения
+# 4. Pills filters
 
-- Все
-- Детям
-- Семьёй
-- Взрослым
+Thin pills above the carousel.
 
 ---
 
-### Поведение
+### Values
 
-Фильтруют карусель МК.
+- All
+- For children
+- For family
+- For adults
 
-Должны быть:
+---
 
-- тонкими
-- лёгкими
+### Behavior
+
+Filters the workshop carousel.
+
+Should be:
+
+- thin
+- lightweight
 - unobtrusive
 
-Пользователь может их игнорировать.
+The user can ignore them.
 
 ---
 
-# 5. Горизонтальная карусель мастер-классов
+# 5. Horizontal workshop carousel
 
-## Самый важный блок страницы
+## Most important block on the page
 
-Карусель должна быть **горизонтальной**.
+The carousel must be **horizontal**.
 
-Карточки появляются **из-под друг друга (peek effect)**.
+Cards should peek **from behind each other (peek effect)**.
 
-Пользователь должен видеть часть следующей карточки.
+The user must see part of the next card.
 
-Это провоцирует свайп.
+This provokes a swipe.
 
 ---
 
-## Карточка МК
+## Workshop card
 
-### Соотношение
+### Ratio
 
-Большая карточка.
+Large card.
 
 Premium feel.
 
 ---
 
-### Состав карточки
+### Card composition
 
-#### 1. Большая картинка
+#### 1. Large image
 
-Крупная.
+Large.
 
-Главный visual driver.
+Main visual driver.
 
-Пример:
+Example:
 
-- горный пейзаж
-- море
-- животные
-- закаты
-
----
-
-#### 2. Название
-
-Крупно.
-
-Пример:
-
-> Горный пейзаж
+- mountain landscape
+- sea
+- animals
+- sunsets
 
 ---
 
-#### 3. Ключевая информация
+#### 2. Title
 
-Минимум иконок.
+Large.
 
-Формат:
+Example:
 
-`Сегодня, 18:00 • 2.5 часа`
+> Mountain landscape
 
-`📍 Альпика`
+---
+
+#### 3. Key information
+
+Minimum icons.
+
+Format:
+
+`Today, 18:00 • 2.5 hours`
+
+`📍 Alpika`
 
 ---
 
 #### 4. Social proof
 
-Не показывать пустоту.
+Do not show emptiness.
 
-Не использовать:
+Do not use:
 
-❌ Осталось 8 мест
+❌ 8 spots left
 
-Лучше:
+Better:
 
-✅ Уже 3 гостя
+✅ 3 guests already
 
-или
+or
 
-✅ Группа собирается
+✅ Group forming
 
 ---
 
-#### 5. Техника
+#### 5. Technique
 
-Материал обязателен.
+Material is mandatory.
 
-Пример:
+Example:
 
-`Акрил • 30×40`
+`Acrylic • 30×40`
 
-или
+or
 
-`Масло • 40×50`
+`Oil • 40×50`
 
-Потому что это операционное ограничение.
+Because it is an operational constraint.
 
-Нельзя смешивать материалы внутри группы.
+Materials cannot be mixed within a group.
 
 ---
 
 #### 6. CTA
 
-Большая кнопка.
+Large button.
 
-> Записаться
-
----
-
-### Что НЕ показывать
-
-Не перегружать карточку:
-
-❌ преподаватель  
-❌ длинные описания  
-❌ слишком много иконок  
-❌ технические детали
+> Book now
 
 ---
 
-# 6. Карусель «Гости с картинами»
+### What NOT to show
 
-## Цель
+Do not overload the card:
 
-Доказать:
-
-> «У меня тоже получится»
-
-Особенно важно для родителей.
-
----
-
-### Формат
-
-Горизонтальная карусель.
-
-Крупные фото:
-
-- ребёнок + картина
-- семья + картина
-- взрослые + картина
-
-Минимум текста.
-
-Можно без текста вообще.
+❌ instructor  
+❌ long descriptions  
+❌ too many icons  
+❌ technical details
 
 ---
 
-### Заголовок
+# 6. "Guests with Paintings" carousel
 
-Пример:
+## Goal
 
-> Наши гости и их картины
+Prove:
+
+> "I can do it too"
+
+Especially important for parents.
 
 ---
 
-# 7. Карусель отзывов
+### Format
 
-## Источник
+Horizontal carousel.
 
-Яндекс Карты.
+Large photos:
+
+- child + painting
+- family + painting
+- adults + painting
+
+Minimum text.
+
+Can be text-free altogether.
+
+---
+
+### Title
+
+Example:
+
+> Our guests and their paintings
+
+---
+
+# 7. Reviews carousel
+
+## Source
+
+Yandex Maps.
 
 ---
 
 ### Header
 
-Показывать доверие сразу.
+Show trust immediately.
 
-Пример:
+Example:
 
-> ⭐ 4.9 в Яндекс Картах  
-> 500+ отзывов гостей
+> ⭐ 4.9 on Yandex Maps  
+> 500+ guest reviews
 
-Справа:
+On the right:
 
-> Все отзывы →
+> All reviews →
 
 ---
 
-### Формат карточек
+### Card format
 
-Если есть текст:
+If there is text:
 
-Показывать отзыв.
+Show the review.
 
-Если только рейтинг:
+If only rating:
 
-Компактная карточка:
+Compact card:
 
 > ⭐⭐⭐⭐⭐  
-> Анна • Яндекс Карты
+> Anna • Yandex Maps
 
 ---
 
-### Фото
+### Photo
 
-Если у отзыва есть фото — показывать.
-
----
-
-### Важно
-
-Отзывы и фото гостей — **две разные карусели**.
-
-Они решают разные задачи.
+If the review has a photo — show it.
 
 ---
 
-# 8. Sticky чат снизу
+### Important
 
-Постоянно закреплён снизу.
+Reviews and guest photos are **two separate carousels**.
 
-Как в интерфейсах LLM.
+They serve different purposes.
 
 ---
 
-### Состояние
+# 8. Sticky chat at bottom
 
-Поле **сразу открыто**.
+Permanently fixed at the bottom.
 
-Не кнопка.
+Like in LLM interfaces.
+
+---
+
+### State
+
+Field is **immediately open**.
+
+Not a button.
 
 Placeholder:
 
-> Помочь выбрать мастер-класс?
+> Need help choosing a workshop?
 
 ---
 
-### Быстрые сценарии
+### Quick scenarios
 
 Chips:
 
-`👶 Для ребёнка 8 лет`
+`👶 For an 8-year-old child`
 
-`❤️ Для двоих`
+`❤️ For two`
 
-`🌧 Чем заняться в дождь`
+`🌧 What to do in the rain`
 
-`⏱ Есть только 1 час`
+`⏱ Only have 1 hour`
 
 ---
 
-### Цель
+### Goal
 
-Чат = sales assistant.
+Chat = sales assistant.
 
-Помогает конвертировать сомневающихся.
+Helps convert the undecided.
 
 ---
 
 # Visual style
 
-## Нужно
+## Must be
 
 - premium
 - minimal
@@ -481,14 +481,14 @@ Chips:
 
 ---
 
-## Избегать
+## Avoid
 
-❌ визуальный шум  
-❌ перегруженность  
-❌ много рамок  
-❌ тяжёлые кнопки  
-❌ слишком много иконок  
-❌ ощущение CRM/каталога услуг
+❌ visual noise  
+❌ clutter  
+❌ too many borders  
+❌ heavy buttons  
+❌ too many icons  
+❌ CRM/service catalog feel
 
 ---
 
@@ -496,19 +496,19 @@ Chips:
 
 ## First screen
 
-На первом экране пользователь должен увидеть:
+On the first screen, the user must see:
 
 - hero
 - today/tomorrow tabs
-- начало карусели МК
+- beginning of the workshop carousel
 
-без скролла.
+without scrolling.
 
 ---
 
 ## Horizontal swipe
 
-Все карусели свайпаются горизонтально.
+All carousels swipe horizontally.
 
 ---
 
@@ -516,19 +516,19 @@ Chips:
 
 LCP < 2.5s
 
-Приоритет:
+Priority:
 
 1. hero image
-2. первая карточка МК
-3. lazy load остального
+2. first workshop card
+3. lazy load the rest
 
 ---
 
 # Analytics events
 
-Трекинг обязателен.
+Tracking is mandatory.
 
-События:
+Events:
 
 - open_home
 - switch_today
@@ -547,12 +547,12 @@ LCP < 2.5s
 
 ---
 
-# Главная идея страницы
+# Main idea of the page
 
-Не продавать:
+Don't sell:
 
-> художественную услугу
+> an art service
 
-Продавать:
+Sell:
 
-> классное впечатление рядом с вами в горах
+> a great experience near you in the mountains

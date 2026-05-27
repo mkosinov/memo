@@ -5,50 +5,50 @@
 
 ## Context
 
-Предыдущий workflow (P2 — Booking Management) завершён. PR #38 создан.
+Previous workflow (P2 — Booking Management) completed. PR #38 created.
 
-Принято архитектурное решение: миграция из единого `frontend/` в **Turborepo monorepo** для поддержки 3+ frontend приложений (admin, web, master) с shared типами и API клиентом.
+Architectural decision adopted: migration from a single `frontend/` to a **Turborepo monorepo** to support 3+ frontend applications (admin, web, master) with shared types and API client.
 
-## Что сделано
+## What Was Done
 
-### Архитектурные изменения
-- [x] Создана базовая структура Turborepo (`turbo.json`, `pnpm-workspace.yaml`, root `package.json`)
-- [x] Создан `packages/domain/` — shared TypeScript типы + Zod схемы (`@memo/domain`)
-- [x] Создан `packages/api-client/` — shared HTTP клиент с Zod-валидацией (`@memo/api-client`)
-- [x] Перенесён `frontend/` → `apps/admin/`
-- [x] Обновлены все импорты: `@/lib/types` → `@memo/domain` (13 файлов)
-- [x] Обновлен `PLAN.md` — добавлена архитектура, этапы 9 (Web) и 10 (Master)
-- [x] Создан `docs/ARCHITECTURE.md` — полная документация структуры репо
+### Architectural Changes
+- [x] Created base Turborepo structure (`turbo.json`, `pnpm-workspace.yaml`, root `package.json`)
+- [x] Created `packages/domain/` — shared TypeScript types + Zod schemas (`@memo/domain`)
+- [x] Created `packages/api-client/` — shared HTTP client with Zod validation (`@memo/api-client`)
+- [x] Moved `frontend/` → `apps/admin/`
+- [x] Updated all imports: `@/lib/types` → `@memo/domain` (13 files)
+- [x] Updated `PLAN.md` — added architecture, stages 9 (Web) and 10 (Master)
+- [x] Created `docs/ARCHITECTURE.md` — full repository structure documentation
 
-### Результаты
+### Results
 - Tests: **160/160 passing** (vitest)
-- npm install: ✅ работает с workspaces
-- TypeScript paths: ✅ `@memo/domain`, `@memo/api-client` резолвятся
+- npm install: ✅ works with workspaces
+- TypeScript paths: ✅ `@memo/domain`, `@memo/api-client` resolve
 
-## Новая структура
+## New Structure
 
 ```
 memo/
 ├── apps/
-│   └── admin/          # Админ-панель (Next.js 14)
+│   └── admin/          # Admin panel (Next.js 14)
 │   └── web/            # colourmountains.ru (future)
-│   └── master/         # Приложение для мастеров (future)
+│   └── master/         # Master application (future)
 ├── packages/
-│   ├── domain/         # Shared типы + Zod
-│   └── api-client/     # Shared HTTP клиент
+│   ├── domain/         # Shared types + Zod
+│   └── api-client/     # Shared HTTP client
 ├── backend/            # FastAPI
 └── docs/
     ├── ARCHITECTURE.md
     └── PLAN.md
 ```
 
-## Следующие шаги
+## Next Steps
 
-1. Создать `apps/web/` — начать разработку colourmountains.ru
-2. Backend: начать FastAPI (в `backend/`)
-3. Обновить GitHub Project board — Issue #6 (Web) в In Progress
+1. Create `apps/web/` — start developing colourmountains.ru
+2. Backend: start FastAPI (in `backend/`)
+3. Update GitHub Project board — Issue #6 (Web) to In Progress
 
-## Документы
+## Documents
 
-- Архитектура: `docs/ARCHITECTURE.md`
-- План: `docs/PLAN.md` (обновлён)
+- Architecture: `docs/ARCHITECTURE.md`
+- Plan: `docs/PLAN.md` (updated)

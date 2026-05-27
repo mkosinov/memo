@@ -621,7 +621,7 @@ frontend/
 - [ ] Create `frontend/app/components/layout/Toolbar.tsx`:
   - Sticky top bar
   - Week navigation: ← → buttons, "Today" button
-  - Date range display: "13–19 мая 2026"
+  - Date range display: "13–19 May 2026"
   - Day/Week toggle buttons
   - Filter dropdowns: artist, location
   - Delete mode toggle (trash icon, red when active)
@@ -789,8 +789,8 @@ frontend/
       background: rgba(107, 142, 110, 0.07);
     }
     ```
-  - On drop: calculate new start time, update or clone activity
-  - Show toast with "Отменить"
+   - On drop: calculate new start time, update or clone activity
+  - Show toast with "Undo"
 - [ ] Update `WeekView.tsx` to wrap with `DndContext`
 - [ ] Commit: `git add frontend/hooks/useDnD.ts frontend/app/components/schedule/ActivityCard.tsx frontend/app/components/schedule/DayColumn.tsx frontend/app/components/schedule/WeekView.tsx && git commit -m "feat: add @dnd-kit drag-and-drop with snap, copy mode, ghost preview"`
 
@@ -805,7 +805,7 @@ frontend/
   - Service dropdown (from ScheduleContext services)
   - Location checkboxes (from ScheduleContext studios)
   - Ready indicator: green blinking dot when master + service + ≥1 location selected
-  - Summary text: "Ольга — Картина маслом — Альпика, Гранд Отель"
+  - Summary text: "Olga — Oil Painting — Alpika, Grand Hotel"
   - Update stamp in ScheduleContext on change
 - [ ] Update `RightPanel.tsx` to include StampPanel
 - [ ] Update `DayColumn.tsx`:
@@ -823,12 +823,12 @@ frontend/
 - [ ] Update `Toolbar.tsx`:
   - Delete mode toggle button (trash icon)
   - Red background/icon when active
-  - Show toast: "Режим удаления — кликните на событие" when activated
+  - Show toast: "Delete mode — click on an event" when activated
 - [ ] Update `ActivityCard.tsx`:
   - On click: if deleteMode, trigger delete
   - Fade-out animation: opacity 0, scale 0.95, 150ms transition
   - After animation: call deleteActivity from context
-  - Show toast with "Отменить"
+  - Show toast with "Undo"
   - Visual in delete mode: cursor not-allowed, red hover shadow
   ```css
   body.delete-mode .event-card {
@@ -850,7 +850,7 @@ frontend/
   - Fixed bottom-right position
   - Stack toasts vertically
   - Auto-remove after 4.5s
-  - "Отменить" button calls undo callback
+  - "Undo" button calls undo callback
   - Close button (×)
   - Transition: opacity 0→1, translateY(8px)→0
   - Max 5 toasts visible
@@ -858,7 +858,7 @@ frontend/
 - [ ] Update `Toolbar.tsx`:
   - Copy last week button
   - On click: call `copyLastWeek()` from ScheduleContext
-  - Show toast with "Отменить"
+  - Show toast with "Undo"
 - [ ] Commit: `git add frontend/app/components/toast/ToastContainer.tsx frontend/app/layout.tsx frontend/app/components/layout/Toolbar.tsx && git commit -m "feat: add Toast system with undo, copy last week functionality"`
 
 ---
@@ -877,8 +877,8 @@ frontend/
     - Duration input
     - Occupied / capacity
     - Private checkbox
-  - Create mode: empty form, "Создать" button
-  - Edit mode: pre-filled, "Сохранить" button
+  - Create mode: empty form, "Create" button
+  - Edit mode: pre-filled, "Save" button
   - Validation: all required fields
   - Close on backdrop click or × button
 - [ ] Wire modal to ActivityCard click (when not in delete mode)

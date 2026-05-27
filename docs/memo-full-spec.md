@@ -1,257 +1,257 @@
 # Memo — Full Technical Specification
 
-> Проект: Система управления студией рисования «Цветные Горы» (ColourMountains)
-> Рабочая директория: `/root/workspace/memo/`
-> UI-прототип: `/root/workspace/memo/sketches/colour-mountains-v4.html`
-> Сессия дизайна: `/root/workspace/memo/sketches/claude_session.txt`
-> Старый frontend spec: `/root/workspace/memo-v1/frontend_spec.md`
-> Предыдущая имплементация: `/root/workspace/memo-v1/memo-frontend/` (Next.js 14)
+> Project: "Colour Mountains" (Цветные Горы) art studio management system
+> Working directory: `/root/workspace/memo/`
+> UI prototype: `/root/workspace/memo/sketches/colour-mountains-v4.html`
+> Design session: `/root/workspace/memo/sketches/claude_session.txt`
+> Old frontend spec: `/root/workspace/memo-v1/frontend_spec.md`
+> Previous implementation: `/root/workspace/memo-v1/memo-frontend/` (Next.js 14)
 
 ---
 
 ## 1. Overview
 
-Memo — система управления расписанием мастер-классов для сети студий рисования «Цветные Горы» (Красная Поляна, Сочи). Заменяет ручное создание расписания через Yclients.
+Memo is a master class schedule management system for the "Colour Mountains" art studio network (Krasnaya Polyana, Sochi). Replaces manual schedule creation via Yclients.
 
-**Бизнес-контекст:**
-- Сезонный бизнес (горнолыжный курорт) — от 1 мастера в низкий сезон до 10+ в высокий
-- 3 студии: Альпика, Гранд Отель Поляна, Поляна 1389
-- 6+ мастеров, каждый со своим цветом
-- 6+ услуг (масло, акрил, акварель, лепка, роспись одежды и др.)
-- Услуги бывают групповые (Public, до 10+ чел) и индивидуальные (Private, 1 чел)
+**Business context:**
+- Seasonal business (ski resort) — from 1 artist in low season to 10+ in high season
+- 3 studios: Alpika, Grand Hotel Polyana, Polyana 1389
+- 6+ artists, each with their own color
+- 6+ services (oil, acrylic, watercolor, ceramics, clothing painting, etc.)
+- Services are either group (Public, up to 10+ people) or individual (Private, 1 person)
 
-**Пользователи:**
-- **Администратор** — создаёт/редактирует расписание, управляет бронированиями, клиентами
-- **Мастер** — просматривает своё расписание на неделю
-- **Клиент** — записывается через публичную воронку (4 шага)
+**Users:**
+- **Administrator** — creates/edits schedule, manages bookings, clients
+- **Artist** — views their weekly schedule
+- **Client** — books through a public funnel (4 steps)
 
 ---
 
 ## 2. UI/UX Specification
 
-### 2.1 Структура главного экрана (Admin Schedule)
+### 2.1 Main Screen Structure (Admin Schedule)
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
-│  SIDEBAR (тёмный #1E2D2F)      │  TOOLBAR                             │
-│  ┌──────────┐  кнопка схлопа   │  ◀ 12 — 18 мая ▶  [Сегодня] │ Д│Н    │
-│  │  ЛОГОТИП  │  ←─→           │  ─────────────────────────────────── │
-│  │ (белый)   │                 │  [Все мастера ▾] [Все локации ▾]     │
-│  ├───────────┤                 ├──────────────────────────────────────┤
-│  │ МИНИ-КАЛЕНДАРЬ              │  РАСПИСАНИЕ                          │
-│  │ Апрель 2026                 │  ┌───┬───┬───┬───┬───┬───┬───┐      │
-│  │ ПН ВТ СР ЧТ ПТ СБ ВС       │  │ПН │ВТ │СР │ЧТ │ПТ │СБ │ВС │      │
+│  SIDEBAR (dark #1E2D2F)         │  TOOLBAR                             │
+│  ┌──────────┐  collapse button  │  ◀ 12 — 18 May ▶  [Today] │ D│W    │
+│  │  LOGO    │  ←─→             │  ─────────────────────────────────── │
+│  │ (white)  │                   │  [All artists ▾] [All locations ▾]   │
+│  ├──────────┤                   ├──────────────────────────────────────┤
+│  │ MINI-CALENDAR                │  SCHEDULE                            │
+│  │ April 2026                   │  ┌───┬───┬───┬───┬───┬───┬───┐      │
+│  │ MO TU WE TH FR SA SU        │  │MO │TU │WE │TH │FR │SA │SU │      │
 │  │       1  2  3  4  5  6  7   │  │12 │13 │14 │15 │16 │17 │18 │      │
 │  │ ...    ...                  │  ├───┼───┼───┼───┼───┼───┼───┤      │
 │  ├─────────────────            │  │9  │   │   │   │   │   │   │      │
-│  │ НАВИГАЦИЯ                   │  │   │[ ][ ]│   │   │[ ]│   │      │
-│  │ Календарь                   │  │10 │   │   │   │   │   │   │      │
-│  │ Мастера                     │  │   │   │[ ]│   │   │   │   │      │
-│  │ Локации                     │  │11 │   │   │   │   │   │[ ]│      │
-│  │ Услуги                      │  │12 │[ ]│   │   │   │   │   │      │
-│  │ Клиенты                     │  │...│...│...│...│...│...│...│      │
-│  │ Аналитика                   │  │21 │   │   │   │   │   │   │      │
+│  │ NAVIGATION                  │  │   │[ ][ ]│   │   │[ ]│   │      │
+│  │ Calendar                    │  │10 │   │   │   │   │   │   │      │
+│  │ Artists                     │  │   │   │[ ]│   │   │   │   │      │
+│  │ Locations                   │  │11 │   │   │   │   │   │[ ]│      │
+│  │ Services                    │  │12 │[ ]│   │   │   │   │   │      │
+│  │ Clients                     │  │...│...│...│...│...│...│...│      │
+│  │ Analytics                   │  │21 │   │   │   │   │   │   │      │
 │  ├─────────────────            │  └───┴───┴───┴───┴───┴───┴───┘      │
-│  │ ЛЕГЕНДА                     │    ПРАВАЯ ПАНЕЛЬ (выезжает)          │
-│  │ ● Ольга ● Юлия ● Анаст.     │  ┌─────────────────────────────┐    │
-│  │ ● Дарья ● Алекс. ● Ирина    │  │ ИНСТРУМЕНТЫ               × │    │
+│  │ LEGEND                      │    RIGHT PANEL (slides out)          │
+│  │ ● Olga  ● Julia ● Anas.     │  ┌─────────────────────────────┐    │
+│  │ ● Daria ● Alex. ● Irina     │  │ TOOLS                    × │    │
 │  ├─────────────────            │  ├─────────────────────────────┤    │
-│  │ ☀/☾  [🎨]                   │  │ ▼ ШТАМП                     │    │
-│  │ ┌───────────────────┐       │  │ Мастер ▾                    │    │
-│  │ │ 👤 Марина К.     ›│       │  │ Услуга ▾                    │    │
-│  │ │   Администратор   │       │  │ Локации ☑☐☐               │    │
-│  │ └───────────────────┘       │  │ ● Штамп настроен           │    │
-│  │ memo v0.0.1                 │  │ 🗑 Режим удаления           │    │
+│  │ ☀/☾  [🎨]                   │  │ ▼ STAMP                     │    │
+│  │ ┌───────────────────┐       │  │ Artist ▾                    │    │
+│  │ │ 👤 Marina K.     ›│       │  │ Service ▾                   │    │
+│  │ │   Administrator   │       │  │ Locations ☑☐☐             │    │
+│  │ └───────────────────┘       │  │ ● Stamp configured         │    │
+│  │ memo v0.0.1                 │  │ 🗑 Delete mode              │    │
 │  └─────────────────────        │  ├─────────────────────────────┤    │
-│                                 │  │ ▼ НЕДЕЛЯ                    │    │
-│                                 │  │ 🔄 Копировать прошлую      │    │
+│                                 │  │ ▼ WEEK                      │    │
+│                                 │  │ 🔄 Copy last week          │    │
 │                                 │  └─────────────────────────────┘    │
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 2.2 Все страницы
+### 2.2 All Pages
 
-#### P1: Admin Schedule Builder (`/`) — главная
+#### P1: Admin Schedule Builder (`/`) — main
 
-**Сайдбар (левый):**
-- **Логотип** — белый PNG, на тёмном фоне, над мини-календарём
-- **Кнопка схлопывания** — круглая на границе сайдбара. Схлопнутое состояние: 56px ширина, только иконки. Стрелка поворачивается на 180°
-- **Мини-календарь** — сетка 7 колонок. Месяц + 1 неделя до и 1 после. Скролл колёсиком мыши = переключение месяцев. Клик по дате = переход к неделе. Подсветка текущей недели/дня
-- **Навигация** — 6 пунктов: Календарь, Мастера, Локации, Услуги, Клиенты, Аналитика. Иконки SVG stroke
-- **Легенда мастеров** — цветные точки + сокращённые имена
-- **Тумблер темы** — ☀/☾, активный элемент с заливкой брендовым цветом
-- **Кнопка "Оформление"** — попап: прозрачность панелей (10/25/50/75/100%), цвет фона расписания + его прозрачность
-- **Кнопка пользователя** — аватар (инициалы), имя, роль, шеврон → заглушка "Личный кабинет в разработке"
-- **Версия** — "memo v0.0.1"
+**Sidebar (left):**
+- **Logo** — white PNG, on dark background, above mini-calendar
+- **Collapse button** — round on sidebar edge. Collapsed state: 56px width, only icons. Arrow rotates 180°
+- **Mini-calendar** — 7-column grid. Month + 1 week before and 1 after. Mouse wheel scroll = month switching. Click on date = navigate to week. Current week/day highlight
+- **Navigation** — 6 items: Calendar, Artists, Locations, Services, Clients, Analytics. SVG stroke icons
+- **Artist legend** — colored dots + abbreviated names
+- **Theme toggle** — ☀/☾, active element filled with brand color
+- **"Appearance" button** — popup: panel opacity (10/25/50/75/100%), schedule background color + its opacity
+- **User button** — avatar (initials), name, role, chevron → placeholder "Profile in development"
+- **Version** — "memo v0.0.1"
 
-**Тулбар:**
-- Навигация ◀ период ▶ + "Сегодня"
-- Переключатель День | Неделя (pill-style с тенью у активного)
-- Фильтры: "Все мастера ▾" + "Все локации ▾"
+**Toolbar:**
+- Navigation ◀ period ▶ + "Today"
+- Day | Week toggle (pill-style with shadow on active)
+- Filters: "All artists ▾" + "All locations ▾"
 
-**Расписание:**
-- Сетка ПН-ВС, 9:00–21:00, шаг 30 мин
-- Режим "День": 1 колонка
-- Час — сплошная линия, полчаса — пунктирная
-- Текущий день: название #004D56, число в залитом круге #004D56
-- Линия текущего времени — тонкая #004D56 с точкой
-- Drag & drop всегда активен. Alt+drag = копирование
+**Schedule:**
+- Grid MON-SUN, 9:00–21:00, 30 min step
+- "Day" mode: 1 column
+- Hour — solid line, half-hour — dashed line
+- Current day: name #004D56, number in filled circle #004D56
+- Current time line — thin #004D56 with dot
+- Drag & drop always active. Alt+drag = copy
 
-**Правая панель "Инструменты":**
-- Кнопка открытия плавает над правым нижним углом. Активна — брендовый цвет
-- Секция "Штамп": мастер ▾, услуга ▾, локации ☑, индикатор готовности, "Режим удаления" toggle
-- Секция "Неделя": "Копировать прошлую неделю" + подсказка
+**Right panel "Tools":**
+- Open button floats over bottom-right corner. Active — brand color
+- "Stamp" section: artist ▾, service ▾, locations ☑, readiness indicator, "Delete mode" toggle
+- "Week" section: "Copy last week" + hint
 
 #### P2: Booking Management (`/bookings`)
-- Фильтруемая таблица: дата, локация, услуга, статус
-- Статусы: CONFIRMED (зелёный), CANCELLED (красный), NO_SHOW (серый)
-- Клик по строке → детальный просмотр
-- Кнопка "Создать бронирование"
+- Filterable table: date, location, service, status
+- Statuses: CONFIRMED (green), CANCELLED (red), NO_SHOW (gray)
+- Click row → detailed view
+- "Create booking" button
 
 #### P2: Client Card (`/clients/[id]`)
-- Шапка: имя, телефон, email
-- Связанные посетители (дети/взрослые)
-- История визитов: дата, услуга, локация, кол-во, цена, оплачено, долг
+- Header: name, phone, email
+- Related visitors (children/adults)
+- Visit history: date, service, location, count, price, paid, debt
 
 #### P3: Client Booking Flow (`/booking`)
-- 4 шага: Локация → Занятие → Запись → Подтверждение
-- LocationSelector (карточки), ActivitySchedule (сетка недели), BookingForm (телефон → клиент → посетители), Confirmation (сводка + цены)
+- 4 steps: Location → Activity → Booking → Confirmation
+- LocationSelector (cards), ActivitySchedule (week grid), BookingForm (phone → client → visitors), Confirmation (summary + prices)
 
 #### P4: Artist Schedule (`/artist`)
-- Селектор мастера с цветной точкой
-- Расписание на неделю (отфильтровано)
+- Artist selector with colored dot
+- Weekly schedule (filtered)
 - Online/offline toggle
 - Mobile-first layout
 
 #### P5: AI Concierge Chat (`/chat`)
-- Чат-интерфейс с сообщениями
-- Карточки рекомендаций услуг с кнопкой "Записаться"
-- Быстрые действия
-- Keyword-based matching (заглушка)
+- Chat interface with messages
+- Service recommendation cards with "Book" button
+- Quick actions
+- Keyword-based matching (placeholder)
 
 ---
 
-### 2.3 Карточка события (Event Card)
+### 2.3 Event Card
 
 ```
 ┌──────────────────────────────────┐
 │  ┌────────────────────┐          │
-│  │ 10:00 — 13:00      │          │  ← овал, заливка цветом мастера, белый текст, 600
+│  │ 10:00 — 13:00      │          │  ← oval, artist color fill, white text, 600
 │  └────────────────────┘          │
-│  Морской пейзаж                  │  ← 2 строки, 600, 13px
-│  👤 6-12                        │  ← иконка + возраст (5+,6+,8+,10+,12+,6-12)
-│  Ольга Середа                    │  ← полное имя, 11.5px, var(--ink-mid)
-│  📍 Гранд Отель Поляна           │  ← локация, 11px, var(--ink-light)
+│  Seascape                        │  ← 2 lines, 600, 13px
+│  👤 6-12                        │  ← icon + age (5+,6+,8+,10+,12+,6-12)
+│  Olga Sereda                     │  ← full name, 11.5px, var(--ink-mid)
+│  📍 Grand Hotel Polyana          │  ← location, 11px, var(--ink-light)
 │                                   │
-│  ┌───────────────────────────┐   │  ← футер с разделителем
-│  │ 👥 3/8               [+]  │   │  ← кол-во гостей + кнопка действия
+│  ┌───────────────────────────┐   │  ← footer with separator
+│  │ 👥 3/8               [+]  │   │  ← guest count + action button
 │  └───────────────────────────┘   │
 └──────────────────────────────────┘
 
-Private (индивидуальные): ★ в правом верхнем углу (SVG звезда, fill var(--brand))
-                          срезанный уголок clip-path
-                          кнопка = ··· вместо +
+Private (individual): ★ in top-right corner (SVG star, fill var(--brand))
+                        cut corner clip-path
+                        button = ··· instead of +
 ```
 
-**Правила отображения:**
-- **Прозрачность заливки** = заполненность. `fillOp = 0.12 + (occ/cap) * 0.28`. Цвет = цвет мастера
-- **Высота** = `max(dur * 2 * 60 - 10, 52)` px
-- **Сжатие**: <90px → скрыть возраст и локацию. <56px → только время
-- **Hover**: тень увеличивается, translateY(-1px), z-index:10
+**Display rules:**
+- **Fill opacity** = occupancy. `fillOp = 0.12 + (occ/cap) * 0.28`. Color = artist color
+- **Height** = `max(dur * 2 * 60 - 10, 52)` px
+- **Compression**: <90px → hide age and location. <56px → only time
+- **Hover**: shadow increases, translateY(-1px), z-index:10
 - **Drag**: opacity 0.5, scale(0.99)
-- **Режим удаления**: красная рамка, `cursor:not-allowed`
-- **Зазор между карточками**: min 10px padding-top
+- **Delete mode**: red border, `cursor:not-allowed`
+- **Gap between cards**: min 10px padding-top
 
-**Цвета мастеров:**
+**Artist colors:**
 
-| Мастер | HEX |
+| Artist | HEX |
 |--------|-----|
-| Ольга Середа | #5B8C7A |
-| Юлия Большакова | #6B7E9C |
-| Анастасия П. | #A07060 |
-| Дарья Тюльпина | #7A6E9C |
-| Александра В. | #8A7840 |
-| Ирина Горох | #9A5870 |
+| Olga Sereda | #5B8C7A |
+| Yulia Bolshakova | #6B7E9C |
+| Anastasia P. | #A07060 |
+| Daria Tyulpina | #7A6E9C |
+| Aleksandra V. | #8A7840 |
+| Irina Gorokh | #9A5870 |
 
 ---
 
-### 2.4 Взаимодействия
+### 2.4 Interactions
 
-| Действие | Результат |
-|----------|-----------|
-| Drag карточки в другой день | Перемещение. Toast + "Отменить" |
-| Alt+drag | Копирование. Зелёный пунктир. Toast |
-| Клик по пустому слоту | Если штамп настроен → создать с параметрами штампа |
-| Клик в режиме удаления | Удаление с анимацией + Toast + "Отменить" |
-| Клик "+" на карточке | Toast "Быстрое добавление гостя" |
-| Клик "···" на карточке | Toast "Редактирование индивидуального МК" |
-| Кнопка "Копировать прошлую неделю" | Toast "События прошлой недели скопированы" |
-| Наведение на слот | Пунктирный прямоугольник-превью |
+| Action | Result |
+|--------|--------|
+| Drag card to another day | Move. Toast + "Undo" |
+| Alt+drag | Copy. Green dashed outline. Toast |
+| Click on empty slot | If stamp is configured → create with stamp parameters |
+| Click in delete mode | Delete with animation + Toast + "Undo" |
+| Click "+" on card | Toast "Quick add guest" |
+| Click "···" on card | Toast "Editing individual Master Class (MK)" |
+| "Copy last week" button | Toast "Last week's events copied" |
+| Hover over slot | Dashed preview rectangle |
 
 ---
 
-### 2.5 Анимации
+### 2.5 Animations
 
-- **Удаление**: opacity→0 + scale(.95) за 150ms
-- **Toast**: slide up 8px + fade in за 180ms
-- **Схлопывание сайдбара**: width 220ms ease
-- **Правая панель**: width 220ms ease
-- **Карточка hover**: box-shadow + translateY(-1px) за 150ms
-- **Тема**: мгновенно (CSS-переменные)
-- **Мини-календарь**: перерисовка без анимации
+- **Delete**: opacity→0 + scale(.95) over 150ms
+- **Toast**: slide up 8px + fade in over 180ms
+- **Sidebar collapse**: width 220ms ease
+- **Right panel**: width 220ms ease
+- **Card hover**: box-shadow + translateY(-1px) over 150ms
+- **Theme**: instant (CSS variables)
+- **Mini-calendar**: redraw without animation
 
 ---
 
 ## 3. Design System
 
-### 3.1 Цвета
+### 3.1 Colors
 
-| Роль | Светлая | Тёмная |
-|------|---------|--------|
-| Фон страницы | `#EDEDEE` | `#1a1a1c` |
-| Сайдбар | `#1E2D2F` (с opacity) | `#1E2D2F` |
-| Карточки | `#ffffff` | `#252528` |
-| Поверхность 2 | `#f4f4f5` | `#303035` |
-| Текст основной | `#1a1a1a` | `#e8e8ea` |
-| Текст втор. | `#555` | `#aaaaae` |
-| Текст трет. | `#888` | `#777780` |
-| Текст бледный | `#ccc` | `#555560` |
-| Линии | `#E0E0E1` | `#3a3a3e` |
-| **Бренд** | **`#004D56`** | **`#004D56`** |
+| Role | Light | Dark |
+|------|-------|------|
+| Page background | `#EDEDEE` | `#1a1a1c` |
+| Sidebar | `#1E2D2F` (with opacity) | `#1E2D2F` |
+| Cards | `#ffffff` | `#252528` |
+| Surface 2 | `#f4f4f5` | `#303035` |
+| Primary text | `#1a1a1a` | `#e8e8ea` |
+| Secondary text | `#555` | `#aaaaae` |
+| Tertiary text | `#888` | `#777780` |
+| Faint text | `#ccc` | `#555560` |
+| Lines | `#E0E0E1` | `#3a3a3e` |
+| **Brand** | **`#004D56`** | **`#004D56`** |
 
-### 3.2 Типографика
+### 3.2 Typography
 
-| Элемент | Размер | Вес | Цвет |
-|---------|--------|-----|------|
-| Time pill | 10.5px | 600 | Белый |
-| Название услуги | 13px | 600 | var(--ink) |
-| Возраст | 11px | 400 | var(--ink-mid) |
-| Мастер | 11.5px | 400 | var(--ink-mid) |
-| Локация | 11px | 400 | var(--ink-light) |
-| Счётчик гостей | 11.5px | 500 | var(--ink-mid) |
-| Дни недели | 10px | 500 uppercase | var(--ink-light) |
-| Число месяца | 22px | 300 | var(--ink-mid) |
-| Период | 15px | 500 | var(--ink) |
-| Навигация | 13px | 400 | rgba(255,255,255,.5) |
-| Имя пользователя | 12.5px | 500 | rgba(255,255,255,.85) |
-| Роль | 10px | 400 | rgba(255,255,255,.35) |
-| Версия | 10px | 400 | rgba(255,255,255,.2) |
+| Element | Size | Weight | Color |
+|---------|------|--------|-------|
+| Time pill | 10.5px | 600 | White |
+| Service name | 13px | 600 | var(--ink) |
+| Age | 11px | 400 | var(--ink-mid) |
+| Artist | 11.5px | 400 | var(--ink-mid) |
+| Location | 11px | 400 | var(--ink-light) |
+| Guest count | 11.5px | 500 | var(--ink-mid) |
+| Day of week | 10px | 500 uppercase | var(--ink-light) |
+| Day number | 22px | 300 | var(--ink-mid) |
+| Period | 15px | 500 | var(--ink) |
+| Navigation | 13px | 400 | rgba(255,255,255,.5) |
+| Username | 12.5px | 500 | rgba(255,255,255,.85) |
+| Role | 10px | 400 | rgba(255,255,255,.35) |
+| Version | 10px | 400 | rgba(255,255,255,.2) |
 
-### 3.3 Размеры
+### 3.3 Sizes
 
-- Сайдбар: 230px / схлопнут 56px
-- Правая панель: 260px
-- Колонка времени: 64px
-- Высота часа: 60px (ячейка), 30px (полчаса)
-- Часы работы: 9:00–21:00
-- Внутренний отступ карточки: 8px 10px 6px
-- Снаружи карточки: 6px по бокам
-- Border-radius: 12px (карточки), 8px (кнопки), 50% (аватары)
+- Sidebar: 230px / collapsed 56px
+- Right panel: 260px
+- Time column: 64px
+- Hour height: 60px (cell), 30px (half-hour)
+- Working hours: 9:00–21:00
+- Card inner padding: 8px 10px 6px
+- Card outer gap: 6px on sides
+- Border-radius: 12px (cards), 8px (buttons), 50% (avatars)
 
-### 3.4 Тени
+### 3.4 Shadows
 
-- Карточки: `0 1px 4px rgba(0,0,0,.08)`
-- Карточки hover: `0 4px 14px rgba(0,0,0,.13)` + translateY(-1px)
+- Cards: `0 1px 4px rgba(0,0,0,.08)`
+- Cards hover: `0 4px 14px rgba(0,0,0,.13)` + translateY(-1px)
 - Collapse btn: `0 1px 4px rgba(0,0,0,.12)`
 - Panel toggle: `0 2px 10px rgba(0,0,0,.1)`
 - Toast: `0 4px 20px rgba(0,0,0,.2)`
@@ -360,7 +360,7 @@ interface Payment {
 
 ---
 
-## 5. API Endpoints (целевые)
+## 5. API Endpoints (target)
 
 ```
 GET    /api/artists
@@ -383,42 +383,42 @@ GET    /api/chat/services?query=
 
 ---
 
-## 6. Design Rationale (почему так, а не иначе)
+## 6. Design Rationale (why this way and not another)
 
-Из сессии Claude. Ключевые решения:
+From the Claude session. Key decisions:
 
-| # | Решение | Почему |
-|---|---------|--------|
-| 1 | Тёмный сайдбар | Контраст, отделение навигации от контента. Editorial-стиль |
-| 2 | Серый фон #EDEDEE | После сравнения с Figma — современнее кремового |
-| 3 | Приватные = срезанный уголок | Бумажный приём (clip-path). Не иконка, не текстура |
-| 4 | Прозрачность заливки = заполненность | Визуальное, не требует чтения |
-| 5 | Два dropdown вместо ToggleGroup | Одновременная фильтрация по мастеру и студии |
-| 6 | Штамп вместо кисти | Понятнее метафора |
-| 7 | Toast с отменой (без таймера) | Меньше шума, чем обратный отсчёт |
-| 8 | Alt+drag = копирование | Интуитивно, не засоряет UI |
-| 9 | #004D56 (брендовый) | Из реального бренда студии |
-| 10 | Inter (шрифт) | Пришёл из v4. Calvino/Noah/Athelas обсуждались, но не дошли |
-| 11 | Нет кнопки "Создать" | Клик по слоту достаточно |
-| 12 | Мини-календарь +1 неделя | Ориентация на стыках месяцев |
+| # | Decision | Why |
+|---|----------|-----|
+| 1 | Dark sidebar | Contrast, separating navigation from content. Editorial style |
+| 2 | Gray background #EDEDEE | After comparison with Figma — more modern than cream |
+| 3 | Private = cut corner | Paper approach (clip-path). Not icon, not texture |
+| 4 | Fill opacity = occupancy | Visual, no reading required |
+| 5 | Two dropdowns instead of ToggleGroup | Simultaneous filtering by artist and studio |
+| 6 | Stamp instead of brush | Clearer metaphor |
+| 7 | Toast with undo (no timer) | Less noisy than countdown |
+| 8 | Alt+drag = copy | Intuitive, doesn't clutter UI |
+| 9 | #004D56 (brand) | From the studio's actual brand |
+| 10 | Inter (font) | Came from v4. Calvino/Noah/Athelas were discussed but didn't make it |
+| 11 | No "Create" button | Clicking a slot is enough |
+| 12 | Mini-calendar +1 week | Orientation at month boundaries |
 
 **Open Questions (TBD):**
 - Employee fields: position_title? email? photo? bio?
-- ServiceCategory нужна?
+- ServiceCategory needed?
 - Address format? coordinates?
 - Payment methods confirmed?
-- Telegram ID для клиента?
+- Telegram ID for client?
 - hasRecords — derived or stored?
-- Copy last week → в какую неделю?
-- Format painter → удалять с записями?
+- Copy last week → into which week?
+- Format painter → delete with records?
 - Navigation → role-based routing?
 
 ---
 
 ## 7. Implementation Status
 
-| # | Страница | Роут | v4 HTML | Next.js (prev) | Бэкенд |
-|---|----------|------|---------|----------------|--------|
+| # | Page | Route | v4 HTML | Next.js (prev) | Backend |
+|---|------|-------|---------|----------------|--------|
 | P1 | Admin Schedule | `/` | ✅ | ✅ | ❌ |
 | P2 | Booking Management | `/bookings` | ❌ | ✅ | ❌ |
 | P2 | Client Card | `/clients/[id]` | ❌ | ✅ | ❌ |
@@ -426,17 +426,17 @@ GET    /api/chat/services?query=
 | P4 | Artist Schedule | `/artist` | ❌ | ✅ | ❌ |
 | P5 | AI Concierge | `/chat` | ❌ | ✅ | ❌ |
 
-**Предыдущая версия (memo-frontend) — работает:**
-- Все 6 страниц с компонентами
+**Previous version (memo-frontend) — works:**
+- All 6 pages with components
 - React Context (schedule, booking, artist, chat)
-- Mock data: 5 артистов, 3 локации, 6 услуг, 20+ событий
-- @dnd-kit для DnD
-- Vitest тесты
-- `npm run dev` → порт 3000
+- Mock data: 5 artists, 3 locations, 6 services, 20+ events
+- @dnd-kit for DnD
+- Vitest tests
+- `npm run dev` → port 3000
 
 ---
 
-## 8. Архитектура (целевая)
+## 8. Architecture (target)
 
 ```
 memo-frontend/
@@ -483,7 +483,7 @@ memo-frontend/
 │   │   ├── QuickActions.tsx
 │   │   ├── ServiceRecommendation.tsx
 │   │   └── TypingIndicator.tsx
-│   └── ui/                       # Общие
+│   └── ui/                       # Shared
 │       ├── Toast.tsx
 │       ├── Badge.tsx
 │       ├── Button.tsx
@@ -499,45 +499,45 @@ memo-frontend/
 └── __tests__/
 ```
 
-**Стек:** Next.js 14 (App Router) + TypeScript + Tailwind CSS 3 + @dnd-kit
+**Stack:** Next.js 14 (App Router) + TypeScript + Tailwind CSS 3 + @dnd-kit
 
 ---
 
-## 9. Дизайн-отличия v4 от старого spec
+## 9. Design Differences v4 vs Old Spec
 
-| Аспект | Старый spec | v4 (актуальный) |
-|--------|-------------|-----------------|
+| Aspect | Old spec | v4 (current) |
+|--------|----------|--------------|
 | Primary | #667eea → #764ba2 | **#004D56** |
-| Фон | #f0f2f5 | **#EDEDEE** |
-| Карточки | белые с тенью | **прозрачная заливка** цветом мастера |
-| Сайдбар | нет | **тёмный** #1E2D2F |
-| Правая панель | нет | **выезжающая** |
-| Приватные | нет | **срезанный уголок** |
-| Возраст | текст | **квадратик + иконка** |
-| DnD | @dnd-kit | HTML5 native (в прототипе) |
-| View switch | Day/Week/Month/List | **День/Неделя** |
-| Toast | нет | **есть** с Отменить |
-| Тёмная тема | нет | **есть** |
-| Мини-календарь | нет | **есть** в сайдбаре |
+| Background | #f0f2f5 | **#EDEDEE** |
+| Cards | white with shadow | **transparent fill** with artist color |
+| Sidebar | none | **dark** #1E2D2F |
+| Right panel | none | **sliding** |
+| Private | none | **cut corner** |
+| Age | text | **square + icon** |
+| DnD | @dnd-kit | HTML5 native (in prototype) |
+| View switch | Day/Week/Month/List | **Day/Week** |
+| Toast | none | **yes** with Undo |
+| Dark theme | none | **yes** |
+| Mini-calendar | none | **yes** in sidebar |
 
 ---
 
 ## 10. Quick Start
 
 ```bash
-# Предыдущая имплементация
+# Previous implementation
 cd /root/workspace/memo-v1/memo-frontend
 npm install
 npm run dev              # localhost:3000
 npm test
 npx next build
 
-# Новая имплементация (memo2)
+# New implementation (memo2)
 cd /root/workspace/memo
-# TODO: инициализировать Next.js проект
+# TODO: initialize Next.js project
 ```
 
 ---
 
-*Документ создан: 2026-05-13*
-*Источники: colour-mountains-v4.html, claude_session.txt, frontend_spec.md (memo/), код memo-frontend/*
+*Document created: 2026-05-13*
+*Sources: colour-mountains-v4.html, claude_session.txt, frontend_spec.md (memo/), memo-frontend/ code*

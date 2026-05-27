@@ -8,15 +8,15 @@
 
 ## 1. Overview
 
-Admin Schedule — главная страница приложения Memo. Представляет собой недельную сетку расписания мастер-классов с drag-and-drop управлением, штампом для быстрого создания событий, и системой уведомлений.
+Admin Schedule — the main page of the Memo application. It is a weekly schedule grid for master classes with drag-and-drop management, a stamp for quick event creation, and a notification system.
 
 **Success Criteria:**
-- Администратор видит расписание на неделю (7 дней, 9:00–21:00)
-- Может перетаскивать события между днями и временными слотами
-- Может создавать события через штамп (Format Painter)
-- Может удалять события в режиме удаления
-- Видит конфликты (двойная занятость мастера)
-- Может копировать public-события с прошлой недели
+- Admin sees a weekly schedule (7 days, 9:00–21:00)
+- Can drag events between days and time slots
+- Can create events via stamp (Format Painter)
+- Can delete events in delete mode
+- Sees conflicts (double-booking of a master)
+- Can copy public events from the previous week
 
 ---
 
@@ -135,7 +135,7 @@ app/
 
 ### Toolbar (Top, sticky)
 - Week navigation (← →, "Today")
-- Date range display ("13–19 мая 2026")
+- Date range display ("13–19 May 2026")
 - Day/Week toggle
 - Filter buttons (artist, location)
 - Delete mode toggle
@@ -321,7 +321,7 @@ interface StackedState {
 ### Behavior
 1. **DragStart:** Store activity ID, check altKey (copy mode). Add `.dragging` class to card.
 2. **DragOver:** Calculate snap position (nearest half-hour). Show ghost (dashed rectangle) at snapped position. Ghost style differs for copy vs move.
-3. **Drop:** Calculate new start time from snap position. If copy: clone activity with new ID. If move: update activity day/start. Show toast with "Отменить".
+3. **Drop:** Calculate new start time from snap position. If copy: clone activity with new ID. If move: update activity day/start. Show toast with "Undo".
 4. **DragEnd:** Clean up state, remove `.dragging` class.
 
 ### Ghost Styles
@@ -360,7 +360,7 @@ interface StampState {
 
 ### Behavior
 - Configured in RightPanel
-- When ready: green blinking dot + summary text ("Ольга — Картина маслом — Альпика, Гранд Отель")
+- When ready: green blinking dot + summary text ("Olga — Oil Painting — Alpika, Grand Hotel")
 - Click on empty grid slot → creates new activity with stamp parameters
 - If stamp not ready → click does nothing (or shows hint)
 - Stamp persists across navigation (week changes)
@@ -379,7 +379,7 @@ interface StampState {
 - Toggle button in Toolbar
 - When active: body gets `.delete-mode` class
 - Click on any card → card fades out (opacity 0, scale 0.95, 150ms transition) then removed
-- Toast with "Отменить"
+- Toast with "Undo"
 - Clicking toggle again exits delete mode
 
 ### Visual
@@ -394,7 +394,7 @@ interface StampState {
 - Button in Toolbar
 - Copies only `isPublic: true` events from previous week to current week
 - Private events and Records are NOT copied
-- After copy: toast with "Отменить"
+- After copy: toast with "Undo"
 - New IDs generated for copied events
 
 ---
@@ -410,7 +410,7 @@ function hideToast(id: string): void;
 ### Behavior
 - Toasts stack at bottom-right
 - Auto-remove after 4.5s
-- "Отменить" button calls undo callback (reverts last action)
+- "Undo" button calls undo callback (reverts last action)
 - Transition: opacity 0→1, translateY(8px)→0
 - Max 5 toasts visible
 

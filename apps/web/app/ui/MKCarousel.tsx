@@ -45,6 +45,7 @@ export function MKCarousel({
   const [index, setIndex] = useState(0);
   const [isEmpty, setIsEmpty] = useState(false);
   const [flyingDir, setFlyingDir] = useState<"left" | "right" | null>(null);
+  const [isEmptyDrag, setIsEmptyDrag] = useState(false);
   const emptyDragX = useRef(0);
   const flyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wasDragged = useRef(false);
@@ -69,21 +70,13 @@ export function MKCarousel({
 
   // ── Build visible stack (up to 3 cards) ──
   const visibleCards: MKCardData[] = [];
-  if (isEmpty && index > 0) {
-    // Render the returning card as a background card in the main stack
-    const prevCard = cards[Math.min(index, cards.length) - 1];
-    if (prevCard) {
-      visibleCards.push(prevCard);
-    }
-  } else {
-    const regularSlots = lastCard ? 2 : 3;
-    for (let i = 0; i < regularSlots && index + i < cards.length; i++) {
-      visibleCards.push(cards[index + i]);
-    }
-    // Show lastCard at the bottom of the stack if there's room
-    if (!isEmpty && lastCard && visibleCards.length < 3 && index <= cards.length) {
-      visibleCards.push(lastCard);
-    }
+  const regularSlots = lastCard ? 2 : 3;
+  for (let i = 0; i < regularSlots && index + i < cards.length; i++) {
+    visibleCards.push(cards[index + i]);
+  }
+  // Show lastCard at the bottom of the stack if there's room
+  if (!isEmpty && lastCard && visibleCards.length < 3 && index <= cards.length) {
+    visibleCards.push(lastCard);
   }
 
   const topCard = visibleCards[0];
@@ -173,9 +166,13 @@ export function MKCarousel({
         // Reset card translation if snapped back
         const el = document.getElementById("empty-preview-card");
         if (el) el.style.transform = "translateX(0px)";
+        setIsEmptyDrag(false); // Unmount preview card
         return;
       }
-      if (info.offset.x <= 0) return; // only right swipe
+      if (info.offset.x <= 0) {
+        setIsEmptyDrag(false); // Unmount preview card if swiping left on empty
+        return;
+      }
 
       // Clear the manual transform so Framer Motion can smoothly animate the transition to left: 3%
       const el = document.getElementById("empty-preview-card");
@@ -186,6 +183,7 @@ export function MKCarousel({
       lastSwipeDir.current = "right";
       setIndex((prev) => Math.max(0, prev - 1));
       setIsEmpty(false);
+      setIsEmptyDrag(false); // Unmount preview card
       queueMicrotask(() => { lastSwipeDir.current = null; });
     },
     [],
@@ -199,13 +197,40 @@ export function MKCarousel({
   }, [onShowAgain]);
 
   // ── Compute whether to show empty background ──
+  // ── Compute whether to show empty background ──
   // Show behind the last card as it flies away, or when fully empty
   const showEmptyBg = isEmpty || (!!flyingDir && topCard?.id === lastCard?.id);
+
+  // Get the returning card to show as preview when dragging back from empty state
+  const getReturningCard = () => {
+    if (index === cards.length + 1 && lastCard) {
+      return lastCard;
+    }
+    const targetIndex = lastCard ? index - 2 : index - 1;
+    if (targetIndex >= 0 && targetIndex < cards.length) {
+      return cards[targetIndex];
+    }
+    return null;
+  };
+  const returningCard = getReturningCard();
 
   // ── Render ──
   return (
     <div className="relative w-full h-full overflow-hidden">
       <div className="relative w-full h-full px-4 py-3">
+        {/* Preview card behind empty state — peeks when dragging right */}
+        {isEmpty && returningCard && isEmptyDrag && (
+          <div
+            id="empty-preview-card"
+            className="absolute h-[98%] overflow-hidden rounded-xl shadow-lg"
+            style={{ left: `calc(-${STACK[0].width} - 20px)`, width: STACK[0].width, top: STACK[0].top }}
+          >
+            <div className="w-full h-full rounded-xl overflow-hidden ring-1 ring-black/10">
+              <MKCard {...returningCard} className="h-full" />
+            </div>
+          </div>
+        )}
+
         {/* Background: empty state — shown behind flying card or when empty */}
         {showEmptyBg && (
           <motion.div
@@ -216,9 +241,9 @@ export function MKCarousel({
             transition={{ duration: 0.3 }}
             drag={isEmpty ? "x" : false}
             dragSnapToOrigin
+            onDragStart={isEmpty ? () => setIsEmptyDrag(true) : undefined}
             onDrag={isEmpty ? handleEmptyDrag : undefined}
-            onDragEnd={isEmpty ? handleEmptyDragEnd : undefined}
-            style={{ zIndex: 10 }} // Stay above preview card but below interactions
+            onDragEnd={isEmpty ? (e, info) => { setIsEmptyDrag(false); handleEmptyDragEnd(e, info); } : undefined}
           >
             <p className="text-text-secondary text-center text-lg max-w-xs">
               Все активности на этот день просмотрены
@@ -252,63 +277,53 @@ export function MKCarousel({
               const cfg = STACK[i] ?? STACK[STACK.length - 1];
               const canInteract = isTop && !flyingDir;
               const isFlying = isTop && !!flyingDir;
-              const isPreview = isEmpty && isTop;
 
               return (
                 <motion.div
                   key={card.id}
-                  id={isPreview ? "empty-preview-card" : undefined}
-                  className={`absolute h-[98%] ${!isTop && !isPreview ? "ring-1 ring-black/10 shadow-lg" : ""}`}
+                  className={`absolute left-[3%] h-[98%] ${!isTop ? "ring-1 ring-black/10 shadow-lg" : ""}`}
                   exit={{ opacity: 0, transition: { duration: 0.1 } }}
                   initial={
-                    isPreview
-                      ? { left: `calc(-${STACK[0].width} - 20px)`, x: 0, scale: 1, opacity: 1 }
-                      : i === 0 && lastSwipeDir.current === "right"
-                        ? { left: "3%", x: -FLY_DISTANCE, scale: 0.9, opacity: 0.8 }
-                        : { left: "3%", x: cfg.x, scale: cfg.scale, opacity: 1 }
+                    i === 0 && lastSwipeDir.current === "right"
+                      ? { x: -FLY_DISTANCE, scale: 0.9, opacity: 0.8 }
+                      : { x: cfg.x, scale: cfg.scale, opacity: 1 }
                   }
                   animate={
-                    isPreview
-                      ? { left: `calc(-${STACK[0].width} - 20px)`, x: 0, scale: 1, opacity: 1 }
-                      : isFlying
-                        ? {
-                            left: "3%",
-                            x: flyingDir === "right" ? FLY_DISTANCE : -FLY_DISTANCE,
-                            scale: cfg.scale,
-                            opacity: 0,
-                          }
-                        : { left: "3%", x: cfg.x, scale: cfg.scale, top: cfg.top, width: cfg.width, opacity: 1 }
+                    isFlying
+                      ? {
+                          x: flyingDir === "right" ? FLY_DISTANCE : -FLY_DISTANCE,
+                          scale: cfg.scale,
+                          opacity: 0,
+                        }
+                      : { x: cfg.x, scale: cfg.scale, top: cfg.top, width: cfg.width }
                   }
                   style={{
-                    top: cfg.top,
-                    width: cfg.width,
-                    zIndex: isPreview ? 1 : isFlying ? 40 : cfg.zIndex,
-                    touchAction: isPreview || isFlying ? "none" : "pan-y",
+                    zIndex: isFlying ? 40 : cfg.zIndex,
+                    touchAction: isFlying ? "none" : "pan-y",
                     transformOrigin: "center top",
                   }}
                   transition={
                     isFlying
                       ? { duration: FLY_DURATION_MS / 1000, ease: "easeIn" }
                       : {
-                          left: { duration: 0.15, ease: "easeOut" },
                           x: { type: "spring", stiffness: 180, damping: 20, mass: 2.4 },
                           scale: { type: "spring", stiffness: 180, damping: 20, mass: 2.4 },
                           top: { duration: 0.15, ease: "easeOut" },
                           width: { duration: 0.15, ease: "easeOut" },
                         }
                   }
-                  drag={!isEmpty && canInteract ? "x" : false}
+                  drag={canInteract ? "x" : false}
                   dragSnapToOrigin
-                  onDragStart={!isEmpty && canInteract ? () => { wasDragged.current = true; } : undefined}
-                  onDragEnd={!isEmpty && canInteract ? handleDragEnd : undefined}
-                  onClick={!isEmpty && canInteract ? () => {
+                  onDragStart={canInteract ? () => { wasDragged.current = true; } : undefined}
+                  onDragEnd={canInteract ? handleDragEnd : undefined}
+                  onClick={canInteract ? () => {
                     if (wasDragged.current) {
                       wasDragged.current = false;
                       return;
                     }
                     handleTap();
                   } : undefined}
-                  onTap={!isEmpty && canInteract ? () => {
+                  onTap={canInteract ? () => {
                     if (wasDragged.current) {
                       wasDragged.current = false;
                       return;

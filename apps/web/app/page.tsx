@@ -136,6 +136,26 @@ export default function Home() {
   const locationOptions = useMemo(() => locations.map(toLocationOption), [locations]);
   const guestPhotos = useMemo(() => galleryPhotos.map(toGuestPhoto), [galleryPhotos]);
 
+  const carouselDateLabel = useMemo(() => {
+    if (!selectedDate) return "этот день";
+    const today = new Date();
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
+    const isSameDate = (d1: Date, d2: Date) =>
+      d1.getDate() === d2.getDate() &&
+      d1.getMonth() === d2.getMonth() &&
+      d1.getFullYear() === d2.getFullYear();
+
+    if (isSameDate(selectedDate, today)) return "сегодня";
+    if (isSameDate(selectedDate, tomorrow)) return "завтра";
+
+    return selectedDate.toLocaleDateString("ru-RU", {
+      day: "numeric",
+      month: "long",
+    });
+  }, [selectedDate]);
+
   // ── Last card (custom booking card) ──
   const lastCard = useMemo(
     () =>
@@ -271,6 +291,7 @@ export default function Home() {
             onTapLastCard={handleTapLastCard}
             onShowAgain={handleShowAgain}
             onNextDay={handleNextDay}
+            dateLabel={carouselDateLabel}
           />
         </div>
 

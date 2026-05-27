@@ -181,10 +181,10 @@ describe("Home (page.tsx)", () => {
       expect(screen.getAllByText("Чт").length).toBeGreaterThanOrEqual(1);
     });
 
-    it("renders CategoryFilter with default option", () => {
+    it("renders ActivityTagFilter with default option", () => {
       renderHome();
-      // CategoryFilter triggers with default category label "Кому угодно"
-      expect(screen.getByRole("button", { name: /кому угодно/i })).toBeInTheDocument();
+      // ActivityTagFilter triggers with default category label "Для всех"
+      expect(screen.getByRole("button", { name: /для всех/i })).toBeInTheDocument();
     });
 
     it("renders LocationFilter trigger button", () => {
@@ -223,16 +223,16 @@ describe("Home (page.tsx)", () => {
   });
 
   describe("category filter selection", () => {
-    it("has 'Кому угодно' selected by default", () => {
+    it("has 'Для всех' selected by default", () => {
       renderHome();
-      const trigger = screen.getByRole("button", { name: /кому угодно/i });
+      const trigger = screen.getByRole("button", { name: /для всех/i });
       expect(trigger).not.toHaveClass("bg-[#004D56]"); // Should not be highlighted with active color
     });
 
     it("calls onSelectCategory when a category is clicked inside overlay", () => {
       renderHome();
-      // Click the CategoryFilter trigger button
-      const trigger = screen.getByRole("button", { name: /кому угодно/i });
+      // Click the ActivityTagFilter trigger button
+      const trigger = screen.getByRole("button", { name: /для всех/i });
       fireEvent.click(trigger);
 
       // The overlay is open, choose "взрослым" option (which is a button)

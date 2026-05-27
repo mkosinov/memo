@@ -5,7 +5,7 @@ import { Hero } from "./sections/Hero";
 import { Reviews } from "./sections/Reviews";
 import { GuestGallery } from "./sections/GuestGallery";
 import { CalendarLine } from "./ui/CalendarLine";
-import { CategoryFilter } from "./ui/CategoryFilter";
+import { ActivityTagFilter } from "./ui/ActivityTagFilter";
 import { LocationFilter } from "./ui/LocationFilter";
 import { MKCarousel } from "./ui/MKCarousel";
 import { ActivityDetail } from "./ui/ActivityDetail";
@@ -276,7 +276,7 @@ export default function Home() {
             selectedLocation={selectedLocation}
             onSelectLocation={handleSelectLocation}
           />
-          <CategoryFilter
+          <ActivityTagFilter
             selectedCategory={selectedTag}
             onSelectCategory={handleSelectTag}
           />

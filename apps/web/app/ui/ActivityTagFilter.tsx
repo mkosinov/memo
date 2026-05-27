@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Overlay } from "./Overlay";
 
-export interface CategoryFilterProps {
+export interface ActivityTagFilterProps {
   selectedCategory: string | null;
   onSelectCategory: (category: string | null) => void;
 }
@@ -19,15 +19,15 @@ const CATEGORY_ITEMS = [
   { id: "для компаний", label: "для компаний", icon: "🥳", desc: "Для праздников и тимбилдингов" },
 ] as const;
 
-export function CategoryFilter({
+export function ActivityTagFilter({
   selectedCategory,
   onSelectCategory,
-}: CategoryFilterProps) {
+}: ActivityTagFilterProps) {
   const [isOpen, setIsOpen] = useState(false);
 
   const currentLabel = selectedCategory
-    ? CATEGORY_ITEMS.find((c) => c.id === selectedCategory)?.label ?? "Кому"
-    : "Кому угодно";
+    ? CATEGORY_ITEMS.find((c) => c.id === selectedCategory)?.label ?? "Для кого"
+    : "Для всех";
 
   return (
     <>
@@ -72,8 +72,8 @@ export function CategoryFilter({
       </button>
 
       {/* Overlay with category options */}
-      <Overlay isOpen={isOpen} onClose={() => setIsOpen(false)} size="half" title="Кому подбираем мастер-класс?">
-        <div className="px-2 max-h-[80dvh] overflow-y-auto no-scrollbar">
+      <Overlay isOpen={isOpen} onClose={() => setIsOpen(false)} size="half" title="Для кого мастер-класс">
+        <div className="px-2">
           {/* All option */}
           <button
             type="button"
@@ -90,7 +90,7 @@ export function CategoryFilter({
           >
             <span className="text-xl">🌟</span>
             <div className="flex flex-col">
-              <span className="font-medium text-sm">Кому угодно</span>
+              <span className="font-medium text-sm">Для всех</span>
               <span className="text-xs opacity-60">Показать все мастер-классы</span>
             </div>
             {!selectedCategory && (
@@ -152,4 +152,4 @@ export function CategoryFilter({
   );
 }
 
-export default CategoryFilter;
+export default ActivityTagFilter;

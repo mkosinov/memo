@@ -88,24 +88,8 @@ function FixedSizePanel({
       exit={{ y: "100%" }}
       transition={{ type: "spring", damping: 25, stiffness: 200 }}
       onClick={(e) => e.stopPropagation()}
-      drag="y"
-      dragConstraints={{ top: 0, bottom: 0 }}
-      dragElastic={{ top: 0, bottom: 0.4 }}
-      onDragEnd={(_e: unknown, info: { offset: { y: number }; velocity: { y: number } }) => {
-        if (info.offset.y > 100 || info.velocity.y > 500) {
-          onClose();
-        }
-      }}
     >
-      {/* Drag handle */}
-      <div
-        className="flex justify-center pt-2 pb-1 cursor-grab active:cursor-grabbing"
-        onPointerDown={(e) => e.stopPropagation()}
-      >
-        <div className="w-10 h-1 rounded-full bg-[#D4D4D4]" />
-      </div>
-
-      <div className="flex items-center justify-between px-6 pb-5 pt-2">
+      <div className="flex items-center justify-between px-6 pt-5 pb-5">
         <span className="text-lg font-playfair font-bold text-[#1a1a1a] truncate mr-4 flex-1 text-left tracking-wide">
           {title || ""}
         </span>

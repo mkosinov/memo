@@ -1,21 +1,21 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
-import { CategoryFilter } from "../CategoryFilter";
+import { ActivityTagFilter } from "../ActivityTagFilter";
 
-describe("CategoryFilter", () => {
+describe("ActivityTagFilter", () => {
   it("renders the trigger button with the default label", () => {
     render(
-      <CategoryFilter
+      <ActivityTagFilter
         selectedCategory={null}
         onSelectCategory={vi.fn()}
       />
     );
-    expect(screen.getByRole("button", { name: /кому угодно/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /для всех/i })).toBeInTheDocument();
   });
 
   it("renders the active category label when selected", () => {
     render(
-      <CategoryFilter
+      <ActivityTagFilter
         selectedCategory="вместе"
         onSelectCategory={vi.fn()}
       />
@@ -25,7 +25,7 @@ describe("CategoryFilter", () => {
 
   it("highlights the active trigger button", () => {
     render(
-      <CategoryFilter
+      <ActivityTagFilter
         selectedCategory="вместе"
         onSelectCategory={vi.fn()}
       />
@@ -36,15 +36,15 @@ describe("CategoryFilter", () => {
 
   it("opens the overlay and lists options", () => {
     render(
-      <CategoryFilter
+      <ActivityTagFilter
         selectedCategory={null}
         onSelectCategory={vi.fn()}
       />
     );
-    const trigger = screen.getByRole("button", { name: /кому угодно/i });
+    const trigger = screen.getByRole("button", { name: /для всех/i });
     fireEvent.click(trigger);
 
-    expect(screen.getByText("Кому подбираем мастер-класс?")).toBeInTheDocument();
+    expect(screen.getByText("Для кого мастер-класс")).toBeInTheDocument();
     expect(screen.getByText("вместе")).toBeInTheDocument();
     expect(screen.getByText("взрослым")).toBeInTheDocument();
     expect(screen.getByText("детям")).toBeInTheDocument();
@@ -58,12 +58,12 @@ describe("CategoryFilter", () => {
   it("calls onSelectCategory when an option is clicked", () => {
     const onSelect = vi.fn();
     render(
-      <CategoryFilter
+      <ActivityTagFilter
         selectedCategory={null}
         onSelectCategory={onSelect}
       />
     );
-    const trigger = screen.getByRole("button", { name: /кому угодно/i });
+    const trigger = screen.getByRole("button", { name: /для всех/i });
     fireEvent.click(trigger);
 
     fireEvent.click(screen.getByText("вместе"));

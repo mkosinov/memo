@@ -5,13 +5,12 @@ import { Hero } from "./sections/Hero";
 import { Reviews } from "./sections/Reviews";
 import { GuestGallery } from "./sections/GuestGallery";
 import { CalendarLine } from "./ui/CalendarLine";
-import { FilterPills } from "./ui/FilterPills";
+import { CategoryFilter } from "./ui/CategoryFilter";
 import { LocationFilter } from "./ui/LocationFilter";
 import { MKCarousel } from "./ui/MKCarousel";
 import { ActivityDetail } from "./ui/ActivityDetail";
 import { BookingActivityOverlay } from "./ui/BookingActivityOverlay";
 import { BookingPrivateOverlay } from "./ui/BookingPrivateOverlay";
-import { ChatBar } from "./ui/ChatBar";
 import { HamburgerMenu } from "./ui/HamburgerMenu";
 import { useCalendarDays } from "./hooks/useCalendarDays";
 import { useActivities } from "./hooks/useActivities";
@@ -73,7 +72,7 @@ export default function Home() {
   const { days, selectedDate, selectDate } = useCalendarDays();
 
   // ── Filter state ──
-  const [selectedTag, setSelectedTag] = useState<string | null>("вместе");
+  const [selectedTag, setSelectedTag] = useState<string | null>(null);
   const [selectedLocation, setSelectedLocation] = useState<string | null>(null);
 
   // ── UI state ──
@@ -241,7 +240,7 @@ export default function Home() {
       />
 
       {/* 2–6. Workspace — sticks to viewport when scrolled into view */}
-      <div className="sticky top-0 h-screen flex flex-col bg-surface">
+      <div className="sticky top-0 h-[100dvh] flex flex-col bg-surface">
         {/* CalendarLine */}
         <CalendarLine
           selectedDate={selectedDate}
@@ -250,16 +249,16 @@ export default function Home() {
           disabled={isAllActivitiesLoading}
         />
 
-        {/* FilterPills + LocationFilter — одна строка */}
-        <div className="flex items-center gap-2 px-4 py-2 overflow-x-auto no-scrollbar">
-          <FilterPills
-            selectedCategory={selectedTag}
-            onSelectCategory={handleSelectTag}
-          />
+        {/* Фильтры: Локация и Кому в одну аккуратную строку */}
+        <div className="flex items-center gap-2 px-4 py-2 border-b border-[#E0E0E1]/30 overflow-x-auto no-scrollbar">
           <LocationFilter
             locations={locationOptions}
             selectedLocation={selectedLocation}
             onSelectLocation={handleSelectLocation}
+          />
+          <CategoryFilter
+            selectedCategory={selectedTag}
+            onSelectCategory={handleSelectTag}
           />
         </div>
 
@@ -275,19 +274,16 @@ export default function Home() {
           />
         </div>
 
-        {/* GuestGallery */}
+        {/* Reviews */}
         <div>
-          <GuestGallery photos={guestPhotos} />
-        </div>
-
-        {/* Reviews — padded bottom to avoid ChatBar overlap */}
-        <div className="pb-14">
           <Reviews />
         </div>
-      </div>
 
-      {/* 7. ChatBar (fixed bottom) */}
-      <ChatBar />
+        {/* GuestGallery — final section of the page */}
+        <div className="pb-6">
+          <GuestGallery photos={guestPhotos} />
+        </div>
+      </div>
 
       {/* 8. HamburgerMenu */}
       <HamburgerMenu isOpen={menuOpen} onClose={handleCloseMenu} />

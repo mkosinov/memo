@@ -61,12 +61,8 @@ export function LocationFilter({
       </button>
 
       {/* Overlay with location list */}
-      <Overlay isOpen={isOpen} onClose={() => setIsOpen(false)} size="half">
+      <Overlay isOpen={isOpen} onClose={() => setIsOpen(false)} size="half" title="Выберите локацию">
         <div className="px-2">
-          <h3 className="text-lg font-bold text-[#1a1a1a] mb-4">
-            Выберите локацию
-          </h3>
-
           {/* Рядом с вами — геолокация */}
           <button
             type="button"

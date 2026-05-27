@@ -45,6 +45,7 @@ export function MKCarousel({
   const [index, setIndex] = useState(0);
   const [isEmpty, setIsEmpty] = useState(false);
   const [flyingDir, setFlyingDir] = useState<"left" | "right" | null>(null);
+  const emptyDragX = useRef(0);
   const flyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wasDragged = useRef(false);
   const lastSwipeDir = useRef<"left" | "right" | null>(null);
@@ -68,13 +69,21 @@ export function MKCarousel({
 
   // ── Build visible stack (up to 3 cards) ──
   const visibleCards: MKCardData[] = [];
-  const regularSlots = lastCard ? 2 : 3;
-  for (let i = 0; i < regularSlots && index + i < cards.length; i++) {
-    visibleCards.push(cards[index + i]);
-  }
-  // Show lastCard at the bottom of the stack if there's room
-  if (!isEmpty && lastCard && visibleCards.length < 3 && index <= cards.length) {
-    visibleCards.push(lastCard);
+  if (isEmpty && index > 0) {
+    // Render the returning card as a background card in the main stack
+    const prevCard = cards[Math.min(index, cards.length) - 1];
+    if (prevCard) {
+      visibleCards.push(prevCard);
+    }
+  } else {
+    const regularSlots = lastCard ? 2 : 3;
+    for (let i = 0; i < regularSlots && index + i < cards.length; i++) {
+      visibleCards.push(cards[index + i]);
+    }
+    // Show lastCard at the bottom of the stack if there's room
+    if (!isEmpty && lastCard && visibleCards.length < 3 && index <= cards.length) {
+      visibleCards.push(lastCard);
+    }
   }
 
   const topCard = visibleCards[0];
@@ -86,14 +95,15 @@ export function MKCarousel({
       if (!topCard) return;
       onSwipe?.(topCard, direction);
       if (topCard.id === lastCard?.id && direction === "left") {
+        // isEmpty set here (keeps empty state visible after fly);
+        // also increment index to remove lastCard from visibleCards
         setIsEmpty(true);
+        setIndex((i) => i + 1);
       } else if (direction === "left") {
         setIndex((i) => i + 1);
       } else {
         setIndex((i) => Math.max(0, i - 1));
       }
-      // Clear direction hint after the render commit, so entering
-      // cards can read it in their initial animation
       queueMicrotask(() => { lastSwipeDir.current = null; });
     },
     [topCard, lastCard, onSwipe],
@@ -140,12 +150,39 @@ export function MKCarousel({
   }, [topCard, lastCard, onSelectCard, onTapLastCard]);
 
   // ── Swipe right on empty state → reveal last card ──
-  const handleEmptyPanEnd = useCallback(
+  const handleEmptyDrag = useCallback(
+    (_: unknown, info: { offset: { x: number } }) => {
+      emptyDragX.current = info.offset.x;
+      // Force render update to match emptyDragX.current
+      const el = document.getElementById("empty-preview-card");
+      if (el) {
+        // Slide the card in from the left off-screen (starting at -cardWidth - 20px)
+        // moving towards the normal position in sync with the drag
+        const progress = Math.max(0, info.offset.x);
+        el.style.transform = `translateX(${progress}px)`;
+      }
+    },
+    [],
+  );
+
+  const handleEmptyDragEnd = useCallback(
     (_: unknown, info: { offset: { x: number }; velocity: { x: number } }) => {
       const absOffset = Math.abs(info.offset.x);
       const absVelocity = Math.abs(info.velocity.x);
-      if (absOffset < SWIPE_THRESHOLD && absVelocity < SWIPE_VELOCITY) return;
+      if (absOffset < SWIPE_THRESHOLD && absVelocity < SWIPE_VELOCITY) {
+        // Reset card translation if snapped back
+        const el = document.getElementById("empty-preview-card");
+        if (el) el.style.transform = "translateX(0px)";
+        return;
+      }
       if (info.offset.x <= 0) return; // only right swipe
+
+      // Clear the manual transform so Framer Motion can smoothly animate the transition to left: 3%
+      const el = document.getElementById("empty-preview-card");
+      if (el) {
+        el.style.transform = "";
+      }
+
       lastSwipeDir.current = "right";
       setIndex((prev) => Math.max(0, prev - 1));
       setIsEmpty(false);
@@ -161,96 +198,117 @@ export function MKCarousel({
     onShowAgain?.();
   }, [onShowAgain]);
 
+  // ── Compute whether to show empty background ──
+  // Show behind the last card as it flies away, or when fully empty
+  const showEmptyBg = isEmpty || (!!flyingDir && topCard?.id === lastCard?.id);
+
   // ── Render ──
   return (
     <div className="relative w-full h-full overflow-hidden">
       <div className="relative w-full h-full px-4 py-3">
-        <AnimatePresence>
-          {showEmpty ? (
-            <motion.div
-              key="empty"
-              className="relative flex flex-col items-center justify-center gap-4 px-4 w-full h-full"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ delay: 0.2, duration: 0.4 }}
-              onPanEnd={handleEmptyPanEnd}
-            >
-              <p className="text-text-secondary text-center text-lg max-w-xs">
-                Все активности на этот день просмотрены
-              </p>
-              <div className="flex flex-col gap-3 w-64">
+        {/* Background: empty state — shown behind flying card or when empty */}
+        {showEmptyBg && (
+          <motion.div
+            key="empty"
+            className="absolute inset-0 flex flex-col items-center justify-center gap-4 px-4"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.3 }}
+            drag={isEmpty ? "x" : false}
+            dragSnapToOrigin
+            onDrag={isEmpty ? handleEmptyDrag : undefined}
+            onDragEnd={isEmpty ? handleEmptyDragEnd : undefined}
+            style={{ zIndex: 10 }} // Stay above preview card but below interactions
+          >
+            <p className="text-text-secondary text-center text-lg max-w-xs">
+              Все активности на этот день просмотрены
+            </p>
+            <div className="flex flex-col gap-3 w-64">
+              <button
+                type="button"
+                onClick={handleReset}
+                className="px-5 py-3 rounded-lg bg-brand/20 text-text-primary font-medium text-sm hover:bg-brand/30 transition-colors"
+              >
+                Показать ещё раз
+              </button>
+              {onNextDay && (
                 <button
                   type="button"
-                  onClick={handleReset}
-                  className="px-5 py-3 rounded-lg bg-brand/20 text-text-primary font-medium text-sm hover:bg-brand/30 transition-colors"
+                  onClick={onNextDay}
+                  className="px-5 py-3 rounded-lg bg-brand text-white font-medium text-sm hover:bg-brand/80 transition-colors"
                 >
-                  Показать ещё раз
+                  Следующий день →
                 </button>
-                {onNextDay && (
-                  <button
-                    type="button"
-                    onClick={onNextDay}
-                    className="px-5 py-3 rounded-lg bg-brand text-white font-medium text-sm hover:bg-brand/80 transition-colors"
-                  >
-                    Следующий день →
-                  </button>
-                )}
-              </div>
-            </motion.div>
-          ) : (
-            visibleCards.map((card, i) => {
+              )}
+            </div>
+          </motion.div>
+        )}
+
+        {/* Foreground: cards stack — on top of empty background */}
+        <AnimatePresence>
+          {visibleCards.length > 0 && visibleCards.map((card, i) => {
               const isTop = i === 0;
               const isLastCard = card.id === lastCard?.id;
               const cfg = STACK[i] ?? STACK[STACK.length - 1];
               const canInteract = isTop && !flyingDir;
               const isFlying = isTop && !!flyingDir;
+              const isPreview = isEmpty && isTop;
 
               return (
                 <motion.div
                   key={card.id}
-                  className={`absolute left-[3%] h-[98%] ${!isTop ? "ring-1 ring-black/10 shadow-lg" : ""}`}
+                  id={isPreview ? "empty-preview-card" : undefined}
+                  className={`absolute h-[98%] ${!isTop && !isPreview ? "ring-1 ring-black/10 shadow-lg" : ""}`}
                   exit={{ opacity: 0, transition: { duration: 0.1 } }}
                   initial={
-                    i === 0 && lastSwipeDir.current === "right"
-                      ? { x: -FLY_DISTANCE, scale: 0.9, opacity: 0.8 }
-                      : { x: cfg.x, scale: cfg.scale, opacity: 1 }
+                    isPreview
+                      ? { left: `calc(-${STACK[0].width} - 20px)`, x: 0, scale: 1, opacity: 1 }
+                      : i === 0 && lastSwipeDir.current === "right"
+                        ? { left: "3%", x: -FLY_DISTANCE, scale: 0.9, opacity: 0.8 }
+                        : { left: "3%", x: cfg.x, scale: cfg.scale, opacity: 1 }
                   }
                   animate={
-                    isFlying
-                      ? {
-                          x: flyingDir === "right" ? FLY_DISTANCE : -FLY_DISTANCE,
-                          scale: cfg.scale,
-                          opacity: 0,
-                        }
-                      : { x: cfg.x, scale: cfg.scale, top: cfg.top, width: cfg.width }
+                    isPreview
+                      ? { left: `calc(-${STACK[0].width} - 20px)`, x: 0, scale: 1, opacity: 1 }
+                      : isFlying
+                        ? {
+                            left: "3%",
+                            x: flyingDir === "right" ? FLY_DISTANCE : -FLY_DISTANCE,
+                            scale: cfg.scale,
+                            opacity: 0,
+                          }
+                        : { left: "3%", x: cfg.x, scale: cfg.scale, top: cfg.top, width: cfg.width, opacity: 1 }
                   }
                   style={{
-                    zIndex: isFlying ? 40 : cfg.zIndex,
-                    touchAction: isFlying ? "none" : "pan-y",
+                    top: cfg.top,
+                    width: cfg.width,
+                    zIndex: isPreview ? 1 : isFlying ? 40 : cfg.zIndex,
+                    touchAction: isPreview || isFlying ? "none" : "pan-y",
                     transformOrigin: "center top",
                   }}
                   transition={
                     isFlying
                       ? { duration: FLY_DURATION_MS / 1000, ease: "easeIn" }
                       : {
+                          left: { duration: 0.15, ease: "easeOut" },
                           x: { type: "spring", stiffness: 180, damping: 20, mass: 2.4 },
                           scale: { type: "spring", stiffness: 180, damping: 20, mass: 2.4 },
                           top: { duration: 0.15, ease: "easeOut" },
                           width: { duration: 0.15, ease: "easeOut" },
                         }
                   }
-                  drag={canInteract ? "x" : false}
+                  drag={!isEmpty && canInteract ? "x" : false}
                   dragSnapToOrigin
-                  onDragStart={canInteract ? () => { wasDragged.current = true; } : undefined}
-                  onDragEnd={canInteract ? handleDragEnd : undefined}
-                  onClick={canInteract ? () => {
+                  onDragStart={!isEmpty && canInteract ? () => { wasDragged.current = true; } : undefined}
+                  onDragEnd={!isEmpty && canInteract ? handleDragEnd : undefined}
+                  onClick={!isEmpty && canInteract ? () => {
                     if (wasDragged.current) {
                       wasDragged.current = false;
                       return;
                     }
                     handleTap();
                   } : undefined}
-                  onTap={canInteract ? () => {
+                  onTap={!isEmpty && canInteract ? () => {
                     if (wasDragged.current) {
                       wasDragged.current = false;
                       return;
@@ -266,7 +324,7 @@ export function MKCarousel({
                 </motion.div>
               );
             })
-          )}
+          }
         </AnimatePresence>
       </div>
     </div>

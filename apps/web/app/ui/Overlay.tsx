@@ -105,12 +105,10 @@ function FixedSizePanel({
         <div className="w-10 h-1 rounded-full bg-[#D4D4D4]" />
       </div>
 
-      <div className="flex items-center justify-between px-4 pb-4">
-        {title && (
-          <span className="text-base font-playfair font-bold text-[#1a1a1a] truncate mr-4">
-            {title}
-          </span>
-        )}
+      <div className="flex items-center justify-between px-6 pb-5 pt-2">
+        <span className="text-lg font-playfair font-bold text-[#1a1a1a] truncate mr-4 flex-1 text-left tracking-wide">
+          {title || ""}
+        </span>
         <button
           type="button"
           onClick={onClose}
@@ -185,12 +183,10 @@ function DynamicPanel({
       </div>
 
       {/* Header */}
-      <div className="flex items-center justify-between px-4 pb-4">
-        {title && (
-          <span className="text-base font-playfair font-bold text-[#1a1a1a] truncate mr-4">
-            {title}
-          </span>
-        )}
+      <div className="flex items-center justify-between px-6 pb-5 pt-2">
+        <span className="text-lg font-playfair font-bold text-[#1a1a1a] truncate mr-4 flex-1 text-left tracking-wide">
+          {title || ""}
+        </span>
         <button
           type="button"
           onClick={onClose}

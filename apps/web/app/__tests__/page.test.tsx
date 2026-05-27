@@ -157,7 +157,7 @@ function renderHome() {
  * With default filters (category=вместе, date=today) the visible card is "Гончарное дело".
  */
 function tapCardTrigger() {
-  fireEvent.click(screen.getByText("Гончарное дело"));
+  fireEvent.click(screen.getByText("Акварельный пейзаж"));
 }
 
 // ── Tests ───────────────────────────────────────────────────
@@ -181,14 +181,10 @@ describe("Home (page.tsx)", () => {
       expect(screen.getAllByText("Чт").length).toBeGreaterThanOrEqual(1);
     });
 
-    it("renders FilterPills with category options", () => {
+    it("renders CategoryFilter with default option", () => {
       renderHome();
-      const vsego = screen.getAllByText("вместе");
-      expect(vsego.length).toBeGreaterThanOrEqual(1);
-      const vzroslym = screen.getAllByText("взрослым");
-      expect(vzroslym.length).toBeGreaterThanOrEqual(1);
-      const detyam = screen.getAllByText("детям");
-      expect(detyam.length).toBeGreaterThanOrEqual(1);
+      // CategoryFilter triggers with default category label "Кому угодно"
+      expect(screen.getByRole("button", { name: /кому угодно/i })).toBeInTheDocument();
     });
 
     it("renders LocationFilter trigger button", () => {
@@ -199,8 +195,8 @@ describe("Home (page.tsx)", () => {
 
     it("renders MKCarousel with activity cards", () => {
       renderHome();
-      // With default filter "вместе" + today, only "Гончарное дело" is visible
-      expect(screen.getByText("Гончарное дело")).toBeInTheDocument();
+      // With default filter "Кому угодно", both cards are rendered, "Акварельный пейзаж" is visible
+      expect(screen.getByText("Акварельный пейзаж")).toBeInTheDocument();
     });
 
     it("renders Reviews section", () => {
@@ -213,13 +209,6 @@ describe("Home (page.tsx)", () => {
       // GuestGallery renders guest photo images
       const guestImages = screen.getAllByAltText(/Guest photo/);
       expect(guestImages.length).toBeGreaterThanOrEqual(1);
-    });
-
-    it("renders ChatBar", () => {
-      renderHome();
-      // ChatBar renders "Отправить" button and chips
-      expect(screen.getByRole("button", { name: /отправить/i })).toBeInTheDocument();
-      expect(screen.getByText(/Для ребёнка/)).toBeInTheDocument();
     });
   });
 
@@ -234,23 +223,28 @@ describe("Home (page.tsx)", () => {
   });
 
   describe("category filter selection", () => {
-    it("has 'вместе' selected by default", () => {
+    it("has 'Кому угодно' selected by default", () => {
       renderHome();
-      const pills = screen.getAllByText("вместе");
-      const pillButton = pills[0].closest("button");
-      expect(pillButton).toHaveClass("bg-[#004D56]");
+      const trigger = screen.getByRole("button", { name: /кому угодно/i });
+      expect(trigger).not.toHaveClass("bg-[#004D56]"); // Should not be highlighted with active color
     });
 
-    it("calls onSelectCategory when a category pill is clicked", () => {
+    it("calls onSelectCategory when a category is clicked inside overlay", () => {
       renderHome();
-      // Find the FilterPills button for "взрослым" (not the card category span)
-      const pills = screen.getAllByText("взрослым");
-      const pillButton = pills[0].closest("button");
-      expect(pillButton).toBeInTheDocument();
-      fireEvent.click(pillButton!);
-      // After clicking, the pill should be highlighted (active state)
-      const activePill = screen.getAllByText("взрослым")[0].closest("button");
-      expect(activePill).toHaveClass("bg-[#004D56]");
+      // Click the CategoryFilter trigger button
+      const trigger = screen.getByRole("button", { name: /кому угодно/i });
+      fireEvent.click(trigger);
+
+      // The overlay is open, choose "взрослым" option (which is a button)
+      const options = screen.getAllByText("взрослым");
+      // Find the button inside the overlay
+      const optionButton = options.find(el => el.closest("button") && !el.closest('[class*="bg-white rounded-2xl"]'));
+      expect(optionButton).toBeDefined();
+      fireEvent.click(optionButton!);
+
+      // Now "взрослым" is selected
+      const triggers = screen.getAllByRole("button", { name: /взрослым/i });
+      expect(triggers.length).toBeGreaterThanOrEqual(1);
     });
   });
 
@@ -268,16 +262,16 @@ describe("Home (page.tsx)", () => {
       renderHome();
       tapCardTrigger();
       // ActivityDetail should render with teacher name
-      expect(screen.getByText("Ольга Смирнова")).toBeInTheDocument();
+      expect(screen.getByText("Анна Иванова")).toBeInTheDocument();
     });
 
     it("closes ActivityDetail when close button is clicked", () => {
       renderHome();
       tapCardTrigger();
-      expect(screen.getByText("Ольга Смирнова")).toBeInTheDocument();
+      expect(screen.getByText("Анна Иванова")).toBeInTheDocument();
       const closeBtn = screen.getByRole("button", { name: /close overlay/i });
       fireEvent.click(closeBtn);
-      expect(screen.queryByText("Ольга Смирнова")).not.toBeInTheDocument();
+      expect(screen.queryByText("Анна Иванова")).not.toBeInTheDocument();
     });
   });
 
@@ -285,11 +279,11 @@ describe("Home (page.tsx)", () => {
     it("shows BookingOverlay when book button is clicked from ActivityDetail", () => {
       renderHome();
       tapCardTrigger();
-      expect(screen.getByText("Ольга Смирнова")).toBeInTheDocument();
+      expect(screen.getByText("Анна Иванова")).toBeInTheDocument();
       const bookButton = screen.getByRole("button", { name: /участвовать/i });
       fireEvent.click(bookButton);
       expect(screen.getByText("Оформление записи")).toBeInTheDocument();
-      expect(screen.queryByText("Ольга Смирнова")).not.toBeInTheDocument();
+      expect(screen.queryByText("Анна Иванова")).not.toBeInTheDocument();
     });
 
     it("closes BookingOverlay when back button is clicked", () => {

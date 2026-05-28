@@ -121,6 +121,96 @@ import { getActivities } from '@memo/api-client';
 
 ---
 
+## Backend — FastAPI + Clean Architecture
+
+> Status: Foundation completed 2026-05-28
+
+The backend is a separate FastAPI service living in `backend/`. It follows **Feature-Based Clean Architecture** — each domain module has its own `router.py`, `service.py`, `repository.py`, `models.py`, and `schemas.py`.
+
+### Backend Directory Structure
+
+```
+backend/
+├── app/
+│   ├── __init__.py
+│   ├── main.py                    # create_app() + lifespan (DB init/close)
+│   │
+│   ├── core/
+│   │   ├── __init__.py
+│   │   └── config.py              # Settings (pydantic-settings, DATABASE_URL)
+│   │
+│   ├── db/
+│   │   ├── __init__.py
+│   │   ├── base.py                # DeclarativeBase
+│   │   └── database.py            # DatabaseSessionManager + get_db_session DI
+│   │
+│   └── domain/
+│       └── system/                # Healthcheck module
+│           ├── __init__.py
+│           ├── schemas.py         # HealthResponse (Pydantic v2)
+│           ├── service.py         # HealthService (SELECT 1)
+│           └── router.py          # GET /api/health
+│
+├── tests/
+│   ├── __init__.py
+│   ├── conftest.py                # In-memory SQLite fixture
+│   ├── test_project_init.py       # 13 tests: structure, linters, imports
+│   ├── test_database.py           # 6 tests: session lifecycle
+│   ├── test_health.py             # 3 tests: health endpoint
+│   └── test_main.py               # 6 tests: app lifecycle, lifespan
+│
+└── pyproject.toml                 # Dependencies + ruff + mypy strict
+```
+
+### Dependency Flow
+
+```
+HTTP Request
+    │
+    ▼
+Router (endpoint)          ← FastAPI route, validates input via Pydantic
+    │
+    ▼
+Service (business logic)    ← ORM → Pydantic mapping, calls repository
+    │
+    ▼
+Session (DI)                ← DatabaseSessionManager.get_db_session()
+    │
+    ▼
+SQLite (aiosqlite)          ← Async SQLAlchemy 2.0 engine
+```
+
+### Key Principles
+
+| Principle | Implementation |
+|-----------|---------------|
+| **No DB in Router** | Router calls Service, never accesses session directly |
+| **No commit in Repository** | Repository uses `flush()`; `commit()` at DI level (Unit of Work) |
+| **Session per request** | `get_db_session` yields per-request session, commits on success |
+| **Test purity** | In-memory SQLite (`:memory:`) for all tests |
+| **TDD first** | Tests written before implementation for every module |
+
+### Communication with Frontend
+
+- Frontend apps → `packages/api-client` → HTTP → FastAPI backend
+- `GET /api/health` returns `{"status": "ok", "db": "connected"}`
+- Future endpoints follow RESTful conventions: `/api/activities`, `/api/bookings`, etc.
+
+### Tech Stack
+
+| Technology | Purpose |
+|-----------|---------|
+| FastAPI | Web framework |
+| SQLAlchemy 2.0 | Async ORM |
+| aiosqlite | Async SQLite driver |
+| Pydantic v2 | Schema validation + Settings |
+| pytest + httpx | Test runner + async client |
+| ruff | Linter |
+| mypy (strict) | Static type checking |
+
+---
+
 ## История изменений
 
+- **2026-05-28**: Added Backend section — FastAPI Clean Architecture foundation with Healthcheck module, TDD infrastructure, and DB session management.
 - **2026-05-19**: Миграция из единого `frontend/` в Turborepo. Admin перенесён в `apps/admin/`. Созданы `packages/domain/` и `packages/api-client/`.

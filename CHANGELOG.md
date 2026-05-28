@@ -11,6 +11,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Phase 5: Backend Foundation (FastAPI + Clean Architecture) — 2026-05-28**
+  - FastAPI application with async SQLAlchemy 2.0 + aiosqlite
+  - DatabaseSessionManager with Unit of Work pattern (DI-based session management)
+  - Pydantic v2 Settings for configuration (`DATABASE_URL`, environment-based)
+  - Lifespan events for DB init/close (startup/shutdown)
+  - First domain module: System/Healthcheck (`GET /api/health`)
+  - Full TDD infrastructure: 27 tests passing, ruff + mypy strict (0 errors)
+  - Clean Architecture: Router → Service → Session dependency flow
+  - `docs/specs/2026-05-28-backend-architecture-design.md` and `docs/plans/2026-05-28-backend-foundation.md`
+
 - **P1: Admin Schedule — UI Polish Session (2026-05-16)**
   - ActivityCard restructured to 5-div vertical layout (Header, Title, Age, Location, Footer)
   - DnD ghost preview — responsive DragOverlay width (`w-full`) + card-shaped slot ghost

@@ -121,6 +121,28 @@ import { getActivities } from '@memo/api-client';
 
 ---
 
-## Change History
+## Backend — FastAPI + Clean Architecture
 
-- **2026-05-19**: Migration from a single `frontend/` to Turborepo. Admin moved to `apps/admin/`. Created `packages/domain/` and `packages/api-client/`.
+> Status: Foundation completed 2026-05-28
+
+The backend is a separate FastAPI service living in `backend/`. It follows **Feature-Based Clean Architecture** — each domain module has its own `router.py`, `service.py`, `repository.py`, `models.py`, and `schemas.py`.
+
+### Backend Directory Structure
+
+```
+backend/
+├── app/
+│   ├── __init__.py
+│   ├── main.py                    # create_app() + lifespan (DB init/close)
+│   │
+│   ├── core/
+│   │   ├── __init__.py
+│   │   └── config.py              # Settings (pydantic-settings, DATABASE_URL)
+│   │
+│   ├── db/
+│   │   ├── __init__.py
+│   │   ├── base.py                # DeclarativeBase
+│   │   └── database.py            # DatabaseSessionManager + get_db_session DI
+│   │
+│   └── domain/
+│       └── system/                # Healthcheck module

@@ -166,16 +166,17 @@ Create 8 agents in `.opencode/agents/` modeled after cmbot:
 
 ---
 
+## Phase 5: Backend Foundation (FastAPI) ✅
 
-## Phase 5: Backend Foundation (FastAPI)
-
-- [ ] Project initialization and linters (ruff, mypy)
-- [ ] DB Session Management (DatabaseSessionManager)
-- [ ] Configuration and Entrypoint (main.py, pydantic-settings)
-- [ ] System Domain / Healthcheck (base router)
+- [x] Project initialization and linters (ruff, mypy)
+- [x] DB Session Management (DatabaseSessionManager)
+- [x] Configuration and Entrypoint (main.py, pydantic-settings)
+- [x] System Domain / Healthcheck (base router)
 - [ ] ... (plan will be expanded after the foundation)
 
 **Result:** Working backend foundation with Clean Architecture and tests.
+
+**Completed:** 2026-05-28 — 27/27 tests passing, ruff + mypy strict clean
 
 ---
 

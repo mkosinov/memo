@@ -57,3 +57,8 @@ docker-compose.override.yml
 
 # Git Worktrees (Superpowers workflow)
 .worktrees/
+
+# Local workspace files
+.opencode/
+local-images/
+token-usage-output.txt

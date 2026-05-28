@@ -7,6 +7,7 @@ from fastapi import FastAPI
 
 from app.core.config import Settings
 from app.db.database import DatabaseSessionManager, set_manager
+from app.domain.system.router import router as system_router
 
 
 @asynccontextmanager
@@ -31,8 +32,6 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    @app.get("/health")
-    async def health_check() -> dict[str, str]:
-        return {"status": "ok"}
+    app.include_router(system_router, prefix="/api/health")
 
     return app

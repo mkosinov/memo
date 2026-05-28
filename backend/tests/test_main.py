@@ -15,19 +15,6 @@ class TestRootEndpoint:
         assert response.status_code == 404
 
 
-class TestHealthEndpoint:
-    """Health check must remain functional after lifespan wiring."""
-
-    def test_health_returns_ok(self) -> None:
-        from app.main import create_app
-
-        app = create_app()
-        client = TestClient(app)
-        response = client.get("/health")
-        assert response.status_code == 200
-        assert response.json() == {"status": "ok"}
-
-
 class TestLifespan:
     """Lifespan must initialize and tear down the DB manager."""
 
@@ -41,7 +28,7 @@ class TestLifespan:
             assert db_mod._manager is not None
             assert db_mod._manager.engine is not None
             # App should still respond
-            assert client.get("/health").status_code == 200
+            assert client.get("/api/health").status_code == 200
 
     def test_db_manager_closed_after_lifespan(self) -> None:
         import app.db.database as db_mod

@@ -61,9 +61,9 @@
          │ 1. Invoke skill `using-git-worktrees`
          │ 2. git worktree add .worktrees/feat-<name> -b feat-<name>
          │ 3. cd .worktrees/feat-<name>
-│ 4. cd frontend && npm install / cd backend && uv sync / pip install
-│ 5. Run tests → verify clean baseline
-│    npm run test:all  # vitest + playwright (browsers pre-installed in image)
+         │ 4. cd frontend && npm install / cd backend && uv sync / pip install
+         │ 5. Run tests → verify clean baseline
+         │    npm run test:all  # vitest + playwright (browsers pre-installed in image)
          │
          ▼  [G3: TESTS PASS]  (if fail → ask user)
          │
@@ -81,23 +81,23 @@
          │
          ▼
     ┌─────────────────────┐
-│ 4b. Dispatch         │
-│ Implementer          │
-│ (frontend-coder /    │
-│  backend-coder)      │
-│ via task() tool      │
-│                      │
-│ Prompt includes:     │
-│ • Task text (verbatim│
-│ • Classification     │
-│ • Scene-setting      │
-│ • Worktree path      │
-│ • TDD skill required │
-│ • Visual test rule:  │
-│   If diff touches UI │
-│   (.tsx, .css,       │
-│   tailwind.config)   │
-│   → run `test:all`   │
+    │ 4b. Dispatch        │
+    │ Implementer         │
+    │ (frontend-coder /   │
+    │  backend-coder)     │
+    │ via task() tool     │
+    │                     │
+    │ Prompt includes:    │
+    │ • Task text (literal│
+    │ • Classification    │
+    │ • Scene-setting     │
+    │ • Worktree path     │
+    │ • TDD skill required│
+    │ • Visual test rule: │
+    │   If diff touches UI│
+    │   (.tsx, .css,      │
+    │   tailwind.config)  │
+    │   → run `test:all`  │
     └──────────┬──────────┘
                │
                ▼
@@ -134,10 +134,10 @@
                │ │     If ❌ → implementer fixes → re-review │
                │ │     If ✅ → Stage 2                       │
                │ │                                          │
-│ │   Stage 2: @code-quality-reviewer         │
-                │ │     Reads diff + runs test suite          │
-                │ │     UI diff → `npm run test:all`          │
-                │ │     Else → `npm run test` (vitest only)   │
+               │ │   Stage 2: @code-quality-reviewer         │
+               │ │     Reads diff + runs test suite          │
+               │ │     UI diff → `npm run test:all`          │
+               │ │     Else → `npm run test` (vitest only)   │
                │ │     If ❌ → implementer fixes → re-review │
                │ │     If ✅ → task complete                 │
                │ └─────────────────────────────────────────┘
@@ -170,10 +170,10 @@
 ║  STEP 6: FINISHING  (Human Gate G7)                          ║
 ╚══════════════════════════════════════════════════════════════╝
          │
-│ 1. Invoke skill `finishing-a-development-branch`
-│ 2. Run final tests
-│    npm run test:all  # vitest + playwright
-│ 3. Present 4 options:
+         │ 1. Invoke skill `finishing-a-development-branch`
+         │ 2. Run final tests
+         │    npm run test:all  # vitest + playwright
+         │ 3. Present 4 options:
          │
          ▼  [G7: USER CHOOSES]
          │
@@ -310,10 +310,10 @@ Project Root (/root/workspace/memo/)
 ```
 
 **Lifecycle:**
-1. `git worktree add .worktrees/feat-<name> -b feat-<name>` — создание
-2. `cd frontend && npm install` — установка зависимостей (однократно)
-3. Implementation + commits в worktree
-4. `git worktree remove .worktrees/feat-<name>` — удаление после merge
+1. `git worktree add .worktrees/feat-<name> -b feat-<name>` — creation
+2. `cd frontend && npm install` — dependency installation (one-time)
+3. Implementation + commits in worktree
+4. `git worktree remove .worktrees/feat-<name>` — removal after merge
 
 ---
 

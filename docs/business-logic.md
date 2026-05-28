@@ -1,62 +1,62 @@
 # Business Logic — Colour Mountains Studio Manager
 
-> Документ технических решений, основанных на бизнес-логике.
-> Создан: 2026-05-17
+> Technical decisions document based on business logic.
+> Created: 2026-05-17
 
-## 1. Статусы визитов и записей (Booking)
+## 1. Visit and Booking Statuses
 
-### Статусы посетителя (VisitorStatus)
+### Visitor Status
 
-| enum | Отображение | Значение |
-|------|-------------|----------|
-| `WAITING` | Ожидание | По умолчанию. Визит подтверждён, но ещё не прошёл |
-| `VISITED` | Посетили | Клиент пришёл на занятие |
-| `MISSED` | Неявка | Клиент не пришёл (NO_SHOW) |
-| `CANCELLED` | Отменена | Визит отменён до занятия |
+| enum | Display | Meaning |
+|------|---------|---------|
+| `WAITING` | Waiting | Default. Visit confirmed but not yet occurred |
+| `VISITED` | Visited | Client attended the class |
+| `MISSED` | Missed | Client did not show up (NO_SHOW) |
+| `CANCELLED` | Cancelled | Visit cancelled before the class |
 
-**Где хранится:** `Visit.status: VisitorStatus`
+**Stored in:** `Visit.status: VisitorStatus`
 
-### Статус записи (RecordStatus)
+### Record Status
 
-Вычисляется из статусов визитов автоматически. Не хранится отдельно в БД, 
-но может быть материализован (pre-computed) для производительности:
+Derived from visit statuses automatically. Not stored separately in the DB,
+but may be materialized (pre-computed) for performance:
 
-| Правило | RecordStatus |
-|---------|-------------|
-| Все визиты `CANCELLED` | `CANCELLED` |
-| Хотя бы один визит `VISITED` | `VISITED` |
-| Ни одного `VISITED`, есть `WAITING` или `MISSED` | `MISSED` |
-| Все визиты `WAITING` | `WAITING` |
+| Rule | RecordStatus |
+|------|-------------|
+| All visits `CANCELLED` | `CANCELLED` |
+| At least one visit `VISITED` | `VISITED` |
+| No `VISITED`, at least one `WAITING` or `MISSED` | `MISSED` |
+| All visits `WAITING` | `WAITING` |
 
-**Приоритет:** `CANCELLED` > `VISITED` > `MISSED` > `WAITING`
+**Priority:** `CANCELLED` > `VISITED` > `MISSED` > `WAITING`
 
-Логика вычисления:
+Computation logic:
 ```
-if все Visit.status === CANCELLED → RecordStatus = CANCELLED
-if хотя бы один Visit.status === VISITED → RecordStatus = VISITED
-if все Visit.status === MISSED или (MISSED + CANCELLED) → RecordStatus = MISSED
+if all Visit.status === CANCELLED → RecordStatus = CANCELLED
+if at least one Visit.status === VISITED → RecordStatus = VISITED
+if all Visit.status === MISSED or (MISSED + CANCELLED) → RecordStatus = MISSED
 else → RecordStatus = WAITING
 ```
 
-## 2. Оплата (Payment)
+## 2. Payment
 
-| Статус | Условие |
-|--------|---------|
-| Оплачено | Сумма всех `Payment.amount` (где `paid=true`) ≥ общей стоимости визитов |
-| Частично | 0 < оплачено < общая стоимость |
-| Не оплачено | Нет платежей или сумма `paid` = 0 |
+| Status | Condition |
+|--------|-----------|
+| Paid | Sum of all `Payment.amount` (where `paid=true`) ≥ total cost of visits |
+| Partial | 0 < paid < total cost |
+| Unpaid | No payments or sum of `paid` = 0 |
 
-## 3. Бронирование (Booking Flow — философия)
+## 3. Booking (Booking Flow — Philosophy)
 
-- Запись (Record) объединяет несколько посетителей (Visit) на одно занятие (Activity)
-- У каждой записи есть клиент (Client) — ответственное лицо
-- Посетители (Visitor) — люди, которые физически придут на занятие
-- Основной посетитель (isPrimary) — тот, кто платит (обычно сам клиент или родитель)
+- A Record groups multiple visitors (Visit) into one class (Activity)
+- Each record has a client (Client) — the responsible person
+- Visitors are people who will physically attend the class
+- Primary visitor (isPrimary) — the one who pays (usually the client or a parent)
 
-## 4. Ценообразование
+## 4. Pricing
 
-_Будет дополнено в P3 (Client Booking Flow)_
+_To be completed in P3 (Client Booking Flow)_
 
-- Базовая цена зависит от возраста (взрослый/детский)
-- Индивидуальное занятие — фиксированная цена (defaultIndividualPrice)
-- Пакетные скидки — не реализовано
+- Base price depends on age (adult/child)
+- Individual class — fixed price (defaultIndividualPrice)
+- Package discounts — not implemented

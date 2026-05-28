@@ -8,21 +8,21 @@ source: sketches/colour-mountains-v4.html, docs/memo-full-spec.md
 
 # Schedule UI — Admin Schedule Builder Patterns
 
-Паттерны для P1 (Admin Schedule `/`). Самая сложная страница проекта.
+Patterns for P1 (Admin Schedule `/`). The most complex page in the project.
 
 ## 1. Schedule Grid (WeekView + DayColumn)
 
-### Структура
+### Structure
 
 ```
 ┌──────┬──────────┬──────────┬──────────┬─────┬──────────┐
-│ Время│    ПН    │    ВТ    │    СР    │ ... │    ВС    │
+│ Time │   MON    │   TUE    │   WED    │ ... │   SUN    │
 │      │   12     │   13     │   14     │     │   18     │
 ├──────┼──────────┼──────────┼──────────┼─────┼──────────┤
 │ 9:00 │          │          │          │     │          │
-│      │ [карт]   │          │ [карт]   │     │          │
-│ 9:30 │  (пункт) │          │          │     │          │
-│10:00 │          │ [карт]   │          │     │          │
+│      │ [card]   │          │ [card]   │     │          │
+│ 9:30 │  (half)  │          │          │     │          │
+│10:00 │          │ [card]   │          │     │          │
 │  ... │          │          │          │     │          │
 │21:00 │          │          │          │     │          │
 └──────┴──────────┴──────────┴──────────┴─────┴──────────┘
@@ -127,7 +127,7 @@ function cardStyle(event: Activity, artist: Artist) {
     {/* Age: icon + text (5+, 6+, 8+, 10+, 12+, 6-12) */}
     <div className="ev-age">👤 {minAge}</div>
 
-    {/* Master: full name */}
+    {/* Artist: full name */}
     <div className="ev-master">{artistName}</div>
 
     {/* Location */}
@@ -148,7 +148,7 @@ function cardStyle(event: Activity, artist: Artist) {
 ### Collapsing (small cards)
 
 ```typescript
-const isSmall = height < 90;  // hide age + master + location
+const isSmall = height < 90;  // hide age + artist + location
 const isTiny = height < 56;   // hide everything except time pill
 ```
 
@@ -202,7 +202,7 @@ function onDrop(event, columnIndex: number, dayIndex: number) {
   // Copy (altKey): clone node, set new id, append to column
 
   showToast(
-    (isCopy ? 'Скопировано: ' : 'Перемещено: ') + title + ' → ' + dayName + ' ' + time,
+    (isCopy ? 'Copied: ' : 'Moved: ') + title + ' → ' + dayName + ' ' + time,
     true  // with Undo button
   );
 }
@@ -227,7 +227,7 @@ function onDrop(event, columnIndex: number, dayIndex: number) {
 
 ## 4. Stamp (Format Painter)
 
-### Состояние
+### State
 
 ```typescript
 interface StampState {
@@ -238,12 +238,12 @@ interface StampState {
 }
 ```
 
-### Поведение
+### Behavior
 
-- Штамп настраивается в правой панели
-- Когда готов — зелёная мигающая точка + краткое описание
-- Клик по пустому слоту в расписании → создаёт событие с параметрами штампа
-- Если штамп не настроен — клик по слоту ничего не делает (или заглушка)
+- Stamp is configured in the right panel
+- When ready — green blinking dot + brief description
+- Click on an empty slot in the schedule → creates an event with stamp parameters
+- If stamp is not configured — clicking a slot does nothing (or placeholder)
 
 ## 5. Delete Mode
 
@@ -253,7 +253,7 @@ let deleteMode: boolean = false;
 function toggleDelete() {
   deleteMode = !deleteMode;
   document.body.classList.toggle('delete-mode', deleteMode);
-  if (deleteMode) showToast('Режим удаления — кликните на событие');
+  if (deleteMode) showToast('Delete mode — click on an event');
 }
 
 // Click on card in delete mode
@@ -264,7 +264,7 @@ function onCardClick(event, id: string) {
   card.style.opacity = '0';
   card.style.transform = 'scale(.95)';
   setTimeout(() => card.remove(), 150);
-  showToast('Удалено: ' + title, true);
+  showToast('Deleted: ' + title, true);
 }
 ```
 
@@ -279,15 +279,15 @@ body.delete-mode .event-card:hover {
 
 ## 6. Conflict Warning
 
-- Проверяется при каждой отрисовке: есть ли у одного мастера два события в одно время в разных локациях
-- Отображается как красная полоса/бар в колонке конфликта
-- Данных для расчёта: `events.filter(e => e.artistId === X)` для каждого мастера
+- Checked on every render: does the same artist have two events at the same time in different locations
+- Displayed as a red strip/bar in the conflict column
+- Data for calculation: `events.filter(e => e.artistId === X)` for each artist
 
 ## 7. Copy Last Week
 
-- Копирует Public события (isPublic: true) с предыдущей недели на текущую
-- Private события и Records НЕ копируются
-- После копирования — toast с "Отменить"
+- Copies Public events (isPublic: true) from the previous week to the current one
+- Private events and Records are NOT copied
+- After copying — toast with "Undo"
 
 ## 8. Toast System
 
@@ -299,7 +299,7 @@ function showToast(msg: string, undo: boolean = false) {
   toast.className = 'toast';
   toast.innerHTML = `
     <span>${msg}</span>
-    ${undo ? '<button class="toast-undo">Отменить</button>' : ''}
+    ${undo ? '<button class="toast-undo">Undo</button>' : ''}
     <button class="toast-x">×</button>
   `;
   toastWrap.appendChild(toast);

@@ -8,9 +8,9 @@ source: sketches/colour-mountains-v4.html + feat-admin-schedule worktree (actual
 
 # v4 Design System — ColourMountains Memo
 
-Визуальная дизайн-система для Memo.
-**Source of truth:** реализованный код в `.worktrees/feat-admin-schedule/frontend/`.
-Все значения выверены из реального кода, расхождения со скетчем помечены ⚠️.
+Visual design system for Memo.
+**Source of truth:** implemented code in `.worktrees/feat-admin-schedule/frontend/`.
+All values verified from real code, deviations from sketch are marked ⚠️.
 
 ---
 
@@ -74,7 +74,7 @@ source: sketches/colour-mountains-v4.html + feat-admin-schedule worktree (actual
 
 ### Tailwind Color Tokens
 
-Все CSS-переменные продублированы в `tailwind.config.ts`:
+All CSS variables are duplicated in `tailwind.config.ts`:
 
 ```ts
 colors: {
@@ -94,12 +94,12 @@ colors: {
 
 ```typescript
 const ARTIST_COLORS: Record<string, string> = {
-  'Ольга Середа':      '#5B8C7A',  // зелёный мох
-  'Юлия Большакова':   '#6B7E9C',  // стальной синий
-  'Анастасия П.':      '#A07060',  // терракота
-  'Дарья Тюльпина':    '#7A6E9C',  // лавандовый
-  'Александра В.':     '#8A7840',  // оливковый
-  'Ирина Горох':       '#9A5870',  // ягодный
+  'Olga Sereda':        '#5B8C7A',  // moss green
+  'Yulia Bolshakova':   '#6B7E9C',  // steel blue
+  'Anastasia P.':       '#A07060',  // terracotta
+  'Daria Tyulpina':     '#7A6E9C',  // lavender
+  'Aleksandra V.':      '#8A7840',  // olive
+  'Irina Gorokh':       '#9A5870',  // berry
 };
 ```
 
@@ -111,22 +111,22 @@ const ARTIST_COLORS: Record<string, string> = {
 | CANCELLED | `status.cancelled` | #ef4444 (red) |
 | NO_SHOW | `status.noShow` | #6b7280 (gray) |
 
-Паттерн badge: `bg-{color}/15 text-{color}` pill с `rounded-full px-2 py-0.5 text-xs font-medium`.
+Badge pattern: `bg-{color}/15 text-{color}` pill with `rounded-full px-2 py-0.5 text-xs font-medium`.
 
 ---
 
 ## Typography
 
-Font family: `'Inter', sans-serif` (Google Fonts, через `var(--font-inter)`)
+Font family: `'Inter', sans-serif` (Google Fonts, via `var(--font-inter)`)
 
 | Element | Size | Weight | Color |
 |---------|------|--------|-------|
-| Time pill | 12px | 600 | white на `rgba(0,0,0,0.25)` |
-| Service name | 14px (`text-sm`) | 600 | black (на карточке) |
-| Age | 13px | 400 | black (на карточке) |
-| Master name | 13px | 400 | black (на карточке) |
-| Location | 13px | 400 | black (на карточке) |
-| Guests count | 13px | 500 | black (на карточке) |
+| Time pill | 12px | 600 | white on `rgba(0,0,0,0.25)` |
+| Service name | 14px (`text-sm`) | 600 | black (on card) |
+| Age | 13px | 400 | black (on card) |
+| Artist name | 13px | 400 | black (on card) |
+| Location | 13px | 400 | black (on card) |
+| Guests count | 13px | 500 | black (on card) |
 | Day headings | 10px | 500 uppercase | `var(--ink-light)` |
 | Day number | 22px | 300 (light) | `var(--ink-mid)` |
 | Period label (Toolbar) | 14px (`text-sm`) | 500 | `var(--ink)` |
@@ -138,7 +138,7 @@ Font family: `'Inter', sans-serif` (Google Fonts, через `var(--font-inter)`
 | Version | 10px | 400 | `rgba(255,255,255,.30)` |
 | Section label (legend) | 10px uppercase tracking-wider | 600 | `rgba(255,255,255,.40)` |
 
-> ⚠️ **Отличие от скетча:** текст внутри ActivityCard — **чёрный** (`text-black`), не `var(--ink)` / `var(--ink-mid)`. Это намеренно: карточки заливаются цветом мастера (solid), чёрный обеспечивает контраст на любом цвете.
+> ⚠️ **Difference from sketch:** text inside ActivityCard is **black** (`text-black`), not `var(--ink)` / `var(--ink-mid)`. This is intentional: cards are filled with the artist color (solid), black ensures contrast on any color.
 
 ---
 
@@ -179,7 +179,7 @@ Tailwind: `shadow-card`, `shadow-card-hover`, `shadow-collapse`, `shadow-panel`,
 | Hour height | 60px | `--cell-h` / `h-cell` |
 | Half-hour slot | 30px | (60px / 2) |
 | Time column | 64px | `--time-w` / `w-time-col` |
-| Hours range | 9:00–21:00 | 12h × 2 = 24 слота |
+| Hours range | 9:00–21:00 | 12h × 2 = 24 slots |
 | Card padding | `px-2 py-1` / `px-2 pb-1` | inline |
 | Card horizontal gap | `left-1 right-1` (4px each side) | Tailwind |
 | Sidebar padding | `px-3` / `px-4` | Tailwind |
@@ -236,7 +236,7 @@ Tailwind: `shadow-card`, `shadow-card-hover`, `shadow-collapse`, `shadow-panel`,
 .animate-slide-up { animation: slide-up 200ms ease-out; }
 ```
 
-> ⚠️ **Отличие от скетча:** `fadeIn .18s` заменён на `slide-up 200ms ease-out`.
+> ⚠️ **Difference from sketch:** `fadeIn .18s` replaced with `slide-up 200ms ease-out`.
 
 ---
 
@@ -249,7 +249,7 @@ Tailwind: `shadow-card`, `shadow-card-hover`, `shadow-collapse`, `shadow-panel`,
   style={{ width: collapsed ? '56px' : '230px', backgroundColor: 'var(--sidebar-bg)' }}
   className="fixed left-0 top-0 h-full z-30 flex flex-col transition-all duration-200"
 >
-  {/* Logo Section — emoji + text (не PNG) */}
+  {/* Logo Section — emoji + text (not PNG) */}
   <div className="flex items-center px-4 py-4 border-b border-white/10">
     <span>🏔</span>
     {!collapsed && <span className="text-sm font-bold text-white">Colour Mountains</span>}
@@ -271,15 +271,15 @@ Tailwind: `shadow-card`, `shadow-card-hover`, `shadow-collapse`, `shadow-panel`,
 ```
 
 **Navigation items (5):**
-1. Расписание (`/`) — CalendarIcon
-2. Бронирования (`/bookings`) — ClipboardIcon
-3. Клиенты (`/clients`) — UsersIcon
-4. Мастера — PaletteIcon
-5. Чат (`/chat`) — ChatIcon
+1. Schedule (`/`) — CalendarIcon
+2. Bookings (`/bookings`) — ClipboardIcon
+3. Clients (`/clients`) — UsersIcon
+4. Artists — PaletteIcon
+5. Chat (`/chat`) — ChatIcon
 
 Active state: `bg-brand text-white font-medium`. Inactive: `text-white/60 hover:bg-white/5`.
 
-> ⚠️ **Отличие от скетча:** 5 пунктов (не 6), кнопка схлопывания в нижней секции (не абсолютная на краю).
+> ⚠️ **Difference from sketch:** 5 items (not 6), collapse button in bottom section (not absolute on edge).
 
 ---
 
@@ -290,17 +290,17 @@ Active state: `bg-brand text-white font-medium`. Inactive: `text-white/60 hover:
   className="sticky top-0 z-40 flex h-12 items-center justify-between border-b px-3"
   style={{ backgroundColor: 'var(--white)', borderColor: 'var(--line)' }}
 >
-  {/* Left: ◀ [date range] ▶ [Сегодня] */}
-  {/* Center: [День] [Неделя] pill toggle */}
-  {/* Right: [Все мастера ▾] [Все локации ▾] selects */}
+  {/* Left: ◀ [date range] ▶ [Today] */}
+  {/* Center: [Day] [Week] pill toggle */}
+  {/* Right: [All artists ▾] [All locations ▾] selects */}
 </div>
 ```
 
 Select style: `rounded-lg border px-2 py-1.5 text-xs`, border=`var(--line)`, bg=`var(--white)`, color=`var(--ink-mid)`.
 
-Button "Сегодня": `rounded-lg px-3 py-1.5 text-xs font-medium`, border=`var(--brand)`, color=`var(--brand)`.
+"Today" button: `rounded-lg px-3 py-1.5 text-xs font-medium`, border=`var(--brand)`, color=`var(--brand)`.
 
-View toggle: pill контейнер `bg-surface rounded-lg p-0.5`. Active: `bg-brand text-white shadow-sm`. Inactive: `text-ink-light`.
+View toggle: pill container `bg-surface rounded-lg p-0.5`. Active: `bg-brand text-white shadow-sm`. Inactive: `text-ink-light`.
 
 ---
 
@@ -311,15 +311,15 @@ View toggle: pill контейнер `bg-surface rounded-lg p-0.5`. Active: `bg-
   className="fixed right-0 top-0 z-20 h-full border-l bg-white transition-all duration-200"
   style={{ width: 'var(--right-w)', borderColor: 'var(--line)' }}
 >
-  {/* Header: "Инструменты" + ‹ arrow button */}
-  {/* AccordionSection "Штамп" → StampPanel */}
-  {/* AccordionSection "Неделя" → CopyLastWeek button */}
+  {/* Header: "Tools" + ‹ arrow button */}
+  {/* AccordionSection "Stamp" → StampPanel */}
+  {/* AccordionSection "Week" → CopyLastWeek button */}
 </aside>
 ```
 
-Toggle: `StampFab` — плавающая кнопка справа (FAB), открывает/закрывает RightPanel. При открытой панели: кнопка-стрелка `‹` в header.
+Toggle: `StampFab` — floating button on the right (FAB), opens/closes RightPanel. When panel is open: arrow button `‹` in header.
 
-AccordionSection паттерн:
+AccordionSection pattern:
 ```tsx
 <div className="border-b" style={{ borderColor: 'var(--line)' }}>
   <button className="flex w-full items-center justify-between px-4 py-3 text-sm font-medium hover:bg-surface">
@@ -342,7 +342,7 @@ AccordionSection паттерн:
   style={{
     top: `${(startTime - 9) * 120}px`,       // HOURS_START=9, CELL_HEIGHT=60, ×2 for 30min
     height: `${Math.max(duration * 120 - 10, 52)}px`,
-    backgroundColor: artist.color,            // solid fill, не прозрачный!
+    backgroundColor: artist.color,            // solid fill, not transparent!
   }}
 >
   {/* 1. HEADER: time pill (rounded-br-lg, rgba(0,0,0,0.25)) + Private diamond icon */}
@@ -356,9 +356,9 @@ AccordionSection паттерн:
 ```
 
 **Collapsing rules:**
-- `height >= 90px` (`showExtra=true`): показать age, master, location
-- `height < 56px` (`showOnlyPill=true`): только time pill, скрыть всё остальное
-- `52px ≤ height < 90px`: только time pill + title
+- `height >= 90px` (`showExtra=true`): show age, master, location
+- `height < 56px` (`showOnlyPill=true`): only time pill, hide everything else
+- `52px ≤ height < 90px`: only time pill + title
 
 **Footer (progress bar pattern):**
 ```tsx
@@ -379,13 +379,13 @@ AccordionSection паттерн:
 </span>
 ```
 
-**Private indicator:** diamond SVG icon (`w-5 h-5`, white stroke), top-right. Нет `clip-path`.
+**Private indicator:** diamond SVG icon (`w-5 h-5`, white stroke), top-right. No `clip-path`.
 
-> ⚠️ **Отличия от скетча:**
-> - Заливка solid (`artist.color`), не прозрачная (`rgba(rgb, 0.12-0.40)`)
-> - Footer — progress bar, не `guests X/Y + button` с разделителем
-> - Time pill — `rounded-br-lg`, не oval pill
-> - Private — diamond icon, не star + clip-path
+> ⚠️ **Differences from sketch:**
+> - Fill is solid (`artist.color`), not transparent (`rgba(rgb, 0.12-0.40)`)
+> - Footer — progress bar, not `guests X/Y + button` with divider
+> - Time pill — `rounded-br-lg`, not oval pill
+> - Private — diamond icon, not star + clip-path
 
 **Drag states:**
 ```tsx
@@ -416,7 +416,7 @@ Card delete animation: `opacity-0 scale-95` over 150ms.
   style={{ background: '#1a1a1a', color: '#eee' }}
 >
   <span>{message}</span>
-  {onUndo && <button className="text-brand-light text-sm font-medium">Отменить</button>}
+  {onUndo && <button className="text-brand-light text-sm font-medium">Undo</button>}
   <button className="text-white/40 hover:text-white/70 text-lg leading-none">×</button>
 </div>
 ```
@@ -425,7 +425,7 @@ Animation: `slide-up 200ms ease-out` (translateY 8px → 0 + opacity 0 → 1).
 
 ---
 
-### StampFab (плавающая кнопка)
+### StampFab (floating button)
 
 ```tsx
 <button
@@ -437,13 +437,13 @@ Animation: `slide-up 200ms ease-out` (translateY 8px → 0 + opacity 0 → 1).
 </button>
 ```
 
-Открывает/закрывает RightPanel. Скрывается когда RightPanel открыт.
+Opens/closes RightPanel. Hidden when RightPanel is open.
 
 ---
 
 ### Select / Filter Input
 
-Общий паттерн для `<select>` фильтров:
+Common pattern for `<select>` filters:
 
 ```tsx
 <select

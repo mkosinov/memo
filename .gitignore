@@ -66,3 +66,6 @@ docker-compose.override.yml
 .opencode/
 local-images/
 token-usage-output.txt
+
+# Turborepo cache
+.turbo/

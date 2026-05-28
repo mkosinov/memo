@@ -84,30 +84,30 @@ You update the GitHub Project board live as work progresses.
 **Project:** "Memo Project" — https://github.com/users/mkosinov/projects/3
 **Script:** `/root/helpers/gh-project-move <issue-number> <status>`
 
-### Issue → Этап Mapping
+### Issue → Stage Mapping
 
-| Issue # | Этап | Когда двигать |
+| Issue # | Stage | When to move |
 |---------|------|-------------|
-| 1 | Этап 0: Подготовка (агенты) | ✅ Done |
-| 2 | Этап 1: Инфраструктура Next.js | Когда Tasks 1-2 готовы → Done |
-| 3 | Этап 2: Дизайн-система и Layout | Когда Tasks 3-6 готовы → Done |
-| 4 | **Этап 3 (P1): Admin Schedule** | **Текущий.** Tasks 7-15 → In Progress |
-| 5 | Этап 4 (P2): Booking Management | Будущие спринты |
-| 6 | Этап 5 (P3): Client Booking Flow | Будущие спринты |
-| 7 | Этап 6 (P4): Artist Schedule | Будущие спринты |
-| 8 | Этап 7 (P5): AI Concierge Chat | Будущие спринты |
-| 9 | Этап 8: Тесты и полировка | Будущие спринты |
-| 11 | infra: кешировать diff в /tmp/task-diff.patch | **Предложение.** Статус: Specification |
+| 1 | Stage 0: Preparation (Agents) | ✅ Done |
+| 2 | Stage 1: Next.js Infrastructure | When Tasks 1-2 ready → Done |
+| 3 | Stage 2: Design System & Layout | When Tasks 3-6 ready → Done |
+| 4 | **Stage 3 (P1): Admin Schedule** | **Current.** Tasks 7-15 → In Progress |
+| 5 | Stage 4 (P2): Booking Management | Future sprints |
+| 6 | Stage 5 (P3): Client Booking Flow | Future sprints |
+| 7 | Stage 6 (P4): Artist Schedule | Future sprints |
+| 8 | Stage 7 (P5): AI Concierge Chat | Future sprints |
+| 9 | Stage 8: Tests & Polish | Future sprints |
+| 11 | infra: Cache diff in /tmp/task-diff.patch | **Proposal.** Status: Specification |
 
-### Когда двигать
+### When to move
 
-| Момент | Действие |
-|--------|----------|
-| Перед диспатчем первого таска для этапа | `gh-project-move <issue> in-progress` |
-| После завершения последнего таска этапа | `gh-project-move <issue> done` |
-| Таск на ревью (перед отдачей ревьюверу) | `gh-project-move <issue> in-review` |
+| Moment | Action |
+|--------|--------|
+| Before dispatching first task of the stage | `gh-project-move <issue> in-progress` |
+| After completing the last task of the stage | `gh-project-move <issue> done` |
+| Task in review (before handing to reviewer) | `gh-project-move <issue> in-review` |
 
-**Важно:** не дёргай скрипт на каждый микро-таск — двигай карточку когда меняется статус всего этапа.
+**Important:** don't run the script for every micro-task — move the card when the whole stage status changes.
 
 ## Project Context
 
@@ -192,7 +192,7 @@ Actions:
 
    **4a. Record task start in scratchpad + GitHub board**
     - Task N: [name], classification: [tier]
-    - If this is the first task of a new этап → `gh-project-move <issue> in-progress`
+    - If this is the first task of a new stage → `gh-project-move <issue> in-progress`
 
    **4b. Dispatch Implementer Subagent**
    - Determine agent type from plan (frontend task → `frontend-coder`, backend task → `backend-coder`)
@@ -239,7 +239,7 @@ Actions:
     **Trivial:** No reviewers dispatched.
     - @architect does `git diff` spot-check (≤5 lines, style/text only).
     - If ok → mark task complete in TodoWrite. Update scratchpad.
-    - If this was the last task of the этап → `gh-project-move <issue> done`
+    - If this was the last task of the stage → `gh-project-move <issue> done`
     - If suspicious → escalate to small review pipeline.
 
    **Small:** Spec-review only.
@@ -256,7 +256,7 @@ Actions:
     - Only if spec ✅ → Stage 2: dispatch code-quality-reviewer (max 3 iterations).
       - Include in reviewer prompt: "UI changes detected: [yes/no]. If yes → run `cd frontend && npm run test:all`. If no → run `cd frontend && npm run test`."
     - Only if quality ✅ → mark task complete. Update scratchpad.
-    - If this was the last task of the этап → `gh-project-move <issue> done`
+    - If this was the last task of the stage → `gh-project-move <issue> done`
 
    **4e. Review Loop Limit (circuit breaker)**
    - Max 3 iterations per reviewer (implementer → reviewer → fix → re-review).

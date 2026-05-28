@@ -248,14 +248,14 @@ interface BookingFiltersProps {
 A table showing all records. Clicking a row shows a right-side detail panel.
 Uses v4 design system: page cards with `rounded-xl border`, `var(--line)`, `var(--white)` background.
 
-**Table columns:** Клиент (link), Услуга, Дата/Время, Локация, Статус (badge), Сумма, Оплата
+**Table columns:** Client (link), Service, Date/Time, Location, Status (badge), Total, Payment
 
 **Detail panel** (slides in right side, ~380px width):
-- **Клиент** card: name, phone, link to `/clients/[id]`
-- **Занятие** card: service name, date+time, location, artist, status badge
-- **Посетители и цены** card: list of visitors with price, total
-- **Оплата** card: list of payments with method, amount, paid/unpaid indicator
-- **Комментарий** card (if present)
+- **Client** card: name, phone, link to `/clients/[id]`
+- **Activity** card: service name, date+time, location, artist, status badge
+- **Visitors and Prices** card: list of visitors with price, total
+- **Payment** card: list of payments with method, amount, paid/unpaid indicator
+- **Comment** card (if present)
 
 **Status badges** (`docs/design-system.md`):
 ```
@@ -265,9 +265,9 @@ NO_SHOW:   bg-gray-200/50 text-gray-500
 ```
 
 **Payment status:**
-- paid >= total → "✓ Оплачено" (emerald)
-- paid > 0 → "Частично (X₽)" (amber)
-- paid === 0 → "Не оплачено" (red)
+- paid >= total → "✓ Paid" (emerald)
+- paid > 0 → "Partial (X₽)" (amber)
+- paid === 0 → "Unpaid" (red)
 
 **Format helpers** (can be added to `utils.ts` or inline):
 ```typescript
@@ -323,7 +323,7 @@ export default function BookingsPage() {
 **Steps:**
 1. Create `app/bookings/page.tsx`
 2. Compose BookingFilters + BookingTable with filter state
-3. Add empty state: "Записи не найдены"
+3. Add empty state: "No bookings found"
 4. Run `npm run test`
 
 ---
@@ -337,11 +337,11 @@ export default function BookingsPage() {
 
 Three sections in cards:
 
-**Header section:** avatar emoji + client name + phone + stats row (Визитов / Посетителей / Потрачено)
+**Header section:** avatar emoji + client name + phone + stats row (Visits / Visitors / Total Spent)
 
-**Связанные посетители section:** grid of visitor cards (name + adult/child age badge)
+**Linked Visitors section:** grid of visitor cards (name + adult/child age badge)
 
-**История записей section:** list of records (service name + status badge + IND badge + date/time/location + total price + payment status)
+**Booking History section:** list of records (service name + status badge + IND badge + date/time/location + total price + payment status)
 
 Not found state: link back to `/bookings`.
 

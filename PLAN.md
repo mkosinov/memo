@@ -1,266 +1,268 @@
-# Memo Frontend v2 — План работ
+# Memo Frontend v2 — Work Plan
 
-> Дата: 2026-05-13
+> Date: 2026-05-13
 > **P1 Admin Schedule: ✅ Completed 2026-05-15** — 15/15 tasks done
 > **P1 UI Polish: ✅ Completed 2026-05-16** — 4 polish tasks + 1 trivial, 165 tests passing
 
-## Дедлайны (обновлено 2026-05-13)
+## Deadlines (updated 2026-05-13)
 
-| Веха | Дата | Что сдаём |
-|------|------|-----------|
-| **MVP** | **20 мая 2026 (7 дней)** | P1 — Admin Schedule полностью рабочий |
-| **Full release** | **31 мая 2026 (18 дней)** | Все P1–P5 + тесты |
+| Milestone | Date | Deliverable |
+|-----------|------|-------------|
+| **MVP** | **May 20, 2026 (7 days)** | P1 — Admin Schedule fully working |
+| **Full release** | **May 31, 2026 (18 days)** | All P1–P5 + tests |
 
-## Вводная
+## Introduction
 
-**Что имеем:**
-1. `apps/admin/` — рабочий Next.js 14 проект (админ-панель) со всеми страницами, мок-данными, контекстами, @dnd-kit, тестами.
-2. `sketches/colour-mountains-v4.html` — новый дизайн (тёмный сайдбар, #004D56, карточки, штамп, тосты, мини-календарь). **Только P1 и в HTML.**
-3. `docs/memo-full-spec.md` — полный spec (543 строки) с UI/UX, дизайн-системой, типами, архитектурой.
+**What we have:**
+1. `apps/admin/` — working Next.js 14 project (admin panel) with all pages, mock data, contexts, @dnd-kit, tests.
+2. `sketches/colour-mountains-v4.html` — new design (dark sidebar, #004D56, cards, stamp, toasts, mini-calendar). **P1 only and in HTML.**
+3. `docs/memo-full-spec.md` — full spec (543 lines) with UI/UX, design system, types, architecture.
 
-**Стратегия:** Гибрид — берём логику из старого `memo-frontend` и переодеваем в дизайн v4.
+**Strategy:** Hybrid — take logic from old `memo-frontend` and dress it in v4 design.
 
-## Архитектура — Turborepo Monorepo
+## Architecture — Turborepo Monorepo
 
-Проект использует **Turborepo + npm workspaces**:
+The project uses **Turborepo + npm workspaces**:
 
 ```
 memo/
 ├── apps/
-│   ├── admin/          # Админ-панель (Next.js 14, App Router)
+│   ├── admin/          # Admin panel (Next.js 14, App Router)
 │   ├── web/            # colourmountains.ru (Next.js 14, future)
-│   └── master/         # Приложение для мастеров (future)
+│   └── master/         # Master app (future)
 ├── packages/
-│   ├── domain/         # Shared TypeScript типы + Zod схемы
-│   └── api-client/     # Shared HTTP клиент к FastAPI
-├── backend/            # FastAPI (отдельный сервис)
+│   ├── domain/         # Shared TypeScript types + Zod schemas
+│   └── api-client/     # Shared HTTP client for FastAPI
+├── backend/            # FastAPI (separate service)
 └── turbo.json
 ```
 
-**Принципы:**
-- **Shared:** Только типы (`@memo/domain`) и API клиент (`@memo/api-client`)
-- **Не shared:** UI компоненты — каждое приложение имеет свой дизайн
-- **Изоляция бандлов:** `@dnd-kit` и admin-specific deps не попадают в сайт
+**Principles:**
+- **Shared:** Only types (`@memo/domain`) and API client (`@memo/api-client`)
+- **Not shared:** UI components — each app has its own design
+- **Bundle isolation:** `@dnd-kit` and admin-specific deps don't leak into the website
 
-Детали: `docs/ARCHITECTURE.md`
+Details: `docs/ARCHITECTURE.md`
 
-## График работ (MVP — 13–20 мая)
+## Work Schedule (MVP — May 13–20)
 
-| День | Дата | Что делаем | Кто |
-|------|------|-----------|-----|
-| День 1 | 13 мая (ср) | Next.js инициализация + дизайн-система | @frontend-coder |
-| День 2 | 14 мая (чт) | Layout: Sidebar, Toolbar, RightPanel | @frontend-coder |
-| День 3 | 15 мая (пт) | P1 — Сетка расписания + карточки | @frontend-coder |
-| День 4 | 16 мая (сб) | P1 — Продолжение (карточки, фильтры) | @frontend-coder |
-| День 5 | 17 мая (вс) | P1 — DnD, штамп, модалка | @frontend-coder |
-| День 6 | 18 мая (пн) | P1 — финальные фичи + тесты | @frontend-coder + @tester |
-| День 7 | 19 мая (вт) | Полировка, фикс багов | @debugger + @tester |
-| Сдача | 20 мая (ср) | **MVP готов** | — |
-
----
-
-## Этап 0: Подготовка — агенты проекта
-
-Создать 8 агентов в `.opencode/agents/` по образу cmbot:
-
-| № | Агент | Роль | Mode | Модель |
-|---|-------|------|------|--------|
-| 1 | @architect | Team Lead + Архитектор — планирует, проектирует, делегирует | primary | kimi-k2.6 |
-| 2 | @frontend-coder | Разработка фронтенда (Next.js, React, Tailwind, TS) | subagent | qwen3.6-plus |
-| 3 | @backend-coder | Разработка бэкенда (FastAPI, SQLite, Python) | subagent | qwen3.6-plus |
-| 4 | @tester | Тестирование (Vitest, pytest, e2e) | subagent | qwen3.5-plus |
-| 5 | @debugger | Поиск и анализ багов | subagent | qwen3.6-plus |
-| 6 | @docser | Документация — ведёт PLAN.md, README, статусы | subagent | deepseek-v4-flash |
-| 7 | @deployer | Деплой и CI/CD | subagent | deepseek-v4-flash |
-| 8 | @manager | Связующий — принимает запросы, распределяет между агентами | primary | deepseek-v4-flash |
-
-- [x] Создать `.opencode/agents/architect.md`
-- [x] Создать `.opencode/agents/frontend-coder.md`
-- [x] Создать `.opencode/agents/backend-coder.md`
-- [x] Создать `.opencode/agents/tester.md`
-- [x] Создать `.opencode/agents/debugger.md`
-- [x] Создать `.opencode/agents/docser.md`
-- [x] Создать `.opencode/agents/deployer.md`
-- [x] Создать `.opencode/agents/manager.md`
-
-**Результат:** 8 агентов готовы к работе, распределение ролей зафиксировано
+| Day | Date | What we do | Who |
+|-----|------|------------|-----|
+| Day 1 | May 13 (Wed) | Next.js initialization + design system | @frontend-coder |
+| Day 2 | May 14 (Thu) | Layout: Sidebar, Toolbar, RightPanel | @frontend-coder |
+| Day 3 | May 15 (Fri) | P1 — Schedule grid + cards | @frontend-coder |
+| Day 4 | May 16 (Sat) | P1 — Continuation (cards, filters) | @frontend-coder |
+| Day 5 | May 17 (Sun) | P1 — DnD, stamp, modal | @frontend-coder |
+| Day 6 | May 18 (Mon) | P1 — final features + tests | @frontend-coder + @tester |
+| Day 7 | May 19 (Tue) | Polish, bug fixes | @debugger + @tester |
+| Delivery | May 20 (Wed) | **MVP ready** | — |
 
 ---
 
-## Этап 1: Инфраструктура Turborepo
+## Stage 0: Preparation — project agents
 
-- [x] Настроить Turborepo (turbo.json, pnpm-workspace.yaml, root package.json)
-- [x] Создать `packages/domain/` — shared TypeScript типы + Zod схемы
-- [x] Создать `packages/api-client/` — shared HTTP клиент
-- [x] Перенести существующий frontend в `apps/admin/`
-- [x] Обновить импорты: `@/lib/types` → `@memo/domain`
-- [x] Настроить npm workspaces
-- [x] Проверить: `npm install`, тесты проходят (160/160)
+Create 8 agents in `.opencode/agents/` modeled after cmbot:
 
-**Результат:** Turborepo монорепо с admin-приложением и shared packages
+| # | Agent | Role | Mode | Model |
+|---|-------|------|------|-------|
+| 1 | @architect | Team Lead + Architect — plans, designs, delegates | primary | kimi-k2.6 |
+| 2 | @frontend-coder | Frontend development (Next.js, React, Tailwind, TS) | subagent | qwen3.6-plus |
+| 3 | @backend-coder | Backend development (FastAPI, SQLite, Python) | subagent | qwen3.6-plus |
+| 4 | @tester | Testing (Vitest, pytest, e2e) | subagent | qwen3.5-plus |
+| 5 | @debugger | Bug search and analysis | subagent | qwen3.6-plus |
+| 6 | @docser | Documentation — maintains PLAN.md, README, statuses | subagent | deepseek-v4-flash |
+| 7 | @deployer | Deployment and CI/CD | subagent | deepseek-v4-flash |
+| 8 | @manager | Connector — takes requests, distributes between agents | primary | deepseek-v4-flash |
+
+- [x] Create `.opencode/agents/architect.md`
+- [x] Create `.opencode/agents/frontend-coder.md`
+- [x] Create `.opencode/agents/backend-coder.md`
+- [x] Create `.opencode/agents/tester.md`
+- [x] Create `.opencode/agents/debugger.md`
+- [x] Create `.opencode/agents/docser.md`
+- [x] Create `.opencode/agents/deployer.md`
+- [x] Create `.opencode/agents/manager.md`
+
+**Result:** 8 agents ready to work, role distribution established
 
 ---
 
-## Этап 2: Дизайн-система и Layout (база)
+## Stage 1: Turborepo Infrastructure
 
-- [ ] `app/globals.css` — CSS-переменные (светлая/тёмная тема из v4), скроллбар, базовые стили
-- [ ] `app/layout.tsx` — корневой лейаут
-- [ ] **Sidebar** — React-компонент (логотип, мини-календарь, навигация, легенда, тумблер ☀/☾, кнопка оформления, пользователь, версия, схлопывание)
-- [ ] **MiniCalendar** — сетка месяца, +1 неделя до/после, скролл недель, подсветка today/недели
-- [ ] **ThemeProvider** — React Context для переключения темы
-- [ ] **Toast** — система тостов (createPortal)
-- [ ] **Toolbar** — навигация по неделям, день/неделя, фильтры
-- [ ] **RightPanel** — выезжающая панель (штамп + неделя, сворачивание секций)
+- [x] Set up Turborepo (turbo.json, pnpm-workspace.yaml, root package.json)
+- [x] Create `packages/domain/` — shared TypeScript types + Zod schemas
+- [x] Create `packages/api-client/` — shared HTTP client
+- [x] Move existing frontend into `apps/admin/`
+- [x] Update imports: `@/lib/types` → `@memo/domain`
+- [x] Set up npm workspaces
+- [x] Verify: `npm install`, tests pass (160/160)
 
-**Результат:** Весь скелет приложения собран, навигация работает, тема переключается, тосты показываются
+**Result:** Turborepo monorepo with admin app and shared packages
 
 ---
 
-## Этап 3: P1 — Admin Schedule (`/`)
+## Stage 2: Design System and Layout (base)
 
-**2a. Сетка расписания:**
-- [x] **WeekView** — 7 колонок × 24 полу-часовых слота (9:00–21:00), sticky-шапка с днями
-- [x] **DayColumn** — одна колонка (drop zone для DnD)
-- [x] Линии часов (сплошные) и получасов (пунктир)
-- [x] Линия текущего времени
+- [ ] `app/globals.css` — CSS variables (light/dark theme from v4), scrollbar, base styles
+- [ ] `app/layout.tsx` — root layout
+- [ ] **Sidebar** — React component (logo, mini-calendar, navigation, legend, ☀/☾ toggle, appearance button, user, version, collapse)
+- [ ] **MiniCalendar** — month grid, +1 week before/after, week scroll, today/week highlight
+- [ ] **ThemeProvider** — React Context for theme switching
+- [ ] **Toast** — toast system (createPortal)
+- [ ] **Toolbar** — week navigation, day/week toggle, filters
+- [ ] **RightPanel** — sliding panel (stamp + week, collapsible sections)
 
-**2b. Карточки событий:**
-- [x] **ActivityCard** — time pill (овал, цвет мастера), название (2 строки), возраст (иконка + текст), мастер, локация, футер (гости + кнопка), срезанный уголок для Private
-- [x] Прозрачность заливки = заполненность
-- [x] Сжатие при малой высоте (<90px, <56px)
-- [x] Анимации hover/drag
+**Result:** Complete application skeleton built, navigation works, theme switches, toasts display
+
+---
+
+## Stage 3: P1 — Admin Schedule (`/`)
+
+**2a. Schedule grid:**
+- [x] **WeekView** — 7 columns × 24 half-hour slots (9:00–21:00), sticky header with days
+- [x] **DayColumn** — single column (drop zone for DnD)
+- [x] Hour lines (solid) and half-hour lines (dashed)
+- [x] Current time line
+
+**2b. Event cards:**
+- [x] **ActivityCard** — time pill (oval, artist color), name (2 lines), age (icon + text), artist, location, footer (guests + button), cut corner for Private
+- [x] Fill opacity = occupancy
+- [x] Compression at small heights (<90px, <56px)
+- [x] Hover/drag animations
 
 **2c. Drag & Drop:**
-- [x] Интегрировать @dnd-kit из `memo-frontend`
-- [x] Перетаскивание между днями
-- [x] Alt+drag = копирование
-- [x] Пунктирный прямоугольник-превью
-- [x] Toast + "Отменить" после DnD
+- [x] Integrate @dnd-kit from `memo-frontend`
+- [x] Drag between days
+- [x] Alt+drag = copy
+- [x] Dashed preview rectangle
+- [x] Toast + "Undo" after DnD
 
-**2d. Штамп (Format Painter):**
-- [x] Режим штампа: мастер + услуга + локации (мультивыбор)
-- [x] Клик по слоту → создание с параметрами штампа
-- [x] Режим удаления (toggle → клик → удаление)
+**2d. Stamp (Format Painter):**
+- [x] Stamp mode: artist + service + locations (multi-select)
+- [x] Click on slot → create with stamp parameters
+- [x] Delete mode (toggle → click → delete)
 
-**2e. Модалка создания/редактирования:**
-- [x] **ActivityModal** — из `memo-frontend`, адаптировать под v4
+**2e. Create/Edit modal:**
+- [x] **ActivityModal** — from `memo-frontend`, adapt to v4
 
-**2f. Дополнительно:**
-- [ ] **ConflictWarning** — двойная занятость мастера (отложено в P2)
-- [x] **Copy last week** — копирование Public активностей
-- [ ] Фильтры по мастеру и локации (отложено в P2)
+**2f. Additional:**
+- [ ] **ConflictWarning** — double booking for artist (postponed to P2)
+- [x] **Copy last week** — copy Public activities
+- [ ] Filters by artist and location (postponed to P2)
 
-**Результат:** P1 работает полностью, как в v4, на React
+**Result:** P1 fully working, as in v4, on React
 
 ---
 
-## Этап 4: P2 — Booking Management + Client Card ✅
+## Stage 4: P2 — Booking Management + Client Card ✅
 
-- [x] **BookingPage** (`/bookings`) — портировать из `memo-frontend`, обновить дизайн
-- [x] **ClientCardPage** (`/clients/[id]`) — портировать, обновить дизайн
-- [x] Фильтры, статусы (CONFIRMED/CANCELLED/NO_SHOW), детальный просмотр
+- [x] **BookingPage** (`/bookings`) — port from `memo-frontend`, update design
+- [x] **ClientCardPage** (`/clients/[id]`) — port, update design
+- [x] Filters, statuses (CONFIRMED/CANCELLED/NO_SHOW), detailed view
 - [x] Route group `(main)` — sidebar nav links with Link + active state
 - [x] Bugfixes: test imports, date filter guard, Sidebar usePathname mock
 
-**Результат:** Администратор управляет бронированиями и видит карточки клиентов
+**Result:** Administrator manages bookings and views client cards
 
 ---
 
-## Этап 5: P3 — Client Booking Flow
+## Stage 5: P3 — Client Booking Flow
 
-- [ ] **BookingPage** (`/booking`) — портировать 4-шаговый флоу
+- [ ] **BookingPage** (`/booking`) — port 4-step flow
 - [ ] LocationSelector, ActivitySchedule, BookingForm, VisitorLookup
 - [ ] BookingConfirmation + PricingBreakdown
-- [ ] Обновить дизайн под общую стилистику
+- [ ] Update design to match overall style
 
-**Результат:** Клиент записывается на мастер-класс
+**Result:** Client books a master class
 
 ---
 
-## Этап 6: P4 — Artist Schedule
+## Stage 6: P4 — Artist Schedule
 
-- [ ] **ArtistPage** (`/artist`) — портировать
+- [ ] **ArtistPage** (`/artist`) — port
 - [ ] ArtistSelector, ArtistWeekView, ActivityDetail, AvailabilityToggle
 - [ ] Mobile-first, card-based layout
 
-**Результат:** Мастера видят своё расписание
+**Result:** Artists see their schedule
 
 ---
 
-## Этап 7: P5 — AI Concierge Chat
+## Stage 7: P5 — AI Concierge Chat
 
-- [ ] **ChatPage** (`/chat`) — портировать
+- [ ] **ChatPage** (`/chat`) — port
 - [ ] ChatMessage, ChatInput, QuickActions, ServiceRecommendation, TypingIndicator
-- [ ] Keyword-based matching (временная заглушка)
+- [ ] Keyword-based matching (temporary placeholder)
 
-**Результат:** Чат-ассистент помогает подобрать услугу
+**Result:** Chat assistant helps choose a service
 
 ---
 
-## Этап 8: Тесты и полировка
+## Stage 8: Tests and Polish
 
-- [ ] Тесты для всех страниц (Vitest + Testing Library)
+- [ ] Tests for all pages (Vitest + Testing Library)
 - [ ] TypeScript strict mode
-- [ ] Базовая a11y (aria-атрибуты)
-- [ ] Минимальная мобильная адаптация
-- [ ] `next build`, `tsc --noEmit`, `next lint` — без ошибок
+- [ ] Basic a11y (aria attributes)
+- [ ] Minimal mobile adaptation
+- [ ] `next build`, `tsc --noEmit`, `next lint` — no errors
 
 ---
 
-## Этап 9: Web — colourmountains.ru (P3 Client Booking Flow)
+## Stage 9: Web — colourmountains.ru (P3 Client Booking Flow)
 
-- [ ] Создать `apps/web/` — Next.js 14 проект для публичного сайта
-- [ ] Настроить SEO: metadata, sitemap, robots
-- [ ] **Главная страница** — hero, галерея, услуги, о студии
-- [ ] **Страница услуг** — список мастер-классов
-- [ ] **Страница записи** (`/booking`) — 4-шаговый флоу:
-  - Шаг 1: LocationSelector (карточки локаций)
-  - Шаг 2: ActivitySchedule (выбор даты и занятия)
-  - Шаг 3: BookingForm (посетители, цены)
-  - Шаг 4: BookingConfirmation (оплата, сводка)
-- [ ] **Страница контактов**
-- [ ] Интеграция с `@memo/domain` и `@memo/api-client`
+- [ ] Create `apps/web/` — Next.js 14 project for public website
+- [ ] Set up SEO: metadata, sitemap, robots
+- [ ] **Home page** — hero, gallery, services, about the studio
+- [ ] **Services page** — list of master classes
+- [ ] **Booking page** (`/booking`) — 4-step flow:
+  - Step 1: LocationSelector (location cards)
+  - Step 2: ActivitySchedule (date and class selection)
+  - Step 3: BookingForm (visitors, prices)
+  - Step 4: BookingConfirmation (payment, summary)
+- [ ] **Contact page**
+- [ ] Integration with `@memo/domain` and `@memo/api-client`
 
-**Результат:** Полноценный сайт colourmountains.ru с онлайн-записью
-
----
-
-## Этап 10: Master App — расписание для мастеров
-
-- [ ] Создать `apps/master/` — Next.js 14 проект
-- [ ] **Mobile-first** дизайн
-- [ ] ArtistSelector (если мастер ведёт несколько направлений)
-- [ ] **ArtistWeekView** — расписание на неделю
-- [ ] **ActivityDetail** — детали занятия, список записавшихся
-- [ ] **AvailabilityToggle** — отметить доступность/недоступность
-- [ ] Push-уведомления о новых записях
-
-**Результат:** Мастера видят своё расписание и управляют доступностью
+**Result:** Full colourmountains.ru website with online booking
 
 ---
 
-## Приоритеты и время
+## Stage 10: Master App — artist schedule
 
-| Этап | Дней | Что делаем | Кто |
-|------|------|-----------|-----|
-| 0 — Подготовка (агенты) | 1 | Создать 8 агентов | @manager |
-| 1 — Инфраструктура Turborepo | 1 | Turborepo + shared packages | @architect |
-| 2 — Дизайн-система + Layout | 1 | Sidebar, Toolbar, RightPanel | @frontend-coder |
-| 3 — P1 Schedule | 3 | Сетка, карточки, DnD, штамп, модалка | @frontend-coder |
-| 4–7 — P2–P5 (admin) | 4 | Портирование страниц админки | @frontend-coder |
-| 8 — Тесты и полировка | 2 | Тесты, a11y, build | @tester + @frontend-coder |
-| 9 — Web (colourmountains.ru) | 5 | Сайт + онлайн-запись | @frontend-coder |
-| 10 — Master App | 3 | Приложение для мастеров | @frontend-coder |
+- [ ] Create `apps/master/` — Next.js 14 project
+- [ ] **Mobile-first** design
+- [ ] ArtistSelector (if an artist handles multiple disciplines)
+- [ ] **ArtistWeekView** — weekly schedule
+- [ ] **ActivityDetail** — class details, list of registered visitors
+- [ ] **AvailabilityToggle** — mark availability/unavailability
+- [ ] Push notifications for new bookings
 
-**Всего:** ~20-25 дней на полный релиз (P1–P5 + Web + Master)
+**Result:** Artists see their schedule and manage availability
 
 ---
-## Документы
 
-- **Бизнес-логика:** `docs/business-logic.md` — статусы, оплата, бронирование
+## Priorities and Time
+
+| Stage | Days | What we do | Who |
+|-------|------|------------|-----|
+| 0 — Preparation (agents) | 1 | Create 8 agents | @manager |
+| 1 — Turborepo Infrastructure | 1 | Turborepo + shared packages | @architect |
+| 2 — Design System + Layout | 1 | Sidebar, Toolbar, RightPanel | @frontend-coder |
+| 3 — P1 Schedule | 3 | Grid, cards, DnD, stamp, modal | @frontend-coder |
+| 4–7 — P2–P5 (admin) | 4 | Porting admin pages | @frontend-coder |
+| 8 — Tests and Polish | 2 | Tests, a11y, build | @tester + @frontend-coder |
+| 9 — Web (colourmountains.ru) | 5 | Website + online booking | @frontend-coder |
+| 10 — Master App | 3 | Master app | @frontend-coder |
+
+**Total:** ~20-25 days for full release (P1–P5 + Web + Master)
 
 ---
+
+## Documents
+
+- **Business Logic:** `docs/business-logic.md` — statuses, payment, booking
+
+---
+
 ## Changelog
-- 2026-05-19: **Turborepo миграция.** Переход от единого `frontend/` к монорепо: `apps/admin/`, `packages/domain/`, `packages/api-client/`. Убран дедлайн MVP, добавлены этапы 9 (Web) и 10 (Master App). Обновлена архитектура: `docs/ARCHITECTURE.md`.
-- 2026-05-13: Updated deadlines — MVP 20 мая, Full release 31 мая. Added daily schedule for MVP sprint.
-- 2026-05-13: Initial PLAN.md created with etapy 0-8.
+- 2026-05-19: **Turborepo migration.** Transition from a single `frontend/` to monorepo: `apps/admin/`, `packages/domain/`, `packages/api-client/`. MVP deadline removed, stages 9 (Web) and 10 (Master App) added. Architecture updated: `docs/ARCHITECTURE.md`.
+- 2026-05-13: Updated deadlines — MVP May 20, Full release May 31. Added daily schedule for MVP sprint.
+- 2026-05-13: Initial PLAN.md created with stages 0-8.

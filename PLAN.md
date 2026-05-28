@@ -166,7 +166,19 @@ memo/
 
 ---
 
-## Этап 5: P3 — Client Booking Flow
+## Phase 5: Backend Foundation (FastAPI)
+
+- [ ] Project initialization and linters (ruff, mypy)
+- [ ] DB Session Management (DatabaseSessionManager)
+- [ ] Configuration and Entrypoint (main.py, pydantic-settings)
+- [ ] System Domain / Healthcheck (base router)
+- [ ] ... (plan will be expanded after the foundation)
+
+**Result:** Working backend foundation with Clean Architecture and tests.
+
+---
+
+## Этап 6: P3 — Client Booking Flow
 
 - [ ] **BookingPage** (`/booking`) — портировать 4-шаговый флоу
 - [ ] LocationSelector, ActivitySchedule, BookingForm, VisitorLookup
@@ -177,7 +189,7 @@ memo/
 
 ---
 
-## Этап 6: P4 — Artist Schedule
+## Этап 7: P4 — Artist Schedule
 
 - [ ] **ArtistPage** (`/artist`) — портировать
 - [ ] ArtistSelector, ArtistWeekView, ActivityDetail, AvailabilityToggle
@@ -187,7 +199,7 @@ memo/
 
 ---
 
-## Этап 7: P5 — AI Concierge Chat
+## Этап 8: P5 — AI Concierge Chat
 
 - [ ] **ChatPage** (`/chat`) — портировать
 - [ ] ChatMessage, ChatInput, QuickActions, ServiceRecommendation, TypingIndicator
@@ -197,7 +209,7 @@ memo/
 
 ---
 
-## Этап 8: Тесты и полировка
+## Этап 9: Тесты и полировка
 
 - [ ] Тесты для всех страниц (Vitest + Testing Library)
 - [ ] TypeScript strict mode
@@ -207,7 +219,7 @@ memo/
 
 ---
 
-## Этап 9: Web — colourmountains.ru (P3 Client Booking Flow)
+## Этап 10: Web — colourmountains.ru (P3 Client Booking Flow)
 
 - [ ] Создать `apps/web/` — Next.js 14 проект для публичного сайта
 - [ ] Настроить SEO: metadata, sitemap, robots
@@ -225,7 +237,7 @@ memo/
 
 ---
 
-## Этап 10: Master App — расписание для мастеров
+## Этап 11: Master App — расписание для мастеров
 
 - [ ] Создать `apps/master/` — Next.js 14 проект
 - [ ] **Mobile-first** дизайн

@@ -1,0 +1,38 @@
+"""StrEnum definitions for model fields."""
+
+import enum
+
+
+class Specialty(str, enum.Enum):
+    PAINTING = "живопись"
+    CERAMICS = "керамика"
+
+
+class Position(str, enum.Enum):
+    MASTER = "мастер"
+    ADMIN = "администратор"
+
+
+class UserRole(str, enum.Enum):
+    ADMIN = "admin"
+    MASTER = "master"
+
+
+class RecordStatus(str, enum.Enum):
+    PENDING = "pending"
+    CONFIRMED = "confirmed"
+    CANCELLED = "cancelled"
+    NO_SHOW = "no_show"
+
+
+class VisitStatus(str, enum.Enum):
+    WAITING = "waiting"
+    VISITED = "visited"
+    MISSED = "missed"
+    CANCELLED = "cancelled"
+
+
+class PaymentMethod(str, enum.Enum):
+    CASH = "cash"
+    CARD = "card"
+    TRANSFER = "transfer"

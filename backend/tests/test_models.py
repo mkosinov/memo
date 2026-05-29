@@ -40,8 +40,13 @@ def _create_all_and_session(engine):
         Visit,
         Visitor,
         activity_tags,
+        client_tags,
+        location_tags,
+        master_tags,
         photo_tags,
+        record_tags,
         service_tags,
+        visitor_tags,
     )
     Base.metadata.create_all(engine)
     return Session(engine)
@@ -77,6 +82,7 @@ class TestModelImports:
             "Master", "User", "Location", "Service", "Tariff", "Tag",
             "Activity", "Client", "Visitor", "Photo", "Record", "Visit", "Payment",
             "service_tags", "activity_tags", "photo_tags",
+            "master_tags", "location_tags", "client_tags", "visitor_tags", "record_tags",
         ]
         assert sorted(__all__) == sorted(expected)
 
@@ -95,6 +101,7 @@ class TestModelTables:
         "tags", "activities", "clients", "visitors",
         "photos", "records", "visits", "payments",
         "service_tags", "activity_tags", "photo_tags",
+        "master_tags", "location_tags", "client_tags", "visitor_tags", "record_tags",
     ])
     def test_table_exists(self, inspector, table_name):
         tables = inspector.get_table_names()
@@ -463,3 +470,100 @@ class TestModelCrud:
         )).all()
         assert len(rows) == 1
         assert rows[0][0] == p.id
+
+    def test_master_tags_join(self, session: Session):
+        from sqlalchemy import select
+
+        from app.db.models import Master, Tag, master_tags
+        m = Master(first_name="Elena", last_name="Sidorova", color="#33FF57",
+                   position="мастер", specialty="керамика")
+        tag = Tag(tag="pottery-master")
+        session.add_all([m, tag])
+        session.flush()
+        session.execute(master_tags.insert().values(master_id=m.id, tag_id=tag.id))
+        session.flush()
+        rows = session.execute(select(master_tags.c.master_id).where(
+            master_tags.c.tag_id == tag.id
+        )).all()
+        assert len(rows) == 1
+        assert rows[0][0] == m.id
+
+    def test_location_tags_join(self, session: Session):
+        from sqlalchemy import select
+
+        from app.db.models import Location, Tag, location_tags
+        loc = Location(name="Workshop Hall", capacity=30)
+        tag = Tag(tag="large-space")
+        session.add_all([loc, tag])
+        session.flush()
+        session.execute(location_tags.insert().values(location_id=loc.id, tag_id=tag.id))
+        session.flush()
+        rows = session.execute(select(location_tags.c.location_id).where(
+            location_tags.c.tag_id == tag.id
+        )).all()
+        assert len(rows) == 1
+        assert rows[0][0] == loc.id
+
+    def test_client_tags_join(self, session: Session):
+        from sqlalchemy import select
+
+        from app.db.models import Client, Tag, client_tags
+        c = Client(name="VIP Client", phone="+79005555555", channel="referral")
+        tag = Tag(tag="vip")
+        session.add_all([c, tag])
+        session.flush()
+        session.execute(client_tags.insert().values(client_id=c.id, tag_id=tag.id))
+        session.flush()
+        rows = session.execute(select(client_tags.c.client_id).where(
+            client_tags.c.tag_id == tag.id
+        )).all()
+        assert len(rows) == 1
+        assert rows[0][0] == c.id
+
+    def test_visitor_tags_join(self, session: Session):
+        from sqlalchemy import select
+
+        from app.db.models import Client, Tag, Visitor, visitor_tags
+        c = Client(name="Parent", phone="+79001111111", channel="phone")
+        session.add(c)
+        session.flush()
+        v = Visitor(client_id=c.id, name="Child", age=7)
+        tag = Tag(tag="birthday-party")
+        session.add_all([v, tag])
+        session.flush()
+        session.execute(visitor_tags.insert().values(visitor_id=v.id, tag_id=tag.id))
+        session.flush()
+        rows = session.execute(select(visitor_tags.c.visitor_id).where(
+            visitor_tags.c.tag_id == tag.id
+        )).all()
+        assert len(rows) == 1
+        assert rows[0][0] == v.id
+
+    def test_record_tags_join(self, session: Session):
+        from sqlalchemy import select
+
+        from app.db.models import (
+            Activity, Client, Location, Master, Record, Service, Tag, record_tags,
+        )
+        now = self._now()
+        m = Master(first_name="A", last_name="B", color="#000", position="мастер", specialty="живопись")
+        svc = Service(title="S", description="d", image_url="http://x.com/i", specialty="живопись",
+                       min_age=1, max_age=99, duration=60, record_info="r")
+        loc = Location(name="L", capacity=10)
+        session.add_all([m, svc, loc])
+        session.flush()
+        act = Activity(master_id=m.id, service_id=svc.id, location_id=loc.id,
+                        start=now, duration=60, capacity=10)
+        session.add(act)
+        session.flush()
+        rec = Record(activity_id=act.id, status="confirmed", seats=1)
+        tag = Tag(tag="early-booking")
+        session.add_all([rec, tag])
+        session.flush()
+        session.execute(record_tags.insert().values(record_id=rec.id, tag_id=tag.id))
+        session.flush()
+        rows = session.execute(select(record_tags.c.record_id).where(
+            record_tags.c.tag_id == tag.id
+        )).all()
+        assert len(rows) == 1
+        assert rows[0][0] == rec.id

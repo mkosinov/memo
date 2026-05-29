@@ -34,9 +34,9 @@ LOCATION_PAYLOAD = {
 
 def _create_prerequisites(client: TestClient) -> dict:
     """Create master, service, location and return their IDs."""
-    master = client.post("/api/masters", json=MASTER_PAYLOAD).json()
-    service = client.post("/api/services", json=SERVICE_PAYLOAD).json()
-    location = client.post("/api/locations", json=LOCATION_PAYLOAD).json()
+    master = client.post("/api/v1/masters", json=MASTER_PAYLOAD).json()
+    service = client.post("/api/v1/services", json=SERVICE_PAYLOAD).json()
+    location = client.post("/api/v1/locations", json=LOCATION_PAYLOAD).json()
     return {
         "master_id": master["id"],
         "service_id": service["id"],
@@ -65,13 +65,13 @@ class TestActivitiesCrud:
 
     def test_create_activity(self) -> None:
         """POST /api/activities creates an activity and returns 201."""
-        from app.main import create_app
+        from src.main import create_app
 
         app = create_app()
         with TestClient(app) as client:
             prereqs = _create_prerequisites(client)
             response = client.post(
-                "/api/activities",
+                "/api/v1/activities",
                 json=_activity_payload(prereqs),
             )
 
@@ -90,17 +90,17 @@ class TestActivitiesCrud:
 
     def test_list_activities_includes_created(self) -> None:
         """GET /api/activities returns a list containing the created activity."""
-        from app.main import create_app
+        from src.main import create_app
 
         app = create_app()
         with TestClient(app) as client:
             prereqs = _create_prerequisites(client)
             create_resp = client.post(
-                "/api/activities", json=_activity_payload(prereqs)
+                "/api/v1/activities", json=_activity_payload(prereqs)
             )
             activity_id = create_resp.json()["id"]
 
-            response = client.get("/api/activities")
+            response = client.get("/api/v1/activities")
             assert response.status_code == 200
             activities = response.json()
             assert isinstance(activities, list)
@@ -109,17 +109,17 @@ class TestActivitiesCrud:
 
     def test_get_activity_by_id(self) -> None:
         """GET /api/activities/{id} returns the specific activity."""
-        from app.main import create_app
+        from src.main import create_app
 
         app = create_app()
         with TestClient(app) as client:
             prereqs = _create_prerequisites(client)
             create_resp = client.post(
-                "/api/activities", json=_activity_payload(prereqs)
+                "/api/v1/activities", json=_activity_payload(prereqs)
             )
             activity_id = create_resp.json()["id"]
 
-            response = client.get(f"/api/activities/{activity_id}")
+            response = client.get(f"/api/v1/activities/{activity_id}")
             assert response.status_code == 200
             body = response.json()
             assert body["id"] == activity_id
@@ -127,13 +127,13 @@ class TestActivitiesCrud:
 
     def test_update_activity(self) -> None:
         """PUT /api/activities/{id} updates all fields."""
-        from app.main import create_app
+        from src.main import create_app
 
         app = create_app()
         with TestClient(app) as client:
             prereqs = _create_prerequisites(client)
             create_resp = client.post(
-                "/api/activities", json=_activity_payload(prereqs)
+                "/api/v1/activities", json=_activity_payload(prereqs)
             )
             activity_id = create_resp.json()["id"]
 
@@ -145,7 +145,7 @@ class TestActivitiesCrud:
             update_data["comment"] = "Updated comment"
 
             response = client.put(
-                f"/api/activities/{activity_id}", json=update_data
+                f"/api/v1/activities/{activity_id}", json=update_data
             )
             assert response.status_code == 200
             body = response.json()
@@ -156,60 +156,60 @@ class TestActivitiesCrud:
 
     def test_delete_activity_soft_deletes(self) -> None:
         """DELETE /api/activities/{id} soft-deletes and list excludes it."""
-        from app.main import create_app
+        from src.main import create_app
 
         app = create_app()
         with TestClient(app) as client:
             prereqs = _create_prerequisites(client)
             create_resp = client.post(
-                "/api/activities", json=_activity_payload(prereqs)
+                "/api/v1/activities", json=_activity_payload(prereqs)
             )
             activity_id = create_resp.json()["id"]
 
             # Delete
-            response = client.delete(f"/api/activities/{activity_id}")
+            response = client.delete(f"/api/v1/activities/{activity_id}")
             assert response.status_code == 204
 
             # GET by id should still return it (soft delete)
-            response = client.get(f"/api/activities/{activity_id}")
+            response = client.get(f"/api/v1/activities/{activity_id}")
             assert response.status_code == 200
             assert response.json()["is_active"] is False
 
             # List should NOT include the deleted activity
-            response = client.get("/api/activities")
+            response = client.get("/api/v1/activities")
             activities = response.json()
             ids = [a["id"] for a in activities]
             assert activity_id not in ids
 
     def test_get_nonexistent_activity_returns_404(self) -> None:
         """GET /api/activities/{fake_id} returns 404."""
-        from app.main import create_app
+        from src.main import create_app
 
         app = create_app()
         with TestClient(app) as client:
-            response = client.get("/api/activities/nonexistent-id")
+            response = client.get("/api/v1/activities/nonexistent-id")
         assert response.status_code == 404
 
     def test_update_nonexistent_activity_returns_404(self) -> None:
         """PUT /api/activities/{fake_id} returns 404."""
-        from app.main import create_app
+        from src.main import create_app
 
         app = create_app()
         with TestClient(app) as client:
             prereqs = _create_prerequisites(client)
             response = client.put(
-                "/api/activities/nonexistent-id",
+                "/api/v1/activities/nonexistent-id",
                 json=_activity_payload(prereqs),
             )
         assert response.status_code == 404
 
     def test_delete_nonexistent_activity_returns_404(self) -> None:
         """DELETE /api/activities/{fake_id} returns 404."""
-        from app.main import create_app
+        from src.main import create_app
 
         app = create_app()
         with TestClient(app) as client:
-            response = client.delete("/api/activities/nonexistent-id")
+            response = client.delete("/api/v1/activities/nonexistent-id")
         assert response.status_code == 404
 
 
@@ -218,7 +218,7 @@ class TestActivitiesDateFiltering:
 
     def test_list_activities_with_date_range(self) -> None:
         """GET /api/activities?date_from=...&date_to=... filters by date range."""
-        from app.main import create_app
+        from src.main import create_app
 
         app = create_app()
         with TestClient(app) as client:
@@ -229,13 +229,13 @@ class TestActivitiesDateFiltering:
             tomorrow = today + timedelta(days=1)
             next_week = today + timedelta(days=7)
 
-            client.post("/api/activities", json=_activity_payload(prereqs, start=today))
-            client.post("/api/activities", json=_activity_payload(prereqs, start=tomorrow))
-            client.post("/api/activities", json=_activity_payload(prereqs, start=next_week))
+            client.post("/api/v1/activities", json=_activity_payload(prereqs, start=today))
+            client.post("/api/v1/activities", json=_activity_payload(prereqs, start=tomorrow))
+            client.post("/api/v1/activities", json=_activity_payload(prereqs, start=next_week))
 
             # Filter: only today and tomorrow
             response = client.get(
-                "/api/activities",
+                "/api/v1/activities",
                 params={
                     "date_from": today.strftime("%Y-%m-%d"),
                     "date_to": tomorrow.strftime("%Y-%m-%d"),
@@ -247,7 +247,7 @@ class TestActivitiesDateFiltering:
 
     def test_list_activities_no_date_filter_returns_all(self) -> None:
         """GET /api/activities without date params returns all active activities."""
-        from app.main import create_app
+        from src.main import create_app
 
         app = create_app()
         with TestClient(app) as client:
@@ -256,10 +256,10 @@ class TestActivitiesDateFiltering:
             today = datetime.now(UTC).replace(hour=10, minute=0, second=0, microsecond=0)
             next_week = today + timedelta(days=7)
 
-            client.post("/api/activities", json=_activity_payload(prereqs, start=today))
-            client.post("/api/activities", json=_activity_payload(prereqs, start=next_week))
+            client.post("/api/v1/activities", json=_activity_payload(prereqs, start=today))
+            client.post("/api/v1/activities", json=_activity_payload(prereqs, start=next_week))
 
-            response = client.get("/api/activities")
+            response = client.get("/api/v1/activities")
             assert response.status_code == 200
             activities = response.json()
             assert len(activities) == 2
@@ -272,7 +272,7 @@ class TestActivitiesOccupied:
         """GET /api/activities/{id} shows occupied=1 after creating a Record."""
         import asyncio
 
-        from app.main import create_app
+        from src.main import create_app
 
         app = create_app()
         with TestClient(app) as client:
@@ -280,12 +280,12 @@ class TestActivitiesOccupied:
 
             # Create activity
             create_resp = client.post(
-                "/api/activities", json=_activity_payload(prereqs)
+                "/api/v1/activities", json=_activity_payload(prereqs)
             )
             activity_id = create_resp.json()["id"]
 
             # Verify occupied=0
-            response = client.get(f"/api/activities/{activity_id}")
+            response = client.get(f"/api/v1/activities/{activity_id}")
             assert response.json()["occupied"] == 0
 
             # Insert record directly into DB
@@ -296,15 +296,15 @@ class TestActivitiesOccupied:
             )
 
             # Verify occupied=1
-            response = client.get(f"/api/activities/{activity_id}")
+            response = client.get(f"/api/v1/activities/{activity_id}")
             assert response.status_code == 200
             assert response.json()["occupied"] == 1
 
 
 async def _insert_record_direct(activity_id: str) -> None:
     """Insert a Record directly into the database using the global db_manager."""
-    from app.db import db_manager
-    from app.db.models.record import Record
+    from src.db import db_manager
+    from src.models import Record
 
     async with db_manager.async_session() as session:
         record = Record(

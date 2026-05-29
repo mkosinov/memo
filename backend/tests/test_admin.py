@@ -8,7 +8,7 @@ class TestAdminEndpoint:
 
     def test_admin_root_returns_200(self) -> None:
         """GET /admin should return 200 (admin dashboard)."""
-        from app.main import create_app
+        from src.main import create_app
 
         app = create_app()
         client = TestClient(app, raise_server_exceptions=False)
@@ -22,7 +22,7 @@ class TestAdminViewRegistration:
 
     def test_all_model_views_registered(self) -> None:
         """Admin should have views for all 13 models."""
-        from app.admin.setup import ALL_ADMIN_VIEWS
+        from src.admin.setup import ALL_ADMIN_VIEWS
 
         expected_models = [
             "Master", "User", "Location", "Service", "Tariff",

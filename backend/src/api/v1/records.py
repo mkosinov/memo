@@ -6,7 +6,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from app.db import SessionDep
+from src.db import SessionDep
 from src.schemas.record import (
     RecordCreate,
     RecordResponse,

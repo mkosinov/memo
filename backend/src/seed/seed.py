@@ -14,9 +14,9 @@ from datetime import datetime
 # ruff: noqa: RUF001, RUF003  -- Cyrillic text is intentional (Russian language app)
 from sqlalchemy import select
 
-from app.db.base import Base
-from app.db.database import DBManager
-from app.db.models import (
+from src.db.base import Base
+from src.db.database import DBManager
+from src.models import (
     Activity,
     Client,
     Location,

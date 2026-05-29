@@ -7,7 +7,7 @@ class TestRootEndpoint:
     """Root path should return 404 (no route registered)."""
 
     def test_root_returns_404(self) -> None:
-        from app.main import create_app
+        from src.main import create_app
 
         app = create_app()
         client = TestClient(app)
@@ -24,7 +24,7 @@ class TestSettings:
         # Remove env var to test the default value
         original = os.environ.pop("DATABASE_URL", None)
         try:
-            from app.core.config import Settings
+            from src.core.config import Settings
 
             settings = Settings()
             assert settings.DATABASE_URL == "sqlite+aiosqlite:///./memo.db"
@@ -37,7 +37,7 @@ class TestSettings:
 
         os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///./custom.db"
         try:
-            from app.core.config import Settings
+            from src.core.config import Settings
 
             settings = Settings()
             assert settings.DATABASE_URL == "sqlite+aiosqlite:///./custom.db"

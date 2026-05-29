@@ -5,7 +5,7 @@ from functools import lru_cache
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domain.system.schemas import HealthResponse
+from src.schemas.system import HealthResponse
 
 
 class HealthService:

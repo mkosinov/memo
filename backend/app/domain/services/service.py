@@ -12,17 +12,17 @@ from app.db.models.service import Service
 from app.db.models.tag import service_tags
 from app.db.models.tariff import Tariff
 from app.db.repository import GenericRepository, get_repository
-from app.domain.base import GenericService
-from app.domain.services.schemas import ServiceCreate, ServiceUpdate
+from src.services.generic import GenericService
+from src.schemas.service import ServiceCreate, ServiceResponse, ServiceUpdate
 
 
-class ServiceService(GenericService[Service, ServiceCreate, ServiceUpdate]):
+class ServiceService(GenericService[ServiceCreate, ServiceUpdate, ServiceResponse]):
     """Service service with eager-loaded tariffs/tags and nested create/update."""
 
     def __init__(
         self, repository: GenericRepository, model: type[Service]
     ) -> None:
-        super().__init__(repository, model)
+        super().__init__(repository, model, response_schema=ServiceResponse)
 
     async def list(
         self, db_session: AsyncSession, **filters

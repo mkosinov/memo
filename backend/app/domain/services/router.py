@@ -6,7 +6,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.db import SessionDep
-from app.domain.services.schemas import ServiceCreate, ServiceResponse, ServiceUpdate
+from src.schemas.service import ServiceCreate, ServiceResponse, ServiceUpdate
 from app.domain.services.service import ServiceService, get_service_service
 
 router = APIRouter(tags=["services"])

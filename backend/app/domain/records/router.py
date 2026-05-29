@@ -7,7 +7,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.db import SessionDep
-from app.domain.records.schemas import (
+from src.schemas.record import (
     RecordCreate,
     RecordResponse,
     RecordUpdate,

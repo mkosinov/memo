@@ -7,17 +7,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.visitor import Visitor
 from app.db.repository import GenericRepository, get_repository
-from app.domain.base import GenericService
-from app.domain.visitors.schemas import VisitorCreate, VisitorUpdate
+from src.services.generic import GenericService
+from src.schemas.visitor import VisitorCreate, VisitorResponse, VisitorUpdate
 
 
-class VisitorService(GenericService[Visitor, VisitorCreate, VisitorUpdate]):
+class VisitorService(GenericService[VisitorCreate, VisitorUpdate, VisitorResponse]):
     """Visitor service with client-based filtering."""
 
     def __init__(
         self, repository: GenericRepository, model: type[Visitor]
     ) -> None:
-        super().__init__(repository, model)
+        super().__init__(repository, model, response_schema=VisitorResponse)
 
     async def list_by_client(
         self, db_session: AsyncSession, client_id: str

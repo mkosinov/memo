@@ -5,21 +5,44 @@ from functools import lru_cache
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.db.models.record import Record
 from app.db.models.visit import Visit
 from app.db.repository import GenericRepository, get_repository
-from app.domain.base import GenericService
-from app.domain.records.schemas import RecordCreate, RecordUpdate
+from src.services.generic import GenericService
+from src.schemas.record import RecordCreate, RecordResponse, RecordUpdate
 
 
-class RecordService(GenericService[Record, RecordCreate, RecordUpdate]):
+class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
     """Record service with nested visit management."""
 
     def __init__(
         self, repository: GenericRepository, model: type[Record]
     ) -> None:
-        super().__init__(repository, model)
+        super().__init__(repository, model, response_schema=RecordResponse)
+
+    async def list(
+        self, db_session: AsyncSession, **filters
+    ) -> list[Record]:
+        """Return all active records with visits eagerly loaded (raw ORM)."""
+        result = await db_session.execute(
+            select(Record)
+            .where(Record.is_active)
+            .options(selectinload(Record.visits))
+        )
+        return list(result.scalars().all())
+
+    async def get(
+        self, db_session: AsyncSession, id: str
+    ) -> Record | None:
+        """Return a record by ID with visits eagerly loaded (raw ORM)."""
+        result = await db_session.execute(
+            select(Record)
+            .where(Record.id == id)
+            .options(selectinload(Record.visits))
+        )
+        return result.scalar_one_or_none()
 
     async def create(
         self, db_session: AsyncSession, data: RecordCreate

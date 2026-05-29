@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import SessionDep
-from app.domain.activities.schemas import (
+from src.schemas.activity import (
     ActivityCreate,
     ActivityResponse,
     ActivityUpdate,

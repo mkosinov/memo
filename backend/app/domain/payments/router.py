@@ -7,18 +7,20 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from app.db.database import SessionDep
 from app.domain.payments.schemas import PaymentCreate, PaymentResponse, PaymentUpdate
-from app.domain.payments.service import PaymentService, get_payment_service
+from app.domain.payments.service import get_payment_service
+from app.domain.base import GenericService
+from app.db.models.payment import Payment
 
 router = APIRouter(tags=["payments"])
 
 
 @lru_cache
-def _get_payment_service() -> PaymentService:
+def _get_payment_service() -> GenericService[Payment, PaymentCreate, PaymentUpdate]:
     """Dependency factory returning a singleton PaymentService."""
     return get_payment_service()
 
 
-_ServiceDep = Annotated[PaymentService, Depends(_get_payment_service)]
+_ServiceDep = Annotated[GenericService[Payment, PaymentCreate, PaymentUpdate], Depends(_get_payment_service)]
 
 
 @router.get("", response_model=list[PaymentResponse])
@@ -27,7 +29,7 @@ async def list_payments(
     session: SessionDep,
 ) -> list[PaymentResponse]:
     """Return all active payments."""
-    payments = await service.list_all(db_session=session)
+    payments = await service.list(db_session=session)
     return [PaymentResponse.model_validate(p) for p in payments]
 
 
@@ -38,7 +40,7 @@ async def get_payment(
     session: SessionDep,
 ) -> PaymentResponse:
     """Return a single payment by ID."""
-    payment = await service.get_by_id(db_session=session, payment_id=payment_id)
+    payment = await service.get(db_session=session, id=payment_id)
     if not payment:
         raise HTTPException(status_code=404, detail="Payment not found")
     return PaymentResponse.model_validate(payment)
@@ -63,7 +65,7 @@ async def update_payment(
     session: SessionDep,
 ) -> PaymentResponse:
     """Full-update a payment by ID (PUT, not PATCH)."""
-    payment = await service.update(db_session=session, payment_id=payment_id, data=data)
+    payment = await service.update(db_session=session, id=payment_id, data=data)
     if not payment:
         raise HTTPException(status_code=404, detail="Payment not found")
     return PaymentResponse.model_validate(payment)
@@ -76,6 +78,6 @@ async def delete_payment(
     session: SessionDep,
 ) -> None:
     """Soft-delete a payment (set is_active=False)."""
-    deleted = await service.delete(db_session=session, payment_id=payment_id)
+    deleted = await service.delete(db_session=session, id=payment_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Payment not found")

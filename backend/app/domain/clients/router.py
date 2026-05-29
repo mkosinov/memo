@@ -7,27 +7,29 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from app.db.database import SessionDep
 from app.domain.clients.schemas import ClientCreate, ClientResponse, ClientUpdate
-from app.domain.clients.service import ClientService, get_client_service
+from app.domain.clients.service import get_client_service
 from app.domain.visitors.schemas import VisitorResponse
-from app.domain.visitors.service import VisitorService, get_visitor_service
+from app.domain.visitors.service import get_visitor_service
+from app.domain.base import GenericService
+from app.db.models.client import Client
 
 router = APIRouter(tags=["clients"])
 
 
 @lru_cache
-def _get_client_service() -> ClientService:
+def _get_client_service() -> GenericService[Client, ClientCreate, ClientUpdate]:
     """Dependency factory returning a singleton ClientService."""
     return get_client_service()
 
 
 @lru_cache
-def _get_visitor_service() -> VisitorService:
+def _get_visitor_service():
     """Dependency factory returning a singleton VisitorService."""
     return get_visitor_service()
 
 
-_ServiceDep = Annotated[ClientService, Depends(_get_client_service)]
-_VisitorServiceDep = Annotated[VisitorService, Depends(_get_visitor_service)]
+_ServiceDep = Annotated[GenericService[Client, ClientCreate, ClientUpdate], Depends(_get_client_service)]
+_VisitorServiceDep = Annotated[any, Depends(_get_visitor_service)]
 
 
 @router.get("", response_model=list[ClientResponse])
@@ -36,7 +38,7 @@ async def list_clients(
     session: SessionDep,
 ) -> list[ClientResponse]:
     """Return all active clients."""
-    clients = await service.list_all(db_session=session)
+    clients = await service.list(db_session=session)
     return [ClientResponse.model_validate(c) for c in clients]
 
 
@@ -47,7 +49,7 @@ async def get_client(
     session: SessionDep,
 ) -> ClientResponse:
     """Return a single client by ID."""
-    client = await service.get_by_id(db_session=session, client_id=client_id)
+    client = await service.get(db_session=session, id=client_id)
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
     return ClientResponse.model_validate(client)
@@ -72,7 +74,7 @@ async def update_client(
     session: SessionDep,
 ) -> ClientResponse:
     """Full-update a client by ID (PUT, not PATCH)."""
-    client = await service.update(db_session=session, client_id=client_id, data=data)
+    client = await service.update(db_session=session, id=client_id, data=data)
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
     return ClientResponse.model_validate(client)
@@ -85,7 +87,7 @@ async def delete_client(
     session: SessionDep,
 ) -> None:
     """Soft-delete a client (set is_active=False)."""
-    deleted = await service.delete(db_session=session, client_id=client_id)
+    deleted = await service.delete(db_session=session, id=client_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Client not found")
 

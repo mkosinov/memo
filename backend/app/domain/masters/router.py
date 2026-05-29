@@ -7,18 +7,20 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from app.db.database import SessionDep
 from app.domain.masters.schemas import MasterCreate, MasterResponse, MasterUpdate
-from app.domain.masters.service import MasterService, get_master_service
+from app.domain.masters.service import get_master_service
+from app.domain.base import GenericService
+from app.db.models.master import Master
 
 router = APIRouter(tags=["masters"])
 
 
 @lru_cache
-def _get_master_service() -> MasterService:
+def _get_master_service() -> GenericService[Master, MasterCreate, MasterUpdate]:
     """Dependency factory returning a singleton MasterService."""
     return get_master_service()
 
 
-_ServiceDep = Annotated[MasterService, Depends(_get_master_service)]
+_ServiceDep = Annotated[GenericService[Master, MasterCreate, MasterUpdate], Depends(_get_master_service)]
 
 
 @router.get("", response_model=list[MasterResponse])
@@ -27,7 +29,7 @@ async def list_masters(
     session: SessionDep,
 ) -> list[MasterResponse]:
     """Return all active masters."""
-    masters = await service.list_all(db_session=session)
+    masters = await service.list(db_session=session)
     return [MasterResponse.model_validate(m) for m in masters]
 
 
@@ -38,7 +40,7 @@ async def get_master(
     session: SessionDep,
 ) -> MasterResponse:
     """Return a single master by ID."""
-    master = await service.get_by_id(db_session=session, master_id=master_id)
+    master = await service.get(db_session=session, id=master_id)
     if not master:
         raise HTTPException(status_code=404, detail="Master not found")
     return MasterResponse.model_validate(master)
@@ -63,7 +65,7 @@ async def update_master(
     session: SessionDep,
 ) -> MasterResponse:
     """Full-update a master by ID (PUT, not PATCH)."""
-    master = await service.update(db_session=session, master_id=master_id, data=data)
+    master = await service.update(db_session=session, id=master_id, data=data)
     if not master:
         raise HTTPException(status_code=404, detail="Master not found")
     return MasterResponse.model_validate(master)
@@ -76,6 +78,6 @@ async def delete_master(
     session: SessionDep,
 ) -> None:
     """Soft-delete a master (set is_active=False)."""
-    deleted = await service.delete(db_session=session, master_id=master_id)
+    deleted = await service.delete(db_session=session, id=master_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Master not found")

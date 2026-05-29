@@ -70,7 +70,7 @@ async def list_records(
     session: SessionDep,
 ) -> list[RecordResponse]:
     """Return all active records with nested visits."""
-    records = await service.list_all(db_session=session)
+    records = await service.list(db_session=session)
     return [_map_record(r) for r in records]
 
 
@@ -81,7 +81,7 @@ async def get_record(
     session: SessionDep,
 ) -> RecordResponse:
     """Return a single record by ID with nested visits."""
-    record = await service.get_by_id(db_session=session, record_id=record_id)
+    record = await service.get(db_session=session, id=record_id)
     if not record:
         raise HTTPException(status_code=404, detail="Record not found")
     return _map_record(record)
@@ -106,7 +106,7 @@ async def update_record(
     session: SessionDep,
 ) -> RecordResponse:
     """Full-update a record by ID. Replaces visits, recalculates seats."""
-    record = await service.update(db_session=session, record_id=record_id, data=data)
+    record = await service.update(db_session=session, id=record_id, data=data)
     if not record:
         raise HTTPException(status_code=404, detail="Record not found")
     return _map_record(record)
@@ -119,6 +119,6 @@ async def delete_record(
     session: SessionDep,
 ) -> None:
     """Soft-delete a record (set is_active=False)."""
-    deleted = await service.delete(db_session=session, record_id=record_id)
+    deleted = await service.delete(db_session=session, id=record_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Record not found")

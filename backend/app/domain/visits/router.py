@@ -49,7 +49,7 @@ async def get_visit(
     session: SessionDep,
 ) -> VisitResponse:
     """Return a single visit by ID."""
-    visit = await service.get_by_id(db_session=session, visit_id=visit_id)
+    visit = await service.get(db_session=session, visit_id=visit_id)
     if not visit:
         raise HTTPException(status_code=404, detail="Visit not found")
     return _map_visit(visit)

@@ -1,5 +1,7 @@
 """Business logic for service CRUD operations with nested tariffs and tags."""
 
+from __future__ import annotations
+
 from functools import lru_cache
 
 from sqlalchemy import delete, select
@@ -9,41 +11,37 @@ from sqlalchemy.orm import selectinload
 from app.db.models.service import Service
 from app.db.models.tag import service_tags
 from app.db.models.tariff import Tariff
+from app.db.repository import GenericRepository
+from app.domain.base import GenericService
 from app.domain.services.schemas import ServiceCreate, ServiceUpdate
 
 
-class ServiceService:
-    """Handles service entity operations with nested tariffs and tags."""
+class ServiceService(GenericService[Service, ServiceCreate, ServiceUpdate]):
+    """Service service with eager-loaded tariffs/tags and nested create/update."""
 
-    def __init__(self) -> None:
-        pass
+    def __init__(self, repository: GenericRepository[Service]) -> None:
+        super().__init__(repository)
 
-    async def list_all(self, db_session: AsyncSession) -> list[Service]:
+    async def list(self, db_session: AsyncSession, **filters) -> list[Service]:
         """Return all active services with tariffs and tags eagerly loaded."""
         result = await db_session.execute(
             select(Service)
             .where(Service.is_active)
-            .options(
-                selectinload(Service.tariffs),
-                selectinload(Service.tags),
-            )
+            .options(selectinload(Service.tariffs), selectinload(Service.tags))
         )
         return list(result.scalars().all())
 
-    async def get_by_id(self, db_session: AsyncSession, service_id: str) -> Service | None:
+    async def get(self, db_session: AsyncSession, id: str) -> Service | None:
         """Return a service by ID with tariffs and tags, or None."""
         result = await db_session.execute(
             select(Service)
-            .where(Service.id == service_id)
-            .options(
-                selectinload(Service.tariffs),
-                selectinload(Service.tags),
-            )
+            .where(Service.id == id)
+            .options(selectinload(Service.tariffs), selectinload(Service.tags))
         )
         return result.scalar_one_or_none()
 
     async def create(self, db_session: AsyncSession, data: ServiceCreate) -> Service:
-        """Create a new service with tariffs and tag links."""
+        """Create service with nested tariffs and tag links."""
         tag_ids = data.tag_ids
         tariff_data = data.tariffs
         service_data = data.model_dump(exclude={"tariffs", "tag_ids"})
@@ -57,23 +55,19 @@ class ServiceService:
             tariff = Tariff(service_id=service.id, **td.model_dump())
             db_session.add(tariff)
 
-        # Link existing tags via direct join table inserts (avoids lazy-load)
+        # Link tags
         if tag_ids:
             for tid in tag_ids:
                 await db_session.execute(
-                    service_tags.insert().values(
-                        service_id=service.id, tag_id=tid
-                    )
+                    service_tags.insert().values(service_id=service.id, tag_id=tid)
                 )
 
         await db_session.flush()
+        return await self.get(db_session, service.id)
 
-        # Reload with relationships eagerly loaded
-        return await self.get_by_id(db_session=db_session, service_id=service.id)
-
-    async def update(self, db_session: AsyncSession, service_id: str, data: ServiceUpdate) -> Service | None:
-        """Full-update a service: replaces attributes, tariffs, and tag links."""
-        service = await self.get_by_id(db_session=db_session, service_id=service_id)
+    async def update(self, db_session: AsyncSession, id: str, data: ServiceUpdate) -> Service | None:
+        """Full-update: replaces attributes, tariffs, and tag links."""
+        service = await self.get(db_session, id)
         if not service:
             return None
 
@@ -81,48 +75,32 @@ class ServiceService:
         tariff_data = data.tariffs
         update_data = data.model_dump(exclude={"tariffs", "tag_ids"})
 
-        # Update service attributes
         for key, value in update_data.items():
             setattr(service, key, value)
 
-        # Replace tariffs (delete old, create new)
-        await db_session.execute(
-            delete(Tariff).where(Tariff.service_id == service_id)
-        )
+        await db_session.execute(delete(Tariff).where(Tariff.service_id == id))
         for td in tariff_data:
             tariff = Tariff(service_id=service.id, **td.model_dump())
             db_session.add(tariff)
 
-        # Replace tag links (delete old, insert new)
-        await db_session.execute(
-            delete(service_tags).where(service_tags.c.service_id == service_id)
-        )
+        await db_session.execute(delete(service_tags).where(service_tags.c.service_id == id))
         if tag_ids:
             for tid in tag_ids:
                 await db_session.execute(
-                    service_tags.insert().values(
-                        service_id=service.id, tag_id=tid
-                    )
+                    service_tags.insert().values(service_id=service.id, tag_id=tid)
                 )
 
         await db_session.flush()
-        # Expunge to avoid stale identity-map cache after cascading deletes
         db_session.expunge(service)
+        return await self.get(db_session, id)
 
-        # Reload with relationships eagerly loaded
-        return await self.get_by_id(db_session=db_session, service_id=service_id)
 
-    async def delete(self, db_session: AsyncSession, service_id: str) -> bool:
-        """Soft-delete a service. Returns False if not found."""
-        service = await self.get_by_id(db_session=db_session, service_id=service_id)
-        if not service:
-            return False
-        service.is_active = False
-        await db_session.flush()
-        return True
+@lru_cache
+def get_service_repo() -> GenericRepository[Service]:
+    return GenericRepository(Service)
 
 
 @lru_cache
 def get_service_service() -> ServiceService:
     """Returns a singleton ServiceService."""
-    return ServiceService()
+    return ServiceService(get_service_repo())

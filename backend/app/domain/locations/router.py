@@ -7,18 +7,20 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from app.db.database import SessionDep
 from app.domain.locations.schemas import LocationCreate, LocationResponse, LocationUpdate
-from app.domain.locations.service import LocationService, get_location_service
+from app.domain.locations.service import get_location_service
+from app.domain.base import GenericService
+from app.db.models.location import Location
 
 router = APIRouter(tags=["locations"])
 
 
 @lru_cache
-def _get_location_service() -> LocationService:
+def _get_location_service() -> GenericService[Location, LocationCreate, LocationUpdate]:
     """Dependency factory returning a singleton LocationService."""
     return get_location_service()
 
 
-_ServiceDep = Annotated[LocationService, Depends(_get_location_service)]
+_ServiceDep = Annotated[GenericService[Location, LocationCreate, LocationUpdate], Depends(_get_location_service)]
 
 
 @router.get("", response_model=list[LocationResponse])
@@ -27,7 +29,7 @@ async def list_locations(
     session: SessionDep,
 ) -> list[LocationResponse]:
     """Return all active locations."""
-    locations = await service.list_all(db_session=session)
+    locations = await service.list(db_session=session)
     return [LocationResponse.model_validate(loc) for loc in locations]
 
 
@@ -38,7 +40,7 @@ async def get_location(
     session: SessionDep,
 ) -> LocationResponse:
     """Return a single location by ID."""
-    location = await service.get_by_id(db_session=session, location_id=location_id)
+    location = await service.get(db_session=session, id=location_id)
     if not location:
         raise HTTPException(status_code=404, detail="Location not found")
     return LocationResponse.model_validate(location)
@@ -63,7 +65,7 @@ async def update_location(
     session: SessionDep,
 ) -> LocationResponse:
     """Full-update a location by ID (PUT, not PATCH)."""
-    location = await service.update(db_session=session, location_id=location_id, data=data)
+    location = await service.update(db_session=session, id=location_id, data=data)
     if not location:
         raise HTTPException(status_code=404, detail="Location not found")
     return LocationResponse.model_validate(location)
@@ -76,6 +78,6 @@ async def delete_location(
     session: SessionDep,
 ) -> None:
     """Soft-delete a location (set is_active=False)."""
-    deleted = await service.delete(db_session=session, location_id=location_id)
+    deleted = await service.delete(db_session=session, id=location_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Location not found")

@@ -1,0 +1,74 @@
+"""Generic service layer using GenericRepository and Pydantic schema validation.
+
+Returns validated Pydantic ``ResponseSchemaT`` objects from all CRUD
+operations instead of raw ORM model instances.
+"""
+
+from __future__ import annotations
+
+from typing import Generic, TypeVar
+
+from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.db.repository import GenericRepository
+
+CreateSchemaT = TypeVar("CreateSchemaT", bound=BaseModel)
+UpdateSchemaT = TypeVar("UpdateSchemaT", bound=BaseModel)
+ResponseSchemaT = TypeVar("ResponseSchemaT", bound=BaseModel)
+
+
+class GenericService(Generic[CreateSchemaT, UpdateSchemaT, ResponseSchemaT]):
+    """Generic service providing standard CRUD with schema validation.
+
+    Stores a model reference, a repository singleton, and a response
+    schema class.  Every public method validates the ORM result through
+    ``self._response_schema.model_validate()`` so callers always receive
+    validated Pydantic models.
+    """
+
+    def __init__(
+        self,
+        repository: GenericRepository,
+        model: type,
+        response_schema: type[ResponseSchemaT],
+    ) -> None:
+        self._repository = repository
+        self._model = model
+        self._response_schema = response_schema
+
+    async def list(
+        self, db_session: AsyncSession, **filters
+    ) -> list[ResponseSchemaT]:
+        """Return all active records, optionally filtered."""
+        orm_list = await self._repository.list(db_session, self._model, **filters)
+        return [self._response_schema.model_validate(o) for o in orm_list]
+
+    async def get(
+        self, db_session: AsyncSession, id: str
+    ) -> ResponseSchemaT | None:
+        """Return a record by ID, or ``None`` if not found."""
+        orm = await self._repository.get(db_session, self._model, id)
+        if orm is None:
+            return None
+        return self._response_schema.model_validate(orm)
+
+    async def create(
+        self, db_session: AsyncSession, data: CreateSchemaT
+    ) -> ResponseSchemaT:
+        """Create a new record from a validated create schema."""
+        orm = await self._repository.create(db_session, data, self._model)
+        return self._response_schema.model_validate(orm)
+
+    async def update(
+        self, db_session: AsyncSession, id: str, data: UpdateSchemaT
+    ) -> ResponseSchemaT | None:
+        """Full-update a record.  Returns ``None`` if the record is not found."""
+        orm = await self._repository.update(db_session, self._model, id, data)
+        if orm is None:
+            return None
+        return self._response_schema.model_validate(orm)
+
+    async def delete(self, db_session: AsyncSession, id: str) -> bool:
+        """Soft-delete a record.  Returns ``True`` if deleted, ``False`` if not found."""
+        return await self._repository.delete(db_session, self._model, id)

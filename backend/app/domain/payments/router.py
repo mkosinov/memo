@@ -5,7 +5,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from app.db.database import SessionDep
+from app.db import SessionDep
 from app.domain.payments.schemas import PaymentCreate, PaymentResponse, PaymentUpdate
 from app.domain.payments.service import get_payment_service
 from app.domain.base import GenericService

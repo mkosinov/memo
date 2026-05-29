@@ -5,7 +5,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends
 
-from app.db.database import SessionDep
+from app.db import SessionDep
 from app.domain.system.schemas import HealthResponse
 from app.domain.system.service import HealthService, get_health_service
 
@@ -21,7 +21,7 @@ def _get_health_service() -> HealthService:
 _ServiceDep = Annotated[HealthService, Depends(_get_health_service)]
 
 
-@router.get("", response_model=HealthResponse)
+@router.get("/health", response_model=HealthResponse)
 async def health_check(
     service: _ServiceDep,
     session: SessionDep,

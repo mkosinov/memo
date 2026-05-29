@@ -5,7 +5,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from app.db.database import SessionDep
+from app.db import SessionDep
 from app.domain.visitors.schemas import VisitorCreate, VisitorResponse, VisitorUpdate
 from app.domain.visitors.service import get_visitor_service
 from app.domain.visitors.service import VisitorService

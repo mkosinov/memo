@@ -6,7 +6,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.database import SessionDep
+from app.db import SessionDep
 from app.domain.activities.schemas import (
     ActivityCreate,
     ActivityResponse,

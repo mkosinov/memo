@@ -30,7 +30,7 @@ class UserRole(StrEnum):
     ADMIN = "admin"
     MASTER = "master"
 
-class BookingStatus(StrEnum):
+class RecordStatus(StrEnum):
     PENDING = "pending"
     CONFIRMED = "confirmed"
     CANCELLED = "cancelled"
@@ -85,6 +85,8 @@ Base class for all ORM models. Not a table itself (`__abstract__ = True`).
 | password_hash | str | |
 | role | UserRole | ADMIN or MASTER |
 | master_id | UUID? | FK → masters.id, unique (1:1) |
+| email_is_confirmed | bool | default False |
+| phone_is_confirmed | bool | default False |
 
 ### 3. `locations` — Location / Studio
 
@@ -146,7 +148,7 @@ Join tables:
 | comment | str? | |
 | record_info | str? | additional info |
 
-`occupied` is computed (count of related Records with CONFIRMED status).
+`occupied` is computed (count of related Records regardless of status).
 
 ### 8. `clients` — Client
 
@@ -186,7 +188,7 @@ At least one of `visitor_id` / `service_id` / `activity_id` should be set (appli
 |-------|------|-------------|
 | activity_id | UUID | FK → activities.id |
 | client_id | UUID? | FK → clients.id |
-| status | BookingStatus | PENDING / CONFIRMED / CANCELLED / NO_SHOW |
+| status | RecordStatus | PENDING / CONFIRMED / CANCELLED / NO_SHOW |
 | seats | int | how many spots booked |
 | comment | str? | |
 
@@ -219,7 +221,7 @@ Specialty(StrEnum) ──┐
 Position(StrEnum)  ──┤── Master.position
                      ├── Service.specialty
 UserRole(StrEnum)   ─┤── User.role
-BookingStatus(StrEnum)── Record.status
+RecordStatus(StrEnum)── Record.status
 VisitStatus(StrEnum) ── Visit.status
 PaymentMethod(StrEnum)─ Payment.method
 
@@ -248,7 +250,7 @@ Per entity, standard CRUD:
 | GET | `/api/{entities}` | List all (with filters) |
 | GET | `/api/{entities}/{id}` | Get one |
 | POST | `/api/{entities}` | Create |
-| PATCH | `/api/{entities}/{id}` | Update |
+| PUT | `/api/{entities}/{id}` | Full update |
 | DELETE | `/api/{entities}/{id}` | Soft delete (is_active=false) |
 
 Entities: masters, locations, services, activities, clients, visitors, records, payments.

@@ -6,21 +6,21 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.db import SessionDep
-from app.domain.masters.schemas import MasterCreate, MasterResponse, MasterUpdate
+from src.schemas.master import MasterCreate, MasterResponse, MasterUpdate
 from app.domain.masters.service import get_master_service
-from app.domain.base import GenericService
+from src.services.generic import GenericService
 from app.db.models.master import Master
 
 router = APIRouter(tags=["masters"])
 
 
 @lru_cache
-def _get_master_service() -> GenericService[Master, MasterCreate, MasterUpdate]:
+def _get_master_service() -> GenericService[MasterCreate, MasterUpdate, MasterResponse]:
     """Dependency factory returning a singleton MasterService."""
     return get_master_service()
 
 
-_ServiceDep = Annotated[GenericService[Master, MasterCreate, MasterUpdate], Depends(_get_master_service)]
+_ServiceDep = Annotated[GenericService[MasterCreate, MasterUpdate, MasterResponse], Depends(_get_master_service)]
 
 
 @router.get("", response_model=list[MasterResponse])

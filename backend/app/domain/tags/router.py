@@ -6,21 +6,21 @@ from typing import Annotated
 from fastapi import APIRouter, Depends
 
 from app.db import SessionDep
-from app.domain.tags.schemas import TagCreate, TagResponse
+from src.schemas.tag import TagCreate, TagResponse
 from app.domain.tags.service import get_tag_service
-from app.domain.base import GenericService
+from src.services.generic import GenericService
 from app.db.models.tag import Tag
 
 router = APIRouter(tags=["tags"])
 
 
 @lru_cache
-def _get_tag_service() -> GenericService[Tag, TagCreate, TagCreate]:
+def _get_tag_service() -> GenericService[TagCreate, TagCreate, TagResponse]:
     """Dependency factory returning a singleton TagService."""
     return get_tag_service()
 
 
-_ServiceDep = Annotated[GenericService[Tag, TagCreate, TagCreate], Depends(_get_tag_service)]
+_ServiceDep = Annotated[GenericService[TagCreate, TagCreate, TagResponse], Depends(_get_tag_service)]
 
 
 @router.get("", response_model=list[TagResponse])

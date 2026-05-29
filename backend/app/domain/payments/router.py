@@ -6,21 +6,21 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.db import SessionDep
-from app.domain.payments.schemas import PaymentCreate, PaymentResponse, PaymentUpdate
+from src.schemas.payment import PaymentCreate, PaymentResponse, PaymentUpdate
 from app.domain.payments.service import get_payment_service
-from app.domain.base import GenericService
+from src.services.generic import GenericService
 from app.db.models.payment import Payment
 
 router = APIRouter(tags=["payments"])
 
 
 @lru_cache
-def _get_payment_service() -> GenericService[Payment, PaymentCreate, PaymentUpdate]:
+def _get_payment_service() -> GenericService[PaymentCreate, PaymentUpdate, PaymentResponse]:
     """Dependency factory returning a singleton PaymentService."""
     return get_payment_service()
 
 
-_ServiceDep = Annotated[GenericService[Payment, PaymentCreate, PaymentUpdate], Depends(_get_payment_service)]
+_ServiceDep = Annotated[GenericService[PaymentCreate, PaymentUpdate, PaymentResponse], Depends(_get_payment_service)]
 
 
 @router.get("", response_model=list[PaymentResponse])

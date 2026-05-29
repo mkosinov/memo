@@ -12,17 +12,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models.activity import Activity
 from app.db.models.record import Record
 from app.db.repository import GenericRepository, get_repository
-from app.domain.activities.schemas import ActivityCreate, ActivityUpdate
-from app.domain.base import GenericService
+from src.schemas.activity import ActivityCreate, ActivityResponse, ActivityUpdate
+from src.services.generic import GenericService
 
 
-class ActivityService(GenericService[Activity, ActivityCreate, ActivityUpdate]):
+class ActivityService(GenericService[ActivityCreate, ActivityUpdate, ActivityResponse]):
     """Activity service with date filtering and occupied count."""
 
     def __init__(
         self, repository: GenericRepository, model: type[Activity]
     ) -> None:
-        super().__init__(repository, model)
+        super().__init__(repository, model, response_schema=ActivityResponse)
 
     async def list(
         self,

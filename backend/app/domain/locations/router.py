@@ -6,21 +6,21 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.db import SessionDep
-from app.domain.locations.schemas import LocationCreate, LocationResponse, LocationUpdate
+from src.schemas.location import LocationCreate, LocationResponse, LocationUpdate
 from app.domain.locations.service import get_location_service
-from app.domain.base import GenericService
+from src.services.generic import GenericService
 from app.db.models.location import Location
 
 router = APIRouter(tags=["locations"])
 
 
 @lru_cache
-def _get_location_service() -> GenericService[Location, LocationCreate, LocationUpdate]:
+def _get_location_service() -> GenericService[LocationCreate, LocationUpdate, LocationResponse]:
     """Dependency factory returning a singleton LocationService."""
     return get_location_service()
 
 
-_ServiceDep = Annotated[GenericService[Location, LocationCreate, LocationUpdate], Depends(_get_location_service)]
+_ServiceDep = Annotated[GenericService[LocationCreate, LocationUpdate, LocationResponse], Depends(_get_location_service)]
 
 
 @router.get("", response_model=list[LocationResponse])

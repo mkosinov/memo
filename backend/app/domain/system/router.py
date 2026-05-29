@@ -6,7 +6,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends
 
 from app.db import SessionDep
-from app.domain.system.schemas import HealthResponse
+from src.schemas.system import HealthResponse
 from app.domain.system.service import HealthService, get_health_service
 
 router = APIRouter(tags=["system"])

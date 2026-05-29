@@ -4,10 +4,10 @@ from functools import lru_cache
 
 from app.db.models.payment import Payment
 from app.db.repository import get_repository
-from app.domain.base import GenericService
-from app.domain.payments.schemas import PaymentCreate, PaymentUpdate
+from src.services.generic import GenericService
+from src.schemas.payment import PaymentCreate, PaymentResponse, PaymentUpdate
 
 
 @lru_cache
-def get_payment_service() -> GenericService[Payment, PaymentCreate, PaymentUpdate]:
-    return GenericService(get_repository(), Payment)
+def get_payment_service() -> GenericService[PaymentCreate, PaymentUpdate, PaymentResponse]:
+    return GenericService(get_repository(), Payment, PaymentResponse)

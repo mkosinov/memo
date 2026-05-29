@@ -6,18 +6,18 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.db import SessionDep
-from app.domain.clients.schemas import ClientCreate, ClientResponse, ClientUpdate
+from src.schemas.client import ClientCreate, ClientResponse, ClientUpdate
 from app.domain.clients.service import get_client_service
-from app.domain.visitors.schemas import VisitorResponse
+from src.schemas.visitor import VisitorResponse
 from app.domain.visitors.service import get_visitor_service
-from app.domain.base import GenericService
+from src.services.generic import GenericService
 from app.db.models.client import Client
 
 router = APIRouter(tags=["clients"])
 
 
 @lru_cache
-def _get_client_service() -> GenericService[Client, ClientCreate, ClientUpdate]:
+def _get_client_service() -> GenericService[ClientCreate, ClientUpdate, ClientResponse]:
     """Dependency factory returning a singleton ClientService."""
     return get_client_service()
 
@@ -28,7 +28,7 @@ def _get_visitor_service():
     return get_visitor_service()
 
 
-_ServiceDep = Annotated[GenericService[Client, ClientCreate, ClientUpdate], Depends(_get_client_service)]
+_ServiceDep = Annotated[GenericService[ClientCreate, ClientUpdate, ClientResponse], Depends(_get_client_service)]
 _VisitorServiceDep = Annotated[any, Depends(_get_visitor_service)]
 
 

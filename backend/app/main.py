@@ -24,10 +24,8 @@ from app.domain.visits.router import router as visits_router
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    """Application lifespan — create tables; drop+recreate in test mode for isolation."""
+    """Application lifespan — ensure tables exist (idempotent)."""
     async with db_manager.engine.begin() as conn:
-        if settings.TESTING:
-            await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
     yield
 

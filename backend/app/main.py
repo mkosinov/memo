@@ -20,6 +20,7 @@ from app.domain.clients.router import router as clients_router
 from app.domain.visitors.router import router as visitors_router
 from app.domain.records.router import router as records_router
 from app.domain.visits.router import router as visits_router
+from app.domain.payments.router import router as payments_router
 
 
 def _sync_engine_url(async_url: str) -> str:
@@ -67,6 +68,7 @@ def create_app() -> FastAPI:
     app.include_router(visitors_router, prefix="/api/visitors")
     app.include_router(records_router, prefix="/api/records")
     app.include_router(visits_router, prefix="/api/visits")
+    app.include_router(payments_router, prefix="/api/payments")
 
     # Mount SQLAdmin with a sync engine (separate from async app engine)
     admin_engine = create_engine(_sync_engine_url(settings.DATABASE_URL))

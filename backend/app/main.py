@@ -14,6 +14,7 @@ from app.domain.locations.router import router as locations_router
 from app.domain.masters.router import router as masters_router
 from app.domain.services.router import router as services_router
 from app.domain.system.router import router as system_router
+from app.domain.activities.router import router as activities_router
 from app.domain.tags.router import router as tags_router
 
 
@@ -55,6 +56,7 @@ def create_app() -> FastAPI:
     app.include_router(system_router, prefix="/api/health")
     app.include_router(locations_router, prefix="/api/locations")
     app.include_router(masters_router, prefix="/api/masters")
+    app.include_router(activities_router, prefix="/api/activities")
     app.include_router(tags_router, prefix="/api/tags")
     app.include_router(services_router, prefix="/api/services")
 

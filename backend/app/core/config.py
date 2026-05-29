@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "Memo Backend"
     CORS_ORIGINS: list[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]
     LOG_LEVEL: str = "INFO"
+    TESTING: bool = False
 
 
 settings = Settings()

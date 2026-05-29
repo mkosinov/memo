@@ -11,7 +11,7 @@ from sqlalchemy.orm import selectinload
 from app.db.models.service import Service
 from app.db.models.tag import service_tags
 from app.db.models.tariff import Tariff
-from app.db.repository import GenericRepository
+from app.db.repository import GenericRepository, get_repository
 from app.domain.base import GenericService
 from app.domain.services.schemas import ServiceCreate, ServiceUpdate
 
@@ -19,10 +19,14 @@ from app.domain.services.schemas import ServiceCreate, ServiceUpdate
 class ServiceService(GenericService[Service, ServiceCreate, ServiceUpdate]):
     """Service service with eager-loaded tariffs/tags and nested create/update."""
 
-    def __init__(self, repository: GenericRepository[Service]) -> None:
-        super().__init__(repository)
+    def __init__(
+        self, repository: GenericRepository, model: type[Service]
+    ) -> None:
+        super().__init__(repository, model)
 
-    async def list(self, db_session: AsyncSession, **filters) -> list[Service]:
+    async def list(
+        self, db_session: AsyncSession, **filters
+    ) -> list[Service]:
         """Return all active services with tariffs and tags eagerly loaded."""
         result = await db_session.execute(
             select(Service)
@@ -31,7 +35,9 @@ class ServiceService(GenericService[Service, ServiceCreate, ServiceUpdate]):
         )
         return list(result.scalars().all())
 
-    async def get(self, db_session: AsyncSession, id: str) -> Service | None:
+    async def get(
+        self, db_session: AsyncSession, id: str
+    ) -> Service | None:
         """Return a service by ID with tariffs and tags, or None."""
         result = await db_session.execute(
             select(Service)
@@ -40,7 +46,9 @@ class ServiceService(GenericService[Service, ServiceCreate, ServiceUpdate]):
         )
         return result.scalar_one_or_none()
 
-    async def create(self, db_session: AsyncSession, data: ServiceCreate) -> Service:
+    async def create(
+        self, db_session: AsyncSession, data: ServiceCreate
+    ) -> Service:
         """Create service with nested tariffs and tag links."""
         tag_ids = data.tag_ids
         tariff_data = data.tariffs
@@ -59,13 +67,17 @@ class ServiceService(GenericService[Service, ServiceCreate, ServiceUpdate]):
         if tag_ids:
             for tid in tag_ids:
                 await db_session.execute(
-                    service_tags.insert().values(service_id=service.id, tag_id=tid)
+                    service_tags.insert().values(
+                        service_id=service.id, tag_id=tid
+                    )
                 )
 
         await db_session.flush()
         return await self.get(db_session, service.id)
 
-    async def update(self, db_session: AsyncSession, id: str, data: ServiceUpdate) -> Service | None:
+    async def update(
+        self, db_session: AsyncSession, id: str, data: ServiceUpdate
+    ) -> Service | None:
         """Full-update: replaces attributes, tariffs, and tag links."""
         service = await self.get(db_session, id)
         if not service:
@@ -78,16 +90,22 @@ class ServiceService(GenericService[Service, ServiceCreate, ServiceUpdate]):
         for key, value in update_data.items():
             setattr(service, key, value)
 
-        await db_session.execute(delete(Tariff).where(Tariff.service_id == id))
+        await db_session.execute(
+            delete(Tariff).where(Tariff.service_id == id)
+        )
         for td in tariff_data:
             tariff = Tariff(service_id=service.id, **td.model_dump())
             db_session.add(tariff)
 
-        await db_session.execute(delete(service_tags).where(service_tags.c.service_id == id))
+        await db_session.execute(
+            delete(service_tags).where(service_tags.c.service_id == id)
+        )
         if tag_ids:
             for tid in tag_ids:
                 await db_session.execute(
-                    service_tags.insert().values(service_id=service.id, tag_id=tid)
+                    service_tags.insert().values(
+                        service_id=service.id, tag_id=tid
+                    )
                 )
 
         await db_session.flush()
@@ -96,11 +114,6 @@ class ServiceService(GenericService[Service, ServiceCreate, ServiceUpdate]):
 
 
 @lru_cache
-def get_service_repo() -> GenericRepository[Service]:
-    return GenericRepository(Service)
-
-
-@lru_cache
 def get_service_service() -> ServiceService:
     """Returns a singleton ServiceService."""
-    return ServiceService(get_service_repo())
+    return ServiceService(get_repository(), Service)

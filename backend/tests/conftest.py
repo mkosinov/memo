@@ -2,5 +2,6 @@
 
 import os
 
-# Use in-memory SQLite for all tests — must be set before any app creation.
+# Test settings — must be set before any app imports (conftest runs first).
 os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
+os.environ["TESTING"] = "True"

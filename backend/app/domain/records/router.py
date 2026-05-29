@@ -1,0 +1,111 @@
+"""FastAPI router for record CRUD endpoints with nested visits."""
+
+from datetime import datetime
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.db.database import get_db_session
+from app.domain.records.schemas import (
+    RecordCreate,
+    RecordResponse,
+    RecordUpdate,
+    VisitResponse,
+)
+from app.domain.records.service import RecordService
+
+router = APIRouter(tags=["records"])
+
+_SessionDep = Annotated[AsyncSession, Depends(get_db_session)]
+
+
+def _get_service(session: _SessionDep) -> RecordService:
+    """Dependency factory for RecordService."""
+    return RecordService(session)
+
+
+_ServiceDep = Annotated[RecordService, Depends(_get_service)]
+
+
+def _map_record(record) -> RecordResponse:
+    """Map a Record ORM object to RecordResponse with nested visits."""
+
+    def _dt_to_str(dt: datetime | None) -> str:
+        if dt is None:
+            return ""
+        return dt.isoformat()
+
+    visits = [
+        VisitResponse(
+            id=v.id,
+            record_id=v.record_id,
+            visitor_id=v.visitor_id,
+            price=v.price,
+            status=v.status,
+            created_at=_dt_to_str(v.created_at),
+            updated_at=_dt_to_str(v.updated_at),
+            is_active=v.is_active,
+        )
+        for v in record.visits
+        if v.is_active
+    ]
+
+    return RecordResponse(
+        id=record.id,
+        activity_id=record.activity_id,
+        client_id=record.client_id,
+        status=record.status,
+        seats=record.seats,
+        comment=record.comment,
+        created_at=_dt_to_str(record.created_at),
+        updated_at=_dt_to_str(record.updated_at),
+        is_active=record.is_active,
+        visits=visits,
+    )
+
+
+@router.get("", response_model=list[RecordResponse])
+async def list_records(service: _ServiceDep) -> list[RecordResponse]:
+    """Return all active records with nested visits."""
+    records = await service.list_all()
+    return [_map_record(r) for r in records]
+
+
+@router.get("/{record_id}", response_model=RecordResponse)
+async def get_record(record_id: str, service: _ServiceDep) -> RecordResponse:
+    """Return a single record by ID with nested visits."""
+    record = await service.get_by_id(record_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Record not found")
+    return _map_record(record)
+
+
+@router.post("", response_model=RecordResponse, status_code=201)
+async def create_record(
+    data: RecordCreate, service: _ServiceDep
+) -> RecordResponse:
+    """Create a new record with visits. Seats auto-calculated from len(visits)."""
+    record = await service.create(data)
+    return _map_record(record)
+
+
+@router.put("/{record_id}", response_model=RecordResponse)
+async def update_record(
+    record_id: str,
+    data: RecordUpdate,
+    service: _ServiceDep,
+) -> RecordResponse:
+    """Full-update a record by ID. Replaces visits, recalculates seats."""
+    record = await service.update(record_id, data)
+    if not record:
+        raise HTTPException(status_code=404, detail="Record not found")
+    return _map_record(record)
+
+
+@router.delete("/{record_id}", status_code=204)
+async def delete_record(record_id: str, service: _ServiceDep) -> None:
+    """Soft-delete a record (set is_active=False)."""
+    deleted = await service.delete(record_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Record not found")

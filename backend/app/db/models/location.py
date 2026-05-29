@@ -1,9 +1,16 @@
 """Location ORM model."""
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from sqlalchemy import Integer, String, Text
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.models.abstract import AbstractModel
+
+if TYPE_CHECKING:
+    from app.db.models.tag import Tag
 
 
 class Location(AbstractModel):
@@ -17,3 +24,7 @@ class Location(AbstractModel):
     review_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     record_info: Mapped[str | None] = mapped_column(Text, nullable=True)
     image_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    tags: Mapped[list["Tag"]] = relationship(
+        "Tag", secondary="location_tags", back_populates="locations"
+    )

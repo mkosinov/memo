@@ -1,9 +1,16 @@
 """Master ORM model."""
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from sqlalchemy import String, Text
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.models.abstract import AbstractModel
+
+if TYPE_CHECKING:
+    from app.db.models.tag import Tag
 
 
 class Master(AbstractModel):
@@ -15,3 +22,7 @@ class Master(AbstractModel):
     position: Mapped[str] = mapped_column(String(20))
     specialty: Mapped[str] = mapped_column(String(20))
     avatar_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    tags: Mapped[list["Tag"]] = relationship(
+        "Tag", secondary="master_tags", back_populates="masters"
+    )

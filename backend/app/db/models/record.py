@@ -1,9 +1,16 @@
 """Record ORM model."""
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from sqlalchemy import ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.models.abstract import AbstractModel
+
+if TYPE_CHECKING:
+    from app.db.models.tag import Tag
 
 
 class Record(AbstractModel):
@@ -19,4 +26,7 @@ class Record(AbstractModel):
 
     visits: Mapped[list["Visit"]] = relationship(
         "Visit", back_populates="record", lazy="selectin"
+    )
+    tags: Mapped[list["Tag"]] = relationship(
+        "Tag", secondary="record_tags", back_populates="records"
     )

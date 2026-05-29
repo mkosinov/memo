@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.record import Record
 from app.db.models.visit import Visit
-from app.db.repository import GenericRepository
+from app.db.repository import GenericRepository, get_repository
 from app.domain.base import GenericService
 from app.domain.records.schemas import RecordCreate, RecordUpdate
 
@@ -16,10 +16,14 @@ from app.domain.records.schemas import RecordCreate, RecordUpdate
 class RecordService(GenericService[Record, RecordCreate, RecordUpdate]):
     """Record service with nested visit management."""
 
-    def __init__(self, repository: GenericRepository[Record]) -> None:
-        super().__init__(repository)
+    def __init__(
+        self, repository: GenericRepository, model: type[Record]
+    ) -> None:
+        super().__init__(repository, model)
 
-    async def create(self, db_session: AsyncSession, data: RecordCreate) -> Record:
+    async def create(
+        self, db_session: AsyncSession, data: RecordCreate
+    ) -> Record:
         """Create record with nested visits, auto-compute seats."""
         record = Record(
             activity_id=data.activity_id,
@@ -44,7 +48,9 @@ class RecordService(GenericService[Record, RecordCreate, RecordUpdate]):
         await db_session.refresh(record)
         return record
 
-    async def update(self, db_session: AsyncSession, id: str, data: RecordUpdate) -> Record | None:
+    async def update(
+        self, db_session: AsyncSession, id: str, data: RecordUpdate
+    ) -> Record | None:
         """Full-update record: replace visits, recalculate seats."""
         record = await self.get(db_session, id)
         if not record:
@@ -75,11 +81,6 @@ class RecordService(GenericService[Record, RecordCreate, RecordUpdate]):
 
 
 @lru_cache
-def get_record_repo() -> GenericRepository[Record]:
-    return GenericRepository(Record)
-
-
-@lru_cache
 def get_record_service() -> RecordService:
     """Returns a singleton RecordService."""
-    return RecordService(get_record_repo())
+    return RecordService(get_repository(), Record)

@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.visitor import Visitor
-from app.db.repository import GenericRepository
+from app.db.repository import GenericRepository, get_repository
 from app.domain.base import GenericService
 from app.domain.visitors.schemas import VisitorCreate, VisitorUpdate
 
@@ -14,10 +14,14 @@ from app.domain.visitors.schemas import VisitorCreate, VisitorUpdate
 class VisitorService(GenericService[Visitor, VisitorCreate, VisitorUpdate]):
     """Visitor service with client-based filtering."""
 
-    def __init__(self, repository: GenericRepository[Visitor]) -> None:
-        super().__init__(repository)
+    def __init__(
+        self, repository: GenericRepository, model: type[Visitor]
+    ) -> None:
+        super().__init__(repository, model)
 
-    async def list_by_client(self, db_session: AsyncSession, client_id: str) -> list[Visitor]:
+    async def list_by_client(
+        self, db_session: AsyncSession, client_id: str
+    ) -> list[Visitor]:
         """Return all active visitors for a given client."""
         result = await db_session.execute(
             select(Visitor).where(
@@ -29,10 +33,6 @@ class VisitorService(GenericService[Visitor, VisitorCreate, VisitorUpdate]):
 
 
 @lru_cache
-def get_visitor_repo() -> GenericRepository[Visitor]:
-    return GenericRepository(Visitor)
-
-
-@lru_cache
 def get_visitor_service() -> VisitorService:
-    return VisitorService(get_visitor_repo())
+    """Returns a singleton VisitorService."""
+    return VisitorService(get_repository(), Visitor)

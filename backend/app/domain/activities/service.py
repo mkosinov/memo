@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from datetime import datetime
 from functools import lru_cache
+from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.activity import Activity
 from app.db.models.record import Record
-from app.db.repository import GenericRepository
+from app.db.repository import GenericRepository, get_repository
 from app.domain.activities.schemas import ActivityCreate, ActivityUpdate
 from app.domain.base import GenericService
 
@@ -18,8 +19,10 @@ from app.domain.base import GenericService
 class ActivityService(GenericService[Activity, ActivityCreate, ActivityUpdate]):
     """Activity service with date filtering and occupied count."""
 
-    def __init__(self, repository: GenericRepository[Activity]) -> None:
-        super().__init__(repository)
+    def __init__(
+        self, repository: GenericRepository, model: type[Activity]
+    ) -> None:
+        super().__init__(repository, model)
 
     async def list(
         self,
@@ -51,7 +54,9 @@ class ActivityService(GenericService[Activity, ActivityCreate, ActivityUpdate]):
         result = await db_session.execute(stmt)
         return list(result.scalars().all())
 
-    async def count_records(self, db_session: AsyncSession, activity_id: str) -> int:
+    async def count_records(
+        self, db_session: AsyncSession, activity_id: str
+    ) -> int:
         """Count the number of Records linked to this activity."""
         result = await db_session.execute(
             select(func.count(Record.id)).where(
@@ -62,11 +67,6 @@ class ActivityService(GenericService[Activity, ActivityCreate, ActivityUpdate]):
 
 
 @lru_cache
-def get_activity_repo() -> GenericRepository[Activity]:
-    return GenericRepository(Activity)
-
-
-@lru_cache
 def get_activity_service() -> ActivityService:
     """Returns a singleton ActivityService."""
-    return ActivityService(get_activity_repo())
+    return ActivityService(get_repository(), Activity)

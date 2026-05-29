@@ -1,47 +1,57 @@
 """FastAPI router for master CRUD endpoints."""
 
+from functools import lru_cache
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.database import get_db_session
+from app.db.database import SessionDep
 from app.domain.masters.schemas import MasterCreate, MasterResponse, MasterUpdate
-from app.domain.masters.service import MasterService
+from app.domain.masters.service import MasterService, get_master_service
 
 router = APIRouter(tags=["masters"])
 
-_SessionDep = Annotated[AsyncSession, Depends(get_db_session)]
+
+@lru_cache
+def _get_master_service() -> MasterService:
+    """Dependency factory returning a singleton MasterService."""
+    return get_master_service()
 
 
-def _get_service(session: _SessionDep) -> MasterService:
-    """Dependency factory for MasterService."""
-    return MasterService(session)
-
-
-_ServiceDep = Annotated[MasterService, Depends(_get_service)]
+_ServiceDep = Annotated[MasterService, Depends(_get_master_service)]
 
 
 @router.get("", response_model=list[MasterResponse])
-async def list_masters(service: _ServiceDep) -> list[MasterResponse]:
+async def list_masters(
+    service: _ServiceDep,
+    session: SessionDep,
+) -> list[MasterResponse]:
     """Return all active masters."""
-    masters = await service.list_all()
+    masters = await service.list_all(db_session=session)
     return [MasterResponse.model_validate(m) for m in masters]
 
 
 @router.get("/{master_id}", response_model=MasterResponse)
-async def get_master(master_id: str, service: _ServiceDep) -> MasterResponse:
+async def get_master(
+    master_id: str,
+    service: _ServiceDep,
+    session: SessionDep,
+) -> MasterResponse:
     """Return a single master by ID."""
-    master = await service.get_by_id(master_id)
+    master = await service.get_by_id(db_session=session, master_id=master_id)
     if not master:
         raise HTTPException(status_code=404, detail="Master not found")
     return MasterResponse.model_validate(master)
 
 
 @router.post("", response_model=MasterResponse, status_code=201)
-async def create_master(data: MasterCreate, service: _ServiceDep) -> MasterResponse:
+async def create_master(
+    data: MasterCreate,
+    service: _ServiceDep,
+    session: SessionDep,
+) -> MasterResponse:
     """Create a new master."""
-    master = await service.create(data)
+    master = await service.create(db_session=session, data=data)
     return MasterResponse.model_validate(master)
 
 
@@ -50,17 +60,22 @@ async def update_master(
     master_id: str,
     data: MasterUpdate,
     service: _ServiceDep,
+    session: SessionDep,
 ) -> MasterResponse:
     """Full-update a master by ID (PUT, not PATCH)."""
-    master = await service.update(master_id, data)
+    master = await service.update(db_session=session, master_id=master_id, data=data)
     if not master:
         raise HTTPException(status_code=404, detail="Master not found")
     return MasterResponse.model_validate(master)
 
 
 @router.delete("/{master_id}", status_code=204)
-async def delete_master(master_id: str, service: _ServiceDep) -> None:
+async def delete_master(
+    master_id: str,
+    service: _ServiceDep,
+    session: SessionDep,
+) -> None:
     """Soft-delete a master (set is_active=False)."""
-    deleted = await service.delete(master_id)
+    deleted = await service.delete(db_session=session, master_id=master_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Master not found")

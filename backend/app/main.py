@@ -4,23 +4,24 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import create_engine
 
 from app.admin.setup import setup_admin
 from app.core.config import Settings
 from app.db.base import Base
 from app.db.database import DatabaseSessionManager, set_manager
+from app.domain.activities.router import router as activities_router
+from app.domain.clients.router import router as clients_router
 from app.domain.locations.router import router as locations_router
 from app.domain.masters.router import router as masters_router
+from app.domain.payments.router import router as payments_router
+from app.domain.records.router import router as records_router
 from app.domain.services.router import router as services_router
 from app.domain.system.router import router as system_router
-from app.domain.activities.router import router as activities_router
 from app.domain.tags.router import router as tags_router
-from app.domain.clients.router import router as clients_router
 from app.domain.visitors.router import router as visitors_router
-from app.domain.records.router import router as records_router
 from app.domain.visits.router import router as visits_router
-from app.domain.payments.router import router as payments_router
 
 
 def _sync_engine_url(async_url: str) -> str:
@@ -56,6 +57,15 @@ def create_app() -> FastAPI:
         description="ColourMountains art studio management system",
         version="0.1.0",
         lifespan=lifespan,
+    )
+
+    # CORS middleware for frontend access (Next.js on localhost:3000)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
     )
 
     app.include_router(system_router, prefix="/api/health")

@@ -6,7 +6,7 @@ import pytest
 from sqlalchemy import create_engine, event, inspect
 from sqlalchemy.orm import Session
 
-from app.db.base import Base
+from src.db.base import Base
 
 
 def _make_engine():
@@ -25,7 +25,7 @@ def _make_engine():
 def _create_all_and_session(engine):
     """Create tables and return a Session."""
     # Import models so they register with Base.metadata
-    from app.db.models import (  # noqa: F401
+    from src.models import (  # noqa: F401
         Activity,
         Client,
         Location,
@@ -53,10 +53,10 @@ def _create_all_and_session(engine):
 
 
 class TestModelImports:
-    """All models and join tables are importable from app.db.models."""
+    """All models and join tables are importable from src.models."""
 
     def test_imports(self):
-        from app.db.models import (
+        from src.models import (
             Activity,
             Client,
             Location,
@@ -77,10 +77,12 @@ class TestModelImports:
             assert hasattr(cls, "__tablename__")
 
     def test_all_exports(self):
-        from app.db.models import __all__
+        from src.models import __all__
         expected = [
+            "AbstractModel",
             "Master", "User", "Location", "Service", "Tariff", "Tag",
             "Activity", "Client", "Visitor", "Photo", "Record", "Visit", "Payment",
+            "RecordStatus", "UserRole",
             "service_tags", "activity_tags", "photo_tags",
             "master_tags", "location_tags", "client_tags", "visitor_tags", "record_tags",
         ]
@@ -122,7 +124,7 @@ class TestModelCrud:
         return datetime.utcnow()
 
     def test_master_crud(self, session: Session):
-        from app.db.models import Master
+        from src.models import Master
         m = Master(
             first_name="Anna",
             last_name="Ivanova",
@@ -143,7 +145,7 @@ class TestModelCrud:
         assert fetched.is_active is True
 
     def test_user_crud(self, session: Session):
-        from app.db.models import User
+        from src.models import User
         u = User(
             phone="+79001234567",
             email="test@example.com",
@@ -160,7 +162,7 @@ class TestModelCrud:
         assert fetched.role == "admin"
 
     def test_user_master_fk_nullable(self, session: Session):
-        from app.db.models import Master, User
+        from src.models import Master, User
         m = Master(first_name="A", last_name="B", color="#000000", position="мастер", specialty="живопись")
         session.add(m)
         session.flush()
@@ -176,7 +178,7 @@ class TestModelCrud:
         assert fetched.master_id == m.id
 
     def test_location_crud(self, session: Session):
-        from app.db.models import Location
+        from src.models import Location
         loc = Location(
             name="Studio 1",
             address="Moscow, street 1",
@@ -194,7 +196,7 @@ class TestModelCrud:
         assert fetched.capacity == 20
 
     def test_service_crud(self, session: Session):
-        from app.db.models import Service
+        from src.models import Service
         svc = Service(
             title="Portrait Painting",
             description="Learn to paint portraits",
@@ -212,7 +214,7 @@ class TestModelCrud:
         assert fetched.duration == 120
 
     def test_tariff_crud(self, session: Session):
-        from app.db.models import Service, Tariff
+        from src.models import Service, Tariff
         svc = Service(
             title="S1", description="d", image_url="http://x.com/i",
             specialty="живопись", min_age=1, max_age=99, duration=60, record_info="r",
@@ -233,7 +235,7 @@ class TestModelCrud:
         assert fetched.service_id == svc.id
 
     def test_tag_crud(self, session: Session):
-        from app.db.models import Tag
+        from src.models import Tag
         t = Tag(tag="beginner")
         session.add(t)
         session.flush()
@@ -241,7 +243,7 @@ class TestModelCrud:
         assert fetched.tag == "beginner"
 
     def test_activity_crud(self, session: Session):
-        from app.db.models import Activity, Location, Master, Service
+        from src.models import Activity, Location, Master, Service
         now = self._now()
         m = Master(first_name="A", last_name="B", color="#000", position="мастер", specialty="живопись")
         svc = Service(title="S", description="d", image_url="http://x.com/i", specialty="живопись",
@@ -268,7 +270,7 @@ class TestModelCrud:
         assert fetched.comment == "Private event"
 
     def test_client_crud(self, session: Session):
-        from app.db.models import Client
+        from src.models import Client
         c = Client(
             name="Maria Petrova",
             phone="+79002223344",
@@ -282,7 +284,7 @@ class TestModelCrud:
         assert fetched.channel == "telegram"
 
     def test_visitor_crud(self, session: Session):
-        from app.db.models import Client, Visitor
+        from src.models import Client, Visitor
         c = Client(name="Parent", phone="+79001111111", channel="phone")
         session.add(c)
         session.flush()
@@ -298,7 +300,7 @@ class TestModelCrud:
         assert fetched.age == 8
 
     def test_photo_crud(self, session: Session):
-        from app.db.models import Photo
+        from src.models import Photo
         p = Photo(filename="photo_001.jpg")
         session.add(p)
         session.flush()
@@ -307,7 +309,7 @@ class TestModelCrud:
         assert fetched.visitor_id is None
 
     def test_record_crud(self, session: Session):
-        from app.db.models import Activity, Client, Location, Master, Record, Service
+        from src.models import Activity, Client, Location, Master, Record, Service
         now = self._now()
         m = Master(first_name="A", last_name="B", color="#000", position="мастер", specialty="живопись")
         svc = Service(title="S", description="d", image_url="http://x.com/i", specialty="живопись",
@@ -334,7 +336,7 @@ class TestModelCrud:
         assert fetched.seats == 2
 
     def test_visit_crud(self, session: Session):
-        from app.db.models import (
+        from src.models import (
             Activity,
             Client,
             Location,
@@ -375,7 +377,7 @@ class TestModelCrud:
         assert fetched.status == "visited"
 
     def test_payment_crud(self, session: Session):
-        from app.db.models import (
+        from src.models import (
             Activity,
             Client,
             Location,
@@ -411,7 +413,7 @@ class TestModelCrud:
         assert fetched.method == "card"
 
     def test_service_tags_join(self, session: Session):
-        from app.db.models import Service, Tag, service_tags
+        from src.models import Service, Tag, service_tags
         svc = Service(title="S2", description="d", image_url="http://x.com/i", specialty="керамика",
                        min_age=5, max_age=50, duration=90, record_info="r")
         tag1 = Tag(tag="for-kids")
@@ -434,7 +436,7 @@ class TestModelCrud:
     def test_activity_tags_join(self, session: Session):
         from sqlalchemy import select
 
-        from app.db.models import Activity, Location, Master, Service, Tag, activity_tags
+        from src.models import Activity, Location, Master, Service, Tag, activity_tags
         now = self._now()
         m = Master(first_name="A", last_name="B", color="#000", position="мастер", specialty="живопись")
         svc = Service(title="S3", description="d", image_url="http://x.com/i", specialty="живопись",
@@ -458,7 +460,7 @@ class TestModelCrud:
     def test_photo_tags_join(self, session: Session):
         from sqlalchemy import select
 
-        from app.db.models import Photo, Tag, photo_tags
+        from src.models import Photo, Tag, photo_tags
         p = Photo(filename="pic.jpg")
         tag = Tag(tag="portrait")
         session.add_all([p, tag])
@@ -474,7 +476,7 @@ class TestModelCrud:
     def test_master_tags_join(self, session: Session):
         from sqlalchemy import select
 
-        from app.db.models import Master, Tag, master_tags
+        from src.models import Master, Tag, master_tags
         m = Master(first_name="Elena", last_name="Sidorova", color="#33FF57",
                    position="мастер", specialty="керамика")
         tag = Tag(tag="pottery-master")
@@ -491,7 +493,7 @@ class TestModelCrud:
     def test_location_tags_join(self, session: Session):
         from sqlalchemy import select
 
-        from app.db.models import Location, Tag, location_tags
+        from src.models import Location, Tag, location_tags
         loc = Location(name="Workshop Hall", capacity=30)
         tag = Tag(tag="large-space")
         session.add_all([loc, tag])
@@ -507,7 +509,7 @@ class TestModelCrud:
     def test_client_tags_join(self, session: Session):
         from sqlalchemy import select
 
-        from app.db.models import Client, Tag, client_tags
+        from src.models import Client, Tag, client_tags
         c = Client(name="VIP Client", phone="+79005555555", channel="referral")
         tag = Tag(tag="vip")
         session.add_all([c, tag])
@@ -523,7 +525,7 @@ class TestModelCrud:
     def test_visitor_tags_join(self, session: Session):
         from sqlalchemy import select
 
-        from app.db.models import Client, Tag, Visitor, visitor_tags
+        from src.models import Client, Tag, Visitor, visitor_tags
         c = Client(name="Parent", phone="+79001111111", channel="phone")
         session.add(c)
         session.flush()
@@ -542,7 +544,7 @@ class TestModelCrud:
     def test_record_tags_join(self, session: Session):
         from sqlalchemy import select
 
-        from app.db.models import (
+        from src.models import (
             Activity, Client, Location, Master, Record, Service, Tag, record_tags,
         )
         now = self._now()

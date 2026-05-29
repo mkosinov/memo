@@ -8,11 +8,11 @@ class TestHealthEndpoint:
 
     def test_health_returns_ok_with_db_connected(self) -> None:
         """Endpoint returns 200 with status=ok and db=connected."""
-        from app.main import create_app
+        from src.main import create_app
 
         app = create_app()
         with TestClient(app) as client:
-            response = client.get("/api/health")
+            response = client.get("/api/v1/health")
 
         assert response.status_code == 200
         body = response.json()
@@ -20,11 +20,11 @@ class TestHealthEndpoint:
 
     def test_health_response_schema_fields(self) -> None:
         """Response body contains exactly 'status' and 'db' keys."""
-        from app.main import create_app
+        from src.main import create_app
 
         app = create_app()
         with TestClient(app) as client:
-            response = client.get("/api/health")
+            response = client.get("/api/v1/health")
 
         body = response.json()
         assert set(body.keys()) == {"status", "db"}
@@ -33,7 +33,7 @@ class TestHealthEndpoint:
 
     def test_old_health_endpoint_removed(self) -> None:
         """The legacy /health route must no longer exist."""
-        from app.main import create_app
+        from src.main import create_app
 
         app = create_app()
         with TestClient(app) as client:

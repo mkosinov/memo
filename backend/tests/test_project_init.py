@@ -14,10 +14,10 @@ class TestDirectoryStructure:
     @pytest.mark.parametrize(
         "directory",
         [
-            "app",
-            "app/core",
-            "app/db",
-            "app/domain",
+            "src",
+            "src/api",
+            "src/core",
+            "src/db",
             "tests",
         ],
     )
@@ -90,13 +90,13 @@ class TestAppFactory:
     """Verify the FastAPI application can be created."""
 
     def test_app_module_importable(self) -> None:
-        mod = importlib.import_module("app.main")
-        assert hasattr(mod, "create_app"), "app.main must export create_app()"
+        mod = importlib.import_module("src.main")
+        assert hasattr(mod, "create_app"), "src.main must export create_app()"
 
     def test_create_app_returns_fastapi(self) -> None:
         from fastapi import FastAPI
 
-        from app.main import create_app
+        from src.main import create_app
 
         app = create_app()
         assert isinstance(app, FastAPI)
@@ -104,11 +104,11 @@ class TestAppFactory:
     def test_health_endpoint(self) -> None:
         from fastapi.testclient import TestClient
 
-        from app.main import create_app
+        from src.main import create_app
 
         app = create_app()
         with TestClient(app) as client:
-            response = client.get("/api/health")
+            response = client.get("/api/v1/health")
             assert response.status_code == 200
             data = response.json()
             assert data["status"] == "ok"

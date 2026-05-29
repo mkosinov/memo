@@ -5,7 +5,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from app.db import SessionDep
+from src.db import SessionDep
 from src.schemas.location import LocationCreate, LocationResponse, LocationUpdate
 from src.services.generic import GenericService
 from src.services.location_service import get_location_service

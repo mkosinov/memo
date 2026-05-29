@@ -5,21 +5,21 @@ from typing import ClassVar
 from sqladmin import Admin, ModelView
 from sqlalchemy import Column, create_engine
 
-from app.db import db_manager
-from app.db.base import Base
-from app.db.models.activity import Activity
-from app.db.models.client import Client
-from app.db.models.location import Location
-from app.db.models.master import Master
-from app.db.models.payment import Payment
-from app.db.models.photo import Photo
-from app.db.models.record import Record
-from app.db.models.service import Service
-from app.db.models.tag import Tag
-from app.db.models.tariff import Tariff
-from app.db.models.user import User
-from app.db.models.visit import Visit
-from app.db.models.visitor import Visitor
+from src.db import db_manager
+from src.db.base import Base
+from src.models.activity import Activity
+from src.models.client import Client
+from src.models.location import Location
+from src.models.master import Master
+from src.models.payment import Payment
+from src.models.photo import Photo
+from src.models.record import Record
+from src.models.service import Service
+from src.models.tag import Tag
+from src.models.tariff import Tariff
+from src.models.user import User
+from src.models.visit import Visit
+from src.models.visitor import Visitor
 
 
 class MasterAdmin(ModelView, model=Master):

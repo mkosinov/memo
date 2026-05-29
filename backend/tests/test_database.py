@@ -10,7 +10,7 @@ class TestDBManager:
 
     async def test_manager_creates_engine(self) -> None:
         """DBManager creates an async engine on construction."""
-        from app.db.database import DBManager
+        from src.db.database import DBManager
 
         manager = DBManager("sqlite+aiosqlite:///:memory:")
         assert manager.engine is not None
@@ -18,7 +18,7 @@ class TestDBManager:
 
     async def test_get_db_session_yields_async_session(self) -> None:
         """get_db_session yields an AsyncSession."""
-        from app.db.database import DBManager
+        from src.db.database import DBManager
 
         manager = DBManager("sqlite+aiosqlite:///:memory:")
         gen = manager.get_db_session()
@@ -30,7 +30,7 @@ class TestDBManager:
 
     async def test_session_auto_commits_on_success(self) -> None:
         """Session commits automatically when context exits cleanly."""
-        from app.db.database import DBManager
+        from src.db.database import DBManager
 
         manager = DBManager("sqlite+aiosqlite:///:memory:")
 
@@ -55,7 +55,7 @@ class TestDBManager:
 
     async def test_get_db_session_rollbacks_on_error(self) -> None:
         """get_db_session rolls back when an exception occurs."""
-        from app.db.database import DBManager
+        from src.db.database import DBManager
 
         manager = DBManager("sqlite+aiosqlite:///:memory:")
 
@@ -85,7 +85,7 @@ class TestBase:
     """Verify declarative base is available."""
 
     def test_base_importable(self) -> None:
-        from app.db.base import Base
+        from src.db.base import Base
 
         assert Base is not None
         assert hasattr(Base, "metadata")
@@ -95,6 +95,6 @@ class TestSessionDep:
     """Verify SessionDep is importable from app.db."""
 
     def test_session_dep_importable(self) -> None:
-        from app.db import SessionDep
+        from src.db import SessionDep
 
         assert SessionDep is not None

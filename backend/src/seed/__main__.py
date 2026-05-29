@@ -2,7 +2,7 @@
 
 import asyncio
 
-from seed.seed import main
+from src.seed.seed import main
 
 if __name__ == "__main__":
     asyncio.run(main())

@@ -5,7 +5,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends
 
-from app.db import SessionDep
+from src.db import SessionDep
 from src.schemas.system import HealthResponse
 from src.services.system_service import HealthService, get_health_service
 

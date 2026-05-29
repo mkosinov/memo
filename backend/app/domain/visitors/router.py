@@ -7,7 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from app.db.database import SessionDep
 from app.domain.visitors.schemas import VisitorCreate, VisitorResponse, VisitorUpdate
-from app.domain.visitors.service import VisitorService, get_visitor_service
+from app.domain.visitors.service import get_visitor_service
+from app.domain.visitors.service import VisitorService
 
 router = APIRouter(tags=["visitors"])
 
@@ -28,7 +29,7 @@ async def get_visitor(
     session: SessionDep,
 ) -> VisitorResponse:
     """Return a single visitor by ID."""
-    visitor = await service.get_by_id(db_session=session, visitor_id=visitor_id)
+    visitor = await service.get(db_session=session, id=visitor_id)
     if not visitor:
         raise HTTPException(status_code=404, detail="Visitor not found")
     return VisitorResponse.model_validate(visitor)
@@ -53,7 +54,7 @@ async def update_visitor(
     session: SessionDep,
 ) -> VisitorResponse:
     """Full-update a visitor by ID (PUT, not PATCH)."""
-    visitor = await service.update(db_session=session, visitor_id=visitor_id, data=data)
+    visitor = await service.update(db_session=session, id=visitor_id, data=data)
     if not visitor:
         raise HTTPException(status_code=404, detail="Visitor not found")
     return VisitorResponse.model_validate(visitor)
@@ -66,6 +67,6 @@ async def delete_visitor(
     session: SessionDep,
 ) -> None:
     """Soft-delete a visitor (set is_active=False)."""
-    deleted = await service.delete(db_session=session, visitor_id=visitor_id)
+    deleted = await service.delete(db_session=session, id=visitor_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Visitor not found")

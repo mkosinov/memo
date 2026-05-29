@@ -27,7 +27,7 @@ async def list_services(
     session: SessionDep,
 ) -> list[ServiceResponse]:
     """Return all active services with tariffs and tags."""
-    services = await service.list_all(db_session=session)
+    services = await service.list(db_session=session)
     return [ServiceResponse.model_validate(s) for s in services]
 
 
@@ -38,7 +38,7 @@ async def get_service(
     session: SessionDep,
 ) -> ServiceResponse:
     """Return a single service by ID with tariffs and tags."""
-    svc = await service.get_by_id(db_session=session, service_id=service_id)
+    svc = await service.get(db_session=session, id=service_id)
     if not svc:
         raise HTTPException(status_code=404, detail="Service not found")
     return ServiceResponse.model_validate(svc)
@@ -63,7 +63,7 @@ async def update_service(
     session: SessionDep,
 ) -> ServiceResponse:
     """Full-update a service by ID (PUT, not PATCH). Replaces tariffs and tag links."""
-    svc = await service.update(db_session=session, service_id=service_id, data=data)
+    svc = await service.update(db_session=session, id=service_id, data=data)
     if not svc:
         raise HTTPException(status_code=404, detail="Service not found")
     return ServiceResponse.model_validate(svc)
@@ -76,6 +76,6 @@ async def delete_service(
     session: SessionDep,
 ) -> None:
     """Soft-delete a service (set is_active=False)."""
-    deleted = await service.delete(db_session=session, service_id=service_id)
+    deleted = await service.delete(db_session=session, id=service_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Service not found")

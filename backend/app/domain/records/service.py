@@ -8,32 +8,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.record import Record
 from app.db.models.visit import Visit
+from app.db.repository import GenericRepository
+from app.domain.base import GenericService
 from app.domain.records.schemas import RecordCreate, RecordUpdate
 
 
-class RecordService:
-    """Handles record entity operations with nested visit management."""
+class RecordService(GenericService[Record, RecordCreate, RecordUpdate]):
+    """Record service with nested visit management."""
 
-    def __init__(self) -> None:
-        pass
-
-    async def list_all(self, db_session: AsyncSession) -> list[Record]:
-        """Return all active records with visits eagerly loaded."""
-        stmt = (
-            select(Record)
-            .where(Record.is_active)
-        )
-        result = await db_session.execute(stmt)
-        return list(result.scalars().all())
-
-    async def get_by_id(self, db_session: AsyncSession, record_id: str) -> Record | None:
-        """Return a record by ID with visits, or None if not found."""
-        stmt = select(Record).where(Record.id == record_id)
-        result = await db_session.execute(stmt)
-        return result.scalar_one_or_none()
+    def __init__(self, repository: GenericRepository[Record]) -> None:
+        super().__init__(repository)
 
     async def create(self, db_session: AsyncSession, data: RecordCreate) -> Record:
-        """Create a new record with visits. Seats = len(visits), status = PENDING."""
+        """Create record with nested visits, auto-compute seats."""
         record = Record(
             activity_id=data.activity_id,
             client_id=data.client_id,
@@ -57,9 +44,9 @@ class RecordService:
         await db_session.refresh(record)
         return record
 
-    async def update(self, db_session: AsyncSession, record_id: str, data: RecordUpdate) -> Record | None:
-        """Full-update a record, replacing visits and recalculating seats."""
-        record = await self.get_by_id(db_session=db_session, record_id=record_id)
+    async def update(self, db_session: AsyncSession, id: str, data: RecordUpdate) -> Record | None:
+        """Full-update record: replace visits, recalculate seats."""
+        record = await self.get(db_session, id)
         if not record:
             return None
 
@@ -70,7 +57,6 @@ class RecordService:
         record.seats = len(data.visits)
         record.updated_at = datetime.now(UTC)
 
-        # Replace all visits: soft-delete existing, create new ones
         for existing_visit in record.visits:
             existing_visit.is_active = False
 
@@ -87,17 +73,13 @@ class RecordService:
         await db_session.refresh(record)
         return record
 
-    async def delete(self, db_session: AsyncSession, record_id: str) -> bool:
-        """Soft-delete a record (set is_active=False). Returns False if not found."""
-        record = await self.get_by_id(db_session=db_session, record_id=record_id)
-        if not record:
-            return False
-        record.is_active = False
-        await db_session.flush()
-        return True
+
+@lru_cache
+def get_record_repo() -> GenericRepository[Record]:
+    return GenericRepository(Record)
 
 
 @lru_cache
 def get_record_service() -> RecordService:
     """Returns a singleton RecordService."""
-    return RecordService()
+    return RecordService(get_record_repo())

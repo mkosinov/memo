@@ -45,7 +45,7 @@ async def list_activities(
     date_to: str | None = Query(None),
 ) -> list[ActivityResponse]:
     """Return all active activities, optionally filtered by date range."""
-    activities = await service.list_all(db_session=session, date_from=date_from, date_to=date_to)
+    activities = await service.list(db_session=session, date_from=date_from, date_to=date_to)
     return [await _to_response(service, db_session=session, activity=a) for a in activities]
 
 
@@ -56,7 +56,7 @@ async def get_activity(
     session: SessionDep,
 ) -> ActivityResponse:
     """Return a single activity by ID with computed occupied count."""
-    activity = await service.get_by_id(db_session=session, activity_id=activity_id)
+    activity = await service.get(db_session=session, id=activity_id)
     if not activity:
         raise HTTPException(status_code=404, detail="Activity not found")
     return await _to_response(service, db_session=session, activity=activity)
@@ -81,7 +81,7 @@ async def update_activity(
     session: SessionDep,
 ) -> ActivityResponse:
     """Full-update an activity by ID (PUT, not PATCH)."""
-    activity = await service.update(db_session=session, activity_id=activity_id, data=data)
+    activity = await service.update(db_session=session, id=activity_id, data=data)
     if not activity:
         raise HTTPException(status_code=404, detail="Activity not found")
     return await _to_response(service, db_session=session, activity=activity)
@@ -94,6 +94,6 @@ async def delete_activity(
     session: SessionDep,
 ) -> None:
     """Soft-delete an activity (set is_active=False)."""
-    deleted = await service.delete(db_session=session, activity_id=activity_id)
+    deleted = await service.delete(db_session=session, id=activity_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Activity not found")

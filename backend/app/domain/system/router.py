@@ -1,28 +1,30 @@
 """FastAPI router for system health endpoints."""
 
+from functools import lru_cache
 from typing import Annotated
 
 from fastapi import APIRouter, Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.database import get_db_session
+from app.db.database import SessionDep
 from app.domain.system.schemas import HealthResponse
-from app.domain.system.service import HealthService
+from app.domain.system.service import HealthService, get_health_service
 
 router = APIRouter(tags=["system"])
 
-_SessionDep = Annotated[AsyncSession, Depends(get_db_session)]
 
-
-def _get_health_service(session: _SessionDep) -> HealthService:
-    """Dependency factory for HealthService."""
-    return HealthService(session)
+@lru_cache
+def _get_health_service() -> HealthService:
+    """Dependency factory returning a singleton HealthService."""
+    return get_health_service()
 
 
 _ServiceDep = Annotated[HealthService, Depends(_get_health_service)]
 
 
 @router.get("", response_model=HealthResponse)
-async def health_check(service: _ServiceDep) -> HealthResponse:
+async def health_check(
+    service: _ServiceDep,
+    session: SessionDep,
+) -> HealthResponse:
     """Return application health status and DB connectivity."""
-    return await service.check_health()
+    return await service.check_health(db_session=session)

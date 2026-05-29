@@ -2,7 +2,9 @@
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Annotated
 
+from fastapi import Depends
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -83,3 +85,6 @@ async def get_db_session() -> AsyncIterator[AsyncSession]:
 
     async with _manager.session() as sess:
         yield sess
+
+
+SessionDep = Annotated[AsyncSession, Depends(get_db_session)]

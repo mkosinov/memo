@@ -1,31 +1,30 @@
 """FastAPI router for record CRUD endpoints with nested visits."""
 
 from datetime import datetime
+from functools import lru_cache
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.database import get_db_session
+from app.db.database import SessionDep
 from app.domain.records.schemas import (
     RecordCreate,
     RecordResponse,
     RecordUpdate,
     VisitResponse,
 )
-from app.domain.records.service import RecordService
+from app.domain.records.service import RecordService, get_record_service
 
 router = APIRouter(tags=["records"])
 
-_SessionDep = Annotated[AsyncSession, Depends(get_db_session)]
+
+@lru_cache
+def _get_record_service() -> RecordService:
+    """Dependency factory returning a singleton RecordService."""
+    return get_record_service()
 
 
-def _get_service(session: _SessionDep) -> RecordService:
-    """Dependency factory for RecordService."""
-    return RecordService(session)
-
-
-_ServiceDep = Annotated[RecordService, Depends(_get_service)]
+_ServiceDep = Annotated[RecordService, Depends(_get_record_service)]
 
 
 def _map_record(record) -> RecordResponse:
@@ -66,16 +65,23 @@ def _map_record(record) -> RecordResponse:
 
 
 @router.get("", response_model=list[RecordResponse])
-async def list_records(service: _ServiceDep) -> list[RecordResponse]:
+async def list_records(
+    service: _ServiceDep,
+    session: SessionDep,
+) -> list[RecordResponse]:
     """Return all active records with nested visits."""
-    records = await service.list_all()
+    records = await service.list_all(db_session=session)
     return [_map_record(r) for r in records]
 
 
 @router.get("/{record_id}", response_model=RecordResponse)
-async def get_record(record_id: str, service: _ServiceDep) -> RecordResponse:
+async def get_record(
+    record_id: str,
+    service: _ServiceDep,
+    session: SessionDep,
+) -> RecordResponse:
     """Return a single record by ID with nested visits."""
-    record = await service.get_by_id(record_id)
+    record = await service.get_by_id(db_session=session, record_id=record_id)
     if not record:
         raise HTTPException(status_code=404, detail="Record not found")
     return _map_record(record)
@@ -83,10 +89,12 @@ async def get_record(record_id: str, service: _ServiceDep) -> RecordResponse:
 
 @router.post("", response_model=RecordResponse, status_code=201)
 async def create_record(
-    data: RecordCreate, service: _ServiceDep
+    data: RecordCreate,
+    service: _ServiceDep,
+    session: SessionDep,
 ) -> RecordResponse:
     """Create a new record with visits. Seats auto-calculated from len(visits)."""
-    record = await service.create(data)
+    record = await service.create(db_session=session, data=data)
     return _map_record(record)
 
 
@@ -95,17 +103,22 @@ async def update_record(
     record_id: str,
     data: RecordUpdate,
     service: _ServiceDep,
+    session: SessionDep,
 ) -> RecordResponse:
     """Full-update a record by ID. Replaces visits, recalculates seats."""
-    record = await service.update(record_id, data)
+    record = await service.update(db_session=session, record_id=record_id, data=data)
     if not record:
         raise HTTPException(status_code=404, detail="Record not found")
     return _map_record(record)
 
 
 @router.delete("/{record_id}", status_code=204)
-async def delete_record(record_id: str, service: _ServiceDep) -> None:
+async def delete_record(
+    record_id: str,
+    service: _ServiceDep,
+    session: SessionDep,
+) -> None:
     """Soft-delete a record (set is_active=False)."""
-    deleted = await service.delete(record_id)
+    deleted = await service.delete(db_session=session, record_id=record_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Record not found")

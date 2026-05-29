@@ -10,6 +10,7 @@ from app.admin.setup import setup_admin
 from app.core.config import Settings
 from app.db.base import Base
 from app.db.database import DatabaseSessionManager, set_manager
+from app.domain.locations.router import router as locations_router
 from app.domain.masters.router import router as masters_router
 from app.domain.system.router import router as system_router
 
@@ -50,6 +51,7 @@ def create_app() -> FastAPI:
     )
 
     app.include_router(system_router, prefix="/api/health")
+    app.include_router(locations_router, prefix="/api/locations")
     app.include_router(masters_router, prefix="/api/masters")
 
     # Mount SQLAdmin with a sync engine (separate from async app engine)

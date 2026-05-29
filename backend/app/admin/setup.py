@@ -3,8 +3,10 @@
 from typing import ClassVar
 
 from sqladmin import Admin, ModelView
-from sqlalchemy import Column, Engine
+from sqlalchemy import Column, create_engine
 
+from app.db import db_manager
+from app.db.base import Base
 from app.db.models.activity import Activity
 from app.db.models.client import Client
 from app.db.models.location import Location
@@ -136,9 +138,16 @@ ALL_ADMIN_VIEWS: ClassVar = [
 ]
 
 
-def setup_admin(app, engine: Engine) -> Admin:
-    """Mount SQLAdmin at /admin with all model views."""
-    admin = Admin(app, engine)
+def setup_admin(app) -> Admin:
+    """Mount SQLAdmin at /admin with all model views.
+
+    Creates a sync engine from the global db_manager's async engine URL
+    and ensures tables exist on it.
+    """
+    sync_url = str(db_manager.engine.url).replace("sqlite+aiosqlite://", "sqlite://")
+    sync_engine = create_engine(sync_url)
+    Base.metadata.create_all(sync_engine)
+    admin = Admin(app, engine=sync_engine)
     for view_cls in ALL_ADMIN_VIEWS:
         admin.add_view(view_cls)
     return admin

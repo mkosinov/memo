@@ -15,7 +15,7 @@ from datetime import datetime
 from sqlalchemy import select
 
 from app.db.base import Base
-from app.db.database import DatabaseSessionManager
+from app.db.database import DBManager
 from app.db.models import (
     Activity,
     Client,
@@ -294,17 +294,16 @@ async def _seed_payments(session) -> None:
 # Public API
 # ---------------------------------------------------------------------------
 
-async def seed_data(manager: DatabaseSessionManager) -> None:
+async def seed_data(manager: DBManager) -> None:
     """Seed the database with mock development data.
 
     Idempotent — safe to run multiple times.
     """
     # Ensure tables exist.
-    if manager.engine is not None:
-        async with manager.engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
+    async with manager.engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
 
-    async with manager.session() as session:
+    async with manager.async_session() as session:
         await _seed_masters(session)
         await _seed_locations(session)
         await _seed_services(session)
@@ -316,6 +315,7 @@ async def seed_data(manager: DatabaseSessionManager) -> None:
         await _seed_records(session)
         await _seed_visits(session)
         await _seed_payments(session)
+        await session.commit()
 
 
 async def main() -> None:
@@ -323,13 +323,12 @@ async def main() -> None:
     database_url = os.environ.get(
         "DATABASE_URL", "sqlite+aiosqlite:///./memo.db"
     )
-    manager = DatabaseSessionManager(database_url)
-    await manager.init()
+    manager = DBManager(database_url)
     try:
         await seed_data(manager)
         print("Database seeded successfully.")
     finally:
-        await manager.close()
+        await manager.engine.dispose()
 
 
 if __name__ == "__main__":

@@ -302,14 +302,11 @@ class TestActivitiesOccupied:
 
 
 async def _insert_record_direct(activity_id: str) -> None:
-    """Insert a Record directly into the database using the app's shared manager."""
-    import app.db.database as db_module
+    """Insert a Record directly into the database using the global db_manager."""
+    from app.db import db_manager
     from app.db.models.record import Record
 
-    if db_module._manager is None:
-        raise RuntimeError("Database manager not initialized")
-
-    async with db_module._manager.session() as session:
+    async with db_manager.async_session() as session:
         record = Record(
             id=str(uuid.uuid4()),
             activity_id=activity_id,
@@ -318,3 +315,4 @@ async def _insert_record_direct(activity_id: str) -> None:
             seats=1,
         )
         session.add(record)
+        await session.commit()

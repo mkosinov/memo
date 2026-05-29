@@ -15,34 +15,6 @@ class TestRootEndpoint:
         assert response.status_code == 404
 
 
-class TestLifespan:
-    """Lifespan must initialize and tear down the DB manager."""
-
-    def test_db_manager_initialized_during_lifespan(self) -> None:
-        import app.db.database as db_mod
-        from app.main import create_app
-
-        app = create_app()
-        with TestClient(app) as client:
-            # Inside lifespan context — manager should be set
-            assert db_mod._manager is not None
-            assert db_mod._manager.engine is not None
-            # App should still respond
-            assert client.get("/api/health").status_code == 200
-
-    def test_db_manager_closed_after_lifespan(self) -> None:
-        import app.db.database as db_mod
-        from app.main import create_app
-
-        app = create_app()
-        with TestClient(app):
-            manager_ref = db_mod._manager
-            assert manager_ref is not None
-
-        # After exiting lifespan, engine should be disposed
-        assert manager_ref.engine is None  # type: ignore[union-attr]
-
-
 class TestSettings:
     """Settings class should expose DATABASE_URL with a sensible default."""
 

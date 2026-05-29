@@ -5,7 +5,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends
 
-from app.db.database import SessionDep
+from app.db import SessionDep
 from app.domain.tags.schemas import TagCreate, TagResponse
 from app.domain.tags.service import get_tag_service
 from app.domain.base import GenericService

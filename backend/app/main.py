@@ -8,7 +8,9 @@ from sqlalchemy import create_engine
 
 from app.admin.setup import setup_admin
 from app.core.config import Settings
+from app.db.base import Base
 from app.db.database import DatabaseSessionManager, set_manager
+from app.domain.masters.router import router as masters_router
 from app.domain.system.router import router as system_router
 
 
@@ -24,6 +26,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     manager = DatabaseSessionManager(settings.DATABASE_URL)
     await manager.init()
     set_manager(manager)
+
+    # Create all tables on startup (for in-memory test DB and initial setup).
+    if manager.engine is not None:
+        async with manager.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
     try:
         yield
     finally:
@@ -42,6 +50,7 @@ def create_app() -> FastAPI:
     )
 
     app.include_router(system_router, prefix="/api/health")
+    app.include_router(masters_router, prefix="/api/masters")
 
     # Mount SQLAdmin with a sync engine (separate from async app engine)
     admin_engine = create_engine(_sync_engine_url(settings.DATABASE_URL))

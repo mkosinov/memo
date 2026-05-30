@@ -13,7 +13,7 @@ import { ActivityModal } from '../modal/ActivityModal';
 import { DAYS, getMonday, TIME_COL_WIDTH, isSameDay, formatTime, HOURS_START, CELL_HEIGHT } from '@/lib/utils';
 
 export function WeekView() {
-  const { currentWeek, activities, artists, services, locations: studios, stamp, addActivity, updateActivity } = useSchedule();
+  const { currentWeek, activities, artists, services, locations: studios, stamp, addActivity, updateActivity, loading, error } = useSchedule();
   const { showToast } = useUI();
   const monday = getMonday(currentWeek);
 
@@ -137,6 +137,35 @@ export function WeekView() {
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 5 } }),
   );
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-full text-text-secondary">
+        <div className="animate-pulse space-y-4">
+          <div className="h-4 bg-surface rounded w-32" />
+          <div className="h-4 bg-surface rounded w-48" />
+          <div className="h-4 bg-surface rounded w-40" />
+        </div>
+        <span className="ml-3">Загрузка...</span>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex items-center justify-center h-full text-status-error">
+        <span>Ошибка загрузки: {error.message}</span>
+      </div>
+    );
+  }
+
+  if (activities.length === 0) {
+    return (
+      <div className="flex items-center justify-center h-full text-text-secondary">
+        <span>Нет занятий на эту неделю</span>
+      </div>
+    );
+  }
 
   return (
     <DndContext

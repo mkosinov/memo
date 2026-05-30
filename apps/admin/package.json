@@ -20,6 +20,7 @@
     "@dnd-kit/utilities": "^3.2.2",
     "@memo/api-client": "*",
     "@memo/domain": "*",
+    "@tanstack/react-query": "^5.100.14",
     "next": "14.2.35",
     "react": "^18",
     "react-dom": "^18"

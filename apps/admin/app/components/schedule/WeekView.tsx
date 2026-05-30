@@ -13,7 +13,7 @@ import { ActivityModal } from '../modal/ActivityModal';
 import { DAYS, getMonday, TIME_COL_WIDTH, isSameDay, formatTime, HOURS_START, CELL_HEIGHT } from '@/lib/utils';
 
 export function WeekView() {
-  const { currentWeek, activities, artists, services, studios, stamp, addActivity, updateActivity } = useSchedule();
+  const { currentWeek, activities, artists, services, locations: studios, stamp, addActivity, updateActivity } = useSchedule();
   const { showToast } = useUI();
   const monday = getMonday(currentWeek);
 

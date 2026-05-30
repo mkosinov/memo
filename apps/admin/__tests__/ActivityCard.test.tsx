@@ -192,7 +192,7 @@ beforeEach(() => {
     activities: [],
     artists: [],
     services: [],
-    studios: [],
+    locations: [],
     currentWeek: new Date(),
     stamp: { masterId: null, serviceId: null, locations: new Set(), ready: false },
     setCurrentWeek: vi.fn(),
@@ -201,6 +201,8 @@ beforeEach(() => {
     deleteActivity: vi.fn(),
     setStamp: vi.fn(),
     copyLastWeek: vi.fn(),
+    loading: false,
+    error: null,
   });
 });
 

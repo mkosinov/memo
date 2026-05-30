@@ -22,7 +22,7 @@ export function ActivityModal({
   defaultDay = 0,
   defaultStartTime = 9,
 }: ActivityModalProps) {
-  const { artists, services, studios } = useSchedule();
+  const { artists, services, locations: studios } = useSchedule();
 
   const [masterId, setMasterId] = useState('');
   const [serviceId, setServiceId] = useState('');

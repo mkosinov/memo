@@ -1,18 +1,38 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import React from 'react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { RightPanel } from '../app/components/layout/RightPanel';
 import { ScheduleProvider } from '../contexts/ScheduleContext';
 import { UIProvider, useUI } from '../contexts/UIContext';
 
-function renderWithProviders() {
-  return render(
-    <UIProvider>
-      <ScheduleProvider>
-        <RightPanel />
-      </ScheduleProvider>
-    </UIProvider>
+vi.mock('@memo/api-client', () => ({
+  getMasters: vi.fn().mockResolvedValue([]),
+  getLocations: vi.fn().mockResolvedValue([]),
+  getServices: vi.fn().mockResolvedValue([]),
+  getActivities: vi.fn().mockResolvedValue([]),
+  createActivity: vi.fn(),
+  updateActivity: vi.fn(),
+  deleteActivity: vi.fn(),
+}));
+
+function createQueryWrapper({ children }: { children: React.ReactNode }) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  return (
+    <QueryClientProvider client={queryClient}>
+      <UIProvider>
+        <ScheduleProvider>
+          {children}
+        </ScheduleProvider>
+      </UIProvider>
+    </QueryClientProvider>
   );
+}
+
+function renderWithProviders() {
+  return render(createQueryWrapper({ children: <RightPanel /> }));
 }
 
 describe('RightPanel', () => {
@@ -51,13 +71,7 @@ describe('RightPanel', () => {
   });
 
   it('renders with default width', () => {
-    const { container } = render(
-      <UIProvider>
-        <ScheduleProvider>
-          <RightPanel />
-        </ScheduleProvider>
-      </UIProvider>
-    );
+    const { container } = render(createQueryWrapper({ children: <RightPanel /> }));
 
     const panel = container.querySelector('[data-testid="right-panel"]');
     expect(panel).toBeInTheDocument();
@@ -71,13 +85,7 @@ describe('RightPanel', () => {
       return <RightPanel />;
     }
 
-    const { container } = render(
-      <UIProvider>
-        <ScheduleProvider>
-          <TestHarness />
-        </ScheduleProvider>
-      </UIProvider>,
-    );
+    const { container } = render(createQueryWrapper({ children: <TestHarness /> }));
 
     // When collapsed, the panel returns null
     const panel = container.querySelector('[data-testid="right-panel"]');

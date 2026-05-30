@@ -1,17 +1,33 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import React from 'react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Toolbar } from '../app/components/layout/Toolbar';
 import { ScheduleProvider } from '../contexts/ScheduleContext';
 import { UIProvider } from '../contexts/UIContext';
 
+vi.mock('@memo/api-client', () => ({
+  getMasters: vi.fn().mockResolvedValue([]),
+  getLocations: vi.fn().mockResolvedValue([]),
+  getServices: vi.fn().mockResolvedValue([]),
+  getActivities: vi.fn().mockResolvedValue([]),
+  createActivity: vi.fn(),
+  updateActivity: vi.fn(),
+  deleteActivity: vi.fn(),
+}));
+
 function renderWithProviders() {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
   return render(
-    <UIProvider>
-      <ScheduleProvider>
-        <Toolbar />
-      </ScheduleProvider>
-    </UIProvider>
+    <QueryClientProvider client={queryClient}>
+      <UIProvider>
+        <ScheduleProvider>
+          <Toolbar />
+        </ScheduleProvider>
+      </UIProvider>
+    </QueryClientProvider>
   );
 }
 

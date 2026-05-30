@@ -50,7 +50,7 @@ beforeEach(() => {
   mockUseSchedule.mockReturnValue({
     artists: mockArtists,
     services: mockServices,
-    studios: mockStudios,
+    locations: mockStudios,
     activities: [],
     currentWeek: new Date(),
     stamp: { masterId: null, serviceId: null, locations: new Set(), ready: false },
@@ -60,6 +60,8 @@ beforeEach(() => {
     deleteActivity: vi.fn(),
     setStamp: vi.fn(),
     copyLastWeek: vi.fn(),
+    loading: false,
+    error: null,
   });
 });
 

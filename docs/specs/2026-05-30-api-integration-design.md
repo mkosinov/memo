@@ -167,11 +167,13 @@ Backend serves at `/api/v1/activities`, `/api/v1/masters`, etc.
 
 ## 7. Visual Compliance Checks
 
-- [ ] Schedule grid renders with correct day/time layout
-- [ ] Activity cards show artist color from API response
-- [ ] Activity cards show service name from API response
-- [ ] Loading skeleton appears briefly during initial fetch
-- [ ] Week navigation works across multiple weeks
+Checks use Playwright text selectors (`text="..."`) and visible DOM content. No heuristic CSS class matching.
+
+- [ ] "Загрузка" page shows loading skeleton before API responds (text="Загрузка")
+- [ ] "Сегодня" tab label renders in toolbar (text="Сегодня")
+- [ ] Service name from API appears in activity card (text="Мини-картина акрилом")
+- [ ] Time range in activity card (text="10:00" appears in schedule column)
+- [ ] Artist name from API renders in sidebar (text="Ольга" appears in artist list)
 
 ## 8. Implementation Order
 

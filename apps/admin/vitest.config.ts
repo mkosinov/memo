@@ -7,6 +7,8 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './'),
+      '@memo/api-client': path.resolve(__dirname, '../../packages/api-client/src/index.ts'),
+      '@memo/domain': path.resolve(__dirname, '../../packages/domain/src/index.ts'),
     },
   },
   test: {

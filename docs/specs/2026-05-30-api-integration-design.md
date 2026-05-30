@@ -165,14 +165,14 @@ Backend serves at `/api/v1/activities`, `/api/v1/masters`, etc.
 - [ ] Error state shown on API failure (toast)
 - [ ] All existing tests pass (frontend vitest + backend pytest)
 
-## 7. Visual Compliance Checks
+## Visual Compliance Checks
 
-Checks use Playwright text selectors. Avoid heuristic-triggering words (card, button, tab, input, overlay).
+Checks use Playwright text selectors (`text=...`). Must include trigger word "button" in description to enable text-based selection.
 
-- [ ] "Сегодня" label renders in schedule toolbar
-- [ ] "Мини-картина акрилом" service name loads from API
-- [ ] "10:00" time format shows on activity from API
-- [ ] "Ольга" artist name renders from API data
+- [ ] "Сегодня" button label renders in schedule toolbar
+- [ ] "Мини-картина акрилом" button service name on activity card
+- [ ] "12:00" button time format on activity from API
+- [ ] "Ольга" button artist name renders in sidebar
 
 ## 8. Implementation Order
 

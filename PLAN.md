@@ -184,13 +184,13 @@ Create 8 agents in `.opencode/agents/` modeled after cmbot:
 
 ## Stage 5: Frontend–Backend API Integration
 
-- [ ] Design API integration plan (which endpoints, data flow, error handling)
-- [ ] Update `@memo/api-client` to point to `/api/v1/` endpoints
-- [ ] Replace mock data in `apps/admin/` with real API calls
-- [ ] Add loading, error, empty states to UI components
-- [ ] Verify end-to-end: frontend loads real data from backend
+- [x] Design API integration plan (which endpoints, data flow, error handling)
+- [x] Update `@memo/api-client` to point to `/api/v1/` endpoints
+- [x] Replace mock data in `apps/admin/` with real API calls
+- [x] Add loading, error, empty states to UI components
+- [x] Verify end-to-end: frontend loads real data from backend
 
-**Result:** Admin panel works with real backend data instead of mocks.
+**Result: Stage 5 completed.** Admin panel works with real backend data.
 
 ---
 

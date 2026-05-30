@@ -1,22 +1,45 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import React from 'react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Sidebar } from '../app/components/layout/Sidebar';
 import { ScheduleProvider } from '../contexts/ScheduleContext';
 import { UIProvider } from '../contexts/UIContext';
 import { getMonday } from '../lib/utils';
+
+vi.mock('@memo/api-client', () => ({
+  getMasters: vi.fn().mockResolvedValue([
+    { id: 'm1', first_name: 'Ольга', last_name: 'Середа', color: '#5B8C7A', position: 'мастер', specialty: 'живопись', avatar_url: null, is_active: true, created_at: '', updated_at: '' },
+    { id: 'm2', first_name: 'Юлия', last_name: 'Большакова', color: '#6B7E9C', position: 'мастер', specialty: 'живопись', avatar_url: null, is_active: true, created_at: '', updated_at: '' },
+    { id: 'm3', first_name: 'Анастасия', last_name: 'П.', color: '#A07060', position: 'мастер', specialty: 'живопись', avatar_url: null, is_active: true, created_at: '', updated_at: '' },
+    { id: 'm4', first_name: 'Дарья', last_name: 'Тюльпина', color: '#7A6E9C', position: 'мастер', specialty: 'живопись', avatar_url: null, is_active: true, created_at: '', updated_at: '' },
+    { id: 'm5', first_name: 'Александра', last_name: 'В.', color: '#8A7840', position: 'мастер', specialty: 'живопись', avatar_url: null, is_active: true, created_at: '', updated_at: '' },
+    { id: 'm7', first_name: 'Ирина', last_name: 'Горох', color: '#9A5870', position: 'мастер', specialty: 'живопись', avatar_url: null, is_active: true, created_at: '', updated_at: '' },
+  ]),
+  getLocations: vi.fn().mockResolvedValue([]),
+  getServices: vi.fn().mockResolvedValue([]),
+  getActivities: vi.fn().mockResolvedValue([]),
+  createActivity: vi.fn(),
+  updateActivity: vi.fn(),
+  deleteActivity: vi.fn(),
+}));
 
 vi.mock('next/navigation', () => ({
   usePathname: () => '/',
 }));
 
 function renderWithProviders() {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
   return render(
-    <UIProvider>
-      <ScheduleProvider>
-        <Sidebar />
-      </ScheduleProvider>
-    </UIProvider>
+    <QueryClientProvider client={queryClient}>
+      <UIProvider>
+        <ScheduleProvider>
+          <Sidebar />
+        </ScheduleProvider>
+      </UIProvider>
+    </QueryClientProvider>
   );
 }
 
@@ -41,9 +64,11 @@ describe('Sidebar', () => {
     expect(activeLink).toHaveClass('bg-brand');
   });
 
-  it('renders artist legend with color dots', () => {
+  it('renders artist legend with color dots', async () => {
     renderWithProviders();
-    expect(screen.getByText('Ольга')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('Ольга')).toBeInTheDocument();
+    });
     expect(screen.getByText('Юлия')).toBeInTheDocument();
     expect(screen.getByText('Анастасия')).toBeInTheDocument();
   });

@@ -27,7 +27,7 @@ vi.mock('@/contexts/ScheduleContext', () => ({
     activities: [],
     artists: [],
     services: [],
-    studios: [],
+    locations: [],
     currentWeek: new Date(),
     stamp: { masterId: null, serviceId: null, locations: new Set(), ready: false },
     setCurrentWeek: vi.fn(),
@@ -36,6 +36,8 @@ vi.mock('@/contexts/ScheduleContext', () => ({
     deleteActivity: vi.fn(),
     setStamp: vi.fn(),
     copyLastWeek: vi.fn(),
+    loading: false,
+    error: null,
   })),
 }));
 

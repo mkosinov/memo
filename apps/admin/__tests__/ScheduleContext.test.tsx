@@ -1,8 +1,69 @@
-import { describe, it, expect, beforeEach } from 'vitest';
-import { render, screen, act } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { render, screen, act, waitFor } from '@testing-library/react';
 import React from 'react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ScheduleProvider, useSchedule } from '../contexts/ScheduleContext';
 import { getMonday } from '../lib/utils';
+
+// ─── Mock api-client ─────────────────────────────────────────────────────────
+vi.mock('@memo/api-client', () => ({
+  getMasters: vi.fn(),
+  getLocations: vi.fn(),
+  getServices: vi.fn(),
+  getActivities: vi.fn(),
+  createActivity: vi.fn(),
+  updateActivity: vi.fn(),
+  deleteActivity: vi.fn(),
+}));
+
+import {
+  getMasters,
+  getLocations,
+  getServices,
+  getActivities,
+  createActivity,
+  updateActivity,
+  deleteActivity,
+} from '@memo/api-client';
+
+// ─── Fixtures ────────────────────────────────────────────────────────────────
+
+const mockArtists = [
+  { id: 'm1', name: 'Ольга Середа', shortName: 'Ольга', color: '#5B8C7A' },
+  { id: 'm2', name: 'Юлия Большакова', shortName: 'Юлия', color: '#6B7E9C' },
+];
+
+const mockLocations = [
+  { id: 'alpika', name: 'Альпика', address: 'Альпика, 1 этаж' },
+  { id: 'grand', name: 'Гранд Отель Поляна', address: 'Гранд Отель, лобби' },
+];
+
+const mockServices = [
+  { id: 's1', name: 'Картина маслом', duration: 2.5, maxCapacity: 8, minAge: '12+', defaultAdultPrice: 3500 },
+  { id: 's2', name: 'Картина акрилом', duration: 2, maxCapacity: 10, minAge: '6+', defaultAdultPrice: 2800 },
+];
+
+const mockActivities = [
+  {
+    id: 'a1', day: 0, masterId: 'm1', startTime: 10, duration: 2,
+    serviceId: 's1', locationId: 'alpika', occupied: 3, capacity: 8, isPrivate: false,
+  },
+  {
+    id: 'a2', day: 1, masterId: 'm2', startTime: 14, duration: 1.5,
+    serviceId: 's2', locationId: 'grand', occupied: 4, capacity: 6, isPrivate: false,
+  },
+];
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function createTestQueryClient() {
+  return new QueryClient({
+    defaultOptions: {
+      queries: { retry: false },
+      mutations: { retry: false },
+    },
+  });
+}
 
 // Test component that consumes the context
 function ScheduleConsumer() {
@@ -10,7 +71,7 @@ function ScheduleConsumer() {
     activities,
     artists,
     services,
-    studios,
+    locations,
     currentWeek,
     stamp,
     setCurrentWeek,
@@ -19,6 +80,8 @@ function ScheduleConsumer() {
     deleteActivity,
     setStamp,
     copyLastWeek,
+    loading,
+    error,
   } = useSchedule();
 
   return (
@@ -26,14 +89,16 @@ function ScheduleConsumer() {
       <span data-testid="activity-count">{activities.length}</span>
       <span data-testid="artist-count">{artists.length}</span>
       <span data-testid="service-count">{services.length}</span>
-      <span data-testid="studio-count">{studios.length}</span>
+      <span data-testid="location-count">{locations.length}</span>
       <span data-testid="week-start">{currentWeek.toISOString()}</span>
       <span data-testid="stamp-ready">{stamp.ready.toString()}</span>
+      <span data-testid="loading">{loading.toString()}</span>
+      <span data-testid="error">{error ? error.message : 'null'}</span>
       <button
         data-testid="add-activity"
         onClick={() =>
           addActivity({
-            day: 0,
+            day: 2,
             masterId: 'm1',
             startTime: 10,
             duration: 2,
@@ -81,14 +146,32 @@ function ScheduleConsumer() {
 }
 
 function renderWithContext() {
+  const queryClient = createTestQueryClient();
   return render(
-    <ScheduleProvider>
-      <ScheduleConsumer />
-    </ScheduleProvider>
+    <QueryClientProvider client={queryClient}>
+      <ScheduleProvider>
+        <ScheduleConsumer />
+      </ScheduleProvider>
+    </QueryClientProvider>,
   );
 }
 
+// ─── Tests ────────────────────────────────────────────────────────────────────
+
 describe('ScheduleProvider', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+
+    // Default mock returns for API calls
+    vi.mocked(getMasters).mockResolvedValue([]);
+    vi.mocked(getLocations).mockResolvedValue([]);
+    vi.mocked(getServices).mockResolvedValue([]);
+    vi.mocked(getActivities).mockResolvedValue([]);
+    vi.mocked(createActivity).mockResolvedValue({} as any);
+    vi.mocked(updateActivity).mockResolvedValue({} as any);
+    vi.mocked(deleteActivity).mockResolvedValue(undefined);
+  });
+
   it('throws when useSchedule is used outside provider', () => {
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
     function BrokenConsumer() {
@@ -101,16 +184,43 @@ describe('ScheduleProvider', () => {
     spy.mockRestore();
   });
 
-  it('provides artists, services, studios from mock data', () => {
+  it('provides artists, services, locations from React Query hooks', async () => {
+    vi.mocked(getMasters).mockResolvedValue([
+      { id: 'm1', first_name: 'Ольга', last_name: 'Середа', color: '#5B8C7A', position: 'мастер', specialty: 'живопись', avatar_url: null, is_active: true, created_at: '2024-01-01', updated_at: '2024-01-01' },
+      { id: 'm2', first_name: 'Юлия', last_name: 'Большакова', color: '#6B7E9C', position: 'мастер', specialty: 'живопись', avatar_url: null, is_active: true, created_at: '2024-01-01', updated_at: '2024-01-01' },
+    ]);
+    vi.mocked(getServices).mockResolvedValue([
+      { id: 's1', title: 'Картина маслом', description: '', image_url: '', specialty: '', min_age: 12, max_age: 99, duration: 150, record_info: '', tariffs: [], tags: [], is_active: true, created_at: '', updated_at: '' },
+    ]);
+    vi.mocked(getLocations).mockResolvedValue([
+      { id: 'alpika', name: 'Альпика', address: 'Альпика, 1 этаж', description: null, capacity: 10, yandex_map_url: null, review_url: null, record_info: null, image_url: null, is_active: true, created_at: '', updated_at: '' },
+      { id: 'grand', name: 'Гранд Отель Поляна', address: 'Гранд Отель, лобби', description: null, capacity: 10, yandex_map_url: null, review_url: null, record_info: null, image_url: null, is_active: true, created_at: '', updated_at: '' },
+    ]);
+    vi.mocked(getActivities).mockResolvedValue([
+      { id: 'a1', master_id: 'm1', service_id: 's1', location_id: 'alpika', start: '2024-12-25T10:00:00Z', duration: 120, capacity: 8, is_private: false, comment: null, record_info: null, created_at: '', updated_at: '', is_active: true, occupied: 3 },
+      { id: 'a2', master_id: 'm2', service_id: 's1', location_id: 'grand', start: '2024-12-26T14:00:00Z', duration: 90, capacity: 6, is_private: false, comment: null, record_info: null, created_at: '', updated_at: '', is_active: true, occupied: 4 },
+    ]);
+
     renderWithContext();
-    expect(screen.getByTestId('artist-count').textContent).toBe('6');
-    expect(screen.getByTestId('service-count').textContent).toBe('7');
-    expect(screen.getByTestId('studio-count').textContent).toBe('3');
+
+    await waitFor(() => {
+      expect(screen.getByTestId('artist-count').textContent).toBe('2');
+    });
+    expect(screen.getByTestId('service-count').textContent).toBe('1');
+    expect(screen.getByTestId('location-count').textContent).toBe('2');
+    expect(screen.getByTestId('activity-count').textContent).toBe('2');
   });
 
-  it('initializes with 28 activities from getStaticEvents', () => {
+  it('initializes with locations (not studios)', async () => {
     renderWithContext();
-    expect(screen.getByTestId('activity-count').textContent).toBe('28');
+    // Wait for queries to settle
+    await waitFor(() => {
+      expect(screen.getByTestId('loading').textContent).toBe('false');
+    });
+    // Verify activities is an empty array (not failing)
+    expect(screen.getByTestId('activity-count').textContent).toBe('0');
+    // Verify locations is available (not studios)
+    expect(screen.getByTestId('location-count').textContent).toBe('0');
   });
 
   it('initializes currentWeek to Monday of today', () => {
@@ -122,31 +232,6 @@ describe('ScheduleProvider', () => {
   it('initializes stamp with ready=false', () => {
     renderWithContext();
     expect(screen.getByTestId('stamp-ready').textContent).toBe('false');
-  });
-
-  it('adds an activity', () => {
-    renderWithContext();
-    act(() => {
-      screen.getByTestId('add-activity').click();
-    });
-    expect(screen.getByTestId('activity-count').textContent).toBe('29');
-  });
-
-  it('updates an activity', () => {
-    renderWithContext();
-    act(() => {
-      screen.getByTestId('update-activity').click();
-    });
-    // Activity count stays the same, but the first activity should be updated
-    expect(screen.getByTestId('activity-count').textContent).toBe('28');
-  });
-
-  it('deletes an activity', () => {
-    renderWithContext();
-    act(() => {
-      screen.getByTestId('delete-activity').click();
-    });
-    expect(screen.getByTestId('activity-count').textContent).toBe('27');
   });
 
   it('changes current week', () => {
@@ -167,15 +252,111 @@ describe('ScheduleProvider', () => {
     expect(screen.getByTestId('stamp-ready').textContent).toBe('true');
   });
 
-  it('copies last week activities', () => {
-    renderWithContext();
-    const initialCount = parseInt(
-      screen.getByTestId('activity-count').textContent!
-    );
-    act(() => {
-      screen.getByTestId('copy-last-week').click();
+  it('calls createActivity mutation when addActivity is called', async () => {
+    vi.mocked(createActivity).mockResolvedValue({
+      id: 'new-id', master_id: 'm1', service_id: 's1', location_id: 'alpika',
+      start: '2024-12-25T10:00:00Z', duration: 120, capacity: 8, is_private: false,
+      comment: null, record_info: null, created_at: '', updated_at: '', is_active: true, occupied: 0,
     });
-    const newCount = parseInt(screen.getByTestId('activity-count').textContent!);
-    expect(newCount).toBeGreaterThan(initialCount);
+
+    renderWithContext();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('loading').textContent).toBe('false');
+    });
+
+    act(() => {
+      screen.getByTestId('add-activity').click();
+    });
+
+    await waitFor(() => {
+      expect(createActivity).toHaveBeenCalled();
+    });
+    expect(createActivity).toHaveBeenCalledWith(
+      expect.objectContaining({
+        master_id: 'm1',
+        service_id: 's1',
+        location_id: 'alpika',
+      }),
+    );
+  });
+
+  it('calls updateActivity mutation when updateActivity is called', async () => {
+    vi.mocked(getActivities).mockResolvedValue([
+      { id: 'a1', master_id: 'm1', service_id: 's1', location_id: 'alpika', start: '2024-12-25T10:00:00Z', duration: 120, capacity: 8, is_private: false, comment: null, record_info: null, created_at: '', updated_at: '', is_active: true, occupied: 3 },
+    ]);
+    vi.mocked(updateActivity).mockResolvedValue({
+      id: 'a1', master_id: 'm1', service_id: 's1', location_id: 'alpika',
+      start: '2024-12-25T10:00:00Z', duration: 120, capacity: 8, is_private: false,
+      comment: null, record_info: null, created_at: '', updated_at: '', is_active: true, occupied: 5,
+    });
+
+    renderWithContext();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('activity-count').textContent).toBe('1');
+    });
+
+    act(() => {
+      screen.getByTestId('update-activity').click();
+    });
+
+    await waitFor(() => {
+      expect(updateActivity).toHaveBeenCalled();
+    });
+    expect(updateActivity).toHaveBeenCalledWith('a1', expect.objectContaining({ occupied: 5 }));
+  });
+
+  it('calls deleteActivity mutation when deleteActivity is called', async () => {
+    vi.mocked(getActivities).mockResolvedValue([
+      { id: 'a1', master_id: 'm1', service_id: 's1', location_id: 'alpika', start: '2024-12-25T10:00:00Z', duration: 120, capacity: 8, is_private: false, comment: null, record_info: null, created_at: '', updated_at: '', is_active: true, occupied: 3 },
+    ]);
+
+    renderWithContext();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('activity-count').textContent).toBe('1');
+    });
+
+    act(() => {
+      screen.getByTestId('delete-activity').click();
+    });
+
+    await waitFor(() => {
+      expect(deleteActivity).toHaveBeenCalledWith('a1');
+    });
+  });
+
+  it('copyLastWeek warns and does not throw', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    renderWithContext();
+    expect(() => {
+      act(() => {
+        screen.getByTestId('copy-last-week').click();
+      });
+    }).not.toThrow();
+    expect(warnSpy).toHaveBeenCalledWith(
+      'copyLastWeek not yet implemented with API data',
+    );
+    warnSpy.mockRestore();
+  });
+
+  it('sets loading to false after data resolves', async () => {
+    vi.mocked(getActivities).mockResolvedValue([]);
+    renderWithContext();
+
+    // loading should be false after Query resolves
+    await waitFor(() => {
+      expect(screen.getByTestId('loading').textContent).toBe('false');
+    });
+  });
+
+  it('sets error when data fetching fails', async () => {
+    vi.mocked(getActivities).mockRejectedValue(new Error('Network error'));
+    renderWithContext();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('error').textContent).not.toBe('null');
+    });
   });
 });

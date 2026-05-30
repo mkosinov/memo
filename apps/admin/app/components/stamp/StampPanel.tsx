@@ -5,7 +5,7 @@ import { useSchedule } from '@/contexts/ScheduleContext';
 import { useUI } from '@/contexts/UIContext';
 
 export function StampPanel() {
-  const { artists, services, studios, stamp, setStamp } = useSchedule();
+  const { artists, services, locations: studios, stamp, setStamp } = useSchedule();
   const { deleteMode, toggleDeleteMode } = useUI();
 
   const selectedMaster = stamp.masterId
@@ -18,36 +18,38 @@ export function StampPanel() {
 
   const handleMasterChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const masterId = e.target.value || null;
-    setStamp({
-      ...stamp,
+    setStamp((prev) => ({
+      ...prev,
       masterId,
       ready:
-        !!masterId && !!stamp.serviceId && stamp.locations.size > 0,
-    });
+        !!masterId && !!prev.serviceId && prev.locations.size > 0,
+    }));
   };
 
   const handleServiceChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const serviceId = e.target.value || null;
-    setStamp({
-      ...stamp,
+    setStamp((prev) => ({
+      ...prev,
       serviceId,
       ready:
-        !!stamp.masterId && !!serviceId && stamp.locations.size > 0,
-    });
+        !!prev.masterId && !!serviceId && prev.locations.size > 0,
+    }));
   };
 
   const handleLocationToggle = (studioId: string) => {
-    const newLocations = new Set(stamp.locations);
-    if (newLocations.has(studioId)) {
-      newLocations.delete(studioId);
-    } else {
-      newLocations.add(studioId);
-    }
-    setStamp({
-      ...stamp,
-      locations: newLocations,
-      ready:
-        !!stamp.masterId && !!stamp.serviceId && newLocations.size > 0,
+    setStamp((prev) => {
+      const newLocations = new Set(prev.locations);
+      if (newLocations.has(studioId)) {
+        newLocations.delete(studioId);
+      } else {
+        newLocations.add(studioId);
+      }
+      return {
+        ...prev,
+        locations: newLocations,
+        ready:
+          !!prev.masterId && !!prev.serviceId && newLocations.size > 0,
+      };
     });
   };
 

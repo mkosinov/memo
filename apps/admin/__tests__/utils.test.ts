@@ -5,6 +5,7 @@ import {
   formatTime,
   getMonday,
   formatDate,
+  formatDateISO,
 } from '@/lib/utils';
 
 describe('hexToRgb', () => {
@@ -101,5 +102,22 @@ describe('formatDate', () => {
   it('formats December date', () => {
     const date = new Date(2026, 11, 31);
     expect(formatDate(date)).toBe('31 декабря');
+  });
+});
+
+describe('formatDateISO', () => {
+  it('formats date as YYYY-MM-DD', () => {
+    const date = new Date(2026, 4, 13); // May 13, 2026
+    expect(formatDateISO(date)).toBe('2026-05-13');
+  });
+
+  it('pads single-digit month and day', () => {
+    const date = new Date(2026, 0, 1); // Jan 1, 2026
+    expect(formatDateISO(date)).toBe('2026-01-01');
+  });
+
+  it('formats December date', () => {
+    const date = new Date(2026, 11, 31); // Dec 31, 2026
+    expect(formatDateISO(date)).toBe('2026-12-31');
   });
 });

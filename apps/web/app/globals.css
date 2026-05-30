@@ -1,0 +1,66 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ===== Design System Variables ===== */
+
+:root {
+  --bg: #EDEDEE;
+  --card-bg: #ffffff;
+  --surface: #f4f4f5;
+  --brand: #004D56;
+  --brand-light: #006670;
+  --gold: #C49A2E;
+  --ink: #1a1a1a;
+  --ink-mid: #555555;
+  --ink-light: #888888;
+  --ink-faint: #cccccc;
+  --line: #E0E0E1;
+}
+
+/* ===== Base Styles ===== */
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  color: var(--ink);
+  background: var(--bg);
+  font-family: var(--font-inter), system-ui, -apple-system, sans-serif;
+  overflow-x: hidden;
+}
+
+/* ===== Scrollbar Utilities ===== */
+
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Thin scrollbar */
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: 2px;
+}

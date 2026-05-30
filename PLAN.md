@@ -101,16 +101,16 @@ Create 8 agents in `.opencode/agents/` modeled after cmbot:
 
 ---
 
-## Stage 2: Design System and Layout (base)
+## Stage 2: Design System and Layout (base) ✅
 
-- [ ] `app/globals.css` — CSS variables (light/dark theme from v4), scrollbar, base styles
-- [ ] `app/layout.tsx` — root layout
-- [ ] **Sidebar** — React component (logo, mini-calendar, navigation, legend, ☀/☾ toggle, appearance button, user, version, collapse)
-- [ ] **MiniCalendar** — month grid, +1 week before/after, week scroll, today/week highlight
-- [ ] **ThemeProvider** — React Context for theme switching
-- [ ] **Toast** — toast system (createPortal)
-- [ ] **Toolbar** — week navigation, day/week toggle, filters
-- [ ] **RightPanel** — sliding panel (stamp + week, collapsible sections)
+- [x] `app/globals.css` — CSS variables (light/dark theme from v4), scrollbar, base styles
+- [x] `app/layout.tsx` — root layout
+- [x] **Sidebar** — React component (logo, mini-calendar, navigation, legend, ☀/☾ toggle, appearance button, user, version, collapse)
+- [x] **MiniCalendar** — month grid, +1 week before/after, week scroll, today/week highlight
+- [x] **ThemeProvider** — React Context for theme switching
+- [x] **Toast** — toast system (createPortal)
+- [x] **Toolbar** — week navigation, day/week toggle, filters
+- [x] **RightPanel** — sliding panel (stamp + week, collapsible sections)
 
 **Result:** Complete application skeleton built, navigation works, theme switches, toasts display
 
@@ -178,9 +178,23 @@ Create 8 agents in `.opencode/agents/` modeled after cmbot:
 
 **Completed:** 2026-05-28 — 27/27 tests passing, ruff + mypy strict clean
 
+**Restructured:** 2026-05-30 — `app/` → `src/`, layer-based, API `/api/v1/`, 161 tests
+
 ---
 
-## Stage 5: P3 — Client Booking Flow
+## Stage 5: Frontend–Backend API Integration
+
+- [ ] Design API integration plan (which endpoints, data flow, error handling)
+- [ ] Update `@memo/api-client` to point to `/api/v1/` endpoints
+- [ ] Replace mock data in `apps/admin/` with real API calls
+- [ ] Add loading, error, empty states to UI components
+- [ ] Verify end-to-end: frontend loads real data from backend
+
+**Result:** Admin panel works with real backend data instead of mocks.
+
+---
+
+## Stage 6: P3 — Client Booking Flow
 
 - [ ] **BookingPage** (`/booking`) — port 4-step flow
 - [ ] LocationSelector, ActivitySchedule, BookingForm, VisitorLookup
@@ -191,7 +205,7 @@ Create 8 agents in `.opencode/agents/` modeled after cmbot:
 
 ---
 
-## Stage 6: P4 — Artist Schedule
+## Stage 7: P4 — Artist Schedule
 
 - [ ] **ArtistPage** (`/artist`) — port
 - [ ] ArtistSelector, ArtistWeekView, ActivityDetail, AvailabilityToggle
@@ -201,7 +215,7 @@ Create 8 agents in `.opencode/agents/` modeled after cmbot:
 
 ---
 
-## Stage 7: P5 — AI Concierge Chat
+## Stage 8: P5 — AI Concierge Chat
 
 - [ ] **ChatPage** (`/chat`) — port
 - [ ] ChatMessage, ChatInput, QuickActions, ServiceRecommendation, TypingIndicator
@@ -211,7 +225,7 @@ Create 8 agents in `.opencode/agents/` modeled after cmbot:
 
 ---
 
-## Stage 8: Tests and Polish
+## Stage 9: Tests and Polish
 
 - [ ] Tests for all pages (Vitest + Testing Library)
 - [ ] TypeScript strict mode
@@ -221,7 +235,7 @@ Create 8 agents in `.opencode/agents/` modeled after cmbot:
 
 ---
 
-## Stage 9: Web — colourmountains.ru (P3 Client Booking Flow)
+## Stage 10: Web — colourmountains.ru (P3 Client Booking Flow)
 
 - [ ] Create `apps/web/` — Next.js 14 project for public website
 - [ ] Set up SEO: metadata, sitemap, robots
@@ -261,10 +275,14 @@ Create 8 agents in `.opencode/agents/` modeled after cmbot:
 | 1 — Turborepo Infrastructure | 1 | Turborepo + shared packages | @architect |
 | 2 — Design System + Layout | 1 | Sidebar, Toolbar, RightPanel | @frontend-coder |
 | 3 — P1 Schedule | 3 | Grid, cards, DnD, stamp, modal | @frontend-coder |
-| 4–7 — P2–P5 (admin) | 4 | Porting admin pages | @frontend-coder |
-| 8 — Tests and Polish | 2 | Tests, a11y, build | @tester + @frontend-coder |
-| 9 — Web (colourmountains.ru) | 5 | Website + online booking | @frontend-coder |
-| 10 — Master App | 3 | Master app | @frontend-coder |
+| 4 — P2 Booking Management | 2 | Bookings + Client Card | @frontend-coder |
+| 5 — Frontend–Backend API | 3 | Connect admin to real API | @frontend-coder |
+| 6 — P3 Client Booking Flow | 3 | Client booking flow | @frontend-coder |
+| 7 — P4 Artist Schedule | 2 | Artist schedule | @frontend-coder |
+| 8 — P5 AI Concierge Chat | 2 | Chat assistant | @frontend-coder |
+| 9 — Tests and Polish | 2 | Tests, a11y, build | @tester + @frontend-coder |
+| 10 — Web (colourmountains.ru) | 5 | Website + online booking | @frontend-coder |
+| 11 — Master App | 3 | Master app | @frontend-coder |
 
 **Total:** ~20-25 days for full release (P1–P5 + Web + Master)
 
@@ -277,6 +295,8 @@ Create 8 agents in `.opencode/agents/` modeled after cmbot:
 ---
 
 ## Changelog
+- 2026-05-30: **Stage 2 marked done.** Added Stage 5 (Frontend–Backend API Integration). Renumbered stages 6–11.
+- 2026-05-30: **Backend restructure merged** — `app/` → `src/`, API `/api/v1/`, repositories/ extracted, services renamed.
 - 2026-05-19: **Turborepo migration.** Transition from a single `frontend/` to monorepo: `apps/admin/`, `packages/domain/`, `packages/api-client/`. MVP deadline removed, stages 9 (Web) and 10 (Master App) added. Architecture updated: `docs/ARCHITECTURE.md`.
 - 2026-05-13: Updated deadlines — MVP May 20, Full release May 31. Added daily schedule for MVP sprint.
 - 2026-05-13: Initial PLAN.md created with stages 0-8.

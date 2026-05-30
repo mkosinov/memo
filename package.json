@@ -2,7 +2,7 @@
   "name": "memo",
   "private": true,
   "workspaces": [
-    "apps/*",
+    "frontend/*",
     "packages/*"
   ],
   "scripts": {

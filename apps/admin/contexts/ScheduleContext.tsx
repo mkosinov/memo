@@ -14,7 +14,7 @@ import {
 import { useQueryClient, useMutation } from '@tanstack/react-query';
 import { getMonday, formatDateISO } from '@/lib/utils';
 
-interface ScheduleContextType {
+export interface ScheduleContextType {
   activities: Activity[];
   artists: Artist[];
   services: Service[];

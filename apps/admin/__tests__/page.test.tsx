@@ -36,9 +36,9 @@ function renderPage() {
 }
 
 describe('Schedule Page', () => {
-  it('renders the WeekView with 7 day columns', () => {
+  it('shows loading state initially, then empty state when no activities for the week', async () => {
     renderPage();
-    const dayColumns = screen.getAllByTestId(/day-column/);
-    expect(dayColumns).toHaveLength(7);
+    // Initially loading, then transitions to empty state when query resolves
+    expect(await screen.findByText('Нет занятий на эту неделю')).toBeInTheDocument();
   });
 });

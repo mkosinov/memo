@@ -1,62 +1,126 @@
 import { render, screen } from '@testing-library/react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { ScheduleProvider } from '../contexts/ScheduleContext';
-import { UIProvider } from '../contexts/UIContext';
-import { WeekView } from '../app/components/schedule/WeekView';
+import type { ScheduleContextType } from '../contexts/ScheduleContext';
 import { DAYS } from '../lib/utils';
 
-vi.mock('@memo/api-client', () => ({
-  getMasters: vi.fn().mockResolvedValue([]),
-  getLocations: vi.fn().mockResolvedValue([]),
-  getServices: vi.fn().mockResolvedValue([]),
-  getActivities: vi.fn().mockResolvedValue([]),
-  createActivity: vi.fn(),
-  updateActivity: vi.fn(),
-  deleteActivity: vi.fn(),
+vi.mock('@/contexts/ScheduleContext', () => ({
+  useSchedule: vi.fn(),
 }));
 
-function renderWeekView() {
-  const queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-  });
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <UIProvider>
-        <ScheduleProvider>
-          <WeekView />
-        </ScheduleProvider>
-      </UIProvider>
-    </QueryClientProvider>,
-  );
+vi.mock('@/contexts/UIContext', () => ({
+  useUI: () => ({ showToast: vi.fn() }),
+}));
+
+vi.mock('@/hooks/useDnD', () => ({
+  useDnD: () => ({
+    dragId: null,
+    dragCopy: null,
+    ghostPosition: null,
+    activeDragActivity: null,
+    onDragStart: vi.fn(),
+    onDragOver: vi.fn(),
+    onDragEnd: vi.fn(),
+    handleDragCancel: vi.fn(),
+  }),
+}));
+
+vi.mock('@/app/components/schedule/TimeColumn', () => ({
+  TimeColumn: () => <div data-testid="time-column" />,
+}));
+
+vi.mock('@/app/components/schedule/DayColumn', () => ({
+  DayColumn: (props: { dayIndex: number }) => <div data-testid={`day-column-${props.dayIndex}`} />,
+}));
+
+vi.mock('@/app/components/schedule/ActivityCard', () => ({
+  ActivityCard: () => <div />,
+}));
+
+vi.mock('@/app/components/modal/ActivityModal', () => ({
+  ActivityModal: () => <div />,
+}));
+
+import { useSchedule } from '@/contexts/ScheduleContext';
+import { WeekView } from '../app/components/schedule/WeekView';
+
+function createDefaultContext(): ScheduleContextType {
+  return {
+    activities: [],
+    artists: [],
+    services: [],
+    locations: [],
+    currentWeek: new Date('2025-04-07'),
+    stamp: { masterId: null, serviceId: null, locations: new Set(), ready: false },
+    setCurrentWeek: vi.fn(),
+    addActivity: vi.fn(),
+    updateActivity: vi.fn(),
+    deleteActivity: vi.fn(),
+    setStamp: vi.fn(),
+    copyLastWeek: vi.fn(),
+    loading: false,
+    error: null,
+  };
+}
+
+function renderWeekView(contextOverrides?: Partial<ScheduleContextType>) {
+  const mockUseSchedule = useSchedule as ReturnType<typeof vi.fn>;
+  mockUseSchedule.mockReturnValue({ ...createDefaultContext(), ...contextOverrides });
+  return render(<WeekView />);
 }
 
 describe('WeekView', () => {
-  it('renders 7 day columns', () => {
-    renderWeekView();
-    const dayColumns = screen.getAllByTestId(/day-column/);
-    expect(dayColumns).toHaveLength(7);
+  beforeEach(() => {
+    vi.clearAllMocks();
   });
 
-  it('renders time column with hour labels', () => {
-    renderWeekView();
-    // Should show at least 9:00 and 20:00 (slots from 9 to 20.5)
-    expect(screen.getByText('09:00')).toBeInTheDocument();
-    expect(screen.getByText('20:00')).toBeInTheDocument();
-  });
-
-  it('shows correct day headers', () => {
-    renderWeekView();
-    DAYS.forEach((day) => {
-      expect(screen.getByText(day)).toBeInTheDocument();
+  describe('loading state', () => {
+    it('shows loading skeleton when loading is true', () => {
+      renderWeekView({ loading: true });
+      expect(screen.getByText('Загрузка...')).toBeInTheDocument();
+      expect(screen.queryByTestId(/day-column/)).not.toBeInTheDocument();
     });
   });
 
-  describe('DragOverlay ghost', () => {
-    it('renders DragOverlay container in the component tree', () => {
-      const { container } = renderWeekView();
-      // DragOverlay renders as a portal, but the DndContext should be present
-      const dndContext = container.querySelector('[data-dnd-context]') || container.firstChild;
-      expect(dndContext).toBeInTheDocument();
+  describe('error state', () => {
+    it('shows error message when error is present', () => {
+      renderWeekView({ error: new Error('Network failure') });
+      expect(screen.getByText(/Ошибка загрузки/)).toBeInTheDocument();
+      expect(screen.getByText(/Network failure/)).toBeInTheDocument();
+      expect(screen.queryByTestId(/day-column/)).not.toBeInTheDocument();
+    });
+  });
+
+  describe('empty state', () => {
+    it('shows empty message when there are no activities', () => {
+      renderWeekView({ activities: [], loading: false, error: null });
+      expect(screen.getByText('Нет занятий на эту неделю')).toBeInTheDocument();
+      expect(screen.queryByTestId(/day-column/)).not.toBeInTheDocument();
+    });
+  });
+
+  describe('normal render', () => {
+    const normalContext = {
+      loading: false,
+      error: null,
+      activities: [{ id: '1', day: 0, masterId: 'm1', artistId: 'm1', startTime: 10, duration: 1, serviceId: 's1', serviceName: 'Test', minAge: '6', locationId: 'l1', occupied: 0, capacity: 10, isPrivate: false }],
+    };
+
+    it('renders 7 day columns', () => {
+      renderWeekView(normalContext);
+      for (let i = 0; i < 7; i++) {
+        expect(screen.getByTestId(`day-column-${i}`)).toBeInTheDocument();
+      }
+    });
+
+    it('renders time column', () => {
+      renderWeekView(normalContext);
+      expect(screen.getByTestId('time-column')).toBeInTheDocument();
+    });
+
+    it('shows correct day headers', () => {
+      renderWeekView(normalContext);
+      DAYS.forEach((day) => {
+        expect(screen.getByText(day)).toBeInTheDocument();
+      });
     });
   });
 });

@@ -1,15 +1,17 @@
 # Memo Frontend v2 — Work Plan
 
-> Date: 2026-05-13
-> **P1 Admin Schedule: ✅ Completed 2026-05-15** — 15/15 tasks done
-> **P1 UI Polish: ✅ Completed 2026-05-16** — 4 polish tasks + 1 trivial, 165 tests passing
+> Date: 2026-05-30
+> **P1 Admin Schedule: ✅ Completed 2026-05-15**
+> **P2 Booking Management: ✅ Completed 2026-05-17**
+> **Backend Foundation: ✅ Completed 2026-05-28** — FastAPI + clean architecture + 161 tests
+> **Stage 5 API Integration: ✅ Completed 2026-05-30** — admin connected to real API
+> **Stage 10 (Web): ✅ Completed 2026-05-27** — colourmountains.ru public website (285 tests)
 
-## Deadlines (updated 2026-05-13)
+## Deadline (updated 2026-05-30)
 
 | Milestone | Date | Deliverable |
 |-----------|------|-------------|
-| **MVP** | **May 20, 2026 (7 days)** | P1 — Admin Schedule fully working |
-| **Full release** | **May 31, 2026 (18 days)** | All P1–P5 + tests |
+| **Full release** | **June 15, 2026** | All stages complete |
 
 ## Introduction
 
@@ -26,14 +28,14 @@ The project uses **Turborepo + npm workspaces**:
 
 ```
 memo/
-├── apps/
-│   ├── admin/          # Admin panel (Next.js 14, App Router)
-│   ├── web/            # colourmountains.ru (Next.js 14, future)
-│   └── master/         # Master app (future)
+├── frontend/
+│   ├── admin/          # Admin panel (Next.js 14, App Router) ✅
+│   ├── web/            # colourmountains.ru (Next.js 14) ✅
+│   └── master/         # Artist mobile app (future)
 ├── packages/
 │   ├── domain/         # Shared TypeScript types + Zod schemas
 │   └── api-client/     # Shared HTTP client for FastAPI
-├── backend/            # FastAPI (separate service)
+├── backend/            # FastAPI (separate service) ✅
 └── turbo.json
 ```
 
@@ -182,36 +184,44 @@ Create 8 agents in `.opencode/agents/` modeled after cmbot:
 
 ---
 
-## Stage 5: Frontend–Backend API Integration
+## Stage 5: Frontend–Backend API Integration ✅
 
 - [x] Design API integration plan (which endpoints, data flow, error handling)
 - [x] Update `@memo/api-client` to point to `/api/v1/` endpoints
-- [x] Replace mock data in `apps/admin/` with real API calls
+- [x] Replace mock data in `frontend/admin/` with real API calls
 - [x] Add loading, error, empty states to UI components
 - [x] Verify end-to-end: frontend loads real data from backend
 
-**Result: Stage 5 completed.** Admin panel works with real backend data.
+**Result:** Admin panel works with real backend data. 488 tests passing.
 
 ---
 
-## Stage 6: P3 — Client Booking Flow
+## Stage 6: P3 — Booking Flow E2E Verification
 
-- [ ] **BookingPage** (`/booking`) — port 4-step flow
-- [ ] LocationSelector, ActivitySchedule, BookingForm, VisitorLookup
-- [ ] BookingConfirmation + PricingBreakdown
-- [ ] Update design to match overall style
+Public website (`frontend/web/`) already has the 4-step booking flow. Now:
+- [ ] **Run full E2E** — book a class from start to finish with real backend
+- [ ] **Fix/refine UX** — polish CalendarLine, BookingOverlay, pricing, validation
+- [ ] **Connect to backend** — wire web booking API to FastAPI `/api/v1/records/` endpoints
+- [ ] **Payment flow** — verify/simplify payment step
+- [ ] **Error states** — handle backend errors gracefully in booking UI
+- [ ] **Visual compliance** — verify against design spec
 
-**Result:** Client books a master class
+**Result:** Client can book a master class end-to-end with real backend
 
 ---
 
-## Stage 7: P4 — Artist Schedule
+## Stage 7: P4 — Artist App (Mobile)
 
-- [ ] **ArtistPage** (`/artist`) — port
-- [ ] ArtistSelector, ArtistWeekView, ActivityDetail, AvailabilityToggle
-- [ ] Mobile-first, card-based layout
+New `frontend/master/` — Next.js 14, mobile-first.
+- [ ] Create `frontend/master/` — Next.js 14 project
+- [ ] **Mobile-first** design (card-based, touch-friendly)
+- [ ] ArtistSelector (if an artist handles multiple disciplines)
+- [ ] **ArtistWeekView** — weekly schedule
+- [ ] **ActivityDetail** — class details, list of registered visitors
+- [ ] **AvailabilityToggle** — mark availability/unavailability
+- [ ] Push notifications for new bookings (basic)
 
-**Result:** Artists see their schedule
+**Result:** Artists see their schedule and manage availability on mobile
 
 ---
 
@@ -235,56 +245,38 @@ Create 8 agents in `.opencode/agents/` modeled after cmbot:
 
 ---
 
-## Stage 10: Web — colourmountains.ru (P3 Client Booking Flow)
+## Stage 10: Web — colourmountains.ru (P3 Public Site) ✅
 
-- [ ] Create `apps/web/` — Next.js 14 project for public website
-- [ ] Set up SEO: metadata, sitemap, robots
-- [ ] **Home page** — hero, gallery, services, about the studio
-- [ ] **Services page** — list of master classes
-- [ ] **Booking page** (`/booking`) — 4-step flow:
-  - Step 1: LocationSelector (location cards)
-  - Step 2: ActivitySchedule (date and class selection)
-  - Step 3: BookingForm (visitors, prices)
-  - Step 4: BookingConfirmation (payment, summary)
-- [ ] **Contact page**
-- [ ] Integration with `@memo/domain` and `@memo/api-client`
+- [x] Home page — hero, gallery, services, about the studio
+- [x] **Services page** — list of master classes
+- [x] **Booking page** (`/booking`) — 4-step flow
+- [x] **Contact page** — `/about`, `/locations`
+- [x] Integration with `@memo/domain` and `@memo/api-client`
+- [x] MKCarousel, CalendarLine, ActivityDetail, BookingOverlay
+- [x] 285 tests — all passing
+- [ ] SEO: metadata, sitemap, robots (minor — left for Stage 9)
 
-**Result:** Full colourmountains.ru website with online booking
-
----
-
-## Stage 10: Master App — artist schedule
-
-- [ ] Create `apps/master/` — Next.js 14 project
-- [ ] **Mobile-first** design
-- [ ] ArtistSelector (if an artist handles multiple disciplines)
-- [ ] **ArtistWeekView** — weekly schedule
-- [ ] **ActivityDetail** — class details, list of registered visitors
-- [ ] **AvailabilityToggle** — mark availability/unavailability
-- [ ] Push notifications for new bookings
-
-**Result:** Artists see their schedule and manage availability
+**Result:** Full colourmountains.ru website with online booking. Merged via PR #40.
 
 ---
 
 ## Priorities and Time
 
-| Stage | Days | What we do | Who |
-|-------|------|------------|-----|
-| 0 — Preparation (agents) | 1 | Create 8 agents | @manager |
-| 1 — Turborepo Infrastructure | 1 | Turborepo + shared packages | @architect |
-| 2 — Design System + Layout | 1 | Sidebar, Toolbar, RightPanel | @frontend-coder |
-| 3 — P1 Schedule | 3 | Grid, cards, DnD, stamp, modal | @frontend-coder |
-| 4 — P2 Booking Management | 2 | Bookings + Client Card | @frontend-coder |
-| 5 — Frontend–Backend API | 3 | Connect admin to real API | @frontend-coder |
-| 6 — P3 Client Booking Flow | 3 | Client booking flow | @frontend-coder |
-| 7 — P4 Artist Schedule | 2 | Artist schedule | @frontend-coder |
-| 8 — P5 AI Concierge Chat | 2 | Chat assistant | @frontend-coder |
-| 9 — Tests and Polish | 2 | Tests, a11y, build | @tester + @frontend-coder |
-| 10 — Web (colourmountains.ru) | 5 | Website + online booking | @frontend-coder |
-| 11 — Master App | 3 | Master app | @frontend-coder |
+| Stage | Days | What | Who | Status |
+|-------|------|------|-----|--------|
+| 0 — Preparation (agents) | 1 | Create 8 agents | @manager | ✅ |
+| 1 — Turborepo Infrastructure | 1 | Turborepo + shared packages | @architect | ✅ |
+| 2 — Design System + Layout | 1 | Sidebar, Toolbar, RightPanel | @frontend-coder | ✅ |
+| 3 — P1 Schedule | 3 | Grid, cards, DnD, stamp, modal | @frontend-coder | ✅ |
+| 4 — P2 Booking Management | 2 | Bookings + Client Card | @frontend-coder | ✅ |
+| 5 — Frontend–Backend API | 3 | Admin connected to real API | @frontend-coder | ✅ |
+| 10 — Web (colourmountains.ru) | 5 | Public website + online booking | @frontend-coder | ✅ |
+| **6 — P3 Booking Flow E2E** | **4** | **Verify + polish + backend wiring** | **@frontend-coder** | **⬅️ СЕЙЧАС** |
+| 7 — P4 Artist App | 4 | Mobile app for artists | @frontend-coder | ⬜ |
+| 8 — P5 AI Concierge | 3 | Chat assistant | @frontend-coder | ⬜ |
+| 9 — Tests and Polish | 3 | Tests, a11y, build, SEO | @tester + @frontend-coder | ⬜ |
 
-**Total:** ~20-25 days for full release (P1–P5 + Web + Master)
+**Total remaining:** ~14 days → **June 15**
 
 ---
 
@@ -295,8 +287,8 @@ Create 8 agents in `.opencode/agents/` modeled after cmbot:
 ---
 
 ## Changelog
-- 2026-05-30: **Stage 2 marked done.** Added Stage 5 (Frontend–Backend API Integration). Renumbered stages 6–11.
+- 2026-05-30: **Plan overhaul.** Architecture `apps/` → `frontend/`. Stage 10 (Web) marked ✅. Stage 7+11 merged into "Artist App". Stage 6 re-scoped to "Booking Flow E2E". Deadline → June 15.
+- 2026-05-30: **Stage 5 completed.** API Integration — admin works with real backend.
 - 2026-05-30: **Backend restructure merged** — `app/` → `src/`, API `/api/v1/`, repositories/ extracted, services renamed.
-- 2026-05-19: **Turborepo migration.** Transition from a single `frontend/` to monorepo: `apps/admin/`, `packages/domain/`, `packages/api-client/`. MVP deadline removed, stages 9 (Web) and 10 (Master App) added. Architecture updated: `docs/ARCHITECTURE.md`.
-- 2026-05-13: Updated deadlines — MVP May 20, Full release May 31. Added daily schedule for MVP sprint.
-- 2026-05-13: Initial PLAN.md created with stages 0-8.
+- 2026-05-19: **Turborepo migration.** Transition from a single `frontend/` to monorepo.
+- 2026-05-13: Initial PLAN.md created.

@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import { ScheduleProvider } from '../contexts/ScheduleContext';
 import { UIProvider } from '../contexts/UIContext';
-import SchedulePage from '../app/(main)/page';
+import SchedulePage from '../app/page';
 import React from 'react';
 
 // usePathname is used by Sidebar (not by page itself, but shared context may trigger it)

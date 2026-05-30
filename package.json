@@ -18,5 +18,8 @@
     "prettier": "^3.2.5",
     "turbo": "^2.0.0"
   },
-  "packageManager": "npm@10.7.0"
+  "packageManager": "npm@10.7.0",
+  "dependencies": {
+    "@tanstack/react-query": "^5.100.14"
+  }
 }

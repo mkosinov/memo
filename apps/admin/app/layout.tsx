@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { ScheduleProvider } from '../contexts/ScheduleContext';
 import { UIProvider } from '../contexts/UIContext';
 import { ToastContainer } from './components/toast/ToastContainer';
 
@@ -37,9 +36,7 @@ export default function RootLayout({
       <body className={`${inter.variable} antialiased`}>
         <QueryClientProvider client={queryClient}>
           <UIProvider>
-            <ScheduleProvider>
-              {children}
-            </ScheduleProvider>
+            {children}
             <ToastContainer />
           </UIProvider>
         </QueryClientProvider>

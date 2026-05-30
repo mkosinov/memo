@@ -1,19 +1,7 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { UIProvider } from '../contexts/UIContext';
-import { ToastContainer } from './components/toast/ToastContainer';
-
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      staleTime: 30_000,
-      retry: 2,
-      refetchOnWindowFocus: false,
-    },
-  },
-});
+import { Providers } from './providers';
 
 const inter = Inter({
   subsets: ["latin"],
@@ -34,12 +22,9 @@ export default function RootLayout({
   return (
     <html lang="ru">
       <body className={`${inter.variable} antialiased`}>
-        <QueryClientProvider client={queryClient}>
-          <UIProvider>
-            {children}
-            <ToastContainer />
-          </UIProvider>
-        </QueryClientProvider>
+        <Providers>
+          {children}
+        </Providers>
       </body>
     </html>
   );

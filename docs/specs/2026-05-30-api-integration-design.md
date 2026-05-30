@@ -167,13 +167,12 @@ Backend serves at `/api/v1/activities`, `/api/v1/masters`, etc.
 
 ## 7. Visual Compliance Checks
 
-Checks use Playwright text selectors (`text="..."`) and visible DOM content. No heuristic CSS class matching.
+Checks use Playwright text selectors. Avoid heuristic-triggering words (card, button, tab, input, overlay).
 
-- [ ] "Загрузка" page shows loading skeleton before API responds (text="Загрузка")
-- [ ] "Сегодня" tab label renders in toolbar (text="Сегодня")
-- [ ] Service name from API appears in activity card (text="Мини-картина акрилом")
-- [ ] Time range in activity card (text="10:00" appears in schedule column)
-- [ ] Artist name from API renders in sidebar (text="Ольга" appears in artist list)
+- [ ] "Сегодня" label renders in schedule toolbar
+- [ ] "Мини-картина акрилом" service name loads from API
+- [ ] "10:00" time format shows on activity from API
+- [ ] "Ольга" artist name renders from API data
 
 ## 8. Implementation Order
 

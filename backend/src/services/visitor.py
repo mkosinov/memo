@@ -5,7 +5,7 @@ from functools import lru_cache
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.db.repository import GenericRepository, get_repository
+from src.repositories.generic import GenericRepository, get_generic_repository
 from src.models.visitor import Visitor
 from src.schemas.visitor import VisitorCreate, VisitorResponse, VisitorUpdate
 from src.services.generic import GenericService
@@ -35,4 +35,4 @@ class VisitorService(GenericService[VisitorCreate, VisitorUpdate, VisitorRespons
 @lru_cache
 def get_visitor_service() -> VisitorService:
     """Returns a singleton VisitorService."""
-    return VisitorService(get_repository(), Visitor)
+    return VisitorService(get_generic_repository(), Visitor)

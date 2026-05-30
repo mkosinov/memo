@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from src.db import SessionDep
 from src.schemas.service import ServiceCreate, ServiceResponse, ServiceUpdate
-from src.services.service_service import ServiceService, get_service_service
+from src.services.service import ServiceService, get_service_service
 
 router = APIRouter(tags=["services"])
 

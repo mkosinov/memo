@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from src.db.repository import GenericRepository, get_repository
+from src.repositories.generic import GenericRepository, get_generic_repository
 from src.models.record import Record
 from src.models.visit import Visit
 from src.schemas.record import RecordCreate, RecordResponse, RecordUpdate
@@ -106,4 +106,4 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
 @lru_cache
 def get_record_service() -> RecordService:
     """Returns a singleton RecordService."""
-    return RecordService(get_repository(), Record)
+    return RecordService(get_generic_repository(), Record)

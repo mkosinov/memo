@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends
 
 from src.db import SessionDep
 from src.schemas.system import HealthResponse
-from src.services.system_service import HealthService, get_health_service
+from src.services.system import HealthService, get_health_service
 
 router = APIRouter(tags=["system"])
 

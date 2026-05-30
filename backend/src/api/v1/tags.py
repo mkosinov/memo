@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends
 from src.db import SessionDep
 from src.schemas.tag import TagCreate, TagResponse
 from src.services.generic import GenericService
-from src.services.tag_service import get_tag_service
+from src.services.tag import get_tag_service
 
 router = APIRouter(tags=["tags"])
 

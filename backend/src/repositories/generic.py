@@ -22,7 +22,7 @@ ModelType = TypeVar("ModelType", bound=Base)
 class GenericRepository:
     """Stateless repository providing standard CRUD operations for any model.
 
-    Use the ``get_repository()`` factory to obtain a singleton instance.
+    Use the ``get_generic_repository()`` factory to obtain a singleton instance.
     """
 
     async def list(
@@ -81,6 +81,6 @@ class GenericRepository:
 
 
 @lru_cache
-def get_repository() -> GenericRepository:
+def get_generic_repository() -> GenericRepository:
     """Return a singleton GenericRepository."""
     return GenericRepository()

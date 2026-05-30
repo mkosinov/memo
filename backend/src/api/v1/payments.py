@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from src.db import SessionDep
 from src.schemas.payment import PaymentCreate, PaymentResponse, PaymentUpdate
 from src.services.generic import GenericService
-from src.services.payment_service import get_payment_service
+from src.services.payment import get_payment_service
 
 router = APIRouter(tags=["payments"])
 

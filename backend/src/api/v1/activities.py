@@ -12,7 +12,7 @@ from src.schemas.activity import (
     ActivityResponse,
     ActivityUpdate,
 )
-from src.services.activity_service import ActivityService, get_activity_service
+from src.services.activity import ActivityService, get_activity_service
 
 router = APIRouter(tags=["activities"])
 

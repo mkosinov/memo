@@ -2,7 +2,7 @@
 
 from functools import lru_cache
 
-from src.db.repository import get_repository
+from src.repositories.generic import get_generic_repository
 from src.models.client import Client
 from src.schemas.client import ClientCreate, ClientResponse, ClientUpdate
 from src.services.generic import GenericService
@@ -10,4 +10,4 @@ from src.services.generic import GenericService
 
 @lru_cache
 def get_client_service() -> GenericService[ClientCreate, ClientUpdate, ClientResponse]:
-    return GenericService(get_repository(), Client, ClientResponse)
+    return GenericService(get_generic_repository(), Client, ClientResponse)

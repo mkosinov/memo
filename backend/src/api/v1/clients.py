@@ -8,9 +8,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from src.db import SessionDep
 from src.schemas.client import ClientCreate, ClientResponse, ClientUpdate
 from src.schemas.visitor import VisitorResponse
-from src.services.client_service import get_client_service
+from src.services.client import get_client_service
 from src.services.generic import GenericService
-from src.services.visitor_service import get_visitor_service
+from src.services.visitor import get_visitor_service
 
 router = APIRouter(tags=["clients"])
 

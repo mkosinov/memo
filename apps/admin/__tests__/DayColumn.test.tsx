@@ -3,7 +3,44 @@ import { render, screen, fireEvent, act } from '@testing-library/react';
 import React from 'react';
 import { DayColumn } from '../app/components/schedule/DayColumn';
 import type { Activity, Artist, Service } from '@memo/domain';
-import { ARTISTS, SERVICES } from '../lib/mock-data';
+const MOCK_ARTISTS: Artist[] = [
+  { id: 'm1', name: 'Анна Иванова', shortName: 'Анна', color: '#FF6B6B' },
+  { id: 'm2', name: 'Петр Петров', shortName: 'Петр', color: '#4ECDC4' },
+  { id: 'm3', name: 'Мария Сидорова', shortName: 'Мария', color: '#45B7D1' },
+];
+
+const MOCK_SERVICES: Service[] = [
+  {
+    id: 's1',
+    name: 'Картина маслом',
+    duration: 2.5,
+    durationMinutes: 150,
+    maxCapacity: 8,
+    minAge: '12+',
+    defaultAdultPrice: 2500,
+    description: 'Рисование масляными красками',
+  },
+  {
+    id: 's2',
+    name: 'Картина акрилом',
+    duration: 1.5,
+    durationMinutes: 90,
+    maxCapacity: 6,
+    minAge: '6+',
+    defaultAdultPrice: 2000,
+    description: 'Рисование акриловыми красками',
+  },
+  {
+    id: 's3',
+    name: 'Мини-картина',
+    duration: 2,
+    durationMinutes: 120,
+    maxCapacity: 10,
+    minAge: '6+',
+    defaultAdultPrice: 1500,
+    description: 'Маленький формат',
+  },
+];
 
 // Mock contexts used by ActivityCard (rendered inside DayColumn)
 vi.mock('@/contexts/UIContext', () => ({
@@ -101,7 +138,7 @@ const mockActivities: Activity[] = [
 ];
 
 function getArtistById(masterId: string) {
-  return ARTISTS.find(a => a.id === masterId) || ARTISTS[0];
+  return MOCK_ARTISTS.find(a => a.id === masterId) || MOCK_ARTISTS[0];
 }
 
 describe('DayColumn', () => {
@@ -111,7 +148,7 @@ describe('DayColumn', () => {
         dayIndex={0}
         date={new Date()}
         activities={[]}
-        artists={ARTISTS}
+        artists={MOCK_ARTISTS}
       />,
     );
     const column = screen.getByTestId('day-column-0');
@@ -124,7 +161,7 @@ describe('DayColumn', () => {
         dayIndex={0}
         date={new Date()}
         activities={mockActivities}
-        artists={ARTISTS}
+        artists={MOCK_ARTISTS}
       />,
     );
     expect(screen.getByTestId('activity-a1')).toBeInTheDocument();
@@ -138,7 +175,7 @@ describe('DayColumn', () => {
         dayIndex={0}
         date={new Date()}
         activities={mockActivities.slice(0, 2)} // a1 and a2 both start at 10
-        artists={ARTISTS}
+        artists={MOCK_ARTISTS}
       />,
     );
     const card1 = screen.getByTestId('activity-a1');
@@ -156,7 +193,7 @@ describe('DayColumn', () => {
         dayIndex={0}
         date={new Date()}
         activities={[mockActivities[2]]} // a3 starts at 14, alone
-        artists={ARTISTS}
+        artists={MOCK_ARTISTS}
       />,
     );
     const card = screen.getByTestId('activity-a3');
@@ -169,7 +206,7 @@ describe('DayColumn', () => {
         dayIndex={0}
         date={new Date()}
         activities={mockActivities.slice(0, 2)}
-        artists={ARTISTS}
+        artists={MOCK_ARTISTS}
       />,
     );
     const card1 = screen.getByTestId('activity-a1');
@@ -201,7 +238,7 @@ describe('DayColumn', () => {
         dayIndex={2}
         date={new Date()}
         activities={[]}
-        artists={ARTISTS}
+        artists={MOCK_ARTISTS}
         onCreateActivity={onCreateActivity}
       />,
     );
@@ -221,7 +258,7 @@ describe('DayColumn', () => {
         dayIndex={0}
         date={new Date()}
         activities={mockActivities}
-        artists={ARTISTS}
+        artists={MOCK_ARTISTS}
         onCreateActivity={onCreateActivity}
       />,
     );
@@ -239,7 +276,7 @@ describe('DayColumn', () => {
         dayIndex={1}
         date={new Date()}
         activities={[]}
-        artists={ARTISTS}
+        artists={MOCK_ARTISTS}
       />,
     );
 
@@ -271,7 +308,7 @@ describe('DayColumn', () => {
           dayIndex={0}
           date={new Date()}
           activities={[]}
-          artists={ARTISTS}
+          artists={MOCK_ARTISTS}
         />,
       );
 
@@ -290,7 +327,7 @@ describe('DayColumn', () => {
           dayIndex={0}
           date={new Date()}
           activities={[]}
-          artists={ARTISTS}
+          artists={MOCK_ARTISTS}
         />,
       );
 
@@ -307,7 +344,7 @@ describe('DayColumn', () => {
           dayIndex={0}
           date={new Date()}
           activities={[]}
-          artists={ARTISTS}
+          artists={MOCK_ARTISTS}
           dragCopy={false}
         />,
       );
@@ -325,7 +362,7 @@ describe('DayColumn', () => {
           dayIndex={0}
           date={new Date()}
           activities={[]}
-          artists={ARTISTS}
+          artists={MOCK_ARTISTS}
           dragCopy={true}
         />,
       );
@@ -354,8 +391,8 @@ describe('DayColumn', () => {
           dayIndex={0}
           date={new Date()}
           activities={[]}
-          artists={ARTISTS}
-          services={SERVICES}
+          artists={MOCK_ARTISTS}
+          services={MOCK_SERVICES}
           stampReady={true}
           stamp={mockStamp}
         />,
@@ -383,8 +420,8 @@ describe('DayColumn', () => {
           dayIndex={0}
           date={new Date()}
           activities={[]}
-          artists={ARTISTS}
-          services={SERVICES}
+          artists={MOCK_ARTISTS}
+          services={MOCK_SERVICES}
           stampReady={true}
           stamp={mockStamp}
         />,
@@ -408,8 +445,8 @@ describe('DayColumn', () => {
           dayIndex={0}
           date={new Date()}
           activities={[]}
-          artists={ARTISTS}
-          services={SERVICES}
+          artists={MOCK_ARTISTS}
+          services={MOCK_SERVICES}
           stampReady={false}
           stamp={{ masterId: null, serviceId: null, locations: new Set(), ready: false }}
         />,

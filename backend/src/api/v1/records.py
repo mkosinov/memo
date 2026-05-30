@@ -13,7 +13,7 @@ from src.schemas.record import (
     RecordUpdate,
     VisitResponse,
 )
-from src.services.record_service import RecordService, get_record_service
+from src.services.record import RecordService, get_record_service
 
 router = APIRouter(tags=["records"])
 

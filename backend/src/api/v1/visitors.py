@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from src.db import SessionDep
 from src.schemas.visitor import VisitorCreate, VisitorResponse, VisitorUpdate
-from src.services.visitor_service import get_visitor_service, VisitorService
+from src.services.visitor import get_visitor_service, VisitorService
 
 router = APIRouter(tags=["visitors"])
 

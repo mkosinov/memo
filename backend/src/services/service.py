@@ -8,7 +8,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from src.db.repository import GenericRepository, get_repository
+from src.repositories.generic import GenericRepository, get_generic_repository
 from src.models.service import Service
 from src.models.tag import service_tags
 from src.models.tariff import Tariff
@@ -116,4 +116,4 @@ class ServiceService(GenericService[ServiceCreate, ServiceUpdate, ServiceRespons
 @lru_cache
 def get_service_service() -> ServiceService:
     """Returns a singleton ServiceService."""
-    return ServiceService(get_repository(), Service)
+    return ServiceService(get_generic_repository(), Service)

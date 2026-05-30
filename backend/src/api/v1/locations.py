@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from src.db import SessionDep
 from src.schemas.location import LocationCreate, LocationResponse, LocationUpdate
 from src.services.generic import GenericService
-from src.services.location_service import get_location_service
+from src.services.location import get_location_service
 
 router = APIRouter(tags=["locations"])
 

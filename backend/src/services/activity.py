@@ -9,7 +9,7 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.db.repository import GenericRepository, get_repository
+from src.repositories.generic import GenericRepository, get_generic_repository
 from src.models.activity import Activity
 from src.models.record import Record
 from src.schemas.activity import ActivityCreate, ActivityResponse, ActivityUpdate
@@ -69,4 +69,4 @@ class ActivityService(GenericService[ActivityCreate, ActivityUpdate, ActivityRes
 @lru_cache
 def get_activity_service() -> ActivityService:
     """Returns a singleton ActivityService."""
-    return ActivityService(get_repository(), Activity)
+    return ActivityService(get_generic_repository(), Activity)

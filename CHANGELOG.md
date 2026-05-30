@@ -11,6 +11,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Stage 5: API Integration** — 2026-05-30
+  - Migrated admin panel to real FastAPI backend using @tanstack/react-query v5
+  - Shared `@memo/api-client` updated to support full CRUD via `/api/v1/`
+  - Created transformation layer (API snake_case to UI camelCase)
+  - Full loading/error/empty state implementation with Skeletons
+  - Migrated ScheduleContext, ScheduleProvider and components to API hooks
+  - 203 tests passing (all tests migrated from mock data)
+
 - **Phase 5: Backend Foundation (FastAPI + Clean Architecture) — 2026-05-28**
   - FastAPI application with async SQLAlchemy 2.0 + aiosqlite
   - DatabaseSessionManager with Unit of Work pattern (DI-based session management)

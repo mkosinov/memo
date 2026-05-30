@@ -25,7 +25,7 @@ interface ScheduleContextType {
   addActivity: (activity: Omit<Activity, 'id'>) => void;
   updateActivity: (id: string, updates: Partial<Activity>) => void;
   deleteActivity: (id: string) => void;
-  setStamp: (stamp: StampState) => void;
+  setStamp: React.Dispatch<React.SetStateAction<StampState>>;
   copyLastWeek: () => void;
   loading: boolean;
   error: Error | null;

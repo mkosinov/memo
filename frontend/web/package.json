@@ -13,6 +13,7 @@
   "dependencies": {
     "@memo/api-client": "*",
     "@memo/domain": "*",
+    "@tanstack/react-query": "^5.100.14",
     "embla-carousel-react": "^8.0.0",
     "framer-motion": "^11.0.0",
     "libphonenumber-js": "^1.13.3",

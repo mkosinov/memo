@@ -11,6 +11,7 @@ from src.models.activity import Activity
 from src.models.client import Client
 from src.models.location import Location
 from src.models.master import Master
+from src.models.material import Material
 from src.models.payment import Payment
 from src.models.photo import Photo
 from src.models.record import Record
@@ -121,8 +122,17 @@ class PaymentAdmin(ModelView, model=Payment):
     icon = "fa-solid fa-credit-card"
 
 
+class MaterialAdmin(ModelView, model=Material):
+    column_list: ClassVar[list[Column]] = [Material.id, Material.title, Material.description, Material.is_active]
+    column_searchable_list: ClassVar[list[Column]] = [Material.title]
+    name = "Material"
+    name_plural = "Materials"
+    icon = "fa-solid fa-paint-brush"
+
+
 ALL_ADMIN_VIEWS: ClassVar = [
     MasterAdmin,
+    MaterialAdmin,
     UserAdmin,
     LocationAdmin,
     ServiceAdmin,

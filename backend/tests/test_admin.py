@@ -18,18 +18,18 @@ class TestAdminEndpoint:
 
 
 class TestAdminViewRegistration:
-    """All 13 ORM models must have admin views registered."""
+    """All ORM models must have admin views registered."""
 
     def test_all_model_views_registered(self) -> None:
-        """Admin should have views for all 13 models."""
+        """Admin should have views for all models."""
         from src.admin.setup import ALL_ADMIN_VIEWS
 
         expected_models = [
-            "Master", "User", "Location", "Service", "Tariff",
+            "Master", "Material", "User", "Location", "Service", "Tariff",
             "Tag", "Activity", "Client", "Visitor", "Photo",
             "Record", "Visit", "Payment",
         ]
-        assert len(ALL_ADMIN_VIEWS) == 13
+        assert len(ALL_ADMIN_VIEWS) == 14
 
         registered_names = [view.name for view in ALL_ADMIN_VIEWS]
         for model_name in expected_models:

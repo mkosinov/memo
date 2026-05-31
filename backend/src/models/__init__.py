@@ -6,6 +6,7 @@ from src.models.client import Client
 from src.models.enums import RecordStatus, UserRole
 from src.models.location import Location
 from src.models.master import Master
+from src.models.material import Material
 from src.models.payment import Payment
 from src.models.photo import Photo, photo_tags
 from src.models.record import Record
@@ -22,7 +23,7 @@ from src.models.visitor import Visitor
 
 __all__ = [
     "AbstractModel",
-    "Activity", "Client", "Location", "Master", "Payment", "Photo",
+    "Activity", "Client", "Location", "Master", "Material", "Payment", "Photo",
     "Record", "Service", "Tag", "Tariff", "User", "Visit", "Visitor",
     "RecordStatus", "UserRole",
     "activity_tags", "client_tags", "location_tags",

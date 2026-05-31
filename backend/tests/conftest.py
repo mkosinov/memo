@@ -34,6 +34,7 @@ def reset_db():
         Client,
         Location,
         Master,
+        Material,
         Payment,
         Photo,
         Record,

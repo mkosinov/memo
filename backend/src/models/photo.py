@@ -1,6 +1,6 @@
 """Photo ORM model and photo_tags join table."""
 
-from sqlalchemy import Column, ForeignKey, String, Table, Text
+from sqlalchemy import Boolean, Column, ForeignKey, String, Table, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.db.base import Base
@@ -20,6 +20,7 @@ class Photo(AbstractModel):
     activity_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("activities.id"), nullable=True,
     )
+    is_public: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 photo_tags = Table(

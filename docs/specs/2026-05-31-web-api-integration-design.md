@@ -179,16 +179,16 @@ Tag colors: dynamic hash-based palette (or fixed set for common tags).
 ### 3.5 joinActivities() — pure function
 
 ```typescript
-interface ScheduleIndex {
-  byId: Map<string, ScheduleDTO>;            // id → ScheduleDTO (single source)
+/** Per-location indexes: date → ids, service_id → ids */
+interface LocationIndex {
+  byDate: Map<string, string[]>;        // date → [id1, id2, ...]
+  byServiceId: Map<string, string[]>;   // service_id → [id1, id2, ...]
+}
 
-  byLocation: {
-    'all': Map<string, string[]>;            // date → [id1, id2, ...]
-    'alpika': Map<string, string[]>;
-    'grand': Map<string, string[]>;
-    'p1389': Map<string, string[]>;
-  };
-  byServiceId: Map<string, string[]>;        // service_id → [id1, id2, ...]
+interface ScheduleIndex {
+  byId: Map<string, ScheduleDTO>;       // id → ScheduleDTO (single source)
+
+  byLocation: Record<string, LocationIndex>;  // 'all', 'alpika', 'grand', 'p1389'
 }
 
 function joinActivities(
@@ -208,10 +208,14 @@ Steps:
    - Extract `time` (HH:MM) and `date` (YYYY-MM-DD) from `start` ISO field
    - Merge service tags + activity tags (deduplicate by tag string)
    - Build `ScheduleDTO`, store in `byId[dto.id]`
-3. Build `byLocation` indexes: for each DTO, push its `id` to `byLocation[location_id][date]` and `byLocation['all'][date]`.
-4. Build `byServiceId` index: for each DTO, push its `id` to `byServiceId[service_id]`.
-5. Compute `next_times` for each ScheduleDTO: lookup `byServiceId[service_id]`, filter future dates, sort ASC, take 6.
-6. Return `ScheduleIndex`.
+3. Build `LocationIndex` per location:
+   - For each DTO, push its `id` to `byLocation[location_id].byDate[date]`
+   - Also push its `id` to `byLocation[location_id].byServiceId[service_id]`
+   - Same for `byLocation['all']` (global index across all locations)
+4. Compute `next_times` for each ScheduleDTO:
+   - Lookup `byLocation[activity.location_id].byServiceId[service_id]`
+   - Filter future dates only, sort ASC, take first 6
+5. Return `ScheduleIndex`.
 
 ### 3.6 React Query Caching
 
@@ -314,7 +318,7 @@ function useSchedule(filters: ActivityFiltersView): UseScheduleResult {
 
   const getByDate = useCallback((date: string, locationId = 'all') => {
     if (!index) return [];
-    const ids = index.byLocation[locationId]?.get(date) ?? [];
+    const ids = index.byLocation[locationId]?.byDate.get(date) ?? [];
     return ids.map(id => toScheduleView(index.byId.get(id)!));
   }, [index]);
 

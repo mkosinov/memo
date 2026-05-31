@@ -21,7 +21,9 @@ from src.models import (
     Client,
     Location,
     Master,
+    Material,
     Payment,
+    Photo,
     Record,
     Service,
     Tag,
@@ -29,6 +31,8 @@ from src.models import (
     Visit,
     Visitor,
 )
+from src.models.photo import photo_tags
+from src.models.tag import activity_tags, service_tags
 
 # ---------------------------------------------------------------------------
 # Seed data constants
@@ -120,9 +124,12 @@ async def _seed_masters(session) -> None:
 
 async def _seed_locations(session) -> None:
     locations = [
-        {"id": "alpika", "name": "Альпика", "address": "Альпика, 1 этаж", "capacity": 10},
-        {"id": "grand", "name": "Гранд Отель Поляна", "address": "Гранд Отель, лобби", "capacity": 12},
-        {"id": "p1389", "name": "Поляна 1389", "address": "Поляна 1389, 2 этаж", "capacity": 8},
+        {"id": "alpika", "name": "Альпика", "address": "Альпика, 1 этаж", "capacity": 10,
+         "location_hint": "1 этаж, светлая студия с панорамными окнами"},
+        {"id": "grand", "name": "Гранд Отель Поляна", "address": "Гранд Отель, лобби", "capacity": 12,
+         "location_hint": "Лобби отеля, зона у ресепшн"},
+        {"id": "p1389", "name": "Поляна 1389", "address": "Поляна 1389, 2 этаж", "capacity": 8,
+         "location_hint": "2 этаж, рядом с детской зоной"},
     ]
     for loc in locations:
         if not await _exists(session, Location, loc["id"]):
@@ -131,13 +138,34 @@ async def _seed_locations(session) -> None:
 
 async def _seed_services(session) -> None:
     services = [
-        {"id": "s1", "title": "Картина маслом", "description": "Масляная живопись на холсте", "image_url": "", "specialty": "живопись", "min_age": 12, "max_age": 99, "duration": 150, "record_info": ""},
-        {"id": "s2", "title": "Картина акрилом", "description": "Акриловая живопись на холсте", "image_url": "", "specialty": "живопись", "min_age": 6, "max_age": 99, "duration": 120, "record_info": ""},
-        {"id": "s3", "title": "Мини-картина акрилом", "description": "Миниатюра акрилом на маленьком холсте", "image_url": "", "specialty": "живопись", "min_age": 6, "max_age": 99, "duration": 90, "record_info": ""},
-        {"id": "s4", "title": "Акварель", "description": "Акварельная живопись", "image_url": "", "specialty": "живопись", "min_age": 6, "max_age": 12, "duration": 150, "record_info": ""},
-        {"id": "s5", "title": "Ручная лепка", "description": "Лепка из глины", "image_url": "", "specialty": "керамика", "min_age": 5, "max_age": 99, "duration": 90, "record_info": ""},
-        {"id": "s6", "title": "Роспись одежды", "description": "Роспись футболки или шоппера", "image_url": "", "specialty": "живопись", "min_age": 8, "max_age": 99, "duration": 120, "record_info": ""},
-        {"id": "s7", "title": "Морской пейзаж", "description": "Морской пейзаж маслом", "image_url": "", "specialty": "живопись", "min_age": 12, "max_age": 99, "duration": 180, "record_info": ""},
+        {"id": "s1", "title": "Картина маслом", "description": "Масляная живопись на холсте",
+         "image_url": "/images/card-seascape.jpg", "specialty": "живопись",
+         "min_age": 12, "max_age": 99, "duration": 150, "record_info": "",
+         "material_hint": "Масляные краски, холст на подрамнике 40×50 см, набор кистей, мастихин"},
+        {"id": "s2", "title": "Картина акрилом", "description": "Акриловая живопись на холсте",
+         "image_url": "/images/card-mountain-acrylic.jpg", "specialty": "живопись",
+         "min_age": 6, "max_age": 99, "duration": 120, "record_info": "",
+         "material_hint": "Акриловые краски, холст 30×40 см, кисти, палитра"},
+        {"id": "s3", "title": "Мини-картина акрилом", "description": "Миниатюра акрилом на маленьком холсте",
+         "image_url": "/images/card-watercolor.jpg", "specialty": "живопись",
+         "min_age": 6, "max_age": 99, "duration": 90, "record_info": "",
+         "material_hint": "Акриловые краски, холст 20×30 см, кисти"},
+        {"id": "s4", "title": "Акварель", "description": "Акварельная живопись",
+         "image_url": "/images/card-watercolor.jpg", "specialty": "живопись",
+         "min_age": 6, "max_age": 12, "duration": 150, "record_info": "",
+         "material_hint": "Акварельные краски, бумага A3 300 г/м², кисти"},
+        {"id": "s5", "title": "Ручная лепка", "description": "Лепка из глины",
+         "image_url": "/images/card-animals.jpg", "specialty": "керамика",
+         "min_age": 5, "max_age": 99, "duration": 90, "record_info": "",
+         "material_hint": "Глина, стек, вода, фартук"},
+        {"id": "s6", "title": "Роспись одежды", "description": "Роспись футболки или шоппера",
+         "image_url": "/images/card-shopper.jpg", "specialty": "живопись",
+         "min_age": 8, "max_age": 99, "duration": 120, "record_info": "",
+         "material_hint": "Текстильные краски, шоппер из хлопка, трафареты, кисти"},
+        {"id": "s7", "title": "Морской пейзаж", "description": "Морской пейзаж маслом",
+         "image_url": "/images/card-seascape.jpg", "specialty": "живопись",
+         "min_age": 12, "max_age": 99, "duration": 180, "record_info": "",
+         "material_hint": "Масляные краски, холст 50×60 см, набор кистей, мастихин"},
     ]
     for s in services:
         if not await _exists(session, Service, s["id"]):
@@ -182,7 +210,7 @@ async def _seed_tariffs(session) -> None:
 
 
 async def _seed_tags(session) -> None:
-    tag_names = ["новинка", "хит", "для детей", "популярное", "индивидуальное", "сезонное"]
+    tag_names = ["новинка", "хит", "для детей", "популярное", "индивидуальное", "сезонное", "гость"]
     for i, name in enumerate(tag_names, start=1):
         tag_id = f"tag{i}"
         if not await _exists(session, Tag, tag_id):
@@ -290,6 +318,98 @@ async def _seed_payments(session) -> None:
             session.add(Payment(**p))
 
 
+async def _seed_service_tags(session) -> None:
+    """Link services to tags via service_tags join table."""
+    links = [
+        ("s1", "tag2"),  # хит
+        ("s1", "tag4"),  # популярное
+        ("s2", "tag4"),  # популярное
+        ("s4", "tag3"),  # для детей
+        ("s5", "tag3"),  # для детей
+        ("s7", "tag1"),  # новинка
+        ("s7", "tag2"),  # хит
+    ]
+    for service_id, tag_id in links:
+        result = await session.execute(
+            select(service_tags).where(
+                service_tags.c.service_id == service_id,
+                service_tags.c.tag_id == tag_id,
+            )
+        )
+        if not result.first():
+            await session.execute(
+                service_tags.insert().values(service_id=service_id, tag_id=tag_id)
+            )
+
+
+async def _seed_activity_tags(session) -> None:
+    """Link activities to tags via activity_tags join table."""
+    links = [
+        ("ev_0", "tag1"),  # новинка
+        ("ev_0", "tag6"),  # сезонное
+    ]
+    for activity_id, tag_id in links:
+        result = await session.execute(
+            select(activity_tags).where(
+                activity_tags.c.activity_id == activity_id,
+                activity_tags.c.tag_id == tag_id,
+            )
+        )
+        if not result.first():
+            await session.execute(
+                activity_tags.insert().values(activity_id=activity_id, tag_id=tag_id)
+            )
+
+
+async def _seed_photos(session) -> None:
+    """Seed public photos linked to services/activities + guest tagged."""
+    photos = [
+        {"id": "ph1", "filename": "/images/card-seascape.jpg", "service_id": "s1",
+         "activity_id": None, "is_public": True},
+        {"id": "ph2", "filename": "/images/card-mountain-acrylic.jpg", "service_id": "s2",
+         "activity_id": None, "is_public": True},
+        {"id": "ph3", "filename": "/images/card-watercolor.jpg", "service_id": "s4",
+         "activity_id": None, "is_public": True},
+        {"id": "ph4", "filename": "/images/card-family.jpg", "service_id": "s5",
+         "activity_id": None, "is_public": True},
+        {"id": "ph5", "filename": "/images/card-shopper.jpg", "service_id": "s6",
+         "activity_id": None, "is_public": True},
+        {"id": "ph6", "filename": "/images/guest-1.jpg", "service_id": None,
+         "activity_id": "ev_0", "is_public": True},
+        {"id": "ph7", "filename": "/images/guest-2.jpg", "service_id": None,
+         "activity_id": "ev_4", "is_public": True},
+    ]
+    for p in photos:
+        if not await _exists(session, Photo, p["id"]):
+            session.add(Photo(**p))
+
+    # Tag ph6, ph7 as "гость" via photo_tags
+    for photo_id in ["ph6", "ph7"]:
+        result = await session.execute(
+            select(photo_tags).where(
+                photo_tags.c.photo_id == photo_id,
+                photo_tags.c.tag_id == "tag7",
+            )
+        )
+        if not result.first():
+            await session.execute(
+                photo_tags.insert().values(photo_id=photo_id, tag_id="tag7")
+            )
+
+
+async def _seed_materials(session) -> None:
+    """Seed material references (art techniques)."""
+    materials = [
+        {"id": "mat1", "title": "Масло", "description": "Масляные краски — классика живописи. Густые, насыщенные, сохнут долго."},
+        {"id": "mat2", "title": "Акрил", "description": "Акриловые краски — быстросохнущие, яркие, подходят для любых поверхностей."},
+        {"id": "mat3", "title": "Акварель", "description": "Акварельные краски — прозрачные, нежные, требуют специальной бумаги."},
+        {"id": "mat4", "title": "Гуашь", "description": "Гуашь — плотные матовые краски на водной основе, идеальны для детей."},
+    ]
+    for m in materials:
+        if not await _exists(session, Material, m["id"]):
+            session.add(Material(**m))
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -315,6 +435,10 @@ async def seed_data(manager: DBManager) -> None:
         await _seed_records(session)
         await _seed_visits(session)
         await _seed_payments(session)
+        await _seed_service_tags(session)
+        await _seed_activity_tags(session)
+        await _seed_photos(session)
+        await _seed_materials(session)
         await session.commit()
 
 

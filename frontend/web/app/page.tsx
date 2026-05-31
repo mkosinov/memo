@@ -13,26 +13,26 @@ import { BookingActivityOverlay } from "./ui/BookingActivityOverlay";
 import { BookingPrivateOverlay } from "./ui/BookingPrivateOverlay";
 import { HamburgerMenu } from "./ui/HamburgerMenu";
 import { useCalendarDays } from "./hooks/useCalendarDays";
-import { useActivities } from "./hooks/useActivities";
-import { useFilteredActivities } from "./hooks/useFilteredActivities";
+import { useSchedule } from "./hooks/useSchedule";
 import { useLocations } from "./hooks/useLocations";
 import { useGallery } from "./hooks/useGallery";
 import type { MKCardProps } from "./ui/MKCard";
-import type { ActivityView } from "./lib/model/view/activity";
+import type { ScheduleView } from "./lib/model/view/schedule";
 import type { LocationView } from "./lib/model/view/location";
 import type { GalleryPhotoView } from "./lib/model/view/gallery";
 import type { GuestPhoto } from "./sections/GuestGallery";
 import { getLocationCookie, setLocationCookie } from "./lib/cookies";
 import { getCurrentPosition } from "./lib/geolocation";
 
-const POLLING_INTERVAL_MS = 3 * 60 * 1000; // 3 minutes
+// ── Backward compat: components still use ActivityView ─────
+import type { ActivityView, ActivityTag } from "./lib/model/view/activity";
 
-/** Map ActivityView → MKCardProps for the carousel */
-function toCardProps(vm: ActivityView): MKCardProps & { id: string } {
+/** Map ScheduleView → MKCardProps for the carousel */
+function toCardProps(vm: ScheduleView): MKCardProps & { id: string } {
   return {
     id: vm.id,
     imageUrl: vm.imageUrl,
-    category: vm.category,
+    category: vm.tags[0] as MKCardProps["category"],
     title: vm.title,
     time: vm.time,
     duration: vm.duration,
@@ -42,7 +42,34 @@ function toCardProps(vm: ActivityView): MKCardProps & { id: string } {
   };
 }
 
-
+/** Backward compat adapter: ScheduleView → ActivityView for old UI components */
+function toActivityView(s: ScheduleView): ActivityView {
+  return {
+    id: s.id,
+    title: s.title,
+    category: (s.tags[0] || "") as ActivityTag,
+    imageUrl: s.imageUrl,
+    guestPhotos: s.photos?.map((p) => p.url),
+    time: s.time,
+    duration: s.duration,
+    location: s.location,
+    guestsCount: s.guestsCount,
+    material: s.material,
+    size: s.size,
+    priceMin: s.priceMin,
+    priceMax: s.priceMax,
+    teacherName: s.masterName,
+    teacherAvatar: s.masterAvatar,
+    date: s.date,
+    priceFormatted: s.priceFormatted,
+    dateFormatted: s.dateFormatted,
+    categoryColor: s.tagColors[0] || "#888888",
+    nextTimes: s.nextTimes,
+    priceDetails: s.priceHint,
+    materialDetails: s.materialHint,
+    locationDetails: s.locationHint,
+  };
+}
 
 /** Map LocationView → LocationFilter location */
 function toLocationOption(vm: LocationView): { id: string; name: string } {
@@ -62,7 +89,7 @@ function toGuestPhoto(vm: GalleryPhotoView): GuestPhoto {
 function findNearestLocationId(
   _latitude: number,
   _longitude: number,
-  _locations: Array<{ id: string }>
+  _locations: Array<{ id: string }>,
 ): string | null {
   return null;
 }
@@ -77,8 +104,8 @@ export default function Home() {
 
   // ── UI state ──
   const [menuOpen, setMenuOpen] = useState(false);
-  const [selectedActivity, setSelectedActivity] = useState<ActivityView | null>(null);
-  const [bookingActivity, setBookingActivity] = useState<ActivityView | null>(null);
+  const [selectedActivity, setSelectedActivity] = useState<ScheduleView | null>(null);
+  const [bookingActivity, setBookingActivity] = useState<ScheduleView | null>(null);
   const [bookingFromLastCard, setBookingFromLastCard] = useState(false);
 
   // ── Build 14-day window for background fetch ──
@@ -89,25 +116,27 @@ export default function Home() {
   const dateEndStr = dateEnd.toISOString().split("T")[0];
 
   // ── Data hooks ──
-  // allActivities = single source of truth for 14-day window
-  const {
-    activities: allActivities,
-    isLoading: isAllActivitiesLoading,
-  } = useActivities(
-    { dateStart, dateEnd: dateEndStr },
-    { refetchInterval: POLLING_INTERVAL_MS },
-  );
+  const { schedules, getByDate, isLoading } = useSchedule({
+    dateStart,
+    dateEnd: dateEndStr,
+    location: selectedLocation ?? undefined,
+    tag: selectedTag ?? undefined,
+  });
 
-  // Client-side filtering by date, location, category
+  // Client-side filtering by date and tag
   const selectedDateStr = selectedDate
     ? selectedDate.toISOString().split("T")[0]
     : null;
-  const filteredActivities = useFilteredActivities(
-    allActivities,
-    selectedDateStr,
-    selectedLocation,
-    selectedTag,
-  );
+  const filteredActivities = useMemo(() => {
+    let result = schedules;
+    if (selectedDateStr) {
+      result = getByDate(selectedDateStr, selectedLocation ?? "all");
+    }
+    if (selectedTag) {
+      result = result.filter((s) => s.tags.includes(selectedTag));
+    }
+    return result;
+  }, [selectedDateStr, selectedLocation, selectedTag, schedules, getByDate]);
 
   const { locations } = useLocations();
   const { photos: galleryPhotos } = useGallery(12);
@@ -122,7 +151,7 @@ export default function Home() {
         const nearestId = findNearestLocationId(
           pos.latitude,
           pos.longitude,
-          locations
+          locations,
         );
         if (nearestId) {
           setLocationCookie(nearestId);
@@ -132,9 +161,24 @@ export default function Home() {
   }, [locations]);
 
   // ── Derived data ──
-  const cards = useMemo(() => filteredActivities.map(toCardProps), [filteredActivities]);
-  const locationOptions = useMemo(() => locations.map(toLocationOption), [locations]);
-  const guestPhotos = useMemo(() => galleryPhotos.map(toGuestPhoto), [galleryPhotos]);
+  const cards = useMemo(
+    () => filteredActivities.map(toCardProps),
+    [filteredActivities],
+  );
+  const locationOptions = useMemo(
+    () => locations.map(toLocationOption),
+    [locations],
+  );
+  const guestPhotos = useMemo(
+    () => galleryPhotos.map(toGuestPhoto),
+    [galleryPhotos],
+  );
+
+  // Backward compat: adapted schedules for old UI components
+  const adaptedActivities = useMemo(
+    () => filteredActivities.map(toActivityView),
+    [filteredActivities],
+  );
 
   const carouselDateLabel = useMemo(() => {
     if (!selectedDate) return "этот день";
@@ -166,13 +210,16 @@ export default function Home() {
         description: "В удобное для вас время. Материал — на ваш выбор.",
         price: 8200,
       }) as MKCardProps & { id: string },
-    []
+    [],
   );
 
   // ── Handlers ──
-  const handleSelectDay = useCallback((date: Date) => {
-    selectDate(date);
-  }, [selectDate]);
+  const handleSelectDay = useCallback(
+    (date: Date) => {
+      selectDate(date);
+    },
+    [selectDate],
+  );
 
   const handleSelectTag = useCallback((tag: string | null) => {
     setSelectedTag(tag);
@@ -182,12 +229,15 @@ export default function Home() {
     setSelectedLocation(locationId);
   }, []);
 
-  const handleSelectCard = useCallback((card: MKCardProps & { id: string }) => {
-    const activity = allActivities.find((a) => a.id === card.id);
-    if (activity) {
-      setSelectedActivity(activity);
-    }
-  }, [allActivities]);
+  const handleSelectCard = useCallback(
+    (card: MKCardProps & { id: string }) => {
+      const activity = schedules.find((a) => a.id === card.id);
+      if (activity) {
+        setSelectedActivity(activity);
+      }
+    },
+    [schedules],
+  );
 
   const handleBook = useCallback(() => {
     if (selectedActivity) {
@@ -202,22 +252,25 @@ export default function Home() {
 
   // ── Switching between activities in ActivityDetail ──
   const switchTimerRef = useRef<ReturnType<typeof setTimeout>>();
-  const handleSelectActivity = useCallback((activity: ActivityView | null) => {
-    clearTimeout(switchTimerRef.current);
-    if (activity === null) {
-      setSelectedActivity(null);
-      return;
-    }
-    if (selectedActivity !== null && selectedActivity.id !== activity.id) {
-      // Close overlay, then reopen with new activity after exit animation
-      setSelectedActivity(null);
-      switchTimerRef.current = setTimeout(() => {
+  const handleSelectActivity = useCallback(
+    (activity: ScheduleView | null) => {
+      clearTimeout(switchTimerRef.current);
+      if (activity === null) {
+        setSelectedActivity(null);
+        return;
+      }
+      if (selectedActivity !== null && selectedActivity.id !== activity.id) {
+        // Close overlay, then reopen with new activity after exit animation
+        setSelectedActivity(null);
+        switchTimerRef.current = setTimeout(() => {
+          setSelectedActivity(activity);
+        }, 300);
+      } else {
         setSelectedActivity(activity);
-      }, 300);
-    } else {
-      setSelectedActivity(activity);
-    }
-  }, [selectedActivity]);
+      }
+    },
+    [selectedActivity],
+  );
 
   const handleCloseBooking = useCallback(() => {
     setBookingActivity(null);
@@ -233,7 +286,7 @@ export default function Home() {
 
   const handleTapLastCard = useCallback(() => {
     setBookingFromLastCard(true);
-    setBookingActivity(null); // Clear any existing booking activity
+    setBookingActivity(null);
   }, []);
 
   const handleShowAgain = useCallback(() => {
@@ -241,7 +294,6 @@ export default function Home() {
   }, []);
 
   const handleNextDay = useCallback(() => {
-    // Select the next day in the calendar
     const next = new Date(selectedDate);
     next.setDate(next.getDate() + 1);
     selectDate(next);
@@ -266,7 +318,7 @@ export default function Home() {
           selectedDate={selectedDate}
           days={days}
           onSelectDay={handleSelectDay}
-          disabled={isAllActivitiesLoading}
+          disabled={isLoading}
         />
 
         {/* Фильтры: Локация и Кому в одну аккуратную строку */}
@@ -315,9 +367,11 @@ export default function Home() {
           isOpen={!!selectedActivity}
           onClose={handleCloseActivityDetail}
           activityId={selectedActivity.id}
-          activities={allActivities}
+          activities={adaptedActivities}
           onBook={handleBook}
-          onSelectActivity={handleSelectActivity}
+          onSelectActivity={
+            handleSelectActivity as unknown as (a: ActivityView) => void
+          }
         />
       )}
 
@@ -327,7 +381,7 @@ export default function Home() {
           isOpen={!!bookingActivity}
           onClose={handleCloseBooking}
           activityId={bookingActivity.id}
-          activities={allActivities}
+          activities={adaptedActivities}
         />
       )}
 
@@ -336,7 +390,11 @@ export default function Home() {
         <BookingPrivateOverlay
           isOpen={bookingFromLastCard}
           onClose={() => setBookingFromLastCard(false)}
-          preferredDate={selectedDate ? selectedDate.toISOString().split("T")[0] : undefined}
+          preferredDate={
+            selectedDate
+              ? selectedDate.toISOString().split("T")[0]
+              : undefined
+          }
           preferredLocation={selectedLocation ?? undefined}
         />
       )}

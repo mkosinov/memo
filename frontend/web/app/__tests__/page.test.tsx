@@ -3,19 +3,19 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import Home from "../page";
 
 // ── Mock hooks ──────────────────────────────────────────────
-// Must use vi.hoisted for variables referenced in vi.mock (which is hoisted)
 const mocks = vi.hoisted(() => ({
   selectDate: vi.fn(),
   setTab: vi.fn(),
+  getByDate: vi.fn(),
 }));
 
-const mockActivities = [
+const mockSchedules = [
   {
     id: "act-1",
     title: "Акварельный пейзаж",
-    category: "взрослым" as const,
+    tags: ["взрослым"],
     imageUrl: "/test-activity.jpg",
-    guestPhotos: ["/guest1.jpg"],
+    photos: [{ url: "/guest1.jpg", isPublic: true, tags: [] }],
     time: "14:00",
     duration: "2 часа",
     location: { id: "loc-1", name: "Студия на Арбате", address: "ул. Арбат, 1" },
@@ -24,24 +24,23 @@ const mockActivities = [
     size: "30x40",
     priceMin: 2500,
     priceMax: 3500,
-    teacherName: "Анна Иванова",
-    teacherAvatar: "/teacher.jpg",
+    masterName: "Анна Иванова",
+    masterAvatar: "/teacher.jpg",
     date: "2026-05-20",
     priceFormatted: "2 500 – 3 500 ₽",
     dateFormatted: "20 мая, среда",
-    categoryColor: "#C49A2E",
-    nextTimes: [
-      { id: "act-1b", date: "22 мая", time: "14:00" },
-    ],
-    priceDetails: "Включает материалы",
-    materialDetails: "Акварель и бумага",
-    locationDetails: "5 минут от метро",
+    tagColors: ["#C49A2E"],
+    nextTimes: [{ id: "act-1b", date: "22 мая", time: "14:00" }],
+    priceHint: "Включает материалы",
+    materialHint: "Акварель и бумага",
+    locationHint: "5 минут от метро",
   },
   {
     id: "act-2",
     title: "Семейное рисование",
-    category: "вместе" as const,
+    tags: ["вместе"],
     imageUrl: "/test-activity-2.jpg",
+    photos: [],
     time: "16:00",
     duration: "1.5 часа",
     location: { id: "loc-2", name: "Парк Горького", address: "ул. Крымский Вал, 9" },
@@ -50,23 +49,22 @@ const mockActivities = [
     size: "20x30",
     priceMin: 1500,
     priceMax: 2500,
-    teacherName: "Мария Петрова",
+    masterName: "Мария Петрова",
     date: "2026-05-21",
     priceFormatted: "1 500 – 2 500 ₽",
     dateFormatted: "21 мая, четверг",
-    categoryColor: "#5B8C7A",
-    nextTimes: [
-      { id: "act-2b", date: "24 мая", time: "16:00" },
-    ],
-    priceDetails: "Цена за участника",
-    materialDetails: "Акриловые краски",
-    locationDetails: "Вход через главный вход",
+    tagColors: ["#5B8C7A"],
+    nextTimes: [{ id: "act-2b", date: "24 мая", time: "16:00" }],
+    priceHint: "Цена за участника",
+    materialHint: "Акриловые краски",
+    locationHint: "Вход через главный вход",
   },
   {
     id: "act-3",
     title: "Гончарное дело",
-    category: "вместе" as const,
+    tags: ["вместе"],
     imageUrl: "/test-activity-3.jpg",
+    photos: [],
     time: "12:00",
     duration: "2 часа",
     location: { id: "loc-1", name: "Студия на Арбате" },
@@ -75,17 +73,15 @@ const mockActivities = [
     size: "Горшок",
     priceMin: 3000,
     priceMax: 4000,
-    teacherName: "Ольга Смирнова",
+    masterName: "Ольга Смирнова",
     date: "2026-05-20",
     priceFormatted: "3 000 – 4 000 ₽",
     dateFormatted: "20 мая, среда",
-    categoryColor: "#5B8C7A",
-    nextTimes: [
-      { id: "act-3b", date: "23 мая", time: "12:00" },
-    ],
-    priceDetails: "Все материалы включены",
-    materialDetails: "Глина, краски, глазурь",
-    locationDetails: "Цокольный этаж",
+    tagColors: ["#5B8C7A"],
+    nextTimes: [{ id: "act-3b", date: "23 мая", time: "12:00" }],
+    priceHint: "Все материалы включены",
+    materialHint: "Глина, краски, глазурь",
+    locationHint: "Цокольный этаж",
   },
 ];
 
@@ -102,7 +98,7 @@ const mockGalleryPhotos = [
 const mockToday = new Date(2026, 4, 20);
 const mockCalendarDays = Array.from({ length: 4 }, (_, i) => {
   const date = new Date(mockToday);
-  date.setDate(mockToday.getDate() + 1 + i); // Start from tomorrow
+  date.setDate(mockToday.getDate() + 1 + i);
   return {
     date,
     dayName: ["Чт", "Пт", "Сб", "Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Пт", "Сб", "Вс", "Пн", "Вт"][i],
@@ -122,9 +118,10 @@ vi.mock("../hooks/useCalendarDays", () => ({
   }),
 }));
 
-vi.mock("../hooks/useActivities", () => ({
-  useActivities: () => ({
-    activities: mockActivities,
+vi.mock("../hooks/useSchedule", () => ({
+  useSchedule: () => ({
+    schedules: mockSchedules,
+    getByDate: mocks.getByDate,
     isLoading: false,
     error: null,
   }),
@@ -154,7 +151,6 @@ function renderHome() {
 
 /**
  * Tap the visible activity card in MKCarousel.
- * With default filters (category=вместе, date=today) the visible card is "Гончарное дело".
  */
 function tapCardTrigger() {
   fireEvent.click(screen.getByText("Акварельный пейзаж"));
@@ -167,12 +163,13 @@ describe("Home (page.tsx)", () => {
     vi.clearAllMocks();
     mocks.selectDate.mockClear();
     mocks.setTab.mockClear();
+    mocks.getByDate.mockClear();
+    mocks.getByDate.mockReturnValue(mockSchedules);
   });
 
   describe("section rendering", () => {
     it("renders Hero section with title", () => {
       renderHome();
-      // Hero title changed per v4 design
       expect(screen.getByRole("heading", { level: 1 })).toBeInTheDocument();
     });
 
@@ -183,19 +180,16 @@ describe("Home (page.tsx)", () => {
 
     it("renders ActivityTagFilter with default option", () => {
       renderHome();
-      // ActivityTagFilter triggers with default category label "Для всех"
       expect(screen.getByRole("button", { name: /для всех/i })).toBeInTheDocument();
     });
 
     it("renders LocationFilter trigger button", () => {
       renderHome();
-      // LocationFilter renders as a pill button, not a <select>
       expect(screen.getByRole("button", { name: /все локации/i })).toBeInTheDocument();
     });
 
     it("renders MKCarousel with activity cards", () => {
       renderHome();
-      // With default filter "Кому угодно", both cards are rendered, "Акварельный пейзаж" is visible
       expect(screen.getByText("Акварельный пейзаж")).toBeInTheDocument();
     });
 
@@ -206,7 +200,6 @@ describe("Home (page.tsx)", () => {
 
     it("renders GuestGallery section", () => {
       renderHome();
-      // GuestGallery renders guest photo images
       const guestImages = screen.getAllByAltText(/Guest photo/);
       expect(guestImages.length).toBeGreaterThanOrEqual(1);
     });
@@ -215,7 +208,6 @@ describe("Home (page.tsx)", () => {
   describe("calendar date selection", () => {
     it("calls selectDate when a calendar day is clicked", () => {
       renderHome();
-      // Click the day button that shows "21"
       const dayButton = screen.getByRole("button", { name: /21/ });
       fireEvent.click(dayButton);
       expect(mocks.selectDate).toHaveBeenCalled();
@@ -226,23 +218,19 @@ describe("Home (page.tsx)", () => {
     it("has 'Для всех' selected by default", () => {
       renderHome();
       const trigger = screen.getByRole("button", { name: /для всех/i });
-      expect(trigger).not.toHaveClass("bg-[#004D56]"); // Should not be highlighted with active color
+      expect(trigger).not.toHaveClass("bg-[#004D56]");
     });
 
     it("calls onSelectCategory when a category is clicked inside overlay", () => {
       renderHome();
-      // Click the ActivityTagFilter trigger button
       const trigger = screen.getByRole("button", { name: /для всех/i });
       fireEvent.click(trigger);
 
-      // The overlay is open, choose "взрослым" option (which is a button)
       const options = screen.getAllByText("взрослым");
-      // Find the button inside the overlay
       const optionButton = options.find(el => el.closest("button") && !el.closest('[class*="bg-white rounded-2xl"]'));
       expect(optionButton).toBeDefined();
       fireEvent.click(optionButton!);
 
-      // Now "взрослым" is selected
       const triggers = screen.getAllByRole("button", { name: /взрослым/i });
       expect(triggers.length).toBeGreaterThanOrEqual(1);
     });
@@ -251,7 +239,6 @@ describe("Home (page.tsx)", () => {
   describe("location filter selection", () => {
     it("has LocationFilter trigger button", () => {
       renderHome();
-      // LocationFilter is a pill+overlay, not a select dropdown
       const trigger = screen.getByRole("button", { name: /все локации/i });
       expect(trigger).toBeInTheDocument();
     });
@@ -261,7 +248,6 @@ describe("Home (page.tsx)", () => {
     it("shows ActivityDetail when a card title is tapped", () => {
       renderHome();
       tapCardTrigger();
-      // ActivityDetail should render with teacher name
       expect(screen.getByText("Анна Иванова")).toBeInTheDocument();
     });
 
@@ -312,7 +298,6 @@ describe("Home (page.tsx)", () => {
       expect(screen.getByTestId("menu-overlay")).toBeInTheDocument();
       const closeBtn = screen.getByRole("button", { name: /close/i });
       fireEvent.click(closeBtn);
-      // Framer-motion exit animation keeps element in DOM briefly
       await waitFor(() => {
         expect(screen.queryByTestId("menu-overlay")).not.toBeInTheDocument();
       });

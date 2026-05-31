@@ -32,15 +32,16 @@ location_hint: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 Free-text field: "2 этаж, светлая студия с панорамными окнами". Replaces `location_details` from old mock DTO.
 
-### 1.3 Photo — add filter fields
+### 1.3 Photo — add `is_public` field (guest tagging via `photo_tags`)
 
 ```python
 # backend/src/models/photo.py
-is_public: Mapped[bool] = mapped_column(Boolean, default=False)  # галерея работ
-is_guest: Mapped[bool] = mapped_column(Boolean, default=False)   # полоска guest photos
+is_public: Mapped[bool] = mapped_column(Boolean, default=False)  # видно на сайте
 ```
 
-Enables photo filtering by visibility for web vs admin endpoints.
+Guest photos are marked via `photo_tags` join table with tag "guest" (added to seed).
+Web endpoint `/photos/web` returns `is_public=true` photos; admin endpoint returns all.
+Separation by `is_guest` is unnecessary — the tag system handles categorization.
 
 ### 1.4 Photo API endpoints
 
@@ -106,7 +107,7 @@ All changes in `backend/src/seed/seed.py`:
 | `Service` ↔ `Tag` links | Link services to tags via `service_tags` |
 | `Activity` ↔ `Tag` links | Link activities to tags via `activity_tags` |
 | `Location.location_hint` | Fill for all 3 locations |
-| `Photo` rows | Seed 8-10 photos: `is_public` for service images, `is_guest` for activity guest photos |
+| `Photo` + `photo_tags` rows | Seed 8-10 photos: `is_public=true` for service images. Guest photos tagged with tag "guest" via `photo_tags` |
 | `Material` rows | Seed 4-5 materials (Масло, Акрил, Акварель, Гуашь, Текстильные краски) |
 | `Client` → auto-id | Ensure phone-based lookup works with existing seed data |
 
@@ -153,7 +154,7 @@ frontend/web/app/lib/
 | `title` | `ServiceResponse.title` | ✅ |
 | `tags` | `[...Service.tags, ...Activity.tags]` | deduplicated by tag string |
 | `image_url` | `ServiceResponse.image_url` | will be populated after seed update |
-| `photos` | `PhotoDTO[]` from `/photos/web` | Fetched per activity. Empty if none. Fields: `url`, `is_public`, `is_guest` |
+| `photos` | `PhotoDTO[]` from `/photos/web` | Fetched per activity. Empty if none. Fields: `url`, `is_public`, `tags` (from photo_tags, e.g. ["гость"]) |
 | `time` | `ActivityResponse.start → HH:MM` | extract from ISO datetime |
 | `duration_minutes` | `ActivityResponse.duration` | ✅ |
 | `location_id` | `ActivityResponse.location_id` | ✅ |

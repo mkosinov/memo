@@ -1,46 +1,46 @@
 # Multi-Environment Configuration Design
 
-> Дата: 2026-05-31
-> Статус: Design (pre-implementation)
-> Связанные: `backend/src/core/config.py`, `backend/tests/conftest.py`, `dev.sh`, `.gitignore`
+> Date: 2026-05-31
+> Status: Design (pre-implementation)
+> Related: `backend/src/core/config.py`, `backend/tests/conftest.py`, `dev.sh`, `.gitignore`
 
-## 1. Проблема
+## 1. Problem
 
-Сейчас backend (FastAPI) использует `Settings` класс с pydantic-settings без подгрузки `.env` файлов. Конфигурация задаётся только через `os.environ` или дефолты в коде. Это приводит к:
+Currently the backend (FastAPI) uses a `Settings` class with pydantic-settings, but without loading any `.env` files. Configuration is set only through `os.environ` or hardcoded defaults. This leads to:
 
-- **Нет разделения сред** — dev, test и production используют одни и те же дефолты
-- **CORS-проблема** — приходится вручную ставить `CORS_ORIGINS=*` при каждом запуске dev-окружения
-- **Тесты используют monkeypatch** вместо изолированного конфига
-- **Нет документации** — какие env-переменные существуют и зачем
+- **No environment separation** — dev, test, and production share the same defaults
+- **CORS issue** — `CORS_ORIGINS=*` must be set manually every time the dev environment starts
+- **Tests use monkeypatch** instead of an isolated config
+- **No documentation** — which env vars exist and what they do is unclear
 
-## 2. Решение: ENV_FILE-based multi-env config
+## 2. Solution: ENV_FILE-based multi-env config
 
-### 2.1. Файловая структура
+### 2.1. File structure
 
 ```
 backend/
-├── .env.example        ✅ commit — шаблон со всеми переменными
-├── .env.dev            ✅ commit — dev-конфигурация
-├── .env.test           ✅ commit — test-конфигурация
+├── .env.example        ✅ committed — template with all variables
+├── .env.dev            ✅ committed — dev configuration
+├── .env.test           ✅ committed — test configuration
 ├── .env                ❌ gitignored — production
 ```
 
-### 2.2. Принцип работы
+### 2.2. How it works
 
-- Среда выбирается через переменную окружения `ENV_FILE`
-- `Settings` читает `ENV_FILE` из `os.environ` при создании singleton
-- Если `ENV_FILE` не задан — читает `.env` (production default)
-- Если указанный файл не найден — ошибки нет, Settings читает из `os.environ`
+- The environment is selected via the `ENV_FILE` environment variable
+- `Settings` reads `ENV_FILE` from `os.environ` when creating the singleton
+- If `ENV_FILE` is not set — reads `.env` (production default)
+- If the specified file is not found — no error, Settings falls back to `os.environ`
 
-### 2.3. Порядок приоритета (низкий → высокий)
+### 2.3. Priority order (lowest → highest)
 
-1. Дефолты в коде (`DATABASE_URL: str = "sqlite+aiosqlite:///./memo.db"`)
-2. Значения из `.env` / `.env.dev` / `.env.test` (зависит от `ENV_FILE`)
-3. `os.environ` (самый высокий приоритет)
+1. Code defaults (`DATABASE_URL: str = "sqlite+aiosqlite:///./memo.db"`)
+2. Values from `.env` / `.env.dev` / `.env.test` (depends on `ENV_FILE`)
+3. `os.environ` (highest priority)
 
-Это значит, что conftest может переопределить `DATABASE_URL` через `os.environ`, и это перекроет значение из `.env.test`.
+This means conftest can override `DATABASE_URL` via `os.environ`, and it will take precedence over the value from `.env.test`.
 
-## 3. Изменения в коде
+## 3. Code Changes
 
 ### 3.1. `backend/src/core/config.py`
 
@@ -135,21 +135,21 @@ LOG_LEVEL=DEBUG
 
 ### 3.5. `backend/tests/conftest.py`
 
-Добавить:
+Add:
 ```python
 os.environ["ENV_FILE"] = ".env.test"
 ```
 
-Существующая строка `os.environ["DATABASE_URL"] = ...` остаётся — она переопределит значение из `.env.test`.
+The existing `os.environ["DATABASE_URL"] = ...` line stays — it overrides the value from `.env.test`.
 
 ### 3.6. `dev.sh`
 
-Добавить перед запуском backend:
+Add before starting the backend:
 ```bash
 export ENV_FILE=.env.dev
 ```
 
-Полный фрагмент:
+Full fragment:
 ```bash
 # Start backend (FastAPI) on :8000
 export ENV_FILE=.env.dev
@@ -158,51 +158,51 @@ export ENV_FILE=.env.dev
 
 ### 3.7. `.gitignore` (root)
 
-Убедиться, что `.env.dev`, `.env.test`, `.env.example` НЕ игнорятся.
-Текущие правила уже корректны — они игнорят только `.env`, `.env.local`, `.env.production` и `.env*.local`. Новые файлы не подпадают под эти паттерны.
+Ensure that `.env.dev`, `.env.test`, `.env.example` are NOT ignored.
+The current rules already handle this correctly — they only ignore `.env`, `.env.local`, `.env.production`, and `.env*.local`. The new files do not match these patterns.
 
-Изменений не требуется.
+No changes required.
 
-## 4. Миграция существующего кода
+## 4. Migration of Existing Code
 
-### 4.1. Что НЕ меняется (работает без изменений)
+### 4.1. What does NOT change (works without changes)
 
-- Все существующие тесты (в том числе с `monkeypatch`)
-- `os.environ["DATABASE_URL"]` в conftest (высший приоритет)
-- Ручной запуск через `DATABASE_URL=... CORS_ORIGINS=... uv run uvicorn ...`
+- All existing tests (including those using `monkeypatch`)
+- `os.environ["DATABASE_URL"]` in conftest (highest priority)
+- Manual startup via `DATABASE_URL=... CORS_ORIGINS=... uv run uvicorn ...`
 
-### 4.2. Test refactoring (опционально, можно позже)
+### 4.2. Test refactoring (optional, can be done later)
 
-Тест `test_cors_env_override` в `tests/test_cors.py` можно упростить:
+The `test_cors_env_override` test in `tests/test_cors.py` can be simplified:
 ```python
 def test_cors_env_override(self, monkeypatch):
     """CORS_ORIGINS from .env.test are loaded correctly."""
-    # Сейчас: monkeypatch.setenv + monkeypatch.setattr
-    # После: Settings(_env_file=".env.test") напрямую
+    # Before: monkeypatch.setenv + monkeypatch.setattr
+    # After: Settings(_env_file=".env.test") directly
     from src.core.config import Settings
     s = Settings(_env_file=".env.test")
     assert s.CORS_ORIGINS == ["*"]
 ```
 
-Это не обязательно делать сейчас — старый тест продолжает работать.
+This is not required now — the old test continues to work.
 
 ## 5. Acceptance Criteria
 
-- [ ] `Settings` class загружает `.env` файл, указанный в `ENV_FILE` env var
-- [ ] `.env.dev` создан, закоммичен, содержит dev-настройки (CORS=*, LOG_LEVEL=DEBUG)
-- [ ] `.env.test` создан, закоммичен, содержит test-настройки
-- [ ] `.env.example` создан, закоммичен, содержит документацию по всем переменным
-- [ ] `conftest.py` устанавливает `ENV_FILE=.env.test`
-- [ ] `dev.sh` экспортирует `ENV_FILE=.env.dev`
-- [ ] Все существующие тесты проходят
-- [ ] При `ENV_FILE=.env.dev curl -H "Origin: http://x.x.x.x:3000" ...` — 200 OK (CORS работает)
-- [ ] При отсутствии `ENV_FILE` — читается `.env` (production behavior)
+- [ ] `Settings` class loads the `.env` file specified by the `ENV_FILE` env var
+- [ ] `.env.dev` created, committed, contains dev settings (CORS=*, LOG_LEVEL=DEBUG)
+- [ ] `.env.test` created, committed, contains test settings
+- [ ] `.env.example` created, committed, contains documentation for all variables
+- [ ] `conftest.py` sets `ENV_FILE=.env.test`
+- [ ] `dev.sh` exports `ENV_FILE=.env.dev`
+- [ ] All existing tests pass
+- [ ] With `ENV_FILE=.env.dev curl -H "Origin: http://x.x.x.x:3000" ...` — 200 OK (CORS works)
+- [ ] Without `ENV_FILE` — reads `.env` (production behavior)
 
 ## 6. Visual Compliance Checks
 
-N/A — конфигурация не имеет UI.
+N/A — configuration has no UI.
 
 ## 7. Open Questions
 
-- Нужен ли `.env.local` для персональных оверрайдов? **Решено: не нужен.**
-- Нужен ли `.env.production` отдельно? **Решено: нет, `.env` = production.**
+- Should `.env.local` be added for personal overrides? **Resolved: not needed.**
+- Should `.env.production` exist separately? **Resolved: no, `.env` = production.**

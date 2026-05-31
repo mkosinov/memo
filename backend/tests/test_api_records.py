@@ -318,3 +318,119 @@ class TestVisitsCrud:
                 json={"status": "visited"},
             )
         assert response.status_code == 404
+
+
+class TestRecordCreatePhoneFlow:
+    """Phone-based record creation flow — auto-creates client and visitors."""
+
+    PHONE = "+79990001122"
+
+    def _create_activity(self, client: TestClient) -> str:
+        """Create master -> service -> location -> activity and return activity_id."""
+        master = client.post("/api/v1/masters", json={
+            "first_name": "Anna", "last_name": "Ivanova", "color": "#5B8C7A",
+            "position": "senior", "specialty": "oil",
+        }).json()
+        service = client.post("/api/v1/services", json={
+            "title": "Oil Painting", "description": "Learn oil painting",
+            "image_url": "https://example.com/oil.jpg", "specialty": "oil",
+            "min_age": 12, "max_age": 99, "duration": 90, "record_info": "Bring apron",
+        }).json()
+        location = client.post("/api/v1/locations", json={
+            "name": "Studio 1", "address": "123 Main St", "capacity": 20,
+        }).json()
+
+        from datetime import UTC, datetime, timedelta
+        start = datetime.now(UTC) + timedelta(days=1)
+        activity = client.post("/api/v1/activities", json={
+            "master_id": master["id"], "service_id": service["id"],
+            "location_id": location["id"], "start": start.isoformat(),
+            "duration": 90, "capacity": 10, "is_private": False,
+        }).json()
+        return activity["id"]
+
+    def test_create_record_with_phone_creates_client_and_visitors(self) -> None:
+        """POST /api/records with phone auto-creates client and visitors."""
+        from src.main import create_app
+
+        app = create_app()
+        with TestClient(app) as client:
+            activity_id = self._create_activity(client)
+            payload = {
+                "activity_id": activity_id,
+                "phone": self.PHONE,
+                "comment": "Phone-based booking",
+                "visits": [
+                    {"name": "Alice", "age": 28, "price": 1500},
+                    {"name": "Bob", "age": 35, "price": 1500},
+                ],
+            }
+
+            response = client.post("/api/v1/records", json=payload)
+
+            assert response.status_code == 201, f"Expected 201, got {response.status_code}: {response.text}"
+            body = response.json()
+            assert body["activity_id"] == activity_id
+            assert body["client_id"] is not None  # auto-created client
+            assert body["status"] == "pending"
+            assert body["seats"] == 2
+            assert body["comment"] == "Phone-based booking"
+            assert len(body["visits"]) == 2
+
+            # Verify client was created with the phone
+            client_resp = client.get(f"/api/v1/clients/{body['client_id']}")
+            assert client_resp.status_code == 200
+            assert client_resp.json()["phone"] == self.PHONE
+
+            # Verify visitors were created
+            for visit in body["visits"]:
+                visitor_resp = client.get(f"/api/v1/visitors/{visit['visitor_id']}")
+                assert visitor_resp.status_code == 200
+
+    def test_create_record_with_phone_existing_client(self) -> None:
+        """POST /api/records with phone reuses existing client."""
+        from src.main import create_app
+
+        app = create_app()
+        with TestClient(app) as client:
+            # First create a client
+            created = client.post("/api/v1/clients", json={
+                "name": "Existing", "phone": self.PHONE,
+                "email": "existing@example.com", "channel": "website",
+            }).json()
+            existing_client_id = created["id"]
+
+            activity_id = self._create_activity(client)
+            payload = {
+                "activity_id": activity_id,
+                "phone": self.PHONE,
+                "comment": "Existing client booking",
+                "visits": [
+                    {"name": "Charlie", "age": 10, "price": 2000},
+                ],
+            }
+
+            response = client.post("/api/v1/records", json=payload)
+            assert response.status_code == 201, f"Expected 201, got {response.status_code}: {response.text}"
+            body = response.json()
+            assert body["client_id"] == existing_client_id  # reused existing client
+            assert body["seats"] == 1
+
+    def test_create_record_with_phone_and_empty_visits(self) -> None:
+        """POST /api/records with phone and empty visits creates record with 0 seats."""
+        from src.main import create_app
+
+        app = create_app()
+        with TestClient(app) as client:
+            activity_id = self._create_activity(client)
+            payload = {
+                "activity_id": activity_id,
+                "phone": self.PHONE,
+                "visits": [],
+            }
+
+            response = client.post("/api/v1/records", json=payload)
+            assert response.status_code == 201, f"Expected 201, got {response.status_code}: {response.text}"
+            body = response.json()
+            assert body["seats"] == 0
+            assert body["visits"] == []

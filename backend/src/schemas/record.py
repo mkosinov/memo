@@ -4,9 +4,18 @@ from pydantic import BaseModel, ConfigDict
 
 
 class VisitItem(BaseModel):
-    """Nested visit creation/update payload within a record."""
+    """Nested visit creation/update payload within a record.
 
-    visitor_id: str
+    Supports two modes:
+    - **Name-based** (for web frontend): provide ``name`` (+ optional ``age``).
+      The service will find-or-create a Visitor by name + client_id.
+    - **ID-based** (for admin/integration): provide ``visitor_id``.
+      Links to an existing Visitor directly.
+    """
+
+    name: str | None = None
+    age: int | None = None
+    visitor_id: str | None = None
     price: int
     status: str = "waiting"  # VisitStatus value
 
@@ -37,9 +46,17 @@ class RecordBase(BaseModel):
 
 
 class RecordCreate(BaseModel):
-    """Request schema for creating a new record with visits."""
+    """Request schema for creating a new record with visits.
+
+    Supports two modes:
+    - **Phone-based** (for web frontend): provide ``phone``.
+      The service will find-or-create a Client and Visitors automatically.
+    - **Client-ID-based** (for admin/integration): provide ``client_id``.
+      Links to an existing Client directly.
+    """
 
     activity_id: str
+    phone: str | None = None
     client_id: str | None = None
     comment: str | None = None
     visits: list[VisitItem]  # seats = len(visits)

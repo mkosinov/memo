@@ -12,6 +12,8 @@ import {
   type ActivityCreate,
   ActivityResponseSchema,
   type ActivityResponse,
+  PhotoResponseSchema,
+  type PhotoResponse,
 } from './schemas';
 
 // ─── MasterResponse ────────────────────────────────────────────────────────
@@ -90,6 +92,18 @@ describe('LocationResponseSchema', () => {
     const { name, ...without } = validLocation;
     expect(() => LocationResponseSchema.parse(without)).toThrow();
   });
+
+  it('parses location with location_hint', () => {
+    const data = { ...validLocation, location_hint: 'Вход со двора' };
+    const result = LocationResponseSchema.parse(data);
+    expect(result.location_hint).toBe('Вход со двора');
+  });
+
+  it('parses location without location_hint (field absent)', () => {
+    // Schema has location_hint as optional, so parsing should succeed without it
+    const result = LocationResponseSchema.parse(validLocation);
+    expect(result.location_hint).toBeUndefined();
+  });
 });
 
 // ─── ServiceResponse ────────────────────────────────────────────────────────
@@ -144,6 +158,18 @@ describe('ServiceResponseSchema', () => {
     const result = ServiceResponseSchema.parse(data);
     expect(result.tariffs).toHaveLength(0);
     expect(result.tags).toHaveLength(0);
+  });
+
+  it('parses service with material_hint', () => {
+    const data = { ...validService, material_hint: 'Принести фартук' };
+    const result = ServiceResponseSchema.parse(data);
+    expect(result.material_hint).toBe('Принести фартук');
+  });
+
+  it('parses service without material_hint (field absent)', () => {
+    // When field is absent and schema uses .optional(), parse should still succeed
+    const result = ServiceResponseSchema.parse(validService);
+    expect(result.material_hint).toBeUndefined();
   });
 });
 
@@ -217,6 +243,44 @@ describe('ActivityResponseSchema', () => {
   });
 });
 
+// ─── PhotoResponse ───────────────────────────────────────────────────────────
+
+const validPhoto = {
+  id: 'photo-1',
+  filename: 'workshop-2024.jpg',
+  visitor_id: null,
+  service_id: 'service-1',
+  activity_id: 'activity-1',
+  is_public: true,
+  created_at: '2024-06-01T12:00:00Z',
+  updated_at: '2024-06-01T12:00:00Z',
+  is_active: true,
+};
+
+describe('PhotoResponseSchema', () => {
+  it('parses a valid photo response', () => {
+    const result = PhotoResponseSchema.parse(validPhoto);
+    expect(result.id).toBe('photo-1');
+    expect(result.filename).toBe('workshop-2024.jpg');
+    expect(result.visitor_id).toBeNull();
+    expect(result.service_id).toBe('service-1');
+    expect(result.activity_id).toBe('activity-1');
+    expect(result.is_public).toBe(true);
+    expect(result.is_active).toBe(true);
+  });
+
+  it('parses photo with non-null visitor_id', () => {
+    const data = { ...validPhoto, visitor_id: 'visitor-1' };
+    const result = PhotoResponseSchema.parse(data);
+    expect(result.visitor_id).toBe('visitor-1');
+  });
+
+  it('rejects missing required field', () => {
+    const { id, ...without } = validPhoto;
+    expect(() => PhotoResponseSchema.parse(without)).toThrow();
+  });
+});
+
 // ─── Type exports compile check ────────────────────────────────────────────
 
 describe('Type exports', () => {
@@ -243,5 +307,10 @@ describe('Type exports', () => {
   it('ActivityResponse is a valid type', () => {
     const a: ActivityResponse = validActivityResponse;
     expect(a.occupied).toBe(3);
+  });
+
+  it('PhotoResponse is a valid type', () => {
+    const p: PhotoResponse = validPhoto;
+    expect(p.filename).toBe('workshop-2024.jpg');
   });
 });

@@ -29,12 +29,29 @@ export const LocationResponseSchema = z.object({
   review_url: z.string().nullable(),
   record_info: z.string().nullable(),
   image_url: z.string().nullable(),
+  location_hint: z.string().nullable().optional(),
   is_active: z.boolean(),
   created_at: z.string(), // ISO datetime string
   updated_at: z.string(), // ISO datetime string
 });
 
 export type LocationResponse = z.infer<typeof LocationResponseSchema>;
+
+// ─── PhotoResponse ──────────────────────────────────────────────────────────
+
+export const PhotoResponseSchema = z.object({
+  id: z.string(),
+  filename: z.string(),
+  visitor_id: z.string().nullable(),
+  service_id: z.string().nullable(),
+  activity_id: z.string().nullable(),
+  is_public: z.boolean(),
+  created_at: z.string(),
+  updated_at: z.string(),
+  is_active: z.boolean(),
+});
+
+export type PhotoResponse = z.infer<typeof PhotoResponseSchema>;
 
 // ─── TariffResponse (nested in ServiceResponse) ────────────────────────────
 
@@ -69,6 +86,7 @@ export const ServiceResponseSchema = z.object({
   max_age: z.number(),
   duration: z.number(),
   record_info: z.string(),
+  material_hint: z.string().nullable().optional(),
   tariffs: z.array(TariffResponseSchema),
   tags: z.array(TagResponseSchema),
   is_active: z.boolean(),

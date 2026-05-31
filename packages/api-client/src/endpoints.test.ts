@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { getMasters, getMaster, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, deleteActivity } from './endpoints';
+import { getMasters, getMaster, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, deleteActivity, getWebPhotos } from './endpoints';
 
 // Mock the api function from client
 vi.mock('./client', () => ({
@@ -53,6 +53,25 @@ describe('getServices', () => {
     vi.mocked(api).mockResolvedValue([]);
     await getServices();
     expect(api).toHaveBeenCalledWith('/api/v1/services', expect.anything());
+  });
+});
+
+// ─── Photos ─────────────────────────────────────────────────────────────────
+
+describe('getWebPhotos', () => {
+  it('calls /api/v1/photos/web without query params', async () => {
+    vi.mocked(api).mockResolvedValue([]);
+    await getWebPhotos();
+    expect(api).toHaveBeenCalledWith('/api/v1/photos/web', expect.anything());
+  });
+
+  it('calls /api/v1/photos/web with activity_id param', async () => {
+    vi.mocked(api).mockResolvedValue([]);
+    await getWebPhotos({ activity_id: 'activity-1' });
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/photos/web?activity_id=activity-1',
+      expect.anything(),
+    );
   });
 });
 

@@ -11,6 +11,7 @@ LOCATION_PAYLOAD = {
     "review_url": "https://example.com/review",
     "record_info": "Call +7-999-123-45-67",
     "image_url": "https://example.com/studio.jpg",
+    "location_hint": "1 этаж, светлая студия с панорамными окнами",
 }
 
 
@@ -34,6 +35,19 @@ class TestLocationsCrud:
         assert "created_at" in body
         assert "updated_at" in body
         assert body["is_active"] is True
+        assert body["location_hint"] == "1 этаж, светлая студия с панорамными окнами"
+
+    def test_create_location_without_location_hint(self) -> None:
+        """POST /api/locations omitting location_hint defaults to None."""
+        from src.main import create_app
+
+        payload = {k: v for k, v in LOCATION_PAYLOAD.items() if k != "location_hint"}
+        app = create_app()
+        with TestClient(app) as client:
+            response = client.post("/api/v1/locations", json=payload)
+
+        assert response.status_code == 201
+        assert response.json()["location_hint"] is None
 
     def test_list_locations_includes_created(self) -> None:
         """GET /api/locations returns a list containing the created location."""

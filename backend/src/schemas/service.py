@@ -40,6 +40,7 @@ class ServiceBase(BaseModel):
     max_age: int
     duration: int
     record_info: str
+    material_hint: str | None = None
 
 
 class ServiceCreate(ServiceBase):

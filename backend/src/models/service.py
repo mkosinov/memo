@@ -23,6 +23,7 @@ class Service(AbstractModel):
     max_age: Mapped[int] = mapped_column(Integer)
     duration: Mapped[int] = mapped_column(Integer)
     record_info: Mapped[str] = mapped_column(Text)
+    material_hint: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     tariffs: Mapped[list["Tariff"]] = relationship(
         "Tariff", back_populates="service", cascade="all, delete-orphan"

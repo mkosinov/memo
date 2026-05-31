@@ -16,6 +16,7 @@ class LocationBase(BaseModel):
     review_url: str | None = None
     record_info: str | None = None
     image_url: str | None = None
+    location_hint: str | None = None
 
 
 class LocationCreate(LocationBase):

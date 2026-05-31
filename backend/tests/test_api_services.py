@@ -13,6 +13,7 @@ SERVICE_PAYLOAD = {
     "max_age": 99,
     "duration": 90,
     "record_info": "Bring your own apron",
+    "material_hint": "Масляные краски, холст на подрамнике 40×50 см",
 }
 
 TAG_PAYLOAD = {"tag": "beginner"}
@@ -56,6 +57,19 @@ class TestServicesCrud:
         assert body["is_active"] is True
         assert body["tariffs"] == []
         assert body["tags"] == []
+        assert body["material_hint"] == "Масляные краски, холст на подрамнике 40×50 см"
+
+    def test_create_service_without_material_hint(self) -> None:
+        """POST /api/services omitting material_hint defaults to None."""
+        from src.main import create_app
+
+        payload = {k: v for k, v in SERVICE_PAYLOAD.items() if k != "material_hint"}
+        app = create_app()
+        with TestClient(app) as client:
+            response = client.post("/api/v1/services", json=payload)
+
+        assert response.status_code == 201
+        assert response.json()["material_hint"] is None
 
     def test_create_service_with_tariffs_and_tags(self) -> None:
         """POST /api/services creates service with nested tariffs and tag links."""

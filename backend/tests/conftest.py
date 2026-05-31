@@ -15,6 +15,7 @@ _db_file.close()
 _TEST_DB_URL = f"sqlite+aiosqlite:///{_db_file.name}"
 
 os.environ["DATABASE_URL"] = _TEST_DB_URL
+os.environ["ENV_FILE"] = ".env.test"
 
 
 @pytest.fixture(autouse=True)

@@ -11,6 +11,8 @@ import {
   type ActivityCreate,
   ActivityResponseSchema,
   type ActivityResponse,
+  PhotoResponseSchema,
+  type PhotoResponse,
 } from './schemas';
 
 // ─── Masters ───────────────────────────────────────────────────────────────
@@ -27,6 +29,15 @@ export async function getMaster(id: string): Promise<MasterResponse> {
 
 export async function getLocations(): Promise<LocationResponse[]> {
   return api('/api/v1/locations', z.array(LocationResponseSchema));
+}
+
+// ─── Photos ─────────────────────────────────────────────────────────────────
+
+export async function getWebPhotos(params?: { activity_id?: string }): Promise<PhotoResponse[]> {
+  const search = new URLSearchParams();
+  if (params?.activity_id) search.set('activity_id', params.activity_id);
+  const qs = search.toString();
+  return api(`/api/v1/photos/web${qs ? `?${qs}` : ''}`, z.array(PhotoResponseSchema));
 }
 
 // ─── Services ──────────────────────────────────────────────────────────────

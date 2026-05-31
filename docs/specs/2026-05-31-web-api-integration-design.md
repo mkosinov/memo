@@ -180,8 +180,15 @@ Tag colors: dynamic hash-based palette (or fixed set for common tags).
 
 ```typescript
 interface ScheduleIndex {
-  byDate: Map<string, ScheduleDTO[]>;       // "2026-06-01" → activities for that day
-  byServiceId: Map<string, ScheduleDTO[]>;  // "s1" → activities for that service (next_times)
+  byId: Map<string, ScheduleDTO>;            // id → ScheduleDTO (single source)
+
+  byLocation: {
+    'all': Map<string, string[]>;            // date → [id1, id2, ...]
+    'alpika': Map<string, string[]>;
+    'grand': Map<string, string[]>;
+    'p1389': Map<string, string[]>;
+  };
+  byServiceId: Map<string, string[]>;        // service_id → [id1, id2, ...]
 }
 
 function joinActivities(
@@ -200,10 +207,11 @@ Steps:
    - Compute `price_hint` from all tariffs: "Взрослый: 3500₽, Детский: 2500₽"
    - Extract `time` (HH:MM) and `date` (YYYY-MM-DD) from `start` ISO field
    - Merge service tags + activity tags (deduplicate by tag string)
-3. Build `byDate` map: for each ScheduleDTO, push to `byDate[date]`
-4. Build `byServiceId` map: for each ScheduleDTO, push to `byServiceId[service_id]`
-5. Compute `next_times` for each ScheduleDTO: lookup `byServiceId[service_id]`, filter future dates, sort ASC, take 6
-6. Return `ScheduleIndex`
+   - Build `ScheduleDTO`, store in `byId[dto.id]`
+3. Build `byLocation` indexes: for each DTO, push its `id` to `byLocation[location_id][date]` and `byLocation['all'][date]`.
+4. Build `byServiceId` index: for each DTO, push its `id` to `byServiceId[service_id]`.
+5. Compute `next_times` for each ScheduleDTO: lookup `byServiceId[service_id]`, filter future dates, sort ASC, take 6.
+6. Return `ScheduleIndex`.
 
 ### 3.6 React Query Caching
 
@@ -270,8 +278,8 @@ export async function createRecord(data: BookingData): Promise<{ success: boolea
 
 ```typescript
 interface UseScheduleResult {
-  schedules: ScheduleView[];                    // all activities (flat, for carousel)
-  getByDate(date: string): ScheduleView[];     // O(1) lookup — Сегодня/Завтра
+  schedules: ScheduleView[];                          // all activities (flat, for carousel)
+  getByDate(date: string, locationId?: string): ScheduleView[];  // O(1) lookup
   isLoading: boolean;
   error: ApiError | null;
 }
@@ -299,18 +307,19 @@ function useSchedule(filters: ActivityFiltersView): UseScheduleResult {
   }, [queries.map(q => q.data)]);
 
   // 3. Convert to views
-  const schedules = useMemo(() => {
+  const allSchedules = useMemo(() => {
     if (!index) return [];
-    return [...index.byDate.values()].flat().map(toScheduleView);
+    return [...index.byId.values()].map(toScheduleView);
   }, [index]);
 
-  const getByDate = useCallback((date: string) => {
+  const getByDate = useCallback((date: string, locationId = 'all') => {
     if (!index) return [];
-    return (index.byDate.get(date) ?? []).map(toScheduleView);
+    const ids = index.byLocation[locationId]?.get(date) ?? [];
+    return ids.map(id => toScheduleView(index.byId.get(id)!));
   }, [index]);
 
   return {
-    schedules,
+    schedules: allSchedules,
     getByDate,
     isLoading: queries.some(q => q.isLoading),
     error: queries.find(q => q.error)?.error ?? null,
@@ -326,6 +335,7 @@ function useSchedule(filters: ActivityFiltersView): UseScheduleResult {
 - [ ] Карточка активности показывает: заголовок, теги (из Service.tags), цену, мастера, локацию, время, длительность
 - [ ] Теги сервиса отображаются корректно на карточке (MKCarousel)
 - [ ] Теги активности тоже видны в ActivityOverlay
+- [ ] `getByDate(date, locationId)` возвращает корректные ScheduleView (O(1))
 - [ ] Фильтр по дате / локации / тегу работает
 - [ ] `material_hint` и `location_hint` отображаются в деталях
 - [ ] `next_times` показывает до 6 pill'ов с ближайшими датами

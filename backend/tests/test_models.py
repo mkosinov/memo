@@ -30,6 +30,7 @@ def _create_all_and_session(engine):
         Client,
         Location,
         Master,
+        Material,
         Payment,
         Photo,
         Record,
@@ -61,6 +62,7 @@ class TestModelImports:
             Client,
             Location,
             Master,
+            Material,
             Payment,
             Photo,
             Record,
@@ -73,7 +75,8 @@ class TestModelImports:
         )
         # Verify they are actual classes / Table objects
         for cls in [Master, User, Location, Service, Tariff, Tag,
-                    Activity, Client, Visitor, Photo, Record, Visit, Payment]:
+                    Activity, Client, Visitor, Photo, Record, Visit, Payment,
+                    Material]:
             assert hasattr(cls, "__tablename__")
 
     def test_all_exports(self):
@@ -82,6 +85,7 @@ class TestModelImports:
             "AbstractModel",
             "Master", "User", "Location", "Service", "Tariff", "Tag",
             "Activity", "Client", "Visitor", "Photo", "Record", "Visit", "Payment",
+            "Material",
             "RecordStatus", "UserRole",
             "service_tags", "activity_tags", "photo_tags",
             "master_tags", "location_tags", "client_tags", "visitor_tags", "record_tags",
@@ -102,6 +106,7 @@ class TestModelTables:
         "masters", "users", "locations", "services", "tariffs",
         "tags", "activities", "clients", "visitors",
         "photos", "records", "visits", "payments",
+        "materials",
         "service_tags", "activity_tags", "photo_tags",
         "master_tags", "location_tags", "client_tags", "visitor_tags", "record_tags",
     ])
@@ -241,6 +246,21 @@ class TestModelCrud:
         session.flush()
         fetched = session.get(Tag, t.id)
         assert fetched.tag == "beginner"
+
+    def test_material_crud(self, session: Session):
+        from src.models import Material
+        m = Material(
+            title="Масло",
+            description="Масляные краски на основе льняного масла",
+        )
+        session.add(m)
+        session.flush()
+        fetched = session.get(Material, m.id)
+        assert fetched.title == "Масло"
+        assert fetched.description == "Масляные краски на основе льняного масла"
+        assert fetched.is_active is True
+        assert fetched.created_at is not None
+        assert fetched.updated_at is not None
 
     def test_activity_crud(self, session: Session):
         from src.models import Activity, Location, Master, Service

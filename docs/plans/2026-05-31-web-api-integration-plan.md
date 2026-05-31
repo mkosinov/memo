@@ -59,8 +59,8 @@
 - [ ] Add after `activity_id`:
   ```python
   is_public: Mapped[bool] = mapped_column(Boolean, default=False)
-  is_guest: Mapped[bool] = mapped_column(Boolean, default=False)
   ```
+  (Guest categorization uses `photo_tags` join table + tag "guest" — no separate field needed.)
 - [ ] Create `backend/src/schemas/photo.py`:
   ```python
   """Pydantic schemas for photos."""
@@ -74,7 +74,6 @@
       service_id: str | None = None
       activity_id: str | None = None
       is_public: bool = False
-      is_guest: bool = False
       created_at: str
       updated_at: str
       is_active: bool
@@ -154,7 +153,6 @@
     service_id: z.string().nullable(),
     activity_id: z.string().nullable(),
     is_public: z.boolean(),
-    is_guest: z.boolean(),
     created_at: z.string(),
     updated_at: z.string(),
     is_active: z.boolean(),
@@ -451,25 +449,43 @@
       from src.models.photo import Photo
       photos = [
           {"id": "ph1", "filename": "/images/card-seascape.jpg", "service_id": "s1",
-           "activity_id": None, "is_public": True, "is_guest": False},
+           "activity_id": None, "is_public": True},
           {"id": "ph2", "filename": "/images/card-mountain-acrylic.jpg", "service_id": "s2",
-           "activity_id": None, "is_public": True, "is_guest": False},
+           "activity_id": None, "is_public": True},
           {"id": "ph3", "filename": "/images/card-watercolor.jpg", "service_id": "s4",
-           "activity_id": None, "is_public": True, "is_guest": False},
+           "activity_id": None, "is_public": True},
           {"id": "ph4", "filename": "/images/card-family.jpg", "service_id": "s5",
-           "activity_id": None, "is_public": True, "is_guest": False},
+           "activity_id": None, "is_public": True},
           {"id": "ph5", "filename": "/images/card-shopper.jpg", "service_id": "s6",
-           "activity_id": None, "is_public": True, "is_guest": False},
+           "activity_id": None, "is_public": True},
           {"id": "ph6", "filename": "/images/guest-1.jpg", "service_id": None,
-           "activity_id": "ev_0", "is_public": False, "is_guest": True},
+           "activity_id": "ev_0", "is_public": True},
           {"id": "ph7", "filename": "/images/guest-2.jpg", "service_id": None,
-           "activity_id": "ev_4", "is_public": False, "is_guest": True},
+           "activity_id": "ev_4", "is_public": True},
       ]
+      # After seeding photos, tag ph6, ph7 as "гость" via photo_tags
+      from src.models.tag import photo_tags
+      for photo_id in ["ph6", "ph7"]:
+          result = await session.execute(
+              select(photo_tags).where(
+                  photo_tags.c.photo_id == photo_id,
+                  photo_tags.c.tag_id == "tag7",  # tag7 = "гость"
+              )
+          )
+          if not result.first():
+              await session.execute(
+                  photo_tags.insert().values(photo_id=photo_id, tag_id="tag7")
+              )
+  ```
+  Need to add `from sqlalchemy import select` if not already imported.
       for p in photos:
           if not await _exists(session, Photo, p["id"]):
               session.add(Photo(**p))
   ```
-- [ ] Add `_seed_materials`:
+- [ ] Update `_seed_tags`: add tag "гость" (tag7):
+  ```python
+  tag_names = ["новинка", "хит", "для детей", "популярное", "индивидуальное", "сезонное", "гость"]
+  ```
   ```python
   async def _seed_materials(session) -> None:
       from src.models.material import Material
@@ -505,41 +521,10 @@
 - [ ] Read existing `frontend/web/app/lib/model/dto/activity.ts` and `view/activity.ts` for reference
 - [ ] Create `frontend/web/app/lib/model/dto/schedule.ts`:
   ```typescript
-  export interface NextTimeDTO {
-    id: string;
-    date: string;
-    time: string;
-  }
-
   export interface PhotoDTO {
     url: string;
     isPublic: boolean;
-    isGuest: boolean;
-  }
-
-  export interface ScheduleDTO {
-    id: string;
-    title: string;
-    tags: string[];
-    image_url: string;
-    photos: PhotoDTO[];
-    time: string;
-    duration_minutes: number;
-    location_id: string;
-    location_name: string;
-    location_address?: string;
-    guests_count: number;
-    material: string;
-    size: string;
-    price_min: number;
-    price_max: number;
-    master_name: string;
-    master_avatar?: string;
-    date: string;
-    next_times?: NextTimeDTO[];
-    price_hint?: string;
-    material_hint?: string;
-    location_hint?: string;
+    tags: string[];  // from photo_tags — e.g. ["гость"]
   }
   ```
   Note: `material` and `size` are kept for backward compat with existing components; they can be populated from `material_hint` or kept as empty strings. Remove them once components migrate.
@@ -568,7 +553,7 @@
     title: string;
     tags: string[];
     imageUrl: string;
-    photos: { url: string; isPublic: boolean; isGuest: boolean }[];
+    photos: { url: string; isPublic: boolean; tags: string[] }[];
     time: string;
     duration: string;
     location: { id: string; name: string; address?: string };

@@ -40,9 +40,22 @@ is_public: Mapped[bool] = mapped_column(Boolean, default=False)  # галере�
 is_guest: Mapped[bool] = mapped_column(Boolean, default=False)   # полоска guest photos
 ```
 
-Enables `GET /api/v1/photos?activity_id=X&is_guest=true` filtering.
+Enables photo filtering by visibility for web vs admin endpoints.
 
-### 1.4 New table: `materials`
+### 1.4 Photo API endpoints
+
+Two routes for different consumers:
+
+```
+GET /api/v1/photos/web?activity_id=X    — public, no auth, is_public=true only
+GET /api/v1/photos?activity_id=X         — auth required (admin/master), all photos
+```
+
+The `/photos/web` endpoint is exclusively for the web frontend. It always filters `is_public=true`. The main `/photos` endpoint is for the admin app (auth via session).
+
+Both return the same schema: `PhotoResponse[]`.
+
+### 1.5 New table: `materials`
 
 ```
 materials
@@ -53,7 +66,7 @@ materials
 
 Standard entity: ORM model + Pydantic schema + CRUD router + SQLAdmin + seed data.
 
-### 1.5 RecordCreate — phone-based flow
+### 1.6 RecordCreate — phone-based flow
 
 **Goal:** One API call from the web form (phone + names + activity_id), backend finds/creates Client and Visitors automatically.
 
@@ -116,8 +129,9 @@ All changes in `backend/src/seed/seed.py`:
 ```
 frontend/web/app/lib/
 ├── api/
-│   └── activities.ts            # fetchActivities(), fetchServices(), fetchMasters(), fetchLocations(), createRecord()
-│       (also: fetchPhotos() — optional for MVP)
+│   ├── activities.ts            # fetchActivities(), fetchServices(), fetchMasters(), fetchLocations()
+│   ├── photos.ts                # fetchWebPhotos(activityId) → GET /api/v1/photos/web
+│   └── records.ts               # createRecord() → POST /api/v1/records
 ├── model/
 │   ├── dto/
 │   │   ├── schedule.ts          # ScheduleDTO (was ActivityDTO)
@@ -126,7 +140,7 @@ frontend/web/app/lib/
 │       ├── schedule.ts          # ScheduleView, ScheduleCardView (was ActivityView)
 │       └── ...                  # keep old activity.ts for migration, delete later
 ├── mappers/
-│   ├── join-schedule.ts         # joinActivities() — pure function, 4 arrays → ScheduleDTO[]
+│   ├── join-schedule.ts         # joinActivities() — pure function, 4 arrays → ScheduleIndex
 │   ├── to-schedule-vm.ts        # toScheduleView() — ScheduleDTO → ScheduleView
 │   └── ...
 ```
@@ -139,7 +153,7 @@ frontend/web/app/lib/
 | `title` | `ServiceResponse.title` | ✅ |
 | `tags` | `[...Service.tags, ...Activity.tags]` | deduplicated by tag string |
 | `image_url` | `ServiceResponse.image_url` | will be populated after seed update |
-| `guest_photos` | `string[]` (empty for MVP) | Always `[]` for MVP. Photo endpoint + seeding deferred to next phase. |
+| `photos` | `PhotoDTO[]` from `/photos/web` | Fetched per activity. Empty if none. Fields: `url`, `is_public`, `is_guest` |
 | `time` | `ActivityResponse.start → HH:MM` | extract from ISO datetime |
 | `duration_minutes` | `ActivityResponse.duration` | ✅ |
 | `location_id` | `ActivityResponse.location_id` | ✅ |
@@ -153,7 +167,7 @@ frontend/web/app/lib/
 | `date` | `ActivityResponse.start → YYYY-MM-DD` | extract from ISO datetime |
 | `material_hint` | `ServiceResponse.material_hint` | free text |
 | `location_hint` | `LocationResponse.location_hint` | free text |
-| `price_details` | `ServiceResponse.record_info` | if available |
+| `price_hint` | Computed from `Service.tariffs` | строка: "Взрослый: 3500₽, Детский: 2500₽, Индивидуальный: 5000₽" |
 | `next_times` | Computed from activities list | same `service_id`, next 6 dates |
 
 ### 3.4 ScheduleView — field mapping
@@ -165,12 +179,17 @@ Tag colors: dynamic hash-based palette (or fixed set for common tags).
 ### 3.5 joinActivities() — pure function
 
 ```typescript
+interface ScheduleIndex {
+  byDate: Map<string, ScheduleDTO[]>;       // "2026-06-01" → activities for that day
+  byServiceId: Map<string, ScheduleDTO[]>;  // "s1" → activities for that service (next_times)
+}
+
 function joinActivities(
   activities: ActivityResponse[],
   services: Map<string, ServiceResponse>,
   masters: Map<string, MasterResponse>,
   locations: Map<string, LocationResponse>,
-): ScheduleDTO[]
+): ScheduleIndex
 ```
 
 Steps:
@@ -178,16 +197,19 @@ Steps:
 2. For each `ActivityResponse`:
    - Look up service, master, location by ID
    - Compute `price_min/max` from service tariffs
-   - Extract `time` and `date` from `start` ISO field
-   - Merge service tags + activity tags
-   - Compute `next_times` (filter activities with same service_id, sort ASC by date, take 6)
-3. Return `ScheduleDTO[]`
+   - Compute `price_hint` from all tariffs: "Взрослый: 3500₽, Детский: 2500₽"
+   - Extract `time` (HH:MM) and `date` (YYYY-MM-DD) from `start` ISO field
+   - Merge service tags + activity tags (deduplicate by tag string)
+3. Build `byDate` map: for each ScheduleDTO, push to `byDate[date]`
+4. Build `byServiceId` map: for each ScheduleDTO, push to `byServiceId[service_id]`
+5. Compute `next_times` for each ScheduleDTO: lookup `byServiceId[service_id]`, filter future dates, sort ASC, take 6
+6. Return `ScheduleIndex`
 
 ### 3.6 React Query Caching
 
 - **Reference data** (services, masters, locations): `staleTime: 300_000` (5 min), `gcTime: 600_000`.
 - **Activities**: `staleTime: 0` (fresh on every mount), `refetchInterval: 60_000` (auto-refresh for booking count changes).
-- **Photos**: `staleTime: 300_000` (rarely changes).
+- **Photos**: `staleTime: 300_000` (rarely changes). Fetched per-activity on demand (when overlay opens).
 
 ### 3.7 Error handling
 
@@ -244,32 +266,57 @@ export async function createRecord(data: BookingData): Promise<{ success: boolea
 
 ---
 
-## 5. UseActivities Hook — React Query version
+## 5. useSchedule Hook — React Query version
 
 ```typescript
-function useActivities(filters: ActivityFiltersView) {
-  const activities = useQuery({
-    queryKey: ['activities', filters.date, filters.location],
-    queryFn: () => fetchAndJoinActivities(filters),
-    staleTime: 0,
-    refetchInterval: 60_000,
+interface UseScheduleResult {
+  schedules: ScheduleView[];                    // all activities (flat, for carousel)
+  getByDate(date: string): ScheduleView[];     // O(1) lookup — Сегодня/Завтра
+  isLoading: boolean;
+  error: ApiError | null;
+}
+
+function useSchedule(filters: ActivityFiltersView): UseScheduleResult {
+  // 1. Fetch all 4 datasets in parallel
+  const queries = useQueries({
+    queries: [
+      { queryKey: ['activities', filters], queryFn: () => fetchActivities(filters), staleTime: 0, refetchInterval: 60_000 },
+      { queryKey: ['services'], queryFn: fetchServices, staleTime: 300_000, gcTime: 600_000 },
+      { queryKey: ['masters'], queryFn: fetchMasters, staleTime: 300_000, gcTime: 600_000 },
+      { queryKey: ['locations'], queryFn: fetchLocations, staleTime: 300_000, gcTime: 600_000 },
+    ],
   });
 
-  const services = useQuery({
-    queryKey: ['services'],
-    queryFn: fetchServices,
-    staleTime: 300_000,
-    gcTime: 600_000,
-  });
-  // same for masters, locations
-  // ... or use useQueries for parallel fetching
+  // 2. Join → ScheduleIndex
+  const index = useMemo(() => {
+    if (queries.some(q => q.isLoading || q.isError)) return null;
+    return joinActivities(
+      queries[0].data!,
+      new Map(queries[1].data!.map(s => [s.id, s])),
+      new Map(queries[2].data!.map(m => [m.id, m])),
+      new Map(queries[3].data!.map(l => [l.id, l])),
+    );
+  }, [queries.map(q => q.data)]);
+
+  // 3. Convert to views
+  const schedules = useMemo(() => {
+    if (!index) return [];
+    return [...index.byDate.values()].flat().map(toScheduleView);
+  }, [index]);
+
+  const getByDate = useCallback((date: string) => {
+    if (!index) return [];
+    return (index.byDate.get(date) ?? []).map(toScheduleView);
+  }, [index]);
+
+  return {
+    schedules,
+    getByDate,
+    isLoading: queries.some(q => q.isLoading),
+    error: queries.find(q => q.error)?.error ?? null,
+  };
 }
 ```
-
-**Alternative:** A single `useSchedules()` hook that:
-1. Fetches all 4 datasets via `useQueries`
-2. Joins them with `joinActivities()` in `select` callback
-3. Returns `ScheduleView[]` directly
 
 ---
 
@@ -284,5 +331,6 @@ function useActivities(filters: ActivityFiltersView) {
 - [ ] `next_times` показывает до 6 pill'ов с ближайшими датами
 - [ ] Цены отображаются из тарифов (min/max)
 - [ ] Создание записи (Record) с телефоном работает и возвращает bookingId
-- [ ] guest_photos не ломает UI (пустой массив или реальные фото)
+- [ ] Фото (public) отображаются в галерее активности через `/photos/web` endpoint
+- [ ] price_hint показывает все варианты тарифов в деталях активности
 - [ ] Моковые данные (`makeMockActivities()`) удалены или заменены

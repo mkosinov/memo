@@ -19,6 +19,7 @@ from src.api.v1.services import router as services_router
 from src.api.v1.system import router as system_router
 from src.api.v1.tags import router as tags_router
 from src.api.v1.visitors import router as visitors_router
+from src.api.v1.photos import router as photos_router
 from src.api.v1.visits import router as visits_router
 
 
@@ -51,6 +52,7 @@ def create_app() -> FastAPI:
     app.include_router(clients_router, prefix="/api/v1/clients")
     app.include_router(visitors_router, prefix="/api/v1/visitors")
     app.include_router(records_router, prefix="/api/v1/records")
+    app.include_router(photos_router, prefix="/api/v1/photos")
     app.include_router(visits_router, prefix="/api/v1/visits")
     app.include_router(payments_router, prefix="/api/v1/payments")
     app.include_router(system_router, prefix="/api/v1")

@@ -307,6 +307,15 @@ class TestModelCrud:
         fetched = session.get(Photo, p.id)
         assert fetched.filename == "photo_001.jpg"
         assert fetched.visitor_id is None
+        assert fetched.is_public is False  # default
+
+    def test_photo_is_public(self, session: Session):
+        from src.models import Photo
+        p = Photo(filename="photo_002.jpg", is_public=True)
+        session.add(p)
+        session.flush()
+        fetched = session.get(Photo, p.id)
+        assert fetched.is_public is True
 
     def test_record_crud(self, session: Session):
         from src.models import Activity, Client, Location, Master, Record, Service

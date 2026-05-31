@@ -53,3 +53,39 @@ class TestCorsHeaders:
             )
 
         assert response.headers["Access-Control-Allow-Credentials"] == "true"
+
+    def test_cors_env_override(self, monkeypatch) -> None:
+        """CORS_ORIGINS env var overrides defaults, splitting comma-separated values."""
+        monkeypatch.setenv("CORS_ORIGINS", "http://example.com:3000,http://test.com:3000")
+
+        # Re-create Settings from env to test parsing, patch the singleton
+        from src.core.config import settings, Settings
+
+        new_settings = Settings()
+        monkeypatch.setattr(settings, "CORS_ORIGINS", new_settings.CORS_ORIGINS)
+
+        from src.main import create_app
+
+        app = create_app()
+        with TestClient(app) as client:
+            # Allowed origin — should pass
+            response = client.options(
+                "/api/v1/health",
+                headers={
+                    "Origin": "http://example.com:3000",
+                    "Access-Control-Request-Method": "GET",
+                },
+            )
+            assert response.status_code == 200
+            assert response.headers["Access-Control-Allow-Origin"] == "http://example.com:3000"
+
+            # Disallowed origin — should fail with 400
+            response = client.options(
+                "/api/v1/health",
+                headers={
+                    "Origin": "http://localhost:3000",
+                    "Access-Control-Request-Method": "GET",
+                },
+            )
+            assert response.status_code == 400
+            assert "Access-Control-Allow-Origin" not in response.headers

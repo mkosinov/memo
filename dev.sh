@@ -32,6 +32,7 @@ fi
 
 # ── Start backend ──────────────────────────────────────────────────
 echo -e "${BLUE}Starting backend (FastAPI) on :8000...${NC}"
+export ENV_FILE=.env.dev
 (cd "$BACKEND_DIR" && uv run uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload) &
 BACKEND_PID=$!
 

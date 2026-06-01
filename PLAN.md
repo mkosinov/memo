@@ -199,12 +199,12 @@ Create 8 agents in `.opencode/agents/` modeled after cmbot:
 ## Stage 6: P3 — Booking Flow E2E Verification
 
 Public website (`frontend/web/`) already has the 4-step booking flow. Now:
-- [ ] **Run full E2E** — book a class from start to finish with real backend
-- [ ] **Fix/refine UX** — polish CalendarLine, BookingOverlay, pricing, validation
-- [ ] **Connect to backend** — wire web booking API to FastAPI `/api/v1/records/` endpoints
-- [ ] **Payment flow** — verify/simplify payment step
-- [ ] **Error states** — handle backend errors gracefully in booking UI
-- [ ] **Visual compliance** — verify against design spec
+- [x] Run full E2E — book a class from start to finish with real backend
+- [x] Fix/refine UX — polish CalendarLine, BookingOverlay, pricing, validation
+- [x] Connect to backend — wire web booking API to FastAPI `/api/v1/records/` endpoints
+- [x] Payment flow — verify/simplify payment step
+- [x] Error states — handle backend errors gracefully in booking UI
+- [x] Visual compliance — verify against design spec
 
 **Result:** Client can book a master class end-to-end with real backend
 
@@ -271,7 +271,7 @@ New `frontend/master/` — Next.js 14, mobile-first.
 | 4 — P2 Booking Management | 2 | Bookings + Client Card | @frontend-coder | ✅ |
 | 5 — Frontend–Backend API | 3 | Admin connected to real API | @frontend-coder | ✅ |
 | 10 — Web (colourmountains.ru) | 5 | Public website + online booking | @frontend-coder | ✅ |
-| **6 — P3 Booking Flow E2E** | **4** | **Verify + polish + backend wiring** | **@frontend-coder** | **⬅️ СЕЙЧАС** |
+| 6 — P3 Booking Flow E2E | 4 | Verify + polish + backend wiring | @frontend-coder | ✅ |
 | 7 — P4 Artist App | 4 | Mobile app for artists | @frontend-coder | ⬜ |
 | 8 — P5 AI Concierge | 3 | Chat assistant | @frontend-coder | ⬜ |
 | 9 — Tests and Polish | 3 | Tests, a11y, build, SEO | @tester + @frontend-coder | ⬜ |

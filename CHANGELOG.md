@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Stage 6: Booking Flow E2E** — 2026-06-01
+  - Verified end-to-end booking flow with real FastAPI backend
+  - Polished booking UX (CalendarLine, BookingOverlay)
+  - Wired booking creation API to FastAPI `/api/v1/records/`
+  - Added error handling for booking flow
+
 - **Stage 5: API Integration** — 2026-05-30
   - Migrated admin panel to real FastAPI backend using @tanstack/react-query v5
   - Shared `@memo/api-client` updated to support full CRUD via `/api/v1/`

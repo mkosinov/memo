@@ -41,9 +41,15 @@ done
 # ── Kill dev processes (--restart) ────────────────────────────────
 if $RESTART; then
     echo -e "${YELLOW}Restart mode — killing existing processes...${NC}"
-    # Kill specific processes by pattern (dev only, not dangerous in dev context)
-    pkill -f "uvicorn src.main:app" 2>/dev/null && echo -e "${YELLOW}  Killed backend${NC}" || true
+    # Kill all uvicorn variants (src.main:app or src.main:create_app --factory)
+    pkill -f "uvicorn src.main" 2>/dev/null && echo -e "${YELLOW}  Killed backend${NC}" || true
+    # Kill all next dev processes
     pkill -f "next dev" 2>/dev/null && echo -e "${YELLOW}  Killed frontend(s)${NC}" || true
+    sleep 2
+    # Force-free ports to clear any lingering orphan processes
+    fuser -k 8000/tcp 2>/dev/null || true
+    fuser -k 3000/tcp 2>/dev/null || true
+    fuser -k 3001/tcp 2>/dev/null || true
     sleep 1
 fi
 

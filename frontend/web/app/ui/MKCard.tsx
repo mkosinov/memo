@@ -80,6 +80,7 @@ export function MKCard({
           .filter(Boolean)
           .join(" ")}
         data-card-id={id}
+        data-testid="activity-card"
       >
         {/* Content */}
         <div className="px-5 pt-6 pb-5 flex flex-col items-center text-center flex-1 justify-center gap-4">
@@ -144,6 +145,7 @@ export function MKCard({
         .filter(Boolean)
         .join(" ")}
       data-card-id={id}
+      data-testid="activity-card"
     >
       {/* Photo */}
       <div className="relative w-full overflow-hidden flex-shrink-0" style={{ maxHeight: "35%" }}>
@@ -161,6 +163,7 @@ export function MKCard({
               "absolute top-3 left-3 px-2 py-0.5 rounded-full text-xs text-white font-medium",
               categoryColors[category],
             ].join(" ")}
+            data-testid="activity-category"
           >
             {category}
           </span>

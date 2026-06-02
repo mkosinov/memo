@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **NavigationProvider Architecture** — 2026-06-02
+  - Centralized date management: NavigationProvider as single source of truth
+  - Refactored layout, Menubar, Topbar, Toolbar to use shared NavigationContext
+  - Simplified date state propagation across Admin components
+  - Cleaned up route groups: (main)/layout, (main)/bookings
+
 - **Stage 6: Booking Flow E2E** — 2026-06-01
   - Verified end-to-end booking flow with real FastAPI backend
   - Polished booking UX (CalendarLine, BookingOverlay)

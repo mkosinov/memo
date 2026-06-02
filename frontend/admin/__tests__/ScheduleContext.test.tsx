@@ -3,7 +3,8 @@ import { render, screen, act, waitFor } from '@testing-library/react';
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ScheduleProvider, useSchedule } from '../contexts/ScheduleContext';
-import { getMonday } from '../lib/utils';
+import { NavigationProvider, useNavigation } from '../contexts/NavigationContext';
+import { getMonday, formatDateISO } from '../lib/utils';
 
 // ─── Mock api-client ─────────────────────────────────────────────────────────
 vi.mock('@memo/api-client', () => ({
@@ -149,9 +150,11 @@ function renderWithContext() {
   const queryClient = createTestQueryClient();
   return render(
     <QueryClientProvider client={queryClient}>
-      <ScheduleProvider>
-        <ScheduleConsumer />
-      </ScheduleProvider>
+      <NavigationProvider>
+        <ScheduleProvider>
+          <ScheduleConsumer />
+        </ScheduleProvider>
+      </NavigationProvider>
     </QueryClientProvider>,
   );
 }
@@ -358,5 +361,46 @@ describe('ScheduleProvider', () => {
     await waitFor(() => {
       expect(screen.getByTestId('error').textContent).not.toBe('null');
     });
+  });
+
+  it('synchronizes currentWeek with NavigationProvider dateFrom', () => {
+    // ── Navigation consumer changes NavigationProvider's dateFrom ──
+    function NavigationController() {
+      const { selectDateRange } = useNavigation();
+      return (
+        <button
+          data-testid="nav-set-week"
+          onClick={() => selectDateRange('2026-05-11', '2026-05-17')}
+        />
+      );
+    }
+
+    function renderWithNavController() {
+      const queryClient = createTestQueryClient();
+      return render(
+        <QueryClientProvider client={queryClient}>
+          <NavigationProvider>
+            <ScheduleProvider>
+              <ScheduleConsumer />
+              <NavigationController />
+            </ScheduleProvider>
+          </NavigationProvider>
+        </QueryClientProvider>,
+      );
+    }
+
+    renderWithNavController();
+
+    // Click to set NavigationProvider's dateFrom to Monday 2026-05-11
+    act(() => {
+      screen.getByTestId('nav-set-week').click();
+    });
+
+    const weekStart = new Date(screen.getByTestId('week-start').textContent!);
+    // 2026-05-11 is a Monday
+    expect(weekStart.getFullYear()).toBe(2026);
+    expect(weekStart.getMonth()).toBe(4); // May
+    expect(weekStart.getDate()).toBe(11);
+    expect(weekStart.getDay()).toBe(1); // Monday
   });
 });

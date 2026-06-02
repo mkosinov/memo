@@ -3,6 +3,7 @@ import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { StampPanel } from '../app/components/stamp/StampPanel';
 import { ScheduleProvider, useSchedule } from '../contexts/ScheduleContext';
+import { NavigationProvider } from '../contexts/NavigationContext';
 import { UIProvider, useUI } from '../contexts/UIContext';
 
 // Mock api-client so React Query hooks don't make real network calls
@@ -46,9 +47,11 @@ function Wrapper({ children }: { children: React.ReactNode }) {
   const queryClient = createTestQueryClient();
   return (
     <QueryClientProvider client={queryClient}>
-      <UIProvider>
-        <ScheduleProvider>{children}</ScheduleProvider>
-      </UIProvider>
+      <NavigationProvider>
+        <UIProvider>
+          <ScheduleProvider>{children}</ScheduleProvider>
+        </UIProvider>
+      </NavigationProvider>
     </QueryClientProvider>
   );
 }

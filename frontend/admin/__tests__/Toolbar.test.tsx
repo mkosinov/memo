@@ -4,6 +4,7 @@ import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Toolbar } from '../app/components/layout/Toolbar';
 import { ScheduleProvider } from '../contexts/ScheduleContext';
+import { NavigationProvider } from '../contexts/NavigationContext';
 import { UIProvider, useUI } from '../contexts/UIContext';
 
 vi.mock('@memo/api-client', () => ({
@@ -22,11 +23,13 @@ function createQueryWrapper({ children }: { children: React.ReactNode }) {
   });
   return (
     <QueryClientProvider client={queryClient}>
-      <UIProvider>
-        <ScheduleProvider>
-          {children}
-        </ScheduleProvider>
-      </UIProvider>
+      <NavigationProvider>
+        <UIProvider>
+          <ScheduleProvider>
+            {children}
+          </ScheduleProvider>
+        </UIProvider>
+      </NavigationProvider>
     </QueryClientProvider>
   );
 }

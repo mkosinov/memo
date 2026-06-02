@@ -13,6 +13,7 @@ import {
 } from '@memo/api-client';
 import { useQueryClient, useMutation } from '@tanstack/react-query';
 import { getMonday, formatDateISO } from '@/lib/utils';
+import { useNavigation } from '@/contexts/NavigationContext';
 
 export interface ScheduleContextType {
   activities: Activity[];
@@ -34,7 +35,13 @@ export interface ScheduleContextType {
 const ScheduleContext = createContext<ScheduleContextType | null>(null);
 
 export function ScheduleProvider({ children }: { children: React.ReactNode }) {
-  const [currentWeek, setCurrentWeek] = useState(() => getMonday(new Date()));
+  const { dateFrom, dateTo, selectDateRange } = useNavigation();
+  const currentWeek = useMemo(() => new Date(dateFrom + 'T00:00:00'), [dateFrom]);
+  const setCurrentWeek = useCallback((date: Date) => {
+    const monday = getMonday(date);
+    const sunday = new Date(monday.getTime() + 6 * 24 * 60 * 60 * 1000);
+    selectDateRange(formatDateISO(monday), formatDateISO(sunday));
+  }, [selectDateRange]);
   const [stamp, setStamp] = useState<StampState>({
     masterId: null,
     serviceId: null,
@@ -43,8 +50,8 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
   });
 
   const queryClient = useQueryClient();
-  const weekStart = formatDateISO(currentWeek);
-  const weekEnd = formatDateISO(new Date(currentWeek.getTime() + 7 * 24 * 60 * 60 * 1000 - 1));
+  const weekStart = dateFrom;
+  const weekEnd = dateTo;
 
   // Data fetching
   const { data: activities = [], isLoading: activitiesLoading, error: activitiesError } = useActivities(weekStart, weekEnd);
@@ -138,7 +145,7 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
   }), [
     activities, artists, services, locations,
     currentWeek, stamp,
-    setCurrentWeek, addActivity, updateActivityFn, deleteActivityById, setStamp, copyLastWeek,
+    dateFrom, selectDateRange, setCurrentWeek, addActivity, updateActivityFn, deleteActivityById, setStamp, copyLastWeek,
     activitiesLoading, activitiesError,
   ]);
 

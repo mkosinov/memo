@@ -3,7 +3,7 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Topbar } from '../app/components/layout/Topbar';
-import { ScheduleProvider } from '../contexts/ScheduleContext';
+import { NavigationProvider } from '../contexts/NavigationContext';
 import { UIProvider } from '../contexts/UIContext';
 
 vi.mock('@memo/api-client', () => ({
@@ -23,9 +23,9 @@ function renderWithProviders() {
   return render(
     <QueryClientProvider client={queryClient}>
       <UIProvider>
-        <ScheduleProvider>
+        <NavigationProvider>
           <Topbar />
-        </ScheduleProvider>
+        </NavigationProvider>
       </UIProvider>
     </QueryClientProvider>
   );

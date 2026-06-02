@@ -1,15 +1,15 @@
 'use client';
 
 import React from 'react';
-import { useSchedule } from '@/contexts/ScheduleContext';
-import { getMonday, MONTHS_GENITIVE } from '@/lib/utils';
+import { useNavigation } from '@/contexts/NavigationContext';
+import { getMonday, formatDateISO, MONTHS_GENITIVE } from '@/lib/utils';
 
 // ─── Topbar ───────────────────────────────────────────────────────────────
 
 export function Topbar() {
-  const { currentWeek, setCurrentWeek } = useSchedule();
+  const { dateFrom, selectDateRange } = useNavigation();
 
-  const monday = getMonday(currentWeek);
+  const monday = new Date(dateFrom + 'T00:00:00');
   const sunday = new Date(monday);
   sunday.setDate(sunday.getDate() + 6);
 
@@ -18,17 +18,27 @@ export function Topbar() {
   const handlePrevWeek = () => {
     const prev = new Date(monday);
     prev.setDate(prev.getDate() - 7);
-    setCurrentWeek(prev);
+    const prevMonday = getMonday(prev);
+    const prevSunday = new Date(prevMonday);
+    prevSunday.setDate(prevSunday.getDate() + 6);
+    selectDateRange(formatDateISO(prevMonday), formatDateISO(prevSunday));
   };
 
   const handleNextWeek = () => {
     const next = new Date(monday);
     next.setDate(next.getDate() + 7);
-    setCurrentWeek(next);
+    const nextMonday = getMonday(next);
+    const nextSunday = new Date(nextMonday);
+    nextSunday.setDate(nextSunday.getDate() + 6);
+    selectDateRange(formatDateISO(nextMonday), formatDateISO(nextSunday));
   };
 
   const handleToday = () => {
-    setCurrentWeek(getMonday(new Date()));
+    const today = new Date();
+    const thisMonday = getMonday(today);
+    const thisSunday = new Date(thisMonday);
+    thisSunday.setDate(thisSunday.getDate() + 6);
+    selectDateRange(formatDateISO(thisMonday), formatDateISO(thisSunday));
   };
 
   return (

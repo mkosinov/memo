@@ -4,9 +4,9 @@ import React from 'react';
 import { useSchedule } from '@/contexts/ScheduleContext';
 import { getMonday, MONTHS_GENITIVE } from '@/lib/utils';
 
-// ─── Toolbar ──────────────────────────────────────────────────────────────
+// ─── Topbar ───────────────────────────────────────────────────────────────
 
-export function Toolbar() {
+export function Topbar() {
   const { currentWeek, setCurrentWeek } = useSchedule();
 
   const monday = getMonday(currentWeek);

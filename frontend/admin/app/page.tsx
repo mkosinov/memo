@@ -1,7 +1,7 @@
 'use client';
 
 import { Menubar } from './components/layout/Menubar';
-import { Toolbar } from './components/layout/Toolbar';
+import { Topbar } from './components/layout/Topbar';
 import { RightPanel } from './components/layout/RightPanel';
 import { StampFab } from './components/layout/StampFab';
 import { WeekView } from './components/schedule/WeekView';
@@ -23,7 +23,7 @@ export default function Home() {
             marginRight: rightPanelCollapsed ? '0' : undefined,
           }}
         >
-          <Toolbar />
+          <Topbar />
           <div className="flex-1 flex overflow-hidden">
             <div className="flex-1 overflow-auto">
               <WeekView />

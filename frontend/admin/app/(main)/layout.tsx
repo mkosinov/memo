@@ -12,6 +12,7 @@ function MainShell({ children }: { children: React.ReactNode }) {
     <div className="flex h-screen overflow-hidden">
       <Menubar />
       <div
+        data-testid="center-content"
         className="flex-1 flex flex-col min-w-0 transition-all duration-300"
         style={{
           marginLeft: sidebarCollapsed

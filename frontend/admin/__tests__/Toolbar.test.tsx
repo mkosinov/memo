@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { RightPanel } from '../app/components/layout/RightPanel';
+import { Toolbar } from '../app/components/layout/Toolbar';
 import { ScheduleProvider } from '../contexts/ScheduleContext';
 import { UIProvider, useUI } from '../contexts/UIContext';
 
@@ -32,10 +32,10 @@ function createQueryWrapper({ children }: { children: React.ReactNode }) {
 }
 
 function renderWithProviders() {
-  return render(createQueryWrapper({ children: <RightPanel /> }));
+  return render(createQueryWrapper({ children: <Toolbar /> }));
 }
 
-describe('RightPanel', () => {
+describe('Toolbar', () => {
   beforeEach(() => {
     document.documentElement.removeAttribute('data-theme');
   });
@@ -71,7 +71,7 @@ describe('RightPanel', () => {
   });
 
   it('renders with default width', () => {
-    const { container } = render(createQueryWrapper({ children: <RightPanel /> }));
+    const { container } = render(createQueryWrapper({ children: <Toolbar /> }));
 
     const panel = container.querySelector('[data-testid="right-panel"]');
     expect(panel).toBeInTheDocument();
@@ -82,7 +82,7 @@ describe('RightPanel', () => {
     function TestHarness() {
       const { toggleRightPanel } = useUI();
       React.useEffect(() => { toggleRightPanel(); }, []);
-      return <RightPanel />;
+      return <Toolbar />;
     }
 
     const { container } = render(createQueryWrapper({ children: <TestHarness /> }));

@@ -45,9 +45,9 @@ function AccordionSection({ title, children, contentTestId }: AccordionSectionPr
   );
 }
 
-// ─── RightPanel ───────────────────────────────────────────────────────────
+// ─── Toolbar ────────────────────────────────────────────────────────────
 
-export function RightPanel() {
+export function Toolbar() {
   const { rightPanelCollapsed, toggleRightPanel, showToast } = useUI();
   const { copyLastWeek } = useSchedule();
 

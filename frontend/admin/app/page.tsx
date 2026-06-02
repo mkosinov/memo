@@ -2,7 +2,7 @@
 
 import { Menubar } from './components/layout/Menubar';
 import { Topbar } from './components/layout/Topbar';
-import { RightPanel } from './components/layout/RightPanel';
+import { Toolbar } from './components/layout/Toolbar';
 import { StampFab } from './components/layout/StampFab';
 import { WeekView } from './components/schedule/WeekView';
 import { useUI } from '@/contexts/UIContext';
@@ -28,7 +28,7 @@ export default function Home() {
             <div className="flex-1 overflow-auto">
               <WeekView />
             </div>
-            <RightPanel />
+            <Toolbar />
           </div>
         </div>
         <StampFab />

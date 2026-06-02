@@ -1,5 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { NavigationProvider } from '../contexts/NavigationContext';
 import { ScheduleProvider } from '../contexts/ScheduleContext';
 import { UIProvider } from '../contexts/UIContext';
 import SchedulePage from '../app/page';
@@ -27,9 +28,11 @@ function renderPage() {
   return render(
     <QueryClientProvider client={queryClient}>
       <UIProvider>
-        <ScheduleProvider>
-          <SchedulePage />
-        </ScheduleProvider>
+        <NavigationProvider>
+          <ScheduleProvider>
+            <SchedulePage />
+          </ScheduleProvider>
+        </NavigationProvider>
       </UIProvider>
     </QueryClientProvider>,
   );

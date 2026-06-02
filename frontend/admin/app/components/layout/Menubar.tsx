@@ -1,11 +1,12 @@
 'use client';
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useCallback } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useSchedule } from '@/contexts/ScheduleContext';
+import { useNavigation } from '@/contexts/NavigationContext';
 import { useUI } from '@/contexts/UIContext';
-import { DAYS, MONTHS, getMonday, formatDate, isSameDay } from '@/lib/utils';
+import { useMasters } from '@/hooks/useMasters';
+import { DAYS, MONTHS, getMonday, formatDate, formatDateISO, isSameDay } from '@/lib/utils';
 import type { Artist } from '@memo/domain';
 
 // ─── SVG Icon Components ──────────────────────────────────────────────────
@@ -106,17 +107,17 @@ const ICON_MAP: Record<string, React.FC<{ className?: string }>> = {
 // ─── MiniCalendar ─────────────────────────────────────────────────────────
 
 interface MiniCalendarProps {
-  currentWeek: Date;
-  setCurrentWeek: (date: Date) => void;
+  selectedWeek: Date;
+  onWeekSelect: (date: Date) => void;
   collapsed: boolean;
 }
 
-function MiniCalendar({ currentWeek, setCurrentWeek, collapsed }: MiniCalendarProps) {
+function MiniCalendar({ selectedWeek, onWeekSelect, collapsed }: MiniCalendarProps) {
   const today = new Date();
 
   const calendarDays = useMemo(() => {
-    const firstDayOfMonth = new Date(currentWeek.getFullYear(), currentWeek.getMonth(), 1);
-    const lastDayOfMonth = new Date(currentWeek.getFullYear(), currentWeek.getMonth() + 1, 0);
+    const firstDayOfMonth = new Date(selectedWeek.getFullYear(), selectedWeek.getMonth(), 1);
+    const lastDayOfMonth = new Date(selectedWeek.getFullYear(), selectedWeek.getMonth() + 1, 0);
 
     const startDate = getMonday(firstDayOfMonth);
     startDate.setDate(startDate.getDate() - 7);
@@ -131,7 +132,7 @@ function MiniCalendar({ currentWeek, setCurrentWeek, collapsed }: MiniCalendarPr
       current.setDate(current.getDate() + 1);
     }
     return days;
-  }, [currentWeek]);
+  }, [selectedWeek]);
 
   const weeks = useMemo(() => {
     const result: Date[][] = [];
@@ -147,10 +148,10 @@ function MiniCalendar({ currentWeek, setCurrentWeek, collapsed }: MiniCalendarPr
     return result;
   }, [calendarDays]);
 
-  const currentWeekMonday = getMonday(currentWeek);
+  const currentWeekMonday = getMonday(selectedWeek);
 
   const handleWeekClick = (weekMonday: Date) => {
-    setCurrentWeek(new Date(weekMonday));
+    onWeekSelect(weekMonday);
   };
 
   const isInCurrentWeek = (date: Date) => {
@@ -159,16 +160,16 @@ function MiniCalendar({ currentWeek, setCurrentWeek, collapsed }: MiniCalendarPr
   };
 
   const isCurrentMonth = (date: Date) =>
-    date.getMonth() === currentWeek.getMonth();
+    date.getMonth() === selectedWeek.getMonth();
 
   if (collapsed) return null;
 
-  const monthName = MONTHS[currentWeek.getMonth()];
+  const monthName = MONTHS[selectedWeek.getMonth()];
 
   return (
     <div className="px-3 py-2">
       <div className="flex items-center justify-between mb-2">
-        <span className="text-xs font-semibold text-white/90">{monthName} {currentWeek.getFullYear()}</span>
+        <span className="text-xs font-semibold text-white/90">{monthName} {selectedWeek.getFullYear()}</span>
       </div>
 
       <div className="grid grid-cols-7 gap-0 mb-1">
@@ -264,9 +265,18 @@ function ArtistLegend({ collapsed, artists }: ArtistLegendProps) {
 // ─── Menubar ──────────────────────────────────────────────────────────────
 
 export function Menubar() {
-  const { currentWeek, setCurrentWeek, artists } = useSchedule();
+  const { dateFrom, selectDateRange } = useNavigation();
+  const { data: artists = [] } = useMasters();
   const { sidebarCollapsed, toggleSidebar, theme, toggleTheme } = useUI();
   const pathname = usePathname();
+
+  const selectedWeek = useMemo(() => new Date(dateFrom + 'T00:00:00'), [dateFrom]);
+
+  const handleWeekSelect = useCallback((date: Date) => {
+    const monday = getMonday(date);
+    const sunday = new Date(monday.getTime() + 6 * 24 * 60 * 60 * 1000);
+    selectDateRange(formatDateISO(monday), formatDateISO(sunday));
+  }, [selectDateRange]);
 
   const isActive = (href: string) => {
     if (href === '/') return pathname === '/';
@@ -298,8 +308,8 @@ export function Menubar() {
       <div className="flex-1 overflow-y-auto overflow-x-hidden">
         {/* MiniCalendar */}
         <MiniCalendar
-          currentWeek={currentWeek}
-          setCurrentWeek={setCurrentWeek}
+          selectedWeek={selectedWeek}
+          onWeekSelect={handleWeekSelect}
           collapsed={sidebarCollapsed}
         />
 

@@ -3,7 +3,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Menubar } from '../app/components/layout/Menubar';
-import { ScheduleProvider } from '../contexts/ScheduleContext';
+import { NavigationProvider } from '../contexts/NavigationContext';
 import { UIProvider } from '../contexts/UIContext';
 import { getMonday } from '../lib/utils';
 
@@ -35,9 +35,9 @@ function renderWithProviders() {
   return render(
     <QueryClientProvider client={queryClient}>
       <UIProvider>
-        <ScheduleProvider>
+        <NavigationProvider>
           <Menubar />
-        </ScheduleProvider>
+        </NavigationProvider>
       </UIProvider>
     </QueryClientProvider>
   );

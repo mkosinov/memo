@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { Toolbar } from '../app/components/layout/Toolbar';
+import { Topbar } from '../app/components/layout/Topbar';
 import { ScheduleProvider } from '../contexts/ScheduleContext';
 import { UIProvider } from '../contexts/UIContext';
 
@@ -24,14 +24,14 @@ function renderWithProviders() {
     <QueryClientProvider client={queryClient}>
       <UIProvider>
         <ScheduleProvider>
-          <Toolbar />
+          <Topbar />
         </ScheduleProvider>
       </UIProvider>
     </QueryClientProvider>
   );
 }
 
-describe('Toolbar', () => {
+describe('Topbar', () => {
   beforeEach(() => {
     // Reset any document state between tests
     document.documentElement.removeAttribute('data-theme');

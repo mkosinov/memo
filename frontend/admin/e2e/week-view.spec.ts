@@ -16,11 +16,11 @@ test.describe('Schedule Page', () => {
     });
   });
 
-  test('sidebar visual regression', async ({ page }) => {
+  test('menubar visual regression', async ({ page }) => {
     await page.goto('/');
-    await page.waitForSelector('[data-testid="sidebar"]', { timeout: 10000 });
-    const sidebar = page.getByTestId('sidebar');
-    await expect(sidebar).toHaveScreenshot('sidebar.png', {
+    await page.waitForSelector('[data-testid="menubar"]', { timeout: 10000 });
+    const menubar = page.getByTestId('menubar');
+    await expect(menubar).toHaveScreenshot('menubar.png', {
       maxDiffPixels: 50,
     });
   });

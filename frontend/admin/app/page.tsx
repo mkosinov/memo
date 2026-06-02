@@ -1,6 +1,6 @@
 'use client';
 
-import { Sidebar } from './components/layout/Sidebar';
+import { Menubar } from './components/layout/Menubar';
 import { Toolbar } from './components/layout/Toolbar';
 import { RightPanel } from './components/layout/RightPanel';
 import { StampFab } from './components/layout/StampFab';
@@ -14,7 +14,7 @@ export default function Home() {
   return (
     <ScheduleProvider>
       <div className="flex h-screen overflow-hidden">
-        <Sidebar />
+        <Menubar />
         <div
           data-testid="center-content"
           className="flex-1 flex flex-col min-w-0 ml-[var(--sidebar-w,230px)] mr-[var(--right-w,0px)] transition-all duration-300"

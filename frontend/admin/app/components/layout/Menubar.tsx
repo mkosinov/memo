@@ -261,9 +261,9 @@ function ArtistLegend({ collapsed, artists }: ArtistLegendProps) {
   );
 }
 
-// ─── Sidebar ──────────────────────────────────────────────────────────────
+// ─── Menubar ──────────────────────────────────────────────────────────────
 
-export function Sidebar() {
+export function Menubar() {
   const { currentWeek, setCurrentWeek, artists } = useSchedule();
   const { sidebarCollapsed, toggleSidebar, theme, toggleTheme } = useUI();
   const pathname = usePathname();
@@ -275,7 +275,7 @@ export function Sidebar() {
 
   return (
     <aside
-      data-testid="sidebar"
+      data-testid="menubar"
       className={`fixed left-0 top-0 h-full bg-sidebar z-30 transition-all duration-200 flex flex-col`}
       style={{
         width: sidebarCollapsed ? 'var(--sidebar-collapsed-w)' : 'var(--sidebar-w)',

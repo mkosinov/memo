@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { Sidebar } from '../app/components/layout/Sidebar';
+import { Menubar } from '../app/components/layout/Menubar';
 import { ScheduleProvider } from '../contexts/ScheduleContext';
 import { UIProvider } from '../contexts/UIContext';
 import { getMonday } from '../lib/utils';
@@ -36,14 +36,14 @@ function renderWithProviders() {
     <QueryClientProvider client={queryClient}>
       <UIProvider>
         <ScheduleProvider>
-          <Sidebar />
+          <Menubar />
         </ScheduleProvider>
       </UIProvider>
     </QueryClientProvider>
   );
 }
 
-describe('Sidebar', () => {
+describe('Menubar', () => {
   it('renders the logo text "Colour Mountains"', () => {
     renderWithProviders();
     expect(screen.getByText(/Colour Mountains/i)).toBeInTheDocument();
@@ -111,9 +111,9 @@ describe('Sidebar', () => {
     expect(screen.getByText('ВС')).toBeInTheDocument();
   });
 
-  it('collapses sidebar when collapse button is clicked', () => {
+  it('collapses menubar when collapse button is clicked', () => {
     renderWithProviders();
-    const sidebar = screen.getByTestId('sidebar');
+    const sidebar = screen.getByTestId('menubar');
     // Initially not collapsed (width is 230px)
     expect(sidebar).toHaveStyle({ width: 'var(--sidebar-w)' });
 

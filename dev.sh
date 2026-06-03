@@ -6,6 +6,9 @@ BACKEND_DIR="$ROOT_DIR/backend"
 WEB_DIR="$ROOT_DIR/frontend/web"
 ADMIN_DIR="$ROOT_DIR/frontend/admin"
 
+# Ensure pnpm is available
+export PATH="/root/.npm-global/bin:$PATH"
+
 # Colors
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
@@ -45,6 +48,8 @@ if $RESTART; then
     pkill -f "uvicorn src.main" 2>/dev/null && echo -e "${YELLOW}  Killed backend${NC}" || true
     # Kill all next dev processes
     pkill -f "next dev" 2>/dev/null && echo -e "${YELLOW}  Killed frontend(s)${NC}" || true
+    # Kill turbo
+    pkill -f "turbo" 2>/dev/null && echo -e "${YELLOW}  Killed turbo${NC}" || true
     sleep 2
     # Force-free ports to clear any lingering orphan processes
     fuser -k 8000/tcp 2>/dev/null || true
@@ -82,7 +87,7 @@ fi
 # ── Start frontend/web ─────────────────────────────────────────────
 if _ensure_port_free 3000; then
     echo -e "${BLUE}Starting frontend/web (Next.js) on :3000...${NC}"
-    (cd "$WEB_DIR" && npx next dev -p 3000 -H 0.0.0.0) &
+    (cd "$WEB_DIR" && pnpm exec next dev -p 3000 -H 0.0.0.0) &
     WEB_PID=$!
 fi
 
@@ -90,7 +95,7 @@ fi
 if $ADMIN_MODE; then
     if _ensure_port_free 3001; then
         echo -e "${BLUE}Starting frontend/admin (Next.js) on :3001...${NC}"
-        (cd "$ADMIN_DIR" && npx next dev -p 3001 -H 0.0.0.0) &
+        (cd "$ADMIN_DIR" && pnpm exec next dev -p 3001 -H 0.0.0.0) &
         ADMIN_PID=$!
     fi
 fi

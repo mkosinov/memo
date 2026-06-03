@@ -126,7 +126,7 @@ describe('Schedule pipeline integration: enrichment from API to ActivityCard', (
     // This simulates what the real backend returns — ActivityResponse
     // does NOT include service_name or min_age fields.
     // transformActivity() in transformers.ts does NOT set them either.
-    // The enrichment MUST come from toScheduleItems() in joinActivities.ts.
+    // The enrichment MUST come from toScheduleItems() in buildSchedule.ts.
     vi.mocked(getActivities).mockResolvedValue([
       {
         id: 'a1',

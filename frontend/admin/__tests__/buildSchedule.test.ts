@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { toScheduleItems, toScheduleIndex } from '@/lib/joinActivities';
-import type { ScheduleItem } from '@/lib/joinActivities';
+import { toScheduleItems, toScheduleIndex } from '@/lib/buildSchedule';
+import type { ScheduleItem } from '@/lib/buildSchedule';
 import type { Activity, Service } from '@memo/domain';
 
 const MONDAY = new Date('2025-04-07T00:00:00Z');

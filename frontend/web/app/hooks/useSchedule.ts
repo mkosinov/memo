@@ -3,7 +3,8 @@
 import { useMemo, useCallback } from 'react';
 import { useQueries } from '@tanstack/react-query';
 import { getActivities, getMasters, getServices, getLocations } from '@memo/api-client';
-import { joinActivities, type ScheduleIndex } from '@/app/lib/mappers/join-schedule';
+import type { ScheduleIndex } from '@memo/domain';
+import { joinActivities, type WebScheduleDTO } from '@/app/lib/mappers/join-schedule';
 import { toScheduleView } from '@/app/lib/mappers/to-schedule-vm';
 import type { ScheduleView, ScheduleFiltersView } from '@/app/lib/model/view/schedule';
 import type { ActivityResponse, ServiceResponse, MasterResponse, LocationResponse } from '@memo/api-client';
@@ -56,7 +57,7 @@ export function useSchedule(filters: ScheduleFiltersView = {}): UseScheduleResul
     ],
   });
 
-  const index: ScheduleIndex | null = useMemo(() => {
+  const index: ScheduleIndex<WebScheduleDTO> | null = useMemo(() => {
     if (queries.some((q) => q.isLoading || q.isError)) return null;
     const rawData = queries.map((q) => q.data);
     const activities = rawData[0] as ActivityResponse[];
@@ -80,7 +81,7 @@ export function useSchedule(filters: ScheduleFiltersView = {}): UseScheduleResul
     (date: string, locationId = 'all'): ScheduleView[] => {
       if (!index) return [];
       const ids = index.byLocation[locationId]?.byDate.get(date) ?? [];
-      return ids.map((id) => toScheduleView(index.byId.get(id)!)).filter(Boolean);
+      return ids.map((id: string) => toScheduleView(index.byId.get(id)!)).filter(Boolean);
     },
     [index],
   );

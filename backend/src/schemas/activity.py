@@ -31,6 +31,20 @@ class ActivityUpdate(ActivityBase):
     pass
 
 
+class ActivityPatch(BaseModel):
+    """Request schema for partially updating an activity (PATCH) — all fields optional."""
+
+    master_id: str | None = None
+    service_id: str | None = None
+    location_id: str | None = None
+    start: datetime | None = None
+    duration: int | None = None  # minutes
+    capacity: int | None = None
+    is_private: bool | None = None
+    comment: str | None = None
+    record_info: str | None = None
+
+
 class ActivityResponse(ActivityBase):
     """Response schema with all activity fields including computed occupied."""
 

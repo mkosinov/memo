@@ -5,6 +5,7 @@ import { DndContext, DragOverlay, closestCenter, useSensor, useSensors, PointerS
 import { useSchedule } from '@/contexts/ScheduleContext';
 import { useUI } from '@/contexts/UIContext';
 import { useDnD } from '@/hooks/useDnD';
+import { resolveById } from '@memo/domain';
 import type { Activity } from '@memo/domain';
 import { TimeColumn } from './TimeColumn';
 import { DayColumn } from './DayColumn';
@@ -13,7 +14,7 @@ import { ActivityModal } from '../modal/ActivityModal';
 import { DAYS, getMonday, TIME_COL_WIDTH, isSameDay, formatTime, HOURS_START, CELL_HEIGHT } from '@/lib/utils';
 
 export function WeekView() {
-  const { currentWeek, activities, artists, services, locations: studios, stamp, addActivity, updateActivity, loading, error } = useSchedule();
+  const { currentWeek, activities, scheduleIndex, artists, services, locations: studios, stamp, addActivity, updateActivity, loading, error, filterMasterId, filterLocationId } = useSchedule();
   const { showToast } = useUI();
   const monday = getMonday(currentWeek);
 
@@ -63,6 +64,7 @@ export function WeekView() {
         masterId: stamp.masterId,
         startTime,
         duration: service.duration,
+        durationMinutes: service.durationMinutes,
         serviceId: stamp.serviceId,
         serviceName: service.name,
         minAge: service.minAge,
@@ -77,6 +79,12 @@ export function WeekView() {
     [stamp, services, addActivity, showToast],
   );
 
+  // Resolve ScheduleAdminDTO[] → Activity[] with duration in hours + serviceName for DayColumn/DnD compat
+  const resolvedActivities = useMemo(
+    () => activities.map(a => ({ ...a, duration: a.durationMinutes / 60, serviceName: a.serviceTitle })),
+    [activities],
+  );
+
   const {
     dragId,
     dragCopy,
@@ -87,27 +95,22 @@ export function WeekView() {
     onDragEnd,
     handleDragCancel,
   } = useDnD({
-    activities,
+    activities: resolvedActivities,
     addActivity,
     updateActivity,
     showToast,
   });
 
-  const activitiesByDay = useMemo(() => {
-    const map = new Map<number, Activity[]>();
-    for (const activity of activities) {
-      const existing = map.get(activity.day) ?? [];
-      existing.push(activity);
-      map.set(activity.day, existing);
-    }
-    return map;
-  }, [activities]);
+  // Use pre-built index from schedule context for O(1) day lookups
+  const activitiesByDate = scheduleIndex.byDate;
 
   const days = Array.from({ length: 7 }, (_, i) => {
     const d = new Date(monday);
     d.setDate(d.getDate() + i);
     return d;
   });
+
+  const dateToISO = (date: Date): string => date.toISOString().slice(0, 10);
 
   const today = new Date();
 
@@ -116,7 +119,8 @@ export function WeekView() {
     : null;
 
   // Calculate ghost span for drag overlay (how many slots the dragged card occupies)
-  const ghostHeight = activeDragActivity ? Math.ceil(activeDragActivity.duration / 0.5) : null;
+  const durMinutes = activeDragActivity?.durationMinutes ?? (activeDragActivity?.duration ?? 0) * 60;
+  const ghostHeight = activeDragActivity ? Math.ceil(durMinutes / 30) : null;
 
   // NowLine
   const [nowPos, setNowPos] = useState(0);
@@ -160,9 +164,11 @@ export function WeekView() {
   }
 
   if (activities.length === 0) {
+    // Check if there are activities but all hidden by filters
+    const hasFilters = filterMasterId !== null || filterLocationId !== null;
     return (
       <div className="flex items-center justify-center h-full text-text-secondary">
-        <span>Нет занятий на эту неделю</span>
+        <span>{hasFilters ? 'Нет занятий по выбранным фильтрам' : 'Нет занятий на эту неделю'}</span>
       </div>
     );
   }
@@ -224,7 +230,7 @@ export function WeekView() {
               key={i}
               dayIndex={i}
               date={day}
-              activities={activitiesByDay.get(i) ?? []}
+              activities={resolveById(activitiesByDate.get(dateToISO(day)) ?? [], scheduleIndex.byId).map(a => ({ ...a, duration: a.durationMinutes / 60, serviceName: a.serviceTitle }))}
               artists={artists}
               studios={studios}
               services={services}
@@ -260,7 +266,12 @@ export function WeekView() {
       <DragOverlay dropAnimation={null}>
         {activeDragActivity && dragArtist ? (
           <div className="opacity-80 scale-95" style={{ width: '180px' }} data-drag-ghost="true">
-            <ActivityCard activity={activeDragActivity} artist={dragArtist} studios={studios} />
+            <ActivityCard
+              activity={activeDragActivity}
+              artist={dragArtist}
+              studios={studios}
+              style={{ top: 0 }}
+            />
           </div>
         ) : null}
       </DragOverlay>

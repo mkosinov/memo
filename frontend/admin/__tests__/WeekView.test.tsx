@@ -45,6 +45,7 @@ import { WeekView } from '../app/components/schedule/WeekView';
 function createDefaultContext(): ScheduleContextType {
   return {
     activities: [],
+    scheduleIndex: { byId: new Map(), byDate: new Map(), byMasterId: new Map(), byLocation: { all: { byDate: new Map(), byServiceId: new Map() } } },
     artists: [],
     services: [],
     locations: [],
@@ -58,6 +59,10 @@ function createDefaultContext(): ScheduleContextType {
     copyLastWeek: vi.fn(),
     loading: false,
     error: null,
+    filterMasterId: null,
+    filterLocationId: null,
+    setFilterMasterId: vi.fn(),
+    setFilterLocationId: vi.fn(),
   };
 }
 
@@ -101,7 +106,14 @@ describe('WeekView', () => {
     const normalContext = {
       loading: false,
       error: null,
-      activities: [{ id: '1', day: 0, masterId: 'm1', artistId: 'm1', startTime: 10, duration: 1, serviceId: 's1', serviceName: 'Test', minAge: '6', locationId: 'l1', occupied: 0, capacity: 10, isPrivate: false }],
+      activities: [{
+        id: '1', day: 0, masterId: 'm1', artistId: 'm1', startTime: 10, duration: 1,
+        serviceId: 's1', serviceName: 'Test', minAge: '6', locationId: 'l1', occupied: 0,
+        capacity: 10, isPrivate: false,
+        masterName: 'Test Master', serviceTitle: 'Test', date: '2025-04-07',
+        time: '10:00', durationMinutes: 60, locationName: 'Loc',
+        priceMin: 0, priceMax: 0, masterColor: '#FF0000', maxAge: '99+', comment: '',
+      }],
     };
 
     it('renders 7 day columns', () => {

@@ -2,12 +2,21 @@
 
 import React from 'react';
 import { useNavigation } from '@/contexts/NavigationContext';
+import { useSchedule } from '@/contexts/ScheduleContext';
 import { getMonday, formatDateISO, MONTHS_GENITIVE } from '@/lib/utils';
 
 // ─── Topbar ───────────────────────────────────────────────────────────────
 
 export function Topbar() {
   const { dateFrom, selectDateRange } = useNavigation();
+  const {
+    artists,
+    locations,
+    filterMasterId,
+    filterLocationId,
+    setFilterMasterId,
+    setFilterLocationId,
+  } = useSchedule();
 
   const monday = new Date(dateFrom + 'T00:00:00');
   const sunday = new Date(monday);
@@ -118,8 +127,13 @@ export function Topbar() {
             backgroundColor: 'var(--white)',
           }}
           aria-label="Фильтр по мастеру"
+          value={filterMasterId ?? ''}
+          onChange={e => setFilterMasterId(e.target.value || null)}
         >
           <option value="">Все мастера</option>
+          {artists.map(a => (
+            <option key={a.id} value={a.id}>{a.shortName}</option>
+          ))}
         </select>
 
         {/* Location filter */}
@@ -131,8 +145,13 @@ export function Topbar() {
             backgroundColor: 'var(--white)',
           }}
           aria-label="Фильтр по локации"
+          value={filterLocationId ?? ''}
+          onChange={e => setFilterLocationId(e.target.value || null)}
         >
           <option value="">Все локации</option>
+          {locations.map(l => (
+            <option key={l.id} value={l.id}>{l.name}</option>
+          ))}
         </select>
       </div>
     </div>

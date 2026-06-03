@@ -78,6 +78,7 @@ export function ActivityModal({
       masterId,
       startTime,
       duration,
+      durationMinutes: duration * 60,
       serviceId,
       serviceName: service?.name || '',
       minAge: service?.minAge || '',

@@ -32,6 +32,7 @@ export const ServiceSchema = z.object({
   durationMinutes: z.number().optional(),
   maxCapacity: z.number(),
   minAge: z.string(),
+  maxAge: z.string(),
   defaultAdultPrice: z.number().optional(),
   defaultChildPrice: z.number().optional(),
   defaultIndividualPrice: z.number().optional(),
@@ -52,6 +53,7 @@ export const ActivitySchema = z.object({
   artistId: z.string().optional(),
   startTime: z.number(), // e.g. 10.5 = 10:30
   duration: z.number(),
+  durationMinutes: z.number().optional(),
   serviceId: z.string(),
   serviceName: z.string().optional(),
   minAge: z.string().optional(),
@@ -227,6 +229,15 @@ export type BookingVisitor = z.infer<typeof BookingVisitorSchema>;
 
 export const BookingStepSchema = z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]);
 export type BookingStep = z.infer<typeof BookingStepSchema>;
+
+// ─── Schedule DTOs ─────────────────────────────────────────────────────────
+
+export type { ScheduleDTO, ScheduleAdminDTO } from './schedule';
+
+// ─── Schedule Index ────────────────────────────────────────────────────────
+
+export type { ScheduleIndex } from './schedule-index';
+export { buildSchedule, resolveById } from './schedule-index';
 
 // ─── Alias for backward compatibility ─────────────────────────────────────
 

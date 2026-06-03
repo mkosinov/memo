@@ -212,6 +212,42 @@ class TestActivitiesCrud:
             response = client.delete("/api/v1/activities/nonexistent-id")
         assert response.status_code == 404
 
+    def test_patch_activity_partial_update(self) -> None:
+        """PATCH /api/activities/{id} applies partial updates only."""
+        from src.main import create_app
+
+        app = create_app()
+        with TestClient(app) as client:
+            prereqs = _create_prerequisites(client)
+            create_resp = client.post(
+                "/api/v1/activities", json=_activity_payload(prereqs)
+            )
+            activity_id = create_resp.json()["id"]
+
+            # Patch only duration
+            response = client.patch(
+                f"/api/v1/activities/{activity_id}",
+                json={"duration": 180},
+            )
+            assert response.status_code == 200
+            body = response.json()
+            assert body["duration"] == 180
+            # Other fields should remain unchanged
+            assert body["capacity"] == 10
+            assert body["is_private"] is False
+
+    def test_patch_nonexistent_activity_returns_404(self) -> None:
+        """PATCH /api/activities/{fake_id} returns 404."""
+        from src.main import create_app
+
+        app = create_app()
+        with TestClient(app) as client:
+            response = client.patch(
+                "/api/v1/activities/nonexistent-id",
+                json={"duration": 180},
+            )
+        assert response.status_code == 404
+
 
 class TestActivitiesDateFiltering:
     """Date range filtering on /api/activities."""

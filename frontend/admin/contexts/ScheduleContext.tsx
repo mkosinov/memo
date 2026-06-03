@@ -1,22 +1,28 @@
 'use client';
 
 import React, { createContext, useContext, useState, useCallback, useMemo } from 'react';
-import type { Activity, Artist, Service, Location, StampState } from '@memo/domain';
+import type { Activity, Artist, Service, Location, StampState, ScheduleAdminDTO, ScheduleIndex as DomainScheduleIndex } from '@memo/domain';
+import { buildSchedule } from '@memo/domain';
+import { buildAdminSchedule } from '@/lib/joinActivities';
 import { useActivities } from '@/hooks/useActivities';
 import { useMasters } from '@/hooks/useMasters';
 import { useServices } from '@/hooks/useServices';
 import { useLocations } from '@/hooks/useLocations';
+import { useQuery } from '@tanstack/react-query';
 import {
+  getActivities, getMasters, getServices, getLocations,
   createActivity as apiCreateActivity,
   updateActivity as apiUpdateActivity,
   deleteActivity as apiDeleteActivity,
 } from '@memo/api-client';
+import type { ActivityResponse, MasterResponse, ServiceResponse, LocationResponse } from '@memo/api-client';
 import { useQueryClient, useMutation } from '@tanstack/react-query';
 import { getMonday, formatDateISO } from '@/lib/utils';
 import { useNavigation } from '@/contexts/NavigationContext';
 
 export interface ScheduleContextType {
-  activities: Activity[];
+  activities: ScheduleAdminDTO[];
+  scheduleIndex: DomainScheduleIndex<ScheduleAdminDTO>;
   artists: Artist[];
   services: Service[];
   locations: Location[];
@@ -30,6 +36,10 @@ export interface ScheduleContextType {
   copyLastWeek: () => void;
   loading: boolean;
   error: Error | null;
+  filterMasterId: string | null;
+  filterLocationId: string | null;
+  setFilterMasterId: (id: string | null) => void;
+  setFilterLocationId: (id: string | null) => void;
 }
 
 const ScheduleContext = createContext<ScheduleContextType | null>(null);
@@ -49,12 +59,35 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
     ready: false,
   });
 
+  const [filterMasterId, setFilterMasterId] = useState<string | null>(null);
+  const [filterLocationId, setFilterLocationId] = useState<string | null>(null);
+
   const queryClient = useQueryClient();
   const weekStart = dateFrom;
   const weekEnd = dateTo;
 
-  // Data fetching
-  const { data: activities = [], isLoading: activitiesLoading, error: activitiesError } = useActivities(weekStart, weekEnd);
+  // Raw API data (shared cache keys with domain hooks — same fetch, different select)
+  const { data: activitiesRaw = [], isLoading: activitiesLoading, error: activitiesError } = useQuery<ActivityResponse[]>({
+    queryKey: ['activities', weekStart, weekEnd],
+    queryFn: () => getActivities({ date_from: weekStart, date_to: weekEnd }),
+  });
+  const { data: mastersRaw = [] } = useQuery<MasterResponse[]>({
+    queryKey: ['masters'],
+    queryFn: () => getMasters(),
+    staleTime: 5 * 60 * 1000,
+  });
+  const { data: servicesRaw = [] } = useQuery<ServiceResponse[]>({
+    queryKey: ['services'],
+    queryFn: () => getServices(),
+    staleTime: 5 * 60 * 1000,
+  });
+  const { data: locationsRaw = [] } = useQuery<LocationResponse[]>({
+    queryKey: ['locations'],
+    queryFn: () => getLocations(),
+    staleTime: 5 * 60 * 1000,
+  });
+
+  // Domain types for context consumers (select transforms use same cache as raw queries)
   const { data: artists = [] } = useMasters();
   const { data: services = [] } = useServices();
   const { data: locations = [] } = useLocations();
@@ -69,8 +102,55 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
   });
 
   const updateMutation = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: Record<string, unknown> }) => apiUpdateActivity(id, data),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: activityQueryKey }),
+    mutationFn: ({ id, data }: { id: string; data: Record<string, unknown> }) => {
+      // Race: API call vs 5s timeout
+      return Promise.race([
+        apiUpdateActivity(id, data),
+        new Promise<never>((_, reject) => {
+          setTimeout(() => reject(new Error('Update timed out after 5s')), 5000);
+        }),
+      ]);
+    },
+    onMutate: async ({ id, data }) => {
+      // Cancel in-flight queries so they don't overwrite our optimistic update
+      await queryClient.cancelQueries({ queryKey: activityQueryKey });
+
+      // Snapshot current data
+      const previousActivities = queryClient.getQueryData(activityQueryKey);
+
+      // Optimistic update: apply API-level fields to cache (ActivityResponse shape)
+      queryClient.setQueryData(activityQueryKey, (old: unknown) => {
+        if (!Array.isArray(old)) return old;
+        return old.map((activity: Record<string, unknown>) => {
+          if (activity.id === id) {
+            const updated = { ...activity };
+            if (data.start !== undefined) updated.start = data.start;
+            if (data.master_id !== undefined) updated.master_id = data.master_id;
+            if (data.service_id !== undefined) updated.service_id = data.service_id;
+            if (data.location_id !== undefined) updated.location_id = data.location_id;
+            if (data.duration !== undefined) updated.duration = data.duration;
+            if (data.capacity !== undefined) updated.capacity = data.capacity;
+            if (data.is_private !== undefined) updated.is_private = data.is_private;
+            if (data.comment !== undefined) updated.comment = data.comment;
+            if (data.occupied !== undefined) updated.occupied = data.occupied;
+            return updated;
+          }
+          return activity;
+        });
+      });
+
+      return { previousActivities };
+    },
+    onError: (_err, _variables, context) => {
+      // Restore snapshot on error — return a new array for immutability/re-render
+      if (context?.previousActivities) {
+        queryClient.setQueryData(activityQueryKey, [...(context.previousActivities as unknown[])]);
+      }
+    },
+    onSettled: () => {
+      // Always sync with server after mutation completes
+      queryClient.invalidateQueries({ queryKey: activityQueryKey });
+    },
   });
 
   const deleteMutation = useMutation({
@@ -89,7 +169,7 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
       service_id: activity.serviceId,
       location_id: activity.locationId,
       start: startDate.toISOString(),
-      duration: Math.round(activity.duration * 60),  // hours → minutes
+      duration: activity.durationMinutes ?? Math.round(activity.duration * 60),  // prefer minutes, fallback hours→min
       capacity: activity.capacity,
       is_private: activity.isPrivate ?? false,
       comment: activity.comment ?? null,
@@ -103,6 +183,7 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
     if (updates.serviceId !== undefined) payload.service_id = updates.serviceId;
     if (updates.locationId !== undefined) payload.location_id = updates.locationId;
     if (updates.duration !== undefined) payload.duration = Math.round(updates.duration * 60); // hours→min
+    if (updates.durationMinutes !== undefined) payload.duration = updates.durationMinutes; // takes precedence
     if (updates.capacity !== undefined) payload.capacity = updates.capacity;
     if (updates.isPrivate !== undefined) payload.is_private = updates.isPrivate;
     if (updates.comment !== undefined) payload.comment = updates.comment;
@@ -123,12 +204,38 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
 
   const copyLastWeek = useCallback(() => {
     // Stub: will be implemented when API-based copy-last-week is needed
-    console.warn('copyLastWeek not yet implemented with API data');
   }, []);
+
+  // Build enriched schedule using buildAdminSchedule (raw API data)
+  const enrichedData = useMemo(
+    () => buildAdminSchedule(
+      activitiesRaw,
+      mastersRaw,
+      servicesRaw,
+      locationsRaw,
+      currentWeek,
+    ),
+    [activitiesRaw, mastersRaw, servicesRaw, locationsRaw, currentWeek],
+  );
+
+  // Filter items based on active filters
+  const filteredItems = useMemo(() => {
+    let result = enrichedData.items;
+    if (filterMasterId) result = result.filter(a => a.masterId === filterMasterId);
+    if (filterLocationId) result = result.filter(a => a.locationId === filterLocationId);
+    return result;
+  }, [enrichedData.items, filterMasterId, filterLocationId]);
+
+  // Build index from filtered items
+  const scheduleIndex = useMemo(
+    () => buildSchedule(filteredItems, { getDateKey: a => a.date }),
+    [filteredItems],
+  );
 
   // Memoize context value
   const contextValue = useMemo(() => ({
-    activities,
+    activities: filteredItems,
+    scheduleIndex,
     artists,
     services,
     locations,
@@ -142,10 +249,15 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
     copyLastWeek,
     loading: activitiesLoading,
     error: activitiesError ?? null,
+    filterMasterId,
+    filterLocationId,
+    setFilterMasterId,
+    setFilterLocationId,
   }), [
-    activities, artists, services, locations,
-    currentWeek, stamp,
-    dateFrom, selectDateRange, setCurrentWeek, addActivity, updateActivityFn, deleteActivityById, setStamp, copyLastWeek,
+    filteredItems, scheduleIndex, artists, services, locations,
+    currentWeek, stamp, filterMasterId, filterLocationId,
+    setCurrentWeek, addActivity, updateActivityFn, deleteActivityById, setStamp, copyLastWeek,
+    setFilterMasterId, setFilterLocationId,
     activitiesLoading, activitiesError,
   ]);
 

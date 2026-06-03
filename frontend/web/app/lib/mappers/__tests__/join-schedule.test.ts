@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { joinActivities } from '../join-schedule';
+import { joinActivities, type WebScheduleDTO } from '../join-schedule';
 import type { ActivityResponse, ServiceResponse, MasterResponse, LocationResponse } from '@memo/api-client';
-import type { ScheduleDTO } from '@/app/lib/model/dto/schedule';
 
 function makeActivity(overrides?: Partial<ActivityResponse>): ActivityResponse {
   return {
@@ -94,34 +93,40 @@ describe('joinActivities', () => {
     expect(typeof result.byLocation).toBe('object');
   });
 
-  it('maps all fields from activity, service, master, location into ScheduleDTO', () => {
+  it('maps all fields from activity, service, master, location into WebScheduleDTO', () => {
     const activities = [makeActivity()];
     const services = new Map([['service-1', makeService()]]);
     const masters = new Map([['master-1', makeMaster()]]);
     const locations = new Map([['loc-1', makeLocation()]]);
 
     const result = joinActivities(activities, services, masters, locations);
-    const dto = result.byId.get('act-1') as ScheduleDTO;
+    const dto = result.byId.get('act-1') as WebScheduleDTO;
 
     expect(dto.id).toBe('act-1');
-    expect(dto.title).toBe('Морской пейзаж');
-    expect(dto.tags).toEqual(['масло', 'пейзаж']);
-    expect(dto.image_url).toBe('https://example.com/service.jpg');
-    expect(dto.time).toBe('10:00');
-    expect(dto.duration_minutes).toBe(120);
-    expect(dto.location_id).toBe('loc-1');
-    expect(dto.location_name).toBe('Альпика');
-    expect(dto.location_address).toBe('ул. Тестовая, 1');
-    expect(dto.guests_count).toBe(3);
-    expect(dto.material).toBe('Масло');
-    expect(dto.price_min).toBe(3500);
-    expect(dto.price_max).toBe(3500);
-    expect(dto.master_name).toBe('Ольга Середа');
-    expect(dto.master_avatar).toBe('https://example.com/avatar.jpg');
+    expect(dto.masterId).toBe('master-1');
+    expect(dto.serviceId).toBe('service-1');
+    expect(dto.locationId).toBe('loc-1');
+    expect(dto.masterName).toBe('Ольга Середа');
+    expect(dto.serviceTitle).toBe('Морской пейзаж');
     expect(dto.date).toBe('2026-06-01');
-    expect(dto.price_hint).toBe('Взрослый: 3500₽');
-    expect(dto.material_hint).toBe('Масло, холст, кисти');
-    expect(dto.location_hint).toBe('Вход со двора');
+    expect(dto.time).toBe('10:00');
+    expect(dto.durationMinutes).toBe(120);
+    expect(dto.occupied).toBe(3);
+    expect(dto.capacity).toBe(10);
+    expect(dto.locationName).toBe('Альпика');
+    expect(dto.locationAddress).toBe('ул. Тестовая, 1');
+    expect(dto.locationHint).toBe('Вход со двора');
+    expect(dto.materialHint).toBe('Масло, холст, кисти');
+    expect(dto.priceMin).toBe(3500);
+    expect(dto.priceMax).toBe(3500);
+    expect(dto.priceHint).toBe('Взрослый: 3500₽');
+    expect(dto.image_url).toBe('https://example.com/service.jpg');
+    expect(dto.tags).toEqual(['масло', 'пейзаж']);
+    expect(dto.masterAvatar).toBe('https://example.com/avatar.jpg');
+    // Web-only fields
+    expect(dto.material).toBe('Масло');
+    expect(dto.size).toBe('');
+    expect(dto.photos).toEqual([]);
   });
 
   it('skips activity when service is missing', () => {
@@ -202,7 +207,7 @@ describe('joinActivities', () => {
     expect(loc2Idx.byDate.get('2026-06-01')).toEqual(['act-3']);
   });
 
-  it('builds per-location byServiceId index using title', () => {
+  it('builds per-location byServiceId index using serviceTitle', () => {
     const act1 = makeActivity({ id: 'act-1', start: '2026-06-01T10:00:00' });
     const act2 = makeActivity({ id: 'act-2', start: '2026-06-02T14:00:00' });
     const act3 = makeActivity({
@@ -228,8 +233,8 @@ describe('joinActivities', () => {
 
   it('computes next_times for activities with same service at same location', () => {
     const activities = [
-      makeActivity({ id: 'act-1', start: '2026-06-01T10:00:00' }),
-      makeActivity({ id: 'act-2', start: '2026-06-01T14:00:00' }),
+      makeActivity({ id: 'act-1', start: '2099-06-01T10:00:00' }),
+      makeActivity({ id: 'act-2', start: '2099-06-01T14:00:00' }),
     ];
     const services = new Map([['service-1', makeService()]]);
     const masters = new Map([['master-1', makeMaster()]]);
@@ -237,20 +242,20 @@ describe('joinActivities', () => {
 
     const result = joinActivities(activities, services, masters, locations);
 
-    const dto1 = result.byId.get('act-1') as ScheduleDTO;
-    expect(dto1.next_times).toBeDefined();
-    expect(dto1.next_times).toHaveLength(1);
-    expect(dto1.next_times![0]).toEqual({ id: 'act-2', date: '2026-06-01', time: '14:00' });
+    const dto1 = result.byId.get('act-1') as WebScheduleDTO;
+    expect((dto1 as unknown as Record<string, unknown>).nextTimes).toBeDefined();
+    expect((dto1 as unknown as Record<string, unknown>).nextTimes).toHaveLength(1);
+    expect((dto1 as unknown as Record<string, unknown>).nextTimes).toEqual([{ id: 'act-2', date: '2099-06-01', time: '14:00' }]);
 
-    const dto2 = result.byId.get('act-2') as ScheduleDTO;
-    expect(dto2.next_times).toBeUndefined();
+    const dto2 = result.byId.get('act-2') as WebScheduleDTO;
+    expect((dto2 as unknown as Record<string, unknown>).nextTimes).toBeUndefined();
   });
 
   it('sorts next_times by date then time', () => {
     const activities = [
-      makeActivity({ id: 'act-2', start: '2026-06-02T10:00:00' }),
-      makeActivity({ id: 'act-3', start: '2026-06-01T14:00:00' }),
-      makeActivity({ id: 'act-1', start: '2026-06-01T10:00:00' }),
+      makeActivity({ id: 'act-2', start: '2099-06-02T10:00:00' }),
+      makeActivity({ id: 'act-3', start: '2099-06-01T14:00:00' }),
+      makeActivity({ id: 'act-1', start: '2099-06-01T10:00:00' }),
     ];
     const services = new Map([['service-1', makeService()]]);
     const masters = new Map([['master-1', makeMaster()]]);
@@ -258,16 +263,16 @@ describe('joinActivities', () => {
 
     const result = joinActivities(activities, services, masters, locations);
 
-    const dto1 = result.byId.get('act-1') as ScheduleDTO;
-    expect(dto1.next_times).toBeDefined();
-    expect(dto1.next_times!.map(n => n.id)).toEqual(['act-3', 'act-2']);
+    const dto1 = result.byId.get('act-1') as WebScheduleDTO;
+    expect((dto1 as unknown as Record<string, unknown>).nextTimes).toBeDefined();
+    expect(((dto1 as unknown as Record<string, unknown>).nextTimes as Array<{id: string}>).map(n => n.id)).toEqual(['act-3', 'act-2']);
   });
 
   it('limits next_times to 6 entries', () => {
     const activities = Array.from({ length: 8 }, (_, i) =>
       makeActivity({
         id: `act-${i + 1}`,
-        start: `2026-06-${String(i + 1).padStart(2, '0')}T10:00:00`,
+        start: `2099-06-${String(i + 1).padStart(2, '0')}T10:00:00`,
       })
     );
     const services = new Map([['service-1', makeService()]]);
@@ -276,8 +281,8 @@ describe('joinActivities', () => {
 
     const result = joinActivities(activities, services, masters, locations);
 
-    const firstDto = result.byId.get('act-1') as ScheduleDTO;
-    expect(firstDto.next_times).toHaveLength(6);
+    const firstDto = result.byId.get('act-1') as WebScheduleDTO;
+    expect(((firstDto as unknown as Record<string, unknown>).nextTimes as unknown[])).toHaveLength(6);
   });
 
   it('handles empty activities array', () => {
@@ -303,16 +308,16 @@ describe('joinActivities', () => {
     const locations = new Map([['loc-1', makeLocation({ address: null, location_hint: null })]]);
 
     const result = joinActivities(activities, services, masters, locations);
-    const dto = result.byId.get('act-1') as ScheduleDTO;
+    const dto = result.byId.get('act-1') as WebScheduleDTO;
 
     expect(dto.material).toBe('');
-    expect(dto.price_min).toBe(0);
-    expect(dto.price_max).toBe(0);
-    expect(dto.master_avatar).toBeUndefined();
-    expect(dto.location_address).toBeUndefined();
-    expect(dto.material_hint).toBeUndefined();
-    expect(dto.location_hint).toBeUndefined();
-    expect(dto.price_hint).toBe('');
+    expect(dto.priceMin).toBe(0);
+    expect(dto.priceMax).toBe(0);
+    expect(dto.masterAvatar).toBeUndefined();
+    expect(dto.locationAddress).toBeUndefined();
+    expect(dto.materialHint).toBeUndefined();
+    expect(dto.locationHint).toBeUndefined();
+    expect(dto.priceHint).toBe('');
     expect(dto.tags).toEqual([]);
   });
 });

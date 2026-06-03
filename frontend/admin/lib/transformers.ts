@@ -30,6 +30,7 @@ export function transformActivity(raw: ActivityResponse): Activity {
     artistId: raw.master_id,
     startTime,
     duration: raw.duration / 60,
+    durationMinutes: raw.duration,
     serviceId: raw.service_id,
     locationId: raw.location_id,
     occupied: raw.occupied,
@@ -56,6 +57,7 @@ export function transformService(raw: ServiceResponse): Service {
     durationMinutes: raw.duration,
     maxCapacity: raw.max_age,
     minAge: `${raw.min_age}+`,
+    maxAge: `${raw.max_age}+`,
     defaultAdultPrice: raw.tariffs?.[0]?.price ?? 0,
     description: raw.description,
   };

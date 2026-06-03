@@ -69,3 +69,8 @@ token-usage-output.txt
 
 # Turborepo cache
 .turbo/
+
+# Databases
+*.db
+*.sqlite
+*.sqlite3

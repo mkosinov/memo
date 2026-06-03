@@ -139,6 +139,57 @@ class TestClientsCrud:
             response = client.delete("/api/v1/clients/nonexistent-id")
         assert response.status_code == 404
 
+    def test_search_client_by_phone_found(self) -> None:
+        """GET /api/v1/clients/search?phone=... returns the matching client."""
+        from src.main import create_app
+
+        app = create_app()
+        with TestClient(app) as client:
+            # Create a client
+            create_resp = client.post("/api/v1/clients", json=CLIENT_PAYLOAD)
+            assert create_resp.status_code == 201
+
+            # Search by phone
+            response = client.get(
+                "/api/v1/clients/search", params={"phone": "+79991234567"}
+            )
+            assert response.status_code == 200
+            body = response.json()
+            assert body["phone"] == "+79991234567"
+            assert body["name"] == "John Smith"
+            assert body["email"] == "john@example.com"
+            assert body["channel"] == "phone"
+            assert "id" in body
+            assert body["is_active"] is True
+
+    def test_search_client_by_phone_not_found(self) -> None:
+        """GET /api/v1/clients/search?phone=... returns 404 for unknown phone."""
+        from src.main import create_app
+
+        app = create_app()
+        with TestClient(app) as client:
+            response = client.get(
+                "/api/v1/clients/search", params={"phone": "+00000000000"}
+            )
+            assert response.status_code == 404
+
+    def test_search_client_by_phone_excludes_inactive(self) -> None:
+        """GET /api/v1/clients/search?phone=... returns 404 for soft-deleted client."""
+        from src.main import create_app
+
+        app = create_app()
+        with TestClient(app) as client:
+            # Create then soft-delete
+            create_resp = client.post("/api/v1/clients", json=CLIENT_PAYLOAD)
+            client_id = create_resp.json()["id"]
+            client.delete(f"/api/v1/clients/{client_id}")
+
+            # Search should not find the deleted client
+            response = client.get(
+                "/api/v1/clients/search", params={"phone": "+79991234567"}
+            )
+            assert response.status_code == 404
+
     def test_list_visitors_for_client(self) -> None:
         """GET /api/clients/{id}/visitors returns visitors for that client."""
         from src.main import create_app

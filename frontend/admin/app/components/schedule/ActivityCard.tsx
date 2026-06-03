@@ -13,11 +13,12 @@ interface ActivityCardProps {
   studios?: Studio[];
   style?: React.CSSProperties;
   onEdit?: (activity: Activity) => void;
+  onQuickAdd?: (activity: Activity) => void;
   isDragging?: boolean;
   isDragCopy?: boolean;
 }
 
-export function ActivityCard({ activity, artist, studios = [], style, onEdit, isDragging, isDragCopy }: ActivityCardProps) {
+export function ActivityCard({ activity, artist, studios = [], style, onEdit, onQuickAdd, isDragging, isDragCopy }: ActivityCardProps) {
   const { deleteMode, showToast } = useUI();
   const { deleteActivity, addActivity } = useSchedule();
   const [deleting, setDeleting] = useState(false);
@@ -65,11 +66,7 @@ export function ActivityCard({ activity, artist, studios = [], style, onEdit, is
 
   const handleQuickAction = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (activity.isPrivate) {
-      showToast('Редактирование индивидуального МК');
-    } else {
-      showToast('Быстрое добавление гостя');
-    }
+    onQuickAdd?.(activity);
   };
 
   const locationName = studios.find(s => s.id === activity.locationId)?.name || '';
@@ -182,6 +179,7 @@ export function ActivityCard({ activity, artist, studios = [], style, onEdit, is
                 className="flex items-center justify-center w-7 h-7 rounded-full border transition-colors hover:bg-white/40"
                 style={{ borderColor: 'rgba(0,0,0,0.3)', color: 'rgba(0,0,0,0.6)' }}
                 aria-label={activity.isPrivate ? 'Редактировать' : 'Добавить гостя'}
+                data-testid="btn-quick-add"
               >
                 {activity.isPrivate ? (
                   <span className="text-xs leading-none font-bold">···</span>

@@ -129,10 +129,10 @@ export function BookingFilters({
           aria-label="Фильтр по статусу"
         >
           <option value="">Все статусы</option>
-          <option value="WAITING">Ожидание</option>
-          <option value="VISITED">Посетили</option>
-          <option value="MISSED">Неявка</option>
-          <option value="CANCELLED">Отменена</option>
+          <option value="waiting">Ожидание</option>
+          <option value="visited">Посетили</option>
+          <option value="missed">Неявка</option>
+          <option value="cancelled">Отменена</option>
         </select>
       </div>
 

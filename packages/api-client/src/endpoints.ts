@@ -15,10 +15,20 @@ import {
   type PhotoResponse,
   RecordResponseSchema,
   type RecordResponse,
+  type RecordCreate,
+  type RecordUpdate,
   ClientResponseSchema,
   type ClientResponse,
   PaymentResponseSchema,
   type PaymentResponse,
+  type PaymentCreate,
+  type PaymentUpdate,
+  VisitorResponseSchema,
+  type VisitorResponse,
+  type VisitorCreate,
+  type VisitorUpdate,
+  VisitResponseSchema,
+  type VisitResponse,
 } from './schemas';
 
 // ─── Masters ───────────────────────────────────────────────────────────────
@@ -129,4 +139,82 @@ export async function getPayments(params?: {
   if (params?.record_id) search.set('record_id', params.record_id);
   const qs = search.toString();
   return api(`/api/v1/payments${qs ? `?${qs}` : ''}`, z.array(PaymentResponseSchema));
+}
+
+// ─── Records CRUD ─────────────────────────────────────────────────────────
+
+export async function createRecord(data: RecordCreate): Promise<RecordResponse> {
+  return api('/api/v1/records', RecordResponseSchema, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updateRecord(id: string, data: RecordUpdate): Promise<RecordResponse> {
+  return api(`/api/v1/records/${id}`, RecordResponseSchema, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteRecord(id: string): Promise<void> {
+  await api(`/api/v1/records/${id}`, z.any(), { method: 'DELETE' });
+}
+
+// ─── Payments CRUD ────────────────────────────────────────────────────────
+
+export async function createPayment(data: PaymentCreate): Promise<PaymentResponse> {
+  return api('/api/v1/payments', PaymentResponseSchema, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updatePayment(id: string, data: PaymentUpdate): Promise<PaymentResponse> {
+  return api(`/api/v1/payments/${id}`, PaymentResponseSchema, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deletePayment(id: string): Promise<void> {
+  await api(`/api/v1/payments/${id}`, z.any(), { method: 'DELETE' });
+}
+
+// ─── Visitors CRUD ────────────────────────────────────────────────────────
+
+export async function createVisitor(data: VisitorCreate): Promise<VisitorResponse> {
+  return api('/api/v1/visitors', VisitorResponseSchema, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updateVisitor(id: string, data: VisitorUpdate): Promise<VisitorResponse> {
+  return api(`/api/v1/visitors/${id}`, VisitorResponseSchema, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteVisitor(id: string): Promise<void> {
+  await api(`/api/v1/visitors/${id}`, z.any(), { method: 'DELETE' });
+}
+
+// ─── Client Search ────────────────────────────────────────────────────────
+
+export async function searchClientByPhone(phone: string): Promise<ClientResponse> {
+  return api(
+    `/api/v1/clients/search?phone=${encodeURIComponent(phone)}`,
+    ClientResponseSchema,
+  );
+}
+
+// ─── Visit Status ─────────────────────────────────────────────────────────
+
+export async function updateVisitStatus(id: string, status: string): Promise<VisitResponse> {
+  return api(`/api/v1/visits/${id}/status`, VisitResponseSchema, {
+    method: 'PUT',
+    body: JSON.stringify({ status }),
+  });
 }

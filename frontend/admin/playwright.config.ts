@@ -1,7 +1,9 @@
 import { defineConfig, devices } from '@playwright/test';
 
 /**
- * Playwright configuration for visual regression testing.
+ * Playwright E2E configuration for Memo admin.
+ * - Frontend: Next.js admin on port 3001
+ * - Backend:  FastAPI on port 8000
  * Browsers are pre-installed in the Docker image.
  * Do NOT run `npx playwright install` in worktrees.
  */
@@ -12,18 +14,20 @@ export default defineConfig({
   retries: process.env.CI ? 2 : 0,
   workers: process.env.CI ? 1 : undefined,
   reporter: 'list',
+  timeout: 30_000,
 
   use: {
-    baseURL: 'http://localhost:3000',
+    baseURL: 'http://localhost:3001',
     trace: 'on-first-retry',
     viewport: { width: 1280, height: 720 },
   },
 
-  // Auto-start Next.js dev server for E2E tests
+  // Auto-start admin Next.js dev server for E2E tests
   webServer: {
-    command: 'npm run dev',
-    url: 'http://localhost:3000',
+    command: 'pnpm exec next dev -p 3001',
+    url: 'http://localhost:3001',
     reuseExistingServer: !process.env.CI,
+    cwd: '.',
   },
 
   projects: [

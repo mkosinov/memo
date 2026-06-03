@@ -134,6 +134,33 @@ describe('ActivityCard', () => {
     expect(screen.getByText('8/8')).toBeInTheDocument();
   });
 
+  it('calls onQuickAdd when quick action button is clicked', () => {
+    const onQuickAdd = vi.fn();
+    render(<ActivityCard activity={mockActivity} artist={mockArtist} onQuickAdd={onQuickAdd} />);
+    // The "+" button has aria-label "Добавить гостя"
+    const btn = screen.getByRole('button', { name: 'Добавить гостя' });
+    fireEvent.click(btn);
+    expect(onQuickAdd).toHaveBeenCalledTimes(1);
+    expect(onQuickAdd).toHaveBeenCalledWith(mockActivity);
+  });
+
+  it('calls onQuickAdd for private activity with correct activity', () => {
+    const onQuickAdd = vi.fn();
+    const privateActivity = { ...mockActivity, isPrivate: true };
+    render(<ActivityCard activity={privateActivity} artist={mockArtist} onQuickAdd={onQuickAdd} />);
+    const btn = screen.getByRole('button', { name: 'Редактировать' });
+    fireEvent.click(btn);
+    expect(onQuickAdd).toHaveBeenCalledTimes(1);
+    expect(onQuickAdd).toHaveBeenCalledWith(privateActivity);
+  });
+
+  it('does not call onQuickAdd when not provided', () => {
+    render(<ActivityCard activity={mockActivity} artist={mockArtist} />);
+    const btn = screen.getByRole('button', { name: 'Добавить гостя' });
+    // Should not throw when clicked without onQuickAdd
+    expect(() => fireEvent.click(btn)).not.toThrow();
+  });
+
   it('renders progress bar with width proportional to occupancy', () => {
     const { container } = render(<ActivityCard activity={mockActivity} artist={mockArtist} />);
     const filledBar = container.querySelector('[data-testid="activity-ev_1"] [style*="width:"][class*="absolute"]');

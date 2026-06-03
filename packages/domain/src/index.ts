@@ -98,21 +98,21 @@ export const VisitorSchema = z.object({
 
 export type Visitor = z.infer<typeof VisitorSchema>;
 
-// ─── BookingRecord ────────────────────────────────────────────────────────
+// ─── Record ───────────────────────────────────────────────────────────────
 
-export const BookingStatusSchema = z.enum(['PENDING', 'CONFIRMED', 'CANCELLED', 'NO_SHOW']);
-export type BookingStatus = z.infer<typeof BookingStatusSchema>;
+export const RecordStatusSchema = z.enum(['pending', 'confirmed', 'cancelled', 'no_show']);
+export type RecordStatus = z.infer<typeof RecordStatusSchema>;
 
-export const BookingRecordSchema = z.object({
+export const RecordSchema = z.object({
   id: z.string(),
   activityId: z.string(),
   clientId: z.string().nullable(),
-  status: BookingStatusSchema,
+  status: RecordStatusSchema,
   createdAt: z.string(),
   comment: z.string().optional(),
 });
 
-export type BookingRecord = z.infer<typeof BookingRecordSchema>;
+export type Record = z.infer<typeof RecordSchema>;
 
 // ─── Visit ────────────────────────────────────────────────────────────────
 

@@ -1,0 +1,280 @@
+'use client';
+
+import React, { useState, useEffect, useCallback } from 'react';
+import { useSchedule } from '@/contexts/ScheduleContext';
+import type { Activity, Service } from '@memo/domain';
+import { decimalToHHMM, hhmmToDecimal } from '@/lib/utils';
+
+interface SettingsTabProps {
+  activity: Activity;
+  onUpdate: (updates: Partial<Activity>) => void;
+}
+
+export function SettingsTab({ activity, onUpdate }: SettingsTabProps) {
+  const { artists, services, locations } = useSchedule();
+
+  const [serviceId, setServiceId] = useState(activity.serviceId);
+  const [masterId, setMasterId] = useState(activity.masterId);
+  const [locationId, setLocationId] = useState(activity.locationId);
+  const [capacity, setCapacity] = useState(activity.capacity);
+  const [durationStr, setDurationStr] = useState(decimalToHHMM(activity.duration));
+  const [isPrivate, setIsPrivate] = useState(activity.isPrivate);
+  const [startDateTime, setStartDateTime] = useState(() => {
+    // Build datetime-local string from activity.date + activity.startTime
+    const dateStr = activity.date || '';
+    const timeHH = String(Math.floor(activity.startTime)).padStart(2, '0');
+    const timeMM = activity.startTime % 1 >= 0.5 ? '30' : '00';
+    if (dateStr) {
+      return `${dateStr}T${timeHH}:${timeMM}`;
+    }
+    return '';
+  });
+
+  // Selected service for display
+  const selectedService = services.find((s) => s.id === serviceId) as (Service & { tariffs?: Array<{ id: string; title: string; price: number; description?: string | null }> }) | undefined;
+
+  // Auto-fill from service when service changes
+  const handleServiceChange = useCallback(
+    (newServiceId: string) => {
+      setServiceId(newServiceId);
+      const svc = services.find((s) => s.id === newServiceId);
+      if (svc) {
+        setDurationStr(decimalToHHMM(svc.duration));
+        setCapacity(svc.maxCapacity);
+        onUpdate({
+          serviceId: newServiceId,
+          serviceName: svc.name,
+          minAge: svc.minAge,
+          duration: svc.duration,
+          durationMinutes: svc.durationMinutes || svc.duration * 60,
+          capacity: svc.maxCapacity,
+        });
+      }
+    },
+    [services, onUpdate],
+  );
+
+  // Handle datetime change
+  const handleDateTimeChange = useCallback(
+    (value: string) => {
+      setStartDateTime(value);
+      if (value) {
+        const [datePart, timePart] = value.split('T');
+        const [h, m] = timePart.split(':').map(Number);
+        const startTimeDecimal = h + m / 60;
+        // Calculate day from date
+        const date = new Date(datePart + 'T12:00:00');
+        const dayOfWeek = (date.getDay() + 6) % 7; // Mon=0
+        onUpdate({ startTime: startTimeDecimal, day: dayOfWeek, date: datePart });
+      }
+    },
+    [onUpdate],
+  );
+
+  // Handle duration change
+  const handleDurationChange = useCallback(
+    (value: string) => {
+      setDurationStr(value);
+      const decimal = hhmmToDecimal(value);
+      if (!isNaN(decimal) && decimal > 0) {
+        onUpdate({ duration: decimal, durationMinutes: Math.round(decimal * 60) });
+      }
+    },
+    [onUpdate],
+  );
+
+  // Sync state from activity prop changes (e.g. after DnD)
+  useEffect(() => {
+    setServiceId(activity.serviceId);
+    setMasterId(activity.masterId);
+    setLocationId(activity.locationId);
+    setCapacity(activity.capacity);
+    setDurationStr(decimalToHHMM(activity.duration));
+    setIsPrivate(activity.isPrivate);
+
+    const dateStr = activity.date || '';
+    const timeHH = String(Math.floor(activity.startTime)).padStart(2, '0');
+    const timeMM = activity.startTime % 1 >= 0.5 ? '30' : '00';
+    if (dateStr) {
+      setStartDateTime(`${dateStr}T${timeHH}:${timeMM}`);
+    }
+  }, [activity]);
+
+  const inputClass =
+    'w-full rounded-lg border px-3 py-2 text-sm bg-white';
+  const inputStyle = { borderColor: 'var(--line)' };
+
+  return (
+    <div className="space-y-4 p-4" data-testid="settings-tab">
+      {/* Date/Time */}
+      <div>
+        <label className="text-xs font-medium text-ink-mid block mb-1" htmlFor="settings-datetime">
+          Дата и время
+        </label>
+        <input
+          id="settings-datetime"
+          type="datetime-local"
+          className={inputClass}
+          style={inputStyle}
+          value={startDateTime}
+          onChange={(e) => handleDateTimeChange(e.target.value)}
+          data-testid="input-datetime"
+        />
+      </div>
+
+      {/* Service */}
+      <div>
+        <label className="text-xs font-medium text-ink-mid block mb-1" htmlFor="settings-service">
+          Услуга
+        </label>
+        <select
+          id="settings-service"
+          className={inputClass}
+          style={inputStyle}
+          value={serviceId}
+          onChange={(e) => handleServiceChange(e.target.value)}
+          data-testid="select-service"
+        >
+          <option value="">Выберите</option>
+          {services.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.name}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {/* Age range */}
+      {selectedService && (
+        <div className="text-xs text-ink-light">
+          Возраст: {selectedService.minAge}–{selectedService.maxAge} лет
+        </div>
+      )}
+
+      {/* Tariffs */}
+      {selectedService?.tariffs && selectedService.tariffs.length > 0 && (
+        <div className="space-y-1">
+          <span className="text-xs font-medium text-ink-mid">Тарифы:</span>
+          {selectedService.tariffs.map((tariff) => (
+            <div key={tariff.id} className="flex items-center justify-between text-sm px-2 py-1 bg-surface rounded">
+              <span className="text-ink-mid">{tariff.title}</span>
+              <span className="font-medium text-ink">{tariff.price.toLocaleString('ru-RU')} ₽</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Master */}
+      <div>
+        <label className="text-xs font-medium text-ink-mid block mb-1" htmlFor="settings-master">
+          Мастер
+        </label>
+        <select
+          id="settings-master"
+          className={inputClass}
+          style={inputStyle}
+          value={masterId}
+          onChange={(e) => {
+            setMasterId(e.target.value);
+            onUpdate({ masterId: e.target.value });
+          }}
+          data-testid="select-master"
+        >
+          <option value="">Выберите</option>
+          {artists.map((a) => (
+            <option key={a.id} value={a.id}>
+              {a.name}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {/* Location */}
+      <div>
+        <label className="text-xs font-medium text-ink-mid block mb-1" htmlFor="settings-location">
+          Локация
+        </label>
+        <select
+          id="settings-location"
+          className={inputClass}
+          style={inputStyle}
+          value={locationId}
+          onChange={(e) => {
+            setLocationId(e.target.value);
+            onUpdate({ locationId: e.target.value });
+          }}
+          data-testid="select-location"
+        >
+          <option value="">Выберите</option>
+          {locations.map((l) => (
+            <option key={l.id} value={l.id}>
+              {l.name}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {/* Capacity */}
+      <div>
+        <label className="text-xs font-medium text-ink-mid block mb-1" htmlFor="settings-capacity">
+          Вместимость
+        </label>
+        <input
+          id="settings-capacity"
+          type="number"
+          min={1}
+          className={inputClass}
+          style={inputStyle}
+          value={capacity}
+          onChange={(e) => {
+            const val = Number(e.target.value);
+            setCapacity(val);
+            onUpdate({ capacity: val });
+          }}
+          data-testid="input-capacity"
+        />
+      </div>
+
+      {/* Duration */}
+      <div>
+        <label className="text-xs font-medium text-ink-mid block mb-1" htmlFor="settings-duration">
+          Длительность
+        </label>
+        <input
+          id="settings-duration"
+          type="text"
+          placeholder="ЧЧ:ММ"
+          className={inputClass}
+          style={inputStyle}
+          value={durationStr}
+          onChange={(e) => handleDurationChange(e.target.value)}
+          data-testid="input-duration"
+        />
+      </div>
+
+      {/* Private toggle */}
+      <div className="flex items-center justify-between">
+        <span className="text-sm text-ink-mid">Приватное</span>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={isPrivate}
+          onClick={() => {
+            setIsPrivate(!isPrivate);
+            onUpdate({ isPrivate: !isPrivate });
+          }}
+          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+            isPrivate ? 'bg-brand' : 'bg-ink-faint'
+          }`}
+          data-testid="toggle-private"
+        >
+          <span
+            className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+              isPrivate ? 'translate-x-6' : 'translate-x-1'
+            }`}
+          />
+        </button>
+      </div>
+    </div>
+  );
+}

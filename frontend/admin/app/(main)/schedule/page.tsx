@@ -6,11 +6,13 @@ import { StampFab } from '../../components/layout/StampFab';
 import { WeekView } from '../../components/schedule/WeekView';
 import { useUI } from '@/contexts/UIContext';
 import { ScheduleProvider } from '@/contexts/ScheduleContext';
+import { RecordsProvider } from '@/contexts/RecordsContext';
 
 export default function SchedulePage() {
   const { rightPanelCollapsed } = useUI();
 
   return (
+    <RecordsProvider>
     <ScheduleProvider>
       <Topbar />
       <div className="flex-1 flex overflow-hidden">
@@ -21,5 +23,6 @@ export default function SchedulePage() {
       </div>
       <StampFab />
     </ScheduleProvider>
+    </RecordsProvider>
   );
 }

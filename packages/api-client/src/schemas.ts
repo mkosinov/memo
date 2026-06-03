@@ -135,6 +135,20 @@ export const ActivityResponseSchema = z.object({
 
 export type ActivityResponse = z.infer<typeof ActivityResponseSchema>;
 
+// ─── VisitorResponse ─────────────────────────────────────────────────────
+
+export const VisitorResponseSchema = z.object({
+  id: z.string(),
+  client_id: z.string(),
+  name: z.string(),
+  age: z.number().nullable(),
+  created_at: z.string(),
+  updated_at: z.string(),
+  is_active: z.boolean(),
+});
+
+export type VisitorResponse = z.infer<typeof VisitorResponseSchema>;
+
 // ─── VisitResponse ─────────────────────────────────────────────────────────
 
 export const VisitResponseSchema = z.object({
@@ -195,3 +209,50 @@ export const PaymentResponseSchema = z.object({
 });
 
 export type PaymentResponse = z.infer<typeof PaymentResponseSchema>;
+
+// ─── RecordCreate (request body) ─────────────────────────────────────────
+
+export const RecordCreateSchema = z.object({
+  activity_id: z.string(),
+  client_id: z.string().optional(),
+  phone: z.string().optional(),
+  status: z.enum(['pending', 'confirmed', 'cancelled', 'no_show']).optional(),
+  seats: z.number().optional(),
+  comment: z.string().optional(),
+  visits: z.array(z.object({
+    visitor_id: z.string().optional(),
+    price: z.number(),
+    status: z.enum(['waiting', 'visited', 'missed', 'cancelled']).optional(),
+  })).optional(),
+});
+
+export type RecordCreate = z.infer<typeof RecordCreateSchema>;
+
+export const RecordUpdateSchema = RecordCreateSchema.partial();
+export type RecordUpdate = z.infer<typeof RecordUpdateSchema>;
+
+// ─── PaymentCreate (request body) ────────────────────────────────────────
+
+export const PaymentCreateSchema = z.object({
+  record_id: z.string(),
+  amount: z.number(),
+  method: z.enum(['cash', 'card', 'transfer']).optional(),
+});
+
+export type PaymentCreate = z.infer<typeof PaymentCreateSchema>;
+
+export const PaymentUpdateSchema = PaymentCreateSchema.partial();
+export type PaymentUpdate = z.infer<typeof PaymentUpdateSchema>;
+
+// ─── VisitorCreate (request body) ────────────────────────────────────────
+
+export const VisitorCreateSchema = z.object({
+  client_id: z.string(),
+  name: z.string(),
+  age: z.number().optional(),
+});
+
+export type VisitorCreate = z.infer<typeof VisitorCreateSchema>;
+
+export const VisitorUpdateSchema = VisitorCreateSchema.partial();
+export type VisitorUpdate = z.infer<typeof VisitorUpdateSchema>;

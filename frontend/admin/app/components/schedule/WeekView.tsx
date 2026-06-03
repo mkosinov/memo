@@ -10,7 +10,7 @@ import type { Activity } from '@memo/domain';
 import { TimeColumn } from './TimeColumn';
 import { DayColumn } from './DayColumn';
 import { ActivityCard } from './ActivityCard';
-import { ActivityModal } from '../modal/ActivityModal';
+import { ActivityDetailsModal } from '../modal/ActivityDetailsModal';
 import { DAYS, getMonday, TIME_COL_WIDTH, isSameDay, formatTime, HOURS_START, CELL_HEIGHT } from '@/lib/utils';
 
 export function WeekView() {
@@ -21,18 +21,23 @@ export function WeekView() {
   // Modal state
   const [modalOpen, setModalOpen] = useState(false);
   const [modalActivity, setModalActivity] = useState<Activity | null>(null);
-  const [modalDayIndex, setModalDayIndex] = useState(0);
-  const [modalStartTime, setModalStartTime] = useState(9);
+  const [modalMode, setModalMode] = useState<'edit' | 'quickAdd'>('edit');
 
   const openCreateModal = useCallback((dayIndex: number, startTime: number) => {
     setModalActivity(null);
-    setModalDayIndex(dayIndex);
-    setModalStartTime(startTime);
+    setModalMode('edit');
     setModalOpen(true);
   }, []);
 
   const openEditModal = useCallback((activity: Activity) => {
     setModalActivity(activity);
+    setModalMode('edit');
+    setModalOpen(true);
+  }, []);
+
+  const openQuickAdd = useCallback((activity: Activity) => {
+    setModalActivity(activity);
+    setModalMode('quickAdd');
     setModalOpen(true);
   }, []);
 
@@ -41,16 +46,38 @@ export function WeekView() {
     setModalActivity(null);
   }, []);
 
-  const handleSave = useCallback((data: Omit<Activity, 'id'>) => {
-    if (modalActivity) {
-      updateActivity(modalActivity.id, data);
-      showToast(`«${data.serviceName}» сохранено`);
-    } else {
-      addActivity(data);
-      showToast(`Создано: ${data.serviceName}`);
-    }
-    closeModal();
-  }, [modalActivity, addActivity, updateActivity, showToast, closeModal]);
+  // Expose modal openers for E2E tests (avoids @dnd-kit pointer interception)
+  // Uses native DOM events processed by React's useEffect to ensure state flushes
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const handleTestOpen = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.activity) {
+        openEditModal(detail.activity);
+      }
+    };
+
+    const handleTestQuickAdd = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.activity) {
+        openQuickAdd(detail.activity);
+      }
+    };
+
+    const handleTestClose = () => {
+      closeModal();
+    };
+
+    document.addEventListener('__memo-open-modal', handleTestOpen);
+    document.addEventListener('__memo-quick-add', handleTestQuickAdd);
+    document.addEventListener('__memo-close-modal', handleTestClose);
+    return () => {
+      document.removeEventListener('__memo-open-modal', handleTestOpen);
+      document.removeEventListener('__memo-quick-add', handleTestQuickAdd);
+      document.removeEventListener('__memo-close-modal', handleTestClose);
+    };
+  }, [openEditModal, openQuickAdd, closeModal]);
 
   const handleCreateActivity = React.useCallback(
     (dayIndex: number, startTime: number) => {
@@ -247,6 +274,7 @@ export function WeekView() {
               onCreateActivity={handleCreateActivity}
               onOpenCreateModal={openCreateModal}
               onOpenEditModal={openEditModal}
+              onQuickAdd={openQuickAdd}
               stampReady={stamp.ready}
               stamp={stamp}
             />
@@ -281,14 +309,14 @@ export function WeekView() {
         ) : null}
       </DragOverlay>
 
-      <ActivityModal
-        isOpen={modalOpen}
-        onClose={closeModal}
-        onSave={handleSave}
-        initialActivity={modalActivity}
-        defaultDay={modalDayIndex}
-        defaultStartTime={modalStartTime}
-      />
+      {modalActivity && (
+        <ActivityDetailsModal
+          isOpen={modalOpen}
+          onClose={closeModal}
+          activity={modalActivity}
+          mode={modalMode}
+        />
+      )}
     </DndContext>
   );
 }

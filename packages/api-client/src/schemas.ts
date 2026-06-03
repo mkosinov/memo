@@ -134,3 +134,64 @@ export const ActivityResponseSchema = z.object({
 });
 
 export type ActivityResponse = z.infer<typeof ActivityResponseSchema>;
+
+// ─── VisitResponse ─────────────────────────────────────────────────────────
+
+export const VisitResponseSchema = z.object({
+  id: z.string(),
+  record_id: z.string(),
+  visitor_id: z.string(),
+  price: z.number(),
+  status: z.string(),
+  created_at: z.string(),
+  updated_at: z.string(),
+  is_active: z.boolean(),
+});
+
+export type VisitResponse = z.infer<typeof VisitResponseSchema>;
+
+// ─── RecordResponse ────────────────────────────────────────────────────────
+
+export const RecordResponseSchema = z.object({
+  id: z.string(),
+  activity_id: z.string(),
+  client_id: z.string().nullable(),
+  status: z.string(),
+  seats: z.number(),
+  comment: z.string().nullable(),
+  created_at: z.string(),
+  updated_at: z.string(),
+  is_active: z.boolean(),
+  visits: z.array(VisitResponseSchema),
+});
+
+export type RecordResponse = z.infer<typeof RecordResponseSchema>;
+
+// ─── ClientResponse ────────────────────────────────────────────────────────
+
+export const ClientResponseSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  phone: z.string(),
+  channel: z.string().nullable(),
+  created_at: z.string(),
+  updated_at: z.string(),
+  is_active: z.boolean(),
+});
+
+export type ClientResponse = z.infer<typeof ClientResponseSchema>;
+
+// ─── PaymentResponse ───────────────────────────────────────────────────────
+
+export const PaymentResponseSchema = z.object({
+  id: z.string(),
+  record_id: z.string(),
+  amount: z.number(),
+  paid: z.boolean(),
+  method: z.string().nullable(),
+  created_at: z.string(),
+  updated_at: z.string(),
+  is_active: z.boolean(),
+});
+
+export type PaymentResponse = z.infer<typeof PaymentResponseSchema>;

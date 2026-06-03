@@ -14,6 +14,14 @@ import {
   type ActivityResponse,
   PhotoResponseSchema,
   type PhotoResponse,
+  VisitResponseSchema,
+  type VisitResponse,
+  RecordResponseSchema,
+  type RecordResponse,
+  ClientResponseSchema,
+  type ClientResponse,
+  PaymentResponseSchema,
+  type PaymentResponse,
 } from './schemas';
 
 // ─── MasterResponse ────────────────────────────────────────────────────────
@@ -281,6 +289,159 @@ describe('PhotoResponseSchema', () => {
   });
 });
 
+// ─── VisitResponse ──────────────────────────────────────────────────────────
+
+const validVisit = {
+  id: 'visit-1',
+  record_id: 'record-1',
+  visitor_id: 'visitor-1',
+  price: 2500,
+  status: 'waiting',
+  created_at: '2024-06-01T12:00:00Z',
+  updated_at: '2024-06-01T12:00:00Z',
+  is_active: true,
+};
+
+describe('VisitResponseSchema', () => {
+  it('parses a valid visit response', () => {
+    const result = VisitResponseSchema.parse(validVisit);
+    expect(result.id).toBe('visit-1');
+    expect(result.record_id).toBe('record-1');
+    expect(result.visitor_id).toBe('visitor-1');
+    expect(result.price).toBe(2500);
+    expect(result.status).toBe('waiting');
+    expect(result.is_active).toBe(true);
+  });
+
+  it('rejects missing required field', () => {
+    const { id, ...without } = validVisit;
+    expect(() => VisitResponseSchema.parse(without)).toThrow();
+  });
+});
+
+// ─── RecordResponse ────────────────────────────────────────────────────────
+
+const validRecord = {
+  id: 'record-1',
+  activity_id: 'activity-1',
+  client_id: 'client-1',
+  status: 'confirmed',
+  seats: 2,
+  comment: 'VIP guests',
+  created_at: '2024-06-01T12:00:00Z',
+  updated_at: '2024-06-01T12:00:00Z',
+  is_active: true,
+  visits: [validVisit],
+};
+
+describe('RecordResponseSchema', () => {
+  it('parses a valid record response with nested visits', () => {
+    const result = RecordResponseSchema.parse(validRecord);
+    expect(result.id).toBe('record-1');
+    expect(result.activity_id).toBe('activity-1');
+    expect(result.client_id).toBe('client-1');
+    expect(result.status).toBe('confirmed');
+    expect(result.seats).toBe(2);
+    expect(result.comment).toBe('VIP guests');
+    expect(result.visits).toHaveLength(1);
+    expect(result.visits[0].id).toBe('visit-1');
+  });
+
+  it('parses record with null client_id and comment', () => {
+    const data = { ...validRecord, client_id: null, comment: null };
+    const result = RecordResponseSchema.parse(data);
+    expect(result.client_id).toBeNull();
+    expect(result.comment).toBeNull();
+  });
+
+  it('parses record with empty visits', () => {
+    const data = { ...validRecord, visits: [] };
+    const result = RecordResponseSchema.parse(data);
+    expect(result.visits).toHaveLength(0);
+  });
+
+  it('rejects missing required field', () => {
+    const { id, ...without } = validRecord;
+    expect(() => RecordResponseSchema.parse(without)).toThrow();
+  });
+});
+
+// ─── ClientResponse ────────────────────────────────────────────────────────
+
+const validClient = {
+  id: 'client-1',
+  name: 'Иван Петров',
+  phone: '+79991234567',
+  channel: 'phone',
+  created_at: '2024-06-01T12:00:00Z',
+  updated_at: '2024-06-01T12:00:00Z',
+  is_active: true,
+};
+
+describe('ClientResponseSchema', () => {
+  it('parses a valid client response', () => {
+    const result = ClientResponseSchema.parse(validClient);
+    expect(result.id).toBe('client-1');
+    expect(result.name).toBe('Иван Петров');
+    expect(result.phone).toBe('+79991234567');
+    expect(result.channel).toBe('phone');
+    expect(result.is_active).toBe(true);
+  });
+
+  it('parses client with null channel', () => {
+    const data = { ...validClient, channel: null };
+    const result = ClientResponseSchema.parse(data);
+    expect(result.channel).toBeNull();
+  });
+
+  it('rejects missing required field', () => {
+    const { id, ...without } = validClient;
+    expect(() => ClientResponseSchema.parse(without)).toThrow();
+  });
+});
+
+// ─── PaymentResponse ───────────────────────────────────────────────────────
+
+const validPayment = {
+  id: 'payment-1',
+  record_id: 'record-1',
+  amount: 5000,
+  paid: true,
+  method: 'card',
+  created_at: '2024-06-01T12:00:00Z',
+  updated_at: '2024-06-01T12:00:00Z',
+  is_active: true,
+};
+
+describe('PaymentResponseSchema', () => {
+  it('parses a valid payment response', () => {
+    const result = PaymentResponseSchema.parse(validPayment);
+    expect(result.id).toBe('payment-1');
+    expect(result.record_id).toBe('record-1');
+    expect(result.amount).toBe(5000);
+    expect(result.paid).toBe(true);
+    expect(result.method).toBe('card');
+    expect(result.is_active).toBe(true);
+  });
+
+  it('parses payment with null method', () => {
+    const data = { ...validPayment, method: null };
+    const result = PaymentResponseSchema.parse(data);
+    expect(result.method).toBeNull();
+  });
+
+  it('parses payment as unpaid', () => {
+    const data = { ...validPayment, paid: false };
+    const result = PaymentResponseSchema.parse(data);
+    expect(result.paid).toBe(false);
+  });
+
+  it('rejects missing required field', () => {
+    const { id, ...without } = validPayment;
+    expect(() => PaymentResponseSchema.parse(without)).toThrow();
+  });
+});
+
 // ─── Type exports compile check ────────────────────────────────────────────
 
 describe('Type exports', () => {
@@ -312,5 +473,25 @@ describe('Type exports', () => {
   it('PhotoResponse is a valid type', () => {
     const p: PhotoResponse = validPhoto;
     expect(p.filename).toBe('workshop-2024.jpg');
+  });
+
+  it('VisitResponse is a valid type', () => {
+    const v: VisitResponse = validVisit;
+    expect(v.record_id).toBe('record-1');
+  });
+
+  it('RecordResponse is a valid type', () => {
+    const r: RecordResponse = validRecord;
+    expect(r.activity_id).toBe('activity-1');
+  });
+
+  it('ClientResponse is a valid type', () => {
+    const c: ClientResponse = validClient;
+    expect(c.name).toBe('Иван Петров');
+  });
+
+  it('PaymentResponse is a valid type', () => {
+    const p: PaymentResponse = validPayment;
+    expect(p.amount).toBe(5000);
   });
 });

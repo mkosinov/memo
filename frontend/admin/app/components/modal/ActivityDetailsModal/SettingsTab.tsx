@@ -33,9 +33,9 @@ export function SettingsTab({ activity, onUpdate }: SettingsTabProps) {
   // Selected service for display
   const selectedService = services.find((s) => s.id === serviceId) as (Service & { tariffs?: Array<{ id: string; title: string; price: number; description?: string | null }> }) | undefined;
 
-  // Age display: if no maxAge → "{minAge}+", if maxAge set → "{minAge}-{maxAge}"
+  // Age display: if no maxAge or maxAge is 0 → "{minAge}+", if maxAge set → "{minAge}-{maxAge}"
   const ageDisplay = selectedService
-    ? selectedService.maxAge && selectedService.maxAge !== '0'
+    ? Number(selectedService.maxAge) > 0
       ? `${selectedService.minAge}–${selectedService.maxAge}`
       : `${selectedService.minAge}+`
     : null;
@@ -113,8 +113,8 @@ export function SettingsTab({ activity, onUpdate }: SettingsTabProps) {
 
   return (
     <div className="space-y-4 p-4" data-testid="settings-tab">
-      {/* Row 1: Date/Time + Duration */}
-      <div className="flex gap-3" data-testid="settings-row-datetime-duration">
+      {/* Row 1: Date/Time + Duration + Private toggle */}
+      <div className="flex gap-3 items-end" data-testid="settings-row-datetime-duration">
         <div className="flex-1">
           <label className="text-xs font-medium text-ink-mid block mb-1" htmlFor="settings-datetime">
             Дата и время
@@ -129,7 +129,7 @@ export function SettingsTab({ activity, onUpdate }: SettingsTabProps) {
             data-testid="input-datetime"
           />
         </div>
-        <div className="w-32">
+        <div className="w-28">
           <label className="text-xs font-medium text-ink-mid block mb-1" htmlFor="settings-duration">
             Длительность
           </label>
@@ -143,6 +143,28 @@ export function SettingsTab({ activity, onUpdate }: SettingsTabProps) {
             onChange={(e) => handleDurationChange(e.target.value)}
             data-testid="input-duration"
           />
+        </div>
+        <div className="flex items-center gap-2 pb-0.5">
+          <span className="text-xs text-ink-mid">Приватное</span>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={isPrivate}
+            onClick={() => {
+              setIsPrivate(!isPrivate);
+              onUpdate({ isPrivate: !isPrivate });
+            }}
+            className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+              isPrivate ? 'bg-brand' : 'bg-ink-faint'
+            }`}
+            data-testid="toggle-private"
+          >
+            <span
+              className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                isPrivate ? 'translate-x-4' : 'translate-x-0.5'
+              }`}
+            />
+          </button>
         </div>
       </div>
 
@@ -220,24 +242,36 @@ export function SettingsTab({ activity, onUpdate }: SettingsTabProps) {
           <label className="text-xs font-medium text-ink-mid block mb-1" htmlFor="settings-master">
             Мастер
           </label>
-          <select
-            id="settings-master"
-            className={inputClass}
-            style={inputStyle}
-            value={masterId}
-            onChange={(e) => {
-              setMasterId(e.target.value);
-              onUpdate({ masterId: e.target.value });
-            }}
-            data-testid="select-master"
-          >
-            <option value="">Выберите</option>
-            {artists.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.color ? `${a.color} ` : ''}{a.name}
-              </option>
-            ))}
-          </select>
+          <div className="relative">
+            <select
+              id="settings-master"
+              className={`${inputClass} appearance-none pr-8`}
+              style={inputStyle}
+              value={masterId}
+              onChange={(e) => {
+                setMasterId(e.target.value);
+                onUpdate({ masterId: e.target.value });
+              }}
+              data-testid="select-master"
+            >
+              <option value="">Выберите</option>
+              {artists.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name}
+                </option>
+              ))}
+            </select>
+            {/* Color dot for selected master */}
+            {masterId && (() => {
+              const m = artists.find((a) => a.id === masterId);
+              return m?.color ? (
+                <span
+                  className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 rounded-sm pointer-events-none"
+                  style={{ backgroundColor: m.color }}
+                />
+              ) : null;
+            })()}
+          </div>
         </div>
         <div className="flex-1">
           <label className="text-xs font-medium text-ink-mid block mb-1" htmlFor="settings-location">
@@ -262,30 +296,6 @@ export function SettingsTab({ activity, onUpdate }: SettingsTabProps) {
             ))}
           </select>
         </div>
-      </div>
-
-      {/* Private toggle */}
-      <div className="flex items-center justify-between">
-        <span className="text-sm text-ink-mid">Приватное</span>
-        <button
-          type="button"
-          role="switch"
-          aria-checked={isPrivate}
-          onClick={() => {
-            setIsPrivate(!isPrivate);
-            onUpdate({ isPrivate: !isPrivate });
-          }}
-          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-            isPrivate ? 'bg-brand' : 'bg-ink-faint'
-          }`}
-          data-testid="toggle-private"
-        >
-          <span
-            className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-              isPrivate ? 'translate-x-6' : 'translate-x-1'
-            }`}
-          />
-        </button>
       </div>
     </div>
   );

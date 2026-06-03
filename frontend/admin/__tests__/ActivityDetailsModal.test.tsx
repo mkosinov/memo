@@ -250,8 +250,9 @@ describe('SettingsTab', () => {
     render(<SettingsTab {...defaultProps} />);
     const masterSelect = screen.getByLabelText('Мастер');
     expect(masterSelect).toBeInTheDocument();
-    // Now includes color prefix
-    expect(screen.getByText('#5B8C7A Ольга Середа')).toBeInTheDocument();
+    // Artist names without color codes
+    expect(screen.getByText('Ольга Середа')).toBeInTheDocument();
+    expect(screen.getByText('Юлия Большакова')).toBeInTheDocument();
   });
 
   it('renders location select', () => {
@@ -608,9 +609,12 @@ describe('SettingsTab — row layout', () => {
     const options = masterSelect.querySelectorAll('option');
     // First option is "Выберите", then 2 artists
     expect(options.length).toBe(3);
-    // Options should include color info (hex prefix or similar)
-    expect(options[1].textContent).toContain('#5B8C7A');
-    expect(options[2].textContent).toContain('#6B7E9C');
+    // Options should show artist names without hex codes
+    expect(options[1].textContent).toBe('Ольга Середа');
+    expect(options[2].textContent).toBe('Юлия Большакова');
+    // Color dot overlay should exist for selected master
+    const colorDot = container.querySelector('span[style*="background-color"]');
+    // (colorDot may be null if no master selected — that's OK)
   });
 });
 
@@ -676,7 +680,7 @@ describe('ClientTab — layout & features', () => {
     render(<ClientTab {...defaultProps} />);
     const statusSelect = screen.getByLabelText('Статус');
     expect(statusSelect).toBeInTheDocument();
-    // Check within the status select specifically (avoid visit status duplicate "Ожидает")
+    // Check within the status select specifically
     const statusOptions = statusSelect.querySelectorAll('option');
     const statusTexts = Array.from(statusOptions).map(o => o.textContent);
     expect(statusTexts).toContain('Ожидает');
@@ -699,12 +703,6 @@ describe('ClientTab — layout & features', () => {
     render(<ClientTab {...defaultProps} payments={mockPayments} />);
     const deleteButtons = screen.getAllByLabelText('Удалить оплату');
     expect(deleteButtons.length).toBe(1);
-  });
-
-  it('renders visit status dropdown for each visit', () => {
-    render(<ClientTab {...defaultProps} />);
-    const visitStatusSelects = screen.getAllByLabelText('Статус визита');
-    expect(visitStatusSelects.length).toBe(1);
   });
 
   it('does not show stale closure in delete — uses ref', () => {

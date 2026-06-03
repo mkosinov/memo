@@ -3,7 +3,7 @@
 import React, { useState, useCallback, useRef } from 'react';
 import type { RecordResponse, ClientResponse, VisitorResponse, PaymentResponse, TariffResponse } from '@memo/api-client';
 import type { RecordStatus } from '@memo/domain';
-import { updateVisitStatus } from '@memo/api-client';
+import { deletePayment as apiDeletePayment } from '@memo/api-client';
 import Link from 'next/link';
 
 interface ClientTabProps {
@@ -62,13 +62,6 @@ function StatusIcon({ status }: { status: RecordStatus }) {
   }
 }
 
-const VISIT_STATUS_LABELS: Record<string, string> = {
-  waiting: 'Ожидает',
-  visited: 'Посещено',
-  missed: 'Неявка',
-  cancelled: 'Отменено',
-};
-
 export function ClientTab({
   record,
   client,
@@ -113,20 +106,10 @@ export function ClientTab({
 
   const handleDeletePayment = useCallback(async (paymentId: string) => {
     try {
-      const { deletePayment } = await import('@memo/api-client');
-      await deletePayment(paymentId);
+      await apiDeletePayment(paymentId);
       showToast('Оплата удалена');
     } catch {
       showToast('Ошибка удаления оплаты');
-    }
-  }, [showToast]);
-
-  const handleVisitStatusChange = useCallback(async (visitId: string, newStatus: string) => {
-    try {
-      await updateVisitStatus(visitId, newStatus);
-      showToast('Статус визита обновлён');
-    } catch {
-      showToast('Ошибка обновления статуса');
     }
   }, [showToast]);
 
@@ -229,31 +212,6 @@ export function ClientTab({
         ))}
         <button className="mt-2 text-brand text-xs hover:underline" data-testid="btn-add-visitor">+ Добавить посетителя</button>
       </div>
-
-      {/* Visit statuses */}
-      {record.visits.length > 0 && (
-        <div>
-          <h4 className="text-xs font-medium text-ink-mid mb-2">Статусы визитов</h4>
-          {record.visits.map((visit) => (
-            <div key={visit.id} className="flex items-center gap-2 mb-1.5">
-              <span className="text-xs text-ink-light flex-1 truncate">
-                {visitors.find((v) => v.id === visit.visitor_id)?.name || visit.visitor_id}
-              </span>
-              <select
-                className="text-xs rounded border px-2 py-1"
-                style={inputStyle}
-                value={visit.status}
-                onChange={(e) => handleVisitStatusChange(visit.id, e.target.value)}
-                aria-label="Статус визита"
-              >
-                {Object.entries(VISIT_STATUS_LABELS).map(([key, label]) => (
-                  <option key={key} value={key}>{label}</option>
-                ))}
-              </select>
-            </div>
-          ))}
-        </div>
-      )}
 
       {/* Payment summary */}
       <div className="space-y-2" data-testid="payment-summary">

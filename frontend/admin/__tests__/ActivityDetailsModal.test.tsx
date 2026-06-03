@@ -7,8 +7,26 @@ import { ModalFooter } from '../app/components/modal/ActivityDetailsModal/ModalF
 import { SettingsTab } from '../app/components/modal/ActivityDetailsModal/SettingsTab';
 import { ClientTab } from '../app/components/modal/ActivityDetailsModal/ClientTab';
 import { NewBookingTab } from '../app/components/modal/ActivityDetailsModal/NewBookingTab';
-import type { RecordResponse, ClientResponse, VisitorResponse, PaymentResponse } from '@memo/api-client';
-import type { Activity } from '@memo/domain';
+
+// ─── Shared mock data & context factories ────────────────────────────────
+
+import {
+  mockArtists,
+  mockServices,
+  mockLocations,
+  mockActivity,
+  mockClient,
+  mockRecord,
+  mockVisitor,
+  mockPayment,
+  mockTariffs,
+} from './helpers/mockData';
+
+import {
+  createMockScheduleContext,
+  createMockRecordsContext,
+  createMockUIContext,
+} from './helpers/mockContexts';
 
 // ─── API Client Mock ───────────────────────────────────────────────────────
 
@@ -33,51 +51,6 @@ import {
   deletePayment,
   updateVisitStatus,
 } from '@memo/api-client';
-
-// ─── Mock Data ──────────────────────────────────────────────────────────────
-
-const mockArtists = [
-  { id: 'm1', name: 'Ольга Середа', shortName: 'Ольга', color: '#5B8C7A' },
-  { id: 'm2', name: 'Юлия Большакова', shortName: 'Юлия', color: '#6B7E9C' },
-];
-
-const mockServices = [
-  {
-    id: 's1', name: 'Картина маслом', duration: 2.5, maxCapacity: 8, minAge: '12', maxAge: '99',
-    defaultAdultPrice: 3500, defaultChildPrice: 2500, defaultIndividualPrice: 5000,
-    tariffs: [
-      { id: 't1', service_id: 's1', title: 'Взрослый', price: 3500, description: null },
-      { id: 't2', service_id: 's1', title: 'Детский', price: 2500, description: null },
-    ],
-  },
-  {
-    id: 's2', name: 'Картина акрилом', duration: 2, maxCapacity: 10, minAge: '6', maxAge: '99',
-    defaultAdultPrice: 2800, defaultChildPrice: 2000, defaultIndividualPrice: 4000,
-    tariffs: [
-      { id: 't3', service_id: 's2', title: 'Взрослый', price: 2800, description: null },
-    ],
-  },
-];
-
-const mockLocations = [
-  { id: 'alpika', name: 'Альпика', address: 'Альпика, 1 этаж' },
-  { id: 'grand', name: 'Гранд Отель Поляна', address: 'Гранд Отель, лобби' },
-];
-
-const mockActivity: Activity = {
-  id: 'ev_1',
-  day: 5,
-  masterId: 'm1',
-  startTime: 14,
-  duration: 2.5,
-  serviceId: 's1',
-  serviceName: 'Картина маслом',
-  minAge: '12',
-  locationId: 'grand',
-  occupied: 3,
-  capacity: 8,
-  isPrivate: false,
-};
 
 // ─── Context Mocks ──────────────────────────────────────────────────────────
 
@@ -113,53 +86,9 @@ const mockUseRecords = vi.mocked(useRecords);
 const mockUseUI = vi.mocked(useUI);
 
 beforeEach(() => {
-  mockUseSchedule.mockReturnValue({
-    artists: mockArtists,
-    services: mockServices,
-    locations: mockLocations,
-    activities: [],
-    scheduleIndex: { byId: new Map(), byDate: new Map(), byMasterId: new Map(), byLocation: { all: { byDate: new Map(), byServiceId: new Map() } } },
-    currentWeek: new Date(),
-    stamp: { masterId: null, serviceId: null, locations: new Set(), ready: false },
-    setCurrentWeek: vi.fn(),
-    addActivity: vi.fn(),
-    updateActivity: vi.fn(),
-    deleteActivity: vi.fn(),
-    setStamp: vi.fn(),
-    copyLastWeek: vi.fn(),
-    loading: false,
-    error: null,
-    filterMasterId: null,
-    filterLocationId: null,
-    setFilterMasterId: vi.fn(),
-    setFilterLocationId: vi.fn(),
-  });
-
-  mockUseRecords.mockReturnValue({
-    records: [],
-    clients: new Map(),
-    payments: new Map(),
-    activities: new Map(),
-    masters: new Map(),
-    services: new Map(),
-    locations: new Map(),
-    loading: false,
-    error: null,
-  });
-
-  mockUseUI.mockReturnValue({
-    deleteMode: false,
-    toggleDeleteMode: vi.fn(),
-    toasts: [],
-    showToast: vi.fn(),
-    hideToast: vi.fn(),
-    sidebarCollapsed: false,
-    toggleSidebar: vi.fn(),
-    rightPanelCollapsed: true,
-    toggleRightPanel: vi.fn(),
-    theme: 'light' as const,
-    toggleTheme: vi.fn(),
-  });
+  mockUseSchedule.mockReturnValue(createMockScheduleContext());
+  mockUseRecords.mockReturnValue(createMockRecordsContext());
+  mockUseUI.mockReturnValue(createMockUIContext());
 });
 
 afterEach(() => {
@@ -290,43 +219,13 @@ describe('SettingsTab', () => {
 // ─── ClientTab Tests ────────────────────────────────────────────────────────
 
 describe('ClientTab', () => {
-  const mockClient: ClientResponse = {
-    id: 'c1',
-    name: 'Анна Иванова',
-    phone: '+7 (900) 123-45-67',
-    email: null,
-    channel: 'telegram',
-    created_at: '2026-01-01T00:00:00',
-    updated_at: '2026-01-01T00:00:00',
-    is_active: true,
-  };
-
-  const mockRecord: RecordResponse = {
-    id: 'r1',
-    activity_id: 'ev_1',
-    client_id: 'c1',
-    status: 'confirmed',
-    seats: 1,
-    comment: null,
-    created_at: '2026-05-10T10:00:00',
-    updated_at: '2026-05-10T10:00:00',
-    is_active: true,
-    visits: [
-      { id: 'v1', record_id: 'r1', visitor_id: 'vis1', price: 3500, status: 'waiting', created_at: '', updated_at: '', is_active: true },
-    ],
-  };
-
-  const mockVisitors: VisitorResponse[] = [
-    { id: 'vis1', client_id: 'c1', name: 'Анна Иванова', age: 30, created_at: '', updated_at: '', is_active: true },
-  ];
-
   const defaultProps = {
     record: mockRecord,
     client: mockClient,
-    visitors: mockVisitors,
+    visitors: [mockVisitor],
     visits: mockRecord.visits,
     payments: [],
-    serviceTariffs: mockServices[0].tariffs,
+    serviceTariffs: mockTariffs,
     onUpdateRecord: vi.fn(),
     onDeleteRecord: vi.fn(),
     onAddPayment: vi.fn(),
@@ -373,7 +272,7 @@ describe('ClientTab', () => {
 describe('NewBookingTab', () => {
   const defaultProps = {
     activity: mockActivity,
-    serviceTariffs: mockServices[0].tariffs,
+    serviceTariffs: mockTariffs,
     onSubmit: vi.fn(),
     showToast: vi.fn(),
   };
@@ -467,34 +366,14 @@ describe('ActivityDetailsModal', () => {
 // ─── ActivityDetailsModal: API Call Tests ────────────────────────────────────
 
 describe('ActivityDetailsModal — API integration', () => {
-  const mockRecords: RecordResponse[] = [
-    {
-      id: 'r1',
-      activity_id: 'ev_1',
-      client_id: 'c1',
-      status: 'confirmed',
-      seats: 1,
-      comment: null,
-      created_at: '2026-05-10T10:00:00',
-      updated_at: '2026-05-10T10:00:00',
-      is_active: true,
-      visits: [
-        { id: 'v1', record_id: 'r1', visitor_id: 'vis1', price: 3500, status: 'waiting', created_at: '', updated_at: '', is_active: true },
-      ],
-    },
-  ];
+  const mockRecords = [mockRecord];
 
   const mockClientMap = new Map([
-    ['c1', {
-      id: 'c1', name: 'Анна Иванова', phone: '+7 (900) 123-45-67',
-      email: null, channel: 'telegram', created_at: '', updated_at: '', is_active: true,
-    }],
+    ['c1', mockClient],
   ]);
 
   const mockVisitorsMap = new Map([
-    ['r1', [
-      { id: 'vis1', client_id: 'c1', name: 'Анна Иванова', age: 30, created_at: '', updated_at: '', is_active: true },
-    ]],
+    ['r1', [mockVisitor]],
   ]);
 
   beforeEach(() => {
@@ -512,15 +391,10 @@ describe('ActivityDetailsModal — API integration', () => {
 
   it('passes actual visitors to ClientTab (not empty array)', () => {
     mockUseRecords.mockReturnValue({
+      ...createMockRecordsContext(),
       records: mockRecords,
       clients: mockClientMap,
       payments: new Map([['r1', []]]),
-      activities: new Map(),
-      masters: new Map(),
-      services: new Map(),
-      locations: new Map(),
-      loading: false,
-      error: null,
     });
 
     render(
@@ -538,15 +412,10 @@ describe('ActivityDetailsModal — API integration', () => {
 
   it('passes visitors from records context to ClientTab', () => {
     mockUseRecords.mockReturnValue({
+      ...createMockRecordsContext(),
       records: mockRecords,
       clients: mockClientMap,
       payments: new Map([['r1', []]]),
-      activities: new Map(),
-      masters: new Map(),
-      services: new Map(),
-      locations: new Map(),
-      loading: false,
-      error: null,
     });
 
     render(
@@ -629,47 +498,17 @@ describe('SettingsTab — row layout', () => {
 // ─── ClientTab — Layout & Feature Tests ──────────────────────────────────────
 
 describe('ClientTab — layout & features', () => {
-  const mockClient: ClientResponse = {
-    id: 'c1',
-    name: 'Анна Иванова',
-    phone: '+7 (900) 123-45-67',
-    email: null,
-    channel: 'telegram',
-    created_at: '2026-01-01T00:00:00',
-    updated_at: '2026-01-01T00:00:00',
-    is_active: true,
-  };
-
-  const mockRecord: RecordResponse = {
-    id: 'r1',
-    activity_id: 'ev_1',
-    client_id: 'c1',
-    status: 'confirmed',
-    seats: 1,
-    comment: null,
-    created_at: '2026-05-10T10:00:00',
-    updated_at: '2026-05-10T10:00:00',
-    is_active: true,
-    visits: [
-      { id: 'v1', record_id: 'r1', visitor_id: 'vis1', price: 3500, status: 'waiting', created_at: '', updated_at: '', is_active: true },
-    ],
-  };
-
-  const mockVisitors: VisitorResponse[] = [
-    { id: 'vis1', client_id: 'c1', name: 'Анна Иванова', age: 30, created_at: '', updated_at: '', is_active: true },
-  ];
-
-  const mockPayments: PaymentResponse[] = [
+  const mockPayments: Array<{ id: string; record_id: string; amount: number; method: string | null; created_at: string; updated_at: string; is_active: boolean }> = [
     { id: 'p1', record_id: 'r1', amount: 3500, method: 'card', created_at: '', updated_at: '', is_active: true },
   ];
 
   const defaultProps = {
     record: mockRecord,
     client: mockClient,
-    visitors: mockVisitors,
+    visitors: [mockVisitor],
     visits: mockRecord.visits,
     payments: [],
-    serviceTariffs: mockServices[0].tariffs,
+    serviceTariffs: mockTariffs,
     onUpdateRecord: vi.fn(),
     onDeleteRecord: vi.fn(),
     onAddPayment: vi.fn(),
@@ -734,7 +573,7 @@ describe('ClientTab — layout & features', () => {
 describe('NewBookingTab — phone optional, visitor optional, tariff required', () => {
   const defaultProps = {
     activity: mockActivity,
-    serviceTariffs: mockServices[0].tariffs,
+    serviceTariffs: mockTariffs,
     onSubmit: vi.fn(),
     showToast: vi.fn(),
   };

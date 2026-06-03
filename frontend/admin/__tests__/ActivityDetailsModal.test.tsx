@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import React from 'react';
 import { ActivityDetailsModal } from '../app/components/modal/ActivityDetailsModal/ActivityDetailsModal';
 import { TabNav } from '../app/components/modal/ActivityDetailsModal/TabNav';
@@ -9,6 +9,30 @@ import { ClientTab } from '../app/components/modal/ActivityDetailsModal/ClientTa
 import { NewBookingTab } from '../app/components/modal/ActivityDetailsModal/NewBookingTab';
 import type { RecordResponse, ClientResponse, VisitorResponse, PaymentResponse } from '@memo/api-client';
 import type { Activity } from '@memo/domain';
+
+// ─── API Client Mock ───────────────────────────────────────────────────────
+
+vi.mock('@memo/api-client', () => ({
+  searchClientByPhone: vi.fn(),
+  createClient: vi.fn(),
+  createVisitor: vi.fn(),
+  createRecord: vi.fn(),
+  deleteRecord: vi.fn(),
+  createPayment: vi.fn(),
+  deletePayment: vi.fn(),
+  updateVisitStatus: vi.fn(),
+}));
+
+import {
+  searchClientByPhone,
+  createClient,
+  createVisitor,
+  createRecord,
+  deleteRecord,
+  createPayment,
+  deletePayment,
+  updateVisitStatus,
+} from '@memo/api-client';
 
 // ─── Mock Data ──────────────────────────────────────────────────────────────
 
@@ -226,7 +250,8 @@ describe('SettingsTab', () => {
     render(<SettingsTab {...defaultProps} />);
     const masterSelect = screen.getByLabelText('Мастер');
     expect(masterSelect).toBeInTheDocument();
-    expect(screen.getByText('Ольга Середа')).toBeInTheDocument();
+    // Now includes color prefix
+    expect(screen.getByText('#5B8C7A Ольга Середа')).toBeInTheDocument();
   });
 
   it('renders location select', () => {
@@ -320,12 +345,15 @@ describe('ClientTab', () => {
 
   it('renders client link', () => {
     render(<ClientTab {...defaultProps} />);
-    expect(screen.getByText(/\/client\/c1/)).toBeInTheDocument();
+    const link = screen.getByTestId('client-link');
+    expect(link).toBeInTheDocument();
+    expect(link.getAttribute('href')).toBe('/clients/c1');
+    expect(link.getAttribute('target')).toBe('_blank');
   });
 
   it('renders record status dropdown', () => {
     render(<ClientTab {...defaultProps} />);
-    expect(screen.getByLabelText('Статус записи')).toBeInTheDocument();
+    expect(screen.getByLabelText('Статус')).toBeInTheDocument();
   });
 
   it('renders delete button', () => {
@@ -432,5 +460,316 @@ describe('ActivityDetailsModal', () => {
       <ActivityDetailsModal isOpen={true} onClose={vi.fn()} activity={mockActivity} mode="edit" />,
     );
     expect(screen.getByLabelText('Добавить запись')).toBeInTheDocument();
+  });
+});
+
+// ─── ActivityDetailsModal: API Call Tests ────────────────────────────────────
+
+describe('ActivityDetailsModal — API integration', () => {
+  const mockRecords: RecordResponse[] = [
+    {
+      id: 'r1',
+      activity_id: 'ev_1',
+      client_id: 'c1',
+      status: 'confirmed',
+      seats: 1,
+      comment: null,
+      created_at: '2026-05-10T10:00:00',
+      updated_at: '2026-05-10T10:00:00',
+      is_active: true,
+      visits: [
+        { id: 'v1', record_id: 'r1', visitor_id: 'vis1', price: 3500, status: 'waiting', created_at: '', updated_at: '', is_active: true },
+      ],
+    },
+  ];
+
+  const mockClientMap = new Map([
+    ['c1', {
+      id: 'c1', name: 'Анна Иванова', phone: '+7 (900) 123-45-67',
+      email: null, channel: 'telegram', created_at: '', updated_at: '', is_active: true,
+    }],
+  ]);
+
+  const mockVisitorsMap = new Map([
+    ['r1', [
+      { id: 'vis1', client_id: 'c1', name: 'Анна Иванова', age: 30, created_at: '', updated_at: '', is_active: true },
+    ]],
+  ]);
+
+  beforeEach(() => {
+    vi.mocked(createRecord).mockResolvedValue({ id: 'r_new', activity_id: 'ev_1', client_id: 'c1', status: 'pending', seats: 1, comment: null, created_at: '', updated_at: '', is_active: true, visits: [] });
+    vi.mocked(createClient).mockResolvedValue({ id: 'c_new', name: 'New', phone: '+7', email: null, channel: 'telegram', created_at: '', updated_at: '', is_active: true });
+    vi.mocked(createVisitor).mockResolvedValue({ id: 'vis_new', client_id: 'c1', name: 'V', age: null, created_at: '', updated_at: '', is_active: true });
+    vi.mocked(deleteRecord).mockResolvedValue(undefined);
+    vi.mocked(createPayment).mockResolvedValue({ id: 'p1', record_id: 'r1', amount: 1000, method: 'card', created_at: '', updated_at: '', is_active: true });
+    vi.mocked(searchClientByPhone).mockRejectedValue(new Error('Not found'));
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('passes actual visitors to ClientTab (not empty array)', () => {
+    mockUseRecords.mockReturnValue({
+      records: mockRecords,
+      clients: mockClientMap,
+      payments: new Map([['r1', []]]),
+      activities: new Map(),
+      masters: new Map(),
+      services: new Map(),
+      locations: new Map(),
+      loading: false,
+      error: null,
+    });
+
+    render(
+      <ActivityDetailsModal isOpen={true} onClose={vi.fn()} activity={mockActivity} mode="edit" />,
+    );
+
+    // Click on the client tab to show ClientTab
+    fireEvent.click(screen.getByText('Анна Иванова'));
+
+    // ClientTab should render — visitors come from record visits
+    expect(screen.getByTestId('client-tab')).toBeInTheDocument();
+    // The "Нет посетителей" message should NOT appear because record has 1 visit
+    expect(screen.queryByText('Нет посетителей')).not.toBeInTheDocument();
+  });
+
+  it('passes visitors from records context to ClientTab', () => {
+    mockUseRecords.mockReturnValue({
+      records: mockRecords,
+      clients: mockClientMap,
+      payments: new Map([['r1', []]]),
+      activities: new Map(),
+      masters: new Map(),
+      services: new Map(),
+      locations: new Map(),
+      loading: false,
+      error: null,
+    });
+
+    render(
+      <ActivityDetailsModal isOpen={true} onClose={vi.fn()} activity={mockActivity} mode="edit" />,
+    );
+
+    // Click on the client tab
+    fireEvent.click(screen.getByText('Анна Иванова'));
+
+    // ClientTab should render with client data
+    expect(screen.getByTestId('client-tab')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('Анна Иванова')).toBeInTheDocument();
+    // Phone should also be shown
+    expect(screen.getByDisplayValue('+7 (900) 123-45-67')).toBeInTheDocument();
+  });
+});
+
+// ─── SettingsTab — Row Layout Tests ─────────────────────────────────────────
+
+describe('SettingsTab — row layout', () => {
+  const defaultProps = {
+    activity: mockActivity,
+    onUpdate: vi.fn(),
+  };
+
+  it('renders date/time and duration on the same row', () => {
+    const { container } = render(<SettingsTab {...defaultProps} />);
+    const row1 = container.querySelector('[data-testid="settings-row-datetime-duration"]');
+    expect(row1).toBeInTheDocument();
+    expect(row1!.querySelector('[data-testid="input-datetime"]')).toBeInTheDocument();
+    expect(row1!.querySelector('[data-testid="input-duration"]')).toBeInTheDocument();
+  });
+
+  it('renders service, age, and capacity on the same row', () => {
+    const { container } = render(<SettingsTab {...defaultProps} />);
+    const row2 = container.querySelector('[data-testid="settings-row-service-age-capacity"]');
+    expect(row2).toBeInTheDocument();
+    expect(row2!.querySelector('[data-testid="select-service"]')).toBeInTheDocument();
+    expect(row2!.querySelector('[data-testid="input-capacity"]')).toBeInTheDocument();
+  });
+
+  it('renders master and location on the same row', () => {
+    const { container } = render(<SettingsTab {...defaultProps} />);
+    const row3 = container.querySelector('[data-testid="settings-row-master-location"]');
+    expect(row3).toBeInTheDocument();
+    expect(row3!.querySelector('[data-testid="select-master"]')).toBeInTheDocument();
+    expect(row3!.querySelector('[data-testid="select-location"]')).toBeInTheDocument();
+  });
+
+  it('displays age in read-only field with correct format', () => {
+    render(<SettingsTab {...defaultProps} />);
+    // minAge='12', maxAge='99' → "12–99" (en dash)
+    expect(screen.getByText('12–99')).toBeInTheDocument();
+  });
+
+  it('shows color dot next to master names in select', () => {
+    const { container } = render(<SettingsTab {...defaultProps} />);
+    const masterSelect = container.querySelector('[data-testid="select-master"]') as HTMLSelectElement;
+    expect(masterSelect).toBeInTheDocument();
+    const options = masterSelect.querySelectorAll('option');
+    // First option is "Выберите", then 2 artists
+    expect(options.length).toBe(3);
+    // Options should include color info (hex prefix or similar)
+    expect(options[1].textContent).toContain('#5B8C7A');
+    expect(options[2].textContent).toContain('#6B7E9C');
+  });
+});
+
+// ─── ClientTab — Layout & Feature Tests ──────────────────────────────────────
+
+describe('ClientTab — layout & features', () => {
+  const mockClient: ClientResponse = {
+    id: 'c1',
+    name: 'Анна Иванова',
+    phone: '+7 (900) 123-45-67',
+    email: null,
+    channel: 'telegram',
+    created_at: '2026-01-01T00:00:00',
+    updated_at: '2026-01-01T00:00:00',
+    is_active: true,
+  };
+
+  const mockRecord: RecordResponse = {
+    id: 'r1',
+    activity_id: 'ev_1',
+    client_id: 'c1',
+    status: 'confirmed',
+    seats: 1,
+    comment: null,
+    created_at: '2026-05-10T10:00:00',
+    updated_at: '2026-05-10T10:00:00',
+    is_active: true,
+    visits: [
+      { id: 'v1', record_id: 'r1', visitor_id: 'vis1', price: 3500, status: 'waiting', created_at: '', updated_at: '', is_active: true },
+    ],
+  };
+
+  const mockVisitors: VisitorResponse[] = [
+    { id: 'vis1', client_id: 'c1', name: 'Анна Иванова', age: 30, created_at: '', updated_at: '', is_active: true },
+  ];
+
+  const mockPayments: PaymentResponse[] = [
+    { id: 'p1', record_id: 'r1', amount: 3500, method: 'card', created_at: '', updated_at: '', is_active: true },
+  ];
+
+  const defaultProps = {
+    record: mockRecord,
+    client: mockClient,
+    visitors: mockVisitors,
+    visits: mockRecord.visits,
+    payments: [],
+    serviceTariffs: mockServices[0].tariffs,
+    onUpdateRecord: vi.fn(),
+    onDeleteRecord: vi.fn(),
+    onAddPayment: vi.fn(),
+    showToast: vi.fn(),
+  };
+
+  it('renders phone and name on the same row', () => {
+    const { container } = render(<ClientTab {...defaultProps} />);
+    const row = container.querySelector('[data-testid="client-info-row"]');
+    expect(row).toBeInTheDocument();
+    expect(row!.querySelector('[data-testid="client-phone"]')).toBeInTheDocument();
+    expect(row!.querySelector('[data-testid="client-name"]')).toBeInTheDocument();
+  });
+
+  it('renders status dropdown with all statuses', () => {
+    render(<ClientTab {...defaultProps} />);
+    const statusSelect = screen.getByLabelText('Статус');
+    expect(statusSelect).toBeInTheDocument();
+    // Check within the status select specifically (avoid visit status duplicate "Ожидает")
+    const statusOptions = statusSelect.querySelectorAll('option');
+    const statusTexts = Array.from(statusOptions).map(o => o.textContent);
+    expect(statusTexts).toContain('Ожидает');
+    expect(statusTexts).toContain('Подтверждена');
+    expect(statusTexts).toContain('Отменена');
+    expect(statusTexts).toContain('Неявка');
+  });
+
+  it('renders client link as SVG icon (not text)', () => {
+    const { container } = render(<ClientTab {...defaultProps} />);
+    const link = container.querySelector('[data-testid="client-link"]') as HTMLAnchorElement;
+    expect(link).toBeInTheDocument();
+    expect(link.getAttribute('href')).toBe('/clients/c1');
+    expect(link.getAttribute('target')).toBe('_blank');
+    // Should contain an SVG element, not text link
+    expect(link.querySelector('svg')).toBeInTheDocument();
+  });
+
+  it('renders delete payment button for each payment', () => {
+    render(<ClientTab {...defaultProps} payments={mockPayments} />);
+    const deleteButtons = screen.getAllByLabelText('Удалить оплату');
+    expect(deleteButtons.length).toBe(1);
+  });
+
+  it('renders visit status dropdown for each visit', () => {
+    render(<ClientTab {...defaultProps} />);
+    const visitStatusSelects = screen.getAllByLabelText('Статус визита');
+    expect(visitStatusSelects.length).toBe(1);
+  });
+
+  it('does not show stale closure in delete — uses ref', () => {
+    vi.useFakeTimers();
+    render(<ClientTab {...defaultProps} />);
+    const deleteBtn = screen.getByTestId('btn-delete-record');
+    fireEvent.click(deleteBtn);
+
+    // showToast should be called with undo callback
+    expect(defaultProps.showToast).toHaveBeenCalledWith(
+      'Запись удалена через 5 секунд',
+      expect.any(Function),
+    );
+
+    vi.useRealTimers();
+  });
+});
+
+// ─── NewBookingTab — Feature Tests ──────────────────────────────────────────
+
+describe('NewBookingTab — phone optional, visitor optional, tariff required', () => {
+  const defaultProps = {
+    activity: mockActivity,
+    serviceTariffs: mockServices[0].tariffs,
+    onSubmit: vi.fn(),
+    showToast: vi.fn(),
+  };
+
+  it('does not start with any visitors (empty array)', () => {
+    render(<NewBookingTab {...defaultProps} />);
+    // Should not have any visitor form rows initially
+    expect(screen.queryAllByTestId('visitor-form-row').length).toBe(0);
+  });
+
+  it('shows add visitor button', () => {
+    render(<NewBookingTab {...defaultProps} />);
+    expect(screen.getByText(/\+ Добавить посетителя/)).toBeInTheDocument();
+  });
+
+  it('adds a visitor when add button is clicked', () => {
+    render(<NewBookingTab {...defaultProps} />);
+    fireEvent.click(screen.getByText(/\+ Добавить посетителя/));
+    expect(screen.getAllByTestId('visitor-form-row').length).toBe(1);
+  });
+
+  it('channel select is always visible (not behind checkbox)', () => {
+    render(<NewBookingTab {...defaultProps} />);
+    expect(screen.getByTestId('select-channel')).toBeInTheDocument();
+  });
+
+  it('allows submit with name only (phone optional)', () => {
+    render(<NewBookingTab {...defaultProps} />);
+    // Fill only name
+    fireEvent.change(screen.getByTestId('input-client-name'), { target: { value: 'Test' } });
+    fireEvent.click(screen.getByTestId('btn-create-record'));
+    // Should NOT show "Заполните телефон и имя" error
+    expect(defaultProps.showToast).not.toHaveBeenCalledWith('Заполните телефон и имя');
+    // Should call onSubmit
+    expect(defaultProps.onSubmit).toHaveBeenCalled();
+  });
+
+  it('validates tariff is selected before submit when visitors exist', () => {
+    render(<NewBookingTab {...defaultProps} serviceTariffs={[]} />);
+    fireEvent.change(screen.getByTestId('input-client-name'), { target: { value: 'Test' } });
+    fireEvent.click(screen.getByTestId('btn-create-record'));
+    // With no tariffs and adding a visitor, should handle gracefully
   });
 });

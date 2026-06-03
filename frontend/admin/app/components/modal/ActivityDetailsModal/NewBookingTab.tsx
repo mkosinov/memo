@@ -30,9 +30,7 @@ export function NewBookingTab({ activity, serviceTariffs, onSubmit, showToast }:
   const [name, setName] = useState('');
   const [notify, setNotify] = useState(false);
   const [channel, setChannel] = useState('telegram');
-  const [visitors, setVisitors] = useState<NewVisitor[]>([
-    { tempId: 'v_1', name: '', age: '', tariffId: serviceTariffs[0]?.id || '' },
-  ]);
+  const [visitors, setVisitors] = useState<NewVisitor[]>([]);
 
   const handlePhoneBlur = useCallback(async () => {
     if (phone.length < 10) return;
@@ -64,12 +62,23 @@ export function NewBookingTab({ activity, serviceTariffs, onSubmit, showToast }:
   }, []);
 
   const handleSubmit = useCallback(() => {
-    if (!phone || !name) {
-      showToast('Заполните телефон и имя');
+    // Name is required (phone is optional)
+    if (!name) {
+      showToast('Заполните имя');
       return;
     }
+
+    // If there are visitors, validate tariff is selected
+    if (visitors.length > 0) {
+      const hasMissingTariff = visitors.some((v) => !v.tariffId);
+      if (hasMissingTariff && serviceTariffs.length > 0) {
+        showToast('Выберите тариф для каждого посетителя');
+        return;
+      }
+    }
+
     onSubmit({ phone, name, visitors, notify, channel });
-  }, [phone, name, visitors, notify, channel, onSubmit, showToast]);
+  }, [phone, name, visitors, notify, channel, onSubmit, showToast, serviceTariffs]);
 
   const inputClass = 'w-full rounded-lg border px-3 py-2 text-sm bg-white';
   const inputStyle = { borderColor: 'var(--line)' };
@@ -110,7 +119,7 @@ export function NewBookingTab({ activity, serviceTariffs, onSubmit, showToast }:
         />
       </div>
 
-      {/* Visitors */}
+      {/* Visitors — starts empty, shown after "Добавить посетителя" click */}
       <div>
         <h4 className="text-xs font-medium text-ink-mid mb-2">Посетители</h4>
         {visitors.map((visitor, index) => (
@@ -143,15 +152,13 @@ export function NewBookingTab({ activity, serviceTariffs, onSubmit, showToast }:
                 </option>
               ))}
             </select>
-            {visitors.length > 1 && (
-              <button
-                onClick={() => removeVisitor(visitor.tempId)}
-                className="text-red-400 hover:text-red-500 text-sm"
-                aria-label="Удалить посетителя"
-              >
-                ×
-              </button>
-            )}
+            <button
+              onClick={() => removeVisitor(visitor.tempId)}
+              className="text-red-400 hover:text-red-500 text-sm"
+              aria-label="Удалить посетителя"
+            >
+              ×
+            </button>
           </div>
         ))}
         <button
@@ -160,6 +167,25 @@ export function NewBookingTab({ activity, serviceTariffs, onSubmit, showToast }:
         >
           + Добавить посетителя
         </button>
+      </div>
+
+      {/* Channel — always visible */}
+      <div>
+        <label className="text-xs font-medium text-ink-mid block mb-1" htmlFor="booking-channel">
+          Канал связи
+        </label>
+        <select
+          id="booking-channel"
+          className={inputClass}
+          style={inputStyle}
+          value={channel}
+          onChange={(e) => setChannel(e.target.value)}
+          data-testid="select-channel"
+        >
+          <option value="telegram">Telegram</option>
+          <option value="max">MAX</option>
+          <option value="whatsapp">WhatsApp</option>
+        </select>
       </div>
 
       {/* Notifications */}
@@ -174,19 +200,6 @@ export function NewBookingTab({ activity, serviceTariffs, onSubmit, showToast }:
           />
           отправлять оповещения
         </label>
-        {notify && (
-          <select
-            className="rounded-lg border px-2 py-1.5 text-xs"
-            style={inputStyle}
-            value={channel}
-            onChange={(e) => setChannel(e.target.value)}
-            data-testid="select-channel"
-          >
-            <option value="telegram">Telegram</option>
-            <option value="max">MAX</option>
-            <option value="whatsapp">WhatsApp</option>
-          </select>
-        )}
       </div>
 
       {/* Submit */}

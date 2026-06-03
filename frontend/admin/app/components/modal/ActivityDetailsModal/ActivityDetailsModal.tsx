@@ -11,7 +11,16 @@ import { SettingsTab } from './SettingsTab';
 import { ClientTab } from './ClientTab';
 import { NewBookingTab } from './NewBookingTab';
 import { ModalFooter } from './ModalFooter';
+import {
+  createRecord,
+  createClient,
+  createVisitor,
+  deleteRecord as apiDeleteRecord,
+  createPayment as apiCreatePayment,
+  searchClientByPhone,
+} from '@memo/api-client';
 import type { TariffResponse } from '@memo/api-client';
+import { useQueryClient } from '@tanstack/react-query';
 
 interface ActivityDetailsModalProps {
   isOpen: boolean;
@@ -31,6 +40,7 @@ export function ActivityDetailsModal({ isOpen, onClose, activity, mode }: Activi
   const { services, updateActivity } = useSchedule();
   const { records, clients, payments } = useRecords();
   const { showToast } = useUI();
+  const queryClient = useQueryClient();
 
   const [activeTab, setActiveTab] = useState(mode === 'quickAdd' ? 'new-booking' : 'settings');
 
@@ -46,6 +56,27 @@ export function ActivityDetailsModal({ isOpen, onClose, activity, mode }: Activi
     () => records.filter((r) => r.activity_id === activity.id),
     [records, activity.id],
   );
+
+  // Build a visitors map from records' visits (visitors are embedded in visits via visitor_id)
+  // We need to look up visitor details from RecordsContext or we pass visits directly
+  const visitorsByRecord = useMemo(() => {
+    // Since visitors are not stored separately in RecordsContext,
+    // we derive them from visits embedded in records
+    const map = new Map<string, Array<{ id: string; name: string; age: number | null }>>();
+    for (const record of activityRecords) {
+      // Visits contain visitor_id, but we need actual visitor objects.
+      // For now, we create lightweight visitor objects from visit data.
+      map.set(
+        record.id,
+        record.visits.map((v) => ({
+          id: v.visitor_id,
+          name: '', // Will be resolved by ClientTab if needed
+          age: null,
+        })),
+      );
+    }
+    return map;
+  }, [activityRecords]);
 
   // Build tabs: settings + client tabs
   const tabs: Tab[] = useMemo(() => {
@@ -74,30 +105,89 @@ export function ActivityDetailsModal({ isOpen, onClose, activity, mode }: Activi
     setActiveTab('new-booking');
   }, []);
 
-  // New booking submit handler
+  // New booking submit handler — actually creates records via API
   const handleNewBookingSubmit = useCallback(
-    (data: { phone: string; name: string }) => {
-      showToast(`Запись создана: ${data.name}`);
-      setActiveTab('settings');
+    async (data: { phone: string; name: string; visitors: Array<{ name: string; age?: string; tariffId: string }>; notify: boolean; channel: string }) => {
+      try {
+        // 1. Create or find client
+        let clientId: string;
+        if (data.phone) {
+          try {
+            const existingClient = await searchClientByPhone(data.phone);
+            clientId = existingClient.id;
+          } catch {
+            // Client not found — create new
+            const newClient = await createClient({ name: data.name, phone: data.phone, channel: data.channel });
+            clientId = newClient.id;
+          }
+        } else {
+          // No phone — create client without phone (if API allows) or use name-only
+          const newClient = await createClient({ name: data.name, phone: '', channel: data.channel });
+          clientId = newClient.id;
+        }
+
+        // 2. Create visitors
+        const visitIds: string[] = [];
+        for (const v of data.visitors) {
+          if (v.name) {
+            const visitor = await createVisitor({
+              client_id: clientId,
+              name: v.name,
+              age: v.age ? Number(v.age) : undefined,
+            });
+            visitIds.push(visitor.id);
+          }
+        }
+
+        // 3. Create record with visits
+        const tariff = serviceTariffs.find((t) => t.id === data.visitors[0]?.tariffId);
+        await createRecord({
+          activity_id: activity.id,
+          client_id: clientId,
+          visits: visitIds.map((vid) => ({
+            visitor_id: vid,
+            price: tariff?.price ?? 0,
+          })),
+        });
+
+        showToast('Запись создана');
+        setActiveTab('settings');
+        // Force refetch records
+        queryClient.invalidateQueries({ queryKey: ['records'] });
+      } catch {
+        showToast('Ошибка создания записи');
+      }
     },
-    [showToast],
+    [showToast, activity.id, serviceTariffs, queryClient],
   );
 
-  // Delete record handler
+  // Delete record handler — actually deletes via API
   const handleDeleteRecord = useCallback(
-    (_recordId: string) => {
-      showToast('Запись удалена');
-      setActiveTab('settings');
+    async (recordId: string) => {
+      try {
+        await apiDeleteRecord(recordId);
+        showToast('Запись удалена');
+        setActiveTab('settings');
+        queryClient.invalidateQueries({ queryKey: ['records'] });
+      } catch {
+        showToast('Ошибка удаления');
+      }
     },
-    [showToast],
+    [showToast, queryClient],
   );
 
-  // Payment handler
+  // Payment handler — actually creates payment via API
   const handleAddPayment = useCallback(
-    (_recordId: string, amount: number, method: string) => {
-      showToast(`Оплата ${amount} ₽ (${method}) добавлена`);
+    async (recordId: string, amount: number, method: string) => {
+      try {
+        await apiCreatePayment({ record_id: recordId, amount, method: method as 'cash' | 'card' | 'transfer' });
+        showToast(`Оплата ${amount} ₽ (${method}) добавлена`);
+        queryClient.invalidateQueries({ queryKey: ['payments'] });
+      } catch {
+        showToast('Ошибка добавления оплаты');
+      }
     },
-    [showToast],
+    [showToast, queryClient],
   );
 
   // Financial summary
@@ -145,12 +235,13 @@ export function ActivityDetailsModal({ isOpen, onClose, activity, mode }: Activi
 
     const client = clients.get(record.client_id ?? '');
     const recordPayments = payments.get(record.id) || [];
+    const recordVisitors = visitorsByRecord.get(record.id) || [];
 
     return (
       <ClientTab
         record={record}
         client={client}
-        visitors={[]}
+        visitors={recordVisitors as any}
         visits={record.visits}
         payments={recordPayments}
         serviceTariffs={serviceTariffs}

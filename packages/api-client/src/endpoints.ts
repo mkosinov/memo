@@ -19,6 +19,7 @@ import {
   type RecordUpdate,
   ClientResponseSchema,
   type ClientResponse,
+  type ClientCreate,
   PaymentResponseSchema,
   type PaymentResponse,
   type PaymentCreate,
@@ -128,6 +129,13 @@ export async function getRecords(params?: {
 
 export async function getClients(): Promise<ClientResponse[]> {
   return api('/api/v1/clients', z.array(ClientResponseSchema));
+}
+
+export async function createClient(data: ClientCreate): Promise<ClientResponse> {
+  return api('/api/v1/clients', ClientResponseSchema, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
 }
 
 // ─── Payments ───────────────────────────────────────────────────────────────

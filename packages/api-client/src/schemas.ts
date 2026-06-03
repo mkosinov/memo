@@ -196,6 +196,17 @@ export const ClientResponseSchema = z.object({
 
 export type ClientResponse = z.infer<typeof ClientResponseSchema>;
 
+// ─── ClientCreate (request body) ──────────────────────────────────────────
+
+export const ClientCreateSchema = z.object({
+  name: z.string(),
+  phone: z.string().optional(),
+  email: z.string().optional(),
+  channel: z.string().optional(),
+});
+
+export type ClientCreate = z.infer<typeof ClientCreateSchema>;
+
 // ─── PaymentResponse ───────────────────────────────────────────────────────
 
 export const PaymentResponseSchema = z.object({

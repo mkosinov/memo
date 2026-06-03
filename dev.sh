@@ -82,7 +82,7 @@ fi
 # ── Start frontend/web ─────────────────────────────────────────────
 if _ensure_port_free 3000; then
     echo -e "${BLUE}Starting frontend/web (Next.js) on :3000...${NC}"
-    (cd "$WEB_DIR" && npx next dev -p 3000) &
+    (cd "$WEB_DIR" && npx next dev -p 3000 -H 0.0.0.0) &
     WEB_PID=$!
 fi
 
@@ -90,7 +90,7 @@ fi
 if $ADMIN_MODE; then
     if _ensure_port_free 3001; then
         echo -e "${BLUE}Starting frontend/admin (Next.js) on :3001...${NC}"
-        (cd "$ADMIN_DIR" && npx next dev -p 3001) &
+        (cd "$ADMIN_DIR" && npx next dev -p 3001 -H 0.0.0.0) &
         ADMIN_PID=$!
     fi
 fi

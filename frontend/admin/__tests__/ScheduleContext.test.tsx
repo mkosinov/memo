@@ -14,6 +14,7 @@ vi.mock('@memo/api-client', () => ({
   getActivities: vi.fn(),
   createActivity: vi.fn(),
   updateActivity: vi.fn(),
+  patchActivity: vi.fn(),
   deleteActivity: vi.fn(),
 }));
 
@@ -23,7 +24,7 @@ import {
   getServices,
   getActivities,
   createActivity,
-  updateActivity,
+  patchActivity,
   deleteActivity,
 } from '@memo/api-client';
 
@@ -171,7 +172,7 @@ describe('ScheduleProvider', () => {
     vi.mocked(getServices).mockResolvedValue([]);
     vi.mocked(getActivities).mockResolvedValue([]);
     vi.mocked(createActivity).mockResolvedValue({} as any);
-    vi.mocked(updateActivity).mockResolvedValue({} as any);
+    vi.mocked(patchActivity).mockResolvedValue({} as any);
     vi.mocked(deleteActivity).mockResolvedValue(undefined);
   });
 
@@ -284,7 +285,7 @@ describe('ScheduleProvider', () => {
     );
   });
 
-  it('calls updateActivity mutation when updateActivity is called', async () => {
+  it('calls patchActivity mutation when updateActivity is called', async () => {
     vi.mocked(getMasters).mockResolvedValue([
       { id: 'm1', first_name: 'Ольга', last_name: 'Середа', color: '#5B8C7A', position: 'мастер', specialty: 'живопись', avatar_url: null, is_active: true, created_at: '2024-01-01', updated_at: '2024-01-01' },
     ]);
@@ -297,7 +298,7 @@ describe('ScheduleProvider', () => {
     vi.mocked(getActivities).mockResolvedValue([
       { id: 'a1', master_id: 'm1', service_id: 's1', location_id: 'alpika', start: '2024-12-25T10:00:00Z', duration: 120, capacity: 8, is_private: false, comment: null, record_info: null, created_at: '', updated_at: '', is_active: true, occupied: 3 },
     ]);
-    vi.mocked(updateActivity).mockResolvedValue({
+    vi.mocked(patchActivity).mockResolvedValue({
       id: 'a1', master_id: 'm1', service_id: 's1', location_id: 'alpika',
       start: '2024-12-25T10:00:00Z', duration: 120, capacity: 8, is_private: false,
       comment: null, record_info: null, created_at: '', updated_at: '', is_active: true, occupied: 5,
@@ -314,9 +315,9 @@ describe('ScheduleProvider', () => {
     });
 
     await waitFor(() => {
-      expect(updateActivity).toHaveBeenCalled();
+      expect(patchActivity).toHaveBeenCalled();
     });
-    expect(updateActivity).toHaveBeenCalledWith('a1', expect.objectContaining({ occupied: 5 }));
+    expect(patchActivity).toHaveBeenCalledWith('a1', expect.objectContaining({ occupied: 5 }));
   });
 
   it('calls deleteActivity mutation when deleteActivity is called', async () => {

@@ -28,7 +28,7 @@ export function UIProvider({ children }: { children: React.ReactNode }) {
   const [deleteMode, setDeleteMode] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false);
+  const [rightPanelCollapsed, setRightPanelCollapsed] = useState(true);
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
   const toastTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 

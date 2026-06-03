@@ -1,10 +1,6 @@
 {
   "name": "memo",
   "private": true,
-  "workspaces": [
-    "frontend/*",
-    "packages/*"
-  ],
   "scripts": {
     "build": "turbo build",
     "dev": "turbo dev",
@@ -18,7 +14,7 @@
     "prettier": "^3.2.5",
     "turbo": "^2.0.0"
   },
-  "packageManager": "npm@10.7.0",
+  "packageManager": "pnpm@11.5.1",
   "dependencies": {
     "@tanstack/react-query": "^5.100.14"
   }

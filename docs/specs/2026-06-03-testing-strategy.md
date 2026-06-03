@@ -144,18 +144,25 @@ const count = queryDB("SELECT COUNT(*) FROM records WHERE client_id = 'c1'");
 expect(count).toBe('1');
 ```
 
-### 1.6 Channel Enum (Bug Fix Required)
+### 1.6 Enum Validation (Bug Fix Required)
 
-**Current:** `channel` is `String(50)` — accepts any value.
-**Required:** Enum with only 3 values: `telegram`, `max`, `whatsapp`.
+**Current:** All enum fields in schemas are `str` — no validation.
+**Required:** Use proper enum types from `models/enums.py`.
 
-Files to change:
-- `packages/domain/src/index.ts` — add `ChannelSchema = z.enum(['telegram', 'max', 'whatsapp'])`
-- `backend/src/models/client.py` — change to `Mapped[str]` with enum check
-- `backend/src/schemas/client.py` — validate against enum
-- `backend/src/seed/seed.py` — fix seed data (remove "instagram", "vk", "website")
-- `frontend/admin/app/components/modal/ActivityDetailsModal/NewBookingTab.tsx` — already correct (telegram/max/whatsapp)
-- E2E test factories — use valid channel values
+| Schema | Field | Enum to Use |
+|--------|-------|-------------|
+| `RecordBase.status` | `status` | `RecordStatus` |
+| `RecordUpdate.status` | `status` | `RecordStatus` |
+| `VisitItem.status` | `status` | `VisitStatus` |
+| `VisitStatusUpdate.status` | `status` | `VisitStatus` |
+| `PaymentBase.method` | `method` | `PaymentMethod` |
+| `ClientCreate.channel` | `channel` | Channel enum (new) |
+
+**Fix:** Change `str` → `EnumType` in each schema. Backend will return 422 for invalid values.
+
+**New enum needed:** `Channel` — `telegram`, `max`, `whatsapp`
+
+**Seed data fix:** Replace "instagram", "vk", "website" with valid enum values.
 
 ---
 
@@ -202,6 +209,9 @@ backend/tests/
 | 12 | Create record exceeding activity capacity | 400 or business error |
 | 13 | Update record concurrently | Last write wins or conflict |
 | 14 | Create record with missing required fields | 422 validation error |
+| 15 | Update record with status="banana" | 422 validation error |
+| 16 | Update visit with status="fake_status" | 422 validation error |
+| 17 | Create payment with method="crypto" | 422 validation error |
 
 #### Clients (test_api_clients.py)
 
@@ -217,6 +227,7 @@ backend/tests/
 | 8 | List clients with special characters in name | 200, no SQL injection |
 | 9 | Create client with invalid channel value | 422 validation error |
 | 10 | Create client with valid channel enum | 201, channel stored correctly |
+| 11 | Create client with channel="banana" | 422 validation error |
 
 #### Payments (test_api_payments.py)
 

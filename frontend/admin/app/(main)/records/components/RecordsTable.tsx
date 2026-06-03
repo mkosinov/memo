@@ -1,11 +1,8 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
-import {
-  RECORDS, BOOKING_ACTIVITIES, CLIENTS, VISITS, VISITORS, PAYMENTS,
-} from '@/lib/mock-data';
-import { SERVICES, LOCATIONS, ARTISTS } from '@/lib/mock-data';
-import type { BookingRecord, Activity } from '@memo/domain';
+import { useRecords } from '@/contexts/RecordsContext';
+import type { RecordResponse, ActivityResponse } from '@memo/api-client';
 import { ClientCardModal } from './ClientCardModal';
 import { DiamondIcon } from '@/app/components/shared/DiamondIcon';
 
@@ -26,6 +23,15 @@ function formatTime(time: number): string {
   return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
 }
 
+/** Normalize JS getDay() (0=Sun..6=Sat) to Mon=0..Sun=6, extract date and startTime. */
+function parseActivityStart(start: string): { date: string; day: number; startTime: number } {
+  const d = new Date(start);
+  const day = (d.getUTCDay() + 6) % 7;
+  const startTime = d.getUTCHours() + d.getUTCMinutes() / 60;
+  const date = start.slice(0, 10);
+  return { date, day, startTime };
+}
+
 const STATUS_LABELS: Record<string, string> = {
   WAITING: 'Ожидание',
   VISITED: 'Посетили',
@@ -40,7 +46,7 @@ const STATUS_COLORS: Record<string, string> = {
   CANCELLED: 'bg-amber-100 text-amber-700',
 };
 
-interface BookingTableProps {
+interface RecordsTableProps {
   filters: {
     dateFrom: string;
     dateTo: string;
@@ -51,35 +57,38 @@ interface BookingTableProps {
   };
 }
 
-export function BookingTable({ filters }: BookingTableProps) {
-  const [selectedRecord, setSelectedRecord] = useState<BookingRecord | null>(null);
+export function RecordsTable({ filters }: RecordsTableProps) {
+  const { records, clients, payments, activities, masters, services, locations } = useRecords();
+
+  const [selectedRecord, setSelectedRecord] = useState<RecordResponse | null>(null);
   const [sortField, setSortField] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(10);
   const [clientModalId, setClientModalId] = useState<string | null>(null);
 
-  const getActivity = (id: string): Activity | undefined =>
-    BOOKING_ACTIVITIES.find((a) => a.id === id);
+  const getActivity = (id: string): ActivityResponse | undefined =>
+    activities.get(id);
 
   const filteredRecords = useMemo(() => {
-    return RECORDS.filter((r) => {
-      const activity = getActivity(r.activityId);
+    return records.filter((r) => {
+      const activity = getActivity(r.activity_id);
       if (!activity) return false;
+      const { date } = parseActivityStart(activity.start);
       // Date range
-      if (filters.dateFrom && activity.date && activity.date < filters.dateFrom) return false;
-      if (filters.dateTo && activity.date && activity.date > filters.dateTo) return false;
+      if (filters.dateFrom && date < filters.dateFrom) return false;
+      if (filters.dateTo && date > filters.dateTo) return false;
       // Location
-      if (filters.locationId && activity.locationId !== filters.locationId) return false;
+      if (filters.locationId && activity.location_id !== filters.locationId) return false;
       // Service
-      if (filters.serviceId && activity.serviceId !== filters.serviceId) return false;
+      if (filters.serviceId && activity.service_id !== filters.serviceId) return false;
       // Master
-      if (filters.masterId && activity.masterId !== filters.masterId) return false;
+      if (filters.masterId && activity.master_id !== filters.masterId) return false;
       // Status
       if (filters.status && r.status !== filters.status) return false;
       return true;
     });
-  }, [filters]);
+  }, [records, filters, activities]);
 
   // Sort
   const handleSort = (field: string) => {
@@ -100,72 +109,65 @@ export function BookingTable({ filters }: BookingTableProps) {
     if (!sortField) return filteredRecords;
     const sorted = [...filteredRecords];
     sorted.sort((a, b) => {
-      const aAct = getActivity(a.activityId);
-      const bAct = getActivity(b.activityId);
+      const aAct = getActivity(a.activity_id);
+      const bAct = getActivity(b.activity_id);
       let cmp = 0;
       switch (sortField) {
         case 'date': {
-          const aDate = aAct?.date;
-          const bDate = bAct?.date;
-          // Activities with dates come first
-          if (aDate && !bDate) { cmp = -1; break; }
-          if (!aDate && bDate) { cmp = 1; break; }
-          if (aDate && bDate) {
-            cmp = aDate.localeCompare(bDate);
-            if (cmp === 0) cmp = (aAct?.startTime || 0) - (bAct?.startTime || 0);
+          const aParsed = aAct ? parseActivityStart(aAct.start) : null;
+          const bParsed = bAct ? parseActivityStart(bAct.start) : null;
+          if (aParsed && !bParsed) { cmp = -1; break; }
+          if (!aParsed && bParsed) { cmp = 1; break; }
+          if (aParsed && bParsed) {
+            cmp = aParsed.date.localeCompare(bParsed.date);
+            if (cmp === 0) cmp = aParsed.startTime - bParsed.startTime;
           } else {
-            // Both don't have dates — sort by day index (0=Mon first), then startTime
-            const aDay = aAct?.day ?? 0;
-            const bDay = bAct?.day ?? 0;
-            cmp = aDay - bDay;
-            if (cmp === 0) cmp = (aAct?.startTime || 0) - (bAct?.startTime || 0);
+            cmp = 0;
           }
           break;
         }
         case 'client': {
-          const aCl = CLIENTS.find((c) => c.id === a.clientId)?.name || '';
-          const bCl = CLIENTS.find((c) => c.id === b.clientId)?.name || '';
+          const aCl = a.client_id ? clients.get(a.client_id)?.name || '' : '';
+          const bCl = b.client_id ? clients.get(b.client_id)?.name || '' : '';
           cmp = aCl.localeCompare(bCl);
           break;
         }
         case 'service': {
-          const aSvc = aAct ? SERVICES.find((s) => s.id === aAct.serviceId)?.name || '' : '';
-          const bSvc = bAct ? SERVICES.find((s) => s.id === bAct.serviceId)?.name || '' : '';
+          const aSvc = aAct ? services.get(aAct.service_id)?.title || '' : '';
+          const bSvc = bAct ? services.get(bAct.service_id)?.title || '' : '';
           cmp = aSvc.localeCompare(bSvc);
           break;
         }
         case 'master': {
-          const aMst = aAct ? ARTISTS.find((a) => a.id === aAct.masterId)?.shortName || '' : '';
-          const bMst = bAct ? ARTISTS.find((a) => a.id === bAct.masterId)?.shortName || '' : '';
+          const aMst = aAct ? masters.get(aAct.master_id)?.first_name || '' : '';
+          const bMst = bAct ? masters.get(bAct.master_id)?.first_name || '' : '';
           cmp = aMst.localeCompare(bMst);
           break;
         }
         case 'location': {
-          const aLoc = aAct ? LOCATIONS.find((l) => l.id === aAct.locationId)?.name || '' : '';
-          const bLoc = bAct ? LOCATIONS.find((l) => l.id === bAct.locationId)?.name || '' : '';
+          const aLoc = aAct ? locations.get(aAct.location_id)?.name || '' : '';
+          const bLoc = bAct ? locations.get(bAct.location_id)?.name || '' : '';
           cmp = aLoc.localeCompare(bLoc);
           break;
         }
         case 'guests': {
-          const aG = VISITS.filter((v) => v.recordId === a.id).length;
-          const bG = VISITS.filter((v) => v.recordId === b.id).length;
-          cmp = aG - bG;
+          cmp = a.visits.length - b.visits.length;
           break;
         }
         case 'status':
           cmp = a.status.localeCompare(b.status);
           break;
         case 'total': {
-          const aTot = VISITS.filter((v) => v.recordId === a.id).reduce((s, v) => s + v.priceCharged, 0);
-          const bTot = VISITS.filter((v) => v.recordId === b.id).reduce((s, v) => s + v.priceCharged, 0);
+          const aTot = a.visits.reduce((s, v) => s + v.price, 0);
+          const bTot = b.visits.reduce((s, v) => s + v.price, 0);
           cmp = aTot - bTot;
           break;
         }
         case 'payment': {
-          const aTot2 = VISITS.filter((v) => v.recordId === a.id).reduce((s, v) => s + v.priceCharged, 0);
-          const bTot2 = VISITS.filter((v) => v.recordId === b.id).reduce((s, v) => s + v.priceCharged, 0);
-          const aPaid = PAYMENTS.filter((p) => p.recordId === a.id && p.paid).reduce((s, p) => s + p.amount, 0);
-          const bPaid = PAYMENTS.filter((p) => p.recordId === b.id && p.paid).reduce((s, p) => s + p.amount, 0);
+          const aTot2 = a.visits.reduce((s, v) => s + v.price, 0);
+          const bTot2 = b.visits.reduce((s, v) => s + v.price, 0);
+          const aPaid = (payments.get(a.id) ?? []).reduce((s, p) => s + p.amount, 0);
+          const bPaid = (payments.get(b.id) ?? []).reduce((s, p) => s + p.amount, 0);
           const aLevel = aPaid >= aTot2 ? 0 : aPaid > 0 ? 1 : 2;
           const bLevel = bPaid >= bTot2 ? 0 : bPaid > 0 ? 1 : 2;
           cmp = aLevel - bLevel;
@@ -175,7 +177,7 @@ export function BookingTable({ filters }: BookingTableProps) {
       return sortDir === 'asc' ? cmp : -cmp;
     });
     return sorted;
-  }, [filteredRecords, sortField, sortDir]);
+  }, [filteredRecords, sortField, sortDir, clients, services, masters, locations, payments]);
 
   // Pagination
   const paginatedRecords = useMemo(() => {
@@ -190,14 +192,16 @@ export function BookingTable({ filters }: BookingTableProps) {
   }, [filters]);
 
   // Detail helpers
-  const selectedActivity = selectedRecord ? getActivity(selectedRecord.activityId) : null;
-  const selectedClient = selectedRecord ? CLIENTS.find((c) => c.id === selectedRecord.clientId) : null;
-  const selectedVisits = selectedRecord ? VISITS.filter((v) => v.recordId === selectedRecord.id) : [];
-  const selectedPayments = selectedRecord ? PAYMENTS.filter((p) => p.recordId === selectedRecord.id) : [];
-  const totalForRecord = (recordId: string): number =>
-    VISITS.filter((v) => v.recordId === recordId).reduce((s, v) => s + v.priceCharged, 0);
+  const selectedActivity = selectedRecord ? getActivity(selectedRecord.activity_id) : null;
+  const selectedClient = selectedRecord?.client_id ? clients.get(selectedRecord.client_id) : null;
+  const selectedVisits = selectedRecord?.visits ?? [];
+  const selectedPayments = selectedRecord ? (payments.get(selectedRecord.id) ?? []) : [];
+  const totalForRecord = (recordId: string): number => {
+    const record = records.find((r) => r.id === recordId);
+    return record?.visits.reduce((s, v) => s + v.price, 0) ?? 0;
+  };
   const paidForRecord = (recordId: string): number =>
-    PAYMENTS.filter((p) => p.recordId === recordId && p.paid).reduce((s, p) => s + p.amount, 0);
+    (payments.get(recordId) ?? []).reduce((s, p) => s + p.amount, 0);
 
   return (
     <div className="flex">
@@ -237,10 +241,10 @@ export function BookingTable({ filters }: BookingTableProps) {
           </thead>
           <tbody>
             {paginatedRecords.map((record) => {
-              const activity = getActivity(record.activityId);
-              const client = CLIENTS.find((c) => c.id === record.clientId);
-              const service = activity ? SERVICES.find((s) => s.id === activity.serviceId) : null;
-              const location = activity ? LOCATIONS.find((l) => l.id === activity.locationId) : null;
+              const activity = getActivity(record.activity_id);
+              const client = record.client_id ? clients.get(record.client_id) : null;
+              const service = activity ? services.get(activity.service_id) : null;
+              const location = activity ? locations.get(activity.location_id) : null;
               const total = totalForRecord(record.id);
               const paid = paidForRecord(record.id);
               const isSelected = selectedRecord?.id === record.id;
@@ -257,16 +261,19 @@ export function BookingTable({ filters }: BookingTableProps) {
                 >
                   {/* Дата / Время */}
                   <td className="px-4 py-3 text-sm whitespace-nowrap" style={{ color: 'var(--ink-mid)' }}>
-                    {activity ? (
-                      <>
-                        <div className="font-medium" style={{ color: 'var(--ink)' }}>
-                          {activity.date ? formatDateRu(activity.date) : `День ${activity.day + 1}`}
-                        </div>
-                        <div className="text-xs" style={{ color: 'var(--ink-light)' }}>
-                          {formatTime(activity.startTime)}
-                        </div>
-                      </>
-                    ) : '—'}
+                    {activity ? (() => {
+                      const parsed = parseActivityStart(activity.start);
+                      return (
+                        <>
+                          <div className="font-medium" style={{ color: 'var(--ink)' }}>
+                            {formatDateRu(parsed.date)}
+                          </div>
+                          <div className="text-xs" style={{ color: 'var(--ink-light)' }}>
+                            {formatTime(parsed.startTime)}
+                          </div>
+                        </>
+                      );
+                    })() : '—'}
                   </td>
 
                   {/* Клиент */}
@@ -274,7 +281,7 @@ export function BookingTable({ filters }: BookingTableProps) {
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
-                        setClientModalId(record.clientId);
+                        if (record.client_id) setClientModalId(record.client_id);
                       }}
                       className="text-sm font-medium transition-colors text-left"
                       style={{ color: 'var(--brand)' }}
@@ -285,28 +292,31 @@ export function BookingTable({ filters }: BookingTableProps) {
 
                   {/* Гостей */}
                   <td className="px-4 py-3 text-center text-sm" style={{ color: 'var(--ink-mid)' }}>
-                    {Math.max(1, VISITS.filter((v) => v.recordId === record.id).length)}
+                    {Math.max(1, record.visits.length)}
                   </td>
 
                   {/* Услуга */}
                   <td className="px-4 py-3 text-sm" style={{ color: 'var(--ink)' }}>
                     <div className="flex items-center gap-2">
-                      {activity?.isPrivate ? (
+                      {activity?.is_private ? (
                         <DiamondIcon className="mr-1" />
                       ) : null}
-                      {service?.name ?? '—'}
+                      {service?.title ?? '—'}
                     </div>
                   </td>
 
                   {/* Мастер */}
                   <td className="px-4 py-3">
-                    {activity ? (
-                      <div
-                        className="w-5 h-5 rounded-full"
-                        style={{ backgroundColor: ARTISTS.find((a) => a.id === activity.masterId)?.color || '#999' }}
-                        title={ARTISTS.find((a) => a.id === activity.masterId)?.shortName}
-                      />
-                    ) : '—'}
+                    {activity ? (() => {
+                      const master = masters.get(activity.master_id);
+                      return (
+                        <div
+                          className="w-5 h-5 rounded-full"
+                          style={{ backgroundColor: master?.color || '#999' }}
+                          title={master?.first_name}
+                        />
+                      );
+                    })() : '—'}
                   </td>
 
                   {/* Локация */}
@@ -422,7 +432,7 @@ export function BookingTable({ filters }: BookingTableProps) {
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                setClientModalId(selectedRecord.clientId);
+                if (selectedRecord.client_id) setClientModalId(selectedRecord.client_id);
               }}
               className="text-sm font-medium transition-colors"
               style={{ color: 'var(--brand)' }}
@@ -438,13 +448,20 @@ export function BookingTable({ filters }: BookingTableProps) {
           <div className="rounded-lg border p-3" style={{ borderColor: 'var(--line)', backgroundColor: 'var(--white)' }}>
             <div className="text-xs mb-1" style={{ color: 'var(--ink-light)' }}>Занятие</div>
             <div className="text-sm font-medium" style={{ color: 'var(--ink)' }}>
-              {SERVICES.find((s) => s.id === selectedActivity.serviceId)?.name}
+              {services.get(selectedActivity.service_id)?.title}
             </div>
             <div className="text-xs mt-1" style={{ color: 'var(--ink-light)' }}>
-              {selectedActivity.date ? formatDateRu(selectedActivity.date) : `День ${selectedActivity.day + 1}`} · {formatTime(selectedActivity.startTime)}
+              {(() => {
+                const parsed = parseActivityStart(selectedActivity.start);
+                return (
+                  <>
+                    {formatDateRu(parsed.date)} · {formatTime(parsed.startTime)}
+                  </>
+                );
+              })()}
             </div>
             <div className="text-xs" style={{ color: 'var(--ink-light)' }}>
-              {LOCATIONS.find((l) => l.id === selectedActivity.locationId)?.name} · {ARTISTS.find((a) => a.id === selectedActivity.masterId)?.name}
+              {locations.get(selectedActivity.location_id)?.name} · {masters.get(selectedActivity.master_id)?.first_name} {masters.get(selectedActivity.master_id)?.last_name}
             </div>
             <div className="mt-2">
               <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-semibold ${STATUS_COLORS[selectedRecord.status]}`}>
@@ -457,23 +474,14 @@ export function BookingTable({ filters }: BookingTableProps) {
           <div className="rounded-lg border p-3" style={{ borderColor: 'var(--line)', backgroundColor: 'var(--white)' }}>
             <div className="text-xs mb-2" style={{ color: 'var(--ink-light)' }}>Посетители и цены</div>
             <div className="space-y-2">
-              {selectedVisits.map((visit) => {
-                const visitor = VISITORS.find((v) => v.id === visit.visitorId);
-                return (
-                  <div key={visit.id} className="flex justify-between items-center text-sm">
-                    <div className="flex items-center gap-2">
-                      <span style={{ color: 'var(--ink)' }}>{visitor?.name ?? '—'}</span>
-                      {visitor && !visitor.isAdult && (
-                        <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full">{visitor.age} лет</span>
-                      )}
-                      {visit.isPrimary && (
-                        <span className="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full font-semibold">Осн.</span>
-                      )}
-                    </div>
-                    <span className="font-medium" style={{ color: 'var(--ink)' }}>{formatPrice(visit.priceCharged)}</span>
+              {selectedVisits.map((visit) => (
+                <div key={visit.id} className="flex justify-between items-center text-sm">
+                  <div className="flex items-center gap-2">
+                    <span style={{ color: 'var(--ink)' }}>Посетитель</span>
                   </div>
-                );
-              })}
+                  <span className="font-medium" style={{ color: 'var(--ink)' }}>{formatPrice(visit.price)}</span>
+                </div>
+              ))}
               <div className="border-t pt-2 mt-2 flex justify-between text-sm font-semibold" style={{ borderColor: 'var(--line)', color: 'var(--ink)' }}>
                 <span>Итого</span>
                 <span>{formatPrice(totalForRecord(selectedRecord.id))}</span>
@@ -491,10 +499,10 @@ export function BookingTable({ filters }: BookingTableProps) {
                   return (
                     <div key={payment.id} className="flex justify-between items-center text-sm">
                       <div className="flex items-center gap-2">
-                        <span className={`w-2 h-2 rounded-full ${payment.paid ? 'bg-emerald-500' : 'bg-red-400'}`} />
+                        <span className="w-2 h-2 rounded-full bg-emerald-500" />
                         <span style={{ color: 'var(--ink-mid)' }}>{payment.method ? methodLabels[payment.method] ?? payment.method : 'Без метода'}</span>
                       </div>
-                      <span className={`font-medium ${payment.paid ? 'text-emerald-600' : 'text-red-500'}`}>{formatPrice(payment.amount)}</span>
+                      <span className="font-medium text-emerald-600">{formatPrice(payment.amount)}</span>
                     </div>
                   );
                 })}

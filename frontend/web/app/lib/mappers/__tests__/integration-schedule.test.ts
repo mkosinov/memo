@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { joinActivities } from '../join-schedule';
+import { buildWebSchedule } from '../buildSchedule';
 import { toScheduleView } from '../to-schedule-vm';
 
 // Mock data matching the real API response shapes
@@ -71,7 +71,7 @@ const mockActivity = {
 
 describe('Full pipeline: API responses → ScheduleView', () => {
   it('produces correctly formatted ScheduleView from API data', () => {
-    const index = joinActivities(
+    const index = buildWebSchedule(
       [mockActivity],
       new Map([['s1', mockService]]),
       new Map([['m1', mockMaster]]),
@@ -109,7 +109,7 @@ describe('Full pipeline: API responses → ScheduleView', () => {
       ['grand', { ...mockLocation, id: 'grand', name: 'Гранд Отель', location_hint: 'Лобби' }],
     ]);
 
-    const index = joinActivities(activities, services, masters, locations);
+    const index = buildWebSchedule(activities, services, masters, locations);
 
     // Date filtering via index
     expect(index.byLocation['all'].byDate.get('2026-06-01')!.length).toBe(2);
@@ -124,7 +124,7 @@ describe('Full pipeline: API responses → ScheduleView', () => {
     const serviceNoHint = { ...mockService, material_hint: null };
     const locationNoHint = { ...mockLocation, location_hint: null };
 
-    const index = joinActivities(
+    const index = buildWebSchedule(
       [mockActivity],
       new Map([['s1', serviceNoHint]]),
       new Map([['m1', mockMaster]]),

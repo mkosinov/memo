@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { joinActivities, type WebScheduleDTO } from '../join-schedule';
+import { buildWebSchedule, type WebScheduleDTO } from '../buildSchedule';
 import type { ActivityResponse, ServiceResponse, MasterResponse, LocationResponse } from '@memo/api-client';
 
 function makeActivity(overrides?: Partial<ActivityResponse>): ActivityResponse {
@@ -78,14 +78,14 @@ function makeLocation(overrides?: Partial<LocationResponse>): LocationResponse {
   };
 }
 
-describe('joinActivities', () => {
+describe('buildWebSchedule', () => {
   it('returns ScheduleIndex with byId Map and byLocation record', () => {
     const activities = [makeActivity()];
     const services = new Map([['service-1', makeService()]]);
     const masters = new Map([['master-1', makeMaster()]]);
     const locations = new Map([['loc-1', makeLocation()]]);
 
-    const result = joinActivities(activities, services, masters, locations);
+    const result = buildWebSchedule(activities, services, masters, locations);
 
     expect(result).toHaveProperty('byId');
     expect(result).toHaveProperty('byLocation');
@@ -99,7 +99,7 @@ describe('joinActivities', () => {
     const masters = new Map([['master-1', makeMaster()]]);
     const locations = new Map([['loc-1', makeLocation()]]);
 
-    const result = joinActivities(activities, services, masters, locations);
+    const result = buildWebSchedule(activities, services, masters, locations);
     const dto = result.byId.get('act-1') as WebScheduleDTO;
 
     expect(dto.id).toBe('act-1');
@@ -135,7 +135,7 @@ describe('joinActivities', () => {
     const masters = new Map([['master-1', makeMaster()]]);
     const locations = new Map([['loc-1', makeLocation()]]);
 
-    const result = joinActivities(activities, services, masters, locations);
+    const result = buildWebSchedule(activities, services, masters, locations);
 
     expect(result.byId.size).toBe(0);
   });
@@ -146,7 +146,7 @@ describe('joinActivities', () => {
     const masters = new Map<string, MasterResponse>();
     const locations = new Map([['loc-1', makeLocation()]]);
 
-    const result = joinActivities(activities, services, masters, locations);
+    const result = buildWebSchedule(activities, services, masters, locations);
 
     expect(result.byId.size).toBe(0);
   });
@@ -157,7 +157,7 @@ describe('joinActivities', () => {
     const masters = new Map([['master-1', makeMaster()]]);
     const locations = new Map<string, LocationResponse>();
 
-    const result = joinActivities(activities, services, masters, locations);
+    const result = buildWebSchedule(activities, services, masters, locations);
 
     expect(result.byId.size).toBe(0);
   });
@@ -176,7 +176,7 @@ describe('joinActivities', () => {
       ['loc-2', makeLocation({ id: 'loc-2', name: 'Гранд Отель' })],
     ]);
 
-    const result = joinActivities(activities, services, masters, locations);
+    const result = buildWebSchedule(activities, services, masters, locations);
 
     const allIdx = result.byLocation['all'];
     expect(allIdx).toBeDefined();
@@ -197,7 +197,7 @@ describe('joinActivities', () => {
       ['loc-2', makeLocation({ id: 'loc-2', name: 'Гранд Отель' })],
     ]);
 
-    const result = joinActivities(activities, services, masters, locations);
+    const result = buildWebSchedule(activities, services, masters, locations);
 
     const loc1Idx = result.byLocation['loc-1'];
     expect(loc1Idx.byDate.get('2026-06-01')).toEqual(['act-1']);
@@ -224,7 +224,7 @@ describe('joinActivities', () => {
     const masters = new Map([['master-1', makeMaster()]]);
     const locations = new Map([['loc-1', makeLocation()]]);
 
-    const result = joinActivities(activities, services, masters, locations);
+    const result = buildWebSchedule(activities, services, masters, locations);
 
     const locIdx = result.byLocation['loc-1'];
     expect(locIdx.byServiceId.get('Морской пейзаж')).toEqual(['act-1', 'act-2']);
@@ -240,7 +240,7 @@ describe('joinActivities', () => {
     const masters = new Map([['master-1', makeMaster()]]);
     const locations = new Map([['loc-1', makeLocation()]]);
 
-    const result = joinActivities(activities, services, masters, locations);
+    const result = buildWebSchedule(activities, services, masters, locations);
 
     const dto1 = result.byId.get('act-1') as WebScheduleDTO;
     expect((dto1 as unknown as Record<string, unknown>).nextTimes).toBeDefined();
@@ -261,7 +261,7 @@ describe('joinActivities', () => {
     const masters = new Map([['master-1', makeMaster()]]);
     const locations = new Map([['loc-1', makeLocation()]]);
 
-    const result = joinActivities(activities, services, masters, locations);
+    const result = buildWebSchedule(activities, services, masters, locations);
 
     const dto1 = result.byId.get('act-1') as WebScheduleDTO;
     expect((dto1 as unknown as Record<string, unknown>).nextTimes).toBeDefined();
@@ -279,14 +279,14 @@ describe('joinActivities', () => {
     const masters = new Map([['master-1', makeMaster()]]);
     const locations = new Map([['loc-1', makeLocation()]]);
 
-    const result = joinActivities(activities, services, masters, locations);
+    const result = buildWebSchedule(activities, services, masters, locations);
 
     const firstDto = result.byId.get('act-1') as WebScheduleDTO;
     expect(((firstDto as unknown as Record<string, unknown>).nextTimes as unknown[])).toHaveLength(6);
   });
 
   it('handles empty activities array', () => {
-    const result = joinActivities(
+    const result = buildWebSchedule(
       [],
       new Map([['service-1', makeService()]]),
       new Map([['master-1', makeMaster()]]),
@@ -307,7 +307,7 @@ describe('joinActivities', () => {
     const masters = new Map([['master-1', makeMaster({ avatar_url: null })]]);
     const locations = new Map([['loc-1', makeLocation({ address: null, location_hint: null })]]);
 
-    const result = joinActivities(activities, services, masters, locations);
+    const result = buildWebSchedule(activities, services, masters, locations);
     const dto = result.byId.get('act-1') as WebScheduleDTO;
 
     expect(dto.material).toBe('');

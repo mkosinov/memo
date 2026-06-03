@@ -122,6 +122,4 @@ export function buildWebSchedule(
   return index;
 }
 
-// ─── Backward compatibility aliases ────────────────────────────────────────
-export { buildWebSchedule as joinActivities };
 export { resolveById };

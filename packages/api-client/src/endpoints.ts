@@ -13,6 +13,12 @@ import {
   type ActivityResponse,
   PhotoResponseSchema,
   type PhotoResponse,
+  RecordResponseSchema,
+  type RecordResponse,
+  ClientResponseSchema,
+  type ClientResponse,
+  PaymentResponseSchema,
+  type PaymentResponse,
 } from './schemas';
 
 // ─── Masters ───────────────────────────────────────────────────────────────
@@ -93,4 +99,34 @@ export async function patchActivity(
 
 export async function deleteActivity(id: string): Promise<void> {
   await api(`/api/v1/activities/${id}`, z.any(), { method: 'DELETE' });
+}
+
+// ─── Records ────────────────────────────────────────────────────────────────
+
+export async function getRecords(params?: {
+  date_from?: string;
+  date_to?: string;
+}): Promise<RecordResponse[]> {
+  const search = new URLSearchParams();
+  if (params?.date_from) search.set('date_from', params.date_from);
+  if (params?.date_to) search.set('date_to', params.date_to);
+  const qs = search.toString();
+  return api(`/api/v1/records${qs ? `?${qs}` : ''}`, z.array(RecordResponseSchema));
+}
+
+// ─── Clients ────────────────────────────────────────────────────────────────
+
+export async function getClients(): Promise<ClientResponse[]> {
+  return api('/api/v1/clients', z.array(ClientResponseSchema));
+}
+
+// ─── Payments ───────────────────────────────────────────────────────────────
+
+export async function getPayments(params?: {
+  record_id?: string;
+}): Promise<PaymentResponse[]> {
+  const search = new URLSearchParams();
+  if (params?.record_id) search.set('record_id', params.record_id);
+  const qs = search.toString();
+  return api(`/api/v1/payments${qs ? `?${qs}` : ''}`, z.array(PaymentResponseSchema));
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { getMasters, getMaster, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, deleteActivity, getWebPhotos } from './endpoints';
+import { getMasters, getMaster, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, deleteActivity, getWebPhotos, getRecords, getClients, getPayments } from './endpoints';
 
 // Mock the api function from client
 vi.mock('./client', () => ({
@@ -142,6 +142,63 @@ describe('deleteActivity', () => {
       '/api/v1/activities/a-1',
       expect.anything(),
       expect.objectContaining({ method: 'DELETE' }),
+    );
+  });
+});
+
+// ─── Records ────────────────────────────────────────────────────────────────
+
+describe('getRecords', () => {
+  it('calls /api/v1/records without params', async () => {
+    vi.mocked(api).mockResolvedValue([]);
+    await getRecords();
+    expect(api).toHaveBeenCalledWith('/api/v1/records', expect.anything());
+  });
+
+  it('calls /api/v1/records with date_from and date_to params', async () => {
+    vi.mocked(api).mockResolvedValue([]);
+    await getRecords({ date_from: '2024-01-01', date_to: '2024-01-07' });
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/records?date_from=2024-01-01&date_to=2024-01-07',
+      expect.anything(),
+    );
+  });
+
+  it('calls /api/v1/records with only date_from', async () => {
+    vi.mocked(api).mockResolvedValue([]);
+    await getRecords({ date_from: '2024-01-01' });
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/records?date_from=2024-01-01',
+      expect.anything(),
+    );
+  });
+});
+
+// ─── Clients ────────────────────────────────────────────────────────────────
+
+describe('getClients', () => {
+  it('calls /api/v1/clients with array schema', async () => {
+    vi.mocked(api).mockResolvedValue([]);
+    await getClients();
+    expect(api).toHaveBeenCalledWith('/api/v1/clients', expect.anything());
+  });
+});
+
+// ─── Payments ───────────────────────────────────────────────────────────────
+
+describe('getPayments', () => {
+  it('calls /api/v1/payments without params', async () => {
+    vi.mocked(api).mockResolvedValue([]);
+    await getPayments();
+    expect(api).toHaveBeenCalledWith('/api/v1/payments', expect.anything());
+  });
+
+  it('calls /api/v1/payments with record_id param', async () => {
+    vi.mocked(api).mockResolvedValue([]);
+    await getPayments({ record_id: 'r-1' });
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/payments?record_id=r-1',
+      expect.anything(),
     );
   });
 });

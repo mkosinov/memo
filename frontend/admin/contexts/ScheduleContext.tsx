@@ -12,7 +12,7 @@ import { useQuery } from '@tanstack/react-query';
 import {
   getActivities, getMasters, getServices, getLocations,
   createActivity as apiCreateActivity,
-  updateActivity as apiUpdateActivity,
+  patchActivity as apiPatchActivity,
   deleteActivity as apiDeleteActivity,
 } from '@memo/api-client';
 import type { ActivityResponse, MasterResponse, ServiceResponse, LocationResponse } from '@memo/api-client';
@@ -105,7 +105,7 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
     mutationFn: ({ id, data }: { id: string; data: Record<string, unknown> }) => {
       // Race: API call vs 5s timeout
       return Promise.race([
-        apiUpdateActivity(id, data),
+        apiPatchActivity(id, data),
         new Promise<never>((_, reject) => {
           setTimeout(() => reject(new Error('Update timed out after 5s')), 5000);
         }),

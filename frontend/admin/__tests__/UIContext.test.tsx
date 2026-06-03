@@ -107,10 +107,10 @@ describe('UIProvider', () => {
     expect(screen.getByTestId('sidebar-collapsed').textContent).toBe('true');
   });
 
-  it('initializes rightPanelCollapsed as false', () => {
+  it('initializes rightPanelCollapsed as true', () => {
     renderWithContext();
     expect(screen.getByTestId('right-panel-collapsed').textContent).toBe(
-      'false'
+      'true'
     );
   });
 
@@ -120,7 +120,7 @@ describe('UIProvider', () => {
       screen.getByTestId('toggle-right-panel').click();
     });
     expect(screen.getByTestId('right-panel-collapsed').textContent).toBe(
-      'true'
+      'false'
     );
   });
 

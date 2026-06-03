@@ -14,6 +14,7 @@ vi.mock('@memo/api-client', () => ({
   getActivities: vi.fn().mockResolvedValue([]),
   createActivity: vi.fn(),
   updateActivity: vi.fn(),
+  patchActivity: vi.fn(),
   deleteActivity: vi.fn(),
 }));
 
@@ -34,8 +35,17 @@ function createQueryWrapper({ children }: { children: React.ReactNode }) {
   );
 }
 
+/** Harness that expands the right panel before rendering children. */
+function ToolbarExpanded() {
+  const { rightPanelCollapsed, toggleRightPanel } = useUI();
+  React.useEffect(() => {
+    if (rightPanelCollapsed) toggleRightPanel();
+  }, []);
+  return <Toolbar />;
+}
+
 function renderWithProviders() {
-  return render(createQueryWrapper({ children: <Toolbar /> }));
+  return render(createQueryWrapper({ children: <ToolbarExpanded /> }));
 }
 
 describe('Toolbar', () => {
@@ -56,26 +66,21 @@ describe('Toolbar', () => {
   it('sections are collapsible — clicking header toggles content visibility', () => {
     renderWithProviders();
 
-    // Find the Штамп section header button
     const stampHeader = screen.getByRole('button', { name: /Штамп/i });
     expect(stampHeader).toBeInTheDocument();
 
-    // Content should be visible initially (has max-h-96)
     const stampContent = screen.getByTestId('stamp-content');
     expect(stampContent).toHaveClass('max-h-96');
 
-    // Click to collapse
     fireEvent.click(stampHeader);
     expect(stampContent).toHaveClass('max-h-0');
 
-    // Click to expand again
     fireEvent.click(stampHeader);
     expect(stampContent).toHaveClass('max-h-96');
   });
 
   it('renders with default width', () => {
-    const { container } = render(createQueryWrapper({ children: <Toolbar /> }));
-
+    const { container } = render(createQueryWrapper({ children: <ToolbarExpanded /> }));
     const panel = container.querySelector('[data-testid="right-panel"]');
     expect(panel).toBeInTheDocument();
     expect(panel).toHaveStyle({ width: 'var(--right-w)' });
@@ -83,14 +88,15 @@ describe('Toolbar', () => {
 
   it('panel is hidden when rightPanelCollapsed is true', () => {
     function TestHarness() {
-      const { toggleRightPanel } = useUI();
-      React.useEffect(() => { toggleRightPanel(); }, []);
+      const { rightPanelCollapsed, toggleRightPanel } = useUI();
+      // Start expanded, then collapse
+      React.useEffect(() => {
+        if (!rightPanelCollapsed) toggleRightPanel();
+      }, []);
       return <Toolbar />;
     }
 
     const { container } = render(createQueryWrapper({ children: <TestHarness /> }));
-
-    // When collapsed, the panel returns null
     const panel = container.querySelector('[data-testid="right-panel"]');
     expect(panel).not.toBeInTheDocument();
   });

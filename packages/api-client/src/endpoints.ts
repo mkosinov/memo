@@ -80,6 +80,17 @@ export async function updateActivity(
   });
 }
 
+// PATCH for partial updates — only send the changed fields.
+export async function patchActivity(
+  id: string,
+  data: Record<string, unknown>,
+): Promise<ActivityResponse> {
+  return api(`/api/v1/activities/${id}`, ActivityResponseSchema, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+}
+
 export async function deleteActivity(id: string): Promise<void> {
   await api(`/api/v1/activities/${id}`, z.any(), { method: 'DELETE' });
 }

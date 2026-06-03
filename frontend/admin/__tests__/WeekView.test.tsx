@@ -113,7 +113,7 @@ describe('WeekView', () => {
         capacity: 10, isPrivate: false,
         masterName: 'Test Master', serviceTitle: 'Test', date: '2025-04-07',
         time: '10:00', durationMinutes: 60, locationName: 'Loc',
-        priceMin: 0, priceMax: 0, masterColor: '#FF0000', maxAge: '99+', comment: '',
+        priceMin: 0, priceMax: 0, masterColor: '#FF0000', maxAge: '99', comment: '',
       }],
     };
 
@@ -147,7 +147,7 @@ describe('WeekView', () => {
         capacity: 10, isPrivate: false,
         masterName: 'Test Master', serviceTitle: 'Test', date: '2025-04-07',
         time: '10:00', durationMinutes: 60, locationName: 'Loc',
-        priceMin: 0, priceMax: 0, masterColor: '#FF0000', maxAge: '99+', comment: '',
+        priceMin: 0, priceMax: 0, masterColor: '#FF0000', maxAge: '99', comment: '',
       }],
     };
 

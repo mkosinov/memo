@@ -33,7 +33,7 @@ export function SettingsTab({ activity, onUpdate }: SettingsTabProps) {
   // Selected service for display
   const selectedService = services.find((s) => s.id === serviceId) as (Service & { tariffs?: Array<{ id: string; title: string; price: number; description?: string | null }> }) | undefined;
 
-  // Age display: if no maxAge or maxAge is 0 → "{minAge}+", if maxAge set → "{minAge}-{maxAge}"
+  // Age display: if maxAge > 0 → "{minAge}–{maxAge}", else → "{minAge}+"
   const ageDisplay = selectedService
     ? Number(selectedService.maxAge) > 0
       ? `${selectedService.minAge}–${selectedService.maxAge}`

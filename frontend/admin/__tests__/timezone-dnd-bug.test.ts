@@ -107,8 +107,8 @@ function makeScheduleItem(overrides: Partial<ScheduleAdminDTO> = {}): ScheduleAd
     priceMax: 2500,
     isPrivate: false,
     masterColor: '#FF5733',
-    minAge: '6+',
-    maxAge: '99+',
+    minAge: '6',
+    maxAge: '99',
     comment: '',
     ...overrides,
   };

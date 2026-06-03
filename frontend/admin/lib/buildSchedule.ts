@@ -165,8 +165,8 @@ export function buildAdminSchedule(
       // Admin-specific fields:
       isPrivate: act.is_private,
       masterColor: master.color,
-      minAge: `${service.min_age}+`,
-      maxAge: `${service.max_age}+`,
+      minAge: `${service.min_age}`,
+      maxAge: `${service.max_age}`,
       comment: act.comment ?? '',
     };
 

@@ -56,8 +56,8 @@ export function transformService(raw: ServiceResponse): Service {
     duration: raw.duration / 60,
     durationMinutes: raw.duration,
     maxCapacity: raw.max_age,
-    minAge: `${raw.min_age}+`,
-    maxAge: `${raw.max_age}+`,
+    minAge: `${raw.min_age}`,
+    maxAge: `${raw.max_age}`,
     defaultAdultPrice: raw.tariffs?.[0]?.price ?? 0,
     description: raw.description,
   };

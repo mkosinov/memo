@@ -146,9 +146,9 @@ describe('transformService', () => {
     expect(result.durationMinutes).toBe(180);
   });
 
-  it('formats minAge as string with + suffix', () => {
+  it('formats minAge as string without + suffix', () => {
     const result = transformService(serviceFixture);
-    expect(result.minAge).toBe('6+');
+    expect(result.minAge).toBe('6');
   });
 
   it('uses max_age as maxCapacity proxy', () => {

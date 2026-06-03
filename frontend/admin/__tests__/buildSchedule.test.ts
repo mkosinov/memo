@@ -11,7 +11,7 @@ const mockServices: Service[] = [
     name: 'Картина маслом',
     duration: 2.5,
     maxCapacity: 8,
-    minAge: '12+',
+    minAge: '12',
     defaultAdultPrice: 3500,
     description: 'Рисование масляными красками',
   },
@@ -20,7 +20,7 @@ const mockServices: Service[] = [
     name: 'Картина акрилом',
     duration: 2,
     maxCapacity: 10,
-    minAge: '6+',
+    minAge: '6',
     defaultAdultPrice: 2800,
     description: 'Рисование акриловыми красками',
   },
@@ -58,7 +58,7 @@ describe('toScheduleItems', () => {
     const result = toScheduleItems(mockActivities, mockServices);
     const a1 = result.find(a => a.id === 'a1')!;
     expect(a1.serviceName).toBe('Картина маслом');
-    expect(a1.minAge).toBe('12+');
+    expect(a1.minAge).toBe('12');
   });
 
   it('preserves existing serviceName on activity when available', () => {
@@ -132,11 +132,11 @@ describe('toScheduleItems', () => {
     const withMinAge: Activity[] = [
       {
         ...mockActivities[0],
-        minAge: '8+',
+        minAge: '8',
       },
     ];
     const result = toScheduleItems(withMinAge, mockServices);
-    expect(result[0].minAge).toBe('8+');
+    expect(result[0].minAge).toBe('8');
   });
 
   it('returns ScheduleItem type (serviceName and minAge are required strings)', () => {
@@ -201,7 +201,7 @@ describe('toScheduleIndex', () => {
         day: 2,
         locationId: 'loc_1',
         serviceName: 'Картина маслом',
-        minAge: '12+',
+        minAge: '12',
       },
     ];
     const idx = toScheduleIndex(threeEnriched, MONDAY);
@@ -236,7 +236,7 @@ describe('toScheduleIndex', () => {
         day: 0,
         locationId: 'loc_1',
         serviceName: 'Картина маслом',
-        minAge: '12+',
+        minAge: '12',
       },
       ...enriched,
     ];
@@ -254,7 +254,7 @@ describe('toScheduleIndex', () => {
         masterId: 'm1',
         locationId: 'loc_1',
         serviceName: 'Картина маслом',
-        minAge: '12+',
+        minAge: '12',
       },
       ...enriched,
     ];

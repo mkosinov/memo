@@ -72,7 +72,7 @@ const mockActivity: Activity = {
   duration: 2.5,
   serviceId: 's1',
   serviceName: 'Картина маслом',
-  minAge: '12+',
+  minAge: '12',
   locationId: 'grand',
   occupied: 3,
   capacity: 8,
@@ -600,6 +600,14 @@ describe('SettingsTab — row layout', () => {
     render(<SettingsTab {...defaultProps} />);
     // minAge='12', maxAge='99' → "12–99" (en dash)
     expect(screen.getByText('12–99')).toBeInTheDocument();
+  });
+
+  it('does not show double plus in age display', () => {
+    const { container } = render(<SettingsTab {...defaultProps} />);
+    const ageDisplay = container.querySelector('[data-testid="age-display"]');
+    // Should show "12–99", NOT "12+–99+" or "12++"
+    expect(ageDisplay?.textContent).toBe('12–99');
+    expect(ageDisplay?.textContent).not.toContain('++');
   });
 
   it('shows color dot next to master names in select', () => {

@@ -19,7 +19,7 @@ const mockActivity: Activity = {
   duration: 2,
   serviceId: 'svc_1',
   serviceName: 'Картина маслом',
-  minAge: '6+',
+  minAge: '6',
   locationId: 'loc_1',
   occupied: 3,
   capacity: 8,

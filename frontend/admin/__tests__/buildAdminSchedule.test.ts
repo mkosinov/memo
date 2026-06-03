@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildAdminSchedule } from '@/lib/joinActivities';
+import { buildAdminSchedule } from '@/lib/buildSchedule';
 import type { ActivityResponse, MasterResponse, ServiceResponse, LocationResponse } from '@memo/api-client';
 
 const MONDAY = new Date('2026-06-01T00:00:00'); // Monday

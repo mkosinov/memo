@@ -1,4 +1,4 @@
-import type { WebScheduleDTO } from '@/app/lib/mappers/join-schedule';
+import type { WebScheduleDTO } from '@/app/lib/mappers/buildSchedule';
 import type { ScheduleView, ScheduleCardView } from '@/app/lib/model/view/schedule';
 import { formatPrice, formatDate, formatDuration } from '@/app/lib/mappers/format';
 

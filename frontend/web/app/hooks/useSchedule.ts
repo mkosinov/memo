@@ -4,7 +4,7 @@ import { useMemo, useCallback } from 'react';
 import { useQueries } from '@tanstack/react-query';
 import { getActivities, getMasters, getServices, getLocations } from '@memo/api-client';
 import type { ScheduleIndex } from '@memo/domain';
-import { joinActivities, type WebScheduleDTO } from '@/app/lib/mappers/join-schedule';
+import { buildWebSchedule, type WebScheduleDTO } from '@/app/lib/mappers/buildSchedule';
 import { toScheduleView } from '@/app/lib/mappers/to-schedule-vm';
 import type { ScheduleView, ScheduleFiltersView } from '@/app/lib/model/view/schedule';
 import type { ActivityResponse, ServiceResponse, MasterResponse, LocationResponse } from '@memo/api-client';
@@ -64,7 +64,7 @@ export function useSchedule(filters: ScheduleFiltersView = {}): UseScheduleResul
     const services = rawData[1] as ServiceResponse[];
     const masters = rawData[2] as MasterResponse[];
     const locations = rawData[3] as LocationResponse[];
-    return joinActivities(
+    return buildWebSchedule(
       activities,
       new Map(services.map((s) => [s.id, s])),
       new Map(masters.map((m) => [m.id, m])),

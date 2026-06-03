@@ -19,6 +19,9 @@ Replace the current simple ActivityModal with a tabbed ActivityDetailsModal that
 ```
 ┌─────────────────────────────────────────────────────────┐
 │  ActivityDetailsModal                                   │
+│  ┌───────────────────────────────────────────────────┐  │
+│  │ Context: МК по рисованию · Сб, 7 июня · 14:00   │  │ ← activity summary header
+│  └───────────────────────────────────────────────────┘  │
 ├────────────┬────────────────────────────────────────────┤
 │ Left Nav   │  Content Area                              │
 │            │                                            │
@@ -40,16 +43,17 @@ Replace the current simple ActivityModal with a tabbed ActivityDetailsModal that
 
 ### 1. "Настройка" (Settings) Tab
 
-Contains the current ActivityModal content:
-- Master (Мастер) — select from artists
-- Service (Услуга) — select from services, auto-fills duration/capacity
-- Location (Локация) — select from locations/studios
-- Day (День) — select from DAYS array
-- Start Time (Начало) — number input 9-21 step 0.5
-- Duration (Длительность) — number input step 0.5
-- Occupied (Занято) — number input
-- Capacity (Вместимость) — number input
-- Private checkbox
+Layout (top to bottom):
+
+1. **Дата и время начала** — single datetime picker (replaces separate "День" + "Начало" fields)
+2. **Услуга** — select from services (auto-fills duration/capacity/tariffs)
+3. **Мастер** — select from artists
+4. **Локация** — select from locations/studios
+5. **Вместимость** — number input
+6. **Длительность** — displayed as HH:MM (e.g. "01:30" not "1.5"). Editable as decimal internally, displayed as HH:MM.
+7. **Приватное событие** — toggle switch (like theme toggle in menubar)
+
+**Removed:** "Occupied" field (computed, not editable).
 
 ### 2. Client Tabs (one per booked client)
 
@@ -231,13 +235,15 @@ Full rename across:
 ## Visual Compliance Checks
 
 - [ ] Modal opens on ActivityCard click with correct activity data
+- [ ] Activity context header shows service name, day, time
 - [ ] Left sidebar shows "Настройка" tab + client tabs + "+" tab
-- [ ] Settings tab contains all current ActivityModal fields
+- [ ] Settings tab: datetime picker, service, master, location, capacity, duration (HH:MM), private toggle
+- [ ] Settings tab: no "Occupied" field
 - [ ] Client tab shows name, phone (readonly), visitors list, payment section
 - [ ] Client tab has link to /client/{id}
 - [ ] "+" tab shows phone input with lookup behavior
 - [ ] "+" tab shows visitor form with tariff selection
 - [ ] Footer shows total cost and remaining balance
-- [ ] Delete button shows Toast with Undo
+- [ ] Delete button shows Toast with Undo (delayed delete)
 - [ ] ActivityCard "+" button opens modal on "+" tab
 - [ ] BookingRecord renamed to Record everywhere

@@ -372,6 +372,7 @@ const validClient = {
   id: 'client-1',
   name: 'Иван Петров',
   phone: '+79991234567',
+  email: null,
   channel: 'phone',
   created_at: '2024-06-01T12:00:00Z',
   updated_at: '2024-06-01T12:00:00Z',
@@ -388,12 +389,6 @@ describe('ClientResponseSchema', () => {
     expect(result.is_active).toBe(true);
   });
 
-  it('parses client with null channel', () => {
-    const data = { ...validClient, channel: null };
-    const result = ClientResponseSchema.parse(data);
-    expect(result.channel).toBeNull();
-  });
-
   it('rejects missing required field', () => {
     const { id, ...without } = validClient;
     expect(() => ClientResponseSchema.parse(without)).toThrow();
@@ -406,7 +401,6 @@ const validPayment = {
   id: 'payment-1',
   record_id: 'record-1',
   amount: 5000,
-  paid: true,
   method: 'card',
   created_at: '2024-06-01T12:00:00Z',
   updated_at: '2024-06-01T12:00:00Z',
@@ -419,7 +413,6 @@ describe('PaymentResponseSchema', () => {
     expect(result.id).toBe('payment-1');
     expect(result.record_id).toBe('record-1');
     expect(result.amount).toBe(5000);
-    expect(result.paid).toBe(true);
     expect(result.method).toBe('card');
     expect(result.is_active).toBe(true);
   });
@@ -428,12 +421,6 @@ describe('PaymentResponseSchema', () => {
     const data = { ...validPayment, method: null };
     const result = PaymentResponseSchema.parse(data);
     expect(result.method).toBeNull();
-  });
-
-  it('parses payment as unpaid', () => {
-    const data = { ...validPayment, paid: false };
-    const result = PaymentResponseSchema.parse(data);
-    expect(result.paid).toBe(false);
   });
 
   it('rejects missing required field', () => {

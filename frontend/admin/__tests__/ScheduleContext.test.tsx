@@ -285,6 +285,15 @@ describe('ScheduleProvider', () => {
   });
 
   it('calls updateActivity mutation when updateActivity is called', async () => {
+    vi.mocked(getMasters).mockResolvedValue([
+      { id: 'm1', first_name: 'Ольга', last_name: 'Середа', color: '#5B8C7A', position: 'мастер', specialty: 'живопись', avatar_url: null, is_active: true, created_at: '2024-01-01', updated_at: '2024-01-01' },
+    ]);
+    vi.mocked(getServices).mockResolvedValue([
+      { id: 's1', title: 'Картина маслом', description: '', image_url: '', specialty: '', min_age: 12, max_age: 99, duration: 120, record_info: '', tariffs: [], tags: [], is_active: true, created_at: '', updated_at: '' },
+    ]);
+    vi.mocked(getLocations).mockResolvedValue([
+      { id: 'alpika', name: 'Альпика', address: 'Альпика, 1 этаж', description: null, capacity: 10, yandex_map_url: null, review_url: null, record_info: null, image_url: null, location_hint: null, is_active: true, created_at: '', updated_at: '' },
+    ]);
     vi.mocked(getActivities).mockResolvedValue([
       { id: 'a1', master_id: 'm1', service_id: 's1', location_id: 'alpika', start: '2024-12-25T10:00:00Z', duration: 120, capacity: 8, is_private: false, comment: null, record_info: null, created_at: '', updated_at: '', is_active: true, occupied: 3 },
     ]);
@@ -311,6 +320,15 @@ describe('ScheduleProvider', () => {
   });
 
   it('calls deleteActivity mutation when deleteActivity is called', async () => {
+    vi.mocked(getMasters).mockResolvedValue([
+      { id: 'm1', first_name: 'Ольга', last_name: 'Середа', color: '#5B8C7A', position: 'мастер', specialty: 'живопись', avatar_url: null, is_active: true, created_at: '2024-01-01', updated_at: '2024-01-01' },
+    ]);
+    vi.mocked(getServices).mockResolvedValue([
+      { id: 's1', title: 'Картина маслом', description: '', image_url: '', specialty: '', min_age: 12, max_age: 99, duration: 120, record_info: '', tariffs: [], tags: [], is_active: true, created_at: '', updated_at: '' },
+    ]);
+    vi.mocked(getLocations).mockResolvedValue([
+      { id: 'alpika', name: 'Альпика', address: 'Альпика, 1 этаж', description: null, capacity: 10, yandex_map_url: null, review_url: null, record_info: null, image_url: null, location_hint: null, is_active: true, created_at: '', updated_at: '' },
+    ]);
     vi.mocked(getActivities).mockResolvedValue([
       { id: 'a1', master_id: 'm1', service_id: 's1', location_id: 'alpika', start: '2024-12-25T10:00:00Z', duration: 120, capacity: 8, is_private: false, comment: null, record_info: null, created_at: '', updated_at: '', is_active: true, occupied: 3 },
     ]);
@@ -330,18 +348,13 @@ describe('ScheduleProvider', () => {
     });
   });
 
-  it('copyLastWeek warns and does not throw', () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  it('copyLastWeek does not throw', () => {
     renderWithContext();
     expect(() => {
       act(() => {
         screen.getByTestId('copy-last-week').click();
       });
     }).not.toThrow();
-    expect(warnSpy).toHaveBeenCalledWith(
-      'copyLastWeek not yet implemented with API data',
-    );
-    warnSpy.mockRestore();
   });
 
   it('sets loading to false after data resolves', async () => {

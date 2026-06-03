@@ -1,35 +1,42 @@
 import { toScheduleView, toCardProps } from '../to-schedule-vm';
-import type { ScheduleDTO } from '@/app/lib/model/dto/schedule';
+import type { WebScheduleDTO } from '@/app/lib/mappers/join-schedule';
 import type { ScheduleView, ScheduleCardView } from '@/app/lib/model/view/schedule';
 
-function makeRawSchedule(overrides?: Partial<ScheduleDTO>): ScheduleDTO {
+function makeRawSchedule(overrides?: Partial<WebScheduleDTO>): WebScheduleDTO {
   return {
     id: 'sched-1',
-    title: 'Морской пейзаж',
-    tags: ['хит', 'для детей'],
+    masterId: 'master-1',
+    serviceId: 'service-1',
+    locationId: 'alpika',
+    masterName: 'Ольга Середа',
+    serviceTitle: 'Морской пейзаж',
+    date: '2026-05-20',
+    time: '14:00',
+    durationMinutes: 150,
+    occupied: 3,
+    capacity: 10,
+    locationName: 'Альпика',
+    locationAddress: 'Альпика, 1 этаж',
+    locationHint: undefined,
+    materialHint: undefined,
+    priceMin: 3500,
+    priceMax: 5500,
+    priceHint: undefined,
     image_url: 'https://example.com/image.jpg',
+    tags: ['хит', 'для детей'],
+    masterAvatar: 'https://example.com/avatar.jpg',
+    // Web-only fields
     photos: [
       { url: 'https://example.com/photo1.jpg', isPublic: true, tags: ['интерьер'] },
     ],
-    time: '14:00',
-    duration_minutes: 150,
-    location_id: 'alpika',
-    location_name: 'Альпика',
-    location_address: 'Альпика, 1 этаж',
-    guests_count: 3,
     material: 'Масло',
     size: '30x40 см',
-    price_min: 3500,
-    price_max: 5500,
-    master_name: 'Ольга Середа',
-    master_avatar: 'https://example.com/avatar.jpg',
-    date: '2026-05-20',
     ...overrides,
   };
 }
 
 describe('toScheduleView', () => {
-  it('converts snake_case to camelCase', () => {
+  it('converts DTO fields to camelCase ViewModel', () => {
     const raw = makeRawSchedule();
     const vm = toScheduleView(raw);
 
@@ -47,12 +54,12 @@ describe('toScheduleView', () => {
   });
 
   it('formats single price when min equals max', () => {
-    const vm = toScheduleView(makeRawSchedule({ price_min: 3500, price_max: 3500 }));
+    const vm = toScheduleView(makeRawSchedule({ priceMin: 3500, priceMax: 3500 }));
     expect(vm.priceFormatted).toBe('3 500 ₽');
   });
 
   it('formats duration from minutes', () => {
-    const vm = toScheduleView(makeRawSchedule({ duration_minutes: 150 }));
+    const vm = toScheduleView(makeRawSchedule({ durationMinutes: 150 }));
     expect(vm.duration).toBe('2 ч 30 мин');
   });
 
@@ -95,7 +102,7 @@ describe('toScheduleView', () => {
   });
 
   it('handles optional price hint', () => {
-    const vmWith = toScheduleView(makeRawSchedule({ price_hint: 'Взрослый: 3500₽, Детский: 2500₽' }));
+    const vmWith = toScheduleView(makeRawSchedule({ priceHint: 'Взрослый: 3500₽, Детский: 2500₽' }));
     expect(vmWith.priceHint).toBe('Взрослый: 3500₽, Детский: 2500₽');
 
     const vmWithout = toScheduleView(makeRawSchedule());
@@ -103,7 +110,7 @@ describe('toScheduleView', () => {
   });
 
   it('handles optional material hint', () => {
-    const vmWith = toScheduleView(makeRawSchedule({ material_hint: 'Все материалы включены' }));
+    const vmWith = toScheduleView(makeRawSchedule({ materialHint: 'Все материалы включены' }));
     expect(vmWith.materialHint).toBe('Все материалы включены');
 
     const vmWithout = toScheduleView(makeRawSchedule());
@@ -111,7 +118,7 @@ describe('toScheduleView', () => {
   });
 
   it('handles optional location hint', () => {
-    const vmWith = toScheduleView(makeRawSchedule({ location_hint: '5 минут от входа' }));
+    const vmWith = toScheduleView(makeRawSchedule({ locationHint: '5 минут от входа' }));
     expect(vmWith.locationHint).toBe('5 минут от входа');
 
     const vmWithout = toScheduleView(makeRawSchedule());
@@ -123,28 +130,30 @@ describe('toScheduleView', () => {
       { id: 'sched-2', date: '2026-05-22', time: '14:00' },
       { id: 'sched-3', date: '2026-05-25', time: '11:00' },
     ];
-    const vm = toScheduleView(makeRawSchedule({ next_times: nextTimes }));
+    const vm = toScheduleView(makeRawSchedule());
+    (vm as unknown as Record<string, unknown>).nextTimes = nextTimes;
     expect(vm.nextTimes).toEqual(nextTimes);
   });
 
   it('handles empty next_times', () => {
-    const vm = toScheduleView(makeRawSchedule({ next_times: [] }));
+    const vm = toScheduleView(makeRawSchedule());
+    (vm as unknown as Record<string, unknown>).nextTimes = [];
     expect(vm.nextTimes).toEqual([]);
   });
 
   it('handles optional master avatar', () => {
-    const vmWith = toScheduleView(makeRawSchedule({ master_avatar: 'https://example.com/av.jpg' }));
+    const vmWith = toScheduleView(makeRawSchedule({ masterAvatar: 'https://example.com/av.jpg' }));
     expect(vmWith.masterAvatar).toBe('https://example.com/av.jpg');
 
-    const vmWithout = toScheduleView(makeRawSchedule({ master_avatar: undefined }));
+    const vmWithout = toScheduleView(makeRawSchedule({ masterAvatar: undefined }));
     expect(vmWithout.masterAvatar).toBeUndefined();
   });
 
   it('handles optional location address', () => {
-    const vmWith = toScheduleView(makeRawSchedule({ location_address: 'ул. Тестовая, 1' }));
+    const vmWith = toScheduleView(makeRawSchedule({ locationAddress: 'ул. Тестовая, 1' }));
     expect(vmWith.location.address).toBe('ул. Тестовая, 1');
 
-    const vmWithout = toScheduleView(makeRawSchedule({ location_address: undefined }));
+    const vmWithout = toScheduleView(makeRawSchedule({ locationAddress: undefined }));
     expect(vmWithout.location.address).toBeUndefined();
   });
 

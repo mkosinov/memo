@@ -68,6 +68,19 @@ class GenericRepository:
         await session.refresh(instance)
         return instance
 
+    async def patch(
+        self, session: AsyncSession, table: type[ModelType], id: str, data: dict
+    ) -> ModelType | None:
+        """Partial-update a record from a dict of fields. Returns None if not found."""
+        instance = await self.get(session, table, id)
+        if not instance:
+            return None
+        for key, value in data.items():
+            setattr(instance, key, value)
+        await session.flush()
+        await session.refresh(instance)
+        return instance
+
     async def delete(
         self, session: AsyncSession, table: type[ModelType], id: str
     ) -> bool:

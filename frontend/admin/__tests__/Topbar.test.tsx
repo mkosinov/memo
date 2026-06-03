@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { render, screen } from '@testing-library/react';
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Topbar } from '../app/components/layout/Topbar';
@@ -14,6 +14,17 @@ vi.mock('@memo/api-client', () => ({
   createActivity: vi.fn(),
   updateActivity: vi.fn(),
   deleteActivity: vi.fn(),
+}));
+
+vi.mock('@/contexts/ScheduleContext', () => ({
+  useSchedule: vi.fn(() => ({
+    artists: [],
+    locations: [],
+    filterMasterId: null,
+    filterLocationId: null,
+    setFilterMasterId: vi.fn(),
+    setFilterLocationId: vi.fn(),
+  })),
 }));
 
 function renderWithProviders() {
@@ -33,7 +44,6 @@ function renderWithProviders() {
 
 describe('Topbar', () => {
   beforeEach(() => {
-    // Reset any document state between tests
     document.documentElement.removeAttribute('data-theme');
   });
 
@@ -45,10 +55,8 @@ describe('Topbar', () => {
 
   it('renders date range text', () => {
     renderWithProviders();
-    // Date range should contain day numbers and a month name
     const dateRange = screen.getByTestId('date-range');
     expect(dateRange).toBeInTheDocument();
-    // Should contain a dash or en-dash between dates
     expect(dateRange.textContent).toMatch(/\d+/);
   });
 
@@ -65,5 +73,11 @@ describe('Topbar', () => {
   it('does not render delete mode toggle (moved to StampPanel)', () => {
     renderWithProviders();
     expect(screen.queryByRole('button', { name: /Режим удаления/i })).not.toBeInTheDocument();
+  });
+
+  it('renders filter selects', () => {
+    renderWithProviders();
+    expect(screen.getByLabelText('Фильтр по мастеру')).toBeInTheDocument();
+    expect(screen.getByLabelText('Фильтр по локации')).toBeInTheDocument();
   });
 });

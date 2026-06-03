@@ -1,4 +1,4 @@
-import type { ScheduleDTO } from '@/app/lib/model/dto/schedule';
+import type { WebScheduleDTO } from '@/app/lib/mappers/join-schedule';
 import type { ScheduleView, ScheduleCardView } from '@/app/lib/model/view/schedule';
 import { formatPrice, formatDate, formatDuration } from '@/app/lib/mappers/format';
 
@@ -15,35 +15,35 @@ function getTagColors(tags: string[]): string[] {
   return tags.map(t => TAG_COLORS[t] || '#888888');
 }
 
-export function toScheduleView(raw: ScheduleDTO): ScheduleView {
+export function toScheduleView(raw: WebScheduleDTO): ScheduleView {
   return {
     id: raw.id,
-    title: raw.title,
-    tags: raw.tags,
-    imageUrl: raw.image_url,
+    title: raw.serviceTitle,
+    tags: raw.tags ?? [],
+    imageUrl: raw.image_url ?? '',
     photos: raw.photos,
     time: raw.time,
-    duration: formatDuration(raw.duration_minutes),
+    duration: formatDuration(raw.durationMinutes),
     location: {
-      id: raw.location_id,
-      name: raw.location_name,
-      address: raw.location_address,
+      id: raw.locationId,
+      name: raw.locationName,
+      address: raw.locationAddress,
     },
-    guestsCount: raw.guests_count,
+    guestsCount: raw.occupied,
     material: raw.material || '',
     size: raw.size || '',
-    priceMin: raw.price_min,
-    priceMax: raw.price_max,
-    masterName: raw.master_name,
-    masterAvatar: raw.master_avatar,
+    priceMin: raw.priceMin,
+    priceMax: raw.priceMax,
+    masterName: raw.masterName,
+    masterAvatar: raw.masterAvatar,
     date: raw.date,
-    priceFormatted: formatPrice(raw.price_min, raw.price_max),
+    priceFormatted: formatPrice(raw.priceMin, raw.priceMax),
     dateFormatted: formatDate(raw.date),
-    tagColors: getTagColors(raw.tags),
-    nextTimes: raw.next_times,
-    priceHint: raw.price_hint,
-    materialHint: raw.material_hint,
-    locationHint: raw.location_hint,
+    tagColors: getTagColors(raw.tags ?? []),
+    nextTimes: (raw as unknown as Record<string, unknown>).nextTimes as { id: string; date: string; time: string }[] | undefined,
+    priceHint: raw.priceHint,
+    materialHint: raw.materialHint,
+    locationHint: raw.locationHint,
   };
 }
 

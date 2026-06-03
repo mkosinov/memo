@@ -12,8 +12,8 @@ const mockArtists = [
 ];
 
 const mockServices = [
-  { id: 's1', name: 'Картина маслом', duration: 2.5, maxCapacity: 8, minAge: '12+', defaultAdultPrice: 3500, defaultChildPrice: 2500, defaultIndividualPrice: 5000 },
-  { id: 's2', name: 'Картина акрилом', duration: 2, maxCapacity: 10, minAge: '6+', defaultAdultPrice: 2800, defaultChildPrice: 2000, defaultIndividualPrice: 4000 },
+  { id: 's1', name: 'Картина маслом', duration: 2.5, maxCapacity: 8, minAge: '12+', maxAge: '99+', defaultAdultPrice: 3500, defaultChildPrice: 2500, defaultIndividualPrice: 5000 },
+  { id: 's2', name: 'Картина акрилом', duration: 2, maxCapacity: 10, minAge: '6+', maxAge: '99+', defaultAdultPrice: 2800, defaultChildPrice: 2000, defaultIndividualPrice: 4000 },
 ];
 
 const mockStudios = [
@@ -52,6 +52,7 @@ beforeEach(() => {
     services: mockServices,
     locations: mockStudios,
     activities: [],
+    scheduleIndex: { byId: new Map(), byDate: new Map(), byMasterId: new Map(), byLocation: { all: { byDate: new Map(), byServiceId: new Map() } } },
     currentWeek: new Date(),
     stamp: { masterId: null, serviceId: null, locations: new Set(), ready: false },
     setCurrentWeek: vi.fn(),
@@ -62,6 +63,10 @@ beforeEach(() => {
     copyLastWeek: vi.fn(),
     loading: false,
     error: null,
+    filterMasterId: null,
+    filterLocationId: null,
+    setFilterMasterId: vi.fn(),
+    setFilterLocationId: vi.fn(),
   });
 });
 

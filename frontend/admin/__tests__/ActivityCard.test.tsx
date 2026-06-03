@@ -190,6 +190,7 @@ beforeEach(() => {
   });
   mockUseSchedule.mockReturnValue({
     activities: [],
+    scheduleIndex: { byId: new Map(), byDate: new Map(), byMasterId: new Map(), byLocation: { all: { byDate: new Map(), byServiceId: new Map() } } },
     artists: [],
     services: [],
     locations: [],
@@ -203,6 +204,10 @@ beforeEach(() => {
     copyLastWeek: vi.fn(),
     loading: false,
     error: null,
+    filterMasterId: null,
+    filterLocationId: null,
+    setFilterMasterId: vi.fn(),
+    setFilterLocationId: vi.fn(),
   });
 });
 

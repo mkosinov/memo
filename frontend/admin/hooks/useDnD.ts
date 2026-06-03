@@ -121,6 +121,7 @@ export function useDnD({ activities, addActivity, updateActivity, showToast }: U
           masterId: activeDragActivity.masterId,
           startTime: newStartTime,
           duration: activeDragActivity.duration,
+          durationMinutes: activeDragActivity.durationMinutes ?? activeDragActivity.duration * 60,
           serviceId: activeDragActivity.serviceId,
           serviceName: activeDragActivity.serviceName,
           minAge: activeDragActivity.minAge,

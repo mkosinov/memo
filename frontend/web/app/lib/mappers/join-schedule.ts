@@ -1,15 +1,19 @@
-import type { ScheduleDTO } from '@/app/lib/model/dto/schedule';
+import { ScheduleDTO, buildSchedule, resolveById } from '@memo/domain';
+import type { ScheduleIndex } from '@memo/domain';
 import type { ActivityResponse, ServiceResponse, MasterResponse, LocationResponse } from '@memo/api-client';
+import type { PhotoDTO } from '@/app/lib/model/dto/schedule';
 
-export interface LocationIndex {
-  byDate: Map<string, string[]>;
-  byServiceId: Map<string, string[]>;
+// ─── Re-export for backward compatibility ──────────────────────────────────
+export type { ScheduleIndex } from '@memo/domain';
+
+// ─── Web-specific extension ────────────────────────────────────────────────
+export interface WebScheduleDTO extends ScheduleDTO {
+  photos: PhotoDTO[];
+  material: string;
+  size: string;
 }
 
-export interface ScheduleIndex {
-  byId: Map<string, ScheduleDTO>;
-  byLocation: Record<string, LocationIndex>;
-}
+// ─── Helper functions ──────────────────────────────────────────────────────
 
 function extractTime(iso: string): string {
   return iso.slice(11, 16); // "2026-06-01T10:00:00" → "10:00"
@@ -35,16 +39,17 @@ function buildTagSet(serviceTags: { tag: string }[]): string[] {
   return result;
 }
 
-export function joinActivities(
+// ─── Main builder ──────────────────────────────────────────────────────────
+
+export function buildWebSchedule(
   activities: ActivityResponse[],
   services: Map<string, ServiceResponse>,
   masters: Map<string, MasterResponse>,
   locations: Map<string, LocationResponse>,
-): ScheduleIndex {
-  const byId = new Map<string, ScheduleDTO>();
-  const locationIds = new Set<string>();
+) {
+  // Phase 1: Build all WebScheduleDTOs
+  const dtos: WebScheduleDTO[] = [];
 
-  // Phase 1: Build all ScheduleDTOs
   for (const act of activities) {
     const service = services.get(act.service_id);
     const master = masters.get(act.master_id);
@@ -57,82 +62,66 @@ export function joinActivities(
     const priceMin = prices.length > 0 ? Math.min(...prices) : 0;
     const priceMax = prices.length > 0 ? Math.max(...prices) : 0;
 
-    const dto: ScheduleDTO = {
+    const dto: WebScheduleDTO = {
+      // Domain fields
       id: act.id,
-      title: service.title,
-      tags: buildTagSet(service.tags ?? []),
-      image_url: service.image_url || '',
-      photos: [],
+      masterId: act.master_id,
+      serviceId: act.service_id,
+      locationId: act.location_id,
+      masterName: `${master.first_name} ${master.last_name}`,
+      serviceTitle: service.title,
+      date: extractDate(act.start),
       time: extractTime(act.start),
-      duration_minutes: act.duration,
-      location_id: act.location_id,
-      location_name: location.name,
-      location_address: location.address ?? undefined,
-      guests_count: act.occupied,
+      durationMinutes: act.duration,
+      occupied: act.occupied,
+      capacity: act.capacity,
+      locationName: location.name,
+      locationAddress: location.address ?? undefined,
+      locationHint: location.location_hint ?? undefined,
+      materialHint: service.material_hint ?? undefined,
+      priceMin,
+      priceMax,
+      priceHint: computePriceHint(tariffs),
+      image_url: service.image_url || '',
+      tags: buildTagSet(service.tags ?? []),
+      masterAvatar: master.avatar_url ?? undefined,
+      // Web-only fields
+      photos: [],
       material: service.material_hint?.split(',')[0]?.trim() ?? '',
       size: '',
-      price_min: priceMin,
-      price_max: priceMax,
-      master_name: `${master.first_name} ${master.last_name}`,
-      master_avatar: master.avatar_url ?? undefined,
-      date: extractDate(act.start),
-      price_hint: computePriceHint(tariffs),
-      material_hint: service.material_hint ?? undefined,
-      location_hint: location.location_hint ?? undefined,
     };
 
-    byId.set(act.id, dto);
-    locationIds.add(act.location_id);
+    dtos.push(dto);
   }
 
-  // Phase 2: Build location indexes
-  const allLocIds = ['all', ...Array.from(locationIds)];
-  const byLocation: Record<string, LocationIndex> = {};
-
-  allLocIds.forEach(locId => {
-    byLocation[locId] = {
-      byDate: new Map(),
-      byServiceId: new Map(),
-    };
+  // Phase 2: Build generic schedule index
+  const index = buildSchedule(dtos, {
+    getDateKey: item => item.date,
+    getServiceKey: item => item.serviceTitle,
   });
 
-  byId.forEach((dto, id) => {
-    const locKeys = ['all', dto.location_id];
-    locKeys.forEach(locKey => {
-      const idx = byLocation[locKey];
-
-      // byDate
-      const dateArr = idx.byDate.get(dto.date) ?? [];
-      dateArr.push(id);
-      idx.byDate.set(dto.date, dateArr);
-
-      // byServiceId — use title as key
-      const svcKey = dto.title;
-      const svcArr = idx.byServiceId.get(svcKey) ?? [];
-      svcArr.push(id);
-      idx.byServiceId.set(svcKey, svcArr);
-    });
-  });
-
-  // Phase 3: Compute next_times for each DTO
+  // Phase 3: nextTimes post-processing
   const today = new Date();
   const todayStr = today.toISOString().slice(0, 10);
 
-  byId.forEach((dto, id) => {
-    const locIdx = byLocation[dto.location_id];
-    const svcIds = locIdx.byServiceId.get(dto.title) ?? [];
-
+  for (const dto of dtos) {
+    const locIdx = index.byLocation[dto.locationId];
+    if (!locIdx) continue;
+    const svcIds = locIdx.byServiceId.get(dto.serviceTitle) ?? [];
     const nextIds = svcIds
-      .map(sid => byId.get(sid)!)
-      .filter(a => a.id !== id && a.date >= todayStr && (a.date > dto.date || (a.date === dto.date && a.time > dto.time)))
+      .map(sid => index.byId.get(sid)!)
+      .filter(a => a.id !== dto.id && a.date >= todayStr && (a.date > dto.date || (a.date === dto.date && a.time > dto.time)))
       .sort((a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time))
       .slice(0, 6)
       .map(a => ({ id: a.id, date: a.date, time: a.time }));
-
     if (nextIds.length > 0) {
-      dto.next_times = nextIds;
+      (dto as unknown as Record<string, unknown>).nextTimes = nextIds;
     }
-  });
+  }
 
-  return { byId, byLocation };
+  return index;
 }
+
+// ─── Backward compatibility aliases ────────────────────────────────────────
+export { buildWebSchedule as joinActivities };
+export { resolveById };

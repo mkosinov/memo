@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.db import SessionDep
 from src.schemas.activity import (
     ActivityCreate,
+    ActivityPatch,
     ActivityResponse,
     ActivityUpdate,
 )
@@ -82,6 +83,20 @@ async def update_activity(
 ) -> ActivityResponse:
     """Full-update an activity by ID (PUT, not PATCH)."""
     activity = await service.update(db_session=session, id=activity_id, data=data)
+    if not activity:
+        raise HTTPException(status_code=404, detail="Activity not found")
+    return await _to_response(service, db_session=session, activity=activity)
+
+
+@router.patch("/{activity_id}", response_model=ActivityResponse)
+async def partial_update_activity(
+    activity_id: str,
+    patch: ActivityPatch,
+    service: _ServiceDep,
+    session: SessionDep,
+) -> ActivityResponse:
+    """Partially update an activity — only fields sent in the body are updated."""
+    activity = await service.patch(db_session=session, id=activity_id, data=patch)
     if not activity:
         raise HTTPException(status_code=404, detail="Activity not found")
     return await _to_response(service, db_session=session, activity=activity)

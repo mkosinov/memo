@@ -23,7 +23,8 @@ export function ActivityCard({ activity, artist, studios = [], style, onEdit, is
   const [deleting, setDeleting] = useState(false);
   const deletingRef = useRef(false);
   const topPx = (activity.startTime - HOURS_START) * CELL_HEIGHT * 2;
-  const heightPx = Math.max(activity.duration * 120 - 10, 52);
+  const durMinutes = activity.durationMinutes ?? activity.duration * 60;
+  const heightPx = Math.max((durMinutes / 60) * 120 - 10, 52);
   const fillPct = activity.capacity > 0 ? Math.min(activity.occupied / activity.capacity, 1) : 0;
 
   // Collapsing

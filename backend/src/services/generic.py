@@ -69,6 +69,17 @@ class GenericService(Generic[CreateSchemaT, UpdateSchemaT, ResponseSchemaT]):
             return None
         return self._response_schema.model_validate(orm)
 
+    async def patch(
+        self, db_session: AsyncSession, id: str, data: BaseModel
+    ) -> ResponseSchemaT | None:
+        """Partial-update a record. Only fields explicitly sent by the client are applied."""
+        orm = await self._repository.patch(
+            db_session, self._model, id, data.model_dump(exclude_unset=True)
+        )
+        if orm is None:
+            return None
+        return self._response_schema.model_validate(orm)
+
     async def delete(self, db_session: AsyncSession, id: str) -> bool:
         """Soft-delete a record.  Returns ``True`` if deleted, ``False`` if not found."""
         return await self._repository.delete(db_session, self._model, id)

@@ -46,12 +46,13 @@ Replace the current simple ActivityModal with a tabbed ActivityDetailsModal that
 Layout (top to bottom):
 
 1. **Дата и время начала** — single datetime picker (replaces separate "День" + "Начало" fields)
-2. **Услуга** — select from services (auto-fills duration/capacity/tariffs)
-3. **Мастер** — select from artists
-4. **Локация** — select from locations/studios
-5. **Вместимость** — number input
-6. **Длительность** — displayed as HH:MM (e.g. "01:30" not "1.5"). Editable as decimal internally, displayed as HH:MM.
-7. **Приватное событие** — toggle switch (like theme toggle in menubar)
+2. **Услуга** — select from services (auto-fills duration/capacity/tariffs). Right of service: display min_age–max_age range from service (read-only, e.g. "6–12 лет")
+3. **Мастер** — select from artists. Each master shows color dot + name (like menubar legend)
+4. **Тарифы услуги** — read-only display of available tariffs (for information)
+5. **Локация** — select from locations/studios
+6. **Вместимость** — number input
+7. **Длительность** — HH:MM input (e.g. "01:30"). Stored as minutes internally, displayed as HH:MM.
+8. **Приватное событие** — toggle switch (like theme toggle in menubar)
 
 **Removed:** "Occupied" field (computed, not editable).
 

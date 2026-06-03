@@ -144,6 +144,19 @@ const count = queryDB("SELECT COUNT(*) FROM records WHERE client_id = 'c1'");
 expect(count).toBe('1');
 ```
 
+### 1.6 Channel Enum (Bug Fix Required)
+
+**Current:** `channel` is `String(50)` — accepts any value.
+**Required:** Enum with only 3 values: `telegram`, `max`, `whatsapp`.
+
+Files to change:
+- `packages/domain/src/index.ts` — add `ChannelSchema = z.enum(['telegram', 'max', 'whatsapp'])`
+- `backend/src/models/client.py` — change to `Mapped[str]` with enum check
+- `backend/src/schemas/client.py` — validate against enum
+- `backend/src/seed/seed.py` — fix seed data (remove "instagram", "vk", "website")
+- `frontend/admin/app/components/modal/ActivityDetailsModal/NewBookingTab.tsx` — already correct (telegram/max/whatsapp)
+- E2E test factories — use valid channel values
+
 ---
 
 ## Part 2: Backend API Tests
@@ -202,6 +215,8 @@ backend/tests/
 | 6 | Update client name | 200, name changed |
 | 7 | Delete client with active records | 400 or cascade behavior |
 | 8 | List clients with special characters in name | 200, no SQL injection |
+| 9 | Create client with invalid channel value | 422 validation error |
+| 10 | Create client with valid channel enum | 201, channel stored correctly |
 
 #### Payments (test_api_payments.py)
 

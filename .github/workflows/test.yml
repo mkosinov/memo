@@ -91,7 +91,7 @@ jobs:
 
       - name: Start frontend
         working-directory: frontend/admin
-        run: pnpm run dev -- -p 3001 &
+        run: npx next dev -p 3001 &
         env:
           TEST_DB_PATH: ../../backend/test_memo.db
 

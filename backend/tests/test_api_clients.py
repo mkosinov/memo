@@ -144,6 +144,43 @@ class TestClientsCrud:
         )
         assert response.status_code == 404
 
+    def test_patch_client_updates_name(self, api_client) -> None:
+        """PATCH /api/v1/clients/{id} partially updates a client."""
+        create_resp = api_client.post("/api/v1/clients", json=CLIENT_PAYLOAD)
+        client_id = create_resp.json()["id"]
+        original_phone = create_resp.json()["phone"]
+
+        response = api_client.patch(f"/api/v1/clients/{client_id}", json={"name": "Updated Name"})
+        assert response.status_code == 200
+        body = response.json()
+        assert body["name"] == "Updated Name"
+        assert body["phone"] == original_phone  # unchanged
+
+    def test_patch_client_not_found(self, api_client) -> None:
+        """PATCH /api/v1/clients/{fake_id} returns 404."""
+        response = api_client.patch("/api/v1/clients/nonexistent", json={"name": "Test"})
+        assert response.status_code == 404
+
+    def test_patch_client_updates_channel(self, api_client) -> None:
+        """PATCH /api/v1/clients/{id} can update channel field."""
+        create_resp = api_client.post("/api/v1/clients", json=CLIENT_PAYLOAD)
+        client_id = create_resp.json()["id"]
+
+        response = api_client.patch(f"/api/v1/clients/{client_id}", json={"channel": "whatsapp"})
+        assert response.status_code == 200
+        assert response.json()["channel"] == "whatsapp"
+
+    def test_patch_client_empty_body(self, api_client) -> None:
+        """PATCH /api/v1/clients/{id} with empty body returns unchanged client."""
+        create_resp = api_client.post("/api/v1/clients", json=CLIENT_PAYLOAD)
+        client_id = create_resp.json()["id"]
+
+        response = api_client.patch(f"/api/v1/clients/{client_id}", json={})
+        assert response.status_code == 200
+        body = response.json()
+        assert body["name"] == CLIENT_PAYLOAD["name"]
+        assert body["phone"] == CLIENT_PAYLOAD["phone"]
+
     def test_list_visitors_for_client(self, api_client) -> None:
         """GET /api/clients/{id}/visitors returns visitors for that client."""
         # Create a client

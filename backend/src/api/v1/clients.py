@@ -6,7 +6,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from src.db import SessionDep
-from src.schemas.client import ClientCreate, ClientResponse, ClientUpdate
+from src.schemas.client import ClientCreate, ClientPatch, ClientResponse, ClientUpdate
 from src.schemas.visitor import VisitorResponse
 from src.services.client import get_client_service
 from src.services.generic import GenericService
@@ -86,6 +86,20 @@ async def update_client(
 ) -> ClientResponse:
     """Full-update a client by ID (PUT, not PATCH)."""
     client = await service.update(db_session=session, id=client_id, data=data)
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+    return client
+
+
+@router.patch("/{client_id}", response_model=ClientResponse)
+async def patch_client(
+    client_id: str,
+    data: ClientPatch,
+    service: _ServiceDep,
+    session: SessionDep,
+) -> ClientResponse:
+    """Partial-update a client by ID (PATCH)."""
+    client = await service.patch(db_session=session, id=client_id, data=data)
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
     return client

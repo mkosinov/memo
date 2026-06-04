@@ -124,12 +124,10 @@ test.describe('Records Page — Table and Filters', () => {
   // ── 6. Filter by status — table updates ──────────────────────────────────
 
   test('6. Filter by status — table updates', async ({ page, request }) => {
-    // Create test data with known status
+    // Create test data — new records default to visit status "waiting"
     const client = await createTestClient(request);
     const activity = await createTestActivity(request);
-    const record = await createTestRecord(request, activity.id, client.id, {
-      status: 'waiting',
-    });
+    const record = await createTestRecord(request, activity.id, client.id);
 
     let recordId = record.id;
     let clientId = client.id;
@@ -420,8 +418,23 @@ test.describe('Records Page — Table and Filters', () => {
   test('15. Status badges — display correct text for statuses', async ({ page, request }) => {
     const client = await createTestClient(request);
     const activity = await createTestActivity(request);
-    const record = await createTestRecord(request, activity.id, client.id, {
-      status: 'visited',
+    const record = await createTestRecord(request, activity.id, client.id);
+
+    // Update visit status to "visited" — RecordCreate only accepts RecordStatus,
+    // not VisitStatus, so we update via PUT with the desired visit status.
+    const BACKEND = process.env.BACKEND_URL || 'http://localhost:8000';
+    await request.put(`${BACKEND}/api/v1/records/${record.id}`, {
+      data: {
+        activity_id: activity.id,
+        client_id: client.id,
+        status: record.status,
+        comment: record.comment,
+        visits: record.visits.map((v: { visitor_id: string; price: number }) => ({
+          visitor_id: v.visitor_id,
+          price: v.price,
+          status: 'visited',
+        })),
+      },
     });
 
     let recordId = record.id;
@@ -500,12 +513,10 @@ test.describe('Records Page — Table and Filters', () => {
     page,
     request,
   }) => {
-    // Create test data
+    // Create test data — new records default to visit status "waiting"
     const client = await createTestClient(request, { name: 'Compound Filter' });
     const activity = await createTestActivity(request);
-    const record = await createTestRecord(request, activity.id, client.id, {
-      status: 'waiting',
-    });
+    const record = await createTestRecord(request, activity.id, client.id);
 
     let recordId = record.id;
     let clientId = client.id;

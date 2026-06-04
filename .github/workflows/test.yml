@@ -91,7 +91,13 @@ jobs:
           cd ../frontend/admin
           npx next dev -p 3001 &
           FRONTEND_PID=$!
-          npx wait-on http://localhost:8000/api/v1/health http://localhost:3001 --timeout 60000
+          npx wait-on http://localhost:3001 --timeout 60000
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8000/api/v1/health > /dev/null 2>&1; then
+              break
+            fi
+            sleep 2
+          done
           pnpm exec playwright test
           EXIT_CODE=$?
           kill $BACKEND_PID $FRONTEND_PID 2>/dev/null || true

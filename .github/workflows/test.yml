@@ -103,3 +103,4 @@ jobs:
         env:
           DATABASE_URL: sqlite+aiosqlite:///./test_memo.db
           TEST_DB_PATH: ../../backend/test_memo.db
+          NEXT_PUBLIC_API_URL: http://127.0.0.1:8000

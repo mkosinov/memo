@@ -75,9 +75,12 @@
 - GitHub Actions: pytest + vitest ✅
 - Coverage threshold 80%
 - Test/Dev DB separation
+- CORS для E2E ✅
 
-**Не работает:**
-- E2E tests — 37/48 падают (schedule не грузит данные)
+**Работает частично:**
+- E2E tests — 33/48 pass
+  - Visual regression — нет baseline скриншотов
+  - Нужно добавить baseline скриншоты в репозиторий
 
 ---
 

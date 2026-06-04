@@ -166,3 +166,14 @@ export async function waitForRecordsReady(page: Page) {
     )
     .catch(() => {});
 }
+
+/**
+ * Wait for clients page to load with table or empty state.
+ * Navigates to /clients and waits for the heading and content.
+ */
+export async function waitForClientsReady(page: Page) {
+  await page.goto('/clients');
+  await page.waitForSelector('h1:has-text("Клиенты")', { timeout: 15_000 });
+  // Wait for either table rows or the "no clients" empty state
+  await page.waitForSelector('table tbody, p:has-text("Нет клиентов")', { timeout: 15_000 });
+}

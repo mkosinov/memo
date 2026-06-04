@@ -4,23 +4,24 @@ import { useState, useEffect, useCallback } from 'react';
 import type { ClientWithStats } from '@memo/api-client';
 
 interface ClientInfoTabProps {
-  client: ClientWithStats;
+  client: ClientWithStats | null;
+  mode?: 'view' | 'create';
   onSave: (data: Partial<ClientWithStats>) => Promise<void>;
-  onDelete: () => void;
+  onDelete?: () => void;
 }
 
-export function ClientInfoTab({ client, onSave, onDelete }: ClientInfoTabProps) {
-  const [name, setName] = useState(client.name || '');
-  const [phone, setPhone] = useState(client.phone || '');
-  const [email, setEmail] = useState(client.email || '');
-  const [channel, setChannel] = useState(client.channel || '');
+export function ClientInfoTab({ client, mode = 'view', onSave, onDelete }: ClientInfoTabProps) {
+  const [name, setName] = useState(client?.name || '');
+  const [phone, setPhone] = useState(client?.phone || '');
+  const [email, setEmail] = useState(client?.email || '');
+  const [channel, setChannel] = useState(client?.channel || '');
   const [hasChanges, setHasChanges] = useState(false);
 
   useEffect(() => {
-    setName(client.name || '');
-    setPhone(client.phone || '');
-    setEmail(client.email || '');
-    setChannel(client.channel || '');
+    setName(client?.name || '');
+    setPhone(client?.phone || '');
+    setEmail(client?.email || '');
+    setChannel(client?.channel || '');
     setHasChanges(false);
   }, [client]);
 
@@ -100,7 +101,8 @@ export function ClientInfoTab({ client, onSave, onDelete }: ClientInfoTabProps) 
         </div>
       </div>
 
-      {/* Metrics group (read-only) */}
+      {/* Metrics group (read-only, view mode only) */}
+      {mode === 'view' && client && (
       <div>
         <h4 className="text-xs font-medium text-ink-mid mb-2">Метрики</h4>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 p-3 bg-surface rounded-lg">
@@ -128,8 +130,10 @@ export function ClientInfoTab({ client, onSave, onDelete }: ClientInfoTabProps) 
           </div>
         </div>
       </div>
+      )}
 
-      {/* Dates group (read-only) */}
+      {/* Dates group (read-only, view mode only) */}
+      {mode === 'view' && client && (
       <div>
         <h4 className="text-xs font-medium text-ink-mid mb-2">Даты</h4>
         <div className="grid grid-cols-2 gap-4">
@@ -147,6 +151,7 @@ export function ClientInfoTab({ client, onSave, onDelete }: ClientInfoTabProps) 
           </div>
         </div>
       </div>
+      )}
 
       {/* Actions */}
       <div className="flex gap-2 pt-4 border-t" style={{ borderColor: 'var(--line)' }}>
@@ -156,14 +161,16 @@ export function ClientInfoTab({ client, onSave, onDelete }: ClientInfoTabProps) 
           className="px-4 py-2 text-sm text-white rounded-lg disabled:bg-gray-300"
           style={{ backgroundColor: hasChanges ? 'var(--brand)' : undefined }}
         >
-          Сохранить
+          {mode === 'create' ? 'Создать' : 'Сохранить'}
         </button>
+        {mode === 'view' && onDelete && (
         <button
           onClick={onDelete}
           className="px-4 py-2 text-sm text-red-500 hover:text-red-600"
         >
           Удалить клиента
         </button>
+        )}
       </div>
     </div>
   );

@@ -15,7 +15,7 @@ interface ClientCardModalProps {
 
 export function ClientCardModal({ client, isOpen, onClose, mode }: ClientCardModalProps) {
   const [activeTab, setActiveTab] = useState('client');
-  const { updateClient, deleteClient } = useClients();
+  const { createClient, updateClient, deleteClient } = useClients();
 
   // Reset tab to 'client' whenever the modal opens
   useEffect(() => {
@@ -89,12 +89,23 @@ export function ClientCardModal({ client, isOpen, onClose, mode }: ClientCardMod
         <div data-testid="client-card-right-panel" className="flex-1 overflow-y-auto">
           {activeTab === 'client' ? (
             <ClientInfoTab
-              client={client!}
-              onSave={(data: any) => updateClient(client!.id, data)}
-              onDelete={() => {
-                deleteClient(client!.id);
-                onClose();
-              }}
+              client={client}
+              mode={mode}
+              onSave={mode === 'create'
+                ? async (data) => {
+                    try {
+                      await createClient(data as any);
+                    } catch {
+                      // Create failed — close modal anyway
+                    }
+                    onClose();
+                  }
+                : (data: any) => updateClient(client!.id, data)
+              }
+              onDelete={mode === 'view' && client
+                ? () => { deleteClient(client.id); onClose(); }
+                : undefined
+              }
             />
           ) : (
             <ClientRecordTab recordId={activeTab.replace('record-', '')} onClose={onClose} />

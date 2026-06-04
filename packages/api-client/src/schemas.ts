@@ -188,7 +188,7 @@ export const ClientResponseSchema = z.object({
   name: z.string(),
   phone: z.string(),
   email: z.string().nullable(),
-  channel: z.string(),
+  channel: z.string().nullable(),
   created_at: z.string(),
   updated_at: z.string(),
   is_active: z.boolean(),

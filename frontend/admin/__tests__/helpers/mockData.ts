@@ -8,6 +8,7 @@ import type { Artist, Service, Activity, Location } from '@memo/domain';
 import type {
   RecordResponse,
   ClientResponse,
+  ClientWithStats,
   VisitorResponse,
   VisitResponse,
   PaymentResponse,
@@ -96,6 +97,14 @@ export const mockClient: ClientResponse = {
   created_at: '2026-01-01T00:00:00',
   updated_at: '2026-01-01T00:00:00',
   is_active: true,
+};
+
+export const mockClientWithStats: ClientWithStats = {
+  ...mockClient,
+  visits_count: 5,
+  last_visit: '2026-05-15T14:00:00',
+  total_paid: 17500,
+  missed_visits: 1,
 };
 
 export const mockVisitor: VisitorResponse = {

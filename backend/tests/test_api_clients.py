@@ -27,15 +27,16 @@ class TestClientsCrud:
         assert body["is_active"] is True
 
     def test_list_clients_includes_created(self, api_client) -> None:
-        """GET /api/clients returns a list containing the created client."""
+        """GET /api/clients returns a paginated response containing the created client."""
         create_resp = api_client.post("/api/v1/clients", json=CLIENT_PAYLOAD)
         client_id = create_resp.json()["id"]
 
         response = api_client.get("/api/v1/clients")
         assert response.status_code == 200
-        clients = response.json()
-        assert isinstance(clients, list)
-        ids = [c["id"] for c in clients]
+        body = response.json()
+        assert "items" in body
+        assert "total" in body
+        ids = [c["id"] for c in body["items"]]
         assert client_id in ids
 
     def test_get_client_by_id(self, api_client) -> None:
@@ -83,8 +84,7 @@ class TestClientsCrud:
 
         # List should NOT include the deleted client
         response = api_client.get("/api/v1/clients")
-        clients = response.json()
-        ids = [c["id"] for c in clients]
+        ids = [c["id"] for c in response.json()["items"]]
         assert client_id not in ids
 
     def test_get_nonexistent_client_returns_404(self, api_client) -> None:

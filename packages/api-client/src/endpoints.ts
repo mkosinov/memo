@@ -26,6 +26,10 @@ import {
   ClientResponseSchema,
   type ClientResponse,
   type ClientCreate,
+  ClientWithStatsSchema,
+  type ClientWithStats,
+  ClientListResponseSchema,
+  type ClientListResponse,
   PaymentResponseSchema,
   type PaymentResponse,
   type PaymentCreate,
@@ -136,7 +140,22 @@ export async function getRecords(params?: {
 // ─── Clients ────────────────────────────────────────────────────────────────
 
 export async function getClients(): Promise<ClientResponse[]> {
-  return api('/api/v1/clients', z.array(ClientResponseSchema));
+  return api('/api/v1/clients', ClientListResponseSchema).then(r => r.items);
+}
+
+export async function getClientsWithStats(
+  params?: Record<string, string | number | boolean | null | undefined>,
+): Promise<ClientListResponse> {
+  const search = new URLSearchParams();
+  if (params) {
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== '') {
+        search.append(key, String(value));
+      }
+    });
+  }
+  const qs = search.toString();
+  return api(`/api/v1/clients${qs ? `?${qs}` : ''}`, ClientListResponseSchema);
 }
 
 export async function createClient(data: ClientCreate): Promise<ClientResponse> {
@@ -144,6 +163,27 @@ export async function createClient(data: ClientCreate): Promise<ClientResponse> 
     method: 'POST',
     body: JSON.stringify(data),
   });
+}
+
+export async function updateClient(id: string, data: ClientCreate): Promise<ClientResponse> {
+  return api(`/api/v1/clients/${id}`, ClientResponseSchema, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function patchClient(
+  id: string,
+  data: Partial<Pick<ClientResponse, 'name' | 'phone' | 'email' | 'channel'>>,
+): Promise<ClientResponse> {
+  return api(`/api/v1/clients/${id}`, ClientResponseSchema, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteClient(id: string): Promise<void> {
+  await api(`/api/v1/clients/${id}`, z.any(), { method: 'DELETE' });
 }
 
 // ─── Payments ───────────────────────────────────────────────────────────────

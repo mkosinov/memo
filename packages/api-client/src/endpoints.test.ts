@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { z } from 'zod';
-import { getMasters, getMaster, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, deleteActivity, getWebPhotos, getRecords, getClients, getPayments, createRecord, updateRecord, deleteRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, deleteVisitor, searchClientByPhone, updateVisitStatus, getTags, createService, updateService, deleteService, createLocation, updateLocation, deleteLocation } from './endpoints';
+import { getMasters, getMaster, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, deleteActivity, getWebPhotos, getRecords, getClients, getPayments, createRecord, updateRecord, deleteRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, deleteVisitor, searchClientByPhone, updateVisitStatus, getTags, createService, updateService, deleteService, createLocation, updateLocation, deleteLocation, getClientsWithStats, patchClient, patchRecord } from './endpoints';
 import { ServiceCreateSchema, LocationCreateSchema } from './schemas';
 
 // Mock the api function from client
@@ -183,6 +183,67 @@ describe('getClients', () => {
     vi.mocked(api).mockResolvedValue([]);
     await getClients();
     expect(api).toHaveBeenCalledWith('/api/v1/clients', expect.anything());
+  });
+});
+
+// ─── Clients With Stats ──────────────────────────────────────────────────────
+
+describe('getClientsWithStats', () => {
+  it('calls /api/v1/clients with pagination params', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
+    await getClientsWithStats({ page: 1, per_page: 20 });
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/clients?page=1&per_page=20',
+      expect.anything(),
+    );
+  });
+
+  it('skips undefined and null params', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
+    await getClientsWithStats({ page: 1, search: undefined, channel: null });
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/clients?page=1',
+      expect.anything(),
+    );
+  });
+
+  it('skips empty string params', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
+    await getClientsWithStats({ page: 1, search: '' });
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/clients?page=1',
+      expect.anything(),
+    );
+  });
+});
+
+// ─── Patch Client ────────────────────────────────────────────────────────────
+
+describe('patchClient', () => {
+  it('calls PATCH /api/v1/clients/:id with partial body', async () => {
+    vi.mocked(api).mockResolvedValue({ id: 'c-1', name: 'Updated' });
+    await patchClient('c-1', { name: 'Updated' });
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/clients/c-1',
+      expect.anything(),
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({ name: 'Updated' }),
+      }),
+    );
+  });
+
+  it('sends only provided fields', async () => {
+    vi.mocked(api).mockResolvedValue({ id: 'c-1', phone: '+79991234567' });
+    await patchClient('c-1', { phone: '+79991234567' });
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/clients/c-1',
+      expect.anything(),
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({ phone: '+79991234567' }),
+      }),
+    );
   });
 });
 

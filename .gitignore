@@ -74,3 +74,5 @@ token-usage-output.txt
 *.db
 *.sqlite
 *.sqlite3
+backend/.coverage
+*.snapshots/

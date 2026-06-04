@@ -100,7 +100,8 @@ class ClientBase(BaseModel):
 Add to `@memo/api-client`:
 - `getClientsWithStats(params)` → `ClientWithStatsResponse[]`
 - `createClient(data)` (already exists)
-- `updateClient(id, data)` (already exists)
+- `updateClient(id, data)` — PUT (already exists)
+- `patchClient(id, data)` — PATCH (new)
 - `deleteClient(id)` (already exists)
 - `getClientVisitors(id)` (already exists)
 
@@ -313,12 +314,32 @@ Click "Отмена" → reset to original values → Save becomes disabled.
 
 ## 5. CRUD Operations
 
+### 5.0. API Response Codes
+
+| Метод | URL | Ответ | Описание |
+|-------|-----|-------|----------|
+| `POST` | `/api/v1/clients` | **201** + `ClientResponse` | Создание |
+| `GET` | `/api/v1/clients` | **200** + `list[ClientResponse]` | Список (без stats) |
+| `GET` | `/api/v1/clients/{id}` | **200** + `ClientResponse` | Получение |
+| `PUT` | `/api/v1/clients/{id}` | **200** + `ClientResponse` | Полная замена (все поля) |
+| `PATCH` | `/api/v1/clients/{id}` | **200** + `ClientResponse` | Частичное обновление (только изменённые поля) |
+| `DELETE` | `/api/v1/clients/{id}` | **204** (no content) | Мягкое удаление |
+
+**PATCH schema:**
+```python
+class ClientPatch(BaseModel):
+    name: str | None = None
+    phone: str | None = None
+    email: str | None = None
+    channel: Channel | None = None
+```
+
 ### 5.1. Create client
 
 1. Click "+ Новый клиент" above table
 2. Modal opens with empty form (Create mode)
 3. Fill fields → Save activates
-4. Click Save → `POST /api/v1/clients`
+4. Click Save → `POST /api/v1/clients` → **201**
 5. Modal switches to View mode (record selected)
 6. Table refreshes
 
@@ -327,20 +348,20 @@ Click "Отмена" → reset to original values → Save becomes disabled.
 1. Click table row → modal opens
 2. All fields are editable immediately
 3. Change any field → Save activates
-4. Click Save → `PUT /api/v1/clients/{id}`
+4. Click Save → `PUT /api/v1/clients/{id}` → **200**
 5. "Отмена" → reset changes
 
 ### 5.3. Delete client
 
 1. In client tab, click "Удалить клиента"
 2. Confirmation dialog: "Удалить Анну Смирнову? Это скроет клиента из списка."
-3. Confirm → `DELETE /api/v1/clients/{id}`
+3. Confirm → `DELETE /api/v1/clients/{id}` → **204**
 4. Modal closes, table refreshes
 
 ### 5.4. Delete record
 
 1. In record tab, click "Удалить запись"
-2. Toast with undo (5 sec) → `DELETE /api/v1/records/{id}`
+2. Toast with undo (5 sec) → `DELETE /api/v1/records/{id}` → **204**
 
 ---
 

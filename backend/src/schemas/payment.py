@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from src.models.enums import PaymentMethod
 
@@ -11,7 +11,7 @@ class PaymentBase(BaseModel):
     """Shared fields for payment creation and updates."""
 
     record_id: str
-    amount: int
+    amount: int = Field(gt=0)
     method: PaymentMethod | None = None
 
 

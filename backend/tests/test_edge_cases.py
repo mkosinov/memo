@@ -224,10 +224,6 @@ class TestClientEdgeCases:
 class TestPaymentEdgeCases:
     """Payment validation and boundary tests."""
 
-    @pytest.mark.xfail(
-        reason="BUG: PaymentCreate.amount accepts 0 and negative — needs gt=0 validation",
-        strict=True,
-    )
     def test_zero_amount(self, api_client, create_record):
         """amount=0 → should be rejected (amount must be > 0)."""
         record = create_record()
@@ -241,10 +237,6 @@ class TestPaymentEdgeCases:
         # Schema should reject zero amount; currently accepts it
         assert response.status_code == 422
 
-    @pytest.mark.xfail(
-        reason="BUG: PaymentCreate.amount accepts 0 and negative — needs gt=0 validation",
-        strict=True,
-    )
     def test_negative_amount(self, api_client, create_record):
         """amount=-100 → should be rejected (amount must be > 0)."""
         record = create_record()
@@ -385,10 +377,6 @@ class TestDataIntegrity:
         ids = [c["id"] for c in response.json()]
         assert client_id not in ids
 
-    @pytest.mark.xfail(
-        reason="BUG: Double-delete returns 204 instead of 404",
-        strict=True,
-    )
     def test_double_delete_idempotent(self, api_client, create_record):
         """Deleting an already-deleted record → should return 404."""
         record = create_record()

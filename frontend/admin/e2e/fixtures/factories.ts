@@ -13,7 +13,7 @@
 
 import { type APIRequestContext, expect } from '@playwright/test';
 
-const BACKEND = process.env.BACKEND_URL || 'http://localhost:8000';
+const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
 
 let testCounter = 0;
 function uid(): string {

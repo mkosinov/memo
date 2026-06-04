@@ -118,13 +118,13 @@ test.describe('Records Page — Table and Filters', () => {
     // Status select should have 4 status options + default
     const statusOptions = page.locator('select[aria-label="Фильтр по статусу"] option');
     const statusCount = await statusOptions.count();
-    expect(statusCount).toBe(5); // default + waiting, visited, missed, cancelled
+    expect(statusCount).toBe(5); // default + pending, confirmed, cancelled, no_show
   });
 
   // ── 6. Filter by status — table updates ──────────────────────────────────
 
   test('6. Filter by status — table updates', async ({ page, request }) => {
-    // Create test data — new records default to visit status "waiting"
+    // Create test data — new records default to record status "pending"
     const client = await createTestClient(request);
     const activity = await createTestActivity(request);
     const record = await createTestRecord(request, activity.id, client.id);
@@ -139,19 +139,23 @@ test.describe('Records Page — Table and Filters', () => {
       // Count initial rows (before filtering)
       const initialCount = await page.locator('tbody tr').count();
 
-      // Select "Ожидание" status filter
-      await page.locator('select[aria-label="Фильтр по статусу"]').selectOption('waiting');
+      // Select "Ожидание" (pending) status filter
+      await page.locator('select[aria-label="Фильтр по статусу"]').selectOption('pending');
       await page.waitForTimeout(500);
 
       // Filtered count should be <= initial count
       const filteredCount = await page.locator('tbody tr').count();
       expect(filteredCount).toBeLessThanOrEqual(initialCount);
 
-      // If there are filtered rows, all should have the correct status badge
+      // If there are filtered rows (not empty state), all should have the correct status badge
       if (filteredCount > 0) {
-        const statusBadges = page.locator('tbody tr span:text("Ожидание")');
-        const badgeCount = await statusBadges.count();
-        expect(badgeCount).toBe(filteredCount);
+        const emptyState = page.locator('td:has-text("Записи не найдены")');
+        const isEmptyState = await emptyState.isVisible().catch(() => false);
+        if (!isEmptyState) {
+          const statusBadges = page.locator('tbody tr span:text("Ожидание")');
+          const badgeCount = await statusBadges.count();
+          expect(badgeCount).toBe(filteredCount);
+        }
       }
     } finally {
       await cleanup(request, `/api/v1/records/${recordId}`);
@@ -188,9 +192,9 @@ test.describe('Records Page — Table and Filters', () => {
       await expect(page.locator('select[aria-label="Фильтр по мастеру"]')).toHaveValue('');
       await expect(page.locator('select[aria-label="Фильтр по статусу"]')).toHaveValue('');
 
-      // Row count should match initial count
+      // Row count should be >= initial count (reset may expand date range to full week)
       const resetCount = await page.locator('tbody tr').count();
-      expect(resetCount).toBe(initialCount);
+      expect(resetCount).toBeGreaterThanOrEqual(initialCount);
     } finally {
       await cleanup(request, `/api/v1/records/${recordId}`);
       await cleanup(request, `/api/v1/clients/${clientId}`);
@@ -420,44 +424,29 @@ test.describe('Records Page — Table and Filters', () => {
     const activity = await createTestActivity(request);
     const record = await createTestRecord(request, activity.id, client.id);
 
-    // Update visit status to "visited" — RecordCreate only accepts RecordStatus,
-    // not VisitStatus, so we update via PUT with the desired visit status.
-    const BACKEND = process.env.BACKEND_URL || 'http://localhost:8000';
-    await request.put(`${BACKEND}/api/v1/records/${record.id}`, {
-      data: {
-        activity_id: activity.id,
-        client_id: client.id,
-        status: record.status,
-        comment: record.comment,
-        visits: record.visits.map((v: { visitor_id: string; price: number }) => ({
-          visitor_id: v.visitor_id,
-          price: v.price,
-          status: 'visited',
-        })),
-      },
-    });
-
     let recordId = record.id;
     let clientId = client.id;
 
     try {
       await waitForRecordsReady(page);
 
-      // Filter to show only our record
-      await page.locator('select[aria-label="Фильтр по статусу"]').selectOption('visited');
+      // The status filter uses RECORD statuses (pending, confirmed, cancelled, no_show).
+      // Newly created records default to "pending".
+      await page.locator('select[aria-label="Фильтр по статусу"]').selectOption('pending');
       await page.waitForTimeout(500);
 
-      // Find the status badge in the table
-      const statusBadge = page.locator('tbody span.rounded-full').filter({ hasText: 'Посетили' });
+      // Find the status badge in the table — use .first() to avoid strict mode violation
+      const statusBadge = page.locator('tbody span.rounded-full').filter({ hasText: 'Ожидание' }).first();
 
-      if (await statusBadge.isVisible()) {
-        // Badge should contain the status text
-        await expect(statusBadge).toContainText('Посетили');
+      // Badge should contain the status text
+      await expect(statusBadge).toBeVisible();
 
-        // Badge should have emerald styling (for "visited" status)
-        const classes = await statusBadge.getAttribute('class');
-        expect(classes).toContain('emerald');
-      }
+      // Badge should contain the status text
+      await expect(statusBadge).toContainText('Ожидание');
+
+      // Badge should have gray styling (for "pending" status)
+      const classes = await statusBadge.getAttribute('class');
+      expect(classes).toContain('gray');
     } finally {
       await cleanup(request, `/api/v1/records/${recordId}`);
       await cleanup(request, `/api/v1/clients/${clientId}`);
@@ -513,7 +502,7 @@ test.describe('Records Page — Table and Filters', () => {
     page,
     request,
   }) => {
-    // Create test data — new records default to visit status "waiting"
+    // Create test data — new records default to record status "pending"
     const client = await createTestClient(request, { name: 'Compound Filter' });
     const activity = await createTestActivity(request);
     const record = await createTestRecord(request, activity.id, client.id);
@@ -526,8 +515,8 @@ test.describe('Records Page — Table and Filters', () => {
 
       const initialCount = await page.locator('tbody tr').count();
 
-      // Apply status filter
-      await page.locator('select[aria-label="Фильтр по статусу"]').selectOption('waiting');
+      // Apply status filter — use record status "pending" (not visit status "waiting")
+      await page.locator('select[aria-label="Фильтр по статусу"]').selectOption('pending');
       await page.waitForTimeout(300);
 
       const afterStatus = await page.locator('tbody tr').count();

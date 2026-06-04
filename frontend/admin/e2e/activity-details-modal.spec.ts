@@ -16,7 +16,7 @@ import { waitForScheduleReady, openModal, openAddTab, getFirstActivity } from '.
  * Requires: dev server on :3001, backend on :8000
  */
 
-const BACKEND = process.env.BACKEND_URL || 'http://localhost:8000';
+const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
 
 // ---------------------------------------------------------------------------
 // Tests — Full User Scenarios with DB Verification

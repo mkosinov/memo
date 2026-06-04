@@ -92,11 +92,39 @@ export async function clickModalTab(page: Page, tabTestId: string) {
 
 /**
  * Wait for records page to load with table.
- * Navigates to /records and waits for the table or empty state to appear.
+ * Navigates to /records, waits for the heading and table to render,
+ * then waits for the records AND activities API responses to arrive —
+ * both are needed for the table to render rows (records are filtered
+ * by activity_id lookup). Also waits for a short time for React to
+ * re-render with the fetched data.
  */
 export async function waitForRecordsReady(page: Page) {
+  // Set up response listeners BEFORE navigation so we don't miss API calls.
+  const recordsResponse = page.waitForResponse(
+    (resp) => resp.url().includes('/api/v1/records') && resp.status() === 200,
+    { timeout: 15_000 },
+  );
+  const activitiesResponse = page.waitForResponse(
+    (resp) => resp.url().includes('/api/v1/activities') && resp.status() === 200,
+    { timeout: 15_000 },
+  );
   await page.goto('/records');
   await page.waitForSelector('h1:has-text("Управление записями")', { timeout: 15_000 });
-  // Wait for either table rows or the empty state — whichever comes first
-  await page.waitForSelector('table tbody, td:has-text("Записи не найдены")', { timeout: 15_000 });
+  await page.waitForSelector('table', { timeout: 15_000 });
+  // Wait for both records and activities to arrive.
+  await Promise.all([recordsResponse, activitiesResponse]);
+  // Give React a moment to re-render the table with data.
+  // The table needs to show either data rows or the empty state AFTER data load.
+  await page
+    .waitForFunction(
+      () => {
+        const rows = document.querySelectorAll('tbody tr');
+        if (rows.length === 0) return true;
+        // Either we have real data rows or the genuine empty state
+        const firstCell = rows[0]?.querySelector('td');
+        return firstCell !== null; // empty state is a td with "Записи не найдены"
+      },
+      { timeout: 5_000 },
+    )
+    .catch(() => {});
 }

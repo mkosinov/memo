@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { useNavigation } from '@/contexts/NavigationContext';
-import { LOCATIONS, SERVICES, ARTISTS } from '@/lib/mock-data';
+import { useRecords } from '@/contexts/RecordsContext';
 import { getMonday, formatDateISO } from '@/lib/utils';
 
 interface BookingFiltersProps {
@@ -38,6 +38,11 @@ export function BookingFilters({
   onReset,
 }: BookingFiltersProps) {
   const { dateFrom, dateTo, selectDateRange } = useNavigation();
+  const { locations, services, masters } = useRecords();
+
+  const locationList = Array.from(locations.values()).filter(l => l.is_active);
+  const serviceList = Array.from(services.values()).filter(s => s.is_active);
+  const masterList = Array.from(masters.values()).filter(m => m.is_active);
 
   const handleReset = () => {
     onReset();
@@ -81,7 +86,7 @@ export function BookingFilters({
           aria-label="Фильтр по локации"
         >
           <option value="">Все локации</option>
-          {LOCATIONS.map((l) => (
+          {locationList.map((l) => (
             <option key={l.id} value={l.id}>{l.name}</option>
           ))}
         </select>
@@ -97,8 +102,8 @@ export function BookingFilters({
           aria-label="Фильтр по услуге"
         >
           <option value="">Все услуги</option>
-          {SERVICES.map((s) => (
-            <option key={s.id} value={s.id}>{s.name}</option>
+          {serviceList.map((s) => (
+            <option key={s.id} value={s.id}>{s.title}</option>
           ))}
         </select>
       </div>
@@ -113,8 +118,8 @@ export function BookingFilters({
           aria-label="Фильтр по мастеру"
         >
           <option value="">Все мастера</option>
-          {ARTISTS.map((a) => (
-            <option key={a.id} value={a.id}>{a.shortName}</option>
+          {masterList.map((m) => (
+            <option key={m.id} value={m.id}>{m.first_name}</option>
           ))}
         </select>
       </div>
@@ -129,10 +134,10 @@ export function BookingFilters({
           aria-label="Фильтр по статусу"
         >
           <option value="">Все статусы</option>
-          <option value="waiting">Ожидание</option>
-          <option value="visited">Посетили</option>
-          <option value="missed">Неявка</option>
+          <option value="pending">Ожидание</option>
+          <option value="confirmed">Подтверждена</option>
           <option value="cancelled">Отменена</option>
+          <option value="no_show">Неявка</option>
         </select>
       </div>
 

@@ -101,15 +101,9 @@ class TestAppFactory:
         app = create_app()
         assert isinstance(app, FastAPI)
 
-    def test_health_endpoint(self) -> None:
-        from fastapi.testclient import TestClient
-
-        from src.main import create_app
-
-        app = create_app()
-        with TestClient(app) as client:
-            response = client.get("/api/v1/health")
-            assert response.status_code == 200
-            data = response.json()
-            assert data["status"] == "ok"
-            assert data["db"] == "connected"
+    def test_health_endpoint(self, api_client) -> None:
+        response = api_client.get("/api/v1/health")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "ok"
+        assert data["db"] == "connected"

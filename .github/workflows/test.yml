@@ -1,0 +1,103 @@
+name: Tests
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend-tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Run tests
+        run: uv run pytest tests/ -v --tb=short
+
+  frontend-tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend/admin
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run vitest
+        run: pnpm run test
+
+  e2e-tests:
+    runs-on: ubuntu-latest
+    needs: [backend-tests, frontend-tests]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: uv sync
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browsers
+        working-directory: frontend/admin
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Start backend
+        working-directory: backend
+        run: uv run uvicorn src.main:app --host 0.0.0.0 --port 8000 &
+        env:
+          DATABASE_URL: sqlite+aiosqlite:///./test_memo.db
+
+      - name: Start frontend
+        working-directory: frontend/admin
+        run: pnpm run dev &
+        env:
+          TEST_DB_PATH: ../../backend/test_memo.db
+
+      - name: Wait for servers
+        run: npx wait-on http://localhost:8000 http://localhost:3001 --timeout 60000
+
+      - name: Run E2E tests
+        working-directory: frontend/admin
+        run: pnpm exec playwright test

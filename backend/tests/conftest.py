@@ -49,6 +49,8 @@ def reset_db():
     engine is async but the API tests are sync.
     """
     # Import all models so they register with Base.metadata, then reset.
+    from sqlalchemy import event
+
     from src.db import db_manager  # noqa: F811
     from src.db.base import Base
     from src.models import (  # noqa: F401
@@ -67,6 +69,15 @@ def reset_db():
         Visit,
         Visitor,
     )
+
+    # Enable FK enforcement on every new connection via engine event listener.
+    # SQLite has FK enforcement OFF by default — this fixes that for tests.
+    def _set_fk_pragma(dbapi_conn, connection_record):
+        cursor = dbapi_conn.cursor()
+        cursor.execute("PRAGMA foreign_keys = ON")
+        cursor.close()
+
+    event.listen(db_manager.engine.sync_engine, "connect", _set_fk_pragma)
 
     async def _reset() -> None:
         async with db_manager.engine.begin() as conn:

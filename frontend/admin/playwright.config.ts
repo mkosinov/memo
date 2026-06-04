@@ -1,4 +1,14 @@
 import { defineConfig, devices } from '@playwright/test';
+import path from 'path';
+
+// Load .env.test so E2E tests use the test database (TEST_DB_PATH).
+// The backend must also be started with ENV_FILE=.env.test.
+// In CI, TEST_DB_PATH is set directly — file may not exist.
+try {
+  process.loadEnvFile(path.resolve(__dirname, '.env.test'));
+} catch {
+  // .env.test not found — rely on environment variables (CI)
+}
 
 /**
  * Playwright E2E configuration for Memo admin.

@@ -6,14 +6,17 @@
  *
  * IMPORTANT: DB_PATH must point to the SAME database the backend uses.
  * In CI: set via TEST_DB_PATH environment variable.
- * Local: defaults to backend/memo.db relative to frontend/admin.
+ * Local: defaults to backend/test_memo.db (the test database).
+ *
+ * The backend must be started with ENV_FILE=.env.test so both the
+ * backend and E2E tests operate on the same isolated test database.
  *
  * Retries on "database is locked" to handle concurrent backend writes.
  */
 
 import { execSync } from 'child_process';
 
-const DB_PATH = process.env.TEST_DB_PATH || '../../backend/memo.db';
+const DB_PATH = process.env.TEST_DB_PATH || '../../backend/test_memo.db';
 
 const MAX_RETRIES = 5;
 const RETRY_DELAY_MS = 200;

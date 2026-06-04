@@ -89,3 +89,14 @@ export async function waitForToast(page: Page, textPattern?: string | RegExp) {
 export async function clickModalTab(page: Page, tabTestId: string) {
   await page.locator(`[data-testid="${tabTestId}"]`).click();
 }
+
+/**
+ * Wait for records page to load with table.
+ * Navigates to /records and waits for the table or empty state to appear.
+ */
+export async function waitForRecordsReady(page: Page) {
+  await page.goto('/records');
+  await page.waitForSelector('h1:has-text("Управление записями")', { timeout: 15_000 });
+  // Wait for either table rows or the empty state — whichever comes first
+  await page.waitForSelector('table tbody, td:has-text("Записи не найдены")', { timeout: 15_000 });
+}

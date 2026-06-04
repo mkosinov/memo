@@ -36,54 +36,60 @@ test.describe('ActivityDetailsModal — Real User Scenarios', () => {
     const testClientName = `E2E Client ${uid}`;
     const testVisitorName = `E2E Visitor ${uid}`;
 
-    // 1. ACTION — open add tab and fill form
-    await openAddTab(page);
+    // Declare cleanup targets outside try so finally can access them
+    let recordRow: Record<string, any> | null = null;
+    let clientRow: Record<string, any> | null = null;
 
-    await page.locator('[data-testid="input-phone"]').fill(testPhone);
-    await page.locator('[data-testid="input-phone"]').blur();
+    try {
+      // 1. ACTION — open add tab and fill form
+      await openAddTab(page);
 
-    await page.locator('[data-testid="input-client-name"]').fill(testClientName);
+      await page.locator('[data-testid="input-phone"]').fill(testPhone);
+      await page.locator('[data-testid="input-phone"]').blur();
 
-    // Add visitor
-    await page
-      .locator('[data-testid="new-booking-tab"]')
-      .locator('button:has-text("Добавить посетителя")')
-      .click();
-    const visitorRow = page.locator('[data-testid="visitor-form-row"]').first();
-    await visitorRow.locator('input').first().fill(testVisitorName);
+      await page.locator('[data-testid="input-client-name"]').fill(testClientName);
 
-    // Verify channel select is visible
-    await expect(page.locator('[data-testid="select-channel"]')).toBeVisible();
+      // Add visitor
+      await page
+        .locator('[data-testid="new-booking-tab"]')
+        .locator('button:has-text("Добавить посетителя")')
+        .click();
+      const visitorRow = page.locator('[data-testid="visitor-form-row"]').first();
+      await visitorRow.locator('input').first().fill(testVisitorName);
 
-    // Submit
-    await page.locator('[data-testid="btn-create-record"]').click();
+      // Verify channel select is visible
+      await expect(page.locator('[data-testid="select-channel"]')).toBeVisible();
 
-    // 2. VERIFY UI — success toast "Запись создана" appears (not just any toast)
-    await expect(page.locator('text=Запись создана')).toBeVisible({ timeout: 10_000 });
+      // Submit
+      await page.locator('[data-testid="btn-create-record"]').click();
 
-    // 3. VERIFY DB — client was created (allow brief commit lag)
-    await page.waitForTimeout(500);
-    const clientRow = queryDBRow(`SELECT * FROM clients WHERE phone='${testPhone}' AND is_active=1`);
-    expect(clientRow).not.toBeNull();
-    expect(clientRow!.name).toBe(testClientName);
-    expect(clientRow!.channel).toBeTruthy();
+      // 2. VERIFY UI — success toast "Запись создана" appears (not just any toast)
+      await expect(page.locator('text=Запись создана')).toBeVisible({ timeout: 10_000 });
 
-    // 4. VERIFY DB — record was created for this client
-    const recordRow = queryDBRow(
-      `SELECT * FROM records WHERE client_id='${clientRow!.id}' AND is_active=1`,
-    );
-    expect(recordRow).not.toBeNull();
-    expect(recordRow!.status).toBeTruthy();
+      // 3. VERIFY DB — client was created (allow brief commit lag)
+      await page.waitForTimeout(500);
+      clientRow = queryDBRow(`SELECT * FROM clients WHERE phone='${testPhone}' AND is_active=1`);
+      expect(clientRow).not.toBeNull();
+      expect(clientRow!.name).toBe(testClientName);
+      expect(clientRow!.channel).toBeTruthy();
 
-    // 5. VERIFY DB — visit was created for this record
-    const visits = queryDBRows(
-      `SELECT * FROM visits WHERE record_id='${recordRow!.id}' AND is_active=1`,
-    );
-    expect(visits.length).toBeGreaterThan(0);
+      // 4. VERIFY DB — record was created for this client
+      recordRow = queryDBRow(
+        `SELECT * FROM records WHERE client_id='${clientRow!.id}' AND is_active=1`,
+      );
+      expect(recordRow).not.toBeNull();
+      expect(recordRow!.status).toBeTruthy();
 
-    // 6. CLEANUP
-    await cleanup(request, `/api/v1/records/${recordRow!.id}`);
-    await cleanup(request, `/api/v1/clients/${clientRow!.id}`);
+      // 5. VERIFY DB — visit was created for this record
+      const visits = queryDBRows(
+        `SELECT * FROM visits WHERE record_id='${recordRow!.id}' AND is_active=1`,
+      );
+      expect(visits.length).toBeGreaterThan(0);
+    } finally {
+      // CLEANUP — always runs, even if test fails
+      if (recordRow?.id) await cleanup(request, `/api/v1/records/${recordRow.id}`);
+      if (clientRow?.id) await cleanup(request, `/api/v1/clients/${clientRow.id}`);
+    }
   });
 
   // ── Scenario 2: Delete record — verify DB soft-delete ──────────────────
@@ -97,44 +103,46 @@ test.describe('ActivityDetailsModal — Real User Scenarios', () => {
     const activity = await getFirstActivity(page);
     const record = await createTestRecord(request, activity.id, client.id);
 
-    // Verify it exists before delete
-    const beforeRow = queryDBRow(
-      `SELECT is_active FROM records WHERE id='${record.id}'`,
-    );
-    expect(beforeRow).not.toBeNull();
-    expect(beforeRow!.is_active).toBe(1);
-
-    // Reload to pick up new data
-    await page.goto('/schedule');
-    await page.waitForSelector('[data-testid^="activity-"]', { timeout: 15000 });
-
-    // 2. ACTION — open modal, navigate to client tab, delete
-    await openModal(page);
-
-    const clientTab = page.locator(`[data-testid="tab-client-${record.id}"]`);
-    if (await clientTab.isVisible()) {
-      await clientTab.click();
-      await page.locator('[data-testid="btn-delete-record"]').click();
-
-      // 3. VERIFY UI — undo toast appears
-      await expect(page.locator('text=Запись удалена через 5 секунд')).toBeVisible({
-        timeout: 3000,
-      });
-
-      // Wait for undo timeout + API call (5s + buffer)
-      await page.waitForTimeout(7000);
-
-      // 4. VERIFY DB — record is soft-deleted
-      const afterRow = queryDBRow(
+    try {
+      // Verify it exists before delete
+      const beforeRow = queryDBRow(
         `SELECT is_active FROM records WHERE id='${record.id}'`,
       );
-      expect(afterRow).not.toBeNull();
-      expect(afterRow!.is_active).toBe(0);
-    }
+      expect(beforeRow).not.toBeNull();
+      expect(beforeRow!.is_active).toBe(1);
 
-    // 5. CLEANUP (in case test failed before delete)
-    await cleanup(request, `/api/v1/records/${record.id}`);
-    await cleanup(request, `/api/v1/clients/${client.id}`);
+      // Reload to pick up new data
+      await page.goto('/schedule');
+      await page.waitForSelector('[data-testid^="activity-"]', { timeout: 15000 });
+
+      // 2. ACTION — open modal, navigate to client tab, delete
+      await openModal(page);
+
+      const clientTab = page.locator(`[data-testid="tab-client-${record.id}"]`);
+      if (await clientTab.isVisible()) {
+        await clientTab.click();
+        await page.locator('[data-testid="btn-delete-record"]').click();
+
+        // 3. VERIFY UI — undo toast appears
+        await expect(page.locator('text=Запись удалена через 5 секунд')).toBeVisible({
+          timeout: 3000,
+        });
+
+        // Wait for undo timeout + API call (5s + buffer)
+        await page.waitForTimeout(7000);
+
+        // 4. VERIFY DB — record is soft-deleted
+        const afterRow = queryDBRow(
+          `SELECT is_active FROM records WHERE id='${record.id}'`,
+        );
+        expect(afterRow).not.toBeNull();
+        expect(afterRow!.is_active).toBe(0);
+      }
+    } finally {
+      // CLEANUP — always runs, even if test fails
+      await cleanup(request, `/api/v1/records/${record.id}`);
+      await cleanup(request, `/api/v1/clients/${client.id}`);
+    }
   });
 
   // ── Scenario 3: Add payment — verify DB persistence ────────────────────
@@ -148,47 +156,49 @@ test.describe('ActivityDetailsModal — Real User Scenarios', () => {
     const activity = await getFirstActivity(page);
     const record = await createTestRecord(request, activity.id, client.id);
 
-    // Verify no payments initially
-    const beforePayments = queryDBRows(
-      `SELECT * FROM payments WHERE record_id='${record.id}' AND is_active=1`,
-    );
-    expect(beforePayments.length).toBe(0);
-
-    // Reload to pick up new data
-    await page.goto('/schedule');
-    await page.waitForSelector('[data-testid^="activity-"]', { timeout: 15000 });
-
-    // 2. ACTION — open modal, go to client tab, add payment
-    await openModal(page);
-
-    const clientTab = page.locator(`[data-testid="tab-client-${record.id}"]`);
-    if (await clientTab.isVisible()) {
-      await clientTab.click();
-
-      // Read footer before
-      await expect(page.locator('[data-testid="modal-footer"]')).toBeVisible();
-
-      // Add payment
-      await page.locator('input[placeholder="Сумма"]').fill('1500');
-      await page.locator('[data-testid="btn-add-payment"]').click();
-
-      // Wait for UI update
-      await page.waitForTimeout(1000);
-
-      // 3. VERIFY UI — footer is still visible (summary updated)
-      await expect(page.locator('[data-testid="modal-footer"]')).toBeVisible();
-
-      // 4. VERIFY DB — payment row exists with amount=1500
-      const payments = queryDBRows(
+    try {
+      // Verify no payments initially
+      const beforePayments = queryDBRows(
         `SELECT * FROM payments WHERE record_id='${record.id}' AND is_active=1`,
       );
-      expect(payments.length).toBeGreaterThan(0);
-      expect(payments[0].amount).toBe(1500);
-    }
+      expect(beforePayments.length).toBe(0);
 
-    // 5. CLEANUP
-    await cleanup(request, `/api/v1/records/${record.id}`);
-    await cleanup(request, `/api/v1/clients/${client.id}`);
+      // Reload to pick up new data
+      await page.goto('/schedule');
+      await page.waitForSelector('[data-testid^="activity-"]', { timeout: 15000 });
+
+      // 2. ACTION — open modal, go to client tab, add payment
+      await openModal(page);
+
+      const clientTab = page.locator(`[data-testid="tab-client-${record.id}"]`);
+      if (await clientTab.isVisible()) {
+        await clientTab.click();
+
+        // Read footer before
+        await expect(page.locator('[data-testid="modal-footer"]')).toBeVisible();
+
+        // Add payment
+        await page.locator('input[placeholder="Сумма"]').fill('1500');
+        await page.locator('[data-testid="btn-add-payment"]').click();
+
+        // Wait for UI update
+        await page.waitForTimeout(1000);
+
+        // 3. VERIFY UI — footer is still visible (summary updated)
+        await expect(page.locator('[data-testid="modal-footer"]')).toBeVisible();
+
+        // 4. VERIFY DB — payment row exists with amount=1500
+        const payments = queryDBRows(
+          `SELECT * FROM payments WHERE record_id='${record.id}' AND is_active=1`,
+        );
+        expect(payments.length).toBeGreaterThan(0);
+        expect(payments[0].amount).toBe(1500);
+      }
+    } finally {
+      // CLEANUP — always runs, even if test fails
+      await cleanup(request, `/api/v1/records/${record.id}`);
+      await cleanup(request, `/api/v1/clients/${client.id}`);
+    }
   });
 
   // ── Scenario 4: Settings update — verify DB service_id change ──────────
@@ -315,44 +325,46 @@ test.describe('ActivityDetailsModal — Real User Scenarios', () => {
     const activity = await getFirstActivity(page);
     const record = await createTestRecord(request, activity.id, client.id);
 
-    await page.goto('/schedule');
-    await page.waitForSelector('[data-testid^="activity-"]', { timeout: 15000 });
+    try {
+      await page.goto('/schedule');
+      await page.waitForSelector('[data-testid^="activity-"]', { timeout: 15000 });
 
-    // 2. ACTION
-    await openModal(page);
+      // 2. ACTION
+      await openModal(page);
 
-    const clientTab = page.locator(`[data-testid="tab-client-${record.id}"]`);
-    if (await clientTab.isVisible()) {
-      await clientTab.click();
-      await expect(page.locator('[data-testid="client-tab"]')).toBeVisible();
+      const clientTab = page.locator(`[data-testid="tab-client-${record.id}"]`);
+      if (await clientTab.isVisible()) {
+        await clientTab.click();
+        await expect(page.locator('[data-testid="client-tab"]')).toBeVisible();
 
-      // Verify client name is displayed
-      const nameInput = page.locator('[data-testid="client-name"]');
-      await expect(nameInput).toHaveValue(client.name);
+        // Verify client name is displayed
+        const nameInput = page.locator('[data-testid="client-name"]');
+        await expect(nameInput).toHaveValue(client.name);
 
-      // Click delete
-      await page.locator('[data-testid="btn-delete-record"]').click();
+        // Click delete
+        await page.locator('[data-testid="btn-delete-record"]').click();
 
-      // 3. VERIFY UI — undo toast
-      await expect(page.locator('text=Запись удалена через 5 секунд')).toBeVisible({
-        timeout: 3000,
-      });
+        // 3. VERIFY UI — undo toast
+        await expect(page.locator('text=Запись удалена через 5 секунд')).toBeVisible({
+          timeout: 3000,
+        });
 
-      // Click undo
-      await page.locator('text=Отменить').click();
-      await page.waitForTimeout(1000);
+        // Click undo
+        await page.locator('text=Отменить').click();
+        await page.waitForTimeout(1000);
 
-      // 4. VERIFY DB — record still active
-      const row = queryDBRow(
-        `SELECT is_active FROM records WHERE id='${record.id}'`,
-      );
-      expect(row).not.toBeNull();
-      expect(row!.is_active).toBe(1);
+        // 4. VERIFY DB — record still active
+        const row = queryDBRow(
+          `SELECT is_active FROM records WHERE id='${record.id}'`,
+        );
+        expect(row).not.toBeNull();
+        expect(row!.is_active).toBe(1);
+      }
+    } finally {
+      // CLEANUP — always runs, even if test fails
+      await cleanup(request, `/api/v1/records/${record.id}`);
+      await cleanup(request, `/api/v1/clients/${client.id}`);
     }
-
-    // 5. CLEANUP
-    await cleanup(request, `/api/v1/records/${record.id}`);
-    await cleanup(request, `/api/v1/clients/${client.id}`);
   });
 
   // ── Scenario 9: Tab navigation — content changes ──────────────────────

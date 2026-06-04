@@ -1,5 +1,13 @@
 """Edge case tests for API validation, boundaries, and data integrity."""
 
+import pytest
+from pydantic import ValidationError
+
+from src.schemas.activity import ActivityResponse
+from src.schemas.client import ClientResponse
+from src.schemas.payment import PaymentResponse
+from src.schemas.record import RecordResponse
+from src.schemas.service import ServiceResponse
 from tests.conftest import query_db
 
 
@@ -9,70 +17,50 @@ from tests.conftest import query_db
 class TestEnumValidation:
     """Test enum validation for schema fields."""
 
-    def test_record_status_invalid_returns_422(self):
+    def test_record_status_invalid_returns_422(self, api_client):
         """Invalid record status should return 422."""
-        from src.main import create_app
-        from fastapi.testclient import TestClient
-
-        app = create_app()
-        with TestClient(app) as client:
-            resp = client.post(
-                "/api/v1/records",
-                json={
-                    "activity_id": "x",
-                    "client_id": "x",
-                    "status": "banana",
-                    "seats": 1,
-                    "visits": [],
-                },
-            )
+        resp = api_client.post(
+            "/api/v1/records",
+            json={
+                "activity_id": "x",
+                "client_id": "x",
+                "status": "banana",
+                "seats": 1,
+                "visits": [],
+            },
+        )
         assert resp.status_code == 422
 
-    def test_visit_status_invalid_returns_422(self):
+    def test_visit_status_invalid_returns_422(self, api_client):
         """Invalid visit status should return 422."""
-        from src.main import create_app
-        from fastapi.testclient import TestClient
-
-        app = create_app()
-        with TestClient(app) as client:
-            resp = client.put(
-                "/api/v1/visits/v1/status",
-                json={"status": "fake"},
-            )
+        resp = api_client.put(
+            "/api/v1/visits/v1/status",
+            json={"status": "fake"},
+        )
         assert resp.status_code == 422
 
-    def test_payment_method_invalid_returns_422(self):
+    def test_payment_method_invalid_returns_422(self, api_client):
         """Invalid payment method should return 422."""
-        from src.main import create_app
-        from fastapi.testclient import TestClient
-
-        app = create_app()
-        with TestClient(app) as client:
-            resp = client.post(
-                "/api/v1/payments",
-                json={
-                    "record_id": "x",
-                    "amount": 100,
-                    "method": "crypto",
-                },
-            )
+        resp = api_client.post(
+            "/api/v1/payments",
+            json={
+                "record_id": "x",
+                "amount": 100,
+                "method": "crypto",
+            },
+        )
         assert resp.status_code == 422
 
-    def test_channel_invalid_returns_422(self):
+    def test_channel_invalid_returns_422(self, api_client):
         """Invalid client channel should return 422."""
-        from src.main import create_app
-        from fastapi.testclient import TestClient
-
-        app = create_app()
-        with TestClient(app) as client:
-            resp = client.post(
-                "/api/v1/clients",
-                json={
-                    "name": "Test",
-                    "phone": "+79990001122",
-                    "channel": "instagram",
-                },
-            )
+        resp = api_client.post(
+            "/api/v1/clients",
+            json={
+                "name": "Test",
+                "phone": "+79990001122",
+                "channel": "instagram",
+            },
+        )
         assert resp.status_code == 422
 
 
@@ -97,18 +85,15 @@ class TestRecordEdgeCases:
         assert body["visits"] == []
 
     def test_create_record_invalid_activity(self, api_client):
-        """Non-existent activity_id → accepted (SQLite FK not enforced)."""
+        """Non-existent activity_id → should be rejected (FK enforced)."""
         payload = {
             "activity_id": "nonexistent-activity-id",
             "visits": [],
         }
         response = api_client.post("/api/v1/records", json=payload)
 
-        # SQLite does not enforce FK constraints by default, so this
-        # succeeds. If FK enforcement were enabled, this would be 500.
-        assert response.status_code == 201
-        body = response.json()
-        assert body["activity_id"] == "nonexistent-activity-id"
+        # FK enforcement rejects this with 422
+        assert response.status_code == 422
 
     def test_update_record_status(self, api_client, create_record):
         """Update status → 200, status changed in DB."""
@@ -239,8 +224,12 @@ class TestClientEdgeCases:
 class TestPaymentEdgeCases:
     """Payment validation and boundary tests."""
 
+    @pytest.mark.xfail(
+        reason="BUG: PaymentCreate.amount accepts 0 and negative — needs gt=0 validation",
+        strict=True,
+    )
     def test_zero_amount(self, api_client, create_record):
-        """amount=0 → accepted (no gt=0 validation in schema)."""
+        """amount=0 → should be rejected (amount must be > 0)."""
         record = create_record()
         payload = {
             "record_id": record["id"],
@@ -249,12 +238,15 @@ class TestPaymentEdgeCases:
         }
         response = api_client.post("/api/v1/payments", json=payload)
 
-        # Schema accepts any int, including 0
-        assert response.status_code == 201
-        assert response.json()["amount"] == 0
+        # Schema should reject zero amount; currently accepts it
+        assert response.status_code == 422
 
+    @pytest.mark.xfail(
+        reason="BUG: PaymentCreate.amount accepts 0 and negative — needs gt=0 validation",
+        strict=True,
+    )
     def test_negative_amount(self, api_client, create_record):
-        """amount=-100 → accepted (no gt=0 validation in schema)."""
+        """amount=-100 → should be rejected (amount must be > 0)."""
         record = create_record()
         payload = {
             "record_id": record["id"],
@@ -263,9 +255,8 @@ class TestPaymentEdgeCases:
         }
         response = api_client.post("/api/v1/payments", json=payload)
 
-        # Schema accepts any int, including negative
-        assert response.status_code == 201
-        assert response.json()["amount"] == -100
+        # Schema should reject negative amount; currently accepts it
+        assert response.status_code == 422
 
     def test_invalid_method(self, api_client, create_record):
         """method='crypto' → 422 (not a valid PaymentMethod)."""
@@ -292,7 +283,7 @@ class TestPaymentEdgeCases:
         assert response.json()["method"] is None
 
     def test_payment_invalid_record_id(self, api_client):
-        """Non-existent record_id → accepted (SQLite FK not enforced)."""
+        """Non-existent record_id → should be rejected (FK enforced)."""
         payload = {
             "record_id": "nonexistent-record-id",
             "amount": 1000,
@@ -300,8 +291,8 @@ class TestPaymentEdgeCases:
         }
         response = api_client.post("/api/v1/payments", json=payload)
 
-        # SQLite does not enforce FK constraints
-        assert response.status_code == 201
+        # FK enforcement rejects this with 422
+        assert response.status_code == 422
 
 
 # ─── Activity edge cases ──────────────────────────────────────────────────────
@@ -394,8 +385,12 @@ class TestDataIntegrity:
         ids = [c["id"] for c in response.json()]
         assert client_id not in ids
 
+    @pytest.mark.xfail(
+        reason="BUG: Double-delete returns 204 instead of 404",
+        strict=True,
+    )
     def test_double_delete_idempotent(self, api_client, create_record):
-        """Deleting an already-deleted record → 204 (idempotent, no-op)."""
+        """Deleting an already-deleted record → should return 404."""
         record = create_record()
         record_id = record["id"]
 
@@ -403,9 +398,9 @@ class TestDataIntegrity:
         response = api_client.delete(f"/api/v1/records/{record_id}")
         assert response.status_code == 204
 
-        # Second delete is idempotent (still finds record via get())
+        # Second delete should return 404 (record already deleted)
         response = api_client.delete(f"/api/v1/records/{record_id}")
-        assert response.status_code == 204
+        assert response.status_code == 404
 
     def test_client_visitors_excludes_deleted(self, api_client, create_client):
         """Soft-deleted visitors excluded from client visitors list."""
@@ -433,3 +428,65 @@ class TestDataIntegrity:
         visitor_ids = [v["id"] for v in response.json()]
         assert v1_id in visitor_ids
         assert v2_id not in visitor_ids
+
+
+# ─── Response contract tests ───────────────────────────────────────────────────
+
+
+class TestResponseContracts:
+    """Verify API responses match Pydantic schemas (contract testing).
+
+    These tests catch schema drift — when API responses change but
+    schemas don't update.  Each test creates its own data via fixtures
+    to ensure the endpoint returns at least one item, then validates
+    every item against the corresponding Pydantic response schema.
+    """
+
+    def test_records_schema(self, api_client, create_record):
+        """GET /api/v1/records — each item validates against RecordResponse."""
+        create_record()  # ensure at least one record exists
+        resp = api_client.get("/api/v1/records")
+        assert resp.status_code == 200
+        for item in resp.json():
+            RecordResponse.model_validate(item)  # raises ValidationError if mismatch
+
+    def test_clients_schema(self, api_client, create_client):
+        """GET /api/v1/clients — each item validates against ClientResponse."""
+        create_client()
+        resp = api_client.get("/api/v1/clients")
+        assert resp.status_code == 200
+        for item in resp.json():
+            ClientResponse.model_validate(item)
+
+    def test_payments_schema(self, api_client, create_record):
+        """GET /api/v1/payments — each item validates against PaymentResponse."""
+        # Create a record first, then a payment
+        record = create_record()
+        api_client.post(
+            "/api/v1/payments",
+            json={
+                "record_id": record["id"],
+                "amount": 1000,
+                "method": "cash",
+            },
+        )
+        resp = api_client.get("/api/v1/payments")
+        assert resp.status_code == 200
+        for item in resp.json():
+            PaymentResponse.model_validate(item)
+
+    def test_activities_schema(self, api_client, create_activity):
+        """GET /api/v1/activities — each item validates against ActivityResponse."""
+        create_activity()
+        resp = api_client.get("/api/v1/activities")
+        assert resp.status_code == 200
+        for item in resp.json():
+            ActivityResponse.model_validate(item)
+
+    def test_services_schema(self, api_client, create_service):
+        """GET /api/v1/services — each item validates against ServiceResponse."""
+        create_service()
+        resp = api_client.get("/api/v1/services")
+        assert resp.status_code == 200
+        for item in resp.json():
+            ServiceResponse.model_validate(item)

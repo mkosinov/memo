@@ -199,4 +199,56 @@ describe('ClientsPage', () => {
     fireEvent.click(screen.getByTestId('modal-close'));
     expect(screen.queryByTestId('client-card-modal')).not.toBeInTheDocument();
   });
+
+  // ─── Pagination edge cases ─────────────────────────────────────────────
+
+  describe('pagination edge cases', () => {
+    it('disables next button on last page', async () => {
+      mockUseClients.mockReturnValue(createMockClientsContext({ total: 25, page: 2, perPage: 20 }));
+      const ClientsPage = (await import('../app/(main)/clients/page')).default;
+      render(
+        <QueryClientProvider client={createQueryClient()}>
+          <ClientsPage />
+        </QueryClientProvider>,
+      );
+      const nextButton = screen.getByText('→').closest('button');
+      expect(nextButton).toBeDisabled();
+    });
+
+    it('enables both prev and next buttons on middle page', async () => {
+      mockUseClients.mockReturnValue(createMockClientsContext({ total: 60, page: 2, perPage: 20 }));
+      const ClientsPage = (await import('../app/(main)/clients/page')).default;
+      render(
+        <QueryClientProvider client={createQueryClient()}>
+          <ClientsPage />
+        </QueryClientProvider>,
+      );
+      const prevButton = screen.getByText('←').closest('button');
+      const nextButton = screen.getByText('→').closest('button');
+      expect(prevButton).not.toBeDisabled();
+      expect(nextButton).not.toBeDisabled();
+    });
+
+    it('shows correct client count for single client', async () => {
+      mockUseClients.mockReturnValue(createMockClientsContext({ total: 1, page: 1, perPage: 20 }));
+      const ClientsPage = (await import('../app/(main)/clients/page')).default;
+      render(
+        <QueryClientProvider client={createQueryClient()}>
+          <ClientsPage />
+        </QueryClientProvider>,
+      );
+      expect(screen.getByText('1 клиентов')).toBeInTheDocument();
+    });
+
+    it('shows zero clients count', async () => {
+      mockUseClients.mockReturnValue(createMockClientsContext({ total: 0, page: 1, perPage: 20 }));
+      const ClientsPage = (await import('../app/(main)/clients/page')).default;
+      render(
+        <QueryClientProvider client={createQueryClient()}>
+          <ClientsPage />
+        </QueryClientProvider>,
+      );
+      expect(screen.getByText('0 клиентов')).toBeInTheDocument();
+    });
+  });
 });

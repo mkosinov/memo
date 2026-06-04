@@ -188,4 +188,87 @@ describe('ClientCardModal', () => {
     expect(deleteClient).toHaveBeenCalledWith('c1');
     expect(onClose).toHaveBeenCalled();
   });
+
+  // ─── Tab switching edge cases ───────────────────────────────────────────
+
+  describe('tab switching', () => {
+    it('switches back to client tab from record tab', () => {
+      render(<ClientCardModal {...defaultProps} client={mockClientWithRecords} />);
+
+      // Start on client tab
+      expect(screen.getByTestId('client-info-tab')).toBeInTheDocument();
+
+      // Switch to a record tab
+      fireEvent.click(screen.getByText(/10\.05\.2026/));
+      expect(screen.getByTestId('client-record-tab')).toBeInTheDocument();
+
+      // Switch back to client tab
+      fireEvent.click(screen.getByText('Клиент'));
+      expect(screen.getByTestId('client-info-tab')).toBeInTheDocument();
+      expect(screen.queryByTestId('client-record-tab')).not.toBeInTheDocument();
+    });
+
+    it('resets to client tab when modal is closed and reopened', () => {
+      const { rerender } = render(
+        <ClientCardModal {...defaultProps} client={mockClientWithRecords} isOpen={true} />,
+      );
+
+      // Switch to record tab
+      fireEvent.click(screen.getByText(/10\.05\.2026/));
+      expect(screen.getByTestId('client-record-tab')).toBeInTheDocument();
+
+      // Close modal
+      rerender(<ClientCardModal {...defaultProps} client={mockClientWithRecords} isOpen={false} />);
+      expect(screen.queryByTestId('client-card-modal')).not.toBeInTheDocument();
+
+      // Reopen modal
+      rerender(<ClientCardModal {...defaultProps} client={mockClientWithRecords} isOpen={true} />);
+      // Should reset to client tab
+      expect(screen.getByTestId('client-info-tab')).toBeInTheDocument();
+    });
+
+    it('renders the correct record tab content for different records', () => {
+      render(<ClientCardModal {...defaultProps} client={mockClientWithRecords} />);
+
+      // Click first record
+      fireEvent.click(screen.getByText(/10\.05\.2026/));
+      expect(screen.getByTestId('record-id').textContent).toBe('rec1');
+
+      // Switch back to client, then click second record
+      fireEvent.click(screen.getByText('Клиент'));
+      fireEvent.click(screen.getByText(/20\.04\.2026/));
+      expect(screen.getByTestId('record-id').textContent).toBe('rec2');
+    });
+
+    it('Клиент tab has active styling when selected', () => {
+      render(<ClientCardModal {...defaultProps} />);
+      const clientTab = screen.getByText('Клиент');
+      expect(clientTab.className).toContain('bg-brand');
+      expect(clientTab.className).toContain('text-white');
+    });
+
+    it('does not render record tabs when client has no records', () => {
+      render(<ClientCardModal {...defaultProps} client={mockClientWithStats} />);
+      expect(screen.getByText('Клиент')).toBeInTheDocument();
+      // No date-based record buttons
+      expect(screen.queryByText(/10\.05\.2026/)).not.toBeInTheDocument();
+    });
+  });
+
+  // ─── Modal close behavior ───────────────────────────────────────────────
+
+  describe('modal close behavior', () => {
+    it('does not call onClose when clicking inside the modal content', () => {
+      const onClose = vi.fn();
+      render(<ClientCardModal {...defaultProps} onClose={onClose} />);
+      // Click on the modal body
+      fireEvent.click(screen.getByTestId('client-card-left-panel'));
+      expect(onClose).not.toHaveBeenCalled();
+    });
+
+    it('passing null client in view mode still renders modal header', () => {
+      render(<ClientCardModal {...defaultProps} client={null} mode="view" />);
+      expect(screen.getByTestId('client-card-modal')).toBeInTheDocument();
+    });
+  });
 });

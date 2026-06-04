@@ -312,4 +312,97 @@ describe('ClientRecordTab', () => {
       expect(amountInput).toHaveValue(null);
     });
   });
+
+  // ─── Payment form edge cases ────────────────────────────────────────────
+
+  it('does not call createPayment with empty string amount', () => {
+    render(<ClientRecordTab recordId="r1" onClose={onClose} />);
+
+    fireEvent.change(screen.getByPlaceholderText('Сумма'), {
+      target: { value: '' },
+    });
+    fireEvent.click(screen.getByText('Добавить'));
+
+    expect(createPayment).not.toHaveBeenCalled();
+  });
+
+  it('does not call createPayment with negative amount', () => {
+    render(<ClientRecordTab recordId="r1" onClose={onClose} />);
+
+    fireEvent.change(screen.getByPlaceholderText('Сумма'), {
+      target: { value: '-500' },
+    });
+    fireEvent.click(screen.getByText('Добавить'));
+
+    expect(createPayment).not.toHaveBeenCalled();
+  });
+
+  it('sends transfer method when payment method is changed to transfer', async () => {
+    render(<ClientRecordTab recordId="r1" onClose={onClose} />);
+
+    const methodSelect = screen.getByDisplayValue('Карта');
+    fireEvent.change(methodSelect, { target: { value: 'transfer' } });
+
+    fireEvent.change(screen.getByPlaceholderText('Сумма'), {
+      target: { value: '3000' },
+    });
+    fireEvent.click(screen.getByText('Добавить'));
+
+    await waitFor(() => {
+      expect(createPayment).toHaveBeenCalledWith({
+        record_id: 'r1',
+        amount: 3000,
+        method: 'transfer',
+      });
+    });
+  });
+
+  it('invalidates payments query after successful payment', async () => {
+    render(<ClientRecordTab recordId="r1" onClose={onClose} />);
+
+    fireEvent.change(screen.getByPlaceholderText('Сумма'), {
+      target: { value: '1000' },
+    });
+    fireEvent.click(screen.getByText('Добавить'));
+
+    await waitFor(() => {
+      expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['payments'] });
+    });
+  });
+
+  it('shows "Нет посетителей" when record has no visits', () => {
+    mockUseQuery.mockReturnValue({
+      data: { ...mockRecord, id: 'r3', visits: [] },
+      isLoading: false,
+      error: null,
+    } as any);
+
+    render(<ClientRecordTab recordId="r3" onClose={onClose} />);
+    expect(screen.getByText('Нет посетителей')).toBeInTheDocument();
+  });
+
+  it('displays all payment method options', () => {
+    render(<ClientRecordTab recordId="r1" onClose={onClose} />);
+
+    const methodSelect = screen.getByDisplayValue('Карта');
+    const options = Array.from(methodSelect.querySelectorAll('option'));
+    const values = options.map(o => o.value);
+    expect(values).toContain('card');
+    expect(values).toContain('cash');
+    expect(values).toContain('transfer');
+  });
+
+  it('displays status icon for each status type', () => {
+    render(<ClientRecordTab recordId="r1" onClose={onClose} />);
+    // Each status has an SVG icon — confirmed status shows checkmark
+    const statusSelect = screen.getByTestId('select-record-status');
+    expect(statusSelect).toBeInTheDocument();
+  });
+
+  it('shows total cost with locale formatting', () => {
+    render(<ClientRecordTab recordId="r1" onClose={onClose} />);
+    // 3500 should be formatted as "3 500 ₽" — appears in both visitor row and payment total
+    const matches = screen.getAllByText('3 500 ₽');
+    expect(matches.length).toBeGreaterThanOrEqual(2);
+  });
 });

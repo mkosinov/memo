@@ -16,10 +16,10 @@ if TYPE_CHECKING:
 class Client(AbstractModel):
     __tablename__ = "clients"
 
-    name: Mapped[str] = mapped_column(String(200))
-    phone: Mapped[str] = mapped_column(String(20))
+    name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    phone: Mapped[str | None] = mapped_column(String(20), nullable=True)
     email: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    channel: Mapped[str] = mapped_column(String(50))
+    channel: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
     tags: Mapped[list["Tag"]] = relationship(
         "Tag", secondary="client_tags", back_populates="clients"

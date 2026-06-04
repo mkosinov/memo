@@ -303,6 +303,37 @@ class TestModelCrud:
         assert fetched.name == "Maria Petrova"
         assert fetched.channel == "telegram"
 
+    def test_client_nullable_fields(self, session: Session):
+        """Client name, phone, and channel can be NULL (optional fields).
+
+        A client may be created with incomplete info (e.g. walk-in without
+        phone or name). The database must allow NULL for these columns.
+        """
+        from src.models import Client
+        c = Client(
+            name=None,
+            phone=None,
+            email=None,
+            channel=None,
+        )
+        session.add(c)
+        session.flush()
+        fetched = session.get(Client, c.id)
+        assert fetched.name is None
+        assert fetched.phone is None
+        assert fetched.email is None
+        assert fetched.channel is None
+
+    def test_client_nullable_via_inspector(self):
+        """Verify the clients table DDL declares name, phone, channel as nullable."""
+        engine = _make_engine()
+        _create_all_and_session(engine)
+        insp = inspect(engine)
+        cols = {col["name"]: col for col in insp.get_columns("clients")}
+        assert cols["name"]["nullable"] is True, "clients.name should be nullable"
+        assert cols["phone"]["nullable"] is True, "clients.phone should be nullable"
+        assert cols["channel"]["nullable"] is True, "clients.channel should be nullable"
+
     def test_visitor_crud(self, session: Session):
         from src.models import Client, Visitor
         c = Client(name="Parent", phone="+79001111111", channel="phone")

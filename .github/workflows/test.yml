@@ -86,7 +86,7 @@ jobs:
       - name: Run E2E tests
         run: |
           cd backend
-          uv run python -m seed
+          uv run python -m src.seed
           uv run uvicorn src.main:app --host 0.0.0.0 --port 8000 &
           BACKEND_PID=$!
           cd ../frontend/admin

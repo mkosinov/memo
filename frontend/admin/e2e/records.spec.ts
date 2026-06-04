@@ -557,7 +557,7 @@ test.describe('Records Page — Table and Filters', () => {
     const client = await createTestClient(request);
     const activity = await createTestActivity(request);
     const record = await createTestRecord(request, activity.id, client.id, {
-      visits: [{ price: 3500 }],
+      visits: [{ name: `Price Test ${Date.now()}`, price: 3500 }],
     });
 
     let recordId = record.id;

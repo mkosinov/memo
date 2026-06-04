@@ -311,7 +311,7 @@ async def _seed_payments(session) -> None:
         {"id": "p3", "record_id": "r3", "amount": 4800, "method": "transfer"},
         {"id": "p4", "record_id": "r4", "amount": 2000, "method": "cash"},
         {"id": "p5", "record_id": "r5", "amount": 6600, "method": "card"},
-        {"id": "p6", "record_id": "r6", "amount": 0, "method": None},
+        {"id": "p6", "record_id": "r6", "amount": 1500, "method": "cash"},
     ]
     for p in payments:
         if not await _exists(session, Payment, p["id"]):

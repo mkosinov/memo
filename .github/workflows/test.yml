@@ -83,21 +83,20 @@ jobs:
         working-directory: frontend/admin
         run: pnpm exec playwright install --with-deps chromium
 
-      - name: Start backend
-        working-directory: backend
-        run: uv run uvicorn src.main:app --host 0.0.0.0 --port 8000 &
-        env:
-          DATABASE_URL: sqlite+aiosqlite:///./test_memo.db
-
-      - name: Start frontend
-        working-directory: frontend/admin
-        run: npx next dev -p 3001 &
-        env:
-          TEST_DB_PATH: ../../backend/test_memo.db
-
-      - name: Wait for servers
-        run: npx wait-on http://localhost:8000 http://localhost:3001 --timeout 60000
-
       - name: Run E2E tests
         working-directory: frontend/admin
-        run: pnpm exec playwright test
+        run: |
+          cd ../backend
+          uv run uvicorn src.main:app --host 0.0.0.0 --port 8000 &
+          BACKEND_PID=$!
+          cd ../frontend/admin
+          npx next dev -p 3001 &
+          FRONTEND_PID=$!
+          npx wait-on http://localhost:8000 http://localhost:3001 --timeout 60000
+          pnpm exec playwright test
+          EXIT_CODE=$?
+          kill $BACKEND_PID $FRONTEND_PID 2>/dev/null || true
+          exit $EXIT_CODE
+        env:
+          DATABASE_URL: sqlite+aiosqlite:///./test_memo.db
+          TEST_DB_PATH: ../../backend/test_memo.db

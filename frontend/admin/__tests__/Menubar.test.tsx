@@ -61,7 +61,7 @@ describe('Menubar', () => {
   it('highlights the active navigation link (Расписание)', () => {
     renderWithProviders();
     const activeLink = screen.getByRole('link', { name: 'Расписание' });
-    expect(activeLink).toHaveClass('bg-brand');
+    expect(activeLink).toHaveClass('bg-brand/30');
   });
 
   it('renders artist legend with color dots', async () => {

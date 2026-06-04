@@ -126,6 +126,10 @@ export async function deleteActivity(id: string): Promise<void> {
 
 // ─── Records ────────────────────────────────────────────────────────────────
 
+export async function getRecord(id: string): Promise<RecordResponse> {
+  return api(`/api/v1/records/${id}`, RecordResponseSchema);
+}
+
 export async function getRecords(params?: {
   date_from?: string;
   date_to?: string;

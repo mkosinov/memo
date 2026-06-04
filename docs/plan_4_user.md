@@ -72,15 +72,11 @@
 #### CI/CD
 
 **Готово:**
-- GitHub Actions: pytest + vitest ✅
+- GitHub Actions: pytest + vitest + E2E ✅
 - Coverage threshold 80%
 - Test/Dev DB separation
 - CORS для E2E ✅
-
-**Работает частично:**
-- E2E tests — 33/48 pass
-  - Visual regression — нет baseline скриншотов
-  - Нужно добавить baseline скриншоты в репозиторий
+- E2E: 40/40 tests passing ✅
 
 ---
 

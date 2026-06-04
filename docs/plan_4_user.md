@@ -1,6 +1,6 @@
 # Memo MVP — Анализ статуса и план
 
-> Дата: 2026-06-04
+> Дата: 2026-06-04 (обновлено)
 > Дедлайн: 15 июня 2026
 
 ---
@@ -15,12 +15,13 @@
 | Admin Panel (Next.js) | ✅ Готов | 299/300 vitest |
 | Public Website | ✅ Готов | 285 tests |
 | API Integration | ✅ Готов | — |
-| CI/CD | ✅ Готов | pytest + vitest + playwright |
+| CI/CD | ⚠️ Partial | pytest + vitest ✅, E2E needs debug |
 
 ### Что осталось
 
 | Задача | Дни | Приоритет |
 |--------|-----|-----------|
+| E2E в CI — починить schedule tests | 0.5 | Высокий |
 | Artist App (P4) | 4-5 | Средний |
 | AI Concierge (P5) | 3 | Низкий |
 | Tests & Polish | 2-3 | Высокий |
@@ -37,16 +38,15 @@
 
 **Готово:**
 - FastAPI + SQLite + Clean Architecture
-- 12 CRUD сущностей (Masters, Services, Locations, Activities, Records, Clients, Payments, Visits, Visitors, Photos, Materials, Tags)
+- 12 CRUD сущностей
 - FK enforcement включён
-- Payment validation (gt=0)
-- Double-delete protection (404)
+- Payment validation (gt=0) ✅ ИСПРАВЛЕНО
+- Double-delete protection (404) ✅ ИСПРАВЛЕНО
 - Health check, CORS, Admin panel
 
 **Тесты:**
 - 274 passed, 2 xfailed (cascade delete, capacity enforcement)
-- Coverage: 78% (порог 80% — нужен рост на ~30 строк)
-- E2E: 13 tests с DB verification
+- Coverage: 78% (порог 80%)
 
 **Осталось доработать:**
 - Cascade delete (visits, payments при удалении record)
@@ -57,37 +57,27 @@
 **Готово:**
 - Schedule (/schedule) — неделя, DnD, stamp, modal
 - Records (/records) — таблица, фильтры, пагинация
-- Clients, Masters, Chat — заготовки
 - ActivityDetailsModal — Settings, Client, New Booking табы
-- Toasts, MiniCalendar, ThemeProvider
 
 **Тесты:**
-- 299/300 vitest (1 pre-existing Menubar — исправлен в PR)
-- 47 E2E tests (schedule, records, visual regression)
+- 299/300 vitest (Menubar тест исправлен ✅)
+- 47 E2E tests (нужна отладка в CI)
 
 **Осталось доработать:**
-- ConflictWarning (двойное бронирование)
-- Filters by artist/location на schedule
+- E2E в CI — schedule page не грузит activities
 - Clients page — полная реализация
 - Masters page — полная реализация
 - Chat page — полная реализация
 
-#### Public Website (colourmountains.ru)
-
-**Готово:**
-- Home, Services, Booking (4-step), Contact
-- Online booking полный цикл
-- 285 tests
-
-**Осталось доработать:**
-- SEO metadata, sitemap, robots
-
 #### CI/CD
 
 **Готово:**
-- GitHub Actions: pytest + vitest + playwright
+- GitHub Actions: pytest + vitest ✅
 - Coverage threshold 80%
 - Test/Dev DB separation
+
+**Не работает:**
+- E2E tests — 37/48 падают (schedule не грузит данные)
 
 ---
 
@@ -97,10 +87,10 @@
 
 | День | Задача | Результат |
 |------|--------|-----------|
-| Пн | Cascade delete + capacity enforcement | 2 xfail → pass, coverage 80%+ |
-| Вт | Clients page — полная реализация | CRUD + фильтры |
-| Ср | Masters page — полная реализация | CRUD + расписание |
-| Чт | Chat page — базовая реализация | UI + mock responses |
+| Пн | E2E debug — schedule loads from API | CI green |
+| Вт | Cascade delete + capacity enforcement | 2 xfail → pass |
+| Ср | Clients page — полная реализация | CRUD + фильтры |
+| Чт | Masters page — полная реализация | CRUD + расписание |
 | Пт | Tests & Polish — a11y, mobile | Build без ошибок |
 
 #### Неделя 2 (12-15 июня)
@@ -118,20 +108,9 @@
 
 | Риск | Вероятность | Влияние | Митигация |
 |------|-------------|---------|-----------|
-| Artist App сложнее ожидаемого | Средняя | Высокое | Сократить до MVP (только расписание) |
+| E2E в CI нестабильны | Высокая | Среднее | Debug schedule API |
+| Artist App сложнее ожидаемого | Средняя | Высокое | Сократить до MVP |
 | AI Concierge не нужен для MVP | Низкая | Среднее | Отложить после 15 июня |
-| Coverage не вырастет до 80% | Низкая | Низкое | Уже 78%, легко добавить тесты |
-| E2E тесты в CI не стабильны | Средняя | Среднее | Retry в playwright config |
-
----
-
-### Рекомендации
-
-1. **Сфокусироваться на Admin Panel** — это ядро MVP
-2. **Artist App — упростить** — только расписание + доступность, без push
-3. **AI Concierge — отложить** — не критично для запуска
-4. **Tests & Polish — параллельно** — не ждать конца
-5. **Deploy — автоматизировать** — Docker + CI/CD
 
 ---
 
@@ -141,6 +120,5 @@
 |---------|---------|------|
 | Backend coverage | 78% | 80%+ |
 | Frontend tests | 299/300 | 300/300 |
-| E2E tests | 47 | 50+ |
-| Build time | ~2min | <3min |
-| CI total time | ~5min | <8min |
+| E2E tests | 11/48 pass | 48/48 |
+| CI status | Partial | Full green |

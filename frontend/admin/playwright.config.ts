@@ -25,6 +25,8 @@ export default defineConfig({
   workers: process.env.CI ? 1 : undefined,
   reporter: 'list',
   timeout: 30_000,
+  // Skip visual regression tests in CI — they need baseline screenshots
+  grep: process.env.CI ? /^(?!.*Visual Regression)/ : undefined,
 
   use: {
     baseURL: 'http://localhost:3001',

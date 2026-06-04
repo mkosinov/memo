@@ -14,12 +14,18 @@ Admin page `/clients` — table of all clients with server-side filtering, pagin
 
 ## 2. Backend Changes
 
-### 2.1. Make `phone` and `channel` nullable
+### 2.1. Make `name`, `phone` and `channel` nullable
 
-**Migration:** ALTER TABLE clients ALTER COLUMN phone DROP NOT NULL; ALTER COLUMN channel DROP NOT NULL;
+**Migration:**
+```sql
+ALTER TABLE clients ALTER COLUMN name DROP NOT NULL;
+ALTER TABLE clients ALTER COLUMN phone DROP NOT NULL;
+ALTER TABLE clients ALTER COLUMN channel DROP NOT NULL;
+```
 
 **ORM changes (`src/models/client.py`):**
 ```python
+name: Mapped[str | None] = mapped_column(String(200), nullable=True)
 phone: Mapped[str | None] = mapped_column(String(20), nullable=True)
 channel: Mapped[str | None] = mapped_column(String(50), nullable=True)
 ```
@@ -27,13 +33,13 @@ channel: Mapped[str | None] = mapped_column(String(50), nullable=True)
 **Schema changes (`src/schemas/client.py`):**
 ```python
 class ClientBase(BaseModel):
-    name: str = "Дорогой гость"
+    name: str | None = None
     phone: str | None = None
     email: str | None = None
     channel: Channel | None = None
 ```
 
-**Default name:** If `name` is not provided or empty → set to `"Дорогой гость"` in service layer.
+**Default name:** The database stores `NULL` when name is not provided. The default `"Дорогой гость"` is applied at the **display layer** (frontend + API response), NOT in the database. This keeps data clean and allows different contexts to use different defaults (notifications, reports, UI).
 
 ### 2.2. Extended `GET /api/v1/clients`
 
@@ -82,6 +88,8 @@ class ClientBase(BaseModel):
   "per_page": 20
 }
 ```
+
+**Name display:** The API returns `name: null` when not set. Frontend displays `"Дорогой гость"` as a fallback. This keeps the database clean and allows different display defaults per context (e.g., notifications might use "Клиент без имени", reports might group as "Без имени").
 
 **SQLAlchemy implementation:** Subquery with `func.count`, `func.max`, `func.sum` + LEFT JOIN on visits/payments + filters + pagination.
 
@@ -154,8 +162,8 @@ After create/update/delete → invalidate `['clients']` query in both ClientsCon
 
 | Column | Width | Sortable | Format |
 |--------|-------|----------|--------|
-| Имя | flex-1 | ✅ `name` | Text (default: "Дорогой гость") |
-| Телефон | 160px | ✅ `phone` | Text (default: "Не указан") |
+| Имя | flex-1 | ✅ `name` | Text (display: `name ?? "Дорогой гость"`) |
+| Телефон | 160px | ✅ `phone` | Text (display: `phone ?? "Не указан"`) |
 | Кол-во визитов | 120px | ✅ `visits_count` | Number |
 | Последний визит | 140px | ✅ `last_visit` | DD.MM.YYYY |
 | Сумма оплат | 140px | ✅ `total_paid` | 36 000 ₽ |

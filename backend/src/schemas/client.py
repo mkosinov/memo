@@ -10,10 +10,10 @@ from src.models.enums import Channel
 class ClientBase(BaseModel):
     """Shared fields for client creation and updates."""
 
-    name: str
-    phone: str
+    name: str | None = None
+    phone: str | None = None
     email: str | None = None
-    channel: Channel
+    channel: Channel | None = None
 
 
 class ClientCreate(ClientBase):
@@ -28,6 +28,15 @@ class ClientUpdate(ClientBase):
     pass
 
 
+class ClientPatch(BaseModel):
+    """Request schema for partial updates (PATCH). All fields optional."""
+
+    name: str | None = None
+    phone: str | None = None
+    email: str | None = None
+    channel: Channel | None = None
+
+
 class ClientResponse(ClientBase):
     """Response schema with all client fields."""
 
@@ -37,3 +46,12 @@ class ClientResponse(ClientBase):
     created_at: datetime
     updated_at: datetime
     is_active: bool
+
+
+class ClientWithStats(ClientResponse):
+    """Response schema extending ClientResponse with aggregated metrics."""
+
+    visits_count: int = 0
+    last_visit: str | None = None
+    total_paid: int = 0
+    missed_visits: int = 0

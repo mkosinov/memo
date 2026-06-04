@@ -12,6 +12,7 @@
 import { vi } from 'vitest';
 import type { ScheduleContextType } from '@/contexts/ScheduleContext';
 import type { RecordsContextType } from '@/contexts/RecordsContext';
+import type { ClientsContextType } from '@/contexts/ClientsContext';
 import { mockArtists, mockServices, mockLocations } from './mockData';
 
 // ─── ScheduleContext ──────────────────────────────────────────────────────
@@ -102,6 +103,49 @@ export function createMockUIContext(overrides?: UIOverrides): UIContextMock {
     toggleRightPanel: vi.fn(),
     theme: 'light' as const,
     toggleTheme: vi.fn(),
+    ...overrides,
+  };
+}
+
+// ─── ClientsContext ─────────────────────────────────────────────────────
+
+type ClientsOverrides = Partial<ClientsContextType>;
+
+export function createMockClientsContext(
+  overrides?: ClientsOverrides,
+): ClientsContextType {
+  return {
+    clients: [],
+    total: 0,
+    page: 1,
+    perPage: 20,
+    filters: {
+      search: '',
+      is_active: null,
+      created_from: '',
+      created_to: '',
+      updated_from: '',
+      updated_to: '',
+      min_visits: null,
+      max_visits: null,
+      min_paid: null,
+      max_paid: null,
+      missed_from: null,
+      missed_to: null,
+    },
+    sortBy: 'name',
+    sortOrder: 'asc',
+    isLoading: false,
+    error: null,
+    setPage: vi.fn(),
+    setPerPage: vi.fn(),
+    setFilters: vi.fn(),
+    setSort: vi.fn(),
+    resetFilters: vi.fn(),
+    createClient: vi.fn(),
+    updateClient: vi.fn(),
+    patchClient: vi.fn(),
+    deleteClient: vi.fn(),
     ...overrides,
   };
 }

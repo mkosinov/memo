@@ -86,7 +86,7 @@ class TestModelImports:
             "Master", "User", "Location", "Service", "Tariff", "Tag",
             "Activity", "Client", "Visitor", "Photo", "Record", "Visit", "Payment",
             "Material",
-            "RecordStatus", "UserRole",
+            "Channel", "RecordStatus", "UserRole",
             "service_tags", "activity_tags", "photo_tags",
             "master_tags", "location_tags", "client_tags", "visitor_tags", "record_tags",
         ]

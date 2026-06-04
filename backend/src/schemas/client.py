@@ -4,6 +4,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict
 
+from src.models.enums import Channel
+
 
 class ClientBase(BaseModel):
     """Shared fields for client creation and updates."""
@@ -11,7 +13,7 @@ class ClientBase(BaseModel):
     name: str
     phone: str
     email: str | None = None
-    channel: str  # "phone", "email", "telegram", "whatsapp"
+    channel: Channel
 
 
 class ClientCreate(ClientBase):

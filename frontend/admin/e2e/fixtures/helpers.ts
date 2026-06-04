@@ -20,7 +20,7 @@ export async function waitForScheduleReady(page: Page) {
  * Get the activity data from the first visible activity card.
  * Uses React fiber tree traversal to extract the activity prop.
  */
-async function getFirstActivity(page: Page) {
+export async function getFirstActivity(page: Page) {
   return page.evaluate(() => {
     const card = document.querySelector('[data-testid^="activity-"]');
     if (!card) return null;

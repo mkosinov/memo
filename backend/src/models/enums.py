@@ -36,3 +36,9 @@ class PaymentMethod(str, enum.Enum):
     CASH = "cash"
     CARD = "card"
     TRANSFER = "transfer"
+
+
+class Channel(str, enum.Enum):
+    TELEGRAM = "telegram"
+    MAX = "max"
+    WHATSAPP = "whatsapp"

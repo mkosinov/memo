@@ -1,6 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import type { ScheduleContextType } from '../contexts/ScheduleContext';
 import { DAYS } from '../lib/utils';
+import { createMockScheduleContext } from './helpers/mockContexts';
 
 vi.mock('@/contexts/ScheduleContext', () => ({
   useSchedule: vi.fn(),
@@ -43,33 +44,11 @@ vi.mock('@/app/components/modal/ActivityDetailsModal/ActivityDetailsModal', () =
 import { useSchedule } from '@/contexts/ScheduleContext';
 import { WeekView } from '../app/components/schedule/WeekView';
 
-function createDefaultContext(): ScheduleContextType {
-  return {
-    activities: [],
-    scheduleIndex: { byId: new Map(), byDate: new Map(), byMasterId: new Map(), byLocation: { all: { byDate: new Map(), byServiceId: new Map() } } },
-    artists: [],
-    services: [],
-    locations: [],
-    currentWeek: new Date('2025-04-07'),
-    stamp: { masterId: null, serviceId: null, locations: new Set(), ready: false },
-    setCurrentWeek: vi.fn(),
-    addActivity: vi.fn(),
-    updateActivity: vi.fn(),
-    deleteActivity: vi.fn(),
-    setStamp: vi.fn(),
-    copyLastWeek: vi.fn(),
-    loading: false,
-    error: null,
-    filterMasterId: null,
-    filterLocationId: null,
-    setFilterMasterId: vi.fn(),
-    setFilterLocationId: vi.fn(),
-  };
-}
+// Use shared context factory for default context shape
 
 function renderWeekView(contextOverrides?: Partial<ScheduleContextType>) {
   const mockUseSchedule = useSchedule as ReturnType<typeof vi.fn>;
-  mockUseSchedule.mockReturnValue({ ...createDefaultContext(), ...contextOverrides });
+  mockUseSchedule.mockReturnValue(createMockScheduleContext(contextOverrides));
   return render(<WeekView />);
 }
 

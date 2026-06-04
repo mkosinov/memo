@@ -243,11 +243,11 @@ async def _seed_activities(session) -> None:
 
 async def _seed_clients(session) -> None:
     clients = [
-        {"id": "c1", "name": "Анна Иванова", "phone": "+79001234567", "email": "anna@example.com", "channel": "instagram"},
-        {"id": "c2", "name": "Мария Петрова", "phone": "+79002345678", "email": None, "channel": "vk"},
+        {"id": "c1", "name": "Анна Иванова", "phone": "+79001234567", "email": "anna@example.com", "channel": "telegram"},
+        {"id": "c2", "name": "Мария Петрова", "phone": "+79002345678", "email": None, "channel": "max"},
         {"id": "c3", "name": "Елена Сидорова", "phone": "+79003456789", "email": None, "channel": "telegram"},
-        {"id": "c4", "name": "Дмитрий Козлов", "phone": "+79004567890", "email": None, "channel": "website"},
-        {"id": "c5", "name": "Ольга Новикова", "phone": "+79005678901", "email": None, "channel": "instagram"},
+        {"id": "c4", "name": "Дмитрий Козлов", "phone": "+79004567890", "email": None, "channel": "whatsapp"},
+        {"id": "c5", "name": "Ольга Новикова", "phone": "+79005678901", "email": None, "channel": "telegram"},
     ]
     for c in clients:
         if not await _exists(session, Client, c["id"]):

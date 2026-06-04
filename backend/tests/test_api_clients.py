@@ -6,7 +6,7 @@ CLIENT_PAYLOAD = {
     "name": "John Smith",
     "phone": "+79991234567",
     "email": "john@example.com",
-    "channel": "phone",
+    "channel": "telegram",
 }
 
 
@@ -26,7 +26,7 @@ class TestClientsCrud:
         assert body["name"] == "John Smith"
         assert body["phone"] == "+79991234567"
         assert body["email"] == "john@example.com"
-        assert body["channel"] == "phone"
+        assert body["channel"] == "telegram"
         assert "id" in body
         assert "created_at" in body
         assert "updated_at" in body
@@ -158,7 +158,7 @@ class TestClientsCrud:
             assert body["phone"] == "+79991234567"
             assert body["name"] == "John Smith"
             assert body["email"] == "john@example.com"
-            assert body["channel"] == "phone"
+            assert body["channel"] == "telegram"
             assert "id" in body
             assert body["is_active"] is True
 

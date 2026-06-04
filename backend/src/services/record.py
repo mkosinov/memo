@@ -78,7 +78,7 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
         record = Record(
             activity_id=data.activity_id,
             client_id=client.id if client else data.client_id,
-            status="pending",
+            status=data.status.value if data.status else "pending",
             seats=len(data.visits),
             comment=data.comment,
         )
@@ -113,7 +113,7 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
             client = Client(
                 phone=data.phone,
                 name=first_name,
-                channel="website",
+                channel="whatsapp",
             )
             db_session.add(client)
             await db_session.flush()

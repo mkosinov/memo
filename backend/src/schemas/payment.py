@@ -4,13 +4,15 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict
 
+from src.models.enums import PaymentMethod
+
 
 class PaymentBase(BaseModel):
     """Shared fields for payment creation and updates."""
 
     record_id: str
     amount: int
-    method: str | None = None  # PaymentMethod enum value
+    method: PaymentMethod | None = None
 
 
 class PaymentCreate(PaymentBase):

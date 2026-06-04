@@ -2,11 +2,13 @@
 
 from pydantic import BaseModel, ConfigDict
 
+from src.models.enums import VisitStatus
+
 
 class VisitStatusUpdate(BaseModel):
     """Request schema for updating a visit's status."""
 
-    status: str  # VisitStatus value
+    status: VisitStatus
 
 
 class VisitResponse(BaseModel):

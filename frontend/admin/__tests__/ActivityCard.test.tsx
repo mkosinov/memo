@@ -3,6 +3,7 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import React from 'react';
 import { ActivityCard } from '../app/components/schedule/ActivityCard';
 import type { Activity, Artist } from '@memo/domain';
+import { createMockUIContext, createMockScheduleContext } from './helpers/mockContexts';
 
 const mockArtist: Artist = {
   id: 'art_1',
@@ -202,40 +203,8 @@ const mockUseSchedule = vi.mocked(useSchedule);
 
 beforeEach(() => {
   vi.useFakeTimers();
-  mockUseUI.mockReturnValue({
-    deleteMode: false,
-    toggleDeleteMode: vi.fn(),
-    toasts: [],
-    showToast: vi.fn(),
-    hideToast: vi.fn(),
-    sidebarCollapsed: false,
-    toggleSidebar: vi.fn(),
-    rightPanelCollapsed: false,
-    toggleRightPanel: vi.fn(),
-    theme: 'light',
-    toggleTheme: vi.fn(),
-  });
-  mockUseSchedule.mockReturnValue({
-    activities: [],
-    scheduleIndex: { byId: new Map(), byDate: new Map(), byMasterId: new Map(), byLocation: { all: { byDate: new Map(), byServiceId: new Map() } } },
-    artists: [],
-    services: [],
-    locations: [],
-    currentWeek: new Date(),
-    stamp: { masterId: null, serviceId: null, locations: new Set(), ready: false },
-    setCurrentWeek: vi.fn(),
-    addActivity: vi.fn(),
-    updateActivity: vi.fn(),
-    deleteActivity: vi.fn(),
-    setStamp: vi.fn(),
-    copyLastWeek: vi.fn(),
-    loading: false,
-    error: null,
-    filterMasterId: null,
-    filterLocationId: null,
-    setFilterMasterId: vi.fn(),
-    setFilterLocationId: vi.fn(),
-  });
+  mockUseUI.mockReturnValue(createMockUIContext());
+  mockUseSchedule.mockReturnValue(createMockScheduleContext());
 });
 
 afterEach(() => {

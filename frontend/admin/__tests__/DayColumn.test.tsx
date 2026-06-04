@@ -3,6 +3,7 @@ import { render, screen, fireEvent, act } from '@testing-library/react';
 import React from 'react';
 import { DayColumn } from '../app/components/schedule/DayColumn';
 import type { Activity, Artist, Service } from '@memo/domain';
+import { createMockUIContext, createMockScheduleContext } from './helpers/mockContexts';
 const MOCK_ARTISTS: Artist[] = [
   { id: 'm1', name: 'Анна Иванова', shortName: 'Анна', color: '#FF6B6B' },
   { id: 'm2', name: 'Петр Петров', shortName: 'Петр', color: '#4ECDC4' },
@@ -47,38 +48,11 @@ const MOCK_SERVICES: Service[] = [
 
 // Mock contexts used by ActivityCard (rendered inside DayColumn)
 vi.mock('@/contexts/UIContext', () => ({
-  useUI: vi.fn(() => ({
-    deleteMode: false,
-    toggleDeleteMode: vi.fn(),
-    toasts: [],
-    showToast: vi.fn(),
-    hideToast: vi.fn(),
-    sidebarCollapsed: false,
-    toggleSidebar: vi.fn(),
-    rightPanelCollapsed: false,
-    toggleRightPanel: vi.fn(),
-    theme: 'light' as const,
-    toggleTheme: vi.fn(),
-  })),
+  useUI: vi.fn(() => createMockUIContext()),
 }));
 
 vi.mock('@/contexts/ScheduleContext', () => ({
-  useSchedule: vi.fn(() => ({
-    activities: [],
-    artists: [],
-    services: [],
-    locations: [],
-    currentWeek: new Date(),
-    stamp: { masterId: null, serviceId: null, locations: new Set(), ready: false },
-    setCurrentWeek: vi.fn(),
-    addActivity: vi.fn(),
-    updateActivity: vi.fn(),
-    deleteActivity: vi.fn(),
-    setStamp: vi.fn(),
-    copyLastWeek: vi.fn(),
-    loading: false,
-    error: null,
-  })),
+  useSchedule: vi.fn(() => createMockScheduleContext()),
 }));
 
 // Mock useDroppable to control isOver state

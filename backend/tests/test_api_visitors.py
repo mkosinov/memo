@@ -6,7 +6,7 @@ CLIENT_PAYLOAD = {
     "name": "Jane Doe",
     "phone": "+79991112233",
     "email": "jane@example.com",
-    "channel": "email",
+    "channel": "telegram",
 }
 
 

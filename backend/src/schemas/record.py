@@ -2,6 +2,8 @@
 
 from pydantic import BaseModel, ConfigDict
 
+from src.models.enums import RecordStatus, VisitStatus
+
 
 class VisitItem(BaseModel):
     """Nested visit creation/update payload within a record.
@@ -17,7 +19,7 @@ class VisitItem(BaseModel):
     age: int | None = None
     visitor_id: str | None = None
     price: int
-    status: str = "waiting"  # VisitStatus value
+    status: VisitStatus = VisitStatus.WAITING
 
 
 class VisitResponse(BaseModel):
@@ -40,7 +42,7 @@ class RecordBase(BaseModel):
 
     activity_id: str
     client_id: str | None = None
-    status: str = "pending"  # RecordStatus value
+    status: RecordStatus = RecordStatus.PENDING
     seats: int
     comment: str | None = None
 
@@ -58,6 +60,7 @@ class RecordCreate(BaseModel):
     activity_id: str
     phone: str | None = None
     client_id: str | None = None
+    status: RecordStatus = RecordStatus.PENDING
     comment: str | None = None
     visits: list[VisitItem]  # seats = len(visits)
 
@@ -67,7 +70,7 @@ class RecordUpdate(BaseModel):
 
     activity_id: str
     client_id: str | None = None
-    status: str
+    status: RecordStatus
     comment: str | None = None
     visits: list[VisitItem]  # full replacement
 

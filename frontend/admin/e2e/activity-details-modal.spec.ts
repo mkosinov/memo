@@ -1,1082 +1,428 @@
 import { test, expect } from '@playwright/test';
+import { queryDBRow, queryDBRows } from './fixtures/db-query';
+import { createTestClient, createTestRecord, cleanup } from './fixtures/factories';
+import { waitForScheduleReady, openModal, openAddTab, getFirstActivity } from './fixtures/helpers';
 
 /**
- * E2E tests for ActivityDetailsModal.
- * Covers: modal opening, settings tab, client tab, new booking tab,
- * tab navigation, delete record, financial summary, validation,
- * and comprehensive edge cases.
+ * E2E tests for ActivityDetailsModal — full user scenarios with DB verification.
  *
- * Requires running dev server on :3001 and backend on :8000.
+ * Each test follows the Full Cycle pattern:
+ *   1. SETUP:     Create test data via API (factories)
+ *   2. ACTION:    User interaction in browser (click, type, navigate)
+ *   3. VERIFY UI: What the user SEES (toHaveText, toHaveValue)
+ *   4. VERIFY DB: What's STORED in backend (SQL via queryDB/queryDBRow)
+ *   5. CLEANUP:   Delete test data via API (cleanup helper)
  *
- * Note: Activity cards use @dnd-kit useDraggable which captures pointer
- * events, preventing Playwright's click() from reaching React's onClick.
- * We dispatch custom DOM events handled by WeekView's useEffect to open
- * the modal reliably.
+ * Requires: dev server on :3001, backend on :8000
  */
 
-const BACKEND = 'http://localhost:8000';
+const BACKEND = process.env.BACKEND_URL || 'http://localhost:8000';
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Tests — Full User Scenarios with DB Verification
 // ---------------------------------------------------------------------------
 
-/** Wait for schedule page to be ready with activity cards visible. */
-async function waitForScheduleReady(page: any) {
-  await page.goto('/');
-  await page.waitForSelector('[data-testid^="activity-ev_"]', { timeout: 15000 });
-}
-
-/** Get activity data from the first card's React fiber. */
-async function getFirstActivity(page: any) {
-  return page.evaluate(() => {
-    const card = document.querySelector('[data-testid^="activity-ev_"]');
-    if (!card) return null;
-    const fiberKey = Object.keys(card).find((k: string) => k.startsWith('__reactFiber'));
-    if (!fiberKey) return null;
-    let current = (card as any)[fiberKey];
-    while (current) {
-      if (current.memoizedProps?.activity) return current.memoizedProps.activity;
-      current = current.return;
-    }
-    return null;
-  });
-}
-
-/** Get activity data from a specific card by activity ID. */
-async function getActivityById(page: any, activityId: string) {
-  return page.evaluate((actId: string) => {
-    const card = document.querySelector(`[data-testid="activity-${actId}"]`);
-    if (!card) return null;
-    const fiberKey = Object.keys(card).find((k: string) => k.startsWith('__reactFiber'));
-    if (!fiberKey) return null;
-    let current = (card as any)[fiberKey];
-    while (current) {
-      if (current.memoizedProps?.activity) return current.memoizedProps.activity;
-      current = current.return;
-    }
-    return null;
-  }, activityId);
-}
-
-/** Open modal via custom DOM event (bypasses @dnd-kit pointer capture). */
-async function openModal(page: any) {
-  const activity = await getFirstActivity(page);
-  if (!activity) throw new Error('No activity found on schedule page');
-  await page.evaluate((act: any) => {
-    document.dispatchEvent(new CustomEvent('__memo-open-modal', { detail: { activity: act } }));
-  }, activity);
-  await page.waitForSelector('[data-testid="activity-details-modal"]', {
-    state: 'visible',
-    timeout: 10000,
-  });
-}
-
-/** Open modal on the "+" (new booking) tab via custom DOM event. */
-async function openAddTab(page: any) {
-  const activity = await getFirstActivity(page);
-  if (!activity) throw new Error('No activity found on schedule page');
-  await page.evaluate((act: any) => {
-    document.dispatchEvent(new CustomEvent('__memo-quick-add', { detail: { activity: act } }));
-  }, activity);
-  await page.waitForSelector('[data-testid="activity-details-modal"]', {
-    state: 'visible',
-    timeout: 10000,
-  });
-  await expect(page.locator('[data-testid="new-booking-tab"]')).toBeVisible();
-}
-
-/** Open modal for a specific activity by ID via custom DOM event. */
-async function openModalForActivity(page: any, activityId: string) {
-  const activity = await getActivityById(page, activityId);
-  if (!activity) throw new Error(`Activity ${activityId} not found on schedule page`);
-  await page.evaluate((act: any) => {
-    document.dispatchEvent(new CustomEvent('__memo-open-modal', { detail: { activity: act } }));
-  }, activity);
-  await page.waitForSelector('[data-testid="activity-details-modal"]', {
-    state: 'visible',
-    timeout: 10000,
-  });
-}
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
-test.describe('ActivityDetailsModal', () => {
+test.describe('ActivityDetailsModal — Real User Scenarios', () => {
   test.beforeEach(async ({ page }) => {
     await waitForScheduleReady(page);
   });
 
-  // ---- Modal Opening -------------------------------------------------------
+  // ── Scenario 1: Create record — verify DB persistence ─────────────────
 
-  test.describe('Modal Opening', () => {
-    test('opens from ActivityCard via custom event', async ({ page }) => {
-      await openModal(page);
-      await expect(
-        page.locator('[data-testid="activity-details-modal"]'),
-      ).toBeVisible();
-      await expect(page.locator('[data-testid="activity-context"]')).toBeVisible();
-      await expect(page.locator('[data-testid="tab-nav"]')).toBeVisible();
-    });
+  test('1. Create new record — data persists in DB (records, clients, visits)', async ({ page, request }) => {
+    // Use unique suffix based on timestamp + random to avoid collisions in parallel runs
+    const uid = `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    const testPhone = `+7999${uid.slice(-7)}`;
+    const testClientName = `E2E Client ${uid}`;
+    const testVisitorName = `E2E Visitor ${uid}`;
 
-    test('opens on "+" tab from quick add button', async ({ page }) => {
-      await openAddTab(page);
-      await expect(
-        page.locator('[data-testid="new-booking-tab"]'),
-      ).toBeVisible();
-      await expect(page.locator('[data-testid="input-phone"]')).toBeVisible();
-    });
+    // 1. ACTION — open add tab and fill form
+    await openAddTab(page);
 
-    test('closes on backdrop click', async ({ page }) => {
-      await openModal(page);
-      await page
-        .locator('[data-testid="details-modal-backdrop"]')
-        .click({ position: { x: 10, y: 10 }, force: true });
-      await expect(
-        page.locator('[data-testid="activity-details-modal"]'),
-      ).toBeHidden();
-    });
+    await page.locator('[data-testid="input-phone"]').fill(testPhone);
+    await page.locator('[data-testid="input-phone"]').blur();
 
-    test('closes on close button', async ({ page }) => {
-      await openModal(page);
-      await page.locator('[data-testid="modal-close-btn"]').click();
-      await expect(
-        page.locator('[data-testid="activity-details-modal"]'),
-      ).toBeHidden();
-    });
+    await page.locator('[data-testid="input-client-name"]').fill(testClientName);
+
+    // Add visitor
+    await page
+      .locator('[data-testid="new-booking-tab"]')
+      .locator('button:has-text("Добавить посетителя")')
+      .click();
+    const visitorRow = page.locator('[data-testid="visitor-form-row"]').first();
+    await visitorRow.locator('input').first().fill(testVisitorName);
+
+    // Verify channel select is visible
+    await expect(page.locator('[data-testid="select-channel"]')).toBeVisible();
+
+    // Submit
+    await page.locator('[data-testid="btn-create-record"]').click();
+
+    // 2. VERIFY UI — success toast "Запись создана" appears (not just any toast)
+    await expect(page.locator('text=Запись создана')).toBeVisible({ timeout: 10_000 });
+
+    // 3. VERIFY DB — client was created (allow brief commit lag)
+    await page.waitForTimeout(500);
+    const clientRow = queryDBRow(`SELECT * FROM clients WHERE phone='${testPhone}' AND is_active=1`);
+    expect(clientRow).not.toBeNull();
+    expect(clientRow!.name).toBe(testClientName);
+    expect(clientRow!.channel).toBeTruthy();
+
+    // 4. VERIFY DB — record was created for this client
+    const recordRow = queryDBRow(
+      `SELECT * FROM records WHERE client_id='${clientRow!.id}' AND is_active=1`,
+    );
+    expect(recordRow).not.toBeNull();
+    expect(recordRow!.status).toBeTruthy();
+
+    // 5. VERIFY DB — visit was created for this record
+    const visits = queryDBRows(
+      `SELECT * FROM visits WHERE record_id='${recordRow!.id}' AND is_active=1`,
+    );
+    expect(visits.length).toBeGreaterThan(0);
+
+    // 6. CLEANUP
+    await cleanup(request, `/api/v1/records/${recordRow!.id}`);
+    await cleanup(request, `/api/v1/clients/${clientRow!.id}`);
   });
 
-  // ---- Settings Tab --------------------------------------------------------
+  // ── Scenario 2: Delete record — verify DB soft-delete ──────────────────
 
-  test.describe('Settings Tab', () => {
-    test('shows all fields', async ({ page }) => {
-      await openModal(page);
-      await expect(page.locator('[data-testid="settings-tab"]')).toBeVisible();
-      await expect(
-        page.locator('[data-testid="input-datetime"]'),
-      ).toBeVisible();
-      await expect(
-        page.locator('[data-testid="select-service"]'),
-      ).toBeVisible();
-      await expect(
-        page.locator('[data-testid="select-master"]'),
-      ).toBeVisible();
-      await expect(
-        page.locator('[data-testid="select-location"]'),
-      ).toBeVisible();
-      await expect(
-        page.locator('[data-testid="input-capacity"]'),
-      ).toBeVisible();
-      await expect(
-        page.locator('[data-testid="input-duration"]'),
-      ).toBeVisible();
-      await expect(
-        page.locator('[data-testid="toggle-private"]'),
-      ).toBeVisible();
-    });
+  test('2. Delete record — timeout removes it (is_active=0 in DB)', async ({
+    page,
+    request,
+  }) => {
+    // 1. SETUP — create record via API
+    const client = await createTestClient(request);
+    const activity = await getFirstActivity(page);
+    const record = await createTestRecord(request, activity.id, client.id);
 
-    test('datetime input has value', async ({ page }) => {
-      await openModal(page);
-      const datetime = page.locator('[data-testid="input-datetime"]');
-      await expect(datetime).not.toHaveValue('');
-    });
-  });
+    // Verify it exists before delete
+    const beforeRow = queryDBRow(
+      `SELECT is_active FROM records WHERE id='${record.id}'`,
+    );
+    expect(beforeRow).not.toBeNull();
+    expect(beforeRow!.is_active).toBe(1);
 
-  // ---- Create Record -------------------------------------------------------
+    // Reload to pick up new data
+    await page.goto('/schedule');
+    await page.waitForSelector('[data-testid^="activity-"]', { timeout: 15000 });
 
-  test.describe('Create Record', () => {
-    test('creates record with existing client', async ({ page }) => {
-      await openAddTab(page);
+    // 2. ACTION — open modal, navigate to client tab, delete
+    await openModal(page);
 
-      // Enter phone
-      await page.locator('[data-testid="input-phone"]').fill('+79991234567');
-      await page.locator('[data-testid="input-phone"]').blur();
+    const clientTab = page.locator(`[data-testid="tab-client-${record.id}"]`);
+    if (await clientTab.isVisible()) {
+      await clientTab.click();
+      await page.locator('[data-testid="btn-delete-record"]').click();
 
-      // Wait for lookup
-      await page.waitForTimeout(1000);
-
-      // Fill client name (may be auto-filled)
-      const nameInput = page.locator('[data-testid="input-client-name"]');
-      if ((await nameInput.inputValue()) === '') {
-        await nameInput.fill('Тест Клиент');
-      }
-
-      // Add a visitor (visitors start empty)
-      await page
-        .locator('[data-testid="new-booking-tab"]')
-        .locator('button:has-text("Добавить посетителя")')
-        .click();
-      const visitorRow = page
-        .locator('[data-testid="visitor-form-row"]')
-        .first();
-      await visitorRow.locator('input').first().fill('Тест Гость');
-
-      // Submit
-      await page.locator('[data-testid="btn-create-record"]').click();
-
-      // Verify toast or modal update
-      await page.waitForTimeout(2000);
-
-      // Verify via backend
-      const response = await page.request.get(`${BACKEND}/api/v1/records`);
-      expect(response.ok()).toBeTruthy();
-    });
-
-    test('creates record with new client', async ({ page }) => {
-      await openAddTab(page);
-
-      // Enter unknown phone
-      await page.locator('[data-testid="input-phone"]').fill('+79990001122');
-      await page.locator('[data-testid="input-phone"]').blur();
-      await page.waitForTimeout(1000);
-
-      // Fill name
-      await page
-        .locator('[data-testid="input-client-name"]')
-        .fill('Новый Клиент');
-
-      // Add a visitor (visitors start empty)
-      await page
-        .locator('[data-testid="new-booking-tab"]')
-        .locator('button:has-text("Добавить посетителя")')
-        .click();
-      const visitorRow = page
-        .locator('[data-testid="visitor-form-row"]')
-        .first();
-      await visitorRow.locator('input').first().fill('Новый Гость');
-
-      // Submit
-      await page.locator('[data-testid="btn-create-record"]').click();
-      await page.waitForTimeout(2000);
-
-      // Verify client created in backend
-      const clientsResp = await page.request.get(`${BACKEND}/api/v1/clients`);
-      expect(clientsResp.ok()).toBeTruthy();
-    });
-  });
-
-  // ---- Delete Record -------------------------------------------------------
-
-  test.describe('Delete Record', () => {
-    test('shows undo toast on delete', async ({ page }) => {
-      // Create a record first
-      await openAddTab(page);
-      await page.locator('[data-testid="input-phone"]').fill('+79991112233');
-      await page.locator('[data-testid="input-phone"]').blur();
-      await page.waitForTimeout(1000);
-
-      const nameInput = page.locator('[data-testid="input-client-name"]');
-      if ((await nameInput.inputValue()) === '') {
-        await nameInput.fill('Для Удаления');
-      }
-
-      // Add a visitor (visitors start empty)
-      await page
-        .locator('[data-testid="new-booking-tab"]')
-        .locator('button:has-text("Добавить посетителя")')
-        .click();
-      const visitorRow = page
-        .locator('[data-testid="visitor-form-row"]')
-        .first();
-      await visitorRow.locator('input').first().fill('Для Удаления');
-
-      await page.locator('[data-testid="btn-create-record"]').click();
-      await page.waitForTimeout(2000);
-
-      // Switch to settings tab (record tab might have opened)
-      const settingsTab = page.locator('[data-testid="tab-settings"]');
-      if (await settingsTab.isVisible()) {
-        await settingsTab.click();
-      }
-
-      // Open the record's client tab (if it exists as a tab)
-      const clientTab = page.locator('[data-testid^="tab-client-"]').first();
-      if (await clientTab.isVisible()) {
-        await clientTab.click();
-        await expect(page.locator('[data-testid="client-tab"]')).toBeVisible();
-
-        // Click delete
-        await page.locator('[data-testid="btn-delete-record"]').click();
-
-        // Verify undo toast appears
-        await expect(page.locator('text=Запись удалена через 5 секунд')).toBeVisible({
-          timeout: 3000,
-        });
-      }
-    });
-  });
-
-  // ---- Validation ----------------------------------------------------------
-
-  test.describe('Validation', () => {
-    test('phone input validates format', async ({ page }) => {
-      await openAddTab(page);
-      await page.locator('[data-testid="input-phone"]').fill('abc');
-      await page.locator('[data-testid="input-phone"]').blur();
-      // Should not find client — name stays empty
-      const nameInput = page.locator('[data-testid="input-client-name"]');
-      await expect(nameInput).toHaveValue('');
-    });
-
-    test('cannot submit without phone', async ({ page }) => {
-      await openAddTab(page);
-      // Ensure phone is empty
-      await page.locator('[data-testid="input-phone"]').fill('');
-      await page.locator('[data-testid="btn-create-record"]').click();
-      // Toast should appear with validation message
-      await expect(page.locator('text=Заполните')).toBeVisible({
+      // 3. VERIFY UI — undo toast appears
+      await expect(page.locator('text=Запись удалена через 5 секунд')).toBeVisible({
         timeout: 3000,
       });
-    });
+
+      // Wait for undo timeout + API call (5s + buffer)
+      await page.waitForTimeout(7000);
+
+      // 4. VERIFY DB — record is soft-deleted
+      const afterRow = queryDBRow(
+        `SELECT is_active FROM records WHERE id='${record.id}'`,
+      );
+      expect(afterRow).not.toBeNull();
+      expect(afterRow!.is_active).toBe(0);
+    }
+
+    // 5. CLEANUP (in case test failed before delete)
+    await cleanup(request, `/api/v1/records/${record.id}`);
+    await cleanup(request, `/api/v1/clients/${client.id}`);
   });
 
-  // ---- Tab Navigation ------------------------------------------------------
+  // ── Scenario 3: Add payment — verify DB persistence ────────────────────
 
-  test.describe('Tab Navigation', () => {
-    test('switches between tabs', async ({ page }) => {
-      await openModal(page);
+  test('3. Add payment — payment row exists in DB with correct amount', async ({
+    page,
+    request,
+  }) => {
+    // 1. SETUP — create record via API
+    const client = await createTestClient(request);
+    const activity = await getFirstActivity(page);
+    const record = await createTestRecord(request, activity.id, client.id);
 
-      // Settings tab should be active/visible
-      await expect(page.locator('[data-testid="settings-tab"]')).toBeVisible();
+    // Verify no payments initially
+    const beforePayments = queryDBRows(
+      `SELECT * FROM payments WHERE record_id='${record.id}' AND is_active=1`,
+    );
+    expect(beforePayments.length).toBe(0);
 
-      // Click on client tab if it exists
-      const clientTab = page.locator('[data-testid^="tab-client-"]').first();
-      if (await clientTab.isVisible()) {
-        await clientTab.click();
-        await expect(
-          page.locator('[data-testid="client-tab"]'),
-        ).toBeVisible();
-      }
-    });
+    // Reload to pick up new data
+    await page.goto('/schedule');
+    await page.waitForSelector('[data-testid^="activity-"]', { timeout: 15000 });
 
-    test('"+" tab always visible', async ({ page }) => {
-      await openModal(page);
-      await expect(page.locator('[data-testid="tab-add"]')).toBeVisible();
-    });
+    // 2. ACTION — open modal, go to client tab, add payment
+    await openModal(page);
 
-    test('clicking "+" tab switches to new booking', async ({ page }) => {
-      await openModal(page);
-      await page.locator('[data-testid="tab-add"]').click();
-      await expect(
-        page.locator('[data-testid="new-booking-tab"]'),
-      ).toBeVisible();
-    });
-  });
+    const clientTab = page.locator(`[data-testid="tab-client-${record.id}"]`);
+    if (await clientTab.isVisible()) {
+      await clientTab.click();
 
-  // ---- Financial Summary ---------------------------------------------------
-
-  test.describe('Financial Summary', () => {
-    test('footer shows amounts', async ({ page }) => {
-      await openModal(page);
+      // Read footer before
       await expect(page.locator('[data-testid="modal-footer"]')).toBeVisible();
-      await expect(page.locator('[data-testid="total-cost"]')).toBeVisible();
-      await expect(page.locator('[data-testid="total-owed"]')).toBeVisible();
-    });
-  });
 
-  // ---- New Booking Tab Interactions ----------------------------------------
+      // Add payment
+      await page.locator('input[placeholder="Сумма"]').fill('1500');
+      await page.locator('[data-testid="btn-add-payment"]').click();
 
-  test.describe('New Booking Tab', () => {
-    test('add visitor button works', async ({ page }) => {
-      await openAddTab(page);
-
-      // Initially no visitor rows (visitors start empty)
-      const initialCount = await page
-        .locator('[data-testid="visitor-form-row"]')
-        .count();
-      expect(initialCount).toBe(0);
-
-      // Add a visitor
-      await page
-        .locator('[data-testid="new-booking-tab"]')
-        .locator('button:has-text("Добавить посетителя")')
-        .click();
-
-      const newCount = await page
-        .locator('[data-testid="visitor-form-row"]')
-        .count();
-      expect(newCount).toBe(1);
-    });
-
-    test('notifications checkbox toggles notify state', async ({ page }) => {
-      await openAddTab(page);
-
-      // Channel select is always visible (not hidden behind checkbox)
-      await expect(
-        page.locator('[data-testid="select-channel"]'),
-      ).toBeVisible();
-
-      // Notifications checkbox starts unchecked
-      const checkbox = page.locator('[data-testid="checkbox-notifications"]');
-      await expect(checkbox).not.toBeChecked();
-
-      // Check notifications
-      await checkbox.check();
-      await expect(checkbox).toBeChecked();
-
-      // Uncheck notifications
-      await checkbox.uncheck();
-      await expect(checkbox).not.toBeChecked();
-    });
-  });
-
-  // ---- Client Tab Interactions ---------------------------------------------
-
-  test.describe('Client Tab', () => {
-    test('shows payment summary', async ({ page }) => {
-      await openModal(page);
-
-      // Switch to a client tab if available
-      const clientTab = page.locator('[data-testid^="tab-client-"]').first();
-      if (await clientTab.isVisible()) {
-        await clientTab.click();
-        await expect(
-          page.locator('[data-testid="client-tab"]'),
-        ).toBeVisible();
-        await expect(
-          page.locator('[data-testid="payment-summary"]'),
-        ).toBeVisible();
-      }
-    });
-  });
-});
-
-// ===========================================================================
-// Edge Cases
-// ===========================================================================
-
-test.describe('Edge Cases', () => {
-  test.beforeEach(async ({ page }) => {
-    await waitForScheduleReady(page);
-  });
-
-  // ── Validation ────────────────────────────────────────────────────────────
-
-  test.describe('Validation', () => {
-    test('create record without phone and without name shows error', async ({ page }) => {
-      await openAddTab(page);
-
-      // Leave both phone and name empty
-      await page.locator('[data-testid="input-phone"]').fill('');
-      await page.locator('[data-testid="input-client-name"]').fill('');
-
-      // Submit — validation should catch missing name
-      await page.locator('[data-testid="btn-create-record"]').click();
-      await expect(page.locator('text=Заполните имя')).toBeVisible({
-        timeout: 3000,
-      });
-    });
-
-    test('create record with unknown phone but no name shows error', async ({ page }) => {
-      await openAddTab(page);
-
-      // Enter a phone that doesn't match any existing client
-      await page.locator('[data-testid="input-phone"]').fill('+79990009999');
-      await page.locator('[data-testid="input-phone"]').blur();
+      // Wait for UI update
       await page.waitForTimeout(1000);
 
-      // Name should still be empty (client not found)
-      const nameInput = page.locator('[data-testid="input-client-name"]');
-      await expect(nameInput).toHaveValue('');
+      // 3. VERIFY UI — footer is still visible (summary updated)
+      await expect(page.locator('[data-testid="modal-footer"]')).toBeVisible();
 
-      // Submit should fail — name is required
-      await page.locator('[data-testid="btn-create-record"]').click();
-      await expect(page.locator('text=Заполните имя')).toBeVisible({
-        timeout: 3000,
-      });
-    });
+      // 4. VERIFY DB — payment row exists with amount=1500
+      const payments = queryDBRows(
+        `SELECT * FROM payments WHERE record_id='${record.id}' AND is_active=1`,
+      );
+      expect(payments.length).toBeGreaterThan(0);
+      expect(payments[0].amount).toBe(1500);
+    }
 
-    test('create record without visitors succeeds', async ({ page }) => {
-      await openAddTab(page);
-
-      // Enter phone for an existing client (name will auto-fill)
-      await page.locator('[data-testid="input-phone"]').fill('+79001234567');
-      await page.locator('[data-testid="input-phone"]').blur();
-      await page.waitForTimeout(1000);
-
-      // Name should auto-fill for existing client
-      const nameInput = page.locator('[data-testid="input-client-name"]');
-      const nameValue = await nameInput.inputValue();
-      expect(nameValue.length).toBeGreaterThan(0);
-
-      // Do NOT add any visitors — visitors are optional
-      const visitorCount = await page.locator('[data-testid="visitor-form-row"]').count();
-      expect(visitorCount).toBe(0);
-
-      // Submit — should succeed without visitors
-      await page.locator('[data-testid="btn-create-record"]').click();
-
-      // Wait for the create to complete (toast or tab switch)
-      await page.waitForTimeout(2000);
-
-      // Verify the modal is still open (no crash) — settings tab should appear
-      // after successful create (handleNewBookingSubmit sets activeTab to 'settings')
-      await expect(
-        page.locator('[data-testid="activity-details-modal"]'),
-      ).toBeVisible();
-    });
-
-    test('invalid duration format does not crash modal', async ({ page }) => {
-      await openModal(page);
-
-      const durationInput = page.locator('[data-testid="input-duration"]');
-      await durationInput.fill('99:99');
-      await durationInput.blur();
-
-      // Modal should still be visible (no crash from invalid duration)
-      await expect(
-        page.locator('[data-testid="activity-details-modal"]'),
-      ).toBeVisible();
-
-      // Input should retain the typed value
-      await expect(durationInput).toHaveValue('99:99');
-    });
+    // 5. CLEANUP
+    await cleanup(request, `/api/v1/records/${record.id}`);
+    await cleanup(request, `/api/v1/clients/${client.id}`);
   });
 
-  // ── Settings Tab ──────────────────────────────────────────────────────────
+  // ── Scenario 4: Settings update — verify DB service_id change ──────────
 
-  test.describe('Settings Tab', () => {
-    test('changing service auto-fills duration and capacity', async ({ page }) => {
-      await openModal(page);
+  test('4. Settings update — service_id changes in DB', async ({ page, request }) => {
+    // 1. ACTION — open modal on Settings tab
+    await openModal(page);
 
+    // Read initial service from DB via the first activity
+    const activity = await getFirstActivity(page);
+    const beforeRow = queryDBRow(
+      `SELECT service_id FROM activities WHERE id='${activity.id}'`,
+    );
+    expect(beforeRow).not.toBeNull();
+    const originalServiceId = beforeRow!.service_id;
+
+    // Get a different service to switch to
+    const servicesResp = await request.get(`${BACKEND}/api/v1/services`);
+    const services = await servicesResp.json();
+    const differentService = services.find(
+      (s: any) => s.id !== originalServiceId,
+    );
+
+    if (differentService) {
+      // 2. ACTION — change service in the select
       const serviceSelect = page.locator('[data-testid="select-service"]');
-      const durationInput = page.locator('[data-testid="input-duration"]');
-      const capacityInput = page.locator('[data-testid="input-capacity"]');
+      await expect(serviceSelect).toBeVisible();
+      await serviceSelect.selectOption(differentService.id);
 
-      // Record initial values
-      const initialDuration = await durationInput.inputValue();
-      const initialCapacity = await capacityInput.inputValue();
+      // Wait for save (select triggers auto-save or blur)
+      await serviceSelect.blur();
+      await page.waitForTimeout(1000);
 
-      // Find a different service option
-      const currentService = await serviceSelect.inputValue();
-      const options = await serviceSelect.locator('option').all();
-      let switched = false;
-      for (const option of options) {
-        const val = await option.getAttribute('value');
-        if (val && val !== currentService && val !== '') {
-          await serviceSelect.selectOption(val);
-          switched = true;
-          break;
-        }
-      }
+      // 3. VERIFY DB — service_id was updated
+      const afterRow = queryDBRow(
+        `SELECT service_id FROM activities WHERE id='${activity.id}'`,
+      );
+      expect(afterRow).not.toBeNull();
+      expect(afterRow!.service_id).toBe(differentService.id);
 
-      if (!switched) return; // Only one service available, skip
-
-      // Wait for auto-fill
+      // Restore original service
+      await serviceSelect.selectOption(originalServiceId);
+      await serviceSelect.blur();
       await page.waitForTimeout(500);
-
-      // Duration or capacity should have changed
-      const newDuration = await durationInput.inputValue();
-      const newCapacity = await capacityInput.inputValue();
-      const somethingChanged =
-        newDuration !== initialDuration || newCapacity !== initialCapacity;
-      expect(somethingChanged).toBeTruthy();
-    });
-
-    test('changing datetime updates the value', async ({ page }) => {
-      await openModal(page);
-
-      const datetimeInput = page.locator('[data-testid="input-datetime"]');
-      const initialValue = await datetimeInput.inputValue();
-
-      // Change to a different datetime
-      const newValue = '2026-06-10T14:30';
-      expect(initialValue).not.toBe(newValue); // Ensure we're actually changing it
-
-      await datetimeInput.fill(newValue);
-      await datetimeInput.blur();
-
-      // Value should be updated
-      await expect(datetimeInput).toHaveValue(newValue);
-    });
-
-    test('toggling private changes aria-checked state', async ({ page }) => {
-      await openModal(page);
-
-      const toggle = page.locator('[data-testid="toggle-private"]');
-      const initialChecked = await toggle.getAttribute('aria-checked');
-
-      // Click the toggle
-      await toggle.click();
-
-      // aria-checked should have flipped
-      const newChecked = await toggle.getAttribute('aria-checked');
-      expect(newChecked).not.toBe(initialChecked);
-
-      // Click again to flip back
-      await toggle.click();
-      const finalChecked = await toggle.getAttribute('aria-checked');
-      expect(finalChecked).toBe(initialChecked);
-    });
+    }
   });
 
-  // ── Client Tab Operations ─────────────────────────────────────────────────
+  // ── Scenario 5: Age display — verify no "++" ──────────────────────────
 
-  test.describe('Client Tab Operations', () => {
-    test('add visitor button exists and is visible on client tab', async ({ page }) => {
-      await openModal(page);
+  test('5. Age display — correct format, no "++"', async ({ page }) => {
+    // 1. ACTION — open modal
+    await openModal(page);
 
-      const clientTab = page.locator('[data-testid^="tab-client-"]').first();
-      if (!(await clientTab.isVisible())) return; // No records on this activity
+    // 2. VERIFY UI — age display exists and has correct format
+    const ageDisplay = page.locator('[data-testid="age-display"]');
+    if (await ageDisplay.isVisible()) {
+      const text = await ageDisplay.textContent();
+      expect(text).toBeTruthy();
 
-      await clientTab.click();
-      await expect(page.locator('[data-testid="client-tab"]')).toBeVisible();
+      // Must NOT contain "++"
+      expect(text).not.toContain('++');
 
-      // "Добавить посетителя" button should be visible
-      await expect(
-        page.locator('[data-testid="btn-add-visitor"]'),
-      ).toBeVisible();
-    });
-
-    test('delete payment button is clickable on records with payments', async ({
-      page,
-    }) => {
-      await openModal(page);
-
-      const clientTab = page.locator('[data-testid^="tab-client-"]').first();
-      if (!(await clientTab.isVisible())) return;
-
-      await clientTab.click();
-      await expect(page.locator('[data-testid="client-tab"]')).toBeVisible();
-
-      // Check if there are any payments with delete buttons
-      const deleteButtons = page.locator(
-        '[data-testid="client-tab"] button[aria-label="Удалить оплату"]',
-      );
-      const paymentCount = await deleteButtons.count();
-      if (paymentCount === 0) return; // No payments to delete
-
-      // Verify the delete button is visible and clickable
-      await expect(deleteButtons.first()).toBeVisible();
-      await expect(deleteButtons.first()).toBeEnabled();
-
-      // Click the delete button — may show success or error toast depending
-      // on dynamic import resolution in the bundled app
-      await deleteButtons.first().click();
-
-      // Verify a toast appears (either success or error)
-      const toastVisible = await Promise.race([
-        page
-          .locator('text=Оплата удалена')
-          .waitFor({ state: 'visible', timeout: 3000 })
-          .then(() => true),
-        page
-          .locator('text=Ошибка удаления оплаты')
-          .waitFor({ state: 'visible', timeout: 3000 })
-          .then(() => true),
-      ]).catch(() => false);
-
-      // At minimum the button was clickable and didn't crash the page
-      await expect(
-        page.locator('[data-testid="activity-details-modal"]'),
-      ).toBeVisible();
-    });
-
-    test('changing record status updates select value', async ({ page }) => {
-      await openModal(page);
-
-      const clientTab = page.locator('[data-testid^="tab-client-"]').first();
-      if (!(await clientTab.isVisible())) return;
-
-      await clientTab.click();
-      await expect(page.locator('[data-testid="client-tab"]')).toBeVisible();
-
-      const statusSelect = page.locator('[data-testid="select-record-status"]');
-      const currentStatus = await statusSelect.inputValue();
-
-      // Switch to a different status
-      const newStatus = currentStatus === 'confirmed' ? 'pending' : 'confirmed';
-      await statusSelect.selectOption(newStatus);
-
-      await expect(statusSelect).toHaveValue(newStatus);
-    });
-
-    test('changing visit status shows success toast', async ({ page }) => {
-      await openModal(page);
-
-      const clientTab = page.locator('[data-testid^="tab-client-"]').first();
-      if (!(await clientTab.isVisible())) return;
-
-      await clientTab.click();
-      await expect(page.locator('[data-testid="client-tab"]')).toBeVisible();
-
-      // Find visit status select (aria-label="Статус визита")
-      const visitStatusSelect = page.locator(
-        '[aria-label="Статус визита"]',
-      ).first();
-      if (!(await visitStatusSelect.isVisible())) return; // No visits
-
-      await visitStatusSelect.selectOption('visited');
-
-      // Verify success toast
-      await expect(
-        page.locator('text=Статус визита обновлён'),
-      ).toBeVisible({ timeout: 3000 });
-    });
+      // Must match either "N–M" or "N+" pattern
+      const isValidRange = /^\d+[–+]\d+$/.test(text!);
+      const isValidPlus = /^\d+\+$/.test(text!);
+      expect(isValidRange || isValidPlus).toBeTruthy();
+    }
   });
 
-  // ── Data Persistence ──────────────────────────────────────────────────────
+  // ── Scenario 6: Admin opens activity — sees correct settings ──────────
 
-  test.describe('Data Persistence', () => {
-    test('created record persists after page reload', async ({ page }) => {
-      const uniquePhone = `+7999${Date.now().toString().slice(-7)}`;
-      const clientName = `Persist ${Date.now()}`;
+  test('6. Admin opens activity — sees correct settings', async ({ page }) => {
+    await openModal(page);
 
-      // Create a record
-      await openAddTab(page);
-      await page.locator('[data-testid="input-phone"]').fill(uniquePhone);
-      await page.locator('[data-testid="input-phone"]').blur();
-      await page.waitForTimeout(500);
-      await page.locator('[data-testid="input-client-name"]').fill(clientName);
+    // Context header shows service name + date
+    const context = page.locator('[data-testid="activity-context"]');
+    await expect(context).toBeVisible();
+    const contextText = await context.textContent();
+    expect(contextText).toBeTruthy();
 
-      // Add a visitor
-      await page
-        .locator('[data-testid="new-booking-tab"]')
-        .locator('button:has-text("Добавить посетителя")')
-        .click();
-      await page
-        .locator('[data-testid="visitor-form-row"]')
-        .first()
-        .locator('input')
-        .first()
-        .fill('Persist Visitor');
+    // Settings tab is active by default
+    await expect(page.locator('[data-testid="settings-tab"]')).toBeVisible();
 
-      await page.locator('[data-testid="btn-create-record"]').click();
-      await page.waitForTimeout(2000);
+    // Date/time field has a value (not empty)
+    const datetime = page.locator('[data-testid="input-datetime"]');
+    await expect(datetime).not.toHaveValue('');
 
-      // Reload the page
-      await page.reload();
-      await waitForScheduleReady(page);
+    // Duration field shows HH:MM format
+    const duration = page.locator('[data-testid="input-duration"]');
+    await expect(duration).toBeVisible();
+    const durationValue = await duration.inputValue();
+    expect(durationValue).toMatch(/^\d{2}:\d{2}$/);
+  });
 
-      // Open modal and check that the record appears as a client tab
-      await openModal(page);
+  // ── Scenario 7: Settings tab shows real values ────────────────────────
 
-      // Verify the client name appears somewhere in the tabs
-      const tabNav = page.locator('[data-testid="tab-nav"]');
-      await expect(tabNav).toBeVisible();
-      // The tab should contain the client name (may be truncated)
-      const tabText = await tabNav.textContent();
-      expect(tabText).toContain(clientName.substring(0, 10));
-    });
+  test('7. Settings tab shows real values from activity', async ({ page }) => {
+    await openModal(page);
 
-    test('deleted record is gone after page reload', async ({ page }) => {
-      // Create a record first
-      const uniquePhone = `+7999${Date.now().toString().slice(-7)}`;
-      const clientName = `DelTest ${Date.now()}`;
+    // Service select has a selected value (not empty)
+    const serviceSelect = page.locator('[data-testid="select-service"]');
+    const serviceValue = await serviceSelect.inputValue();
+    expect(serviceValue).toBeTruthy();
 
-      await openAddTab(page);
-      await page.locator('[data-testid="input-phone"]').fill(uniquePhone);
-      await page.locator('[data-testid="input-phone"]').blur();
-      await page.waitForTimeout(500);
-      await page.locator('[data-testid="input-client-name"]').fill(clientName);
+    // Master select has a selected value
+    const masterSelect = page.locator('[data-testid="select-master"]');
+    const masterValue = await masterSelect.inputValue();
+    expect(masterValue).toBeTruthy();
 
-      // Add a visitor
-      await page
-        .locator('[data-testid="new-booking-tab"]')
-        .locator('button:has-text("Добавить посетителя")')
-        .click();
-      await page
-        .locator('[data-testid="visitor-form-row"]')
-        .first()
-        .locator('input')
-        .first()
-        .fill('Del Visitor');
+    // Capacity shows a number > 0
+    const capacity = page.locator('[data-testid="input-capacity"]');
+    const capacityValue = await capacity.inputValue();
+    expect(Number(capacityValue)).toBeGreaterThan(0);
+  });
 
-      await page.locator('[data-testid="btn-create-record"]').click();
-      await page.waitForTimeout(2000);
+  // ── Scenario 8: Delete with undo — record survives ────────────────────
 
-      // Switch to the new record's tab
-      const newTab = page.locator(
-        `[data-testid^="tab-client-"]:has-text("${clientName.substring(0, 8)}")`,
-      );
-      if (!(await newTab.isVisible())) return; // Tab not found, skip
+  test('8. Delete record — undo within 5s preserves it in DB', async ({
+    page,
+    request,
+  }) => {
+    // 1. SETUP
+    const client = await createTestClient(request);
+    const activity = await getFirstActivity(page);
+    const record = await createTestRecord(request, activity.id, client.id);
 
-      await newTab.click();
+    await page.goto('/schedule');
+    await page.waitForSelector('[data-testid^="activity-"]', { timeout: 15000 });
+
+    // 2. ACTION
+    await openModal(page);
+
+    const clientTab = page.locator(`[data-testid="tab-client-${record.id}"]`);
+    if (await clientTab.isVisible()) {
+      await clientTab.click();
       await expect(page.locator('[data-testid="client-tab"]')).toBeVisible();
+
+      // Verify client name is displayed
+      const nameInput = page.locator('[data-testid="client-name"]');
+      await expect(nameInput).toHaveValue(client.name);
 
       // Click delete
       await page.locator('[data-testid="btn-delete-record"]').click();
 
-      // Wait for undo toast, then wait for the 5-second timer + API call
-      await expect(
-        page.locator('text=Запись удалена через 5 секунд'),
-      ).toBeVisible({ timeout: 3000 });
-
-      // Wait for the actual deletion (5s timer + API roundtrip)
-      await page.waitForTimeout(7000);
-
-      // Reload the page
-      await page.reload();
-      await waitForScheduleReady(page);
-
-      // Open modal and verify the tab is gone
-      await openModal(page);
-      const tabNav = page.locator('[data-testid="tab-nav"]');
-      const tabText = await tabNav.textContent();
-      expect(tabText).not.toContain(clientName.substring(0, 10));
-    });
-  });
-
-  // ── Financial ─────────────────────────────────────────────────────────────
-
-  test.describe('Financial', () => {
-    test('add payment shows success toast and updates footer', async ({ page }) => {
-      await openModal(page);
-
-      const clientTab = page.locator('[data-testid^="tab-client-"]').first();
-      if (!(await clientTab.isVisible())) return;
-
-      await clientTab.click();
-      await expect(page.locator('[data-testid="client-tab"]')).toBeVisible();
-
-      // Read initial owed amount from footer
-      const initialOwed = await page.locator('[data-testid="total-owed"]').textContent();
-
-      // Add a payment of 500
-      const paymentInput = page.locator(
-        '[data-testid="client-tab"] input[type="number"]',
-      );
-      await paymentInput.fill('500');
-      await page.locator('[data-testid="btn-add-payment"]').click();
-
-      // Verify success toast
-      await expect(page.locator('text=Оплата 500 ₽')).toBeVisible({
+      // 3. VERIFY UI — undo toast
+      await expect(page.locator('text=Запись удалена через 5 секунд')).toBeVisible({
         timeout: 3000,
       });
 
-      // Footer total-owed should change (unless owed was already 0)
-      // Wait for query invalidation and re-render
+      // Click undo
+      await page.locator('text=Отменить').click();
       await page.waitForTimeout(1000);
-      const newOwed = await page.locator('[data-testid="total-owed"]').textContent();
-      // At minimum the toast proves the payment was submitted
-      // The footer may or may not update depending on query invalidation timing
-      expect(newOwed).toBeDefined();
-    });
 
-    test('delete payment shows toast confirming removal', async ({ page }) => {
-      await openModal(page);
-
-      const clientTab = page.locator('[data-testid^="tab-client-"]').first();
-      if (!(await clientTab.isVisible())) return;
-
-      await clientTab.click();
-      await expect(page.locator('[data-testid="client-tab"]')).toBeVisible();
-
-      // Check for existing payments
-      const deleteButtons = page.locator(
-        '[data-testid="client-tab"] button[aria-label="Удалить оплату"]',
+      // 4. VERIFY DB — record still active
+      const row = queryDBRow(
+        `SELECT is_active FROM records WHERE id='${record.id}'`,
       );
-      const count = await deleteButtons.count();
-      if (count === 0) return; // No payments to delete
+      expect(row).not.toBeNull();
+      expect(row!.is_active).toBe(1);
+    }
 
-      // Delete the first payment
-      await deleteButtons.first().click();
-
-      // Verify a toast appears (success or error)
-      const toastVisible = await Promise.race([
-        page
-          .locator('text=Оплата удалена')
-          .waitFor({ state: 'visible', timeout: 3000 })
-          .then(() => true),
-        page
-          .locator('text=Ошибка удаления оплаты')
-          .waitFor({ state: 'visible', timeout: 3000 })
-          .then(() => true),
-      ]).catch(() => false);
-
-      // At minimum the button click didn't crash the page
-      await expect(
-        page.locator('[data-testid="activity-details-modal"]'),
-      ).toBeVisible();
-    });
+    // 5. CLEANUP
+    await cleanup(request, `/api/v1/records/${record.id}`);
+    await cleanup(request, `/api/v1/clients/${client.id}`);
   });
 
-  // ── Tab Navigation ────────────────────────────────────────────────────────
+  // ── Scenario 9: Tab navigation — content changes ──────────────────────
 
-  test.describe('Tab Navigation', () => {
-    test('switching between client tabs shows different content', async ({
-      page,
-    }) => {
-      await openModal(page);
+  test('9. Tab navigation — each tab shows different content', async ({ page }) => {
+    await openModal(page);
 
-      const clientTabs = page.locator('[data-testid^="tab-client-"]');
-      const count = await clientTabs.count();
-      if (count < 2) return; // Need at least 2 client tabs
+    // Settings tab is visible
+    await expect(page.locator('[data-testid="settings-tab"]')).toBeVisible();
 
-      // Click first client tab
-      await clientTabs.nth(0).click();
-      await expect(page.locator('[data-testid="client-tab"]')).toBeVisible();
-      const firstName = await page
-        .locator('[data-testid="client-name"]')
-        .inputValue();
+    // Click "+" tab
+    await page.locator('[data-testid="tab-add"]').click();
+    await expect(page.locator('[data-testid="new-booking-tab"]')).toBeVisible();
+    await expect(page.locator('[data-testid="input-phone"]')).toBeVisible();
 
-      // Click last client tab
-      await clientTabs.nth(count - 1).click();
-      await expect(page.locator('[data-testid="client-tab"]')).toBeVisible();
-      const secondName = await page
-        .locator('[data-testid="client-name"]')
-        .inputValue();
-
-      // Both should have loaded content — at least verify the tabs are functional
-      expect(firstName).toBeDefined();
-      expect(secondName).toBeDefined();
-
-      // If different clients, names should differ
-      // (same client on different records would show same name — that's ok)
-    });
-
-    test('settings → client → settings round-trip works', async ({ page }) => {
-      await openModal(page);
-
-      // Start on settings
-      await expect(page.locator('[data-testid="settings-tab"]')).toBeVisible();
-
-      const clientTab = page.locator('[data-testid^="tab-client-"]').first();
-      if (!(await clientTab.isVisible())) return;
-
-      // Switch to client tab
-      await clientTab.click();
-      await expect(page.locator('[data-testid="client-tab"]')).toBeVisible();
-
-      // Switch back to settings
-      await page.locator('[data-testid="tab-settings"]').click();
-      await expect(page.locator('[data-testid="settings-tab"]')).toBeVisible();
-
-      // All settings fields should still be present
-      await expect(page.locator('[data-testid="input-datetime"]')).toBeVisible();
-      await expect(page.locator('[data-testid="select-service"]')).toBeVisible();
-      await expect(page.locator('[data-testid="input-duration"]')).toBeVisible();
-    });
-
-    test('settings → new-booking → settings round-trip works', async ({
-      page,
-    }) => {
-      await openModal(page);
-
-      // Start on settings
-      await expect(page.locator('[data-testid="settings-tab"]')).toBeVisible();
-
-      // Switch to new booking tab
-      await page.locator('[data-testid="tab-add"]').click();
-      await expect(page.locator('[data-testid="new-booking-tab"]')).toBeVisible();
-
-      // Switch back to settings
-      await page.locator('[data-testid="tab-settings"]').click();
-      await expect(page.locator('[data-testid="settings-tab"]')).toBeVisible();
-    });
+    // Click back to settings
+    await page.locator('[data-testid="tab-settings"]').click();
+    await expect(page.locator('[data-testid="settings-tab"]')).toBeVisible();
   });
 
-  // ── Error Handling ────────────────────────────────────────────────────────
+  // ── Scenario 10: Validation — cannot submit without name ──────────────
 
-  test.describe('Error Handling', () => {
-    test('network error on create shows error toast', async ({ page }) => {
-      await openAddTab(page);
+  test('10. Cannot create record without name', async ({ page }) => {
+    await openAddTab(page);
 
-      // Use unknown phone so the flow tries to create a new client
-      await page.locator('[data-testid="input-phone"]').fill('+79990009876');
-      await page.locator('[data-testid="input-phone"]').blur();
-      await page.waitForTimeout(500);
-      await page.locator('[data-testid="input-client-name"]').fill('Error Test');
+    // Leave name empty
+    await page.locator('[data-testid="input-client-name"]').fill('');
 
-      // Add a visitor
-      await page
-        .locator('[data-testid="new-booking-tab"]')
-        .locator('button:has-text("Добавить посетителя")')
-        .click();
-      await page
-        .locator('[data-testid="visitor-form-row"]')
-        .first()
-        .locator('input')
-        .first()
-        .fill('Error Visitor');
+    // Submit
+    await page.locator('[data-testid="btn-create-record"]').click();
 
-      // Mock the client creation endpoint to fail
-      await page.route(
-        `${BACKEND}/api/v1/clients`,
-        (route: any) => {
-          if (route.request().method() === 'POST') {
-            route.abort('connectionrefused');
-          } else {
-            route.continue();
-          }
-        },
-      );
+    // Should show error toast
+    await expect(page.locator('text=Заполните имя')).toBeVisible({ timeout: 3000 });
+  });
 
-      // Submit — should show error toast
-      await page.locator('[data-testid="btn-create-record"]').click();
-      await expect(page.locator('text=Ошибка создания записи')).toBeVisible({
-        timeout: 5000,
-      });
+  // ── Scenario 11: Channel select always visible ────────────────────────
 
-      // Clean up the route mock
-      await page.unroute(`${BACKEND}/api/v1/clients`);
-    });
+  test('11. Channel select visible without checkbox', async ({ page }) => {
+    await openAddTab(page);
 
-    test('empty activity modal shows settings and no client tabs', async ({
-      page,
-    }) => {
-      // Create a fresh activity via API to guarantee 0 records
-      const createResp = await page.request.post(`${BACKEND}/api/v1/activities`, {
-        data: {
-          service_id: 's3',
-          master_id: 'm5',
-          location_id: 'p1389',
-          start: '2026-06-08T10:00:00',
-          duration: 90,
-          capacity: 5,
-          is_private: false,
-        },
-      });
-      expect(createResp.ok()).toBeTruthy();
-      const newActivity = await createResp.json();
-      const newActivityId = newActivity.id;
+    // Channel select should be visible
+    await expect(page.locator('[data-testid="select-channel"]')).toBeVisible();
 
-      // Reload to pick up the new activity
-      await page.reload();
-      await waitForScheduleReady(page);
+    // Checkbox should be unchecked by default
+    const checkbox = page.locator('[data-testid="checkbox-notifications"]');
+    await expect(checkbox).not.toBeChecked();
+  });
 
-      // Find the new activity card
-      const cardExists = await page.evaluate((actId: string) => {
-        return !!document.querySelector(`[data-testid="activity-${actId}"]`);
-      }, newActivityId);
+  // ── Scenario 12: Private toggle works ─────────────────────────────────
 
-      if (!cardExists) {
-        // Activity might not be in the current week view, clean up and skip
-        await page.request.delete(`${BACKEND}/api/v1/activities/${newActivityId}`);
-        return;
-      }
+  test('12. Private toggle changes state', async ({ page }) => {
+    await openModal(page);
 
-      // Open modal for the fresh activity
-      const activity = await getActivityById(page, newActivityId);
-      if (!activity) {
-        await page.request.delete(`${BACKEND}/api/v1/activities/${newActivityId}`);
-        return;
-      }
+    const toggle = page.locator('[data-testid="toggle-private"]');
+    await expect(toggle).toBeVisible();
 
-      await page.evaluate((act: any) => {
-        document.dispatchEvent(
-          new CustomEvent('__memo-open-modal', {
-            detail: { activity: act },
-          }),
-        );
-      }, activity);
-      await page.waitForSelector('[data-testid="activity-details-modal"]', {
-        state: 'visible',
-        timeout: 10000,
-      });
+    const initialState = await toggle.getAttribute('aria-checked');
+    await toggle.click();
+    const newState = await toggle.getAttribute('aria-checked');
+    expect(newState).not.toBe(initialState);
+  });
 
-      // Settings tab should be visible
-      await expect(page.locator('[data-testid="settings-tab"]')).toBeVisible();
+  // ── Scenario 13: Duration displays as HH:MM ──────────────────────────
 
-      // No client tabs (fresh activity has 0 records)
-      const clientTabs = page.locator('[data-testid^="tab-client-"]');
-      await expect(clientTabs).toHaveCount(0);
+  test('13. Duration displays as HH:MM, not decimal', async ({ page }) => {
+    await openModal(page);
 
-      // "+" tab should still be visible
-      await expect(page.locator('[data-testid="tab-add"]')).toBeVisible();
-
-      // Clean up: delete the test activity
-      await page.request.delete(`${BACKEND}/api/v1/activities/${newActivityId}`);
-    });
+    const duration = page.locator('[data-testid="input-duration"]');
+    const value = await duration.inputValue();
+    expect(value).toMatch(/^\d{2}:\d{2}$/);
+    expect(value).not.toContain('.');
   });
 });

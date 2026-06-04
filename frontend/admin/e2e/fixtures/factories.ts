@@ -80,12 +80,15 @@ export async function createTestRecord(
   clientId: string,
   overrides?: Record<string, any>,
 ) {
+  const visitorName = overrides?.visitor_name || `Test Visitor ${uid()}`;
+  // Remove visitor_name from overrides so it doesn't leak into the API payload
+  const { visitor_name: _unused, ...apiOverrides } = overrides || {};
   const resp = await api.post(`${BACKEND}/api/v1/records`, {
     data: {
       activity_id: activityId,
       client_id: clientId,
-      visits: [{ price: 3500 }],
-      ...overrides,
+      visits: [{ name: visitorName, price: 3500 }],
+      ...apiOverrides,
     },
   });
   expect(resp.ok()).toBeTruthy();

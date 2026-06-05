@@ -131,6 +131,7 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
                 record_id=record.id,
                 visitor_id=visitor_ids[i],
                 price=item.price,
+                custom_price=item.custom_price,
                 status=item.status,
             )
             db_session.add(visit)
@@ -208,6 +209,7 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
                 record_id=record.id,
                 visitor_id=visit_item.visitor_id,
                 price=visit_item.price,
+                custom_price=visit_item.custom_price,
                 status=visit_item.status,
             )
             db_session.add(visit)
@@ -245,6 +247,7 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
                     record_id=record.id,
                     visitor_id=visit_item.get("visitor_id"),
                     price=visit_item["price"],
+                    custom_price=visit_item.get("custom_price"),
                     status=visit_item.get("status", "waiting"),
                 )
                 db_session.add(visit)

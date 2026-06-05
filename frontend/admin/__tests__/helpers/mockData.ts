@@ -122,6 +122,7 @@ export const mockVisit: VisitResponse = {
   record_id: 'r1',
   visitor_id: 'vis1',
   price: 3500,
+  custom_price: null,
   status: 'waiting',
   created_at: '',
   updated_at: '',

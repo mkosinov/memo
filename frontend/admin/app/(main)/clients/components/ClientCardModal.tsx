@@ -20,6 +20,18 @@ export function ClientCardModal({ client, isOpen, onClose, onClientCreated, mode
   const [activeTab, setActiveTab] = useState('client');
   const { createClient, updateClient, deleteClient } = useClients();
 
+  // Close on Escape
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
   const handleDelete = useCallback(async () => {
     const clientName = client?.name ?? 'клиента';
     if (window.confirm(`Удалить ${clientName}? Это скроет клиента из списка.`)) {

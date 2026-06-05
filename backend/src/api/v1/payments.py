@@ -26,9 +26,13 @@ _ServiceDep = Annotated[GenericService[PaymentCreate, PaymentUpdate, PaymentResp
 async def list_payments(
     service: _ServiceDep,
     session: SessionDep,
+    record_id: str | None = None,
 ) -> list[PaymentResponse]:
-    """Return all active payments."""
-    return await service.list(db_session=session)
+    """Return all active payments, optionally filtered by record_id."""
+    filters = {}
+    if record_id:
+        filters["record_id"] = record_id
+    return await service.list(db_session=session, **filters)
 
 
 @router.get("/{payment_id}", response_model=PaymentResponse)

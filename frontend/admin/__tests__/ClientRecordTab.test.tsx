@@ -21,6 +21,7 @@ vi.mock('@memo/api-client', () => ({
   updateVisitStatus: vi.fn(),
   patchActivity: vi.fn(),
   createVisitor: vi.fn(),
+  deleteVisitor: vi.fn(),
 }));
 
 import {
@@ -37,6 +38,7 @@ import {
   getPayments,
   patchActivity,
   createVisitor,
+  deleteVisitor,
 } from '@memo/api-client';
 
 // ─── Mock react-query ──────────────────────────────────────────────────────
@@ -71,6 +73,7 @@ const mockRecord: RecordResponse = {
       record_id: 'r1',
       visitor_id: 'vis1',
       price: 3500,
+      custom_price: null,
       status: 'waiting',
       created_at: '',
       updated_at: '',
@@ -192,6 +195,7 @@ describe('ClientRecordTab', () => {
       is_active: true,
     });
     vi.mocked(deletePayment).mockResolvedValue(undefined);
+    vi.mocked(deleteVisitor).mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -238,63 +242,49 @@ describe('ClientRecordTab', () => {
 
   it('renders service dropdown with current service', () => {
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    const serviceSelect = screen.getByLabelText('Услуга') as HTMLSelectElement;
-    expect(serviceSelect.value).toBe('s1');
+    // CustomSelect shows the label of the selected option
+    expect(screen.getByText('Картина маслом')).toBeInTheDocument();
   });
 
-  it('renders all service options', () => {
+  it('renders all service options in dropdown', () => {
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    const serviceSelect = screen.getByLabelText('Услуга') as HTMLSelectElement;
-    const options = Array.from(serviceSelect.querySelectorAll('option'));
-    const values = options.map(o => o.value);
-    expect(values).toContain('s1');
+    // Open the service CustomSelect (4th trigger: location, status, master, service)
+    const triggers = screen.getAllByTestId('custom-select-trigger');
+    fireEvent.click(triggers[3]);
+    // After opening, "Не выбрана" should be visible in the dropdown
+    const dropdown = screen.getByTestId('custom-select-dropdown');
+    expect(dropdown).toHaveTextContent('Не выбрана');
   });
 
   // ─── Master / Location ─────────────────────────────────────────────────
 
-  it('renders master dropdown (disabled)', () => {
+  it('renders master dropdown with current master', () => {
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    const masterSelect = screen.getByLabelText('Мастер') as HTMLSelectElement;
-    expect(masterSelect).toBeDisabled();
-    expect(masterSelect.value).toBe('m1');
+    expect(screen.getByText('Ольга Середа')).toBeInTheDocument();
   });
 
-  it('renders location dropdown (disabled)', () => {
+  it('renders location dropdown with current location', () => {
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    const locationSelect = screen.getByLabelText('Локация') as HTMLSelectElement;
-    expect(locationSelect).toBeDisabled();
-    expect(locationSelect.value).toBe('loc1');
+    expect(screen.getByText('Альпика')).toBeInTheDocument();
   });
 
-  // ─── Visit status icon ────────────────────────────────────────────────
+  // ─── Visit status ───────────────────────────────────────────────────────
 
-  it('renders visit status icon', () => {
+  it('renders visit status with correct label', () => {
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    expect(screen.getByTestId('visit-status-icon')).toBeInTheDocument();
+    // The status CustomSelect shows "Ожидает" as the selected option
+    expect(screen.getByText('Ожидает')).toBeInTheDocument();
   });
 
-  it('status icon cycles through statuses on click', async () => {
+  it('status changes through CustomSelect dropdown', async () => {
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    const icon = screen.getByTestId('visit-status-icon');
-
-    // Initial status is waiting (yellow)
-    expect(icon).toHaveStyle({ color: '#F59E0B' });
-
-    // Click to cycle to visited (green)
-    fireEvent.click(icon);
-    expect(icon).toHaveStyle({ color: '#10B981' });
-
-    // Click to cycle to missed (red)
-    fireEvent.click(icon);
-    expect(icon).toHaveStyle({ color: '#EF4444' });
-
-    // Click to cycle to cancelled (gray)
-    fireEvent.click(icon);
-    expect(icon).toHaveStyle({ color: '#6B7280' });
-
-    // Click to cycle back to waiting
-    fireEvent.click(icon);
-    expect(icon).toHaveStyle({ color: '#F59E0B' });
+    // Open the status CustomSelect (second trigger in row 2)
+    const triggers = screen.getAllByTestId('custom-select-trigger');
+    fireEvent.click(triggers[1]); // status trigger
+    // Click "Пришла" option
+    fireEvent.click(screen.getByTestId('custom-select-option-visited'));
+    // Save button should be enabled
+    expect(screen.getByTestId('btn-save-record')).toBeEnabled();
   });
 
   // ─── Visitors ─────────────────────────────────────────────────────────
@@ -347,10 +337,10 @@ describe('ClientRecordTab', () => {
     expect(tariffSelects.length).toBe(mockRecord.visits.length);
   });
 
-  it('shows visit price', () => {
+  it('shows visit price in input', () => {
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    const prices = screen.getAllByTestId('visit-price');
-    expect(prices[0]).toHaveTextContent('3 500 ₽');
+    const priceInputs = screen.getAllByTestId('input-visit-price');
+    expect(priceInputs[0]).toHaveValue(3500);
   });
 
   it('shows "Нет посетителей" when record has no visits', () => {
@@ -390,10 +380,11 @@ describe('ClientRecordTab', () => {
 
   it('shows total cost from visits', () => {
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    expect(screen.getByText('Итого:')).toBeInTheDocument();
-    // 3500 total
-    const priceInputs = screen.getAllByTestId('visit-price');
-    expect(priceInputs[0]).toHaveTextContent('3 500 ₽');
+    // The visits total is shown inside the visitors box
+    expect(screen.getByTestId('visits-total')).toHaveTextContent('3 500 ₽');
+    // Also check the price input
+    const priceInputs = screen.getAllByTestId('input-visit-price');
+    expect(priceInputs[0]).toHaveValue(3500);
   });
 
   it('shows paid amount from payments', () => {
@@ -435,9 +426,9 @@ describe('ClientRecordTab', () => {
 
     render(<ClientRecordTab recordId="r2" clientId="c1" onClose={onClose} />);
     // 3500 + 2500 = 6000
-    const priceSpans = screen.getAllByTestId('visit-price');
-    expect(priceSpans[0]).toHaveTextContent('3 500 ₽');
-    expect(priceSpans[1]).toHaveTextContent('2 500 ₽');
+    const priceInputs = screen.getAllByTestId('input-visit-price');
+    expect(priceInputs[0]).toHaveValue(3500);
+    expect(priceInputs[1]).toHaveValue(2500);
   });
 
   it('uses custom_price for total when set', () => {
@@ -538,10 +529,13 @@ describe('ClientRecordTab', () => {
     expect(createPayment).not.toHaveBeenCalled();
   });
 
-  it('allows changing payment method', async () => {
+  it('allows changing payment method via CustomSelect', async () => {
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    const methodSelect = screen.getByDisplayValue('Карта');
-    fireEvent.change(methodSelect, { target: { value: 'cash' } });
+    // The payment method CustomSelect is the last trigger
+    const triggers = screen.getAllByTestId('custom-select-trigger');
+    const paymentMethodTrigger = triggers[triggers.length - 1];
+    fireEvent.click(paymentMethodTrigger);
+    fireEvent.click(screen.getByTestId('custom-select-option-cash'));
     fireEvent.change(screen.getByPlaceholderText('Сумма'), { target: { value: '2000' } });
     fireEvent.click(screen.getByTestId('btn-add-payment'));
 
@@ -554,21 +548,15 @@ describe('ClientRecordTab', () => {
     });
   });
 
-  it('displays all payment method options', () => {
+  it('displays all payment methods in CustomSelect', () => {
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    const methodSelect = screen.getByDisplayValue('Карта');
-    const options = Array.from(methodSelect.querySelectorAll('option'));
-    const values = options.map(o => o.value);
-    expect(values).toContain('card');
-    expect(values).toContain('cash');
-    expect(values).toContain('transfer');
-  });
-
-  it('displays all payment methods in Russian', () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    expect(screen.getByText('Карта')).toBeInTheDocument();
-    expect(screen.getByText('Наличные')).toBeInTheDocument();
-    expect(screen.getByText('Перевод')).toBeInTheDocument();
+    const triggers = screen.getAllByTestId('custom-select-trigger');
+    const paymentMethodTrigger = triggers[triggers.length - 1];
+    fireEvent.click(paymentMethodTrigger);
+    const dropdown = screen.getByTestId('custom-select-dropdown');
+    expect(dropdown).toHaveTextContent('Карта');
+    expect(dropdown).toHaveTextContent('Наличные');
+    expect(dropdown).toHaveTextContent('Перевод');
   });
 
   // ─── Comment ───────────────────────────────────────────────────────────
@@ -618,17 +606,20 @@ describe('ClientRecordTab', () => {
     expect(screen.getByText('Удалить запись')).toBeInTheDocument();
   });
 
-  it('calls deleteRecord and onClose when delete clicked', async () => {
+  it('calls deleteRecord when delete clicked (does not close modal)', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
     fireEvent.click(screen.getByText('Удалить запись'));
 
     await waitFor(() => {
       expect(deleteRecord).toHaveBeenCalledWith('r1');
-      expect(onClose).toHaveBeenCalled();
     });
+    // Should NOT call onClose — modal stays open, user switches to client tab
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it('invalidates records query after delete', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
     fireEvent.click(screen.getByText('Удалить запись'));
 
@@ -672,9 +663,11 @@ describe('ClientRecordTab', () => {
     expect(screen.getByTestId('btn-save-record')).toBeEnabled();
   });
 
-  it('save button enables when status icon is cycled', () => {
+  it('save button enables when status is changed via CustomSelect', () => {
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    fireEvent.click(screen.getByTestId('visit-status-icon'));
+    const triggers = screen.getAllByTestId('custom-select-trigger');
+    fireEvent.click(triggers[1]); // status trigger
+    fireEvent.click(screen.getByTestId('custom-select-option-visited'));
     expect(screen.getByTestId('btn-save-record')).toBeEnabled();
   });
 
@@ -783,9 +776,9 @@ describe('ClientRecordTab', () => {
 
   // ─── Service name display ───────────────────────────────────────────────
 
-  it('displays activity service name in dropdown', () => {
+  it('displays activity service name in CustomSelect', () => {
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    const serviceSelect = screen.getByLabelText('Услуга');
-    expect(serviceSelect).toHaveTextContent('Картина маслом');
+    // Service name is shown in the CustomSelect trigger
+    expect(screen.getByText('Картина маслом')).toBeInTheDocument();
   });
 });

@@ -12,6 +12,7 @@ class Visit(AbstractModel):
     record_id: Mapped[str] = mapped_column(String(36), ForeignKey("records.id"))
     visitor_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("visitors.id"), nullable=True)
     price: Mapped[int] = mapped_column(Integer)
+    custom_price: Mapped[int | None] = mapped_column(Integer, nullable=True)
     status: Mapped[str] = mapped_column(String(20))
 
     record: Mapped["Record"] = relationship("Record", back_populates="visits")

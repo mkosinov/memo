@@ -156,6 +156,7 @@ export const VisitResponseSchema = z.object({
   record_id: z.string(),
   visitor_id: z.string(),
   price: z.number(),
+  custom_price: z.number().nullable(),
   status: z.string(),
   created_at: z.string(),
   updated_at: z.string(),
@@ -257,6 +258,7 @@ export const RecordCreateSchema = z.object({
   visits: z.array(z.object({
     visitor_id: z.string().optional(),
     price: z.number(),
+    custom_price: z.number().nullable().optional(),
     status: z.enum(['waiting', 'visited', 'missed', 'cancelled']).optional(),
   })).optional(),
 });

@@ -392,6 +392,27 @@ describe('ClientCardModal', () => {
       render(<ClientCardModal {...defaultProps} client={null} mode="view" />);
       expect(screen.getByTestId('client-card-modal')).toBeInTheDocument();
     });
+
+    it('closes modal on Escape key', () => {
+      const onClose = vi.fn();
+      render(<ClientCardModal {...defaultProps} onClose={onClose} />);
+      fireEvent.keyDown(document, { key: 'Escape' });
+      expect(onClose).toHaveBeenCalled();
+    });
+
+    it('does not close modal on other key presses', () => {
+      const onClose = vi.fn();
+      render(<ClientCardModal {...defaultProps} onClose={onClose} />);
+      fireEvent.keyDown(document, { key: 'Enter' });
+      expect(onClose).not.toHaveBeenCalled();
+    });
+
+    it('does not close on Escape when modal is closed', () => {
+      const onClose = vi.fn();
+      render(<ClientCardModal {...defaultProps} isOpen={false} onClose={onClose} />);
+      fireEvent.keyDown(document, { key: 'Escape' });
+      expect(onClose).not.toHaveBeenCalled();
+    });
   });
 
   // ─── Create mode — keep modal open ─────────────────────────────────────

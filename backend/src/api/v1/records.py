@@ -42,6 +42,7 @@ def _map_record(record) -> RecordResponse:
             record_id=v.record_id,
             visitor_id=v.visitor_id,
             price=v.price,
+            custom_price=v.custom_price,
             status=v.status,
             created_at=_dt_to_str(v.created_at),
             updated_at=_dt_to_str(v.updated_at),

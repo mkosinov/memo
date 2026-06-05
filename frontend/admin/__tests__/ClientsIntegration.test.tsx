@@ -162,6 +162,9 @@ describe('ClientCardModal ↔ ClientInfoTab integration (real components)', () =
         // Records list query for ClientCardModal — return records array
         return { data: mockClientWithRecords.records, isLoading: false, error: null } as any;
       }
+      if (Array.isArray(queryKey) && queryKey[0] === 'visitors') {
+        return { data: mockVisitors, isLoading: false, error: null } as any;
+      }
       // Default: single record query for ClientRecordTab
       return { data: mockRecord, isLoading: false, error: null } as any;
     });

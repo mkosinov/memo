@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { getRecord, patchRecord, deleteRecord, createPayment, getClientVisitors, getActivity, getServices } from '@memo/api-client';
+import { getRecord, patchRecord, deleteRecord, createPayment, getClientVisitors, getActivity, getServices, getMasters, getLocations, getPayments, updateVisitStatus } from '@memo/api-client';
 import type { RecordStatus } from '@memo/domain';
 
 interface ClientRecordTabProps {
@@ -78,6 +78,22 @@ export function ClientRecordTab({ recordId, clientId, onClose }: ClientRecordTab
     queryFn: () => getServices(),
   });
 
+  const { data: masters = [] } = useQuery({
+    queryKey: ['masters'],
+    queryFn: () => getMasters(),
+  });
+
+  const { data: locations = [] } = useQuery({
+    queryKey: ['locations'],
+    queryFn: () => getLocations(),
+  });
+
+  const { data: payments = [] } = useQuery({
+    queryKey: ['payments', recordId],
+    queryFn: () => getPayments({ record_id: recordId }),
+    enabled: !!recordId,
+  });
+
   const serviceName = useMemo(() => {
     if (!activity || !Array.isArray(services)) return null;
     const service = services.find(s => s.id === activity.service_id);
@@ -97,11 +113,13 @@ export function ClientRecordTab({ recordId, clientId, onClose }: ClientRecordTab
   const [paymentMethod, setPaymentMethod] = useState('card');
   const [customPrice, setCustomPrice] = useState<string>('');
   const [editPrices, setEditPrices] = useState<Record<string, string>>({});
+  const [comment, setComment] = useState('');
 
   useEffect(() => {
     if (record) {
       setStatus(record.status as RecordStatus);
       setCustomPrice(record.custom_price != null ? String(record.custom_price) : '');
+      setComment(record.comment || '');
     }
   }, [record]);
 
@@ -155,14 +173,35 @@ export function ClientRecordTab({ recordId, clientId, onClose }: ClientRecordTab
     invalidateRecord();
   }, [recordId, record, invalidateRecord]);
 
+  const handleCommentSave = useCallback(async () => {
+    if (!record) return;
+    if (comment === (record.comment || '')) return;
+    await patchRecord(recordId, { comment: comment || null });
+    invalidateRecord();
+  }, [recordId, record, comment, invalidateRecord]);
+
+  const handleVisitStatusChange = useCallback(async (visitId: string, newStatus: string) => {
+    await updateVisitStatus(visitId, newStatus);
+    invalidateRecord();
+  }, [invalidateRecord]);
+
   if (isLoading) return <div className="p-4">Загрузка...</div>;
   if (!record) return <div className="p-4">Запись не найдена</div>;
 
   const totalCost = record.visits.reduce((sum, v) => sum + v.price, 0);
   const displayTotal = customPrice.trim() !== '' ? Number(customPrice) : totalCost;
+  const totalPaid = Array.isArray(payments) ? payments.reduce((sum: number, p: { amount: number }) => sum + p.amount, 0) : 0;
+  const remaining = displayTotal - totalPaid;
 
   const inputClass = 'w-full rounded-lg border px-3 py-2 text-sm bg-white';
   const inputStyle = { borderColor: 'var(--line)' };
+
+  const activityDate = activity?.start
+    ? new Date(activity.start).toLocaleDateString('ru-RU')
+    : '—';
+  const activityTime = activity?.start
+    ? new Date(activity.start).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
+    : '—';
 
   return (
     <div className="space-y-4 p-4" data-testid="client-record-tab">
@@ -172,29 +211,96 @@ export function ClientRecordTab({ recordId, clientId, onClose }: ClientRecordTab
         {serviceName && (
           <div className="text-sm text-ink mb-2">{serviceName}</div>
         )}
+
+        {/* Master, Activity, Location dropdowns */}
         <div className="grid grid-cols-3 gap-4">
           <div>
-            <label className="text-xs font-medium text-ink-mid block mb-1" htmlFor="record-status">
-              Статус
+            <label className="text-xs font-medium text-ink-mid block mb-1" htmlFor="record-master">
+              Мастер
             </label>
-            <div className="relative">
-              <select
-                id="record-status"
-                className={`${inputClass} appearance-none pr-8`}
-                style={inputStyle}
-                value={status}
-                onChange={(e) => handleStatusChange(e.target.value as RecordStatus)}
-                data-testid="select-record-status"
-              >
-                {(Object.entries(STATUS_CONFIG) as [RecordStatus, { label: string; color: string }][]).map(([key, config]) => (
-                  <option key={key} value={key}>
-                    {config.label}
-                  </option>
-                ))}
-              </select>
-              <div className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: STATUS_CONFIG[status]?.color }}>
-                <StatusIcon status={status} />
-              </div>
+            <select
+              id="record-master"
+              className={inputClass}
+              style={inputStyle}
+              value={activity?.master_id || ''}
+              disabled
+            >
+              <option value="">Не выбран</option>
+              {Array.isArray(masters) && masters.map((m) => (
+                <option key={m.id} value={m.id}>{m.first_name} {m.last_name}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="text-xs font-medium text-ink-mid block mb-1" htmlFor="record-activity">
+              Активность
+            </label>
+            <select
+              id="record-activity"
+              className={inputClass}
+              style={inputStyle}
+              value={activity?.service_id || ''}
+              disabled
+            >
+              <option value="">Не выбрана</option>
+              {Array.isArray(services) && services.map((s) => (
+                <option key={s.id} value={s.id}>{s.title}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="text-xs font-medium text-ink-mid block mb-1" htmlFor="record-location">
+              Место
+            </label>
+            <select
+              id="record-location"
+              className={inputClass}
+              style={inputStyle}
+              value={activity?.location_id || ''}
+              disabled
+            >
+              <option value="">Не выбрано</option>
+              {Array.isArray(locations) && locations.map((l) => (
+                <option key={l.id} value={l.id}>{l.name}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {/* Date + Time */}
+        <div className="grid grid-cols-2 gap-4 mt-4">
+          <div>
+            <label className="text-xs font-medium text-ink-mid block mb-1">Дата</label>
+            <div className="text-sm">{activityDate}</div>
+          </div>
+          <div>
+            <label className="text-xs font-medium text-ink-mid block mb-1">Время</label>
+            <div className="text-sm">{activityTime}</div>
+          </div>
+        </div>
+
+        {/* Record status */}
+        <div className="mt-4">
+          <label className="text-xs font-medium text-ink-mid block mb-1" htmlFor="record-status">
+            Статус записи
+          </label>
+          <div className="relative">
+            <select
+              id="record-status"
+              className={`${inputClass} appearance-none pr-8`}
+              style={inputStyle}
+              value={status}
+              onChange={(e) => handleStatusChange(e.target.value as RecordStatus)}
+              data-testid="select-record-status"
+            >
+              {(Object.entries(STATUS_CONFIG) as [RecordStatus, { label: string; color: string }][]).map(([key, config]) => (
+                <option key={key} value={key}>
+                  {config.label}
+                </option>
+              ))}
+            </select>
+            <div className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: STATUS_CONFIG[status]?.color }}>
+              <StatusIcon status={status} />
             </div>
           </div>
         </div>
@@ -220,7 +326,19 @@ export function ClientRecordTab({ recordId, clientId, onClose }: ClientRecordTab
                 {visitor?.name ?? 'Неизвестный'}
                 {visitor?.age && <span className="text-xs text-ink-light ml-1">({visitor.age} лет)</span>}
               </span>
-              <span className="text-xs text-ink-light">{visit.status === 'visited' ? 'Пришла' : visit.status === 'missed' ? 'Пропущена' : visit.status}</span>
+              <select
+                className="text-xs rounded border px-2 py-1 bg-white"
+                style={{ borderColor: 'var(--line)' }}
+                value={visit.status}
+                onChange={(e) => handleVisitStatusChange(visit.id, e.target.value)}
+                aria-label="Статус посетителя"
+                data-testid="select-visit-status"
+              >
+                <option value="waiting">Ожидает</option>
+                <option value="visited">Пришла</option>
+                <option value="missed">Пропущена</option>
+                <option value="cancelled">Отменена</option>
+              </select>
               {isEditingPrice ? (
                 <input
                   type="number"
@@ -279,11 +397,22 @@ export function ClientRecordTab({ recordId, clientId, onClose }: ClientRecordTab
           />
         </div>
 
-        <div className="flex justify-between text-sm">
-          <span className="text-ink-mid">Итого:</span>
-          <span className="text-ink font-medium" data-testid="total-price">
-            {displayTotal.toLocaleString('ru-RU')} ₽
-          </span>
+        {/* Payment breakdown: Итого / Оплачено / Остаток */}
+        <div className="grid grid-cols-3 gap-2 p-3 bg-surface rounded-lg">
+          <div className="text-center">
+            <div className="text-lg font-semibold">{displayTotal.toLocaleString('ru-RU')} ₽</div>
+            <div className="text-xs text-ink-light">Итого</div>
+          </div>
+          <div className="text-center">
+            <div className="text-lg font-semibold">{totalPaid.toLocaleString('ru-RU')} ₽</div>
+            <div className="text-xs text-ink-light">Оплачено</div>
+          </div>
+          <div className="text-center">
+            <div className="text-lg font-semibold" style={{ color: remaining > 0 ? 'var(--danger, #C8503C)' : 'var(--success, #6B8E6E)' }}>
+              {remaining.toLocaleString('ru-RU')} ₽
+            </div>
+            <div className="text-xs text-ink-light">Остаток</div>
+          </div>
         </div>
 
         {/* Add payment form */}
@@ -315,6 +444,21 @@ export function ClientRecordTab({ recordId, clientId, onClose }: ClientRecordTab
             Добавить
           </button>
         </div>
+      </div>
+
+      {/* Comment field */}
+      <div>
+        <h4 className="text-xs font-medium text-ink-mid mb-2">Комментарий</h4>
+        <textarea
+          className="w-full rounded-lg border px-3 py-2 text-sm bg-white"
+          style={inputStyle}
+          value={comment}
+          onChange={(e) => setComment(e.target.value)}
+          onBlur={handleCommentSave}
+          placeholder="Добавить комментарий..."
+          rows={2}
+          data-testid="input-comment"
+        />
       </div>
 
       {/* Delete button */}

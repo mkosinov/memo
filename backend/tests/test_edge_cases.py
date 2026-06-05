@@ -168,34 +168,40 @@ class TestClientEdgeCases:
     """Client validation and boundary tests."""
 
     def test_create_client_no_phone(self, api_client):
-        """Missing phone → 422 (phone is required in ClientCreate schema)."""
+        """Missing phone → 201 (phone is optional, returns null)."""
         payload = {
             "name": "No Phone",
             "channel": "telegram",
         }
         response = api_client.post("/api/v1/clients", json=payload)
 
-        assert response.status_code == 422
+        assert response.status_code == 201
+        data = response.json()
+        assert data["phone"] is None
 
     def test_create_client_no_name(self, api_client):
-        """Missing name → 422 (name is required)."""
+        """Missing name → 201 (name is optional, returns null)."""
         payload = {
             "phone": "+79990001234",
             "channel": "telegram",
         }
         response = api_client.post("/api/v1/clients", json=payload)
 
-        assert response.status_code == 422
+        assert response.status_code == 201
+        data = response.json()
+        assert data["name"] is None
 
     def test_create_client_no_channel(self, api_client):
-        """Missing channel → 422 (channel is required)."""
+        """Missing channel → 201 (channel is optional, returns null)."""
         payload = {
             "name": "No Channel",
             "phone": "+79990001234",
         }
         response = api_client.post("/api/v1/clients", json=payload)
 
-        assert response.status_code == 422
+        assert response.status_code == 201
+        data = response.json()
+        assert data["channel"] is None
 
     def test_search_phone_not_found(self, api_client):
         """Unknown phone → 404."""
@@ -374,7 +380,8 @@ class TestDataIntegrity:
         api_client.delete(f"/api/v1/clients/{client_id}")
 
         response = api_client.get("/api/v1/clients")
-        ids = [c["id"] for c in response.json()]
+        items = response.json()["items"]
+        ids = [c["id"] for c in items]
         assert client_id not in ids
 
     def test_double_delete_idempotent(self, api_client, create_record):
@@ -443,7 +450,7 @@ class TestResponseContracts:
         create_client()
         resp = api_client.get("/api/v1/clients")
         assert resp.status_code == 200
-        for item in resp.json():
+        for item in resp.json()["items"]:
             ClientResponse.model_validate(item)
 
     def test_payments_schema(self, api_client, create_record):

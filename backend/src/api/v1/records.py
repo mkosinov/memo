@@ -68,9 +68,10 @@ def _map_record(record) -> RecordResponse:
 async def list_records(
     service: _ServiceDep,
     session: SessionDep,
+    client_id: str | None = None,
 ) -> list[RecordResponse]:
-    """Return all active records with nested visits."""
-    records = await service.list(db_session=session)
+    """Return all active records with nested visits, optionally filtered by client_id."""
+    records = await service.list(db_session=session, client_id=client_id)
     return [_map_record(r) for r in records]
 
 

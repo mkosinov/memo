@@ -25,6 +25,28 @@ vi.mock('../app/(main)/clients/components/ClientRecordTab', () => ({
   ),
 }));
 
+// ─── React Query Mock ────────────────────────────────────────────────────
+
+const mockUseQuery = vi.fn().mockReturnValue({ data: [], isLoading: false });
+
+vi.mock('@tanstack/react-query', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@tanstack/react-query')>();
+  return {
+    ...actual,
+    useQuery: (...args: any[]) => mockUseQuery(...args),
+  };
+});
+
+// ─── API Client Mock ──────────────────────────────────────────────────────
+
+vi.mock('@memo/api-client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@memo/api-client')>();
+  return {
+    ...actual,
+    getRecords: vi.fn().mockResolvedValue([]),
+  };
+});
+
 // ─── Context Mock ─────────────────────────────────────────────────────────
 
 vi.mock('@/contexts/ClientsContext', () => ({
@@ -38,6 +60,7 @@ const mockUseClients = vi.mocked(useClients);
 
 beforeEach(() => {
   mockUseClients.mockReturnValue(createMockClientsContext());
+  mockUseQuery.mockReturnValue({ data: [], isLoading: false });
 });
 
 afterEach(() => {
@@ -61,23 +84,32 @@ const mockClientWithStats: ClientWithStats = {
   missed_visits: 1,
 };
 
-const mockClientWithRecords = {
-  ...mockClientWithStats,
-  records: [
-    {
-      id: 'rec1',
-      date: '2026-05-10',
-      time: '14:00',
-      created_at: '2026-05-10T10:00:00',
-    },
-    {
-      id: 'rec2',
-      date: '2026-04-20',
-      time: '16:30',
-      created_at: '2026-04-20T10:00:00',
-    },
-  ],
-} as ClientWithStats & { records: Array<{ id: string; date: string; time: string; created_at: string }> };
+const mockRecords = [
+  {
+    id: 'rec1',
+    activity_id: 'ev_1',
+    client_id: 'c1',
+    status: 'confirmed',
+    seats: 1,
+    comment: null,
+    created_at: '2026-05-10T10:00:00',
+    updated_at: '2026-05-10T10:00:00',
+    is_active: true,
+    visits: [],
+  },
+  {
+    id: 'rec2',
+    activity_id: 'ev_2',
+    client_id: 'c1',
+    status: 'pending',
+    seats: 2,
+    comment: null,
+    created_at: '2026-04-20T10:00:00',
+    updated_at: '2026-04-20T10:00:00',
+    is_active: true,
+    visits: [],
+  },
+];
 
 // ─── Tests ────────────────────────────────────────────────────────────────
 
@@ -143,7 +175,8 @@ describe('ClientCardModal', () => {
   });
 
   it('switches to record tab when record button is clicked', () => {
-    render(<ClientCardModal {...defaultProps} client={mockClientWithRecords} />);
+    mockUseQuery.mockReturnValue({ data: mockRecords, isLoading: false });
+    render(<ClientCardModal {...defaultProps} />);
     // Click on first record tab
     fireEvent.click(screen.getByText(/10\.05\.2026/));
     expect(screen.getByTestId('client-record-tab')).toBeInTheDocument();
@@ -157,7 +190,8 @@ describe('ClientCardModal', () => {
   });
 
   it('shows record date buttons for each record', () => {
-    render(<ClientCardModal {...defaultProps} client={mockClientWithRecords} />);
+    mockUseQuery.mockReturnValue({ data: mockRecords, isLoading: false });
+    render(<ClientCardModal {...defaultProps} />);
     // Should have 2 record tabs + 1 client tab
     expect(screen.getByText(/10\.05\.2026/)).toBeInTheDocument();
     expect(screen.getByText(/20\.04\.2026/)).toBeInTheDocument();
@@ -193,7 +227,8 @@ describe('ClientCardModal', () => {
 
   describe('tab switching', () => {
     it('switches back to client tab from record tab', () => {
-      render(<ClientCardModal {...defaultProps} client={mockClientWithRecords} />);
+      mockUseQuery.mockReturnValue({ data: mockRecords, isLoading: false });
+      render(<ClientCardModal {...defaultProps} />);
 
       // Start on client tab
       expect(screen.getByTestId('client-info-tab')).toBeInTheDocument();
@@ -209,8 +244,9 @@ describe('ClientCardModal', () => {
     });
 
     it('resets to client tab when modal is closed and reopened', () => {
+      mockUseQuery.mockReturnValue({ data: mockRecords, isLoading: false });
       const { rerender } = render(
-        <ClientCardModal {...defaultProps} client={mockClientWithRecords} isOpen={true} />,
+        <ClientCardModal {...defaultProps} isOpen={true} />,
       );
 
       // Switch to record tab
@@ -218,17 +254,18 @@ describe('ClientCardModal', () => {
       expect(screen.getByTestId('client-record-tab')).toBeInTheDocument();
 
       // Close modal
-      rerender(<ClientCardModal {...defaultProps} client={mockClientWithRecords} isOpen={false} />);
+      rerender(<ClientCardModal {...defaultProps} isOpen={false} />);
       expect(screen.queryByTestId('client-card-modal')).not.toBeInTheDocument();
 
       // Reopen modal
-      rerender(<ClientCardModal {...defaultProps} client={mockClientWithRecords} isOpen={true} />);
+      rerender(<ClientCardModal {...defaultProps} isOpen={true} />);
       // Should reset to client tab
       expect(screen.getByTestId('client-info-tab')).toBeInTheDocument();
     });
 
     it('renders the correct record tab content for different records', () => {
-      render(<ClientCardModal {...defaultProps} client={mockClientWithRecords} />);
+      mockUseQuery.mockReturnValue({ data: mockRecords, isLoading: false });
+      render(<ClientCardModal {...defaultProps} />);
 
       // Click first record
       fireEvent.click(screen.getByText(/10\.05\.2026/));
@@ -248,7 +285,8 @@ describe('ClientCardModal', () => {
     });
 
     it('does not render record tabs when client has no records', () => {
-      render(<ClientCardModal {...defaultProps} client={mockClientWithStats} />);
+      mockUseQuery.mockReturnValue({ data: [], isLoading: false });
+      render(<ClientCardModal {...defaultProps} />);
       expect(screen.getByText('Клиент')).toBeInTheDocument();
       // No date-based record buttons
       expect(screen.queryByText(/10\.05\.2026/)).not.toBeInTheDocument();
@@ -269,6 +307,35 @@ describe('ClientCardModal', () => {
     it('passing null client in view mode still renders modal header', () => {
       render(<ClientCardModal {...defaultProps} client={null} mode="view" />);
       expect(screen.getByTestId('client-card-modal')).toBeInTheDocument();
+    });
+  });
+
+  // ─── Create mode — keep modal open ─────────────────────────────────────
+
+  describe('create mode', () => {
+    it('calls onClientCreated instead of onClose after successful create', async () => {
+      const onClientCreated = vi.fn();
+      const newClient = { ...mockClientWithStats, id: 'new-c1', name: 'Новый' };
+      const createClient = vi.fn().mockResolvedValue(newClient);
+      mockUseClients.mockReturnValue(createMockClientsContext({ createClient }));
+
+      render(
+        <ClientCardModal
+          {...defaultProps}
+          client={null}
+          mode="create"
+          onClientCreated={onClientCreated}
+        />,
+      );
+
+      fireEvent.click(screen.getByTestId('info-save'));
+
+      // Wait for async createClient
+      const { waitFor } = await import('@testing-library/react');
+      await waitFor(() => {
+        expect(createClient).toHaveBeenCalled();
+      });
+      expect(onClientCreated).toHaveBeenCalledWith(newClient);
     });
   });
 });

@@ -9,7 +9,7 @@ import {
   patchClient as apiPatchClient,
   deleteClient as apiDeleteClient,
 } from '@memo/api-client';
-import type { ClientWithStats, ClientListResponse } from '@memo/api-client';
+import type { ClientWithStats, ClientResponse, ClientListResponse } from '@memo/api-client';
 
 export interface ClientFilters {
   search: string;
@@ -56,7 +56,7 @@ export interface ClientsContextType {
   setFilters: (filters: Partial<ClientFilters>) => void;
   setSort: (field: string, order: 'asc' | 'desc') => void;
   resetFilters: () => void;
-  createClient: (data: ClientCreateData) => Promise<void>;
+  createClient: (data: ClientCreateData) => Promise<ClientResponse>;
   updateClient: (id: string, data: ClientCreateData) => Promise<void>;
   patchClient: (id: string, data: Record<string, unknown>) => Promise<void>;
   deleteClient: (id: string) => Promise<void>;
@@ -129,7 +129,7 @@ export function ClientsProvider({ children }: { children: React.ReactNode }) {
 
   const createClient = useCallback(
     async (data: ClientCreateData) => {
-      await createMutation.mutateAsync(data);
+      return await createMutation.mutateAsync(data);
     },
     [createMutation],
   );

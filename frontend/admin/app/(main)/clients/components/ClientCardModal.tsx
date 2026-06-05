@@ -1,6 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { getRecords } from '@memo/api-client';
 import { useClients } from '@/contexts/ClientsContext';
 import { ClientInfoTab } from './ClientInfoTab';
 import { ClientRecordTab } from './ClientRecordTab';
@@ -10,12 +12,20 @@ interface ClientCardModalProps {
   client: ClientWithStats | null;
   isOpen: boolean;
   onClose: () => void;
+  onClientCreated?: (client: ClientWithStats) => void;
   mode: 'view' | 'create';
 }
 
-export function ClientCardModal({ client, isOpen, onClose, mode }: ClientCardModalProps) {
+export function ClientCardModal({ client, isOpen, onClose, onClientCreated, mode }: ClientCardModalProps) {
   const [activeTab, setActiveTab] = useState('client');
   const { createClient, updateClient, deleteClient } = useClients();
+
+  // Fetch records for this client (only in view mode)
+  const { data: records } = useQuery({
+    queryKey: ['records', 'client', client?.id],
+    queryFn: () => getRecords({ client_id: client?.id! }),
+    enabled: isOpen && mode === 'view' && !!client?.id,
+  });
 
   // Reset tab to 'client' whenever the modal opens
   useEffect(() => {
@@ -26,8 +36,6 @@ export function ClientCardModal({ client, isOpen, onClose, mode }: ClientCardMod
 
   const clientName = client?.name ?? 'Дорогой гость';
   const clientPhone = client?.phone || 'Не указан';
-  const records: Array<{ id: string; date?: string; time?: string; created_at: string }> =
-    (client as any)?.records ?? [];
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center" data-testid="client-card-modal">
@@ -68,7 +76,7 @@ export function ClientCardModal({ client, isOpen, onClose, mode }: ClientCardMod
               Клиент
             </button>
 
-            {records.map((record) => (
+            {records?.map((record) => (
               <button
                 key={record.id}
                 className={`w-full text-left px-3 py-2 rounded-lg text-sm ${
@@ -78,8 +86,7 @@ export function ClientCardModal({ client, isOpen, onClose, mode }: ClientCardMod
                 }`}
                 onClick={() => setActiveTab(`record-${record.id}`)}
               >
-                {new Date(record.date || record.created_at).toLocaleDateString('ru-RU')}{' '}
-                {record.time || ''}
+                {new Date(record.created_at).toLocaleDateString('ru-RU')}
               </button>
             ))}
           </div>
@@ -94,11 +101,12 @@ export function ClientCardModal({ client, isOpen, onClose, mode }: ClientCardMod
               onSave={mode === 'create'
                 ? async (data) => {
                     try {
-                      await createClient(data as any);
+                      const newClient = await createClient(data as any);
+                      onClientCreated?.(newClient as any);
                     } catch {
-                      // Create failed — close modal anyway
+                      // Create failed — close modal
+                      onClose();
                     }
-                    onClose();
                   }
                 : (data: any) => updateClient(client!.id, data)
               }

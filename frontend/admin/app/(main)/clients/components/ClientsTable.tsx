@@ -20,7 +20,7 @@ export function ClientsTable({ onClientClick }: ClientsTableProps) {
 
   if (isLoading) {
     return (
-      <div className="space-y-2">
+      <div className="space-y-2 p-4">
         {Array.from({ length: 10 }).map((_, i) => (
           <div key={i} className="h-12 bg-gray-100 rounded animate-pulse" />
         ))}
@@ -31,7 +31,7 @@ export function ClientsTable({ onClientClick }: ClientsTableProps) {
   if (clients.length === 0) {
     return (
       <div className="text-center py-12">
-        <p className="text-gray-500">Нет клиентов</p>
+        <p style={{ color: 'var(--ink-light)' }}>Нет клиентов</p>
       </div>
     );
   }
@@ -39,11 +39,11 @@ export function ClientsTable({ onClientClick }: ClientsTableProps) {
   return (
     <table className="w-full">
       <thead>
-        <tr className="border-b" style={{ borderColor: 'var(--line)' }}>
+        <tr className="border-b" style={{ borderColor: 'var(--line)', backgroundColor: 'var(--surface)' }}>
           {COLUMNS.map((col) => (
             <th
               key={col.key}
-              className={`text-left text-xs font-semibold uppercase tracking-wider py-3 px-4 ${col.sortable ? 'cursor-pointer hover:text-brand select-none' : ''}`}
+              className={`text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider select-none ${col.sortable ? 'cursor-pointer' : ''}`}
               style={{ color: 'var(--ink-light)' }}
               onClick={() =>
                 col.sortable &&
@@ -64,25 +64,27 @@ export function ClientsTable({ onClientClick }: ClientsTableProps) {
           <tr
             key={client.id}
             onClick={() => onClientClick(client)}
-            className="border-b hover:bg-gray-50 cursor-pointer group"
+            className="border-b cursor-pointer transition-colors"
             style={{ borderColor: 'var(--line)' }}
           >
-            <td className="py-3 px-4">
+            <td className="px-4 py-3 text-sm font-medium" style={{ color: 'var(--ink)' }}>
               {client.name || 'Дорогой гость'}
             </td>
-            <td className="py-3 px-4">
+            <td className="px-4 py-3 text-sm" style={{ color: 'var(--ink-mid)' }}>
               {client.phone || 'Не указан'}
             </td>
-            <td className="py-3 px-4">{client.visits_count}</td>
-            <td className="py-3 px-4">
+            <td className="px-4 py-3 text-sm" style={{ color: 'var(--ink-mid)' }}>
+              {client.visits_count}
+            </td>
+            <td className="px-4 py-3 text-sm" style={{ color: 'var(--ink-mid)' }}>
               {client.last_visit
                 ? new Date(client.last_visit).toLocaleDateString('ru-RU')
                 : '—'}
             </td>
-            <td className="py-3 px-4">
+            <td className="px-4 py-3 text-sm font-medium" style={{ color: 'var(--ink)' }}>
               {client.total_paid.toLocaleString('ru-RU')} ₽
             </td>
-            <td className="py-3 px-4">
+            <td className="px-4 py-3">
               <button
                 onClick={(e) => {
                   e.stopPropagation();

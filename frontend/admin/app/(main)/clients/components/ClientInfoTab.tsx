@@ -154,15 +154,7 @@ export function ClientInfoTab({ client, mode = 'view', onSave, onDelete }: Clien
       )}
 
       {/* Actions */}
-      <div className="flex gap-2 pt-4 border-t" style={{ borderColor: 'var(--line)' }}>
-        <button
-          disabled={!hasChanges}
-          onClick={handleSave}
-          className="px-4 py-2 text-sm text-white rounded-lg disabled:bg-gray-300"
-          style={{ backgroundColor: hasChanges ? 'var(--brand)' : undefined }}
-        >
-          {mode === 'create' ? 'Создать' : 'Сохранить'}
-        </button>
+      <div className="flex justify-between items-center pt-4 border-t" style={{ borderColor: 'var(--line)' }}>
         {mode === 'view' && onDelete && (
         <button
           onClick={onDelete}
@@ -171,6 +163,15 @@ export function ClientInfoTab({ client, mode = 'view', onSave, onDelete }: Clien
           Удалить клиента
         </button>
         )}
+        {mode === 'create' && <div />}
+        <button
+          disabled={!hasChanges}
+          onClick={handleSave}
+          className="px-4 py-2 text-sm text-white rounded-lg disabled:bg-gray-300"
+          style={{ backgroundColor: hasChanges ? 'var(--brand)' : undefined }}
+        >
+          {mode === 'create' ? 'Создать' : 'Сохранить'}
+        </button>
       </div>
     </div>
   );

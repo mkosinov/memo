@@ -28,14 +28,20 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
         super().__init__(repository, model, response_schema=RecordResponse)
 
     async def list(
-        self, db_session: AsyncSession, **filters
+        self, db_session: AsyncSession, client_id: str | None = None, **filters
     ) -> list[Record]:
-        """Return all active records with visits eagerly loaded (raw ORM)."""
-        result = await db_session.execute(
+        """Return all active records with visits eagerly loaded (raw ORM).
+
+        Optionally filter by client_id.
+        """
+        stmt = (
             select(Record)
             .where(Record.is_active)
             .options(selectinload(Record.visits))
         )
+        if client_id:
+            stmt = stmt.where(Record.client_id == client_id)
+        result = await db_session.execute(stmt)
         return list(result.scalars().all())
 
     async def get(

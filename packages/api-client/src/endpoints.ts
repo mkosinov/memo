@@ -133,10 +133,12 @@ export async function getRecord(id: string): Promise<RecordResponse> {
 export async function getRecords(params?: {
   date_from?: string;
   date_to?: string;
+  client_id?: string;
 }): Promise<RecordResponse[]> {
   const search = new URLSearchParams();
   if (params?.date_from) search.set('date_from', params.date_from);
   if (params?.date_to) search.set('date_to', params.date_to);
+  if (params?.client_id) search.set('client_id', params.client_id);
   const qs = search.toString();
   return api(`/api/v1/records${qs ? `?${qs}` : ''}`, z.array(RecordResponseSchema));
 }

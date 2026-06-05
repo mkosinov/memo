@@ -14,6 +14,7 @@ vi.mock('@memo/api-client', () => ({
   patchClient: vi.fn(),
   deleteClient: vi.fn(),
   getRecord: vi.fn(),
+  getRecords: vi.fn().mockResolvedValue([]),
   updateRecord: vi.fn(),
   deleteRecord: vi.fn(),
   createPayment: vi.fn(),
@@ -141,11 +142,16 @@ describe('ClientCardModal ↔ ClientInfoTab integration (real components)', () =
       invalidateQueries: mockInvalidateQueries,
     } as any);
 
-    vi.mocked(useQuery).mockReturnValue({
-      data: mockRecord,
-      isLoading: false,
-      error: null,
-    } as any);
+    // Mock useQuery to return different data based on query key
+    vi.mocked(useQuery).mockImplementation((...args: any[]) => {
+      const queryKey = args[0]?.queryKey ?? args[0];
+      if (Array.isArray(queryKey) && queryKey[0] === 'records' && queryKey[1] === 'client') {
+        // Records list query for ClientCardModal — return records array
+        return { data: mockClientWithRecords.records, isLoading: false, error: null } as any;
+      }
+      // Default: single record query for ClientRecordTab
+      return { data: mockRecord, isLoading: false, error: null } as any;
+    });
 
     vi.mocked(useMutation).mockReturnValue({
       mutateAsync: vi.fn(),
@@ -287,11 +293,16 @@ describe('ClientCardModal ↔ ClientRecordTab integration (real components)', ()
       invalidateQueries: mockInvalidateQueries,
     } as any);
 
-    vi.mocked(useQuery).mockReturnValue({
-      data: mockRecord,
-      isLoading: false,
-      error: null,
-    } as any);
+    // Mock useQuery to return different data based on query key
+    vi.mocked(useQuery).mockImplementation((...args: any[]) => {
+      const queryKey = args[0]?.queryKey ?? args[0];
+      if (Array.isArray(queryKey) && queryKey[0] === 'records' && queryKey[1] === 'client') {
+        // Records list query for ClientCardModal — return records array
+        return { data: mockClientWithRecords.records, isLoading: false, error: null } as any;
+      }
+      // Default: single record query for ClientRecordTab
+      return { data: mockRecord, isLoading: false, error: null } as any;
+    });
 
     vi.mocked(useMutation).mockReturnValue({
       mutateAsync: vi.fn(),

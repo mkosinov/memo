@@ -139,6 +139,30 @@ describe('ClientsPage', () => {
     expect(screen.getByText('Стр. 2')).toBeInTheDocument();
   });
 
+  it('renders per-page selector dropdown', async () => {
+    const ClientsPage = (await import('../app/(main)/clients/page')).default;
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <ClientsPage />
+      </QueryClientProvider>,
+    );
+    const select = screen.getByRole('combobox');
+    expect(select).toBeInTheDocument();
+    expect(select).toHaveValue('20');
+  });
+
+  it('per-page selector has options 10, 20, 50, 100', async () => {
+    const ClientsPage = (await import('../app/(main)/clients/page')).default;
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <ClientsPage />
+      </QueryClientProvider>,
+    );
+    const select = screen.getByRole('combobox');
+    const options = Array.from(select.querySelectorAll('option'));
+    expect(options.map(o => o.value)).toEqual(['10', '20', '50', '100']);
+  });
+
   it('disables previous button on first page', async () => {
     mockUseClients.mockReturnValue(createMockClientsContext({ total: 45, page: 1, perPage: 20 }));
     const ClientsPage = (await import('../app/(main)/clients/page')).default;

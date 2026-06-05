@@ -16,7 +16,15 @@ interface ClientsTableProps {
 }
 
 export function ClientsTable({ onClientClick }: ClientsTableProps) {
-  const { clients, isLoading, sortBy, sortOrder, setSort } = useClients();
+  const { clients, isLoading, filters, sortBy, sortOrder, setSort, resetFilters, deleteClient } = useClients();
+
+  const hasActiveFilters =
+    filters.search ||
+    filters.is_active !== null ||
+    filters.min_visits !== null ||
+    filters.max_visits !== null ||
+    filters.min_paid !== null ||
+    filters.max_paid !== null;
 
   if (isLoading) {
     return (
@@ -29,8 +37,21 @@ export function ClientsTable({ onClientClick }: ClientsTableProps) {
   }
 
   if (clients.length === 0) {
+    if (hasActiveFilters) {
+      return (
+        <div className="text-center py-12">
+          <p style={{ color: 'var(--ink-light)' }}>Ничего не найдено</p>
+          <button onClick={resetFilters} className="text-sm mt-2 hover:underline" style={{ color: 'var(--brand)' }}>
+            Сбросить фильтры
+          </button>
+        </div>
+      );
+    }
     return (
       <div className="text-center py-12">
+        <svg className="w-12 h-12 mx-auto text-gray-300 mb-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+          <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2M9 11a4 4 010-8 4 4 0 018 0M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75" />
+        </svg>
         <p style={{ color: 'var(--ink-light)' }}>Нет клиентов</p>
       </div>
     );
@@ -64,7 +85,7 @@ export function ClientsTable({ onClientClick }: ClientsTableProps) {
           <tr
             key={client.id}
             onClick={() => onClientClick(client)}
-            className="border-b cursor-pointer transition-colors"
+            className="border-b hover:bg-gray-50 cursor-pointer group transition-colors"
             style={{ borderColor: 'var(--line)' }}
           >
             <td className="px-4 py-3 text-sm font-medium" style={{ color: 'var(--ink)' }}>
@@ -84,14 +105,19 @@ export function ClientsTable({ onClientClick }: ClientsTableProps) {
             <td className="px-4 py-3 text-sm font-medium" style={{ color: 'var(--ink)' }}>
               {client.total_paid.toLocaleString('ru-RU')} ₽
             </td>
-            <td className="px-4 py-3">
+            <td className="py-3 px-4">
               <button
                 onClick={(e) => {
                   e.stopPropagation();
+                  if (window.confirm(`Удалить ${client.name ?? 'клиента'}?`)) {
+                    deleteClient(client.id);
+                  }
                 }}
-                className="text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100"
+                className="text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
               >
-                ×
+                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
+                </svg>
               </button>
             </td>
           </tr>

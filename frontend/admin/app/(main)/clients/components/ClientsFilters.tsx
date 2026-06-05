@@ -29,7 +29,7 @@ export function ClientsFilters() {
   const inputStyle = { borderColor: 'var(--line)' };
 
   return (
-    <div className="space-y-3 p-4 rounded-xl border bg-white" style={{ borderColor: 'var(--line)' }}>
+    <div className="space-y-3">
       <input
         type="text"
         placeholder="🔍 Поиск по имени или телефону"

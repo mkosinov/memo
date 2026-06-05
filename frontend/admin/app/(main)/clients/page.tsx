@@ -10,7 +10,7 @@ import type { ClientWithStats } from '@memo/api-client';
 function ClientsPageContent() {
   const [selectedClient, setSelectedClient] = useState<ClientWithStats | null>(null);
   const [isCreateMode, setIsCreateMode] = useState(false);
-  const { total, page, perPage, setPage } = useClients();
+  const { total, page, perPage, setPage, setPerPage } = useClients();
 
   return (
     <div className="p-4 space-y-4">
@@ -46,7 +46,20 @@ function ClientsPageContent() {
 
       {/* Pagination */}
       <div className="flex items-center justify-between">
-        <span className="text-sm" style={{ color: 'var(--ink-light)' }}>{total} клиентов</span>
+        <div className="flex items-center gap-4">
+          <span className="text-sm" style={{ color: 'var(--ink-light)' }}>{total} клиентов</span>
+          <select
+            value={perPage}
+            onChange={(e) => setPerPage(Number(e.target.value))}
+            className="text-sm border rounded px-2 py-1"
+            style={{ borderColor: 'var(--line)' }}
+          >
+            <option value={10}>10</option>
+            <option value={20}>20</option>
+            <option value={50}>50</option>
+            <option value={100}>100</option>
+          </select>
+        </div>
         <div className="flex items-center gap-2">
           <button
             disabled={page <= 1}

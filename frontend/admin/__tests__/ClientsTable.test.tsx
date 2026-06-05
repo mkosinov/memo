@@ -169,6 +169,42 @@ describe('ClientsTable', () => {
     expect(screen.getByText('Нет клиентов')).toBeTruthy();
   });
 
+  it('shows "Ничего не найдено" with reset link when filters active and no results', () => {
+    mockContextValue = {
+      ...mockContextValue,
+      clients: [],
+      filters: { ...mockContextValue.filters, search: 'test' },
+    };
+    render(<ClientsTable onClientClick={vi.fn()} />);
+    expect(screen.getByText('Ничего не найдено')).toBeTruthy();
+    expect(screen.getByText('Сбросить фильтры')).toBeTruthy();
+  });
+
+  it('calls resetFilters when reset link clicked in empty-filtered state', () => {
+    mockContextValue = {
+      ...mockContextValue,
+      clients: [],
+      filters: { ...mockContextValue.filters, search: 'test' },
+    };
+    render(<ClientsTable onClientClick={vi.fn()} />);
+    fireEvent.click(screen.getByText('Сбросить фильтры'));
+    expect(mockContextValue.resetFilters).toHaveBeenCalledTimes(1);
+  });
+
+  it('delete button calls deleteClient after confirmation', () => {
+    const deleteClient = vi.fn();
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    mockContextValue = { ...mockContextValue, deleteClient };
+    render(<ClientsTable onClientClick={vi.fn()} />);
+    // Find the delete button (has the trash icon SVG inside)
+    const deleteButtons = document.querySelectorAll('button');
+    const deleteBtn = Array.from(deleteButtons).find(btn => btn.querySelector('svg'));
+    expect(deleteBtn).toBeTruthy();
+    fireEvent.click(deleteBtn!);
+    expect(deleteClient).toHaveBeenCalledWith('c1');
+    vi.mocked(window.confirm).mockRestore();
+  });
+
   it('calls setSort when a sortable column header is clicked', () => {
     render(<ClientsTable onClientClick={vi.fn()} />);
     fireEvent.click(screen.getByText('Имя'));

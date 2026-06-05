@@ -17,6 +17,26 @@ export async function waitForScheduleReady(page: Page) {
 }
 
 /**
+ * Wait for services page to load with table.
+ * Navigates to /services and waits for the heading and table to render.
+ */
+export async function waitForServicesReady(page: Page) {
+  await page.goto('/services');
+  await page.waitForSelector('h1:has-text("Управление услугами")', { timeout: 15_000 });
+  await page.waitForSelector('table', { timeout: 15_000 });
+}
+
+/**
+ * Wait for locations page to load with table.
+ * Navigates to /locations and waits for the heading and table to render.
+ */
+export async function waitForLocationsReady(page: Page) {
+  await page.goto('/locations');
+  await page.waitForSelector('h1:has-text("Управление локациями")', { timeout: 15_000 });
+  await page.waitForSelector('table', { timeout: 15_000 });
+}
+
+/**
  * Get the activity data from the first visible activity card.
  * Uses React fiber tree traversal to extract the activity prop.
  */

@@ -62,6 +62,25 @@ function ChatIcon({ className }: { className?: string }) {
   );
 }
 
+function PackageIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M16.5 9.4l-9-5.19M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z" />
+      <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
+      <line x1="12" y1="22.08" x2="12" y2="12" />
+    </svg>
+  );
+}
+
+function MapPinIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z" />
+      <circle cx="12" cy="10" r="3" />
+    </svg>
+  );
+}
+
 function SunIcon({ className }: { className?: string }) {
   return (
     <svg className={className} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -92,8 +111,13 @@ const NAV_ITEMS = [
   { label: 'Расписание', icon: 'calendar', href: '/schedule' },
   { label: 'Записи', icon: 'clipboard', href: '/records' },
   { label: 'Клиенты', icon: 'users', href: '/clients' },
-  { label: 'Мастера', icon: 'palette', href: '#' },
   { label: 'Чат', icon: 'chat', href: '/chat' },
+  { label: 'Мастера', icon: 'palette', href: '#' },
+] as const;
+
+const SETTINGS_ITEMS = [
+  { label: 'Услуги', icon: 'package', href: '/services' },
+  { label: 'Локации', icon: 'mapPin', href: '/locations' },
 ] as const;
 
 const ICON_MAP: Record<string, React.FC<{ className?: string }>> = {
@@ -102,6 +126,8 @@ const ICON_MAP: Record<string, React.FC<{ className?: string }>> = {
   users: UsersIcon,
   palette: PaletteIcon,
   chat: ChatIcon,
+  package: PackageIcon,
+  mapPin: MapPinIcon,
 };
 
 // ─── MiniCalendar ─────────────────────────────────────────────────────────
@@ -344,6 +370,33 @@ export function Menubar() {
 
         {/* Artist Legend */}
         <ArtistLegend collapsed={sidebarCollapsed} artists={artists} />
+
+        {!sidebarCollapsed && <div className="border-t border-white/10 mx-3" />}
+
+        {/* Settings items */}
+        <nav className={`py-2 ${sidebarCollapsed ? 'px-1' : 'px-2'}`}>
+          {SETTINGS_ITEMS.map(item => {
+            const IconComponent = ICON_MAP[item.icon];
+            const active = isActive(item.href);
+            return (
+              <Link
+                key={item.label}
+                href={item.href}
+                className={`w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors duration-150
+                  ${active
+                    ? 'bg-brand text-white font-medium'
+                    : 'text-white/60 hover:bg-white/5 hover:text-white/90'
+                  }
+                  ${sidebarCollapsed ? 'justify-center px-1' : ''}`}
+                aria-label={item.label}
+                title={sidebarCollapsed ? item.label : undefined}
+              >
+                <IconComponent className={active ? 'text-white' : 'text-white/60'} />
+                {!sidebarCollapsed && <span>{item.label}</span>}
+              </Link>
+            );
+          })}
+        </nav>
       </div>
 
       {/* ── Bottom Section ── */}

@@ -7,6 +7,12 @@ import {
   type LocationResponse,
   ServiceResponseSchema,
   type ServiceResponse,
+  ServiceCreateSchema,
+  ServiceUpdateSchema,
+  type ServiceUpdate,
+  LocationCreateSchema,
+  LocationUpdateSchema,
+  type LocationUpdate,
   ActivityCreateSchema,
   type ActivityCreate,
   ActivityResponseSchema,
@@ -30,6 +36,8 @@ import {
   type VisitorUpdate,
   VisitResponseSchema,
   type VisitResponse,
+  TagResponseSchema,
+  type TagResponse,
 } from './schemas';
 
 // ─── Masters ───────────────────────────────────────────────────────────────
@@ -225,4 +233,50 @@ export async function updateVisitStatus(id: string, status: string): Promise<Vis
     method: 'PUT',
     body: JSON.stringify({ status }),
   });
+}
+
+// ─── Tags ──────────────────────────────────────────────────────────────────
+
+export async function getTags(): Promise<TagResponse[]> {
+  return api('/api/v1/tags', z.array(TagResponseSchema));
+}
+
+// ─── Services CRUD ─────────────────────────────────────────────────────────
+
+export async function createService(data: z.input<typeof ServiceCreateSchema>): Promise<ServiceResponse> {
+  return api('/api/v1/services', ServiceResponseSchema, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updateService(id: string, data: ServiceUpdate): Promise<ServiceResponse> {
+  return api(`/api/v1/services/${id}`, ServiceResponseSchema, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteService(id: string): Promise<void> {
+  await api(`/api/v1/services/${id}`, z.any(), { method: 'DELETE' });
+}
+
+// ─── Locations CRUD ────────────────────────────────────────────────────────
+
+export async function createLocation(data: z.input<typeof LocationCreateSchema>): Promise<LocationResponse> {
+  return api('/api/v1/locations', LocationResponseSchema, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updateLocation(id: string, data: LocationUpdate): Promise<LocationResponse> {
+  return api(`/api/v1/locations/${id}`, LocationResponseSchema, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteLocation(id: string): Promise<void> {
+  await api(`/api/v1/locations/${id}`, z.any(), { method: 'DELETE' });
 }

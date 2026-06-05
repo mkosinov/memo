@@ -1,10 +1,10 @@
 import { describe, it, expect } from 'vitest';
+import { z } from 'zod';
 import {
   MasterResponseSchema,
   type MasterResponse,
   LocationResponseSchema,
   type LocationResponse,
-  TariffResponseSchema,
   TagResponseSchema,
   ServiceResponseSchema,
   type ServiceResponse,
@@ -22,6 +22,13 @@ import {
   type ClientResponse,
   PaymentResponseSchema,
   type PaymentResponse,
+  TariffCreateSchema,
+  ServiceCreateSchema,
+  ServiceUpdateSchema,
+  type ServiceUpdate,
+  LocationCreateSchema,
+  LocationUpdateSchema,
+  type LocationUpdate,
 } from './schemas';
 
 // ─── MasterResponse ────────────────────────────────────────────────────────
@@ -480,5 +487,224 @@ describe('Type exports', () => {
   it('PaymentResponse is a valid type', () => {
     const p: PaymentResponse = validPayment;
     expect(p.amount).toBe(5000);
+  });
+
+  it('ServiceCreate input accepts minimal fields (defaults apply)', () => {
+    const s: z.input<typeof ServiceCreateSchema> = {
+      title: 'Рисование',
+      duration: 120,
+    };
+    const parsed = ServiceCreateSchema.parse(s);
+    expect(parsed.title).toBe('Рисование');
+    expect(parsed.description).toBe('');
+  });
+
+  it('ServiceUpdate is a valid type', () => {
+    const s: ServiceUpdate = { title: 'Обновлённое название' };
+    expect(s.title).toBe('Обновлённое название');
+  });
+
+  it('LocationCreate input accepts minimal fields (defaults apply)', () => {
+    const l: z.input<typeof LocationCreateSchema> = {
+      name: 'Новая студия',
+      capacity: 20,
+    };
+    const parsed = LocationCreateSchema.parse(l);
+    expect(parsed.name).toBe('Новая студия');
+    expect(parsed.address).toBe('');
+  });
+
+  it('LocationUpdate is a valid type', () => {
+    const l: LocationUpdate = { name: 'Обновлённая студия' };
+    expect(l.name).toBe('Обновлённая студия');
+  });
+
+  it('TariffCreate input accepts minimal fields', () => {
+    const t: z.input<typeof TariffCreateSchema> = {
+      title: 'Взрослый',
+      price: 2500,
+    };
+    const parsed = TariffCreateSchema.parse(t);
+    expect(parsed.title).toBe('Взрослый');
+    expect(parsed.description).toBe('');
+  });
+});
+
+// ─── TariffCreateSchema ──────────────────────────────────────────────────
+
+const validTariffCreate = {
+  title: 'Детский',
+  description: 'Билет для ребёнка',
+  price: 1500,
+};
+
+describe('TariffCreateSchema', () => {
+  it('parses a valid tariff create request', () => {
+    const result = TariffCreateSchema.parse(validTariffCreate);
+    expect(result.title).toBe('Детский');
+    expect(result.description).toBe('Билет для ребёнка');
+    expect(result.price).toBe(1500);
+  });
+
+  it('defaults description to empty string', () => {
+    const data = { title: 'Стандарт', price: 2000 };
+    const result = TariffCreateSchema.parse(data);
+    expect(result.description).toBe('');
+  });
+
+  it('rejects negative price', () => {
+    const data = { title: 'Бесплатный', price: -100 };
+    expect(() => TariffCreateSchema.parse(data)).toThrow();
+  });
+});
+
+// ─── ServiceCreateSchema ─────────────────────────────────────────────────
+
+const validServiceCreate = {
+  title: 'Мастер-класс по глине',
+  duration: 90,
+};
+
+describe('ServiceCreateSchema', () => {
+  it('parses a valid service create request with defaults', () => {
+    const result = ServiceCreateSchema.parse(validServiceCreate);
+    expect(result.title).toBe('Мастер-класс по глине');
+    expect(result.duration).toBe(90);
+    expect(result.description).toBe('');
+    expect(result.image_url).toBe('');
+    expect(result.specialty).toBe('');
+    expect(result.min_age).toBe(0);
+    expect(result.max_age).toBe(18);
+    expect(result.record_info).toBe('');
+    expect(result.material_hint).toBe('');
+    expect(result.tariffs).toEqual([]);
+    expect(result.tag_ids).toEqual([]);
+  });
+
+  it('parses with all fields provided', () => {
+    const data = {
+      title: 'Рисование маслом',
+      description: 'Учимся рисовать',
+      image_url: 'https://example.com/img.jpg',
+      specialty: 'живопись',
+      min_age: 6,
+      max_age: 14,
+      duration: 180,
+      record_info: 'Запись за сутки',
+      material_hint: 'Фартук обязателен',
+      tariffs: [{ title: 'Взрослый', price: 3000 }],
+      tag_ids: ['tag-1', 'tag-2'],
+    };
+    const result = ServiceCreateSchema.parse(data);
+    expect(result.title).toBe('Рисование маслом');
+    expect(result.tariffs).toHaveLength(1);
+    expect(result.tag_ids).toHaveLength(2);
+  });
+
+  it('rejects empty title', () => {
+    const data = { title: '', duration: 90 };
+    expect(() => ServiceCreateSchema.parse(data)).toThrow();
+  });
+
+  it('rejects missing duration', () => {
+    const { duration, ...data } = validServiceCreate;
+    expect(() => ServiceCreateSchema.parse(data)).toThrow();
+  });
+
+  it('rejects duration < 15', () => {
+    const data = { title: 'Короткий', duration: 10 };
+    expect(() => ServiceCreateSchema.parse(data)).toThrow();
+  });
+
+  it('rejects duration > 480', () => {
+    const data = { title: 'Длинный', duration: 481 };
+    expect(() => ServiceCreateSchema.parse(data)).toThrow();
+  });
+});
+
+// ─── ServiceUpdateSchema ─────────────────────────────────────────────────
+
+describe('ServiceUpdateSchema', () => {
+  it('accepts partial update with only title', () => {
+    const result = ServiceUpdateSchema.parse({ title: 'Новое название' });
+    expect(result.title).toBe('Новое название');
+    expect(result.duration).toBeUndefined();
+  });
+
+  it('accepts empty update', () => {
+    const result = ServiceUpdateSchema.parse({});
+    expect(Object.keys(result)).toHaveLength(0);
+  });
+});
+
+// ─── LocationCreateSchema ────────────────────────────────────────────────
+
+const validLocationCreate = {
+  name: 'Новая студия',
+  capacity: 15,
+};
+
+describe('LocationCreateSchema', () => {
+  it('parses a valid location create request with defaults', () => {
+    const result = LocationCreateSchema.parse(validLocationCreate);
+    expect(result.name).toBe('Новая студия');
+    expect(result.capacity).toBe(15);
+    expect(result.address).toBe('');
+    expect(result.description).toBe('');
+    expect(result.yandex_map_url).toBe('');
+    expect(result.review_url).toBe('');
+    expect(result.record_info).toBe('');
+    expect(result.image_url).toBe('');
+    expect(result.location_hint).toBe('');
+    expect(result.tag_ids).toEqual([]);
+  });
+
+  it('parses with all fields', () => {
+    const data = {
+      name: 'Большой зал',
+      address: 'ул. Ленина 10',
+      description: 'Зал на 50 человек',
+      capacity: 50,
+      yandex_map_url: 'https://yandex.ru/maps/xxx',
+      review_url: 'https://yandex.ru/reviews/xxx',
+      record_info: 'Бронирование онлайн',
+      image_url: 'https://example.com/hall.jpg',
+      location_hint: 'Вход с парковки',
+      tag_ids: ['tag-1'],
+    };
+    const result = LocationCreateSchema.parse(data);
+    expect(result.name).toBe('Большой зал');
+    expect(result.capacity).toBe(50);
+    expect(result.tag_ids).toHaveLength(1);
+  });
+
+  it('rejects empty name', () => {
+    const data = { name: '', capacity: 15 };
+    expect(() => LocationCreateSchema.parse(data)).toThrow();
+  });
+
+  it('rejects missing capacity', () => {
+    const { capacity, ...data } = validLocationCreate;
+    expect(() => LocationCreateSchema.parse(data)).toThrow();
+  });
+
+  it('rejects capacity < 1', () => {
+    const data = { name: 'Пустая', capacity: 0 };
+    expect(() => LocationCreateSchema.parse(data)).toThrow();
+  });
+});
+
+// ─── LocationUpdateSchema ────────────────────────────────────────────────
+
+describe('LocationUpdateSchema', () => {
+  it('accepts partial update with only name', () => {
+    const result = LocationUpdateSchema.parse({ name: 'Обновлённое' });
+    expect(result.name).toBe('Обновлённое');
+    expect(result.capacity).toBeUndefined();
+  });
+
+  it('accepts empty update', () => {
+    const result = LocationUpdateSchema.parse({});
+    expect(Object.keys(result)).toHaveLength(0);
   });
 });

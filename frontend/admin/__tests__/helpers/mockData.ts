@@ -11,6 +11,7 @@ import type {
   VisitorResponse,
   VisitResponse,
   PaymentResponse,
+  LocationResponse,
 } from '@memo/api-client';
 
 // Tariff shape (mirrors API TariffResponse, used by SettingsTab via type cast)
@@ -147,3 +148,47 @@ export const mockTariffs = [
   { id: 't1', service_id: 's1', title: 'Взрослый', price: 3500, description: null },
   { id: 't2', service_id: 's1', title: 'Детский', price: 2500, description: null },
 ];
+
+// ─── LocationResponse (API shape) ────────────────────────────────────────
+
+export const mockLocationResponse: LocationResponse = {
+  id: 'loc-1',
+  name: 'Студия на Невском',
+  address: 'Невский пр. 28',
+  description: 'Уютная студия',
+  capacity: 10,
+  yandex_map_url: 'https://yandex.ru/maps/...',
+  review_url: null,
+  record_info: 'Запись по телефону',
+  image_url: 'https://example.com/studio.jpg',
+  location_hint: 'Вход со двора',
+  is_active: true,
+  created_at: '2024-01-15T10:00:00Z',
+  updated_at: '2024-06-01T12:00:00Z',
+};
+
+export const mockLocationResponseArchived: LocationResponse = {
+  id: 'loc-2',
+  name: 'Гранд Отель Поляна',
+  address: 'Гранд Отель, лобби',
+  description: null,
+  capacity: 20,
+  yandex_map_url: null,
+  review_url: null,
+  record_info: null,
+  image_url: null,
+  location_hint: null,
+  is_active: false,
+  created_at: '2024-01-10T10:00:00Z',
+  updated_at: '2024-05-01T12:00:00Z',
+};
+
+/** Factory for creating LocationResponse objects with overrides. */
+export function createMockLocationResponse(
+  overrides: Partial<LocationResponse> = {},
+): LocationResponse {
+  return {
+    ...mockLocationResponse,
+    ...overrides,
+  };
+}

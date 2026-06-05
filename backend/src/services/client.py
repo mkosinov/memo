@@ -39,14 +39,14 @@ async def list_clients_with_stats(
     stats_subq = (
         select(
             Record.client_id,
-            func.count(Visit.id).label("visits_count"),
+            func.count(func.distinct(Record.id)).label("visits_count"),  # Counts distinct records
             func.max(Visit.created_at).label("last_visit"),
             func.coalesce(func.sum(Payment.amount), 0).label("total_paid"),
             func.sum(case((Visit.status == "missed", 1), else_=0)).label(
                 "missed_visits"
             ),
         )
-        .join(Visit, Visit.record_id == Record.id)
+        .outerjoin(Visit, Visit.record_id == Record.id)  # LEFT JOIN so records without visits still counted
         .outerjoin(Payment, Payment.record_id == Record.id)
         .where(Record.is_active == True)  # noqa: E712
         .group_by(Record.client_id)

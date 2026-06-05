@@ -787,4 +787,76 @@ describe('ClientRecordTab', () => {
     // Service name is shown in the CustomSelect trigger
     expect(screen.getByText('Картина маслом')).toBeInTheDocument();
   });
+
+  // ─── Visitor combobox ─────────────────────────────────────────────────
+
+  it('shows existing visitors in dropdown when typing in visitor name input', () => {
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    fireEvent.click(screen.getByTestId('btn-add-visitor'));
+    
+    const nameInput = screen.getByTestId('input-visitor-name');
+    fireEvent.change(nameInput, { target: { value: 'Анн' } });
+    
+    // Dropdown should appear with matching visitor
+    expect(screen.getByTestId('visitor-option-vis1')).toBeInTheDocument();
+  });
+
+  it('selecting existing visitor does not call createVisitor', async () => {
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    fireEvent.click(screen.getByTestId('btn-add-visitor'));
+    
+    const nameInput = screen.getByTestId('input-visitor-name');
+    fireEvent.change(nameInput, { target: { value: 'Анн' } });
+    
+    // Click on the existing visitor in dropdown
+    fireEvent.click(screen.getByTestId('visitor-option-vis1'));
+    
+    // Input should be filled with the visitor name
+    expect(nameInput).toHaveValue('Анна Иванова');
+    
+    // Click add button
+    fireEvent.click(screen.getByTestId('btn-create-visitor'));
+    
+    await waitFor(() => {
+      // Should NOT create a new visitor
+      expect(createVisitor).not.toHaveBeenCalled();
+      // Should patch record with existing visitor_id
+      expect(patchRecord).toHaveBeenCalledWith('r1', expect.objectContaining({
+        visits: expect.arrayContaining([
+          expect.objectContaining({ visitor_id: 'vis1' }),
+        ]),
+      }));
+    });
+  });
+
+  it('typing new name and submitting creates new visitor', async () => {
+    vi.mocked(createVisitor).mockResolvedValue({
+      id: 'vis_new',
+      client_id: 'c1',
+      name: 'Новый Гость',
+      age: null,
+      created_at: '',
+      updated_at: '',
+      is_active: true,
+    });
+
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    fireEvent.click(screen.getByTestId('btn-add-visitor'));
+    
+    const nameInput = screen.getByTestId('input-visitor-name');
+    fireEvent.change(nameInput, { target: { value: 'Новый Гость' } });
+    
+    // No dropdown should appear for non-matching name
+    expect(screen.queryByTestId('visitor-option-vis1')).not.toBeInTheDocument();
+    
+    fireEvent.click(screen.getByTestId('btn-create-visitor'));
+    
+    await waitFor(() => {
+      expect(createVisitor).toHaveBeenCalledWith({
+        client_id: 'c1',
+        name: 'Новый Гость',
+        age: undefined,
+      });
+    });
+  });
 });

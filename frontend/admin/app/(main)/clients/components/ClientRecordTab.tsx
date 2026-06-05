@@ -144,10 +144,20 @@ export function ClientRecordTab({ recordId, clientId, onClose }: ClientRecordTab
   const [newVisitorName, setNewVisitorName] = useState('');
   const [newVisitorAge, setNewVisitorAge] = useState('');
   const [newVisitorTariffId, setNewVisitorTariffId] = useState('');
+  const [selectedVisitor, setSelectedVisitor] = useState<{ id: string; name: string } | null>(null);
 
   // Payment form state
   const [paymentAmount, setPaymentAmount] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('card');
+
+  // Filtered visitors for combobox dropdown
+  const filteredVisitors = useMemo(() => {
+    if (!newVisitorName || selectedVisitor) return [];
+    const searchLower = newVisitorName.toLowerCase();
+    return Array.isArray(visitors)
+      ? visitors.filter(v => v.name.toLowerCase().includes(searchLower))
+      : [];
+  }, [visitors, newVisitorName, selectedVisitor]);
 
   // Initialize from data
   useEffect(() => {
@@ -291,8 +301,16 @@ export function ClientRecordTab({ recordId, clientId, onClose }: ClientRecordTab
   const handleAddVisitor = useCallback(async () => {
     if (!newVisitorName.trim()) return;
 
-    const age = newVisitorAge ? Number(newVisitorAge) : undefined;
-    const visitor = await createVisitor({ client_id: clientId, name: newVisitorName.trim(), age });
+    let visitorId: string;
+    if (selectedVisitor) {
+      // Use existing visitor
+      visitorId = selectedVisitor.id;
+    } else {
+      // Create new visitor
+      const age = newVisitorAge ? Number(newVisitorAge) : undefined;
+      const visitor = await createVisitor({ client_id: clientId, name: newVisitorName.trim(), age });
+      visitorId = visitor.id;
+    }
 
     const existingVisits = record?.visits.map(v => {
       const cp = visitCustomPrices[v.id];
@@ -307,16 +325,17 @@ export function ClientRecordTab({ recordId, clientId, onClose }: ClientRecordTab
     const newTariff = tariffs.length > 0 ? tariffs.find(t => t.id === newVisitorTariffId) ?? tariffs[0] : null;
 
     await patchRecord(recordId, {
-      visits: [...existingVisits, { visitor_id: visitor.id, price: newTariff?.price ?? 0, status: 'waiting' }],
+      visits: [...existingVisits, { visitor_id: visitorId, price: newTariff?.price ?? 0, status: 'waiting' }],
     });
 
     setNewVisitorName('');
     setNewVisitorAge('');
     setNewVisitorTariffId('');
+    setSelectedVisitor(null);
     setShowVisitorForm(false);
     invalidateRecord();
     queryClient.invalidateQueries({ queryKey: ['visitors', clientId] });
-  }, [clientId, newVisitorName, newVisitorAge, newVisitorTariffId, record, visitPrices, visitCustomPrices, visitStatuses, tariffs, recordId, invalidateRecord, queryClient]);
+  }, [clientId, newVisitorName, newVisitorAge, newVisitorTariffId, selectedVisitor, record, visitPrices, visitCustomPrices, visitStatuses, tariffs, recordId, invalidateRecord, queryClient]);
 
   const handleDeleteVisitor = useCallback(async (visitorId: string) => {
     if (!record) return;
@@ -558,15 +577,38 @@ export function ClientRecordTab({ recordId, clientId, onClose }: ClientRecordTab
         {showVisitorForm && (
           <div className="space-y-2 pt-2">
             <div className="flex gap-2">
-              <input
-                type="text"
-                placeholder="Имя"
-                className={`flex-1 ${inputClass}`}
-                style={inputStyle}
-                value={newVisitorName}
-                onChange={e => setNewVisitorName(e.target.value)}
-                data-testid="input-visitor-name"
-              />
+              <div className="relative flex-1">
+                <input
+                  type="text"
+                  placeholder="Введите имя или выберите из списка"
+                  className={`w-full ${inputClass}`}
+                  style={inputStyle}
+                  value={newVisitorName}
+                  onChange={e => {
+                    setNewVisitorName(e.target.value);
+                    setSelectedVisitor(null);
+                  }}
+                  data-testid="input-visitor-name"
+                />
+                {filteredVisitors.length > 0 && (
+                  <div className="absolute z-10 mt-1 w-full bg-white border rounded-lg shadow-lg max-h-40 overflow-auto" style={{ borderColor: 'var(--line)' }}>
+                    {filteredVisitors.map(visitor => (
+                      <button
+                        key={visitor.id}
+                        type="button"
+                        className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50"
+                        data-testid={`visitor-option-${visitor.id}`}
+                        onClick={() => {
+                          setSelectedVisitor({ id: visitor.id, name: visitor.name });
+                          setNewVisitorName(visitor.name);
+                        }}
+                      >
+                        {visitor.name} {visitor.age != null && `(${visitor.age} лет)`}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
               <input
                 type="number"
                 placeholder="Возраст"
@@ -603,6 +645,7 @@ export function ClientRecordTab({ recordId, clientId, onClose }: ClientRecordTab
                   setNewVisitorName('');
                   setNewVisitorAge('');
                   setNewVisitorTariffId('');
+                  setSelectedVisitor(null);
                 }}
                 className="px-3 py-1.5 text-xs text-ink-mid rounded-lg hover:bg-gray-100"
               >

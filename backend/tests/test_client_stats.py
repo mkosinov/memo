@@ -88,6 +88,21 @@ class TestClientStatsAggregation:
         item = next(c for c in resp.json()["items"] if c["id"] == client["id"])
         assert item["visits_count"] == 1
 
+    def test_visits_count_with_multiple_visits_in_one_record(
+        self, api_client, create_activity, create_client
+    ) -> None:
+        """Client with 1 record (2 visits) has visits_count=1 (counts records, not visits)."""
+        client, record = _create_client_with_record(
+            api_client, create_activity, create_client,
+            visits=[
+                {"name": "Guest1", "price": 3500, "status": "visited"},
+                {"name": "Guest2", "price": 2500, "status": "visited"},
+            ],
+        )
+        resp = api_client.get("/api/v1/clients")
+        item = next(c for c in resp.json()["items"] if c["id"] == client["id"])
+        assert item["visits_count"] == 1  # Should count 1 record, not 2 visits
+
     def test_visits_count_with_multiple_records(
         self, api_client, create_activity, create_client
     ) -> None:
@@ -933,7 +948,7 @@ class TestClientStatsAggregationExtended:
     def test_mixed_visit_statuses_count(
         self, api_client, create_activity, create_client
     ) -> None:
-        """Mixed visited/missed/cancelled: missed count excludes visited+cancelled."""
+        """Mixed visited/missed/cancelled: missed count excludes visited+cancelled, visits_count counts records."""
         client, _ = _create_client_with_record(
             api_client, create_activity, create_client,
             client={"name": "MixedStatus", "phone": "+79999000020"},
@@ -946,7 +961,7 @@ class TestClientStatsAggregationExtended:
 
         resp = api_client.get("/api/v1/clients")
         item = next(c for c in resp.json()["items"] if c["id"] == client["id"])
-        assert item["visits_count"] == 3  # all visits counted
+        assert item["visits_count"] == 1  # counts 1 record, not 3 visits
         assert item["missed_visits"] == 1  # only missed
 
     def test_payments_only_count_active_records(

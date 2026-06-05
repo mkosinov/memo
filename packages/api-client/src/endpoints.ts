@@ -243,6 +243,12 @@ export async function deletePayment(id: string): Promise<void> {
   await api(`/api/v1/payments/${id}`, z.any(), { method: 'DELETE' });
 }
 
+// ─── Client Visitors ─────────────────────────────────────────────────────
+
+export async function getClientVisitors(clientId: string): Promise<VisitorResponse[]> {
+  return api(`/api/v1/clients/${clientId}/visitors`, z.array(VisitorResponseSchema));
+}
+
 // ─── Visitors CRUD ────────────────────────────────────────────────────────
 
 export async function createVisitor(data: VisitorCreate): Promise<VisitorResponse> {

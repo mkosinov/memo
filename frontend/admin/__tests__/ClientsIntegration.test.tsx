@@ -18,6 +18,7 @@ vi.mock('@memo/api-client', () => ({
   updateRecord: vi.fn(),
   deleteRecord: vi.fn(),
   createPayment: vi.fn(),
+  getClientVisitors: vi.fn(),
 }));
 
 import {
@@ -28,6 +29,7 @@ import {
   updateRecord,
   deleteRecord,
   createPayment,
+  getClientVisitors,
 } from '@memo/api-client';
 
 // ─── Mock ClientsContext ──────────────────────────────────────────────────
@@ -114,6 +116,10 @@ const mockClientWithRecords: ClientWithStats & {
     { id: 'rec2', date: '2026-04-20', time: '16:30', created_at: '2026-04-20T10:00:00' },
   ],
 };
+
+const mockVisitors = [
+  { id: 'vis1', client_id: 'c1', name: 'Анна Иванова', age: 30, created_at: '', updated_at: '', is_active: true },
+];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
@@ -288,6 +294,7 @@ describe('ClientCardModal ↔ ClientRecordTab integration (real components)', ()
       updated_at: '',
       is_active: true,
     });
+    vi.mocked(getClientVisitors).mockResolvedValue(mockVisitors);
 
     vi.mocked(useQueryClient).mockReturnValue({
       invalidateQueries: mockInvalidateQueries,
@@ -299,6 +306,9 @@ describe('ClientCardModal ↔ ClientRecordTab integration (real components)', ()
       if (Array.isArray(queryKey) && queryKey[0] === 'records' && queryKey[1] === 'client') {
         // Records list query for ClientCardModal — return records array
         return { data: mockClientWithRecords.records, isLoading: false, error: null } as any;
+      }
+      if (Array.isArray(queryKey) && queryKey[0] === 'visitors') {
+        return { data: mockVisitors, isLoading: false, error: null } as any;
       }
       // Default: single record query for ClientRecordTab
       return { data: mockRecord, isLoading: false, error: null } as any;

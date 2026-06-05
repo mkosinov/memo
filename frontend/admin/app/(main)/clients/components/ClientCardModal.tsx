@@ -116,7 +116,7 @@ export function ClientCardModal({ client, isOpen, onClose, onClientCreated, mode
               }
             />
           ) : (
-            <ClientRecordTab recordId={activeTab.replace('record-', '')} onClose={onClose} />
+            <ClientRecordTab recordId={activeTab.replace('record-', '')} clientId={client!.id} onClose={onClose} />
           )}
         </div>
       </div>

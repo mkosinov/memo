@@ -11,6 +11,7 @@ vi.mock('@memo/api-client', () => ({
   deleteRecord: vi.fn(),
   createPayment: vi.fn(),
   deletePayment: vi.fn(),
+  getClientVisitors: vi.fn(),
 }));
 
 import {
@@ -18,6 +19,7 @@ import {
   updateRecord,
   deleteRecord,
   createPayment,
+  getClientVisitors,
 } from '@memo/api-client';
 
 // ─── Mock react-query ──────────────────────────────────────────────────────
@@ -68,6 +70,11 @@ const mockRecordMultipleVisits: RecordResponse = {
   ],
 };
 
+const mockVisitors = [
+  { id: 'vis1', client_id: 'c1', name: 'Анна Иванова', age: 30, created_at: '', updated_at: '', is_active: true },
+  { id: 'vis2', client_id: 'c1', name: 'Мария Петрова', age: 25, created_at: '', updated_at: '', is_active: true },
+];
+
 const mockUseQuery = vi.mocked(useQuery);
 
 // Static import — vi.mock is hoisted so mocks apply before module execution
@@ -82,12 +89,14 @@ describe('ClientRecordTab', () => {
   beforeEach(() => {
     vi.clearAllMocks();
 
-    // Default: react-query returns data
-    mockUseQuery.mockReturnValue({
-      data: mockRecord,
-      isLoading: false,
-      error: null,
-    } as any);
+    // Default: react-query returns data for both queries
+    mockUseQuery.mockImplementation((options: any) => {
+      const key = options?.queryKey?.[0];
+      if (key === 'visitors') {
+        return { data: mockVisitors, isLoading: false, error: null } as any;
+      }
+      return { data: mockRecord, isLoading: false, error: null } as any;
+    });
 
     vi.mocked(updateRecord).mockResolvedValue(mockRecord);
     vi.mocked(deleteRecord).mockResolvedValue(undefined);
@@ -113,7 +122,7 @@ describe('ClientRecordTab', () => {
       error: null,
     } as any);
 
-    render(<ClientRecordTab recordId="r1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
     expect(screen.getByText('Загрузка...')).toBeInTheDocument();
   });
 
@@ -125,19 +134,19 @@ describe('ClientRecordTab', () => {
     } as any);
 
 
-    render(<ClientRecordTab recordId="r1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
     expect(screen.getByText('Запись не найдена')).toBeInTheDocument();
   });
 
   it('renders event info section', () => {
 
-    render(<ClientRecordTab recordId="r1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
     expect(screen.getByText('Мероприятие')).toBeInTheDocument();
   });
 
   it('renders status dropdown with current status', () => {
 
-    render(<ClientRecordTab recordId="r1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
     const statusSelect = screen.getByLabelText('Статус');
     expect(statusSelect).toBeInTheDocument();
     expect(statusSelect).toHaveValue('confirmed');
@@ -145,7 +154,7 @@ describe('ClientRecordTab', () => {
 
   it('renders all status options', () => {
 
-    render(<ClientRecordTab recordId="r1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
     const statusSelect = screen.getByLabelText('Статус');
     const options = Array.from(statusSelect.querySelectorAll('option'));
     const values = options.map((o) => o.value);
@@ -157,18 +166,18 @@ describe('ClientRecordTab', () => {
 
   it('renders visitors section', () => {
 
-    render(<ClientRecordTab recordId="r1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
     expect(screen.getByText('Посетители')).toBeInTheDocument();
   });
 
-  it('renders visitor rows', () => {
+  it('renders visitor rows with actual names', () => {
 
-    render(<ClientRecordTab recordId="r1" onClose={onClose} />);
-    expect(screen.getByText(/vis1/)).toBeInTheDocument();
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    expect(screen.getByText('Анна Иванова')).toBeInTheDocument();
   });
 
   it('renders payment summary with total cost', () => {
-    render(<ClientRecordTab recordId="r1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
     expect(screen.getByText('Оплата')).toBeInTheDocument();
     // 3 500 ₽ appears both in visitor row and payment total — use getAllByText
     const matches = screen.getAllByText(/3[\s]?500\s?₽/);
@@ -176,34 +185,36 @@ describe('ClientRecordTab', () => {
   });
 
   it('calculates total from multiple visits', () => {
-    mockUseQuery.mockReturnValue({
-      data: mockRecordMultipleVisits,
-      isLoading: false,
-      error: null,
-    } as any);
+    mockUseQuery.mockImplementation((options: any) => {
+      const key = options?.queryKey?.[0];
+      if (key === 'visitors') {
+        return { data: mockVisitors, isLoading: false, error: null } as any;
+      }
+      return { data: mockRecordMultipleVisits, isLoading: false, error: null } as any;
+    });
 
 
-    render(<ClientRecordTab recordId="r2" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r2" clientId="c1" onClose={onClose} />);
     // 3500 + 2500 = 6000
     expect(screen.getByText(/6[\s]?000\s?₽/)).toBeInTheDocument();
   });
 
   it('renders add payment form', () => {
 
-    render(<ClientRecordTab recordId="r1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
     expect(screen.getByPlaceholderText('Сумма')).toBeInTheDocument();
     expect(screen.getByText('Добавить')).toBeInTheDocument();
   });
 
   it('renders delete button', () => {
 
-    render(<ClientRecordTab recordId="r1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
     expect(screen.getByText('Удалить запись')).toBeInTheDocument();
   });
 
   it('calls updateRecord when status changes', async () => {
 
-    render(<ClientRecordTab recordId="r1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
     const statusSelect = screen.getByLabelText('Статус');
 
     fireEvent.change(statusSelect, { target: { value: 'cancelled' } });
@@ -215,7 +226,7 @@ describe('ClientRecordTab', () => {
 
   it('invalidates records query after status change', async () => {
 
-    render(<ClientRecordTab recordId="r1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
     const statusSelect = screen.getByLabelText('Статус');
 
     fireEvent.change(statusSelect, { target: { value: 'cancelled' } });
@@ -227,7 +238,7 @@ describe('ClientRecordTab', () => {
 
   it('calls deleteRecord and onClose when delete clicked', async () => {
 
-    render(<ClientRecordTab recordId="r1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
 
     fireEvent.click(screen.getByText('Удалить запись'));
 
@@ -239,7 +250,7 @@ describe('ClientRecordTab', () => {
 
   it('invalidates records query after delete', async () => {
 
-    render(<ClientRecordTab recordId="r1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
 
     fireEvent.click(screen.getByText('Удалить запись'));
 
@@ -250,7 +261,7 @@ describe('ClientRecordTab', () => {
 
   it('calls createPayment when add button clicked with amount', async () => {
 
-    render(<ClientRecordTab recordId="r1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
 
     fireEvent.change(screen.getByPlaceholderText('Сумма'), {
       target: { value: '1500' },
@@ -268,7 +279,7 @@ describe('ClientRecordTab', () => {
 
   it('does not call createPayment with zero amount', async () => {
 
-    render(<ClientRecordTab recordId="r1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
 
     fireEvent.change(screen.getByPlaceholderText('Сумма'), {
       target: { value: '0' },
@@ -281,7 +292,7 @@ describe('ClientRecordTab', () => {
 
   it('allows changing payment method', async () => {
 
-    render(<ClientRecordTab recordId="r1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
 
     const methodSelect = screen.getByDisplayValue('Карта');
     fireEvent.change(methodSelect, { target: { value: 'cash' } });
@@ -302,7 +313,7 @@ describe('ClientRecordTab', () => {
 
   it('clears payment amount after successful add', async () => {
 
-    render(<ClientRecordTab recordId="r1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
 
     const amountInput = screen.getByPlaceholderText('Сумма');
     fireEvent.change(amountInput, { target: { value: '1000' } });
@@ -316,7 +327,7 @@ describe('ClientRecordTab', () => {
   // ─── Payment form edge cases ────────────────────────────────────────────
 
   it('does not call createPayment with empty string amount', () => {
-    render(<ClientRecordTab recordId="r1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
 
     fireEvent.change(screen.getByPlaceholderText('Сумма'), {
       target: { value: '' },
@@ -327,7 +338,7 @@ describe('ClientRecordTab', () => {
   });
 
   it('does not call createPayment with negative amount', () => {
-    render(<ClientRecordTab recordId="r1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
 
     fireEvent.change(screen.getByPlaceholderText('Сумма'), {
       target: { value: '-500' },
@@ -338,7 +349,7 @@ describe('ClientRecordTab', () => {
   });
 
   it('sends transfer method when payment method is changed to transfer', async () => {
-    render(<ClientRecordTab recordId="r1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
 
     const methodSelect = screen.getByDisplayValue('Карта');
     fireEvent.change(methodSelect, { target: { value: 'transfer' } });
@@ -358,7 +369,7 @@ describe('ClientRecordTab', () => {
   });
 
   it('invalidates payments query after successful payment', async () => {
-    render(<ClientRecordTab recordId="r1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
 
     fireEvent.change(screen.getByPlaceholderText('Сумма'), {
       target: { value: '1000' },
@@ -371,18 +382,20 @@ describe('ClientRecordTab', () => {
   });
 
   it('shows "Нет посетителей" when record has no visits', () => {
-    mockUseQuery.mockReturnValue({
-      data: { ...mockRecord, id: 'r3', visits: [] },
-      isLoading: false,
-      error: null,
-    } as any);
+    mockUseQuery.mockImplementation((options: any) => {
+      const key = options?.queryKey?.[0];
+      if (key === 'visitors') {
+        return { data: mockVisitors, isLoading: false, error: null } as any;
+      }
+      return { data: { ...mockRecord, id: 'r3', visits: [] }, isLoading: false, error: null } as any;
+    });
 
-    render(<ClientRecordTab recordId="r3" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r3" clientId="c1" onClose={onClose} />);
     expect(screen.getByText('Нет посетителей')).toBeInTheDocument();
   });
 
   it('displays all payment method options', () => {
-    render(<ClientRecordTab recordId="r1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
 
     const methodSelect = screen.getByDisplayValue('Карта');
     const options = Array.from(methodSelect.querySelectorAll('option'));
@@ -393,14 +406,14 @@ describe('ClientRecordTab', () => {
   });
 
   it('displays status icon for each status type', () => {
-    render(<ClientRecordTab recordId="r1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
     // Each status has an SVG icon — confirmed status shows checkmark
     const statusSelect = screen.getByTestId('select-record-status');
     expect(statusSelect).toBeInTheDocument();
   });
 
   it('shows total cost with locale formatting', () => {
-    render(<ClientRecordTab recordId="r1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
     // 3500 should be formatted as "3 500 ₽" — appears in both visitor row and payment total
     const matches = screen.getAllByText('3 500 ₽');
     expect(matches.length).toBeGreaterThanOrEqual(2);

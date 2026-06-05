@@ -17,9 +17,10 @@ vi.mock('../app/(main)/clients/components/ClientInfoTab', () => ({
 }));
 
 vi.mock('../app/(main)/clients/components/ClientRecordTab', () => ({
-  ClientRecordTab: ({ recordId, onClose }: any) => (
+  ClientRecordTab: ({ recordId, clientId, onClose }: any) => (
     <div data-testid="client-record-tab">
       <span data-testid="record-id">{recordId}</span>
+      <span data-testid="record-client-id">{clientId}</span>
       <button data-testid="record-close" onClick={onClose}>Close</button>
     </div>
   ),
@@ -181,6 +182,13 @@ describe('ClientCardModal', () => {
     fireEvent.click(screen.getByText(/10\.05\.2026/));
     expect(screen.getByTestId('client-record-tab')).toBeInTheDocument();
     expect(screen.getByTestId('record-id').textContent).toBe('rec1');
+  });
+
+  it('passes clientId to ClientRecordTab', () => {
+    mockUseQuery.mockReturnValue({ data: mockRecords, isLoading: false });
+    render(<ClientCardModal {...defaultProps} />);
+    fireEvent.click(screen.getByText(/10\.05\.2026/));
+    expect(screen.getByTestId('record-client-id').textContent).toBe('c1');
   });
 
   it('shows ClientInfoTab by default (client tab active)', () => {

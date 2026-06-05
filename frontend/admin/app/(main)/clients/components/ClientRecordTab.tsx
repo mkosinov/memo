@@ -1,12 +1,13 @@
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { getRecord, updateRecord, deleteRecord, createPayment } from '@memo/api-client';
+import { getRecord, updateRecord, deleteRecord, createPayment, getClientVisitors } from '@memo/api-client';
 import type { RecordStatus } from '@memo/domain';
 
 interface ClientRecordTabProps {
   recordId: string;
+  clientId: string;
   onClose: () => void;
 }
 
@@ -53,12 +54,26 @@ function StatusIcon({ status }: { status: RecordStatus }) {
   }
 }
 
-export function ClientRecordTab({ recordId, onClose }: ClientRecordTabProps) {
+export function ClientRecordTab({ recordId, clientId, onClose }: ClientRecordTabProps) {
   const queryClient = useQueryClient();
   const { data: record, isLoading } = useQuery({
     queryKey: ['record', recordId],
     queryFn: () => getRecord(recordId),
   });
+
+  const { data: visitors = [] } = useQuery({
+    queryKey: ['visitors', clientId],
+    queryFn: () => getClientVisitors(clientId),
+    enabled: !!clientId,
+  });
+
+  const visitorsMap = useMemo(() => {
+    const map = new Map<string, { name: string; age: number | null }>();
+    if (Array.isArray(visitors)) {
+      visitors.forEach(v => map.set(v.id, { name: v.name, age: v.age }));
+    }
+    return map;
+  }, [visitors]);
 
   const [status, setStatus] = useState<RecordStatus>('pending');
   const [paymentAmount, setPaymentAmount] = useState('');
@@ -138,17 +153,24 @@ export function ClientRecordTab({ recordId, onClose }: ClientRecordTabProps) {
         {record.visits.length === 0 && (
           <p className="text-xs text-ink-light">Нет посетителей</p>
         )}
-        {record.visits.map((visit) => (
-          <div
-            key={visit.id}
-            className="flex items-center gap-2 py-1.5 border-b text-sm"
-            style={{ borderColor: 'var(--line)' }}
-            data-testid="visit-row"
-          >
-            <span className="flex-1 truncate text-ink">Посетитель {visit.visitor_id.slice(0, 8)}</span>
-            <span className="text-sm">{visit.price.toLocaleString('ru-RU')} ₽</span>
-          </div>
-        ))}
+        {record.visits.map((visit) => {
+          const visitor = visitorsMap.get(visit.visitor_id);
+          return (
+            <div
+              key={visit.id}
+              className="flex items-center gap-2 py-1.5 border-b text-sm"
+              style={{ borderColor: 'var(--line)' }}
+              data-testid="visit-row"
+            >
+              <span className="flex-1 truncate text-ink">
+                {visitor?.name ?? 'Неизвестный'}
+                {visitor?.age && <span className="text-xs text-ink-light ml-1">({visitor.age} лет)</span>}
+              </span>
+              <span className="text-xs text-ink-light">{visit.status === 'visited' ? 'Пришла' : visit.status === 'missed' ? 'Пропущена' : visit.status}</span>
+              <span className="text-sm">{visit.price.toLocaleString('ru-RU')} ₽</span>
+            </div>
+          );
+        })}
       </div>
 
       {/* Payment summary */}

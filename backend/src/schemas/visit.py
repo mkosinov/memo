@@ -18,8 +18,9 @@ class VisitResponse(BaseModel):
 
     id: str
     record_id: str
-    visitor_id: str
+    visitor_id: str | None = None
     price: int
+    custom_price: int | None = None
     status: str
     created_at: str
     updated_at: str

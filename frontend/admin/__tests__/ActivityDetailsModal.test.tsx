@@ -377,7 +377,7 @@ describe('ActivityDetailsModal — API integration', () => {
   ]);
 
   beforeEach(() => {
-    vi.mocked(createRecord).mockResolvedValue({ id: 'r_new', activity_id: 'ev_1', client_id: 'c1', status: 'pending', seats: 1, comment: null, created_at: '', updated_at: '', is_active: true, visits: [] });
+    vi.mocked(createRecord).mockResolvedValue({ id: 'r_new', activity_id: 'ev_1', client_id: 'c1', status: 'pending', seats: 1, comment: null, custom_price: null, created_at: '', updated_at: '', is_active: true, visits: [] });
     vi.mocked(createClient).mockResolvedValue({ id: 'c_new', name: 'New', phone: '+7', email: null, channel: 'telegram', created_at: '', updated_at: '', is_active: true });
     vi.mocked(createVisitor).mockResolvedValue({ id: 'vis_new', client_id: 'c1', name: 'V', age: null, created_at: '', updated_at: '', is_active: true });
     vi.mocked(deleteRecord).mockResolvedValue(undefined);

@@ -6,9 +6,16 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from src.db import SessionDep
-from src.schemas.client import ClientCreate, ClientResponse, ClientUpdate
+from src.schemas.client import (
+    ClientCreate,
+    ClientListParams,
+    ClientListResponse,
+    ClientPatch,
+    ClientResponse,
+    ClientUpdate,
+)
 from src.schemas.visitor import VisitorResponse
-from src.services.client import get_client_service
+from src.services.client import get_client_service, list_clients_with_stats
 from src.services.generic import GenericService
 from src.services.visitor import get_visitor_service
 
@@ -44,14 +51,13 @@ async def search_client_by_phone(
     return clients[0]
 
 
-@router.get("", response_model=list[ClientResponse])
+@router.get("", response_model=ClientListResponse)
 async def list_clients(
-    service: _ServiceDep,
     session: SessionDep,
-) -> list[ClientResponse]:
-    """Return all active clients."""
-    clients = await service.list(db_session=session)
-    return clients
+    params: ClientListParams = Depends(),
+) -> ClientListResponse:
+    """Return paginated clients with stats aggregation, filtering, and sorting."""
+    return await list_clients_with_stats(db_session=session, params=params)
 
 
 @router.get("/{client_id}", response_model=ClientResponse)
@@ -86,6 +92,20 @@ async def update_client(
 ) -> ClientResponse:
     """Full-update a client by ID (PUT, not PATCH)."""
     client = await service.update(db_session=session, id=client_id, data=data)
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+    return client
+
+
+@router.patch("/{client_id}", response_model=ClientResponse)
+async def patch_client(
+    client_id: str,
+    data: ClientPatch,
+    service: _ServiceDep,
+    session: SessionDep,
+) -> ClientResponse:
+    """Partial-update a client by ID (PATCH)."""
+    client = await service.patch(db_session=session, id=client_id, data=data)
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
     return client

@@ -156,6 +156,7 @@ export const VisitResponseSchema = z.object({
   record_id: z.string(),
   visitor_id: z.string(),
   price: z.number(),
+  custom_price: z.number().nullable(),
   status: z.string(),
   created_at: z.string(),
   updated_at: z.string(),
@@ -173,6 +174,7 @@ export const RecordResponseSchema = z.object({
   status: z.string(),
   seats: z.number(),
   comment: z.string().nullable(),
+  custom_price: z.number().nullable(),
   created_at: z.string(),
   updated_at: z.string(),
   is_active: z.boolean(),
@@ -185,10 +187,10 @@ export type RecordResponse = z.infer<typeof RecordResponseSchema>;
 
 export const ClientResponseSchema = z.object({
   id: z.string(),
-  name: z.string(),
-  phone: z.string(),
+  name: z.string().nullable(),
+  phone: z.string().nullable(),
   email: z.string().nullable(),
-  channel: z.string(),
+  channel: z.string().nullable(),
   created_at: z.string(),
   updated_at: z.string(),
   is_active: z.boolean(),
@@ -199,13 +201,35 @@ export type ClientResponse = z.infer<typeof ClientResponseSchema>;
 // ─── ClientCreate (request body) ──────────────────────────────────────────
 
 export const ClientCreateSchema = z.object({
-  name: z.string(),
+  name: z.string().optional(),
   phone: z.string().optional(),
   email: z.string().optional(),
   channel: z.string().optional(),
 });
 
 export type ClientCreate = z.infer<typeof ClientCreateSchema>;
+
+// ─── ClientWithStats ────────────────────────────────────────────────────────
+
+export const ClientWithStatsSchema = ClientResponseSchema.extend({
+  visits_count: z.number(),
+  last_visit: z.string().nullable(),
+  total_paid: z.number(),
+  missed_visits: z.number(),
+});
+
+export type ClientWithStats = z.infer<typeof ClientWithStatsSchema>;
+
+// ─── ClientListResponse ─────────────────────────────────────────────────────
+
+export const ClientListResponseSchema = z.object({
+  items: z.array(ClientWithStatsSchema),
+  total: z.number(),
+  page: z.number(),
+  per_page: z.number(),
+});
+
+export type ClientListResponse = z.infer<typeof ClientListResponseSchema>;
 
 // ─── PaymentResponse ───────────────────────────────────────────────────────
 
@@ -230,9 +254,11 @@ export const RecordCreateSchema = z.object({
   status: z.enum(['pending', 'confirmed', 'cancelled', 'no_show']).optional(),
   seats: z.number().optional(),
   comment: z.string().optional(),
+  custom_price: z.number().nullable().optional(),
   visits: z.array(z.object({
     visitor_id: z.string().optional(),
     price: z.number(),
+    custom_price: z.number().nullable().optional(),
     status: z.enum(['waiting', 'visited', 'missed', 'cancelled']).optional(),
   })).optional(),
 });

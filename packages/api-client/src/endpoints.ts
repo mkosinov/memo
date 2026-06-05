@@ -26,6 +26,10 @@ import {
   ClientResponseSchema,
   type ClientResponse,
   type ClientCreate,
+  ClientWithStatsSchema,
+  type ClientWithStats,
+  ClientListResponseSchema,
+  type ClientListResponse,
   PaymentResponseSchema,
   type PaymentResponse,
   type PaymentCreate,
@@ -122,13 +126,19 @@ export async function deleteActivity(id: string): Promise<void> {
 
 // ─── Records ────────────────────────────────────────────────────────────────
 
+export async function getRecord(id: string): Promise<RecordResponse> {
+  return api(`/api/v1/records/${id}`, RecordResponseSchema);
+}
+
 export async function getRecords(params?: {
   date_from?: string;
   date_to?: string;
+  client_id?: string;
 }): Promise<RecordResponse[]> {
   const search = new URLSearchParams();
   if (params?.date_from) search.set('date_from', params.date_from);
   if (params?.date_to) search.set('date_to', params.date_to);
+  if (params?.client_id) search.set('client_id', params.client_id);
   const qs = search.toString();
   return api(`/api/v1/records${qs ? `?${qs}` : ''}`, z.array(RecordResponseSchema));
 }
@@ -136,7 +146,22 @@ export async function getRecords(params?: {
 // ─── Clients ────────────────────────────────────────────────────────────────
 
 export async function getClients(): Promise<ClientResponse[]> {
-  return api('/api/v1/clients', z.array(ClientResponseSchema));
+  return api('/api/v1/clients', ClientListResponseSchema).then(r => r.items);
+}
+
+export async function getClientsWithStats(
+  params?: Record<string, string | number | boolean | null | undefined>,
+): Promise<ClientListResponse> {
+  const search = new URLSearchParams();
+  if (params) {
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== '') {
+        search.append(key, String(value));
+      }
+    });
+  }
+  const qs = search.toString();
+  return api(`/api/v1/clients${qs ? `?${qs}` : ''}`, ClientListResponseSchema);
 }
 
 export async function createClient(data: ClientCreate): Promise<ClientResponse> {
@@ -144,6 +169,27 @@ export async function createClient(data: ClientCreate): Promise<ClientResponse> 
     method: 'POST',
     body: JSON.stringify(data),
   });
+}
+
+export async function updateClient(id: string, data: ClientCreate): Promise<ClientResponse> {
+  return api(`/api/v1/clients/${id}`, ClientResponseSchema, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function patchClient(
+  id: string,
+  data: Partial<Pick<ClientResponse, 'name' | 'phone' | 'email' | 'channel'>>,
+): Promise<ClientResponse> {
+  return api(`/api/v1/clients/${id}`, ClientResponseSchema, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteClient(id: string): Promise<void> {
+  await api(`/api/v1/clients/${id}`, z.any(), { method: 'DELETE' });
 }
 
 // ─── Payments ───────────────────────────────────────────────────────────────
@@ -177,6 +223,13 @@ export async function deleteRecord(id: string): Promise<void> {
   await api(`/api/v1/records/${id}`, z.any(), { method: 'DELETE' });
 }
 
+export async function patchRecord(id: string, data: Partial<Pick<RecordResponse, 'status' | 'comment' | 'custom_price'> & { visits?: Array<{ visitor_id?: string; price: number; custom_price?: number | null; status?: string }> }>): Promise<RecordResponse> {
+  return api(`/api/v1/records/${id}`, RecordResponseSchema, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+}
+
 // ─── Payments CRUD ────────────────────────────────────────────────────────
 
 export async function createPayment(data: PaymentCreate): Promise<PaymentResponse> {
@@ -195,6 +248,12 @@ export async function updatePayment(id: string, data: PaymentUpdate): Promise<Pa
 
 export async function deletePayment(id: string): Promise<void> {
   await api(`/api/v1/payments/${id}`, z.any(), { method: 'DELETE' });
+}
+
+// ─── Client Visitors ─────────────────────────────────────────────────────
+
+export async function getClientVisitors(clientId: string): Promise<VisitorResponse[]> {
+  return api(`/api/v1/clients/${clientId}/visitors`, z.array(VisitorResponseSchema));
 }
 
 // ─── Visitors CRUD ────────────────────────────────────────────────────────

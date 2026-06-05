@@ -19,6 +19,7 @@ class VisitItem(BaseModel):
     age: int | None = None
     visitor_id: str | None = None
     price: int
+    custom_price: int | None = None
     status: VisitStatus = VisitStatus.WAITING
 
 
@@ -29,8 +30,9 @@ class VisitResponse(BaseModel):
 
     id: str
     record_id: str
-    visitor_id: str
+    visitor_id: str | None = None
     price: int
+    custom_price: int | None = None
     status: str
     created_at: str
     updated_at: str
@@ -45,6 +47,7 @@ class RecordBase(BaseModel):
     status: RecordStatus = RecordStatus.PENDING
     seats: int
     comment: str | None = None
+    custom_price: int | None = None
 
 
 class RecordCreate(BaseModel):
@@ -62,6 +65,7 @@ class RecordCreate(BaseModel):
     client_id: str | None = None
     status: RecordStatus = RecordStatus.PENDING
     comment: str | None = None
+    custom_price: int | None = None
     visits: list[VisitItem]  # seats = len(visits)
 
 
@@ -72,7 +76,17 @@ class RecordUpdate(BaseModel):
     client_id: str | None = None
     status: RecordStatus
     comment: str | None = None
+    custom_price: int | None = None
     visits: list[VisitItem]  # full replacement
+
+
+class RecordPatch(BaseModel):
+    """Partial update for record. All fields optional."""
+
+    status: RecordStatus | None = None
+    comment: str | None = None
+    custom_price: int | None = None
+    visits: list[VisitItem] | None = None
 
 
 class RecordResponse(RecordBase):

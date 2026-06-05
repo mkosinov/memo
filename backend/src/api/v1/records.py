@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from src.db import SessionDep
 from src.schemas.record import (
     RecordCreate,
+    RecordPatch,
     RecordResponse,
     RecordUpdate,
     VisitResponse,
@@ -41,6 +42,7 @@ def _map_record(record) -> RecordResponse:
             record_id=v.record_id,
             visitor_id=v.visitor_id,
             price=v.price,
+            custom_price=v.custom_price,
             status=v.status,
             created_at=_dt_to_str(v.created_at),
             updated_at=_dt_to_str(v.updated_at),
@@ -57,6 +59,7 @@ def _map_record(record) -> RecordResponse:
         status=record.status,
         seats=record.seats,
         comment=record.comment,
+        custom_price=record.custom_price,
         created_at=_dt_to_str(record.created_at),
         updated_at=_dt_to_str(record.updated_at),
         is_active=record.is_active,
@@ -68,9 +71,10 @@ def _map_record(record) -> RecordResponse:
 async def list_records(
     service: _ServiceDep,
     session: SessionDep,
+    client_id: str | None = None,
 ) -> list[RecordResponse]:
-    """Return all active records with nested visits."""
-    records = await service.list(db_session=session)
+    """Return all active records with nested visits, optionally filtered by client_id."""
+    records = await service.list(db_session=session, client_id=client_id)
     return [_map_record(r) for r in records]
 
 
@@ -107,6 +111,20 @@ async def update_record(
 ) -> RecordResponse:
     """Full-update a record by ID. Replaces visits, recalculates seats."""
     record = await service.update(db_session=session, id=record_id, data=data)
+    if not record:
+        raise HTTPException(status_code=404, detail="Record not found")
+    return _map_record(record)
+
+
+@router.patch("/{record_id}", response_model=RecordResponse)
+async def patch_record(
+    record_id: str,
+    data: RecordPatch,
+    service: _ServiceDep,
+    session: SessionDep,
+) -> RecordResponse:
+    """Partial-update a record by ID (PATCH). Only sent fields are changed."""
+    record = await service.patch(db_session=session, id=record_id, data=data)
     if not record:
         raise HTTPException(status_code=404, detail="Record not found")
     return _map_record(record)

@@ -303,6 +303,103 @@ class TestVisitsCrud:
         assert response.status_code == 404
 
 
+class TestRecordPatch:
+    """PATCH /api/records/{id} partial update tests."""
+
+    def test_patch_status_only(self, api_client, create_record) -> None:
+        """PATCH with only status field updates status, leaves other fields unchanged."""
+        record = create_record()
+
+        response = api_client.patch(
+            f"/api/v1/records/{record['id']}",
+            json={"status": "confirmed"},
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["status"] == "confirmed"
+        assert body["comment"] == "Test record"  # unchanged
+        assert body["seats"] == record["seats"]  # unchanged
+
+    def test_patch_comment_only(self, api_client, create_record) -> None:
+        """PATCH with only comment field updates comment."""
+        record = create_record()
+
+        response = api_client.patch(
+            f"/api/v1/records/{record['id']}",
+            json={"comment": "Updated via patch"},
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["comment"] == "Updated via patch"
+        assert body["status"] == record["status"]  # unchanged
+
+    def test_patch_custom_price(self, api_client, create_record) -> None:
+        """PATCH with custom_price sets the override price."""
+        record = create_record()
+
+        response = api_client.patch(
+            f"/api/v1/records/{record['id']}",
+            json={"custom_price": 9900},
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["custom_price"] == 9900
+
+    def test_patch_custom_price_null_clears(self, api_client, create_record) -> None:
+        """PATCH with custom_price: null clears the override."""
+        record = create_record()
+        # First set it
+        api_client.patch(
+            f"/api/v1/records/{record['id']}",
+            json={"custom_price": 9900},
+        )
+        # Then clear it
+        response = api_client.patch(
+            f"/api/v1/records/{record['id']}",
+            json={"custom_price": None},
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["custom_price"] is None
+
+    def test_patch_multiple_fields(self, api_client, create_record) -> None:
+        """PATCH with multiple fields updates all at once."""
+        record = create_record()
+
+        response = api_client.patch(
+            f"/api/v1/records/{record['id']}",
+            json={"status": "cancelled", "comment": "Cancelled by client"},
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["status"] == "cancelled"
+        assert body["comment"] == "Cancelled by client"
+
+    def test_patch_nonexistent_record_returns_404(self, api_client) -> None:
+        """PATCH /api/records/{fake_id} returns 404."""
+        response = api_client.patch(
+            "/api/v1/records/nonexistent-id",
+            json={"status": "confirmed"},
+        )
+        assert response.status_code == 404
+
+    def test_patch_updates_updated_at(self, api_client, create_record) -> None:
+        """PATCH updates the updated_at timestamp."""
+        record = create_record()
+        original_updated = record["updated_at"]
+
+        import time
+        time.sleep(0.05)
+
+        response = api_client.patch(
+            f"/api/v1/records/{record['id']}",
+            json={"status": "confirmed"},
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["updated_at"] >= original_updated
+
+
 class TestRecordCreatePhoneFlow:
     """Phone-based record creation flow — auto-creates client and visitors."""
 

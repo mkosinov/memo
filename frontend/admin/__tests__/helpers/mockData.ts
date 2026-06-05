@@ -8,6 +8,7 @@ import type { Artist, Service, Activity, Location } from '@memo/domain';
 import type {
   RecordResponse,
   ClientResponse,
+  ClientWithStats,
   VisitorResponse,
   VisitResponse,
   PaymentResponse,
@@ -98,6 +99,14 @@ export const mockClient: ClientResponse = {
   is_active: true,
 };
 
+export const mockClientWithStats: ClientWithStats = {
+  ...mockClient,
+  visits_count: 5,
+  last_visit: '2026-05-15T14:00:00',
+  total_paid: 17500,
+  missed_visits: 1,
+};
+
 export const mockVisitor: VisitorResponse = {
   id: 'vis1',
   client_id: 'c1',
@@ -113,6 +122,7 @@ export const mockVisit: VisitResponse = {
   record_id: 'r1',
   visitor_id: 'vis1',
   price: 3500,
+  custom_price: null,
   status: 'waiting',
   created_at: '',
   updated_at: '',
@@ -126,6 +136,7 @@ export const mockRecord: RecordResponse = {
   status: 'confirmed',
   seats: 1,
   comment: null,
+  custom_price: null,
   created_at: '2026-05-10T10:00:00',
   updated_at: '2026-05-10T10:00:00',
   is_active: true,

@@ -15,7 +15,7 @@ from src.models.payment import Payment
 from src.models.record import Record
 from src.models.visit import Visit
 from src.models.visitor import Visitor
-from src.schemas.record import RecordCreate, RecordResponse, RecordUpdate
+from src.schemas.record import RecordCreate, RecordPatch, RecordResponse, RecordUpdate
 from src.services.generic import GenericService
 
 
@@ -28,14 +28,20 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
         super().__init__(repository, model, response_schema=RecordResponse)
 
     async def list(
-        self, db_session: AsyncSession, **filters
+        self, db_session: AsyncSession, client_id: str | None = None, **filters
     ) -> list[Record]:
-        """Return all active records with visits eagerly loaded (raw ORM)."""
-        result = await db_session.execute(
+        """Return all active records with visits eagerly loaded (raw ORM).
+
+        Optionally filter by client_id.
+        """
+        stmt = (
             select(Record)
             .where(Record.is_active)
             .options(selectinload(Record.visits))
         )
+        if client_id:
+            stmt = stmt.where(Record.client_id == client_id)
+        result = await db_session.execute(stmt)
         return list(result.scalars().all())
 
     async def get(
@@ -91,8 +97,8 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
         else:
             client = None
 
-        # ── Resolve visitors (name-based or ID-based) ───────────────────
-        visitor_ids: list[str] = []
+        # ── Resolve visitors (name-based, ID-based, or anonymous) ───────
+        visitor_ids: list[str | None] = []
         for item in data.visits:
             if item.name:
                 # Name-based flow: find-or-create Visitor
@@ -104,7 +110,8 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
                 # ID-based flow: use existing Visitor directly
                 visitor_ids.append(item.visitor_id)
             else:
-                raise ValueError("Each visit must have either 'name' or 'visitor_id'")
+                # Anonymous visit — no visitor linked
+                visitor_ids.append(None)
 
         # ── Create Record ───────────────────────────────────────────────
         record = Record(
@@ -113,6 +120,7 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
             status=data.status.value if data.status else "pending",
             seats=len(data.visits),
             comment=data.comment,
+            custom_price=data.custom_price,
         )
         db_session.add(record)
         await db_session.flush()
@@ -123,6 +131,7 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
                 record_id=record.id,
                 visitor_id=visitor_ids[i],
                 price=item.price,
+                custom_price=item.custom_price,
                 status=item.status,
             )
             db_session.add(visit)
@@ -188,6 +197,7 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
         record.client_id = data.client_id
         record.status = data.status
         record.comment = data.comment
+        record.custom_price = data.custom_price
         record.seats = len(data.visits)
         record.updated_at = datetime.now(UTC)
 
@@ -199,10 +209,51 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
                 record_id=record.id,
                 visitor_id=visit_item.visitor_id,
                 price=visit_item.price,
+                custom_price=visit_item.custom_price,
                 status=visit_item.status,
             )
             db_session.add(visit)
 
+        await db_session.flush()
+        await db_session.refresh(record)
+        return record
+
+    async def patch(
+        self, db_session: AsyncSession, id: str, data: RecordPatch
+    ) -> Record | None:
+        """Partial-update record — only fields explicitly sent are changed.
+
+        Handles visits specially: if ``visits`` is provided in the patch,
+        deactivates existing visits and creates new ones; otherwise visits
+        are left untouched.
+        """
+        record = await self.get(db_session, id)
+        if not record:
+            return None
+
+        update_data = data.model_dump(exclude_unset=True)
+
+        if "status" in update_data:
+            record.status = update_data["status"]
+        if "comment" in update_data:
+            record.comment = update_data["comment"]
+        if "custom_price" in update_data:
+            record.custom_price = update_data["custom_price"]
+        if "visits" in update_data:
+            for existing_visit in record.visits:
+                existing_visit.is_active = False
+            for visit_item in update_data["visits"]:
+                visit = Visit(
+                    record_id=record.id,
+                    visitor_id=visit_item.get("visitor_id"),
+                    price=visit_item["price"],
+                    custom_price=visit_item.get("custom_price"),
+                    status=visit_item.get("status", "waiting"),
+                )
+                db_session.add(visit)
+            record.seats = len(update_data["visits"])
+
+        record.updated_at = datetime.now(UTC)
         await db_session.flush()
         await db_session.refresh(record)
         return record

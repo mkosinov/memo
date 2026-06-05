@@ -57,6 +57,7 @@ def _map_record(record) -> RecordResponse:
         status=record.status,
         seats=record.seats,
         comment=record.comment,
+        custom_price=record.custom_price,
         created_at=_dt_to_str(record.created_at),
         updated_at=_dt_to_str(record.updated_at),
         is_active=record.is_active,

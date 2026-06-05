@@ -4,6 +4,7 @@ import { useState, useCallback, useEffect, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { getRecord, updateRecord, deleteRecord, createPayment, getClientVisitors } from '@memo/api-client';
 import type { RecordStatus } from '@memo/domain';
+import type { RecordUpdate } from '@memo/api-client';
 
 interface ClientRecordTabProps {
   recordId: string;
@@ -78,9 +79,13 @@ export function ClientRecordTab({ recordId, clientId, onClose }: ClientRecordTab
   const [status, setStatus] = useState<RecordStatus>('pending');
   const [paymentAmount, setPaymentAmount] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('card');
+  const [customPrice, setCustomPrice] = useState<string>('');
 
   useEffect(() => {
-    if (record) setStatus(record.status as RecordStatus);
+    if (record) {
+      setStatus(record.status as RecordStatus);
+      setCustomPrice(record.custom_price != null ? String(record.custom_price) : '');
+    }
   }, [record]);
 
   const handleStatusChange = useCallback(async (newStatus: RecordStatus) => {
@@ -106,10 +111,18 @@ export function ClientRecordTab({ recordId, clientId, onClose }: ClientRecordTab
     queryClient.invalidateQueries({ queryKey: ['records'] });
   }, [recordId, onClose, queryClient]);
 
+  const handleCustomPriceSave = useCallback(async () => {
+    if (!record) return;
+    const value = customPrice.trim() === '' ? null : Number(customPrice);
+    await updateRecord(recordId, { custom_price: value } as RecordUpdate);
+    queryClient.invalidateQueries({ queryKey: ['record', recordId] });
+  }, [recordId, record, customPrice, queryClient]);
+
   if (isLoading) return <div className="p-4">Загрузка...</div>;
   if (!record) return <div className="p-4">Запись не найдена</div>;
 
   const totalCost = record.visits.reduce((sum, v) => sum + v.price, 0);
+  const displayTotal = customPrice.trim() !== '' ? Number(customPrice) : totalCost;
 
   const inputClass = 'w-full rounded-lg border px-3 py-2 text-sm bg-white';
   const inputStyle = { borderColor: 'var(--line)' };
@@ -176,9 +189,30 @@ export function ClientRecordTab({ recordId, clientId, onClose }: ClientRecordTab
       {/* Payment summary */}
       <div className="space-y-2" data-testid="payment-summary">
         <h4 className="text-xs font-medium text-ink-mid">Оплата</h4>
+
+        {/* Custom price override */}
+        <div className="flex items-center gap-2">
+          <label className="text-xs text-ink-mid whitespace-nowrap" htmlFor="custom-price">
+            Ручная стоимость
+          </label>
+          <input
+            id="custom-price"
+            type="number"
+            placeholder="Авто"
+            className="flex-1 rounded-lg border px-3 py-2 text-sm"
+            style={inputStyle}
+            value={customPrice}
+            onChange={(e) => setCustomPrice(e.target.value)}
+            onBlur={handleCustomPriceSave}
+            data-testid="input-custom-price"
+          />
+        </div>
+
         <div className="flex justify-between text-sm">
           <span className="text-ink-mid">Итого:</span>
-          <span className="text-ink font-medium">{totalCost.toLocaleString('ru-RU')} ₽</span>
+          <span className="text-ink font-medium" data-testid="total-price">
+            {displayTotal.toLocaleString('ru-RU')} ₽
+          </span>
         </div>
 
         {/* Add payment form */}

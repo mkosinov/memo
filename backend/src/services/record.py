@@ -120,6 +120,7 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
             status=data.status.value if data.status else "pending",
             seats=len(data.visits),
             comment=data.comment,
+            custom_price=data.custom_price,
         )
         db_session.add(record)
         await db_session.flush()
@@ -195,6 +196,7 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
         record.client_id = data.client_id
         record.status = data.status
         record.comment = data.comment
+        record.custom_price = data.custom_price
         record.seats = len(data.visits)
         record.updated_at = datetime.now(UTC)
 

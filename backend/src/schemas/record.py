@@ -45,6 +45,7 @@ class RecordBase(BaseModel):
     status: RecordStatus = RecordStatus.PENDING
     seats: int
     comment: str | None = None
+    custom_price: int | None = None
 
 
 class RecordCreate(BaseModel):
@@ -62,6 +63,7 @@ class RecordCreate(BaseModel):
     client_id: str | None = None
     status: RecordStatus = RecordStatus.PENDING
     comment: str | None = None
+    custom_price: int | None = None
     visits: list[VisitItem]  # seats = len(visits)
 
 
@@ -72,6 +74,7 @@ class RecordUpdate(BaseModel):
     client_id: str | None = None
     status: RecordStatus
     comment: str | None = None
+    custom_price: int | None = None
     visits: list[VisitItem]  # full replacement
 
 

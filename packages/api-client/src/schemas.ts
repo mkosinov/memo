@@ -173,6 +173,7 @@ export const RecordResponseSchema = z.object({
   status: z.string(),
   seats: z.number(),
   comment: z.string().nullable(),
+  custom_price: z.number().nullable(),
   created_at: z.string(),
   updated_at: z.string(),
   is_active: z.boolean(),
@@ -252,6 +253,7 @@ export const RecordCreateSchema = z.object({
   status: z.enum(['pending', 'confirmed', 'cancelled', 'no_show']).optional(),
   seats: z.number().optional(),
   comment: z.string().optional(),
+  custom_price: z.number().nullable().optional(),
   visits: z.array(z.object({
     visitor_id: z.string().optional(),
     price: z.number(),

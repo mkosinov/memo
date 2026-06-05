@@ -195,7 +195,7 @@ class TestDeleteCascade:
         assert record_id not in ids
 
     def test_delete_record_soft_deletes_visits_in_db(self, api_client, create_record) -> None:
-        """Soft-delete record → visits NOT soft-deleted at DB level (current behavior)."""
+        """Soft-delete record → visits are cascade-soft-deleted at DB level."""
         record = create_record()
         record_id = record["id"]
 
@@ -208,16 +208,12 @@ class TestDeleteCascade:
         # Delete record
         api_client.delete(f"/api/v1/records/{record_id}")
 
-        # Visits are NOT cascaded — they remain active (current behavior)
+        # Visits are cascaded — they are soft-deleted
         visits_after = query_db(
             f"SELECT * FROM visits WHERE record_id='{record_id}' AND is_active=1"
         )
-        assert len(visits_after) == len(visits_before)
+        assert len(visits_after) == 0
 
-    @pytest.mark.xfail(
-        reason="TODO: record delete should cascade-soft-delete visits and payments",
-        strict=False,
-    )
     def test_delete_record_cascades_to_visits_and_payments(self, api_client, create_record) -> None:
         """Soft-delete record → visits AND payments should also be soft-deleted."""
         record = create_record()
@@ -244,7 +240,7 @@ class TestDeleteCascade:
         assert len(payments) == 0
 
     def test_delete_record_then_payment_still_visible(self, api_client, create_record) -> None:
-        """After deleting record, associated payments are still visible (current behavior)."""
+        """After deleting record, associated payments are cascade-soft-deleted."""
         record = create_record()
 
         # Add a payment
@@ -255,10 +251,10 @@ class TestDeleteCascade:
         # Delete record
         api_client.delete(f"/api/v1/records/{record['id']}")
 
-        # Payment still visible in list (no cascade)
+        # Payment is cascade-soft-deleted — excluded from list
         payments = api_client.get("/api/v1/payments").json()
         ids = [p["id"] for p in payments]
-        assert payment["id"] in ids
+        assert payment["id"] not in ids
 
 
 # ─── Flow 4: Activity capacity enforcement ────────────────────────────────────
@@ -267,13 +263,12 @@ class TestDeleteCascade:
 class TestCapacityFlow:
     """Fill activity to capacity → verify behavior when exceeded."""
 
-    @pytest.mark.xfail(
-        reason="Capacity enforcement not implemented: record service does not check activity.capacity before creating",
-        strict=False,
-    )
-    def test_activity_capacity_limit(self, api_client) -> None:
+    def test_activity_capacity_limit(self, api_client, create_client) -> None:
         """Fill activity to capacity → next record should be rejected."""
         from datetime import UTC, datetime, timedelta
+
+        # Create a client for the records
+        client = create_client()
 
         # Create activity with capacity=2
         master = api_client.post("/api/v1/masters", json={
@@ -305,6 +300,7 @@ class TestCapacityFlow:
         for i in range(2):
             resp = api_client.post("/api/v1/records", json={
                 "activity_id": activity["id"],
+                "client_id": client["id"],
                 "visits": [{"name": f"Гость {i}", "price": 2000}],
             })
             assert resp.status_code == 201, f"Record {i} should succeed"
@@ -316,6 +312,7 @@ class TestCapacityFlow:
         # Third record should fail (capacity full) — expects 409 or 422
         resp = api_client.post("/api/v1/records", json={
             "activity_id": activity["id"],
+            "client_id": client["id"],
             "visits": [{"name": "Переполнение", "price": 2000}],
         })
         assert resp.status_code in (409, 422), (

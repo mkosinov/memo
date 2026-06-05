@@ -404,8 +404,8 @@ export function ClientRecordTab({ recordId, clientId, onClose }: ClientRecordTab
   return (
     <div className="space-y-4 p-4" data-testid="client-record-tab">
 
-      {/* ── Row 1: Date / Time ─────────────────────────────────────────── */}
-      <div className="flex flex-wrap gap-3">
+      {/* ── Row 1: Date / Time / Location / Status — all 4 in one row ─── */}
+      <div className="flex flex-wrap gap-3 items-end">
         <div>
           <label className="text-xs font-medium text-ink-mid block mb-1" htmlFor="record-date">Дата</label>
           <input
@@ -428,10 +428,6 @@ export function ClientRecordTab({ recordId, clientId, onClose }: ClientRecordTab
             onChange={e => { setTime(e.target.value); markChanged(); }}
           />
         </div>
-      </div>
-
-      {/* ── Row 2: Location / Status ───────────────────────────────────── */}
-      <div className="flex flex-wrap items-end gap-3">
         <div>
           <label className="text-xs font-medium text-ink-mid block mb-1">Локация</label>
           <CustomSelect
@@ -452,29 +448,30 @@ export function ClientRecordTab({ recordId, clientId, onClose }: ClientRecordTab
                 options={statusOptions}
                 onChange={(v) => handleStatusChange(firstVisit.id, v)}
                 className={`${inputClass} appearance-none text-xs`}
+                iconOnly
               />
             );
           })()}
         </div>
       </div>
 
-      {/* ── Row 3: Master / Service ────────────────────────────────────── */}
+      {/* ── Row 2: Service / Master ───────────────────────────────────── */}
       <div className="flex flex-wrap gap-3">
-        <div>
-          <label className="text-xs font-medium text-ink-mid block mb-1">Мастер</label>
-          <CustomSelect
-            value={masterId}
-            options={masterOptions}
-            onChange={(v) => { setMasterId(v); markChanged(); }}
-            className={`${inputClass} appearance-none`}
-          />
-        </div>
         <div>
           <label className="text-xs font-medium text-ink-mid block mb-1">Услуга</label>
           <CustomSelect
             value={serviceId}
             options={serviceOptions}
             onChange={(v) => { setServiceId(v); markChanged(); }}
+            className={`${inputClass} appearance-none`}
+          />
+        </div>
+        <div>
+          <label className="text-xs font-medium text-ink-mid block mb-1">Мастер</label>
+          <CustomSelect
+            value={masterId}
+            options={masterOptions}
+            onChange={(v) => { setMasterId(v); markChanged(); }}
             className={`${inputClass} appearance-none`}
           />
         </div>
@@ -492,7 +489,7 @@ export function ClientRecordTab({ recordId, clientId, onClose }: ClientRecordTab
           {record.visits.length > 0 && (
             <div className="flex items-center gap-2 py-1 text-xs font-medium text-ink-mid border-b" style={{ borderColor: 'var(--line)' }}>
               <span className="flex-1">Имя</span>
-              <span className="w-32">Тариф</span>
+              <span className="min-w-[120px]">Тариф</span>
               <span className="w-20 text-right">Стоимость</span>
               <span className="w-8" />
             </div>
@@ -521,7 +518,7 @@ export function ClientRecordTab({ recordId, clientId, onClose }: ClientRecordTab
                   )}
                 </span>
                 <select
-                  className="w-32 text-xs rounded border px-2 py-1 bg-white"
+                  className="min-w-[120px] text-xs rounded border px-2 py-1 bg-white"
                   style={{ borderColor: 'var(--line)' }}
                   value={tariffs.find(t => t.price === Number(price))?.id ?? ''}
                   onChange={e => handleTariffChange(visit.id, e.target.value)}
@@ -555,116 +552,97 @@ export function ClientRecordTab({ recordId, clientId, onClose }: ClientRecordTab
               </div>
             );
           })}
-
-          {/* ── Итого (inside visitors box) ─────────────────────────────── */}
-          {record.visits.length > 0 && (
-            <div className="flex items-center justify-end gap-2 py-2 text-sm font-medium border-t" style={{ borderColor: 'var(--line)' }}>
-              <span className="text-ink-mid">Итого:</span>
-              <span data-testid="visits-total">{visitsTotal.toLocaleString('ru-RU')} ₽</span>
-            </div>
-          )}
-
-          {/* Add visitor */}
-          {showVisitorForm ? (
-            <div className="space-y-2 pt-2 border-t" style={{ borderColor: 'var(--line)' }}>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  placeholder="Имя"
-                  className={`flex-1 ${inputClass}`}
-                  style={inputStyle}
-                  value={newVisitorName}
-                  onChange={e => setNewVisitorName(e.target.value)}
-                  data-testid="input-visitor-name"
-                />
-                <input
-                  type="number"
-                  placeholder="Возраст"
-                  className={`w-20 ${inputClass}`}
-                  style={inputStyle}
-                  value={newVisitorAge}
-                  onChange={e => setNewVisitorAge(e.target.value)}
-                  data-testid="input-visitor-age"
-                />
-                <select
-                  className={`${inputClass} appearance-none`}
-                  style={inputStyle}
-                  value={newVisitorTariffId}
-                  onChange={e => setNewVisitorTariffId(e.target.value)}
-                >
-                  <option value="">Тариф</option>
-                  {tariffs.map(t => (
-                    <option key={t.id} value={t.id}>{t.title} {t.price}₽</option>
-                  ))}
-                </select>
-              </div>
-              <div className="flex gap-2">
-                <button
-                  onClick={handleAddVisitor}
-                  className="px-3 py-1.5 text-xs text-white rounded-lg"
-                  style={{ backgroundColor: 'var(--brand, #004D56)' }}
-                  data-testid="btn-create-visitor"
-                >
-                  Добавить
-                </button>
-                <button
-                  onClick={() => {
-                    setShowVisitorForm(false);
-                    setNewVisitorName('');
-                    setNewVisitorAge('');
-                    setNewVisitorTariffId('');
-                  }}
-                  className="px-3 py-1.5 text-xs text-ink-mid rounded-lg hover:bg-gray-100"
-                >
-                  Отмена
-                </button>
-              </div>
-            </div>
-          ) : (
-            <button
-              onClick={() => setShowVisitorForm(true)}
-              className="text-brand text-xs hover:underline"
-              data-testid="btn-add-visitor"
-            >
-              + Добавить посетителя
-            </button>
-          )}
         </div>
-      </div>
 
-      {/* ── Payments ──────────────────────────────────────────────────── */}
-      <div>
-        <h4 className="text-xs font-medium text-ink-mid mb-2">Оплата</h4>
+        {/* ── Add visitor form (below box) ──────────────────────────────── */}
+        {showVisitorForm && (
+          <div className="space-y-2 pt-2">
+            <div className="flex gap-2">
+              <input
+                type="text"
+                placeholder="Имя"
+                className={`flex-1 ${inputClass}`}
+                style={inputStyle}
+                value={newVisitorName}
+                onChange={e => setNewVisitorName(e.target.value)}
+                data-testid="input-visitor-name"
+              />
+              <input
+                type="number"
+                placeholder="Возраст"
+                className={`w-20 ${inputClass}`}
+                style={inputStyle}
+                value={newVisitorAge}
+                onChange={e => setNewVisitorAge(e.target.value)}
+                data-testid="input-visitor-age"
+              />
+              <select
+                className={`${inputClass} appearance-none min-w-[120px]`}
+                style={inputStyle}
+                value={newVisitorTariffId}
+                onChange={e => setNewVisitorTariffId(e.target.value)}
+              >
+                <option value="">Тариф</option>
+                {tariffs.map(t => (
+                  <option key={t.id} value={t.id}>{t.title} {t.price}₽</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={handleAddVisitor}
+                className="px-3 py-1.5 text-xs text-white rounded-lg"
+                style={{ backgroundColor: 'var(--brand, #004D56)' }}
+                data-testid="btn-create-visitor"
+              >
+                Добавить
+              </button>
+              <button
+                onClick={() => {
+                  setShowVisitorForm(false);
+                  setNewVisitorName('');
+                  setNewVisitorAge('');
+                  setNewVisitorTariffId('');
+                }}
+                className="px-3 py-1.5 text-xs text-ink-mid rounded-lg hover:bg-gray-100"
+              >
+                Отмена
+              </button>
+            </div>
+          </div>
+        )}
 
-        {/* Total / Paid / Remaining */}
-        <div className="flex flex-wrap items-center gap-4 mb-2">
-          <div className="flex items-center gap-1">
-            <label className="text-xs text-ink-mid whitespace-nowrap" htmlFor="custom-price">Итого:</label>
+        {/* "+ Добавить посетителя" button */}
+        {!showVisitorForm && (
+          <button
+            onClick={() => setShowVisitorForm(true)}
+            className="text-brand text-xs hover:underline mt-2"
+            data-testid="btn-add-visitor"
+          >
+            + Добавить посетителя
+          </button>
+        )}
+
+        {/* ── Итого — right-aligned, outside visitors box ────────────── */}
+        {record.visits.length > 0 && (
+          <div className="flex justify-end items-center gap-2 mt-2">
+            <span className="text-sm text-ink-mid">Итого:</span>
             <input
-              id="custom-price"
               type="number"
-              className={`${inputClass} w-28`}
-              style={inputStyle}
-              value={customPrice}
+              className="w-24 text-right rounded-lg border px-2 py-1 text-sm"
+              style={{ borderColor: 'var(--line)' }}
+              value={customPrice !== '' ? customPrice : visitsTotal}
               onChange={e => { setCustomPrice(e.target.value); markChanged(); }}
               data-testid="input-custom-price"
             />
-            <span className="text-sm ml-0.5">₽</span>
+            <span className="text-sm">₽</span>
           </div>
-          <div className="text-sm">
-            <span className="text-ink-mid">Оплачено: </span>
-            <span className="font-medium">{totalPaid.toLocaleString('ru-RU')} ₽</span>
-          </div>
-          <div className="text-sm">
-            <span className="text-ink-mid">Остаток: </span>
-            <span
-              className="font-medium"
-              style={{ color: remaining > 0 ? 'var(--danger, #C8503C)' : 'var(--success, #6B8E6E)' }}
-            >
-              {remaining.toLocaleString('ru-RU')} ₽
-            </span>
-          </div>
-        </div>
+        )}
+      </div>
+
+      {/* ── Оплата ──────────────────────────────────────────────────────── */}
+      <div>
+        <h4 className="text-xs font-medium text-ink-mid mb-2">Оплата</h4>
 
         {/* Payment list */}
         {Array.isArray(payments) && payments.length > 0 && (
@@ -712,6 +690,23 @@ export function ClientRecordTab({ recordId, clientId, onClose }: ClientRecordTab
             Добавить оплату
           </button>
         </div>
+
+        {/* Totals at the end of payment block — right-aligned */}
+        <div className="flex justify-end items-center gap-4 mt-2">
+          <div className="text-sm">
+            <span className="text-ink-mid">Оплачено: </span>
+            <span className="font-medium">{totalPaid.toLocaleString('ru-RU')} ₽</span>
+          </div>
+          <div className="text-sm">
+            <span className="text-ink-mid">Осталось: </span>
+            <span
+              className="font-medium"
+              style={{ color: remaining > 0 ? 'var(--danger, #C8503C)' : 'var(--success, #6B8E6E)' }}
+            >
+              {remaining.toLocaleString('ru-RU')} ₽
+            </span>
+          </div>
+        </div>
       </div>
 
       {/* ── Comment ───────────────────────────────────────────────────── */}
@@ -728,11 +723,11 @@ export function ClientRecordTab({ recordId, clientId, onClose }: ClientRecordTab
         />
       </div>
 
-      {/* ── Dates (moved to bottom, above actions) ────────────────────── */}
+      {/* ── Dates with time ────────────────────────────────────────────── */}
       <div className="text-xs text-ink-light" data-testid="record-dates">
-        <span>Создан {new Date(record.created_at).toLocaleDateString('ru-RU')}</span>
+        <span>Создан: {new Date(record.created_at).toLocaleDateString('ru-RU')} {new Date(record.created_at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}</span>
         <span className="mx-2">|</span>
-        <span>Обновлён {new Date(record.updated_at).toLocaleDateString('ru-RU')}</span>
+        <span>Обновлён: {new Date(record.updated_at).toLocaleDateString('ru-RU')} {new Date(record.updated_at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}</span>
       </div>
 
       {/* ── Actions ───────────────────────────────────────────────────── */}

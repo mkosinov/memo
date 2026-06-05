@@ -14,9 +14,11 @@ interface CustomSelectProps {
   options: CustomSelectOption[];
   onChange: (value: string) => void;
   className?: string;
+  /** When true, only the icon is shown in the trigger — no label text */
+  iconOnly?: boolean;
 }
 
-export function CustomSelect({ value, options, onChange, className = '' }: CustomSelectProps) {
+export function CustomSelect({ value, options, onChange, className = '', iconOnly = false }: CustomSelectProps) {
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const selected = options.find(o => o.value === value);
@@ -54,7 +56,7 @@ export function CustomSelect({ value, options, onChange, className = '' }: Custo
         {selected?.icon && (
           <span style={{ color: selected?.color }}>{selected.icon}</span>
         )}
-        <span>{selected?.label ?? '—'}</span>
+        {!iconOnly && <span>{selected?.label ?? '—'}</span>}
         <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
           <path d="M6 9l6 6 6-6" />
         </svg>

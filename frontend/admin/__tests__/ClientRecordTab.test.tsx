@@ -248,9 +248,9 @@ describe('ClientRecordTab', () => {
 
   it('renders all service options in dropdown', () => {
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    // Open the service CustomSelect (4th trigger: location, status, master, service)
+    // Open the service CustomSelect (3rd trigger: location, status, service)
     const triggers = screen.getAllByTestId('custom-select-trigger');
-    fireEvent.click(triggers[3]);
+    fireEvent.click(triggers[2]);
     // After opening, "Не выбрана" should be visible in the dropdown
     const dropdown = screen.getByTestId('custom-select-dropdown');
     expect(dropdown).toHaveTextContent('Не выбрана');
@@ -270,10 +270,15 @@ describe('ClientRecordTab', () => {
 
   // ─── Visit status ───────────────────────────────────────────────────────
 
-  it('renders visit status with correct label', () => {
+  it('renders visit status as icon-only select', () => {
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    // The status CustomSelect shows "Ожидает" as the selected option
-    expect(screen.getByText('Ожидает')).toBeInTheDocument();
+    // Status select is iconOnly — label is hidden in trigger, visible in dropdown
+    const triggers = screen.getAllByTestId('custom-select-trigger');
+    const statusTrigger = triggers[1]; // Location, Status, ...
+    expect(statusTrigger).toBeInTheDocument();
+    // Open dropdown to verify the option exists
+    fireEvent.click(statusTrigger);
+    expect(screen.getByTestId('custom-select-dropdown')).toHaveTextContent('Ожидает');
   });
 
   it('status changes through CustomSelect dropdown', async () => {
@@ -380,9 +385,10 @@ describe('ClientRecordTab', () => {
 
   it('shows total cost from visits', () => {
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    // The visits total is shown inside the visitors box
-    expect(screen.getByTestId('visits-total')).toHaveTextContent('3 500 ₽');
-    // Also check the price input
+    // The Итого input shows the sum of visit prices (custom_price is null)
+    const customPriceInput = screen.getByTestId('input-custom-price');
+    expect(customPriceInput).toHaveValue(3500);
+    // Also check the per-visit price input
     const priceInputs = screen.getAllByTestId('input-visit-price');
     expect(priceInputs[0]).toHaveValue(3500);
   });
@@ -395,7 +401,7 @@ describe('ClientRecordTab', () => {
 
   it('shows remaining amount', () => {
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    expect(screen.getByText('Остаток:')).toBeInTheDocument();
+    expect(screen.getByText('Осталось:')).toBeInTheDocument();
     // 3500 - 1500 = 2000
     expect(screen.getByText('2 000 ₽')).toBeInTheDocument();
   });
@@ -460,7 +466,7 @@ describe('ClientRecordTab', () => {
 
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
     // Total = 5000 (custom), paid = 2000, remaining = 3000
-    expect(screen.getByText('5 000 ₽')).toBeInTheDocument();
+    expect(screen.getByTestId('input-custom-price')).toHaveValue(5000);
     expect(screen.getByText('2 000 ₽')).toBeInTheDocument();
     expect(screen.getByText('3 000 ₽')).toBeInTheDocument();
   });

@@ -19,21 +19,24 @@ vi.mock('@memo/api-client', () => ({
   getLocations: vi.fn(),
   getPayments: vi.fn(),
   updateVisitStatus: vi.fn(),
+  patchActivity: vi.fn(),
+  createVisitor: vi.fn(),
 }));
 
 import {
   getRecord,
-  updateRecord,
   patchRecord,
   deleteRecord,
   createPayment,
+  deletePayment,
   getClientVisitors,
   getActivity,
   getServices,
   getMasters,
   getLocations,
   getPayments,
-  updateVisitStatus,
+  patchActivity,
+  createVisitor,
 } from '@memo/api-client';
 
 // ─── Mock react-query ──────────────────────────────────────────────────────
@@ -117,7 +120,10 @@ const mockServiceResponse = {
   max_age: 99,
   duration: 150,
   record_info: '',
-  tariffs: [],
+  tariffs: [
+    { id: 't1', service_id: 's1', title: 'Взрослый', price: 3500, description: null },
+    { id: 't2', service_id: 's1', title: 'Детский', price: 2500, description: null },
+  ],
   tags: [],
   is_active: true,
   created_at: '',
@@ -145,7 +151,6 @@ import { ClientRecordTab } from '../app/(main)/clients/components/ClientRecordTa
 
 describe('ClientRecordTab', () => {
   const onClose = vi.fn();
-  const mockMutateAsync = vi.fn();
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -174,8 +179,8 @@ describe('ClientRecordTab', () => {
       return { data: mockRecord, isLoading: false, error: null } as any;
     });
 
-    vi.mocked(updateRecord).mockResolvedValue(mockRecord);
     vi.mocked(patchRecord).mockResolvedValue(mockRecord);
+    vi.mocked(patchActivity).mockResolvedValue(mockActivityResponse);
     vi.mocked(deleteRecord).mockResolvedValue(undefined);
     vi.mocked(createPayment).mockResolvedValue({
       id: 'p1',
@@ -186,11 +191,14 @@ describe('ClientRecordTab', () => {
       updated_at: '',
       is_active: true,
     });
+    vi.mocked(deletePayment).mockResolvedValue(undefined);
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
   });
+
+  // ─── Loading / NotFound ────────────────────────────────────────────────
 
   it('shows loading state', () => {
     mockUseQuery.mockReturnValue({
@@ -210,446 +218,109 @@ describe('ClientRecordTab', () => {
       error: null,
     } as any);
 
-
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
     expect(screen.getByText('Запись не найдена')).toBeInTheDocument();
   });
 
-  it('renders event info section', () => {
+  // ─── Date / Time / Service ─────────────────────────────────────────────
 
+  it('renders date input with activity date', () => {
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    expect(screen.getByText('Мероприятие')).toBeInTheDocument();
+    const dateInput = screen.getByLabelText('Дата') as HTMLInputElement;
+    expect(dateInput.value).toBe('2026-05-15');
   });
 
-  it('renders status dropdown with current status', () => {
-
+  it('renders time input with activity time', () => {
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    const statusSelect = screen.getByLabelText('Статус записи');
-    expect(statusSelect).toBeInTheDocument();
-    expect(statusSelect).toHaveValue('confirmed');
+    const timeInput = screen.getByLabelText('Время') as HTMLInputElement;
+    expect(timeInput.value).toBe('14:00');
   });
 
-  it('renders all status options', () => {
-
+  it('renders service dropdown with current service', () => {
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    const statusSelect = screen.getByLabelText('Статус записи');
-    const options = Array.from(statusSelect.querySelectorAll('option'));
-    const values = options.map((o) => o.value);
-    expect(values).toContain('pending');
-    expect(values).toContain('confirmed');
-    expect(values).toContain('cancelled');
-    expect(values).toContain('no_show');
+    const serviceSelect = screen.getByLabelText('Услуга') as HTMLSelectElement;
+    expect(serviceSelect.value).toBe('s1');
   });
+
+  it('renders all service options', () => {
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    const serviceSelect = screen.getByLabelText('Услуга') as HTMLSelectElement;
+    const options = Array.from(serviceSelect.querySelectorAll('option'));
+    const values = options.map(o => o.value);
+    expect(values).toContain('s1');
+  });
+
+  // ─── Master / Location ─────────────────────────────────────────────────
+
+  it('renders master dropdown (disabled)', () => {
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    const masterSelect = screen.getByLabelText('Мастер') as HTMLSelectElement;
+    expect(masterSelect).toBeDisabled();
+    expect(masterSelect.value).toBe('m1');
+  });
+
+  it('renders location dropdown (disabled)', () => {
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    const locationSelect = screen.getByLabelText('Локация') as HTMLSelectElement;
+    expect(locationSelect).toBeDisabled();
+    expect(locationSelect.value).toBe('loc1');
+  });
+
+  // ─── Visit status icon ────────────────────────────────────────────────
+
+  it('renders visit status icon', () => {
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    expect(screen.getByTestId('visit-status-icon')).toBeInTheDocument();
+  });
+
+  it('status icon cycles through statuses on click', async () => {
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    const icon = screen.getByTestId('visit-status-icon');
+
+    // Initial status is waiting (yellow)
+    expect(icon).toHaveStyle({ color: '#F59E0B' });
+
+    // Click to cycle to visited (green)
+    fireEvent.click(icon);
+    expect(icon).toHaveStyle({ color: '#10B981' });
+
+    // Click to cycle to missed (red)
+    fireEvent.click(icon);
+    expect(icon).toHaveStyle({ color: '#EF4444' });
+
+    // Click to cycle to cancelled (gray)
+    fireEvent.click(icon);
+    expect(icon).toHaveStyle({ color: '#6B7280' });
+
+    // Click to cycle back to waiting
+    fireEvent.click(icon);
+    expect(icon).toHaveStyle({ color: '#F59E0B' });
+  });
+
+  // ─── Visitors ─────────────────────────────────────────────────────────
 
   it('renders visitors section', () => {
-
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
     expect(screen.getByText('Посетители')).toBeInTheDocument();
   });
 
-  it('renders visitor rows with actual names', () => {
-
+  it('renders visitor rows with names', () => {
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
     expect(screen.getByText('Анна Иванова')).toBeInTheDocument();
   });
 
-  it('renders payment summary with total cost', () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    expect(screen.getByText('Оплата')).toBeInTheDocument();
-    // 3 500 ₽ appears both in visitor row and payment total — use getAllByText
-    const matches = screen.getAllByText(/3[\s]?500\s?₽/);
-    expect(matches.length).toBeGreaterThanOrEqual(2);
-  });
-
-  it('calculates total from multiple visits', () => {
+  it('shows adult label when visitor has no age', () => {
     mockUseQuery.mockImplementation((options: any) => {
       const key = options?.queryKey?.[0];
       if (key === 'visitors') {
-        return { data: mockVisitors, isLoading: false, error: null } as any;
-      }
-      return { data: mockRecordMultipleVisits, isLoading: false, error: null } as any;
-    });
-
-
-    render(<ClientRecordTab recordId="r2" clientId="c1" onClose={onClose} />);
-    // 3500 + 2500 = 6000 — appears in Итого and Остаток (no payments)
-    const matches = screen.getAllByText(/6[\s]?000\s?₽/);
-    expect(matches.length).toBeGreaterThanOrEqual(2);
-  });
-
-  it('renders add payment form', () => {
-
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    expect(screen.getByPlaceholderText('Сумма')).toBeInTheDocument();
-    expect(screen.getByText('Добавить')).toBeInTheDocument();
-  });
-
-  it('renders delete button', () => {
-
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    expect(screen.getByText('Удалить запись')).toBeInTheDocument();
-  });
-
-  it('calls patchRecord when status changes', async () => {
-
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    const statusSelect = screen.getByLabelText('Статус записи');
-
-    fireEvent.change(statusSelect, { target: { value: 'cancelled' } });
-
-    await waitFor(() => {
-      expect(patchRecord).toHaveBeenCalledWith('r1', { status: 'cancelled' });
-    });
-  });
-
-  it('invalidates records query after status change', async () => {
-
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    const statusSelect = screen.getByLabelText('Статус записи');
-
-    fireEvent.change(statusSelect, { target: { value: 'cancelled' } });
-
-    await waitFor(() => {
-      expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['records'] });
-    });
-  });
-
-  it('calls deleteRecord and onClose when delete clicked', async () => {
-
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-
-    fireEvent.click(screen.getByText('Удалить запись'));
-
-    await waitFor(() => {
-      expect(deleteRecord).toHaveBeenCalledWith('r1');
-      expect(onClose).toHaveBeenCalled();
-    });
-  });
-
-  it('invalidates records query after delete', async () => {
-
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-
-    fireEvent.click(screen.getByText('Удалить запись'));
-
-    await waitFor(() => {
-      expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['records'] });
-    });
-  });
-
-  it('calls createPayment when add button clicked with amount', async () => {
-
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-
-    fireEvent.change(screen.getByPlaceholderText('Сумма'), {
-      target: { value: '1500' },
-    });
-    fireEvent.click(screen.getByText('Добавить'));
-
-    await waitFor(() => {
-      expect(createPayment).toHaveBeenCalledWith({
-        record_id: 'r1',
-        amount: 1500,
-        method: 'card',
-      });
-    });
-  });
-
-  it('does not call createPayment with zero amount', async () => {
-
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-
-    fireEvent.change(screen.getByPlaceholderText('Сумма'), {
-      target: { value: '0' },
-    });
-    fireEvent.click(screen.getByText('Добавить'));
-
-    // Should not be called because amount is not > 0
-    expect(createPayment).not.toHaveBeenCalled();
-  });
-
-  it('allows changing payment method', async () => {
-
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-
-    const methodSelect = screen.getByDisplayValue('Карта');
-    fireEvent.change(methodSelect, { target: { value: 'cash' } });
-
-    fireEvent.change(screen.getByPlaceholderText('Сумма'), {
-      target: { value: '2000' },
-    });
-    fireEvent.click(screen.getByText('Добавить'));
-
-    await waitFor(() => {
-      expect(createPayment).toHaveBeenCalledWith({
-        record_id: 'r1',
-        amount: 2000,
-        method: 'cash',
-      });
-    });
-  });
-
-  it('clears payment amount after successful add', async () => {
-
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-
-    const amountInput = screen.getByPlaceholderText('Сумма');
-    fireEvent.change(amountInput, { target: { value: '1000' } });
-    fireEvent.click(screen.getByText('Добавить'));
-
-    await waitFor(() => {
-      expect(amountInput).toHaveValue(null);
-    });
-  });
-
-  // ─── Payment form edge cases ────────────────────────────────────────────
-
-  it('does not call createPayment with empty string amount', () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-
-    fireEvent.change(screen.getByPlaceholderText('Сумма'), {
-      target: { value: '' },
-    });
-    fireEvent.click(screen.getByText('Добавить'));
-
-    expect(createPayment).not.toHaveBeenCalled();
-  });
-
-  it('does not call createPayment with negative amount', () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-
-    fireEvent.change(screen.getByPlaceholderText('Сумма'), {
-      target: { value: '-500' },
-    });
-    fireEvent.click(screen.getByText('Добавить'));
-
-    expect(createPayment).not.toHaveBeenCalled();
-  });
-
-  it('sends transfer method when payment method is changed to transfer', async () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-
-    const methodSelect = screen.getByDisplayValue('Карта');
-    fireEvent.change(methodSelect, { target: { value: 'transfer' } });
-
-    fireEvent.change(screen.getByPlaceholderText('Сумма'), {
-      target: { value: '3000' },
-    });
-    fireEvent.click(screen.getByText('Добавить'));
-
-    await waitFor(() => {
-      expect(createPayment).toHaveBeenCalledWith({
-        record_id: 'r1',
-        amount: 3000,
-        method: 'transfer',
-      });
-    });
-  });
-
-  it('invalidates payments query after successful payment', async () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-
-    fireEvent.change(screen.getByPlaceholderText('Сумма'), {
-      target: { value: '1000' },
-    });
-    fireEvent.click(screen.getByText('Добавить'));
-
-    await waitFor(() => {
-      expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['payments'] });
-    });
-  });
-
-  it('shows "Нет посетителей" when record has no visits', () => {
-    mockUseQuery.mockImplementation((options: any) => {
-      const key = options?.queryKey?.[0];
-      if (key === 'visitors') {
-        return { data: mockVisitors, isLoading: false, error: null } as any;
-      }
-      return { data: { ...mockRecord, id: 'r3', visits: [] }, isLoading: false, error: null } as any;
-    });
-
-    render(<ClientRecordTab recordId="r3" clientId="c1" onClose={onClose} />);
-    expect(screen.getByText('Нет посетителей')).toBeInTheDocument();
-  });
-
-  it('displays all payment method options', () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-
-    const methodSelect = screen.getByDisplayValue('Карта');
-    const options = Array.from(methodSelect.querySelectorAll('option'));
-    const values = options.map(o => o.value);
-    expect(values).toContain('card');
-    expect(values).toContain('cash');
-    expect(values).toContain('transfer');
-  });
-
-  it('displays status icon for each status type', () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    // Each status has an SVG icon — confirmed status shows checkmark
-    const statusSelect = screen.getByTestId('select-record-status');
-    expect(statusSelect).toBeInTheDocument();
-  });
-
-  it('shows total cost with locale formatting', () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    // 3500 should be formatted as "3 500 ₽" — appears in both visitor row and payment total
-    const matches = screen.getAllByText('3 500 ₽');
-    expect(matches.length).toBeGreaterThanOrEqual(2);
-  });
-
-  // ─── PATCH-based status and price ────────────────────────────────────────
-
-  it('invalidates record query after status change', async () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    const statusSelect = screen.getByLabelText('Статус записи');
-
-    fireEvent.change(statusSelect, { target: { value: 'cancelled' } });
-
-    await waitFor(() => {
-      expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['record', 'r1'] });
-    });
-  });
-
-  it('does NOT call updateRecord on status change', async () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    const statusSelect = screen.getByLabelText('Статус записи');
-
-    fireEvent.change(statusSelect, { target: { value: 'confirmed' } });
-
-    await waitFor(() => {
-      expect(patchRecord).toHaveBeenCalled();
-    });
-    expect(updateRecord).not.toHaveBeenCalled();
-  });
-
-  it('calls patchRecord for custom_price on blur', async () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    const priceInput = screen.getByTestId('input-custom-price');
-
-    fireEvent.change(priceInput, { target: { value: '5000' } });
-    fireEvent.blur(priceInput);
-
-    await waitFor(() => {
-      expect(patchRecord).toHaveBeenCalledWith('r1', { custom_price: 5000 });
-    });
-  });
-
-  // ─── Activity name display ───────────────────────────────────────────────
-
-  it('displays activity service name', () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    // "Картина маслом" appears in the header div and in the dropdown option
-    const matches = screen.getAllByText('Картина маслом');
-    expect(matches.length).toBeGreaterThanOrEqual(1);
-  });
-
-  // ─── Payment invalidation ────────────────────────────────────────────────
-
-  it('invalidates record query after adding payment', async () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-
-    fireEvent.change(screen.getByPlaceholderText('Сумма'), {
-      target: { value: '1000' },
-    });
-    fireEvent.click(screen.getByText('Добавить'));
-
-    await waitFor(() => {
-      expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['record', 'r1'] });
-    });
-  });
-
-  // ─── Visitor price editing ──────────────────────────────────────────────
-
-  it('allows editing visit price inline', async () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    // Should have a price input for each visit
-    const priceInputs = screen.getAllByTestId('visit-price-input');
-    expect(priceInputs.length).toBe(mockRecord.visits.length);
-  });
-
-  it('calls patchRecord when visit price is changed and blurred', async () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    // Click the price span to enter edit mode
-    const priceSpan = screen.getAllByTestId('visit-price-input')[0];
-    fireEvent.click(priceSpan);
-
-    // Now it should be an input
-    const priceInput = screen.getAllByTestId('visit-price-input')[0];
-    fireEvent.change(priceInput, { target: { value: '4000' } });
-    fireEvent.blur(priceInput);
-
-    await waitFor(() => {
-      expect(patchRecord).toHaveBeenCalledWith(
-        'r1',
-        expect.objectContaining({
-          visits: expect.arrayContaining([
-            expect.objectContaining({ price: 4000 }),
-          ]),
-        }),
-      );
-    });
-  });
-
-  // ─── 3.1: Activity dropdowns (Мастер, Активность, Место) ─────────────
-
-  it('renders Мастер dropdown with masters list', () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    const masterSelect = screen.getByLabelText('Мастер');
-    expect(masterSelect).toBeInTheDocument();
-    expect(masterSelect).toHaveValue('m1');
-  });
-
-  it('renders Мастер name in dropdown options', () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    const masterSelect = screen.getByLabelText('Мастер');
-    expect(masterSelect).toHaveTextContent('Ольга Середа');
-  });
-
-  it('renders Активность dropdown with services list', () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    const serviceSelect = screen.getByLabelText('Активность');
-    expect(serviceSelect).toBeInTheDocument();
-    expect(serviceSelect).toHaveValue('s1');
-  });
-
-  it('renders Место dropdown with locations list', () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    const locationSelect = screen.getByLabelText('Место');
-    expect(locationSelect).toBeInTheDocument();
-    expect(locationSelect).toHaveValue('loc1');
-  });
-
-  it('renders Место name in dropdown options', () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    const locationSelect = screen.getByLabelText('Место');
-    expect(locationSelect).toHaveTextContent('Альпика');
-  });
-
-  it('renders date from activity', () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    // activity start is '2026-05-15T14:00:00', should render as ru-RU date
-    expect(screen.getByText('Дата')).toBeInTheDocument();
-    expect(screen.getByText('15.05.2026')).toBeInTheDocument();
-  });
-
-  it('renders time from activity', () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    expect(screen.getByText('Время')).toBeInTheDocument();
-    // Activity start 2026-05-15T14:00:00 — time is 14:00
-    expect(screen.getByText('14:00')).toBeInTheDocument();
-  });
-
-  it('shows "Не выбран" placeholder in master dropdown when no activity', () => {
-    mockUseQuery.mockImplementation((options: any) => {
-      const key = options?.queryKey?.[0];
-      if (key === 'record') {
-        return { data: { ...mockRecord, activity_id: '' }, isLoading: false, error: null } as any;
+        return {
+          data: [{ ...mockVisitors[0], age: null }],
+          isLoading: false,
+          error: null,
+        } as any;
       }
       if (key === 'activity') {
-        return { data: undefined, isLoading: false, error: null } as any;
-      }
-      if (key === 'visitors') {
-        return { data: mockVisitors, isLoading: false, error: null } as any;
+        return { data: mockActivityResponse, isLoading: false, error: null } as any;
       }
       if (key === 'services') {
         return { data: [mockServiceResponse], isLoading: false, error: null } as any;
@@ -663,118 +334,110 @@ describe('ClientRecordTab', () => {
       if (key === 'payments') {
         return { data: [], isLoading: false, error: null } as any;
       }
-      return { data: undefined, isLoading: false, error: null } as any;
-    });
-
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    const masterSelect = screen.getByLabelText('Мастер');
-    expect(masterSelect).toHaveValue('');
-  });
-
-  // ─── 3.2: Visitor status as dropdown ────────────────────────────────
-
-  it('renders visitor status as dropdown', () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    const statusSelect = screen.getByLabelText('Статус посетителя');
-    expect(statusSelect).toBeInTheDocument();
-    expect(statusSelect).toHaveValue('waiting');
-  });
-
-  it('renders all visitor status options in dropdown', () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    const statusSelect = screen.getByLabelText('Статус посетителя');
-    const options = Array.from(statusSelect.querySelectorAll('option'));
-    const values = options.map((o) => o.value);
-    expect(values).toContain('waiting');
-    expect(values).toContain('visited');
-    expect(values).toContain('missed');
-    expect(values).toContain('cancelled');
-  });
-
-  it('calls updateVisitStatus when visitor status changes', async () => {
-    vi.mocked(updateVisitStatus).mockResolvedValue({
-      id: 'v1', record_id: 'r1', visitor_id: 'vis1', price: 3500, status: 'visited', created_at: '', updated_at: '', is_active: true,
-    });
-
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    const statusSelect = screen.getByLabelText('Статус посетителя');
-    fireEvent.change(statusSelect, { target: { value: 'visited' } });
-
-    await waitFor(() => {
-      expect(updateVisitStatus).toHaveBeenCalledWith('v1', 'visited');
-    });
-  });
-
-  it('invalidates record query after visitor status change', async () => {
-    vi.mocked(updateVisitStatus).mockResolvedValue({
-      id: 'v1', record_id: 'r1', visitor_id: 'vis1', price: 3500, status: 'visited', created_at: '', updated_at: '', is_active: true,
-    });
-
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    const statusSelect = screen.getByLabelText('Статус посетителя');
-    fireEvent.change(statusSelect, { target: { value: 'visited' } });
-
-    await waitFor(() => {
-      expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['record', 'r1'] });
-    });
-  });
-
-  // ─── 3.3: Payment summary (Итого / Оплачено / Остаток) ─────────────
-
-  it('renders payment summary with Итого, Оплачено, Остаток', () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    expect(screen.getByText('Итого')).toBeInTheDocument();
-    expect(screen.getByText('Оплачено')).toBeInTheDocument();
-    expect(screen.getByText('Остаток')).toBeInTheDocument();
-  });
-
-  it('shows total cost in payment summary', () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    // Total for 1 visit at 3500
-    const totalElements = screen.getAllByText('3 500 ₽');
-    expect(totalElements.length).toBeGreaterThanOrEqual(1);
-  });
-
-  it('shows paid amount from payments', () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    // mockPayments has amount 1500
-    expect(screen.getByText('1 500 ₽')).toBeInTheDocument();
-  });
-
-  it('shows remaining amount as difference', () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    // 3500 - 1500 = 2000
-    expect(screen.getByText('2 000 ₽')).toBeInTheDocument();
-  });
-
-  it('shows zero remaining when fully paid', () => {
-    mockUseQuery.mockImplementation((options: any) => {
-      const key = options?.queryKey?.[0];
-      if (key === 'payments') {
-        return { data: [{ id: 'p1', record_id: 'r1', amount: 3500, method: 'card', created_at: '', updated_at: '', is_active: true }], isLoading: false, error: null } as any;
-      }
-      const key2 = options?.queryKey?.[0];
-      if (key2 === 'visitors') {
-        return { data: mockVisitors, isLoading: false, error: null } as any;
-      }
-      if (key2 === 'activity') {
-        return { data: mockActivityResponse, isLoading: false, error: null } as any;
-      }
-      if (key2 === 'services') {
-        return { data: [mockServiceResponse], isLoading: false, error: null } as any;
-      }
-      if (key2 === 'masters') {
-        return { data: mockMasters, isLoading: false, error: null } as any;
-      }
-      if (key2 === 'locations') {
-        return { data: mockLocations, isLoading: false, error: null } as any;
-      }
       return { data: mockRecord, isLoading: false, error: null } as any;
     });
 
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    // 3500 - 3500 = 0
-    expect(screen.getByText('0 ₽')).toBeInTheDocument();
+    expect(screen.getByText('(взр.)')).toBeInTheDocument();
+  });
+
+  it('renders tariff dropdown for each visit', () => {
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    const tariffSelects = screen.getAllByLabelText('Тариф посетителя');
+    expect(tariffSelects.length).toBe(mockRecord.visits.length);
+  });
+
+  it('shows visit price', () => {
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    const prices = screen.getAllByTestId('visit-price');
+    expect(prices[0]).toHaveTextContent('3 500 ₽');
+  });
+
+  it('shows "Нет посетителей" when record has no visits', () => {
+    mockUseQuery.mockImplementation((options: any) => {
+      const key = options?.queryKey?.[0];
+      if (key === 'visitors') {
+        return { data: mockVisitors, isLoading: false, error: null } as any;
+      }
+      if (key === 'activity') {
+        return { data: mockActivityResponse, isLoading: false, error: null } as any;
+      }
+      if (key === 'services') {
+        return { data: [mockServiceResponse], isLoading: false, error: null } as any;
+      }
+      if (key === 'masters') {
+        return { data: mockMasters, isLoading: false, error: null } as any;
+      }
+      if (key === 'locations') {
+        return { data: mockLocations, isLoading: false, error: null } as any;
+      }
+      if (key === 'payments') {
+        return { data: [], isLoading: false, error: null } as any;
+      }
+      return { data: { ...mockRecord, id: 'r3', visits: [] }, isLoading: false, error: null } as any;
+    });
+
+    render(<ClientRecordTab recordId="r3" clientId="c1" onClose={onClose} />);
+    expect(screen.getByText('Нет посетителей')).toBeInTheDocument();
+  });
+
+  // ─── Payments ─────────────────────────────────────────────────────────
+
+  it('renders payment summary', () => {
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    expect(screen.getByText('Оплата')).toBeInTheDocument();
+  });
+
+  it('shows total cost from visits', () => {
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    expect(screen.getByText('Итого:')).toBeInTheDocument();
+    // 3500 total
+    const priceInputs = screen.getAllByTestId('visit-price');
+    expect(priceInputs[0]).toHaveTextContent('3 500 ₽');
+  });
+
+  it('shows paid amount from payments', () => {
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    expect(screen.getByText('Оплачено:')).toBeInTheDocument();
+    expect(screen.getByText('1 500 ₽')).toBeInTheDocument();
+  });
+
+  it('shows remaining amount', () => {
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    expect(screen.getByText('Остаток:')).toBeInTheDocument();
+    // 3500 - 1500 = 2000
+    expect(screen.getByText('2 000 ₽')).toBeInTheDocument();
+  });
+
+  it('calculates total from multiple visits', () => {
+    mockUseQuery.mockImplementation((options: any) => {
+      const key = options?.queryKey?.[0];
+      if (key === 'visitors') {
+        return { data: mockVisitors, isLoading: false, error: null } as any;
+      }
+      if (key === 'activity') {
+        return { data: mockActivityResponse, isLoading: false, error: null } as any;
+      }
+      if (key === 'services') {
+        return { data: [mockServiceResponse], isLoading: false, error: null } as any;
+      }
+      if (key === 'masters') {
+        return { data: mockMasters, isLoading: false, error: null } as any;
+      }
+      if (key === 'locations') {
+        return { data: mockLocations, isLoading: false, error: null } as any;
+      }
+      if (key === 'payments') {
+        return { data: [], isLoading: false, error: null } as any;
+      }
+      return { data: mockRecordMultipleVisits, isLoading: false, error: null } as any;
+    });
+
+    render(<ClientRecordTab recordId="r2" clientId="c1" onClose={onClose} />);
+    // 3500 + 2500 = 6000
+    const priceSpans = screen.getAllByTestId('visit-price');
+    expect(priceSpans[0]).toHaveTextContent('3 500 ₽');
+    expect(priceSpans[1]).toHaveTextContent('2 500 ₽');
   });
 
   it('uses custom_price for total when set', () => {
@@ -805,13 +468,110 @@ describe('ClientRecordTab', () => {
     });
 
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    // Total = custom_price 5000, paid = 2000, remaining = 3000
+    // Total = 5000 (custom), paid = 2000, remaining = 3000
     expect(screen.getByText('5 000 ₽')).toBeInTheDocument();
     expect(screen.getByText('2 000 ₽')).toBeInTheDocument();
     expect(screen.getByText('3 000 ₽')).toBeInTheDocument();
   });
 
-  // ─── 3.4: Comment field ────────────────────────────────────────────
+  // ─── Payment list with delete ────────────────────────────────────────
+
+  it('renders payment list with existing payments', () => {
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    expect(screen.getByTestId('payment-list')).toBeInTheDocument();
+    const rows = screen.getAllByTestId('payment-row');
+    expect(rows.length).toBe(1);
+    expect(screen.getByText(/1 500 ₽ \(карта\)/)).toBeInTheDocument();
+  });
+
+  it('calls deletePayment when delete button clicked', async () => {
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    fireEvent.click(screen.getByTestId('btn-delete-payment'));
+
+    await waitFor(() => {
+      expect(deletePayment).toHaveBeenCalledWith('p1');
+    });
+  });
+
+  it('invalidates queries after deleting payment', async () => {
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    fireEvent.click(screen.getByTestId('btn-delete-payment'));
+
+    await waitFor(() => {
+      expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['payments'] });
+    });
+  });
+
+  // ─── Add payment form ─────────────────────────────────────────────────
+
+  it('renders add payment form', () => {
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    expect(screen.getByPlaceholderText('Сумма')).toBeInTheDocument();
+    expect(screen.getByText('Добавить оплату')).toBeInTheDocument();
+  });
+
+  it('calls createPayment when add button clicked with amount', async () => {
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    fireEvent.change(screen.getByPlaceholderText('Сумма'), { target: { value: '1500' } });
+    fireEvent.click(screen.getByTestId('btn-add-payment'));
+
+    await waitFor(() => {
+      expect(createPayment).toHaveBeenCalledWith({
+        record_id: 'r1',
+        amount: 1500,
+        method: 'card',
+      });
+    });
+  });
+
+  it('does not call createPayment with zero amount', () => {
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    fireEvent.change(screen.getByPlaceholderText('Сумма'), { target: { value: '0' } });
+    fireEvent.click(screen.getByTestId('btn-add-payment'));
+    expect(createPayment).not.toHaveBeenCalled();
+  });
+
+  it('does not call createPayment with empty amount', () => {
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    fireEvent.change(screen.getByPlaceholderText('Сумма'), { target: { value: '' } });
+    fireEvent.click(screen.getByTestId('btn-add-payment'));
+    expect(createPayment).not.toHaveBeenCalled();
+  });
+
+  it('allows changing payment method', async () => {
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    const methodSelect = screen.getByDisplayValue('Карта');
+    fireEvent.change(methodSelect, { target: { value: 'cash' } });
+    fireEvent.change(screen.getByPlaceholderText('Сумма'), { target: { value: '2000' } });
+    fireEvent.click(screen.getByTestId('btn-add-payment'));
+
+    await waitFor(() => {
+      expect(createPayment).toHaveBeenCalledWith({
+        record_id: 'r1',
+        amount: 2000,
+        method: 'cash',
+      });
+    });
+  });
+
+  it('displays all payment method options', () => {
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    const methodSelect = screen.getByDisplayValue('Карта');
+    const options = Array.from(methodSelect.querySelectorAll('option'));
+    const values = options.map(o => o.value);
+    expect(values).toContain('card');
+    expect(values).toContain('cash');
+    expect(values).toContain('transfer');
+  });
+
+  it('displays all payment methods in Russian', () => {
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    expect(screen.getByText('Карта')).toBeInTheDocument();
+    expect(screen.getByText('Наличные')).toBeInTheDocument();
+    expect(screen.getByText('Перевод')).toBeInTheDocument();
+  });
+
+  // ─── Comment ───────────────────────────────────────────────────────────
 
   it('renders comment textarea', () => {
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
@@ -851,29 +611,181 @@ describe('ClientRecordTab', () => {
     expect(textarea).toHaveValue('Тестовый комментарий');
   });
 
-  it('saves comment on blur via patchRecord', async () => {
+  // ─── Delete record ─────────────────────────────────────────────────────
+
+  it('renders delete button', () => {
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    const textarea = screen.getByPlaceholderText('Добавить комментарий...');
-    fireEvent.change(textarea, { target: { value: 'Новый комментарий' } });
-    fireEvent.blur(textarea);
+    expect(screen.getByText('Удалить запись')).toBeInTheDocument();
+  });
+
+  it('calls deleteRecord and onClose when delete clicked', async () => {
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    fireEvent.click(screen.getByText('Удалить запись'));
 
     await waitFor(() => {
-      expect(patchRecord).toHaveBeenCalledWith('r1', { comment: 'Новый комментарий' });
+      expect(deleteRecord).toHaveBeenCalledWith('r1');
+      expect(onClose).toHaveBeenCalled();
     });
   });
 
-  it('does not patch comment when value is unchanged', async () => {
+  it('invalidates records query after delete', async () => {
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    const textarea = screen.getByPlaceholderText('Добавить комментарий...');
-    // Don't change, just blur
-    fireEvent.blur(textarea);
+    fireEvent.click(screen.getByText('Удалить запись'));
 
     await waitFor(() => {
-      // patchRecord should NOT have been called with comment
-      const commentCalls = (patchRecord as any).mock.calls.filter(
-        (call: any[]) => call[1] && 'comment' in call[1]
-      );
-      expect(commentCalls).toHaveLength(0);
+      expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['records'] });
     });
+  });
+
+  // ─── Save / Cancel with hasChanges ─────────────────────────────────────
+
+  it('save button is disabled when no changes', () => {
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    const saveBtn = screen.getByTestId('btn-save-record');
+    expect(saveBtn).toBeDisabled();
+  });
+
+  it('cancel button is disabled when no changes', () => {
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    const cancelBtn = screen.getByRole('button', { name: /Отмена/ });
+    expect(cancelBtn).toBeDisabled();
+  });
+
+  it('save button enables when date is changed', () => {
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    const dateInput = screen.getByLabelText('Дата');
+    fireEvent.change(dateInput, { target: { value: '2026-06-01' } });
+    expect(screen.getByTestId('btn-save-record')).toBeEnabled();
+  });
+
+  it('save button enables when comment is changed', () => {
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    const textarea = screen.getByPlaceholderText('Добавить комментарий...');
+    fireEvent.change(textarea, { target: { value: 'Новый комментарий' } });
+    expect(screen.getByTestId('btn-save-record')).toBeEnabled();
+  });
+
+  it('save button enables when custom price is changed', () => {
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    const priceInput = screen.getByTestId('input-custom-price');
+    fireEvent.change(priceInput, { target: { value: '5000' } });
+    expect(screen.getByTestId('btn-save-record')).toBeEnabled();
+  });
+
+  it('save button enables when status icon is cycled', () => {
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    fireEvent.click(screen.getByTestId('visit-status-icon'));
+    expect(screen.getByTestId('btn-save-record')).toBeEnabled();
+  });
+
+  it('calls patchRecord and patchActivity on save', async () => {
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    // Change comment to enable save
+    const textarea = screen.getByPlaceholderText('Добавить комментарий...');
+    fireEvent.change(textarea, { target: { value: 'Новый комментарий' } });
+    fireEvent.click(screen.getByTestId('btn-save-record'));
+
+    await waitFor(() => {
+      expect(patchRecord).toHaveBeenCalledWith('r1', expect.objectContaining({
+        comment: 'Новый комментарий',
+      }));
+    });
+  });
+
+  it('patchActivity is called when date is changed', async () => {
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    const dateInput = screen.getByLabelText('Дата');
+    fireEvent.change(dateInput, { target: { value: '2026-06-01' } });
+    fireEvent.click(screen.getByTestId('btn-save-record'));
+
+    await waitFor(() => {
+      expect(patchActivity).toHaveBeenCalledWith('ev_1', expect.objectContaining({
+        start: '2026-06-01T14:00:00',
+      }));
+    });
+  });
+
+  it('cancel resets all changes', () => {
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    const textarea = screen.getByPlaceholderText('Добавить комментарий...');
+    fireEvent.change(textarea, { target: { value: 'Новый комментарий' } });
+    expect(screen.getByTestId('btn-save-record')).toBeEnabled();
+
+    const cancelBtn = screen.getByRole('button', { name: /Отмена/ });
+    fireEvent.click(cancelBtn);
+
+    expect(textarea).toHaveValue('');
+    expect(screen.getByTestId('btn-save-record')).toBeDisabled();
+  });
+
+  it('invalidates queries after save', async () => {
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    const textarea = screen.getByPlaceholderText('Добавить комментарий...');
+    fireEvent.change(textarea, { target: { value: 'test' } });
+    fireEvent.click(screen.getByTestId('btn-save-record'));
+
+    await waitFor(() => {
+      expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['record', 'r1'] });
+      expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['records'] });
+    });
+  });
+
+  // ─── Add visitor ────────────────────────────────────────────────────────
+
+  it('renders add visitor button', () => {
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    expect(screen.getByTestId('btn-add-visitor')).toBeInTheDocument();
+  });
+
+  it('shows inline form when add visitor button clicked', () => {
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    fireEvent.click(screen.getByTestId('btn-add-visitor'));
+    expect(screen.getByTestId('input-visitor-name')).toBeInTheDocument();
+    expect(screen.getByTestId('input-visitor-age')).toBeInTheDocument();
+    expect(screen.getByTestId('btn-create-visitor')).toBeInTheDocument();
+  });
+
+  it('creates visitor and adds to record on form submit', async () => {
+    vi.mocked(createVisitor).mockResolvedValue({
+      id: 'vis_new',
+      client_id: 'c1',
+      name: 'Новый Гость',
+      age: 10,
+      created_at: '',
+      updated_at: '',
+      is_active: true,
+    });
+
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    fireEvent.click(screen.getByTestId('btn-add-visitor'));
+
+    fireEvent.change(screen.getByTestId('input-visitor-name'), { target: { value: 'Новый Гость' } });
+    fireEvent.change(screen.getByTestId('input-visitor-age'), { target: { value: '10' } });
+    fireEvent.click(screen.getByTestId('btn-create-visitor'));
+
+    await waitFor(() => {
+      expect(createVisitor).toHaveBeenCalledWith({
+        client_id: 'c1',
+        name: 'Новый Гость',
+        age: 10,
+      });
+    });
+
+    await waitFor(() => {
+      expect(patchRecord).toHaveBeenCalledWith('r1', expect.objectContaining({
+        visits: expect.arrayContaining([
+          expect.objectContaining({ visitor_id: 'vis1' }),
+          expect.objectContaining({ visitor_id: 'vis_new' }),
+        ]),
+      }));
+    });
+  });
+
+  // ─── Service name display ───────────────────────────────────────────────
+
+  it('displays activity service name in dropdown', () => {
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    const serviceSelect = screen.getByLabelText('Услуга');
+    expect(serviceSelect).toHaveTextContent('Картина маслом');
   });
 });

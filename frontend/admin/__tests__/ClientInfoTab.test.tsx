@@ -109,7 +109,6 @@ describe('ClientInfoTab', () => {
         phone: '+7 (900) 123-45-67',
         email: '',
         channel: 'telegram',
-        is_active: true,
       });
     });
   });
@@ -265,7 +264,6 @@ describe('ClientInfoTab', () => {
           phone: '+7 (000) 000-00-00',
           email: 'new@test.com',
           channel: 'whatsapp',
-          is_active: true,
         });
       });
     });

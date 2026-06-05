@@ -92,6 +92,7 @@ const mockRecord: RecordResponse = {
   status: 'confirmed',
   seats: 1,
   comment: null,
+  custom_price: null,
   created_at: '2026-05-10T10:00:00',
   updated_at: '2026-05-10T10:00:00',
   is_active: true,
@@ -283,7 +284,6 @@ describe('ClientCardModal ↔ ClientInfoTab integration (real components)', () =
         phone: '+7 (000) 000-00-00',
         email: '',
         channel: 'telegram',
-        is_active: true,
       });
     });
   });
@@ -371,9 +371,8 @@ describe('ClientCardModal ↔ ClientRecordTab integration (real components)', ()
       expect(screen.getByTestId('client-record-tab')).toBeInTheDocument();
     });
 
-    // Verify the record data is displayed (status select with current value)
-    const statusSelect = screen.getByTestId('select-record-status');
-    expect(statusSelect).toHaveValue('confirmed');
+    // Verify the record data is displayed (visit status icon)
+    expect(screen.getByTestId('visit-status-icon')).toBeInTheDocument();
   });
 
   it('record tab payment form calls createPayment', async () => {
@@ -406,7 +405,7 @@ describe('ClientCardModal ↔ ClientRecordTab integration (real components)', ()
     });
   });
 
-  it('record tab status change calls updateRecord', async () => {
+  it('record tab status icon cycles visit status', async () => {
     const { ClientCardModal } = await import('@/app/(main)/clients/components/ClientCardModal');
     render(
       <QueryClientProvider client={createQueryClient()}>
@@ -421,12 +420,12 @@ describe('ClientCardModal ↔ ClientRecordTab integration (real components)', ()
       expect(screen.getByTestId('client-record-tab')).toBeInTheDocument();
     });
 
-    // Change status
-    const statusSelect = screen.getByTestId('select-record-status');
-    fireEvent.change(statusSelect, { target: { value: 'cancelled' } });
+    // Click the status icon to cycle
+    fireEvent.click(screen.getByTestId('visit-status-icon'));
 
+    // Save button should be enabled
     await waitFor(() => {
-      expect(patchRecord).toHaveBeenCalledWith('rec1', { status: 'cancelled' });
+      expect(screen.getByTestId('btn-save-record')).toBeEnabled();
     });
   });
 

@@ -17,7 +17,6 @@ export function ClientInfoTab({ client, mode = 'view', onSave, onDelete }: Clien
   const [email, setEmail] = useState(client?.email || '');
   const [channel, setChannel] = useState(client?.channel || '');
   const [hasChanges, setHasChanges] = useState(false);
-  const [isActive, setIsActive] = useState(client?.is_active ?? true);
 
   // Visitors state
   const [visitors, setVisitors] = useState<VisitorResponse[]>([]);
@@ -31,7 +30,6 @@ export function ClientInfoTab({ client, mode = 'view', onSave, onDelete }: Clien
     setPhone(client?.phone || '');
     setEmail(client?.email || '');
     setChannel(client?.channel || '');
-    setIsActive(client?.is_active ?? true);
     setHasChanges(false);
   }, [client]);
 
@@ -48,16 +46,15 @@ export function ClientInfoTab({ client, mode = 'view', onSave, onDelete }: Clien
   const handleChange = useCallback(() => setHasChanges(true), []);
 
   const handleSave = useCallback(async () => {
-    await onSave({ name, phone, email, channel, is_active: isActive });
+    await onSave({ name, phone, email, channel });
     setHasChanges(false);
-  }, [name, phone, email, channel, isActive, onSave]);
+  }, [name, phone, email, channel, onSave]);
 
   const handleCancel = useCallback(() => {
     setName(client?.name || '');
     setPhone(client?.phone || '');
     setEmail(client?.email || '');
     setChannel(client?.channel || '');
-    setIsActive(client?.is_active ?? true);
     setHasChanges(false);
   }, [client]);
 
@@ -145,16 +142,6 @@ export function ClientInfoTab({ client, mode = 'view', onSave, onDelete }: Clien
                 handleChange();
               }}
             />
-          </div>
-          <div>
-            <label className="text-xs font-medium text-ink-mid block mb-1">Статус</label>
-            <button
-              type="button"
-              onClick={() => { setIsActive(!isActive); handleChange(); }}
-              className={`px-3 py-1.5 text-sm rounded-lg ${isActive ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}
-            >
-              {isActive ? 'Активна' : 'Неактивна'}
-            </button>
           </div>
         </div>
       </div>

@@ -280,6 +280,36 @@ class TestClientListSearch:
         assert body["items"] == []
         assert body["total"] == 0
 
+    def test_search_is_case_insensitive(
+        self, api_client, create_activity, create_client
+    ) -> None:
+        """search matches regardless of case (ilike)."""
+        _create_client_with_record(
+            api_client, create_activity, create_client,
+            client={"name": "John Smith", "phone": "+79991000003"},
+        )
+
+        # Search with different case
+        resp = api_client.get("/api/v1/clients", params={"search": "john"})
+        body = resp.json()
+        names = [c["name"] for c in body["items"]]
+        assert "John Smith" in names
+
+    def test_search_is_substring(
+        self, api_client, create_activity, create_client
+    ) -> None:
+        """search matches partial substrings."""
+        _create_client_with_record(
+            api_client, create_activity, create_client,
+            client={"name": "Alexandra Petrova", "phone": "+79991000004"},
+        )
+
+        # Search for partial name
+        resp = api_client.get("/api/v1/clients", params={"search": "alex"})
+        body = resp.json()
+        names = [c["name"] for c in body["items"]]
+        assert "Alexandra Petrova" in names
+
 
 # ─── Sort Tests ───────────────────────────────────────────────────────────────
 
@@ -377,11 +407,6 @@ class TestClientListFilterIsActive:
         assert active["id"] in ids
         assert inactive["id"] not in ids
 
-    @pytest.mark.xfail(
-        reason="BUG: service hardcodes .where(Client.is_active == True) before applying is_active filter — "
-               "is_active=false becomes True AND False → empty. Fix: remove base filter when is_active is explicit.",
-        strict=True,
-    )
     def test_filter_is_active_false(self, api_client, create_client) -> None:
         """is_active=false returns only soft-deleted clients."""
         active = create_client(name="Active Two")

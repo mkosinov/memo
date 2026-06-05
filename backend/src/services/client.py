@@ -73,17 +73,20 @@ async def list_clients_with_stats(
     count_query = (
         select(func.count(Client.id))
         .outerjoin(stats_subq, Client.id == stats_subq.c.client_id)
-        .where(Client.is_active == True)  # noqa: E712
     )
 
     # 4. Main query
     query = (
         select(*base_cols)
         .outerjoin(stats_subq, Client.id == stats_subq.c.client_id)
-        .where(Client.is_active == True)  # noqa: E712
     )
 
-    # 5. Apply filters
+    # 5. Apply is_active filter: default to True (active only) when not specified
+    is_active_filter = params.is_active if params.is_active is not None else True
+    query = query.where(Client.is_active == is_active_filter)
+    count_query = count_query.where(Client.is_active == is_active_filter)
+
+    # 6. Apply other filters
     if params.search:
         search_pattern = f"%{params.search}%"
         query = query.where(
@@ -92,10 +95,6 @@ async def list_clients_with_stats(
         count_query = count_query.where(
             (Client.name.ilike(search_pattern)) | (Client.phone.ilike(search_pattern))
         )
-
-    if params.is_active is not None:
-        query = query.where(Client.is_active == params.is_active)
-        count_query = count_query.where(Client.is_active == params.is_active)
 
     if params.created_from:
         cond = Client.created_at >= datetime.combine(params.created_from, datetime.min.time())

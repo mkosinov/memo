@@ -447,7 +447,7 @@ export function ClientRecordTab({ recordId, clientId, onClose }: ClientRecordTab
             onChange={e => { setTime(e.target.value); markChanged(); }}
           />
         </div>
-        <div>
+        <div data-testid="select-location">
           <label className="text-xs font-medium text-ink-mid block mb-1">Локация</label>
           <CustomSelect
             value={locationId}
@@ -456,7 +456,7 @@ export function ClientRecordTab({ recordId, clientId, onClose }: ClientRecordTab
             className={`${inputClass} appearance-none`}
           />
         </div>
-        <div>
+        <div data-testid="visit-status-select">
           <label className="text-xs font-medium text-ink-mid block mb-1">Статус</label>
           {record.visits.length > 0 && (() => {
             const firstVisit = record.visits[0];
@@ -476,7 +476,7 @@ export function ClientRecordTab({ recordId, clientId, onClose }: ClientRecordTab
 
       {/* ── Row 2: Service / Master ───────────────────────────────────── */}
       <div className="flex flex-wrap gap-3">
-        <div>
+        <div data-testid="select-service">
           <label className="text-xs font-medium text-ink-mid block mb-1">Услуга</label>
           <CustomSelect
             value={serviceId}
@@ -485,7 +485,7 @@ export function ClientRecordTab({ recordId, clientId, onClose }: ClientRecordTab
             className={`${inputClass} appearance-none`}
           />
         </div>
-        <div>
+        <div data-testid="select-master">
           <label className="text-xs font-medium text-ink-mid block mb-1">Мастер</label>
           <CustomSelect
             value={masterId}
@@ -709,7 +709,7 @@ export function ClientRecordTab({ recordId, clientId, onClose }: ClientRecordTab
         )}
 
         {/* Add payment form */}
-        <div className="flex gap-2">
+        <div className="flex gap-2" data-testid="payment-form">
           <CustomSelect
             value={paymentMethod}
             options={paymentMethodOptions}

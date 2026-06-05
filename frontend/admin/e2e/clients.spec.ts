@@ -443,17 +443,25 @@ test.describe('Record tab', () => {
       // Time field visible
       await expect(tab.locator('#record-time')).toBeVisible();
 
-      // Service dropdown visible
-      await expect(tab.locator('#record-service')).toBeVisible();
+      // Service dropdown visible (CustomSelect)
+      await expect(
+        tab.locator('[data-testid="select-service"] [data-testid="custom-select-trigger"]'),
+      ).toBeVisible();
 
-      // Master dropdown visible
-      await expect(tab.locator('#record-master')).toBeVisible();
+      // Master dropdown visible (CustomSelect)
+      await expect(
+        tab.locator('[data-testid="select-master"] [data-testid="custom-select-trigger"]'),
+      ).toBeVisible();
 
-      // Location dropdown visible
-      await expect(tab.locator('#record-location')).toBeVisible();
+      // Location dropdown visible (CustomSelect)
+      await expect(
+        tab.locator('[data-testid="select-location"] [data-testid="custom-select-trigger"]'),
+      ).toBeVisible();
 
-      // Status dropdown visible (visit-status-select)
-      await expect(tab.locator('[data-testid="visit-status-select"]')).toBeVisible();
+      // Status dropdown visible (CustomSelect in iconOnly mode)
+      await expect(
+        tab.locator('[data-testid="visit-status-select"] [data-testid="custom-select-trigger"]'),
+      ).toBeVisible();
 
       // Visitors section visible
       await expect(tab.locator('text=Посетители')).toBeVisible();
@@ -478,15 +486,16 @@ test.describe('Record tab', () => {
     const { client, activity, record } = await setupRecordTab(page, request);
 
     try {
-      // Find the status dropdown
-      const statusSelect = page.locator('[data-testid="visit-status-select"]');
-      await expect(statusSelect).toBeVisible();
+      // Find the status CustomSelect trigger
+      const statusTrigger = page
+        .locator('[data-testid="visit-status-select"] [data-testid="custom-select-trigger"]');
+      await expect(statusTrigger).toBeVisible();
 
-      // Change to "Пришла" (visited)
-      await statusSelect.selectOption('visited');
+      // Open the dropdown
+      await statusTrigger.click();
 
-      // Verify the selected value changed
-      await expect(statusSelect).toHaveValue('visited');
+      // Click "Пришла" option
+      await page.locator('[data-testid="custom-select-option-visited"]').click();
 
       // Save button should now be enabled (status change triggers hasChanges)
       const saveBtn = page.locator('[data-testid="btn-save-record"]');
@@ -511,12 +520,12 @@ test.describe('Record tab', () => {
       await expect(amountInput).toBeVisible();
       await amountInput.fill('1500');
 
-      // Select payment method (default is card, switch to cash)
-      const methodSelect = page.locator(
-        'select:has(option:text("Карта")):has(option:text("Наличные"))',
-      );
-      if (await methodSelect.isVisible()) {
-        await methodSelect.selectOption('cash');
+      // Select payment method via CustomSelect (default is card, switch to cash)
+      const methodTrigger = page
+        .locator('[data-testid="payment-form"] [data-testid="custom-select-trigger"]');
+      if (await methodTrigger.isVisible()) {
+        await methodTrigger.click();
+        await page.locator('[data-testid="custom-select-option-cash"]').click();
       }
 
       // Click "Добавить оплату"

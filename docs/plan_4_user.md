@@ -40,12 +40,14 @@
 - FastAPI + SQLite + Clean Architecture
 - 12 CRUD сущностей
 - FK enforcement включён
-- Payment validation (gt=0) ✅ ИСПРАВЛЕНО
-- Double-delete protection (404) ✅ ИСПРАВЛЕНО
+- Payment validation (gt=0) ✅
+- Double-delete protection (404) ✅
+- Cascade delete (visits, payments) ✅
+- Capacity enforcement ✅
 - Health check, CORS, Admin panel
 
 **Тесты:**
-- 274 passed, 2 xfailed (cascade delete, capacity enforcement)
+- 274 passed, 0 xfailed
 - Coverage: 78% (порог 80%)
 
 **Осталось доработать:**
@@ -61,7 +63,7 @@
 
 **Тесты:**
 - 299/300 vitest (Menubar тест исправлен ✅)
-- 47 E2E tests (нужна отладка в CI)
+- 48/48 E2E tests passing ✅ (включая visual regression)
 
 **Осталось доработать:**
 - E2E в CI — schedule page не грузит activities

@@ -97,8 +97,8 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
         else:
             client = None
 
-        # ── Resolve visitors (name-based or ID-based) ───────────────────
-        visitor_ids: list[str] = []
+        # ── Resolve visitors (name-based, ID-based, or anonymous) ───────
+        visitor_ids: list[str | None] = []
         for item in data.visits:
             if item.name:
                 # Name-based flow: find-or-create Visitor
@@ -110,7 +110,8 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
                 # ID-based flow: use existing Visitor directly
                 visitor_ids.append(item.visitor_id)
             else:
-                raise ValueError("Each visit must have either 'name' or 'visitor_id'")
+                # Anonymous visit — no visitor linked
+                visitor_ids.append(None)
 
         # ── Create Record ───────────────────────────────────────────────
         record = Record(

@@ -10,7 +10,7 @@ class Visit(AbstractModel):
     __tablename__ = "visits"
 
     record_id: Mapped[str] = mapped_column(String(36), ForeignKey("records.id"))
-    visitor_id: Mapped[str] = mapped_column(String(36), ForeignKey("visitors.id"))
+    visitor_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("visitors.id"), nullable=True)
     price: Mapped[int] = mapped_column(Integer)
     status: Mapped[str] = mapped_column(String(20))
 

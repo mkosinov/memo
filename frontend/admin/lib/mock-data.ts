@@ -1,4 +1,4 @@
-import type { Artist, Studio, Service, Activity, Client, Visitor, BookingRecord, Visit, Payment } from '@memo/domain';
+import type { Artist, Studio, Service, Activity, Client, Visitor, Record, Visit, Payment } from '@memo/domain';
 
 // ─── Artists ──────────────────────────────────────────────────────────────
 
@@ -31,13 +31,13 @@ export const STUDIO_MAP: Record<string, string> = {
 // ─── Services ─────────────────────────────────────────────────────────────
 
 export const SERVICES: Service[] = [
-  { id: 's1', name: 'Картина маслом',       duration: 2.5, maxCapacity: 8,  minAge: '12+', maxAge: '99+', defaultAdultPrice: 3500, defaultChildPrice: 2500, defaultIndividualPrice: 5000 },
-  { id: 's2', name: 'Картина акрилом',      duration: 2,   maxCapacity: 10, minAge: '6+',  maxAge: '99+', defaultAdultPrice: 2800, defaultChildPrice: 2000, defaultIndividualPrice: 4000 },
-  { id: 's3', name: 'Мини-картина акрилом', duration: 1.5, maxCapacity: 8,  minAge: '6+',  maxAge: '99+', defaultAdultPrice: 2000, defaultChildPrice: 1500, defaultIndividualPrice: 3000 },
-  { id: 's4', name: 'Акварель',             duration: 2.5, maxCapacity: 6,  minAge: '6-12', maxAge: '99+', defaultAdultPrice: 2800, defaultChildPrice: 2000, defaultIndividualPrice: 4000 },
-  { id: 's5', name: 'Ручная лепка',         duration: 1.5, maxCapacity: 6,  minAge: '5+',  maxAge: '99+', defaultAdultPrice: 2200, defaultChildPrice: 1800, defaultIndividualPrice: 3500 },
-  { id: 's6', name: 'Роспись одежды',       duration: 2,   maxCapacity: 10, minAge: '8+',  maxAge: '99+', defaultAdultPrice: 3200, defaultChildPrice: 2500, defaultIndividualPrice: 4500 },
-  { id: 's7', name: 'Морской пейзаж',       duration: 3,   maxCapacity: 8,  minAge: '12+', maxAge: '99+', defaultAdultPrice: 3800, defaultChildPrice: 2800, defaultIndividualPrice: 5500 },
+  { id: 's1', name: 'Картина маслом',       duration: 2.5, maxCapacity: 8,  minAge: '12', maxAge: '99', defaultAdultPrice: 3500, defaultChildPrice: 2500, defaultIndividualPrice: 5000 },
+  { id: 's2', name: 'Картина акрилом',      duration: 2,   maxCapacity: 10, minAge: '6',  maxAge: '99', defaultAdultPrice: 2800, defaultChildPrice: 2000, defaultIndividualPrice: 4000 },
+  { id: 's3', name: 'Мини-картина акрилом', duration: 1.5, maxCapacity: 8,  minAge: '6',  maxAge: '99', defaultAdultPrice: 2000, defaultChildPrice: 1500, defaultIndividualPrice: 3000 },
+  { id: 's4', name: 'Акварель',             duration: 2.5, maxCapacity: 6,  minAge: '6-12', maxAge: '99', defaultAdultPrice: 2800, defaultChildPrice: 2000, defaultIndividualPrice: 4000 },
+  { id: 's5', name: 'Ручная лепка',         duration: 1.5, maxCapacity: 6,  minAge: '5',  maxAge: '99', defaultAdultPrice: 2200, defaultChildPrice: 1800, defaultIndividualPrice: 3500 },
+  { id: 's6', name: 'Роспись одежды',       duration: 2,   maxCapacity: 10, minAge: '8',  maxAge: '99', defaultAdultPrice: 3200, defaultChildPrice: 2500, defaultIndividualPrice: 4500 },
+  { id: 's7', name: 'Морской пейзаж',       duration: 3,   maxCapacity: 8,  minAge: '12', maxAge: '99', defaultAdultPrice: 3800, defaultChildPrice: 2800, defaultIndividualPrice: 5500 },
 ];
 
 // Map service name → service id for raw event data
@@ -138,13 +138,13 @@ export function getStaticEvents(): Activity[] {
 // They exist as a separate map so RECORDS can link to them by stable IDs.
 
 export const BOOKING_ACTIVITIES: Activity[] = [
-  { id: 'act1', day: 0, masterId: 'm1', startTime: 10, duration: 2, serviceId: 's5', serviceName: 'Керамика ручной работы', minAge: '6+', locationId: 'alpika', occupied: 5, capacity: 8, isPrivate: false },
-  { id: 'act2', day: 1, masterId: 'm2', startTime: 11, duration: 1.5, serviceId: 's4', serviceName: 'Рисование акварелью', minAge: '8+', locationId: 'grand', occupied: 3, capacity: 6, isPrivate: false },
-  { id: 'act3', day: 1, masterId: 'm1', startTime: 14, duration: 2, serviceId: 's5', serviceName: 'Керамика ручной работы', minAge: '6+', locationId: 'grand', occupied: 1, capacity: 1, isPrivate: true },
-  { id: 'act5', day: 2, masterId: 'm3', startTime: 10, duration: 2, serviceId: 's5', serviceName: 'Керамика ручной работы', minAge: '6+', locationId: 'alpika', occupied: 4, capacity: 8, isPrivate: false },
-  { id: 'act7', day: 3, masterId: 'm4', startTime: 12, duration: 2, serviceId: 's1', serviceName: 'Живопись маслом', minAge: '12+', locationId: 'p1389', occupied: 6, capacity: 10, isPrivate: false },
-  { id: 'act8', day: 4, masterId: 'm1', startTime: 9, duration: 2, serviceId: 's2', serviceName: 'Рисование акрилом', minAge: '10+', locationId: 'grand', occupied: 1, capacity: 1, isPrivate: true },
-  { id: 'act10', day: 5, masterId: 'm5', startTime: 15, duration: 2, serviceId: 's5', serviceName: 'Ручная лепка', minAge: '5+', locationId: 'alpika', occupied: 5, capacity: 10, isPrivate: false },
+  { id: 'act1', day: 0, masterId: 'm1', startTime: 10, duration: 2, serviceId: 's5', serviceName: 'Керамика ручной работы', minAge: '6', locationId: 'alpika', occupied: 5, capacity: 8, isPrivate: false },
+  { id: 'act2', day: 1, masterId: 'm2', startTime: 11, duration: 1.5, serviceId: 's4', serviceName: 'Рисование акварелью', minAge: '8', locationId: 'grand', occupied: 3, capacity: 6, isPrivate: false },
+  { id: 'act3', day: 1, masterId: 'm1', startTime: 14, duration: 2, serviceId: 's5', serviceName: 'Керамика ручной работы', minAge: '6', locationId: 'grand', occupied: 1, capacity: 1, isPrivate: true },
+  { id: 'act5', day: 2, masterId: 'm3', startTime: 10, duration: 2, serviceId: 's5', serviceName: 'Керамика ручной работы', minAge: '6', locationId: 'alpika', occupied: 4, capacity: 8, isPrivate: false },
+  { id: 'act7', day: 3, masterId: 'm4', startTime: 12, duration: 2, serviceId: 's1', serviceName: 'Живопись маслом', minAge: '12', locationId: 'p1389', occupied: 6, capacity: 10, isPrivate: false },
+  { id: 'act8', day: 4, masterId: 'm1', startTime: 9, duration: 2, serviceId: 's2', serviceName: 'Рисование акрилом', minAge: '10', locationId: 'grand', occupied: 1, capacity: 1, isPrivate: true },
+  { id: 'act10', day: 5, masterId: 'm5', startTime: 15, duration: 2, serviceId: 's5', serviceName: 'Ручная лепка', minAge: '5', locationId: 'alpika', occupied: 5, capacity: 10, isPrivate: false },
 ];
 
 // ─── Booking Mock Data ────────────────────────────────────────────────────
@@ -174,38 +174,38 @@ export const VISITORS: Visitor[] = [
   { id: 'v12', clientId: 'cl7', name: 'Павел Морозов', isAdult: true },
 ];
 
-export const RECORDS: BookingRecord[] = [
-  { id: 'rec1', activityId: 'act1', clientId: 'cl1', status: 'WAITING', createdAt: '2025-05-01', comment: 'День рождения Маши' },
-  { id: 'rec2', activityId: 'act1', clientId: 'cl4', status: 'WAITING', createdAt: '2025-05-02' },
-  { id: 'rec3', activityId: 'act2', clientId: 'cl3', status: 'VISITED', createdAt: '2025-05-03' },
-  { id: 'rec4', activityId: 'act2', clientId: 'cl5', status: 'CANCELLED', createdAt: '2025-05-03', comment: 'Болезнь' },
-  { id: 'rec5', activityId: 'act3', clientId: 'cl1', status: 'VISITED', createdAt: '2025-05-04' },
-  { id: 'rec6', activityId: 'act5', clientId: 'cl2', status: 'VISITED', createdAt: '2025-05-05' },
-  { id: 'rec7', activityId: 'act5', clientId: 'cl6', status: 'MISSED', createdAt: '2025-05-05' },
-  { id: 'rec8', activityId: 'act7', clientId: 'cl4', status: 'WAITING', createdAt: '2025-05-06' },
-  { id: 'rec9', activityId: 'act7', clientId: 'cl7', status: 'WAITING', createdAt: '2025-05-06' },
-  { id: 'rec10', activityId: 'act10', clientId: 'cl1', status: 'VISITED', createdAt: '2025-05-07' },
-  { id: 'rec11', activityId: 'act10', clientId: 'cl3', status: 'CANCELLED', createdAt: '2025-05-07' },
-  { id: 'rec12', activityId: 'act8', clientId: 'cl2', status: 'WAITING', createdAt: '2025-05-08' },
+export const RECORDS: Record[] = [
+  { id: 'rec1', activityId: 'act1', clientId: 'cl1', status: 'waiting', createdAt: '2025-05-01', comment: 'День рождения Маши' },
+  { id: 'rec2', activityId: 'act1', clientId: 'cl4', status: 'waiting', createdAt: '2025-05-02' },
+  { id: 'rec3', activityId: 'act2', clientId: 'cl3', status: 'visited', createdAt: '2025-05-03' },
+  { id: 'rec4', activityId: 'act2', clientId: 'cl5', status: 'cancelled', createdAt: '2025-05-03', comment: 'Болезнь' },
+  { id: 'rec5', activityId: 'act3', clientId: 'cl1', status: 'visited', createdAt: '2025-05-04' },
+  { id: 'rec6', activityId: 'act5', clientId: 'cl2', status: 'visited', createdAt: '2025-05-05' },
+  { id: 'rec7', activityId: 'act5', clientId: 'cl6', status: 'missed', createdAt: '2025-05-05' },
+  { id: 'rec8', activityId: 'act7', clientId: 'cl4', status: 'waiting', createdAt: '2025-05-06' },
+  { id: 'rec9', activityId: 'act7', clientId: 'cl7', status: 'waiting', createdAt: '2025-05-06' },
+  { id: 'rec10', activityId: 'act10', clientId: 'cl1', status: 'visited', createdAt: '2025-05-07' },
+  { id: 'rec11', activityId: 'act10', clientId: 'cl3', status: 'cancelled', createdAt: '2025-05-07' },
+  { id: 'rec12', activityId: 'act8', clientId: 'cl2', status: 'waiting', createdAt: '2025-05-08' },
 ];
 
 export const VISITS: Visit[] = [
-  { id: 'vis1', recordId: 'rec1', visitorId: 'v1', isPrimary: false, priceCharged: 2500, status: 'VISITED' },
-  { id: 'vis2', recordId: 'rec1', visitorId: 'v2', isPrimary: false, priceCharged: 1800, status: 'VISITED' },
-  { id: 'vis3', recordId: 'rec2', visitorId: 'v6', isPrimary: false, priceCharged: 2500, status: 'VISITED' },
-  { id: 'vis4', recordId: 'rec2', visitorId: 'v7', isPrimary: false, priceCharged: 1800, status: 'VISITED' },
-  { id: 'vis5', recordId: 'rec2', visitorId: 'v8', isPrimary: false, priceCharged: 1800, status: 'VISITED' },
-  { id: 'vis6', recordId: 'rec3', visitorId: 'v5', isPrimary: false, priceCharged: 2800, status: 'VISITED' },
-  { id: 'vis7', recordId: 'rec5', visitorId: 'v1', isPrimary: true, priceCharged: 8200, status: 'VISITED' },
-  { id: 'vis8', recordId: 'rec5', visitorId: 'v2', isPrimary: false, priceCharged: 1800, status: 'VISITED' },
-  { id: 'vis9', recordId: 'rec6', visitorId: 'v3', isPrimary: false, priceCharged: 2500, status: 'VISITED' },
-  { id: 'vis10', recordId: 'rec6', visitorId: 'v4', isPrimary: false, priceCharged: 1800, status: 'VISITED' },
-  { id: 'vis11', recordId: 'rec8', visitorId: 'v6', isPrimary: false, priceCharged: 3500, status: 'VISITED' },
-  { id: 'vis12', recordId: 'rec9', visitorId: 'v12', isPrimary: false, priceCharged: 3500, status: 'WAITING' },
-  { id: 'vis13', recordId: 'rec10', visitorId: 'v1', isPrimary: false, priceCharged: 3000, status: 'VISITED' },
-  { id: 'vis14', recordId: 'rec10', visitorId: 'v2', isPrimary: false, priceCharged: 2200, status: 'VISITED' },
-  { id: 'vis15', recordId: 'rec12', visitorId: 'v3', isPrimary: true, priceCharged: 8200, status: 'WAITING' },
-  { id: 'vis16', recordId: 'rec12', visitorId: 'v4', isPrimary: false, priceCharged: 2000, status: 'WAITING' },
+  { id: 'vis1', recordId: 'rec1', visitorId: 'v1', isPrimary: false, priceCharged: 2500, status: 'visited' },
+  { id: 'vis2', recordId: 'rec1', visitorId: 'v2', isPrimary: false, priceCharged: 1800, status: 'visited' },
+  { id: 'vis3', recordId: 'rec2', visitorId: 'v6', isPrimary: false, priceCharged: 2500, status: 'visited' },
+  { id: 'vis4', recordId: 'rec2', visitorId: 'v7', isPrimary: false, priceCharged: 1800, status: 'visited' },
+  { id: 'vis5', recordId: 'rec2', visitorId: 'v8', isPrimary: false, priceCharged: 1800, status: 'visited' },
+  { id: 'vis6', recordId: 'rec3', visitorId: 'v5', isPrimary: false, priceCharged: 2800, status: 'visited' },
+  { id: 'vis7', recordId: 'rec5', visitorId: 'v1', isPrimary: true, priceCharged: 8200, status: 'visited' },
+  { id: 'vis8', recordId: 'rec5', visitorId: 'v2', isPrimary: false, priceCharged: 1800, status: 'visited' },
+  { id: 'vis9', recordId: 'rec6', visitorId: 'v3', isPrimary: false, priceCharged: 2500, status: 'visited' },
+  { id: 'vis10', recordId: 'rec6', visitorId: 'v4', isPrimary: false, priceCharged: 1800, status: 'visited' },
+  { id: 'vis11', recordId: 'rec8', visitorId: 'v6', isPrimary: false, priceCharged: 3500, status: 'visited' },
+  { id: 'vis12', recordId: 'rec9', visitorId: 'v12', isPrimary: false, priceCharged: 3500, status: 'waiting' },
+  { id: 'vis13', recordId: 'rec10', visitorId: 'v1', isPrimary: false, priceCharged: 3000, status: 'visited' },
+  { id: 'vis14', recordId: 'rec10', visitorId: 'v2', isPrimary: false, priceCharged: 2200, status: 'visited' },
+  { id: 'vis15', recordId: 'rec12', visitorId: 'v3', isPrimary: true, priceCharged: 8200, status: 'waiting' },
+  { id: 'vis16', recordId: 'rec12', visitorId: 'v4', isPrimary: false, priceCharged: 2000, status: 'waiting' },
 ];
 
 export const PAYMENTS: Payment[] = [

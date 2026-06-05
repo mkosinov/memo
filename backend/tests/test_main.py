@@ -1,17 +1,11 @@
 """Tests for application entrypoint and configuration."""
 
-from fastapi.testclient import TestClient
-
 
 class TestRootEndpoint:
     """Root path should return 404 (no route registered)."""
 
-    def test_root_returns_404(self) -> None:
-        from src.main import create_app
-
-        app = create_app()
-        client = TestClient(app)
-        response = client.get("/")
+    def test_root_returns_404(self, api_client) -> None:
+        response = api_client.get("/")
         assert response.status_code == 404
 
 

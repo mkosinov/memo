@@ -54,6 +54,7 @@ interface DayColumnProps {
   onCreateActivity?: (dayIndex: number, startTime: number) => void;
   onOpenCreateModal?: (dayIndex: number, startTime: number) => void;
   onOpenEditModal?: (activity: Activity) => void;
+  onQuickAdd?: (activity: Activity) => void;
   stampReady?: boolean;
   stamp?: StampState;
 }
@@ -188,7 +189,7 @@ function DroppableSlot({ dayIndex, slotIndex, startTime, isHour, dragCopy, onCli
 
 // ─── DayColumn ────────────────────────────────────────────────────────────
 
-export function DayColumn({ dayIndex, activities, artists, studios = [], services = [], dragCopy, dragId, ghostHeight, ghostDayIndex, ghostSlotIndex, onCreateActivity, onOpenCreateModal, onOpenEditModal, stampReady, stamp }: DayColumnProps) {
+export function DayColumn({ dayIndex, activities, artists, studios = [], services = [], dragCopy, dragId, ghostHeight, ghostDayIndex, ghostSlotIndex, onCreateActivity, onOpenCreateModal, onOpenEditModal, onQuickAdd, stampReady, stamp }: DayColumnProps) {
   const [visibleIndices, setVisibleIndices] = useState<Record<string, number>>({});
   const [prevIndices, setPrevIndices] = useState<Record<string, number>>({});
   const columnRef = useRef<HTMLDivElement>(null);
@@ -350,6 +351,7 @@ export function DayColumn({ dayIndex, activities, artists, studios = [], service
               artist={artist}
               studios={studios}
               onEdit={onOpenEditModal}
+              onQuickAdd={onQuickAdd}
               isDragging={isThisDragging}
               isDragCopy={dragCopy}
               style={{

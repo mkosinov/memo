@@ -46,6 +46,35 @@ export function mixWithWhite(
   };
 }
 
+// ─── Duration Utilities ──────────────────────────────────────────────────
+
+/** Convert decimal hours (1.5) to HH:MM string ("01:30"). */
+export function decimalToHHMM(hours: number): string {
+  const h = Math.floor(hours);
+  const m = Math.round((hours - h) * 60);
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+
+/** Convert HH:MM string ("01:30") to decimal hours (1.5). */
+export function hhmmToDecimal(hhmm: string): number {
+  const [h, m] = hhmm.split(':').map(Number);
+  return h + m / 60;
+}
+
+/** Format datetime for display: "Сб, 7 июня · 14:00". */
+export function formatActivityContext(date: Date): string {
+  const days = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
+  const months = [
+    'января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
+    'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря',
+  ];
+  const dayName = days[date.getDay()];
+  const dayNum = date.getDate();
+  const month = months[date.getMonth()];
+  const time = `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+  return `${dayName}, ${dayNum} ${month} · ${time}`;
+}
+
 // ─── Time / Date Utilities ────────────────────────────────────────────────
 
 /** Format hours to "HH:MM" string. 10 → "10:00", 10.5 → "10:30". */

@@ -1,0 +1,16 @@
+[
+  {
+    "first_name": "Ольга",
+    "last_name": "Середа",
+    "color": "#5B8C7A",
+    "position": "мастер",
+    "specialty": "живопись"
+  },
+  {
+    "first_name": "Юлия",
+    "last_name": "Большакова",
+    "color": "#6B7E9C",
+    "position": "мастер",
+    "specialty": "керамика"
+  }
+]

@@ -23,7 +23,10 @@ export interface ScheduleIndex {
 function dayToDate(monday: Date, day: number): string {
   const d = new Date(monday);
   d.setDate(d.getDate() + day);
-  return d.toISOString().slice(0, 10);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const dayOfMonth = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${dayOfMonth}`;
 }
 
 function addToActivityIndex(idx: ActivityIndex, activity: ScheduleItem, monday: Date): void {
@@ -162,8 +165,8 @@ export function buildAdminSchedule(
       // Admin-specific fields:
       isPrivate: act.is_private,
       masterColor: master.color,
-      minAge: `${service.min_age}+`,
-      maxAge: `${service.max_age}+`,
+      minAge: `${service.min_age}`,
+      maxAge: `${service.max_age}`,
       comment: act.comment ?? '',
     };
 

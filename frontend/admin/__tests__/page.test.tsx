@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { NavigationProvider } from '../contexts/NavigationContext';
 import { ScheduleProvider } from '../contexts/ScheduleContext';
 import { UIProvider } from '../contexts/UIContext';
-import SchedulePage from '../app/(main)/page';
+import SchedulePage from '../app/(main)/schedule/page';
 import React from 'react';
 
 vi.mock('@memo/api-client', () => ({

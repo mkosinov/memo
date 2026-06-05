@@ -1,6 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import type { ScheduleContextType } from '../contexts/ScheduleContext';
 import { DAYS } from '../lib/utils';
+import { createMockScheduleContext } from './helpers/mockContexts';
 
 vi.mock('@/contexts/ScheduleContext', () => ({
   useSchedule: vi.fn(),
@@ -35,40 +36,19 @@ vi.mock('@/app/components/schedule/ActivityCard', () => ({
   ActivityCard: () => <div />,
 }));
 
-vi.mock('@/app/components/modal/ActivityModal', () => ({
-  ActivityModal: () => <div />,
+vi.mock('@/app/components/modal/ActivityDetailsModal/ActivityDetailsModal', () => ({
+  ActivityDetailsModal: (props: { isOpen: boolean; mode?: string }) =>
+    props.isOpen ? <div data-testid="activity-details-modal" data-mode={props.mode} /> : null,
 }));
 
 import { useSchedule } from '@/contexts/ScheduleContext';
 import { WeekView } from '../app/components/schedule/WeekView';
 
-function createDefaultContext(): ScheduleContextType {
-  return {
-    activities: [],
-    scheduleIndex: { byId: new Map(), byDate: new Map(), byMasterId: new Map(), byLocation: { all: { byDate: new Map(), byServiceId: new Map() } } },
-    artists: [],
-    services: [],
-    locations: [],
-    currentWeek: new Date('2025-04-07'),
-    stamp: { masterId: null, serviceId: null, locations: new Set(), ready: false },
-    setCurrentWeek: vi.fn(),
-    addActivity: vi.fn(),
-    updateActivity: vi.fn(),
-    deleteActivity: vi.fn(),
-    setStamp: vi.fn(),
-    copyLastWeek: vi.fn(),
-    loading: false,
-    error: null,
-    filterMasterId: null,
-    filterLocationId: null,
-    setFilterMasterId: vi.fn(),
-    setFilterLocationId: vi.fn(),
-  };
-}
+// Use shared context factory for default context shape
 
 function renderWeekView(contextOverrides?: Partial<ScheduleContextType>) {
   const mockUseSchedule = useSchedule as ReturnType<typeof vi.fn>;
-  mockUseSchedule.mockReturnValue({ ...createDefaultContext(), ...contextOverrides });
+  mockUseSchedule.mockReturnValue(createMockScheduleContext(contextOverrides));
   return render(<WeekView />);
 }
 
@@ -112,7 +92,7 @@ describe('WeekView', () => {
         capacity: 10, isPrivate: false,
         masterName: 'Test Master', serviceTitle: 'Test', date: '2025-04-07',
         time: '10:00', durationMinutes: 60, locationName: 'Loc',
-        priceMin: 0, priceMax: 0, masterColor: '#FF0000', maxAge: '99+', comment: '',
+        priceMin: 0, priceMax: 0, masterColor: '#FF0000', maxAge: '99', comment: '',
       }],
     };
 
@@ -133,6 +113,26 @@ describe('WeekView', () => {
       DAYS.forEach((day) => {
         expect(screen.getByText(day)).toBeInTheDocument();
       });
+    });
+  });
+
+  describe('ActivityDetailsModal wiring', () => {
+    const normalContext = {
+      loading: false,
+      error: null,
+      activities: [{
+        id: '1', day: 0, masterId: 'm1', artistId: 'm1', startTime: 10, duration: 1,
+        serviceId: 's1', serviceName: 'Test', minAge: '6', locationId: 'l1', occupied: 0,
+        capacity: 10, isPrivate: false,
+        masterName: 'Test Master', serviceTitle: 'Test', date: '2025-04-07',
+        time: '10:00', durationMinutes: 60, locationName: 'Loc',
+        priceMin: 0, priceMax: 0, masterColor: '#FF0000', maxAge: '99', comment: '',
+      }],
+    };
+
+    it('does not render ActivityDetailsModal when closed', () => {
+      renderWeekView(normalContext);
+      expect(screen.queryByTestId('activity-details-modal')).not.toBeInTheDocument();
     });
   });
 });

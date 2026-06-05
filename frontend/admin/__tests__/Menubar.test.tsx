@@ -25,7 +25,7 @@ vi.mock('@memo/api-client', () => ({
 }));
 
 vi.mock('next/navigation', () => ({
-  usePathname: () => '/',
+  usePathname: () => '/schedule',
 }));
 
 function renderWithProviders() {

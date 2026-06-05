@@ -84,9 +84,9 @@ class GenericRepository:
     async def delete(
         self, session: AsyncSession, table: type[ModelType], id: str
     ) -> bool:
-        """Soft-delete a record (set is_active=False). Returns False if not found."""
+        """Soft-delete a record (set is_active=False). Returns False if not found or already deleted."""
         instance = await self.get(session, table, id)
-        if not instance:
+        if not instance or not instance.is_active:
             return False
         instance.is_active = False
         await session.flush()

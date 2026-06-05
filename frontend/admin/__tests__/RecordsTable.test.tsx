@@ -91,7 +91,7 @@ const mockRecord: RecordResponse = {
   id: 'rec-1',
   activity_id: 'act-1',
   client_id: 'client-1',
-  status: 'WAITING',
+  status: 'waiting',
   seats: 2,
   comment: null,
   created_at: '2024-06-15T10:00:00Z',

@@ -3,6 +3,7 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import React from 'react';
 import { ActivityCard } from '../app/components/schedule/ActivityCard';
 import type { Activity, Artist } from '@memo/domain';
+import { createMockUIContext, createMockScheduleContext } from './helpers/mockContexts';
 
 const mockArtist: Artist = {
   id: 'art_1',
@@ -19,7 +20,7 @@ const mockActivity: Activity = {
   duration: 2,
   serviceId: 'svc_1',
   serviceName: 'Картина маслом',
-  minAge: '6+',
+  minAge: '6',
   locationId: 'loc_1',
   occupied: 3,
   capacity: 8,
@@ -134,6 +135,33 @@ describe('ActivityCard', () => {
     expect(screen.getByText('8/8')).toBeInTheDocument();
   });
 
+  it('calls onQuickAdd when quick action button is clicked', () => {
+    const onQuickAdd = vi.fn();
+    render(<ActivityCard activity={mockActivity} artist={mockArtist} onQuickAdd={onQuickAdd} />);
+    // The "+" button has aria-label "Добавить гостя"
+    const btn = screen.getByRole('button', { name: 'Добавить гостя' });
+    fireEvent.click(btn);
+    expect(onQuickAdd).toHaveBeenCalledTimes(1);
+    expect(onQuickAdd).toHaveBeenCalledWith(mockActivity);
+  });
+
+  it('calls onQuickAdd for private activity with correct activity', () => {
+    const onQuickAdd = vi.fn();
+    const privateActivity = { ...mockActivity, isPrivate: true };
+    render(<ActivityCard activity={privateActivity} artist={mockArtist} onQuickAdd={onQuickAdd} />);
+    const btn = screen.getByRole('button', { name: 'Редактировать' });
+    fireEvent.click(btn);
+    expect(onQuickAdd).toHaveBeenCalledTimes(1);
+    expect(onQuickAdd).toHaveBeenCalledWith(privateActivity);
+  });
+
+  it('does not call onQuickAdd when not provided', () => {
+    render(<ActivityCard activity={mockActivity} artist={mockArtist} />);
+    const btn = screen.getByRole('button', { name: 'Добавить гостя' });
+    // Should not throw when clicked without onQuickAdd
+    expect(() => fireEvent.click(btn)).not.toThrow();
+  });
+
   it('renders progress bar with width proportional to occupancy', () => {
     const { container } = render(<ActivityCard activity={mockActivity} artist={mockArtist} />);
     const filledBar = container.querySelector('[data-testid="activity-ev_1"] [style*="width:"][class*="absolute"]');
@@ -175,40 +203,8 @@ const mockUseSchedule = vi.mocked(useSchedule);
 
 beforeEach(() => {
   vi.useFakeTimers();
-  mockUseUI.mockReturnValue({
-    deleteMode: false,
-    toggleDeleteMode: vi.fn(),
-    toasts: [],
-    showToast: vi.fn(),
-    hideToast: vi.fn(),
-    sidebarCollapsed: false,
-    toggleSidebar: vi.fn(),
-    rightPanelCollapsed: false,
-    toggleRightPanel: vi.fn(),
-    theme: 'light',
-    toggleTheme: vi.fn(),
-  });
-  mockUseSchedule.mockReturnValue({
-    activities: [],
-    scheduleIndex: { byId: new Map(), byDate: new Map(), byMasterId: new Map(), byLocation: { all: { byDate: new Map(), byServiceId: new Map() } } },
-    artists: [],
-    services: [],
-    locations: [],
-    currentWeek: new Date(),
-    stamp: { masterId: null, serviceId: null, locations: new Set(), ready: false },
-    setCurrentWeek: vi.fn(),
-    addActivity: vi.fn(),
-    updateActivity: vi.fn(),
-    deleteActivity: vi.fn(),
-    setStamp: vi.fn(),
-    copyLastWeek: vi.fn(),
-    loading: false,
-    error: null,
-    filterMasterId: null,
-    filterLocationId: null,
-    setFilterMasterId: vi.fn(),
-    setFilterLocationId: vi.fn(),
-  });
+  mockUseUI.mockReturnValue(createMockUIContext());
+  mockUseSchedule.mockReturnValue(createMockScheduleContext());
 });
 
 afterEach(() => {

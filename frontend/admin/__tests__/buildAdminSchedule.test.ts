@@ -130,7 +130,7 @@ describe('buildAdminSchedule', () => {
     );
     expect(items[0].isPrivate).toBe(true);
     expect(items[0].masterColor).toBe('#FF5733');
-    expect(items[0].minAge).toBe('6+');
+    expect(items[0].minAge).toBe('6');
     expect(items[0].comment).toBe('test comment');
   });
 });

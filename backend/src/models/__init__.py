@@ -3,7 +3,7 @@
 from src.models.abstract import AbstractModel
 from src.models.activity import Activity
 from src.models.client import Client
-from src.models.enums import RecordStatus, UserRole
+from src.models.enums import Channel, RecordStatus, UserRole
 from src.models.location import Location
 from src.models.master import Master
 from src.models.material import Material
@@ -25,7 +25,7 @@ __all__ = [
     "AbstractModel",
     "Activity", "Client", "Location", "Master", "Material", "Payment", "Photo",
     "Record", "Service", "Tag", "Tariff", "User", "Visit", "Visitor",
-    "RecordStatus", "UserRole",
+    "Channel", "RecordStatus", "UserRole",
     "activity_tags", "client_tags", "location_tags",
     "master_tags", "photo_tags", "record_tags", "service_tags", "visitor_tags",
 ]

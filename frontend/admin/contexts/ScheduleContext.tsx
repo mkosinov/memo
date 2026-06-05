@@ -164,11 +164,18 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
     startDate.setDate(startDate.getDate() + activity.day);
     startDate.setHours(Math.floor(activity.startTime), Math.round((activity.startTime % 1) * 60), 0, 0);
 
+    const sy = startDate.getFullYear();
+    const sm = String(startDate.getMonth() + 1).padStart(2, '0');
+    const sd = String(startDate.getDate()).padStart(2, '0');
+    const sh = String(startDate.getHours()).padStart(2, '0');
+    const smin = String(startDate.getMinutes()).padStart(2, '0');
+    const localStart = `${sy}-${sm}-${sd}T${sh}:${smin}:00`;
+
     createMutation.mutate({
       master_id: activity.masterId,
       service_id: activity.serviceId,
       location_id: activity.locationId,
-      start: startDate.toISOString(),
+      start: localStart,
       duration: activity.durationMinutes ?? Math.round(activity.duration * 60),  // prefer minutes, fallback hours→min
       capacity: activity.capacity,
       is_private: activity.isPrivate ?? false,
@@ -193,7 +200,12 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
       const startDate = new Date(currentWeek);
       startDate.setDate(startDate.getDate() + updates.day);
       startDate.setHours(Math.floor(updates.startTime), Math.round((updates.startTime % 1) * 60), 0, 0);
-      payload.start = startDate.toISOString();
+      const y = startDate.getFullYear();
+      const m = String(startDate.getMonth() + 1).padStart(2, '0');
+      const d = String(startDate.getDate()).padStart(2, '0');
+      const h = String(startDate.getHours()).padStart(2, '0');
+      const min = String(startDate.getMinutes()).padStart(2, '0');
+      payload.start = `${y}-${m}-${d}T${h}:${min}:00`;
     }
     updateMutation.mutate({ id, data: payload });
   }, [currentWeek, updateMutation]);

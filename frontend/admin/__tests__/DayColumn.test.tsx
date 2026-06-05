@@ -3,6 +3,7 @@ import { render, screen, fireEvent, act } from '@testing-library/react';
 import React from 'react';
 import { DayColumn } from '../app/components/schedule/DayColumn';
 import type { Activity, Artist, Service } from '@memo/domain';
+import { createMockUIContext, createMockScheduleContext } from './helpers/mockContexts';
 const MOCK_ARTISTS: Artist[] = [
   { id: 'm1', name: 'Анна Иванова', shortName: 'Анна', color: '#FF6B6B' },
   { id: 'm2', name: 'Петр Петров', shortName: 'Петр', color: '#4ECDC4' },
@@ -16,8 +17,8 @@ const MOCK_SERVICES: Service[] = [
     duration: 2.5,
     durationMinutes: 150,
     maxCapacity: 8,
-    minAge: '12+',
-    maxAge: '99+',
+    minAge: '12',
+    maxAge: '99',
     defaultAdultPrice: 2500,
     description: 'Рисование масляными красками',
   },
@@ -27,8 +28,8 @@ const MOCK_SERVICES: Service[] = [
     duration: 1.5,
     durationMinutes: 90,
     maxCapacity: 6,
-    minAge: '6+',
-    maxAge: '99+',
+    minAge: '6',
+    maxAge: '99',
     defaultAdultPrice: 2000,
     description: 'Рисование акриловыми красками',
   },
@@ -38,8 +39,8 @@ const MOCK_SERVICES: Service[] = [
     duration: 2,
     durationMinutes: 120,
     maxCapacity: 10,
-    minAge: '6+',
-    maxAge: '99+',
+    minAge: '6',
+    maxAge: '99',
     defaultAdultPrice: 1500,
     description: 'Маленький формат',
   },
@@ -47,38 +48,11 @@ const MOCK_SERVICES: Service[] = [
 
 // Mock contexts used by ActivityCard (rendered inside DayColumn)
 vi.mock('@/contexts/UIContext', () => ({
-  useUI: vi.fn(() => ({
-    deleteMode: false,
-    toggleDeleteMode: vi.fn(),
-    toasts: [],
-    showToast: vi.fn(),
-    hideToast: vi.fn(),
-    sidebarCollapsed: false,
-    toggleSidebar: vi.fn(),
-    rightPanelCollapsed: false,
-    toggleRightPanel: vi.fn(),
-    theme: 'light' as const,
-    toggleTheme: vi.fn(),
-  })),
+  useUI: vi.fn(() => createMockUIContext()),
 }));
 
 vi.mock('@/contexts/ScheduleContext', () => ({
-  useSchedule: vi.fn(() => ({
-    activities: [],
-    artists: [],
-    services: [],
-    locations: [],
-    currentWeek: new Date(),
-    stamp: { masterId: null, serviceId: null, locations: new Set(), ready: false },
-    setCurrentWeek: vi.fn(),
-    addActivity: vi.fn(),
-    updateActivity: vi.fn(),
-    deleteActivity: vi.fn(),
-    setStamp: vi.fn(),
-    copyLastWeek: vi.fn(),
-    loading: false,
-    error: null,
-  })),
+  useSchedule: vi.fn(() => createMockScheduleContext()),
 }));
 
 // Mock useDroppable to control isOver state
@@ -104,7 +78,7 @@ const mockActivities: Activity[] = [
     duration: 2,
     serviceId: 's1',
     serviceName: 'Картина маслом',
-    minAge: '12+',
+    minAge: '12',
     locationId: 'alpika',
     occupied: 3,
     capacity: 8,
@@ -118,7 +92,7 @@ const mockActivities: Activity[] = [
     duration: 1.5,
     serviceId: 's2',
     serviceName: 'Картина акрилом',
-    minAge: '6+',
+    minAge: '6',
     locationId: 'alpika',
     occupied: 4,
     capacity: 6,
@@ -132,7 +106,7 @@ const mockActivities: Activity[] = [
     duration: 2,
     serviceId: 's3',
     serviceName: 'Мини-картина',
-    minAge: '6+',
+    minAge: '6',
     locationId: 'grand',
     occupied: 5,
     capacity: 10,

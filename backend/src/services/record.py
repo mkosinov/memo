@@ -3,12 +3,15 @@
 from datetime import UTC, datetime
 from functools import lru_cache
 
-from sqlalchemy import select
+from fastapi import HTTPException
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from src.repositories.generic import GenericRepository, get_generic_repository
+from src.models.activity import Activity
 from src.models.client import Client
+from src.models.payment import Payment
 from src.models.record import Record
 from src.models.visit import Visit
 from src.models.visitor import Visitor
@@ -46,13 +49,42 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
         )
         return result.scalar_one_or_none()
 
+    async def delete(self, db_session: AsyncSession, id: str) -> bool:
+        """Soft-delete a record and cascade-soft-delete its visits and payments."""
+        record = await self._repository.get(db_session, Record, id)
+        if not record or not record.is_active:
+            return False
+
+        # Cascade: soft-delete all related visits
+        await db_session.execute(
+            update(Visit)
+            .where(Visit.record_id == id, Visit.is_active.is_(True))  # type: ignore[union-attr]
+            .values(is_active=False)
+        )
+
+        # Cascade: soft-delete all related payments
+        await db_session.execute(
+            update(Payment)
+            .where(Payment.record_id == id, Payment.is_active.is_(True))  # type: ignore[union-attr]
+            .values(is_active=False)
+        )
+
+        # Soft-delete the record itself
+        record.is_active = False
+        await db_session.flush()
+        return True
+
     async def create(
         self, db_session: AsyncSession, data: RecordCreate
     ) -> Record:
         """Create record with nested visits, auto-compute seats.
 
         Supports both phone-based and client-ID-based flows.
+        Raises HTTPException 409 if activity is at capacity.
         """
+        # ── Capacity check ─────────────────────────────────────────────
+        await self._check_capacity(db_session, data.activity_id, seats=len(data.visits))
+
         # ── Resolve client ──────────────────────────────────────────────
         if data.phone:
             client = await self._resolve_client_by_phone(db_session, data)
@@ -78,7 +110,7 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
         record = Record(
             activity_id=data.activity_id,
             client_id=client.id if client else data.client_id,
-            status="pending",
+            status=data.status.value if data.status else "pending",
             seats=len(data.visits),
             comment=data.comment,
         )
@@ -113,7 +145,7 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
             client = Client(
                 phone=data.phone,
                 name=first_name,
-                channel="website",
+                channel="whatsapp",
             )
             db_session.add(client)
             await db_session.flush()
@@ -174,6 +206,35 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
         await db_session.flush()
         await db_session.refresh(record)
         return record
+
+    @staticmethod
+    async def _check_capacity(
+        db_session: AsyncSession, activity_id: str, seats: int = 1,
+    ) -> None:
+        """Check if the activity has enough capacity for the new seats.
+
+        Raises HTTPException 409 if the activity is at or over capacity.
+        """
+        result = await db_session.execute(
+            select(Activity).where(Activity.id == activity_id, Activity.is_active)
+        )
+        activity = result.scalar_one_or_none()
+        if not activity:
+            return  # activity not found — let create handle it downstream
+
+        occupied_result = await db_session.execute(
+            select(func.coalesce(func.sum(Record.seats), 0)).where(
+                Record.activity_id == activity_id,
+                Record.is_active.is_(True),  # type: ignore[union-attr]
+            )
+        )
+        occupied = occupied_result.scalar() or 0
+
+        if occupied + seats > activity.capacity:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Activity at capacity: {occupied}/{activity.capacity} seats occupied",
+            )
 
 
 @lru_cache

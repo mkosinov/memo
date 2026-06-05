@@ -2,8 +2,10 @@
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from sqlalchemy.exc import IntegrityError
 
 from src.admin.setup import setup_admin
 from src.core.config import settings
@@ -40,6 +42,15 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    @app.exception_handler(IntegrityError)
+    async def integrity_error_handler(request: Request, exc: IntegrityError):
+        """Convert SQLAlchemy IntegrityError (FK violations, unique constraints)
+        into a proper 422 Unprocessable Entity response."""
+        return JSONResponse(
+            status_code=422,
+            content={"detail": "Database integrity constraint violated"},
+        )
 
     setup_admin(app)
 

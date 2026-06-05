@@ -1,7 +1,5 @@
 """Tests for the Payments CRUD API endpoints."""
 
-from fastapi.testclient import TestClient
-
 # --- Prerequisite payloads ---
 MASTER_PAYLOAD = {
     "first_name": "Anna",
@@ -32,32 +30,32 @@ CLIENT_PAYLOAD = {
     "name": "Jane Doe",
     "phone": "+79991112233",
     "email": "jane@example.com",
-    "channel": "email",
+    "channel": "telegram",
 }
 
 VISITOR_PAYLOAD = {"name": "Alice", "age": 28}
 
 PAYMENT_PAYLOAD = {
-    "record_id": "",  # filled in _create_prerequisites
+    "record_id": "",  # filled in _create_record
     "amount": 3000,
     "method": "card",
 }
 
 
-def _create_record(client: TestClient) -> str:
+def _create_record(api_client) -> str:
     """Create all prerequisites and return a record_id."""
     from datetime import UTC, datetime, timedelta
 
-    master = client.post("/api/v1/masters", json=MASTER_PAYLOAD).json()
-    service = client.post("/api/v1/services", json=SERVICE_PAYLOAD).json()
-    location = client.post("/api/v1/locations", json=LOCATION_PAYLOAD).json()
-    created_client = client.post("/api/v1/clients", json=CLIENT_PAYLOAD).json()
+    master = api_client.post("/api/v1/masters", json=MASTER_PAYLOAD).json()
+    service = api_client.post("/api/v1/services", json=SERVICE_PAYLOAD).json()
+    location = api_client.post("/api/v1/locations", json=LOCATION_PAYLOAD).json()
+    created_client = api_client.post("/api/v1/clients", json=CLIENT_PAYLOAD).json()
 
     visitor_data = {**VISITOR_PAYLOAD, "client_id": created_client["id"]}
-    visitor1 = client.post("/api/v1/visitors", json=visitor_data).json()
+    visitor1 = api_client.post("/api/v1/visitors", json=visitor_data).json()
 
     start = datetime.now(UTC) + timedelta(days=1)
-    activity = client.post(
+    activity = api_client.post(
         "/api/v1/activities",
         json={
             "master_id": master["id"],
@@ -78,23 +76,19 @@ def _create_record(client: TestClient) -> str:
             {"visitor_id": visitor1["id"], "price": 1500, "status": "waiting"},
         ],
     }
-    record_resp = client.post("/api/v1/records", json=record_payload)
+    record_resp = api_client.post("/api/v1/records", json=record_payload)
     return record_resp.json()["id"]
 
 
 class TestPaymentsCrud:
     """Full CRUD round-trip for /api/payments."""
 
-    def test_create_payment(self) -> None:
+    def test_create_payment(self, api_client) -> None:
         """POST /api/payments creates a payment and returns 201."""
-        from src.main import create_app
+        record_id = _create_record(api_client)
+        payload = {**PAYMENT_PAYLOAD, "record_id": record_id}
 
-        app = create_app()
-        with TestClient(app) as client:
-            record_id = _create_record(client)
-            payload = {**PAYMENT_PAYLOAD, "record_id": record_id}
-
-            response = client.post("/api/v1/payments", json=payload)
+        response = api_client.post("/api/v1/payments", json=payload)
 
         assert response.status_code == 201
         body = response.json()
@@ -106,116 +100,88 @@ class TestPaymentsCrud:
         assert "updated_at" in body
         assert body["is_active"] is True
 
-    def test_list_payments_includes_created(self) -> None:
+    def test_list_payments_includes_created(self, api_client) -> None:
         """GET /api/payments returns a list containing the created payment."""
-        from src.main import create_app
+        record_id = _create_record(api_client)
+        payload = {**PAYMENT_PAYLOAD, "record_id": record_id}
+        create_resp = api_client.post("/api/v1/payments", json=payload)
+        payment_id = create_resp.json()["id"]
 
-        app = create_app()
-        with TestClient(app) as client:
-            record_id = _create_record(client)
-            payload = {**PAYMENT_PAYLOAD, "record_id": record_id}
-            create_resp = client.post("/api/v1/payments", json=payload)
-            payment_id = create_resp.json()["id"]
+        response = api_client.get("/api/v1/payments")
+        assert response.status_code == 200
+        payments = response.json()
+        assert isinstance(payments, list)
+        ids = [p["id"] for p in payments]
+        assert payment_id in ids
 
-            response = client.get("/api/v1/payments")
-            assert response.status_code == 200
-            payments = response.json()
-            assert isinstance(payments, list)
-            ids = [p["id"] for p in payments]
-            assert payment_id in ids
-
-    def test_get_payment_by_id(self) -> None:
+    def test_get_payment_by_id(self, api_client) -> None:
         """GET /api/payments/{id} returns the specific payment."""
-        from src.main import create_app
+        record_id = _create_record(api_client)
+        payload = {**PAYMENT_PAYLOAD, "record_id": record_id}
+        create_resp = api_client.post("/api/v1/payments", json=payload)
+        payment_id = create_resp.json()["id"]
 
-        app = create_app()
-        with TestClient(app) as client:
-            record_id = _create_record(client)
-            payload = {**PAYMENT_PAYLOAD, "record_id": record_id}
-            create_resp = client.post("/api/v1/payments", json=payload)
-            payment_id = create_resp.json()["id"]
+        response = api_client.get(f"/api/v1/payments/{payment_id}")
+        assert response.status_code == 200
+        body = response.json()
+        assert body["id"] == payment_id
+        assert body["amount"] == 3000
 
-            response = client.get(f"/api/v1/payments/{payment_id}")
-            assert response.status_code == 200
-            body = response.json()
-            assert body["id"] == payment_id
-            assert body["amount"] == 3000
-
-    def test_update_payment(self) -> None:
+    def test_update_payment(self, api_client) -> None:
         """PUT /api/payments/{id} updates all fields."""
-        from src.main import create_app
+        record_id = _create_record(api_client)
+        payload = {**PAYMENT_PAYLOAD, "record_id": record_id}
+        create_resp = api_client.post("/api/v1/payments", json=payload)
+        payment_id = create_resp.json()["id"]
 
-        app = create_app()
-        with TestClient(app) as client:
-            record_id = _create_record(client)
-            payload = {**PAYMENT_PAYLOAD, "record_id": record_id}
-            create_resp = client.post("/api/v1/payments", json=payload)
-            payment_id = create_resp.json()["id"]
+        update_data = {
+            "record_id": record_id,
+            "amount": 5000,
+            "method": "cash",
+        }
+        response = api_client.put(f"/api/v1/payments/{payment_id}", json=update_data)
+        assert response.status_code == 200
+        body = response.json()
+        assert body["amount"] == 5000
+        assert body["method"] == "cash"
 
-            update_data = {
-                "record_id": record_id,
-                "amount": 5000,
-                "method": "cash",
-            }
-            response = client.put(f"/api/v1/payments/{payment_id}", json=update_data)
-            assert response.status_code == 200
-            body = response.json()
-            assert body["amount"] == 5000
-            assert body["method"] == "cash"
-
-    def test_delete_payment_soft_deletes(self) -> None:
+    def test_delete_payment_soft_deletes(self, api_client) -> None:
         """DELETE /api/payments/{id} soft-deletes and list excludes it."""
-        from src.main import create_app
+        record_id = _create_record(api_client)
+        payload = {**PAYMENT_PAYLOAD, "record_id": record_id}
+        create_resp = api_client.post("/api/v1/payments", json=payload)
+        payment_id = create_resp.json()["id"]
 
-        app = create_app()
-        with TestClient(app) as client:
-            record_id = _create_record(client)
-            payload = {**PAYMENT_PAYLOAD, "record_id": record_id}
-            create_resp = client.post("/api/v1/payments", json=payload)
-            payment_id = create_resp.json()["id"]
+        # Delete
+        response = api_client.delete(f"/api/v1/payments/{payment_id}")
+        assert response.status_code == 204
 
-            # Delete
-            response = client.delete(f"/api/v1/payments/{payment_id}")
-            assert response.status_code == 204
+        # GET by id should still return it (soft delete)
+        response = api_client.get(f"/api/v1/payments/{payment_id}")
+        assert response.status_code == 200
+        assert response.json()["is_active"] is False
 
-            # GET by id should still return it (soft delete)
-            response = client.get(f"/api/v1/payments/{payment_id}")
-            assert response.status_code == 200
-            assert response.json()["is_active"] is False
+        # List should NOT include the deleted payment
+        response = api_client.get("/api/v1/payments")
+        payments = response.json()
+        ids = [p["id"] for p in payments]
+        assert payment_id not in ids
 
-            # List should NOT include the deleted payment
-            response = client.get("/api/v1/payments")
-            payments = response.json()
-            ids = [p["id"] for p in payments]
-            assert payment_id not in ids
-
-    def test_get_nonexistent_payment_returns_404(self) -> None:
+    def test_get_nonexistent_payment_returns_404(self, api_client) -> None:
         """GET /api/payments/{fake_id} returns 404."""
-        from src.main import create_app
-
-        app = create_app()
-        with TestClient(app) as client:
-            response = client.get("/api/v1/payments/nonexistent-id")
+        response = api_client.get("/api/v1/payments/nonexistent-id")
         assert response.status_code == 404
 
-    def test_update_nonexistent_payment_returns_404(self) -> None:
+    def test_update_nonexistent_payment_returns_404(self, api_client) -> None:
         """PUT /api/payments/{fake_id} returns 404."""
-        from src.main import create_app
-
-        app = create_app()
-        with TestClient(app) as client:
-            record_id = _create_record(client)
-            response = client.put(
-                "/api/v1/payments/nonexistent-id",
-                json={**PAYMENT_PAYLOAD, "record_id": record_id},
-            )
+        record_id = _create_record(api_client)
+        response = api_client.put(
+            "/api/v1/payments/nonexistent-id",
+            json={**PAYMENT_PAYLOAD, "record_id": record_id},
+        )
         assert response.status_code == 404
 
-    def test_delete_nonexistent_payment_returns_404(self) -> None:
+    def test_delete_nonexistent_payment_returns_404(self, api_client) -> None:
         """DELETE /api/payments/{fake_id} returns 404."""
-        from src.main import create_app
-
-        app = create_app()
-        with TestClient(app) as client:
-            response = client.delete("/api/v1/payments/nonexistent-id")
+        response = api_client.delete("/api/v1/payments/nonexistent-id")
         assert response.status_code == 404

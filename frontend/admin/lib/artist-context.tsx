@@ -76,7 +76,7 @@ export function ArtistProvider({ children }: { children: React.ReactNode }) {
   };
 
   const getVisitorsForActivity = (activityId: string): VisitorInfo[] => {
-    const records = RECORDS.filter(r => r.activityId === activityId && r.status !== 'CANCELLED');
+    const records = RECORDS.filter(r => r.activityId === activityId && r.status !== 'cancelled');
     const result: VisitorInfo[] = [];
     for (const record of records) {
       const visits = VISITS.filter(v => v.recordId === record.id);

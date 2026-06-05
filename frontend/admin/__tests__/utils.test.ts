@@ -6,6 +6,9 @@ import {
   getMonday,
   formatDate,
   formatDateISO,
+  decimalToHHMM,
+  hhmmToDecimal,
+  formatActivityContext,
 } from '@/lib/utils';
 
 describe('hexToRgb', () => {
@@ -119,5 +122,40 @@ describe('formatDateISO', () => {
   it('formats December date', () => {
     const date = new Date(2026, 11, 31); // Dec 31, 2026
     expect(formatDateISO(date)).toBe('2026-12-31');
+  });
+});
+
+describe('decimalToHHMM', () => {
+  it('converts 1.5 to "01:30"', () => {
+    expect(decimalToHHMM(1.5)).toBe('01:30');
+  });
+
+  it('converts 0 to "00:00"', () => {
+    expect(decimalToHHMM(0)).toBe('00:00');
+  });
+
+  it('converts 2.25 to "02:15"', () => {
+    expect(decimalToHHMM(2.25)).toBe('02:15');
+  });
+});
+
+describe('hhmmToDecimal', () => {
+  it('converts "01:30" to 1.5', () => {
+    expect(hhmmToDecimal('01:30')).toBe(1.5);
+  });
+
+  it('converts "00:00" to 0', () => {
+    expect(hhmmToDecimal('00:00')).toBe(0);
+  });
+
+  it('converts "02:15" to 2.25', () => {
+    expect(hhmmToDecimal('02:15')).toBeCloseTo(2.25);
+  });
+});
+
+describe('formatActivityContext', () => {
+  it('formats Saturday June 6, 2026 14:00 correctly', () => {
+    const date = new Date(2026, 5, 6, 14, 0); // June 6, 2026 = Saturday
+    expect(formatActivityContext(date)).toBe('Сб, 6 июня · 14:00');
   });
 });

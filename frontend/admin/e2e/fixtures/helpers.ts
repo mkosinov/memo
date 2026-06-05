@@ -1,0 +1,130 @@
+/**
+ * helpers.ts — UI interaction helpers for Playwright E2E tests.
+ *
+ * These helpers encapsulate complex UI interactions (opening modals,
+ * waiting for data, navigating tabs) so test files stay readable.
+ */
+
+import { type Page, expect } from '@playwright/test';
+
+/**
+ * Wait for schedule page to load with activity cards.
+ * Navigates to /schedule and waits for at least one activity card to appear.
+ */
+export async function waitForScheduleReady(page: Page) {
+  await page.goto('/schedule');
+  await page.waitForSelector('[data-testid^="activity-"]', { timeout: 15_000 });
+}
+
+/**
+ * Get the activity data from the first visible activity card.
+ * Uses React fiber tree traversal to extract the activity prop.
+ */
+export async function getFirstActivity(page: Page) {
+  return page.evaluate(() => {
+    const card = document.querySelector('[data-testid^="activity-"]');
+    if (!card) return null;
+    const fiberKey = Object.keys(card).find((k: string) => k.startsWith('__reactFiber'));
+    if (!fiberKey) return null;
+    let current = (card as any)[fiberKey];
+    while (current) {
+      if (current.memoizedProps?.activity) return current.memoizedProps.activity;
+      current = current.return;
+    }
+    return null;
+  });
+}
+
+/**
+ * Open the activity details modal for the first visible activity.
+ * Dispatches a custom event that the modal listens to.
+ */
+export async function openModal(page: Page) {
+  const activity = await getFirstActivity(page);
+  if (!activity) throw new Error('No activity found on page');
+
+  await page.evaluate((act: any) => {
+    document.dispatchEvent(new CustomEvent('__memo-open-modal', { detail: { activity: act } }));
+  }, activity);
+
+  await page.waitForSelector('[data-testid="activity-details-modal"]', {
+    state: 'visible',
+    timeout: 10_000,
+  });
+}
+
+/**
+ * Open the modal directly on the "new booking" (+) tab.
+ * Useful for testing record creation flows.
+ */
+export async function openAddTab(page: Page) {
+  const activity = await getFirstActivity(page);
+  if (!activity) throw new Error('No activity found on page');
+
+  await page.evaluate((act: any) => {
+    document.dispatchEvent(new CustomEvent('__memo-quick-add', { detail: { activity: act } }));
+  }, activity);
+
+  await page.waitForSelector('[data-testid="activity-details-modal"]', {
+    state: 'visible',
+    timeout: 10_000,
+  });
+  await expect(page.locator('[data-testid="new-booking-tab"]')).toBeVisible();
+}
+
+/**
+ * Wait for a toast notification to appear.
+ */
+export async function waitForToast(page: Page, textPattern?: string | RegExp) {
+  const toast = page.locator('[role="status"]');
+  await toast.first().waitFor({ state: 'visible', timeout: 5000 });
+  if (textPattern) {
+    await expect(toast.first()).toContainText(textPattern);
+  }
+}
+
+/**
+ * Click a specific tab in the modal by test ID.
+ */
+export async function clickModalTab(page: Page, tabTestId: string) {
+  await page.locator(`[data-testid="${tabTestId}"]`).click();
+}
+
+/**
+ * Wait for records page to load with table.
+ * Navigates to /records, waits for the heading and table to render,
+ * then waits for the records AND activities API responses to arrive —
+ * both are needed for the table to render rows (records are filtered
+ * by activity_id lookup). Also waits for a short time for React to
+ * re-render with the fetched data.
+ */
+export async function waitForRecordsReady(page: Page) {
+  // Set up response listeners BEFORE navigation so we don't miss API calls.
+  const recordsResponse = page.waitForResponse(
+    (resp) => resp.url().includes('/api/v1/records') && resp.status() === 200,
+    { timeout: 15_000 },
+  );
+  const activitiesResponse = page.waitForResponse(
+    (resp) => resp.url().includes('/api/v1/activities') && resp.status() === 200,
+    { timeout: 15_000 },
+  );
+  await page.goto('/records');
+  await page.waitForSelector('h1:has-text("Управление записями")', { timeout: 15_000 });
+  await page.waitForSelector('table', { timeout: 15_000 });
+  // Wait for both records and activities to arrive.
+  await Promise.all([recordsResponse, activitiesResponse]);
+  // Give React a moment to re-render the table with data.
+  // The table needs to show either data rows or the empty state AFTER data load.
+  await page
+    .waitForFunction(
+      () => {
+        const rows = document.querySelectorAll('tbody tr');
+        if (rows.length === 0) return true;
+        // Either we have real data rows or the genuine empty state
+        const firstCell = rows[0]?.querySelector('td');
+        return firstCell !== null; // empty state is a td with "Записи не найдены"
+      },
+      { timeout: 5_000 },
+    )
+    .catch(() => {});
+}

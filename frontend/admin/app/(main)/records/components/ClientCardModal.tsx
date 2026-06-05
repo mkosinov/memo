@@ -1,10 +1,7 @@
 'use client';
 
 import React, { useMemo } from 'react';
-import {
-  CLIENTS, VISITORS, RECORDS, BOOKING_ACTIVITIES, VISITS, PAYMENTS,
-  SERVICES, LOCATIONS,
-} from '@/lib/mock-data';
+import { useRecords } from '@/contexts/RecordsContext';
 import { DiamondIcon } from '@/app/components/shared/DiamondIcon';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
@@ -20,17 +17,17 @@ function formatTime(time: number): string {
 }
 
 const STATUS_LABELS: Record<string, string> = {
-  WAITING: 'Ожидание',
-  VISITED: 'Посетили',
-  MISSED: 'Неявка',
-  CANCELLED: 'Отменена',
+  pending: 'Ожидание',
+  confirmed: 'Подтверждена',
+  cancelled: 'Отменена',
+  no_show: 'Неявка',
 };
 
 const STATUS_COLORS: Record<string, string> = {
-  WAITING: 'bg-gray-100 text-gray-600',
-  VISITED: 'bg-emerald-100 text-emerald-700',
-  MISSED: 'bg-red-100 text-red-700',
-  CANCELLED: 'bg-amber-100 text-amber-700',
+  pending: 'bg-gray-100 text-gray-600',
+  confirmed: 'bg-emerald-100 text-emerald-700',
+  cancelled: 'bg-amber-100 text-amber-700',
+  no_show: 'bg-red-100 text-red-700',
 };
 
 // ─── Component ────────────────────────────────────────────────────────────
@@ -41,26 +38,30 @@ interface ClientCardModalProps {
 }
 
 export function ClientCardModal({ clientId, onClose }: ClientCardModalProps) {
-  const client = CLIENTS.find((c) => c.id === clientId);
-  const clientVisitors = VISITORS.filter((v) => v.clientId === clientId);
-  const clientRecords = RECORDS.filter((r) => r.clientId === clientId);
+  const { clients, records, activities, services, locations, payments } = useRecords();
+
+  const client = clients.get(clientId) ?? null;
+  const clientRecords = useMemo(
+    () => records.filter((r) => r.client_id === clientId),
+    [records, clientId],
+  );
 
   const recordDetails = useMemo(() => {
     return clientRecords.map((record) => {
-      const activity = BOOKING_ACTIVITIES.find((a) => a.id === record.activityId);
-      const service = activity ? SERVICES.find((s) => s.id === activity.serviceId) : null;
-      const location = activity ? LOCATIONS.find((l) => l.id === activity.locationId) : null;
-      const visits = VISITS.filter((v) => v.recordId === record.id);
-      const payments = PAYMENTS.filter((p) => p.recordId === record.id);
-      const totalPrice = visits.reduce((s, v) => s + v.priceCharged, 0);
-      const paidAmount = payments.filter((p) => p.paid).reduce((s, p) => s + p.amount, 0);
-      return { record, activity, service, location, visits, totalPrice, paidAmount };
+      const activity = activities.get(record.activity_id);
+      const service = activity ? services.get(activity.service_id) : null;
+      const location = activity ? locations.get(activity.location_id) : null;
+      const recordPayments = payments.get(record.id) ?? [];
+      const totalPrice = record.visits.reduce((s, v) => s + v.price, 0);
+      const paidAmount = recordPayments.reduce((s, p) => s + p.amount, 0);
+      return { record, activity, service, location, totalPrice, paidAmount };
     });
-  }, [clientRecords]);
+  }, [clientRecords, activities, services, locations, payments]);
 
-  const totalVisits = clientRecords.filter((r) => (r.status as string) === 'VISITED').length;
+  const totalVisitCount = clientRecords.filter((r) => r.status === 'confirmed').length;
+  const totalGuests = clientRecords.reduce((s, r) => s + Math.max(1, r.visits.length), 0);
   const totalSpent = recordDetails
-    .filter((d) => d.record.status !== 'CANCELLED')
+    .filter((d) => d.record.status !== 'cancelled')
     .reduce((s, d) => s + d.paidAmount, 0);
 
   return (
@@ -107,46 +108,16 @@ export function ClientCardModal({ clientId, onClose }: ClientCardModalProps) {
                 </div>
                 <div className="grid grid-cols-3 divide-x" style={{ borderColor: 'var(--line)' }}>
                   <div className="px-6 py-4 text-center">
-                    <div className="text-xl font-bold" style={{ color: 'var(--brand)' }}>{totalVisits}</div>
+                    <div className="text-xl font-bold" style={{ color: 'var(--brand)' }}>{totalVisitCount}</div>
                     <div className="text-xs mt-0.5" style={{ color: 'var(--ink-light)' }}>Визитов</div>
                   </div>
                   <div className="px-6 py-4 text-center">
-                    <div className="text-xl font-bold" style={{ color: 'var(--success)' }}>{clientVisitors.length}</div>
-                    <div className="text-xs mt-0.5" style={{ color: 'var(--ink-light)' }}>Посетителей</div>
+                    <div className="text-xl font-bold" style={{ color: 'var(--success)' }}>{totalGuests}</div>
+                    <div className="text-xs mt-0.5" style={{ color: 'var(--ink-light)' }}>Гостей</div>
                   </div>
                   <div className="px-6 py-4 text-center">
                     <div className="text-xl font-bold" style={{ color: 'var(--ink)' }}>{formatPrice(totalSpent)}</div>
                     <div className="text-xs mt-0.5" style={{ color: 'var(--ink-light)' }}>Потрачено</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Visitors Section */}
-            <div className="px-6 pb-6">
-              <div className="rounded-xl border overflow-hidden" style={{ borderColor: 'var(--line)' }}>
-                <div className="px-6 py-4 border-b" style={{ borderColor: 'var(--line)' }}>
-                  <h2 className="text-sm font-semibold" style={{ color: 'var(--ink)' }}>Связанные посетители</h2>
-                </div>
-                <div className="p-4">
-                  <div className="grid grid-cols-2 gap-3">
-                    {clientVisitors.map((visitor) => (
-                      <div key={visitor.id} className="p-3 rounded-lg border" style={{ borderColor: 'var(--line)' }}>
-                        <div className="text-sm font-medium" style={{ color: 'var(--ink)' }}>{visitor.name}</div>
-                        <div className="flex items-center gap-2 mt-1">
-                          {visitor.isAdult ? (
-                            <span className="text-[10px] bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-medium">Взрослый</span>
-                          ) : (
-                            <span className="text-[10px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">Ребенок, {visitor.age} лет</span>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                    {clientVisitors.length === 0 && (
-                      <div className="col-span-2 text-sm text-center py-4" style={{ color: 'var(--ink-light)' }}>
-                        Нет связанных посетителей
-                      </div>
-                    )}
                   </div>
                 </div>
               </div>
@@ -164,17 +135,17 @@ export function ClientCardModal({ clientId, onClose }: ClientCardModalProps) {
                       <div className="flex justify-between items-start">
                         <div className="flex-1">
                           <div className="flex items-center gap-3">
-                            <span className="text-sm font-medium" style={{ color: 'var(--ink)' }}>{service?.name ?? '—'}</span>
+                            <span className="text-sm font-medium" style={{ color: 'var(--ink)' }}>{service?.title ?? '—'}</span>
                             <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-semibold ${STATUS_COLORS[record.status]}`}>
                               {STATUS_LABELS[record.status]}
                             </span>
-                            {activity?.isPrivate && (
+                            {activity?.is_private && (
                               <DiamondIcon className="text-[10px]" />
                             )}
                           </div>
                           <div className="text-xs mt-1.5" style={{ color: 'var(--ink-light)' }}>
                             {activity
-                              ? `${formatTime(activity.startTime)} · ${location?.name ?? '—'}`
+                              ? `${formatTime(new Date(activity.start).getUTCHours() + new Date(activity.start).getUTCMinutes() / 60)} · ${location?.name ?? '—'}`
                               : '—'}
                           </div>
                           {record.comment && (

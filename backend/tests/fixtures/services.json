@@ -1,0 +1,31 @@
+[
+  {
+    "title": "Картина маслом",
+    "description": "Мастер-класс по рисованию маслом",
+    "image_url": "https://example.com/oil.jpg",
+    "specialty": "живопись",
+    "min_age": 12,
+    "max_age": 99,
+    "duration": 150,
+    "record_info": "Принесите фартук",
+    "tariffs": [
+      {"title": "Взрослый", "description": "Стандартный тариф", "price": 3500},
+      {"title": "Детский", "description": "Для детей до 12 лет", "price": 2500},
+      {"title": "Индивидуальный", "description": "Персональное занятие", "price": 5000}
+    ]
+  },
+  {
+    "title": "Картина акрилом",
+    "description": "Мастер-класс по рисованию акрилом",
+    "image_url": "https://example.com/acrylic.jpg",
+    "specialty": "живопись",
+    "min_age": 6,
+    "max_age": 99,
+    "duration": 120,
+    "record_info": "Все материалы включены",
+    "tariffs": [
+      {"title": "Взрослый", "description": "Стандартный тариф", "price": 2800},
+      {"title": "Детский", "description": "Для детей до 12 лет", "price": 2000}
+    ]
+  }
+]

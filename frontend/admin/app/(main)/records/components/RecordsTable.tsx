@@ -33,17 +33,17 @@ function parseActivityStart(start: string): { date: string; day: number; startTi
 }
 
 const STATUS_LABELS: Record<string, string> = {
-  WAITING: 'Ожидание',
-  VISITED: 'Посетили',
-  MISSED: 'Неявка',
-  CANCELLED: 'Отменена',
+  pending: 'Ожидание',
+  confirmed: 'Подтверждена',
+  cancelled: 'Отменена',
+  no_show: 'Неявка',
 };
 
 const STATUS_COLORS: Record<string, string> = {
-  WAITING: 'bg-gray-100 text-gray-600',
-  VISITED: 'bg-emerald-100 text-emerald-700',
-  MISSED: 'bg-red-100 text-red-700',
-  CANCELLED: 'bg-amber-100 text-amber-700',
+  pending: 'bg-gray-100 text-gray-600',
+  confirmed: 'bg-emerald-100 text-emerald-700',
+  cancelled: 'bg-amber-100 text-amber-700',
+  no_show: 'bg-red-100 text-red-700',
 };
 
 interface RecordsTableProps {

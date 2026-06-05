@@ -143,6 +143,7 @@ describe('ClientCardModal ↔ ClientInfoTab integration (real components)', () =
 
     vi.mocked(apiUpdateClient).mockResolvedValue(mockClient);
     vi.mocked(apiDeleteClient).mockResolvedValue(undefined);
+    vi.mocked(getClientVisitors).mockResolvedValue([]);
 
     vi.mocked(useQueryClient).mockReturnValue({
       invalidateQueries: mockInvalidateQueries,

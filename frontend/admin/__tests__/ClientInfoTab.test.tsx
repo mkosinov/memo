@@ -1,9 +1,22 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import React from 'react';
 import { ClientInfoTab } from '../app/(main)/clients/components/ClientInfoTab';
-import { mockClientWithStats } from './helpers/mockData';
-import type { ClientWithStats } from '@memo/api-client';
+import { mockClientWithStats, mockVisitor } from './helpers/mockData';
+import type { ClientWithStats, VisitorResponse } from '@memo/api-client';
+
+// Mock API calls
+vi.mock('@memo/api-client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@memo/api-client')>();
+  return {
+    ...actual,
+    getClientVisitors: vi.fn(),
+    createVisitor: vi.fn(),
+    deleteVisitor: vi.fn(),
+  };
+});
+
+import { getClientVisitors, createVisitor, deleteVisitor } from '@memo/api-client';
 
 function renderClientInfoTab(overrides?: {
   client?: ClientWithStats;
@@ -19,6 +32,11 @@ function renderClientInfoTab(overrides?: {
 }
 
 describe('ClientInfoTab', () => {
+  beforeEach(() => {
+    vi.mocked(getClientVisitors).mockResolvedValue([]);
+  });
+
+  afterEach(() => vi.restoreAllMocks());
   it('renders client name in input', () => {
     renderClientInfoTab();
     const input = screen.getByLabelText('Имя') as HTMLInputElement;
@@ -259,6 +277,126 @@ describe('ClientInfoTab', () => {
     it('shows formatted total paid with ₽ symbol', () => {
       renderClientInfoTab();
       expect(screen.getByText(/17 500 ₽/)).toBeInTheDocument();
+    });
+  });
+
+  // ─── Visitors section ───────────────────────────────────────────────────
+
+  describe('visitors section', () => {
+    const mockVisitors: VisitorResponse[] = [
+      { ...mockVisitor, id: 'vis1', name: 'Анна (взр.)', age: 30 },
+      { ...mockVisitor, id: 'vis2', name: 'Маша', age: 8 },
+    ];
+
+    beforeEach(() => {
+      vi.mocked(getClientVisitors).mockResolvedValue(mockVisitors);
+      vi.mocked(createVisitor).mockResolvedValue({
+        ...mockVisitor,
+        id: 'vis_new',
+        name: 'Новый Гость',
+        age: null,
+      });
+      vi.mocked(deleteVisitor).mockResolvedValue(undefined);
+    });
+
+    it('renders visitors section heading', async () => {
+      renderClientInfoTab();
+      expect(screen.getByText('Посетители')).toBeInTheDocument();
+    });
+
+    it('fetches and displays existing visitors', async () => {
+      renderClientInfoTab();
+      await waitFor(() => {
+        expect(getClientVisitors).toHaveBeenCalledWith('c1');
+      });
+      expect(screen.getByText(/Анна/)).toBeInTheDocument();
+      expect(screen.getByText(/Маша/)).toBeInTheDocument();
+    });
+
+    it('shows add visitor button', () => {
+      renderClientInfoTab();
+      expect(screen.getByText(/Добавить посетителя/)).toBeInTheDocument();
+    });
+
+    it('shows inline add form when button clicked', async () => {
+      renderClientInfoTab();
+      fireEvent.click(screen.getByText(/Добавить посетителя/));
+      expect(screen.getByTestId('input-visitor-name')).toBeInTheDocument();
+      expect(screen.getByTestId('input-visitor-age')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Создать/ })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Отмена/ })).toBeInTheDocument();
+    });
+
+    it('creates visitor on form submit', async () => {
+      renderClientInfoTab();
+      fireEvent.click(screen.getByText(/Добавить посетителя/));
+
+      // Fill in the new visitor form
+      const nameInput = screen.getByTestId('input-visitor-name') as HTMLInputElement;
+      fireEvent.change(nameInput, { target: { value: 'Новый Гость' } });
+
+      const createBtn = screen.getByRole('button', { name: /Создать/ });
+      fireEvent.click(createBtn);
+
+      await waitFor(() => {
+        expect(createVisitor).toHaveBeenCalledWith({
+          client_id: 'c1',
+          name: 'Новый Гость',
+          age: undefined,
+        });
+      });
+    });
+
+    it('creates visitor with age when age provided', async () => {
+      renderClientInfoTab();
+      fireEvent.click(screen.getByText(/Добавить посетителя/));
+
+      const nameInput = screen.getByTestId('input-visitor-name') as HTMLInputElement;
+      fireEvent.change(nameInput, { target: { value: 'Ребёнок' } });
+
+      const ageInput = screen.getByTestId('input-visitor-age') as HTMLInputElement;
+      fireEvent.change(ageInput, { target: { value: '5' } });
+
+      fireEvent.click(screen.getByRole('button', { name: /Создать/ }));
+
+      await waitFor(() => {
+        expect(createVisitor).toHaveBeenCalledWith({
+          client_id: 'c1',
+          name: 'Ребёнок',
+          age: 5,
+        });
+      });
+    });
+
+    it('hides form when cancel clicked', () => {
+      renderClientInfoTab();
+      fireEvent.click(screen.getByText(/Добавить посетителя/));
+      expect(screen.getByTestId('input-visitor-age')).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: /Отмена/ }));
+      expect(screen.queryByTestId('input-visitor-age')).not.toBeInTheDocument();
+    });
+
+    it('refetches visitors after successful creation', async () => {
+      renderClientInfoTab();
+      await waitFor(() => {
+        expect(getClientVisitors).toHaveBeenCalledWith('c1');
+      });
+
+      // Reset mock call count after initial fetch
+      vi.mocked(getClientVisitors).mockClear();
+
+      fireEvent.click(screen.getByText(/Добавить посетителя/));
+      const nameInput = screen.getByTestId('input-visitor-name') as HTMLInputElement;
+      fireEvent.change(nameInput, { target: { value: 'Новый Гость' } });
+      fireEvent.click(screen.getByRole('button', { name: /Создать/ }));
+
+      await waitFor(() => {
+        expect(createVisitor).toHaveBeenCalled();
+      });
+
+      // After creation, getClientVisitors should be called again for refetch
+      expect(getClientVisitors).toHaveBeenCalled();
     });
   });
 });

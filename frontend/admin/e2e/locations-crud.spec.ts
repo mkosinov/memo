@@ -39,8 +39,9 @@ test.describe('Locations — Create Modal', () => {
   test('opens create modal when clicking add button', async ({ page }) => {
     await waitForLocationsReady(page);
     await page.click('text=+ Добавить локацию');
-    await expect(page.getByRole('dialog')).toBeVisible();
-    await expect(page.getByText('Новая локация')).toBeVisible();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByText('Новая локация')).toBeVisible();
   });
 
   test('validates required fields in create modal', async ({ page }) => {
@@ -49,9 +50,7 @@ test.describe('Locations — Create Modal', () => {
     const dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible({ timeout: 10_000 });
     await dialog.getByText('Сохранить').click();
-    // Wait for validation errors to appear
     await page.waitForTimeout(300);
-    // Check for error messages inside the dialog
     const errors = dialog.locator('[style*="danger"], .text-red-500');
     await expect(errors.first()).toBeVisible({ timeout: 5_000 });
   });

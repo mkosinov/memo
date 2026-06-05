@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { waitForServicesReady } from './fixtures/helpers';
+import { waitForServicesReady, waitForLocationsReady } from './fixtures/helpers';
 
 /**
  * E2E tests for Services page: table rendering, CRUD operations,
@@ -25,7 +25,6 @@ test.describe('Services — Table and Navigation', () => {
     const searchInput = page.getByPlaceholder('Название...');
     await expect(searchInput).toBeVisible();
     await searchInput.fill('тест');
-    // Table should filter (we can't assert specific rows without test data)
   });
 
   test('status filter works', async ({ page }) => {
@@ -38,11 +37,8 @@ test.describe('Services — Table and Navigation', () => {
   test('column picker toggles column visibility', async ({ page }) => {
     await waitForServicesReady(page);
     await page.click('[aria-label="Настроить колонки"]');
-    // Check that dropdown appeared
     await expect(page.getByText('Специализация')).toBeVisible();
-    // Toggle a column
     await page.click('text=Специализация');
-    // Close picker
     await page.keyboard.press('Escape');
   });
 });
@@ -51,10 +47,11 @@ test.describe('Services — Create Modal', () => {
   test('opens create modal when clicking add button', async ({ page }) => {
     await waitForServicesReady(page);
     await page.click('text=+ Добавить услугу');
-    await expect(page.getByRole('dialog')).toBeVisible();
-    await expect(page.getByText('Новая услуга')).toBeVisible();
-    await expect(page.getByText('Сохранить')).toBeVisible();
-    await expect(page.getByText('Отмена')).toBeVisible();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByText('Новая услуга')).toBeVisible();
+    await expect(dialog.getByText('Сохранить')).toBeVisible();
+    await expect(dialog.getByText('Отмена')).toBeVisible();
   });
 
   test('validates required fields in create modal', async ({ page }) => {
@@ -63,9 +60,7 @@ test.describe('Services — Create Modal', () => {
     const dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible({ timeout: 10_000 });
     await dialog.getByText('Сохранить').click();
-    // Wait for validation errors to appear
     await page.waitForTimeout(300);
-    // Check for error messages inside the dialog
     const errors = dialog.locator('[style*="danger"], .text-red-500');
     await expect(errors.first()).toBeVisible({ timeout: 5_000 });
   });
@@ -75,29 +70,28 @@ test.describe('Services — Create Modal', () => {
     await page.click('text=+ Добавить услугу');
     await expect(page.getByRole('dialog')).toBeVisible();
     await page.keyboard.press('Escape');
-    // Modal should close (no dirty check since no changes)
     await expect(page.getByRole('dialog')).not.toBeVisible();
   });
 
   test('shows dirty check when closing with changes', async ({ page }) => {
     await waitForServicesReady(page);
     await page.click('text=+ Добавить услугу');
-    // Type something to make form dirty
-    await page.fill('input[placeholder*="Мастер-класс"]', 'Тест');
-    // Set up dialog handler to dismiss
-    page.on('dialog', (dialog) => dialog.dismiss());
-    await page.click('text=Отмена');
-    // Dialog should have appeared (we dismissed it, so modal stays)
-    await expect(page.getByRole('dialog')).toBeVisible();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible();
+    await dialog.getByPlaceholder('Мастер-класс').fill('Тест');
+    page.on('dialog', (d) => d.dismiss());
+    await dialog.getByText('Отмена').click();
+    await expect(dialog).toBeVisible();
   });
 
   test('adds and removes tariffs in nested list', async ({ page }) => {
     await waitForServicesReady(page);
     await page.click('text=+ Добавить услугу');
-    await page.click('text=+ Добавить тариф');
-    await expect(page.getByText('Тариф 1')).toBeVisible();
-    // Remove tariff
-    await page.click('[aria-label="Удалить Тариф"]');
-    await expect(page.getByText('Нет тарифов')).toBeVisible();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible();
+    await dialog.getByText('+ Добавить тариф').click();
+    await expect(dialog.getByText('Тариф 1')).toBeVisible();
+    await dialog.getByLabel('Удалить Тариф').click();
+    await expect(dialog.getByText('Нет тарифов')).toBeVisible();
   });
 });

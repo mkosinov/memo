@@ -372,8 +372,8 @@ describe('ClientCardModal ↔ ClientRecordTab integration (real components)', ()
       expect(screen.getByTestId('client-record-tab')).toBeInTheDocument();
     });
 
-    // Verify the record data is displayed (visit status select exists in real component)
-    expect(screen.getByTestId('visit-status-select')).toBeInTheDocument();
+    // Verify the record data is displayed (CustomSelect triggers exist in record tab)
+    expect(screen.getAllByTestId('custom-select-trigger').length).toBeGreaterThan(0);
   });
 
   it('record tab payment form calls createPayment', async () => {
@@ -431,8 +431,11 @@ describe('ClientCardModal ↔ ClientRecordTab integration (real components)', ()
     });
   });
 
-  it('record tab delete calls deleteRecord and onClose', async () => {
+  it('record tab delete calls deleteRecord but does NOT close modal', async () => {
     const onClose = vi.fn();
+    // handleDelete calls window.confirm — mock it to allow deletion
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+
     const { ClientCardModal } = await import('@/app/(main)/clients/components/ClientCardModal');
     render(
       <QueryClientProvider client={createQueryClient()}>
@@ -452,8 +455,11 @@ describe('ClientCardModal ↔ ClientRecordTab integration (real components)', ()
 
     await waitFor(() => {
       expect(deleteRecord).toHaveBeenCalledWith('rec1');
-      expect(onClose).toHaveBeenCalled();
     });
+    // Delete deliberately does NOT close the modal — user stays in context
+    expect(onClose).not.toHaveBeenCalled();
+
+    vi.mocked(window.confirm).mockRestore();
   });
 
   it('switching back to client tab from record tab shows client info', async () => {

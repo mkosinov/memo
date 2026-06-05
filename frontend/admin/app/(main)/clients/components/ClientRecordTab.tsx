@@ -62,11 +62,6 @@ function StatusIcon({ status }: { status: VisitStatus }) {
   }
 }
 
-function cycleVisitStatus(current: VisitStatus): VisitStatus {
-  const idx = VISIT_STATUS_ORDER.indexOf(current);
-  return VISIT_STATUS_ORDER[(idx + 1) % VISIT_STATUS_ORDER.length];
-}
-
 // ─── Component ──────────────────────────────────────────────────────────────
 
 export function ClientRecordTab({ recordId, clientId, onClose }: ClientRecordTabProps) {
@@ -186,11 +181,8 @@ export function ClientRecordTab({ recordId, clientId, onClose }: ClientRecordTab
 
   // ── Handlers ────────────────────────────────────────────────────────────
 
-  const handleStatusCycle = useCallback((visitId: string) => {
-    setVisitStatuses(prev => {
-      const current = (prev[visitId] || 'waiting') as VisitStatus;
-      return { ...prev, [visitId]: cycleVisitStatus(current) };
-    });
+  const handleStatusChange = useCallback((visitId: string, newStatus: VisitStatus) => {
+    setVisitStatuses(prev => ({ ...prev, [visitId]: newStatus }));
     markChanged();
   }, [markChanged]);
 
@@ -405,16 +397,17 @@ export function ClientRecordTab({ recordId, clientId, onClose }: ClientRecordTab
           const status = (visitStatuses[firstVisit.id] || 'waiting') as VisitStatus;
           const cfg = STATUS_CONFIG[status];
           return (
-            <button
-              type="button"
-              onClick={() => handleStatusCycle(firstVisit.id)}
-              className="p-2 rounded-lg hover:bg-gray-100 transition-colors"
-              style={{ color: cfg?.color }}
-              title={cfg?.label}
-              data-testid="visit-status-icon"
+            <select
+              value={status}
+              onChange={(e) => handleStatusChange(firstVisit.id, e.target.value as VisitStatus)}
+              className={`${inputClass} appearance-none text-xs`}
+              style={{ ...inputStyle, color: cfg?.color }}
+              data-testid="visit-status-select"
             >
-              <StatusIcon status={status} />
-            </button>
+              {Object.entries(STATUS_CONFIG).map(([key, config]) => (
+                <option key={key} value={key}>{config.label}</option>
+              ))}
+            </select>
           );
         })()}
       </div>

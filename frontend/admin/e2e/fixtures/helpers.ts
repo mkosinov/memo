@@ -17,6 +17,44 @@ export async function waitForScheduleReady(page: Page) {
 }
 
 /**
+ * Wait for services page to load with table.
+ * Navigates to /services, waits for API response, then waits for heading and table.
+ */
+export async function waitForServicesReady(page: Page) {
+  // Set up response listener BEFORE navigation
+  const servicesResponse = page.waitForResponse(
+    (resp) => resp.url().includes('/api/v1/services') && resp.status() === 200,
+    { timeout: 15_000 },
+  );
+  await page.goto('/services');
+  await page.waitForSelector('h1:has-text("Управление услугами")', { timeout: 15_000 });
+  await page.waitForSelector('table', { timeout: 15_000 });
+  // Wait for API response to arrive
+  await servicesResponse.catch(() => {});
+  // Give React a moment to re-render with data
+  await page.waitForTimeout(500);
+}
+
+/**
+ * Wait for locations page to load with table.
+ * Navigates to /locations, waits for API response, then waits for heading and table.
+ */
+export async function waitForLocationsReady(page: Page) {
+  // Set up response listener BEFORE navigation
+  const locationsResponse = page.waitForResponse(
+    (resp) => resp.url().includes('/api/v1/locations') && resp.status() === 200,
+    { timeout: 15_000 },
+  );
+  await page.goto('/locations');
+  await page.waitForSelector('h1:has-text("Управление локациями")', { timeout: 15_000 });
+  await page.waitForSelector('table', { timeout: 15_000 });
+  // Wait for API response to arrive
+  await locationsResponse.catch(() => {});
+  // Give React a moment to re-render with data
+  await page.waitForTimeout(500);
+}
+
+/**
  * Get the activity data from the first visible activity card.
  * Uses React fiber tree traversal to extract the activity prop.
  */

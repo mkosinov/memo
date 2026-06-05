@@ -54,8 +54,16 @@ describe('Menubar', () => {
     expect(screen.getByRole('link', { name: 'Расписание' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Записи' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Клиенты' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Мастера' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Чат' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Мастера' })).toBeInTheDocument();
+  });
+
+  it('renders settings links (Услуги and Локации)', () => {
+    renderWithProviders();
+    expect(screen.getByRole('link', { name: 'Услуги' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Локации' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Услуги' })).toHaveAttribute('href', '/services');
+    expect(screen.getByRole('link', { name: 'Локации' })).toHaveAttribute('href', '/locations');
   });
 
   it('highlights the active navigation link (Расписание)', () => {

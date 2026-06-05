@@ -267,3 +267,54 @@ export type VisitorCreate = z.infer<typeof VisitorCreateSchema>;
 
 export const VisitorUpdateSchema = VisitorCreateSchema.partial();
 export type VisitorUpdate = z.infer<typeof VisitorUpdateSchema>;
+
+// ─── TariffCreate (request body) ─────────────────────────────────────────
+
+export const TariffCreateSchema = z.object({
+  title: z.string(),
+  description: z.string().optional().default(''),
+  price: z.number().min(0),
+});
+
+export type TariffCreate = z.infer<typeof TariffCreateSchema>;
+
+// ─── ServiceCreate (request body) ────────────────────────────────────────
+
+export const ServiceCreateSchema = z.object({
+  title: z.string().min(1).max(200),
+  description: z.string().optional().default(''),
+  image_url: z.string().optional().default(''),
+  specialty: z.string().optional().default(''),
+  min_age: z.number().min(0).max(18).default(0),
+  max_age: z.number().min(0).max(18).default(18),
+  duration: z.number().min(15).max(480),
+  record_info: z.string().optional().default(''),
+  material_hint: z.string().optional().default(''),
+  tariffs: z.array(TariffCreateSchema).default([]),
+  tag_ids: z.array(z.string()).default([]),
+});
+
+export type ServiceCreate = z.infer<typeof ServiceCreateSchema>;
+
+export const ServiceUpdateSchema = ServiceCreateSchema.partial();
+export type ServiceUpdate = z.infer<typeof ServiceUpdateSchema>;
+
+// ─── LocationCreate (request body) ───────────────────────────────────────
+
+export const LocationCreateSchema = z.object({
+  name: z.string().min(1).max(200),
+  address: z.string().optional().default(''),
+  description: z.string().optional().default(''),
+  capacity: z.number().min(1).max(500),
+  yandex_map_url: z.string().optional().default(''),
+  review_url: z.string().optional().default(''),
+  record_info: z.string().optional().default(''),
+  image_url: z.string().optional().default(''),
+  location_hint: z.string().optional().default(''),
+  tag_ids: z.array(z.string()).default([]),
+});
+
+export type LocationCreate = z.infer<typeof LocationCreateSchema>;
+
+export const LocationUpdateSchema = LocationCreateSchema.partial();
+export type LocationUpdate = z.infer<typeof LocationUpdateSchema>;

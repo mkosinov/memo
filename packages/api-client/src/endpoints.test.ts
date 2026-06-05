@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { getMasters, getMaster, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, deleteActivity, getWebPhotos, getRecords, getClients, getPayments, createRecord, updateRecord, deleteRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, deleteVisitor, searchClientByPhone, updateVisitStatus } from './endpoints';
+import { z } from 'zod';
+import { getMasters, getMaster, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, deleteActivity, getWebPhotos, getRecords, getClients, getPayments, createRecord, updateRecord, deleteRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, deleteVisitor, searchClientByPhone, updateVisitStatus, getTags, createService, updateService, deleteService, createLocation, updateLocation, deleteLocation } from './endpoints';
+import { ServiceCreateSchema, LocationCreateSchema } from './schemas';
 
 // Mock the api function from client
 vi.mock('./client', () => ({
@@ -364,6 +366,106 @@ describe('updateVisitStatus', () => {
         method: 'PUT',
         body: JSON.stringify({ status: 'visited' }),
       }),
+    );
+  });
+});
+
+// ─── Tags ──────────────────────────────────────────────────────────────────
+
+describe('getTags', () => {
+  it('calls /api/v1/tags with array schema', async () => {
+    vi.mocked(api).mockResolvedValue([]);
+    await getTags();
+    expect(api).toHaveBeenCalledWith('/api/v1/tags', expect.anything());
+  });
+});
+
+// ─── Services CRUD ─────────────────────────────────────────────────────────
+
+describe('createService', () => {
+  it('calls POST /api/v1/services with body', async () => {
+    vi.mocked(api).mockResolvedValue({ id: 's-1' });
+    const data: z.input<typeof ServiceCreateSchema> = { title: 'Рисование', duration: 90 };
+    await createService(data);
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/services',
+      expect.anything(),
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    );
+  });
+});
+
+describe('updateService', () => {
+  it('calls PUT /api/v1/services/:id with partial body', async () => {
+    vi.mocked(api).mockResolvedValue({ id: 's-1' });
+    await updateService('s-1', { title: 'Обновлённое' });
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/services/s-1',
+      expect.anything(),
+      expect.objectContaining({
+        method: 'PUT',
+        body: JSON.stringify({ title: 'Обновлённое' }),
+      }),
+    );
+  });
+});
+
+describe('deleteService', () => {
+  it('calls DELETE /api/v1/services/:id', async () => {
+    vi.mocked(api).mockResolvedValue(undefined);
+    await deleteService('s-1');
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/services/s-1',
+      expect.anything(),
+      expect.objectContaining({ method: 'DELETE' }),
+    );
+  });
+});
+
+// ─── Locations CRUD ────────────────────────────────────────────────────────
+
+describe('createLocation', () => {
+  it('calls POST /api/v1/locations with body', async () => {
+    vi.mocked(api).mockResolvedValue({ id: 'l-1' });
+    const data: z.input<typeof LocationCreateSchema> = { name: 'Новая студия', capacity: 20 };
+    await createLocation(data);
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/locations',
+      expect.anything(),
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    );
+  });
+});
+
+describe('updateLocation', () => {
+  it('calls PUT /api/v1/locations/:id with partial body', async () => {
+    vi.mocked(api).mockResolvedValue({ id: 'l-1' });
+    await updateLocation('l-1', { name: 'Обновлённая' });
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/locations/l-1',
+      expect.anything(),
+      expect.objectContaining({
+        method: 'PUT',
+        body: JSON.stringify({ name: 'Обновлённая' }),
+      }),
+    );
+  });
+});
+
+describe('deleteLocation', () => {
+  it('calls DELETE /api/v1/locations/:id', async () => {
+    vi.mocked(api).mockResolvedValue(undefined);
+    await deleteLocation('l-1');
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/locations/l-1',
+      expect.anything(),
+      expect.objectContaining({ method: 'DELETE' }),
     );
   });
 });

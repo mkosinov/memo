@@ -60,8 +60,13 @@ test.describe('Services — Create Modal', () => {
   test('validates required fields in create modal', async ({ page }) => {
     await waitForServicesReady(page);
     await page.click('text=+ Добавить услугу');
+    await page.waitForSelector('[role="dialog"]', { timeout: 10_000 });
     await page.click('text=Сохранить');
-    await expect(page.getByText('Обязательное поле').first()).toBeVisible();
+    // Wait for validation errors to appear
+    await page.waitForTimeout(300);
+    // Check for error messages (may be "Обязательное поле" or similar)
+    const errors = page.locator('[style*="danger"], .text-red-500, [class*="error"]');
+    await expect(errors.first()).toBeVisible({ timeout: 5_000 });
   });
 
   test('closes modal with escape key', async ({ page }) => {

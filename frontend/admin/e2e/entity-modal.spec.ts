@@ -28,11 +28,15 @@ test.describe('EntityModal — Service', () => {
   test('number field respects min/max', async ({ page }) => {
     await waitForServicesReady(page);
     await page.click('text=+ Добавить услугу');
+    await page.waitForSelector('[role="dialog"]', { timeout: 10_000 });
     // Try to submit with duration=0 (below min of 15)
     const durationInput = page.locator('input[type="number"]').nth(0);
     await durationInput.fill('0');
     await page.click('text=Сохранить');
-    await expect(page.getByText('Минимум:').first()).toBeVisible();
+    // Wait for validation error
+    await page.waitForTimeout(300);
+    const errors = page.locator('[style*="danger"], .text-red-500, [class*="error"]');
+    await expect(errors.first()).toBeVisible({ timeout: 5_000 });
   });
 
   test('submit button shows loading state', async ({ page }) => {

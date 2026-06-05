@@ -28,6 +28,9 @@ jobs:
 
   frontend-tests:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        group: [1, 2]
     defaults:
       run:
         working-directory: frontend/admin
@@ -47,10 +50,15 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Run vitest
-        run: pnpm run test
+      - name: Run vitest (group ${{ matrix.group }})
+        run: |
+          if [ "${{ matrix.group }}" = "1" ]; then
+            npx vitest run --reporter=verbose __tests__/Client*.test.tsx __tests__/CustomSelect.test.tsx __tests__/RecordsTable.test.tsx
+          else
+            npx vitest run --reporter=verbose --exclude='**/Client*.test.tsx' --exclude='**/CustomSelect.test.tsx' --exclude='**/RecordsTable.test.tsx'
+          fi
         env:
-          NODE_OPTIONS: --max-old-space-size=4096
+          NODE_OPTIONS: --max-old-space-size=6144
 
   e2e-tests:
     runs-on: ubuntu-latest

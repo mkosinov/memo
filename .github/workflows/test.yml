@@ -32,7 +32,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        group: [1, 2]
+        group: [1, 2, 3]
     defaults:
       run:
         working-directory: frontend/admin
@@ -55,7 +55,9 @@ jobs:
       - name: Run vitest (group ${{ matrix.group }})
         run: |
           if [ "${{ matrix.group }}" = "1" ]; then
-            npx vitest run --reporter=verbose __tests__/Client*.test.tsx __tests__/CustomSelect.test.tsx __tests__/RecordsTable.test.tsx
+            npx vitest run --reporter=verbose __tests__/ClientCardModal.test.tsx __tests__/ClientInfoTab.test.tsx __tests__/ClientsContext.test.tsx
+          elif [ "${{ matrix.group }}" = "2" ]; then
+            npx vitest run --reporter=verbose __tests__/ClientRecordTab.test.tsx __tests__/ClientsIntegration.test.tsx __tests__/ClientsTable.test.tsx __tests__/ClientsFilters.test.tsx __tests__/ClientsPage.test.tsx __tests__/CustomSelect.test.tsx __tests__/RecordsTable.test.tsx
           else
             npx vitest run --reporter=verbose --exclude='**/Client*.test.tsx' --exclude='**/CustomSelect.test.tsx' --exclude='**/RecordsTable.test.tsx'
           fi

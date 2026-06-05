@@ -17,6 +17,7 @@ export function ClientInfoTab({ client, mode = 'view', onSave, onDelete }: Clien
   const [email, setEmail] = useState(client?.email || '');
   const [channel, setChannel] = useState(client?.channel || '');
   const [hasChanges, setHasChanges] = useState(false);
+  const [isActive, setIsActive] = useState(client?.is_active ?? true);
 
   // Visitors state
   const [visitors, setVisitors] = useState<VisitorResponse[]>([]);
@@ -30,6 +31,7 @@ export function ClientInfoTab({ client, mode = 'view', onSave, onDelete }: Clien
     setPhone(client?.phone || '');
     setEmail(client?.email || '');
     setChannel(client?.channel || '');
+    setIsActive(client?.is_active ?? true);
     setHasChanges(false);
   }, [client]);
 
@@ -46,9 +48,18 @@ export function ClientInfoTab({ client, mode = 'view', onSave, onDelete }: Clien
   const handleChange = useCallback(() => setHasChanges(true), []);
 
   const handleSave = useCallback(async () => {
-    await onSave({ name, phone, email, channel });
+    await onSave({ name, phone, email, channel, is_active: isActive });
     setHasChanges(false);
-  }, [name, phone, email, channel, onSave]);
+  }, [name, phone, email, channel, isActive, onSave]);
+
+  const handleCancel = useCallback(() => {
+    setName(client?.name || '');
+    setPhone(client?.phone || '');
+    setEmail(client?.email || '');
+    setChannel(client?.channel || '');
+    setIsActive(client?.is_active ?? true);
+    setHasChanges(false);
+  }, [client]);
 
   const handleCreateVisitor = useCallback(async () => {
     if (!newVisitorName.trim() || !client) return;
@@ -134,6 +145,16 @@ export function ClientInfoTab({ client, mode = 'view', onSave, onDelete }: Clien
                 handleChange();
               }}
             />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-ink-mid block mb-1">Статус</label>
+            <button
+              type="button"
+              onClick={() => { setIsActive(!isActive); handleChange(); }}
+              className={`px-3 py-1.5 text-sm rounded-lg ${isActive ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}
+            >
+              {isActive ? 'Активна' : 'Неактивна'}
+            </button>
           </div>
         </div>
       </div>
@@ -278,23 +299,34 @@ export function ClientInfoTab({ client, mode = 'view', onSave, onDelete }: Clien
 
       {/* Actions */}
       <div className="flex justify-between items-center pt-4 border-t" style={{ borderColor: 'var(--line)' }}>
-        {mode === 'view' && onDelete && (
-        <button
-          onClick={onDelete}
-          className="px-4 py-2 text-sm text-red-500 hover:text-red-600"
-        >
-          Удалить клиента
-        </button>
-        )}
-        {mode === 'create' && <div />}
-        <button
-          disabled={!hasChanges}
-          onClick={handleSave}
-          className="px-4 py-2 text-sm text-white rounded-lg disabled:bg-gray-300"
-          style={{ backgroundColor: hasChanges ? 'var(--brand)' : undefined }}
-        >
-          {mode === 'create' ? 'Создать' : 'Сохранить'}
-        </button>
+        {mode === 'view' && onDelete ? (
+          <button
+            onClick={onDelete}
+            className="text-sm text-red-500 hover:text-red-600"
+          >
+            Удалить клиента
+          </button>
+        ) : <div />}
+        <div className="flex gap-2">
+          {mode === 'view' && (
+            <button
+              disabled={!hasChanges}
+              onClick={handleCancel}
+              className="px-4 py-2 text-sm text-ink-mid border rounded-lg disabled:opacity-50"
+              style={{ borderColor: 'var(--line)' }}
+            >
+              Отмена
+            </button>
+          )}
+          <button
+            disabled={!hasChanges}
+            onClick={handleSave}
+            className="px-4 py-2 text-sm text-white rounded-lg disabled:bg-gray-300"
+            style={{ backgroundColor: hasChanges ? 'var(--brand)' : undefined }}
+          >
+            {mode === 'create' ? 'Создать' : 'Сохранить'}
+          </button>
+        </div>
       </div>
     </div>
   );

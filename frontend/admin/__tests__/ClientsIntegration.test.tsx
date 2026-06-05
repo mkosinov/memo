@@ -15,6 +15,7 @@ vi.mock('@memo/api-client', () => ({
   deleteClient: vi.fn(),
   getRecord: vi.fn(),
   getRecords: vi.fn().mockResolvedValue([]),
+  patchRecord: vi.fn(),
   updateRecord: vi.fn(),
   deleteRecord: vi.fn(),
   createPayment: vi.fn(),
@@ -26,6 +27,7 @@ import {
   updateClient as apiUpdateClient,
   deleteClient as apiDeleteClient,
   getRecord,
+  patchRecord,
   updateRecord,
   deleteRecord,
   createPayment,
@@ -119,6 +121,10 @@ const mockClientWithRecords: ClientWithStats & {
 
 const mockVisitors = [
   { id: 'vis1', client_id: 'c1', name: 'Анна Иванова', age: 30, created_at: '', updated_at: '', is_active: true },
+];
+
+const mockActivityResponses = [
+  { id: 'ev_1', master_id: 'm1', service_id: 's1', location_id: 'loc1', start: '2026-05-10T14:00:00', duration: 150, capacity: 8, is_private: false, comment: null, record_info: null, created_at: '', updated_at: '', is_active: true, occupied: 3 },
 ];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
@@ -239,7 +245,7 @@ describe('ClientCardModal ↔ ClientInfoTab integration (real components)', () =
     expect(saveBtn).toBeEnabled();
   });
 
-  it('delete button calls context deleteClient', async () => {
+  it('delete button calls context deleteClient after confirm', async () => {
     const { ClientCardModal } = await import('@/app/(main)/clients/components/ClientCardModal');
     const onClose = vi.fn();
     render(
@@ -249,10 +255,15 @@ describe('ClientCardModal ↔ ClientInfoTab integration (real components)', () =
     );
 
     const deleteBtn = screen.getByRole('button', { name: /Удалить клиента/i });
+
+    // jsdom's window.confirm returns false by default (not implemented)
+    // so deleteClient should NOT be called without explicit confirm mock
     fireEvent.click(deleteBtn);
 
-    expect(mockDeleteClient).toHaveBeenCalledWith('c1');
-    expect(onClose).toHaveBeenCalled();
+    await waitFor(() => {
+      expect(mockDeleteClient).not.toHaveBeenCalled();
+    });
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it('save button sends correct data to context updateClient', async () => {
@@ -269,6 +280,7 @@ describe('ClientCardModal ↔ ClientInfoTab integration (real components)', () =
         phone: '+7 (000) 000-00-00',
         email: '',
         channel: 'telegram',
+        is_active: true,
       });
     });
   });
@@ -284,6 +296,7 @@ describe('ClientCardModal ↔ ClientRecordTab integration (real components)', ()
     );
 
     vi.mocked(getRecord).mockResolvedValue(mockRecord);
+    vi.mocked(patchRecord).mockResolvedValue(mockRecord);
     vi.mocked(updateRecord).mockResolvedValue(mockRecord);
     vi.mocked(deleteRecord).mockResolvedValue(undefined);
     vi.mocked(createPayment).mockResolvedValue({
@@ -308,8 +321,21 @@ describe('ClientCardModal ↔ ClientRecordTab integration (real components)', ()
         // Records list query for ClientCardModal — return records array
         return { data: mockClientWithRecords.records, isLoading: false, error: null } as any;
       }
+      if (Array.isArray(queryKey) && queryKey[0] === 'activities') {
+        // Activities for records query
+        return { data: mockActivityResponses, isLoading: false, error: null } as any;
+      }
       if (Array.isArray(queryKey) && queryKey[0] === 'visitors') {
         return { data: mockVisitors, isLoading: false, error: null } as any;
+      }
+      if (Array.isArray(queryKey) && queryKey[0] === 'activity') {
+        return { data: mockActivityResponses[0], isLoading: false, error: null } as any;
+      }
+      if (Array.isArray(queryKey) && (queryKey[0] === 'masters' || queryKey[0] === 'locations' || queryKey[0] === 'services')) {
+        return { data: [], isLoading: false, error: null } as any;
+      }
+      if (Array.isArray(queryKey) && queryKey[0] === 'payments') {
+        return { data: [], isLoading: false, error: null } as any;
       }
       // Default: single record query for ClientRecordTab
       return { data: mockRecord, isLoading: false, error: null } as any;
@@ -343,7 +369,7 @@ describe('ClientCardModal ↔ ClientRecordTab integration (real components)', ()
     });
 
     // Verify the record data is displayed (status select with current value)
-    const statusSelect = screen.getByLabelText('Статус');
+    const statusSelect = screen.getByTestId('select-record-status');
     expect(statusSelect).toHaveValue('confirmed');
   });
 
@@ -393,11 +419,11 @@ describe('ClientCardModal ↔ ClientRecordTab integration (real components)', ()
     });
 
     // Change status
-    const statusSelect = screen.getByLabelText('Статус');
+    const statusSelect = screen.getByTestId('select-record-status');
     fireEvent.change(statusSelect, { target: { value: 'cancelled' } });
 
     await waitFor(() => {
-      expect(updateRecord).toHaveBeenCalledWith('rec1', { status: 'cancelled' });
+      expect(patchRecord).toHaveBeenCalledWith('rec1', { status: 'cancelled' });
     });
   });
 

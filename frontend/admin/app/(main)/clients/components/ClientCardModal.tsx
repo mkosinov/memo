@@ -1,12 +1,12 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { getRecords } from '@memo/api-client';
+import { getRecords, getActivity } from '@memo/api-client';
 import { useClients } from '@/contexts/ClientsContext';
 import { ClientInfoTab } from './ClientInfoTab';
 import { ClientRecordTab } from './ClientRecordTab';
-import type { ClientWithStats } from '@memo/api-client';
+import type { ClientWithStats, ActivityResponse } from '@memo/api-client';
 
 interface ClientCardModalProps {
   client: ClientWithStats | null;
@@ -20,11 +20,29 @@ export function ClientCardModal({ client, isOpen, onClose, onClientCreated, mode
   const [activeTab, setActiveTab] = useState('client');
   const { createClient, updateClient, deleteClient } = useClients();
 
+  const handleDelete = useCallback(async () => {
+    const clientName = client?.name ?? 'клиента';
+    if (window.confirm(`Удалить ${clientName}? Это скроет клиента из списка.`)) {
+      await deleteClient(client!.id);
+      onClose();
+    }
+  }, [client, deleteClient, onClose]);
+
   // Fetch records for this client (only in view mode)
   const { data: records } = useQuery({
     queryKey: ['records', 'client', client?.id],
     queryFn: () => getRecords({ client_id: client?.id! }),
     enabled: isOpen && mode === 'view' && !!client?.id,
+  });
+
+  // Fetch activities for each record to get date/time
+  const { data: recordActivities = [] } = useQuery<ActivityResponse[]>({
+    queryKey: ['activities', 'for-records', records?.map(r => r.activity_id) ?? []],
+    queryFn: () =>
+      Promise.all(
+        (records ?? []).map(r => getActivity(r.activity_id)),
+      ),
+    enabled: !!records && records.length > 0,
   });
 
   // Reset tab to 'client' whenever the modal opens
@@ -76,19 +94,28 @@ export function ClientCardModal({ client, isOpen, onClose, onClientCreated, mode
               Клиент
             </button>
 
-            {records?.map((record) => (
-              <button
-                key={record.id}
-                className={`w-full text-left px-3 py-2 rounded-lg text-sm ${
-                  activeTab === `record-${record.id}`
-                    ? 'bg-brand text-white font-medium'
-                    : 'text-ink-mid hover:bg-white/60'
-                }`}
-                onClick={() => setActiveTab(`record-${record.id}`)}
-              >
-                {new Date(record.created_at).toLocaleDateString('ru-RU')}
-              </button>
-            ))}
+            {records?.map((record, i) => {
+              const activity = recordActivities[i];
+              const startDate = activity?.start ? new Date(activity.start) : null;
+              return (
+                <button
+                  key={record.id}
+                  className={`w-full text-left px-3 py-2 rounded-lg text-sm ${
+                    activeTab === `record-${record.id}`
+                      ? 'bg-brand text-white font-medium'
+                      : 'text-ink-mid hover:bg-white/60'
+                  }`}
+                  onClick={() => setActiveTab(`record-${record.id}`)}
+                >
+                  <div>{startDate ? startDate.toLocaleDateString('ru-RU') : '—'}</div>
+                  {startDate && (
+                    <div className="text-xs opacity-70">
+                      {startDate.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
+                    </div>
+                  )}
+                </button>
+              );
+            })}
           </div>
         </div>
 
@@ -110,10 +137,7 @@ export function ClientCardModal({ client, isOpen, onClose, onClientCreated, mode
                   }
                 : (data: any) => updateClient(client!.id, data)
               }
-              onDelete={mode === 'view' && client
-                ? () => { deleteClient(client.id); onClose(); }
-                : undefined
-              }
+              onDelete={mode === 'view' && client ? handleDelete : undefined}
             />
           ) : (
             <ClientRecordTab recordId={activeTab.replace('record-', '')} clientId={client!.id} onClose={onClose} />

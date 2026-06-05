@@ -30,6 +30,16 @@ vi.mock('../app/(main)/clients/components/ClientRecordTab', () => ({
 
 const mockUseQuery = vi.fn().mockReturnValue({ data: [], isLoading: false });
 
+// Helper: set up mock to return records for the records query and activities for the activities query
+function mockQueriesForRecordsAndActivities(records: any[] = mockRecords, activities: any[] = mockActivities) {
+  mockUseQuery.mockImplementation((...args: any[]) => {
+    const queryKey = args[0]?.queryKey ?? args[1]?.queryKey ?? [];
+    if (queryKey[0] === 'records') return { data: records, isLoading: false };
+    if (queryKey[0] === 'activities') return { data: activities, isLoading: false };
+    return { data: [], isLoading: false };
+  });
+}
+
 vi.mock('@tanstack/react-query', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@tanstack/react-query')>();
   return {
@@ -112,6 +122,11 @@ const mockRecords = [
   },
 ];
 
+const mockActivities = [
+  { id: 'ev_1', start: '2026-05-10T14:00:00', duration: 2.5 },
+  { id: 'ev_2', start: '2026-04-20T18:00:00', duration: 2 },
+];
+
 // ─── Tests ────────────────────────────────────────────────────────────────
 
 describe('ClientCardModal', () => {
@@ -176,18 +191,18 @@ describe('ClientCardModal', () => {
   });
 
   it('switches to record tab when record button is clicked', () => {
-    mockUseQuery.mockReturnValue({ data: mockRecords, isLoading: false });
+    mockQueriesForRecordsAndActivities();
     render(<ClientCardModal {...defaultProps} />);
     // Click on first record tab
-    fireEvent.click(screen.getByText(/10\.05\.2026/));
+    fireEvent.click(screen.getByText('10.05.2026'));
     expect(screen.getByTestId('client-record-tab')).toBeInTheDocument();
     expect(screen.getByTestId('record-id').textContent).toBe('rec1');
   });
 
   it('passes clientId to ClientRecordTab', () => {
-    mockUseQuery.mockReturnValue({ data: mockRecords, isLoading: false });
+    mockQueriesForRecordsAndActivities();
     render(<ClientCardModal {...defaultProps} />);
-    fireEvent.click(screen.getByText(/10\.05\.2026/));
+    fireEvent.click(screen.getByText('10.05.2026'));
     expect(screen.getByTestId('record-client-id').textContent).toBe('c1');
   });
 
@@ -198,11 +213,25 @@ describe('ClientCardModal', () => {
   });
 
   it('shows record date buttons for each record', () => {
-    mockUseQuery.mockReturnValue({ data: mockRecords, isLoading: false });
+    mockQueriesForRecordsAndActivities();
     render(<ClientCardModal {...defaultProps} />);
     // Should have 2 record tabs + 1 client tab
-    expect(screen.getByText(/10\.05\.2026/)).toBeInTheDocument();
-    expect(screen.getByText(/20\.04\.2026/)).toBeInTheDocument();
+    expect(screen.getByText('10.05.2026')).toBeInTheDocument();
+    expect(screen.getByText('20.04.2026')).toBeInTheDocument();
+  });
+
+  it('shows activity date and time in record tab buttons', () => {
+    // Uses custom activities with different times
+    mockQueriesForRecordsAndActivities(mockRecords, [
+      { id: 'ev_1', start: '2026-05-10T14:00:00', duration: 2.5 },
+      { id: 'ev_2', start: '2026-04-20T18:00:00', duration: 2 },
+    ]);
+    render(<ClientCardModal {...defaultProps} />);
+    // Should show activity start dates, not record created_at
+    expect(screen.getByText('10.05.2026')).toBeInTheDocument();
+    expect(screen.getByText('14:00')).toBeInTheDocument();
+    expect(screen.getByText('20.04.2026')).toBeInTheDocument();
+    expect(screen.getByText('18:00')).toBeInTheDocument();
   });
 
   it('renders two-panel layout (left panel + right panel)', () => {
@@ -221,28 +250,31 @@ describe('ClientCardModal', () => {
     expect(updateClient).toHaveBeenCalledWith('c1', { name: 'updated' });
   });
 
-  it('ClientInfoTab onDelete calls context deleteClient and onClose', () => {
-    const deleteClient = vi.fn();
+  it('ClientInfoTab onDelete wraps deleteClient with confirm', async () => {
+    const deleteClient = vi.fn().mockResolvedValue(undefined);
     const onClose = vi.fn();
     mockUseClients.mockReturnValue(createMockClientsContext({ deleteClient }));
     render(<ClientCardModal {...defaultProps} onClose={onClose} />);
     fireEvent.click(screen.getByTestId('info-delete'));
-    expect(deleteClient).toHaveBeenCalledWith('c1');
-    expect(onClose).toHaveBeenCalled();
+    // jsdom's window.confirm returns false by default, so deleteClient should not be called
+    await vi.waitFor(() => {
+      expect(deleteClient).not.toHaveBeenCalled();
+    });
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   // ─── Tab switching edge cases ───────────────────────────────────────────
 
   describe('tab switching', () => {
     it('switches back to client tab from record tab', () => {
-      mockUseQuery.mockReturnValue({ data: mockRecords, isLoading: false });
+      mockQueriesForRecordsAndActivities();
       render(<ClientCardModal {...defaultProps} />);
 
       // Start on client tab
       expect(screen.getByTestId('client-info-tab')).toBeInTheDocument();
 
       // Switch to a record tab
-      fireEvent.click(screen.getByText(/10\.05\.2026/));
+      fireEvent.click(screen.getByText('10.05.2026'));
       expect(screen.getByTestId('client-record-tab')).toBeInTheDocument();
 
       // Switch back to client tab
@@ -252,13 +284,13 @@ describe('ClientCardModal', () => {
     });
 
     it('resets to client tab when modal is closed and reopened', () => {
-      mockUseQuery.mockReturnValue({ data: mockRecords, isLoading: false });
+      mockQueriesForRecordsAndActivities();
       const { rerender } = render(
         <ClientCardModal {...defaultProps} isOpen={true} />,
       );
 
       // Switch to record tab
-      fireEvent.click(screen.getByText(/10\.05\.2026/));
+      fireEvent.click(screen.getByText('10.05.2026'));
       expect(screen.getByTestId('client-record-tab')).toBeInTheDocument();
 
       // Close modal
@@ -272,16 +304,16 @@ describe('ClientCardModal', () => {
     });
 
     it('renders the correct record tab content for different records', () => {
-      mockUseQuery.mockReturnValue({ data: mockRecords, isLoading: false });
+      mockQueriesForRecordsAndActivities();
       render(<ClientCardModal {...defaultProps} />);
 
       // Click first record
-      fireEvent.click(screen.getByText(/10\.05\.2026/));
+      fireEvent.click(screen.getByText('10.05.2026'));
       expect(screen.getByTestId('record-id').textContent).toBe('rec1');
 
       // Switch back to client, then click second record
       fireEvent.click(screen.getByText('Клиент'));
-      fireEvent.click(screen.getByText(/20\.04\.2026/));
+      fireEvent.click(screen.getByText('20.04.2026'));
       expect(screen.getByTestId('record-id').textContent).toBe('rec2');
     });
 

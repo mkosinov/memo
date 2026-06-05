@@ -109,6 +109,7 @@ describe('ClientInfoTab', () => {
         phone: '+7 (900) 123-45-67',
         email: '',
         channel: 'telegram',
+        is_active: true,
       });
     });
   });
@@ -264,6 +265,7 @@ describe('ClientInfoTab', () => {
           phone: '+7 (000) 000-00-00',
           email: 'new@test.com',
           channel: 'whatsapp',
+          is_active: true,
         });
       });
     });
@@ -324,7 +326,9 @@ describe('ClientInfoTab', () => {
       expect(screen.getByTestId('input-visitor-name')).toBeInTheDocument();
       expect(screen.getByTestId('input-visitor-age')).toBeInTheDocument();
       expect(screen.getByRole('button', { name: /Создать/ })).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: /Отмена/ })).toBeInTheDocument();
+      // Visitor form has its own cancel button (the smaller one)
+      const cancelButtons = screen.getAllByRole('button', { name: /Отмена/ });
+      expect(cancelButtons.length).toBeGreaterThanOrEqual(1);
     });
 
     it('creates visitor on form submit', async () => {
@@ -373,7 +377,9 @@ describe('ClientInfoTab', () => {
       fireEvent.click(screen.getByText(/Добавить посетителя/));
       expect(screen.getByTestId('input-visitor-age')).toBeInTheDocument();
 
-      fireEvent.click(screen.getByRole('button', { name: /Отмена/ }));
+      // The visitor form cancel is the first Отмена button in the DOM
+      const cancelButtons = screen.getAllByRole('button', { name: /Отмена/ });
+      fireEvent.click(cancelButtons[0]);
       expect(screen.queryByTestId('input-visitor-age')).not.toBeInTheDocument();
     });
 

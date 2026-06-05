@@ -186,8 +186,8 @@ export type RecordResponse = z.infer<typeof RecordResponseSchema>;
 
 export const ClientResponseSchema = z.object({
   id: z.string(),
-  name: z.string(),
-  phone: z.string(),
+  name: z.string().nullable(),
+  phone: z.string().nullable(),
   email: z.string().nullable(),
   channel: z.string().nullable(),
   created_at: z.string(),
@@ -200,7 +200,7 @@ export type ClientResponse = z.infer<typeof ClientResponseSchema>;
 // ─── ClientCreate (request body) ──────────────────────────────────────────
 
 export const ClientCreateSchema = z.object({
-  name: z.string(),
+  name: z.string().optional(),
   phone: z.string().optional(),
   email: z.string().optional(),
   channel: z.string().optional(),

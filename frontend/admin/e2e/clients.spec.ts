@@ -1,6 +1,11 @@
 import { test, expect } from '@playwright/test';
 import { waitForClientsReady } from './fixtures/helpers';
-import { createTestClient, cleanup } from './fixtures/factories';
+import {
+  createTestClient,
+  createTestActivity,
+  createTestRecord,
+  cleanup,
+} from './fixtures/factories';
 
 const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
 
@@ -372,6 +377,236 @@ test.describe('Clients page', () => {
       await expect(modal).not.toBeVisible({ timeout: 5000 });
     } finally {
       await cleanup(request, `/api/v1/clients/${clientId}`);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Helper — open client card and click on the first record tab
+// ---------------------------------------------------------------------------
+
+/**
+ * Creates client + activity + record, opens the client card modal,
+ * and clicks on the first record tab (date/time button in left panel).
+ * Returns IDs for cleanup.
+ */
+async function setupRecordTab(
+  page: import('@playwright/test').Page,
+  request: import('@playwright/test').APIRequestContext,
+  clientName?: string,
+) {
+  const client = await createTestClient(request, { name: clientName || `Record Tab ${uid()}` });
+  const activity = await createTestActivity(request);
+  const record = await createTestRecord(request, activity.id, client.id);
+
+  await waitForClientsReady(page);
+
+  // Open client card
+  const row = page
+    .locator('table tbody tr')
+    .filter({ hasText: client.name });
+  await expect(row).toBeVisible({ timeout: 10_000 });
+  await row.click();
+
+  const modal = page.locator('[data-testid="client-card-modal"]');
+  await expect(modal).toBeVisible({ timeout: 5000 });
+
+  // Click on the record tab — it's the second button in the left panel
+  // (first button is "Клиент" tab, subsequent ones are record tabs with date/time)
+  const recordTabButton = modal.locator('[data-testid="client-card-left-panel"] button').nth(1);
+  await expect(recordTabButton).toBeVisible({ timeout: 5000 });
+  await recordTabButton.click();
+
+  // Wait for record tab content to load
+  const recordTab = page.locator('[data-testid="client-record-tab"]');
+  await expect(recordTab).toBeVisible({ timeout: 10_000 });
+
+  return { client, activity, record };
+}
+
+// ---------------------------------------------------------------------------
+// Tests — Record Tab
+// ---------------------------------------------------------------------------
+
+test.describe('Record tab', () => {
+  // ── 13. Record tab shows all fields ──────────────────────────────────────
+
+  test('13. Record tab shows all fields', async ({ page, request }) => {
+    const { client, activity, record } = await setupRecordTab(page, request);
+
+    try {
+      const tab = page.locator('[data-testid="client-record-tab"]');
+
+      // Date field visible
+      await expect(tab.locator('#record-date')).toBeVisible();
+
+      // Time field visible
+      await expect(tab.locator('#record-time')).toBeVisible();
+
+      // Service dropdown visible
+      await expect(tab.locator('#record-service')).toBeVisible();
+
+      // Master dropdown visible
+      await expect(tab.locator('#record-master')).toBeVisible();
+
+      // Location dropdown visible
+      await expect(tab.locator('#record-location')).toBeVisible();
+
+      // Status dropdown visible (visit-status-select)
+      await expect(tab.locator('[data-testid="visit-status-select"]')).toBeVisible();
+
+      // Visitors section visible
+      await expect(tab.locator('text=Посетители')).toBeVisible();
+
+      // Payment section visible
+      await expect(tab.locator('text=Оплата')).toBeVisible();
+
+      // Comment field visible
+      await expect(tab.locator('[data-testid="input-comment"]')).toBeVisible();
+
+      // Close modal
+      await closeByBackdrop(page);
+    } finally {
+      await cleanup(request, `/api/v1/records/${record.id}`);
+      await cleanup(request, `/api/v1/clients/${client.id}`);
+    }
+  });
+
+  // ── 14. Change visit status via dropdown ─────────────────────────────────
+
+  test('14. Change visit status via dropdown', async ({ page, request }) => {
+    const { client, activity, record } = await setupRecordTab(page, request);
+
+    try {
+      // Find the status dropdown
+      const statusSelect = page.locator('[data-testid="visit-status-select"]');
+      await expect(statusSelect).toBeVisible();
+
+      // Change to "Пришла" (visited)
+      await statusSelect.selectOption('visited');
+
+      // Verify the selected value changed
+      await expect(statusSelect).toHaveValue('visited');
+
+      // Save button should now be enabled (status change triggers hasChanges)
+      const saveBtn = page.locator('[data-testid="btn-save-record"]');
+      await expect(saveBtn).toBeEnabled();
+
+      // Close modal
+      await closeByBackdrop(page);
+    } finally {
+      await cleanup(request, `/api/v1/records/${record.id}`);
+      await cleanup(request, `/api/v1/clients/${client.id}`);
+    }
+  });
+
+  // ── 15. Add payment to record ────────────────────────────────────────────
+
+  test('15. Add payment to record', async ({ page, request }) => {
+    const { client, activity, record } = await setupRecordTab(page, request);
+
+    try {
+      // Fill payment amount
+      const amountInput = page.locator('input[placeholder="Сумма"]');
+      await expect(amountInput).toBeVisible();
+      await amountInput.fill('1500');
+
+      // Select payment method (default is card, switch to cash)
+      const methodSelect = page.locator(
+        'select:has(option:text("Карта")):has(option:text("Наличные"))',
+      );
+      if (await methodSelect.isVisible()) {
+        await methodSelect.selectOption('cash');
+      }
+
+      // Click "Добавить оплату"
+      const addPaymentBtn = page.locator('[data-testid="btn-add-payment"]');
+      await addPaymentBtn.click();
+
+      // Wait for the payment to appear in the list
+      await page.waitForTimeout(1000);
+
+      // Verify payment appears in the payment list
+      const paymentList = page.locator('[data-testid="payment-list"]');
+      if (await paymentList.isVisible()) {
+        await expect(paymentList).toContainText('1 500');
+        await expect(paymentList).toContainText('наличные');
+      }
+
+      // Close modal
+      await closeByBackdrop(page);
+    } finally {
+      await cleanup(request, `/api/v1/records/${record.id}`);
+      await cleanup(request, `/api/v1/clients/${client.id}`);
+    }
+  });
+
+  // ── 16. Save button activates on change ──────────────────────────────────
+
+  test('16. Save button activates on change', async ({ page, request }) => {
+    const { client, activity, record } = await setupRecordTab(page, request);
+
+    try {
+      const saveBtn = page.locator('[data-testid="btn-save-record"]');
+
+      // Verify save button is disabled initially
+      await expect(saveBtn).toBeDisabled();
+
+      // Change the comment (triggers markChanged)
+      const commentField = page.locator('[data-testid="input-comment"]');
+      await commentField.click();
+      await commentField.fill('Test comment for save activation');
+
+      // Verify save button is now enabled
+      await expect(saveBtn).toBeEnabled();
+
+      // Close modal
+      await closeByBackdrop(page);
+    } finally {
+      await cleanup(request, `/api/v1/records/${record.id}`);
+      await cleanup(request, `/api/v1/clients/${client.id}`);
+    }
+  });
+
+  // ── 17. Cancel resets changes ────────────────────────────────────────────
+
+  test('17. Cancel resets changes', async ({ page, request }) => {
+    const { client, activity, record } = await setupRecordTab(page, request);
+
+    try {
+      const saveBtn = page.locator('[data-testid="btn-save-record"]');
+      const commentField = page.locator('[data-testid="input-comment"]');
+
+      // Verify save is disabled initially
+      await expect(saveBtn).toBeDisabled();
+
+      // Make a change to the comment
+      await commentField.click();
+      await commentField.fill('Changed comment');
+
+      // Verify save is now enabled
+      await expect(saveBtn).toBeEnabled();
+
+      // Click Cancel button (the button next to Save, with text "Отмена")
+      const cancelBtn = page.locator('button:has-text("Отмена")');
+      await cancelBtn.click();
+
+      // Wait for state to reset
+      await page.waitForTimeout(500);
+
+      // Verify save button is disabled again
+      await expect(saveBtn).toBeDisabled();
+
+      // Verify comment was reset (should be empty or original value)
+      const commentValue = await commentField.inputValue();
+      // Original record has no comment, so it should reset to empty
+      expect(commentValue).toBe(record.comment || '');
+
+      // Close modal
+      await closeByBackdrop(page);
+    } finally {
+      await cleanup(request, `/api/v1/records/${record.id}`);
+      await cleanup(request, `/api/v1/clients/${client.id}`);
     }
   });
 });

@@ -29,27 +29,29 @@ test.describe('EntityModal — Service', () => {
   test('number field respects min/max', async ({ page }) => {
     await waitForServicesReady(page);
     await page.click('text=+ Добавить услугу');
-    await page.waitForSelector('[role="dialog"]', { timeout: 10_000 });
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible({ timeout: 10_000 });
     // Try to submit with duration=0 (below min of 15)
-    const durationInput = page.locator('[role="dialog"] input[type="number"]').nth(0);
+    const durationInput = dialog.locator('input[type="number"]').nth(0);
     await durationInput.fill('0');
-    await page.locator('[role="dialog"] text=Сохранить').click();
+    await dialog.getByText('Сохранить').click();
     // Wait for validation error
     await page.waitForTimeout(300);
-    const errors = page.locator('[role="dialog"] [style*="danger"], [role="dialog"] .text-red-500');
+    const errors = dialog.locator('[style*="danger"], .text-red-500');
     await expect(errors.first()).toBeVisible({ timeout: 5_000 });
   });
 
   test('submit button shows loading state', async ({ page }) => {
     await waitForServicesReady(page);
     await page.click('text=+ Добавить услугу');
-    await page.waitForSelector('[role="dialog"]', { timeout: 10_000 });
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible({ timeout: 10_000 });
     // Fill required fields
-    await page.locator('[role="dialog"] input[placeholder*="Мастер-класс"]').fill('Тестовый класс');
-    const durationInput = page.locator('[role="dialog"] input[type="number"]').nth(0);
+    await dialog.getByPlaceholder('Мастер-класс').fill('Тестовый класс');
+    const durationInput = dialog.locator('input[type="number"]').nth(0);
     await durationInput.fill('90');
     // Click submit — button text should change
-    await page.locator('[role="dialog"] text=Сохранить').click();
+    await dialog.getByText('Сохранить').click();
     // Note: This may be too fast to catch "Сохранение..." — depends on API speed
   });
 });

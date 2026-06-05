@@ -8,18 +8,24 @@ import type { RecordResponse } from '@memo/api-client';
 vi.mock('@memo/api-client', () => ({
   getRecord: vi.fn(),
   updateRecord: vi.fn(),
+  patchRecord: vi.fn(),
   deleteRecord: vi.fn(),
   createPayment: vi.fn(),
   deletePayment: vi.fn(),
   getClientVisitors: vi.fn(),
+  getActivity: vi.fn(),
+  getServices: vi.fn(),
 }));
 
 import {
   getRecord,
   updateRecord,
+  patchRecord,
   deleteRecord,
   createPayment,
   getClientVisitors,
+  getActivity,
+  getServices,
 } from '@memo/api-client';
 
 // ─── Mock react-query ──────────────────────────────────────────────────────
@@ -44,6 +50,7 @@ const mockRecord: RecordResponse = {
   status: 'confirmed',
   seats: 1,
   comment: null,
+  custom_price: null,
   created_at: '2026-05-10T10:00:00',
   updated_at: '2026-05-10T10:00:00',
   is_active: true,
@@ -75,6 +82,40 @@ const mockVisitors = [
   { id: 'vis2', client_id: 'c1', name: 'Мария Петрова', age: 25, created_at: '', updated_at: '', is_active: true },
 ];
 
+const mockActivityResponse = {
+  id: 'ev_1',
+  master_id: 'm1',
+  service_id: 's1',
+  location_id: 'loc1',
+  start: '2026-05-15T14:00:00',
+  duration: 150,
+  capacity: 8,
+  is_private: false,
+  comment: null,
+  record_info: null,
+  created_at: '2026-05-01T00:00:00',
+  updated_at: '2026-05-01T00:00:00',
+  is_active: true,
+  occupied: 3,
+};
+
+const mockServiceResponse = {
+  id: 's1',
+  title: 'Картина маслом',
+  description: 'Рисуем картину маслом',
+  image_url: '',
+  specialty: 'живопись',
+  min_age: 6,
+  max_age: 99,
+  duration: 150,
+  record_info: '',
+  tariffs: [],
+  tags: [],
+  is_active: true,
+  created_at: '',
+  updated_at: '',
+};
+
 const mockUseQuery = vi.mocked(useQuery);
 
 // Static import — vi.mock is hoisted so mocks apply before module execution
@@ -89,16 +130,23 @@ describe('ClientRecordTab', () => {
   beforeEach(() => {
     vi.clearAllMocks();
 
-    // Default: react-query returns data for both queries
+    // Default: react-query returns data for all queries
     mockUseQuery.mockImplementation((options: any) => {
       const key = options?.queryKey?.[0];
       if (key === 'visitors') {
         return { data: mockVisitors, isLoading: false, error: null } as any;
       }
+      if (key === 'activity') {
+        return { data: mockActivityResponse, isLoading: false, error: null } as any;
+      }
+      if (key === 'services') {
+        return { data: [mockServiceResponse], isLoading: false, error: null } as any;
+      }
       return { data: mockRecord, isLoading: false, error: null } as any;
     });
 
     vi.mocked(updateRecord).mockResolvedValue(mockRecord);
+    vi.mocked(patchRecord).mockResolvedValue(mockRecord);
     vi.mocked(deleteRecord).mockResolvedValue(undefined);
     vi.mocked(createPayment).mockResolvedValue({
       id: 'p1',
@@ -212,7 +260,7 @@ describe('ClientRecordTab', () => {
     expect(screen.getByText('Удалить запись')).toBeInTheDocument();
   });
 
-  it('calls updateRecord when status changes', async () => {
+  it('calls patchRecord when status changes', async () => {
 
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
     const statusSelect = screen.getByLabelText('Статус');
@@ -220,7 +268,7 @@ describe('ClientRecordTab', () => {
     fireEvent.change(statusSelect, { target: { value: 'cancelled' } });
 
     await waitFor(() => {
-      expect(updateRecord).toHaveBeenCalledWith('r1', { status: 'cancelled' });
+      expect(patchRecord).toHaveBeenCalledWith('r1', { status: 'cancelled' });
     });
   });
 
@@ -417,5 +465,96 @@ describe('ClientRecordTab', () => {
     // 3500 should be formatted as "3 500 ₽" — appears in both visitor row and payment total
     const matches = screen.getAllByText('3 500 ₽');
     expect(matches.length).toBeGreaterThanOrEqual(2);
+  });
+
+  // ─── PATCH-based status and price ────────────────────────────────────────
+
+  it('invalidates record query after status change', async () => {
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    const statusSelect = screen.getByLabelText('Статус');
+
+    fireEvent.change(statusSelect, { target: { value: 'cancelled' } });
+
+    await waitFor(() => {
+      expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['record', 'r1'] });
+    });
+  });
+
+  it('does NOT call updateRecord on status change', async () => {
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    const statusSelect = screen.getByLabelText('Статус');
+
+    fireEvent.change(statusSelect, { target: { value: 'confirmed' } });
+
+    await waitFor(() => {
+      expect(patchRecord).toHaveBeenCalled();
+    });
+    expect(updateRecord).not.toHaveBeenCalled();
+  });
+
+  it('calls patchRecord for custom_price on blur', async () => {
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    const priceInput = screen.getByTestId('input-custom-price');
+
+    fireEvent.change(priceInput, { target: { value: '5000' } });
+    fireEvent.blur(priceInput);
+
+    await waitFor(() => {
+      expect(patchRecord).toHaveBeenCalledWith('r1', { custom_price: 5000 });
+    });
+  });
+
+  // ─── Activity name display ───────────────────────────────────────────────
+
+  it('displays activity service name', () => {
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    expect(screen.getByText('Картина маслом')).toBeInTheDocument();
+  });
+
+  // ─── Payment invalidation ────────────────────────────────────────────────
+
+  it('invalidates record query after adding payment', async () => {
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+
+    fireEvent.change(screen.getByPlaceholderText('Сумма'), {
+      target: { value: '1000' },
+    });
+    fireEvent.click(screen.getByText('Добавить'));
+
+    await waitFor(() => {
+      expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['record', 'r1'] });
+    });
+  });
+
+  // ─── Visitor price editing ──────────────────────────────────────────────
+
+  it('allows editing visit price inline', async () => {
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    // Should have a price input for each visit
+    const priceInputs = screen.getAllByTestId('visit-price-input');
+    expect(priceInputs.length).toBe(mockRecord.visits.length);
+  });
+
+  it('calls patchRecord when visit price is changed and blurred', async () => {
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    // Click the price span to enter edit mode
+    const priceSpan = screen.getAllByTestId('visit-price-input')[0];
+    fireEvent.click(priceSpan);
+
+    // Now it should be an input
+    const priceInput = screen.getAllByTestId('visit-price-input')[0];
+    fireEvent.change(priceInput, { target: { value: '4000' } });
+    fireEvent.blur(priceInput);
+
+    await waitFor(() => {
+      expect(patchRecord).toHaveBeenCalledWith(
+        'r1',
+        expect.objectContaining({
+          visits: expect.arrayContaining([
+            expect.objectContaining({ price: 4000 }),
+          ]),
+        }),
+      );
+    });
   });
 });

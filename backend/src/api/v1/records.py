@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from src.db import SessionDep
 from src.schemas.record import (
     RecordCreate,
+    RecordPatch,
     RecordResponse,
     RecordUpdate,
     VisitResponse,
@@ -109,6 +110,20 @@ async def update_record(
 ) -> RecordResponse:
     """Full-update a record by ID. Replaces visits, recalculates seats."""
     record = await service.update(db_session=session, id=record_id, data=data)
+    if not record:
+        raise HTTPException(status_code=404, detail="Record not found")
+    return _map_record(record)
+
+
+@router.patch("/{record_id}", response_model=RecordResponse)
+async def patch_record(
+    record_id: str,
+    data: RecordPatch,
+    service: _ServiceDep,
+    session: SessionDep,
+) -> RecordResponse:
+    """Partial-update a record by ID (PATCH). Only sent fields are changed."""
+    record = await service.patch(db_session=session, id=record_id, data=data)
     if not record:
         raise HTTPException(status_code=404, detail="Record not found")
     return _map_record(record)

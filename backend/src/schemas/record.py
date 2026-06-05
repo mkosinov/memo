@@ -78,6 +78,15 @@ class RecordUpdate(BaseModel):
     visits: list[VisitItem]  # full replacement
 
 
+class RecordPatch(BaseModel):
+    """Partial update for record. All fields optional."""
+
+    status: RecordStatus | None = None
+    comment: str | None = None
+    custom_price: int | None = None
+    visits: list[VisitItem] | None = None
+
+
 class RecordResponse(RecordBase):
     """Response schema with all record fields including nested visits."""
 

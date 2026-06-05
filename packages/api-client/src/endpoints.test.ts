@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { z } from 'zod';
-import { getMasters, getMaster, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, deleteActivity, getWebPhotos, getRecords, getClients, getPayments, createRecord, updateRecord, deleteRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, deleteVisitor, searchClientByPhone, updateVisitStatus, getTags, createService, updateService, deleteService, createLocation, updateLocation, deleteLocation, getClientsWithStats, patchClient, patchRecord } from './endpoints';
+import { getMasters, getMaster, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, deleteActivity, getWebPhotos, getRecords, getClients, getPayments, createRecord, updateRecord, deleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, deleteVisitor, searchClientByPhone, updateVisitStatus, getTags, createService, updateService, deleteService, createLocation, updateLocation, deleteLocation, getClientsWithStats, patchClient } from './endpoints';
 import { ServiceCreateSchema, LocationCreateSchema } from './schemas';
 
 // Mock the api function from client
@@ -307,6 +307,34 @@ describe('deleteRecord', () => {
       '/api/v1/records/r-1',
       expect.anything(),
       expect.objectContaining({ method: 'DELETE' }),
+    );
+  });
+});
+
+describe('patchRecord', () => {
+  it('calls PATCH /api/v1/records/:id with partial body', async () => {
+    vi.mocked(api).mockResolvedValue({ id: 'r-1', status: 'confirmed' });
+    await patchRecord('r-1', { status: 'confirmed' });
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/records/r-1',
+      expect.anything(),
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({ status: 'confirmed' }),
+      }),
+    );
+  });
+
+  it('sends only provided fields', async () => {
+    vi.mocked(api).mockResolvedValue({ id: 'r-1', custom_price: 5000 });
+    await patchRecord('r-1', { custom_price: 5000 });
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/records/r-1',
+      expect.anything(),
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({ custom_price: 5000 }),
+      }),
     );
   });
 });

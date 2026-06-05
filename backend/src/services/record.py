@@ -15,7 +15,7 @@ from src.models.payment import Payment
 from src.models.record import Record
 from src.models.visit import Visit
 from src.models.visitor import Visitor
-from src.schemas.record import RecordCreate, RecordResponse, RecordUpdate
+from src.schemas.record import RecordCreate, RecordPatch, RecordResponse, RecordUpdate
 from src.services.generic import GenericService
 
 
@@ -212,6 +212,45 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
             )
             db_session.add(visit)
 
+        await db_session.flush()
+        await db_session.refresh(record)
+        return record
+
+    async def patch(
+        self, db_session: AsyncSession, id: str, data: RecordPatch
+    ) -> Record | None:
+        """Partial-update record — only fields explicitly sent are changed.
+
+        Handles visits specially: if ``visits`` is provided in the patch,
+        deactivates existing visits and creates new ones; otherwise visits
+        are left untouched.
+        """
+        record = await self.get(db_session, id)
+        if not record:
+            return None
+
+        update_data = data.model_dump(exclude_unset=True)
+
+        if "status" in update_data:
+            record.status = update_data["status"]
+        if "comment" in update_data:
+            record.comment = update_data["comment"]
+        if "custom_price" in update_data:
+            record.custom_price = update_data["custom_price"]
+        if "visits" in update_data:
+            for existing_visit in record.visits:
+                existing_visit.is_active = False
+            for visit_item in update_data["visits"]:
+                visit = Visit(
+                    record_id=record.id,
+                    visitor_id=visit_item.get("visitor_id"),
+                    price=visit_item["price"],
+                    status=visit_item.get("status", "waiting"),
+                )
+                db_session.add(visit)
+            record.seats = len(update_data["visits"])
+
+        record.updated_at = datetime.now(UTC)
         await db_session.flush()
         await db_session.refresh(record)
         return record

@@ -2,9 +2,8 @@
 
 import { useState, useCallback, useEffect, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { getRecord, updateRecord, deleteRecord, createPayment, getClientVisitors } from '@memo/api-client';
+import { getRecord, patchRecord, deleteRecord, createPayment, getClientVisitors, getActivity, getServices } from '@memo/api-client';
 import type { RecordStatus } from '@memo/domain';
-import type { RecordUpdate } from '@memo/api-client';
 
 interface ClientRecordTabProps {
   recordId: string;
@@ -68,6 +67,23 @@ export function ClientRecordTab({ recordId, clientId, onClose }: ClientRecordTab
     enabled: !!clientId,
   });
 
+  const { data: activity } = useQuery({
+    queryKey: ['activity', record?.activity_id],
+    queryFn: () => getActivity(record!.activity_id),
+    enabled: !!record?.activity_id,
+  });
+
+  const { data: services = [] } = useQuery({
+    queryKey: ['services'],
+    queryFn: () => getServices(),
+  });
+
+  const serviceName = useMemo(() => {
+    if (!activity || !Array.isArray(services)) return null;
+    const service = services.find(s => s.id === activity.service_id);
+    return service?.title ?? null;
+  }, [activity, services]);
+
   const visitorsMap = useMemo(() => {
     const map = new Map<string, { name: string; age: number | null }>();
     if (Array.isArray(visitors)) {
@@ -80,6 +96,7 @@ export function ClientRecordTab({ recordId, clientId, onClose }: ClientRecordTab
   const [paymentAmount, setPaymentAmount] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('card');
   const [customPrice, setCustomPrice] = useState<string>('');
+  const [editPrices, setEditPrices] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (record) {
@@ -88,13 +105,16 @@ export function ClientRecordTab({ recordId, clientId, onClose }: ClientRecordTab
     }
   }, [record]);
 
+  const invalidateRecord = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ['record', recordId] });
+    queryClient.invalidateQueries({ queryKey: ['records'] });
+  }, [queryClient, recordId]);
+
   const handleStatusChange = useCallback(async (newStatus: RecordStatus) => {
     setStatus(newStatus);
-    if (record) {
-      await updateRecord(recordId, { status: newStatus });
-      queryClient.invalidateQueries({ queryKey: ['records'] });
-    }
-  }, [recordId, record, queryClient]);
+    await patchRecord(recordId, { status: newStatus });
+    invalidateRecord();
+  }, [recordId, invalidateRecord]);
 
   const handleAddPayment = useCallback(async () => {
     const amount = Number(paymentAmount);
@@ -102,8 +122,9 @@ export function ClientRecordTab({ recordId, clientId, onClose }: ClientRecordTab
       await createPayment({ record_id: recordId, amount, method: paymentMethod as 'card' | 'cash' | 'transfer' });
       setPaymentAmount('');
       queryClient.invalidateQueries({ queryKey: ['payments'] });
+      invalidateRecord();
     }
-  }, [recordId, paymentAmount, paymentMethod, queryClient]);
+  }, [recordId, paymentAmount, paymentMethod, queryClient, invalidateRecord]);
 
   const handleDelete = useCallback(async () => {
     await deleteRecord(recordId);
@@ -114,9 +135,25 @@ export function ClientRecordTab({ recordId, clientId, onClose }: ClientRecordTab
   const handleCustomPriceSave = useCallback(async () => {
     if (!record) return;
     const value = customPrice.trim() === '' ? null : Number(customPrice);
-    await updateRecord(recordId, { custom_price: value } as RecordUpdate);
-    queryClient.invalidateQueries({ queryKey: ['record', recordId] });
-  }, [recordId, record, customPrice, queryClient]);
+    await patchRecord(recordId, { custom_price: value });
+    invalidateRecord();
+  }, [recordId, record, customPrice, invalidateRecord]);
+
+  const handleVisitPriceChange = useCallback(async (visitId: string, newPrice: number) => {
+    if (!record) return;
+    const updatedVisits = record.visits.map(v =>
+      v.id === visitId
+        ? { visitor_id: v.visitor_id, price: newPrice, status: v.status }
+        : { visitor_id: v.visitor_id, price: v.price, status: v.status }
+    );
+    await patchRecord(recordId, { visits: updatedVisits });
+    setEditPrices(prev => {
+      const next = { ...prev };
+      delete next[visitId];
+      return next;
+    });
+    invalidateRecord();
+  }, [recordId, record, invalidateRecord]);
 
   if (isLoading) return <div className="p-4">Загрузка...</div>;
   if (!record) return <div className="p-4">Запись не найдена</div>;
@@ -132,6 +169,9 @@ export function ClientRecordTab({ recordId, clientId, onClose }: ClientRecordTab
       {/* Event info group */}
       <div>
         <h4 className="text-xs font-medium text-ink-mid mb-2">Мероприятие</h4>
+        {serviceName && (
+          <div className="text-sm text-ink mb-2">{serviceName}</div>
+        )}
         <div className="grid grid-cols-3 gap-4">
           <div>
             <label className="text-xs font-medium text-ink-mid block mb-1" htmlFor="record-status">
@@ -168,6 +208,7 @@ export function ClientRecordTab({ recordId, clientId, onClose }: ClientRecordTab
         )}
         {record.visits.map((visit) => {
           const visitor = visitorsMap.get(visit.visitor_id);
+          const isEditingPrice = visit.id in editPrices;
           return (
             <div
               key={visit.id}
@@ -180,7 +221,37 @@ export function ClientRecordTab({ recordId, clientId, onClose }: ClientRecordTab
                 {visitor?.age && <span className="text-xs text-ink-light ml-1">({visitor.age} лет)</span>}
               </span>
               <span className="text-xs text-ink-light">{visit.status === 'visited' ? 'Пришла' : visit.status === 'missed' ? 'Пропущена' : visit.status}</span>
-              <span className="text-sm">{visit.price.toLocaleString('ru-RU')} ₽</span>
+              {isEditingPrice ? (
+                <input
+                  type="number"
+                  className="w-20 text-right rounded border px-1 py-0.5 text-sm"
+                  style={inputStyle}
+                  value={editPrices[visit.id] ?? String(visit.price)}
+                  onChange={(e) => setEditPrices(prev => ({ ...prev, [visit.id]: e.target.value }))}
+                  onBlur={() => {
+                    const val = Number(editPrices[visit.id]);
+                    if (val > 0 && val !== visit.price) {
+                      handleVisitPriceChange(visit.id, val);
+                    } else {
+                      setEditPrices(prev => {
+                        const next = { ...prev };
+                        delete next[visit.id];
+                        return next;
+                      });
+                    }
+                  }}
+                  autoFocus
+                  data-testid="visit-price-input"
+                />
+              ) : (
+                <span
+                  className="text-sm cursor-pointer hover:underline"
+                  onClick={() => setEditPrices(prev => ({ ...prev, [visit.id]: String(visit.price) }))}
+                  data-testid="visit-price-input"
+                >
+                  {visit.price.toLocaleString('ru-RU')} ₽
+                </span>
+              )}
             </div>
           );
         })}

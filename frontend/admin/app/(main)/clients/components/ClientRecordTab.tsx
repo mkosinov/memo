@@ -128,17 +128,6 @@ export function ClientRecordTab({ recordId, clientId, onClose }: ClientRecordTab
     return service?.tariffs ?? [];
   }, [services, activity]);
 
-  const masterName = useMemo(() => {
-    if (!Array.isArray(masters) || !activity) return '';
-    const m = masters.find(m => m.id === activity.master_id);
-    return m ? `${m.first_name} ${m.last_name}` : '';
-  }, [masters, activity]);
-
-  const locationName = useMemo(() => {
-    if (!Array.isArray(locations) || !activity) return '';
-    return locations.find(l => l.id === activity.location_id)?.name ?? '';
-  }, [locations, activity]);
-
   // ── Editable state ──────────────────────────────────────────────────────
 
   const [date, setDate] = useState('');
@@ -381,14 +370,16 @@ export function ClientRecordTab({ recordId, clientId, onClose }: ClientRecordTab
             className={`${inputClass} appearance-none`}
             style={inputStyle}
             value={activity?.master_id || ''}
-            disabled
+            onChange={(e) => {
+              setHasChanges(true);
+              // Will be saved on Save button click
+            }}
           >
             <option value="">Не выбран</option>
             {Array.isArray(masters) && masters.map(m => (
               <option key={m.id} value={m.id}>{m.first_name} {m.last_name}</option>
             ))}
           </select>
-          {masterName && <span className="text-xs text-ink-light ml-1 hidden sm:inline">{masterName}</span>}
         </div>
         <div>
           <label className="text-xs font-medium text-ink-mid block mb-1" htmlFor="record-location">Локация</label>
@@ -397,14 +388,16 @@ export function ClientRecordTab({ recordId, clientId, onClose }: ClientRecordTab
             className={`${inputClass} appearance-none`}
             style={inputStyle}
             value={activity?.location_id || ''}
-            disabled
+            onChange={(e) => {
+              setHasChanges(true);
+              // Will be saved on Save button click
+            }}
           >
             <option value="">Не выбрана</option>
             {Array.isArray(locations) && locations.map(l => (
               <option key={l.id} value={l.id}>{l.name}</option>
             ))}
           </select>
-          {locationName && <span className="text-xs text-ink-light ml-1 hidden sm:inline">{locationName}</span>}
         </div>
         {/* Status icon — cycles first visit status */}
         {record.visits.length > 0 && (() => {

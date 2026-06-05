@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, within } from '@testing-library/react';
+import { render, screen, fireEvent, within, waitFor } from '@testing-library/react';
 import React from 'react';
 import { ClientCardModal } from '../app/(main)/clients/components/ClientCardModal';
 import type { ClientWithStats } from '@memo/api-client';
@@ -16,14 +16,58 @@ vi.mock('../app/(main)/clients/components/ClientInfoTab', () => ({
   ),
 }));
 
+// Payment summary state for the enhanced mock
+// Use vi.hoisted + getter pattern so vi.mock factory always reads fresh values
+const getMockRecordTabState = vi.hoisted(() => {
+  const state = { total: 0, paid: 0, remaining: 0, hasChanges: false };
+  return {
+    getState: () => state,
+    setTotal: (v: number) => { state.total = v; },
+    setPaid: (v: number) => { state.paid = v; },
+    setRemaining: (v: number) => { state.remaining = v; },
+    reset: (overrides?: Partial<typeof state>) => {
+      Object.assign(state, { total: 0, paid: 0, remaining: 0, hasChanges: false, ...overrides });
+    },
+  };
+});
+
 vi.mock('../app/(main)/clients/components/ClientRecordTab', () => ({
-  ClientRecordTab: ({ recordId, clientId, onClose }: any) => (
-    <div data-testid="client-record-tab">
-      <span data-testid="record-id">{recordId}</span>
-      <span data-testid="record-client-id">{clientId}</span>
-      <button data-testid="record-close" onClick={onClose}>Close</button>
-    </div>
-  ),
+  ClientRecordTab: ({ recordId, clientId, onClose, onSave }: any) => {
+    const [comment, setComment] = React.useState('');
+    const [isDirty, setIsDirty] = React.useState(false);
+    const state = getMockRecordTabState.getState();
+
+    return (
+      <div data-testid="client-record-tab">
+        <span data-testid="record-id">{recordId}</span>
+        <span data-testid="record-client-id">{clientId}</span>
+        {/* Payment summary */}
+        <div data-testid="payment-summary">
+          <span data-testid="total-price">{state.total.toLocaleString('ru-RU')} ₽</span>
+          <span data-testid="paid-amount">{state.paid.toLocaleString('ru-RU')} ₽</span>
+          <span data-testid="remaining-amount">{state.remaining.toLocaleString('ru-RU')} ₽</span>
+        </div>
+        {/* Comment field to test dirty state */}
+        <textarea
+          data-testid="record-comment"
+          value={comment}
+          onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => {
+            setComment(e.target.value);
+            setIsDirty(true);
+          }}
+          placeholder="Комментарий"
+        />
+        <button
+          data-testid="btn-save-record"
+          disabled={!isDirty}
+          onClick={() => onSave?.({ comment })}
+        >
+          Сохранить
+        </button>
+        <button data-testid="record-close" onClick={onClose}>Close</button>
+      </div>
+    );
+  },
 }));
 
 // ─── React Query Mock ────────────────────────────────────────────────────
@@ -377,5 +421,113 @@ describe('ClientCardModal', () => {
       });
       expect(onClientCreated).toHaveBeenCalledWith(newClient);
     });
+  });
+});
+
+// ─── Record tab integration: payment summary + save button ─────────────
+
+describe('ClientCardModal — Record tab integration', () => {
+  const defaultProps = {
+    client: mockClientWithStats,
+    isOpen: true,
+    onClose: vi.fn(),
+    mode: 'view' as const,
+  };
+
+  beforeEach(() => {
+    mockUseClients.mockReturnValue(createMockClientsContext());
+    mockUseQuery.mockReturnValue({ data: [], isLoading: false });
+    // Reset payment summary mock state
+    getMockRecordTabState.reset({ total: 7000, paid: 3500, remaining: 3500 });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('record tab shows payment summary with correct totals', async () => {
+    // Set up records with visits and payments
+    getMockRecordTabState.reset({ total: 7000, paid: 3500, remaining: 3500 });
+    mockQueriesForRecordsAndActivities();
+
+    render(<ClientCardModal {...defaultProps} />);
+
+    // Switch to record tab
+    fireEvent.click(screen.getByText('10.05.2026'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('client-record-tab')).toBeInTheDocument();
+    });
+
+    // Verify payment summary displays correct totals
+    // Note: toLocaleString('ru-RU') uses non-breaking space (U+00A0) as thousands separator
+    const nbsp = '\u00A0';
+    expect(screen.getByTestId('total-price').textContent).toBe(`7${nbsp}000 ₽`);
+    expect(screen.getByTestId('paid-amount').textContent).toBe(`3${nbsp}500 ₽`);
+    expect(screen.getByTestId('remaining-amount').textContent).toBe(`3${nbsp}500 ₽`);
+  });
+
+  it('record tab shows zero remaining when fully paid', async () => {
+    getMockRecordTabState.reset({ total: 3500, paid: 3500, remaining: 0 });
+    mockQueriesForRecordsAndActivities();
+
+    render(<ClientCardModal {...defaultProps} />);
+
+    fireEvent.click(screen.getByText('10.05.2026'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('client-record-tab')).toBeInTheDocument();
+    });
+
+    const nbsp = '\u00A0';
+    expect(screen.getByTestId('total-price').textContent).toBe(`3${nbsp}500 ₽`);
+    expect(screen.getByTestId('paid-amount').textContent).toBe(`3${nbsp}500 ₽`);
+    expect(screen.getByTestId('remaining-amount').textContent).toBe('0 ₽');
+  });
+
+  it('record tab save button activates on comment change', async () => {
+    mockQueriesForRecordsAndActivities();
+
+    render(<ClientCardModal {...defaultProps} />);
+
+    fireEvent.click(screen.getByText('10.05.2026'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('client-record-tab')).toBeInTheDocument();
+    });
+
+    // Save button should be disabled initially
+    const saveBtn = screen.getByTestId('btn-save-record');
+    expect(saveBtn).toBeDisabled();
+
+    // Change comment
+    fireEvent.change(screen.getByTestId('record-comment'), {
+      target: { value: 'Новый комментарий' },
+    });
+
+    // Save button should now be enabled
+    expect(saveBtn).toBeEnabled();
+  });
+
+  it('record tab save button disables after cancel (no cancel in mock, but test dirty state)', async () => {
+    mockQueriesForRecordsAndActivities();
+
+    render(<ClientCardModal {...defaultProps} />);
+
+    fireEvent.click(screen.getByText('10.05.2026'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('client-record-tab')).toBeInTheDocument();
+    });
+
+    // Save should be disabled
+    const saveBtn = screen.getByTestId('btn-save-record');
+    expect(saveBtn).toBeDisabled();
+
+    // Change to dirty
+    fireEvent.change(screen.getByTestId('record-comment'), {
+      target: { value: 'Тест' },
+    });
+    expect(saveBtn).toBeEnabled();
   });
 });

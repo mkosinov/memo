@@ -205,4 +205,62 @@ describe('RecordsTable', () => {
     render(<RecordsTable filters={filters} />);
     expect(screen.getByText('Записи не найдены')).toBeTruthy();
   });
+
+  it('renders client name from client_id lookup', () => {
+    // Record with known client_id should show client name
+    render(<RecordsTable filters={filters} />);
+    expect(screen.getByText('Анна Смирнова')).toBeTruthy();
+  });
+
+  it('shows dash when record has no client_id', () => {
+    // Record without client_id should show '—' as fallback
+    const recordNoClient: RecordResponse = {
+      ...mockRecord,
+      id: 'rec-no-client',
+      client_id: null,
+    };
+    mockContextValue = {
+      ...mockContextValue,
+      records: [recordNoClient],
+    };
+    render(<RecordsTable filters={filters} />);
+    // The client column should show '—' (em dash) when client_id is null
+    const clientCells = screen.getAllByText('—');
+    expect(clientCells.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('shows dash when client_id not found in clients map', () => {
+    // Record with client_id that doesn't exist in the clients map
+    const recordUnknownClient: RecordResponse = {
+      ...mockRecord,
+      id: 'rec-unknown-client',
+      client_id: 'nonexistent-client',
+    };
+    mockContextValue = {
+      ...mockContextValue,
+      records: [recordUnknownClient],
+    };
+    render(<RecordsTable filters={filters} />);
+    // Should show '—' when client is not in the map
+    const clientCells = screen.getAllByText('—');
+    expect(clientCells.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('renders multiple records with mixed client_id presence', () => {
+    const recordNoClient: RecordResponse = {
+      ...mockRecord,
+      id: 'rec-no-client',
+      client_id: null,
+    };
+    mockContextValue = {
+      ...mockContextValue,
+      records: [mockRecord, recordNoClient],
+    };
+    render(<RecordsTable filters={filters} />);
+    // Should show the known client name
+    expect(screen.getByText('Анна Смирнова')).toBeTruthy();
+    // Should show dash for the record without client_id
+    const clientCells = screen.getAllByText('—');
+    expect(clientCells.length).toBeGreaterThanOrEqual(1);
+  });
 });

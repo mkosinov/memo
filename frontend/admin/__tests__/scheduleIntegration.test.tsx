@@ -202,6 +202,149 @@ describe('Schedule pipeline integration: enrichment from API to ActivityCard', (
   });
 });
 
+describe('Schedule pipeline: nullable visitor_id impact', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+
+    vi.mocked(getMasters).mockResolvedValue([
+      {
+        id: 'm1',
+        first_name: 'Ольга',
+        last_name: 'Середа',
+        color: '#5B8C7A',
+        position: 'мастер',
+        specialty: 'живопись',
+        avatar_url: null,
+        is_active: true,
+        created_at: '2024-01-01T00:00:00Z',
+        updated_at: '2024-01-01T00:00:00Z',
+      },
+    ]);
+
+    vi.mocked(getServices).mockResolvedValue([
+      {
+        id: 's1',
+        title: 'Картина маслом',
+        description: 'Рисование масляными красками',
+        image_url: '',
+        specialty: 'живопись',
+        min_age: 12,
+        max_age: 99,
+        duration: 150,
+        record_info: '',
+        tariffs: [
+          { id: 't1', service_id: 's1', title: 'Взрослый', description: null, price: 3500 },
+        ],
+        tags: [],
+        is_active: true,
+        created_at: '2024-01-01T00:00:00Z',
+        updated_at: '2024-01-01T00:00:00Z',
+      },
+    ]);
+
+    vi.mocked(getLocations).mockResolvedValue([
+      {
+        id: 'loc1',
+        name: 'Альпика',
+        address: 'Альпика, 1 этаж',
+        description: null,
+        capacity: 10,
+        yandex_map_url: null,
+        review_url: null,
+        record_info: null,
+        image_url: null,
+        is_active: true,
+        created_at: '2024-01-01T00:00:00Z',
+        updated_at: '2024-01-01T00:00:00Z',
+      },
+    ]);
+  });
+
+  it('renders activity card correctly even when activity has occupied > 0 with null visitor_ids', async () => {
+    // This test verifies that activities with occupied count (which may come from
+    // visits with null visitor_ids) still render correctly in the schedule.
+    // The occupied count is provided directly by the ActivityResponse, so null
+    // visitor_ids on visits do not break the schedule rendering pipeline.
+    vi.mocked(getActivities).mockResolvedValue([
+      {
+        id: 'a1',
+        master_id: 'm1',
+        service_id: 's1',
+        location_id: 'loc1',
+        start: '2026-06-01T10:00:00Z', // Monday of current week
+        duration: 120,
+        capacity: 8,
+        is_private: false,
+        comment: null,
+        record_info: null,
+        created_at: '2024-01-01T00:00:00Z',
+        updated_at: '2024-01-01T00:00:00Z',
+        is_active: true,
+        occupied: 3, // Simulates visits with null visitor_ids — occupied is still tracked
+      },
+    ]);
+
+    const queryClient = createTestQueryClient();
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <UIProvider>
+          <NavigationProvider>
+            <ScheduleProvider>
+              <WeekView />
+            </ScheduleProvider>
+          </NavigationProvider>
+        </UIProvider>
+      </QueryClientProvider>,
+    );
+
+    // Activity card should still render with correct service name
+    await waitFor(() => {
+      expect(screen.getByText('Картина маслом')).toBeInTheDocument();
+    });
+  });
+
+  it('renders activity with zero occupied when all visits have null visitor_ids', async () => {
+    vi.mocked(getActivities).mockResolvedValue([
+      {
+        id: 'a1',
+        master_id: 'm1',
+        service_id: 's1',
+        location_id: 'loc1',
+        start: '2026-06-01T10:00:00Z',
+        duration: 120,
+        capacity: 8,
+        is_private: false,
+        comment: null,
+        record_info: null,
+        created_at: '2024-01-01T00:00:00Z',
+        updated_at: '2024-01-01T00:00:00Z',
+        is_active: true,
+        occupied: 0, // All visits with null visitor_ids → occupied = 0
+      },
+    ]);
+
+    const queryClient = createTestQueryClient();
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <UIProvider>
+          <NavigationProvider>
+            <ScheduleProvider>
+              <WeekView />
+            </ScheduleProvider>
+          </NavigationProvider>
+        </UIProvider>
+      </QueryClientProvider>,
+    );
+
+    // Activity card should still render with correct service name
+    await waitFor(() => {
+      expect(screen.getByText('Картина маслом')).toBeInTheDocument();
+    });
+  });
+});
+
 // THIS TEST IS RED — REPRODUCES BUG #service-name-missing
 // If the test PASSES (GREEN), the enrichment pipeline (ScheduleProvider → toScheduleItems)
 // is working correctly. The bug must be elsewhere (CSS/build/deployment/context wiring issue).

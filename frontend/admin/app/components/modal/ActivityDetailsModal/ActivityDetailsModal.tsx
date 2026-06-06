@@ -15,12 +15,11 @@ import {
   createRecord,
   createClient,
   createVisitor,
-  deleteRecord as apiDeleteRecord,
-  createPayment as apiCreatePayment,
   searchClientByPhone,
 } from '@memo/api-client';
 import type { TariffResponse } from '@memo/api-client';
 import { useQueryClient } from '@tanstack/react-query';
+import { useRecordMutations } from '@/hooks/useRecordMutations';
 
 interface ActivityDetailsModalProps {
   isOpen: boolean;
@@ -43,6 +42,14 @@ export function ActivityDetailsModal({ isOpen, onClose, activity, mode }: Activi
   const queryClient = useQueryClient();
 
   const [activeTab, setActiveTab] = useState(mode === 'quickAdd' ? 'new-booking' : 'settings');
+
+  // Extract record ID from active tab (only for client tabs)
+  const activeRecordId = activeTab.startsWith('client-')
+    ? activeTab.replace('client-', '')
+    : null;
+
+  // Use the hook for record mutations (only when we have a record ID)
+  const { deleteRecord, addPayment } = useRecordMutations(activeRecordId || '');
 
   // Current service and its tariffs (used by all tab contents)
   const currentService = useMemo(
@@ -162,11 +169,11 @@ export function ActivityDetailsModal({ isOpen, onClose, activity, mode }: Activi
     [showToast, activity.id, serviceTariffs, queryClient],
   );
 
-  // Delete record handler — actually deletes via API
+  // Delete record handler — uses the hook
   const handleDeleteRecord = useCallback(
-    async (recordId: string) => {
+    async (_recordId: string) => {
       try {
-        await apiDeleteRecord(recordId);
+        await deleteRecord();
         showToast('Запись удалена');
         setActiveTab('settings');
         queryClient.invalidateQueries({ queryKey: ['records'] });
@@ -175,21 +182,21 @@ export function ActivityDetailsModal({ isOpen, onClose, activity, mode }: Activi
         showToast('Ошибка удаления');
       }
     },
-    [showToast, queryClient],
+    [deleteRecord, showToast, queryClient],
   );
 
-  // Payment handler — actually creates payment via API
+  // Payment handler — uses the hook
   const handleAddPayment = useCallback(
-    async (recordId: string, amount: number, method: string) => {
+    async (_recordId: string, amount: number, method: string) => {
       try {
-        await apiCreatePayment({ record_id: recordId, amount, method: method as 'cash' | 'card' | 'transfer' });
+        await addPayment(amount, method);
         showToast(`Оплата ${amount} ₽ (${method}) добавлена`);
         queryClient.invalidateQueries({ queryKey: ['payments'] });
       } catch {
         showToast('Ошибка добавления оплаты');
       }
     },
-    [showToast, queryClient],
+    [addPayment, showToast, queryClient],
   );
 
   // Financial summary

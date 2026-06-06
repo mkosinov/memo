@@ -1,14 +1,11 @@
 'use client';
 
 import { useState, useCallback, useEffect, useMemo } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import {
-  getRecord, patchRecord, deleteRecord, createPayment, deletePayment,
-  getClientVisitors, getActivity, getServices, getMasters, getLocations,
-  getPayments, patchActivity, createVisitor, deleteVisitor,
-} from '@memo/api-client';
+import { useQueryClient } from '@tanstack/react-query';
 import { CustomSelect, type CustomSelectOption } from '@/app/components/shared/CustomSelect';
 import { MasterPicker } from '@/app/components/shared/MasterPicker';
+import { useRecordData } from '@/hooks/useRecordData';
+import { useRecordMutations } from '@/hooks/useRecordMutations';
 
 interface ClientRecordTabProps {
   recordId: string;
@@ -29,7 +26,6 @@ const STATUS_CONFIG: Record<VisitStatus, { label: string; color: string }> = {
 };
 
 function StatusIcon({ status, size = 16 }: { status: VisitStatus; size?: number }) {
-  const cls = `w-${size / 4} h-${size / 4}`;
   const s = `0 0 ${size} ${size}`;
   switch (status) {
     case 'waiting':
@@ -70,61 +66,15 @@ function StatusIcon({ status, size = 16 }: { status: VisitStatus; size?: number 
 export function ClientRecordTab({ recordId, clientId, onClose }: ClientRecordTabProps) {
   const queryClient = useQueryClient();
 
-  // ── Data queries ────────────────────────────────────────────────────────
+  // ── Data queries via hook ──────────────────────────────────────────────
 
-  const { data: record, isLoading } = useQuery({
-    queryKey: ['record', recordId],
-    queryFn: () => getRecord(recordId),
-  });
+  const { record, visitors, activity, services, masters, locations, payments, visitorsMap, tariffs, isLoading } =
+    useRecordData(recordId, clientId);
 
-  const { data: visitors = [] } = useQuery({
-    queryKey: ['visitors', clientId],
-    queryFn: () => getClientVisitors(clientId),
-    enabled: !!clientId,
-  });
+  // ── Mutations via hook ────────────────────────────────────────────────
 
-  const { data: activity } = useQuery({
-    queryKey: ['activity', record?.activity_id],
-    queryFn: () => getActivity(record!.activity_id),
-    enabled: !!record?.activity_id,
-  });
-
-  const { data: services = [] } = useQuery({
-    queryKey: ['services'],
-    queryFn: () => getServices(),
-  });
-
-  const { data: masters = [] } = useQuery({
-    queryKey: ['masters'],
-    queryFn: () => getMasters(),
-  });
-
-  const { data: locations = [] } = useQuery({
-    queryKey: ['locations'],
-    queryFn: () => getLocations(),
-  });
-
-  const { data: payments = [] } = useQuery({
-    queryKey: ['payments', recordId],
-    queryFn: () => getPayments({ record_id: recordId }),
-    enabled: !!recordId,
-  });
-
-  // ── Derived data ────────────────────────────────────────────────────────
-
-  const visitorsMap = useMemo(() => {
-    const map = new Map<string, { name: string; age: number | null }>();
-    if (Array.isArray(visitors)) {
-      visitors.forEach(v => map.set(v.id, { name: v.name, age: v.age }));
-    }
-    return map;
-  }, [visitors]);
-
-  const tariffs = useMemo(() => {
-    if (!Array.isArray(services)) return [];
-    const service = services.find(s => s.id === activity?.service_id);
-    return service?.tariffs ?? [];
-  }, [services, activity]);
+  const { saveRecord, deleteRecord, addVisitor, deleteVisitor, addPayment, deletePayment } =
+    useRecordMutations(recordId);
 
   // ── Editable state ──────────────────────────────────────────────────────
 
@@ -194,12 +144,6 @@ export function ClientRecordTab({ recordId, clientId, onClose }: ClientRecordTab
 
   const markChanged = useCallback(() => setHasChanges(true), []);
 
-  const invalidateRecord = useCallback(() => {
-    queryClient.invalidateQueries({ queryKey: ['record', recordId] });
-    queryClient.invalidateQueries({ queryKey: ['records'] });
-    queryClient.invalidateQueries({ queryKey: ['payments'] });
-  }, [queryClient, recordId]);
-
   // ── Handlers ────────────────────────────────────────────────────────────
 
   const handleStatusChange = useCallback((visitId: string, newStatus: string) => {
@@ -223,55 +167,44 @@ export function ClientRecordTab({ recordId, clientId, onClose }: ClientRecordTab
   const handleAddPayment = useCallback(async () => {
     const amount = Number(paymentAmount);
     if (amount > 0) {
-      await createPayment({ record_id: recordId, amount, method: paymentMethod as 'card' | 'cash' | 'transfer' });
+      await addPayment(amount, paymentMethod);
       setPaymentAmount('');
-      invalidateRecord();
     }
-  }, [recordId, paymentAmount, paymentMethod, invalidateRecord]);
+  }, [paymentAmount, paymentMethod, addPayment]);
 
   const handleDeletePayment = useCallback(async (paymentId: string) => {
     await deletePayment(paymentId);
-    invalidateRecord();
-  }, [invalidateRecord]);
+  }, [deletePayment]);
 
   const handleDelete = useCallback(async () => {
     if (window.confirm('Удалить запись?')) {
-      await deleteRecord(recordId);
-      invalidateRecord();
+      await deleteRecord();
       queryClient.invalidateQueries({ queryKey: ['visitors', clientId] });
     }
-  }, [recordId, clientId, invalidateRecord, queryClient]);
+  }, [clientId, deleteRecord, queryClient]);
 
   const handleSave = useCallback(async () => {
     if (!record || !activity) return;
 
-    // 1. Patch activity if date/time/service/master/location changed
-    const newStart = `${date}T${time}:00`;
-    const activityChanged = newStart !== activity.start || serviceId !== activity.service_id;
-    if (activityChanged) {
-      await patchActivity(activity.id, { start: newStart, service_id: serviceId });
-    }
-
-    // 2. Patch record with custom_price, comment, and visits
-    const visits = record.visits.map(v => {
-      const cp = visitCustomPrices[v.id];
-      return {
+    // Use the hook's saveRecord method
+    await saveRecord({
+      activityId: serviceId !== activity.service_id || `${date}T${time}:00` !== activity.start
+        ? activity.id : undefined,
+      activityStart: `${date}T${time}:00`,
+      activityServiceId: serviceId,
+      customPrice,
+      comment,
+      visits: record.visits.map(v => ({
         visitor_id: v.visitor_id,
         price: Number(visitPrices[v.id] ?? v.price),
-        custom_price: cp !== '' && cp != null ? Number(cp) : null,
+        custom_price: visitCustomPrices[v.id] !== '' && visitCustomPrices[v.id] != null
+          ? Number(visitCustomPrices[v.id]) : null,
         status: visitStatuses[v.id] ?? v.status,
-      };
+      })),
     });
 
-    await patchRecord(recordId, {
-      custom_price: customPrice.trim() !== '' ? Number(customPrice) : null,
-      comment: comment || null,
-      visits,
-    });
-
-    invalidateRecord();
     setHasChanges(false);
-  }, [record, activity, date, time, serviceId, customPrice, comment, visitPrices, visitCustomPrices, visitStatuses, recordId, invalidateRecord]);
+  }, [saveRecord, record, activity, date, time, serviceId, customPrice, comment, visitPrices, visitCustomPrices, visitStatuses]);
 
   const handleCancel = useCallback(() => {
     if (activity) {
@@ -307,9 +240,9 @@ export function ClientRecordTab({ recordId, clientId, onClose }: ClientRecordTab
       // Use existing visitor
       visitorId = selectedVisitor.id;
     } else {
-      // Create new visitor
+      // Create new visitor using the hook
       const age = newVisitorAge ? Number(newVisitorAge) : undefined;
-      const visitor = await createVisitor({ client_id: clientId, name: newVisitorName.trim(), age });
+      const visitor = await addVisitor({ client_id: clientId, name: newVisitorName.trim(), age });
       visitorId = visitor.id;
     }
 
@@ -325,7 +258,8 @@ export function ClientRecordTab({ recordId, clientId, onClose }: ClientRecordTab
 
     const newTariff = tariffs.length > 0 ? tariffs.find(t => t.id === newVisitorTariffId) ?? tariffs[0] : null;
 
-    await patchRecord(recordId, {
+    // Use saveRecord to update the record with the new visitor
+    await saveRecord({
       visits: [...existingVisits, { visitor_id: visitorId, price: newTariff?.price ?? 0, status: 'waiting' }],
     });
 
@@ -334,27 +268,22 @@ export function ClientRecordTab({ recordId, clientId, onClose }: ClientRecordTab
     setNewVisitorTariffId('');
     setSelectedVisitor(null);
     setShowVisitorForm(false);
-    invalidateRecord();
     queryClient.invalidateQueries({ queryKey: ['visitors', clientId] });
-  }, [clientId, newVisitorName, newVisitorAge, newVisitorTariffId, selectedVisitor, record, visitPrices, visitCustomPrices, visitStatuses, tariffs, recordId, invalidateRecord, queryClient]);
+  }, [clientId, newVisitorName, newVisitorAge, newVisitorTariffId, selectedVisitor, record, visitPrices, visitCustomPrices, visitStatuses, tariffs, addVisitor, saveRecord, queryClient]);
 
   const handleDeleteVisitor = useCallback(async (visitorId: string) => {
     if (!record) return;
-    // Soft-delete the visitor via API
-    await deleteVisitor(visitorId);
-    // Remove from record visits
-    const remainingVisits = record.visits
-      .filter(v => v.visitor_id !== visitorId)
-      .map(v => ({
-        visitor_id: v.visitor_id,
-        price: Number(visitPrices[v.id] ?? v.price),
-        custom_price: visitCustomPrices[v.id] !== '' && visitCustomPrices[v.id] != null ? Number(visitCustomPrices[v.id]) : null,
-        status: visitStatuses[v.id] ?? v.status,
-      }));
-    await patchRecord(recordId, { visits: remainingVisits });
-    invalidateRecord();
+    // Use the hook's deleteVisitor method
+    // The hook handles deleting the visitor and updating the record
+    const currentVisits = record.visits.map(v => ({
+      visitor_id: v.visitor_id,
+      price: Number(visitPrices[v.id] ?? v.price),
+      custom_price: visitCustomPrices[v.id] !== '' && visitCustomPrices[v.id] != null ? Number(visitCustomPrices[v.id]) : null,
+      status: visitStatuses[v.id] ?? v.status,
+    }));
+    await deleteVisitor(visitorId, currentVisits);
     queryClient.invalidateQueries({ queryKey: ['visitors', clientId] });
-  }, [record, recordId, clientId, visitPrices, visitCustomPrices, visitStatuses, invalidateRecord, queryClient]);
+  }, [record, deleteVisitor, visitPrices, visitCustomPrices, visitStatuses, queryClient, clientId]);
 
   // ── Render ──────────────────────────────────────────────────────────────
 
@@ -511,7 +440,6 @@ export function ClientRecordTab({ recordId, clientId, onClose }: ClientRecordTab
             const visitor = visitorsMap.get(visit.visitor_id);
             const price = visitPrices[visit.id] ?? String(visit.price);
             const cp = visitCustomPrices[visit.id] ?? '';
-            const displayPrice = cp !== '' ? Number(cp) : Number(price);
 
             return (
               <div

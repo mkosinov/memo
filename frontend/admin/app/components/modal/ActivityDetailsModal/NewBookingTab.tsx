@@ -21,6 +21,7 @@ interface NewBookingTabProps {
     visitors: NewVisitor[];
     notify: boolean;
     channel: string;
+    seats: number;
   }) => void;
   showToast: (message: string) => void;
 }
@@ -31,13 +32,14 @@ export function NewBookingTab({ activity, serviceTariffs, onSubmit, showToast }:
   const [notify, setNotify] = useState(false);
   const [channel, setChannel] = useState('telegram');
   const [visitors, setVisitors] = useState<NewVisitor[]>([]);
+  const [seatsCount, setSeatsCount] = useState(1);
 
   const handlePhoneBlur = useCallback(async () => {
     if (phone.length < 10) return;
     try {
       const client = await searchClientByPhone(phone);
       if (client) {
-        setName(client.name);
+        setName(client.name || '');
       }
     } catch {
       // Client not found — leave name empty for manual entry
@@ -62,12 +64,6 @@ export function NewBookingTab({ activity, serviceTariffs, onSubmit, showToast }:
   }, []);
 
   const handleSubmit = useCallback(() => {
-    // Name is required (phone is optional)
-    if (!name) {
-      showToast('Заполните имя');
-      return;
-    }
-
     // If there are visitors, validate tariff is selected
     if (visitors.length > 0) {
       const hasMissingTariff = visitors.some((v) => !v.tariffId);
@@ -77,8 +73,8 @@ export function NewBookingTab({ activity, serviceTariffs, onSubmit, showToast }:
       }
     }
 
-    onSubmit({ phone, name, visitors, notify, channel });
-  }, [phone, name, visitors, notify, channel, onSubmit, showToast, serviceTariffs]);
+    onSubmit({ phone, name, visitors, notify, channel, seats: seatsCount });
+  }, [phone, name, visitors, notify, channel, seatsCount, onSubmit, showToast, serviceTariffs]);
 
   const inputClass = 'w-full rounded-lg border px-3 py-2 text-sm bg-white';
   const inputStyle = { borderColor: 'var(--line)' };
@@ -116,6 +112,20 @@ export function NewBookingTab({ activity, serviceTariffs, onSubmit, showToast }:
           value={name}
           onChange={(e) => setName(e.target.value)}
           data-testid="input-client-name"
+        />
+      </div>
+
+      {/* Seats */}
+      <div>
+        <label className="text-xs font-medium text-ink-mid block mb-1">Мест</label>
+        <input
+          type="number"
+          min={1}
+          max={10}
+          value={seatsCount}
+          onChange={(e) => setSeatsCount(Number(e.target.value))}
+          className={inputClass}
+          style={inputStyle}
         />
       </div>
 

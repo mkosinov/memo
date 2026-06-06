@@ -224,19 +224,19 @@ describe('ServicesTable', () => {
 
   it('renders "Добавить услугу" button', () => {
     render(<ServicesTable />);
-    expect(screen.getByText('Добавить услугу')).toBeTruthy();
+    expect(screen.getByText('+ Добавить услугу')).toBeTruthy();
   });
 
   it('opens create modal when "Добавить услугу" clicked', () => {
     render(<ServicesTable />);
-    const addBtn = screen.getByText('Добавить услугу');
+    const addBtn = screen.getByText('+ Добавить услугу');
     fireEvent.click(addBtn);
     expect(screen.getByText('Новая услуга')).toBeTruthy();
   });
 
   it('opens create modal with empty title field', () => {
     render(<ServicesTable />);
-    fireEvent.click(screen.getByText('Добавить услугу'));
+    fireEvent.click(screen.getByText('+ Добавить услугу'));
     // Modal should be open with the "Новая услуга" title
     expect(screen.getByText('Новая услуга')).toBeTruthy();
     // The title input should be empty

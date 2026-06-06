@@ -365,20 +365,20 @@ describe('LocationsTable', () => {
   it('renders "Добавить локацию" button', () => {
     setupQuery(TEST_LOCATIONS);
     render(<LocationsTable />);
-    expect(screen.getByText('Добавить локацию')).toBeInTheDocument();
+    expect(screen.getByText('+ Добавить локацию')).toBeInTheDocument();
   });
 
   it('opens create modal when "Добавить локацию" clicked', () => {
     setupQuery(TEST_LOCATIONS);
     render(<LocationsTable />);
-    fireEvent.click(screen.getByText('Добавить локацию'));
+    fireEvent.click(screen.getByText('+ Добавить локацию'));
     expect(screen.getByText('Новая локация')).toBeInTheDocument();
   });
 
   it('opens create modal with empty name field', () => {
     setupQuery(TEST_LOCATIONS);
     render(<LocationsTable />);
-    fireEvent.click(screen.getByText('Добавить локацию'));
+    fireEvent.click(screen.getByText('+ Добавить локацию'));
     expect(screen.getByText('Новая локация')).toBeInTheDocument();
     // Name input should be empty in create mode
     const nameInput = screen.getByPlaceholderText('Студия на Тверской');

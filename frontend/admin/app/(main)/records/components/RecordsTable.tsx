@@ -5,6 +5,21 @@ import { useRecords } from '@/contexts/RecordsContext';
 import type { RecordResponse, ActivityResponse } from '@memo/api-client';
 import { ClientCardModal } from './ClientCardModal';
 import { DiamondIcon } from '@/app/components/shared/DiamondIcon';
+import { ColumnPicker } from '@/app/components/shared/ColumnPicker';
+
+// ─── Column definitions ──────────────────────────────────────────────────
+
+const TABLE_COLUMNS = [
+  { key: 'date', label: 'Дата / Время', defaultVisible: true },
+  { key: 'client', label: 'Клиент', defaultVisible: true },
+  { key: 'guests', label: 'Гостей', defaultVisible: true },
+  { key: 'service', label: 'Услуга', defaultVisible: true },
+  { key: 'master', label: 'Мастер', defaultVisible: true },
+  { key: 'location', label: 'Локация', defaultVisible: true },
+  { key: 'status', label: 'Статус', defaultVisible: true },
+  { key: 'total', label: 'Сумма', defaultVisible: true },
+  { key: 'payment', label: 'Оплата', defaultVisible: true },
+];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
@@ -66,6 +81,14 @@ export function RecordsTable({ filters }: RecordsTableProps) {
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(10);
   const [clientModalId, setClientModalId] = useState<string | null>(null);
+
+  const [visibleKeys, setVisibleKeys] = useState<string[]>(() => {
+    try {
+      const stored = localStorage.getItem('records-columns');
+      if (stored) return JSON.parse(stored);
+    } catch {}
+    return TABLE_COLUMNS.filter((c) => c.defaultVisible).map((c) => c.key);
+  });
 
   const getActivity = (id: string): ActivityResponse | undefined =>
     activities.get(id);
@@ -207,36 +230,64 @@ export function RecordsTable({ filters }: RecordsTableProps) {
     <div className="flex">
       {/* Table */}
       <div className="flex-1 overflow-auto">
+        {/* Column picker bar */}
+        <div className="flex items-center justify-end px-4 py-2 border-b" style={{ borderColor: 'var(--line)' }}>
+          <ColumnPicker
+            columns={TABLE_COLUMNS.map((c) => ({ key: c.key, label: c.label }))}
+            visibleKeys={visibleKeys}
+            onChange={setVisibleKeys}
+            storageKey="records-columns"
+          />
+        </div>
+
         <table className="w-full">
           <thead>
             <tr className="border-b" style={{ borderColor: 'var(--line)', backgroundColor: 'var(--surface)' }}>
+              {visibleKeys.includes('date') && (
               <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: 'var(--ink-light)' }} onClick={() => handleSort('date')}>
                 Дата / Время {sortIcon('date')}
               </th>
+              )}
+              {visibleKeys.includes('client') && (
               <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: 'var(--ink-light)' }} onClick={() => handleSort('client')}>
                 Клиент {sortIcon('client')}
               </th>
+              )}
+              {visibleKeys.includes('guests') && (
               <th className="text-center px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: 'var(--ink-light)' }} onClick={() => handleSort('guests')}>
                 Гостей {sortIcon('guests')}
               </th>
+              )}
+              {visibleKeys.includes('service') && (
               <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: 'var(--ink-light)' }} onClick={() => handleSort('service')}>
                 Услуга {sortIcon('service')}
               </th>
+              )}
+              {visibleKeys.includes('master') && (
               <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: 'var(--ink-light)' }} onClick={() => handleSort('master')}>
                 Мастер {sortIcon('master')}
               </th>
+              )}
+              {visibleKeys.includes('location') && (
               <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: 'var(--ink-light)' }} onClick={() => handleSort('location')}>
                 Локация {sortIcon('location')}
               </th>
+              )}
+              {visibleKeys.includes('status') && (
               <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: 'var(--ink-light)' }} onClick={() => handleSort('status')}>
                 Статус {sortIcon('status')}
               </th>
+              )}
+              {visibleKeys.includes('total') && (
               <th className="text-right px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: 'var(--ink-light)' }} onClick={() => handleSort('total')}>
                 Сумма {sortIcon('total')}
               </th>
+              )}
+              {visibleKeys.includes('payment') && (
               <th className="text-center px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: 'var(--ink-light)' }} onClick={() => handleSort('payment')}>
                 Оплата {sortIcon('payment')}
               </th>
+              )}
             </tr>
           </thead>
           <tbody>
@@ -260,6 +311,7 @@ export function RecordsTable({ filters }: RecordsTableProps) {
                   }}
                 >
                   {/* Дата / Время */}
+                  {visibleKeys.includes('date') && (
                   <td className="px-4 py-3 text-sm whitespace-nowrap" style={{ color: 'var(--ink-mid)' }}>
                     {activity ? (() => {
                       const parsed = parseActivityStart(activity.start);
@@ -275,8 +327,10 @@ export function RecordsTable({ filters }: RecordsTableProps) {
                       );
                     })() : '—'}
                   </td>
+                  )}
 
                   {/* Клиент */}
+                  {visibleKeys.includes('client') && (
                   <td className="px-4 py-3">
                     <button
                       onClick={(e) => {
@@ -289,13 +343,17 @@ export function RecordsTable({ filters }: RecordsTableProps) {
                       {client?.name ?? '—'}
                     </button>
                   </td>
+                  )}
 
                   {/* Гостей */}
+                  {visibleKeys.includes('guests') && (
                   <td className="px-4 py-3 text-center text-sm" style={{ color: 'var(--ink-mid)' }}>
                     {Math.max(1, record.visits.length)}
                   </td>
+                  )}
 
                   {/* Услуга */}
+                  {visibleKeys.includes('service') && (
                   <td className="px-4 py-3 text-sm" style={{ color: 'var(--ink)' }}>
                     <div className="flex items-center gap-2">
                       {activity?.is_private ? (
@@ -304,8 +362,10 @@ export function RecordsTable({ filters }: RecordsTableProps) {
                       {service?.title ?? '—'}
                     </div>
                   </td>
+                  )}
 
                   {/* Мастер */}
+                  {visibleKeys.includes('master') && (
                   <td className="px-4 py-3">
                     {activity ? (() => {
                       const master = masters.get(activity.master_id);
@@ -318,25 +378,33 @@ export function RecordsTable({ filters }: RecordsTableProps) {
                       );
                     })() : '—'}
                   </td>
+                  )}
 
                   {/* Локация */}
+                  {visibleKeys.includes('location') && (
                   <td className="px-4 py-3 text-sm" style={{ color: 'var(--ink-mid)' }}>
                     {location?.name ?? '—'}
                   </td>
+                  )}
 
                   {/* Статус */}
+                  {visibleKeys.includes('status') && (
                   <td className="px-4 py-3">
                     <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-semibold ${STATUS_COLORS[record.status]}`}>
                       {STATUS_LABELS[record.status]}
                     </span>
                   </td>
+                  )}
 
                   {/* Сумма */}
+                  {visibleKeys.includes('total') && (
                   <td className="px-4 py-3 text-sm text-right font-medium" style={{ color: 'var(--ink)' }}>
                     {formatPrice(total)}
                   </td>
+                  )}
 
                   {/* Оплата */}
+                  {visibleKeys.includes('payment') && (
                   <td className="px-4 py-3 text-center">
                     {paid >= total ? (
                       <span className="inline-flex items-center gap-1 text-xs font-medium" style={{ color: 'var(--success)' }}>✓ Оплачено</span>
@@ -346,12 +414,13 @@ export function RecordsTable({ filters }: RecordsTableProps) {
                       <span className="inline-flex items-center gap-1 text-xs font-medium" style={{ color: 'var(--danger)' }}>Не оплачено</span>
                     )}
                   </td>
+                  )}
                 </tr>
               );
             })}
             {paginatedRecords.length === 0 && (
               <tr>
-                <td colSpan={9} className="px-4 py-12 text-center text-sm" style={{ color: 'var(--ink-light)' }}>
+                <td colSpan={visibleKeys.length} className="px-4 py-12 text-center text-sm" style={{ color: 'var(--ink-light)' }}>
                   Записи не найдены
                 </td>
               </tr>

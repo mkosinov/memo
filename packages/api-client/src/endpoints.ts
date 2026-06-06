@@ -3,6 +3,8 @@ import { api } from './client';
 import {
   MasterResponseSchema,
   type MasterResponse,
+  type MasterCreate,
+  type MasterUpdate,
   LocationResponseSchema,
   type LocationResponse,
   ServiceResponseSchema,
@@ -19,6 +21,8 @@ import {
   type ActivityResponse,
   PhotoResponseSchema,
   type PhotoResponse,
+  type PhotoCreate,
+  type PhotoUpdate,
   RecordResponseSchema,
   type RecordResponse,
   type RecordCreate,
@@ -42,6 +46,12 @@ import {
   type VisitResponse,
   TagResponseSchema,
   type TagResponse,
+  type TagCreate,
+  type TagUpdate,
+  MaterialResponseSchema,
+  type MaterialResponse,
+  type MaterialCreate,
+  type MaterialUpdate,
 } from './schemas';
 
 // ─── Masters ───────────────────────────────────────────────────────────────
@@ -52,6 +62,24 @@ export async function getMasters(): Promise<MasterResponse[]> {
 
 export async function getMaster(id: string): Promise<MasterResponse> {
   return api(`/api/v1/masters/${id}`, MasterResponseSchema);
+}
+
+export async function createMaster(data: MasterCreate): Promise<MasterResponse> {
+  return api('/api/v1/masters', MasterResponseSchema, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updateMaster(id: string, data: MasterUpdate): Promise<MasterResponse> {
+  return api(`/api/v1/masters/${id}`, MasterResponseSchema, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteMaster(id: string): Promise<void> {
+  await api(`/api/v1/masters/${id}`, z.any(), { method: 'DELETE' });
 }
 
 // ─── Locations ─────────────────────────────────────────────────────────────
@@ -67,6 +95,30 @@ export async function getWebPhotos(params?: { activity_id?: string }): Promise<P
   if (params?.activity_id) search.set('activity_id', params.activity_id);
   const qs = search.toString();
   return api(`/api/v1/photos/web${qs ? `?${qs}` : ''}`, z.array(PhotoResponseSchema));
+}
+
+// ─── Photos CRUD ────────────────────────────────────────────────────────
+
+export async function getPhotos(): Promise<PhotoResponse[]> {
+  return api('/api/v1/photos', z.array(PhotoResponseSchema));
+}
+
+export async function createPhoto(data: PhotoCreate): Promise<PhotoResponse> {
+  return api('/api/v1/photos', PhotoResponseSchema, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updatePhoto(id: string, data: PhotoUpdate): Promise<PhotoResponse> {
+  return api(`/api/v1/photos/${id}`, PhotoResponseSchema, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deletePhoto(id: string): Promise<void> {
+  await api(`/api/v1/photos/${id}`, z.any(), { method: 'DELETE' });
 }
 
 // ─── Services ──────────────────────────────────────────────────────────────
@@ -300,6 +352,24 @@ export async function getTags(): Promise<TagResponse[]> {
   return api('/api/v1/tags', z.array(TagResponseSchema));
 }
 
+export async function createTag(data: TagCreate): Promise<TagResponse> {
+  return api('/api/v1/tags', TagResponseSchema, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updateTag(id: string, data: TagUpdate): Promise<TagResponse> {
+  return api(`/api/v1/tags/${id}`, TagResponseSchema, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteTag(id: string): Promise<void> {
+  await api(`/api/v1/tags/${id}`, z.any(), { method: 'DELETE' });
+}
+
 // ─── Services CRUD ─────────────────────────────────────────────────────────
 
 export async function createService(data: z.input<typeof ServiceCreateSchema>): Promise<ServiceResponse> {
@@ -338,4 +408,28 @@ export async function updateLocation(id: string, data: LocationUpdate): Promise<
 
 export async function deleteLocation(id: string): Promise<void> {
   await api(`/api/v1/locations/${id}`, z.any(), { method: 'DELETE' });
+}
+
+// ─── Materials ──────────────────────────────────────────────────────────
+
+export async function getMaterials(): Promise<MaterialResponse[]> {
+  return api('/api/v1/materials', z.array(MaterialResponseSchema));
+}
+
+export async function createMaterial(data: MaterialCreate): Promise<MaterialResponse> {
+  return api('/api/v1/materials', MaterialResponseSchema, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updateMaterial(id: string, data: MaterialUpdate): Promise<MaterialResponse> {
+  return api(`/api/v1/materials/${id}`, MaterialResponseSchema, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteMaterial(id: string): Promise<void> {
+  await api(`/api/v1/materials/${id}`, z.any(), { method: 'DELETE' });
 }

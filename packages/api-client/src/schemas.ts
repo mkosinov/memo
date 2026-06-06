@@ -17,6 +17,21 @@ export const MasterResponseSchema = z.object({
 
 export type MasterResponse = z.infer<typeof MasterResponseSchema>;
 
+// ─── MasterCreate (request body) ──────────────────────────────────────────
+
+export const MasterCreateSchema = z.object({
+  first_name: z.string().min(1).max(100),
+  last_name: z.string().min(1).max(100),
+  color: z.string().regex(/^#[0-9A-Fa-f]{6}$/),
+  position: z.enum(['мастер', 'администратор']),
+  specialty: z.enum(['живопись', 'керамика']),
+  avatar_url: z.string().optional().default(''),
+});
+export type MasterCreate = z.infer<typeof MasterCreateSchema>;
+
+export const MasterUpdateSchema = MasterCreateSchema.partial();
+export type MasterUpdate = z.infer<typeof MasterUpdateSchema>;
+
 // ─── LocationResponse ──────────────────────────────────────────────────────
 
 export const LocationResponseSchema = z.object({
@@ -53,6 +68,20 @@ export const PhotoResponseSchema = z.object({
 
 export type PhotoResponse = z.infer<typeof PhotoResponseSchema>;
 
+// ─── PhotoCreate (request body) ──────────────────────────────────────────
+
+export const PhotoCreateSchema = z.object({
+  filename: z.string().min(1),
+  visitor_id: z.string().optional().default(''),
+  service_id: z.string().optional().default(''),
+  activity_id: z.string().optional().default(''),
+  is_public: z.boolean().default(false),
+});
+export type PhotoCreate = z.infer<typeof PhotoCreateSchema>;
+
+export const PhotoUpdateSchema = PhotoCreateSchema.partial();
+export type PhotoUpdate = z.infer<typeof PhotoUpdateSchema>;
+
 // ─── TariffResponse (nested in ServiceResponse) ────────────────────────────
 
 export const TariffResponseSchema = z.object({
@@ -73,6 +102,16 @@ export const TagResponseSchema = z.object({
 });
 
 export type TagResponse = z.infer<typeof TagResponseSchema>;
+
+// ─── TagCreate (request body) ───────────────────────────────────────────
+
+export const TagCreateSchema = z.object({
+  tag: z.string().min(1).max(100),
+});
+export type TagCreate = z.infer<typeof TagCreateSchema>;
+
+export const TagUpdateSchema = TagCreateSchema.partial();
+export type TagUpdate = z.infer<typeof TagUpdateSchema>;
 
 // ─── ServiceResponse ───────────────────────────────────────────────────────
 
@@ -344,3 +383,26 @@ export type LocationCreate = z.infer<typeof LocationCreateSchema>;
 
 export const LocationUpdateSchema = LocationCreateSchema.partial();
 export type LocationUpdate = z.infer<typeof LocationUpdateSchema>;
+
+// ─── MaterialResponse ───────────────────────────────────────────────────
+
+export const MaterialResponseSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  description: z.string(),
+  is_active: z.boolean(),
+  created_at: z.string(),
+  updated_at: z.string(),
+});
+export type MaterialResponse = z.infer<typeof MaterialResponseSchema>;
+
+// ─── MaterialCreate (request body) ──────────────────────────────────────
+
+export const MaterialCreateSchema = z.object({
+  title: z.string().min(1).max(200),
+  description: z.string().optional().default(''),
+});
+export type MaterialCreate = z.infer<typeof MaterialCreateSchema>;
+
+export const MaterialUpdateSchema = MaterialCreateSchema.partial();
+export type MaterialUpdate = z.infer<typeof MaterialUpdateSchema>;

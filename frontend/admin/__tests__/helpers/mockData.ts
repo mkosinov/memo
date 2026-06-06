@@ -13,6 +13,7 @@ import type {
   VisitResponse,
   PaymentResponse,
   LocationResponse,
+  MasterResponse,
 } from '@memo/api-client';
 
 // Tariff shape (mirrors API TariffResponse, used by SettingsTab via type cast)
@@ -200,6 +201,44 @@ export function createMockLocationResponse(
 ): LocationResponse {
   return {
     ...mockLocationResponse,
+    ...overrides,
+  };
+}
+
+// ─── MasterResponse (API shape) ─────────────────────────────────────────
+
+export const mockMasterResponse: MasterResponse = {
+  id: 'm1',
+  first_name: 'Ольга',
+  last_name: 'Середа',
+  color: '#5B8C7A',
+  position: 'мастер',
+  specialty: 'живопись',
+  avatar_url: 'https://example.com/avatar.jpg',
+  is_active: true,
+  created_at: '2024-01-15T10:00:00Z',
+  updated_at: '2024-06-01T12:00:00Z',
+};
+
+export const mockMasterResponseArchived: MasterResponse = {
+  id: 'm2',
+  first_name: 'Юлия',
+  last_name: 'Большакова',
+  color: '#6B7E9C',
+  position: 'мастер',
+  specialty: 'керамика',
+  avatar_url: null,
+  is_active: false,
+  created_at: '2024-01-10T10:00:00Z',
+  updated_at: '2024-05-01T12:00:00Z',
+};
+
+/** Factory for creating MasterResponse objects with overrides. */
+export function createMockMasterResponse(
+  overrides: Partial<MasterResponse> = {},
+): MasterResponse {
+  return {
+    ...mockMasterResponse,
     ...overrides,
   };
 }

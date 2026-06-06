@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import React from 'react';
 import type { RecordsContextType } from '../contexts/RecordsContext';
 import type {
@@ -154,6 +154,7 @@ const filters = {
 
 describe('RecordsTable', () => {
   beforeEach(() => {
+    localStorage.clear();
     // Reset to default context
     mockContextValue = {
       records: [mockRecord],
@@ -264,5 +265,39 @@ describe('RecordsTable', () => {
     // Should show dash for the record without client_id
     const clientCells = screen.getAllByText('—');
     expect(clientCells.length).toBeGreaterThanOrEqual(1);
+  });
+
+  // ─── Column picker ──────────────────────────────────────────────────────
+
+  it('renders column picker gear button', () => {
+    render(<RecordsTable filters={filters} />);
+    expect(screen.getByLabelText('Настроить колонки')).toBeInTheDocument();
+  });
+
+  it('shows all default column headers', () => {
+    render(<RecordsTable filters={filters} />);
+    expect(screen.getByText(/Дата \/ Время/)).toBeTruthy();
+    expect(screen.getByText(/Клиент/)).toBeTruthy();
+    expect(screen.getByText(/Гостей/)).toBeTruthy();
+    expect(screen.getByText(/Услуга/)).toBeTruthy();
+    expect(screen.getByText(/Мастер/)).toBeTruthy();
+    expect(screen.getByText(/Локация/)).toBeTruthy();
+    expect(screen.getByText(/Статус/)).toBeTruthy();
+    expect(screen.getByText(/Сумма/)).toBeTruthy();
+    expect(screen.getByText(/Оплата/)).toBeTruthy();
+  });
+
+  it('hides column when unchecked via ColumnPicker', () => {
+    render(<RecordsTable filters={filters} />);
+
+    // Open picker
+    fireEvent.click(screen.getByLabelText('Настроить колонки'));
+
+    // Uncheck "Клиент"
+    fireEvent.click(screen.getByLabelText('Клиент'));
+
+    // The "Клиент" th should be gone
+    const thead = document.querySelector('thead');
+    expect(thead?.textContent).not.toMatch(/Клиент/);
   });
 });

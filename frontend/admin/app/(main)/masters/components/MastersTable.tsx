@@ -2,14 +2,13 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { getLocations } from '@memo/api-client';
-import type { LocationResponse } from '@memo/api-client';
-import { useUpdateLocation, useCreateLocation, useDeleteLocation } from '@/hooks/useLocationsMutations';
-import type { LocationUpdate } from '@memo/api-client';
+import { getMasters } from '@memo/api-client';
+import type { MasterResponse } from '@memo/api-client';
+import { useUpdateMaster, useCreateMaster, useDeleteMaster } from '@/hooks/useMastersMutations';
+import type { MasterUpdate } from '@memo/api-client';
 import { useUI } from '@/contexts/UIContext';
-import { LocationModal } from './LocationModal';
-import { LocationFilters } from './LocationFilters';
-import { LOCATION_FIELDS } from './locationFields';
+import { MasterModal } from './MasterModal';
+import { MasterFilters } from './MasterFilters';
 import { ColumnPicker } from '@/app/components/shared/ColumnPicker';
 
 // ─── Column definitions ──────────────────────────────────────────────────
@@ -18,37 +17,35 @@ interface Column {
   key: string;
   label: string;
   width?: string;
-  defaultVisible?: boolean;
+  defaultVisible: boolean;
 }
 
 const COLUMNS: Column[] = [
-  { key: 'name', label: 'Название', width: 'flex-1', defaultVisible: true },
-  { key: 'capacity', label: 'Вместимость', width: 'w-[100px]', defaultVisible: true },
-  { key: 'address', label: 'Адрес', width: 'flex-1', defaultVisible: true },
-  { key: 'location_hint', label: 'Подсказка', width: 'w-[150px]', defaultVisible: true },
-  { key: 'description', label: 'Описание', defaultVisible: false },
-  { key: 'is_active', label: 'Статус', defaultVisible: false },
-  { key: 'yandex_map_url', label: 'Карта', defaultVisible: false },
-  { key: 'created_at', label: 'Создано', defaultVisible: false },
+  { key: 'name', label: 'Имя', width: 'flex-1', defaultVisible: true },
+  { key: 'specialty', label: 'Специальность', width: 'w-[150px]', defaultVisible: true },
+  { key: 'position', label: 'Должность', width: 'w-[150px]', defaultVisible: true },
+  { key: 'color', label: 'Цвет', width: 'w-[80px]', defaultVisible: true },
+  { key: 'avatar', label: 'Аватар', width: 'w-[60px]', defaultVisible: false },
+  { key: 'status', label: 'Статус', width: 'w-[100px]', defaultVisible: false },
 ];
 
 // ─── Component ───────────────────────────────────────────────────────────
 
-export function LocationsTable() {
-  const { data: locations = [], isLoading } = useQuery<LocationResponse[]>({
-    queryKey: ['locations'],
-    queryFn: getLocations,
+export function MastersTable() {
+  const { data: masters = [], isLoading } = useQuery<MasterResponse[]>({
+    queryKey: ['masters'],
+    queryFn: getMasters,
   });
 
-  const updateLocation = useUpdateLocation();
-  const createLocation = useCreateLocation();
-  const deleteLocation = useDeleteLocation();
+  const updateMaster = useUpdateMaster();
+  const createMaster = useCreateMaster();
+  const deleteMaster = useDeleteMaster();
   const { showToast } = useUI();
 
   // ─── Column visibility state ───────────────────────────────────────
   const [visibleKeys, setVisibleKeys] = useState<string[]>(() => {
     try {
-      const stored = localStorage.getItem('locations-columns');
+      const stored = localStorage.getItem('masters-columns');
       if (stored) return JSON.parse(stored);
     } catch {}
     return COLUMNS.filter((c) => c.defaultVisible).map((c) => c.key);
@@ -67,10 +64,10 @@ export function LocationsTable() {
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
 
   // ─── Edit modal state ────────────────────────────────────────────────
-  const [editLocation, setEditLocation] = useState<LocationResponse | null>(null);
+  const [editMaster, setEditMaster] = useState<MasterResponse | null>(null);
 
   // ─── Create modal state ─────────────────────────────────────────────
-  const [creatingLocation, setCreatingLocation] = useState(false);
+  const [creatingMaster, setCreatingMaster] = useState(false);
 
   // ─── Action dropdown state ───────────────────────────────────────────
   const [openDropdownId, setOpenDropdownId] = useState<string | null>(null);
@@ -82,50 +79,55 @@ export function LocationsTable() {
 
   // ─── Filtered data ───────────────────────────────────────────────────
 
-  const filteredLocations = useMemo(() => {
-    return locations.filter((loc) => {
-      // Search filter (name or address contains)
+  const filteredMasters = useMemo(() => {
+    return masters.filter((m) => {
+      // Search filter (first_name or last_name contains)
       if (search) {
         const q = search.toLowerCase();
-        const nameMatch = loc.name.toLowerCase().includes(q);
-        const addrMatch = (loc.address ?? '').toLowerCase().includes(q);
-        if (!nameMatch && !addrMatch) return false;
+        const firstNameMatch = m.first_name.toLowerCase().includes(q);
+        const lastNameMatch = m.last_name.toLowerCase().includes(q);
+        if (!firstNameMatch && !lastNameMatch) return false;
       }
       // Status filter
-      if (status === 'active' && !loc.is_active) return false;
-      if (status === 'archived' && loc.is_active) return false;
+      if (status === 'active' && !m.is_active) return false;
+      if (status === 'archived' && m.is_active) return false;
       return true;
     });
-  }, [locations, search, status]);
+  }, [masters, search, status]);
 
   // ─── Sorted data ─────────────────────────────────────────────────────
 
-  const sortedLocations = useMemo(() => {
-    if (!sortField) return filteredLocations;
-    const sorted = [...filteredLocations];
+  const sortedMasters = useMemo(() => {
+    if (!sortField) return filteredMasters;
+    const sorted = [...filteredMasters];
     sorted.sort((a, b) => {
-      const aVal = a[sortField as keyof LocationResponse];
-      const bVal = b[sortField as keyof LocationResponse];
+      let aVal: unknown;
+      let bVal: unknown;
+      if (sortField === 'name') {
+        aVal = `${a.first_name} ${a.last_name}`;
+        bVal = `${b.first_name} ${b.last_name}`;
+      } else {
+        aVal = a[sortField as keyof MasterResponse];
+        bVal = b[sortField as keyof MasterResponse];
+      }
       let cmp = 0;
       if (typeof aVal === 'string' && typeof bVal === 'string') {
         cmp = aVal.localeCompare(bVal, 'ru');
-      } else if (typeof aVal === 'number' && typeof bVal === 'number') {
-        cmp = aVal - bVal;
       } else if (typeof aVal === 'boolean' && typeof bVal === 'boolean') {
         cmp = aVal === bVal ? 0 : aVal ? -1 : 1;
       }
       return sortDir === 'asc' ? cmp : -cmp;
     });
     return sorted;
-  }, [filteredLocations, sortField, sortDir]);
+  }, [filteredMasters, sortField, sortDir]);
 
   // ─── Pagination ──────────────────────────────────────────────────────
 
-  const paginatedLocations = useMemo(() => {
-    return sortedLocations.slice(page * pageSize, (page + 1) * pageSize);
-  }, [sortedLocations, page, pageSize]);
+  const paginatedMasters = useMemo(() => {
+    return sortedMasters.slice(page * pageSize, (page + 1) * pageSize);
+  }, [sortedMasters, page, pageSize]);
 
-  const totalPages = Math.max(1, Math.ceil(sortedLocations.length / (pageSize || 10)));
+  const totalPages = Math.max(1, Math.ceil(sortedMasters.length / (pageSize || 10)));
 
   // ─── Sort handler ────────────────────────────────────────────────────
 
@@ -146,37 +148,36 @@ export function LocationsTable() {
   // ─── Edit handlers ───────────────────────────────────────────────────
 
   const handleEdit = async (data: Record<string, unknown>) => {
-    if (!editLocation) return;
-    // Strip null values to match LocationUpdate (string | undefined, not null)
-    const payload: LocationUpdate = {};
+    if (!editMaster) return;
+    const payload: MasterUpdate = {};
     for (const [key, val] of Object.entries(data)) {
       if (val !== null && val !== undefined) {
         (payload as Record<string, unknown>)[key] = val;
       }
     }
-    await updateLocation.mutateAsync({
-      id: editLocation.id,
+    await updateMaster.mutateAsync({
+      id: editMaster.id,
       data: payload,
     });
-    showToast('Локация обновлена');
-    setEditLocation(null);
+    showToast('Мастер обновлён');
+    setEditMaster(null);
   };
 
   // ─── Archive / Restore ───────────────────────────────────────────────
 
-  const handleToggleActive = async (loc: LocationResponse) => {
-    await updateLocation.mutateAsync({
-      id: loc.id,
-      data: { is_active: !loc.is_active } as Record<string, unknown>,
+  const handleToggleActive = async (master: MasterResponse) => {
+    await updateMaster.mutateAsync({
+      id: master.id,
+      data: { is_active: !master.is_active } as Record<string, unknown>,
     });
-    showToast(loc.is_active ? 'Локация архивирована' : 'Локация восстановлена');
+    showToast(master.is_active ? 'Мастер архивирован' : 'Мастер восстановлен');
     setOpenDropdownId(null);
   };
 
   // ─── Create ─────────────────────────────────────────────────────────
 
   const handleCreate = () => {
-    setCreatingLocation(true);
+    setCreatingMaster(true);
   };
 
   const handleCreateSubmit = async (data: Record<string, unknown>) => {
@@ -186,17 +187,17 @@ export function LocationsTable() {
         payload[key] = val;
       }
     }
-    await createLocation.mutateAsync(payload as never);
-    showToast('Локация создана');
+    await createMaster.mutateAsync(payload as never);
+    showToast('Мастер создан');
   };
 
   // ─── Delete ─────────────────────────────────────────────────────────
 
-  const handleDelete = async (loc: LocationResponse) => {
+  const handleDelete = async (master: MasterResponse) => {
     setOpenDropdownId(null);
-    if (!window.confirm('Удалить локацию?')) return;
-    await deleteLocation.mutateAsync(loc.id);
-    showToast('Локация удалена');
+    if (!window.confirm('Удалить мастера?')) return;
+    await deleteMaster.mutateAsync(master.id);
+    showToast('Мастер удалён');
   };
 
   // ─── Loading / Empty ─────────────────────────────────────────────────
@@ -211,7 +212,7 @@ export function LocationsTable() {
     <div>
       {/* Filters */}
       <div className="p-4 border-b flex items-center justify-between" style={{ borderColor: 'var(--line)' }}>
-        <LocationFilters
+        <MasterFilters
           search={search}
           status={status}
           onSearchChange={setSearch}
@@ -223,14 +224,14 @@ export function LocationsTable() {
             columns={COLUMNS.map((c) => ({ key: c.key, label: c.label }))}
             visibleKeys={visibleKeys}
             onChange={setVisibleKeys}
-            storageKey="locations-columns"
+            storageKey="masters-columns"
           />
           <button
             onClick={handleCreate}
             className="px-4 py-2 text-sm font-medium rounded-lg text-white transition-colors"
             style={{ backgroundColor: 'var(--brand)' }}
           >
-            + Добавить локацию
+            + Добавить мастера
           </button>
         </div>
       </div>
@@ -260,98 +261,83 @@ export function LocationsTable() {
             </tr>
           </thead>
           <tbody>
-            {paginatedLocations.map((loc) => (
+            {paginatedMasters.map((master) => (
               <tr
-                key={loc.id}
-                onClick={() => setEditLocation(loc)}
+                key={master.id}
+                onClick={() => setEditMaster(master)}
                 className="border-b cursor-pointer transition-colors hover:opacity-80"
                 style={{ borderColor: 'var(--line)' }}
-                data-testid={`location-row-${loc.id}`}
+                data-testid={`master-row-${master.id}`}
               >
                 {/* Name */}
                 {visibleKeys.includes('name') && (
                 <td className="px-4 py-3 text-sm font-medium" style={{ color: 'var(--ink)' }}>
-                  {loc.name}
+                  {master.first_name} {master.last_name}
                 </td>
                 )}
 
-                {/* Capacity */}
-                {visibleKeys.includes('capacity') && (
+                {/* Specialty */}
+                {visibleKeys.includes('specialty') && (
                 <td className="px-4 py-3 text-sm" style={{ color: 'var(--ink-mid)' }}>
-                  {loc.capacity}
+                  {master.specialty}
                 </td>
                 )}
 
-                {/* Address */}
-                {visibleKeys.includes('address') && (
+                {/* Position */}
+                {visibleKeys.includes('position') && (
                 <td className="px-4 py-3 text-sm" style={{ color: 'var(--ink-mid)' }}>
-                  {loc.address ?? '—'}
+                  {master.position}
                 </td>
                 )}
 
-                {/* Location Hint */}
-                {visibleKeys.includes('location_hint') && (
-                <td className="px-4 py-3 text-sm" style={{ color: 'var(--ink-light)' }}>
-                  {loc.location_hint ?? '—'}
-                </td>
-                )}
-
-                {/* Description */}
-                {visibleKeys.includes('description') && (
-                <td className="px-4 py-3 text-sm max-w-[200px] truncate" style={{ color: 'var(--ink-mid)' }}>
-                  {loc.description ?? '—'}
-                </td>
-                )}
-
-                {/* Is Active */}
-                {visibleKeys.includes('is_active') && (
+                {/* Color */}
+                {visibleKeys.includes('color') && (
                 <td className="px-4 py-3 text-sm">
-                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${loc.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500'}`}>
-                    {loc.is_active ? 'Активен' : 'Архив'}
+                  <div className="flex items-center gap-2">
+                    <div
+                      className="w-4 h-4 rounded-full border"
+                      style={{ backgroundColor: master.color }}
+                    />
+                    <span className="text-xs" style={{ color: 'var(--ink-light)' }}>
+                      {master.color}
+                    </span>
+                  </div>
+                </td>
+                )}
+
+                {/* Avatar */}
+                {visibleKeys.includes('avatar') && (
+                <td className="px-4 py-3 text-sm">
+                  {master.avatar_url ? (
+                    <img
+                      src={master.avatar_url}
+                      alt="avatar"
+                      className="w-8 h-8 rounded-full object-cover"
+                    />
+                  ) : (
+                    <span style={{ color: 'var(--ink-light)' }}>—</span>
+                  )}
+                </td>
+                )}
+
+                {/* Status */}
+                {visibleKeys.includes('status') && (
+                <td className="px-4 py-3 text-sm">
+                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${master.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500'}`}>
+                    {master.is_active ? 'Активен' : 'Архив'}
                   </span>
-                </td>
-                )}
-
-                {/* Yandex Map URL */}
-                {visibleKeys.includes('yandex_map_url') && (
-                <td className="px-4 py-3 text-sm">
-                  {loc.yandex_map_url ? (
-                    <a href={loc.yandex_map_url} target="_blank" rel="noopener noreferrer" className="text-xs" style={{ color: 'var(--brand)' }}>🗺</a>
-                  ) : '—'}
-                </td>
-                )}
-
-                {/* Created At */}
-                {visibleKeys.includes('created_at') && (
-                <td className="px-4 py-3 text-sm" style={{ color: 'var(--ink-light)' }}>
-                  {new Date(loc.created_at).toLocaleDateString('ru-RU')}
                 </td>
                 )}
 
                 {/* Actions */}
                 <td className="px-4 py-3 text-center relative">
                   <div className="flex items-center justify-center gap-2">
-                    {/* Map link icon */}
-                    {loc.yandex_map_url && (
-                      <a
-                        href={loc.yandex_map_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-xs transition-colors"
-                        style={{ color: 'var(--brand)' }}
-                        aria-label="Карта"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        🗺
-                      </a>
-                    )}
-
                     {/* Actions dropdown */}
                     <div className="relative">
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          setOpenDropdownId(openDropdownId === loc.id ? null : loc.id);
+                          setOpenDropdownId(openDropdownId === master.id ? null : master.id);
                         }}
                         className="w-7 h-7 flex items-center justify-center rounded-lg text-sm transition-colors"
                         style={{ color: 'var(--ink-light)' }}
@@ -359,29 +345,29 @@ export function LocationsTable() {
                       >
                         ⋯
                       </button>
-                      {openDropdownId === loc.id && (
+                      {openDropdownId === master.id && (
                         <div
                           className="absolute right-0 top-full mt-1 z-10 border rounded-lg shadow-lg py-1 min-w-[160px]"
                           style={{
                             borderColor: 'var(--line)',
                             backgroundColor: 'var(--white)',
                           }}
-                          data-testid={`dropdown-${loc.id}`}
+                          data-testid={`dropdown-${master.id}`}
                         >
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              handleToggleActive(loc);
+                              handleToggleActive(master);
                             }}
                             className="w-full text-left px-3 py-2 text-sm transition-colors hover:opacity-80"
                             style={{ color: 'var(--ink)' }}
                           >
-                            {loc.is_active ? 'В архив' : 'Восстановить'}
+                            {master.is_active ? 'В архив' : 'Восстановить'}
                           </button>
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              handleDelete(loc);
+                              handleDelete(master);
                             }}
                             className="w-full text-left px-3 py-2 text-sm transition-colors hover:opacity-80"
                             style={{ color: 'var(--danger, #dc2626)' }}
@@ -395,14 +381,14 @@ export function LocationsTable() {
                 </td>
               </tr>
             ))}
-            {paginatedLocations.length === 0 && (
+            {paginatedMasters.length === 0 && (
               <tr>
                 <td
                   colSpan={VISIBLE_COLUMNS.length + 1}
                   className="px-4 py-12 text-center text-sm"
                   style={{ color: 'var(--ink-light)' }}
                 >
-                  Локации не найдены
+                  Мастера не найдены
                 </td>
               </tr>
             )}
@@ -436,7 +422,7 @@ export function LocationsTable() {
             <option value={50}>50</option>
             <option value={100}>100</option>
           </select>
-          <span>{sortedLocations.length} всего</span>
+          <span>{sortedMasters.length} всего</span>
         </div>
         <div className="flex items-center gap-1">
           <button
@@ -473,25 +459,25 @@ export function LocationsTable() {
       </div>
 
       {/* Edit modal */}
-      {editLocation && (
-        <LocationModal
+      {editMaster && (
+        <MasterModal
           mode="edit"
-          location={editLocation}
+          master={editMaster}
           onSubmit={handleEdit}
-          onClose={() => setEditLocation(null)}
-          title="Редактирование локации"
-          subtitle={editLocation.name}
+          onClose={() => setEditMaster(null)}
+          title="Редактирование мастера"
+          subtitle={`${editMaster.first_name} ${editMaster.last_name}`}
         />
       )}
 
       {/* Create modal */}
-      {creatingLocation && (
-        <LocationModal
+      {creatingMaster && (
+        <MasterModal
           mode="create"
-          location={null}
+          master={null}
           onSubmit={handleCreateSubmit}
-          onClose={() => setCreatingLocation(false)}
-          title="Новая локация"
+          onClose={() => setCreatingMaster(false)}
+          title="Новый мастер"
         />
       )}
     </div>

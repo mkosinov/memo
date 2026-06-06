@@ -1,9 +1,10 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
-import { FieldRenderer } from '@/app/components/modal/FieldRenderer';
-import type { FieldConfig } from '@/app/components/modal/field-types';
-import { LOCATION_FIELDS } from './locationFields';
+import React, { useState, useEffect, useCallback, useId } from 'react';
+import {
+  LOCATION_FIELDS,
+  type LocationFieldConfig,
+} from './locationFields';
 
 export interface LocationModalProps {
   mode: 'create' | 'edit';
@@ -13,6 +14,121 @@ export interface LocationModalProps {
   title: string;
   subtitle?: string;
 }
+
+/* ── Local inline field renderer ─────────────────────────────────── */
+
+interface FieldRendererProps {
+  field: LocationFieldConfig;
+  value: unknown;
+  onChange: (key: string, value: unknown) => void;
+  error?: string;
+}
+
+function FieldRenderer({ field, value, onChange, error }: FieldRendererProps) {
+  const baseId = useId();
+  const inputId = `${baseId}-${field.key}`;
+  const errorId = `${baseId}-${field.key}-error`;
+
+  const baseInputClasses = 'w-full rounded-lg border px-3 py-2 text-sm transition-colors';
+  const baseStyle = {
+    borderColor: error ? 'var(--danger)' : 'var(--line)',
+    backgroundColor: 'var(--white)',
+    color: 'var(--ink)',
+  };
+
+  const labelEl = (
+    <label
+      htmlFor={inputId}
+      className="text-xs font-medium"
+      style={{ color: 'var(--ink-light)' }}
+    >
+      {field.label}
+      {'required' in field && field.required && (
+        <span className="text-red-500 ml-0.5">*</span>
+      )}
+    </label>
+  );
+
+  const errorEl = error ? (
+    <span className="text-xs" style={{ color: 'var(--danger)' }} id={errorId}>
+      {error}
+    </span>
+  ) : null;
+
+  const ariaDescribedBy = error ? errorId : undefined;
+
+  switch (field.type) {
+    case 'text':
+      return (
+        <div className="flex flex-col gap-1">
+          {labelEl}
+          <input
+            id={inputId}
+            type="text"
+            value={(value as string) ?? ''}
+            onChange={(e) => onChange(field.key, e.target.value)}
+            placeholder={field.placeholder}
+            disabled={field.disabled}
+            className={baseInputClasses}
+            style={baseStyle}
+            aria-describedby={ariaDescribedBy}
+          />
+          {errorEl}
+        </div>
+      );
+
+    case 'number':
+      return (
+        <div className="flex flex-col gap-1">
+          {labelEl}
+          <div className="flex items-center gap-2">
+            <input
+              id={inputId}
+              type="number"
+              value={(value as number) ?? ''}
+              onChange={(e) =>
+                onChange(field.key, e.target.value === '' ? '' : Number(e.target.value))
+              }
+              min={field.min}
+              max={field.max}
+              className={baseInputClasses}
+              style={{ ...baseStyle, width: '120px' }}
+              aria-describedby={ariaDescribedBy}
+            />
+            {field.suffix && (
+              <span className="text-xs" style={{ color: 'var(--ink-light)' }}>
+                {field.suffix}
+              </span>
+            )}
+          </div>
+          {errorEl}
+        </div>
+      );
+
+    case 'textarea':
+      return (
+        <div className="flex flex-col gap-1">
+          {labelEl}
+          <textarea
+            id={inputId}
+            value={(value as string) ?? ''}
+            onChange={(e) => onChange(field.key, e.target.value)}
+            placeholder={field.placeholder}
+            rows={field.rows ?? 3}
+            className={baseInputClasses}
+            style={{ ...baseStyle, resize: 'vertical' }}
+            aria-describedby={ariaDescribedBy}
+          />
+          {errorEl}
+        </div>
+      );
+
+    default:
+      return null;
+  }
+}
+
+/* ── LocationModal ───────────────────────────────────────────────── */
 
 export function LocationModal({
   mode,

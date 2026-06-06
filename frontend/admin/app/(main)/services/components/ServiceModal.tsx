@@ -1,10 +1,10 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
-import { FieldRenderer } from '@/app/components/modal/FieldRenderer';
-import { NestedList } from '@/app/components/modal/NestedList';
-import type { FieldConfig, NestedListFieldConfig } from '@/app/components/modal/field-types';
-import { SERVICE_FIELDS } from './serviceFields';
+import React, { useState, useEffect, useCallback, useId } from 'react';
+import {
+  SERVICE_FIELDS,
+  type ServiceFieldConfig,
+} from './serviceFields';
 
 export interface ServiceModalProps {
   mode: 'create' | 'edit';
@@ -14,6 +14,206 @@ export interface ServiceModalProps {
   title: string;
   subtitle?: string;
 }
+
+/* ── Local inline field renderer ─────────────────────────────────── */
+
+function useBaseInputClasses() {
+  const baseId = useId();
+  return { baseId };
+}
+
+interface FieldRendererProps {
+  field: ServiceFieldConfig;
+  value: unknown;
+  onChange: (key: string, value: unknown) => void;
+  error?: string;
+}
+
+function FieldRenderer({ field, value, onChange, error }: FieldRendererProps) {
+  const { baseId } = useBaseInputClasses();
+  const inputId = `${baseId}-${field.key}`;
+  const errorId = `${baseId}-${field.key}-error`;
+
+  const baseInputClasses = 'w-full rounded-lg border px-3 py-2 text-sm transition-colors';
+  const baseStyle = {
+    borderColor: error ? 'var(--danger)' : 'var(--line)',
+    backgroundColor: 'var(--white)',
+    color: 'var(--ink)',
+  };
+
+  const labelEl = (
+    <label
+      htmlFor={inputId}
+      className="text-xs font-medium"
+      style={{ color: 'var(--ink-light)' }}
+    >
+      {field.label}
+      {'required' in field && field.required && (
+        <span className="text-red-500 ml-0.5">*</span>
+      )}
+    </label>
+  );
+
+  const errorEl = error ? (
+    <span className="text-xs" style={{ color: 'var(--danger)' }} id={errorId}>
+      {error}
+    </span>
+  ) : null;
+
+  const ariaDescribedBy = error ? errorId : undefined;
+
+  switch (field.type) {
+    case 'text':
+      return (
+        <div className="flex flex-col gap-1">
+          {labelEl}
+          <input
+            id={inputId}
+            type="text"
+            value={(value as string) ?? ''}
+            onChange={(e) => onChange(field.key, e.target.value)}
+            placeholder={field.placeholder}
+            disabled={field.disabled}
+            className={baseInputClasses}
+            style={baseStyle}
+            aria-describedby={ariaDescribedBy}
+          />
+          {errorEl}
+        </div>
+      );
+
+    case 'number':
+      return (
+        <div className="flex flex-col gap-1">
+          {labelEl}
+          <div className="flex items-center gap-2">
+            <input
+              id={inputId}
+              type="number"
+              value={(value as number) ?? ''}
+              onChange={(e) =>
+                onChange(field.key, e.target.value === '' ? '' : Number(e.target.value))
+              }
+              min={field.min}
+              max={field.max}
+              className={baseInputClasses}
+              style={{ ...baseStyle, width: '120px' }}
+              aria-describedby={ariaDescribedBy}
+            />
+            {field.suffix && (
+              <span className="text-xs" style={{ color: 'var(--ink-light)' }}>
+                {field.suffix}
+              </span>
+            )}
+          </div>
+          {errorEl}
+        </div>
+      );
+
+    case 'textarea':
+      return (
+        <div className="flex flex-col gap-1">
+          {labelEl}
+          <textarea
+            id={inputId}
+            value={(value as string) ?? ''}
+            onChange={(e) => onChange(field.key, e.target.value)}
+            placeholder={field.placeholder}
+            rows={field.rows ?? 3}
+            className={baseInputClasses}
+            style={{ ...baseStyle, resize: 'vertical' }}
+            aria-describedby={ariaDescribedBy}
+          />
+          {errorEl}
+        </div>
+      );
+
+    default:
+      return null;
+  }
+}
+
+/* ── Local nested list for tariffs ───────────────────────────────── */
+
+interface NestedListProps {
+  field: Extract<ServiceFieldConfig, { type: 'nested-list' }>;
+  items: Record<string, unknown>[];
+  onChange: (items: Record<string, unknown>[]) => void;
+}
+
+function NestedList({ field, items, onChange }: NestedListProps) {
+  const addItem = () => {
+    const newItem: Record<string, unknown> = {};
+    field.itemFields.forEach((f) => {
+      newItem[f.key] = f.type === 'number' ? 0 : '';
+    });
+    onChange([...items, newItem]);
+  };
+
+  const removeItem = (index: number) => {
+    onChange(items.filter((_, i) => i !== index));
+  };
+
+  const updateItem = (index: number, key: string, value: unknown) => {
+    const updated = items.map((item, i) =>
+      i === index ? { ...item, [key]: value } : item,
+    );
+    onChange(updated);
+  };
+
+  return (
+    <div className="flex flex-col gap-2">
+      <label className="text-xs font-semibold" style={{ color: 'var(--ink)' }}>
+        {field.label}
+      </label>
+      {items.length === 0 && (
+        <div className="text-xs py-2" style={{ color: 'var(--ink-light)' }}>
+          {field.emptyText}
+        </div>
+      )}
+      {items.map((item, index) => (
+        <div
+          key={index}
+          className="rounded-lg border p-3 relative"
+          style={{ borderColor: 'var(--line)', backgroundColor: 'var(--surface)' }}
+        >
+          <div className="flex justify-between items-center mb-2">
+            <span className="text-xs font-medium" style={{ color: 'var(--ink-mid)' }}>
+              {field.itemLabel} {index + 1}
+            </span>
+            <button
+              onClick={() => removeItem(index)}
+              className="text-xs hover:text-red-500"
+              style={{ color: 'var(--ink-light)' }}
+              aria-label={`Удалить ${field.itemLabel}`}
+            >
+              🗑
+            </button>
+          </div>
+          <div className="space-y-2">
+            {field.itemFields.map((itemField) => (
+              <FieldRenderer
+                key={itemField.key}
+                field={itemField}
+                value={item[itemField.key]}
+                onChange={(key, val) => updateItem(index, key, val)}
+              />
+            ))}
+          </div>
+        </div>
+      ))}
+      <button
+        onClick={addItem}
+        className="text-xs font-medium self-start px-3 py-1 rounded-lg border border-dashed transition-colors hover:bg-brand/5"
+        style={{ borderColor: 'var(--brand)', color: 'var(--brand)' }}
+      >
+        {field.addButtonText}
+      </button>
+    </div>
+  );
+}
+
+/* ── ServiceModal ────────────────────────────────────────────────── */
 
 export function ServiceModal({
   mode,
@@ -148,7 +348,7 @@ export function ServiceModal({
               return (
                 <NestedList
                   key={field.key}
-                  field={field as NestedListFieldConfig}
+                  field={field}
                   items={(formData[field.key] as Record<string, unknown>[]) ?? []}
                   onChange={(items) => handleChange(field.key, items)}
                 />

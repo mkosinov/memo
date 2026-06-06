@@ -4,7 +4,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getServices } from '@memo/api-client';
 import type { ServiceResponse } from '@memo/api-client';
-import { useUpdateService } from '@/hooks/useServicesMutations';
+import { useUpdateService, useCreateService, useDeleteService } from '@/hooks/useServicesMutations';
 import { useUI } from '@/contexts/UIContext';
 import { ServiceModal } from './ServiceModal';
 import { ServiceFilters } from './ServiceFilters';
@@ -171,6 +171,8 @@ export function ServicesTable() {
   });
 
   const updateService = useUpdateService();
+  const createService = useCreateService();
+  const deleteService = useDeleteService();
   const { showToast } = useUI();
 
   // Filters
@@ -197,6 +199,9 @@ export function ServicesTable() {
   const [editingService, setEditingService] = useState<ServiceResponse | null>(
     null,
   );
+
+  // Create modal
+  const [creatingService, setCreatingService] = useState(false);
 
   // Action dropdown
   const [actionMenuId, setActionMenuId] = useState<string | null>(null);
@@ -303,6 +308,22 @@ export function ServicesTable() {
     );
   };
 
+  const handleCreate = () => {
+    setCreatingService(true);
+  };
+
+  const handleCreateSubmit = async (data: Record<string, unknown>) => {
+    await createService.mutateAsync(data as never);
+    showToast('Услуга создана', undefined);
+  };
+
+  const handleDelete = async (service: ServiceResponse) => {
+    setActionMenuId(null);
+    if (!window.confirm('Удалить услугу?')) return;
+    await deleteService.mutateAsync(service.id);
+    showToast('Услуга удалена', undefined);
+  };
+
   if (isLoading) {
     return (
       <div className="px-4 py-12 text-center text-sm" style={{ color: 'var(--ink-light)' }}>
@@ -329,12 +350,21 @@ export function ServicesTable() {
               setStatus('active');
             }}
           />
-          <ColumnPicker
-            columns={ALL_COLUMNS.map((c) => ({ key: c.key, label: c.label }))}
-            visibleKeys={visibleKeys}
-            onChange={setVisibleKeys}
-            storageKey={STORAGE_KEY}
-          />
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleCreate}
+              className="px-4 py-2 text-sm font-medium rounded-lg text-white transition-colors"
+              style={{ backgroundColor: 'var(--brand)' }}
+            >
+              Добавить услугу
+            </button>
+            <ColumnPicker
+              columns={ALL_COLUMNS.map((c) => ({ key: c.key, label: c.label }))}
+              visibleKeys={visibleKeys}
+              onChange={setVisibleKeys}
+              storageKey={STORAGE_KEY}
+            />
+          </div>
         </div>
       </div>
 
@@ -407,6 +437,16 @@ export function ServicesTable() {
                         style={{ color: 'var(--ink)' }}
                       >
                         {service.is_active ? 'В архив' : 'Восстановить'}
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDelete(service);
+                        }}
+                        className="w-full text-left px-4 py-2 text-sm transition-colors hover:opacity-80"
+                        style={{ color: 'var(--danger, #dc2626)' }}
+                      >
+                        Удалить
                       </button>
                     </div>
                   )}
@@ -505,6 +545,17 @@ export function ServicesTable() {
           onClose={() => setEditingService(null)}
           title="Редактировать услугу"
           subtitle={editingService.title}
+        />
+      )}
+
+      {/* Create Modal */}
+      {creatingService && (
+        <ServiceModal
+          mode="create"
+          service={null}
+          onSubmit={handleCreateSubmit}
+          onClose={() => setCreatingService(false)}
+          title="Новая услуга"
         />
       )}
     </>

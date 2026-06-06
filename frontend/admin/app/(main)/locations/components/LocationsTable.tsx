@@ -4,7 +4,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getLocations } from '@memo/api-client';
 import type { LocationResponse } from '@memo/api-client';
-import { useUpdateLocation } from '@/hooks/useLocationsMutations';
+import { useUpdateLocation, useCreateLocation, useDeleteLocation } from '@/hooks/useLocationsMutations';
 import type { LocationUpdate } from '@memo/api-client';
 import { useUI } from '@/contexts/UIContext';
 import { LocationModal } from './LocationModal';
@@ -42,6 +42,8 @@ export function LocationsTable() {
   });
 
   const updateLocation = useUpdateLocation();
+  const createLocation = useCreateLocation();
+  const deleteLocation = useDeleteLocation();
   const { showToast } = useUI();
 
   // ─── Filter state ────────────────────────────────────────────────────
@@ -56,6 +58,9 @@ export function LocationsTable() {
 
   // ─── Edit modal state ────────────────────────────────────────────────
   const [editLocation, setEditLocation] = useState<LocationResponse | null>(null);
+
+  // ─── Create modal state ─────────────────────────────────────────────
+  const [creatingLocation, setCreatingLocation] = useState(false);
 
   // ─── Action dropdown state ───────────────────────────────────────────
   const [openDropdownId, setOpenDropdownId] = useState<string | null>(null);
@@ -158,6 +163,32 @@ export function LocationsTable() {
     setOpenDropdownId(null);
   };
 
+  // ─── Create ─────────────────────────────────────────────────────────
+
+  const handleCreate = () => {
+    setCreatingLocation(true);
+  };
+
+  const handleCreateSubmit = async (data: Record<string, unknown>) => {
+    const payload: Record<string, unknown> = {};
+    for (const [key, val] of Object.entries(data)) {
+      if (val !== null && val !== undefined) {
+        payload[key] = val;
+      }
+    }
+    await createLocation.mutateAsync(payload as never);
+    showToast('Локация создана');
+  };
+
+  // ─── Delete ─────────────────────────────────────────────────────────
+
+  const handleDelete = async (loc: LocationResponse) => {
+    setOpenDropdownId(null);
+    if (!window.confirm('Удалить локацию?')) return;
+    await deleteLocation.mutateAsync(loc.id);
+    showToast('Локация удалена');
+  };
+
   // ─── Loading / Empty ─────────────────────────────────────────────────
 
   if (isLoading) {
@@ -169,7 +200,7 @@ export function LocationsTable() {
   return (
     <div>
       {/* Filters */}
-      <div className="p-4 border-b" style={{ borderColor: 'var(--line)' }}>
+      <div className="p-4 border-b flex items-center justify-between" style={{ borderColor: 'var(--line)' }}>
         <LocationFilters
           search={search}
           status={status}
@@ -177,6 +208,13 @@ export function LocationsTable() {
           onStatusChange={setStatus}
           onReset={() => { setSearch(''); setStatus(''); }}
         />
+        <button
+          onClick={handleCreate}
+          className="px-4 py-2 text-sm font-medium rounded-lg text-white transition-colors"
+          style={{ backgroundColor: 'var(--brand)' }}
+        >
+          Добавить локацию
+        </button>
       </div>
 
       {/* Table */}
@@ -282,6 +320,16 @@ export function LocationsTable() {
                           >
                             {loc.is_active ? 'В архив' : 'Восстановить'}
                           </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDelete(loc);
+                            }}
+                            className="w-full text-left px-3 py-2 text-sm transition-colors hover:opacity-80"
+                            style={{ color: 'var(--danger, #dc2626)' }}
+                          >
+                            Удалить
+                          </button>
                         </div>
                       )}
                     </div>
@@ -375,6 +423,17 @@ export function LocationsTable() {
           onClose={() => setEditLocation(null)}
           title="Редактирование локации"
           subtitle={editLocation.name}
+        />
+      )}
+
+      {/* Create modal */}
+      {creatingLocation && (
+        <LocationModal
+          mode="create"
+          location={null}
+          onSubmit={handleCreateSubmit}
+          onClose={() => setCreatingLocation(false)}
+          title="Новая локация"
         />
       )}
     </div>

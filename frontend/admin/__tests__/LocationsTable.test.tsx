@@ -359,4 +359,107 @@ describe('LocationsTable', () => {
 
     expect(screen.queryByLabelText('Карта')).not.toBeInTheDocument();
   });
+
+  // ─── Create functionality ────────────────────────────────────────────
+
+  it('renders "Добавить локацию" button', () => {
+    setupQuery(TEST_LOCATIONS);
+    render(<LocationsTable />);
+    expect(screen.getByText('Добавить локацию')).toBeInTheDocument();
+  });
+
+  it('opens create modal when "Добавить локацию" clicked', () => {
+    setupQuery(TEST_LOCATIONS);
+    render(<LocationsTable />);
+    fireEvent.click(screen.getByText('Добавить локацию'));
+    expect(screen.getByText('Новая локация')).toBeInTheDocument();
+  });
+
+  it('opens create modal with empty name field', () => {
+    setupQuery(TEST_LOCATIONS);
+    render(<LocationsTable />);
+    fireEvent.click(screen.getByText('Добавить локацию'));
+    expect(screen.getByText('Новая локация')).toBeInTheDocument();
+    // Name input should be empty in create mode
+    const nameInput = screen.getByPlaceholderText('Студия на Тверской');
+    expect(nameInput).toHaveValue('');
+  });
+
+  // ─── Delete functionality ────────────────────────────────────────────
+
+  it('shows "Удалить" option in action dropdown', () => {
+    setupQuery(TEST_LOCATIONS);
+    render(<LocationsTable />);
+    // Open action menu for first location
+    const actionButtons = screen.getAllByLabelText('Действия');
+    fireEvent.click(actionButtons[0]);
+    expect(screen.getByText('Удалить')).toBeInTheDocument();
+  });
+
+  it('calls deleteLocation when "Удалить" clicked and confirmed', async () => {
+    const deleteMutateAsync = vi.fn().mockResolvedValue({});
+    mockUseDeleteLocation.mockReturnValue({
+      mutateAsync: deleteMutateAsync,
+      mutate: vi.fn(),
+      isPending: false,
+      isSuccess: false,
+      isError: false,
+      isIdle: true,
+      data: undefined,
+      error: null,
+      status: 'idle',
+      reset: vi.fn(),
+      failureCount: 0,
+      failureReason: null,
+      variables: undefined,
+      context: undefined,
+      submittedAt: 0,
+    } as unknown as ReturnType<typeof useDeleteLocation>);
+
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    setupQuery(TEST_LOCATIONS);
+    render(<LocationsTable />);
+
+    // Open action menu and click delete
+    const actionButtons = screen.getAllByLabelText('Действия');
+    fireEvent.click(actionButtons[0]);
+    fireEvent.click(screen.getByText('Удалить'));
+
+    expect(window.confirm).toHaveBeenCalledWith('Удалить локацию?');
+    expect(deleteMutateAsync).toHaveBeenCalled();
+    vi.restoreAllMocks();
+  });
+
+  it('does not call deleteLocation when confirmation cancelled', () => {
+    const deleteMutateAsync = vi.fn();
+    mockUseDeleteLocation.mockReturnValue({
+      mutateAsync: deleteMutateAsync,
+      mutate: vi.fn(),
+      isPending: false,
+      isSuccess: false,
+      isError: false,
+      isIdle: true,
+      data: undefined,
+      error: null,
+      status: 'idle',
+      reset: vi.fn(),
+      failureCount: 0,
+      failureReason: null,
+      variables: undefined,
+      context: undefined,
+      submittedAt: 0,
+    } as unknown as ReturnType<typeof useDeleteLocation>);
+
+    vi.spyOn(window, 'confirm').mockReturnValue(false);
+    setupQuery(TEST_LOCATIONS);
+    render(<LocationsTable />);
+
+    const actionButtons = screen.getAllByLabelText('Действия');
+    fireEvent.click(actionButtons[0]);
+    fireEvent.click(screen.getByText('Удалить'));
+
+    expect(window.confirm).toHaveBeenCalledWith('Удалить локацию?');
+    expect(deleteMutateAsync).not.toHaveBeenCalled();
+    vi.restoreAllMocks();
+  });
 });

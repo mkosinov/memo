@@ -12,13 +12,13 @@ jobs:
       matrix:
         include:
           - group: unit
-            cov: "--cov=src/models --cov=src/schemas --cov-fail-under=95"
+            cov: "--cov-reset --cov=src/models --cov=src/schemas --cov-fail-under=95"
           - group: api
-            cov: "--cov=src/api --cov=src/services --cov-fail-under=90"
+            cov: "--cov-reset --cov=src/api --cov=src/services --cov-fail-under=90"
           - group: integration
-            cov: "--cov=src --cov-fail-under=80"
+            cov: "--cov-reset --cov=src --cov-fail-under=80"
           - group: misc
-            cov: "--cov=src --cov-fail-under=80"
+            cov: "--cov-reset --cov=src --cov-fail-under=80"
     defaults:
       run:
         working-directory: backend

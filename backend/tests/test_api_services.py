@@ -1,5 +1,9 @@
 """Tests for the Services CRUD API endpoints with nested Tariffs and Tags."""
 
+import pytest
+
+pytestmark = pytest.mark.api
+
 SERVICE_PAYLOAD = {
     "title": "Oil Painting for Beginners",
     "description": "Learn the basics of oil painting",

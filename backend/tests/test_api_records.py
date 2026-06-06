@@ -2,7 +2,10 @@
 
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from fastapi.testclient import TestClient
+
+pytestmark = pytest.mark.api
 
 
 class TestRecordsCrud:

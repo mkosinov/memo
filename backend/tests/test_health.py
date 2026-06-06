@@ -1,5 +1,9 @@
 """Tests for the /api/health endpoint (system domain)."""
 
+import pytest
+
+pytestmark = pytest.mark.misc
+
 
 class TestHealthEndpoint:
     """GET /api/health must return status and DB connectivity info."""

@@ -3,6 +3,10 @@
 import asyncio
 from datetime import datetime
 
+import pytest
+
+pytestmark = pytest.mark.api
+
 
 class TestPhotosWebEndpoint:
     """GET /api/v1/photos/web — public photos endpoint."""

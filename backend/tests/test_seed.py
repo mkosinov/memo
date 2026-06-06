@@ -6,6 +6,8 @@ from sqlalchemy import text
 from src.db.base import Base
 from src.db.database import DBManager
 
+pytestmark = pytest.mark.misc
+
 
 @pytest.fixture
 async def db_manager():

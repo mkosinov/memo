@@ -8,13 +8,33 @@ Provides:
   - Fixture factories: create_master, create_service, create_location,
     create_client, create_activity, create_record
   - query_db helper for direct SQL verification
+  - Test markers: unit, api, integration, misc
 
 Key patterns:
   - Uses sync TestClient, NOT AsyncClient
   - Uses drop_all + create_all, NOT rollback
   - Uses fixture-based factories, NOT factory_boy
   - Uses tempfile for DB, NOT fixed path (parallel-safe)
+  - Run specific groups: pytest -m unit / pytest -m api / pytest -m integration
 """
+
+import asyncio
+import os
+import sqlite3
+import tempfile
+
+import pytest
+from fastapi.testclient import TestClient
+
+
+# ─── Pytest Markers ──────────────────────────────────────────────────────────────
+
+def pytest_configure(config):
+    """Register custom markers for test grouping."""
+    config.addinivalue_line("markers", "unit: Fast tests, no DB (schemas, utils, validation)")
+    config.addinivalue_line("markers", "api: API endpoint tests (CRUD, status codes)")
+    config.addinivalue_line("markers", "integration: Complex flows, multi-step scenarios")
+    config.addinivalue_line("markers", "misc: Infrastructure, health, CORS, admin")
 
 import asyncio
 import os

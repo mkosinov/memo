@@ -10,6 +10,8 @@ from src.schemas.record import RecordResponse
 from src.schemas.service import ServiceResponse
 from tests.conftest import query_db
 
+pytestmark = pytest.mark.integration
+
 
 # ─── Existing enum validation tests (kept as-is) ──────────────────────────────
 

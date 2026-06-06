@@ -6,6 +6,8 @@ from pydantic import ValidationError
 from src.models.enums import Channel
 from src.schemas.client import ClientBase, ClientCreate, ClientPatch, ClientResponse, ClientUpdate, ClientWithStats
 
+pytestmark = pytest.mark.unit
+
 
 class TestClientBaseNullableFields:
     """ClientBase should accept nullable name, phone, and channel."""

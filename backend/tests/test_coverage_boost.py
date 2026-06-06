@@ -11,6 +11,10 @@ Targets low-coverage modules identified by pytest-cov:
 
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
+pytestmark = pytest.mark.integration
+
 # ─── Record Service: Phone Flow & Visitor Resolution ──────────────────────────
 
 

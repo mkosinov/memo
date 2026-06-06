@@ -6,8 +6,7 @@ import { getServices } from '@memo/api-client';
 import type { ServiceResponse } from '@memo/api-client';
 import { useUpdateService } from '@/hooks/useServicesMutations';
 import { useUI } from '@/contexts/UIContext';
-import { EntityModal } from '@/app/components/modal/EntityModal';
-import { SERVICE_FIELDS } from './serviceFields';
+import { ServiceModal } from './ServiceModal';
 import { ServiceFilters } from './ServiceFilters';
 import { ColumnPicker } from './ColumnPicker';
 
@@ -499,15 +498,13 @@ export function ServicesTable() {
 
       {/* Edit Modal */}
       {editingService && (
-        <EntityModal
+        <ServiceModal
           mode="edit"
-          entity={editingService}
-          fields={SERVICE_FIELDS}
+          service={editingService}
           onSubmit={handleEditSubmit}
           onClose={() => setEditingService(null)}
           title="Редактировать услугу"
           subtitle={editingService.title}
-          width="wide"
         />
       )}
     </>

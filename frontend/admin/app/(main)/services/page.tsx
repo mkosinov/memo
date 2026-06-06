@@ -4,8 +4,7 @@ import React, { useState } from 'react';
 import { useCreateService } from '@/hooks/useServicesMutations';
 import { useUI } from '@/contexts/UIContext';
 import { ServicesTable } from './components/ServicesTable';
-import { EntityModal } from '@/app/components/modal/EntityModal';
-import { SERVICE_FIELDS } from './components/serviceFields';
+import { ServiceModal } from './components/ServiceModal';
 
 export default function ServicesPage() {
   const [showCreate, setShowCreate] = useState(false);
@@ -46,15 +45,13 @@ export default function ServicesPage() {
 
       {/* Create Modal */}
       {showCreate && (
-        <EntityModal
+        <ServiceModal
           mode="create"
-          entity={null}
-          fields={SERVICE_FIELDS}
+          service={null}
           onSubmit={handleCreate}
           onClose={() => setShowCreate(false)}
           title="Новая услуга"
           subtitle="Заполните данные услуги"
-          width="wide"
         />
       )}
     </div>

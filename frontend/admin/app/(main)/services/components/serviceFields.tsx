@@ -1,4 +1,4 @@
-import type { FieldConfig } from '@/app/components/modal/EntityModal/types';
+import type { FieldConfig } from '@/app/components/modal/field-types';
 
 export const SERVICE_FIELDS: FieldConfig[] = [
   {

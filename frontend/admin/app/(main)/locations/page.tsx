@@ -4,8 +4,7 @@ import React, { useState } from 'react';
 import { useCreateLocation } from '@/hooks/useLocationsMutations';
 import { useUI } from '@/contexts/UIContext';
 import { LocationsTable } from './components/LocationsTable';
-import { EntityModal } from '@/app/components/modal/EntityModal';
-import { LOCATION_FIELDS } from './components/locationFields';
+import { LocationModal } from './components/LocationModal';
 
 export default function LocationsPage() {
   const [showCreate, setShowCreate] = useState(false);
@@ -46,10 +45,9 @@ export default function LocationsPage() {
 
       {/* Create modal */}
       {showCreate && (
-        <EntityModal
+        <LocationModal
           mode="create"
-          entity={null}
-          fields={LOCATION_FIELDS}
+          location={null}
           onSubmit={handleCreate}
           onClose={() => setShowCreate(false)}
           title="Новая локация"

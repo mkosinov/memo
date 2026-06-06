@@ -1,4 +1,4 @@
-import type { FieldConfig } from '@/app/components/modal/EntityModal/types';
+import type { FieldConfig } from '@/app/components/modal/field-types';
 
 export const LOCATION_FIELDS: FieldConfig[] = [
   { type: 'text', key: 'name', label: 'Название', required: true, placeholder: 'Студия на Тверской' },

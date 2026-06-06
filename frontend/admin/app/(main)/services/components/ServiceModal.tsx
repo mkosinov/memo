@@ -1,47 +1,40 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { FieldRenderer } from './FieldRenderer';
-import { NestedList } from './NestedList';
-import type { FieldConfig, NestedListFieldConfig } from './types';
+import { FieldRenderer } from '@/app/components/modal/FieldRenderer';
+import { NestedList } from '@/app/components/modal/NestedList';
+import type { FieldConfig, NestedListFieldConfig } from '@/app/components/modal/field-types';
+import { SERVICE_FIELDS } from './serviceFields';
 
-export type { FieldConfig };
-
-export interface EntityModalProps {
+export interface ServiceModalProps {
   mode: 'create' | 'edit';
-  entity: Record<string, unknown> | null;
-  fields: FieldConfig[];
+  service: Record<string, unknown> | null;
   onSubmit: (data: Record<string, unknown>) => Promise<void>;
   onClose: () => void;
   title: string;
   subtitle?: string;
-  width?: 'default' | 'wide';
 }
 
-export function EntityModal({
+export function ServiceModal({
   mode,
-  entity,
-  fields,
+  service,
   onSubmit,
   onClose,
   title,
   subtitle,
-  width = 'default',
-}: EntityModalProps) {
+}: ServiceModalProps) {
   const [formData, setFormData] = useState<Record<string, unknown>>(() => {
-    if (!entity) return {};
+    if (!service) return {};
     const initial: Record<string, unknown> = {};
-    fields.forEach((f) => {
+    SERVICE_FIELDS.forEach((f) => {
       initial[f.key] =
-        entity[f.key] ?? (f.type === 'number' ? 0 : f.type === 'nested-list' ? [] : '');
+        service[f.key] ?? (f.type === 'number' ? 0 : f.type === 'nested-list' ? [] : '');
     });
     return initial;
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isDirty, setIsDirty] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-
-  const maxW = width === 'wide' ? 'max-w-[800px]' : 'max-w-[600px]';
 
   const handleChange = useCallback((key: string, value: unknown) => {
     setFormData((prev) => ({ ...prev, [key]: value }));
@@ -55,7 +48,7 @@ export function EntityModal({
 
   const validate = useCallback((): boolean => {
     const newErrors: Record<string, string> = {};
-    fields.forEach((field) => {
+    SERVICE_FIELDS.forEach((field) => {
       if ('required' in field && field.required) {
         const val = formData[field.key];
         if (val === undefined || val === null || val === '') {
@@ -86,7 +79,7 @@ export function EntityModal({
     }
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
-  }, [fields, formData]);
+  }, [formData]);
 
   const handleSubmit = async () => {
     if (!validate()) return;
@@ -123,7 +116,7 @@ export function EntityModal({
         onClick={handleClose}
       />
       <div
-        className={`relative bg-white rounded-xl shadow-2xl w-full ${maxW} mx-4 flex flex-col overflow-hidden`}
+        className="relative bg-white rounded-xl shadow-2xl w-full max-w-[800px] mx-4 flex flex-col overflow-hidden"
         style={{ maxHeight: '85vh' }}
       >
         {/* Header */}
@@ -150,7 +143,7 @@ export function EntityModal({
 
         {/* Scrollable body */}
         <div className="flex-1 overflow-y-auto px-6 pb-4 space-y-4">
-          {fields.map((field) => {
+          {SERVICE_FIELDS.map((field) => {
             if (field.type === 'nested-list') {
               return (
                 <NestedList

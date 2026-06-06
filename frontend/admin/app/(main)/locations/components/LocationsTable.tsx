@@ -7,7 +7,7 @@ import type { LocationResponse } from '@memo/api-client';
 import { useUpdateLocation } from '@/hooks/useLocationsMutations';
 import type { LocationUpdate } from '@memo/api-client';
 import { useUI } from '@/contexts/UIContext';
-import { EntityModal } from '@/app/components/modal/EntityModal';
+import { LocationModal } from './LocationModal';
 import { LocationFilters } from './LocationFilters';
 import { LOCATION_FIELDS } from './locationFields';
 
@@ -368,10 +368,9 @@ export function LocationsTable() {
 
       {/* Edit modal */}
       {editLocation && (
-        <EntityModal
+        <LocationModal
           mode="edit"
-          entity={editLocation}
-          fields={LOCATION_FIELDS}
+          location={editLocation}
           onSubmit={handleEdit}
           onClose={() => setEditLocation(null)}
           title="Редактирование локации"

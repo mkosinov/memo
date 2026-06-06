@@ -2,7 +2,7 @@
 
 import React, { useId } from 'react';
 import { TagsSelect } from './TagsSelect';
-import type { FieldConfig } from './types';
+import type { FieldConfig } from './field-types';
 
 interface FieldRendererProps {
   field: FieldConfig;

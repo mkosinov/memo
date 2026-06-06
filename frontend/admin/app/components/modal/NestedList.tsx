@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { FieldRenderer } from './FieldRenderer';
-import type { NestedListFieldConfig } from './types';
+import type { NestedListFieldConfig } from './field-types';
 
 interface NestedListProps {
   field: NestedListFieldConfig;

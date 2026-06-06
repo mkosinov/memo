@@ -12,13 +12,9 @@ jobs:
       matrix:
         include:
           - group: unit
-            cov: "--cov-reset --cov=src/models --cov=src/schemas --cov-fail-under=95"
           - group: api
-            cov: "--cov-reset --cov=src/api --cov=src/services --cov-fail-under=90"
           - group: integration
-            cov: "--cov-reset --cov=src --cov-fail-under=80"
           - group: misc
-            cov: "--cov-reset --cov=src --cov-fail-under=80"
     defaults:
       run:
         working-directory: backend
@@ -36,7 +32,7 @@ jobs:
         run: uv sync --extra dev
 
       - name: Run tests (${{ matrix.group }})
-        run: uv run pytest -m ${{ matrix.group }} -v --tb=short ${{ matrix.cov }}
+        run: uv run pytest -m ${{ matrix.group }} -v --tb=short
 
   backend-coverage:
     runs-on: ubuntu-latest

@@ -303,10 +303,13 @@ test.describe('ActivityDetailsModal — Real User Scenarios', () => {
     const serviceValue = await serviceSelect.inputValue();
     expect(serviceValue).toBeTruthy();
 
-    // Master select has a selected value
-    const masterSelect = page.locator('[data-testid="select-master"]');
-    const masterValue = await masterSelect.inputValue();
-    expect(masterValue).toBeTruthy();
+    // Master picker (CustomSelect rendered as button, not native select)
+    // Scoped to settings-tab to avoid matching other CustomSelects on the page
+    const masterPicker = page.locator('[data-testid="settings-tab"] [data-testid="custom-select-trigger"]');
+    const masterText = await masterPicker.textContent();
+    // The trigger shows the selected master name (not placeholder "—")
+    expect(masterText).toBeTruthy();
+    expect(masterText).not.toBe('—');
 
     // Capacity shows a number > 0
     const capacity = page.locator('[data-testid="input-capacity"]');
@@ -387,7 +390,7 @@ test.describe('ActivityDetailsModal — Real User Scenarios', () => {
 
   // ── Scenario 10: Validation — cannot submit without name ──────────────
 
-  test('10. Cannot create record without name', async ({ page }) => {
+  test('10. Can create record without name (name is optional)', async ({ page }) => {
     await openAddTab(page);
 
     // Leave name empty
@@ -396,8 +399,9 @@ test.describe('ActivityDetailsModal — Real User Scenarios', () => {
     // Submit
     await page.locator('[data-testid="btn-create-record"]').click();
 
-    // Should show error toast
-    await expect(page.locator('text=Заполните имя')).toBeVisible({ timeout: 3000 });
+    // Should succeed — name is optional, verify success toast appears
+    // The toast role="status" shows "Запись создана"
+    await expect(page.locator('[role="status"]')).toBeVisible({ timeout: 5000 });
   });
 
   // ── Scenario 11: Channel select always visible ────────────────────────

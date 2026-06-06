@@ -56,6 +56,13 @@ export function CustomSelect({ value, options, onChange, className = '', iconOnl
         {selected?.icon && (
           <span style={{ color: selected?.color }}>{selected.icon}</span>
         )}
+        {selected?.color && (
+          <span
+            data-color={selected.color}
+            className="inline-block w-3 h-3 rounded-sm shrink-0"
+            style={{ backgroundColor: selected.color }}
+          />
+        )}
         {!iconOnly && <span>{selected?.label ?? '—'}</span>}
         <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
           <path d="M6 9l6 6 6-6" />
@@ -79,6 +86,13 @@ export function CustomSelect({ value, options, onChange, className = '', iconOnl
             >
               {option.icon && (
                 <span style={{ color: option.color }}>{option.icon}</span>
+              )}
+              {option.color && (
+                <span
+                  data-color={option.color}
+                  className="inline-block w-3 h-3 rounded-sm shrink-0"
+                  style={{ backgroundColor: option.color }}
+                />
               )}
               <span>{option.label}</span>
             </button>

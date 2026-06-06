@@ -113,4 +113,31 @@ describe('CustomSelect', () => {
     fireEvent.click(button);
     expect(screen.queryByText('Option B')).not.toBeInTheDocument();
   });
+
+  it('renders colored square in trigger when selected option has color', () => {
+    const options = [
+      { value: 'x', label: 'Item X', color: '#FF0000' },
+    ];
+    render(<CustomSelect value="x" options={options} onChange={vi.fn()} />);
+    const trigger = screen.getByTestId('custom-select-trigger');
+    const colorSquare = trigger.querySelector('span[data-color]');
+    expect(colorSquare).toBeTruthy();
+    expect(colorSquare?.getAttribute('data-color')).toBe('#FF0000');
+  });
+
+  it('renders colored square in dropdown when option has color', () => {
+    render(<CustomSelect value="waiting" options={OPTIONS_WITH_ICONS} onChange={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button'));
+    const option = screen.getByTestId('custom-select-option-visited');
+    const colorSquare = option.querySelector('span[data-color]');
+    expect(colorSquare).toBeTruthy();
+    expect(colorSquare?.getAttribute('data-color')).toBe('#10B981');
+  });
+
+  it('does not render colored square when option has no color', () => {
+    render(<CustomSelect value="a" options={TEST_OPTIONS} onChange={vi.fn()} />);
+    const trigger = screen.getByTestId('custom-select-trigger');
+    const colorSquare = trigger.querySelector('span[data-color]');
+    expect(colorSquare).toBeFalsy();
+  });
 });

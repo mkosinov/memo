@@ -1,5 +1,9 @@
 """Tests for application entrypoint and configuration."""
 
+import pytest
+
+pytestmark = pytest.mark.misc
+
 
 class TestRootEndpoint:
     """Root path should return 404 (no route registered)."""

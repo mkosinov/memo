@@ -5,6 +5,8 @@ TDD RED phase — these tests MUST fail before any production code is written.
 
 import pytest
 
+pytestmark = pytest.mark.integration
+
 
 # ─── Helper: create full data chain (client + record + visits + payments) ──────
 

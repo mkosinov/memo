@@ -8,6 +8,8 @@ from sqlalchemy.orm import Session
 
 from src.db.base import Base
 
+pytestmark = pytest.mark.unit
+
 
 def _make_engine():
     """In-memory SQLite engine with string-based FK support."""

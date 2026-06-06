@@ -1,6 +1,9 @@
 """Tests for SQLAdmin setup and registration."""
 
+import pytest
 from fastapi.testclient import TestClient
+
+pytestmark = pytest.mark.misc
 
 
 class TestAdminEndpoint:

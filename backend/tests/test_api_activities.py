@@ -3,6 +3,10 @@
 import uuid
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
+pytestmark = pytest.mark.api
+
 # --- Prerequisite payloads ---
 MASTER_PAYLOAD = {
     "first_name": "Anna",

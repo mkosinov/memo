@@ -1,22 +1,9 @@
 'use client';
 
-import React, { useState } from 'react';
-import { useCreateService } from '@/hooks/useServicesMutations';
-import { useUI } from '@/contexts/UIContext';
+import React from 'react';
 import { ServicesTable } from './components/ServicesTable';
-import { EntityModal } from '@/app/components/modal/EntityModal';
-import { SERVICE_FIELDS } from './components/serviceFields';
 
 export default function ServicesPage() {
-  const [showCreate, setShowCreate] = useState(false);
-  const createService = useCreateService();
-  const { showToast } = useUI();
-
-  const handleCreate = async (data: Record<string, unknown>) => {
-    await createService.mutateAsync(data as never);
-    showToast('Услуга создана', undefined);
-  };
-
   return (
     <div className="p-4 space-y-4">
       {/* Header */}
@@ -27,13 +14,6 @@ export default function ServicesPage() {
         >
           Управление услугами
         </h1>
-        <button
-          onClick={() => setShowCreate(true)}
-          className="px-4 py-2 text-sm rounded-lg text-white transition-colors"
-          style={{ backgroundColor: 'var(--brand)' }}
-        >
-          + Добавить услугу
-        </button>
       </div>
 
       {/* Table */}
@@ -43,20 +23,6 @@ export default function ServicesPage() {
       >
         <ServicesTable />
       </div>
-
-      {/* Create Modal */}
-      {showCreate && (
-        <EntityModal
-          mode="create"
-          entity={null}
-          fields={SERVICE_FIELDS}
-          onSubmit={handleCreate}
-          onClose={() => setShowCreate(false)}
-          title="Новая услуга"
-          subtitle="Заполните данные услуги"
-          width="wide"
-        />
-      )}
     </div>
   );
 }

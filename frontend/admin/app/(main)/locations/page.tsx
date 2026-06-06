@@ -1,22 +1,9 @@
 'use client';
 
-import React, { useState } from 'react';
-import { useCreateLocation } from '@/hooks/useLocationsMutations';
-import { useUI } from '@/contexts/UIContext';
+import React from 'react';
 import { LocationsTable } from './components/LocationsTable';
-import { EntityModal } from '@/app/components/modal/EntityModal';
-import { LOCATION_FIELDS } from './components/locationFields';
 
 export default function LocationsPage() {
-  const [showCreate, setShowCreate] = useState(false);
-  const createLocation = useCreateLocation();
-  const { showToast } = useUI();
-
-  const handleCreate = async (data: Record<string, unknown>) => {
-    await createLocation.mutateAsync(data as never);
-    showToast('Локация создана');
-  };
-
   return (
     <div className="p-4 space-y-4">
       {/* Header */}
@@ -27,13 +14,6 @@ export default function LocationsPage() {
         >
           Управление локациями
         </h1>
-        <button
-          onClick={() => setShowCreate(true)}
-          className="px-4 py-2 text-sm rounded-lg text-white transition-colors"
-          style={{ backgroundColor: 'var(--brand)' }}
-        >
-          + Добавить локацию
-        </button>
       </div>
 
       {/* Table card */}
@@ -43,19 +23,6 @@ export default function LocationsPage() {
       >
         <LocationsTable />
       </div>
-
-      {/* Create modal */}
-      {showCreate && (
-        <EntityModal
-          mode="create"
-          entity={null}
-          fields={LOCATION_FIELDS}
-          onSubmit={handleCreate}
-          onClose={() => setShowCreate(false)}
-          title="Новая локация"
-          subtitle="Заполните данные локации"
-        />
-      )}
     </div>
   );
 }

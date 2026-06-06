@@ -1,6 +1,45 @@
-import type { FieldConfig } from '@/app/components/modal/EntityModal/types';
+/** Local field types — no shared modal imports */
 
-export const SERVICE_FIELDS: FieldConfig[] = [
+interface TextFieldConfig {
+  type: 'text';
+  key: string;
+  label: string;
+  placeholder?: string;
+  required?: boolean;
+  disabled?: boolean;
+}
+
+interface NumberFieldConfig {
+  type: 'number';
+  key: string;
+  label: string;
+  min?: number;
+  max?: number;
+  required?: boolean;
+  suffix?: string;
+}
+
+interface TextareaFieldConfig {
+  type: 'textarea';
+  key: string;
+  label: string;
+  rows?: number;
+  placeholder?: string;
+}
+
+interface NestedListFieldConfig {
+  type: 'nested-list';
+  key: string;
+  label: string;
+  itemLabel: string;
+  itemFields: (TextFieldConfig | NumberFieldConfig | TextareaFieldConfig)[];
+  addButtonText: string;
+  emptyText: string;
+}
+
+export type ServiceFieldConfig = TextFieldConfig | NumberFieldConfig | TextareaFieldConfig | NestedListFieldConfig;
+
+export const SERVICE_FIELDS: ServiceFieldConfig[] = [
   {
     type: 'text',
     key: 'title',

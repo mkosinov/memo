@@ -4,6 +4,10 @@ When creating records, visits can now be created without linking to a visitor.
 This allows booking seats without knowing visitor names upfront.
 """
 
+import pytest
+
+pytestmark = pytest.mark.unit
+
 
 class TestOptionalVisitorId:
     """Visits with no visitor_id should be creatable and return null visitor_id."""

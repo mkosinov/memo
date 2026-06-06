@@ -77,10 +77,15 @@ disallow_untyped_defs = false
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+    "unit: Fast tests, no DB (schemas, utils, validation)",
+    "api: API endpoint tests (CRUD, status codes)",
+    "integration: Complex flows, multi-step scenarios",
+    "misc: Infrastructure, health, CORS, admin",
+]
 addopts = [
     "--cov=src",
     "--cov-report=term-missing",
-    "--cov-fail-under=80",
 ]
 
 # ── Coverage ───────────────────────────────────────────────────────

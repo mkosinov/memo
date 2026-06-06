@@ -220,5 +220,61 @@ describe('ServicesTable', () => {
     expect(screen.getByText('Редактировать услугу')).toBeTruthy();
   });
 
+  // ─── Create functionality ────────────────────────────────────────────
 
+  it('renders "Добавить услугу" button', () => {
+    render(<ServicesTable />);
+    expect(screen.getByText('+ Добавить услугу')).toBeTruthy();
+  });
+
+  it('opens create modal when "Добавить услугу" clicked', () => {
+    render(<ServicesTable />);
+    const addBtn = screen.getByText('+ Добавить услугу');
+    fireEvent.click(addBtn);
+    expect(screen.getByText('Новая услуга')).toBeTruthy();
+  });
+
+  it('opens create modal with empty title field', () => {
+    render(<ServicesTable />);
+    fireEvent.click(screen.getByText('+ Добавить услугу'));
+    // Modal should be open with the "Новая услуга" title
+    expect(screen.getByText('Новая услуга')).toBeTruthy();
+    // The title input should be empty
+    const titleInput = screen.getByPlaceholderText('Мастер-класс по рисованию');
+    expect(titleInput).toHaveValue('');
+  });
+
+  // ─── Delete functionality ────────────────────────────────────────────
+
+  it('shows "Удалить" option in action dropdown', () => {
+    render(<ServicesTable />);
+    // Open action menu for first service
+    const actionButtons = screen.getAllByLabelText('Действия');
+    fireEvent.click(actionButtons[0]);
+    expect(screen.getByText('Удалить')).toBeTruthy();
+  });
+
+  it('calls deleteService when "Удалить" clicked and confirmed', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    render(<ServicesTable />);
+    // Open action menu
+    const actionButtons = screen.getAllByLabelText('Действия');
+    fireEvent.click(actionButtons[0]);
+    // Click delete
+    fireEvent.click(screen.getByText('Удалить'));
+    expect(window.confirm).toHaveBeenCalledWith('Удалить услугу?');
+    expect(mockMutateAsync).toHaveBeenCalled();
+    vi.restoreAllMocks();
+  });
+
+  it('does not call deleteService when confirmation cancelled', () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(false);
+    render(<ServicesTable />);
+    const actionButtons = screen.getAllByLabelText('Действия');
+    fireEvent.click(actionButtons[0]);
+    fireEvent.click(screen.getByText('Удалить'));
+    expect(window.confirm).toHaveBeenCalledWith('Удалить услугу?');
+    expect(mockMutateAsync).not.toHaveBeenCalled();
+    vi.restoreAllMocks();
+  });
 });

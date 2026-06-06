@@ -2,6 +2,10 @@
 
 from datetime import datetime
 
+import pytest
+
+pytestmark = pytest.mark.unit
+
 
 class TestPhotoResponse:
     """PhotoResponse schema creation and validation."""

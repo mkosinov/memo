@@ -5,7 +5,11 @@ custom_price is an optional manual price override:
 - If not set (None), total is the sum of visit prices.
 """
 
+import pytest
+
 from tests.conftest import query_db
+
+pytestmark = pytest.mark.unit
 
 
 class TestCustomPriceCreate:

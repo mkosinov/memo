@@ -1,5 +1,9 @@
 """Tests for the Clients CRUD API endpoints."""
 
+import pytest
+
+pytestmark = pytest.mark.api
+
 CLIENT_PAYLOAD = {
     "name": "John Smith",
     "phone": "+79991234567",

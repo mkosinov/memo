@@ -1,5 +1,9 @@
 """Tests for the Masters CRUD API endpoints."""
 
+import pytest
+
+pytestmark = pytest.mark.api
+
 MASTER_PAYLOAD = {
     "first_name": "Anna",
     "last_name": "Ivanova",

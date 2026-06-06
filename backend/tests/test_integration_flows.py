@@ -8,6 +8,8 @@ import pytest
 
 from tests.conftest import query_db
 
+pytestmark = pytest.mark.integration
+
 
 # ─── Flow 1: Phone → Client → Record → Visit (complete booking) ─────────────
 

@@ -1,5 +1,9 @@
 """Tests for the Payments CRUD API endpoints."""
 
+import pytest
+
+pytestmark = pytest.mark.api
+
 # --- Prerequisite payloads ---
 MASTER_PAYLOAD = {
     "first_name": "Anna",

@@ -15,8 +15,8 @@ process.env.TZ = 'Europe/Moscow';
 
 import { describe, it, expect } from 'vitest';
 import { buildAdminSchedule, toScheduleIndex } from '@/lib/buildSchedule';
+import type { ScheduleItem } from '@/lib/buildSchedule';
 import type { ActivityResponse, MasterResponse, ServiceResponse, LocationResponse } from '@memo/api-client';
-import type { ScheduleAdminDTO } from '@memo/domain';
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -87,29 +87,20 @@ const makeActivity = (overrides: Partial<ActivityResponse> = {}): ActivityRespon
   ...overrides,
 });
 
-function makeScheduleItem(overrides: Partial<ScheduleAdminDTO> = {}): ScheduleAdminDTO {
+function makeScheduleItem(overrides: Partial<ScheduleItem> = {}): ScheduleItem {
   return {
     id: 'a1',
     masterId: 'm1',
     serviceId: 's1',
     locationId: 'l1',
-    masterName: 'Анна Иванова',
-    serviceTitle: 'Гончарный круг',
-    date: '2026-06-01',
-    time: '10:00',
-    durationMinutes: 120,
     day: 0,
     startTime: 10,
+    duration: 2,
     occupied: 0,
     capacity: 6,
-    locationName: 'Основной зал',
-    priceMin: 2500,
-    priceMax: 2500,
     isPrivate: false,
-    masterColor: '#FF5733',
+    serviceName: 'Гончарный круг',
     minAge: '6',
-    maxAge: '99',
-    comment: '',
     ...overrides,
   };
 }
@@ -150,10 +141,9 @@ describe('Timezone DnD bug — dayToDate via toScheduleIndex', () => {
     // BUG: toScheduleIndex → addToActivityIndex → dayToDate → .toISOString()
     // produces "2026-05-31" instead of "2026-06-01" in UTC+3
 
-    const items: ScheduleAdminDTO[] = [
+    const items: ScheduleItem[] = [
       makeScheduleItem({
         id: 'a1',
-        date: '2026-06-01',
         day: 0, // Monday
         startTime: 10,
       }),
@@ -174,7 +164,6 @@ describe('Timezone DnD bug — dayToDate via toScheduleIndex', () => {
     // Activity on Sunday June 7 at 10:00 (day=6 from Monday June 1)
     const sundayActivity = makeScheduleItem({
       id: 'a-sun',
-      date: '2026-06-07',
       day: 6,
       startTime: 10,
     });

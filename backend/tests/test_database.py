@@ -4,6 +4,8 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+pytestmark = pytest.mark.misc
+
 
 class TestDBManager:
     """Verify DBManager lifecycle and session behavior."""

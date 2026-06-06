@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act, within } from '@testing-library/react';
 import React from 'react';
 import { ActivityDetailsModal } from '../app/components/modal/ActivityDetailsModal/ActivityDetailsModal';
 import { TabNav } from '../app/components/modal/ActivityDetailsModal/TabNav';
@@ -177,11 +177,19 @@ describe('SettingsTab', () => {
 
   it('renders master select with artist names', () => {
     render(<SettingsTab {...defaultProps} />);
-    const masterSelect = screen.getByLabelText('Мастер');
-    expect(masterSelect).toBeInTheDocument();
-    // Artist names without color codes
-    expect(screen.getByText('Ольга Середа')).toBeInTheDocument();
-    expect(screen.getByText('Юлия Большакова')).toBeInTheDocument();
+    // MasterPicker uses CustomSelect — a button trigger instead of native <select>
+    const masterRow = screen.getByTestId('settings-row-master-location');
+    const masterTrigger = masterRow.querySelector(
+      '[data-testid="custom-select-trigger"]',
+    ) as HTMLButtonElement;
+    expect(masterTrigger).toBeInTheDocument();
+    // The selected master (m1 = Ольга Середа) should show in the trigger label
+    expect(masterTrigger.textContent).toContain('Ольга Середа');
+    // Open the dropdown to verify all artist names are available
+    fireEvent.click(masterTrigger);
+    const dropdown = screen.getByTestId('custom-select-dropdown');
+    expect(within(dropdown).getByText('Ольга Середа')).toBeInTheDocument();
+    expect(within(dropdown).getByText('Юлия Большакова')).toBeInTheDocument();
   });
 
   it('renders location select', () => {
@@ -461,7 +469,8 @@ describe('SettingsTab — row layout', () => {
     const { container } = render(<SettingsTab {...defaultProps} />);
     const row3 = container.querySelector('[data-testid="settings-row-master-location"]');
     expect(row3).toBeInTheDocument();
-    expect(row3!.querySelector('[data-testid="select-master"]')).toBeInTheDocument();
+    // MasterPicker uses CustomSelect which renders a button trigger
+    expect(row3!.querySelector('[data-testid="custom-select-trigger"]')).toBeInTheDocument();
     expect(row3!.querySelector('[data-testid="select-location"]')).toBeInTheDocument();
   });
 
@@ -481,17 +490,21 @@ describe('SettingsTab — row layout', () => {
 
   it('shows color dot next to master names in select', () => {
     const { container } = render(<SettingsTab {...defaultProps} />);
-    const masterSelect = container.querySelector('[data-testid="select-master"]') as HTMLSelectElement;
-    expect(masterSelect).toBeInTheDocument();
-    const options = masterSelect.querySelectorAll('option');
-    // First option is "Выберите", then 2 artists
-    expect(options.length).toBe(3);
-    // Options should show artist names without hex codes
-    expect(options[1].textContent).toBe('Ольга Середа');
-    expect(options[2].textContent).toBe('Юлия Большакова');
-    // Color dot overlay should exist for selected master
-    const colorDot = container.querySelector('span[style*="background-color"]');
-    // (colorDot may be null if no master selected — that's OK)
+    // MasterPicker uses CustomSelect — open the dropdown to inspect options
+    const masterRow = container.querySelector(
+      '[data-testid="settings-row-master-location"]',
+    )!;
+    const trigger = masterRow.querySelector(
+      '[data-testid="custom-select-trigger"]',
+    ) as HTMLButtonElement;
+    expect(trigger).toBeInTheDocument();
+    fireEvent.click(trigger);
+    // CustomSelect renders colored square indicators (span with backgroundColor) for each option
+    const colorSquares = container.querySelectorAll('[data-color]');
+    expect(colorSquares.length).toBeGreaterThanOrEqual(1);
+    // Verify the first color square has an inline background-color style
+    const firstSquare = colorSquares[0];
+    expect(firstSquare.getAttribute('style')).toContain('background-color');
   });
 });
 

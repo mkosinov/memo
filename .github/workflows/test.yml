@@ -9,6 +9,14 @@ on:
 jobs:
   backend-tests:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - group: unit
+          - group: api
+          - group: integration
+          - group: misc
     defaults:
       run:
         working-directory: backend
@@ -25,8 +33,30 @@ jobs:
       - name: Install dependencies
         run: uv sync --extra dev
 
-      - name: Run tests
-        run: uv run pytest tests/ -v --tb=short
+      - name: Run tests (${{ matrix.group }})
+        run: uv run pytest -m ${{ matrix.group }} -v --tb=short
+
+  backend-coverage:
+    runs-on: ubuntu-latest
+    needs: [backend-tests]
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      - name: Check coverage threshold
+        run: uv run pytest --cov=src --cov-fail-under=80
 
   frontend-tests:
     runs-on: ubuntu-latest

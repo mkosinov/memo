@@ -1,5 +1,9 @@
 """Tests for the Locations CRUD API endpoints."""
 
+import pytest
+
+pytestmark = pytest.mark.api
+
 LOCATION_PAYLOAD = {
     "name": "Test Studio",
     "address": "123 Art Street",

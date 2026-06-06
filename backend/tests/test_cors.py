@@ -1,5 +1,9 @@
 """Tests for CORS middleware configuration."""
 
+import pytest
+
+pytestmark = pytest.mark.misc
+
 
 class TestCorsHeaders:
     """CORS middleware must add appropriate headers to responses."""

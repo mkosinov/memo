@@ -1,47 +1,155 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
-import { FieldRenderer } from './FieldRenderer';
-import { NestedList } from './NestedList';
-import type { FieldConfig, NestedListFieldConfig } from './types';
+import React, { useState, useEffect, useCallback, useId } from 'react';
+import {
+  LOCATION_FIELDS,
+  type LocationFieldConfig,
+} from './locationFields';
 
-export type { FieldConfig };
-
-export interface EntityModalProps {
+export interface LocationModalProps {
   mode: 'create' | 'edit';
-  entity: Record<string, unknown> | null;
-  fields: FieldConfig[];
+  location: Record<string, unknown> | null;
   onSubmit: (data: Record<string, unknown>) => Promise<void>;
   onClose: () => void;
   title: string;
   subtitle?: string;
-  width?: 'default' | 'wide';
 }
 
-export function EntityModal({
+/* ── Local inline field renderer ─────────────────────────────────── */
+
+interface FieldRendererProps {
+  field: LocationFieldConfig;
+  value: unknown;
+  onChange: (key: string, value: unknown) => void;
+  error?: string;
+}
+
+function FieldRenderer({ field, value, onChange, error }: FieldRendererProps) {
+  const baseId = useId();
+  const inputId = `${baseId}-${field.key}`;
+  const errorId = `${baseId}-${field.key}-error`;
+
+  const baseInputClasses = 'w-full rounded-lg border px-3 py-2 text-sm transition-colors';
+  const baseStyle = {
+    borderColor: error ? 'var(--danger)' : 'var(--line)',
+    backgroundColor: 'var(--white)',
+    color: 'var(--ink)',
+  };
+
+  const labelEl = (
+    <label
+      htmlFor={inputId}
+      className="text-xs font-medium"
+      style={{ color: 'var(--ink-light)' }}
+    >
+      {field.label}
+      {'required' in field && field.required && (
+        <span className="text-red-500 ml-0.5">*</span>
+      )}
+    </label>
+  );
+
+  const errorEl = error ? (
+    <span className="text-xs" style={{ color: 'var(--danger)' }} id={errorId}>
+      {error}
+    </span>
+  ) : null;
+
+  const ariaDescribedBy = error ? errorId : undefined;
+
+  switch (field.type) {
+    case 'text':
+      return (
+        <div className="flex flex-col gap-1">
+          {labelEl}
+          <input
+            id={inputId}
+            type="text"
+            value={(value as string) ?? ''}
+            onChange={(e) => onChange(field.key, e.target.value)}
+            placeholder={field.placeholder}
+            disabled={field.disabled}
+            className={baseInputClasses}
+            style={baseStyle}
+            aria-describedby={ariaDescribedBy}
+          />
+          {errorEl}
+        </div>
+      );
+
+    case 'number':
+      return (
+        <div className="flex flex-col gap-1">
+          {labelEl}
+          <div className="flex items-center gap-2">
+            <input
+              id={inputId}
+              type="number"
+              value={(value as number) ?? ''}
+              onChange={(e) =>
+                onChange(field.key, e.target.value === '' ? '' : Number(e.target.value))
+              }
+              min={field.min}
+              max={field.max}
+              className={baseInputClasses}
+              style={{ ...baseStyle, width: '120px' }}
+              aria-describedby={ariaDescribedBy}
+            />
+            {field.suffix && (
+              <span className="text-xs" style={{ color: 'var(--ink-light)' }}>
+                {field.suffix}
+              </span>
+            )}
+          </div>
+          {errorEl}
+        </div>
+      );
+
+    case 'textarea':
+      return (
+        <div className="flex flex-col gap-1">
+          {labelEl}
+          <textarea
+            id={inputId}
+            value={(value as string) ?? ''}
+            onChange={(e) => onChange(field.key, e.target.value)}
+            placeholder={field.placeholder}
+            rows={field.rows ?? 3}
+            className={baseInputClasses}
+            style={{ ...baseStyle, resize: 'vertical' }}
+            aria-describedby={ariaDescribedBy}
+          />
+          {errorEl}
+        </div>
+      );
+
+    default:
+      return null;
+  }
+}
+
+/* ── LocationModal ───────────────────────────────────────────────── */
+
+export function LocationModal({
   mode,
-  entity,
-  fields,
+  location,
   onSubmit,
   onClose,
   title,
   subtitle,
-  width = 'default',
-}: EntityModalProps) {
+}: LocationModalProps) {
   const [formData, setFormData] = useState<Record<string, unknown>>(() => {
-    if (!entity) return {};
+    if (!location) return {};
     const initial: Record<string, unknown> = {};
-    fields.forEach((f) => {
+    LOCATION_FIELDS.forEach((f) => {
       initial[f.key] =
-        entity[f.key] ?? (f.type === 'number' ? 0 : f.type === 'nested-list' ? [] : '');
+        location[f.key] ?? (f.type === 'number' ? 0 : '');
     });
     return initial;
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isDirty, setIsDirty] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-
-  const maxW = width === 'wide' ? 'max-w-[800px]' : 'max-w-[600px]';
 
   const handleChange = useCallback((key: string, value: unknown) => {
     setFormData((prev) => ({ ...prev, [key]: value }));
@@ -55,7 +163,7 @@ export function EntityModal({
 
   const validate = useCallback((): boolean => {
     const newErrors: Record<string, string> = {};
-    fields.forEach((field) => {
+    LOCATION_FIELDS.forEach((field) => {
       if ('required' in field && field.required) {
         const val = formData[field.key];
         if (val === undefined || val === null || val === '') {
@@ -77,16 +185,9 @@ export function EntityModal({
         }
       }
     });
-    // Cross-field: min_age <= max_age
-    const minAge = formData['min_age'] as number | undefined;
-    const maxAge = formData['max_age'] as number | undefined;
-    if (minAge !== undefined && maxAge !== undefined && minAge > maxAge) {
-      newErrors['min_age'] = 'Не может быть больше возраста до';
-      newErrors['max_age'] = 'Не может быть меньше возраста от';
-    }
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
-  }, [fields, formData]);
+  }, [formData]);
 
   const handleSubmit = async () => {
     if (!validate()) return;
@@ -123,7 +224,7 @@ export function EntityModal({
         onClick={handleClose}
       />
       <div
-        className={`relative bg-white rounded-xl shadow-2xl w-full ${maxW} mx-4 flex flex-col overflow-hidden`}
+        className="relative bg-white rounded-xl shadow-2xl w-full max-w-[600px] mx-4 flex flex-col overflow-hidden"
         style={{ maxHeight: '85vh' }}
       >
         {/* Header */}
@@ -150,27 +251,15 @@ export function EntityModal({
 
         {/* Scrollable body */}
         <div className="flex-1 overflow-y-auto px-6 pb-4 space-y-4">
-          {fields.map((field) => {
-            if (field.type === 'nested-list') {
-              return (
-                <NestedList
-                  key={field.key}
-                  field={field as NestedListFieldConfig}
-                  items={(formData[field.key] as Record<string, unknown>[]) ?? []}
-                  onChange={(items) => handleChange(field.key, items)}
-                />
-              );
-            }
-            return (
-              <FieldRenderer
-                key={field.key}
-                field={field}
-                value={formData[field.key]}
-                onChange={handleChange}
-                error={errors[field.key]}
-              />
-            );
-          })}
+          {LOCATION_FIELDS.map((field) => (
+            <FieldRenderer
+              key={field.key}
+              field={field}
+              value={formData[field.key]}
+              onChange={handleChange}
+              error={errors[field.key]}
+            />
+          ))}
         </div>
 
         {/* Footer */}

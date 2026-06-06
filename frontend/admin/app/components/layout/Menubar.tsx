@@ -81,6 +81,25 @@ function MapPinIcon({ className }: { className?: string }) {
   );
 }
 
+function TagIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M20.59 13.41l-7.17 7.17a2 2 0 01-2.83 0L2 12V2h10l8.59 8.59a2 2 0 010 2.82z" />
+      <line x1="7" y1="7" x2="7.01" y2="7" />
+    </svg>
+  );
+}
+
+function ImageIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+      <circle cx="8.5" cy="8.5" r="1.5" />
+      <polyline points="21 15 16 10 5 21" />
+    </svg>
+  );
+}
+
 function SunIcon({ className }: { className?: string }) {
   return (
     <svg className={className} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -112,12 +131,14 @@ const NAV_ITEMS = [
   { label: 'Записи', icon: 'clipboard', href: '/records' },
   { label: 'Клиенты', icon: 'users', href: '/clients' },
   { label: 'Чат', icon: 'chat', href: '/chat' },
-  { label: 'Мастера', icon: 'palette', href: '#' },
+  { label: 'Мастера', icon: 'palette', href: '/masters' },
 ] as const;
 
 const SETTINGS_ITEMS = [
   { label: 'Услуги', icon: 'package', href: '/services' },
   { label: 'Локации', icon: 'mapPin', href: '/locations' },
+  { label: 'Теги', icon: 'tag', href: '/tags' },
+  { label: 'Фото', icon: 'image', href: '/photos' },
 ] as const;
 
 const ICON_MAP: Record<string, React.FC<{ className?: string }>> = {
@@ -128,6 +149,8 @@ const ICON_MAP: Record<string, React.FC<{ className?: string }>> = {
   chat: ChatIcon,
   package: PackageIcon,
   mapPin: MapPinIcon,
+  tag: TagIcon,
+  image: ImageIcon,
 };
 
 // ─── MiniCalendar ─────────────────────────────────────────────────────────

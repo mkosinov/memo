@@ -462,4 +462,63 @@ describe('LocationsTable', () => {
     expect(deleteMutateAsync).not.toHaveBeenCalled();
     vi.restoreAllMocks();
   });
+
+  // ─── Column picker ──────────────────────────────────────────────────────
+
+  it('renders column picker gear button', () => {
+    setupQuery(TEST_LOCATIONS);
+    render(<LocationsTable />);
+    expect(screen.getByLabelText('Настроить колонки')).toBeInTheDocument();
+  });
+
+  it('shows default visible columns by default', () => {
+    setupQuery(TEST_LOCATIONS);
+    render(<LocationsTable />);
+    // Default visible: name, capacity, address, location_hint
+    // Column headers include sort icon ↕, so use partial matching
+    expect(screen.getByText(/Название/)).toBeInTheDocument();
+    expect(screen.getByText(/Вместимость/)).toBeInTheDocument();
+    expect(screen.getByText(/Адрес/)).toBeInTheDocument();
+    expect(screen.getByText(/Подсказка/)).toBeInTheDocument();
+  });
+
+  it('hides non-default columns by default', () => {
+    setupQuery(TEST_LOCATIONS);
+    const { container } = render(<LocationsTable />);
+    // Check that column headers for hidden columns are NOT in the table header
+    const thead = container.querySelector('thead');
+    expect(thead?.textContent).not.toMatch(/Описание/);
+    expect(thead?.textContent).not.toMatch(/Статус/);
+    expect(thead?.textContent).not.toMatch(/Карта/);
+    expect(thead?.textContent).not.toMatch(/Создано/);
+  });
+
+  it('shows hidden column in table when loaded from localStorage', () => {
+    localStorage.setItem('locations-columns', JSON.stringify(['name', 'description']));
+    setupQuery(TEST_LOCATIONS);
+    render(<LocationsTable />);
+    // "Описание" should be visible as a column header (includes sort icon)
+    expect(screen.getByText(/Описание/)).toBeInTheDocument();
+    // "Вместимость" should NOT be visible (not in localStorage set)
+    const thead = document.querySelector('thead');
+    expect(thead?.textContent).not.toMatch(/Вместимость/);
+  });
+
+  it('toggles column visibility via ColumnPicker', () => {
+    setupQuery(TEST_LOCATIONS);
+    render(<LocationsTable />);
+
+    // Open picker
+    fireEvent.click(screen.getByLabelText('Настроить колонки'));
+
+    // Uncheck "Название" — it should disappear from table header
+    fireEvent.click(screen.getByLabelText('Название'));
+    const thead = document.querySelector('thead');
+    expect(thead?.textContent).not.toMatch(/Название/);
+
+    // Re-check "Название" — it should reappear in thead
+    fireEvent.click(screen.getByLabelText('Название'));
+    const theadAfter = document.querySelector('thead');
+    expect(theadAfter?.textContent).toMatch(/Название/);
+  });
 });

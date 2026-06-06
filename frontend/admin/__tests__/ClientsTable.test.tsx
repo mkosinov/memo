@@ -81,6 +81,7 @@ import { ClientsTable } from '../app/(main)/clients/components/ClientsTable';
 
 describe('ClientsTable', () => {
   beforeEach(() => {
+    localStorage.clear();
     mockContextValue = {
       clients: mockClientsWithStats,
       total: 2,
@@ -342,5 +343,49 @@ describe('ClientsTable', () => {
     render(<ClientsTable onClientClick={vi.fn()} />);
     const skeletons = document.querySelectorAll('.animate-pulse');
     expect(skeletons.length).toBe(10);
+  });
+
+  // ─── Column picker ──────────────────────────────────────────────────────
+
+  it('renders column picker gear button', () => {
+    render(<ClientsTable onClientClick={vi.fn()} />);
+    expect(screen.getByLabelText('Настроить колонки')).toBeInTheDocument();
+  });
+
+  it('shows all default columns', () => {
+    render(<ClientsTable onClientClick={vi.fn()} />);
+    expect(screen.getByText('Имя')).toBeInTheDocument();
+    expect(screen.getByText('Телефон')).toBeInTheDocument();
+    expect(screen.getByText('Кол-во визитов')).toBeInTheDocument();
+    expect(screen.getByText('Последний визит')).toBeInTheDocument();
+    expect(screen.getByText('Сумма оплат')).toBeInTheDocument();
+  });
+
+  it('hides column when unchecked via ColumnPicker', () => {
+    render(<ClientsTable onClientClick={vi.fn()} />);
+
+    // Open picker
+    fireEvent.click(screen.getByLabelText('Настроить колонки'));
+
+    // Uncheck "Телефон"
+    fireEvent.click(screen.getByLabelText('Телефон'));
+
+    // Column header should be gone from the table
+    const thead = document.querySelector('thead');
+    expect(thead?.textContent).not.toContain('Телефон');
+
+    // But data should still be in the row (hidden via visibility check, but the td is gone)
+    // Since we removed the th, we need to check that the td for phone is also gone
+    expect(screen.queryByText('+7 (900) 123-45-67')).not.toBeInTheDocument();
+  });
+
+  it('persists column visibility to localStorage', () => {
+    render(<ClientsTable onClientClick={vi.fn()} />);
+    fireEvent.click(screen.getByLabelText('Настроить колонки'));
+    fireEvent.click(screen.getByLabelText('Телефон'));
+
+    const stored = JSON.parse(localStorage.getItem('clients-columns')!);
+    expect(stored).not.toContain('phone');
+    expect(stored).toContain('name');
   });
 });

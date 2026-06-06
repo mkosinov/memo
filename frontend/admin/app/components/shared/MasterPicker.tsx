@@ -2,18 +2,27 @@
 
 import { CustomSelect, type CustomSelectOption } from './CustomSelect';
 
-interface Master {
+/** Accepts both raw API MasterResponse ({ first_name, last_name }) and domain Artist ({ name }). */
+interface MasterBase {
   id: string;
-  first_name: string;
-  last_name: string;
   color: string;
+  name?: string;
+  first_name?: string;
+  last_name?: string;
 }
 
 interface MasterPickerProps {
-  masters: Master[];
+  masters: MasterBase[];
   value: string;
   onChange: (value: string) => void;
   className?: string;
+}
+
+function getMasterLabel(m: MasterBase): string {
+  if (m.first_name != null || m.last_name != null) {
+    return `${m.first_name ?? ''} ${m.last_name ?? ''}`.trim();
+  }
+  return m.name ?? '';
 }
 
 export function MasterPicker({ masters, value, onChange, className }: MasterPickerProps) {
@@ -21,7 +30,7 @@ export function MasterPicker({ masters, value, onChange, className }: MasterPick
     { value: '', label: 'Не выбран' },
     ...(Array.isArray(masters) ? masters.map(m => ({
       value: m.id,
-      label: `${m.first_name} ${m.last_name}`,
+      label: getMasterLabel(m),
       color: m.color,
     })) : []),
   ];

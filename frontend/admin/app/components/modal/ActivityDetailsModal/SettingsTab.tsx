@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { useSchedule } from '@/contexts/ScheduleContext';
+import { MasterPicker } from '@/app/components/shared/MasterPicker';
 import type { Activity, Service } from '@memo/domain';
 import { decimalToHHMM, hhmmToDecimal } from '@/lib/utils';
 
@@ -242,36 +243,15 @@ export function SettingsTab({ activity, onUpdate }: SettingsTabProps) {
           <label className="text-xs font-medium text-ink-mid block mb-1" htmlFor="settings-master">
             Мастер
           </label>
-          <div className="relative">
-            <select
-              id="settings-master"
-              className={`${inputClass} appearance-none pr-8`}
-              style={inputStyle}
-              value={masterId}
-              onChange={(e) => {
-                setMasterId(e.target.value);
-                onUpdate({ masterId: e.target.value });
-              }}
-              data-testid="select-master"
-            >
-              <option value="">Выберите</option>
-              {artists.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.name}
-                </option>
-              ))}
-            </select>
-            {/* Color dot for selected master */}
-            {masterId && (() => {
-              const m = artists.find((a) => a.id === masterId);
-              return m?.color ? (
-                <span
-                  className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 rounded-sm pointer-events-none"
-                  style={{ backgroundColor: m.color }}
-                />
-              ) : null;
-            })()}
-          </div>
+          <MasterPicker
+            masters={artists}
+            value={masterId}
+            onChange={(value) => {
+              setMasterId(value);
+              onUpdate({ masterId: value });
+            }}
+            className={`${inputClass} appearance-none`}
+          />
         </div>
         <div className="flex-1">
           <label className="text-xs font-medium text-ink-mid block mb-1" htmlFor="settings-location">

@@ -8,6 +8,7 @@ import {
   getPayments, patchActivity, createVisitor, deleteVisitor,
 } from '@memo/api-client';
 import { CustomSelect, type CustomSelectOption } from '@/app/components/shared/CustomSelect';
+import { MasterPicker } from '@/app/components/shared/MasterPicker';
 
 interface ClientRecordTabProps {
   recordId: string;
@@ -390,14 +391,6 @@ export function ClientRecordTab({ recordId, clientId, onClose }: ClientRecordTab
     icon: <StatusIcon status={key} />,
   }));
 
-  const masterOptions: CustomSelectOption[] = [
-    { value: '', label: 'Не выбран' },
-    ...(Array.isArray(masters) ? masters.map(m => ({
-      value: m.id,
-      label: `${m.first_name} ${m.last_name}`,
-    })) : []),
-  ];
-
   const locationOptions: CustomSelectOption[] = [
     { value: '', label: 'Не выбрана' },
     ...(Array.isArray(locations) ? locations.map(l => ({
@@ -487,9 +480,9 @@ export function ClientRecordTab({ recordId, clientId, onClose }: ClientRecordTab
         </div>
         <div>
           <label className="text-xs font-medium text-ink-mid block mb-1">Мастер</label>
-          <CustomSelect
+          <MasterPicker
+            masters={masters}
             value={masterId}
-            options={masterOptions}
             onChange={(v) => { setMasterId(v); markChanged(); }}
             className={`${inputClass} appearance-none`}
           />

@@ -107,7 +107,7 @@ export function ActivityDetailsModal({ isOpen, onClose, activity, mode }: Activi
 
   // New booking submit handler — actually creates records via API
   const handleNewBookingSubmit = useCallback(
-    async (data: { phone: string; name: string; visitors: Array<{ name: string; age?: string; tariffId: string }>; notify: boolean; channel: string }) => {
+    async (data: { phone: string; name: string; visitors: Array<{ name: string; age?: string; tariffId: string }>; notify: boolean; channel: string; seats: number }) => {
       try {
         // 1. Create or find client
         let clientId: string;
@@ -144,6 +144,7 @@ export function ActivityDetailsModal({ isOpen, onClose, activity, mode }: Activi
         await createRecord({
           activity_id: activity.id,
           client_id: clientId,
+          seats: data.seats,
           visits: visitIds.map((vid) => ({
             visitor_id: vid,
             price: tariff?.price ?? 0,
@@ -169,6 +170,7 @@ export function ActivityDetailsModal({ isOpen, onClose, activity, mode }: Activi
         showToast('Запись удалена');
         setActiveTab('settings');
         queryClient.invalidateQueries({ queryKey: ['records'] });
+        queryClient.invalidateQueries({ queryKey: ['activities'] });
       } catch {
         showToast('Ошибка удаления');
       }

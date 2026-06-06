@@ -356,7 +356,7 @@ export function ServicesTable() {
               className="px-4 py-2 text-sm font-medium rounded-lg text-white transition-colors"
               style={{ backgroundColor: 'var(--brand)' }}
             >
-              Добавить услугу
+              + Добавить услугу
             </button>
             <ColumnPicker
               columns={ALL_COLUMNS.map((c) => ({ key: c.key, label: c.label }))}

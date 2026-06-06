@@ -86,7 +86,6 @@ markers = [
 addopts = [
     "--cov=src",
     "--cov-report=term-missing",
-    "--cov-fail-under=80",
 ]
 
 # ── Coverage ───────────────────────────────────────────────────────

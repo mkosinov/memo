@@ -36,7 +36,7 @@ export default defineConfig({
 
   // Auto-start admin Next.js dev server for E2E tests
   webServer: {
-    command: 'npx next dev -p 3001',
+    command: 'pnpm exec next dev -p 3001',
     url: 'http://localhost:3001',
     reuseExistingServer: !process.env.CI,
     cwd: '.',

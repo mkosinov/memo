@@ -7,17 +7,20 @@ import { PhotoModal } from '@/app/(main)/photos/components/PhotoModal';
 const mockSearchVisitors = vi.fn();
 const mockSearchServices = vi.fn();
 const mockSearchActivities = vi.fn();
+const mockSearchTags = vi.fn();
 
 vi.mock('@memo/api-client', () => ({
   searchVisitors: (...args: unknown[]) => mockSearchVisitors(...args),
   searchServices: (...args: unknown[]) => mockSearchServices(...args),
   searchActivities: (...args: unknown[]) => mockSearchActivities(...args),
+  searchTags: (...args: unknown[]) => mockSearchTags(...args),
 }));
 
 beforeEach(() => {
   mockSearchVisitors.mockReset();
   mockSearchServices.mockReset();
   mockSearchActivities.mockReset();
+  mockSearchTags.mockReset();
   vi.useFakeTimers({ shouldAdvanceTime: true });
 });
 

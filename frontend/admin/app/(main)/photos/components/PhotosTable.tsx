@@ -155,6 +155,10 @@ export function PhotosTable() {
     if (data.is_public !== null && data.is_public !== undefined) {
       payload.is_public = Boolean(data.is_public);
     }
+    if (data.tags !== null && data.tags !== undefined) {
+      const tags = (data.tags as Array<{ id: string; tag: string }>) || [];
+      payload.tag_ids = tags.map(t => t.id);
+    }
     await updateMutation.mutateAsync({
       id: editPhoto.id,
       data: payload,
@@ -166,12 +170,14 @@ export function PhotosTable() {
   // ─── Create ────────────────────────────────────────────────────────
 
   const handleCreateSubmit = async (data: Record<string, unknown>) => {
+    const tags = (data.tags as Array<{ id: string; tag: string }>) || [];
     await createMutation.mutateAsync({
       filename: String(data.filename ?? ''),
       visitor_id: String(data.visitor_id ?? ''),
       service_id: String(data.service_id ?? ''),
       activity_id: String(data.activity_id ?? ''),
       is_public: Boolean(data.is_public),
+      tag_ids: tags.map(t => t.id),
     });
     showToast('Фото создано');
   };

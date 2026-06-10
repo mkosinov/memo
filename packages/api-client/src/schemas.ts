@@ -61,6 +61,7 @@ export const PhotoResponseSchema = z.object({
   service_id: z.string().nullable(),
   activity_id: z.string().nullable(),
   is_public: z.boolean(),
+  tags: z.array(z.object({ id: z.string(), tag: z.string() })).default([]),
   created_at: z.string(),
   updated_at: z.string(),
   is_active: z.boolean(),
@@ -76,6 +77,7 @@ export const PhotoCreateSchema = z.object({
   service_id: z.string().optional().default(''),
   activity_id: z.string().optional().default(''),
   is_public: z.boolean().default(false),
+  tag_ids: z.array(z.string()).default([]),
 });
 export type PhotoCreate = z.infer<typeof PhotoCreateSchema>;
 
@@ -429,3 +431,9 @@ export const ActivitySearchResultSchema = z.object({
   service_title: z.string(),
 });
 export type ActivitySearchResult = z.infer<typeof ActivitySearchResultSchema>;
+
+export const TagSearchResultSchema = z.object({
+  id: z.string(),
+  tag: z.string(),
+});
+export type TagSearchResult = z.infer<typeof TagSearchResultSchema>;

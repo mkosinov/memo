@@ -58,6 +58,8 @@ import {
   type ServiceSearchResult,
   ActivitySearchResultSchema,
   type ActivitySearchResult,
+  TagSearchResultSchema,
+  type TagSearchResult,
 } from './schemas';
 
 // ─── Masters ───────────────────────────────────────────────────────────────
@@ -454,4 +456,8 @@ export async function searchActivities(q: string, serviceId?: string): Promise<A
   const params = new URLSearchParams({ q });
   if (serviceId) params.set('service_id', serviceId);
   return api(`/api/v1/search/activities?${params.toString()}`, z.array(ActivitySearchResultSchema));
+}
+
+export async function searchTags(q: string): Promise<TagSearchResult[]> {
+  return api(`/api/v1/search/tags?q=${encodeURIComponent(q)}`, z.array(TagSearchResultSchema));
 }

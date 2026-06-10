@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback, useId } from 'react';
 import { PHOTO_FIELDS, type PhotoFieldConfig } from './photoFields';
 import SearchableSelect from '@/app/components/shared/SearchableSelect';
-import { searchVisitors, searchServices, searchActivities } from '@memo/api-client';
+import { searchVisitors, searchServices, searchActivities, searchTags } from '@memo/api-client';
 
 export interface PhotoModalProps {
   mode: 'create' | 'edit';
@@ -43,6 +43,53 @@ function FieldRenderer({ field, value, onChange, error, formData }: FieldRendere
   ) : null;
 
   const ariaDescribedBy = error ? errorId : undefined;
+
+  if (field.type === 'tags') {
+    // Tags field - multi-select with search
+    const selectedTags = (value as Array<{ id: string; tag: string }>) || [];
+    const selectedTagIds = selectedTags.map(t => t.id);
+    
+    return (
+      <div className="flex flex-col gap-1">
+        <label className="text-xs font-medium" style={{ color: 'var(--ink-light)' }}>
+          {field.label}
+        </label>
+        <div className="flex flex-wrap gap-2 mb-2">
+          {selectedTags.map(tag => (
+            <span
+              key={tag.id}
+              className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-800"
+            >
+              {tag.tag}
+              <button
+                type="button"
+                onClick={() => {
+                  const newTags = selectedTags.filter(t => t.id !== tag.id);
+                  onChange(field.key, newTags);
+                }}
+                className="hover:text-blue-600"
+              >
+                ×
+              </button>
+            </span>
+          ))}
+        </div>
+        <SearchableSelect
+          value={null}
+          onChange={() => {}}
+          onSelectItem={(item) => {
+            if (!selectedTagIds.includes(item.id as string)) {
+              onChange(field.key, [...selectedTags, { id: item.id, tag: item.tag }]);
+            }
+          }}
+          onSearch={searchTags}
+          label=""
+          displayField="tag"
+          placeholder={field.placeholder || 'Добавить тег...'}
+        />
+      </div>
+    );
+  }
 
   if (field.type === 'searchable') {
     // Map field keys to search functions
@@ -135,7 +182,11 @@ export function PhotoModal({
     if (!photo) return {};
     const initial: Record<string, unknown> = {};
     PHOTO_FIELDS.forEach((f) => {
-      initial[f.key] = photo[f.key] ?? '';
+      if (f.type === 'tags') {
+        initial[f.key] = photo.tags || [];
+      } else {
+        initial[f.key] = photo[f.key] ?? '';
+      }
     });
     initial.is_public = photo.is_public ?? false;
     return initial;

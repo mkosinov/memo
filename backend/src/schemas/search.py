@@ -22,3 +22,9 @@ class ActivitySearchResult(BaseModel):
     start: str  # ISO format
     service_id: str
     service_title: str
+
+
+class TagSearchResult(BaseModel):
+    """Search result for tag lookup."""
+    id: str
+    tag: str

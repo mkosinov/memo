@@ -1,10 +1,17 @@
 """Photo ORM model and photo_tags join table."""
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from sqlalchemy import Boolean, Column, ForeignKey, String, Table, Text
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.db.base import Base
 from src.models.abstract import AbstractModel
+
+if TYPE_CHECKING:
+    from src.models.tag import Tag
 
 
 class Photo(AbstractModel):
@@ -21,6 +28,10 @@ class Photo(AbstractModel):
         String(36), ForeignKey("activities.id"), nullable=True,
     )
     is_public: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    tags: Mapped[list["Tag"]] = relationship(
+        "Tag", secondary="photo_tags", back_populates="photos"
+    )
 
 
 photo_tags = Table(

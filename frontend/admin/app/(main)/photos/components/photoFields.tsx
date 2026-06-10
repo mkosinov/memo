@@ -18,7 +18,14 @@ interface SearchableFieldConfig {
   required?: boolean;
 }
 
-export type PhotoFieldConfig = TextFieldConfig | SearchableFieldConfig;
+interface TagsFieldConfig {
+  type: 'tags';
+  key: string;
+  label: string;
+  placeholder?: string;
+}
+
+export type PhotoFieldConfig = TextFieldConfig | SearchableFieldConfig | TagsFieldConfig;
 
 export const PHOTO_FIELDS: PhotoFieldConfig[] = [
   { type: 'text', key: 'filename', label: 'Имя файла', required: true, placeholder: 'photo-001.jpg' },
@@ -44,5 +51,11 @@ export const PHOTO_FIELDS: PhotoFieldConfig[] = [
     displayField: 'service_title',
     subtitleField: 'start',
     placeholder: 'Введите услугу или дату...',
+  },
+  {
+    type: 'tags',
+    key: 'tag_ids',
+    label: 'Теги',
+    placeholder: 'Введите название тега...',
   },
 ];

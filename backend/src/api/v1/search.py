@@ -6,10 +6,12 @@ from sqlalchemy import select
 from src.db import SessionDep
 from src.models.activity import Activity
 from src.models.service import Service
+from src.models.tag import Tag
 from src.models.visitor import Visitor
 from src.schemas.search import (
     ActivitySearchResult,
     ServiceSearchResult,
+    TagSearchResult,
     VisitorSearchResult,
 )
 
@@ -79,4 +81,22 @@ async def search_activities(
             service_title=row.service_title,
         )
         for row in result.all()
+    ]
+
+
+@router.get("/tags", response_model=list[TagSearchResult])
+async def search_tags(
+    q: str = Query(min_length=1, max_length=100),
+    session: SessionDep = None,
+) -> list[TagSearchResult]:
+    """Search tags by name (case-insensitive substring)."""
+    pattern = f"%{q}%"
+    result = await session.execute(
+        select(Tag)
+        .where(Tag.tag.ilike(pattern))
+        .limit(10)
+    )
+    return [
+        TagSearchResult(id=t.id, tag=t.tag)
+        for t in result.scalars().all()
     ]

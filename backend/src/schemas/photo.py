@@ -12,6 +12,7 @@ class PhotoCreate(BaseModel):
     service_id: str | None = None
     activity_id: str | None = None
     is_public: bool = False
+    tag_ids: list[str] = []
 
 
 class PhotoUpdate(BaseModel):
@@ -21,6 +22,13 @@ class PhotoUpdate(BaseModel):
     service_id: str | None = None
     activity_id: str | None = None
     is_public: bool | None = None
+    tag_ids: list[str] | None = None
+
+
+class PhotoTagResponse(BaseModel):
+    """Tag reference in photo response."""
+    id: str
+    tag: str
 
 
 class PhotoResponse(BaseModel):
@@ -34,6 +42,7 @@ class PhotoResponse(BaseModel):
     service_id: str | None = None
     activity_id: str | None = None
     is_public: bool = False
+    tags: list[PhotoTagResponse] = []
     created_at: datetime
     updated_at: datetime
     is_active: bool

@@ -21,9 +21,10 @@ interface FieldRendererProps {
   value: unknown;
   onChange: (key: string, value: unknown) => void;
   error?: string;
+  formData?: Record<string, unknown>;
 }
 
-function FieldRenderer({ field, value, onChange, error }: FieldRendererProps) {
+function FieldRenderer({ field, value, onChange, error, formData }: FieldRendererProps) {
   const baseId = useId();
   const inputId = `${baseId}-${field.key}`;
   const errorId = `${baseId}-${field.key}-error`;
@@ -45,11 +46,25 @@ function FieldRenderer({ field, value, onChange, error }: FieldRendererProps) {
 
   if (field.type === 'searchable') {
     // Map field keys to search functions
-    const searchFn = field.key === 'visitor_id' 
-      ? searchVisitors 
-      : field.key === 'service_id' 
-        ? searchServices 
-        : searchActivities;
+    let searchFn;
+    let displayField = field.displayField;
+    let subtitleField = field.subtitleField;
+    
+    if (field.key === 'visitor_id') {
+      searchFn = searchVisitors;
+    } else if (field.key === 'service_id') {
+      searchFn = searchServices;
+    } else {
+      // For activity_id, pass the selected service_id if available
+      const selectedServiceId = formData?.service_id as string | null;
+      searchFn = (q: string) => searchActivities(q, selectedServiceId || undefined);
+      
+      // If service is already selected, show only datetime (not service_title)
+      if (selectedServiceId) {
+        displayField = 'start';
+        subtitleField = undefined;
+      }
+    }
 
     return (
       <div className="flex flex-col gap-1">
@@ -58,8 +73,8 @@ function FieldRenderer({ field, value, onChange, error }: FieldRendererProps) {
           onChange={(uuid) => onChange(field.key, uuid)}
           onSearch={searchFn}
           label={field.label}
-          displayField={field.displayField}
-          subtitleField={field.subtitleField}
+          displayField={displayField}
+          subtitleField={subtitleField}
           placeholder={field.placeholder}
           required={field.required}
         />
@@ -227,6 +242,7 @@ export function PhotoModal({
               value={formData[field.key]}
               onChange={handleChange}
               error={errors[field.key]}
+              formData={formData}
             />
           ))}
 

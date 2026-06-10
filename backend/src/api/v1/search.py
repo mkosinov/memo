@@ -55,19 +55,22 @@ async def search_services(
 @router.get("/activities", response_model=list[ActivitySearchResult])
 async def search_activities(
     q: str = Query(min_length=1, max_length=100),
+    service_id: str | None = Query(None),
     session: SessionDep = None,
 ) -> list[ActivitySearchResult]:
     """Search activities by service title (case-insensitive substring)."""
     pattern = f"%{q}%"
-    result = await session.execute(
+    stmt = (
         select(Activity.id, Activity.start, Service.title.label("service_title"))
         .join(Service, Activity.service_id == Service.id)
         .where(
             Service.title.ilike(pattern),
             Activity.is_active == True,  # noqa: E712
         )
-        .limit(10)
     )
+    if service_id:
+        stmt = stmt.where(Activity.service_id == service_id)
+    result = await session.execute(stmt.limit(10))
     return [
         ActivitySearchResult(
             id=row.id,

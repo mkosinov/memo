@@ -450,6 +450,8 @@ export async function searchServices(q: string): Promise<ServiceSearchResult[]> 
   return api(`/api/v1/search/services?q=${encodeURIComponent(q)}`, z.array(ServiceSearchResultSchema));
 }
 
-export async function searchActivities(q: string): Promise<ActivitySearchResult[]> {
-  return api(`/api/v1/search/activities?q=${encodeURIComponent(q)}`, z.array(ActivitySearchResultSchema));
+export async function searchActivities(q: string, serviceId?: string): Promise<ActivitySearchResult[]> {
+  const params = new URLSearchParams({ q });
+  if (serviceId) params.set('service_id', serviceId);
+  return api(`/api/v1/search/activities?${params.toString()}`, z.array(ActivitySearchResultSchema));
 }

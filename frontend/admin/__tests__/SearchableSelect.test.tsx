@@ -1,0 +1,286 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
+import SearchableSelect from '@/app/components/shared/SearchableSelect';
+
+// Mock fetch globally
+const mockFetch = vi.fn();
+vi.stubGlobal('fetch', mockFetch);
+
+beforeEach(() => {
+  mockFetch.mockReset();
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+});
+
+afterEach(() => {
+  vi.runOnlyPendingTimers();
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
+
+const defaultProps = {
+  value: null as string | null,
+  onChange: vi.fn(),
+  searchEndpoint: '/api/v1/search/visitors',
+  label: 'Посетитель',
+  placeholder: 'Введите имя...',
+  displayField: 'name',
+};
+
+function renderSearchableSelect(overrides: Record<string, unknown> = {}) {
+  return render(<SearchableSelect {...defaultProps} {...overrides} />);
+}
+
+describe('SearchableSelect', () => {
+  it('renders label and input', () => {
+    renderSearchableSelect();
+    expect(screen.getByLabelText(/Посетитель/)).toBeInTheDocument();
+    expect(screen.getByRole('textbox')).toBeInTheDocument();
+  });
+
+  it('shows placeholder text', () => {
+    renderSearchableSelect({ placeholder: 'Поиск...' });
+    expect(screen.getByPlaceholderText('Поиск...')).toBeInTheDocument();
+  });
+
+  it('shows required indicator when required prop is true', () => {
+    renderSearchableSelect({ required: true });
+    expect(screen.getByText('*')).toBeInTheDocument();
+  });
+
+  it('calls searchEndpoint on input change (debounced)', async () => {
+    mockFetch.mockResolvedValue({ json: () => Promise.resolve([]) });
+
+    renderSearchableSelect();
+    const input = screen.getByRole('textbox');
+
+    // Type a character
+    act(() => {
+      fireEvent.change(input, { target: { value: 'А' } });
+    });
+
+    // Before debounce fires — no fetch yet
+    expect(mockFetch).not.toHaveBeenCalled();
+
+    // Advance past debounce (300ms)
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith('/api/v1/search/visitors?q=%D0%90');
+    });
+  });
+
+  it('shows results in dropdown after search', async () => {
+    mockFetch.mockResolvedValue({
+      json: () =>
+        Promise.resolve([
+          { id: 'v1', name: 'Анна Иванова' },
+          { id: 'v2', name: 'Алексей Петров' },
+        ]),
+    });
+
+    renderSearchableSelect();
+    const input = screen.getByRole('textbox');
+
+    act(() => {
+      fireEvent.change(input, { target: { value: 'А' } });
+    });
+
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('Анна Иванова')).toBeInTheDocument();
+      expect(screen.getByText('Алексей Петров')).toBeInTheDocument();
+    });
+  });
+
+  it('calls onChange with selected item id', async () => {
+    const onChange = vi.fn();
+    mockFetch.mockResolvedValue({
+      json: () =>
+        Promise.resolve([
+          { id: 'v1', name: 'Анна Иванова' },
+          { id: 'v2', name: 'Алексей Петров' },
+        ]),
+    });
+
+    renderSearchableSelect({ onChange });
+    const input = screen.getByRole('textbox');
+
+    act(() => {
+      fireEvent.change(input, { target: { value: 'А' } });
+    });
+
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('Анна Иванова')).toBeInTheDocument();
+    });
+
+    // Find the dropdown item (li element) and click it
+    const dropdownItems = screen.getAllByText('Анна Иванова');
+    const dropdownItem = dropdownItems.find(
+      (el) => el.tagName === 'LI' || el.closest('li'),
+    );
+    fireEvent.click(dropdownItem!);
+    expect(onChange).toHaveBeenCalledWith('v1');
+  });
+
+  it('shows selected value after selection', async () => {
+    mockFetch.mockResolvedValue({
+      json: () =>
+        Promise.resolve([{ id: 'v1', name: 'Анна Иванова' }]),
+    });
+
+    renderSearchableSelect();
+    const input = screen.getByRole('textbox');
+
+    act(() => {
+      fireEvent.change(input, { target: { value: 'А' } });
+    });
+
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('Анна Иванова')).toBeInTheDocument();
+    });
+
+    // Click the dropdown item (li)
+    const dropdownItems = screen.getAllByText('Анна Иванова');
+    const dropdownItem = dropdownItems.find(
+      (el) => el.tagName === 'LI' || el.closest('li'),
+    );
+    fireEvent.click(dropdownItem!);
+
+    // After selection, input should show the selected label
+    expect(screen.getByDisplayValue('Анна Иванова')).toBeInTheDocument();
+  });
+
+  it('clear button resets value', async () => {
+    const onChange = vi.fn();
+    mockFetch.mockResolvedValue({
+      json: () =>
+        Promise.resolve([{ id: 'v1', name: 'Анна Иванова' }]),
+    });
+
+    renderSearchableSelect({ onChange });
+    const input = screen.getByRole('textbox');
+
+    // Select an item
+    act(() => {
+      fireEvent.change(input, { target: { value: 'А' } });
+    });
+
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('Анна Иванова')).toBeInTheDocument();
+    });
+
+    const dropdownItems = screen.getAllByText('Анна Иванова');
+    const dropdownItem = dropdownItems.find(
+      (el) => el.tagName === 'LI' || el.closest('li'),
+    );
+    fireEvent.click(dropdownItem!);
+    expect(onChange).toHaveBeenCalledWith('v1');
+
+    // Now clear
+    const clearButton = screen.getByRole('button', { name: /clear/i });
+    fireEvent.click(clearButton);
+
+    expect(onChange).toHaveBeenCalledWith(null);
+  });
+
+  it('shows "Ничего не найдено" for empty results', async () => {
+    mockFetch.mockResolvedValue({
+      json: () => Promise.resolve([]),
+    });
+
+    renderSearchableSelect();
+    const input = screen.getByRole('textbox');
+
+    act(() => {
+      fireEvent.change(input, { target: { value: 'Несуществующий' } });
+    });
+
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('Ничего не найдено')).toBeInTheDocument();
+    });
+  });
+
+  it('shows subtitle when subtitleField is provided', async () => {
+    mockFetch.mockResolvedValue({
+      json: () =>
+        Promise.resolve([
+          { id: 's1', name: 'Картина маслом', price: '3500' },
+        ]),
+    });
+
+    renderSearchableSelect({ subtitleField: 'price' });
+    const input = screen.getByRole('textbox');
+
+    act(() => {
+      fireEvent.change(input, { target: { value: 'К' } });
+    });
+
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(/Картина маслом/)).toBeInTheDocument();
+      expect(screen.getByText(/3500/)).toBeInTheDocument();
+    });
+  });
+
+  it('closes dropdown on outside click', async () => {
+    mockFetch.mockResolvedValue({
+      json: () =>
+        Promise.resolve([{ id: 'v1', name: 'Анна Иванова' }]),
+    });
+
+    render(
+      <div>
+        <SearchableSelect {...defaultProps} />
+        <div data-testid="outside">Outside</div>
+      </div>,
+    );
+    const input = screen.getByRole('textbox');
+
+    act(() => {
+      fireEvent.change(input, { target: { value: 'А' } });
+    });
+
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('Анна Иванова')).toBeInTheDocument();
+    });
+
+    fireEvent.mouseDown(screen.getByTestId('outside'));
+
+    await waitFor(() => {
+      expect(screen.queryByText('Анна Иванова')).not.toBeInTheDocument();
+    });
+  });
+
+  it('does not show dropdown when query is empty', () => {
+    renderSearchableSelect();
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+  });
+});

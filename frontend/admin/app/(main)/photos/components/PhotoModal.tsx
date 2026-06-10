@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useCallback, useId } from 'react';
 import { PHOTO_FIELDS, type PhotoFieldConfig } from './photoFields';
+import SearchableSelect from '@/app/components/shared/SearchableSelect';
 
 export interface PhotoModalProps {
   mode: 'create' | 'edit';
@@ -33,6 +34,32 @@ function FieldRenderer({ field, value, onChange, error }: FieldRendererProps) {
     color: 'var(--ink)',
   };
 
+  const errorEl = error ? (
+    <span className="text-xs" style={{ color: 'var(--danger)' }} id={errorId}>
+      {error}
+    </span>
+  ) : null;
+
+  const ariaDescribedBy = error ? errorId : undefined;
+
+  if (field.type === 'searchable') {
+    return (
+      <div className="flex flex-col gap-1">
+        <SearchableSelect
+          value={(value as string) ?? null}
+          onChange={(uuid) => onChange(field.key, uuid)}
+          searchEndpoint={field.searchEndpoint}
+          label={field.label}
+          displayField={field.displayField}
+          subtitleField={field.subtitleField}
+          placeholder={field.placeholder}
+          required={field.required}
+        />
+        {errorEl}
+      </div>
+    );
+  }
+
   const labelEl = (
     <label
       htmlFor={inputId}
@@ -43,14 +70,6 @@ function FieldRenderer({ field, value, onChange, error }: FieldRendererProps) {
       {field.required && <span className="text-red-500 ml-0.5">*</span>}
     </label>
   );
-
-  const errorEl = error ? (
-    <span className="text-xs" style={{ color: 'var(--danger)' }} id={errorId}>
-      {error}
-    </span>
-  ) : null;
-
-  const ariaDescribedBy = error ? errorId : undefined;
 
   return (
     <div className="flex flex-col gap-1">

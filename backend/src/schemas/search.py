@@ -20,4 +20,5 @@ class ActivitySearchResult(BaseModel):
     """Search result for activity lookup."""
     id: str
     start: str  # ISO format
+    service_id: str
     service_title: str

@@ -7,6 +7,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 export interface SearchableSelectProps {
   value: string | null;
   onChange: (uuid: string | null) => void;
+  onSelectItem?: (item: SearchItem) => void;
   onSearch: (query: string) => Promise<{ id: string; [key: string]: string | number | null | undefined }[]>;
   label: string;
   placeholder?: string;
@@ -62,6 +63,7 @@ function getDisplayText(
 export default function SearchableSelect({
   value,
   onChange,
+  onSelectItem,
   onSearch,
   label,
   placeholder = 'Введите для поиска...',
@@ -128,8 +130,9 @@ export default function SearchableSelect({
       setQuery('');
       setIsOpen(false);
       onChange(item.id);
+      onSelectItem?.(item);
     },
-    [displayField, subtitleField, onChange],
+    [displayField, subtitleField, onChange, onSelectItem],
   );
 
   const handleClear = useCallback(() => {

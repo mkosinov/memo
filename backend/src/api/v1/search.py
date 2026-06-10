@@ -75,6 +75,7 @@ async def search_activities(
         ActivitySearchResult(
             id=row.id,
             start=row.start.strftime("%H:%M %d.%m.%Y"),
+            service_id=row.service_id,
             service_title=row.service_title,
         )
         for row in result.all()

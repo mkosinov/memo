@@ -49,6 +49,7 @@ function FieldRenderer({ field, value, onChange, error, formData }: FieldRendere
     let searchFn;
     let displayField = field.displayField;
     let subtitleField = field.subtitleField;
+    let onSelectItem: ((item: Record<string, unknown>) => void) | undefined;
     
     if (field.key === 'visitor_id') {
       searchFn = searchVisitors;
@@ -64,6 +65,13 @@ function FieldRenderer({ field, value, onChange, error, formData }: FieldRendere
         displayField = 'start';
         subtitleField = undefined;
       }
+      
+      // Auto-fill service when activity is selected
+      onSelectItem = (item) => {
+        if (item.service_id) {
+          onChange('service_id', item.service_id);
+        }
+      };
     }
 
     return (
@@ -71,6 +79,7 @@ function FieldRenderer({ field, value, onChange, error, formData }: FieldRendere
         <SearchableSelect
           value={(value as string) ?? null}
           onChange={(uuid) => onChange(field.key, uuid)}
+          onSelectItem={onSelectItem}
           onSearch={searchFn}
           label={field.label}
           displayField={displayField}

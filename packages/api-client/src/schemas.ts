@@ -425,6 +425,7 @@ export type ServiceSearchResult = z.infer<typeof ServiceSearchResultSchema>;
 export const ActivitySearchResultSchema = z.object({
   id: z.string(),
   start: z.string(),
+  service_id: z.string(),
   service_title: z.string(),
 });
 export type ActivitySearchResult = z.infer<typeof ActivitySearchResultSchema>;

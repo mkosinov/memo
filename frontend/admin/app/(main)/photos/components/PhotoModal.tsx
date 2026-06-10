@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useCallback, useId } from 'react';
 import { PHOTO_FIELDS, type PhotoFieldConfig } from './photoFields';
 import SearchableSelect from '@/app/components/shared/SearchableSelect';
+import { searchVisitors, searchServices, searchActivities } from '@memo/api-client';
 
 export interface PhotoModalProps {
   mode: 'create' | 'edit';
@@ -43,12 +44,19 @@ function FieldRenderer({ field, value, onChange, error }: FieldRendererProps) {
   const ariaDescribedBy = error ? errorId : undefined;
 
   if (field.type === 'searchable') {
+    // Map field keys to search functions
+    const searchFn = field.key === 'visitor_id' 
+      ? searchVisitors 
+      : field.key === 'service_id' 
+        ? searchServices 
+        : searchActivities;
+
     return (
       <div className="flex flex-col gap-1">
         <SearchableSelect
           value={(value as string) ?? null}
           onChange={(uuid) => onChange(field.key, uuid)}
-          searchEndpoint={field.searchEndpoint}
+          onSearch={searchFn}
           label={field.label}
           displayField={field.displayField}
           subtitleField={field.subtitleField}

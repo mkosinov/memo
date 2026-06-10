@@ -52,6 +52,12 @@ import {
   type MaterialResponse,
   type MaterialCreate,
   type MaterialUpdate,
+  VisitorSearchResultSchema,
+  type VisitorSearchResult,
+  ServiceSearchResultSchema,
+  type ServiceSearchResult,
+  ActivitySearchResultSchema,
+  type ActivitySearchResult,
 } from './schemas';
 
 // ─── Masters ───────────────────────────────────────────────────────────────
@@ -432,4 +438,18 @@ export async function updateMaterial(id: string, data: MaterialUpdate): Promise<
 
 export async function deleteMaterial(id: string): Promise<void> {
   await api(`/api/v1/materials/${id}`, z.any(), { method: 'DELETE' });
+}
+
+// ─── Search Endpoints ──────────────────────────────────────────────────
+
+export async function searchVisitors(q: string): Promise<VisitorSearchResult[]> {
+  return api(`/api/v1/search/visitors?q=${encodeURIComponent(q)}`, z.array(VisitorSearchResultSchema));
+}
+
+export async function searchServices(q: string): Promise<ServiceSearchResult[]> {
+  return api(`/api/v1/search/services?q=${encodeURIComponent(q)}`, z.array(ServiceSearchResultSchema));
+}
+
+export async function searchActivities(q: string): Promise<ActivitySearchResult[]> {
+  return api(`/api/v1/search/activities?q=${encodeURIComponent(q)}`, z.array(ActivitySearchResultSchema));
 }

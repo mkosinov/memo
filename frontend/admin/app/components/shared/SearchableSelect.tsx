@@ -7,7 +7,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 export interface SearchableSelectProps {
   value: string | null;
   onChange: (uuid: string | null) => void;
-  searchEndpoint: string;
+  onSearch: (query: string) => Promise<{ id: string; [key: string]: string | number | null | undefined }[]>;
   label: string;
   placeholder?: string;
   required?: boolean;
@@ -62,7 +62,7 @@ function getDisplayText(
 export default function SearchableSelect({
   value,
   onChange,
-  searchEndpoint,
+  onSearch,
   label,
   placeholder = 'Введите для поиска...',
   required = false,
@@ -97,8 +97,7 @@ export default function SearchableSelect({
       }
       setIsLoading(true);
       try {
-        const res = await fetch(`${searchEndpoint}?q=${encodeURIComponent(q)}`);
-        const data = await res.json();
+        const data = await onSearch(q);
         setResults(data);
         setIsOpen(true);
       } catch {
@@ -107,7 +106,7 @@ export default function SearchableSelect({
         setIsLoading(false);
       }
     },
-    [searchEndpoint],
+    [onSearch],
   );
 
   const handleInputChange = useCallback(

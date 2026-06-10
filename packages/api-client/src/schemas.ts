@@ -406,3 +406,25 @@ export type MaterialCreate = z.infer<typeof MaterialCreateSchema>;
 
 export const MaterialUpdateSchema = MaterialCreateSchema.partial();
 export type MaterialUpdate = z.infer<typeof MaterialUpdateSchema>;
+
+// ─── Search Result Schemas ──────────────────────────────────────────────
+
+export const VisitorSearchResultSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  age: z.number().nullable(),
+});
+export type VisitorSearchResult = z.infer<typeof VisitorSearchResultSchema>;
+
+export const ServiceSearchResultSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+});
+export type ServiceSearchResult = z.infer<typeof ServiceSearchResultSchema>;
+
+export const ActivitySearchResultSchema = z.object({
+  id: z.string(),
+  start: z.string(),
+  service_title: z.string(),
+});
+export type ActivitySearchResult = z.infer<typeof ActivitySearchResultSchema>;

@@ -12,7 +12,6 @@ interface SearchableFieldConfig {
   type: 'searchable';
   key: string;
   label: string;
-  searchEndpoint: string;
   displayField: string;
   subtitleField?: string;
   placeholder?: string;
@@ -27,7 +26,6 @@ export const PHOTO_FIELDS: PhotoFieldConfig[] = [
     type: 'searchable',
     key: 'visitor_id',
     label: 'Посетитель',
-    searchEndpoint: '/api/v1/search/visitors',
     displayField: 'name',
     subtitleField: 'age',
     placeholder: 'Введите имя...',
@@ -36,7 +34,6 @@ export const PHOTO_FIELDS: PhotoFieldConfig[] = [
     type: 'searchable',
     key: 'service_id',
     label: 'Услуга',
-    searchEndpoint: '/api/v1/search/services',
     displayField: 'title',
     placeholder: 'Введите название...',
   },
@@ -44,7 +41,6 @@ export const PHOTO_FIELDS: PhotoFieldConfig[] = [
     type: 'searchable',
     key: 'activity_id',
     label: 'Активность',
-    searchEndpoint: '/api/v1/search/activities',
     displayField: 'service_title',
     subtitleField: 'start',
     placeholder: 'Введите услугу или дату...',

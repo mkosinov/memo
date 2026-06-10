@@ -2,12 +2,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import SearchableSelect from '@/app/components/shared/SearchableSelect';
 
-// Mock fetch globally
-const mockFetch = vi.fn();
-vi.stubGlobal('fetch', mockFetch);
+// Mock search function
+const mockSearch = vi.fn();
 
 beforeEach(() => {
-  mockFetch.mockReset();
+  mockSearch.mockReset();
   vi.useFakeTimers({ shouldAdvanceTime: true });
 });
 
@@ -20,7 +19,7 @@ afterEach(() => {
 const defaultProps = {
   value: null as string | null,
   onChange: vi.fn(),
-  searchEndpoint: '/api/v1/search/visitors',
+  onSearch: mockSearch,
   label: 'Посетитель',
   placeholder: 'Введите имя...',
   displayField: 'name',
@@ -47,8 +46,8 @@ describe('SearchableSelect', () => {
     expect(screen.getByText('*')).toBeInTheDocument();
   });
 
-  it('calls searchEndpoint on input change (debounced)', async () => {
-    mockFetch.mockResolvedValue({ json: () => Promise.resolve([]) });
+  it('calls onSearch on input change (debounced)', async () => {
+    mockSearch.mockResolvedValue([]);
 
     renderSearchableSelect();
     const input = screen.getByRole('textbox');
@@ -58,8 +57,8 @@ describe('SearchableSelect', () => {
       fireEvent.change(input, { target: { value: 'А' } });
     });
 
-    // Before debounce fires — no fetch yet
-    expect(mockFetch).not.toHaveBeenCalled();
+    // Before debounce fires — no search yet
+    expect(mockSearch).not.toHaveBeenCalled();
 
     // Advance past debounce (300ms)
     act(() => {
@@ -67,18 +66,15 @@ describe('SearchableSelect', () => {
     });
 
     await waitFor(() => {
-      expect(mockFetch).toHaveBeenCalledWith('/api/v1/search/visitors?q=%D0%90');
+      expect(mockSearch).toHaveBeenCalledWith('А');
     });
   });
 
   it('shows results in dropdown after search', async () => {
-    mockFetch.mockResolvedValue({
-      json: () =>
-        Promise.resolve([
-          { id: 'v1', name: 'Анна Иванова' },
-          { id: 'v2', name: 'Алексей Петров' },
-        ]),
-    });
+    mockSearch.mockResolvedValue([
+      { id: 'v1', name: 'Анна Иванова' },
+      { id: 'v2', name: 'Алексей Петров' },
+    ]);
 
     renderSearchableSelect();
     const input = screen.getByRole('textbox');
@@ -99,13 +95,10 @@ describe('SearchableSelect', () => {
 
   it('calls onChange with selected item id', async () => {
     const onChange = vi.fn();
-    mockFetch.mockResolvedValue({
-      json: () =>
-        Promise.resolve([
-          { id: 'v1', name: 'Анна Иванова' },
-          { id: 'v2', name: 'Алексей Петров' },
-        ]),
-    });
+    mockSearch.mockResolvedValue([
+      { id: 'v1', name: 'Анна Иванова' },
+      { id: 'v2', name: 'Алексей Петров' },
+    ]);
 
     renderSearchableSelect({ onChange });
     const input = screen.getByRole('textbox');
@@ -132,10 +125,7 @@ describe('SearchableSelect', () => {
   });
 
   it('shows selected value after selection', async () => {
-    mockFetch.mockResolvedValue({
-      json: () =>
-        Promise.resolve([{ id: 'v1', name: 'Анна Иванова' }]),
-    });
+    mockSearch.mockResolvedValue([{ id: 'v1', name: 'Анна Иванова' }]);
 
     renderSearchableSelect();
     const input = screen.getByRole('textbox');
@@ -165,10 +155,7 @@ describe('SearchableSelect', () => {
 
   it('clear button resets value', async () => {
     const onChange = vi.fn();
-    mockFetch.mockResolvedValue({
-      json: () =>
-        Promise.resolve([{ id: 'v1', name: 'Анна Иванова' }]),
-    });
+    mockSearch.mockResolvedValue([{ id: 'v1', name: 'Анна Иванова' }]);
 
     renderSearchableSelect({ onChange });
     const input = screen.getByRole('textbox');
@@ -201,9 +188,7 @@ describe('SearchableSelect', () => {
   });
 
   it('shows "Ничего не найдено" for empty results', async () => {
-    mockFetch.mockResolvedValue({
-      json: () => Promise.resolve([]),
-    });
+    mockSearch.mockResolvedValue([]);
 
     renderSearchableSelect();
     const input = screen.getByRole('textbox');
@@ -222,12 +207,9 @@ describe('SearchableSelect', () => {
   });
 
   it('shows subtitle when subtitleField is provided', async () => {
-    mockFetch.mockResolvedValue({
-      json: () =>
-        Promise.resolve([
-          { id: 's1', name: 'Картина маслом', price: '3500' },
-        ]),
-    });
+    mockSearch.mockResolvedValue([
+      { id: 's1', name: 'Картина маслом', price: '3500' },
+    ]);
 
     renderSearchableSelect({ subtitleField: 'price' });
     const input = screen.getByRole('textbox');
@@ -247,10 +229,7 @@ describe('SearchableSelect', () => {
   });
 
   it('closes dropdown on outside click', async () => {
-    mockFetch.mockResolvedValue({
-      json: () =>
-        Promise.resolve([{ id: 'v1', name: 'Анна Иванова' }]),
-    });
+    mockSearch.mockResolvedValue([{ id: 'v1', name: 'Анна Иванова' }]);
 
     render(
       <div>

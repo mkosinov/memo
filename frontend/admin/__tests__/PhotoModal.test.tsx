@@ -3,12 +3,21 @@ import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import React from 'react';
 import { PhotoModal } from '@/app/(main)/photos/components/PhotoModal';
 
-// Mock fetch globally
-const mockFetch = vi.fn();
-vi.stubGlobal('fetch', mockFetch);
+// Mock search functions
+const mockSearchVisitors = vi.fn();
+const mockSearchServices = vi.fn();
+const mockSearchActivities = vi.fn();
+
+vi.mock('@memo/api-client', () => ({
+  searchVisitors: (...args: unknown[]) => mockSearchVisitors(...args),
+  searchServices: (...args: unknown[]) => mockSearchServices(...args),
+  searchActivities: (...args: unknown[]) => mockSearchActivities(...args),
+}));
 
 beforeEach(() => {
-  mockFetch.mockReset();
+  mockSearchVisitors.mockReset();
+  mockSearchServices.mockReset();
+  mockSearchActivities.mockReset();
   vi.useFakeTimers({ shouldAdvanceTime: true });
 });
 
@@ -79,12 +88,9 @@ describe('PhotoModal', () => {
   });
 
   it('searches visitors when typing in visitor_id SearchableSelect', async () => {
-    mockFetch.mockResolvedValue({
-      json: () =>
-        Promise.resolve([
-          { id: 'v1', name: 'Анна Иванова' },
-        ]),
-    });
+    mockSearchVisitors.mockResolvedValue([
+      { id: 'v1', name: 'Анна Иванова' },
+    ]);
 
     renderPhotoModal();
     const visitorInput = screen.getByLabelText(/Посетитель/);
@@ -98,7 +104,7 @@ describe('PhotoModal', () => {
     });
 
     await waitFor(() => {
-      expect(mockFetch).toHaveBeenCalledWith('/api/v1/search/visitors?q=%D0%90');
+      expect(mockSearchVisitors).toHaveBeenCalledWith('А');
     });
   });
 
@@ -129,19 +135,22 @@ describe('PhotoModal', () => {
     expect(submittedData).not.toHaveProperty('activity_id');
   });
 
-  it('SearchableSelect has correct searchEndpoint for visitors', () => {
+  it('SearchableSelect uses onSearch prop for visitors', async () => {
+    mockSearchVisitors.mockResolvedValue([]);
+    
     renderPhotoModal();
     const visitorInput = screen.getByRole('textbox', { name: /Посетитель/ });
-    // When typing, it should use the correct endpoint
+    
     act(() => {
       fireEvent.change(visitorInput, { target: { value: 'Т' } });
     });
+    
     act(() => {
       vi.advanceTimersByTime(300);
     });
-    // The endpoint should be /api/v1/search/visitors
-    expect(mockFetch).toHaveBeenCalledWith(
-      expect.stringContaining('/api/v1/search/visitors'),
-    );
+    
+    await waitFor(() => {
+      expect(mockSearchVisitors).toHaveBeenCalledWith('Т');
+    });
   });
 });

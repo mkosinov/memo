@@ -19,6 +19,7 @@ interface Column {
 }
 
 const COLUMNS: Column[] = [
+  { key: 'preview', label: 'Превью', width: 'w-[80px]', defaultVisible: true },
   { key: 'filename', label: 'Файл', width: 'flex-1', defaultVisible: true },
   { key: 'visitor', label: 'Посетитель', width: 'w-[150px]', defaultVisible: true },
   { key: 'service', label: 'Услуга', width: 'w-[150px]', defaultVisible: false },
@@ -291,6 +292,26 @@ export function PhotosTable() {
                 style={{ borderColor: 'var(--line)' }}
                 data-testid={`photo-row-${photo.id}`}
               >
+                {/* Preview */}
+                {visibleKeys.includes('preview') && (
+                  <td className="px-4 py-3">
+                    <div className="w-12 h-12 rounded-lg overflow-hidden bg-gray-100 flex items-center justify-center">
+                      {photo.filename ? (
+                        <img
+                          src={photo.filename}
+                          alt={photo.filename}
+                          className="w-full h-full object-cover"
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).style.display = 'none';
+                          }}
+                        />
+                      ) : (
+                        <span className="text-gray-400 text-xs">Нет фото</span>
+                      )}
+                    </div>
+                  </td>
+                )}
+
                 {/* Filename */}
                 {visibleKeys.includes('filename') && (
                   <td className="px-4 py-3 text-sm font-medium" style={{ color: 'var(--ink)' }}>

@@ -206,6 +206,20 @@ export function PhotoModal({
 
         {/* Scrollable body */}
         <div className="flex-1 overflow-y-auto px-6 pb-4 space-y-4">
+          {/* Image preview */}
+          {mode === 'edit' && photo?.filename && (
+            <div className="rounded-lg overflow-hidden bg-gray-100 flex items-center justify-center" style={{ maxHeight: '300px' }}>
+              <img
+                src={photo.filename}
+                alt={photo.filename}
+                className="max-w-full max-h-[300px] object-contain"
+                onError={(e) => {
+                  (e.target as HTMLImageElement).style.display = 'none';
+                }}
+              />
+            </div>
+          )}
+
           {PHOTO_FIELDS.map((field) => (
             <FieldRenderer
               key={field.key}

@@ -4,7 +4,14 @@ import React, { useCallback } from 'react';
 import { useSchedule } from '@/contexts/ScheduleContext';
 import { useNavigation } from '@/contexts/NavigationContext';
 import { getMonday, formatDateISO } from '@/lib/utils';
-import { FilterDropdown } from '../shared/FilterDropdown';
+import { MultiSelect } from '../shared/MultiSelect';
+import type { Master, Location } from '@memo/domain';
+
+// ─── Helpers ──────────────────────────────────────────────────────────────
+
+function groupMastersBySpecialty(master: Master): string {
+  return master.specialty || 'Без специальности';
+}
 
 // ─── Topbar ───────────────────────────────────────────────────────────────
 
@@ -84,15 +91,35 @@ export function Topbar() {
         </div>
       </div>
 
-      {/* ── Right: Filter Dropdown ── */}
-      <div className="flex items-center justify-end">
-        <FilterDropdown
-          masters={masters}
-          locations={locations}
-          selectedMasterIds={filterMasterIds}
-          selectedLocationIds={filterLocationIds}
-          onMasterSelectionChange={setFilterMasterIds}
-          onLocationSelectionChange={setFilterLocationIds}
+      {/* ── Right: Masters + Locations filters ── */}
+      <div className="flex items-center justify-end gap-2">
+        <MultiSelect<Master>
+          items={masters}
+          selectedIds={filterMasterIds}
+          onSelectionChange={setFilterMasterIds}
+          label="Мастера"
+          icon={<span className="text-sm">👤</span>}
+          getId={(m) => m.id}
+          getLabel={(m) => m.shortName}
+          getGroup={groupMastersBySpecialty}
+          renderItemLabel={(m) => (
+            <span className="flex items-center gap-1.5">
+              <span
+                className="inline-block w-2 h-2 rounded-full shrink-0"
+                style={{ backgroundColor: m.color }}
+              />
+              <span style={{ color: 'var(--ink, #1a1a1a)' }}>{m.shortName}</span>
+            </span>
+          )}
+        />
+        <MultiSelect<Location>
+          items={locations}
+          selectedIds={filterLocationIds}
+          onSelectionChange={setFilterLocationIds}
+          label="Локации"
+          icon={<span className="text-sm">📍</span>}
+          getId={(l) => l.id}
+          getLabel={(l) => l.name}
         />
       </div>
     </div>

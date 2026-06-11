@@ -584,7 +584,7 @@ export function Menubar() {
                     style={{ backgroundColor: master.color }}
                   />
                   <span className="text-xs text-white/70 truncate">
-                    {master.name}{master.specialty ? `\u00A0—\u00A0${master.specialty}` : ''}
+                    {master.name}
                   </span>
                 </div>
               ))}

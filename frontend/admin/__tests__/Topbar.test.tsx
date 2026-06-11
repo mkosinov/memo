@@ -78,9 +78,15 @@ describe('Topbar', () => {
     expect(screen.queryByRole('button', { name: /Режим удаления/i })).not.toBeInTheDocument();
   });
 
-  it('renders combined filter button', () => {
+  it('renders separate Masters and Locations filter buttons', () => {
     renderWithProviders();
-    expect(screen.getByLabelText('Фильтры')).toBeInTheDocument();
+    expect(screen.getByLabelText('Мастера')).toBeInTheDocument();
+    expect(screen.getByLabelText('Локации')).toBeInTheDocument();
+  });
+
+  it('does NOT render the old combined filter button', () => {
+    renderWithProviders();
+    expect(screen.queryByLabelText('Фильтры')).not.toBeInTheDocument();
   });
 
   it('renders view toggle buttons (День and Неделя)', () => {

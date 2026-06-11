@@ -209,10 +209,11 @@ export function MultiSelect<T>({
             />
           )}
 
-          {/* Checkbox list — grouped or flat */}
-          <div className="max-h-[240px] overflow-y-auto py-1">
-            {sections
-              ? sections.map(section => (
+          {/* Checkbox list — grouped (horizontal columns) or flat (vertical) */}
+          {sections ? (
+            <div className="max-h-[240px] overflow-auto py-1">
+              <div className="flex gap-0 min-w-max">
+                {sections.map(section => (
                   <GroupSection
                     key={section.group}
                     section={section}
@@ -221,14 +222,19 @@ export function MultiSelect<T>({
                     onToggleGroup={handleToggleGroup}
                     renderCheckboxItem={renderCheckboxItem}
                   />
-                ))
-              : items.map(renderCheckboxItem)}
-            {items.length === 0 && (
-              <div className="px-3 py-2 text-xs text-center" style={{ color: 'var(--ink-light, #9ca3af)' }}>
-                Нет элементов
+                ))}
               </div>
-            )}
-          </div>
+            </div>
+          ) : (
+            <div className="max-h-[240px] overflow-y-auto py-1">
+              {items.map(renderCheckboxItem)}
+              {items.length === 0 && (
+                <div className="px-3 py-2 text-xs text-center" style={{ color: 'var(--ink-light, #9ca3af)' }}>
+                  Нет элементов
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -266,7 +272,10 @@ function GroupSection<T>({
   }, [isIndeterminate]);
 
   return (
-    <div className="mb-1">
+    <div
+      className="min-w-[180px] shrink-0 last:border-r-0 border-r"
+      style={{ borderColor: 'var(--line, #e5e7eb)' }}
+    >
       <button
         type="button"
         onClick={() => onToggleGroup(section.group)}

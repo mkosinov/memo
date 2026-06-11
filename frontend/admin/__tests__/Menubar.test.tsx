@@ -10,11 +10,11 @@ import { getMonday } from '../lib/utils';
 vi.mock('@memo/api-client', () => ({
   getMasters: vi.fn().mockResolvedValue([
     { id: 'm1', first_name: 'Ольга', last_name: 'Середа', color: '#5B8C7A', position: 'мастер', specialty: 'живопись', avatar_url: null, is_active: true, created_at: '', updated_at: '' },
-    { id: 'm2', first_name: 'Юлия', last_name: 'Большакова', color: '#6B7E9C', position: 'мастер', specialty: 'живопись', avatar_url: null, is_active: true, created_at: '', updated_at: '' },
+    { id: 'm2', first_name: 'Юлия', last_name: 'Большакова', color: '#6B7E9C', position: 'мастер', specialty: 'керамика', avatar_url: null, is_active: true, created_at: '', updated_at: '' },
     { id: 'm3', first_name: 'Анастасия', last_name: 'П.', color: '#A07060', position: 'мастер', specialty: 'живопись', avatar_url: null, is_active: true, created_at: '', updated_at: '' },
-    { id: 'm4', first_name: 'Дарья', last_name: 'Тюльпина', color: '#7A6E9C', position: 'мастер', specialty: 'живопись', avatar_url: null, is_active: true, created_at: '', updated_at: '' },
+    { id: 'm4', first_name: 'Дарья', last_name: 'Тюльпина', color: '#7A6E9C', position: 'мастер', specialty: 'керамика', avatar_url: null, is_active: true, created_at: '', updated_at: '' },
     { id: 'm5', first_name: 'Александра', last_name: 'В.', color: '#8A7840', position: 'мастер', specialty: 'живопись', avatar_url: null, is_active: true, created_at: '', updated_at: '' },
-    { id: 'm7', first_name: 'Ирина', last_name: 'Горох', color: '#9A5870', position: 'мастер', specialty: 'живопись', avatar_url: null, is_active: true, created_at: '', updated_at: '' },
+    { id: 'm7', first_name: 'Ирина', last_name: 'Горох', color: '#9A5870', position: 'мастер', specialty: 'керамика', avatar_url: null, is_active: true, created_at: '', updated_at: '' },
   ]),
   getLocations: vi.fn().mockResolvedValue([]),
   getServices: vi.fn().mockResolvedValue([]),
@@ -49,21 +49,65 @@ describe('Menubar', () => {
     expect(screen.getByText(/Colour Mountains/i)).toBeInTheDocument();
   });
 
-  it('renders navigation links in Russian', () => {
+  it('renders navigation links (Расписание, Записи, Клиенты)', () => {
     renderWithProviders();
     expect(screen.getByRole('link', { name: 'Расписание' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Записи' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Клиенты' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Чат' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Мастера' })).toBeInTheDocument();
   });
 
-  it('renders settings links (Услуги and Локации)', () => {
+  it('does not render Chat menu item', () => {
     renderWithProviders();
-    expect(screen.getByRole('link', { name: 'Услуги' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Локации' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Услуги' })).toHaveAttribute('href', '/services');
-    expect(screen.getByRole('link', { name: 'Локации' })).toHaveAttribute('href', '/locations');
+    expect(screen.queryByRole('link', { name: 'Чат' })).not.toBeInTheDocument();
+  });
+
+  it('renders Мастера and Справочники as buttons', () => {
+    renderWithProviders();
+    expect(screen.getByRole('button', { name: 'Мастера' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Справочники' })).toBeInTheDocument();
+  });
+
+  it('shows master list with specialties when Мастера is clicked', async () => {
+    renderWithProviders();
+    fireEvent.click(screen.getByRole('button', { name: 'Мастера' }));
+    await waitFor(() => {
+      expect(screen.getByText(/Ольга Середа/)).toBeInTheDocument();
+    });
+    expect(screen.getByText(/Юлия Большакова/)).toBeInTheDocument();
+    // Check specialty is shown in the submenu
+    expect(screen.getAllByText(/живопись/).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('hides master list when Мастера is clicked again', async () => {
+    renderWithProviders();
+    fireEvent.click(screen.getByRole('button', { name: 'Мастера' }));
+    await waitFor(() => {
+      expect(screen.getByText(/Ольга Середа/)).toBeInTheDocument();
+    });
+    // Click again to close
+    fireEvent.click(screen.getByRole('button', { name: 'Мастера' }));
+    await waitFor(() => {
+      expect(screen.queryByText(/Ольга Середа/)).not.toBeInTheDocument();
+    });
+  });
+
+  it('shows directory links when Справочники is clicked', async () => {
+    renderWithProviders();
+    fireEvent.click(screen.getByRole('button', { name: 'Справочники' }));
+    await waitFor(() => {
+      expect(screen.getByRole('link', { name: 'Услуги' })).toBeInTheDocument();
+      expect(screen.getByRole('link', { name: 'Локации' })).toBeInTheDocument();
+      expect(screen.getByRole('link', { name: 'Теги' })).toBeInTheDocument();
+      expect(screen.getByRole('link', { name: 'Услуги' })).toHaveAttribute('href', '/services');
+      expect(screen.getByRole('link', { name: 'Локации' })).toHaveAttribute('href', '/locations');
+      expect(screen.getByRole('link', { name: 'Теги' })).toHaveAttribute('href', '/tags');
+    });
+  });
+
+  it('renders Фото as a standalone link', () => {
+    renderWithProviders();
+    expect(screen.getByRole('link', { name: 'Фото' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Фото' })).toHaveAttribute('href', '/photos');
   });
 
   it('highlights the active navigation link (Расписание)', () => {

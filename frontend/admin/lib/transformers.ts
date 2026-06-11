@@ -46,6 +46,7 @@ export function transformMaster(raw: MasterResponse): Artist {
     name: `${raw.first_name} ${raw.last_name}`,
     shortName: raw.first_name,
     color: raw.color,
+    specialty: raw.specialty,
   };
 }
 

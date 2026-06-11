@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useMemo, useCallback } from 'react';
+import React, { useMemo, useCallback, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useNavigation } from '@/contexts/NavigationContext';
@@ -58,6 +58,28 @@ function ChatIcon({ className }: { className?: string }) {
   return (
     <svg className={className} width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
+    </svg>
+  );
+}
+
+function ChevronIcon({ className, expanded }: { className?: string; expanded: boolean }) {
+  return (
+    <svg
+      className={`w-3 h-3 transition-transform duration-200 ${expanded ? 'rotate-90' : ''} ${className ?? ''}`}
+      fill="none"
+      stroke="currentColor"
+      viewBox="0 0 24 24"
+    >
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+    </svg>
+  );
+}
+
+function BookIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M4 19.5A2.5 2.5 0 016.5 17H20" />
+      <path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z" />
     </svg>
   );
 }
@@ -130,16 +152,15 @@ const NAV_ITEMS = [
   { label: 'Расписание', icon: 'calendar', href: '/schedule' },
   { label: 'Записи', icon: 'clipboard', href: '/records' },
   { label: 'Клиенты', icon: 'users', href: '/clients' },
-  { label: 'Чат', icon: 'chat', href: '/chat' },
-  { label: 'Мастера', icon: 'palette', href: '/masters' },
 ] as const;
 
-const SETTINGS_ITEMS = [
+const DIRECTORY_ITEMS = [
   { label: 'Услуги', icon: 'package', href: '/services' },
   { label: 'Локации', icon: 'mapPin', href: '/locations' },
   { label: 'Теги', icon: 'tag', href: '/tags' },
-  { label: 'Фото', icon: 'image', href: '/photos' },
 ] as const;
+
+const PHOTO_ITEM = { label: 'Фото', icon: 'image', href: '/photos' } as const;
 
 const ICON_MAP: Record<string, React.FC<{ className?: string }>> = {
   calendar: CalendarIcon,
@@ -318,6 +339,7 @@ export function Menubar() {
   const { data: artists = [] } = useMasters();
   const { sidebarCollapsed, toggleSidebar, theme, toggleTheme } = useUI();
   const pathname = usePathname();
+  const [openMenu, setOpenMenu] = useState<string | null>(null);
 
   const selectedWeek = useMemo(() => new Date(dateFrom + 'T00:00:00'), [dateFrom]);
 
@@ -326,6 +348,10 @@ export function Menubar() {
     const sunday = new Date(monday.getTime() + 6 * 24 * 60 * 60 * 1000);
     selectDateRange(formatDateISO(monday), formatDateISO(sunday));
   }, [selectDateRange]);
+
+  const toggleMenu = useCallback((menu: string) => {
+    setOpenMenu(prev => prev === menu ? null : menu);
+  }, []);
 
   const isActive = (href: string) => {
     if (href === '/') return pathname === '/';
@@ -366,6 +392,7 @@ export function Menubar() {
 
         {/* Navigation */}
         <nav className={`py-2 ${sidebarCollapsed ? 'px-1' : 'px-2'}`}>
+          {/* Regular nav items */}
           {NAV_ITEMS.map(item => {
             const IconComponent = ICON_MAP[item.icon];
             const active = isActive(item.href);
@@ -387,39 +414,115 @@ export function Menubar() {
               </Link>
             );
           })}
-        </nav>
 
-        {!sidebarCollapsed && <div className="border-t border-white/10 mx-3" />}
+          {/* Мастера — collapsible */}
+          <button
+            onClick={() => toggleMenu('masters')}
+            className={`w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors duration-150
+              ${openMenu === 'masters'
+                ? 'bg-brand text-white font-medium'
+                : 'text-white/60 hover:bg-white/5 hover:text-white/90'
+              }
+              ${sidebarCollapsed ? 'justify-center px-1' : ''}`}
+            aria-label="Мастера"
+            aria-expanded={openMenu === 'masters'}
+            title={sidebarCollapsed ? 'Мастера' : undefined}
+          >
+            <PaletteIcon className={openMenu === 'masters' ? 'text-white' : 'text-white/60'} />
+            {!sidebarCollapsed && (
+              <>
+                <span className="flex-1 text-left">Мастера</span>
+                <ChevronIcon expanded={openMenu === 'masters'} className={openMenu === 'masters' ? 'text-white' : 'text-white/40'} />
+              </>
+            )}
+          </button>
+          {openMenu === 'masters' && !sidebarCollapsed && (
+            <div className="ml-4 mt-0.5 mb-1 space-y-0.5">
+              {artists.map(artist => (
+                <div
+                  key={artist.id}
+                  className="flex items-center gap-2 px-3 py-1.5 rounded-md"
+                >
+                  <div
+                    className="w-2 h-2 rounded-full flex-shrink-0"
+                    style={{ backgroundColor: artist.color }}
+                  />
+                  <span className="text-xs text-white/70 truncate">
+                    {artist.name}{artist.specialty ? `\u00A0—\u00A0${artist.specialty}` : ''}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
 
-        {/* Artist Legend */}
-        <ArtistLegend collapsed={sidebarCollapsed} artists={artists} />
+          {/* Справочники — collapsible */}
+          <button
+            onClick={() => toggleMenu('directories')}
+            className={`w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors duration-150
+              ${openMenu === 'directories'
+                ? 'bg-brand text-white font-medium'
+                : 'text-white/60 hover:bg-white/5 hover:text-white/90'
+              }
+              ${sidebarCollapsed ? 'justify-center px-1' : ''}`}
+            aria-label="Справочники"
+            aria-expanded={openMenu === 'directories'}
+            title={sidebarCollapsed ? 'Справочники' : undefined}
+          >
+            <BookIcon className={openMenu === 'directories' ? 'text-white' : 'text-white/60'} />
+            {!sidebarCollapsed && (
+              <>
+                <span className="flex-1 text-left">Справочники</span>
+                <ChevronIcon expanded={openMenu === 'directories'} className={openMenu === 'directories' ? 'text-white' : 'text-white/40'} />
+              </>
+            )}
+          </button>
+          {openMenu === 'directories' && !sidebarCollapsed && (
+            <div className="ml-4 mt-0.5 mb-1 space-y-0.5">
+              {DIRECTORY_ITEMS.map(item => {
+                const active = isActive(item.href);
+                return (
+                  <Link
+                    key={item.label}
+                    href={item.href}
+                    className={`flex items-center gap-2 px-3 py-1.5 text-xs rounded-md transition-colors
+                      ${active
+                        ? 'text-white bg-white/10 font-medium'
+                        : 'text-white/60 hover:text-white/90 hover:bg-white/5'
+                      }`}
+                  >
+                    {item.label}
+                  </Link>
+                );
+              })}
+            </div>
+          )}
 
-        {!sidebarCollapsed && <div className="border-t border-white/10 mx-3" />}
-
-        {/* Settings items */}
-        <nav className={`py-2 ${sidebarCollapsed ? 'px-1' : 'px-2'}`}>
-          {SETTINGS_ITEMS.map(item => {
-            const IconComponent = ICON_MAP[item.icon];
-            const active = isActive(item.href);
+          {/* Фото — standalone */}
+          {(() => {
+            const active = isActive(PHOTO_ITEM.href);
             return (
               <Link
-                key={item.label}
-                href={item.href}
+                href={PHOTO_ITEM.href}
                 className={`w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors duration-150
                   ${active
                     ? 'bg-brand text-white font-medium'
                     : 'text-white/60 hover:bg-white/5 hover:text-white/90'
                   }
                   ${sidebarCollapsed ? 'justify-center px-1' : ''}`}
-                aria-label={item.label}
-                title={sidebarCollapsed ? item.label : undefined}
+                aria-label={PHOTO_ITEM.label}
+                title={sidebarCollapsed ? PHOTO_ITEM.label : undefined}
               >
-                <IconComponent className={active ? 'text-white' : 'text-white/60'} />
-                {!sidebarCollapsed && <span>{item.label}</span>}
+                <ImageIcon className={active ? 'text-white' : 'text-white/60'} />
+                {!sidebarCollapsed && <span>{PHOTO_ITEM.label}</span>}
               </Link>
             );
-          })}
+          })()}
         </nav>
+
+        {!sidebarCollapsed && <div className="border-t border-white/10 mx-3" />}
+
+        {/* Artist Legend */}
+        <ArtistLegend collapsed={sidebarCollapsed} artists={artists} />
       </div>
 
       {/* ── Bottom Section ── */}

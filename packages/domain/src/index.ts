@@ -7,6 +7,7 @@ export const ArtistSchema = z.object({
   name: z.string(),
   shortName: z.string(),
   color: z.string(),
+  specialty: z.string().optional(),
 });
 
 export type Artist = z.infer<typeof ArtistSchema>;

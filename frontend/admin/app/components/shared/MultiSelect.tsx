@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
 
 export interface MultiSelectProps<T> {
   items: T[];
@@ -35,9 +35,12 @@ function groupItems<T>(items: T[], getGroup: (item: T) => string): GroupedSectio
 }
 
 /**
- * MultiSelect dropdown with checkbox list and select-all / clear-all buttons.
+ * MultiSelect dropdown with checkbox list.
  * Closes on outside click. Shows label + selected count as trigger text.
  * Supports optional grouping via `getGroup` prop.
+ *
+ * - Grouped mode: each group header has a tri-state checkbox (checked/unchecked/indeterminate)
+ * - Flat mode: a single "select all" checkbox at the top
  */
 export function MultiSelect<T>({
   items,
@@ -51,7 +54,19 @@ export function MultiSelect<T>({
   renderItemLabel,
 }: MultiSelectProps<T>) {
   const [isOpen, setIsOpen] = useState(false);
+  const [opensUpward, setOpensUpward] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+
+  // Measure available space and decide direction when opening
+  useLayoutEffect(() => {
+    if (!isOpen || !triggerRef.current) return;
+    const rect = triggerRef.current.getBoundingClientRect();
+    const spaceBelow = window.innerHeight - rect.bottom;
+    // Dropdown needs ~272px (1px margin + 32px header + 240px scrollable content)
+    const DROPDOWN_HEIGHT = 280;
+    setOpensUpward(spaceBelow < DROPDOWN_HEIGHT);
+  }, [isOpen]);
 
   // Close on outside click
   useEffect(() => {
@@ -77,14 +92,6 @@ export function MultiSelect<T>({
     [selectedIds, onSelectionChange],
   );
 
-  const handleSelectAll = useCallback(() => {
-    onSelectionChange(items.map(item => getId(item)));
-  }, [items, getId, onSelectionChange]);
-
-  const handleClearAll = useCallback(() => {
-    onSelectionChange([]);
-  }, [onSelectionChange]);
-
   const count = selectedIds.length;
   const total = items.length;
 
@@ -93,6 +100,37 @@ export function MultiSelect<T>({
     if (!getGroup) return null;
     return groupItems(items, getGroup);
   }, [items, getGroup]);
+
+  // ── Group checkbox handlers ────────────────────────────────────────────────
+
+  const handleToggleGroup = useCallback(
+    (groupName: string) => {
+      if (!getGroup) return;
+      const groupIds = items
+        .filter(item => (getGroup(item) || 'Прочее') === groupName)
+        .map(item => getId(item));
+      const allSelected = groupIds.every(id => selectedIds.includes(id));
+      if (allSelected) {
+        // Deselect all in group
+        onSelectionChange(selectedIds.filter(id => !groupIds.includes(id)));
+      } else {
+        // Select all in group (add missing ones)
+        const missing = groupIds.filter(id => !selectedIds.includes(id));
+        onSelectionChange([...selectedIds, ...missing]);
+      }
+    },
+    [items, getGroup, getId, selectedIds, onSelectionChange],
+  );
+
+  const handleSelectAll = useCallback(() => {
+    onSelectionChange(items.map(item => getId(item)));
+  }, [items, getId, onSelectionChange]);
+
+  const handleDeselectAll = useCallback(() => {
+    onSelectionChange([]);
+  }, [onSelectionChange]);
+
+  // ── Render ─────────────────────────────────────────────────────────────────
 
   const renderCheckboxItem = (item: T) => {
     const id = getId(item);
@@ -126,6 +164,7 @@ export function MultiSelect<T>({
   return (
     <div className="relative" ref={containerRef}>
       <button
+        ref={triggerRef}
         type="button"
         onClick={handleToggle}
         className="flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors hover:bg-gray-50"
@@ -154,43 +193,34 @@ export function MultiSelect<T>({
 
       {isOpen && (
         <div
-          className="absolute z-50 mt-1 min-w-[200px] bg-white border rounded-lg shadow-lg"
+          className={`absolute z-50 min-w-[200px] bg-white border rounded-lg shadow-lg ${
+            opensUpward ? 'bottom-full mb-1' : 'mt-1 top-full'
+          }`}
           style={{ borderColor: 'var(--line, #e5e7eb)' }}
           data-testid="multiselect-dropdown"
         >
-          {/* Select all / Clear all */}
-          <div className="flex items-center justify-between border-b px-3 py-1.5" style={{ borderColor: 'var(--line, #e5e7eb)' }}>
-            <button
-              type="button"
-              onClick={handleSelectAll}
-              className="text-[11px] font-medium transition-colors hover:underline"
-              style={{ color: 'var(--brand)' }}
-            >
-              Выбрать все
-            </button>
-            <button
-              type="button"
-              onClick={handleClearAll}
-              className="text-[11px] font-medium transition-colors hover:underline"
-              style={{ color: 'var(--ink-light, #9ca3af)' }}
-            >
-              Снять все
-            </button>
-          </div>
+          {/* Flat mode: single select-all checkbox at top */}
+          {!getGroup && items.length > 0 && (
+            <SelectAllCheckbox
+              allIds={items.map(item => getId(item))}
+              selectedIds={selectedIds}
+              onToggleAll={handleSelectAll}
+              onDeselectAll={handleDeselectAll}
+            />
+          )}
 
           {/* Checkbox list — grouped or flat */}
           <div className="max-h-[240px] overflow-y-auto py-1">
             {sections
               ? sections.map(section => (
-                  <div key={section.group} className="mb-1">
-                    <div
-                      className="px-3 pt-1.5 pb-0.5 text-[10px] font-medium uppercase tracking-wide"
-                      style={{ color: 'var(--ink-light, #9ca3af)' }}
-                    >
-                      {section.group}
-                    </div>
-                    <div>{section.items.map(renderCheckboxItem)}</div>
-                  </div>
+                  <GroupSection
+                    key={section.group}
+                    section={section}
+                    selectedIds={selectedIds}
+                    getId={getId}
+                    onToggleGroup={handleToggleGroup}
+                    renderCheckboxItem={renderCheckboxItem}
+                  />
                 ))
               : items.map(renderCheckboxItem)}
             {items.length === 0 && (
@@ -201,6 +231,123 @@ export function MultiSelect<T>({
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── Sub-components ───────────────────────────────────────────────────────
+
+/** Grouped section with a tri-state group checkbox in the header. */
+function GroupSection<T>({
+  section,
+  selectedIds,
+  getId,
+  onToggleGroup,
+  renderCheckboxItem,
+}: {
+  section: GroupedSection<T>;
+  selectedIds: string[];
+  getId: (item: T) => string;
+  onToggleGroup: (groupName: string) => void;
+  renderCheckboxItem: (item: T) => React.ReactNode;
+}) {
+  const groupIds = section.items.map(item => getId(item));
+  const selectedCount = groupIds.filter(id => selectedIds.includes(id)).length;
+  const allSelected = selectedCount === groupIds.length;
+  const noneSelected = selectedCount === 0;
+  const isIndeterminate = !allSelected && !noneSelected;
+
+  const checkboxRef = useRef<HTMLInputElement>(null);
+  // Sync indeterminate property (not an HTML attribute — must be set via JS)
+  useEffect(() => {
+    if (checkboxRef.current) {
+      checkboxRef.current.indeterminate = isIndeterminate;
+    }
+  }, [isIndeterminate]);
+
+  return (
+    <div className="mb-1">
+      <button
+        type="button"
+        onClick={() => onToggleGroup(section.group)}
+        className="w-full flex items-center gap-2 px-3 pt-1.5 pb-0.5 hover:bg-gray-50 transition-colors"
+      >
+        <input
+          ref={checkboxRef}
+          type="checkbox"
+          checked={allSelected}
+          readOnly
+          className="w-3.5 h-3.5 rounded border-gray-300 text-[var(--brand)] accent-[var(--brand)] cursor-pointer shrink-0"
+          tabIndex={-1}
+          data-testid={`group-checkbox-${section.group}`}
+        />
+        <span
+          className="text-[10px] font-medium uppercase tracking-wide"
+          style={{ color: 'var(--ink-light, #9ca3af)' }}
+        >
+          {section.group}
+        </span>
+      </button>
+      <div>{section.items.map(renderCheckboxItem)}</div>
+    </div>
+  );
+}
+
+/** Flat-mode select-all checkbox row at top of list. */
+function SelectAllCheckbox({
+  allIds,
+  selectedIds,
+  onToggleAll,
+  onDeselectAll,
+}: {
+  allIds: string[];
+  selectedIds: string[];
+  onToggleAll: () => void;
+  onDeselectAll: () => void;
+}) {
+  const selectedCount = selectedIds.filter(id => allIds.includes(id)).length;
+  const allSelected = selectedCount === allIds.length && allIds.length > 0;
+  const noneSelected = selectedCount === 0;
+  const isIndeterminate = !allSelected && !noneSelected;
+
+  const checkboxRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (checkboxRef.current) {
+      checkboxRef.current.indeterminate = isIndeterminate;
+    }
+  }, [isIndeterminate]);
+
+  const handleClick = () => {
+    if (allSelected) {
+      onDeselectAll();
+    } else {
+      onToggleAll();
+    }
+  };
+
+  return (
+    <div className="border-b" style={{ borderColor: 'var(--line, #e5e7eb)' }}>
+      <button
+        type="button"
+        onClick={handleClick}
+        className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-gray-50 transition-colors"
+      >
+        <input
+          ref={checkboxRef}
+          type="checkbox"
+          checked={allSelected}
+          readOnly
+          className="w-3.5 h-3.5 rounded border-gray-300 text-[var(--brand)] accent-[var(--brand)] cursor-pointer shrink-0"
+          tabIndex={-1}
+          data-testid="select-all-checkbox"
+        />
+        <span
+          className="text-[11px] font-medium"
+          style={{ color: 'var(--ink, #1a1a1a)' }}
+        >
+          Выбрать все
+        </span>
+      </button>
     </div>
   );
 }

@@ -98,7 +98,6 @@ export function Topbar() {
           selectedIds={filterMasterIds}
           onSelectionChange={setFilterMasterIds}
           label="Мастера"
-          icon={<span className="text-sm">👤</span>}
           getId={(m) => m.id}
           getLabel={(m) => m.shortName}
           getGroup={groupMastersBySpecialty}
@@ -117,7 +116,6 @@ export function Topbar() {
           selectedIds={filterLocationIds}
           onSelectionChange={setFilterLocationIds}
           label="Локации"
-          icon={<span className="text-sm">📍</span>}
           getId={(l) => l.id}
           getLabel={(l) => l.name}
         />

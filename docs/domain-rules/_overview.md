@@ -6,7 +6,7 @@
 |--------|-------------|-------------------|------------|
 | Service | Master class type | has many Tariffs | Medium |
 | Tariff | Pricing tier | belongs to Service | Low |
-| Master | Artist | has color, specialties | Low |
+| Master | Мастер (ведёт мастер-класс) | has color, specialties | Low |
 | Location | Studio space | has capacity | Low |
 | Activity | Scheduled instance | belongs to Service, Master, Location | Medium |
 | Client | Customer | has contacts, stats | Medium |
@@ -46,6 +46,21 @@
 | cash | Наличные |
 | card | Карта |
 | transfer | Перевод |
+
+## Naming Conventions
+
+| Business term | Code name | Forbidden | Notes |
+|---------------|-----------|-----------|-------|
+| Мастер | `Master` | ~~Artist~~, ~~artist~~ | Типы, переменные, компоненты, API — везде Master |
+| Мастер-класс | `Activity` | ~~Class~~, ~~Workshop~~ | Запланированное занятие |
+| Запись | `Record` | ~~Booking~~ | Бронирование клиентом |
+| Посещение | `Visit` | ~~Attendance~~ | Факт прихода конкретного гостя |
+| Студия / Локация | `Location` | ~~Studio~~, ~~Room~~ | Помещение для проведения |
+| Услуга | `Service` | ~~Course~~, ~~Type~~ | Тип мастер-класса |
+| Клиент | `Client` | ~~Customer~~, ~~User~~ | Человек, который бронирует |
+| Гость | `Visitor` | ~~Guest~~, ~~Attendee~~ | Конкретный участник записи |
+
+**Rule:** When introducing new code, always use the code name from this table. If you see a forbidden name in existing code, rename it.
 
 ## Cross-Entity Invariants
 
@@ -102,10 +117,10 @@
 - **Fix:** Invalidate activity queries after Record deletion
 - **Where:** ActivityDetailsModal → handleDeleteRecord
 
-### 4. Reusable ArtistPicker Component
+### 4. Reusable MasterPicker Component
 - **Current:** SettingsTab has hack (colored span over native select)
 - **Current:** ClientRecordTab uses CustomSelect without color
-- **Goal:** Single ArtistPicker component with colored square, reusable across all modals
+- **Goal:** Single MasterPicker component with colored square, reusable across all modals
 - **Base:** CustomSelect from PR #56 (supports icon + color)
 
 ### 5. Consistent Entity Operations Across Pages

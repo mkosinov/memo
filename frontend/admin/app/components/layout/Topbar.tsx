@@ -130,9 +130,6 @@ export function Topbar() {
         />
       </div>
 
-      {/* ── Spacer (pushes toggle to right) ── */}
-      <div className="flex-1" />
-
       {/* ── Right: Combined Day+ColumnMode / Week Toggle ── */}
       <div className="flex items-center gap-1 rounded-lg p-0.5" style={{ backgroundColor: 'var(--surface)' }}>
         {/* Day button with dropdown */}

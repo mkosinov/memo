@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 
 export interface MultiSelectProps<T> {
   items: T[];
@@ -55,31 +55,16 @@ export function MultiSelect<T>({
 }: MultiSelectProps<T>) {
   const [isOpen, setIsOpen] = useState(false);
   const [opensUpward, setOpensUpward] = useState(false);
-  const [dropdownOffset, setDropdownOffset] = useState<{ left?: number; right?: number }>({});
   const containerRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // Measure available space and decide direction when opening
-  useLayoutEffect(() => {
+  // Measure vertical space when opening
+  useEffect(() => {
     if (!isOpen || !triggerRef.current) return;
     const triggerRect = triggerRef.current.getBoundingClientRect();
     const spaceBelow = window.innerHeight - triggerRect.bottom;
-    // Dropdown needs ~272px (1px margin + 32px header + 240px scrollable content)
     const DROPDOWN_HEIGHT = 280;
     setOpensUpward(spaceBelow < DROPDOWN_HEIGHT);
-
-    // Measure dropdown width and adjust horizontal position to stay within viewport
-    if (dropdownRef.current) {
-      const dropdownWidth = dropdownRef.current.offsetWidth;
-      const spaceRight = window.innerWidth - triggerRect.left;
-      if (dropdownWidth > spaceRight) {
-        // Not enough space to the right — align to right edge of trigger
-        setDropdownOffset({ right: 0 });
-      } else {
-        setDropdownOffset({ left: 0 });
-      }
-    }
   }, [isOpen]);
 
   // Close on outside click
@@ -207,15 +192,10 @@ export function MultiSelect<T>({
 
       {isOpen && (
         <div
-          ref={dropdownRef}
-          className={`absolute z-50 min-w-[200px] max-w-[calc(100vw-16px)] bg-white border rounded-lg shadow-lg ${
+          className={`absolute z-50 right-0 min-w-[200px] max-w-[calc(100vw-16px)] bg-white border rounded-lg shadow-lg ${
             opensUpward ? 'bottom-full mb-1' : 'mt-1 top-full'
           }`}
-          style={{
-            borderColor: 'var(--line, #e5e7eb)',
-            left: dropdownOffset.left !== undefined ? 0 : undefined,
-            right: dropdownOffset.right !== undefined ? 0 : undefined,
-          }}
+          style={{ borderColor: 'var(--line, #e5e7eb)' }}
           data-testid="multiselect-dropdown"
         >
           {/* Flat mode: single select-all checkbox at top */}

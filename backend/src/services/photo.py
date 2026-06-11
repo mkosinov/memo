@@ -18,6 +18,34 @@ from src.services.generic import GenericService
 class PhotoService(GenericService[PhotoCreate, PhotoUpdate, PhotoResponse]):
     """Extended photo service with tag handling."""
 
+    async def list(
+        self, db_session: AsyncSession, **filters
+    ) -> list[PhotoResponse]:
+        """Return all active photos with tags eagerly loaded."""
+        stmt = (
+            select(Photo)
+            .where(Photo.is_active)
+            .options(selectinload(Photo.tags))
+        )
+        result = await db_session.execute(stmt)
+        orm_list = result.scalars().all()
+        return [self._response_schema.model_validate(o) for o in orm_list]
+
+    async def get(
+        self, db_session: AsyncSession, id: str
+    ) -> PhotoResponse | None:
+        """Return a single photo with tags eagerly loaded."""
+        stmt = (
+            select(Photo)
+            .where(Photo.id == id)
+            .options(selectinload(Photo.tags))
+        )
+        result = await db_session.execute(stmt)
+        orm = result.scalar_one_or_none()
+        if orm is None:
+            return None
+        return self._response_schema.model_validate(orm)
+
     async def create(
         self, db_session: AsyncSession, data: PhotoCreate
     ) -> PhotoResponse:
@@ -37,9 +65,9 @@ class PhotoService(GenericService[PhotoCreate, PhotoUpdate, PhotoResponse]):
             tags = result.scalars().all()
             orm.tags = list(tags)
             await db_session.commit()
-            await db_session.refresh(orm)
         
-        return self._response_schema.model_validate(orm)
+        # Reload with tags
+        return await self.get(db_session, orm.id)
 
     async def update(
         self, db_session: AsyncSession, id: str, data: PhotoUpdate
@@ -63,8 +91,9 @@ class PhotoService(GenericService[PhotoCreate, PhotoUpdate, PhotoResponse]):
             orm.tags = list(tags)
         
         await db_session.commit()
-        await db_session.refresh(orm)
-        return self._response_schema.model_validate(orm)
+        
+        # Reload with tags
+        return await self.get(db_session, id)
 
 
 @lru_cache

@@ -99,6 +99,23 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
     return () => document.removeEventListener('__memo-select-day', handleSelectDay);
   }, [selectDateRange]);
 
+  // Listen for "switch to day view" event from MiniCalendar (double-click)
+  React.useEffect(() => {
+    const handleSwitchToDayView = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.date) {
+        setViewMode('day');
+        setSelectedDay(new Date(detail.date));
+        // Also navigate the week range to contain this day
+        const monday = getMonday(new Date(detail.date));
+        const sunday = new Date(monday.getTime() + 6 * 24 * 60 * 60 * 1000);
+        selectDateRange(formatDateISO(monday), formatDateISO(sunday));
+      }
+    };
+    document.addEventListener('__memo-switch-to-day-view', handleSwitchToDayView);
+    return () => document.removeEventListener('__memo-switch-to-day-view', handleSwitchToDayView);
+  }, [selectDateRange]);
+
   // Dispatch events so sidebar Menubar (outside ScheduleProvider) can track viewMode & selectedDay
   React.useEffect(() => {
     document.dispatchEvent(new CustomEvent('__memo-view-mode-changed', { detail: { viewMode } }));

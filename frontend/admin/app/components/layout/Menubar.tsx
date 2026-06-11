@@ -272,6 +272,11 @@ function MiniCalendar({ selectedWeek, selectedDay, viewMode, onWeekSelect, colla
     }
   };
 
+  const handleDayDoubleClick = (day: Date) => {
+    // Double-click in WeekView: switch to DayView and select that day
+    document.dispatchEvent(new CustomEvent('__memo-switch-to-day-view', { detail: { date: day } }));
+  };
+
   const isInCurrentWeek = (date: Date) => {
     const dMonday = getMonday(date);
     return dMonday.getTime() === currentWeekMonday.getTime();
@@ -381,6 +386,7 @@ function MiniCalendar({ selectedWeek, selectedDay, viewMode, onWeekSelect, colla
                     key={di}
                     type="button"
                     onClick={() => handleDayClick(day)}
+                    onDoubleClick={() => handleDayDoubleClick(day)}
                     className="flex items-center justify-center hover:bg-white/5 transition-colors"
                     aria-label={formatDate(day)}
                   >

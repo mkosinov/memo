@@ -444,6 +444,42 @@ describe('ScheduleProvider', () => {
     expect(selectedDay.getDate()).toBe(15);
   });
 
+  // ─── __memo-switch-to-day-view event tests ─────────────────────────────────
+
+  it('switches viewMode to "day" and sets selectedDay when __memo-switch-to-day-view event fires', () => {
+    renderWithContext();
+    // Verify initial state
+    expect(screen.getByTestId('view-mode').textContent).toBe('week');
+
+    const targetDate = new Date(2026, 5, 15); // June 15, 2026
+
+    act(() => {
+      document.dispatchEvent(new CustomEvent('__memo-switch-to-day-view', { detail: { date: targetDate } }));
+    });
+
+    expect(screen.getByTestId('view-mode').textContent).toBe('day');
+    const selectedDay = new Date(screen.getByTestId('selected-day').textContent!);
+    expect(selectedDay.toDateString()).toBe(targetDate.toDateString());
+  });
+
+  it('navigates week range when __memo-switch-to-day-view event fires', () => {
+    renderWithContext();
+    // Set initial week far from the target
+    act(() => {
+      screen.getByTestId('set-week').click(); // sets to 2026-05-18
+    });
+
+    const targetDate = new Date(2026, 6, 6); // July 6, 2026 (Monday)
+
+    act(() => {
+      document.dispatchEvent(new CustomEvent('__memo-switch-to-day-view', { detail: { date: targetDate } }));
+    });
+
+    // The week should now contain July 6
+    const weekStart = new Date(screen.getByTestId('week-start').textContent!);
+    expect(weekStart.toDateString()).toBe(targetDate.toDateString());
+  });
+
   // ─── showAllColumns tests ──────────────────────────────────────────────────
 
   it('defaults showAllColumns to false', () => {

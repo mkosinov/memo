@@ -276,7 +276,7 @@ export function DayView() {
     >
       <div className="min-w-[600px] h-full flex flex-col">
         {/* Column headers */}
-        <ScheduleColumnHeader stickyTop="52px" zIndex={24}>
+        <ScheduleColumnHeader>
           {orderedColumns.map((col) => {
             const isDropTarget = dropTargetId === col.id && draggedColumnId !== col.id;
             return (

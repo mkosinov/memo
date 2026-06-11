@@ -177,7 +177,7 @@ export function MultiSelect<T>({
       >
         {icon}
         <span>
-          {label} {count}/{total}
+          {label} ({count}/{total})
         </span>
         <svg
           className={`w-3.5 h-3.5 shrink-0 transition-transform duration-150 ${isOpen ? 'rotate-180' : ''}`}

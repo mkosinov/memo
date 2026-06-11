@@ -12,14 +12,14 @@ import { waitForScheduleReady } from './fixtures/helpers';
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Click the "next week" arrow in the topbar. */
+/** Click the "next period" arrow in the topbar. */
 async function clickNextWeek(page: import('@playwright/test').Page) {
-  await page.locator('button[aria-label="Следующая неделя"]').click();
+  await page.locator('[data-testid="date-nav-next"]').click();
 }
 
-/** Click the "previous week" arrow in the topbar. */
+/** Click the "previous period" arrow in the topbar. */
 async function clickPrevWeek(page: import('@playwright/test').Page) {
-  await page.locator('button[aria-label="Предыдущая неделя"]').click();
+  await page.locator('[data-testid="date-nav-prev"]').click();
 }
 
 // ---------------------------------------------------------------------------
@@ -34,7 +34,7 @@ test.describe('Schedule — Week Navigation and UI', () => {
   // ── 1. Week navigation — arrows change displayed week ──────────────────
 
   test('week navigation — arrows change displayed week', async ({ page }) => {
-    const dateRange = page.locator('[data-testid="date-range"]');
+    const dateRange = page.locator('[data-testid="date-nav-text"]');
     await expect(dateRange).toBeVisible();
 
     const initialText = await dateRange.textContent();
@@ -59,7 +59,7 @@ test.describe('Schedule — Week Navigation and UI', () => {
   // ── 2. Today button — returns to current week ──────────────────────────
 
   test('today button — returns to current week', async ({ page }) => {
-    const dateRange = page.locator('[data-testid="date-range"]');
+    const dateRange = page.locator('[data-testid="date-nav-text"]');
     await expect(dateRange).toBeVisible();
 
     const currentWeekText = await dateRange.textContent();
@@ -151,7 +151,7 @@ test.describe('Schedule — Week Navigation and UI', () => {
   // ── 7. Week navigation — round trip integrity ──────────────────────────
 
   test('week navigation — multiple round trips preserve consistency', async ({ page }) => {
-    const dateRange = page.locator('[data-testid="date-range"]');
+    const dateRange = page.locator('[data-testid="date-nav-text"]');
     await expect(dateRange).toBeVisible();
 
     const originalText = await dateRange.textContent();

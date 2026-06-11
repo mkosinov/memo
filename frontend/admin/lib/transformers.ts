@@ -44,7 +44,7 @@ export function transformMaster(raw: MasterResponse): Master {
   return {
     id: raw.id,
     name: displayMasterName(raw),
-    shortName: displayMasterName(raw),
+    shortName: raw.first_name,
     color: raw.color,
     specialty: raw.specialty,
     sortOrder: raw.sort_order ?? 0,

@@ -38,7 +38,7 @@ test.describe('Schedule Page', () => {
     await waitForScheduleReady(page);
 
     // Navigate to next week
-    await page.locator('button[aria-label="Следующая неделя"]').click();
+    await page.locator('[data-testid="date-nav-next"]').click();
     await page.waitForTimeout(500);
 
     await expect(page).toHaveScreenshot('schedule-next-week.png', {

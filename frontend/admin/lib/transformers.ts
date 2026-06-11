@@ -46,6 +46,7 @@ export function transformMaster(raw: MasterResponse): Master {
     shortName: raw.first_name,
     color: raw.color,
     specialty: raw.specialty,
+    sortOrder: raw.sort_order ?? 0,
   };
 }
 
@@ -69,5 +70,6 @@ export function transformLocation(raw: LocationResponse): Location {
     name: raw.name,
     address: raw.address ?? undefined,
     defaultCapacity: raw.capacity,
+    sortOrder: raw.sort_order ?? 0,
   };
 }

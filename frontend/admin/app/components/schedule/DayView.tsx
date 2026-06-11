@@ -5,6 +5,7 @@ import { DndContext, DragOverlay, closestCenter, useSensor, useSensors, PointerS
 import { useSchedule } from '@/contexts/ScheduleContext';
 import { useUI } from '@/contexts/UIContext';
 import { useDnD } from '@/hooks/useDnD';
+import { useColumnReorder } from '@/hooks/useColumnReorder';
 import { resolveById } from '@memo/domain';
 import type { Activity } from '@memo/domain';
 import { TimeColumn } from './TimeColumn';
@@ -161,6 +162,15 @@ export function DayView() {
       return allMasters.filter(m => activeMasterIds.has(m.id));
     }
   }, [columnMode, studios, masters, showAllColumns, dayActivities]);
+
+  // Column reorder via Cmd/Alt + drag
+  const {
+    modifierHeld,
+    orderedColumns,
+    onColumnDrop,
+  } = useColumnReorder({ columns, columnMode });
+  const [draggedColumnId, setDraggedColumnId] = useState<string | null>(null);
+  const [dropTargetId, setDropTargetId] = useState<string | null>(null);
 
   // Group activities by column
   const activitiesByColumn = useMemo(() => {
@@ -355,18 +365,56 @@ export function DayView() {
           className="sticky top-[52px] z-[24] flex bg-white border-b shrink-0"
           style={{ paddingLeft: TIME_COL_WIDTH, borderColor: 'var(--line)' }}
         >
-          {columns.map((col) => (
-            <div
-              key={col.id}
-              className="flex-1 text-center py-2 text-xs font-medium"
-              style={{ color: 'var(--ink-mid)' }}
-            >
-              <div className="uppercase tracking-wide">
-                {columnMode === 'locations' ? col.name : ('shortName' in col ? col.shortName : col.name)}
+          {orderedColumns.map((col) => {
+            const isDropTarget = dropTargetId === col.id && draggedColumnId !== col.id;
+            return (
+              <div
+                key={col.id}
+                draggable={modifierHeld}
+                onDragStart={(e) => {
+                  if (!modifierHeld) {
+                    e.preventDefault();
+                    return;
+                  }
+                  e.dataTransfer.setData('text/plain', col.id);
+                  e.dataTransfer.effectAllowed = 'move';
+                  setDraggedColumnId(col.id);
+                }}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = 'move';
+                  setDropTargetId(col.id);
+                }}
+                onDragLeave={() => {
+                  setDropTargetId((prev) => (prev === col.id ? null : prev));
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  const draggedId = e.dataTransfer.getData('text/plain');
+                  if (draggedId && draggedId !== col.id) {
+                    onColumnDrop(draggedId, col.id);
+                  }
+                  setDraggedColumnId(null);
+                  setDropTargetId(null);
+                }}
+                onDragEnd={() => {
+                  setDraggedColumnId(null);
+                  setDropTargetId(null);
+                }}
+                className={`flex-1 text-center py-2 text-xs font-medium transition-all duration-150 ${
+                  modifierHeld ? 'cursor-grab' : 'cursor-default'
+                } ${draggedColumnId === col.id ? 'opacity-50 scale-95' : ''} ${
+                  isDropTarget ? 'border-l-2 border-l-[var(--brand)]' : ''
+                }`}
+                style={{ color: 'var(--ink-mid)' }}
+              >
+                <div className="uppercase tracking-wide">
+                  {columnMode === 'locations' ? col.name : (col as { shortName?: string }).shortName ?? col.name}
+                </div>
               </div>
-            </div>
-          ))}
-          {columns.length === 0 && (
+            );
+          })}
+          {orderedColumns.length === 0 && (
             <div className="flex-1 text-center py-2 text-xs" style={{ color: 'var(--ink-light)' }}>
               Нет занятий на этот день
             </div>
@@ -376,7 +424,7 @@ export function DayView() {
         {/* Grid row — scrollable */}
         <div className="flex-1 flex overflow-auto relative">
           <TimeColumn />
-          {columns.map((col) => {
+          {orderedColumns.map((col) => {
             const colActivities = activitiesByColumn.get(col.id) ?? [];
             return (
               <DayColumn

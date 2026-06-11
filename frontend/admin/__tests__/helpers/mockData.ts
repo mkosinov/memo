@@ -174,6 +174,7 @@ export const mockLocationResponse: LocationResponse = {
   record_info: 'Запись по телефону',
   image_url: 'https://example.com/studio.jpg',
   location_hint: 'Вход со двора',
+  sort_order: 0,
   is_active: true,
   created_at: '2024-01-15T10:00:00Z',
   updated_at: '2024-06-01T12:00:00Z',
@@ -190,6 +191,7 @@ export const mockLocationResponseArchived: LocationResponse = {
   record_info: null,
   image_url: null,
   location_hint: null,
+  sort_order: 1,
   is_active: false,
   created_at: '2024-01-10T10:00:00Z',
   updated_at: '2024-05-01T12:00:00Z',
@@ -216,6 +218,7 @@ export const mockMasterResponse: MasterResponse = {
   specialty: 'живопись',
   avatar_url: 'https://example.com/avatar.jpg',
   is_active: true,
+  sort_order: 0,
   created_at: '2024-01-15T10:00:00Z',
   updated_at: '2024-06-01T12:00:00Z',
 };
@@ -229,6 +232,7 @@ export const mockMasterResponseArchived: MasterResponse = {
   specialty: 'керамика',
   avatar_url: null,
   is_active: false,
+  sort_order: 1,
   created_at: '2024-01-10T10:00:00Z',
   updated_at: '2024-05-01T12:00:00Z',
 };

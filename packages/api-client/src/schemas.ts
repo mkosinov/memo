@@ -11,6 +11,7 @@ export const MasterResponseSchema = z.object({
   specialty: z.string(),
   avatar_url: z.string().nullable(),
   is_active: z.boolean(),
+  sort_order: z.number().optional(),
   created_at: z.string(), // ISO datetime string
   updated_at: z.string(), // ISO datetime string
 });
@@ -45,6 +46,7 @@ export const LocationResponseSchema = z.object({
   record_info: z.string().nullable(),
   image_url: z.string().nullable(),
   location_hint: z.string().nullable().optional(),
+  sort_order: z.number().optional(),
   is_active: z.boolean(),
   created_at: z.string(), // ISO datetime string
   updated_at: z.string(), // ISO datetime string

@@ -69,6 +69,17 @@ describe('MasterResponseSchema', () => {
     const { first_name, ...without } = validMaster;
     expect(() => MasterResponseSchema.parse(without)).toThrow();
   });
+
+  it('parses master with sort_order', () => {
+    const data = { ...validMaster, sort_order: 3 };
+    const result = MasterResponseSchema.parse(data);
+    expect(result.sort_order).toBe(3);
+  });
+
+  it('defaults sort_order to undefined when absent', () => {
+    const result = MasterResponseSchema.parse(validMaster);
+    expect(result.sort_order).toBeUndefined();
+  });
 });
 
 // ─── LocationResponse ──────────────────────────────────────────────────────
@@ -118,6 +129,17 @@ describe('LocationResponseSchema', () => {
     // Schema has location_hint as optional, so parsing should succeed without it
     const result = LocationResponseSchema.parse(validLocation);
     expect(result.location_hint).toBeUndefined();
+  });
+
+  it('parses location with sort_order', () => {
+    const data = { ...validLocation, sort_order: 5 };
+    const result = LocationResponseSchema.parse(data);
+    expect(result.sort_order).toBe(5);
+  });
+
+  it('defaults sort_order to undefined when absent', () => {
+    const result = LocationResponseSchema.parse(validLocation);
+    expect(result.sort_order).toBeUndefined();
   });
 });
 

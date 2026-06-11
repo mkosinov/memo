@@ -1,16 +1,17 @@
 import { z } from 'zod';
 
-// ─── Artist ───────────────────────────────────────────────────────────────
+// ─── Master ───────────────────────────────────────────────────────────────
 
-export const ArtistSchema = z.object({
+export const MasterSchema = z.object({
   id: z.string(),
   name: z.string(),
   shortName: z.string(),
   color: z.string(),
   specialty: z.string().optional(),
+  sortOrder: z.number().optional(),
 });
 
-export type Artist = z.infer<typeof ArtistSchema>;
+export type Master = z.infer<typeof MasterSchema>;
 
 // ─── Studio / Location ────────────────────────────────────────────────────
 
@@ -20,6 +21,7 @@ export const LocationSchema = z.object({
   address: z.string().optional(),
   emoji: z.string().optional(),
   defaultCapacity: z.number().optional(),
+  sortOrder: z.number().optional(),
 });
 
 export type Location = z.infer<typeof LocationSchema>;
@@ -51,7 +53,6 @@ export const ActivitySchema = z.object({
   id: z.string(),
   day: z.number(), // 0=ПН ... 6=ВС
   masterId: z.string(),
-  artistId: z.string().optional(),
   startTime: z.number(), // e.g. 10.5 = 10:30
   duration: z.number(),
   durationMinutes: z.number().optional(),
@@ -160,7 +161,7 @@ export type StampState = z.infer<typeof StampStateSchema>;
 export const FiltersSchema = z.object({
   locationId: z.string(),
   serviceId: z.string(),
-  artistId: z.string(),
+  masterId: z.string(),
   weekStart: z.string(),
 });
 
@@ -171,7 +172,7 @@ export type Filters = z.infer<typeof FiltersSchema>;
 export const ConflictSchema = z.object({
   activityId1: z.string(),
   activityId2: z.string(),
-  artistId: z.string(),
+  masterId: z.string(),
   message: z.string(),
 });
 

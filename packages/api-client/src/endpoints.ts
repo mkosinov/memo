@@ -90,6 +90,13 @@ export async function deleteMaster(id: string): Promise<void> {
   await api(`/api/v1/masters/${id}`, z.any(), { method: 'DELETE' });
 }
 
+export async function reorderMasters(ids: string[]): Promise<void> {
+  await api('/api/v1/masters/reorder', z.any(), {
+    method: 'PUT',
+    body: JSON.stringify({ ids }),
+  });
+}
+
 // ─── Locations ─────────────────────────────────────────────────────────────
 
 export async function getLocations(): Promise<LocationResponse[]> {
@@ -416,6 +423,13 @@ export async function updateLocation(id: string, data: LocationUpdate): Promise<
 
 export async function deleteLocation(id: string): Promise<void> {
   await api(`/api/v1/locations/${id}`, z.any(), { method: 'DELETE' });
+}
+
+export async function reorderLocations(ids: string[]): Promise<void> {
+  await api('/api/v1/locations/reorder', z.any(), {
+    method: 'PUT',
+    body: JSON.stringify({ ids }),
+  });
 }
 
 // ─── Materials ──────────────────────────────────────────────────────────

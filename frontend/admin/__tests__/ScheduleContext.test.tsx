@@ -217,8 +217,8 @@ describe('ScheduleProvider', () => {
 
   it('provides masters, services, locations from React Query hooks', async () => {
     vi.mocked(getMasters).mockResolvedValue([
-      { id: 'm1', first_name: 'Ольга', last_name: 'Середа', color: '#5B8C7A', position: 'мастер', specialty: 'живопись', avatar_url: null, is_active: true, created_at: '2024-01-01', updated_at: '2024-01-01' },
-      { id: 'm2', first_name: 'Юлия', last_name: 'Большакова', color: '#6B7E9C', position: 'мастер', specialty: 'живопись', avatar_url: null, is_active: true, created_at: '2024-01-01', updated_at: '2024-01-01' },
+      { id: 'm1', first_name: 'Ольга', last_name: 'Середа', color: '#5B8C7A', position: 'мастер', specialty: 'живопись', avatar_url: null, is_active: true, sort_order: 0, created_at: '2024-01-01', updated_at: '2024-01-01' },
+      { id: 'm2', first_name: 'Юлия', last_name: 'Большакова', color: '#6B7E9C', position: 'мастер', specialty: 'живопись', avatar_url: null, is_active: true, sort_order: 0, created_at: '2024-01-01', updated_at: '2024-01-01' },
     ]);
     vi.mocked(getServices).mockResolvedValue([
       { id: 's1', title: 'Картина маслом', description: '', image_url: '', specialty: '', min_age: 12, max_age: 99, duration: 150, record_info: '', tariffs: [], tags: [], is_active: true, created_at: '', updated_at: '' },
@@ -314,7 +314,7 @@ describe('ScheduleProvider', () => {
 
   it('calls patchActivity mutation when updateActivity is called', async () => {
     vi.mocked(getMasters).mockResolvedValue([
-      { id: 'm1', first_name: 'Ольга', last_name: 'Середа', color: '#5B8C7A', position: 'мастер', specialty: 'живопись', avatar_url: null, is_active: true, created_at: '2024-01-01', updated_at: '2024-01-01' },
+      { id: 'm1', first_name: 'Ольга', last_name: 'Середа', color: '#5B8C7A', position: 'мастер', specialty: 'живопись', avatar_url: null, is_active: true, sort_order: 0, created_at: '2024-01-01', updated_at: '2024-01-01' },
     ]);
     vi.mocked(getServices).mockResolvedValue([
       { id: 's1', title: 'Картина маслом', description: '', image_url: '', specialty: '', min_age: 12, max_age: 99, duration: 120, record_info: '', tariffs: [], tags: [], is_active: true, created_at: '', updated_at: '' },
@@ -349,7 +349,7 @@ describe('ScheduleProvider', () => {
 
   it('calls deleteActivity mutation when deleteActivity is called', async () => {
     vi.mocked(getMasters).mockResolvedValue([
-      { id: 'm1', first_name: 'Ольга', last_name: 'Середа', color: '#5B8C7A', position: 'мастер', specialty: 'живопись', avatar_url: null, is_active: true, created_at: '2024-01-01', updated_at: '2024-01-01' },
+      { id: 'm1', first_name: 'Ольга', last_name: 'Середа', color: '#5B8C7A', position: 'мастер', specialty: 'живопись', avatar_url: null, is_active: true, sort_order: 0, created_at: '2024-01-01', updated_at: '2024-01-01' },
     ]);
     vi.mocked(getServices).mockResolvedValue([
       { id: 's1', title: 'Картина маслом', description: '', image_url: '', specialty: '', min_age: 12, max_age: 99, duration: 120, record_info: '', tariffs: [], tags: [], is_active: true, created_at: '', updated_at: '' },

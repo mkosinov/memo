@@ -4,9 +4,11 @@ from functools import lru_cache
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import asc
 
 from src.db import SessionDep
-from src.schemas.location import LocationCreate, LocationResponse, LocationUpdate
+from src.models.location import Location
+from src.schemas.location import LocationCreate, LocationResponse, LocationUpdate, ReorderRequest
 from src.services.generic import GenericService
 from src.services.location import get_location_service
 
@@ -27,8 +29,21 @@ async def list_locations(
     service: _ServiceDep,
     session: SessionDep,
 ) -> list[LocationResponse]:
-    """Return all active locations."""
-    return await service.list(db_session=session)
+    """Return all active locations sorted by sort_order, then name."""
+    return await service.list(
+        db_session=session,
+        order_by=[asc(Location.sort_order), asc(Location.name)],
+    )
+
+
+@router.put("/reorder", response_model=list[LocationResponse])
+async def reorder_locations(
+    data: ReorderRequest,
+    service: _ServiceDep,
+    session: SessionDep,
+) -> list[LocationResponse]:
+    """Reorder locations by assigning sort_order from the provided ID list."""
+    return await service.reorder(db_session=session, ids=data.ids)
 
 
 @router.get("/{location_id}", response_model=LocationResponse)

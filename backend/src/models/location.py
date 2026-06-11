@@ -25,6 +25,7 @@ class Location(AbstractModel):
     record_info: Mapped[str | None] = mapped_column(Text, nullable=True)
     image_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     location_hint: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
     tags: Mapped[list["Tag"]] = relationship(
         "Tag", secondary="location_tags", back_populates="locations"

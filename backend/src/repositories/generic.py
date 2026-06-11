@@ -26,13 +26,15 @@ class GenericRepository:
     """
 
     async def list(
-        self, session: AsyncSession, table: type[ModelType], **filters
+        self, session: AsyncSession, table: type[ModelType], order_by=None, **filters
     ) -> list[ModelType]:
-        """Return all active records, optionally filtered."""
+        """Return all active records, optionally filtered and ordered."""
         stmt = select(table).where(table.is_active)
         for key, value in filters.items():
             if value is not None:
                 stmt = stmt.where(getattr(table, key) == value)
+        if order_by is not None:
+            stmt = stmt.order_by(*order_by)
         result = await session.execute(stmt)
         return list(result.scalars().all())
 
@@ -91,6 +93,24 @@ class GenericRepository:
         instance.is_active = False
         await session.flush()
         return True
+
+    async def reorder(
+        self, session: AsyncSession, table: type[ModelType], ids: list[str]
+    ) -> list[ModelType]:
+        """Set sort_order for records based on the order of IDs in the list.
+
+        Only active records matching the given IDs are updated.
+        Returns the reordered records in the new order.
+        """
+        updated: list[ModelType] = []
+        for idx, record_id in enumerate(ids):
+            instance = await self.get(session, table, record_id)
+            if instance and instance.is_active:
+                instance.sort_order = idx
+                await session.flush()
+                await session.refresh(instance)
+                updated.append(instance)
+        return updated
 
 
 @lru_cache

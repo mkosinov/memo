@@ -38,10 +38,10 @@ class GenericService(Generic[CreateSchemaT, UpdateSchemaT, ResponseSchemaT]):
         self._response_schema = response_schema
 
     async def list(
-        self, db_session: AsyncSession, **filters
+        self, db_session: AsyncSession, order_by=None, **filters
     ) -> list[ResponseSchemaT]:
-        """Return all active records, optionally filtered."""
-        orm_list = await self._repository.list(db_session, self._model, **filters)
+        """Return all active records, optionally filtered and ordered."""
+        orm_list = await self._repository.list(db_session, self._model, order_by=order_by, **filters)
         return [self._response_schema.model_validate(o) for o in orm_list]
 
     async def get(
@@ -83,3 +83,10 @@ class GenericService(Generic[CreateSchemaT, UpdateSchemaT, ResponseSchemaT]):
     async def delete(self, db_session: AsyncSession, id: str) -> bool:
         """Soft-delete a record.  Returns ``True`` if deleted, ``False`` if not found."""
         return await self._repository.delete(db_session, self._model, id)
+
+    async def reorder(
+        self, db_session: AsyncSession, ids: list[str]
+    ) -> list[ResponseSchemaT]:
+        """Reorder records by assigning sort_order based on the order of IDs."""
+        orm_list = await self._repository.reorder(db_session, self._model, ids)
+        return [self._response_schema.model_validate(o) for o in orm_list]

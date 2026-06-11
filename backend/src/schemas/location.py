@@ -17,6 +17,7 @@ class LocationBase(BaseModel):
     record_info: str | None = None
     image_url: str | None = None
     location_hint: str | None = None
+    sort_order: int = 0
 
 
 class LocationCreate(LocationBase):
@@ -40,3 +41,9 @@ class LocationResponse(LocationBase):
     created_at: datetime
     updated_at: datetime
     is_active: bool
+
+
+class ReorderRequest(BaseModel):
+    """Request body for reordering locations."""
+
+    ids: list[str]

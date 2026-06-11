@@ -14,6 +14,7 @@ class MasterBase(BaseModel):
     position: str  # Position enum value
     specialty: str  # Specialty enum value
     avatar_url: str | None = None
+    sort_order: int = 0
 
 
 class MasterCreate(MasterBase):
@@ -37,3 +38,9 @@ class MasterResponse(MasterBase):
     created_at: datetime
     updated_at: datetime
     is_active: bool
+
+
+class ReorderRequest(BaseModel):
+    """Request body for reordering masters."""
+
+    ids: list[str]

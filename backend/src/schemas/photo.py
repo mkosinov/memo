@@ -27,6 +27,8 @@ class PhotoUpdate(BaseModel):
 
 class PhotoTagResponse(BaseModel):
     """Tag reference in photo response."""
+    model_config = ConfigDict(from_attributes=True)
+    
     id: str
     tag: str
 

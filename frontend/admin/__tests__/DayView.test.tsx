@@ -218,36 +218,11 @@ describe('DayView', () => {
     });
   });
 
-  describe('column mode toggle UI', () => {
-    it('renders the column mode toggle with both options', () => {
+  describe('column mode toggle (moved to Topbar)', () => {
+    it('does NOT render the column mode toggle in DayView', () => {
       renderDayView({ selectedDay: new Date(2026, 5, 15), loading: false, error: null });
-      expect(screen.getByText('По мастерам')).toBeInTheDocument();
-      expect(screen.getByText('По локациям')).toBeInTheDocument();
-    });
-
-    it('calls setColumnMode when toggle button is clicked', () => {
-      const setColumnMode = vi.fn();
-      renderDayView({
-        columnMode: 'masters',
-        setColumnMode,
-        selectedDay: new Date(2026, 5, 15),
-        loading: false,
-        error: null,
-      });
-      fireEvent.click(screen.getByText('По локациям'));
-      expect(setColumnMode).toHaveBeenCalledWith('locations');
-    });
-
-    it('highlights the active column mode button', () => {
-      renderDayView({
-        columnMode: 'masters',
-        selectedDay: new Date(2026, 5, 15),
-        loading: false,
-        error: null,
-      });
-      const mastersBtn = screen.getByTestId('column-mode-masters');
-      // Active button should have brand background via inline style
-      expect(mastersBtn).toHaveStyle({ backgroundColor: 'var(--brand)' });
+      expect(screen.queryByText('По мастерам')).not.toBeInTheDocument();
+      expect(screen.queryByText('По локациям')).not.toBeInTheDocument();
     });
   });
 });

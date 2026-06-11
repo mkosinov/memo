@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback } from 'react';
+import React, { useCallback, useState, useRef, useEffect } from 'react';
 import { useSchedule } from '@/contexts/ScheduleContext';
 import { useNavigation } from '@/contexts/NavigationContext';
 import { getMonday, formatDateISO } from '@/lib/utils';
@@ -28,8 +28,26 @@ export function Topbar() {
     selectedDay,
     setSelectedDay,
     currentWeek,
+    columnMode,
+    setColumnMode,
   } = useSchedule();
   const { selectDateRange } = useNavigation();
+
+  // Dropdown state
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    if (!dropdownOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [dropdownOpen]);
 
   const handleViewModeSwitch = useCallback((newMode: 'day' | 'week') => {
     if (newMode === viewMode) return;
@@ -54,9 +72,29 @@ export function Topbar() {
     setViewMode(newMode);
   }, [viewMode, selectedDay, currentWeek, selectDateRange, setSelectedDay, setViewMode]);
 
+  const handleDayButtonClick = useCallback(() => {
+    handleViewModeSwitch('day');
+  }, [handleViewModeSwitch]);
+
+  const handleDropdownToggle = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    setDropdownOpen(prev => !prev);
+  }, []);
+
+  const handleColumnModeSelect = useCallback((mode: 'masters' | 'locations') => {
+    setColumnMode(mode);
+    setDropdownOpen(false);
+    // Also switch to day view if not already
+    if (viewMode !== 'day') {
+      handleViewModeSwitch('day');
+    }
+  }, [setColumnMode, viewMode, handleViewModeSwitch]);
+
+  const dayLabel = columnMode === 'masters' ? 'День по мастерам' : 'День по локациям';
+
   return (
     <div
-      className="sticky top-0 z-40 flex h-12 items-center justify-between border-b px-3"
+      className="sticky top-0 z-40 flex h-12 items-center gap-2 border-b px-3"
       style={{
         backgroundColor: 'var(--white)',
         borderColor: 'var(--line)',
@@ -92,18 +130,96 @@ export function Topbar() {
         />
       </div>
 
-      {/* ── Right: View Toggle (Day/Week) ── */}
+      {/* ── Spacer (pushes toggle to right) ── */}
+      <div className="flex-1" />
+
+      {/* ── Right: Combined Day+ColumnMode / Week Toggle ── */}
       <div className="flex items-center gap-1 rounded-lg p-0.5" style={{ backgroundColor: 'var(--surface)' }}>
-        <button
-          onClick={() => handleViewModeSwitch('day')}
-          className="rounded-md px-3 py-1 text-xs font-medium transition-colors"
-          style={viewMode === 'day'
-            ? { backgroundColor: 'var(--brand)', color: 'white', boxShadow: '0 1px 3px rgba(0,0,0,0.15)' }
-            : { color: 'var(--ink-light)' }
-          }
-        >
-          День
-        </button>
+        {/* Day button with dropdown */}
+        <div className="relative" ref={dropdownRef}>
+          <div className="flex items-center">
+            <button
+              onClick={handleDayButtonClick}
+              className="rounded-l-md px-3 py-1 text-xs font-medium transition-colors"
+              style={viewMode === 'day'
+                ? { backgroundColor: 'var(--brand)', color: 'white', boxShadow: '0 1px 3px rgba(0,0,0,0.15)' }
+                : { color: 'var(--ink-light)' }
+              }
+              data-testid="day-button"
+            >
+              {dayLabel}
+            </button>
+            <button
+              onClick={handleDropdownToggle}
+              className="rounded-r-md px-1.5 py-1 text-xs transition-colors border-l"
+              style={viewMode === 'day'
+                ? { backgroundColor: 'var(--brand)', color: 'white', borderColor: 'rgba(255,255,255,0.2)' }
+                : { color: 'var(--ink-light)', borderColor: 'var(--ink-faint)' }
+              }
+              aria-label="Открыть меню выбора режима колонок"
+              data-testid="column-mode-dropdown"
+            >
+              <svg width="10" height="6" viewBox="0 0 10 6" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M1 1L5 5L9 1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            </button>
+          </div>
+
+          {/* Dropdown menu */}
+          {dropdownOpen && (
+            <div
+              className="absolute top-full right-0 mt-1 min-w-[160px] rounded-lg border py-1 z-50"
+              style={{
+                backgroundColor: 'var(--white)',
+                borderColor: 'var(--line)',
+                boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+              }}
+              role="menu"
+              data-testid="column-mode-menu"
+            >
+              <button
+                role="menuitem"
+                data-active={columnMode === 'masters'}
+                onClick={() => handleColumnModeSelect('masters')}
+                className="w-full px-3 py-1.5 text-left text-xs font-medium transition-colors flex items-center gap-2"
+                style={columnMode === 'masters'
+                  ? { color: 'var(--brand)' }
+                  : { color: 'var(--ink)' }
+                }
+              >
+                {columnMode === 'masters' && (
+                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                    <path d="M2 6L5 9L10 3" stroke="var(--brand)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                )}
+                <span className={columnMode === 'masters' ? '' : 'pl-[20px]'}>
+                  По мастерам
+                </span>
+              </button>
+              <button
+                role="menuitem"
+                data-active={columnMode === 'locations'}
+                onClick={() => handleColumnModeSelect('locations')}
+                className="w-full px-3 py-1.5 text-left text-xs font-medium transition-colors flex items-center gap-2"
+                style={columnMode === 'locations'
+                  ? { color: 'var(--brand)' }
+                  : { color: 'var(--ink)' }
+                }
+              >
+                {columnMode === 'locations' && (
+                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                    <path d="M2 6L5 9L10 3" stroke="var(--brand)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                )}
+                <span className={columnMode === 'locations' ? '' : 'pl-[20px]'}>
+                  По локациям
+                </span>
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Week button */}
         <button
           onClick={() => handleViewModeSwitch('week')}
           className="rounded-md px-3 py-1 text-xs font-medium transition-colors"

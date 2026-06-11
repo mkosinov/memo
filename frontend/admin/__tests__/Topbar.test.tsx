@@ -16,20 +16,24 @@ vi.mock('@memo/api-client', () => ({
   deleteActivity: vi.fn(),
 }));
 
+const defaultScheduleMock = {
+  masters: [],
+  locations: [],
+  filterMasterIds: [],
+  filterLocationIds: [],
+  setFilterMasterIds: vi.fn(),
+  setFilterLocationIds: vi.fn(),
+  viewMode: 'week',
+  setViewMode: vi.fn(),
+  selectedDay: new Date(),
+  setSelectedDay: vi.fn(),
+  currentWeek: new Date(),
+  columnMode: 'masters',
+  setColumnMode: vi.fn(),
+};
+
 vi.mock('@/contexts/ScheduleContext', () => ({
-  useSchedule: vi.fn(() => ({
-    masters: [],
-    locations: [],
-    filterMasterIds: [],
-    filterLocationIds: [],
-    setFilterMasterIds: vi.fn(),
-    setFilterLocationIds: vi.fn(),
-    viewMode: 'week',
-    setViewMode: vi.fn(),
-    selectedDay: new Date(),
-    setSelectedDay: vi.fn(),
-    currentWeek: new Date(),
-  })),
+  useSchedule: vi.fn(() => defaultScheduleMock),
 }));
 
 function renderWithProviders() {
@@ -50,6 +54,7 @@ function renderWithProviders() {
 describe('Topbar', () => {
   beforeEach(() => {
     document.documentElement.removeAttribute('data-theme');
+    vi.clearAllMocks();
   });
 
   it('does not render week navigation buttons (moved to sidebar)', () => {
@@ -89,50 +94,24 @@ describe('Topbar', () => {
     expect(screen.queryByLabelText('Фильтры')).not.toBeInTheDocument();
   });
 
-  it('renders view toggle buttons (День and Неделя)', () => {
+  it('renders combined Day button with column mode text', () => {
     renderWithProviders();
-    expect(screen.getByText('День')).toBeInTheDocument();
+    // Should show "День по мастерам" instead of just "День"
+    expect(screen.getByText('День по мастерам')).toBeInTheDocument();
     expect(screen.getByText('Неделя')).toBeInTheDocument();
   });
 
-  it('calls setViewMode when day button is clicked', async () => {
-    const setViewMode = vi.fn();
+  it('shows "День по локациям" when columnMode is locations', async () => {
     const { useSchedule: mockHook } = await import('@/contexts/ScheduleContext');
     vi.mocked(mockHook).mockReturnValue({
-      masters: [],
-      locations: [],
-      filterMasterIds: [],
-      filterLocationIds: [],
-      setFilterMasterIds: vi.fn(),
-      setFilterLocationIds: vi.fn(),
-      viewMode: 'week',
-      setViewMode,
-      selectedDay: new Date(),
-      setSelectedDay: vi.fn(),
-      showAllColumns: false,
-      setShowAllColumns: vi.fn(),
-      activities: [],
-      scheduleIndex: { byId: new Map(), byDate: new Map(), byMasterId: new Map(), byLocation: { all: { byDate: new Map(), byServiceId: new Map() } } },
-      services: [],
-      currentWeek: new Date(),
-      stamp: { masterId: null, serviceId: null, locations: new Set(), ready: false },
-      setCurrentWeek: vi.fn(),
-      addActivity: vi.fn(),
-      updateActivity: vi.fn(),
-      deleteActivity: vi.fn(),
-      setStamp: vi.fn(),
-      copyLastWeek: vi.fn(),
-      loading: false,
-      error: null,
+      ...defaultScheduleMock,
+      columnMode: 'locations',
     } as any);
 
-    // Need to re-render with updated mock
     const { unmount } = renderWithProviders();
     unmount();
 
-    // Re-import to pick up the mock
     const { Topbar: TopbarRe } = await import('../app/components/layout/Topbar');
-
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
     });
@@ -146,7 +125,146 @@ describe('Topbar', () => {
       </QueryClientProvider>
     );
 
-    fireEvent.click(screen.getByText('День'));
+    expect(screen.getByText('День по локациям')).toBeInTheDocument();
+  });
+
+  it('calls setViewMode("day") when Day button is clicked', async () => {
+    const setViewMode = vi.fn();
+    const { useSchedule: mockHook } = await import('@/contexts/ScheduleContext');
+    vi.mocked(mockHook).mockReturnValue({
+      ...defaultScheduleMock,
+      viewMode: 'week',
+      setViewMode,
+    } as any);
+
+    const { unmount } = renderWithProviders();
+    unmount();
+
+    const { Topbar: TopbarRe } = await import('../app/components/layout/Topbar');
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <UIProvider>
+          <NavigationProvider>
+            <TopbarRe />
+          </NavigationProvider>
+        </UIProvider>
+      </QueryClientProvider>
+    );
+
+    fireEvent.click(screen.getByText('День по мастерам'));
     expect(setViewMode).toHaveBeenCalledWith('day');
+  });
+
+  it('opens dropdown menu when dropdown arrow is clicked', () => {
+    renderWithProviders();
+    // The dropdown arrow is a chevron SVG button — find it by role
+    const dropdownButton = screen.getByRole('button', { name: /открыть меню/i });
+    fireEvent.click(dropdownButton);
+    // After opening, both options should be visible
+    expect(screen.getByRole('menuitem', { name: /по мастерам/i })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: /по локациям/i })).toBeInTheDocument();
+  });
+
+  it('calls setColumnMode when dropdown option is selected', async () => {
+    const setColumnMode = vi.fn();
+    const { useSchedule: mockHook } = await import('@/contexts/ScheduleContext');
+    vi.mocked(mockHook).mockReturnValue({
+      ...defaultScheduleMock,
+      columnMode: 'masters',
+      setColumnMode,
+    } as any);
+
+    const { unmount } = renderWithProviders();
+    unmount();
+
+    const { Topbar: TopbarRe } = await import('../app/components/layout/Topbar');
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <UIProvider>
+          <NavigationProvider>
+            <TopbarRe />
+          </NavigationProvider>
+        </UIProvider>
+      </QueryClientProvider>
+    );
+
+    // Open dropdown
+    fireEvent.click(screen.getByRole('button', { name: /открыть меню/i }));
+    // Click the locations option
+    fireEvent.click(screen.getByRole('menuitem', { name: /по локациям/i }));
+    expect(setColumnMode).toHaveBeenCalledWith('locations');
+  });
+
+  it('closes dropdown after selecting an option', async () => {
+    const setColumnMode = vi.fn();
+    const { useSchedule: mockHook } = await import('@/contexts/ScheduleContext');
+    vi.mocked(mockHook).mockReturnValue({
+      ...defaultScheduleMock,
+      columnMode: 'masters',
+      setColumnMode,
+    } as any);
+
+    const { unmount } = renderWithProviders();
+    unmount();
+
+    const { Topbar: TopbarRe } = await import('../app/components/layout/Topbar');
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <UIProvider>
+          <NavigationProvider>
+            <TopbarRe />
+          </NavigationProvider>
+        </UIProvider>
+      </QueryClientProvider>
+    );
+
+    // Open dropdown
+    fireEvent.click(screen.getByRole('button', { name: /открыть меню/i }));
+    expect(screen.getByRole('menuitem', { name: /по локациям/i })).toBeInTheDocument();
+
+    // Select an option
+    fireEvent.click(screen.getByRole('menuitem', { name: /по локациям/i }));
+
+    // Dropdown should close
+    expect(screen.queryByRole('menuitem', { name: /по мастерам/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: /по локациям/i })).not.toBeInTheDocument();
+  });
+
+  it('highlights active column mode in dropdown', async () => {
+    const { useSchedule: mockHook } = await import('@/contexts/ScheduleContext');
+    vi.mocked(mockHook).mockReturnValue({
+      ...defaultScheduleMock,
+      columnMode: 'locations',
+    } as any);
+
+    const { unmount } = renderWithProviders();
+    unmount();
+
+    const { Topbar: TopbarRe } = await import('../app/components/layout/Topbar');
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <UIProvider>
+          <NavigationProvider>
+            <TopbarRe />
+          </NavigationProvider>
+        </UIProvider>
+      </QueryClientProvider>
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /открыть меню/i }));
+    const locationsItem = screen.getByRole('menuitem', { name: /по локациям/i });
+    expect(locationsItem).toHaveAttribute('data-active', 'true');
   });
 });

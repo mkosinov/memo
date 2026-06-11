@@ -2,7 +2,7 @@
 
 import React, { useCallback, useState, useRef, useEffect } from 'react';
 import { useSchedule } from '@/contexts/ScheduleContext';
-import { CELL_HEIGHT_MIN, CELL_HEIGHT_MAX, CELL_HEIGHT_STEP, getMonday, formatDateISO, formatWeekRange, formatDayLabel } from '@/lib/utils';
+import { CELL_HEIGHT_OPTIONS, GRID_FREQUENCY_OPTIONS, getMonday, formatDateISO, formatWeekRange, formatDayLabel } from '@/lib/utils';
 import { useNavigation } from '@/contexts/NavigationContext';
 import { MultiSelect } from '../shared/MultiSelect';
 import { CalendarPopover } from '../shared/CalendarPopover';
@@ -33,6 +33,8 @@ export function Topbar() {
     setColumnMode,
     cellHeight,
     setCellHeight,
+    gridFrequency,
+    setGridFrequency,
     prevPeriod,
     nextPeriod,
   } = useSchedule();
@@ -41,6 +43,10 @@ export function Topbar() {
   // Dropdown state
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Zoom popup state
+  const [zoomOpen, setZoomOpen] = useState(false);
+  const zoomRef = useRef<HTMLDivElement>(null);
 
   // Calendar popover state
   const [calendarOpen, setCalendarOpen] = useState(false);
@@ -57,6 +63,18 @@ export function Topbar() {
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [dropdownOpen]);
+
+  // Close zoom popup on outside click
+  useEffect(() => {
+    if (!zoomOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (zoomRef.current && !zoomRef.current.contains(e.target as Node)) {
+        setZoomOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [zoomOpen]);
 
   const handleViewModeSwitch = useCallback((newMode: 'day' | 'week') => {
     if (newMode === viewMode) return;
@@ -98,6 +116,15 @@ export function Topbar() {
       handleViewModeSwitch('day');
     }
   }, [setColumnMode, viewMode, handleViewModeSwitch]);
+
+  const handleZoomSelect = useCallback((height: number) => {
+    setCellHeight(height);
+    setZoomOpen(false);
+  }, [setCellHeight]);
+
+  const handleFrequencySelect = useCallback((freq: number) => {
+    setGridFrequency(freq);
+  }, [setGridFrequency]);
 
   const handleCalendarDateSelect = useCallback((date: Date) => {
     if (viewMode === 'week') {
@@ -175,43 +202,6 @@ export function Topbar() {
           <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
             <path d="M4 2L8 6L4 10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
           </svg>
-        </button>
-      </div>
-
-      {/* ── Left: Cell height control ── */}
-      <div
-        className="flex items-center gap-1.5 mr-auto"
-        data-testid="cell-height-control"
-      >
-        <span className="text-[11px] font-medium select-none" style={{ color: 'var(--ink-light)' }}>
-          Высота
-        </span>
-        <button
-          onClick={() => setCellHeight(cellHeight - CELL_HEIGHT_STEP)}
-          disabled={cellHeight <= CELL_HEIGHT_MIN}
-          data-testid="cell-height-decrease"
-          className="flex items-center justify-center w-6 h-6 rounded-md text-xs font-semibold transition-colors disabled:opacity-30 disabled:cursor-not-allowed hover:bg-surface"
-          style={{ color: 'var(--ink-mid)', border: '1px solid var(--line)' }}
-          aria-label="Уменьшить высоту ячейки"
-        >
-          −
-        </button>
-        <span
-          data-testid="cell-height-value"
-          className="text-[11px] font-medium tabular-nums min-w-[24px] text-center"
-          style={{ color: 'var(--ink)' }}
-        >
-          {cellHeight}
-        </span>
-        <button
-          onClick={() => setCellHeight(cellHeight + CELL_HEIGHT_STEP)}
-          disabled={cellHeight >= CELL_HEIGHT_MAX}
-          data-testid="cell-height-increase"
-          className="flex items-center justify-center w-6 h-6 rounded-md text-xs font-semibold transition-colors disabled:opacity-30 disabled:cursor-not-allowed hover:bg-surface"
-          style={{ color: 'var(--ink-mid)', border: '1px solid var(--line)' }}
-          aria-label="Увеличить высоту ячейки"
-        >
-          +
         </button>
       </div>
 
@@ -342,6 +332,88 @@ export function Topbar() {
         >
           Неделя
         </button>
+      </div>
+
+      {/* ── Zoom icon + popup ── */}
+      <div className="relative" ref={zoomRef}>
+        <button
+          onClick={() => setZoomOpen(prev => !prev)}
+          data-testid="zoom-button"
+          className="flex items-center justify-center w-7 h-7 rounded-md text-xs transition-colors hover:bg-surface"
+          style={{ color: 'var(--ink-mid)', border: '1px solid var(--line)' }}
+          aria-label="Масштаб расписания"
+        >
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="6" cy="6" r="4.5" stroke="currentColor" strokeWidth="1.3"/>
+            <path d="M9.5 9.5L12.5 12.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+          </svg>
+        </button>
+
+        {zoomOpen && (
+          <div
+            className="absolute top-full right-0 mt-1 min-w-[140px] rounded-lg border py-1 z-50"
+            style={{
+              backgroundColor: 'var(--white)',
+              borderColor: 'var(--line)',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+            }}
+            role="menu"
+            data-testid="zoom-popup"
+          >
+            {CELL_HEIGHT_OPTIONS.map((option) => (
+              <button
+                key={option.value}
+                role="menuitem"
+                data-testid={`zoom-option-${option.value}`}
+                data-active={cellHeight === option.value}
+                onClick={() => handleZoomSelect(option.value)}
+                className="w-full px-3 py-1.5 text-left text-xs font-medium transition-colors flex items-center gap-2"
+                style={cellHeight === option.value
+                  ? { color: 'var(--brand)' }
+                  : { color: 'var(--ink)' }
+                }
+              >
+                {cellHeight === option.value && (
+                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                    <path d="M2 6L5 9L10 3" stroke="var(--brand)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                )}
+                <span className={cellHeight === option.value ? '' : 'pl-[20px]'}>
+                  {option.label}
+                </span>
+              </button>
+            ))}
+            {/* ── Divider ── */}
+            <div className="my-1 mx-2 border-t" style={{ borderColor: 'var(--line)' }} />
+            {/* ── Frequency section label ── */}
+            <div className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--ink-light)' }}>
+              Частота сетки:
+            </div>
+            {GRID_FREQUENCY_OPTIONS.map((option) => (
+              <button
+                key={option.value}
+                role="menuitem"
+                data-testid={`grid-freq-${option.value}`}
+                data-active={gridFrequency === option.value}
+                onClick={() => handleFrequencySelect(option.value)}
+                className="w-full px-3 py-1.5 text-left text-xs font-medium transition-colors flex items-center gap-2"
+                style={gridFrequency === option.value
+                  ? { color: 'var(--brand)' }
+                  : { color: 'var(--ink)' }
+                }
+              >
+                {gridFrequency === option.value && (
+                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                    <path d="M2 6L5 9L10 3" stroke="var(--brand)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                )}
+                <span className={gridFrequency === option.value ? '' : 'pl-[20px]'}>
+                  {option.label}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

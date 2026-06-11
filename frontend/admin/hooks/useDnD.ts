@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import type { Activity } from '@memo/domain';
 import { HOURS_START } from '@/lib/utils';
 
@@ -14,6 +14,7 @@ interface UseDnDOptions {
   addActivity: (activity: Omit<Activity, 'id'>) => void;
   updateActivity: (id: string, updates: Partial<Activity>) => void;
   showToast: (message: string, undo?: () => void) => void;
+  gridFrequency?: number;
 }
 
 /**
@@ -57,17 +58,26 @@ export function parseSlotId(id: string): { dayIndex: number; slotIndex: number }
 }
 
 /**
- * Calculate startTime from slotIndex: HOURS_START + slotIndex * 0.5
+ * Calculate startTime from slotIndex using the given grid frequency.
+ * Default 30 min: slotIndexToTime(2) = 10 (10:00)
+ * 15 min: slotIndexToTime(2) = 9.5 (9:30)
+ * 5 min: slotIndexToTime(2) = 9 + 2*(5/60) = 9.167 (9:10)
  */
-export function slotIndexToTime(slotIndex: number): number {
-  return HOURS_START + slotIndex * 0.5;
+export function slotIndexToTime(slotIndex: number, gridFrequency: number = 30): number {
+  return HOURS_START + slotIndex * (gridFrequency / 60);
 }
 
-export function useDnD({ activities, addActivity, updateActivity, showToast }: UseDnDOptions) {
+export function useDnD({ activities, addActivity, updateActivity, showToast, gridFrequency = 30 }: UseDnDOptions) {
   const [dragId, setDragId] = useState<string | null>(null);
   const [dragCopy, setDragCopy] = useState(false);
   const [ghostPosition, setGhostPosition] = useState<GhostPosition | null>(null);
   const [activeDragActivity, setActiveDragActivity] = useState<Activity | null>(null);
+
+  /** The snapped time during drag (derived from ghostPosition). Shows as preview on the card. */
+  const draggedSnappedTime = useMemo(() => {
+    if (!ghostPosition || !activeDragActivity) return null;
+    return slotIndexToTime(ghostPosition.slotIndex, gridFrequency);
+  }, [ghostPosition, activeDragActivity, gridFrequency]);
 
   const onDragStart = useCallback(
     (event: DragStartEvent, input?: DragStartInput) => {
@@ -112,7 +122,7 @@ export function useDnD({ activities, addActivity, updateActivity, showToast }: U
       }
 
       const { dayIndex, slotIndex } = parsed;
-      const newStartTime = slotIndexToTime(slotIndex);
+      const newStartTime = slotIndexToTime(slotIndex, gridFrequency);
 
       if (dragCopy && activeDragActivity) {
         // Create a copy at the new position
@@ -157,7 +167,7 @@ export function useDnD({ activities, addActivity, updateActivity, showToast }: U
       setGhostPosition(null);
       setActiveDragActivity(null);
     },
-    [dragId, dragCopy, activeDragActivity, activities, addActivity, updateActivity, showToast],
+    [dragId, dragCopy, activeDragActivity, activities, addActivity, updateActivity, showToast, gridFrequency],
   );
 
   const handleDragCancel = useCallback(() => {
@@ -172,6 +182,7 @@ export function useDnD({ activities, addActivity, updateActivity, showToast }: U
     dragCopy,
     ghostPosition,
     activeDragActivity,
+    draggedSnappedTime,
     onDragStart,
     onDragOver,
     onDragEnd,

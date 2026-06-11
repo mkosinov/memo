@@ -102,8 +102,8 @@ describe('ActivityCard', () => {
   });
 
   it('hides age and location when height < 90px', () => {
-    // duration=0.6 → height = 0.6*120-10 = 62px (56 <= h < 90, !showExtra)
-    const mediumActivity = { ...mockActivity, duration: 0.6 };
+    // duration=0.7, cellHeight=50 → height = 0.7*100-10 = 60px (56 <= h < 90, !showExtra)
+    const mediumActivity = { ...mockActivity, duration: 0.7 };
     render(<ActivityCard activity={mediumActivity} master={mockMaster} />);
     expect(screen.queryByText('6+')).not.toBeInTheDocument();
     // Service name IS still visible

@@ -31,6 +31,7 @@ export function DayView() {
     showAllColumns,
     columnMode,
     cellHeight = 60,
+    gridFrequency = 30,
   } = useSchedule();
   const { showToast } = useUI();
 
@@ -186,6 +187,7 @@ export function DayView() {
     dragCopy,
     ghostPosition,
     activeDragActivity,
+    draggedSnappedTime,
     onDragStart,
     onDragOver,
     onDragEnd,
@@ -195,6 +197,7 @@ export function DayView() {
     addActivity,
     updateActivity,
     showToast,
+    gridFrequency,
   });
 
   const today = new Date();
@@ -335,7 +338,7 @@ export function DayView() {
 
         {/* Grid row — scrollable */}
         <div className="flex-1 flex overflow-auto relative">
-          <TimeColumn cellHeight={cellHeight} />
+          <TimeColumn cellHeight={cellHeight} gridFrequency={gridFrequency} />
           {orderedColumns.map((col) => {
             const colActivities = activitiesByColumn.get(col.id) ?? [];
             return (
@@ -359,6 +362,7 @@ export function DayView() {
                 stampReady={stamp.ready}
                 stamp={stamp}
                 cellHeight={cellHeight}
+                gridFrequency={gridFrequency}
               />
             );
           })}
@@ -381,9 +385,22 @@ export function DayView() {
 
       <DragOverlay dropAnimation={null}>
         {activeDragActivity && dragMaster ? (
-          <div className="opacity-80 scale-95" style={{ width: '180px' }} data-drag-ghost="true">
+          <div className="opacity-80 scale-95 relative" style={{ width: '180px' }} data-drag-ghost="true">
+            {/* Time preview label — shows snapped position while dragging */}
+            {draggedSnappedTime != null && (
+              <div
+                className="absolute -top-6 left-1/2 -translate-x-1/2 z-[60] px-2 py-0.5 rounded-full text-[11px] font-bold text-white shadow-lg whitespace-nowrap"
+                style={{ backgroundColor: 'var(--brand, #004D56)' }}
+              >
+                {formatTime(draggedSnappedTime)}
+              </div>
+            )}
             <ActivityCard
-              activity={activeDragActivity}
+              activity={
+                draggedSnappedTime != null
+                  ? { ...activeDragActivity, startTime: draggedSnappedTime }
+                  : activeDragActivity
+              }
               master={dragMaster}
               studios={studios}
               style={{ top: 0 }}

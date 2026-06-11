@@ -58,6 +58,7 @@ interface DayColumnProps {
   stampReady?: boolean;
   stamp?: StampState;
   cellHeight?: number;
+  gridFrequency?: number;
 }
 
 interface DroppableSlotProps {
@@ -191,7 +192,7 @@ function DroppableSlot({ dayIndex, slotIndex, startTime, isHour, dragCopy, onCli
 
 // ─── DayColumn ────────────────────────────────────────────────────────────
 
-export function DayColumn({ dayIndex, activities, masters, studios = [], services = [], dragCopy, dragId, ghostHeight, ghostDayIndex, ghostSlotIndex, onCreateActivity, onOpenCreateModal, onOpenEditModal, onQuickAdd, stampReady, stamp, cellHeight = 60 }: DayColumnProps) {
+export function DayColumn({ dayIndex, activities, masters, studios = [], services = [], dragCopy, dragId, ghostHeight, ghostDayIndex, ghostSlotIndex, onCreateActivity, onOpenCreateModal, onOpenEditModal, onQuickAdd, stampReady, stamp, cellHeight = 60, gridFrequency = 30 }: DayColumnProps) {
   const [visibleIndices, setVisibleIndices] = useState<Record<string, number>>({});
   const [prevIndices, setPrevIndices] = useState<Record<string, number>>({});
   const columnRef = useRef<HTMLDivElement>(null);
@@ -199,7 +200,7 @@ export function DayColumn({ dayIndex, activities, masters, studios = [], service
   const lastWheelTime = useRef(0);
   const [animatingKeys, setAnimatingKeys] = useState<Set<string>>(new Set());
 
-  const slots = useMemo(() => generateTimeSlots(), []);
+  const slots = useMemo(() => generateTimeSlots(gridFrequency), [gridFrequency]);
 
   const masterMap = useMemo(() => new Map(masters.map(a => [a.id, a])), [masters]);
 

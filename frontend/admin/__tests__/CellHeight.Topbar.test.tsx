@@ -30,7 +30,7 @@ const defaultScheduleMock = {
   currentWeek: new Date(),
   columnMode: 'masters',
   setColumnMode: vi.fn(),
-  cellHeight: 60,
+  cellHeight: 50,
   setCellHeight: vi.fn(),
 };
 
@@ -64,55 +64,68 @@ async function renderWithMockContext(scheduleOverrides: Record<string, unknown>)
   return { unmount };
 }
 
-describe('Topbar — Cell Height Control', () => {
+describe('Topbar — Cell Height Zoom Control', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it('renders the cell height control with label "Высота"', () => {
+  it('does NOT render the old +/- height control', () => {
     renderWithProviders();
-    expect(screen.getByText('Высота')).toBeInTheDocument();
+    expect(screen.queryByTestId('cell-height-control')).not.toBeInTheDocument();
+    expect(screen.queryByText('Высота')).not.toBeInTheDocument();
   });
 
-  it('displays the current cell height value', () => {
+  it('renders the zoom icon button', () => {
     renderWithProviders();
-    expect(screen.getByTestId('cell-height-value').textContent).toBe('60');
+    expect(screen.getByTestId('zoom-button')).toBeInTheDocument();
   });
 
-  it('calls setCellHeight with 70 when + is clicked (step 10)', async () => {
+  it('opens zoom popup when zoom button is clicked', () => {
+    renderWithProviders();
+    fireEvent.click(screen.getByTestId('zoom-button'));
+    expect(screen.getByTestId('zoom-popup')).toBeInTheDocument();
+  });
+
+  it('renders 3 options in the popup', () => {
+    renderWithProviders();
+    fireEvent.click(screen.getByTestId('zoom-button'));
+    expect(screen.getByTestId('zoom-option-40')).toBeInTheDocument();
+    expect(screen.getByTestId('zoom-option-50')).toBeInTheDocument();
+    expect(screen.getByTestId('zoom-option-60')).toBeInTheDocument();
+  });
+
+  it('highlights the currently active option', async () => {
+    await renderWithMockContext({ cellHeight: 50 });
+    fireEvent.click(screen.getByTestId('zoom-button'));
+    const activeOption = screen.getByTestId('zoom-option-50');
+    expect(activeOption).toHaveAttribute('data-active', 'true');
+  });
+
+  it('calls setCellHeight and closes popup when option is selected', async () => {
     const setCellHeight = vi.fn();
-    await renderWithMockContext({ cellHeight: 60, setCellHeight });
+    await renderWithMockContext({ cellHeight: 50, setCellHeight });
 
-    fireEvent.click(screen.getByTestId('cell-height-increase'));
-    expect(setCellHeight).toHaveBeenCalledWith(70);
+    fireEvent.click(screen.getByTestId('zoom-button'));
+    fireEvent.click(screen.getByTestId('zoom-option-60'));
+
+    expect(setCellHeight).toHaveBeenCalledWith(60);
+    expect(screen.queryByTestId('zoom-popup')).not.toBeInTheDocument();
   });
 
-  it('calls setCellHeight with 50 when - is clicked (step 10)', async () => {
-    const setCellHeight = vi.fn();
-    await renderWithMockContext({ cellHeight: 60, setCellHeight });
-
-    fireEvent.click(screen.getByTestId('cell-height-decrease'));
-    expect(setCellHeight).toHaveBeenCalledWith(50);
-  });
-
-  it('disables - button when height is at minimum (40)', async () => {
-    await renderWithMockContext({ cellHeight: 40 });
-    expect(screen.getByTestId('cell-height-decrease')).toBeDisabled();
-  });
-
-  it('disables + button when height is at maximum (120)', async () => {
-    await renderWithMockContext({ cellHeight: 120 });
-    expect(screen.getByTestId('cell-height-increase')).toBeDisabled();
-  });
-
-  it('renders height control as the first element in Topbar', () => {
+  it('closes popup on outside click', () => {
     renderWithProviders();
-    const heightControl = screen.getByTestId('cell-height-control');
-    expect(heightControl).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('zoom-button'));
+    expect(screen.getByTestId('zoom-popup')).toBeInTheDocument();
 
-    // The height control should be in the leftmost position (before filters)
-    const topbar = heightControl.parentElement;
-    const firstChild = topbar?.firstElementChild;
-    expect(firstChild).toBe(heightControl);
+    fireEvent.mouseDown(document.body);
+    expect(screen.queryByTestId('zoom-popup')).not.toBeInTheDocument();
+  });
+
+  it('displays option labels in Russian', () => {
+    renderWithProviders();
+    fireEvent.click(screen.getByTestId('zoom-button'));
+    expect(screen.getByText('Мелкий')).toBeInTheDocument();
+    expect(screen.getByText('Стандартный')).toBeInTheDocument();
+    expect(screen.getByText('Крупный')).toBeInTheDocument();
   });
 });

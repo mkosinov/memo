@@ -589,9 +589,16 @@ export function Menubar() {
                     className="w-2 h-2 rounded-full flex-shrink-0"
                     style={{ backgroundColor: master.color }}
                   />
-                  <span className="text-xs text-white/70 truncate">
-                    {master.name}
-                  </span>
+                  <div className="flex flex-col min-w-0">
+                    <span className="text-xs text-white/70 truncate">
+                      {master.name}
+                    </span>
+                    {master.specialty && (
+                      <span className="text-[10px] text-white/40 truncate">
+                        {master.specialty}
+                      </span>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>

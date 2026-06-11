@@ -18,15 +18,20 @@ import {
 import type { ActivityResponse, MasterResponse, ServiceResponse, LocationResponse } from '@memo/api-client';
 import { useQueryClient, useMutation } from '@tanstack/react-query';
 import { getMonday, formatDateISO } from '@/lib/utils';
-import { CELL_HEIGHT_MIN, CELL_HEIGHT_MAX } from '@/lib/utils';
+import { CELL_HEIGHT_MIN, CELL_HEIGHT_OPTIONS, GRID_FREQUENCY_DEFAULT, GRID_FREQUENCY_OPTIONS } from '@/lib/utils';
 import { useNavigation } from '@/contexts/NavigationContext';
 
 export type ViewModeType = 'week' | 'day';
 export type ColumnModeType = 'masters' | 'locations';
 
 // Cell height constraints (px per half-hour slot)
-const CELL_HEIGHT_DEFAULT = 60;
+const CELL_HEIGHT_DEFAULT = 50;
 const CELL_HEIGHT_STORAGE_KEY = 'memo-cell-height';
+const VALID_CELL_HEIGHTS = new Set(CELL_HEIGHT_OPTIONS.map(o => o.value)) as Set<number>;
+
+// Grid frequency (minutes per slot)
+const GRID_FREQUENCY_STORAGE_KEY = 'memo-grid-frequency';
+const VALID_GRID_FREQUENCIES = new Set(GRID_FREQUENCY_OPTIONS.map(o => o.value)) as Set<number>;
 
 function readCellHeightFromStorage(): number {
   if (typeof window === 'undefined') return CELL_HEIGHT_DEFAULT;
@@ -36,10 +41,25 @@ function readCellHeightFromStorage(): number {
     const parsed = Number(raw);
     if (!Number.isFinite(parsed)) return CELL_HEIGHT_DEFAULT;
     const clamped = Math.round(parsed);
-    if (clamped < CELL_HEIGHT_MIN || clamped > CELL_HEIGHT_MAX) return CELL_HEIGHT_DEFAULT;
+    if (!VALID_CELL_HEIGHTS.has(clamped)) return CELL_HEIGHT_DEFAULT;
     return clamped;
   } catch {
     return CELL_HEIGHT_DEFAULT;
+  }
+}
+
+function readGridFrequencyFromStorage(): number {
+  if (typeof window === 'undefined') return GRID_FREQUENCY_DEFAULT;
+  try {
+    const raw = localStorage.getItem(GRID_FREQUENCY_STORAGE_KEY);
+    if (raw === null) return GRID_FREQUENCY_DEFAULT;
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed)) return GRID_FREQUENCY_DEFAULT;
+    const clamped = Math.round(parsed);
+    if (!VALID_GRID_FREQUENCIES.has(clamped)) return GRID_FREQUENCY_DEFAULT;
+    return clamped;
+  } catch {
+    return GRID_FREQUENCY_DEFAULT;
   }
 }
 
@@ -73,6 +93,8 @@ export interface ScheduleContextType {
   setColumnMode: (mode: ColumnModeType) => void;
   cellHeight: number;
   setCellHeight: (height: number) => void;
+  gridFrequency: number;
+  setGridFrequency: (freq: number) => void;
   prevPeriod: () => void;
   nextPeriod: () => void;
 }
@@ -106,10 +128,23 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
   const [cellHeight, _setCellHeight] = useState<number>(readCellHeightFromStorage);
 
   const setCellHeight = useCallback((height: number) => {
-    const clamped = Math.min(Math.max(Math.round(height), CELL_HEIGHT_MIN), CELL_HEIGHT_MAX);
-    _setCellHeight(clamped);
+    const clamped = Math.round(height);
+    const valid = VALID_CELL_HEIGHTS.has(clamped) ? clamped : CELL_HEIGHT_DEFAULT;
+    _setCellHeight(valid);
     try {
-      localStorage.setItem(CELL_HEIGHT_STORAGE_KEY, String(clamped));
+      localStorage.setItem(CELL_HEIGHT_STORAGE_KEY, String(valid));
+    } catch { /* ignore */ }
+  }, []);
+
+  // ── Grid frequency (persisted to localStorage) ─────────────────────────
+  const [gridFrequency, _setGridFrequency] = useState<number>(readGridFrequencyFromStorage);
+
+  const setGridFrequency = useCallback((freq: number) => {
+    const clamped = Math.round(freq);
+    const valid = VALID_GRID_FREQUENCIES.has(clamped) ? clamped : GRID_FREQUENCY_DEFAULT;
+    _setGridFrequency(valid);
+    try {
+      localStorage.setItem(GRID_FREQUENCY_STORAGE_KEY, String(valid));
     } catch { /* ignore */ }
   }, []);
 
@@ -419,6 +454,8 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
     setColumnMode,
     cellHeight,
     setCellHeight,
+    gridFrequency,
+    setGridFrequency,
     prevPeriod,
     nextPeriod,
   }), [
@@ -430,6 +467,7 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
     setViewMode, setSelectedDay, setShowAllColumns, setColumnMode,
     activitiesLoading, activitiesError,
     cellHeight, setCellHeight,
+    gridFrequency, setGridFrequency,
     prevPeriod, nextPeriod,
   ]);
 

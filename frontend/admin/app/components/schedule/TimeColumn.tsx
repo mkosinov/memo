@@ -5,10 +5,11 @@ import { formatTime, generateTimeSlots } from '@/lib/utils';
 
 interface TimeColumnProps {
   cellHeight?: number;
+  gridFrequency?: number;
 }
 
-export function TimeColumn({ cellHeight = 60 }: TimeColumnProps) {
-  const hours = generateTimeSlots();
+export function TimeColumn({ cellHeight = 60, gridFrequency = 30 }: TimeColumnProps) {
+  const hours = generateTimeSlots(gridFrequency);
 
   return (
     <div

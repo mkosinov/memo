@@ -21,12 +21,22 @@ export const MONTHS_GENITIVE = [
 
 export const HOURS_START = 9;
 export const HOURS_END = 21;
-export const CELL_HEIGHT = 60;
 export const CELL_HEIGHT_MIN = 40;
-export const CELL_HEIGHT_MAX = 120;
-export const CELL_HEIGHT_STEP = 10;
+export const CELL_HEIGHT_OPTIONS = [
+  { value: 40, label: 'Мелкий' },
+  { value: 50, label: 'Стандартный' },
+  { value: 60, label: 'Крупный' },
+] as const;
 export const SLOT_COUNT = (HOURS_END - HOURS_START) * 2;
 export const TIME_COL_WIDTH = 64;
+
+// Grid frequency (minutes per slot)
+export const GRID_FREQUENCY_OPTIONS = [
+  { value: 5, label: '5 минут' },
+  { value: 15, label: '15 минут' },
+  { value: 30, label: '30 минут' },
+] as const;
+export const GRID_FREQUENCY_DEFAULT = 30;
 
 // ─── Color Utilities ──────────────────────────────────────────────────────
 
@@ -147,11 +157,13 @@ export function isSameDay(a: Date, b: Date): boolean {
   );
 }
 
-/** Generate half-hour time slots from HOURS_START to HOURS_END (exclusive). */
-export function generateTimeSlots(): number[] {
+/** Generate time slots from HOURS_START to HOURS_END (exclusive) at given frequency (minutes). */
+export function generateTimeSlots(frequencyMinutes: number = 30): number[] {
   const slots: number[] = [];
-  for (let h = HOURS_START; h < HOURS_END; h++) {
-    slots.push(h, h + 0.5);
+  const step = frequencyMinutes / 60; // convert to hours
+  for (let t = HOURS_START; t < HOURS_END; t += step) {
+    // Round to avoid floating point issues
+    slots.push(Math.round(t * 100) / 100);
   }
   return slots;
 }

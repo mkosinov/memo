@@ -396,14 +396,6 @@ describe('Topbar', () => {
     expect(nextPeriod).toHaveBeenCalledTimes(1);
   });
 
-  it('shows date navigation before cell height control', async () => {
-    renderWithProviders();
-    const dateNav = screen.getByTestId('date-nav');
-    const cellHeightControl = screen.getByTestId('cell-height-control');
-    // date-nav should come before cell-height-control in DOM order
-    expect(dateNav.compareDocumentPosition(cellHeightControl) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  });
-
   // ── Calendar Popover ─────────────────────────────────────────────────
 
   it('opens calendar popover when date text is clicked', async () => {

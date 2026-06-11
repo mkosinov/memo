@@ -30,20 +30,20 @@ function CellHeightConsumer() {
   return (
     <div>
       <span data-testid="cell-height">{cellHeight}</span>
-      <button data-testid="set-height-80" onClick={() => setCellHeight(80)}>
-        Set 80
+      <button data-testid="set-height-60" onClick={() => setCellHeight(60)}>
+        Set 60
       </button>
       <button data-testid="set-height-40" onClick={() => setCellHeight(40)}>
         Set 40
       </button>
-      <button data-testid="set-height-120" onClick={() => setCellHeight(120)}>
-        Set 120
+      <button data-testid="set-height-50" onClick={() => setCellHeight(50)}>
+        Set 50
       </button>
       <button data-testid="set-height-200" onClick={() => setCellHeight(200)}>
-        Set 200 (over max)
+        Set 200 (invalid preset)
       </button>
       <button data-testid="set-height-10" onClick={() => setCellHeight(10)}>
-        Set 10 (under min)
+        Set 10 (invalid preset)
       </button>
     </div>
   );
@@ -74,33 +74,33 @@ describe('ScheduleContext — cellHeight', () => {
     localStorage.clear();
   });
 
-  it('defaults cellHeight to 60', () => {
+  it('defaults cellHeight to 50', () => {
     renderWithContext();
+    expect(screen.getByTestId('cell-height').textContent).toBe('50');
+  });
+
+  it('provides setCellHeight to change height to valid preset', () => {
+    renderWithContext();
+    act(() => {
+      screen.getByTestId('set-height-60').click();
+    });
     expect(screen.getByTestId('cell-height').textContent).toBe('60');
   });
 
-  it('provides setCellHeight to change height', () => {
-    renderWithContext();
-    act(() => {
-      screen.getByTestId('set-height-80').click();
-    });
-    expect(screen.getByTestId('cell-height').textContent).toBe('80');
-  });
-
-  it('clamps cellHeight to min of 40', () => {
+  it('clamps invalid cellHeight to default (50)', () => {
     renderWithContext();
     act(() => {
       screen.getByTestId('set-height-10').click();
     });
-    expect(screen.getByTestId('cell-height').textContent).toBe('40');
+    expect(screen.getByTestId('cell-height').textContent).toBe('50');
   });
 
-  it('clamps cellHeight to max of 120', () => {
+  it('clamps invalid cellHeight to default (50) for out-of-preset values', () => {
     renderWithContext();
     act(() => {
       screen.getByTestId('set-height-200').click();
     });
-    expect(screen.getByTestId('cell-height').textContent).toBe('120');
+    expect(screen.getByTestId('cell-height').textContent).toBe('50');
   });
 
   it('accepts exact min (40)', () => {
@@ -111,37 +111,37 @@ describe('ScheduleContext — cellHeight', () => {
     expect(screen.getByTestId('cell-height').textContent).toBe('40');
   });
 
-  it('accepts exact max (120)', () => {
+  it('accepts exact max preset (60)', () => {
     renderWithContext();
     act(() => {
-      screen.getByTestId('set-height-120').click();
+      screen.getByTestId('set-height-60').click();
     });
-    expect(screen.getByTestId('cell-height').textContent).toBe('120');
+    expect(screen.getByTestId('cell-height').textContent).toBe('60');
   });
 
   it('persists cellHeight to localStorage', () => {
     renderWithContext();
     act(() => {
-      screen.getByTestId('set-height-80').click();
+      screen.getByTestId('set-height-60').click();
     });
-    expect(localStorage.getItem('memo-cell-height')).toBe('80');
+    expect(localStorage.getItem('memo-cell-height')).toBe('60');
   });
 
-  it('restores cellHeight from localStorage on mount', () => {
+  it('restores valid cellHeight from localStorage on mount', () => {
+    localStorage.setItem('memo-cell-height', '40');
+    renderWithContext();
+    expect(screen.getByTestId('cell-height').textContent).toBe('40');
+  });
+
+  it('ignores invalid preset localStorage values and uses default', () => {
     localStorage.setItem('memo-cell-height', '90');
     renderWithContext();
-    expect(screen.getByTestId('cell-height').textContent).toBe('90');
+    expect(screen.getByTestId('cell-height').textContent).toBe('50');
   });
 
   it('ignores invalid localStorage values and uses default', () => {
     localStorage.setItem('memo-cell-height', 'invalid');
     renderWithContext();
-    expect(screen.getByTestId('cell-height').textContent).toBe('60');
-  });
-
-  it('ignores out-of-range localStorage values and uses default', () => {
-    localStorage.setItem('memo-cell-height', '200');
-    renderWithContext();
-    expect(screen.getByTestId('cell-height').textContent).toBe('60');
+    expect(screen.getByTestId('cell-height').textContent).toBe('50');
   });
 });

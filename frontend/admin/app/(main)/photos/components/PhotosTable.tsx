@@ -265,7 +265,7 @@ export function PhotosTable() {
       </div>
 
       {/* Table */}
-      <div className="overflow-auto">
+      <div className="overflow-x-auto">
         <table className="w-full">
           <thead>
             <tr

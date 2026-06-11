@@ -38,10 +38,10 @@ export interface ScheduleContextType {
   copyLastWeek: () => void;
   loading: boolean;
   error: Error | null;
-  filterMasterId: string | null;
-  filterLocationId: string | null;
-  setFilterMasterId: (id: string | null) => void;
-  setFilterLocationId: (id: string | null) => void;
+  filterMasterIds: string[];
+  filterLocationIds: string[];
+  setFilterMasterIds: (ids: string[]) => void;
+  setFilterLocationIds: (ids: string[]) => void;
   viewMode: ViewModeType;
   setViewMode: (mode: ViewModeType) => void;
   selectedDay: Date;
@@ -67,11 +67,37 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
     ready: false,
   });
 
-  const [filterMasterId, setFilterMasterId] = useState<string | null>(null);
-  const [filterLocationId, setFilterLocationId] = useState<string | null>(null);
+  const [filterMasterIds, setFilterMasterIds] = useState<string[]>([]);
+  const [filterLocationIds, setFilterLocationIds] = useState<string[]>([]);
+  const [filtersInitialized, setFiltersInitialized] = useState(false);
   const [viewMode, setViewMode] = useState<ViewModeType>('week');
   const [selectedDay, setSelectedDay] = useState<Date>(new Date());
   const [showAllColumns, setShowAllColumns] = useState<boolean>(false);
+
+  // Listen for "go to today" event from sidebar button
+  React.useEffect(() => {
+    const handleGoToToday = () => {
+      setSelectedDay(new Date());
+    };
+    document.addEventListener('__memo-go-to-today', handleGoToToday);
+    return () => document.removeEventListener('__memo-go-to-today', handleGoToToday);
+  }, []);
+
+  // Listen for "select day" event from MiniCalendar (day mode)
+  React.useEffect(() => {
+    const handleSelectDay = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.date) {
+        setSelectedDay(new Date(detail.date));
+        // Also navigate the week range to contain this day
+        const monday = getMonday(new Date(detail.date));
+        const sunday = new Date(monday.getTime() + 6 * 24 * 60 * 60 * 1000);
+        selectDateRange(formatDateISO(monday), formatDateISO(sunday));
+      }
+    };
+    document.addEventListener('__memo-select-day', handleSelectDay);
+    return () => document.removeEventListener('__memo-select-day', handleSelectDay);
+  }, [selectDateRange]);
 
   const queryClient = useQueryClient();
   const weekStart = dateFrom;
@@ -102,6 +128,16 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
   const { data: masters = [] } = useMasters();
   const { data: services = [] } = useServices();
   const { data: locations = [] } = useLocations();
+
+  // Initialize filters with all IDs when data first loads
+  React.useEffect(() => {
+    if (filtersInitialized) return;
+    if (masters.length > 0 && locations.length > 0) {
+      setFilterMasterIds(masters.map(m => m.id));
+      setFilterLocationIds(locations.map(l => l.id));
+      setFiltersInitialized(true);
+    }
+  }, [masters, locations, filtersInitialized]);
 
   // Query key for cache invalidation
   const activityQueryKey = ['activities', weekStart, weekEnd] as const;
@@ -241,13 +277,13 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
     [activitiesRaw, mastersRaw, servicesRaw, locationsRaw, currentWeek],
   );
 
-  // Filter items based on active filters
+  // Filter items based on active filters (multi-select: empty = show all)
   const filteredItems = useMemo(() => {
     let result = enrichedData.items;
-    if (filterMasterId) result = result.filter(a => a.masterId === filterMasterId);
-    if (filterLocationId) result = result.filter(a => a.locationId === filterLocationId);
+    if (filterMasterIds.length > 0) result = result.filter(a => filterMasterIds.includes(a.masterId));
+    if (filterLocationIds.length > 0) result = result.filter(a => filterLocationIds.includes(a.locationId));
     return result;
-  }, [enrichedData.items, filterMasterId, filterLocationId]);
+  }, [enrichedData.items, filterMasterIds, filterLocationIds]);
 
   // Build index from filtered items
   const scheduleIndex = useMemo(
@@ -272,10 +308,10 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
     copyLastWeek,
     loading: activitiesLoading,
     error: activitiesError ?? null,
-    filterMasterId,
-    filterLocationId,
-    setFilterMasterId,
-    setFilterLocationId,
+    filterMasterIds,
+    filterLocationIds,
+    setFilterMasterIds,
+    setFilterLocationIds,
     viewMode,
     setViewMode,
     selectedDay,
@@ -284,10 +320,10 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
     setShowAllColumns,
   }), [
     filteredItems, scheduleIndex, masters, services, locations,
-    currentWeek, stamp, filterMasterId, filterLocationId,
+    currentWeek, stamp, filterMasterIds, filterLocationIds,
     viewMode, selectedDay, showAllColumns,
     setCurrentWeek, addActivity, updateActivityFn, deleteActivityById, setStamp, copyLastWeek,
-    setFilterMasterId, setFilterLocationId,
+    setFilterMasterIds, setFilterLocationIds,
     setViewMode, setSelectedDay, setShowAllColumns,
     activitiesLoading, activitiesError,
   ]);

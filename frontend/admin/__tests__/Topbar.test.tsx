@@ -20,14 +20,15 @@ vi.mock('@/contexts/ScheduleContext', () => ({
   useSchedule: vi.fn(() => ({
     masters: [],
     locations: [],
-    filterMasterId: null,
-    filterLocationId: null,
-    setFilterMasterId: vi.fn(),
-    setFilterLocationId: vi.fn(),
+    filterMasterIds: [],
+    filterLocationIds: [],
+    setFilterMasterIds: vi.fn(),
+    setFilterLocationIds: vi.fn(),
     viewMode: 'week',
     setViewMode: vi.fn(),
     selectedDay: new Date(),
     setSelectedDay: vi.fn(),
+    currentWeek: new Date(),
   })),
 }));
 
@@ -51,22 +52,20 @@ describe('Topbar', () => {
     document.documentElement.removeAttribute('data-theme');
   });
 
-  it('renders week navigation buttons (← →)', () => {
+  it('does not render week navigation buttons (moved to sidebar)', () => {
     renderWithProviders();
-    expect(screen.getByRole('button', { name: /Предыдущая/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Следующая/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Предыдущая/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Следующая/i })).not.toBeInTheDocument();
   });
 
-  it('renders date range text', () => {
+  it('does not render date range text (week nav removed)', () => {
     renderWithProviders();
-    const dateRange = screen.getByTestId('date-range');
-    expect(dateRange).toBeInTheDocument();
-    expect(dateRange.textContent).toMatch(/\d+/);
+    expect(screen.queryByTestId('date-range')).not.toBeInTheDocument();
   });
 
-  it('renders "Сегодня" button', () => {
+  it('does not render "Сегодня" button (moved to sidebar)', () => {
     renderWithProviders();
-    expect(screen.getByRole('button', { name: 'Сегодня' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Сегодня' })).not.toBeInTheDocument();
   });
 
   it('does not render copy last week button (moved to RightPanel)', () => {
@@ -79,10 +78,9 @@ describe('Topbar', () => {
     expect(screen.queryByRole('button', { name: /Режим удаления/i })).not.toBeInTheDocument();
   });
 
-  it('renders filter selects', () => {
+  it('renders combined filter button', () => {
     renderWithProviders();
-    expect(screen.getByLabelText('Фильтр по мастеру')).toBeInTheDocument();
-    expect(screen.getByLabelText('Фильтр по локации')).toBeInTheDocument();
+    expect(screen.getByLabelText('Фильтры')).toBeInTheDocument();
   });
 
   it('renders view toggle buttons (День and Неделя)', () => {
@@ -97,10 +95,10 @@ describe('Topbar', () => {
     vi.mocked(mockHook).mockReturnValue({
       masters: [],
       locations: [],
-      filterMasterId: null,
-      filterLocationId: null,
-      setFilterMasterId: vi.fn(),
-      setFilterLocationId: vi.fn(),
+      filterMasterIds: [],
+      filterLocationIds: [],
+      setFilterMasterIds: vi.fn(),
+      setFilterLocationIds: vi.fn(),
       viewMode: 'week',
       setViewMode,
       selectedDay: new Date(),

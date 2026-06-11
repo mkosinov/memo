@@ -1,5 +1,6 @@
 import type { Activity, Master, Service, Location } from '@memo/domain';
 import type { ActivityResponse, MasterResponse, ServiceResponse, LocationResponse } from '@memo/api-client';
+import { displayMasterName } from '@/lib/utils';
 
 /**
  * Normalize JavaScript getDay() (0=Sun..6=Sat) to Mon=0..Sun=6.
@@ -42,8 +43,8 @@ export function transformActivity(raw: ActivityResponse): Activity {
 export function transformMaster(raw: MasterResponse): Master {
   return {
     id: raw.id,
-    name: `${raw.last_name} ${raw.first_name}`,
-    shortName: raw.first_name,
+    name: displayMasterName(raw),
+    shortName: displayMasterName(raw),
     color: raw.color,
     specialty: raw.specialty,
     sortOrder: raw.sort_order ?? 0,

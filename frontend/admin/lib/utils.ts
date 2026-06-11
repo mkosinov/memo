@@ -1,3 +1,10 @@
+// ─── Display Utilities ────────────────────────────────────────────────────
+
+/** Format master name as "Фамилия Имя" (Last Name + First Name). */
+export function displayMasterName(master: { first_name: string; last_name: string }): string {
+  return `${master.last_name} ${master.first_name}`;
+}
+
 // ─── Constants ────────────────────────────────────────────────────────────
 
 export const DAYS = ['ПН', 'ВТ', 'СР', 'ЧТ', 'ПТ', 'СБ', 'ВС'] as const;

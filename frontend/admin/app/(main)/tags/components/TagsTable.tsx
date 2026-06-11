@@ -221,7 +221,7 @@ export function TagsTable() {
       </div>
 
       {/* Table */}
-      <div className="overflow-auto">
+      <div>
         <table className="w-full">
           <thead>
             <tr

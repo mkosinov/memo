@@ -28,6 +28,15 @@ vi.mock('next/navigation', () => ({
   usePathname: () => '/schedule',
 }));
 
+vi.mock('@/contexts/ScheduleContext', () => ({
+  useSchedule: vi.fn(() => ({
+    viewMode: 'week',
+    selectedDay: new Date(),
+    setViewMode: vi.fn(),
+    setSelectedDay: vi.fn(),
+  })),
+}));
+
 function renderWithProviders() {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -114,15 +123,6 @@ describe('Menubar', () => {
     renderWithProviders();
     const activeLink = screen.getByRole('link', { name: 'Расписание' });
     expect(activeLink).toHaveClass('bg-brand');
-  });
-
-  it('renders master legend with color dots', async () => {
-    renderWithProviders();
-    await waitFor(() => {
-      expect(screen.getByText('Ольга')).toBeInTheDocument();
-    });
-    expect(screen.getByText('Юлия')).toBeInTheDocument();
-    expect(screen.getByText('Анастасия')).toBeInTheDocument();
   });
 
   it('renders theme toggle as a slider switch', () => {

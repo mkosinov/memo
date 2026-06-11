@@ -115,47 +115,6 @@ describe('DayView', () => {
     });
   });
 
-  describe('day navigation', () => {
-    it('displays the selected date prominently', () => {
-      const selectedDay = new Date(2026, 5, 15); // June 15, 2026
-      renderDayView({
-        selectedDay,
-        loading: false,
-        error: null,
-        activities: [createMockActivity()],
-      });
-      // Should show "15 июня" in the header
-      expect(screen.getByText(/15.*июня/)).toBeInTheDocument();
-    });
-
-    it('has previous day button', () => {
-      renderDayView({
-        loading: false,
-        error: null,
-        activities: [],
-      });
-      expect(screen.getByLabelText('Предыдущий день')).toBeInTheDocument();
-    });
-
-    it('has next day button', () => {
-      renderDayView({
-        loading: false,
-        error: null,
-        activities: [],
-      });
-      expect(screen.getByLabelText('Следующий день')).toBeInTheDocument();
-    });
-
-    it('has "Сегодня" button to jump to today', () => {
-      renderDayView({
-        loading: false,
-        error: null,
-        activities: [],
-      });
-      expect(screen.getByRole('button', { name: 'Сегодня' })).toBeInTheDocument();
-    });
-  });
-
   describe('column logic based on filters', () => {
     it('shows location columns when master filter is active', () => {
       const activities = [
@@ -163,8 +122,8 @@ describe('DayView', () => {
         createMockActivity({ id: 'ev_2', masterId: 'm1', locationId: 'grand', date: '2026-06-15' }),
       ];
       renderDayView({
-        filterMasterId: 'm1',
-        filterLocationId: null,
+        filterMasterIds: ['m1'],
+        filterLocationIds: [],
         selectedDay: new Date(2026, 5, 15), // June 15, 2026
         activities,
         loading: false,
@@ -181,8 +140,8 @@ describe('DayView', () => {
         createMockActivity({ id: 'ev_2', masterId: 'm2', locationId: 'alpika', date: '2026-06-15' }),
       ];
       renderDayView({
-        filterMasterId: null,
-        filterLocationId: 'alpika',
+        filterMasterIds: [],
+        filterLocationIds: ['alpika'],
         selectedDay: new Date(2026, 5, 15), // June 15, 2026
         activities,
         loading: false,
@@ -198,8 +157,8 @@ describe('DayView', () => {
         createMockActivity({ id: 'ev_1', masterId: 'm1', locationId: 'alpika', date: '2026-06-15' }),
       ];
       renderDayView({
-        filterMasterId: null,
-        filterLocationId: null,
+        filterMasterIds: [],
+        filterLocationIds: [],
         selectedDay: new Date(2026, 5, 15), // June 15, 2026
         activities,
         loading: false,
@@ -207,31 +166,6 @@ describe('DayView', () => {
       });
       // With no filter, defaults to master columns; only active masters shown (m1 = Ольга)
       expect(screen.getByText('Ольга')).toBeInTheDocument();
-    });
-  });
-
-  describe('show all columns toggle', () => {
-    it('shows a "Показать все" checkbox', () => {
-      renderDayView({
-        loading: false,
-        error: null,
-        activities: [],
-      });
-      expect(screen.getByText('Показать все')).toBeInTheDocument();
-    });
-
-    it('checkbox toggles showAllColumns in context', () => {
-      const setShowAllColumns = vi.fn();
-      renderDayView({
-        loading: false,
-        error: null,
-        activities: [],
-        showAllColumns: false,
-        setShowAllColumns,
-      });
-      const checkbox = screen.getByText('Показать все').closest('label')?.querySelector('input[type="checkbox"]') as HTMLInputElement;
-      fireEvent.click(checkbox);
-      expect(setShowAllColumns).toHaveBeenCalledWith(true);
     });
   });
 });

@@ -7,6 +7,7 @@ import type { MasterResponse } from '@memo/api-client';
 import { useUpdateMaster, useCreateMaster, useDeleteMaster } from '@/hooks/useMastersMutations';
 import type { MasterUpdate } from '@memo/api-client';
 import { useUI } from '@/contexts/UIContext';
+import { displayMasterName } from '@/lib/utils';
 import { MasterModal } from './MasterModal';
 import { MasterFilters } from './MasterFilters';
 import { ColumnPicker } from '@/app/components/shared/ColumnPicker';
@@ -237,7 +238,7 @@ export function MastersTable() {
       </div>
 
       {/* Table */}
-      <div className="overflow-auto">
+      <div className="overflow-x-auto">
         <table className="w-full">
           <thead>
             <tr
@@ -272,7 +273,7 @@ export function MastersTable() {
                 {/* Name */}
                 {visibleKeys.includes('name') && (
                 <td className="px-4 py-3 text-sm font-medium" style={{ color: 'var(--ink)' }}>
-                  {master.first_name} {master.last_name}
+                  {displayMasterName(master)}
                 </td>
                 )}
 

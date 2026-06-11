@@ -12,7 +12,7 @@ import { TimeColumn } from './TimeColumn';
 import { DayColumn } from './DayColumn';
 import { ActivityCard } from './ActivityCard';
 import { ActivityDetailsModal } from '../modal/ActivityDetailsModal';
-import { TIME_COL_WIDTH, isSameDay, formatTime, HOURS_START, CELL_HEIGHT, MONTHS_GENITIVE } from '@/lib/utils';
+import { TIME_COL_WIDTH, isSameDay, formatTime, HOURS_START, CELL_HEIGHT } from '@/lib/utils';
 
 export function DayView() {
   const {
@@ -25,11 +25,9 @@ export function DayView() {
     updateActivity,
     loading,
     error,
-    filterMasterId,
+    filterMasterIds,
     selectedDay,
-    setSelectedDay,
     showAllColumns,
-    setShowAllColumns,
   } = useSchedule();
   const { showToast } = useUI();
 
@@ -140,10 +138,9 @@ export function DayView() {
   );
 
   // Determine columns based on filter
-  // If master filter → columns = locations
-  // If location filter → columns = masters
-  // If neither → default to masters as columns (master-centric day view)
-  const columnMode = filterMasterId ? 'locations' : 'masters';
+  // If master filter (subset selected) → columns = locations
+  // If no master filter → default to masters as columns
+  const columnMode = filterMasterIds.length > 0 ? 'locations' : 'masters';
 
   const columns = useMemo(() => {
     if (columnMode === 'locations') {
@@ -183,23 +180,6 @@ export function DayView() {
     }
     return map;
   }, [resolvedActivities, columnMode]);
-
-  // Day navigation
-  const handlePrevDay = useCallback(() => {
-    const prev = new Date(selectedDay);
-    prev.setDate(prev.getDate() - 1);
-    setSelectedDay(prev);
-  }, [selectedDay, setSelectedDay]);
-
-  const handleNextDay = useCallback(() => {
-    const next = new Date(selectedDay);
-    next.setDate(next.getDate() + 1);
-    setSelectedDay(next);
-  }, [selectedDay, setSelectedDay]);
-
-  const handleToday = useCallback(() => {
-    setSelectedDay(new Date());
-  }, [setSelectedDay]);
 
   // DnD
   const {
@@ -296,70 +276,6 @@ export function DayView() {
       }}
     >
       <div className="min-w-[600px] h-full flex flex-col">
-        {/* Day header — date navigation */}
-        <div
-          className="sticky top-0 z-[25] flex items-center justify-between bg-white border-b px-4 py-3 shrink-0"
-          style={{ borderColor: 'var(--line)' }}
-        >
-          <div className="flex items-center gap-2">
-            <button
-              onClick={handlePrevDay}
-              className="flex h-8 w-8 items-center justify-center rounded-lg transition-colors hover:bg-surface"
-              style={{ color: 'var(--ink-mid)' }}
-              aria-label="Предыдущий день"
-            >
-              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-              </svg>
-            </button>
-
-            <div className="flex flex-col items-center">
-              <span className="text-xs font-medium uppercase tracking-wide" style={{ color: 'var(--ink-light)' }}>
-                {selectedDayISO === `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}` ? 'Сегодня' : selectedDayISO}
-              </span>
-              <span className="text-lg font-bold" style={{ color: 'var(--ink)' }}>
-                {selectedDay.getDate()} {MONTHS_GENITIVE[selectedDay.getMonth()]}
-              </span>
-              <span className="text-xs" style={{ color: 'var(--ink-light)' }}>
-                {selectedDay.getFullYear()}
-              </span>
-            </div>
-
-            <button
-              onClick={handleNextDay}
-              className="flex h-8 w-8 items-center justify-center rounded-lg transition-colors hover:bg-surface"
-              style={{ color: 'var(--ink-mid)' }}
-              aria-label="Следующий день"
-            >
-              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-              </svg>
-            </button>
-
-            <button
-              onClick={handleToday}
-              className="ml-2 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors"
-              style={{
-                color: 'var(--brand)',
-                border: '1px solid var(--brand)',
-              }}
-            >
-              Сегодня
-            </button>
-          </div>
-
-          {/* Show all columns checkbox */}
-          <label className="flex items-center gap-2 cursor-pointer text-xs" style={{ color: 'var(--ink-mid)' }}>
-            <input
-              type="checkbox"
-              checked={showAllColumns}
-              onChange={(e) => setShowAllColumns(e.target.checked)}
-              className="rounded"
-            />
-            Показать все
-          </label>
-        </div>
-
         {/* Column headers */}
         <div
           className="sticky top-[52px] z-[24] flex bg-white border-b shrink-0"

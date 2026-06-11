@@ -1,9 +1,10 @@
 'use client';
 
-import React, { useMemo, useCallback, useState } from 'react';
+import React, { useMemo, useCallback, useState, useRef } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useNavigation } from '@/contexts/NavigationContext';
+import { useSchedule } from '@/contexts/ScheduleContext';
 import { useUI } from '@/contexts/UIContext';
 import { useMasters } from '@/hooks/useMasters';
 import { DAYS, MONTHS, getMonday, formatDate, formatDateISO, isSameDay } from '@/lib/utils';
@@ -178,12 +179,48 @@ const ICON_MAP: Record<string, React.FC<{ className?: string }>> = {
 
 interface MiniCalendarProps {
   selectedWeek: Date;
+  selectedDay: Date;
+  viewMode: 'day' | 'week';
   onWeekSelect: (date: Date) => void;
   collapsed: boolean;
 }
 
-function MiniCalendar({ selectedWeek, onWeekSelect, collapsed }: MiniCalendarProps) {
+function MiniCalendar({ selectedWeek, selectedDay, viewMode, onWeekSelect, collapsed }: MiniCalendarProps) {
   const today = new Date();
+  const [showMonthPicker, setShowMonthPicker] = useState(false);
+
+  const handleGoToToday = useCallback(() => {
+    const now = new Date();
+    const monday = getMonday(now);
+    const sunday = new Date(monday.getTime() + 6 * 24 * 60 * 60 * 1000);
+    onWeekSelect(monday);
+    // Also dispatch event so ScheduleContext can reset selectedDay
+    document.dispatchEvent(new CustomEvent('__memo-go-to-today'));
+    // In day mode, also select the single day
+    if (viewMode === 'day') {
+      document.dispatchEvent(new CustomEvent('__memo-select-day', { detail: { date: now } }));
+    }
+  }, [onWeekSelect, viewMode]);
+
+  const handleMonthSelect = useCallback((monthIndex: number) => {
+    // Navigate to the first day of the selected month
+    const target = new Date(selectedWeek.getFullYear(), monthIndex, 1);
+    onWeekSelect(target);
+    setShowMonthPicker(false);
+  }, [selectedWeek, onWeekSelect]);
+
+  // Close month picker on outside click
+  const monthPickerRef = useRef<HTMLDivElement>(null);
+  React.useEffect(() => {
+    if (!showMonthPicker) return;
+    const handleMouseDown = (e: MouseEvent) => {
+      if (monthPickerRef.current && !monthPickerRef.current.contains(e.target as Node)) {
+        setShowMonthPicker(false);
+      }
+    };
+    document.addEventListener('mousedown', handleMouseDown);
+    return () => document.removeEventListener('mousedown', handleMouseDown);
+  }, [showMonthPicker]);
 
   const calendarDays = useMemo(() => {
     const firstDayOfMonth = new Date(selectedWeek.getFullYear(), selectedWeek.getMonth(), 1);
@@ -193,7 +230,7 @@ function MiniCalendar({ selectedWeek, onWeekSelect, collapsed }: MiniCalendarPro
     startDate.setDate(startDate.getDate() - 7);
 
     const endDate = new Date(lastDayOfMonth);
-    endDate.setDate(endDate.getDate() + 13);
+    endDate.setDate(endDate.getDate() + 6);
 
     const days: Date[] = [];
     const current = new Date(startDate);
@@ -224,6 +261,17 @@ function MiniCalendar({ selectedWeek, onWeekSelect, collapsed }: MiniCalendarPro
     onWeekSelect(weekMonday);
   };
 
+  const handleDayClick = (day: Date) => {
+    if (viewMode === 'day') {
+      // DayView: select single day (dispatch a special event for ScheduleContext)
+      document.dispatchEvent(new CustomEvent('__memo-select-day', { detail: { date: day } }));
+    } else {
+      // WeekView: select the week containing this day
+      const weekMonday = getMonday(day);
+      handleWeekClick(weekMonday);
+    }
+  };
+
   const isInCurrentWeek = (date: Date) => {
     const dMonday = getMonday(date);
     return dMonday.getTime() === currentWeekMonday.getTime();
@@ -238,8 +286,61 @@ function MiniCalendar({ selectedWeek, onWeekSelect, collapsed }: MiniCalendarPro
 
   return (
     <div className="px-3 py-2">
-      <div className="flex items-center justify-between mb-2">
-        <span className="text-xs font-semibold text-white/90">{monthName} {selectedWeek.getFullYear()}</span>
+      <div className="flex items-center justify-between mb-2 gap-2">
+        <button
+          type="button"
+          onClick={handleGoToToday}
+          className="shrink-0 rounded-md px-2 py-0.5 text-[10px] font-medium transition-colors hover:bg-white/10"
+          style={{
+            color: 'var(--brand, #004D56)',
+            border: '1px solid var(--brand, #004D56)',
+          }}
+        >
+          Сегодня
+        </button>
+
+        <div className="relative" ref={monthPickerRef}>
+          <button
+            type="button"
+            onClick={() => setShowMonthPicker(prev => !prev)}
+            className="flex items-center gap-1 text-xs font-semibold text-white/90 hover:text-white transition-colors"
+          >
+            {monthName} {selectedWeek.getFullYear()}
+            <svg
+              className={`w-3 h-3 transition-transform duration-150 ${showMonthPicker ? 'rotate-180' : ''}`}
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+            >
+              <path d="M6 9l6 6 6-6" />
+            </svg>
+          </button>
+
+          {showMonthPicker && (
+            <div
+              className="absolute z-50 mt-1 right-0 bg-white border rounded-lg shadow-lg p-2 min-w-[160px]"
+              style={{ borderColor: 'var(--line, #e5e7eb)' }}
+            >
+              <div className="grid grid-cols-3 gap-1">
+                {MONTHS.map((m, i) => (
+                  <button
+                    key={i}
+                    type="button"
+                    onClick={() => handleMonthSelect(i)}
+                    className={`rounded-md px-2 py-1.5 text-[11px] font-medium transition-colors
+                      ${i === selectedWeek.getMonth()
+                        ? 'bg-[var(--brand)] text-white'
+                        : 'hover:bg-gray-100 text-gray-700'
+                      }`}
+                  >
+                    {m}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="grid grid-cols-7 gap-0 mb-1">
@@ -256,32 +357,47 @@ function MiniCalendar({ selectedWeek, onWeekSelect, collapsed }: MiniCalendarPro
           const isActive = weekMonday.getTime() === currentWeekMonday.getTime();
 
           return (
-            <button
+            <div
               key={wi}
-              onClick={() => handleWeekClick(weekMonday)}
               className={`w-full grid grid-cols-7 gap-0 rounded-md py-0.5 transition-colors duration-150
-                ${isActive ? 'bg-brand/30' : 'hover:bg-white/5'}`}
-              aria-label={`Неделя с ${formatDate(weekMonday)}`}
+                ${isActive ? 'bg-brand/30' : ''}`}
             >
               {week.map((day, di) => {
                 const isDayToday = isSameDay(day, today);
                 const inWeek = isInCurrentWeek(day);
                 const inMonth = isCurrentMonth(day);
 
+                // Highlight logic based on viewMode
+                let isHighlighted = false;
+                if (viewMode === 'day') {
+                  // Day mode: highlight the specific selected day
+                  isHighlighted = isSameDay(day, selectedDay);
+                } else {
+                  // Week mode: highlight entire week row
+                  isHighlighted = isActive;
+                }
+
                 return (
-                  <div key={di} className="flex items-center justify-center">
+                  <button
+                    key={di}
+                    type="button"
+                    onClick={() => handleDayClick(day)}
+                    className="flex items-center justify-center hover:bg-white/5 transition-colors"
+                    aria-label={formatDate(day)}
+                  >
                     <span
                       className={`relative flex items-center justify-center w-5 h-5 text-[11px] rounded-full
                         ${!inMonth ? 'text-white/20' : isDayToday ? 'text-white font-bold' : inWeek ? 'text-white/90' : 'text-white/50'}
                         ${isDayToday ? 'bg-brand text-white' : ''}
+                        ${isHighlighted && !isDayToday ? 'bg-brand/40 text-white' : ''}
                       `}
                     >
                       {day.getDate()}
                     </span>
-                  </div>
+                  </button>
                 );
               })}
-            </button>
+            </div>
           );
         })}
       </div>
@@ -338,6 +454,7 @@ export function Menubar() {
   const { dateFrom, selectDateRange } = useNavigation();
   const { data: masters = [] } = useMasters();
   const { sidebarCollapsed, toggleSidebar, theme, toggleTheme } = useUI();
+  const { viewMode, selectedDay } = useSchedule();
   const pathname = usePathname();
   const [openMenu, setOpenMenu] = useState<string | null>(null);
 
@@ -384,6 +501,8 @@ export function Menubar() {
         {/* MiniCalendar */}
         <MiniCalendar
           selectedWeek={selectedWeek}
+          selectedDay={selectedDay}
+          viewMode={viewMode}
           onWeekSelect={handleWeekSelect}
           collapsed={sidebarCollapsed}
         />
@@ -419,20 +538,17 @@ export function Menubar() {
           <button
             onClick={() => toggleMenu('masters')}
             className={`w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors duration-150
-              ${openMenu === 'masters'
-                ? 'bg-brand text-white font-medium'
-                : 'text-white/60 hover:bg-white/5 hover:text-white/90'
-              }
+              text-white/60 hover:bg-white/5 hover:text-white/90
               ${sidebarCollapsed ? 'justify-center px-1' : ''}`}
             aria-label="Мастера"
             aria-expanded={openMenu === 'masters'}
             title={sidebarCollapsed ? 'Мастера' : undefined}
           >
-            <PaletteIcon className={openMenu === 'masters' ? 'text-white' : 'text-white/60'} />
+            <PaletteIcon className="text-white/60" />
             {!sidebarCollapsed && (
               <>
                 <span className="flex-1 text-left">Мастера</span>
-                <ChevronIcon expanded={openMenu === 'masters'} className={openMenu === 'masters' ? 'text-white' : 'text-white/40'} />
+                <ChevronIcon expanded={openMenu === 'masters'} className="text-white/40" />
               </>
             )}
           </button>
@@ -459,20 +575,17 @@ export function Menubar() {
           <button
             onClick={() => toggleMenu('directories')}
             className={`w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors duration-150
-              ${openMenu === 'directories'
-                ? 'bg-brand text-white font-medium'
-                : 'text-white/60 hover:bg-white/5 hover:text-white/90'
-              }
+              text-white/60 hover:bg-white/5 hover:text-white/90
               ${sidebarCollapsed ? 'justify-center px-1' : ''}`}
             aria-label="Справочники"
             aria-expanded={openMenu === 'directories'}
             title={sidebarCollapsed ? 'Справочники' : undefined}
           >
-            <BookIcon className={openMenu === 'directories' ? 'text-white' : 'text-white/60'} />
+            <BookIcon className="text-white/60" />
             {!sidebarCollapsed && (
               <>
                 <span className="flex-1 text-left">Справочники</span>
-                <ChevronIcon expanded={openMenu === 'directories'} className={openMenu === 'directories' ? 'text-white' : 'text-white/40'} />
+                <ChevronIcon expanded={openMenu === 'directories'} className="text-white/40" />
               </>
             )}
           </button>
@@ -521,8 +634,7 @@ export function Menubar() {
 
         {!sidebarCollapsed && <div className="border-t border-white/10 mx-3" />}
 
-        {/* Master Legend */}
-        <MasterLegend collapsed={sidebarCollapsed} masters={masters} />
+        {/* Master Legend — removed, duplicates Masters submenu */}
       </div>
 
       {/* ── Bottom Section ── */}

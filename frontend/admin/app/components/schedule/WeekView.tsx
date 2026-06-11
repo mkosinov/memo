@@ -14,7 +14,7 @@ import { ActivityDetailsModal } from '../modal/ActivityDetailsModal';
 import { DAYS, getMonday, TIME_COL_WIDTH, isSameDay, formatTime, HOURS_START, CELL_HEIGHT } from '@/lib/utils';
 
 export function WeekView() {
-  const { currentWeek, activities, scheduleIndex, masters, services, locations: studios, stamp, addActivity, updateActivity, loading, error, filterMasterId, filterLocationId } = useSchedule();
+  const { currentWeek, activities, scheduleIndex, masters, services, locations: studios, stamp, addActivity, updateActivity, loading, error, filterMasterIds, filterLocationIds } = useSchedule();
   const { showToast } = useUI();
   const monday = getMonday(currentWeek);
 
@@ -197,7 +197,7 @@ export function WeekView() {
 
   if (activities.length === 0) {
     // Check if there are activities but all hidden by filters
-    const hasFilters = filterMasterId !== null || filterLocationId !== null;
+    const hasFilters = filterMasterIds.length > 0 || filterLocationIds.length > 0;
     return (
       <div className="flex items-center justify-center h-full text-text-secondary">
         <span>{hasFilters ? 'Нет занятий по выбранным фильтрам' : 'Нет занятий на эту неделю'}</span>

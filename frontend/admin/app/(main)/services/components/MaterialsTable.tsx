@@ -339,7 +339,7 @@ export function MaterialsTable() {
       </div>
 
       {/* Table */}
-      <div className="flex-1 overflow-auto">
+      <div className="flex-1 overflow-x-auto">
         <table className="w-full">
           <thead>
             <tr

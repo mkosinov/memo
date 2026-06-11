@@ -5,7 +5,7 @@ import { useDraggable } from '@dnd-kit/core';
 import { useUI } from '@/contexts/UIContext';
 import { useSchedule } from '@/contexts/ScheduleContext';
 import type { Activity, Master, Studio } from '@memo/domain';
-import { HOURS_START, CELL_HEIGHT, formatTime } from '@/lib/utils';
+import { HOURS_START, formatTime } from '@/lib/utils';
 
 interface ActivityCardProps {
   activity: Activity;
@@ -20,12 +20,12 @@ interface ActivityCardProps {
 
 export function ActivityCard({ activity, master, studios = [], style, onEdit, onQuickAdd, isDragging, isDragCopy }: ActivityCardProps) {
   const { deleteMode, showToast } = useUI();
-  const { deleteActivity, addActivity } = useSchedule();
+  const { deleteActivity, addActivity, cellHeight = 60 } = useSchedule();
   const [deleting, setDeleting] = useState(false);
   const deletingRef = useRef(false);
-  const topPx = (activity.startTime - HOURS_START) * CELL_HEIGHT * 2;
+  const topPx = (activity.startTime - HOURS_START) * cellHeight * 2;
   const durMinutes = activity.durationMinutes ?? activity.duration * 60;
-  const heightPx = Math.max((durMinutes / 60) * 120 - 10, 52);
+  const heightPx = Math.max((durMinutes / 60) * cellHeight * 2 - 10, 52);
   const fillPct = activity.capacity > 0 ? Math.min(activity.occupied / activity.capacity, 1) : 0;
 
   // Collapsing

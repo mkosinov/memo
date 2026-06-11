@@ -2,8 +2,8 @@
 
 import React, { useCallback, useState, useRef, useEffect } from 'react';
 import { useSchedule } from '@/contexts/ScheduleContext';
+import { CELL_HEIGHT_MIN, CELL_HEIGHT_MAX, CELL_HEIGHT_STEP, getMonday, formatDateISO, formatWeekRange, formatDayLabel } from '@/lib/utils';
 import { useNavigation } from '@/contexts/NavigationContext';
-import { getMonday, formatDateISO } from '@/lib/utils';
 import { MultiSelect } from '../shared/MultiSelect';
 import type { Master, Location } from '@memo/domain';
 
@@ -30,6 +30,10 @@ export function Topbar() {
     currentWeek,
     columnMode,
     setColumnMode,
+    cellHeight,
+    setCellHeight,
+    prevPeriod,
+    nextPeriod,
   } = useSchedule();
   const { selectDateRange } = useNavigation();
 
@@ -100,7 +104,86 @@ export function Topbar() {
         borderColor: 'var(--line)',
       }}
     >
-      {/* ── Left: Masters + Locations filters ── */}
+      {/* ── Left: Date Navigation ── */}
+      <div
+        className="flex items-center mr-auto"
+        data-testid="date-nav"
+      >
+        <button
+          onClick={prevPeriod}
+          data-testid="date-nav-prev"
+          className="flex items-center justify-center w-7 h-7 rounded-l-md text-xs font-medium transition-colors hover:bg-surface"
+          style={{ color: 'var(--ink-mid)', border: '1px solid var(--line)', borderRight: 'none' }}
+          aria-label="Предыдущий период"
+        >
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+            <path d="M8 2L4 6L8 10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+        </button>
+        <span
+          className="flex items-center h-7 px-2.5 text-[11px] font-medium select-none whitespace-nowrap"
+          style={{
+            color: 'var(--ink)',
+            border: '1px solid var(--line)',
+            borderRadius: '0',
+          }}
+        >
+          {viewMode === 'week'
+            ? formatWeekRange(currentWeek)
+            : formatDayLabel(selectedDay)
+          }
+        </span>
+        <button
+          onClick={nextPeriod}
+          data-testid="date-nav-next"
+          className="flex items-center justify-center w-7 h-7 rounded-r-md text-xs font-medium transition-colors hover:bg-surface"
+          style={{ color: 'var(--ink-mid)', border: '1px solid var(--line)', borderLeft: 'none' }}
+          aria-label="Следующий период"
+        >
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+            <path d="M4 2L8 6L4 10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+        </button>
+      </div>
+
+      {/* ── Left: Cell height control ── */}
+      <div
+        className="flex items-center gap-1.5 mr-auto"
+        data-testid="cell-height-control"
+      >
+        <span className="text-[11px] font-medium select-none" style={{ color: 'var(--ink-light)' }}>
+          Высота
+        </span>
+        <button
+          onClick={() => setCellHeight(cellHeight - CELL_HEIGHT_STEP)}
+          disabled={cellHeight <= CELL_HEIGHT_MIN}
+          data-testid="cell-height-decrease"
+          className="flex items-center justify-center w-6 h-6 rounded-md text-xs font-semibold transition-colors disabled:opacity-30 disabled:cursor-not-allowed hover:bg-surface"
+          style={{ color: 'var(--ink-mid)', border: '1px solid var(--line)' }}
+          aria-label="Уменьшить высоту ячейки"
+        >
+          −
+        </button>
+        <span
+          data-testid="cell-height-value"
+          className="text-[11px] font-medium tabular-nums min-w-[24px] text-center"
+          style={{ color: 'var(--ink)' }}
+        >
+          {cellHeight}
+        </span>
+        <button
+          onClick={() => setCellHeight(cellHeight + CELL_HEIGHT_STEP)}
+          disabled={cellHeight >= CELL_HEIGHT_MAX}
+          data-testid="cell-height-increase"
+          className="flex items-center justify-center w-6 h-6 rounded-md text-xs font-semibold transition-colors disabled:opacity-30 disabled:cursor-not-allowed hover:bg-surface"
+          style={{ color: 'var(--ink-mid)', border: '1px solid var(--line)' }}
+          aria-label="Увеличить высоту ячейки"
+        >
+          +
+        </button>
+      </div>
+
+      {/* ── Right: Masters + Locations filters ── */}
       <div className="flex items-center gap-2">
         <MultiSelect<Master>
           items={masters}

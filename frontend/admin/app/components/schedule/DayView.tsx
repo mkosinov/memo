@@ -13,7 +13,7 @@ import { DayColumn } from './DayColumn';
 import { ActivityCard } from './ActivityCard';
 import { ScheduleColumnHeader } from './ScheduleColumnHeader';
 import { ActivityDetailsModal } from '../modal/ActivityDetailsModal';
-import { TIME_COL_WIDTH, isSameDay, formatTime, HOURS_START, CELL_HEIGHT } from '@/lib/utils';
+import { TIME_COL_WIDTH, isSameDay, formatTime, HOURS_START } from '@/lib/utils';
 
 export function DayView() {
   const {
@@ -30,6 +30,7 @@ export function DayView() {
     selectedDay,
     showAllColumns,
     columnMode,
+    cellHeight = 60,
   } = useSchedule();
   const { showToast } = useUI();
 
@@ -211,12 +212,12 @@ export function DayView() {
     const update = () => {
       const now = new Date();
       const hours = now.getHours() + now.getMinutes() / 60;
-      setNowPos((hours - HOURS_START) * CELL_HEIGHT * 2);
+      setNowPos((hours - HOURS_START) * cellHeight * 2);
     };
     update();
     const iv = setInterval(update, 30000);
     return () => clearInterval(iv);
-  }, []);
+  }, [cellHeight]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -334,7 +335,7 @@ export function DayView() {
 
         {/* Grid row — scrollable */}
         <div className="flex-1 flex overflow-auto relative">
-          <TimeColumn />
+          <TimeColumn cellHeight={cellHeight} />
           {orderedColumns.map((col) => {
             const colActivities = activitiesByColumn.get(col.id) ?? [];
             return (
@@ -357,6 +358,7 @@ export function DayView() {
                 onQuickAdd={openQuickAdd}
                 stampReady={stamp.ready}
                 stamp={stamp}
+                cellHeight={cellHeight}
               />
             );
           })}

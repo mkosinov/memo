@@ -55,6 +55,10 @@ export function createMockScheduleContext(
     setShowAllColumns: vi.fn(),
     columnMode: 'masters',
     setColumnMode: vi.fn(),
+    cellHeight: 60,
+    setCellHeight: vi.fn(),
+    prevPeriod: vi.fn(),
+    nextPeriod: vi.fn(),
     ...overrides,
   };
 }

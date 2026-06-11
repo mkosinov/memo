@@ -12,10 +12,10 @@ import { DayColumn } from './DayColumn';
 import { ActivityCard } from './ActivityCard';
 import { ScheduleColumnHeader } from './ScheduleColumnHeader';
 import { ActivityDetailsModal } from '../modal/ActivityDetailsModal';
-import { DAYS, getMonday, TIME_COL_WIDTH, isSameDay, formatTime, HOURS_START, CELL_HEIGHT } from '@/lib/utils';
+import { DAYS, getMonday, TIME_COL_WIDTH, isSameDay, formatTime, HOURS_START } from '@/lib/utils';
 
 export function WeekView() {
-  const { currentWeek, activities, scheduleIndex, masters, services, locations: studios, stamp, addActivity, updateActivity, loading, error, filterMasterIds, filterLocationIds } = useSchedule();
+  const { currentWeek, activities, scheduleIndex, masters, services, locations: studios, stamp, addActivity, updateActivity, loading, error, filterMasterIds, filterLocationIds, cellHeight = 60 } = useSchedule();
   const { showToast } = useUI();
   const monday = getMonday(currentWeek);
 
@@ -161,12 +161,12 @@ export function WeekView() {
     const update = () => {
       const now = new Date();
       const hours = now.getHours() + now.getMinutes() / 60;
-      setNowPos((hours - HOURS_START) * CELL_HEIGHT * 2);
+      setNowPos((hours - HOURS_START) * cellHeight * 2);
     };
     update();
     const iv = setInterval(update, 30000);
     return () => clearInterval(iv);
-  }, []);
+  }, [cellHeight]);
 
   const showNowLine = days.some(d => isSameDay(d, today)) && nowPos >= 0;
 
@@ -254,7 +254,7 @@ export function WeekView() {
 
         {/* Grid row — scrollable */}
         <div className="flex-1 flex overflow-auto relative">
-          <TimeColumn />
+          <TimeColumn cellHeight={cellHeight} />
           {days.map((day, i) => (
             <DayColumn
               key={i}
@@ -275,6 +275,7 @@ export function WeekView() {
               onQuickAdd={openQuickAdd}
               stampReady={stamp.ready}
               stamp={stamp}
+              cellHeight={cellHeight}
             />
           ))}
 

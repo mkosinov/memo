@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useDroppable } from '@dnd-kit/core';
-import { CELL_HEIGHT, hexToRgb, mixWithWhite, formatTime, generateTimeSlots, HOURS_START } from '@/lib/utils';
+import { hexToRgb, mixWithWhite, formatTime, generateTimeSlots, HOURS_START } from '@/lib/utils';
 import type { Activity, Master, Studio, StampState, Service } from '@memo/domain';
 import { ActivityCard } from './ActivityCard';
 
@@ -57,6 +57,7 @@ interface DayColumnProps {
   onQuickAdd?: (activity: Activity) => void;
   stampReady?: boolean;
   stamp?: StampState;
+  cellHeight?: number;
 }
 
 interface DroppableSlotProps {
@@ -71,12 +72,13 @@ interface DroppableSlotProps {
   stamp?: StampState;
   masters?: Master[];
   services?: Service[];
+  cellHeight?: number;
   children?: React.ReactNode;
 }
 
 // ─── DroppableSlot ────────────────────────────────────────────────────────
 
-function DroppableSlot({ dayIndex, slotIndex, startTime, isHour, dragCopy, onClick, onOpenModal, stampReady, stamp, masters, services, children }: DroppableSlotProps) {
+function DroppableSlot({ dayIndex, slotIndex, startTime, isHour, dragCopy, onClick, onOpenModal, stampReady, stamp, masters, services, cellHeight = 60, children }: DroppableSlotProps) {
   const { isOver, setNodeRef } = useDroppable({
     id: `slot-${dayIndex}-${slotIndex}`,
     data: { dayIndex, slotIndex },
@@ -149,7 +151,7 @@ function DroppableSlot({ dayIndex, slotIndex, startTime, isHour, dragCopy, onCli
       ref={setNodeRef}
       data-slot-index={slotIndex}
       className={isHour ? 'border-t border-line' : 'border-t border-dashed border-line'}
-      style={{ height: CELL_HEIGHT, ...stampGhostStyle }}
+      style={{ height: cellHeight, ...stampGhostStyle }}
       onClick={handleClick}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
@@ -161,7 +163,7 @@ function DroppableSlot({ dayIndex, slotIndex, startTime, isHour, dragCopy, onCli
           className="absolute inset-x-1 rounded-lg pointer-events-none overflow-hidden flex flex-col"
           style={{
             top: 0,
-            height: CELL_HEIGHT * 2,
+            height: cellHeight * 2,
             border: '2px dashed rgba(0,77,86,0.3)',
             backgroundColor: `rgba(${stampGhostPreview.rgb.r}, ${stampGhostPreview.rgb.g}, ${stampGhostPreview.rgb.b}, 0.08)`,
             borderLeft: `3px solid ${stampGhostPreview.master.color}`,
@@ -189,7 +191,7 @@ function DroppableSlot({ dayIndex, slotIndex, startTime, isHour, dragCopy, onCli
 
 // ─── DayColumn ────────────────────────────────────────────────────────────
 
-export function DayColumn({ dayIndex, activities, masters, studios = [], services = [], dragCopy, dragId, ghostHeight, ghostDayIndex, ghostSlotIndex, onCreateActivity, onOpenCreateModal, onOpenEditModal, onQuickAdd, stampReady, stamp }: DayColumnProps) {
+export function DayColumn({ dayIndex, activities, masters, studios = [], services = [], dragCopy, dragId, ghostHeight, ghostDayIndex, ghostSlotIndex, onCreateActivity, onOpenCreateModal, onOpenEditModal, onQuickAdd, stampReady, stamp, cellHeight = 60 }: DayColumnProps) {
   const [visibleIndices, setVisibleIndices] = useState<Record<string, number>>({});
   const [prevIndices, setPrevIndices] = useState<Record<string, number>>({});
   const columnRef = useRef<HTMLDivElement>(null);
@@ -234,7 +236,7 @@ export function DayColumn({ dayIndex, activities, masters, studios = [], service
       // Find which stacked group we are hovering over
       let targetKey: string | null = null;
       for (const act of activities) {
-        const topPx = (act.startTime - HOURS_START) * CELL_HEIGHT * 2;
+        const topPx = (act.startTime - HOURS_START) * cellHeight * 2;
         const heightPx = Math.max(act.duration * 120 - 10, 52);
         if (y >= topPx && y <= topPx + heightPx) {
           const key = `${dayIndex}_${act.startTime}`;
@@ -287,6 +289,7 @@ export function DayColumn({ dayIndex, activities, masters, studios = [], service
           stamp={stamp}
           masters={masters}
           services={services}
+          cellHeight={cellHeight}
         />
       ))}
 
@@ -295,8 +298,8 @@ export function DayColumn({ dayIndex, activities, masters, studios = [], service
         <div
           className="absolute inset-x-1 rounded-xl pointer-events-none z-[30]"
           style={{
-            top: ghostSlotIndex * CELL_HEIGHT,
-            height: ghostHeight * CELL_HEIGHT,
+            top: ghostSlotIndex * cellHeight,
+            height: ghostHeight * cellHeight,
             border: '2px dashed #004D56',
             backgroundColor: 'rgba(0,77,86,0.06)',
           }}
@@ -384,7 +387,7 @@ export function DayColumn({ dayIndex, activities, masters, studios = [], service
                 }}
                 className="absolute right-1 z-[35] px-1.5 py-0.5 rounded-full bg-white/90 border border-gray-300 text-[10px] font-semibold text-gray-500 shadow-sm hover:bg-white hover:text-gray-700 transition-colors cursor-pointer"
                 style={{
-                  top: (activity.startTime - 9) * CELL_HEIGHT * 2 + 2,
+                  top: (activity.startTime - 9) * cellHeight * 2 + 2,
                 }}
                 title="Click to cycle through cards"
               >

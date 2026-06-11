@@ -1,20 +1,21 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { HOURS_START, CELL_HEIGHT } from '@/lib/utils';
+import { HOURS_START } from '@/lib/utils';
 
 interface NowLineProps {
   date: Date;
+  cellHeight?: number;
 }
 
-export function NowLine({ date }: NowLineProps) {
+export function NowLine({ date, cellHeight = 60 }: NowLineProps) {
   const [position, setPosition] = useState(0);
 
   useEffect(() => {
     const updatePosition = () => {
       const now = new Date();
       const hours = now.getHours() + now.getMinutes() / 60;
-      const pos = (hours - HOURS_START) * CELL_HEIGHT * 2;
+      const pos = (hours - HOURS_START) * cellHeight * 2;
       setPosition(pos);
     };
 
@@ -22,7 +23,7 @@ export function NowLine({ date }: NowLineProps) {
     const interval = setInterval(updatePosition, 30000);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [cellHeight]);
 
   const today = new Date();
   if (

@@ -1,9 +1,13 @@
 'use client';
 
 import React from 'react';
-import { CELL_HEIGHT, formatTime, generateTimeSlots } from '@/lib/utils';
+import { formatTime, generateTimeSlots } from '@/lib/utils';
 
-export function TimeColumn() {
+interface TimeColumnProps {
+  cellHeight?: number;
+}
+
+export function TimeColumn({ cellHeight = 60 }: TimeColumnProps) {
   const hours = generateTimeSlots();
 
   return (
@@ -17,7 +21,7 @@ export function TimeColumn() {
           <div
             key={i}
             className="relative"
-            style={{ height: CELL_HEIGHT }}
+            style={{ height: cellHeight }}
           >
             {isHour && (
               <span className="absolute -top-3 right-2 text-xs text-ink-light">

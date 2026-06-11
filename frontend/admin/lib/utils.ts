@@ -22,6 +22,9 @@ export const MONTHS_GENITIVE = [
 export const HOURS_START = 9;
 export const HOURS_END = 21;
 export const CELL_HEIGHT = 60;
+export const CELL_HEIGHT_MIN = 40;
+export const CELL_HEIGHT_MAX = 120;
+export const CELL_HEIGHT_STEP = 10;
 export const SLOT_COUNT = (HOURS_END - HOURS_START) * 2;
 export const TIME_COL_WIDTH = 64;
 
@@ -105,6 +108,25 @@ export function getMonday(date: Date): Date {
 
 /** Format date as "13 мая" (day + genitive month). */
 export function formatDate(date: Date): string {
+  return `${date.getDate()} ${MONTHS_GENITIVE[date.getMonth()]}`;
+}
+
+/** Format week range: same month "8-14 июня", cross-month "29 июня - 5 июля". */
+export function formatWeekRange(monday: Date): string {
+  const sunday = new Date(monday);
+  sunday.setDate(sunday.getDate() + 6);
+  const startDay = monday.getDate();
+  const endDay = sunday.getDate();
+  const startMonth = MONTHS_GENITIVE[monday.getMonth()];
+  const endMonth = MONTHS_GENITIVE[sunday.getMonth()];
+  if (monday.getMonth() === sunday.getMonth()) {
+    return `${startDay}-${endDay} ${startMonth}`;
+  }
+  return `${startDay} ${startMonth} - ${endDay} ${endMonth}`;
+}
+
+/** Format single day: "11 июня". */
+export function formatDayLabel(date: Date): string {
   return `${date.getDate()} ${MONTHS_GENITIVE[date.getMonth()]}`;
 }
 

@@ -30,6 +30,8 @@ const defaultScheduleMock = {
   currentWeek: new Date(),
   columnMode: 'masters',
   setColumnMode: vi.fn(),
+  prevPeriod: vi.fn(),
+  nextPeriod: vi.fn(),
 };
 
 vi.mock('@/contexts/ScheduleContext', () => ({
@@ -266,5 +268,139 @@ describe('Topbar', () => {
     fireEvent.click(screen.getByRole('button', { name: /открыть меню/i }));
     const locationsItem = screen.getByRole('menuitem', { name: /по локациям/i });
     expect(locationsItem).toHaveAttribute('data-active', 'true');
+  });
+
+  // ── Date Navigation ──────────────────────────────────────────────────
+
+  it('renders date navigation in week mode with week range', async () => {
+    // June 8–14, 2026
+    const monday = new Date(2026, 5, 8);
+    const { useSchedule: mockHook } = await import('@/contexts/ScheduleContext');
+    vi.mocked(mockHook).mockReturnValue({
+      ...defaultScheduleMock,
+      viewMode: 'week',
+      currentWeek: monday,
+    } as any);
+
+    const { unmount } = renderWithProviders();
+    unmount();
+
+    const { Topbar: TopbarRe } = await import('../app/components/layout/Topbar');
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <UIProvider>
+          <NavigationProvider>
+            <TopbarRe />
+          </NavigationProvider>
+        </UIProvider>
+      </QueryClientProvider>
+    );
+
+    expect(screen.getByTestId('date-nav')).toBeInTheDocument();
+    expect(screen.getByText('8-14 июня')).toBeInTheDocument();
+  });
+
+  it('renders date navigation in day mode with single day', async () => {
+    // June 11, 2026
+    const day = new Date(2026, 5, 11);
+    const { useSchedule: mockHook } = await import('@/contexts/ScheduleContext');
+    vi.mocked(mockHook).mockReturnValue({
+      ...defaultScheduleMock,
+      viewMode: 'day',
+      selectedDay: day,
+      currentWeek: new Date(2026, 5, 8),
+    } as any);
+
+    const { unmount } = renderWithProviders();
+    unmount();
+
+    const { Topbar: TopbarRe } = await import('../app/components/layout/Topbar');
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <UIProvider>
+          <NavigationProvider>
+            <TopbarRe />
+          </NavigationProvider>
+        </UIProvider>
+      </QueryClientProvider>
+    );
+
+    expect(screen.getByText('11 июня')).toBeInTheDocument();
+  });
+
+  it('calls prevPeriod when left arrow is clicked', async () => {
+    const prevPeriod = vi.fn();
+    const { useSchedule: mockHook } = await import('@/contexts/ScheduleContext');
+    vi.mocked(mockHook).mockReturnValue({
+      ...defaultScheduleMock,
+      viewMode: 'week',
+      currentWeek: new Date(2026, 5, 8),
+      prevPeriod,
+    } as any);
+
+    const { unmount } = renderWithProviders();
+    unmount();
+
+    const { Topbar: TopbarRe } = await import('../app/components/layout/Topbar');
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <UIProvider>
+          <NavigationProvider>
+            <TopbarRe />
+          </NavigationProvider>
+        </UIProvider>
+      </QueryClientProvider>
+    );
+
+    fireEvent.click(screen.getByTestId('date-nav-prev'));
+    expect(prevPeriod).toHaveBeenCalledTimes(1);
+  });
+
+  it('calls nextPeriod when right arrow is clicked', async () => {
+    const nextPeriod = vi.fn();
+    const { useSchedule: mockHook } = await import('@/contexts/ScheduleContext');
+    vi.mocked(mockHook).mockReturnValue({
+      ...defaultScheduleMock,
+      viewMode: 'week',
+      currentWeek: new Date(2026, 5, 8),
+      nextPeriod,
+    } as any);
+
+    const { unmount } = renderWithProviders();
+    unmount();
+
+    const { Topbar: TopbarRe } = await import('../app/components/layout/Topbar');
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <UIProvider>
+          <NavigationProvider>
+            <TopbarRe />
+          </NavigationProvider>
+        </UIProvider>
+      </QueryClientProvider>
+    );
+
+    fireEvent.click(screen.getByTestId('date-nav-next'));
+    expect(nextPeriod).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows date navigation before cell height control', async () => {
+    renderWithProviders();
+    const dateNav = screen.getByTestId('date-nav');
+    const cellHeightControl = screen.getByTestId('cell-height-control');
+    // date-nav should come before cell-height-control in DOM order
+    expect(dateNav.compareDocumentPosition(cellHeightControl) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });

@@ -18,10 +18,30 @@ import {
 import type { ActivityResponse, MasterResponse, ServiceResponse, LocationResponse } from '@memo/api-client';
 import { useQueryClient, useMutation } from '@tanstack/react-query';
 import { getMonday, formatDateISO } from '@/lib/utils';
+import { CELL_HEIGHT_MIN, CELL_HEIGHT_MAX } from '@/lib/utils';
 import { useNavigation } from '@/contexts/NavigationContext';
 
 export type ViewModeType = 'week' | 'day';
 export type ColumnModeType = 'masters' | 'locations';
+
+// Cell height constraints (px per half-hour slot)
+const CELL_HEIGHT_DEFAULT = 60;
+const CELL_HEIGHT_STORAGE_KEY = 'memo-cell-height';
+
+function readCellHeightFromStorage(): number {
+  if (typeof window === 'undefined') return CELL_HEIGHT_DEFAULT;
+  try {
+    const raw = localStorage.getItem(CELL_HEIGHT_STORAGE_KEY);
+    if (raw === null) return CELL_HEIGHT_DEFAULT;
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed)) return CELL_HEIGHT_DEFAULT;
+    const clamped = Math.round(parsed);
+    if (clamped < CELL_HEIGHT_MIN || clamped > CELL_HEIGHT_MAX) return CELL_HEIGHT_DEFAULT;
+    return clamped;
+  } catch {
+    return CELL_HEIGHT_DEFAULT;
+  }
+}
 
 export interface ScheduleContextType {
   activities: ScheduleAdminDTO[];
@@ -51,6 +71,10 @@ export interface ScheduleContextType {
   setShowAllColumns: (show: boolean) => void;
   columnMode: ColumnModeType;
   setColumnMode: (mode: ColumnModeType) => void;
+  cellHeight: number;
+  setCellHeight: (height: number) => void;
+  prevPeriod: () => void;
+  nextPeriod: () => void;
 }
 
 const ScheduleContext = createContext<ScheduleContextType | null>(null);
@@ -77,6 +101,17 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
   const [selectedDay, setSelectedDay] = useState<Date>(new Date());
   const [showAllColumns, setShowAllColumns] = useState<boolean>(false);
   const [columnMode, setColumnMode] = useState<ColumnModeType>('masters');
+
+  // ── Cell height (persisted to localStorage) ──────────────────────────────
+  const [cellHeight, _setCellHeight] = useState<number>(readCellHeightFromStorage);
+
+  const setCellHeight = useCallback((height: number) => {
+    const clamped = Math.min(Math.max(Math.round(height), CELL_HEIGHT_MIN), CELL_HEIGHT_MAX);
+    _setCellHeight(clamped);
+    try {
+      localStorage.setItem(CELL_HEIGHT_STORAGE_KEY, String(clamped));
+    } catch { /* ignore */ }
+  }, []);
 
   // Listen for "go to today" event from sidebar button
   React.useEffect(() => {
@@ -295,6 +330,38 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
     // Stub: will be implemented when API-based copy-last-week is needed
   }, []);
 
+  const prevPeriod = useCallback(() => {
+    if (viewMode === 'week') {
+      const prev = new Date(currentWeek);
+      prev.setDate(prev.getDate() - 7);
+      const sunday = new Date(prev.getTime() + 6 * 24 * 60 * 60 * 1000);
+      selectDateRange(formatDateISO(prev), formatDateISO(sunday));
+    } else {
+      const prev = new Date(selectedDay);
+      prev.setDate(prev.getDate() - 1);
+      setSelectedDay(prev);
+      const monday = getMonday(prev);
+      const sunday = new Date(monday.getTime() + 6 * 24 * 60 * 60 * 1000);
+      selectDateRange(formatDateISO(monday), formatDateISO(sunday));
+    }
+  }, [viewMode, currentWeek, selectedDay, selectDateRange, setSelectedDay]);
+
+  const nextPeriod = useCallback(() => {
+    if (viewMode === 'week') {
+      const next = new Date(currentWeek);
+      next.setDate(next.getDate() + 7);
+      const sunday = new Date(next.getTime() + 6 * 24 * 60 * 60 * 1000);
+      selectDateRange(formatDateISO(next), formatDateISO(sunday));
+    } else {
+      const next = new Date(selectedDay);
+      next.setDate(next.getDate() + 1);
+      setSelectedDay(next);
+      const monday = getMonday(next);
+      const sunday = new Date(monday.getTime() + 6 * 24 * 60 * 60 * 1000);
+      selectDateRange(formatDateISO(monday), formatDateISO(sunday));
+    }
+  }, [viewMode, currentWeek, selectedDay, selectDateRange, setSelectedDay]);
+
   // Build enriched schedule using buildAdminSchedule (raw API data)
   const enrichedData = useMemo(
     () => buildAdminSchedule(
@@ -350,6 +417,10 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
     setShowAllColumns,
     columnMode,
     setColumnMode,
+    cellHeight,
+    setCellHeight,
+    prevPeriod,
+    nextPeriod,
   }), [
     filteredItems, scheduleIndex, masters, services, locations,
     currentWeek, stamp, filterMasterIds, filterLocationIds,
@@ -358,6 +429,8 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
     setFilterMasterIds, setFilterLocationIds,
     setViewMode, setSelectedDay, setShowAllColumns, setColumnMode,
     activitiesLoading, activitiesError,
+    cellHeight, setCellHeight,
+    prevPeriod, nextPeriod,
   ]);
 
   return (

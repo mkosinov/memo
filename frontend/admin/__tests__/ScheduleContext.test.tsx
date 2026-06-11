@@ -84,6 +84,12 @@ function ScheduleConsumer() {
     copyLastWeek,
     loading,
     error,
+    viewMode,
+    setViewMode,
+    selectedDay,
+    setSelectedDay,
+    showAllColumns,
+    setShowAllColumns,
   } = useSchedule();
 
   return (
@@ -96,6 +102,9 @@ function ScheduleConsumer() {
       <span data-testid="stamp-ready">{stamp.ready.toString()}</span>
       <span data-testid="loading">{loading.toString()}</span>
       <span data-testid="error">{error ? error.message : 'null'}</span>
+      <span data-testid="view-mode">{viewMode}</span>
+      <span data-testid="selected-day">{selectedDay.toISOString()}</span>
+      <span data-testid="show-all-columns">{showAllColumns.toString()}</span>
       <button
         data-testid="add-activity"
         onClick={() =>
@@ -142,6 +151,24 @@ function ScheduleConsumer() {
       </button>
       <button data-testid="copy-last-week" onClick={copyLastWeek}>
         Copy
+      </button>
+      <button data-testid="set-view-day" onClick={() => setViewMode('day')}>
+        Day
+      </button>
+      <button data-testid="set-view-week" onClick={() => setViewMode('week')}>
+        Week
+      </button>
+      <button
+        data-testid="set-selected-day"
+        onClick={() => setSelectedDay(new Date(2026, 5, 15))}
+      >
+        Set Day
+      </button>
+      <button
+        data-testid="toggle-show-all"
+        onClick={() => setShowAllColumns(!showAllColumns)}
+      >
+        Toggle Show All
       </button>
     </div>
   );
@@ -375,6 +402,66 @@ describe('ScheduleProvider', () => {
     await waitFor(() => {
       expect(screen.getByTestId('error').textContent).not.toBe('null');
     });
+  });
+
+  // ─── viewMode tests ────────────────────────────────────────────────────────
+
+  it('defaults viewMode to "week"', () => {
+    renderWithContext();
+    expect(screen.getByTestId('view-mode').textContent).toBe('week');
+  });
+
+  it('provides setViewMode to switch between week and day', () => {
+    renderWithContext();
+    act(() => {
+      screen.getByTestId('set-view-day').click();
+    });
+    expect(screen.getByTestId('view-mode').textContent).toBe('day');
+
+    act(() => {
+      screen.getByTestId('set-view-week').click();
+    });
+    expect(screen.getByTestId('view-mode').textContent).toBe('week');
+  });
+
+  // ─── selectedDay tests ─────────────────────────────────────────────────────
+
+  it('defaults selectedDay to today', () => {
+    renderWithContext();
+    const today = new Date();
+    const selectedDay = new Date(screen.getByTestId('selected-day').textContent!);
+    expect(selectedDay.toDateString()).toBe(today.toDateString());
+  });
+
+  it('provides setSelectedDay to change the selected day', () => {
+    renderWithContext();
+    act(() => {
+      screen.getByTestId('set-selected-day').click();
+    });
+    const selectedDay = new Date(screen.getByTestId('selected-day').textContent!);
+    expect(selectedDay.getFullYear()).toBe(2026);
+    expect(selectedDay.getMonth()).toBe(5); // June
+    expect(selectedDay.getDate()).toBe(15);
+  });
+
+  // ─── showAllColumns tests ──────────────────────────────────────────────────
+
+  it('defaults showAllColumns to false', () => {
+    renderWithContext();
+    expect(screen.getByTestId('show-all-columns').textContent).toBe('false');
+  });
+
+  it('provides setShowAllColumns to toggle', () => {
+    renderWithContext();
+    act(() => {
+      screen.getByTestId('toggle-show-all').click();
+    });
+    expect(screen.getByTestId('show-all-columns').textContent).toBe('true');
+
+    act(() => {
+      screen.getByTestId('toggle-show-all').click();
+    });
+    expect(screen.getByTestId('show-all-columns').textContent).toBe('false');
   });
 
   it('synchronizes currentWeek with NavigationProvider dateFrom', () => {

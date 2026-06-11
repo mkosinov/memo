@@ -47,6 +47,12 @@ export function createMockScheduleContext(
     filterLocationId: null,
     setFilterMasterId: vi.fn(),
     setFilterLocationId: vi.fn(),
+    viewMode: 'week',
+    setViewMode: vi.fn(),
+    selectedDay: new Date(),
+    setSelectedDay: vi.fn(),
+    showAllColumns: false,
+    setShowAllColumns: vi.fn(),
     ...overrides,
   };
 }

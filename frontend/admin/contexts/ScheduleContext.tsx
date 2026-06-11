@@ -20,6 +20,8 @@ import { useQueryClient, useMutation } from '@tanstack/react-query';
 import { getMonday, formatDateISO } from '@/lib/utils';
 import { useNavigation } from '@/contexts/NavigationContext';
 
+export type ViewModeType = 'week' | 'day';
+
 export interface ScheduleContextType {
   activities: ScheduleAdminDTO[];
   scheduleIndex: DomainScheduleIndex<ScheduleAdminDTO>;
@@ -40,6 +42,12 @@ export interface ScheduleContextType {
   filterLocationId: string | null;
   setFilterMasterId: (id: string | null) => void;
   setFilterLocationId: (id: string | null) => void;
+  viewMode: ViewModeType;
+  setViewMode: (mode: ViewModeType) => void;
+  selectedDay: Date;
+  setSelectedDay: (date: Date) => void;
+  showAllColumns: boolean;
+  setShowAllColumns: (show: boolean) => void;
 }
 
 const ScheduleContext = createContext<ScheduleContextType | null>(null);
@@ -61,6 +69,9 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
 
   const [filterMasterId, setFilterMasterId] = useState<string | null>(null);
   const [filterLocationId, setFilterLocationId] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<ViewModeType>('week');
+  const [selectedDay, setSelectedDay] = useState<Date>(new Date());
+  const [showAllColumns, setShowAllColumns] = useState<boolean>(false);
 
   const queryClient = useQueryClient();
   const weekStart = dateFrom;
@@ -265,11 +276,19 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
     filterLocationId,
     setFilterMasterId,
     setFilterLocationId,
+    viewMode,
+    setViewMode,
+    selectedDay,
+    setSelectedDay,
+    showAllColumns,
+    setShowAllColumns,
   }), [
     filteredItems, scheduleIndex, masters, services, locations,
     currentWeek, stamp, filterMasterId, filterLocationId,
+    viewMode, selectedDay, showAllColumns,
     setCurrentWeek, addActivity, updateActivityFn, deleteActivityById, setStamp, copyLastWeek,
     setFilterMasterId, setFilterLocationId,
+    setViewMode, setSelectedDay, setShowAllColumns,
     activitiesLoading, activitiesError,
   ]);
 

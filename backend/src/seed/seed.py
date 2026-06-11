@@ -38,7 +38,8 @@ from src.models.tag import activity_tags, service_tags
 # Seed data constants
 # ---------------------------------------------------------------------------
 
-WEEK_START = datetime(2026, 6, 1)  # Monday
+WEEK_START = datetime(2026, 6, 1)  # Monday — first seed week
+WEEK2_START = datetime(2026, 6, 9)  # Monday — current week (June 9-15, 2026)
 
 _SERVICE_NAME_TO_ID: dict[str, str] = {
     "Морской пейзаж": "s7",
@@ -91,6 +92,25 @@ _ACTIVITIES_RAW: list[tuple] = [
     (6, "m2", 11, 1.5, "Ручная лепка", "alpika", 6, False),
     (6, "m7", 14, 2, "Картина акрилом", "grand", 10, False),
     (6, "m5", 16.5, 2, "Роспись одежды", "p1389", 8, False),
+]
+
+# Activities for week 2 (June 9-15, 2026)
+_ACTIVITIES_RAW_WEEK2: list[tuple] = [
+    # ПН (day 0) — June 9
+    (0, "m1", 10, 3, "Морской пейзаж", "grand", 8, False),
+    # ВТ (day 1) — June 10
+    (1, "m3", 11, 2, "Картина акрилом", "alpika", 10, False),
+    # СР (day 2) — June 11
+    (2, "m2", 10, 2, "Роспись одежды", "alpika", 10, False),
+    # ЧТ (day 3) — June 12
+    (3, "m1", 10, 3, "Морской пейзаж", "grand", 8, False),
+    # ПТ (day 4) — June 13
+    (4, "m5", 14, 2.5, "Картина маслом", "p1389", 8, False),
+    # СБ (day 5) — June 14
+    (5, "m1", 10, 3, "Морской пейзаж", "grand", 8, False),
+    (5, "m3", 14, 2, "Картина акрилом", "alpika", 10, False),
+    # ВС (day 6) — June 15
+    (6, "m2", 11, 1.5, "Ручная лепка", "alpika", 6, False),
 ]
 
 
@@ -218,27 +238,33 @@ async def _seed_tags(session) -> None:
 
 
 async def _seed_activities(session) -> None:
-    for i, (day, master, start_h, dur_h, svc_name, loc, cap, is_priv) in enumerate(_ACTIVITIES_RAW):
-        activity_id = f"ev_{i}"
-        if await _exists(session, Activity, activity_id):
-            continue
-        service_id = _SERVICE_NAME_TO_ID[svc_name]
-        hour = int(start_h)
-        minute = 30 if start_h % 1 else 0
-        start_dt = WEEK_START.replace(
-            day=WEEK_START.day + day, hour=hour, minute=minute
-        )
-        duration_min = int(dur_h * 60)
-        session.add(Activity(
-            id=activity_id,
-            master_id=master,
-            service_id=service_id,
-            location_id=loc,
-            start=start_dt,
-            duration=duration_min,
-            capacity=cap,
-            is_private=is_priv,
-        ))
+    idx = 0
+    for week_start, activities in [
+        (WEEK_START, _ACTIVITIES_RAW),
+        (WEEK2_START, _ACTIVITIES_RAW_WEEK2),
+    ]:
+        for day, master, start_h, dur_h, svc_name, loc, cap, is_priv in activities:
+            activity_id = f"ev_{idx}"
+            idx += 1
+            if await _exists(session, Activity, activity_id):
+                continue
+            service_id = _SERVICE_NAME_TO_ID[svc_name]
+            hour = int(start_h)
+            minute = 30 if start_h % 1 else 0
+            start_dt = week_start.replace(
+                day=week_start.day + day, hour=hour, minute=minute
+            )
+            duration_min = int(dur_h * 60)
+            session.add(Activity(
+                id=activity_id,
+                master_id=master,
+                service_id=service_id,
+                location_id=loc,
+                start=start_dt,
+                duration=duration_min,
+                capacity=cap,
+                is_private=is_priv,
+            ))
 
 
 async def _seed_clients(session) -> None:

@@ -42,7 +42,7 @@ export function transformActivity(raw: ActivityResponse): Activity {
 export function transformMaster(raw: MasterResponse): Master {
   return {
     id: raw.id,
-    name: `${raw.first_name} ${raw.last_name}`,
+    name: `${raw.last_name} ${raw.first_name}`,
     shortName: raw.first_name,
     color: raw.color,
     specialty: raw.specialty,

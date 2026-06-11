@@ -80,9 +80,9 @@ const activityFixture: ActivityResponse = {
 // ─── transformMaster ────────────────────────────────────────────────────────
 
 describe('transformMaster', () => {
-  it('combines first_name and last_name into name', () => {
+  it('combines last_name and first_name into name', () => {
     const result = transformMaster(masterFixture);
-    expect(result.name).toBe('Анна Иванова');
+    expect(result.name).toBe('Иванова Анна');
   });
 
   it('uses first_name for shortName', () => {

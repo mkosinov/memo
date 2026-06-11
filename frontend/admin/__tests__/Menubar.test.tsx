@@ -71,9 +71,9 @@ describe('Menubar', () => {
     renderWithProviders();
     fireEvent.click(screen.getByRole('button', { name: 'Мастера' }));
     await waitFor(() => {
-      expect(screen.getByText(/Ольга Середа/)).toBeInTheDocument();
+      expect(screen.getByText(/Середа Ольга/)).toBeInTheDocument();
     });
-    expect(screen.getByText(/Юлия Большакова/)).toBeInTheDocument();
+    expect(screen.getByText(/Большакова Юлия/)).toBeInTheDocument();
     // Check specialty is shown in the submenu
     expect(screen.getAllByText(/живопись/).length).toBeGreaterThanOrEqual(1);
   });
@@ -82,12 +82,12 @@ describe('Menubar', () => {
     renderWithProviders();
     fireEvent.click(screen.getByRole('button', { name: 'Мастера' }));
     await waitFor(() => {
-      expect(screen.getByText(/Ольга Середа/)).toBeInTheDocument();
+      expect(screen.getByText(/Середа Ольга/)).toBeInTheDocument();
     });
     // Click again to close
     fireEvent.click(screen.getByRole('button', { name: 'Мастера' }));
     await waitFor(() => {
-      expect(screen.queryByText(/Ольга Середа/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/Середа Ольга/)).not.toBeInTheDocument();
     });
   });
 

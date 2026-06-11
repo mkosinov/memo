@@ -22,10 +22,6 @@ class Settings(BaseSettings):
         "http://127.0.0.1:3001",
         "http://localhost:3002",
         "http://127.0.0.1:3002",
-        "http://imac.local:3000",
-        "http://imac.local:3001",
-        "http://imac.local:3002",
-        "http://imac.local:8000",
     ]
     LOG_LEVEL: str = "INFO"
 

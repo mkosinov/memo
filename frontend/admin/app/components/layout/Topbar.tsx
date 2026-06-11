@@ -5,6 +5,7 @@ import { useSchedule } from '@/contexts/ScheduleContext';
 import { CELL_HEIGHT_MIN, CELL_HEIGHT_MAX, CELL_HEIGHT_STEP, getMonday, formatDateISO, formatWeekRange, formatDayLabel } from '@/lib/utils';
 import { useNavigation } from '@/contexts/NavigationContext';
 import { MultiSelect } from '../shared/MultiSelect';
+import { CalendarPopover } from '../shared/CalendarPopover';
 import type { Master, Location } from '@memo/domain';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
@@ -40,6 +41,10 @@ export function Topbar() {
   // Dropdown state
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Calendar popover state
+  const [calendarOpen, setCalendarOpen] = useState(false);
+  const calendarRef = useRef<HTMLDivElement>(null);
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -94,6 +99,23 @@ export function Topbar() {
     }
   }, [setColumnMode, viewMode, handleViewModeSwitch]);
 
+  const handleCalendarDateSelect = useCallback((date: Date) => {
+    if (viewMode === 'week') {
+      // In week mode: select the week containing the clicked date
+      const monday = getMonday(date);
+      const sunday = new Date(monday.getTime() + 6 * 24 * 60 * 60 * 1000);
+      selectDateRange(formatDateISO(monday), formatDateISO(sunday));
+    } else {
+      // In day mode: select the single day
+      setSelectedDay(date);
+      // Also navigate the week range to contain this day
+      const monday = getMonday(date);
+      const sunday = new Date(monday.getTime() + 6 * 24 * 60 * 60 * 1000);
+      selectDateRange(formatDateISO(monday), formatDateISO(sunday));
+    }
+    setCalendarOpen(false);
+  }, [viewMode, selectDateRange, setSelectedDay]);
+
   const dayLabel = columnMode === 'masters' ? 'День по мастерам' : 'День по локациям';
 
   return (
@@ -120,19 +142,29 @@ export function Topbar() {
             <path d="M8 2L4 6L8 10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
           </svg>
         </button>
-        <span
-          className="flex items-center h-7 px-2.5 text-[11px] font-medium select-none whitespace-nowrap"
-          style={{
-            color: 'var(--ink)',
-            border: '1px solid var(--line)',
-            borderRadius: '0',
-          }}
-        >
-          {viewMode === 'week'
-            ? formatWeekRange(currentWeek)
-            : formatDayLabel(selectedDay)
-          }
-        </span>
+        <div className="relative" ref={calendarRef}>
+          <button
+            onClick={() => setCalendarOpen(prev => !prev)}
+            data-testid="date-nav-text"
+            className="flex items-center h-7 px-2.5 text-[11px] font-medium select-none whitespace-nowrap cursor-pointer transition-colors hover:bg-surface"
+            style={{
+              color: 'var(--ink)',
+              border: '1px solid var(--line)',
+              borderRadius: '0',
+            }}
+          >
+            {viewMode === 'week'
+              ? formatWeekRange(currentWeek)
+              : formatDayLabel(selectedDay)
+            }
+          </button>
+          <CalendarPopover
+            isOpen={calendarOpen}
+            onClose={() => setCalendarOpen(false)}
+            onSelectDate={handleCalendarDateSelect}
+            selectedDate={viewMode === 'week' ? currentWeek : selectedDay}
+          />
+        </div>
         <button
           onClick={nextPeriod}
           data-testid="date-nav-next"

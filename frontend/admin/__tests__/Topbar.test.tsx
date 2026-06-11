@@ -403,4 +403,38 @@ describe('Topbar', () => {
     // date-nav should come before cell-height-control in DOM order
     expect(dateNav.compareDocumentPosition(cellHeightControl) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
+
+  // ── Calendar Popover ─────────────────────────────────────────────────
+
+  it('opens calendar popover when date text is clicked', async () => {
+    renderWithProviders();
+    // Date text shows "8-14 июня" in week mode
+    const dateText = screen.getByTestId('date-nav-text');
+    fireEvent.click(dateText);
+    // Calendar popover should appear
+    expect(screen.getByTestId('calendar-popover')).toBeInTheDocument();
+  });
+
+  it('closes calendar popover when a date is selected', async () => {
+    renderWithProviders();
+
+    // Open the calendar
+    fireEvent.click(screen.getByTestId('date-nav-text'));
+    expect(screen.getByTestId('calendar-popover')).toBeInTheDocument();
+
+    // Click on day 15 (June 15, 2026)
+    fireEvent.click(screen.getByText('15'));
+
+    // Calendar should close
+    expect(screen.queryByTestId('calendar-popover')).not.toBeInTheDocument();
+  });
+
+  it('does not open calendar when prev/next arrows are clicked', async () => {
+    renderWithProviders();
+    fireEvent.click(screen.getByTestId('date-nav-prev'));
+    expect(screen.queryByTestId('calendar-popover')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('date-nav-next'));
+    expect(screen.queryByTestId('calendar-popover')).not.toBeInTheDocument();
+  });
 });

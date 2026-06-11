@@ -1,4 +1,4 @@
-import type { Activity, Artist, Service, Location } from '@memo/domain';
+import type { Activity, Master, Service, Location } from '@memo/domain';
 import type { ActivityResponse, MasterResponse, ServiceResponse, LocationResponse } from '@memo/api-client';
 
 /**
@@ -27,7 +27,6 @@ export function transformActivity(raw: ActivityResponse): Activity {
     id: raw.id,
     day,
     masterId: raw.master_id,
-    artistId: raw.master_id,
     startTime,
     duration: raw.duration / 60,
     durationMinutes: raw.duration,
@@ -40,7 +39,7 @@ export function transformActivity(raw: ActivityResponse): Activity {
   };
 }
 
-export function transformMaster(raw: MasterResponse): Artist {
+export function transformMaster(raw: MasterResponse): Master {
   return {
     id: raw.id,
     name: `${raw.first_name} ${raw.last_name}`,

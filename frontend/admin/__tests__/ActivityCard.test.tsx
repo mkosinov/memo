@@ -2,10 +2,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import React from 'react';
 import { ActivityCard } from '../app/components/schedule/ActivityCard';
-import type { Activity, Artist } from '@memo/domain';
+import type { Activity, Master } from '@memo/domain';
 import { createMockUIContext, createMockScheduleContext } from './helpers/mockContexts';
 
-const mockArtist: Artist = {
+const mockMaster: Master = {
   id: 'art_1',
   name: 'Ольга Петрова',
   shortName: 'Ольга',
@@ -29,24 +29,24 @@ const mockActivity: Activity = {
 
 describe('ActivityCard', () => {
   it('renders service name', () => {
-    render(<ActivityCard activity={mockActivity} artist={mockArtist} />);
+    render(<ActivityCard activity={mockActivity} master={mockMaster} />);
     expect(screen.getByText('Картина маслом')).toBeInTheDocument();
   });
 
   it('shows time pill with time range', () => {
-    render(<ActivityCard activity={mockActivity} artist={mockArtist} />);
+    render(<ActivityCard activity={mockActivity} master={mockMaster} />);
     expect(screen.getByText(/10:00/)).toBeInTheDocument();
     expect(screen.getByText(/12:00/)).toBeInTheDocument();
   });
 
   it('shows occupancy ratio', () => {
-    render(<ActivityCard activity={mockActivity} artist={mockArtist} />);
+    render(<ActivityCard activity={mockActivity} master={mockMaster} />);
     expect(screen.getByText('3/8')).toBeInTheDocument();
   });
 
   it('hides content when card is very small (short duration)', () => {
     const shortActivity = { ...mockActivity, duration: 0.25 };
-    render(<ActivityCard activity={shortActivity} artist={mockArtist} />);
+    render(<ActivityCard activity={shortActivity} master={mockMaster} />);
     // Time pill should still show
     expect(screen.getByText(/10:00/)).toBeInTheDocument();
     // Service name should NOT be visible
@@ -56,27 +56,27 @@ describe('ActivityCard', () => {
   it('does not crash when capacity is 0', () => {
     const zeroCapActivity = { ...mockActivity, capacity: 0, occupied: 0 };
     expect(() => {
-      render(<ActivityCard activity={zeroCapActivity} artist={mockArtist} />);
+      render(<ActivityCard activity={zeroCapActivity} master={mockMaster} />);
     }).not.toThrow();
   });
 
   it('shows "0/0" occupancy when capacity is 0', () => {
     const zeroCapActivity = { ...mockActivity, capacity: 0, occupied: 0 };
-    render(<ActivityCard activity={zeroCapActivity} artist={mockArtist} />);
+    render(<ActivityCard activity={zeroCapActivity} master={mockMaster} />);
     expect(screen.getByText('0/0')).toBeInTheDocument();
   });
 
   it('clamps occupancy ratio when occupied exceeds capacity', () => {
     const overbooked = { ...mockActivity, occupied: 10, capacity: 5 };
     expect(() => {
-      render(<ActivityCard activity={overbooked} artist={mockArtist} />);
+      render(<ActivityCard activity={overbooked} master={mockMaster} />);
     }).not.toThrow();
     expect(screen.getByText('10/5')).toBeInTheDocument();
   });
 
   it('renders diamond icon when isPrivate is true', () => {
     const privateActivity = { ...mockActivity, isPrivate: true };
-    const { container } = render(<ActivityCard activity={privateActivity} artist={mockArtist} />);
+    const { container } = render(<ActivityCard activity={privateActivity} master={mockMaster} />);
     
     // Check that the gem paths exist in the card
     expect(container.querySelector('path[d="M12 2L2 9l10 13 10-13L12 2z"]')).toBeInTheDocument();
@@ -87,7 +87,7 @@ describe('ActivityCard', () => {
 
   it('does not have diamond icon when isPrivate is false', () => {
     const { container } = render(
-      <ActivityCard activity={mockActivity} artist={mockArtist} />
+      <ActivityCard activity={mockActivity} master={mockMaster} />
     );
     const paths = container.querySelectorAll('svg path[d="M12 2l10 10-10 10L2 12z"]');
     expect(paths.length).toBe(0);
@@ -96,7 +96,7 @@ describe('ActivityCard', () => {
   it('shows age and location when height >= 90px', () => {
     const tallActivity = { ...mockActivity, duration: 2 };
     const mockStudios = [{ id: 'loc_1', name: 'Студия А' }];
-    render(<ActivityCard activity={tallActivity} artist={mockArtist} studios={mockStudios} />);
+    render(<ActivityCard activity={tallActivity} master={mockMaster} studios={mockStudios} />);
     expect(screen.getByText('6+')).toBeInTheDocument();
     expect(screen.getByText('Студия А')).toBeInTheDocument();
   });
@@ -104,7 +104,7 @@ describe('ActivityCard', () => {
   it('hides age and location when height < 90px', () => {
     // duration=0.6 → height = 0.6*120-10 = 62px (56 <= h < 90, !showExtra)
     const mediumActivity = { ...mockActivity, duration: 0.6 };
-    render(<ActivityCard activity={mediumActivity} artist={mockArtist} />);
+    render(<ActivityCard activity={mediumActivity} master={mockMaster} />);
     expect(screen.queryByText('6+')).not.toBeInTheDocument();
     // Service name IS still visible
     expect(screen.getByText('Картина маслом')).toBeInTheDocument();
@@ -114,7 +114,7 @@ describe('ActivityCard', () => {
 
   it('has data-testid attribute', () => {
     const { container } = render(
-      <ActivityCard activity={mockActivity} artist={mockArtist} />
+      <ActivityCard activity={mockActivity} master={mockMaster} />
     );
     const card = container.querySelector('[data-testid="activity-ev_1"]');
     expect(card).toBeInTheDocument();
@@ -123,7 +123,7 @@ describe('ActivityCard', () => {
   it('enforces minimum height of 52px when duration is 0', () => {
     const zeroDuration = { ...mockActivity, duration: 0 };
     const { container } = render(
-      <ActivityCard activity={zeroDuration} artist={mockArtist} />
+      <ActivityCard activity={zeroDuration} master={mockMaster} />
     );
     const card = container.querySelector('[data-testid]');
     expect(card).toHaveStyle({ height: '52px' });
@@ -131,13 +131,13 @@ describe('ActivityCard', () => {
 
   it('shows full occupancy display when occupied equals capacity', () => {
     const fullActivity = { ...mockActivity, occupied: 8, capacity: 8 };
-    render(<ActivityCard activity={fullActivity} artist={mockArtist} />);
+    render(<ActivityCard activity={fullActivity} master={mockMaster} />);
     expect(screen.getByText('8/8')).toBeInTheDocument();
   });
 
   it('calls onQuickAdd when quick action button is clicked', () => {
     const onQuickAdd = vi.fn();
-    render(<ActivityCard activity={mockActivity} artist={mockArtist} onQuickAdd={onQuickAdd} />);
+    render(<ActivityCard activity={mockActivity} master={mockMaster} onQuickAdd={onQuickAdd} />);
     // The "+" button has aria-label "Добавить гостя"
     const btn = screen.getByRole('button', { name: 'Добавить гостя' });
     fireEvent.click(btn);
@@ -148,7 +148,7 @@ describe('ActivityCard', () => {
   it('calls onQuickAdd for private activity with correct activity', () => {
     const onQuickAdd = vi.fn();
     const privateActivity = { ...mockActivity, isPrivate: true };
-    render(<ActivityCard activity={privateActivity} artist={mockArtist} onQuickAdd={onQuickAdd} />);
+    render(<ActivityCard activity={privateActivity} master={mockMaster} onQuickAdd={onQuickAdd} />);
     const btn = screen.getByRole('button', { name: 'Редактировать' });
     fireEvent.click(btn);
     expect(onQuickAdd).toHaveBeenCalledTimes(1);
@@ -156,14 +156,14 @@ describe('ActivityCard', () => {
   });
 
   it('does not call onQuickAdd when not provided', () => {
-    render(<ActivityCard activity={mockActivity} artist={mockArtist} />);
+    render(<ActivityCard activity={mockActivity} master={mockMaster} />);
     const btn = screen.getByRole('button', { name: 'Добавить гостя' });
     // Should not throw when clicked without onQuickAdd
     expect(() => fireEvent.click(btn)).not.toThrow();
   });
 
   it('renders progress bar with width proportional to occupancy', () => {
-    const { container } = render(<ActivityCard activity={mockActivity} artist={mockArtist} />);
+    const { container } = render(<ActivityCard activity={mockActivity} master={mockMaster} />);
     const filledBar = container.querySelector('[data-testid="activity-ev_1"] [style*="width:"][class*="absolute"]');
     expect(filledBar).toBeInTheDocument();
     // mockActivity: occupied=3, capacity=8 → fillPct=0.375 → width=37.5%
@@ -172,14 +172,14 @@ describe('ActivityCard', () => {
 
   it('renders full width progress bar when fully occupied', () => {
     const fullActivity = { ...mockActivity, occupied: 8, capacity: 8 };
-    const { container } = render(<ActivityCard activity={fullActivity} artist={mockArtist} />);
+    const { container } = render(<ActivityCard activity={fullActivity} master={mockMaster} />);
     const filledBar = container.querySelector('[data-testid="activity-ev_1"] [style*="width:"][class*="absolute"]');
     expect(filledBar).toHaveStyle({ width: '100%' });
   });
 
   it('renders zero width progress bar when empty', () => {
     const emptyActivity = { ...mockActivity, occupied: 0, capacity: 8 };
-    const { container } = render(<ActivityCard activity={emptyActivity} artist={mockArtist} />);
+    const { container } = render(<ActivityCard activity={emptyActivity} master={mockMaster} />);
     const filledBar = container.querySelector('[data-testid="activity-ev_1"] [style*="width:"][class*="absolute"]');
     expect(filledBar).toHaveStyle({ width: '0%' });
   });
@@ -220,7 +220,7 @@ describe('ActivityCard delete mode', () => {
       deleteActivity,
     } as ReturnType<typeof useSchedule>);
 
-    render(<ActivityCard activity={mockActivity} artist={mockArtist} />);
+    render(<ActivityCard activity={mockActivity} master={mockMaster} />);
     const card = screen.getByTestId('activity-ev_1');
     fireEvent.click(card);
 
@@ -240,7 +240,7 @@ describe('ActivityCard delete mode', () => {
       deleteActivity,
     } as ReturnType<typeof useSchedule>);
 
-    const { container } = render(<ActivityCard activity={mockActivity} artist={mockArtist} />);
+    const { container } = render(<ActivityCard activity={mockActivity} master={mockMaster} />);
     const card = screen.getByTestId('activity-ev_1');
 
     // Before click: card is visible

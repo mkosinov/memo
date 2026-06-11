@@ -5,7 +5,7 @@
  * ```ts
  * import { createMockScheduleContext } from './helpers/mockContexts';
  * vi.mock('@/contexts/ScheduleContext', () => ({
- *   useSchedule: vi.fn(() => createMockScheduleContext({ artists: myArtists })),
+ *   useSchedule: vi.fn(() => createMockScheduleContext({ masters: myMasters })),
  * }));
  * ```
  */
@@ -13,7 +13,7 @@ import { vi } from 'vitest';
 import type { ScheduleContextType } from '@/contexts/ScheduleContext';
 import type { RecordsContextType } from '@/contexts/RecordsContext';
 import type { ClientsContextType } from '@/contexts/ClientsContext';
-import { mockArtists, mockServices, mockLocations } from './mockData';
+import { mockMasters, mockServices, mockLocations } from './mockData';
 
 // ─── ScheduleContext ──────────────────────────────────────────────────────
 
@@ -23,7 +23,7 @@ export function createMockScheduleContext(
   overrides?: ScheduleOverrides,
 ): ScheduleContextType {
   return {
-    artists: mockArtists,
+    masters: mockMasters,
     services: mockServices,
     locations: mockLocations,
     activities: [],

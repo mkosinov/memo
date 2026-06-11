@@ -116,7 +116,7 @@ describe('Menubar', () => {
     expect(activeLink).toHaveClass('bg-brand');
   });
 
-  it('renders artist legend with color dots', async () => {
+  it('renders master legend with color dots', async () => {
     renderWithProviders();
     await waitFor(() => {
       expect(screen.getByText('Ольга')).toBeInTheDocument();

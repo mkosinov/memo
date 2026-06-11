@@ -7,7 +7,7 @@ import { useNavigation } from '@/contexts/NavigationContext';
 import { useUI } from '@/contexts/UIContext';
 import { useMasters } from '@/hooks/useMasters';
 import { DAYS, MONTHS, getMonday, formatDate, formatDateISO, isSameDay } from '@/lib/utils';
-import type { Artist } from '@memo/domain';
+import type { Master } from '@memo/domain';
 
 // ─── SVG Icon Components ──────────────────────────────────────────────────
 
@@ -289,23 +289,23 @@ function MiniCalendar({ selectedWeek, onWeekSelect, collapsed }: MiniCalendarPro
   );
 }
 
-// ─── Artist Legend ────────────────────────────────────────────────────────
+// ─── Master Legend ────────────────────────────────────────────────────────
 
-interface ArtistLegendProps {
+interface MasterLegendProps {
   collapsed: boolean;
-  artists: Artist[];
+  masters: Master[];
 }
 
-function ArtistLegend({ collapsed, artists }: ArtistLegendProps) {
+function MasterLegend({ collapsed, masters }: MasterLegendProps) {
   if (collapsed) {
     return (
       <div className="px-2 py-2 space-y-1.5">
-        {artists.slice(0, 4).map(artist => (
+        {masters.slice(0, 4).map(master => (
           <div
-            key={artist.id}
+            key={master.id}
             className="w-5 h-5 rounded-full mx-auto"
-            style={{ backgroundColor: artist.color }}
-            title={artist.shortName}
+            style={{ backgroundColor: master.color }}
+            title={master.shortName}
           />
         ))}
       </div>
@@ -318,13 +318,13 @@ function ArtistLegend({ collapsed, artists }: ArtistLegendProps) {
         Мастера
       </div>
       <div className="space-y-1.5">
-        {artists.map(artist => (
-          <div key={artist.id} className="flex items-center gap-2">
+        {masters.map(master => (
+          <div key={master.id} className="flex items-center gap-2">
             <div
               className="w-3 h-3 rounded-full flex-shrink-0"
-              style={{ backgroundColor: artist.color }}
+              style={{ backgroundColor: master.color }}
             />
-            <span className="text-xs text-white/70 truncate">{artist.shortName}</span>
+            <span className="text-xs text-white/70 truncate">{master.shortName}</span>
           </div>
         ))}
       </div>
@@ -336,7 +336,7 @@ function ArtistLegend({ collapsed, artists }: ArtistLegendProps) {
 
 export function Menubar() {
   const { dateFrom, selectDateRange } = useNavigation();
-  const { data: artists = [] } = useMasters();
+  const { data: masters = [] } = useMasters();
   const { sidebarCollapsed, toggleSidebar, theme, toggleTheme } = useUI();
   const pathname = usePathname();
   const [openMenu, setOpenMenu] = useState<string | null>(null);
@@ -438,17 +438,17 @@ export function Menubar() {
           </button>
           {openMenu === 'masters' && !sidebarCollapsed && (
             <div className="ml-4 mt-0.5 mb-1 space-y-0.5">
-              {artists.map(artist => (
+              {masters.map(master => (
                 <div
-                  key={artist.id}
+                  key={master.id}
                   className="flex items-center gap-2 px-3 py-1.5 rounded-md"
                 >
                   <div
                     className="w-2 h-2 rounded-full flex-shrink-0"
-                    style={{ backgroundColor: artist.color }}
+                    style={{ backgroundColor: master.color }}
                   />
                   <span className="text-xs text-white/70 truncate">
-                    {artist.name}{artist.specialty ? `\u00A0—\u00A0${artist.specialty}` : ''}
+                    {master.name}{master.specialty ? `\u00A0—\u00A0${master.specialty}` : ''}
                   </span>
                 </div>
               ))}
@@ -521,8 +521,8 @@ export function Menubar() {
 
         {!sidebarCollapsed && <div className="border-t border-white/10 mx-3" />}
 
-        {/* Artist Legend */}
-        <ArtistLegend collapsed={sidebarCollapsed} artists={artists} />
+        {/* Master Legend */}
+        <MasterLegend collapsed={sidebarCollapsed} masters={masters} />
       </div>
 
       {/* ── Bottom Section ── */}

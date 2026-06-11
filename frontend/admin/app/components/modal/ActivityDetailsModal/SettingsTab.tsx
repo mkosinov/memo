@@ -12,7 +12,7 @@ interface SettingsTabProps {
 }
 
 export function SettingsTab({ activity, onUpdate }: SettingsTabProps) {
-  const { artists, services, locations } = useSchedule();
+  const { masters, services, locations } = useSchedule();
 
   const [serviceId, setServiceId] = useState(activity.serviceId);
   const [masterId, setMasterId] = useState(activity.masterId);
@@ -244,7 +244,7 @@ export function SettingsTab({ activity, onUpdate }: SettingsTabProps) {
             Мастер
           </label>
           <MasterPicker
-            masters={artists}
+            masters={masters}
             value={masterId}
             onChange={(value) => {
               setMasterId(value);

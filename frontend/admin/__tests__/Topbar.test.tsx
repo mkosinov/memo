@@ -18,7 +18,7 @@ vi.mock('@memo/api-client', () => ({
 
 vi.mock('@/contexts/ScheduleContext', () => ({
   useSchedule: vi.fn(() => ({
-    artists: [],
+    masters: [],
     locations: [],
     filterMasterId: null,
     filterLocationId: null,

@@ -1,8 +1,8 @@
-import type { Artist, Studio, Service, Activity, Client, Visitor, Record, Visit, Payment } from '@memo/domain';
+import type { Master, Studio, Service, Activity, Client, Visitor, Record, Visit, Payment } from '@memo/domain';
 
-// ─── Artists ──────────────────────────────────────────────────────────────
+// ─── Masters ─────────────────────────────────────────────────────────────
 
-export const ARTISTS: Artist[] = [
+export const MASTERS: Master[] = [
   { id: 'm1', name: 'Ольга Середа',       shortName: 'Ольга',      color: '#5B8C7A' },
   { id: 'm2', name: 'Юлия Большакова',    shortName: 'Юлия',       color: '#6B7E9C' },
   { id: 'm3', name: 'Анастасия П.',       shortName: 'Анастасия',  color: '#A07060' },

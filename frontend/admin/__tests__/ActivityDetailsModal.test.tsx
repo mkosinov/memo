@@ -11,7 +11,7 @@ import { NewBookingTab } from '../app/components/modal/ActivityDetailsModal/NewB
 // ─── Shared mock data & context factories ────────────────────────────────
 
 import {
-  mockArtists,
+  mockMasters,
   mockServices,
   mockLocations,
   mockActivity,
@@ -175,7 +175,7 @@ describe('SettingsTab', () => {
     expect(screen.getByLabelText('Услуга')).toBeInTheDocument();
   });
 
-  it('renders master select with artist names', () => {
+  it('renders master select with master names', () => {
     render(<SettingsTab {...defaultProps} />);
     // MasterPicker uses CustomSelect — a button trigger instead of native <select>
     const masterRow = screen.getByTestId('settings-row-master-location');
@@ -185,7 +185,7 @@ describe('SettingsTab', () => {
     expect(masterTrigger).toBeInTheDocument();
     // The selected master (m1 = Ольга Середа) should show in the trigger label
     expect(masterTrigger.textContent).toContain('Ольга Середа');
-    // Open the dropdown to verify all artist names are available
+    // Open the dropdown to verify all master names are available
     fireEvent.click(masterTrigger);
     const dropdown = screen.getByTestId('custom-select-dropdown');
     expect(within(dropdown).getByText('Ольга Середа')).toBeInTheDocument();

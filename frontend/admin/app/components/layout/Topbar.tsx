@@ -10,7 +10,7 @@ import { getMonday, formatDateISO, MONTHS_GENITIVE } from '@/lib/utils';
 export function Topbar() {
   const { dateFrom, selectDateRange } = useNavigation();
   const {
-    artists,
+    masters,
     locations,
     filterMasterId,
     filterLocationId,
@@ -118,7 +118,7 @@ export function Topbar() {
 
       {/* ── Right: Filters ── */}
       <div className="flex items-center gap-2">
-        {/* Artist filter */}
+        {/* Master filter */}
         <select
           className="rounded-lg border px-2 py-1.5 text-xs"
           style={{
@@ -131,7 +131,7 @@ export function Topbar() {
           onChange={e => setFilterMasterId(e.target.value || null)}
         >
           <option value="">Все мастера</option>
-          {artists.map(a => (
+          {masters.map(a => (
             <option key={a.id} value={a.id}>{a.shortName}</option>
           ))}
         </select>

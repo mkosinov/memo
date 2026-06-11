@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useDroppable } from '@dnd-kit/core';
 import { CELL_HEIGHT, hexToRgb, mixWithWhite, formatTime, generateTimeSlots, HOURS_START } from '@/lib/utils';
-import type { Activity, Artist, Studio, StampState, Service } from '@memo/domain';
+import type { Activity, Master, Studio, StampState, Service } from '@memo/domain';
 import { ActivityCard } from './ActivityCard';
 
 // ─── Constants ────────────────────────────────────────────────────────────
@@ -43,7 +43,7 @@ interface DayColumnProps {
   dayIndex: number;
   date: Date;
   activities: Activity[];
-  artists: Artist[];
+  masters: Master[];
   studios?: Studio[];
   services?: Service[];
   dragCopy?: boolean;
@@ -69,14 +69,14 @@ interface DroppableSlotProps {
   onOpenModal?: (dayIndex: number, startTime: number) => void;
   stampReady?: boolean;
   stamp?: StampState;
-  artists?: Artist[];
+  masters?: Master[];
   services?: Service[];
   children?: React.ReactNode;
 }
 
 // ─── DroppableSlot ────────────────────────────────────────────────────────
 
-function DroppableSlot({ dayIndex, slotIndex, startTime, isHour, dragCopy, onClick, onOpenModal, stampReady, stamp, artists, services, children }: DroppableSlotProps) {
+function DroppableSlot({ dayIndex, slotIndex, startTime, isHour, dragCopy, onClick, onOpenModal, stampReady, stamp, masters, services, children }: DroppableSlotProps) {
   const { isOver, setNodeRef } = useDroppable({
     id: `slot-${dayIndex}-${slotIndex}`,
     data: { dayIndex, slotIndex },
@@ -87,7 +87,7 @@ function DroppableSlot({ dayIndex, slotIndex, startTime, isHour, dragCopy, onCli
   const showStampGhost = stampReady && hoveredStampSlot === slotIndex && !isOver;
   const stampGhostPreview = showStampGhost && stamp?.masterId && stamp?.serviceId
     ? (() => {
-        const master = artists?.find(a => a.id === stamp.masterId);
+        const master = masters?.find(a => a.id === stamp.masterId);
         const service = services?.find(s => s.id === stamp.serviceId);
         if (!master || !service) return null;
         const rgb = hexToRgb(master.color);
@@ -96,9 +96,9 @@ function DroppableSlot({ dayIndex, slotIndex, startTime, isHour, dragCopy, onCli
       })()
     : null;
 
-  const stampGhostStyle: React.CSSProperties | null = (stampReady && isOver && stamp?.masterId && artists)
+  const stampGhostStyle: React.CSSProperties | null = (stampReady && isOver && stamp?.masterId && masters)
     ? (() => {
-        const master = artists.find(a => a.id === stamp.masterId);
+        const master = masters.find(a => a.id === stamp.masterId);
         if (!master) return null;
         const rgb = hexToRgb(master.color);
         const mixed = mixWithWhite(rgb, 0.85);
@@ -189,7 +189,7 @@ function DroppableSlot({ dayIndex, slotIndex, startTime, isHour, dragCopy, onCli
 
 // ─── DayColumn ────────────────────────────────────────────────────────────
 
-export function DayColumn({ dayIndex, activities, artists, studios = [], services = [], dragCopy, dragId, ghostHeight, ghostDayIndex, ghostSlotIndex, onCreateActivity, onOpenCreateModal, onOpenEditModal, onQuickAdd, stampReady, stamp }: DayColumnProps) {
+export function DayColumn({ dayIndex, activities, masters, studios = [], services = [], dragCopy, dragId, ghostHeight, ghostDayIndex, ghostSlotIndex, onCreateActivity, onOpenCreateModal, onOpenEditModal, onQuickAdd, stampReady, stamp }: DayColumnProps) {
   const [visibleIndices, setVisibleIndices] = useState<Record<string, number>>({});
   const [prevIndices, setPrevIndices] = useState<Record<string, number>>({});
   const columnRef = useRef<HTMLDivElement>(null);
@@ -199,7 +199,7 @@ export function DayColumn({ dayIndex, activities, artists, studios = [], service
 
   const slots = useMemo(() => generateTimeSlots(), []);
 
-  const artistMap = useMemo(() => new Map(artists.map(a => [a.id, a])), [artists]);
+  const masterMap = useMemo(() => new Map(masters.map(a => [a.id, a])), [masters]);
 
   // Group by startTime for stacking within same slot
   const slotGroups: Record<string, Activity[]> = {};
@@ -285,7 +285,7 @@ export function DayColumn({ dayIndex, activities, artists, studios = [], service
           onOpenModal={onOpenCreateModal}
           stampReady={stampReady}
           stamp={stamp}
-          artists={artists}
+          masters={masters}
           services={services}
         />
       ))}
@@ -341,14 +341,14 @@ export function DayColumn({ dayIndex, activities, artists, studios = [], service
         const ox = overlapInfo ? overlapInfo.index * OVERLAP_OFFSET : 0;
         const oy = overlapInfo ? overlapInfo.index * OVERLAP_OFFSET : 0;
 
-        const artist = artistMap.get(activity.masterId) || artists[0];
+        const master = masterMap.get(activity.masterId) || masters[0];
         const isThisDragging = dragId === activity.id;
 
         return (
           <React.Fragment key={activity.id}>
             <ActivityCard
               activity={activity}
-              artist={artist}
+              master={master}
               studios={studios}
               onEdit={onOpenEditModal}
               onQuickAdd={onQuickAdd}

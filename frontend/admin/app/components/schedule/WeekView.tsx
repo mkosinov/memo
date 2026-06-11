@@ -14,7 +14,7 @@ import { ActivityDetailsModal } from '../modal/ActivityDetailsModal';
 import { DAYS, getMonday, TIME_COL_WIDTH, isSameDay, formatTime, HOURS_START, CELL_HEIGHT } from '@/lib/utils';
 
 export function WeekView() {
-  const { currentWeek, activities, scheduleIndex, artists, services, locations: studios, stamp, addActivity, updateActivity, loading, error, filterMasterId, filterLocationId } = useSchedule();
+  const { currentWeek, activities, scheduleIndex, masters, services, locations: studios, stamp, addActivity, updateActivity, loading, error, filterMasterId, filterLocationId } = useSchedule();
   const { showToast } = useUI();
   const monday = getMonday(currentWeek);
 
@@ -146,8 +146,8 @@ export function WeekView() {
 
   const today = new Date();
 
-  const dragArtist = activeDragActivity
-    ? artists.find((a) => a.id === activeDragActivity.masterId) || artists[0]
+  const dragMaster = activeDragActivity
+    ? masters.find((a) => a.id === activeDragActivity.masterId) || masters[0]
     : null;
 
   // Calculate ghost span for drag overlay (how many slots the dragged card occupies)
@@ -263,7 +263,7 @@ export function WeekView() {
               dayIndex={i}
               date={day}
               activities={resolveById(activitiesByDate.get(dateToISO(day)) ?? [], scheduleIndex.byId).map(a => ({ ...a, duration: a.durationMinutes / 60, serviceName: a.serviceTitle }))}
-              artists={artists}
+              masters={masters}
               studios={studios}
               services={services}
               dragCopy={dragCopy}
@@ -297,11 +297,11 @@ export function WeekView() {
       </div>
 
       <DragOverlay dropAnimation={null}>
-        {activeDragActivity && dragArtist ? (
+        {activeDragActivity && dragMaster ? (
           <div className="opacity-80 scale-95" style={{ width: '180px' }} data-drag-ghost="true">
             <ActivityCard
               activity={activeDragActivity}
-              artist={dragArtist}
+              master={dragMaster}
               studios={studios}
               style={{ top: 0 }}
             />

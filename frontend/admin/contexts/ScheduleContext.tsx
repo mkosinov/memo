@@ -1,7 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useState, useCallback, useMemo } from 'react';
-import type { Activity, Artist, Service, Location, StampState, ScheduleAdminDTO, ScheduleIndex as DomainScheduleIndex } from '@memo/domain';
+import type { Activity, Master, Service, Location, StampState, ScheduleAdminDTO, ScheduleIndex as DomainScheduleIndex } from '@memo/domain';
 import { buildSchedule } from '@memo/domain';
 import { buildAdminSchedule } from '@/lib/buildSchedule';
 import { useActivities } from '@/hooks/useActivities';
@@ -23,7 +23,7 @@ import { useNavigation } from '@/contexts/NavigationContext';
 export interface ScheduleContextType {
   activities: ScheduleAdminDTO[];
   scheduleIndex: DomainScheduleIndex<ScheduleAdminDTO>;
-  artists: Artist[];
+  masters: Master[];
   services: Service[];
   locations: Location[];
   currentWeek: Date;
@@ -88,7 +88,7 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
   });
 
   // Domain types for context consumers (select transforms use same cache as raw queries)
-  const { data: artists = [] } = useMasters();
+  const { data: masters = [] } = useMasters();
   const { data: services = [] } = useServices();
   const { data: locations = [] } = useLocations();
 
@@ -248,7 +248,7 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
   const contextValue = useMemo(() => ({
     activities: filteredItems,
     scheduleIndex,
-    artists,
+    masters,
     services,
     locations,
     currentWeek,
@@ -266,7 +266,7 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
     setFilterMasterId,
     setFilterLocationId,
   }), [
-    filteredItems, scheduleIndex, artists, services, locations,
+    filteredItems, scheduleIndex, masters, services, locations,
     currentWeek, stamp, filterMasterId, filterLocationId,
     setCurrentWeek, addActivity, updateActivityFn, deleteActivityById, setStamp, copyLastWeek,
     setFilterMasterId, setFilterLocationId,

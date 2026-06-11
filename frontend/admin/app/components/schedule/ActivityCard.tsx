@@ -4,12 +4,12 @@ import React, { useState, useRef } from 'react';
 import { useDraggable } from '@dnd-kit/core';
 import { useUI } from '@/contexts/UIContext';
 import { useSchedule } from '@/contexts/ScheduleContext';
-import type { Activity, Artist, Studio } from '@memo/domain';
+import type { Activity, Master, Studio } from '@memo/domain';
 import { HOURS_START, CELL_HEIGHT, formatTime } from '@/lib/utils';
 
 interface ActivityCardProps {
   activity: Activity;
-  artist: Artist;
+  master: Master;
   studios?: Studio[];
   style?: React.CSSProperties;
   onEdit?: (activity: Activity) => void;
@@ -18,7 +18,7 @@ interface ActivityCardProps {
   isDragCopy?: boolean;
 }
 
-export function ActivityCard({ activity, artist, studios = [], style, onEdit, onQuickAdd, isDragging, isDragCopy }: ActivityCardProps) {
+export function ActivityCard({ activity, master, studios = [], style, onEdit, onQuickAdd, isDragging, isDragCopy }: ActivityCardProps) {
   const { deleteMode, showToast } = useUI();
   const { deleteActivity, addActivity } = useSchedule();
   const [deleting, setDeleting] = useState(false);
@@ -81,7 +81,7 @@ export function ActivityCard({ activity, artist, studios = [], style, onEdit, on
       style={{
         top: topPx,
         height: heightPx,
-        backgroundColor: artist.color,
+        backgroundColor: master.color,
         border: 'none',
         transition: 'opacity 150ms ease, transform 150ms ease',
         ...dragStyle,
@@ -130,8 +130,8 @@ export function ActivityCard({ activity, artist, studios = [], style, onEdit, on
 
           {/* 3b. MASTER */}
           {showExtra && (
-            <div className="px-2 text-[13px] text-black truncate" title={artist.name}>
-              {artist.name}
+            <div className="px-2 text-[13px] text-black truncate" title={master.name}>
+              {master.name}
             </div>
           )}
 

@@ -209,11 +209,6 @@ describe('transformActivity', () => {
     expect(result.masterId).toBe('master-1');
   });
 
-  it('sets artistId as alias for masterId', () => {
-    const result = transformActivity(activityFixture);
-    expect(result.artistId).toBe('master-1');
-  });
-
   it('maps service_id to serviceId', () => {
     const result = transformActivity(activityFixture);
     expect(result.serviceId).toBe('service-1');

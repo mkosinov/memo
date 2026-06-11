@@ -66,7 +66,7 @@ describe('Schedule pipeline integration: enrichment from API to ActivityCard', (
   beforeEach(() => {
     vi.clearAllMocks();
 
-    // Mock masters API (raw MasterResponse, not transformed Artist)
+    // Mock masters API (raw MasterResponse, not transformed Master)
     vi.mocked(getMasters).mockResolvedValue([
       {
         id: 'm1',

@@ -87,7 +87,7 @@ describe('WeekView', () => {
       loading: false,
       error: null,
       activities: [{
-        id: '1', day: 0, masterId: 'm1', artistId: 'm1', startTime: 10, duration: 1,
+        id: '1', day: 0, masterId: 'm1', startTime: 10, duration: 1,
         serviceId: 's1', serviceName: 'Test', minAge: '6', locationId: 'l1', occupied: 0,
         capacity: 10, isPrivate: false,
         masterName: 'Test Master', serviceTitle: 'Test', date: '2025-04-07',
@@ -121,7 +121,7 @@ describe('WeekView', () => {
       loading: false,
       error: null,
       activities: [{
-        id: '1', day: 0, masterId: 'm1', artistId: 'm1', startTime: 10, duration: 1,
+        id: '1', day: 0, masterId: 'm1', startTime: 10, duration: 1,
         serviceId: 's1', serviceName: 'Test', minAge: '6', locationId: 'l1', occupied: 0,
         capacity: 10, isPrivate: false,
         masterName: 'Test Master', serviceTitle: 'Test', date: '2025-04-07',

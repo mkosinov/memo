@@ -30,7 +30,7 @@ import {
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
-const mockArtists = [
+const mockMasters = [
   { id: 'm1', name: 'Ольга Середа', shortName: 'Ольга', color: '#5B8C7A' },
   { id: 'm2', name: 'Юлия Большакова', shortName: 'Юлия', color: '#6B7E9C' },
 ];
@@ -71,7 +71,7 @@ function createTestQueryClient() {
 function ScheduleConsumer() {
   const {
     activities,
-    artists,
+    masters,
     services,
     locations,
     currentWeek,
@@ -89,7 +89,7 @@ function ScheduleConsumer() {
   return (
     <div>
       <span data-testid="activity-count">{activities.length}</span>
-      <span data-testid="artist-count">{artists.length}</span>
+      <span data-testid="master-count">{masters.length}</span>
       <span data-testid="service-count">{services.length}</span>
       <span data-testid="location-count">{locations.length}</span>
       <span data-testid="week-start">{currentWeek.toISOString()}</span>
@@ -188,7 +188,7 @@ describe('ScheduleProvider', () => {
     spy.mockRestore();
   });
 
-  it('provides artists, services, locations from React Query hooks', async () => {
+  it('provides masters, services, locations from React Query hooks', async () => {
     vi.mocked(getMasters).mockResolvedValue([
       { id: 'm1', first_name: 'Ольга', last_name: 'Середа', color: '#5B8C7A', position: 'мастер', specialty: 'живопись', avatar_url: null, is_active: true, created_at: '2024-01-01', updated_at: '2024-01-01' },
       { id: 'm2', first_name: 'Юлия', last_name: 'Большакова', color: '#6B7E9C', position: 'мастер', specialty: 'живопись', avatar_url: null, is_active: true, created_at: '2024-01-01', updated_at: '2024-01-01' },
@@ -208,7 +208,7 @@ describe('ScheduleProvider', () => {
     renderWithContext();
 
     await waitFor(() => {
-      expect(screen.getByTestId('artist-count').textContent).toBe('2');
+      expect(screen.getByTestId('master-count').textContent).toBe('2');
     });
     expect(screen.getByTestId('service-count').textContent).toBe('1');
     expect(screen.getByTestId('location-count').textContent).toBe('2');

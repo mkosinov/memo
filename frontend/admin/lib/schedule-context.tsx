@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useCallback, useMemo } from 'react';
 import { DndContext } from '@dnd-kit/core';
 import { Activity, Filters, FormatPainterState, ViewMode, Conflict } from '@memo/domain';
-import { ARTISTS, LOCATIONS, SERVICES, INITIAL_ACTIVITIES, addDays, addMinutes, getMonday } from './mock-data';
+import { MASTERS, LOCATIONS, SERVICES, INITIAL_ACTIVITIES, addDays, addMinutes, getMonday } from './mock-data';
 
 interface ScheduleContextType {
   activities: Activity[];
@@ -36,7 +36,7 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
   const [filters, setFilters] = useState<Filters>({
     locationId: '',
     serviceId: '',
-    artistId: '',
+    masterId: '',
     weekStart: getMonday(new Date()),
   });
   const [viewMode, setViewMode] = useState<ViewMode>('week');
@@ -85,7 +85,7 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
         ...a,
         serviceId: source.serviceId,
         locationId: source.locationId,
-        artistId: source.artistId,
+        masterId: source.masterId,
       };
     }));
     setFormatPainter({ mode: 'inactive', sourceId: null });
@@ -110,7 +110,7 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
     return activities.filter(a => {
       if (filters.locationId && a.locationId !== filters.locationId) return false;
       if (filters.serviceId && a.serviceId !== filters.serviceId) return false;
-      if (filters.artistId && a.artistId !== filters.artistId) return false;
+      if (filters.masterId && a.masterId !== filters.masterId) return false;
       if (!weekDays.includes(a.date)) return false;
       return true;
     });
@@ -123,7 +123,7 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
       for (let j = i + 1; j < weekActivities.length; j++) {
         const a = weekActivities[i];
         const b = weekActivities[j];
-        if (a.artistId !== b.artistId) continue;
+        if (a.masterId !== b.masterId) continue;
         if (a.date !== b.date) continue;
         if (a.locationId === b.locationId) continue;
         const aStart = timeToMinutes(a.startTime);
@@ -131,14 +131,14 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
         const bStart = timeToMinutes(b.startTime);
         const bEnd = timeToMinutes(b.endTime);
         if (aStart < bEnd && bStart < aEnd) {
-          const artist = ARTISTS.find(ar => ar.id === a.artistId);
+          const master = MASTERS.find(ar => ar.id === a.masterId);
           const locA = LOCATIONS.find(l => l.id === a.locationId);
           const locB = LOCATIONS.find(l => l.id === b.locationId);
           result.push({
             activityId1: a.id,
             activityId2: b.id,
-            artistId: a.artistId,
-            message: `${artist?.name} записан в ${locA?.name} и ${locB?.name} одновременно`,
+            masterId: a.masterId,
+            message: `${master?.name} записан в ${locA?.name} и ${locB?.name} одновременно`,
           });
         }
       }

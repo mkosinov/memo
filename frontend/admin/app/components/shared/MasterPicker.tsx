@@ -2,7 +2,7 @@
 
 import { CustomSelect, type CustomSelectOption } from './CustomSelect';
 
-/** Accepts both raw API MasterResponse ({ first_name, last_name }) and domain Artist ({ name }). */
+/** Accepts both raw API MasterResponse ({ first_name, last_name }) and domain Master ({ name }). */
 interface MasterBase {
   id: string;
   color: string;

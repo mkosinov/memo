@@ -4,7 +4,7 @@
  * Import these constants instead of defining per-file mocks.
  * All data is minimal but realistic — enough to test most UI paths.
  */
-import type { Artist, Service, Activity, Location } from '@memo/domain';
+import type { Master, Service, Activity, Location } from '@memo/domain';
 import type {
   RecordResponse,
   ClientResponse,
@@ -30,7 +30,7 @@ type ServiceWithTariffs = Service & { tariffs: Tariff[] };
 
 // ─── Domain types ─────────────────────────────────────────────────────────
 
-export const mockArtists: Artist[] = [
+export const mockMasters: Master[] = [
   { id: 'm1', name: 'Ольга Середа', shortName: 'Ольга', color: '#5B8C7A' },
   { id: 'm2', name: 'Юлия Большакова', shortName: 'Юлия', color: '#6B7E9C' },
 ];

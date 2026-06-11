@@ -21,6 +21,7 @@ import { getMonday, formatDateISO } from '@/lib/utils';
 import { useNavigation } from '@/contexts/NavigationContext';
 
 export type ViewModeType = 'week' | 'day';
+export type ColumnModeType = 'masters' | 'locations';
 
 export interface ScheduleContextType {
   activities: ScheduleAdminDTO[];
@@ -48,6 +49,8 @@ export interface ScheduleContextType {
   setSelectedDay: (date: Date) => void;
   showAllColumns: boolean;
   setShowAllColumns: (show: boolean) => void;
+  columnMode: ColumnModeType;
+  setColumnMode: (mode: ColumnModeType) => void;
 }
 
 const ScheduleContext = createContext<ScheduleContextType | null>(null);
@@ -73,6 +76,7 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
   const [viewMode, setViewMode] = useState<ViewModeType>('week');
   const [selectedDay, setSelectedDay] = useState<Date>(new Date());
   const [showAllColumns, setShowAllColumns] = useState<boolean>(false);
+  const [columnMode, setColumnMode] = useState<ColumnModeType>('masters');
 
   // Listen for "go to today" event from sidebar button
   React.useEffect(() => {
@@ -344,13 +348,15 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
     setSelectedDay,
     showAllColumns,
     setShowAllColumns,
+    columnMode,
+    setColumnMode,
   }), [
     filteredItems, scheduleIndex, masters, services, locations,
     currentWeek, stamp, filterMasterIds, filterLocationIds,
-    viewMode, selectedDay, showAllColumns,
+    viewMode, selectedDay, showAllColumns, columnMode,
     setCurrentWeek, addActivity, updateActivityFn, deleteActivityById, setStamp, copyLastWeek,
     setFilterMasterIds, setFilterLocationIds,
-    setViewMode, setSelectedDay, setShowAllColumns,
+    setViewMode, setSelectedDay, setShowAllColumns, setColumnMode,
     activitiesLoading, activitiesError,
   ]);
 

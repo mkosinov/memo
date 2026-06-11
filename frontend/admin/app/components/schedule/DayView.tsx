@@ -11,6 +11,7 @@ import type { Activity } from '@memo/domain';
 import { TimeColumn } from './TimeColumn';
 import { DayColumn } from './DayColumn';
 import { ActivityCard } from './ActivityCard';
+import { ScheduleColumnHeader } from './ScheduleColumnHeader';
 import { ActivityDetailsModal } from '../modal/ActivityDetailsModal';
 import { TIME_COL_WIDTH, isSameDay, formatTime, HOURS_START, CELL_HEIGHT } from '@/lib/utils';
 
@@ -28,6 +29,8 @@ export function DayView() {
     filterMasterIds,
     selectedDay,
     showAllColumns,
+    columnMode,
+    setColumnMode,
   } = useSchedule();
   const { showToast } = useUI();
 
@@ -137,11 +140,7 @@ export function DayView() {
     [dayActivities],
   );
 
-  // Determine columns based on filter
-  // If master filter (subset selected) → columns = locations
-  // If no master filter → default to masters as columns
-  const columnMode = filterMasterIds.length > 0 ? 'locations' : 'masters';
-
+  // Determine columns based on explicit columnMode (not implicit filter logic)
   const columns = useMemo(() => {
     if (columnMode === 'locations') {
       // Show locations as columns
@@ -276,11 +275,36 @@ export function DayView() {
       }}
     >
       <div className="min-w-[600px] h-full flex flex-col">
+        {/* Column mode toggle */}
+        <div className="flex items-center justify-end px-3 py-1.5 border-b shrink-0" style={{ borderColor: 'var(--line)' }}>
+          <div className="flex items-center gap-1 rounded-lg p-0.5" style={{ backgroundColor: 'var(--surface)' }}>
+            <button
+              onClick={() => setColumnMode('masters')}
+              className="rounded-md px-3 py-1 text-xs font-medium transition-colors"
+              style={columnMode === 'masters'
+                ? { backgroundColor: 'var(--brand)', color: 'white', boxShadow: '0 1px 3px rgba(0,0,0,0.15)' }
+                : { color: 'var(--ink-light)' }
+              }
+              data-testid="column-mode-masters"
+            >
+              По мастерам
+            </button>
+            <button
+              onClick={() => setColumnMode('locations')}
+              className="rounded-md px-3 py-1 text-xs font-medium transition-colors"
+              style={columnMode === 'locations'
+                ? { backgroundColor: 'var(--brand)', color: 'white', boxShadow: '0 1px 3px rgba(0,0,0,0.15)' }
+                : { color: 'var(--ink-light)' }
+              }
+              data-testid="column-mode-locations"
+            >
+              По локациям
+            </button>
+          </div>
+        </div>
+
         {/* Column headers */}
-        <div
-          className="sticky top-[52px] z-[24] flex bg-white border-b shrink-0"
-          style={{ paddingLeft: TIME_COL_WIDTH, borderColor: 'var(--line)' }}
-        >
+        <ScheduleColumnHeader stickyTop="52px" zIndex={24}>
           {orderedColumns.map((col) => {
             const isDropTarget = dropTargetId === col.id && draggedColumnId !== col.id;
             return (
@@ -335,7 +359,7 @@ export function DayView() {
               Нет занятий на этот день
             </div>
           )}
-        </div>
+        </ScheduleColumnHeader>
 
         {/* Grid row — scrollable */}
         <div className="flex-1 flex overflow-auto relative">

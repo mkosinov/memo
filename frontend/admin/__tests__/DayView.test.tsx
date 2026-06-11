@@ -116,12 +116,13 @@ describe('DayView', () => {
   });
 
   describe('column logic based on filters', () => {
-    it('shows location columns when master filter is active', () => {
+    it('shows location columns when columnMode=locations is set', () => {
       const activities = [
         createMockActivity({ id: 'ev_1', masterId: 'm1', locationId: 'alpika', date: '2026-06-15' }),
-        createMockActivity({ id: 'ev_2', masterId: 'm1', locationId: 'grand', date: '2026-06-15' }),
+        createMockActivity({ id: 'ev_2', masterId: 'm2', locationId: 'grand', date: '2026-06-15' }),
       ];
       renderDayView({
+        columnMode: 'locations',
         filterMasterIds: ['m1'],
         filterLocationIds: [],
         selectedDay: new Date(2026, 5, 15), // June 15, 2026
@@ -166,6 +167,87 @@ describe('DayView', () => {
       });
       // With no filter, defaults to master columns; only active masters shown (m1 = Ольга)
       expect(screen.getByText('Ольга')).toBeInTheDocument();
+    });
+  });
+
+  describe('explicit columnMode override', () => {
+    it('shows master columns when columnMode=masters even with master filter active', () => {
+      // Implicit logic would show locations when filterMasterIds has entries,
+      // but explicit columnMode=masters should override that
+      const activities = [
+        createMockActivity({ id: 'ev_1', masterId: 'm1', locationId: 'alpika', date: '2026-06-15' }),
+        createMockActivity({ id: 'ev_2', masterId: 'm2', locationId: 'grand', date: '2026-06-15' }),
+      ];
+      renderDayView({
+        columnMode: 'masters',
+        filterMasterIds: ['m1'],
+        filterLocationIds: [],
+        selectedDay: new Date(2026, 5, 15),
+        activities,
+        loading: false,
+        error: null,
+      });
+      // Should show master columns, not location columns
+      expect(screen.getByText('Ольга')).toBeInTheDocument();
+      expect(screen.getByText('Юлия')).toBeInTheDocument();
+      // Location names should NOT appear as column headers
+      expect(screen.queryByText('Альпика')).not.toBeInTheDocument();
+    });
+
+    it('shows location columns when columnMode=locations even with no master filter', () => {
+      // Implicit logic would show masters when no filter is active,
+      // but explicit columnMode=locations should override that
+      const activities = [
+        createMockActivity({ id: 'ev_1', masterId: 'm1', locationId: 'alpika', date: '2026-06-15' }),
+        createMockActivity({ id: 'ev_2', masterId: 'm1', locationId: 'grand', date: '2026-06-15' }),
+      ];
+      renderDayView({
+        columnMode: 'locations',
+        filterMasterIds: [],
+        filterLocationIds: [],
+        selectedDay: new Date(2026, 5, 15),
+        activities,
+        loading: false,
+        error: null,
+      });
+      // Should show location columns, not master columns
+      expect(screen.getByText('Альпика')).toBeInTheDocument();
+      expect(screen.getByText('Гранд Отель Поляна')).toBeInTheDocument();
+      // Master names should NOT appear as column headers
+      expect(screen.queryByText('Ольга')).not.toBeInTheDocument();
+    });
+  });
+
+  describe('column mode toggle UI', () => {
+    it('renders the column mode toggle with both options', () => {
+      renderDayView({ selectedDay: new Date(2026, 5, 15), loading: false, error: null });
+      expect(screen.getByText('По мастерам')).toBeInTheDocument();
+      expect(screen.getByText('По локациям')).toBeInTheDocument();
+    });
+
+    it('calls setColumnMode when toggle button is clicked', () => {
+      const setColumnMode = vi.fn();
+      renderDayView({
+        columnMode: 'masters',
+        setColumnMode,
+        selectedDay: new Date(2026, 5, 15),
+        loading: false,
+        error: null,
+      });
+      fireEvent.click(screen.getByText('По локациям'));
+      expect(setColumnMode).toHaveBeenCalledWith('locations');
+    });
+
+    it('highlights the active column mode button', () => {
+      renderDayView({
+        columnMode: 'masters',
+        selectedDay: new Date(2026, 5, 15),
+        loading: false,
+        error: null,
+      });
+      const mastersBtn = screen.getByTestId('column-mode-masters');
+      // Active button should have brand background via inline style
+      expect(mastersBtn).toHaveStyle({ backgroundColor: 'var(--brand)' });
     });
   });
 });

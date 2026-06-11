@@ -56,43 +56,14 @@ export function Topbar() {
 
   return (
     <div
-      className="sticky top-0 z-40 flex h-12 items-center border-b px-3"
+      className="sticky top-0 z-40 flex h-12 items-center justify-between border-b px-3"
       style={{
         backgroundColor: 'var(--white)',
         borderColor: 'var(--line)',
       }}
     >
-      {/* ── Left: spacer ── */}
-      <div />
-
-      {/* ── Center: View Toggle (Day/Week) ── */}
-      <div className="flex-1 flex justify-center">
-        <div className="flex items-center gap-1 rounded-lg p-0.5" style={{ backgroundColor: 'var(--surface)' }}>
-          <button
-            onClick={() => handleViewModeSwitch('day')}
-            className="rounded-md px-3 py-1 text-xs font-medium transition-colors"
-            style={viewMode === 'day'
-              ? { backgroundColor: 'var(--brand)', color: 'white', boxShadow: '0 1px 3px rgba(0,0,0,0.15)' }
-              : { color: 'var(--ink-light)' }
-            }
-          >
-            День
-          </button>
-          <button
-            onClick={() => handleViewModeSwitch('week')}
-            className="rounded-md px-3 py-1 text-xs font-medium transition-colors"
-            style={viewMode === 'week'
-              ? { backgroundColor: 'var(--brand)', color: 'white', boxShadow: '0 1px 3px rgba(0,0,0,0.15)' }
-              : { color: 'var(--ink-light)' }
-            }
-          >
-            Неделя
-          </button>
-        </div>
-      </div>
-
-      {/* ── Right: Masters + Locations filters ── */}
-      <div className="flex items-center justify-end gap-2">
+      {/* ── Left: Masters + Locations filters ── */}
+      <div className="flex items-center gap-2">
         <MultiSelect<Master>
           items={masters}
           selectedIds={filterMasterIds}
@@ -119,6 +90,30 @@ export function Topbar() {
           getId={(l) => l.id}
           getLabel={(l) => l.name}
         />
+      </div>
+
+      {/* ── Right: View Toggle (Day/Week) ── */}
+      <div className="flex items-center gap-1 rounded-lg p-0.5" style={{ backgroundColor: 'var(--surface)' }}>
+        <button
+          onClick={() => handleViewModeSwitch('day')}
+          className="rounded-md px-3 py-1 text-xs font-medium transition-colors"
+          style={viewMode === 'day'
+            ? { backgroundColor: 'var(--brand)', color: 'white', boxShadow: '0 1px 3px rgba(0,0,0,0.15)' }
+            : { color: 'var(--ink-light)' }
+          }
+        >
+          День
+        </button>
+        <button
+          onClick={() => handleViewModeSwitch('week')}
+          className="rounded-md px-3 py-1 text-xs font-medium transition-colors"
+          style={viewMode === 'week'
+            ? { backgroundColor: 'var(--brand)', color: 'white', boxShadow: '0 1px 3px rgba(0,0,0,0.15)' }
+            : { color: 'var(--ink-light)' }
+          }
+        >
+          Неделя
+        </button>
       </div>
     </div>
   );

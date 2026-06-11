@@ -53,6 +53,8 @@ export function createMockScheduleContext(
     setSelectedDay: vi.fn(),
     showAllColumns: false,
     setShowAllColumns: vi.fn(),
+    columnMode: 'masters',
+    setColumnMode: vi.fn(),
     ...overrides,
   };
 }

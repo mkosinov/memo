@@ -10,6 +10,7 @@ import type { Activity } from '@memo/domain';
 import { TimeColumn } from './TimeColumn';
 import { DayColumn } from './DayColumn';
 import { ActivityCard } from './ActivityCard';
+import { ScheduleColumnHeader } from './ScheduleColumnHeader';
 import { ActivityDetailsModal } from '../modal/ActivityDetailsModal';
 import { DAYS, getMonday, TIME_COL_WIDTH, isSameDay, formatTime, HOURS_START, CELL_HEIGHT } from '@/lib/utils';
 
@@ -236,10 +237,7 @@ export function WeekView() {
     >
       <div className="min-w-[800px] h-full flex flex-col">
         {/* Header row — sticky above cards */}
-        <div
-          className="sticky top-0 z-[25] flex bg-white border-b shrink-0"
-          style={{ paddingLeft: TIME_COL_WIDTH }}
-        >
+        <ScheduleColumnHeader>
           {days.map((day, i) => (
             <div
               key={i}
@@ -252,7 +250,7 @@ export function WeekView() {
               </div>
             </div>
           ))}
-        </div>
+        </ScheduleColumnHeader>
 
         {/* Grid row — scrollable */}
         <div className="flex-1 flex overflow-auto relative">

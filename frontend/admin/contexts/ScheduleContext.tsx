@@ -99,6 +99,15 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
     return () => document.removeEventListener('__memo-select-day', handleSelectDay);
   }, [selectDateRange]);
 
+  // Dispatch events so sidebar Menubar (outside ScheduleProvider) can track viewMode & selectedDay
+  React.useEffect(() => {
+    document.dispatchEvent(new CustomEvent('__memo-view-mode-changed', { detail: { viewMode } }));
+  }, [viewMode]);
+
+  React.useEffect(() => {
+    document.dispatchEvent(new CustomEvent('__memo-selected-day-changed', { detail: { selectedDay } }));
+  }, [selectedDay]);
+
   const queryClient = useQueryClient();
   const weekStart = dateFrom;
   const weekEnd = dateTo;

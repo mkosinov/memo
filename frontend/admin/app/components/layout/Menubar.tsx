@@ -4,8 +4,8 @@ import React, { useMemo, useCallback, useState, useRef } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useNavigation } from '@/contexts/NavigationContext';
-import { useSchedule } from '@/contexts/ScheduleContext';
 import { useUI } from '@/contexts/UIContext';
+import type { ViewModeType } from '@/contexts/ScheduleContext';
 import { useMasters } from '@/hooks/useMasters';
 import { DAYS, MONTHS, getMonday, formatDate, formatDateISO, isSameDay } from '@/lib/utils';
 import type { Master } from '@memo/domain';
@@ -290,10 +290,9 @@ function MiniCalendar({ selectedWeek, selectedDay, viewMode, onWeekSelect, colla
         <button
           type="button"
           onClick={handleGoToToday}
-          className="shrink-0 rounded-md px-2 py-0.5 text-[10px] font-medium transition-colors hover:bg-white/10"
+          className="shrink-0 rounded-md px-2 py-0.5 text-[10px] font-medium text-white/90 transition-colors hover:bg-white/10"
           style={{
-            color: 'var(--brand, #004D56)',
-            border: '1px solid var(--brand, #004D56)',
+            border: '1px solid rgba(255,255,255,0.3)',
           }}
         >
           Сегодня
@@ -454,9 +453,30 @@ export function Menubar() {
   const { dateFrom, selectDateRange } = useNavigation();
   const { data: masters = [] } = useMasters();
   const { sidebarCollapsed, toggleSidebar, theme, toggleTheme } = useUI();
-  const { viewMode, selectedDay } = useSchedule();
   const pathname = usePathname();
   const [openMenu, setOpenMenu] = useState<string | null>(null);
+
+  // Track viewMode & selectedDay via custom events from ScheduleContext
+  // (Menubar lives outside ScheduleProvider in the component tree)
+  const [viewMode, setViewMode] = useState<ViewModeType>('week');
+  const [selectedDay, setSelectedDay] = useState<Date>(new Date());
+
+  React.useEffect(() => {
+    const handleViewMode = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.viewMode) setViewMode(detail.viewMode);
+    };
+    const handleSelectedDay = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.selectedDay) setSelectedDay(new Date(detail.selectedDay));
+    };
+    document.addEventListener('__memo-view-mode-changed', handleViewMode);
+    document.addEventListener('__memo-selected-day-changed', handleSelectedDay);
+    return () => {
+      document.removeEventListener('__memo-view-mode-changed', handleViewMode);
+      document.removeEventListener('__memo-selected-day-changed', handleSelectedDay);
+    };
+  }, []);
 
   const selectedWeek = useMemo(() => new Date(dateFrom + 'T00:00:00'), [dateFrom]);
 

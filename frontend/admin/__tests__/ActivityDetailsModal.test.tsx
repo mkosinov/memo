@@ -172,11 +172,6 @@ describe('SettingsTab', () => {
     expect(input).toHaveAttribute('type', 'datetime-local');
   });
 
-  it('renders precise time checkbox', () => {
-    render(<SettingsTab {...defaultProps} />);
-    expect(screen.getByText('Указать точное время')).toBeInTheDocument();
-  });
-
   it('renders service select', () => {
     render(<SettingsTab {...defaultProps} />);
     expect(screen.getByLabelText('Услуга')).toBeInTheDocument();
@@ -515,7 +510,7 @@ describe('SettingsTab — row layout', () => {
     expect(firstSquare.getAttribute('style')).toContain('background-color');
   });
 
-  it('snaps non-grid time to nearest grid slot in default mode', () => {
+  it('snaps non-grid time to nearest grid slot', () => {
     // Activity with startTime=14.0667 (14:04) — NOT aligned to 30-min grid
     const activityWithArbitraryMinutes = {
       ...mockActivity,
@@ -526,25 +521,8 @@ describe('SettingsTab — row layout', () => {
       <SettingsTab activity={activityWithArbitraryMinutes} onUpdate={vi.fn()} />,
     );
     const datetimeInput = screen.getByTestId('input-datetime') as HTMLInputElement;
-    // Native datetime-local value is "YYYY-MM-DDTHH:MM"
+    // Native datetime-local value is "YYYY-MM-DDTHH:MM" — snapped to 14:00
     expect(datetimeInput.value).toBe('2026-06-15T14:00');
-  });
-
-  it('allows precise time via checkbox', () => {
-    const activityWithArbitraryMinutes = {
-      ...mockActivity,
-      startTime: 14 + 4 / 60, // 14:04
-      date: '2026-06-15',
-    };
-    render(
-      <SettingsTab activity={activityWithArbitraryMinutes} onUpdate={vi.fn()} />,
-    );
-    // Enable precise mode
-    const checkbox = screen.getByTestId('checkbox-precise-time') as HTMLInputElement;
-    fireEvent.click(checkbox);
-    // Now 14:04 should be shown without snapping
-    const datetimeInput = screen.getByTestId('input-datetime') as HTMLInputElement;
-    expect(datetimeInput.value).toBe('2026-06-15T14:04');
   });
 });
 

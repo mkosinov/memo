@@ -354,6 +354,197 @@ describe('DayColumn', () => {
     });
   });
 
+  describe('partial-overlap carousel', () => {
+    // Activity A: 10:00-13:00, Activity B: 12:00-13:30 (overlap 12:00-13:00)
+    const partialOverlapActivities: Activity[] = [
+      {
+        id: 'po_a1',
+        day: 0,
+        masterId: 'm1',
+        startTime: 10,
+        duration: 3,
+        serviceId: 's1',
+        serviceName: 'Oil painting',
+        locationId: 'alpika',
+        occupied: 2,
+        capacity: 8,
+        isPrivate: false,
+      },
+      {
+        id: 'po_a2',
+        day: 0,
+        masterId: 'm2',
+        startTime: 12,
+        duration: 1.5,
+        serviceId: 's2',
+        serviceName: 'Acrylic',
+        locationId: 'alpika',
+        occupied: 3,
+        capacity: 6,
+        isPrivate: false,
+      },
+    ];
+
+    it('groups partially overlapping activities into same carousel group', () => {
+      render(
+        <DayColumn
+          dayIndex={0}
+          date={new Date()}
+          activities={partialOverlapActivities}
+          masters={MOCK_MASTERS}
+        />,
+      );
+
+      // Both cards should be in a carousel group (size > 1), so they get carousel styling
+      const card1 = screen.getByTestId('activity-po_a1');
+      const card2 = screen.getByTestId('activity-po_a2');
+
+      // First card should be visible (diff=0), second hidden (diff=1)
+      expect(card1).toHaveStyle({ opacity: '1' });
+      expect(card2).toHaveStyle({ opacity: '0.85' }); // 1 - 1*0.15 = 0.85
+    });
+
+    it('cycles partially overlapping cards on wheel event', async () => {
+      render(
+        <DayColumn
+          dayIndex={0}
+          date={new Date()}
+          activities={partialOverlapActivities}
+          masters={MOCK_MASTERS}
+        />,
+      );
+
+      const card1 = screen.getByTestId('activity-po_a1');
+      const card2 = screen.getByTestId('activity-po_a2');
+
+      // Initially card1 visible, card2 hidden
+      expect(card1).toHaveStyle({ opacity: '1' });
+      expect(card2).toHaveStyle({ opacity: '0.85' });
+
+      // Wheel event at y=360 → time = 360/(60*2)+9 = 12, where both po_a1 (10-13) and po_a2 (12-13.5) overlap
+      await act(async () => {
+        const column = screen.getByTestId('day-column-0');
+        column.getBoundingClientRect = vi.fn(() => ({
+          top: 0, left: 0, width: 200, height: 1440,
+          bottom: 1440, right: 200, x: 0, y: 0, toJSON: () => {},
+        }));
+        const wheelEvent = new WheelEvent('wheel', {
+          deltaY: 100,
+          clientY: 360, // time=12 where both activities are visible
+          bubbles: true,
+        });
+        column.dispatchEvent(wheelEvent);
+      });
+
+      // Now card2 should be visible, card1 hidden
+      expect(card1).toHaveStyle({ opacity: '0.85' });
+      expect(card2).toHaveStyle({ opacity: '1' });
+    });
+
+    it('shows "N cards" badge for partially overlapping activities', () => {
+      render(
+        <DayColumn
+          dayIndex={0}
+          date={new Date()}
+          activities={partialOverlapActivities}
+          masters={MOCK_MASTERS}
+        />,
+      );
+
+      const badge = screen.getByText('2 cards');
+      expect(badge).toBeInTheDocument();
+    });
+
+    it('does NOT group non-overlapping activities', () => {
+      // a1 at 10:00 (2h), a3 at 14:00 (2h) — no overlap
+      render(
+        <DayColumn
+          dayIndex={0}
+          date={new Date()}
+          activities={[mockActivities[0], mockActivities[2]]}
+          masters={MOCK_MASTERS}
+        />,
+      );
+
+      const card1 = screen.getByTestId('activity-a1');
+      const card3 = screen.getByTestId('activity-a3');
+
+      // Both should be fully visible (no carousel)
+      expect(card1).toHaveStyle({ opacity: '1', transform: 'translate(0px, 0px) scale(1)' });
+      expect(card3).toHaveStyle({ opacity: '1', transform: 'translate(0px, 0px) scale(1)' });
+    });
+
+    it('groups pairwise (not transitive): A overlaps B, B overlaps C, but A and C are separate groups', () => {
+      // A: 10:00-11:00, B: 10:30-12:30, C: 12:00-13:00
+      // A overlaps B (pair), B overlaps C (pair), but A does NOT overlap C
+      // Each activity has its own pairwise group:
+      //   A's group = [A, B] (size 2), A at index 0
+      //   B's group = [A, B, C] (size 3), B at index 1
+      //   C's group = [B, C] (size 2), C at index 1
+      const chainActivities: Activity[] = [
+        {
+          id: 'ch_a',
+          day: 0,
+          masterId: 'm1',
+          startTime: 10,
+          duration: 1,
+          serviceId: 's1',
+          locationId: 'alpika',
+          occupied: 1,
+          capacity: 8,
+          isPrivate: false,
+        },
+        {
+          id: 'ch_b',
+          day: 0,
+          masterId: 'm2',
+          startTime: 10.5,
+          duration: 2,
+          serviceId: 's2',
+          locationId: 'alpika',
+          occupied: 2,
+          capacity: 6,
+          isPrivate: false,
+        },
+        {
+          id: 'ch_c',
+          day: 0,
+          masterId: 'm3',
+          startTime: 12,
+          duration: 1,
+          serviceId: 's3',
+          locationId: 'grand',
+          occupied: 3,
+          capacity: 10,
+          isPrivate: false,
+        },
+      ];
+
+      render(
+        <DayColumn
+          dayIndex={0}
+          date={new Date()}
+          activities={chainActivities}
+          masters={MOCK_MASTERS}
+        />,
+      );
+
+      const cardA = screen.getByTestId('activity-ch_a');
+      const cardB = screen.getByTestId('activity-ch_b');
+      const cardC = screen.getByTestId('activity-ch_c');
+
+      // A: group [A,B] size 2, index 0 → diff 0 → visible
+      expect(cardA).toHaveStyle({ opacity: '1' });
+      // B: group [A,B,C] size 3, index 1 → diff 1 → hidden
+      expect(cardB).toHaveStyle({ opacity: '0.85' });
+      // C: group [B,C] size 2, index 1 → diff 1 → hidden
+      expect(cardC).toHaveStyle({ opacity: '0.85' });
+
+      // Only A's group has indexInGroup===0 with size>1 → one "2 cards" badge
+      expect(screen.getByText('2 cards')).toBeInTheDocument();
+    });
+  });
+
   describe('stamp ghost preview on hover', () => {
     const mockStamp = {
       masterId: 'm1',

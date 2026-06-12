@@ -39,6 +39,19 @@ function buildOverlapMap(activities: Activity[]): Map<string, { index: number; t
   return result;
 }
 
+// ─── Direct Overlap Helpers (carousel) ─────────────────────────────────
+// Two activities overlap if their time ranges intersect (pairwise, NOT transitive).
+
+function getDirectOverlapGroup(activity: Activity, all: Activity[]): Activity[] {
+  const aStart = activity.startTime;
+  const aEnd = activity.startTime + activity.duration;
+  const peers = all.filter((b) => {
+    if (b.id === activity.id) return false;
+    return aStart < b.startTime + b.duration && b.startTime < aEnd;
+  });
+  return [activity, ...peers].sort((a, b) => a.startTime - b.startTime || a.id.localeCompare(b.id));
+}
+
 interface DayColumnProps {
   dayIndex: number;
   date: Date;
@@ -202,7 +215,6 @@ export function DayColumn({ dayIndex, activities, masters, studios = [], service
   const [visibleIndices, setVisibleIndices] = useState<Record<string, number>>({});
   const [prevIndices, setPrevIndices] = useState<Record<string, number>>({});
   const columnRef = useRef<HTMLDivElement>(null);
-  const wheelAccum = useRef(0);
   const lastWheelTime = useRef(0);
   const [animatingKeys, setAnimatingKeys] = useState<Set<string>>(new Set());
 
@@ -212,19 +224,8 @@ export function DayColumn({ dayIndex, activities, masters, studios = [], service
 
   const masterMap = useMemo(() => new Map(masters.map(a => [a.id, a])), [masters]);
 
-  // Group by startTime for stacking within same slot
-  const slotGroups: Record<string, Activity[]> = {};
-  for (const activity of activities) {
-    const key = `${dayIndex}_${activity.startTime}`;
-    if (!slotGroups[key]) slotGroups[key] = [];
-    slotGroups[key].push(activity);
-  }
-
-  // Full range overlap detection (X+Y offset)
+  // Full range overlap detection (X+Y offset for visual stacking)
   const overlapMap = useMemo(() => buildOverlapMap(activities), [activities]);
-
-  const slotGroupsRef = useRef(slotGroups);
-  slotGroupsRef.current = slotGroups;
 
   // Non-passive wheel handler for scroll carousel
   useEffect(() => {
@@ -232,50 +233,51 @@ export function DayColumn({ dayIndex, activities, masters, studios = [], service
     if (!el) return;
     const handler = (e: WheelEvent) => {
       const now = Date.now();
-      // Throttle: max 1 card flip per 200ms
       if (now - lastWheelTime.current < 200) {
-        wheelAccum.current += e.deltaY;
         e.preventDefault();
         return;
       }
-      wheelAccum.current += e.deltaY;
+
       const rect = el.getBoundingClientRect();
       const y = e.clientY - rect.top;
-      
-      // Find which stacked group we are hovering over
-      let targetKey: string | null = null;
+
+      // Find the activity under cursor using Y position
+      let activityUnderCursor: Activity | null = null;
       for (const act of activities) {
-        const topPx = (act.startTime - gridStart) * cellHeight * 2;
-        const heightPx = Math.max(act.duration * 120 - 10, 52);
+        const overlapInfo = overlapMap.get(act.id);
+        const oy = overlapInfo ? overlapInfo.index * OVERLAP_OFFSET : 0;
+
+        const topPx = (act.startTime - gridStart) * cellHeight * 2 + oy;
+        const durMinutes = act.durationMinutes ?? act.duration * 60;
+        const heightPx = Math.max((durMinutes / 60) * cellHeight * 2 - 10, 52);
         if (y >= topPx && y <= topPx + heightPx) {
-          const key = `${dayIndex}_${act.startTime}`;
-          const group = slotGroupsRef.current[key];
-          if (group && group.length > 1) {
-            targetKey = key;
-            break;
-          }
+          activityUnderCursor = act;
+          break;
         }
       }
 
-      if (targetKey) {
-        const key = targetKey;
-        const group = slotGroupsRef.current[key];
-        if (group && group.length > 1) {
+      if (activityUnderCursor) {
+        // Get all activities that overlap with this one (pairwise, not transitive)
+        const group = getDirectOverlapGroup(activityUnderCursor, activities);
+
+        if (group.length > 1) {
           e.preventDefault();
           lastWheelTime.current = now;
+
+          const groupKey = group.map(a => a.id).join(',');
+          const direction = e.deltaY > 0 ? 1 : -1;
+
           setVisibleIndices((prev) => {
-            const current = prev[key] || 0;
-            const direction = wheelAccum.current > 0 ? 1 : -1;
+            const current = prev[groupKey] || 0;
             const next = (current + direction + group.length) % group.length;
-            return { ...prev, [key]: next };
+            return { ...prev, [groupKey]: next };
           });
-          wheelAccum.current = 0;
         }
       }
     };
     el.addEventListener('wheel', handler, { passive: false });
     return () => el.removeEventListener('wheel', handler);
-  }, [dayIndex, slots]);
+  }, [dayIndex, slots, activities, cellHeight, gridStart]);
 
   return (
     <div
@@ -323,11 +325,12 @@ export function DayColumn({ dayIndex, activities, masters, studios = [], service
 
       {/* Render activity cards */}
       {activities.map((activity) => {
-        const key = `${dayIndex}_${activity.startTime}`;
-        const group = slotGroups[key];
-        const indexInGroup = group.indexOf(activity);
+        // Compute direct overlap group for this activity (pairwise, not transitive)
+        const group = getDirectOverlapGroup(activity, activities);
+        const groupKey = group.map(a => a.id).join(',');
+        const indexInGroup = group.findIndex(a => a.id === activity.id);
         const totalInSlot = group.length;
-        const visibleIndex = visibleIndices[key] || 0;
+        const visibleIndex = visibleIndices[groupKey] || 0;
 
         let carouselOffsetX = 0;
         let carouselOffsetY = 0;
@@ -387,18 +390,18 @@ export function DayColumn({ dayIndex, activities, masters, studios = [], service
                 onClick={(e) => {
                   e.stopPropagation();
                   setVisibleIndices((prev) => {
-                    const current = prev[key] || 0;
+                    const current = prev[groupKey] || 0;
                     const next = (current + 1 + totalInSlot) % totalInSlot;
-                    setPrevIndices(p => ({ ...p, [key]: current }));
-                    setAnimatingKeys(prev => new Set(prev).add(key));
+                    setPrevIndices(p => ({ ...p, [groupKey]: current }));
+                    setAnimatingKeys(prev => new Set(prev).add(groupKey));
                     setTimeout(() => {
                       setAnimatingKeys(prev => {
                         const next_set = new Set(prev);
-                        next_set.delete(key);
+                        next_set.delete(groupKey);
                         return next_set;
                       });
                     }, 350);
-                    return { ...prev, [key]: next };
+                    return { ...prev, [groupKey]: next };
                   });
                 }}
                 className="absolute right-1 z-[35] px-1.5 py-0.5 rounded-full bg-white/90 border border-gray-300 text-[10px] font-semibold text-gray-500 shadow-sm hover:bg-white hover:text-gray-700 transition-colors cursor-pointer"

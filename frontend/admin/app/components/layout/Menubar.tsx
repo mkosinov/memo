@@ -286,14 +286,11 @@ function MiniCalendar({ selectedWeek, selectedDay, viewMode, onWeekSelect, colla
 
   return (
     <div className="px-3 py-2">
-      {/* Today button — full width */}
+      {/* Today button — link style */}
       <button
         type="button"
         onClick={handleGoToToday}
-        className="w-full rounded-md px-2 py-1 text-[11px] font-medium text-white/90 transition-colors hover:bg-white/10 whitespace-nowrap text-center mb-2"
-        style={{
-          border: '1px solid rgba(255,255,255,0.3)',
-        }}
+        className="w-full text-[11px] text-white/70 hover:text-white hover:underline transition-colors whitespace-nowrap text-center mb-2"
       >
         Сегодня {today.getDate()} {MONTHS_GENITIVE[today.getMonth()]}, {DAYS_FULL[(today.getDay() + 6) % 7]}
       </button>

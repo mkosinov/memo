@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Menubar } from '../app/components/layout/Menubar';
 import { NavigationProvider } from '../contexts/NavigationContext';
 import { UIProvider } from '../contexts/UIContext';
-import { getMonday } from '../lib/utils';
+import { getMonday, DAYS_FULL, MONTHS_GENITIVE } from '../lib/utils';
 
 vi.mock('@memo/api-client', () => ({
   getMasters: vi.fn().mockResolvedValue([
@@ -161,6 +161,16 @@ describe('Menubar', () => {
     renderWithProviders();
     expect(screen.getByText('ПН')).toBeInTheDocument();
     expect(screen.getByText('ВС')).toBeInTheDocument();
+  });
+
+  it('renders "Сегодня" button with current date and weekday', () => {
+    renderWithProviders();
+    const now = new Date();
+    const day = now.getDate();
+    const month = MONTHS_GENITIVE[now.getMonth()];
+    const weekday = DAYS_FULL[(now.getDay() + 6) % 7];
+    const expectedText = `Сегодня ${day} ${month}, ${weekday}`;
+    expect(screen.getByText(expectedText)).toBeInTheDocument();
   });
 
   it('collapses menubar when collapse button is clicked', () => {

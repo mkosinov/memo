@@ -7,7 +7,7 @@ import { useNavigation } from '@/contexts/NavigationContext';
 import { useUI } from '@/contexts/UIContext';
 import type { ViewModeType } from '@/contexts/ScheduleContext';
 import { useMasters } from '@/hooks/useMasters';
-import { DAYS, MONTHS, getMonday, formatDate, formatDateISO, isSameDay } from '@/lib/utils';
+import { DAYS, DAYS_FULL, MONTHS, MONTHS_GENITIVE, getMonday, formatDate, formatDateISO, isSameDay } from '@/lib/utils';
 import { MonthYearPicker } from '../shared/MonthYearPicker';
 import type { Master } from '@memo/domain';
 
@@ -276,12 +276,12 @@ function MiniCalendar({ selectedWeek, selectedDay, viewMode, onWeekSelect, colla
         <button
           type="button"
           onClick={handleGoToToday}
-          className="shrink-0 rounded-md px-2 py-0.5 text-[10px] font-medium text-white/90 transition-colors hover:bg-white/10"
+          className="shrink-0 rounded-md px-2 py-0.5 text-[10px] font-medium text-white/90 transition-colors hover:bg-white/10 whitespace-nowrap"
           style={{
             border: '1px solid rgba(255,255,255,0.3)',
           }}
         >
-          Сегодня
+          Сегодня {today.getDate()} {MONTHS_GENITIVE[today.getMonth()]}, {DAYS_FULL[(today.getDay() + 6) % 7]}
         </button>
 
         <div className="relative">

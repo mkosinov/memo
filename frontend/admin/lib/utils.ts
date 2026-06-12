@@ -209,14 +209,15 @@ export function calculateGridTimeRange(
   }
 
   // Extend start only if activity starts before working hours (at least 1 hour padding)
+  // Clamp to [0, 24] — hours represent a single day (0:00–24:00)
   const adaptiveStart = earliestStart < workingHoursStart
     ? Math.max(0, Math.floor(earliestStart) - 1)
     : workingHoursStart;
 
   // Extend end only if activity ends after working hours (at least 1 hour padding)
-  const adaptiveEnd = latestEnd > workingHoursEnd
+  const adaptiveEnd = Math.min(24, latestEnd > workingHoursEnd
     ? Math.ceil(latestEnd) + 1
-    : workingHoursEnd;
+    : workingHoursEnd);
 
   return { start: adaptiveStart, end: adaptiveEnd };
 }

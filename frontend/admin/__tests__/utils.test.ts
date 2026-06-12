@@ -244,4 +244,20 @@ describe('calculateGridTimeRange', () => {
     const range = calculateGridTimeRange(activities, 9, 21);
     expect(range).toEqual({ start: 9, end: 21 });
   });
+
+  it('caps endTime at 24 when activity would overflow past midnight', () => {
+    // Activity: 21:00-25:00 (startTime=21, duration=4) → endTime=25
+    const activities = [{ startTime: 21, duration: 4 }];
+    const range = calculateGridTimeRange(activities, 9, 21);
+    expect(range.start).toBe(9);
+    expect(range.end).toBe(24); // clamped, not 25 or 26
+  });
+
+  it('caps endTime at 24 for extreme overnight activity', () => {
+    // Activity: 23:00-30:00 (startTime=23, duration=7) → endTime=30
+    const activities = [{ startTime: 23, duration: 7 }];
+    const range = calculateGridTimeRange(activities, 9, 21);
+    expect(range.start).toBe(9);
+    expect(range.end).toBe(24); // Math.min(24, ceil(30)+1) = 24
+  });
 });

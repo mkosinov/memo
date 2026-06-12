@@ -12,28 +12,36 @@ interface MonthYearPickerProps {
   onSelect: (month: number, year: number) => void;
   /** Called when picker should close (outside click) */
   onClose: () => void;
+  /** Reference to the trigger button (to exclude from outside click) */
+  triggerRef?: React.RefObject<HTMLElement>;
+  /** Additional styles for positioning */
+  style?: React.CSSProperties;
 }
 
-export function MonthYearPicker({ selectedMonth, selectedYear, onSelect, onClose }: MonthYearPickerProps) {
+export function MonthYearPicker({ selectedMonth, selectedYear, onSelect, onClose, triggerRef, style }: MonthYearPickerProps) {
   const [year, setYear] = useState(selectedYear);
   const ref = useRef<HTMLDivElement>(null);
 
-  // Close on outside click
+  // Close on outside click (but not on trigger button)
   useEffect(() => {
     const handleMouseDown = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) {
+        // Don't close if click was on trigger button
+        if (triggerRef?.current && triggerRef.current.contains(e.target as Node)) {
+          return;
+        }
         onClose();
       }
     };
     document.addEventListener('mousedown', handleMouseDown);
     return () => document.removeEventListener('mousedown', handleMouseDown);
-  }, [onClose]);
+  }, [onClose, triggerRef]);
 
   return (
     <div
       ref={ref}
-      className="absolute z-50 mt-1 left-0 bg-white border rounded-lg shadow-lg p-3 min-w-[200px]"
-      style={{ borderColor: 'var(--line, #e5e7eb)' }}
+      className="fixed z-50 bg-white border rounded-lg shadow-lg p-3 min-w-[200px]"
+      style={{ borderColor: 'var(--line, #e5e7eb)', left: '12px', ...style }}
       data-testid="month-year-picker"
     >
       {/* Year navigation */}

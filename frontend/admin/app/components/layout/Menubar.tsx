@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useMemo, useCallback, useState } from 'react';
+import React, { useMemo, useCallback, useState, useRef } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useNavigation } from '@/contexts/NavigationContext';
@@ -189,6 +189,8 @@ interface MiniCalendarProps {
 function MiniCalendar({ selectedWeek, selectedDay, viewMode, onWeekSelect, collapsed }: MiniCalendarProps) {
   const today = new Date();
   const [showMonthPicker, setShowMonthPicker] = useState(false);
+  const monthButtonRef = useRef<HTMLButtonElement>(null);
+  const [pickerTop, setPickerTop] = useState(0);
 
   const handleGoToToday = useCallback(() => {
     const now = new Date();
@@ -310,8 +312,17 @@ function MiniCalendar({ selectedWeek, selectedDay, viewMode, onWeekSelect, colla
 
         <div className="relative">
           <button
+            ref={monthButtonRef}
             type="button"
-            onClick={() => setShowMonthPicker(prev => !prev)}
+            onClick={() => {
+              setShowMonthPicker(prev => {
+                if (!prev && monthButtonRef.current) {
+                  const rect = monthButtonRef.current.getBoundingClientRect();
+                  setPickerTop(rect.bottom + 4);
+                }
+                return !prev;
+              });
+            }}
             className="flex items-center gap-1 text-xs font-semibold text-white/90 hover:text-white transition-colors"
           >
             {monthName} {selectedWeek.getFullYear()}
@@ -336,6 +347,8 @@ function MiniCalendar({ selectedWeek, selectedDay, viewMode, onWeekSelect, colla
                 setShowMonthPicker(false);
               }}
               onClose={() => setShowMonthPicker(false)}
+              triggerRef={monthButtonRef}
+              style={{ top: `${pickerTop}px` }}
             />
           )}
         </div>

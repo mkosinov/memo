@@ -6,16 +6,17 @@ import { HOURS_START } from '@/lib/utils';
 interface NowLineProps {
   date: Date;
   cellHeight?: number;
+  gridStart?: number;
 }
 
-export function NowLine({ date, cellHeight = 60 }: NowLineProps) {
+export function NowLine({ date, cellHeight = 60, gridStart = HOURS_START }: NowLineProps) {
   const [position, setPosition] = useState(0);
 
   useEffect(() => {
     const updatePosition = () => {
       const now = new Date();
       const hours = now.getHours() + now.getMinutes() / 60;
-      const pos = (hours - HOURS_START) * cellHeight * 2;
+      const pos = (hours - gridStart) * cellHeight * 2;
       setPosition(pos);
     };
 
@@ -23,7 +24,7 @@ export function NowLine({ date, cellHeight = 60 }: NowLineProps) {
     const interval = setInterval(updatePosition, 30000);
 
     return () => clearInterval(interval);
-  }, [cellHeight]);
+  }, [cellHeight, gridStart]);
 
   const today = new Date();
   if (

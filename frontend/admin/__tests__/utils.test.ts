@@ -9,6 +9,10 @@ import {
   decimalToHHMM,
   hhmmToDecimal,
   formatActivityContext,
+  generateTimeSlots,
+  calculateGridTimeRange,
+  HOURS_START,
+  HOURS_END,
 } from '@/lib/utils';
 
 describe('hexToRgb', () => {
@@ -157,5 +161,87 @@ describe('formatActivityContext', () => {
   it('formats Saturday June 6, 2026 14:00 correctly', () => {
     const date = new Date(2026, 5, 6, 14, 0); // June 6, 2026 = Saturday
     expect(formatActivityContext(date)).toBe('Сб, 6 июня · 14:00');
+  });
+});
+
+describe('generateTimeSlots', () => {
+  it('generates default slots from HOURS_START to HOURS_END', () => {
+    const slots = generateTimeSlots(30);
+    expect(slots[0]).toBe(HOURS_START);
+    expect(slots[slots.length - 1]).toBeLessThan(HOURS_END);
+    expect(slots.length).toBe((HOURS_END - HOURS_START) * 2);
+  });
+
+  it('generates slots with custom start and end', () => {
+    const slots = generateTimeSlots(30, 7, 23);
+    expect(slots[0]).toBe(7);
+    expect(slots[slots.length - 1]).toBeCloseTo(22.5, 1);
+    expect(slots.length).toBe((23 - 7) * 2);
+  });
+
+  it('generates 15-min frequency slots with custom range', () => {
+    const slots = generateTimeSlots(15, 8, 12);
+    expect(slots[0]).toBe(8);
+    expect(slots).toContain(8.25);
+    expect(slots).toContain(11.75);
+    expect(slots.length).toBe((12 - 8) * 4);
+  });
+});
+
+describe('calculateGridTimeRange', () => {
+  it('returns working hours when no activities', () => {
+    const range = calculateGridTimeRange([], 9, 21);
+    expect(range).toEqual({ start: 9, end: 21 });
+  });
+
+  it('does not shrink below working hours range', () => {
+    const activities = [{ startTime: 10, duration: 2 }]; // 10:00-12:00
+    const range = calculateGridTimeRange(activities, 9, 21);
+    expect(range.start).toBe(9);
+    expect(range.end).toBe(21);
+  });
+
+  it('extends end when activity goes past working hours', () => {
+    // Activity: 20:00-23:00 (startTime=20, duration=3)
+    const activities = [{ startTime: 20, duration: 3 }];
+    const range = calculateGridTimeRange(activities, 9, 21);
+    expect(range.start).toBe(9);
+    expect(range.end).toBe(24); // ceil(23) + 1 = 24
+  });
+
+  it('extends start when activity starts before working hours', () => {
+    // Activity: 7:00-9:00 (startTime=7, duration=2)
+    const activities = [{ startTime: 7, duration: 2 }];
+    const range = calculateGridTimeRange(activities, 9, 21);
+    expect(range.start).toBe(6); // floor(7) - 1 = 6
+    expect(range.end).toBe(21);
+  });
+
+  it('extends both start and end for early + late activities', () => {
+    const activities = [
+      { startTime: 6, duration: 1.5 },  // 6:00-7:30
+      { startTime: 20.5, duration: 2.5 }, // 20:30-23:00
+    ];
+    const range = calculateGridTimeRange(activities, 9, 21);
+    expect(range.start).toBe(5);  // floor(6) - 1 = 5
+    expect(range.end).toBe(24);   // ceil(23) + 1 = 24
+  });
+
+  it('uses latest activity end time, not just start time', () => {
+    // Short activity starting late: 21:00-21:30
+    const activities = [{ startTime: 21, duration: 0.5 }];
+    const range = calculateGridTimeRange(activities, 9, 21);
+    expect(range.start).toBe(9);
+    // ceil(21.5) + 1 = 23
+    expect(range.end).toBe(23);
+  });
+
+  it('handles multiple activities at the same time', () => {
+    const activities = [
+      { startTime: 14, duration: 2 },
+      { startTime: 14, duration: 1.5 },
+    ];
+    const range = calculateGridTimeRange(activities, 9, 21);
+    expect(range).toEqual({ start: 9, end: 21 });
   });
 });

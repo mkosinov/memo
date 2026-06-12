@@ -16,14 +16,15 @@ interface ActivityCardProps {
   onQuickAdd?: (activity: Activity) => void;
   isDragging?: boolean;
   isDragCopy?: boolean;
+  gridStart?: number;
 }
 
-export function ActivityCard({ activity, master, studios = [], style, onEdit, onQuickAdd, isDragging, isDragCopy }: ActivityCardProps) {
+export function ActivityCard({ activity, master, studios = [], style, onEdit, onQuickAdd, isDragging, isDragCopy, gridStart = HOURS_START }: ActivityCardProps) {
   const { deleteMode, showToast } = useUI();
   const { deleteActivity, addActivity, cellHeight = 60 } = useSchedule();
   const [deleting, setDeleting] = useState(false);
   const deletingRef = useRef(false);
-  const topPx = (activity.startTime - HOURS_START) * cellHeight * 2;
+  const topPx = (activity.startTime - gridStart) * cellHeight * 2;
   const durMinutes = activity.durationMinutes ?? activity.duration * 60;
   const heightPx = Math.max((durMinutes / 60) * cellHeight * 2 - 10, 52);
   const fillPct = activity.capacity > 0 ? Math.min(activity.occupied / activity.capacity, 1) : 0;

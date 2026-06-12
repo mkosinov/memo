@@ -1,16 +1,19 @@
 'use client';
 
-import React from 'react';
-import { formatTime, generateTimeSlots } from '@/lib/utils';
+import React, { useMemo } from 'react';
+import { formatTime, generateTimeSlots, HOURS_START, HOURS_END } from '@/lib/utils';
 
 interface TimeColumnProps {
   cellHeight?: number;
   gridFrequency?: number;
+  gridStart?: number;
+  gridEnd?: number;
 }
 
-export function TimeColumn({ cellHeight = 60 }: TimeColumnProps) {
-  // Visual grid always uses 30-minute intervals regardless of gridFrequency.
-  const hours = generateTimeSlots(30);
+export function TimeColumn({ cellHeight = 60, gridFrequency = 30, gridStart = HOURS_START, gridEnd = HOURS_END }: TimeColumnProps) {
+  // Generate slots at gridFrequency intervals. Slot height is scaled to keep total grid height constant.
+  const slotHeight = useMemo(() => cellHeight * (gridFrequency / 30), [cellHeight, gridFrequency]);
+  const hours = useMemo(() => generateTimeSlots(gridFrequency, gridStart, gridEnd), [gridFrequency, gridStart, gridEnd]);
 
   return (
     <div
@@ -19,11 +22,12 @@ export function TimeColumn({ cellHeight = 60 }: TimeColumnProps) {
     >
       {hours.map((hour, i) => {
         const isHour = hour % 1 === 0;
+        // Show time label only at hour boundaries to avoid crowding
         return (
           <div
             key={i}
             className="relative"
-            style={{ height: cellHeight }}
+            style={{ height: slotHeight }}
           >
             {isHour && (
               <span className="absolute -top-3 right-2 text-xs text-ink-light">

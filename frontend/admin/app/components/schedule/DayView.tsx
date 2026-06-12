@@ -13,7 +13,7 @@ import { DayColumn } from './DayColumn';
 import { ActivityCard } from './ActivityCard';
 import { ScheduleColumnHeader } from './ScheduleColumnHeader';
 import { ActivityDetailsModal } from '../modal/ActivityDetailsModal';
-import { TIME_COL_WIDTH, isSameDay, formatTime, HOURS_START } from '@/lib/utils';
+import { TIME_COL_WIDTH, isSameDay, formatTime, calculateGridTimeRange } from '@/lib/utils';
 
 export function DayView() {
   const {
@@ -32,6 +32,8 @@ export function DayView() {
     columnMode,
     cellHeight = 60,
     gridFrequency = 30,
+    workingHoursStart = 9,
+    workingHoursEnd = 21,
   } = useSchedule();
   const { showToast } = useUI();
 
@@ -141,6 +143,12 @@ export function DayView() {
     [dayActivities],
   );
 
+  // Adaptive grid time range — extends beyond working hours if activities go outside
+  const gridRange = useMemo(
+    () => calculateGridTimeRange(resolvedActivities, workingHoursStart, workingHoursEnd),
+    [resolvedActivities, workingHoursStart, workingHoursEnd],
+  );
+
   // Determine columns based on explicit columnMode (not implicit filter logic)
   const columns = useMemo(() => {
     if (columnMode === 'locations') {
@@ -182,6 +190,7 @@ export function DayView() {
   }, [resolvedActivities, columnMode]);
 
   // DnD
+  const columnField = columnMode === 'locations' ? 'locationId' as const : 'masterId' as const;
   const {
     dragId,
     dragCopy,
@@ -198,6 +207,7 @@ export function DayView() {
     updateActivity,
     showToast,
     gridFrequency,
+    columnField,
   });
 
   const today = new Date();
@@ -207,7 +217,7 @@ export function DayView() {
     : null;
 
   const durMinutes = activeDragActivity?.durationMinutes ?? (activeDragActivity?.duration ?? 0) * 60;
-  const ghostHeight = activeDragActivity ? Math.ceil(durMinutes / 30) : null;
+  const ghostHeight = activeDragActivity ? Math.ceil(durMinutes / gridFrequency) : null;
 
   // NowLine
   const [nowPos, setNowPos] = useState(0);
@@ -215,12 +225,12 @@ export function DayView() {
     const update = () => {
       const now = new Date();
       const hours = now.getHours() + now.getMinutes() / 60;
-      setNowPos((hours - HOURS_START) * cellHeight * 2);
+      setNowPos((hours - gridRange.start) * cellHeight * 2);
     };
     update();
     const iv = setInterval(update, 30000);
     return () => clearInterval(iv);
-  }, [cellHeight]);
+  }, [cellHeight, gridRange.start]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -268,9 +278,11 @@ export function DayView() {
         });
       }}
       onDragEnd={(event) => {
+        const overData = event.over?.data?.current as Record<string, unknown> | undefined;
+        const columnId = overData?.columnId as string | undefined;
         onDragEnd({
           active: { id: event.active.id },
-          over: event.over ? { id: event.over.id } : null,
+          over: event.over ? { id: event.over.id, columnId } : null,
         });
       }}
       onDragCancel={() => {
@@ -338,7 +350,7 @@ export function DayView() {
 
         {/* Grid row — scrollable */}
         <div className="flex-1 flex overflow-auto relative">
-          <TimeColumn cellHeight={cellHeight} gridFrequency={gridFrequency} />
+          <TimeColumn cellHeight={cellHeight} gridFrequency={gridFrequency} gridStart={gridRange.start} gridEnd={gridRange.end} />
           {orderedColumns.map((col) => {
             const colActivities = activitiesByColumn.get(col.id) ?? [];
             return (
@@ -363,6 +375,9 @@ export function DayView() {
                 stamp={stamp}
                 cellHeight={cellHeight}
                 gridFrequency={gridFrequency}
+                gridStart={gridRange.start}
+                gridEnd={gridRange.end}
+                columnId={col.id}
               />
             );
           })}

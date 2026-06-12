@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useDroppable } from '@dnd-kit/core';
-import { hexToRgb, mixWithWhite, formatTime, generateTimeSlots, HOURS_START } from '@/lib/utils';
+import { hexToRgb, mixWithWhite, formatTime, generateTimeSlots, HOURS_START, HOURS_END } from '@/lib/utils';
 import type { Activity, Master, Studio, StampState, Service } from '@memo/domain';
 import { ActivityCard } from './ActivityCard';
 
@@ -59,6 +59,10 @@ interface DayColumnProps {
   stamp?: StampState;
   cellHeight?: number;
   gridFrequency?: number;
+  gridStart?: number;
+  gridEnd?: number;
+  /** Column identity (master or location ID) — included in droppable slot data for cross-column DnD. */
+  columnId?: string;
 }
 
 interface DroppableSlotProps {
@@ -66,6 +70,7 @@ interface DroppableSlotProps {
   slotIndex: number;
   startTime: number;
   isHour: boolean;
+  isHalfHour?: boolean;
   dragCopy?: boolean;
   onClick?: (dayIndex: number, startTime: number) => void;
   onOpenModal?: (dayIndex: number, startTime: number) => void;
@@ -74,15 +79,16 @@ interface DroppableSlotProps {
   masters?: Master[];
   services?: Service[];
   cellHeight?: number;
+  columnId?: string;
   children?: React.ReactNode;
 }
 
 // ─── DroppableSlot ────────────────────────────────────────────────────────
 
-function DroppableSlot({ dayIndex, slotIndex, startTime, isHour, dragCopy, onClick, onOpenModal, stampReady, stamp, masters, services, cellHeight = 60, children }: DroppableSlotProps) {
+function DroppableSlot({ dayIndex, slotIndex, startTime, isHour, isHalfHour, dragCopy, onClick, onOpenModal, stampReady, stamp, masters, services, cellHeight = 60, columnId, children }: DroppableSlotProps) {
   const { isOver, setNodeRef } = useDroppable({
     id: `slot-${dayIndex}-${slotIndex}`,
-    data: { dayIndex, slotIndex },
+    data: { dayIndex, slotIndex, columnId },
   });
 
   const [hoveredStampSlot, setHoveredStampSlot] = useState<number | null>(null);
@@ -151,7 +157,7 @@ function DroppableSlot({ dayIndex, slotIndex, startTime, isHour, dragCopy, onCli
     <div
       ref={setNodeRef}
       data-slot-index={slotIndex}
-      className={isHour ? 'border-t border-line' : 'border-t border-dashed border-line'}
+      className={isHour ? 'border-t border-line' : isHalfHour ? 'border-t border-dashed border-line' : 'border-t border-dotted border-line/30'}
       style={{ height: cellHeight, ...stampGhostStyle }}
       onClick={handleClick}
       onMouseEnter={handleMouseEnter}
@@ -192,7 +198,7 @@ function DroppableSlot({ dayIndex, slotIndex, startTime, isHour, dragCopy, onCli
 
 // ─── DayColumn ────────────────────────────────────────────────────────────
 
-export function DayColumn({ dayIndex, activities, masters, studios = [], services = [], dragCopy, dragId, ghostHeight, ghostDayIndex, ghostSlotIndex, onCreateActivity, onOpenCreateModal, onOpenEditModal, onQuickAdd, stampReady, stamp, cellHeight = 60, gridFrequency = 30 }: DayColumnProps) {
+export function DayColumn({ dayIndex, activities, masters, studios = [], services = [], dragCopy, dragId, ghostHeight, ghostDayIndex, ghostSlotIndex, onCreateActivity, onOpenCreateModal, onOpenEditModal, onQuickAdd, stampReady, stamp, cellHeight = 60, gridFrequency = 30, gridStart = HOURS_START, gridEnd = HOURS_END, columnId }: DayColumnProps) {
   const [visibleIndices, setVisibleIndices] = useState<Record<string, number>>({});
   const [prevIndices, setPrevIndices] = useState<Record<string, number>>({});
   const columnRef = useRef<HTMLDivElement>(null);
@@ -200,9 +206,9 @@ export function DayColumn({ dayIndex, activities, masters, studios = [], service
   const lastWheelTime = useRef(0);
   const [animatingKeys, setAnimatingKeys] = useState<Set<string>>(new Set());
 
-  // Visual grid always uses 30-minute intervals regardless of gridFrequency.
-  // gridFrequency only affects DnD snapping (useDnD) and activity card height calculation.
-  const slots = useMemo(() => generateTimeSlots(30), []);
+  // Generate slots at gridFrequency intervals. Slot height is scaled to keep total grid height constant.
+  const slotHeight = useMemo(() => cellHeight * (gridFrequency / 30), [cellHeight, gridFrequency]);
+  const slots = useMemo(() => generateTimeSlots(gridFrequency, gridStart, gridEnd), [gridFrequency, gridStart, gridEnd]);
 
   const masterMap = useMemo(() => new Map(masters.map(a => [a.id, a])), [masters]);
 
@@ -239,7 +245,7 @@ export function DayColumn({ dayIndex, activities, masters, studios = [], service
       // Find which stacked group we are hovering over
       let targetKey: string | null = null;
       for (const act of activities) {
-        const topPx = (act.startTime - HOURS_START) * cellHeight * 2;
+        const topPx = (act.startTime - gridStart) * cellHeight * 2;
         const heightPx = Math.max(act.duration * 120 - 10, 52);
         if (y >= topPx && y <= topPx + heightPx) {
           const key = `${dayIndex}_${act.startTime}`;
@@ -278,31 +284,37 @@ export function DayColumn({ dayIndex, activities, masters, studios = [], service
       data-day-column={dayIndex}
       className="relative flex-1 border-l border-line"
     >
-      {slots.map((hour, i) => (
-        <DroppableSlot
-          key={i}
-          dayIndex={dayIndex}
-          slotIndex={i}
-          startTime={hour}
-          isHour={hour % 1 === 0}
-          dragCopy={dragCopy}
-          onClick={onCreateActivity}
-          onOpenModal={onOpenCreateModal}
-          stampReady={stampReady}
-          stamp={stamp}
-          masters={masters}
-          services={services}
-          cellHeight={cellHeight}
-        />
-      ))}
+      {slots.map((hour, i) => {
+        const isHour = hour % 1 === 0;
+        const isHalfHour = !isHour && Math.abs(hour % 0.5) < 0.01;
+        return (
+          <DroppableSlot
+            key={i}
+            dayIndex={dayIndex}
+            slotIndex={i}
+            startTime={hour}
+            isHour={isHour}
+            isHalfHour={isHalfHour}
+            dragCopy={dragCopy}
+            onClick={onCreateActivity}
+            onOpenModal={onOpenCreateModal}
+            stampReady={stampReady}
+            stamp={stamp}
+            masters={masters}
+            services={services}
+            cellHeight={slotHeight}
+            columnId={columnId}
+          />
+        );
+      })}
 
       {/* Drag ghost — single continuous dashed outline spanning all target slots */}
       {ghostDayIndex === dayIndex && ghostSlotIndex != null && ghostHeight != null && (
         <div
           className="absolute inset-x-1 rounded-xl pointer-events-none z-[30]"
           style={{
-            top: ghostSlotIndex * cellHeight,
-            height: ghostHeight * cellHeight,
+            top: ghostSlotIndex * slotHeight,
+            height: ghostHeight * slotHeight,
             border: '2px dashed #004D56',
             backgroundColor: 'rgba(0,77,86,0.06)',
           }}
@@ -360,6 +372,7 @@ export function DayColumn({ dayIndex, activities, masters, studios = [], service
               onQuickAdd={onQuickAdd}
               isDragging={isThisDragging}
               isDragCopy={dragCopy}
+              gridStart={gridStart}
               style={{
                 transform: `translate(${ox + carouselOffsetX}px, ${oy + carouselOffsetY}px) scale(${cardScale})`,
                 zIndex: cardZIndex,
@@ -390,7 +403,7 @@ export function DayColumn({ dayIndex, activities, masters, studios = [], service
                 }}
                 className="absolute right-1 z-[35] px-1.5 py-0.5 rounded-full bg-white/90 border border-gray-300 text-[10px] font-semibold text-gray-500 shadow-sm hover:bg-white hover:text-gray-700 transition-colors cursor-pointer"
                 style={{
-                  top: (activity.startTime - 9) * cellHeight * 2 + 2,
+                  top: (activity.startTime - gridStart) * cellHeight * 2 + 2,
                 }}
                 title="Click to cycle through cards"
               >

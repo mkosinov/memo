@@ -33,6 +33,12 @@ const VALID_CELL_HEIGHTS = new Set(CELL_HEIGHT_OPTIONS.map(o => o.value)) as Set
 const GRID_FREQUENCY_STORAGE_KEY = 'memo-grid-frequency';
 const VALID_GRID_FREQUENCIES = new Set(GRID_FREQUENCY_OPTIONS.map(o => o.value)) as Set<number>;
 
+// Working hours (default grid range)
+const WORKING_HOURS_START_KEY = 'memo-working-hours-start';
+const WORKING_HOURS_END_KEY = 'memo-working-hours-end';
+const WORKING_HOURS_START_DEFAULT = 9;
+const WORKING_HOURS_END_DEFAULT = 21;
+
 function readCellHeightFromStorage(): number {
   if (typeof window === 'undefined') return CELL_HEIGHT_DEFAULT;
   try {
@@ -60,6 +66,21 @@ function readGridFrequencyFromStorage(): number {
     return clamped;
   } catch {
     return GRID_FREQUENCY_DEFAULT;
+  }
+}
+
+function readWorkingHoursFromStorage(key: string, defaultValue: number): number {
+  if (typeof window === 'undefined') return defaultValue;
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw === null) return defaultValue;
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed)) return defaultValue;
+    const clamped = Math.round(parsed);
+    if (clamped < 0 || clamped > 23) return defaultValue;
+    return clamped;
+  } catch {
+    return defaultValue;
   }
 }
 
@@ -95,6 +116,10 @@ export interface ScheduleContextType {
   setCellHeight: (height: number) => void;
   gridFrequency: number;
   setGridFrequency: (freq: number) => void;
+  workingHoursStart: number;
+  setWorkingHoursStart: (h: number) => void;
+  workingHoursEnd: number;
+  setWorkingHoursEnd: (h: number) => void;
   prevPeriod: () => void;
   nextPeriod: () => void;
 }
@@ -145,6 +170,30 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
     _setGridFrequency(valid);
     try {
       localStorage.setItem(GRID_FREQUENCY_STORAGE_KEY, String(valid));
+    } catch { /* ignore */ }
+  }, []);
+
+  // ── Working hours (persisted to localStorage) ─────────────────────────────
+  const [workingHoursStart, _setWorkingHoursStart] = useState<number>(
+    () => readWorkingHoursFromStorage(WORKING_HOURS_START_KEY, WORKING_HOURS_START_DEFAULT),
+  );
+  const [workingHoursEnd, _setWorkingHoursEnd] = useState<number>(
+    () => readWorkingHoursFromStorage(WORKING_HOURS_END_KEY, WORKING_HOURS_END_DEFAULT),
+  );
+
+  const setWorkingHoursStart = useCallback((h: number) => {
+    const clamped = Math.max(0, Math.min(23, Math.round(h)));
+    _setWorkingHoursStart(clamped);
+    try {
+      localStorage.setItem(WORKING_HOURS_START_KEY, String(clamped));
+    } catch { /* ignore */ }
+  }, []);
+
+  const setWorkingHoursEnd = useCallback((h: number) => {
+    const clamped = Math.max(0, Math.min(23, Math.round(h)));
+    _setWorkingHoursEnd(clamped);
+    try {
+      localStorage.setItem(WORKING_HOURS_END_KEY, String(clamped));
     } catch { /* ignore */ }
   }, []);
 
@@ -456,6 +505,10 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
     setCellHeight,
     gridFrequency,
     setGridFrequency,
+    workingHoursStart,
+    setWorkingHoursStart,
+    workingHoursEnd,
+    setWorkingHoursEnd,
     prevPeriod,
     nextPeriod,
   }), [
@@ -468,6 +521,8 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
     activitiesLoading, activitiesError,
     cellHeight, setCellHeight,
     gridFrequency, setGridFrequency,
+    workingHoursStart, setWorkingHoursStart,
+    workingHoursEnd, setWorkingHoursEnd,
     prevPeriod, nextPeriod,
   ]);
 

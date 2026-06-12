@@ -349,7 +349,7 @@ describe('useDnD', () => {
 
   describe('gridFrequency snapping', () => {
     it('snaps to 15-min grid when gridFrequency=15', () => {
-      // slot-0-1 = 9:30, which is a 15-min multiple → stays 9:30
+      // With gridFrequency=15, slot-0-1 = 9 + 1*(15/60) = 9.25 (9:15)
       const { result } = renderDnDWithFrequency(15);
       act(() => {
         result.current.onDragStart({
@@ -364,12 +364,12 @@ describe('useDnD', () => {
       });
       expect(mocks.updateActivity).toHaveBeenCalledWith('ev_1', {
         day: 0,
-        startTime: 9.5,
+        startTime: 9.25, // 9:15 — grid now has 15-min slots
       });
     });
 
     it('snaps to 5-min grid when gridFrequency=5', () => {
-      // slot-0-1 = 9:30, which is a 5-min multiple → stays 9:30
+      // With gridFrequency=5, slot-0-1 = 9 + 1*(5/60) = 9.083… (9:05)
       const { result } = renderDnDWithFrequency(5);
       act(() => {
         result.current.onDragStart({
@@ -384,7 +384,7 @@ describe('useDnD', () => {
       });
       expect(mocks.updateActivity).toHaveBeenCalledWith('ev_1', {
         day: 0,
-        startTime: 9.5,
+        startTime: expect.closeTo(9 + 5 / 60, 10), // 9:05
       });
     });
 
@@ -409,6 +409,7 @@ describe('useDnD', () => {
     });
 
     it('snaps copied activity to gridFrequency on copy-drag', () => {
+      // With gridFrequency=15, slot-2-6 = 9 + 6*(15/60) = 9 + 1.5 = 10.5 (10:30)
       const { result } = renderDnDWithFrequency(15);
       act(() => {
         result.current.onDragStart({
@@ -423,8 +424,7 @@ describe('useDnD', () => {
       });
       expect(mocks.addActivity).toHaveBeenCalled();
       const added = mocks.addActivity.mock.calls[0][0];
-      // slot-2-6 = 9 + 6*0.5 = 12.0 (12:00), which is a 15-min multiple
-      expect(added.startTime).toBe(12);
+      expect(added.startTime).toBe(10.5); // 10:30
     });
 
     it('defaults gridFrequency to 30 when not provided', () => {
@@ -444,6 +444,199 @@ describe('useDnD', () => {
         day: 0,
         startTime: 9.5,
       });
+    });
+  });
+
+  describe('cross-column DnD (columnField)', () => {
+    function renderDnDWithColumnField(field: 'masterId' | 'locationId') {
+      return renderHook(() =>
+        useDnD({
+          activities: mocks.activities,
+          addActivity: mocks.addActivity,
+          updateActivity: mocks.updateActivity,
+          showToast: mocks.showToast,
+          columnField: field,
+        }),
+      );
+    }
+
+    it('updates masterId when dropping on a different master column', () => {
+      const { result } = renderDnDWithColumnField('masterId');
+      act(() => {
+        result.current.onDragStart({
+          active: { id: 'ev_1', data: { current: { activity: mockActivities[0] } } },
+        } as any);
+      });
+      // ev_1 has masterId='m1', drop on column m2
+      act(() => {
+        result.current.onDragEnd({
+          active: { id: 'ev_1' },
+          over: { id: 'slot-0-2', columnId: 'm2' },
+        } as any);
+      });
+      expect(mocks.updateActivity).toHaveBeenCalledWith('ev_1', {
+        day: 0,
+        startTime: 10,
+        masterId: 'm2',
+      });
+    });
+
+    it('does NOT update masterId when dropping on the same master column', () => {
+      const { result } = renderDnDWithColumnField('masterId');
+      act(() => {
+        result.current.onDragStart({
+          active: { id: 'ev_1', data: { current: { activity: mockActivities[0] } } },
+        } as any);
+      });
+      // ev_1 has masterId='m1', drop on column m1 (same)
+      act(() => {
+        result.current.onDragEnd({
+          active: { id: 'ev_1' },
+          over: { id: 'slot-0-2', columnId: 'm1' },
+        } as any);
+      });
+      expect(mocks.updateActivity).toHaveBeenCalledWith('ev_1', {
+        day: 0,
+        startTime: 10,
+      });
+    });
+
+    it('updates locationId when columnField=locations', () => {
+      const { result } = renderDnDWithColumnField('locationId');
+      act(() => {
+        result.current.onDragStart({
+          active: { id: 'ev_1', data: { current: { activity: mockActivities[0] } } },
+        } as any);
+      });
+      // ev_1 has locationId='alpika', drop on column grand
+      act(() => {
+        result.current.onDragEnd({
+          active: { id: 'ev_1' },
+          over: { id: 'slot-0-2', columnId: 'grand' },
+        } as any);
+      });
+      expect(mocks.updateActivity).toHaveBeenCalledWith('ev_1', {
+        day: 0,
+        startTime: 10,
+        locationId: 'grand',
+      });
+    });
+
+    it('updates masterId and startTime together', () => {
+      const { result } = renderDnDWithColumnField('masterId');
+      act(() => {
+        result.current.onDragStart({
+          active: { id: 'ev_1', data: { current: { activity: mockActivities[0] } } },
+        } as any);
+      });
+      // Drop on a different time AND different master
+      act(() => {
+        result.current.onDragEnd({
+          active: { id: 'ev_1' },
+          over: { id: 'slot-3-8', columnId: 'm2' },
+        } as any);
+      });
+      expect(mocks.updateActivity).toHaveBeenCalledWith('ev_1', {
+        day: 3,
+        startTime: 13, // slot 8 → 9 + 8*0.5 = 13
+        masterId: 'm2',
+      });
+    });
+
+    it('undo callback restores both time and column', () => {
+      const { result } = renderDnDWithColumnField('masterId');
+      act(() => {
+        result.current.onDragStart({
+          active: { id: 'ev_1', data: { current: { activity: mockActivities[0] } } },
+        } as any);
+      });
+      act(() => {
+        result.current.onDragEnd({
+          active: { id: 'ev_1' },
+          over: { id: 'slot-1-4', columnId: 'm2' },
+        } as any);
+      });
+      // Get the undo callback from the toast call
+      const toastCall = mocks.showToast.mock.calls.find(
+        (call: unknown[]) => call[0] === 'Событие перемещено',
+      );
+      expect(toastCall).toBeTruthy();
+      const undoFn = toastCall![1] as () => void;
+      // Call undo
+      undoFn();
+      expect(mocks.updateActivity).toHaveBeenCalledWith('ev_1', {
+        day: 0,
+        startTime: 10,
+        masterId: 'm1',
+      });
+    });
+
+    it('does not include columnField when no columnField option', () => {
+      const { result } = renderDnD();
+      act(() => {
+        result.current.onDragStart({
+          active: { id: 'ev_1', data: { current: { activity: mockActivities[0] } } },
+        } as any);
+      });
+      act(() => {
+        result.current.onDragEnd({
+          active: { id: 'ev_1' },
+          over: { id: 'slot-0-2', columnId: 'm2' },
+        } as any);
+      });
+      // Should NOT include masterId since columnField is not set
+      expect(mocks.updateActivity).toHaveBeenCalledWith('ev_1', {
+        day: 0,
+        startTime: 10,
+      });
+    });
+
+    it('copies activity to a different column with columnField', () => {
+      const { result } = renderHook(() =>
+        useDnD({
+          activities: mocks.activities,
+          addActivity: mocks.addActivity,
+          updateActivity: mocks.updateActivity,
+          showToast: mocks.showToast,
+          columnField: 'masterId',
+        }),
+      );
+      act(() => {
+        result.current.onDragStart({
+          active: { id: 'ev_1', data: { current: { activity: mockActivities[0] } } },
+        } as any, { altKey: true });
+      });
+      act(() => {
+        result.current.onDragEnd({
+          active: { id: 'ev_1' },
+          over: { id: 'slot-0-4', columnId: 'm2' },
+        } as any);
+      });
+      expect(mocks.addActivity).toHaveBeenCalled();
+      const added = mocks.addActivity.mock.calls[0][0];
+      expect(added.masterId).toBe('m2'); // Should use target column's masterId
+      expect(added.locationId).toBe('alpika'); // locationId stays the same
+    });
+  });
+
+  describe('slotIndexToTime (exported)', () => {
+    it('returns 30-min intervals by default', () => {
+      expect(slotIndexToTime(0)).toBe(9);
+      expect(slotIndexToTime(1)).toBe(9.5);
+      expect(slotIndexToTime(2)).toBe(10);
+    });
+
+    it('returns 15-min intervals when gridFrequency=15', () => {
+      expect(slotIndexToTime(0, 15)).toBe(9);
+      expect(slotIndexToTime(1, 15)).toBe(9.25);
+      expect(slotIndexToTime(2, 15)).toBe(9.5);
+      expect(slotIndexToTime(4, 15)).toBe(10);
+    });
+
+    it('returns 5-min intervals when gridFrequency=5', () => {
+      expect(slotIndexToTime(0, 5)).toBe(9);
+      expect(slotIndexToTime(1, 5)).toBeCloseTo(9 + 5 / 60, 10);
+      expect(slotIndexToTime(6, 5)).toBeCloseTo(9.5, 10);
     });
   });
 

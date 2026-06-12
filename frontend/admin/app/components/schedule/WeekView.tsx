@@ -12,10 +12,10 @@ import { DayColumn } from './DayColumn';
 import { ActivityCard } from './ActivityCard';
 import { ScheduleColumnHeader } from './ScheduleColumnHeader';
 import { ActivityDetailsModal } from '../modal/ActivityDetailsModal';
-import { DAYS, getMonday, TIME_COL_WIDTH, isSameDay, formatTime, HOURS_START } from '@/lib/utils';
+import { DAYS, getMonday, TIME_COL_WIDTH, isSameDay, formatTime, calculateGridTimeRange } from '@/lib/utils';
 
 export function WeekView() {
-  const { currentWeek, activities, scheduleIndex, masters, services, locations: studios, stamp, addActivity, updateActivity, loading, error, filterMasterIds, filterLocationIds, cellHeight = 60, gridFrequency = 30 } = useSchedule();
+  const { currentWeek, activities, scheduleIndex, masters, services, locations: studios, stamp, addActivity, updateActivity, loading, error, filterMasterIds, filterLocationIds, cellHeight = 60, gridFrequency = 30, workingHoursStart = 9, workingHoursEnd = 21 } = useSchedule();
   const { showToast } = useUI();
   const monday = getMonday(currentWeek);
 
@@ -113,6 +113,12 @@ export function WeekView() {
     [activities],
   );
 
+  // Adaptive grid time range — extends beyond working hours if activities go outside
+  const gridRange = useMemo(
+    () => calculateGridTimeRange(resolvedActivities, workingHoursStart, workingHoursEnd),
+    [resolvedActivities, workingHoursStart, workingHoursEnd],
+  );
+
   const {
     dragId,
     dragCopy,
@@ -155,7 +161,7 @@ export function WeekView() {
 
   // Calculate ghost span for drag overlay (how many slots the dragged card occupies)
   const durMinutes = activeDragActivity?.durationMinutes ?? (activeDragActivity?.duration ?? 0) * 60;
-  const ghostHeight = activeDragActivity ? Math.ceil(durMinutes / 30) : null;
+  const ghostHeight = activeDragActivity ? Math.ceil(durMinutes / gridFrequency) : null;
 
   // NowLine
   const [nowPos, setNowPos] = useState(0);
@@ -163,12 +169,12 @@ export function WeekView() {
     const update = () => {
       const now = new Date();
       const hours = now.getHours() + now.getMinutes() / 60;
-      setNowPos((hours - HOURS_START) * cellHeight * 2);
+      setNowPos((hours - gridRange.start) * cellHeight * 2);
     };
     update();
     const iv = setInterval(update, 30000);
     return () => clearInterval(iv);
-  }, [cellHeight]);
+  }, [cellHeight, gridRange.start]);
 
   const showNowLine = days.some(d => isSameDay(d, today)) && nowPos >= 0;
 
@@ -256,7 +262,7 @@ export function WeekView() {
 
         {/* Grid row — scrollable */}
         <div className="flex-1 flex overflow-auto relative">
-          <TimeColumn cellHeight={cellHeight} gridFrequency={gridFrequency} />
+          <TimeColumn cellHeight={cellHeight} gridFrequency={gridFrequency} gridStart={gridRange.start} gridEnd={gridRange.end} />
           {days.map((day, i) => (
             <DayColumn
               key={i}
@@ -279,6 +285,8 @@ export function WeekView() {
               stamp={stamp}
               cellHeight={cellHeight}
               gridFrequency={gridFrequency}
+              gridStart={gridRange.start}
+              gridEnd={gridRange.end}
             />
           ))}
 

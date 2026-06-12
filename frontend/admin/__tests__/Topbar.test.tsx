@@ -30,6 +30,10 @@ const defaultScheduleMock = {
   currentWeek: new Date(),
   columnMode: 'masters',
   setColumnMode: vi.fn(),
+  workingHoursStart: 9,
+  setWorkingHoursStart: vi.fn(),
+  workingHoursEnd: 21,
+  setWorkingHoursEnd: vi.fn(),
   prevPeriod: vi.fn(),
   nextPeriod: vi.fn(),
 };
@@ -428,5 +432,87 @@ describe('Topbar', () => {
 
     fireEvent.click(screen.getByTestId('date-nav-next'));
     expect(screen.queryByTestId('calendar-popover')).not.toBeInTheDocument();
+  });
+
+  // ── Working Hours in Zoom Popup ──────────────────────────────────────
+
+  it('shows working hours inputs in zoom popup', async () => {
+    renderWithProviders();
+    // Open zoom popup
+    fireEvent.click(screen.getByTestId('zoom-button'));
+    // Working hours section should be visible
+    expect(screen.getByLabelText('Рабочее время начало')).toBeInTheDocument();
+    expect(screen.getByLabelText('Рабочее время окончание')).toBeInTheDocument();
+  });
+
+  it('shows default working hours values (9 and 21)', async () => {
+    renderWithProviders();
+    fireEvent.click(screen.getByTestId('zoom-button'));
+    const startInput = screen.getByLabelText('Рабочее время начало') as HTMLInputElement;
+    const endInput = screen.getByLabelText('Рабочее время окончание') as HTMLInputElement;
+    expect(startInput.value).toBe('9');
+    expect(endInput.value).toBe('21');
+  });
+
+  it('calls setWorkingHoursStart when start input changes', async () => {
+    const setWorkingHoursStart = vi.fn();
+    const { useSchedule: mockHook } = await import('@/contexts/ScheduleContext');
+    vi.mocked(mockHook).mockReturnValue({
+      ...defaultScheduleMock,
+      workingHoursStart: 9,
+      setWorkingHoursStart,
+    } as any);
+
+    const { unmount } = renderWithProviders();
+    unmount();
+
+    const { Topbar: TopbarRe } = await import('../app/components/layout/Topbar');
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <UIProvider>
+          <NavigationProvider>
+            <TopbarRe />
+          </NavigationProvider>
+        </UIProvider>
+      </QueryClientProvider>
+    );
+
+    fireEvent.click(screen.getByTestId('zoom-button'));
+    fireEvent.change(screen.getByLabelText('Рабочее время начало'), { target: { value: '7' } });
+    expect(setWorkingHoursStart).toHaveBeenCalledWith(7);
+  });
+
+  it('calls setWorkingHoursEnd when end input changes', async () => {
+    const setWorkingHoursEnd = vi.fn();
+    const { useSchedule: mockHook } = await import('@/contexts/ScheduleContext');
+    vi.mocked(mockHook).mockReturnValue({
+      ...defaultScheduleMock,
+      workingHoursEnd: 21,
+      setWorkingHoursEnd,
+    } as any);
+
+    const { unmount } = renderWithProviders();
+    unmount();
+
+    const { Topbar: TopbarRe } = await import('../app/components/layout/Topbar');
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <UIProvider>
+          <NavigationProvider>
+            <TopbarRe />
+          </NavigationProvider>
+        </UIProvider>
+      </QueryClientProvider>
+    );
+
+    fireEvent.click(screen.getByTestId('zoom-button'));
+    fireEvent.change(screen.getByLabelText('Рабочее время окончание'), { target: { value: '23' } });
+    expect(setWorkingHoursEnd).toHaveBeenCalledWith(23);
   });
 });

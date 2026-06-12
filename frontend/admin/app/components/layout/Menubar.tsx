@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useMemo, useCallback, useState, useRef } from 'react';
+import React, { useMemo, useCallback, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useNavigation } from '@/contexts/NavigationContext';
@@ -8,6 +8,7 @@ import { useUI } from '@/contexts/UIContext';
 import type { ViewModeType } from '@/contexts/ScheduleContext';
 import { useMasters } from '@/hooks/useMasters';
 import { DAYS, MONTHS, getMonday, formatDate, formatDateISO, isSameDay } from '@/lib/utils';
+import { MonthYearPicker } from '../shared/MonthYearPicker';
 import type { Master } from '@memo/domain';
 
 // ─── SVG Icon Components ──────────────────────────────────────────────────
@@ -202,26 +203,6 @@ function MiniCalendar({ selectedWeek, selectedDay, viewMode, onWeekSelect, colla
     }
   }, [onWeekSelect, viewMode]);
 
-  const handleMonthSelect = useCallback((monthIndex: number) => {
-    // Navigate to the first day of the selected month
-    const target = new Date(selectedWeek.getFullYear(), monthIndex, 1);
-    onWeekSelect(target);
-    setShowMonthPicker(false);
-  }, [selectedWeek, onWeekSelect]);
-
-  // Close month picker on outside click
-  const monthPickerRef = useRef<HTMLDivElement>(null);
-  React.useEffect(() => {
-    if (!showMonthPicker) return;
-    const handleMouseDown = (e: MouseEvent) => {
-      if (monthPickerRef.current && !monthPickerRef.current.contains(e.target as Node)) {
-        setShowMonthPicker(false);
-      }
-    };
-    document.addEventListener('mousedown', handleMouseDown);
-    return () => document.removeEventListener('mousedown', handleMouseDown);
-  }, [showMonthPicker]);
-
   const calendarDays = useMemo(() => {
     const firstDayOfMonth = new Date(selectedWeek.getFullYear(), selectedWeek.getMonth(), 1);
     const lastDayOfMonth = new Date(selectedWeek.getFullYear(), selectedWeek.getMonth() + 1, 0);
@@ -303,7 +284,7 @@ function MiniCalendar({ selectedWeek, selectedDay, viewMode, onWeekSelect, colla
           Сегодня
         </button>
 
-        <div className="relative" ref={monthPickerRef}>
+        <div className="relative">
           <button
             type="button"
             onClick={() => setShowMonthPicker(prev => !prev)}
@@ -322,27 +303,16 @@ function MiniCalendar({ selectedWeek, selectedDay, viewMode, onWeekSelect, colla
           </button>
 
           {showMonthPicker && (
-            <div
-              className="absolute z-50 mt-1 right-0 bg-white border rounded-lg shadow-lg p-2 min-w-[160px]"
-              style={{ borderColor: 'var(--line, #e5e7eb)' }}
-            >
-              <div className="grid grid-cols-3 gap-1">
-                {MONTHS.map((m, i) => (
-                  <button
-                    key={i}
-                    type="button"
-                    onClick={() => handleMonthSelect(i)}
-                    className={`rounded-md px-2 py-1.5 text-[11px] font-medium transition-colors
-                      ${i === selectedWeek.getMonth()
-                        ? 'bg-[var(--brand)] text-white'
-                        : 'hover:bg-gray-100 text-gray-700'
-                      }`}
-                  >
-                    {m}
-                  </button>
-                ))}
-              </div>
-            </div>
+            <MonthYearPicker
+              selectedMonth={selectedWeek.getMonth()}
+              selectedYear={selectedWeek.getFullYear()}
+              onSelect={(month, year) => {
+                const target = new Date(year, month, 1);
+                onWeekSelect(target);
+                setShowMonthPicker(false);
+              }}
+              onClose={() => setShowMonthPicker(false)}
+            />
           )}
         </div>
       </div>

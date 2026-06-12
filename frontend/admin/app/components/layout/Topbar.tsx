@@ -35,6 +35,10 @@ export function Topbar() {
     setCellHeight,
     gridFrequency,
     setGridFrequency,
+    workingHoursStart,
+    setWorkingHoursStart,
+    workingHoursEnd,
+    setWorkingHoursEnd,
     prevPeriod,
     nextPeriod,
   } = useSchedule();
@@ -412,6 +416,46 @@ export function Topbar() {
                 </span>
               </button>
             ))}
+            {/* ── Divider ── */}
+            <div className="my-1 mx-2 border-t" style={{ borderColor: 'var(--line)' }} />
+            {/* ── Working hours section ── */}
+            <div className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--ink-light)' }}>
+              Рабочее время:
+            </div>
+            <div className="px-3 py-2 flex items-center gap-2">
+              <label className="text-[11px] font-medium" style={{ color: 'var(--ink)' }}>С</label>
+              <input
+                type="number"
+                min={0}
+                max={23}
+                value={workingHoursStart}
+                onChange={(e) => setWorkingHoursStart(Number(e.target.value))}
+                className="w-12 px-1.5 py-0.5 text-[11px] font-medium rounded border text-center"
+                style={{
+                  borderColor: 'var(--line)',
+                  color: 'var(--ink)',
+                  backgroundColor: 'var(--white)',
+                }}
+                aria-label="Рабочее время начало"
+              />
+              <span className="text-[11px]" style={{ color: 'var(--ink-light)' }}>:00</span>
+              <label className="text-[11px] font-medium" style={{ color: 'var(--ink)' }}>По</label>
+              <input
+                type="number"
+                min={0}
+                max={23}
+                value={workingHoursEnd}
+                onChange={(e) => setWorkingHoursEnd(Number(e.target.value))}
+                className="w-12 px-1.5 py-0.5 text-[11px] font-medium rounded border text-center"
+                style={{
+                  borderColor: 'var(--line)',
+                  color: 'var(--ink)',
+                  backgroundColor: 'var(--white)',
+                }}
+                aria-label="Рабочее время окончание"
+              />
+              <span className="text-[11px]" style={{ color: 'var(--ink-light)' }}>:00</span>
+            </div>
           </div>
         )}
       </div>

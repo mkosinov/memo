@@ -157,13 +157,66 @@ export function isSameDay(a: Date, b: Date): boolean {
   );
 }
 
-/** Generate time slots from HOURS_START to HOURS_END (exclusive) at given frequency (minutes). */
-export function generateTimeSlots(frequencyMinutes: number = 30): number[] {
+/** Generate time slots from start to end (exclusive) at given frequency (minutes). */
+export function generateTimeSlots(frequencyMinutes: number = 30, start: number = HOURS_START, end: number = HOURS_END): number[] {
   const slots: number[] = [];
   const step = frequencyMinutes / 60; // convert to hours
-  for (let t = HOURS_START; t < HOURS_END; t += step) {
+  for (let t = start; t < end; t += step) {
     // Round to avoid floating point issues
     slots.push(Math.round(t * 100) / 100);
   }
   return slots;
+}
+
+/** Activity shape for adaptive grid calculation (subset of fields needed). */
+interface GridActivity {
+  startTime: number;
+  duration: number; // in hours
+}
+
+/** Grid time range result. */
+export interface GridTimeRange {
+  start: number;
+  end: number;
+}
+
+/**
+ * Calculate adaptive grid time range based on actual activities.
+ * Extends the working hours range to fit activities outside the default range.
+ * Never shrinks below working hours range. Adds at least 1 hour padding.
+ *
+ * @param activities - visible activities for the period
+ * @param workingHoursStart - default grid start hour (e.g. 9)
+ * @param workingHoursEnd - default grid end hour (e.g. 21)
+ * @returns { start, end } in decimal hours
+ */
+export function calculateGridTimeRange(
+  activities: GridActivity[],
+  workingHoursStart: number = HOURS_START,
+  workingHoursEnd: number = HOURS_END,
+): GridTimeRange {
+  if (activities.length === 0) {
+    return { start: workingHoursStart, end: workingHoursEnd };
+  }
+
+  let earliestStart = Infinity;
+  let latestEnd = -Infinity;
+
+  for (const a of activities) {
+    if (a.startTime < earliestStart) earliestStart = a.startTime;
+    const endTime = a.startTime + a.duration;
+    if (endTime > latestEnd) latestEnd = endTime;
+  }
+
+  // Extend start only if activity starts before working hours (at least 1 hour padding)
+  const adaptiveStart = earliestStart < workingHoursStart
+    ? Math.max(0, Math.floor(earliestStart) - 1)
+    : workingHoursStart;
+
+  // Extend end only if activity ends after working hours (at least 1 hour padding)
+  const adaptiveEnd = latestEnd > workingHoursEnd
+    ? Math.ceil(latestEnd) + 1
+    : workingHoursEnd;
+
+  return { start: adaptiveStart, end: adaptiveEnd };
 }

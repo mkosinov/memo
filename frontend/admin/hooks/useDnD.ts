@@ -14,6 +14,7 @@ interface UseDnDOptions {
   addActivity: (activity: Omit<Activity, 'id'>) => void;
   updateActivity: (id: string, updates: Partial<Activity>) => void;
   showToast: (message: string, undo?: () => void) => void;
+  /** Grid frequency in minutes (5, 15, or 30). DnD snaps dropped times to the nearest multiple. */
   gridFrequency?: number;
 }
 
@@ -58,13 +59,27 @@ export function parseSlotId(id: string): { dayIndex: number; slotIndex: number }
 }
 
 /**
- * Calculate startTime from slotIndex using the given grid frequency.
- * Default 30 min: slotIndexToTime(2) = 10 (10:00)
- * 15 min: slotIndexToTime(2) = 9.5 (9:30)
- * 5 min: slotIndexToTime(2) = 9 + 2*(5/60) = 9.167 (9:10)
+ * Calculate startTime from slotIndex. The visual grid always uses 30-minute
+ * intervals, so each slot corresponds to 30 minutes regardless of gridFrequency.
+ *
+ * slotIndexToTime(0) = 9:00, slotIndexToTime(1) = 9:30, slotIndexToTime(2) = 10:00, etc.
  */
-export function slotIndexToTime(slotIndex: number, gridFrequency: number = 30): number {
-  return HOURS_START + slotIndex * (gridFrequency / 60);
+export function slotIndexToTime(slotIndex: number): number {
+  return HOURS_START + slotIndex * 0.5;
+}
+
+/**
+ * Snap a time value (in hours) to the nearest gridFrequency multiple.
+ *
+ * Example: snapToGrid(10.2, 15) → 10.25 (rounds 10:12 → 10:15)
+ *          snapToGrid(9.0, 30)  → 9.0   (already aligned)
+ *          snapToGrid(9.1, 5)   → 9.083… (rounds 9:06 → 9:05)
+ */
+export function snapToGrid(time: number, gridFrequency: number): number {
+  if (gridFrequency <= 0 || gridFrequency > 60) return time;
+  const minutes = time * 60;
+  const snapped = Math.round(minutes / gridFrequency) * gridFrequency;
+  return Math.round(snapped * 100) / 100 / 60; // avoid float drift
 }
 
 export function useDnD({ activities, addActivity, updateActivity, showToast, gridFrequency = 30 }: UseDnDOptions) {
@@ -76,7 +91,7 @@ export function useDnD({ activities, addActivity, updateActivity, showToast, gri
   /** The snapped time during drag (derived from ghostPosition). Shows as preview on the card. */
   const draggedSnappedTime = useMemo(() => {
     if (!ghostPosition || !activeDragActivity) return null;
-    return slotIndexToTime(ghostPosition.slotIndex, gridFrequency);
+    return snapToGrid(slotIndexToTime(ghostPosition.slotIndex), gridFrequency);
   }, [ghostPosition, activeDragActivity, gridFrequency]);
 
   const onDragStart = useCallback(
@@ -122,7 +137,7 @@ export function useDnD({ activities, addActivity, updateActivity, showToast, gri
       }
 
       const { dayIndex, slotIndex } = parsed;
-      const newStartTime = slotIndexToTime(slotIndex, gridFrequency);
+      const newStartTime = snapToGrid(slotIndexToTime(slotIndex), gridFrequency);
 
       if (dragCopy && activeDragActivity) {
         // Create a copy at the new position
@@ -167,7 +182,7 @@ export function useDnD({ activities, addActivity, updateActivity, showToast, gri
       setGhostPosition(null);
       setActiveDragActivity(null);
     },
-    [dragId, dragCopy, activeDragActivity, activities, addActivity, updateActivity, showToast, gridFrequency],
+    [dragId, dragCopy, activeDragActivity, activities, addActivity, updateActivity, showToast],
   );
 
   const handleDragCancel = useCallback(() => {

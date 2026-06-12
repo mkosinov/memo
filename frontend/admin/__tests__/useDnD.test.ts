@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
-import { useDnD } from '../hooks/useDnD';
+import { useDnD, snapToGrid, slotIndexToTime } from '../hooks/useDnD';
 import type { Activity } from '@memo/domain';
 import { HOURS_START } from '../lib/utils';
 
@@ -58,6 +58,18 @@ describe('useDnD', () => {
         addActivity: mocks.addActivity,
         updateActivity: mocks.updateActivity,
         showToast: mocks.showToast,
+      }),
+    );
+  }
+
+  function renderDnDWithFrequency(freq: number) {
+    return renderHook(() =>
+      useDnD({
+        activities: mocks.activities,
+        addActivity: mocks.addActivity,
+        updateActivity: mocks.updateActivity,
+        showToast: mocks.showToast,
+        gridFrequency: freq,
       }),
     );
   }
@@ -332,6 +344,158 @@ describe('useDnD', () => {
         day: 5,
         startTime: 21,
       });
+    });
+  });
+
+  describe('gridFrequency snapping', () => {
+    it('snaps to 15-min grid when gridFrequency=15', () => {
+      // slot-0-1 = 9:30, which is a 15-min multiple → stays 9:30
+      const { result } = renderDnDWithFrequency(15);
+      act(() => {
+        result.current.onDragStart({
+          active: { id: 'ev_1', data: { current: { activity: mockActivities[0] } } },
+        } as any);
+      });
+      act(() => {
+        result.current.onDragEnd({
+          active: { id: 'ev_1' },
+          over: { id: 'slot-0-1' },
+        } as any);
+      });
+      expect(mocks.updateActivity).toHaveBeenCalledWith('ev_1', {
+        day: 0,
+        startTime: 9.5,
+      });
+    });
+
+    it('snaps to 5-min grid when gridFrequency=5', () => {
+      // slot-0-1 = 9:30, which is a 5-min multiple → stays 9:30
+      const { result } = renderDnDWithFrequency(5);
+      act(() => {
+        result.current.onDragStart({
+          active: { id: 'ev_1', data: { current: { activity: mockActivities[0] } } },
+        } as any);
+      });
+      act(() => {
+        result.current.onDragEnd({
+          active: { id: 'ev_1' },
+          over: { id: 'slot-0-1' },
+        } as any);
+      });
+      expect(mocks.updateActivity).toHaveBeenCalledWith('ev_1', {
+        day: 0,
+        startTime: 9.5,
+      });
+    });
+
+    it('snaps to 30-min grid when gridFrequency=30 (default)', () => {
+      const { result } = renderDnDWithFrequency(30);
+      act(() => {
+        result.current.onDragStart({
+          active: { id: 'ev_1', data: { current: { activity: mockActivities[0] } } },
+        } as any);
+      });
+      act(() => {
+        result.current.onDragEnd({
+          active: { id: 'ev_1' },
+          over: { id: 'slot-0-1' },
+        } as any);
+      });
+      // 9:30 is already a 30-min multiple
+      expect(mocks.updateActivity).toHaveBeenCalledWith('ev_1', {
+        day: 0,
+        startTime: 9.5,
+      });
+    });
+
+    it('snaps copied activity to gridFrequency on copy-drag', () => {
+      const { result } = renderDnDWithFrequency(15);
+      act(() => {
+        result.current.onDragStart({
+          active: { id: 'ev_1', data: { current: { activity: mockActivities[0] } } },
+        } as any, { altKey: true });
+      });
+      act(() => {
+        result.current.onDragEnd({
+          active: { id: 'ev_1' },
+          over: { id: 'slot-2-6' },
+        } as any);
+      });
+      expect(mocks.addActivity).toHaveBeenCalled();
+      const added = mocks.addActivity.mock.calls[0][0];
+      // slot-2-6 = 9 + 6*0.5 = 12.0 (12:00), which is a 15-min multiple
+      expect(added.startTime).toBe(12);
+    });
+
+    it('defaults gridFrequency to 30 when not provided', () => {
+      const { result } = renderDnD();
+      act(() => {
+        result.current.onDragStart({
+          active: { id: 'ev_1', data: { current: { activity: mockActivities[0] } } },
+        } as any);
+      });
+      act(() => {
+        result.current.onDragEnd({
+          active: { id: 'ev_1' },
+          over: { id: 'slot-0-1' },
+        } as any);
+      });
+      expect(mocks.updateActivity).toHaveBeenCalledWith('ev_1', {
+        day: 0,
+        startTime: 9.5,
+      });
+    });
+  });
+
+  describe('snapToGrid (exported)', () => {
+    it('returns same time when already aligned to gridFrequency=30', () => {
+      expect(snapToGrid(9.0, 30)).toBe(9.0);
+      expect(snapToGrid(9.5, 30)).toBe(9.5);
+      expect(snapToGrid(10.0, 30)).toBe(10.0);
+    });
+
+    it('returns same time when already aligned to gridFrequency=15', () => {
+      expect(snapToGrid(9.0, 15)).toBe(9.0);
+      expect(snapToGrid(9.25, 15)).toBe(9.25);  // 9:15
+      expect(snapToGrid(9.5, 15)).toBe(9.5);     // 9:30
+      expect(snapToGrid(9.75, 15)).toBe(9.75);   // 9:45
+    });
+
+    it('returns same time when already aligned to gridFrequency=5', () => {
+      expect(snapToGrid(9.0, 5)).toBe(9.0);
+      expect(snapToGrid(9 + 5/60, 5)).toBeCloseTo(9 + 5/60, 10);   // 9:05
+      expect(snapToGrid(9 + 10/60, 5)).toBeCloseTo(9 + 10/60, 10);  // 9:10
+      expect(snapToGrid(9 + 15/60, 5)).toBeCloseTo(9 + 15/60, 10);  // 9:15
+    });
+
+    it('rounds 10:12 to 10:15 when gridFrequency=15', () => {
+      // 10:12 = 10 + 12/60 = 10.2
+      const result = snapToGrid(10.2, 15);
+      expect(result).toBeCloseTo(10.25, 10); // 10:15
+    });
+
+    it('rounds 10:21 to 10:15 when gridFrequency=15 (rounds down)', () => {
+      // 10:21 = 10 + 21/60 = 10.35
+      const result = snapToGrid(10.35, 15);
+      expect(result).toBeCloseTo(10.25, 10); // 10:15 (closer than 10:30)
+    });
+
+    it('rounds 10:20 to 10:20 when gridFrequency=5', () => {
+      // 10:20 = 10 + 20/60 = 10.333...
+      const result = snapToGrid(10 + 20/60, 5);
+      expect(result).toBeCloseTo(10 + 20/60, 10);
+    });
+
+    it('rounds 10:22 to 10:20 when gridFrequency=5', () => {
+      // 10:22 = 10 + 22/60 = 10.366...
+      const result = snapToGrid(10 + 22/60, 5);
+      expect(result).toBeCloseTo(10 + 20/60, 10); // 10:20
+    });
+
+    it('does not change time for invalid gridFrequency', () => {
+      expect(snapToGrid(10.2, 0)).toBe(10.2);
+      expect(snapToGrid(10.2, -5)).toBe(10.2);
+      expect(snapToGrid(10.2, 90)).toBe(10.2);
     });
   });
 });

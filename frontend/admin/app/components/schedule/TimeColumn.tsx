@@ -8,8 +8,9 @@ interface TimeColumnProps {
   gridFrequency?: number;
 }
 
-export function TimeColumn({ cellHeight = 60, gridFrequency = 30 }: TimeColumnProps) {
-  const hours = generateTimeSlots(gridFrequency);
+export function TimeColumn({ cellHeight = 60 }: TimeColumnProps) {
+  // Visual grid always uses 30-minute intervals regardless of gridFrequency.
+  const hours = generateTimeSlots(30);
 
   return (
     <div

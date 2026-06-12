@@ -200,7 +200,9 @@ export function DayColumn({ dayIndex, activities, masters, studios = [], service
   const lastWheelTime = useRef(0);
   const [animatingKeys, setAnimatingKeys] = useState<Set<string>>(new Set());
 
-  const slots = useMemo(() => generateTimeSlots(gridFrequency), [gridFrequency]);
+  // Visual grid always uses 30-minute intervals regardless of gridFrequency.
+  // gridFrequency only affects DnD snapping (useDnD) and activity card height calculation.
+  const slots = useMemo(() => generateTimeSlots(30), []);
 
   const masterMap = useMemo(() => new Map(masters.map(a => [a.id, a])), [masters]);
 

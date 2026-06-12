@@ -524,7 +524,7 @@ export function Menubar() {
       {/* ── Logo Section ── */}
       <div className={`flex items-center ${sidebarCollapsed ? 'justify-center px-2' : 'px-4'} py-4 border-b border-white/10`}>
         <img
-          src="/logo.png"
+          src="/logo-white.png"
           alt="Colour Mountains"
           className={sidebarCollapsed ? 'w-8 h-8' : 'h-10 w-auto'}
         />

@@ -62,6 +62,41 @@ describe('formatTime', () => {
   it('formats 21:00', () => {
     expect(formatTime(21)).toBe('21:00');
   });
+
+  // 5-minute grid
+  it('formats 5-min intervals (9:05)', () => {
+    expect(formatTime(9 + 5 / 60)).toBe('09:05');
+  });
+
+  it('formats 5-min intervals (10:10)', () => {
+    expect(formatTime(10 + 10 / 60)).toBe('10:10');
+  });
+
+  it('formats 5-min intervals (10:25)', () => {
+    expect(formatTime(10 + 25 / 60)).toBe('10:25');
+  });
+
+  // 15-minute grid
+  it('formats 15-min intervals (9:15)', () => {
+    expect(formatTime(9 + 15 / 60)).toBe('09:15');
+  });
+
+  it('formats 15-min intervals (10:45)', () => {
+    expect(formatTime(10 + 45 / 60)).toBe('10:45');
+  });
+
+  it('formats 15-min intervals (14:30)', () => {
+    expect(formatTime(14 + 30 / 60)).toBe('14:30');
+  });
+
+  // 5-min grid edge cases
+  it('formats 5-min intervals (11:55)', () => {
+    expect(formatTime(11 + 55 / 60)).toBe('11:55');
+  });
+
+  it('formats 5-min intervals (9:35)', () => {
+    expect(formatTime(9 + 35 / 60)).toBe('09:35');
+  });
 });
 
 describe('getMonday', () => {

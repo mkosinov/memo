@@ -97,11 +97,11 @@ export function formatActivityContext(date: Date): string {
 
 // ─── Time / Date Utilities ────────────────────────────────────────────────
 
-/** Format hours to "HH:MM" string. 10 → "10:00", 10.5 → "10:30". */
+/** Format hours to "HH:MM" string. 10 → "10:00", 10.5 → "10:30", 9.25 → "09:15". */
 export function formatTime(hours: number): string {
   const h = Math.floor(hours);
-  const m = hours % 1 >= 0.5 ? '30' : '00';
-  return `${h.toString().padStart(2, '0')}:${m}`;
+  const m = Math.round((hours - h) * 60);
+  return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
 }
 
 /** Get the Monday of the week containing the given date. */

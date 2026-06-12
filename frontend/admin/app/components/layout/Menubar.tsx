@@ -290,7 +290,7 @@ function MiniCalendar({ selectedWeek, selectedDay, viewMode, onWeekSelect, colla
       <button
         type="button"
         onClick={handleGoToToday}
-        className="w-full text-[11px] text-white/70 hover:text-white hover:underline transition-colors whitespace-nowrap text-center mb-2"
+        className="w-full text-xs text-white/70 hover:text-white hover:underline transition-colors whitespace-nowrap text-center mb-2"
       >
         Сегодня {today.getDate()} {MONTHS_GENITIVE[today.getMonth()]}, {DAYS_FULL[(today.getDay() + 6) % 7]}
       </button>

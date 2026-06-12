@@ -32,7 +32,7 @@ export function MonthYearPicker({ selectedMonth, selectedYear, onSelect, onClose
   return (
     <div
       ref={ref}
-      className="absolute z-50 mt-1 right-0 bg-white border rounded-lg shadow-lg p-3 min-w-[200px]"
+      className="absolute z-50 mt-1 left-0 bg-white border rounded-lg shadow-lg p-3 min-w-[200px]"
       style={{ borderColor: 'var(--line, #e5e7eb)' }}
       data-testid="month-year-picker"
     >

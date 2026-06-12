@@ -165,9 +165,11 @@ describe('SettingsTab', () => {
     onUpdate: vi.fn(),
   };
 
-  it('renders datetime-local input', () => {
+  it('renders DateTimePicker component', () => {
     render(<SettingsTab {...defaultProps} />);
-    expect(screen.getByTestId('input-datetime-local')).toBeInTheDocument();
+    expect(screen.getByTestId('date-time-picker')).toBeInTheDocument();
+    expect(screen.getByTestId('date-time-picker-date')).toBeInTheDocument();
+    expect(screen.getByTestId('date-time-picker-time')).toBeInTheDocument();
   });
 
   it('renders precise time checkbox', () => {
@@ -455,11 +457,11 @@ describe('SettingsTab — row layout', () => {
     onUpdate: vi.fn(),
   };
 
-  it('renders datetime-local and duration on the same row', () => {
+  it('renders DateTimePicker and duration on the same row', () => {
     const { container } = render(<SettingsTab {...defaultProps} />);
     const row1 = container.querySelector('[data-testid="settings-row-datetime-duration"]');
     expect(row1).toBeInTheDocument();
-    expect(row1!.querySelector('[data-testid="input-datetime-local"]')).toBeInTheDocument();
+    expect(row1!.querySelector('[data-testid="date-time-picker"]')).toBeInTheDocument();
     expect(row1!.querySelector('[data-testid="input-duration"]')).toBeInTheDocument();
   });
 
@@ -523,9 +525,12 @@ describe('SettingsTab — row layout', () => {
     render(
       <SettingsTab activity={activityWithArbitraryMinutes} onUpdate={vi.fn()} />,
     );
-    const datetimeInput = screen.getByTestId('input-datetime-local') as HTMLInputElement;
+    const dateInput = screen.getByTestId('date-time-picker-date') as HTMLInputElement;
+    const timeSelect = screen.getByTestId('date-time-picker-time') as HTMLSelectElement;
+    // Date should be correct
+    expect(dateInput.value).toBe('2026-06-15');
     // 14:04 is not on 30-min grid, so it snaps to nearest (14:00)
-    expect(datetimeInput.value).toBe('2026-06-15T14:00');
+    expect(timeSelect.value).toBe('14:00');
   });
 
   it('allows precise time via checkbox', () => {
@@ -541,8 +546,8 @@ describe('SettingsTab — row layout', () => {
     const checkbox = screen.getByTestId('checkbox-precise-time') as HTMLInputElement;
     fireEvent.click(checkbox);
     // Now 14:04 should be shown without snapping
-    const datetimeInput = screen.getByTestId('input-datetime-local') as HTMLInputElement;
-    expect(datetimeInput.value).toBe('2026-06-15T14:04');
+    const timeSelect = screen.getByTestId('date-time-picker-time') as HTMLSelectElement;
+    expect(timeSelect.value).toBe('14:04');
   });
 });
 

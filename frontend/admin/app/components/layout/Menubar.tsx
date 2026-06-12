@@ -523,14 +523,11 @@ export function Menubar() {
     >
       {/* ── Logo Section ── */}
       <div className={`flex items-center ${sidebarCollapsed ? 'justify-center px-2' : 'px-4'} py-4 border-b border-white/10`}>
-        <div className="flex items-center gap-2">
-          <span className="text-lg" role="img" aria-label="mountain">🏔</span>
-          {!sidebarCollapsed && (
-            <span className="text-sm font-bold text-white tracking-wide">
-              Colour Mountains
-            </span>
-          )}
-        </div>
+        <img
+          src="/logo.png"
+          alt="Colour Mountains"
+          className={sidebarCollapsed ? 'w-8 h-8' : 'h-10 w-auto'}
+        />
       </div>
 
       {/* ── Scrollable Content ── */}

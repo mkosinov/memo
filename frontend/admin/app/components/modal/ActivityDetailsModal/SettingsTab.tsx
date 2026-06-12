@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useSchedule } from '@/contexts/ScheduleContext';
 import { MasterPicker } from '@/app/components/shared/MasterPicker';
+import { DateTimePicker } from '@/app/components/shared/DateTimePicker';
 import type { Activity, Service } from '@memo/domain';
 import { decimalToHHMM, hhmmToDecimal } from '@/lib/utils';
 
@@ -133,17 +134,14 @@ export function SettingsTab({ activity, onUpdate }: SettingsTabProps) {
       {/* Row 1: Date/Time + Duration + Private toggle */}
       <div className="flex gap-3 items-end" data-testid="settings-row-datetime-duration">
         <div className="flex-1">
-          <label className="text-xs font-medium text-ink-mid block mb-1" htmlFor="settings-datetime">
+          <label className="text-xs font-medium text-ink-mid block mb-1">
             Дата и время
           </label>
-          <input
-            id="settings-datetime"
-            type="datetime-local"
-            className={inputClass}
-            style={inputStyle}
+          <DateTimePicker
             value={startDateTime}
-            onChange={(e) => handleDateTimeChange(e.target.value)}
-            data-testid="input-datetime-local"
+            onChange={handleDateTimeChange}
+            gridFrequency={gridFrequency}
+            precise={preciseTime}
           />
           <label className="flex items-center gap-1.5 text-xs text-ink-mid cursor-pointer mt-1">
             <input

@@ -193,7 +193,6 @@ function MiniCalendar({ selectedWeek, selectedDay, viewMode, onWeekSelect, colla
   const handleGoToToday = useCallback(() => {
     const now = new Date();
     const monday = getMonday(now);
-    const sunday = new Date(monday.getTime() + 6 * 24 * 60 * 60 * 1000);
     onWeekSelect(monday);
     // Also dispatch event so ScheduleContext can reset selectedDay
     document.dispatchEvent(new CustomEvent('__memo-go-to-today'));
@@ -210,8 +209,11 @@ function MiniCalendar({ selectedWeek, selectedDay, viewMode, onWeekSelect, colla
     const startDate = getMonday(firstDayOfMonth);
     startDate.setDate(startDate.getDate() - 7);
 
+    // End on Sunday of the week containing the last day of the month
     const endDate = new Date(lastDayOfMonth);
-    endDate.setDate(endDate.getDate() + 6);
+    const dayOfWeek = endDate.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
+    const daysUntilSunday = dayOfWeek === 0 ? 0 : 7 - dayOfWeek;
+    endDate.setDate(endDate.getDate() + daysUntilSunday);
 
     const days: Date[] = [];
     const current = new Date(startDate);
@@ -258,6 +260,16 @@ function MiniCalendar({ selectedWeek, selectedDay, viewMode, onWeekSelect, colla
     document.dispatchEvent(new CustomEvent('__memo-switch-to-day-view', { detail: { date: day } }));
   };
 
+  const handlePrevMonth = useCallback(() => {
+    const target = new Date(selectedWeek.getFullYear(), selectedWeek.getMonth() - 1, 1);
+    onWeekSelect(target);
+  }, [selectedWeek, onWeekSelect]);
+
+  const handleNextMonth = useCallback(() => {
+    const target = new Date(selectedWeek.getFullYear(), selectedWeek.getMonth() + 1, 1);
+    onWeekSelect(target);
+  }, [selectedWeek, onWeekSelect]);
+
   const isInCurrentWeek = (date: Date) => {
     const dMonday = getMonday(date);
     return dMonday.getTime() === currentWeekMonday.getTime();
@@ -272,16 +284,29 @@ function MiniCalendar({ selectedWeek, selectedDay, viewMode, onWeekSelect, colla
 
   return (
     <div className="px-3 py-2">
-      <div className="flex items-center justify-between mb-2 gap-2">
+      {/* Today button — full width */}
+      <button
+        type="button"
+        onClick={handleGoToToday}
+        className="w-full rounded-md px-2 py-1 text-[11px] font-medium text-white/90 transition-colors hover:bg-white/10 whitespace-nowrap text-center mb-2"
+        style={{
+          border: '1px solid rgba(255,255,255,0.3)',
+        }}
+      >
+        Сегодня {today.getDate()} {MONTHS_GENITIVE[today.getMonth()]}, {DAYS_FULL[(today.getDay() + 6) % 7]}
+      </button>
+
+      {/* Month picker row: ← Month Year ▼ → */}
+      <div className="flex items-center justify-between mb-2">
         <button
           type="button"
-          onClick={handleGoToToday}
-          className="shrink-0 rounded-md px-2 py-0.5 text-[10px] font-medium text-white/90 transition-colors hover:bg-white/10 whitespace-nowrap"
-          style={{
-            border: '1px solid rgba(255,255,255,0.3)',
-          }}
+          onClick={handlePrevMonth}
+          className="flex items-center justify-center w-6 h-6 rounded-md text-white/60 hover:bg-white/10 hover:text-white transition-colors"
+          aria-label="Предыдущий месяц"
         >
-          Сегодня {today.getDate()} {MONTHS_GENITIVE[today.getMonth()]}, {DAYS_FULL[(today.getDay() + 6) % 7]}
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M15 19l-7-7 7-7" />
+          </svg>
         </button>
 
         <div className="relative">
@@ -315,8 +340,20 @@ function MiniCalendar({ selectedWeek, selectedDay, viewMode, onWeekSelect, colla
             />
           )}
         </div>
+
+        <button
+          type="button"
+          onClick={handleNextMonth}
+          className="flex items-center justify-center w-6 h-6 rounded-md text-white/60 hover:bg-white/10 hover:text-white transition-colors"
+          aria-label="Следующий месяц"
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M9 5l7 7-7 7" />
+          </svg>
+        </button>
       </div>
 
+      {/* Day headers */}
       <div className="grid grid-cols-7 gap-0 mb-1">
         {DAYS.map(d => (
           <div key={d} className="text-center text-[10px] text-white/40 font-medium py-0.5">
@@ -325,6 +362,7 @@ function MiniCalendar({ selectedWeek, selectedDay, viewMode, onWeekSelect, colla
         ))}
       </div>
 
+      {/* Calendar grid */}
       <div className="space-y-0.5">
         {weeks.map((week, wi) => {
           const weekMonday = week[0];

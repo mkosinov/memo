@@ -261,12 +261,14 @@ function MiniCalendar({ selectedWeek, selectedDay, viewMode, onWeekSelect, colla
   };
 
   const handlePrevMonth = useCallback(() => {
-    const target = new Date(selectedWeek.getFullYear(), selectedWeek.getMonth() - 1, 1);
+    // Use 15th of prev month to ensure getMonday returns a date in the prev month
+    const target = new Date(selectedWeek.getFullYear(), selectedWeek.getMonth() - 1, 15);
     onWeekSelect(target);
   }, [selectedWeek, onWeekSelect]);
 
   const handleNextMonth = useCallback(() => {
-    const target = new Date(selectedWeek.getFullYear(), selectedWeek.getMonth() + 1, 1);
+    // Use 15th of next month to ensure getMonday returns a date in the next month
+    const target = new Date(selectedWeek.getFullYear(), selectedWeek.getMonth() + 1, 15);
     onWeekSelect(target);
   }, [selectedWeek, onWeekSelect]);
 

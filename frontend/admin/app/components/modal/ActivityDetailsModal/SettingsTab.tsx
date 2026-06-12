@@ -3,13 +3,27 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useSchedule } from '@/contexts/ScheduleContext';
 import { MasterPicker } from '@/app/components/shared/MasterPicker';
-import { TimePicker } from '@/app/components/shared/TimePicker';
 import type { Activity, Service } from '@memo/domain';
 import { decimalToHHMM, hhmmToDecimal } from '@/lib/utils';
 
 interface SettingsTabProps {
   activity: Activity;
   onUpdate: (updates: Partial<Activity>) => void;
+}
+
+/** Snap minutes to the nearest grid slot. */
+function snapMinutes(minutes: number, gridFrequency: number): number {
+  return Math.round(minutes / gridFrequency) * gridFrequency;
+}
+
+/** Build a datetime-local string "YYYY-MM-DDTHH:MM" from date and decimal time, snapped to grid. */
+function buildDateTimeLocal(dateStr: string, decimalTime: number, gridFrequency: number, precise: boolean): string {
+  if (!dateStr) return '';
+  const hours = Math.floor(decimalTime);
+  const rawMinutes = Math.round((decimalTime - hours) * 60);
+  const minutes = precise ? rawMinutes : snapMinutes(rawMinutes, gridFrequency);
+  const mm = String(minutes).padStart(2, '0');
+  return `${dateStr}T${String(hours).padStart(2, '0')}:${mm}`;
 }
 
 export function SettingsTab({ activity, onUpdate }: SettingsTabProps) {
@@ -23,12 +37,7 @@ export function SettingsTab({ activity, onUpdate }: SettingsTabProps) {
   const [isPrivate, setIsPrivate] = useState(activity.isPrivate);
   const [preciseTime, setPreciseTime] = useState(false);
   const [startDateTime, setStartDateTime] = useState(() => {
-    // Build datetime-local string from activity.date + activity.startTime
-    const dateStr = activity.date || '';
-    if (dateStr) {
-      return `${dateStr}T${decimalToHHMM(activity.startTime)}`;
-    }
-    return '';
+    return buildDateTimeLocal(activity.date || '', activity.startTime, gridFrequency, false);
   });
 
   // Selected service for display
@@ -65,18 +74,21 @@ export function SettingsTab({ activity, onUpdate }: SettingsTabProps) {
   // Handle datetime change
   const handleDateTimeChange = useCallback(
     (value: string) => {
-      setStartDateTime(value);
       if (value) {
         const [datePart, timePart] = value.split('T');
         const [h, m] = timePart.split(':').map(Number);
-        const startTimeDecimal = h + m / 60;
+        const snappedMinutes = preciseTime ? m : snapMinutes(m, gridFrequency);
+        const startTimeDecimal = h + snappedMinutes / 60;
+        // Rebuild snapped datetime-local value for display
+        const snappedTime = `${String(h).padStart(2, '0')}:${String(snappedMinutes % 60).padStart(2, '0')}`;
+        setStartDateTime(`${datePart}T${snappedTime}`);
         // Calculate day from date
         const date = new Date(datePart + 'T12:00:00');
         const dayOfWeek = (date.getDay() + 6) % 7; // Mon=0
         onUpdate({ startTime: startTimeDecimal, day: dayOfWeek, date: datePart });
       }
     },
-    [onUpdate],
+    [onUpdate, preciseTime, gridFrequency],
   );
 
   // Handle duration change
@@ -100,11 +112,17 @@ export function SettingsTab({ activity, onUpdate }: SettingsTabProps) {
     setDurationStr(decimalToHHMM(activity.duration));
     setIsPrivate(activity.isPrivate);
 
-    const dateStr = activity.date || '';
-    if (dateStr) {
-      setStartDateTime(`${dateStr}T${decimalToHHMM(activity.startTime)}`);
-    }
+    setStartDateTime(
+      buildDateTimeLocal(activity.date || '', activity.startTime, gridFrequency, preciseTime),
+    );
   }, [activity]);
+
+  // Re-snap or un-snap datetime when precise mode is toggled
+  useEffect(() => {
+    setStartDateTime(
+      buildDateTimeLocal(activity.date || '', activity.startTime, gridFrequency, preciseTime),
+    );
+  }, [preciseTime]);
 
   const inputClass =
     'w-full rounded-lg border px-3 py-2 text-sm bg-white';
@@ -114,35 +132,20 @@ export function SettingsTab({ activity, onUpdate }: SettingsTabProps) {
     <div className="space-y-4 p-4" data-testid="settings-tab">
       {/* Row 1: Date/Time + Duration + Private toggle */}
       <div className="flex gap-3 items-end" data-testid="settings-row-datetime-duration">
-        <div>
-          <label className="text-xs font-medium text-ink-mid block mb-1" htmlFor="settings-date">
-            Дата
+        <div className="flex-1">
+          <label className="text-xs font-medium text-ink-mid block mb-1" htmlFor="settings-datetime">
+            Дата и время
           </label>
           <input
-            id="settings-date"
-            type="date"
+            id="settings-datetime"
+            type="datetime-local"
             className={inputClass}
             style={inputStyle}
-            value={startDateTime.split('T')[0] || ''}
-            onChange={(e) => {
-              const datePart = e.target.value;
-              const timePart = startDateTime.split('T')[1] || '00:00:00';
-              handleDateTimeChange(`${datePart}T${timePart}`);
-            }}
-            data-testid="input-date"
-          />
-        </div>
-        <div>
-          <TimePicker
             value={startDateTime}
-            onChange={handleDateTimeChange}
-            gridFrequency={gridFrequency}
-            precise={preciseTime}
-            label="Время начала"
+            onChange={(e) => handleDateTimeChange(e.target.value)}
+            data-testid="input-datetime-local"
           />
-        </div>
-        <div className="flex items-center gap-2 pb-0.5">
-          <label className="flex items-center gap-1.5 text-xs text-ink-mid cursor-pointer">
+          <label className="flex items-center gap-1.5 text-xs text-ink-mid cursor-pointer mt-1">
             <input
               type="checkbox"
               checked={preciseTime}

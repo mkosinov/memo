@@ -298,7 +298,7 @@ function MiniCalendar({ selectedWeek, selectedDay, viewMode, onWeekSelect, colla
       </button>
 
       {/* Month picker row: ← Month Year ▼ → */}
-      <div className="flex items-center justify-center gap-2 mb-2">
+      <div className="flex items-center justify-between mb-2">
         <button
           type="button"
           onClick={handlePrevMonth}

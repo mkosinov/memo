@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useSchedule } from '@/contexts/ScheduleContext';
 import { MasterPicker } from '@/app/components/shared/MasterPicker';
+import { TimePicker } from '@/app/components/shared/TimePicker';
 import type { Activity, Service } from '@memo/domain';
 import { decimalToHHMM, hhmmToDecimal } from '@/lib/utils';
 
@@ -12,7 +13,7 @@ interface SettingsTabProps {
 }
 
 export function SettingsTab({ activity, onUpdate }: SettingsTabProps) {
-  const { masters, services, locations } = useSchedule();
+  const { masters, services, locations, gridFrequency } = useSchedule();
 
   const [serviceId, setServiceId] = useState(activity.serviceId);
   const [masterId, setMasterId] = useState(activity.masterId);
@@ -20,6 +21,7 @@ export function SettingsTab({ activity, onUpdate }: SettingsTabProps) {
   const [capacity, setCapacity] = useState(activity.capacity);
   const [durationStr, setDurationStr] = useState(decimalToHHMM(activity.duration));
   const [isPrivate, setIsPrivate] = useState(activity.isPrivate);
+  const [preciseTime, setPreciseTime] = useState(false);
   const [startDateTime, setStartDateTime] = useState(() => {
     // Build datetime-local string from activity.date + activity.startTime
     const dateStr = activity.date || '';
@@ -112,19 +114,44 @@ export function SettingsTab({ activity, onUpdate }: SettingsTabProps) {
     <div className="space-y-4 p-4" data-testid="settings-tab">
       {/* Row 1: Date/Time + Duration + Private toggle */}
       <div className="flex gap-3 items-end" data-testid="settings-row-datetime-duration">
-        <div className="flex-1">
-          <label className="text-xs font-medium text-ink-mid block mb-1" htmlFor="settings-datetime">
-            Дата и время
+        <div>
+          <label className="text-xs font-medium text-ink-mid block mb-1" htmlFor="settings-date">
+            Дата
           </label>
           <input
-            id="settings-datetime"
-            type="datetime-local"
+            id="settings-date"
+            type="date"
             className={inputClass}
             style={inputStyle}
-            value={startDateTime}
-            onChange={(e) => handleDateTimeChange(e.target.value)}
-            data-testid="input-datetime"
+            value={startDateTime.split('T')[0] || ''}
+            onChange={(e) => {
+              const datePart = e.target.value;
+              const timePart = startDateTime.split('T')[1] || '00:00:00';
+              handleDateTimeChange(`${datePart}T${timePart}`);
+            }}
+            data-testid="input-date"
           />
+        </div>
+        <div>
+          <TimePicker
+            value={startDateTime}
+            onChange={handleDateTimeChange}
+            gridFrequency={gridFrequency}
+            precise={preciseTime}
+            label="Время начала"
+          />
+        </div>
+        <div className="flex items-center gap-2 pb-0.5">
+          <label className="flex items-center gap-1.5 text-xs text-ink-mid cursor-pointer">
+            <input
+              type="checkbox"
+              checked={preciseTime}
+              onChange={(e) => setPreciseTime(e.target.checked)}
+              className="rounded"
+              data-testid="checkbox-precise-time"
+            />
+            Указать точное время
+          </label>
         </div>
         <div className="w-28">
           <label className="text-xs font-medium text-ink-mid block mb-1" htmlFor="settings-duration">

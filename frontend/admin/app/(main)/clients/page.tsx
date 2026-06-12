@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { ClientsProvider, useClients } from '@/contexts/ClientsContext';
+import { ScheduleProvider } from '@/contexts/ScheduleContext';
 import { ClientsTable } from './components/ClientsTable';
 import { ClientsFilters } from './components/ClientsFilters';
 import { ClientCardModal } from './components/ClientCardModal';
@@ -101,8 +102,10 @@ function ClientsPageContent() {
 
 export default function ClientsPage() {
   return (
-    <ClientsProvider>
-      <ClientsPageContent />
-    </ClientsProvider>
+    <ScheduleProvider>
+      <ClientsProvider>
+        <ClientsPageContent />
+      </ClientsProvider>
+    </ScheduleProvider>
   );
 }

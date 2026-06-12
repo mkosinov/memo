@@ -23,6 +23,19 @@ vi.mock('@memo/api-client', () => ({
   deleteVisitor: vi.fn(),
 }));
 
+// ─── Mock ScheduleContext ────────────────────────────────────────────────
+
+vi.mock('@/contexts/ScheduleContext', () => ({
+  useSchedule: vi.fn(() => ({
+    gridFrequency: 30,
+    masters: [],
+    services: [],
+    locations: [],
+  })),
+}));
+
+import { useSchedule } from '@/contexts/ScheduleContext';
+
 // ─── Mock react-query ──────────────────────────────────────────────────────
 
 const mockInvalidateQueries = vi.fn();

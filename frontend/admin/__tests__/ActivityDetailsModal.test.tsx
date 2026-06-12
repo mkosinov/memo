@@ -165,9 +165,19 @@ describe('SettingsTab', () => {
     onUpdate: vi.fn(),
   };
 
-  it('renders datetime input', () => {
+  it('renders date input', () => {
     render(<SettingsTab {...defaultProps} />);
-    expect(screen.getByLabelText(/Дата и время/)).toBeInTheDocument();
+    expect(screen.getByLabelText(/Дата/)).toBeInTheDocument();
+  });
+
+  it('renders time picker', () => {
+    render(<SettingsTab {...defaultProps} />);
+    expect(screen.getByTestId('time-picker-select')).toBeInTheDocument();
+  });
+
+  it('renders precise time checkbox', () => {
+    render(<SettingsTab {...defaultProps} />);
+    expect(screen.getByText('Указать точное время')).toBeInTheDocument();
   });
 
   it('renders service select', () => {
@@ -214,7 +224,8 @@ describe('SettingsTab', () => {
 
   it('displays age range from service', () => {
     render(<SettingsTab {...defaultProps} />);
-    expect(screen.getByText(/12/)).toBeInTheDocument();
+    const ageDisplay = screen.getByTestId('age-display');
+    expect(ageDisplay.textContent).toContain('12');
   });
 
   it('displays tariffs from selected service', () => {
@@ -449,11 +460,12 @@ describe('SettingsTab — row layout', () => {
     onUpdate: vi.fn(),
   };
 
-  it('renders date/time and duration on the same row', () => {
+  it('renders date, time picker, and duration on the same row', () => {
     const { container } = render(<SettingsTab {...defaultProps} />);
     const row1 = container.querySelector('[data-testid="settings-row-datetime-duration"]');
     expect(row1).toBeInTheDocument();
-    expect(row1!.querySelector('[data-testid="input-datetime"]')).toBeInTheDocument();
+    expect(row1!.querySelector('[data-testid="input-date"]')).toBeInTheDocument();
+    expect(row1!.querySelector('[data-testid="time-picker-select"]')).toBeInTheDocument();
     expect(row1!.querySelector('[data-testid="input-duration"]')).toBeInTheDocument();
   });
 
@@ -507,7 +519,7 @@ describe('SettingsTab — row layout', () => {
     expect(firstSquare.getAttribute('style')).toContain('background-color');
   });
 
-  it('displays arbitrary minutes in datetime input (not snapped to 00/30)', () => {
+  it('snaps non-grid time to nearest grid slot in default mode', () => {
     // Activity with startTime=14.0667 (14:04) — NOT aligned to 30-min grid
     const activityWithArbitraryMinutes = {
       ...mockActivity,
@@ -517,22 +529,26 @@ describe('SettingsTab — row layout', () => {
     render(
       <SettingsTab activity={activityWithArbitraryMinutes} onUpdate={vi.fn()} />,
     );
-    const datetimeInput = screen.getByTestId('input-datetime') as HTMLInputElement;
-    // The datetime-local value should be "2026-06-15T14:04", NOT "2026-06-15T14:00"
-    expect(datetimeInput.value).toBe('2026-06-15T14:04');
+    const timePicker = screen.getByTestId('time-picker-select') as HTMLSelectElement;
+    // 14:04 is not on 30-min grid, so TimePicker snaps to nearest (14:00)
+    expect(timePicker.value).toBe('14:00');
   });
 
-  it('displays non-aligned minutes (e.g. 14:17) correctly in datetime input', () => {
-    const activityWith17Min = {
+  it('allows precise time via checkbox', () => {
+    const activityWithArbitraryMinutes = {
       ...mockActivity,
-      startTime: 14 + 17 / 60, // 14:17
+      startTime: 14 + 4 / 60, // 14:04
       date: '2026-06-15',
     };
     render(
-      <SettingsTab activity={activityWith17Min} onUpdate={vi.fn()} />,
+      <SettingsTab activity={activityWithArbitraryMinutes} onUpdate={vi.fn()} />,
     );
-    const datetimeInput = screen.getByTestId('input-datetime') as HTMLInputElement;
-    expect(datetimeInput.value).toBe('2026-06-15T14:17');
+    // Enable precise mode
+    const checkbox = screen.getByTestId('checkbox-precise-time') as HTMLInputElement;
+    fireEvent.click(checkbox);
+    // Now 14:04 should be available in the select
+    const timePicker = screen.getByTestId('time-picker-select') as HTMLSelectElement;
+    expect(timePicker.value).toBe('14:04');
   });
 });
 

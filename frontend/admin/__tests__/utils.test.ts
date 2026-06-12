@@ -176,6 +176,21 @@ describe('decimalToHHMM', () => {
   it('converts 2.25 to "02:15"', () => {
     expect(decimalToHHMM(2.25)).toBe('02:15');
   });
+
+  it('converts 14.0667 to "14:04" (non-grid-aligned)', () => {
+    // 14:04 = 14 + 4/60 ≈ 14.0667
+    expect(decimalToHHMM(14 + 4 / 60)).toBe('14:04');
+  });
+
+  it('converts 9.2833 to "09:17" (non-grid-aligned)', () => {
+    // 9:17 = 9 + 17/60 ≈ 9.2833
+    expect(decimalToHHMM(9 + 17 / 60)).toBe('09:17');
+  });
+
+  it('converts 16.55 to "16:33" (non-grid-aligned)', () => {
+    // 16:33 = 16 + 33/60 = 16.55
+    expect(decimalToHHMM(16.55)).toBe('16:33');
+  });
 });
 
 describe('hhmmToDecimal', () => {
@@ -189,6 +204,10 @@ describe('hhmmToDecimal', () => {
 
   it('converts "02:15" to 2.25', () => {
     expect(hhmmToDecimal('02:15')).toBeCloseTo(2.25);
+  });
+
+  it('converts "14:04" to 14.0667 (non-grid-aligned)', () => {
+    expect(hhmmToDecimal('14:04')).toBeCloseTo(14 + 4 / 60);
   });
 });
 

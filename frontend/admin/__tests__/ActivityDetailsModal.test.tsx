@@ -506,6 +506,34 @@ describe('SettingsTab — row layout', () => {
     const firstSquare = colorSquares[0];
     expect(firstSquare.getAttribute('style')).toContain('background-color');
   });
+
+  it('displays arbitrary minutes in datetime input (not snapped to 00/30)', () => {
+    // Activity with startTime=14.0667 (14:04) — NOT aligned to 30-min grid
+    const activityWithArbitraryMinutes = {
+      ...mockActivity,
+      startTime: 14 + 4 / 60, // 14:04
+      date: '2026-06-15',
+    };
+    render(
+      <SettingsTab activity={activityWithArbitraryMinutes} onUpdate={vi.fn()} />,
+    );
+    const datetimeInput = screen.getByTestId('input-datetime') as HTMLInputElement;
+    // The datetime-local value should be "2026-06-15T14:04", NOT "2026-06-15T14:00"
+    expect(datetimeInput.value).toBe('2026-06-15T14:04');
+  });
+
+  it('displays non-aligned minutes (e.g. 14:17) correctly in datetime input', () => {
+    const activityWith17Min = {
+      ...mockActivity,
+      startTime: 14 + 17 / 60, // 14:17
+      date: '2026-06-15',
+    };
+    render(
+      <SettingsTab activity={activityWith17Min} onUpdate={vi.fn()} />,
+    );
+    const datetimeInput = screen.getByTestId('input-datetime') as HTMLInputElement;
+    expect(datetimeInput.value).toBe('2026-06-15T14:17');
+  });
 });
 
 // ─── ClientTab — Layout & Feature Tests ──────────────────────────────────────

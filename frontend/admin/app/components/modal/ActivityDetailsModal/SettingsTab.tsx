@@ -23,10 +23,8 @@ export function SettingsTab({ activity, onUpdate }: SettingsTabProps) {
   const [startDateTime, setStartDateTime] = useState(() => {
     // Build datetime-local string from activity.date + activity.startTime
     const dateStr = activity.date || '';
-    const timeHH = String(Math.floor(activity.startTime)).padStart(2, '0');
-    const timeMM = activity.startTime % 1 >= 0.5 ? '30' : '00';
     if (dateStr) {
-      return `${dateStr}T${timeHH}:${timeMM}`;
+      return `${dateStr}T${decimalToHHMM(activity.startTime)}`;
     }
     return '';
   });
@@ -101,10 +99,8 @@ export function SettingsTab({ activity, onUpdate }: SettingsTabProps) {
     setIsPrivate(activity.isPrivate);
 
     const dateStr = activity.date || '';
-    const timeHH = String(Math.floor(activity.startTime)).padStart(2, '0');
-    const timeMM = activity.startTime % 1 >= 0.5 ? '30' : '00';
     if (dateStr) {
-      setStartDateTime(`${dateStr}T${timeHH}:${timeMM}`);
+      setStartDateTime(`${dateStr}T${decimalToHHMM(activity.startTime)}`);
     }
   }, [activity]);
 

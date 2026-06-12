@@ -326,15 +326,6 @@ function MiniCalendar({ selectedWeek, selectedDay, viewMode, onWeekSelect, colla
             className="flex items-center gap-1 text-xs font-semibold text-white/90 hover:text-white transition-colors"
           >
             {monthName} {selectedWeek.getFullYear()}
-            <svg
-              className={`w-3 h-3 transition-transform duration-150 ${showMonthPicker ? 'rotate-180' : ''}`}
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-            >
-              <path d="M6 9l6 6 6-6" />
-            </svg>
           </button>
 
           {showMonthPicker && (

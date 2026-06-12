@@ -211,11 +211,10 @@ function MiniCalendar({ selectedWeek, selectedDay, viewMode, onWeekSelect, colla
     const startDate = getMonday(firstDayOfMonth);
     startDate.setDate(startDate.getDate() - 7);
 
-    // End on Sunday of the week containing the last day of the month
-    const endDate = new Date(lastDayOfMonth);
-    const dayOfWeek = endDate.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
-    const daysUntilSunday = dayOfWeek === 0 ? 0 : 7 - dayOfWeek;
-    endDate.setDate(endDate.getDate() + daysUntilSunday);
+    // End = Monday of the week containing lastDayOfMonth + 13 days (2 full weeks)
+    // This ensures at least one full week (Mon-Sun) after the month ends
+    const endDate = getMonday(lastDayOfMonth);
+    endDate.setDate(endDate.getDate() + 13);
 
     const days: Date[] = [];
     const current = new Date(startDate);
@@ -522,7 +521,7 @@ export function Menubar() {
       }}
     >
       {/* ── Logo Section ── */}
-      <div className={`flex items-center ${sidebarCollapsed ? 'justify-center px-2' : 'px-4'} py-4 border-b border-white/10`}>
+      <div className={`flex items-center ${sidebarCollapsed ? 'justify-center' : ''} p-6 border-b border-white/10`}>
         <img
           src="/logo-white.png"
           alt="Colour Mountains"
@@ -597,16 +596,9 @@ export function Menubar() {
                     className="w-2 h-2 rounded-full flex-shrink-0"
                     style={{ backgroundColor: master.color }}
                   />
-                  <div className="flex flex-col min-w-0">
-                    <span className="text-xs text-white/70 truncate">
-                      {master.name}
-                    </span>
-                    {master.specialty && (
-                      <span className="text-[10px] text-white/40 truncate">
-                        {master.specialty}
-                      </span>
-                    )}
-                  </div>
+                  <span className="text-xs text-white/70 truncate">
+                    {master.name}
+                  </span>
                 </div>
               ))}
             </div>

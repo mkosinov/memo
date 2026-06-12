@@ -53,9 +53,9 @@ function renderWithProviders() {
 }
 
 describe('Menubar', () => {
-  it('renders the logo text "Colour Mountains"', () => {
+  it('renders the logo with alt text "Colour Mountains"', () => {
     renderWithProviders();
-    expect(screen.getByText(/Colour Mountains/i)).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: 'Colour Mountains' })).toBeInTheDocument();
   });
 
   it('renders navigation links (Расписание, Записи, Клиенты)', () => {
@@ -76,15 +76,13 @@ describe('Menubar', () => {
     expect(screen.getByRole('button', { name: 'Справочники' })).toBeInTheDocument();
   });
 
-  it('shows master list with specialties when Мастера is clicked', async () => {
+  it('shows master list when Мастера is clicked', async () => {
     renderWithProviders();
     fireEvent.click(screen.getByRole('button', { name: 'Мастера' }));
     await waitFor(() => {
       expect(screen.getByText(/Середа Ольга/)).toBeInTheDocument();
     });
     expect(screen.getByText(/Большакова Юлия/)).toBeInTheDocument();
-    // Check specialty is shown in the submenu
-    expect(screen.getAllByText(/живопись/).length).toBeGreaterThanOrEqual(1);
   });
 
   it('hides master list when Мастера is clicked again', async () => {

@@ -526,7 +526,7 @@ export function Menubar() {
         <img
           src="/logo-white.png"
           alt="Colour Mountains"
-          className={sidebarCollapsed ? 'w-8 h-auto' : 'h-10 w-auto'}
+          className={sidebarCollapsed ? 'w-8 h-auto object-contain' : 'h-10 w-auto max-w-full object-contain'}
         />
       </div>
 

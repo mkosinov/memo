@@ -3,7 +3,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useSchedule } from '@/contexts/ScheduleContext';
 import { MasterPicker } from '@/app/components/shared/MasterPicker';
-import { DateTimePicker } from '@/app/components/shared/DateTimePicker';
 import type { Activity, Service } from '@memo/domain';
 import { decimalToHHMM, hhmmToDecimal } from '@/lib/utils';
 
@@ -137,11 +136,15 @@ export function SettingsTab({ activity, onUpdate }: SettingsTabProps) {
           <label className="text-xs font-medium text-ink-mid block mb-1">
             Дата и время
           </label>
-          <DateTimePicker
+          <input
+            id="settings-datetime"
+            type="datetime-local"
+            className={inputClass}
+            style={inputStyle}
             value={startDateTime}
-            onChange={handleDateTimeChange}
-            gridFrequency={gridFrequency}
-            precise={preciseTime}
+            onChange={(e) => handleDateTimeChange(e.target.value)}
+            step={preciseTime ? 60 : gridFrequency * 60}
+            data-testid="input-datetime"
           />
           <label className="flex items-center gap-1.5 text-xs text-ink-mid cursor-pointer mt-1">
             <input

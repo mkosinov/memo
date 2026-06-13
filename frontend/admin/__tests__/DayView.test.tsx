@@ -12,6 +12,19 @@ vi.mock('@/contexts/UIContext', () => ({
   useUI: () => ({ showToast: vi.fn() }),
 }));
 
+vi.mock('@/contexts/UserSettingsContext', () => ({
+  useUserSettings: vi.fn(),
+}));
+
+vi.mock('@/hooks/useColumnReorder', () => ({
+  useColumnReorder: ({ columns }: { columns: ReadonlyArray<{ id: string; name: string }> }) => ({
+    modifierHeld: false,
+    columnOrder: columns.map((c) => c.id),
+    orderedColumns: columns,
+    onColumnDrop: vi.fn(),
+  }),
+}));
+
 vi.mock('@/hooks/useDnD', () => ({
   useDnD: () => ({
     dragId: null,
@@ -43,6 +56,7 @@ vi.mock('@/app/components/modal/ActivityDetailsModal/ActivityDetailsModal', () =
 }));
 
 import { useSchedule } from '@/contexts/ScheduleContext';
+import { useUserSettings } from '@/contexts/UserSettingsContext';
 import { DayView } from '../app/components/schedule/DayView';
 import { buildSchedule } from '@memo/domain';
 
@@ -76,6 +90,7 @@ function createMockActivity(overrides: Partial<ScheduleAdminDTO> = {}): Schedule
 
 function renderDayView(contextOverrides?: Record<string, unknown>) {
   const mockUseSchedule = useSchedule as ReturnType<typeof vi.fn>;
+  const mockUseUserSettings = useUserSettings as ReturnType<typeof vi.fn>;
   const overrides = { ...contextOverrides };
 
   // Build scheduleIndex from activities if not provided
@@ -85,6 +100,15 @@ function renderDayView(contextOverrides?: Record<string, unknown>) {
   }
 
   mockUseSchedule.mockReturnValue(createMockScheduleContext(overrides as Record<string, unknown>));
+  mockUseUserSettings.mockReturnValue({
+    settings: { theme: 'light', language: 'ru', columnOrderMasters: overrides._columnOrderMasters ?? [], columnOrderLocations: overrides._columnOrderLocations ?? [] },
+    updateSettings: vi.fn(),
+    setColumnOrder: vi.fn(),
+    getColumnOrder: vi.fn((mode: 'masters' | 'locations') => {
+      return mode === 'masters' ? (overrides._columnOrderMasters as string[] ?? []) : (overrides._columnOrderLocations as string[] ?? []);
+    }),
+    ready: true,
+  });
   return render(<DayView />);
 }
 
@@ -110,8 +134,13 @@ describe('DayView', () => {
   });
 
   describe('empty state', () => {
-    it('shows empty message when there are no activities', () => {
-      renderDayView({ activities: [], loading: false, error: null });
+    it('shows empty message when filter returns no columns', () => {
+      renderDayView({
+        activities: [],
+        filterMasterIds: ['nonexistent'],
+        loading: false,
+        error: null,
+      });
       expect(screen.getByText(/Нет занятий/)).toBeInTheDocument();
     });
   });
@@ -173,8 +202,7 @@ describe('DayView', () => {
 
   describe('explicit columnMode override', () => {
     it('shows master columns when columnMode=masters even with master filter active', () => {
-      // Implicit logic would show locations when filterMasterIds has entries,
-      // but explicit columnMode=masters should override that
+      // When columnMode=masters with filterMasterIds=['m1'], only m1 should appear
       const activities = [
         createMockActivity({ id: 'ev_1', masterId: 'm1', locationId: 'alpika', date: '2026-06-15' }),
         createMockActivity({ id: 'ev_2', masterId: 'm2', locationId: 'grand', date: '2026-06-15' }),
@@ -188,9 +216,10 @@ describe('DayView', () => {
         loading: false,
         error: null,
       });
-      // Should show master columns, not location columns
+      // Should show only the filtered master column
       expect(screen.getByText('Ольга Середа')).toBeInTheDocument();
-      expect(screen.getByText('Юлия Большакова')).toBeInTheDocument();
+      // m2 is not in filter, should not appear
+      expect(screen.queryByText('Юлия Большакова')).not.toBeInTheDocument();
       // Location names should NOT appear as column headers
       expect(screen.queryByText('Альпика')).not.toBeInTheDocument();
     });
@@ -224,6 +253,58 @@ describe('DayView', () => {
       renderDayView({ selectedDay: new Date(2026, 5, 15), loading: false, error: null });
       expect(screen.queryByText('По мастерам')).not.toBeInTheDocument();
       expect(screen.queryByText('По локациям')).not.toBeInTheDocument();
+    });
+  });
+
+  describe('column position after re-adding to filter (Bug 2)', () => {
+    it('preserves user column order when master filter is active', () => {
+      // User has a preferred order: m2 first, then m1
+      // Filter shows only [m1, m2] — should respect user order, not filter insertion order
+      const activities = [
+        createMockActivity({ id: 'ev_1', masterId: 'm1', locationId: 'alpika', date: '2026-06-15' }),
+        createMockActivity({ id: 'ev_2', masterId: 'm2', locationId: 'alpika', date: '2026-06-15' }),
+      ];
+      const { container } = renderDayView({
+        columnMode: 'masters',
+        filterMasterIds: ['m1', 'm2'],
+        _columnOrderMasters: ['m2', 'm1'], // user prefers m2 first
+        selectedDay: new Date(2026, 5, 15),
+        activities,
+        loading: false,
+        error: null,
+      });
+
+      // Column headers appear in DOM order — Юлия (m2) should come BEFORE Ольга (m1)
+      const headers = container.querySelectorAll('[data-testid^="column-header-"]');
+      expect(headers.length).toBe(2);
+
+      // Verify DOM order: m2 header before m1 header
+      const m2Index = Array.from(headers).findIndex(h => h.getAttribute('data-testid') === 'column-header-m2');
+      const m1Index = Array.from(headers).findIndex(h => h.getAttribute('data-testid') === 'column-header-m1');
+      expect(m2Index).toBeLessThan(m1Index);
+    });
+
+    it('preserves user column order when location filter is active', () => {
+      const activities = [
+        createMockActivity({ id: 'ev_1', masterId: 'm1', locationId: 'alpika', date: '2026-06-15' }),
+        createMockActivity({ id: 'ev_2', masterId: 'm2', locationId: 'grand', date: '2026-06-15' }),
+      ];
+      const { container } = renderDayView({
+        columnMode: 'locations',
+        filterLocationIds: ['alpika', 'grand'],
+        _columnOrderLocations: ['grand', 'alpika'], // user prefers grand first
+        selectedDay: new Date(2026, 5, 15),
+        activities,
+        loading: false,
+        error: null,
+      });
+
+      const headers = container.querySelectorAll('[data-testid^="column-header-"]');
+      expect(headers.length).toBe(2);
+
+      const grandIndex = Array.from(headers).findIndex(h => h.getAttribute('data-testid') === 'column-header-grand');
+      const alpikaIndex = Array.from(headers).findIndex(h => h.getAttribute('data-testid') === 'column-header-alpika');
+      expect(grandIndex).toBeLessThan(alpikaIndex);
     });
   });
 });

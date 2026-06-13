@@ -184,7 +184,15 @@ export function DayView() {
           ? order.map(id => allLocations.find(l => l.id === id)).filter(Boolean) as typeof allLocations
           : allLocations;
       }
-      // Filter selected = only those columns
+      // Filter active: show only filtered columns but respect user column order
+      const filterSet = new Set(filterLocationIds);
+      const order = getColumnOrder('locations');
+      if (order.length > 0) {
+        return order
+          .filter(id => filterSet.has(id))
+          .map(id => allLocations.find(l => l.id === id))
+          .filter(Boolean) as typeof allLocations;
+      }
       return filterLocationIds
         .map(id => allLocations.find(l => l.id === id))
         .filter(Boolean) as typeof allLocations;
@@ -197,7 +205,15 @@ export function DayView() {
           ? order.map(id => allMasters.find(m => m.id === id)).filter(Boolean) as typeof allMasters
           : allMasters;
       }
-      // Filter selected = only those columns
+      // Filter active: show only filtered columns but respect user column order
+      const filterSet = new Set(filterMasterIds);
+      const order = getColumnOrder('masters');
+      if (order.length > 0) {
+        return order
+          .filter(id => filterSet.has(id))
+          .map(id => allMasters.find(m => m.id === id))
+          .filter(Boolean) as typeof allMasters;
+      }
       return filterMasterIds
         .map(id => allMasters.find(m => m.id === id))
         .filter(Boolean) as typeof allMasters;
@@ -218,12 +234,11 @@ export function DayView() {
   const [draggedColumnId, setDraggedColumnId] = useState<string | null>(null);
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
 
-  // Ref for onColumnDrop so the test effect's setTimeout captures the latest callback
+  // Ref for onColumnDrop so the test event effect always has the latest callback
   const onColumnDropRef = React.useRef(onColumnDrop);
   onColumnDropRef.current = onColumnDrop;
 
-  // Expose column reorder for E2E tests (HTML5 DnD from Playwright doesn't
-  // propagate DataTransfer data between events, so we need a direct entry point)
+  // Expose column reorder for E2E tests via custom event
   React.useEffect(() => {
     if (typeof window === 'undefined') return;
     const handleTestColumnReorder = (e: Event) => {
@@ -233,27 +248,9 @@ export function DayView() {
       }
     };
 
-    // Test helper for the HTML5 DnD code path (Bug 2 fix verification).
-    // Simulates: onDragStart → setDraggedColumnId → onDrop → onColumnDrop
-    // This tests the React state path (draggedColumnId) instead of DataTransfer.
-    const handleTestHtml5ColumnReorder = (e: Event) => {
-      const detail = (e as CustomEvent).detail;
-      if (detail?.draggedId && detail?.targetId) {
-        setDraggedColumnId(detail.draggedId);
-        // Allow React to commit the state update before onDrop reads it
-        setTimeout(() => {
-          onColumnDropRef.current(detail.draggedId, detail.targetId);
-          setDraggedColumnId(null);
-          setDropTargetId(null);
-        }, 100);
-      }
-    };
-
     document.addEventListener('__memo-column-reorder', handleTestColumnReorder);
-    document.addEventListener('__memo-column-html5-reorder', handleTestHtml5ColumnReorder);
     return () => {
       document.removeEventListener('__memo-column-reorder', handleTestColumnReorder);
-      document.removeEventListener('__memo-column-html5-reorder', handleTestHtml5ColumnReorder);
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps — uses onColumnDropRef.current
 
@@ -318,181 +315,182 @@ export function DayView() {
   }
 
   return (
-    <DndContext
-      sensors={sensors}
-      collisionDetection={closestCenter}
-      onDragStart={(event) => {
-        const nativeEvent = event.activatorEvent as MouseEvent | undefined;
-        const dragData = event.active.data?.current as Record<string, unknown> | undefined;
-        onDragStart(
-          { active: { id: event.active.id, data: { current: { activity: dragData?.activity as Activity | undefined } } } },
-          { altKey: nativeEvent?.altKey },
-        );
-      }}
-      onDragOver={(event) => {
-        onDragOver({
-          over: event.over
-            ? { id: event.over.id, data: { current: event.over.data?.current } }
-            : null,
-        });
-      }}
-      onDragEnd={(event) => {
-        const overData = event.over?.data?.current as Record<string, unknown> | undefined;
-        const columnId = overData?.columnId as string | undefined;
-        onDragEnd({
-          active: { id: event.active.id },
-          over: event.over ? { id: event.over.id, columnId } : null,
-        });
-      }}
-      onDragCancel={() => {
-        handleDragCancel();
-      }}
-    >
-      <div className="min-w-[600px] h-full flex flex-col">
-        {/* Column headers */}
-        <ScheduleColumnHeader>
-          {orderedColumns.map((col) => {
-            const isDropTarget = dropTargetId === col.id && draggedColumnId !== col.id;
-            return (
+    <>
+      {/* Column headers — outside DndContext so native HTML5 DnD works without @dnd-kit intercepting pointer events */}
+      <ScheduleColumnHeader>
+        {orderedColumns.map((col) => {
+          const isDropTarget = dropTargetId === col.id && draggedColumnId !== col.id;
+          return (
+            <div
+              key={col.id}
+              data-testid={`column-header-${col.id}`}
+              draggable={modifierHeld}
+              onDragStart={(e) => {
+                if (!modifierHeld) {
+                  e.preventDefault();
+                  return;
+                }
+                e.dataTransfer.setData('text/plain', col.id);
+                e.dataTransfer.effectAllowed = 'move';
+                setDraggedColumnId(col.id);
+              }}
+              onDragOver={(e) => {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+                setDropTargetId(col.id);
+              }}
+              onDragLeave={() => {
+                setDropTargetId((prev) => (prev === col.id ? null : prev));
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                if (draggedColumnId && draggedColumnId !== col.id) {
+                  onColumnDrop(draggedColumnId, col.id);
+                }
+                setDraggedColumnId(null);
+                setDropTargetId(null);
+              }}
+              onDragEnd={() => {
+                setDraggedColumnId(null);
+                setDropTargetId(null);
+              }}
+              className={`flex-1 text-center py-2 text-xs font-medium transition-all duration-150 ${
+                modifierHeld ? 'cursor-grab' : 'cursor-default'
+              } ${draggedColumnId === col.id ? 'opacity-50 scale-95' : ''} ${
+                isDropTarget ? 'border-l-2 border-l-[var(--brand)]' : ''
+              }`}
+              style={{ color: 'var(--ink-mid)' }}
+            >
+              <div className="uppercase tracking-wide flex items-center justify-center gap-1">
+                <span>{col.name}</span>
+              </div>
+            </div>
+          );
+        })}
+        {orderedColumns.length === 0 && (
+          <div className="flex-1 text-center py-2 text-xs" style={{ color: 'var(--ink-light)' }}>
+            Нет занятий на этот день
+          </div>
+        )}
+      </ScheduleColumnHeader>
+
+      {/* DndContext wraps only activity card drag — column headers use native HTML5 DnD */}
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragStart={(event) => {
+          const nativeEvent = event.activatorEvent as MouseEvent | undefined;
+          const dragData = event.active.data?.current as Record<string, unknown> | undefined;
+          onDragStart(
+            { active: { id: event.active.id, data: { current: { activity: dragData?.activity as Activity | undefined } } } },
+            { altKey: nativeEvent?.altKey },
+          );
+        }}
+        onDragOver={(event) => {
+          onDragOver({
+            over: event.over
+              ? { id: event.over.id, data: { current: event.over.data?.current } }
+              : null,
+          });
+        }}
+        onDragEnd={(event) => {
+          const overData = event.over?.data?.current as Record<string, unknown> | undefined;
+          const columnId = overData?.columnId as string | undefined;
+          onDragEnd({
+            active: { id: event.active.id },
+            over: event.over ? { id: event.over.id, columnId } : null,
+          });
+        }}
+        onDragCancel={() => {
+          handleDragCancel();
+        }}
+      >
+        <div className="min-w-[600px] h-full flex flex-col">
+          {/* Grid row — scrollable */}
+          <div className="flex-1 flex overflow-auto relative">
+            <TimeColumn cellHeight={cellHeight} gridFrequency={gridFrequency} gridStart={gridRange.start} gridEnd={gridRange.end} />
+            {orderedColumns.map((col) => {
+              const colActivities = activitiesByColumn.get(col.id) ?? [];
+              return (
+                <DayColumn
+                  key={col.id}
+                  dayIndex={0}
+                  date={selectedDay}
+                  activities={colActivities.map(a => ({ ...a, duration: a.durationMinutes / 60, serviceName: a.serviceTitle }))}
+                  masters={masters}
+                  studios={studios}
+                  services={services}
+                  dragCopy={dragCopy}
+                  dragId={dragId}
+                  ghostHeight={ghostHeight}
+                  ghostDayIndex={ghostPosition?.dayIndex ?? null}
+                  ghostSlotIndex={ghostPosition?.slotIndex ?? null}
+                  ghostColumnId={ghostPosition?.columnId ?? null}
+                  onCreateActivity={handleCreateActivity}
+                  onOpenCreateModal={openCreateModal}
+                  onOpenEditModal={openEditModal}
+                  onQuickAdd={openQuickAdd}
+                  stampReady={stamp.ready}
+                  stamp={stamp}
+                  cellHeight={cellHeight}
+                  gridFrequency={gridFrequency}
+                  gridStart={gridRange.start}
+                  gridEnd={gridRange.end}
+                  columnId={col.id}
+                />
+              );
+            })}
+
+            {/* NowLine */}
+            {isSameDay(selectedDay, today) && nowPos >= 0 && (
               <div
-                key={col.id}
-                data-testid={`column-header-${col.id}`}
-                draggable={modifierHeld}
-                onDragStart={(e) => {
-                  if (!modifierHeld) {
-                    e.preventDefault();
-                    return;
-                  }
-                  e.dataTransfer.setData('text/plain', col.id);
-                  e.dataTransfer.effectAllowed = 'move';
-                  setDraggedColumnId(col.id);
-                }}
-                onDragOver={(e) => {
-                  e.preventDefault();
-                  e.dataTransfer.dropEffect = 'move';
-                  setDropTargetId(col.id);
-                }}
-                onDragLeave={() => {
-                  setDropTargetId((prev) => (prev === col.id ? null : prev));
-                }}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  // Use React state instead of DataTransfer (which doesn't work in React synthetic events)
-                  if (draggedColumnId && draggedColumnId !== col.id) {
-                    onColumnDrop(draggedColumnId, col.id);
-                  }
-                  setDraggedColumnId(null);
-                  setDropTargetId(null);
-                }}
-                onDragEnd={() => {
-                  setDraggedColumnId(null);
-                  setDropTargetId(null);
-                }}
-                className={`flex-1 text-center py-2 text-xs font-medium transition-all duration-150 ${
-                  modifierHeld ? 'cursor-grab' : 'cursor-default'
-                } ${draggedColumnId === col.id ? 'opacity-50 scale-95' : ''} ${
-                  isDropTarget ? 'border-l-2 border-l-[var(--brand)]' : ''
-                }`}
-                style={{ color: 'var(--ink-mid)' }}
+                data-testid="now-line"
+                className="absolute left-0 right-0 z-[22] pointer-events-none"
+                style={{ top: nowPos, marginLeft: TIME_COL_WIDTH }}
               >
-                <div className="uppercase tracking-wide flex items-center justify-center gap-1">
-                  <span>{col.name}</span>
+                <div className="flex items-center">
+                  <div className="w-2.5 h-2.5 rounded-full bg-red-500 shadow-sm" />
+                  <div className="flex-1 h-[2px] bg-red-500" />
                 </div>
               </div>
-            );
-          })}
-          {orderedColumns.length === 0 && (
-            <div className="flex-1 text-center py-2 text-xs" style={{ color: 'var(--ink-light)' }}>
-              Нет занятий на этот день
-            </div>
-          )}
-        </ScheduleColumnHeader>
-
-        {/* Grid row — scrollable */}
-        <div className="flex-1 flex overflow-auto relative">
-          <TimeColumn cellHeight={cellHeight} gridFrequency={gridFrequency} gridStart={gridRange.start} gridEnd={gridRange.end} />
-          {orderedColumns.map((col) => {
-            const colActivities = activitiesByColumn.get(col.id) ?? [];
-            return (
-              <DayColumn
-                key={col.id}
-                dayIndex={0}
-                date={selectedDay}
-                activities={colActivities.map(a => ({ ...a, duration: a.durationMinutes / 60, serviceName: a.serviceTitle }))}
-                masters={masters}
-                studios={studios}
-                services={services}
-                dragCopy={dragCopy}
-                dragId={dragId}
-                ghostHeight={ghostHeight}
-                ghostDayIndex={ghostPosition?.dayIndex ?? null}
-                ghostSlotIndex={ghostPosition?.slotIndex ?? null}
-                ghostColumnId={ghostPosition?.columnId ?? null}
-                onCreateActivity={handleCreateActivity}
-                onOpenCreateModal={openCreateModal}
-                onOpenEditModal={openEditModal}
-                onQuickAdd={openQuickAdd}
-                stampReady={stamp.ready}
-                stamp={stamp}
-                cellHeight={cellHeight}
-                gridFrequency={gridFrequency}
-                gridStart={gridRange.start}
-                gridEnd={gridRange.end}
-                columnId={col.id}
-              />
-            );
-          })}
-
-          {/* NowLine */}
-          {isSameDay(selectedDay, today) && nowPos >= 0 && (
-            <div
-              data-testid="now-line"
-              className="absolute left-0 right-0 z-[22] pointer-events-none"
-              style={{ top: nowPos, marginLeft: TIME_COL_WIDTH }}
-            >
-              <div className="flex items-center">
-                <div className="w-2.5 h-2.5 rounded-full bg-red-500 shadow-sm" />
-                <div className="flex-1 h-[2px] bg-red-500" />
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-
-      <DragOverlay dropAnimation={null}>
-        {activeDragActivity && dragMaster ? (
-          <div className="opacity-80 scale-95 relative" style={{ width: '180px' }} data-drag-ghost="true">
-            {/* Time preview label — shows snapped position while dragging */}
-            {draggedSnappedTime != null && (
-              <div
-                className="absolute -top-6 left-1/2 -translate-x-1/2 z-[60] px-2 py-0.5 rounded-full text-[11px] font-bold text-white shadow-lg whitespace-nowrap"
-                style={{ backgroundColor: 'var(--brand, #004D56)' }}
-              >
-                {formatTime(draggedSnappedTime)}
-              </div>
             )}
-            <ActivityCard
-              activity={
-                draggedSnappedTime != null
-                  ? { ...activeDragActivity, startTime: draggedSnappedTime }
-                  : activeDragActivity
-              }
-              master={dragMaster}
-              studios={studios}
-              style={{ top: 0 }}
-            />
           </div>
-        ) : null}
-      </DragOverlay>
+        </div>
 
-      {modalActivity && (
-        <ActivityDetailsModal
-          isOpen={modalOpen}
-          onClose={closeModal}
-          activity={modalActivity}
-          mode={modalMode}
-        />
-      )}
-    </DndContext>
+        <DragOverlay dropAnimation={null}>
+          {activeDragActivity && dragMaster ? (
+            <div className="opacity-80 scale-95 relative" style={{ width: '180px' }} data-drag-ghost="true">
+              {draggedSnappedTime != null && (
+                <div
+                  className="absolute -top-6 left-1/2 -translate-x-1/2 z-[60] px-2 py-0.5 rounded-full text-[11px] font-bold text-white shadow-lg whitespace-nowrap"
+                  style={{ backgroundColor: 'var(--brand, #004D56)' }}
+                >
+                  {formatTime(draggedSnappedTime)}
+                </div>
+              )}
+              <ActivityCard
+                activity={
+                  draggedSnappedTime != null
+                    ? { ...activeDragActivity, startTime: draggedSnappedTime }
+                    : activeDragActivity
+                }
+                master={dragMaster}
+                studios={studios}
+                style={{ top: 0 }}
+              />
+            </div>
+          ) : null}
+        </DragOverlay>
+
+        {modalActivity && (
+          <ActivityDetailsModal
+            isOpen={modalOpen}
+            onClose={closeModal}
+            activity={modalActivity}
+            mode={modalMode}
+          />
+        )}
+      </DndContext>
+    </>
   );
 }

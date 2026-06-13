@@ -217,7 +217,7 @@ export function Topbar() {
           onSelectionChange={setFilterMasterIds}
           label="Мастера"
           getId={(m) => m.id}
-          getLabel={(m) => m.shortName}
+          getLabel={(m) => m.name}
           getGroup={groupMastersBySpecialty}
           renderItemLabel={(m) => (
             <span className="flex items-center gap-1.5">
@@ -225,7 +225,7 @@ export function Topbar() {
                 className="inline-block w-2 h-2 rounded-full shrink-0"
                 style={{ backgroundColor: m.color }}
               />
-              <span style={{ color: 'var(--ink, #1a1a1a)' }}>{m.shortName}</span>
+              <span style={{ color: 'var(--ink, #1a1a1a)' }}>{m.name}</span>
             </span>
           )}
         />

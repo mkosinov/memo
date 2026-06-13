@@ -204,7 +204,7 @@ export function FilterDropdown({
                           className="w-2 h-2 rounded-full shrink-0"
                           style={{ backgroundColor: master.color }}
                         />
-                        <span style={{ color: 'var(--ink, #1a1a1a)' }}>{master.shortName}</span>
+                        <span style={{ color: 'var(--ink, #1a1a1a)' }}>{master.name}</span>
                       </button>
                     );
                   })}

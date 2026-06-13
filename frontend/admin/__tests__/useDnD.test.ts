@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
-import { useDnD, snapToGrid, slotIndexToTime } from '../hooks/useDnD';
+import { useDnD, snapToGrid, slotIndexToTime, parseSlotId } from '../hooks/useDnD';
 import type { Activity } from '@memo/domain';
 import { HOURS_START } from '../lib/utils';
 
@@ -689,6 +689,126 @@ describe('useDnD', () => {
       expect(snapToGrid(10.2, 0)).toBe(10.2);
       expect(snapToGrid(10.2, -5)).toBe(10.2);
       expect(snapToGrid(10.2, 90)).toBe(10.2);
+    });
+  });
+
+  describe('parseSlotId (exported)', () => {
+    it('parses legacy numeric format "slot-3-4"', () => {
+      expect(parseSlotId('slot-3-4')).toEqual({ dayIndex: 3, slotIndex: 4 });
+    });
+
+    it('parses legacy "slot-0-0"', () => {
+      expect(parseSlotId('slot-0-0')).toEqual({ dayIndex: 0, slotIndex: 0 });
+    });
+
+    it('parses UUID columnId format "slot-abc123-5"', () => {
+      const result = parseSlotId('slot-abc123-5');
+      expect(result).toEqual({ dayIndex: 0, slotIndex: 5, columnId: 'abc123' });
+    });
+
+    it('parses UUID columnId format with dashes', () => {
+      const result = parseSlotId('slot-a1b2c3d4-e5f6-7-10');
+      expect(result).toEqual({ dayIndex: 0, slotIndex: 10, columnId: 'a1b2c3d4-e5f6-7' });
+    });
+
+    it('returns null for invalid IDs', () => {
+      expect(parseSlotId('invalid')).toBeNull();
+      expect(parseSlotId('slot-')).toBeNull();
+      expect(parseSlotId('slot-3')).toBeNull();
+    });
+  });
+
+  describe('ghostPosition with columnId', () => {
+    it('includes columnId in ghostPosition from droppable data', () => {
+      const { result } = renderDnD();
+      act(() => {
+        result.current.onDragStart({
+          active: { id: 'ev_1', data: { current: { activity: mockActivities[0] } } },
+        } as any);
+      });
+      act(() => {
+        result.current.onDragOver({
+          over: {
+            id: 'slot-m1-5',
+            data: { current: { dayIndex: 0, slotIndex: 5, columnId: 'm1' } },
+          },
+        } as any);
+      });
+      expect(result.current.ghostPosition).toEqual({
+        dayIndex: 0,
+        slotIndex: 5,
+        columnId: 'm1',
+      });
+    });
+
+    it('falls back to columnId from slot ID when data.current has no columnId', () => {
+      const { result } = renderDnD();
+      act(() => {
+        result.current.onDragStart({
+          active: { id: 'ev_1', data: { current: { activity: mockActivities[0] } } },
+        } as any);
+      });
+      act(() => {
+        result.current.onDragOver({
+          over: {
+            id: 'slot-m2-3',
+            data: { current: { dayIndex: 0, slotIndex: 3 } },
+          },
+        } as any);
+      });
+      expect(result.current.ghostPosition).toEqual({
+        dayIndex: 0,
+        slotIndex: 3,
+        columnId: 'm2',
+      });
+    });
+
+    it('ghostPosition has no columnId for legacy numeric slot IDs', () => {
+      const { result } = renderDnD();
+      act(() => {
+        result.current.onDragStart({
+          active: { id: 'ev_1', data: { current: { activity: mockActivities[0] } } },
+        } as any);
+      });
+      act(() => {
+        result.current.onDragOver({
+          over: {
+            id: 'slot-2-5',
+            data: { current: { dayIndex: 2, slotIndex: 5 } },
+          },
+        } as any);
+      });
+      expect(result.current.ghostPosition).toEqual({ dayIndex: 2, slotIndex: 5 });
+    });
+  });
+
+  describe('cross-column copy with columnId', () => {
+    it('copies activity to a different master column via slot ID', () => {
+      const { result } = renderHook(() =>
+        useDnD({
+          activities: mocks.activities,
+          addActivity: mocks.addActivity,
+          updateActivity: mocks.updateActivity,
+          showToast: mocks.showToast,
+          columnField: 'masterId',
+        }),
+      );
+      act(() => {
+        result.current.onDragStart({
+          active: { id: 'ev_1', data: { current: { activity: mockActivities[0] } } },
+        } as any, { altKey: true });
+      });
+      // Drop on column m2 via slot ID
+      act(() => {
+        result.current.onDragEnd({
+          active: { id: 'ev_1' },
+          over: { id: 'slot-m2-4', columnId: 'm2' },
+        } as any);
+      });
+      expect(mocks.addActivity).toHaveBeenCalled();
+      const added = mocks.addActivity.mock.calls[0][0];
+      expect(added.masterId).toBe('m2');
+      expect(added.locationId).toBe('alpika'); // unchanged
     });
   });
 });

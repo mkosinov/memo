@@ -86,6 +86,7 @@ def reset_db():
         Tag,
         Tariff,
         User,
+        UserSettings,
         Visit,
         Visitor,
     )
@@ -301,6 +302,35 @@ def create_record(api_client, create_activity, create_client):
         assert resp.status_code == 201, f"create_record failed: {resp.status_code}: {resp.text}"
         return resp.json()
     return factory
+
+
+# ─── User Factory (direct DB — no user API exists) ──────────────────────────
+
+@pytest.fixture
+def _user():
+    """Create a user row directly in the DB (no user API endpoint)."""
+    import uuid as _uuid
+
+    user_id = str(_uuid.uuid4())
+    phone = f"+7999{_uuid.uuid4().hex[:7]}"
+
+    from sqlalchemy import text
+    from src.db import db_manager
+
+    async def _insert():
+        async with db_manager.async_session() as session:
+            await session.execute(
+                text(
+                    "INSERT INTO users (id, phone, password_hash, role, "
+                    "email_is_confirmed, phone_is_confirmed, is_active, created_at, updated_at) "
+                    "VALUES (:id, :phone, :hash, :role, 0, 0, 1, datetime('now'), datetime('now'))"
+                ),
+                {"id": user_id, "phone": phone, "hash": "test", "role": "admin"},
+            )
+            await session.commit()
+
+    asyncio.run(_insert())
+    return {"id": user_id, "phone": phone}
 
 
 # ─── DB Verification Helper ────────────────────────────────────────────────────

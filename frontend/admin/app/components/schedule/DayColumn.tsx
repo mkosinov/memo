@@ -64,6 +64,7 @@ interface DayColumnProps {
   ghostHeight?: number | null;
   ghostDayIndex?: number | null;
   ghostSlotIndex?: number | null;
+  ghostColumnId?: string | null;
   onCreateActivity?: (dayIndex: number, startTime: number) => void;
   onOpenCreateModal?: (dayIndex: number, startTime: number) => void;
   onOpenEditModal?: (activity: Activity) => void;
@@ -100,7 +101,7 @@ interface DroppableSlotProps {
 
 function DroppableSlot({ dayIndex, slotIndex, startTime, isHour, isHalfHour, dragCopy, onClick, onOpenModal, stampReady, stamp, masters, services, cellHeight = 60, columnId, children }: DroppableSlotProps) {
   const { isOver, setNodeRef } = useDroppable({
-    id: `slot-${dayIndex}-${slotIndex}`,
+    id: `slot-${columnId ?? dayIndex}-${slotIndex}`,
     data: { dayIndex, slotIndex, columnId },
   });
 
@@ -169,6 +170,7 @@ function DroppableSlot({ dayIndex, slotIndex, startTime, isHour, isHalfHour, dra
   return (
     <div
       ref={setNodeRef}
+      data-testid={`slot-${columnId ?? dayIndex}-${slotIndex}`}
       data-slot-index={slotIndex}
       className={isHour ? 'border-t border-line' : isHalfHour ? 'border-t border-dashed border-line' : 'border-t border-dotted border-line/30'}
       style={{ height: cellHeight, ...stampGhostStyle }}
@@ -211,7 +213,7 @@ function DroppableSlot({ dayIndex, slotIndex, startTime, isHour, isHalfHour, dra
 
 // ─── DayColumn ────────────────────────────────────────────────────────────
 
-export function DayColumn({ dayIndex, activities, masters, studios = [], services = [], dragCopy, dragId, ghostHeight, ghostDayIndex, ghostSlotIndex, onCreateActivity, onOpenCreateModal, onOpenEditModal, onQuickAdd, stampReady, stamp, cellHeight = 60, gridFrequency = 30, gridStart = HOURS_START, gridEnd = HOURS_END, columnId }: DayColumnProps) {
+export function DayColumn({ dayIndex, activities, masters, studios = [], services = [], dragCopy, dragId, ghostHeight, ghostDayIndex, ghostSlotIndex, ghostColumnId, onCreateActivity, onOpenCreateModal, onOpenEditModal, onQuickAdd, stampReady, stamp, cellHeight = 60, gridFrequency = 30, gridStart = HOURS_START, gridEnd = HOURS_END, columnId }: DayColumnProps) {
   const [visibleIndices, setVisibleIndices] = useState<Record<string, number>>({});
   const [prevIndices, setPrevIndices] = useState<Record<string, number>>({});
   const columnRef = useRef<HTMLDivElement>(null);
@@ -311,7 +313,7 @@ export function DayColumn({ dayIndex, activities, masters, studios = [], service
       })}
 
       {/* Drag ghost — single continuous dashed outline spanning all target slots */}
-      {ghostDayIndex === dayIndex && ghostSlotIndex != null && ghostHeight != null && (
+      {(ghostColumnId != null ? ghostColumnId === columnId : ghostDayIndex === dayIndex) && ghostSlotIndex != null && ghostHeight != null && (
         <div
           className="absolute inset-x-1 rounded-xl pointer-events-none z-[30]"
           style={{

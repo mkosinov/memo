@@ -35,7 +35,7 @@ interface DragEndEvent {
 }
 
 interface DragOverEvent {
-  over: { id: string | number; data: { current?: { dayIndex?: number; slotIndex?: number } } } | null;
+  over: { id: string | number; data: { current?: { dayIndex?: number; slotIndex?: number; columnId?: string } } } | null;
 }
 
 interface DragStartInput {
@@ -45,19 +45,30 @@ interface DragStartInput {
 interface GhostPosition {
   dayIndex: number;
   slotIndex: number;
+  columnId?: string;
 }
 
 /**
- * Parse a droppable slot ID like "slot-3-4" into { dayIndex: 3, slotIndex: 4 }.
- * Returns null if the ID doesn't match the pattern.
+ * Parse a droppable slot ID into { dayIndex, slotIndex, columnId? }.
+ *
+ * Supports two formats:
+ *   - "slot-<dayIndex>-<slotIndex>" (legacy, numeric dayIndex)
+ *   - "slot-<columnId>-<slotIndex>" (cross-column DnD, columnId is a string like a UUID)
+ *
+ * When the middle segment is non-numeric (UUID), we treat it as columnId and
+ * default dayIndex to 0 (single-day views use dayIndex=0).
  */
-export function parseSlotId(id: string): { dayIndex: number; slotIndex: number } | null {
-  const match = id.match(/^slot-(\d+)-(\d+)$/);
+export function parseSlotId(id: string): { dayIndex: number; slotIndex: number; columnId?: string } | null {
+  const match = id.match(/^slot-(.+)-(\d+)$/);
   if (!match) return null;
-  return {
-    dayIndex: parseInt(match[1], 10),
-    slotIndex: parseInt(match[2], 10),
-  };
+  const middle = match[1];
+  const slotIndex = parseInt(match[2], 10);
+  const numericDay = /^\d+$/.test(middle);
+  if (numericDay) {
+    return { dayIndex: parseInt(middle, 10), slotIndex };
+  }
+  // Middle is a columnId (e.g. UUID) — dayIndex defaults to 0 for single-day views
+  return { dayIndex: 0, slotIndex, columnId: middle };
 }
 
 /**
@@ -114,7 +125,9 @@ export function useDnD({ activities, addActivity, updateActivity, showToast, gri
     if (event.over) {
       const parsed = parseSlotId(String(event.over.id));
       if (parsed) {
-        setGhostPosition(parsed);
+        // Prefer columnId from droppable data (more reliable), fall back to parsed
+        const columnId = event.over.data?.current?.columnId ?? parsed.columnId;
+        setGhostPosition({ ...parsed, columnId });
       }
     }
   }, []);
@@ -139,22 +152,24 @@ export function useDnD({ activities, addActivity, updateActivity, showToast, gri
         return;
       }
 
-      const { dayIndex, slotIndex } = parsed;
+      const { dayIndex, slotIndex, columnId: parsedColumnId } = parsed;
       const newStartTime = snapToGrid(slotIndexToTime(slotIndex, gridFrequency), gridFrequency);
+      
+      // Use over.columnId if provided, otherwise fall back to parsed columnId
+      const targetColumnId = over.columnId ?? parsedColumnId;
 
       if (dragCopy && activeDragActivity) {
         // Create a copy at the new position (optionally in a different column)
-        const copyColumnUpdate = columnField && over.columnId ? { [columnField]: over.columnId } : {};
         addActivity({
           day: dayIndex,
-          masterId: columnField === 'masterId' && over.columnId ? over.columnId : activeDragActivity.masterId,
+          masterId: columnField === 'masterId' && targetColumnId ? targetColumnId : activeDragActivity.masterId,
           startTime: newStartTime,
           duration: activeDragActivity.duration,
           durationMinutes: activeDragActivity.durationMinutes ?? activeDragActivity.duration * 60,
           serviceId: activeDragActivity.serviceId,
           serviceName: activeDragActivity.serviceName,
           minAge: activeDragActivity.minAge,
-          locationId: columnField === 'locationId' && over.columnId ? over.columnId : activeDragActivity.locationId,
+          locationId: columnField === 'locationId' && targetColumnId ? targetColumnId : activeDragActivity.locationId,
           occupied: activeDragActivity.occupied,
           capacity: activeDragActivity.capacity,
           isPrivate: activeDragActivity.isPrivate,
@@ -170,8 +185,8 @@ export function useDnD({ activities, addActivity, updateActivity, showToast, gri
           };
 
           // Cross-column update: change masterId or locationId when dropped on a different column
-          if (columnField && over.columnId && original[columnField] !== over.columnId) {
-            updates[columnField] = over.columnId;
+          if (columnField && targetColumnId && original[columnField] !== targetColumnId) {
+            updates[columnField] = targetColumnId;
           }
 
           updateActivity(dragId, updates);
@@ -182,7 +197,7 @@ export function useDnD({ activities, addActivity, updateActivity, showToast, gri
               day: original.day,
               startTime: original.startTime,
             };
-            if (columnField && over.columnId && original[columnField] !== over.columnId) {
+            if (columnField && targetColumnId && original[columnField] !== targetColumnId) {
               undoUpdates[columnField] = original[columnField];
             }
             updateActivity(dragId, undoUpdates);

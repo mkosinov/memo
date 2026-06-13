@@ -18,13 +18,14 @@ from src.models.tag import (
 )
 from src.models.tariff import Tariff
 from src.models.user import User
+from src.models.user_settings import UserSettings
 from src.models.visit import Visit
 from src.models.visitor import Visitor
 
 __all__ = [
     "AbstractModel",
     "Activity", "Client", "Location", "Master", "Material", "Payment", "Photo",
-    "Record", "Service", "Tag", "Tariff", "User", "Visit", "Visitor",
+    "Record", "Service", "Tag", "Tariff", "User", "UserSettings", "Visit", "Visitor",
     "Channel", "RecordStatus", "UserRole",
     "activity_tags", "client_tags", "location_tags",
     "master_tags", "photo_tags", "record_tags", "service_tags", "visitor_tags",

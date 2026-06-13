@@ -94,12 +94,12 @@ describe('CalendarPopover', () => {
   });
 
   it('highlights today', () => {
-    // Today is June 11, 2026 based on system date mock
-    // We'll check for data-today attribute
+    // Date-agnostic: find today's day number and check for data-today attribute
+    const today = new Date();
+    const todayDay = today.getDate();
     render(<CalendarPopover {...defaultProps} />);
-    const day11 = screen.getByText('11');
-    // Today element should have data-today
-    expect(day11.closest('[data-today="true"]')).toBeInTheDocument();
+    const todayEl = screen.getByText(String(todayDay));
+    expect(todayEl.closest('[data-today="true"]')).toBeInTheDocument();
   });
 
   it('calls onClose when escape key is pressed', () => {

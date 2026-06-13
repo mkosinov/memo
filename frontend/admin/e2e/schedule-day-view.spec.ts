@@ -29,7 +29,7 @@ test.describe('Schedule — WeekView ↔ DayView', () => {
     await page.waitForTimeout(500);
 
     // Day view should show only 1 day column (day-column-0)
-    await expect(page.locator('[data-testid="day-column-0"]')).toBeVisible();
+    await expect(page.locator('[data-testid="day-column-0"]').first()).toBeVisible();
 
     // day-column-1 through day-column-6 should NOT be visible
     for (let i = 1; i < 7; i++) {
@@ -43,7 +43,7 @@ test.describe('Schedule — WeekView ↔ DayView', () => {
     await page.waitForTimeout(500);
 
     // Verify day view
-    await expect(page.locator('[data-testid="day-column-0"]')).toBeVisible();
+    await expect(page.locator('[data-testid="day-column-0"]').first()).toBeVisible();
 
     // Find and click the week button
     const weekButton = page.locator('button:has-text("Неделя")');
@@ -133,7 +133,7 @@ test.describe('Schedule — Column Mode (По мастерам / По локац
     await expect(page.locator('[data-testid="day-button"]')).toContainText('День по локациям');
 
     // Day column should still be visible
-    await expect(page.locator('[data-testid="day-column-0"]')).toBeVisible();
+    await expect(page.locator('[data-testid="day-column-0"]').first()).toBeVisible();
   });
 
   test('switching to "По мастерам" changes column mode back', async ({ page }) => {
@@ -166,7 +166,7 @@ test.describe('Schedule — Column Mode (По мастерам / По локац
     await page.waitForTimeout(500);
 
     // Should now be in day view (only day-column-0 visible)
-    await expect(page.locator('[data-testid="day-column-0"]')).toBeVisible();
+    await expect(page.locator('[data-testid="day-column-0"]').first()).toBeVisible();
     await expect(page.locator('[data-testid="day-column-6"]')).not.toBeVisible();
   });
 });

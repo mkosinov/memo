@@ -411,6 +411,34 @@ export type MaterialCreate = z.infer<typeof MaterialCreateSchema>;
 export const MaterialUpdateSchema = MaterialCreateSchema.partial();
 export type MaterialUpdate = z.infer<typeof MaterialUpdateSchema>;
 
+// ─── UserSettingsResponse ───────────────────────────────────────────────
+
+export const UserSettingsResponseSchema = z.object({
+  id: z.string(),
+  user_id: z.string(),
+  theme: z.string(),
+  language: z.string(),
+  column_order_masters: z.array(z.string()),
+  column_order_locations: z.array(z.string()),
+  created_at: z.string(),
+  updated_at: z.string(),
+});
+
+export type UserSettingsResponse = z.infer<typeof UserSettingsResponseSchema>;
+
+export const UserSettingsCreateSchema = z.object({
+  user_id: z.string(),
+  theme: z.string().optional().default('light'),
+  language: z.string().optional().default('ru'),
+  column_order_masters: z.array(z.string()).optional().default([]),
+  column_order_locations: z.array(z.string()).optional().default([]),
+});
+
+export type UserSettingsCreate = z.infer<typeof UserSettingsCreateSchema>;
+
+export const UserSettingsUpdateSchema = UserSettingsCreateSchema.partial().omit({ user_id: true });
+export type UserSettingsUpdate = z.infer<typeof UserSettingsUpdateSchema>;
+
 // ─── Search Result Schemas ──────────────────────────────────────────────
 
 export const VisitorSearchResultSchema = z.object({

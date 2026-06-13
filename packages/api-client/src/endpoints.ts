@@ -52,6 +52,10 @@ import {
   type MaterialResponse,
   type MaterialCreate,
   type MaterialUpdate,
+  UserSettingsResponseSchema,
+  type UserSettingsResponse,
+  type UserSettingsCreate,
+  type UserSettingsUpdate,
   VisitorSearchResultSchema,
   type VisitorSearchResult,
   ServiceSearchResultSchema,
@@ -474,4 +478,38 @@ export async function searchActivities(q: string, serviceId?: string): Promise<A
 
 export async function searchTags(q: string): Promise<TagSearchResult[]> {
   return api(`/api/v1/search/tags?q=${encodeURIComponent(q)}`, z.array(TagSearchResultSchema));
+}
+
+// ─── User Settings ────────────────────────────────────────────────────
+
+export async function getUserSettings(userId: string): Promise<UserSettingsResponse> {
+  return api(
+    `/api/v1/user-settings?user_id=${encodeURIComponent(userId)}`,
+    UserSettingsResponseSchema,
+  );
+}
+
+export async function createUserSettings(data: UserSettingsCreate): Promise<UserSettingsResponse> {
+  return api('/api/v1/user-settings', UserSettingsResponseSchema, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updateUserSettings(
+  userId: string,
+  data: UserSettingsUpdate,
+): Promise<UserSettingsResponse> {
+  return api(
+    `/api/v1/user-settings?user_id=${encodeURIComponent(userId)}`,
+    UserSettingsResponseSchema,
+    {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    },
+  );
+}
+
+export async function deleteUserSettings(id: string): Promise<void> {
+  await api(`/api/v1/user-settings/${id}`, z.any(), { method: 'DELETE' });
 }

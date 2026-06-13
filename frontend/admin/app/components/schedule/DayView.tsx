@@ -4,6 +4,7 @@ import React, { useState, useCallback, useMemo } from 'react';
 import { DndContext, DragOverlay, closestCenter, useSensor, useSensors, PointerSensor, TouchSensor } from '@dnd-kit/core';
 import { useSchedule } from '@/contexts/ScheduleContext';
 import { useUI } from '@/contexts/UIContext';
+import { useUserSettings } from '@/contexts/UserSettingsContext';
 import { useDnD } from '@/hooks/useDnD';
 import { useColumnReorder } from '@/hooks/useColumnReorder';
 import { resolveById } from '@memo/domain';
@@ -27,6 +28,7 @@ export function DayView() {
     loading,
     error,
     filterMasterIds,
+    filterLocationIds,
     selectedDay,
     columnMode,
     cellHeight = 60,
@@ -35,6 +37,7 @@ export function DayView() {
     workingHoursEnd = 21,
   } = useSchedule();
   const { showToast } = useUI();
+  const { getColumnOrder, settings, setColumnOrder: saveColumnOrder } = useUserSettings();
 
   // Modal state
   const [modalOpen, setModalOpen] = useState(false);
@@ -151,12 +154,6 @@ export function DayView() {
   // DnD — must be before `columns` so dragId/activeDragActivity are available
   const columnField = columnMode === 'locations' ? 'locationId' as const : 'masterId' as const;
 
-  // Post-drag visibility buffer: after drag ends (dragId → null), the activity
-  // update is async. Keep all columns visible briefly so the target column
-  // (which now has the moved activity) stays rendered until React re-renders.
-  const [showAllColumnsTemp, setShowAllColumnsTemp] = useState(false);
-  const postDragTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-
   const {
     dragId,
     dragCopy,
@@ -165,7 +162,7 @@ export function DayView() {
     draggedSnappedTime,
     onDragStart,
     onDragOver,
-    onDragEnd: rawOnDragEnd,
+    onDragEnd,
     handleDragCancel,
   } = useDnD({
     activities: resolvedActivities,
@@ -176,67 +173,48 @@ export function DayView() {
     columnField,
   });
 
-  // Wrap onDragEnd to add the post-drag visibility buffer
-  const onDragEnd = React.useCallback(
-    (event: Parameters<typeof rawOnDragEnd>[0]) => {
-      // Clear any existing timer
-      if (postDragTimerRef.current) {
-        clearTimeout(postDragTimerRef.current);
-      }
-      // Keep all columns visible for 500ms after drop
-      setShowAllColumnsTemp(true);
-      postDragTimerRef.current = setTimeout(() => {
-        setShowAllColumnsTemp(false);
-        postDragTimerRef.current = null;
-      }, 500);
-
-      rawOnDragEnd(event);
-    },
-    [rawOnDragEnd],
-  );
-
-  // Cleanup timer on unmount
-  React.useEffect(() => {
-    return () => {
-      if (postDragTimerRef.current) {
-        clearTimeout(postDragTimerRef.current);
-      }
-    };
-  }, []);
-
-  // Determine columns based on explicit columnMode (not implicit filter logic)
+  // Determine columns based on filter selection and user column order preference
   const columns = useMemo(() => {
     if (columnMode === 'locations') {
-      // Show locations as columns
       const allLocations = studios;
-
-      // During drag or shortly after, show all columns so target column's
-      // droppables exist in DOM and the moved activity's column stays visible.
-      if (dragId || showAllColumnsTemp) return allLocations;
-
-      // Active locations (have activities on this day)
-      const activeLocationIds = new Set(dayActivities.map(a => a.locationId));
-      return allLocations.filter(l => activeLocationIds.has(l.id));
+      // Empty filter = show all locations (ordered by user settings or default)
+      if (filterLocationIds.length === 0) {
+        const order = getColumnOrder('locations');
+        return order.length > 0
+          ? order.map(id => allLocations.find(l => l.id === id)).filter(Boolean) as typeof allLocations
+          : allLocations;
+      }
+      // Filter selected = only those columns
+      return filterLocationIds
+        .map(id => allLocations.find(l => l.id === id))
+        .filter(Boolean) as typeof allLocations;
     } else {
-      // Show masters as columns
       const allMasters = masters;
-
-      // During drag or shortly after, show all columns so target column's
-      // droppables exist in DOM and the moved activity's column stays visible.
-      if (dragId || showAllColumnsTemp) return allMasters;
-
-      // Active masters (have activities on this day)
-      const activeMasterIds = new Set(dayActivities.map(a => a.masterId));
-      return allMasters.filter(m => activeMasterIds.has(m.id));
+      // Empty filter = show all masters (ordered by user settings or default)
+      if (filterMasterIds.length === 0) {
+        const order = getColumnOrder('masters');
+        return order.length > 0
+          ? order.map(id => allMasters.find(m => m.id === id)).filter(Boolean) as typeof allMasters
+          : allMasters;
+      }
+      // Filter selected = only those columns
+      return filterMasterIds
+        .map(id => allMasters.find(m => m.id === id))
+        .filter(Boolean) as typeof allMasters;
     }
-  }, [columnMode, studios, masters, dayActivities, dragId, showAllColumnsTemp]);
+  }, [columnMode, studios, masters, filterMasterIds, filterLocationIds, getColumnOrder]);
 
   // Column reorder via Cmd/Alt + drag
   const {
     modifierHeld,
     orderedColumns,
     onColumnDrop,
-  } = useColumnReorder({ columns, columnMode });
+  } = useColumnReorder({
+    columns,
+    columnMode,
+    initialOrder: columnMode === 'masters' ? settings.columnOrderMasters : settings.columnOrderLocations,
+    onOrderChange: (order) => saveColumnOrder(columnMode, order),
+  });
   const [draggedColumnId, setDraggedColumnId] = useState<string | null>(null);
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
 

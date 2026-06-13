@@ -189,7 +189,7 @@ App init:
 User changes settings:
   1. Update context state (immediate)
   2. Update localStorage (immediate)
-  3. Debounced PUT API (300ms)
+  3. PUT API (immediate — one change = one request)
 
 Page reload:
   1. Read localStorage → instant
@@ -234,7 +234,7 @@ Same logic for locations mode.
 - Cmd/Alt + drag header → reorder columns
 - `onColumnDrop(draggedId, targetId)`:
   1. Compute new order
-  2. `setColumnOrder('masters', newOrder)` → updates context + localStorage + debounced API
+  2. `setColumnOrder('masters', newOrder)` → updates context + localStorage + PUT API
   3. Columns re-render in new order
 
 ### 3.3 Pin Removal

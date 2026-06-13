@@ -88,8 +88,6 @@ function ScheduleConsumer() {
     setViewMode,
     selectedDay,
     setSelectedDay,
-    showAllColumns,
-    setShowAllColumns,
   } = useSchedule();
 
   return (
@@ -104,7 +102,7 @@ function ScheduleConsumer() {
       <span data-testid="error">{error ? error.message : 'null'}</span>
       <span data-testid="view-mode">{viewMode}</span>
       <span data-testid="selected-day">{selectedDay.toISOString()}</span>
-      <span data-testid="show-all-columns">{showAllColumns.toString()}</span>
+
       <button
         data-testid="add-activity"
         onClick={() =>
@@ -164,12 +162,7 @@ function ScheduleConsumer() {
       >
         Set Day
       </button>
-      <button
-        data-testid="toggle-show-all"
-        onClick={() => setShowAllColumns(!showAllColumns)}
-      >
-        Toggle Show All
-      </button>
+
     </div>
   );
 }
@@ -478,26 +471,6 @@ describe('ScheduleProvider', () => {
     // The week should now contain July 6
     const weekStart = new Date(screen.getByTestId('week-start').textContent!);
     expect(weekStart.toDateString()).toBe(targetDate.toDateString());
-  });
-
-  // ─── showAllColumns tests ──────────────────────────────────────────────────
-
-  it('defaults showAllColumns to false', () => {
-    renderWithContext();
-    expect(screen.getByTestId('show-all-columns').textContent).toBe('false');
-  });
-
-  it('provides setShowAllColumns to toggle', () => {
-    renderWithContext();
-    act(() => {
-      screen.getByTestId('toggle-show-all').click();
-    });
-    expect(screen.getByTestId('show-all-columns').textContent).toBe('true');
-
-    act(() => {
-      screen.getByTestId('toggle-show-all').click();
-    });
-    expect(screen.getByTestId('show-all-columns').textContent).toBe('false');
   });
 
   it('synchronizes currentWeek with NavigationProvider dateFrom', () => {

@@ -51,8 +51,6 @@ export function createMockScheduleContext(
     setViewMode: vi.fn(),
     selectedDay: new Date(),
     setSelectedDay: vi.fn(),
-    showAllColumns: false,
-    setShowAllColumns: vi.fn(),
     columnMode: 'masters',
     setColumnMode: vi.fn(),
     cellHeight: 50,

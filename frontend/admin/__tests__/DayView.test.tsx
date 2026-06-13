@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import React from 'react';
 import type { ScheduleAdminDTO } from '@memo/domain';
 import { createMockScheduleContext } from './helpers/mockContexts';
@@ -91,6 +91,7 @@ function renderDayView(contextOverrides?: Record<string, unknown>) {
 describe('DayView', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.clear();
   });
 
   describe('loading state', () => {
@@ -148,9 +149,9 @@ describe('DayView', () => {
         loading: false,
         error: null,
       });
-      // Should show column headers for masters (using shortName)
-      expect(screen.getByText('Ольга')).toBeInTheDocument();
-      expect(screen.getByText('Юлия')).toBeInTheDocument();
+      // Should show column headers for masters (using displayName = "Фамилия Имя")
+      expect(screen.getByText('Ольга Середа')).toBeInTheDocument();
+      expect(screen.getByText('Юлия Большакова')).toBeInTheDocument();
     });
 
     it('auto-selects masters as columns when no filter is active', () => {
@@ -165,8 +166,8 @@ describe('DayView', () => {
         loading: false,
         error: null,
       });
-      // With no filter, defaults to master columns; only active masters shown (m1 = Ольга)
-      expect(screen.getByText('Ольга')).toBeInTheDocument();
+      // With no filter, defaults to master columns; only active masters shown (m1 = Ольга Середа)
+      expect(screen.getByText('Ольга Середа')).toBeInTheDocument();
     });
   });
 
@@ -188,8 +189,8 @@ describe('DayView', () => {
         error: null,
       });
       // Should show master columns, not location columns
-      expect(screen.getByText('Ольга')).toBeInTheDocument();
-      expect(screen.getByText('Юлия')).toBeInTheDocument();
+      expect(screen.getByText('Ольга Середа')).toBeInTheDocument();
+      expect(screen.getByText('Юлия Большакова')).toBeInTheDocument();
       // Location names should NOT appear as column headers
       expect(screen.queryByText('Альпика')).not.toBeInTheDocument();
     });
@@ -214,7 +215,7 @@ describe('DayView', () => {
       expect(screen.getByText('Альпика')).toBeInTheDocument();
       expect(screen.getByText('Гранд Отель Поляна')).toBeInTheDocument();
       // Master names should NOT appear as column headers
-      expect(screen.queryByText('Ольга')).not.toBeInTheDocument();
+      expect(screen.queryByText('Ольга Середа')).not.toBeInTheDocument();
     });
   });
 

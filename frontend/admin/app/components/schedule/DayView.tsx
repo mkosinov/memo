@@ -28,7 +28,6 @@ export function DayView() {
     error,
     filterMasterIds,
     selectedDay,
-    showAllColumns,
     columnMode,
     cellHeight = 60,
     gridFrequency = 30,
@@ -149,24 +148,88 @@ export function DayView() {
     [resolvedActivities, workingHoursStart, workingHoursEnd],
   );
 
+  // DnD — must be before `columns` so dragId/activeDragActivity are available
+  const columnField = columnMode === 'locations' ? 'locationId' as const : 'masterId' as const;
+
+  // Post-drag visibility buffer: after drag ends (dragId → null), the activity
+  // update is async. Keep all columns visible briefly so the target column
+  // (which now has the moved activity) stays rendered until React re-renders.
+  const [showAllColumnsTemp, setShowAllColumnsTemp] = useState(false);
+  const postDragTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const {
+    dragId,
+    dragCopy,
+    ghostPosition,
+    activeDragActivity,
+    draggedSnappedTime,
+    onDragStart,
+    onDragOver,
+    onDragEnd: rawOnDragEnd,
+    handleDragCancel,
+  } = useDnD({
+    activities: resolvedActivities,
+    addActivity,
+    updateActivity,
+    showToast,
+    gridFrequency,
+    columnField,
+  });
+
+  // Wrap onDragEnd to add the post-drag visibility buffer
+  const onDragEnd = React.useCallback(
+    (event: Parameters<typeof rawOnDragEnd>[0]) => {
+      // Clear any existing timer
+      if (postDragTimerRef.current) {
+        clearTimeout(postDragTimerRef.current);
+      }
+      // Keep all columns visible for 500ms after drop
+      setShowAllColumnsTemp(true);
+      postDragTimerRef.current = setTimeout(() => {
+        setShowAllColumnsTemp(false);
+        postDragTimerRef.current = null;
+      }, 500);
+
+      rawOnDragEnd(event);
+    },
+    [rawOnDragEnd],
+  );
+
+  // Cleanup timer on unmount
+  React.useEffect(() => {
+    return () => {
+      if (postDragTimerRef.current) {
+        clearTimeout(postDragTimerRef.current);
+      }
+    };
+  }, []);
+
   // Determine columns based on explicit columnMode (not implicit filter logic)
   const columns = useMemo(() => {
     if (columnMode === 'locations') {
       // Show locations as columns
       const allLocations = studios;
-      if (showAllColumns) return allLocations;
-      // Only show locations that have activities on this day
+
+      // During drag or shortly after, show all columns so target column's
+      // droppables exist in DOM and the moved activity's column stays visible.
+      if (dragId || showAllColumnsTemp) return allLocations;
+
+      // Active locations (have activities on this day)
       const activeLocationIds = new Set(dayActivities.map(a => a.locationId));
       return allLocations.filter(l => activeLocationIds.has(l.id));
     } else {
       // Show masters as columns
       const allMasters = masters;
-      if (showAllColumns) return allMasters;
-      // Only show masters that have activities on this day
+
+      // During drag or shortly after, show all columns so target column's
+      // droppables exist in DOM and the moved activity's column stays visible.
+      if (dragId || showAllColumnsTemp) return allMasters;
+
+      // Active masters (have activities on this day)
       const activeMasterIds = new Set(dayActivities.map(a => a.masterId));
       return allMasters.filter(m => activeMasterIds.has(m.id));
     }
-  }, [columnMode, studios, masters, showAllColumns, dayActivities]);
+  }, [columnMode, studios, masters, dayActivities, dragId, showAllColumnsTemp]);
 
   // Column reorder via Cmd/Alt + drag
   const {
@@ -176,6 +239,45 @@ export function DayView() {
   } = useColumnReorder({ columns, columnMode });
   const [draggedColumnId, setDraggedColumnId] = useState<string | null>(null);
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
+
+  // Ref for onColumnDrop so the test effect's setTimeout captures the latest callback
+  const onColumnDropRef = React.useRef(onColumnDrop);
+  onColumnDropRef.current = onColumnDrop;
+
+  // Expose column reorder for E2E tests (HTML5 DnD from Playwright doesn't
+  // propagate DataTransfer data between events, so we need a direct entry point)
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleTestColumnReorder = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.draggedId && detail?.targetId) {
+        onColumnDropRef.current(detail.draggedId, detail.targetId);
+      }
+    };
+
+    // Test helper for the HTML5 DnD code path (Bug 2 fix verification).
+    // Simulates: onDragStart → setDraggedColumnId → onDrop → onColumnDrop
+    // This tests the React state path (draggedColumnId) instead of DataTransfer.
+    const handleTestHtml5ColumnReorder = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.draggedId && detail?.targetId) {
+        setDraggedColumnId(detail.draggedId);
+        // Allow React to commit the state update before onDrop reads it
+        setTimeout(() => {
+          onColumnDropRef.current(detail.draggedId, detail.targetId);
+          setDraggedColumnId(null);
+          setDropTargetId(null);
+        }, 100);
+      }
+    };
+
+    document.addEventListener('__memo-column-reorder', handleTestColumnReorder);
+    document.addEventListener('__memo-column-html5-reorder', handleTestHtml5ColumnReorder);
+    return () => {
+      document.removeEventListener('__memo-column-reorder', handleTestColumnReorder);
+      document.removeEventListener('__memo-column-html5-reorder', handleTestHtml5ColumnReorder);
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps — uses onColumnDropRef.current
 
   // Group activities by column
   const activitiesByColumn = useMemo(() => {
@@ -188,27 +290,6 @@ export function DayView() {
     }
     return map;
   }, [resolvedActivities, columnMode]);
-
-  // DnD
-  const columnField = columnMode === 'locations' ? 'locationId' as const : 'masterId' as const;
-  const {
-    dragId,
-    dragCopy,
-    ghostPosition,
-    activeDragActivity,
-    draggedSnappedTime,
-    onDragStart,
-    onDragOver,
-    onDragEnd,
-    handleDragCancel,
-  } = useDnD({
-    activities: resolvedActivities,
-    addActivity,
-    updateActivity,
-    showToast,
-    gridFrequency,
-    columnField,
-  });
 
   const today = new Date();
 
@@ -297,6 +378,7 @@ export function DayView() {
             return (
               <div
                 key={col.id}
+                data-testid={`column-header-${col.id}`}
                 draggable={modifierHeld}
                 onDragStart={(e) => {
                   if (!modifierHeld) {
@@ -317,9 +399,9 @@ export function DayView() {
                 }}
                 onDrop={(e) => {
                   e.preventDefault();
-                  const draggedId = e.dataTransfer.getData('text/plain');
-                  if (draggedId && draggedId !== col.id) {
-                    onColumnDrop(draggedId, col.id);
+                  // Use React state instead of DataTransfer (which doesn't work in React synthetic events)
+                  if (draggedColumnId && draggedColumnId !== col.id) {
+                    onColumnDrop(draggedColumnId, col.id);
                   }
                   setDraggedColumnId(null);
                   setDropTargetId(null);
@@ -335,8 +417,8 @@ export function DayView() {
                 }`}
                 style={{ color: 'var(--ink-mid)' }}
               >
-                <div className="uppercase tracking-wide">
-                  {columnMode === 'locations' ? col.name : (col as { shortName?: string }).shortName ?? col.name}
+                <div className="uppercase tracking-wide flex items-center justify-center gap-1">
+                  <span>{col.name}</span>
                 </div>
               </div>
             );
@@ -367,6 +449,7 @@ export function DayView() {
                 ghostHeight={ghostHeight}
                 ghostDayIndex={ghostPosition?.dayIndex ?? null}
                 ghostSlotIndex={ghostPosition?.slotIndex ?? null}
+                ghostColumnId={ghostPosition?.columnId ?? null}
                 onCreateActivity={handleCreateActivity}
                 onOpenCreateModal={openCreateModal}
                 onOpenEditModal={openEditModal}

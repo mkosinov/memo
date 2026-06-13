@@ -108,8 +108,6 @@ export interface ScheduleContextType {
   setViewMode: (mode: ViewModeType) => void;
   selectedDay: Date;
   setSelectedDay: (date: Date) => void;
-  showAllColumns: boolean;
-  setShowAllColumns: (show: boolean) => void;
   columnMode: ColumnModeType;
   setColumnMode: (mode: ColumnModeType) => void;
   cellHeight: number;
@@ -146,7 +144,6 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
   const [filtersInitialized, setFiltersInitialized] = useState(false);
   const [viewMode, setViewMode] = useState<ViewModeType>('week');
   const [selectedDay, setSelectedDay] = useState<Date>(new Date());
-  const [showAllColumns, setShowAllColumns] = useState<boolean>(false);
   const [columnMode, setColumnMode] = useState<ColumnModeType>('masters');
 
   // ── Cell height (persisted to localStorage) ──────────────────────────────
@@ -497,8 +494,6 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
     setViewMode,
     selectedDay,
     setSelectedDay,
-    showAllColumns,
-    setShowAllColumns,
     columnMode,
     setColumnMode,
     cellHeight,
@@ -514,10 +509,10 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
   }), [
     filteredItems, scheduleIndex, masters, services, locations,
     currentWeek, stamp, filterMasterIds, filterLocationIds,
-    viewMode, selectedDay, showAllColumns, columnMode,
+    viewMode, selectedDay, columnMode,
     setCurrentWeek, addActivity, updateActivityFn, deleteActivityById, setStamp, copyLastWeek,
     setFilterMasterIds, setFilterLocationIds,
-    setViewMode, setSelectedDay, setShowAllColumns, setColumnMode,
+    setViewMode, setSelectedDay, setColumnMode,
     activitiesLoading, activitiesError,
     cellHeight, setCellHeight,
     gridFrequency, setGridFrequency,

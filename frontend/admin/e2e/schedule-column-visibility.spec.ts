@@ -12,16 +12,62 @@ import { waitForScheduleReady } from './fixtures/helpers';
  * 5. Location filter controls location columns
  */
 
+const BACKEND = process.env.BACKEND_URL || 'http://localhost:8000';
+const DEV_USER_ID = 'dev-user-001';
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 /**
- * Switch to DayView by clicking the day button and waiting for column headers.
+ * Clear memo-user-settings from localStorage before page load.
+ * Uses addInitScript so it runs before any page JS, preventing
+ * stale column orders from being loaded by UserSettingsContext.
  */
-async function switchToDayView(page: import('@playwright/test').Page) {
+async function clearUserSettingsStorage(page: import('@playwright/test').Page) {
+  await page.context().addInitScript(() => {
+    localStorage.removeItem('memo-user-settings');
+  });
+}
+
+/**
+ * Reset user settings via the API to ensure column orders include all masters/locations.
+ * Previous test runs may have saved partial column orders (e.g. only ["m2"]),
+ * which causes DayView to render only that one column.
+ */
+async function resetUserSettings(request: import('@playwright/test').APIRequestContext) {
+  await request.put(`${BACKEND}/api/v1/user-settings?user_id=${DEV_USER_ID}`, {
+    data: {
+      column_order_masters: [],
+      column_order_locations: [],
+    },
+  });
+}
+
+/**
+ * Switch to DayView by clicking the day button and optionally navigating
+ * to a specific date via the __memo-switch-to-day-view custom event.
+ *
+ * @param page   Playwright page instance
+ * @param date   Optional ISO date string (e.g. '2026-06-05'). When provided,
+ *               dispatches a custom event to navigate to that day so tests land
+ *               on a date with known seed data.
+ */
+async function switchToDayView(page: import('@playwright/test').Page, date?: string) {
   await page.locator('[data-testid="day-button"]').click();
   await page.waitForTimeout(500);
+
+  if (date) {
+    // Navigate to the specific date via custom event
+    await page.evaluate((d: string) => {
+      document.dispatchEvent(
+        new CustomEvent('__memo-switch-to-day-view', { detail: { date: d } }),
+      );
+    }, `${date}T12:00:00`);
+
+    // Wait for DayView column headers to appear (master columns start with 'column-header-m')
+    await page.waitForSelector('[data-testid^="column-header-m"]', { timeout: 5000 });
+  }
 }
 
 /**
@@ -86,9 +132,14 @@ async function deselectAllOptions(page: import('@playwright/test').Page) {
 // ---------------------------------------------------------------------------
 
 test.describe('DayView Column Visibility', () => {
-  test.beforeEach(async ({ page }) => {
+  test.beforeEach(async ({ page, request }) => {
+    // Clear localStorage before any page load so UserSettingsContext starts fresh
+    await clearUserSettingsStorage(page);
+    // Reset backend user settings to include all masters
+    await resetUserSettings(request);
+    // Now navigate — localStorage is clean, backend is clean
     await waitForScheduleReady(page);
-    await switchToDayView(page);
+    await switchToDayView(page, '2026-06-05');
   });
 
   test('empty filter shows all master columns', async ({ page }) => {
@@ -121,9 +172,14 @@ test.describe('DayView Column Visibility', () => {
 // ---------------------------------------------------------------------------
 
 test.describe('DayView Column Visibility — Master Filter', () => {
-  test.beforeEach(async ({ page }) => {
+  test.beforeEach(async ({ page, request }) => {
+    // Clear localStorage before any page load so UserSettingsContext starts fresh
+    await clearUserSettingsStorage(page);
+    // Reset backend user settings to include all masters
+    await resetUserSettings(request);
+    // Now navigate — localStorage is clean, backend is clean
     await waitForScheduleReady(page);
-    await switchToDayView(page);
+    await switchToDayView(page, '2026-06-05');
   });
 
   test('deselecting all masters except one shows only that column', async ({ page }) => {
@@ -347,8 +403,11 @@ test.describe('DayView Column Visibility — Master Filter', () => {
 // ---------------------------------------------------------------------------
 
 test.describe('DayView Column Visibility — Location Filter', () => {
-  test('switching to locations mode and filtering shows only selected locations', async ({ page }) => {
+  test('switching to locations mode and filtering shows only selected locations', async ({ page, request }) => {
+    await clearUserSettingsStorage(page);
+    await resetUserSettings(request);
     await waitForScheduleReady(page);
+    await switchToDayView(page, '2026-06-05');
 
     // Switch to locations column mode
     await page.locator('[data-testid="column-mode-dropdown"]').click();
@@ -401,8 +460,11 @@ test.describe('DayView Column Visibility — Location Filter', () => {
     expect(remainingTestId).toBe(`column-header-${firstLocationId}`);
   });
 
-  test('location filter: adding location makes its column appear', async ({ page }) => {
+  test('location filter: adding location makes its column appear', async ({ page, request }) => {
+    await clearUserSettingsStorage(page);
+    await resetUserSettings(request);
     await waitForScheduleReady(page);
+    await switchToDayView(page, '2026-06-05');
 
     // Switch to locations column mode
     await page.locator('[data-testid="column-mode-dropdown"]').click();

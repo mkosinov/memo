@@ -222,6 +222,89 @@ test.describe('DayView Column Visibility — Master Filter', () => {
     expect(idsAfter).toContain(idsBefore[1]);
   });
 
+  test('adding a master to filter makes its column appear', async ({ page }) => {
+    // 1. Get all initial column IDs
+    const allIds = await getColumnHeaderIds(page);
+    expect(allIds.length).toBeGreaterThanOrEqual(2);
+
+    // 2. Pick the LAST master to re-add later
+    const targetId = allIds[allIds.length - 1];
+
+    // 3. Open filter and deselect ALL masters
+    await openMasterFilter(page);
+    await deselectAllOptions(page);
+    await page.click('body', { position: { x: 10, y: 10 } });
+    await page.waitForTimeout(300);
+
+    // 4. Verify columns are filtered (fewer than initial)
+    const filteredIds = await getColumnHeaderIds(page);
+    expect(filteredIds.length).toBeLessThan(allIds.length);
+
+    // 5. Re-open master filter
+    await openMasterFilter(page);
+
+    // 6. Select the target master
+    const targetOption = page.locator(`[data-testid="multiselect-option-${targetId}"]`);
+    await targetOption.click();
+    await page.waitForTimeout(200);
+
+    // 7. Close dropdown
+    await page.click('body', { position: { x: 10, y: 10 } });
+    await page.waitForTimeout(300);
+
+    // 8. Verify that master's column is now visible
+    const afterIds = await getColumnHeaderIds(page);
+    expect(afterIds).toContain(targetId);
+    expect(afterIds.length).toBeGreaterThan(filteredIds.length);
+  });
+
+  test('removing and re-adding master preserves column position', async ({ page }) => {
+    // 1. Get initial column order
+    const initialIds = await getColumnHeaderIds(page);
+    expect(initialIds.length).toBeGreaterThanOrEqual(3);
+
+    // Pick the second master to remove and re-add
+    const targetId = initialIds[1];
+
+    // 2. Open master filter, deselect the second master
+    await openMasterFilter(page);
+    const option = page.locator(`[data-testid="multiselect-option-${targetId}"]`);
+    const checkboxDiv = option.locator('div').first();
+    const cls = await checkboxDiv.getAttribute('class');
+    if (cls && cls.includes('bg-[var(--brand)]')) {
+      await option.click();
+      await page.waitForTimeout(100);
+    }
+
+    // Close dropdown
+    await page.click('body', { position: { x: 10, y: 10 } });
+    await page.waitForTimeout(300);
+
+    // 3. Verify the column is gone
+    const afterRemoveIds = await getColumnHeaderIds(page);
+    expect(afterRemoveIds).not.toContain(targetId);
+    expect(afterRemoveIds.length).toBe(initialIds.length - 1);
+
+    // 4. Re-open filter and select the target again
+    await openMasterFilter(page);
+    const reOption = page.locator(`[data-testid="multiselect-option-${targetId}"]`);
+    await reOption.click();
+    await page.waitForTimeout(200);
+
+    // Close dropdown
+    await page.click('body', { position: { x: 10, y: 10 } });
+    await page.waitForTimeout(300);
+
+    // 5. Verify the column is back
+    const afterAddIds = await getColumnHeaderIds(page);
+    expect(afterAddIds).toContain(targetId);
+
+    // 6. Verify column order is preserved (target is NOT at the end)
+    const targetIndex = afterAddIds.indexOf(targetId);
+    expect(targetIndex).toBe(1); // Should be back in its original position (index 1)
+    expect(afterAddIds).toEqual(initialIds);
+  });
+
   test('re-selecting all masters restores all columns', async ({ page }) => {
     // Get initial column count
     const headersBefore = page.locator('[data-testid^="column-header-"]');
@@ -316,5 +399,60 @@ test.describe('DayView Column Visibility — Location Filter', () => {
     // Verify it's the correct location
     const remainingTestId = await headersAfter.first().getAttribute('data-testid');
     expect(remainingTestId).toBe(`column-header-${firstLocationId}`);
+  });
+
+  test('location filter: adding location makes its column appear', async ({ page }) => {
+    await waitForScheduleReady(page);
+
+    // Switch to locations column mode
+    await page.locator('[data-testid="column-mode-dropdown"]').click();
+    await page.waitForTimeout(300);
+    await page.locator('[data-testid="column-mode-menu"] button:has-text("По локациям")').click();
+    await page.waitForTimeout(500);
+
+    // Get initial location column IDs
+    const allIds = await getColumnHeaderIds(page);
+    expect(allIds.length).toBeGreaterThanOrEqual(2);
+
+    // Pick the last location to re-add later
+    const targetId = allIds[allIds.length - 1];
+
+    // Open location filter and deselect all
+    await openLocationFilter(page);
+    const selectAllCheckbox = page.locator('[data-testid="select-all-checkbox"]');
+    if (await selectAllCheckbox.isVisible()) {
+      const isChecked = await selectAllCheckbox.isChecked();
+      if (isChecked) {
+        await selectAllCheckbox.click({ force: true });
+        await page.waitForTimeout(200);
+      }
+    }
+    // Also click any remaining checked options
+    await deselectAllOptions(page);
+
+    // Close dropdown
+    await page.click('body', { position: { x: 10, y: 10 } });
+    await page.waitForTimeout(300);
+
+    // Verify fewer columns
+    const filteredIds = await getColumnHeaderIds(page);
+    expect(filteredIds.length).toBeLessThan(allIds.length);
+
+    // Re-open location filter
+    await openLocationFilter(page);
+
+    // Select the target location
+    const targetOption = page.locator(`[data-testid="multiselect-option-${targetId}"]`);
+    await targetOption.click();
+    await page.waitForTimeout(200);
+
+    // Close dropdown
+    await page.click('body', { position: { x: 10, y: 10 } });
+    await page.waitForTimeout(300);
+
+    // Verify that location's column is now visible
+    const afterIds = await getColumnHeaderIds(page);
+    expect(afterIds).toContain(targetId);
+    expect(afterIds.length).toBeGreaterThan(filteredIds.length);
   });
 });

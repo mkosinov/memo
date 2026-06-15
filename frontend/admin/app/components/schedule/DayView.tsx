@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useState, useCallback, useMemo } from 'react';
-import { DndContext, DragOverlay, closestCorners, useSensor, useSensors, PointerSensor, TouchSensor } from '@dnd-kit/core';
+import { DndContext, DragOverlay, closestCorners, rectIntersection, useSensor, useSensors, PointerSensor, TouchSensor } from '@dnd-kit/core';
+import type { Collision, DragStartEvent } from '@dnd-kit/core';
 import { SortableContext, horizontalListSortingStrategy } from '@dnd-kit/sortable';
 import { useSchedule } from '@/contexts/ScheduleContext';
 import { useUI } from '@/contexts/UIContext';
@@ -397,8 +398,22 @@ export function DayView() {
       {/* Column headers — inside DndContext, using SortableContext for @dnd-kit sortable */}
       <SortableContext items={orderedColumns.map(c => c.id)} strategy={horizontalListSortingStrategy}>
         <ScheduleColumnHeader>
-          {orderedColumns.map((col) => (
-            <SortableColumnHeader key={col.id} col={col} isDropTarget={false} />
+          {orderedColumns.map((col, index) => (
+            <SortableColumnHeader
+              key={col.id}
+              col={col}
+              isDropTarget={false}
+              isFirst={index === 0}
+              isLast={index === orderedColumns.length - 1}
+              onMoveLeft={index > 0 ? () => {
+                const prevCol = orderedColumns[index - 1];
+                onColumnDrop(col.id, prevCol.id);
+              } : undefined}
+              onMoveRight={index < orderedColumns.length - 1 ? () => {
+                const nextCol = orderedColumns[index + 1];
+                onColumnDrop(col.id, nextCol.id);
+              } : undefined}
+            />
           ))}
           {orderedColumns.length === 0 && (
             <div className="flex-1 text-center py-2 text-xs" style={{ color: 'var(--ink-light)' }}>

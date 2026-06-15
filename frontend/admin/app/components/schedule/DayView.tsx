@@ -338,9 +338,10 @@ export function DayView() {
         const activeData = event.active.data?.current as Record<string, unknown> | undefined;
 
         if (activeData?.type === 'column') {
-          // Column drag — show ghost overlay
+          // Column drag — show ghost overlay, clear any leftover activity ghost state
           const col = activeData.column as { id: string; name: string };
           setActiveColumn(col);
+          handleDragCancel();
           return;
         }
 
@@ -374,8 +375,8 @@ export function DayView() {
         const overData = over.data?.current as Record<string, unknown> | undefined;
 
         if (activeData?.type === 'column') {
-          // Column reorder — use onColumnDrop for direct reorder logic
-          if (active.id !== over.id) {
+          // Column reorder — only act if drop target is also a column (not a slot)
+          if (overData?.type === 'column' && active.id !== over.id) {
             onColumnDrop(String(active.id), String(over.id));
           }
         } else {

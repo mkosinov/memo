@@ -184,7 +184,6 @@ function DroppableSlot({ dayIndex, slotIndex, startTime, isHour, isHalfHour, dra
 // ─── DayColumn ────────────────────────────────────────────────────────────
 
 export function DayColumn({ dayIndex, activities, masters, studios = [], services = [], dragCopy, dragId, ghostHeight, ghostDayIndex, ghostSlotIndex, ghostColumnId, onCreateActivity, onOpenCreateModal, onOpenEditModal, onQuickAdd, stampReady, stamp, cellHeight = 60, gridFrequency = 30, gridStart = HOURS_START, gridEnd = HOURS_END, columnId }: DayColumnProps) {
-  const [visibleIndices, setVisibleIndices] = useState<Record<string, number>>({});
   const [popoverData, setPopoverData] = useState<{
     activities: Activity[];
     anchorRect: DOMRect;
@@ -201,6 +200,22 @@ export function DayColumn({ dayIndex, activities, masters, studios = [], service
   // When a column-level ghost is active for this column, suppress individual slot-level isOver borders
   const hasColumnGhost = ghostColumnId === columnId && ghostSlotIndex != null && ghostHeight != null;
 
+  // z-array per slot: key = slot time, value = activity IDs in z-order (index 0 = front)
+  const [zOrders, setZOrders] = useState<Record<number, string[]>>(() => {
+    const initial: Record<number, string[]> = {};
+    for (const slot of slots) {
+      const activeAtSlot = activities.filter(a => {
+        const aStart = a.startTime;
+        const aEnd = a.startTime + a.duration;
+        return aStart <= slot && aEnd > slot;
+      });
+      initial[slot] = activeAtSlot
+        .sort((a, b) => a.startTime - b.startTime || a.id.localeCompare(b.id))
+        .map(a => a.id);
+    }
+    return initial;
+  });
+
   // Non-passive wheel handler for scroll carousel
   useEffect(() => {
     const el = columnRef.current;
@@ -215,46 +230,58 @@ export function DayColumn({ dayIndex, activities, masters, studios = [], service
       const rect = el.getBoundingClientRect();
       const y = e.clientY - rect.top;
 
-      // Find ALL activities under cursor, then pick the one with z=0 (frontmost)
-      const activitiesUnderCursor: { activity: Activity; z: number }[] = [];
-      for (const act of activities) {
-        const topPx = (act.startTime - gridStart) * cellHeight * 2;
-        const durMinutes = act.durationMinutes ?? act.duration * 60;
-        const heightPx = Math.max((durMinutes / 60) * cellHeight * 2, 52);
-        if (y >= topPx && y <= topPx + heightPx) {
-          // Calculate z for this activity
-          const group = getDirectOverlapGroup(act, activities);
-          const groupKey = group.map(a => a.id).sort().join(',');
-          const indexInGroup = group.findIndex(a => a.id === act.id);
-          const visibleIndex = visibleIndices[groupKey] || 0;
-          const z = group.length > 1 ? (indexInGroup - visibleIndex + group.length) % group.length : 0;
-          activitiesUnderCursor.push({ activity: act, z });
-        }
-      }
+      // Find which slot the cursor is in
+      const slotIndex = Math.floor(y / slotHeight);
+      const slotTime = slots[slotIndex];
+      if (slotTime === undefined) return;
 
-      // Pick the activity with z=0 (frontmost card)
-      const frontmost = activitiesUnderCursor.find(item => item.z === 0);
-      if (frontmost) {
-        const group = getDirectOverlapGroup(frontmost.activity, activities);
+      // Get z-array for this slot
+      const zArray = zOrders[slotTime];
+      if (!zArray || zArray.length <= 1) return;
 
-        if (group.length > 1) {
-          e.preventDefault();
-          lastWheelTime.current = now;
+      // Check if frontmost activity (z=0) is under cursor
+      const frontmostId = zArray[0];
+      const frontmostActivity = activities.find(a => a.id === frontmostId);
+      if (!frontmostActivity) return;
 
-          const groupKey = group.map(a => a.id).sort().join(',');
-          const direction = e.deltaY > 0 ? 1 : -1;
+      const topPx = (frontmostActivity.startTime - gridStart) * cellHeight * 2;
+      const durMinutes = frontmostActivity.durationMinutes ?? frontmostActivity.duration * 60;
+      const heightPx = Math.max((durMinutes / 60) * cellHeight * 2, 52);
 
-          setVisibleIndices((prev) => {
-            const current = prev[groupKey] || 0;
-            const next = (current + direction + group.length) % group.length;
-            return { ...prev, [groupKey]: next };
-          });
-        }
+      if (y >= topPx && y <= topPx + heightPx) {
+        // Frontmost card is under cursor — shift z-array for ALL slots in overlap zone
+        e.preventDefault();
+        lastWheelTime.current = now;
+
+        const direction = e.deltaY > 0 ? 1 : -1;
+        setZOrders(prev => {
+          const newOrders = { ...prev };
+          // Find all slots where the same set of activities is active
+          const zArray = prev[slotTime] || [];
+          for (const slot of slots) {
+            const slotArr = newOrders[slot] || [];
+            // Check if this slot has the same activities (same set of IDs)
+            if (slotArr.length === zArray.length && 
+                slotArr.every(id => zArray.includes(id))) {
+              // Same group — apply the same shift
+              const arr = [...slotArr];
+              if (direction === 1) {
+                const last = arr.pop()!;
+                arr.unshift(last);
+              } else {
+                const first = arr.shift()!;
+                arr.push(first);
+              }
+              newOrders[slot] = arr;
+            }
+          }
+          return newOrders;
+        });
       }
     };
     el.addEventListener('wheel', handler, { passive: false });
     return () => el.removeEventListener('wheel', handler);
-  }, [dayIndex, slots, activities, cellHeight, gridStart]);
+  }, [dayIndex, slots, activities, cellHeight, gridStart, zOrders, slotHeight]);
 
   return (
     <div
@@ -303,12 +330,21 @@ export function DayColumn({ dayIndex, activities, masters, studios = [], service
 
       {/* Render activity cards */}
       {activities.map((activity) => {
-        // Compute direct overlap group for this activity (pairwise, not transitive)
-        const group = getDirectOverlapGroup(activity, activities);
-        const groupKey = group.map(a => a.id).sort().join(',');
-        const indexInGroup = group.findIndex(a => a.id === activity.id);
-        const totalInSlot = group.length;
-        const visibleIndex = visibleIndices[groupKey] || 0;
+        // Find the best slot for this activity: closest to startTime with overlap
+        let bestSlot = Math.floor(activity.startTime);
+        let bestTotal = 0;
+        for (const slot of slots) {
+          const arr = zOrders[slot] || [];
+          if (arr.includes(activity.id) && arr.length > bestTotal) {
+            bestSlot = slot;
+            bestTotal = arr.length;
+          }
+        }
+
+        const zArray = zOrders[bestSlot] || [];
+        const totalInSlot = zArray.length;
+        const z = zArray.indexOf(activity.id);
+        const actualZ = z === -1 ? 0 : z;
 
         let cardOpacity = 1;
         let cardScale = 1;
@@ -319,13 +355,12 @@ export function DayColumn({ dayIndex, activities, masters, studios = [], service
         let oy = 0;
         
         if (totalInSlot > 1) {
-          const z = (indexInGroup - visibleIndex + totalInSlot) % totalInSlot;
-          isClickable = z === 0;
-          cardOpacity = z === 0 ? 1 : Math.max(0, 1 - (z * 0.15));
-          cardScale = z === 0 ? 1 : Math.max(0.8, 1 - (z * 0.04));
-          cardZIndex = z === 0 ? 25 : 25 - z;
-          ox = (12 - z) * z;
-          oy = (12 - z) * z;
+          isClickable = actualZ === 0;
+          cardOpacity = actualZ === 0 ? 1 : Math.max(0, 1 - (actualZ * 0.15));
+          cardScale = actualZ === 0 ? 1 : Math.max(0.8, 1 - (actualZ * 0.04));
+          cardZIndex = actualZ === 0 ? 25 : 25 - actualZ;
+          ox = (12 - actualZ) * actualZ;
+          oy = (12 - actualZ) * actualZ;
         }
 
         const master = masterMap.get(activity.masterId) || masters[0];
@@ -351,16 +386,20 @@ export function DayColumn({ dayIndex, activities, masters, studios = [], service
               }}
             />
             {/* "N cards" badge for multi-event slots — opens OverlapPopover */}
-            {totalInSlot > 1 && indexInGroup === 0 && (
+            {totalInSlot > 1 && actualZ === 0 && (
               <button
                 onClick={(e) => {
                   e.stopPropagation();
-                  // Toggle: close if same group, otherwise open
-                  if (popoverData?.activities === group) {
+                  // Get all activities in z-order for this slot
+                  const slotActivities = zArray
+                    .map(id => activities.find(a => a.id === id))
+                    .filter(Boolean) as Activity[];
+                  // Toggle: close if same slot, otherwise open
+                  if (popoverData?.activities === slotActivities) {
                     setPopoverData(null);
                   } else {
                     setPopoverData({
-                      activities: group,
+                      activities: slotActivities,
                       anchorRect: e.currentTarget.getBoundingClientRect(),
                     });
                   }

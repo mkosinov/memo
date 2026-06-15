@@ -458,15 +458,27 @@ export function DayView() {
       <DragOverlay dropAnimation={null}>
         {activeColumn ? (
           <div
-            className="bg-white border rounded px-3 py-2 text-xs font-medium shadow-lg opacity-80"
+            className="flex flex-col bg-white border rounded shadow-lg opacity-80 overflow-hidden"
             style={{
-              minWidth: '120px',
-              color: 'var(--ink-mid)',
+              width: '180px',
+              height: '400px',
               borderColor: 'var(--brand, #004D56)',
             }}
             data-drag-ghost="true"
           >
-            <div className="uppercase tracking-wide text-center">{activeColumn.name}</div>
+            {/* Column header */}
+            <div
+              className="text-center py-2 text-xs font-medium uppercase tracking-wide"
+              style={{
+                backgroundColor: 'var(--brand, #004D56)',
+                color: 'white',
+                borderBottom: '1px solid var(--brand, #004D56)',
+              }}
+            >
+              {activeColumn.name}
+            </div>
+            {/* Empty body — matches grid background */}
+            <div className="flex-1" style={{ backgroundColor: 'rgba(0,77,86,0.03)' }} />
           </div>
         ) : activeDragActivity && dragMaster ? (
           <div className="opacity-80 scale-95 relative" style={{ width: '180px' }} data-drag-ghost="true">

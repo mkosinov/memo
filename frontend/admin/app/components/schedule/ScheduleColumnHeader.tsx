@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { useSortable } from '@dnd-kit/sortable';
+import { useSortable, defaultAnimateLayoutChanges } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { TIME_COL_WIDTH } from '@/lib/utils';
 
@@ -57,7 +57,7 @@ export function SortableColumnHeader({ col, isDropTarget }: SortableColumnHeader
     transform,
     transition,
     isDragging,
-  } = useSortable({ id: col.id, data: { type: 'column', column: col } });
+  } = useSortable({ id: col.id, data: { type: 'column', column: col }, animateLayoutChanges: defaultAnimateLayoutChanges });
 
   const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),

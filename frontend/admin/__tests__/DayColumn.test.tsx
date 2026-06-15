@@ -685,6 +685,53 @@ describe('DayColumn', () => {
       expect(screen.queryByTestId('overlap-popover')).not.toBeInTheDocument();
     });
 
+    it('does not emit console.log during initialization', () => {
+      const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      try {
+        render(
+          <DayColumn
+            dayIndex={0}
+            date={new Date()}
+            activities={partialOverlapActivities}
+            masters={MOCK_MASTERS}
+          />,
+        );
+        // Per-card z-index model should not produce debug logging
+        expect(consoleSpy).not.toHaveBeenCalled();
+      } finally {
+        consoleSpy.mockRestore();
+      }
+    });
+
+    it('same card retains same z-index across partial overlap range', () => {
+      // Two activities: po_a1 (10:00-13:00) and po_a2 (12:00-13:30)
+      // In the per-card model, po_a1 is always z=0 and po_a2 always z=1
+      // regardless of which timeslot we inspect
+      render(
+        <DayColumn
+          dayIndex={0}
+          date={new Date()}
+          activities={partialOverlapActivities}
+          masters={MOCK_MASTERS}
+        />,
+      );
+
+      const card1 = screen.getByTestId('activity-po_a1');
+      const card2 = screen.getByTestId('activity-po_a2');
+
+      // po_a1 has earlier start → z=0 → front → full opacity
+      expect(card1).toHaveStyle({ opacity: '1' });
+      // po_a2 has later start → z=1 → behind → dimmed
+      expect(card2).toHaveStyle({ opacity: '0.85' });
+
+      // Both cards should have different transforms (z=0 vs z=1 offset)
+      const style1 = card1.getAttribute('style') || '';
+      const style2 = card2.getAttribute('style') || '';
+      // z=0: translate(0px, 0px) scale(1), z=1: translate(11px, 11px) scale(0.96)
+      expect(style1).toContain('translate(0px, 0px) scale(1)');
+      expect(style2).toContain('translate(11px, 11px) scale(0.96)');
+    });
+
     it('calls onOpenEditModal and closes popover when clicking a card in popover', () => {
       const onOpenEditModal = vi.fn();
       render(

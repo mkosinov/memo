@@ -202,15 +202,17 @@ export function DayColumn({ dayIndex, activities, masters, studios = [], service
 
   // Per-card z-index: each activity has ONE z-index (0 = frontmost) used everywhere.
   // Each activity's z is its position within its own pairwise overlap group.
-  const [zIndices, setZIndices] = useState<Record<string, number>>(() => {
+  // Re-initialize when activities change (e.g., navigating to a new date).
+  const [zIndices, setZIndices] = useState<Record<string, number>>({});
+  useEffect(() => {
     const initial: Record<string, number> = {};
     for (const act of activities) {
       const group = getDirectOverlapGroup(act, activities);
       const indexInGroup = group.findIndex(a => a.id === act.id);
       initial[act.id] = indexInGroup >= 0 ? indexInGroup : 0;
     }
-    return initial;
-  });
+    setZIndices(initial);
+  }, [activities]);
 
   // Non-passive wheel handler for scroll carousel
   useEffect(() => {

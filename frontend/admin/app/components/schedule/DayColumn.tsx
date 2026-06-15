@@ -215,28 +215,32 @@ export function DayColumn({ dayIndex, activities, masters, studios = [], service
       const rect = el.getBoundingClientRect();
       const y = e.clientY - rect.top;
 
-      // Find the activity under cursor using Y position
-      // Use the LAST matching activity (topmost in visual stack)
-      let activityUnderCursor: Activity | null = null;
+      // Find ALL activities under cursor, then pick the one with z=0 (frontmost)
+      const activitiesUnderCursor: { activity: Activity; z: number }[] = [];
       for (const act of activities) {
         const topPx = (act.startTime - gridStart) * cellHeight * 2;
         const durMinutes = act.durationMinutes ?? act.duration * 60;
         const heightPx = Math.max((durMinutes / 60) * cellHeight * 2, 52);
         if (y >= topPx && y <= topPx + heightPx) {
-          activityUnderCursor = act;
-          // Don't break — keep looking for later activities (higher in stack)
+          // Calculate z for this activity
+          const group = getDirectOverlapGroup(act, activities);
+          const groupKey = group.map(a => a.id).sort().join(',');
+          const indexInGroup = group.findIndex(a => a.id === act.id);
+          const visibleIndex = visibleIndices[groupKey] || 0;
+          const z = group.length > 1 ? (indexInGroup - visibleIndex + group.length) % group.length : 0;
+          activitiesUnderCursor.push({ activity: act, z });
         }
       }
 
-      if (activityUnderCursor) {
-        // Get all activities that overlap with this one (pairwise, not transitive)
-        const group = getDirectOverlapGroup(activityUnderCursor, activities);
+      // Pick the activity with z=0 (frontmost card)
+      const frontmost = activitiesUnderCursor.find(item => item.z === 0);
+      if (frontmost) {
+        const group = getDirectOverlapGroup(frontmost.activity, activities);
 
         if (group.length > 1) {
           e.preventDefault();
           lastWheelTime.current = now;
 
-          // Use sorted IDs for consistent groupKey regardless of which activity found
           const groupKey = group.map(a => a.id).sort().join(',');
           const direction = e.deltaY > 0 ? 1 : -1;
 

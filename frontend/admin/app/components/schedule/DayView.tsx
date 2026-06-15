@@ -411,7 +411,7 @@ export function DayView() {
               } : undefined}
               onMoveRight={index < orderedColumns.length - 1 ? () => {
                 const nextCol = orderedColumns[index + 1];
-                onColumnDrop(col.id, nextCol.id);
+                onColumnDrop(nextCol.id, col.id);
               } : undefined}
             />
           ))}

@@ -701,9 +701,10 @@ describe('DayColumn', () => {
       fireEvent.click(badge);
 
       const popover = screen.getByTestId('overlap-popover');
-      // Click on the first activity button inside the popover
-      const popoverButtons = popover.querySelectorAll('button');
-      fireEvent.click(popoverButtons[0]);
+      // Click on the first activity card inside the popover (ActivityCard is a div with onClick)
+      const firstCard = popover.querySelector('[data-testid^="activity-"]');
+      expect(firstCard).toBeInTheDocument();
+      fireEvent.click(firstCard!);
       expect(onOpenEditModal).toHaveBeenCalledWith(partialOverlapActivities[0]);
       expect(screen.queryByTestId('overlap-popover')).not.toBeInTheDocument();
     });

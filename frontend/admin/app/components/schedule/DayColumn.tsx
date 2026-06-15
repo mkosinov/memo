@@ -349,10 +349,15 @@ export function DayColumn({ dayIndex, activities, masters, studios = [], service
               <button
                 onClick={(e) => {
                   e.stopPropagation();
-                  setPopoverData({
-                    activities: group,
-                    anchorRect: e.currentTarget.getBoundingClientRect(),
-                  });
+                  // Toggle: close if same group, otherwise open
+                  if (popoverData?.activities === group) {
+                    setPopoverData(null);
+                  } else {
+                    setPopoverData({
+                      activities: group,
+                      anchorRect: e.currentTarget.getBoundingClientRect(),
+                    });
+                  }
                 }}
                 className="absolute right-1 z-[35] px-1.5 py-0.5 rounded-full bg-white/90 border border-gray-300 text-[10px] font-semibold text-gray-500 shadow-sm hover:bg-white hover:text-gray-700 transition-colors cursor-pointer"
                 style={{
@@ -372,7 +377,10 @@ export function DayColumn({ dayIndex, activities, masters, studios = [], service
         <OverlapPopover
           activities={popoverData.activities}
           masterMap={masterMap}
+          studios={studios}
           anchorRect={popoverData.anchorRect}
+          cellHeight={cellHeight}
+          gridStart={gridStart}
           onClose={() => setPopoverData(null)}
           onSelectActivity={(act) => {
             setPopoverData(null);

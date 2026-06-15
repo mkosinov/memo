@@ -1,15 +1,19 @@
 'use client';
 
 import React, { useEffect, useRef } from 'react';
-import type { Activity, Master } from '@memo/domain';
-import { formatTime } from '@/lib/utils';
+import type { Activity, Master, Studio } from '@memo/domain';
+import { formatTime, HOURS_START } from '@/lib/utils';
+import { ActivityCard } from './ActivityCard';
 
 interface OverlapPopoverProps {
   activities: Activity[];
   masterMap: Map<string, Master>;
+  studios: Studio[];
   onClose: () => void;
   onSelectActivity: (activity: Activity) => void;
   anchorRect: DOMRect;
+  cellHeight: number;
+  gridStart?: number;
 }
 
 /**
@@ -38,9 +42,16 @@ function assignColumns(activities: Activity[]): Activity[][] {
   return columns;
 }
 
-const HOUR_PX = 32;
-
-export function OverlapPopover({ activities, masterMap, onClose, onSelectActivity, anchorRect }: OverlapPopoverProps) {
+export function OverlapPopover({
+  activities,
+  masterMap,
+  studios,
+  onClose,
+  onSelectActivity,
+  anchorRect,
+  cellHeight = 60,
+  gridStart = HOURS_START,
+}: OverlapPopoverProps) {
   const popoverRef = useRef<HTMLDivElement>(null);
   const columns = assignColumns(activities);
 
@@ -55,7 +66,7 @@ export function OverlapPopover({ activities, masterMap, onClose, onSelectActivit
     return () => document.removeEventListener('mousedown', handler);
   }, [onClose]);
 
-  // Calculate timeline bounds
+  // Calculate timeline bounds (same scale as main schedule)
   const allStarts = activities.map(a => a.startTime);
   const allEnds = activities.map(a => a.startTime + a.duration);
   const timelineStart = Math.floor(Math.min(...allStarts));
@@ -71,12 +82,16 @@ export function OverlapPopover({ activities, masterMap, onClose, onSelectActivit
   };
 
   return (
-    <div ref={popoverRef} style={style} data-testid="overlap-popover" className="bg-white rounded-lg shadow-xl border p-3 max-h-[300px] overflow-auto">
-      <div className="flex gap-2">
-        {/* Timeline column */}
-        <div className="w-10 flex-shrink-0">
+    <div ref={popoverRef} style={style} data-testid="overlap-popover" className="bg-white rounded-lg shadow-xl border max-h-[400px] overflow-auto">
+      <div className="flex">
+        {/* Timeline column — same scale as main schedule */}
+        <div className="w-12 flex-shrink-0 border-r border-gray-200">
           {hours.map(h => (
-            <div key={h} className="flex items-center text-[10px] text-gray-500" style={{ height: HOUR_PX }}>
+            <div
+              key={h}
+              className="flex items-center text-[10px] text-gray-500 px-1"
+              style={{ height: cellHeight * 2 }}
+            >
               {formatTime(h)}
             </div>
           ))}
@@ -84,25 +99,33 @@ export function OverlapPopover({ activities, masterMap, onClose, onSelectActivit
 
         {/* Activity columns */}
         {columns.map((col, colIdx) => (
-          <div key={colIdx} className="relative" style={{ minWidth: '80px' }}>
+          <div key={colIdx} className="relative" style={{ minWidth: '120px' }}>
             {col.map(act => {
-              const top = (act.startTime - timelineStart) * HOUR_PX;
-              const height = act.duration * HOUR_PX;
-              const master = masterMap.get(act.masterId);
+              const master = masterMap.get(act.masterId) || masters[0];
+              const topPx = (act.startTime - gridStart) * cellHeight * 2;
+              const durMinutes = act.durationMinutes ?? act.duration * 60;
+              const heightPx = Math.max((durMinutes / 60) * cellHeight * 2 - 10, 52);
+
               return (
-                <button
+                <div
                   key={act.id}
-                  onClick={() => onSelectActivity(act)}
-                  className="absolute inset-x-0.5 rounded p-1 text-left text-[10px] text-white font-medium overflow-hidden hover:opacity-90 transition-opacity"
-                  style={{
-                    top: `${top}px`,
-                    height: `${height}px`,
-                    backgroundColor: master?.color || '#666',
-                  }}
+                  className="absolute left-1 right-1"
+                  style={{ top: `${topPx}px`, height: `${heightPx}px` }}
                 >
-                  <div className="font-semibold">{formatTime(act.startTime)}</div>
-                  <div className="truncate">{act.serviceName}</div>
-                </button>
+                  <ActivityCard
+                    activity={act}
+                    master={master}
+                    studios={studios}
+                    gridStart={gridStart}
+                    onEdit={onSelectActivity}
+                    style={{
+                      position: 'absolute',
+                      inset: 0,
+                      height: '100%',
+                      cursor: 'pointer',
+                    }}
+                  />
+                </div>
               );
             })}
           </div>

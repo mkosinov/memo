@@ -40,23 +40,6 @@ describe('useColumnReorder', () => {
     expect(result.current.orderedColumns.map((c) => c.id)).toEqual(['m1', 'm2', 'm3']);
   });
 
-  it('tracks modifier key state', () => {
-    const { result } = renderHook(() =>
-      useColumnReorder({ columns, columnMode: 'masters' }),
-    );
-    expect(result.current.modifierHeld).toBe(false);
-
-    act(() => {
-      window.dispatchEvent(new KeyboardEvent('keydown', { metaKey: true }));
-    });
-    expect(result.current.modifierHeld).toBe(true);
-
-    act(() => {
-      window.dispatchEvent(new KeyboardEvent('keyup', { metaKey: false, altKey: false }));
-    });
-    expect(result.current.modifierHeld).toBe(false);
-  });
-
   it('reorders columns on drop', () => {
     const { result } = renderHook(() =>
       useColumnReorder({ columns, columnMode: 'masters' }),

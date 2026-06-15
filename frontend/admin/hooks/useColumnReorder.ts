@@ -11,7 +11,6 @@ interface UseColumnReorderOptions {
 }
 
 export function useColumnReorder({ columns, columnMode, initialOrder, onOrderChange }: UseColumnReorderOptions) {
-  const [modifierHeld, setModifierHeld] = useState(false);
   const [columnOrder, setColumnOrder] = useState<string[]>([]);
   const initializedRef = useRef(false);
   const onOrderChangeRef = useRef(onOrderChange);
@@ -101,22 +100,6 @@ export function useColumnReorder({ columns, columnMode, initialOrder, onOrderCha
     }
   }, [columnOrder]);
 
-  // Track Cmd/Alt modifier
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.metaKey || e.altKey) setModifierHeld(true);
-    };
-    const handleKeyUp = (e: KeyboardEvent) => {
-      if (!e.metaKey && !e.altKey) setModifierHeld(false);
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('keyup', handleKeyUp);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('keyup', handleKeyUp);
-    };
-  }, []);
-
   const onColumnDrop = useCallback(
     (draggedId: string, targetId: string) => {
       if (draggedId === targetId) return;
@@ -154,7 +137,6 @@ export function useColumnReorder({ columns, columnMode, initialOrder, onOrderCha
   }, [columns, columnOrder]);
 
   return {
-    modifierHeld,
     columnOrder,
     orderedColumns,
     onColumnDrop,

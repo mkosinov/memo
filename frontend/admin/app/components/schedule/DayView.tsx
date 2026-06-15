@@ -2,6 +2,7 @@
 
 import React, { useState, useCallback, useMemo } from 'react';
 import { DndContext, DragOverlay, closestCenter, useSensor, useSensors, PointerSensor, TouchSensor } from '@dnd-kit/core';
+import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { useSchedule } from '@/contexts/ScheduleContext';
 import { useUI } from '@/contexts/UIContext';
 import { useUserSettings } from '@/contexts/UserSettingsContext';
@@ -12,7 +13,7 @@ import type { Activity } from '@memo/domain';
 import { TimeColumn } from './TimeColumn';
 import { DayColumn } from './DayColumn';
 import { ActivityCard } from './ActivityCard';
-import { ScheduleColumnHeader } from './ScheduleColumnHeader';
+import { ScheduleColumnHeader, SortableColumnHeader } from './ScheduleColumnHeader';
 import { ActivityDetailsModal } from '../modal/ActivityDetailsModal';
 import { TIME_COL_WIDTH, isSameDay, formatTime, calculateGridTimeRange } from '@/lib/utils';
 
@@ -232,9 +233,8 @@ export function DayView() {
     }
   }, [columnMode, studios, masters, filterMasterIds, filterLocationIds, getColumnOrder]);
 
-  // Column reorder via Cmd/Alt + drag
+  // Column reorder
   const {
-    modifierHeld,
     orderedColumns,
     onColumnDrop,
   } = useColumnReorder({
@@ -243,8 +243,6 @@ export function DayView() {
     initialOrder: columnMode === 'masters' ? settings.columnOrderMasters : settings.columnOrderLocations,
     onOrderChange: (order) => saveColumnOrder(columnMode, order),
   });
-  const [draggedColumnId, setDraggedColumnId] = useState<string | null>(null);
-  const [dropTargetId, setDropTargetId] = useState<string | null>(null);
 
   // Ref for onColumnDrop so the test event effect always has the latest callback
   const onColumnDropRef = React.useRef(onColumnDrop);
@@ -327,189 +325,155 @@ export function DayView() {
   }
 
   return (
-    <>
-      {/* Column headers — outside DndContext so native HTML5 DnD works without @dnd-kit intercepting pointer events */}
-      <ScheduleColumnHeader>
-        {orderedColumns.map((col) => {
-          const isDropTarget = dropTargetId === col.id && draggedColumnId !== col.id;
-          return (
-            <div
-              key={col.id}
-              data-testid={`column-header-${col.id}`}
-              draggable={modifierHeld}
-              onPointerDown={(e) => {
-                // Prevent @dnd-kit's PointerSensor from capturing this event
-                // so native HTML5 DnD can handle column reorder
-                if (modifierHeld) {
-                  e.stopPropagation();
-                }
-              }}
-              onDragStart={(e) => {
-                if (!modifierHeld) {
-                  e.preventDefault();
-                  return;
-                }
-                e.dataTransfer.setData('text/plain', col.id);
-                e.dataTransfer.effectAllowed = 'move';
-                setDraggedColumnId(col.id);
-              }}
-              onDragOver={(e) => {
-                e.preventDefault();
-                e.dataTransfer.dropEffect = 'move';
-                setDropTargetId(col.id);
-              }}
-              onDragLeave={() => {
-                setDropTargetId((prev) => (prev === col.id ? null : prev));
-              }}
-              onDrop={(e) => {
-                e.preventDefault();
-                if (draggedColumnId && draggedColumnId !== col.id) {
-                  onColumnDrop(draggedColumnId, col.id);
-                }
-                setDraggedColumnId(null);
-                setDropTargetId(null);
-              }}
-              onDragEnd={() => {
-                setDraggedColumnId(null);
-                setDropTargetId(null);
-              }}
-              className={`flex-1 text-center py-2 text-xs font-medium transition-all duration-150 ${
-                modifierHeld ? 'cursor-grab' : 'cursor-default'
-              } ${draggedColumnId === col.id ? 'opacity-50 scale-95' : ''} ${
-                isDropTarget ? 'border-l-2 border-l-[var(--brand)]' : ''
-              }`}
-              style={{ color: 'var(--ink-mid)' }}
-            >
-              <div className="uppercase tracking-wide flex items-center justify-center gap-1">
-                <span>{col.name}</span>
-              </div>
-            </div>
-          );
-        })}
-        {orderedColumns.length === 0 && (
-          <div className="flex-1 text-center py-2 text-xs" style={{ color: 'var(--ink-light)' }}>
-            Нет занятий на этот день
-          </div>
-        )}
-      </ScheduleColumnHeader>
-
-      {/* DndContext wraps only activity card drag — column headers use native HTML5 DnD */}
-      <DndContext
-        sensors={sensors}
-        collisionDetection={closestCenter}
-        onDragStart={(event) => {
+    <DndContext
+      sensors={sensors}
+      collisionDetection={closestCenter}
+      onDragStart={(event) => {
+        const activeData = event.active.data?.current as Record<string, unknown> | undefined;
+        // Only handle activity card drags — columns are handled by sortable's own logic
+        if (activeData?.type !== 'column') {
           const nativeEvent = event.activatorEvent as MouseEvent | undefined;
-          const dragData = event.active.data?.current as Record<string, unknown> | undefined;
           onDragStart(
-            { active: { id: event.active.id, data: { current: { activity: dragData?.activity as Activity | undefined } } } },
+            { active: { id: event.active.id, data: { current: { activity: activeData?.activity as Activity | undefined } } } },
             { altKey: nativeEvent?.altKey },
           );
-        }}
-        onDragOver={(event) => {
+        }
+      }}
+      onDragOver={(event) => {
+        const activeData = event.active.data?.current as Record<string, unknown> | undefined;
+        // Only process activity card drag-over events
+        if (activeData?.type !== 'column') {
           onDragOver({
             over: event.over
               ? { id: event.over.id, data: { current: event.over.data?.current } }
               : null,
           });
-        }}
-        onDragEnd={(event) => {
-          const overData = event.over?.data?.current as Record<string, unknown> | undefined;
+        }
+      }}
+      onDragEnd={(event) => {
+        const { active, over } = event;
+        if (!over) return;
+
+        const activeData = active.data?.current as Record<string, unknown> | undefined;
+        const overData = over.data?.current as Record<string, unknown> | undefined;
+
+        if (activeData?.type === 'column') {
+          // Column reorder — use onColumnDrop for direct reorder logic
+          if (active.id !== over.id) {
+            onColumnDrop(String(active.id), String(over.id));
+          }
+        } else {
+          // Activity card move
           const columnId = overData?.columnId as string | undefined;
           onDragEnd({
-            active: { id: event.active.id },
-            over: event.over ? { id: event.over.id, columnId } : null,
+            active: { id: active.id },
+            over: over ? { id: over.id, columnId } : null,
           });
-        }}
-        onDragCancel={() => {
-          handleDragCancel();
-        }}
-      >
-        <div className="min-w-[600px] h-full flex flex-col">
-          {/* Grid row — scrollable */}
-          <div className="flex-1 flex overflow-auto relative">
-            <TimeColumn cellHeight={cellHeight} gridFrequency={gridFrequency} gridStart={gridRange.start} gridEnd={gridRange.end} />
-            {orderedColumns.map((col) => {
-              const colActivities = activitiesByColumn.get(col.id) ?? [];
-              return (
-                <DayColumn
-                  key={col.id}
-                  dayIndex={0}
-                  date={selectedDay}
-                  activities={colActivities.map(a => ({ ...a, duration: a.durationMinutes / 60, serviceName: a.serviceTitle }))}
-                  masters={masters}
-                  studios={studios}
-                  services={services}
-                  dragCopy={dragCopy}
-                  dragId={dragId}
-                  ghostHeight={ghostHeight}
-                  ghostDayIndex={ghostPosition?.dayIndex ?? null}
-                  ghostSlotIndex={ghostPosition?.slotIndex ?? null}
-                  ghostColumnId={ghostPosition?.columnId ?? null}
-                  onCreateActivity={handleCreateActivity}
-                  onOpenCreateModal={openCreateModal}
-                  onOpenEditModal={openEditModal}
-                  onQuickAdd={openQuickAdd}
-                  stampReady={stamp.ready}
-                  stamp={stamp}
-                  cellHeight={cellHeight}
-                  gridFrequency={gridFrequency}
-                  gridStart={gridRange.start}
-                  gridEnd={gridRange.end}
-                  columnId={col.id}
-                />
-              );
-            })}
+        }
+      }}
+      onDragCancel={() => {
+        handleDragCancel();
+      }}
+    >
+      {/* Column headers — inside DndContext, using SortableContext for @dnd-kit sortable */}
+      <SortableContext items={orderedColumns.map(c => c.id)} strategy={verticalListSortingStrategy}>
+        <ScheduleColumnHeader>
+          {orderedColumns.map((col) => (
+            <SortableColumnHeader key={col.id} col={col} isDropTarget={false} />
+          ))}
+          {orderedColumns.length === 0 && (
+            <div className="flex-1 text-center py-2 text-xs" style={{ color: 'var(--ink-light)' }}>
+              Нет занятий на этот день
+            </div>
+          )}
+        </ScheduleColumnHeader>
+      </SortableContext>
 
-            {/* NowLine */}
-            {isSameDay(selectedDay, today) && nowPos >= 0 && (
+      <div className="min-w-[600px] h-full flex flex-col">
+        {/* Grid row — scrollable */}
+        <div className="flex-1 flex overflow-auto relative">
+          <TimeColumn cellHeight={cellHeight} gridFrequency={gridFrequency} gridStart={gridRange.start} gridEnd={gridRange.end} />
+          {orderedColumns.map((col) => {
+            const colActivities = activitiesByColumn.get(col.id) ?? [];
+            return (
+              <DayColumn
+                key={col.id}
+                dayIndex={0}
+                date={selectedDay}
+                activities={colActivities.map(a => ({ ...a, duration: a.durationMinutes / 60, serviceName: a.serviceTitle }))}
+                masters={masters}
+                studios={studios}
+                services={services}
+                dragCopy={dragCopy}
+                dragId={dragId}
+                ghostHeight={ghostHeight}
+                ghostDayIndex={ghostPosition?.dayIndex ?? null}
+                ghostSlotIndex={ghostPosition?.slotIndex ?? null}
+                ghostColumnId={ghostPosition?.columnId ?? null}
+                onCreateActivity={handleCreateActivity}
+                onOpenCreateModal={openCreateModal}
+                onOpenEditModal={openEditModal}
+                onQuickAdd={openQuickAdd}
+                stampReady={stamp.ready}
+                stamp={stamp}
+                cellHeight={cellHeight}
+                gridFrequency={gridFrequency}
+                gridStart={gridRange.start}
+                gridEnd={gridRange.end}
+                columnId={col.id}
+              />
+            );
+          })}
+
+          {/* NowLine */}
+          {isSameDay(selectedDay, today) && nowPos >= 0 && (
+            <div
+              data-testid="now-line"
+              className="absolute left-0 right-0 z-[22] pointer-events-none"
+              style={{ top: nowPos, marginLeft: TIME_COL_WIDTH }}
+            >
+              <div className="flex items-center">
+                <div className="w-2.5 h-2.5 rounded-full bg-red-500 shadow-sm" />
+                <div className="flex-1 h-[2px] bg-red-500" />
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <DragOverlay dropAnimation={null}>
+        {activeDragActivity && dragMaster ? (
+          <div className="opacity-80 scale-95 relative" style={{ width: '180px' }} data-drag-ghost="true">
+            {draggedSnappedTime != null && (
               <div
-                data-testid="now-line"
-                className="absolute left-0 right-0 z-[22] pointer-events-none"
-                style={{ top: nowPos, marginLeft: TIME_COL_WIDTH }}
+                className="absolute -top-6 left-1/2 -translate-x-1/2 z-[60] px-2 py-0.5 rounded-full text-[11px] font-bold text-white shadow-lg whitespace-nowrap"
+                style={{ backgroundColor: 'var(--brand, #004D56)' }}
               >
-                <div className="flex items-center">
-                  <div className="w-2.5 h-2.5 rounded-full bg-red-500 shadow-sm" />
-                  <div className="flex-1 h-[2px] bg-red-500" />
-                </div>
+                {formatTime(draggedSnappedTime)}
               </div>
             )}
+            <ActivityCard
+              activity={
+                draggedSnappedTime != null
+                  ? { ...activeDragActivity, startTime: draggedSnappedTime }
+                  : activeDragActivity
+              }
+              master={dragMaster}
+              studios={studios}
+              style={{ top: 0 }}
+            />
           </div>
-        </div>
+        ) : null}
+      </DragOverlay>
 
-        <DragOverlay dropAnimation={null}>
-          {activeDragActivity && dragMaster ? (
-            <div className="opacity-80 scale-95 relative" style={{ width: '180px' }} data-drag-ghost="true">
-              {draggedSnappedTime != null && (
-                <div
-                  className="absolute -top-6 left-1/2 -translate-x-1/2 z-[60] px-2 py-0.5 rounded-full text-[11px] font-bold text-white shadow-lg whitespace-nowrap"
-                  style={{ backgroundColor: 'var(--brand, #004D56)' }}
-                >
-                  {formatTime(draggedSnappedTime)}
-                </div>
-              )}
-              <ActivityCard
-                activity={
-                  draggedSnappedTime != null
-                    ? { ...activeDragActivity, startTime: draggedSnappedTime }
-                    : activeDragActivity
-                }
-                master={dragMaster}
-                studios={studios}
-                style={{ top: 0 }}
-              />
-            </div>
-          ) : null}
-        </DragOverlay>
-
-        {modalActivity && (
-          <ActivityDetailsModal
-            isOpen={modalOpen}
-            onClose={closeModal}
-            activity={modalActivity}
-            mode={modalMode}
-          />
-        )}
-      </DndContext>
-    </>
+      {modalActivity && (
+        <ActivityDetailsModal
+          isOpen={modalOpen}
+          onClose={closeModal}
+          activity={modalActivity}
+          mode={modalMode}
+        />
+      )}
+    </DndContext>
   );
 }

@@ -18,7 +18,6 @@ vi.mock('@/contexts/UserSettingsContext', () => ({
 
 vi.mock('@/hooks/useColumnReorder', () => ({
   useColumnReorder: ({ columns }: { columns: ReadonlyArray<{ id: string; name: string }> }) => ({
-    modifierHeld: false,
     columnOrder: columns.map((c) => c.id),
     orderedColumns: columns,
     onColumnDrop: vi.fn(),

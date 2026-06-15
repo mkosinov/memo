@@ -6,39 +6,6 @@ import { hexToRgb, mixWithWhite, formatTime, generateTimeSlots, HOURS_START, HOU
 import type { Activity, Master, Studio, StampState, Service } from '@memo/domain';
 import { ActivityCard } from './ActivityCard';
 
-// ─── Constants ────────────────────────────────────────────────────────────
-
-const OVERLAP_OFFSET = 12;
-
-// ─── Overlap Detection (sliding window) ─────────────────────────────────
-
-function buildOverlapMap(activities: Activity[]): Map<string, { index: number; total: number }> {
-  const result = new Map<string, { index: number; total: number }>();
-  const sorted = [...activities].sort((a, b) => a.startTime - b.startTime || a.id.localeCompare(b.id));
-  let active: Activity[] = []; // currently overlapping activities
-
-  for (const a of sorted) {
-    // Remove activities that ended before this one starts
-    active = active.filter(prev => a.startTime < prev.startTime + prev.duration);
-
-    const myIndex = active.length;
-    const total = active.length + 1;
-
-    // Update totals for all already-active activities
-    for (const prev of active) {
-      const cur = result.get(prev.id);
-      if (cur && cur.total < total) {
-        result.set(prev.id, { index: cur.index, total });
-      }
-    }
-
-    result.set(a.id, { index: myIndex, total });
-    active.push(a);
-  }
-
-  return result;
-}
-
 // ─── Direct Overlap Helpers (carousel) ─────────────────────────────────
 // Two activities overlap if their time ranges intersect (pairwise, NOT transitive).
 
@@ -104,7 +71,7 @@ interface DroppableSlotProps {
 function DroppableSlot({ dayIndex, slotIndex, startTime, isHour, isHalfHour, dragCopy, onClick, onOpenModal, stampReady, stamp, masters, services, cellHeight = 60, columnId, suppressIsOverGhost, children }: DroppableSlotProps) {
   const { isOver, setNodeRef } = useDroppable({
     id: `slot-${columnId ?? dayIndex}-${slotIndex}`,
-    data: { dayIndex, slotIndex, columnId },
+    data: { type: 'slot', dayIndex, slotIndex, columnId },
   });
 
   const [hoveredStampSlot, setHoveredStampSlot] = useState<number | null>(null);
@@ -217,10 +184,8 @@ function DroppableSlot({ dayIndex, slotIndex, startTime, isHour, isHalfHour, dra
 
 export function DayColumn({ dayIndex, activities, masters, studios = [], services = [], dragCopy, dragId, ghostHeight, ghostDayIndex, ghostSlotIndex, ghostColumnId, onCreateActivity, onOpenCreateModal, onOpenEditModal, onQuickAdd, stampReady, stamp, cellHeight = 60, gridFrequency = 30, gridStart = HOURS_START, gridEnd = HOURS_END, columnId }: DayColumnProps) {
   const [visibleIndices, setVisibleIndices] = useState<Record<string, number>>({});
-  const [prevIndices, setPrevIndices] = useState<Record<string, number>>({});
   const columnRef = useRef<HTMLDivElement>(null);
   const lastWheelTime = useRef(0);
-  const [animatingKeys, setAnimatingKeys] = useState<Set<string>>(new Set());
 
   // Generate slots at gridFrequency intervals. Slot height is scaled to keep total grid height constant.
   const slotHeight = useMemo(() => cellHeight * (gridFrequency / 30), [cellHeight, gridFrequency]);
@@ -230,9 +195,6 @@ export function DayColumn({ dayIndex, activities, masters, studios = [], service
 
   // When a column-level ghost is active for this column, suppress individual slot-level isOver borders
   const hasColumnGhost = ghostColumnId === columnId && ghostSlotIndex != null && ghostHeight != null;
-
-  // Full range overlap detection (X+Y offset for visual stacking)
-  const overlapMap = useMemo(() => buildOverlapMap(activities), [activities]);
 
   // Non-passive wheel handler for scroll carousel
   useEffect(() => {
@@ -251,10 +213,7 @@ export function DayColumn({ dayIndex, activities, masters, studios = [], service
       // Find the activity under cursor using Y position
       let activityUnderCursor: Activity | null = null;
       for (const act of activities) {
-        const overlapInfo = overlapMap.get(act.id);
-        const oy = overlapInfo ? overlapInfo.index * OVERLAP_OFFSET : 0;
-
-        const topPx = (act.startTime - gridStart) * cellHeight * 2 + oy;
+        const topPx = (act.startTime - gridStart) * cellHeight * 2;
         const durMinutes = act.durationMinutes ?? act.duration * 60;
         const heightPx = Math.max((durMinutes / 60) * cellHeight * 2 - 10, 52);
         if (y >= topPx && y <= topPx + heightPx) {
@@ -340,35 +299,23 @@ export function DayColumn({ dayIndex, activities, masters, studios = [], service
         const totalInSlot = group.length;
         const visibleIndex = visibleIndices[groupKey] || 0;
 
-        let carouselOffsetX = 0;
-        let carouselOffsetY = 0;
         let cardOpacity = 1;
         let cardScale = 1;
         let cardZIndex = 20;
         let isClickable = true;
+
+        let ox = 0;
+        let oy = 0;
         
         if (totalInSlot > 1) {
-          const diff = (indexInGroup - visibleIndex + totalInSlot) % totalInSlot;
-          isClickable = diff === 0;
-          if (diff === 0) {
-            carouselOffsetX = 0;
-            carouselOffsetY = 0;
-            cardOpacity = 1;
-            cardScale = 1;
-            cardZIndex = 25;
-          } else {
-            carouselOffsetX = diff * 8;
-            carouselOffsetY = diff * 6;
-            cardOpacity = Math.max(0, 1 - (diff * 0.15));
-            cardScale = Math.max(0.8, 1 - (diff * 0.04));
-            cardZIndex = 25 - diff;
-          }
+          const z = (indexInGroup - visibleIndex + totalInSlot) % totalInSlot;
+          isClickable = z === 0;
+          cardOpacity = z === 0 ? 1 : Math.max(0, 1 - (z * 0.15));
+          cardScale = z === 0 ? 1 : Math.max(0.8, 1 - (z * 0.04));
+          cardZIndex = z === 0 ? 25 : 25 - z;
+          ox = (12 - z) * z;
+          oy = (12 - z) * z;
         }
-
-        // Full overlap offset (X + Y)
-        const overlapInfo = overlapMap.get(activity.id);
-        const ox = overlapInfo ? overlapInfo.index * OVERLAP_OFFSET : 0;
-        const oy = overlapInfo ? overlapInfo.index * OVERLAP_OFFSET : 0;
 
         const master = masterMap.get(activity.masterId) || masters[0];
         const isThisDragging = dragId === activity.id;
@@ -385,7 +332,7 @@ export function DayColumn({ dayIndex, activities, masters, studios = [], service
               isDragCopy={dragCopy}
               gridStart={gridStart}
               style={{
-                transform: `translate(${ox + carouselOffsetX}px, ${oy + carouselOffsetY}px) scale(${cardScale})`,
+                transform: `translate(${ox}px, ${oy}px) scale(${cardScale})`,
                 zIndex: cardZIndex,
                 opacity: cardOpacity,
                 pointerEvents: isClickable ? 'auto' : 'none',
@@ -400,15 +347,6 @@ export function DayColumn({ dayIndex, activities, masters, studios = [], service
                   setVisibleIndices((prev) => {
                     const current = prev[groupKey] || 0;
                     const next = (current + 1 + totalInSlot) % totalInSlot;
-                    setPrevIndices(p => ({ ...p, [groupKey]: current }));
-                    setAnimatingKeys(prev => new Set(prev).add(groupKey));
-                    setTimeout(() => {
-                      setAnimatingKeys(prev => {
-                        const next_set = new Set(prev);
-                        next_set.delete(groupKey);
-                        return next_set;
-                      });
-                    }, 350);
                     return { ...prev, [groupKey]: next };
                   });
                 }}

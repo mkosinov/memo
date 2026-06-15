@@ -146,7 +146,7 @@ describe('DayColumn', () => {
     expect(screen.getByTestId('activity-a3')).toBeInTheDocument();
   });
 
-  it('applies stacked offset to overlapping activities', () => {
+  it('applies formula-based offset to overlapping activities', () => {
     render(
       <DayColumn
         dayIndex={0}
@@ -158,10 +158,10 @@ describe('DayColumn', () => {
     const card1 = screen.getByTestId('activity-a1');
     const card2 = screen.getByTestId('activity-a2');
 
-    // First card: no offset (index 0 → translate(0, 0))
+    // z=0 (front card): (12-0)*0 = 0, scale=1
     expect(card1).toHaveStyle({ transform: 'translate(0px, 0px) scale(1)' });
-    // Second card: offset by X and Y (index 1)
-    expect(card2).toHaveStyle({ transform: 'translate(20px, 18px) scale(0.96)' });
+    // z=1: (12-1)*1 = 11, scale=max(0.8, 1-1*0.04)=0.96
+    expect(card2).toHaveStyle({ transform: 'translate(11px, 11px) scale(0.96)' });
   });
 
   it('non-overlapping activity has no offset', () => {
@@ -451,7 +451,7 @@ describe('DayColumn', () => {
         />,
       );
 
-      const badge = screen.getByText('2 cards');
+      const badge = screen.getByRole('button', { name: /2 cards/i });
       expect(badge).toBeInTheDocument();
     });
 
@@ -540,8 +540,9 @@ describe('DayColumn', () => {
       // C: group [B,C] size 2, index 1 → diff 1 → hidden
       expect(cardC).toHaveStyle({ opacity: '0.85' });
 
-      // Only A's group has indexInGroup===0 with size>1 → one "2 cards" badge
-      expect(screen.getByText('2 cards')).toBeInTheDocument();
+      // Only A's group has indexInGroup===0 with size>1 → "2 cards" badge
+      const badge = screen.getByRole('button', { name: /2 cards/i });
+      expect(badge).toBeInTheDocument();
     });
   });
 

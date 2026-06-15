@@ -2,7 +2,7 @@
 
 import React, { useState, useCallback, useMemo } from 'react';
 import { DndContext, DragOverlay, closestCenter, useSensor, useSensors, PointerSensor, TouchSensor } from '@dnd-kit/core';
-import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
+import { SortableContext, horizontalListSortingStrategy } from '@dnd-kit/sortable';
 import { useSchedule } from '@/contexts/ScheduleContext';
 import { useUI } from '@/contexts/UIContext';
 import { useUserSettings } from '@/contexts/UserSettingsContext';
@@ -393,7 +393,7 @@ export function DayView() {
       }}
     >
       {/* Column headers — inside DndContext, using SortableContext for @dnd-kit sortable */}
-      <SortableContext items={orderedColumns.map(c => c.id)} strategy={verticalListSortingStrategy}>
+      <SortableContext items={orderedColumns.map(c => c.id)} strategy={horizontalListSortingStrategy}>
         <ScheduleColumnHeader>
           {orderedColumns.map((col) => (
             <SortableColumnHeader key={col.id} col={col} isDropTarget={false} />
@@ -461,27 +461,34 @@ export function DayView() {
       <DragOverlay dropAnimation={null}>
         {activeColumn ? (
           <div
-            className="flex flex-col bg-white border rounded shadow-lg opacity-80 overflow-hidden"
+            className="flex flex-col bg-white rounded-lg overflow-hidden shadow-xl"
             style={{
               width: '180px',
               height: `${columnGhostHeight}px`,
-              borderColor: 'var(--brand, #004D56)',
+              border: '1px solid var(--line)',
+              opacity: 0.9,
             }}
             data-drag-ghost="true"
           >
-            {/* Column header */}
+            {/* Header — matches ScheduleColumnHeader / SortableColumnHeader style */}
             <div
-              className="text-center py-2 text-xs font-medium uppercase tracking-wide"
+              className="text-center py-2 text-xs font-medium uppercase tracking-wide shrink-0"
               style={{
-                backgroundColor: 'var(--brand, #004D56)',
-                color: 'white',
-                borderBottom: '1px solid var(--brand, #004D56)',
+                backgroundColor: 'var(--bg)',
+                color: 'var(--ink-mid)',
+                borderBottom: '1px solid var(--line)',
               }}
             >
               {activeColumn.name}
             </div>
-            {/* Empty body — matches grid background */}
-            <div className="flex-1" style={{ backgroundColor: 'rgba(0,77,86,0.03)' }} />
+            {/* Body — matches DayColumn grid background with faint horizontal grid lines */}
+            <div
+              className="flex-1 relative"
+              style={{
+                background: 'repeating-linear-gradient(to bottom, var(--line) 0px, var(--line) 1px, transparent 1px, transparent 60px)',
+                backgroundColor: 'white',
+              }}
+            />
           </div>
         ) : activeDragActivity && dragMaster ? (
           <div className="opacity-80 scale-95 relative" style={{ width: '180px' }} data-drag-ghost="true">

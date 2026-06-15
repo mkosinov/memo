@@ -5,6 +5,7 @@ import { useDroppable } from '@dnd-kit/core';
 import { hexToRgb, mixWithWhite, formatTime, generateTimeSlots, HOURS_START, HOURS_END } from '@/lib/utils';
 import type { Activity, Master, Studio, StampState, Service } from '@memo/domain';
 import { ActivityCard } from './ActivityCard';
+import { OverlapPopover } from './OverlapPopover';
 
 // ─── Direct Overlap Helpers (carousel) ─────────────────────────────────
 // Two activities overlap if their time ranges intersect (pairwise, NOT transitive).
@@ -184,6 +185,10 @@ function DroppableSlot({ dayIndex, slotIndex, startTime, isHour, isHalfHour, dra
 
 export function DayColumn({ dayIndex, activities, masters, studios = [], services = [], dragCopy, dragId, ghostHeight, ghostDayIndex, ghostSlotIndex, ghostColumnId, onCreateActivity, onOpenCreateModal, onOpenEditModal, onQuickAdd, stampReady, stamp, cellHeight = 60, gridFrequency = 30, gridStart = HOURS_START, gridEnd = HOURS_END, columnId }: DayColumnProps) {
   const [visibleIndices, setVisibleIndices] = useState<Record<string, number>>({});
+  const [popoverData, setPopoverData] = useState<{
+    activities: Activity[];
+    anchorRect: DOMRect;
+  } | null>(null);
   const columnRef = useRef<HTMLDivElement>(null);
   const lastWheelTime = useRef(0);
 
@@ -339,22 +344,21 @@ export function DayColumn({ dayIndex, activities, masters, studios = [], service
                 transition: 'opacity 300ms ease, transform 300ms ease',
               }}
             />
-            {/* "N cards" badge for multi-event slots — clickable to cycle */}
+            {/* "N cards" badge for multi-event slots — opens OverlapPopover */}
             {totalInSlot > 1 && indexInGroup === 0 && (
               <button
                 onClick={(e) => {
                   e.stopPropagation();
-                  setVisibleIndices((prev) => {
-                    const current = prev[groupKey] || 0;
-                    const next = (current + 1 + totalInSlot) % totalInSlot;
-                    return { ...prev, [groupKey]: next };
+                  setPopoverData({
+                    activities: group,
+                    anchorRect: e.currentTarget.getBoundingClientRect(),
                   });
                 }}
                 className="absolute right-1 z-[35] px-1.5 py-0.5 rounded-full bg-white/90 border border-gray-300 text-[10px] font-semibold text-gray-500 shadow-sm hover:bg-white hover:text-gray-700 transition-colors cursor-pointer"
                 style={{
                   top: (activity.startTime - gridStart) * cellHeight * 2 + 2,
                 }}
-                title="Click to cycle through cards"
+                title="View all overlapping cards"
               >
                 {totalInSlot} cards
               </button>
@@ -362,6 +366,20 @@ export function DayColumn({ dayIndex, activities, masters, studios = [], service
           </React.Fragment>
         );
       })}
+
+      {/* OverlapPopover — shows all overlapping cards in column layout */}
+      {popoverData && (
+        <OverlapPopover
+          activities={popoverData.activities}
+          masterMap={masterMap}
+          anchorRect={popoverData.anchorRect}
+          onClose={() => setPopoverData(null)}
+          onSelectActivity={(act) => {
+            setPopoverData(null);
+            onOpenEditModal?.(act);
+          }}
+        />
+      )}
 
     </div>
   );

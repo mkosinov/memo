@@ -354,37 +354,37 @@ describe('DayColumn', () => {
     });
   });
 
-  describe('partial-overlap carousel', () => {
-    // Activity A: 10:00-13:00, Activity B: 12:00-13:30 (overlap 12:00-13:00)
-    const partialOverlapActivities: Activity[] = [
-      {
-        id: 'po_a1',
-        day: 0,
-        masterId: 'm1',
-        startTime: 10,
-        duration: 3,
-        serviceId: 's1',
-        serviceName: 'Oil painting',
-        locationId: 'alpika',
-        occupied: 2,
-        capacity: 8,
-        isPrivate: false,
-      },
-      {
-        id: 'po_a2',
-        day: 0,
-        masterId: 'm2',
-        startTime: 12,
-        duration: 1.5,
-        serviceId: 's2',
-        serviceName: 'Acrylic',
-        locationId: 'alpika',
-        occupied: 3,
-        capacity: 6,
-        isPrivate: false,
-      },
-    ];
+  // Activity A: 10:00-13:00, Activity B: 12:00-13:30 (overlap 12:00-13:00)
+  const partialOverlapActivities: Activity[] = [
+    {
+      id: 'po_a1',
+      day: 0,
+      masterId: 'm1',
+      startTime: 10,
+      duration: 3,
+      serviceId: 's1',
+      serviceName: 'Oil painting',
+      locationId: 'alpika',
+      occupied: 2,
+      capacity: 8,
+      isPrivate: false,
+    },
+    {
+      id: 'po_a2',
+      day: 0,
+      masterId: 'm2',
+      startTime: 12,
+      duration: 1.5,
+      serviceId: 's2',
+      serviceName: 'Acrylic',
+      locationId: 'alpika',
+      occupied: 3,
+      capacity: 6,
+      isPrivate: false,
+    },
+  ];
 
+  describe('partial-overlap carousel', () => {
     it('groups partially overlapping activities into same carousel group', () => {
       render(
         <DayColumn
@@ -627,6 +627,85 @@ describe('DayColumn', () => {
 
       fireEvent.mouseEnter(firstSlot);
       expect(column.querySelector('[data-stamp-ghost]')).not.toBeInTheDocument();
+    });
+  });
+
+  describe('OverlapPopover integration', () => {
+    it('opens OverlapPopover when clicking "N cards" badge', () => {
+      render(
+        <DayColumn
+          dayIndex={0}
+          date={new Date()}
+          activities={partialOverlapActivities}
+          masters={MOCK_MASTERS}
+        />,
+      );
+
+      const badge = screen.getByRole('button', { name: /2 cards/i });
+      fireEvent.click(badge);
+
+      expect(screen.getByTestId('overlap-popover')).toBeInTheDocument();
+    });
+
+    it('popover shows both overlapping activities inside it', () => {
+      render(
+        <DayColumn
+          dayIndex={0}
+          date={new Date()}
+          activities={partialOverlapActivities}
+          masters={MOCK_MASTERS}
+        />,
+      );
+
+      const badge = screen.getByRole('button', { name: /2 cards/i });
+      fireEvent.click(badge);
+
+      const popover = screen.getByTestId('overlap-popover');
+      // Service names should appear inside the popover
+      expect(popover.textContent).toContain('Oil painting');
+      expect(popover.textContent).toContain('Acrylic');
+    });
+
+    it('closes popover when clicking outside', () => {
+      render(
+        <DayColumn
+          dayIndex={0}
+          date={new Date()}
+          activities={partialOverlapActivities}
+          masters={MOCK_MASTERS}
+        />,
+      );
+
+      const badge = screen.getByRole('button', { name: /2 cards/i });
+      fireEvent.click(badge);
+      expect(screen.getByTestId('overlap-popover')).toBeInTheDocument();
+
+      // Click outside
+      fireEvent.mouseDown(document.body);
+      expect(screen.queryByTestId('overlap-popover')).not.toBeInTheDocument();
+    });
+
+    it('calls onOpenEditModal and closes popover when clicking a card in popover', () => {
+      const onOpenEditModal = vi.fn();
+      render(
+        <DayColumn
+          dayIndex={0}
+          date={new Date()}
+          activities={partialOverlapActivities}
+          masters={MOCK_MASTERS}
+          onOpenEditModal={onOpenEditModal}
+        />,
+      );
+
+      const badge = screen.getByRole('button', { name: /2 cards/i });
+      fireEvent.click(badge);
+
+      const popover = screen.getByTestId('overlap-popover');
+      // Click on the first activity button inside the popover
+      const popoverButtons = popover.querySelectorAll('button');
+      fireEvent.click(popoverButtons[0]);
+      expect(onOpenEditModal).toHaveBeenCalledWith(partialOverlapActivities[0]);
+      expect(screen.queryByTestId('overlap-popover')).not.toBeInTheDocument();
     });
   });
 });

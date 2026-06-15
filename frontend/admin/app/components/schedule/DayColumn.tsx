@@ -7,17 +7,28 @@ import type { Activity, Master, Studio, StampState, Service } from '@memo/domain
 import { ActivityCard } from './ActivityCard';
 import { OverlapPopover } from './OverlapPopover';
 
-// ─── Direct Overlap Helpers (carousel) ─────────────────────────────────
-// Two activities overlap if their time ranges intersect (pairwise, NOT transitive).
+// ─── Time-Groups Carousel Model ──────────────────────────────────────
+// Activities are grouped by their START time into fixed time windows.
+// Each group has its own carousel that cycles independently.
 
-function getDirectOverlapGroup(activity: Activity, all: Activity[]): Activity[] {
-  const aStart = activity.startTime;
-  const aEnd = activity.startTime + activity.duration;
-  const peers = all.filter((b) => {
-    if (b.id === activity.id) return false;
-    return aStart < b.startTime + b.duration && b.startTime < aEnd;
-  });
-  return [activity, ...peers].sort((a, b) => a.startTime - b.startTime || a.id.localeCompare(b.id));
+type TimeGroup = {
+  id: 'G1' | 'G2' | 'G3';
+  start: number;
+  end: number;
+};
+
+const TIME_GROUPS: TimeGroup[] = [
+  { id: 'G1', start: 9, end: 13 },    // 09:00–12:59
+  { id: 'G2', start: 13, end: 16 },   // 13:00–15:59
+  { id: 'G3', start: 16, end: 24 },   // 16:00–23:59
+];
+
+function getGroupForActivity(activity: Activity): TimeGroup | undefined {
+  return TIME_GROUPS.find(g => activity.startTime >= g.start && activity.startTime < g.end);
+}
+
+function getGroupForTime(time: number): TimeGroup | undefined {
+  return TIME_GROUPS.find(g => time >= g.start && time < g.end);
 }
 
 interface DayColumnProps {
@@ -201,17 +212,25 @@ export function DayColumn({ dayIndex, activities, masters, studios = [], service
   const hasColumnGhost = ghostColumnId === columnId && ghostSlotIndex != null && ghostHeight != null;
 
   // Per-card z-index: each activity has ONE z-index (0 = frontmost) used everywhere.
-  // Each activity's z is its position within its own pairwise overlap group.
+  // Each activity's z is its position within its time group (sorted by startTime).
   // Re-initialize when activities change (e.g., navigating to a new date).
   const [zIndices, setZIndices] = useState<Record<string, number>>({});
+  const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
   useEffect(() => {
     const initial: Record<string, number> = {};
     for (const act of activities) {
-      const group = getDirectOverlapGroup(act, activities);
-      const indexInGroup = group.findIndex(a => a.id === act.id);
+      const group = getGroupForActivity(act);
+      if (!group) {
+        initial[act.id] = 0;
+        continue;
+      }
+      const activitiesInGroup = activities.filter(a => getGroupForActivity(a)?.id === group.id);
+      const sorted = [...activitiesInGroup].sort((a, b) => a.startTime - b.startTime || a.id.localeCompare(b.id));
+      const indexInGroup = sorted.findIndex(a => a.id === act.id);
       initial[act.id] = indexInGroup >= 0 ? indexInGroup : 0;
     }
     setZIndices(initial);
+    setActiveGroupId(null); // reset active group on new activities
   }, [activities]);
 
   // Non-passive wheel handler for scroll carousel
@@ -228,44 +247,45 @@ export function DayColumn({ dayIndex, activities, masters, studios = [], service
       const rect = el.getBoundingClientRect();
       const y = e.clientY - rect.top;
 
-      // Find ALL activities under cursor
-      const activitiesUnderCursor: Activity[] = [];
+      // Find the activity under cursor
+      let actUnderCursor: Activity | undefined;
       for (const act of activities) {
         const topPx = (act.startTime - gridStart) * cellHeight * 2;
         const durMinutes = act.durationMinutes ?? act.duration * 60;
         const heightPx = Math.max((durMinutes / 60) * cellHeight * 2, 52);
         if (y >= topPx && y <= topPx + heightPx) {
-          activitiesUnderCursor.push(act);
+          actUnderCursor = act;
+          break;
         }
       }
+      if (!actUnderCursor) return;
 
-      // Find the frontmost card (z=0) under cursor
-      const frontmost = activitiesUnderCursor.find(a => (zIndices[a.id] ?? 0) === 0);
-      if (!frontmost) return;
+      // Get the time-group of the activity under cursor
+      const group = getGroupForActivity(actUnderCursor);
+      if (!group) return;
 
-      // Get the pairwise overlap group for the frontmost card
-      const group = getDirectOverlapGroup(frontmost, activities);
-      if (group.length <= 1) return;
+      // Get all activities in the same time group
+      const groupActivities = activities
+        .filter(a => getGroupForActivity(a)?.id === group.id)
+        .sort((a, b) => a.startTime - b.startTime || a.id.localeCompare(b.id));
+
+      if (groupActivities.length <= 1) return;
 
       e.preventDefault();
       lastWheelTime.current = now;
+
+      // Set active group for background rendering
+      setActiveGroupId(group.id);
 
       const direction = e.deltaY > 0 ? 1 : -1;  // 1 = scroll down, -1 = scroll up
 
       setZIndices(prev => {
         const newZ = { ...prev };
-        if (direction === 1) {
-          // Scroll down: move z=0 to z=last
-          const sorted = [...group].sort((a, b) => (prev[a.id] ?? 0) - (prev[b.id] ?? 0));
-          for (let i = 0; i < sorted.length; i++) {
-            newZ[sorted[i].id] = (i - 1 + sorted.length) % sorted.length;
-          }
-        } else {
-          // Scroll up: move z=last to z=0
-          const sorted = [...group].sort((a, b) => (prev[a.id] ?? 0) - (prev[b.id] ?? 0));
-          for (let i = 0; i < sorted.length; i++) {
-            newZ[sorted[i].id] = (i + 1) % sorted.length;
-          }
+        const sorted = [...groupActivities].sort((a, b) => (prev[a.id] ?? 0) - (prev[b.id] ?? 0));
+        for (let i = 0; i < sorted.length; i++) {
+          newZ[sorted[i].id] = direction === 1
+            ? (i - 1 + sorted.length) % sorted.length
+            : (i + 1) % sorted.length;
         }
         return newZ;
       });
@@ -324,9 +344,17 @@ export function DayColumn({ dayIndex, activities, masters, studios = [], service
         // Get z-index for this card (per-card model)
         const z = zIndices[activity.id] ?? 0;
 
-        // Get the pairwise overlap group for opacity/scale calculations
-        const group = getDirectOverlapGroup(activity, activities);
-        const totalInSlot = group.length;
+        // Get the time-group for this activity
+        const activityGroup = getGroupForActivity(activity);
+
+        // Count total activities in the same time group
+        const totalInGroup = activityGroup
+          ? activities.filter(a => getGroupForActivity(a)?.id === activityGroup.id).length
+          : 1;
+
+        // Determine if this activity is in the active group
+        const isActive = activeGroupId !== null && activityGroup?.id === activeGroupId;
+        const isBackground = activeGroupId !== null && activityGroup !== undefined && activityGroup.id !== activeGroupId;
 
         let cardOpacity = 1;
         let cardScale = 1;
@@ -335,8 +363,14 @@ export function DayColumn({ dayIndex, activities, masters, studios = [], service
 
         let ox = 0;
         let oy = 0;
-        
-        if (totalInSlot > 1) {
+
+        if (isBackground) {
+          // Background: other group, always behind active
+          cardOpacity = 0.3;
+          cardScale = 1;
+          cardZIndex = 10;
+          isClickable = false;
+        } else if (totalInGroup > 1) {
           isClickable = z === 0;
           cardOpacity = z === 0 ? 1 : Math.max(0, 1 - (z * 0.15));
           cardScale = z === 0 ? 1 : Math.max(0.8, 1 - (z * 0.04));
@@ -347,6 +381,9 @@ export function DayColumn({ dayIndex, activities, masters, studios = [], service
 
         const master = masterMap.get(activity.masterId) || masters[0];
         const isThisDragging = dragId === activity.id;
+
+        // Badge: show only for active cards where totalInGroup > 1 and z === 0
+        const showBadge = totalInGroup > 1 && z === 0 && !isBackground;
 
         return (
           <React.Fragment key={activity.id}>
@@ -368,12 +405,13 @@ export function DayColumn({ dayIndex, activities, masters, studios = [], service
               }}
             />
             {/* "N cards" badge for multi-event slots — opens OverlapPopover */}
-            {totalInSlot > 1 && z === 0 && (
+            {showBadge && (
               <button
                 onClick={(e) => {
                   e.stopPropagation();
-                  // Get all activities in z-order for the overlap group
-                  const groupActivities = group
+                  // Get all activities in the same time group, sorted by z-order
+                  const groupActivities = activities
+                    .filter(a => getGroupForActivity(a)?.id === activityGroup?.id)
                     .sort((a, b) => (zIndices[a.id] ?? 0) - (zIndices[b.id] ?? 0));
                   // Toggle: close if same group, otherwise open
                   if (popoverData?.activities === groupActivities) {
@@ -391,7 +429,7 @@ export function DayColumn({ dayIndex, activities, masters, studios = [], service
                 }}
                 title="View all overlapping cards"
               >
-                {totalInSlot} cards
+                {totalInGroup} cards
               </button>
             )}
           </React.Fragment>

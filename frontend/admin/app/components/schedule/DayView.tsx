@@ -337,6 +337,13 @@ export function DayView() {
               key={col.id}
               data-testid={`column-header-${col.id}`}
               draggable={modifierHeld}
+              onPointerDown={(e) => {
+                // Prevent @dnd-kit's PointerSensor from capturing this event
+                // so native HTML5 DnD can handle column reorder
+                if (modifierHeld) {
+                  e.stopPropagation();
+                }
+              }}
               onDragStart={(e) => {
                 if (!modifierHeld) {
                   e.preventDefault();

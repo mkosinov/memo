@@ -42,29 +42,23 @@ export function useColumnReorder({ columns, columnMode, initialOrder, onOrderCha
     }
     
     // Subsequent updates: preserve user order, insert new IDs at their position from columns
+    // NOTE: We do NOT remove IDs that are missing from columns — they're just filtered out
+    // and will reappear at their original position when re-added. The orderedColumns memo
+    // handles display filtering by only returning IDs present in both columnOrder and columns.
     setColumnOrder((prev) => {
-      const columnIds = new Set(columns.map((c) => c.id));
-      
-      // Remove IDs that are no longer in columns
-      const filtered = prev.filter((id) => columnIds.has(id));
-      
       // Find new IDs that need to be added
-      const existingIds = new Set(filtered);
+      const existingIds = new Set(prev);
       const newIds = columns.filter((c) => !existingIds.has(c.id)).map((c) => c.id);
       
       if (newIds.length === 0) {
-        // No new IDs, just return filtered (removed IDs)
-        if (filtered.length === prev.length && filtered.every((id, i) => prev[i] === id)) {
-          return prev;
-        }
-        return filtered;
+        return prev;
       }
       
       // Insert new IDs at their position relative to existing IDs
       // Strategy: for each new ID, find its position in columns array,
-      // then find where it should be inserted in filtered based on neighbors
+      // then find where it should be inserted based on neighbors
       const newIdSet = new Set(newIds);
-      const result: string[] = [...filtered];
+      const result: string[] = [...prev];
       
       // Process new IDs in reverse order of their position in columns
       // (so earlier positions don't shift later insertions)

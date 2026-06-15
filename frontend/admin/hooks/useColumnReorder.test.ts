@@ -235,4 +235,77 @@ describe('useColumnReorder', () => {
     const lastCall = onOrderChange.mock.calls[onOrderChange.mock.calls.length - 1][0];
     expect(lastCall).toEqual(['m2', 'm1', 'm3']);
   });
+
+  it('preserves column position when column is filtered out and re-added', () => {
+    // Start with all 3 masters
+    const { result, rerender } = renderHook(
+      (opts: Parameters<typeof useColumnReorder>[0]) => useColumnReorder(opts),
+      {
+        initialProps: {
+          columns,
+          columnMode: 'masters' as const,
+        },
+      },
+    );
+
+    // Initial order: [m1, m2, m3]
+    expect(result.current.columnOrder).toEqual(['m1', 'm2', 'm3']);
+    expect(result.current.orderedColumns.map((c) => c.id)).toEqual(['m1', 'm2', 'm3']);
+
+    // Simulate filter: remove m2 from visible columns
+    rerender({
+      columns: [columns[0], columns[2]], // only m1, m3
+      columnMode: 'masters',
+    });
+
+    // m2 is removed from columnOrder (it's filtered out)
+    // orderedColumns only shows m1, m3
+    expect(result.current.orderedColumns.map((c) => c.id)).toEqual(['m1', 'm3']);
+
+    // Re-add m2 to filter
+    rerender({
+      columns, // back to m1, m2, m3
+      columnMode: 'masters',
+    });
+
+    // m2 should appear at its original position (index 1), NOT at the end
+    expect(result.current.columnOrder).toEqual(['m1', 'm2', 'm3']);
+    expect(result.current.orderedColumns.map((c) => c.id)).toEqual(['m1', 'm2', 'm3']);
+  });
+
+  it('preserves column position after re-add even with user reorder', () => {
+    // Start with [m1, m2, m3], reorder to [m2, m1, m3]
+    const { result, rerender } = renderHook(
+      (opts: Parameters<typeof useColumnReorder>[0]) => useColumnReorder(opts),
+      {
+        initialProps: {
+          columns,
+          columnMode: 'masters' as const,
+        },
+      },
+    );
+
+    act(() => {
+      result.current.onColumnDrop('m1', 'm3');
+    });
+    // Now order is [m2, m1, m3]
+    expect(result.current.columnOrder).toEqual(['m2', 'm1', 'm3']);
+
+    // Filter out m1 (keep only m2, m3)
+    rerender({
+      columns: [columns[1], columns[2]], // only m2, m3
+      columnMode: 'masters',
+    });
+
+    expect(result.current.orderedColumns.map((c) => c.id)).toEqual(['m2', 'm3']);
+
+    // Re-add m1 — should appear at position 1 (between m2 and m3), not at end
+    rerender({
+      columns, // back to all
+      columnMode: 'masters',
+    });
+
+    expect(result.current.columnOrder).toEqual(['m2', 'm1', 'm3']);
+    expect(result.current.orderedColumns.map((c) => c.id)).toEqual(['m2', 'm1', 'm3']);
+  });
 });

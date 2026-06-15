@@ -375,8 +375,9 @@ export function DayView() {
         const overData = over.data?.current as Record<string, unknown> | undefined;
 
         if (activeData?.type === 'column') {
-          // Column reorder — only act if drop target is also a column (not a slot)
-          if (overData?.type === 'column' && active.id !== over.id) {
+          // Column reorder — check if drop target is a column by ID (not a slot droppable)
+          const columnIds = new Set(orderedColumns.map(c => c.id));
+          if (columnIds.has(String(over.id)) && active.id !== over.id) {
             onColumnDrop(String(active.id), String(over.id));
           }
         } else {

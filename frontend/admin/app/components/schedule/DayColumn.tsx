@@ -236,7 +236,8 @@ export function DayColumn({ dayIndex, activities, masters, studios = [], service
           e.preventDefault();
           lastWheelTime.current = now;
 
-          const groupKey = group.map(a => a.id).join(',');
+          // Use sorted IDs for consistent groupKey regardless of which activity found
+          const groupKey = group.map(a => a.id).sort().join(',');
           const direction = e.deltaY > 0 ? 1 : -1;
 
           setVisibleIndices((prev) => {
@@ -300,7 +301,7 @@ export function DayColumn({ dayIndex, activities, masters, studios = [], service
       {activities.map((activity) => {
         // Compute direct overlap group for this activity (pairwise, not transitive)
         const group = getDirectOverlapGroup(activity, activities);
-        const groupKey = group.map(a => a.id).join(',');
+        const groupKey = group.map(a => a.id).sort().join(',');
         const indexInGroup = group.findIndex(a => a.id === activity.id);
         const totalInSlot = group.length;
         const visibleIndex = visibleIndices[groupKey] || 0;

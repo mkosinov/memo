@@ -216,14 +216,15 @@ export function DayColumn({ dayIndex, activities, masters, studios = [], service
       const y = e.clientY - rect.top;
 
       // Find the activity under cursor using Y position
+      // Use the LAST matching activity (topmost in visual stack)
       let activityUnderCursor: Activity | null = null;
       for (const act of activities) {
         const topPx = (act.startTime - gridStart) * cellHeight * 2;
         const durMinutes = act.durationMinutes ?? act.duration * 60;
-        const heightPx = Math.max((durMinutes / 60) * cellHeight * 2 - 10, 52);
+        const heightPx = Math.max((durMinutes / 60) * cellHeight * 2, 52);
         if (y >= topPx && y <= topPx + heightPx) {
           activityUnderCursor = act;
-          break;
+          // Don't break — keep looking for later activities (higher in stack)
         }
       }
 

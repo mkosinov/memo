@@ -188,8 +188,14 @@ export function DayView() {
       const filterSet = new Set(filterLocationIds);
       const order = getColumnOrder('locations');
       if (order.length > 0) {
-        return order
-          .filter(id => filterSet.has(id))
+        const ordered = order.filter(id => filterSet.has(id));
+        // Append any filter IDs not in saved order (newly re-added columns)
+        for (const id of filterLocationIds) {
+          if (!ordered.includes(id)) {
+            ordered.push(id);
+          }
+        }
+        return ordered
           .map(id => allLocations.find(l => l.id === id))
           .filter(Boolean) as typeof allLocations;
       }
@@ -209,8 +215,14 @@ export function DayView() {
       const filterSet = new Set(filterMasterIds);
       const order = getColumnOrder('masters');
       if (order.length > 0) {
-        return order
-          .filter(id => filterSet.has(id))
+        const ordered = order.filter(id => filterSet.has(id));
+        // Append any filter IDs not in saved order (newly re-added columns)
+        for (const id of filterMasterIds) {
+          if (!ordered.includes(id)) {
+            ordered.push(id);
+          }
+        }
+        return ordered
           .map(id => allMasters.find(m => m.id === id))
           .filter(Boolean) as typeof allMasters;
       }

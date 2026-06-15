@@ -256,6 +256,70 @@ describe('DayView', () => {
     });
   });
 
+  describe('column re-appears after filter re-add (Bug 2)', () => {
+    it('shows master column that was removed from filter and re-added', () => {
+      // Setup: 4 masters, user had order [m1, m3, m4] (m2 was deselected and removed from order)
+      // Now m2 is re-added to filter — it should appear
+      const allMasters = [
+        { id: 'm1', name: 'Ольга Середа', shortName: 'Ольга', color: '#5B8C7A' },
+        { id: 'm2', name: 'Юлия Большакова', shortName: 'Юлия', color: '#6B7E9C' },
+        { id: 'm3', name: 'Анна Иванова', shortName: 'Анна', color: '#8B6E4E' },
+        { id: 'm4', name: 'Мария Петрова', shortName: 'Мария', color: '#4E8B6E' },
+      ];
+      const activities = [
+        createMockActivity({ id: 'ev_1', masterId: 'm1', date: '2026-06-15' }),
+        createMockActivity({ id: 'ev_2', masterId: 'm2', date: '2026-06-15' }),
+        createMockActivity({ id: 'ev_3', masterId: 'm3', date: '2026-06-15' }),
+        createMockActivity({ id: 'ev_4', masterId: 'm4', date: '2026-06-15' }),
+      ];
+      renderDayView({
+        columnMode: 'masters',
+        masters: allMasters,
+        filterMasterIds: ['m1', 'm2', 'm3', 'm4'], // all selected (m2 re-added)
+        _columnOrderMasters: ['m1', 'm3', 'm4'],    // m2 missing from saved order
+        selectedDay: new Date(2026, 5, 15),
+        activities,
+        loading: false,
+        error: null,
+      });
+      // All 4 masters should appear — m2 must NOT be missing
+      expect(screen.getByText('Ольга Середа')).toBeInTheDocument();
+      expect(screen.getByText('Юлия Большакова')).toBeInTheDocument();
+      expect(screen.getByText('Анна Иванова')).toBeInTheDocument();
+      expect(screen.getByText('Мария Петрова')).toBeInTheDocument();
+    });
+
+    it('shows location column that was removed from filter and re-added', () => {
+      const allLocations = [
+        { id: 'alpika', name: 'Альпика', color: '#5B8C7A' },
+        { id: 'grand', name: 'Гранд Отель Поляна', color: '#6B7E9C' },
+        { id: 'park', name: 'Парк Отдыха', color: '#8B6E4E' },
+        { id: 'center', name: 'Центр', color: '#4E8B6E' },
+      ];
+      const activities = [
+        createMockActivity({ id: 'ev_1', locationId: 'alpika', date: '2026-06-15' }),
+        createMockActivity({ id: 'ev_2', locationId: 'grand', date: '2026-06-15' }),
+        createMockActivity({ id: 'ev_3', locationId: 'park', date: '2026-06-15' }),
+        createMockActivity({ id: 'ev_4', locationId: 'center', date: '2026-06-15' }),
+      ];
+      renderDayView({
+        columnMode: 'locations',
+        locations: allLocations,
+        filterLocationIds: ['alpika', 'grand', 'park', 'center'], // all selected (grand re-added)
+        _columnOrderLocations: ['alpika', 'park', 'center'],      // grand missing from saved order
+        selectedDay: new Date(2026, 5, 15),
+        activities,
+        loading: false,
+        error: null,
+      });
+      // All 4 locations should appear — grand must NOT be missing
+      expect(screen.getByText('Альпика')).toBeInTheDocument();
+      expect(screen.getByText('Гранд Отель Поляна')).toBeInTheDocument();
+      expect(screen.getByText('Парк Отдыха')).toBeInTheDocument();
+      expect(screen.getByText('Центр')).toBeInTheDocument();
+    });
+  });
+
   describe('column position after re-adding to filter (Bug 2)', () => {
     it('preserves user column order when master filter is active', () => {
       // User has a preferred order: m2 first, then m1

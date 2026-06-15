@@ -40,6 +40,9 @@ export function DayView() {
   const { showToast } = useUI();
   const { getColumnOrder, settings, setColumnOrder: saveColumnOrder } = useUserSettings();
 
+  // Active dragged column ghost state
+  const [activeColumn, setActiveColumn] = useState<{ id: string; name: string } | null>(null);
+
   // Modal state
   const [modalOpen, setModalOpen] = useState(false);
   const [modalActivity, setModalActivity] = useState<Activity | null>(null);
@@ -330,14 +333,20 @@ export function DayView() {
       collisionDetection={closestCenter}
       onDragStart={(event) => {
         const activeData = event.active.data?.current as Record<string, unknown> | undefined;
-        // Only handle activity card drags — columns are handled by sortable's own logic
-        if (activeData?.type !== 'column') {
-          const nativeEvent = event.activatorEvent as MouseEvent | undefined;
-          onDragStart(
-            { active: { id: event.active.id, data: { current: { activity: activeData?.activity as Activity | undefined } } } },
-            { altKey: nativeEvent?.altKey },
-          );
+
+        if (activeData?.type === 'column') {
+          // Column drag — show ghost overlay
+          const col = activeData.column as { id: string; name: string };
+          setActiveColumn(col);
+          return;
         }
+
+        // Activity card drag
+        const nativeEvent = event.activatorEvent as MouseEvent | undefined;
+        onDragStart(
+          { active: { id: event.active.id, data: { current: { activity: activeData?.activity as Activity | undefined } } } },
+          { altKey: nativeEvent?.altKey },
+        );
       }}
       onDragOver={(event) => {
         const activeData = event.active.data?.current as Record<string, unknown> | undefined;
@@ -352,6 +361,10 @@ export function DayView() {
       }}
       onDragEnd={(event) => {
         const { active, over } = event;
+
+        // Clear column drag state regardless of outcome
+        setActiveColumn(null);
+
         if (!over) return;
 
         const activeData = active.data?.current as Record<string, unknown> | undefined;
@@ -373,6 +386,7 @@ export function DayView() {
       }}
       onDragCancel={() => {
         handleDragCancel();
+        setActiveColumn(null);
       }}
     >
       {/* Column headers — inside DndContext, using SortableContext for @dnd-kit sortable */}
@@ -442,7 +456,19 @@ export function DayView() {
       </div>
 
       <DragOverlay dropAnimation={null}>
-        {activeDragActivity && dragMaster ? (
+        {activeColumn ? (
+          <div
+            className="bg-white border rounded px-3 py-2 text-xs font-medium shadow-lg opacity-80"
+            style={{
+              minWidth: '120px',
+              color: 'var(--ink-mid)',
+              borderColor: 'var(--brand, #004D56)',
+            }}
+            data-drag-ghost="true"
+          >
+            <div className="uppercase tracking-wide text-center">{activeColumn.name}</div>
+          </div>
+        ) : activeDragActivity && dragMaster ? (
           <div className="opacity-80 scale-95 relative" style={{ width: '180px' }} data-drag-ghost="true">
             {draggedSnappedTime != null && (
               <div

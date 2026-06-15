@@ -279,6 +279,9 @@ export function DayView() {
     return map;
   }, [resolvedActivities, columnMode]);
 
+  // Dynamic column ghost height based on actual grid range
+  const columnGhostHeight = (gridRange.end - gridRange.start) * cellHeight * 2;
+
   const today = new Date();
 
   const dragMaster = activeDragActivity
@@ -461,7 +464,7 @@ export function DayView() {
             className="flex flex-col bg-white border rounded shadow-lg opacity-80 overflow-hidden"
             style={{
               width: '180px',
-              height: '400px',
+              height: `${columnGhostHeight}px`,
               borderColor: 'var(--brand, #004D56)',
             }}
             data-drag-ghost="true"

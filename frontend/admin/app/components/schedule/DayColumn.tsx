@@ -94,12 +94,14 @@ interface DroppableSlotProps {
   services?: Service[];
   cellHeight?: number;
   columnId?: string;
+  /** When true, suppress slot-level isOver border (column ghost already covers it) */
+  suppressIsOverGhost?: boolean;
   children?: React.ReactNode;
 }
 
 // ─── DroppableSlot ────────────────────────────────────────────────────────
 
-function DroppableSlot({ dayIndex, slotIndex, startTime, isHour, isHalfHour, dragCopy, onClick, onOpenModal, stampReady, stamp, masters, services, cellHeight = 60, columnId, children }: DroppableSlotProps) {
+function DroppableSlot({ dayIndex, slotIndex, startTime, isHour, isHalfHour, dragCopy, onClick, onOpenModal, stampReady, stamp, masters, services, cellHeight = 60, columnId, suppressIsOverGhost, children }: DroppableSlotProps) {
   const { isOver, setNodeRef } = useDroppable({
     id: `slot-${columnId ?? dayIndex}-${slotIndex}`,
     data: { dayIndex, slotIndex, columnId },
@@ -133,7 +135,7 @@ function DroppableSlot({ dayIndex, slotIndex, startTime, isHour, isHalfHour, dra
           position: 'relative' as const,
         };
       })()
-    : isOver
+    : !suppressIsOverGhost && isOver
       ? {
           border: `2px dashed ${dragCopy ? '#22c55e' : 'var(--brand, #004D56)'}`,
           backgroundColor: dragCopy ? 'rgba(34,197,94,0.06)' : 'rgba(0,77,86,0.085)',
@@ -226,6 +228,9 @@ export function DayColumn({ dayIndex, activities, masters, studios = [], service
 
   const masterMap = useMemo(() => new Map(masters.map(a => [a.id, a])), [masters]);
 
+  // When a column-level ghost is active for this column, suppress individual slot-level isOver borders
+  const hasColumnGhost = ghostColumnId === columnId && ghostSlotIndex != null && ghostHeight != null;
+
   // Full range overlap detection (X+Y offset for visual stacking)
   const overlapMap = useMemo(() => buildOverlapMap(activities), [activities]);
 
@@ -308,6 +313,7 @@ export function DayColumn({ dayIndex, activities, masters, studios = [], service
             services={services}
             cellHeight={slotHeight}
             columnId={columnId}
+            suppressIsOverGhost={hasColumnGhost}
           />
         );
       })}

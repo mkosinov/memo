@@ -125,18 +125,16 @@ export function ActivityCard({ activity, master, locations = [], style, onEdit, 
         )}
       </div>
 
-      {/* 2. TITLE + AGE (always rendered, line-clamp-2) */}
+      {/* 2. TITLE + AGE (line-clamp-2, age on right if fits) */}
       <div className="px-2 overflow-hidden">
-        <div className="flex justify-between items-start">
-          {/* Title text — left side */}
+        <div className="flex items-start gap-1">
           <div
-            className={`text-sm font-semibold leading-tight text-black ${titleLines === 2 ? 'line-clamp-2' : 'truncate'}`}
+            className={`text-sm font-semibold leading-tight text-black flex-1 min-w-0 ${titleLines === 2 ? 'line-clamp-2' : 'truncate'}`}
             title={activity.serviceName}
           >
             {activity.serviceName}
           </div>
-          {/* Age text — right side */}
-          <span className="flex-shrink-0 ml-1 text-[12px] text-black/70 font-normal">
+          <span className="flex-shrink-0 text-[12px] text-black/70 font-normal">
             {activity.minAge}+
           </span>
         </div>

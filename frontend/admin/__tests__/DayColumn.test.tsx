@@ -708,6 +708,31 @@ describe('DayColumn', () => {
       expect(screen.queryByTestId('overlap-popover')).not.toBeInTheDocument();
     });
 
+    it('badge z-index is above popover z-index so toggle click is not swallowed', () => {
+      // The OverlapPopover renders with position:fixed and z-index:100.
+      // If the badge has z-index below 100, clicking the badge position hits the
+      // popover (which is above), preventing the toggle-close from firing.
+      // Badge must be above 100 to receive clicks when popover is open.
+      render(
+        <DayColumn
+          dayIndex={0}
+          date={new Date()}
+          activities={partialOverlapActivities}
+          masters={MOCK_MASTERS}
+        />,
+      );
+
+      const badge = screen.getByRole('button', { name: /2 cards/i });
+
+      // Extract z-index from the Tailwind class (e.g., z-[110] → 110)
+      const classMatch = badge.className.match(/z-\[(\d+)\]/);
+      expect(classMatch).toBeTruthy();
+      const badgeZIndex = parseInt(classMatch![1], 10);
+
+      // Popover uses zIndex: 100 — badge must be above that
+      expect(badgeZIndex).toBeGreaterThan(100);
+    });
+
     it('badge mousedown prevents outside-click handler from interfering with toggle', () => {
       // Simulates the real-world scenario: mousedown fires on badge before click.
       // Without stopPropagation on mousedown, the outside-click handler would close

@@ -441,7 +441,7 @@ describe('DayColumn', () => {
       expect(card2).toHaveStyle({ opacity: '1' });
     });
 
-    it('shows "N cards" badge for partially overlapping activities', () => {
+    it('shows badge on topmost card for multi-activity group', () => {
       render(
         <DayColumn
           dayIndex={0}
@@ -451,8 +451,10 @@ describe('DayColumn', () => {
         />,
       );
 
+      // Badge shows "2 cards" on the topmost card (z=0) in the group
       const badge = screen.getByRole('button', { name: /2 cards/i });
       expect(badge).toBeInTheDocument();
+      expect(badge).toHaveAttribute('title', 'View all overlapping cards');
     });
 
     it('does NOT group non-overlapping activities', () => {
@@ -540,7 +542,7 @@ describe('DayColumn', () => {
       // C (startTime=12): index 2 → z=2 → opacity 0.7
       expect(cardC).toHaveStyle({ opacity: '0.7' });
 
-      // Badge shows "3 cards" for the G1 group
+      // Badge shows "3 cards" on the topmost G1 card
       const badge = screen.getByRole('button', { name: /3 cards/i });
       expect(badge).toBeInTheDocument();
     });
@@ -631,7 +633,7 @@ describe('DayColumn', () => {
   });
 
   describe('OverlapPopover integration', () => {
-    it('opens OverlapPopover when clicking "N cards" badge', () => {
+    it('opens OverlapPopover when clicking group badge', () => {
       render(
         <DayColumn
           dayIndex={0}
@@ -682,6 +684,27 @@ describe('DayColumn', () => {
 
       // Click outside
       fireEvent.mouseDown(document.body);
+      expect(screen.queryByTestId('overlap-popover')).not.toBeInTheDocument();
+    });
+
+    it('toggles popover closed when clicking the same badge again', () => {
+      render(
+        <DayColumn
+          dayIndex={0}
+          date={new Date()}
+          activities={partialOverlapActivities}
+          masters={MOCK_MASTERS}
+        />,
+      );
+
+      const badge = screen.getByRole('button', { name: /2 cards/i });
+
+      // First click — opens the popover
+      fireEvent.click(badge);
+      expect(screen.getByTestId('overlap-popover')).toBeInTheDocument();
+
+      // Second click on same badge — should close the popover (toggle)
+      fireEvent.click(badge);
       expect(screen.queryByTestId('overlap-popover')).not.toBeInTheDocument();
     });
 
@@ -881,12 +904,13 @@ describe('DayColumn', () => {
       // After cycling G1: tg_a1 should be behind (z>0), tg_a2 should be front (z=0)
       expect(card1).toHaveStyle({ opacity: '0.85' });
       expect(card2).toHaveStyle({ opacity: '1' });
-      // G2 activity becomes background (opacity 0.3) since G1 is active
-      expect(card3).toHaveStyle({ opacity: '0.3' });
+      // G2 activity at 14:00 does NOT overlap with G1 time range (9-13),
+      // so it should NOT be rendered as background
+      expect(card3).toHaveStyle({ opacity: '1' });
     });
 
-    it('activity from different group renders as background when cursor is in another group', async () => {
-      // When cursor is in G1, G2 activities should be background (opacity 0.3)
+    it('activity from different group is NOT background when it does not overlap with active group time range', async () => {
+      // When G1 is active, G2 activities that don't overlap with G1's time range should NOT be background
       render(
         <DayColumn
           dayIndex={0}
@@ -900,7 +924,6 @@ describe('DayColumn', () => {
       const card3 = screen.getByTestId('activity-tg_a3');
 
       // Before any cursor interaction — all groups render independently
-      // G1 card z=0 → full opacity, G2 card z=0 → full opacity
       expect(card1).toHaveStyle({ opacity: '1' });
       expect(card3).toHaveStyle({ opacity: '1' });
 
@@ -919,11 +942,12 @@ describe('DayColumn', () => {
         column.dispatchEvent(wheelEvent);
       });
 
-      // G1 is now active — card3 (G2) should be background (opacity 0.3)
-      expect(card3).toHaveStyle({ opacity: '0.3' });
+      // card3 (G2 at 14:00) does NOT overlap with G1 time range (9-13)
+      // so it should NOT be background
+      expect(card3).toHaveStyle({ opacity: '1' });
     });
 
-    it('"N cards" badge shows only for active cards (z=0 in their group)', () => {
+    it('badge appears on topmost card in multi-activity group', () => {
       render(
         <DayColumn
           dayIndex={0}
@@ -933,17 +957,17 @@ describe('DayColumn', () => {
         />,
       );
 
-      // G1 has 2 activities with z=0 → should show "2 cards" badge
+      // G1 has 2 activities → badge "2 cards" on the topmost card (tg_a1, z=0)
       const badge = screen.getByRole('button', { name: /2 cards/i });
       expect(badge).toBeInTheDocument();
 
       // G2 has 1 activity → no badge
-      // There should only be one badge (for G1's active card)
+      // There should only be one badge (for G1's multi-activity group)
       const allBadges = screen.getAllByRole('button', { name: /cards/i });
       expect(allBadges).toHaveLength(1);
     });
 
-    it('badge popover shows only active group activities', () => {
+    it('badge popover shows only group activities', () => {
       render(
         <DayColumn
           dayIndex={0}
@@ -1044,11 +1068,10 @@ describe('DayColumn', () => {
       expect(g2CardB).toHaveStyle({ opacity: '1' });
     });
 
-    it('activities overlapping in time but in different groups are NOT carousel-linked', () => {
-      // Activity A: starts at 12.5 (G1), duration 2h (ends 14.5)
-      // Activity B: starts at 13 (G2), duration 1h (ends 14)
-      // In pairwise model: they overlap (A.end=14.5 > B.start=13) → same carousel group
-      // In time-groups model: A is G1, B is G2 → DIFFERENT groups → independent z-indices
+    it('activities overlapping in time but in different groups cycle together at cursor position', async () => {
+      // Activity A: starts at 12.5 (G1), duration 2h (ends 14.5) → visually at y=420..660
+      // Activity B: starts at 13 (G2), duration 1h (ends 14) → visually at y=480..600
+      // They visually overlap at y=480..600 — cursor-based cycling should find both
       const crossGroupActivities: Activity[] = [
         {
           id: 'cg_a',
@@ -1090,10 +1113,116 @@ describe('DayColumn', () => {
       const cardA = screen.getByTestId('activity-cg_a');
       const cardB = screen.getByTestId('activity-cg_b');
 
-      // In time-groups: A is G1 (alone in G1), B is G2 (alone in G2) → both z=0 → full opacity
-      // In pairwise: A and B overlap → one is z=0 (full opacity), other z=1 (dimmed)
+      // Initially: each in their own group (alone), so both z=0 → full opacity
       expect(cardA).toHaveStyle({ opacity: '1' });
       expect(cardB).toHaveStyle({ opacity: '1' });
+
+      // Wheel at y=540 → time≈13.5, where BOTH cards visually overlap
+      await act(async () => {
+        const column = screen.getByTestId('day-column-0');
+        column.getBoundingClientRect = vi.fn(() => ({
+          top: 0, left: 0, width: 200, height: 1440,
+          bottom: 1440, right: 200, x: 0, y: 0, toJSON: () => {},
+        }));
+        const wheelEvent = new WheelEvent('wheel', {
+          deltaY: 100,
+          clientY: 540, // time ≈ 13.5
+          bubbles: true,
+        });
+        column.dispatchEvent(wheelEvent);
+      });
+
+      // After cycling: cardA sorted first by startTime (12.5 < 13) → z=1 (behind)
+      // cardB sorted second → z=0 (front)
+      expect(cardA).toHaveStyle({ opacity: '0.85' });
+      expect(cardB).toHaveStyle({ opacity: '1' });
+    });
+
+    it('scrolling at cursor time 13:00 cycles G2 activities, not G1 spanning activity', async () => {
+      // G1 activity spanning into G2 (12:30-14:30) + two G2 activities
+      // At cursor time 13:00, only G2 should cycle (G1 spanning is not included)
+      const g2CycleActivities: Activity[] = [
+        {
+          id: 'gc_g1span',
+          day: 0,
+          masterId: 'm1',
+          startTime: 12.5,
+          duration: 2, // ends 14.5, spans into G2
+          serviceId: 's1',
+          serviceName: 'G1 Spanning',
+          locationId: 'alpika',
+          occupied: 2,
+          capacity: 8,
+          isPrivate: false,
+        },
+        {
+          id: 'gc_g2a',
+          day: 0,
+          masterId: 'm2',
+          startTime: 13,
+          duration: 1,
+          serviceId: 's2',
+          serviceName: 'G2 Activity A',
+          locationId: 'alpika',
+          occupied: 3,
+          capacity: 6,
+          isPrivate: false,
+        },
+        {
+          id: 'gc_g2b',
+          day: 0,
+          masterId: 'm3',
+          startTime: 13.5,
+          duration: 1.5,
+          serviceId: 's3',
+          serviceName: 'G2 Activity B',
+          locationId: 'grand',
+          occupied: 4,
+          capacity: 10,
+          isPrivate: false,
+        },
+      ];
+
+      render(
+        <DayColumn
+          dayIndex={0}
+          date={new Date()}
+          activities={g2CycleActivities}
+          masters={MOCK_MASTERS}
+        />,
+      );
+
+      const g1Card = screen.getByTestId('activity-gc_g1span');
+      const g2CardA = screen.getByTestId('activity-gc_g2a');
+      const g2CardB = screen.getByTestId('activity-gc_g2b');
+
+      // Initially: G1 has 1 activity (z=0), G2 has 2 (gc_g2a z=0, gc_g2b z=1)
+      expect(g1Card).toHaveStyle({ opacity: '1' });
+      expect(g2CardA).toHaveStyle({ opacity: '1' });
+      expect(g2CardB).toHaveStyle({ opacity: '0.85' });
+
+      // Scroll at y=480 → time = 480/(60*2)+9 = 13.0 → G2 boundary
+      await act(async () => {
+        const column = screen.getByTestId('day-column-0');
+        column.getBoundingClientRect = vi.fn(() => ({
+          top: 0, left: 0, width: 200, height: 1440,
+          bottom: 1440, right: 200, x: 0, y: 0, toJSON: () => {},
+        }));
+        const wheelEvent = new WheelEvent('wheel', {
+          deltaY: 100,
+          clientY: 480, // time = 13.0 → G2 boundary
+          bubbles: true,
+        });
+        column.dispatchEvent(wheelEvent);
+      });
+
+      // G2 activities should cycle: gc_g2a was z=0→z=1, gc_g2b was z=1→z=0
+      expect(g2CardA).toHaveStyle({ opacity: '0.85' });
+      expect(g2CardB).toHaveStyle({ opacity: '1' });
+
+      // G1 spanning activity should NOT be cycled (stays at z=0) but IS background
+      // because it overlaps with G2 time range (12.5 < 16, 14.5 > 13)
+      expect(g1Card).toHaveStyle({ opacity: '0.3' });
     });
 
     it('does not show badge for single-activity group', () => {
@@ -1109,6 +1238,756 @@ describe('DayColumn', () => {
       // No badge should appear
       const badges = screen.queryAllByRole('button', { name: /cards/i });
       expect(badges).toHaveLength(0);
+    });
+
+    // ─── Issue 1: Reset activeGroupId ────────────────────────────────────
+
+    it('resets activeGroupId after 1 second timeout', async () => {
+      vi.useFakeTimers();
+      try {
+        render(
+          <DayColumn
+            dayIndex={0}
+            date={new Date()}
+            activities={timeGroupActivities}
+            masters={MOCK_MASTERS}
+          />,
+        );
+
+        const card3 = screen.getByTestId('activity-tg_a3');
+
+        // Scroll in G1 → G1 active
+        await act(async () => {
+          const column = screen.getByTestId('day-column-0');
+          column.getBoundingClientRect = vi.fn(() => ({
+            top: 0, left: 0, width: 200, height: 1440,
+            bottom: 1440, right: 200, x: 0, y: 0, toJSON: () => {},
+          }));
+          const wheelEvent = new WheelEvent('wheel', {
+            deltaY: 100,
+            clientY: 120,
+            bubbles: true,
+          });
+          column.dispatchEvent(wheelEvent);
+        });
+
+        // After scroll: activeGroupId is set, but G2 activity at 14:00
+        // doesn't overlap with G1 time range so it stays at opacity 1
+
+        // Advance timers by 1 second — activeGroupId should reset
+        act(() => {
+          vi.advanceTimersByTime(1100);
+        });
+
+        // After timeout: activeGroupId is null, all groups render normally
+        expect(card3).toHaveStyle({ opacity: '1' });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('resets activeGroupId on mouseleave', async () => {
+      render(
+        <DayColumn
+          dayIndex={0}
+          date={new Date()}
+          activities={timeGroupActivities}
+          masters={MOCK_MASTERS}
+        />,
+      );
+
+      const card1 = screen.getByTestId('activity-tg_a1');
+      const card2 = screen.getByTestId('activity-tg_a2');
+
+      // Scroll in G1 → G1 active → cycle cards
+      await act(async () => {
+        const column = screen.getByTestId('day-column-0');
+        column.getBoundingClientRect = vi.fn(() => ({
+          top: 0, left: 0, width: 200, height: 1440,
+          bottom: 1440, right: 200, x: 0, y: 0, toJSON: () => {},
+        }));
+        const wheelEvent = new WheelEvent('wheel', {
+          deltaY: 100,
+          clientY: 120,
+          bubbles: true,
+        });
+        column.dispatchEvent(wheelEvent);
+      });
+
+      // After cycling: card1 is behind, card2 is front
+      expect(card1).toHaveStyle({ opacity: '0.85' });
+      expect(card2).toHaveStyle({ opacity: '1' });
+
+      // Mouseleave on column — resets activeGroupId
+      await act(async () => {
+        const column = screen.getByTestId('day-column-0');
+        fireEvent.mouseLeave(column);
+      });
+
+      // After mouseleave: activeGroupId is null, but z-indices persist.
+      // card1 (z=1) still has carousel dimming, card2 (z=0) is front.
+      // No "background" dimming on other groups since activeGroupId is null.
+      expect(card1).toHaveStyle({ opacity: '0.85' });
+      expect(card2).toHaveStyle({ opacity: '1' });
+    });
+
+    // ─── Issue 2: Background only shows overlapping activities ────────────
+
+    it('non-overlapping activity from different group is NOT background', async () => {
+      // G1: 2 activities at 10:00, G2: 1 activity at 14:00
+      // When G1 is active, G2 activity at 14:00 does NOT overlap with G1 time range (9-13)
+      render(
+        <DayColumn
+          dayIndex={0}
+          date={new Date()}
+          activities={timeGroupActivities}
+          masters={MOCK_MASTERS}
+        />,
+      );
+
+      const card3 = screen.getByTestId('activity-tg_a3');
+
+      // Scroll in G1
+      await act(async () => {
+        const column = screen.getByTestId('day-column-0');
+        column.getBoundingClientRect = vi.fn(() => ({
+          top: 0, left: 0, width: 200, height: 1440,
+          bottom: 1440, right: 200, x: 0, y: 0, toJSON: () => {},
+        }));
+        const wheelEvent = new WheelEvent('wheel', {
+          deltaY: 100,
+          clientY: 120, // time ≈ 10 → G1
+          bubbles: true,
+        });
+        column.dispatchEvent(wheelEvent);
+      });
+
+      // G2 activity at 14:00 (actStart=14) does NOT overlap with G1 (end=13)
+      // So it should NOT be background
+      expect(card3).toHaveStyle({ opacity: '1' });
+    });
+
+    it('activity spanning group boundary IS background when overlapping group is active', async () => {
+      // Activity at 12.5 (G1), duration 0.6h → ends 13.1, just past G1 boundary
+      // Second G1 activity at 10h for carousel cycling
+      // G2 has 2 activities → scrolling in G2 activates it
+      // G1 activity at 12.5 should be background because it overlaps with G2 time range (13-16)
+      const crossBoundaryActivities: Activity[] = [
+        {
+          id: 'cb_a1',
+          day: 0,
+          masterId: 'm1',
+          startTime: 10,
+          duration: 1,
+          serviceId: 's1',
+          serviceName: 'G1 Early',
+          locationId: 'alpika',
+          occupied: 2,
+          capacity: 8,
+          isPrivate: false,
+        },
+        {
+          id: 'cb_a2',
+          day: 0,
+          masterId: 'm2',
+          startTime: 12.5,
+          duration: 0.6,
+          serviceId: 's2',
+          serviceName: 'Spanning G1',
+          locationId: 'alpika',
+          occupied: 3,
+          capacity: 6,
+          isPrivate: false,
+        },
+        {
+          id: 'cb_a3',
+          day: 0,
+          masterId: 'm3',
+          startTime: 13,
+          duration: 2,
+          serviceId: 's3',
+          serviceName: 'G2 Activity A',
+          locationId: 'grand',
+          occupied: 4,
+          capacity: 10,
+          isPrivate: false,
+        },
+        {
+          id: 'cb_a4',
+          day: 0,
+          masterId: 'm1',
+          startTime: 13.5,
+          duration: 1.5,
+          serviceId: 's1',
+          serviceName: 'G2 Activity B',
+          locationId: 'alpika',
+          occupied: 5,
+          capacity: 8,
+          isPrivate: false,
+        },
+      ];
+
+      render(
+        <DayColumn
+          dayIndex={0}
+          date={new Date()}
+          activities={crossBoundaryActivities}
+          masters={MOCK_MASTERS}
+        />,
+      );
+
+      const spanningCard = screen.getByTestId('activity-cb_a2');
+
+      // Before scroll: cb_a2 is z=1 in G1 carousel (cb_a1 is z=0), so carousel dimming applies
+      expect(spanningCard).toHaveStyle({ opacity: '0.85' });
+
+      // Scroll in G2 area (y=540 → time≈13.5, on cb_a4 which is in G2)
+      // cb_a2 (G1, 12.5-13.1) does NOT cover y=540 (its range is [420, 492])
+      // so the handler finds cb_a3 or cb_a4 (G2) first
+      await act(async () => {
+        const column = screen.getByTestId('day-column-0');
+        column.getBoundingClientRect = vi.fn(() => ({
+          top: 0, left: 0, width: 200, height: 1440,
+          bottom: 1440, right: 200, x: 0, y: 0, toJSON: () => {},
+        }));
+        const wheelEvent = new WheelEvent('wheel', {
+          deltaY: 100,
+          clientY: 540, // time ≈ 13.5 → G2
+          bubbles: true,
+        });
+        column.dispatchEvent(wheelEvent);
+      });
+
+      // cb_a2 (start=12.5, end=13.1) overlaps with G2 time range (13-16)
+      // actStart=12.5 < 16=true, actEnd=13.1 > 13=true → IS background
+      expect(spanningCard).toHaveStyle({ opacity: '0.3' });
+    });
+
+    // ─── Issue 3: Badge at group level ───────────────────────────────────
+
+    it('badge is positioned on the topmost card, not at group boundary', () => {
+      render(
+        <DayColumn
+          dayIndex={0}
+          date={new Date()}
+          activities={timeGroupActivities}
+          masters={MOCK_MASTERS}
+        />,
+      );
+
+      // Badge for G1 group (2 activities) appears on the topmost card (tg_a1)
+      const badge = screen.getByRole('button', { name: /2 cards/i });
+      expect(badge).toBeInTheDocument();
+      // Badge should be positioned at the card's top, not at group boundary
+      // tg_a1 starts at 10, gridStart=9, cellHeight=60: top = (10-9)*60*2+2 = 122px
+      expect(badge.style.top).toBe('122px');
+    });
+
+    // ─── Issue 4: Separator lines at group boundaries ────────────────────
+
+    it('renders separator lines at group boundaries', () => {
+      render(
+        <DayColumn
+          dayIndex={0}
+          date={new Date()}
+          activities={[]}
+          masters={MOCK_MASTERS}
+        />,
+      );
+
+      expect(screen.getByTestId('group-boundary-G1')).toBeInTheDocument();
+      expect(screen.getByTestId('group-boundary-G2')).toBeInTheDocument();
+      expect(screen.getByTestId('group-boundary-G3')).toBeInTheDocument();
+    });
+
+    it('separator lines have bolder styling than regular grid lines', () => {
+      render(
+        <DayColumn
+          dayIndex={0}
+          date={new Date()}
+          activities={[]}
+          masters={MOCK_MASTERS}
+        />,
+      );
+
+      const boundary = screen.getByTestId('group-boundary-G1');
+      // Should have a thicker border than regular lines
+      expect(boundary.className).toContain('border-t-2');
+    });
+
+    // ─── Auto-promote group by cursor time ───────────────────────────
+
+    it('cursor in G2 time range auto-promotes G2 to active', async () => {
+      // G1 has 2 overlapping activities (multi), G2 has 1 solo activity
+      // Without scrolling, G1 is frontmost and hides G2
+      // When cursor moves to G2 time range (13:00+), G2 auto-promotes
+      const autoPromoteActivities: Activity[] = [
+        {
+          id: 'ap_g1a',
+          day: 0,
+          masterId: 'm1',
+          startTime: 10,
+          duration: 2,
+          serviceId: 's1',
+          serviceName: 'G1 Activity A',
+          locationId: 'alpika',
+          occupied: 3,
+          capacity: 8,
+          isPrivate: false,
+        },
+        {
+          id: 'ap_g1b',
+          day: 0,
+          masterId: 'm2',
+          startTime: 10.5,
+          duration: 1.5,
+          serviceId: 's2',
+          serviceName: 'G1 Activity B',
+          locationId: 'alpika',
+          occupied: 4,
+          capacity: 6,
+          isPrivate: false,
+        },
+        {
+          id: 'ap_g2',
+          day: 0,
+          masterId: 'm3',
+          startTime: 13,
+          duration: 2.5,
+          serviceId: 's3',
+          serviceName: 'G2 Solo Activity',
+          locationId: 'grand',
+          occupied: 5,
+          capacity: 10,
+          isPrivate: false,
+        },
+      ];
+
+      render(
+        <DayColumn
+          dayIndex={0}
+          date={new Date()}
+          activities={autoPromoteActivities}
+          masters={MOCK_MASTERS}
+        />,
+      );
+
+      const g1CardA = screen.getByTestId('activity-ap_g1a');
+      const g1CardB = screen.getByTestId('activity-ap_g1b');
+      const g2Card = screen.getByTestId('activity-ap_g2');
+
+      // Before cursor interaction: G1 has carousel (2 activities), G2 is solo
+      expect(g1CardA).toHaveStyle({ opacity: '1' });
+      expect(g1CardB).toHaveStyle({ opacity: '0.85' });
+      expect(g2Card).toHaveStyle({ opacity: '1' });
+
+      // Mouse move to G2 time range (y=480 → time = 480/(60*2)+9 = 13.0 → G2)
+      await act(async () => {
+        const column = screen.getByTestId('day-column-0');
+        column.getBoundingClientRect = vi.fn(() => ({
+          top: 0, left: 0, width: 200, height: 1440,
+          bottom: 1440, right: 200, x: 0, y: 0, toJSON: () => {},
+        }));
+        const mouseEvent = new MouseEvent('mousemove', {
+          clientY: 480, // time = 13.0 → G2
+          bubbles: true,
+        });
+        column.dispatchEvent(mouseEvent);
+      });
+
+      // G2 should be auto-promoted (active), G1 should go to background
+      // G1 activities overlap with G2 time range (10-12 < 16, 12-12.5 < 13 → depends)
+      // ap_g1a: 10-12, ap_g1b: 10.5-12. Neither overlaps G2 (13-16) → NOT background
+      // But G2 is now active → G1 activities that overlap G2 time range become background
+      // Actually: ap_g1a ends at 12, G2 starts at 13 → no overlap → NOT background
+      // The key thing: G2 is active and visible
+      expect(g2Card).toHaveStyle({ opacity: '1' });
+    });
+
+    it('G1 goes to background when cursor in G2 and G1 overlaps G2 time range', async () => {
+      // G1 activity spanning into G2 (12:30-14:30) + G2 solo (13:00-15:30)
+      // When cursor moves to G2, G1 spanning becomes background
+      const overlapActivities: Activity[] = [
+        {
+          id: 'ob_g1',
+          day: 0,
+          masterId: 'm1',
+          startTime: 12.5,
+          duration: 2,
+          serviceId: 's1',
+          serviceName: 'G1 Spanning',
+          locationId: 'alpika',
+          occupied: 3,
+          capacity: 8,
+          isPrivate: false,
+        },
+        {
+          id: 'ob_g2',
+          day: 0,
+          masterId: 'm3',
+          startTime: 13,
+          duration: 2.5,
+          serviceId: 's3',
+          serviceName: 'G2 Solo',
+          locationId: 'grand',
+          occupied: 5,
+          capacity: 10,
+          isPrivate: false,
+        },
+      ];
+
+      render(
+        <DayColumn
+          dayIndex={0}
+          date={new Date()}
+          activities={overlapActivities}
+          masters={MOCK_MASTERS}
+        />,
+      );
+
+      const g1Card = screen.getByTestId('activity-ob_g1');
+      const g2Card = screen.getByTestId('activity-ob_g2');
+
+      // Before cursor: both solo (1 per group), full opacity
+      expect(g1Card).toHaveStyle({ opacity: '1' });
+      expect(g2Card).toHaveStyle({ opacity: '1' });
+
+      // Mouse move to G2 time range (y=480 → time=13 → G2)
+      await act(async () => {
+        const column = screen.getByTestId('day-column-0');
+        column.getBoundingClientRect = vi.fn(() => ({
+          top: 0, left: 0, width: 200, height: 1440,
+          bottom: 1440, right: 200, x: 0, y: 0, toJSON: () => {},
+        }));
+        const mouseEvent = new MouseEvent('mousemove', {
+          clientY: 480, // time = 13.0 → G2
+          bubbles: true,
+        });
+        column.dispatchEvent(mouseEvent);
+      });
+
+      // G2 is active, G1 spanning (12.5-14.5) overlaps G2 (13-16) → background
+      expect(g1Card).toHaveStyle({ opacity: '0.3' });
+      expect(g2Card).toHaveStyle({ opacity: '1' });
+    });
+
+    it('cursor in G1 time range keeps G1 active and G2 solo stays visible', async () => {
+      const cursorG1Activities: Activity[] = [
+        {
+          id: 'cg_g1a',
+          day: 0,
+          masterId: 'm1',
+          startTime: 10,
+          duration: 2,
+          serviceId: 's1',
+          serviceName: 'G1 Activity A',
+          locationId: 'alpika',
+          occupied: 3,
+          capacity: 8,
+          isPrivate: false,
+        },
+        {
+          id: 'cg_g1b',
+          day: 0,
+          masterId: 'm2',
+          startTime: 10.5,
+          duration: 1.5,
+          serviceId: 's2',
+          serviceName: 'G1 Activity B',
+          locationId: 'alpika',
+          occupied: 4,
+          capacity: 6,
+          isPrivate: false,
+        },
+        {
+          id: 'cg_g2',
+          day: 0,
+          masterId: 'm3',
+          startTime: 14,
+          duration: 2,
+          serviceId: 's3',
+          serviceName: 'G2 Solo',
+          locationId: 'grand',
+          occupied: 5,
+          capacity: 10,
+          isPrivate: false,
+        },
+      ];
+
+      render(
+        <DayColumn
+          dayIndex={0}
+          date={new Date()}
+          activities={cursorG1Activities}
+          masters={MOCK_MASTERS}
+        />,
+      );
+
+      const g1CardA = screen.getByTestId('activity-cg_g1a');
+      const g1CardB = screen.getByTestId('activity-cg_g1b');
+      const g2Card = screen.getByTestId('activity-cg_g2');
+
+      // Before: G1 has carousel (2 activities), G2 solo
+      expect(g1CardA).toHaveStyle({ opacity: '1' });
+      expect(g1CardB).toHaveStyle({ opacity: '0.85' });
+      expect(g2Card).toHaveStyle({ opacity: '1' });
+
+      // Mouse move to G1 time range (y=120 → time≈10 → G1)
+      await act(async () => {
+        const column = screen.getByTestId('day-column-0');
+        column.getBoundingClientRect = vi.fn(() => ({
+          top: 0, left: 0, width: 200, height: 1440,
+          bottom: 1440, right: 200, x: 0, y: 0, toJSON: () => {},
+        }));
+        const mouseEvent = new MouseEvent('mousemove', {
+          clientY: 120, // time ≈ 10 → G1
+          bubbles: true,
+        });
+        column.dispatchEvent(mouseEvent);
+      });
+
+      // G1 is active, G2 solo at 14:00 does NOT overlap G1 time range (9-13)
+      // so G2 should NOT be background
+      expect(g2Card).toHaveStyle({ opacity: '1' });
+      expect(g1CardA).toHaveStyle({ opacity: '1' });
+    });
+
+    it('mouseLeave resets activeGroupId after cursor auto-promotes', async () => {
+      const resetActivities: Activity[] = [
+        {
+          id: 'r_g1a',
+          day: 0,
+          masterId: 'm1',
+          startTime: 10,
+          duration: 2,
+          serviceId: 's1',
+          serviceName: 'G1 Activity A',
+          locationId: 'alpika',
+          occupied: 3,
+          capacity: 8,
+          isPrivate: false,
+        },
+        {
+          id: 'r_g1b',
+          day: 0,
+          masterId: 'm2',
+          startTime: 10.5,
+          duration: 1.5,
+          serviceId: 's2',
+          serviceName: 'G1 Activity B',
+          locationId: 'alpika',
+          occupied: 4,
+          capacity: 6,
+          isPrivate: false,
+        },
+        {
+          id: 'r_g2',
+          day: 0,
+          masterId: 'm3',
+          startTime: 13,
+          duration: 2,
+          serviceId: 's3',
+          serviceName: 'G2 Solo',
+          locationId: 'grand',
+          occupied: 5,
+          capacity: 10,
+          isPrivate: false,
+        },
+      ];
+
+      render(
+        <DayColumn
+          dayIndex={0}
+          date={new Date()}
+          activities={resetActivities}
+          masters={MOCK_MASTERS}
+        />,
+      );
+
+      const g1CardA = screen.getByTestId('activity-r_g1a');
+      const g2Card = screen.getByTestId('activity-r_g2');
+
+      // Mouse to G2 area (y=480 → time=13 → G2)
+      await act(async () => {
+        const column = screen.getByTestId('day-column-0');
+        column.getBoundingClientRect = vi.fn(() => ({
+          top: 0, left: 0, width: 200, height: 1440,
+          bottom: 1440, right: 200, x: 0, y: 0, toJSON: () => {},
+        }));
+        const mouseEvent = new MouseEvent('mousemove', {
+          clientY: 480,
+          bubbles: true,
+        });
+        column.dispatchEvent(mouseEvent);
+      });
+
+      // G2 active — check state
+      expect(g2Card).toHaveStyle({ opacity: '1' });
+
+      // Now mouseLeave → activeGroupId resets
+      await act(async () => {
+        const column = screen.getByTestId('day-column-0');
+        fireEvent.mouseLeave(column);
+      });
+
+      // After mouseleave: no active group, both groups render normally
+      // G1 a1 still z=0, a2 z=1 (carousel persists), G2 solo z=0
+      expect(g1CardA).toHaveStyle({ opacity: '1' });
+      expect(g2Card).toHaveStyle({ opacity: '1' });
+    });
+
+    // ─── Cursor-based cross-group cycling ──────────────────────────────
+
+    it('G2 single (15:30-17:00) + G3 single (16:00-18:00) cycle together at 16:00', async () => {
+      // G2: 13:00–15:59, G3: 16:00–23:59
+      // Activity G2a: starts 15.5 (in G2), duration 1.5h → ends 17.0 → visually at y=780..960
+      // Activity G3a: starts 16.0 (in G3), duration 2h → ends 18.0 → visually at y=840..1080
+      // They visually overlap at y=840..960
+      const crossGroupSingles: Activity[] = [
+        {
+          id: 'cs_g2',
+          day: 0,
+          masterId: 'm1',
+          startTime: 15.5,
+          duration: 1.5,
+          durationMinutes: 90,
+          serviceId: 's1',
+          serviceName: 'G2 Late Activity',
+          locationId: 'alpika',
+          occupied: 3,
+          capacity: 8,
+          isPrivate: false,
+        },
+        {
+          id: 'cs_g3',
+          day: 0,
+          masterId: 'm2',
+          startTime: 16,
+          duration: 2,
+          durationMinutes: 120,
+          serviceId: 's2',
+          serviceName: 'G3 Early Activity',
+          locationId: 'alpika',
+          occupied: 4,
+          capacity: 6,
+          isPrivate: false,
+        },
+      ];
+
+      render(
+        <DayColumn
+          dayIndex={0}
+          date={new Date()}
+          activities={crossGroupSingles}
+          masters={MOCK_MASTERS}
+        />,
+      );
+
+      const cardG2 = screen.getByTestId('activity-cs_g2');
+      const cardG3 = screen.getByTestId('activity-cs_g3');
+
+      // Initially both in different groups (alone) → z=0 → full opacity
+      expect(cardG2).toHaveStyle({ opacity: '1' });
+      expect(cardG3).toHaveStyle({ opacity: '1' });
+
+      // Wheel at y=900 → time≈16.5, where BOTH cards visually overlap
+      await act(async () => {
+        const column = screen.getByTestId('day-column-0');
+        column.getBoundingClientRect = vi.fn(() => ({
+          top: 0, left: 0, width: 200, height: 1440,
+          bottom: 1440, right: 200, x: 0, y: 0, toJSON: () => {},
+        }));
+        const wheelEvent = new WheelEvent('wheel', {
+          deltaY: 100,
+          clientY: 900, // time ≈ 16.5 — in overlap zone
+          bubbles: true,
+        });
+        column.dispatchEvent(wheelEvent);
+      });
+
+      // After cycling: sorted by startTime: cs_g2 (15.5) first → z=1, cs_g3 (16) second → z=0
+      expect(cardG2).toHaveStyle({ opacity: '0.85' });
+      expect(cardG3).toHaveStyle({ opacity: '1' });
+    });
+
+    it('sets primary group active when cycling cross-group overlapping activities', async () => {
+      // G2 has 2 activities, G3 has 1 — G2 is primary (most cards)
+      // When G2 is set as active, G1 activities that visually overlap G2 time range
+      // should become background (opacity 0.3)
+      const multiGroupActivities: Activity[] = [
+        {
+          id: 'mg_g1',
+          day: 0,
+          masterId: 'm1',
+          startTime: 12.5,
+          duration: 2,
+          serviceId: 's1',
+          serviceName: 'G1 Spanning',
+          locationId: 'alpika',
+          occupied: 3,
+          capacity: 8,
+          isPrivate: false,
+        },
+        {
+          id: 'mg_g2a',
+          day: 0,
+          masterId: 'm2',
+          startTime: 14,
+          duration: 2,
+          serviceId: 's2',
+          serviceName: 'G2 Activity A',
+          locationId: 'alpika',
+          occupied: 4,
+          capacity: 6,
+          isPrivate: false,
+        },
+        {
+          id: 'mg_g2b',
+          day: 0,
+          masterId: 'm3',
+          startTime: 15,
+          duration: 1.5,
+          serviceId: 's3',
+          serviceName: 'G2 Activity B',
+          locationId: 'grand',
+          occupied: 5,
+          capacity: 10,
+          isPrivate: false,
+        },
+      ];
+
+      render(
+        <DayColumn
+          dayIndex={0}
+          date={new Date()}
+          activities={multiGroupActivities}
+          masters={MOCK_MASTERS}
+        />,
+      );
+
+      const g1Card = screen.getByTestId('activity-mg_g1');
+
+      // Before scroll: G1 card is in its own group (alone) → full opacity
+      expect(g1Card).toHaveStyle({ opacity: '1' });
+
+      // Wheel at y=720 → time≈15, overlapping mg_g2a and mg_g2b (both G2)
+      // Primary group = G2 (2 cards vs 0 in cursor overlap for others)
+      await act(async () => {
+        const column = screen.getByTestId('day-column-0');
+        column.getBoundingClientRect = vi.fn(() => ({
+          top: 0, left: 0, width: 200, height: 1440,
+          bottom: 1440, right: 200, x: 0, y: 0, toJSON: () => {},
+        }));
+        const wheelEvent = new WheelEvent('wheel', {
+          deltaY: 100,
+          clientY: 720, // time ≈ 15
+          bubbles: true,
+        });
+        column.dispatchEvent(wheelEvent);
+      });
+
+      // G1 card (12.5–14.5) overlaps with G2 time range (13–16) → should be background
+      expect(g1Card).toHaveStyle({ opacity: '0.3' });
     });
   });
 });

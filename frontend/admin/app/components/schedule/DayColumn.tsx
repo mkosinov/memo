@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useDroppable } from '@dnd-kit/core';
 import { hexToRgb, mixWithWhite, formatTime, generateTimeSlots, HOURS_START, HOURS_END } from '@/lib/utils';
 import type { Activity, Master, Studio, StampState, Service } from '@memo/domain';
@@ -25,10 +25,6 @@ const TIME_GROUPS: TimeGroup[] = [
 
 function getGroupForActivity(activity: Activity): TimeGroup | undefined {
   return TIME_GROUPS.find(g => activity.startTime >= g.start && activity.startTime < g.end);
-}
-
-function getGroupForTime(time: number): TimeGroup | undefined {
-  return TIME_GROUPS.find(g => time >= g.start && time < g.end);
 }
 
 interface DayColumnProps {
@@ -201,6 +197,22 @@ export function DayColumn({ dayIndex, activities, masters, studios = [], service
   } | null>(null);
   const columnRef = useRef<HTMLDivElement>(null);
   const lastWheelTime = useRef(0);
+  const activeGroupTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const isMouseInsideRef = useRef(false);
+
+  // Reset active group after timeout — but only if mouse is not inside the column
+  // (mousemove auto-promote should keep the group active while hovering)
+  const resetActiveGroup = useCallback(() => {
+    if (activeGroupTimeoutRef.current) {
+      clearTimeout(activeGroupTimeoutRef.current);
+    }
+    activeGroupTimeoutRef.current = setTimeout(() => {
+      if (!isMouseInsideRef.current) {
+        setActiveGroupId(null);
+        setCycledGroupIds(new Set());
+      }
+    }, 1000);
+  }, []);
 
   // Generate slots at gridFrequency intervals. Slot height is scaled to keep total grid height constant.
   const slotHeight = useMemo(() => cellHeight * (gridFrequency / 30), [cellHeight, gridFrequency]);
@@ -216,6 +228,9 @@ export function DayColumn({ dayIndex, activities, masters, studios = [], service
   // Re-initialize when activities change (e.g., navigating to a new date).
   const [zIndices, setZIndices] = useState<Record<string, number>>({});
   const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
+  // Track all group IDs being cycled together (primary + adjacent solos)
+  // so adjacent solo activities aren't treated as "background"
+  const [cycledGroupIds, setCycledGroupIds] = useState<Set<string>>(new Set());
   useEffect(() => {
     const initial: Record<string, number> = {};
     for (const act of activities) {
@@ -231,7 +246,47 @@ export function DayColumn({ dayIndex, activities, masters, studios = [], service
     }
     setZIndices(initial);
     setActiveGroupId(null); // reset active group on new activities
+    setCycledGroupIds(new Set());
   }, [activities]);
+
+  // Reset activeGroupId on mouseleave
+  useEffect(() => {
+    const el = columnRef.current;
+    if (!el) return;
+    const handleMouseLeave = () => {
+      isMouseInsideRef.current = false;
+      if (activeGroupTimeoutRef.current) {
+        clearTimeout(activeGroupTimeoutRef.current);
+      }
+      setActiveGroupId(null);
+      setCycledGroupIds(new Set());
+    };
+    el.addEventListener('mouseleave', handleMouseLeave);
+    return () => el.removeEventListener('mouseleave', handleMouseLeave);
+  }, []);
+
+  // Auto-promote group by cursor position: when mouse moves over the column,
+  // determine which time group the cursor is in and set activeGroupId accordingly.
+  // This ensures solo groups become visible without requiring scroll (e.g., solo G2 activity
+  // hidden behind G1 activities becomes visible when cursor enters 13:00+ area).
+  useEffect(() => {
+    const el = columnRef.current;
+    if (!el) return;
+    const handleMouseMove = (e: MouseEvent) => {
+      isMouseInsideRef.current = true;
+      const rect = el.getBoundingClientRect();
+      const y = e.clientY - rect.top;
+      const cursorTime = gridStart + y / (cellHeight * 2);
+      const group = TIME_GROUPS.find(g =>
+        cursorTime >= g.start && cursorTime < g.end
+      );
+      if (group) {
+        setActiveGroupId(group.id);
+      }
+    };
+    el.addEventListener('mousemove', handleMouseMove);
+    return () => el.removeEventListener('mousemove', handleMouseMove);
+  }, [cellHeight, gridStart]);
 
   // Non-passive wheel handler for scroll carousel
   useEffect(() => {
@@ -247,45 +302,87 @@ export function DayColumn({ dayIndex, activities, masters, studios = [], service
       const rect = el.getBoundingClientRect();
       const y = e.clientY - rect.top;
 
-      // Find the activity under cursor
-      let actUnderCursor: Activity | undefined;
-      for (const act of activities) {
-        const topPx = (act.startTime - gridStart) * cellHeight * 2;
-        const durMinutes = act.durationMinutes ?? act.duration * 60;
+      // Find ALL activities that visually overlap with the cursor's Y position
+      const cursorOverlapping = activities.filter(a => {
+        const topPx = (a.startTime - gridStart) * cellHeight * 2;
+        const durMinutes = a.durationMinutes ?? a.duration * 60;
         const heightPx = Math.max((durMinutes / 60) * cellHeight * 2, 52);
-        if (y >= topPx && y <= topPx + heightPx) {
-          actUnderCursor = act;
-          break;
+        return y >= topPx && y <= topPx + heightPx;
+      });
+
+      if (cursorOverlapping.length === 0) return;
+
+      // Determine primary group by CURSOR TIME position (not by which activities overlap).
+      // This ensures that at 13:00-13:30 we cycle G2, even if a G1 activity spans into G2.
+      const cursorTime = gridStart + y / (cellHeight * 2);
+      const primaryGroup = TIME_GROUPS.find(g =>
+        cursorTime >= g.start && cursorTime < g.end
+      );
+
+      if (!primaryGroup) return;
+
+      // Find all activities in the primary group
+      const primaryGroupActivities = activities.filter(a => {
+        const g = getGroupForActivity(a);
+        return g?.id === primaryGroup.id;
+      });
+
+      // If primary group has 1 activity but cursor also overlaps with activities from adjacent groups
+      // (e.g., solo 15:30-17:00 in G2 + solo 16:00-18:00 in G3), include those too
+      const hasSolo = primaryGroupActivities.length === 1;
+      let cycleActivities = primaryGroupActivities;
+
+      if (hasSolo) {
+        // Check adjacent groups for overlapping solo activities
+        const adjacentGroupIds = new Set<string>();
+        for (const act of cursorOverlapping) {
+          const g = getGroupForActivity(act);
+          if (g && g.id !== primaryGroup.id) {
+            // Check if this activity is a "solo" (group has 1 activity)
+            const actGroupActivities = activities.filter(a => {
+              const ag = getGroupForActivity(a);
+              return ag?.id === g.id;
+            });
+            if (actGroupActivities.length === 1) {
+              adjacentGroupIds.add(g.id);
+            }
+          }
+        }
+        if (adjacentGroupIds.size > 0) {
+          cycleActivities = activities.filter(a => {
+            const g = getGroupForActivity(a);
+            if (!g) return false;
+            return g.id === primaryGroup.id || adjacentGroupIds.has(g.id);
+          });
         }
       }
-      if (!actUnderCursor) return;
 
-      // Get the time-group of the activity under cursor
-      const group = getGroupForActivity(actUnderCursor);
-      if (!group) return;
-
-      // Get all activities in the same time group
-      const groupActivities = activities
-        .filter(a => getGroupForActivity(a)?.id === group.id)
-        .sort((a, b) => a.startTime - b.startTime || a.id.localeCompare(b.id));
-
-      if (groupActivities.length <= 1) return;
+      if (cycleActivities.length <= 1) return;
 
       e.preventDefault();
       lastWheelTime.current = now;
 
-      // Set active group for background rendering
-      setActiveGroupId(group.id);
+      setActiveGroupId(primaryGroup.id);
+      resetActiveGroup();
+
+      // Track all group IDs being cycled (primary + adjacent solos)
+      const effectiveGroupIds = new Set<string>();
+      for (const act of cycleActivities) {
+        const g = getGroupForActivity(act);
+        if (g) effectiveGroupIds.add(g.id);
+      }
+      setCycledGroupIds(effectiveGroupIds);
 
       const direction = e.deltaY > 0 ? 1 : -1;  // 1 = scroll down, -1 = scroll up
+      const sorted = [...cycleActivities].sort((a, b) => a.startTime - b.startTime || a.id.localeCompare(b.id));
 
       setZIndices(prev => {
         const newZ = { ...prev };
-        const sorted = [...groupActivities].sort((a, b) => (prev[a.id] ?? 0) - (prev[b.id] ?? 0));
-        for (let i = 0; i < sorted.length; i++) {
-          newZ[sorted[i].id] = direction === 1
-            ? (i - 1 + sorted.length) % sorted.length
-            : (i + 1) % sorted.length;
+        const sortedByZ = [...sorted].sort((a, b) => (prev[a.id] ?? 0) - (prev[b.id] ?? 0));
+        for (let i = 0; i < sortedByZ.length; i++) {
+          newZ[sortedByZ[i].id] = direction === 1
+            ? (i - 1 + sortedByZ.length) % sortedByZ.length
+            : (i + 1) % sortedByZ.length;
         }
         return newZ;
       });
@@ -352,9 +449,16 @@ export function DayColumn({ dayIndex, activities, masters, studios = [], service
           ? activities.filter(a => getGroupForActivity(a)?.id === activityGroup.id).length
           : 1;
 
-        // Determine if this activity is in the active group
-        const isActive = activeGroupId !== null && activityGroup?.id === activeGroupId;
-        const isBackground = activeGroupId !== null && activityGroup !== undefined && activityGroup.id !== activeGroupId;
+        // Determine if this activity should be rendered as background
+        // Exclude activities in cycledGroupIds (they're part of the active carousel)
+        const isBackground = activeGroupId !== null && activityGroup !== undefined && activityGroup.id !== activeGroupId && !cycledGroupIds.has(activityGroup.id) && (() => {
+          // Only show as background if activity visually overlaps with the active group's time range
+          const activeGroup = TIME_GROUPS.find(g => g.id === activeGroupId);
+          if (!activeGroup) return false;
+          const actStart = activity.startTime;
+          const actEnd = activity.startTime + activity.duration;
+          return actStart < activeGroup.end && actEnd > activeGroup.start;
+        })();
 
         let cardOpacity = 1;
         let cardScale = 1;
@@ -370,7 +474,7 @@ export function DayColumn({ dayIndex, activities, masters, studios = [], service
           cardScale = 1;
           cardZIndex = 10;
           isClickable = false;
-        } else if (totalInGroup > 1) {
+        } else if (totalInGroup > 1 || z > 0) {
           isClickable = z === 0;
           cardOpacity = z === 0 ? 1 : Math.max(0, 1 - (z * 0.15));
           cardScale = z === 0 ? 1 : Math.max(0.8, 1 - (z * 0.04));
@@ -382,7 +486,7 @@ export function DayColumn({ dayIndex, activities, masters, studios = [], service
         const master = masterMap.get(activity.masterId) || masters[0];
         const isThisDragging = dragId === activity.id;
 
-        // Badge: show only for active cards where totalInGroup > 1 and z === 0
+        // Show badge on the topmost card (z=0) in multi-activity groups
         const showBadge = totalInGroup > 1 && z === 0 && !isBackground;
 
         return (
@@ -404,17 +508,19 @@ export function DayColumn({ dayIndex, activities, masters, studios = [], service
                 transition: 'opacity 300ms ease, transform 300ms ease',
               }}
             />
-            {/* "N cards" badge for multi-event slots — opens OverlapPopover */}
             {showBadge && (
               <button
                 onClick={(e) => {
                   e.stopPropagation();
-                  // Get all activities in the same time group, sorted by z-order
+                  // Toggle popover for this group
                   const groupActivities = activities
                     .filter(a => getGroupForActivity(a)?.id === activityGroup?.id)
-                    .sort((a, b) => (zIndices[a.id] ?? 0) - (zIndices[b.id] ?? 0));
-                  // Toggle: close if same group, otherwise open
-                  if (popoverData?.activities === groupActivities) {
+                    .sort((a, b) => a.startTime - b.startTime);
+                  // Use stable comparison via activity IDs (array reference changes every render)
+                  const isSameGroup = popoverData?.activities &&
+                    popoverData.activities.length === groupActivities.length &&
+                    popoverData.activities.every((a, i) => a.id === groupActivities[i].id);
+                  if (isSameGroup) {
                     setPopoverData(null);
                   } else {
                     setPopoverData({
@@ -435,6 +541,19 @@ export function DayColumn({ dayIndex, activities, masters, studios = [], service
           </React.Fragment>
         );
       })}
+
+      {/* Bolder lines at group boundaries */}
+      {TIME_GROUPS.map(group => (
+        <div
+          key={`boundary-${group.id}`}
+          className="absolute left-0 right-0 border-t-2 border-brand/30 pointer-events-none"
+          style={{
+            top: (group.start - gridStart) * cellHeight * 2,
+            zIndex: 15,
+          }}
+          data-testid={`group-boundary-${group.id}`}
+        />
+      ))}
 
       {/* OverlapPopover — shows all overlapping cards in column layout */}
       {popoverData && (

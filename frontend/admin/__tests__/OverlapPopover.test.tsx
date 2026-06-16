@@ -395,7 +395,7 @@ describe('OverlapPopover', () => {
 
   // ─── Scroll for overflow ────────────────────────────────────────
 
-  it('has overflow-auto on the popover container for scrolling', () => {
+  it('has overflow-auto on the scroll container for scrolling', () => {
     render(
       <OverlapPopover
         activities={overlappingActivities}
@@ -407,7 +407,10 @@ describe('OverlapPopover', () => {
     );
 
     const popover = screen.getByTestId('overlap-popover');
-    expect(popover.className).toContain('overflow-auto');
+    // overflow-auto is now on the inner scroll container, not the outer positioning div
+    const scrollContainer = popover.querySelector('[data-testid="popover-scroll-container"]');
+    expect(scrollContainer).toBeTruthy();
+    expect(scrollContainer!.className).toContain('overflow-auto');
   });
 
   it('has max-height and max-width constraints for scroll bounds', () => {
@@ -626,5 +629,185 @@ describe('OverlapPopover', () => {
         Object.defineProperty(window, 'innerWidth', originalInnerWidth);
       }
     }
+  });
+
+  // ─── Issue 1: Auto-scroll on hover ─────────────────────────────────
+
+  it('has an inner scroll container with overflow-auto for content', () => {
+    render(
+      <OverlapPopover
+        activities={overlappingActivities}
+        masterMap={masterMap}
+        anchorRect={anchorRect}
+        onClose={vi.fn()}
+        onSelectActivity={vi.fn()}
+      />,
+    );
+
+    const popover = screen.getByTestId('overlap-popover');
+    // The popover should contain an inner scroll container
+    // that separates overflow from the outer positioning container
+    const scrollContainer = popover.querySelector('[data-testid="popover-scroll-container"]') || popover.querySelector('.overflow-auto');
+    expect(scrollContainer).toBeTruthy();
+  });
+
+  it('has an inner scroll container with overflow-x-auto for horizontal scrolling', () => {
+    render(
+      <OverlapPopover
+        activities={overlappingActivities}
+        masterMap={masterMap}
+        anchorRect={anchorRect}
+        onClose={vi.fn()}
+        onSelectActivity={vi.fn()}
+      />,
+    );
+
+    const popover = screen.getByTestId('overlap-popover');
+    // Find the inner scroll container — should have overflow-x-auto or overflow-auto
+    const innerContainers = popover.querySelectorAll('.overflow-auto, .overflow-x-auto');
+    expect(innerContainers.length).toBeGreaterThanOrEqual(1);
+    // The innermost scroll container should support horizontal scroll
+    const lastContainer = innerContainers[innerContainers.length - 1] as HTMLElement;
+    const style = window.getComputedStyle(lastContainer);
+    const overflowX = lastContainer.style.overflowX || style.overflowX;
+    expect(overflowX === 'auto' || overflowX === 'scroll' || lastContainer.className.includes('overflow')).toBe(true);
+  });
+
+  it('auto-scrolls right when mouse is near the right edge of the scroll container', () => {
+    render(
+      <OverlapPopover
+        activities={overlappingActivities}
+        masterMap={masterMap}
+        anchorRect={anchorRect}
+        onClose={vi.fn()}
+        onSelectActivity={vi.fn()}
+      />,
+    );
+
+    const popover = screen.getByTestId('overlap-popover');
+    // Find the scroll container (inner div with overflow-auto)
+    const scrollContainer = popover.querySelector('[data-testid="popover-scroll-container"]') as HTMLDivElement;
+    expect(scrollContainer).toBeTruthy();
+
+    // Mock getBoundingClientRect to simulate the scroll container
+    scrollContainer.getBoundingClientRect = vi.fn(() => ({
+      top: 100, left: 200, width: 300, height: 200,
+      bottom: 300, right: 500, x: 200, y: 100, toJSON: () => ({}),
+    }));
+    // Set initial scrollLeft
+    Object.defineProperty(scrollContainer, 'scrollLeft', { value: 0, writable: true, configurable: true });
+
+    // Simulate mouse move near right edge (within EDGE_THRESHOLD=50)
+    fireEvent.mouseMove(scrollContainer, { clientX: 470, clientY: 200 });
+
+    // After moving near right edge, scrollLeft should increase
+    expect(scrollContainer.scrollLeft).toBeGreaterThan(0);
+  });
+
+  it('auto-scrolls left when mouse is near the left edge of the scroll container', () => {
+    render(
+      <OverlapPopover
+        activities={overlappingActivities}
+        masterMap={masterMap}
+        anchorRect={anchorRect}
+        onClose={vi.fn()}
+        onSelectActivity={vi.fn()}
+      />,
+    );
+
+    const popover = screen.getByTestId('overlap-popover');
+    const scrollContainer = popover.querySelector('[data-testid="popover-scroll-container"]') as HTMLDivElement;
+    expect(scrollContainer).toBeTruthy();
+
+    scrollContainer.getBoundingClientRect = vi.fn(() => ({
+      top: 100, left: 200, width: 300, height: 200,
+      bottom: 300, right: 500, x: 200, y: 100, toJSON: () => ({}),
+    }));
+    Object.defineProperty(scrollContainer, 'scrollLeft', { value: 100, writable: true, configurable: true });
+
+    // Simulate mouse move near left edge (clientX=210 → mouseX=10 < EDGE_THRESHOLD=50)
+    fireEvent.mouseMove(scrollContainer, { clientX: 210, clientY: 200 });
+
+    // After moving near left edge, scrollLeft should decrease
+    expect(scrollContainer.scrollLeft).toBeLessThan(100);
+  });
+
+  it('auto-scrolls down when mouse is near the bottom edge of the scroll container', () => {
+    render(
+      <OverlapPopover
+        activities={overlappingActivities}
+        masterMap={masterMap}
+        anchorRect={anchorRect}
+        onClose={vi.fn()}
+        onSelectActivity={vi.fn()}
+      />,
+    );
+
+    const popover = screen.getByTestId('overlap-popover');
+    const scrollContainer = popover.querySelector('[data-testid="popover-scroll-container"]') as HTMLDivElement;
+    expect(scrollContainer).toBeTruthy();
+
+    scrollContainer.getBoundingClientRect = vi.fn(() => ({
+      top: 100, left: 200, width: 300, height: 200,
+      bottom: 300, right: 500, x: 200, y: 100, toJSON: () => ({}),
+    }));
+    Object.defineProperty(scrollContainer, 'scrollTop', { value: 0, writable: true, configurable: true });
+
+    // Simulate mouse near bottom edge (clientY=270 → mouseY=170, height=200, 200-50=150 < 170)
+    fireEvent.mouseMove(scrollContainer, { clientX: 350, clientY: 270 });
+
+    expect(scrollContainer.scrollTop).toBeGreaterThan(0);
+  });
+
+  it('does not auto-scroll when mouse is in the center of the scroll container', () => {
+    render(
+      <OverlapPopover
+        activities={overlappingActivities}
+        masterMap={masterMap}
+        anchorRect={anchorRect}
+        onClose={vi.fn()}
+        onSelectActivity={vi.fn()}
+      />,
+    );
+
+    const popover = screen.getByTestId('overlap-popover');
+    const scrollContainer = popover.querySelector('[data-testid="popover-scroll-container"]') as HTMLDivElement;
+    expect(scrollContainer).toBeTruthy();
+
+    scrollContainer.getBoundingClientRect = vi.fn(() => ({
+      top: 100, left: 200, width: 400, height: 300,
+      bottom: 400, right: 600, x: 200, y: 100, toJSON: () => ({}),
+    }));
+    Object.defineProperty(scrollContainer, 'scrollLeft', { value: 0, writable: true, configurable: true });
+    Object.defineProperty(scrollContainer, 'scrollTop', { value: 0, writable: true, configurable: true });
+
+    // Mouse in center (clientX=400 → mouseX=200, clientY=250 → mouseY=150)
+    // Both well within the middle, away from edges
+    fireEvent.mouseMove(scrollContainer, { clientX: 400, clientY: 250 });
+
+    expect(scrollContainer.scrollLeft).toBe(0);
+    expect(scrollContainer.scrollTop).toBe(0);
+  });
+
+  // ─── Issue 2: Horizontal scroll for wide popovers ──────────────────
+
+  it('inner scroll container has min-width to ensure wide content is scrollable', () => {
+    render(
+      <OverlapPopover
+        activities={overlappingActivities}
+        masterMap={masterMap}
+        anchorRect={anchorRect}
+        onClose={vi.fn()}
+        onSelectActivity={vi.fn()}
+      />,
+    );
+
+    const popover = screen.getByTestId('overlap-popover');
+    // Find the inner scroll container
+    const scrollContainer = popover.querySelector('[data-testid="popover-scroll-container"]') as HTMLElement;
+    expect(scrollContainer).toBeTruthy();
+    // Should have a min-width style that allows content to be wider than the container
+    const minWidth = scrollContainer.style.minWidth;
+    expect(minWidth).toBeTruthy();
   });
 });

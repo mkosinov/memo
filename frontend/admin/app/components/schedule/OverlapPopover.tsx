@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useRef, useMemo } from 'react';
+import React, { useEffect, useRef, useMemo, useCallback } from 'react';
 import type { Activity, Master, Studio } from '@memo/domain';
 import { formatTime, HOURS_START } from '@/lib/utils';
 import { ActivityCard } from './ActivityCard';
@@ -58,7 +58,33 @@ export function OverlapPopover({
   gridStart = HOURS_START,
 }: OverlapPopoverProps) {
   const popoverRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
   const columns = assignColumns(activities);
+
+  // Auto-scroll when mouse moves near edges of the scroll container
+  const EDGE_THRESHOLD = 50;
+  const SCROLL_SPEED = 5;
+
+  const handleMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    if (!scrollRef.current) return;
+    const rect = scrollRef.current.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+
+    // Horizontal: if mouse is near right edge, scroll right; near left, scroll left
+    if (mouseX > rect.width - EDGE_THRESHOLD) {
+      scrollRef.current.scrollLeft += SCROLL_SPEED;
+    } else if (mouseX < EDGE_THRESHOLD) {
+      scrollRef.current.scrollLeft -= SCROLL_SPEED;
+    }
+
+    // Vertical: same logic
+    if (mouseY > rect.height - EDGE_THRESHOLD) {
+      scrollRef.current.scrollTop += SCROLL_SPEED;
+    } else if (mouseY < EDGE_THRESHOLD) {
+      scrollRef.current.scrollTop -= SCROLL_SPEED;
+    }
+  }, []);
 
   // Close on outside click
   useEffect(() => {
@@ -131,69 +157,82 @@ export function OverlapPopover({
       ref={popoverRef}
       style={popoverStyle}
       data-testid="overlap-popover"
-      className="bg-white rounded-lg shadow-xl border overflow-auto relative"
+      className="bg-white rounded-lg shadow-xl border relative"
+      onMouseMove={handleMouseMove}
     >
-      {/* Close button */}
-      <button
-        data-testid="overlap-popover-close"
-        onClick={onClose}
-        className="absolute top-1 right-1 z-10 w-6 h-6 flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-500 hover:text-gray-700 transition-colors"
-        aria-label="Close popover"
+      {/* Inner scroll container — handles overflow for both axes */}
+      <div
+        ref={scrollRef}
+        data-testid="popover-scroll-container"
+        className="overflow-auto"
+        style={{
+          maxHeight: popoverStyle.maxHeight || '400px',
+          maxWidth: popoverStyle.maxWidth || '90vw',
+          minWidth: '300px',
+        }}
       >
-        <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-          <path d="M2 2L10 10M10 2L2 10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-        </svg>
-      </button>
+        {/* Close button */}
+        <button
+          data-testid="overlap-popover-close"
+          onClick={onClose}
+          className="absolute top-1 right-1 z-10 w-6 h-6 flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-500 hover:text-gray-700 transition-colors"
+          aria-label="Close popover"
+        >
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+            <path d="M2 2L10 10M10 2L2 10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+          </svg>
+        </button>
 
-      <div className="flex pr-6">
-        {/* Timeline column — same scale as main schedule */}
-        <div className="w-12 flex-shrink-0 border-r border-gray-200">
-          {hours.map(h => (
-            <div
-              key={h}
-              className="flex items-center text-[10px] text-gray-500 px-1"
-              style={{ height: cellHeight * 2 }}
-            >
-              {formatTime(h)}
+        <div className="flex pr-6">
+          {/* Timeline column — same scale as main schedule */}
+          <div className="w-12 flex-shrink-0 border-r border-gray-200">
+            {hours.map(h => (
+              <div
+                key={h}
+                className="flex items-center text-[10px] text-gray-500 px-1"
+                style={{ height: cellHeight * 2 }}
+              >
+                {formatTime(h)}
+              </div>
+            ))}
+          </div>
+
+          {/* Activity columns */}
+          {columns.map((col, colIdx) => (
+            <div key={colIdx} className="relative" style={{ minWidth: '120px' }}>
+              {col.map(act => {
+                const master = masterMap.get(act.masterId) || { id: '', name: 'Unknown', shortName: '?', color: '#666' };
+                // Use timelineStart (popover's own start) instead of gridStart (main schedule start)
+                const topPx = (act.startTime - timelineStart) * cellHeight * 2;
+                const durMinutes = act.durationMinutes ?? act.duration * 60;
+                const heightPx = Math.max((durMinutes / 60) * cellHeight * 2 - 10, 52);
+
+                return (
+                  <div
+                    key={act.id}
+                    data-testid={`popover-slot-${act.id}`}
+                    className="absolute left-1 right-1"
+                    style={{ top: `${topPx}px`, height: `${heightPx}px` }}
+                  >
+                    <ActivityCard
+                      activity={act}
+                      master={master}
+                      studios={studios}
+                      gridStart={timelineStart}
+                      onEdit={onSelectActivity}
+                      style={{
+                        position: 'absolute',
+                        inset: 0,
+                        height: '100%',
+                        cursor: 'pointer',
+                      }}
+                    />
+                  </div>
+                );
+              })}
             </div>
           ))}
         </div>
-
-        {/* Activity columns */}
-        {columns.map((col, colIdx) => (
-          <div key={colIdx} className="relative" style={{ minWidth: '120px' }}>
-            {col.map(act => {
-              const master = masterMap.get(act.masterId) || { id: '', name: 'Unknown', shortName: '?', color: '#666' };
-              // Use timelineStart (popover's own start) instead of gridStart (main schedule start)
-              const topPx = (act.startTime - timelineStart) * cellHeight * 2;
-              const durMinutes = act.durationMinutes ?? act.duration * 60;
-              const heightPx = Math.max((durMinutes / 60) * cellHeight * 2 - 10, 52);
-
-              return (
-                <div
-                  key={act.id}
-                  data-testid={`popover-slot-${act.id}`}
-                  className="absolute left-1 right-1"
-                  style={{ top: `${topPx}px`, height: `${heightPx}px` }}
-                >
-                  <ActivityCard
-                    activity={act}
-                    master={master}
-                    studios={studios}
-                    gridStart={timelineStart}
-                    onEdit={onSelectActivity}
-                    style={{
-                      position: 'absolute',
-                      inset: 0,
-                      height: '100%',
-                      cursor: 'pointer',
-                    }}
-                  />
-                </div>
-              );
-            })}
-          </div>
-        ))}
       </div>
     </div>
   );

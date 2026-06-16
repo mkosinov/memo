@@ -15,7 +15,7 @@ import { ActivityDetailsModal } from '../modal/ActivityDetailsModal';
 import { DAYS, getMonday, TIME_COL_WIDTH, isSameDay, formatTime, calculateGridTimeRange } from '@/lib/utils';
 
 export function WeekView() {
-  const { currentWeek, activities, scheduleIndex, masters, services, locations: studios, stamp, addActivity, updateActivity, loading, error, filterMasterIds, filterLocationIds, cellHeight = 60, gridFrequency = 30, workingHoursStart = 9, workingHoursEnd = 21 } = useSchedule();
+  const { currentWeek, activities, scheduleIndex, masters, services, locations, stamp, addActivity, updateActivity, loading, error, filterMasterIds, filterLocationIds, cellHeight = 60, gridFrequency = 30, workingHoursStart = 9, workingHoursEnd = 21 } = useSchedule();
   const { showToast } = useUI();
   const monday = getMonday(currentWeek);
 
@@ -270,7 +270,7 @@ export function WeekView() {
               date={day}
               activities={resolveById(activitiesByDate.get(dateToISO(day)) ?? [], scheduleIndex.byId).map(a => ({ ...a, duration: a.durationMinutes / 60, serviceName: a.serviceTitle }))}
               masters={masters}
-              studios={studios}
+              locations={locations}
               services={services}
               dragCopy={dragCopy}
               dragId={dragId}
@@ -325,7 +325,7 @@ export function WeekView() {
                   : activeDragActivity
               }
               master={dragMaster}
-              studios={studios}
+              locations={locations}
               style={{ top: 0 }}
             />
           </div>

@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useDroppable } from '@dnd-kit/core';
 import { hexToRgb, mixWithWhite, formatTime, generateTimeSlots, HOURS_START, HOURS_END } from '@/lib/utils';
-import type { Activity, Master, Studio, StampState, Service } from '@memo/domain';
+import type { Activity, Master, Location, StampState, Service } from '@memo/domain';
 import { ActivityCard } from './ActivityCard';
 import { OverlapPopover } from './OverlapPopover';
 
@@ -32,7 +32,7 @@ interface DayColumnProps {
   date: Date;
   activities: Activity[];
   masters: Master[];
-  studios?: Studio[];
+  locations?: Location[];
   services?: Service[];
   dragCopy?: boolean;
   dragId?: string | null;
@@ -190,7 +190,7 @@ function DroppableSlot({ dayIndex, slotIndex, startTime, isHour, isHalfHour, dra
 
 // ─── DayColumn ────────────────────────────────────────────────────────────
 
-export function DayColumn({ dayIndex, activities, masters, studios = [], services = [], dragCopy, dragId, ghostHeight, ghostDayIndex, ghostSlotIndex, ghostColumnId, onCreateActivity, onOpenCreateModal, onOpenEditModal, onQuickAdd, stampReady, stamp, cellHeight = 60, gridFrequency = 30, gridStart = HOURS_START, gridEnd = HOURS_END, columnId }: DayColumnProps) {
+export function DayColumn({ dayIndex, activities, masters, locations = [], services = [], dragCopy, dragId, ghostHeight, ghostDayIndex, ghostSlotIndex, ghostColumnId, onCreateActivity, onOpenCreateModal, onOpenEditModal, onQuickAdd, stampReady, stamp, cellHeight = 60, gridFrequency = 30, gridStart = HOURS_START, gridEnd = HOURS_END, columnId }: DayColumnProps) {
   const [popoverData, setPopoverData] = useState<{
     activities: Activity[];
     anchorRect: DOMRect;
@@ -494,7 +494,7 @@ export function DayColumn({ dayIndex, activities, masters, studios = [], service
             <ActivityCard
               activity={activity}
               master={master}
-              studios={studios}
+              locations={locations}
               onEdit={onOpenEditModal}
               onQuickAdd={onQuickAdd}
               isDragging={isThisDragging}
@@ -566,7 +566,7 @@ export function DayColumn({ dayIndex, activities, masters, studios = [], service
         <OverlapPopover
           activities={popoverData.activities}
           masterMap={masterMap}
-          studios={studios}
+          locations={locations}
           anchorRect={popoverData.anchorRect}
           cellHeight={cellHeight}
           gridStart={gridStart}

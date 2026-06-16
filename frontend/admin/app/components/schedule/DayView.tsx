@@ -52,7 +52,7 @@ export function DayView() {
     scheduleIndex,
     masters,
     services,
-    locations: studios,
+    locations,
     stamp,
     addActivity,
     updateActivity,
@@ -210,7 +210,7 @@ export function DayView() {
   // Determine columns based on filter selection and user column order preference
   const columns = useMemo(() => {
     if (columnMode === 'locations') {
-      const allLocations = studios;
+      const allLocations = locations;
       // Empty filter = show all locations (ordered by user settings or default)
       if (filterLocationIds.length === 0) {
         const order = getColumnOrder('locations');
@@ -264,7 +264,7 @@ export function DayView() {
         .map(id => allMasters.find(m => m.id === id))
         .filter(Boolean) as typeof allMasters;
     }
-  }, [columnMode, studios, masters, filterMasterIds, filterLocationIds, getColumnOrder]);
+  }, [columnMode, locations, masters, filterMasterIds, filterLocationIds, getColumnOrder]);
 
   // Column reorder
   const {
@@ -469,7 +469,7 @@ export function DayView() {
                 date={selectedDay}
                 activities={colActivities.map(a => ({ ...a, duration: a.durationMinutes / 60, serviceName: a.serviceTitle }))}
                 masters={masters}
-                studios={studios}
+                locations={locations}
                 services={services}
                 dragCopy={dragCopy}
                 dragId={dragId}
@@ -557,7 +557,7 @@ export function DayView() {
                   : activeDragActivity
               }
               master={dragMaster}
-              studios={studios}
+              locations={locations}
               style={{ top: 0 }}
             />
           </div>

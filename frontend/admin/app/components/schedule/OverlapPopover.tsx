@@ -1,14 +1,14 @@
 'use client';
 
 import React, { useEffect, useRef, useMemo, useCallback } from 'react';
-import type { Activity, Master, Studio } from '@memo/domain';
+import type { Activity, Master, Location } from '@memo/domain';
 import { formatTime, HOURS_START } from '@/lib/utils';
 import { ActivityCard } from './ActivityCard';
 
 interface OverlapPopoverProps {
   activities: Activity[];
   masterMap: Map<string, Master>;
-  studios?: Studio[];
+  locations?: Location[];
   onClose: () => void;
   onSelectActivity: (activity: Activity) => void;
   anchorRect: DOMRect;
@@ -50,7 +50,7 @@ const ANCHOR_GAP = 4;
 export function OverlapPopover({
   activities,
   masterMap,
-  studios = [],
+  locations = [],
   onClose,
   onSelectActivity,
   anchorRect,
@@ -248,7 +248,7 @@ export function OverlapPopover({
                     <ActivityCard
                       activity={act}
                       master={master}
-                      studios={studios}
+                      locations={locations}
                       gridStart={timelineStart}
                       onEdit={onSelectActivity}
                       style={{

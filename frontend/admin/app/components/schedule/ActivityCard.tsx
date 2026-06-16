@@ -129,12 +129,12 @@ export function ActivityCard({ activity, master, locations = [], style, onEdit, 
       <div className="px-2 overflow-hidden">
         <div className="flex justify-between items-start">
           {/* Title text — left side */}
-          <span
+          <div
             className={`text-sm font-semibold leading-tight text-black ${titleLines === 2 ? 'line-clamp-2' : 'truncate'}`}
             title={activity.serviceName}
           >
             {activity.serviceName}
-          </span>
+          </div>
           {/* Age text — right side */}
           <span className="flex-shrink-0 ml-1 text-[12px] text-black/70 font-normal">
             {activity.minAge}+

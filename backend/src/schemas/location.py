@@ -9,6 +9,7 @@ class LocationBase(BaseModel):
     """Shared fields for location creation and updates."""
 
     name: str
+    short_title: str | None = None
     address: str | None = None
     description: str | None = None
     capacity: int

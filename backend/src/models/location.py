@@ -17,6 +17,7 @@ class Location(AbstractModel):
     __tablename__ = "locations"
 
     name: Mapped[str] = mapped_column(String(100))
+    short_title: Mapped[str | None] = mapped_column(String(50), nullable=True)
     address: Mapped[str | None] = mapped_column(Text, nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     capacity: Mapped[int] = mapped_column(Integer)

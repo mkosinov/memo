@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **feat: schedule popover carousel — time-groups model with smart popover UX (toggle close, X close, auto-scroll, wheel propagation, smart alignment)** — 2026-06-16 (branch `feat-photo-searchable-select`)
+  - Redesigned pairwise overlap into 3-group carousel (G1 09:00-12:59, G2 13:00-15:59, G3 16:00-23:59)
+  - Added `OverlapPopover` with smart alignment and internal auto-scroll
+  - Improved UX: toggle close, X close button, background dimming, wheel propagation lock
+  - Increased z-index handling: badges `z-[110]`, popovers `z-100`
+
 - **NavigationProvider Architecture** — 2026-06-02
   - Centralized date management: NavigationProvider as single source of truth
   - Refactored layout, Menubar, Topbar, Toolbar to use shared NavigationContext

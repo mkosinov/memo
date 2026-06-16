@@ -105,12 +105,8 @@ export function Topbar() {
 
   const handleDayButtonClick = useCallback(() => {
     handleViewModeSwitch('day');
-  }, [handleViewModeSwitch]);
-
-  const handleDropdownToggle = useCallback((e: React.MouseEvent) => {
-    e.stopPropagation();
     setDropdownOpen(prev => !prev);
-  }, []);
+  }, [handleViewModeSwitch]);
 
   const handleColumnModeSelect = useCallback((mode: 'masters' | 'locations') => {
     setColumnMode(mode);
@@ -243,33 +239,20 @@ export function Topbar() {
       <div className="flex items-center gap-1 rounded-lg p-0.5" style={{ backgroundColor: 'var(--surface)' }}>
         {/* Day button with dropdown */}
         <div className="relative" ref={dropdownRef}>
-          <div className="flex items-center">
-            <button
-              onClick={handleDayButtonClick}
-              className="rounded-l-md px-3 py-1 text-xs font-medium transition-colors"
-              style={viewMode === 'day'
-                ? { backgroundColor: 'var(--brand)', color: 'white', boxShadow: '0 1px 3px rgba(0,0,0,0.15)' }
-                : { color: 'var(--ink-light)' }
-              }
-              data-testid="day-button"
-            >
-              {dayLabel}
-            </button>
-            <button
-              onClick={handleDropdownToggle}
-              className="rounded-r-md px-1.5 py-1 text-xs transition-colors border-l"
-              style={viewMode === 'day'
-                ? { backgroundColor: 'var(--brand)', color: 'white', borderColor: 'rgba(255,255,255,0.2)' }
-                : { color: 'var(--ink-light)', borderColor: 'var(--ink-faint)' }
-              }
-              aria-label="Открыть меню выбора режима колонок"
-              data-testid="column-mode-dropdown"
-            >
-              <svg width="10" height="6" viewBox="0 0 10 6" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M1 1L5 5L9 1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-              </svg>
-            </button>
-          </div>
+          <button
+            onClick={handleDayButtonClick}
+            className="flex items-center gap-1.5 rounded-md px-3 py-1 text-xs font-medium transition-colors"
+            style={viewMode === 'day'
+              ? { backgroundColor: 'var(--brand)', color: 'white', boxShadow: '0 1px 3px rgba(0,0,0,0.15)' }
+              : { color: 'var(--ink-light)' }
+            }
+            data-testid="day-button"
+          >
+            {dayLabel}
+            <svg width="10" height="6" viewBox="0 0 10 6" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M1 1L5 5L9 1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          </button>
 
           {/* Dropdown menu */}
           {dropdownOpen && (

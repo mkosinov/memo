@@ -246,14 +246,8 @@ function MiniCalendar({ selectedWeek, selectedDay, viewMode, onWeekSelect, colla
   };
 
   const handleDayClick = (day: Date) => {
-    if (viewMode === 'day') {
-      // DayView: select single day (dispatch a special event for ScheduleContext)
-      document.dispatchEvent(new CustomEvent('__memo-select-day', { detail: { date: day } }));
-    } else {
-      // WeekView: select the week containing this day
-      const weekMonday = getMonday(day);
-      handleWeekClick(weekMonday);
-    }
+    // Always switch to week view containing this day
+    document.dispatchEvent(new CustomEvent('__memo-switch-to-week-view', { detail: { date: day } }));
   };
 
   const handleDayDoubleClick = (day: Date) => {

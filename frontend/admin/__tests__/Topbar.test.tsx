@@ -164,11 +164,11 @@ describe('Topbar', () => {
     expect(setViewMode).toHaveBeenCalledWith('day');
   });
 
-  it('opens dropdown menu when dropdown arrow is clicked', () => {
+  it('opens dropdown menu when day button is clicked', () => {
     renderWithProviders();
-    // The dropdown arrow is a chevron SVG button — find it by role
-    const dropdownButton = screen.getByRole('button', { name: /открыть меню/i });
-    fireEvent.click(dropdownButton);
+    // Click the day button (which now contains the dropdown arrow)
+    const dayButton = screen.getByTestId('day-button');
+    fireEvent.click(dayButton);
     // After opening, both options should be visible
     expect(screen.getByRole('menuitem', { name: /по мастерам/i })).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: /по локациям/i })).toBeInTheDocument();
@@ -201,7 +201,7 @@ describe('Topbar', () => {
     );
 
     // Open dropdown
-    fireEvent.click(screen.getByRole('button', { name: /открыть меню/i }));
+    fireEvent.click(screen.getByTestId('day-button'));
     // Click the locations option
     fireEvent.click(screen.getByRole('menuitem', { name: /по локациям/i }));
     expect(setColumnMode).toHaveBeenCalledWith('locations');
@@ -234,7 +234,7 @@ describe('Topbar', () => {
     );
 
     // Open dropdown
-    fireEvent.click(screen.getByRole('button', { name: /открыть меню/i }));
+    fireEvent.click(screen.getByTestId('day-button'));
     expect(screen.getByRole('menuitem', { name: /по локациям/i })).toBeInTheDocument();
 
     // Select an option
@@ -269,7 +269,7 @@ describe('Topbar', () => {
       </QueryClientProvider>
     );
 
-    fireEvent.click(screen.getByRole('button', { name: /открыть меню/i }));
+    fireEvent.click(screen.getByTestId('day-button'));
     const locationsItem = screen.getByRole('menuitem', { name: /по локациям/i });
     expect(locationsItem).toHaveAttribute('data-active', 'true');
   });

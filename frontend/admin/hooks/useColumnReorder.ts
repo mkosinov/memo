@@ -101,7 +101,7 @@ export function useColumnReorder({ columns, columnMode, initialOrder, onOrderCha
   }, [columnOrder]);
 
   const onColumnDrop = useCallback(
-    (draggedId: string, targetId: string) => {
+    (draggedId: string, targetId: string, direction: 'before' | 'after' = 'before') => {
       if (draggedId === targetId) return;
 
       setColumnOrder((prev) => {
@@ -111,10 +111,14 @@ export function useColumnReorder({ columns, columnMode, initialOrder, onOrderCha
 
         if (dragIdx === -1 || targetIdx === -1) return prev;
 
-        // Remove dragged item and insert before target
+        // Remove dragged item
         newOrder.splice(dragIdx, 1);
         const newTargetIdx = newOrder.indexOf(targetId);
-        newOrder.splice(newTargetIdx, 0, draggedId);
+
+        // 'before' — insert before target (default, used by arrows)
+        // 'after' — insert after target (used by DnD when dragging right)
+        const insertIdx = direction === 'after' ? newTargetIdx + 1 : newTargetIdx;
+        newOrder.splice(insertIdx, 0, draggedId);
 
         // Persist to backend
         const reorderFn = columnMode === 'masters' ? reorderMasters : reorderLocations;

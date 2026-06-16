@@ -54,6 +54,20 @@ describe('useColumnReorder', () => {
     expect(result.current.orderedColumns.map((c) => c.id)).toEqual(['m2', 'm1', 'm3']);
   });
 
+  it('reorders columns with direction=after (DnD right drag)', () => {
+    const { result } = renderHook(() =>
+      useColumnReorder({ columns, columnMode: 'masters' }),
+    );
+
+    // [m1, m2, m3] → drag m1 after m3 → [m2, m3, m1]
+    act(() => {
+      result.current.onColumnDrop('m1', 'm3', 'after');
+    });
+
+    expect(result.current.columnOrder).toEqual(['m2', 'm3', 'm1']);
+    expect(result.current.orderedColumns.map((c) => c.id)).toEqual(['m2', 'm3', 'm1']);
+  });
+
   it('calls reorderMasters API on drop in masters mode', async () => {
     const { result } = renderHook(() =>
       useColumnReorder({ columns, columnMode: 'masters' }),

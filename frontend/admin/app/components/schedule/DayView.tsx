@@ -2,7 +2,7 @@
 
 import React, { useState, useCallback, useMemo } from 'react';
 import { DndContext, DragOverlay, closestCorners, rectIntersection, useSensor, useSensors, PointerSensor, TouchSensor } from '@dnd-kit/core';
-import type { Collision, DragStartEvent } from '@dnd-kit/core';
+import type { CollisionDetection } from '@dnd-kit/core';
 import { SortableContext, horizontalListSortingStrategy } from '@dnd-kit/sortable';
 import { useSchedule } from '@/contexts/ScheduleContext';
 import { useUI } from '@/contexts/UIContext';
@@ -17,6 +17,35 @@ import { ActivityCard } from './ActivityCard';
 import { ScheduleColumnHeader, SortableColumnHeader } from './ScheduleColumnHeader';
 import { ActivityDetailsModal } from '../modal/ActivityDetailsModal';
 import { TIME_COL_WIDTH, isSameDay, formatTime, calculateGridTimeRange } from '@/lib/utils';
+
+/**
+ * Custom collision detection that separates column drags from activity drags.
+ * When dragging a column header, only considers other column headers as drop targets.
+ * When dragging an activity, uses standard closestCorners for slot-based drops.
+ */
+const separatedCollisionDetection: CollisionDetection = (args) => {
+  const { active, droppableContainers } = args;
+  const activeData = active.data?.current as Record<string, unknown> | undefined;
+
+  if (activeData?.type === 'column') {
+    // Column drag: only consider droppables that are columns (no type or type !== 'slot')
+    const columnContainers = droppableContainers.filter((container) => {
+      const containerData = container.data?.current as Record<string, unknown> | undefined;
+      // Column headers from SortableContext don't have data.type set by useDroppable,
+      // but they DO have data set by useSortable. We want containers that are NOT slots.
+      return containerData?.type !== 'slot';
+    });
+
+    // Use rectIntersection for column-to-column (horizontal layout)
+    return rectIntersection({
+      ...args,
+      droppableContainers: columnContainers,
+    });
+  }
+
+  // Activity drag: standard closestCorners for slot-based drops
+  return closestCorners(args);
+};
 
 export function DayView() {
   const {
@@ -334,7 +363,7 @@ export function DayView() {
   return (
     <DndContext
       sensors={sensors}
-      collisionDetection={closestCorners}
+      collisionDetection={separatedCollisionDetection}
       onDragStart={(event) => {
         const activeData = event.active.data?.current as Record<string, unknown> | undefined;
 
@@ -379,7 +408,11 @@ export function DayView() {
           // Column reorder — check if drop target is a column by ID (not a slot droppable)
           const columnIds = new Set(orderedColumns.map(c => c.id));
           if (columnIds.has(String(over.id)) && active.id !== over.id) {
-            onColumnDrop(String(active.id), String(over.id));
+            // Compute direction: dragging right (dragIdx < targetIdx) → insert AFTER target, left → BEFORE
+            const dragIdx = orderedColumns.findIndex(c => c.id === String(active.id));
+            const targetIdx = orderedColumns.findIndex(c => c.id === String(over.id));
+            const direction = dragIdx < targetIdx ? 'after' : 'before';
+            onColumnDrop(String(active.id), String(over.id), direction);
           }
         } else {
           // Activity card move

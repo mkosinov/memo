@@ -410,7 +410,7 @@ test.describe('DayView Column Visibility — Location Filter', () => {
     await switchToDayView(page, '2026-06-05');
 
     // Switch to locations column mode
-    await page.locator('[data-testid="column-mode-dropdown"]').click();
+    await page.locator('[data-testid="day-button"]  ').click();
     await page.waitForTimeout(300);
     await page.locator('[data-testid="column-mode-menu"] button:has-text("По локациям")').click();
     await page.waitForTimeout(500);
@@ -467,7 +467,7 @@ test.describe('DayView Column Visibility — Location Filter', () => {
     await switchToDayView(page, '2026-06-05');
 
     // Switch to locations column mode
-    await page.locator('[data-testid="column-mode-dropdown"]').click();
+    await page.locator('[data-testid="day-button"]  ').click();
     await page.waitForTimeout(300);
     await page.locator('[data-testid="column-mode-menu"] button:has-text("По локациям")').click();
     await page.waitForTimeout(500);

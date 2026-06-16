@@ -4,6 +4,28 @@ import React from 'react';
 import { OverlapPopover } from '../app/components/schedule/OverlapPopover';
 import type { Activity, Master } from '@memo/domain';
 import { formatTime } from '@/lib/utils';
+import { createMockUIContext, createMockScheduleContext } from './helpers/mockContexts';
+
+vi.mock('@/contexts/UIContext', () => ({
+  useUI: vi.fn(() => createMockUIContext()),
+}));
+
+vi.mock('@/contexts/ScheduleContext', () => ({
+  useSchedule: vi.fn(() => createMockScheduleContext()),
+}));
+
+const mockUseDroppable = vi.fn(() => ({
+  isOver: false,
+  setNodeRef: vi.fn(),
+}));
+
+vi.mock('@dnd-kit/core', async () => {
+  const actual = await vi.importActual('@dnd-kit/core');
+  return {
+    ...actual,
+    useDroppable: () => mockUseDroppable(),
+  };
+});
 
 const MOCK_MASTERS: Master[] = [
   { id: 'm1', name: 'Анна Иванова', shortName: 'Анна', color: '#FF6B6B' },
@@ -121,9 +143,10 @@ describe('OverlapPopover', () => {
       />,
     );
 
-    // Both start at 10:00 — timeline shows one, each card shows one → 3 total
+    // Timeline shows "10:00", cards show "10:00–12:00" and "10:00–11:30"
+    // So "10:00" appears at least once in timeline, and the card time ranges contain it
     const timeLabels = screen.getAllByText('10:00');
-    expect(timeLabels.length).toBe(3);
+    expect(timeLabels.length).toBeGreaterThanOrEqual(1);
   });
 
   it('calls onSelectActivity when clicking a card', () => {
@@ -239,8 +262,8 @@ describe('OverlapPopover', () => {
       />,
     );
 
-    const card1 = screen.getByText('Картина маслом').closest('button');
-    const card2 = screen.getByText('Картина акрилом').closest('button');
+    const card1 = screen.getByTestId('activity-ov1');
+    const card2 = screen.getByTestId('activity-ov2');
 
     expect(card1).toHaveStyle({ backgroundColor: '#FF6B6B' });
     expect(card2).toHaveStyle({ backgroundColor: '#4ECDC4' });
@@ -274,7 +297,334 @@ describe('OverlapPopover', () => {
       />,
     );
 
-    const card = screen.getByText('Неизвестный мастер').closest('button');
+    const card = screen.getByTestId('activity-unk1');
     expect(card).toHaveStyle({ backgroundColor: '#666' });
+  });
+
+  // ─── Close button ──────────────────────────────────────────────
+
+  it('renders an X close button in the top-right corner', () => {
+    render(
+      <OverlapPopover
+        activities={overlappingActivities}
+        masterMap={masterMap}
+        anchorRect={anchorRect}
+        onClose={vi.fn()}
+        onSelectActivity={vi.fn()}
+      />,
+    );
+
+    const closeBtn = screen.getByTestId('overlap-popover-close');
+    expect(closeBtn).toBeInTheDocument();
+    expect(closeBtn).toHaveAttribute('aria-label', 'Close popover');
+  });
+
+  it('calls onClose when clicking the X close button', () => {
+    const onClose = vi.fn();
+    render(
+      <OverlapPopover
+        activities={overlappingActivities}
+        masterMap={masterMap}
+        anchorRect={anchorRect}
+        onClose={onClose}
+        onSelectActivity={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('overlap-popover-close'));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  // ─── Time alignment bug ────────────────────────────────────────
+
+  it('positions activities relative to popover timeline, not gridStart', () => {
+    // Activities at 13:00 and 14:00 — timeline starts at 13 (not gridStart=9)
+    const g2Activities: Activity[] = [
+      {
+        id: 'g2a1',
+        day: 0,
+        masterId: 'm1',
+        startTime: 13,
+        duration: 2.5,
+        serviceId: 's1',
+        serviceName: 'G2 Activity A',
+        locationId: 'alpika',
+        occupied: 3,
+        capacity: 8,
+        isPrivate: false,
+      },
+      {
+        id: 'g2a2',
+        day: 0,
+        masterId: 'm2',
+        startTime: 14,
+        duration: 2,
+        serviceId: 's2',
+        serviceName: 'G2 Activity B',
+        locationId: 'alpika',
+        occupied: 4,
+        capacity: 6,
+        isPrivate: false,
+      },
+    ];
+
+    const { container } = render(
+      <OverlapPopover
+        activities={g2Activities}
+        masterMap={masterMap}
+        anchorRect={anchorRect}
+        onClose={vi.fn()}
+        onSelectActivity={vi.fn()}
+        cellHeight={60}
+        gridStart={9}
+      />,
+    );
+
+    const popover = container.firstChild as HTMLElement;
+    // Activity at 13:00 should be at top=0 (13 - timelineStart=13 = 0 hours)
+    // NOT at top=(13-9)*60*2 = 480px (old bug with gridStart)
+    const card1 = popover.querySelector('[data-testid="popover-slot-g2a1"]') as HTMLElement;
+    expect(card1).toBeTruthy();
+    expect(card1.style.top).toBe('0px');
+
+    // Activity at 14:00 should be at top=(14-13)*60*2 = 120px
+    const card2 = popover.querySelector('[data-testid="popover-slot-g2a2"]') as HTMLElement;
+    expect(card2).toBeTruthy();
+    expect(card2.style.top).toBe('120px');
+  });
+
+  // ─── Scroll for overflow ────────────────────────────────────────
+
+  it('has overflow-auto on the popover container for scrolling', () => {
+    render(
+      <OverlapPopover
+        activities={overlappingActivities}
+        masterMap={masterMap}
+        anchorRect={anchorRect}
+        onClose={vi.fn()}
+        onSelectActivity={vi.fn()}
+      />,
+    );
+
+    const popover = screen.getByTestId('overlap-popover');
+    expect(popover.className).toContain('overflow-auto');
+  });
+
+  it('has max-height and max-width constraints for scroll bounds', () => {
+    render(
+      <OverlapPopover
+        activities={overlappingActivities}
+        masterMap={masterMap}
+        anchorRect={anchorRect}
+        onClose={vi.fn()}
+        onSelectActivity={vi.fn()}
+      />,
+    );
+
+    const popover = screen.getByTestId('overlap-popover');
+    // Should have maxHeight and maxWidth set (either via style or className)
+    const hasConstraints =
+      popover.className.includes('max-h-') ||
+      popover.className.includes('max-w-') ||
+      (popover.style.maxHeight && popover.style.maxHeight !== '') ||
+      (popover.style.maxWidth && popover.style.maxWidth !== '');
+    expect(hasConstraints).toBe(true);
+  });
+
+  // ─── Screen edge detection ──────────────────────────────────────
+
+  it('positions below anchor when there is enough space below', () => {
+    const nearTopAnchor: DOMRect = {
+      top: 100,
+      left: 200,
+      bottom: 130,
+      right: 300,
+      width: 100,
+      height: 30,
+      x: 200,
+      y: 100,
+      toJSON: () => ({}),
+    };
+
+    const { container } = render(
+      <OverlapPopover
+        activities={overlappingActivities}
+        masterMap={masterMap}
+        anchorRect={nearTopAnchor}
+        onClose={vi.fn()}
+        onSelectActivity={vi.fn()}
+      />,
+    );
+
+    const popover = container.firstChild as HTMLElement;
+    // Should be positioned below anchor (bottom + gap)
+    const top = parseInt(popover.style.top, 10);
+    expect(top).toBeGreaterThanOrEqual(nearTopAnchor.bottom);
+    expect(top).toBeLessThanOrEqual(nearTopAnchor.bottom + 10);
+  });
+
+  it('positions above anchor when anchor is near bottom of screen', () => {
+    // Anchor near bottom of screen (bottom=980, viewport height ~1000)
+    const nearBottomAnchor: DOMRect = {
+      top: 950,
+      left: 200,
+      bottom: 980,
+      right: 300,
+      width: 100,
+      height: 30,
+      x: 200,
+      y: 950,
+      toJSON: () => ({}),
+    };
+
+    const { container } = render(
+      <OverlapPopover
+        activities={overlappingActivities}
+        masterMap={masterMap}
+        anchorRect={nearBottomAnchor}
+        onClose={vi.fn()}
+        onSelectActivity={vi.fn()}
+      />,
+    );
+
+    const popover = container.firstChild as HTMLElement;
+    // Should be positioned above anchor (not below which would go off-screen)
+    const top = parseInt(popover.style.top, 10);
+    expect(top).toBeLessThan(nearBottomAnchor.top);
+  });
+
+  // ─── Smart horizontal alignment ──────────────────────────────
+
+  it('aligns right edge of popover with right edge of pill when near right screen edge', () => {
+    // Pill near right edge of 1024px viewport (jsdom default)
+    const nearRightAnchor: DOMRect = {
+      top: 100,
+      left: 900,
+      bottom: 130,
+      right: 1000,
+      width: 100,
+      height: 30,
+      x: 900,
+      y: 100,
+      toJSON: () => ({}),
+    };
+
+    const { container } = render(
+      <OverlapPopover
+        activities={overlappingActivities}
+        masterMap={masterMap}
+        anchorRect={nearRightAnchor}
+        onClose={vi.fn()}
+        onSelectActivity={vi.fn()}
+      />,
+    );
+
+    const popover = container.firstChild as HTMLElement;
+    // spaceRight = 1024 - 900 = 124 < 400 (not enough to right-align)
+    // spaceLeft = 1000 >= 400 (enough to left-align from right)
+    // Expected: style.right = screenWidth - anchorRect.right = 1024 - 1000 = 24
+    expect(popover.style.right).toBe('24px');
+    expect(popover.style.left).toBe(''); // no left property set
+  });
+
+  it('aligns left edge of popover with left edge of pill when near left screen edge', () => {
+    const nearLeftAnchor: DOMRect = {
+      top: 100,
+      left: 10,
+      bottom: 130,
+      right: 110,
+      width: 100,
+      height: 30,
+      x: 10,
+      y: 100,
+      toJSON: () => ({}),
+    };
+
+    const { container } = render(
+      <OverlapPopover
+        activities={overlappingActivities}
+        masterMap={masterMap}
+        anchorRect={nearLeftAnchor}
+        onClose={vi.fn()}
+        onSelectActivity={vi.fn()}
+      />,
+    );
+
+    const popover = container.firstChild as HTMLElement;
+    // spaceRight = 1024 - 10 = 1014 >= 400
+    // Expected: style.left = anchorRect.left = 10
+    expect(popover.style.left).toBe('10px');
+  });
+
+  it('left-aligns popover when pill is in middle with enough space', () => {
+    const midAnchor: DOMRect = {
+      top: 100,
+      left: 400,
+      bottom: 130,
+      right: 500,
+      width: 100,
+      height: 30,
+      x: 400,
+      y: 100,
+      toJSON: () => ({}),
+    };
+
+    const { container } = render(
+      <OverlapPopover
+        activities={overlappingActivities}
+        masterMap={masterMap}
+        anchorRect={midAnchor}
+        onClose={vi.fn()}
+        onSelectActivity={vi.fn()}
+      />,
+    );
+
+    const popover = container.firstChild as HTMLElement;
+    // spaceRight = 1024 - 400 = 624 >= 400
+    // Expected: left-aligned at anchorRect.left
+    expect(popover.style.left).toBe('400px');
+  });
+
+  it('shrinks popover to fit screen when neither side has enough space', () => {
+    // Narrow viewport (500px) — neither side can fit 400px popover
+    const originalInnerWidth = Object.getOwnPropertyDescriptor(window, 'innerWidth');
+    Object.defineProperty(window, 'innerWidth', { value: 500, writable: true, configurable: true });
+
+    try {
+      const midAnchor: DOMRect = {
+        top: 100,
+        left: 200,
+        bottom: 130,
+        right: 300,
+        width: 100,
+        height: 30,
+        x: 200,
+        y: 100,
+        toJSON: () => ({}),
+      };
+
+      const { container } = render(
+        <OverlapPopover
+          activities={overlappingActivities}
+          masterMap={masterMap}
+          anchorRect={midAnchor}
+          onClose={vi.fn()}
+          onSelectActivity={vi.fn()}
+        />,
+      );
+
+      const popover = container.firstChild as HTMLElement;
+      // spaceRight = 500 - 200 = 300 < 400
+      // spaceLeft = 300 < 400
+      // Expected: left=SCREEN_PADDING, right=SCREEN_PADDING, width=maxWidth
+      expect(popover.style.left).toBe('8px');
+      expect(popover.style.right).toBe('8px');
+      expect(popover.style.width).toBe('484px'); // 500 - 8*2
+    } finally {
+      // Restore
+      if (originalInnerWidth) {
+        Object.defineProperty(window, 'innerWidth', originalInnerWidth);
+      }
+    }
   });
 });

@@ -18,6 +18,7 @@ export type Master = z.infer<typeof MasterSchema>;
 export const LocationSchema = z.object({
   id: z.string(),
   name: z.string(),
+  shortTitle: z.string().optional(),
   address: z.string().optional(),
   emoji: z.string().optional(),
   defaultCapacity: z.number().optional(),

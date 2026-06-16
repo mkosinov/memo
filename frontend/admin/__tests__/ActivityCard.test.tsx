@@ -198,6 +198,127 @@ describe('ActivityCard', () => {
     const filledBar = container.querySelector('[data-testid="activity-ev_1"] [style*="width:"][class*="absolute"]');
     expect(filledBar).toHaveStyle({ width: '0%' });
   });
+
+  // ─── Tier selection ────────────────────────────────────────────────────
+  // With cellHeight=50: heightPx = max(durMinutes/60 * 100 - 8, 60)
+  // 30→60px, 59→90px, 60→92px, 89→140px, 90→142px, 120→192px
+
+  describe('tier selection', () => {
+    it.each([
+      [30, 'tiny'],      // 30 min → height 60, isTiny
+      [59, 'tiny'],      // 59 min → height 90, isTiny
+      [60, 'compact'],   // 60 min → height 92, isCompact
+      [89, 'compact'],   // 89 min → height 140, isCompact
+      [90, 'standard'],  // 90 min → height 142, isStandard
+      [120, 'standard'], // 120 min → height 192, isStandard
+    ])('duration %i min → %s tier', (minutes, expectedTier) => {
+      const activity = { ...mockActivity, duration: minutes / 60 };
+      const { container } = render(
+        <ActivityCard
+          activity={activity}
+          master={mockMaster}
+          locations={[mockLocation]}
+        />
+      );
+      const card = container.querySelector('[data-testid^="activity-"]') as HTMLElement;
+      const styleHeight = parseInt(card.style.height);
+      if (expectedTier === 'tiny') {
+        // Tiny: 60px is the floor; actual height depends on duration
+        expect(styleHeight).toBeGreaterThanOrEqual(60);
+        expect(screen.queryByTestId('btn-quick-add')).not.toBeInTheDocument();
+        expect(screen.queryByText('Ольга Петрова')).not.toBeInTheDocument();
+      } else if (expectedTier === 'compact') {
+        // Compact: has compact-capacity, no footer
+        expect(screen.getByTestId('compact-capacity')).toBeInTheDocument();
+        expect(screen.queryByTestId('btn-quick-add')).not.toBeInTheDocument();
+      } else {
+        // Standard: has footer button
+        expect(screen.getByTestId('btn-quick-add')).toBeInTheDocument();
+      }
+    });
+  });
+
+  // ─── Master visibility matrix ──────────────────────────────────────────
+  // Derived from spec math with cellHeight=50:
+  //   Compact: want2Line≥90, canFit2Master≥108, canFit1Master≥88
+  //   Standard: want2Line≥134, canFit2Master≥152, canFit1Master≥132
+  // Heights: 30→60, 60→92, 75→117, 90→142, 120→192, 180→292
+
+  describe('master visibility', () => {
+    const cases: Array<[number, 'short' | 'long', boolean]> = [
+      // [durationMinutes, titleType, expectedShowMaster]
+      // Note: implementation always prefers 2-line title when the card is tall enough,
+      // so the test should expect the 2-line behaviour.
+      [30, 'short', false],   // tiny: no master
+      [30, 'long', false],    // tiny: no master
+      [60, 'short', false],   // compact 1:00, 2-line preferred (92≥90), no master (108>92)
+      [60, 'long', false],    // compact 1:00, 2-line: no master
+      [75, 'short', true],    // compact 1:15, 2-line preferred, master fits (108≤117)
+      [75, 'long', true],     // compact 1:15, 2-line: master fits
+      [90, 'short', false],   // standard 1:30, 2-line preferred (142≥134), no master (152>142)
+      [90, 'long', false],    // standard 1:30, 2-line: no master
+      [120, 'long', true],    // standard 2:00, 2-line: master fits (152≤192)
+      [180, 'long', true],    // standard 3:00, 2-line: master fits
+    ];
+
+    it.each(cases)(
+      'duration %i min, %s title → showMaster=%s',
+      (minutes, titleType, expectedShowMaster) => {
+        const activity = {
+          ...mockActivity,
+          duration: minutes / 60,
+          serviceName: titleType === 'long' ? 'Мини-картина акрилом' : 'МК',
+        };
+        render(
+          <ActivityCard
+            activity={activity}
+            master={mockMaster}
+            locations={[mockLocation]}
+          />
+        );
+        if (expectedShowMaster) {
+          expect(screen.getByText('Ольга Петрова')).toBeInTheDocument();
+        } else {
+          expect(screen.queryByText('Ольга Петрова')).not.toBeInTheDocument();
+        }
+      }
+    );
+  });
+
+  // ─── Compact capacity placement ────────────────────────────────────────
+
+  describe('compact capacity', () => {
+    it('renders capacity in location row, not in footer (compact 1:00)', () => {
+      const activity = { ...mockActivity, duration: 1 }; // 1:00 → compact
+      render(
+        <ActivityCard
+          activity={activity}
+          master={mockMaster}
+          locations={[mockLocation]}
+        />
+      );
+      // Capacity present in compact-capacity slot
+      const compactCap = screen.getByTestId('compact-capacity');
+      expect(compactCap).toHaveTextContent('3/8');
+      // Footer absent in compact
+      expect(screen.queryByTestId('btn-quick-add')).not.toBeInTheDocument();
+    });
+
+    it('renders capacity in footer for standard (2:00)', () => {
+      const activity = { ...mockActivity, duration: 2 }; // 2:00 → standard
+      render(
+        <ActivityCard
+          activity={activity}
+          master={mockMaster}
+          locations={[mockLocation]}
+        />
+      );
+      // Capacity in footer (button + capacity present)
+      expect(screen.getByTestId('btn-quick-add')).toBeInTheDocument();
+      // No compact-capacity slot in standard
+      expect(screen.queryByTestId('compact-capacity')).not.toBeInTheDocument();
+    });
+  });
 });
 
 // ─── Delete Mode Tests ────────────────────────────────────────────────────

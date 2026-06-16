@@ -763,6 +763,40 @@ describe('DayColumn', () => {
       expect(screen.queryByTestId('overlap-popover')).not.toBeInTheDocument();
     });
 
+    it('popover toggle closes even when document mousedown races with badge click', () => {
+      // Regression test: In a real browser, the native mousedown event on the badge
+      // bubbles to document BEFORE React's synthetic event delegation processes it.
+      // This causes OverlapPopover's document mousedown handler to fire onClose()
+      // before the badge's onClick toggle runs, which reopens the popover.
+      //
+      // The fix: OverlapPopover's document handler must skip onClose() when the
+      // mousedown target is a popover toggle trigger (badge with data-popover-toggle).
+      render(
+        <DayColumn
+          dayIndex={0}
+          date={new Date()}
+          activities={partialOverlapActivities}
+          masters={MOCK_MASTERS}
+        />,
+      );
+
+      const badge = screen.getByRole('button', { name: /2 cards/i });
+
+      // Verify the badge has data-popover-toggle so the OverlapPopover document
+      // handler can identify it and skip calling onClose
+      expect(badge).toHaveAttribute('data-popover-toggle');
+
+      // First click — opens the popover
+      fireEvent.click(badge);
+      expect(screen.getByTestId('overlap-popover')).toBeInTheDocument();
+
+      // Second click on same badge — should close the popover (toggle)
+      // Even if the document mousedown handler races with the badge click,
+      // the data-popover-toggle guard prevents onClose from being called
+      fireEvent.click(badge);
+      expect(screen.queryByTestId('overlap-popover')).not.toBeInTheDocument();
+    });
+
     it('does not emit console.log during initialization', () => {
       const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
       try {

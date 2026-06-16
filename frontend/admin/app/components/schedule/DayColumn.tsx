@@ -535,6 +535,7 @@ export function DayColumn({ dayIndex, activities, masters, studios = [], service
                   }
                 }}
                 className="absolute right-1 z-[110] px-1.5 py-0.5 rounded-full bg-white/90 border border-gray-300 text-[10px] font-semibold text-gray-500 shadow-sm hover:bg-white hover:text-gray-700 transition-colors cursor-pointer"
+                data-popover-toggle
                 style={{
                   top: (activity.startTime - gridStart) * cellHeight * 2 + 2,
                 }}

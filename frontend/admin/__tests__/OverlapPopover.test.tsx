@@ -182,6 +182,38 @@ describe('OverlapPopover', () => {
     expect(onClose).toHaveBeenCalled();
   });
 
+  it('does not call onClose when mousedown target has data-popover-toggle', () => {
+    // Regression: the "N cards" badge that toggles the popover sits OUTSIDE
+    // the popover DOM. Without the data-popover-toggle guard, the document
+    // mousedown handler would call onClose(), racing with the badge click
+    // and causing the popover to reopen instead of closing.
+    const onClose = vi.fn();
+    render(
+      <OverlapPopover
+        activities={overlappingActivities}
+        masterMap={masterMap}
+        anchorRect={anchorRect}
+        onClose={onClose}
+        onSelectActivity={vi.fn()}
+      />,
+    );
+
+    // Create a badge element with data-popover-toggle (simulates the "N cards" badge)
+    const badge = document.createElement('button');
+    badge.setAttribute('data-popover-toggle', '');
+    badge.textContent = '2 cards';
+    document.body.appendChild(badge);
+
+    try {
+      // Fire mousedown on the badge — the document handler should recognise
+      // data-popover-toggle and skip calling onClose
+      fireEvent.mouseDown(badge);
+      expect(onClose).not.toHaveBeenCalled();
+    } finally {
+      document.body.removeChild(badge);
+    }
+  });
+
   it('does not call onClose when clicking inside the popover', () => {
     const onClose = vi.fn();
     render(

@@ -86,10 +86,18 @@ export function OverlapPopover({
     }
   }, []);
 
-  // Close on outside click
+  // Close on outside click — but skip if the mousedown target is a popover
+  // toggle trigger (the "N cards" badge). The badge uses onClick to toggle
+  // the popover, so firing onClose here would race with the badge click and
+  // cause the popover to reopen instead of closing.
   useEffect(() => {
     const handler = (e: MouseEvent) => {
-      if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
+      const target = e.target as Element;
+      if (
+        popoverRef.current &&
+        !popoverRef.current.contains(target) &&
+        !target.closest('[data-popover-toggle]')
+      ) {
         onClose();
       }
     };

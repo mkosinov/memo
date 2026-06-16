@@ -127,10 +127,17 @@ export function ActivityCard({ activity, master, locations = [], style, onEdit, 
 
       {/* 2. TITLE + AGE (always rendered, line-clamp-2) */}
       <div className="px-2 overflow-hidden">
-        <div className="text-sm font-semibold leading-tight text-black flex items-start gap-1">
-          {/* Age icon inline */}
+        <div className="flex justify-between items-start">
+          {/* Title text — left side */}
+          <span
+            className={`text-sm font-semibold leading-tight text-black ${titleLines === 2 ? 'line-clamp-2' : 'truncate'}`}
+            title={activity.serviceName}
+          >
+            {activity.serviceName}
+          </span>
+          {/* Age icon — right side */}
           <svg
-            className="w-3 h-3 flex-shrink-0 mt-0.5"
+            className="w-4 h-4 flex-shrink-0 ml-1 mt-0.5"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
@@ -138,12 +145,6 @@ export function ActivityCard({ activity, master, locations = [], style, onEdit, 
           >
             <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" />
           </svg>
-          <span
-            className={titleLines === 2 ? 'line-clamp-2' : 'truncate'}
-            title={activity.serviceName}
-          >
-            {activity.serviceName}
-          </span>
         </div>
       </div>
 

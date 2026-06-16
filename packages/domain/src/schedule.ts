@@ -32,6 +32,6 @@ export interface ScheduleAdminDTO extends ScheduleDTO {
   isPrivate: boolean;
   masterColor: string; // resolved from masters reference
   minAge: string; // resolved from services reference
-  maxAge: string; // resolved from services reference
+  maxAge?: string; // resolved from services reference (null = no upper limit)
   comment: string; // required, empty string as default
 }

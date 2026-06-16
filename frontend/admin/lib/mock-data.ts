@@ -31,13 +31,13 @@ export const STUDIO_MAP: Record<string, string> = {
 // ─── Services ─────────────────────────────────────────────────────────────
 
 export const SERVICES: Service[] = [
-  { id: 's1', name: 'Картина маслом',       duration: 2.5, maxCapacity: 8,  minAge: '12', maxAge: '99', defaultAdultPrice: 3500, defaultChildPrice: 2500, defaultIndividualPrice: 5000 },
-  { id: 's2', name: 'Картина акрилом',      duration: 2,   maxCapacity: 10, minAge: '6',  maxAge: '99', defaultAdultPrice: 2800, defaultChildPrice: 2000, defaultIndividualPrice: 4000 },
-  { id: 's3', name: 'Мини-картина акрилом', duration: 1.5, maxCapacity: 8,  minAge: '6',  maxAge: '99', defaultAdultPrice: 2000, defaultChildPrice: 1500, defaultIndividualPrice: 3000 },
-  { id: 's4', name: 'Акварель',             duration: 2.5, maxCapacity: 6,  minAge: '6-12', maxAge: '99', defaultAdultPrice: 2800, defaultChildPrice: 2000, defaultIndividualPrice: 4000 },
-  { id: 's5', name: 'Ручная лепка',         duration: 1.5, maxCapacity: 6,  minAge: '5',  maxAge: '99', defaultAdultPrice: 2200, defaultChildPrice: 1800, defaultIndividualPrice: 3500 },
-  { id: 's6', name: 'Роспись одежды',       duration: 2,   maxCapacity: 10, minAge: '8',  maxAge: '99', defaultAdultPrice: 3200, defaultChildPrice: 2500, defaultIndividualPrice: 4500 },
-  { id: 's7', name: 'Морской пейзаж',       duration: 3,   maxCapacity: 8,  minAge: '12', maxAge: '99', defaultAdultPrice: 3800, defaultChildPrice: 2800, defaultIndividualPrice: 5500 },
+  { id: 's1', name: 'Картина маслом',       duration: 2.5, maxCapacity: 8,  minAge: '12', defaultAdultPrice: 3500, defaultChildPrice: 2500, defaultIndividualPrice: 5000 },
+  { id: 's2', name: 'Картина акрилом',      duration: 2,   maxCapacity: 10, minAge: '6',  defaultAdultPrice: 2800, defaultChildPrice: 2000, defaultIndividualPrice: 4000 },
+  { id: 's3', name: 'Мини-картина акрилом', duration: 1.5, maxCapacity: 8,  minAge: '6',  defaultAdultPrice: 2000, defaultChildPrice: 1500, defaultIndividualPrice: 3000 },
+  { id: 's4', name: 'Акварель',             duration: 2.5, maxCapacity: 6,  minAge: '6',  maxAge: '12', defaultAdultPrice: 2800, defaultChildPrice: 2000, defaultIndividualPrice: 4000 },
+  { id: 's5', name: 'Ручная лепка',         duration: 1.5, maxCapacity: 6,  minAge: '5',  defaultAdultPrice: 2200, defaultChildPrice: 1800, defaultIndividualPrice: 3500 },
+  { id: 's6', name: 'Роспись одежды',       duration: 2,   maxCapacity: 10, minAge: '8',  defaultAdultPrice: 3200, defaultChildPrice: 2500, defaultIndividualPrice: 4500 },
+  { id: 's7', name: 'Морской пейзаж',       duration: 3,   maxCapacity: 8,  minAge: '12', defaultAdultPrice: 3800, defaultChildPrice: 2800, defaultIndividualPrice: 5500 },
 ];
 
 // Map service name → service id for raw event data

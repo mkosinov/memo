@@ -37,7 +37,7 @@ class ServiceBase(BaseModel):
     image_url: str
     specialty: str
     min_age: int
-    max_age: int
+    max_age: int | None = None
     duration: int
     record_info: str
     material_hint: str | None = None

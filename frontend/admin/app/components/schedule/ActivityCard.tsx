@@ -135,7 +135,7 @@ export function ActivityCard({ activity, master, locations = [], style, onEdit, 
             {activity.serviceName}
           </div>
           <span className="flex-shrink-0 text-[12px] text-black/70 font-normal">
-            {activity.minAge}+
+            {activity.minAge}{activity.maxAge ? `–${activity.maxAge}` : '+'}
           </span>
         </div>
       </div>

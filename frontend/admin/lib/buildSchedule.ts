@@ -6,6 +6,7 @@ import type { ActivityResponse, MasterResponse, ServiceResponse, LocationRespons
 export interface ScheduleItem extends Activity {
   serviceName: string;
   minAge: string;
+  maxAge?: string;
 }
 
 export interface ActivityIndex {
@@ -91,6 +92,7 @@ export function toScheduleItems(
       ...activity,
       serviceName: activity.serviceName || service?.name || '',
       minAge: activity.minAge || service?.minAge || '',
+      maxAge: activity.maxAge ?? service?.maxAge,
     };
   });
 }
@@ -166,7 +168,7 @@ export function buildAdminSchedule(
       isPrivate: act.is_private,
       masterColor: master.color,
       minAge: `${service.min_age}`,
-      maxAge: `${service.max_age}`,
+      maxAge: service.max_age != null ? `${service.max_age}` : undefined,
       comment: act.comment ?? '',
     };
 

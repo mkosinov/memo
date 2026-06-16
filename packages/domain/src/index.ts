@@ -36,7 +36,7 @@ export const ServiceSchema = z.object({
   durationMinutes: z.number().optional(),
   maxCapacity: z.number(),
   minAge: z.string(),
-  maxAge: z.string(),
+  maxAge: z.string().optional(),
   defaultAdultPrice: z.number().optional(),
   defaultChildPrice: z.number().optional(),
   defaultIndividualPrice: z.number().optional(),

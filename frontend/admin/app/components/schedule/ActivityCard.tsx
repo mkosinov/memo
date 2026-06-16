@@ -36,6 +36,11 @@ export function ActivityCard({ activity, master, locations = [], style, onEdit, 
   const hasFooter = isStandard;
 
   // Master visibility rule
+  // Element heights (px): header=26, title+age=20 (1 line) / 40 (2 lines),
+  // master=18, location=24, footer=44. Thresholds sum these so the card
+  // has room for master without silent vertical clipping.
+  // Standard (with footer): want2Line=134, canFit2+master=152, canFit1+master=132
+  // Compact  (no footer):   want2Line=90,  canFit2+master=108, canFit1+master=88
   const want2LineTitle        = heightPx >= (hasFooter ? 134 : 90);
   const canFit2LineWithMaster = heightPx >= (hasFooter ? 152 : 108);
   const canFit1LineWithMaster = heightPx >= (hasFooter ? 132 : 88);
@@ -155,7 +160,7 @@ export function ActivityCard({ activity, master, locations = [], style, onEdit, 
           {showMaster && <div className="flex-1" />}
 
           {/* 4. LOCATION (Compact and Standard) + capacity right (Compact only) */}
-          {!isTiny && locationShortName && (
+          {locationShortName && (
             <div className="flex items-center gap-1 px-2 pb-1 text-[13px] text-black">
               <svg
                 className="w-3 h-3 flex-shrink-0"

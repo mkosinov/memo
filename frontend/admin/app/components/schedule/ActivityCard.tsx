@@ -4,13 +4,13 @@ import React, { useState, useRef } from 'react';
 import { useDraggable } from '@dnd-kit/core';
 import { useUI } from '@/contexts/UIContext';
 import { useSchedule } from '@/contexts/ScheduleContext';
-import type { Activity, Master, Studio } from '@memo/domain';
+import type { Activity, Master, Location } from '@memo/domain';
 import { HOURS_START, formatTime } from '@/lib/utils';
 
 interface ActivityCardProps {
   activity: Activity;
   master: Master;
-  studios?: Studio[];
+  locations?: Location[];
   style?: React.CSSProperties;
   onEdit?: (activity: Activity) => void;
   onQuickAdd?: (activity: Activity) => void;
@@ -19,19 +19,28 @@ interface ActivityCardProps {
   gridStart?: number;
 }
 
-export function ActivityCard({ activity, master, studios = [], style, onEdit, onQuickAdd, isDragging, isDragCopy, gridStart = HOURS_START }: ActivityCardProps) {
+export function ActivityCard({ activity, master, locations = [], style, onEdit, onQuickAdd, isDragging, isDragCopy, gridStart = HOURS_START }: ActivityCardProps) {
   const { deleteMode, showToast } = useUI();
   const { deleteActivity, addActivity, cellHeight = 60 } = useSchedule();
   const [deleting, setDeleting] = useState(false);
   const deletingRef = useRef(false);
-  const topPx = (activity.startTime - gridStart) * cellHeight * 2;
+  const topPx = (activity.startTime - gridStart) * cellHeight * 2 + 4;          // +4 top margin
   const durMinutes = activity.durationMinutes ?? activity.duration * 60;
-  const heightPx = Math.max((durMinutes / 60) * cellHeight * 2 - 10, 52);
+  const heightPx = Math.max((durMinutes / 60) * cellHeight * 2 - 8, 60);        // -8 bottom, min 60
   const fillPct = activity.capacity > 0 ? Math.min(activity.occupied / activity.capacity, 1) : 0;
 
-  // Collapsing
-  const showExtra = heightPx >= 90;
-  const showOnlyPill = heightPx < 56;
+  // Tier selection (replaces old showExtra/showOnlyPill)
+  const isTiny = durMinutes < 60;
+  const isCompact = !isTiny && durMinutes < 90;
+  const isStandard = !isTiny && !isCompact;
+  const hasFooter = isStandard;
+
+  // Master visibility rule
+  const want2LineTitle        = heightPx >= (hasFooter ? 134 : 90);
+  const canFit2LineWithMaster = heightPx >= (hasFooter ? 152 : 108);
+  const canFit1LineWithMaster = heightPx >= (hasFooter ? 132 : 88);
+  const titleLines = want2LineTitle ? 2 : 1;
+  const showMaster = titleLines === 2 ? canFit2LineWithMaster : canFit1LineWithMaster;
 
   // DnD draggable
   const { attributes, listeners, setNodeRef, transform, isDragging: dndDragging } = useDraggable({
@@ -70,7 +79,8 @@ export function ActivityCard({ activity, master, studios = [], style, onEdit, on
     onQuickAdd?.(activity);
   };
 
-  const locationName = studios.find(s => s.id === activity.locationId)?.name || '';
+  const foundLocation = locations.find(l => l.id === activity.locationId);
+  const locationShortName = foundLocation?.shortTitle || foundLocation?.name || '';
 
   return (
     <div
@@ -110,48 +120,67 @@ export function ActivityCard({ activity, master, studios = [], style, onEdit, on
         )}
       </div>
 
-      {!showOnlyPill && (
+      {/* 2. TITLE + AGE (always rendered, line-clamp-2) */}
+      <div className="px-2 overflow-hidden">
+        <div className="text-sm font-semibold leading-tight text-black flex items-start gap-1">
+          {/* Age icon inline */}
+          <svg
+            className="w-3 h-3 flex-shrink-0 mt-0.5"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+          >
+            <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" />
+          </svg>
+          <span
+            className={titleLines === 2 ? 'line-clamp-2' : 'truncate'}
+            title={activity.serviceName}
+          >
+            {activity.serviceName}
+          </span>
+        </div>
+      </div>
+
+      {!isTiny && (
         <>
-          {/* 2. TITLE */}
-          <div className="px-2 overflow-hidden">
-            <div className="text-sm font-semibold leading-tight text-black">
-              {activity.serviceName}
-            </div>
-          </div>
-
-          {/* 3. AGE */}
-          {showExtra && (
-            <div className="flex items-center gap-1 px-2 text-[13px] text-black">
-              <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" />
-              </svg>
-              <span>{activity.minAge}+</span>
-            </div>
-          )}
-
-          {/* 3b. MASTER */}
-          {showExtra && (
+          {/* 3b. MASTER — only if it fits */}
+          {showMaster && (
             <div className="px-2 text-[13px] text-black truncate" title={master.name}>
               {master.name}
             </div>
           )}
 
-          {/* Spacer */}
-          {showExtra && <div className="flex-1" />}
+          {/* Spacer — only when master is shown */}
+          {showMaster && <div className="flex-1" />}
 
-          {/* 4. LOCATION */}
-          {showExtra && locationName && (
+          {/* 4. LOCATION (Compact and Standard) + capacity right (Compact only) */}
+          {!isTiny && locationShortName && (
             <div className="flex items-center gap-1 px-2 pb-1 text-[13px] text-black">
-              <svg className="w-3 h-3 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <svg
+                className="w-3 h-3 flex-shrink-0"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
                 <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z" />
                 <circle cx="12" cy="10" r="3" />
               </svg>
-              <span className="truncate">{locationName}</span>
+              <span className="truncate flex-1" title={locationShortName}>
+                {locationShortName}
+              </span>
+              {!isStandard && (
+                <span className="flex-shrink-0" data-testid="compact-capacity">
+                  {activity.occupied}/{activity.capacity}
+                </span>
+              )}
             </div>
           )}
 
-          {/* 5. FOOTER — full-width progress bar */}
-          <div className="mx-0 mb-0 rounded-xl overflow-hidden relative" style={{ border: '1px solid rgba(0,0,0,0.15)' }}>
+          {/* 5. FOOTER — full-width progress bar (Standard only) */}
+          {isStandard && (
+            <div className="mx-0 mb-0 rounded-xl overflow-hidden relative" style={{ border: '1px solid rgba(0,0,0,0.15)' }}>
             {/* Filled portion */}
             <div
               className="absolute inset-0 transition-all duration-300"
@@ -191,7 +220,8 @@ export function ActivityCard({ activity, master, studios = [], style, onEdit, on
                 )}
               </button>
             </div>
-          </div>
+            </div>
+          )}
         </>
       )}
     </div>

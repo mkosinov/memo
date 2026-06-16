@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import React from 'react';
 import { ActivityCard } from '../app/components/schedule/ActivityCard';
-import type { Activity, Master } from '@memo/domain';
+import type { Activity, Master, Location } from '@memo/domain';
 import { createMockUIContext, createMockScheduleContext } from './helpers/mockContexts';
 
 const mockMaster: Master = {
@@ -10,6 +10,12 @@ const mockMaster: Master = {
   name: 'Ольга Петрова',
   shortName: 'Ольга',
   color: '#5B8C7A',
+};
+
+const mockLocation: Location = {
+  id: 'loc_1',
+  name: 'Гранд Отель Поляна',
+  shortTitle: 'Гранд',
 };
 
 const mockActivity: Activity = {
@@ -44,13 +50,23 @@ describe('ActivityCard', () => {
     expect(screen.getByText('3/8')).toBeInTheDocument();
   });
 
-  it('hides content when card is very small (short duration)', () => {
-    const shortActivity = { ...mockActivity, duration: 0.25 };
-    render(<ActivityCard activity={shortActivity} master={mockMaster} />);
+  it('tiny mode (< 60 min) shows only header + title', () => {
+    const shortActivity = { ...mockActivity, duration: 0.25 }; // 15 min
+    render(
+      <ActivityCard
+        activity={shortActivity}
+        master={mockMaster}
+        locations={[mockLocation]}
+      />
+    );
     // Time pill should still show
     expect(screen.getByText(/10:00/)).toBeInTheDocument();
-    // Service name should NOT be visible
-    expect(screen.queryByText('Картина маслом')).not.toBeInTheDocument();
+    // Title visible (truncate)
+    expect(screen.getByText('Картина маслом')).toBeInTheDocument();
+    // Master, location, footer hidden
+    expect(screen.queryByText('Ольга Петрова')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('compact-capacity')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('btn-quick-add')).not.toBeInTheDocument();
   });
 
   it('does not crash when capacity is 0', () => {
@@ -93,23 +109,22 @@ describe('ActivityCard', () => {
     expect(paths.length).toBe(0);
   });
 
-  it('shows age and location when height >= 90px', () => {
+  it('shows location when height >= 90px (Standard mode)', () => {
     const tallActivity = { ...mockActivity, duration: 2 };
-    const mockStudios = [{ id: 'loc_1', name: 'Студия А' }];
-    render(<ActivityCard activity={tallActivity} master={mockMaster} studios={mockStudios} />);
-    expect(screen.getByText('6+')).toBeInTheDocument();
-    expect(screen.getByText('Студия А')).toBeInTheDocument();
+    render(<ActivityCard activity={tallActivity} master={mockMaster} locations={[mockLocation]} />);
+    expect(screen.getByText('Гранд')).toBeInTheDocument();
   });
 
-  it('hides age and location when height < 90px', () => {
-    // duration=0.7, cellHeight=50 → height = 0.7*100-10 = 60px (56 <= h < 90, !showExtra)
+  it('hides master, location, footer when duration < 60 min (Tiny)', () => {
+    // duration=0.7 → 42 min → Tiny mode
     const mediumActivity = { ...mockActivity, duration: 0.7 };
-    render(<ActivityCard activity={mediumActivity} master={mockMaster} />);
-    expect(screen.queryByText('6+')).not.toBeInTheDocument();
-    // Service name IS still visible
+    render(<ActivityCard activity={mediumActivity} master={mockMaster} locations={[mockLocation]} />);
+    // Title IS still visible
     expect(screen.getByText('Картина маслом')).toBeInTheDocument();
-    // Occupancy IS still visible
-    expect(screen.getByText('3/8')).toBeInTheDocument();
+    // Master, location, footer hidden
+    expect(screen.queryByText('Ольга Петрова')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('compact-capacity')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('btn-quick-add')).not.toBeInTheDocument();
   });
 
   it('has data-testid attribute', () => {
@@ -120,13 +135,13 @@ describe('ActivityCard', () => {
     expect(card).toBeInTheDocument();
   });
 
-  it('enforces minimum height of 52px when duration is 0', () => {
+  it('enforces minimum height of 60px when duration is 0', () => {
     const zeroDuration = { ...mockActivity, duration: 0 };
     const { container } = render(
       <ActivityCard activity={zeroDuration} master={mockMaster} />
     );
     const card = container.querySelector('[data-testid]');
-    expect(card).toHaveStyle({ height: '52px' });
+    expect(card).toHaveStyle({ height: '60px' });
   });
 
   it('shows full occupancy display when occupied equals capacity', () => {

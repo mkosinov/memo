@@ -708,6 +708,36 @@ describe('DayColumn', () => {
       expect(screen.queryByTestId('overlap-popover')).not.toBeInTheDocument();
     });
 
+    it('badge mousedown prevents outside-click handler from interfering with toggle', () => {
+      // Simulates the real-world scenario: mousedown fires on badge before click.
+      // Without stopPropagation on mousedown, the outside-click handler would close
+      // the popover first, then the click would re-open it.
+      render(
+        <DayColumn
+          dayIndex={0}
+          date={new Date()}
+          activities={partialOverlapActivities}
+          masters={MOCK_MASTERS}
+        />,
+      );
+
+      const badge = screen.getByRole('button', { name: /2 cards/i });
+
+      // First click — opens the popover
+      fireEvent.click(badge);
+      expect(screen.getByTestId('overlap-popover')).toBeInTheDocument();
+
+      // Simulate real click sequence: mousedown → mouseup → click
+      // The badge's mousedown handler should stopPropagation to prevent
+      // the document-level outside-click handler from firing.
+      fireEvent.mouseDown(badge);
+      fireEvent.mouseUp(badge);
+      fireEvent.click(badge);
+
+      // Popover should be closed (toggle off)
+      expect(screen.queryByTestId('overlap-popover')).not.toBeInTheDocument();
+    });
+
     it('does not emit console.log during initialization', () => {
       const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
       try {

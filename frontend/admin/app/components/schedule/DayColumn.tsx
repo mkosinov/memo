@@ -510,6 +510,11 @@ export function DayColumn({ dayIndex, activities, masters, studios = [], service
             />
             {showBadge && (
               <button
+                onMouseDown={(e) => {
+                  // Prevent mousedown from reaching the document-level outside-click handler
+                  // in OverlapPopover, which would close the popover before our onClick fires.
+                  e.stopPropagation();
+                }}
                 onClick={(e) => {
                   e.stopPropagation();
                   // Toggle popover for this group

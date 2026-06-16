@@ -810,4 +810,90 @@ describe('OverlapPopover', () => {
     const minWidth = scrollContainer.style.minWidth;
     expect(minWidth).toBeTruthy();
   });
+
+  it('outer popover container has overflow-hidden to clip wide content', () => {
+    render(
+      <OverlapPopover
+        activities={overlappingActivities}
+        masterMap={masterMap}
+        anchorRect={anchorRect}
+        onClose={vi.fn()}
+        onSelectActivity={vi.fn()}
+      />,
+    );
+
+    const popover = screen.getByTestId('overlap-popover');
+    expect(popover.className).toContain('overflow-hidden');
+  });
+
+  // ─── Issue 1: Wheel event propagation ────────────────────────────
+
+  it('stops wheel event propagation to prevent scrolling the schedule behind', () => {
+    render(
+      <OverlapPopover
+        activities={overlappingActivities}
+        masterMap={masterMap}
+        anchorRect={anchorRect}
+        onClose={vi.fn()}
+        onSelectActivity={vi.fn()}
+      />,
+    );
+
+    const popover = screen.getByTestId('overlap-popover');
+    const wheelHandler = vi.fn();
+    // Attach a listener on the document to catch wheel events that propagate
+    document.addEventListener('wheel', wheelHandler);
+
+    try {
+      const wheelEvent = new WheelEvent('wheel', {
+        deltaY: 100,
+        clientY: 200,
+        clientX: 350,
+        bubbles: true,
+      });
+      popover.dispatchEvent(wheelEvent);
+
+      // The popover should stop propagation, so the document listener should NOT fire
+      expect(wheelHandler).not.toHaveBeenCalled();
+    } finally {
+      document.removeEventListener('wheel', wheelHandler);
+    }
+  });
+
+  it('has onWheel handler on the outer popover container', () => {
+    render(
+      <OverlapPopover
+        activities={overlappingActivities}
+        masterMap={masterMap}
+        anchorRect={anchorRect}
+        onClose={vi.fn()}
+        onSelectActivity={vi.fn()}
+      />,
+    );
+
+    const popover = screen.getByTestId('overlap-popover');
+    // Verify the popover has a wheel event by dispatching one and checking it doesn't propagate
+    const parentDiv = document.createElement('div');
+    document.body.appendChild(parentDiv);
+    parentDiv.appendChild(popover.parentElement!);
+
+    const propagated = vi.fn();
+    parentDiv.addEventListener('wheel', propagated);
+
+    try {
+      const wheelEvent = new WheelEvent('wheel', {
+        deltaY: 50,
+        bubbles: true,
+        clientX: 350,
+        clientY: 200,
+      });
+      popover.dispatchEvent(wheelEvent);
+
+      // Wheel should NOT propagate to parent
+      expect(propagated).not.toHaveBeenCalled();
+    } finally {
+      parentDiv.removeEventListener('wheel', propagated);
+      document.body.removeChild(parentDiv);
+    }
+  });
 });

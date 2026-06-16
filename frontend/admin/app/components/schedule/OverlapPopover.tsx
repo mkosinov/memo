@@ -152,13 +152,36 @@ export function OverlapPopover({
     return s;
   }, [anchorRect]);
 
+  // Stop wheel events from propagating to the schedule behind the popover
+  const handleWheel = useCallback((e: React.WheelEvent) => {
+    e.stopPropagation();
+    // Also auto-scroll the inner container when mouse is near edges
+    if (!scrollRef.current) return;
+    const rect = scrollRef.current.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+
+    if (mouseX > rect.width - EDGE_THRESHOLD) {
+      scrollRef.current.scrollLeft += SCROLL_SPEED;
+    } else if (mouseX < EDGE_THRESHOLD) {
+      scrollRef.current.scrollLeft -= SCROLL_SPEED;
+    }
+
+    if (mouseY > rect.height - EDGE_THRESHOLD) {
+      scrollRef.current.scrollTop += SCROLL_SPEED;
+    } else if (mouseY < EDGE_THRESHOLD) {
+      scrollRef.current.scrollTop -= SCROLL_SPEED;
+    }
+  }, []);
+
   return (
     <div
       ref={popoverRef}
       style={popoverStyle}
       data-testid="overlap-popover"
-      className="bg-white rounded-lg shadow-xl border relative"
+      className="bg-white rounded-lg shadow-xl border relative overflow-hidden"
       onMouseMove={handleMouseMove}
+      onWheel={handleWheel}
     >
       {/* Inner scroll container — handles overflow for both axes */}
       <div

@@ -23,6 +23,7 @@ interface Column {
 
 const COLUMNS: Column[] = [
   { key: 'name', label: 'Название', width: 'flex-1', defaultVisible: true },
+  { key: 'short_title', label: 'Короткое название', defaultVisible: false },
   { key: 'capacity', label: 'Вместимость', width: 'w-[100px]', defaultVisible: true },
   { key: 'address', label: 'Адрес', width: 'flex-1', defaultVisible: true },
   { key: 'location_hint', label: 'Подсказка', width: 'w-[150px]', defaultVisible: true },
@@ -272,6 +273,13 @@ export function LocationsTable() {
                 {visibleKeys.includes('name') && (
                 <td className="px-4 py-3 text-sm font-medium" style={{ color: 'var(--ink)' }}>
                   {loc.name}
+                </td>
+                )}
+
+                {/* Short Title */}
+                {visibleKeys.includes('short_title') && (
+                <td className="px-4 py-3 text-sm" style={{ color: 'var(--ink-mid)' }}>
+                  {loc.short_title ?? '—'}
                 </td>
                 )}
 

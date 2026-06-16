@@ -141,6 +141,23 @@ describe('LocationResponseSchema', () => {
     const result = LocationResponseSchema.parse(validLocation);
     expect(result.sort_order).toBeUndefined();
   });
+
+  it('parses location with short_title', () => {
+    const data = { ...validLocation, short_title: 'Гранд' };
+    const result = LocationResponseSchema.parse(data);
+    expect(result.short_title).toBe('Гранд');
+  });
+
+  it('parses location without short_title (field absent)', () => {
+    const result = LocationResponseSchema.parse(validLocation);
+    expect(result.short_title).toBeUndefined();
+  });
+
+  it('parses location with null short_title', () => {
+    const data = { ...validLocation, short_title: null };
+    const result = LocationResponseSchema.parse(data);
+    expect(result.short_title).toBeNull();
+  });
 });
 
 // ─── ServiceResponse ────────────────────────────────────────────────────────

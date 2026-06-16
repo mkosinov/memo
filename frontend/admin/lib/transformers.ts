@@ -69,6 +69,7 @@ export function transformLocation(raw: LocationResponse): Location {
   return {
     id: raw.id,
     name: raw.name,
+    shortTitle: raw.short_title ?? undefined,
     address: raw.address ?? undefined,
     defaultCapacity: raw.capacity,
     sortOrder: raw.sort_order ?? 0,

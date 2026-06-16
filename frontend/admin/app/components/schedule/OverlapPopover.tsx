@@ -121,7 +121,7 @@ export function OverlapPopover({
 
     const s: React.CSSProperties = {
       position: 'fixed',
-      zIndex: 100,
+      zIndex: 120,
     };
 
     // Vertical: prefer below, flip above if no space

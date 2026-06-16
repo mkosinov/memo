@@ -38,6 +38,7 @@ export type MasterUpdate = z.infer<typeof MasterUpdateSchema>;
 export const LocationResponseSchema = z.object({
   id: z.string(),
   name: z.string(),
+  short_title: z.string().nullable().optional(),
   address: z.string().nullable(),
   description: z.string().nullable(),
   capacity: z.number(),
@@ -372,6 +373,7 @@ export type ServiceUpdate = z.infer<typeof ServiceUpdateSchema>;
 
 export const LocationCreateSchema = z.object({
   name: z.string().min(1).max(200),
+  short_title: z.string().optional().default(''),
   address: z.string().optional().default(''),
   description: z.string().optional().default(''),
   capacity: z.number().min(1).max(500),

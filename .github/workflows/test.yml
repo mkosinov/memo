@@ -101,6 +101,11 @@ jobs:
   e2e-tests:
     runs-on: ubuntu-latest
     needs: [backend-tests, frontend-tests]
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
 
     steps:
       - uses: actions/checkout@v4
@@ -131,7 +136,7 @@ jobs:
         working-directory: frontend/admin
         run: pnpm exec playwright install --with-deps chromium
 
-      - name: Run E2E tests
+      - name: Run E2E tests (shard ${{ matrix.shard }}/2)
         run: |
           cd backend
           uv run python -m src.seed
@@ -144,7 +149,7 @@ jobs:
             fi
             sleep 2
           done
-          pnpm exec playwright test
+          pnpm exec playwright test --shard=${{ matrix.shard }}/2
           EXIT_CODE=$?
           kill $BACKEND_PID 2>/dev/null || true
           exit $EXIT_CODE

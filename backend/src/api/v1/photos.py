@@ -5,6 +5,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
 from src.db import SessionDep
 from src.models.photo import Photo
@@ -29,7 +30,11 @@ async def list_public_photos(
     activity_id: str | None = Query(None),
 ) -> list[PhotoResponse]:
     """Return public photos (is_public=true, is_active=true). Optionally filter by activity_id."""
-    stmt = select(Photo).where(Photo.is_public == True, Photo.is_active == True)
+    stmt = (
+        select(Photo)
+        .where(Photo.is_public == True, Photo.is_active == True)
+        .options(selectinload(Photo.tags))
+    )
     if activity_id:
         stmt = stmt.where(Photo.activity_id == activity_id)
     result = await session.execute(stmt)

@@ -52,11 +52,20 @@ class PhotoService(GenericService[PhotoCreate, PhotoUpdate, PhotoResponse]):
         """Create a new photo with tags."""
         # Extract tag_ids before creating photo
         tag_ids = data.tag_ids if hasattr(data, 'tag_ids') else []
-        
-        # Create photo without tag_ids
-        photo_data = data.model_dump(exclude={'tag_ids'})
-        orm = await self._repository.create(db_session, photo_data, Photo)
-        
+
+        # Create ORM instance directly (GenericRepository.create expects BaseModel
+        # but PhotoCreate includes tag_ids which Photo doesn't have)
+        orm = Photo(
+            filename=data.filename,
+            visitor_id=data.visitor_id,
+            service_id=data.service_id,
+            activity_id=data.activity_id,
+            is_public=data.is_public,
+        )
+        db_session.add(orm)
+        await db_session.flush()
+        await db_session.refresh(orm)
+
         # Add tags if provided
         if tag_ids:
             result = await db_session.execute(
@@ -64,8 +73,8 @@ class PhotoService(GenericService[PhotoCreate, PhotoUpdate, PhotoResponse]):
             )
             tags = result.scalars().all()
             orm.tags = list(tags)
-            await db_session.commit()
-        
+            await db_session.flush()
+
         # Reload with tags
         return await self.get(db_session, orm.id)
 

@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ScheduleProvider, useSchedule } from '../contexts/ScheduleContext';
 import { NavigationProvider, useNavigation } from '../contexts/NavigationContext';
 import { getMonday, formatDateISO } from '../lib/utils';
+import { transformService } from '../lib/transformers';
 
 // ─── Mock api-client ─────────────────────────────────────────────────────────
 vi.mock('@memo/api-client', () => ({
@@ -129,6 +130,14 @@ function ScheduleConsumer() {
       >
         Update
       </button>
+      <button
+        data-testid="update-activity-null-capacity"
+        onClick={() => updateActivity('a1', { serviceId: 's5', durationMinutes: 120, capacity: null } as any)}
+      />
+      <button
+        data-testid="update-activity-with-capacity"
+        onClick={() => updateActivity('a1', { serviceId: 's5', durationMinutes: 120, capacity: 8 })}
+      />
       <button
         data-testid="delete-activity"
         onClick={() => deleteActivity(activities[0]?.id ?? '')}
@@ -339,6 +348,82 @@ describe('ScheduleProvider', () => {
     });
     expect(patchActivity).toHaveBeenCalledWith('a1', expect.objectContaining({ occupied: 5 }));
   });
+
+  // ─── BUG-63 regression tests ──────────────────────────────────────────────
+
+  it('excludes capacity from PATCH payload when capacity is null (BUG-63 regression)', async () => {
+    vi.mocked(getMasters).mockResolvedValue([
+      { id: 'm1', first_name: 'Ольга', last_name: 'Середа', color: '#5B8C7A', position: 'мастер', specialty: 'живопись', avatar_url: null, is_active: true, sort_order: 0, created_at: '2024-01-01', updated_at: '2024-01-01' },
+    ]);
+    vi.mocked(getServices).mockResolvedValue([
+      { id: 's1', title: 'Картина маслом', description: '', image_url: '', specialty: '', min_age: 12, max_age: null, duration: 120, record_info: '', tariffs: [], tags: [], is_active: true, created_at: '', updated_at: '' },
+    ]);
+    vi.mocked(getLocations).mockResolvedValue([
+      { id: 'alpika', name: 'Альпика', address: 'Альпика, 1 этаж', description: null, capacity: 10, yandex_map_url: null, review_url: null, record_info: null, image_url: null, location_hint: null, is_active: true, created_at: '', updated_at: '' },
+    ]);
+    vi.mocked(getActivities).mockResolvedValue([
+      { id: 'a1', master_id: 'm1', service_id: 's1', location_id: 'alpika', start: '2024-12-25T10:00:00Z', duration: 120, capacity: 8, is_private: false, comment: null, record_info: null, created_at: '', updated_at: '', is_active: true, occupied: 3 },
+    ]);
+    vi.mocked(patchActivity).mockResolvedValue({
+      id: 'a1', master_id: 'm1', service_id: 's1', location_id: 'alpika',
+      start: '2024-12-25T10:00:00Z', duration: 120, capacity: 8, is_private: false,
+      comment: null, record_info: null, created_at: '', updated_at: '', is_active: true, occupied: 5,
+    });
+
+    renderWithContext();
+    await waitFor(() => { expect(screen.getByTestId('activity-count').textContent).toBe('1'); });
+
+    // Simulate updateActivity with null capacity (what happens when service changes and maxCapacity is null)
+    act(() => { screen.getByTestId('update-activity-null-capacity').click(); });
+
+    await waitFor(() => { expect(patchActivity).toHaveBeenCalled(); });
+    // KEY: payload must NOT contain capacity when it would be null
+    const callArgs = (patchActivity as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(callArgs[1]).not.toHaveProperty('capacity');
+  });
+
+  it('includes capacity in PATCH payload when capacity has a defined value (BUG-63 regression)', async () => {
+    vi.mocked(getMasters).mockResolvedValue([
+      { id: 'm1', first_name: 'Ольга', last_name: 'Середа', color: '#5B8C7A', position: 'мастер', specialty: 'живопись', avatar_url: null, is_active: true, sort_order: 0, created_at: '2024-01-01', updated_at: '2024-01-01' },
+    ]);
+    vi.mocked(getServices).mockResolvedValue([
+      { id: 's1', title: 'Картина маслом', description: '', image_url: '', specialty: '', min_age: 12, max_age: null, duration: 120, record_info: '', tariffs: [], tags: [], is_active: true, created_at: '', updated_at: '' },
+    ]);
+    vi.mocked(getLocations).mockResolvedValue([
+      { id: 'alpika', name: 'Альпика', address: 'Альпика, 1 этаж', description: null, capacity: 10, yandex_map_url: null, review_url: null, record_info: null, image_url: null, location_hint: null, is_active: true, created_at: '', updated_at: '' },
+    ]);
+    vi.mocked(getActivities).mockResolvedValue([
+      { id: 'a1', master_id: 'm1', service_id: 's1', location_id: 'alpika', start: '2024-12-25T10:00:00Z', duration: 120, capacity: 8, is_private: false, comment: null, record_info: null, created_at: '', updated_at: '', is_active: true, occupied: 3 },
+    ]);
+    vi.mocked(patchActivity).mockResolvedValue({
+      id: 'a1', master_id: 'm1', service_id: 's1', location_id: 'alpika',
+      start: '2024-12-25T10:00:00Z', duration: 120, capacity: 8, is_private: false,
+      comment: null, record_info: null, created_at: '', updated_at: '', is_active: true, occupied: 5,
+    });
+
+    renderWithContext();
+    await waitFor(() => { expect(screen.getByTestId('activity-count').textContent).toBe('1'); });
+
+    // Simulate updateActivity with a defined capacity
+    act(() => { screen.getByTestId('update-activity-with-capacity').click(); });
+
+    await waitFor(() => { expect(patchActivity).toHaveBeenCalled(); });
+    const callArgs = (patchActivity as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(callArgs[1]).toHaveProperty('capacity', 8);
+    expect(callArgs[1]).toHaveProperty('service_id');
+  });
+
+  it('transformService does not produce maxCapacity field (BUG-63 regression)', () => {
+    const mockRaw = {
+      id: 's1', title: 'Картина маслом', duration: 120, min_age: 12, max_age: null,
+      tariffs: [], tags: [], description: '', image_url: '', specialty: '', record_info: '',
+      is_active: true, created_at: '', updated_at: '',
+    } as any;
+    const result = transformService(mockRaw);
+    expect(result).not.toHaveProperty('maxCapacity');
+  });
+
+  // ─── end BUG-63 regression tests ──────────────────────────────────────────
 
   it('calls deleteActivity mutation when deleteActivity is called', async () => {
     vi.mocked(getMasters).mockResolvedValue([

@@ -86,6 +86,7 @@ export function WeekView() {
       const service = services.find((s) => s.id === stamp.serviceId);
       if (!service) return;
       const firstLocation = stamp.locations.values().next().value as string;
+      const location = locations.find((l) => l.id === firstLocation);
 
       addActivity({
         day: dayIndex,
@@ -98,7 +99,7 @@ export function WeekView() {
         minAge: service.minAge,
         locationId: firstLocation,
         occupied: 0,
-        capacity: service.maxCapacity,
+        capacity: location?.defaultCapacity ?? 0,
         isPrivate: false,
       });
 

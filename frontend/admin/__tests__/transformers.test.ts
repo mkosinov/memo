@@ -151,11 +151,6 @@ describe('transformService', () => {
     expect(result.minAge).toBe('6');
   });
 
-  it('uses max_age as maxCapacity proxy', () => {
-    const result = transformService(serviceFixture);
-    expect(result.maxCapacity).toBe(99);
-  });
-
   it('extracts defaultAdultPrice from first tariff', () => {
     const result = transformService(serviceFixture);
     expect(result.defaultAdultPrice).toBe(2500);

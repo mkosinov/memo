@@ -42,8 +42,8 @@ const mockLocations = [
 ];
 
 const mockServices = [
-  { id: 's1', name: 'Картина маслом', duration: 2.5, maxCapacity: 8, minAge: '12', defaultAdultPrice: 3500 },
-  { id: 's2', name: 'Картина акрилом', duration: 2, maxCapacity: 10, minAge: '6', defaultAdultPrice: 2800 },
+  { id: 's1', name: 'Картина маслом', duration: 2.5, minAge: '12', defaultAdultPrice: 3500 },
+  { id: 's2', name: 'Картина акрилом', duration: 2, minAge: '6', defaultAdultPrice: 2800 },
 ];
 
 const mockActivities = [

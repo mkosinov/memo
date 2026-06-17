@@ -56,14 +56,12 @@ export function SettingsTab({ activity, onUpdate }: SettingsTabProps) {
       const svc = services.find((s) => s.id === newServiceId);
       if (svc) {
         setDurationStr(decimalToHHMM(svc.duration));
-        setCapacity(svc.maxCapacity);
         onUpdate({
           serviceId: newServiceId,
           serviceName: svc.name,
           minAge: svc.minAge,
           duration: svc.duration,
           durationMinutes: svc.durationMinutes || svc.duration * 60,
-          capacity: svc.maxCapacity,
         });
       }
     },

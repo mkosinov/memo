@@ -399,7 +399,7 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
     if (updates.locationId !== undefined) payload.location_id = updates.locationId;
     if (updates.duration !== undefined) payload.duration = Math.round(updates.duration * 60); // hours→min
     if (updates.durationMinutes !== undefined) payload.duration = updates.durationMinutes; // takes precedence
-    if (updates.capacity !== undefined) payload.capacity = updates.capacity;
+    if (updates.capacity !== undefined && updates.capacity !== null) payload.capacity = updates.capacity;
     if (updates.isPrivate !== undefined) payload.is_private = updates.isPrivate;
     if (updates.comment !== undefined) payload.comment = updates.comment;
     if (updates.occupied !== undefined) payload.occupied = updates.occupied;

@@ -46,8 +46,10 @@ class TestActivitySearchResult:
         asr = ActivitySearchResult(
             id="a1",
             start="2025-06-15T10:00:00",
+            service_id="s1",
             service_title="Pottery Workshop",
         )
         assert asr.id == "a1"
         assert asr.start == "2025-06-15T10:00:00"
+        assert asr.service_id == "s1"
         assert asr.service_title == "Pottery Workshop"

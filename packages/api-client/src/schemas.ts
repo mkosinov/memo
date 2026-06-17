@@ -127,7 +127,7 @@ export const ServiceResponseSchema = z.object({
   image_url: z.string(),
   specialty: z.string(),
   min_age: z.number(),
-  max_age: z.number(),
+  max_age: z.number().nullable(),
   duration: z.number(),
   record_info: z.string(),
   material_hint: z.string().nullable().optional(),

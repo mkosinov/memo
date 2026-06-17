@@ -11,8 +11,23 @@ interface SettingsTabProps {
   onUpdate: (updates: Partial<Activity>) => void;
 }
 
+/** Snap minutes to the nearest grid slot. */
+function snapMinutes(minutes: number, gridFrequency: number): number {
+  return Math.round(minutes / gridFrequency) * gridFrequency;
+}
+
+/** Build a datetime-local string "YYYY-MM-DDTHH:MM" from date and decimal time, snapped to grid. */
+function buildDateTimeLocal(dateStr: string, decimalTime: number, gridFrequency: number): string {
+  if (!dateStr) return '';
+  const hours = Math.floor(decimalTime);
+  const rawMinutes = Math.round((decimalTime - hours) * 60);
+  const minutes = snapMinutes(rawMinutes, gridFrequency);
+  const mm = String(minutes).padStart(2, '0');
+  return `${dateStr}T${String(hours).padStart(2, '0')}:${mm}`;
+}
+
 export function SettingsTab({ activity, onUpdate }: SettingsTabProps) {
-  const { artists, services, locations } = useSchedule();
+  const { masters, services, locations, gridFrequency } = useSchedule();
 
   const [serviceId, setServiceId] = useState(activity.serviceId);
   const [masterId, setMasterId] = useState(activity.masterId);
@@ -21,14 +36,7 @@ export function SettingsTab({ activity, onUpdate }: SettingsTabProps) {
   const [durationStr, setDurationStr] = useState(decimalToHHMM(activity.duration));
   const [isPrivate, setIsPrivate] = useState(activity.isPrivate);
   const [startDateTime, setStartDateTime] = useState(() => {
-    // Build datetime-local string from activity.date + activity.startTime
-    const dateStr = activity.date || '';
-    const timeHH = String(Math.floor(activity.startTime)).padStart(2, '0');
-    const timeMM = activity.startTime % 1 >= 0.5 ? '30' : '00';
-    if (dateStr) {
-      return `${dateStr}T${timeHH}:${timeMM}`;
-    }
-    return '';
+    return buildDateTimeLocal(activity.date || '', activity.startTime, gridFrequency);
   });
 
   // Selected service for display
@@ -48,14 +56,12 @@ export function SettingsTab({ activity, onUpdate }: SettingsTabProps) {
       const svc = services.find((s) => s.id === newServiceId);
       if (svc) {
         setDurationStr(decimalToHHMM(svc.duration));
-        setCapacity(svc.maxCapacity);
         onUpdate({
           serviceId: newServiceId,
           serviceName: svc.name,
           minAge: svc.minAge,
           duration: svc.duration,
           durationMinutes: svc.durationMinutes || svc.duration * 60,
-          capacity: svc.maxCapacity,
         });
       }
     },
@@ -65,18 +71,21 @@ export function SettingsTab({ activity, onUpdate }: SettingsTabProps) {
   // Handle datetime change
   const handleDateTimeChange = useCallback(
     (value: string) => {
-      setStartDateTime(value);
       if (value) {
         const [datePart, timePart] = value.split('T');
         const [h, m] = timePart.split(':').map(Number);
-        const startTimeDecimal = h + m / 60;
+        const snappedMinutes = snapMinutes(m, gridFrequency);
+        const startTimeDecimal = h + snappedMinutes / 60;
+        // Rebuild snapped datetime-local value for display
+        const snappedTime = `${String(h).padStart(2, '0')}:${String(snappedMinutes % 60).padStart(2, '0')}`;
+        setStartDateTime(`${datePart}T${snappedTime}`);
         // Calculate day from date
         const date = new Date(datePart + 'T12:00:00');
         const dayOfWeek = (date.getDay() + 6) % 7; // Mon=0
         onUpdate({ startTime: startTimeDecimal, day: dayOfWeek, date: datePart });
       }
     },
-    [onUpdate],
+    [onUpdate, gridFrequency],
   );
 
   // Handle duration change
@@ -100,12 +109,9 @@ export function SettingsTab({ activity, onUpdate }: SettingsTabProps) {
     setDurationStr(decimalToHHMM(activity.duration));
     setIsPrivate(activity.isPrivate);
 
-    const dateStr = activity.date || '';
-    const timeHH = String(Math.floor(activity.startTime)).padStart(2, '0');
-    const timeMM = activity.startTime % 1 >= 0.5 ? '30' : '00';
-    if (dateStr) {
-      setStartDateTime(`${dateStr}T${timeHH}:${timeMM}`);
-    }
+    setStartDateTime(
+      buildDateTimeLocal(activity.date || '', activity.startTime, gridFrequency),
+    );
   }, [activity]);
 
   const inputClass =
@@ -117,7 +123,7 @@ export function SettingsTab({ activity, onUpdate }: SettingsTabProps) {
       {/* Row 1: Date/Time + Duration + Private toggle */}
       <div className="flex gap-3 items-end" data-testid="settings-row-datetime-duration">
         <div className="flex-1">
-          <label className="text-xs font-medium text-ink-mid block mb-1" htmlFor="settings-datetime">
+          <label className="text-xs font-medium text-ink-mid block mb-1">
             Дата и время
           </label>
           <input
@@ -244,7 +250,7 @@ export function SettingsTab({ activity, onUpdate }: SettingsTabProps) {
             Мастер
           </label>
           <MasterPicker
-            masters={artists}
+            masters={masters}
             value={masterId}
             onChange={(value) => {
               setMasterId(value);

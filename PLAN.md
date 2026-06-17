@@ -268,7 +268,7 @@ New `frontend/master/` — Next.js 14, mobile-first.
 | 0 — Preparation (agents) | 1 | Create 8 agents | @manager | ✅ |
 | 1 — Turborepo Infrastructure | 1 | Turborepo + shared packages | @architect | ✅ |
 | 2 — Design System + Layout | 1 | Sidebar, Toolbar, RightPanel | @frontend-coder | ✅ |
-| 3 — P1 Schedule | 3 | Grid, cards, DnD, stamp, modal | @frontend-coder | ✅ |
+| 3 — P1 Schedule | 3 | Grid, cards, DnD, stamp, modal, carousel | @frontend-coder | ✅ Completed 2026-06-16 |
 | 4 — P2 Booking Management | 2 | Bookings + Client Card | @frontend-coder | ✅ |
 | 5 — Frontend–Backend API | 3 | Admin connected to real API | @frontend-coder | ✅ |
 | 10 — Web (colourmountains.ru) | 5 | Public website + online booking | @frontend-coder | ✅ |

@@ -1,13 +1,15 @@
 'use client';
 
-import React, { useMemo, useCallback } from 'react';
+import React, { useMemo, useCallback, useState, useRef } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useNavigation } from '@/contexts/NavigationContext';
 import { useUI } from '@/contexts/UIContext';
+import type { ViewModeType } from '@/contexts/ScheduleContext';
 import { useMasters } from '@/hooks/useMasters';
-import { DAYS, MONTHS, getMonday, formatDate, formatDateISO, isSameDay } from '@/lib/utils';
-import type { Artist } from '@memo/domain';
+import { DAYS, DAYS_FULL, MONTHS, MONTHS_GENITIVE, getMonday, formatDate, formatDateISO, isSameDay } from '@/lib/utils';
+import { MonthYearPicker } from '../shared/MonthYearPicker';
+import type { Master } from '@memo/domain';
 
 // ─── SVG Icon Components ──────────────────────────────────────────────────
 
@@ -58,6 +60,28 @@ function ChatIcon({ className }: { className?: string }) {
   return (
     <svg className={className} width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
+    </svg>
+  );
+}
+
+function ChevronIcon({ className, expanded }: { className?: string; expanded: boolean }) {
+  return (
+    <svg
+      className={`w-3 h-3 transition-transform duration-200 ${expanded ? 'rotate-90' : ''} ${className ?? ''}`}
+      fill="none"
+      stroke="currentColor"
+      viewBox="0 0 24 24"
+    >
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+    </svg>
+  );
+}
+
+function BookIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M4 19.5A2.5 2.5 0 016.5 17H20" />
+      <path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z" />
     </svg>
   );
 }
@@ -130,16 +154,15 @@ const NAV_ITEMS = [
   { label: 'Расписание', icon: 'calendar', href: '/schedule' },
   { label: 'Записи', icon: 'clipboard', href: '/records' },
   { label: 'Клиенты', icon: 'users', href: '/clients' },
-  { label: 'Чат', icon: 'chat', href: '/chat' },
-  { label: 'Мастера', icon: 'palette', href: '/masters' },
 ] as const;
 
-const SETTINGS_ITEMS = [
+const DIRECTORY_ITEMS = [
   { label: 'Услуги', icon: 'package', href: '/services' },
   { label: 'Локации', icon: 'mapPin', href: '/locations' },
   { label: 'Теги', icon: 'tag', href: '/tags' },
-  { label: 'Фото', icon: 'image', href: '/photos' },
 ] as const;
+
+const PHOTO_ITEM = { label: 'Фото', icon: 'image', href: '/photos' } as const;
 
 const ICON_MAP: Record<string, React.FC<{ className?: string }>> = {
   calendar: CalendarIcon,
@@ -157,12 +180,29 @@ const ICON_MAP: Record<string, React.FC<{ className?: string }>> = {
 
 interface MiniCalendarProps {
   selectedWeek: Date;
+  selectedDay: Date;
+  viewMode: 'day' | 'week';
   onWeekSelect: (date: Date) => void;
   collapsed: boolean;
 }
 
-function MiniCalendar({ selectedWeek, onWeekSelect, collapsed }: MiniCalendarProps) {
+function MiniCalendar({ selectedWeek, selectedDay, viewMode, onWeekSelect, collapsed }: MiniCalendarProps) {
   const today = new Date();
+  const [showMonthPicker, setShowMonthPicker] = useState(false);
+  const monthButtonRef = useRef<HTMLButtonElement>(null);
+  const [pickerTop, setPickerTop] = useState(0);
+
+  const handleGoToToday = useCallback(() => {
+    const now = new Date();
+    const monday = getMonday(now);
+    onWeekSelect(monday);
+    // Also dispatch event so ScheduleContext can reset selectedDay
+    document.dispatchEvent(new CustomEvent('__memo-go-to-today'));
+    // In day mode, also select the single day
+    if (viewMode === 'day') {
+      document.dispatchEvent(new CustomEvent('__memo-select-day', { detail: { date: now } }));
+    }
+  }, [onWeekSelect, viewMode]);
 
   const calendarDays = useMemo(() => {
     const firstDayOfMonth = new Date(selectedWeek.getFullYear(), selectedWeek.getMonth(), 1);
@@ -171,7 +211,9 @@ function MiniCalendar({ selectedWeek, onWeekSelect, collapsed }: MiniCalendarPro
     const startDate = getMonday(firstDayOfMonth);
     startDate.setDate(startDate.getDate() - 7);
 
-    const endDate = new Date(lastDayOfMonth);
+    // End = Monday of the week containing lastDayOfMonth + 13 days (2 full weeks)
+    // This ensures at least one full week (Mon-Sun) after the month ends
+    const endDate = getMonday(lastDayOfMonth);
     endDate.setDate(endDate.getDate() + 13);
 
     const days: Date[] = [];
@@ -203,6 +245,28 @@ function MiniCalendar({ selectedWeek, onWeekSelect, collapsed }: MiniCalendarPro
     onWeekSelect(weekMonday);
   };
 
+  const handleDayClick = (day: Date) => {
+    // Always switch to week view containing this day
+    document.dispatchEvent(new CustomEvent('__memo-switch-to-week-view', { detail: { date: day } }));
+  };
+
+  const handleDayDoubleClick = (day: Date) => {
+    // Double-click in WeekView: switch to DayView and select that day
+    document.dispatchEvent(new CustomEvent('__memo-switch-to-day-view', { detail: { date: day } }));
+  };
+
+  const handlePrevMonth = useCallback(() => {
+    // Use 15th of prev month to ensure getMonday returns a date in the prev month
+    const target = new Date(selectedWeek.getFullYear(), selectedWeek.getMonth() - 1, 15);
+    onWeekSelect(target);
+  }, [selectedWeek, onWeekSelect]);
+
+  const handleNextMonth = useCallback(() => {
+    // Use 15th of next month to ensure getMonday returns a date in the next month
+    const target = new Date(selectedWeek.getFullYear(), selectedWeek.getMonth() + 1, 15);
+    onWeekSelect(target);
+  }, [selectedWeek, onWeekSelect]);
+
   const isInCurrentWeek = (date: Date) => {
     const dMonday = getMonday(date);
     return dMonday.getTime() === currentWeekMonday.getTime();
@@ -217,10 +281,75 @@ function MiniCalendar({ selectedWeek, onWeekSelect, collapsed }: MiniCalendarPro
 
   return (
     <div className="px-3 py-2">
+      {/* Today button — link style */}
+      <button
+        type="button"
+        onClick={handleGoToToday}
+        className="w-full text-xs text-white/70 hover:text-white hover:underline transition-colors whitespace-nowrap text-center mb-2"
+      >
+        Сегодня {today.getDate()} {MONTHS_GENITIVE[today.getMonth()]}, {DAYS_FULL[(today.getDay() + 6) % 7]}
+      </button>
+
+      {/* Month picker row: ← Month Year ▼ → */}
       <div className="flex items-center justify-between mb-2">
-        <span className="text-xs font-semibold text-white/90">{monthName} {selectedWeek.getFullYear()}</span>
+        <button
+          type="button"
+          onClick={handlePrevMonth}
+          className="flex items-center justify-center w-6 h-6 rounded-md text-white/60 hover:bg-white/10 hover:text-white transition-colors"
+          aria-label="Предыдущий месяц"
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M15 19l-7-7 7-7" />
+          </svg>
+        </button>
+
+        <div className="relative">
+          <button
+            ref={monthButtonRef}
+            type="button"
+            onClick={() => {
+              setShowMonthPicker(prev => {
+                if (!prev && monthButtonRef.current) {
+                  const rect = monthButtonRef.current.getBoundingClientRect();
+                  setPickerTop(rect.bottom + 4);
+                }
+                return !prev;
+              });
+            }}
+            className="flex items-center gap-1 text-xs font-semibold text-white/90 hover:text-white transition-colors"
+          >
+            {monthName} {selectedWeek.getFullYear()}
+          </button>
+
+          {showMonthPicker && (
+            <MonthYearPicker
+              selectedMonth={selectedWeek.getMonth()}
+              selectedYear={selectedWeek.getFullYear()}
+              onSelect={(month, year) => {
+                const target = new Date(year, month, 1);
+                onWeekSelect(target);
+                setShowMonthPicker(false);
+              }}
+              onClose={() => setShowMonthPicker(false)}
+              triggerRef={monthButtonRef}
+              style={{ top: `${pickerTop}px` }}
+            />
+          )}
+        </div>
+
+        <button
+          type="button"
+          onClick={handleNextMonth}
+          className="flex items-center justify-center w-6 h-6 rounded-md text-white/60 hover:bg-white/10 hover:text-white transition-colors"
+          aria-label="Следующий месяц"
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M9 5l7 7-7 7" />
+          </svg>
+        </button>
       </div>
 
+      {/* Day headers */}
       <div className="grid grid-cols-7 gap-0 mb-1">
         {DAYS.map(d => (
           <div key={d} className="text-center text-[10px] text-white/40 font-medium py-0.5">
@@ -229,38 +358,55 @@ function MiniCalendar({ selectedWeek, onWeekSelect, collapsed }: MiniCalendarPro
         ))}
       </div>
 
+      {/* Calendar grid */}
       <div className="space-y-0.5">
         {weeks.map((week, wi) => {
           const weekMonday = week[0];
           const isActive = weekMonday.getTime() === currentWeekMonday.getTime();
 
           return (
-            <button
+            <div
               key={wi}
-              onClick={() => handleWeekClick(weekMonday)}
               className={`w-full grid grid-cols-7 gap-0 rounded-md py-0.5 transition-colors duration-150
-                ${isActive ? 'bg-brand/30' : 'hover:bg-white/5'}`}
-              aria-label={`Неделя с ${formatDate(weekMonday)}`}
+                ${isActive ? 'bg-brand/30' : ''}`}
             >
               {week.map((day, di) => {
                 const isDayToday = isSameDay(day, today);
                 const inWeek = isInCurrentWeek(day);
                 const inMonth = isCurrentMonth(day);
 
+                // Highlight logic based on viewMode
+                let isHighlighted = false;
+                if (viewMode === 'day') {
+                  // Day mode: highlight the specific selected day
+                  isHighlighted = isSameDay(day, selectedDay);
+                } else {
+                  // Week mode: highlight entire week row
+                  isHighlighted = isActive;
+                }
+
                 return (
-                  <div key={di} className="flex items-center justify-center">
+                  <button
+                    key={di}
+                    type="button"
+                    onClick={() => handleDayClick(day)}
+                    onDoubleClick={() => handleDayDoubleClick(day)}
+                    className="flex items-center justify-center hover:bg-white/5 transition-colors"
+                    aria-label={formatDate(day)}
+                  >
                     <span
                       className={`relative flex items-center justify-center w-5 h-5 text-[11px] rounded-full
                         ${!inMonth ? 'text-white/20' : isDayToday ? 'text-white font-bold' : inWeek ? 'text-white/90' : 'text-white/50'}
                         ${isDayToday ? 'bg-brand text-white' : ''}
+                        ${isHighlighted && !isDayToday ? 'bg-brand/40 text-white' : ''}
                       `}
                     >
                       {day.getDate()}
                     </span>
-                  </div>
+                  </button>
                 );
               })}
-            </button>
+            </div>
           );
         })}
       </div>
@@ -268,23 +414,23 @@ function MiniCalendar({ selectedWeek, onWeekSelect, collapsed }: MiniCalendarPro
   );
 }
 
-// ─── Artist Legend ────────────────────────────────────────────────────────
+// ─── Master Legend ────────────────────────────────────────────────────────
 
-interface ArtistLegendProps {
+interface MasterLegendProps {
   collapsed: boolean;
-  artists: Artist[];
+  masters: Master[];
 }
 
-function ArtistLegend({ collapsed, artists }: ArtistLegendProps) {
+function MasterLegend({ collapsed, masters }: MasterLegendProps) {
   if (collapsed) {
     return (
       <div className="px-2 py-2 space-y-1.5">
-        {artists.slice(0, 4).map(artist => (
+        {masters.slice(0, 4).map(master => (
           <div
-            key={artist.id}
+            key={master.id}
             className="w-5 h-5 rounded-full mx-auto"
-            style={{ backgroundColor: artist.color }}
-            title={artist.shortName}
+            style={{ backgroundColor: master.color }}
+            title={master.shortName}
           />
         ))}
       </div>
@@ -297,13 +443,13 @@ function ArtistLegend({ collapsed, artists }: ArtistLegendProps) {
         Мастера
       </div>
       <div className="space-y-1.5">
-        {artists.map(artist => (
-          <div key={artist.id} className="flex items-center gap-2">
+        {masters.map(master => (
+          <div key={master.id} className="flex items-center gap-2">
             <div
               className="w-3 h-3 rounded-full flex-shrink-0"
-              style={{ backgroundColor: artist.color }}
+              style={{ backgroundColor: master.color }}
             />
-            <span className="text-xs text-white/70 truncate">{artist.shortName}</span>
+            <span className="text-xs text-white/70 truncate">{master.shortName}</span>
           </div>
         ))}
       </div>
@@ -315,9 +461,32 @@ function ArtistLegend({ collapsed, artists }: ArtistLegendProps) {
 
 export function Menubar() {
   const { dateFrom, selectDateRange } = useNavigation();
-  const { data: artists = [] } = useMasters();
+  const { data: masters = [] } = useMasters();
   const { sidebarCollapsed, toggleSidebar, theme, toggleTheme } = useUI();
   const pathname = usePathname();
+  const [openMenu, setOpenMenu] = useState<string | null>(null);
+
+  // Track viewMode & selectedDay via custom events from ScheduleContext
+  // (Menubar lives outside ScheduleProvider in the component tree)
+  const [viewMode, setViewMode] = useState<ViewModeType>('week');
+  const [selectedDay, setSelectedDay] = useState<Date>(new Date());
+
+  React.useEffect(() => {
+    const handleViewMode = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.viewMode) setViewMode(detail.viewMode);
+    };
+    const handleSelectedDay = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.selectedDay) setSelectedDay(new Date(detail.selectedDay));
+    };
+    document.addEventListener('__memo-view-mode-changed', handleViewMode);
+    document.addEventListener('__memo-selected-day-changed', handleSelectedDay);
+    return () => {
+      document.removeEventListener('__memo-view-mode-changed', handleViewMode);
+      document.removeEventListener('__memo-selected-day-changed', handleSelectedDay);
+    };
+  }, []);
 
   const selectedWeek = useMemo(() => new Date(dateFrom + 'T00:00:00'), [dateFrom]);
 
@@ -326,6 +495,10 @@ export function Menubar() {
     const sunday = new Date(monday.getTime() + 6 * 24 * 60 * 60 * 1000);
     selectDateRange(formatDateISO(monday), formatDateISO(sunday));
   }, [selectDateRange]);
+
+  const toggleMenu = useCallback((menu: string) => {
+    setOpenMenu(prev => prev === menu ? null : menu);
+  }, []);
 
   const isActive = (href: string) => {
     if (href === '/') return pathname === '/';
@@ -342,15 +515,12 @@ export function Menubar() {
       }}
     >
       {/* ── Logo Section ── */}
-      <div className={`flex items-center ${sidebarCollapsed ? 'justify-center px-2' : 'px-4'} py-4 border-b border-white/10`}>
-        <div className="flex items-center gap-2">
-          <span className="text-lg" role="img" aria-label="mountain">🏔</span>
-          {!sidebarCollapsed && (
-            <span className="text-sm font-bold text-white tracking-wide">
-              Colour Mountains
-            </span>
-          )}
-        </div>
+      <div className={`flex items-center ${sidebarCollapsed ? 'justify-center' : ''} p-6 border-b border-white/10`}>
+        <img
+          src="/logo-white.png"
+          alt="Colour Mountains"
+          className={`flex-shrink-0 object-contain ${sidebarCollapsed ? 'w-6 h-auto' : 'max-h-8 w-auto'}`}
+        />
       </div>
 
       {/* ── Scrollable Content ── */}
@@ -358,6 +528,8 @@ export function Menubar() {
         {/* MiniCalendar */}
         <MiniCalendar
           selectedWeek={selectedWeek}
+          selectedDay={selectedDay}
+          viewMode={viewMode}
           onWeekSelect={handleWeekSelect}
           collapsed={sidebarCollapsed}
         />
@@ -366,6 +538,7 @@ export function Menubar() {
 
         {/* Navigation */}
         <nav className={`py-2 ${sidebarCollapsed ? 'px-1' : 'px-2'}`}>
+          {/* Regular nav items */}
           {NAV_ITEMS.map(item => {
             const IconComponent = ICON_MAP[item.icon];
             const active = isActive(item.href);
@@ -387,39 +560,108 @@ export function Menubar() {
               </Link>
             );
           })}
-        </nav>
 
-        {!sidebarCollapsed && <div className="border-t border-white/10 mx-3" />}
+          {/* Мастера — collapsible */}
+          <button
+            onClick={() => toggleMenu('masters')}
+            className={`w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors duration-150
+              text-white/60 hover:bg-white/5 hover:text-white/90
+              ${sidebarCollapsed ? 'justify-center px-1' : ''}`}
+            aria-label="Мастера"
+            aria-expanded={openMenu === 'masters'}
+            title={sidebarCollapsed ? 'Мастера' : undefined}
+          >
+            <PaletteIcon className="text-white/60" />
+            {!sidebarCollapsed && (
+              <>
+                <span className="flex-1 text-left">Мастера</span>
+                <ChevronIcon expanded={openMenu === 'masters'} className="text-white/40" />
+              </>
+            )}
+          </button>
+          {openMenu === 'masters' && !sidebarCollapsed && (
+            <div className="ml-4 mt-0.5 mb-1 space-y-0.5">
+              {masters.map(master => (
+                <div
+                  key={master.id}
+                  className="flex items-center gap-2 px-3 py-1.5 rounded-md"
+                >
+                  <div
+                    className="w-2 h-2 rounded-full flex-shrink-0"
+                    style={{ backgroundColor: master.color }}
+                  />
+                  <span className="text-xs text-white/70 truncate">
+                    {master.name}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
 
-        {/* Artist Legend */}
-        <ArtistLegend collapsed={sidebarCollapsed} artists={artists} />
+          {/* Справочники — collapsible */}
+          <button
+            onClick={() => toggleMenu('directories')}
+            className={`w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors duration-150
+              text-white/60 hover:bg-white/5 hover:text-white/90
+              ${sidebarCollapsed ? 'justify-center px-1' : ''}`}
+            aria-label="Справочники"
+            aria-expanded={openMenu === 'directories'}
+            title={sidebarCollapsed ? 'Справочники' : undefined}
+          >
+            <BookIcon className="text-white/60" />
+            {!sidebarCollapsed && (
+              <>
+                <span className="flex-1 text-left">Справочники</span>
+                <ChevronIcon expanded={openMenu === 'directories'} className="text-white/40" />
+              </>
+            )}
+          </button>
+          {openMenu === 'directories' && !sidebarCollapsed && (
+            <div className="ml-4 mt-0.5 mb-1 space-y-0.5">
+              {DIRECTORY_ITEMS.map(item => {
+                const active = isActive(item.href);
+                return (
+                  <Link
+                    key={item.label}
+                    href={item.href}
+                    className={`flex items-center gap-2 px-3 py-1.5 text-xs rounded-md transition-colors
+                      ${active
+                        ? 'text-white bg-white/10 font-medium'
+                        : 'text-white/60 hover:text-white/90 hover:bg-white/5'
+                      }`}
+                  >
+                    {item.label}
+                  </Link>
+                );
+              })}
+            </div>
+          )}
 
-        {!sidebarCollapsed && <div className="border-t border-white/10 mx-3" />}
-
-        {/* Settings items */}
-        <nav className={`py-2 ${sidebarCollapsed ? 'px-1' : 'px-2'}`}>
-          {SETTINGS_ITEMS.map(item => {
-            const IconComponent = ICON_MAP[item.icon];
-            const active = isActive(item.href);
+          {/* Фото — standalone */}
+          {(() => {
+            const active = isActive(PHOTO_ITEM.href);
             return (
               <Link
-                key={item.label}
-                href={item.href}
+                href={PHOTO_ITEM.href}
                 className={`w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors duration-150
                   ${active
                     ? 'bg-brand text-white font-medium'
                     : 'text-white/60 hover:bg-white/5 hover:text-white/90'
                   }
                   ${sidebarCollapsed ? 'justify-center px-1' : ''}`}
-                aria-label={item.label}
-                title={sidebarCollapsed ? item.label : undefined}
+                aria-label={PHOTO_ITEM.label}
+                title={sidebarCollapsed ? PHOTO_ITEM.label : undefined}
               >
-                <IconComponent className={active ? 'text-white' : 'text-white/60'} />
-                {!sidebarCollapsed && <span>{item.label}</span>}
+                <ImageIcon className={active ? 'text-white' : 'text-white/60'} />
+                {!sidebarCollapsed && <span>{PHOTO_ITEM.label}</span>}
               </Link>
             );
-          })}
+          })()}
         </nav>
+
+        {!sidebarCollapsed && <div className="border-t border-white/10 mx-3" />}
+
+        {/* Master Legend — removed, duplicates Masters submenu */}
       </div>
 
       {/* ── Bottom Section ── */}

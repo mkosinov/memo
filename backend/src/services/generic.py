@@ -25,7 +25,14 @@ class GenericService(Generic[CreateSchemaT, UpdateSchemaT, ResponseSchemaT]):
     schema class.  Every public method validates the ORM result through
     ``self._response_schema.model_validate()`` so callers always receive
     validated Pydantic models.
+
+    Subclasses should override ``NOT_NULL_FIELDS`` with the set of field
+    names that map to NOT NULL columns in the database.  The ``patch()``
+    method will silently strip ``None`` values for these fields so they
+    never reach a NOT NULL constraint violation.
     """
+
+    NOT_NULL_FIELDS: set[str] = set()
 
     def __init__(
         self,
@@ -38,10 +45,10 @@ class GenericService(Generic[CreateSchemaT, UpdateSchemaT, ResponseSchemaT]):
         self._response_schema = response_schema
 
     async def list(
-        self, db_session: AsyncSession, **filters
+        self, db_session: AsyncSession, order_by=None, **filters
     ) -> list[ResponseSchemaT]:
-        """Return all active records, optionally filtered."""
-        orm_list = await self._repository.list(db_session, self._model, **filters)
+        """Return all active records, optionally filtered and ordered."""
+        orm_list = await self._repository.list(db_session, self._model, order_by=order_by, **filters)
         return [self._response_schema.model_validate(o) for o in orm_list]
 
     async def get(
@@ -72,9 +79,20 @@ class GenericService(Generic[CreateSchemaT, UpdateSchemaT, ResponseSchemaT]):
     async def patch(
         self, db_session: AsyncSession, id: str, data: BaseModel
     ) -> ResponseSchemaT | None:
-        """Partial-update a record. Only fields explicitly sent by the client are applied."""
+        """Partial-update a record. Only fields explicitly sent by the client are applied.
+
+        Silently strips ``None`` values for fields listed in ``NOT_NULL_FIELDS``
+        to prevent NOT NULL constraint violations on columns that must never
+        be null (e.g. capacity, master_id, start, etc.).
+        """
+        data_dict = data.model_dump(exclude_unset=True)
+        # Strip nulls for NOT NULL fields — client intent is "don't change",
+        # not "set to null"
+        for field in self.NOT_NULL_FIELDS:
+            if field in data_dict and data_dict[field] is None:
+                del data_dict[field]
         orm = await self._repository.patch(
-            db_session, self._model, id, data.model_dump(exclude_unset=True)
+            db_session, self._model, id, data_dict
         )
         if orm is None:
             return None
@@ -83,3 +101,10 @@ class GenericService(Generic[CreateSchemaT, UpdateSchemaT, ResponseSchemaT]):
     async def delete(self, db_session: AsyncSession, id: str) -> bool:
         """Soft-delete a record.  Returns ``True`` if deleted, ``False`` if not found."""
         return await self._repository.delete(db_session, self._model, id)
+
+    async def reorder(
+        self, db_session: AsyncSession, ids: list[str]
+    ) -> list[ResponseSchemaT]:
+        """Reorder records by assigning sort_order based on the order of IDs."""
+        orm_list = await self._repository.reorder(db_session, self._model, ids)
+        return [self._response_schema.model_validate(o) for o in orm_list]

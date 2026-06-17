@@ -76,6 +76,13 @@ if [ ! -f "$BACKEND_DIR/memo.db" ]; then
     echo -e "${GREEN}Database seeded.${NC}"
 fi
 
+# ── Create .env from .env.dev if not exists ─────────────────────────
+if [ ! -f "$BACKEND_DIR/.env" ] && [ -f "$BACKEND_DIR/.env.dev" ]; then
+    echo -e "${BLUE}Creating .env from .env.dev...${NC}"
+    cp "$BACKEND_DIR/.env.dev" "$BACKEND_DIR/.env"
+    echo -e "${GREEN}.env created.${NC}"
+fi
+
 # ── Start backend ──────────────────────────────────────────────────
 if _ensure_port_free 8000; then
     echo -e "${BLUE}Starting backend (FastAPI) on :8000...${NC}"

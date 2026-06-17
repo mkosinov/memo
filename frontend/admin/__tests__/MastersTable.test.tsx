@@ -167,9 +167,9 @@ describe('MastersTable', () => {
     setupQuery(TEST_MASTERS);
     render(<MastersTable />);
 
-    expect(screen.getByText('Ольга Середа')).toBeInTheDocument();
-    expect(screen.getByText('Юлия Большакова')).toBeInTheDocument();
-    expect(screen.getByText('Анна Петрова')).toBeInTheDocument();
+    expect(screen.getByText('Середа Ольга')).toBeInTheDocument();
+    expect(screen.getByText('Большакова Юлия')).toBeInTheDocument();
+    expect(screen.getByText('Петрова Анна')).toBeInTheDocument();
   });
 
   it('renders master specialties', () => {
@@ -214,9 +214,9 @@ describe('MastersTable', () => {
     const searchInput = screen.getByLabelText('Поиск по имени или фамилии');
     fireEvent.change(searchInput, { target: { value: 'Ольга' } });
 
-    expect(screen.getByText('Ольга Середа')).toBeInTheDocument();
-    expect(screen.queryByText('Юлия Большакова')).not.toBeInTheDocument();
-    expect(screen.queryByText('Анна Петрова')).not.toBeInTheDocument();
+    expect(screen.getByText('Середа Ольга')).toBeInTheDocument();
+    expect(screen.queryByText('Большакова Юлия')).not.toBeInTheDocument();
+    expect(screen.queryByText('Петрова Анна')).not.toBeInTheDocument();
   });
 
   it('filters by active status', () => {
@@ -226,9 +226,9 @@ describe('MastersTable', () => {
     const statusSelect = screen.getByLabelText('Фильтр по статусу');
     fireEvent.change(statusSelect, { target: { value: 'active' } });
 
-    expect(screen.getByText('Ольга Середа')).toBeInTheDocument();
-    expect(screen.getByText('Анна Петрова')).toBeInTheDocument();
-    expect(screen.queryByText('Юлия Большакова')).not.toBeInTheDocument();
+    expect(screen.getByText('Середа Ольга')).toBeInTheDocument();
+    expect(screen.getByText('Петрова Анна')).toBeInTheDocument();
+    expect(screen.queryByText('Большакова Юлия')).not.toBeInTheDocument();
   });
 
   it('resets filters when reset button clicked', () => {
@@ -238,14 +238,14 @@ describe('MastersTable', () => {
     const searchInput = screen.getByLabelText('Поиск по имени или фамилии');
     fireEvent.change(searchInput, { target: { value: 'Ольга' } });
 
-    expect(screen.queryByText('Юлия Большакова')).not.toBeInTheDocument();
+    expect(screen.queryByText('Большакова Юлия')).not.toBeInTheDocument();
 
     const resetButton = screen.getByText('Сбросить');
     fireEvent.click(resetButton);
 
-    expect(screen.getByText('Ольга Середа')).toBeInTheDocument();
-    expect(screen.getByText('Юлия Большакова')).toBeInTheDocument();
-    expect(screen.getByText('Анна Петрова')).toBeInTheDocument();
+    expect(screen.getByText('Середа Ольга')).toBeInTheDocument();
+    expect(screen.getByText('Большакова Юлия')).toBeInTheDocument();
+    expect(screen.getByText('Петрова Анна')).toBeInTheDocument();
     expect(searchInput).toHaveValue('');
   });
 
@@ -397,9 +397,9 @@ describe('MastersTable', () => {
     const secondDataRow = rows[2];
     const thirdDataRow = rows[3];
 
-    expect(within(firstDataRow).getByText('Анна Петрова')).toBeInTheDocument();
-    expect(within(secondDataRow).getByText('Ольга Середа')).toBeInTheDocument();
-    expect(within(thirdDataRow).getByText('Юлия Большакова')).toBeInTheDocument();
+    expect(within(firstDataRow).getByText('Петрова Анна')).toBeInTheDocument();
+    expect(within(secondDataRow).getByText('Середа Ольга')).toBeInTheDocument();
+    expect(within(thirdDataRow).getByText('Большакова Юлия')).toBeInTheDocument();
   });
 
   it('sorts by specialty when specialty header clicked', () => {

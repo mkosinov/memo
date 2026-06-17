@@ -11,7 +11,7 @@ import { NewBookingTab } from '../app/components/modal/ActivityDetailsModal/NewB
 // ─── Shared mock data & context factories ────────────────────────────────
 
 import {
-  mockArtists,
+  mockMasters,
   mockServices,
   mockLocations,
   mockActivity,
@@ -165,9 +165,11 @@ describe('SettingsTab', () => {
     onUpdate: vi.fn(),
   };
 
-  it('renders datetime input', () => {
+  it('renders native datetime-local input', () => {
     render(<SettingsTab {...defaultProps} />);
-    expect(screen.getByLabelText(/Дата и время/)).toBeInTheDocument();
+    const input = screen.getByTestId('input-datetime');
+    expect(input).toBeInTheDocument();
+    expect(input).toHaveAttribute('type', 'datetime-local');
   });
 
   it('renders service select', () => {
@@ -175,7 +177,7 @@ describe('SettingsTab', () => {
     expect(screen.getByLabelText('Услуга')).toBeInTheDocument();
   });
 
-  it('renders master select with artist names', () => {
+  it('renders master select with master names', () => {
     render(<SettingsTab {...defaultProps} />);
     // MasterPicker uses CustomSelect — a button trigger instead of native <select>
     const masterRow = screen.getByTestId('settings-row-master-location');
@@ -185,7 +187,7 @@ describe('SettingsTab', () => {
     expect(masterTrigger).toBeInTheDocument();
     // The selected master (m1 = Ольга Середа) should show in the trigger label
     expect(masterTrigger.textContent).toContain('Ольга Середа');
-    // Open the dropdown to verify all artist names are available
+    // Open the dropdown to verify all master names are available
     fireEvent.click(masterTrigger);
     const dropdown = screen.getByTestId('custom-select-dropdown');
     expect(within(dropdown).getByText('Ольга Середа')).toBeInTheDocument();
@@ -214,7 +216,8 @@ describe('SettingsTab', () => {
 
   it('displays age range from service', () => {
     render(<SettingsTab {...defaultProps} />);
-    expect(screen.getByText(/12/)).toBeInTheDocument();
+    const ageDisplay = screen.getByTestId('age-display');
+    expect(ageDisplay.textContent).toContain('12');
   });
 
   it('displays tariffs from selected service', () => {
@@ -449,7 +452,7 @@ describe('SettingsTab — row layout', () => {
     onUpdate: vi.fn(),
   };
 
-  it('renders date/time and duration on the same row', () => {
+  it('renders native datetime-local input and duration on the same row', () => {
     const { container } = render(<SettingsTab {...defaultProps} />);
     const row1 = container.querySelector('[data-testid="settings-row-datetime-duration"]');
     expect(row1).toBeInTheDocument();
@@ -505,6 +508,21 @@ describe('SettingsTab — row layout', () => {
     // Verify the first color square has an inline background-color style
     const firstSquare = colorSquares[0];
     expect(firstSquare.getAttribute('style')).toContain('background-color');
+  });
+
+  it('snaps non-grid time to nearest grid slot', () => {
+    // Activity with startTime=14.0667 (14:04) — NOT aligned to 30-min grid
+    const activityWithArbitraryMinutes = {
+      ...mockActivity,
+      startTime: 14 + 4 / 60, // 14:04
+      date: '2026-06-15',
+    };
+    render(
+      <SettingsTab activity={activityWithArbitraryMinutes} onUpdate={vi.fn()} />,
+    );
+    const datetimeInput = screen.getByTestId('input-datetime') as HTMLInputElement;
+    // Native datetime-local value is "YYYY-MM-DDTHH:MM" — snapped to 14:00
+    expect(datetimeInput.value).toBe('2026-06-15T14:00');
   });
 });
 

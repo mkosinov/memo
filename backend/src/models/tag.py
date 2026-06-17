@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from src.models.client import Client
     from src.models.location import Location
     from src.models.master import Master
+    from src.models.photo import Photo
     from src.models.record import Record
     from src.models.service import Service
     from src.models.visitor import Visitor
@@ -86,4 +87,7 @@ class Tag(AbstractModel):
     )
     records: Mapped[list["Record"]] = relationship(
         "Record", secondary=record_tags, back_populates="tags"
+    )
+    photos: Mapped[list["Photo"]] = relationship(
+        "Photo", secondary="photo_tags", back_populates="tags"
     )

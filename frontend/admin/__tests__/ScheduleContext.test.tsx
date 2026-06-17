@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ScheduleProvider, useSchedule } from '../contexts/ScheduleContext';
 import { NavigationProvider, useNavigation } from '../contexts/NavigationContext';
 import { getMonday, formatDateISO } from '../lib/utils';
+import { transformService } from '../lib/transformers';
 
 // ─── Mock api-client ─────────────────────────────────────────────────────────
 vi.mock('@memo/api-client', () => ({
@@ -30,7 +31,7 @@ import {
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
-const mockArtists = [
+const mockMasters = [
   { id: 'm1', name: 'Ольга Середа', shortName: 'Ольга', color: '#5B8C7A' },
   { id: 'm2', name: 'Юлия Большакова', shortName: 'Юлия', color: '#6B7E9C' },
 ];
@@ -41,8 +42,8 @@ const mockLocations = [
 ];
 
 const mockServices = [
-  { id: 's1', name: 'Картина маслом', duration: 2.5, maxCapacity: 8, minAge: '12', defaultAdultPrice: 3500 },
-  { id: 's2', name: 'Картина акрилом', duration: 2, maxCapacity: 10, minAge: '6', defaultAdultPrice: 2800 },
+  { id: 's1', name: 'Картина маслом', duration: 2.5, minAge: '12', defaultAdultPrice: 3500 },
+  { id: 's2', name: 'Картина акрилом', duration: 2, minAge: '6', defaultAdultPrice: 2800 },
 ];
 
 const mockActivities = [
@@ -71,7 +72,7 @@ function createTestQueryClient() {
 function ScheduleConsumer() {
   const {
     activities,
-    artists,
+    masters,
     services,
     locations,
     currentWeek,
@@ -84,18 +85,25 @@ function ScheduleConsumer() {
     copyLastWeek,
     loading,
     error,
+    viewMode,
+    setViewMode,
+    selectedDay,
+    setSelectedDay,
   } = useSchedule();
 
   return (
     <div>
       <span data-testid="activity-count">{activities.length}</span>
-      <span data-testid="artist-count">{artists.length}</span>
+      <span data-testid="master-count">{masters.length}</span>
       <span data-testid="service-count">{services.length}</span>
       <span data-testid="location-count">{locations.length}</span>
       <span data-testid="week-start">{currentWeek.toISOString()}</span>
       <span data-testid="stamp-ready">{stamp.ready.toString()}</span>
       <span data-testid="loading">{loading.toString()}</span>
       <span data-testid="error">{error ? error.message : 'null'}</span>
+      <span data-testid="view-mode">{viewMode}</span>
+      <span data-testid="selected-day">{selectedDay.toISOString()}</span>
+
       <button
         data-testid="add-activity"
         onClick={() =>
@@ -123,6 +131,14 @@ function ScheduleConsumer() {
         Update
       </button>
       <button
+        data-testid="update-activity-null-capacity"
+        onClick={() => updateActivity('a1', { serviceId: 's5', durationMinutes: 120, capacity: null } as any)}
+      />
+      <button
+        data-testid="update-activity-with-capacity"
+        onClick={() => updateActivity('a1', { serviceId: 's5', durationMinutes: 120, capacity: 8 })}
+      />
+      <button
         data-testid="delete-activity"
         onClick={() => deleteActivity(activities[0]?.id ?? '')}
       >
@@ -143,6 +159,19 @@ function ScheduleConsumer() {
       <button data-testid="copy-last-week" onClick={copyLastWeek}>
         Copy
       </button>
+      <button data-testid="set-view-day" onClick={() => setViewMode('day')}>
+        Day
+      </button>
+      <button data-testid="set-view-week" onClick={() => setViewMode('week')}>
+        Week
+      </button>
+      <button
+        data-testid="set-selected-day"
+        onClick={() => setSelectedDay(new Date(2026, 5, 15))}
+      >
+        Set Day
+      </button>
+
     </div>
   );
 }
@@ -188,10 +217,10 @@ describe('ScheduleProvider', () => {
     spy.mockRestore();
   });
 
-  it('provides artists, services, locations from React Query hooks', async () => {
+  it('provides masters, services, locations from React Query hooks', async () => {
     vi.mocked(getMasters).mockResolvedValue([
-      { id: 'm1', first_name: 'Ольга', last_name: 'Середа', color: '#5B8C7A', position: 'мастер', specialty: 'живопись', avatar_url: null, is_active: true, created_at: '2024-01-01', updated_at: '2024-01-01' },
-      { id: 'm2', first_name: 'Юлия', last_name: 'Большакова', color: '#6B7E9C', position: 'мастер', specialty: 'живопись', avatar_url: null, is_active: true, created_at: '2024-01-01', updated_at: '2024-01-01' },
+      { id: 'm1', first_name: 'Ольга', last_name: 'Середа', color: '#5B8C7A', position: 'мастер', specialty: 'живопись', avatar_url: null, is_active: true, sort_order: 0, created_at: '2024-01-01', updated_at: '2024-01-01' },
+      { id: 'm2', first_name: 'Юлия', last_name: 'Большакова', color: '#6B7E9C', position: 'мастер', specialty: 'живопись', avatar_url: null, is_active: true, sort_order: 0, created_at: '2024-01-01', updated_at: '2024-01-01' },
     ]);
     vi.mocked(getServices).mockResolvedValue([
       { id: 's1', title: 'Картина маслом', description: '', image_url: '', specialty: '', min_age: 12, max_age: 99, duration: 150, record_info: '', tariffs: [], tags: [], is_active: true, created_at: '', updated_at: '' },
@@ -208,7 +237,7 @@ describe('ScheduleProvider', () => {
     renderWithContext();
 
     await waitFor(() => {
-      expect(screen.getByTestId('artist-count').textContent).toBe('2');
+      expect(screen.getByTestId('master-count').textContent).toBe('2');
     });
     expect(screen.getByTestId('service-count').textContent).toBe('1');
     expect(screen.getByTestId('location-count').textContent).toBe('2');
@@ -287,7 +316,7 @@ describe('ScheduleProvider', () => {
 
   it('calls patchActivity mutation when updateActivity is called', async () => {
     vi.mocked(getMasters).mockResolvedValue([
-      { id: 'm1', first_name: 'Ольга', last_name: 'Середа', color: '#5B8C7A', position: 'мастер', specialty: 'живопись', avatar_url: null, is_active: true, created_at: '2024-01-01', updated_at: '2024-01-01' },
+      { id: 'm1', first_name: 'Ольга', last_name: 'Середа', color: '#5B8C7A', position: 'мастер', specialty: 'живопись', avatar_url: null, is_active: true, sort_order: 0, created_at: '2024-01-01', updated_at: '2024-01-01' },
     ]);
     vi.mocked(getServices).mockResolvedValue([
       { id: 's1', title: 'Картина маслом', description: '', image_url: '', specialty: '', min_age: 12, max_age: 99, duration: 120, record_info: '', tariffs: [], tags: [], is_active: true, created_at: '', updated_at: '' },
@@ -320,9 +349,85 @@ describe('ScheduleProvider', () => {
     expect(patchActivity).toHaveBeenCalledWith('a1', expect.objectContaining({ occupied: 5 }));
   });
 
+  // ─── BUG-63 regression tests ──────────────────────────────────────────────
+
+  it('excludes capacity from PATCH payload when capacity is null (BUG-63 regression)', async () => {
+    vi.mocked(getMasters).mockResolvedValue([
+      { id: 'm1', first_name: 'Ольга', last_name: 'Середа', color: '#5B8C7A', position: 'мастер', specialty: 'живопись', avatar_url: null, is_active: true, sort_order: 0, created_at: '2024-01-01', updated_at: '2024-01-01' },
+    ]);
+    vi.mocked(getServices).mockResolvedValue([
+      { id: 's1', title: 'Картина маслом', description: '', image_url: '', specialty: '', min_age: 12, max_age: null, duration: 120, record_info: '', tariffs: [], tags: [], is_active: true, created_at: '', updated_at: '' },
+    ]);
+    vi.mocked(getLocations).mockResolvedValue([
+      { id: 'alpika', name: 'Альпика', address: 'Альпика, 1 этаж', description: null, capacity: 10, yandex_map_url: null, review_url: null, record_info: null, image_url: null, location_hint: null, is_active: true, created_at: '', updated_at: '' },
+    ]);
+    vi.mocked(getActivities).mockResolvedValue([
+      { id: 'a1', master_id: 'm1', service_id: 's1', location_id: 'alpika', start: '2024-12-25T10:00:00Z', duration: 120, capacity: 8, is_private: false, comment: null, record_info: null, created_at: '', updated_at: '', is_active: true, occupied: 3 },
+    ]);
+    vi.mocked(patchActivity).mockResolvedValue({
+      id: 'a1', master_id: 'm1', service_id: 's1', location_id: 'alpika',
+      start: '2024-12-25T10:00:00Z', duration: 120, capacity: 8, is_private: false,
+      comment: null, record_info: null, created_at: '', updated_at: '', is_active: true, occupied: 5,
+    });
+
+    renderWithContext();
+    await waitFor(() => { expect(screen.getByTestId('activity-count').textContent).toBe('1'); });
+
+    // Simulate updateActivity with null capacity (what happens when service changes and maxCapacity is null)
+    act(() => { screen.getByTestId('update-activity-null-capacity').click(); });
+
+    await waitFor(() => { expect(patchActivity).toHaveBeenCalled(); });
+    // KEY: payload must NOT contain capacity when it would be null
+    const callArgs = (patchActivity as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(callArgs[1]).not.toHaveProperty('capacity');
+  });
+
+  it('includes capacity in PATCH payload when capacity has a defined value (BUG-63 regression)', async () => {
+    vi.mocked(getMasters).mockResolvedValue([
+      { id: 'm1', first_name: 'Ольга', last_name: 'Середа', color: '#5B8C7A', position: 'мастер', specialty: 'живопись', avatar_url: null, is_active: true, sort_order: 0, created_at: '2024-01-01', updated_at: '2024-01-01' },
+    ]);
+    vi.mocked(getServices).mockResolvedValue([
+      { id: 's1', title: 'Картина маслом', description: '', image_url: '', specialty: '', min_age: 12, max_age: null, duration: 120, record_info: '', tariffs: [], tags: [], is_active: true, created_at: '', updated_at: '' },
+    ]);
+    vi.mocked(getLocations).mockResolvedValue([
+      { id: 'alpika', name: 'Альпика', address: 'Альпика, 1 этаж', description: null, capacity: 10, yandex_map_url: null, review_url: null, record_info: null, image_url: null, location_hint: null, is_active: true, created_at: '', updated_at: '' },
+    ]);
+    vi.mocked(getActivities).mockResolvedValue([
+      { id: 'a1', master_id: 'm1', service_id: 's1', location_id: 'alpika', start: '2024-12-25T10:00:00Z', duration: 120, capacity: 8, is_private: false, comment: null, record_info: null, created_at: '', updated_at: '', is_active: true, occupied: 3 },
+    ]);
+    vi.mocked(patchActivity).mockResolvedValue({
+      id: 'a1', master_id: 'm1', service_id: 's1', location_id: 'alpika',
+      start: '2024-12-25T10:00:00Z', duration: 120, capacity: 8, is_private: false,
+      comment: null, record_info: null, created_at: '', updated_at: '', is_active: true, occupied: 5,
+    });
+
+    renderWithContext();
+    await waitFor(() => { expect(screen.getByTestId('activity-count').textContent).toBe('1'); });
+
+    // Simulate updateActivity with a defined capacity
+    act(() => { screen.getByTestId('update-activity-with-capacity').click(); });
+
+    await waitFor(() => { expect(patchActivity).toHaveBeenCalled(); });
+    const callArgs = (patchActivity as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(callArgs[1]).toHaveProperty('capacity', 8);
+    expect(callArgs[1]).toHaveProperty('service_id');
+  });
+
+  it('transformService does not produce maxCapacity field (BUG-63 regression)', () => {
+    const mockRaw = {
+      id: 's1', title: 'Картина маслом', duration: 120, min_age: 12, max_age: null,
+      tariffs: [], tags: [], description: '', image_url: '', specialty: '', record_info: '',
+      is_active: true, created_at: '', updated_at: '',
+    } as any;
+    const result = transformService(mockRaw);
+    expect(result).not.toHaveProperty('maxCapacity');
+  });
+
+  // ─── end BUG-63 regression tests ──────────────────────────────────────────
+
   it('calls deleteActivity mutation when deleteActivity is called', async () => {
     vi.mocked(getMasters).mockResolvedValue([
-      { id: 'm1', first_name: 'Ольга', last_name: 'Середа', color: '#5B8C7A', position: 'мастер', specialty: 'живопись', avatar_url: null, is_active: true, created_at: '2024-01-01', updated_at: '2024-01-01' },
+      { id: 'm1', first_name: 'Ольга', last_name: 'Середа', color: '#5B8C7A', position: 'мастер', specialty: 'живопись', avatar_url: null, is_active: true, sort_order: 0, created_at: '2024-01-01', updated_at: '2024-01-01' },
     ]);
     vi.mocked(getServices).mockResolvedValue([
       { id: 's1', title: 'Картина маслом', description: '', image_url: '', specialty: '', min_age: 12, max_age: 99, duration: 120, record_info: '', tariffs: [], tags: [], is_active: true, created_at: '', updated_at: '' },
@@ -375,6 +480,82 @@ describe('ScheduleProvider', () => {
     await waitFor(() => {
       expect(screen.getByTestId('error').textContent).not.toBe('null');
     });
+  });
+
+  // ─── viewMode tests ────────────────────────────────────────────────────────
+
+  it('defaults viewMode to "week"', () => {
+    renderWithContext();
+    expect(screen.getByTestId('view-mode').textContent).toBe('week');
+  });
+
+  it('provides setViewMode to switch between week and day', () => {
+    renderWithContext();
+    act(() => {
+      screen.getByTestId('set-view-day').click();
+    });
+    expect(screen.getByTestId('view-mode').textContent).toBe('day');
+
+    act(() => {
+      screen.getByTestId('set-view-week').click();
+    });
+    expect(screen.getByTestId('view-mode').textContent).toBe('week');
+  });
+
+  // ─── selectedDay tests ─────────────────────────────────────────────────────
+
+  it('defaults selectedDay to today', () => {
+    renderWithContext();
+    const today = new Date();
+    const selectedDay = new Date(screen.getByTestId('selected-day').textContent!);
+    expect(selectedDay.toDateString()).toBe(today.toDateString());
+  });
+
+  it('provides setSelectedDay to change the selected day', () => {
+    renderWithContext();
+    act(() => {
+      screen.getByTestId('set-selected-day').click();
+    });
+    const selectedDay = new Date(screen.getByTestId('selected-day').textContent!);
+    expect(selectedDay.getFullYear()).toBe(2026);
+    expect(selectedDay.getMonth()).toBe(5); // June
+    expect(selectedDay.getDate()).toBe(15);
+  });
+
+  // ─── __memo-switch-to-day-view event tests ─────────────────────────────────
+
+  it('switches viewMode to "day" and sets selectedDay when __memo-switch-to-day-view event fires', () => {
+    renderWithContext();
+    // Verify initial state
+    expect(screen.getByTestId('view-mode').textContent).toBe('week');
+
+    const targetDate = new Date(2026, 5, 15); // June 15, 2026
+
+    act(() => {
+      document.dispatchEvent(new CustomEvent('__memo-switch-to-day-view', { detail: { date: targetDate } }));
+    });
+
+    expect(screen.getByTestId('view-mode').textContent).toBe('day');
+    const selectedDay = new Date(screen.getByTestId('selected-day').textContent!);
+    expect(selectedDay.toDateString()).toBe(targetDate.toDateString());
+  });
+
+  it('navigates week range when __memo-switch-to-day-view event fires', () => {
+    renderWithContext();
+    // Set initial week far from the target
+    act(() => {
+      screen.getByTestId('set-week').click(); // sets to 2026-05-18
+    });
+
+    const targetDate = new Date(2026, 6, 6); // July 6, 2026 (Monday)
+
+    act(() => {
+      document.dispatchEvent(new CustomEvent('__memo-switch-to-day-view', { detail: { date: targetDate } }));
+    });
+
+    // The week should now contain July 6
+    const weekStart = new Date(screen.getByTestId('week-start').textContent!);
+    expect(weekStart.toDateString()).toBe(targetDate.toDateString());
   });
 
   it('synchronizes currentWeek with NavigationProvider dateFrom', () => {

@@ -72,13 +72,14 @@ class TestModelImports:
             Tag,
             Tariff,
             User,
+            UserSettings,
             Visit,
             Visitor,
         )
         # Verify they are actual classes / Table objects
         for cls in [Master, User, Location, Service, Tariff, Tag,
                     Activity, Client, Visitor, Photo, Record, Visit, Payment,
-                    Material]:
+                    Material, UserSettings]:
             assert hasattr(cls, "__tablename__")
 
     def test_all_exports(self):
@@ -87,7 +88,7 @@ class TestModelImports:
             "AbstractModel",
             "Master", "User", "Location", "Service", "Tariff", "Tag",
             "Activity", "Client", "Visitor", "Photo", "Record", "Visit", "Payment",
-            "Material",
+            "Material", "UserSettings",
             "Channel", "RecordStatus", "UserRole",
             "service_tags", "activity_tags", "photo_tags",
             "master_tags", "location_tags", "client_tags", "visitor_tags", "record_tags",
@@ -108,7 +109,7 @@ class TestModelTables:
         "masters", "users", "locations", "services", "tariffs",
         "tags", "activities", "clients", "visitors",
         "photos", "records", "visits", "payments",
-        "materials",
+        "materials", "user_settings",
         "service_tags", "activity_tags", "photo_tags",
         "master_tags", "location_tags", "client_tags", "visitor_tags", "record_tags",
     ])
@@ -694,3 +695,80 @@ class TestModelCrud:
         )).all()
         assert len(rows) == 1
         assert rows[0][0] == rec.id
+
+    def test_user_settings_crud(self, session: Session):
+        """UserSettings can be created, saved, and read back with correct values."""
+        from src.models import Master, User, UserSettings
+
+        m = Master(first_name="A", last_name="B", color="#000", position="мастер", specialty="живопись")
+        session.add(m)
+        session.flush()
+        u = User(phone="+79009999999", password_hash="h", role="admin", master_id=m.id)
+        session.add(u)
+        session.flush()
+
+        us = UserSettings(
+            user_id=u.id,
+            theme="dark",
+            language="ru",
+            column_order_masters='["last_name","color"]',
+            column_order_locations='["name","capacity"]',
+        )
+        session.add(us)
+        session.flush()
+
+        fetched = session.get(UserSettings, us.id)
+        assert fetched.user_id == u.id
+        assert fetched.theme == "dark"
+        assert fetched.language == "ru"
+        assert fetched.column_order_masters == '["last_name","color"]'
+        assert fetched.column_order_locations == '["name","capacity"]'
+        assert fetched.is_active is True
+
+    def test_user_settings_defaults(self, session: Session):
+        """UserSettings columns use sensible defaults."""
+        from src.models import Master, User, UserSettings
+
+        m = Master(first_name="C", last_name="D", color="#111", position="мастер", specialty="керамика")
+        session.add(m)
+        session.flush()
+        u = User(phone="+79008888888", password_hash="h", role="admin", master_id=m.id)
+        session.add(u)
+        session.flush()
+
+        us = UserSettings(user_id=u.id)
+        session.add(us)
+        session.flush()
+
+        fetched = session.get(UserSettings, us.id)
+        assert fetched.theme == "light"
+        assert fetched.language == "ru"
+        assert fetched.column_order_masters == "[]"
+        assert fetched.column_order_locations == "[]"
+
+    def test_user_settings_unique_user_id(self, session: Session):
+        """Two UserSettings rows cannot share the same user_id."""
+        from src.models import Master, User, UserSettings
+
+        m = Master(first_name="E", last_name="F", color="#222", position="мастер", specialty="живопись")
+        session.add(m)
+        session.flush()
+        u = User(phone="+79007777777", password_hash="h", role="admin", master_id=m.id)
+        session.add(u)
+        session.flush()
+
+        us1 = UserSettings(user_id=u.id, theme="light")
+        session.add(us1)
+        session.flush()
+
+        us2 = UserSettings(user_id=u.id, theme="dark")
+        session.add(us2)
+        try:
+            session.flush()
+            # If we get here, the unique constraint is missing — fail the test.
+            assert False, "Expected IntegrityError for duplicate user_id"
+        except Exception as exc:
+            # SQLite wraps it in OperationalError or IntegrityError
+            assert "UNIQUE" in str(exc) or "unique" in str(exc).lower()
+        finally:
+            session.rollback()

@@ -5,7 +5,7 @@
  * ```ts
  * import { createMockScheduleContext } from './helpers/mockContexts';
  * vi.mock('@/contexts/ScheduleContext', () => ({
- *   useSchedule: vi.fn(() => createMockScheduleContext({ artists: myArtists })),
+ *   useSchedule: vi.fn(() => createMockScheduleContext({ masters: myMasters })),
  * }));
  * ```
  */
@@ -13,7 +13,7 @@ import { vi } from 'vitest';
 import type { ScheduleContextType } from '@/contexts/ScheduleContext';
 import type { RecordsContextType } from '@/contexts/RecordsContext';
 import type { ClientsContextType } from '@/contexts/ClientsContext';
-import { mockArtists, mockServices, mockLocations } from './mockData';
+import { mockMasters, mockServices, mockLocations } from './mockData';
 
 // ─── ScheduleContext ──────────────────────────────────────────────────────
 
@@ -23,7 +23,7 @@ export function createMockScheduleContext(
   overrides?: ScheduleOverrides,
 ): ScheduleContextType {
   return {
-    artists: mockArtists,
+    masters: mockMasters,
     services: mockServices,
     locations: mockLocations,
     activities: [],
@@ -43,10 +43,26 @@ export function createMockScheduleContext(
     copyLastWeek: vi.fn(),
     loading: false,
     error: null,
-    filterMasterId: null,
-    filterLocationId: null,
-    setFilterMasterId: vi.fn(),
-    setFilterLocationId: vi.fn(),
+    filterMasterIds: [],
+    filterLocationIds: [],
+    setFilterMasterIds: vi.fn(),
+    setFilterLocationIds: vi.fn(),
+    viewMode: 'week',
+    setViewMode: vi.fn(),
+    selectedDay: new Date(),
+    setSelectedDay: vi.fn(),
+    columnMode: 'masters',
+    setColumnMode: vi.fn(),
+    cellHeight: 50,
+    setCellHeight: vi.fn(),
+    gridFrequency: 30,
+    setGridFrequency: vi.fn(),
+    workingHoursStart: 9,
+    setWorkingHoursStart: vi.fn(),
+    workingHoursEnd: 21,
+    setWorkingHoursEnd: vi.fn(),
+    prevPeriod: vi.fn(),
+    nextPeriod: vi.fn(),
     ...overrides,
   };
 }

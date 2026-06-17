@@ -4,7 +4,7 @@
  * Usage:
  * ```tsx
  * import { renderWithProviders } from './helpers/renderWithProviders';
- * renderWithProviders(<MyComponent />, { useSchedule: { artists: myArtists } });
+ * renderWithProviders(<MyComponent />, { useSchedule: { masters: myMasters } });
  * ```
  */
 import React, { type ReactElement } from 'react';

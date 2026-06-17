@@ -43,8 +43,8 @@ const config: Config = {
           DEFAULT: "#E0E0E1",
           dark: "rgba(255,255,255,.1)",
         },
-        // Artist colors
-        artist: {
+        // Master colors
+        master: {
           olga: "#5B8C7A",
           yulia: "#6B7E9C",
           anastasia: "#A07060",

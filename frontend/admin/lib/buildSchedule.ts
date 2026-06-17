@@ -6,11 +6,12 @@ import type { ActivityResponse, MasterResponse, ServiceResponse, LocationRespons
 export interface ScheduleItem extends Activity {
   serviceName: string;
   minAge: string;
+  maxAge?: string;
 }
 
 export interface ActivityIndex {
   byDate: Map<string, ScheduleItem[]>;   // key: YYYY-MM-DD ISO date
-  byArtistId: Map<string, ScheduleItem[]>;
+  byMasterId: Map<string, ScheduleItem[]>;
   byLocationId: Map<string, ScheduleItem[]>;
 }
 
@@ -36,10 +37,10 @@ function addToActivityIndex(idx: ActivityIndex, activity: ScheduleItem, monday: 
   dateArr.push(activity);
   idx.byDate.set(dateKey, dateArr);
 
-  // byArtistId (uses masterId as key)
-  const artistArr = idx.byArtistId.get(activity.masterId) ?? [];
-  artistArr.push(activity);
-  idx.byArtistId.set(activity.masterId, artistArr);
+  // byMasterId (uses masterId as key)
+  const masterArr = idx.byMasterId.get(activity.masterId) ?? [];
+  masterArr.push(activity);
+  idx.byMasterId.set(activity.masterId, masterArr);
 
   // byLocationId
   const locArr = idx.byLocationId.get(activity.locationId) ?? [];
@@ -51,7 +52,7 @@ export function toScheduleIndex(activities: ScheduleItem[], monday: Date): Sched
   const byId = new Map<string, ScheduleItem>();
   const allIndex: ActivityIndex = {
     byDate: new Map(),
-    byArtistId: new Map(),
+    byMasterId: new Map(),
     byLocationId: new Map(),
   };
   const byLocation: Record<string, ActivityIndex> = {};
@@ -66,7 +67,7 @@ export function toScheduleIndex(activities: ScheduleItem[], monday: Date): Sched
     if (!byLocation[activity.locationId]) {
       byLocation[activity.locationId] = {
         byDate: new Map(),
-        byArtistId: new Map(),
+        byMasterId: new Map(),
         byLocationId: new Map(),
       };
     }
@@ -91,6 +92,7 @@ export function toScheduleItems(
       ...activity,
       serviceName: activity.serviceName || service?.name || '',
       minAge: activity.minAge || service?.minAge || '',
+      maxAge: activity.maxAge ?? service?.maxAge,
     };
   });
 }
@@ -166,7 +168,7 @@ export function buildAdminSchedule(
       isPrivate: act.is_private,
       masterColor: master.color,
       minAge: `${service.min_age}`,
-      maxAge: `${service.max_age}`,
+      maxAge: service.max_age != null ? `${service.max_age}` : undefined,
       comment: act.comment ?? '',
     };
 

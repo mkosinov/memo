@@ -11,6 +11,7 @@ export const MasterResponseSchema = z.object({
   specialty: z.string(),
   avatar_url: z.string().nullable(),
   is_active: z.boolean(),
+  sort_order: z.number().optional(),
   created_at: z.string(), // ISO datetime string
   updated_at: z.string(), // ISO datetime string
 });
@@ -37,6 +38,7 @@ export type MasterUpdate = z.infer<typeof MasterUpdateSchema>;
 export const LocationResponseSchema = z.object({
   id: z.string(),
   name: z.string(),
+  short_title: z.string().nullable().optional(),
   address: z.string().nullable(),
   description: z.string().nullable(),
   capacity: z.number(),
@@ -45,6 +47,7 @@ export const LocationResponseSchema = z.object({
   record_info: z.string().nullable(),
   image_url: z.string().nullable(),
   location_hint: z.string().nullable().optional(),
+  sort_order: z.number().optional(),
   is_active: z.boolean(),
   created_at: z.string(), // ISO datetime string
   updated_at: z.string(), // ISO datetime string
@@ -61,6 +64,7 @@ export const PhotoResponseSchema = z.object({
   service_id: z.string().nullable(),
   activity_id: z.string().nullable(),
   is_public: z.boolean(),
+  tags: z.array(z.object({ id: z.string(), tag: z.string() })).default([]),
   created_at: z.string(),
   updated_at: z.string(),
   is_active: z.boolean(),
@@ -76,6 +80,7 @@ export const PhotoCreateSchema = z.object({
   service_id: z.string().optional().default(''),
   activity_id: z.string().optional().default(''),
   is_public: z.boolean().default(false),
+  tag_ids: z.array(z.string()).default([]),
 });
 export type PhotoCreate = z.infer<typeof PhotoCreateSchema>;
 
@@ -122,7 +127,7 @@ export const ServiceResponseSchema = z.object({
   image_url: z.string(),
   specialty: z.string(),
   min_age: z.number(),
-  max_age: z.number(),
+  max_age: z.number().nullable(),
   duration: z.number(),
   record_info: z.string(),
   material_hint: z.string().nullable().optional(),
@@ -368,6 +373,7 @@ export type ServiceUpdate = z.infer<typeof ServiceUpdateSchema>;
 
 export const LocationCreateSchema = z.object({
   name: z.string().min(1).max(200),
+  short_title: z.string().optional().default(''),
   address: z.string().optional().default(''),
   description: z.string().optional().default(''),
   capacity: z.number().min(1).max(500),
@@ -406,3 +412,60 @@ export type MaterialCreate = z.infer<typeof MaterialCreateSchema>;
 
 export const MaterialUpdateSchema = MaterialCreateSchema.partial();
 export type MaterialUpdate = z.infer<typeof MaterialUpdateSchema>;
+
+// ─── UserSettingsResponse ───────────────────────────────────────────────
+
+export const UserSettingsResponseSchema = z.object({
+  id: z.string(),
+  user_id: z.string(),
+  theme: z.string(),
+  language: z.string(),
+  column_order_masters: z.array(z.string()),
+  column_order_locations: z.array(z.string()),
+  created_at: z.string(),
+  updated_at: z.string(),
+});
+
+export type UserSettingsResponse = z.infer<typeof UserSettingsResponseSchema>;
+
+export const UserSettingsCreateSchema = z.object({
+  user_id: z.string(),
+  theme: z.string().optional().default('light'),
+  language: z.string().optional().default('ru'),
+  column_order_masters: z.array(z.string()).optional().default([]),
+  column_order_locations: z.array(z.string()).optional().default([]),
+});
+
+export type UserSettingsCreate = z.infer<typeof UserSettingsCreateSchema>;
+
+export const UserSettingsUpdateSchema = UserSettingsCreateSchema.partial().omit({ user_id: true });
+export type UserSettingsUpdate = z.infer<typeof UserSettingsUpdateSchema>;
+
+// ─── Search Result Schemas ──────────────────────────────────────────────
+
+export const VisitorSearchResultSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  age: z.number().nullable(),
+});
+export type VisitorSearchResult = z.infer<typeof VisitorSearchResultSchema>;
+
+export const ServiceSearchResultSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+});
+export type ServiceSearchResult = z.infer<typeof ServiceSearchResultSchema>;
+
+export const ActivitySearchResultSchema = z.object({
+  id: z.string(),
+  start: z.string(),
+  service_id: z.string(),
+  service_title: z.string(),
+});
+export type ActivitySearchResult = z.infer<typeof ActivitySearchResultSchema>;
+
+export const TagSearchResultSchema = z.object({
+  id: z.string(),
+  tag: z.string(),
+});
+export type TagSearchResult = z.infer<typeof TagSearchResultSchema>;

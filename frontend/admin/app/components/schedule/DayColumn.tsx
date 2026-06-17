@@ -1,62 +1,57 @@
 'use client';
 
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useDroppable } from '@dnd-kit/core';
-import { CELL_HEIGHT, hexToRgb, mixWithWhite, formatTime, generateTimeSlots, HOURS_START } from '@/lib/utils';
-import type { Activity, Artist, Studio, StampState, Service } from '@memo/domain';
+import { hexToRgb, mixWithWhite, formatTime, generateTimeSlots, HOURS_START, HOURS_END } from '@/lib/utils';
+import type { Activity, Master, Location, StampState, Service } from '@memo/domain';
 import { ActivityCard } from './ActivityCard';
+import { OverlapPopover } from './OverlapPopover';
 
-// ─── Constants ────────────────────────────────────────────────────────────
+// ─── Time-Groups Carousel Model ──────────────────────────────────────
+// Activities are grouped by their START time into fixed time windows.
+// Each group has its own carousel that cycles independently.
 
-const OVERLAP_OFFSET = 12;
+type TimeGroup = {
+  id: 'G1' | 'G2' | 'G3';
+  start: number;
+  end: number;
+};
 
-// ─── Overlap Detection (sliding window) ─────────────────────────────────
+const TIME_GROUPS: TimeGroup[] = [
+  { id: 'G1', start: 9, end: 13 },    // 09:00–12:59
+  { id: 'G2', start: 13, end: 16 },   // 13:00–15:59
+  { id: 'G3', start: 16, end: 24 },   // 16:00–23:59
+];
 
-function buildOverlapMap(activities: Activity[]): Map<string, { index: number; total: number }> {
-  const result = new Map<string, { index: number; total: number }>();
-  const sorted = [...activities].sort((a, b) => a.startTime - b.startTime || a.id.localeCompare(b.id));
-  let active: Activity[] = []; // currently overlapping activities
-
-  for (const a of sorted) {
-    // Remove activities that ended before this one starts
-    active = active.filter(prev => a.startTime < prev.startTime + prev.duration);
-
-    const myIndex = active.length;
-    const total = active.length + 1;
-
-    // Update totals for all already-active activities
-    for (const prev of active) {
-      const cur = result.get(prev.id);
-      if (cur && cur.total < total) {
-        result.set(prev.id, { index: cur.index, total });
-      }
-    }
-
-    result.set(a.id, { index: myIndex, total });
-    active.push(a);
-  }
-
-  return result;
+function getGroupForActivity(activity: Activity): TimeGroup | undefined {
+  return TIME_GROUPS.find(g => activity.startTime >= g.start && activity.startTime < g.end);
 }
 
 interface DayColumnProps {
   dayIndex: number;
   date: Date;
   activities: Activity[];
-  artists: Artist[];
-  studios?: Studio[];
+  masters: Master[];
+  locations?: Location[];
   services?: Service[];
   dragCopy?: boolean;
   dragId?: string | null;
   ghostHeight?: number | null;
   ghostDayIndex?: number | null;
   ghostSlotIndex?: number | null;
+  ghostColumnId?: string | null;
   onCreateActivity?: (dayIndex: number, startTime: number) => void;
   onOpenCreateModal?: (dayIndex: number, startTime: number) => void;
   onOpenEditModal?: (activity: Activity) => void;
   onQuickAdd?: (activity: Activity) => void;
   stampReady?: boolean;
   stamp?: StampState;
+  cellHeight?: number;
+  gridFrequency?: number;
+  gridStart?: number;
+  gridEnd?: number;
+  /** Column identity (master or location ID) — included in droppable slot data for cross-column DnD. */
+  columnId?: string;
 }
 
 interface DroppableSlotProps {
@@ -64,22 +59,27 @@ interface DroppableSlotProps {
   slotIndex: number;
   startTime: number;
   isHour: boolean;
+  isHalfHour?: boolean;
   dragCopy?: boolean;
   onClick?: (dayIndex: number, startTime: number) => void;
   onOpenModal?: (dayIndex: number, startTime: number) => void;
   stampReady?: boolean;
   stamp?: StampState;
-  artists?: Artist[];
+  masters?: Master[];
   services?: Service[];
+  cellHeight?: number;
+  columnId?: string;
+  /** When true, suppress slot-level isOver border (column ghost already covers it) */
+  suppressIsOverGhost?: boolean;
   children?: React.ReactNode;
 }
 
 // ─── DroppableSlot ────────────────────────────────────────────────────────
 
-function DroppableSlot({ dayIndex, slotIndex, startTime, isHour, dragCopy, onClick, onOpenModal, stampReady, stamp, artists, services, children }: DroppableSlotProps) {
+function DroppableSlot({ dayIndex, slotIndex, startTime, isHour, isHalfHour, dragCopy, onClick, onOpenModal, stampReady, stamp, masters, services, cellHeight = 60, columnId, suppressIsOverGhost, children }: DroppableSlotProps) {
   const { isOver, setNodeRef } = useDroppable({
-    id: `slot-${dayIndex}-${slotIndex}`,
-    data: { dayIndex, slotIndex },
+    id: `slot-${columnId ?? dayIndex}-${slotIndex}`,
+    data: { type: 'slot', dayIndex, slotIndex, columnId },
   });
 
   const [hoveredStampSlot, setHoveredStampSlot] = useState<number | null>(null);
@@ -87,7 +87,7 @@ function DroppableSlot({ dayIndex, slotIndex, startTime, isHour, dragCopy, onCli
   const showStampGhost = stampReady && hoveredStampSlot === slotIndex && !isOver;
   const stampGhostPreview = showStampGhost && stamp?.masterId && stamp?.serviceId
     ? (() => {
-        const master = artists?.find(a => a.id === stamp.masterId);
+        const master = masters?.find(a => a.id === stamp.masterId);
         const service = services?.find(s => s.id === stamp.serviceId);
         if (!master || !service) return null;
         const rgb = hexToRgb(master.color);
@@ -96,9 +96,9 @@ function DroppableSlot({ dayIndex, slotIndex, startTime, isHour, dragCopy, onCli
       })()
     : null;
 
-  const stampGhostStyle: React.CSSProperties | null = (stampReady && isOver && stamp?.masterId && artists)
+  const stampGhostStyle: React.CSSProperties | null = (stampReady && isOver && stamp?.masterId && masters)
     ? (() => {
-        const master = artists.find(a => a.id === stamp.masterId);
+        const master = masters.find(a => a.id === stamp.masterId);
         if (!master) return null;
         const rgb = hexToRgb(master.color);
         const mixed = mixWithWhite(rgb, 0.85);
@@ -110,7 +110,7 @@ function DroppableSlot({ dayIndex, slotIndex, startTime, isHour, dragCopy, onCli
           position: 'relative' as const,
         };
       })()
-    : isOver
+    : !suppressIsOverGhost && isOver
       ? {
           border: `2px dashed ${dragCopy ? '#22c55e' : 'var(--brand, #004D56)'}`,
           backgroundColor: dragCopy ? 'rgba(34,197,94,0.06)' : 'rgba(0,77,86,0.085)',
@@ -147,9 +147,10 @@ function DroppableSlot({ dayIndex, slotIndex, startTime, isHour, dragCopy, onCli
   return (
     <div
       ref={setNodeRef}
+      data-testid={`slot-${columnId ?? dayIndex}-${slotIndex}`}
       data-slot-index={slotIndex}
-      className={isHour ? 'border-t border-line' : 'border-t border-dashed border-line'}
-      style={{ height: CELL_HEIGHT, ...stampGhostStyle }}
+      className={isHour ? 'border-t border-line' : isHalfHour ? 'border-t border-dashed border-line' : 'border-t border-dotted border-line/30'}
+      style={{ height: cellHeight, ...stampGhostStyle }}
       onClick={handleClick}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
@@ -161,7 +162,7 @@ function DroppableSlot({ dayIndex, slotIndex, startTime, isHour, dragCopy, onCli
           className="absolute inset-x-1 rounded-lg pointer-events-none overflow-hidden flex flex-col"
           style={{
             top: 0,
-            height: CELL_HEIGHT * 2,
+            height: cellHeight * 2,
             border: '2px dashed rgba(0,77,86,0.3)',
             backgroundColor: `rgba(${stampGhostPreview.rgb.r}, ${stampGhostPreview.rgb.g}, ${stampGhostPreview.rgb.b}, 0.08)`,
             borderLeft: `3px solid ${stampGhostPreview.master.color}`,
@@ -189,31 +190,119 @@ function DroppableSlot({ dayIndex, slotIndex, startTime, isHour, dragCopy, onCli
 
 // ─── DayColumn ────────────────────────────────────────────────────────────
 
-export function DayColumn({ dayIndex, activities, artists, studios = [], services = [], dragCopy, dragId, ghostHeight, ghostDayIndex, ghostSlotIndex, onCreateActivity, onOpenCreateModal, onOpenEditModal, onQuickAdd, stampReady, stamp }: DayColumnProps) {
-  const [visibleIndices, setVisibleIndices] = useState<Record<string, number>>({});
-  const [prevIndices, setPrevIndices] = useState<Record<string, number>>({});
+export function DayColumn({ dayIndex, activities, masters, locations = [], services = [], dragCopy, dragId, ghostHeight, ghostDayIndex, ghostSlotIndex, ghostColumnId, onCreateActivity, onOpenCreateModal, onOpenEditModal, onQuickAdd, stampReady, stamp, cellHeight = 60, gridFrequency = 30, gridStart = HOURS_START, gridEnd = HOURS_END, columnId }: DayColumnProps) {
+  const [popoverData, setPopoverData] = useState<{
+    activities: Activity[];
+    anchorRect: DOMRect;
+  } | null>(null);
   const columnRef = useRef<HTMLDivElement>(null);
-  const wheelAccum = useRef(0);
   const lastWheelTime = useRef(0);
-  const [animatingKeys, setAnimatingKeys] = useState<Set<string>>(new Set());
+  const activeGroupTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const isMouseInsideRef = useRef(false);
 
-  const slots = useMemo(() => generateTimeSlots(), []);
+  // Reset active group after timeout — but only if mouse is not inside the column
+  // (mousemove auto-promote should keep the group active while hovering)
+  const resetActiveGroup = useCallback(() => {
+    if (activeGroupTimeoutRef.current) {
+      clearTimeout(activeGroupTimeoutRef.current);
+    }
+    activeGroupTimeoutRef.current = setTimeout(() => {
+      if (!isMouseInsideRef.current) {
+        setActiveGroupId(null);
+        setCycledGroupIds(new Set());
+      }
+    }, 1000);
+  }, []);
 
-  const artistMap = useMemo(() => new Map(artists.map(a => [a.id, a])), [artists]);
+  // Generate slots at gridFrequency intervals. Slot height is scaled to keep total grid height constant.
+  const slotHeight = useMemo(() => cellHeight * (gridFrequency / 30), [cellHeight, gridFrequency]);
+  const slots = useMemo(() => generateTimeSlots(gridFrequency, gridStart, gridEnd), [gridFrequency, gridStart, gridEnd]);
 
-  // Group by startTime for stacking within same slot
-  const slotGroups: Record<string, Activity[]> = {};
-  for (const activity of activities) {
-    const key = `${dayIndex}_${activity.startTime}`;
-    if (!slotGroups[key]) slotGroups[key] = [];
-    slotGroups[key].push(activity);
-  }
+  const masterMap = useMemo(() => new Map(masters.map(a => [a.id, a])), [masters]);
 
-  // Full range overlap detection (X+Y offset)
-  const overlapMap = useMemo(() => buildOverlapMap(activities), [activities]);
+  // When a column-level ghost is active for this column, suppress individual slot-level isOver borders
+  const hasColumnGhost = ghostColumnId === columnId && ghostSlotIndex != null && ghostHeight != null;
 
-  const slotGroupsRef = useRef(slotGroups);
-  slotGroupsRef.current = slotGroups;
+  // Per-card z-index: each activity has ONE z-index (0 = frontmost) used everywhere.
+  // Each activity's z is its position within its time group (sorted by startTime).
+  // Re-initialize when activities change (e.g., navigating to a new date).
+  const [zIndices, setZIndices] = useState<Record<string, number>>({});
+  const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
+  // Track all group IDs being cycled together (primary + adjacent solos)
+  // so adjacent solo activities aren't treated as "background"
+  const [cycledGroupIds, setCycledGroupIds] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    const initial: Record<string, number> = {};
+    for (const act of activities) {
+      const group = getGroupForActivity(act);
+      if (!group) {
+        initial[act.id] = 0;
+        continue;
+      }
+      const activitiesInGroup = activities.filter(a => getGroupForActivity(a)?.id === group.id);
+      const sorted = [...activitiesInGroup].sort((a, b) => a.startTime - b.startTime || a.id.localeCompare(b.id));
+      const indexInGroup = sorted.findIndex(a => a.id === act.id);
+      initial[act.id] = indexInGroup >= 0 ? indexInGroup : 0;
+    }
+    setZIndices(initial);
+    setActiveGroupId(null); // reset active group on new activities
+    setCycledGroupIds(new Set());
+  }, [activities]);
+
+  // Reset activeGroupId on mouseleave
+  useEffect(() => {
+    const el = columnRef.current;
+    if (!el) return;
+    const handleMouseLeave = () => {
+      isMouseInsideRef.current = false;
+      if (activeGroupTimeoutRef.current) {
+        clearTimeout(activeGroupTimeoutRef.current);
+      }
+      setActiveGroupId(null);
+      setCycledGroupIds(new Set());
+    };
+    el.addEventListener('mouseleave', handleMouseLeave);
+    return () => el.removeEventListener('mouseleave', handleMouseLeave);
+  }, []);
+
+  // Auto-promote group by cursor position: when mouse moves over a CARD in the column,
+  // determine which time group the CARD belongs to and set activeGroupId accordingly.
+  // This ensures solo groups become visible without requiring scroll (e.g., solo G2 activity
+  // hidden behind G1 activities becomes visible when cursor enters 13:00+ area).
+  // Only triggers when hovering over an activity card — NOT on empty slots.
+  // Uses the CARD's group (not cursor time) so a G2 card at 15:00-16:30 doesn't get
+  // dimmed when cursor is at 16:00 (which is in G3's time range).
+  useEffect(() => {
+    const el = columnRef.current;
+    if (!el) return;
+    const handleMouseMove = (e: MouseEvent) => {
+      isMouseInsideRef.current = true;
+      const rect = el.getBoundingClientRect();
+      const y = e.clientY - rect.top;
+
+      // Check if cursor overlaps with any activity card
+      const cursorOverlapping = activities.filter(a => {
+        const topPx = (a.startTime - gridStart) * cellHeight * 2;
+        const durMinutes = a.durationMinutes ?? a.duration * 60;
+        const heightPx = Math.max((durMinutes / 60) * cellHeight * 2, 60);
+        return y >= topPx && y <= topPx + heightPx;
+      });
+
+      if (cursorOverlapping.length === 0) {
+        // Cursor is over an empty slot — don't set activeGroupId
+        return;
+      }
+
+      // Use the FIRST overlapping card's group (not cursor time)
+      const firstCard = cursorOverlapping[0];
+      const cardGroup = getGroupForActivity(firstCard);
+      if (cardGroup) {
+        setActiveGroupId(cardGroup.id);
+      }
+    };
+    el.addEventListener('mousemove', handleMouseMove);
+    return () => el.removeEventListener('mousemove', handleMouseMove);
+  }, [activities, cellHeight, gridStart]);
 
   // Non-passive wheel handler for scroll carousel
   useEffect(() => {
@@ -221,50 +310,102 @@ export function DayColumn({ dayIndex, activities, artists, studios = [], service
     if (!el) return;
     const handler = (e: WheelEvent) => {
       const now = Date.now();
-      // Throttle: max 1 card flip per 200ms
       if (now - lastWheelTime.current < 200) {
-        wheelAccum.current += e.deltaY;
         e.preventDefault();
         return;
       }
-      wheelAccum.current += e.deltaY;
+
       const rect = el.getBoundingClientRect();
       const y = e.clientY - rect.top;
-      
-      // Find which stacked group we are hovering over
-      let targetKey: string | null = null;
-      for (const act of activities) {
-        const topPx = (act.startTime - HOURS_START) * CELL_HEIGHT * 2;
-        const heightPx = Math.max(act.duration * 120 - 10, 52);
-        if (y >= topPx && y <= topPx + heightPx) {
-          const key = `${dayIndex}_${act.startTime}`;
-          const group = slotGroupsRef.current[key];
-          if (group && group.length > 1) {
-            targetKey = key;
-            break;
+
+      // Find ALL activities that visually overlap with the cursor's Y position
+      const cursorOverlapping = activities.filter(a => {
+        const topPx = (a.startTime - gridStart) * cellHeight * 2;
+        const durMinutes = a.durationMinutes ?? a.duration * 60;
+        const heightPx = Math.max((durMinutes / 60) * cellHeight * 2, 52);
+        return y >= topPx && y <= topPx + heightPx;
+      });
+
+      if (cursorOverlapping.length === 0) return;
+
+      // Determine primary group by CURSOR TIME position (not by which activities overlap).
+      // This ensures that at 13:00-13:30 we cycle G2, even if a G1 activity spans into G2.
+      const cursorTime = gridStart + y / (cellHeight * 2);
+      const primaryGroup = TIME_GROUPS.find(g =>
+        cursorTime >= g.start && cursorTime < g.end
+      );
+
+      if (!primaryGroup) return;
+
+      // Find all activities in the primary group
+      const primaryGroupActivities = activities.filter(a => {
+        const g = getGroupForActivity(a);
+        return g?.id === primaryGroup.id;
+      });
+
+      // If primary group has 1 activity but cursor also overlaps with activities from adjacent groups
+      // (e.g., solo 15:30-17:00 in G2 + solo 16:00-18:00 in G3), include those too
+      const hasSolo = primaryGroupActivities.length === 1;
+      let cycleActivities = primaryGroupActivities;
+
+      if (hasSolo) {
+        // Check adjacent groups for overlapping solo activities
+        const adjacentGroupIds = new Set<string>();
+        for (const act of cursorOverlapping) {
+          const g = getGroupForActivity(act);
+          if (g && g.id !== primaryGroup.id) {
+            // Check if this activity is a "solo" (group has 1 activity)
+            const actGroupActivities = activities.filter(a => {
+              const ag = getGroupForActivity(a);
+              return ag?.id === g.id;
+            });
+            if (actGroupActivities.length === 1) {
+              adjacentGroupIds.add(g.id);
+            }
           }
+        }
+        if (adjacentGroupIds.size > 0) {
+          cycleActivities = activities.filter(a => {
+            const g = getGroupForActivity(a);
+            if (!g) return false;
+            return g.id === primaryGroup.id || adjacentGroupIds.has(g.id);
+          });
         }
       }
 
-      if (targetKey) {
-        const key = targetKey;
-        const group = slotGroupsRef.current[key];
-        if (group && group.length > 1) {
-          e.preventDefault();
-          lastWheelTime.current = now;
-          setVisibleIndices((prev) => {
-            const current = prev[key] || 0;
-            const direction = wheelAccum.current > 0 ? 1 : -1;
-            const next = (current + direction + group.length) % group.length;
-            return { ...prev, [key]: next };
-          });
-          wheelAccum.current = 0;
-        }
+      if (cycleActivities.length <= 1) return;
+
+      e.preventDefault();
+      lastWheelTime.current = now;
+
+      setActiveGroupId(primaryGroup.id);
+      resetActiveGroup();
+
+      // Track all group IDs being cycled (primary + adjacent solos)
+      const effectiveGroupIds = new Set<string>();
+      for (const act of cycleActivities) {
+        const g = getGroupForActivity(act);
+        if (g) effectiveGroupIds.add(g.id);
       }
+      setCycledGroupIds(effectiveGroupIds);
+
+      const direction = e.deltaY > 0 ? 1 : -1;  // 1 = scroll down, -1 = scroll up
+      const sorted = [...cycleActivities].sort((a, b) => a.startTime - b.startTime || a.id.localeCompare(b.id));
+
+      setZIndices(prev => {
+        const newZ = { ...prev };
+        const sortedByZ = [...sorted].sort((a, b) => (prev[a.id] ?? 0) - (prev[b.id] ?? 0));
+        for (let i = 0; i < sortedByZ.length; i++) {
+          newZ[sortedByZ[i].id] = direction === 1
+            ? (i - 1 + sortedByZ.length) % sortedByZ.length
+            : (i + 1) % sortedByZ.length;
+        }
+        return newZ;
+      });
     };
     el.addEventListener('wheel', handler, { passive: false });
     return () => el.removeEventListener('wheel', handler);
-  }, [dayIndex, slots]);
+  }, [dayIndex, slots, activities, cellHeight, gridStart, zIndices, slotHeight]);
 
   return (
     <div
@@ -273,30 +414,38 @@ export function DayColumn({ dayIndex, activities, artists, studios = [], service
       data-day-column={dayIndex}
       className="relative flex-1 border-l border-line"
     >
-      {slots.map((hour, i) => (
-        <DroppableSlot
-          key={i}
-          dayIndex={dayIndex}
-          slotIndex={i}
-          startTime={hour}
-          isHour={hour % 1 === 0}
-          dragCopy={dragCopy}
-          onClick={onCreateActivity}
-          onOpenModal={onOpenCreateModal}
-          stampReady={stampReady}
-          stamp={stamp}
-          artists={artists}
-          services={services}
-        />
-      ))}
+      {slots.map((hour, i) => {
+        const isHour = hour % 1 === 0;
+        const isHalfHour = !isHour && Math.abs(hour % 0.5) < 0.01;
+        return (
+          <DroppableSlot
+            key={i}
+            dayIndex={dayIndex}
+            slotIndex={i}
+            startTime={hour}
+            isHour={isHour}
+            isHalfHour={isHalfHour}
+            dragCopy={dragCopy}
+            onClick={onCreateActivity}
+            onOpenModal={onOpenCreateModal}
+            stampReady={stampReady}
+            stamp={stamp}
+            masters={masters}
+            services={services}
+            cellHeight={slotHeight}
+            columnId={columnId}
+            suppressIsOverGhost={hasColumnGhost}
+          />
+        );
+      })}
 
       {/* Drag ghost — single continuous dashed outline spanning all target slots */}
-      {ghostDayIndex === dayIndex && ghostSlotIndex != null && ghostHeight != null && (
+      {(ghostColumnId != null ? ghostColumnId === columnId : ghostDayIndex === dayIndex) && ghostSlotIndex != null && ghostHeight != null && (
         <div
           className="absolute inset-x-1 rounded-xl pointer-events-none z-[30]"
           style={{
-            top: ghostSlotIndex * CELL_HEIGHT,
-            height: ghostHeight * CELL_HEIGHT,
+            top: ghostSlotIndex * slotHeight,
+            height: ghostHeight * slotHeight,
             border: '2px dashed #004D56',
             backgroundColor: 'rgba(0,77,86,0.06)',
           }}
@@ -305,95 +454,145 @@ export function DayColumn({ dayIndex, activities, artists, studios = [], service
 
       {/* Render activity cards */}
       {activities.map((activity) => {
-        const key = `${dayIndex}_${activity.startTime}`;
-        const group = slotGroups[key];
-        const indexInGroup = group.indexOf(activity);
-        const totalInSlot = group.length;
-        const visibleIndex = visibleIndices[key] || 0;
+        // Get z-index for this card (per-card model)
+        const z = zIndices[activity.id] ?? 0;
 
-        let carouselOffsetX = 0;
-        let carouselOffsetY = 0;
+        // Get the time-group for this activity
+        const activityGroup = getGroupForActivity(activity);
+
+        // Count total activities in the same time group
+        const totalInGroup = activityGroup
+          ? activities.filter(a => getGroupForActivity(a)?.id === activityGroup.id).length
+          : 1;
+
+        // Determine if this activity should be rendered as background
+        // Exclude activities in cycledGroupIds (they're part of the active carousel)
+        const isBackground = activeGroupId !== null && activityGroup !== undefined && activityGroup.id !== activeGroupId && !cycledGroupIds.has(activityGroup.id) && (() => {
+          // Only show as background if activity visually overlaps with the active group's time range
+          const activeGroup = TIME_GROUPS.find(g => g.id === activeGroupId);
+          if (!activeGroup) return false;
+          const actStart = activity.startTime;
+          const actEnd = activity.startTime + activity.duration;
+          return actStart < activeGroup.end && actEnd > activeGroup.start;
+        })();
+
         let cardOpacity = 1;
         let cardScale = 1;
         let cardZIndex = 20;
         let isClickable = true;
-        
-        if (totalInSlot > 1) {
-          const diff = (indexInGroup - visibleIndex + totalInSlot) % totalInSlot;
-          isClickable = diff === 0;
-          if (diff === 0) {
-            carouselOffsetX = 0;
-            carouselOffsetY = 0;
-            cardOpacity = 1;
-            cardScale = 1;
-            cardZIndex = 25;
-          } else {
-            carouselOffsetX = diff * 8;
-            carouselOffsetY = diff * 6;
-            cardOpacity = Math.max(0, 1 - (diff * 0.15));
-            cardScale = Math.max(0.8, 1 - (diff * 0.04));
-            cardZIndex = 25 - diff;
-          }
+
+        let ox = 0;
+        let oy = 0;
+
+        if (isBackground) {
+          // Background: other group, always behind active
+          cardOpacity = 0.3;
+          cardScale = 1;
+          cardZIndex = 10;
+          isClickable = false;
+        } else if (totalInGroup > 1 || z > 0) {
+          isClickable = z === 0;
+          cardOpacity = z === 0 ? 1 : Math.max(0, 1 - (z * 0.15));
+          cardScale = z === 0 ? 1 : Math.max(0.8, 1 - (z * 0.04));
+          cardZIndex = z === 0 ? 25 : 25 - z;
+          ox = (12 - z) * z;
+          oy = (12 - z) * z;
         }
 
-        // Full overlap offset (X + Y)
-        const overlapInfo = overlapMap.get(activity.id);
-        const ox = overlapInfo ? overlapInfo.index * OVERLAP_OFFSET : 0;
-        const oy = overlapInfo ? overlapInfo.index * OVERLAP_OFFSET : 0;
-
-        const artist = artistMap.get(activity.masterId) || artists[0];
+        const master = masterMap.get(activity.masterId) || masters[0];
         const isThisDragging = dragId === activity.id;
+
+        // Show badge on the topmost card (z=0) in multi-activity groups
+        const showBadge = totalInGroup > 1 && z === 0 && !isBackground;
 
         return (
           <React.Fragment key={activity.id}>
             <ActivityCard
               activity={activity}
-              artist={artist}
-              studios={studios}
+              master={master}
+              locations={locations}
               onEdit={onOpenEditModal}
               onQuickAdd={onQuickAdd}
               isDragging={isThisDragging}
               isDragCopy={dragCopy}
+              gridStart={gridStart}
               style={{
-                transform: `translate(${ox + carouselOffsetX}px, ${oy + carouselOffsetY}px) scale(${cardScale})`,
+                transform: `translate(${ox}px, ${oy}px) scale(${cardScale})`,
                 zIndex: cardZIndex,
                 opacity: cardOpacity,
                 pointerEvents: isClickable ? 'auto' : 'none',
                 transition: 'opacity 300ms ease, transform 300ms ease',
               }}
             />
-            {/* "N cards" badge for multi-event slots — clickable to cycle */}
-            {totalInSlot > 1 && indexInGroup === 0 && (
+            {showBadge && (
               <button
+                onMouseDown={(e) => {
+                  // Prevent mousedown from reaching the document-level outside-click handler
+                  // in OverlapPopover, which would close the popover before our onClick fires.
+                  e.stopPropagation();
+                }}
                 onClick={(e) => {
                   e.stopPropagation();
-                  setVisibleIndices((prev) => {
-                    const current = prev[key] || 0;
-                    const next = (current + 1 + totalInSlot) % totalInSlot;
-                    setPrevIndices(p => ({ ...p, [key]: current }));
-                    setAnimatingKeys(prev => new Set(prev).add(key));
-                    setTimeout(() => {
-                      setAnimatingKeys(prev => {
-                        const next_set = new Set(prev);
-                        next_set.delete(key);
-                        return next_set;
-                      });
-                    }, 350);
-                    return { ...prev, [key]: next };
-                  });
+                  // Toggle popover for this group
+                  const groupActivities = activities
+                    .filter(a => getGroupForActivity(a)?.id === activityGroup?.id)
+                    .sort((a, b) => a.startTime - b.startTime);
+                  // Use stable comparison via activity IDs (array reference changes every render)
+                  const isSameGroup = popoverData?.activities &&
+                    popoverData.activities.length === groupActivities.length &&
+                    popoverData.activities.every((a, i) => a.id === groupActivities[i].id);
+                  if (isSameGroup) {
+                    setPopoverData(null);
+                  } else {
+                    setPopoverData({
+                      activities: groupActivities,
+                      anchorRect: e.currentTarget.getBoundingClientRect(),
+                    });
+                  }
                 }}
-                className="absolute right-1 z-[35] px-1.5 py-0.5 rounded-full bg-white/90 border border-gray-300 text-[10px] font-semibold text-gray-500 shadow-sm hover:bg-white hover:text-gray-700 transition-colors cursor-pointer"
+                className="absolute right-1 z-[110] px-1.5 py-0.5 rounded-full bg-white/90 border border-gray-300 text-[10px] font-semibold text-gray-500 shadow-sm hover:bg-white hover:text-gray-700 transition-colors cursor-pointer"
+                data-popover-toggle
                 style={{
-                  top: (activity.startTime - 9) * CELL_HEIGHT * 2 + 2,
+                  top: (activity.startTime - gridStart) * cellHeight * 2 + 2,
                 }}
-                title="Click to cycle through cards"
+                title="View all overlapping cards"
               >
-                {totalInSlot} cards
+                {totalInGroup} cards
               </button>
             )}
           </React.Fragment>
         );
       })}
+
+      {/* Bolder lines at group boundaries */}
+      {TIME_GROUPS.map(group => (
+        <div
+          key={`boundary-${group.id}`}
+          className="absolute left-0 right-0 border-t-2 border-brand/30 pointer-events-none"
+          style={{
+            top: (group.start - gridStart) * cellHeight * 2,
+            zIndex: 15,
+          }}
+          data-testid={`group-boundary-${group.id}`}
+        />
+      ))}
+
+      {/* OverlapPopover — shows all overlapping cards in column layout */}
+      {popoverData && (
+        <OverlapPopover
+          activities={popoverData.activities}
+          masterMap={masterMap}
+          locations={locations}
+          anchorRect={popoverData.anchorRect}
+          cellHeight={cellHeight}
+          gridStart={gridStart}
+          onClose={() => setPopoverData(null)}
+          onSelectActivity={(act) => {
+            setPopoverData(null);
+            onOpenEditModal?.(act);
+          }}
+        />
+      )}
 
     </div>
   );

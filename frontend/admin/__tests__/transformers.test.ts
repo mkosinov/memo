@@ -80,9 +80,9 @@ const activityFixture: ActivityResponse = {
 // ─── transformMaster ────────────────────────────────────────────────────────
 
 describe('transformMaster', () => {
-  it('combines first_name and last_name into name', () => {
+  it('combines last_name and first_name into name', () => {
     const result = transformMaster(masterFixture);
-    expect(result.name).toBe('Анна Иванова');
+    expect(result.name).toBe('Иванова Анна');
   });
 
   it('uses first_name for shortName', () => {
@@ -151,11 +151,6 @@ describe('transformService', () => {
     expect(result.minAge).toBe('6');
   });
 
-  it('uses max_age as maxCapacity proxy', () => {
-    const result = transformService(serviceFixture);
-    expect(result.maxCapacity).toBe(99);
-  });
-
   it('extracts defaultAdultPrice from first tariff', () => {
     const result = transformService(serviceFixture);
     expect(result.defaultAdultPrice).toBe(2500);
@@ -207,11 +202,6 @@ describe('transformActivity', () => {
   it('maps master_id to masterId', () => {
     const result = transformActivity(activityFixture);
     expect(result.masterId).toBe('master-1');
-  });
-
-  it('sets artistId as alias for masterId', () => {
-    const result = transformActivity(activityFixture);
-    expect(result.artistId).toBe('master-1');
   });
 
   it('maps service_id to serviceId', () => {

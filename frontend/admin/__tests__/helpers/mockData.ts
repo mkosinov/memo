@@ -4,7 +4,7 @@
  * Import these constants instead of defining per-file mocks.
  * All data is minimal but realistic — enough to test most UI paths.
  */
-import type { Artist, Service, Activity, Location } from '@memo/domain';
+import type { Master, Service, Activity, Location } from '@memo/domain';
 import type {
   RecordResponse,
   ClientResponse,
@@ -30,7 +30,7 @@ type ServiceWithTariffs = Service & { tariffs: Tariff[] };
 
 // ─── Domain types ─────────────────────────────────────────────────────────
 
-export const mockArtists: Artist[] = [
+export const mockMasters: Master[] = [
   { id: 'm1', name: 'Ольга Середа', shortName: 'Ольга', color: '#5B8C7A' },
   { id: 'm2', name: 'Юлия Большакова', shortName: 'Юлия', color: '#6B7E9C' },
 ];
@@ -40,7 +40,6 @@ export const mockServices: ServiceWithTariffs[] = [
     id: 's1',
     name: 'Картина маслом',
     duration: 2.5,
-    maxCapacity: 8,
     minAge: '12',
     maxAge: '99',
     defaultAdultPrice: 3500,
@@ -55,7 +54,6 @@ export const mockServices: ServiceWithTariffs[] = [
     id: 's2',
     name: 'Картина акрилом',
     duration: 2,
-    maxCapacity: 10,
     minAge: '6',
     maxAge: '99',
     defaultAdultPrice: 2800,
@@ -174,6 +172,7 @@ export const mockLocationResponse: LocationResponse = {
   record_info: 'Запись по телефону',
   image_url: 'https://example.com/studio.jpg',
   location_hint: 'Вход со двора',
+  sort_order: 0,
   is_active: true,
   created_at: '2024-01-15T10:00:00Z',
   updated_at: '2024-06-01T12:00:00Z',
@@ -190,6 +189,7 @@ export const mockLocationResponseArchived: LocationResponse = {
   record_info: null,
   image_url: null,
   location_hint: null,
+  sort_order: 1,
   is_active: false,
   created_at: '2024-01-10T10:00:00Z',
   updated_at: '2024-05-01T12:00:00Z',
@@ -216,6 +216,7 @@ export const mockMasterResponse: MasterResponse = {
   specialty: 'живопись',
   avatar_url: 'https://example.com/avatar.jpg',
   is_active: true,
+  sort_order: 0,
   created_at: '2024-01-15T10:00:00Z',
   updated_at: '2024-06-01T12:00:00Z',
 };
@@ -229,6 +230,7 @@ export const mockMasterResponseArchived: MasterResponse = {
   specialty: 'керамика',
   avatar_url: null,
   is_active: false,
+  sort_order: 1,
   created_at: '2024-01-10T10:00:00Z',
   updated_at: '2024-05-01T12:00:00Z',
 };

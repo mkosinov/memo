@@ -4,9 +4,11 @@ from functools import lru_cache
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import asc
 
 from src.db import SessionDep
-from src.schemas.master import MasterCreate, MasterResponse, MasterUpdate
+from src.models.master import Master
+from src.schemas.master import MasterCreate, MasterResponse, MasterUpdate, ReorderRequest
 from src.services.generic import GenericService
 from src.services.master import get_master_service
 
@@ -27,8 +29,21 @@ async def list_masters(
     service: _ServiceDep,
     session: SessionDep,
 ) -> list[MasterResponse]:
-    """Return all active masters."""
-    return await service.list(db_session=session)
+    """Return all active masters sorted by sort_order, then name."""
+    return await service.list(
+        db_session=session,
+        order_by=[asc(Master.sort_order), asc(Master.first_name)],
+    )
+
+
+@router.put("/reorder", response_model=list[MasterResponse])
+async def reorder_masters(
+    data: ReorderRequest,
+    service: _ServiceDep,
+    session: SessionDep,
+) -> list[MasterResponse]:
+    """Reorder masters by assigning sort_order from the provided ID list."""
+    return await service.reorder(db_session=session, ids=data.ids)
 
 
 @router.get("/{master_id}", response_model=MasterResponse)

@@ -5,16 +5,16 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Menubar } from '../app/components/layout/Menubar';
 import { NavigationProvider } from '../contexts/NavigationContext';
 import { UIProvider } from '../contexts/UIContext';
-import { getMonday } from '../lib/utils';
+import { getMonday, DAYS_FULL, MONTHS_GENITIVE } from '../lib/utils';
 
 vi.mock('@memo/api-client', () => ({
   getMasters: vi.fn().mockResolvedValue([
-    { id: 'm1', first_name: 'Ольга', last_name: 'Середа', color: '#5B8C7A', position: 'мастер', specialty: 'живопись', avatar_url: null, is_active: true, created_at: '', updated_at: '' },
-    { id: 'm2', first_name: 'Юлия', last_name: 'Большакова', color: '#6B7E9C', position: 'мастер', specialty: 'живопись', avatar_url: null, is_active: true, created_at: '', updated_at: '' },
-    { id: 'm3', first_name: 'Анастасия', last_name: 'П.', color: '#A07060', position: 'мастер', specialty: 'живопись', avatar_url: null, is_active: true, created_at: '', updated_at: '' },
-    { id: 'm4', first_name: 'Дарья', last_name: 'Тюльпина', color: '#7A6E9C', position: 'мастер', specialty: 'живопись', avatar_url: null, is_active: true, created_at: '', updated_at: '' },
-    { id: 'm5', first_name: 'Александра', last_name: 'В.', color: '#8A7840', position: 'мастер', specialty: 'живопись', avatar_url: null, is_active: true, created_at: '', updated_at: '' },
-    { id: 'm7', first_name: 'Ирина', last_name: 'Горох', color: '#9A5870', position: 'мастер', specialty: 'живопись', avatar_url: null, is_active: true, created_at: '', updated_at: '' },
+    { id: 'm1', first_name: 'Ольга', last_name: 'Середа', color: '#5B8C7A', position: 'мастер', specialty: 'живопись', avatar_url: null, is_active: true, sort_order: 0, created_at: '', updated_at: '' },
+    { id: 'm2', first_name: 'Юлия', last_name: 'Большакова', color: '#6B7E9C', position: 'мастер', specialty: 'керамика', avatar_url: null, is_active: true, sort_order: 0, created_at: '', updated_at: '' },
+    { id: 'm3', first_name: 'Анастасия', last_name: 'П.', color: '#A07060', position: 'мастер', specialty: 'живопись', avatar_url: null, is_active: true, sort_order: 0, created_at: '', updated_at: '' },
+    { id: 'm4', first_name: 'Дарья', last_name: 'Тюльпина', color: '#7A6E9C', position: 'мастер', specialty: 'керамика', avatar_url: null, is_active: true, sort_order: 0, created_at: '', updated_at: '' },
+    { id: 'm5', first_name: 'Александра', last_name: 'В.', color: '#8A7840', position: 'мастер', specialty: 'живопись', avatar_url: null, is_active: true, sort_order: 0, created_at: '', updated_at: '' },
+    { id: 'm7', first_name: 'Ирина', last_name: 'Горох', color: '#9A5870', position: 'мастер', specialty: 'керамика', avatar_url: null, is_active: true, sort_order: 0, created_at: '', updated_at: '' },
   ]),
   getLocations: vi.fn().mockResolvedValue([]),
   getServices: vi.fn().mockResolvedValue([]),
@@ -26,6 +26,15 @@ vi.mock('@memo/api-client', () => ({
 
 vi.mock('next/navigation', () => ({
   usePathname: () => '/schedule',
+}));
+
+vi.mock('@/contexts/ScheduleContext', () => ({
+  useSchedule: vi.fn(() => ({
+    viewMode: 'week',
+    selectedDay: new Date(),
+    setViewMode: vi.fn(),
+    setSelectedDay: vi.fn(),
+  })),
 }));
 
 function renderWithProviders() {
@@ -44,41 +53,74 @@ function renderWithProviders() {
 }
 
 describe('Menubar', () => {
-  it('renders the logo text "Colour Mountains"', () => {
+  it('renders the logo with alt text "Colour Mountains"', () => {
     renderWithProviders();
-    expect(screen.getByText(/Colour Mountains/i)).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: 'Colour Mountains' })).toBeInTheDocument();
   });
 
-  it('renders navigation links in Russian', () => {
+  it('renders navigation links (Расписание, Записи, Клиенты)', () => {
     renderWithProviders();
     expect(screen.getByRole('link', { name: 'Расписание' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Записи' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Клиенты' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Чат' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Мастера' })).toBeInTheDocument();
   });
 
-  it('renders settings links (Услуги and Локации)', () => {
+  it('does not render Chat menu item', () => {
     renderWithProviders();
-    expect(screen.getByRole('link', { name: 'Услуги' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Локации' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Услуги' })).toHaveAttribute('href', '/services');
-    expect(screen.getByRole('link', { name: 'Локации' })).toHaveAttribute('href', '/locations');
+    expect(screen.queryByRole('link', { name: 'Чат' })).not.toBeInTheDocument();
+  });
+
+  it('renders Мастера and Справочники as buttons', () => {
+    renderWithProviders();
+    expect(screen.getByRole('button', { name: 'Мастера' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Справочники' })).toBeInTheDocument();
+  });
+
+  it('shows master list when Мастера is clicked', async () => {
+    renderWithProviders();
+    fireEvent.click(screen.getByRole('button', { name: 'Мастера' }));
+    await waitFor(() => {
+      expect(screen.getByText(/Середа Ольга/)).toBeInTheDocument();
+    });
+    expect(screen.getByText(/Большакова Юлия/)).toBeInTheDocument();
+  });
+
+  it('hides master list when Мастера is clicked again', async () => {
+    renderWithProviders();
+    fireEvent.click(screen.getByRole('button', { name: 'Мастера' }));
+    await waitFor(() => {
+      expect(screen.getByText(/Середа Ольга/)).toBeInTheDocument();
+    });
+    // Click again to close
+    fireEvent.click(screen.getByRole('button', { name: 'Мастера' }));
+    await waitFor(() => {
+      expect(screen.queryByText(/Середа Ольга/)).not.toBeInTheDocument();
+    });
+  });
+
+  it('shows directory links when Справочники is clicked', async () => {
+    renderWithProviders();
+    fireEvent.click(screen.getByRole('button', { name: 'Справочники' }));
+    await waitFor(() => {
+      expect(screen.getByRole('link', { name: 'Услуги' })).toBeInTheDocument();
+      expect(screen.getByRole('link', { name: 'Локации' })).toBeInTheDocument();
+      expect(screen.getByRole('link', { name: 'Теги' })).toBeInTheDocument();
+      expect(screen.getByRole('link', { name: 'Услуги' })).toHaveAttribute('href', '/services');
+      expect(screen.getByRole('link', { name: 'Локации' })).toHaveAttribute('href', '/locations');
+      expect(screen.getByRole('link', { name: 'Теги' })).toHaveAttribute('href', '/tags');
+    });
+  });
+
+  it('renders Фото as a standalone link', () => {
+    renderWithProviders();
+    expect(screen.getByRole('link', { name: 'Фото' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Фото' })).toHaveAttribute('href', '/photos');
   });
 
   it('highlights the active navigation link (Расписание)', () => {
     renderWithProviders();
     const activeLink = screen.getByRole('link', { name: 'Расписание' });
     expect(activeLink).toHaveClass('bg-brand');
-  });
-
-  it('renders artist legend with color dots', async () => {
-    renderWithProviders();
-    await waitFor(() => {
-      expect(screen.getByText('Ольга')).toBeInTheDocument();
-    });
-    expect(screen.getByText('Юлия')).toBeInTheDocument();
-    expect(screen.getByText('Анастасия')).toBeInTheDocument();
   });
 
   it('renders theme toggle as a slider switch', () => {
@@ -117,6 +159,16 @@ describe('Menubar', () => {
     renderWithProviders();
     expect(screen.getByText('ПН')).toBeInTheDocument();
     expect(screen.getByText('ВС')).toBeInTheDocument();
+  });
+
+  it('renders "Сегодня" button with current date and weekday', () => {
+    renderWithProviders();
+    const now = new Date();
+    const day = now.getDate();
+    const month = MONTHS_GENITIVE[now.getMonth()];
+    const weekday = DAYS_FULL[(now.getDay() + 6) % 7];
+    const expectedText = `Сегодня ${day} ${month}, ${weekday}`;
+    expect(screen.getByText(expectedText)).toBeInTheDocument();
   });
 
   it('collapses menubar when collapse button is clicked', () => {

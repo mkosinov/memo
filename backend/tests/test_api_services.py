@@ -191,3 +191,53 @@ class TestServicesCrud:
         """DELETE /api/services/{fake_id} returns 404."""
         response = api_client.delete("/api/v1/services/nonexistent-id")
         assert response.status_code == 404
+
+
+class TestServiceMaxAgeNullable:
+    """Test that max_age is nullable — null means 'no upper age limit'."""
+
+    def test_create_service_without_max_age(self, api_client) -> None:
+        """POST /api/services without max_age returns max_age as null."""
+        payload = {k: v for k, v in SERVICE_PAYLOAD.items() if k != "max_age"}
+        response = api_client.post("/api/v1/services", json=payload)
+
+        assert response.status_code == 201
+        body = response.json()
+        assert body["max_age"] is None
+        assert body["min_age"] == 12
+
+    def test_create_service_with_max_age(self, api_client) -> None:
+        """POST /api/services with max_age=12 returns max_age as 12."""
+        payload = {**SERVICE_PAYLOAD, "max_age": 12}
+        response = api_client.post("/api/v1/services", json=payload)
+
+        assert response.status_code == 201
+        body = response.json()
+        assert body["max_age"] == 12
+
+    def test_update_service_set_max_age_to_null(self, api_client) -> None:
+        """PUT /api/services/{id} can set max_age to null."""
+        # Create with max_age
+        payload = {**SERVICE_PAYLOAD, "max_age": 12}
+        create_resp = api_client.post("/api/v1/services", json=payload)
+        service_id = create_resp.json()["id"]
+        assert create_resp.json()["max_age"] == 12
+
+        # Update to null
+        update_data = {**SERVICE_PAYLOAD, "max_age": None}
+        response = api_client.put(f"/api/v1/services/{service_id}", json=update_data)
+        assert response.status_code == 200
+        assert response.json()["max_age"] is None
+
+    def test_create_service_null_max_age_serializes_correctly(self, api_client) -> None:
+        """GET /api/services/{id} returns null max_age in JSON."""
+        payload = {k: v for k, v in SERVICE_PAYLOAD.items() if k != "max_age"}
+        create_resp = api_client.post("/api/v1/services", json=payload)
+        service_id = create_resp.json()["id"]
+
+        response = api_client.get(f"/api/v1/services/{service_id}")
+        assert response.status_code == 200
+        body = response.json()
+        assert body["max_age"] is None
+        # min_age still present
+        assert body["min_age"] == 12

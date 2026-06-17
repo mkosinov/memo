@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { z } from 'zod';
-import { getMasters, getMaster, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, deleteActivity, getWebPhotos, getRecords, getClients, getPayments, createRecord, updateRecord, deleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, deleteVisitor, searchClientByPhone, updateVisitStatus, getTags, createService, updateService, deleteService, createLocation, updateLocation, deleteLocation, getClientsWithStats, patchClient } from './endpoints';
+import { getMasters, getMaster, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, deleteActivity, getWebPhotos, getRecords, getClients, getPayments, createRecord, updateRecord, deleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, deleteVisitor, searchClientByPhone, updateVisitStatus, getTags, createService, updateService, deleteService, createLocation, updateLocation, deleteLocation, getClientsWithStats, patchClient, reorderMasters, reorderLocations } from './endpoints';
 import { ServiceCreateSchema, LocationCreateSchema } from './schemas';
 
 // Mock the api function from client
@@ -38,6 +38,21 @@ describe('getMaster', () => {
   });
 });
 
+describe('reorderMasters', () => {
+  it('calls PUT /api/v1/masters/reorder with ids', async () => {
+    vi.mocked(api).mockResolvedValue([]);
+    await reorderMasters(['m2', 'm1', 'm3']);
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/masters/reorder',
+      expect.anything(),
+      {
+        method: 'PUT',
+        body: JSON.stringify({ ids: ['m2', 'm1', 'm3'] }),
+      },
+    );
+  });
+});
+
 // ─── Locations ──────────────────────────────────────────────────────────────
 
 describe('getLocations', () => {
@@ -45,6 +60,21 @@ describe('getLocations', () => {
     vi.mocked(api).mockResolvedValue([]);
     await getLocations();
     expect(api).toHaveBeenCalledWith('/api/v1/locations', expect.anything());
+  });
+});
+
+describe('reorderLocations', () => {
+  it('calls PUT /api/v1/locations/reorder with ids', async () => {
+    vi.mocked(api).mockResolvedValue([]);
+    await reorderLocations(['loc2', 'loc1', 'loc3']);
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/locations/reorder',
+      expect.anything(),
+      {
+        method: 'PUT',
+        body: JSON.stringify({ ids: ['loc2', 'loc1', 'loc3'] }),
+      },
+    );
   });
 });
 

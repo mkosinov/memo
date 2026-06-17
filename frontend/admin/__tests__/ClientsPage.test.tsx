@@ -8,6 +8,11 @@ import { createMockClientsContext } from './helpers/mockContexts';
 
 // ─── Mock contexts ───────────────────────────────────────────────────────
 
+vi.mock('@/contexts/ScheduleContext', () => ({
+  useSchedule: vi.fn(),
+  ScheduleProvider: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+}));
+
 vi.mock('@/contexts/ClientsContext', () => ({
   useClients: vi.fn(),
   ClientsProvider: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,

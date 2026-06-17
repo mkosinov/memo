@@ -1,7 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useState, useCallback, useMemo } from 'react';
-import type { Activity, Artist, Service, Location, StampState, ScheduleAdminDTO, ScheduleIndex as DomainScheduleIndex } from '@memo/domain';
+import type { Activity, Master, Service, Location, StampState, ScheduleAdminDTO, ScheduleIndex as DomainScheduleIndex } from '@memo/domain';
 import { buildSchedule } from '@memo/domain';
 import { buildAdminSchedule } from '@/lib/buildSchedule';
 import { useActivities } from '@/hooks/useActivities';
@@ -18,12 +18,76 @@ import {
 import type { ActivityResponse, MasterResponse, ServiceResponse, LocationResponse } from '@memo/api-client';
 import { useQueryClient, useMutation } from '@tanstack/react-query';
 import { getMonday, formatDateISO } from '@/lib/utils';
+import { CELL_HEIGHT_MIN, CELL_HEIGHT_OPTIONS, GRID_FREQUENCY_DEFAULT, GRID_FREQUENCY_OPTIONS } from '@/lib/utils';
 import { useNavigation } from '@/contexts/NavigationContext';
+
+export type ViewModeType = 'week' | 'day';
+export type ColumnModeType = 'masters' | 'locations';
+
+// Cell height constraints (px per half-hour slot)
+const CELL_HEIGHT_DEFAULT = 50;
+const CELL_HEIGHT_STORAGE_KEY = 'memo-cell-height';
+const VALID_CELL_HEIGHTS = new Set(CELL_HEIGHT_OPTIONS.map(o => o.value)) as Set<number>;
+
+// Grid frequency (minutes per slot)
+const GRID_FREQUENCY_STORAGE_KEY = 'memo-grid-frequency';
+const VALID_GRID_FREQUENCIES = new Set(GRID_FREQUENCY_OPTIONS.map(o => o.value)) as Set<number>;
+
+// Working hours (default grid range)
+const WORKING_HOURS_START_KEY = 'memo-working-hours-start';
+const WORKING_HOURS_END_KEY = 'memo-working-hours-end';
+const WORKING_HOURS_START_DEFAULT = 9;
+const WORKING_HOURS_END_DEFAULT = 21;
+
+function readCellHeightFromStorage(): number {
+  if (typeof window === 'undefined') return CELL_HEIGHT_DEFAULT;
+  try {
+    const raw = localStorage.getItem(CELL_HEIGHT_STORAGE_KEY);
+    if (raw === null) return CELL_HEIGHT_DEFAULT;
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed)) return CELL_HEIGHT_DEFAULT;
+    const clamped = Math.round(parsed);
+    if (!VALID_CELL_HEIGHTS.has(clamped)) return CELL_HEIGHT_DEFAULT;
+    return clamped;
+  } catch {
+    return CELL_HEIGHT_DEFAULT;
+  }
+}
+
+function readGridFrequencyFromStorage(): number {
+  if (typeof window === 'undefined') return GRID_FREQUENCY_DEFAULT;
+  try {
+    const raw = localStorage.getItem(GRID_FREQUENCY_STORAGE_KEY);
+    if (raw === null) return GRID_FREQUENCY_DEFAULT;
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed)) return GRID_FREQUENCY_DEFAULT;
+    const clamped = Math.round(parsed);
+    if (!VALID_GRID_FREQUENCIES.has(clamped)) return GRID_FREQUENCY_DEFAULT;
+    return clamped;
+  } catch {
+    return GRID_FREQUENCY_DEFAULT;
+  }
+}
+
+function readWorkingHoursFromStorage(key: string, defaultValue: number): number {
+  if (typeof window === 'undefined') return defaultValue;
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw === null) return defaultValue;
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed)) return defaultValue;
+    const clamped = Math.round(parsed);
+    if (clamped < 0 || clamped > 23) return defaultValue;
+    return clamped;
+  } catch {
+    return defaultValue;
+  }
+}
 
 export interface ScheduleContextType {
   activities: ScheduleAdminDTO[];
   scheduleIndex: DomainScheduleIndex<ScheduleAdminDTO>;
-  artists: Artist[];
+  masters: Master[];
   services: Service[];
   locations: Location[];
   currentWeek: Date;
@@ -36,10 +100,26 @@ export interface ScheduleContextType {
   copyLastWeek: () => void;
   loading: boolean;
   error: Error | null;
-  filterMasterId: string | null;
-  filterLocationId: string | null;
-  setFilterMasterId: (id: string | null) => void;
-  setFilterLocationId: (id: string | null) => void;
+  filterMasterIds: string[];
+  filterLocationIds: string[];
+  setFilterMasterIds: (ids: string[]) => void;
+  setFilterLocationIds: (ids: string[]) => void;
+  viewMode: ViewModeType;
+  setViewMode: (mode: ViewModeType) => void;
+  selectedDay: Date;
+  setSelectedDay: (date: Date) => void;
+  columnMode: ColumnModeType;
+  setColumnMode: (mode: ColumnModeType) => void;
+  cellHeight: number;
+  setCellHeight: (height: number) => void;
+  gridFrequency: number;
+  setGridFrequency: (freq: number) => void;
+  workingHoursStart: number;
+  setWorkingHoursStart: (h: number) => void;
+  workingHoursEnd: number;
+  setWorkingHoursEnd: (h: number) => void;
+  prevPeriod: () => void;
+  nextPeriod: () => void;
 }
 
 const ScheduleContext = createContext<ScheduleContextType | null>(null);
@@ -59,8 +139,126 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
     ready: false,
   });
 
-  const [filterMasterId, setFilterMasterId] = useState<string | null>(null);
-  const [filterLocationId, setFilterLocationId] = useState<string | null>(null);
+  const [filterMasterIds, setFilterMasterIds] = useState<string[]>([]);
+  const [filterLocationIds, setFilterLocationIds] = useState<string[]>([]);
+  const [filtersInitialized, setFiltersInitialized] = useState(false);
+  const [viewMode, setViewMode] = useState<ViewModeType>('week');
+  const [selectedDay, setSelectedDay] = useState<Date>(new Date());
+  const [columnMode, setColumnMode] = useState<ColumnModeType>('masters');
+
+  // ── Cell height (persisted to localStorage) ──────────────────────────────
+  const [cellHeight, _setCellHeight] = useState<number>(readCellHeightFromStorage);
+
+  const setCellHeight = useCallback((height: number) => {
+    const clamped = Math.round(height);
+    const valid = VALID_CELL_HEIGHTS.has(clamped) ? clamped : CELL_HEIGHT_DEFAULT;
+    _setCellHeight(valid);
+    try {
+      localStorage.setItem(CELL_HEIGHT_STORAGE_KEY, String(valid));
+    } catch { /* ignore */ }
+  }, []);
+
+  // ── Grid frequency (persisted to localStorage) ─────────────────────────
+  const [gridFrequency, _setGridFrequency] = useState<number>(readGridFrequencyFromStorage);
+
+  const setGridFrequency = useCallback((freq: number) => {
+    const clamped = Math.round(freq);
+    const valid = VALID_GRID_FREQUENCIES.has(clamped) ? clamped : GRID_FREQUENCY_DEFAULT;
+    _setGridFrequency(valid);
+    try {
+      localStorage.setItem(GRID_FREQUENCY_STORAGE_KEY, String(valid));
+    } catch { /* ignore */ }
+  }, []);
+
+  // ── Working hours (persisted to localStorage) ─────────────────────────────
+  const [workingHoursStart, _setWorkingHoursStart] = useState<number>(
+    () => readWorkingHoursFromStorage(WORKING_HOURS_START_KEY, WORKING_HOURS_START_DEFAULT),
+  );
+  const [workingHoursEnd, _setWorkingHoursEnd] = useState<number>(
+    () => readWorkingHoursFromStorage(WORKING_HOURS_END_KEY, WORKING_HOURS_END_DEFAULT),
+  );
+
+  const setWorkingHoursStart = useCallback((h: number) => {
+    const clamped = Math.max(0, Math.min(23, Math.round(h)));
+    _setWorkingHoursStart(clamped);
+    try {
+      localStorage.setItem(WORKING_HOURS_START_KEY, String(clamped));
+    } catch { /* ignore */ }
+  }, []);
+
+  const setWorkingHoursEnd = useCallback((h: number) => {
+    const clamped = Math.max(0, Math.min(23, Math.round(h)));
+    _setWorkingHoursEnd(clamped);
+    try {
+      localStorage.setItem(WORKING_HOURS_END_KEY, String(clamped));
+    } catch { /* ignore */ }
+  }, []);
+
+  // Listen for "go to today" event from sidebar button
+  React.useEffect(() => {
+    const handleGoToToday = () => {
+      setSelectedDay(new Date());
+    };
+    document.addEventListener('__memo-go-to-today', handleGoToToday);
+    return () => document.removeEventListener('__memo-go-to-today', handleGoToToday);
+  }, []);
+
+  // Listen for "select day" event from MiniCalendar (day mode)
+  React.useEffect(() => {
+    const handleSelectDay = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.date) {
+        setSelectedDay(new Date(detail.date));
+        // Also navigate the week range to contain this day
+        const monday = getMonday(new Date(detail.date));
+        const sunday = new Date(monday.getTime() + 6 * 24 * 60 * 60 * 1000);
+        selectDateRange(formatDateISO(monday), formatDateISO(sunday));
+      }
+    };
+    document.addEventListener('__memo-select-day', handleSelectDay);
+    return () => document.removeEventListener('__memo-select-day', handleSelectDay);
+  }, [selectDateRange]);
+
+  // Listen for "switch to day view" event from MiniCalendar (double-click)
+  React.useEffect(() => {
+    const handleSwitchToDayView = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.date) {
+        setViewMode('day');
+        setSelectedDay(new Date(detail.date));
+        // Also navigate the week range to contain this day
+        const monday = getMonday(new Date(detail.date));
+        const sunday = new Date(monday.getTime() + 6 * 24 * 60 * 60 * 1000);
+        selectDateRange(formatDateISO(monday), formatDateISO(sunday));
+      }
+    };
+    document.addEventListener('__memo-switch-to-day-view', handleSwitchToDayView);
+    return () => document.removeEventListener('__memo-switch-to-day-view', handleSwitchToDayView);
+  }, [selectDateRange]);
+
+  // Listen for "switch to week view" event from MiniCalendar (single-click on day)
+  React.useEffect(() => {
+    const handleSwitchToWeekView = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.date) {
+        setViewMode('week');
+        const monday = getMonday(new Date(detail.date));
+        const sunday = new Date(monday.getTime() + 6 * 24 * 60 * 60 * 1000);
+        selectDateRange(formatDateISO(monday), formatDateISO(sunday));
+      }
+    };
+    document.addEventListener('__memo-switch-to-week-view', handleSwitchToWeekView);
+    return () => document.removeEventListener('__memo-switch-to-week-view', handleSwitchToWeekView);
+  }, [selectDateRange]);
+
+  // Dispatch events so sidebar Menubar (outside ScheduleProvider) can track viewMode & selectedDay
+  React.useEffect(() => {
+    document.dispatchEvent(new CustomEvent('__memo-view-mode-changed', { detail: { viewMode } }));
+  }, [viewMode]);
+
+  React.useEffect(() => {
+    document.dispatchEvent(new CustomEvent('__memo-selected-day-changed', { detail: { selectedDay } }));
+  }, [selectedDay]);
 
   const queryClient = useQueryClient();
   const weekStart = dateFrom;
@@ -88,9 +286,19 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
   });
 
   // Domain types for context consumers (select transforms use same cache as raw queries)
-  const { data: artists = [] } = useMasters();
+  const { data: masters = [] } = useMasters();
   const { data: services = [] } = useServices();
   const { data: locations = [] } = useLocations();
+
+  // Initialize filters with all IDs when data first loads
+  React.useEffect(() => {
+    if (filtersInitialized) return;
+    if (masters.length > 0 && locations.length > 0) {
+      setFilterMasterIds(masters.map(m => m.id));
+      setFilterLocationIds(locations.map(l => l.id));
+      setFiltersInitialized(true);
+    }
+  }, [masters, locations, filtersInitialized]);
 
   // Query key for cache invalidation
   const activityQueryKey = ['activities', weekStart, weekEnd] as const;
@@ -191,7 +399,7 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
     if (updates.locationId !== undefined) payload.location_id = updates.locationId;
     if (updates.duration !== undefined) payload.duration = Math.round(updates.duration * 60); // hours→min
     if (updates.durationMinutes !== undefined) payload.duration = updates.durationMinutes; // takes precedence
-    if (updates.capacity !== undefined) payload.capacity = updates.capacity;
+    if (updates.capacity !== undefined && updates.capacity !== null) payload.capacity = updates.capacity;
     if (updates.isPrivate !== undefined) payload.is_private = updates.isPrivate;
     if (updates.comment !== undefined) payload.comment = updates.comment;
     if (updates.occupied !== undefined) payload.occupied = updates.occupied;
@@ -218,6 +426,38 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
     // Stub: will be implemented when API-based copy-last-week is needed
   }, []);
 
+  const prevPeriod = useCallback(() => {
+    if (viewMode === 'week') {
+      const prev = new Date(currentWeek);
+      prev.setDate(prev.getDate() - 7);
+      const sunday = new Date(prev.getTime() + 6 * 24 * 60 * 60 * 1000);
+      selectDateRange(formatDateISO(prev), formatDateISO(sunday));
+    } else {
+      const prev = new Date(selectedDay);
+      prev.setDate(prev.getDate() - 1);
+      setSelectedDay(prev);
+      const monday = getMonday(prev);
+      const sunday = new Date(monday.getTime() + 6 * 24 * 60 * 60 * 1000);
+      selectDateRange(formatDateISO(monday), formatDateISO(sunday));
+    }
+  }, [viewMode, currentWeek, selectedDay, selectDateRange, setSelectedDay]);
+
+  const nextPeriod = useCallback(() => {
+    if (viewMode === 'week') {
+      const next = new Date(currentWeek);
+      next.setDate(next.getDate() + 7);
+      const sunday = new Date(next.getTime() + 6 * 24 * 60 * 60 * 1000);
+      selectDateRange(formatDateISO(next), formatDateISO(sunday));
+    } else {
+      const next = new Date(selectedDay);
+      next.setDate(next.getDate() + 1);
+      setSelectedDay(next);
+      const monday = getMonday(next);
+      const sunday = new Date(monday.getTime() + 6 * 24 * 60 * 60 * 1000);
+      selectDateRange(formatDateISO(monday), formatDateISO(sunday));
+    }
+  }, [viewMode, currentWeek, selectedDay, selectDateRange, setSelectedDay]);
+
   // Build enriched schedule using buildAdminSchedule (raw API data)
   const enrichedData = useMemo(
     () => buildAdminSchedule(
@@ -230,13 +470,13 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
     [activitiesRaw, mastersRaw, servicesRaw, locationsRaw, currentWeek],
   );
 
-  // Filter items based on active filters
+  // Filter items based on active filters (multi-select: empty = show all)
   const filteredItems = useMemo(() => {
     let result = enrichedData.items;
-    if (filterMasterId) result = result.filter(a => a.masterId === filterMasterId);
-    if (filterLocationId) result = result.filter(a => a.locationId === filterLocationId);
+    if (filterMasterIds.length > 0) result = result.filter(a => filterMasterIds.includes(a.masterId));
+    if (filterLocationIds.length > 0) result = result.filter(a => filterLocationIds.includes(a.locationId));
     return result;
-  }, [enrichedData.items, filterMasterId, filterLocationId]);
+  }, [enrichedData.items, filterMasterIds, filterLocationIds]);
 
   // Build index from filtered items
   const scheduleIndex = useMemo(
@@ -248,7 +488,7 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
   const contextValue = useMemo(() => ({
     activities: filteredItems,
     scheduleIndex,
-    artists,
+    masters,
     services,
     locations,
     currentWeek,
@@ -261,16 +501,39 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
     copyLastWeek,
     loading: activitiesLoading,
     error: activitiesError ?? null,
-    filterMasterId,
-    filterLocationId,
-    setFilterMasterId,
-    setFilterLocationId,
+    filterMasterIds,
+    filterLocationIds,
+    setFilterMasterIds,
+    setFilterLocationIds,
+    viewMode,
+    setViewMode,
+    selectedDay,
+    setSelectedDay,
+    columnMode,
+    setColumnMode,
+    cellHeight,
+    setCellHeight,
+    gridFrequency,
+    setGridFrequency,
+    workingHoursStart,
+    setWorkingHoursStart,
+    workingHoursEnd,
+    setWorkingHoursEnd,
+    prevPeriod,
+    nextPeriod,
   }), [
-    filteredItems, scheduleIndex, artists, services, locations,
-    currentWeek, stamp, filterMasterId, filterLocationId,
+    filteredItems, scheduleIndex, masters, services, locations,
+    currentWeek, stamp, filterMasterIds, filterLocationIds,
+    viewMode, selectedDay, columnMode,
     setCurrentWeek, addActivity, updateActivityFn, deleteActivityById, setStamp, copyLastWeek,
-    setFilterMasterId, setFilterLocationId,
+    setFilterMasterIds, setFilterLocationIds,
+    setViewMode, setSelectedDay, setColumnMode,
     activitiesLoading, activitiesError,
+    cellHeight, setCellHeight,
+    gridFrequency, setGridFrequency,
+    workingHoursStart, setWorkingHoursStart,
+    workingHoursEnd, setWorkingHoursEnd,
+    prevPeriod, nextPeriod,
   ]);
 
   return (

@@ -1,6 +1,17 @@
+// ─── Display Utilities ────────────────────────────────────────────────────
+
+/** Format master name as "Фамилия Имя" (Last Name + First Name). */
+export function displayMasterName(master: { first_name: string; last_name: string }): string {
+  return `${master.last_name} ${master.first_name}`;
+}
+
 // ─── Constants ────────────────────────────────────────────────────────────
 
 export const DAYS = ['ПН', 'ВТ', 'СР', 'ЧТ', 'ПТ', 'СБ', 'ВС'] as const;
+
+export const DAYS_FULL = [
+  'Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота', 'Воскресенье',
+] as const;
 
 export const MONTHS = [
   'Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
@@ -14,9 +25,22 @@ export const MONTHS_GENITIVE = [
 
 export const HOURS_START = 9;
 export const HOURS_END = 21;
-export const CELL_HEIGHT = 60;
+export const CELL_HEIGHT_MIN = 40;
+export const CELL_HEIGHT_OPTIONS = [
+  { value: 40, label: 'Мелкий' },
+  { value: 50, label: 'Стандартный' },
+  { value: 60, label: 'Крупный' },
+] as const;
 export const SLOT_COUNT = (HOURS_END - HOURS_START) * 2;
 export const TIME_COL_WIDTH = 64;
+
+// Grid frequency (minutes per slot)
+export const GRID_FREQUENCY_OPTIONS = [
+  { value: 5, label: '5 минут' },
+  { value: 15, label: '15 минут' },
+  { value: 30, label: '30 минут' },
+] as const;
+export const GRID_FREQUENCY_DEFAULT = 30;
 
 // ─── Color Utilities ──────────────────────────────────────────────────────
 
@@ -77,11 +101,11 @@ export function formatActivityContext(date: Date): string {
 
 // ─── Time / Date Utilities ────────────────────────────────────────────────
 
-/** Format hours to "HH:MM" string. 10 → "10:00", 10.5 → "10:30". */
+/** Format hours to "HH:MM" string. 10 → "10:00", 10.5 → "10:30", 9.25 → "09:15". */
 export function formatTime(hours: number): string {
   const h = Math.floor(hours);
-  const m = hours % 1 >= 0.5 ? '30' : '00';
-  return `${h.toString().padStart(2, '0')}:${m}`;
+  const m = Math.round((hours - h) * 60);
+  return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
 }
 
 /** Get the Monday of the week containing the given date. */
@@ -98,6 +122,25 @@ export function getMonday(date: Date): Date {
 
 /** Format date as "13 мая" (day + genitive month). */
 export function formatDate(date: Date): string {
+  return `${date.getDate()} ${MONTHS_GENITIVE[date.getMonth()]}`;
+}
+
+/** Format week range: same month "8-14 июня", cross-month "29 июня - 5 июля". */
+export function formatWeekRange(monday: Date): string {
+  const sunday = new Date(monday);
+  sunday.setDate(sunday.getDate() + 6);
+  const startDay = monday.getDate();
+  const endDay = sunday.getDate();
+  const startMonth = MONTHS_GENITIVE[monday.getMonth()];
+  const endMonth = MONTHS_GENITIVE[sunday.getMonth()];
+  if (monday.getMonth() === sunday.getMonth()) {
+    return `${startDay}-${endDay} ${startMonth}`;
+  }
+  return `${startDay} ${startMonth} - ${endDay} ${endMonth}`;
+}
+
+/** Format single day: "11 июня". */
+export function formatDayLabel(date: Date): string {
   return `${date.getDate()} ${MONTHS_GENITIVE[date.getMonth()]}`;
 }
 
@@ -118,11 +161,67 @@ export function isSameDay(a: Date, b: Date): boolean {
   );
 }
 
-/** Generate half-hour time slots from HOURS_START to HOURS_END (exclusive). */
-export function generateTimeSlots(): number[] {
+/** Generate time slots from start to end (exclusive) at given frequency (minutes). */
+export function generateTimeSlots(frequencyMinutes: number = 30, start: number = HOURS_START, end: number = HOURS_END): number[] {
   const slots: number[] = [];
-  for (let h = HOURS_START; h < HOURS_END; h++) {
-    slots.push(h, h + 0.5);
+  const step = frequencyMinutes / 60; // convert to hours
+  for (let t = start; t < end; t += step) {
+    // Round to avoid floating point issues
+    slots.push(Math.round(t * 100) / 100);
   }
   return slots;
+}
+
+/** Activity shape for adaptive grid calculation (subset of fields needed). */
+interface GridActivity {
+  startTime: number;
+  duration: number; // in hours
+}
+
+/** Grid time range result. */
+export interface GridTimeRange {
+  start: number;
+  end: number;
+}
+
+/**
+ * Calculate adaptive grid time range based on actual activities.
+ * Extends the working hours range to fit activities outside the default range.
+ * Never shrinks below working hours range. Adds at least 1 hour padding.
+ *
+ * @param activities - visible activities for the period
+ * @param workingHoursStart - default grid start hour (e.g. 9)
+ * @param workingHoursEnd - default grid end hour (e.g. 21)
+ * @returns { start, end } in decimal hours
+ */
+export function calculateGridTimeRange(
+  activities: GridActivity[],
+  workingHoursStart: number = HOURS_START,
+  workingHoursEnd: number = HOURS_END,
+): GridTimeRange {
+  if (activities.length === 0) {
+    return { start: workingHoursStart, end: workingHoursEnd };
+  }
+
+  let earliestStart = Infinity;
+  let latestEnd = -Infinity;
+
+  for (const a of activities) {
+    if (a.startTime < earliestStart) earliestStart = a.startTime;
+    const endTime = a.startTime + a.duration;
+    if (endTime > latestEnd) latestEnd = endTime;
+  }
+
+  // Extend start only if activity starts before working hours (at least 1 hour padding)
+  // Clamp to [0, 24] — hours represent a single day (0:00–24:00)
+  const adaptiveStart = earliestStart < workingHoursStart
+    ? Math.max(0, Math.floor(earliestStart) - 1)
+    : workingHoursStart;
+
+  // Extend end only if activity ends after working hours (at least 1 hour padding)
+  const adaptiveEnd = Math.min(24, latestEnd > workingHoursEnd
+    ? Math.ceil(latestEnd) + 1
+    : workingHoursEnd);
+
+  return { start: adaptiveStart, end: adaptiveEnd };
 }

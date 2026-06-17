@@ -4,8 +4,10 @@ import { useState, useCallback, useEffect, useMemo } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { CustomSelect, type CustomSelectOption } from '@/app/components/shared/CustomSelect';
 import { MasterPicker } from '@/app/components/shared/MasterPicker';
+import { TimePicker } from '@/app/components/shared/TimePicker';
 import { useRecordData } from '@/hooks/useRecordData';
 import { useRecordMutations } from '@/hooks/useRecordMutations';
+import { useSchedule } from '@/contexts/ScheduleContext';
 
 interface ClientRecordTabProps {
   recordId: string;
@@ -65,6 +67,7 @@ function StatusIcon({ status, size = 16 }: { status: VisitStatus; size?: number 
 
 export function ClientRecordTab({ recordId, clientId, onClose }: ClientRecordTabProps) {
   const queryClient = useQueryClient();
+  const { gridFrequency } = useSchedule();
 
   // ── Data queries via hook ──────────────────────────────────────────────
 
@@ -89,6 +92,7 @@ export function ClientRecordTab({ recordId, clientId, onClose }: ClientRecordTab
   const [visitPrices, setVisitPrices] = useState<Record<string, string>>({});
   const [visitCustomPrices, setVisitCustomPrices] = useState<Record<string, string>>({});
   const [hasChanges, setHasChanges] = useState(false);
+  const [preciseTime, setPreciseTime] = useState(false);
 
   // Add-visitor form state
   const [showVisitorForm, setShowVisitorForm] = useState(false);
@@ -359,15 +363,29 @@ export function ClientRecordTab({ recordId, clientId, onClose }: ClientRecordTab
           />
         </div>
         <div>
-          <label className="text-xs font-medium text-ink-mid block mb-1" htmlFor="record-time">Время</label>
-          <input
-            id="record-time"
-            type="time"
-            className={inputClass}
-            style={inputStyle}
-            value={time}
-            onChange={e => { setTime(e.target.value); markChanged(); }}
+          <TimePicker
+            value={date && time ? `${date}T${time}:00` : ''}
+            onChange={(isoValue) => {
+              const timePart = isoValue.split('T')[1]?.slice(0, 5) || '';
+              setTime(timePart);
+              markChanged();
+            }}
+            gridFrequency={gridFrequency}
+            precise={preciseTime}
+            label="Время"
           />
+        </div>
+        <div className="flex items-center gap-2 pb-0.5">
+          <label className="flex items-center gap-1.5 text-xs text-ink-mid cursor-pointer">
+            <input
+              type="checkbox"
+              checked={preciseTime}
+              onChange={(e) => setPreciseTime(e.target.checked)}
+              className="rounded"
+              data-testid="checkbox-precise-time"
+            />
+            Точное время
+          </label>
         </div>
         <div data-testid="select-location">
           <label className="text-xs font-medium text-ink-mid block mb-1">Локация</label>

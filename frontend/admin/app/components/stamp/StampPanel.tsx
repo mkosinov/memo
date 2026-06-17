@@ -5,11 +5,11 @@ import { useSchedule } from '@/contexts/ScheduleContext';
 import { useUI } from '@/contexts/UIContext';
 
 export function StampPanel() {
-  const { artists, services, locations: studios, stamp, setStamp } = useSchedule();
+  const { masters, services, locations: studios, stamp, setStamp } = useSchedule();
   const { deleteMode, toggleDeleteMode } = useUI();
 
   const selectedMaster = stamp.masterId
-    ? artists.find((a) => a.id === stamp.masterId)
+    ? masters.find((a) => a.id === stamp.masterId)
     : null;
   const selectedService = stamp.serviceId
     ? services.find((s) => s.id === stamp.serviceId)
@@ -93,7 +93,7 @@ export function StampPanel() {
           onChange={handleMasterChange}
         >
           <option value="">Выберите мастера</option>
-          {artists.map((a) => (
+          {masters.map((a) => (
             <option key={a.id} value={a.id}>
               {a.shortName}
             </option>

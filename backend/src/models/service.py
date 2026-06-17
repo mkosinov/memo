@@ -20,7 +20,7 @@ class Service(AbstractModel):
     image_url: Mapped[str] = mapped_column(Text)
     specialty: Mapped[str] = mapped_column(String(20))
     min_age: Mapped[int] = mapped_column(Integer)
-    max_age: Mapped[int] = mapped_column(Integer)
+    max_age: Mapped[int | None] = mapped_column(Integer, nullable=True)
     duration: Mapped[int] = mapped_column(Integer)
     record_info: Mapped[str] = mapped_column(Text)
     material_hint: Mapped[str | None] = mapped_column(Text, nullable=True)

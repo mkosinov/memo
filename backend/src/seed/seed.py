@@ -38,7 +38,8 @@ from src.models.tag import activity_tags, service_tags
 # Seed data constants
 # ---------------------------------------------------------------------------
 
-WEEK_START = datetime(2026, 6, 1)  # Monday
+WEEK_START = datetime(2026, 6, 1)  # Monday — first seed week
+WEEK2_START = datetime(2026, 6, 9)  # Monday — current week (June 9-15, 2026)
 
 _SERVICE_NAME_TO_ID: dict[str, str] = {
     "Морской пейзаж": "s7",
@@ -93,6 +94,25 @@ _ACTIVITIES_RAW: list[tuple] = [
     (6, "m5", 16.5, 2, "Роспись одежды", "p1389", 8, False),
 ]
 
+# Activities for week 2 (June 9-15, 2026)
+_ACTIVITIES_RAW_WEEK2: list[tuple] = [
+    # ПН (day 0) — June 9
+    (0, "m1", 10, 3, "Морской пейзаж", "grand", 8, False),
+    # ВТ (day 1) — June 10
+    (1, "m3", 11, 2, "Картина акрилом", "alpika", 10, False),
+    # СР (day 2) — June 11
+    (2, "m2", 10, 2, "Роспись одежды", "alpika", 10, False),
+    # ЧТ (day 3) — June 12
+    (3, "m1", 10, 3, "Морской пейзаж", "grand", 8, False),
+    # ПТ (day 4) — June 13
+    (4, "m5", 14, 2.5, "Картина маслом", "p1389", 8, False),
+    # СБ (day 5) — June 14
+    (5, "m1", 10, 3, "Морской пейзаж", "grand", 8, False),
+    (5, "m3", 14, 2, "Картина акрилом", "alpika", 10, False),
+    # ВС (day 6) — June 15
+    (6, "m2", 11, 1.5, "Ручная лепка", "alpika", 6, False),
+]
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -110,12 +130,12 @@ async def _exists(session, model, id_value: str) -> bool:
 
 async def _seed_masters(session) -> None:
     masters = [
-        {"id": "m1", "first_name": "Ольга", "last_name": "Середа", "color": "#5B8C7A", "specialty": "живопись", "position": "мастер"},
-        {"id": "m2", "first_name": "Юлия", "last_name": "Большакова", "color": "#6B7E9C", "specialty": "керамика", "position": "мастер"},
-        {"id": "m3", "first_name": "Анастасия", "last_name": "П.", "color": "#A07060", "specialty": "живопись", "position": "мастер"},
-        {"id": "m4", "first_name": "Дарья", "last_name": "Тюльпина", "color": "#7A6E9C", "specialty": "керамика", "position": "мастер"},
-        {"id": "m5", "first_name": "Александра", "last_name": "В.", "color": "#8A7840", "specialty": "живопись", "position": "мастер"},
-        {"id": "m7", "first_name": "Ирина", "last_name": "Горох", "color": "#9A5870", "specialty": "керамика", "position": "мастер"},
+        {"id": "m1", "first_name": "Ольга", "last_name": "Середа", "color": "#5B8C7A", "specialty": "живопись", "position": "мастер", "sort_order": 0},
+        {"id": "m2", "first_name": "Юлия", "last_name": "Большакова", "color": "#6B7E9C", "specialty": "керамика", "position": "мастер", "sort_order": 1},
+        {"id": "m3", "first_name": "Анастасия", "last_name": "П.", "color": "#A07060", "specialty": "живопись", "position": "мастер", "sort_order": 2},
+        {"id": "m4", "first_name": "Дарья", "last_name": "Тюльпина", "color": "#7A6E9C", "specialty": "керамика", "position": "мастер", "sort_order": 3},
+        {"id": "m5", "first_name": "Александра", "last_name": "В.", "color": "#8A7840", "specialty": "живопись", "position": "мастер", "sort_order": 4},
+        {"id": "m7", "first_name": "Ирина", "last_name": "Горох", "color": "#9A5870", "specialty": "керамика", "position": "мастер", "sort_order": 5},
     ]
     for m in masters:
         if not await _exists(session, Master, m["id"]):
@@ -125,11 +145,11 @@ async def _seed_masters(session) -> None:
 async def _seed_locations(session) -> None:
     locations = [
         {"id": "alpika", "name": "Альпика", "address": "Альпика, 1 этаж", "capacity": 10,
-         "location_hint": "1 этаж, светлая студия с панорамными окнами"},
+         "location_hint": "1 этаж, светлая студия с панорамными окнами", "sort_order": 0},
         {"id": "grand", "name": "Гранд Отель Поляна", "address": "Гранд Отель, лобби", "capacity": 12,
-         "location_hint": "Лобби отеля, зона у ресепшн"},
+         "location_hint": "Лобби отеля, зона у ресепшн", "sort_order": 1},
         {"id": "p1389", "name": "Поляна 1389", "address": "Поляна 1389, 2 этаж", "capacity": 8,
-         "location_hint": "2 этаж, рядом с детской зоной"},
+         "location_hint": "2 этаж, рядом с детской зоной", "sort_order": 2},
     ]
     for loc in locations:
         if not await _exists(session, Location, loc["id"]):
@@ -140,15 +160,15 @@ async def _seed_services(session) -> None:
     services = [
         {"id": "s1", "title": "Картина маслом", "description": "Масляная живопись на холсте",
          "image_url": "/images/card-seascape.jpg", "specialty": "живопись",
-         "min_age": 12, "max_age": 99, "duration": 150, "record_info": "",
+         "min_age": 12, "max_age": None, "duration": 150, "record_info": "",
          "material_hint": "Масляные краски, холст на подрамнике 40×50 см, набор кистей, мастихин"},
         {"id": "s2", "title": "Картина акрилом", "description": "Акриловая живопись на холсте",
          "image_url": "/images/card-mountain-acrylic.jpg", "specialty": "живопись",
-         "min_age": 6, "max_age": 99, "duration": 120, "record_info": "",
+         "min_age": 6, "max_age": None, "duration": 120, "record_info": "",
          "material_hint": "Акриловые краски, холст 30×40 см, кисти, палитра"},
         {"id": "s3", "title": "Мини-картина акрилом", "description": "Миниатюра акрилом на маленьком холсте",
          "image_url": "/images/card-watercolor.jpg", "specialty": "живопись",
-         "min_age": 6, "max_age": 99, "duration": 90, "record_info": "",
+         "min_age": 6, "max_age": None, "duration": 90, "record_info": "",
          "material_hint": "Акриловые краски, холст 20×30 см, кисти"},
         {"id": "s4", "title": "Акварель", "description": "Акварельная живопись",
          "image_url": "/images/card-watercolor.jpg", "specialty": "живопись",
@@ -156,15 +176,15 @@ async def _seed_services(session) -> None:
          "material_hint": "Акварельные краски, бумага A3 300 г/м², кисти"},
         {"id": "s5", "title": "Ручная лепка", "description": "Лепка из глины",
          "image_url": "/images/card-animals.jpg", "specialty": "керамика",
-         "min_age": 5, "max_age": 99, "duration": 90, "record_info": "",
+         "min_age": 5, "max_age": None, "duration": 90, "record_info": "",
          "material_hint": "Глина, стек, вода, фартук"},
         {"id": "s6", "title": "Роспись одежды", "description": "Роспись футболки или шоппера",
          "image_url": "/images/card-shopper.jpg", "specialty": "живопись",
-         "min_age": 8, "max_age": 99, "duration": 120, "record_info": "",
+         "min_age": 8, "max_age": None, "duration": 120, "record_info": "",
          "material_hint": "Текстильные краски, шоппер из хлопка, трафареты, кисти"},
         {"id": "s7", "title": "Морской пейзаж", "description": "Морской пейзаж маслом",
          "image_url": "/images/card-seascape.jpg", "specialty": "живопись",
-         "min_age": 12, "max_age": 99, "duration": 180, "record_info": "",
+         "min_age": 12, "max_age": None, "duration": 180, "record_info": "",
          "material_hint": "Масляные краски, холст 50×60 см, набор кистей, мастихин"},
     ]
     for s in services:
@@ -218,27 +238,33 @@ async def _seed_tags(session) -> None:
 
 
 async def _seed_activities(session) -> None:
-    for i, (day, master, start_h, dur_h, svc_name, loc, cap, is_priv) in enumerate(_ACTIVITIES_RAW):
-        activity_id = f"ev_{i}"
-        if await _exists(session, Activity, activity_id):
-            continue
-        service_id = _SERVICE_NAME_TO_ID[svc_name]
-        hour = int(start_h)
-        minute = 30 if start_h % 1 else 0
-        start_dt = WEEK_START.replace(
-            day=WEEK_START.day + day, hour=hour, minute=minute
-        )
-        duration_min = int(dur_h * 60)
-        session.add(Activity(
-            id=activity_id,
-            master_id=master,
-            service_id=service_id,
-            location_id=loc,
-            start=start_dt,
-            duration=duration_min,
-            capacity=cap,
-            is_private=is_priv,
-        ))
+    idx = 0
+    for week_start, activities in [
+        (WEEK_START, _ACTIVITIES_RAW),
+        (WEEK2_START, _ACTIVITIES_RAW_WEEK2),
+    ]:
+        for day, master, start_h, dur_h, svc_name, loc, cap, is_priv in activities:
+            activity_id = f"ev_{idx}"
+            idx += 1
+            if await _exists(session, Activity, activity_id):
+                continue
+            service_id = _SERVICE_NAME_TO_ID[svc_name]
+            hour = int(start_h)
+            minute = 30 if start_h % 1 else 0
+            start_dt = week_start.replace(
+                day=week_start.day + day, hour=hour, minute=minute
+            )
+            duration_min = int(dur_h * 60)
+            session.add(Activity(
+                id=activity_id,
+                master_id=master,
+                service_id=service_id,
+                location_id=loc,
+                start=start_dt,
+                duration=duration_min,
+                capacity=cap,
+                is_private=is_priv,
+            ))
 
 
 async def _seed_clients(session) -> None:

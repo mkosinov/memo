@@ -2,6 +2,8 @@
 
 import React, { useState, useEffect, useCallback, useId } from 'react';
 import { PHOTO_FIELDS, type PhotoFieldConfig } from './photoFields';
+import SearchableSelect from '@/app/components/shared/SearchableSelect';
+import { searchVisitors, searchServices, searchActivities, searchTags } from '@memo/api-client';
 
 export interface PhotoModalProps {
   mode: 'create' | 'edit';
@@ -19,9 +21,10 @@ interface FieldRendererProps {
   value: unknown;
   onChange: (key: string, value: unknown) => void;
   error?: string;
+  formData?: Record<string, unknown>;
 }
 
-function FieldRenderer({ field, value, onChange, error }: FieldRendererProps) {
+function FieldRenderer({ field, value, onChange, error, formData }: FieldRendererProps) {
   const baseId = useId();
   const inputId = `${baseId}-${field.key}`;
   const errorId = `${baseId}-${field.key}-error`;
@@ -33,6 +36,109 @@ function FieldRenderer({ field, value, onChange, error }: FieldRendererProps) {
     color: 'var(--ink)',
   };
 
+  const errorEl = error ? (
+    <span className="text-xs" style={{ color: 'var(--danger)' }} id={errorId}>
+      {error}
+    </span>
+  ) : null;
+
+  const ariaDescribedBy = error ? errorId : undefined;
+
+  if (field.type === 'tags') {
+    // Tags field - multi-select with search
+    const selectedTags = (value as Array<{ id: string; tag: string }>) || [];
+    const selectedTagIds = selectedTags.map(t => t.id);
+    
+    return (
+      <div className="flex flex-col gap-1">
+        <label className="text-xs font-medium" style={{ color: 'var(--ink-light)' }}>
+          {field.label}
+        </label>
+        <div className="flex flex-wrap gap-2 mb-2">
+          {selectedTags.map(tag => (
+            <span
+              key={tag.id}
+              className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-800"
+            >
+              {tag.tag}
+              <button
+                type="button"
+                onClick={() => {
+                  const newTags = selectedTags.filter(t => t.id !== tag.id);
+                  onChange(field.key, newTags);
+                }}
+                className="hover:text-blue-600"
+              >
+                ×
+              </button>
+            </span>
+          ))}
+        </div>
+        <SearchableSelect
+          value={null}
+          onChange={() => {}}
+          onSelectItem={(item) => {
+            if (!selectedTagIds.includes(item.id as string)) {
+              onChange(field.key, [...selectedTags, { id: item.id, tag: item.tag }]);
+            }
+          }}
+          onSearch={searchTags}
+          label=""
+          displayField="tag"
+          placeholder={field.placeholder || 'Добавить тег...'}
+        />
+      </div>
+    );
+  }
+
+  if (field.type === 'searchable') {
+    // Map field keys to search functions
+    let searchFn;
+    let displayField = field.displayField;
+    let subtitleField = field.subtitleField;
+    let onSelectItem: ((item: Record<string, unknown>) => void) | undefined;
+    
+    if (field.key === 'visitor_id') {
+      searchFn = searchVisitors;
+    } else if (field.key === 'service_id') {
+      searchFn = searchServices;
+    } else {
+      // For activity_id, pass the selected service_id if available
+      const selectedServiceId = formData?.service_id as string | null;
+      searchFn = (q: string) => searchActivities(q, selectedServiceId || undefined);
+      
+      // If service is already selected, show only datetime (not service_title)
+      if (selectedServiceId) {
+        displayField = 'start';
+        subtitleField = undefined;
+      }
+      
+      // Auto-fill service when activity is selected
+      onSelectItem = (item) => {
+        if (item.service_id) {
+          onChange('service_id', item.service_id);
+        }
+      };
+    }
+
+    return (
+      <div className="flex flex-col gap-1">
+        <SearchableSelect
+          value={(value as string) ?? null}
+          onChange={(uuid) => onChange(field.key, uuid)}
+          onSelectItem={onSelectItem}
+          onSearch={searchFn}
+          label={field.label}
+          displayField={displayField}
+          subtitleField={subtitleField}
+          placeholder={field.placeholder}
+          required={field.required}
+        />
+        {errorEl}
+      </div>
+    );
+  }
+
   const labelEl = (
     <label
       htmlFor={inputId}
@@ -43,14 +149,6 @@ function FieldRenderer({ field, value, onChange, error }: FieldRendererProps) {
       {field.required && <span className="text-red-500 ml-0.5">*</span>}
     </label>
   );
-
-  const errorEl = error ? (
-    <span className="text-xs" style={{ color: 'var(--danger)' }} id={errorId}>
-      {error}
-    </span>
-  ) : null;
-
-  const ariaDescribedBy = error ? errorId : undefined;
 
   return (
     <div className="flex flex-col gap-1">
@@ -84,7 +182,11 @@ export function PhotoModal({
     if (!photo) return {};
     const initial: Record<string, unknown> = {};
     PHOTO_FIELDS.forEach((f) => {
-      initial[f.key] = photo[f.key] ?? '';
+      if (f.type === 'tags') {
+        initial[f.key] = photo.tags || [];
+      } else {
+        initial[f.key] = photo[f.key] ?? '';
+      }
     });
     initial.is_public = photo.is_public ?? false;
     return initial;
@@ -179,6 +281,20 @@ export function PhotoModal({
 
         {/* Scrollable body */}
         <div className="flex-1 overflow-y-auto px-6 pb-4 space-y-4">
+          {/* Image preview */}
+          {mode === 'edit' && photo?.filename && (
+            <div className="rounded-lg overflow-hidden bg-gray-100 flex items-center justify-center" style={{ maxHeight: '300px' }}>
+              <img
+                src={photo.filename}
+                alt={photo.filename}
+                className="max-w-full max-h-[300px] object-contain"
+                onError={(e) => {
+                  (e.target as HTMLImageElement).style.display = 'none';
+                }}
+              />
+            </div>
+          )}
+
           {PHOTO_FIELDS.map((field) => (
             <FieldRenderer
               key={field.key}
@@ -186,6 +302,7 @@ export function PhotoModal({
               value={formData[field.key]}
               onChange={handleChange}
               error={errors[field.key]}
+              formData={formData}
             />
           ))}
 

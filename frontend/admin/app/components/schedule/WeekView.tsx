@@ -10,11 +10,12 @@ import type { Activity } from '@memo/domain';
 import { TimeColumn } from './TimeColumn';
 import { DayColumn } from './DayColumn';
 import { ActivityCard } from './ActivityCard';
+import { ScheduleColumnHeader } from './ScheduleColumnHeader';
 import { ActivityDetailsModal } from '../modal/ActivityDetailsModal';
-import { DAYS, getMonday, TIME_COL_WIDTH, isSameDay, formatTime, HOURS_START, CELL_HEIGHT } from '@/lib/utils';
+import { DAYS, getMonday, TIME_COL_WIDTH, isSameDay, formatTime, calculateGridTimeRange } from '@/lib/utils';
 
 export function WeekView() {
-  const { currentWeek, activities, scheduleIndex, artists, services, locations: studios, stamp, addActivity, updateActivity, loading, error, filterMasterId, filterLocationId } = useSchedule();
+  const { currentWeek, activities, scheduleIndex, masters, services, locations, stamp, addActivity, updateActivity, loading, error, filterMasterIds, filterLocationIds, cellHeight = 60, gridFrequency = 30, workingHoursStart = 9, workingHoursEnd = 21 } = useSchedule();
   const { showToast } = useUI();
   const monday = getMonday(currentWeek);
 
@@ -85,6 +86,7 @@ export function WeekView() {
       const service = services.find((s) => s.id === stamp.serviceId);
       if (!service) return;
       const firstLocation = stamp.locations.values().next().value as string;
+      const location = locations.find((l) => l.id === firstLocation);
 
       addActivity({
         day: dayIndex,
@@ -97,7 +99,7 @@ export function WeekView() {
         minAge: service.minAge,
         locationId: firstLocation,
         occupied: 0,
-        capacity: service.maxCapacity,
+        capacity: location?.defaultCapacity ?? 0,
         isPrivate: false,
       });
 
@@ -112,11 +114,18 @@ export function WeekView() {
     [activities],
   );
 
+  // Adaptive grid time range — extends beyond working hours if activities go outside
+  const gridRange = useMemo(
+    () => calculateGridTimeRange(resolvedActivities, workingHoursStart, workingHoursEnd),
+    [resolvedActivities, workingHoursStart, workingHoursEnd],
+  );
+
   const {
     dragId,
     dragCopy,
     ghostPosition,
     activeDragActivity,
+    draggedSnappedTime,
     onDragStart,
     onDragOver,
     onDragEnd,
@@ -126,6 +135,7 @@ export function WeekView() {
     addActivity,
     updateActivity,
     showToast,
+    gridFrequency,
   });
 
   // Use pre-built index from schedule context for O(1) day lookups
@@ -146,13 +156,13 @@ export function WeekView() {
 
   const today = new Date();
 
-  const dragArtist = activeDragActivity
-    ? artists.find((a) => a.id === activeDragActivity.masterId) || artists[0]
+  const dragMaster = activeDragActivity
+    ? masters.find((a) => a.id === activeDragActivity.masterId) || masters[0]
     : null;
 
   // Calculate ghost span for drag overlay (how many slots the dragged card occupies)
   const durMinutes = activeDragActivity?.durationMinutes ?? (activeDragActivity?.duration ?? 0) * 60;
-  const ghostHeight = activeDragActivity ? Math.ceil(durMinutes / 30) : null;
+  const ghostHeight = activeDragActivity ? Math.ceil(durMinutes / gridFrequency) : null;
 
   // NowLine
   const [nowPos, setNowPos] = useState(0);
@@ -160,12 +170,12 @@ export function WeekView() {
     const update = () => {
       const now = new Date();
       const hours = now.getHours() + now.getMinutes() / 60;
-      setNowPos((hours - HOURS_START) * CELL_HEIGHT * 2);
+      setNowPos((hours - gridRange.start) * cellHeight * 2);
     };
     update();
     const iv = setInterval(update, 30000);
     return () => clearInterval(iv);
-  }, []);
+  }, [cellHeight, gridRange.start]);
 
   const showNowLine = days.some(d => isSameDay(d, today)) && nowPos >= 0;
 
@@ -197,7 +207,7 @@ export function WeekView() {
 
   if (activities.length === 0) {
     // Check if there are activities but all hidden by filters
-    const hasFilters = filterMasterId !== null || filterLocationId !== null;
+    const hasFilters = filterMasterIds.length > 0 || filterLocationIds.length > 0;
     return (
       <div className="flex items-center justify-center h-full text-text-secondary">
         <span>{hasFilters ? 'Нет занятий по выбранным фильтрам' : 'Нет занятий на эту неделю'}</span>
@@ -236,10 +246,7 @@ export function WeekView() {
     >
       <div className="min-w-[800px] h-full flex flex-col">
         {/* Header row — sticky above cards */}
-        <div
-          className="sticky top-0 z-[25] flex bg-white border-b shrink-0"
-          style={{ paddingLeft: TIME_COL_WIDTH }}
-        >
+        <ScheduleColumnHeader>
           {days.map((day, i) => (
             <div
               key={i}
@@ -252,19 +259,19 @@ export function WeekView() {
               </div>
             </div>
           ))}
-        </div>
+        </ScheduleColumnHeader>
 
         {/* Grid row — scrollable */}
         <div className="flex-1 flex overflow-auto relative">
-          <TimeColumn />
+          <TimeColumn cellHeight={cellHeight} gridFrequency={gridFrequency} gridStart={gridRange.start} gridEnd={gridRange.end} />
           {days.map((day, i) => (
             <DayColumn
               key={i}
               dayIndex={i}
               date={day}
               activities={resolveById(activitiesByDate.get(dateToISO(day)) ?? [], scheduleIndex.byId).map(a => ({ ...a, duration: a.durationMinutes / 60, serviceName: a.serviceTitle }))}
-              artists={artists}
-              studios={studios}
+              masters={masters}
+              locations={locations}
               services={services}
               dragCopy={dragCopy}
               dragId={dragId}
@@ -277,6 +284,10 @@ export function WeekView() {
               onQuickAdd={openQuickAdd}
               stampReady={stamp.ready}
               stamp={stamp}
+              cellHeight={cellHeight}
+              gridFrequency={gridFrequency}
+              gridStart={gridRange.start}
+              gridEnd={gridRange.end}
             />
           ))}
 
@@ -297,12 +308,25 @@ export function WeekView() {
       </div>
 
       <DragOverlay dropAnimation={null}>
-        {activeDragActivity && dragArtist ? (
-          <div className="opacity-80 scale-95" style={{ width: '180px' }} data-drag-ghost="true">
+        {activeDragActivity && dragMaster ? (
+          <div className="opacity-80 scale-95 relative" style={{ width: '180px' }} data-drag-ghost="true">
+            {/* Time preview label — shows snapped position while dragging */}
+            {draggedSnappedTime != null && (
+              <div
+                className="absolute -top-6 left-1/2 -translate-x-1/2 z-[60] px-2 py-0.5 rounded-full text-[11px] font-bold text-white shadow-lg whitespace-nowrap"
+                style={{ backgroundColor: 'var(--brand, #004D56)' }}
+              >
+                {formatTime(draggedSnappedTime)}
+              </div>
+            )}
             <ActivityCard
-              activity={activeDragActivity}
-              artist={dragArtist}
-              studios={studios}
+              activity={
+                draggedSnappedTime != null
+                  ? { ...activeDragActivity, startTime: draggedSnappedTime }
+                  : activeDragActivity
+              }
+              master={dragMaster}
+              locations={locations}
               style={{ top: 0 }}
             />
           </div>

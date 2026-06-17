@@ -3,6 +3,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useRecords } from '@/contexts/RecordsContext';
 import type { RecordResponse, ActivityResponse } from '@memo/api-client';
+import { displayMasterName } from '@/lib/utils';
 import { ClientCardModal } from './ClientCardModal';
 import { DiamondIcon } from '@/app/components/shared/DiamondIcon';
 import { ColumnPicker } from '@/app/components/shared/ColumnPicker';
@@ -162,8 +163,8 @@ export function RecordsTable({ filters }: RecordsTableProps) {
           break;
         }
         case 'master': {
-          const aMst = aAct ? masters.get(aAct.master_id)?.first_name || '' : '';
-          const bMst = bAct ? masters.get(bAct.master_id)?.first_name || '' : '';
+          const aMst = aAct ? displayMasterName(masters.get(aAct.master_id) ?? { first_name: '', last_name: '' }) : '';
+          const bMst = bAct ? displayMasterName(masters.get(bAct.master_id) ?? { first_name: '', last_name: '' }) : '';
           cmp = aMst.localeCompare(bMst);
           break;
         }
@@ -229,7 +230,7 @@ export function RecordsTable({ filters }: RecordsTableProps) {
   return (
     <div className="flex">
       {/* Table */}
-      <div className="flex-1 overflow-auto">
+      <div className="flex-1 overflow-x-auto">
         {/* Column picker bar */}
         <div className="flex items-center justify-end px-4 py-2 border-b" style={{ borderColor: 'var(--line)' }}>
           <ColumnPicker
@@ -373,7 +374,7 @@ export function RecordsTable({ filters }: RecordsTableProps) {
                         <div
                           className="w-5 h-5 rounded-full"
                           style={{ backgroundColor: master?.color || '#999' }}
-                          title={master?.first_name}
+                          title={master ? displayMasterName(master) : undefined}
                         />
                       );
                     })() : '—'}
@@ -530,7 +531,7 @@ export function RecordsTable({ filters }: RecordsTableProps) {
               })()}
             </div>
             <div className="text-xs" style={{ color: 'var(--ink-light)' }}>
-              {locations.get(selectedActivity.location_id)?.name} · {masters.get(selectedActivity.master_id)?.first_name} {masters.get(selectedActivity.master_id)?.last_name}
+              {locations.get(selectedActivity.location_id)?.name} · {masters.get(selectedActivity.master_id) ? displayMasterName(masters.get(selectedActivity.master_id)!) : '—'}
             </div>
             <div className="mt-2">
               <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-semibold ${STATUS_COLORS[selectedRecord.status]}`}>

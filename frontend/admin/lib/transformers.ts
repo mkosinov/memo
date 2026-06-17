@@ -1,5 +1,6 @@
-import type { Activity, Artist, Service, Location } from '@memo/domain';
+import type { Activity, Master, Service, Location } from '@memo/domain';
 import type { ActivityResponse, MasterResponse, ServiceResponse, LocationResponse } from '@memo/api-client';
+import { displayMasterName } from '@/lib/utils';
 
 /**
  * Normalize JavaScript getDay() (0=Sun..6=Sat) to Mon=0..Sun=6.
@@ -27,7 +28,6 @@ export function transformActivity(raw: ActivityResponse): Activity {
     id: raw.id,
     day,
     masterId: raw.master_id,
-    artistId: raw.master_id,
     startTime,
     duration: raw.duration / 60,
     durationMinutes: raw.duration,
@@ -40,12 +40,14 @@ export function transformActivity(raw: ActivityResponse): Activity {
   };
 }
 
-export function transformMaster(raw: MasterResponse): Artist {
+export function transformMaster(raw: MasterResponse): Master {
   return {
     id: raw.id,
-    name: `${raw.first_name} ${raw.last_name}`,
+    name: displayMasterName(raw),
     shortName: raw.first_name,
     color: raw.color,
+    specialty: raw.specialty,
+    sortOrder: raw.sort_order ?? 0,
   };
 }
 
@@ -55,9 +57,8 @@ export function transformService(raw: ServiceResponse): Service {
     name: raw.title,
     duration: raw.duration / 60,
     durationMinutes: raw.duration,
-    maxCapacity: raw.max_age,
     minAge: `${raw.min_age}`,
-    maxAge: `${raw.max_age}`,
+    maxAge: raw.max_age != null ? `${raw.max_age}` : undefined,
     defaultAdultPrice: raw.tariffs?.[0]?.price ?? 0,
     description: raw.description,
   };
@@ -67,7 +68,9 @@ export function transformLocation(raw: LocationResponse): Location {
   return {
     id: raw.id,
     name: raw.name,
+    shortTitle: raw.short_title ?? undefined,
     address: raw.address ?? undefined,
     defaultCapacity: raw.capacity,
+    sortOrder: raw.sort_order ?? 0,
   };
 }

@@ -19,6 +19,7 @@ interface Column {
 }
 
 const COLUMNS: Column[] = [
+  { key: 'preview', label: 'Превью', width: 'w-[80px]', defaultVisible: true },
   { key: 'filename', label: 'Файл', width: 'flex-1', defaultVisible: true },
   { key: 'visitor', label: 'Посетитель', width: 'w-[150px]', defaultVisible: true },
   { key: 'service', label: 'Услуга', width: 'w-[150px]', defaultVisible: false },
@@ -154,6 +155,10 @@ export function PhotosTable() {
     if (data.is_public !== null && data.is_public !== undefined) {
       payload.is_public = Boolean(data.is_public);
     }
+    if (data.tags !== null && data.tags !== undefined) {
+      const tags = (data.tags as Array<{ id: string; tag: string }>) || [];
+      payload.tag_ids = tags.map(t => t.id);
+    }
     await updateMutation.mutateAsync({
       id: editPhoto.id,
       data: payload,
@@ -165,12 +170,14 @@ export function PhotosTable() {
   // ─── Create ────────────────────────────────────────────────────────
 
   const handleCreateSubmit = async (data: Record<string, unknown>) => {
+    const tags = (data.tags as Array<{ id: string; tag: string }>) || [];
     await createMutation.mutateAsync({
       filename: String(data.filename ?? ''),
       visitor_id: String(data.visitor_id ?? ''),
       service_id: String(data.service_id ?? ''),
       activity_id: String(data.activity_id ?? ''),
       is_public: Boolean(data.is_public),
+      tag_ids: tags.map(t => t.id),
     });
     showToast('Фото создано');
   };
@@ -258,7 +265,7 @@ export function PhotosTable() {
       </div>
 
       {/* Table */}
-      <div className="overflow-auto">
+      <div className="overflow-x-auto">
         <table className="w-full">
           <thead>
             <tr
@@ -291,6 +298,26 @@ export function PhotosTable() {
                 style={{ borderColor: 'var(--line)' }}
                 data-testid={`photo-row-${photo.id}`}
               >
+                {/* Preview */}
+                {visibleKeys.includes('preview') && (
+                  <td className="px-4 py-3">
+                    <div className="w-12 h-12 rounded-lg overflow-hidden bg-gray-100 flex items-center justify-center">
+                      {photo.filename ? (
+                        <img
+                          src={photo.filename}
+                          alt={photo.filename}
+                          className="w-full h-full object-cover"
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).style.display = 'none';
+                          }}
+                        />
+                      ) : (
+                        <span className="text-gray-400 text-xs">Нет фото</span>
+                      )}
+                    </div>
+                  </td>
+                )}
+
                 {/* Filename */}
                 {visibleKeys.includes('filename') && (
                   <td className="px-4 py-3 text-sm font-medium" style={{ color: 'var(--ink)' }}>

@@ -179,14 +179,14 @@ async def test_seed_has_guest_tag(db_manager: DBManager) -> None:
 
 
 async def test_seed_populates_activities(db_manager: DBManager) -> None:
-    """Seed script creates 28 activities (one week schedule)."""
+    """Seed script creates 36 activities (two-week schedule)."""
     from src.seed.seed import seed_data
 
     await seed_data(db_manager)
 
     async with db_manager.async_session() as session:
         result = await session.execute(text("SELECT COUNT(*) FROM activities"))
-        assert result.scalar() == 28
+        assert result.scalar() == 36
 
 
 async def test_seed_populates_clients(db_manager: DBManager) -> None:
@@ -260,4 +260,4 @@ async def test_seed_is_idempotent(db_manager: DBManager) -> None:
         assert result.scalar() == 6
 
         result = await session.execute(text("SELECT COUNT(*) FROM activities"))
-        assert result.scalar() == 28
+        assert result.scalar() == 36

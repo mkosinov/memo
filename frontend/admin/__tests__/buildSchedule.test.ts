@@ -10,7 +10,6 @@ const mockServices: Service[] = [
     id: 's1',
     name: 'Картина маслом',
     duration: 2.5,
-    maxCapacity: 8,
     minAge: '12',
     maxAge: '99',
     defaultAdultPrice: 3500,
@@ -20,7 +19,6 @@ const mockServices: Service[] = [
     id: 's2',
     name: 'Картина акрилом',
     duration: 2,
-    maxCapacity: 10,
     minAge: '6',
     maxAge: '99',
     defaultAdultPrice: 2800,
@@ -169,12 +167,12 @@ describe('toScheduleIndex', () => {
     expect(idx.index.byDate.get('2025-04-08')?.[0].id).toBe('a2');
   });
 
-  it('index.byArtistId groups activities by masterId', () => {
+  it('index.byMasterId groups activities by masterId', () => {
     const idx = toScheduleIndex(enriched, MONDAY);
-    expect(idx.index.byArtistId.get('m1')).toHaveLength(1);
-    expect(idx.index.byArtistId.get('m1')?.[0].id).toBe('a1');
-    expect(idx.index.byArtistId.get('m2')).toHaveLength(1);
-    expect(idx.index.byArtistId.get('m2')?.[0].id).toBe('a2');
+    expect(idx.index.byMasterId.get('m1')).toHaveLength(1);
+    expect(idx.index.byMasterId.get('m1')?.[0].id).toBe('a1');
+    expect(idx.index.byMasterId.get('m2')).toHaveLength(1);
+    expect(idx.index.byMasterId.get('m2')?.[0].id).toBe('a2');
   });
 
   it('index.byLocationId groups activities by locationId', () => {
@@ -220,7 +218,7 @@ describe('toScheduleIndex', () => {
     const idx = toScheduleIndex([], MONDAY);
     expect(idx.byId.size).toBe(0);
     expect(idx.index.byDate.size).toBe(0);
-    expect(idx.index.byArtistId.size).toBe(0);
+    expect(idx.index.byMasterId.size).toBe(0);
     expect(idx.index.byLocationId.size).toBe(0);
     expect(Object.keys(idx.byLocation)).toEqual(['all']);
   });
@@ -247,8 +245,8 @@ describe('toScheduleIndex', () => {
     expect(idx.index.byDate.get('2025-04-07')?.map(a => a.id).sort()).toEqual(['a1', 'a3']);
   });
 
-  it('multiple activities by same artist appear in byArtistId array', () => {
-    const multiArtist: ScheduleItem[] = [
+  it('multiple activities by same master appear in byMasterId array', () => {
+    const multiMaster: ScheduleItem[] = [
       {
         ...mockActivities[0],
         id: 'a3',
@@ -260,8 +258,8 @@ describe('toScheduleIndex', () => {
       },
       ...enriched,
     ];
-    const idx = toScheduleIndex(multiArtist, MONDAY);
-    expect(idx.index.byArtistId.get('m1')).toHaveLength(2);
-    expect(idx.index.byArtistId.get('m1')?.map(a => a.id).sort()).toEqual(['a1', 'a3']);
+    const idx = toScheduleIndex(multiMaster, MONDAY);
+    expect(idx.index.byMasterId.get('m1')).toHaveLength(2);
+    expect(idx.index.byMasterId.get('m1')?.map(a => a.id).sort()).toEqual(['a1', 'a3']);
   });
 });

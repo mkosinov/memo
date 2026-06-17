@@ -181,7 +181,7 @@ describe('RecordsTable', () => {
 
   it('renders master color dot', () => {
     const { container } = render(<RecordsTable filters={filters} />);
-    const dot = container.querySelector('[title="Мария"]');
+    const dot = container.querySelector('[title="Иванова Мария"]');
     expect(dot).toBeTruthy();
   });
 

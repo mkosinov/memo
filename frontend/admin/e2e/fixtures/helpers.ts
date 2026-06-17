@@ -177,3 +177,51 @@ export async function waitForClientsReady(page: Page) {
   // Wait for either table rows or the "no clients" empty state
   await page.waitForSelector('table tbody, p:has-text("Нет клиентов")', { timeout: 15_000 });
 }
+
+/**
+ * Wait for masters page to load with table.
+ * Navigates to /masters, waits for heading and table to render.
+ */
+export async function waitForMastersReady(page: Page) {
+  const mastersResponse = page.waitForResponse(
+    (resp) => resp.url().includes('/api/v1/masters') && resp.status() === 200,
+    { timeout: 15_000 },
+  );
+  await page.goto('/masters');
+  await page.waitForSelector('h1:has-text("Управление мастерами")', { timeout: 15_000 });
+  await page.waitForSelector('table', { timeout: 15_000 });
+  await mastersResponse.catch(() => {});
+  await page.waitForTimeout(500);
+}
+
+/**
+ * Wait for tags page to load with table.
+ * Navigates to /tags, waits for heading and table to render.
+ */
+export async function waitForTagsReady(page: Page) {
+  const tagsResponse = page.waitForResponse(
+    (resp) => resp.url().includes('/api/v1/tags') && resp.status() === 200,
+    { timeout: 15_000 },
+  );
+  await page.goto('/tags');
+  await page.waitForSelector('h1:has-text("Управление тегами")', { timeout: 15_000 });
+  await page.waitForSelector('table', { timeout: 15_000 });
+  await tagsResponse.catch(() => {});
+  await page.waitForTimeout(500);
+}
+
+/**
+ * Wait for photos page to load with table.
+ * Navigates to /photos, waits for heading and table to render.
+ */
+export async function waitForPhotosReady(page: Page) {
+  const photosResponse = page.waitForResponse(
+    (resp) => resp.url().includes('/api/v1/photos') && resp.status() === 200,
+    { timeout: 15_000 },
+  );
+  await page.goto('/photos');
+  await page.waitForSelector('h1:has-text("Управление фото")', { timeout: 15_000 });
+  await page.waitForSelector('table', { timeout: 15_000 });
+  await photosResponse.catch(() => {});
+  await page.waitForTimeout(500);
+}

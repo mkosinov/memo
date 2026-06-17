@@ -9,7 +9,7 @@ export class ApiError extends Error {
   }
 }
 
-async function api<T>(path: string, schema: z.ZodSchema<T>, options?: RequestInit): Promise<T> {
+async function api<T>(path: string, schema: z.ZodType<T, z.ZodTypeDef, unknown>, options?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     headers: {
       'Content-Type': 'application/json',

@@ -1,7 +1,7 @@
 // Re-export all domain types for backward compatibility during migration.
 // New code should import directly from '@memo/domain'.
 export type {
-  Artist,
+  Master,
   Location,
   Studio,
   Service,
@@ -27,7 +27,7 @@ export type {
 
 // Re-export Zod schemas (values, not types)
 export {
-  ArtistSchema,
+  MasterSchema,
   LocationSchema,
   ServiceSchema,
   ActivitySchema,

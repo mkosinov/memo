@@ -83,6 +83,14 @@ class UserSettingsService:
             return None
 
         update_data = data.model_dump(exclude_unset=True)
+
+        # Strip null values for NOT NULL columns — client intent is "don't change",
+        # not "set to null"
+        _not_null_fields = {"theme", "language", "column_order_masters", "column_order_locations"}
+        for field in _not_null_fields:
+            if field in update_data and update_data[field] is None:
+                del update_data[field]
+
         # Serialize list fields to JSON strings
         if "column_order_masters" in update_data:
             update_data["column_order_masters"] = json.dumps(

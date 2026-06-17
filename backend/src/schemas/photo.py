@@ -16,12 +16,16 @@ class PhotoCreate(BaseModel):
 
 
 class PhotoUpdate(BaseModel):
-    """Request schema for updating a photo (full replacement via PUT)."""
-    filename: str | None = None
+    """Request schema for updating a photo (full replacement via PUT).
+
+    ``filename`` and ``is_public`` are required because they map to
+    NOT NULL columns in the database.
+    """
+    filename: str
     visitor_id: str | None = None
     service_id: str | None = None
     activity_id: str | None = None
-    is_public: bool | None = None
+    is_public: bool = False
     tag_ids: list[str] | None = None
 
 

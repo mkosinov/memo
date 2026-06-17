@@ -19,6 +19,10 @@ from src.services.generic import GenericService
 class ActivityService(GenericService[ActivityCreate, ActivityUpdate, ActivityResponse]):
     """Activity service with date filtering and occupied count."""
 
+    # Fields that map to NOT NULL columns in the activities table.
+    # Patch should silently ignore null values for these fields.
+    NOT_NULL_FIELDS = {"master_id", "service_id", "location_id", "start", "duration", "capacity"}
+
     def __init__(
         self, repository: GenericRepository, model: type[Activity]
     ) -> None:

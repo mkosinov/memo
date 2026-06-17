@@ -266,11 +266,12 @@ export function DayColumn({ dayIndex, activities, masters, locations = [], servi
   }, []);
 
   // Auto-promote group by cursor position: when mouse moves over a CARD in the column,
-  // determine which time group the cursor is in and set activeGroupId accordingly.
+  // determine which time group the CARD belongs to and set activeGroupId accordingly.
   // This ensures solo groups become visible without requiring scroll (e.g., solo G2 activity
   // hidden behind G1 activities becomes visible when cursor enters 13:00+ area).
-  // Only triggers when hovering over an activity card — NOT on empty slots (fixes
-  // the bug where hovering over an empty slot at 16:00-16:30 dimmed the 15:00-16:30 activity).
+  // Only triggers when hovering over an activity card — NOT on empty slots.
+  // Uses the CARD's group (not cursor time) so a G2 card at 15:00-16:30 doesn't get
+  // dimmed when cursor is at 16:00 (which is in G3's time range).
   useEffect(() => {
     const el = columnRef.current;
     if (!el) return;
@@ -292,12 +293,11 @@ export function DayColumn({ dayIndex, activities, masters, locations = [], servi
         return;
       }
 
-      const cursorTime = gridStart + y / (cellHeight * 2);
-      const group = TIME_GROUPS.find(g =>
-        cursorTime >= g.start && cursorTime < g.end
-      );
-      if (group) {
-        setActiveGroupId(group.id);
+      // Use the FIRST overlapping card's group (not cursor time)
+      const firstCard = cursorOverlapping[0];
+      const cardGroup = getGroupForActivity(firstCard);
+      if (cardGroup) {
+        setActiveGroupId(cardGroup.id);
       }
     };
     el.addEventListener('mousemove', handleMouseMove);

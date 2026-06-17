@@ -265,10 +265,12 @@ export function DayColumn({ dayIndex, activities, masters, locations = [], servi
     return () => el.removeEventListener('mouseleave', handleMouseLeave);
   }, []);
 
-  // Auto-promote group by cursor position: when mouse moves over the column,
+  // Auto-promote group by cursor position: when mouse moves over a CARD in the column,
   // determine which time group the cursor is in and set activeGroupId accordingly.
   // This ensures solo groups become visible without requiring scroll (e.g., solo G2 activity
   // hidden behind G1 activities becomes visible when cursor enters 13:00+ area).
+  // Only triggers when hovering over an activity card — NOT on empty slots (fixes
+  // the bug where hovering over an empty slot at 16:00-16:30 dimmed the 15:00-16:30 activity).
   useEffect(() => {
     const el = columnRef.current;
     if (!el) return;
@@ -276,6 +278,20 @@ export function DayColumn({ dayIndex, activities, masters, locations = [], servi
       isMouseInsideRef.current = true;
       const rect = el.getBoundingClientRect();
       const y = e.clientY - rect.top;
+
+      // Check if cursor overlaps with any activity card
+      const cursorOverlapping = activities.filter(a => {
+        const topPx = (a.startTime - gridStart) * cellHeight * 2;
+        const durMinutes = a.durationMinutes ?? a.duration * 60;
+        const heightPx = Math.max((durMinutes / 60) * cellHeight * 2, 60);
+        return y >= topPx && y <= topPx + heightPx;
+      });
+
+      if (cursorOverlapping.length === 0) {
+        // Cursor is over an empty slot — don't set activeGroupId
+        return;
+      }
+
       const cursorTime = gridStart + y / (cellHeight * 2);
       const group = TIME_GROUPS.find(g =>
         cursorTime >= g.start && cursorTime < g.end
@@ -286,7 +302,7 @@ export function DayColumn({ dayIndex, activities, masters, locations = [], servi
     };
     el.addEventListener('mousemove', handleMouseMove);
     return () => el.removeEventListener('mousemove', handleMouseMove);
-  }, [cellHeight, gridStart]);
+  }, [activities, cellHeight, gridStart]);
 
   // Non-passive wheel handler for scroll carousel
   useEffect(() => {

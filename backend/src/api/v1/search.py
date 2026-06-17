@@ -63,7 +63,7 @@ async def search_activities(
     """Search activities by service title (case-insensitive substring)."""
     pattern = f"%{q}%"
     stmt = (
-        select(Activity.id, Activity.start, Service.title.label("service_title"))
+        select(Activity.id, Activity.start, Activity.service_id, Service.title.label("service_title"))
         .join(Service, Activity.service_id == Service.id)
         .where(
             Service.title.ilike(pattern),

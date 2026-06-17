@@ -1741,7 +1741,10 @@ describe('DayColumn', () => {
       expect(g1Card).toHaveStyle({ opacity: '1' });
       expect(g2Card).toHaveStyle({ opacity: '1' });
 
-      // Mouse move to G2 time range (y=480 → time=13 → G2)
+      // Mouse move to G2 time range — cursor at y=700 (time≈14.8) where ONLY G2 card overlaps.
+      // ob_g1 (G1): top=420, height=240 → bottom=660. At y=700, ob_g1 does NOT overlap.
+      // ob_g2 (G2): top=480, height=300 → bottom=780. At y=700, ob_g2 DOES overlap.
+      // So mousemove handler picks ob_g2's group (G2) as activeGroupId.
       await act(async () => {
         const column = screen.getByTestId('day-column-0');
         column.getBoundingClientRect = vi.fn(() => ({
@@ -1749,7 +1752,7 @@ describe('DayColumn', () => {
           bottom: 1440, right: 200, x: 0, y: 0, toJSON: () => {},
         }));
         const mouseEvent = new MouseEvent('mousemove', {
-          clientY: 480, // time = 13.0 → G2
+          clientY: 700, // time ≈ 14.8 → G2 range, only G2 card visually overlaps
           bubbles: true,
         });
         column.dispatchEvent(mouseEvent);

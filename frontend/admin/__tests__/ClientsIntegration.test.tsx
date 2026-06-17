@@ -34,6 +34,13 @@ import {
   getClientVisitors,
 } from '@memo/api-client';
 
+// ─── Mock ScheduleContext ─────────────────────────────────────────────────
+
+vi.mock('@/contexts/ScheduleContext', () => ({
+  useSchedule: vi.fn(() => ({ gridFrequency: 30 })),
+  ScheduleProvider: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+}));
+
 // ─── Mock ClientsContext ──────────────────────────────────────────────────
 
 vi.mock('@/contexts/ClientsContext', () => ({

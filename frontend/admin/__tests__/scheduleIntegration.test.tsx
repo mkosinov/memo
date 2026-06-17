@@ -206,11 +206,12 @@ describe('Schedule pipeline integration: enrichment from API to ActivityCard', (
       </QueryClientProvider>,
     );
 
-    // ASSERT — minAge should be '12' (from service min_age: 12 → transformService → '12')
+    // ASSERT — minAge should be '12' (from service min_age: 12 → buildAdminSchedule → '12')
+    // Service mock has max_age: 99, so ActivityCard renders "12–99" (minAge + "–" + maxAge)
     // Note: minAge only renders when the card is tall enough (height >= 90px).
     // Activity duration=2h → height = 2*120-10 = 230px → showExtra = true → minAge is visible.
     await waitFor(() => {
-      expect(screen.getByText('12+')).toBeInTheDocument();
+      expect(screen.getByText('12–99')).toBeInTheDocument();
     });
   });
 });

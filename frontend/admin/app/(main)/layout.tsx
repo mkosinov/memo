@@ -4,6 +4,7 @@ import React from 'react';
 import { Menubar } from '../components/layout/Menubar';
 import { NavigationProvider } from '@/contexts/NavigationContext';
 import { useUI } from '@/contexts/UIContext';
+import { ErrorBoundary } from '../components/error';
 
 function MainShell({ children }: { children: React.ReactNode }) {
   const { sidebarCollapsed } = useUI();
@@ -28,8 +29,10 @@ function MainShell({ children }: { children: React.ReactNode }) {
 
 export default function MainLayout({ children }: { children: React.ReactNode }) {
   return (
-    <NavigationProvider>
-      <MainShell>{children}</MainShell>
-    </NavigationProvider>
+    <ErrorBoundary>
+      <NavigationProvider>
+        <MainShell>{children}</MainShell>
+      </NavigationProvider>
+    </ErrorBoundary>
   );
 }

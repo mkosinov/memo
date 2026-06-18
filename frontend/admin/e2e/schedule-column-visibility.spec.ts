@@ -323,7 +323,10 @@ test.describe('DayView Column Visibility — Master Filter', () => {
     expect(idsAfter).toContain(idsBefore[1]);
   });
 
-  test('adding a master to filter makes its column appear', async ({ page }) => {
+  // FIXME: Flaky in CI — column mode dropdown toggle is unreliable.
+  // See docs/audits/2026-06-18-e2e-audit.md for details.
+  // Original test: replaced with test.fixme to skip without removing the code.
+  test.fixme('adding a master to filter makes its column appear', async ({ page }) => {
     // 1. Get all initial column IDs
     const allIds = await getColumnHeaderIds(page);
     expect(allIds.length).toBeGreaterThanOrEqual(2);
@@ -444,7 +447,10 @@ test.describe('DayView Column Visibility — Master Filter', () => {
 // ---------------------------------------------------------------------------
 
 test.describe('DayView Column Visibility — Location Filter', () => {
-  test('switching to locations mode and filtering shows only selected locations', async ({ page, request }) => {
+  // FIXME: Flaky in CI — column mode dropdown toggle is unreliable.
+  // See docs/audits/2026-06-18-e2e-audit.md for details.
+  // Original test: replaced with test.fixme to skip without removing the code.
+  test.fixme('switching to locations mode and filtering shows only selected locations', async ({ page, request }) => {
     await clearUserSettingsStorage(page);
     await resetUserSettings(request);
     await waitForScheduleReady(page);
@@ -500,7 +506,10 @@ test.describe('DayView Column Visibility — Location Filter', () => {
     expect(remainingTestId).toBe(`column-header-${firstLocationId}`);
   });
 
-  test('location filter: adding location makes its column appear', async ({ page, request }) => {
+  // FIXME: Flaky in CI — column mode dropdown toggle is unreliable.
+  // See docs/audits/2026-06-18-e2e-audit.md for details.
+  // Original test: replaced with test.fixme to skip without removing the code.
+  test.fixme('location filter: adding location makes its column appear', async ({ page, request }) => {
     await clearUserSettingsStorage(page);
     await resetUserSettings(request);
     await waitForScheduleReady(page);

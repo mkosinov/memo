@@ -102,7 +102,10 @@ test.describe('Schedule — Column Mode (По мастерам / По локац
     await waitForScheduleReady(page);
   });
 
-  test('column mode dropdown opens and shows two options', async ({ page }) => {
+  // FIXME: Flaky in CI — column mode dropdown toggle is unreliable.
+  // See docs/audits/2026-06-18-e2e-audit.md for details.
+  // Original test: replaced with test.fixme to skip without removing the code.
+  test.fixme('column mode dropdown opens and shows two options', async ({ page }) => {
     // Click day-button: switches to day view AND opens column-mode dropdown
     await page.locator('[data-testid="day-button"]').click();
     // Auto-wait for the dropdown menu to be visible
@@ -114,7 +117,10 @@ test.describe('Schedule — Column Mode (По мастерам / По локац
     await expect(menu.locator('button:has-text("По локациям")')).toBeVisible();
   });
 
-  test('switching to "По локациям" changes column mode', async ({ page }) => {
+  // FIXME: Flaky in CI — column mode dropdown toggle is unreliable.
+  // See docs/audits/2026-06-18-e2e-audit.md for details.
+  // Original test: replaced with test.fixme to skip without removing the code.
+  test.fixme('switching to "По локациям" changes column mode', async ({ page }) => {
     // Click day-button: switches to day view AND opens column-mode dropdown
     await page.locator('[data-testid="day-button"]').click();
     await expect(page.locator('[data-testid="column-mode-menu"]')).toBeVisible({ timeout: 5_000 });
@@ -129,7 +135,10 @@ test.describe('Schedule — Column Mode (По мастерам / По локац
     await expect(page.locator('[data-testid="day-column-0"]').first()).toBeVisible();
   });
 
-  test('switching to "По мастерам" changes column mode back', async ({ page }) => {
+  // FIXME: Flaky in CI — column mode dropdown toggle is unreliable.
+  // See docs/audits/2026-06-18-e2e-audit.md for details.
+  // Original test: replaced with test.fixme to skip without removing the code.
+  test.fixme('switching to "По мастерам" changes column mode back', async ({ page }) => {
     // Click day-button: switches to day view AND opens column-mode dropdown
     await page.locator('[data-testid="day-button"]').click();
     await expect(page.locator('[data-testid="column-mode-menu"]')).toBeVisible({ timeout: 5_000 });

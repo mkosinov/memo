@@ -3,6 +3,10 @@
 Contract change (2026-06-18):
 When ``alembic_version`` is missing, the function self-heals by stamping to
 head (legacy DB bootstrap). Previously it raised ``RuntimeError``.
+
+Fast-path (2026-06-18):
+When ``alembic_version`` already matches script head, ``command.upgrade``
+is NOT called — saving ~100-250ms per startup.
 """
 
 import asyncio
@@ -94,6 +98,47 @@ def test_run_alembic_upgrade_stamps_when_alembic_version_missing(tmp_path) -> No
                 f"Stamped revision {version!r} should be in heads {heads!r}"
             )
 
+        await mgr.engine.dispose()
+
+    asyncio.run(scenario())
+
+
+def test_run_alembic_upgrade_fast_path_when_at_head(tmp_path, monkeypatch) -> None:
+    """When at head, command.upgrade is NOT called (fast-path)."""
+    from alembic import command
+    from alembic.config import Config
+
+    from src.db.base import Base
+    from src.db.database import DBManager
+    from src.db.migrate import run_alembic_upgrade
+
+    test_db = tmp_path / "test_fast_path.db"
+    test_url = f"sqlite+aiosqlite:///{test_db}"
+
+    async def scenario():
+        mgr = DBManager(test_url, echo_mode=False)
+        async with mgr.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        sync_url = test_url.replace("+aiosqlite", "")
+        cfg = Config(str(BACKEND_DIR / "alembic.ini"))
+        cfg.set_main_option("sqlalchemy.url", sync_url)
+        cfg.set_main_option("script_location", str(BACKEND_DIR / "alembic"))
+        command.stamp(cfg, "head")
+
+        # Patch command.upgrade — should NOT be called
+        upgrade_calls = []
+        original_upgrade = command.upgrade
+
+        def track_upgrade(*args, **kwargs):
+            upgrade_calls.append((args, kwargs))
+            return original_upgrade(*args, **kwargs)
+
+        monkeypatch.setattr(command, "upgrade", track_upgrade)
+
+        await run_alembic_upgrade(test_url)
+        assert len(upgrade_calls) == 0, (
+            f"command.upgrade called {len(upgrade_calls)} times — fast-path failed"
+        )
         await mgr.engine.dispose()
 
     asyncio.run(scenario())

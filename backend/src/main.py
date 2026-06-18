@@ -31,10 +31,12 @@ from src.api.v1.visits import router as visits_router
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    async with db_manager.engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    # Issue #61: apply pending alembic migrations
-    await run_alembic_upgrade(str(settings.DATABASE_URL))
+    # In test env: conftest handles table creation, skip alembic
+    if settings.ENV != "testing":
+        async with db_manager.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        # Issue #61: apply pending alembic migrations
+        await run_alembic_upgrade(str(settings.DATABASE_URL))
     yield
 
 
@@ -58,7 +60,8 @@ def create_app() -> FastAPI:
             content={"detail": "Database integrity constraint violated"},
         )
 
-    setup_admin(app)
+    if settings.ENV != "testing":
+        setup_admin(app)
 
     # API v1
     app.include_router(masters_router, prefix="/api/v1/masters")

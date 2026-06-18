@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **fix: backend issues batch — channel tolerance, alembic baseline, schema drift (#47, #60, #61)** — 2026-06-18 (branch `fix/backend-issues`)
+  - **#60:** `ClientResponse` no longer inherits `ClientBase`; uses `str | None` for `channel` to tolerate legacy DB values (`instagram`, `vk`, `website`). Input schemas still reject unknown channels via `Channel` enum.
+  - **#61:** Generated initial alembic migration capturing all base tables. Existing migrations made idempotent with column/table existence guards. Added `backend/scripts/recreate_dev_db.sh` for one-command dev DB recreation. Wired `alembic upgrade head` into FastAPI `lifespan` via `src.db.migrate.run_alembic_upgrade()`.
+  - **#47:** Closed as wontfix — frontend uses PATCH (not PUT), and schemas already include `start: datetime | None = None`.
+  - Tests: 2 new test classes (`TestClientChannelTolerance`, `TestMigrate`), 139 tests passing.
+
 ### Added
 
 - **feat: schedule popover carousel — time-groups model with smart popover UX (toggle close, X close, auto-scroll, wheel propagation, smart alignment)** — 2026-06-16 (branch `feat-photo-searchable-select`)

@@ -103,40 +103,24 @@ test.describe('Schedule — Column Mode (По мастерам / По локац
   });
 
   test('column mode dropdown opens and shows two options', async ({ page }) => {
-    // Switch to day view first (column mode is only relevant in day view)
+    // Click day-button: switches to day view AND opens column-mode dropdown
     await page.locator('[data-testid="day-button"]').click();
-    await page.waitForTimeout(500);
-
-    // Dismiss any open menu (e.g., from previous test)
-    await page.mouse.click(5, 5);
-    await page.waitForTimeout(200);
-
-    // Open column mode dropdown
-    await page.locator('[data-testid="day-button"]  ').click();
-    await page.waitForTimeout(300);
+    // Auto-wait for the dropdown menu to be visible
+    await expect(page.locator('[data-testid="column-mode-menu"]')).toBeVisible({ timeout: 5_000 });
 
     const menu = page.locator('[data-testid="column-mode-menu"]');
-    await expect(menu).toBeVisible();
-
     // Should have two menu items
     await expect(menu.locator('button:has-text("По мастерам")')).toBeVisible();
     await expect(menu.locator('button:has-text("По локациям")')).toBeVisible();
   });
 
   test('switching to "По локациям" changes column mode', async ({ page }) => {
+    // Click day-button: switches to day view AND opens column-mode dropdown
     await page.locator('[data-testid="day-button"]').click();
-    await page.waitForTimeout(500);
-
-    // Dismiss any open menu (e.g., from previous test)
-    await page.mouse.click(5, 5);
-    await page.waitForTimeout(200);
-
-    await page.locator('[data-testid="day-button"]  ').click();
-    await page.waitForTimeout(300);
+    await expect(page.locator('[data-testid="column-mode-menu"]')).toBeVisible({ timeout: 5_000 });
 
     // Column mode switch is client-side only — no API call
     await page.locator('[data-testid="column-mode-menu"] button:has-text("По локациям")').click();
-    await page.waitForTimeout(500);
 
     // The day button text should change
     await expect(page.locator('[data-testid="day-button"]')).toContainText('День по локациям');
@@ -146,26 +130,20 @@ test.describe('Schedule — Column Mode (По мастерам / По локац
   });
 
   test('switching to "По мастерам" changes column mode back', async ({ page }) => {
+    // Click day-button: switches to day view AND opens column-mode dropdown
     await page.locator('[data-testid="day-button"]').click();
-    await page.waitForTimeout(500);
-
-    // Dismiss any open menu (e.g., from previous test)
-    await page.mouse.click(5, 5);
-    await page.waitForTimeout(200);
+    await expect(page.locator('[data-testid="column-mode-menu"]')).toBeVisible({ timeout: 5_000 });
 
     // Switch to locations first (client-side only — no API call)
-    await page.locator('[data-testid="day-button"]  ').click();
-    await page.waitForTimeout(300);
     await page.locator('[data-testid="column-mode-menu"] button:has-text("По локациям")').click();
-    await page.waitForTimeout(500);
+    await expect(page.locator('[data-testid="day-button"]')).toContainText('День по локациям');
+
+    // Click day-button again: already in day view, toggles dropdown open
+    await page.locator('[data-testid="day-button"]').click();
+    await expect(page.locator('[data-testid="column-mode-menu"]')).toBeVisible({ timeout: 5_000 });
 
     // Switch back to masters
-    await page.mouse.click(5, 5);
-    await page.waitForTimeout(200);
-    await page.locator('[data-testid="day-button"]  ').click();
-    await page.waitForTimeout(300);
     await page.locator('[data-testid="column-mode-menu"] button:has-text("По мастерам")').click();
-    await page.waitForTimeout(500);
 
     await expect(page.locator('[data-testid="day-button"]')).toContainText('День по мастерам');
   });

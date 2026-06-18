@@ -55,7 +55,8 @@ async function resetUserSettings(request: import('@playwright/test').APIRequestC
  */
 async function switchToDayView(page: import('@playwright/test').Page, date?: string) {
   await page.locator('[data-testid="day-button"]').click();
-  await page.waitForTimeout(500);
+  // Wait for day view to be active by checking button text
+  await expect(page.locator('[data-testid="day-button"]')).toContainText(/День/);
 
   if (date) {
     // Navigate to the specific date via custom event
@@ -346,7 +347,8 @@ test.describe('DayView Column Visibility — Master Filter', () => {
     // 5. Re-open master filter and add the target master
     await openMasterFilter(page);
     await selectOptionById(page, targetId);
-    await page.waitForTimeout(200);
+    // Auto-wait for the target column to appear
+    await expect(page.locator(`[data-testid="column-header-${targetId}"]`)).toBeVisible({ timeout: 5_000 });
 
     // 6. Close dropdown
     await closeDropdown(page);
@@ -448,14 +450,11 @@ test.describe('DayView Column Visibility — Location Filter', () => {
     await waitForScheduleReady(page);
     await switchToDayView(page, '2026-06-05');
 
-    // switchToDayView clicks the day-button which opens the dropdown.
-    // Close it first so our click below toggles it open (not closed).
-    await page.mouse.click(5, 5);
-    await page.waitForTimeout(300);
+    // switchToDayView clicks day-button which opens the column-mode dropdown.
+    // Wait for it to be visible, then select locations.
+    await expect(page.locator('[data-testid="column-mode-menu"]')).toBeVisible({ timeout: 5_000 });
 
     // Switch to locations column mode (pure UI state change, no network call)
-    await page.locator('[data-testid="day-button"]  ').click();
-    await page.waitForTimeout(300);
     await page.locator('[data-testid="column-mode-menu"] button:has-text("По локациям")').click();
 
     // Verify we're in day view with location columns
@@ -478,7 +477,6 @@ test.describe('DayView Column Visibility — Location Filter', () => {
       const isChecked = await selectAllCheckbox.isChecked();
       if (isChecked) {
         await selectAllCheckbox.click({ force: true });
-        await page.waitForTimeout(200);
       }
     }
 
@@ -486,7 +484,6 @@ test.describe('DayView Column Visibility — Location Filter', () => {
     const firstOption = page.locator(`[data-testid="multiselect-option-${firstLocationId}"]`);
     if (await firstOption.isVisible()) {
       await firstOption.click();
-      await page.waitForTimeout(200);
     }
 
     // Close dropdown
@@ -509,14 +506,11 @@ test.describe('DayView Column Visibility — Location Filter', () => {
     await waitForScheduleReady(page);
     await switchToDayView(page, '2026-06-05');
 
-    // switchToDayView clicks the day-button which opens the dropdown.
-    // Close it first so our click below toggles it open (not closed).
-    await page.mouse.click(5, 5);
-    await page.waitForTimeout(300);
+    // switchToDayView clicks day-button which opens the column-mode dropdown.
+    // Wait for it to be visible, then select locations.
+    await expect(page.locator('[data-testid="column-mode-menu"]')).toBeVisible({ timeout: 5_000 });
 
     // Switch to locations column mode (pure UI state change, no network call)
-    await page.locator('[data-testid="day-button"]  ').click();
-    await page.waitForTimeout(300);
     await page.locator('[data-testid="column-mode-menu"] button:has-text("По локациям")').click();
 
     // Get initial location column IDs
@@ -537,12 +531,10 @@ test.describe('DayView Column Visibility — Location Filter', () => {
       const isChecked = await selectAllCheckbox.isChecked();
       if (isChecked) {
         await selectAllCheckbox.click({ force: true });
-        await page.waitForTimeout(200);
       }
     }
     // Now select ONLY the keepId (all others are already deselected)
     await selectOptionById(page, keepId);
-    await page.waitForTimeout(200);
 
     // Close dropdown
     await closeDropdown(page);
@@ -555,7 +547,6 @@ test.describe('DayView Column Visibility — Location Filter', () => {
     // Re-open location filter and add the target location
     await openLocationFilter(page);
     await selectOptionById(page, targetId);
-    await page.waitForTimeout(200);
 
     // Close dropdown
     await closeDropdown(page);

@@ -4,6 +4,8 @@ import {
   createTestClient,
   createTestActivity,
   createTestRecord,
+  createTestRecordWithClient,
+  createTestRecordWithPayment,
   cleanup,
 } from './fixtures/factories';
 
@@ -304,41 +306,65 @@ test.describe('Records Page — Table and Filters', () => {
 
   // ── 11. Sorting — click header toggles sort direction ────────────────────
 
-  test('11. Sorting — click header toggles sort direction', async ({ page }) => {
-    await waitForRecordsReady(page);
+  test('11. Sorting — click header toggles sort direction', async ({ page, request }) => {
+    // Seed 3 records with different clients for deterministic sort test
+    const seeded = [
+      await createTestRecordWithClient(request, `АClient-${Date.now()}`),
+      await createTestRecordWithClient(request, `БClient-${Date.now() + 1}`),
+      await createTestRecordWithClient(request, `ВClient-${Date.now() + 2}`),
+    ];
 
-    // Find the "Клиент" header and click it to sort
-    const clientHeader = page.locator('table thead th').filter({ hasText: 'Клиент' });
-    await expect(clientHeader).toBeVisible();
+    try {
+      await waitForRecordsReady(page);
 
-    // Get initial order of client names
-    const getName = async (index: number) =>
-      page.locator('tbody tr').nth(index).locator('td').nth(1).textContent();
+      // Find the "Клиент" header and click it to sort
+      const clientHeader = page.locator('table thead th').filter({ hasText: 'Клиент' });
+      await expect(clientHeader).toBeVisible();
 
-    const initialFirst = await getName(0);
-    const initialLast = await getName((await page.locator('tbody tr').count()) - 1);
+      // Get initial order of client names
+      const getName = async (index: number) =>
+        page.locator('tbody tr').nth(index).locator('td').nth(1).textContent();
 
-    // Click header to sort ascending
-    await clientHeader.click();
-    await page.waitForTimeout(300);
+      // Wait for at least 3 rows (our seeded records)
+      await expect(page.locator('tbody tr')).toHaveCount({ minimum: 3 }, { timeout: 10_000 });
 
-    const afterFirstAsc = await getName(0);
-    const afterLastAsc = await getName((await page.locator('tbody tr').count()) - 1);
+      const initialFirst = await getName(0);
+      const initialLast = await getName((await page.locator('tbody tr').count()) - 1);
 
-    // Click again to sort descending
-    await clientHeader.click();
-    await page.waitForTimeout(300);
+      // Click header to sort ascending
+      await clientHeader.click();
+      // Wait for network response to indicate sort completed
+      await page.waitForResponse(
+        (r) => r.url().includes('/api/v1/records') && r.status() === 200,
+        { timeout: 5_000 },
+      ).catch(() => {});
 
-    const afterFirstDesc = await getName(0);
-    const afterLastDesc = await getName((await page.locator('tbody tr').count()) - 1);
+      const afterFirstAsc = await getName(0);
+      const afterLastAsc = await getName((await page.locator('tbody tr').count()) - 1);
 
-    // Ascending and descending should have different first elements (unless all same)
-    if (initialFirst !== initialLast) {
-      expect(afterFirstAsc).not.toBe(afterFirstDesc);
+      // Click again to sort descending
+      await clientHeader.click();
+      await page.waitForResponse(
+        (r) => r.url().includes('/api/v1/records') && r.status() === 200,
+        { timeout: 5_000 },
+      ).catch(() => {});
+
+      const afterFirstDesc = await getName(0);
+      const afterLastDesc = await getName((await page.locator('tbody tr').count()) - 1);
+
+      // Ascending and descending should have different first elements (unless all same)
+      if (initialFirst !== initialLast) {
+        expect(afterFirstAsc).not.toBe(afterFirstDesc);
+      }
+
+      // Verify sort indicator changes
+      await expect(clientHeader).toContainText('↓');
+    } finally {
+      for (const s of seeded) {
+        await cleanup(request, `/api/v1/records/${s.recordId}`);
+        await cleanup(request, `/api/v1/clients/${s.clientId}`);
+      }
     }
-
-    // Verify sort indicator changes
-    await expect(clientHeader).toContainText('↓');
   });
 
   // ── 12. Pagination — page count selector works ───────────────────────────
@@ -572,19 +598,33 @@ test.describe('Records Page — Table and Filters', () => {
 
   // ── 20. Payment status — displays correctly ──────────────────────────────
 
-  test('20. Payment status — displays payment indicator', async ({ page }) => {
-    await waitForRecordsReady(page);
+  test('20. Payment status — displays payment indicator', async ({ page, request }) => {
+    // Seed one record with a payment to guarantee indicator presence
+    const { clientId, recordId, paymentId } = await createTestRecordWithPayment(
+      request,
+      'Оплачено',
+    );
 
-    // Look for payment status indicators in the table
-    const paymentIndicators = page.locator('tbody td').filter({
-      hasText: /Оплачено|Частично|Не оплачено/,
-    });
+    try {
+      await waitForRecordsReady(page);
 
-    // If there are records, at least one should have a payment indicator
-    const rowCount = await page.locator('tbody tr').count();
-    if (rowCount > 0) {
-      const indicatorCount = await paymentIndicators.count();
-      expect(indicatorCount).toBeGreaterThan(0);
+      // Look for payment status indicators in the table
+      const paymentIndicators = page.locator('tbody td').filter({
+        hasText: /Оплачено|Частично|Не оплачено/,
+      });
+
+      // If there are records, at least one should have a payment indicator
+      const rowCount = await page.locator('tbody tr').count();
+      if (rowCount > 0) {
+        const indicatorCount = await paymentIndicators.count();
+        expect(indicatorCount).toBeGreaterThan(0);
+      }
+    } finally {
+      if (paymentId) {
+        await cleanup(request, `/api/v1/payments/${paymentId}`);
+      }
+      await cleanup(request, `/api/v1/records/${recordId}`);
+      await cleanup(request, `/api/v1/clients/${clientId}`);
     }
   });
 });

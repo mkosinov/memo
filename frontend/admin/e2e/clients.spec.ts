@@ -417,9 +417,11 @@ async function setupRecordTab(
   await expect(recordTabButton).toBeVisible({ timeout: 5000 });
   await recordTabButton.click();
 
-  // Wait for record tab content to load
+  // Wait for record tab content to load — must be visible before checking fields
   const recordTab = page.locator('[data-testid="client-record-tab"]');
-  await expect(recordTab).toBeVisible({ timeout: 10_000 });
+  await recordTab.waitFor({ state: 'visible', timeout: 10_000 });
+  // Also wait for the date field inside the tab to ensure tab content has rendered
+  await page.locator('#record-date').waitFor({ state: 'visible', timeout: 10_000 });
 
   return { client, activity, record };
 }

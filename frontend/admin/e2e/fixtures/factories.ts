@@ -96,6 +96,65 @@ export async function createTestRecord(
 }
 
 /**
+ * Create a client + activity + record in one call.
+ * Useful for tests that need records with known client names (e.g., sort tests).
+ */
+export async function createTestRecordWithClient(
+  api: APIRequestContext,
+  clientName: string,
+) {
+  const client = await createTestClient(api, { name: clientName });
+  const activity = await createTestActivity(api);
+  const record = await createTestRecord(api, activity.id, client.id);
+  return { clientId: client.id, recordId: record.id, activityId: activity.id };
+}
+
+/**
+ * Create a client + activity + record + payment in one call.
+ * Useful for tests that need records with known payment status.
+ */
+export async function createTestRecordWithPayment(
+  api: APIRequestContext,
+  paymentStatus?: 'Оплачено' | 'Частично' | 'Не оплачено',
+) {
+  const client = await createTestClient(api, {
+    name: `Payment Test ${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+  });
+  const activity = await createTestActivity(api);
+  const record = await createTestRecord(api, activity.id, client.id);
+
+  // Determine payment amount based on the status
+  let amount = 3500; // full price = "Оплачено"
+  if (paymentStatus === 'Частично') {
+    amount = 1500;
+  } else if (paymentStatus === 'Не оплачено') {
+    amount = 0;
+  }
+
+  let paymentId: string | null = null;
+  if (amount > 0) {
+    const paymentResp = await api.post(`${BACKEND}/api/v1/payments`, {
+      data: {
+        record_id: record.id,
+        amount,
+        method: 'card',
+      },
+    });
+    if (paymentResp.ok()) {
+      const payment = await paymentResp.json();
+      paymentId = payment.id;
+    }
+  }
+
+  return {
+    clientId: client.id,
+    recordId: record.id,
+    activityId: activity.id,
+    paymentId,
+  };
+}
+
+/**
  * Delete entity via API (ignore errors — used in cleanup).
  * Always call this in test cleanup to prevent data leaking between tests.
  */

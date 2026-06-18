@@ -10,6 +10,12 @@ export function ToastContainer() {
 
   const visible = toasts.slice(-5);
 
+  const BORDER_BY_KIND: Record<string, string> = {
+    info: 'border-transparent',
+    success: 'border-l-4 border-l-emerald-400',
+    error: 'border-l-4 border-l-red-400',
+  };
+
   return (
     <div
       className="fixed bottom-4 right-4 z-50 flex flex-col gap-2 max-w-sm"
@@ -19,7 +25,8 @@ export function ToastContainer() {
       {visible.map((toast) => (
         <div
           key={toast.id}
-          className="flex items-center gap-3 bg-sidebar text-white px-4 py-3 rounded-lg shadow-lg text-sm animate-slide-up"
+          data-testid={`toast-${toast.kind}`}
+          className={`flex items-center gap-3 bg-sidebar text-white px-4 py-3 rounded-lg shadow-lg text-sm animate-slide-up ${BORDER_BY_KIND[toast.kind] ?? BORDER_BY_KIND.info}`}
         >
           <span className="flex-1">{toast.message}</span>
           {toast.undo && (

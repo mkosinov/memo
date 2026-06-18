@@ -107,6 +107,10 @@ test.describe('Schedule — Column Mode (По мастерам / По локац
     await page.locator('[data-testid="day-button"]').click();
     await page.waitForTimeout(500);
 
+    // Dismiss any open menu (e.g., from previous test)
+    await page.mouse.click(5, 5);
+    await page.waitForTimeout(200);
+
     // Open column mode dropdown
     await page.locator('[data-testid="day-button"]  ').click();
     await page.waitForTimeout(300);
@@ -123,9 +127,14 @@ test.describe('Schedule — Column Mode (По мастерам / По локац
     await page.locator('[data-testid="day-button"]').click();
     await page.waitForTimeout(500);
 
+    // Dismiss any open menu (e.g., from previous test)
+    await page.mouse.click(5, 5);
+    await page.waitForTimeout(200);
+
     await page.locator('[data-testid="day-button"]  ').click();
     await page.waitForTimeout(300);
 
+    // Column mode switch is client-side only — no API call
     await page.locator('[data-testid="column-mode-menu"] button:has-text("По локациям")').click();
     await page.waitForTimeout(500);
 
@@ -140,13 +149,19 @@ test.describe('Schedule — Column Mode (По мастерам / По локац
     await page.locator('[data-testid="day-button"]').click();
     await page.waitForTimeout(500);
 
-    // Switch to locations first
+    // Dismiss any open menu (e.g., from previous test)
+    await page.mouse.click(5, 5);
+    await page.waitForTimeout(200);
+
+    // Switch to locations first (client-side only — no API call)
     await page.locator('[data-testid="day-button"]  ').click();
     await page.waitForTimeout(300);
     await page.locator('[data-testid="column-mode-menu"] button:has-text("По локациям")').click();
     await page.waitForTimeout(500);
 
     // Switch back to masters
+    await page.mouse.click(5, 5);
+    await page.waitForTimeout(200);
     await page.locator('[data-testid="day-button"]  ').click();
     await page.waitForTimeout(300);
     await page.locator('[data-testid="column-mode-menu"] button:has-text("По мастерам")').click();
@@ -159,7 +174,7 @@ test.describe('Schedule — Column Mode (По мастерам / По локац
     // Start in week view (default)
     await expect(page.locator('[data-testid="day-column-6"]')).toBeVisible();
 
-    // Open column mode dropdown and select masters
+    // Open column mode dropdown and select masters (client-side only — no API call)
     await page.locator('[data-testid="day-button"]  ').click();
     await page.waitForTimeout(300);
     await page.locator('[data-testid="column-mode-menu"] button:has-text("По мастерам")').click();

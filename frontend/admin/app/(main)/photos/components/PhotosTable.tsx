@@ -8,6 +8,7 @@ import { useUpdatePhoto, useCreatePhoto, useDeletePhoto } from '@/hooks/usePhoto
 import { useUI } from '@/contexts/UIContext';
 import { PhotoModal } from './PhotoModal';
 import { ColumnPicker } from '@/app/components/shared/ColumnPicker';
+import { ErrorState } from '@/app/components/error';
 
 // ─── Column definitions ──────────────────────────────────────────────────
 
@@ -31,7 +32,7 @@ const COLUMNS: Column[] = [
 // ─── Component ───────────────────────────────────────────────────────────
 
 export function PhotosTable() {
-  const { data: photos = [], isLoading } = useQuery<PhotoResponse[]>({
+  const { data: photos = [], isLoading, error, refetch } = useQuery<PhotoResponse[]>({
     queryKey: ['photos'],
     queryFn: getPhotos,
   });
@@ -190,6 +191,17 @@ export function PhotosTable() {
     await deleteMutation.mutateAsync(photo.id);
     showToast('Фото удалено');
   };
+
+  // ─── Error ───────────────────────────────────────────────────────
+
+  if (error) {
+    return (
+      <ErrorState
+        error={error}
+        onRetry={refetch}
+      />
+    );
+  }
 
   // ─── Loading ───────────────────────────────────────────────────────
 

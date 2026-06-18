@@ -11,6 +11,7 @@ import { displayMasterName } from '@/lib/utils';
 import { MasterModal } from './MasterModal';
 import { MasterFilters } from './MasterFilters';
 import { ColumnPicker } from '@/app/components/shared/ColumnPicker';
+import { ErrorState } from '@/app/components/error';
 
 // ─── Column definitions ──────────────────────────────────────────────────
 
@@ -33,7 +34,7 @@ const COLUMNS: Column[] = [
 // ─── Component ───────────────────────────────────────────────────────────
 
 export function MastersTable() {
-  const { data: masters = [], isLoading } = useQuery<MasterResponse[]>({
+  const { data: masters = [], isLoading, error, refetch } = useQuery<MasterResponse[]>({
     queryKey: ['masters'],
     queryFn: getMasters,
   });
@@ -200,6 +201,17 @@ export function MastersTable() {
     await deleteMaster.mutateAsync(master.id);
     showToast('Мастер удалён');
   };
+
+  // ─── Error ─────────────────────────────────────────────────────────
+
+  if (error) {
+    return (
+      <ErrorState
+        error={error}
+        onRetry={refetch}
+      />
+    );
+  }
 
   // ─── Loading / Empty ─────────────────────────────────────────────────
 

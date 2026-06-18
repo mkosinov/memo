@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { useClients } from '@/contexts/ClientsContext';
 import { ColumnPicker } from '@/app/components/shared/ColumnPicker';
+import { ErrorState } from '@/app/components/error';
 import type { ClientWithStats } from '@memo/api-client';
 
 const COLUMNS: { key: string; label: string; sortable: boolean; defaultVisible: boolean }[] = [
@@ -18,7 +19,7 @@ interface ClientsTableProps {
 }
 
 export function ClientsTable({ onClientClick }: ClientsTableProps) {
-  const { clients, isLoading, filters, sortBy, sortOrder, setSort, resetFilters, deleteClient } = useClients();
+  const { clients, isLoading, error, refetch, filters, sortBy, sortOrder, setSort, resetFilters, deleteClient } = useClients();
 
   const [visibleKeys, setVisibleKeys] = useState<string[]>(() => {
     try {
@@ -37,6 +38,15 @@ export function ClientsTable({ onClientClick }: ClientsTableProps) {
     filters.max_visits !== null ||
     filters.min_paid !== null ||
     filters.max_paid !== null;
+
+  if (error) {
+    return (
+      <ErrorState
+        error={new Error(error)}
+        onRetry={refetch}
+      />
+    );
+  }
 
   if (isLoading) {
     return (

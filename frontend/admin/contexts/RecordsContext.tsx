@@ -1,7 +1,7 @@
 'use client';
 
-import React, { createContext, useContext, useMemo } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import React, { createContext, useCallback, useContext, useMemo } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   getRecords,
   getClients,
@@ -32,12 +32,18 @@ export interface RecordsContextType {
   locations: Map<string, LocationResponse>;
   loading: boolean;
   error: Error | null;
+  refetch: () => void;
 }
 
 const RecordsContext = createContext<RecordsContextType | null>(null);
 
 export function RecordsProvider({ children }: { children: React.ReactNode }) {
   const { dateFrom, dateTo } = useNavigation();
+  const queryClient = useQueryClient();
+
+  const refetch = useCallback(() => {
+    void queryClient.refetchQueries({ queryKey: ['records'] });
+  }, [queryClient]);
 
   // Period-based data
   const { data: records = [], isLoading: recordsLoading, error: recordsError } = useQuery<RecordResponse[]>({
@@ -134,8 +140,9 @@ export function RecordsProvider({ children }: { children: React.ReactNode }) {
       locations,
       loading: recordsLoading,
       error: recordsError ?? null,
+      refetch,
     }),
-    [records, clients, payments, activities, masters, services, locations, recordsLoading, recordsError],
+    [records, clients, payments, activities, masters, services, locations, recordsLoading, recordsError, refetch],
   );
 
   return (

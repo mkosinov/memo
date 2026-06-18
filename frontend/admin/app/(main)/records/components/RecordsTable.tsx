@@ -7,6 +7,7 @@ import { displayMasterName } from '@/lib/utils';
 import { ClientCardModal } from './ClientCardModal';
 import { DiamondIcon } from '@/app/components/shared/DiamondIcon';
 import { ColumnPicker } from '@/app/components/shared/ColumnPicker';
+import { ErrorState } from '@/app/components/error';
 
 // ─── Column definitions ──────────────────────────────────────────────────
 
@@ -74,7 +75,7 @@ interface RecordsTableProps {
 }
 
 export function RecordsTable({ filters }: RecordsTableProps) {
-  const { records, clients, payments, activities, masters, services, locations } = useRecords();
+  const { records, clients, payments, activities, masters, services, locations, error, refetch } = useRecords();
 
   const [selectedRecord, setSelectedRecord] = useState<RecordResponse | null>(null);
   const [sortField, setSortField] = useState<string | null>(null);
@@ -226,6 +227,15 @@ export function RecordsTable({ filters }: RecordsTableProps) {
   };
   const paidForRecord = (recordId: string): number =>
     (payments.get(recordId) ?? []).reduce((s, p) => s + p.amount, 0);
+
+  if (error) {
+    return (
+      <ErrorState
+        error={error}
+        onRetry={refetch}
+      />
+    );
+  }
 
   return (
     <div className="flex">

@@ -37,12 +37,21 @@ class ClientPatch(BaseModel):
     channel: Channel | None = None
 
 
-class ClientResponse(ClientBase):
-    """Response schema with all client fields."""
+class ClientResponse(BaseModel):
+    """Response schema with all client fields.
+
+    Uses ``str | None`` for ``channel`` (not the Channel enum) to tolerate
+    any string already stored in the DB (e.g. 'instagram', 'vk', 'website'
+    from before the enum was tightened). See issue #60.
+    """
 
     model_config = ConfigDict(from_attributes=True)
 
     id: str
+    name: str | None = None
+    phone: str | None = None
+    email: str | None = None
+    channel: str | None = None
     created_at: datetime
     updated_at: datetime
     is_active: bool

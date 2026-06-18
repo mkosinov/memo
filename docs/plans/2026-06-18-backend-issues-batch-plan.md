@@ -248,137 +248,150 @@ class ClientListResponse(BaseModel):
 
 ---
 
-## Task 3: Add alembic migration helper for #61
+## Task 3: Bring existing memo.db to alembic head (one-time)
 
 ### Classification: standard
 ### Required Docs
-- `backend/alembic/versions/c2d4ed6da43f_add_custom_price_to_records.py` — existing migration
-- `backend/src/core/config.py` — DATABASE_URL
-- `backend/alembic/env.py` — alembic env config
+- `backend/alembic/versions/*.py` — all migration files
 - `backend/alembic.ini` — alembic config
+- `backend/src/core/config.py` — DATABASE_URL
 
 ### Task Description
 
-Create a helper function that:
-1. Checks if `alembic_version` table exists in the DB
-2. If not — stamps the current `head` (DB is at head via `create_all`)
-3. If yes — runs `alembic upgrade head` to apply pending migrations
-4. Idempotent (can be called multiple times)
+The current `backend/memo.db` was created via `create_all` and is missing some columns added by later migrations (e.g. `records.custom_price`). The DB has NO `alembic_version` table. To use alembic going forward, we need to:
+1. Determine the correct baseline (the last migration that was definitely applied)
+2. Stamp the DB to that baseline
+3. Run `alembic upgrade head` to apply pending migrations
+4. Verify the DB schema now matches the model
 
-Then add a RED test that verifies idempotency.
+**Baseline determination:** Inspect the DB schema. The DB has:
+- `clients.name/phone/channel` nullable (post-`ce42b37ee405`)
+- `user_settings` table exists (post-`25569161a522`)
+- BUT `records.custom_price` missing (pre-`c2d4ed6da43f`)
+- AND `locations.short_title` missing (pre-`4c7aaa708a63`)
+- AND `services.max_age` NOT NULL (pre-`275ba490cab8`)
+
+**Inconsistent state** — the DB has some post-`25569161a522` artifacts (user_settings) but is missing other later changes. The safest baseline is the **root** (`ce42b37ee405`), but the upgrade will fail on `25569161a522` because `user_settings` already exists.
+
+**Strategy:** Drop the existing `memo.db` and let `create_all` recreate it from current models. Data loss is acceptable for dev (per issue #61: "acceptable for dev, not for prod" — and this is dev). For prod, document the manual migration steps in the commit message.
 
 ### Files
 
-- **Create:** `backend/src/db/migrate.py` — migration helper
-- **Create:** `backend/tests/test_migrate.py` — migration tests
+- **Modify:** None (operations on DB file only)
+- **Create:** `backend/scripts/recreate_dev_db.sh` — script for re-creating dev DB
 
 ### Steps
 
-- [ ] **Read context first:**
-  - `cat backend/alembic.ini | head -40` (alembic config)
-  - `cat backend/alembic/env.py` (async env config)
-  - `cat backend/src/core/config.py` (DATABASE_URL location)
-  - `ls backend/alembic/versions/` (migration files)
-
-- [ ] **Write RED test first — `backend/tests/test_migrate.py`:**
-
-```python
-"""Tests for the alembic migration helper (issue #61)."""
-
-import pytest
-from sqlalchemy import text
-
-
-pytestmark = pytest.mark.db
-
-
-def test_run_migrations_stamps_when_alembic_version_missing(
-    db_manager, tmp_path
-) -> None:
-    """If alembic_version doesn't exist, stamp to head (no-op for schema)."""
-    import asyncio
-    from src.db.migrate import run_migrations
-
-    # Use a fresh DB file
-    test_db = tmp_path / "test_stamp.db"
-    test_url = f"sqlite+aiosqlite:///{test_db}"
-    from src.db.database import DBManager
-    from src.db.base import Base
-
-    async def scenario():
-        mgr = DBManager(test_url, echo_mode=False)
-        async with mgr.engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-        # alembic_version does NOT exist
-        async with mgr.engine.connect() as conn:
-            tables = await conn.execute(
-                text("SELECT name FROM sqlite_master WHERE type='table'")
-            )
-            names = {row[0] for row in tables}
-            assert "alembic_version" not in names
-
-        await run_migrations(test_url)
-
-        # After run, alembic_version exists and is at head
-        async with mgr.engine.connect() as conn:
-            rows = await conn.execute(
-                text("SELECT version_num FROM alembic_version")
-            )
-            version = rows.scalar()
-            assert version is not None
-            # Head is 275ba490cab8 (last migration)
-            assert version == "275ba490cab8"
-
-        await mgr.engine.dispose()
-
-    asyncio.run(scenario())
-
-
-def test_run_migrations_is_idempotent(db_manager, tmp_path) -> None:
-    """Calling run_migrations twice must not raise."""
-    import asyncio
-    from src.db.migrate import run_migrations
-    from src.db.database import DBManager
-    from src.db.base import Base
-
-    test_db = tmp_path / "test_idempotent.db"
-    test_url = f"sqlite+aiosqlite:///{test_db}"
-
-    async def scenario():
-        mgr = DBManager(test_url, echo_mode=False)
-        async with mgr.engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-        await run_migrations(test_url)
-        # Second call must be a no-op (already at head)
-        await run_migrations(test_url)
-        await mgr.engine.dispose()
-
-    asyncio.run(scenario())
-```
-
-- [ ] **Run the test — confirm RED (import error):**
+- [ ] **Backup the current memo.db (safety):**
   ```bash
   cd backend
-  uv run pytest tests/test_migrate.py -v
+  cp memo.db memo.db.bak.$(date +%Y%m%d)
+  ls -la memo.db*
   ```
-  - Expected: `ModuleNotFoundError: No module named 'src.db.migrate'`
 
-- [ ] **Implement the helper — `backend/src/db/migrate.py`:**
+- [ ] **Inspect what's in the DB before dropping:**
+  ```bash
+  cd backend
+  sqlite3 memo.db "SELECT COUNT(*) AS records_count FROM records;"
+  sqlite3 memo.db "SELECT COUNT(*) AS clients_count FROM clients;"
+  sqlite3 memo.db "SELECT COUNT(*) AS activities_count FROM activities;"
+  ```
+  - Note: dev DB likely has seed data, no production data
+  - If counts are 0 or only seed data — safe to drop
+
+- [ ] **Recreate the DB using alembic (one-time):**
+  ```bash
+  cd backend
+  rm memo.db
+  uv run alembic upgrade head
+  ```
+  - Expected: All migrations apply, ending at head `275ba490cab8`
+  - Verify: `sqlite3 memo.db ".tables"` should include `alembic_version`
+
+- [ ] **Verify schema now matches model:**
+  ```bash
+  cd backend
+  sqlite3 memo.db "PRAGMA table_info(records);" | grep custom_price
+  sqlite3 memo.db "PRAGMA table_info(visits);" | grep custom_price
+  sqlite3 memo.db "PRAGMA table_info(records);"
+  sqlite3 memo.db "SELECT version_num FROM alembic_version;"
+  ```
+  - Expected: `custom_price` present in records and visits
+  - Expected: version = `275ba490cab8` (head)
+
+- [ ] **Re-seed the dev DB:**
+  ```bash
+  cd backend
+  uv run python -m src.seed.seed
+  ```
+  - Expected: Seed runs successfully, no errors
+
+- [ ] **Save the recreate script — `backend/scripts/recreate_dev_db.sh`:**
+
+```bash
+#!/usr/bin/env bash
+# Recreate the dev memo.db from scratch using alembic migrations.
+# Use when the DB has drifted from the model schema.
+#
+# Usage: ./scripts/recreate_dev_db.sh
+
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+if [ -f memo.db ]; then
+    echo "Backing up existing memo.db → memo.db.bak.$(date +%Y%m%d%H%M%S)"
+    cp memo.db "memo.db.bak.$(date +%Y%m%d%H%M%S)"
+    rm memo.db
+fi
+
+echo "Running alembic upgrade head..."
+uv run alembic upgrade head
+
+echo "Seeding dev data..."
+uv run python -m src.seed.seed
+
+echo "Done. New memo.db created at head $(uv run alembic current 2>/dev/null | tail -1)"
+```
+
+- [ ] **Make script executable:**
+  ```bash
+  chmod +x backend/scripts/recreate_dev_db.sh
+  ```
+
+- [ ] **Report status: DONE with backup file path and new head version.**
+
+---
+
+## Task 4: Wire `alembic upgrade head` into FastAPI lifespan
+
+### Classification: small
+### Required Docs
+- `backend/src/main.py` — current lifespan (lines 32-37)
+- `backend/alembic.ini` — config
+
+### Task Description
+
+Add `alembic upgrade head` to the FastAPI `lifespan` startup hook, so future migrations apply automatically. Assumes the DB has been brought to head once (Task 3).
+
+### Files
+
+- **Modify:** `backend/src/main.py` — add alembic upgrade to lifespan
+
+### Steps
+
+- [ ] **Read current main.py lifespan:**
+  ```bash
+  sed -n '30,40p' backend/src/main.py
+  ```
+
+- [ ] **Add a migration helper — `backend/src/db/migrate.py`:**
 
 ```python
-"""Alembic migration runner (issue #61).
+"""Run alembic upgrade head (issue #61).
 
-Runs pending migrations on app startup, handling the case where the DB
-was originally created via SQLAlchemy's `create_all` (no alembic_version
-table) and may be missing columns added by later migrations.
-
-Behavior:
-- If `alembic_version` table does NOT exist → stamp to head (DB is at
-  head via `create_all` using current model definitions)
-- If `alembic_version` exists → run `alembic upgrade head` to apply
-  any pending migrations
-
-Idempotent — safe to call on every startup.
+Idempotent — runs every app startup. Assumes the DB has been stamped
+to a baseline at least once (use `alembic stamp` or recreate script).
 """
 
 from __future__ import annotations
@@ -395,13 +408,21 @@ from sqlalchemy.ext.asyncio import create_async_engine
 logger = logging.getLogger(__name__)
 
 
-async def run_migrations(database_url: str) -> None:
-    """Apply pending migrations. Idempotent.
+async def run_alembic_upgrade(database_url: str) -> None:
+    """Run `alembic upgrade head`. Idempotent.
+
+    If `alembic_version` table doesn't exist, the call will fail — the
+    operator must run `alembic stamp <baseline>` or recreate the DB first.
 
     Args:
         database_url: SQLAlchemy async URL (e.g. 'sqlite+aiosqlite:///memo.db').
     """
-    # Check if alembic_version exists
+    backend_dir = Path(__file__).resolve().parents[2]
+    cfg = Config(str(backend_dir / "alembic.ini"))
+    cfg.set_main_option("sqlalchemy.url", database_url)
+    cfg.set_main_option("script_location", str(backend_dir / "alembic"))
+
+    # If alembic_version doesn't exist, we cannot upgrade — fail loudly
     engine = create_async_engine(database_url, echo=False)
     try:
         async with engine.connect() as conn:
@@ -411,64 +432,20 @@ async def run_migrations(database_url: str) -> None:
                     "WHERE type='table' AND name='alembic_version'"
                 )
             )
-            has_alembic = result.scalar() is not None
+            if result.scalar() is None:
+                raise RuntimeError(
+                    "alembic_version table not found. "
+                    "Run `alembic stamp <baseline>` or recreate the DB. "
+                    "See scripts/recreate_dev_db.sh"
+                )
     finally:
         await engine.dispose()
 
-    # Build alembic Config
-    backend_dir = Path(__file__).resolve().parents[2]
-    cfg = Config(str(backend_dir / "alembic.ini"))
-    cfg.set_main_option("sqlalchemy.url", database_url)
-
-    if not has_alembic:
-        logger.info("alembic_version not found — stamping to head")
-        # Override script_location to absolute path
-        cfg.set_main_option(
-            "script_location", str(backend_dir / "alembic")
-        )
-        command.stamp(cfg, "head")
-    else:
-        logger.info("alembic_version exists — running upgrade head")
-        cfg.set_main_option(
-            "script_location", str(backend_dir / "alembic")
-        )
-        command.upgrade(cfg, "head")
+    logger.info("Running alembic upgrade head")
+    command.upgrade(cfg, "head")
 ```
 
-- [ ] **Run the test — confirm GREEN:**
-  ```bash
-  cd backend
-  uv run pytest tests/test_migrate.py -v
-  ```
-  - Expected: BOTH tests pass
-
-- [ ] **Report status: DONE.**
-
----
-
-## Task 4: Wire migration helper into FastAPI lifespan
-
-### Classification: small
-### Required Docs
-- `backend/src/main.py` — current lifespan (lines 32-37)
-- `backend/src/db/migrate.py` — Task 3 implementation
-
-### Task Description
-
-Call `run_migrations` from the FastAPI `lifespan` startup hook, AFTER `create_all` so the DB exists.
-
-### Files
-
-- **Modify:** `backend/src/main.py` — add migration call to `lifespan`
-
-### Steps
-
-- [ ] **Read current main.py lifespan:**
-  ```bash
-  sed -n '30,40p' backend/src/main.py
-  ```
-
-- [ ] **Modify `backend/src/main.py` — update imports and lifespan:**
+- [ ] **Modify `backend/src/main.py` — add migration call to lifespan:**
 
 ```python
 """Memo backend — FastAPI application factory."""
@@ -484,7 +461,7 @@ from src.admin.setup import setup_admin
 from src.core.config import settings
 from src.db import db_manager
 from src.db.base import Base
-from src.db.migrate import run_migrations
+from src.db.migrate import run_alembic_upgrade
 # ... (all other imports unchanged)
 
 
@@ -492,31 +469,100 @@ from src.db.migrate import run_migrations
 async def lifespan(_app: FastAPI):
     async with db_manager.engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    # Issue #61: apply pending migrations to bring DB to head
-    await run_migrations(str(settings.DATABASE_URL))
+    # Issue #61: apply pending alembic migrations
+    await run_alembic_upgrade(str(settings.DATABASE_URL))
     yield
 ```
 
-- [ ] **Verify import is correct:**
+- [ ] **Verify the import:**
   ```bash
   cd backend
-  uv run python -c "from src.db.migrate import run_migrations; print('ok')"
+  uv run python -c "from src.db.migrate import run_alembic_upgrade; print('ok')"
   ```
+
+- [ ] **Add a unit test — `backend/tests/test_migrate.py`:**
+
+```python
+"""Tests for the alembic upgrade runner (issue #61)."""
+
+import asyncio
+
+import pytest
+from sqlalchemy import text
+
+
+def test_run_alembic_upgrade_on_already_at_head(tmp_path) -> None:
+    """When DB is at head, run_alembic_upgrade is a no-op (no errors)."""
+    from src.db.migrate import run_alembic_upgrade
+    from src.db.database import DBManager
+    from src.db.base import Base
+
+    test_db = tmp_path / "test_at_head.db"
+    test_url = f"sqlite+aiosqlite:///{test_db}"
+
+    async def scenario():
+        mgr = DBManager(test_url, echo_mode=False)
+        # Create schema and stamp to head first
+        async with mgr.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+        # Stamp to head via alembic CLI
+        from alembic.config import Config
+        from alembic import command
+        backend_dir = mgr.engine.url.database and __import__('pathlib').Path(mgr.engine.url.database).resolve().parents[1]
+        cfg = Config(str(backend_dir / "alembic.ini"))
+        cfg.set_main_option("sqlalchemy.url", test_url)
+        cfg.set_main_option("script_location", str(backend_dir / "alembic"))
+        command.stamp(cfg, "head")
+
+        # Now run_alembic_upgrade must be a no-op
+        await run_alembic_upgrade(test_url)
+
+        async with mgr.engine.connect() as conn:
+            version = (await conn.execute(
+                text("SELECT version_num FROM alembic_version")
+            )).scalar()
+            assert version == "275ba490cab8"
+
+        await mgr.engine.dispose()
+
+    asyncio.run(scenario())
+
+
+def test_run_alembic_upgrade_fails_when_alembic_version_missing(tmp_path) -> None:
+    """When alembic_version doesn't exist, raise RuntimeError with guidance."""
+    from src.db.migrate import run_alembic_upgrade
+    from src.db.database import DBManager
+    from src.db.base import Base
+
+    test_db = tmp_path / "test_no_alembic.db"
+    test_url = f"sqlite+aiosqlite:///{test_db}"
+
+    async def scenario():
+        mgr = DBManager(test_url, echo_mode=False)
+        async with mgr.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        # No stamping — alembic_version doesn't exist
+        with pytest.raises(RuntimeError, match="alembic_version"):
+            await run_alembic_upgrade(test_url)
+        await mgr.engine.dispose()
+
+    asyncio.run(scenario())
+```
+
+- [ ] **Run the tests:**
+  ```bash
+  cd backend
+  uv run pytest tests/test_migrate.py -v
+  ```
+  - Expected: BOTH tests pass
 
 - [ ] **Run all backend tests — confirm no regression:**
   ```bash
   cd backend
-  uv run pytest -v
+  uv run pytest -v --tb=short
   ```
-  - All existing tests must still pass
-
-- [ ] **Verify the production memo.db has custom_price column after restart:**
-  ```bash
-  cd backend
-  sqlite3 memo.db ".schema records" | grep custom_price
-  ```
-  - Expected: `custom_price INTEGER,` (or similar)
-  - If still missing: restart backend (`uv run python -m src.main` or similar) and re-check
+  - All existing tests must still pass (test DBs use `reset_db` autouse fixture, no alembic interference)
 
 - [ ] **Report status: DONE.**
 
@@ -595,18 +641,26 @@ Run the full test suite to confirm nothing is broken, and verify the production 
 
 ## Commit Strategy
 
-After all tasks, commits on `fix/backend-issues`:
+After all tasks, commits on `fix/backend-issues` (in this order):
 
 ```bash
+# 1. Channel fix
 git add backend/src/schemas/client.py backend/tests/test_api_clients.py
 git commit -m "fix(client): tolerate any channel value in response schema (#60)"
 
+# 2. Migration helper + startup hook
 git add backend/src/db/migrate.py backend/tests/test_migrate.py
-git commit -m "feat(db): add alembic migration runner with stamp+upgrade (#61)"
+git commit -m "feat(db): add alembic upgrade runner (issue #61)"
 
 git add backend/src/main.py
-git commit -m "feat(db): run migrations on FastAPI startup (fix #61)"
+git commit -m "feat(db): run alembic upgrade on FastAPI startup (issue #61)"
+
+# 3. Recreate script
+git add backend/scripts/recreate_dev_db.sh
+git commit -m "chore(db): add script to recreate dev memo.db via alembic (#61)"
 ```
+
+**Note:** `backend/memo.db` itself is NOT committed (gitignored). The recreate script handles DB lifecycle for dev.
 
 ## Acceptance Criteria (from spec)
 

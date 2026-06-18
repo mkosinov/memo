@@ -37,14 +37,6 @@ def pytest_configure(config):
     config.addinivalue_line("markers", "integration: Complex flows, multi-step scenarios")
     config.addinivalue_line("markers", "misc: Infrastructure, health, CORS, admin")
 
-import asyncio
-import os
-import sqlite3
-import tempfile
-
-import pytest
-from fastapi.testclient import TestClient
-
 # ─── Test Database ──────────────────────────────────────────────────────────────
 
 # Use a temporary file for SQLite so connections work across event loops.
@@ -60,6 +52,64 @@ os.environ["ENV_FILE"] = ".env.test"
 
 # Path to backend root (where alembic.ini lives)
 BACKEND_DIR = Path(__file__).resolve().parents[1]
+
+
+# ─── Session-Scoped Fixtures ────────────────────────────────────────────────────
+
+@pytest.fixture(scope="session")
+def app():
+    """Session-scoped FastAPI app. Created once per test session."""
+    from src.main import create_app
+    return create_app()
+
+
+@pytest.fixture(scope="session")
+def db_engine(app):
+    """Session-scoped async engine. Schema created once via alembic upgrade.
+
+    Depends on ``app`` to ensure FastAPI app is created first (for setup_admin
+    engine if ENV is not testing).  Uses its own temp file — separate from the
+    module-level ``db_manager`` used by ``reset_db``.
+    """
+    from alembic import command
+    from alembic.config import Config
+    from src.db.database import DBManager
+
+    test_db_path = os.environ.get("MEMO_TEST_DB")
+    if not test_db_path:
+        fd, test_db_path = tempfile.mkstemp(suffix=".db", prefix="memo_session_")
+        os.close(fd)
+        os.environ["MEMO_TEST_DB"] = test_db_path
+
+    test_url = f"sqlite+aiosqlite:///{test_db_path}"
+    sync_url = f"sqlite:///{test_db_path}"
+
+    # Run alembic once at session start
+    cfg = Config(str(BACKEND_DIR / "alembic.ini"))
+    cfg.set_main_option("sqlalchemy.url", sync_url)
+    cfg.set_main_option("script_location", str(BACKEND_DIR / "alembic"))
+    command.upgrade(cfg, "head")
+
+    mgr = DBManager(test_url, echo_mode=False)
+    yield mgr.engine
+
+    # Teardown
+    try:
+        asyncio.run(mgr.engine.dispose())
+    except Exception:
+        pass
+    if os.path.exists(test_db_path):
+        try:
+            os.unlink(test_db_path)
+        except OSError:
+            pass
+
+
+@pytest.fixture(scope="session")
+def api_client(app):
+    """Session-scoped TestClient. One client for the entire test session."""
+    with TestClient(app) as c:
+        yield c
 
 
 # ─── Database Reset ─────────────────────────────────────────────────────────────
@@ -125,15 +175,7 @@ def reset_db():
 
 
 # ─── HTTP Client ────────────────────────────────────────────────────────────────
-
-@pytest.fixture
-def api_client():
-    """Shared TestClient — one per test."""
-    from src.main import create_app
-
-    app = create_app()
-    with TestClient(app) as c:
-        yield c
+# api_client is now session-scoped — see top of file.
 
 
 # ─── Fixture Factories ──────────────────────────────────────────────────────────

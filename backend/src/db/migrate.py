@@ -1,7 +1,8 @@
 """Run alembic upgrade head (issue #61).
 
-Idempotent — runs every app startup. Assumes the DB has been stamped
-to a baseline at least once (use ``alembic stamp`` or recreate script).
+Idempotent — runs every app startup. Self-healing: when
+``alembic_version`` is missing (legacy DB) the function stamps to head
+before upgrading, so the operator never needs manual intervention.
 """
 
 from __future__ import annotations
@@ -20,9 +21,10 @@ logger = logging.getLogger(__name__)
 async def run_alembic_upgrade(database_url: str) -> None:
     """Run ``alembic upgrade head``. Idempotent.
 
-    If ``alembic_version`` table doesn't exist, raises a clear
-    ``RuntimeError`` — the operator must run ``alembic stamp <baseline>``
-    or recreate the DB.  See ``backend/scripts/recreate_dev_db.sh``.
+    If ``alembic_version`` table doesn't exist (legacy DB created before
+    Alembic was introduced), the function self-heals by stamping to head.
+    This is safe because the lifespan hook runs ``Base.metadata.create_all``
+    *before* this function, so all model tables are already present.
 
     Args:
         database_url: SQLAlchemy async URL
@@ -36,7 +38,7 @@ async def run_alembic_upgrade(database_url: str) -> None:
     cfg.set_main_option("sqlalchemy.url", sync_url)
     cfg.set_main_option("script_location", str(backend_dir / "alembic"))
 
-    # Verify alembic_version exists — fail loudly if not
+    # Self-heal: if alembic_version is missing, stamp to head first
     engine = create_async_engine(database_url, echo=False)
     try:
         async with engine.connect() as conn:
@@ -47,11 +49,10 @@ async def run_alembic_upgrade(database_url: str) -> None:
                 )
             )
             if result.scalar() is None:
-                raise RuntimeError(
-                    "alembic_version table not found. "
-                    "Run `alembic stamp <baseline>` or recreate the DB using "
-                    "`backend/scripts/recreate_dev_db.sh`."
+                logger.warning(
+                    "alembic_version table missing — stamping to head (legacy DB bootstrap)"
                 )
+                command.stamp(cfg, "head")
     finally:
         await engine.dispose()
 

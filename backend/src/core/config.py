@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(extra="ignore")
 
     DATABASE_URL: str = "sqlite+aiosqlite:///./memo.db"
+    ENV: str = "development"
     PROJECT_NAME: str = "Memo Backend"
     CORS_ORIGINS: Annotated[list[str], NoDecode] = [
         "http://localhost:3000",

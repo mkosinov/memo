@@ -10,7 +10,6 @@ from sqlalchemy.exc import IntegrityError
 from src.admin.setup import setup_admin
 from src.core.config import settings
 from src.db import db_manager
-from src.db.base import Base
 from src.db.migrate import run_alembic_upgrade
 from src.api.v1.activities import router as activities_router
 from src.api.v1.clients import router as clients_router
@@ -31,10 +30,9 @@ from src.api.v1.visits import router as visits_router
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    async with db_manager.engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    # Issue #61: apply pending alembic migrations
-    await run_alembic_upgrade(str(settings.DATABASE_URL))
+    # In test env: conftest handles table creation, skip alembic
+    if settings.ENV != "testing":
+        await run_alembic_upgrade(str(settings.DATABASE_URL))
     yield
 
 
@@ -58,7 +56,8 @@ def create_app() -> FastAPI:
             content={"detail": "Database integrity constraint violated"},
         )
 
-    setup_admin(app)
+    if settings.ENV != "testing":
+        setup_admin(app)
 
     # API v1
     app.include_router(masters_router, prefix="/api/v1/masters")

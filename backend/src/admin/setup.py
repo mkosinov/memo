@@ -6,7 +6,6 @@ from sqladmin import Admin, ModelView
 from sqlalchemy import Column, create_engine
 
 from src.db import db_manager
-from src.db.base import Base
 from src.models.activity import Activity
 from src.models.client import Client
 from src.models.location import Location
@@ -152,11 +151,10 @@ def setup_admin(app) -> Admin:
     """Mount SQLAdmin at /admin with all model views.
 
     Creates a sync engine from the global db_manager's async engine URL
-    and ensures tables exist on it.
+    for sqladmin to use. Schema is managed by alembic, not by this module.
     """
     sync_url = str(db_manager.engine.url).replace("sqlite+aiosqlite://", "sqlite://")
     sync_engine = create_engine(sync_url)
-    Base.metadata.create_all(sync_engine)
     admin = Admin(app, engine=sync_engine)
     for view_cls in ALL_ADMIN_VIEWS:
         admin.add_view(view_cls)

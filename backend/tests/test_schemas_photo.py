@@ -4,7 +4,7 @@ from datetime import datetime
 
 import pytest
 
-pytestmark = pytest.mark.unit
+pytestmark = pytest.mark.pure_unit
 
 
 class TestPhotoResponse:

@@ -8,8 +8,6 @@ from sqlalchemy.orm import Session
 
 from src.db.base import Base
 
-pytestmark = pytest.mark.unit
-
 
 def _make_engine():
     """In-memory SQLite engine with string-based FK support."""
@@ -55,6 +53,7 @@ def _create_all_and_session(engine):
     return Session(engine)
 
 
+@pytest.mark.pure_unit
 class TestModelImports:
     """All models and join tables are importable from src.models."""
 
@@ -96,6 +95,7 @@ class TestModelImports:
         assert sorted(__all__) == sorted(expected)
 
 
+@pytest.mark.unit
 class TestModelTables:
     """Each model maps to the correct table name and has expected columns."""
 
@@ -118,6 +118,7 @@ class TestModelTables:
         assert table_name in tables
 
 
+@pytest.mark.unit
 class TestModelCrud:
     """Each model can be created, saved, and read back with correct values."""
 

@@ -4,7 +4,7 @@ import pytest
 
 from src.schemas.search import ActivitySearchResult, ServiceSearchResult, VisitorSearchResult
 
-pytestmark = pytest.mark.unit
+pytestmark = pytest.mark.pure_unit
 
 
 class TestVisitorSearchResult:

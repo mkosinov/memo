@@ -84,10 +84,7 @@ markers = [
     "integration: Complex flows, multi-step scenarios",
     "misc: Infrastructure, health, CORS, admin",
 ]
-addopts = [
-    "--cov=src",
-    "--cov-report=term-missing",
-]
+addopts = []
 
 # ── Coverage ───────────────────────────────────────────────────────
 [tool.coverage.run]

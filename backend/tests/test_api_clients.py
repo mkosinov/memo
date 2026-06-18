@@ -517,3 +517,59 @@ class TestClientResponseContract:
         )
         validated = ClientResponse.model_validate(resp.json())
         assert validated.name == "Patched"
+
+
+# ─── Channel Tolerance (Issue #60) ─────────────────────────────────────────
+
+
+class TestClientChannelTolerance:
+    """Issue #60: GET /api/v1/clients must tolerate any channel value in DB.
+
+    Channel enum has telegram/max/whatsapp, but DB has instagram/vk/website.
+    Response schema must accept any string from DB.
+    """
+
+    def test_get_clients_with_unknown_channel_returns_200(self, api_client) -> None:
+        """Insert client with channel='instagram' via SQL, GET must return 200."""
+        import sqlite3
+        import uuid as _uuid
+
+        from tests.conftest import _db_file
+
+        client_id = str(_uuid.uuid4())
+        # Bypass API validation by inserting directly via SQL
+        # (DB column is String(50), so any value is accepted at DB level)
+        conn = sqlite3.connect(_db_file.name)
+        conn.execute(
+            "INSERT INTO clients (id, name, phone, email, channel, "
+            "created_at, updated_at, is_active) VALUES "
+            "(?, 'Instagram User', '+79990000001', NULL, 'instagram', "
+            "datetime('now'), datetime('now'), 1)",
+            (client_id,),
+        )
+        conn.commit()
+        conn.close()
+
+        resp = api_client.get("/api/v1/clients")
+        assert resp.status_code == 200, f"GET failed: {resp.text}"
+        body = resp.json()
+        # Find the client with the unknown channel
+        matching = [c for c in body["items"] if c["id"] == client_id]
+        assert len(matching) == 1
+        assert matching[0]["channel"] == "instagram"
+
+    def test_post_client_with_unknown_channel_returns_422(self, api_client) -> None:
+        """POST must still REJECT unknown channel — input schema keeps enum."""
+        import uuid as _uuid
+
+        resp = api_client.post(
+            "/api/v1/clients",
+            json={
+                "name": "Bad Channel",
+                "phone": f"+7999{_uuid.uuid4().hex[:7]}",
+                "channel": "instagram",
+            },
+        )
+        assert resp.status_code == 422, (
+            f"Expected 422 for unknown channel, got {resp.status_code}: {resp.text}"
+        )

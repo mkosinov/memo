@@ -19,13 +19,14 @@ Key patterns:
 """
 
 import asyncio
+from pathlib import Path
 import os
 import sqlite3
 import tempfile
 
 import pytest
 from fastapi.testclient import TestClient
-
+from sqlalchemy import text
 
 # ─── Pytest Markers ──────────────────────────────────────────────────────────────
 
@@ -56,6 +57,9 @@ _TEST_DB_URL = f"sqlite+aiosqlite:///{_db_file.name}"
 
 os.environ["DATABASE_URL"] = _TEST_DB_URL
 os.environ["ENV_FILE"] = ".env.test"
+
+# Path to backend root (where alembic.ini lives)
+BACKEND_DIR = Path(__file__).resolve().parents[1]
 
 
 # ─── Database Reset ─────────────────────────────────────────────────────────────
@@ -104,6 +108,18 @@ def reset_db():
         async with db_manager.engine.begin() as conn:
             await conn.run_sync(Base.metadata.drop_all)
             await conn.run_sync(Base.metadata.create_all)
+
+        # Stamp alembic to head so lifespan's run_alembic_upgrade is a no-op in tests.
+        # Uses alembic's sync API directly (avoids async driver issues).
+        import alembic.config as _alembic_cfg
+        from alembic import command as _alembic_cmd
+
+        _cfg = _alembic_cfg.Config(str(BACKEND_DIR / "alembic.ini"))
+        _cfg.set_main_option("script_location", str(BACKEND_DIR / "alembic"))
+        # Use sync URL for alembic (alembic runs synchronously)
+        _sync_url = _TEST_DB_URL.replace("+aiosqlite", "")
+        _cfg.set_main_option("sqlalchemy.url", _sync_url)
+        _alembic_cmd.stamp(_cfg, "head")
 
     asyncio.run(_reset())
 

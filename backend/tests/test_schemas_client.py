@@ -6,12 +6,11 @@ from pydantic import ValidationError
 from src.models.enums import Channel
 from src.schemas.client import ClientBase, ClientCreate, ClientPatch, ClientResponse, ClientUpdate, ClientWithStats
 
-pytestmark = pytest.mark.unit
-
 
 class TestClientBaseNullableFields:
     """ClientBase should accept nullable name, phone, and channel."""
 
+    @pytest.mark.pure_unit
     def test_client_base_with_all_fields(self):
         """ClientBase works with all fields provided."""
         cb = ClientBase(name="Anna", phone="+79991112233", email="a@b.com", channel=Channel.TELEGRAM)
@@ -20,21 +19,25 @@ class TestClientBaseNullableFields:
         assert cb.email == "a@b.com"
         assert cb.channel == Channel.TELEGRAM
 
+    @pytest.mark.pure_unit
     def test_client_base_name_nullable(self):
         """ClientBase accepts name=None."""
         cb = ClientBase(name=None, phone="+79991112233", channel=Channel.TELEGRAM)
         assert cb.name is None
 
+    @pytest.mark.pure_unit
     def test_client_base_phone_nullable(self):
         """ClientBase accepts phone=None."""
         cb = ClientBase(name="Anna", phone=None, channel=Channel.TELEGRAM)
         assert cb.phone is None
 
+    @pytest.mark.pure_unit
     def test_client_base_channel_nullable(self):
         """ClientBase accepts channel=None."""
         cb = ClientBase(name="Anna", phone="+79991112233", channel=None)
         assert cb.channel is None
 
+    @pytest.mark.pure_unit
     def test_client_base_all_nullable(self):
         """ClientBase accepts all optional fields as None."""
         cb = ClientBase(name=None, phone=None, email=None, channel=None)
@@ -43,6 +46,7 @@ class TestClientBaseNullableFields:
         assert cb.email is None
         assert cb.channel is None
 
+    @pytest.mark.pure_unit
     def test_client_base_defaults(self):
         """ClientBase defaults optional fields to None when omitted."""
         cb = ClientBase()
@@ -55,11 +59,13 @@ class TestClientBaseNullableFields:
 class TestClientCreateNullableFields:
     """ClientCreate inherits nullable fields from ClientBase."""
 
+    @pytest.mark.pure_unit
     def test_create_with_all_fields(self):
         """ClientCreate works with all fields."""
         cc = ClientCreate(name="Bob", phone="+79991112233", channel=Channel.WHATSAPP)
         assert cc.name == "Bob"
 
+    @pytest.mark.pure_unit
     def test_create_with_no_fields(self):
         """ClientCreate accepts empty payload."""
         cc = ClientCreate()
@@ -70,11 +76,13 @@ class TestClientCreateNullableFields:
 class TestClientUpdateNullableFields:
     """ClientUpdate inherits nullable fields from ClientBase."""
 
+    @pytest.mark.pure_unit
     def test_update_with_all_fields(self):
         """ClientUpdate works with all fields."""
         cu = ClientUpdate(name="Updated", phone="+79990001111", channel=Channel.MAX)
         assert cu.name == "Updated"
 
+    @pytest.mark.pure_unit
     def test_update_with_no_fields(self):
         """ClientUpdate accepts empty payload."""
         cu = ClientUpdate()
@@ -85,6 +93,7 @@ class TestClientUpdateNullableFields:
 class TestClientPatch:
     """ClientPatch allows partial updates — all fields optional."""
 
+    @pytest.mark.pure_unit
     def test_patch_empty(self):
         """Empty patch is valid (no changes)."""
         p = ClientPatch()
@@ -93,6 +102,7 @@ class TestClientPatch:
         assert p.email is None
         assert p.channel is None
 
+    @pytest.mark.pure_unit
     def test_patch_name_only(self):
         """Patch with only name."""
         p = ClientPatch(name="Only Name")
@@ -100,23 +110,27 @@ class TestClientPatch:
         assert p.phone is None
         assert p.channel is None
 
+    @pytest.mark.pure_unit
     def test_patch_phone_only(self):
         """Patch with only phone."""
         p = ClientPatch(phone="+79999999999")
         assert p.phone == "+79999999999"
         assert p.name is None
 
+    @pytest.mark.pure_unit
     def test_patch_channel_only(self):
         """Patch with only channel."""
         p = ClientPatch(channel=Channel.WHATSAPP)
         assert p.channel == Channel.WHATSAPP
         assert p.name is None
 
+    @pytest.mark.pure_unit
     def test_patch_email_only(self):
         """Patch with only email."""
         p = ClientPatch(email="new@example.com")
         assert p.email == "new@example.com"
 
+    @pytest.mark.pure_unit
     def test_patch_all_fields(self):
         """Patch with all fields."""
         p = ClientPatch(
@@ -134,6 +148,7 @@ class TestClientPatch:
 class TestClientWithStats:
     """ClientWithStats extends ClientResponse with aggregated metrics."""
 
+    @pytest.mark.pure_unit
     def test_client_with_stats_fields(self):
         """ClientWithStats has all ClientResponse fields plus stats."""
         cws = ClientWithStats(
@@ -157,6 +172,7 @@ class TestClientWithStats:
         assert cws.total_paid == 15000
         assert cws.missed_visits == 1
 
+    @pytest.mark.pure_unit
     def test_client_with_stats_defaults(self):
         """ClientWithStats has sensible defaults for stats fields."""
         cws = ClientWithStats(
@@ -172,6 +188,7 @@ class TestClientWithStats:
         assert cws.total_paid == 0
         assert cws.missed_visits == 0
 
+    @pytest.mark.pure_unit
     def test_client_with_stats_nullable_client_fields(self):
         """ClientWithStats inherits nullable fields from ClientBase."""
         cws = ClientWithStats(
@@ -192,6 +209,7 @@ class TestClientWithStats:
 class TestClientResponseNullableFields:
     """ClientResponse inherits nullable fields from ClientBase."""
 
+    @pytest.mark.pure_unit
     def test_response_with_nullable_fields(self):
         """ClientResponse works with nullable name/phone/channel."""
         cr = ClientResponse(

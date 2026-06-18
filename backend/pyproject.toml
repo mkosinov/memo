@@ -80,6 +80,7 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 markers = [
     "unit: Fast tests, no DB (schemas, utils, validation)",
+    "pure_unit: Fast tests, NO database (pydantic, validation, pure logic)",
     "api: API endpoint tests (CRUD, status codes)",
     "integration: Complex flows, multi-step scenarios",
     "misc: Infrastructure, health, CORS, admin",

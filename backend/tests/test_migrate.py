@@ -1,9 +1,13 @@
-"""Tests for the alembic upgrade runner (issue #61)."""
+"""Tests for the alembic upgrade runner (issue #61).
+
+Contract change (2026-06-18):
+When ``alembic_version`` is missing, the function self-heals by stamping to
+head (legacy DB bootstrap). Previously it raised ``RuntimeError``.
+"""
 
 import asyncio
 from pathlib import Path
 
-import pytest
 from sqlalchemy import text
 
 
@@ -50,8 +54,11 @@ def test_run_alembic_upgrade_on_already_at_head(tmp_path) -> None:
     asyncio.run(scenario())
 
 
-def test_run_alembic_upgrade_fails_when_alembic_version_missing(tmp_path) -> None:
-    """When alembic_version doesn't exist, raise RuntimeError with guidance."""
+def test_run_alembic_upgrade_stamps_when_alembic_version_missing(tmp_path) -> None:
+    """When alembic_version is missing but model tables exist (legacy DB),
+    run_alembic_upgrade should stamp to head and complete without error."""
+    from alembic.script import ScriptDirectory
+
     from src.db.base import Base
     from src.db.database import DBManager
     from src.db.migrate import run_alembic_upgrade
@@ -61,11 +68,32 @@ def test_run_alembic_upgrade_fails_when_alembic_version_missing(tmp_path) -> Non
 
     async def scenario():
         mgr = DBManager(test_url, echo_mode=False)
+        # Simulate legacy DB: all model tables exist, but no alembic_version
         async with mgr.engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
-        # No stamping — alembic_version doesn't exist
-        with pytest.raises(RuntimeError, match="alembic_version"):
-            await run_alembic_upgrade(test_url)
+        # No stamping — alembic_version table is absent
+
+        # Must NOT raise — self-heal by stamping to head
+        await run_alembic_upgrade(test_url)
+
+        # Verify alembic_version table now exists with a revision
+        async with mgr.engine.connect() as conn:
+            version = (
+                await conn.execute(text("SELECT version_num FROM alembic_version"))
+            ).scalar()
+            assert version is not None, (
+                "alembic_version should exist after self-heal"
+            )
+            # Verify it matches the current head
+            from alembic.config import Config
+
+            cfg = Config(str(BACKEND_DIR / "alembic.ini"))
+            cfg.set_main_option("script_location", str(BACKEND_DIR / "alembic"))
+            heads = ScriptDirectory.from_config(cfg).get_heads()
+            assert version in heads, (
+                f"Stamped revision {version!r} should be in heads {heads!r}"
+            )
+
         await mgr.engine.dispose()
 
     asyncio.run(scenario())

@@ -326,7 +326,7 @@ test.describe('Records Page — Table and Filters', () => {
         page.locator('tbody tr').nth(index).locator('td').nth(1).textContent();
 
       // Wait for at least 3 rows (our seeded records)
-      await expect(page.locator('tbody tr')).toHaveCount({ minimum: 3 }, { timeout: 10_000 });
+      await expect.poll(async () => page.locator('tbody tr').count(), { timeout: 10_000 }).toBeGreaterThanOrEqual(3);
 
       const initialFirst = await getName(0);
       const initialLast = await getName((await page.locator('tbody tr').count()) - 1);

@@ -362,7 +362,7 @@ export function ClientRecordTab({ recordId, clientId, onClose }: ClientRecordTab
             onChange={e => { setDate(e.target.value); markChanged(); }}
           />
         </div>
-        <div>
+        <div id="record-time">
           <TimePicker
             value={date && time ? `${date}T${time}:00` : ''}
             onChange={(isoValue) => {

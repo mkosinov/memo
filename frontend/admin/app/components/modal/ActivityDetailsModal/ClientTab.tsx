@@ -4,7 +4,7 @@ import React, { useState, useCallback, useRef } from 'react';
 import type { RecordResponse, ClientResponse, VisitorResponse, PaymentResponse, TariffResponse } from '@memo/api-client';
 import type { RecordStatus } from '@memo/domain';
 import { deletePayment as apiDeletePayment } from '@memo/api-client';
-import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 
 interface ClientTabProps {
   record: RecordResponse;
@@ -18,6 +18,7 @@ interface ClientTabProps {
   onAddPayment: (recordId: string, amount: number, method: string) => void;
   onAddVisitor?: (data: { name: string; age?: number; price: number }) => Promise<void>;
   showToast: (message: string, undo?: () => void) => void;
+  onClose?: () => void;
 }
 
 const STATUS_CONFIG: Record<RecordStatus, { label: string; color: string }> = {
@@ -74,12 +75,20 @@ export function ClientTab({
   onAddPayment,
   onAddVisitor,
   showToast,
+  onClose,
 }: ClientTabProps) {
   const [name, setName] = useState(client?.name || '');
   const [status, setStatus] = useState<RecordStatus>(record.status as RecordStatus);
   const [paymentAmount, setPaymentAmount] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('card');
   const isDeletingRef = useRef(false);
+  const router = useRouter();
+
+  const handleOpenProfile = useCallback(() => {
+    if (!client) return;
+    onClose?.();
+    router.push(`/clients/${client.id}`);
+  }, [client, onClose, router]);
 
   // Add visitor form state
   const [showAddVisitor, setShowAddVisitor] = useState(false);
@@ -204,11 +213,11 @@ export function ClientTab({
       {/* Row 2: Client link */}
       {client && (
         <div>
-          <Link
-            href={`/clients/${client.id}`}
-            target="_blank"
+          <button
+            onClick={handleOpenProfile}
             className="inline-flex items-center gap-1.5 text-brand text-xs hover:underline"
             data-testid="client-link"
+            type="button"
           >
             <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
@@ -216,7 +225,7 @@ export function ClientTab({
               <line x1="10" y1="14" x2="21" y2="3" />
             </svg>
             Открыть профиль
-          </Link>
+          </button>
         </div>
       )}
 

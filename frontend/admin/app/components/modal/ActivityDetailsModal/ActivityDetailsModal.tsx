@@ -220,6 +220,7 @@ export function ActivityDetailsModal({ isOpen, onClose, activity, mode }: Activi
           }
         }}
         showToast={showToast}
+        onClose={onClose}
       />
     );
   };

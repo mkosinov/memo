@@ -77,6 +77,16 @@ vi.mock('@tanstack/react-query', () => ({
   })),
 }));
 
+vi.mock('next/navigation', () => ({
+  useRouter: vi.fn(() => ({
+    push: vi.fn(),
+    replace: vi.fn(),
+    prefetch: vi.fn(),
+    back: vi.fn(),
+    forward: vi.fn(),
+  })),
+}));
+
 import { useSchedule } from '@/contexts/ScheduleContext';
 import { useRecords } from '@/contexts/RecordsContext';
 import { useUI } from '@/contexts/UIContext';
@@ -258,8 +268,7 @@ describe('ClientTab', () => {
     render(<ClientTab {...defaultProps} />);
     const link = screen.getByTestId('client-link');
     expect(link).toBeInTheDocument();
-    expect(link.getAttribute('href')).toBe('/clients/c1');
-    expect(link.getAttribute('target')).toBe('_blank');
+    expect(link.tagName).toBe('BUTTON');
   });
 
   it('renders record status dropdown', () => {
@@ -569,10 +578,9 @@ describe('ClientTab — layout & features', () => {
 
   it('renders client link as SVG icon (not text)', () => {
     const { container } = render(<ClientTab {...defaultProps} />);
-    const link = container.querySelector('[data-testid="client-link"]') as HTMLAnchorElement;
+    const link = container.querySelector('[data-testid="client-link"]') as HTMLButtonElement;
     expect(link).toBeInTheDocument();
-    expect(link.getAttribute('href')).toBe('/clients/c1');
-    expect(link.getAttribute('target')).toBe('_blank');
+    expect(link.tagName).toBe('BUTTON');
     // Should contain an SVG element, not text link
     expect(link.querySelector('svg')).toBeInTheDocument();
   });

@@ -9,6 +9,7 @@ import { useUI } from '@/contexts/UIContext';
 import { ServiceModal } from './ServiceModal';
 import { ServiceFilters } from './ServiceFilters';
 import { ColumnPicker } from './ColumnPicker';
+import { ErrorState } from '@/app/components/error';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
@@ -164,7 +165,7 @@ function loadVisibleKeys(): string[] | null {
 // ─── Component ────────────────────────────────────────────────────────────
 
 export function ServicesTable() {
-  const { data: services = [], isLoading } = useQuery<ServiceResponse[], Error>({
+  const { data: services = [], isLoading, error, refetch } = useQuery<ServiceResponse[], Error>({
     queryKey: ['services'],
     queryFn: () => getServices(),
     staleTime: 5 * 60 * 1000,
@@ -323,6 +324,15 @@ export function ServicesTable() {
     await deleteService.mutateAsync(service.id);
     showToast('Услуга удалена', undefined);
   };
+
+  if (error) {
+    return (
+      <ErrorState
+        error={error}
+        onRetry={refetch}
+      />
+    );
+  }
 
   if (isLoading) {
     return (

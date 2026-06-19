@@ -51,6 +51,7 @@ export interface ClientsContextType {
   sortOrder: 'asc' | 'desc';
   isLoading: boolean;
   error: string | null;
+  refetch: () => void;
   setPage: (page: number) => void;
   setPerPage: (perPage: number) => void;
   setFilters: (filters: Partial<ClientFilters>) => void;
@@ -74,7 +75,7 @@ export function ClientsProvider({ children }: { children: React.ReactNode }) {
   const [sortBy, setSortBy] = useState('name');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
 
-  const { data, isLoading, error } = useQuery<ClientListResponse>({
+  const { data, isLoading, error, refetch } = useQuery<ClientListResponse>({
     queryKey: ['clients', page, perPage, filters, sortBy, sortOrder],
     queryFn: () =>
       getClientsWithStats({
@@ -166,6 +167,7 @@ export function ClientsProvider({ children }: { children: React.ReactNode }) {
       sortOrder,
       isLoading,
       error: error?.message || null,
+      refetch,
       setPage,
       setPerPage,
       setFilters,
@@ -185,6 +187,7 @@ export function ClientsProvider({ children }: { children: React.ReactNode }) {
       sortOrder,
       isLoading,
       error,
+      refetch,
       createClient,
       updateClient,
       patchClient,

@@ -84,6 +84,7 @@ export function createMockRecordsContext(
     locations: new Map(),
     loading: false,
     error: null,
+    refetch: vi.fn(),
     ...overrides,
   };
 }

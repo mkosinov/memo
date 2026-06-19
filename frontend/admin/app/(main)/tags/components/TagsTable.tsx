@@ -8,6 +8,7 @@ import { useUpdateTag, useCreateTag, useDeleteTag } from '@/hooks/useTagsMutatio
 import { useUI } from '@/contexts/UIContext';
 import { TagModal } from './TagModal';
 import { ColumnPicker } from '@/app/components/shared/ColumnPicker';
+import { ErrorState } from '@/app/components/error';
 
 // ─── Column definitions ──────────────────────────────────────────────────
 
@@ -26,7 +27,7 @@ const COLUMNS: Column[] = [
 // ─── Component ───────────────────────────────────────────────────────────
 
 export function TagsTable() {
-  const { data: tags = [], isLoading } = useQuery<TagResponse[]>({
+  const { data: tags = [], isLoading, error, refetch } = useQuery<TagResponse[]>({
     queryKey: ['tags'],
     queryFn: getTags,
   });
@@ -160,6 +161,17 @@ export function TagsTable() {
     await deleteTag.mutateAsync(tag.id);
     showToast('Тег удалён');
   };
+
+  // ─── Error ─────────────────────────────────────────────────────────
+
+  if (error) {
+    return (
+      <ErrorState
+        error={error}
+        onRetry={refetch}
+      />
+    );
+  }
 
   // ─── Loading ─────────────────────────────────────────────────────────
 

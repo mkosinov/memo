@@ -2,8 +2,11 @@
 
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
 
+export type ToastKind = 'info' | 'success' | 'error';
+
 interface Toast {
   id: string;
+  kind: ToastKind;
   message: string;
   undo?: () => void;
 }
@@ -12,7 +15,7 @@ interface UIContextType {
   deleteMode: boolean;
   toggleDeleteMode: () => void;
   toasts: Toast[];
-  showToast: (message: string, undo?: () => void) => void;
+  showToast: (message: string, kindOrUndo?: ToastKind | (() => void), undo?: () => void) => void;
   hideToast: (id: string) => void;
   sidebarCollapsed: boolean;
   toggleSidebar: () => void;
@@ -44,9 +47,21 @@ export function UIProvider({ children }: { children: React.ReactNode }) {
     setDeleteMode(prev => !prev);
   }, []);
 
-  const showToast = useCallback((message: string, undo?: () => void) => {
+  const showToast = useCallback((
+    message: string,
+    kindOrUndo?: ToastKind | (() => void),
+    undo?: () => void,
+  ) => {
+    let kind: ToastKind = 'info';
+    let undoFn: (() => void) | undefined;
+    if (typeof kindOrUndo === 'function') {
+      undoFn = kindOrUndo;
+    } else if (kindOrUndo) {
+      kind = kindOrUndo;
+      undoFn = undo;
+    }
     const id = `toast-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-    setToasts(prev => [...prev, { id, message, undo }]);
+    setToasts(prev => [...prev, { id, kind, message, undo: undoFn }]);
     const timerId = setTimeout(() => {
       toastTimers.current.delete(id);
       setToasts(prev => prev.filter(t => t.id !== id));

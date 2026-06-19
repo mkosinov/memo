@@ -11,6 +11,7 @@ import { LocationModal } from './LocationModal';
 import { LocationFilters } from './LocationFilters';
 import { LOCATION_FIELDS } from './locationFields';
 import { ColumnPicker } from '@/app/components/shared/ColumnPicker';
+import { ErrorState } from '@/app/components/error';
 
 // ─── Column definitions ──────────────────────────────────────────────────
 
@@ -36,7 +37,7 @@ const COLUMNS: Column[] = [
 // ─── Component ───────────────────────────────────────────────────────────
 
 export function LocationsTable() {
-  const { data: locations = [], isLoading } = useQuery<LocationResponse[]>({
+  const { data: locations = [], isLoading, error, refetch } = useQuery<LocationResponse[]>({
     queryKey: ['locations'],
     queryFn: getLocations,
   });
@@ -199,6 +200,17 @@ export function LocationsTable() {
     await deleteLocation.mutateAsync(loc.id);
     showToast('Локация удалена');
   };
+
+  // ─── Error ─────────────────────────────────────────────────────────
+
+  if (error) {
+    return (
+      <ErrorState
+        error={error}
+        onRetry={refetch}
+      />
+    );
+  }
 
   // ─── Loading / Empty ─────────────────────────────────────────────────
 

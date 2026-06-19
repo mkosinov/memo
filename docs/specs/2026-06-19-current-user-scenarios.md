@@ -192,6 +192,14 @@ Single living source of truth for **what the user can do** in the admin app. Eve
 
 **Summary:** 14 scenarios total. 10 new E2E needed (US-S01, US-S03, US-M01, US-M03, US-M04, US-M05, US-M06, US-M09, US-M10, US-ST01). 2 covered as side-effects of US-M03 (US-M07, US-M08 — assertions on name and seats). 2 use existing E2E (US-S02 → `schedule.spec.ts`, US-M02 → `activity-details-modal.spec.ts`). **10 new E2E RED → 0 GREEN** as of 2026-06-19. Target after Wave 4: **all ✅ GREEN**.
 
+### Replay Test Result (T25)
+- **Date:** 2026-06-19
+- **Branch:** `feat-testing-strategy-v2`
+- **Result:** ✅ All 10 E2E tests FAILED (RED) — confirmed
+- **Output:** `10 failed, 0 passed`
+- **Log:** `/tmp/replay-test-RED.log`
+- **Conclusion:** Tests correctly catch bugs #73–#86. Going GREEN after Wave 4 will be meaningful.
+
 ---
 
 ## Visual Compliance Checks

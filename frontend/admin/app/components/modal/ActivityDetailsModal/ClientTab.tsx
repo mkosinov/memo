@@ -167,6 +167,7 @@ export function ClientTab({
             className={inputClass}
             style={inputStyle}
             value={client?.phone || ''}
+            placeholder="Не указано"
             disabled
             data-testid="client-phone"
           />
@@ -182,6 +183,7 @@ export function ClientTab({
             style={inputStyle}
             value={name}
             onChange={(e) => setName(e.target.value)}
+            placeholder="Не указано"
             data-testid="client-name"
           />
         </div>

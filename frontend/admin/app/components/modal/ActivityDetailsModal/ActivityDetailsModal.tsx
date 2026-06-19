@@ -82,10 +82,12 @@ export function ActivityDetailsModal({ isOpen, onClose, activity, mode }: Activi
     const settingsTab: Tab = { id: 'settings', label: 'Настройка' };
     const clientTabs: Tab[] = activityRecords.map((record) => {
       const client = clients.get(record.client_id ?? '');
+      const name = client?.name?.trim();
+      const phone = client?.phone?.trim();
       return {
         id: `client-${record.id}`,
-        label: client?.name || 'Неизвестный',
-        sublabel: client?.phone || '',
+        label: name || phone || 'Без контакта',
+        sublabel: name && phone ? phone : '',
       };
     });
     return [settingsTab, ...clientTabs];

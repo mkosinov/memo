@@ -7,7 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased] — 2026-06-18
+## [Unreleased] — 2026-06-19
+
+### Added
+- **E2E 5-shard CI split** (#71, #72) — CI suite split into 5 project-based shards (services, schedule, records, clients, rest). Wall time reduced from 5m15s to ≤5m.
+- **Project board reconciliation** (2026-06-19) — 10 status updates applied across issues #30-#34, #37, #47, #48, #1.
 
 ### Added (Robustness Bundle)
 - **ErrorState component** with 3 variants (`table`, `card`, `inline`) for inline error UI in list/table components when `useQuery` fails. Renders title + error message + retry button.

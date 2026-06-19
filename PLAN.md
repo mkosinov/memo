@@ -8,14 +8,16 @@
 > **Backend Issues Batch: ✅ Completed 2026-06-18** — #47 wontfix, #60 channel validation, #61 custom_price migration (branch `fix/backend-issues`)
 > **Backend Test Optimization: ✅ Completed 2026-06-18** — pytest suite 30+ min → 1m47s (session-scope fixtures, alembic fast-path, truncate-per-test, xdist, pure_unit marker audit) — branch `fix/optimize-backend-tests`
 > **Robustness Bundle: ✅ Completed 2026-06-18** — #53 wontfix, #64 React Query errors, #65 5 e2e fixed + 6 fixme'd (branch `fix/robustness-bundle`)
+> **E2E 5-Shard CI Split: ✅ Completed 2026-06-19** — #71 project-based CI matrix, wall time 5m→≤5m (branch `ci/e2e-shard-5-projects`)
+> **Reconciliation: ✅ Completed 2026-06-19** — Project board statuses synchronized with reality
 > **Stage 5 API Integration: ✅ Completed 2026-05-30** — admin connected to real API
 > **Stage 10 (Web): ✅ Completed 2026-05-27** — colourmountains.ru public website (285 tests)
 
-## Deadline (updated 2026-05-30)
+## Deadline (updated 2026-06-19)
 
-| Milestone | Date | Deliverable |
-|-----------|------|-------------|
-| **Full release** | **June 15, 2026** | All stages complete |
+| Milestone | Original Date | Current Status |
+|-----------|---------------|----------------|
+| **Full release** | **June 15, 2026** | ⏳ Overdue — TBD reschedule. Stages 7–9 still in Backlog; open issues #37 (inline filters), #48 (optimistic update) pending. |
 
 ## Introduction
 
@@ -210,11 +212,13 @@ Public website (`frontend/web/`) already has the 4-step booking flow. Now:
 - [x] Error states — handle backend errors gracefully in booking UI
 - [x] Visual compliance — verify against design spec
 
-**Result:** Client can book a master class end-to-end with real backend
+**Result:** Client can book a master class end-to-end with real backend. Core UX implemented, but project issue #6 remains open for any remaining follow-ups.
 
 ---
 
 ## Stage 7: P4 — Artist App (Mobile)
+
+> **Status: Backlog, scheduled post-MVP**
 
 New `frontend/master/` — Next.js 14, mobile-first.
 - [ ] Create `frontend/master/` — Next.js 14 project
@@ -231,6 +235,8 @@ New `frontend/master/` — Next.js 14, mobile-first.
 
 ## Stage 8: P5 — AI Concierge Chat
 
+> **Status: Backlog, scheduled post-MVP**
+
 - [ ] **ChatPage** (`/chat`) — port
 - [ ] ChatMessage, ChatInput, QuickActions, ServiceRecommendation, TypingIndicator
 - [ ] Keyword-based matching (temporary placeholder)
@@ -240,6 +246,8 @@ New `frontend/master/` — Next.js 14, mobile-first.
 ---
 
 ## Stage 9: Tests and Polish
+
+> **Status: Backlog, scheduled post-MVP**
 
 - [ ] Tests for all pages (Vitest + Testing Library)
 - [ ] TypeScript strict mode
@@ -276,11 +284,17 @@ New `frontend/master/` — Next.js 14, mobile-first.
 | 5 — Frontend–Backend API | 3 | Admin connected to real API | @frontend-coder | ✅ |
 | 10 — Web (colourmountains.ru) | 5 | Public website + online booking | @frontend-coder | ✅ |
 | 6 — P3 Booking Flow E2E | 4 | Verify + polish + backend wiring | @frontend-coder | ✅ |
-| 7 — P4 Artist App | 4 | Mobile app for artists | @frontend-coder | ⬜ |
-| 8 — P5 AI Concierge | 3 | Chat assistant | @frontend-coder | ⬜ |
-| 9 — Tests and Polish | 3 | Tests, a11y, build, SEO | @tester + @frontend-coder | ⬜ |
+| — Backend Issues Batch | 1 | #47 wontfix, #60 channel tolerance, #61 alembic baseline | @backend-coder | ✅ (2026-06-18) |
+| — Backend Test Optimization | 1 | pytest suite 30+ min → 1m47s | @tester + @backend-coder | ✅ (2026-06-18) |
+| — Robustness Bundle | 2 | Error handling, 5 e2e fixed, 6 fixme'd | @frontend-coder + @debugger | ✅ (2026-06-18) |
+| — E2E 5-Shard CI Split | 1 | CI wall time ~5m | @tester + @deployer | ✅ (2026-06-19) |
+| 7 — P4 Artist App | 4 | Mobile app for artists | @frontend-coder | ⬜ Backlog |
+| 8 — P5 AI Concierge | 3 | Chat assistant | @frontend-coder | ⬜ Backlog |
+| 9 — Tests and Polish | 3 | Tests, a11y, build, SEO | @tester + @frontend-coder | ⬜ Backlog |
 
-**Total remaining:** ~14 days → **June 15**
+**Open issues before MVP:** #37 (inline column filters + sort), #48 (optimistic update for mutations).
+
+**Total remaining:** Stages 7–9 still pending (~10 days). Deadline overdue — reschedule TBD.
 
 ---
 
@@ -291,8 +305,22 @@ New `frontend/master/` — Next.js 14, mobile-first.
 ---
 
 ## Changelog
+- 2026-06-19: **Project board reconciled** — 10 status updates applied (#30-#34, #37, #47, #48, #1).
+- 2026-06-19: **E2E 5-shard CI split merged** (#72) — wall time ~5m.
+- 2026-06-19: **Robustness bundle merged** (#70) — error handling + 5 e2e fixed + 6 fixme'd.
+- 2026-06-19: **Backend tests optimized to 1m47s** (#69).
+- 2026-06-19: **Backend issues batch merged** (#67, #66) — #47 wontfix, #60 channel tolerance, #61 alembic baseline.
+- 2026-06-18: **Backend test optimization completed** — pytest 30+ min → 1m47s (branch `fix/optimize-backend-tests`).
+- 2026-06-17: **Photo searchable select merged** (#63) — schedule UI improvements.
+- 2026-06-11: **Naming conventions added to domain-rules** (#62).
+- 2026-06-05-06: **CRUD pages for Masters, Tags, Photos, Materials + ColumnPicker** (#59).
+- 2026-06-05: **Unification refactor** (#58) — shared components, hooks, bug fixes.
+- 2026-06-05: **Services & Locations Management** (#57).
+- 2026-06-02: **NavigationProvider Architecture** merged — centralized date management.
+- 2026-06-01: **Stage 6: Booking Flow E2E** — verified with real backend.
 - 2026-05-30: **Plan overhaul.** Architecture `apps/` → `frontend/`. Stage 10 (Web) marked ✅. Stage 7+11 merged into "Artist App". Stage 6 re-scoped to "Booking Flow E2E". Deadline → June 15.
 - 2026-05-30: **Stage 5 completed.** API Integration — admin works with real backend.
 - 2026-05-30: **Backend restructure merged** — `app/` → `src/`, API `/api/v1/`, repositories/ extracted, services renamed.
+- 2026-05-28: **Backend Foundation completed** — FastAPI + clean architecture + 161 tests.
 - 2026-05-19: **Turborepo migration.** Transition from a single `frontend/` to monorepo.
 - 2026-05-13: Initial PLAN.md created.

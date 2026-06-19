@@ -77,7 +77,7 @@ export function ClientRecordTab({ recordId, clientId, onClose }: ClientRecordTab
   // ── Mutations via hook ────────────────────────────────────────────────
 
   const { saveRecord, deleteRecord, addVisitor, deleteVisitor, addPayment, deletePayment } =
-    useRecordMutations(recordId);
+    useRecordMutations(record?.activity_id ?? '', recordId);
 
   // ── Editable state ──────────────────────────────────────────────────────
 

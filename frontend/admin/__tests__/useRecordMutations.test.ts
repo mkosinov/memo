@@ -43,6 +43,7 @@ function createQueryClientWrapper() {
   };
 }
 
+const activityId = 'a1';
 const recordId = 'r1';
 
 const mockRecordResponse = {
@@ -96,7 +97,7 @@ describe('useRecordMutations', () => {
   describe('saveRecord', () => {
     it('calls patchRecord with the provided data', async () => {
       const { wrapper } = createQueryClientWrapper();
-      const { result } = renderHook(() => useRecordMutations(recordId), { wrapper });
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
 
       await act(async () => {
         await result.current.saveRecord({
@@ -115,7 +116,7 @@ describe('useRecordMutations', () => {
 
     it('calls patchActivity when activity data is provided', async () => {
       const { wrapper } = createQueryClientWrapper();
-      const { result } = renderHook(() => useRecordMutations(recordId), { wrapper });
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
 
       await act(async () => {
         await result.current.saveRecord({
@@ -139,7 +140,7 @@ describe('useRecordMutations', () => {
 
     it('does not call patchActivity when activity data is missing', async () => {
       const { wrapper } = createQueryClientWrapper();
-      const { result } = renderHook(() => useRecordMutations(recordId), { wrapper });
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
 
       await act(async () => {
         await result.current.saveRecord({
@@ -153,7 +154,7 @@ describe('useRecordMutations', () => {
 
     it('trims empty customPrice to null', async () => {
       const { wrapper } = createQueryClientWrapper();
-      const { result } = renderHook(() => useRecordMutations(recordId), { wrapper });
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
 
       await act(async () => {
         await result.current.saveRecord({
@@ -172,7 +173,7 @@ describe('useRecordMutations', () => {
     it('invalidates record and records queries on success', async () => {
       const { queryClient, wrapper } = createQueryClientWrapper();
       const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
-      const { result } = renderHook(() => useRecordMutations(recordId), { wrapper });
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
 
       await act(async () => {
         await result.current.saveRecord({ visits: [] });
@@ -187,7 +188,7 @@ describe('useRecordMutations', () => {
   describe('deleteRecord', () => {
     it('calls deleteRecord API with the record id', async () => {
       const { wrapper } = createQueryClientWrapper();
-      const { result } = renderHook(() => useRecordMutations(recordId), { wrapper });
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
 
       await act(async () => {
         await result.current.deleteRecord();
@@ -199,7 +200,7 @@ describe('useRecordMutations', () => {
     it('invalidates record and records queries on success', async () => {
       const { queryClient, wrapper } = createQueryClientWrapper();
       const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
-      const { result } = renderHook(() => useRecordMutations(recordId), { wrapper });
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
 
       await act(async () => {
         await result.current.deleteRecord();
@@ -214,7 +215,7 @@ describe('useRecordMutations', () => {
   describe('addVisitor', () => {
     it('calls createVisitor with the provided data', async () => {
       const { wrapper } = createQueryClientWrapper();
-      const { result } = renderHook(() => useRecordMutations(recordId), { wrapper });
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
 
       await act(async () => {
         await result.current.addVisitor({
@@ -233,7 +234,7 @@ describe('useRecordMutations', () => {
 
     it('returns the created visitor response', async () => {
       const { wrapper } = createQueryClientWrapper();
-      const { result } = renderHook(() => useRecordMutations(recordId), { wrapper });
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
 
       let returned: unknown;
       await act(async () => {
@@ -250,7 +251,7 @@ describe('useRecordMutations', () => {
   describe('deleteVisitor', () => {
     it('calls deleteVisitor API and patches record with remaining visits', async () => {
       const { wrapper } = createQueryClientWrapper();
-      const { result } = renderHook(() => useRecordMutations(recordId), { wrapper });
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
 
       const currentVisits = [
         { visitor_id: 'vis1', price: 3500 },
@@ -270,7 +271,7 @@ describe('useRecordMutations', () => {
     it('invalidates queries on success', async () => {
       const { queryClient, wrapper } = createQueryClientWrapper();
       const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
-      const { result } = renderHook(() => useRecordMutations(recordId), { wrapper });
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
 
       await act(async () => {
         await result.current.deleteVisitor('vis1', [{ visitor_id: 'vis1', price: 3500 }]);
@@ -285,7 +286,7 @@ describe('useRecordMutations', () => {
   describe('addPayment', () => {
     it('calls createPayment with record id, amount and method', async () => {
       const { wrapper } = createQueryClientWrapper();
-      const { result } = renderHook(() => useRecordMutations(recordId), { wrapper });
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
 
       await act(async () => {
         await result.current.addPayment(3500, 'card');
@@ -301,7 +302,7 @@ describe('useRecordMutations', () => {
     it('invalidates queries on success', async () => {
       const { queryClient, wrapper } = createQueryClientWrapper();
       const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
-      const { result } = renderHook(() => useRecordMutations(recordId), { wrapper });
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
 
       await act(async () => {
         await result.current.addPayment(3500, 'cash');
@@ -316,7 +317,7 @@ describe('useRecordMutations', () => {
   describe('deletePayment', () => {
     it('calls deletePayment API with the payment id', async () => {
       const { wrapper } = createQueryClientWrapper();
-      const { result } = renderHook(() => useRecordMutations(recordId), { wrapper });
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
 
       await act(async () => {
         await result.current.deletePayment('pay1');
@@ -328,7 +329,7 @@ describe('useRecordMutations', () => {
     it('invalidates queries on success', async () => {
       const { queryClient, wrapper } = createQueryClientWrapper();
       const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
-      const { result } = renderHook(() => useRecordMutations(recordId), { wrapper });
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
 
       await act(async () => {
         await result.current.deletePayment('pay1');

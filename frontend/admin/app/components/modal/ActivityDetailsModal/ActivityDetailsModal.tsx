@@ -236,7 +236,7 @@ export function ActivityDetailsModal({ isOpen, onClose, activity, mode }: Activi
     : '';
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center" role="dialog" aria-modal="true" data-testid="activity-details-modal">
+    <div className="fixed inset-0 z-[200] flex items-center justify-center" role="dialog" aria-modal="true" data-testid="activity-details-modal">
       {/* Backdrop */}
       <div
         data-testid="details-modal-backdrop"

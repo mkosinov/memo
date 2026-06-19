@@ -121,3 +121,16 @@ body.delete-mode [data-testid^="activity-"] {
 body.delete-mode [data-testid^="activity-"]:hover {
   box-shadow: 0 0 0 2px rgba(200, 80, 60, 0.5) !important;
 }
+
+/* ===== Z-Index Stacking Order =====
+ *
+ * z-[10]  — Schedule grid container
+ * z-[20]  — DayColumn header
+ * z-[50]  — Overlap popover (x-cards badge)
+ * z-[100] — StatusPicker dropdown (inside modal)
+ * z-[200] — ActivityDetailsModal overlay (backdrop + content)
+ * z-[300] — Toast notifications
+ *
+ * Rule: modal (z-[200]) must exceed any in-grid element so the
+ * backdrop covers schedule cards and overlap badges cleanly.
+ */

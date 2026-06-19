@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] — 2026-06-19
 
+### Fixed
+- **Wave 4.5 — Fix 55 pre-existing TypeScript errors blocking pre-push hook** (#88, branch `fix/ts-errors-blocking-hook`):
+  - Deleted dead `lib/mock-data.ts` and `lib/schedule-context.tsx` (37 errors eliminated)
+  - Added `maxAge?: string` to `Activity` schema in `@memo/domain` (3 errors fixed in ActivityCard, buildSchedule)
+  - Added `required?: boolean` to `TagsFieldConfig` in photo fields (4 errors fixed in PhotoModal)
+  - Used `PhotoResponse` type in PhotoModal instead of raw API response (plan deviation T1.4b)
+  - Updated test mocks: `kind` on toasts, `refetch` on Records/Clients contexts (6 errors fixed)
+  - Re-typed `mockUseQuery` properly in `clientRecordTabSetup.ts` (1 error fixed)
+  - Added `short_title`, `tag_ids` to Location mock (1 error fixed)
+  - Type guard in ErrorBoundary for non-`Error` throws (1 error fixed)
+  - `Array.from()` in e2e for NodeList iteration (1 error fixed)
+  - **pnpm type-check: 0 errors (was 55)**
+  - **No suppressions added** — no `@ts-ignore`, `as any`, or `@ts-expect-error`
+  - **Tests: 986 passed, 1 skipped** — zero regression
+
 ### Added
 - **Testing Strategy v2** — Pre-push gate + User Scenarios + 10 full-flow E2E (branch `feat-testing-strategy-v2`):
   - Native pre-push hook (`.git/hooks/pre-push`) blocks `git push` if local test suite fails

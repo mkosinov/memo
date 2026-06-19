@@ -26,7 +26,7 @@ const mockUpdateLocation = vi.mocked(updateLocation);
 const mockDeleteLocation = vi.mocked(deleteLocation);
 
 const locationCreatePayload: LocationCreate = {
-  name: 'Studio', capacity: 10, address: '', description: '',
+  name: 'Studio', short_title: 'Studio', capacity: 10, address: '', description: '',
   yandex_map_url: '', review_url: '', record_info: '', image_url: '',
   location_hint: '', tag_ids: [],
 };

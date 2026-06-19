@@ -4,6 +4,10 @@
 
 set -euo pipefail
 
+# Set CI=true so pnpm doesn't require TTY for module purge confirmation.
+# Pre-push hook runs in non-TTY context (git push is not interactive).
+export CI=true
+
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 

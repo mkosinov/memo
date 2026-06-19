@@ -23,6 +23,10 @@ class ActivityService(GenericService[ActivityCreate, ActivityUpdate, ActivityRes
     # Patch should silently ignore null values for these fields.
     NOT_NULL_FIELDS = {"master_id", "service_id", "location_id", "start", "duration", "capacity"}
 
+    # Statuses considered "active" for occupied-seat aggregation.
+    # Cancelled and no_show are excluded from the sum.
+    ACTIVE_RECORD_STATUSES = ("pending", "confirmed")
+
     def __init__(
         self, repository: GenericRepository, model: type[Activity]
     ) -> None:
@@ -58,16 +62,32 @@ class ActivityService(GenericService[ActivityCreate, ActivityUpdate, ActivityRes
         result = await db_session.execute(stmt)
         return list(result.scalars().all())
 
+    async def sum_active_seats(
+        self, db_session: AsyncSession, activity_id: str
+    ) -> int:
+        """Return SUM(seats) for active records (excludes cancelled/no_show).
+
+        Active = status IN ('pending', 'confirmed'). This matches
+        the spec's display labels 'Ожидание' / 'Посетил'.
+        """
+        result = await db_session.execute(
+            select(func.coalesce(func.sum(Record.seats), 0)).where(
+                Record.activity_id == activity_id,
+                Record.status.in_(self.ACTIVE_RECORD_STATUSES),
+            )
+        )
+        return int(result.scalar() or 0)
+
     async def count_records(
         self, db_session: AsyncSession, activity_id: str
     ) -> int:
-        """Count the number of Records linked to this activity."""
+        """DEPRECATED: counts ALL records (including cancelled). Use sum_active_seats."""
         result = await db_session.execute(
             select(func.count(Record.id)).where(
                 Record.activity_id == activity_id
             )
         )
-        return result.scalar() or 0
+        return int(result.scalar() or 0)
 
 
 @lru_cache

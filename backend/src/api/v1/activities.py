@@ -34,7 +34,7 @@ async def _to_response(
 ) -> ActivityResponse:
     """Map an Activity ORM object to ActivityResponse with computed occupied."""
     data = ActivityResponse.model_validate(activity)
-    data.occupied = await service.count_records(db_session=db_session, activity_id=activity.id)
+    data.occupied = await service.sum_active_seats(db_session=db_session, activity_id=activity.id)
     return data
 
 

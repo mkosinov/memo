@@ -572,9 +572,9 @@ describe('ClientTab — layout & features', () => {
     // Check within the status select specifically
     const statusOptions = statusSelect.querySelectorAll('option');
     const statusTexts = Array.from(statusOptions).map(o => o.textContent);
-    expect(statusTexts).toContain('Ожидает');
-    expect(statusTexts).toContain('Подтверждена');
-    expect(statusTexts).toContain('Отменена');
+    expect(statusTexts).toContain('Ожидание');
+    expect(statusTexts).toContain('Посетил');
+    expect(statusTexts).toContain('Отменил');
     expect(statusTexts).toContain('Неявка');
   });
 

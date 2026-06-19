@@ -22,9 +22,9 @@ interface ClientTabProps {
 }
 
 const STATUS_CONFIG: Record<RecordStatus, { label: string; color: string }> = {
-  pending: { label: 'Ожидает', color: '#F59E0B' },
-  confirmed: { label: 'Подтверждена', color: '#10B981' },
-  cancelled: { label: 'Отменена', color: '#EF4444' },
+  pending: { label: 'Ожидание', color: '#F59E0B' },
+  confirmed: { label: 'Посетил', color: '#10B981' },
+  cancelled: { label: 'Отменил', color: '#EF4444' },
   no_show: { label: 'Неявка', color: '#6B7280' },
 };
 

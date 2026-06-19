@@ -272,9 +272,9 @@ describe('ClientTab', () => {
     expect(link.tagName).toBe('BUTTON');
   });
 
-  it('renders record status dropdown', () => {
+  it('renders record status picker', () => {
     render(<ClientTab {...defaultProps} />);
-    expect(screen.getByLabelText('Статус')).toBeInTheDocument();
+    expect(screen.getByTestId('status-picker')).toBeInTheDocument();
   });
 
   it('renders delete button', () => {
@@ -565,17 +565,16 @@ describe('ClientTab — layout & features', () => {
     expect(row!.querySelector('[data-testid="client-name"]')).toBeInTheDocument();
   });
 
-  it('renders status dropdown with all statuses', () => {
+  it('renders status picker with all statuses', () => {
     render(<ClientTab {...defaultProps} />);
-    const statusSelect = screen.getByLabelText('Статус');
-    expect(statusSelect).toBeInTheDocument();
-    // Check within the status select specifically
-    const statusOptions = statusSelect.querySelectorAll('option');
-    const statusTexts = Array.from(statusOptions).map(o => o.textContent);
-    expect(statusTexts).toContain('Ожидание');
-    expect(statusTexts).toContain('Посетил');
-    expect(statusTexts).toContain('Отменил');
-    expect(statusTexts).toContain('Неявка');
+    const trigger = screen.getByTestId('status-picker-trigger');
+    expect(trigger).toBeInTheDocument();
+    fireEvent.click(trigger);
+    expect(screen.getByTestId('status-picker-popover')).toBeInTheDocument();
+    expect(screen.getByTestId('status-picker-option-pending')).toBeInTheDocument();
+    expect(screen.getByTestId('status-picker-option-confirmed')).toBeInTheDocument();
+    expect(screen.getByTestId('status-picker-option-cancelled')).toBeInTheDocument();
+    expect(screen.getByTestId('status-picker-option-no_show')).toBeInTheDocument();
   });
 
   it('renders client link as SVG icon (not text)', () => {

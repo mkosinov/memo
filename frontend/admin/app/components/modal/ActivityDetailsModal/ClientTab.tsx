@@ -1,9 +1,10 @@
 'use client';
 
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import type { RecordResponse, ClientResponse, VisitorResponse, PaymentResponse, TariffResponse } from '@memo/api-client';
 import type { RecordStatus } from '@memo/domain';
 import { useRouter } from 'next/navigation';
+import { StatusPicker } from './StatusPicker';
 
 interface ClientTabProps {
   record: RecordResponse;
@@ -28,26 +29,26 @@ const STATUS_CONFIG: Record<RecordStatus, { label: string; color: string }> = {
   no_show: { label: 'Неявка', color: '#6B7280' },
 };
 
-function StatusIcon({ status }: { status: RecordStatus }) {
+function renderStatusIcon(status: RecordStatus): React.ReactNode {
   const iconClass = 'w-3.5 h-3.5';
   switch (status) {
     case 'pending':
       return (
-        <svg className={iconClass} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <svg className={iconClass} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" data-testid="icon-pending">
           <circle cx="12" cy="12" r="10" />
           <polyline points="12 6 12 12 16 14" />
         </svg>
       );
     case 'confirmed':
       return (
-        <svg className={iconClass} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <svg className={iconClass} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" data-testid="icon-confirmed">
           <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
           <polyline points="22 4 12 14.01 9 11.01" />
         </svg>
       );
     case 'cancelled':
       return (
-        <svg className={iconClass} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <svg className={iconClass} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" data-testid="icon-cancelled">
           <circle cx="12" cy="12" r="10" />
           <line x1="15" y1="9" x2="9" y2="15" />
           <line x1="9" y1="9" x2="15" y2="15" />
@@ -55,7 +56,7 @@ function StatusIcon({ status }: { status: RecordStatus }) {
       );
     case 'no_show':
       return (
-        <svg className={iconClass} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <svg className={iconClass} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" data-testid="icon-no_show">
           <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
           <line x1="12" y1="9" x2="12" y2="13" />
           <line x1="12" y1="17" x2="12.01" y2="17" />
@@ -96,6 +97,12 @@ export function ClientTab({
   const [newVisitorName, setNewVisitorName] = useState('');
   const [newVisitorAge, setNewVisitorAge] = useState('');
   const [isAddingVisitor, setIsAddingVisitor] = useState(false);
+
+  // Persist status change to backend
+  useEffect(() => {
+    if (status === record.status) return;
+    _onUpdateRecord(record.id, { ...record, status });
+  }, [status]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Calculate totals from visits
   const totalCost = record.visits.reduce((sum, v) => sum + v.price, 0);
@@ -191,25 +198,12 @@ export function ClientTab({
           <label className="text-xs font-medium text-ink-mid block mb-1" htmlFor="record-status">
             Статус
           </label>
-          <div className="relative">
-            <select
-              id="record-status"
-              className={`${inputClass} appearance-none pr-8`}
-              style={inputStyle}
-              value={status}
-              onChange={(e) => setStatus(e.target.value as RecordStatus)}
-              data-testid="select-record-status"
-            >
-              {(Object.entries(STATUS_CONFIG) as [RecordStatus, { label: string; color: string }][]).map(([key, config]) => (
-                <option key={key} value={key}>
-                  {config.label}
-                </option>
-              ))}
-            </select>
-            <div className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: STATUS_CONFIG[status]?.color }}>
-              <StatusIcon status={status} />
-            </div>
-          </div>
+          <StatusPicker
+            value={status}
+            onChange={setStatus}
+            statusConfig={STATUS_CONFIG}
+            iconFor={renderStatusIcon}
+          />
         </div>
       </div>
 

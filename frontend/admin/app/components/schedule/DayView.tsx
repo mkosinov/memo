@@ -296,7 +296,7 @@ export function DayView() {
     return () => {
       document.removeEventListener('__memo-column-reorder', handleTestColumnReorder);
     };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps — uses onColumnDropRef.current
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps -- uses onColumnDropRef.current
 
   // Group activities by column
   const activitiesByColumn = useMemo(() => {

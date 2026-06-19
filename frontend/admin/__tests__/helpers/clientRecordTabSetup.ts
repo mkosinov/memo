@@ -5,7 +5,8 @@
  * @tanstack/react-query at its own top level. This module provides
  * the plain mock data objects and a reusable beforeEach setup function.
  */
-import { vi } from 'vitest';
+import { vi, type Mock } from 'vitest';
+import { useQuery } from '@tanstack/react-query';
 import type { RecordResponse } from '@memo/api-client';
 
 // ─── Mock data ─────────────────────────────────────────────────────────────
@@ -101,18 +102,16 @@ export const mockPayments = [
 
 // ─── Helper: build mockUseQuery implementation ─────────────────────────────
 
-type UseQueryOptions = { queryKey?: readonly unknown[] };
-
 /**
  * Returns a standard mockUseQuery.mockImplementation that resolves
  * all known query keys to their mock data. Pass overrides to customize
  * individual keys for a specific test.
  */
 export function buildDefaultQueryImpl(
-  mockUseQuery: ReturnType<typeof vi.mocked>,
-  overrides?: Partial<Record<string, any>>,
+  mockUseQuery: Mock<typeof useQuery>,
+  overrides?: Partial<Record<string, unknown>>,
 ) {
-  return mockUseQuery.mockImplementation((options: UseQueryOptions) => {
+  return mockUseQuery.mockImplementation((options) => {
     const key = options?.queryKey?.[0] as string | undefined;
     if (key && overrides && key in overrides) {
       return overrides[key] as any;

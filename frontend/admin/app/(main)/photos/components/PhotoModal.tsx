@@ -4,10 +4,11 @@ import React, { useState, useEffect, useCallback, useId } from 'react';
 import { PHOTO_FIELDS, type PhotoFieldConfig } from './photoFields';
 import SearchableSelect from '@/app/components/shared/SearchableSelect';
 import { searchVisitors, searchServices, searchActivities, searchTags } from '@memo/api-client';
+import type { PhotoResponse } from '@memo/api-client';
 
 export interface PhotoModalProps {
   mode: 'create' | 'edit';
-  photo: Record<string, unknown> | null;
+  photo: PhotoResponse | null;
   onSubmit: (data: Record<string, unknown>) => Promise<void>;
   onClose: () => void;
   title: string;
@@ -185,7 +186,7 @@ export function PhotoModal({
       if (f.type === 'tags') {
         initial[f.key] = photo.tags || [];
       } else {
-        initial[f.key] = photo[f.key] ?? '';
+        initial[f.key] = (photo as Record<string, unknown>)[f.key] ?? '';
       }
     });
     initial.is_public = photo.is_public ?? false;

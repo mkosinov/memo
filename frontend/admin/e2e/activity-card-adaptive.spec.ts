@@ -70,7 +70,7 @@ test.describe('Adaptive ActivityCard', () => {
       // (skip elements that intentionally clip via truncate/line-clamp-2)
       const overflowOk = await card.evaluate((el) => {
         const all = el.querySelectorAll('*');
-        for (const child of all) {
+        for (const child of Array.from(all)) {
           const ce = child as HTMLElement;
           if (ce.classList.contains('truncate')) continue;
           if (ce.classList.contains('line-clamp-2')) continue;

@@ -135,6 +135,7 @@ let mockContextValue: RecordsContextType = {
   locations: new Map([['loc-1', mockLocation]]),
   loading: false,
   error: null,
+  refetch: vi.fn(),
 };
 
 vi.mock('@/contexts/RecordsContext', () => ({
@@ -166,6 +167,7 @@ describe('RecordsTable', () => {
       locations: new Map([['loc-1', mockLocation]]),
       loading: false,
       error: null,
+      refetch: vi.fn(),
     };
   });
 

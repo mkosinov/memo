@@ -94,8 +94,8 @@ export function createMockRecordsContext(
 interface UIContextMock {
   deleteMode: boolean;
   toggleDeleteMode: () => void;
-  toasts: Array<{ id: string; message: string; undo?: () => void }>;
-  showToast: (message: string, undo?: () => void) => void;
+  toasts: Array<{ id: string; kind: 'info' | 'success' | 'error'; message: string; undo?: () => void }>;
+  showToast: (message: string, kindOrUndo?: 'info' | 'success' | 'error' | (() => void), undo?: () => void) => void;
   hideToast: (id: string) => void;
   sidebarCollapsed: boolean;
   toggleSidebar: () => void;
@@ -105,13 +105,16 @@ interface UIContextMock {
   toggleTheme: () => void;
 }
 
-type UIOverrides = Partial<UIContextMock>;
+type ToastOverride = { id: string; kind?: 'info' | 'success' | 'error'; message: string; undo?: () => void };
+
+type UIOverrides = Partial<Omit<UIContextMock, 'toasts'>> & { toasts?: ToastOverride[] };
 
 export function createMockUIContext(overrides?: UIOverrides): UIContextMock {
+  const { toasts: rawToasts, ...rest } = overrides ?? {};
   return {
     deleteMode: false,
     toggleDeleteMode: vi.fn(),
-    toasts: [],
+    toasts: rawToasts?.map(t => ({ ...t, kind: t.kind ?? ('info' as const) })) ?? [],
     showToast: vi.fn(),
     hideToast: vi.fn(),
     sidebarCollapsed: false,
@@ -120,7 +123,7 @@ export function createMockUIContext(overrides?: UIOverrides): UIContextMock {
     toggleRightPanel: vi.fn(),
     theme: 'light' as const,
     toggleTheme: vi.fn(),
-    ...overrides,
+    ...rest,
   };
 }
 
@@ -154,6 +157,7 @@ export function createMockClientsContext(
     sortOrder: 'asc',
     isLoading: false,
     error: null,
+    refetch: vi.fn(),
     setPage: vi.fn(),
     setPerPage: vi.fn(),
     setFilters: vi.fn(),

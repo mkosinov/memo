@@ -23,6 +23,7 @@ interface TagsFieldConfig {
   key: string;
   label: string;
   placeholder?: string;
+  required?: boolean;
 }
 
 export type PhotoFieldConfig = TextFieldConfig | SearchableFieldConfig | TagsFieldConfig;

@@ -59,6 +59,7 @@ export const ActivitySchema = z.object({
   serviceId: z.string(),
   serviceName: z.string().optional(),
   minAge: z.string().optional(),
+  maxAge: z.string().optional(),
   locationId: z.string(),
   occupied: z.number(),
   capacity: z.number(),

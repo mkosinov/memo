@@ -44,7 +44,28 @@ export default defineConfig({
 
   projects: [
     {
-      name: 'chromium',
+      name: 'shard-services',
+      testMatch: /services-crud\.spec\.ts/,
+      use: { ...devices['Desktop Chrome'] },
+    },
+    {
+      name: 'shard-schedule',
+      testMatch: /schedule.*\.spec\.ts/,
+      use: { ...devices['Desktop Chrome'] },
+    },
+    {
+      name: 'shard-records',
+      testMatch: /(records|activity-details-modal)\.spec\.ts/,
+      use: { ...devices['Desktop Chrome'] },
+    },
+    {
+      name: 'shard-clients',
+      testMatch: /clients\.spec\.ts/,
+      use: { ...devices['Desktop Chrome'] },
+    },
+    {
+      name: 'shard-rest',
+      testMatch: /^((?!services|schedule|records|activity-details-modal|clients).)*\.spec\.ts$/,
       use: { ...devices['Desktop Chrome'] },
     },
   ],

@@ -105,7 +105,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2]
+        project: [shard-services, shard-schedule, shard-records, shard-clients, shard-rest]
 
     steps:
       - uses: actions/checkout@v4
@@ -136,7 +136,7 @@ jobs:
         working-directory: frontend/admin
         run: pnpm exec playwright install --with-deps chromium
 
-      - name: Run E2E tests (shard ${{ matrix.shard }}/2)
+      - name: Run E2E tests (${{ matrix.project }})
         run: |
           cd backend
           uv run python -m src.seed
@@ -149,7 +149,7 @@ jobs:
             fi
             sleep 2
           done
-          pnpm exec playwright test --shard=${{ matrix.shard }}/2
+          pnpm exec playwright test --project=${{ matrix.project }}
           EXIT_CODE=$?
           kill $BACKEND_PID 2>/dev/null || true
           exit $EXIT_CODE

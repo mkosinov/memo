@@ -7,9 +7,14 @@ set -euo pipefail
 
 # Resolve repo root (hooks live in .git/hooks, project in parent)
 HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
-if [[ "$HOOK_DIR" == *"/.git/hooks" ]]; then
-  REPO_ROOT="$(cd "$HOOK_DIR/../../.." && pwd)"
+if [[ "$HOOK_DIR" == *"/.git/worktrees/"*"/hooks" ]]; then
+  # Worktree hook location: .git/worktrees/<name>/hooks/<hook>
+  REPO_ROOT="$(cd "$HOOK_DIR/../../../.." && pwd)"
+elif [[ "$HOOK_DIR" == *"/.git/hooks" ]]; then
+  # Normal repo hook location: .git/hooks/<hook>
+  REPO_ROOT="$(cd "$HOOK_DIR/../.." && pwd)"
 else
+  # Source location: scripts/git-hooks/<hook>
   REPO_ROOT="$(cd "$HOOK_DIR/../.." && pwd)"
 fi
 

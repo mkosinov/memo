@@ -25,8 +25,8 @@ export default defineConfig({
   workers: process.env.CI ? 1 : undefined,
   reporter: 'list',
   timeout: 30_000,
-  // Skip visual regression tests in CI — they need baseline screenshots
-  grep: process.env.CI ? /^(?!.*visual regression|.*schedule with activity|.*schedule — different|.*default state visual|.*menubar visual)/i : undefined,
+  // Visual regression runs locally (pre-push) — not skipped.
+  // Baseline screenshots committed in *-snapshots/ directories.
 
   use: {
     baseURL: 'http://localhost:3001',

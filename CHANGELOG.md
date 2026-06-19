@@ -10,6 +10,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased] — 2026-06-19
 
 ### Added
+- **Testing Strategy v2** — Pre-push gate + User Scenarios + 10 full-flow E2E (branch `feat-testing-strategy-v2`):
+  - Native pre-push hook (`.git/hooks/pre-push`) blocks `git push` if local test suite fails
+  - `scripts/test-all.sh` runs: lint, type-check, vitest, playwright (incl. visual regression), visual-compliance-check, backend pytest
+  - `postinstall` hook in root `package.json` auto-installs the hook for new clones
+  - `docs/specs/2026-06-19-current-user-scenarios.md` — living doc of all 14 admin user tasks, each mapped to E2E
+  - 10 new full-flow E2E tests (T15–T24) covering bugs #73–#86 — all RED, become GREEN after Wave 4
+  - Replay test (T25) confirmed all 10 E2E fail on `main`
+  - `.github/workflows/smoke.yml` — CI reduced to smoke-only (lint + type-check + unit)
+  - `.github/workflows/test.yml` — full E2E matrix removed
+  - `.github/PULL_REQUEST_TEMPLATE.md` — manual smoke checklist for author + reviewer
+  - `CONTRIBUTING.md` — documents local test execution, pre-push hook, visual baseline update policy
+  - `frontend/admin/playwright.config.ts` — visual regression no longer skipped in CI
+  - Superagents skills updated: `brainstorming` requires `## User Scenarios` section; `writing-plans` requires E2E coverage in DoD
+
 - **E2E 5-shard CI split** (#71, #72) — CI suite split into 5 project-based shards (services, schedule, records, clients, rest). Wall time reduced from 5m15s to ≤5m.
 - **Project board reconciliation** (2026-06-19) — 10 status updates applied across issues #30-#34, #37, #47, #48, #1.
 

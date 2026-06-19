@@ -10,6 +10,7 @@
 > **Robustness Bundle: ✅ Completed 2026-06-18** — #53 wontfix, #64 React Query errors, #65 5 e2e fixed + 6 fixme'd (branch `fix/robustness-bundle`)
 > **E2E 5-Shard CI Split: ✅ Completed 2026-06-19** — #71 project-based CI matrix, wall time 5m→≤5m (branch `ci/e2e-shard-5-projects`)
 > **Reconciliation: ✅ Completed 2026-06-19** — Project board statuses synchronized with reality
+> **Testing Strategy v2: ✅ Completed 2026-06-19** — Pre-push gate + User Scenarios + 10 full-flow E2E (branch `feat-testing-strategy-v2`)
 > **Stage 5 API Integration: ✅ Completed 2026-05-30** — admin connected to real API
 > **Stage 10 (Web): ✅ Completed 2026-05-27** — colourmountains.ru public website (285 tests)
 
@@ -288,6 +289,7 @@ New `frontend/master/` — Next.js 14, mobile-first.
 | — Backend Test Optimization | 1 | pytest suite 30+ min → 1m47s | @tester + @backend-coder | ✅ (2026-06-18) |
 | — Robustness Bundle | 2 | Error handling, 5 e2e fixed, 6 fixme'd | @frontend-coder + @debugger | ✅ (2026-06-18) |
 | — E2E 5-Shard CI Split | 1 | CI wall time ~5m | @tester + @deployer | ✅ (2026-06-19) |
+| — Testing Strategy v2 | 2 | Pre-push gate, User Scenarios, 10 full-flow E2E, smoke CI | @tester + @infra | ✅ (2026-06-19) |
 | 7 — P4 Artist App | 4 | Mobile app for artists | @frontend-coder | ⬜ Backlog |
 | 8 — P5 AI Concierge | 3 | Chat assistant | @frontend-coder | ⬜ Backlog |
 | 9 — Tests and Polish | 3 | Tests, a11y, build, SEO | @tester + @frontend-coder | ⬜ Backlog |
@@ -306,6 +308,7 @@ New `frontend/master/` — Next.js 14, mobile-first.
 
 ## Changelog
 - 2026-06-19: **Project board reconciled** — 10 status updates applied (#30-#34, #37, #47, #48, #1).
+- 2026-06-19: **Testing Strategy v2** — Pre-push gate, User Scenarios doc, 10 new full-flow E2E (RED), smoke-only CI, CONTRIBUTING.md, PR template (branch `feat-testing-strategy-v2`).
 - 2026-06-19: **E2E 5-shard CI split merged** (#72) — wall time ~5m.
 - 2026-06-19: **Robustness bundle merged** (#70) — error handling + 5 e2e fixed + 6 fixme'd.
 - 2026-06-19: **Backend tests optimized to 1m47s** (#69).

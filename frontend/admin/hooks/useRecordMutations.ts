@@ -166,6 +166,34 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
     [invalidateAll],
   );
 
+  const addVisitorToRecord = useCallback(
+    async (data: { name: string; age?: number; price: number }) => {
+      const record = await queryClient.fetchQuery({
+        queryKey: ['record', recordId],
+        queryFn: () => import('@memo/api-client').then((m) => m.getRecord(recordId)),
+      });
+      const clientId = record.client_id;
+      if (!clientId) throw new Error('Record has no client');
+
+      const visitor = await createVisitor({
+        client_id: clientId,
+        name: data.name,
+        age: data.age,
+      });
+
+      const newVisit = {
+        visitor_id: visitor.id,
+        price: data.price,
+      };
+
+      await patchRecord(recordId, {
+        visits: [...record.visits, newVisit],
+      });
+      invalidateAll();
+    },
+    [recordId, queryClient, invalidateAll],
+  );
+
   return {
     createRecord: createRecordMutation,
     saveRecord,
@@ -174,5 +202,6 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
     deleteVisitor,
     addPayment,
     deletePayment,
+    addVisitorToRecord,
   };
 }

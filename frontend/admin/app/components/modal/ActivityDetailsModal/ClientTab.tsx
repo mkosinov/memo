@@ -16,6 +16,7 @@ interface ClientTabProps {
   onUpdateRecord: (id: string, data: RecordResponse) => void;
   onDeleteRecord: (id: string) => void;
   onAddPayment: (recordId: string, amount: number, method: string) => void;
+  onAddVisitor?: (data: { name: string; age?: number; price: number }) => Promise<void>;
   showToast: (message: string, undo?: () => void) => void;
 }
 
@@ -71,6 +72,7 @@ export function ClientTab({
   onUpdateRecord: _onUpdateRecord,
   onDeleteRecord,
   onAddPayment,
+  onAddVisitor,
   showToast,
 }: ClientTabProps) {
   const [name, setName] = useState(client?.name || '');
@@ -78,6 +80,12 @@ export function ClientTab({
   const [paymentAmount, setPaymentAmount] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('card');
   const isDeletingRef = useRef(false);
+
+  // Add visitor form state
+  const [showAddVisitor, setShowAddVisitor] = useState(false);
+  const [newVisitorName, setNewVisitorName] = useState('');
+  const [newVisitorAge, setNewVisitorAge] = useState('');
+  const [isAddingVisitor, setIsAddingVisitor] = useState(false);
 
   // Calculate totals from visits
   const totalCost = record.visits.reduce((sum, v) => sum + v.price, 0);
@@ -112,6 +120,25 @@ export function ClientTab({
       showToast('Ошибка удаления оплаты');
     }
   }, [showToast]);
+
+  const handleAddVisitor = useCallback(async () => {
+    if (!newVisitorName.trim() || isAddingVisitor || !onAddVisitor) return;
+    setIsAddingVisitor(true);
+    try {
+      await onAddVisitor({
+        name: newVisitorName.trim(),
+        age: newVisitorAge ? Number(newVisitorAge) : undefined,
+        price: 0, // overridden by parent
+      });
+      setNewVisitorName('');
+      setNewVisitorAge('');
+      setShowAddVisitor(false);
+    } catch {
+      showToast('Ошибка добавления посетителя');
+    } finally {
+      setIsAddingVisitor(false);
+    }
+  }, [newVisitorName, newVisitorAge, isAddingVisitor, onAddVisitor, showToast]);
 
   const inputClass = 'w-full rounded-lg border px-3 py-2 text-sm bg-white';
   const inputStyle = { borderColor: 'var(--line)' };
@@ -210,7 +237,58 @@ export function ClientTab({
             {visitor.age && <span className="text-xs text-ink-light">{visitor.age} лет</span>}
           </div>
         ))}
-        <button className="mt-2 text-brand text-xs hover:underline" data-testid="btn-add-visitor">+ Добавить посетителя</button>
+        {!showAddVisitor ? (
+          <button
+            onClick={() => setShowAddVisitor(true)}
+            className="mt-2 text-brand text-xs hover:underline"
+            data-testid="btn-add-visitor"
+          >
+            + Добавить посетителя
+          </button>
+        ) : (
+          <div className="mt-2 flex items-center gap-2" data-testid="add-visitor-form">
+            <input
+              type="text"
+              placeholder="Имя"
+              value={newVisitorName}
+              onChange={(e) => setNewVisitorName(e.target.value)}
+              className="flex-1 rounded-lg border px-2 py-1 text-sm"
+              style={inputStyle}
+              data-testid="input-visitor-name"
+              autoFocus
+            />
+            <input
+              type="number"
+              placeholder="Возраст"
+              value={newVisitorAge}
+              onChange={(e) => setNewVisitorAge(e.target.value)}
+              className="w-16 rounded-lg border px-2 py-1 text-sm"
+              style={inputStyle}
+              data-testid="input-visitor-age"
+            />
+            <button
+              onClick={handleAddVisitor}
+              disabled={!newVisitorName.trim() || isAddingVisitor}
+              className="px-2 py-1 text-xs text-white rounded-lg shrink-0 disabled:opacity-50"
+              style={{ backgroundColor: 'var(--brand, #004D56)' }}
+              data-testid="btn-save-visitor"
+            >
+              Сохранить
+            </button>
+            <button
+              onClick={() => {
+                setShowAddVisitor(false);
+                setNewVisitorName('');
+                setNewVisitorAge('');
+              }}
+              className="text-red-400 hover:text-red-500 text-sm"
+              aria-label="Отмена"
+              data-testid="btn-cancel-visitor"
+            >
+              ×
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Payment summary */}

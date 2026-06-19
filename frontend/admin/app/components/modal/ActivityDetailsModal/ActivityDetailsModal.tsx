@@ -41,7 +41,7 @@ export function ActivityDetailsModal({ isOpen, onClose, activity, mode }: Activi
     : null;
 
   // Use the hook for record mutations (only when we have a record ID)
-  const { createRecord, deleteRecord, addPayment } = useRecordMutations(activity.id, activeRecordId || '');
+  const { createRecord, deleteRecord, addPayment, addVisitorToRecord } = useRecordMutations(activity.id, activeRecordId || '');
 
   // Current service and its tariffs (used by all tab contents)
   const currentService = useMemo(
@@ -210,6 +210,15 @@ export function ActivityDetailsModal({ isOpen, onClose, activity, mode }: Activi
         onUpdateRecord={() => {}}
         onDeleteRecord={handleDeleteRecord}
         onAddPayment={handleAddPayment}
+        onAddVisitor={async (data) => {
+          try {
+            const firstPrice = serviceTariffs[0]?.price ?? 0;
+            await addVisitorToRecord({ ...data, price: firstPrice });
+            showToast('Посетитель добавлен');
+          } catch {
+            showToast('Ошибка добавления посетителя');
+          }
+        }}
         showToast={showToast}
       />
     );

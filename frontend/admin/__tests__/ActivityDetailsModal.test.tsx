@@ -250,6 +250,7 @@ describe('ClientTab', () => {
     onUpdateRecord: vi.fn(),
     onDeleteRecord: vi.fn(),
     onAddPayment: vi.fn(),
+    onDeletePayment: vi.fn(),
     showToast: vi.fn(),
   };
 
@@ -552,6 +553,7 @@ describe('ClientTab — layout & features', () => {
     onUpdateRecord: vi.fn(),
     onDeleteRecord: vi.fn(),
     onAddPayment: vi.fn(),
+    onDeletePayment: vi.fn(),
     showToast: vi.fn(),
   };
 

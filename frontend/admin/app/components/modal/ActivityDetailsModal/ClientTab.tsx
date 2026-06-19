@@ -3,7 +3,6 @@
 import React, { useState, useCallback, useRef } from 'react';
 import type { RecordResponse, ClientResponse, VisitorResponse, PaymentResponse, TariffResponse } from '@memo/api-client';
 import type { RecordStatus } from '@memo/domain';
-import { deletePayment as apiDeletePayment } from '@memo/api-client';
 import { useRouter } from 'next/navigation';
 
 interface ClientTabProps {
@@ -16,6 +15,7 @@ interface ClientTabProps {
   onUpdateRecord: (id: string, data: RecordResponse) => void;
   onDeleteRecord: (id: string) => void;
   onAddPayment: (recordId: string, amount: number, method: string) => void;
+  onDeletePayment: (paymentId: string) => Promise<void>;
   onAddVisitor?: (data: { name: string; age?: number; price: number }) => Promise<void>;
   showToast: (message: string, undo?: () => void) => void;
   onClose?: () => void;
@@ -73,6 +73,7 @@ export function ClientTab({
   onUpdateRecord: _onUpdateRecord,
   onDeleteRecord,
   onAddPayment,
+  onDeletePayment,
   onAddVisitor,
   showToast,
   onClose,
@@ -123,12 +124,12 @@ export function ClientTab({
 
   const handleDeletePayment = useCallback(async (paymentId: string) => {
     try {
-      await apiDeletePayment(paymentId);
+      await onDeletePayment(paymentId);
       showToast('Оплата удалена');
     } catch {
       showToast('Ошибка удаления оплаты');
     }
-  }, [showToast]);
+  }, [onDeletePayment, showToast]);
 
   const handleAddVisitor = useCallback(async () => {
     if (!newVisitorName.trim() || isAddingVisitor || !onAddVisitor) return;

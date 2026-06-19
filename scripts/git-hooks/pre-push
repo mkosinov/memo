@@ -5,17 +5,12 @@
 
 set -euo pipefail
 
-# Resolve repo root (hooks live in .git/hooks, project in parent)
-HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
-if [[ "$HOOK_DIR" == *"/.git/worktrees/"*"/hooks" ]]; then
-  # Worktree hook location: .git/worktrees/<name>/hooks/<hook>
-  REPO_ROOT="$(cd "$HOOK_DIR/../../../.." && pwd)"
-elif [[ "$HOOK_DIR" == *"/.git/hooks" ]]; then
-  # Normal repo hook location: .git/hooks/<hook>
-  REPO_ROOT="$(cd "$HOOK_DIR/../.." && pwd)"
-else
-  # Source location: scripts/git-hooks/<hook>
-  REPO_ROOT="$(cd "$HOOK_DIR/../.." && pwd)"
+# Get the current worktree's root (works for both main repo and worktrees).
+# When hook runs from .git/hooks/ or .git/worktrees/<name>/hooks/, git
+# auto-sets GIT_DIR and GIT_WORK_TREE, so rev-parse returns the correct path.
+if ! REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"; then
+  echo "❌ Not in a git repository. Pre-push hook requires a git worktree."
+  exit 1
 fi
 
 TEST_SCRIPT="$REPO_ROOT/scripts/test-all.sh"

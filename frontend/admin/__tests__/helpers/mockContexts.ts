@@ -157,6 +157,7 @@ export function createMockClientsContext(
     sortOrder: 'asc',
     isLoading: false,
     error: null,
+    refetch: vi.fn(),
     setPage: vi.fn(),
     setPerPage: vi.fn(),
     setFilters: vi.fn(),

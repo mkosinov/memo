@@ -5,7 +5,8 @@ import { ErrorBoundary as ReactErrorBoundary, type FallbackProps } from 'react-e
 import { FullPageError } from './FullPageError';
 
 function defaultFallback({ error, resetErrorBoundary }: FallbackProps) {
-  return <FullPageError error={error} onReset={resetErrorBoundary} />;
+  const err = error instanceof Error ? error : new Error(String(error));
+  return <FullPageError error={err} onReset={resetErrorBoundary} />;
 }
 
 export interface ErrorBoundaryProps {

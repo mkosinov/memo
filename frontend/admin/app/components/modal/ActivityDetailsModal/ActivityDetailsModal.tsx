@@ -246,8 +246,8 @@ export function ActivityDetailsModal({ isOpen, onClose, activity, mode }: Activi
 
       {/* Modal */}
       <div
-        className="relative bg-white rounded-xl shadow-2xl w-full max-w-2xl mx-4 flex flex-col overflow-hidden"
-        style={{ maxHeight: '85vh' }}
+        data-testid="activity-details-modal-container"
+        className="relative bg-white rounded-xl shadow-2xl w-full max-w-2xl mx-4 flex flex-col overflow-hidden h-[80vh]"
       >
         {/* Context header */}
         <div

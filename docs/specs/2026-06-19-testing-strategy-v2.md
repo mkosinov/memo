@@ -517,16 +517,31 @@ This doc is the **single source of truth** for "what does the app do for users."
 
 ## Visual Compliance Checks
 
-These states should be screenshot-stable. The `visual-compliance-check.sh` script verifies these (run during pre-push).
+These smoke checks verify the /schedule page renders with expected UI text. Verified by `visual-compliance-check.sh` (run during pre-push). Format: `- [ ] "Text" keyword` — the script extracts the quoted text and uses `text=<text>` selector. **Keyword required** (tab/button/card/overlay/input) — without it, the script falls back to using the description as a CSS selector and fails.
 
-- [ ] `/schedule` with 1 activity
-- [ ] `/schedule` with 5+ activities (grid stress)
-- [ ] `/schedule` with `ActivityDetailModal` open (full backdrop blur)
-- [ ] `ActivityDetailModal` — Settings tab (default state)
-- [ ] `ActivityDetailModal` — Records tab with 1 record
-- [ ] `ActivityDetailModal` — Records tab with 5+ records (scrollable)
-- [ ] `ActivityDetailModal` — Records tab with cancelled record
-- [ ] Status icon — 4 variants (Ожидание, Посетил, Отменил, Неявка)
+- [ ] "Расписание" button visible (nav item)
+- [ ] "Записи" button visible (nav item)
+- [ ] "Клиенты" button visible (nav item)
+- [ ] "Мастера" button visible (nav item)
+- [ ] "Справочники" button visible (nav item)
+- [ ] "Фото" button visible (nav item)
+- [ ] "Сегодня" tab visible
+- [ ] "Неделя" tab visible
+- [ ] "День по мастерам" tab visible
+
+## Visual Compliance Notes
+
+**Scope:** The visual-compliance-check.sh script verifies **text presence** on /schedule (the page it lands on) using `text=<text>` selectors triggered by keyword (tab/button/etc.). It does NOT verify modal states, record tabs, or other interactive flows. For those, use `frontend/admin/e2e/visual-regression.spec.ts` (screenshot diffs) or the 10 new E2E from T15–T24 (full-flow assertions).
+
+**Why only navigation smoke checks?** The script is a quick "is the page alive" check. Complex states require opening modals, clicking tabs, etc. — that's what visual-regression.spec.ts and the 10 E2E are for. Trying to put complex state checks in this section caused the script to fail parsing them as CSS selectors (see git history for the 2026-06-19 fix).
+
+**Current baseline snapshots (4):**
+- `modal-settings-chromium-linux.png`
+- `modal-new-booking-chromium-linux.png`
+- `records-default-chromium-linux.png`
+- `records-filtered-chromium-linux.png`
+
+**Frozen at v2 ship.** Expansion tracked separately.
 
 **Current baseline snapshots (4):**
 - `modal-settings-chromium-linux.png`

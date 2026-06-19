@@ -5,6 +5,7 @@ import type { RecordResponse, ClientResponse, VisitorResponse, PaymentResponse, 
 import type { RecordStatus } from '@memo/domain';
 import { useRouter } from 'next/navigation';
 import { StatusPicker } from './StatusPicker';
+import { formatSeats } from '@/app/lib/pluralize';
 
 interface ClientTabProps {
   record: RecordResponse;
@@ -228,7 +229,12 @@ export function ClientTab({
 
       {/* Visitors */}
       <div>
-        <h4 className="text-xs font-medium text-ink-mid mb-2">Посетители</h4>
+        <div className="flex items-center justify-between mb-2">
+          <h4 className="text-xs font-medium text-ink-mid">Посетители</h4>
+          <span className="text-xs text-ink-mid" data-testid="record-seats">
+            {formatSeats(record.seats)}
+          </span>
+        </div>
         {visitors.length === 0 && (
           <p className="text-xs text-ink-light">Нет посетителей</p>
         )}

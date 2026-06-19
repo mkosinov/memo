@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Pre-push hook: runs local test suite, blocks push on failure
+# Source: scripts/git-hooks/pre-push
+# Installed by: scripts/install-hooks.sh (via postinstall)
+
+set -euo pipefail
+
+# Resolve repo root (hooks live in .git/hooks, project in parent)
+HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
+if [[ "$HOOK_DIR" == *"/.git/hooks" ]]; then
+  REPO_ROOT="$(cd "$HOOK_DIR/../../.." && pwd)"
+else
+  REPO_ROOT="$(cd "$HOOK_DIR/../.." && pwd)"
+fi
+
+TEST_SCRIPT="$REPO_ROOT/scripts/test-all.sh"
+
+if [ ! -x "$TEST_SCRIPT" ]; then
+  echo "❌ test-all.sh not found or not executable at $TEST_SCRIPT"
+  echo "   Run: pnpm install (postinstall installs the hook)"
+  exit 1
+fi
+
+exec "$TEST_SCRIPT"

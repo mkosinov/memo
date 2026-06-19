@@ -8,6 +8,7 @@
     "test": "turbo test",
     "test:e2e": "turbo test:e2e",
     "test:all": "turbo test:all",
+    "postinstall": "bash scripts/install-hooks.sh",
     "format": "prettier --write \"**/*.{ts,tsx,md}\""
   },
   "devDependencies": {

@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { ClientsProvider, useClients } from '@/contexts/ClientsContext';
 import { ScheduleProvider } from '@/contexts/ScheduleContext';
 import { ClientsTable } from './components/ClientsTable';
@@ -11,7 +12,20 @@ import type { ClientWithStats } from '@memo/api-client';
 function ClientsPageContent() {
   const [selectedClient, setSelectedClient] = useState<ClientWithStats | null>(null);
   const [isCreateMode, setIsCreateMode] = useState(false);
-  const { total, page, perPage, setPage, setPerPage } = useClients();
+  const { total, page, perPage, setPage, setPerPage, clients } = useClients();
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const clientIdFromQuery = searchParams.get('clientId');
+
+  // Open ClientCardModal when navigated with ?clientId=
+  useEffect(() => {
+    if (clientIdFromQuery && !selectedClient) {
+      const found = clients.find(c => c.id === clientIdFromQuery);
+      if (found) {
+        setSelectedClient(found);
+      }
+    }
+  }, [clientIdFromQuery, clients, selectedClient]);
 
   return (
     <div className="p-4 space-y-4">
@@ -89,6 +103,10 @@ function ClientsPageContent() {
         onClose={() => {
           setSelectedClient(null);
           setIsCreateMode(false);
+          // Clean up query param from URL
+          if (clientIdFromQuery) {
+            router.replace('/clients', { scroll: false });
+          }
         }}
         onClientCreated={(newClient) => {
           setSelectedClient(newClient);

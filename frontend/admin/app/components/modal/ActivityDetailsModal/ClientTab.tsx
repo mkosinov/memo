@@ -90,7 +90,7 @@ export function ClientTab({
   const handleOpenProfile = useCallback(() => {
     if (!client) return;
     onClose?.();
-    router.push(`/clients/${client.id}`);
+    router.push(`/clients?clientId=${client.id}`);
   }, [client, onClose, router]);
 
   // Add visitor form state

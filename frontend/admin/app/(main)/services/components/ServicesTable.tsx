@@ -290,24 +290,32 @@ export function ServicesTable() {
 
   const handleEditSubmit = async (data: Record<string, unknown>) => {
     if (!editingService) return;
-    await updateService.mutateAsync({
-      id: editingService.id,
-      data: data as Record<string, unknown>,
-    });
-    showToast('Услуга обновлена', undefined);
+    try {
+      await updateService.mutateAsync({
+        id: editingService.id,
+        data: data as Record<string, unknown>,
+      });
+      showToast('Услуга обновлена', undefined);
+    } catch (err) {
+      showToast(parseApiError(err).message, 'error');
+    }
   };
 
   const handleArchive = async (service: ServiceResponse) => {
     setActionMenuId(null);
-    // ServiceUpdate doesn't include is_active — cast needed for archive/restore
-    await updateService.mutateAsync({
-      id: service.id,
-      data: { is_active: !service.is_active } as never,
-    });
-    showToast(
-      service.is_active ? 'Услуга в архиве' : 'Услуга восстановлена',
-      undefined,
-    );
+    try {
+      // ServiceUpdate doesn't include is_active — cast needed for archive/restore
+      await updateService.mutateAsync({
+        id: service.id,
+        data: { is_active: !service.is_active } as never,
+      });
+      showToast(
+        service.is_active ? 'Услуга в архиве' : 'Услуга восстановлена',
+        undefined,
+      );
+    } catch (err) {
+      showToast(parseApiError(err).message, 'error');
+    }
   };
 
   const handleCreate = () => {
@@ -315,15 +323,23 @@ export function ServicesTable() {
   };
 
   const handleCreateSubmit = async (data: Record<string, unknown>) => {
-    await createService.mutateAsync(data as never);
-    showToast('Услуга создана', undefined);
+    try {
+      await createService.mutateAsync(data as never);
+      showToast('Услуга создана', undefined);
+    } catch (err) {
+      showToast(parseApiError(err).message, 'error');
+    }
   };
 
   const handleDelete = async (service: ServiceResponse) => {
     setActionMenuId(null);
     if (!window.confirm('Удалить услугу?')) return;
-    await deleteService.mutateAsync(service.id);
-    showToast('Услуга удалена', undefined);
+    try {
+      await deleteService.mutateAsync(service.id);
+      showToast('Услуга удалена', undefined);
+    } catch (err) {
+      showToast(parseApiError(err).message, 'error');
+    }
   };
 
   if (error) {

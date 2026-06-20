@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { useClients } from '@/contexts/ClientsContext';
+import { useUI } from '@/contexts/UIContext';
 import { ColumnPicker } from '@/app/components/shared/ColumnPicker';
 import { ErrorState } from '@/app/components/error';
 import { parseApiError } from '@/app/lib/api/parseApiError';
@@ -21,6 +22,7 @@ interface ClientsTableProps {
 
 export function ClientsTable({ onClientClick }: ClientsTableProps) {
   const { clients, isLoading, error, refetch, filters, sortBy, sortOrder, setSort, resetFilters, deleteClient } = useClients();
+  const { showToast } = useUI();
 
   const [visibleKeys, setVisibleKeys] = useState<string[]>(() => {
     try {
@@ -151,10 +153,14 @@ export function ClientsTable({ onClientClick }: ClientsTableProps) {
               )}
               <td className="py-3 px-4">
                 <button
-                  onClick={(e) => {
+                  onClick={async (e) => {
                     e.stopPropagation();
                     if (window.confirm(`Удалить ${client.name ?? 'клиента'}?`)) {
-                      deleteClient(client.id);
+                      try {
+                        await deleteClient(client.id);
+                      } catch (err) {
+                        showToast(parseApiError(err).message, 'error');
+                      }
                     }
                   }}
                   className="text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"

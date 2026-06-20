@@ -214,23 +214,31 @@ export function MaterialsTable() {
 
   const handleEditSubmit = async (data: Record<string, unknown>) => {
     if (!editingMaterial) return;
-    await updateMaterial.mutateAsync({
-      id: editingMaterial.id,
-      data: data as Record<string, unknown>,
-    });
-    showToast('Материал обновлён', undefined);
+    try {
+      await updateMaterial.mutateAsync({
+        id: editingMaterial.id,
+        data: data as Record<string, unknown>,
+      });
+      showToast('Материал обновлён', undefined);
+    } catch (err) {
+      showToast(parseApiError(err).message, 'error');
+    }
   };
 
   const handleArchive = async (material: MaterialResponse) => {
     setActionMenuId(null);
-    await updateMaterial.mutateAsync({
-      id: material.id,
-      data: { is_active: !material.is_active } as never,
-    });
-    showToast(
-      material.is_active ? 'Материал в архиве' : 'Материал восстановлен',
-      undefined,
-    );
+    try {
+      await updateMaterial.mutateAsync({
+        id: material.id,
+        data: { is_active: !material.is_active } as never,
+      });
+      showToast(
+        material.is_active ? 'Материал в архиве' : 'Материал восстановлен',
+        undefined,
+      );
+    } catch (err) {
+      showToast(parseApiError(err).message, 'error');
+    }
   };
 
   const handleCreate = () => {
@@ -238,15 +246,23 @@ export function MaterialsTable() {
   };
 
   const handleCreateSubmit = async (data: Record<string, unknown>) => {
-    await createMaterial.mutateAsync(data as never);
-    showToast('Материал создан', undefined);
+    try {
+      await createMaterial.mutateAsync(data as never);
+      showToast('Материал создан', undefined);
+    } catch (err) {
+      showToast(parseApiError(err).message, 'error');
+    }
   };
 
   const handleDelete = async (material: MaterialResponse) => {
     setActionMenuId(null);
     if (!window.confirm('Удалить материал?')) return;
-    await deleteMaterial.mutateAsync(material.id);
-    showToast('Материал удалён', undefined);
+    try {
+      await deleteMaterial.mutateAsync(material.id);
+      showToast('Материал удалён', undefined);
+    } catch (err) {
+      showToast(parseApiError(err).message, 'error');
+    }
   };
 
   if (isLoading) {

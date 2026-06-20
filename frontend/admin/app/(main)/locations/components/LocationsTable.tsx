@@ -157,23 +157,31 @@ export function LocationsTable() {
         (payload as Record<string, unknown>)[key] = val;
       }
     }
-    await updateLocation.mutateAsync({
-      id: editLocation.id,
-      data: payload,
-    });
-    showToast('Локация обновлена');
-    setEditLocation(null);
+    try {
+      await updateLocation.mutateAsync({
+        id: editLocation.id,
+        data: payload,
+      });
+      showToast('Локация обновлена');
+      setEditLocation(null);
+    } catch (err) {
+      showToast(parseApiError(err).message, 'error');
+    }
   };
 
   // ─── Archive / Restore ───────────────────────────────────────────────
 
   const handleToggleActive = async (loc: LocationResponse) => {
-    await updateLocation.mutateAsync({
-      id: loc.id,
-      data: { is_active: !loc.is_active } as Record<string, unknown>,
-    });
-    showToast(loc.is_active ? 'Локация архивирована' : 'Локация восстановлена');
-    setOpenDropdownId(null);
+    try {
+      await updateLocation.mutateAsync({
+        id: loc.id,
+        data: { is_active: !loc.is_active } as Record<string, unknown>,
+      });
+      showToast(loc.is_active ? 'Локация архивирована' : 'Локация восстановлена');
+      setOpenDropdownId(null);
+    } catch (err) {
+      showToast(parseApiError(err).message, 'error');
+    }
   };
 
   // ─── Create ─────────────────────────────────────────────────────────
@@ -189,8 +197,12 @@ export function LocationsTable() {
         payload[key] = val;
       }
     }
-    await createLocation.mutateAsync(payload as never);
-    showToast('Локация создана');
+    try {
+      await createLocation.mutateAsync(payload as never);
+      showToast('Локация создана');
+    } catch (err) {
+      showToast(parseApiError(err).message, 'error');
+    }
   };
 
   // ─── Delete ─────────────────────────────────────────────────────────
@@ -198,8 +210,12 @@ export function LocationsTable() {
   const handleDelete = async (loc: LocationResponse) => {
     setOpenDropdownId(null);
     if (!window.confirm('Удалить локацию?')) return;
-    await deleteLocation.mutateAsync(loc.id);
-    showToast('Локация удалена');
+    try {
+      await deleteLocation.mutateAsync(loc.id);
+      showToast('Локация удалена');
+    } catch (err) {
+      showToast(parseApiError(err).message, 'error');
+    }
   };
 
   // ─── Error ─────────────────────────────────────────────────────────

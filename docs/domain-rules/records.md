@@ -8,8 +8,9 @@ A Record is a booking for an Activity. It links a Client to an Activity and cont
 |-------|------|----------|-----|-----|---------|-------------|
 | activity_id | string | ✅ | — | — | — | FK to Activity |
 | client_id | string | ❌ | — | — | null | FK to Client (nullable for anonymous) |
-| status | enum | ❌ | — | — | pending | pending / confirmed / cancelled / no_show |
+| status | enum | ❌ | — | — | waiting | **DERIVED** from VisitStatus (see [RecordStatus derivation](#recordstatus-derivation)). Same enum as VisitItem.status: waiting / visited / missed / cancelled |
 | seats | integer | ✅ | — | — | — | Computed: len(visits), never set by user |
+| anonym_visits | integer | ❌ | — | — | 0 | Number of "anonymous" seats (no visitor assigned). Adds to seats count without a Visit row. Used for "walk-ins" / phone reservations. |
 | comment | string | ❌ | — | — | null | Комментарий |
 | custom_price | integer | ❌ | — | — | null | Override price (replaces sum of visit prices) |
 | visits | array | ✅ | — | — | — | List of VisitItems |
@@ -71,6 +72,40 @@ A Record is a booking for an Activity. It links a Client to an Activity and cont
 - Capacity check: `occupied + seats <= activity.capacity` (on create only)
 - Activity must exist and be active (FK enforced)
 - Client is optional (anonymous booking possible)
+- **Record.status === derived from VisitItems.status** (see below). Record status is NEVER set independently.
+
+## RecordStatus derivation
+
+`Record.status` is **always computed** from the statuses of its `VisitItem`s. The Record has no user-editable status field; the user edits per-visit statuses (or `anonym_visits` slots) and the Record status updates automatically.
+
+| Condition | Record.status |
+|-----------|---------------|
+| At least 1 visit with `status = 'visited'` | `visited` |
+| 0 visits with `'visited'` AND all visits are `'missed'` | `missed` |
+| 0 visits with `'visited'` AND all visits are `'cancelled'` | `cancelled` |
+| Otherwise (any visit is `'waiting'`, or mixed waiting/other) | `waiting` |
+
+**Algorithm (priority order):**
+1. If `any(visit.status == 'visited')` → `'visited'`
+2. Else if `len(visits) > 0 AND all(v.status == 'missed' for v in visits)` → `'missed'`
+3. Else if `len(visits) > 0 AND all(v.status == 'cancelled' for v in visits)` → `'cancelled'`
+4. Else → `'waiting'`
+
+**Edge cases:**
+- Record with **0 visits** (only `anonym_visits` slots): status = `'waiting'` (no derivation possible)
+- Record with **1 visit**: status = that visit's status
+- Mixed (e.g. 2 visited + 1 waiting): status = `'visited'` (rule 1 wins)
+
+**Why derived, not stored:** A Record is just a container for Visits. Its status is a **summary** of visitor attendance, not an independent state. Storing it independently creates drift (e.g. user cancels Record but a Visit says 'visited').
+
+**API contract:**
+- POST/PUT/PATCH `Record` payload does NOT accept `status` field — server returns 422 if provided
+- GET `Record` response includes `status` (derived, read-only) for UI convenience
+- The UI can edit `visits[].status` (and `anonym_visits` slots) but never the Record-level status
+
+**UI implication:**
+- One `StatusPicker` component, one `VISIT_STATUS_CONFIG` (waiting/visited/missed/cancelled) — used both for per-visit edits AND for the read-only Record-level badge
+- No second `RecordStatus` enum or `RECORD_STATUS_CONFIG` — single source of truth
 
 ## Business Logic
 
@@ -95,7 +130,7 @@ A Record is a booking for an Activity. It links a Client to an Activity and cont
 - **Name required:** Toast "Заполните имя" if empty
 - **Tariff required per visitor:** Toast if any visitor has no tariffId
 - **Price from first visitor:** Only first visitor's tariff price used for all visits (bug)
-- **Status transitions:** No restrictions in UI (all 4 options always shown)
+- **Per-visit status:** UI edits `visits[].status` (waiting/visited/missed/cancelled). Record-level status updates automatically via derivation. StatusPicker used for both per-visit edit and read-only Record badge.
 - **Delayed delete:** 5-second setTimeout with undo toast
 
 ## API Endpoints
@@ -116,10 +151,12 @@ A Record is a booking for an Activity. It links a Client to an Activity and cont
 - Record → has many Tags (M2M)
 
 ## Enums & Constants
-| Enum | Values |
-|------|--------|
-| RecordStatus | pending, confirmed, cancelled, no_show |
-| VisitStatus | waiting, visited, missed, cancelled |
+| Enum | Values | Source of truth |
+|------|--------|-----------------|
+| **VisitStatus** (used at BOTH visit and record level) | `waiting`, `visited`, `missed`, `cancelled` | `@memo/domain` |
+| ~~RecordStatus (old: pending/confirmed/cancelled/no_show)~~ | ❌ Deprecated — DO NOT USE | Wave 5 implementation drift, see [RecordStatus derivation](#recordstatus-derivation) |
+
+**Single enum: `VisitStatus`.** Record status is a derived field that mirrors the same values. There is no separate `RecordStatus` enum anywhere in code, schema, or API.
 
 ## Acceptance Criteria
 - [ ] Capacity check prevents overbooking on create
@@ -128,6 +165,9 @@ A Record is a booking for an Activity. It links a Client to an Activity and cont
 - [ ] Visitor resolution works (name-based, ID-based, anonymous)
 - [ ] Delete cascades to Visits and Payments
 - [ ] custom_price overrides visit prices
+- [ ] Record.status is derived from VisitItems.status (never stored, never set by user)
+- [ ] API rejects Record payloads with `status` field (422)
+- [ ] Record with 0 visits → status = 'waiting'
 
 ## Parity Notes
 | Backend (Pydantic) | Frontend (Zod) | Match |
@@ -135,4 +175,6 @@ A Record is a booking for an Activity. It links a Client to an Activity and cont
 | visits: required | visits: optional | ❌ |
 | VisitItem has name/age | VisitItem missing name/age | ❌ |
 | seats: not in schema | seats: in schema | ❌ (ignored) |
-| RecordStatus enum | RecordStatus enum | ✅ |
+| **Record.status: derived, no input field** | **Record.status: derived, no input field** | ✅ (after migration) |
+| VisitStatus enum (waiting/visited/missed/cancelled) | VisitStatus enum | ✅ |
+| ~~RecordStatus enum (pending/confirmed/...)~~ | ~~RecordStatus enum~~ | ❌ MIGRATION NEEDED |

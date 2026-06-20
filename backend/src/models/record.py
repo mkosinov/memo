@@ -22,6 +22,7 @@ class Record(AbstractModel):
     )
     status: Mapped[str] = mapped_column(String(20))
     seats: Mapped[int] = mapped_column(Integer)
+    anonym_visits: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)
     custom_price: Mapped[int | None] = mapped_column(Integer, nullable=True)
 

@@ -89,7 +89,8 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
         Raises HTTPException 409 if activity is at capacity.
         """
         # ── Capacity check ─────────────────────────────────────────────
-        await self._check_capacity(db_session, data.activity_id, seats=len(data.visits))
+        effective_seats = len(data.visits) + (data.anonym_visits or 0)
+        await self._check_capacity(db_session, data.activity_id, seats=effective_seats)
 
         # ── Resolve client ──────────────────────────────────────────────
         if data.phone:
@@ -118,7 +119,8 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
             activity_id=data.activity_id,
             client_id=client.id if client else data.client_id,
             status=data.status.value if data.status else "pending",
-            seats=len(data.visits),
+            seats=effective_seats,
+            anonym_visits=data.anonym_visits or 0,
             comment=data.comment,
             custom_price=data.custom_price,
         )
@@ -198,7 +200,8 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
         record.status = data.status
         record.comment = data.comment
         record.custom_price = data.custom_price
-        record.seats = len(data.visits)
+        record.anonym_visits = data.anonym_visits or 0
+        record.seats = len(data.visits) + (data.anonym_visits or 0)
         record.updated_at = datetime.now(UTC)
 
         for existing_visit in record.visits:
@@ -239,6 +242,8 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
             record.comment = update_data["comment"]
         if "custom_price" in update_data:
             record.custom_price = update_data["custom_price"]
+        if "anonym_visits" in update_data:
+            record.anonym_visits = update_data["anonym_visits"] or 0
         if "visits" in update_data:
             for existing_visit in record.visits:
                 existing_visit.is_active = False
@@ -251,7 +256,12 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
                     status=visit_item.get("status", "waiting"),
                 )
                 db_session.add(visit)
-            record.seats = len(update_data["visits"])
+            # When visits replaced: seats = len(new_visits) + anonym_visits
+            record.seats = len(update_data["visits"]) + record.anonym_visits
+        else:
+            # When only other fields patched: seats = len(active visits) + anonym_visits
+            active_visits = [v for v in record.visits if v.is_active]
+            record.seats = len(active_visits) + record.anonym_visits
 
         record.updated_at = datetime.now(UTC)
         await db_session.flush()

@@ -217,6 +217,7 @@ export const RecordResponseSchema = z.object({
   client_id: z.string().nullable(),
   status: z.string(),
   seats: z.number(),
+  anonym_visits: z.number(),
   comment: z.string().nullable(),
   custom_price: z.number().nullable(),
   created_at: z.string(),
@@ -297,6 +298,7 @@ export const RecordCreateSchema = z.object({
   phone: z.string().optional(),
   status: z.enum(['pending', 'confirmed', 'cancelled', 'no_show']).optional(),
   seats: z.number().optional(),
+  anonym_visits: z.number().int().min(0).default(0).optional(),
   comment: z.string().optional(),
   custom_price: z.number().nullable().optional(),
   visits: z.array(z.object({

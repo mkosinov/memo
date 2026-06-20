@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import asc
 
 from src.db import SessionDep
+from src.errors import ErrorCode, ErrorDetail
 from src.models.location import Location
 from src.schemas.location import LocationCreate, LocationResponse, LocationUpdate, ReorderRequest
 from src.services.generic import GenericService
@@ -55,7 +56,13 @@ async def get_location(
     """Return a single location by ID."""
     location = await service.get(db_session=session, id=location_id)
     if not location:
-        raise HTTPException(status_code=404, detail="Location not found")
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.LOCATION_NOT_FOUND,
+                message="Location not found",
+            ).model_dump(),
+        )
     return location
 
 
@@ -79,7 +86,13 @@ async def update_location(
     """Full-update a location by ID (PUT, not PATCH)."""
     location = await service.update(db_session=session, id=location_id, data=data)
     if not location:
-        raise HTTPException(status_code=404, detail="Location not found")
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.LOCATION_NOT_FOUND,
+                message="Location not found",
+            ).model_dump(),
+        )
     return location
 
 
@@ -92,4 +105,10 @@ async def delete_location(
     """Soft-delete a location (set is_active=False)."""
     deleted = await service.delete(db_session=session, id=location_id)
     if not deleted:
-        raise HTTPException(status_code=404, detail="Location not found")
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.LOCATION_NOT_FOUND,
+                message="Location not found",
+            ).model_dump(),
+        )

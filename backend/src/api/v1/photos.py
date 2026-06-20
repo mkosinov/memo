@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from src.db import SessionDep
+from src.errors import ErrorCode, ErrorDetail
 from src.models.photo import Photo
 from src.schemas.photo import PhotoCreate, PhotoResponse, PhotoUpdate
 from src.services.generic import GenericService
@@ -60,7 +61,13 @@ async def get_photo(
     """Return a single photo by ID."""
     photo = await service.get(db_session=session, id=photo_id)
     if not photo:
-        raise HTTPException(status_code=404, detail="Photo not found")
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.PHOTO_NOT_FOUND,
+                message="Photo not found",
+            ).model_dump(),
+        )
     return photo
 
 
@@ -84,7 +91,13 @@ async def update_photo(
     """Full-update a photo by ID."""
     photo = await service.update(db_session=session, id=photo_id, data=data)
     if not photo:
-        raise HTTPException(status_code=404, detail="Photo not found")
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.PHOTO_NOT_FOUND,
+                message="Photo not found",
+            ).model_dump(),
+        )
     return photo
 
 
@@ -97,4 +110,10 @@ async def delete_photo(
     """Soft-delete a photo (set is_active=False)."""
     deleted = await service.delete(db_session=session, id=photo_id)
     if not deleted:
-        raise HTTPException(status_code=404, detail="Photo not found")
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.PHOTO_NOT_FOUND,
+                message="Photo not found",
+            ).model_dump(),
+        )

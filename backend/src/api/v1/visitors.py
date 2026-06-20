@@ -6,6 +6,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 
 from src.db import SessionDep
+from src.errors import ErrorCode, ErrorDetail
 from src.schemas.visitor import VisitorCreate, VisitorResponse, VisitorUpdate
 from src.services.visitor import get_visitor_service, VisitorService
 
@@ -30,7 +31,13 @@ async def get_visitor(
     """Return a single visitor by ID."""
     visitor = await service.get(db_session=session, id=visitor_id)
     if not visitor:
-        raise HTTPException(status_code=404, detail="Visitor not found")
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.VISITOR_NOT_FOUND,
+                message="Visitor not found",
+            ).model_dump(),
+        )
     return visitor
 
 
@@ -54,7 +61,13 @@ async def update_visitor(
     """Full-update a visitor by ID (PUT, not PATCH)."""
     visitor = await service.update(db_session=session, id=visitor_id, data=data)
     if not visitor:
-        raise HTTPException(status_code=404, detail="Visitor not found")
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.VISITOR_NOT_FOUND,
+                message="Visitor not found",
+            ).model_dump(),
+        )
     return visitor
 
 
@@ -67,4 +80,10 @@ async def delete_visitor(
     """Soft-delete a visitor (set is_active=False)."""
     deleted = await service.delete(db_session=session, id=visitor_id)
     if not deleted:
-        raise HTTPException(status_code=404, detail="Visitor not found")
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.VISITOR_NOT_FOUND,
+                message="Visitor not found",
+            ).model_dump(),
+        )

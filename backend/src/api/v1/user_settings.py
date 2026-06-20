@@ -6,6 +6,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 
 from src.db import SessionDep
+from src.errors import ErrorCode, ErrorDetail
 from src.schemas.user_settings import (
     UserSettingsCreate,
     UserSettingsResponse,
@@ -34,7 +35,13 @@ async def get_settings(
     """Find active settings by user_id."""
     result = await service.get_by_user_id(session, user_id)
     if not result:
-        raise HTTPException(status_code=404, detail="No settings found for user")
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.SETTINGS_NOT_FOUND,
+                message="No settings found for user",
+            ).model_dump(),
+        )
     return result
 
 
@@ -58,7 +65,13 @@ async def update_settings(
     """Partial-update settings by user_id."""
     result = await service.update_by_user_id(session, user_id, data)
     if not result:
-        raise HTTPException(status_code=404, detail="No settings found for user")
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.SETTINGS_NOT_FOUND,
+                message="No settings found for user",
+            ).model_dump(),
+        )
     return result
 
 
@@ -71,4 +84,10 @@ async def delete_settings(
     """Soft-delete a settings record by its primary key ID."""
     deleted = await service.delete(session, settings_id)
     if not deleted:
-        raise HTTPException(status_code=404, detail="Settings not found")
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.SETTINGS_NOT_FOUND,
+                message="Settings not found",
+            ).model_dump(),
+        )

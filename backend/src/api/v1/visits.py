@@ -7,6 +7,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 
 from src.db import SessionDep
+from src.errors import ErrorCode, ErrorDetail
 from src.schemas.visit import VisitResponse, VisitStatusUpdate
 from src.services.visit import VisitService, get_visit_service
 
@@ -52,7 +53,13 @@ async def get_visit(
     """Return a single visit by ID."""
     visit = await service.get(db_session=session, visit_id=visit_id)
     if not visit:
-        raise HTTPException(status_code=404, detail="Visit not found")
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.VISIT_NOT_FOUND,
+                message="Visit not found",
+            ).model_dump(),
+        )
     return _map_visit(visit)
 
 
@@ -66,5 +73,11 @@ async def update_visit_status(
     """Update a visit's status only."""
     visit = await service.update_status(db_session=session, visit_id=visit_id, status=data.status)
     if not visit:
-        raise HTTPException(status_code=404, detail="Visit not found")
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.VISIT_NOT_FOUND,
+                message="Visit not found",
+            ).model_dump(),
+        )
     return _map_visit(visit)

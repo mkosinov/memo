@@ -5,7 +5,7 @@ import type { RecordResponse, ClientResponse, VisitorResponse, PaymentResponse, 
 import type { RecordPatchData } from '@/hooks/useRecordMutations';
 import type { VisitStatus } from '@memo/domain';
 import { useRouter } from 'next/navigation';
-import { StatusPicker } from './StatusPicker';
+import { StatusPicker } from '@/app/components/shared/StatusPicker';
 import { formatSeats } from '@/app/lib/pluralize';
 import { useRecordData } from '@/hooks/useRecordData';
 
@@ -23,49 +23,6 @@ interface ClientTabProps {
   onAddVisitor?: (data: { name: string; age?: number; price: number }) => Promise<void>;
   showToast: (message: string, undo?: () => void) => void;
   onClose?: () => void;
-}
-
-const STATUS_CONFIG: Record<VisitStatus, { label: string; color: string }> = {
-  waiting: { label: 'Ожидание', color: '#F59E0B' },
-  visited: { label: 'Посетил', color: '#10B981' },
-  cancelled: { label: 'Отменён', color: '#F97316' },
-  missed: { label: 'Неявка', color: '#4B5563' },
-};
-
-function renderStatusIcon(status: VisitStatus): React.ReactNode {
-  const iconClass = 'w-3.5 h-3.5';
-  switch (status) {
-    case 'waiting':
-      return (
-        <svg className={iconClass} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" data-testid="icon-waiting">
-          <circle cx="12" cy="12" r="10" />
-          <polyline points="12 6 12 12 16 14" />
-        </svg>
-      );
-    case 'visited':
-      return (
-        <svg className={iconClass} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" data-testid="icon-visited">
-          <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
-          <polyline points="22 4 12 14.01 9 11.01" />
-        </svg>
-      );
-    case 'cancelled':
-      return (
-        <svg className={iconClass} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" data-testid="icon-cancelled">
-          <circle cx="12" cy="12" r="10" />
-          <line x1="15" y1="9" x2="9" y2="15" />
-          <line x1="9" y1="9" x2="15" y2="15" />
-        </svg>
-      );
-    case 'missed':
-      return (
-        <svg className={iconClass} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" data-testid="icon-missed">
-          <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
-          <line x1="12" y1="9" x2="12" y2="13" />
-          <line x1="12" y1="17" x2="12.01" y2="17" />
-        </svg>
-      );
-  }
 }
 
 export function ClientTab({
@@ -314,8 +271,6 @@ export function ClientTab({
           <StatusPicker
             value={status}
             onChange={setStatus}
-            statusConfig={STATUS_CONFIG}
-            iconFor={renderStatusIcon}
           />
         </div>
       </div>

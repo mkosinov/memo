@@ -3,6 +3,7 @@
 import React, { useMemo } from 'react';
 import { useRecords } from '@/contexts/RecordsContext';
 import { DiamondIcon } from '@/app/components/shared/DiamondIcon';
+import { StatusBadge } from '@/app/components/shared/StatusBadge';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
@@ -15,20 +16,6 @@ function formatTime(time: number): string {
   const m = Math.round((time - h) * 60);
   return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
 }
-
-const STATUS_LABELS: Record<string, string> = {
-  pending: 'Ожидание',
-  confirmed: 'Подтверждена',
-  cancelled: 'Отменена',
-  no_show: 'Неявка',
-};
-
-const STATUS_COLORS: Record<string, string> = {
-  pending: 'bg-gray-100 text-gray-600',
-  confirmed: 'bg-emerald-100 text-emerald-700',
-  cancelled: 'bg-amber-100 text-amber-700',
-  no_show: 'bg-red-100 text-red-700',
-};
 
 // ─── Component ────────────────────────────────────────────────────────────
 
@@ -136,9 +123,7 @@ export function ClientCardModal({ clientId, onClose }: ClientCardModalProps) {
                         <div className="flex-1">
                           <div className="flex items-center gap-3">
                             <span className="text-sm font-medium" style={{ color: 'var(--ink)' }}>{service?.title ?? '—'}</span>
-                            <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-semibold ${STATUS_COLORS[record.status]}`}>
-                              {STATUS_LABELS[record.status]}
-                            </span>
+                            <StatusBadge status={record.status as 'waiting' | 'visited' | 'missed' | 'cancelled'} />
                             {activity?.is_private && (
                               <DiamondIcon className="text-[10px]" />
                             )}

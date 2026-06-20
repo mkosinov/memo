@@ -8,6 +8,7 @@ import { ClientCardModal } from './ClientCardModal';
 import { DiamondIcon } from '@/app/components/shared/DiamondIcon';
 import { ColumnPicker } from '@/app/components/shared/ColumnPicker';
 import { ErrorState } from '@/app/components/error';
+import { StatusBadge } from '@/app/components/shared/StatusBadge';
 
 // ─── Column definitions ──────────────────────────────────────────────────
 
@@ -48,20 +49,6 @@ function parseActivityStart(start: string): { date: string; day: number; startTi
   const date = start.slice(0, 10);
   return { date, day, startTime };
 }
-
-const STATUS_LABELS: Record<string, string> = {
-  pending: 'Ожидание',
-  confirmed: 'Подтверждена',
-  cancelled: 'Отменена',
-  no_show: 'Неявка',
-};
-
-const STATUS_COLORS: Record<string, string> = {
-  pending: 'bg-gray-100 text-gray-600',
-  confirmed: 'bg-emerald-100 text-emerald-700',
-  cancelled: 'bg-amber-100 text-amber-700',
-  no_show: 'bg-red-100 text-red-700',
-};
 
 interface RecordsTableProps {
   filters: {
@@ -401,9 +388,7 @@ export function RecordsTable({ filters }: RecordsTableProps) {
                   {/* Статус */}
                   {visibleKeys.includes('status') && (
                   <td className="px-4 py-3">
-                    <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-semibold ${STATUS_COLORS[record.status]}`}>
-                      {STATUS_LABELS[record.status]}
-                    </span>
+                    <StatusBadge status={record.status as 'waiting' | 'visited' | 'missed' | 'cancelled'} />
                   </td>
                   )}
 
@@ -544,9 +529,7 @@ export function RecordsTable({ filters }: RecordsTableProps) {
               {locations.get(selectedActivity.location_id)?.name} · {masters.get(selectedActivity.master_id) ? displayMasterName(masters.get(selectedActivity.master_id)!) : '—'}
             </div>
             <div className="mt-2">
-              <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-semibold ${STATUS_COLORS[selectedRecord.status]}`}>
-                {STATUS_LABELS[selectedRecord.status]}
-              </span>
+              <StatusBadge status={selectedRecord.status as 'waiting' | 'visited' | 'missed' | 'cancelled'} />
             </div>
           </div>
 

@@ -4,6 +4,7 @@ import React, { useMemo } from 'react';
 import { useRecords } from '@/contexts/RecordsContext';
 import { DiamondIcon } from '@/app/components/shared/DiamondIcon';
 import { StatusBadge } from '@/app/components/shared/StatusBadge';
+import { safeStatus } from '@/app/lib/status-utils';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
@@ -123,7 +124,7 @@ export function ClientCardModal({ clientId, onClose }: ClientCardModalProps) {
                         <div className="flex-1">
                           <div className="flex items-center gap-3">
                             <span className="text-sm font-medium" style={{ color: 'var(--ink)' }}>{service?.title ?? '—'}</span>
-                            <StatusBadge status={record.status as 'waiting' | 'visited' | 'missed' | 'cancelled'} />
+                             <StatusBadge status={safeStatus(record.status)} />
                             {activity?.is_private && (
                               <DiamondIcon className="text-[10px]" />
                             )}

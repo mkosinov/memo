@@ -9,6 +9,7 @@ import { DiamondIcon } from '@/app/components/shared/DiamondIcon';
 import { ColumnPicker } from '@/app/components/shared/ColumnPicker';
 import { ErrorState } from '@/app/components/error';
 import { StatusBadge } from '@/app/components/shared/StatusBadge';
+import { safeStatus } from '@/app/lib/status-utils';
 
 // ─── Column definitions ──────────────────────────────────────────────────
 
@@ -388,7 +389,7 @@ export function RecordsTable({ filters }: RecordsTableProps) {
                   {/* Статус */}
                   {visibleKeys.includes('status') && (
                   <td className="px-4 py-3">
-                    <StatusBadge status={record.status as 'waiting' | 'visited' | 'missed' | 'cancelled'} />
+                    <StatusBadge status={safeStatus(record.status)} />
                   </td>
                   )}
 
@@ -529,7 +530,7 @@ export function RecordsTable({ filters }: RecordsTableProps) {
               {locations.get(selectedActivity.location_id)?.name} · {masters.get(selectedActivity.master_id) ? displayMasterName(masters.get(selectedActivity.master_id)!) : '—'}
             </div>
             <div className="mt-2">
-              <StatusBadge status={selectedRecord.status as 'waiting' | 'visited' | 'missed' | 'cancelled'} />
+              <StatusBadge status={safeStatus(selectedRecord.status)} />
             </div>
           </div>
 

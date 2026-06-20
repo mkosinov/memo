@@ -1,4 +1,4 @@
-import { VisitStatus } from '@memo/domain';
+import type { VisitStatus } from '@memo/domain';
 import { VISIT_STATUS_CONFIG } from './config/VISIT_STATUS_CONFIG';
 
 export interface StatusBadgeProps {

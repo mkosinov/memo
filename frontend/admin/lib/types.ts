@@ -34,7 +34,6 @@ export {
   ClientSchema,
   VisitorSchema,
   RecordSchema,
-  RecordStatusSchema,
   VisitSchema,
   PaymentSchema,
   PaymentMethodSchema,

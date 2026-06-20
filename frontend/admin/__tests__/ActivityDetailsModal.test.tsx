@@ -573,14 +573,14 @@ describe('ClientTab — layout & features', () => {
 
   it('renders status picker with all statuses', () => {
     render(<ClientTab {...defaultProps} />);
-    const trigger = screen.getByTestId('status-picker-trigger');
+    const trigger = screen.getByTestId('custom-select-trigger');
     expect(trigger).toBeInTheDocument();
     fireEvent.click(trigger);
-    expect(screen.getByTestId('status-picker-popover')).toBeInTheDocument();
-    expect(screen.getByTestId('status-picker-option-pending')).toBeInTheDocument();
-    expect(screen.getByTestId('status-picker-option-confirmed')).toBeInTheDocument();
-    expect(screen.getByTestId('status-picker-option-cancelled')).toBeInTheDocument();
-    expect(screen.getByTestId('status-picker-option-no_show')).toBeInTheDocument();
+    expect(screen.getByTestId('custom-select-dropdown')).toBeInTheDocument();
+    expect(screen.getByTestId('custom-select-option-waiting')).toBeInTheDocument();
+    expect(screen.getByTestId('custom-select-option-visited')).toBeInTheDocument();
+    expect(screen.getByTestId('custom-select-option-missed')).toBeInTheDocument();
+    expect(screen.getByTestId('custom-select-option-cancelled')).toBeInTheDocument();
   });
 
   it('renders client link as SVG icon (not text)', () => {

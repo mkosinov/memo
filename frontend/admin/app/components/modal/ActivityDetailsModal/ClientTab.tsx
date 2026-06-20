@@ -6,6 +6,7 @@ import type { RecordPatchData } from '@/hooks/useRecordMutations';
 import type { VisitStatus } from '@memo/domain';
 import { useRouter } from 'next/navigation';
 import { StatusPicker } from '@/app/components/shared/StatusPicker';
+import { safeStatus } from '@/app/lib/status-utils';
 import { formatSeats } from '@/app/lib/pluralize';
 import { useRecordData } from '@/hooks/useRecordData';
 
@@ -41,7 +42,7 @@ export function ClientTab({
   onClose,
 }: ClientTabProps) {
   const [name, setName] = useState(client?.name || '');
-  const [status, setStatus] = useState<VisitStatus>(record.status as VisitStatus);
+  const [status, setStatus] = useState<VisitStatus>(safeStatus(record.status));
   const [paymentAmount, setPaymentAmount] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('card');
   const isDeletingRef = useRef(false);
@@ -80,7 +81,7 @@ export function ClientTab({
 
   // --- Reset status on record change (Bug #84) ---
   useEffect(() => {
-      setStatus(record.status as VisitStatus);
+      setStatus(safeStatus(record.status));
   }, [record.id]);
 
   // --- Persist status change to backend (Bug #84) ---

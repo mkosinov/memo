@@ -42,7 +42,7 @@ export function StatusPicker({ value, onChange, statusConfig, iconFor, testIdPre
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg border text-sm hover:bg-surface"
+        className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border text-sm bg-white hover:bg-surface"
         style={{ borderColor: 'var(--line)', color: current.color }}
         aria-label={`Статус: ${current.label}`}
         aria-haspopup="listbox"

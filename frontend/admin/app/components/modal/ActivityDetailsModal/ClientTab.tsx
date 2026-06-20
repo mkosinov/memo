@@ -5,10 +5,17 @@ import type { RecordResponse, ClientResponse, VisitorResponse, PaymentResponse, 
 import type { RecordPatchData } from '@/hooks/useRecordMutations';
 import type { VisitStatus } from '@memo/domain';
 import { useRouter } from 'next/navigation';
-import { StatusPicker } from '@/app/components/shared/StatusPicker';
+import { RecordHeader } from '@/app/components/shared/records/RecordHeader';
+import { RecordVisitRow } from '@/app/components/shared/records/RecordVisitRow';
+import { PaymentList } from '@/app/components/shared/payments/PaymentList';
+import { PaymentForm } from '@/app/components/shared/payments/PaymentForm';
+import { PaymentTotals } from '@/app/components/shared/payments/PaymentTotals';
+import { AddVisitorForm } from '@/app/components/shared/visitors/AddVisitorForm';
+import { useRecordData } from '@/hooks/useRecordData';
+import type { RecordWithDerived } from '@/app/components/shared/records/types';
+import { computeRecordStatus } from '@memo/domain';
 import { safeStatus } from '@/app/lib/status-utils';
 import { formatSeats } from '@/app/lib/pluralize';
-import { useRecordData } from '@/hooks/useRecordData';
 
 interface ClientTabProps {
   record: RecordResponse;
@@ -41,144 +48,32 @@ export function ClientTab({
   showToast,
   onClose,
 }: ClientTabProps) {
-  const [name, setName] = useState(client?.name || '');
-  const [status, setStatus] = useState<VisitStatus>(safeStatus(record.status));
-  const [paymentAmount, setPaymentAmount] = useState('');
-  const [paymentMethod, setPaymentMethod] = useState('card');
   const isDeletingRef = useRef(false);
   const router = useRouter();
-
-  // --- Fetch visitors + tariffs for this record's client ---
   const { visitorsMap } = useRecordData(record.id, client?.id ?? '');
 
-  // --- Visitor editor state (pre-filled from visitorsMap + visit.tariff_id) ---
-  const [visitNames, setVisitNames] = useState<string[]>(
-    visits.map((v) => visitorsMap.get(v.visitor_id ?? '')?.name ?? '')
+  // Derive status from visits (atom pattern)
+  const status: VisitStatus = computeRecordStatus(
+    (visits || []).map(v => ({ id: v.id, status: safeStatus(v.status) })),
   );
-  const [visitAges, setVisitAges] = useState<string[]>(
-    visits.map((v) => visitorsMap.get(v.visitor_id ?? '')?.age?.toString() ?? '')
-  );
-  const [visitTariffIds, setVisitTariffIds] = useState<string[]>(
-    visits.map((v) => v.tariff_id ?? '')
-  );
+
+  // Build RecordWithDerived for atom consumption
+  const recordData: RecordWithDerived = {
+    record,
+    status,
+    visits: visits || [],
+    payments,
+    client: client ? { id: client.id, name: client.name, phone: client.phone } : null,
+    tariffs: serviceTariffs,
+  };
+
+  // ── Surface-specific handlers ─────────────────────────────────────────────
 
   const handleOpenProfile = useCallback(() => {
     if (!client) return;
     onClose?.();
     router.push(`/clients?clientId=${client.id}`);
   }, [client, onClose, router]);
-
-  // Add visitor form state
-  const [showAddVisitor, setShowAddVisitor] = useState(false);
-  const [newVisitorName, setNewVisitorName] = useState('');
-  const [newVisitorAge, setNewVisitorAge] = useState('');
-  const [isAddingVisitor, setIsAddingVisitor] = useState(false);
-
-  // --- Reset name on record/client change (Bug #81) ---
-  useEffect(() => {
-    setName(client?.name || '');
-  }, [record.id, client?.id]);
-
-  // --- Reset status on record change (Bug #84) ---
-  useEffect(() => {
-      setStatus(safeStatus(record.status));
-  }, [record.id]);
-
-  // --- Persist status change to backend (Bug #84) ---
-  useEffect(() => {
-    if (status === record.status) return;
-    onUpdateRecord(record.id, { status }).catch(() => {
-    setStatus(record.status as VisitStatus);
-      showToast('Ошибка изменения статуса');
-    });
-  }, [status]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // --- Reset visitor editor state on record.visits or visitorsMap change ---
-  useEffect(() => {
-    setVisitNames(visits.map((v) => visitorsMap.get(v.visitor_id ?? '')?.name ?? ''));
-    setVisitAges(visits.map((v) => visitorsMap.get(v.visitor_id ?? '')?.age?.toString() ?? ''));
-    setVisitTariffIds(visits.map((v) => v.tariff_id ?? ''));
-  }, [record.id, visits.length, visitorsMap]);
-
-  // --- Visitor editor helpers ---
-  const updateVisitName = useCallback((id: string, value: string) => {
-    const idx = visits.findIndex((v) => v.id === id);
-    if (idx === -1) return;
-    setVisitNames((prev) => {
-      const next = [...prev];
-      next[idx] = value;
-      return next;
-    });
-  }, [visits]);
-
-  const updateVisitAge = useCallback((id: string, value: string) => {
-    const idx = visits.findIndex((v) => v.id === id);
-    if (idx === -1) return;
-    setVisitAges((prev) => {
-      const next = [...prev];
-      next[idx] = value;
-      return next;
-    });
-  }, [visits]);
-
-  const updateVisitTariff = useCallback((id: string, tariffId: string) => {
-    const idx = visits.findIndex((v) => v.id === id);
-    if (idx === -1) return;
-    setVisitTariffIds((prev) => {
-      const next = [...prev];
-      next[idx] = tariffId;
-      return next;
-    });
-  }, [visits]);
-
-  // Build visits payload from local state for saving
-  const buildVisitsPayload = useCallback((targetVisits: RecordResponse['visits'], names: string[], ages: string[], tariffIds: string[]) => {
-    return targetVisits.map((v, idx) => {
-      const tariff = serviceTariffs.find((t) => t.id === tariffIds[idx]);
-      return {
-        visitor_id: v.visitor_id || undefined,
-        tariff_id: tariffIds[idx] || undefined,
-        name: names[idx] || undefined,
-        age: ages[idx] ? Number(ages[idx]) : undefined,
-        price: tariff?.price ?? v.price,
-        status: v.status || undefined,
-      };
-    });
-  }, [serviceTariffs]);
-
-  // Save all visits to backend
-  const saveVisits = useCallback(async () => {
-    const newVisits = buildVisitsPayload(visits, visitNames, visitAges, visitTariffIds);
-    try {
-      await onUpdateRecord(record.id, { visits: newVisits });
-    } catch {
-      showToast('Ошибка сохранения посетителей');
-    }
-  }, [visits, visitNames, visitAges, visitTariffIds, buildVisitsPayload, record.id, onUpdateRecord, showToast]);
-
-  // Remove a visit by id
-  const removeVisit = useCallback(async (visitId: string) => {
-    const remaining = visits.filter((v) => v.id !== visitId);
-    const remainingIdx = remaining.map((v) => {
-      // Re-map indices from the original arrays
-      const origIdx = visits.findIndex((ov) => ov.id === v.id);
-      return origIdx;
-    });
-    const newNames = remainingIdx.map((i) => visitNames[i] ?? '');
-    const newAges = remainingIdx.map((i) => visitAges[i] ?? '');
-    const newTariffIds = remainingIdx.map((i) => visitTariffIds[i] ?? '');
-    const newVisits = buildVisitsPayload(remaining, newNames, newAges, newTariffIds);
-    try {
-      await onUpdateRecord(record.id, { visits: newVisits });
-    } catch {
-      showToast('Ошибка удаления посетителя');
-    }
-  }, [visits, visitNames, visitAges, visitTariffIds, buildVisitsPayload, record.id, onUpdateRecord, showToast]);
-
-  // Calculate totals from visits
-  const totalCost = record.visits.reduce((sum, v) => sum + v.price, 0);
-  const totalPaid = payments.reduce((sum, p) => sum + p.amount, 0);
-  const remaining = totalCost - totalPaid;
 
   const handleDelete = useCallback(() => {
     isDeletingRef.current = true;
@@ -192,13 +87,52 @@ export function ClientTab({
     }, 5000);
   }, [onDeleteRecord, record.id, showToast]);
 
-  const handleAddPayment = useCallback(() => {
-    const amount = Number(paymentAmount);
-    if (amount > 0) {
-      onAddPayment(record.id, amount, paymentMethod);
-      setPaymentAmount('');
+  const handleAnonymChange = useCallback((value: number) => {
+    onUpdateRecord(record.id, { anonym_visits: value } as any).catch(() => {
+      showToast('Ошибка изменения анонимных посетителей');
+    });
+  }, [record.id, onUpdateRecord, showToast]);
+
+  const handleVisitChange = useCallback((visitId: string, data: { status?: VisitStatus; name?: string; age?: number | null; tariff_id?: string }) => {
+    const updatedVisits = (visits || []).map(v => {
+      if (v.id !== visitId) return { visitor_id: v.visitor_id, price: v.price, status: v.status };
+      return {
+        visitor_id: v.visitor_id,
+        price: v.price,
+        status: data.status || v.status,
+        name: data.name,
+        age: data.age,
+        tariff_id: data.tariff_id,
+      };
+    });
+    onUpdateRecord(record.id, { visits: updatedVisits } as any).catch(() => {
+      showToast('Ошибка обновления посетителя');
+    });
+  }, [visits, record.id, onUpdateRecord, showToast]);
+
+  const handleDeleteVisit = useCallback(async (visitId: string) => {
+    const remaining = (visits || []).filter(v => v.id !== visitId).map(v => ({
+      visitor_id: v.visitor_id,
+      price: v.price,
+      status: v.status,
+    }));
+    try {
+      await onUpdateRecord(record.id, { visits: remaining } as any);
+    } catch {
+      showToast('Ошибка удаления посетителя');
     }
-  }, [paymentAmount, paymentMethod, onAddPayment, record.id]);
+  }, [visits, record.id, onUpdateRecord, showToast]);
+
+  const handleAddVisitor = useCallback(async (data: { name: string; age: number | null; tariff_id: string }) => {
+    if (onAddVisitor) {
+      const tariff = serviceTariffs.find(t => t.id === data.tariff_id);
+      await onAddVisitor({ name: data.name, age: data.age ?? undefined, price: tariff?.price ?? 0 });
+    }
+  }, [onAddVisitor, serviceTariffs]);
+
+  const handleAddPayment = useCallback((p: { amount: number; method: string }) => {
+    onAddPayment(record.id, p.amount, p.method);
+  }, [onAddPayment, record.id]);
 
   const handleDeletePayment = useCallback(async (paymentId: string) => {
     try {
@@ -209,74 +143,15 @@ export function ClientTab({
     }
   }, [onDeletePayment, showToast]);
 
-  const handleAddVisitor = useCallback(async () => {
-    if (!newVisitorName.trim() || isAddingVisitor || !onAddVisitor) return;
-    setIsAddingVisitor(true);
-    try {
-      await onAddVisitor({
-        name: newVisitorName.trim(),
-        age: newVisitorAge ? Number(newVisitorAge) : undefined,
-        price: 0, // overridden by parent
-      });
-      setNewVisitorName('');
-      setNewVisitorAge('');
-      setShowAddVisitor(false);
-    } catch {
-      showToast('Ошибка добавления посетителя');
-    } finally {
-      setIsAddingVisitor(false);
-    }
-  }, [newVisitorName, newVisitorAge, isAddingVisitor, onAddVisitor, showToast]);
-
-  const inputClass = 'w-full rounded-lg border px-3 py-2 text-sm bg-white';
-  const inputStyle = { borderColor: 'var(--line)' };
+  const totalCost = (visits || []).reduce((sum, v) => sum + v.price, 0);
+  const totalPaid = payments.reduce((sum, p) => sum + p.amount, 0);
 
   return (
     <div className="space-y-4 p-4" data-testid="client-tab">
-      {/* Row 1: Phone + Name + Status */}
-      <div className="flex gap-3 items-end" data-testid="client-info-row">
-        <div className="flex-1">
-          <label className="text-xs font-medium text-ink-mid block mb-1" htmlFor="client-phone">
-            Телефон
-          </label>
-          <input
-            id="client-phone"
-            type="text"
-            className={inputClass}
-            style={inputStyle}
-            value={client?.phone || ''}
-            placeholder="Не указано"
-            disabled
-            data-testid="client-phone"
-          />
-        </div>
-        <div className="flex-1">
-          <label className="text-xs font-medium text-ink-mid block mb-1" htmlFor="client-name">
-            Имя
-          </label>
-          <input
-            id="client-name"
-            type="text"
-            className={inputClass}
-            style={inputStyle}
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Не указано"
-            data-testid="client-name"
-          />
-        </div>
-        <div className="w-40">
-          <label className="text-xs font-medium text-ink-mid block mb-1" htmlFor="record-status">
-            Статус
-          </label>
-          <StatusPicker
-            value={status}
-            onChange={(s) => { if (s) setStatus(s); }}
-          />
-        </div>
-      </div>
+      {/* Record header with name, phone, status, anonym_visits */}
+      <RecordHeader data={recordData} onAnonymVisitsChange={handleAnonymChange} />
 
-      {/* Row 2: Client link */}
+      {/* Client link */}
       {client && (
         <div>
           <button
@@ -295,7 +170,7 @@ export function ClientTab({
         </div>
       )}
 
-      {/* Visitors — editable rows */}
+      {/* Visitors — shared atom rows */}
       <div>
         <div className="flex items-center justify-between mb-2">
           <h4 className="text-xs font-medium text-ink-mid">Посетители</h4>
@@ -308,195 +183,32 @@ export function ClientTab({
           <p className="text-xs text-ink-light">Нет посетителей</p>
         )}
 
-        {visits.map((visit, idx) => (
-          <div
-            key={visit.id}
-            className="flex items-center gap-2 py-1.5 border-b text-sm"
-            style={{ borderColor: 'var(--line)' }}
-            data-testid="visitor-row"
-            data-visit-id={visit.id}
-          >
-            {/* Name input */}
-            <input
-              type="text"
-              placeholder="Имя"
-              value={visitNames[idx] ?? ''}
-              onChange={(e) => updateVisitName(visit.id, e.target.value)}
-              onBlur={() => saveVisits()}
-              className="flex-1 rounded-lg border px-2 py-1 text-sm min-w-0"
-              style={inputStyle}
-              data-testid="visitor-name-input"
+        {visits.map((visit) => {
+          const visitor = visitorsMap.get(visit.visitor_id ?? '');
+          return (
+            <RecordVisitRow
+              key={visit.id}
+              visit={visit}
+              visitorName={visitor?.name}
+              visitorAge={visitor?.age}
+              tariffId={visit.tariff_id ?? ''}
+              tariffs={serviceTariffs}
+              onChange={(data) => handleVisitChange(visit.id, data)}
+              onDelete={() => handleDeleteVisit(visit.id)}
             />
-            {/* Age input */}
-            <input
-              type="number"
-              placeholder="Возраст"
-              value={visitAges[idx] ?? ''}
-              onChange={(e) => updateVisitAge(visit.id, e.target.value)}
-              onBlur={() => saveVisits()}
-              className="w-16 rounded-lg border px-2 py-1 text-sm"
-              style={inputStyle}
-              data-testid="visitor-age-input"
-            />
-            {/* Tariff dropdown */}
-            <select
-              value={visitTariffIds[idx] ?? ''}
-              onChange={(e) => updateVisitTariff(visit.id, e.target.value)}
-              className="w-32 rounded-lg border px-2 py-1 text-sm"
-              style={inputStyle}
-              data-testid="visitor-tariff-select"
-            >
-              <option value="">— тариф —</option>
-              {serviceTariffs.map((t) => (
-                <option key={t.id} value={t.id}>{t.title} ({t.price} ₽)</option>
-              ))}
-            </select>
-            {/* Remove button */}
-            <button
-              onClick={() => removeVisit(visit.id)}
-              className="text-red-400 hover:text-red-500 text-sm shrink-0"
-              aria-label="Удалить посетителя"
-              data-testid="btn-remove-visit"
-            >
-              ×
-            </button>
-          </div>
-        ))}
+          );
+        })}
 
-        {/* Add visitor button / inline form */}
-        {!showAddVisitor ? (
-          <button
-            onClick={() => setShowAddVisitor(true)}
-            className="mt-2 text-brand text-xs hover:underline"
-            data-testid="btn-add-visitor"
-          >
-            + Добавить посетителя
-          </button>
-        ) : (
-          <div className="mt-2 flex items-center gap-2" data-testid="add-visitor-form">
-            <input
-              type="text"
-              placeholder="Имя"
-              value={newVisitorName}
-              onChange={(e) => setNewVisitorName(e.target.value)}
-              className="flex-1 rounded-lg border px-2 py-1 text-sm"
-              style={inputStyle}
-              data-testid="input-visitor-name"
-              autoFocus
-            />
-            <input
-              type="number"
-              placeholder="Возраст"
-              value={newVisitorAge}
-              onChange={(e) => setNewVisitorAge(e.target.value)}
-              className="w-16 rounded-lg border px-2 py-1 text-sm"
-              style={inputStyle}
-              data-testid="input-visitor-age"
-            />
-            <button
-              onClick={handleAddVisitor}
-              disabled={!newVisitorName.trim() || isAddingVisitor}
-              className="px-2 py-1 text-xs text-white rounded-lg shrink-0 disabled:opacity-50"
-              style={{ backgroundColor: 'var(--brand, #004D56)' }}
-              data-testid="btn-save-visitor"
-            >
-              Сохранить
-            </button>
-            <button
-              onClick={() => {
-                setShowAddVisitor(false);
-                setNewVisitorName('');
-                setNewVisitorAge('');
-              }}
-              className="text-red-400 hover:text-red-500 text-sm"
-              aria-label="Отмена"
-              data-testid="btn-cancel-visitor"
-            >
-              ×
-            </button>
-          </div>
-        )}
+        <AddVisitorForm tariffs={serviceTariffs} onAdd={handleAddVisitor} onCancel={() => {}} />
       </div>
 
-      {/* Payment summary */}
+      {/* Payment section — shared atoms */}
       <div className="space-y-2" data-testid="payment-summary">
         <h4 className="text-xs font-medium text-ink-mid">Оплата</h4>
-        <div className="flex justify-between text-sm">
-          <span className="text-ink-mid">Стоимость:</span>
-          <span className="text-ink font-medium">{totalCost.toLocaleString('ru-RU')} ₽</span>
-        </div>
-        <div className="flex justify-between text-sm">
-          <span className="text-ink-mid">Оплачено:</span>
-          <span className="text-ink font-medium">{totalPaid.toLocaleString('ru-RU')} ₽</span>
-        </div>
-        <div className="flex justify-between text-sm">
-          <span className="text-ink-mid">Остаток:</span>
-          <span
-            className="font-medium"
-            style={{ color: remaining > 0 ? 'var(--danger, #C8503C)' : 'var(--success, #6B8E6E)' }}
-          >
-            {remaining.toLocaleString('ru-RU')} ₽
-          </span>
-        </div>
-
-        {/* Existing payments with delete button */}
-        {payments.length > 0 && (
-          <div className="mt-2 space-y-1">
-            {payments.map((p) => (
-              <div key={p.id} className="flex items-center justify-between text-xs px-2 py-1 bg-surface rounded">
-                <span className="text-ink-mid">{p.amount.toLocaleString('ru-RU')} ₽ ({p.method || '—'})</span>
-                <button
-                  onClick={() => handleDeletePayment(p.id)}
-                  className="text-red-400 hover:text-red-500 ml-2 shrink-0"
-                  aria-label="Удалить оплату"
-                >
-                  ×
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Tariffs for display */}
-        {serviceTariffs.length > 0 && (
-          <div className="mt-2 space-y-1">
-            {serviceTariffs.map((tariff) => (
-              <div key={tariff.id} className="flex items-center justify-between text-xs px-2 py-1 bg-surface rounded">
-                <span className="text-ink-light">{tariff.title}</span>
-                <span className="text-ink">{tariff.price.toLocaleString('ru-RU')} ₽</span>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Add payment form */}
-        <div className="flex gap-2 mt-2">
-          <input
-            type="number"
-            placeholder="Сумма"
-            className="flex-1 rounded-lg border px-3 py-2 text-sm"
-            style={inputStyle}
-            value={paymentAmount}
-            onChange={(e) => setPaymentAmount(e.target.value)}
-          />
-          <select
-            className="rounded-lg border px-2 py-2 text-sm"
-            style={inputStyle}
-            value={paymentMethod}
-            onChange={(e) => setPaymentMethod(e.target.value)}
-          >
-            <option value="card">Карта</option>
-            <option value="cash">Наличные</option>
-            <option value="transfer">Перевод</option>
-          </select>
-          <button
-            onClick={handleAddPayment}
-            className="px-3 py-2 text-sm text-white rounded-lg shrink-0"
-            style={{ backgroundColor: 'var(--brand, #004D56)' }}
-            data-testid="btn-add-payment"
-          >
-            Добавить оплату
-          </button>
+        <PaymentTotals total={totalCost} paid={totalPaid} />
+        <PaymentList payments={payments} onDelete={handleDeletePayment} />
+        <div className="mt-2">
+          <PaymentForm total={totalCost} paid={totalPaid} onSubmit={handleAddPayment} />
         </div>
       </div>
 

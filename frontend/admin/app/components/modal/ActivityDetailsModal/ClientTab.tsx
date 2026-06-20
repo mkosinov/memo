@@ -1,10 +1,13 @@
 'use client';
 
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import type { RecordResponse, ClientResponse, VisitorResponse, PaymentResponse, TariffResponse } from '@memo/api-client';
+import type { RecordPatchData } from '@/hooks/useRecordMutations';
 import type { RecordStatus } from '@memo/domain';
-import { deletePayment as apiDeletePayment } from '@memo/api-client';
-import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { StatusPicker } from './StatusPicker';
+import { formatSeats } from '@/app/lib/pluralize';
+import { useRecordData } from '@/hooks/useRecordData';
 
 interface ClientTabProps {
   record: RecordResponse;
@@ -13,39 +16,42 @@ interface ClientTabProps {
   visits: RecordResponse['visits'];
   payments: PaymentResponse[];
   serviceTariffs: TariffResponse[];
-  onUpdateRecord: (id: string, data: RecordResponse) => void;
+  onUpdateRecord: (id: string, data: RecordPatchData) => Promise<void>;
   onDeleteRecord: (id: string) => void;
   onAddPayment: (recordId: string, amount: number, method: string) => void;
+  onDeletePayment: (paymentId: string) => Promise<void>;
+  onAddVisitor?: (data: { name: string; age?: number; price: number }) => Promise<void>;
   showToast: (message: string, undo?: () => void) => void;
+  onClose?: () => void;
 }
 
 const STATUS_CONFIG: Record<RecordStatus, { label: string; color: string }> = {
-  pending: { label: 'Ожидает', color: '#F59E0B' },
-  confirmed: { label: 'Подтверждена', color: '#10B981' },
-  cancelled: { label: 'Отменена', color: '#EF4444' },
-  no_show: { label: 'Неявка', color: '#6B7280' },
+  pending: { label: 'Ожидание', color: '#F59E0B' },
+  confirmed: { label: 'Посетил', color: '#10B981' },
+  cancelled: { label: 'Отменил', color: '#F97316' },
+  no_show: { label: 'Неявка', color: '#4B5563' },
 };
 
-function StatusIcon({ status }: { status: RecordStatus }) {
+function renderStatusIcon(status: RecordStatus): React.ReactNode {
   const iconClass = 'w-3.5 h-3.5';
   switch (status) {
     case 'pending':
       return (
-        <svg className={iconClass} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <svg className={iconClass} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" data-testid="icon-pending">
           <circle cx="12" cy="12" r="10" />
           <polyline points="12 6 12 12 16 14" />
         </svg>
       );
     case 'confirmed':
       return (
-        <svg className={iconClass} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <svg className={iconClass} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" data-testid="icon-confirmed">
           <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
           <polyline points="22 4 12 14.01 9 11.01" />
         </svg>
       );
     case 'cancelled':
       return (
-        <svg className={iconClass} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <svg className={iconClass} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" data-testid="icon-cancelled">
           <circle cx="12" cy="12" r="10" />
           <line x1="15" y1="9" x2="9" y2="15" />
           <line x1="9" y1="9" x2="15" y2="15" />
@@ -53,7 +59,7 @@ function StatusIcon({ status }: { status: RecordStatus }) {
       );
     case 'no_show':
       return (
-        <svg className={iconClass} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <svg className={iconClass} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" data-testid="icon-no_show">
           <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
           <line x1="12" y1="9" x2="12" y2="13" />
           <line x1="12" y1="17" x2="12.01" y2="17" />
@@ -66,18 +72,150 @@ export function ClientTab({
   record,
   client,
   visitors,
+  visits,
   payments,
   serviceTariffs,
-  onUpdateRecord: _onUpdateRecord,
+  onUpdateRecord,
   onDeleteRecord,
   onAddPayment,
+  onDeletePayment,
+  onAddVisitor,
   showToast,
+  onClose,
 }: ClientTabProps) {
   const [name, setName] = useState(client?.name || '');
   const [status, setStatus] = useState<RecordStatus>(record.status as RecordStatus);
   const [paymentAmount, setPaymentAmount] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('card');
   const isDeletingRef = useRef(false);
+  const router = useRouter();
+
+  // --- Fetch visitors + tariffs for this record's client ---
+  const { visitorsMap } = useRecordData(record.id, client?.id ?? '');
+
+  // --- Visitor editor state (pre-filled from visitorsMap + visit.tariff_id) ---
+  const [visitNames, setVisitNames] = useState<string[]>(
+    visits.map((v) => visitorsMap.get(v.visitor_id ?? '')?.name ?? '')
+  );
+  const [visitAges, setVisitAges] = useState<string[]>(
+    visits.map((v) => visitorsMap.get(v.visitor_id ?? '')?.age?.toString() ?? '')
+  );
+  const [visitTariffIds, setVisitTariffIds] = useState<string[]>(
+    visits.map((v) => v.tariff_id ?? '')
+  );
+
+  const handleOpenProfile = useCallback(() => {
+    if (!client) return;
+    onClose?.();
+    router.push(`/clients?clientId=${client.id}`);
+  }, [client, onClose, router]);
+
+  // Add visitor form state
+  const [showAddVisitor, setShowAddVisitor] = useState(false);
+  const [newVisitorName, setNewVisitorName] = useState('');
+  const [newVisitorAge, setNewVisitorAge] = useState('');
+  const [isAddingVisitor, setIsAddingVisitor] = useState(false);
+
+  // --- Reset name on record/client change (Bug #81) ---
+  useEffect(() => {
+    setName(client?.name || '');
+  }, [record.id, client?.id]);
+
+  // --- Reset status on record change (Bug #84) ---
+  useEffect(() => {
+    setStatus(record.status as RecordStatus);
+  }, [record.id]);
+
+  // --- Persist status change to backend (Bug #84) ---
+  useEffect(() => {
+    if (status === record.status) return;
+    onUpdateRecord(record.id, { status }).catch(() => {
+      setStatus(record.status as RecordStatus);
+      showToast('Ошибка изменения статуса');
+    });
+  }, [status]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // --- Reset visitor editor state on record.visits or visitorsMap change ---
+  useEffect(() => {
+    setVisitNames(visits.map((v) => visitorsMap.get(v.visitor_id ?? '')?.name ?? ''));
+    setVisitAges(visits.map((v) => visitorsMap.get(v.visitor_id ?? '')?.age?.toString() ?? ''));
+    setVisitTariffIds(visits.map((v) => v.tariff_id ?? ''));
+  }, [record.id, visits.length, visitorsMap]);
+
+  // --- Visitor editor helpers ---
+  const updateVisitName = useCallback((id: string, value: string) => {
+    const idx = visits.findIndex((v) => v.id === id);
+    if (idx === -1) return;
+    setVisitNames((prev) => {
+      const next = [...prev];
+      next[idx] = value;
+      return next;
+    });
+  }, [visits]);
+
+  const updateVisitAge = useCallback((id: string, value: string) => {
+    const idx = visits.findIndex((v) => v.id === id);
+    if (idx === -1) return;
+    setVisitAges((prev) => {
+      const next = [...prev];
+      next[idx] = value;
+      return next;
+    });
+  }, [visits]);
+
+  const updateVisitTariff = useCallback((id: string, tariffId: string) => {
+    const idx = visits.findIndex((v) => v.id === id);
+    if (idx === -1) return;
+    setVisitTariffIds((prev) => {
+      const next = [...prev];
+      next[idx] = tariffId;
+      return next;
+    });
+  }, [visits]);
+
+  // Build visits payload from local state for saving
+  const buildVisitsPayload = useCallback((targetVisits: RecordResponse['visits'], names: string[], ages: string[], tariffIds: string[]) => {
+    return targetVisits.map((v, idx) => {
+      const tariff = serviceTariffs.find((t) => t.id === tariffIds[idx]);
+      return {
+        visitor_id: v.visitor_id || undefined,
+        tariff_id: tariffIds[idx] || undefined,
+        name: names[idx] || undefined,
+        age: ages[idx] ? Number(ages[idx]) : undefined,
+        price: tariff?.price ?? v.price,
+        status: v.status || undefined,
+      };
+    });
+  }, [serviceTariffs]);
+
+  // Save all visits to backend
+  const saveVisits = useCallback(async () => {
+    const newVisits = buildVisitsPayload(visits, visitNames, visitAges, visitTariffIds);
+    try {
+      await onUpdateRecord(record.id, { visits: newVisits });
+    } catch {
+      showToast('Ошибка сохранения посетителей');
+    }
+  }, [visits, visitNames, visitAges, visitTariffIds, buildVisitsPayload, record.id, onUpdateRecord, showToast]);
+
+  // Remove a visit by id
+  const removeVisit = useCallback(async (visitId: string) => {
+    const remaining = visits.filter((v) => v.id !== visitId);
+    const remainingIdx = remaining.map((v) => {
+      // Re-map indices from the original arrays
+      const origIdx = visits.findIndex((ov) => ov.id === v.id);
+      return origIdx;
+    });
+    const newNames = remainingIdx.map((i) => visitNames[i] ?? '');
+    const newAges = remainingIdx.map((i) => visitAges[i] ?? '');
+    const newTariffIds = remainingIdx.map((i) => visitTariffIds[i] ?? '');
+    const newVisits = buildVisitsPayload(remaining, newNames, newAges, newTariffIds);
+    try {
+      await onUpdateRecord(record.id, { visits: newVisits });
+    } catch {
+      showToast('Ошибка удаления посетителя');
+    }
+  }, [visits, visitNames, visitAges, visitTariffIds, buildVisitsPayload, record.id, onUpdateRecord, showToast]);
 
   // Calculate totals from visits
   const totalCost = record.visits.reduce((sum, v) => sum + v.price, 0);
@@ -106,12 +244,31 @@ export function ClientTab({
 
   const handleDeletePayment = useCallback(async (paymentId: string) => {
     try {
-      await apiDeletePayment(paymentId);
+      await onDeletePayment(paymentId);
       showToast('Оплата удалена');
     } catch {
       showToast('Ошибка удаления оплаты');
     }
-  }, [showToast]);
+  }, [onDeletePayment, showToast]);
+
+  const handleAddVisitor = useCallback(async () => {
+    if (!newVisitorName.trim() || isAddingVisitor || !onAddVisitor) return;
+    setIsAddingVisitor(true);
+    try {
+      await onAddVisitor({
+        name: newVisitorName.trim(),
+        age: newVisitorAge ? Number(newVisitorAge) : undefined,
+        price: 0, // overridden by parent
+      });
+      setNewVisitorName('');
+      setNewVisitorAge('');
+      setShowAddVisitor(false);
+    } catch {
+      showToast('Ошибка добавления посетителя');
+    } finally {
+      setIsAddingVisitor(false);
+    }
+  }, [newVisitorName, newVisitorAge, isAddingVisitor, onAddVisitor, showToast]);
 
   const inputClass = 'w-full rounded-lg border px-3 py-2 text-sm bg-white';
   const inputStyle = { borderColor: 'var(--line)' };
@@ -130,6 +287,7 @@ export function ClientTab({
             className={inputClass}
             style={inputStyle}
             value={client?.phone || ''}
+            placeholder="Не указано"
             disabled
             data-testid="client-phone"
           />
@@ -145,6 +303,7 @@ export function ClientTab({
             style={inputStyle}
             value={name}
             onChange={(e) => setName(e.target.value)}
+            placeholder="Не указано"
             data-testid="client-name"
           />
         </div>
@@ -152,36 +311,23 @@ export function ClientTab({
           <label className="text-xs font-medium text-ink-mid block mb-1" htmlFor="record-status">
             Статус
           </label>
-          <div className="relative">
-            <select
-              id="record-status"
-              className={`${inputClass} appearance-none pr-8`}
-              style={inputStyle}
-              value={status}
-              onChange={(e) => setStatus(e.target.value as RecordStatus)}
-              data-testid="select-record-status"
-            >
-              {(Object.entries(STATUS_CONFIG) as [RecordStatus, { label: string; color: string }][]).map(([key, config]) => (
-                <option key={key} value={key}>
-                  {config.label}
-                </option>
-              ))}
-            </select>
-            <div className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: STATUS_CONFIG[status]?.color }}>
-              <StatusIcon status={status} />
-            </div>
-          </div>
+          <StatusPicker
+            value={status}
+            onChange={setStatus}
+            statusConfig={STATUS_CONFIG}
+            iconFor={renderStatusIcon}
+          />
         </div>
       </div>
 
       {/* Row 2: Client link */}
       {client && (
         <div>
-          <Link
-            href={`/clients/${client.id}`}
-            target="_blank"
+          <button
+            onClick={handleOpenProfile}
             className="inline-flex items-center gap-1.5 text-brand text-xs hover:underline"
             data-testid="client-link"
+            type="button"
           >
             <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
@@ -189,28 +335,131 @@ export function ClientTab({
               <line x1="10" y1="14" x2="21" y2="3" />
             </svg>
             Открыть профиль
-          </Link>
+          </button>
         </div>
       )}
 
-      {/* Visitors */}
+      {/* Visitors — editable rows */}
       <div>
-        <h4 className="text-xs font-medium text-ink-mid mb-2">Посетители</h4>
-        {visitors.length === 0 && (
+        <div className="flex items-center justify-between mb-2">
+          <h4 className="text-xs font-medium text-ink-mid">Посетители</h4>
+          <span className="text-xs text-ink-mid" data-testid="record-seats">
+            {formatSeats(record.seats)}
+          </span>
+        </div>
+
+        {visits.length === 0 && (
           <p className="text-xs text-ink-light">Нет посетителей</p>
         )}
-        {visitors.map((visitor) => (
+
+        {visits.map((visit, idx) => (
           <div
-            key={visitor.id}
+            key={visit.id}
             className="flex items-center gap-2 py-1.5 border-b text-sm"
             style={{ borderColor: 'var(--line)' }}
             data-testid="visitor-row"
+            data-visit-id={visit.id}
           >
-            <span className="flex-1 truncate text-ink">{visitor.name}</span>
-            {visitor.age && <span className="text-xs text-ink-light">{visitor.age} лет</span>}
+            {/* Name input */}
+            <input
+              type="text"
+              placeholder="Имя"
+              value={visitNames[idx] ?? ''}
+              onChange={(e) => updateVisitName(visit.id, e.target.value)}
+              onBlur={() => saveVisits()}
+              className="flex-1 rounded-lg border px-2 py-1 text-sm min-w-0"
+              style={inputStyle}
+              data-testid="visitor-name-input"
+            />
+            {/* Age input */}
+            <input
+              type="number"
+              placeholder="Возраст"
+              value={visitAges[idx] ?? ''}
+              onChange={(e) => updateVisitAge(visit.id, e.target.value)}
+              onBlur={() => saveVisits()}
+              className="w-16 rounded-lg border px-2 py-1 text-sm"
+              style={inputStyle}
+              data-testid="visitor-age-input"
+            />
+            {/* Tariff dropdown */}
+            <select
+              value={visitTariffIds[idx] ?? ''}
+              onChange={(e) => updateVisitTariff(visit.id, e.target.value)}
+              className="w-32 rounded-lg border px-2 py-1 text-sm"
+              style={inputStyle}
+              data-testid="visitor-tariff-select"
+            >
+              <option value="">— тариф —</option>
+              {serviceTariffs.map((t) => (
+                <option key={t.id} value={t.id}>{t.title} ({t.price} ₽)</option>
+              ))}
+            </select>
+            {/* Remove button */}
+            <button
+              onClick={() => removeVisit(visit.id)}
+              className="text-red-400 hover:text-red-500 text-sm shrink-0"
+              aria-label="Удалить посетителя"
+              data-testid="btn-remove-visit"
+            >
+              ×
+            </button>
           </div>
         ))}
-        <button className="mt-2 text-brand text-xs hover:underline" data-testid="btn-add-visitor">+ Добавить посетителя</button>
+
+        {/* Add visitor button / inline form */}
+        {!showAddVisitor ? (
+          <button
+            onClick={() => setShowAddVisitor(true)}
+            className="mt-2 text-brand text-xs hover:underline"
+            data-testid="btn-add-visitor"
+          >
+            + Добавить посетителя
+          </button>
+        ) : (
+          <div className="mt-2 flex items-center gap-2" data-testid="add-visitor-form">
+            <input
+              type="text"
+              placeholder="Имя"
+              value={newVisitorName}
+              onChange={(e) => setNewVisitorName(e.target.value)}
+              className="flex-1 rounded-lg border px-2 py-1 text-sm"
+              style={inputStyle}
+              data-testid="input-visitor-name"
+              autoFocus
+            />
+            <input
+              type="number"
+              placeholder="Возраст"
+              value={newVisitorAge}
+              onChange={(e) => setNewVisitorAge(e.target.value)}
+              className="w-16 rounded-lg border px-2 py-1 text-sm"
+              style={inputStyle}
+              data-testid="input-visitor-age"
+            />
+            <button
+              onClick={handleAddVisitor}
+              disabled={!newVisitorName.trim() || isAddingVisitor}
+              className="px-2 py-1 text-xs text-white rounded-lg shrink-0 disabled:opacity-50"
+              style={{ backgroundColor: 'var(--brand, #004D56)' }}
+              data-testid="btn-save-visitor"
+            >
+              Сохранить
+            </button>
+            <button
+              onClick={() => {
+                setShowAddVisitor(false);
+                setNewVisitorName('');
+                setNewVisitorAge('');
+              }}
+              className="text-red-400 hover:text-red-500 text-sm"
+              aria-label="Отмена"
+              data-testid="btn-cancel-visitor"
+            >
+              ×
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Payment summary */}

@@ -121,7 +121,7 @@ export function SettingsTab({ activity, onUpdate }: SettingsTabProps) {
   return (
     <div className="space-y-4 p-4" data-testid="settings-tab">
       {/* Row 1: Date/Time + Duration + Private toggle */}
-      <div className="flex gap-3 items-end" data-testid="settings-row-datetime-duration">
+      <div className="flex gap-3 items-start" data-testid="settings-row-datetime-duration">
         <div className="flex-1">
           <label className="text-xs font-medium text-ink-mid block mb-1">
             Дата и время
@@ -151,7 +151,7 @@ export function SettingsTab({ activity, onUpdate }: SettingsTabProps) {
             data-testid="input-duration"
           />
         </div>
-        <div className="flex items-center gap-2 pb-0.5">
+        <div className="ml-auto flex flex-col items-start gap-1.5 pb-0.5">
           <span className="text-xs text-ink-mid">Приватное</span>
           <button
             type="button"

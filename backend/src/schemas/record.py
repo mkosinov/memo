@@ -46,6 +46,7 @@ class RecordBase(BaseModel):
     client_id: str | None = None
     status: RecordStatus = RecordStatus.PENDING
     seats: int
+    anonym_visits: int = 0
     comment: str | None = None
     custom_price: int | None = None
 
@@ -64,9 +65,10 @@ class RecordCreate(BaseModel):
     phone: str | None = None
     client_id: str | None = None
     status: RecordStatus = RecordStatus.PENDING
+    anonym_visits: int = 0
     comment: str | None = None
     custom_price: int | None = None
-    visits: list[VisitItem]  # seats = len(visits)
+    visits: list[VisitItem]  # seats = len(visits) + anonym_visits
 
 
 class RecordUpdate(BaseModel):
@@ -75,6 +77,7 @@ class RecordUpdate(BaseModel):
     activity_id: str
     client_id: str | None = None
     status: RecordStatus
+    anonym_visits: int = 0
     comment: str | None = None
     custom_price: int | None = None
     visits: list[VisitItem]  # full replacement
@@ -84,6 +87,7 @@ class RecordPatch(BaseModel):
     """Partial update for record. All fields optional."""
 
     status: RecordStatus | None = None
+    anonym_visits: int | None = None
     comment: str | None = None
     custom_price: int | None = None
     visits: list[VisitItem] | None = None

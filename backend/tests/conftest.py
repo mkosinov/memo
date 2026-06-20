@@ -372,6 +372,34 @@ def _user():
     return {"id": user_id, "phone": phone}
 
 
+@pytest.fixture
+def _create_activity_payload(api_client, create_master, create_service, create_location):
+    """Factory: returns a raw payload dict for POST /api/v1/activities.
+
+    Usage::
+
+        payload = _create_activity_payload()
+        resp = api_client.post("/api/v1/activities", json=payload)
+    """
+    def factory(**overrides):
+        master = create_master()
+        service = create_service()
+        location = create_location()
+        from datetime import UTC, datetime, timedelta
+        start = overrides.pop("start", datetime.now(UTC) + timedelta(days=1))
+        return {
+            "master_id": master["id"],
+            "service_id": service["id"],
+            "location_id": location["id"],
+            "start": start.isoformat(),
+            "duration": 90,
+            "capacity": 10,
+            "is_private": False,
+            **overrides,
+        }
+    return factory
+
+
 # ─── DB Verification Helper ────────────────────────────────────────────────────
 
 def query_db(sql: str) -> list[dict]:

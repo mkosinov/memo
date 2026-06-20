@@ -481,3 +481,93 @@ class TestRecordCreatePhoneFlow:
         body = response.json()
         assert body["seats"] == 0
         assert body["visits"] == []
+
+
+class TestAnonymVisits:
+    """Tests for the anonym_visits field on Record (#82)."""
+
+    def test_create_record_with_anonym_visits_only(self, api_client, create_activity, create_client) -> None:
+        """POST /api/records with anonym_visits=5, visits=[] → seats=5."""
+        activity = create_activity()
+        client = create_client()
+        payload = {
+            "activity_id": activity["id"],
+            "client_id": client["id"],
+            "anonym_visits": 5,
+            "visits": [],
+        }
+
+        response = api_client.post("/api/v1/records", json=payload)
+        assert response.status_code == 201, f"Expected 201, got {response.status_code}: {response.text}"
+        body = response.json()
+        assert body["seats"] == 5
+        assert body["anonym_visits"] == 5
+        assert body["visits"] == []
+
+    def test_create_record_with_visits_and_anonym_visits(self, api_client, create_activity, create_client) -> None:
+        """POST /api/records with 2 visits + anonym_visits=3 → seats=5."""
+        activity = create_activity()
+        client = create_client()
+        payload = {
+            "activity_id": activity["id"],
+            "client_id": client["id"],
+            "anonym_visits": 3,
+            "visits": [
+                {"name": "Alice", "price": 1500, "status": "waiting"},
+                {"name": "Bob", "price": 1500, "status": "waiting"},
+            ],
+        }
+
+        response = api_client.post("/api/v1/records", json=payload)
+        assert response.status_code == 201, f"Expected 201, got {response.status_code}: {response.text}"
+        body = response.json()
+        assert body["seats"] == 5  # 2 visits + 3 anonym
+        assert body["anonym_visits"] == 3
+        assert len(body["visits"]) == 2
+
+    def test_create_record_default_anonym_visits_zero(self, api_client, create_activity, create_client) -> None:
+        """POST /api/records without anonym_visits → seats = len(visits), anonym_visits=0."""
+        activity = create_activity()
+        client = create_client()
+        payload = {
+            "activity_id": activity["id"],
+            "client_id": client["id"],
+            "visits": [{"name": "Solo", "price": 2000, "status": "waiting"}],
+        }
+
+        response = api_client.post("/api/v1/records", json=payload)
+        assert response.status_code == 201, f"Expected 201, got {response.status_code}: {response.text}"
+        body = response.json()
+        assert body["seats"] == 1
+        assert body["anonym_visits"] == 0
+
+    def test_patch_anonym_visits_updates_seats(self, api_client, create_record) -> None:
+        """PATCH /api/records/{id} with anonym_visits recalculates seats."""
+        record = create_record()  # default: 1 visit, seats=1, anonym_visits=0
+
+        resp = api_client.patch(f"/api/v1/records/{record['id']}", json={
+            "anonym_visits": 4,
+        })
+        assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
+        body = resp.json()
+        assert body["anonym_visits"] == 4
+        assert body["seats"] == 5  # 1 visit + 4 anonym
+
+    def test_put_record_with_anonym_visits(self, api_client, create_activity, create_client, create_record) -> None:
+        """PUT /api/records/{id} with anonym_visits computes seats correctly."""
+        record = create_record()  # 1 visit
+
+        resp = api_client.put(f"/api/v1/records/{record['id']}", json={
+            "activity_id": record["activity_id"],
+            "client_id": record["client_id"],
+            "status": "pending",
+            "anonym_visits": 2,
+            "visits": [
+                {"name": "Guest1", "price": 1000, "status": "waiting"},
+                {"name": "Guest2", "price": 1000, "status": "waiting"},
+            ],
+        })
+        assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
+        body = resp.json()
+        assert body["seats"] == 4  # 2 visits + 2 anonym
+        assert body["anonym_visits"] == 2

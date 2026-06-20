@@ -11,14 +11,7 @@ import { SettingsTab } from './SettingsTab';
 import { ClientTab } from './ClientTab';
 import { NewBookingTab } from './NewBookingTab';
 import { ModalFooter } from './ModalFooter';
-import {
-  createRecord,
-  createClient,
-  createVisitor,
-  searchClientByPhone,
-} from '@memo/api-client';
 import type { TariffResponse } from '@memo/api-client';
-import { useQueryClient } from '@tanstack/react-query';
 import { useRecordMutations } from '@/hooks/useRecordMutations';
 
 interface ActivityDetailsModalProps {
@@ -39,7 +32,6 @@ export function ActivityDetailsModal({ isOpen, onClose, activity, mode }: Activi
   const { services, updateActivity } = useSchedule();
   const { records, clients, payments } = useRecords();
   const { showToast } = useUI();
-  const queryClient = useQueryClient();
 
   const [activeTab, setActiveTab] = useState(mode === 'quickAdd' ? 'new-booking' : 'settings');
 
@@ -49,7 +41,7 @@ export function ActivityDetailsModal({ isOpen, onClose, activity, mode }: Activi
     : null;
 
   // Use the hook for record mutations (only when we have a record ID)
-  const { deleteRecord, addPayment } = useRecordMutations(activeRecordId || '');
+  const { createRecord, deleteRecord, addPayment, deletePayment, addVisitorToRecord, updateRecord } = useRecordMutations(activity.id, activeRecordId || '');
 
   // Current service and its tariffs (used by all tab contents)
   const currentService = useMemo(
@@ -76,7 +68,7 @@ export function ActivityDetailsModal({ isOpen, onClose, activity, mode }: Activi
       map.set(
         record.id,
         record.visits.map((v) => ({
-          id: v.visitor_id,
+          id: v.visitor_id ?? '',
           name: '', // Will be resolved by ClientTab if needed
           age: null,
         })),
@@ -90,10 +82,12 @@ export function ActivityDetailsModal({ isOpen, onClose, activity, mode }: Activi
     const settingsTab: Tab = { id: 'settings', label: 'Настройка' };
     const clientTabs: Tab[] = activityRecords.map((record) => {
       const client = clients.get(record.client_id ?? '');
+      const name = client?.name?.trim();
+      const phone = client?.phone?.trim();
       return {
         id: `client-${record.id}`,
-        label: client?.name || 'Неизвестный',
-        sublabel: client?.phone || '',
+        label: name || phone || 'Без контакта',
+        sublabel: name && phone ? phone : '',
       };
     });
     return [settingsTab, ...clientTabs];
@@ -112,61 +106,25 @@ export function ActivityDetailsModal({ isOpen, onClose, activity, mode }: Activi
     setActiveTab('new-booking');
   }, []);
 
-  // New booking submit handler — actually creates records via API
+  // New booking submit handler — delegates to useRecordMutations hook
   const handleNewBookingSubmit = useCallback(
-    async (data: { phone: string; name: string; visitors: Array<{ name: string; age?: string; tariffId: string }>; notify: boolean; channel: string; seats: number }) => {
+    async (data: {
+      phone: string;
+      name: string;
+      visitors: Array<{ name: string; age?: string; tariffId: string }>;
+      notify: boolean;
+      channel: string;
+      seats: number;
+    }) => {
       try {
-        // 1. Create or find client
-        let clientId: string;
-        if (data.phone) {
-          try {
-            const existingClient = await searchClientByPhone(data.phone);
-            clientId = existingClient.id;
-          } catch {
-            // Client not found — create new
-            const newClient = await createClient({ name: data.name, phone: data.phone, channel: data.channel });
-            clientId = newClient.id;
-          }
-        } else {
-          // No phone — create client without phone (if API allows) or use name-only
-          const newClient = await createClient({ name: data.name, phone: '', channel: data.channel });
-          clientId = newClient.id;
-        }
-
-        // 2. Create visitors
-        const visitIds: string[] = [];
-        for (const v of data.visitors) {
-          if (v.name) {
-            const visitor = await createVisitor({
-              client_id: clientId,
-              name: v.name,
-              age: v.age ? Number(v.age) : undefined,
-            });
-            visitIds.push(visitor.id);
-          }
-        }
-
-        // 3. Create record with visits
-        const tariff = serviceTariffs.find((t) => t.id === data.visitors[0]?.tariffId);
-        await createRecord({
-          activity_id: activity.id,
-          client_id: clientId,
-          seats: data.seats,
-          visits: visitIds.map((vid) => ({
-            visitor_id: vid,
-            price: tariff?.price ?? 0,
-          })),
-        });
-
+        await createRecord(data, serviceTariffs);
         showToast('Запись создана');
         setActiveTab('settings');
-        // Force refetch records
-        queryClient.invalidateQueries({ queryKey: ['records'] });
       } catch {
         showToast('Ошибка создания записи');
       }
     },
-    [showToast, activity.id, serviceTariffs, queryClient],
+    [createRecord, serviceTariffs, showToast],
   );
 
   // Delete record handler — uses the hook
@@ -176,13 +134,11 @@ export function ActivityDetailsModal({ isOpen, onClose, activity, mode }: Activi
         await deleteRecord();
         showToast('Запись удалена');
         setActiveTab('settings');
-        queryClient.invalidateQueries({ queryKey: ['records'] });
-        queryClient.invalidateQueries({ queryKey: ['activities'] });
       } catch {
         showToast('Ошибка удаления');
       }
     },
-    [deleteRecord, showToast, queryClient],
+    [deleteRecord, showToast],
   );
 
   // Payment handler — uses the hook
@@ -191,12 +147,11 @@ export function ActivityDetailsModal({ isOpen, onClose, activity, mode }: Activi
       try {
         await addPayment(amount, method);
         showToast(`Оплата ${amount} ₽ (${method}) добавлена`);
-        queryClient.invalidateQueries({ queryKey: ['payments'] });
       } catch {
         showToast('Ошибка добавления оплаты');
       }
     },
-    [addPayment, showToast, queryClient],
+    [addPayment, showToast],
   );
 
   // Financial summary
@@ -254,10 +209,21 @@ export function ActivityDetailsModal({ isOpen, onClose, activity, mode }: Activi
         visits={record.visits}
         payments={recordPayments}
         serviceTariffs={serviceTariffs}
-        onUpdateRecord={() => {}}
+        onUpdateRecord={(id, updates) => updateRecord(id, updates)}
         onDeleteRecord={handleDeleteRecord}
         onAddPayment={handleAddPayment}
+        onDeletePayment={(id) => deletePayment(id)}
+        onAddVisitor={async (data) => {
+          try {
+            const firstPrice = serviceTariffs[0]?.price ?? 0;
+            await addVisitorToRecord({ ...data, price: firstPrice });
+            showToast('Посетитель добавлен');
+          } catch {
+            showToast('Ошибка добавления посетителя');
+          }
+        }}
         showToast={showToast}
+        onClose={onClose}
       />
     );
   };
@@ -270,7 +236,7 @@ export function ActivityDetailsModal({ isOpen, onClose, activity, mode }: Activi
     : '';
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center" role="dialog" aria-modal="true" data-testid="activity-details-modal">
+    <div className="fixed inset-0 z-[200] flex items-center justify-center" role="dialog" aria-modal="true" data-testid="activity-details-modal">
       {/* Backdrop */}
       <div
         data-testid="details-modal-backdrop"
@@ -280,8 +246,8 @@ export function ActivityDetailsModal({ isOpen, onClose, activity, mode }: Activi
 
       {/* Modal */}
       <div
-        className="relative bg-white rounded-xl shadow-2xl w-full max-w-2xl mx-4 flex flex-col overflow-hidden"
-        style={{ maxHeight: '85vh' }}
+        data-testid="activity-details-modal-container"
+        className="relative bg-white rounded-xl shadow-2xl w-full max-w-2xl mx-4 flex flex-col overflow-hidden h-[80vh]"
       >
         {/* Context header */}
         <div

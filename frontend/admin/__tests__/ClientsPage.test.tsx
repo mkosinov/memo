@@ -18,6 +18,11 @@ vi.mock('@/contexts/ClientsContext', () => ({
   ClientsProvider: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));
 
+vi.mock('next/navigation', () => ({
+  useSearchParams: () => new URLSearchParams(),
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+}));
+
 const mockUseClients = vi.mocked(useClients);
 
 // ─── Mock components ─────────────────────────────────────────────────────

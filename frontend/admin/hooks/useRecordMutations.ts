@@ -3,30 +3,122 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback } from 'react';
 import {
+  createRecord,
+  createClient,
+  createVisitor,
+  searchClientByPhone,
   patchRecord,
   deleteRecord as apiDeleteRecord,
   patchActivity,
   createPayment,
   deletePayment as apiDeletePayment,
-  createVisitor,
   deleteVisitor as apiDeleteVisitor,
 } from '@memo/api-client';
+import type { RecordResponse } from '@memo/api-client';
 
 interface VisitData {
-  visitor_id?: string;
+  visitor_id?: string | null;
+  tariff_id?: string | null;
   price: number;
   custom_price?: number | null;
   status?: string;
 }
 
-export function useRecordMutations(recordId: string) {
+/** Data type accepted by patchRecord — status, comment, custom_price, visits. */
+export type RecordPatchData = Partial<
+  Pick<RecordResponse, 'status' | 'comment' | 'custom_price'> & {
+    visits?: Array<{ visitor_id?: string | null; tariff_id?: string | null; name?: string; age?: number; price: number; custom_price?: number | null; status?: string }>;
+  }
+>;
+
+interface CreateRecordInput {
+  phone: string;
+  name: string;
+  channel: string;
+  seats: number;
+  visitors: Array<{ name: string; age?: string; tariffId: string }>;
+}
+
+export function useRecordMutations(activityId: string, recordId: string = '') {
   const queryClient = useQueryClient();
 
-  const invalidateRecord = useCallback(() => {
-    queryClient.invalidateQueries({ queryKey: ['record', recordId] });
+  const invalidateAll = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: ['records'] });
+    queryClient.invalidateQueries({ queryKey: ['activities'] });
     queryClient.invalidateQueries({ queryKey: ['payments'] });
+    queryClient.invalidateQueries({ queryKey: ['clients'] });
+    if (recordId) {
+      queryClient.invalidateQueries({ queryKey: ['record', recordId] });
+    }
   }, [queryClient, recordId]);
+
+  const createRecordMutation = useCallback(
+    async (
+      input: CreateRecordInput,
+      serviceTariffs: Array<{ id: string; price: number }>,
+    ) => {
+      // 1. Resolve or create client
+      let clientId: string;
+      if (input.phone) {
+        try {
+          const existing = await searchClientByPhone(input.phone);
+          clientId = existing.id;
+        } catch {
+          const created = await createClient({
+            name: input.name,
+            phone: input.phone,
+            channel: input.channel,
+          });
+          clientId = created.id;
+        }
+      } else {
+        const created = await createClient({
+          name: input.name,
+          phone: '',
+          channel: input.channel,
+        });
+        clientId = created.id;
+      }
+
+      // 2. Create visitors (skip empty names)
+      const visitData: Array<{ visitorId: string; tariffId?: string }> = [];
+      for (const v of input.visitors) {
+        if (v.name) {
+          const visitor = await createVisitor({
+            client_id: clientId,
+            name: v.name,
+            age: v.age ? Number(v.age) : undefined,
+          });
+          visitData.push({ visitorId: visitor.id, tariffId: v.tariffId || undefined });
+        }
+      }
+
+      // 3. Default price from first tariff if any
+      const firstTariff = serviceTariffs[0];
+
+      // 4. Create record
+      await createRecord({
+        activity_id: activityId,
+        client_id: clientId,
+        anonym_visits: input.seats,
+        visits: visitData.map((vd) => {
+          // Lookup tariff price by id; fall back to firstTariff
+          const tariff = vd.tariffId
+            ? serviceTariffs.find((t) => t.id === vd.tariffId)
+            : firstTariff;
+          return {
+            visitor_id: vd.visitorId,
+            tariff_id: vd.tariffId || undefined,
+            price: tariff?.price ?? 0,
+          };
+        }),
+      });
+
+      // 5. Invalidate all relevant queries
+      invalidateAll();
+    },
+    [activityId, invalidateAll],
+  );
 
   const saveRecord = useCallback(
     async (data: {
@@ -43,22 +135,32 @@ export function useRecordMutations(recordId: string) {
           service_id: data.activityServiceId,
         });
       }
-
       await patchRecord(recordId, {
         custom_price: data.customPrice?.trim() ? Number(data.customPrice) : null,
         comment: data.comment || null,
         visits: data.visits,
       });
-
-      invalidateRecord();
+      invalidateAll();
     },
-    [recordId, invalidateRecord],
+    [recordId, invalidateAll],
+  );
+
+  const updateRecord = useCallback(
+    async (id: string, updates: RecordPatchData): Promise<void> => {
+      await patchRecord(id, updates);
+      invalidateAll();
+    },
+    [invalidateAll],
   );
 
   const deleteRecord = useCallback(async () => {
     await apiDeleteRecord(recordId);
-    invalidateRecord();
-  }, [recordId, invalidateRecord]);
+    // Optimistic update: remove record from cache immediately for snappy UX
+    queryClient.setQueryData<RecordResponse[]>(['records'], (old) =>
+      old ? old.filter((r) => r.id !== recordId) : old,
+    );
+    invalidateAll();
+  }, [recordId, queryClient, invalidateAll]);
 
   const addVisitor = useCallback(
     async (data: { client_id: string; name: string; age?: number }) => {
@@ -72,33 +174,64 @@ export function useRecordMutations(recordId: string) {
       await apiDeleteVisitor(visitorId);
       const remaining = currentVisits.filter((v) => v.visitor_id !== visitorId);
       await patchRecord(recordId, { visits: remaining });
-      invalidateRecord();
+      invalidateAll();
     },
-    [recordId, invalidateRecord],
+    [recordId, invalidateAll],
   );
 
   const addPayment = useCallback(
     async (amount: number, method: string) => {
       await createPayment({ record_id: recordId, amount, method: method as 'cash' | 'card' | 'transfer' });
-      invalidateRecord();
+      invalidateAll();
     },
-    [recordId, invalidateRecord],
+    [recordId, invalidateAll],
   );
 
   const deletePayment = useCallback(
     async (paymentId: string) => {
       await apiDeletePayment(paymentId);
-      invalidateRecord();
+      invalidateAll();
     },
-    [invalidateRecord],
+    [invalidateAll],
+  );
+
+  const addVisitorToRecord = useCallback(
+    async (data: { name: string; age?: number; price: number }) => {
+      const record = await queryClient.fetchQuery({
+        queryKey: ['record', recordId],
+        queryFn: () => import('@memo/api-client').then((m) => m.getRecord(recordId)),
+      });
+      const clientId = record.client_id;
+      if (!clientId) throw new Error('Record has no client');
+
+      const visitor = await createVisitor({
+        client_id: clientId,
+        name: data.name,
+        age: data.age,
+      });
+
+      const newVisit: VisitData = {
+        visitor_id: visitor.id,
+        price: data.price,
+      };
+
+      await patchRecord(recordId, {
+        visits: [...(record.visits as unknown as VisitData[]), newVisit],
+      });
+      invalidateAll();
+    },
+    [recordId, queryClient, invalidateAll],
   );
 
   return {
+    createRecord: createRecordMutation,
     saveRecord,
+    updateRecord,
     deleteRecord,
     addVisitor,
     deleteVisitor,
     addPayment,
     deletePayment,
+    addVisitorToRecord,
   };
 }

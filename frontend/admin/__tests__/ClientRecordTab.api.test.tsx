@@ -39,7 +39,9 @@ import { useSchedule } from '@/contexts/ScheduleContext';
 // ─── Mock react-query ──────────────────────────────────────────────────────
 
 const mockInvalidateQueries = vi.fn();
-const mockQueryClient = { invalidateQueries: mockInvalidateQueries };
+const mockSetQueryData = vi.fn();
+const mockFetchQuery = vi.fn();
+const mockQueryClient = { invalidateQueries: mockInvalidateQueries, setQueryData: mockSetQueryData, fetchQuery: mockFetchQuery };
 
 vi.mock('@tanstack/react-query', () => ({
   useQuery: vi.fn(),

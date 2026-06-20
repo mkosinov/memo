@@ -117,8 +117,11 @@ export function NewBookingTab({ activity, serviceTariffs, onSubmit, showToast }:
 
       {/* Seats */}
       <div>
-        <label className="text-xs font-medium text-ink-mid block mb-1">Мест</label>
+        <label className="text-xs font-medium text-ink-mid block mb-1" htmlFor="booking-seats">
+          Мест
+        </label>
         <input
+          id="booking-seats"
           type="number"
           min={1}
           max={10}
@@ -126,6 +129,7 @@ export function NewBookingTab({ activity, serviceTariffs, onSubmit, showToast }:
           onChange={(e) => setSeatsCount(Number(e.target.value))}
           className={inputClass}
           style={inputStyle}
+          data-testid="input-seats"
         />
       </div>
 

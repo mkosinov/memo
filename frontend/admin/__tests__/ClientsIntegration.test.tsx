@@ -98,6 +98,7 @@ const mockRecord: RecordResponse = {
   client_id: 'c1',
   status: 'confirmed',
   seats: 1,
+  anonym_visits: 0,
   comment: null,
   custom_price: null,
   created_at: '2026-05-10T10:00:00',
@@ -162,6 +163,8 @@ describe('ClientCardModal ↔ ClientInfoTab integration (real components)', () =
 
     vi.mocked(useQueryClient).mockReturnValue({
       invalidateQueries: mockInvalidateQueries,
+      setQueryData: vi.fn(),
+      fetchQuery: vi.fn(),
     } as any);
 
     // Mock useQuery to return different data based on query key
@@ -323,6 +326,8 @@ describe('ClientCardModal ↔ ClientRecordTab integration (real components)', ()
 
     vi.mocked(useQueryClient).mockReturnValue({
       invalidateQueries: mockInvalidateQueries,
+      setQueryData: vi.fn(),
+      fetchQuery: vi.fn(),
     } as any);
 
     // Mock useQuery to return different data based on query key
@@ -525,6 +530,8 @@ describe('Cross-page integration: create client → view → edit → save', () 
 
     vi.mocked(useQueryClient).mockReturnValue({
       invalidateQueries: mockInvalidateQueries,
+      setQueryData: vi.fn(),
+      fetchQuery: vi.fn(),
     } as any);
 
     vi.mocked(useQuery).mockImplementation((...args: any[]) => {
@@ -634,6 +641,8 @@ describe('Error scenarios: create client fails', () => {
 
     vi.mocked(useQueryClient).mockReturnValue({
       invalidateQueries: mockInvalidateQueries,
+      setQueryData: vi.fn(),
+      fetchQuery: vi.fn(),
     } as any);
 
     vi.mocked(useQuery).mockImplementation((...args: any[]) => {

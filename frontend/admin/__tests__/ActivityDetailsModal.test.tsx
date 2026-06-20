@@ -74,6 +74,22 @@ vi.mock('@tanstack/react-query', () => ({
   })),
   useQueryClient: vi.fn(() => ({
     invalidateQueries: vi.fn(),
+    setQueryData: vi.fn(),
+    fetchQuery: vi.fn(),
+  })),
+  useQuery: vi.fn(() => ({
+    data: undefined,
+    isLoading: false,
+  })),
+}));
+
+vi.mock('next/navigation', () => ({
+  useRouter: vi.fn(() => ({
+    push: vi.fn(),
+    replace: vi.fn(),
+    prefetch: vi.fn(),
+    back: vi.fn(),
+    forward: vi.fn(),
   })),
 }));
 
@@ -240,6 +256,7 @@ describe('ClientTab', () => {
     onUpdateRecord: vi.fn(),
     onDeleteRecord: vi.fn(),
     onAddPayment: vi.fn(),
+    onDeletePayment: vi.fn(),
     showToast: vi.fn(),
   };
 
@@ -258,13 +275,12 @@ describe('ClientTab', () => {
     render(<ClientTab {...defaultProps} />);
     const link = screen.getByTestId('client-link');
     expect(link).toBeInTheDocument();
-    expect(link.getAttribute('href')).toBe('/clients/c1');
-    expect(link.getAttribute('target')).toBe('_blank');
+    expect(link.tagName).toBe('BUTTON');
   });
 
-  it('renders record status dropdown', () => {
+  it('renders record status picker', () => {
     render(<ClientTab {...defaultProps} />);
-    expect(screen.getByLabelText('Статус')).toBeInTheDocument();
+    expect(screen.getByTestId('status-picker')).toBeInTheDocument();
   });
 
   it('renders delete button', () => {
@@ -388,7 +404,7 @@ describe('ActivityDetailsModal — API integration', () => {
   ]);
 
   beforeEach(() => {
-    vi.mocked(createRecord).mockResolvedValue({ id: 'r_new', activity_id: 'ev_1', client_id: 'c1', status: 'pending', seats: 1, comment: null, custom_price: null, created_at: '', updated_at: '', is_active: true, visits: [] });
+    vi.mocked(createRecord).mockResolvedValue({ id: 'r_new', activity_id: 'ev_1', client_id: 'c1', status: 'pending', seats: 1, anonym_visits: 0, comment: null, custom_price: null, created_at: '', updated_at: '', is_active: true, visits: [] });
     vi.mocked(createClient).mockResolvedValue({ id: 'c_new', name: 'New', phone: '+7', email: null, channel: 'telegram', created_at: '', updated_at: '', is_active: true });
     vi.mocked(createVisitor).mockResolvedValue({ id: 'vis_new', client_id: 'c1', name: 'V', age: null, created_at: '', updated_at: '', is_active: true });
     vi.mocked(deleteRecord).mockResolvedValue(undefined);
@@ -543,6 +559,7 @@ describe('ClientTab — layout & features', () => {
     onUpdateRecord: vi.fn(),
     onDeleteRecord: vi.fn(),
     onAddPayment: vi.fn(),
+    onDeletePayment: vi.fn(),
     showToast: vi.fn(),
   };
 
@@ -554,25 +571,23 @@ describe('ClientTab — layout & features', () => {
     expect(row!.querySelector('[data-testid="client-name"]')).toBeInTheDocument();
   });
 
-  it('renders status dropdown with all statuses', () => {
+  it('renders status picker with all statuses', () => {
     render(<ClientTab {...defaultProps} />);
-    const statusSelect = screen.getByLabelText('Статус');
-    expect(statusSelect).toBeInTheDocument();
-    // Check within the status select specifically
-    const statusOptions = statusSelect.querySelectorAll('option');
-    const statusTexts = Array.from(statusOptions).map(o => o.textContent);
-    expect(statusTexts).toContain('Ожидает');
-    expect(statusTexts).toContain('Подтверждена');
-    expect(statusTexts).toContain('Отменена');
-    expect(statusTexts).toContain('Неявка');
+    const trigger = screen.getByTestId('status-picker-trigger');
+    expect(trigger).toBeInTheDocument();
+    fireEvent.click(trigger);
+    expect(screen.getByTestId('status-picker-popover')).toBeInTheDocument();
+    expect(screen.getByTestId('status-picker-option-pending')).toBeInTheDocument();
+    expect(screen.getByTestId('status-picker-option-confirmed')).toBeInTheDocument();
+    expect(screen.getByTestId('status-picker-option-cancelled')).toBeInTheDocument();
+    expect(screen.getByTestId('status-picker-option-no_show')).toBeInTheDocument();
   });
 
   it('renders client link as SVG icon (not text)', () => {
     const { container } = render(<ClientTab {...defaultProps} />);
-    const link = container.querySelector('[data-testid="client-link"]') as HTMLAnchorElement;
+    const link = container.querySelector('[data-testid="client-link"]') as HTMLButtonElement;
     expect(link).toBeInTheDocument();
-    expect(link.getAttribute('href')).toBe('/clients/c1');
-    expect(link.getAttribute('target')).toBe('_blank');
+    expect(link.tagName).toBe('BUTTON');
     // Should contain an SVG element, not text link
     expect(link.querySelector('svg')).toBeInTheDocument();
   });

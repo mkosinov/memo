@@ -336,6 +336,83 @@ class TestActivityEdgeCases:
         assert response.status_code == 200
         assert response.json()["occupied"] == 2
 
+    # ─── BUG #84: occupied = SUM(seats), not COUNT(records) ──────────────────
+
+    def test_occupied_sums_seats_not_records(self, api_client, create_record, _create_activity_payload):
+        """occupied = SUM(seats) over active records, not count of records."""
+        act_payload = _create_activity_payload()
+        act_resp = api_client.post("/api/v1/activities", json=act_payload)
+        assert act_resp.status_code == 201
+        act_id = act_resp.json()["id"]
+
+        # Three records with 1, 2, 3 visits (= seats 1+2+3)
+        create_record(activity_id=act_id, visits=[{"name": "A", "price": 1000}])
+        create_record(activity_id=act_id, visits=[{"name": "A", "price": 1000}, {"name": "B", "price": 1000}])
+        create_record(activity_id=act_id, visits=[
+            {"name": "A", "price": 1000},
+            {"name": "B", "price": 1000},
+            {"name": "C", "price": 1000},
+        ])
+
+        response = api_client.get(f"/api/v1/activities/{act_id}")
+        assert response.status_code == 200
+        assert response.json()["occupied"] == 6  # 1+2+3, not 3
+
+    def test_occupied_excludes_cancelled(self, api_client, create_record, _create_activity_payload):
+        """occupied excludes records with status=cancelled."""
+        act_payload = _create_activity_payload()
+        act_resp = api_client.post("/api/v1/activities", json=act_payload)
+        assert act_resp.status_code == 201
+        act_id = act_resp.json()["id"]
+
+        r1 = create_record(activity_id=act_id, visits=[
+            {"name": "A", "price": 1000},
+            {"name": "B", "price": 1000},
+            {"name": "C", "price": 1000},
+        ])
+        r2 = create_record(activity_id=act_id, visits=[
+            {"name": "A", "price": 1000},
+            {"name": "B", "price": 1000},
+            {"name": "C", "price": 1000},
+            {"name": "D", "price": 1000},
+            {"name": "E", "price": 1000},
+        ])
+
+        # Cancel r2
+        patch_resp = api_client.patch(
+            f"/api/v1/records/{r2['id']}",
+            json={"status": "cancelled"},
+        )
+        assert patch_resp.status_code == 200
+
+        response = api_client.get(f"/api/v1/activities/{act_id}")
+        assert response.json()["occupied"] == 3  # only r1 counts (3 seats)
+
+    def test_occupied_excludes_no_show(self, api_client, create_record, _create_activity_payload):
+        """occupied excludes records with status=no_show."""
+        act_payload = _create_activity_payload()
+        act_resp = api_client.post("/api/v1/activities", json=act_payload)
+        assert act_resp.status_code == 201
+        act_id = act_resp.json()["id"]
+
+        r1 = create_record(activity_id=act_id, visits=[
+            {"name": "A", "price": 1000},
+            {"name": "B", "price": 1000},
+            {"name": "C", "price": 1000},
+        ])
+        r2 = create_record(activity_id=act_id, visits=[
+            {"name": "A", "price": 1000},
+            {"name": "B", "price": 1000},
+            {"name": "C", "price": 1000},
+            {"name": "D", "price": 1000},
+            {"name": "E", "price": 1000},
+        ])
+
+        api_client.patch(f"/api/v1/records/{r2['id']}", json={"status": "no_show"})
+
+        response = api_client.get(f"/api/v1/activities/{act_id}")
+        assert response.json()["occupied"] == 3  # only r1 counts (3 seats)
+
     def test_activity_no_records_occupied_zero(self, api_client, create_activity):
         """Activity with no records → occupied=0."""
         activity = create_activity()

@@ -3,9 +3,13 @@
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError
+from starlette.exceptions import HTTPException as StarletteHTTPException
+
+from src.errors import ErrorCode, ErrorDetail
 
 from src.admin.setup import setup_admin
 from src.core.config import settings
@@ -47,14 +51,86 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    @app.exception_handler(IntegrityError)
-    async def integrity_error_handler(request: Request, exc: IntegrityError):
-        """Convert SQLAlchemy IntegrityError (FK violations, unique constraints)
-        into a proper 422 Unprocessable Entity response."""
+    # ── Global exception handlers ──────────────────────────────────────────
+    # All handlers return {detail: {code, message}} via ErrorDetail.
+    # Registered BEFORE include_router so they catch errors from all routes.
+
+    @app.exception_handler(StarletteHTTPException)
+    async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+        """Convert FastAPI HTTPException → {detail: {code, message}}.
+
+        Supports two detail shapes:
+        - If raise site passed a string detail: look up code by status, fallback to INTERNAL_ERROR
+        - If raise site passed an ErrorDetail dict (new style): preserve code + message
+        """
+        detail = exc.detail
+        if isinstance(detail, dict) and "code" in detail and "message" in detail:
+            # New style: already an ErrorDetail dict
+            return JSONResponse(
+                status_code=exc.status_code,
+                content={"detail": detail},
+            )
+        # Legacy / string detail: map status → code
+        code = _status_to_code(exc.status_code)
+        message = str(detail) if detail else ErrorCode.INTERNAL_ERROR.value
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"detail": ErrorDetail(code=code, message=message).model_dump()},
+        )
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_exception_handler(request: Request, exc: RequestValidationError):
+        """Convert Pydantic validation errors → {detail: {code, message}}.
+
+        Takes the first error's msg as the message. Real fix is on the
+        caller side; toast says "Проверьте правильность заполнения полей".
+        """
+        errors = exc.errors()
+        first_msg = errors[0]["msg"] if errors else "Validation error"
+        # Strip FastAPI's "Value error, " prefix for cleaner messages
+        first_msg = first_msg.replace("Value error, ", "")
         return JSONResponse(
             status_code=422,
-            content={"detail": "Database integrity constraint violated"},
+            content={"detail": ErrorDetail(
+                code=ErrorCode.VALIDATION_ERROR.value,
+                message=first_msg,
+            ).model_dump()},
         )
+
+    @app.exception_handler(IntegrityError)
+    async def integrity_error_handler(request: Request, exc: IntegrityError):
+        """Convert SQLAlchemy IntegrityError → {detail: {code, message}}."""
+        return JSONResponse(
+            status_code=422,
+            content={"detail": ErrorDetail(
+                code=ErrorCode.INTEGRITY_VIOLATION.value,
+                message="Database integrity constraint violated",
+            ).model_dump()},
+        )
+
+    @app.exception_handler(Exception)
+    async def unhandled_exception_handler(request: Request, exc: Exception):
+        """Catch-all for uncaught exceptions → 500 with INTERNAL_ERROR code.
+
+        Logs the exception server-side. Hides internals from client.
+        """
+        return JSONResponse(
+            status_code=500,
+            content={"detail": ErrorDetail(
+                code=ErrorCode.INTERNAL_ERROR.value,
+                message="Internal Server Error",
+            ).model_dump()},
+        )
+
+    def _status_to_code(status_code: int) -> str:
+        """Map HTTP status code to a default ErrorCode (string value)."""
+        mapping = {
+            404: ErrorCode.ACTIVITY_NOT_FOUND.value,  # generic; raise sites override
+            409: ErrorCode.CLIENT_DUPLICATE_PHONE.value,  # generic; raise sites override
+            422: ErrorCode.VALIDATION_ERROR.value,
+            500: ErrorCode.INTERNAL_ERROR.value,
+        }
+        return mapping.get(status_code, ErrorCode.INTERNAL_ERROR.value)
 
     if settings.ENV != "testing":
         setup_admin(app)

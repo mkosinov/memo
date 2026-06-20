@@ -8,6 +8,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from src.errors import ErrorCode, ErrorDetail
 from src.repositories.generic import GenericRepository, get_generic_repository
 from src.models.activity import Activity
 from src.models.client import Client
@@ -294,7 +295,10 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
         if occupied + seats > activity.capacity:
             raise HTTPException(
                 status_code=409,
-                detail=f"Activity at capacity: {occupied}/{activity.capacity} seats occupied",
+                detail=ErrorDetail(
+                    code=ErrorCode.ACTIVITY_AT_CAPACITY,
+                    message=f"Activity at capacity: {occupied}/{activity.capacity} seats occupied",
+                ).model_dump(),
             )
 
 

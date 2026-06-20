@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db import SessionDep
+from src.errors import ErrorCode, ErrorDetail
 from src.schemas.activity import (
     ActivityCreate,
     ActivityPatch,
@@ -59,7 +60,13 @@ async def get_activity(
     """Return a single activity by ID with computed occupied count."""
     activity = await service.get(db_session=session, id=activity_id)
     if not activity:
-        raise HTTPException(status_code=404, detail="Activity not found")
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.ACTIVITY_NOT_FOUND,
+                message="Activity not found",
+            ).model_dump(),
+        )
     return await _to_response(service, db_session=session, activity=activity)
 
 
@@ -84,7 +91,13 @@ async def update_activity(
     """Full-update an activity by ID (PUT, not PATCH)."""
     activity = await service.update(db_session=session, id=activity_id, data=data)
     if not activity:
-        raise HTTPException(status_code=404, detail="Activity not found")
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.ACTIVITY_NOT_FOUND,
+                message="Activity not found",
+            ).model_dump(),
+        )
     return await _to_response(service, db_session=session, activity=activity)
 
 
@@ -98,7 +111,13 @@ async def partial_update_activity(
     """Partially update an activity — only fields sent in the body are updated."""
     activity = await service.patch(db_session=session, id=activity_id, data=patch)
     if not activity:
-        raise HTTPException(status_code=404, detail="Activity not found")
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.ACTIVITY_NOT_FOUND,
+                message="Activity not found",
+            ).model_dump(),
+        )
     return await _to_response(service, db_session=session, activity=activity)
 
 
@@ -111,4 +130,10 @@ async def delete_activity(
     """Soft-delete an activity (set is_active=False)."""
     deleted = await service.delete(db_session=session, id=activity_id)
     if not deleted:
-        raise HTTPException(status_code=404, detail="Activity not found")
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.ACTIVITY_NOT_FOUND,
+                message="Activity not found",
+            ).model_dump(),
+        )

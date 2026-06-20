@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import asc
 
 from src.db import SessionDep
+from src.errors import ErrorCode, ErrorDetail
 from src.models.master import Master
 from src.schemas.master import MasterCreate, MasterResponse, MasterUpdate, ReorderRequest
 from src.services.generic import GenericService
@@ -55,7 +56,13 @@ async def get_master(
     """Return a single master by ID."""
     master = await service.get(db_session=session, id=master_id)
     if not master:
-        raise HTTPException(status_code=404, detail="Master not found")
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.MASTER_NOT_FOUND,
+                message="Master not found",
+            ).model_dump(),
+        )
     return master
 
 
@@ -79,7 +86,13 @@ async def update_master(
     """Full-update a master by ID (PUT, not PATCH)."""
     master = await service.update(db_session=session, id=master_id, data=data)
     if not master:
-        raise HTTPException(status_code=404, detail="Master not found")
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.MASTER_NOT_FOUND,
+                message="Master not found",
+            ).model_dump(),
+        )
     return master
 
 
@@ -92,4 +105,10 @@ async def delete_master(
     """Soft-delete a master (set is_active=False)."""
     deleted = await service.delete(db_session=session, id=master_id)
     if not deleted:
-        raise HTTPException(status_code=404, detail="Master not found")
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.MASTER_NOT_FOUND,
+                message="Master not found",
+            ).model_dump(),
+        )

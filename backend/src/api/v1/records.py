@@ -7,6 +7,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 
 from src.db import SessionDep
+from src.errors import ErrorCode, ErrorDetail
 from src.schemas.record import (
     RecordCreate,
     RecordPatch,
@@ -88,7 +89,13 @@ async def get_record(
     """Return a single record by ID with nested visits."""
     record = await service.get(db_session=session, id=record_id)
     if not record:
-        raise HTTPException(status_code=404, detail="Record not found")
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.RECORD_NOT_FOUND,
+                message="Record not found",
+            ).model_dump(),
+        )
     return _map_record(record)
 
 
@@ -113,7 +120,13 @@ async def update_record(
     """Full-update a record by ID. Replaces visits, recalculates seats."""
     record = await service.update(db_session=session, id=record_id, data=data)
     if not record:
-        raise HTTPException(status_code=404, detail="Record not found")
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.RECORD_NOT_FOUND,
+                message="Record not found",
+            ).model_dump(),
+        )
     return _map_record(record)
 
 
@@ -127,7 +140,13 @@ async def patch_record(
     """Partial-update a record by ID (PATCH). Only sent fields are changed."""
     record = await service.patch(db_session=session, id=record_id, data=data)
     if not record:
-        raise HTTPException(status_code=404, detail="Record not found")
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.RECORD_NOT_FOUND,
+                message="Record not found",
+            ).model_dump(),
+        )
     return _map_record(record)
 
 
@@ -140,4 +159,10 @@ async def delete_record(
     """Soft-delete a record (set is_active=False)."""
     deleted = await service.delete(db_session=session, id=record_id)
     if not deleted:
-        raise HTTPException(status_code=404, detail="Record not found")
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.RECORD_NOT_FOUND,
+                message="Record not found",
+            ).model_dump(),
+        )

@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — 2026-06-20
+
+### Changed
+- **End-to-End Error Contract with Machine-Readable Codes** (#93, branch `fix/error-flow-93`):
+  - **Backend:** New `ErrorCode` enum with 18 stable codes (ACTIVITY_AT_CAPACITY, *_NOT_FOUND, VALIDATION_ERROR, INTERNAL_ERROR, etc.) and `ErrorDetail { code, message }` Pydantic schema
+  - **Backend:** 4 global exception handlers wrap all errors in `{detail: {code, message}}` shape (HTTPException, RequestValidationError, IntegrityError, Exception catch-all)
+  - **Backend:** 41 `raise HTTPException` sites migrated to include `ErrorDetail(code=..., message=...)` — explicit codes per entity
+  - **API client:** `ApiError` gets optional `code?: string` field; `api()` extracts structured errors from response body
+  - **Admin:** New `parseApiError(err)` helper maps codes → user-friendly Russian messages (e.g., ACTIVITY_AT_CAPACITY → "Недостаточно мест: 2/2 мест занято")
+  - **Admin:** 26 mutation handlers in 9 files now wrap `mutateAsync` in try/catch with `parseApiError` — eliminates silent error swallowing
+  - **Admin:** `QueryCache.onError` uses `parseApiError` for specific messages instead of generic "Не удалось загрузить данные"
+  - **Tests:** 6 E2E tests cover all 6 user scenarios (activity capacity, not-found, validation, 500, network, duplicate phone)
+  - **Docs:** ADR-005 added for the error contract decision
+  - **Backwards compatible:** Legacy `{"detail": "string"}` responses still work (code=undefined, uses err.message)
+
+---
+
 ## [Unreleased] — 2026-06-19
 
 ### Fixed

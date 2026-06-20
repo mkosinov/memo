@@ -6,6 +6,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 
 from src.db import SessionDep
+from src.errors import ErrorCode, ErrorDetail
 from src.schemas.payment import PaymentCreate, PaymentResponse, PaymentUpdate
 from src.services.generic import GenericService
 from src.services.payment import get_payment_service
@@ -44,7 +45,13 @@ async def get_payment(
     """Return a single payment by ID."""
     payment = await service.get(db_session=session, id=payment_id)
     if not payment:
-        raise HTTPException(status_code=404, detail="Payment not found")
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.PAYMENT_NOT_FOUND,
+                message="Payment not found",
+            ).model_dump(),
+        )
     return payment
 
 
@@ -68,7 +75,13 @@ async def update_payment(
     """Full-update a payment by ID (PUT, not PATCH)."""
     payment = await service.update(db_session=session, id=payment_id, data=data)
     if not payment:
-        raise HTTPException(status_code=404, detail="Payment not found")
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.PAYMENT_NOT_FOUND,
+                message="Payment not found",
+            ).model_dump(),
+        )
     return payment
 
 
@@ -81,4 +94,10 @@ async def delete_payment(
     """Soft-delete a payment (set is_active=False)."""
     deleted = await service.delete(db_session=session, id=payment_id)
     if not deleted:
-        raise HTTPException(status_code=404, detail="Payment not found")
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.PAYMENT_NOT_FOUND,
+                message="Payment not found",
+            ).model_dump(),
+        )

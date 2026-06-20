@@ -3,24 +3,38 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ClientWithStats, RecordResponse } from '@memo/api-client';
+import { UIProvider } from '../contexts/UIContext';
 import { createMockClientsContext } from './helpers/mockContexts';
 
 // ─── Mock api-client ──────────────────────────────────────────────────────
 
-vi.mock('@memo/api-client', () => ({
-  getClientsWithStats: vi.fn(),
-  createClient: vi.fn(),
-  updateClient: vi.fn(),
-  patchClient: vi.fn(),
-  deleteClient: vi.fn(),
-  getRecord: vi.fn(),
-  getRecords: vi.fn().mockResolvedValue([]),
-  patchRecord: vi.fn(),
-  updateRecord: vi.fn(),
-  deleteRecord: vi.fn(),
-  createPayment: vi.fn(),
-  getClientVisitors: vi.fn(),
-}));
+vi.mock('@memo/api-client', () => {
+  class ApiError extends Error {
+    constructor(status: number, message: string, code?: string) {
+      super(message);
+      this.name = 'ApiError';
+      this.status = status;
+      this.code = code;
+    }
+    status: number;
+    code?: string;
+  }
+  return {
+    ApiError,
+    getClientsWithStats: vi.fn(),
+    createClient: vi.fn(),
+    updateClient: vi.fn(),
+    patchClient: vi.fn(),
+    deleteClient: vi.fn(),
+    getRecord: vi.fn(),
+    getRecords: vi.fn().mockResolvedValue([]),
+    patchRecord: vi.fn(),
+    updateRecord: vi.fn(),
+    deleteRecord: vi.fn(),
+    createPayment: vi.fn(),
+    getClientVisitors: vi.fn(),
+  };
+});
 
 import {
   getClientsWithStats,
@@ -32,6 +46,7 @@ import {
   deleteRecord,
   createPayment,
   getClientVisitors,
+  ApiError,
 } from '@memo/api-client';
 
 // ─── Mock ScheduleContext ─────────────────────────────────────────────────
@@ -195,9 +210,9 @@ describe('ClientCardModal ↔ ClientInfoTab integration (real components)', () =
   async function renderModal(client: ClientWithStats | null, mode: 'view' | 'create' = 'view') {
     const { ClientCardModal } = await import('@/app/(main)/clients/components/ClientCardModal');
     return render(
-      <QueryClientProvider client={createQueryClient()}>
+      <UIProvider><QueryClientProvider client={createQueryClient()}>
         <ClientCardModal client={client} isOpen={true} onClose={vi.fn()} mode={mode} />
-      </QueryClientProvider>,
+      </QueryClientProvider></UIProvider>,
     );
   }
 
@@ -264,9 +279,9 @@ describe('ClientCardModal ↔ ClientInfoTab integration (real components)', () =
     const { ClientCardModal } = await import('@/app/(main)/clients/components/ClientCardModal');
     const onClose = vi.fn();
     render(
-      <QueryClientProvider client={createQueryClient()}>
+      <UIProvider><QueryClientProvider client={createQueryClient()}>
         <ClientCardModal client={mockClient} isOpen={true} onClose={onClose} mode="view" />
-      </QueryClientProvider>,
+      </QueryClientProvider></UIProvider>,
     );
 
     const deleteBtn = screen.getByRole('button', { name: /Удалить клиента/i });
@@ -371,9 +386,9 @@ describe('ClientCardModal ↔ ClientRecordTab integration (real components)', ()
   it('switching to record tab renders record data', async () => {
     const { ClientCardModal } = await import('@/app/(main)/clients/components/ClientCardModal');
     render(
-      <QueryClientProvider client={createQueryClient()}>
+      <UIProvider><QueryClientProvider client={createQueryClient()}>
         <ClientCardModal client={mockClientWithRecords} isOpen={true} onClose={vi.fn()} mode="view" />
-      </QueryClientProvider>,
+      </QueryClientProvider></UIProvider>,
     );
 
     // Click on a record tab
@@ -391,9 +406,9 @@ describe('ClientCardModal ↔ ClientRecordTab integration (real components)', ()
   it('record tab payment form calls createPayment', async () => {
     const { ClientCardModal } = await import('@/app/(main)/clients/components/ClientCardModal');
     render(
-      <QueryClientProvider client={createQueryClient()}>
+      <UIProvider><QueryClientProvider client={createQueryClient()}>
         <ClientCardModal client={mockClientWithRecords} isOpen={true} onClose={vi.fn()} mode="view" />
-      </QueryClientProvider>,
+      </QueryClientProvider></UIProvider>,
     );
 
     // Switch to record tab
@@ -422,9 +437,9 @@ describe('ClientCardModal ↔ ClientRecordTab integration (real components)', ()
     // SKIPPED: Real ClientRecordTab uses visit-status-select (dropdown), not visit-status-icon (button)
     const { ClientCardModal } = await import('@/app/(main)/clients/components/ClientCardModal');
     render(
-      <QueryClientProvider client={createQueryClient()}>
+      <UIProvider><QueryClientProvider client={createQueryClient()}>
         <ClientCardModal client={mockClientWithRecords} isOpen={true} onClose={vi.fn()} mode="view" />
-      </QueryClientProvider>,
+      </QueryClientProvider></UIProvider>,
     );
 
     // Switch to record tab
@@ -450,9 +465,9 @@ describe('ClientCardModal ↔ ClientRecordTab integration (real components)', ()
 
     const { ClientCardModal } = await import('@/app/(main)/clients/components/ClientCardModal');
     render(
-      <QueryClientProvider client={createQueryClient()}>
+      <UIProvider><QueryClientProvider client={createQueryClient()}>
         <ClientCardModal client={mockClientWithRecords} isOpen={true} onClose={onClose} mode="view" />
-      </QueryClientProvider>,
+      </QueryClientProvider></UIProvider>,
     );
 
     // Switch to record tab
@@ -477,9 +492,9 @@ describe('ClientCardModal ↔ ClientRecordTab integration (real components)', ()
   it('switching back to client tab from record tab shows client info', async () => {
     const { ClientCardModal } = await import('@/app/(main)/clients/components/ClientCardModal');
     render(
-      <QueryClientProvider client={createQueryClient()}>
+      <UIProvider><QueryClientProvider client={createQueryClient()}>
         <ClientCardModal client={mockClientWithRecords} isOpen={true} onClose={vi.fn()} mode="view" />
-      </QueryClientProvider>,
+      </QueryClientProvider></UIProvider>,
     );
 
     // Start on client tab
@@ -573,9 +588,9 @@ describe('Cross-page integration: create client → view → edit → save', () 
 
     // 1. Open modal in view mode (simulates opening a client card from a table)
     render(
-      <QueryClientProvider client={createQueryClient()}>
+      <UIProvider><QueryClientProvider client={createQueryClient()}>
         <ClientCardModal client={mockClientWithRecords} isOpen={true} onClose={vi.fn()} mode="view" />
-      </QueryClientProvider>,
+      </QueryClientProvider></UIProvider>,
     );
 
     // 2. Verify client info is visible
@@ -698,9 +713,9 @@ describe('Error scenarios: create client fails', () => {
 
     const { ClientCardModal } = await import('@/app/(main)/clients/components/ClientCardModal');
     render(
-      <QueryClientProvider client={createQueryClient()}>
+      <UIProvider><QueryClientProvider client={createQueryClient()}>
         <ClientCardModal client={mockClient} isOpen={true} onClose={vi.fn()} mode="view" />
-      </QueryClientProvider>,
+      </QueryClientProvider></UIProvider>,
     );
 
     // Change name to trigger save
@@ -737,9 +752,9 @@ describe('Error scenarios: create client fails', () => {
 
     const { ClientCardModal } = await import('@/app/(main)/clients/components/ClientCardModal');
     render(
-      <QueryClientProvider client={createQueryClient()}>
+      <UIProvider><QueryClientProvider client={createQueryClient()}>
         <ClientCardModal client={mockClient} isOpen={true} onClose={vi.fn()} mode="view" />
-      </QueryClientProvider>,
+      </QueryClientProvider></UIProvider>,
     );
 
     // Change phone
@@ -759,9 +774,7 @@ describe('Error scenarios: create client fails', () => {
   });
 
   it('handles duplicate phone (409) gracefully on create', async () => {
-    const duplicateError = Object.assign(new Error('Client with this phone already exists'), {
-      status: 409,
-    });
+    const duplicateError = new ApiError(409, 'Client with this phone already exists', 'CLIENT_DUPLICATE_PHONE');
     const createClientFn = vi.fn().mockRejectedValue(duplicateError);
     const onClose = vi.fn();
     mockUseClients.mockReturnValue(
@@ -771,7 +784,7 @@ describe('Error scenarios: create client fails', () => {
     const { ClientCardModal } = await import('@/app/(main)/clients/components/ClientCardModal');
     const onClientCreated = vi.fn();
     render(
-      <QueryClientProvider client={createQueryClient()}>
+      <UIProvider><QueryClientProvider client={createQueryClient()}>
         <ClientCardModal
           client={null}
           isOpen={true}
@@ -779,7 +792,7 @@ describe('Error scenarios: create client fails', () => {
           mode="create"
           onClientCreated={onClientCreated}
         />
-      </QueryClientProvider>,
+      </QueryClientProvider></UIProvider>,
     );
 
     // In create mode, the real ClientInfoTab renders "Создать" button
@@ -798,8 +811,7 @@ describe('Error scenarios: create client fails', () => {
     // Should NOT call onClientCreated since create failed
     expect(onClientCreated).not.toHaveBeenCalled();
 
-    // In create mode, the code catches errors and closes the modal
-    // (see ClientCardModal catch block: "// Create failed — close modal")
-    expect(onClose).toHaveBeenCalled();
+    // Error is caught — parseApiError shows toast, modal stays open for retry
+    expect(onClose).not.toHaveBeenCalled();
   });
 });

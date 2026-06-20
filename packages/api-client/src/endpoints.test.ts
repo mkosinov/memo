@@ -7,7 +7,11 @@ import { ServiceCreateSchema, LocationCreateSchema } from './schemas';
 vi.mock('./client', () => ({
   api: vi.fn(),
   ApiError: class ApiError extends Error {
-    constructor(public status: number, message: string) {
+    constructor(
+      public status: number,
+      message: string,
+      public code?: string,
+    ) {
       super(message);
       this.name = 'ApiError';
     }

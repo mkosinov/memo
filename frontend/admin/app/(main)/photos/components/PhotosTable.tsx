@@ -9,6 +9,7 @@ import { useUI } from '@/contexts/UIContext';
 import { PhotoModal } from './PhotoModal';
 import { ColumnPicker } from '@/app/components/shared/ColumnPicker';
 import { ErrorState } from '@/app/components/error';
+import { parseApiError } from '@/app/lib/api/parseApiError';
 
 // ─── Column definitions ──────────────────────────────────────────────────
 
@@ -160,27 +161,35 @@ export function PhotosTable() {
       const tags = (data.tags as Array<{ id: string; tag: string }>) || [];
       payload.tag_ids = tags.map(t => t.id);
     }
-    await updateMutation.mutateAsync({
-      id: editPhoto.id,
-      data: payload,
-    });
-    showToast('Фото обновлено');
-    setEditPhoto(null);
+    try {
+      await updateMutation.mutateAsync({
+        id: editPhoto.id,
+        data: payload,
+      });
+      showToast('Фото обновлено');
+      setEditPhoto(null);
+    } catch (err) {
+      showToast(parseApiError(err).message, 'error');
+    }
   };
 
   // ─── Create ────────────────────────────────────────────────────────
 
   const handleCreateSubmit = async (data: Record<string, unknown>) => {
     const tags = (data.tags as Array<{ id: string; tag: string }>) || [];
-    await createMutation.mutateAsync({
-      filename: String(data.filename ?? ''),
-      visitor_id: String(data.visitor_id ?? ''),
-      service_id: String(data.service_id ?? ''),
-      activity_id: String(data.activity_id ?? ''),
-      is_public: Boolean(data.is_public),
-      tag_ids: tags.map(t => t.id),
-    });
-    showToast('Фото создано');
+    try {
+      await createMutation.mutateAsync({
+        filename: String(data.filename ?? ''),
+        visitor_id: String(data.visitor_id ?? ''),
+        service_id: String(data.service_id ?? ''),
+        activity_id: String(data.activity_id ?? ''),
+        is_public: Boolean(data.is_public),
+        tag_ids: tags.map(t => t.id),
+      });
+      showToast('Фото создано');
+    } catch (err) {
+      showToast(parseApiError(err).message, 'error');
+    }
   };
 
   // ─── Delete ────────────────────────────────────────────────────────
@@ -188,8 +197,12 @@ export function PhotosTable() {
   const handleDelete = async (photo: PhotoResponse) => {
     setOpenDropdownId(null);
     if (!window.confirm('Удалить фото?')) return;
-    await deleteMutation.mutateAsync(photo.id);
-    showToast('Фото удалено');
+    try {
+      await deleteMutation.mutateAsync(photo.id);
+      showToast('Фото удалено');
+    } catch (err) {
+      showToast(parseApiError(err).message, 'error');
+    }
   };
 
   // ─── Error ───────────────────────────────────────────────────────

@@ -6,6 +6,7 @@ import { UIProvider, useUI } from '../contexts/UIContext';
 import { UserSettingsProvider } from '../contexts/UserSettingsContext';
 import { ErrorBoundary } from './components/error';
 import { ToastContainer } from './components/toast/ToastContainer';
+import { parseApiError } from './lib/api/parseApiError';
 
 function QueryClientWithErrorReporting({ children }: { children: React.ReactNode }) {
   const { showToast } = useUI();
@@ -15,7 +16,8 @@ function QueryClientWithErrorReporting({ children }: { children: React.ReactNode
         // Silent queries (meta.silent === true) skip the toast
         if ((query.meta as { silent?: boolean } | undefined)?.silent) return;
         console.error('[Query]', query.queryKey, err);
-        showToast('Не удалось загрузить данные', 'error');
+        const { message } = parseApiError(err);
+        showToast(message, 'error');
       },
     }),
     defaultOptions: {

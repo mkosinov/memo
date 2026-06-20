@@ -13,6 +13,7 @@ import {
   createPayment,
   deletePayment as apiDeletePayment,
   deleteVisitor as apiDeleteVisitor,
+  updateVisitStatus as apiUpdateVisitStatus,
 } from '@memo/api-client';
 import type { RecordResponse } from '@memo/api-client';
 
@@ -223,6 +224,25 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
     [recordId, queryClient, invalidateAll],
   );
 
+  const updateAnonymVisits = useCallback(
+    async (recordId: string, anonymVisits: number) => {
+      await patchRecord(recordId, { anonym_visits: anonymVisits });
+      invalidateAll();
+    },
+    [invalidateAll],
+  );
+
+  const updateVisitStatus = useCallback(
+    async (visitId: string, status: string) => {
+      await apiUpdateVisitStatus(visitId, status);
+      queryClient.invalidateQueries({ queryKey: ['records'] });
+      if (recordId) {
+        queryClient.invalidateQueries({ queryKey: ['record', recordId] });
+      }
+    },
+    [queryClient, recordId],
+  );
+
   return {
     createRecord: createRecordMutation,
     saveRecord,
@@ -233,5 +253,7 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
     addPayment,
     deletePayment,
     addVisitorToRecord,
+    updateAnonymVisits,
+    updateVisitStatus,
   };
 }

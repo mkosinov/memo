@@ -16,6 +16,10 @@ fi
 
 HOOKS_DIR="$GIT_DIR/hooks"
 
+# Ensure hooks directory exists. In a fresh git worktree, $GIT_DIR/hooks may
+# not exist yet (git only creates .git/worktrees/<name>/ on `worktree add`).
+mkdir -p "$HOOKS_DIR"
+
 for hook_file in "$SRC_DIR"/*; do
   [ -e "$hook_file" ] || continue
   hook_name="$(basename "$hook_file")"

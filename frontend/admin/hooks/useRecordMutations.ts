@@ -14,6 +14,7 @@ import {
   deletePayment as apiDeletePayment,
   deleteVisitor as apiDeleteVisitor,
 } from '@memo/api-client';
+import type { RecordResponse } from '@memo/api-client';
 
 interface VisitData {
   visitor_id?: string;
@@ -21,6 +22,13 @@ interface VisitData {
   custom_price?: number | null;
   status?: string;
 }
+
+/** Data type accepted by patchRecord — status, comment, custom_price, visits. */
+export type RecordPatchData = Partial<
+  Pick<RecordResponse, 'status' | 'comment' | 'custom_price'> & {
+    visits?: Array<{ visitor_id?: string; name?: string; age?: number; price: number; custom_price?: number | null; status?: string }>;
+  }
+>;
 
 interface CreateRecordInput {
   phone: string;
@@ -37,6 +45,7 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
     queryClient.invalidateQueries({ queryKey: ['records'] });
     queryClient.invalidateQueries({ queryKey: ['activities'] });
     queryClient.invalidateQueries({ queryKey: ['payments'] });
+    queryClient.invalidateQueries({ queryKey: ['clients'] });
     if (recordId) {
       queryClient.invalidateQueries({ queryKey: ['record', recordId] });
     }
@@ -90,7 +99,7 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
       await createRecord({
         activity_id: activityId,
         client_id: clientId,
-        seats: input.seats,
+        anonym_visits: input.seats,
         visits: visitIds.map((vid) => ({
           visitor_id: vid,
           price: firstTariff?.price ?? 0,
@@ -128,10 +137,22 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
     [recordId, invalidateAll],
   );
 
+  const updateRecord = useCallback(
+    async (id: string, updates: RecordPatchData): Promise<void> => {
+      await patchRecord(id, updates);
+      invalidateAll();
+    },
+    [invalidateAll],
+  );
+
   const deleteRecord = useCallback(async () => {
     await apiDeleteRecord(recordId);
+    // Optimistic update: remove record from cache immediately for snappy UX
+    queryClient.setQueryData<RecordResponse[]>(['records'], (old) =>
+      old ? old.filter((r) => r.id !== recordId) : old,
+    );
     invalidateAll();
-  }, [recordId, invalidateAll]);
+  }, [recordId, queryClient, invalidateAll]);
 
   const addVisitor = useCallback(
     async (data: { client_id: string; name: string; age?: number }) => {
@@ -197,6 +218,7 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
   return {
     createRecord: createRecordMutation,
     saveRecord,
+    updateRecord,
     deleteRecord,
     addVisitor,
     deleteVisitor,

@@ -2,6 +2,7 @@
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import type { RecordResponse, ClientResponse, VisitorResponse, PaymentResponse, TariffResponse } from '@memo/api-client';
+import type { RecordPatchData } from '@/hooks/useRecordMutations';
 import type { RecordStatus } from '@memo/domain';
 import { useRouter } from 'next/navigation';
 import { StatusPicker } from './StatusPicker';
@@ -14,7 +15,7 @@ interface ClientTabProps {
   visits: RecordResponse['visits'];
   payments: PaymentResponse[];
   serviceTariffs: TariffResponse[];
-  onUpdateRecord: (id: string, data: RecordResponse) => void;
+  onUpdateRecord: (id: string, data: RecordPatchData) => Promise<void>;
   onDeleteRecord: (id: string) => void;
   onAddPayment: (recordId: string, amount: number, method: string) => void;
   onDeletePayment: (paymentId: string) => Promise<void>;
@@ -26,8 +27,8 @@ interface ClientTabProps {
 const STATUS_CONFIG: Record<RecordStatus, { label: string; color: string }> = {
   pending: { label: 'Ожидание', color: '#F59E0B' },
   confirmed: { label: 'Посетил', color: '#10B981' },
-  cancelled: { label: 'Отменил', color: '#EF4444' },
-  no_show: { label: 'Неявка', color: '#6B7280' },
+  cancelled: { label: 'Отменил', color: '#F97316' },
+  no_show: { label: 'Неявка', color: '#4B5563' },
 };
 
 function renderStatusIcon(status: RecordStatus): React.ReactNode {
@@ -70,9 +71,10 @@ export function ClientTab({
   record,
   client,
   visitors,
+  visits,
   payments,
   serviceTariffs,
-  onUpdateRecord: _onUpdateRecord,
+  onUpdateRecord,
   onDeleteRecord,
   onAddPayment,
   onDeletePayment,
@@ -87,6 +89,12 @@ export function ClientTab({
   const isDeletingRef = useRef(false);
   const router = useRouter();
 
+  // --- Visitor editor state ---
+  // VisitResponse doesn't have visitor_name/age/tariff_id — use empty placeholders
+  const [visitNames, setVisitNames] = useState<string[]>(visits.map(() => ''));
+  const [visitAges, setVisitAges] = useState<string[]>(visits.map(() => ''));
+  const [visitTariffIds, setVisitTariffIds] = useState<string[]>(visits.map(() => ''));
+
   const handleOpenProfile = useCallback(() => {
     if (!client) return;
     onClose?.();
@@ -99,11 +107,105 @@ export function ClientTab({
   const [newVisitorAge, setNewVisitorAge] = useState('');
   const [isAddingVisitor, setIsAddingVisitor] = useState(false);
 
-  // Persist status change to backend
+  // --- Reset name on record/client change (Bug #81) ---
+  useEffect(() => {
+    setName(client?.name || '');
+  }, [record.id, client?.id]);
+
+  // --- Reset status on record change (Bug #84) ---
+  useEffect(() => {
+    setStatus(record.status as RecordStatus);
+  }, [record.id]);
+
+  // --- Persist status change to backend (Bug #84) ---
   useEffect(() => {
     if (status === record.status) return;
-    _onUpdateRecord(record.id, { ...record, status });
+    onUpdateRecord(record.id, { status }).catch(() => {
+      setStatus(record.status as RecordStatus);
+      showToast('Ошибка изменения статуса');
+    });
   }, [status]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // --- Reset visitor editor state on record.visits change ---
+  useEffect(() => {
+    setVisitNames(visits.map(() => ''));
+    setVisitAges(visits.map(() => ''));
+    setVisitTariffIds(visits.map(() => ''));
+  }, [record.id, visits.length]);
+
+  // --- Visitor editor helpers ---
+  const updateVisitName = useCallback((id: string, value: string) => {
+    const idx = visits.findIndex((v) => v.id === id);
+    if (idx === -1) return;
+    setVisitNames((prev) => {
+      const next = [...prev];
+      next[idx] = value;
+      return next;
+    });
+  }, [visits]);
+
+  const updateVisitAge = useCallback((id: string, value: string) => {
+    const idx = visits.findIndex((v) => v.id === id);
+    if (idx === -1) return;
+    setVisitAges((prev) => {
+      const next = [...prev];
+      next[idx] = value;
+      return next;
+    });
+  }, [visits]);
+
+  const updateVisitTariff = useCallback((id: string, tariffId: string) => {
+    const idx = visits.findIndex((v) => v.id === id);
+    if (idx === -1) return;
+    setVisitTariffIds((prev) => {
+      const next = [...prev];
+      next[idx] = tariffId;
+      return next;
+    });
+  }, [visits]);
+
+  // Build visits payload from local state for saving
+  const buildVisitsPayload = useCallback((targetVisits: RecordResponse['visits'], names: string[], ages: string[], tariffIds: string[]) => {
+    return targetVisits.map((v, idx) => {
+      const tariff = serviceTariffs.find((t) => t.id === tariffIds[idx]);
+      return {
+        visitor_id: v.visitor_id || undefined,
+        name: names[idx] || undefined,
+        age: ages[idx] ? Number(ages[idx]) : undefined,
+        price: tariff?.price ?? v.price,
+        status: v.status || undefined,
+      };
+    });
+  }, [serviceTariffs]);
+
+  // Save all visits to backend
+  const saveVisits = useCallback(async () => {
+    const newVisits = buildVisitsPayload(visits, visitNames, visitAges, visitTariffIds);
+    try {
+      await onUpdateRecord(record.id, { visits: newVisits });
+    } catch {
+      showToast('Ошибка сохранения посетителей');
+    }
+  }, [visits, visitNames, visitAges, visitTariffIds, buildVisitsPayload, record.id, onUpdateRecord, showToast]);
+
+  // Remove a visit by id
+  const removeVisit = useCallback(async (visitId: string) => {
+    const remaining = visits.filter((v) => v.id !== visitId);
+    const remainingIdx = remaining.map((v) => {
+      // Re-map indices from the original arrays
+      const origIdx = visits.findIndex((ov) => ov.id === v.id);
+      return origIdx;
+    });
+    const newNames = remainingIdx.map((i) => visitNames[i] ?? '');
+    const newAges = remainingIdx.map((i) => visitAges[i] ?? '');
+    const newTariffIds = remainingIdx.map((i) => visitTariffIds[i] ?? '');
+    const newVisits = buildVisitsPayload(remaining, newNames, newAges, newTariffIds);
+    try {
+      await onUpdateRecord(record.id, { visits: newVisits });
+    } catch {
+      showToast('Ошибка удаления посетителя');
+    }
+  }, [visits, visitNames, visitAges, visitTariffIds, buildVisitsPayload, record.id, onUpdateRecord, showToast]);
 
   // Calculate totals from visits
   const totalCost = record.visits.reduce((sum, v) => sum + v.price, 0);
@@ -227,7 +329,7 @@ export function ClientTab({
         </div>
       )}
 
-      {/* Visitors */}
+      {/* Visitors — editable rows */}
       <div>
         <div className="flex items-center justify-between mb-2">
           <h4 className="text-xs font-medium text-ink-mid">Посетители</h4>
@@ -235,20 +337,67 @@ export function ClientTab({
             {formatSeats(record.seats)}
           </span>
         </div>
-        {visitors.length === 0 && (
+
+        {visits.length === 0 && (
           <p className="text-xs text-ink-light">Нет посетителей</p>
         )}
-        {visitors.map((visitor) => (
+
+        {visits.map((visit, idx) => (
           <div
-            key={visitor.id}
+            key={visit.id}
             className="flex items-center gap-2 py-1.5 border-b text-sm"
             style={{ borderColor: 'var(--line)' }}
             data-testid="visitor-row"
+            data-visit-id={visit.id}
           >
-            <span className="flex-1 truncate text-ink">{visitor.name}</span>
-            {visitor.age && <span className="text-xs text-ink-light">{visitor.age} лет</span>}
+            {/* Name input */}
+            <input
+              type="text"
+              placeholder="Имя"
+              value={visitNames[idx] ?? ''}
+              onChange={(e) => updateVisitName(visit.id, e.target.value)}
+              onBlur={() => saveVisits()}
+              className="flex-1 rounded-lg border px-2 py-1 text-sm min-w-0"
+              style={inputStyle}
+              data-testid="visitor-name-input"
+            />
+            {/* Age input */}
+            <input
+              type="number"
+              placeholder="Возраст"
+              value={visitAges[idx] ?? ''}
+              onChange={(e) => updateVisitAge(visit.id, e.target.value)}
+              onBlur={() => saveVisits()}
+              className="w-16 rounded-lg border px-2 py-1 text-sm"
+              style={inputStyle}
+              data-testid="visitor-age-input"
+            />
+            {/* Tariff dropdown */}
+            <select
+              value={visitTariffIds[idx] ?? ''}
+              onChange={(e) => updateVisitTariff(visit.id, e.target.value)}
+              className="w-32 rounded-lg border px-2 py-1 text-sm"
+              style={inputStyle}
+              data-testid="visitor-tariff-select"
+            >
+              <option value="">— тариф —</option>
+              {serviceTariffs.map((t) => (
+                <option key={t.id} value={t.id}>{t.title} ({t.price} ₽)</option>
+              ))}
+            </select>
+            {/* Remove button */}
+            <button
+              onClick={() => removeVisit(visit.id)}
+              className="text-red-400 hover:text-red-500 text-sm shrink-0"
+              aria-label="Удалить посетителя"
+              data-testid="btn-remove-visit"
+            >
+              ×
+            </button>
           </div>
         ))}
+
+        {/* Add visitor button / inline form */}
         {!showAddVisitor ? (
           <button
             onClick={() => setShowAddVisitor(true)}

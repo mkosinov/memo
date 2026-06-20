@@ -129,8 +129,8 @@ body.delete-mode [data-testid^="activity-"]:hover {
  * z-[50]  — Overlap popover (x-cards badge)
  * z-[100] — StatusPicker dropdown (inside modal)
  * z-[200] — ActivityDetailsModal overlay (backdrop + content)
- * z-[300] — Toast notifications
+ * z-[250] — Toast notifications (above modal so toasts are never hidden)
  *
- * Rule: modal (z-[200]) must exceed any in-grid element so the
- * backdrop covers schedule cards and overlap badges cleanly.
+ * Rule: toasts (z-[250]) must exceed modal (z-[200]) so the user
+ * always sees confirmation/error messages.
  */

@@ -151,7 +151,7 @@ export function SettingsTab({ activity, onUpdate }: SettingsTabProps) {
             data-testid="input-duration"
           />
         </div>
-        <div className="flex flex-col items-start gap-1.5 pb-0.5">
+        <div className="ml-auto flex flex-col items-start gap-1.5 pb-0.5">
           <span className="text-xs text-ink-mid">Приватное</span>
           <button
             type="button"

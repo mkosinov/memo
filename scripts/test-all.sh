@@ -40,8 +40,10 @@ SPEC_FILE="$ROOT/docs/specs/2026-06-19-current-user-scenarios.md"
 if [ ! -f "$SPEC_FILE" ]; then
   echo "  ⚠️  $SPEC_FILE not found; skipping visual compliance"
 elif [ -x "$ROOT/superagents/scripts/visual-compliance-check.sh" ]; then
+  # Allow overriding the dev server URL (useful for worktrees using non-default ports).
+  VISUAL_COMPLIANCE_URL="${VISUAL_COMPLIANCE_URL:-http://localhost:3001}"
   "$ROOT/superagents/scripts/visual-compliance-check.sh" \
-    http://localhost:3001 \
+    "$VISUAL_COMPLIANCE_URL" \
     "$SPEC_FILE" \
     /tmp/visual-compliance \
     mobile || {

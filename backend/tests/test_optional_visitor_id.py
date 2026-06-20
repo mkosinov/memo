@@ -113,10 +113,9 @@ class TestOptionalVisitorId:
         update_payload = {
             "activity_id": activity["id"],
             "client_id": client["id"],
-            "status": "confirmed",
             "visits": [
-                {"price": 2000, "status": "waiting"},
-                {"price": 2000, "status": "waiting"},
+                {"price": 2000},
+                {"price": 2000},
             ],
         }
 

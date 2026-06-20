@@ -160,7 +160,6 @@ class TestRecordUpdate:
         update_payload = {
             "activity_id": activity_id,
             "client_id": client_id,
-            "status": "confirmed",
             "comment": "Updated via test",
             "visits": [
                 {"visitor_id": new_visitor["id"], "price": 4000, "status": "visited"},
@@ -169,7 +168,7 @@ class TestRecordUpdate:
         resp = api_client.put(f"/api/v1/records/{record['id']}", json=update_payload)
         assert resp.status_code == 200
         body = resp.json()
-        assert body["status"] == "confirmed"
+        assert body["status"] == "visited"  # derived: 1 visit with visited
         assert body["comment"] == "Updated via test"
         assert body["seats"] == 1
         assert len(body["visits"]) == 1
@@ -180,7 +179,6 @@ class TestRecordUpdate:
         update_payload = {
             "activity_id": record["activity_id"],
             "client_id": record["client_id"],
-            "status": "cancelled",
             "visits": [],
         }
         resp = api_client.put(f"/api/v1/records/{record['id']}", json=update_payload)
@@ -640,7 +638,6 @@ class TestRecordNotFound:
         activity = create_activity()
         resp = api_client.put("/api/v1/records/nonexistent", json={
             "activity_id": activity["id"],
-            "status": "confirmed",
             "visits": [],
         })
         assert resp.status_code == 404

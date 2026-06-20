@@ -24,8 +24,8 @@ class ActivityService(GenericService[ActivityCreate, ActivityUpdate, ActivityRes
     NOT_NULL_FIELDS = {"master_id", "service_id", "location_id", "start", "duration", "capacity"}
 
     # Statuses considered "active" for occupied-seat aggregation.
-    # Cancelled and no_show are excluded from the sum.
-    ACTIVE_RECORD_STATUSES = ("pending", "confirmed")
+    # Cancelled and missed are excluded from the sum.
+    ACTIVE_RECORD_STATUSES = ("waiting", "visited")
 
     def __init__(
         self, repository: GenericRepository, model: type[Activity]
@@ -65,10 +65,10 @@ class ActivityService(GenericService[ActivityCreate, ActivityUpdate, ActivityRes
     async def sum_active_seats(
         self, db_session: AsyncSession, activity_id: str
     ) -> int:
-        """Return SUM(seats) for active records (excludes cancelled/no_show).
+        """Return SUM(seats) for active records (excludes cancelled/missed).
 
-        Active = status IN ('pending', 'confirmed'). This matches
-        the spec's display labels 'Ожидание' / 'Посетил'.
+        Active = status IN ('waiting', 'visited'). This matches
+        the VisitStatus enum values.
         """
         result = await db_session.execute(
             select(func.coalesce(func.sum(Record.seats), 0)).where(

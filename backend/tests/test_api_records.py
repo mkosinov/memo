@@ -29,8 +29,8 @@ class TestRecordsCrud:
             "client_id": client["id"],
             "comment": "Test record",
             "visits": [
-                {"visitor_id": v1["id"], "price": 1500, "status": "waiting"},
-                {"visitor_id": v2["id"], "price": 1500, "status": "waiting"},
+                {"visitor_id": v1["id"], "price": 1500},
+                {"visitor_id": v2["id"], "price": 1500},
             ],
         }
 
@@ -40,7 +40,7 @@ class TestRecordsCrud:
         body = response.json()
         assert body["activity_id"] == activity["id"]
         assert body["client_id"] == client["id"]
-        assert body["status"] == "pending"
+        assert body["status"] == "waiting"  # derived from visits (all waiting)
         assert body["seats"] == 2  # auto-calculated from len(visits)
         assert body["comment"] == "Test record"
         assert len(body["visits"]) == 2
@@ -68,8 +68,8 @@ class TestRecordsCrud:
             "client_id": client["id"],
             "comment": "Test record",
             "visits": [
-                {"visitor_id": v1["id"], "price": 1500, "status": "waiting"},
-                {"visitor_id": v2["id"], "price": 1500, "status": "waiting"},
+                {"visitor_id": v1["id"], "price": 1500},
+                {"visitor_id": v2["id"], "price": 1500},
             ],
         }
         create_resp = api_client.post("/api/v1/records", json=payload)
@@ -102,8 +102,8 @@ class TestRecordsCrud:
             "client_id": client["id"],
             "comment": "Test record",
             "visits": [
-                {"visitor_id": v1["id"], "price": 1500, "status": "waiting"},
-                {"visitor_id": v2["id"], "price": 1500, "status": "waiting"},
+                {"visitor_id": v1["id"], "price": 1500},
+                {"visitor_id": v2["id"], "price": 1500},
             ],
         }
         create_resp = api_client.post("/api/v1/records", json=payload)
@@ -132,8 +132,8 @@ class TestRecordsCrud:
             "client_id": client["id"],
             "comment": "Test record",
             "visits": [
-                {"visitor_id": v1["id"], "price": 1500, "status": "waiting"},
-                {"visitor_id": v2["id"], "price": 1500, "status": "waiting"},
+                {"visitor_id": v1["id"], "price": 1500},
+                {"visitor_id": v2["id"], "price": 1500},
             ],
         }
         create_resp = api_client.post("/api/v1/records", json=payload)
@@ -143,7 +143,6 @@ class TestRecordsCrud:
         update_payload = {
             "activity_id": activity["id"],
             "client_id": client["id"],
-            "status": "confirmed",
             "comment": "Updated comment",
             "visits": [
                 {"visitor_id": v1["id"], "price": 2000, "status": "visited"},
@@ -153,7 +152,7 @@ class TestRecordsCrud:
         response = api_client.put(f"/api/v1/records/{record_id}", json=update_payload)
         assert response.status_code == 200
         body = response.json()
-        assert body["status"] == "confirmed"
+        assert body["status"] == "visited"  # derived: 1 visit with visited
         assert body["comment"] == "Updated comment"
         assert body["seats"] == 1  # recalculated from len(visits)
         assert len(body["visits"]) == 1
@@ -177,8 +176,8 @@ class TestRecordsCrud:
             "client_id": client["id"],
             "comment": "Test record",
             "visits": [
-                {"visitor_id": v1["id"], "price": 1500, "status": "waiting"},
-                {"visitor_id": v2["id"], "price": 1500, "status": "waiting"},
+                {"visitor_id": v1["id"], "price": 1500},
+                {"visitor_id": v2["id"], "price": 1500},
             ],
         }
         create_resp = api_client.post("/api/v1/records", json=payload)
@@ -211,7 +210,6 @@ class TestRecordsCrud:
         update_payload = {
             "activity_id": activity["id"],
             "client_id": client["id"],
-            "status": "confirmed",
             "visits": [],
         }
         response = api_client.put(
@@ -245,8 +243,8 @@ class TestVisitsCrud:
             "client_id": client["id"],
             "comment": "Test record",
             "visits": [
-                {"visitor_id": v1["id"], "price": 1500, "status": "waiting"},
-                {"visitor_id": v2["id"], "price": 1500, "status": "waiting"},
+                {"visitor_id": v1["id"], "price": 1500},
+                {"visitor_id": v2["id"], "price": 1500},
             ],
         })
         visits = record_resp.json()["visits"]
@@ -277,8 +275,8 @@ class TestVisitsCrud:
             "client_id": client["id"],
             "comment": "Test record",
             "visits": [
-                {"visitor_id": v1["id"], "price": 1500, "status": "waiting"},
-                {"visitor_id": v2["id"], "price": 1500, "status": "waiting"},
+                {"visitor_id": v1["id"], "price": 1500},
+                {"visitor_id": v2["id"], "price": 1500},
             ],
         })
         visit_id = record_resp.json()["visits"][0]["id"]
@@ -310,17 +308,16 @@ class TestRecordPatch:
     """PATCH /api/records/{id} partial update tests."""
 
     def test_patch_status_only(self, api_client, create_record) -> None:
-        """PATCH with only status field updates status, leaves other fields unchanged."""
+        """PATCH with only comment field updates comment, leaves other fields unchanged."""
         record = create_record()
 
         response = api_client.patch(
             f"/api/v1/records/{record['id']}",
-            json={"status": "confirmed"},
+            json={"comment": "Patched comment"},
         )
         assert response.status_code == 200
         body = response.json()
-        assert body["status"] == "confirmed"
-        assert body["comment"] == "Test record"  # unchanged
+        assert body["comment"] == "Patched comment"
         assert body["seats"] == record["seats"]  # unchanged
 
     def test_patch_comment_only(self, api_client, create_record) -> None:
@@ -334,7 +331,8 @@ class TestRecordPatch:
         assert response.status_code == 200
         body = response.json()
         assert body["comment"] == "Updated via patch"
-        assert body["status"] == record["status"]  # unchanged
+        # Status is derived from visits — unchanged since visits unchanged
+        assert body["seats"] == record["seats"]  # unchanged
 
     def test_patch_custom_price(self, api_client, create_record) -> None:
         """PATCH with custom_price sets the override price."""
@@ -371,18 +369,18 @@ class TestRecordPatch:
 
         response = api_client.patch(
             f"/api/v1/records/{record['id']}",
-            json={"status": "cancelled", "comment": "Cancelled by client"},
+            json={"custom_price": 5000, "comment": "Updated by client"},
         )
         assert response.status_code == 200
         body = response.json()
-        assert body["status"] == "cancelled"
-        assert body["comment"] == "Cancelled by client"
+        assert body["custom_price"] == 5000
+        assert body["comment"] == "Updated by client"
 
     def test_patch_nonexistent_record_returns_404(self, api_client) -> None:
         """PATCH /api/records/{fake_id} returns 404."""
         response = api_client.patch(
             "/api/v1/records/nonexistent-id",
-            json={"status": "confirmed"},
+            json={"comment": "test"},
         )
         assert response.status_code == 404
 
@@ -396,7 +394,7 @@ class TestRecordPatch:
 
         response = api_client.patch(
             f"/api/v1/records/{record['id']}",
-            json={"status": "confirmed"},
+            json={"comment": "Updated timestamp"},
         )
         assert response.status_code == 200
         body = response.json()
@@ -427,7 +425,7 @@ class TestRecordCreatePhoneFlow:
         body = response.json()
         assert body["activity_id"] == activity["id"]
         assert body["client_id"] is not None  # auto-created client
-        assert body["status"] == "pending"
+        assert body["status"] == "waiting"  # derived: 2 visits, all waiting
         assert body["seats"] == 2
         assert body["comment"] == "Phone-based booking"
         assert len(body["visits"]) == 2
@@ -513,8 +511,8 @@ class TestAnonymVisits:
             "client_id": client["id"],
             "anonym_visits": 3,
             "visits": [
-                {"name": "Alice", "price": 1500, "status": "waiting"},
-                {"name": "Bob", "price": 1500, "status": "waiting"},
+                {"name": "Alice", "price": 1500},
+                {"name": "Bob", "price": 1500},
             ],
         }
 
@@ -532,7 +530,7 @@ class TestAnonymVisits:
         payload = {
             "activity_id": activity["id"],
             "client_id": client["id"],
-            "visits": [{"name": "Solo", "price": 2000, "status": "waiting"}],
+            "visits": [{"name": "Solo", "price": 2000}],
         }
 
         response = api_client.post("/api/v1/records", json=payload)
@@ -560,11 +558,10 @@ class TestAnonymVisits:
         resp = api_client.put(f"/api/v1/records/{record['id']}", json={
             "activity_id": record["activity_id"],
             "client_id": record["client_id"],
-            "status": "pending",
             "anonym_visits": 2,
             "visits": [
-                {"name": "Guest1", "price": 1000, "status": "waiting"},
-                {"name": "Guest2", "price": 1000, "status": "waiting"},
+                {"name": "Guest1", "price": 1000},
+                {"name": "Guest2", "price": 1000},
             ],
         })
         assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"

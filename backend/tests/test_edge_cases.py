@@ -20,14 +20,13 @@ class TestEnumValidation:
     """Test enum validation for schema fields."""
 
     def test_record_status_invalid_returns_422(self, api_client):
-        """Invalid record status should return 422."""
+        """Invalid record status field should return 422 (extra field rejected)."""
         resp = api_client.post(
             "/api/v1/records",
             json={
                 "activity_id": "x",
                 "client_id": "x",
                 "status": "banana",
-                "seats": 1,
                 "visits": [],
             },
         )
@@ -98,29 +97,28 @@ class TestRecordEdgeCases:
         assert response.status_code == 422
 
     def test_update_record_status(self, api_client, create_record):
-        """Update status → 200, status changed in DB."""
+        """Status is derived from visits — update visit status to change record status."""
         record = create_record()
-        assert record["status"] == "pending"
+        assert record["status"] == "waiting"  # derived from 1 waiting visit
 
-        response = api_client.put(
-            f"/api/v1/records/{record['id']}",
-            json={
-                "activity_id": record["activity_id"],
-                "client_id": record["client_id"],
-                "status": "confirmed",
-                "comment": record.get("comment"),
-                "visits": record["visits"],
-            },
+        # Update the visit status to 'visited' — record status should derive to 'visited'
+        visit_id = record["visits"][0]["id"]
+        api_client.put(
+            f"/api/v1/visits/{visit_id}/status",
+            json={"status": "visited"},
         )
+
+        # Re-fetch the record
+        response = api_client.get(f"/api/v1/records/{record['id']}")
         assert response.status_code == 200
         body = response.json()
-        assert body["status"] == "confirmed"
+        assert body["status"] == "visited"
 
         # Verify in DB
         rows = query_db(
             f"SELECT status FROM records WHERE id='{record['id']}'"
         )
-        assert rows[0]["status"] == "confirmed"
+        assert rows[0]["status"] == "visited"
 
     def test_create_record_with_phone(self, api_client, create_activity):
         """Phone-based creation → client created automatically."""
@@ -359,7 +357,7 @@ class TestActivityEdgeCases:
         assert response.json()["occupied"] == 6  # 1+2+3, not 3
 
     def test_occupied_excludes_cancelled(self, api_client, create_record, _create_activity_payload):
-        """occupied excludes records with status=cancelled."""
+        """occupied excludes records with status=cancelled (all visits cancelled)."""
         act_payload = _create_activity_payload()
         act_resp = api_client.post("/api/v1/activities", json=act_payload)
         assert act_resp.status_code == 201
@@ -371,25 +369,23 @@ class TestActivityEdgeCases:
             {"name": "C", "price": 1000},
         ])
         r2 = create_record(activity_id=act_id, visits=[
-            {"name": "A", "price": 1000},
-            {"name": "B", "price": 1000},
-            {"name": "C", "price": 1000},
             {"name": "D", "price": 1000},
             {"name": "E", "price": 1000},
+            {"name": "F", "price": 1000},
         ])
 
-        # Cancel r2
-        patch_resp = api_client.patch(
-            f"/api/v1/records/{r2['id']}",
-            json={"status": "cancelled"},
-        )
-        assert patch_resp.status_code == 200
+        # Cancel all visits of r2 → record status becomes 'cancelled'
+        for visit in r2["visits"]:
+            api_client.put(
+                f"/api/v1/visits/{visit['id']}/status",
+                json={"status": "cancelled"},
+            )
 
         response = api_client.get(f"/api/v1/activities/{act_id}")
         assert response.json()["occupied"] == 3  # only r1 counts (3 seats)
 
-    def test_occupied_excludes_no_show(self, api_client, create_record, _create_activity_payload):
-        """occupied excludes records with status=no_show."""
+    def test_occupied_excludes_missed(self, api_client, create_record, _create_activity_payload):
+        """occupied excludes records with status=missed (all visits missed)."""
         act_payload = _create_activity_payload()
         act_resp = api_client.post("/api/v1/activities", json=act_payload)
         assert act_resp.status_code == 201
@@ -401,14 +397,17 @@ class TestActivityEdgeCases:
             {"name": "C", "price": 1000},
         ])
         r2 = create_record(activity_id=act_id, visits=[
-            {"name": "A", "price": 1000},
-            {"name": "B", "price": 1000},
-            {"name": "C", "price": 1000},
             {"name": "D", "price": 1000},
             {"name": "E", "price": 1000},
+            {"name": "F", "price": 1000},
         ])
 
-        api_client.patch(f"/api/v1/records/{r2['id']}", json={"status": "no_show"})
+        # Mark all visits of r2 as missed → record status becomes 'missed'
+        for visit in r2["visits"]:
+            api_client.put(
+                f"/api/v1/visits/{visit['id']}/status",
+                json={"status": "missed"},
+            )
 
         response = api_client.get(f"/api/v1/activities/{act_id}")
         assert response.json()["occupied"] == 3  # only r1 counts (3 seats)

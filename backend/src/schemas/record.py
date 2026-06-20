@@ -44,7 +44,7 @@ class RecordBase(BaseModel):
 
     activity_id: str
     client_id: str | None = None
-    status: RecordStatus = RecordStatus.PENDING
+    status: str
     seats: int
     anonym_visits: int = 0
     comment: str | None = None
@@ -61,10 +61,11 @@ class RecordCreate(BaseModel):
       Links to an existing Client directly.
     """
 
+    model_config = ConfigDict(extra="forbid")
+
     activity_id: str
     phone: str | None = None
     client_id: str | None = None
-    status: RecordStatus = RecordStatus.PENDING
     anonym_visits: int = 0
     comment: str | None = None
     custom_price: int | None = None
@@ -74,9 +75,10 @@ class RecordCreate(BaseModel):
 class RecordUpdate(BaseModel):
     """Request schema for updating a record (full replacement via PUT)."""
 
+    model_config = ConfigDict(extra="forbid")
+
     activity_id: str
     client_id: str | None = None
-    status: RecordStatus
     anonym_visits: int = 0
     comment: str | None = None
     custom_price: int | None = None
@@ -86,7 +88,8 @@ class RecordUpdate(BaseModel):
 class RecordPatch(BaseModel):
     """Partial update for record. All fields optional."""
 
-    status: RecordStatus | None = None
+    model_config = ConfigDict(extra="forbid")
+
     anonym_visits: int | None = None
     comment: str | None = None
     custom_price: int | None = None

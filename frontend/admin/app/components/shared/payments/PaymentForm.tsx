@@ -4,7 +4,7 @@ import { useState } from 'react';
 
 export interface PaymentFormValues {
   amount: number;
-  method: 'cash' | 'card' | 'transfer';
+  method: 'cash' | 'card' | 'transfer' | 'online';
 }
 
 export interface PaymentFormProps {

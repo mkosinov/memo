@@ -23,7 +23,7 @@ export function RecordHeader({ data, onAnonymVisitsChange, isReadOnly }: RecordH
     return () => clearTimeout(t);
   }, [anonym, record.anonym_visits, onAnonymVisitsChange]);
 
-  const totalSeats = visits.length + (record.anonym_visits ?? 0);
+  const totalSeats = visits.length + Number(anonym);
 
   return (
     <div className="space-y-2 border-b border-gray-200 pb-3 dark:border-gray-700" data-testid="record-header">
@@ -51,6 +51,7 @@ export function RecordHeader({ data, onAnonymVisitsChange, isReadOnly }: RecordH
               value={anonym}
               onChange={(e) => setAnonym(Math.max(0, Number(e.target.value)))}
               data-testid="anonym-visits-input"
+              aria-label="Количество анонимных посетителей"
               className="w-12 rounded border px-1 py-0.5 text-center"
             />
             <span>анонимных</span>

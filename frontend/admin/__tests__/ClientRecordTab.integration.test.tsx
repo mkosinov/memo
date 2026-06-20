@@ -211,7 +211,7 @@ describe('ClientRecordTab — integration with shared atoms', () => {
   // ─── Status change wiring ─────────────────────────────────────────
 
   it('status change on RecordVisitRow calls updateVisitStatus', async () => {
-    vi.mocked(updateVisitStatus).mockResolvedValue(undefined);
+    vi.mocked(updateVisitStatus).mockResolvedValue({ id: 'v1', status: 'visited', custom_price: null, created_at: '', updated_at: '', is_active: true, record_id: 'r1', price: 0 } as any);
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
 
     const statusContainer = screen.getByTestId('visit-v1-status');

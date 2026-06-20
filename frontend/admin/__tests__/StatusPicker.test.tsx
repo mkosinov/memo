@@ -3,10 +3,10 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import { StatusPicker } from '@/app/components/modal/ActivityDetailsModal/StatusPicker';
 
 const STATUS_CONFIG = {
-  pending: { label: 'Ожидание', color: '#F59E0B' },
-  confirmed: { label: 'Посетил', color: '#10B981' },
-  cancelled: { label: 'Отменил', color: '#EF4444' },
-  no_show: { label: 'Неявка', color: '#6B7280' },
+  waiting: { label: 'Ожидание', color: '#F59E0B' },
+  visited: { label: 'Посетил', color: '#10B981' },
+  cancelled: { label: 'Отменён', color: '#EF4444' },
+  missed: { label: 'Неявка', color: '#6B7280' },
 } as const;
 
 const iconFor = (status: keyof typeof STATUS_CONFIG) => (
@@ -15,27 +15,27 @@ const iconFor = (status: keyof typeof STATUS_CONFIG) => (
 
 describe('StatusPicker', () => {
   it('renders the current status as an icon', () => {
-    render(<StatusPicker value="pending" onChange={() => {}} statusConfig={STATUS_CONFIG} iconFor={iconFor} />);
+    render(<StatusPicker value="waiting" onChange={() => {}} statusConfig={STATUS_CONFIG} iconFor={iconFor} />);
     expect(screen.getByTestId('status-picker-trigger')).toBeInTheDocument();
     expect(screen.getByLabelText('Статус: Ожидание')).toBeInTheDocument();
   });
 
   it('opens popover on click and shows all 4 options', () => {
-    render(<StatusPicker value="pending" onChange={() => {}} statusConfig={STATUS_CONFIG} iconFor={iconFor} />);
+    render(<StatusPicker value="waiting" onChange={() => {}} statusConfig={STATUS_CONFIG} iconFor={iconFor} />);
     fireEvent.click(screen.getByTestId('status-picker-trigger'));
     expect(screen.getByTestId('status-picker-popover')).toBeInTheDocument();
-    expect(screen.getByTestId('status-picker-option-pending')).toBeInTheDocument();
-    expect(screen.getByTestId('status-picker-option-confirmed')).toBeInTheDocument();
+    expect(screen.getByTestId('status-picker-option-waiting')).toBeInTheDocument();
+    expect(screen.getByTestId('status-picker-option-visited')).toBeInTheDocument();
     expect(screen.getByTestId('status-picker-option-cancelled')).toBeInTheDocument();
-    expect(screen.getByTestId('status-picker-option-no_show')).toBeInTheDocument();
+    expect(screen.getByTestId('status-picker-option-missed')).toBeInTheDocument();
   });
 
   it('calls onChange and closes popover when option is clicked', () => {
     const onChange = vi.fn();
-    render(<StatusPicker value="pending" onChange={onChange} statusConfig={STATUS_CONFIG} iconFor={iconFor} />);
+    render(<StatusPicker value="waiting" onChange={onChange} statusConfig={STATUS_CONFIG} iconFor={iconFor} />);
     fireEvent.click(screen.getByTestId('status-picker-trigger'));
-    fireEvent.click(screen.getByTestId('status-picker-option-confirmed'));
-    expect(onChange).toHaveBeenCalledWith('confirmed');
+    fireEvent.click(screen.getByTestId('status-picker-option-visited'));
+    expect(onChange).toHaveBeenCalledWith('visited');
     expect(screen.queryByTestId('status-picker-popover')).not.toBeInTheDocument();
   });
 
@@ -43,7 +43,7 @@ describe('StatusPicker', () => {
     render(
       <div>
         <div data-testid="outside">outside</div>
-        <StatusPicker value="pending" onChange={() => {}} statusConfig={STATUS_CONFIG} iconFor={iconFor} />
+        <StatusPicker value="waiting" onChange={() => {}} statusConfig={STATUS_CONFIG} iconFor={iconFor} />
       </div>
     );
     fireEvent.click(screen.getByTestId('status-picker-trigger'));

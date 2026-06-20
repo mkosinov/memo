@@ -1,19 +1,19 @@
 'use client';
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import type { RecordStatus } from '@memo/domain';
+import type { VisitStatus } from '@memo/domain';
 
 interface StatusPickerProps {
-  value: RecordStatus;
-  onChange: (status: RecordStatus) => void;
+  value: VisitStatus;
+  onChange: (status: VisitStatus) => void;
   /** Map from status to display label and color */
-  statusConfig: Record<RecordStatus, { label: string; color: string }>;
+  statusConfig: Record<VisitStatus, { label: string; color: string }>;
   /** SVG path for each status (reused from ClientTab) */
-  iconFor: (status: RecordStatus) => React.ReactNode;
+  iconFor: (status: VisitStatus) => React.ReactNode;
   testIdPrefix?: string;
 }
 
-const STATUS_ORDER: RecordStatus[] = ['pending', 'confirmed', 'cancelled', 'no_show'];
+const STATUS_ORDER: VisitStatus[] = ['waiting', 'visited', 'missed', 'cancelled'];
 
 export function StatusPicker({ value, onChange, statusConfig, iconFor, testIdPrefix = 'status-picker' }: StatusPickerProps) {
   const [open, setOpen] = useState(false);
@@ -30,7 +30,7 @@ export function StatusPicker({ value, onChange, statusConfig, iconFor, testIdPre
     return () => document.removeEventListener('mousedown', handler);
   }, [open]);
 
-  const handleSelect = useCallback((status: RecordStatus) => {
+  const handleSelect = useCallback((status: VisitStatus) => {
     onChange(status);
     setOpen(false);
   }, [onChange]);

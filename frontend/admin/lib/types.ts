@@ -9,7 +9,7 @@ export type {
   Client,
   Visitor,
   Record,
-  RecordStatus,
+  VisitStatus,
   Visit,
   Payment,
   PaymentMethod,

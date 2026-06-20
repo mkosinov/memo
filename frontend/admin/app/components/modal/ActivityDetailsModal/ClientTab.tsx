@@ -3,7 +3,7 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import type { RecordResponse, ClientResponse, VisitorResponse, PaymentResponse, TariffResponse } from '@memo/api-client';
 import type { RecordPatchData } from '@/hooks/useRecordMutations';
-import type { RecordStatus } from '@memo/domain';
+import type { VisitStatus } from '@memo/domain';
 import { useRouter } from 'next/navigation';
 import { StatusPicker } from './StatusPicker';
 import { formatSeats } from '@/app/lib/pluralize';
@@ -25,26 +25,26 @@ interface ClientTabProps {
   onClose?: () => void;
 }
 
-const STATUS_CONFIG: Record<RecordStatus, { label: string; color: string }> = {
-  pending: { label: 'Ожидание', color: '#F59E0B' },
-  confirmed: { label: 'Посетил', color: '#10B981' },
-  cancelled: { label: 'Отменил', color: '#F97316' },
-  no_show: { label: 'Неявка', color: '#4B5563' },
+const STATUS_CONFIG: Record<VisitStatus, { label: string; color: string }> = {
+  waiting: { label: 'Ожидание', color: '#F59E0B' },
+  visited: { label: 'Посетил', color: '#10B981' },
+  cancelled: { label: 'Отменён', color: '#F97316' },
+  missed: { label: 'Неявка', color: '#4B5563' },
 };
 
-function renderStatusIcon(status: RecordStatus): React.ReactNode {
+function renderStatusIcon(status: VisitStatus): React.ReactNode {
   const iconClass = 'w-3.5 h-3.5';
   switch (status) {
-    case 'pending':
+    case 'waiting':
       return (
-        <svg className={iconClass} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" data-testid="icon-pending">
+        <svg className={iconClass} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" data-testid="icon-waiting">
           <circle cx="12" cy="12" r="10" />
           <polyline points="12 6 12 12 16 14" />
         </svg>
       );
-    case 'confirmed':
+    case 'visited':
       return (
-        <svg className={iconClass} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" data-testid="icon-confirmed">
+        <svg className={iconClass} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" data-testid="icon-visited">
           <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
           <polyline points="22 4 12 14.01 9 11.01" />
         </svg>
@@ -57,9 +57,9 @@ function renderStatusIcon(status: RecordStatus): React.ReactNode {
           <line x1="9" y1="9" x2="15" y2="15" />
         </svg>
       );
-    case 'no_show':
+    case 'missed':
       return (
-        <svg className={iconClass} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" data-testid="icon-no_show">
+        <svg className={iconClass} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" data-testid="icon-missed">
           <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
           <line x1="12" y1="9" x2="12" y2="13" />
           <line x1="12" y1="17" x2="12.01" y2="17" />
@@ -84,7 +84,7 @@ export function ClientTab({
   onClose,
 }: ClientTabProps) {
   const [name, setName] = useState(client?.name || '');
-  const [status, setStatus] = useState<RecordStatus>(record.status as RecordStatus);
+  const [status, setStatus] = useState<VisitStatus>(record.status as VisitStatus);
   const [paymentAmount, setPaymentAmount] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('card');
   const isDeletingRef = useRef(false);
@@ -123,14 +123,14 @@ export function ClientTab({
 
   // --- Reset status on record change (Bug #84) ---
   useEffect(() => {
-    setStatus(record.status as RecordStatus);
+      setStatus(record.status as VisitStatus);
   }, [record.id]);
 
   // --- Persist status change to backend (Bug #84) ---
   useEffect(() => {
     if (status === record.status) return;
     onUpdateRecord(record.id, { status }).catch(() => {
-      setStatus(record.status as RecordStatus);
+    setStatus(record.status as VisitStatus);
       showToast('Ошибка изменения статуса');
     });
   }, [status]); // eslint-disable-line react-hooks/exhaustive-deps

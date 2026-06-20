@@ -103,7 +103,16 @@ export type Visitor = z.infer<typeof VisitorSchema>;
 
 // ─── Record ───────────────────────────────────────────────────────────────
 
+/**
+ * @deprecated Use `VisitStatus` from './visit_status' instead.
+ * This enum uses the old Wave 5 values (pending/confirmed/cancelled/no_show).
+ * Kept for backward compatibility during migration.
+ */
 export const RecordStatusSchema = z.enum(['pending', 'confirmed', 'cancelled', 'no_show']);
+
+/**
+ * @deprecated Use `VisitStatus` from './visit_status' instead.
+ */
 export type RecordStatus = z.infer<typeof RecordStatusSchema>;
 
 export const RecordSchema = z.object({
@@ -241,6 +250,11 @@ export type { ScheduleDTO, ScheduleAdminDTO } from './schedule';
 
 export type { ScheduleIndex } from './schedule-index';
 export { buildSchedule, resolveById } from './schedule-index';
+
+// ─── Visit Status (single source of truth) ─────────────────────────────────
+
+export type { VisitStatus, VisitItem } from './visit_status';
+export { computeRecordStatus } from './visit_status';
 
 // ─── Alias for backward compatibility ─────────────────────────────────────
 

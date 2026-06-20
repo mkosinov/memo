@@ -6,6 +6,9 @@ import {
   getRecord, getClientVisitors, getActivity, getServices,
   getMasters, getLocations, getPayments,
 } from '@memo/api-client';
+import type { VisitStatus } from '@memo/domain';
+import { computeRecordStatus } from '@memo/domain';
+import type { RecordWithDerived } from '@/app/components/shared/records/types';
 
 export function useRecordData(recordId: string, clientId: string) {
   const { data: record, isLoading } = useQuery({
@@ -60,8 +63,30 @@ export function useRecordData(recordId: string, clientId: string) {
     return service?.tariffs ?? [];
   }, [services, activity]);
 
+  // Derive record status from visits
+  const status: VisitStatus = useMemo(() => {
+    if (!record?.visits) return 'waiting';
+    return computeRecordStatus(
+      record.visits.map(v => ({ id: v.id, status: (v.status || 'waiting') as VisitStatus })),
+    );
+  }, [record]);
+
+  // Build RecordWithDerived for shared atom consumption
+  const recordData: RecordWithDerived | null = useMemo(() => {
+    if (!record) return null;
+    return {
+      record,
+      status,
+      visits: record.visits ?? [],
+      payments: Array.isArray(payments) ? payments : [],
+      client: null, // Parents provide client info via props when available
+      tariffs,
+    };
+  }, [record, status, payments, tariffs]);
+
   return {
+    recordData,
     record, visitors, activity, services, masters, locations,
-    payments, visitorsMap, tariffs, isLoading,
+    payments, visitorsMap, tariffs, isLoading, status,
   };
 }

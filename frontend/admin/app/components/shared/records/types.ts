@@ -14,6 +14,9 @@ import type {
   TariffResponse,
 } from '@memo/api-client';
 
+/** Minimal client info needed by record-level atoms (name + phone). */
+export type ClientInfo = Pick<ClientResponse, 'id' | 'name' | 'phone'>;
+
 /** Record without the API-provided status (which is stale/Wave-5). */
 export type RecordWithoutStatus = Omit<RecordResponse, 'status'>;
 
@@ -23,6 +26,6 @@ export interface RecordWithDerived {
   status: VisitStatus;
   visits: VisitResponse[];
   payments: PaymentResponse[];
-  client: ClientResponse | null;
+  client: ClientInfo | null;
   tariffs: TariffResponse[];
 }

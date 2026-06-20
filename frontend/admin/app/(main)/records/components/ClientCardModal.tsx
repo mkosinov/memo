@@ -45,7 +45,7 @@ export function ClientCardModal({ clientId, onClose }: ClientCardModalProps) {
     });
   }, [clientRecords, activities, services, locations, payments]);
 
-  const totalVisitCount = clientRecords.filter((r) => r.status === 'confirmed').length;
+  const totalVisitCount = clientRecords.filter((r) => r.status === 'visited').length;
   const totalGuests = clientRecords.reduce((s, r) => s + Math.max(1, r.visits.length), 0);
   const totalSpent = recordDetails
     .filter((d) => d.record.status !== 'cancelled')

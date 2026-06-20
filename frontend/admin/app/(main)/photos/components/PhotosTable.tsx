@@ -9,6 +9,7 @@ import { useUI } from '@/contexts/UIContext';
 import { PhotoModal } from './PhotoModal';
 import { ColumnPicker } from '@/app/components/shared/ColumnPicker';
 import { ErrorState } from '@/app/components/error';
+import { parseApiError } from '@/app/lib/api/parseApiError';
 
 // ─── Column definitions ──────────────────────────────────────────────────
 

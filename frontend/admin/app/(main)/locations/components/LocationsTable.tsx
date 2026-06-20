@@ -12,6 +12,7 @@ import { LocationFilters } from './LocationFilters';
 import { LOCATION_FIELDS } from './locationFields';
 import { ColumnPicker } from '@/app/components/shared/ColumnPicker';
 import { ErrorState } from '@/app/components/error';
+import { parseApiError } from '@/app/lib/api/parseApiError';
 
 // ─── Column definitions ──────────────────────────────────────────────────
 

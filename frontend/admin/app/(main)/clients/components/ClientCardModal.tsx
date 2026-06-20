@@ -7,6 +7,7 @@ import { useClients } from '@/contexts/ClientsContext';
 import { ClientInfoTab } from './ClientInfoTab';
 import { ClientRecordTab } from './ClientRecordTab';
 import type { ClientWithStats, ActivityResponse } from '@memo/api-client';
+import { parseApiError } from '@/app/lib/api/parseApiError';
 
 interface ClientCardModalProps {
   client: ClientWithStats | null;

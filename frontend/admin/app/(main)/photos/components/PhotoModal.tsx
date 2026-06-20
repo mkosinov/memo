@@ -5,6 +5,7 @@ import { PHOTO_FIELDS, type PhotoFieldConfig } from './photoFields';
 import SearchableSelect from '@/app/components/shared/SearchableSelect';
 import { searchVisitors, searchServices, searchActivities, searchTags } from '@memo/api-client';
 import type { PhotoResponse } from '@memo/api-client';
+import { parseApiError } from '@/app/lib/api/parseApiError';
 
 export interface PhotoModalProps {
   mode: 'create' | 'edit';

@@ -10,6 +10,7 @@ import { ServiceModal } from './ServiceModal';
 import { ServiceFilters } from './ServiceFilters';
 import { ColumnPicker } from './ColumnPicker';
 import { ErrorState } from '@/app/components/error';
+import { parseApiError } from '@/app/lib/api/parseApiError';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 

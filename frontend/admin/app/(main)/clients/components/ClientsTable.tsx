@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import { useClients } from '@/contexts/ClientsContext';
 import { ColumnPicker } from '@/app/components/shared/ColumnPicker';
 import { ErrorState } from '@/app/components/error';
+import { parseApiError } from '@/app/lib/api/parseApiError';
 import type { ClientWithStats } from '@memo/api-client';
 
 const COLUMNS: { key: string; label: string; sortable: boolean; defaultVisible: boolean }[] = [

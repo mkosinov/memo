@@ -8,6 +8,7 @@ import { useUpdateMaterial, useCreateMaterial, useDeleteMaterial } from '@/hooks
 import { useUI } from '@/contexts/UIContext';
 import { MaterialModal } from './MaterialModal';
 import { ColumnPicker } from './ColumnPicker';
+import { parseApiError } from '@/app/lib/api/parseApiError';
 
 // ─── Column definitions ─────────────────────────────────────────────────
 

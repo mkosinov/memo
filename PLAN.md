@@ -12,6 +12,7 @@
 > **Reconciliation: ✅ Completed 2026-06-19** — Project board statuses synchronized with reality
 > **Testing Strategy v2: ✅ Completed 2026-06-19** — Pre-push gate + User Scenarios + 10 full-flow E2E (branch `feat-testing-strategy-v2`)
 > **Wave 4.5 — Fix TS Errors Blocking Pre-Push Hook: ✅ Completed 2026-06-19** — 55→0 TS errors, 11 commits, closes #88 (branch `fix/ts-errors-blocking-hook`)
+> **Wave 5 — 14 P1/P3 UX Bugs: ✅ Completed 2026-06-19** — closed #74–#86 (except #73) in `ActivityDetailsModal`, `ClientTab`, `ActivityCard`; 14 commits, 7/7 visual checks passed (branch `fix/wave5-ux-bugs`)
 > **Stage 5 API Integration: ✅ Completed 2026-05-30** — admin connected to real API
 > **Stage 10 (Web): ✅ Completed 2026-05-27** — colourmountains.ru public website (285 tests)
 
@@ -308,7 +309,26 @@ New `frontend/master/` — Next.js 14, mobile-first.
 
 ---
 
+## Wave 5 — Closed Issues
+
+- **#74** — Modal height unstable across tabs — fixed with `h-[80vh]` + `overflow-y-auto` content area
+- **#75** — "+ Добавить посетителя" has no onClick — wired inline form (name + age + tariff)
+- **#76** — "Открыть профиль" opens in new tab — replaced with SPA navigation + modal close
+- **#77** — Status labels don't match spec — updated to Ожидание/Посетил/Отменил/Неявка
+- **#78** — Status control is a `<select>`, spec calls for icon picker — implemented `StatusPicker` component
+- **#79** — React Query cache not invalidated after payment delete — added `invalidateRecord()` in handler
+- **#80** — New booking form payload mismatch — audited fields, added `data-testid` + `htmlFor` labels
+- **#81** — "Неизвестный" placeholder hides identity — replaced with phone-as-label logic + `placeholder="Не указано"`
+- **#82** — Visitor row doesn't render `seats` — added Russian pluralisation helper + display
+- **#83** — "Приватное" label and switch on one line — stacked vertically with `flex-col`
+- **#84** — Backend `occupied` counts records instead of sum of seats — changed to `sum_active_seats` excluding cancelled/no_show
+- **#85** — React Query cache not refreshed after new booking — moved create-record flow into `useRecordMutations` hook with full invalidation
+- **#86** — Scheduled grid badge (`z-[110]`) appears above modal (`z-50`) — raised modal to `z-[200]`, documented stack order in globals.css
+
+**Total:** 13 issues closed (all P1/P3, #73 already closed), 14 commits, 7/7 Visual Compliance checks passed.
+
 ## Changelog
+- 2026-06-19: **Wave 5 — 14 P1/P3 UX Bugs** — closed #74–#86 (except #73) in ActivityDetailsModal, ClientTab, ActivityCard; 14 commits, 7/7 visual checks passed (branch `fix/wave5-ux-bugs`).
 - 2026-06-19: **Wave 4.5 — Fix TS Errors Blocking Pre-Push Hook** — 55→0 TS errors, 11 commits, closes #88. Deleted 2 dead files, added `maxAge` to `ActivitySchema` + `required` to `TagsFieldConfig`, updated 5 test mock files, type guard + `Array.from` fixes. No suppressions added (branch `fix/ts-errors-blocking-hook`).
 - 2026-06-19: **Project board reconciled** — 10 status updates applied (#30-#34, #37, #47, #48, #1).
 - 2026-06-19: **Testing Strategy v2** — Pre-push gate, User Scenarios doc, 10 new full-flow E2E (RED), smoke-only CI, CONTRIBUTING.md, PR template (branch `feat-testing-strategy-v2`).

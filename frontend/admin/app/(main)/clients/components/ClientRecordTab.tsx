@@ -29,7 +29,7 @@ export function ClientRecordTab({ recordId, clientId, onClose }: ClientRecordTab
   const { record, visitors, activity, services, masters, locations, payments, visitorsMap, tariffs, isLoading, recordData, status } =
     useRecordData(recordId, clientId);
 
-  const { saveRecord, deleteRecord, addVisitor, deleteVisitor, addPayment, deletePayment, updateAnonymVisits } =
+  const { saveRecord, deleteRecord, addVisitor, deleteVisitor, addPayment, deletePayment, updateAnonymVisits, updateVisitStatus } =
     useRecordMutations(record?.activity_id ?? '', recordId);
 
   // ── Surface-specific editable state ─────────────────────────────────────
@@ -251,8 +251,9 @@ export function ClientRecordTab({ recordId, clientId, onClose }: ClientRecordTab
                 tariffId={visit.tariff_id ?? ''}
                 tariffs={tariffs}
                 onChange={(data) => {
-                  if (data.status) {
-                    // Status change goes through visit status update
+                  if (data.status !== undefined) {
+                    updateVisitStatus(visit.id, data.status);
+                    return;
                   }
                 }}
                 onDelete={() => handleDeleteVisitor(visit.id)}

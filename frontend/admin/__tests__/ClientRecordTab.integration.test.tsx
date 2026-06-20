@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import React from 'react';
 
 // ─── Mock api-client ───────────────────────────────────────────────────────
@@ -49,6 +49,7 @@ import {
   createPayment,
   deletePayment,
   createVisitor,
+  updateVisitStatus,
 } from '@memo/api-client';
 
 import {
@@ -204,6 +205,24 @@ describe('ClientRecordTab — integration with shared atoms', () => {
       expect(patchRecord).toHaveBeenCalledWith('r1', expect.objectContaining({
         comment: 'Test comment',
       }));
+    });
+  });
+
+  // ─── Status change wiring ─────────────────────────────────────────
+
+  it('status change on RecordVisitRow calls updateVisitStatus', async () => {
+    vi.mocked(updateVisitStatus).mockResolvedValue(undefined);
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+
+    const statusContainer = screen.getByTestId('visit-v1-status');
+    const trigger = within(statusContainer).getByTestId('custom-select-trigger');
+    fireEvent.click(trigger);
+
+    const option = within(statusContainer).getByTestId('custom-select-option-visited');
+    fireEvent.click(option);
+
+    await waitFor(() => {
+      expect(updateVisitStatus).toHaveBeenCalledWith('v1', 'visited');
     });
   });
 });

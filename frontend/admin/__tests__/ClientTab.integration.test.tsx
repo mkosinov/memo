@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import React from 'react';
 
 // ─── Shared mock data ──────────────────────────────────────────────────────
@@ -21,6 +21,8 @@ import {
   createMockRecordsContext,
   createMockUIContext,
 } from './helpers/mockContexts';
+
+import { updateVisitStatus } from '@memo/api-client';
 
 // ─── API Client Mock ───────────────────────────────────────────────────────
 
@@ -218,5 +220,25 @@ describe('ClientTab — integration with shared atoms', () => {
   it('renders seats summary', () => {
     render(<ClientTab {...defaultProps} />);
     expect(screen.getByTestId('record-seats')).toBeInTheDocument();
+  });
+
+  // ─── Status change wiring ─────────────────────────────────────────
+
+  it('status change on RecordVisitRow calls updateVisitStatus instead of onUpdateRecord', async () => {
+    vi.mocked(updateVisitStatus).mockResolvedValue(undefined);
+    render(<ClientTab {...defaultProps} />);
+
+    const statusContainer = screen.getByTestId('visit-v1-status');
+    const trigger = within(statusContainer).getByTestId('custom-select-trigger');
+    fireEvent.click(trigger);
+
+    const option = within(statusContainer).getByTestId('custom-select-option-visited');
+    fireEvent.click(option);
+
+    await waitFor(() => {
+      expect(updateVisitStatus).toHaveBeenCalledWith('v1', 'visited');
+    });
+    // Should NOT call the full-record onUpdateRecord for a status-only change
+    expect(defaultProps.onUpdateRecord).not.toHaveBeenCalled();
   });
 });

@@ -12,6 +12,7 @@ import { PaymentForm } from '@/app/components/shared/payments/PaymentForm';
 import { PaymentTotals } from '@/app/components/shared/payments/PaymentTotals';
 import { AddVisitorForm } from '@/app/components/shared/visitors/AddVisitorForm';
 import { useRecordData } from '@/hooks/useRecordData';
+import { useRecordMutations } from '@/hooks/useRecordMutations';
 import type { RecordWithDerived } from '@/app/components/shared/records/types';
 import { computeRecordStatus } from '@memo/domain';
 import { safeStatus } from '@/app/lib/status-utils';
@@ -51,6 +52,7 @@ export function ClientTab({
   const isDeletingRef = useRef(false);
   const router = useRouter();
   const { visitorsMap } = useRecordData(record.id, client?.id ?? '');
+  const { updateVisitStatus } = useRecordMutations(record.activity_id ?? '', record.id);
 
   // Derive status from visits (atom pattern)
   const status: VisitStatus = computeRecordStatus(
@@ -94,6 +96,12 @@ export function ClientTab({
   }, [record.id, onUpdateRecord, showToast]);
 
   const handleVisitChange = useCallback((visitId: string, data: { status?: VisitStatus; name?: string; age?: number | null; tariff_id?: string }) => {
+    // Status-only changes → dedicated endpoint
+    if (data.status !== undefined && data.name === undefined && data.age === undefined && data.tariff_id === undefined) {
+      updateVisitStatus(visitId, data.status);
+      return;
+    }
+    // Non-status changes → full visit update via record patch
     const updatedVisits = (visits || []).map(v => {
       if (v.id !== visitId) return { visitor_id: v.visitor_id, price: v.price, status: v.status };
       return {
@@ -108,7 +116,7 @@ export function ClientTab({
     onUpdateRecord(record.id, { visits: updatedVisits } as any).catch(() => {
       showToast('Ошибка обновления посетителя');
     });
-  }, [visits, record.id, onUpdateRecord, showToast]);
+  }, [visits, record.id, onUpdateRecord, showToast, updateVisitStatus]);
 
   const handleDeleteVisit = useCallback(async (visitId: string) => {
     const remaining = (visits || []).filter(v => v.id !== visitId).map(v => ({

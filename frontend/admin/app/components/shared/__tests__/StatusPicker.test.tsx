@@ -36,4 +36,24 @@ describe('StatusPicker', () => {
     render(<StatusPicker value="waiting" onChange={() => {}} testIdPrefix="my-prefix" />);
     expect(screen.getByTestId('my-prefix')).toBeInTheDocument();
   });
+
+  it('shows placeholder option when placeholder prop is set', () => {
+    const onChange = vi.fn();
+    render(
+      <StatusPicker
+        value=""
+        onChange={onChange}
+        placeholder="Все статусы"
+        variant="full"
+        testIdPrefix="filter-status"
+      />
+    );
+    fireEvent.click(screen.getByTestId('custom-select-trigger'));
+    // "Все статусы" appears in both trigger and dropdown — use getAllByText
+    const allStatuses = screen.getAllByText('Все статусы');
+    expect(allStatuses.length).toBeGreaterThanOrEqual(2);
+    // Click the "all" option in the dropdown
+    fireEvent.click(screen.getByTestId('custom-select-option-'));
+    expect(onChange).toHaveBeenCalledWith('');
+  });
 });

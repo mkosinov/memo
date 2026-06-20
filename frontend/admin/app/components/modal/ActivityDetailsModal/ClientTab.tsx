@@ -270,7 +270,7 @@ export function ClientTab({
           </label>
           <StatusPicker
             value={status}
-            onChange={setStatus}
+            onChange={(s) => { if (s) setStatus(s); }}
           />
         </div>
       </div>

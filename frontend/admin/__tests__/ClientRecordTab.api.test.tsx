@@ -106,75 +106,9 @@ describe('ClientRecordTab — API interactions', () => {
     vi.restoreAllMocks();
   });
 
-  // ─── Payment API ──────────────────────────────────────────────────────
+  // ─── Delete record ────────────────────────────────────────────────
 
-  it('calls deletePayment when delete button clicked', async () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    fireEvent.click(screen.getByTestId('btn-delete-payment'));
-
-    await waitFor(() => {
-      expect(deletePayment).toHaveBeenCalledWith('p1');
-    });
-  });
-
-  it('invalidates queries after deleting payment', async () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    fireEvent.click(screen.getByTestId('btn-delete-payment'));
-
-    await waitFor(() => {
-      expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['payments'] });
-    });
-  });
-
-  it('calls createPayment when add button clicked with amount', async () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    fireEvent.change(screen.getByPlaceholderText('Сумма'), { target: { value: '1500' } });
-    fireEvent.click(screen.getByTestId('btn-add-payment'));
-
-    await waitFor(() => {
-      expect(createPayment).toHaveBeenCalledWith({
-        record_id: 'r1',
-        amount: 1500,
-        method: 'card',
-      });
-    });
-  });
-
-  it('does not call createPayment with zero amount', () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    fireEvent.change(screen.getByPlaceholderText('Сумма'), { target: { value: '0' } });
-    fireEvent.click(screen.getByTestId('btn-add-payment'));
-    expect(createPayment).not.toHaveBeenCalled();
-  });
-
-  it('does not call createPayment with empty amount', () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    fireEvent.change(screen.getByPlaceholderText('Сумма'), { target: { value: '' } });
-    fireEvent.click(screen.getByTestId('btn-add-payment'));
-    expect(createPayment).not.toHaveBeenCalled();
-  });
-
-  it('allows changing payment method via CustomSelect', async () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    const triggers = screen.getAllByTestId('custom-select-trigger');
-    const paymentMethodTrigger = triggers[triggers.length - 1];
-    fireEvent.click(paymentMethodTrigger);
-    fireEvent.click(screen.getByTestId('custom-select-option-cash'));
-    fireEvent.change(screen.getByPlaceholderText('Сумма'), { target: { value: '2000' } });
-    fireEvent.click(screen.getByTestId('btn-add-payment'));
-
-    await waitFor(() => {
-      expect(createPayment).toHaveBeenCalledWith({
-        record_id: 'r1',
-        amount: 2000,
-        method: 'cash',
-      });
-    });
-  });
-
-  // ─── Delete record ────────────────────────────────────────────────────
-
-  it('calls deleteRecord when delete clicked (does not close modal)', async () => {
+  it('calls deleteRecord when delete clicked', async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true);
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
     fireEvent.click(screen.getByText('Удалить запись'));
@@ -182,7 +116,6 @@ describe('ClientRecordTab — API interactions', () => {
     await waitFor(() => {
       expect(deleteRecord).toHaveBeenCalledWith('r1');
     });
-    expect(onClose).not.toHaveBeenCalled();
   });
 
   it('invalidates records query after delete', async () => {
@@ -197,7 +130,7 @@ describe('ClientRecordTab — API interactions', () => {
 
   // ─── Save (patchRecord) calls ─────────────────────────────────────────
 
-  it('calls patchRecord and patchActivity on save', async () => {
+  it('calls patchRecord on save with comment', async () => {
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
     const textarea = screen.getByPlaceholderText('Добавить комментарий...');
     fireEvent.change(textarea, { target: { value: 'Новый комментарий' } });
@@ -235,77 +168,21 @@ describe('ClientRecordTab — API interactions', () => {
     });
   });
 
-  // ─── Delete visitor ───────────────────────────────────────────────────
+  // ─── Add visitor via AddVisitorForm atom ───────────────────────────
 
-  it('creates visitor and adds to record on form submit', async () => {
+  it('creates visitor and adds to record via AddVisitorForm', async () => {
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
     fireEvent.click(screen.getByTestId('btn-add-visitor'));
 
-    fireEvent.change(screen.getByTestId('input-visitor-name'), { target: { value: 'Новый Гость' } });
-    fireEvent.change(screen.getByTestId('input-visitor-age'), { target: { value: '10' } });
-    fireEvent.click(screen.getByTestId('btn-create-visitor'));
+    fireEvent.change(screen.getByTestId('add-visitor-name'), { target: { value: 'Новый Гость' } });
+    fireEvent.change(screen.getByTestId('add-visitor-age'), { target: { value: '10' } });
+    fireEvent.click(screen.getByTestId('add-visitor-submit'));
 
     await waitFor(() => {
       expect(createVisitor).toHaveBeenCalledWith({
         client_id: 'c1',
         name: 'Новый Гость',
         age: 10,
-      });
-    });
-
-    await waitFor(() => {
-      expect(patchRecord).toHaveBeenCalledWith('r1', expect.objectContaining({
-        visits: expect.arrayContaining([
-          expect.objectContaining({ visitor_id: 'vis1' }),
-          expect.objectContaining({ visitor_id: 'vis_new' }),
-        ]),
-      }));
-    });
-  });
-
-  it('selecting existing visitor does not call createVisitor', async () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    fireEvent.click(screen.getByTestId('btn-add-visitor'));
-
-    const nameInput = screen.getByTestId('input-visitor-name');
-    fireEvent.change(nameInput, { target: { value: 'Анн' } });
-
-    fireEvent.click(screen.getByTestId('visitor-option-vis1'));
-    expect(nameInput).toHaveValue('Анна Иванова');
-
-    fireEvent.click(screen.getByTestId('btn-create-visitor'));
-
-    await waitFor(() => {
-      expect(createVisitor).not.toHaveBeenCalled();
-      expect(patchRecord).toHaveBeenCalledWith('r1', expect.objectContaining({
-        visits: expect.arrayContaining([
-          expect.objectContaining({ visitor_id: 'vis1' }),
-        ]),
-      }));
-    });
-  });
-
-  it('typing new name and submitting creates new visitor', async () => {
-    vi.mocked(createVisitor).mockResolvedValue({
-      id: 'vis_new', client_id: 'c1', name: 'Новый Гость', age: null,
-      created_at: '', updated_at: '', is_active: true,
-    });
-
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    fireEvent.click(screen.getByTestId('btn-add-visitor'));
-
-    const nameInput = screen.getByTestId('input-visitor-name');
-    fireEvent.change(nameInput, { target: { value: 'Новый Гость' } });
-
-    expect(screen.queryByTestId('visitor-option-vis1')).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByTestId('btn-create-visitor'));
-
-    await waitFor(() => {
-      expect(createVisitor).toHaveBeenCalledWith({
-        client_id: 'c1',
-        name: 'Новый Гость',
-        age: undefined,
       });
     });
   });

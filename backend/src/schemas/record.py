@@ -2,7 +2,7 @@
 
 from pydantic import BaseModel, ConfigDict
 
-from src.models.enums import RecordStatus, VisitStatus
+from src.models.enums import VisitStatus
 
 
 class VisitItem(BaseModel):

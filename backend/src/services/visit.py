@@ -30,7 +30,7 @@ class VisitService:
         visit.updated_at = datetime.now(UTC)
 
         # Re-derive parent record status from all active visits
-        record = await self._derive_record_status(db_session, visit.record_id)
+        await self._derive_record_status(db_session, visit.record_id)
 
         await db_session.flush()
         await db_session.refresh(visit)

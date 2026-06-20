@@ -13,6 +13,7 @@
 > **Testing Strategy v2: ✅ Completed 2026-06-19** — Pre-push gate + User Scenarios + 10 full-flow E2E (branch `feat-testing-strategy-v2`)
 > **Wave 4.5 — Fix TS Errors Blocking Pre-Push Hook: ✅ Completed 2026-06-19** — 55→0 TS errors, 11 commits, closes #88 (branch `fix/ts-errors-blocking-hook`)
 > **Wave 5 — 14 P1/P3 UX Bugs: ✅ Completed 2026-06-19** — closed #74–#86 (except #73) in `ActivityDetailsModal`, `ClientTab`, `ActivityCard`; 14 commits, 7/7 visual checks passed (branch `fix/wave5-ux-bugs`)
+> **Wave 5.1 — 11 QA Hotfixes: ✅ Completed 2026-06-19** — follow-up to Wave 5 (4 commits, 1012+560 tests pass)
 > **Stage 5 API Integration: ✅ Completed 2026-05-30** — admin connected to real API
 > **Stage 10 (Web): ✅ Completed 2026-05-27** — colourmountains.ru public website (285 tests)
 
@@ -326,6 +327,23 @@ New `frontend/master/` — Next.js 14, mobile-first.
 - **#86** — Scheduled grid badge (`z-[110]`) appears above modal (`z-50`) — raised modal to `z-[200]`, documented stack order in globals.css
 
 **Total:** 13 issues closed (all P1/P3, #73 already closed), 14 commits, 7/7 Visual Compliance checks passed.
+
+---
+
+## Wave 5.1 — 11 QA Hotfixes: ✅ Completed 2026-06-19
+
+Follow-up fixes from manual testing of Wave 5 (branch `fix/wave5-ux-bugs`, 4 commits). All 1012 backend + 560 frontend tests pass.
+
+### Fixed (11 issues):
+- **#75** Visitor rows empty — restored full editor (name/age/tariff inputs + X to remove)
+- **#76** /clients/{id} → 404 — open ClientCardModal via `?clientId=` query param
+- **#77** Status colors — softer palette (cancelled: #F97316, no_show: #4B5563)
+- **#79** Delete lag — `setQueryData` optimistic update + 1 refetch; toast z-index raised above modal
+- **#80/#85** New client not in cache — added `['clients']` to invalidateAll
+- **#81** Name input not resetting on record switch — useEffect on `[record.id, client?.id]`
+- **#82** Seats 5 → 0 — added `anonym_visits: int` field; `seats = len(visits) + anonym_visits`
+- **#83** Private toggle alignment — `ml-auto` to right edge
+- **#84** Status not persisting — wired `onUpdateRecord` to `patchRecord` mutation; status resets on record switch
 
 ## Changelog
 - 2026-06-19: **Wave 5 — 14 P1/P3 UX Bugs** — closed #74–#86 (except #73) in ActivityDetailsModal, ClientTab, ActivityCard; 14 commits, 7/7 visual checks passed (branch `fix/wave5-ux-bugs`).

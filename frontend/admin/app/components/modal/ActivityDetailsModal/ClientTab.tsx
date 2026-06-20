@@ -7,6 +7,7 @@ import type { RecordStatus } from '@memo/domain';
 import { useRouter } from 'next/navigation';
 import { StatusPicker } from './StatusPicker';
 import { formatSeats } from '@/app/lib/pluralize';
+import { useRecordData } from '@/hooks/useRecordData';
 
 interface ClientTabProps {
   record: RecordResponse;
@@ -89,11 +90,19 @@ export function ClientTab({
   const isDeletingRef = useRef(false);
   const router = useRouter();
 
-  // --- Visitor editor state ---
-  // VisitResponse doesn't have visitor_name/age/tariff_id — use empty placeholders
-  const [visitNames, setVisitNames] = useState<string[]>(visits.map(() => ''));
-  const [visitAges, setVisitAges] = useState<string[]>(visits.map(() => ''));
-  const [visitTariffIds, setVisitTariffIds] = useState<string[]>(visits.map(() => ''));
+  // --- Fetch visitors + tariffs for this record's client ---
+  const { visitorsMap } = useRecordData(record.id, client?.id ?? '');
+
+  // --- Visitor editor state (pre-filled from visitorsMap + visit.tariff_id) ---
+  const [visitNames, setVisitNames] = useState<string[]>(
+    visits.map((v) => visitorsMap.get(v.visitor_id ?? '')?.name ?? '')
+  );
+  const [visitAges, setVisitAges] = useState<string[]>(
+    visits.map((v) => visitorsMap.get(v.visitor_id ?? '')?.age?.toString() ?? '')
+  );
+  const [visitTariffIds, setVisitTariffIds] = useState<string[]>(
+    visits.map((v) => v.tariff_id ?? '')
+  );
 
   const handleOpenProfile = useCallback(() => {
     if (!client) return;
@@ -126,12 +135,12 @@ export function ClientTab({
     });
   }, [status]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // --- Reset visitor editor state on record.visits change ---
+  // --- Reset visitor editor state on record.visits or visitorsMap change ---
   useEffect(() => {
-    setVisitNames(visits.map(() => ''));
-    setVisitAges(visits.map(() => ''));
-    setVisitTariffIds(visits.map(() => ''));
-  }, [record.id, visits.length]);
+    setVisitNames(visits.map((v) => visitorsMap.get(v.visitor_id ?? '')?.name ?? ''));
+    setVisitAges(visits.map((v) => visitorsMap.get(v.visitor_id ?? '')?.age?.toString() ?? ''));
+    setVisitTariffIds(visits.map((v) => v.tariff_id ?? ''));
+  }, [record.id, visits.length, visitorsMap]);
 
   // --- Visitor editor helpers ---
   const updateVisitName = useCallback((id: string, value: string) => {
@@ -170,6 +179,7 @@ export function ClientTab({
       const tariff = serviceTariffs.find((t) => t.id === tariffIds[idx]);
       return {
         visitor_id: v.visitor_id || undefined,
+        tariff_id: tariffIds[idx] || undefined,
         name: names[idx] || undefined,
         age: ages[idx] ? Number(ages[idx]) : undefined,
         price: tariff?.price ?? v.price,

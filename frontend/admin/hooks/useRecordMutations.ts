@@ -17,7 +17,8 @@ import {
 import type { RecordResponse } from '@memo/api-client';
 
 interface VisitData {
-  visitor_id?: string;
+  visitor_id?: string | null;
+  tariff_id?: string | null;
   price: number;
   custom_price?: number | null;
   status?: string;
@@ -26,7 +27,7 @@ interface VisitData {
 /** Data type accepted by patchRecord — status, comment, custom_price, visits. */
 export type RecordPatchData = Partial<
   Pick<RecordResponse, 'status' | 'comment' | 'custom_price'> & {
-    visits?: Array<{ visitor_id?: string; name?: string; age?: number; price: number; custom_price?: number | null; status?: string }>;
+    visits?: Array<{ visitor_id?: string | null; tariff_id?: string | null; name?: string; age?: number; price: number; custom_price?: number | null; status?: string }>;
   }
 >;
 
@@ -80,7 +81,7 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
       }
 
       // 2. Create visitors (skip empty names)
-      const visitIds: string[] = [];
+      const visitData: Array<{ visitorId: string; tariffId?: string }> = [];
       for (const v of input.visitors) {
         if (v.name) {
           const visitor = await createVisitor({
@@ -88,7 +89,7 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
             name: v.name,
             age: v.age ? Number(v.age) : undefined,
           });
-          visitIds.push(visitor.id);
+          visitData.push({ visitorId: visitor.id, tariffId: v.tariffId || undefined });
         }
       }
 
@@ -100,10 +101,17 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
         activity_id: activityId,
         client_id: clientId,
         anonym_visits: input.seats,
-        visits: visitIds.map((vid) => ({
-          visitor_id: vid,
-          price: firstTariff?.price ?? 0,
-        })),
+        visits: visitData.map((vd) => {
+          // Lookup tariff price by id; fall back to firstTariff
+          const tariff = vd.tariffId
+            ? serviceTariffs.find((t) => t.id === vd.tariffId)
+            : firstTariff;
+          return {
+            visitor_id: vd.visitorId,
+            tariff_id: vd.tariffId || undefined,
+            price: tariff?.price ?? 0,
+          };
+        }),
       });
 
       // 5. Invalidate all relevant queries
@@ -202,13 +210,13 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
         age: data.age,
       });
 
-      const newVisit = {
+      const newVisit: VisitData = {
         visitor_id: visitor.id,
         price: data.price,
       };
 
       await patchRecord(recordId, {
-        visits: [...record.visits, newVisit],
+        visits: [...(record.visits as unknown as VisitData[]), newVisit],
       });
       invalidateAll();
     },

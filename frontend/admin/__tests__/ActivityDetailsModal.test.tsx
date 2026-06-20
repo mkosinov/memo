@@ -77,6 +77,10 @@ vi.mock('@tanstack/react-query', () => ({
     setQueryData: vi.fn(),
     fetchQuery: vi.fn(),
   })),
+  useQuery: vi.fn(() => ({
+    data: undefined,
+    isLoading: false,
+  })),
 }));
 
 vi.mock('next/navigation', () => ({

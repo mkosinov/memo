@@ -198,7 +198,8 @@ export type VisitorResponse = z.infer<typeof VisitorResponseSchema>;
 export const VisitResponseSchema = z.object({
   id: z.string(),
   record_id: z.string(),
-  visitor_id: z.string(),
+  visitor_id: z.string().nullable().optional(),
+  tariff_id: z.string().nullable().optional(),
   price: z.number(),
   custom_price: z.number().nullable(),
   status: z.string(),

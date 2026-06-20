@@ -455,7 +455,7 @@ export function ClientRecordTab({ recordId, clientId, onClose }: ClientRecordTab
           )}
 
           {record.visits.map(visit => {
-            const visitor = visitorsMap.get(visit.visitor_id);
+            const visitor = visitorsMap.get(visit.visitor_id ?? "");
             const price = visitPrices[visit.id] ?? String(visit.price);
             const cp = visitCustomPrices[visit.id] ?? '';
 
@@ -500,7 +500,7 @@ export function ClientRecordTab({ recordId, clientId, onClose }: ClientRecordTab
                 </div>
                 <span className="text-sm">₽</span>
                 <button
-                  onClick={() => handleDeleteVisitor(visit.visitor_id)}
+                  onClick={() => handleDeleteVisitor(visit.visitor_id ?? "")}
                   className="text-red-400 hover:text-red-500 text-xs w-8 text-center"
                   aria-label="Удалить посетителя"
                   data-testid="btn-delete-visitor"

@@ -68,7 +68,7 @@ export function ActivityDetailsModal({ isOpen, onClose, activity, mode }: Activi
       map.set(
         record.id,
         record.visits.map((v) => ({
-          id: v.visitor_id,
+          id: v.visitor_id ?? '',
           name: '', // Will be resolved by ClientTab if needed
           age: null,
         })),

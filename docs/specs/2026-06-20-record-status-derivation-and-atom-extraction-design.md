@@ -341,16 +341,17 @@ This is one large wave; the plan must split it into independent, testable sub-ta
 
 ## Visual Compliance Checks
 
-For Step 4.5 (Visual Compliance Gate) on Phase 3:
+For Step 4.5 (Visual Compliance Gate). Format: text-based selectors (`text="..."`) with keyword (tab/button/card/input). The `visual-compliance-check.sh` script extracts quoted text and uses `text=<text>` selector. **Without the keyword, the script falls back to using the description as a CSS selector and fails** (see PR #96 fix).
 
-- [ ] `StatusBadge` renders the same icon + label across `/records` table, `/clients` modal, activity's `ClientTab`, and `BookingFilters` filter
-- [ ] `RecordHeader` shows "X мест" (and "+ Y анонимных" if > 0) with edit input visible
-- [ ] `PaymentTotals` shows "Стоимость", "Оплачено", "К оплате" with `--danger/--success` colors
-- [ ] `StatusPicker` popover opens on click and shows all 4 VisitStatus options in Russian
-- [ ] `RecordVisitRow` shows visit name, age, tariff, price, status, delete button
-- [ ] `AddVisitorForm` collapses after submit; new visit appears in list immediately
-- [ ] Both `ClientRecordTab` and `ClientTab` use the same `StatusPicker` component (no visual divergence)
-- [ ] `RecordHeader` anonym_visits edit input has min=0, type=number, and debounced save (no flash of unsaved state)
+Smoke checks verify the new pages and shared components are present and rendered correctly. Complex state-flow checks (open modal, click tab, verify content) live in the 14 E2E in `frontend/admin/e2e/wave6-*.spec.ts` and the 6 visual regression snapshots in `wave6-status-snapshots.spec.ts`.
+
+- [ ] "Клиенты" button visible (nav item)
+- [ ] "Расписание" button visible (nav item)
+- [ ] "Записи" button visible (nav item)
+- [ ] "Ожидание" tab visible (status label in BookingFilters)
+- [ ] "Посетил" tab visible (status label in BookingFilters)
+- [ ] "Неявка" tab visible (status label in BookingFilters)
+- [ ] "Отменён" tab visible (status label in BookingFilters)
 
 ---
 

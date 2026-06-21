@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { ClientsProvider, useClients } from '@/contexts/ClientsContext';
+import { useClients } from '@/contexts/ClientsContext';
 import { ScheduleProvider } from '@/contexts/ScheduleContext';
 import { ClientsTable } from './components/ClientsTable';
 import { ClientsFilters } from './components/ClientsFilters';
@@ -121,9 +121,7 @@ function ClientsPageContent() {
 export default function ClientsPage() {
   return (
     <ScheduleProvider>
-      <ClientsProvider>
-        <ClientsPageContent />
-      </ClientsProvider>
+      <ClientsPageContent />
     </ScheduleProvider>
   );
 }

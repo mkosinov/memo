@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import type { VisitResponse, TariffResponse } from '@memo/api-client';
 import type { VisitStatus } from '@memo/domain';
 import { StatusPicker } from '@/app/components/shared/StatusPicker';
@@ -31,6 +31,13 @@ interface InlineEditCellProps {
 function InlineEditCell({ value, onCommit, className = '', type = 'text' }: InlineEditCellProps) {
   const [draft, setDraft] = useState(value);
   const originalRef = useRef(value);
+
+  // Sync with prop when it changes (e.g. async visitor data loads after first render)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    setDraft(value);
+    originalRef.current = value;
+  }, [value]);
 
   const commitIfChanged = useCallback(() => {
     if (draft !== originalRef.current) {
@@ -231,13 +238,13 @@ export function RecordVisitsTable({
             {showForm ? (
               <AddVisitorForm tariffs={tariffs} onAdd={handleAdd} onCancel={() => setShowForm(false)} />
             ) : (
-              <div className="px-3 py-1.5">
+              <div className="px-3 py-2">
                 <button
                   onClick={() => setShowForm(true)}
-                  className="text-brand text-xs hover:underline"
+                  className="inline-flex items-center gap-1 text-xs font-medium text-brand border border-brand/30 rounded px-2.5 py-1 hover:bg-brand/5 transition-colors"
                   data-testid="btn-add-visitor"
                 >
-                  + Добавить посетителя
+                  <span className="text-brand">+</span> Добавить посетителя
                 </button>
               </div>
             )}

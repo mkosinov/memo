@@ -110,7 +110,7 @@ export function RecordPaymentsTable({
         {!isReadOnly && (
           <RecordTable.AddRow testId="btn-add-payment-wrapper">
             {showForm ? (
-              <form onSubmit={handleSubmit} className="flex items-center gap-2 px-3 py-1.5 text-sm" data-testid="payment-form">
+              <form onSubmit={handleSubmit} className="flex items-center gap-2 px-3 py-2 text-sm" data-testid="payment-form">
                 <input
                   type="number"
                   min={1}
@@ -158,13 +158,13 @@ export function RecordPaymentsTable({
                 </button>
               </form>
             ) : (
-              <div className="px-3 py-1.5">
+              <div className="px-3 py-2">
                 <button
                   onClick={() => setShowForm(true)}
-                  className="text-brand text-xs hover:underline"
+                  className="inline-flex items-center gap-1 text-xs font-medium text-brand border border-brand/30 rounded px-2.5 py-1 hover:bg-brand/5 transition-colors"
                   data-testid="btn-add-payment"
                 >
-                  + Добавить оплату
+                  <span className="text-brand">+</span> Добавить оплату
                 </button>
               </div>
             )}

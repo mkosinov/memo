@@ -6,12 +6,11 @@ import { CustomSelect, type CustomSelectOption } from '@/app/components/shared/C
 import { MasterPicker } from '@/app/components/shared/MasterPicker';
 import { TimePicker } from '@/app/components/shared/TimePicker';
 import { RecordHeader } from '@/app/components/shared/records/RecordHeader';
-import { RecordVisitRow } from '@/app/components/shared/records/RecordVisitRow';
-import { PaymentList } from '@/app/components/shared/payments/PaymentList';
-import { PaymentForm } from '@/app/components/shared/payments/PaymentForm';
-import { PaymentTotals } from '@/app/components/shared/payments/PaymentTotals';
-import { AddVisitorForm } from '@/app/components/shared/visitors/AddVisitorForm';
 import { ClientStatistics } from '@/app/components/shared/record/blocks/ClientStatistics';
+import { RecordVisitsTable } from '@/app/components/shared/record/blocks/RecordVisitsTable';
+import { RecordPaymentsTable } from '@/app/components/shared/record/blocks/RecordPaymentsTable';
+import { RecordComments } from '@/app/components/shared/record/blocks/RecordComments';
+import { RecordTimestamps } from '@/app/components/shared/record/blocks/RecordTimestamps';
 import { useRecordData } from '@/hooks/useRecordData';
 import { useRecordMutations } from '@/hooks/useRecordMutations';
 import { useSchedule } from '@/contexts/ScheduleContext';
@@ -46,7 +45,6 @@ export function ClientRecordTab({ recordId, clientId, onClose, client }: ClientR
   const [comment, setComment] = useState('');
   const [hasChanges, setHasChanges] = useState(false);
   const [preciseTime, setPreciseTime] = useState(false);
-  const [showVisitorForm, setShowVisitorForm] = useState(false);
 
   // Initialize from data
   useEffect(() => {
@@ -124,7 +122,6 @@ export function ClientRecordTab({ recordId, clientId, onClose, client }: ClientR
     await saveRecord({
       visits: [...existingVisits, { visitor_id: visitor.id, price: tariff?.price ?? 0, status: 'waiting' }],
     });
-    setShowVisitorForm(false);
     queryClient.invalidateQueries({ queryKey: ['visitors', clientId] });
   }, [clientId, addVisitor, saveRecord, record, tariffs, queryClient]);
 
@@ -155,6 +152,45 @@ export function ClientRecordTab({ recordId, clientId, onClose, client }: ClientR
     updateAnonymVisits(recordId, value);
   }, [recordId, updateAnonymVisits]);
 
+  // RecordVisitsTable: visit status/tariff change
+  const handleChangeVisit = useCallback((visitId: string, data: { status?: VisitStatus; tariff_id?: string }) => {
+    if (data.status !== undefined) {
+      updateVisitStatus(visitId, data.status);
+      return;
+    }
+    // Tariff change — rebuild visits array
+    if (data.tariff_id !== undefined && record) {
+      const updatedVisits = record.visits.map(v => ({
+        visitor_id: v.visitor_id,
+        price: v.custom_price ?? v.price,
+        custom_price: v.custom_price,
+        status: v.status,
+        ...(v.id === visitId ? { tariff_id: data.tariff_id } : {}),
+      }));
+      saveRecord({ visits: updatedVisits });
+      markChanged();
+    }
+  }, [record, updateVisitStatus, saveRecord, markChanged]);
+
+  // RecordVisitsTable: visitor name/age change — no API endpoint yet
+  const handleChangeVisitor = useCallback((_visitorId: string, _data: { name?: string; age?: number | null }) => {
+    // TODO: no API endpoint for updating visitor name/age
+    console.warn('[ClientRecordTab] onChangeVisitor: API not implemented', _visitorId, _data);
+  }, []);
+
+  // RecordVisitsTable: visit price change
+  const handleChangeVisitPrice = useCallback((visitId: string, price: number) => {
+    if (!record) return;
+    const updatedVisits = record.visits.map(v => ({
+      visitor_id: v.visitor_id,
+      price: v.id === visitId ? price : (v.custom_price ?? v.price),
+      custom_price: v.custom_price,
+      status: v.status,
+    }));
+    saveRecord({ visits: updatedVisits });
+    markChanged();
+  }, [record, saveRecord, markChanged]);
+
   // ── Render ───────────────────────────────────────────────────────────────
 
   if (isLoading) return <div className="p-4">Загрузка...</div>;
@@ -178,7 +214,7 @@ export function ClientRecordTab({ recordId, clientId, onClose, client }: ClientR
   ];
 
   // Build RecordWithDerived for RecordHeader
-  const headerData = recordData ? { ...recordData, client: null } : null;
+  const headerData = recordData ? { ...recordData, client: client ?? null } : null;
 
   return (
     <div className="space-y-4 p-4" data-testid="client-record-tab">
@@ -237,93 +273,44 @@ export function ClientRecordTab({ recordId, clientId, onClose, client }: ClientR
         </div>
       </div>
 
-      {/* Visitors — shared atom rows */}
-      <div>
-        <h4 className="text-xs font-medium text-ink-mid mb-2">Посетители</h4>
-        <div className="rounded-lg border p-3 space-y-2" style={{ borderColor: 'var(--line)' }}>
-          {record.visits.length === 0 && !showVisitorForm && (
-            <p className="text-xs text-ink-light">Нет посетителей</p>
-          )}
+      {/* Visitors table */}
+      <RecordVisitsTable
+        visits={record.visits || []}
+        visitorsMap={visitorsMap}
+        tariffs={tariffs}
+        anonymVisits={record.anonym_visits ?? 0}
+        totalCost={total}
+        recordStatus={status}
+        onChangeVisit={handleChangeVisit}
+        onChangeVisitor={handleChangeVisitor}
+        onChangeVisitPrice={handleChangeVisitPrice}
+        onDeleteVisit={handleDeleteVisitor}
+        onAnonymVisitsChange={handleAnonymChange}
+        onAddVisitor={handleAddVisitor}
+      />
 
-          {/* Table header */}
-          {record.visits.length > 0 && (
-            <div className="flex items-center gap-2 py-1 text-xs font-medium text-ink-mid border-b" style={{ borderColor: 'var(--line)' }}>
-              <span className="flex-1">Имя</span>
-              <span className="min-w-[120px]">Тариф</span>
-              <span className="w-8" />
-            </div>
-          )}
-
-          {record.visits.map(visit => {
-            const visitor = visitorsMap.get(visit.visitor_id ?? '');
-            return (
-              <RecordVisitRow
-                key={visit.id}
-                visit={visit}
-                visitorName={visitor?.name}
-                visitorAge={visitor?.age}
-                tariffId={visit.tariff_id ?? ''}
-                tariffs={tariffs}
-                onChange={(data) => {
-                  if (data.status !== undefined) {
-                    updateVisitStatus(visit.id, data.status);
-                    return;
-                  }
-                }}
-                onDelete={() => handleDeleteVisitor(visit.id)}
-              />
-            );
-          })}
-        </div>
-
-        {showVisitorForm ? (
-          <AddVisitorForm tariffs={tariffs} onAdd={handleAddVisitor}
-            onCancel={() => setShowVisitorForm(false)} />
-        ) : (
-          <button onClick={() => setShowVisitorForm(true)}
-            className="text-brand text-xs hover:underline mt-2"
-            data-testid="btn-add-visitor">
-            + Добавить посетителя
-          </button>
-        )}
-
-        {/* Итого */}
-        {record.visits.length > 0 && (
-          <div className="flex justify-end items-center gap-2 mt-2">
-            <span className="text-sm text-ink-mid">Итого:</span>
-            <input type="number" className="w-24 text-right rounded-lg border px-2 py-1 text-sm"
-              style={inputStyle} value={customPrice !== '' ? customPrice : total}
-              onChange={e => { setCustomPrice(e.target.value); markChanged(); }}
-              data-testid="input-custom-price" />
-            <span className="text-sm">₽</span>
-          </div>
-        )}
+      {/* Custom price override (unique to /clients) */}
+      <div className="flex justify-end items-center gap-2">
+        <span className="text-sm text-ink-mid">Итого:</span>
+        <input type="number" className="w-24 text-right rounded-lg border px-2 py-1 text-sm"
+          style={inputStyle} value={customPrice !== '' ? customPrice : total}
+          onChange={e => { setCustomPrice(e.target.value); markChanged(); }}
+          data-testid="input-custom-price" />
+        <span className="text-sm">₽</span>
       </div>
 
-      {/* Payment section — shared atoms */}
-      <div>
-        <h4 className="text-xs font-medium text-ink-mid mb-2">Оплата</h4>
-        <PaymentTotals total={displayTotal} paid={totalPaid} className="mb-2" />
-        <PaymentList payments={Array.isArray(payments) ? payments : []} onDelete={handleDeletePayment} />
-        <div className="mt-2">
-          <PaymentForm total={displayTotal} paid={totalPaid} onSubmit={handleAddPayment} />
-        </div>
-      </div>
+      {/* Payments table */}
+      <RecordPaymentsTable
+        payments={Array.isArray(payments) ? payments : []}
+        onAdd={handleAddPayment}
+        onDelete={handleDeletePayment}
+      />
 
       {/* Comment */}
-      <div>
-        <h4 className="text-xs font-medium text-ink-mid mb-2">Комментарий</h4>
-        <textarea className="w-full rounded-lg border px-3 py-2 text-sm bg-white" style={inputStyle}
-          value={comment} onChange={e => { setComment(e.target.value); markChanged(); }}
-          placeholder="Добавить комментарий..." rows={2} data-testid="input-comment" />
-      </div>
+      <RecordComments value={comment} onChange={(v) => { setComment(v); markChanged(); }} />
 
-      {/* Dates */}
-      <div className="text-xs text-ink-light" data-testid="record-dates">
-        <span>Создан: {new Date(record.created_at).toLocaleDateString('ru-RU')} {new Date(record.created_at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}</span>
-        <span className="mx-2">|</span>
-        <span>Обновлён: {new Date(record.updated_at).toLocaleDateString('ru-RU')} {new Date(record.updated_at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}</span>
-      </div>
+      {/* Timestamps */}
+      <RecordTimestamps createdAt={record.created_at} updatedAt={record.updated_at} />
 
       {/* Actions */}
       <div className="flex justify-between items-center pt-4 border-t" style={{ borderColor: 'var(--line)' }}>

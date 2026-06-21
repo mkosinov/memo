@@ -4,8 +4,8 @@ import React from 'react';
 
 export interface Tab {
   id: string;
-  label: string;
-  sublabel?: string;
+  label: React.ReactNode;
+  sublabel?: React.ReactNode;
   color?: string;
 }
 

@@ -3,14 +3,15 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import { useSchedule } from '@/contexts/ScheduleContext';
 import { useRecords } from '@/contexts/RecordsContext';
+import { useClients } from '@/contexts/ClientsContext';
 import { useUI } from '@/contexts/UIContext';
 import type { Activity, Service } from '@memo/domain';
-import { formatActivityContext } from '@/lib/utils';
+import { formatActivityContext, formatTime } from '@/lib/utils';
 import { TabNav, type Tab } from './TabNav';
 import { SettingsTab } from './SettingsTab';
 import { ClientTab } from './ClientTab';
 import { NewBookingTab } from './NewBookingTab';
-import { ModalFooter } from './ModalFooter';
+import { Modal } from '@/app/components/shared/modal/Modal';
 import type { TariffResponse } from '@memo/api-client';
 import { useRecordMutations } from '@/hooks/useRecordMutations';
 
@@ -29,8 +30,9 @@ function getServiceTariffs(service: Service | undefined): TariffResponse[] {
 }
 
 export function ActivityDetailsModal({ isOpen, onClose, activity, mode }: ActivityDetailsModalProps) {
-  const { services, updateActivity } = useSchedule();
+  const { services, updateActivity, deleteActivity } = useSchedule();
   const { records, clients, payments } = useRecords();
+  const { clients: clientsList } = useClients();
   const { showToast } = useUI();
 
   const [activeTab, setActiveTab] = useState(mode === 'quickAdd' ? 'new-booking' : 'settings');
@@ -77,21 +79,71 @@ export function ActivityDetailsModal({ isOpen, onClose, activity, mode }: Activi
     return map;
   }, [activityRecords]);
 
+  // Build a map from useClients() (has stats) for O(1) lookup
+  const clientsWithStats = useMemo(() => {
+    const map = new Map(clientsList.map(c => [c.id, c]));
+    return map;
+  }, [clientsList]);
+
   // Build tabs: settings + client tabs
   const tabs: Tab[] = useMemo(() => {
     const settingsTab: Tab = { id: 'settings', label: 'Настройка' };
     const clientTabs: Tab[] = activityRecords.map((record) => {
-      const client = clients.get(record.client_id ?? '');
+    const client = clientsWithStats.get(record.client_id ?? '') ?? clients.get(record.client_id ?? '');
       const name = client?.name?.trim();
       const phone = client?.phone?.trim();
+      const totalSeats = record.visits.length + (record.anonym_visits ?? 0);
       return {
         id: `client-${record.id}`,
-        label: name || phone || 'Без контакта',
-        sublabel: name && phone ? phone : '',
+        label: (
+          <div className="flex items-start justify-between w-full min-w-0">
+            <div className="flex flex-col min-w-0">
+              <span className="truncate">{name || phone || 'Без контакта'}</span>
+              {phone && <span className="text-xs text-ink-light truncate">{phone}</span>}
+            </div>
+            <div className="flex flex-col items-end shrink-0 ml-1">
+              <span className="text-[10px] opacity-70">x{totalSeats}</span>
+              {client && (
+                <span
+                  role="button"
+                  tabIndex={0}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onClose();
+                    window.open(`/clients?clientId=${client.id}`, '_blank', 'noopener,noreferrer');
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.stopPropagation();
+                      onClose();
+                      window.open(`/clients?clientId=${client.id}`, '_blank', 'noopener,noreferrer');
+                    }
+                  }}
+                  className="cursor-pointer hover:opacity-100 inline-flex"
+                  title="Открыть профиль"
+                  data-testid={`open-profile-${record.id}`}
+                >
+                  <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                    <polyline points="15 3 21 3 21 9" />
+                    <line x1="10" y1="14" x2="21" y2="3" />
+                  </svg>
+                </span>
+              )}
+            </div>
+          </div>
+        ),
       };
     });
     return [settingsTab, ...clientTabs];
   }, [activityRecords, clients]);
+
+  // Delete activity handler
+  const handleDeleteActivity = useCallback(() => {
+    deleteActivity(activity.id);
+    showToast('Активность удалена');
+    onClose();
+  }, [activity.id, deleteActivity, showToast, onClose]);
 
   // Activity update callback for settings
   const handleActivityUpdate = useCallback(
@@ -154,27 +206,6 @@ export function ActivityDetailsModal({ isOpen, onClose, activity, mode }: Activi
     [addPayment, showToast],
   );
 
-  // Financial summary
-  const totalCost = useMemo(
-    () =>
-      activityRecords.reduce(
-        (sum, record) => sum + record.visits.reduce((vSum, v) => vSum + v.price, 0),
-        0,
-      ),
-    [activityRecords],
-  );
-
-  const totalPaid = useMemo(
-    () =>
-      activityRecords.reduce((sum, record) => {
-        const rp = payments.get(record.id) || [];
-        return sum + rp.reduce((pSum, p) => pSum + p.amount, 0);
-      }, 0),
-    [activityRecords, payments],
-  );
-
-  const totalOwed = totalCost - totalPaid;
-
   // Content renderer per active tab
   const renderContent = () => {
     if (activeTab === 'new-booking') {
@@ -232,7 +263,7 @@ export function ActivityDetailsModal({ isOpen, onClose, activity, mode }: Activi
 
   // Activity context header label
   const contextLabel = activity.date
-    ? formatActivityContext(new Date(activity.date + 'T12:00:00'))
+    ? formatActivityContext(new Date(activity.date + 'T' + formatTime(activity.startTime) + ':00'))
     : '';
 
   return (
@@ -245,50 +276,33 @@ export function ActivityDetailsModal({ isOpen, onClose, activity, mode }: Activi
       />
 
       {/* Modal */}
-      <div
-        data-testid="activity-details-modal-container"
-        className="relative bg-white rounded-xl shadow-2xl w-full max-w-2xl mx-4 flex flex-col overflow-hidden h-[80vh]"
+      <Modal
+        title={activity.serviceName || 'Мероприятие'}
+        context={contextLabel}
+        onClose={onClose}
+        footer={
+          <div data-testid="modal-footer">
+            <button
+              onClick={handleDeleteActivity}
+              className="text-red-500 hover:text-red-600 transition-colors text-sm"
+              data-testid="btn-delete-activity"
+            >
+              Удалить активность
+            </button>
+          </div>
+        }
+        testId="activity-details-modal-container"
       >
-        {/* Context header */}
-        <div
-          data-testid="activity-context"
-          className="flex items-center justify-between px-5 py-3 border-b shrink-0"
-          style={{ borderColor: 'var(--line)', backgroundColor: 'var(--white)' }}
-        >
-          <div className="flex items-center gap-3 min-w-0">
-            <h2 className="text-sm font-semibold text-ink truncate">
-              {activity.serviceName || 'Мероприятие'}
-            </h2>
-            {contextLabel && (
-              <span className="text-xs text-ink-light shrink-0">{contextLabel}</span>
-            )}
-          </div>
-          <button
-            onClick={onClose}
-            aria-label="Закрыть"
-            className="text-ink-light hover:text-ink-mid text-xl leading-none shrink-0 ml-2"
-            data-testid="modal-close-btn"
-          >
-            ×
-          </button>
+        <TabNav
+          tabs={tabs}
+          activeTab={activeTab}
+          onTabChange={setActiveTab}
+          onAddClick={handleAddClick}
+        />
+        <div className="flex-1 overflow-y-auto" style={{ backgroundColor: 'var(--white)' }}>
+          {renderContent()}
         </div>
-
-        {/* Body: TabNav + Content */}
-        <div className="flex flex-1 overflow-hidden min-h-0">
-          <TabNav
-            tabs={tabs}
-            activeTab={activeTab}
-            onTabChange={setActiveTab}
-            onAddClick={handleAddClick}
-          />
-          <div className="flex-1 overflow-y-auto" style={{ backgroundColor: 'var(--white)' }}>
-            {renderContent()}
-          </div>
-        </div>
-
-        {/* Footer */}
-        <ModalFooter totalCost={totalCost} totalOwed={totalOwed} />
-      </div>
+      </Modal>
     </div>
   );
 }

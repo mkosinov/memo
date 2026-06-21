@@ -1,11 +1,12 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getRecords, getActivity } from '@memo/api-client';
 import { useClients } from '@/contexts/ClientsContext';
-import { ClientInfoTab } from './ClientInfoTab';
+import { ClientInfoTab, type ClientInfoTabHandle } from './ClientInfoTab';
 import { ClientRecordTab } from './ClientRecordTab';
+import { Modal } from '@/app/components/shared/modal/Modal';
 import type { ClientWithStats, ActivityResponse } from '@memo/api-client';
 
 interface ClientCardModalProps {
@@ -18,6 +19,8 @@ interface ClientCardModalProps {
 
 export function ClientCardModal({ client, isOpen, onClose, onClientCreated, mode }: ClientCardModalProps) {
   const [activeTab, setActiveTab] = useState('client');
+  const [hasChanges, setHasChanges] = useState(false);
+  const clientInfoRef = useRef<ClientInfoTabHandle>(null);
   const { createClient, updateClient, deleteClient } = useClients();
 
   // Close on Escape
@@ -77,9 +80,41 @@ export function ClientCardModal({ client, isOpen, onClose, onClientCreated, mode
       />
 
       {/* Modal */}
-      <div
-        className="relative bg-white rounded-xl shadow-2xl w-full max-w-2xl mx-4 flex overflow-hidden"
-        style={{ maxHeight: '85vh' }}
+      <Modal
+        onClose={onClose}
+        footer={
+          activeTab === 'client' ? (
+            <div className="flex justify-between items-center">
+              {mode === 'view' && client ? (
+                <button
+                  onClick={handleDelete}
+                  className="px-4 py-2 text-sm text-red-500 hover:text-red-600 rounded-lg transition-colors"
+                >
+                  Удалить
+                </button>
+              ) : <div />}
+              <div className="flex gap-2">
+                {mode === 'view' && (
+                  <button
+                    onClick={() => clientInfoRef.current?.cancel()}
+                    className="px-4 py-2 text-sm rounded-lg border transition-colors"
+                    style={{ borderColor: 'var(--line)', color: 'var(--ink)' }}
+                  >
+                    Отмена
+                  </button>
+                )}
+                <button
+                  disabled={!hasChanges}
+                  onClick={() => clientInfoRef.current?.save()}
+                  className="px-4 py-2 text-sm text-white rounded-lg disabled:bg-gray-300 transition-colors"
+                  style={{ backgroundColor: hasChanges ? 'var(--brand)' : undefined }}
+                >
+                  {mode === 'create' ? 'Создать' : 'Сохранить'}
+                </button>
+              </div>
+            </div>
+          ) : undefined
+        }
       >
         {/* Left panel */}
         <div
@@ -135,8 +170,10 @@ export function ClientCardModal({ client, isOpen, onClose, onClientCreated, mode
         <div data-testid="client-card-right-panel" className="flex-1 overflow-y-auto">
           {activeTab === 'client' ? (
             <ClientInfoTab
+              ref={clientInfoRef}
               client={client}
               mode={mode}
+              onHasChanges={setHasChanges}
               onSave={mode === 'create'
                 ? async (data) => {
                     try {
@@ -152,10 +189,10 @@ export function ClientCardModal({ client, isOpen, onClose, onClientCreated, mode
               onDelete={mode === 'view' && client ? handleDelete : undefined}
             />
           ) : (
-            <ClientRecordTab recordId={activeTab.replace('record-', '')} clientId={client!.id} onClose={onClose} />
+            <ClientRecordTab recordId={activeTab.replace('record-', '')} clientId={client!.id} onClose={onClose} client={client} />
           )}
         </div>
-      </div>
+      </Modal>
     </div>
   );
 }

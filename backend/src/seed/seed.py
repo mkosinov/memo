@@ -300,12 +300,12 @@ async def _seed_visitors(session) -> None:
 
 async def _seed_records(session) -> None:
     records = [
-        {"id": "r1", "activity_id": "ev_0", "client_id": "c1", "status": "confirmed", "seats": 2, "comment": None},
-        {"id": "r2", "activity_id": "ev_1", "client_id": "c2", "status": "confirmed", "seats": 2, "comment": None},
-        {"id": "r3", "activity_id": "ev_4", "client_id": "c3", "status": "confirmed", "seats": 2, "comment": None},
-        {"id": "r4", "activity_id": "ev_5", "client_id": "c1", "status": "confirmed", "seats": 1, "comment": None},
-        {"id": "r5", "activity_id": "ev_10", "client_id": "c5", "status": "confirmed", "seats": 2, "comment": None},
-        {"id": "r6", "activity_id": "ev_17", "client_id": "c4", "status": "pending", "seats": 1, "comment": None},
+        {"id": "r1", "activity_id": "ev_0", "client_id": "c1", "status": "visited", "seats": 2, "comment": None},
+        {"id": "r2", "activity_id": "ev_1", "client_id": "c2", "status": "visited", "seats": 2, "comment": None},
+        {"id": "r3", "activity_id": "ev_4", "client_id": "c3", "status": "visited", "seats": 2, "comment": None},
+        {"id": "r4", "activity_id": "ev_5", "client_id": "c1", "status": "visited", "seats": 1, "comment": None},
+        {"id": "r5", "activity_id": "ev_10", "client_id": "c5", "status": "waiting", "seats": 2, "comment": None},
+        {"id": "r6", "activity_id": "ev_17", "client_id": "c4", "status": "waiting", "seats": 1, "comment": None},
     ]
     for r in records:
         if not await _exists(session, Record, r["id"]):

@@ -23,7 +23,7 @@ class ActivityService(GenericService[ActivityCreate, ActivityUpdate, ActivityRes
     # Patch should silently ignore null values for these fields.
     NOT_NULL_FIELDS = {"master_id", "service_id", "location_id", "start", "duration", "capacity"}
 
-    # Statuses considered "active" for occupied-seat aggregation.
+    # Only VisitStatus values that mean "the visit will happen or has happened".
     # Cancelled and missed are excluded from the sum.
     ACTIVE_RECORD_STATUSES = ("waiting", "visited")
 
@@ -67,12 +67,12 @@ class ActivityService(GenericService[ActivityCreate, ActivityUpdate, ActivityRes
     ) -> int:
         """Return SUM(seats) for active records (excludes cancelled/missed).
 
-        Active = status IN ('waiting', 'visited'). This matches
-        the VisitStatus enum values.
+        Active = is_active AND status IN ('waiting', 'visited').
         """
         result = await db_session.execute(
             select(func.coalesce(func.sum(Record.seats), 0)).where(
                 Record.activity_id == activity_id,
+                Record.is_active.is_(True),  # type: ignore[union-attr]
                 Record.status.in_(self.ACTIVE_RECORD_STATUSES),
             )
         )

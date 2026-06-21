@@ -11,18 +11,22 @@ import { PaymentList } from '@/app/components/shared/payments/PaymentList';
 import { PaymentForm } from '@/app/components/shared/payments/PaymentForm';
 import { PaymentTotals } from '@/app/components/shared/payments/PaymentTotals';
 import { AddVisitorForm } from '@/app/components/shared/visitors/AddVisitorForm';
+import { ClientStatistics } from '@/app/components/shared/record/blocks/ClientStatistics';
 import { useRecordData } from '@/hooks/useRecordData';
 import { useRecordMutations } from '@/hooks/useRecordMutations';
 import { useSchedule } from '@/contexts/ScheduleContext';
 import type { VisitStatus } from '@memo/domain';
+import type { ClientWithStats } from '@memo/api-client';
 
 interface ClientRecordTabProps {
   recordId: string;
   clientId: string;
   onClose: () => void;
+  /** Client-level stats (optional, from parent). */
+  client?: ClientWithStats | null;
 }
 
-export function ClientRecordTab({ recordId, clientId, onClose }: ClientRecordTabProps) {
+export function ClientRecordTab({ recordId, clientId, onClose, client }: ClientRecordTabProps) {
   const queryClient = useQueryClient();
   const { gridFrequency } = useSchedule();
 
@@ -182,6 +186,16 @@ export function ClientRecordTab({ recordId, clientId, onClose }: ClientRecordTab
       {headerData && (
         <RecordHeader data={headerData} onAnonymVisitsChange={handleAnonymChange} />
       )}
+
+      {/* Client statistics */}
+      <ClientStatistics
+        stats={client ? {
+          visitsCount: client.visits_count,
+          missedVisits: client.missed_visits,
+          lastVisit: client.last_visit,
+          totalPaid: client.total_paid,
+        } : undefined}
+      />
 
       {/* Row 1: Date / Time / Location */}
       <div className="flex flex-wrap gap-3 items-end">

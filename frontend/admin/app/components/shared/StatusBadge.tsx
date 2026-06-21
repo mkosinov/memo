@@ -8,7 +8,7 @@ export interface StatusBadgeProps {
 
 export function StatusBadge({ status, className = '' }: StatusBadgeProps) {
   const config = VISIT_STATUS_CONFIG[status];
-  const Icon = config.icon;
+  const { Icon } = config;
   return (
     <span
       data-testid={`status-badge-${status}`}

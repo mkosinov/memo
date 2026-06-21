@@ -1,26 +1,43 @@
 'use client';
 
-import React, { useState, useCallback, useRef, useEffect } from 'react';
-import type { RecordResponse, ClientResponse, VisitorResponse, PaymentResponse, TariffResponse } from '@memo/api-client';
+import React, { useState, useCallback, useRef } from 'react';
+import type { RecordResponse, ClientResponse, VisitorResponse, PaymentResponse, TariffResponse, ClientWithStats } from '@memo/api-client';
 import type { RecordPatchData } from '@/hooks/useRecordMutations';
 import type { VisitStatus } from '@memo/domain';
 import { useRouter } from 'next/navigation';
-import { RecordHeader } from '@/app/components/shared/records/RecordHeader';
-import { RecordVisitRow } from '@/app/components/shared/records/RecordVisitRow';
-import { PaymentList } from '@/app/components/shared/payments/PaymentList';
-import { PaymentForm } from '@/app/components/shared/payments/PaymentForm';
-import { PaymentTotals } from '@/app/components/shared/payments/PaymentTotals';
-import { AddVisitorForm } from '@/app/components/shared/visitors/AddVisitorForm';
+import { RecordSummary } from '@/app/components/shared/record/blocks/RecordSummary';
+import { RecordVisitsTable } from '@/app/components/shared/record/blocks/RecordVisitsTable';
+import { RecordPaymentsTable } from '@/app/components/shared/record/blocks/RecordPaymentsTable';
+import { RecordComments } from '@/app/components/shared/record/blocks/RecordComments';
+import { RecordTimestamps } from '@/app/components/shared/record/blocks/RecordTimestamps';
+import { ClientStatistics } from '@/app/components/shared/record/blocks/ClientStatistics';
 import { useRecordData } from '@/hooks/useRecordData';
 import { useRecordMutations } from '@/hooks/useRecordMutations';
 import type { RecordWithDerived } from '@/app/components/shared/records/types';
 import { computeRecordStatus } from '@memo/domain';
 import { safeStatus } from '@/app/lib/status-utils';
-import { formatSeats } from '@/app/lib/pluralize';
+import { WaitingIcon, VisitedIcon, MissedIcon, CancelledIcon } from '@/app/components/shared/icons/StatusIcons';
+
+const STATUS_CONFIG: Record<VisitStatus, { label: string; color: string }> = {
+  waiting: { label: 'Ожидание', color: '#F59E0B' },
+  visited: { label: 'Посетил', color: '#10B981' },
+  cancelled: { label: 'Отменён', color: '#6B7280' },
+  missed: { label: 'Неявка', color: '#EF4444' },
+};
+
+function renderStatusIcon(status: VisitStatus): React.ReactNode {
+  const iconClass = 'w-3.5 h-3.5';
+  switch (status) {
+    case 'waiting': return <WaitingIcon className={iconClass} />;
+    case 'visited': return <VisitedIcon className={iconClass} />;
+    case 'cancelled': return <CancelledIcon className={iconClass} />;
+    case 'missed': return <MissedIcon className={iconClass} />;
+  }
+}
 
 interface ClientTabProps {
   record: RecordResponse;
-  client: ClientResponse | undefined;
+  client: ClientResponse | ClientWithStats | undefined;
   visitors: VisitorResponse[];
   visits: RecordResponse['visits'];
   payments: PaymentResponse[];
@@ -54,28 +71,15 @@ export function ClientTab({
   const { visitorsMap } = useRecordData(record.id, client?.id ?? '');
   const { updateVisitStatus } = useRecordMutations(record.activity_id ?? '', record.id);
 
-  // Derive status from visits (atom pattern)
+  // Derive status from visits
   const status: VisitStatus = computeRecordStatus(
     (visits || []).map(v => ({ id: v.id, status: safeStatus(v.status) })),
   );
 
-  // Build RecordWithDerived for atom consumption
-  const recordData: RecordWithDerived = {
-    record,
-    status,
-    visits: visits || [],
-    payments,
-    client: client ? { id: client.id, name: client.name, phone: client.phone } : null,
-    tariffs: serviceTariffs,
-  };
+  // Comment state
+  const [comment, setComment] = useState(record.comment || '');
 
-  // ── Surface-specific handlers ─────────────────────────────────────────────
-
-  const handleOpenProfile = useCallback(() => {
-    if (!client) return;
-    onClose?.();
-    router.push(`/clients?clientId=${client.id}`);
-  }, [client, onClose, router]);
+  // ── Handlers ─────────────────────────────────────────────────────────────
 
   const handleDelete = useCallback(() => {
     isDeletingRef.current = true;
@@ -89,27 +93,29 @@ export function ClientTab({
     }, 5000);
   }, [onDeleteRecord, record.id, showToast]);
 
-  const handleAnonymChange = useCallback((value: number) => {
-    onUpdateRecord(record.id, { anonym_visits: value } as any).catch(() => {
-      showToast('Ошибка изменения анонимных посетителей');
+  const handleStatusChange = useCallback((newStatus: VisitStatus) => {
+    // Update all visits to the new status
+    const updatedVisits = (visits || []).map(v => ({
+      visitor_id: v.visitor_id,
+      price: v.price,
+      status: newStatus,
+    }));
+    onUpdateRecord(record.id, { visits: updatedVisits } as any).catch(() => {
+      showToast('Ошибка обновления статуса');
     });
-  }, [record.id, onUpdateRecord, showToast]);
+  }, [visits, record.id, onUpdateRecord, showToast]);
 
-  const handleVisitChange = useCallback((visitId: string, data: { status?: VisitStatus; name?: string; age?: number | null; tariff_id?: string }) => {
-    // Status-only changes → dedicated endpoint
-    if (data.status !== undefined && data.name === undefined && data.age === undefined && data.tariff_id === undefined) {
+  const handleVisitChange = useCallback((visitId: string, data: { status?: VisitStatus; tariff_id?: string; price?: number }) => {
+    if (data.status !== undefined && data.tariff_id === undefined && data.price === undefined) {
       updateVisitStatus(visitId, data.status);
       return;
     }
-    // Non-status changes → full visit update via record patch
     const updatedVisits = (visits || []).map(v => {
       if (v.id !== visitId) return { visitor_id: v.visitor_id, price: v.price, status: v.status };
       return {
         visitor_id: v.visitor_id,
-        price: v.price,
+        price: data.price ?? v.price,
         status: data.status || v.status,
-        name: data.name,
-        age: data.age,
         tariff_id: data.tariff_id,
       };
     });
@@ -117,6 +123,16 @@ export function ClientTab({
       showToast('Ошибка обновления посетителя');
     });
   }, [visits, record.id, onUpdateRecord, showToast, updateVisitStatus]);
+
+  // TODO: No API endpoint exists yet for updating visitor name/age.
+  // When the API is ready, replace console.warn with the actual call.
+  const handleVisitorChange = useCallback((_visitorId: string, _data: { name?: string; age?: number | null }) => {
+    console.warn('[ClientTab] onChangeVisitor: API not implemented yet', _visitorId, _data);
+  }, []);
+
+  const handleVisitPriceChange = useCallback((visitId: string, price: number) => {
+    handleVisitChange(visitId, { price });
+  }, [handleVisitChange]);
 
   const handleDeleteVisit = useCallback(async (visitId: string) => {
     const remaining = (visits || []).filter(v => v.id !== visitId).map(v => ({
@@ -138,6 +154,12 @@ export function ClientTab({
     }
   }, [onAddVisitor, serviceTariffs]);
 
+  const handleAnonymChange = useCallback((value: number) => {
+    onUpdateRecord(record.id, { anonym_visits: value } as any).catch(() => {
+      showToast('Ошибка изменения анонимных посетителей');
+    });
+  }, [record.id, onUpdateRecord, showToast]);
+
   const handleAddPayment = useCallback((p: { amount: number; method: string }) => {
     onAddPayment(record.id, p.amount, p.method);
   }, [onAddPayment, record.id]);
@@ -151,77 +173,71 @@ export function ClientTab({
     }
   }, [onDeletePayment, showToast]);
 
+  const handleCommentChange = useCallback((value: string) => {
+    setComment(value);
+    onUpdateRecord(record.id, { comment: value } as any).catch(() => {
+      showToast('Ошибка сохранения комментария');
+    });
+  }, [record.id, onUpdateRecord, showToast]);
+
+  // ── Derived data ─────────────────────────────────────────────────────────
+
   const totalCost = (visits || []).reduce((sum, v) => sum + v.price, 0);
   const totalPaid = payments.reduce((sum, p) => sum + p.amount, 0);
 
+  // Compute stats for ClientStatistics
+  const stats = client && 'visits_count' in client
+    ? {
+        visitsCount: client.visits_count,
+        missedVisits: client.missed_visits,
+        lastVisit: client.last_visit,
+        totalPaid: client.total_paid,
+      }
+    : undefined;
+
   return (
-    <div className="space-y-4 p-4" data-testid="client-tab">
-      {/* Record header with name, phone, status, anonym_visits */}
-      <RecordHeader data={recordData} onAnonymVisitsChange={handleAnonymChange} />
+    <div className="flex flex-col min-h-full space-y-5 p-4" data-testid="client-tab">
+      {/* Summary: cost + status */}
+      <RecordSummary
+        totalCost={totalCost}
+        totalPaid={totalPaid}
+        seats={(visits || []).length + (record.anonym_visits ?? 0)}
+        status={status}
+        onStatusChange={handleStatusChange}
+      />
 
-      {/* Client link */}
-      {client && (
-        <div>
-          <button
-            onClick={handleOpenProfile}
-            className="inline-flex items-center gap-1.5 text-brand text-xs hover:underline"
-            data-testid="client-link"
-            type="button"
-          >
-            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-              <polyline points="15 3 21 3 21 9" />
-              <line x1="10" y1="14" x2="21" y2="3" />
-            </svg>
-            Открыть профиль
-          </button>
-        </div>
-      )}
+      {/* Client statistics */}
+      <ClientStatistics stats={stats} />
 
-      {/* Visitors — shared atom rows */}
-      <div>
-        <div className="flex items-center justify-between mb-2">
-          <h4 className="text-xs font-medium text-ink-mid">Посетители</h4>
-          <span className="text-xs text-ink-mid" data-testid="record-seats">
-            {formatSeats(record.seats)}
-          </span>
-        </div>
+      {/* Visits table */}
+      <RecordVisitsTable
+        visits={visits || []}
+        visitorsMap={visitorsMap}
+        tariffs={serviceTariffs}
+        anonymVisits={record.anonym_visits ?? 0}
+        totalCost={totalCost}
+        recordStatus={status}
+        onChangeVisit={handleVisitChange}
+        onChangeVisitor={handleVisitorChange}
+        onChangeVisitPrice={handleVisitPriceChange}
+        onDeleteVisit={handleDeleteVisit}
+        onAnonymVisitsChange={handleAnonymChange}
+        onAddVisitor={handleAddVisitor}
+      />
 
-        {visits.length === 0 && (
-          <p className="text-xs text-ink-light">Нет посетителей</p>
-        )}
+      {/* Payments table */}
+      <RecordPaymentsTable
+        payments={payments}
+        onDelete={handleDeletePayment}
+        onAdd={handleAddPayment}
+      />
 
-        {visits.map((visit) => {
-          const visitor = visitorsMap.get(visit.visitor_id ?? '');
-          return (
-            <RecordVisitRow
-              key={visit.id}
-              visit={visit}
-              visitorName={visitor?.name}
-              visitorAge={visitor?.age}
-              tariffId={visit.tariff_id ?? ''}
-              tariffs={serviceTariffs}
-              onChange={(data) => handleVisitChange(visit.id, data)}
-              onDelete={() => handleDeleteVisit(visit.id)}
-            />
-          );
-        })}
+      {/* Comment */}
+      <RecordComments value={comment} onChange={handleCommentChange} />
 
-        <AddVisitorForm tariffs={serviceTariffs} onAdd={handleAddVisitor} onCancel={() => {}} />
-      </div>
-
-      {/* Payment section — shared atoms */}
-      <div className="space-y-2" data-testid="payment-summary">
-        <h4 className="text-xs font-medium text-ink-mid">Оплата</h4>
-        <PaymentTotals total={totalCost} paid={totalPaid} />
-        <PaymentList payments={payments} onDelete={handleDeletePayment} />
-        <div className="mt-2">
-          <PaymentForm total={totalCost} paid={totalPaid} onSubmit={handleAddPayment} />
-        </div>
-      </div>
-
-      {/* Delete button */}
-      <div className="pt-2 border-t" style={{ borderColor: 'var(--line)' }}>
+      {/* Timestamps + delete — pushed to bottom */}
+      <div className="mt-auto pt-2 border-t" style={{ borderColor: 'var(--line)' }}>
+        <RecordTimestamps createdAt={record.created_at} updatedAt={record.updated_at} />
         <button
           onClick={handleDelete}
           className="text-sm text-red-500 hover:text-red-600 transition-colors"

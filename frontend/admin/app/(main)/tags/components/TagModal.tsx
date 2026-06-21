@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useCallback, useId } from 'react';
 import { TAG_FIELDS, type TagFieldConfig } from './tagFields';
+import { Modal } from '@/app/components/shared/modal/Modal';
 
 export interface TagModalProps {
   mode: 'create' | 'edit';
@@ -150,32 +151,31 @@ export function TagModal({
         className="absolute inset-0 bg-black/30 backdrop-blur-sm"
         onClick={handleClose}
       />
-      <div
-        className="relative bg-white rounded-xl shadow-2xl w-full max-w-[600px] mx-4 flex flex-col overflow-hidden"
-        style={{ maxHeight: '85vh' }}
-      >
-        {/* Header */}
-        <div className="flex justify-between items-start px-6 pt-6 pb-4">
-          <div>
-            <h2 className="text-lg font-semibold" style={{ color: 'var(--ink)' }}>
-              {title}
-            </h2>
-            {subtitle && (
-              <p className="text-sm mt-0.5" style={{ color: 'var(--ink-light)' }}>
-                {subtitle}
-              </p>
-            )}
+      <Modal
+        title={title}
+        context={subtitle}
+        onClose={handleClose}
+        size="small"
+        footer={
+          <div className="flex justify-end gap-2">
+            <button
+              onClick={handleClose}
+              className="px-4 py-2 text-sm rounded-lg border transition-colors"
+              style={{ borderColor: 'var(--line)', color: 'var(--ink)' }}
+            >
+              Отмена
+            </button>
+            <button
+              onClick={handleSubmit}
+              disabled={isSubmitting}
+              className="px-4 py-2 text-sm rounded-lg text-white transition-colors disabled:opacity-50"
+              style={{ backgroundColor: 'var(--brand)' }}
+            >
+              {isSubmitting ? 'Сохранение...' : 'Сохранить'}
+            </button>
           </div>
-          <button
-            onClick={handleClose}
-            className="w-8 h-8 flex items-center justify-center rounded-lg transition-colors hover:opacity-80"
-            style={{ backgroundColor: 'var(--surface)', color: 'var(--ink-light)' }}
-            aria-label="Закрыть"
-          >
-            ✕
-          </button>
-        </div>
-
+        }
+      >
         {/* Scrollable body */}
         <div className="flex-1 overflow-y-auto px-6 pb-4 space-y-4">
           {TAG_FIELDS.map((field) => (
@@ -188,29 +188,7 @@ export function TagModal({
             />
           ))}
         </div>
-
-        {/* Footer */}
-        <div
-          className="flex justify-end gap-2 px-6 py-4 border-t"
-          style={{ borderColor: 'var(--line)' }}
-        >
-          <button
-            onClick={handleClose}
-            className="px-4 py-2 text-sm rounded-lg border transition-colors"
-            style={{ borderColor: 'var(--line)', color: 'var(--ink)' }}
-          >
-            Отмена
-          </button>
-          <button
-            onClick={handleSubmit}
-            disabled={isSubmitting}
-            className="px-4 py-2 text-sm rounded-lg text-white transition-colors disabled:opacity-50"
-            style={{ backgroundColor: 'var(--brand)' }}
-          >
-            {isSubmitting ? 'Сохранение...' : 'Сохранить'}
-          </button>
-        </div>
-      </div>
+      </Modal>
     </div>
   );
 }

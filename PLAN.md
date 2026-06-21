@@ -345,6 +345,46 @@ Follow-up fixes from manual testing of Wave 5 (branch `fix/wave5-ux-bugs`, 4 com
 - **#83** Private toggle alignment — `ml-auto` to right edge
 - **#84** Status not persisting — wired `onUpdateRecord` to `patchRecord` mutation; status resets on record switch
 
+---
+
+## Wave 6 — Record Status Derivation & Atom Extraction: ✅ Completed 2026-06-20
+
+**Issues addressed:** #78 (StatusPicker refactor), #79 (record row duplication), #82 (anonym_visits editing), #98 (RecordStatus migration)
+
+**Branch:** `fix/wave6-status-derivation-atom-extraction` (off main @ 4cba62b)
+
+**Total commits:** 36 (28 implementation + 4 review cleanups + 2 spec updates + 2 plan/spec)
+
+**LOC reduction:** −749 LOC (−57%)
+
+### Goal
+
+Migrate `RecordStatus` (pending/confirmed/cancelled/no_show) to derived `VisitStatus` (waiting/visited/missed/cancelled) and extract shared record atoms to `app/components/shared/{records,payments,visitors}/` so that `ClientRecordTab` and `ClientTab` are thin wrappers.
+
+### Phases
+
+- **Phase 0 (Backend):** `VisitStatus` enum + `computeRecordStatus` derivation function in TypeScript (`@memo/domain`) and Python (FastAPI). Schema `extra='forbid'` rejects `status` field with 422. Alembic data migration `4d5e6f7a8b9c` re-maps Wave 5 enum values.
+- **Phase 1 (Frontend enum):** Single `VISIT_STATUS_CONFIG` in `app/components/shared/config/` replaces 3 duplicates. `StatusPicker` moved to `shared/` and rebuilt on `CustomSelect`. New `StatusBadge` (read-only) component. `safeStatus()` helper for runtime defensive guards.
+- **Phase 2 (8 atoms extracted):** `records/types.ts` (RecordWithDerived), `RecordHeader`, `RecordVisitRow`, `PaymentList`, `PaymentForm`, `PaymentTotals`, `AddVisitorForm`, `VisitorRow` — all in `app/components/shared/{records,payments,visitors}/`.
+- **Phase 3 (Wire parents):** `useRecordData` returns derived `status: VisitStatus`. `useRecordMutations` gains `updateAnonymVisits` and `updateVisitStatus`. `ClientRecordTab` 746→329 LOC (−56%). `ClientTab` 559→227 LOC (−59%). Total: 1305→556 LOC (−57%, −749 LOC).
+- **Phase 4 (E2E + visual regression):** 4 E2E for User Scenarios 1-4 (`wave6-record-status-derived.spec.ts`), 4 E2E for Scenario 5 (`wave6-status-shared.spec.ts`), 6 visual regression snapshots (`wave6-status-snapshots.spec.ts`). Visual Compliance Gate: 6/6 PASS.
+
+### Test Results
+
+- Backend pytest: 572 passing
+- Frontend vitest: 70+ passing
+- E2E: 14/14 Wave 6 scenarios passing
+- Visual regression: 6/6 snapshots passing
+
+### Closed Issues
+
+- **#78** — StatusPicker refactor → rebuilt on CustomSelect in `shared/` (Phase 1)
+- **#79** — Record row duplication → 9 atoms extracted, −749 LOC (Phase 2+3)
+- **#82** — anonym_visits editing → `updateAnonymVisits` mutation + inline input in `RecordHeader` (Phase 3)
+- **#98** — RecordStatus migration → Alembic data migration re-maps Wave 5 enum (Phase 0)
+
+---
+
 ## Changelog
 - 2026-06-19: **Wave 5 — 14 P1/P3 UX Bugs** — closed #74–#86 (except #73) in ActivityDetailsModal, ClientTab, ActivityCard; 14 commits, 7/7 visual checks passed (branch `fix/wave5-ux-bugs`).
 - 2026-06-19: **Wave 4.5 — Fix TS Errors Blocking Pre-Push Hook** — 55→0 TS errors, 11 commits, closes #88. Deleted 2 dead files, added `maxAge` to `ActivitySchema` + `required` to `TagsFieldConfig`, updated 5 test mock files, type guard + `Array.from` fixes. No suppressions added (branch `fix/ts-errors-blocking-hook`).

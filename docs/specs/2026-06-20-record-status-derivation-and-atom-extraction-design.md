@@ -343,15 +343,14 @@ This is one large wave; the plan must split it into independent, testable sub-ta
 
 For Step 4.5 (Visual Compliance Gate). Format: text-based selectors (`text="..."`) with keyword (tab/button/card/input). The `visual-compliance-check.sh` script extracts quoted text and uses `text=<text>` selector. **Without the keyword, the script falls back to using the description as a CSS selector and fails** (see PR #96 fix).
 
-Smoke checks verify the new pages and shared components are present and rendered correctly. Complex state-flow checks (open modal, click tab, verify content) live in the 14 E2E in `frontend/admin/e2e/wave6-*.spec.ts` and the 6 visual regression snapshots in `wave6-status-snapshots.spec.ts`.
+Smoke checks verify navigation works (the Wave 6 refactor touched all 3 main pages: /clients, /schedule, /records). Complex state-flow checks live in the 14 E2E in `frontend/admin/e2e/wave6-*.spec.ts` and 6 visual regression snapshots in `wave6-status-snapshots.spec.ts`.
 
 - [ ] "Клиенты" button visible (nav item)
 - [ ] "Расписание" button visible (nav item)
 - [ ] "Записи" button visible (nav item)
-- [ ] "Ожидание" tab visible (status label in BookingFilters)
-- [ ] "Посетил" tab visible (status label in BookingFilters)
-- [ ] "Неявка" tab visible (status label in BookingFilters)
-- [ ] "Отменён" tab visible (status label in BookingFilters)
+- [ ] "Мастера" button visible (nav item)
+- [ ] "Справочники" button visible (nav item)
+- [ ] "Фото" button visible (nav item)
 
 ---
 

@@ -8,7 +8,7 @@ import { RecordTable, type Column } from '@/app/components/shared/record/RecordT
 
 const PAYMENT_COLUMNS: Column[] = [
   { key: 'date', label: 'Дата', width: 'w-32 shrink-0' },
-  { key: 'method', label: 'Метод', width: 'w-24 shrink-0' },
+  { key: 'method', label: 'Метод', width: 'w-24 shrink-0', align: 'center' },
   { key: 'amount', label: 'Сумма', width: 'flex-1', align: 'right' },
 ];
 
@@ -101,19 +101,18 @@ export function RecordPaymentsTable({
             testId="payments-total"
             columns={PAYMENT_COLUMNS}
             cells={{
-              amount: <span className="text-sm font-semibold text-ink">{totalPaid.toLocaleString('ru-RU')} ₽</span>,
-            }}
-            action={
-              !isReadOnly && !showForm ? (
+              date: !isReadOnly && !showForm ? (
                 <button
                   onClick={() => setShowForm(true)}
                   className="text-xs text-brand hover:underline transition-colors"
                   data-testid="btn-add-payment"
                 >
-                  + Добавить оплату
+                  + Добавить
                 </button>
-              ) : undefined
-            }
+              ) : null,
+              method: <span className="text-sm text-ink-mid text-right block">Итого</span>,
+              amount: <span className="text-sm font-semibold text-ink">{totalPaid.toLocaleString('ru-RU')} ₽</span>,
+            }}
           />
         )}
 

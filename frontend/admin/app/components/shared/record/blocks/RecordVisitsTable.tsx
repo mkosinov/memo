@@ -252,19 +252,18 @@ export function RecordVisitsTable({
             testId="visits-total"
             columns={VISIT_COLUMNS}
             cells={{
-              price: <span className="text-sm font-semibold text-ink">{totalCost.toLocaleString('ru-RU')} ₽</span>,
-            }}
-            action={
-              !isReadOnly && !showForm ? (
+              name: !isReadOnly && !showForm ? (
                 <button
                   onClick={() => setShowForm(true)}
                   className="text-xs text-brand hover:underline transition-colors"
                   data-testid="btn-add-visitor"
                 >
-                  + Добавить посетителя
+                  + Добавить
                 </button>
-              ) : undefined
-            }
+              ) : null,
+              tariff: <span className="text-sm text-ink-mid text-right block">Итого</span>,
+              price: <span className="text-sm font-semibold text-ink">{totalCost.toLocaleString('ru-RU')} ₽</span>,
+            }}
           />
         )}
 

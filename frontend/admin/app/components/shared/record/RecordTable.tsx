@@ -38,8 +38,6 @@ interface AnonymRowProps {
 interface TotalsRowProps {
   columns: Column[];
   cells: Record<string, React.ReactNode>;
-  /** Optional right-aligned action (e.g. "Add" button) rendered inline with totals. */
-  action?: React.ReactNode;
   testId?: string;
 }
 
@@ -128,27 +126,25 @@ function AnonymRow({ columns, cells, testId }: AnonymRowProps) {
 
 // ── TotalsRow ────────────────────────────────────────────────────────────────
 
-function TotalsRow({ columns, cells, action, testId }: TotalsRowProps) {
+function TotalsRow({ columns, cells, testId }: TotalsRowProps) {
   return (
     <div
-      className="flex items-center gap-3 border-t text-sm px-3 py-1.5"
+      className="flex items-center gap-2 border-t text-sm px-3 py-1.5"
       style={{ borderColor: 'var(--line)' }}
       data-testid={testId}
     >
-      {action && <div className="shrink-0">{action}</div>}
-      <div className="flex items-center gap-2 flex-1 justify-end">
-        {columns.map((col) => {
-          const alignClass = col.align === 'right' ? 'text-right' : col.align === 'center' ? 'text-center' : '';
-          return (
-            <span
-              key={col.key}
-              className={`${alignClass} ${col.width ?? ''}`}
-            >
-              {cells[col.key]}
-            </span>
-          );
-        })}
-      </div>
+      {columns.map((col) => {
+        const alignClass = col.align === 'right' ? 'text-right' : col.align === 'center' ? 'text-center' : '';
+        return (
+          <span
+            key={col.key}
+            className={`${alignClass} ${col.width ?? ''}`}
+          >
+            {cells[col.key]}
+          </span>
+        );
+      })}
+      <span className="w-5 shrink-0 text-right" />
     </div>
   );
 }

@@ -226,9 +226,11 @@ export function ClientTab({
         <RecordComments value={comment} onChange={handleCommentChange} />
       </div>
 
-      {/* Footer — sticky at bottom, outside scroll area */}
-      <div className="shrink-0 border-t h-[61px] flex items-center justify-between gap-4 px-4"
-           style={{ borderColor: 'var(--line)' }}>
+      {/* Footer — fixed at bottom of modal body, aligned with TabNav's "+ Запись" border-t */}
+      <div
+        className="shrink-0 border-t px-4 py-3 bg-white flex items-center justify-between gap-4"
+        style={{ borderColor: 'var(--line)' }}
+      >
         <RecordTimestamps createdAt={record.created_at} updatedAt={record.updated_at} />
         <button
           onClick={handleDelete}

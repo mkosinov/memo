@@ -299,7 +299,7 @@ export function ActivityDetailsModal({ isOpen, onClose, activity, mode }: Activi
           onTabChange={setActiveTab}
           onAddClick={handleAddClick}
         />
-        <div className="flex-1 overflow-y-auto" style={{ backgroundColor: 'var(--white)' }}>
+        <div className="flex-1 flex flex-col overflow-y-auto" style={{ backgroundColor: 'var(--white)' }}>
           {renderContent()}
         </div>
       </Modal>

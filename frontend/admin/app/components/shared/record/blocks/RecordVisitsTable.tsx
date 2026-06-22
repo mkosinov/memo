@@ -5,7 +5,7 @@ import type { VisitResponse, TariffResponse } from '@memo/api-client';
 import type { VisitStatus } from '@memo/domain';
 import { StatusPicker } from '@/app/components/shared/StatusPicker';
 import { StatusBadge } from '@/app/components/shared/StatusBadge';
-import { AddVisitorForm, type AddVisitorPayload } from '@/app/components/shared/visitors/AddVisitorForm';
+import type { AddVisitorPayload } from '@/app/components/shared/visitors/AddVisitorForm';
 import { safeStatus } from '@/app/lib/status-utils';
 import { RecordTable, type Column } from '@/app/components/shared/record/RecordTable';
 
@@ -106,16 +106,52 @@ export function RecordVisitsTable({
   const [showForm, setShowForm] = useState(false);
   const [anonymInput, setAnonymInput] = useState(anonymVisits);
 
+  // Inline add-row state (when showForm is true)
+  const [newName, setNewName] = useState('');
+  const [newAge, setNewAge] = useState<number | null>(null);
+  const [newTariffId, setNewTariffId] = useState('');
+  const [newPrice, setNewPrice] = useState(0);
+
   const handleAnonymChange = useCallback((value: number) => {
     setAnonymInput(value);
     const t = setTimeout(() => onAnonymVisitsChange(value), 500);
     return () => clearTimeout(t);
   }, [onAnonymVisitsChange]);
 
+  const resetNewVisitor = useCallback(() => {
+    setNewName('');
+    setNewAge(null);
+    setNewTariffId('');
+    setNewPrice(0);
+  }, []);
+
   const handleAdd = useCallback((data: AddVisitorPayload) => {
     onAddVisitor(data);
     setShowForm(false);
-  }, [onAddVisitor]);
+    resetNewVisitor();
+  }, [onAddVisitor, resetNewVisitor]);
+
+  const handleCancelAdd = useCallback(() => {
+    setShowForm(false);
+    resetNewVisitor();
+  }, [resetNewVisitor]);
+
+  // Auto-fill price when tariff changes (if user hasn't manually edited it)
+  const handleNewTariffChange = useCallback((tariffId: string) => {
+    setNewTariffId(tariffId);
+    const tariff = tariffs.find((t) => t.id === tariffId);
+    if (tariff) setNewPrice(tariff.price);
+  }, [tariffs]);
+
+  // Commit on Enter in name field
+  const handleNewNameKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (newName.trim()) {
+        handleAdd({ name: newName.trim(), age: newAge, tariff_id: newTariffId });
+      }
+    }
+  }, [newName, newAge, newTariffId, handleAdd]);
 
   return (
     <div data-testid="record-visits-table">
@@ -247,6 +283,88 @@ export function RecordVisitsTable({
           />
         )}
 
+        {!isReadOnly && showForm && (
+          <RecordTable.Row
+            testId="add-visitor-row"
+            columns={VISIT_COLUMNS}
+            cells={{
+              name: (
+                <input
+                  type="text"
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                  onKeyDown={handleNewNameKeyDown}
+                  placeholder="Имя"
+                  autoFocus
+                  className="w-full rounded border px-2 py-0.5 text-sm"
+                  style={{ borderColor: 'var(--line)' }}
+                  data-testid="add-visitor-name"
+                />
+              ),
+              age: (
+                <select
+                  value={newAge != null ? String(newAge) : 'adult'}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setNewAge(v === 'adult' ? null : Number(v));
+                  }}
+                  className="w-full rounded border px-1 py-0.5 text-sm bg-white truncate"
+                  style={{ borderColor: 'var(--line)' }}
+                  data-testid="add-visitor-age"
+                >
+                  <optgroup label="Дети">
+                    {[3, 4, 5, 6, 7, 8, 9, 10, 11].map((n) => (
+                      <option key={n} value={String(n)}>{n}</option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="Подростки">
+                    {[12, 13, 14, 15, 16, 17].map((n) => (
+                      <option key={n} value={String(n)}>{n}</option>
+                    ))}
+                  </optgroup>
+                  <option value="adult">Взрослый</option>
+                </select>
+              ),
+              tariff: (
+                <select
+                  value={newTariffId}
+                  onChange={(e) => handleNewTariffChange(e.target.value)}
+                  className="w-full rounded border px-2 py-0.5 text-sm"
+                  style={{ borderColor: 'var(--line)' }}
+                  data-testid="add-visitor-tariff"
+                >
+                  <option value="">— тариф —</option>
+                  {tariffs.map((t) => (
+                    <option key={t.id} value={t.id}>{t.title} ({t.price} ₽)</option>
+                  ))}
+                </select>
+              ),
+              price: (
+                <input
+                  type="number"
+                  value={newPrice || ''}
+                  onChange={(e) => setNewPrice(Number(e.target.value) || 0)}
+                  onKeyDown={handleNewNameKeyDown}
+                  className="w-full rounded border px-2 py-0.5 text-sm text-right"
+                  style={{ borderColor: 'var(--line)' }}
+                  data-testid="add-visitor-price"
+                />
+              ),
+              status: <StatusPicker value="waiting" onChange={() => {}} variant="icon" size="sm" testIdPrefix="add-visitor-status" />,
+              __actions: (
+                <button
+                  onClick={handleCancelAdd}
+                  className="text-red-500 hover:text-red-600"
+                  aria-label="Отменить"
+                  data-testid="add-visitor-cancel"
+                >
+                  ×
+                </button>
+              ),
+            }}
+          />
+        )}
+
         {visits.length > 0 && (
           <RecordTable.TotalsRow
             testId="visits-total"
@@ -254,7 +372,16 @@ export function RecordVisitsTable({
             cells={{
               name: !isReadOnly && !showForm ? (
                 <button
-                  onClick={() => setShowForm(true)}
+                  onClick={() => {
+                    resetNewVisitor();
+                    // pre-fill with first tariff's price as default
+                    const firstTariff = tariffs[0];
+                    if (firstTariff) {
+                      setNewTariffId(firstTariff.id);
+                      setNewPrice(firstTariff.price);
+                    }
+                    setShowForm(true);
+                  }}
                   className="text-xs text-brand hover:underline transition-colors"
                   data-testid="btn-add-visitor"
                 >
@@ -265,12 +392,6 @@ export function RecordVisitsTable({
               price: <span className="text-sm font-semibold text-ink">{totalCost.toLocaleString('ru-RU')} ₽</span>,
             }}
           />
-        )}
-
-        {!isReadOnly && showForm && (
-          <RecordTable.AddRow testId="btn-add-visitor-wrapper">
-            <AddVisitorForm tariffs={tariffs} onAdd={handleAdd} onCancel={() => setShowForm(false)} />
-          </RecordTable.AddRow>
         )}
       </RecordTable>
 

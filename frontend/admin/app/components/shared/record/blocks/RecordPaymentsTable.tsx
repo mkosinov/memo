@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import type { PaymentResponse } from '@memo/api-client';
 import { RecordTable, type Column } from '@/app/components/shared/record/RecordTable';
 
@@ -40,6 +40,36 @@ export function RecordPaymentsTable({
   const [method, setMethod] = useState('card');
   const [payDate, setPayDate] = useState(new Date().toISOString().slice(0, 16));
   const [showForm, setShowForm] = useState(false);
+
+  // Inline add-row state (when showForm is true)
+  const [newAmount, setNewAmount] = useState(0);
+  const [newMethod, setNewMethod] = useState('card');
+  const [newPayDate, setNewPayDate] = useState(new Date().toISOString().slice(0, 16));
+
+  const resetNewPayment = useCallback(() => {
+    setNewAmount(0);
+    setNewMethod('card');
+    setNewPayDate(new Date().toISOString().slice(0, 16));
+  }, []);
+
+  const handleAddPaymentInline = useCallback(() => {
+    if (newAmount <= 0) return;
+    onAdd({ amount: newAmount, method: newMethod, date: newPayDate });
+    setShowForm(false);
+    resetNewPayment();
+  }, [newAmount, newMethod, newPayDate, onAdd, resetNewPayment]);
+
+  const handleCancelAddPayment = useCallback(() => {
+    setShowForm(false);
+    resetNewPayment();
+  }, [resetNewPayment]);
+
+  const handleNewAmountKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleAddPaymentInline();
+    }
+  }, [handleAddPaymentInline]);
 
   const totalPaid = payments.reduce((sum, p) => sum + p.amount, 0);
 
@@ -96,6 +126,63 @@ export function RecordPaymentsTable({
           </RecordTable.EmptyState>
         )}
 
+        {!isReadOnly && showForm && (
+          <RecordTable.Row
+            testId="add-payment-row"
+            columns={PAYMENT_COLUMNS}
+            cells={{
+              date: (
+                <input
+                  type="datetime-local"
+                  value={newPayDate}
+                  onChange={(e) => setNewPayDate(e.target.value)}
+                  step="60"
+                  autoFocus
+                  className="w-full rounded border px-2 py-0.5 text-sm bg-white"
+                  style={{ borderColor: 'var(--line)' }}
+                  data-testid="add-payment-date"
+                />
+              ),
+              method: (
+                <select
+                  value={newMethod}
+                  onChange={(e) => setNewMethod(e.target.value)}
+                  className="w-full rounded border px-2 py-0.5 text-sm bg-white text-center"
+                  style={{ borderColor: 'var(--line)' }}
+                  data-testid="add-payment-method"
+                >
+                  <option value="cash">Наличные</option>
+                  <option value="card">Карта</option>
+                  <option value="transfer">Перевод</option>
+                  <option value="online">Онлайн</option>
+                </select>
+              ),
+              amount: (
+                <input
+                  type="number"
+                  min={1}
+                  value={newAmount || ''}
+                  onChange={(e) => setNewAmount(Number(e.target.value) || 0)}
+                  onKeyDown={handleNewAmountKeyDown}
+                  className="w-full rounded border px-2 py-0.5 text-sm text-right"
+                  style={{ borderColor: 'var(--line)' }}
+                  data-testid="add-payment-amount"
+                />
+              ),
+              __actions: (
+                <button
+                  onClick={handleCancelAddPayment}
+                  className="text-red-500 hover:text-red-600"
+                  aria-label="Отменить"
+                  data-testid="add-payment-cancel"
+                >
+                  ×
+                </button>
+              ),
+            }}
+          />
+        )}
+
         {payments.length > 0 && (
           <RecordTable.TotalsRow
             testId="payments-total"
@@ -103,7 +190,10 @@ export function RecordPaymentsTable({
             cells={{
               date: !isReadOnly && !showForm ? (
                 <button
-                  onClick={() => setShowForm(true)}
+                  onClick={() => {
+                    resetNewPayment();
+                    setShowForm(true);
+                  }}
                   className="text-xs text-brand hover:underline transition-colors"
                   data-testid="btn-add-payment"
                 >
@@ -114,58 +204,6 @@ export function RecordPaymentsTable({
               amount: <span className="text-sm font-semibold text-ink">{totalPaid.toLocaleString('ru-RU')} ₽</span>,
             }}
           />
-        )}
-
-        {!isReadOnly && showForm && (
-          <RecordTable.AddRow testId="btn-add-payment-wrapper">
-            <form onSubmit={handleSubmit} className="flex items-center gap-2 px-3 py-2 text-sm" data-testid="payment-form">
-              <input
-                type="number"
-                min={1}
-                value={amount}
-                onChange={(e) => setAmount(Number(e.target.value))}
-                className="w-20 rounded border px-2 py-1"
-                style={{ borderColor: 'var(--line)' }}
-                data-testid="payment-amount"
-              />
-              <span className="text-ink-mid">₽</span>
-              <input
-                type="datetime-local"
-                value={payDate}
-                onChange={(e) => setPayDate(e.target.value)}
-                step="60"
-                className="w-40 rounded border px-2 py-1 text-sm"
-                style={{ borderColor: 'var(--line)' }}
-                data-testid="payment-date"
-              />
-              <select
-                value={method}
-                onChange={(e) => setMethod(e.target.value)}
-                className="rounded border px-2 py-1"
-                style={{ borderColor: 'var(--line)' }}
-                data-testid="payment-method"
-              >
-                <option value="cash">Наличные</option>
-                <option value="card">Карта</option>
-                <option value="transfer">Перевод</option>
-                <option value="online">Онлайн</option>
-              </select>
-              <button
-                type="submit"
-                className="rounded bg-emerald-600 px-3 py-1 text-sm text-white hover:bg-emerald-700"
-                data-testid="payment-submit"
-              >
-                Добавить
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowForm(false)}
-                className="text-sm text-ink-mid hover:text-ink"
-              >
-                Отмена
-              </button>
-            </form>
-          </RecordTable.AddRow>
         )}
       </RecordTable>
     </div>

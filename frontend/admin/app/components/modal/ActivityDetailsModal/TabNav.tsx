@@ -55,14 +55,10 @@ export function TabNav({ tabs, activeTab, onTabChange, onAddClick }: TabNavProps
           onClick={onAddClick}
           aria-label="Добавить запись"
           data-testid="tab-add"
-          className="w-full flex items-center justify-center gap-1 px-3 py-2 rounded-lg text-sm
+          className="w-full flex items-center justify-center gap-1 h-12 text-sm
                      text-ink-light hover:bg-white/60 hover:text-brand transition-colors"
         >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <line x1="12" y1="5" x2="12" y2="19" />
-            <line x1="5" y1="12" x2="19" y2="12" />
-          </svg>
-          Запись
+          + Запись
         </button>
       </div>
     </div>

@@ -165,9 +165,9 @@ describe('ClientRecordTab — layout', () => {
 
   it('renders visit status via StatusPicker atom', () => {
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    // RecordVisitRow renders StatusPicker (CustomSelect) — verify the row exists with status picker
+    // RecordVisitRow renders StatusPicker — verify the row exists with status picker
     const visitRow = screen.getByTestId('visit-row-v1');
-    expect(visitRow.querySelector('[data-testid="custom-select-trigger"]')).toBeInTheDocument();
+    expect(visitRow.querySelector('[data-testid$="-status-trigger"]')).toBeInTheDocument();
   });
 
   // ─── Visitors section ─────────────────────────────────────────────────

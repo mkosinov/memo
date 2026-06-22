@@ -1,26 +1,7 @@
 'use client';
 
-import React from 'react';
 import type { VisitStatus } from '@memo/domain';
-import { StatusPicker } from '@/app/components/modal/ActivityDetailsModal/StatusPicker';
-import { WaitingIcon, VisitedIcon, MissedIcon, CancelledIcon } from '@/app/components/shared/icons/StatusIcons';
-
-const STATUS_CONFIG: Record<VisitStatus, { label: string; color: string }> = {
-  waiting: { label: 'Ожидание', color: '#F59E0B' },
-  visited: { label: 'Посетил', color: '#10B981' },
-  cancelled: { label: 'Отменён', color: '#6B7280' },
-  missed: { label: 'Неявка', color: '#EF4444' },
-};
-
-function renderStatusIcon(status: VisitStatus): React.ReactNode {
-  const cls = 'w-3.5 h-3.5';
-  switch (status) {
-    case 'waiting': return <WaitingIcon className={cls} />;
-    case 'visited': return <VisitedIcon className={cls} />;
-    case 'cancelled': return <CancelledIcon className={cls} />;
-    case 'missed': return <MissedIcon className={cls} />;
-  }
-}
+import { StatusPicker } from '@/app/components/shared/StatusPicker';
 
 export interface RecordSummaryProps {
   totalCost: number;
@@ -38,8 +19,7 @@ export function RecordSummary({ totalCost, totalPaid, seats, status, onStatusCha
 
   return (
     <div
-      className="flex items-center justify-between gap-4 rounded-lg border p-3"
-      style={{ borderColor: 'var(--line)' }}
+      className="flex items-center justify-between gap-4 rounded-lg bg-surface p-3"
       data-testid="record-summary"
     >
       {/* Left: financial summary */}
@@ -68,8 +48,8 @@ export function RecordSummary({ totalCost, totalPaid, seats, status, onStatusCha
         <StatusPicker
           value={status}
           onChange={onStatusChange}
-          statusConfig={STATUS_CONFIG}
-          iconFor={renderStatusIcon}
+          variant="icon"
+          size="md"
           testIdPrefix="record-status"
         />
       </div>

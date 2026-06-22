@@ -80,7 +80,8 @@ export function RecordVisitRow({
           onChange={(status) => {
             if (status) onChange({ status });
           }}
-          variant="icon-only"
+          variant="icon"
+          size="sm"
           testIdPrefix={`visit-${visit.id}-status`}
         />
       )}

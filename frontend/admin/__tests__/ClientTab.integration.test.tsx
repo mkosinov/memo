@@ -229,10 +229,10 @@ describe('ClientTab — integration with shared atoms', () => {
     render(<ClientTab {...defaultProps} />);
 
     const statusContainer = screen.getByTestId('visit-v1-status');
-    const trigger = within(statusContainer).getByTestId('custom-select-trigger');
+    const trigger = within(statusContainer).getByTestId('visit-v1-status-trigger');
     fireEvent.click(trigger);
 
-    const option = within(statusContainer).getByTestId('custom-select-option-visited');
+    const option = within(statusContainer).getByTestId('visit-v1-status-option-visited');
     fireEvent.click(option);
 
     await waitFor(() => {

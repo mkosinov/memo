@@ -4,7 +4,8 @@ import React from 'react';
 import { useNavigation } from '@/contexts/NavigationContext';
 import { useRecords } from '@/contexts/RecordsContext';
 import { getMonday, formatDateISO } from '@/lib/utils';
-import { StatusPicker } from '@/app/components/shared/StatusPicker';
+import { StatusFiltersPicker } from '@/app/components/shared/StatusFiltersPicker';
+import type { VisitStatus } from '@memo/domain';
 
 interface BookingFiltersProps {
   locationId: string;
@@ -127,12 +128,10 @@ export function BookingFilters({
 
       <div className="flex flex-col gap-1">
         <label className="text-xs font-medium" style={{ color: 'var(--ink-light)' }}>Статус</label>
-        {/* Uses StatusPicker with placeholder="Все статусы" so empty string maps to "no filter" */}
-        <StatusPicker
-          value={status as '' | 'waiting' | 'visited' | 'missed' | 'cancelled'}
-          onChange={(s) => onStatusChange(s)}
-          variant="full"
-          placeholder="Все статусы"
+        <StatusFiltersPicker
+          value={status === '' ? null : (status as VisitStatus)}
+          onChange={(v) => onStatusChange(v ?? '')}
+          size="md"
           testIdPrefix="booking-filters-status"
         />
       </div>

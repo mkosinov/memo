@@ -13,6 +13,7 @@ import { RecordTimestamps } from '@/app/components/shared/record/blocks/RecordTi
 import { ClientStatistics } from '@/app/components/shared/record/blocks/ClientStatistics';
 import { useRecordData } from '@/hooks/useRecordData';
 import { useRecordMutations } from '@/hooks/useRecordMutations';
+import { useOptimisticVisitMutation } from '@/hooks/useOptimisticVisitMutation';
 import type { RecordWithDerived } from '@/app/components/shared/records/types';
 import { computeRecordStatus } from '@memo/domain';
 import { safeStatus } from '@/app/lib/status-utils';
@@ -68,8 +69,24 @@ export function ClientTab({
 }: ClientTabProps) {
   const isDeletingRef = useRef(false);
   const router = useRouter();
-  const { visitorsMap } = useRecordData(record.id, client?.id ?? '');
+  const { visitorsMap: realVisitorsMap } = useRecordData(record.id, client?.id ?? '');
   const { updateVisitStatus } = useRecordMutations(record.activity_id ?? '', record.id);
+
+  // Optimistic visit mutation layer
+  const {
+    mergedVisitorsMap,
+    mergedVisits,
+    handleVisitorChange,
+    handleVisitChange,
+    handleVisitPriceChange,
+  } = useOptimisticVisitMutation({
+    record,
+    visitorsMap: realVisitorsMap,
+    serviceTariffs,
+    onUpdateRecord,
+    updateVisitStatus,
+    showToast,
+  });
 
   // Derive status from visits
   const status: VisitStatus = computeRecordStatus(
@@ -104,35 +121,6 @@ export function ClientTab({
       showToast('Ошибка обновления статуса');
     });
   }, [visits, record.id, onUpdateRecord, showToast]);
-
-  const handleVisitChange = useCallback((visitId: string, data: { status?: VisitStatus; tariff_id?: string; price?: number }) => {
-    if (data.status !== undefined && data.tariff_id === undefined && data.price === undefined) {
-      updateVisitStatus(visitId, data.status);
-      return;
-    }
-    const updatedVisits = (visits || []).map(v => {
-      if (v.id !== visitId) return { visitor_id: v.visitor_id, price: v.price, status: v.status };
-      return {
-        visitor_id: v.visitor_id,
-        price: data.price ?? v.price,
-        status: data.status || v.status,
-        tariff_id: data.tariff_id,
-      };
-    });
-    onUpdateRecord(record.id, { visits: updatedVisits } as any).catch(() => {
-      showToast('Ошибка обновления посетителя');
-    });
-  }, [visits, record.id, onUpdateRecord, showToast, updateVisitStatus]);
-
-  // TODO: No API endpoint exists yet for updating visitor name/age.
-  // When the API is ready, replace console.warn with the actual call.
-  const handleVisitorChange = useCallback((_visitorId: string, _data: { name?: string; age?: number | null }) => {
-    console.warn('[ClientTab] onChangeVisitor: API not implemented yet', _visitorId, _data);
-  }, []);
-
-  const handleVisitPriceChange = useCallback((visitId: string, price: number) => {
-    handleVisitChange(visitId, { price });
-  }, [handleVisitChange]);
 
   const handleDeleteVisit = useCallback(async (visitId: string) => {
     const remaining = (visits || []).filter(v => v.id !== visitId).map(v => ({
@@ -196,51 +184,55 @@ export function ClientTab({
     : undefined;
 
   return (
-    <div className="flex flex-col min-h-full space-y-5 p-4" data-testid="client-tab">
-      {/* Summary: cost + status */}
-      <RecordSummary
-        totalCost={totalCost}
-        totalPaid={totalPaid}
-        seats={(visits || []).length + (record.anonym_visits ?? 0)}
-        status={status}
-        onStatusChange={handleStatusChange}
-      />
+    <div className="flex flex-col flex-1 min-h-0" data-testid="client-tab">
+      {/* Scrollable content area */}
+      <div className="flex-1 overflow-y-auto px-4 pt-4 space-y-[30px]">
+        {/* Summary: cost + status */}
+        <RecordSummary
+          totalCost={totalCost}
+          totalPaid={totalPaid}
+          seats={(visits || []).length + (record.anonym_visits ?? 0)}
+          status={status}
+          onStatusChange={handleStatusChange}
+        />
 
-      {/* Client statistics */}
-      <ClientStatistics stats={stats} />
+        {/* Client statistics */}
+        <ClientStatistics stats={stats} />
 
-      {/* Visits table */}
-      <RecordVisitsTable
-        visits={visits || []}
-        visitorsMap={visitorsMap}
-        tariffs={serviceTariffs}
-        anonymVisits={record.anonym_visits ?? 0}
-        totalCost={totalCost}
-        recordStatus={status}
-        onChangeVisit={handleVisitChange}
-        onChangeVisitor={handleVisitorChange}
-        onChangeVisitPrice={handleVisitPriceChange}
-        onDeleteVisit={handleDeleteVisit}
-        onAnonymVisitsChange={handleAnonymChange}
-        onAddVisitor={handleAddVisitor}
-      />
+        {/* Visits table */}
+        <RecordVisitsTable
+          visits={mergedVisits}
+          visitorsMap={mergedVisitorsMap}
+          tariffs={serviceTariffs}
+          anonymVisits={record.anonym_visits ?? 0}
+          totalCost={totalCost}
+          recordStatus={status}
+          onChangeVisit={handleVisitChange}
+          onChangeVisitor={handleVisitorChange}
+          onChangeVisitPrice={handleVisitPriceChange}
+          onDeleteVisit={handleDeleteVisit}
+          onAnonymVisitsChange={handleAnonymChange}
+          onAddVisitor={handleAddVisitor}
+        />
 
-      {/* Payments table */}
-      <RecordPaymentsTable
-        payments={payments}
-        onDelete={handleDeletePayment}
-        onAdd={handleAddPayment}
-      />
+        {/* Payments table */}
+        <RecordPaymentsTable
+          payments={payments}
+          onDelete={handleDeletePayment}
+          onAdd={handleAddPayment}
+        />
 
-      {/* Comment */}
-      <RecordComments value={comment} onChange={handleCommentChange} />
+        {/* Comment */}
+        <RecordComments value={comment} onChange={handleCommentChange} />
+      </div>
 
-      {/* Timestamps + delete — pushed to bottom */}
-      <div className="mt-auto pt-2 border-t" style={{ borderColor: 'var(--line)' }}>
+      {/* Footer — sticky at bottom, outside scroll area */}
+      <div className="shrink-0 border-t h-[61px] flex items-center justify-between gap-4 px-4"
+           style={{ borderColor: 'var(--line)' }}>
         <RecordTimestamps createdAt={record.created_at} updatedAt={record.updated_at} />
         <button
           onClick={handleDelete}
-          className="text-sm text-red-500 hover:text-red-600 transition-colors"
+          className="text-sm text-red-500 hover:text-red-600 transition-colors shrink-0"
           data-testid="btn-delete-record"
         >
           Удалить запись

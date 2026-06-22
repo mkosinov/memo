@@ -41,7 +41,8 @@ export function VisitorRow({ visit, tariffs, isPreview }: VisitorRowProps) {
       <StatusPicker
         value={visit.status}
         onChange={() => {}}
-        variant="icon-only"
+        variant="icon"
+        size="sm"
         testIdPrefix={`visitor-status-${visit.id}`}
       />
     </div>

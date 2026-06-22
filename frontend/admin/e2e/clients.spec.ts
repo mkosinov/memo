@@ -460,9 +460,9 @@ test.describe('Record tab', () => {
         tab.locator('[data-testid="select-location"] [data-testid="custom-select-trigger"]'),
       ).toBeVisible();
 
-      // Status dropdown visible (CustomSelect in iconOnly mode)
+      // Status dropdown visible (StatusPicker icon variant in RecordVisitRow)
       await expect(
-        tab.locator('[data-testid="visit-status-select"] [data-testid="custom-select-trigger"]'),
+        tab.locator('[data-testid$="-status-trigger"]').first(),
       ).toBeVisible();
 
       // Visitors section visible
@@ -488,16 +488,16 @@ test.describe('Record tab', () => {
     const { client, activity, record } = await setupRecordTab(page, request);
 
     try {
-      // Find the status CustomSelect trigger
+      // Find the status picker trigger in RecordVisitRow
       const statusTrigger = page
-        .locator('[data-testid="visit-status-select"] [data-testid="custom-select-trigger"]');
+        .locator('[data-testid$="-status-trigger"]').first();
       await expect(statusTrigger).toBeVisible();
 
       // Open the dropdown
       await statusTrigger.click();
 
-      // Click "Пришла" option
-      await page.locator('[data-testid="custom-select-option-visited"]').click();
+      // Click "Посетил" option
+      await page.locator('[data-testid$="-status-option-visited"]').first().click();
 
       // Save button should now be enabled (status change triggers hasChanges)
       const saveBtn = page.locator('[data-testid="btn-save-record"]');

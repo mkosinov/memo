@@ -13,6 +13,7 @@ import { RecordComments } from '@/app/components/shared/record/blocks/RecordComm
 import { RecordTimestamps } from '@/app/components/shared/record/blocks/RecordTimestamps';
 import { useRecordData } from '@/hooks/useRecordData';
 import { useRecordMutations } from '@/hooks/useRecordMutations';
+import { useOptimisticVisitMutation } from '@/hooks/useOptimisticVisitMutation';
 import { useSchedule } from '@/contexts/ScheduleContext';
 import type { VisitStatus } from '@memo/domain';
 import type { ClientWithStats } from '@memo/api-client';
@@ -32,8 +33,24 @@ export function ClientRecordTab({ recordId, clientId, onClose, client }: ClientR
   const { record, visitors, activity, services, masters, locations, payments, visitorsMap, tariffs, isLoading, recordData, status } =
     useRecordData(recordId, clientId);
 
-  const { saveRecord, deleteRecord, addVisitor, deleteVisitor, addPayment, deletePayment, updateAnonymVisits, updateVisitStatus } =
+  const { saveRecord, deleteRecord, addVisitor, deleteVisitor, addPayment, deletePayment, updateAnonymVisits, updateVisitStatus, updateRecord } =
     useRecordMutations(record?.activity_id ?? '', recordId);
+
+  // Optimistic visit mutation layer
+  const {
+    mergedVisitorsMap,
+    mergedVisits,
+    handleVisitorChange,
+    handleVisitChange,
+    handleVisitPriceChange,
+  } = useOptimisticVisitMutation({
+    record,
+    visitorsMap,
+    serviceTariffs: tariffs,
+    onUpdateRecord: updateRecord,
+    updateVisitStatus,
+    showToast: console.warn,
+  });
 
   // ── Surface-specific editable state ─────────────────────────────────────
   const [date, setDate] = useState('');
@@ -152,45 +169,6 @@ export function ClientRecordTab({ recordId, clientId, onClose, client }: ClientR
     updateAnonymVisits(recordId, value);
   }, [recordId, updateAnonymVisits]);
 
-  // RecordVisitsTable: visit status/tariff change
-  const handleChangeVisit = useCallback((visitId: string, data: { status?: VisitStatus; tariff_id?: string }) => {
-    if (data.status !== undefined) {
-      updateVisitStatus(visitId, data.status);
-      return;
-    }
-    // Tariff change — rebuild visits array
-    if (data.tariff_id !== undefined && record) {
-      const updatedVisits = record.visits.map(v => ({
-        visitor_id: v.visitor_id,
-        price: v.custom_price ?? v.price,
-        custom_price: v.custom_price,
-        status: v.status,
-        ...(v.id === visitId ? { tariff_id: data.tariff_id } : {}),
-      }));
-      saveRecord({ visits: updatedVisits });
-      markChanged();
-    }
-  }, [record, updateVisitStatus, saveRecord, markChanged]);
-
-  // RecordVisitsTable: visitor name/age change — no API endpoint yet
-  const handleChangeVisitor = useCallback((_visitorId: string, _data: { name?: string; age?: number | null }) => {
-    // TODO: no API endpoint for updating visitor name/age
-    console.warn('[ClientRecordTab] onChangeVisitor: API not implemented', _visitorId, _data);
-  }, []);
-
-  // RecordVisitsTable: visit price change
-  const handleChangeVisitPrice = useCallback((visitId: string, price: number) => {
-    if (!record) return;
-    const updatedVisits = record.visits.map(v => ({
-      visitor_id: v.visitor_id,
-      price: v.id === visitId ? price : (v.custom_price ?? v.price),
-      custom_price: v.custom_price,
-      status: v.status,
-    }));
-    saveRecord({ visits: updatedVisits });
-    markChanged();
-  }, [record, saveRecord, markChanged]);
-
   // ── Render ───────────────────────────────────────────────────────────────
 
   if (isLoading) return <div className="p-4">Загрузка...</div>;
@@ -275,15 +253,15 @@ export function ClientRecordTab({ recordId, clientId, onClose, client }: ClientR
 
       {/* Visitors table */}
       <RecordVisitsTable
-        visits={record.visits || []}
-        visitorsMap={visitorsMap}
+        visits={mergedVisits}
+        visitorsMap={mergedVisitorsMap}
         tariffs={tariffs}
         anonymVisits={record.anonym_visits ?? 0}
         totalCost={total}
         recordStatus={status}
-        onChangeVisit={handleChangeVisit}
-        onChangeVisitor={handleChangeVisitor}
-        onChangeVisitPrice={handleChangeVisitPrice}
+        onChangeVisit={handleVisitChange}
+        onChangeVisitor={handleVisitorChange}
+        onChangeVisitPrice={handleVisitPriceChange}
         onDeleteVisit={handleDeleteVisitor}
         onAnonymVisitsChange={handleAnonymChange}
         onAddVisitor={handleAddVisitor}

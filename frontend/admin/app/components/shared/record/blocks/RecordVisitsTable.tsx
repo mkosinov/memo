@@ -12,11 +12,11 @@ import { RecordTable, type Column } from '@/app/components/shared/record/RecordT
 // ── Column definitions ────────────────────────────────────────────────────────
 
 const VISIT_COLUMNS: Column[] = [
-  { key: 'name', label: 'Имя', width: 'flex-1 min-w-0' },
-  { key: 'age', label: 'Возраст', width: 'w-16 shrink-0', align: 'center' },
-  { key: 'tariff', label: 'Тариф', width: 'w-32 shrink-0' },
+  { key: 'name', label: 'Имя', width: 'flex-1 min-w-[80px]' },
+  { key: 'age', label: 'Возраст', width: 'w-12 shrink-0', align: 'center' },
+  { key: 'tariff', label: 'Тариф', width: 'w-28 shrink-0' },
   { key: 'price', label: 'Стоимость', width: 'w-20 shrink-0', align: 'right' },
-  { key: 'status', label: 'Статус', width: 'w-12 shrink-0' },
+  { key: 'status', label: '', width: 'w-6 shrink-0' },
 ];
 
 // ── Inline-edit cell ──────────────────────────────────────────────────────────
@@ -26,9 +26,10 @@ interface InlineEditCellProps {
   onCommit: (value: string) => void;
   className?: string;
   type?: string;
+  title?: string;
 }
 
-function InlineEditCell({ value, onCommit, className = '', type = 'text' }: InlineEditCellProps) {
+function InlineEditCell({ value, onCommit, className = '', type = 'text', title = '' }: InlineEditCellProps) {
   const [draft, setDraft] = useState(value);
   const originalRef = useRef(value);
 
@@ -62,6 +63,7 @@ function InlineEditCell({ value, onCommit, className = '', type = 'text' }: Inli
       }}
       className={`w-full rounded border px-2 py-0.5 text-sm ${className}`}
       style={{ borderColor: 'var(--line)' }}
+      title={title}
     />
   );
 }
@@ -143,18 +145,39 @@ export function RecordVisitsTable({
                     onCommit={(v) => {
                       if (visit.visitor_id) onChangeVisitor(visit.visitor_id, { name: v });
                     }}
+                    title={visitor?.name || ''}
                   />
                 ),
                 age: isReadOnly ? (
-                  <span className="text-ink-mid">{visitor?.age != null ? visitor.age : '—'}</span>
+                  <span className="text-ink-mid text-sm">
+                    {visitor?.age != null ? visitor.age : 'Взрослый'}
+                  </span>
                 ) : (
-                  <InlineEditCell
-                    type="number"
-                    value={visitor?.age != null ? String(visitor.age) : ''}
-                    onCommit={(v) => {
-                      if (visit.visitor_id) onChangeVisitor(visit.visitor_id, { age: v === '' ? null : Number(v) });
+                  <select
+                    value={visitor?.age != null ? String(visitor.age) : 'adult'}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      if (visit.visitor_id) {
+                        onChangeVisitor(visit.visitor_id, { age: v === 'adult' ? null : Number(v) });
+                      }
                     }}
-                  />
+                    title={visitor?.age != null ? String(visitor.age) : 'Взрослый'}
+                    className="w-full rounded border px-1 py-0.5 text-sm bg-white truncate"
+                    style={{ borderColor: 'var(--line)' }}
+                    data-testid={`visit-${visit.id}-age`}
+                  >
+                    <optgroup label="Дети">
+                      {[3, 4, 5, 6, 7, 8, 9, 10, 11].map((n) => (
+                        <option key={n} value={String(n)}>{n}</option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="Подростки">
+                      {[12, 13, 14, 15, 16, 17].map((n) => (
+                        <option key={n} value={String(n)}>{n}</option>
+                      ))}
+                    </optgroup>
+                    <option value="adult">Взрослый</option>
+                  </select>
                 ),
                 tariff: isReadOnly ? (
                   <span className="text-ink-mid">{tariff?.title || '—'}</span>
@@ -189,7 +212,9 @@ export function RecordVisitsTable({
                 ) : (
                   <StatusPicker
                     value={safeStatus(visit.status)}
-                    onChange={(s) => { if (s) onChangeVisit(visit.id, { status: s as VisitStatus }); }}
+                    onChange={(s) => onChangeVisit(visit.id, { status: s })}
+                    variant="icon"
+                    size="sm"
                     testIdPrefix={`visit-${visit.id}-status`}
                   />
                 ),
@@ -227,27 +252,25 @@ export function RecordVisitsTable({
             testId="visits-total"
             columns={VISIT_COLUMNS}
             cells={{
-              tariff: <span className="text-sm text-ink-mid">Итого:</span>,
               price: <span className="text-sm font-semibold text-ink">{totalCost.toLocaleString('ru-RU')} ₽</span>,
             }}
+            action={
+              !isReadOnly && !showForm ? (
+                <button
+                  onClick={() => setShowForm(true)}
+                  className="text-xs text-brand hover:underline transition-colors"
+                  data-testid="btn-add-visitor"
+                >
+                  + Добавить посетителя
+                </button>
+              ) : undefined
+            }
           />
         )}
 
-        {!isReadOnly && (
+        {!isReadOnly && showForm && (
           <RecordTable.AddRow testId="btn-add-visitor-wrapper">
-            {showForm ? (
-              <AddVisitorForm tariffs={tariffs} onAdd={handleAdd} onCancel={() => setShowForm(false)} />
-            ) : (
-              <div className="px-3 py-2">
-                <button
-                  onClick={() => setShowForm(true)}
-                  className="inline-flex items-center gap-1 text-xs font-medium text-brand border border-brand/30 rounded px-2.5 py-1 hover:bg-brand/5 transition-colors"
-                  data-testid="btn-add-visitor"
-                >
-                  <span className="text-brand">+</span> Добавить посетителя
-                </button>
-              </div>
-            )}
+            <AddVisitorForm tariffs={tariffs} onAdd={handleAdd} onCancel={() => setShowForm(false)} />
           </RecordTable.AddRow>
         )}
       </RecordTable>

@@ -8,8 +8,8 @@ import { RecordTable, type Column } from '@/app/components/shared/record/RecordT
 
 const PAYMENT_COLUMNS: Column[] = [
   { key: 'date', label: 'Дата', width: 'w-32 shrink-0' },
-  { key: 'amount', label: 'Сумма', width: 'flex-1', align: 'right' },
   { key: 'method', label: 'Метод', width: 'w-24 shrink-0' },
+  { key: 'amount', label: 'Сумма', width: 'flex-1', align: 'right' },
 ];
 
 const METHOD_LABELS: Record<string, string> = {
@@ -101,73 +101,71 @@ export function RecordPaymentsTable({
             testId="payments-total"
             columns={PAYMENT_COLUMNS}
             cells={{
-              method: <span className="text-sm text-ink-mid">Итого:</span>,
               amount: <span className="text-sm font-semibold text-ink">{totalPaid.toLocaleString('ru-RU')} ₽</span>,
             }}
+            action={
+              !isReadOnly && !showForm ? (
+                <button
+                  onClick={() => setShowForm(true)}
+                  className="text-xs text-brand hover:underline transition-colors"
+                  data-testid="btn-add-payment"
+                >
+                  + Добавить оплату
+                </button>
+              ) : undefined
+            }
           />
         )}
 
-        {!isReadOnly && (
+        {!isReadOnly && showForm && (
           <RecordTable.AddRow testId="btn-add-payment-wrapper">
-            {showForm ? (
-              <form onSubmit={handleSubmit} className="flex items-center gap-2 px-3 py-2 text-sm" data-testid="payment-form">
-                <input
-                  type="number"
-                  min={1}
-                  value={amount}
-                  onChange={(e) => setAmount(Number(e.target.value))}
-                  className="w-20 rounded border px-2 py-1"
-                  style={{ borderColor: 'var(--line)' }}
-                  data-testid="payment-amount"
-                />
-                <span className="text-ink-mid">₽</span>
-                <input
-                  type="datetime-local"
-                  value={payDate}
-                  onChange={(e) => setPayDate(e.target.value)}
-                  step="60"
-                  className="w-40 rounded border px-2 py-1 text-sm"
-                  style={{ borderColor: 'var(--line)' }}
-                  data-testid="payment-date"
-                />
-                <select
-                  value={method}
-                  onChange={(e) => setMethod(e.target.value)}
-                  className="rounded border px-2 py-1"
-                  style={{ borderColor: 'var(--line)' }}
-                  data-testid="payment-method"
-                >
-                  <option value="cash">Наличные</option>
-                  <option value="card">Карта</option>
-                  <option value="transfer">Перевод</option>
-                  <option value="online">Онлайн</option>
-                </select>
-                <button
-                  type="submit"
-                  className="rounded bg-emerald-600 px-3 py-1 text-sm text-white hover:bg-emerald-700"
-                  data-testid="payment-submit"
-                >
-                  Добавить
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowForm(false)}
-                  className="text-sm text-ink-mid hover:text-ink"
-                >
-                  Отмена
-                </button>
-              </form>
-            ) : (
-              <div className="px-3 py-2">
-                <button
-                  onClick={() => setShowForm(true)}
-                  className="inline-flex items-center gap-1 text-xs font-medium text-brand border border-brand/30 rounded px-2.5 py-1 hover:bg-brand/5 transition-colors"
-                  data-testid="btn-add-payment"
-                >
-                  <span className="text-brand">+</span> Добавить оплату
-                </button>
-              </div>
-            )}
+            <form onSubmit={handleSubmit} className="flex items-center gap-2 px-3 py-2 text-sm" data-testid="payment-form">
+              <input
+                type="number"
+                min={1}
+                value={amount}
+                onChange={(e) => setAmount(Number(e.target.value))}
+                className="w-20 rounded border px-2 py-1"
+                style={{ borderColor: 'var(--line)' }}
+                data-testid="payment-amount"
+              />
+              <span className="text-ink-mid">₽</span>
+              <input
+                type="datetime-local"
+                value={payDate}
+                onChange={(e) => setPayDate(e.target.value)}
+                step="60"
+                className="w-40 rounded border px-2 py-1 text-sm"
+                style={{ borderColor: 'var(--line)' }}
+                data-testid="payment-date"
+              />
+              <select
+                value={method}
+                onChange={(e) => setMethod(e.target.value)}
+                className="rounded border px-2 py-1"
+                style={{ borderColor: 'var(--line)' }}
+                data-testid="payment-method"
+              >
+                <option value="cash">Наличные</option>
+                <option value="card">Карта</option>
+                <option value="transfer">Перевод</option>
+                <option value="online">Онлайн</option>
+              </select>
+              <button
+                type="submit"
+                className="rounded bg-emerald-600 px-3 py-1 text-sm text-white hover:bg-emerald-700"
+                data-testid="payment-submit"
+              >
+                Добавить
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowForm(false)}
+                className="text-sm text-ink-mid hover:text-ink"
+              >
+                Отмена
+              </button>
+            </form>
           </RecordTable.AddRow>
         )}
       </RecordTable>

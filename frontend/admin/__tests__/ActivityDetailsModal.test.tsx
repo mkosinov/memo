@@ -573,14 +573,15 @@ describe('ClientTab — layout & features', () => {
 
   it('renders status picker with all statuses', () => {
     render(<ClientTab {...defaultProps} />);
-    const trigger = screen.getByTestId('custom-select-trigger');
+    // RecordVisitRow renders StatusPicker — find its trigger
+    const trigger = screen.getByTestId('visit-v1-status-trigger');
     expect(trigger).toBeInTheDocument();
     fireEvent.click(trigger);
-    expect(screen.getByTestId('custom-select-dropdown')).toBeInTheDocument();
-    expect(screen.getByTestId('custom-select-option-waiting')).toBeInTheDocument();
-    expect(screen.getByTestId('custom-select-option-visited')).toBeInTheDocument();
-    expect(screen.getByTestId('custom-select-option-missed')).toBeInTheDocument();
-    expect(screen.getByTestId('custom-select-option-cancelled')).toBeInTheDocument();
+    expect(screen.getByTestId('visit-v1-status-popover')).toBeInTheDocument();
+    expect(screen.getByTestId('visit-v1-status-option-waiting')).toBeInTheDocument();
+    expect(screen.getByTestId('visit-v1-status-option-visited')).toBeInTheDocument();
+    expect(screen.getByTestId('visit-v1-status-option-missed')).toBeInTheDocument();
+    expect(screen.getByTestId('visit-v1-status-option-cancelled')).toBeInTheDocument();
   });
 
   it('renders client link as SVG icon (not text)', () => {

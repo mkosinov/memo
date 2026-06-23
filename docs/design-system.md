@@ -1,7 +1,7 @@
 ---
 type: design-system
 scope: project
-sections: [colors, typography, shadows, spacing, components, icons, patterns]
+sections: [colors, status-colors, status-icons, status-components, typography, shadows, spacing, components, icons, patterns]
 updated: 2026-05-17
 source: sketches/colour-mountains-v4.html + feat-admin-schedule worktree (actual implementation)
 ---
@@ -86,7 +86,7 @@ colors: {
   line:     { DEFAULT: '#E0E0E1', dark: 'rgba(255,255,255,.1)' },
   artist:   { olga: '#5B8C7A', yulia: '#6B7E9C', anastasia: '#A07060',
               darya: '#7A6E9C', aleksandra: '#8A7840', irina: '#9A5870' },
-  status:   { confirmed: '#10b981', cancelled: '#ef4444', noShow: '#6b7280' },
+  status:   { confirmed: '#10b981', cancelled: '#ef4444', noShow: '#6b7280' },  // ⚠️ LEGACY — see Status Colors section above for canonical mapping
 }
 ```
 
@@ -103,15 +103,63 @@ const ARTIST_COLORS: Record<string, string> = {
 };
 ```
 
-### Status Badge Colors
+### Status Colors
 
-| Status | Tailwind | Hex |
-|--------|----------|-----|
-| CONFIRMED | `status.confirmed` | #10b981 (emerald) |
-| CANCELLED | `status.cancelled` | #ef4444 (red) |
-| NO_SHOW | `status.noShow` | #6b7280 (gray) |
+Canonical colors for visit statuses. These are the **source of truth** — corrected in Wave 5 (user explicitly swapped `cancelled` and `missed` from earlier incorrect mapping).
 
-Badge pattern: `bg-{color}/15 text-{color}` pill with `rounded-full px-2 py-0.5 text-xs font-medium`.
+| Status | Russian label | Color (hex) | Tailwind palette | Meaning |
+|--------|---------------|-------------|------------------|---------|
+| `waiting` | Ожидание | `#F59E0B` | amber-500 | Запись создана, клиент не пришёл |
+| `visited` | Посетил | `#10B981` | emerald-500 | Клиент пришёл на мастер-класс |
+| `missed` | Неявка | `#EF4444` | red-500 | Клиент не пришёл (no-show) |
+| `cancelled` | Отменён | `#6B7280` | gray-500 | Запись отменена |
+
+**Tailwind classes** (used in `VISIT_STATUS_CONFIG`):
+
+| Status | Badge bg | Badge text | Dark bg | Dark text |
+|--------|----------|------------|---------|-----------|
+| `waiting` | `bg-amber-100` | `text-amber-700` | `dark:bg-amber-900/30` | `dark:text-amber-300` |
+| `visited` | `bg-emerald-100` | `text-emerald-700` | `dark:bg-emerald-900/30` | `dark:text-emerald-300` |
+| `missed` | `bg-red-100` | `text-red-700` | `dark:bg-red-900/30` | `dark:text-red-300` |
+| `cancelled` | `bg-gray-100` | `text-gray-700` | `dark:bg-gray-800` | `dark:text-gray-300` |
+
+Badge pattern: inline pill with `rounded-full px-2 py-0.5 text-xs font-medium`, using `bgClass` + `textClass` from `VISIT_STATUS_CONFIG`.
+
+> ⚠️ **Note:** `VISIT_STATUS_CONFIG` also stores a `color` hex for icon tinting (e.g. `#b45309` for amber text). These are darker than the palette 500 values above — they're used only for inline icon `color`/`stroke`, not for badge backgrounds.
+
+### Status Icons — Inline SVG Convention
+
+All status icons are **inline SVG components** (not from `lucide-react`).
+
+**Location:** `frontend/admin/app/components/shared/icons/StatusIcons.tsx`
+
+**Exports:**
+
+| Component | Visual | SVG description |
+|-----------|--------|-----------------|
+| `<WaitingIcon />` | Clock in circle | `circle` + `polyline` (clock hands) |
+| `<VisitedIcon />` | Checkmark in circle | `path` (arc) + `polyline` (checkmark) |
+| `<MissedIcon />` | Warning triangle | `path` (triangle) + two `line`s (exclamation) |
+| `<CancelledIcon />` | X in circle | `circle` + two crossed `line`s |
+| `<IconForStatus status={...} />` | Lookup component | Switch on `VisitStatus`, returns the matching icon |
+
+**Props:** All accept `className` (default `w-3.5 h-3.5`). Color is inherited via `stroke="currentColor"`.
+
+**Why inline SVG, not lucide-react:**
+- Custom Wave 5 design — specific stroke width (`2`), curve proportions, and `viewBox="0 0 24 24"`
+- lucide-react equivalents are close but not pixel-identical
+- Avoids adding `lucide-react` dependency just for 4 status icons
+- Inline = no extra bundle icon-tree, easier to tweak per-status
+
+### Status Display Components
+
+| Component | Location | Role |
+|-----------|----------|------|
+| `StatusBadge` | `app/components/shared/StatusBadge.tsx` | **Read-only** pill — shows icon + label, colored by `VISIT_STATUS_CONFIG` |
+| `StatusPicker` (CustomSelect) | `app/components/shared/StatusPicker.tsx` | **Editable** dropdown using `CustomSelect`; used in RecordSummary, RecordVisitsTable, BookingFilters |
+| `StatusPicker` (standalone) | `app/components/modal/ActivityDetailsModal/StatusPicker.tsx` | **Editable** dropdown with Wave 5 styling; used in ClientTab |
+
+Both pickers accept `value: VisitStatus` and `onChange: (status) => void`. They share the same `VISIT_STATUS_CONFIG` colors but differ in rendering: the shared picker uses `CustomSelect`, while the modal picker renders its own popover.
 
 ---
 

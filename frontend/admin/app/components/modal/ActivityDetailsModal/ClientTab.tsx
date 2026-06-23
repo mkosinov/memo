@@ -1,17 +1,44 @@
 'use client';
 
-import React, { useState, useCallback, useRef, useEffect } from 'react';
-import type { RecordResponse, ClientResponse, VisitorResponse, PaymentResponse, TariffResponse } from '@memo/api-client';
+import React, { useState, useCallback, useRef } from 'react';
+import type { RecordResponse, ClientResponse, VisitorResponse, PaymentResponse, TariffResponse, ClientWithStats } from '@memo/api-client';
 import type { RecordPatchData } from '@/hooks/useRecordMutations';
-import type { RecordStatus } from '@memo/domain';
+import type { VisitStatus } from '@memo/domain';
 import { useRouter } from 'next/navigation';
-import { StatusPicker } from './StatusPicker';
-import { formatSeats } from '@/app/lib/pluralize';
+import { RecordSummary } from '@/app/components/shared/record/blocks/RecordSummary';
+import { RecordVisitsTable } from '@/app/components/shared/record/blocks/RecordVisitsTable';
+import { RecordPaymentsTable } from '@/app/components/shared/record/blocks/RecordPaymentsTable';
+import { RecordComments } from '@/app/components/shared/record/blocks/RecordComments';
+import { RecordTimestamps } from '@/app/components/shared/record/blocks/RecordTimestamps';
+import { ClientStatistics } from '@/app/components/shared/record/blocks/ClientStatistics';
 import { useRecordData } from '@/hooks/useRecordData';
+import { useRecordMutations } from '@/hooks/useRecordMutations';
+import { useOptimisticVisitMutation } from '@/hooks/useOptimisticVisitMutation';
+import type { RecordWithDerived } from '@/app/components/shared/records/types';
+import { computeRecordStatus } from '@memo/domain';
+import { safeStatus } from '@/app/lib/status-utils';
+import { WaitingIcon, VisitedIcon, MissedIcon, CancelledIcon } from '@/app/components/shared/icons/StatusIcons';
+
+const STATUS_CONFIG: Record<VisitStatus, { label: string; color: string }> = {
+  waiting: { label: 'Ожидание', color: '#F59E0B' },
+  visited: { label: 'Посетил', color: '#10B981' },
+  cancelled: { label: 'Отменён', color: '#6B7280' },
+  missed: { label: 'Неявка', color: '#EF4444' },
+};
+
+function renderStatusIcon(status: VisitStatus): React.ReactNode {
+  const iconClass = 'w-3.5 h-3.5';
+  switch (status) {
+    case 'waiting': return <WaitingIcon className={iconClass} />;
+    case 'visited': return <VisitedIcon className={iconClass} />;
+    case 'cancelled': return <CancelledIcon className={iconClass} />;
+    case 'missed': return <MissedIcon className={iconClass} />;
+  }
+}
 
 interface ClientTabProps {
   record: RecordResponse;
-  client: ClientResponse | undefined;
+  client: ClientResponse | ClientWithStats | undefined;
   visitors: VisitorResponse[];
   visits: RecordResponse['visits'];
   payments: PaymentResponse[];
@@ -23,49 +50,6 @@ interface ClientTabProps {
   onAddVisitor?: (data: { name: string; age?: number; price: number }) => Promise<void>;
   showToast: (message: string, undo?: () => void) => void;
   onClose?: () => void;
-}
-
-const STATUS_CONFIG: Record<RecordStatus, { label: string; color: string }> = {
-  pending: { label: 'Ожидание', color: '#F59E0B' },
-  confirmed: { label: 'Посетил', color: '#10B981' },
-  cancelled: { label: 'Отменил', color: '#F97316' },
-  no_show: { label: 'Неявка', color: '#4B5563' },
-};
-
-function renderStatusIcon(status: RecordStatus): React.ReactNode {
-  const iconClass = 'w-3.5 h-3.5';
-  switch (status) {
-    case 'pending':
-      return (
-        <svg className={iconClass} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" data-testid="icon-pending">
-          <circle cx="12" cy="12" r="10" />
-          <polyline points="12 6 12 12 16 14" />
-        </svg>
-      );
-    case 'confirmed':
-      return (
-        <svg className={iconClass} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" data-testid="icon-confirmed">
-          <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
-          <polyline points="22 4 12 14.01 9 11.01" />
-        </svg>
-      );
-    case 'cancelled':
-      return (
-        <svg className={iconClass} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" data-testid="icon-cancelled">
-          <circle cx="12" cy="12" r="10" />
-          <line x1="15" y1="9" x2="9" y2="15" />
-          <line x1="9" y1="9" x2="15" y2="15" />
-        </svg>
-      );
-    case 'no_show':
-      return (
-        <svg className={iconClass} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" data-testid="icon-no_show">
-          <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
-          <line x1="12" y1="9" x2="12" y2="13" />
-          <line x1="12" y1="17" x2="12.01" y2="17" />
-        </svg>
-      );
-  }
 }
 
 export function ClientTab({
@@ -83,144 +67,36 @@ export function ClientTab({
   showToast,
   onClose,
 }: ClientTabProps) {
-  const [name, setName] = useState(client?.name || '');
-  const [status, setStatus] = useState<RecordStatus>(record.status as RecordStatus);
-  const [paymentAmount, setPaymentAmount] = useState('');
-  const [paymentMethod, setPaymentMethod] = useState('card');
   const isDeletingRef = useRef(false);
   const router = useRouter();
+  const { visitorsMap: realVisitorsMap } = useRecordData(record.id, client?.id ?? '');
+  const { updateVisitStatus } = useRecordMutations(record.activity_id ?? '', record.id);
 
-  // --- Fetch visitors + tariffs for this record's client ---
-  const { visitorsMap } = useRecordData(record.id, client?.id ?? '');
+  // Optimistic visit mutation layer
+  const {
+    mergedVisitorsMap,
+    mergedVisits,
+    handleVisitorChange,
+    handleVisitChange,
+    handleVisitPriceChange,
+  } = useOptimisticVisitMutation({
+    record,
+    visitorsMap: realVisitorsMap,
+    serviceTariffs,
+    onUpdateRecord,
+    updateVisitStatus,
+    showToast,
+  });
 
-  // --- Visitor editor state (pre-filled from visitorsMap + visit.tariff_id) ---
-  const [visitNames, setVisitNames] = useState<string[]>(
-    visits.map((v) => visitorsMap.get(v.visitor_id ?? '')?.name ?? '')
+  // Derive status from visits
+  const status: VisitStatus = computeRecordStatus(
+    (visits || []).map(v => ({ id: v.id, status: safeStatus(v.status) })),
   );
-  const [visitAges, setVisitAges] = useState<string[]>(
-    visits.map((v) => visitorsMap.get(v.visitor_id ?? '')?.age?.toString() ?? '')
-  );
-  const [visitTariffIds, setVisitTariffIds] = useState<string[]>(
-    visits.map((v) => v.tariff_id ?? '')
-  );
 
-  const handleOpenProfile = useCallback(() => {
-    if (!client) return;
-    onClose?.();
-    router.push(`/clients?clientId=${client.id}`);
-  }, [client, onClose, router]);
+  // Comment state
+  const [comment, setComment] = useState(record.comment || '');
 
-  // Add visitor form state
-  const [showAddVisitor, setShowAddVisitor] = useState(false);
-  const [newVisitorName, setNewVisitorName] = useState('');
-  const [newVisitorAge, setNewVisitorAge] = useState('');
-  const [isAddingVisitor, setIsAddingVisitor] = useState(false);
-
-  // --- Reset name on record/client change (Bug #81) ---
-  useEffect(() => {
-    setName(client?.name || '');
-  }, [record.id, client?.id]);
-
-  // --- Reset status on record change (Bug #84) ---
-  useEffect(() => {
-    setStatus(record.status as RecordStatus);
-  }, [record.id]);
-
-  // --- Persist status change to backend (Bug #84) ---
-  useEffect(() => {
-    if (status === record.status) return;
-    onUpdateRecord(record.id, { status }).catch(() => {
-      setStatus(record.status as RecordStatus);
-      showToast('Ошибка изменения статуса');
-    });
-  }, [status]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // --- Reset visitor editor state on record.visits or visitorsMap change ---
-  useEffect(() => {
-    setVisitNames(visits.map((v) => visitorsMap.get(v.visitor_id ?? '')?.name ?? ''));
-    setVisitAges(visits.map((v) => visitorsMap.get(v.visitor_id ?? '')?.age?.toString() ?? ''));
-    setVisitTariffIds(visits.map((v) => v.tariff_id ?? ''));
-  }, [record.id, visits.length, visitorsMap]);
-
-  // --- Visitor editor helpers ---
-  const updateVisitName = useCallback((id: string, value: string) => {
-    const idx = visits.findIndex((v) => v.id === id);
-    if (idx === -1) return;
-    setVisitNames((prev) => {
-      const next = [...prev];
-      next[idx] = value;
-      return next;
-    });
-  }, [visits]);
-
-  const updateVisitAge = useCallback((id: string, value: string) => {
-    const idx = visits.findIndex((v) => v.id === id);
-    if (idx === -1) return;
-    setVisitAges((prev) => {
-      const next = [...prev];
-      next[idx] = value;
-      return next;
-    });
-  }, [visits]);
-
-  const updateVisitTariff = useCallback((id: string, tariffId: string) => {
-    const idx = visits.findIndex((v) => v.id === id);
-    if (idx === -1) return;
-    setVisitTariffIds((prev) => {
-      const next = [...prev];
-      next[idx] = tariffId;
-      return next;
-    });
-  }, [visits]);
-
-  // Build visits payload from local state for saving
-  const buildVisitsPayload = useCallback((targetVisits: RecordResponse['visits'], names: string[], ages: string[], tariffIds: string[]) => {
-    return targetVisits.map((v, idx) => {
-      const tariff = serviceTariffs.find((t) => t.id === tariffIds[idx]);
-      return {
-        visitor_id: v.visitor_id || undefined,
-        tariff_id: tariffIds[idx] || undefined,
-        name: names[idx] || undefined,
-        age: ages[idx] ? Number(ages[idx]) : undefined,
-        price: tariff?.price ?? v.price,
-        status: v.status || undefined,
-      };
-    });
-  }, [serviceTariffs]);
-
-  // Save all visits to backend
-  const saveVisits = useCallback(async () => {
-    const newVisits = buildVisitsPayload(visits, visitNames, visitAges, visitTariffIds);
-    try {
-      await onUpdateRecord(record.id, { visits: newVisits });
-    } catch {
-      showToast('Ошибка сохранения посетителей');
-    }
-  }, [visits, visitNames, visitAges, visitTariffIds, buildVisitsPayload, record.id, onUpdateRecord, showToast]);
-
-  // Remove a visit by id
-  const removeVisit = useCallback(async (visitId: string) => {
-    const remaining = visits.filter((v) => v.id !== visitId);
-    const remainingIdx = remaining.map((v) => {
-      // Re-map indices from the original arrays
-      const origIdx = visits.findIndex((ov) => ov.id === v.id);
-      return origIdx;
-    });
-    const newNames = remainingIdx.map((i) => visitNames[i] ?? '');
-    const newAges = remainingIdx.map((i) => visitAges[i] ?? '');
-    const newTariffIds = remainingIdx.map((i) => visitTariffIds[i] ?? '');
-    const newVisits = buildVisitsPayload(remaining, newNames, newAges, newTariffIds);
-    try {
-      await onUpdateRecord(record.id, { visits: newVisits });
-    } catch {
-      showToast('Ошибка удаления посетителя');
-    }
-  }, [visits, visitNames, visitAges, visitTariffIds, buildVisitsPayload, record.id, onUpdateRecord, showToast]);
-
-  // Calculate totals from visits
-  const totalCost = record.visits.reduce((sum, v) => sum + v.price, 0);
-  const totalPaid = payments.reduce((sum, p) => sum + p.amount, 0);
-  const remaining = totalCost - totalPaid;
+  // ── Handlers ─────────────────────────────────────────────────────────────
 
   const handleDelete = useCallback(() => {
     isDeletingRef.current = true;
@@ -234,13 +110,47 @@ export function ClientTab({
     }, 5000);
   }, [onDeleteRecord, record.id, showToast]);
 
-  const handleAddPayment = useCallback(() => {
-    const amount = Number(paymentAmount);
-    if (amount > 0) {
-      onAddPayment(record.id, amount, paymentMethod);
-      setPaymentAmount('');
+  const handleStatusChange = useCallback((newStatus: VisitStatus) => {
+    // Update all visits to the new status
+    const updatedVisits = (visits || []).map(v => ({
+      visitor_id: v.visitor_id,
+      price: v.price,
+      status: newStatus,
+    }));
+    onUpdateRecord(record.id, { visits: updatedVisits } as any).catch(() => {
+      showToast('Ошибка обновления статуса');
+    });
+  }, [visits, record.id, onUpdateRecord, showToast]);
+
+  const handleDeleteVisit = useCallback(async (visitId: string) => {
+    const remaining = (visits || []).filter(v => v.id !== visitId).map(v => ({
+      visitor_id: v.visitor_id,
+      price: v.price,
+      status: v.status,
+    }));
+    try {
+      await onUpdateRecord(record.id, { visits: remaining } as any);
+    } catch {
+      showToast('Ошибка удаления посетителя');
     }
-  }, [paymentAmount, paymentMethod, onAddPayment, record.id]);
+  }, [visits, record.id, onUpdateRecord, showToast]);
+
+  const handleAddVisitor = useCallback(async (data: { name: string; age: number | null; tariff_id: string }) => {
+    if (onAddVisitor) {
+      const tariff = serviceTariffs.find(t => t.id === data.tariff_id);
+      await onAddVisitor({ name: data.name, age: data.age ?? undefined, price: tariff?.price ?? 0 });
+    }
+  }, [onAddVisitor, serviceTariffs]);
+
+  const handleAnonymChange = useCallback((value: number) => {
+    onUpdateRecord(record.id, { anonym_visits: value } as any).catch(() => {
+      showToast('Ошибка изменения анонимных посетителей');
+    });
+  }, [record.id, onUpdateRecord, showToast]);
+
+  const handleAddPayment = useCallback((p: { amount: number; method: string }) => {
+    onAddPayment(record.id, p.amount, p.method);
+  }, [onAddPayment, record.id]);
 
   const handleDeletePayment = useCallback(async (paymentId: string) => {
     try {
@@ -251,304 +161,82 @@ export function ClientTab({
     }
   }, [onDeletePayment, showToast]);
 
-  const handleAddVisitor = useCallback(async () => {
-    if (!newVisitorName.trim() || isAddingVisitor || !onAddVisitor) return;
-    setIsAddingVisitor(true);
-    try {
-      await onAddVisitor({
-        name: newVisitorName.trim(),
-        age: newVisitorAge ? Number(newVisitorAge) : undefined,
-        price: 0, // overridden by parent
-      });
-      setNewVisitorName('');
-      setNewVisitorAge('');
-      setShowAddVisitor(false);
-    } catch {
-      showToast('Ошибка добавления посетителя');
-    } finally {
-      setIsAddingVisitor(false);
-    }
-  }, [newVisitorName, newVisitorAge, isAddingVisitor, onAddVisitor, showToast]);
+  const handleCommentChange = useCallback((value: string) => {
+    setComment(value);
+    onUpdateRecord(record.id, { comment: value } as any).catch(() => {
+      showToast('Ошибка сохранения комментария');
+    });
+  }, [record.id, onUpdateRecord, showToast]);
 
-  const inputClass = 'w-full rounded-lg border px-3 py-2 text-sm bg-white';
-  const inputStyle = { borderColor: 'var(--line)' };
+  // ── Derived data ─────────────────────────────────────────────────────────
+
+  const totalCost = (visits || []).reduce((sum, v) => sum + v.price, 0);
+  const totalPaid = payments.reduce((sum, p) => sum + p.amount, 0);
+  const toPay = Math.max(0, totalCost - totalPaid);
+
+  // Compute stats for ClientStatistics
+  const stats = client && 'visits_count' in client
+    ? {
+        visitsCount: client.visits_count,
+        missedVisits: client.missed_visits,
+        lastVisit: client.last_visit,
+        totalPaid: client.total_paid,
+      }
+    : undefined;
 
   return (
-    <div className="space-y-4 p-4" data-testid="client-tab">
-      {/* Row 1: Phone + Name + Status */}
-      <div className="flex gap-3 items-end" data-testid="client-info-row">
-        <div className="flex-1">
-          <label className="text-xs font-medium text-ink-mid block mb-1" htmlFor="client-phone">
-            Телефон
-          </label>
-          <input
-            id="client-phone"
-            type="text"
-            className={inputClass}
-            style={inputStyle}
-            value={client?.phone || ''}
-            placeholder="Не указано"
-            disabled
-            data-testid="client-phone"
-          />
-        </div>
-        <div className="flex-1">
-          <label className="text-xs font-medium text-ink-mid block mb-1" htmlFor="client-name">
-            Имя
-          </label>
-          <input
-            id="client-name"
-            type="text"
-            className={inputClass}
-            style={inputStyle}
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Не указано"
-            data-testid="client-name"
-          />
-        </div>
-        <div className="w-40">
-          <label className="text-xs font-medium text-ink-mid block mb-1" htmlFor="record-status">
-            Статус
-          </label>
-          <StatusPicker
-            value={status}
-            onChange={setStatus}
-            statusConfig={STATUS_CONFIG}
-            iconFor={renderStatusIcon}
-          />
-        </div>
+    <div className="flex flex-col flex-1 min-h-0" data-testid="client-tab">
+      {/* Scrollable content area */}
+      <div className="flex-1 overflow-y-auto px-4 pt-4 space-y-[30px]">
+        {/* Summary: cost + status */}
+        <RecordSummary
+          totalCost={totalCost}
+          totalPaid={totalPaid}
+          seats={(visits || []).length + (record.anonym_visits ?? 0)}
+          status={status}
+          onStatusChange={handleStatusChange}
+        />
+
+        {/* Client statistics */}
+        <ClientStatistics stats={stats} />
+
+        {/* Visits table */}
+        <RecordVisitsTable
+          visits={mergedVisits}
+          visitorsMap={mergedVisitorsMap}
+          tariffs={serviceTariffs}
+          anonymVisits={record.anonym_visits ?? 0}
+          totalCost={totalCost}
+          recordStatus={status}
+          onChangeVisit={handleVisitChange}
+          onChangeVisitor={handleVisitorChange}
+          onChangeVisitPrice={handleVisitPriceChange}
+          onDeleteVisit={handleDeleteVisit}
+          onAnonymVisitsChange={handleAnonymChange}
+          onAddVisitor={handleAddVisitor}
+        />
+
+        {/* Payments table */}
+        <RecordPaymentsTable
+          payments={payments}
+          defaultAmount={toPay}
+          onDelete={handleDeletePayment}
+          onAdd={handleAddPayment}
+        />
+
+        {/* Comment */}
+        <RecordComments value={comment} onChange={handleCommentChange} />
       </div>
 
-      {/* Row 2: Client link */}
-      {client && (
-        <div>
-          <button
-            onClick={handleOpenProfile}
-            className="inline-flex items-center gap-1.5 text-brand text-xs hover:underline"
-            data-testid="client-link"
-            type="button"
-          >
-            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-              <polyline points="15 3 21 3 21 9" />
-              <line x1="10" y1="14" x2="21" y2="3" />
-            </svg>
-            Открыть профиль
-          </button>
-        </div>
-      )}
-
-      {/* Visitors — editable rows */}
-      <div>
-        <div className="flex items-center justify-between mb-2">
-          <h4 className="text-xs font-medium text-ink-mid">Посетители</h4>
-          <span className="text-xs text-ink-mid" data-testid="record-seats">
-            {formatSeats(record.seats)}
-          </span>
-        </div>
-
-        {visits.length === 0 && (
-          <p className="text-xs text-ink-light">Нет посетителей</p>
-        )}
-
-        {visits.map((visit, idx) => (
-          <div
-            key={visit.id}
-            className="flex items-center gap-2 py-1.5 border-b text-sm"
-            style={{ borderColor: 'var(--line)' }}
-            data-testid="visitor-row"
-            data-visit-id={visit.id}
-          >
-            {/* Name input */}
-            <input
-              type="text"
-              placeholder="Имя"
-              value={visitNames[idx] ?? ''}
-              onChange={(e) => updateVisitName(visit.id, e.target.value)}
-              onBlur={() => saveVisits()}
-              className="flex-1 rounded-lg border px-2 py-1 text-sm min-w-0"
-              style={inputStyle}
-              data-testid="visitor-name-input"
-            />
-            {/* Age input */}
-            <input
-              type="number"
-              placeholder="Возраст"
-              value={visitAges[idx] ?? ''}
-              onChange={(e) => updateVisitAge(visit.id, e.target.value)}
-              onBlur={() => saveVisits()}
-              className="w-16 rounded-lg border px-2 py-1 text-sm"
-              style={inputStyle}
-              data-testid="visitor-age-input"
-            />
-            {/* Tariff dropdown */}
-            <select
-              value={visitTariffIds[idx] ?? ''}
-              onChange={(e) => updateVisitTariff(visit.id, e.target.value)}
-              className="w-32 rounded-lg border px-2 py-1 text-sm"
-              style={inputStyle}
-              data-testid="visitor-tariff-select"
-            >
-              <option value="">— тариф —</option>
-              {serviceTariffs.map((t) => (
-                <option key={t.id} value={t.id}>{t.title} ({t.price} ₽)</option>
-              ))}
-            </select>
-            {/* Remove button */}
-            <button
-              onClick={() => removeVisit(visit.id)}
-              className="text-red-400 hover:text-red-500 text-sm shrink-0"
-              aria-label="Удалить посетителя"
-              data-testid="btn-remove-visit"
-            >
-              ×
-            </button>
-          </div>
-        ))}
-
-        {/* Add visitor button / inline form */}
-        {!showAddVisitor ? (
-          <button
-            onClick={() => setShowAddVisitor(true)}
-            className="mt-2 text-brand text-xs hover:underline"
-            data-testid="btn-add-visitor"
-          >
-            + Добавить посетителя
-          </button>
-        ) : (
-          <div className="mt-2 flex items-center gap-2" data-testid="add-visitor-form">
-            <input
-              type="text"
-              placeholder="Имя"
-              value={newVisitorName}
-              onChange={(e) => setNewVisitorName(e.target.value)}
-              className="flex-1 rounded-lg border px-2 py-1 text-sm"
-              style={inputStyle}
-              data-testid="input-visitor-name"
-              autoFocus
-            />
-            <input
-              type="number"
-              placeholder="Возраст"
-              value={newVisitorAge}
-              onChange={(e) => setNewVisitorAge(e.target.value)}
-              className="w-16 rounded-lg border px-2 py-1 text-sm"
-              style={inputStyle}
-              data-testid="input-visitor-age"
-            />
-            <button
-              onClick={handleAddVisitor}
-              disabled={!newVisitorName.trim() || isAddingVisitor}
-              className="px-2 py-1 text-xs text-white rounded-lg shrink-0 disabled:opacity-50"
-              style={{ backgroundColor: 'var(--brand, #004D56)' }}
-              data-testid="btn-save-visitor"
-            >
-              Сохранить
-            </button>
-            <button
-              onClick={() => {
-                setShowAddVisitor(false);
-                setNewVisitorName('');
-                setNewVisitorAge('');
-              }}
-              className="text-red-400 hover:text-red-500 text-sm"
-              aria-label="Отмена"
-              data-testid="btn-cancel-visitor"
-            >
-              ×
-            </button>
-          </div>
-        )}
-      </div>
-
-      {/* Payment summary */}
-      <div className="space-y-2" data-testid="payment-summary">
-        <h4 className="text-xs font-medium text-ink-mid">Оплата</h4>
-        <div className="flex justify-between text-sm">
-          <span className="text-ink-mid">Стоимость:</span>
-          <span className="text-ink font-medium">{totalCost.toLocaleString('ru-RU')} ₽</span>
-        </div>
-        <div className="flex justify-between text-sm">
-          <span className="text-ink-mid">Оплачено:</span>
-          <span className="text-ink font-medium">{totalPaid.toLocaleString('ru-RU')} ₽</span>
-        </div>
-        <div className="flex justify-between text-sm">
-          <span className="text-ink-mid">Остаток:</span>
-          <span
-            className="font-medium"
-            style={{ color: remaining > 0 ? 'var(--danger, #C8503C)' : 'var(--success, #6B8E6E)' }}
-          >
-            {remaining.toLocaleString('ru-RU')} ₽
-          </span>
-        </div>
-
-        {/* Existing payments with delete button */}
-        {payments.length > 0 && (
-          <div className="mt-2 space-y-1">
-            {payments.map((p) => (
-              <div key={p.id} className="flex items-center justify-between text-xs px-2 py-1 bg-surface rounded">
-                <span className="text-ink-mid">{p.amount.toLocaleString('ru-RU')} ₽ ({p.method || '—'})</span>
-                <button
-                  onClick={() => handleDeletePayment(p.id)}
-                  className="text-red-400 hover:text-red-500 ml-2 shrink-0"
-                  aria-label="Удалить оплату"
-                >
-                  ×
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Tariffs for display */}
-        {serviceTariffs.length > 0 && (
-          <div className="mt-2 space-y-1">
-            {serviceTariffs.map((tariff) => (
-              <div key={tariff.id} className="flex items-center justify-between text-xs px-2 py-1 bg-surface rounded">
-                <span className="text-ink-light">{tariff.title}</span>
-                <span className="text-ink">{tariff.price.toLocaleString('ru-RU')} ₽</span>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Add payment form */}
-        <div className="flex gap-2 mt-2">
-          <input
-            type="number"
-            placeholder="Сумма"
-            className="flex-1 rounded-lg border px-3 py-2 text-sm"
-            style={inputStyle}
-            value={paymentAmount}
-            onChange={(e) => setPaymentAmount(e.target.value)}
-          />
-          <select
-            className="rounded-lg border px-2 py-2 text-sm"
-            style={inputStyle}
-            value={paymentMethod}
-            onChange={(e) => setPaymentMethod(e.target.value)}
-          >
-            <option value="card">Карта</option>
-            <option value="cash">Наличные</option>
-            <option value="transfer">Перевод</option>
-          </select>
-          <button
-            onClick={handleAddPayment}
-            className="px-3 py-2 text-sm text-white rounded-lg shrink-0"
-            style={{ backgroundColor: 'var(--brand, #004D56)' }}
-            data-testid="btn-add-payment"
-          >
-            Добавить оплату
-          </button>
-        </div>
-      </div>
-
-      {/* Delete button */}
-      <div className="pt-2 border-t" style={{ borderColor: 'var(--line)' }}>
+      {/* Footer — fixed at bottom of modal body, aligned with TabNav's "+ Запись" border-t */}
+      <div
+        className="shrink-0 border-t px-4 py-3 bg-white flex items-center justify-between gap-4"
+        style={{ borderColor: 'var(--line)' }}
+      >
+        <RecordTimestamps createdAt={record.created_at} updatedAt={record.updated_at} />
         <button
           onClick={handleDelete}
-          className="text-sm text-red-500 hover:text-red-600 transition-colors"
+          className="text-sm text-red-500 hover:text-red-600 transition-colors shrink-0"
           data-testid="btn-delete-record"
         >
           Удалить запись

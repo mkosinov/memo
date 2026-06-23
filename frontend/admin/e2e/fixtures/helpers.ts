@@ -76,19 +76,45 @@ export async function getFirstActivity(page: Page) {
 /**
  * Open the activity details modal for the first visible activity.
  * Dispatches a custom event that the modal listens to.
+ *
+ * If the first activity has no client tabs (no records), navigates to
+ * previous weeks until finding an activity with records (seed data places
+ * records 2 weeks back).
  */
 export async function openModal(page: Page) {
-  const activity = await getFirstActivity(page);
-  if (!activity) throw new Error('No activity found on page');
+  // Try up to 5 times, navigating to previous week each time if no client tabs
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const activity = await getFirstActivity(page);
+    if (!activity) throw new Error('No activity found on page');
 
-  await page.evaluate((act: any) => {
-    document.dispatchEvent(new CustomEvent('__memo-open-modal', { detail: { activity: act } }));
-  }, activity);
+    await page.evaluate((act: any) => {
+      document.dispatchEvent(new CustomEvent('__memo-open-modal', { detail: { activity: act } }));
+    }, activity);
 
-  await page.waitForSelector('[data-testid="activity-details-modal"]', {
-    state: 'visible',
-    timeout: 10_000,
-  });
+    await page.waitForSelector('[data-testid="activity-details-modal"]', {
+      state: 'visible',
+      timeout: 10_000,
+    });
+
+    // Check if this activity has records (client tabs)
+    const hasClientTabs = await page.locator('[data-testid^="tab-client-"]').count() > 0;
+    if (hasClientTabs) return;
+
+    // No client tabs — close modal and try previous week
+    await page.evaluate(() => {
+      document.dispatchEvent(new CustomEvent('__memo-close-modal'));
+    });
+    await page.waitForTimeout(300);
+
+    // Navigate to previous week
+    const prevBtn = page.locator('[data-testid="date-nav-prev"]');
+    if (await prevBtn.isVisible()) {
+      await prevBtn.click();
+      await page.waitForSelector('[data-testid^="activity-"]', { timeout: 10_000 });
+      await page.waitForTimeout(500);
+    }
+  }
+  // If we get here, no activity with records was found — proceed anyway
 }
 
 /**

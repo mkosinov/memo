@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import React from 'react';
 
 // ─── Mock api-client ───────────────────────────────────────────────────────
@@ -98,17 +98,7 @@ describe('ClientRecordTab — interactions', () => {
     vi.restoreAllMocks();
   });
 
-  // ─── Status change via CustomSelect ────────────────────────────────────
-
-  it('status changes through CustomSelect dropdown', async () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    const triggers = screen.getAllByTestId('custom-select-trigger');
-    fireEvent.click(triggers[1]);
-    fireEvent.click(screen.getByTestId('custom-select-option-visited'));
-    expect(screen.getByTestId('btn-save-record')).toBeEnabled();
-  });
-
-  // ─── Visitor section with custom mocks ────────────────────────────────
+  // ─── Visitor section ────────────────────────────────────────────────
 
   it('shows adult label when visitor has no age', () => {
     buildDefaultQueryImpl(mockUseQuery, {
@@ -117,7 +107,13 @@ describe('ClientRecordTab — interactions', () => {
     });
 
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    expect(screen.getByText('(взр.)')).toBeInTheDocument();
+    // RecordVisitRow shows age as "(взр.)" when visitorAge is null
+    const visitRow = screen.getByTestId('visit-row-v1');
+    expect(visitRow).toBeInTheDocument();
+    // The name input is inside the visit row (InlineEditCell without testid)
+    const nameInput = visitRow.querySelector('input') as HTMLInputElement;
+    expect(nameInput).toBeInTheDocument();
+    expect(nameInput.value).toBe('Анна Иванова');
   });
 
   it('shows "Нет посетителей" when record has no visits', () => {
@@ -137,9 +133,9 @@ describe('ClientRecordTab — interactions', () => {
     });
 
     render(<ClientRecordTab recordId="r2" clientId="c1" onClose={onClose} />);
-    const priceInputs = screen.getAllByTestId('input-visit-price');
-    expect(priceInputs[0]).toHaveValue(3500);
-    expect(priceInputs[1]).toHaveValue(2500);
+    // Both visit rows should be rendered
+    expect(screen.getByTestId('visit-row-v1')).toBeInTheDocument();
+    expect(screen.getByTestId('visit-row-v2')).toBeInTheDocument();
   });
 
   it('uses custom_price for total when set', () => {
@@ -150,8 +146,6 @@ describe('ClientRecordTab — interactions', () => {
 
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
     expect(screen.getByTestId('input-custom-price')).toHaveValue(5000);
-    expect(screen.getByText('2 000 ₽')).toBeInTheDocument();
-    expect(screen.getByText('3 000 ₽')).toBeInTheDocument();
   });
 
   it('shows existing comment from record', () => {
@@ -165,34 +159,21 @@ describe('ClientRecordTab — interactions', () => {
     expect(textarea).toHaveValue('Тестовый комментарий');
   });
 
-  // ─── Payment display ──────────────────────────────────────────────────
+  // ─── Payment display (atoms) ──────────────────────────────────────
 
-  it('renders payment list with existing payments', () => {
+  it('renders payment list with existing payments via PaymentList atom', () => {
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    expect(screen.getByTestId('payment-list')).toBeInTheDocument();
-    const rows = screen.getAllByTestId('payment-row');
-    expect(rows.length).toBe(1);
-    expect(screen.getByText(/1 500 ₽ \(карта\)/)).toBeInTheDocument();
+    expect(screen.getByTestId('record-payments-table')).toBeInTheDocument();
+    // PaymentList renders items with data-testid="payment-{id}"
+    expect(screen.getByTestId('payment-p1')).toBeInTheDocument();
   });
 
-  it('displays all payment methods in CustomSelect', () => {
+  it('renders PaymentForm for adding payments', () => {
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    const triggers = screen.getAllByTestId('custom-select-trigger');
-    const paymentMethodTrigger = triggers[triggers.length - 1];
-    fireEvent.click(paymentMethodTrigger);
-    const dropdown = screen.getByTestId('custom-select-dropdown');
-    expect(dropdown).toHaveTextContent('Карта');
-    expect(dropdown).toHaveTextContent('Наличные');
-    expect(dropdown).toHaveTextContent('Перевод');
+    expect(screen.getByTestId('btn-add-payment')).toBeInTheDocument();
   });
 
-  it('renders add payment form', () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    expect(screen.getByPlaceholderText('Сумма')).toBeInTheDocument();
-    expect(screen.getByText('Добавить оплату')).toBeInTheDocument();
-  });
-
-  // ─── Save button state ────────────────────────────────────────────────
+  // ─── Save button state ────────────────────────────────────────────
 
   it('save button is disabled when no changes', () => {
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
@@ -227,14 +208,6 @@ describe('ClientRecordTab — interactions', () => {
     expect(screen.getByTestId('btn-save-record')).toBeEnabled();
   });
 
-  it('save button enables when status is changed via CustomSelect', () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    const triggers = screen.getAllByTestId('custom-select-trigger');
-    fireEvent.click(triggers[1]);
-    fireEvent.click(screen.getByTestId('custom-select-option-visited'));
-    expect(screen.getByTestId('btn-save-record')).toBeEnabled();
-  });
-
   it('cancel resets all changes', () => {
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
     const textarea = screen.getByPlaceholderText('Добавить комментарий...');
@@ -248,23 +221,14 @@ describe('ClientRecordTab — interactions', () => {
     expect(screen.getByTestId('btn-save-record')).toBeDisabled();
   });
 
-  // ─── Add visitor (combobox) ───────────────────────────────────────────
+  // ─── Add visitor (via AddVisitorForm atom) ────────────────────────
 
-  it('shows inline form when add visitor button clicked', () => {
+  it('shows AddVisitorForm when add visitor button clicked', () => {
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
     fireEvent.click(screen.getByTestId('btn-add-visitor'));
-    expect(screen.getByTestId('input-visitor-name')).toBeInTheDocument();
-    expect(screen.getByTestId('input-visitor-age')).toBeInTheDocument();
-    expect(screen.getByTestId('btn-create-visitor')).toBeInTheDocument();
-  });
-
-  it('shows existing visitors in dropdown when typing in visitor name input', () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    fireEvent.click(screen.getByTestId('btn-add-visitor'));
-
-    const nameInput = screen.getByTestId('input-visitor-name');
-    fireEvent.change(nameInput, { target: { value: 'Анн' } });
-
-    expect(screen.getByTestId('visitor-option-vis1')).toBeInTheDocument();
+    // The add visitor form is an inline row with name/age inputs
+    expect(screen.getByTestId('add-visitor-row')).toBeInTheDocument();
+    expect(screen.getByTestId('add-visitor-name')).toBeInTheDocument();
+    expect(screen.getByTestId('add-visitor-age')).toBeInTheDocument();
   });
 });

@@ -25,7 +25,6 @@ class TestCustomPriceCreate:
         resp = api_client.put(f"/api/v1/records/{record['id']}", json={
             "activity_id": record["activity_id"],
             "client_id": record["client_id"],
-            "status": "confirmed",
             "comment": "VIP",
             "custom_price": 5000,
             "visits": record["visits"],
@@ -48,7 +47,6 @@ class TestCustomPriceCreate:
         resp = api_client.put(f"/api/v1/records/{record['id']}", json={
             "activity_id": record["activity_id"],
             "client_id": record["client_id"],
-            "status": "confirmed",
             "comment": "Free event",
             "custom_price": 0,
             "visits": record["visits"],
@@ -69,7 +67,6 @@ class TestCustomPriceUpdate:
         resp = api_client.put(f"/api/v1/records/{record['id']}", json={
             "activity_id": record["activity_id"],
             "client_id": record["client_id"],
-            "status": "confirmed",
             "custom_price": 7500,
             "visits": record["visits"],
         })
@@ -84,7 +81,6 @@ class TestCustomPriceUpdate:
         api_client.put(f"/api/v1/records/{record['id']}", json={
             "activity_id": record["activity_id"],
             "client_id": record["client_id"],
-            "status": "confirmed",
             "custom_price": 5000,
             "visits": record["visits"],
         })
@@ -93,7 +89,6 @@ class TestCustomPriceUpdate:
         resp = api_client.put(f"/api/v1/records/{record['id']}", json={
             "activity_id": record["activity_id"],
             "client_id": record["client_id"],
-            "status": "confirmed",
             "custom_price": None,
             "visits": record["visits"],
         })
@@ -110,7 +105,6 @@ class TestCustomPriceDatabase:
         api_client.put(f"/api/v1/records/{record['id']}", json={
             "activity_id": record["activity_id"],
             "client_id": record["client_id"],
-            "status": "confirmed",
             "custom_price": 3000,
             "visits": record["visits"],
         })
@@ -135,7 +129,6 @@ class TestCustomPriceResponse:
         api_client.put(f"/api/v1/records/{record['id']}", json={
             "activity_id": record["activity_id"],
             "client_id": record["client_id"],
-            "status": "confirmed",
             "custom_price": 4200,
             "visits": record["visits"],
         })
@@ -151,7 +144,6 @@ class TestCustomPriceResponse:
         api_client.put(f"/api/v1/records/{record['id']}", json={
             "activity_id": record["activity_id"],
             "client_id": record["client_id"],
-            "status": "confirmed",
             "custom_price": 9900,
             "visits": record["visits"],
         })

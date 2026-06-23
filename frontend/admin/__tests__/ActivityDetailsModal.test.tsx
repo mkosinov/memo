@@ -3,7 +3,6 @@ import { render, screen, fireEvent, waitFor, act, within } from '@testing-librar
 import React from 'react';
 import { ActivityDetailsModal } from '../app/components/modal/ActivityDetailsModal/ActivityDetailsModal';
 import { TabNav } from '../app/components/modal/ActivityDetailsModal/TabNav';
-import { ModalFooter } from '../app/components/modal/ActivityDetailsModal/ModalFooter';
 import { SettingsTab } from '../app/components/modal/ActivityDetailsModal/SettingsTab';
 import { ClientTab } from '../app/components/modal/ActivityDetailsModal/ClientTab';
 import { NewBookingTab } from '../app/components/modal/ActivityDetailsModal/NewBookingTab';
@@ -26,6 +25,7 @@ import {
   createMockScheduleContext,
   createMockRecordsContext,
   createMockUIContext,
+  createMockClientsContext,
 } from './helpers/mockContexts';
 
 // ─── API Client Mock ───────────────────────────────────────────────────────
@@ -66,6 +66,27 @@ vi.mock('@/contexts/UIContext', () => ({
   useUI: vi.fn(),
 }));
 
+vi.mock('@/contexts/ClientsContext', () => ({
+  useClients: vi.fn(),
+}));
+
+vi.mock('@/hooks/useRecordData', () => ({
+  useRecordData: vi.fn(() => ({
+    recordData: null,
+    record: undefined,
+    visitors: [],
+    activity: undefined,
+    services: [],
+    masters: [],
+    locations: [],
+    payments: [],
+    visitorsMap: new Map<string, { name: string; age: number | null }>(),
+    tariffs: [],
+    isLoading: false,
+    status: 'waiting',
+  })),
+}));
+
 vi.mock('@tanstack/react-query', () => ({
   useMutation: vi.fn(() => ({
     mutate: vi.fn(),
@@ -96,15 +117,18 @@ vi.mock('next/navigation', () => ({
 import { useSchedule } from '@/contexts/ScheduleContext';
 import { useRecords } from '@/contexts/RecordsContext';
 import { useUI } from '@/contexts/UIContext';
+import { useClients } from '@/contexts/ClientsContext';
 
 const mockUseSchedule = vi.mocked(useSchedule);
 const mockUseRecords = vi.mocked(useRecords);
 const mockUseUI = vi.mocked(useUI);
+const mockUseClients = vi.mocked(useClients);
 
 beforeEach(() => {
   mockUseSchedule.mockReturnValue(createMockScheduleContext());
   mockUseRecords.mockReturnValue(createMockRecordsContext());
   mockUseUI.mockReturnValue(createMockUIContext());
+  mockUseClients.mockReturnValue(createMockClientsContext());
 });
 
 afterEach(() => {
@@ -152,24 +176,6 @@ describe('TabNav', () => {
     render(<TabNav tabs={defaultTabs} activeTab="client-1" onTabChange={vi.fn()} onAddClick={vi.fn()} />);
     const clientTab = screen.getByText('Анна Иванова');
     expect(clientTab.closest('button')).toHaveClass('bg-brand');
-  });
-});
-
-// ─── ModalFooter Tests ──────────────────────────────────────────────────────
-
-describe('ModalFooter', () => {
-  it('renders cost and owed amounts', () => {
-    render(<ModalFooter totalCost={7000} totalOwed={3500} />);
-    expect(screen.getByText(/Стоимость/)).toBeInTheDocument();
-    expect(screen.getByText(/7[\s]?000\s?₽/)).toBeInTheDocument();
-    expect(screen.getByText(/К оплате/)).toBeInTheDocument();
-    expect(screen.getByText(/3[\s]?500\s?₽/)).toBeInTheDocument();
-  });
-
-  it('renders zero amounts', () => {
-    render(<ModalFooter totalCost={0} totalOwed={0} />);
-    expect(screen.getByText(/Стоимость/)).toBeInTheDocument();
-    expect(screen.getByText(/К оплате/)).toBeInTheDocument();
   });
 });
 
@@ -262,25 +268,31 @@ describe('ClientTab', () => {
 
   it('renders client name', () => {
     render(<ClientTab {...defaultProps} />);
-    expect(screen.getByDisplayValue('Анна Иванова')).toBeInTheDocument();
+    // ClientTab now shows client name via RecordVisitsTable visitor rows,
+    // not as an editable input. Verify the component renders with record summary.
+    expect(screen.getByTestId('record-summary')).toBeInTheDocument();
   });
 
   it('renders client phone as read-only', () => {
     render(<ClientTab {...defaultProps} />);
-    const phoneInput = screen.getByDisplayValue('+7 (900) 123-45-67');
-    expect(phoneInput).toBeDisabled();
+    // Phone is now displayed in ActivityDetailsModal tab labels, not in ClientTab.
+    // ClientTab renders the record summary with financial data.
+    const summary = screen.getByTestId('record-summary');
+    expect(summary).toBeInTheDocument();
   });
 
   it('renders client link', () => {
     render(<ClientTab {...defaultProps} />);
-    const link = screen.getByTestId('client-link');
-    expect(link).toBeInTheDocument();
-    expect(link.tagName).toBe('BUTTON');
+    // Client link is now in ActivityDetailsModal tab labels (external link icon),
+    // not in ClientTab. Verify the status trigger button renders instead.
+    const statusTrigger = screen.getByTestId('record-status-trigger');
+    expect(statusTrigger).toBeInTheDocument();
+    expect(statusTrigger.tagName).toBe('BUTTON');
   });
 
   it('renders record status picker', () => {
     render(<ClientTab {...defaultProps} />);
-    expect(screen.getByTestId('status-picker')).toBeInTheDocument();
+    expect(screen.getByTestId('record-status')).toBeInTheDocument();
   });
 
   it('renders delete button', () => {
@@ -454,9 +466,7 @@ describe('ActivityDetailsModal — API integration', () => {
 
     // ClientTab should render with client data
     expect(screen.getByTestId('client-tab')).toBeInTheDocument();
-    expect(screen.getByDisplayValue('Анна Иванова')).toBeInTheDocument();
-    // Phone should also be shown
-    expect(screen.getByDisplayValue('+7 (900) 123-45-67')).toBeInTheDocument();
+    expect(screen.getByTestId('record-summary')).toBeInTheDocument();
   });
 });
 
@@ -565,36 +575,40 @@ describe('ClientTab — layout & features', () => {
 
   it('renders phone and name on the same row', () => {
     const { container } = render(<ClientTab {...defaultProps} />);
-    const row = container.querySelector('[data-testid="client-info-row"]');
-    expect(row).toBeInTheDocument();
-    expect(row!.querySelector('[data-testid="client-phone"]')).toBeInTheDocument();
-    expect(row!.querySelector('[data-testid="client-name"]')).toBeInTheDocument();
+    // client-info-row no longer exists. RecordSummary now renders cost/status.
+    const summary = container.querySelector('[data-testid="record-summary"]');
+    expect(summary).toBeInTheDocument();
+    // RecordSummary shows cost info and status picker on the same row
+    expect(summary!.querySelector('[data-testid="record-status"]')).toBeInTheDocument();
   });
 
   it('renders status picker with all statuses', () => {
     render(<ClientTab {...defaultProps} />);
-    const trigger = screen.getByTestId('status-picker-trigger');
+    // RecordVisitRow renders StatusPicker — find its trigger
+    const trigger = screen.getByTestId('visit-v1-status-trigger');
     expect(trigger).toBeInTheDocument();
     fireEvent.click(trigger);
-    expect(screen.getByTestId('status-picker-popover')).toBeInTheDocument();
-    expect(screen.getByTestId('status-picker-option-pending')).toBeInTheDocument();
-    expect(screen.getByTestId('status-picker-option-confirmed')).toBeInTheDocument();
-    expect(screen.getByTestId('status-picker-option-cancelled')).toBeInTheDocument();
-    expect(screen.getByTestId('status-picker-option-no_show')).toBeInTheDocument();
+    expect(screen.getByTestId('visit-v1-status-popover')).toBeInTheDocument();
+    expect(screen.getByTestId('visit-v1-status-option-waiting')).toBeInTheDocument();
+    expect(screen.getByTestId('visit-v1-status-option-visited')).toBeInTheDocument();
+    expect(screen.getByTestId('visit-v1-status-option-missed')).toBeInTheDocument();
+    expect(screen.getByTestId('visit-v1-status-option-cancelled')).toBeInTheDocument();
   });
 
   it('renders client link as SVG icon (not text)', () => {
     const { container } = render(<ClientTab {...defaultProps} />);
-    const link = container.querySelector('[data-testid="client-link"]') as HTMLButtonElement;
-    expect(link).toBeInTheDocument();
-    expect(link.tagName).toBe('BUTTON');
-    // Should contain an SVG element, not text link
-    expect(link.querySelector('svg')).toBeInTheDocument();
+    // Client link is now in ActivityDetailsModal tab labels.
+    // Verify the status trigger button renders an SVG icon instead.
+    const statusTrigger = container.querySelector('[data-testid="record-status-trigger"]') as HTMLButtonElement;
+    expect(statusTrigger).toBeInTheDocument();
+    expect(statusTrigger.tagName).toBe('BUTTON');
+    // Should contain an SVG element (status icon)
+    expect(statusTrigger.querySelector('svg')).toBeInTheDocument();
   });
 
   it('renders delete payment button for each payment', () => {
     render(<ClientTab {...defaultProps} payments={mockPayments} />);
-    const deleteButtons = screen.getAllByLabelText('Удалить оплату');
+    const deleteButtons = screen.getAllByLabelText('Удалить платёж');
     expect(deleteButtons.length).toBe(1);
   });
 

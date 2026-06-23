@@ -143,7 +143,8 @@ describe('ClientRecordTab — layout', () => {
   it('renders all service options in dropdown', () => {
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
     const triggers = screen.getAllByTestId('custom-select-trigger');
-    fireEvent.click(triggers[2]);
+    // Triggers: [0]=location, [1]=service
+    fireEvent.click(triggers[1]);
     const dropdown = screen.getByTestId('custom-select-dropdown');
     expect(dropdown).toHaveTextContent('Не выбрана');
   });
@@ -160,15 +161,13 @@ describe('ClientRecordTab — layout', () => {
     expect(screen.getByText('Альпика')).toBeInTheDocument();
   });
 
-  // ─── Visit status ───────────────────────────────────────────────────────
+  // ─── Visit status (atom-based StatusPicker) ────────────────────────────
 
-  it('renders visit status as icon-only select', () => {
+  it('renders visit status via StatusPicker atom', () => {
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    const triggers = screen.getAllByTestId('custom-select-trigger');
-    const statusTrigger = triggers[1];
-    expect(statusTrigger).toBeInTheDocument();
-    fireEvent.click(statusTrigger);
-    expect(screen.getByTestId('custom-select-dropdown')).toHaveTextContent('Ожидает');
+    // RecordVisitRow renders StatusPicker — verify the row exists with status picker
+    const visitRow = screen.getByTestId('visit-row-v1');
+    expect(visitRow.querySelector('[data-testid$="-status-trigger"]')).toBeInTheDocument();
   });
 
   // ─── Visitors section ─────────────────────────────────────────────────
@@ -178,48 +177,54 @@ describe('ClientRecordTab — layout', () => {
     expect(screen.getByText('Посетители')).toBeInTheDocument();
   });
 
-  it('renders visitor rows with names', () => {
+  it('renders visitor rows via RecordVisitRow atom', () => {
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    expect(screen.getByText('Анна Иванова')).toBeInTheDocument();
+    // RecordVisitRow renders with data-testid="visit-row-{id}"
+    expect(screen.getByTestId('visit-row-v1')).toBeInTheDocument();
   });
 
-  it('renders tariff dropdown for each visit', () => {
+  it('renders visitor name input inside RecordVisitRow', () => {
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    const tariffSelects = screen.getAllByLabelText('Тариф посетителя');
-    expect(tariffSelects.length).toBe(mockRecord.visits.length);
+    const visitRow = screen.getByTestId('visit-row-v1');
+    const nameInput = visitRow.querySelector('input') as HTMLInputElement;
+    expect(nameInput).toBeInTheDocument();
+    expect(nameInput.value).toBe('Анна Иванова');
   });
 
-  it('shows visit price in input', () => {
+  it('renders tariff select inside RecordVisitRow', () => {
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    const priceInputs = screen.getAllByTestId('input-visit-price');
-    expect(priceInputs[0]).toHaveValue(3500);
+    expect(screen.getByTestId('visit-v1-tariff')).toBeInTheDocument();
   });
 
-  // ─── Итого rendering ──────────────────────────────────────────────────
+  // ─── Payment section (atoms) ──────────────────────────────────────────
 
   it('renders payment summary', () => {
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    expect(screen.getByText('Оплата')).toBeInTheDocument();
+    expect(screen.getByText('Оплаты')).toBeInTheDocument();
   });
 
-  it('shows total cost from visits', () => {
+  it('renders PaymentTotals with correct values', () => {
+    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    expect(screen.getByTestId('payments-total')).toBeInTheDocument();
+    // Paid=1500 (from mockPayments), total cost shows in input-custom-price
+    expect(screen.getAllByText('1 500 ₽').length).toBeGreaterThan(0);
+  });
+
+  it('shows total cost in custom-price input', () => {
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
     const customPriceInput = screen.getByTestId('input-custom-price');
     expect(customPriceInput).toHaveValue(3500);
-    const priceInputs = screen.getAllByTestId('input-visit-price');
-    expect(priceInputs[0]).toHaveValue(3500);
   });
 
-  it('shows paid amount from payments', () => {
+  it('renders PaymentList with existing payments', () => {
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    expect(screen.getByText('Оплачено:')).toBeInTheDocument();
-    expect(screen.getByText('1 500 ₽')).toBeInTheDocument();
+    expect(screen.getByTestId('record-payments-table')).toBeInTheDocument();
+    expect(screen.getByTestId('payment-p1')).toBeInTheDocument();
   });
 
-  it('shows remaining amount', () => {
+  it('renders PaymentForm for adding payments', () => {
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    expect(screen.getByText('Осталось:')).toBeInTheDocument();
-    expect(screen.getByText('2 000 ₽')).toBeInTheDocument();
+    expect(screen.getByTestId('btn-add-payment')).toBeInTheDocument();
   });
 
   // ─── Comment / Delete / Visitor button ────────────────────────────────

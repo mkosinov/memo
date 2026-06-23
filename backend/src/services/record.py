@@ -18,6 +18,7 @@ from src.models.visit import Visit
 from src.models.visitor import Visitor
 from src.schemas.record import RecordCreate, RecordPatch, RecordResponse, RecordUpdate
 from src.services.generic import GenericService
+from src.domain.visit_status import VisitItem, VisitStatus, compute_record_status
 
 
 class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
@@ -119,7 +120,10 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
         record = Record(
             activity_id=data.activity_id,
             client_id=client.id if client else data.client_id,
-            status=data.status.value if data.status else "pending",
+            status=compute_record_status([
+                VisitItem(id=f"new_{i}", status=item.status)
+                for i, item in enumerate(data.visits)
+            ]).value,
             seats=effective_seats,
             anonym_visits=data.anonym_visits or 0,
             comment=data.comment,
@@ -135,7 +139,7 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
                 visitor_id=visitor_ids[i],
                 price=item.price,
                 custom_price=item.custom_price,
-                status=item.status,
+                status=item.status.value,
             )
             db_session.add(visit)
 
@@ -198,7 +202,6 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
 
         record.activity_id = data.activity_id
         record.client_id = data.client_id
-        record.status = data.status
         record.comment = data.comment
         record.custom_price = data.custom_price
         record.anonym_visits = data.anonym_visits or 0
@@ -214,9 +217,15 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
                 visitor_id=visit_item.visitor_id,
                 price=visit_item.price,
                 custom_price=visit_item.custom_price,
-                status=visit_item.status,
+                status=visit_item.status.value,
             )
             db_session.add(visit)
+
+        # Derive status from visits
+        record.status = compute_record_status([
+            VisitItem(id=f"new_{i}", status=v.status)
+            for i, v in enumerate(data.visits)
+        ]).value
 
         await db_session.flush()
         await db_session.refresh(record)
@@ -237,8 +246,6 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
 
         update_data = data.model_dump(exclude_unset=True)
 
-        if "status" in update_data:
-            record.status = update_data["status"]
         if "comment" in update_data:
             record.comment = update_data["comment"]
         if "custom_price" in update_data:
@@ -263,6 +270,21 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
             # When only other fields patched: seats = len(active visits) + anonym_visits
             active_visits = [v for v in record.visits if v.is_active]
             record.seats = len(active_visits) + record.anonym_visits
+
+        # Derive status from active visits
+        if "visits" in update_data:
+            # Use the new visits from the patch
+            record.status = compute_record_status([
+                VisitItem(id=f"patch_{i}", status=v.get("status", "waiting"))
+                for i, v in enumerate(update_data["visits"])
+            ]).value
+        else:
+            # Use the existing active visits
+            record.status = compute_record_status([
+                VisitItem(id=v.id, status=v.status)
+                for v in record.visits
+                if v.is_active
+            ]).value
 
         record.updated_at = datetime.now(UTC)
         await db_session.flush()

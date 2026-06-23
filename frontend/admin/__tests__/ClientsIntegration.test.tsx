@@ -284,7 +284,7 @@ describe('ClientCardModal ↔ ClientInfoTab integration (real components)', () =
       </QueryClientProvider></UIProvider>,
     );
 
-    const deleteBtn = screen.getByRole('button', { name: /Удалить клиента/i });
+    const deleteBtn = screen.getByRole('button', { name: /Удалить/i });
 
     // jsdom's window.confirm returns false by default (not implemented)
     // so deleteClient should NOT be called without explicit confirm mock
@@ -418,11 +418,14 @@ describe('ClientCardModal ↔ ClientRecordTab integration (real components)', ()
       expect(screen.getByTestId('client-record-tab')).toBeInTheDocument();
     });
 
+    // Open payment add form first
+    fireEvent.click(screen.getByTestId('btn-add-payment'));
+
     // Fill payment amount
-    fireEvent.change(screen.getByPlaceholderText('Сумма'), { target: { value: '2500' } });
+    fireEvent.change(screen.getByTestId('add-payment-amount'), { target: { value: '2500' } });
 
     // Click add payment
-    fireEvent.click(screen.getByTestId('btn-add-payment'));
+    fireEvent.click(screen.getByTestId('add-payment-submit'));
 
     await waitFor(() => {
       expect(createPayment).toHaveBeenCalledWith({

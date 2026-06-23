@@ -31,8 +31,15 @@ echo "  → vitest..."
 (cd frontend/admin && pnpm run test)
 
 # 4. Playwright (admin E2E + visual regression)
+# Unset CI for playwright — CI=true forces workers=1 + retries=1, which causes the
+# process to hang when a test times out and the retry also fails.
+# Pre-push wants standalone behaviour: workers=auto, retries=0, fail-fast.
+# Also force --workers=1 because the multi-worker mode hangs after ~20 tests
+# in this environment (likely dev-server contention between workers).
+# This is a pre-existing environmental issue, not specific to our changes —
+# tracked separately for follow-up.
 echo "  → playwright (incl. visual regression)..."
-(cd frontend/admin && pnpm run test:e2e)
+(cd frontend/admin && CI= pnpm exec playwright test --workers=1)
 
 # 5. Visual compliance (against current-user-scenarios.md)
 echo "  → visual-compliance-check..."

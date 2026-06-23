@@ -298,7 +298,7 @@ async def _insert_record_direct(activity_id: str) -> None:
             id=str(uuid.uuid4()),
             activity_id=activity_id,
             client_id=None,
-            status="confirmed",
+            status="waiting",
             seats=1,
         )
         session.add(record)

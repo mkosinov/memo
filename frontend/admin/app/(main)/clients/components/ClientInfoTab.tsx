@@ -1,17 +1,27 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react';
 import type { ClientWithStats, VisitorResponse } from '@memo/api-client';
 import { getClientVisitors, createVisitor, deleteVisitor } from '@memo/api-client';
+import { ClientStatistics } from '@/app/components/shared/record/blocks/ClientStatistics';
+
+export interface ClientInfoTabHandle {
+  save: () => Promise<void>;
+  cancel: () => void;
+}
 
 interface ClientInfoTabProps {
   client: ClientWithStats | null;
   mode?: 'view' | 'create';
   onSave: (data: Partial<ClientWithStats>) => Promise<void>;
   onDelete?: () => void;
+  onHasChanges?: (hasChanges: boolean) => void;
 }
 
-export function ClientInfoTab({ client, mode = 'view', onSave, onDelete }: ClientInfoTabProps) {
+export const ClientInfoTab = forwardRef<ClientInfoTabHandle, ClientInfoTabProps>(function ClientInfoTab(
+  { client, mode = 'view', onSave, onDelete, onHasChanges },
+  ref,
+) {
   const [name, setName] = useState(client?.name || '');
   const [phone, setPhone] = useState(client?.phone || '');
   const [email, setEmail] = useState(client?.email || '');
@@ -57,6 +67,12 @@ export function ClientInfoTab({ client, mode = 'view', onSave, onDelete }: Clien
     setChannel(client?.channel || '');
     setHasChanges(false);
   }, [client]);
+
+  // Expose save/cancel to parent via ref
+  useImperativeHandle(ref, () => ({ save: handleSave, cancel: handleCancel }), [handleSave, handleCancel]);
+
+  // Notify parent when hasChanges changes
+  useEffect(() => { onHasChanges?.(hasChanges); }, [hasChanges, onHasChanges]);
 
   const handleCreateVisitor = useCallback(async () => {
     if (!newVisitorName.trim() || !client) return;
@@ -146,35 +162,16 @@ export function ClientInfoTab({ client, mode = 'view', onSave, onDelete }: Clien
         </div>
       </div>
 
-      {/* Metrics group (read-only, view mode only) */}
+      {/* Statistics group (read-only, view mode only) */}
       {mode === 'view' && client && (
-      <div>
-        <h4 className="text-xs font-medium text-ink-mid mb-2">Метрики</h4>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 p-3 bg-surface rounded-lg">
-          <div className="text-center">
-            <div className="text-lg font-semibold">{client.visits_count}</div>
-            <div className="text-xs text-ink-light">Визитов</div>
-          </div>
-          <div className="text-center">
-            <div className="text-lg font-semibold">{client.missed_visits}</div>
-            <div className="text-xs text-ink-light">Пропущено</div>
-          </div>
-          <div className="text-center">
-            <div className="text-lg font-semibold">
-              {client.last_visit
-                ? new Date(client.last_visit).toLocaleDateString('ru-RU')
-                : '—'}
-            </div>
-            <div className="text-xs text-ink-light">Последний</div>
-          </div>
-          <div className="text-center">
-            <div className="text-lg font-semibold">
-              {client.total_paid.toLocaleString('ru-RU')} ₽
-            </div>
-            <div className="text-xs text-ink-light">Оплачено</div>
-          </div>
-        </div>
-      </div>
+        <ClientStatistics
+          stats={{
+            visitsCount: client.visits_count,
+            missedVisits: client.missed_visits,
+            lastVisit: client.last_visit,
+            totalPaid: client.total_paid,
+          }}
+        />
       )}
 
       {/* Dates group (read-only, view mode only) */}
@@ -283,38 +280,6 @@ export function ClientInfoTab({ client, mode = 'view', onSave, onDelete }: Clien
         </div>
       </div>
       )}
-
-      {/* Actions */}
-      <div className="flex justify-between items-center pt-4 border-t" style={{ borderColor: 'var(--line)' }}>
-        {mode === 'view' && onDelete ? (
-          <button
-            onClick={onDelete}
-            className="text-sm text-red-500 hover:text-red-600"
-          >
-            Удалить клиента
-          </button>
-        ) : <div />}
-        <div className="flex gap-2">
-          {mode === 'view' && (
-            <button
-              disabled={!hasChanges}
-              onClick={handleCancel}
-              className="px-4 py-2 text-sm text-ink-mid border rounded-lg disabled:opacity-50"
-              style={{ borderColor: 'var(--line)' }}
-            >
-              Отмена
-            </button>
-          )}
-          <button
-            disabled={!hasChanges}
-            onClick={handleSave}
-            className="px-4 py-2 text-sm text-white rounded-lg disabled:bg-gray-300"
-            style={{ backgroundColor: hasChanges ? 'var(--brand)' : undefined }}
-          >
-            {mode === 'create' ? 'Создать' : 'Сохранить'}
-          </button>
-        </div>
-      </div>
     </div>
   );
-}
+});

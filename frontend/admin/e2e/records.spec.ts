@@ -79,7 +79,7 @@ test.describe('Records Page — Table and Filters', () => {
     await expect(page.locator('select[aria-label="Фильтр по локации"]')).toBeVisible();
     await expect(page.locator('select[aria-label="Фильтр по услуге"]')).toBeVisible();
     await expect(page.locator('select[aria-label="Фильтр по мастеру"]')).toBeVisible();
-    await expect(page.locator('select[aria-label="Фильтр по статусу"]')).toBeVisible();
+    await expect(page.locator('[data-testid="booking-filters-status"]')).toBeVisible();
 
     // Reset button
     await expect(page.locator('button:has-text("Сбросить")')).toBeVisible();
@@ -94,7 +94,7 @@ test.describe('Records Page — Table and Filters', () => {
     await expect(page.locator('select[aria-label="Фильтр по локации"]')).toHaveValue('');
     await expect(page.locator('select[aria-label="Фильтр по услуге"]')).toHaveValue('');
     await expect(page.locator('select[aria-label="Фильтр по мастеру"]')).toHaveValue('');
-    await expect(page.locator('select[aria-label="Фильтр по статусу"]')).toHaveValue('');
+    await expect(page.locator('[data-testid="booking-filters-status-trigger"]')).toContainText('Все статусы');
   });
 
   // ── 5. Filter selects have options from mock data ────────────────────────
@@ -117,10 +117,14 @@ test.describe('Records Page — Table and Filters', () => {
     const masterCount = await masterOptions.count();
     expect(masterCount).toBeGreaterThan(1);
 
-    // Status select should have 4 status options + default
-    const statusOptions = page.locator('select[aria-label="Фильтр по статусу"] option');
+    // Status filter is a StatusFiltersPicker dropdown — open it to count options
+    await page.locator('[data-testid="booking-filters-status-trigger"]').click();
+    await page.waitForTimeout(200);
+    const statusOptions = page.locator('[data-testid^="booking-filters-status-option-"]');
     const statusCount = await statusOptions.count();
-    expect(statusCount).toBe(5); // default + pending, confirmed, cancelled, no_show
+    expect(statusCount).toBe(5); // all + waiting, visited, cancelled, missed
+    // Close the dropdown
+    await page.locator('[data-testid="booking-filters-status-trigger"]').click();
   });
 
   // ── 6. Filter by status — table updates ──────────────────────────────────
@@ -141,8 +145,9 @@ test.describe('Records Page — Table and Filters', () => {
       // Count initial rows (before filtering)
       const initialCount = await page.locator('tbody tr').count();
 
-      // Select "Ожидание" (pending) status filter
-      await page.locator('select[aria-label="Фильтр по статусу"]').selectOption('pending');
+      // Select "Ожидание" (waiting) status filter via StatusFiltersPicker dropdown
+      await page.locator('[data-testid="booking-filters-status-trigger"]').click();
+      await page.locator('[data-testid="booking-filters-status-option-waiting"]').click();
       await page.waitForTimeout(500);
 
       // Filtered count should be <= initial count
@@ -181,7 +186,8 @@ test.describe('Records Page — Table and Filters', () => {
       const initialCount = await page.locator('tbody tr').count();
 
       // Apply a filter
-      await page.locator('select[aria-label="Фильтр по статусу"]').selectOption('cancelled');
+      await page.locator('[data-testid="booking-filters-status-trigger"]').click();
+      await page.locator('[data-testid="booking-filters-status-option-cancelled"]').click();
       await page.waitForTimeout(500);
 
       // Click reset
@@ -192,7 +198,7 @@ test.describe('Records Page — Table and Filters', () => {
       await expect(page.locator('select[aria-label="Фильтр по локации"]')).toHaveValue('');
       await expect(page.locator('select[aria-label="Фильтр по услуге"]')).toHaveValue('');
       await expect(page.locator('select[aria-label="Фильтр по мастеру"]')).toHaveValue('');
-      await expect(page.locator('select[aria-label="Фильтр по статусу"]')).toHaveValue('');
+      await expect(page.locator('[data-testid="booking-filters-status-trigger"]')).toContainText('Все статусы');
 
       // Row count should be >= initial count (reset may expand date range to full week)
       const resetCount = await page.locator('tbody tr').count();
@@ -456,9 +462,9 @@ test.describe('Records Page — Table and Filters', () => {
     try {
       await waitForRecordsReady(page);
 
-      // The status filter uses RECORD statuses (pending, confirmed, cancelled, no_show).
-      // Newly created records default to "pending".
-      await page.locator('select[aria-label="Фильтр по статусу"]').selectOption('pending');
+      // The status filter uses VisitStatus via StatusFiltersPicker (waiting = "Ожидание").
+      await page.locator('[data-testid="booking-filters-status-trigger"]').click();
+      await page.locator('[data-testid="booking-filters-status-option-waiting"]').click();
       await page.waitForTimeout(500);
 
       // Find the status badge in the table — use .first() to avoid strict mode violation
@@ -470,9 +476,9 @@ test.describe('Records Page — Table and Filters', () => {
       // Badge should contain the status text
       await expect(statusBadge).toContainText('Ожидание');
 
-      // Badge should have gray styling (for "pending" status)
+      // Badge should have amber styling (for "waiting" / "Ожидание" status)
       const classes = await statusBadge.getAttribute('class');
-      expect(classes).toContain('gray');
+      expect(classes).toContain('amber');
     } finally {
       await cleanup(request, `/api/v1/records/${recordId}`);
       await cleanup(request, `/api/v1/clients/${clientId}`);
@@ -541,8 +547,9 @@ test.describe('Records Page — Table and Filters', () => {
 
       const initialCount = await page.locator('tbody tr').count();
 
-      // Apply status filter — use record status "pending" (not visit status "waiting")
-      await page.locator('select[aria-label="Фильтр по статусу"]').selectOption('pending');
+      // Apply status filter — use visit status "waiting" via StatusFiltersPicker
+      await page.locator('[data-testid="booking-filters-status-trigger"]').click();
+      await page.locator('[data-testid="booking-filters-status-option-waiting"]').click();
       await page.waitForTimeout(300);
 
       const afterStatus = await page.locator('tbody tr').count();

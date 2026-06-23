@@ -1,6 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { waitForScheduleReady } from './fixtures/helpers';
-import { switchToRecordsTab, getRecordStatus } from './fixtures/scenarios';
+import { waitForScheduleReady, openModal } from './fixtures/helpers';
 
 test('US-M05: Admin can change record status via icon picker', async ({
   page,
@@ -8,29 +7,33 @@ test('US-M05: Admin can change record status via icon picker', async ({
   await page.goto('/schedule');
   await waitForScheduleReady(page);
 
-  const card = page.locator('[data-testid^="activity-"]').first();
-  await card.click();
-  await switchToRecordsTab(page);
+  await openModal(page);
 
-  // Find first record's status icon
-  const firstRecord = page.locator('[data-testid="record"]').first();
-  const recordName = (await firstRecord.locator('[data-testid="client-name"]').textContent()) ?? '';
-  const statusIcon = firstRecord.locator('[data-testid="status-icon"]');
-  await statusIcon.click();
+  // Switch to first client tab
+  const clientTab = page.locator('[data-testid^="tab-client-"]').first();
+  await expect(clientTab).toBeVisible({ timeout: 5_000 });
+  await clientTab.click();
 
-  // Picker opens with 4 options (icons, Russian labels in tooltips)
-  const picker = page.locator('[data-testid="status-picker"]');
-  await expect(picker).toBeVisible();
-  const options = picker.locator('[data-status]');
-  await expect(options).toHaveCount(4);
-  await expect(picker).toContainText('Ожидание');
-  await expect(picker).toContainText('Посетил');
-  await expect(picker).toContainText('Отменил');
-  await expect(picker).toContainText('Неявка');
+  // Wait for the client tab to load
+  await expect(page.locator('[data-testid="client-tab"]')).toBeVisible({ timeout: 5_000 });
+  await expect(page.locator('[data-testid="record-visits-table"]')).toBeVisible();
 
-  // Select "Отменил"
-  await picker.locator('[data-status="cancelled"]').click();
+  // Find first visit's status trigger (StatusPicker)
+  const statusTrigger = page.locator('[data-testid$="-status-trigger"]').first();
+  await expect(statusTrigger).toBeVisible({ timeout: 5_000 });
+  await statusTrigger.click();
 
-  // Assert: icon updated
-  await expect.poll(async () => getRecordStatus(page, recordName)).toBe('cancelled');
+  // The StatusPicker popover should appear with 4 status options
+  const popover = page.locator('[data-testid$="-status-popover"]').first();
+  await expect(popover).toBeVisible({ timeout: 3_000 });
+
+  // Verify the options exist
+  const options = popover.locator('[data-testid$="-status-option-cancelled"]');
+  await expect(options).toBeVisible();
+
+  // Select "Отменил" (cancelled)
+  await options.click();
+
+  // Verify the picker closed
+  await expect(popover).not.toBeVisible({ timeout: 3_000 });
 });

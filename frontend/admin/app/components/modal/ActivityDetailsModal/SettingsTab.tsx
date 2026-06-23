@@ -122,7 +122,7 @@ export function SettingsTab({ activity, onUpdate }: SettingsTabProps) {
     <div className="space-y-4 p-4" data-testid="settings-tab">
       {/* Row 1: Date/Time + Duration + Private toggle */}
       <div className="flex gap-3 items-start" data-testid="settings-row-datetime-duration">
-        <div className="flex-1">
+        <div className="flex-none">
           <label className="text-xs font-medium text-ink-mid block mb-1">
             Дата и время
           </label>
@@ -136,7 +136,7 @@ export function SettingsTab({ activity, onUpdate }: SettingsTabProps) {
             data-testid="input-datetime"
           />
         </div>
-        <div className="w-28">
+        <div className="w-20">
           <label className="text-xs font-medium text-ink-mid block mb-1" htmlFor="settings-duration">
             Длительность
           </label>
@@ -151,7 +151,7 @@ export function SettingsTab({ activity, onUpdate }: SettingsTabProps) {
             data-testid="input-duration"
           />
         </div>
-        <div className="ml-auto flex flex-col items-start gap-1.5 pb-0.5">
+        <div className="ml-auto flex flex-col items-end gap-1.5 pb-0.5">
           <span className="text-xs text-ink-mid">Приватное</span>
           <button
             type="button"
@@ -197,7 +197,7 @@ export function SettingsTab({ activity, onUpdate }: SettingsTabProps) {
             ))}
           </select>
         </div>
-        <div className="w-24">
+        <div className="w-20">
           <label className="text-xs font-medium text-ink-mid block mb-1">
             Возраст
           </label>
@@ -209,7 +209,7 @@ export function SettingsTab({ activity, onUpdate }: SettingsTabProps) {
             {ageDisplay || '—'}
           </div>
         </div>
-        <div className="w-24">
+        <div className="w-20">
           <label className="text-xs font-medium text-ink-mid block mb-1" htmlFor="settings-capacity">
             Вместимость
           </label>

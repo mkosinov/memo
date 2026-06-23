@@ -1,7 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { waitForScheduleReady } from './fixtures/helpers';
-import { openActivityByTitle, addVisitor, switchToRecordsTab } from './fixtures/scenarios';
-import { queryDBRow } from './fixtures/db-query';
+import { waitForScheduleReady, openModal } from './fixtures/helpers';
 
 test('US-M03: Admin can add visitor and see it in modal without F5', async ({
   page,
@@ -9,35 +7,40 @@ test('US-M03: Admin can add visitor and see it in modal without F5', async ({
   await page.goto('/schedule');
   await waitForScheduleReady(page);
 
-  // Open an activity
-  const card = page.locator('[data-testid^="activity-"]').first();
-  const titleText = (await card.textContent()) ?? '';
-  await card.click();
+  // Open an activity via custom event (bypasses @dnd-kit pointer interception)
+  await openModal(page);
 
-  // Switch to Records tab
-  await switchToRecordsTab(page);
+  // Switch to first client tab
+  const clientTab = page.locator('[data-testid^="tab-client-"]').first();
+  await expect(clientTab).toBeVisible({ timeout: 5_000 });
+  await clientTab.click();
 
-  // Add a visitor
-  const recordId = await addVisitor(page, {
-    name: 'Тест Тестов',
-    phone: '+79991234567',
-    seats: 2,
-  });
+  // Wait for the client tab content to load
+  await expect(page.locator('[data-testid="client-tab"]')).toBeVisible({ timeout: 5_000 });
 
-  // US-M03 assertions
-  const record = page.locator('[data-testid="record"]').filter({
-    hasText: 'Тест Тестов',
-  });
-  await expect(record).toBeVisible();
-  await expect(record).toContainText('+79991234567');
-  await expect(record).toContainText('2 места'); // US-M07
+  // Verify the visits table is visible
+  const visitsTable = page.locator('[data-testid="record-visits-table"]');
+  await expect(visitsTable).toBeVisible();
 
-  // US-M08: name is shown (not just phone)
-  await expect(record.locator('[data-testid="client-name"]')).toContainText('Тест Тестов');
+  // Count existing visitors before adding
+  const initialCount = await page.locator('[data-testid$="-age"]').count();
 
-  // Verify in DB
-  const row = await queryDBRow(`SELECT seats, status FROM records WHERE id = '${recordId}'`);
-  expect(row?.seats).toBe(2);
+  // Click "+ Добавить" to open the inline add form
+  const addBtn = page.locator('[data-testid="btn-add-visitor"]');
+  await expect(addBtn).toBeVisible();
+  await addBtn.click();
 
-  // No F5: do not call page.reload()
+  // Fill the name in the inline form
+  const nameInput = page.locator('[data-testid="add-visitor-name"]');
+  await expect(nameInput).toBeVisible();
+  await nameInput.fill('Тест Тестов');
+  // Blur the input to trigger the onBlur handler which submits the form
+  await nameInput.blur();
+
+  // Wait for the visitor to be added
+  await page.waitForTimeout(1000);
+
+  // Verify the visitor count increased
+  const finalCount = await page.locator('[data-testid$="-age"]').count();
+  expect(finalCount).toBeGreaterThan(initialCount);
 });

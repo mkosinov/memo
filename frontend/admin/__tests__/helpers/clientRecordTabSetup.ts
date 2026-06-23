@@ -15,7 +15,7 @@ export const mockRecord: RecordResponse = {
   id: 'r1',
   activity_id: 'ev_1',
   client_id: 'c1',
-  status: 'confirmed',
+  status: 'visited',
   seats: 1,
   anonym_visits: 0,
   comment: null,

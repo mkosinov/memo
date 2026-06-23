@@ -19,6 +19,7 @@ try {
  */
 export default defineConfig({
   testDir: './e2e',
+  globalSetup: require.resolve('./e2e/globalSetup'),
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
@@ -38,7 +39,7 @@ export default defineConfig({
   webServer: {
     command: 'pnpm exec next dev -p 3001',
     url: 'http://localhost:3001',
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer: true,
     cwd: '.',
   },
 

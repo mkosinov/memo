@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { waitForScheduleReady } from './fixtures/helpers';
+import { waitForScheduleReady, openModal } from './fixtures/helpers';
 import { createTestActivity } from './fixtures/factories';
 
 /**
@@ -39,9 +39,8 @@ test.describe('Wave 5: x cards badge behind modal (#86)', () => {
     const badgeCount = await badge.count();
 
     if (badgeCount > 0) {
-      // Badge exists — open any activity card to trigger the modal
-      const card = page.locator('[data-testid^="activity-"]').first();
-      await card.click();
+      // Badge exists — open any activity card via custom event
+      await openModal(page);
       await expect(page.locator('[role="dialog"]')).toBeVisible();
       await page.waitForTimeout(300);
 
@@ -84,9 +83,8 @@ test.describe('Wave 5: x cards badge behind modal (#86)', () => {
       // in the component code (z-[110]) and the modal is z-[200].
       // We verify the modal z-index is correct as a fallback assertion.
       if (count > 0) {
-        // Open any card
-        const card = page.locator('[data-testid^="activity-"]').first();
-        await card.click();
+        // Open any card via custom event
+        await openModal(page);
         await expect(page.locator('[role="dialog"]')).toBeVisible();
 
         // Verify modal z-index is 200
@@ -96,8 +94,7 @@ test.describe('Wave 5: x cards badge behind modal (#86)', () => {
         expect(modalZIndex).toBe(200);
       } else {
         // No overlap scenario available — at minimum verify modal z-index is correct
-        const card = page.locator('[data-testid^="activity-"]').first();
-        await card.click();
+        await openModal(page);
         await expect(page.locator('[role="dialog"]')).toBeVisible();
 
         const modalZIndex = await page.locator('[role="dialog"]').evaluate((el) => {

@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] — 2026-06-20
 
+### Added
+- **Wave 6 — Record Status Derivation & Atom Extraction** (#78, #79, #82, #98, branch `fix/wave6-status-derivation-atom-extraction`, 2026-06-20):
+  - **Phase 0 (Backend):** `VisitStatus` enum + `computeRecordStatus` derivation in TypeScript (`@memo/domain`) and Python (FastAPI). Alembic data migration `4d5e6f7a8b9c` re-maps Wave 5 enum values. Record schemas reject `status` field with 422 via `extra='forbid'`.
+  - **Phase 1 (Frontend enum migration):** Single `VISIT_STATUS_CONFIG` replaces 3 duplicate maps. `StatusPicker` moved to `shared/` and rebuilt on `CustomSelect`. New `StatusBadge` (read-only) component. `safeStatus()` helper for runtime defensive guards.
+  - **Phase 2 (Atoms extraction):** 8 atoms extracted to `app/components/shared/{records,payments,visitors}/`: `RecordHeader`, `RecordVisitRow`, `PaymentList`, `PaymentForm`, `PaymentTotals`, `AddVisitorForm`, `VisitorRow`, `RecordWithDerived` type.
+  - **Phase 3 (Wire parents):** `useRecordData` returns derived `status`. `useRecordMutations` gains `updateAnonymVisits` and `updateVisitStatus`. `ClientRecordTab` 746→329 LOC (−56%). `ClientTab` 559→227 LOC (−59%). Total: 1305→556 LOC (−57%, −749 LOC removed).
+  - **Phase 4 (E2E):** 4 E2E for User Scenarios 1-4, 4 E2E for Scenario 5 (same StatusPicker everywhere), 6 visual regression snapshots. Visual Compliance Gate: 6/6 PASS. 572 backend tests, 70+ frontend vitest, 14/14 Wave 6 E2E passing.
+
 ### Changed
 - **End-to-End Error Contract with Machine-Readable Codes** (#93, branch `fix/error-flow-93`):
   - **Backend:** New `ErrorCode` enum with 18 stable codes (ACTIVITY_AT_CAPACITY, *_NOT_FOUND, VALIDATION_ERROR, INTERNAL_ERROR, etc.) and `ErrorDetail { code, message }` Pydantic schema

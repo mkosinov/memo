@@ -4,6 +4,8 @@ import React from 'react';
 import { useNavigation } from '@/contexts/NavigationContext';
 import { useRecords } from '@/contexts/RecordsContext';
 import { getMonday, formatDateISO } from '@/lib/utils';
+import { StatusFiltersPicker } from '@/app/components/shared/StatusFiltersPicker';
+import type { VisitStatus } from '@memo/domain';
 
 interface BookingFiltersProps {
   locationId: string;
@@ -126,19 +128,12 @@ export function BookingFilters({
 
       <div className="flex flex-col gap-1">
         <label className="text-xs font-medium" style={{ color: 'var(--ink-light)' }}>Статус</label>
-        <select
-          value={status}
-          onChange={(e) => onStatusChange(e.target.value)}
-          className="rounded-lg border px-2 py-1.5 text-xs"
-          style={{ borderColor: 'var(--line)', color: 'var(--ink-mid)', backgroundColor: 'var(--white)' }}
-          aria-label="Фильтр по статусу"
-        >
-          <option value="">Все статусы</option>
-          <option value="pending">Ожидание</option>
-          <option value="confirmed">Подтверждена</option>
-          <option value="cancelled">Отменена</option>
-          <option value="no_show">Неявка</option>
-        </select>
+        <StatusFiltersPicker
+          value={status === '' ? null : (status as VisitStatus)}
+          onChange={(v) => onStatusChange(v ?? '')}
+          size="md"
+          testIdPrefix="booking-filters-status"
+        />
       </div>
 
       <button

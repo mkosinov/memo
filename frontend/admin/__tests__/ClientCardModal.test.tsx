@@ -108,6 +108,10 @@ vi.mock('@/contexts/ClientsContext', () => ({
   useClients: vi.fn(),
 }));
 
+vi.mock('@/contexts/UIContext', () => ({
+  useUI: vi.fn(() => ({ showToast: vi.fn() })),
+}));
+
 import { useClients } from '@/contexts/ClientsContext';
 import { createMockClientsContext } from './helpers/mockContexts';
 

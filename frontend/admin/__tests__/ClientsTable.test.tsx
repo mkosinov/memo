@@ -78,6 +78,10 @@ vi.mock('@/contexts/ClientsContext', () => ({
   useClients: () => mockContextValue,
 }));
 
+vi.mock('@/contexts/UIContext', () => ({
+  useUI: vi.fn(() => ({ showToast: vi.fn() })),
+}));
+
 import { ClientsTable } from '../app/(main)/clients/components/ClientsTable';
 
 describe('ClientsTable', () => {

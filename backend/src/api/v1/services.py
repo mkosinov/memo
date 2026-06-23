@@ -6,6 +6,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 
 from src.db import SessionDep
+from src.errors import ErrorCode, ErrorDetail
 from src.schemas.service import ServiceCreate, ServiceResponse, ServiceUpdate
 from src.services.service import ServiceService, get_service_service
 
@@ -40,7 +41,13 @@ async def get_service(
     """Return a single service by ID with tariffs and tags."""
     svc = await service.get(db_session=session, id=service_id)
     if not svc:
-        raise HTTPException(status_code=404, detail="Service not found")
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.SERVICE_NOT_FOUND,
+                message="Service not found",
+            ).model_dump(),
+        )
     return ServiceResponse.model_validate(svc)
 
 
@@ -65,7 +72,13 @@ async def update_service(
     """Full-update a service by ID (PUT, not PATCH). Replaces tariffs and tag links."""
     svc = await service.update(db_session=session, id=service_id, data=data)
     if not svc:
-        raise HTTPException(status_code=404, detail="Service not found")
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.SERVICE_NOT_FOUND,
+                message="Service not found",
+            ).model_dump(),
+        )
     return ServiceResponse.model_validate(svc)
 
 
@@ -78,4 +91,10 @@ async def delete_service(
     """Soft-delete a service (set is_active=False)."""
     deleted = await service.delete(db_session=session, id=service_id)
     if not deleted:
-        raise HTTPException(status_code=404, detail="Service not found")
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.SERVICE_NOT_FOUND,
+                message="Service not found",
+            ).model_dump(),
+        )

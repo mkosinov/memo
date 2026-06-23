@@ -6,6 +6,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 
 from src.db import SessionDep
+from src.errors import ErrorCode, ErrorDetail
 from src.schemas.tag import TagCreate, TagResponse
 from src.services.generic import GenericService
 from src.services.tag import get_tag_service
@@ -51,7 +52,13 @@ async def update_tag(
     """Full-update a tag by ID."""
     tag = await service.update(db_session=session, id=tag_id, data=data)
     if not tag:
-        raise HTTPException(status_code=404, detail="Tag not found")
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.TAG_NOT_FOUND,
+                message="Tag not found",
+            ).model_dump(),
+        )
     return tag
 
 
@@ -64,4 +71,10 @@ async def delete_tag(
     """Soft-delete a tag (set is_active=False)."""
     deleted = await service.delete(db_session=session, id=tag_id)
     if not deleted:
-        raise HTTPException(status_code=404, detail="Tag not found")
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.TAG_NOT_FOUND,
+                message="Tag not found",
+            ).model_dump(),
+        )

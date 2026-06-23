@@ -6,6 +6,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 
 from src.db import SessionDep
+from src.errors import ErrorCode, ErrorDetail
 from src.schemas.material import MaterialCreate, MaterialResponse, MaterialUpdate
 from src.services.generic import GenericService
 from src.services.material import get_material_service
@@ -40,7 +41,13 @@ async def get_material(
     """Return a single material by ID."""
     material = await service.get(db_session=session, id=material_id)
     if not material:
-        raise HTTPException(status_code=404, detail="Material not found")
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.MATERIAL_NOT_FOUND,
+                message="Material not found",
+            ).model_dump(),
+        )
     return material
 
 
@@ -64,7 +71,13 @@ async def update_material(
     """Full-update a material by ID (PUT, not PATCH)."""
     material = await service.update(db_session=session, id=material_id, data=data)
     if not material:
-        raise HTTPException(status_code=404, detail="Material not found")
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.MATERIAL_NOT_FOUND,
+                message="Material not found",
+            ).model_dump(),
+        )
     return material
 
 
@@ -77,4 +90,10 @@ async def delete_material(
     """Soft-delete a material (set is_active=False)."""
     deleted = await service.delete(db_session=session, id=material_id)
     if not deleted:
-        raise HTTPException(status_code=404, detail="Material not found")
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.MATERIAL_NOT_FOUND,
+                message="Material not found",
+            ).model_dump(),
+        )

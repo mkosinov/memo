@@ -9,6 +9,7 @@ import { useUI } from '@/contexts/UIContext';
 import { TagModal } from './TagModal';
 import { ColumnPicker } from '@/app/components/shared/ColumnPicker';
 import { ErrorState } from '@/app/components/error';
+import { parseApiError } from '@/app/lib/api/parseApiError';
 
 // ─── Column definitions ──────────────────────────────────────────────────
 
@@ -138,19 +139,27 @@ export function TagsTable() {
     if (data.tag !== null && data.tag !== undefined) {
       payload.tag = String(data.tag);
     }
-    await updateTag.mutateAsync({
-      id: editTag.id,
-      data: payload,
-    });
-    showToast('Тег обновлён');
-    setEditTag(null);
+    try {
+      await updateTag.mutateAsync({
+        id: editTag.id,
+        data: payload,
+      });
+      showToast('Тег обновлён');
+      setEditTag(null);
+    } catch (err) {
+      showToast(parseApiError(err).message, 'error');
+    }
   };
 
   // ─── Create ─────────────────────────────────────────────────────────
 
   const handleCreateSubmit = async (data: Record<string, unknown>) => {
-    await createTag.mutateAsync({ tag: String(data.tag ?? '') });
-    showToast('Тег создан');
+    try {
+      await createTag.mutateAsync({ tag: String(data.tag ?? '') });
+      showToast('Тег создан');
+    } catch (err) {
+      showToast(parseApiError(err).message, 'error');
+    }
   };
 
   // ─── Delete ─────────────────────────────────────────────────────────
@@ -158,8 +167,12 @@ export function TagsTable() {
   const handleDelete = async (tag: TagResponse) => {
     setOpenDropdownId(null);
     if (!window.confirm('Удалить тег?')) return;
-    await deleteTag.mutateAsync(tag.id);
-    showToast('Тег удалён');
+    try {
+      await deleteTag.mutateAsync(tag.id);
+      showToast('Тег удалён');
+    } catch (err) {
+      showToast(parseApiError(err).message, 'error');
+    }
   };
 
   // ─── Error ─────────────────────────────────────────────────────────

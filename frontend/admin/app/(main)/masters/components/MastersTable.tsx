@@ -12,6 +12,7 @@ import { MasterModal } from './MasterModal';
 import { MasterFilters } from './MasterFilters';
 import { ColumnPicker } from '@/app/components/shared/ColumnPicker';
 import { ErrorState } from '@/app/components/error';
+import { parseApiError } from '@/app/lib/api/parseApiError';
 
 // ─── Column definitions ──────────────────────────────────────────────────
 
@@ -157,23 +158,31 @@ export function MastersTable() {
         (payload as Record<string, unknown>)[key] = val;
       }
     }
-    await updateMaster.mutateAsync({
-      id: editMaster.id,
-      data: payload,
-    });
-    showToast('Мастер обновлён');
-    setEditMaster(null);
+    try {
+      await updateMaster.mutateAsync({
+        id: editMaster.id,
+        data: payload,
+      });
+      showToast('Мастер обновлён');
+      setEditMaster(null);
+    } catch (err) {
+      showToast(parseApiError(err).message, 'error');
+    }
   };
 
   // ─── Archive / Restore ───────────────────────────────────────────────
 
   const handleToggleActive = async (master: MasterResponse) => {
-    await updateMaster.mutateAsync({
-      id: master.id,
-      data: { is_active: !master.is_active } as Record<string, unknown>,
-    });
-    showToast(master.is_active ? 'Мастер архивирован' : 'Мастер восстановлен');
-    setOpenDropdownId(null);
+    try {
+      await updateMaster.mutateAsync({
+        id: master.id,
+        data: { is_active: !master.is_active } as Record<string, unknown>,
+      });
+      showToast(master.is_active ? 'Мастер архивирован' : 'Мастер восстановлен');
+      setOpenDropdownId(null);
+    } catch (err) {
+      showToast(parseApiError(err).message, 'error');
+    }
   };
 
   // ─── Create ─────────────────────────────────────────────────────────
@@ -189,8 +198,12 @@ export function MastersTable() {
         payload[key] = val;
       }
     }
-    await createMaster.mutateAsync(payload as never);
-    showToast('Мастер создан');
+    try {
+      await createMaster.mutateAsync(payload as never);
+      showToast('Мастер создан');
+    } catch (err) {
+      showToast(parseApiError(err).message, 'error');
+    }
   };
 
   // ─── Delete ─────────────────────────────────────────────────────────
@@ -198,8 +211,12 @@ export function MastersTable() {
   const handleDelete = async (master: MasterResponse) => {
     setOpenDropdownId(null);
     if (!window.confirm('Удалить мастера?')) return;
-    await deleteMaster.mutateAsync(master.id);
-    showToast('Мастер удалён');
+    try {
+      await deleteMaster.mutateAsync(master.id);
+      showToast('Мастер удалён');
+    } catch (err) {
+      showToast(parseApiError(err).message, 'error');
+    }
   };
 
   // ─── Error ─────────────────────────────────────────────────────────

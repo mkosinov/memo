@@ -6,6 +6,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from src.db import SessionDep
+from src.errors import ErrorCode, ErrorDetail
 from src.schemas.client import (
     ClientCreate,
     ClientListParams,
@@ -47,7 +48,13 @@ async def search_client_by_phone(
     """Search for an active client by phone number."""
     clients = await service.list(db_session=session, phone=phone)
     if not clients:
-        raise HTTPException(status_code=404, detail="Client not found")
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.CLIENT_NOT_FOUND,
+                message="Client not found",
+            ).model_dump(),
+        )
     return clients[0]
 
 
@@ -69,7 +76,13 @@ async def get_client(
     """Return a single client by ID."""
     client = await service.get(db_session=session, id=client_id)
     if not client:
-        raise HTTPException(status_code=404, detail="Client not found")
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.CLIENT_NOT_FOUND,
+                message="Client not found",
+            ).model_dump(),
+        )
     return client
 
 
@@ -93,7 +106,13 @@ async def update_client(
     """Full-update a client by ID (PUT, not PATCH)."""
     client = await service.update(db_session=session, id=client_id, data=data)
     if not client:
-        raise HTTPException(status_code=404, detail="Client not found")
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.CLIENT_NOT_FOUND,
+                message="Client not found",
+            ).model_dump(),
+        )
     return client
 
 
@@ -107,7 +126,13 @@ async def patch_client(
     """Partial-update a client by ID (PATCH)."""
     client = await service.patch(db_session=session, id=client_id, data=data)
     if not client:
-        raise HTTPException(status_code=404, detail="Client not found")
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.CLIENT_NOT_FOUND,
+                message="Client not found",
+            ).model_dump(),
+        )
     return client
 
 
@@ -120,7 +145,13 @@ async def delete_client(
     """Soft-delete a client (set is_active=False)."""
     deleted = await service.delete(db_session=session, id=client_id)
     if not deleted:
-        raise HTTPException(status_code=404, detail="Client not found")
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.CLIENT_NOT_FOUND,
+                message="Client not found",
+            ).model_dump(),
+        )
 
 
 @router.get("/{client_id}/visitors", response_model=list[VisitorResponse])

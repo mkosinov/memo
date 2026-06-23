@@ -14,6 +14,7 @@ import { NewBookingTab } from './NewBookingTab';
 import { Modal } from '@/app/components/shared/modal/Modal';
 import type { TariffResponse } from '@memo/api-client';
 import { useRecordMutations } from '@/hooks/useRecordMutations';
+import { parseApiError } from '@/app/lib/api/parseApiError';
 
 interface ActivityDetailsModalProps {
   isOpen: boolean;
@@ -172,8 +173,8 @@ export function ActivityDetailsModal({ isOpen, onClose, activity, mode }: Activi
         await createRecord(data, serviceTariffs);
         showToast('Запись создана');
         setActiveTab('settings');
-      } catch {
-        showToast('Ошибка создания записи');
+      } catch (err) {
+        showToast(parseApiError(err).message, 'error');
       }
     },
     [createRecord, serviceTariffs, showToast],
@@ -186,8 +187,8 @@ export function ActivityDetailsModal({ isOpen, onClose, activity, mode }: Activi
         await deleteRecord();
         showToast('Запись удалена');
         setActiveTab('settings');
-      } catch {
-        showToast('Ошибка удаления');
+      } catch (err) {
+        showToast(parseApiError(err).message, 'error');
       }
     },
     [deleteRecord, showToast],
@@ -199,8 +200,8 @@ export function ActivityDetailsModal({ isOpen, onClose, activity, mode }: Activi
       try {
         await addPayment(amount, method);
         showToast(`Оплата ${amount} ₽ (${method}) добавлена`);
-      } catch {
-        showToast('Ошибка добавления оплаты');
+      } catch (err) {
+        showToast(parseApiError(err).message, 'error');
       }
     },
     [addPayment, showToast],
@@ -249,8 +250,8 @@ export function ActivityDetailsModal({ isOpen, onClose, activity, mode }: Activi
             const firstPrice = serviceTariffs[0]?.price ?? 0;
             await addVisitorToRecord({ ...data, price: firstPrice });
             showToast('Посетитель добавлен');
-          } catch {
-            showToast('Ошибка добавления посетителя');
+          } catch (err) {
+            showToast(parseApiError(err).message, 'error');
           }
         }}
         showToast={showToast}

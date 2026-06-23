@@ -17,6 +17,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Phase 3 (Wire parents):** `useRecordData` returns derived `status`. `useRecordMutations` gains `updateAnonymVisits` and `updateVisitStatus`. `ClientRecordTab` 746→329 LOC (−56%). `ClientTab` 559→227 LOC (−59%). Total: 1305→556 LOC (−57%, −749 LOC removed).
   - **Phase 4 (E2E):** 4 E2E for User Scenarios 1-4, 4 E2E for Scenario 5 (same StatusPicker everywhere), 6 visual regression snapshots. Visual Compliance Gate: 6/6 PASS. 572 backend tests, 70+ frontend vitest, 14/14 Wave 6 E2E passing.
 
+### Changed
+- **End-to-End Error Contract with Machine-Readable Codes** (#93, branch `fix/error-flow-93`):
+  - **Backend:** New `ErrorCode` enum with 18 stable codes (ACTIVITY_AT_CAPACITY, *_NOT_FOUND, VALIDATION_ERROR, INTERNAL_ERROR, etc.) and `ErrorDetail { code, message }` Pydantic schema
+  - **Backend:** 4 global exception handlers wrap all errors in `{detail: {code, message}}` shape (HTTPException, RequestValidationError, IntegrityError, Exception catch-all)
+  - **Backend:** 41 `raise HTTPException` sites migrated to include `ErrorDetail(code=..., message=...)` — explicit codes per entity
+  - **API client:** `ApiError` gets optional `code?: string` field; `api()` extracts structured errors from response body
+  - **Admin:** New `parseApiError(err)` helper maps codes → user-friendly Russian messages (e.g., ACTIVITY_AT_CAPACITY → "Недостаточно мест: 2/2 мест занято")
+  - **Admin:** 26 mutation handlers in 9 files now wrap `mutateAsync` in try/catch with `parseApiError` — eliminates silent error swallowing
+  - **Admin:** `QueryCache.onError` uses `parseApiError` for specific messages instead of generic "Не удалось загрузить данные"
+  - **Tests:** 6 E2E tests cover all 6 user scenarios (activity capacity, not-found, validation, 500, network, duplicate phone)
+  - **Docs:** ADR-005 added for the error contract decision
+  - **Backwards compatible:** Legacy `{"detail": "string"}` responses still work (code=undefined, uses err.message)
+
+---
+
+## [Unreleased] — 2026-06-19
+
 ### Fixed
 - **Wave 4.5 — Fix 55 pre-existing TypeScript errors blocking pre-push hook** (#88, branch `fix/ts-errors-blocking-hook`):
   - Deleted dead `lib/mock-data.ts` and `lib/schedule-context.tsx` (37 errors eliminated)

@@ -4,10 +4,12 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getRecords, getActivity } from '@memo/api-client';
 import { useClients } from '@/contexts/ClientsContext';
+import { useUI } from '@/contexts/UIContext';
 import { ClientInfoTab, type ClientInfoTabHandle } from './ClientInfoTab';
 import { ClientRecordTab } from './ClientRecordTab';
 import { Modal } from '@/app/components/shared/modal/Modal';
 import type { ClientWithStats, ActivityResponse } from '@memo/api-client';
+import { parseApiError } from '@/app/lib/api/parseApiError';
 
 interface ClientCardModalProps {
   client: ClientWithStats | null;
@@ -22,6 +24,7 @@ export function ClientCardModal({ client, isOpen, onClose, onClientCreated, mode
   const [hasChanges, setHasChanges] = useState(false);
   const clientInfoRef = useRef<ClientInfoTabHandle>(null);
   const { createClient, updateClient, deleteClient } = useClients();
+  const { showToast } = useUI();
 
   // Close on Escape
   useEffect(() => {
@@ -38,10 +41,14 @@ export function ClientCardModal({ client, isOpen, onClose, onClientCreated, mode
   const handleDelete = useCallback(async () => {
     const clientName = client?.name ?? 'клиента';
     if (window.confirm(`Удалить ${clientName}? Это скроет клиента из списка.`)) {
-      await deleteClient(client!.id);
-      onClose();
+      try {
+        await deleteClient(client!.id);
+        onClose();
+      } catch (err) {
+        showToast(parseApiError(err).message, 'error');
+      }
     }
-  }, [client, deleteClient, onClose]);
+  }, [client, deleteClient, onClose, showToast]);
 
   // Fetch records for this client (only in view mode)
   const { data: records } = useQuery({
@@ -179,12 +186,17 @@ export function ClientCardModal({ client, isOpen, onClose, onClientCreated, mode
                     try {
                       const newClient = await createClient(data as any);
                       onClientCreated?.(newClient as any);
-                    } catch {
-                      // Create failed — close modal
-                      onClose();
+                    } catch (err) {
+                      showToast(parseApiError(err).message, 'error');
                     }
                   }
-                : (data: any) => updateClient(client!.id, data)
+                : async (data: any) => {
+                    try {
+                      await updateClient(client!.id, data);
+                    } catch (err) {
+                      showToast(parseApiError(err).message, 'error');
+                    }
+                  }
               }
               onDelete={mode === 'view' && client ? handleDelete : undefined}
             />

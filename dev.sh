@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -e
 
+# Allow dev.sh to run in non-TTY contexts (backgrounded, scripts, CI, nohup).
+# pnpm 11+ prompts to confirm modules purge when no TTY is detected, which
+# aborts the dev server. Setting CI=true tells pnpm to skip the prompt.
+# Override with `CI=false ./dev.sh` to force interactive prompts (rare).
+export CI="${CI:-true}"
+
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BACKEND_DIR="$ROOT_DIR/backend"
 WEB_DIR="$ROOT_DIR/frontend/web"

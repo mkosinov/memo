@@ -31,14 +31,15 @@ test.describe('Records Page — Visual Regression', () => {
   test('records page with filters applied', async ({ page }) => {
     await waitForRecordsReady(page);
 
-    // Apply status filter — select first non-empty option
-    const statusSelect = page.locator('select[aria-label="Фильтр по статусу"]');
-    const statusOptions = statusSelect.locator('option');
-    const optionCount = await statusOptions.count();
-
-    if (optionCount > 1) {
-      await statusSelect.selectOption({ index: 1 });
-      await page.waitForTimeout(500);
+    // Apply status filter via StatusFiltersPicker dropdown
+    const trigger = page.locator('[data-testid="booking-filters-status-trigger"]');
+    if ((await trigger.count()) > 0) {
+      await trigger.click();
+      const option = page.locator('[data-testid="booking-filters-status-option-waiting"]');
+      if ((await option.count()) > 0) {
+        await option.click();
+        await page.waitForTimeout(500);
+      }
     }
 
     await expect(page).toHaveScreenshot('records-filtered.png', {

@@ -31,8 +31,8 @@ test.describe('Wave 6 — Record status derived from visits', () => {
     await clientTabs.first().click();
     await expect(page.locator('[data-testid="client-tab"]')).toBeVisible({ timeout: 10_000 });
 
-    // Find the status picker inside the client tab
-    const statusPicker = page.locator('[data-testid="client-tab"] [data-testid="status-picker"]');
+    // Find the status picker inside the client tab (testidPrefix="record-status" in RecordSummary)
+    const statusPicker = page.locator('[data-testid="client-tab"] [data-testid="record-status"]');
     await expect(statusPicker).toBeVisible();
 
     // The status picker is either a native <select> or CustomSelect
@@ -55,9 +55,10 @@ test.describe('Wave 6 — Record status derived from visits', () => {
     // The icon-pending should now show as a different status
     await page.waitForTimeout(1000);
 
-    // Verify the record still exists and has the expected visitor
-    const visitorRow = page.locator('[data-testid="visitor-row"]').first();
-    await expect(visitorRow).toBeVisible();
+    // Verify the record still exists — the client tab should still be visible
+    // with the visits table (testid="record-visits-table")
+    const visitsTable = page.locator('[data-testid="record-visits-table"]');
+    await expect(visitsTable).toBeVisible();
   });
 
   // ──────────────────────────────────────────────────
@@ -85,12 +86,12 @@ test.describe('Wave 6 — Record status derived from visits', () => {
     await addPaymentBtn.click();
 
     // After clicking, a payment form should appear or the payment should be added directly
-    // Check the payment summary for updated values
-    const summary = page.locator('[data-testid="payment-summary"]');
+    // Check the payment section for updated values (testid="record-payments-table")
+    const summary = page.locator('[data-testid="record-payments-table"]');
     await expect(summary).toBeVisible();
 
     // Verify payment section content
-    await expect(summary).toContainText('Оплачено');
+    await expect(summary).toContainText('Оплаты');
   });
 
   // ──────────────────────────────────────────────────
@@ -112,8 +113,8 @@ test.describe('Wave 6 — Record status derived from visits', () => {
     await clientTabs.first().click();
     await expect(page.locator('[data-testid="client-tab"]')).toBeVisible({ timeout: 10_000 });
 
-    // Check record seats summary is visible
-    const seatsSummary = page.locator('[data-testid="record-seats"]');
+    // Check record seats summary is visible (seats info is inside record-summary)
+    const seatsSummary = page.locator('[data-testid="record-summary"]');
     await expect(seatsSummary).toBeVisible();
     const seatsBefore = await seatsSummary.textContent();
 

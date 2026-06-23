@@ -9,7 +9,7 @@ Usage:
 from __future__ import annotations
 
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # ruff: noqa: RUF001, RUF003  -- Cyrillic text is intentional (Russian language app)
 from sqlalchemy import select
@@ -38,8 +38,19 @@ from src.models.tag import activity_tags, service_tags
 # Seed data constants
 # ---------------------------------------------------------------------------
 
-WEEK_START = datetime(2026, 6, 1)  # Monday — first seed week
-WEEK2_START = datetime(2026, 6, 9)  # Monday — current week (June 9-15, 2026)
+def _get_week_monday(dt: datetime) -> datetime:
+    """Return the Monday of the week containing *dt*."""
+    return dt - timedelta(days=dt.weekday())
+
+
+_today = datetime.now()
+_THIS_WEEK_MONDAY = _get_week_monday(_today)
+_LAST_WEEK_MONDAY = _THIS_WEEK_MONDAY - timedelta(days=7)
+_WEEK_BEFORE_MONDAY = _THIS_WEEK_MONDAY - timedelta(days=14)
+
+WEEK_START = _WEEK_BEFORE_MONDAY  # week before last — records r1-r6 link here
+WEEK2_START = _LAST_WEEK_MONDAY   # last week
+WEEK3_START = _THIS_WEEK_MONDAY   # current week (so e2e tests find activities)
 
 _SERVICE_NAME_TO_ID: dict[str, str] = {
     "Морской пейзаж": "s7",
@@ -110,6 +121,26 @@ _ACTIVITIES_RAW_WEEK2: list[tuple] = [
     (5, "m1", 10, 3, "Морской пейзаж", "grand", 8, False),
     (5, "m3", 14, 2, "Картина акрилом", "alpika", 10, False),
     # ВС (day 6) — June 15
+    (6, "m2", 11, 1.5, "Ручная лепка", "alpika", 6, False),
+]
+
+# Activities for week 3 (current week — always fresh relative to today)
+_ACTIVITIES_RAW_WEEK3: list[tuple] = [
+    # ПН (day 0)
+    (0, "m1", 10, 3, "Морской пейзаж", "grand", 8, False),
+    (0, "m4", 14, 2, "Мини-картина акрилом", "p1389", 8, False),
+    # ВТ (day 1)
+    (1, "m3", 11, 2, "Картина акрилом", "alpika", 10, False),
+    # СР (day 2)
+    (2, "m2", 10, 2, "Роспись одежды", "alpika", 10, False),
+    # ЧТ (day 3)
+    (3, "m1", 10, 3, "Морской пейзаж", "grand", 8, False),
+    # ПТ (day 4)
+    (4, "m5", 14, 2.5, "Картина маслом", "p1389", 8, False),
+    # СБ (day 5)
+    (5, "m1", 10, 3, "Морской пейзаж", "grand", 8, False),
+    (5, "m3", 14, 2, "Картина акрилом", "alpika", 10, False),
+    # ВС (day 6)
     (6, "m2", 11, 1.5, "Ручная лепка", "alpika", 6, False),
 ]
 
@@ -242,6 +273,7 @@ async def _seed_activities(session) -> None:
     for week_start, activities in [
         (WEEK_START, _ACTIVITIES_RAW),
         (WEEK2_START, _ACTIVITIES_RAW_WEEK2),
+        (WEEK3_START, _ACTIVITIES_RAW_WEEK3),
     ]:
         for day, master, start_h, dur_h, svc_name, loc, cap, is_priv in activities:
             activity_id = f"ev_{idx}"

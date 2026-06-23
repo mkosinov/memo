@@ -7,9 +7,9 @@ import { RecordTable, type Column } from '@/app/components/shared/record/RecordT
 // ── Column definitions ────────────────────────────────────────────────────────
 
 const PAYMENT_COLUMNS: Column[] = [
-  { key: 'date', label: 'Дата', width: 'w-32 shrink-0' },
-  { key: 'method', label: 'Метод', width: 'w-24 shrink-0', align: 'center' },
-  { key: 'amount', label: 'Сумма', width: 'flex-1', align: 'right' },
+  { key: 'date', label: 'Дата', width: 'w-[168px] shrink-0' },
+  { key: 'method', label: 'Метод', width: 'w-36 shrink-0', align: 'center' },
+  { key: 'amount', label: 'Сумма', width: 'w-20 shrink-0', align: 'right' },
 ];
 
 const METHOD_LABELS: Record<string, string> = {
@@ -24,6 +24,8 @@ const METHOD_LABELS: Record<string, string> = {
 export interface RecordPaymentsTableProps {
   payments: PaymentResponse[];
   isReadOnly?: boolean;
+  /** Pre-fill amount when opening the add form (e.g. "К оплате" from RecordSummary) */
+  defaultAmount?: number;
   onDelete: (paymentId: string) => void;
   onAdd: (payment: { amount: number; method: string; date?: string }) => void;
 }
@@ -33,12 +35,10 @@ export interface RecordPaymentsTableProps {
 export function RecordPaymentsTable({
   payments,
   isReadOnly,
+  defaultAmount = 0,
   onDelete,
   onAdd,
 }: RecordPaymentsTableProps) {
-  const [amount, setAmount] = useState(0);
-  const [method, setMethod] = useState('card');
-  const [payDate, setPayDate] = useState(new Date().toISOString().slice(0, 16));
   const [showForm, setShowForm] = useState(false);
 
   // Inline add-row state (when showForm is true)
@@ -52,7 +52,7 @@ export function RecordPaymentsTable({
     setNewPayDate(new Date().toISOString().slice(0, 16));
   }, []);
 
-  const handleAddPaymentInline = useCallback(() => {
+  const handleSubmitPaymentInline = useCallback(() => {
     if (newAmount <= 0) return;
     onAdd({ amount: newAmount, method: newMethod, date: newPayDate });
     setShowForm(false);
@@ -64,23 +64,7 @@ export function RecordPaymentsTable({
     resetNewPayment();
   }, [resetNewPayment]);
 
-  const handleNewAmountKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      handleAddPaymentInline();
-    }
-  }, [handleAddPaymentInline]);
-
   const totalPaid = payments.reduce((sum, p) => sum + p.amount, 0);
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (amount <= 0) return;
-    onAdd({ amount, method, date: payDate });
-    setAmount(0);
-    setPayDate(new Date().toISOString().slice(0, 16));
-    setShowForm(false);
-  };
 
   return (
     <div data-testid="record-payments-table">
@@ -91,7 +75,7 @@ export function RecordPaymentsTable({
 
       {/* Payment table */}
       <RecordTable testId="record-payments-table-table">
-        {payments.length > 0 && <RecordTable.Header columns={PAYMENT_COLUMNS} isReadOnly={isReadOnly} />}
+        {(payments.length > 0 || showForm) && <RecordTable.Header columns={PAYMENT_COLUMNS} isReadOnly={isReadOnly} />}
 
         {payments.map((p) => (
           <RecordTable.Row
@@ -163,35 +147,55 @@ export function RecordPaymentsTable({
                   min={1}
                   value={newAmount || ''}
                   onChange={(e) => setNewAmount(Number(e.target.value) || 0)}
-                  onKeyDown={handleNewAmountKeyDown}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleSubmitPaymentInline();
+                    }
+                  }}
                   className="w-full rounded border px-2 py-0.5 text-sm text-right"
                   style={{ borderColor: 'var(--line)' }}
                   data-testid="add-payment-amount"
                 />
               ),
               __actions: (
-                <button
-                  onClick={handleCancelAddPayment}
-                  className="text-red-500 hover:text-red-600"
-                  aria-label="Отменить"
-                  data-testid="add-payment-cancel"
-                >
-                  ×
-                </button>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={handleSubmitPaymentInline}
+                    className="text-green-600 hover:text-green-700"
+                    aria-label="Добавить"
+                    data-testid="add-payment-submit"
+                    title="Добавить"
+                  >
+                    ✓
+                  </button>
+                  <button
+                    onClick={handleCancelAddPayment}
+                    className="text-red-500 hover:text-red-600"
+                    aria-label="Отменить"
+                    data-testid="add-payment-cancel"
+                  >
+                    ×
+                  </button>
+                </div>
               ),
             }}
           />
         )}
 
-        {payments.length > 0 && (
+        {!isReadOnly && (
           <RecordTable.TotalsRow
             testId="payments-total"
             columns={PAYMENT_COLUMNS}
             cells={{
-              date: !isReadOnly && !showForm ? (
+              date: !showForm ? (
                 <button
                   onClick={() => {
                     resetNewPayment();
+                    // Pre-fill amount with "К оплате" (defaultAmount from parent)
+                    if (defaultAmount > 0) {
+                      setNewAmount(defaultAmount);
+                    }
                     setShowForm(true);
                   }}
                   className="text-xs text-brand hover:underline transition-colors"

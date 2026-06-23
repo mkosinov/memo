@@ -172,6 +172,7 @@ export function ClientTab({
 
   const totalCost = (visits || []).reduce((sum, v) => sum + v.price, 0);
   const totalPaid = payments.reduce((sum, p) => sum + p.amount, 0);
+  const toPay = Math.max(0, totalCost - totalPaid);
 
   // Compute stats for ClientStatistics
   const stats = client && 'visits_count' in client
@@ -218,6 +219,7 @@ export function ClientTab({
         {/* Payments table */}
         <RecordPaymentsTable
           payments={payments}
+          defaultAmount={toPay}
           onDelete={handleDeletePayment}
           onAdd={handleAddPayment}
         />

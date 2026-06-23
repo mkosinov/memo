@@ -1,7 +1,9 @@
 'use client';
 
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import type { RecordResponse, TariffResponse } from '@memo/api-client';
+import { updateVisitor } from '@memo/api-client';
 import type { VisitStatus } from '@memo/domain';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -85,9 +87,13 @@ export function useOptimisticVisitMutation({
   const [visitOverrides, setVisitOverrides] = useState<Map<string, VisitOverride>>(new Map());
   const controllerRef = useRef<AbortController | null>(null);
   const isMountedRef = useRef(true);
+  const queryClient = useQueryClient();
 
   // Cleanup: abort on unmount
+  // Reset isMountedRef at the start to handle React 18 strict mode double-invocation:
+  // mount → effect → cleanup (sets false) → re-mount → effect (must reset to true)
   useEffect(() => {
+    isMountedRef.current = true;
     return () => {
       isMountedRef.current = false;
       controllerRef.current?.abort();
@@ -135,8 +141,13 @@ export function useOptimisticVisitMutation({
 
       withRetry(
         async (_signal: AbortSignal) => {
-          // TODO: replace with actual PATCH /api/visitors/{visitorId} when API ready
-          throw new Error('API not implemented yet');
+          // Convert null → undefined for API compatibility (VisitorUpdate expects age?: number)
+          const apiData = { ...data, age: data.age ?? undefined };
+          await updateVisitor(visitorId, apiData);
+          // Invalidate visitors query so next modal open fetches fresh data
+          if (record?.client_id) {
+            queryClient.invalidateQueries({ queryKey: ['visitors', record.client_id] });
+          }
         },
         controller,
         isMountedRef,
@@ -145,7 +156,7 @@ export function useOptimisticVisitMutation({
         },
       );
     },
-    [visitorsMap, showToast],
+    [visitorsMap, showToast, record, queryClient],
   );
 
   // ── Visit tariff/status change ─────────────────────────────────────────────

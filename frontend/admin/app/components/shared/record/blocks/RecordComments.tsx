@@ -15,7 +15,7 @@ export function RecordComments({ value, onChange }: RecordCommentsProps) {
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder="Добавить комментарий..."
-        rows={2}
+        rows={3}
         data-testid="input-comment"
       />
     </div>

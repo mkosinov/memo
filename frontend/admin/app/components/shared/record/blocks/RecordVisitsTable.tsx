@@ -27,9 +27,10 @@ interface InlineEditCellProps {
   className?: string;
   type?: string;
   title?: string;
+  placeholder?: string;
 }
 
-function InlineEditCell({ value, onCommit, className = '', type = 'text', title = '' }: InlineEditCellProps) {
+function InlineEditCell({ value, onCommit, className = '', type = 'text', title = '', placeholder = '' }: InlineEditCellProps) {
   const [draft, setDraft] = useState(value);
   const originalRef = useRef(value);
 
@@ -61,6 +62,7 @@ function InlineEditCell({ value, onCommit, className = '', type = 'text', title 
           (e.target as HTMLInputElement).blur();
         }
       }}
+      placeholder={placeholder}
       className={`w-full rounded border px-2 py-0.5 text-sm ${className}`}
       style={{ borderColor: 'var(--line)' }}
       title={title}
@@ -125,6 +127,7 @@ export function RecordVisitsTable({
     setNewPrice(0);
   }, []);
 
+  // Empty name → create visitor with empty name (backend counts it as anonym_visit)
   const handleAdd = useCallback((data: AddVisitorPayload) => {
     onAddVisitor(data);
     setShowForm(false);
@@ -143,13 +146,11 @@ export function RecordVisitsTable({
     if (tariff) setNewPrice(tariff.price);
   }, [tariffs]);
 
-  // Commit on Enter in name field
+  // Commit on Enter in price field (name field has its own inline handler)
   const handleNewNameKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
       e.preventDefault();
-      if (newName.trim()) {
-        handleAdd({ name: newName.trim(), age: newAge, tariff_id: newTariffId });
-      }
+      handleAdd({ name: newName.trim(), age: newAge, tariff_id: newTariffId });
     }
   }, [newName, newAge, newTariffId, handleAdd]);
 
@@ -162,7 +163,7 @@ export function RecordVisitsTable({
 
       {/* Table */}
       <RecordTable testId="record-visits-table-table">
-        {visits.length > 0 && <RecordTable.Header columns={VISIT_COLUMNS} isReadOnly={isReadOnly} />}
+        {(visits.length > 0 || showForm) && <RecordTable.Header columns={VISIT_COLUMNS} isReadOnly={isReadOnly} />}
 
         {visits.map((visit) => {
           const visitor = visitorsMap.get(visit.visitor_id ?? '');
@@ -174,7 +175,9 @@ export function RecordVisitsTable({
               testId={`visit-row-${visit.id}`}
               cells={{
                 name: isReadOnly ? (
-                  <span className="truncate text-ink">{visitor?.name || '—'}</span>
+                  <span className={`truncate ${visitor?.name ? 'text-ink' : 'text-ink-light italic'}`}>
+                    {visitor?.name || 'Аноним'}
+                  </span>
                 ) : (
                   <InlineEditCell
                     value={visitor?.name ?? ''}
@@ -182,6 +185,7 @@ export function RecordVisitsTable({
                       if (visit.visitor_id) onChangeVisitor(visit.visitor_id, { name: v });
                     }}
                     title={visitor?.name || ''}
+                    placeholder="Аноним"
                   />
                 ),
                 age: isReadOnly ? (
@@ -269,20 +273,6 @@ export function RecordVisitsTable({
           );
         })}
 
-        {anonymInput > 0 && (
-          <RecordTable.AnonymRow
-            columns={VISIT_COLUMNS}
-            testId="anonym-row"
-            cells={{
-              name: <span className="truncate text-ink-light italic">Анонимные ×{anonymInput}</span>,
-              age: <span className="text-ink-light">—</span>,
-              tariff: <span className="text-ink-light">—</span>,
-              price: <span className="text-ink-mid">—</span>,
-              status: <StatusBadge status={recordStatus} />,
-            }}
-          />
-        )}
-
         {!isReadOnly && showForm && (
           <RecordTable.Row
             testId="add-visitor-row"
@@ -293,8 +283,20 @@ export function RecordVisitsTable({
                   type="text"
                   value={newName}
                   onChange={(e) => setNewName(e.target.value)}
-                  onKeyDown={handleNewNameKeyDown}
-                  placeholder="Имя"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      // Use e.currentTarget.value to avoid stale closure
+                      const name = e.currentTarget.value.trim();
+                      handleAdd({ name, age: newAge, tariff_id: newTariffId });
+                    }
+                  }}
+                  onBlur={(e) => {
+                    // Use e.currentTarget.value to avoid stale closure
+                    const name = e.currentTarget.value.trim();
+                    handleAdd({ name, age: newAge, tariff_id: newTariffId });
+                  }}
+                  placeholder="Аноним"
                   autoFocus
                   className="w-full rounded border px-2 py-0.5 text-sm"
                   style={{ borderColor: 'var(--line)' }}
@@ -365,12 +367,12 @@ export function RecordVisitsTable({
           />
         )}
 
-        {visits.length > 0 && (
+        {!isReadOnly && (
           <RecordTable.TotalsRow
             testId="visits-total"
             columns={VISIT_COLUMNS}
             cells={{
-              name: !isReadOnly && !showForm ? (
+              name: !showForm ? (
                 <button
                   onClick={() => {
                     resetNewVisitor();
@@ -395,28 +397,13 @@ export function RecordVisitsTable({
         )}
       </RecordTable>
 
-      {/* Empty state (shown when no visits and no anonym) */}
-      {visits.length === 0 && anonymInput === 0 && (
+      {/* Empty state (shown when no visits) */}
+      {visits.length === 0 && (
         <div className="px-3 py-4 text-xs text-ink-light text-center rounded-lg border" style={{ borderColor: 'var(--line)' }}>
           Нет посетителей
         </div>
       )}
 
-      {/* Anonym count editor */}
-      {!isReadOnly && anonymInput > 0 && (
-        <div className="flex items-center gap-1.5 mt-2 text-xs text-ink-mid">
-          <span>Анонимных:</span>
-          <input
-            type="number"
-            min={0}
-            value={anonymInput}
-            onChange={(e) => handleAnonymChange(Math.max(0, Number(e.target.value)))}
-            className="w-12 rounded border px-1 py-0.5 text-center text-xs"
-            style={{ borderColor: 'var(--line)' }}
-            data-testid="anonym-visits-input"
-          />
-        </div>
-      )}
     </div>
   );
 }

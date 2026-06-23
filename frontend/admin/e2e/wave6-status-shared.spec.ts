@@ -55,12 +55,12 @@ test.describe('Wave 6 — StatusPicker shared across sites', () => {
     await clientTabs.first().click();
     await expect(page.locator('[data-testid="client-tab"]')).toBeVisible({ timeout: 10_000 });
 
-    // Find the StatusPicker inside the client tab
-    const statusPicker = page.locator('[data-testid="client-tab"] [data-testid="status-picker"]');
+    // Find the StatusPicker inside the client tab (testidPrefix="record-status" in RecordSummary)
+    const statusPicker = page.locator('[data-testid="client-tab"] [data-testid="record-status"]');
     await expect(statusPicker).toBeVisible();
     // Verify it has the correct testid
     const testId = await statusPicker.getAttribute('data-testid');
-    expect(testId).toBe('status-picker');
+    expect(testId).toBe('record-status');
   });
 
   test('Scenario 5: same StatusPicker in /clients modal', async ({
@@ -96,7 +96,7 @@ test.describe('Wave 6 — StatusPicker shared across sites', () => {
     await expect(page.locator('[data-testid="client-tab"]')).toBeVisible({ timeout: 10_000 });
 
     // Verify StatusPicker structure
-    const statusPicker = page.locator('[data-testid="client-tab"] [data-testid="status-picker"]');
+    const statusPicker = page.locator('[data-testid="client-tab"] [data-testid="record-status"]');
     await expect(statusPicker).toBeVisible();
 
     // Should contain a trigger element (button or select)
@@ -105,6 +105,6 @@ test.describe('Wave 6 — StatusPicker shared across sites', () => {
 
     // Verify the StatusPicker has the correct testid prefix
     const testId = await statusPicker.getAttribute('data-testid');
-    expect(testId).toBe('status-picker');
+    expect(testId).toBe('record-status');
   });
 });

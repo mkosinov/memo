@@ -274,7 +274,8 @@ test.describe('ActivityDetailsModal — Real User Scenarios', () => {
     await openModal(page);
 
     // Context header shows service name + date
-    const context = page.locator('[data-testid="activity-context"]');
+    // The Modal renders context as a <span> sibling after the <h2> title (no testid)
+    const context = page.locator('[data-testid="activity-details-modal-container"] h2 + span');
     await expect(context).toBeVisible();
     const contextText = await context.textContent();
     expect(contextText).toBeTruthy();

@@ -3,7 +3,6 @@ import { render, screen, fireEvent, waitFor, act, within } from '@testing-librar
 import React from 'react';
 import { ActivityDetailsModal } from '../app/components/modal/ActivityDetailsModal/ActivityDetailsModal';
 import { TabNav } from '../app/components/modal/ActivityDetailsModal/TabNav';
-import { ModalFooter } from '../app/components/modal/ActivityDetailsModal/ModalFooter';
 import { SettingsTab } from '../app/components/modal/ActivityDetailsModal/SettingsTab';
 import { ClientTab } from '../app/components/modal/ActivityDetailsModal/ClientTab';
 import { NewBookingTab } from '../app/components/modal/ActivityDetailsModal/NewBookingTab';
@@ -152,24 +151,6 @@ describe('TabNav', () => {
     render(<TabNav tabs={defaultTabs} activeTab="client-1" onTabChange={vi.fn()} onAddClick={vi.fn()} />);
     const clientTab = screen.getByText('Анна Иванова');
     expect(clientTab.closest('button')).toHaveClass('bg-brand');
-  });
-});
-
-// ─── ModalFooter Tests ──────────────────────────────────────────────────────
-
-describe('ModalFooter', () => {
-  it('renders cost and owed amounts', () => {
-    render(<ModalFooter totalCost={7000} totalOwed={3500} />);
-    expect(screen.getByText(/Стоимость/)).toBeInTheDocument();
-    expect(screen.getByText(/7[\s]?000\s?₽/)).toBeInTheDocument();
-    expect(screen.getByText(/К оплате/)).toBeInTheDocument();
-    expect(screen.getByText(/3[\s]?500\s?₽/)).toBeInTheDocument();
-  });
-
-  it('renders zero amounts', () => {
-    render(<ModalFooter totalCost={0} totalOwed={0} />);
-    expect(screen.getByText(/Стоимость/)).toBeInTheDocument();
-    expect(screen.getByText(/К оплате/)).toBeInTheDocument();
   });
 });
 

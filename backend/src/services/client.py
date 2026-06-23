@@ -35,25 +35,35 @@ async def list_clients_with_stats(
 ) -> ClientListResponse:
     """Return paginated clients with aggregated visit/payment stats."""
 
-    # 1. Build stats subquery
-    stats_subq = (
+    # 1a. Visits subquery (Record + Visit) — for visits_count, last_visit, missed_visits
+    visits_subq = (
         select(
             Record.client_id,
-            func.count(func.distinct(Record.id)).label("visits_count"),  # Counts distinct records
+            func.count(func.distinct(Record.id)).label("visits_count"),
             func.max(Visit.created_at).label("last_visit"),
-            func.coalesce(func.sum(Payment.amount), 0).label("total_paid"),
             func.sum(case((Visit.status == "missed", 1), else_=0)).label(
                 "missed_visits"
             ),
         )
-        .outerjoin(Visit, Visit.record_id == Record.id)  # LEFT JOIN so records without visits still counted
+        .outerjoin(Visit, Visit.record_id == Record.id)
+        .where(Record.is_active == True)  # noqa: E712
+        .group_by(Record.client_id)
+        .subquery()
+    )
+
+    # 1b. Payments subquery (Record + Payment) — for total_paid (no cartesian product!)
+    payments_subq = (
+        select(
+            Record.client_id,
+            func.coalesce(func.sum(Payment.amount), 0).label("total_paid"),
+        )
         .outerjoin(Payment, Payment.record_id == Record.id)
         .where(Record.is_active == True)  # noqa: E712
         .group_by(Record.client_id)
         .subquery()
     )
 
-    # 2. Select specific columns from both Client and stats subquery
+    # 2. Select specific columns from Client and both subqueries
     base_cols = [
         Client.id,
         Client.name,
@@ -63,22 +73,23 @@ async def list_clients_with_stats(
         Client.created_at,
         Client.updated_at,
         Client.is_active,
-        stats_subq.c.visits_count,
-        stats_subq.c.last_visit,
-        stats_subq.c.total_paid,
-        stats_subq.c.missed_visits,
+        visits_subq.c.visits_count,
+        visits_subq.c.last_visit,
+        payments_subq.c.total_paid,
+        visits_subq.c.missed_visits,
     ]
 
     # 3. Count query (total matching clients)
     count_query = (
         select(func.count(Client.id))
-        .outerjoin(stats_subq, Client.id == stats_subq.c.client_id)
+        .outerjoin(visits_subq, Client.id == visits_subq.c.client_id)
     )
 
     # 4. Main query
     query = (
         select(*base_cols)
-        .outerjoin(stats_subq, Client.id == stats_subq.c.client_id)
+        .outerjoin(visits_subq, Client.id == visits_subq.c.client_id)
+        .outerjoin(payments_subq, Client.id == payments_subq.c.client_id)
     )
 
     # 5. Apply is_active filter: default to True (active only) when not specified
@@ -118,12 +129,12 @@ async def list_clients_with_stats(
 
     # Stats-based filters (applied to both queries)
     stats_filter_map = {
-        "min_visits": stats_subq.c.visits_count,
-        "max_visits": stats_subq.c.visits_count,
-        "min_paid": stats_subq.c.total_paid,
-        "max_paid": stats_subq.c.total_paid,
-        "missed_from": stats_subq.c.missed_visits,
-        "missed_to": stats_subq.c.missed_visits,
+        "min_visits": visits_subq.c.visits_count,
+        "max_visits": visits_subq.c.visits_count,
+        "min_paid": payments_subq.c.total_paid,
+        "max_paid": payments_subq.c.total_paid,
+        "missed_from": visits_subq.c.missed_visits,
+        "missed_to": visits_subq.c.missed_visits,
     }
     ops_map = {
         "min_visits": lambda col, val: col >= val,
@@ -148,10 +159,10 @@ async def list_clients_with_stats(
     # 7. Apply sorting
     sort_column_map = {
         "name": Client.name,
-        "visits_count": stats_subq.c.visits_count,
-        "last_visit": stats_subq.c.last_visit,
-        "total_paid": stats_subq.c.total_paid,
-        "missed_visits": stats_subq.c.missed_visits,
+        "visits_count": visits_subq.c.visits_count,
+        "last_visit": visits_subq.c.last_visit,
+        "total_paid": payments_subq.c.total_paid,
+        "missed_visits": visits_subq.c.missed_visits,
         "created_at": Client.created_at,
         "updated_at": Client.updated_at,
     }

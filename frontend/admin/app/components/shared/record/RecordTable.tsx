@@ -57,7 +57,7 @@ function TableWrapper({ children, testId }: RecordTableProps) {
   return (
     <div
       data-testid={testId}
-      className="rounded-lg border overflow-hidden"
+      className="rounded-lg border overflow-visible"
       style={{ borderColor: 'var(--line)' }}
     >
       {children}

@@ -1,6 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { waitForScheduleReady } from './fixtures/helpers';
-import { switchToRecordsTab } from './fixtures/scenarios';
+import { waitForScheduleReady, openModal } from './fixtures/helpers';
 
 test('US-M04: Admin can open client profile from a record', async ({
   page,
@@ -9,20 +8,29 @@ test('US-M04: Admin can open client profile from a record', async ({
   await waitForScheduleReady(page);
 
   // Open an activity with at least one record
-  const card = page.locator('[data-testid^="activity-"]').first();
-  await card.click();
-  await switchToRecordsTab(page);
+  await openModal(page);
 
-  // Click "Открыть профиль" on first record
-  const firstRecord = page.locator('[data-testid="record"]').first();
-  await firstRecord.locator('button:has-text("Открыть профиль")').click();
+  // Switch to first client tab
+  const clientTab = page.locator('[data-testid^="tab-client-"]').first();
+  await expect(clientTab).toBeVisible({ timeout: 5_000 });
+  await clientTab.click();
 
-  // Assert: URL changes to /client/{id}
-  await expect(page).toHaveURL(/\/client\/\d+/);
+  // Wait for client tab to load
+  await expect(page.locator('[data-testid="client-tab"]')).toBeVisible({ timeout: 5_000 });
 
-  // Assert: client card is visible
-  await expect(page.locator('[data-testid="client-card"]')).toBeVisible();
+  // The profile link is a span with data-testid="open-profile-{recordId}"
+  // that opens /clients?clientId={id} in a new tab
+  const profileLink = page.locator('[data-testid^="open-profile-"]').first();
+  await expect(profileLink).toBeVisible({ timeout: 5_000 });
 
-  // Assert: activity modal is closed
-  await expect(page.locator('[role="dialog"]')).not.toBeVisible();
+  // Click the profile link — it opens a new tab via window.open and closes the modal
+  const [newPage] = await Promise.all([
+    page.context().waitForEvent('page'),
+    profileLink.click(),
+  ]);
+
+  // Assert: new page URL changes to /clients?clientId=...
+  await expect(newPage).toHaveURL(/\/clients\?clientId=/);
+
+  await newPage.close();
 });

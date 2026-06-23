@@ -11,6 +11,11 @@ test.describe('Schedule Page', () => {
   test('default state visual regression', async ({ page }) => {
     await page.goto('/');
     await page.waitForSelector('[data-testid="center-content"]', { timeout: 10000 });
+    // Hide the NowLine to avoid time-dependent screenshot differences
+    await page.evaluate(() => {
+      const nowLine = document.querySelector('[data-testid="now-line"]');
+      if (nowLine) (nowLine as HTMLElement).style.display = 'none';
+    });
     await expect(page).toHaveScreenshot('schedule-default.png', {
       fullPage: true,
       maxDiffPixels: 100,
@@ -28,6 +33,11 @@ test.describe('Schedule Page', () => {
 
   test('schedule with activity cards', async ({ page }) => {
     await waitForScheduleReady(page);
+    // Hide the NowLine to avoid time-dependent screenshot differences
+    await page.evaluate(() => {
+      const nowLine = document.querySelector('[data-testid="now-line"]');
+      if (nowLine) (nowLine as HTMLElement).style.display = 'none';
+    });
     await expect(page).toHaveScreenshot('schedule-with-activities.png', {
       fullPage: true,
       maxDiffPixels: 100,

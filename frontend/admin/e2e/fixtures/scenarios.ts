@@ -28,11 +28,15 @@ export async function openActivityByTitle(
 }
 
 /**
- * Switch to the Records tab inside the open activity modal.
+ * Switch to a client/record tab inside the open activity modal.
+ * The ActivityDetailsModal uses data-testid="tab-client-{recordId}" buttons
+ * (not role="tab"). We click the first available client tab.
  */
 export async function switchToRecordsTab(page: Page): Promise<void> {
-  await page.click('button[role="tab"]:has-text("Запись")');
-  await expect(page.locator('[data-testid="records-tab"]')).toBeVisible();
+  // Click the first client tab in the modal's TabNav
+  const clientTab = page.locator('[data-testid^="tab-client-"]').first();
+  await clientTab.waitFor({ state: 'visible', timeout: 5_000 });
+  await clientTab.click();
 }
 
 /**
@@ -41,15 +45,18 @@ export async function switchToRecordsTab(page: Page): Promise<void> {
  */
 export async function addVisitor(
   page: Page,
-  data: { name: string; phone: string; seats: number }
+  data: { name: string; phone?: string; seats?: number }
 ): Promise<string> {
-  await page.click('button:has-text("Добавить посетителя")');
+  // Click the "+ Добавить" button in the visits table footer
+  const addBtn = page.locator('[data-testid="btn-add-visitor"]');
+  await expect(addBtn).toBeVisible();
+  await addBtn.click();
 
-  await page.fill('input[name="name"]', data.name);
-  await page.fill('input[name="phone"]', data.phone);
-  await page.fill('input[name="seats"]', String(data.seats));
-
-  await page.click('button:has-text("Сохранить")');
+  // Fill the inline add-row form
+  const nameInput = page.locator('[data-testid="add-visitor-name"]');
+  await expect(nameInput).toBeVisible();
+  await nameInput.fill(data.name);
+  await nameInput.press('Enter');
 
   // Wait for record to appear in list
   const record = page.locator('[data-testid="record"]').filter({

@@ -1,12 +1,11 @@
 import { test, expect } from '@playwright/test';
-import { waitForScheduleReady } from './fixtures/helpers';
+import { waitForScheduleReady, openModal } from './fixtures/helpers';
 
 test('US-M09: Modal does not jump when switching tabs', async ({ page }) => {
   await page.goto('/schedule');
   await waitForScheduleReady(page);
 
-  const card = page.locator('[data-testid^="activity-"]').first();
-  await card.click();
+  await openModal(page);
   const dialog = page.locator('[role="dialog"]');
   await expect(dialog).toBeVisible();
 
@@ -14,13 +13,15 @@ test('US-M09: Modal does not jump when switching tabs', async ({ page }) => {
   const initialBox = await dialog.boundingBox();
   expect(initialBox).not.toBeNull();
 
-  // Switch to Records tab
-  await page.click('button[role="tab"]:has-text("Запись")');
+  // Switch to first client tab
+  const clientTab = page.locator('[data-testid^="tab-client-"]').first();
+  await expect(clientTab).toBeVisible({ timeout: 5_000 });
+  await clientTab.click();
   await page.waitForTimeout(300);
   const recordsBox = await dialog.boundingBox();
 
   // Switch back to Settings
-  await page.click('button[role="tab"]:has-text("Настройка")');
+  await page.locator('[data-testid="tab-settings"]').click();
   await page.waitForTimeout(300);
   const settingsBox = await dialog.boundingBox();
 

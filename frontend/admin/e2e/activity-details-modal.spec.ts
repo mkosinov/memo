@@ -177,9 +177,10 @@ test.describe('ActivityDetailsModal — Real User Scenarios', () => {
         // Read footer before
         await expect(page.locator('[data-testid="modal-footer"]')).toBeVisible();
 
-        // Add payment
-        await page.locator('input[placeholder="Сумма"]').fill('1500');
+        // Add payment — click "Добавить" first to reveal inline form, then fill & submit
         await page.locator('[data-testid="btn-add-payment"]').click();
+        await page.locator('[data-testid="add-payment-amount"]').fill('1500');
+        await page.locator('[data-testid="add-payment-submit"]').click();
 
         // Wait for UI update
         await page.waitForTimeout(1000);
@@ -341,9 +342,8 @@ test.describe('ActivityDetailsModal — Real User Scenarios', () => {
         await clientTab.click();
         await expect(page.locator('[data-testid="client-tab"]')).toBeVisible();
 
-        // Verify client name is displayed
-        const nameInput = page.locator('[data-testid="client-name"]');
-        await expect(nameInput).toHaveValue(client.name);
+        // Verify client name is displayed (shown in the tab label in WIP structure)
+        await expect(page.getByText(client.name)).toBeVisible();
 
         // Click delete
         await page.locator('[data-testid="btn-delete-record"]').click();

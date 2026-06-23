@@ -71,12 +71,14 @@ interface DroppableSlotProps {
   columnId?: string;
   /** When true, suppress slot-level isOver border (column ghost already covers it) */
   suppressIsOverGhost?: boolean;
+  /** When true, the slot overlaps with an activity card — disable pointer events so clicks reach the card */
+  occupied?: boolean;
   children?: React.ReactNode;
 }
 
 // ─── DroppableSlot ────────────────────────────────────────────────────────
 
-function DroppableSlot({ dayIndex, slotIndex, startTime, isHour, isHalfHour, dragCopy, onClick, onOpenModal, stampReady, stamp, masters, services, cellHeight = 60, columnId, suppressIsOverGhost, children }: DroppableSlotProps) {
+function DroppableSlot({ dayIndex, slotIndex, startTime, isHour, isHalfHour, dragCopy, onClick, onOpenModal, stampReady, stamp, masters, services, cellHeight = 60, columnId, suppressIsOverGhost, occupied, children }: DroppableSlotProps) {
   const { isOver, setNodeRef } = useDroppable({
     id: `slot-${columnId ?? dayIndex}-${slotIndex}`,
     data: { type: 'slot', dayIndex, slotIndex, columnId },
@@ -147,9 +149,9 @@ function DroppableSlot({ dayIndex, slotIndex, startTime, isHour, isHalfHour, dra
   return (
     <div
       ref={setNodeRef}
-      data-testid={`slot-${columnId ?? dayIndex}-${slotIndex}`}
+      data-testid={occupied ? `slot-${columnId ?? dayIndex}-${slotIndex}` : 'empty-slot'}
       data-slot-index={slotIndex}
-      className={isHour ? 'border-t border-line' : isHalfHour ? 'border-t border-dashed border-line' : 'border-t border-dotted border-line/30'}
+      className={`${isHour ? 'border-t border-line' : isHalfHour ? 'border-t border-dashed border-line' : 'border-t border-dotted border-line/30'}${occupied ? ' pointer-events-none' : ''}`}
       style={{ height: cellHeight, ...stampGhostStyle }}
       onClick={handleClick}
       onMouseEnter={handleMouseEnter}
@@ -417,6 +419,16 @@ export function DayColumn({ dayIndex, activities, masters, locations = [], servi
       {slots.map((hour, i) => {
         const isHour = hour % 1 === 0;
         const isHalfHour = !isHour && Math.abs(hour % 0.5) < 0.01;
+        // A slot is "occupied" if any activity card visually overlaps its vertical range.
+        // Activity cards are absolutely positioned, but DroppableSlot divs in normal flow
+        // intercept pointer events unless explicitly disabled.
+        const slotDuration = gridFrequency / 60;
+        const slotEnd = hour + slotDuration;
+        const isOccupied = activities.some(a => {
+          const aStart = a.startTime;
+          const aEnd = a.startTime + a.duration;
+          return aStart < slotEnd && aEnd > hour;
+        });
         return (
           <DroppableSlot
             key={i}
@@ -435,6 +447,7 @@ export function DayColumn({ dayIndex, activities, masters, locations = [], servi
             cellHeight={slotHeight}
             columnId={columnId}
             suppressIsOverGhost={hasColumnGhost}
+            occupied={isOccupied}
           />
         );
       })}

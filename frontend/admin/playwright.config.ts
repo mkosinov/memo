@@ -19,6 +19,7 @@ try {
  */
 export default defineConfig({
   testDir: './e2e',
+  globalSetup: require.resolve('./e2e/globalSetup'),
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,

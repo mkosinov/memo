@@ -185,8 +185,10 @@ describe('ClientRecordTab — layout', () => {
 
   it('renders visitor name input inside RecordVisitRow', () => {
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    const nameInput = screen.getByTestId('visit-v1-name');
-    expect(nameInput).toHaveValue('Анна Иванова');
+    const visitRow = screen.getByTestId('visit-row-v1');
+    const nameInput = visitRow.querySelector('input') as HTMLInputElement;
+    expect(nameInput).toBeInTheDocument();
+    expect(nameInput.value).toBe('Анна Иванова');
   });
 
   it('renders tariff select inside RecordVisitRow', () => {
@@ -198,15 +200,14 @@ describe('ClientRecordTab — layout', () => {
 
   it('renders payment summary', () => {
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    expect(screen.getByText('Оплата')).toBeInTheDocument();
+    expect(screen.getByText('Оплаты')).toBeInTheDocument();
   });
 
   it('renders PaymentTotals with correct values', () => {
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    expect(screen.getByTestId('payment-totals')).toBeInTheDocument();
-    // Total=3500, Paid=1500 (from mockPayments)
-    expect(screen.getByText('3 500 ₽')).toBeInTheDocument();
-    expect(screen.getByText('1 500 ₽')).toBeInTheDocument();
+    expect(screen.getByTestId('payments-total')).toBeInTheDocument();
+    // Paid=1500 (from mockPayments), total cost shows in input-custom-price
+    expect(screen.getAllByText('1 500 ₽').length).toBeGreaterThan(0);
   });
 
   it('shows total cost in custom-price input', () => {
@@ -217,12 +218,13 @@ describe('ClientRecordTab — layout', () => {
 
   it('renders PaymentList with existing payments', () => {
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    expect(screen.getByTestId('payment-list')).toBeInTheDocument();
+    expect(screen.getByTestId('record-payments-table')).toBeInTheDocument();
+    expect(screen.getByTestId('payment-p1')).toBeInTheDocument();
   });
 
   it('renders PaymentForm for adding payments', () => {
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    expect(screen.getByTestId('payment-form')).toBeInTheDocument();
+    expect(screen.getByTestId('btn-add-payment')).toBeInTheDocument();
   });
 
   // ─── Comment / Delete / Visitor button ────────────────────────────────

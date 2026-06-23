@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import React from 'react';
 import { ClientInfoTab } from '../app/(main)/clients/components/ClientInfoTab';
+import type { ClientInfoTabHandle } from '../app/(main)/clients/components/ClientInfoTab';
 import { mockClientWithStats, mockVisitor } from './helpers/mockData';
 import type { ClientWithStats, VisitorResponse } from '@memo/api-client';
 
@@ -18,17 +19,52 @@ vi.mock('@memo/api-client', async (importOriginal) => {
 
 import { getClientVisitors, createVisitor, deleteVisitor } from '@memo/api-client';
 
+// Global ref holder for tests that need to call save()/cancel()
+let testRefHandle: ClientInfoTabHandle | null = null;
+
+function RefCapture({ children }: { children: (ref: React.Ref<ClientInfoTabHandle>) => React.ReactNode }) {
+  const ref = React.useCallback((instance: ClientInfoTabHandle | null) => {
+    testRefHandle = instance;
+  }, []) as React.Ref<ClientInfoTabHandle>;
+  return <>{children(ref)}</> as React.ReactElement;
+}
+
+type RenderResult = ReturnType<typeof render>;
+
 function renderClientInfoTab(overrides?: {
   client?: ClientWithStats;
   onSave?: (data: Partial<ClientWithStats>) => Promise<void>;
   onDelete?: () => void;
+  onHasChanges?: (hasChanges: boolean) => void;
+}): RenderResult {
+  const client = overrides?.client ?? mockClientWithStats;
+  const onSave = overrides?.onSave ?? vi.fn().mockResolvedValue(undefined);
+  const onDelete = overrides?.onDelete ?? vi.fn();
+  const onHasChanges = overrides?.onHasChanges;
+  return render(
+    <ClientInfoTab client={client} onSave={onSave} onDelete={onDelete} onHasChanges={onHasChanges} />
+  );
+}
+
+/** Like renderClientInfoTab but exposes a ref for calling save()/cancel() */
+function renderClientInfoTabWithRef(overrides?: {
+  client?: ClientWithStats;
+  onSave?: (data: Partial<ClientWithStats>) => Promise<void>;
+  onDelete?: () => void;
+  onHasChanges?: (hasChanges: boolean) => void;
 }) {
   const client = overrides?.client ?? mockClientWithStats;
   const onSave = overrides?.onSave ?? vi.fn().mockResolvedValue(undefined);
   const onDelete = overrides?.onDelete ?? vi.fn();
-  return { client, onSave, onDelete, ...render(
-    <ClientInfoTab client={client} onSave={onSave} onDelete={onDelete} />
-  ) };
+  const onHasChanges = overrides?.onHasChanges;
+  render(
+    <RefCapture>
+      {(ref) => (
+        <ClientInfoTab client={client} onSave={onSave} onDelete={onDelete} onHasChanges={onHasChanges} ref={ref} />
+      )}
+    </RefCapture>
+  );
+  return { client, onSave, onDelete, getRef: () => testRefHandle };
 }
 
 describe('ClientInfoTab', () => {
@@ -83,26 +119,29 @@ describe('ClientInfoTab', () => {
   });
 
   it('save button is disabled when no changes', () => {
-    renderClientInfoTab();
-    const saveBtn = screen.getByRole('button', { name: /Сохранить/i });
-    expect(saveBtn).toBeDisabled();
+    const onHasChanges = vi.fn();
+    renderClientInfoTab({ onHasChanges });
+    // ClientInfoTab no longer renders save button (moved to ClientCardModal footer)
+    // Instead it notifies parent via onHasChanges callback
+    expect(onHasChanges).toHaveBeenCalledWith(false);
   });
 
-  it('enables save button when name changes', () => {
-    renderClientInfoTab();
+  it('enables save when name changes (onHasChanges fires)', () => {
+    const onHasChanges = vi.fn();
+    renderClientInfoTab({ onHasChanges });
+    onHasChanges.mockClear();
     const input = screen.getByLabelText('Имя');
     fireEvent.change(input, { target: { value: 'Новое Имя' } });
-    const saveBtn = screen.getByRole('button', { name: /Сохранить/i });
-    expect(saveBtn).toBeEnabled();
+    expect(onHasChanges).toHaveBeenCalledWith(true);
   });
 
-  it('calls onSave with updated data when save clicked', async () => {
+  it('calls onSave with updated data via ref.save()', async () => {
     const onSave = vi.fn().mockResolvedValue(undefined);
-    renderClientInfoTab({ onSave });
+    const { getRef } = renderClientInfoTabWithRef({ onSave });
     const input = screen.getByLabelText('Имя');
     fireEvent.change(input, { target: { value: 'Новое Имя' } });
-    const saveBtn = screen.getByRole('button', { name: /Сохранить/i });
-    fireEvent.click(saveBtn);
+    // Save is triggered via ref by the parent ClientCardModal
+    await getRef()!.save();
     await waitFor(() => {
       expect(onSave).toHaveBeenCalledWith({
         name: 'Новое Имя',
@@ -113,12 +152,11 @@ describe('ClientInfoTab', () => {
     });
   });
 
-  it('calls onDelete when delete button clicked', () => {
-    const onDelete = vi.fn();
-    renderClientInfoTab({ onDelete });
-    const deleteBtn = screen.getByRole('button', { name: /Удалить клиента/i });
-    fireEvent.click(deleteBtn);
-    expect(onDelete).toHaveBeenCalled();
+  it('does not render save/delete buttons (moved to parent modal)', () => {
+    renderClientInfoTab();
+    // Save and delete buttons are now in ClientCardModal footer, not in ClientInfoTab
+    expect(screen.queryByRole('button', { name: /Сохранить/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Удалить клиента/i })).not.toBeInTheDocument();
   });
 
   it('resets form when client prop changes', () => {
@@ -143,93 +181,99 @@ describe('ClientInfoTab', () => {
   // ─── Save button state edge cases ───────────────────────────────────────
 
   describe('save button state', () => {
-    it('save button stays disabled after save completes', async () => {
+    it('onHasChanges resets after ref.save() completes', async () => {
       const onSave = vi.fn().mockResolvedValue(undefined);
-      renderClientInfoTab({ onSave });
+      const onHasChanges = vi.fn();
+      const { getRef } = renderClientInfoTabWithRef({ onSave, onHasChanges });
+      onHasChanges.mockClear();
 
-      // Change name to enable save
+      // Change name to trigger hasChanges
       const input = screen.getByLabelText('Имя');
       fireEvent.change(input, { target: { value: 'Новое Имя' } });
-      const saveBtn = screen.getByRole('button', { name: /Сохранить/i });
-      expect(saveBtn).toBeEnabled();
+      expect(onHasChanges).toHaveBeenCalledWith(true);
+      onHasChanges.mockClear();
 
-      // Click save
-      fireEvent.click(saveBtn);
+      // Save via ref (simulating parent modal clicking save)
+      await getRef()!.save();
 
-      // After save, button should be disabled again (hasChanges reset)
+      // After save, hasChanges resets
       await waitFor(() => {
-        expect(saveBtn).toBeDisabled();
+        expect(onHasChanges).toHaveBeenCalledWith(false);
       });
     });
 
-    it('save button enables when phone is changed', () => {
-      renderClientInfoTab();
-      const saveBtn = screen.getByRole('button', { name: /Сохранить/i });
-      expect(saveBtn).toBeDisabled();
+    it('onHasChanges fires when phone is changed', () => {
+      const onHasChanges = vi.fn();
+      renderClientInfoTab({ onHasChanges });
+      onHasChanges.mockClear();
 
       const phoneInput = screen.getByLabelText('Телефон');
       fireEvent.change(phoneInput, { target: { value: '+7 (999) 111-22-33' } });
-      expect(saveBtn).toBeEnabled();
+      expect(onHasChanges).toHaveBeenCalledWith(true);
     });
 
-    it('save button enables when email is changed', () => {
-      renderClientInfoTab();
-      const saveBtn = screen.getByRole('button', { name: /Сохранить/i });
-      expect(saveBtn).toBeDisabled();
+    it('onHasChanges fires when email is changed', () => {
+      const onHasChanges = vi.fn();
+      renderClientInfoTab({ onHasChanges });
+      onHasChanges.mockClear();
 
       const emailInput = screen.getByLabelText('Email');
       fireEvent.change(emailInput, { target: { value: 'test@example.com' } });
-      expect(saveBtn).toBeEnabled();
+      expect(onHasChanges).toHaveBeenCalledWith(true);
     });
 
-    it('save button enables when channel is changed', () => {
-      renderClientInfoTab();
-      const saveBtn = screen.getByRole('button', { name: /Сохранить/i });
-      expect(saveBtn).toBeDisabled();
+    it('onHasChanges fires when channel is changed', () => {
+      const onHasChanges = vi.fn();
+      renderClientInfoTab({ onHasChanges });
+      onHasChanges.mockClear();
 
       const channelSelect = screen.getByLabelText('Канал');
       fireEvent.change(channelSelect, { target: { value: 'whatsapp' } });
-      expect(saveBtn).toBeEnabled();
+      expect(onHasChanges).toHaveBeenCalledWith(true);
     });
 
-    it('save button stays enabled after multiple changes', () => {
-      renderClientInfoTab();
-      const saveBtn = screen.getByRole('button', { name: /Сохранить/i });
+    it('onHasChanges stays true after multiple changes', () => {
+      const onHasChanges = vi.fn();
+      renderClientInfoTab({ onHasChanges });
+      onHasChanges.mockClear();
 
       fireEvent.change(screen.getByLabelText('Имя'), { target: { value: 'A' } });
-      expect(saveBtn).toBeEnabled();
+      expect(onHasChanges).toHaveBeenCalledWith(true);
 
+      // Subsequent changes don't re-fire onHasChanges since hasChanges is already true
+      // (React effect won't re-run when the value hasn't changed)
       fireEvent.change(screen.getByLabelText('Телефон'), { target: { value: '+7 (000) 000-00-00' } });
-      expect(saveBtn).toBeEnabled();
-
       fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'a@b.com' } });
-      expect(saveBtn).toBeEnabled();
+      // hasChanges remains true throughout
+      expect(onHasChanges).toHaveBeenLastCalledWith(true);
     });
 
-    it('save button resets disabled after saving even with new changes pending', async () => {
+    it('onHasChanges resets after save then new change re-enables', async () => {
       const onSave = vi.fn().mockResolvedValue(undefined);
-      renderClientInfoTab({ onSave });
+      const onHasChanges = vi.fn();
+      const { getRef } = renderClientInfoTabWithRef({ onSave, onHasChanges });
+      onHasChanges.mockClear();
 
       const input = screen.getByLabelText('Имя');
       fireEvent.change(input, { target: { value: 'New' } });
-      const saveBtn = screen.getByRole('button', { name: /Сохранить/i });
-      expect(saveBtn).toBeEnabled();
+      expect(onHasChanges).toHaveBeenCalledWith(true);
 
-      fireEvent.click(saveBtn);
+      await getRef()!.save();
 
       await waitFor(() => {
-        expect(saveBtn).toBeDisabled();
+        expect(onHasChanges).toHaveBeenCalledWith(false);
       });
+      onHasChanges.mockClear();
 
-      // Making a new change should re-enable the button
+      // Making a new change should re-enable
       fireEvent.change(input, { target: { value: 'New Again' } });
-      expect(saveBtn).toBeEnabled();
+      expect(onHasChanges).toHaveBeenCalledWith(true);
     });
 
-    it('delete button is always enabled regardless of hasChanges', () => {
+    it('delete button is not in ClientInfoTab (parent modal owns it)', () => {
       renderClientInfoTab();
-      const deleteBtn = screen.getByRole('button', { name: /Удалить клиента/i });
-      expect(deleteBtn).toBeEnabled();
+      // Delete button lives in ClientCardModal footer
+      expect(screen.queryByRole('button', { name: /Удалить/i })).not.toBeInTheDocument();
     });
   });
 
@@ -249,14 +293,15 @@ describe('ClientInfoTab', () => {
 
     it('sends correct data with all fields changed', async () => {
       const onSave = vi.fn().mockResolvedValue(undefined);
-      renderClientInfoTab({ onSave });
+      const { getRef } = renderClientInfoTabWithRef({ onSave });
 
       fireEvent.change(screen.getByLabelText('Имя'), { target: { value: 'Новое Имя' } });
       fireEvent.change(screen.getByLabelText('Телефон'), { target: { value: '+7 (000) 000-00-00' } });
       fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'new@test.com' } });
       fireEvent.change(screen.getByLabelText('Канал'), { target: { value: 'whatsapp' } });
 
-      fireEvent.click(screen.getByRole('button', { name: /Сохранить/i }));
+      // Save via ref (parent modal calls ref.save())
+      await getRef()!.save();
 
       await waitFor(() => {
         expect(onSave).toHaveBeenCalledWith({

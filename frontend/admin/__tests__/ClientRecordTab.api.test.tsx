@@ -176,7 +176,8 @@ describe('ClientRecordTab — API interactions', () => {
 
     fireEvent.change(screen.getByTestId('add-visitor-name'), { target: { value: 'Новый Гость' } });
     fireEvent.change(screen.getByTestId('add-visitor-age'), { target: { value: '10' } });
-    fireEvent.click(screen.getByTestId('add-visitor-submit'));
+    // The add visitor form auto-submits on blur (no explicit submit button)
+    fireEvent.blur(screen.getByTestId('add-visitor-name'));
 
     await waitFor(() => {
       expect(createVisitor).toHaveBeenCalledWith({

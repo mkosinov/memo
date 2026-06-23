@@ -108,8 +108,12 @@ describe('ClientRecordTab — interactions', () => {
 
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
     // RecordVisitRow shows age as "(взр.)" when visitorAge is null
-    const nameInput = screen.getByTestId('visit-v1-name');
-    expect(nameInput.closest('[data-testid^="visit-row-"]')).toBeInTheDocument();
+    const visitRow = screen.getByTestId('visit-row-v1');
+    expect(visitRow).toBeInTheDocument();
+    // The name input is inside the visit row (InlineEditCell without testid)
+    const nameInput = visitRow.querySelector('input') as HTMLInputElement;
+    expect(nameInput).toBeInTheDocument();
+    expect(nameInput.value).toBe('Анна Иванова');
   });
 
   it('shows "Нет посетителей" when record has no visits', () => {
@@ -159,15 +163,14 @@ describe('ClientRecordTab — interactions', () => {
 
   it('renders payment list with existing payments via PaymentList atom', () => {
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    expect(screen.getByTestId('payment-list')).toBeInTheDocument();
+    expect(screen.getByTestId('record-payments-table')).toBeInTheDocument();
     // PaymentList renders items with data-testid="payment-{id}"
     expect(screen.getByTestId('payment-p1')).toBeInTheDocument();
   });
 
   it('renders PaymentForm for adding payments', () => {
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    expect(screen.getByTestId('payment-form')).toBeInTheDocument();
-    expect(screen.getByTestId('payment-submit')).toBeInTheDocument();
+    expect(screen.getByTestId('btn-add-payment')).toBeInTheDocument();
   });
 
   // ─── Save button state ────────────────────────────────────────────
@@ -223,7 +226,8 @@ describe('ClientRecordTab — interactions', () => {
   it('shows AddVisitorForm when add visitor button clicked', () => {
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
     fireEvent.click(screen.getByTestId('btn-add-visitor'));
-    expect(screen.getByTestId('add-visitor-form')).toBeInTheDocument();
+    // The add visitor form is an inline row with name/age inputs
+    expect(screen.getByTestId('add-visitor-row')).toBeInTheDocument();
     expect(screen.getByTestId('add-visitor-name')).toBeInTheDocument();
     expect(screen.getByTestId('add-visitor-age')).toBeInTheDocument();
   });

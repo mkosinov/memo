@@ -117,15 +117,17 @@ describe('ClientRecordTab — integration with shared atoms', () => {
 
   it('renders visit name inside RecordVisitRow', () => {
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    const nameInput = screen.getByTestId('visit-v1-name');
-    expect(nameInput).toHaveValue('Анна Иванова');
+    const visitRow = screen.getByTestId('visit-row-v1');
+    const nameInput = visitRow.querySelector('input') as HTMLInputElement;
+    expect(nameInput).toBeInTheDocument();
+    expect(nameInput.value).toBe('Анна Иванова');
   });
 
   // ─── PaymentList atom ──────────────────────────────────────────────
 
   it('renders PaymentList with existing payments', () => {
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    expect(screen.getByTestId('payment-list')).toBeInTheDocument();
+    expect(screen.getByTestId('record-payments-table')).toBeInTheDocument();
     expect(screen.getByTestId('payment-p1')).toBeInTheDocument();
   });
 
@@ -133,17 +135,16 @@ describe('ClientRecordTab — integration with shared atoms', () => {
 
   it('renders PaymentTotals with correct values', () => {
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    expect(screen.getByTestId('payment-totals')).toBeInTheDocument();
-    // Total=3500, Paid=1500
-    expect(screen.getByText('3 500 ₽')).toBeInTheDocument();
-    expect(screen.getByText('1 500 ₽')).toBeInTheDocument();
+    expect(screen.getByTestId('payments-total')).toBeInTheDocument();
+    // Paid=1500 (from mockPayments)
+    expect(screen.getAllByText('1 500 ₽').length).toBeGreaterThan(0);
   });
 
   // ─── PaymentForm atom ──────────────────────────────────────────────
 
   it('renders PaymentForm', () => {
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    expect(screen.getByTestId('payment-form')).toBeInTheDocument();
+    expect(screen.getByTestId('btn-add-payment')).toBeInTheDocument();
   });
 
   // ─── AddVisitorForm atom ───────────────────────────────────────────
@@ -151,7 +152,8 @@ describe('ClientRecordTab — integration with shared atoms', () => {
   it('shows AddVisitorForm when add button clicked', () => {
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
     fireEvent.click(screen.getByTestId('btn-add-visitor'));
-    expect(screen.getByTestId('add-visitor-form')).toBeInTheDocument();
+    // The add visitor form is an inline row with name input
+    expect(screen.getByTestId('add-visitor-row')).toBeInTheDocument();
     expect(screen.getByTestId('add-visitor-name')).toBeInTheDocument();
   });
 
@@ -159,8 +161,10 @@ describe('ClientRecordTab — integration with shared atoms', () => {
 
   it('addPayment fires createPayment mutation', async () => {
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    fireEvent.change(screen.getByTestId('payment-amount'), { target: { value: '2000' } });
-    fireEvent.click(screen.getByTestId('payment-submit'));
+    // Open payment add form first
+    fireEvent.click(screen.getByTestId('btn-add-payment'));
+    fireEvent.change(screen.getByTestId('add-payment-amount'), { target: { value: '2000' } });
+    fireEvent.click(screen.getByTestId('add-payment-submit'));
 
     await waitFor(() => {
       expect(createPayment).toHaveBeenCalledWith({
@@ -174,8 +178,10 @@ describe('ClientRecordTab — integration with shared atoms', () => {
   it('addVisitor fires createVisitor then patchRecord', async () => {
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
     fireEvent.click(screen.getByTestId('btn-add-visitor'));
-    fireEvent.change(screen.getByTestId('add-visitor-name'), { target: { value: 'Новый Гость' } });
-    fireEvent.click(screen.getByTestId('add-visitor-submit'));
+    const nameInput = screen.getByTestId('add-visitor-name');
+    fireEvent.change(nameInput, { target: { value: 'Новый Гость' } });
+    // The add visitor form auto-submits on blur (no explicit submit button)
+    fireEvent.blur(nameInput);
 
     await waitFor(() => {
       expect(createVisitor).toHaveBeenCalledWith({

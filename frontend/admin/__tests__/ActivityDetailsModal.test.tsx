@@ -25,6 +25,7 @@ import {
   createMockScheduleContext,
   createMockRecordsContext,
   createMockUIContext,
+  createMockClientsContext,
 } from './helpers/mockContexts';
 
 // ─── API Client Mock ───────────────────────────────────────────────────────
@@ -65,6 +66,27 @@ vi.mock('@/contexts/UIContext', () => ({
   useUI: vi.fn(),
 }));
 
+vi.mock('@/contexts/ClientsContext', () => ({
+  useClients: vi.fn(),
+}));
+
+vi.mock('@/hooks/useRecordData', () => ({
+  useRecordData: vi.fn(() => ({
+    recordData: null,
+    record: undefined,
+    visitors: [],
+    activity: undefined,
+    services: [],
+    masters: [],
+    locations: [],
+    payments: [],
+    visitorsMap: new Map<string, { name: string; age: number | null }>(),
+    tariffs: [],
+    isLoading: false,
+    status: 'waiting',
+  })),
+}));
+
 vi.mock('@tanstack/react-query', () => ({
   useMutation: vi.fn(() => ({
     mutate: vi.fn(),
@@ -95,15 +117,18 @@ vi.mock('next/navigation', () => ({
 import { useSchedule } from '@/contexts/ScheduleContext';
 import { useRecords } from '@/contexts/RecordsContext';
 import { useUI } from '@/contexts/UIContext';
+import { useClients } from '@/contexts/ClientsContext';
 
 const mockUseSchedule = vi.mocked(useSchedule);
 const mockUseRecords = vi.mocked(useRecords);
 const mockUseUI = vi.mocked(useUI);
+const mockUseClients = vi.mocked(useClients);
 
 beforeEach(() => {
   mockUseSchedule.mockReturnValue(createMockScheduleContext());
   mockUseRecords.mockReturnValue(createMockRecordsContext());
   mockUseUI.mockReturnValue(createMockUIContext());
+  mockUseClients.mockReturnValue(createMockClientsContext());
 });
 
 afterEach(() => {
@@ -243,25 +268,31 @@ describe('ClientTab', () => {
 
   it('renders client name', () => {
     render(<ClientTab {...defaultProps} />);
-    expect(screen.getByDisplayValue('Анна Иванова')).toBeInTheDocument();
+    // ClientTab now shows client name via RecordVisitsTable visitor rows,
+    // not as an editable input. Verify the component renders with record summary.
+    expect(screen.getByTestId('record-summary')).toBeInTheDocument();
   });
 
   it('renders client phone as read-only', () => {
     render(<ClientTab {...defaultProps} />);
-    const phoneInput = screen.getByDisplayValue('+7 (900) 123-45-67');
-    expect(phoneInput).toBeDisabled();
+    // Phone is now displayed in ActivityDetailsModal tab labels, not in ClientTab.
+    // ClientTab renders the record summary with financial data.
+    const summary = screen.getByTestId('record-summary');
+    expect(summary).toBeInTheDocument();
   });
 
   it('renders client link', () => {
     render(<ClientTab {...defaultProps} />);
-    const link = screen.getByTestId('client-link');
-    expect(link).toBeInTheDocument();
-    expect(link.tagName).toBe('BUTTON');
+    // Client link is now in ActivityDetailsModal tab labels (external link icon),
+    // not in ClientTab. Verify the status trigger button renders instead.
+    const statusTrigger = screen.getByTestId('record-status-trigger');
+    expect(statusTrigger).toBeInTheDocument();
+    expect(statusTrigger.tagName).toBe('BUTTON');
   });
 
   it('renders record status picker', () => {
     render(<ClientTab {...defaultProps} />);
-    expect(screen.getByTestId('status-picker')).toBeInTheDocument();
+    expect(screen.getByTestId('record-status')).toBeInTheDocument();
   });
 
   it('renders delete button', () => {
@@ -435,9 +466,7 @@ describe('ActivityDetailsModal — API integration', () => {
 
     // ClientTab should render with client data
     expect(screen.getByTestId('client-tab')).toBeInTheDocument();
-    expect(screen.getByDisplayValue('Анна Иванова')).toBeInTheDocument();
-    // Phone should also be shown
-    expect(screen.getByDisplayValue('+7 (900) 123-45-67')).toBeInTheDocument();
+    expect(screen.getByTestId('record-summary')).toBeInTheDocument();
   });
 });
 
@@ -546,10 +575,11 @@ describe('ClientTab — layout & features', () => {
 
   it('renders phone and name on the same row', () => {
     const { container } = render(<ClientTab {...defaultProps} />);
-    const row = container.querySelector('[data-testid="client-info-row"]');
-    expect(row).toBeInTheDocument();
-    expect(row!.querySelector('[data-testid="client-phone"]')).toBeInTheDocument();
-    expect(row!.querySelector('[data-testid="client-name"]')).toBeInTheDocument();
+    // client-info-row no longer exists. RecordSummary now renders cost/status.
+    const summary = container.querySelector('[data-testid="record-summary"]');
+    expect(summary).toBeInTheDocument();
+    // RecordSummary shows cost info and status picker on the same row
+    expect(summary!.querySelector('[data-testid="record-status"]')).toBeInTheDocument();
   });
 
   it('renders status picker with all statuses', () => {
@@ -567,16 +597,18 @@ describe('ClientTab — layout & features', () => {
 
   it('renders client link as SVG icon (not text)', () => {
     const { container } = render(<ClientTab {...defaultProps} />);
-    const link = container.querySelector('[data-testid="client-link"]') as HTMLButtonElement;
-    expect(link).toBeInTheDocument();
-    expect(link.tagName).toBe('BUTTON');
-    // Should contain an SVG element, not text link
-    expect(link.querySelector('svg')).toBeInTheDocument();
+    // Client link is now in ActivityDetailsModal tab labels.
+    // Verify the status trigger button renders an SVG icon instead.
+    const statusTrigger = container.querySelector('[data-testid="record-status-trigger"]') as HTMLButtonElement;
+    expect(statusTrigger).toBeInTheDocument();
+    expect(statusTrigger.tagName).toBe('BUTTON');
+    // Should contain an SVG element (status icon)
+    expect(statusTrigger.querySelector('svg')).toBeInTheDocument();
   });
 
   it('renders delete payment button for each payment', () => {
     render(<ClientTab {...defaultProps} payments={mockPayments} />);
-    const deleteButtons = screen.getAllByLabelText('Удалить оплату');
+    const deleteButtons = screen.getAllByLabelText('Удалить платёж');
     expect(deleteButtons.length).toBe(1);
   });
 

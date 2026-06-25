@@ -74,43 +74,67 @@ export async function getFirstActivity(page: Page) {
 }
 
 /**
- * Open the activity details modal for the first visible activity.
+ * Open the activity details modal for an activity that has records (client tabs).
  * Dispatches a custom event that the modal listens to.
  *
- * If the first activity has no client tabs (no records), navigates to
- * previous weeks until finding an activity with records (seed data places
- * records 2 weeks back).
+ * Tries the first few visible activities on the current page before navigating
+ * to previous weeks. Seed data may place records on non-first activities,
+ * so checking only the first card can miss them.
+ *
+ * Falls back to navigating up to 3 previous weeks.
  */
 export async function openModal(page: Page) {
-  // Try up to 5 times, navigating to previous week each time if no client tabs
-  for (let attempt = 0; attempt < 5; attempt++) {
-    const activity = await getFirstActivity(page);
-    if (!activity) throw new Error('No activity found on page');
+  const MAX_WEEKS_BACK = 3;
+  const MAX_ACTIVITIES_PER_WEEK = 5;
 
-    await page.evaluate((act: any) => {
-      document.dispatchEvent(new CustomEvent('__memo-open-modal', { detail: { activity: act } }));
-    }, activity);
+  for (let week = 0; week <= MAX_WEEKS_BACK; week++) {
+    const cardCount = await page.locator('[data-testid^="activity-"]').count();
+    const toTry = Math.min(cardCount, MAX_ACTIVITIES_PER_WEEK);
 
-    await page.waitForSelector('[data-testid="activity-details-modal"]', {
-      state: 'visible',
-      timeout: 10_000,
-    });
+    for (let i = 0; i < toTry; i++) {
+      const card = page.locator('[data-testid^="activity-"]').nth(i);
+      if (!(await card.isVisible())) continue;
 
-    // Check if this activity has records (client tabs)
-    const hasClientTabs = await page.locator('[data-testid^="tab-client-"]').count() > 0;
-    if (hasClientTabs) return;
+      const activity = await card.evaluate((el: any) => {
+        const fiberKey = Object.keys(el).find((k: string) => k.startsWith('__reactFiber'));
+        if (!fiberKey) return null;
+        let current = (el as any)[fiberKey];
+        while (current) {
+          if (current.memoizedProps?.activity) return current.memoizedProps.activity;
+          current = current.return;
+        }
+        return null;
+      });
 
-    // No client tabs — close modal and try previous week
-    await page.evaluate(() => {
-      document.dispatchEvent(new CustomEvent('__memo-close-modal'));
-    });
-    await page.waitForTimeout(300);
+      if (!activity) continue;
 
-    // Navigate to previous week
+      await page.evaluate((act: any) => {
+        document.dispatchEvent(new CustomEvent('__memo-open-modal', { detail: { activity: act } }));
+      }, activity);
+
+      await page.waitForSelector('[data-testid="activity-details-modal"]', {
+        state: 'visible',
+        timeout: 10_000,
+      });
+
+      const hasClientTabs =
+        (await page.locator('[data-testid^="tab-client-"]').count()) > 0;
+      if (hasClientTabs) return;
+
+      // No client tabs — close modal and try next activity on this page
+      await page.evaluate(() => {
+        document.dispatchEvent(new CustomEvent('__memo-close-modal'));
+      });
+      await page.waitForTimeout(300);
+    }
+
+    // No activity on this page has records — navigate to previous week
     const prevBtn = page.locator('[data-testid="date-nav-prev"]');
     if (await prevBtn.isVisible()) {
       await prevBtn.click();
-      await page.waitForSelector('[data-testid^="activity-"]', { timeout: 10_000 });
+      await page.waitForSelector('[data-testid^="activity-"]', {
+        timeout: 10_000,
+      });
       await page.waitForTimeout(500);
     }
   }

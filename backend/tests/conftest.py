@@ -402,6 +402,60 @@ def _create_activity_payload(api_client, create_master, create_service, create_l
 
 # ─── DB Verification Helper ────────────────────────────────────────────────────
 
+# ─── Phase 0 Fixtures (tariff_id round-trip) ─────────────────────────────────
+
+@pytest.fixture
+def sample_tariff():
+    """Insert a tariff row directly via SQL (no tariff API exists yet)."""
+    import uuid as _uuid
+
+    tariff_id = f"tariff-{_uuid.uuid4().hex[:8]}"
+    query_db(
+        f"INSERT INTO tariffs (id, service_id, title, price, is_active, created_at, updated_at) "
+        f"VALUES ('{tariff_id}', 'svc-placeholder', 'Adult', 3500, 1, datetime('now'), datetime('now'))"
+    )
+    return tariff_id
+
+
+@pytest.fixture
+def sample_record_with_visit(create_record):
+    """Create a record with at least one visit (uses existing create_record factory).
+
+    Returns the record dict from the API response.
+    """
+    return create_record()
+
+
+@pytest.fixture
+def sample_visit_with_tariff(sample_record_with_visit):
+    """Create a record with a visit that has tariff_id set.
+
+    Inserts tariff_id directly into the DB (column exists but ORM model
+    doesn't expose it yet — this is the whole point of Phase 0).
+    """
+    record = sample_record_with_visit
+    visit_id = record["visits"][0]["id"]
+    tariff_id = f"tariff-{__import__('uuid').uuid4().hex[:8]}"
+    query_db(
+        f"INSERT INTO tariffs (id, service_id, title, price, is_active, created_at, updated_at) "
+        f"VALUES ('{tariff_id}', 'svc-placeholder', 'Adult', 3500, 1, datetime('now'), datetime('now'))"
+    )
+    query_db(f"UPDATE visits SET tariff_id = '{tariff_id}' WHERE id = '{visit_id}'")
+    return {"record": record, "visit_id": visit_id, "tariff_id": tariff_id}
+
+
+@pytest.fixture
+def sample_visit_no_tariff(create_record):
+    """Create a record with a visit that has no tariff (tariff_id=None).
+
+    Uses create_record factory — visits are created without tariff_id
+    (column exists in DB, ORM model doesn't have it, default is NULL).
+    """
+    record = create_record()
+    visit_id = record["visits"][0]["id"]
+    return {"record": record, "visit_id": visit_id}
+
+
 def query_db(sql: str) -> list[dict]:
     """Execute SQL against the test database.
 

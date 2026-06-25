@@ -568,3 +568,47 @@ class TestAnonymVisits:
         body = resp.json()
         assert body["seats"] == 4  # 2 visits + 2 anonym
         assert body["anonym_visits"] == 2
+
+
+class TestRecordTariffId:
+    """Phase 0: tariff_id round-trip through Record API (nested visits)."""
+
+    def test_get_record_includes_tariff_id_in_visits(
+        self, api_client, sample_visit_with_tariff
+    ) -> None:
+        """Scenario 2: GET /api/v1/records/{id} includes tariff_id in nested visits."""
+        record_id = sample_visit_with_tariff["record"]["id"]
+        response = api_client.get(f"/api/v1/records/{record_id}")
+        assert response.status_code == 200
+        visits = response.json()["visits"]
+        assert len(visits) >= 1
+        assert "tariff_id" in visits[0], (
+            f"'tariff_id' not in nested visit: {list(visits[0].keys())}"
+        )
+
+    def test_patch_record_preserves_tariff_id_in_visits(
+        self, api_client, sample_record_with_visit, sample_tariff
+    ) -> None:
+        """Scenario 3: PATCH /api/v1/records/{id} accepts tariff_id in visits array."""
+        record = sample_record_with_visit
+        visit_id = record["visits"][0]["id"]
+        patch_data = {
+            "visits": [
+                {
+                    "id": visit_id,
+                    "tariff_id": sample_tariff,
+                    "price": 3500,
+                    "status": "waiting",
+                }
+            ]
+        }
+        response = api_client.patch(
+            f"/api/v1/records/{record['id']}", json=patch_data
+        )
+        assert response.status_code == 200
+        patched_visits = response.json()["visits"]
+        assert len(patched_visits) >= 1
+        assert "tariff_id" in patched_visits[0], (
+            f"'tariff_id' not in patched visit: {list(patched_visits[0].keys())}"
+        )
+        assert patched_visits[0]["tariff_id"] == sample_tariff

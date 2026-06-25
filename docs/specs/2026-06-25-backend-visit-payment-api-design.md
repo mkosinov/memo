@@ -287,8 +287,10 @@ All endpoints follow the project's standard error contract (see `docs/specs/2026
 
 `VisitService` is currently hand-rolled (only `get` + `update_status`). The new methods need:
 - `_derive_record_status` cascade after any mutation (status change affects parent record)
-- Custom create logic (after insert, derive parent record's `status`)
-- Custom delete logic (soft-delete, then derive parent record's `status`)
+- **`seats` recomputation** after any mutation that changes `len(active_visits)` (create adds, delete removes)
+- **Capacity check** on `create` (delegating to `RecordService._check_capacity` or inlining the logic)
+- Custom create logic (after insert, derive parent record's `status` and `seats`)
+- Custom delete logic (soft-delete, then derive parent record's `status` and `seats`)
 
 `GenericService` doesn't know about cascades. Two options:
 
@@ -296,7 +298,7 @@ All endpoints follow the project's standard error contract (see `docs/specs/2026
 
 **Option B: Inherit from `GenericService` and override `create`/`update`/`patch`/`delete` to add cascade** — reuses `GenericService` boilerplate (`model_validate` etc.), but inheritance gets messy.
 
-**Decision: Option A.** Hand-roll all methods. Total ~80 lines. Clearer separation between "pure CRUD" and "visit-specific cascade logic".
+**Decision: Option A.** Hand-roll all methods. Total ~80 lines. Clearer separation between "pure CRUD" and "visit-specific cascade logic". **`GenericService` itself is NOT modified** — it stays as a generic, cascade-agnostic CRUD wrapper that other services (like `PaymentService`) can keep using without polluting it with visit-specific logic.
 
 ```python
 # backend/src/services/visit.py (skeleton)
@@ -313,17 +315,40 @@ class VisitService:
     async def get(self, db_session, visit_id) -> Visit | None:
         # ... existing implementation ...
 
-    async def create(self, db_session, data: VisitCreate) -> Visit:
+    async def create(self, db_session, data: VisitCreate) -> Visit | None:
+        """Create a new visit, then cascade: derive record.status + record.seats.
+
+        Returns None if the parent record doesn't exist or if capacity would
+        be exceeded.
+        """
+        # 1. Verify parent record exists and load it for capacity check
+        record = await self._get_active_record(db_session, data.record_id)
+        if not record:
+            return None
+        # 2. Capacity check (similar to RecordService._check_capacity)
+        if record.activity.max_seats is not None:
+            new_seats = record.seats + 1
+            if new_seats > record.activity.max_seats:
+                raise HTTPException(
+                    status_code=400,
+                    detail=ErrorDetail(
+                        code=ErrorCode.CAPACITY_EXCEEDED,
+                        message=f"Activity capacity exceeded ({record.activity.max_seats} seats)",
+                    ).model_dump(),
+                )
+        # 3. Insert visit
         visit = Visit(**data.model_dump())
         db_session.add(visit)
         await db_session.flush()
+        # 4. Cascade: derive status + seats on parent record
         await self._derive_record_status(db_session, visit.record_id)
+        await self._derive_record_seats(db_session, visit.record_id)
         await db_session.flush()
         await db_session.refresh(visit)
         return visit
 
     async def update(self, db_session, visit_id, data: VisitUpdate) -> Visit | None:
-        """Full-replace update."""
+        """Full-replace update. Cascade only status (seats unchanged — is_active not in VisitUpdate)."""
         visit = await self.get(db_session, visit_id)
         if not visit:
             return None
@@ -332,12 +357,16 @@ class VisitService:
         visit.updated_at = datetime.now(UTC)
         await db_session.flush()
         await self._derive_record_status(db_session, visit.record_id)
+        # seats: no change (is_active not exposed in VisitUpdate)
         await db_session.flush()
         await db_session.refresh(visit)
         return visit
 
     async def patch(self, db_session, visit_id, data: VisitPatch) -> Visit | None:
-        """Partial update — only fields explicitly set in `data` are applied."""
+        """Partial update — only fields explicitly set in `data` are applied.
+
+        Cascade only status (seats unchanged — is_active not in VisitPatch).
+        """
         visit = await self.get(db_session, visit_id)
         if not visit:
             return None
@@ -347,12 +376,16 @@ class VisitService:
         visit.updated_at = datetime.now(UTC)
         await db_session.flush()
         await self._derive_record_status(db_session, visit.record_id)
+        # seats: no change (is_active not exposed in VisitPatch)
         await db_session.flush()
         await db_session.refresh(visit)
         return visit
 
     async def delete(self, db_session, visit_id) -> bool:
-        """Soft-delete the visit (is_active=False) and re-derive parent record status."""
+        """Soft-delete the visit (is_active=False) and cascade: derive record.status + record.seats.
+
+        seats -= 1 because the deleted visit is no longer in len(active_visits).
+        """
         visit = await self.get(db_session, visit_id)
         if not visit:
             return False
@@ -360,10 +393,31 @@ class VisitService:
         visit.updated_at = datetime.now(UTC)
         await db_session.flush()
         await self._derive_record_status(db_session, visit.record_id)
+        await self._derive_record_seats(db_session, visit.record_id)
         await db_session.flush()
         return True
 
     # ... existing get, update_status, _derive_record_status ...
+    
+    @staticmethod
+    async def _derive_record_seats(db_session: AsyncSession, record_id: str) -> Record | None:
+        """Recompute record.seats = len(active visits) + anonym_visits."""
+        result = await db_session.execute(
+            select(Record).where(Record.id == record_id)
+        )
+        record = result.scalar_one_or_none()
+        if not record:
+            return None
+        active_visits_result = await db_session.execute(
+            select(func.count()).select_from(Visit).where(
+                Visit.record_id == record_id,
+                Visit.is_active.is_(True),
+            )
+        )
+        active_count = active_visits_result.scalar() or 0
+        record.seats = active_count + record.anonym_visits
+        record.updated_at = datetime.now(UTC)
+        return record
 ```
 
 ### Phase 2 — Payment PATCH
@@ -440,13 +494,23 @@ async def patch_payment(
 
 15. **Existing `PUT /api/v1/visits/{id}/status` still works unchanged.** (Regression test — make sure the new methods don't break the status-only PUT.)
 
+16. **`POST /api/v1/visits` cascades to `record.seats` (+1).** Before create, `record.seats = N`. After create, `record.seats = N + 1`. Confirmed by re-fetching the record via `GET /api/v1/records/{record_id}`. (Test: `test_visits.py::test_create_visit_cascades_to_seats`.)
+
+17. **`DELETE /api/v1/visits/{id}` cascades to `record.seats` (-1).** Before delete, `record.seats = N`. After delete, `record.seats = N - 1` (assuming `anonym_visits` unchanged). Confirmed by re-fetching the record. (Test: `test_visits.py::test_delete_visit_cascades_to_seats`.)
+
+18. **`PATCH /api/v1/visits/{id}` does NOT change `record.seats`.** Since `is_active` is not exposed in `VisitPatch`, patching other fields (e.g., `tariff_id`, `status`, `price`) doesn't change `seats`. Confirmed by re-fetching the record. (Test: `test_visits.py::test_patch_visit_does_not_change_seats`.)
+
+19. **`POST /api/v1/visits` rejects when capacity exceeded.** Setup: an activity with `max_seats=3` and a record with 3 active visits. Try to POST a 4th visit. Response 400 with `code: CAPACITY_EXCEEDED`. (Test: `test_visits.py::test_create_visit_rejects_when_capacity_exceeded`.)
+
+20. **`POST /api/v1/visits` rejects when `record_id` doesn't exist.** Send `{"record_id": "nonexistent", ...}`. Response 404 with `code: RECORD_NOT_FOUND`. (Test: `test_visits.py::test_create_visit_invalid_record_id_404` — supersedes the 400 test in scenario 7, which was speculative.)
+
 ### Phase 2 — Payment PATCH
 
-16. **`PATCH /api/v1/payments/{id}` partial update.** Send `{"method": "card"}`. Payment's `method` changes, `amount` and `record_id` unchanged. (Test: `test_payments.py::test_patch_payment_partial`.)
+21. **`PATCH /api/v1/payments/{id}` partial update.** Send `{"method": "card"}`. Payment's `method` changes, `amount` and `record_id` unchanged. (Test: `test_payments.py::test_patch_payment_partial`.)
 
-17. **`PATCH /api/v1/payments/{id}` with `amount: null` is silently stripped.** Send `{"amount": null, "method": "cash"}`. Payment's `amount` is unchanged (NOT_NULL strip), `method` is updated. (Test: `test_payments.py::test_patch_payment_null_amount_stripped`.)
+22. **`PATCH /api/v1/payments/{id}` with `amount: null` is silently stripped.** Send `{"amount": null, "method": "cash"}`. Payment's `amount` is unchanged (NOT_NULL strip), `method` is updated. (Test: `test_payments.py::test_patch_payment_null_amount_stripped`.)
 
-18. **`PATCH /api/v1/payments/{id}` on non-existent ID returns 404.** (Test: `test_payments.py::test_patch_payment_not_found_404`.)
+23. **`PATCH /api/v1/payments/{id}` on non-existent ID returns 404.** (Test: `test_payments.py::test_patch_payment_not_found_404`.)
 
 ---
 
@@ -471,7 +535,7 @@ Goal: `tariff_id` round-trips correctly. UI shows the chosen tariff. 4 files cha
 Goal: visit can be created, listed, fully updated, partially updated, soft-deleted via direct endpoints. 4 files changed, ~15 tests added.
 
 - T1.1. `backend/src/schemas/visit.py` — add `VisitBase`, `VisitCreate`, `VisitUpdate`, `VisitPatch` (see Schema design section)
-- T1.2. `backend/src/services/visit.py` — add `list`, `create`, `update`, `patch`, `delete` methods to `VisitService` (hand-rolled, with `_derive_record_status` cascade)
+- T1.2. `backend/src/services/visit.py` — add `list`, `create`, `update`, `patch`, `delete` methods to `VisitService` (hand-rolled, with `_derive_record_status` cascade + `seats` recomputation + capacity check on `create`)
 - T1.3. `backend/src/api/v1/visits.py` — add `GET /`, `POST /`, `PUT /{id}`, `PATCH /{id}`, `DELETE /{id}` handlers (return `_map_visit` for non-list responses, `list[_map_visit]` for list)
 - T1.4. `backend/tests/api/test_visits.py` — add tests for scenarios 5-15 (full CRUD + cascades)
 - T1.5. `backend/tests/api/test_visit_status.py` (regression) — confirm scenario 15 (existing `PUT /visits/{id}/status` still works)
@@ -504,9 +568,9 @@ Goal: `PATCH /api/v1/payments/{id}` exposed and tested. 3 files changed, 3 tests
 | Gate | Criteria |
 |------|----------|
 | **Phase 0 done** | Scenarios 1-4 pass. UI in browser shows correct tariff names. `pytest` all green. |
-| **Phase 1 done** | Scenarios 5-15 pass. `pytest` all green. Existing `PUT /visits/{id}/status` still works (scenario 15). |
+| **Phase 1 done** | Scenarios 5-15, 19-23 pass. `pytest` all green. Existing `PUT /visits/{id}/status` still works (scenario 15). Cascade to `record.seats` verified (scenarios 19-21). Capacity check enforced (scenario 22). |
 | **Phase 2 done** | Scenarios 16-18 pass. `pytest` all green. Existing `POST`/`PUT`/`DELETE` for payments still work. |
-| **Overall** | All 18 scenarios pass. No new `mypy` errors. `pytest` 100% green. Frontend can now rely on `tariff_id` in `VisitResponse` (re-enables the deferred `RecordVisitsTable` refactor at `4c031a5`). |
+| **Overall** | All 23 scenarios pass. No new `mypy` errors. `pytest` 100% green. Frontend can now rely on `tariff_id` in `VisitResponse` and can use direct visit endpoints (re-enables the deferred `RecordVisitsTable` refactor at `4c031a5`). |
 
 ---
 
@@ -528,17 +592,19 @@ This spec adds `tariff_id` to **both**, but does NOT deduplicate them. Drift ris
 
 ### `tariff_id` cascade on visit update is not implemented
 
-When a visit's `tariff_id` changes, the **record's `total_cost` is NOT re-derived** by the backend. The record's `total_cost` field (if it exists; check `Record` model) is computed on read by the frontend (`useRecordData` or similar). If the backend has a stored `total_cost` (e.g., a denormalized column), Phase 1 must update it.
+When a visit's `tariff_id` changes, the **record's `total_cost` is NOT re-derived** by the backend. The `Record` model has no `total_cost` column (verified at `backend/src/models/record.py` — only `status`, `seats`, `anonym_visits`, `comment`, `custom_price` are stored; no `total_cost` denormalization). The frontend computes total cost from visits on the fly. No cascade needed for `total_cost`. **Resolved: no risk.**
 
-**Mitigation:** Phase 1 implementation T1.2 must check `Record.total_cost` (and any other denormalized fields affected by visit changes) and update them in the cascade. If no such field exists, no change needed.
+### `seats` cascade IS implemented (added in revision)
+
+When a visit is created, `record.seats` must increment by 1. When soft-deleted, decrement by 1. When patched/updated (no `is_active` change), no change. This is covered by scenarios 19-21 and the new `_derive_record_seats` helper in `VisitService`. **Resolved.**
+
+### Capacity check on visit create is enforced
+
+`POST /api/v1/visits` must check that adding the visit doesn't exceed the activity's `max_seats`. This is covered by scenario 22 and the capacity check in the new `create` method. **Resolved.**
 
 ### `RecordResponse` visits round-trip test depends on nested schema
 
 Scenario 2 (`GET /api/v1/records/{id}` returns visits with `tariff_id`) depends on the nested `VisitResponse` in `RecordResponse` being updated. If the implementer forgets T0.3, scenario 2 will fail. The test must explicitly assert the nested field, not just the top-level.
-
-### Soft-delete cascade on record is not tested
-
-Phase 1 adds `DELETE /api/v1/visits/{id}` which soft-deletes the visit and re-derives record status. But the **record's `seats` count** is not in the cascade — `seats` is `len(active_visits)` (re-computed on read in the service layer). If `seats` is denormalized, the cascade must update it. Same mitigation as the `tariff_id` cascade.
 
 ### `GenericService.patch` `NOT_NULL_FIELDS` interaction with `PaymentPatch`
 

@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — 2026-06-25
+
+### Added
+- **Phase 0: `tariff_id` round-trip (GH-104)** — branch `feat/phase0-tariff-id`, 2026-06-25:
+  - First of 3 phases for Visit/Payment API completion (Phase 1 = Visit CRUD, Phase 2 = Payment PATCH). UI shows `— тариф —` placeholder until Phase 0 is live.
+  - `tariff_id` propagates through all 4 layers: DB column → SQLAlchemy `Visit` model → Pydantic `VisitResponse` (and nested in `RecordResponse`) → API response mapper.
+  - Seed data updated: all 10 visits (6 adult + 4 child) now include `tariff_id`.
+  - 10 files changed, 154 insertions(+), 11 deletions(-): `backend/src/{models/visit.py,schemas/{visit.py,record.py},services/record.py,api/v1/{records.py,visits.py},seed/seed.py}`, `backend/tests/{conftest.py,test_api_records.py,test_api_visits.py}`.
+  - 4 new round-trip tests (scenarios 1-4 in spec) — `GET /visits/{id}` and `GET /records/{id}` verify `tariff_id` surfaces in both Visit and nested Record responses.
+  - Conftest fixed: `query_db` helper now calls `conn.commit()` before close (was silently discarding test DB writes).
+  - Design spec: `docs/specs/2026-06-25-backend-visit-payment-api-design.md`
+  - Plan: `docs/plans/2026-06-25-backend-visit-payment-api.md`
+  - **Tests: 595 passed, 0 regressions** (4 new + 591 existing backend).
+
 ## [Unreleased] — 2026-06-20
 
 ### Added

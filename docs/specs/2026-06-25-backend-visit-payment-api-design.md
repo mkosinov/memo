@@ -366,13 +366,38 @@ class RecordService:
 
 ### `VisitService` uses `RecordService` for cascade
 
+**DI pattern: FastAPI `Depends` chain** (idiomatic for this project — see `backend/src/api/v1/visits.py:17-23`):
+
 ```python
-# backend/src/services/visit.py — refactored methods
+# backend/src/services/record.py
+@lru_cache
+def get_record_service() -> RecordService:
+    return RecordService()
+
+# backend/src/api/v1/visits.py — CHAINED Depends
+@lru_cache
+def get_visit_service(
+    record_service: RecordService = Depends(get_record_service),
+) -> VisitService:
+    """FastAPI resolves the chain: VisitService → RecordService."""
+    return VisitService(record_service=record_service)
+
+_ServiceDep = Annotated[VisitService, Depends(get_visit_service)]
+```
+
+**`VisitService.__init__` accepts `RecordService` for explicit dependency** (also enables direct instantiation in tests):
+
+```python
+# backend/src/services/visit.py — refactored class
 
 class VisitService:
-    def __init__(self, record_service: RecordService | None = None) -> None:
-        """VisitService depends on RecordService for cascade recompute."""
-        self._record_service = record_service or RecordService()
+    def __init__(self, record_service: RecordService) -> None:
+        """VisitService depends on RecordService for cascade recompute.
+        
+        In production, FastAPI's Depends chain injects this via get_visit_service().
+        In tests, you can pass a mock or real RecordService directly.
+        """
+        self._record_service = record_service
 
     async def list(self, db_session, record_id=None) -> list[Visit]:
         """Return active visits, optionally filtered by record_id."""
@@ -580,8 +605,8 @@ Goal: `tariff_id` round-trips correctly. UI shows the chosen tariff. 4 files cha
 Goal: visit can be created, listed, fully updated, partially updated, soft-deleted via direct endpoints. 4 files changed, ~15 tests added.
 
 - T1.1. `backend/src/schemas/visit.py` — add `VisitBase`, `VisitCreate`, `VisitUpdate`, `VisitPatch` (see Schema design section)
-- T1.2. `backend/src/services/visit.py` — add `list`, `create`, `update`, `patch`, `delete` methods to `VisitService` (hand-rolled, with `_derive_record_status` cascade + `seats` recomputation + capacity check on `create`)
-- T1.3. `backend/src/api/v1/visits.py` — add `GET /`, `POST /`, `PUT /{id}`, `PATCH /{id}`, `DELETE /{id}` handlers (return `_map_visit` for non-list responses, `list[_map_visit]` for list)
+- T1.2. `backend/src/services/visit.py` — add `list`, `create`, `update`, `patch`, `delete` methods to `VisitService` (hand-rolled, with cascade to `RecordService.recompute_status` + `RecordService.recompute_seats` + capacity check on `create`). Update `VisitService.__init__` to accept `RecordService` (FastAPI `Depends` chain in T1.3).
+- T1.3. `backend/src/api/v1/visits.py` — add `GET /`, `POST /`, `PUT /{id}`, `PATCH /{id}`, `DELETE /{id}` handlers (return `_map_visit` for non-list responses, `list[_map_visit]` for list). Add `get_visit_service` factory with chained `Depends(get_record_service)`.
 - T1.4. `backend/tests/api/test_visits.py` — add tests for scenarios 5-15 (full CRUD + cascades)
 - T1.5. `backend/tests/api/test_visit_status.py` (regression) — confirm scenario 15 (existing `PUT /visits/{id}/status` still works)
 - T1.6. Run `pytest backend/tests/` — all green, including new tests

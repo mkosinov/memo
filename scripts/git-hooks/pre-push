@@ -1,13 +1,17 @@
 #!/usr/bin/env bash
-# Pre-push hook: runs the FAST test suite, blocks push on failure.
+# Pre-push hook: runs the full local test suite, blocks push on failure.
 # Source: scripts/git-hooks/pre-push
 # Installed by: scripts/install-hooks.sh (via postinstall)
 #
-# Uses test-fast.sh (lint + typecheck + vitest + backend pytest, ~1-2 min)
-# instead of test-all.sh (adds Playwright E2E + visual, ~15 min).
-# To run the full suite before pushing, use:
-#   FULL_TESTS=1 git push
-# Or manually: pnpm test:all
+# Runs scripts/test-all.sh which executes all checks in parallel:
+#   - backend pytest
+#   - lint (turbo)
+#   - type-check (admin)
+#   - vitest (admin unit tests)
+#   - playwright E2E (5 shards in parallel)
+#   - visual compliance
+#
+# Typical runtime: ~6-8 min (down from 15+ min sequential).
 
 set -euo pipefail
 
@@ -19,10 +23,10 @@ if ! REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"; then
   exit 1
 fi
 
-TEST_SCRIPT="$REPO_ROOT/scripts/test-fast.sh"
+TEST_SCRIPT="$REPO_ROOT/scripts/test-all.sh"
 
 if [ ! -x "$TEST_SCRIPT" ]; then
-  echo "❌ test-fast.sh not found or not executable at $TEST_SCRIPT"
+  echo "❌ test-all.sh not found or not executable at $TEST_SCRIPT"
   echo "   Run: pnpm install (postinstall installs the hook)"
   exit 1
 fi

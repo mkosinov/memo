@@ -259,6 +259,7 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
                 visit = Visit(
                     record_id=record.id,
                     visitor_id=visit_item.get("visitor_id"),
+                    tariff_id=visit_item.get("tariff_id"),
                     price=visit_item["price"],
                     custom_price=visit_item.get("custom_price"),
                     status=visit_item.get("status", "waiting"),

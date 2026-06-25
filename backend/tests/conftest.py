@@ -467,5 +467,6 @@ def query_db(sql: str) -> list[dict]:
     conn = sqlite3.connect(_db_file.name)
     conn.row_factory = sqlite3.Row
     rows = conn.execute(sql).fetchall()
+    conn.commit()  # required: Python 3.12+ no longer auto-commits on close()
     conn.close()
     return [dict(r) for r in rows]

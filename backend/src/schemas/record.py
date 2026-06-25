@@ -18,6 +18,7 @@ class VisitItem(BaseModel):
     name: str | None = None
     age: int | None = None
     visitor_id: str | None = None
+    tariff_id: str | None = None
     price: int
     custom_price: int | None = None
     status: VisitStatus = VisitStatus.WAITING
@@ -31,6 +32,7 @@ class VisitResponse(BaseModel):
     id: str
     record_id: str
     visitor_id: str | None = None
+    tariff_id: str | None = None
     price: int
     custom_price: int | None = None
     status: str

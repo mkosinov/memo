@@ -55,7 +55,7 @@ All visit mutations today go through `PATCH /api/v1/records/{id}` with a full `v
 1. **Fix GH-104 root cause:** `tariff_id` round-trips correctly through Visit model → `_map_visit` → `VisitResponse` → frontend. UI shows the chosen tariff name (or `—` when null) instead of the misleading placeholder.
 2. **Complete Visit CRUD:** add `POST /api/v1/visits`, `PATCH /api/v1/visits/{id}`, `DELETE /api/v1/visits/{id}`, and `GET /api/v1/visits` (list, with optional `record_id` filter). Match the pattern used by `payments.py`.
 3. **Add Payment PATCH:** expose `PATCH /api/v1/payments/{id}` (the `GenericService.patch()` method is already implemented — just wire it up).
-4. **Cascade via domain functions:** any visit mutation (create, update including partial, delete) must re-derive the parent record's `status` and `seats` via the free functions in `src/domain/record_cascade.py` (`recompute_record_status`, `recompute_record_seats`) and refresh `updated_at`. Same logic already inlined in `RecordService.patch` today — extracted to single source of truth.
+4. **Cascade via domain functions:** any visit mutation (create, update including partial, delete) must re-derive the parent record's `status` and `seats` via the free functions in `src/domain/record_visits.py` (`recompute_record_status`, `recompute_record_seats`) and refresh `updated_at`. Same logic already inlined in `RecordService.patch` today — extracted to single source of truth.
 5. **Test coverage:** full unit + API tests for all new endpoints and the `tariff_id` round-trip. Follow the existing test pattern under `backend/tests/`.
 
 ---
@@ -90,13 +90,13 @@ All visit mutations today go through `PATCH /api/v1/records/{id}` with a full `v
 
 | File | Change | Approx lines |
 |------|--------|-------------|
-| `backend/src/domain/record_cascade.py` | **NEW file**: `recompute_record_seats`, `recompute_record_status`, `check_activity_capacity` | +90 |
+| `backend/src/domain/record_visits.py` | **NEW file**: `recompute_record_seats`, `recompute_record_status`, `check_activity_capacity` | +90 |
 | `backend/src/schemas/visit.py` | Add `VisitBase`, `VisitCreate`, `VisitUpdate`, `VisitPatch` (mirroring `visitor.py` pattern) | +30 |
 | `backend/src/services/visit.py` | Add `list`, `create`, `update`, `patch`, `delete` methods. **No constructor deps** — calls domain functions directly. Refactor existing `update_status` and remove `_derive_record_status`. | +80 / -30 |
 | `backend/src/services/record.py` | Refactor `create`/`update`/`patch` to use new free functions. **Remove** `_check_capacity` (logic moved to free function). | +20 / -50 |
 | `backend/src/api/v1/visits.py` | Add `GET /`, `POST /`, `PUT /{id}`, `PATCH /{id}`, `DELETE /{id}` handlers. Simplified `get_visit_service` (no chained `Depends`). | +50 |
 | `backend/tests/api/test_visits.py` | Full CRUD tests (create, list, get, patch, delete, error cases) | +200 |
-| `backend/tests/api/test_record_cascade.py` (NEW) | Unit tests for the three free functions (recompute_seats, recompute_status, check_activity_capacity) | +60 |
+| `backend/tests/api/test_record_visits.py` (NEW) | Unit tests for the three free functions (recompute_seats, recompute_status, check_activity_capacity) | +60 |
 | **Phase 1 total** | | **~480 lines** (slight increase due to new domain file) |
 
 ### Files modified (Phase 2 — Payment PATCH)
@@ -291,7 +291,7 @@ All endpoints follow the project's standard error contract (see `docs/specs/2026
 `VisitService` is currently hand-rolled (only `get` + `update_status`). The new methods need:
 - `_derive_record_status` cascade after any mutation (status change affects parent record)
 - **`seats` recomputation** after any mutation that changes `len(active_visits)` (create adds, delete removes)
-- **Capacity check** on `create` (calls `check_activity_capacity` free function in `src/domain/record_cascade.py`)
+- **Capacity check** on `create` (calls `check_activity_capacity` free function in `src/domain/record_visits.py`)
 - Custom create logic (after insert, derive parent record's `status` and `seats`)
 - Custom delete logic (soft-delete, then derive parent record's `status` and `seats`)
 
@@ -303,16 +303,17 @@ All endpoints follow the project's standard error contract (see `docs/specs/2026
 
 **Decision: Option A.** Hand-roll all methods. Total ~80 lines. Clearer separation between "pure CRUD" and "visit-specific cascade logic". **`GenericService` itself is NOT modified** — it stays as a generic, cascade-agnostic CRUD wrapper that other services (like `PaymentService`) can keep using without polluting it with visit-specific logic.
 
-### Cascade helpers: free functions in `src/domain/record_cascade.py` (per user choice)
+### Cascade helpers: free functions in `src/domain/record_visits.py` (per user choice)
 
-**Architectural decision: domain layer, not service layer.** Per user's choice, cascade logic lives in `src/domain/record_cascade.py` as **free functions**, not as methods on `RecordService` or `VisitService`. This:
+**Architectural decision: domain layer, not service layer.** Per user's choice, cascade logic lives in `src/domain/record_visits.py` as **free functions**, not as methods on `RecordService` or `VisitService`. This:
 
 - ✅ **Eliminates service-to-service dependency** — `VisitService` and `RecordService` are siblings, not parent/child
 - ✅ **Matches existing pattern** — `compute_record_status` is already a free function in `src/domain/visit_status.py:21-34`; we extend the same pattern
 - ✅ **Stateless** — pure DB operations, easy to test
 - ✅ **Both services consume** — `VisitService.create/delete` and `RecordService.patch` all call the same functions
+- ⚠️ **No backward compatibility** — per user decision. `RecordService._check_capacity` is REMOVED, not kept as wrapper. `RecordService.create/update/patch` inlined logic is REPLACED, not preserved. Full rewrite of the service layer is the goal.
 
-**New file: `backend/src/domain/record_cascade.py`**
+**New file: `backend/src/domain/record_visits.py`**
 
 ```python
 """Cascade operations for the Record aggregate.
@@ -431,7 +432,7 @@ async def check_activity_capacity(
 ```python
 # backend/src/services/visit.py — refactored class, zero service deps
 
-from src.domain.record_cascade import (
+from src.domain.record_visits import (
     recompute_record_seats,
     recompute_record_status,
     check_activity_capacity,
@@ -571,7 +572,7 @@ async def create_visit(
 ```python
 # backend/src/services/record.py — refactored to use domain functions
 
-from src.domain.record_cascade import (
+from src.domain.record_visits import (
     recompute_record_seats,
     recompute_record_status,
     check_activity_capacity,
@@ -714,13 +715,13 @@ Goal: `tariff_id` round-trips correctly. UI shows the chosen tariff. 4 files cha
 
 Goal: visit can be created, listed, fully updated, partially updated, soft-deleted via direct endpoints. 5 files changed + 1 new file, ~15 tests added.
 
-- T1.1. `backend/src/domain/record_cascade.py` — **NEW file**: `recompute_record_seats`, `recompute_record_status`, `check_activity_capacity` free functions
+- T1.1. `backend/src/domain/record_visits.py` — **NEW file**: `recompute_record_seats`, `recompute_record_status`, `check_activity_capacity` free functions
 - T1.2. `backend/src/schemas/visit.py` — add `VisitBase`, `VisitCreate`, `VisitUpdate`, `VisitPatch` (see Schema design section)
 - T1.3. `backend/src/services/visit.py` — add `list`, `create`, `update`, `patch`, `delete` methods. **No constructor deps** — call domain functions directly. Refactor existing `update_status` and remove `_derive_record_status` (replaced by `recompute_record_status`).
 - T1.4. `backend/src/services/record.py` — refactor `create`/`update`/`patch` to use the new free functions. **Remove** `_check_capacity` (logic moved to free function).
 - T1.5. `backend/src/api/v1/visits.py` — add `GET /`, `POST /`, `PUT /{id}`, `PATCH /{id}`, `DELETE /{id}` handlers. Simplified `get_visit_service` (no chained `Depends`).
 - T1.6. `backend/tests/api/test_visits.py` — add tests for scenarios 5-15 (full CRUD + cascades)
-- T1.7. `backend/tests/api/test_record_cascade.py` (NEW) — unit tests for the three free functions
+- T1.7. `backend/tests/api/test_record_visits.py` (NEW) — unit tests for the three free functions
 - T1.8. Run `pytest backend/tests/` — all green, including new tests
 
 **Acceptance gate:** scenarios 5-15 pass. Manual sanity check (optional): use `curl` or `/docs` (Swagger UI) to create a visit, list visits, patch a tariff, delete — all work as expected.
@@ -782,7 +783,7 @@ When a visit is created, `record.seats` must increment by 1. When soft-deleted, 
 
 ### Capacity check on visit create is enforced
 
-`POST /api/v1/visits` must check that adding the visit doesn't exceed the activity's `capacity` field. This is covered by scenario 19 and uses `check_activity_capacity` (free function in `src/domain/record_cascade.py`, extracted from `RecordService._check_capacity:294`). **Resolved.**
+`POST /api/v1/visits` must check that adding the visit doesn't exceed the activity's `capacity` field. This is covered by scenario 19 and uses `check_activity_capacity` (free function in `src/domain/record_visits.py`, extracted from `RecordService._check_capacity:294`). **Resolved.**
 
 ### `RecordResponse` visits round-trip test depends on nested schema
 

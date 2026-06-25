@@ -55,7 +55,7 @@ All visit mutations today go through `PATCH /api/v1/records/{id}` with a full `v
 1. **Fix GH-104 root cause:** `tariff_id` round-trips correctly through Visit model → `_map_visit` → `VisitResponse` → frontend. UI shows the chosen tariff name (or `—` when null) instead of the misleading placeholder.
 2. **Complete Visit CRUD:** add `POST /api/v1/visits`, `PATCH /api/v1/visits/{id}`, `DELETE /api/v1/visits/{id}`, and `GET /api/v1/visits` (list, with optional `record_id` filter). Match the pattern used by `payments.py`.
 3. **Add Payment PATCH:** expose `PATCH /api/v1/payments/{id}` (the `GenericService.patch()` method is already implemented — just wire it up).
-4. **Service-layer cascade:** any visit mutation (create, update including partial, delete) must re-derive the parent record's `status` (call `_derive_record_status` from `VisitService`) and refresh `updated_at`. This is the same pattern `update_status` already uses.
+4. **Cascade via domain functions:** any visit mutation (create, update including partial, delete) must re-derive the parent record's `status` and `seats` via the free functions in `src/domain/record_cascade.py` (`recompute_record_status`, `recompute_record_seats`) and refresh `updated_at`. Same logic already inlined in `RecordService.patch` today — extracted to single source of truth.
 5. **Test coverage:** full unit + API tests for all new endpoints and the `tariff_id` round-trip. Follow the existing test pattern under `backend/tests/`.
 
 ---
@@ -90,11 +90,14 @@ All visit mutations today go through `PATCH /api/v1/records/{id}` with a full `v
 
 | File | Change | Approx lines |
 |------|--------|-------------|
+| `backend/src/domain/record_cascade.py` | **NEW file**: `recompute_record_seats`, `recompute_record_status`, `check_activity_capacity` | +90 |
 | `backend/src/schemas/visit.py` | Add `VisitBase`, `VisitCreate`, `VisitUpdate`, `VisitPatch` (mirroring `visitor.py` pattern) | +30 |
-| `backend/src/services/visit.py` | Add `list`, `create`, `update`, `patch`, `delete` methods to `VisitService` (use `GenericService` or hand-roll; see Design Decisions) | +80 |
-| `backend/src/api/v1/visits.py` | Add `GET /`, `POST /`, `PATCH /{id}`, `DELETE /{id}` handlers | +50 |
+| `backend/src/services/visit.py` | Add `list`, `create`, `update`, `patch`, `delete` methods. **No constructor deps** — calls domain functions directly. Refactor existing `update_status` and remove `_derive_record_status`. | +80 / -30 |
+| `backend/src/services/record.py` | Refactor `create`/`update`/`patch` to use new free functions. **Remove** `_check_capacity` (logic moved to free function). | +20 / -50 |
+| `backend/src/api/v1/visits.py` | Add `GET /`, `POST /`, `PUT /{id}`, `PATCH /{id}`, `DELETE /{id}` handlers. Simplified `get_visit_service` (no chained `Depends`). | +50 |
 | `backend/tests/api/test_visits.py` | Full CRUD tests (create, list, get, patch, delete, error cases) | +200 |
-| **Phase 1 total** | | **~360 lines** |
+| `backend/tests/api/test_record_cascade.py` (NEW) | Unit tests for the three free functions (recompute_seats, recompute_status, check_activity_capacity) | +60 |
+| **Phase 1 total** | | **~480 lines** (slight increase due to new domain file) |
 
 ### Files modified (Phase 2 — Payment PATCH)
 
@@ -288,7 +291,7 @@ All endpoints follow the project's standard error contract (see `docs/specs/2026
 `VisitService` is currently hand-rolled (only `get` + `update_status`). The new methods need:
 - `_derive_record_status` cascade after any mutation (status change affects parent record)
 - **`seats` recomputation** after any mutation that changes `len(active_visits)` (create adds, delete removes)
-- **Capacity check** on `create` (reusing `RecordService._check_capacity`)
+- **Capacity check** on `create` (calls `check_activity_capacity` free function in `src/domain/record_cascade.py`)
 - Custom create logic (after insert, derive parent record's `status` and `seats`)
 - Custom delete logic (soft-delete, then derive parent record's `status` and `seats`)
 
@@ -300,104 +303,147 @@ All endpoints follow the project's standard error contract (see `docs/specs/2026
 
 **Decision: Option A.** Hand-roll all methods. Total ~80 lines. Clearer separation between "pure CRUD" and "visit-specific cascade logic". **`GenericService` itself is NOT modified** — it stays as a generic, cascade-agnostic CRUD wrapper that other services (like `PaymentService`) can keep using without polluting it with visit-specific logic.
 
-### Cascade helpers: live in `RecordService`, called by `VisitService`
+### Cascade helpers: free functions in `src/domain/record_cascade.py` (per user choice)
 
-Per user's preference: cascade logic is the parent record's concern, not the visit's. Add **two new public methods** to `RecordService`:
+**Architectural decision: domain layer, not service layer.** Per user's choice, cascade logic lives in `src/domain/record_cascade.py` as **free functions**, not as methods on `RecordService` or `VisitService`. This:
+
+- ✅ **Eliminates service-to-service dependency** — `VisitService` and `RecordService` are siblings, not parent/child
+- ✅ **Matches existing pattern** — `compute_record_status` is already a free function in `src/domain/visit_status.py:21-34`; we extend the same pattern
+- ✅ **Stateless** — pure DB operations, easy to test
+- ✅ **Both services consume** — `VisitService.create/delete` and `RecordService.patch` all call the same functions
+
+**New file: `backend/src/domain/record_cascade.py`**
 
 ```python
-# backend/src/services/record.py — NEW public methods (refactor of inlined logic)
+"""Cascade operations for the Record aggregate.
 
-class RecordService:
-    # ... existing methods ...
+These are stateless DB operations that recompute denormalized fields on
+the parent Record (seats, status) after changes to child entities (Visits).
+Lives in the domain layer (not service layer) because cascade is an
+aggregate invariant — the Record is the aggregate root and must maintain
+its own consistency. Both VisitService and RecordService call these
+functions; neither knows about the other.
+"""
 
-    async def recompute_seats(self, db_session: AsyncSession, record_id: str) -> Record | None:
-        """Recompute record.seats from active visits.
+from datetime import UTC, datetime
+from fastapi import HTTPException
+from sqlalchemy import select, func
+from sqlalchemy.ext.asyncio import AsyncSession
 
-        Formula: seats = len(active visits) + anonym_visits.
-        Called by VisitService after create/delete (which change len(active_visits)),
-        and by RecordService.patch when visits are replaced.
+from src.domain.visit_status import VisitItem, compute_record_status
+from src.errors import ErrorCode, ErrorDetail
+from src.models.activity import Activity
+from src.models.record import Record
+from src.models.visit import Visit
 
-        Replaces the inlined logic at lines 127, 208, 268, 272.
-        """
-        record = await self.get(db_session, record_id)
-        if not record:
-            return None
-        result = await db_session.execute(
-            select(func.count()).select_from(Visit).where(
-                Visit.record_id == record_id,
-                Visit.is_active.is_(True),
-            )
+
+async def recompute_record_seats(
+    db_session: AsyncSession, record_id: str,
+) -> Record | None:
+    """Recompute record.seats = len(active visits) + anonym_visits.
+
+    Used by VisitService.create/delete (which change len(active_visits))
+    and by RecordService.patch (when visits array is replaced).
+    Replaces inlined logic at lines 127, 208, 268, 272 of services/record.py.
+    """
+    record = await db_session.get(Record, record_id)
+    if not record:
+        return None
+    result = await db_session.execute(
+        select(func.count()).select_from(Visit).where(
+            Visit.record_id == record_id,
+            Visit.is_active.is_(True),
         )
-        active_count = result.scalar() or 0
-        record.seats = active_count + record.anonym_visits
-        record.updated_at = datetime.now(UTC)
-        await db_session.flush()
-        return record
+    )
+    active_count = result.scalar() or 0
+    record.seats = active_count + record.anonym_visits
+    record.updated_at = datetime.now(UTC)
+    await db_session.flush()
+    return record
 
-    async def recompute_status(self, db_session: AsyncSession, record_id: str) -> Record | None:
-        """Recompute record.status from active visits.
 
-        Uses the same compute_record_status domain function as the inlined code.
-        Called by VisitService after any mutation (status change affects parent record),
-        and by RecordService.patch when visits are replaced.
+async def recompute_record_status(
+    db_session: AsyncSession, record_id: str,
+) -> Record | None:
+    """Recompute record.status from active visits.
 
-        Replaces the inlined logic at lines 123, 225, 277, 283.
-        """
-        record = await self.get(db_session, record_id)
-        if not record:
-            return None
-        result = await db_session.execute(
-            select(Visit).where(
-                Visit.record_id == record_id,
-                Visit.is_active.is_(True),
-            )
+    Wraps the pure compute_record_status domain function with the DB
+    query and update. Used by VisitService.* and RecordService.patch.
+    Replaces inlined logic at lines 123, 225, 277, 283 of services/record.py.
+    """
+    record = await db_session.get(Record, record_id)
+    if not record:
+        return None
+    result = await db_session.execute(
+        select(Visit).where(
+            Visit.record_id == record_id,
+            Visit.is_active.is_(True),
         )
-        active_visits = list(result.scalars().all())
-        record.status = compute_record_status([
-            VisitItem(id=v.id, status=v.status)
-            for v in active_visits
-        ]).value
-        record.updated_at = datetime.now(UTC)
-        await db_session.flush()
-        return record
+    )
+    active_visits = list(result.scalars().all())
+    record.status = compute_record_status([
+        VisitItem(id=v.id, status=v.status)
+        for v in active_visits
+    ]).value
+    record.updated_at = datetime.now(UTC)
+    await db_session.flush()
+    return record
+
+
+async def check_activity_capacity(
+    db_session: AsyncSession, activity_id: str, seats: int = 1,
+) -> None:
+    """Check if the activity has enough capacity for the new seats.
+
+    Raises HTTPException 409 with code: ACTIVITY_AT_CAPACITY if exceeded.
+    Extracted from RecordService._check_capacity (line 294) for symmetry
+    with the other cascade functions. Both services use this directly.
+    """
+    result = await db_session.execute(
+        select(Activity).where(Activity.id == activity_id, Activity.is_active)
+    )
+    activity = result.scalar_one_or_none()
+    if not activity:
+        return  # activity not found — let caller handle
+
+    occupied_result = await db_session.execute(
+        select(func.coalesce(func.sum(Record.seats), 0)).where(
+            Record.activity_id == activity_id,
+            Record.is_active.is_(True),
+        )
+    )
+    occupied = occupied_result.scalar() or 0
+
+    if occupied + seats > activity.capacity:
+        raise HTTPException(
+            status_code=409,
+            detail=ErrorDetail(
+                code=ErrorCode.ACTIVITY_AT_CAPACITY,
+                message=f"Activity at capacity: {occupied}/{activity.capacity} seats occupied",
+            ).model_dump(),
+        )
 ```
 
-**Bonus DRY:** refactor existing `RecordService.create`, `update`, `patch` to use these new helpers instead of inlining the logic. Removes ~30 lines of duplication. This is included in Phase 1 scope (not a separate cleanup).
+### `VisitService` uses domain functions (no service-to-service deps)
 
-### `VisitService` uses `RecordService` for cascade
-
-**DI pattern: FastAPI `Depends` chain** (idiomatic for this project — see `backend/src/api/v1/visits.py:17-23`):
+**Architectural impact:** `VisitService` no longer depends on `RecordService`. The constructor has no parameters (or only a `db_session` if needed for testing). The router uses a simple `Depends(get_visit_service)` — no chained dependencies.
 
 ```python
-# backend/src/services/record.py
-@lru_cache
-def get_record_service() -> RecordService:
-    return RecordService()
+# backend/src/services/visit.py — refactored class, zero service deps
 
-# backend/src/api/v1/visits.py — CHAINED Depends
-@lru_cache
-def get_visit_service(
-    record_service: RecordService = Depends(get_record_service),
-) -> VisitService:
-    """FastAPI resolves the chain: VisitService → RecordService."""
-    return VisitService(record_service=record_service)
-
-_ServiceDep = Annotated[VisitService, Depends(get_visit_service)]
-```
-
-**`VisitService.__init__` accepts `RecordService` for explicit dependency** (also enables direct instantiation in tests):
-
-```python
-# backend/src/services/visit.py — refactored class
+from src.domain.record_cascade import (
+    recompute_record_seats,
+    recompute_record_status,
+    check_activity_capacity,
+)
+from src.models.record import Record
 
 class VisitService:
-    def __init__(self, record_service: RecordService) -> None:
-        """VisitService depends on RecordService for cascade recompute.
-        
-        In production, FastAPI's Depends chain injects this via get_visit_service().
-        In tests, you can pass a mock or real RecordService directly.
-        """
-        self._record_service = record_service
+    """No __init__ deps — cascade lives in domain layer.
+    
+    In production, FastAPI Depends(get_visit_service) returns a singleton.
+    In tests, you can instantiate VisitService() directly (no mocks needed).
+    """
 
     async def list(self, db_session, record_id=None) -> list[Visit]:
         """Return active visits, optionally filtered by record_id."""
@@ -417,19 +463,18 @@ class VisitService:
         Raises HTTPException 409 + ErrorCode.ACTIVITY_AT_CAPACITY if activity is at capacity.
         """
         # 1. Verify parent record exists (404 if not)
-        record = await self._record_service.get(db_session, data.record_id)
+        record = await db_session.get(Record, data.record_id)
         if not record:
             return None
         # 2. Capacity check (409 + ACTIVITY_AT_CAPACITY if exceeded)
-        #    Uses RecordService._check_capacity (existing static method, line 294)
-        await RecordService._check_capacity(db_session, record.activity_id, seats=1)
+        await check_activity_capacity(db_session, record.activity_id, seats=1)
         # 3. Insert visit
         visit = Visit(**data.model_dump())
         db_session.add(visit)
         await db_session.flush()
-        # 4. Cascade: derive status + seats on parent record
-        await self._record_service.recompute_status(db_session, visit.record_id)
-        await self._record_service.recompute_seats(db_session, visit.record_id)
+        # 4. Cascade via domain functions (no service-to-service dep)
+        await recompute_record_status(db_session, visit.record_id)
+        await recompute_record_seats(db_session, visit.record_id)
         await db_session.flush()
         await db_session.refresh(visit)
         return visit
@@ -444,7 +489,7 @@ class VisitService:
         visit.updated_at = datetime.now(UTC)
         await db_session.flush()
         # Cascade: status only (seats: no change — is_active not exposed in VisitUpdate)
-        await self._record_service.recompute_status(db_session, visit.record_id)
+        await recompute_record_status(db_session, visit.record_id)
         await db_session.flush()
         await db_session.refresh(visit)
         return visit
@@ -463,7 +508,7 @@ class VisitService:
         visit.updated_at = datetime.now(UTC)
         await db_session.flush()
         # Cascade: status only
-        await self._record_service.recompute_status(db_session, visit.record_id)
+        await recompute_record_status(db_session, visit.record_id)
         await db_session.flush()
         await db_session.refresh(visit)
         return visit
@@ -479,16 +524,81 @@ class VisitService:
         visit.is_active = False
         visit.updated_at = datetime.now(UTC)
         await db_session.flush()
-        # Cascade: status + seats
-        await self._record_service.recompute_status(db_session, visit.record_id)
-        await self._record_service.recompute_seats(db_session, visit.record_id)
+        # Cascade via domain functions
+        await recompute_record_status(db_session, visit.record_id)
+        await recompute_record_seats(db_session, visit.record_id)
         await db_session.flush()
         return True
 
-    # ... existing get, update_status (now also uses recompute_status) ...
+    # ... existing get, update_status (refactored to use recompute_record_status) ...
 ```
 
-**The existing `VisitService.update_status` (line 24-37) and `_derive_record_status` (line 39-62) are REFACTORED** to use `RecordService.recompute_status` instead of their own implementation. Removes the duplicated logic.
+**The existing `VisitService.update_status` (line 24-37) and `_derive_record_status` (line 39-62) are REFACTORED** to use `recompute_record_status` (free function) instead of their own implementation. Removes the duplicated logic.
+
+### Router (visits.py) — simplified DI
+
+```python
+# backend/src/api/v1/visits.py
+
+@lru_cache
+def get_visit_service() -> VisitService:
+    """Returns a singleton VisitService (no constructor deps)."""
+    return VisitService()
+
+_ServiceDep = Annotated[VisitService, Depends(get_visit_service)]
+
+
+@router.post("", response_model=VisitResponse, status_code=201)
+async def create_visit(
+    data: VisitCreate,
+    service: _ServiceDep,  # ← simple Depends, no chain
+    session: SessionDep,
+) -> VisitResponse:
+    visit = await service.create(db_session=session, data=data)
+    if not visit:
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.RECORD_NOT_FOUND,
+                message="Parent record not found",
+            ).model_dump(),
+        )
+    return _map_visit(visit)
+```
+
+### `RecordService` also uses the free functions (DRY)
+
+```python
+# backend/src/services/record.py — refactored to use domain functions
+
+from src.domain.record_cascade import (
+    recompute_record_seats,
+    recompute_record_status,
+    check_activity_capacity,
+)
+
+
+class RecordService:
+    # ... existing methods (get, delete) unchanged ...
+
+    async def create(self, db_session, data):
+        # ... existing logic up to capacity check ...
+        # OLD: await self._check_capacity(db_session, data.activity_id, seats=effective_seats)
+        # NEW:
+        await check_activity_capacity(db_session, data.activity_id, seats=effective_seats)
+        # ... rest of create unchanged ...
+    
+    async def patch(self, db_session, record_id, data):
+        # ... existing logic ...
+        # Replace the inlined cascade (lines 267-287) with:
+        await recompute_record_seats(db_session, record_id)
+        await recompute_record_status(db_session, record_id)
+        # ... rest of patch unchanged ...
+```
+
+**The existing `RecordService._check_capacity` (line 294-324) is REMOVED** — its logic now lives in `check_activity_capacity` (free function). Single source of truth.
+
+**Bonus DRY:** `RecordService.create`/`update`/`patch` refactored to use free functions. Removes ~30 lines of inlined cascade logic. This is included in Phase 1 scope.
 
 ### Phase 2 — Payment PATCH
 
@@ -600,16 +710,18 @@ Goal: `tariff_id` round-trips correctly. UI shows the chosen tariff. 4 files cha
 
 **Acceptance gate:** scenarios 1-4 pass. Manual sanity check: open `/admin/.../record/...` in browser, confirm Tariff dropdown shows the actual tariff name (or `—` for null), not `— тариф —` everywhere.
 
-### Phase 1 — Visit CRUD (medium, ~360 lines)
+### Phase 1 — Visit CRUD (medium, ~480 lines)
 
-Goal: visit can be created, listed, fully updated, partially updated, soft-deleted via direct endpoints. 4 files changed, ~15 tests added.
+Goal: visit can be created, listed, fully updated, partially updated, soft-deleted via direct endpoints. 5 files changed + 1 new file, ~15 tests added.
 
-- T1.1. `backend/src/schemas/visit.py` — add `VisitBase`, `VisitCreate`, `VisitUpdate`, `VisitPatch` (see Schema design section)
-- T1.2. `backend/src/services/visit.py` — add `list`, `create`, `update`, `patch`, `delete` methods to `VisitService` (hand-rolled, with cascade to `RecordService.recompute_status` + `RecordService.recompute_seats` + capacity check on `create`). Update `VisitService.__init__` to accept `RecordService` (FastAPI `Depends` chain in T1.3).
-- T1.3. `backend/src/api/v1/visits.py` — add `GET /`, `POST /`, `PUT /{id}`, `PATCH /{id}`, `DELETE /{id}` handlers (return `_map_visit` for non-list responses, `list[_map_visit]` for list). Add `get_visit_service` factory with chained `Depends(get_record_service)`.
-- T1.4. `backend/tests/api/test_visits.py` — add tests for scenarios 5-15 (full CRUD + cascades)
-- T1.5. `backend/tests/api/test_visit_status.py` (regression) — confirm scenario 15 (existing `PUT /visits/{id}/status` still works)
-- T1.6. Run `pytest backend/tests/` — all green, including new tests
+- T1.1. `backend/src/domain/record_cascade.py` — **NEW file**: `recompute_record_seats`, `recompute_record_status`, `check_activity_capacity` free functions
+- T1.2. `backend/src/schemas/visit.py` — add `VisitBase`, `VisitCreate`, `VisitUpdate`, `VisitPatch` (see Schema design section)
+- T1.3. `backend/src/services/visit.py` — add `list`, `create`, `update`, `patch`, `delete` methods. **No constructor deps** — call domain functions directly. Refactor existing `update_status` and remove `_derive_record_status` (replaced by `recompute_record_status`).
+- T1.4. `backend/src/services/record.py` — refactor `create`/`update`/`patch` to use the new free functions. **Remove** `_check_capacity` (logic moved to free function).
+- T1.5. `backend/src/api/v1/visits.py` — add `GET /`, `POST /`, `PUT /{id}`, `PATCH /{id}`, `DELETE /{id}` handlers. Simplified `get_visit_service` (no chained `Depends`).
+- T1.6. `backend/tests/api/test_visits.py` — add tests for scenarios 5-15 (full CRUD + cascades)
+- T1.7. `backend/tests/api/test_record_cascade.py` (NEW) — unit tests for the three free functions
+- T1.8. Run `pytest backend/tests/` — all green, including new tests
 
 **Acceptance gate:** scenarios 5-15 pass. Manual sanity check (optional): use `curl` or `/docs` (Swagger UI) to create a visit, list visits, patch a tariff, delete — all work as expected.
 
@@ -670,7 +782,7 @@ When a visit is created, `record.seats` must increment by 1. When soft-deleted, 
 
 ### Capacity check on visit create is enforced
 
-`POST /api/v1/visits` must check that adding the visit doesn't exceed the activity's `capacity` field. This is covered by scenario 19 and reuses `RecordService._check_capacity` (existing static method at `services/record.py:294`). **Resolved.**
+`POST /api/v1/visits` must check that adding the visit doesn't exceed the activity's `capacity` field. This is covered by scenario 19 and uses `check_activity_capacity` (free function in `src/domain/record_cascade.py`, extracted from `RecordService._check_capacity:294`). **Resolved.**
 
 ### `RecordResponse` visits round-trip test depends on nested schema
 

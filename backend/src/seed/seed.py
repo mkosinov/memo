@@ -346,16 +346,16 @@ async def _seed_records(session) -> None:
 
 async def _seed_visits(session) -> None:
     visits = [
-        {"id": "v1", "record_id": "r1", "visitor_id": "vis1", "price": 3500, "status": "visited"},
-        {"id": "v2", "record_id": "r1", "visitor_id": "vis2", "price": 2500, "status": "visited"},
-        {"id": "v3", "record_id": "r2", "visitor_id": "vis3", "price": 2200, "status": "visited"},
-        {"id": "v4", "record_id": "r2", "visitor_id": "vis4", "price": 1800, "status": "visited"},
-        {"id": "v5", "record_id": "r3", "visitor_id": "vis5", "price": 2800, "status": "visited"},
-        {"id": "v6", "record_id": "r3", "visitor_id": "vis6", "price": 2000, "status": "visited"},
-        {"id": "v7", "record_id": "r4", "visitor_id": "vis1", "price": 2000, "status": "visited"},
-        {"id": "v8", "record_id": "r5", "visitor_id": "vis8", "price": 3800, "status": "waiting"},
-        {"id": "v9", "record_id": "r5", "visitor_id": "vis9", "price": 2800, "status": "waiting"},
-        {"id": "v10", "record_id": "r6", "visitor_id": "vis7", "price": 3800, "status": "waiting"},
+        {"id": "v1", "record_id": "r1", "visitor_id": "vis1", "tariff_id": "t7a", "price": 3500, "status": "visited"},
+        {"id": "v2", "record_id": "r1", "visitor_id": "vis2", "tariff_id": "t7c", "price": 2500, "status": "visited"},
+        {"id": "v3", "record_id": "r2", "visitor_id": "vis3", "tariff_id": "t5a", "price": 2200, "status": "visited"},
+        {"id": "v4", "record_id": "r2", "visitor_id": "vis4", "tariff_id": "t5c", "price": 1800, "status": "visited"},
+        {"id": "v5", "record_id": "r3", "visitor_id": "vis5", "tariff_id": "t2a", "price": 2800, "status": "visited"},
+        {"id": "v6", "record_id": "r3", "visitor_id": "vis6", "tariff_id": "t2c", "price": 2000, "status": "visited"},
+        {"id": "v7", "record_id": "r4", "visitor_id": "vis1", "tariff_id": "t3a", "price": 2000, "status": "visited"},
+        {"id": "v8", "record_id": "r5", "visitor_id": "vis8", "tariff_id": "t7a", "price": 3800, "status": "waiting"},
+        {"id": "v9", "record_id": "r5", "visitor_id": "vis9", "tariff_id": "t7c", "price": 2800, "status": "waiting"},
+        {"id": "v10", "record_id": "r6", "visitor_id": "vis7", "tariff_id": "t7a", "price": 3800, "status": "waiting"},
     ]
     for v in visits:
         if not await _exists(session, Visit, v["id"]):

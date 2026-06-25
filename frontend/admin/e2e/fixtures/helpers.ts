@@ -83,7 +83,7 @@ export async function getFirstActivity(page: Page) {
  *
  * Falls back to navigating up to 3 previous weeks.
  */
-export async function openModal(page: Page) {
+export async function openModal(page: Page): Promise<unknown | null> {
   const MAX_WEEKS_BACK = 3;
   const MAX_ACTIVITIES_PER_WEEK = 5;
 
@@ -119,7 +119,7 @@ export async function openModal(page: Page) {
 
       const hasClientTabs =
         (await page.locator('[data-testid^="tab-client-"]').count()) > 0;
-      if (hasClientTabs) return;
+      if (hasClientTabs) return activity;
 
       // No client tabs — close modal and try next activity on this page
       await page.evaluate(() => {
@@ -138,7 +138,8 @@ export async function openModal(page: Page) {
       await page.waitForTimeout(500);
     }
   }
-  // If we get here, no activity with records was found — proceed anyway
+  // If we get here, no activity with records was found — signal to callers
+  return null;
 }
 
 /**

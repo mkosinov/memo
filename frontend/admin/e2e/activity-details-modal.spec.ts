@@ -206,12 +206,15 @@ test.describe('ActivityDetailsModal — Real User Scenarios', () => {
 
   test('4. Settings update — service_id changes in DB', async ({ page, request }) => {
     // 1. ACTION — open modal on Settings tab
-    await openModal(page);
+    const activity = await openModal(page);
+    if (!activity) {
+      test.skip();
+      return;
+    }
 
-    // Read initial service from DB via the first activity
-    const activity = await getFirstActivity(page);
+    // Read initial service from DB via the activity that has the modal open
     const beforeRow = queryDBRow(
-      `SELECT service_id FROM activities WHERE id='${activity.id}'`,
+      `SELECT service_id FROM activities WHERE id='${(activity as any).id}'`,
     );
     expect(beforeRow).not.toBeNull();
     const originalServiceId = beforeRow!.service_id;
@@ -235,7 +238,7 @@ test.describe('ActivityDetailsModal — Real User Scenarios', () => {
 
       // 3. VERIFY DB — service_id was updated
       const afterRow = queryDBRow(
-        `SELECT service_id FROM activities WHERE id='${activity.id}'`,
+        `SELECT service_id FROM activities WHERE id='${(activity as any).id}'`,
       );
       expect(afterRow).not.toBeNull();
       expect(afterRow!.service_id).toBe(differentService.id);

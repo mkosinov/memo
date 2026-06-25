@@ -8,7 +8,7 @@ Provides:
   - Fixture factories: create_master, create_service, create_location,
     create_client, create_activity, create_record
   - query_db helper for direct SQL verification
-  - Test markers: unit, api, integration, misc
+  - Test markers: unit, api, integration, misc, pure_unit
 
 Key patterns:
   - Uses sync TestClient, NOT AsyncClient
@@ -16,6 +16,7 @@ Key patterns:
   - Uses fixture-based factories, NOT factory_boy
   - Uses tempfile for DB, NOT fixed path (parallel-safe)
   - Run specific groups: pytest -m unit / pytest -m api / pytest -m integration
+  - Run fast smoke: pytest -m pure_unit
 """
 
 import asyncio

@@ -56,7 +56,7 @@ The spec file references test paths under `backend/tests/api/` and `backend/test
 
 # Phase 0 — `tariff_id` round-trip (GH-104 minimum)
 
-**Scope:** `tariff_id` propagates from DB → Visit ORM → `VisitResponse` → nested `VisitResponse` → API response. 4 files changed, 4 user scenarios.
+**Scope:** `tariff_id` propagates from DB → Visit ORM → `VisitResponse` → nested `VisitResponse` → API response. Seed visits also get `tariff_id` (GH-104 acceptance #6). 5 files changed (4 source + 1 seed), 4 user scenarios.
 
 **Acceptance gate:** scenarios 1-4 pass. `pytest` all green. `mypy` clean.
 
@@ -224,11 +224,83 @@ Make the 4 RED tests pass by adding `tariff_id` to 4 layers. The spec provides e
 
 ---
 
-## Task 0.3: Verify Phase 0 acceptance and prepare PR #1
+## Task 0.3: Update seed data to include `tariff_id` (GH-104 acceptance #6)
 
 ### Classification: trivial
 ### Required Docs
-- This plan, Tasks 0.1 and 0.2
+- `backend/src/seed/seed.py` — current state (does NOT set `tariff_id` on visits)
+- `docs/specs/2026-06-25-backend-visit-payment-api-design.md` — Problem section A (triple-layer drift)
+- GH-104 acceptance criteria: "All seeded visits have a `tariff_id` set"
+
+### Task Description
+Add `tariff_id` to each visit in the seed script. Pick sensible defaults: adult visit → adult tariff, child visit → child tariff. **No new test** — this is data configuration, not code logic. GH-104 acceptance will be verified by user manually loading the seed.
+
+**Files to modify:**
+
+- [ ] **Read `backend/src/seed/seed.py`** and identify all visit-creation lines (look for `Visit(...)` or `visits.append(...)` patterns).
+
+- [ ] **Read the seed data for tariffs** in `backend/src/seed/seed.py` (or a related seed file like `seed_tariffs.py`). Identify which tariffs are for adults vs children.
+
+- [ ] **Update each visit in the seed** to include `tariff_id=<appropriate_tariff_id>`. Example pattern:
+
+  ```python
+  # OLD:
+  Visit(
+      id=vis1_id,
+      record_id=anna_record_id,
+      visitor_id=anna_id,
+      price=3500,
+      status="visited",
+      is_active=True,
+  )
+
+  # NEW:
+  Visit(
+      id=vis1_id,
+      record_id=anna_record_id,
+      visitor_id=anna_id,
+      tariff_id=adult_tariff_id,  # NEW
+      price=3500,
+      status="visited",
+      is_active=True,
+  )
+  ```
+
+  - For adult visitors → adult tariff
+  - For child visitors → child tariff
+  - For seed visits without a clear visitor (e.g., anonymous slots) → use the most common adult tariff, or `None` (acceptable for `anonym_visits`)
+
+- [ ] **Verify the seed still loads** (sanity check):
+  ```bash
+  cd backend && python -c "from src.seed.seed import seed_all; print('seed imports OK')"
+  ```
+  Expected: prints "seed imports OK" or similar (no import errors).
+
+- [ ] **If there's a test that loads the seed** (e.g., `tests/test_seed.py`), run it to verify it still passes:
+  ```bash
+  cd backend && pytest tests/test_seed.py -v
+  ```
+  Expected: all green (seed loads without error).
+
+- [ ] **Commit:**
+  ```bash
+  git add backend/src/seed/seed.py
+  git commit -m "feat(backend): add tariff_id to seeded visits (GH-104 acceptance #6)"
+  ```
+
+### Definition of Done
+- [ ] All visits in `seed.py` have `tariff_id` set (or explicitly `None` for anonym slots)
+- [ ] Seed loads without import errors
+- [ ] `test_seed.py` (if exists) still passes
+- [ ] Commit made
+
+---
+
+## Task 0.4: Verify Phase 0 acceptance and prepare PR #1
+
+### Classification: trivial
+### Required Docs
+- This plan, Tasks 0.1, 0.2, 0.3
 - `docs/specs/2026-06-25-backend-visit-payment-api-design.md` — "Acceptance gates" section
 
 ### Task Description
@@ -236,7 +308,7 @@ Verify Phase 0 is complete and ready for PR.
 
 **Steps:**
 
-- [ ] **Run all 23 user scenarios from the spec's `## User Scenarios` section via the test suite.** At this point only scenarios 1-4 are implemented (Phase 0 scope). Run them and confirm:
+- [ ] **Run all 4 user scenarios from Phase 0 (scenarios 1-4) via the test suite:**
   ```bash
   cd backend && pytest tests/test_api_visits.py tests/test_api_records.py -v -k "tariff_id or tariff"
   ```
@@ -263,7 +335,7 @@ Verify Phase 0 is complete and ready for PR.
 - [ ] **Update scratchpad** — append a note that Phase 0 is complete and ready for PR review.
 
 - [ ] **Report status** to architect with:
-  - Files changed: 4 source + 2 test + 1 conftest
+  - Files changed: 4 source + 2 test + 1 conftest + 1 seed
   - Test results: 4 new tests pass, 0 regressions
   - mypy: clean
   - alembic: no migration needed
@@ -1040,27 +1112,19 @@ After all 3 phases are done, the architect will:
 
 ---
 
-# Open Questions for User (resolve before starting Phase 0)
+# Open Questions for User
 
-### Q1: Seed update for GH-104 acceptance #6
-**Issue:** GH-104 acceptance criteria require "All seeded visits have a `tariff_id` set". The spec is silent on this.
+### ✅ Q1: Seed update for GH-104 acceptance #6 — RESOLVED (A)
+User chose **A**: include seed update in Phase 0 as Task 0.3. See Task 0.3 for details.
 
-**Options:**
-- **A. Add to Phase 0** (recommended) — small, 1 file change (`backend/src/seed/seed.py`). Add `tariff_id` to each visit in seed. Phase 0 will go from ~40 lines to ~50 lines.
-- **B. Defer to follow-up issue** — Phase 0 ships without seed update; user creates separate issue. Phase 0 stays small.
+### Q2: PR split — RESOLVED (3 PRs)
+Spec recommends 3 PRs; handoff confirms 3 PRs. No action needed.
 
-### Q2: PR split
-The spec recommends 3 PRs (one per phase). The handoff says "3 PRs". **Confirmed 3 PRs.** No action needed.
+### ✅ Q3: Worktree base branch — RESOLVED (A)
+User chose **A** (default): worktree from `local main` (9fa1a69), spec available. Spec push to origin deferred to finishing step.
 
-### Q3: Worktree base branch
-The 7 spec commits are in `local main` (9fa1a69) but not yet pushed to `origin/main` (cee8811).
-
-**Options:**
-- **A. Worktree from local main** (recommended) — spec is available in worktree. Push spec commits at finishing step. **Default for this plan.**
-- **B. Push spec first via `--no-verify`** — pre-push hook is broken (ELOOP on `packages/domain/node_modules`). User should approve bypassing the hook.
-
-### Q4: Plan granularity
-This plan breaks Phase 1 into 5 sub-tasks (1.1-1.5). Each is a coherent TDD cycle (test + implement + verify). Some may be further split if a single sub-agent dispatch is too large (>500 lines). **Architect will decide per dispatch.**
+### Q4: Plan granularity — architect decides per dispatch
+Phase 1 broken into 5 sub-tasks (1.1-1.5). Each is a coherent TDD cycle. Architect may split further if a single dispatch exceeds token budget.
 
 ---
 

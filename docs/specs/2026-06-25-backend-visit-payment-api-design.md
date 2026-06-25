@@ -277,7 +277,7 @@ All endpoints follow the project's standard error contract (see `docs/specs/2026
 
 - `404` with `code: VISIT_NOT_FOUND` / `PAYMENT_NOT_FOUND` for missing IDs
 - `422` for validation errors (Pydantic)
-- `400` for FK violations (e.g., `record_id` doesn't exist — though SQLAlchemy may emit `IntegrityError`; handler should catch and convert)
+- `400` for malformed requests (rare — most validation is 422)
 
 ---
 
@@ -288,7 +288,7 @@ All endpoints follow the project's standard error contract (see `docs/specs/2026
 `VisitService` is currently hand-rolled (only `get` + `update_status`). The new methods need:
 - `_derive_record_status` cascade after any mutation (status change affects parent record)
 - **`seats` recomputation** after any mutation that changes `len(active_visits)` (create adds, delete removes)
-- **Capacity check** on `create` (delegating to `RecordService._check_capacity` or inlining the logic)
+- **Capacity check** on `create` (reusing `RecordService._check_capacity`)
 - Custom create logic (after insert, derive parent record's `status` and `seats`)
 - Custom delete logic (soft-delete, then derive parent record's `status` and `seats`)
 
@@ -300,10 +300,80 @@ All endpoints follow the project's standard error contract (see `docs/specs/2026
 
 **Decision: Option A.** Hand-roll all methods. Total ~80 lines. Clearer separation between "pure CRUD" and "visit-specific cascade logic". **`GenericService` itself is NOT modified** — it stays as a generic, cascade-agnostic CRUD wrapper that other services (like `PaymentService`) can keep using without polluting it with visit-specific logic.
 
+### Cascade helpers: live in `RecordService`, called by `VisitService`
+
+Per user's preference: cascade logic is the parent record's concern, not the visit's. Add **two new public methods** to `RecordService`:
+
 ```python
-# backend/src/services/visit.py (skeleton)
+# backend/src/services/record.py — NEW public methods (refactor of inlined logic)
+
+class RecordService:
+    # ... existing methods ...
+
+    async def recompute_seats(self, db_session: AsyncSession, record_id: str) -> Record | None:
+        """Recompute record.seats from active visits.
+
+        Formula: seats = len(active visits) + anonym_visits.
+        Called by VisitService after create/delete (which change len(active_visits)),
+        and by RecordService.patch when visits are replaced.
+
+        Replaces the inlined logic at lines 127, 208, 268, 272.
+        """
+        record = await self.get(db_session, record_id)
+        if not record:
+            return None
+        result = await db_session.execute(
+            select(func.count()).select_from(Visit).where(
+                Visit.record_id == record_id,
+                Visit.is_active.is_(True),
+            )
+        )
+        active_count = result.scalar() or 0
+        record.seats = active_count + record.anonym_visits
+        record.updated_at = datetime.now(UTC)
+        await db_session.flush()
+        return record
+
+    async def recompute_status(self, db_session: AsyncSession, record_id: str) -> Record | None:
+        """Recompute record.status from active visits.
+
+        Uses the same compute_record_status domain function as the inlined code.
+        Called by VisitService after any mutation (status change affects parent record),
+        and by RecordService.patch when visits are replaced.
+
+        Replaces the inlined logic at lines 123, 225, 277, 283.
+        """
+        record = await self.get(db_session, record_id)
+        if not record:
+            return None
+        result = await db_session.execute(
+            select(Visit).where(
+                Visit.record_id == record_id,
+                Visit.is_active.is_(True),
+            )
+        )
+        active_visits = list(result.scalars().all())
+        record.status = compute_record_status([
+            VisitItem(id=v.id, status=v.status)
+            for v in active_visits
+        ]).value
+        record.updated_at = datetime.now(UTC)
+        await db_session.flush()
+        return record
+```
+
+**Bonus DRY:** refactor existing `RecordService.create`, `update`, `patch` to use these new helpers instead of inlining the logic. Removes ~30 lines of duplication. This is included in Phase 1 scope (not a separate cleanup).
+
+### `VisitService` uses `RecordService` for cascade
+
+```python
+# backend/src/services/visit.py — refactored methods
 
 class VisitService:
+    def __init__(self, record_service: RecordService | None = None) -> None:
+        """VisitService depends on RecordService for cascade recompute."""
+        self._record_service = record_service or RecordService()
+
     async def list(self, db_session, record_id=None) -> list[Visit]:
         """Return active visits, optionally filtered by record_id."""
         stmt = select(Visit).where(Visit.is_active.is_(True))
@@ -318,31 +388,23 @@ class VisitService:
     async def create(self, db_session, data: VisitCreate) -> Visit | None:
         """Create a new visit, then cascade: derive record.status + record.seats.
 
-        Returns None if the parent record doesn't exist or if capacity would
-        be exceeded.
+        Returns None if the parent record doesn't exist.
+        Raises HTTPException 409 + ErrorCode.ACTIVITY_AT_CAPACITY if activity is at capacity.
         """
-        # 1. Verify parent record exists and load it for capacity check
-        record = await self._get_active_record(db_session, data.record_id)
+        # 1. Verify parent record exists (404 if not)
+        record = await self._record_service.get(db_session, data.record_id)
         if not record:
             return None
-        # 2. Capacity check (similar to RecordService._check_capacity)
-        if record.activity.max_seats is not None:
-            new_seats = record.seats + 1
-            if new_seats > record.activity.max_seats:
-                raise HTTPException(
-                    status_code=400,
-                    detail=ErrorDetail(
-                        code=ErrorCode.CAPACITY_EXCEEDED,
-                        message=f"Activity capacity exceeded ({record.activity.max_seats} seats)",
-                    ).model_dump(),
-                )
+        # 2. Capacity check (409 + ACTIVITY_AT_CAPACITY if exceeded)
+        #    Uses RecordService._check_capacity (existing static method, line 294)
+        await RecordService._check_capacity(db_session, record.activity_id, seats=1)
         # 3. Insert visit
         visit = Visit(**data.model_dump())
         db_session.add(visit)
         await db_session.flush()
         # 4. Cascade: derive status + seats on parent record
-        await self._derive_record_status(db_session, visit.record_id)
-        await self._derive_record_seats(db_session, visit.record_id)
+        await self._record_service.recompute_status(db_session, visit.record_id)
+        await self._record_service.recompute_seats(db_session, visit.record_id)
         await db_session.flush()
         await db_session.refresh(visit)
         return visit
@@ -356,8 +418,8 @@ class VisitService:
             setattr(visit, field, value)
         visit.updated_at = datetime.now(UTC)
         await db_session.flush()
-        await self._derive_record_status(db_session, visit.record_id)
-        # seats: no change (is_active not exposed in VisitUpdate)
+        # Cascade: status only (seats: no change — is_active not exposed in VisitUpdate)
+        await self._record_service.recompute_status(db_session, visit.record_id)
         await db_session.flush()
         await db_session.refresh(visit)
         return visit
@@ -375,8 +437,8 @@ class VisitService:
             setattr(visit, field, value)
         visit.updated_at = datetime.now(UTC)
         await db_session.flush()
-        await self._derive_record_status(db_session, visit.record_id)
-        # seats: no change (is_active not exposed in VisitPatch)
+        # Cascade: status only
+        await self._record_service.recompute_status(db_session, visit.record_id)
         await db_session.flush()
         await db_session.refresh(visit)
         return visit
@@ -392,33 +454,16 @@ class VisitService:
         visit.is_active = False
         visit.updated_at = datetime.now(UTC)
         await db_session.flush()
-        await self._derive_record_status(db_session, visit.record_id)
-        await self._derive_record_seats(db_session, visit.record_id)
+        # Cascade: status + seats
+        await self._record_service.recompute_status(db_session, visit.record_id)
+        await self._record_service.recompute_seats(db_session, visit.record_id)
         await db_session.flush()
         return True
 
-    # ... existing get, update_status, _derive_record_status ...
-    
-    @staticmethod
-    async def _derive_record_seats(db_session: AsyncSession, record_id: str) -> Record | None:
-        """Recompute record.seats = len(active visits) + anonym_visits."""
-        result = await db_session.execute(
-            select(Record).where(Record.id == record_id)
-        )
-        record = result.scalar_one_or_none()
-        if not record:
-            return None
-        active_visits_result = await db_session.execute(
-            select(func.count()).select_from(Visit).where(
-                Visit.record_id == record_id,
-                Visit.is_active.is_(True),
-            )
-        )
-        active_count = active_visits_result.scalar() or 0
-        record.seats = active_count + record.anonym_visits
-        record.updated_at = datetime.now(UTC)
-        return record
+    # ... existing get, update_status (now also uses recompute_status) ...
 ```
+
+**The existing `VisitService.update_status` (line 24-37) and `_derive_record_status` (line 39-62) are REFACTORED** to use `RecordService.recompute_status` instead of their own implementation. Removes the duplicated logic.
 
 ### Phase 2 — Payment PATCH
 
@@ -476,7 +521,7 @@ async def patch_payment(
 
 6. **`POST /api/v1/visits` with missing `record_id` returns 422.** Send `{"price": 3500}` (no `record_id`). 422 with Pydantic validation error. (Test: `test_visits.py::test_create_visit_missing_record_id_422`.)
 
-7. **`POST /api/v1/visits` with invalid `record_id` (FK violation) returns 400.** Send `{"record_id": "nonexistent", ...}`. 400 with `code: FK_VIOLATION` or similar. (Test: `test_visits.py::test_create_visit_invalid_record_id_400`.)
+7. **`POST /api/v1/visits` with invalid `record_id` (FK violation) returns 422.** Send `{"record_id": "nonexistent", ...}`. 422 with `code: INTEGRITY_VIOLATION` (project's standard error contract for FK violations). (Test: `test_visits.py::test_create_visit_invalid_record_id_422`.)
 
 8. **`GET /api/v1/visits` lists all active visits.** Seed 3 visits. Call `GET /api/v1/visits`. Response is a list of 3 visits. (Test: `test_visits.py::test_list_visits`.)
 
@@ -500,7 +545,7 @@ async def patch_payment(
 
 18. **`PATCH /api/v1/visits/{id}` does NOT change `record.seats`.** Since `is_active` is not exposed in `VisitPatch`, patching other fields (e.g., `tariff_id`, `status`, `price`) doesn't change `seats`. Confirmed by re-fetching the record. (Test: `test_visits.py::test_patch_visit_does_not_change_seats`.)
 
-19. **`POST /api/v1/visits` rejects when capacity exceeded.** Setup: an activity with `max_seats=3` and a record with 3 active visits. Try to POST a 4th visit. Response 400 with `code: CAPACITY_EXCEEDED`. (Test: `test_visits.py::test_create_visit_rejects_when_capacity_exceeded`.)
+19. **`POST /api/v1/visits` rejects when capacity exceeded.** Setup: an activity with `capacity=3` and a record with 3 active visits. Try to POST a 4th visit. Response 409 with `code: ACTIVITY_AT_CAPACITY` (project's standard error code for capacity violations, per `docs/specs/2026-06-20-error-flow-design.md`). (Test: `test_visits.py::test_create_visit_rejects_when_capacity_exceeded`.)
 
 20. **`POST /api/v1/visits` rejects when `record_id` doesn't exist.** Send `{"record_id": "nonexistent", ...}`. Response 404 with `code: RECORD_NOT_FOUND`. (Test: `test_visits.py::test_create_visit_invalid_record_id_404` — supersedes the 400 test in scenario 7, which was speculative.)
 
@@ -600,7 +645,7 @@ When a visit is created, `record.seats` must increment by 1. When soft-deleted, 
 
 ### Capacity check on visit create is enforced
 
-`POST /api/v1/visits` must check that adding the visit doesn't exceed the activity's `max_seats`. This is covered by scenario 22 and the capacity check in the new `create` method. **Resolved.**
+`POST /api/v1/visits` must check that adding the visit doesn't exceed the activity's `capacity` field. This is covered by scenario 19 and reuses `RecordService._check_capacity` (existing static method at `services/record.py:294`). **Resolved.**
 
 ### `RecordResponse` visits round-trip test depends on nested schema
 

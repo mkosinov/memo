@@ -28,7 +28,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Admin:** `QueryCache.onError` uses `parseApiError` for specific messages instead of generic "Не удалось загрузить данные"
   - **Tests:** 6 E2E tests cover all 6 user scenarios (activity capacity, not-found, validation, 500, network, duplicate phone)
   - **Docs:** ADR-005 added for the error contract decision
-  - **Backwards compatible:** Legacy `{"detail": "string"}` responses still work (code=undefined, uses err.message)
+-   **Backwards compatible:** Legacy `{"detail": "string"}` responses still work (code=undefined, uses err.message)
+
+### Fixed
+- **#112 — E2E test ordering bug in activity-details-modal scenario 4** (branch `fix/issue-112-service-persist`):
+  - Root cause: `openModal()` and `getFirstActivity()` returned different activities — `openModal` navigates up to 3 weeks back to find an activity with records, while `getFirstActivity` always reads the first card on the current week. Test 4 changed the service for activity X (earlier week) but queried the DB for activity Y (current week).
+  - Fix: `openModal` now returns the activity it opened; test 4 uses the returned activity for the DB query.
+  - Production code was already correct; the fix was in the test helper only.
 
 ---
 

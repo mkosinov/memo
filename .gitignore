@@ -76,3 +76,4 @@ token-usage-output.txt
 *.sqlite3
 backend/.coverage
 *.snapshots/
+node_modules

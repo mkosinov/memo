@@ -1,7 +1,17 @@
 #!/usr/bin/env bash
-# Pre-push hook: runs local test suite, blocks push on failure
+# Pre-push hook: runs the full local test suite, blocks push on failure.
 # Source: scripts/git-hooks/pre-push
 # Installed by: scripts/install-hooks.sh (via postinstall)
+#
+# Runs scripts/test-all.sh which executes all checks in parallel:
+#   - backend pytest
+#   - lint (turbo)
+#   - type-check (admin)
+#   - vitest (admin unit tests)
+#   - playwright E2E (5 shards in parallel)
+#   - visual compliance
+#
+# Typical runtime: ~6-8 min (down from 15+ min sequential).
 
 set -euo pipefail
 

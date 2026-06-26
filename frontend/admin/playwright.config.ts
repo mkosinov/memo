@@ -10,9 +10,16 @@ try {
   // .env.test not found — rely on environment variables (CI)
 }
 
+// SHARD_PORT: dev server port. Default 3002 — NOT 3001, so the user's
+// dev server (started by dev.sh on :3001) stays free for development
+// while tests run. Override via env var for multi-shard setups.
+const SHARD_PORT = process.env.SHARD_PORT || '3002';
+
 /**
  * Playwright E2E configuration for Memo admin.
- * - Frontend: Next.js admin on port 3001
+ * - Frontend: Next.js admin on port 3002 (or SHARD_PORT). NOT :3001,
+ *   so the user's dev server (started by dev.sh on :3001) stays free
+ *   for development while tests run.
  * - Backend:  FastAPI on port 8000
  * Browsers are pre-installed in the Docker image.
  * Do NOT run `npx playwright install` in worktrees.
@@ -30,15 +37,18 @@ export default defineConfig({
   // Baseline screenshots committed in *-snapshots/ directories.
 
   use: {
-    baseURL: 'http://localhost:3001',
+    baseURL: `http://localhost:${SHARD_PORT}`,
     trace: 'on-first-retry',
     viewport: { width: 1280, height: 720 },
   },
 
-  // Auto-start admin Next.js dev server for E2E tests
+  // Auto-start admin Next.js dev server for E2E tests.
+  // When SHARD_PORT is set, starts a dev server on that port (per-shard).
+  // reuseExistingServer: true so subsequent runs reuse the running server
+  // (important for parallel shard runs where each shard has its own server).
   webServer: {
-    command: 'pnpm exec next dev -p 3001',
-    url: 'http://localhost:3001',
+    command: `pnpm exec next dev -p ${SHARD_PORT}`,
+    url: `http://localhost:${SHARD_PORT}`,
     reuseExistingServer: true,
     cwd: '.',
   },

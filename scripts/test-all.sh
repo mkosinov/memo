@@ -4,9 +4,11 @@
 #
 # Parallelization strategy:
 # - Backend pytest runs in parallel with frontend stages.
-# - Lint, type-check, vitest, and 5 playwright shards all run in parallel.
+# - Lint, type-check, vitest all run in parallel.
+# - 5 playwright shards run in parallel against a single dev server
+#   on :3002 (so :3001 stays free for any user dev server).
 # - Visual compliance runs last (needs dev server on :3001).
-# - Total runtime ≈ max(stages) instead of sum, typically 6-8 min.
+# - Total runtime ≈ slowest shard (typically 6-8 min).
 #
 # Env vars:
 #   VISUAL_COMPLIANCE=0   Skip visual compliance check (default: 1, run it)
@@ -79,15 +81,40 @@ echo "  → vitest..."
 ) &
 ALL_PIDS+=($!)
 
-# ── Playwright shards in parallel (5 shards, each --workers=1) ─────────────
-# Each shard runs as a separate process, all hitting the shared :3001 dev server.
-# Total time = slowest shard (instead of sum of all shards).
-echo "  → playwright (5 shards in parallel)..."
+# ── Playwright shards: 1 dev server on :3002, 5 parallel shards ─────────
+# Start ONE dev server manually on :3002 and wait for it to be fully ready
+# (15s buffer to ensure compilation is done). Then run 5 parallel
+# playwright invocations, each with --project=<shard>. All shards reuse
+# the running server (reuseExistingServer: true).
+# This avoids the race where 5 simultaneous webServer starts all try
+# to bind :3002 simultaneously.
+# Total time = slowest shard (typically ~11 min).
+# Uses :3002 (NOT :3001) so any user dev server stays free.
+
+TEST_PORT=3002
+
+# Start dev server manually if not running
+if ! lsof -i ":$TEST_PORT" > /dev/null 2>&1; then
+  echo "  → starting dev server on :$TEST_PORT..."
+  (cd frontend/admin && pnpm exec next dev -p $TEST_PORT) > /dev/null 2>&1 &
+  # Wait for it to respond AND be fully ready (15s buffer for compilation)
+  for _ in $(seq 1 30); do
+    if curl -s -o /dev/null -w "%{http_code}" "http://localhost:$TEST_PORT/" --max-time 1 2>/dev/null | grep -qE "^(2|3)"; then
+      break
+    fi
+    sleep 1
+  done
+  sleep 15  # Extra buffer for Next.js compilation
+  echo "    :$TEST_PORT ready"
+fi
+
+echo "  → playwright (5 shards in parallel on :$TEST_PORT)..."
 SHARDS=("shard-services" "shard-schedule" "shard-records" "shard-clients" "shard-rest")
 for shard in "${SHARDS[@]}"; do
   (
     cd frontend/admin
-    CI= pnpm exec playwright test --project="$shard" --workers=1 > "$LOG_DIR/pw-$shard.log" 2>&1
+    CI= pnpm exec playwright test --project="$shard" --workers=1 \
+      > "$LOG_DIR/pw-$shard.log" 2>&1
   ) &
   ALL_PIDS+=($!)
 done

@@ -113,13 +113,14 @@ _orig_cleanup() {
 }
 trap _orig_cleanup EXIT INT TERM
 
-# Wait for frontend to be ready (max 30s)
-for i in $(seq 1 30); do
+# Wait for frontend to be ready (max 120s — 5 parallel Next.js dev servers
+# can take 30-60s each under load, allow plenty of headroom)
+for i in $(seq 1 120); do
   if curl -s -o /dev/null -w "%{http_code}" "http://localhost:$SHARD_PORT/" --max-time 1 2>/dev/null | grep -qE "^(2|3)"; then
     echo "[shard-$SHARD_ID] Frontend ready on :$SHARD_PORT"
     break
   fi
-  if [ "$i" -eq 30 ]; then
+  if [ "$i" -eq 120 ]; then
     echo "[shard-$SHARD_ID] ERROR: Frontend failed to start on :$SHARD_PORT" >&2
     exit 1
   fi

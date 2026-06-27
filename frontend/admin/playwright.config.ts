@@ -3,9 +3,9 @@ import path from 'path';
 
 // ── Per-shard environment variables ────────────────────────────────────────
 // When run via test-all.sh, each shard sets:
-//   SHARD_ID        — 1-5 (used by globalSetup/cleanTestData for DB path)
-//   SHARD_PORT      — frontend port (3002-3006)
-//   BACKEND_PORT    — backend port (8001-8005)
+//   SHARD_ID        — 1-2 (used by globalSetup/cleanTestData for DB path)
+//   SHARD_PORT      — frontend port (3002-3003)
+//   BACKEND_PORT    — backend port (8001-8002)
 //   BACKEND_URL     — backend API URL for E2E factories
 //   TEST_DB_PATH    — shard's SQLite DB path
 //   NEXT_PUBLIC_API_URL — backend URL for browser (baked into Next.js bundle)
@@ -25,10 +25,12 @@ const SHARD_PORT = process.env.SHARD_PORT || '3002';
  * Playwright E2E configuration for Memo admin.
  *
  * Per-shard architecture (when run via test-all.sh):
- *   - Each shard gets its own Next.js (SHARD_PORT 3002-3006),
- *     FastAPI (BACKEND_PORT 8001-8005), and SQLite DB.
+ *   - 2 shards, each with its own Next.js (SHARD_PORT 3002-3003),
+ *     FastAPI (BACKEND_PORT 8001-8002), and SQLite DB.
  *   - No cross-shard interference.
  *   - webServer finds the pre-started server via reuseExistingServer.
+ *   - 2 shards instead of 5 to avoid CPU contention on 4-core machines
+ *     (5 parallel Next.js dev servers caused 30s+ page loads).
  *
  * Standalone mode (manual `playwright test`):
  *   - Single Next.js on :3002, single FastAPI on :8000.
@@ -45,49 +47,52 @@ export default defineConfig({
   retries: process.env.CI ? 1 : 0,
   workers: process.env.CI ? 1 : undefined,
   reporter: 'list',
-  timeout: 30_000,
+  // Generous timeouts — 2 Next.js dev servers on 4 cores may still be slow
+  // on first compilation. 60s test timeout + 60s navigation gives headroom.
+  timeout: 60_000,
 
   use: {
     baseURL: `http://localhost:${SHARD_PORT}`,
     trace: 'on-first-retry',
     viewport: { width: 1280, height: 720 },
+    navigationTimeout: 60_000,
+    expect: { timeout: 10_000 },
+    actionTimeout: 15_000,
   },
 
   // Playwright validates webServer URL before running tests.
   // In per-shard mode: test-all.sh pre-starts the server, so
   // reuseExistingServer finds it. In standalone mode: Playwright
   // starts the server itself.
-  webServer: {
-    command: `pnpm exec next dev -p ${SHARD_PORT}`,
-    url: `http://localhost:${SHARD_PORT}`,
-    reuseExistingServer: true,
-    cwd: '.',
-  },
+  //
+  // IMPORTANT: In shard mode (SHARD_ID set), we skip the webServer config
+  // entirely. The shard stack already has a server running on SHARD_PORT,
+  // and Playwright's reuseExistingServer health check is unreliable under
+  // load — it sometimes fails, causing EADDRINUSE when Playwright tries
+  // to start a second Next.js on the same port.
+  ...(process.env.SHARD_ID ? {} : {
+    webServer: {
+      command: `pnpm exec next dev -p ${SHARD_PORT}`,
+      url: `http://localhost:${SHARD_PORT}`,
+      reuseExistingServer: true,
+      cwd: '.',
+    },
+  }),
 
+  // 2 shards instead of 5 to avoid CPU contention on 4-core machines.
+  // Shard 1: schedule-heavy tests (services, schedule, records, activity-details)
+  //   — all share schedule page data, heavy per-test.
+  // Shard 2: everything else (clients, masters, locations, tags, photos, etc.)
+  //   — lighter per-test, more files.
   projects: [
     {
-      name: 'shard-services',
-      testMatch: /services-crud\.spec\.ts/,
-      use: { ...devices['Desktop Chrome'] },
-    },
-    {
       name: 'shard-schedule',
-      testMatch: /schedule.*\.spec\.ts/,
-      use: { ...devices['Desktop Chrome'] },
-    },
-    {
-      name: 'shard-records',
-      testMatch: /(records|activity-details-modal)\.spec\.ts/,
-      use: { ...devices['Desktop Chrome'] },
-    },
-    {
-      name: 'shard-clients',
-      testMatch: /clients\.spec\.ts/,
+      testMatch: /(services-crud|schedule.*|records|activity-details-modal)\.spec\.ts/,
       use: { ...devices['Desktop Chrome'] },
     },
     {
       name: 'shard-rest',
-      testMatch: /^((?!services|schedule|records|activity-details-modal|clients).)*\.spec\.ts$/,
+      testMatch: /^((?!services-crud|schedule|records|activity-details-modal).)*\.spec\.ts$/,
       use: { ...devices['Desktop Chrome'] },
     },
   ],

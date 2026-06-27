@@ -21,9 +21,9 @@ export default function globalSetup() {
   // Falls back to TEST_DB_PATH or default test_memo.db for backwards compat.
   const shardId = process.env.SHARD_ID;
   const dbPath = shardId
-    ? path.resolve(__dirname, `../../backend/test_memo_shard${shardId}.db`)
+    ? path.resolve(__dirname, `../../../backend/test_memo_shard${shardId}.db`)
     : process.env.TEST_DB_PATH
-      || path.resolve(__dirname, '../../backend/test_memo.db');
+      || path.resolve(__dirname, '../../../backend/test_memo.db');
 
   console.log(`[globalSetup] Cleaning DB: ${dbPath}${shardId ? ` (shard ${shardId})` : ''}`);
 

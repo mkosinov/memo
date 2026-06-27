@@ -19,7 +19,7 @@ function resolveDBPath(): string {
     return path.resolve(__dirname, `../../../../backend/test_memo_shard${shardId}.db`);
   }
   return process.env.TEST_DB_PATH
-    || path.resolve(__dirname, '../../backend/test_memo.db');
+    || path.resolve(__dirname, '../../../../backend/test_memo.db');
 }
 
 const DB_PATH = resolveDBPath();

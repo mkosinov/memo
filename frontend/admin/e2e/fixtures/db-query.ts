@@ -28,7 +28,8 @@ function resolveDBPath(): string {
     // Resolve relative to this file's location (frontend/admin/e2e/fixtures/)
     return path.resolve(__dirname, `../../../../backend/test_memo_shard${shardId}.db`);
   }
-  return process.env.TEST_DB_PATH || '../../backend/test_memo.db';
+  return process.env.TEST_DB_PATH
+    || path.resolve(__dirname, '../../../../backend/test_memo.db');
 }
 
 const DB_PATH = resolveDBPath();

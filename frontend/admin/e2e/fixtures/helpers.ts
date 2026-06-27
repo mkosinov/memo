@@ -9,8 +9,20 @@ import { type Page, expect } from '@playwright/test';
 import { execSync } from 'child_process';
 import path from 'path';
 
-const DB_PATH = process.env.TEST_DB_PATH
-  || path.resolve(__dirname, '../../backend/test_memo.db');
+/**
+ * Resolve the DB path: per-shard (test_memo_shard{id}.db) or fallback.
+ * SHARD_ID is set by test-all.sh; falls back to TEST_DB_PATH or default.
+ */
+function resolveDBPath(): string {
+  const shardId = process.env.SHARD_ID;
+  if (shardId) {
+    return path.resolve(__dirname, `../../../../backend/test_memo_shard${shardId}.db`);
+  }
+  return process.env.TEST_DB_PATH
+    || path.resolve(__dirname, '../../backend/test_memo.db');
+}
+
+const DB_PATH = resolveDBPath();
 
 /**
  * Clean non-seed test data from the test DB so visual regression snapshots
@@ -28,8 +40,13 @@ export function cleanTestData() {
       DELETE FROM activities WHERE length(id) > 5;
       DELETE FROM clients WHERE length(id) > 3;
     "`, { encoding: 'utf-8', stdio: 'pipe' });
-  } catch {
-    // If sqlite3 is not available or DB doesn't exist, skip silently
+  } catch (err: any) {
+    const msg = String(err?.stderr || err?.message || '');
+    if (msg.includes('no such table') || msg.includes('no such file') || msg.includes('unable to open database')) {
+      return; // DB not ready yet — ok
+    }
+    // Log but don't throw — test cleanup should not fail tests
+    console.warn(`[cleanTestData] Warning: ${msg.trim()}`);
   }
 }
 

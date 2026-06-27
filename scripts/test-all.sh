@@ -5,10 +5,13 @@
 # Parallelization strategy:
 # - Backend pytest runs in parallel with frontend stages.
 # - Lint, type-check, vitest all run in parallel.
-# - 5 playwright shards run in parallel against a single dev server
-#   on :3002 (so :3001 stays free for any user dev server).
+# - 5 Playwright shards run in PARALLEL, each with its own isolated stack:
+#   * Its own SQLite DB (test_memo_shard{1-5}.db)
+#   * Its own FastAPI backend (port 8001-8005)
+#   * Its own Next.js frontend (port 3002-3006)
+#   No cross-shard interference.
 # - Visual compliance runs last (needs dev server on :3001).
-# - Total runtime ≈ slowest shard (typically 6-8 min).
+# - Total runtime ≈ slowest shard setup + slowest shard tests.
 #
 # Env vars:
 #   VISUAL_COMPLIANCE=0   Skip visual compliance check (default: 1, run it)
@@ -81,40 +84,144 @@ echo "  → vitest..."
 ) &
 ALL_PIDS+=($!)
 
-# ── Playwright shards: 1 dev server on :3002, 5 parallel shards ─────────
-# Start ONE dev server manually on :3002 and wait for it to be fully ready
-# (15s buffer to ensure compilation is done). Then run 5 parallel
-# playwright invocations, each with --project=<shard>. All shards reuse
-# the running server (reuseExistingServer: true).
-# This avoids the race where 5 simultaneous webServer starts all try
-# to bind :3002 simultaneously.
-# Total time = slowest shard (typically ~11 min).
-# Uses :3002 (NOT :3001) so any user dev server stays free.
+# ── Playwright shards: per-shard DB + backend + frontend ───────────────────
+# Each shard gets an isolated stack:
+#   SHARD_ID=1 → DB: test_memo_shard1.db, backend: :8001, frontend: :3002
+#   SHARD_ID=2 → DB: test_memo_shard2.db, backend: :8002, frontend: :3003
+#   ...
+#   SHARD_ID=5 → DB: test_memo_shard5.db, backend: :8005, frontend: :3006
+#
+# This eliminates cross-shard DB interference entirely.
+# Each stack runs via scripts/e2e-shard-start.sh which:
+#   1. Seeds the DB (if empty)
+#   2. Starts FastAPI on BACKEND_PORT
+#   3. Starts Next.js on SHARD_PORT (foreground)
+#
+# Playwright connects via reuseExistingServer: true.
 
-TEST_PORT=3002
+SHARD_PROJECTS=("shard-services" "shard-schedule" "shard-records" "shard-clients" "shard-rest")
+SHARD_BACKEND_PORTS=(8001 8002 8003 8004 8005)
+SHARD_FRONTEND_PORTS=(3002 3003 3004 3005 3006)
 
-# Start dev server manually if not running
-if ! lsof -i ":$TEST_PORT" > /dev/null 2>&1; then
-  echo "  → starting dev server on :$TEST_PORT..."
-  (cd frontend/admin && pnpm exec next dev -p $TEST_PORT) > /dev/null 2>&1 &
-  # Wait for it to respond AND be fully ready (15s buffer for compilation)
-  for _ in $(seq 1 30); do
-    if curl -s -o /dev/null -w "%{http_code}" "http://localhost:$TEST_PORT/" --max-time 1 2>/dev/null | grep -qE "^(2|3)"; then
-      break
-    fi
-    sleep 1
-  done
-  sleep 15  # Extra buffer for Next.js compilation
-  echo "    :$TEST_PORT ready"
+echo "  → preparing per-shard databases..."
+# Ensure sqlite3 is available
+if ! command -v sqlite3 &>/dev/null; then
+  echo "❌ sqlite3 not found — required for per-shard DB setup" >&2
+  exit 1
 fi
 
-echo "  → playwright (5 shards in parallel on :$TEST_PORT)..."
-SHARDS=("shard-services" "shard-schedule" "shard-records" "shard-clients" "shard-rest")
-for shard in "${SHARDS[@]}"; do
+# Create master DB with seed data (idempotent — only if missing or empty)
+MASTER_DB="backend/test_memo.db"
+if [ ! -f "$MASTER_DB" ] || [ "$(sqlite3 "$MASTER_DB" "SELECT COUNT(*) FROM sqlite_master WHERE type='table';" 2>/dev/null || echo 0)" -lt 5 ]; then
+  echo "  → seeding master test DB..."
+  (
+    cd backend
+    DATABASE_URL="sqlite+aiosqlite:///$(pwd)/test_memo.db" \
+      PYTHONPATH=src uv run python -m seed.seed
+  )
+fi
+
+# Create per-shard DB copies from master
+for i in $(seq 1 5); do
+  SHARD_DB="backend/test_memo_shard${i}.db"
+  cp "$MASTER_DB" "$SHARD_DB"
+done
+echo "  → per-shard DBs ready (5 copies of $MASTER_DB)"
+
+# Cleanup function for shard stacks
+SHARD_BACKEND_PIDS=()
+cleanup_shards() {
+  echo ""
+  echo "Cleaning up shard stacks..."
+  for pid in "${SHARD_BACKEND_PIDS[@]}"; do
+    kill "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
+  done
+  # Remove per-shard DB copies (master DB is kept)
+  rm -f backend/test_memo_shard*.db
+}
+trap cleanup_shards EXIT
+
+# Start 5 shard stacks in parallel
+echo "  → starting 5 shard stacks..."
+for i in $(seq 0 4); do
+  SHARD_NUM=$((i + 1))
+  PROJECT="${SHARD_PROJECTS[$i]}"
+  BACKEND_PORT="${SHARD_BACKEND_PORTS[$i]}"
+  FRONTEND_PORT="${SHARD_FRONTEND_PORTS[$i]}"
+  SHARD_DB="backend/test_memo_shard${SHARD_NUM}.db"
+  BACKEND_URL="http://127.0.0.1:${BACKEND_PORT}"
+
+  (
+    cd "$ROOT"
+    SHARD_ID="$SHARD_NUM" \
+    SHARD_PORT="$FRONTEND_PORT" \
+    BACKEND_PORT="$BACKEND_PORT" \
+    TEST_DB_PATH="$SHARD_DB" \
+    BACKEND_URL="$BACKEND_URL" \
+    NEXT_PUBLIC_API_URL="$BACKEND_URL" \
+      bash scripts/e2e-shard-start.sh
+  ) > "$LOG_DIR/shard-stack-${SHARD_NUM}.log" 2>&1 &
+
+  # Track the backend PID (parent of the startup script's children)
+  # The startup script runs backend in background, frontend in foreground.
+  # We need the backend PID for cleanup. Since the startup script backgrounds
+  # the backend, we capture it from the log after a short delay.
+  # For now, we kill the entire process group on cleanup.
+  SHARD_BACKEND_PIDS+=($!)
+done
+
+# Wait for all shard stacks to be ready (check frontend ports)
+echo "  → waiting for shard frontends to be ready..."
+SHARD_READY=("" "" "" "" "")
+for _ in $(seq 1 40); do
+  ALL_READY=true
+  for i in $(seq 0 4); do
+    if [ "${SHARD_READY[$i]}" = "ready" ]; then continue; fi
+    FRONTEND_PORT="${SHARD_FRONTEND_PORTS[$i]}"
+    if curl -s -o /dev/null -w "%{http_code}" "http://localhost:${FRONTEND_PORT}/" --max-time 1 2>/dev/null | grep -qE "^(2|3)"; then
+      SHARD_READY[$i]="ready"
+      echo "    shard $((i + 1)) ready (frontend :${FRONTEND_PORT})"
+    else
+      ALL_READY=false
+    fi
+  done
+  if [ "$ALL_READY" = true ]; then break; fi
+  sleep 1
+done
+# Check for any shards that failed to start
+for i in $(seq 0 4); do
+  if [ "${SHARD_READY[$i]}" != "ready" ]; then
+    echo "❌ Shard $((i + 1)) frontend failed to start on :${SHARD_FRONTEND_PORTS[$i]}"
+    echo "   Check: $LOG_DIR/shard-stack-$((i + 1)).log"
+    exit 1
+  fi
+done
+
+# Extra buffer for Next.js compilation across all shards
+echo "  → waiting 15s for Next.js compilation to stabilize..."
+sleep 15
+
+# Run 5 Playwright shards in parallel, each against its own frontend
+echo "  → running 5 Playwright shards in parallel..."
+for i in $(seq 0 4); do
+  SHARD_NUM=$((i + 1))
+  PROJECT="${SHARD_PROJECTS[$i]}"
+  FRONTEND_PORT="${SHARD_FRONTEND_PORTS[$i]}"
+  BACKEND_PORT="${SHARD_BACKEND_PORTS[$i]}"
+  BACKEND_URL="http://127.0.0.1:${BACKEND_PORT}"
+  SHARD_DB="backend/test_memo_shard${SHARD_NUM}.db"
+
   (
     cd frontend/admin
-    CI= pnpm exec playwright test --project="$shard" --workers=1 \
-      > "$LOG_DIR/pw-$shard.log" 2>&1
+    SHARD_ID="$SHARD_NUM" \
+    SHARD_PORT="$FRONTEND_PORT" \
+    BACKEND_PORT="$BACKEND_PORT" \
+    TEST_DB_PATH="$ROOT/$SHARD_DB" \
+    BACKEND_URL="$BACKEND_URL" \
+    NEXT_PUBLIC_API_URL="$BACKEND_URL" \
+    CI= pnpm exec playwright test --project="$PROJECT" --workers=1 \
+      > "$LOG_DIR/pw-$PROJECT.log" 2>&1
   ) &
   ALL_PIDS+=($!)
 done

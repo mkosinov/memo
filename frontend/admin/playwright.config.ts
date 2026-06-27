@@ -1,26 +1,39 @@
 import { defineConfig, devices } from '@playwright/test';
 import path from 'path';
 
-// Load .env.test so E2E tests use the test database (TEST_DB_PATH).
-// The backend must also be started with ENV_FILE=.env.test.
-// In CI, TEST_DB_PATH is set directly — file may not exist.
+// ── Per-shard environment variables ────────────────────────────────────────
+// When run via test-all.sh, each shard sets:
+//   SHARD_ID        — 1-5 (used by globalSetup/cleanTestData for DB path)
+//   SHARD_PORT      — frontend port (3002-3006)
+//   BACKEND_PORT    — backend port (8001-8005)
+//   BACKEND_URL     — backend API URL for E2E factories
+//   TEST_DB_PATH    — shard's SQLite DB path
+//   NEXT_PUBLIC_API_URL — backend URL for browser (baked into Next.js bundle)
+//
+// When run standalone (not via test-all.sh), falls back to .env.test defaults.
+// process.loadEnvFile does NOT override existing env vars, so shard vars win.
+
 try {
   process.loadEnvFile(path.resolve(__dirname, '.env.test'));
 } catch {
   // .env.test not found — rely on environment variables (CI)
 }
 
-// SHARD_PORT: dev server port. Default 3002 — NOT 3001, so the user's
-// dev server (started by dev.sh on :3001) stays free for development
-// while tests run. Override via env var for multi-shard setups.
 const SHARD_PORT = process.env.SHARD_PORT || '3002';
 
 /**
  * Playwright E2E configuration for Memo admin.
- * - Frontend: Next.js admin on port 3002 (or SHARD_PORT). NOT :3001,
- *   so the user's dev server (started by dev.sh on :3001) stays free
- *   for development while tests run.
- * - Backend:  FastAPI on port 8000
+ *
+ * Per-shard architecture (when run via test-all.sh):
+ *   - Each shard gets its own Next.js (SHARD_PORT 3002-3006),
+ *     FastAPI (BACKEND_PORT 8001-8005), and SQLite DB.
+ *   - No cross-shard interference.
+ *   - webServer finds the pre-started server via reuseExistingServer.
+ *
+ * Standalone mode (manual `playwright test`):
+ *   - Single Next.js on :3002, single FastAPI on :8000.
+ *   - Backwards compatible with .env.test.
+ *
  * Browsers are pre-installed in the Docker image.
  * Do NOT run `npx playwright install` in worktrees.
  */
@@ -33,8 +46,6 @@ export default defineConfig({
   workers: process.env.CI ? 1 : undefined,
   reporter: 'list',
   timeout: 30_000,
-  // Visual regression runs locally (pre-push) — not skipped.
-  // Baseline screenshots committed in *-snapshots/ directories.
 
   use: {
     baseURL: `http://localhost:${SHARD_PORT}`,
@@ -42,10 +53,10 @@ export default defineConfig({
     viewport: { width: 1280, height: 720 },
   },
 
-  // Auto-start admin Next.js dev server for E2E tests.
-  // When SHARD_PORT is set, starts a dev server on that port (per-shard).
-  // reuseExistingServer: true so subsequent runs reuse the running server
-  // (important for parallel shard runs where each shard has its own server).
+  // Playwright validates webServer URL before running tests.
+  // In per-shard mode: test-all.sh pre-starts the server, so
+  // reuseExistingServer finds it. In standalone mode: Playwright
+  // starts the server itself.
   webServer: {
     command: `pnpm exec next dev -p ${SHARD_PORT}`,
     url: `http://localhost:${SHARD_PORT}`,

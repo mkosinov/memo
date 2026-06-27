@@ -5,18 +5,33 @@
  * FK constraints, cascade behavior, payment totals.
  *
  * IMPORTANT: DB_PATH must point to the SAME database the backend uses.
- * In CI: set via TEST_DB_PATH environment variable.
- * Local: defaults to backend/test_memo.db (the test database).
  *
- * The backend must be started with ENV_FILE=.env.test so both the
- * backend and E2E tests operate on the same isolated test database.
+ * Per-shard mode (via test-all.sh):
+ *   SHARD_ID is set → uses test_memo_shard{id}.db
+ *
+ * Standalone mode:
+ *   Falls back to TEST_DB_PATH or default test_memo.db.
  *
  * Retries on "database is locked" to handle concurrent backend writes.
  */
 
 import { execSync } from 'child_process';
+import path from 'path';
 
-const DB_PATH = process.env.TEST_DB_PATH || '../../backend/test_memo.db';
+/**
+ * Resolve DB path: per-shard (test_memo_shard{id}.db) or fallback.
+ * SHARD_ID is set by test-all.sh; falls back to TEST_DB_PATH or default.
+ */
+function resolveDBPath(): string {
+  const shardId = process.env.SHARD_ID;
+  if (shardId) {
+    // Resolve relative to this file's location (frontend/admin/e2e/fixtures/)
+    return path.resolve(__dirname, `../../../../backend/test_memo_shard${shardId}.db`);
+  }
+  return process.env.TEST_DB_PATH || '../../backend/test_memo.db';
+}
+
+const DB_PATH = resolveDBPath();
 
 const MAX_RETRIES = 5;
 const RETRY_DELAY_MS = 200;

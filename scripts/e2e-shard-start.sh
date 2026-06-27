@@ -77,7 +77,7 @@ trap cleanup EXIT INT TERM
 # can take 30-50s each under load, allow plenty of headroom)
 BACKEND_READY=false
 for i in $(seq 1 60); do
-  if curl -s -o /dev/null -w "%{http_code}" "http://localhost:$BACKEND_PORT/docs" --max-time 1 2>/dev/null | grep -qE "^(2|3)"; then
+  if curl -s -o /dev/null -w "%{http_code}" "http://localhost:$BACKEND_PORT/docs" --max-time 10 2>/dev/null | grep -qE "^(2|3)"; then
     echo "[shard-$SHARD_ID] Backend ready on :$BACKEND_PORT"
     BACKEND_READY=true
     break
@@ -115,9 +115,11 @@ _orig_cleanup() {
 trap _orig_cleanup EXIT INT TERM
 
 # Wait for frontend to be ready (max 120s — 5 parallel Next.js dev servers
-# can take 30-60s each under load, allow plenty of headroom)
+# can take 30-60s each under load, allow plenty of headroom.
+# Use --max-time 30 for curl because Next.js dev server compiles routes
+# on first request, which can take 20+ seconds.
 for i in $(seq 1 120); do
-  if curl -s -o /dev/null -w "%{http_code}" "http://localhost:$SHARD_PORT/" --max-time 1 2>/dev/null | grep -qE "^(2|3)"; then
+  if curl -s -o /dev/null -w "%{http_code}" "http://localhost:$SHARD_PORT/" --max-time 30 2>/dev/null | grep -qE "^(2|3)"; then
     echo "[shard-$SHARD_ID] Frontend ready on :$SHARD_PORT"
     break
   fi

@@ -174,12 +174,14 @@ done
 # Wait for all shard stacks to be ready (check frontend ports)
 echo "  → waiting for shard frontends to be ready..."
 SHARD_READY=("" "" "" "" "")
-for _ in $(seq 1 40); do
+# 5 parallel Next.js dev servers need more time to compile first request.
+# --max-time 30 + 60 iterations = up to 30 min total (usually ~2-3 min).
+for _ in $(seq 1 60); do
   ALL_READY=true
   for i in $(seq 0 4); do
     if [ "${SHARD_READY[$i]}" = "ready" ]; then continue; fi
     FRONTEND_PORT="${SHARD_FRONTEND_PORTS[$i]}"
-    if curl -s -o /dev/null -w "%{http_code}" "http://localhost:${FRONTEND_PORT}/" --max-time 1 2>/dev/null | grep -qE "^(2|3)"; then
+    if curl -s -o /dev/null -w "%{http_code}" "http://localhost:${FRONTEND_PORT}/" --max-time 30 2>/dev/null | grep -qE "^(2|3)"; then
       SHARD_READY[$i]="ready"
       echo "    shard $((i + 1)) ready (frontend :${FRONTEND_PORT})"
     else
@@ -198,9 +200,9 @@ for i in $(seq 0 4); do
   fi
 done
 
-# Extra buffer for Next.js compilation across all shards
-echo "  → waiting 15s for Next.js compilation to stabilize..."
-sleep 15
+# Extra buffer for Next.js compilation to stabilize
+echo "  → waiting 30s for Next.js compilation to stabilize..."
+sleep 30
 
 # Run 5 Playwright shards in parallel, each against its own frontend
 echo "  → running 5 Playwright shards in parallel..."

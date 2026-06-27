@@ -73,9 +73,10 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-# Wait for backend to be ready (max 20s)
+# Wait for backend to be ready (max 60s — 5 parallel FastAPI/uicorn + alembic
+# can take 30-50s each under load, allow plenty of headroom)
 BACKEND_READY=false
-for i in $(seq 1 20); do
+for i in $(seq 1 60); do
   if curl -s -o /dev/null -w "%{http_code}" "http://localhost:$BACKEND_PORT/docs" --max-time 1 2>/dev/null | grep -qE "^(2|3)"; then
     echo "[shard-$SHARD_ID] Backend ready on :$BACKEND_PORT"
     BACKEND_READY=true

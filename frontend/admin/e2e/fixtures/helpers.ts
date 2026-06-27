@@ -6,6 +6,32 @@
  */
 
 import { type Page, expect } from '@playwright/test';
+import { execSync } from 'child_process';
+import path from 'path';
+
+const DB_PATH = process.env.TEST_DB_PATH
+  || path.resolve(__dirname, '../../backend/test_memo.db');
+
+/**
+ * Clean non-seed test data from the test DB so visual regression snapshots
+ * aren't affected by records/activities created by earlier tests in the
+ * same shard. Mirrors the cleanup in e2e/globalSetup.ts — seed IDs are
+ * short (clients: c1..c5, records: r1..r6, visits: v1..v10, activities:
+ * ev_0..ev_44) so length checks distinguish them from UUID test data.
+ */
+export function cleanTestData() {
+  try {
+    execSync(`sqlite3 "${DB_PATH}" "
+      DELETE FROM payments WHERE length(id) > 3;
+      DELETE FROM visits WHERE length(id) > 3;
+      DELETE FROM records WHERE length(id) > 3;
+      DELETE FROM activities WHERE length(id) > 5;
+      DELETE FROM clients WHERE length(id) > 3;
+    "`, { encoding: 'utf-8', stdio: 'pipe' });
+  } catch {
+    // If sqlite3 is not available or DB doesn't exist, skip silently
+  }
+}
 
 /**
  * Wait for schedule page to load with activity cards.

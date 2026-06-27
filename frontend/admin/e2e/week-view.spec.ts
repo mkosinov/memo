@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { waitForScheduleReady } from './fixtures/helpers';
+import { waitForScheduleReady, cleanTestData } from './fixtures/helpers';
 
 /**
  * Visual regression tests for Schedule page.
@@ -9,6 +9,7 @@ import { waitForScheduleReady } from './fixtures/helpers';
 
 test.describe('Schedule Page', () => {
   test('default state visual regression', async ({ page }) => {
+    cleanTestData();
     await page.goto('/');
     await page.waitForSelector('[data-testid="center-content"]', { timeout: 10000 });
     // Hide the NowLine to avoid time-dependent screenshot differences
@@ -23,6 +24,7 @@ test.describe('Schedule Page', () => {
   });
 
   test('menubar visual regression', async ({ page }) => {
+    cleanTestData();
     await page.goto('/');
     await page.waitForSelector('[data-testid="menubar"]', { timeout: 10000 });
     const menubar = page.getByTestId('menubar');
@@ -32,6 +34,7 @@ test.describe('Schedule Page', () => {
   });
 
   test('schedule with activity cards', async ({ page }) => {
+    cleanTestData();
     await waitForScheduleReady(page);
     // Hide the NowLine to avoid time-dependent screenshot differences
     await page.evaluate(() => {
@@ -45,6 +48,7 @@ test.describe('Schedule Page', () => {
   });
 
   test('schedule — different week', async ({ page }) => {
+    cleanTestData();
     await waitForScheduleReady(page);
 
     // Navigate to next week

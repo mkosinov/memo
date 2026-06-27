@@ -4,24 +4,8 @@ import {
   waitForRecordsReady,
   openModal,
   openAddTab,
+  cleanTestData,
 } from './fixtures/helpers';
-import { execSync } from 'child_process';
-
-/**
- * Clean non-seed test data from the DB so visual regression snapshots
- * aren't affected by records created by earlier tests in the same shard.
- */
-function cleanTestData() {
-  const dbPath = process.env.TEST_DB_PATH || '../../backend/test_memo.db';
-  try {
-    execSync(`sqlite3 "${dbPath}" "
-      DELETE FROM payments WHERE length(id) > 3;
-      DELETE FROM visits WHERE length(id) > 3;
-      DELETE FROM records WHERE length(id) > 3;
-      DELETE FROM clients WHERE length(id) > 3;
-    "`, { encoding: 'utf-8', stdio: 'pipe' });
-  } catch { /* ignore */ }
-}
 
 /**
  * Visual regression tests for Records page, Activity Modal, and other UI states.
@@ -79,6 +63,7 @@ test.describe('Records Page — Visual Regression', () => {
 
 test.describe('Activity Modal — Visual Regression', () => {
   test.beforeEach(async ({ page }) => {
+    cleanTestData();
     await waitForScheduleReady(page);
   });
 

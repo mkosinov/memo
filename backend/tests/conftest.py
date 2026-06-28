@@ -457,6 +457,206 @@ def sample_visit_no_tariff(create_record):
     return {"record": record, "visit_id": visit_id}
 
 
+# ─── Phase 1: db_session + sample fixtures (record_visits domain tests) ────
+
+@pytest.fixture
+async def db_session(db_engine):
+    """Function-scoped async session for direct ORM operations in domain tests.
+
+    Shares the session-scoped db_engine (same test database) but creates a
+    fresh session per test for isolation.
+    """
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
+    async with session_factory() as session:
+        yield session
+        await session.close()
+
+
+@pytest.fixture
+async def sample_record(api_client, db_session):
+    """Create a Record with 2 active visits + anonym_visits=1 via API, return ORM object.
+
+    Used by test_recompute_record_seats.
+    """
+    import uuid as _uuid
+    from datetime import UTC, datetime, timedelta
+    from src.models.record import Record
+
+    master = api_client.post("/api/v1/masters", json={
+        "first_name": "Rec", "last_name": "Master", "color": "#5B8C7A",
+        "position": "мастер", "specialty": "живопись",
+    }).json()
+    service = api_client.post("/api/v1/services", json={
+        "title": "Rec Service", "description": "Test", "image_url": "https://example.com/t.jpg",
+        "specialty": "живопись", "min_age": 6, "max_age": 99, "duration": 90, "record_info": "test",
+    }).json()
+    location = api_client.post("/api/v1/locations", json={
+        "name": "Rec Studio", "address": "Rec Address", "capacity": 20,
+    }).json()
+    activity = api_client.post("/api/v1/activities", json={
+        "master_id": master["id"], "service_id": service["id"],
+        "location_id": location["id"],
+        "start": (datetime.now(UTC) + timedelta(days=1)).isoformat(),
+        "duration": 90, "capacity": 10, "is_private": False,
+    }).json()
+    client_obj = api_client.post("/api/v1/clients", json={
+        "name": "Rec Client", "phone": f"+7999{_uuid.uuid4().hex[:7]}",
+        "email": None, "channel": "telegram",
+    }).json()
+
+    record_resp = api_client.post("/api/v1/records", json={
+        "activity_id": activity["id"],
+        "client_id": client_obj["id"],
+        "comment": "Test record for seats",
+        "visits": [
+            {"name": "Alice", "price": 3500, "status": "waiting"},
+            {"name": "Bob", "price": 2500, "status": "waiting"},
+        ],
+    })
+    assert record_resp.status_code == 201
+    record_id = record_resp.json()["id"]
+
+    # Set anonym_visits=1 directly in DB
+    await db_session.execute(
+        text("UPDATE records SET anonym_visits = 1 WHERE id = :id"),
+        {"id": record_id},
+    )
+    await db_session.commit()
+
+    # Expire cached state and reload fresh ORM object
+    db_session.expire_all()
+    record = await db_session.get(Record, record_id)
+    return record
+
+
+@pytest.fixture
+async def sample_record_with_visits(api_client, db_session):
+    """Create a Record with active visits having different statuses.
+
+    Creates 2 visits: one 'visited', one 'waiting'.
+    Used by test_recompute_record_status_derives_from_visits.
+    """
+    import uuid as _uuid
+    from datetime import UTC, datetime, timedelta
+    from src.models.record import Record
+
+    master = api_client.post("/api/v1/masters", json={
+        "first_name": "St", "last_name": "Master", "color": "#5B8C7A",
+        "position": "мастер", "specialty": "живопись",
+    }).json()
+    service = api_client.post("/api/v1/services", json={
+        "title": "St Service", "description": "Test", "image_url": "https://example.com/t.jpg",
+        "specialty": "живопись", "min_age": 6, "max_age": 99, "duration": 90, "record_info": "test",
+    }).json()
+    location = api_client.post("/api/v1/locations", json={
+        "name": "St Studio", "address": "St Address", "capacity": 20,
+    }).json()
+    activity = api_client.post("/api/v1/activities", json={
+        "master_id": master["id"], "service_id": service["id"],
+        "location_id": location["id"],
+        "start": (datetime.now(UTC) + timedelta(days=1)).isoformat(),
+        "duration": 90, "capacity": 10, "is_private": False,
+    }).json()
+    client_obj = api_client.post("/api/v1/clients", json={
+        "name": "St Client", "phone": f"+7999{_uuid.uuid4().hex[:7]}",
+        "email": None, "channel": "telegram",
+    }).json()
+
+    record_resp = api_client.post("/api/v1/records", json={
+        "activity_id": activity["id"],
+        "client_id": client_obj["id"],
+        "comment": "Test record for status",
+        "visits": [
+            {"name": "Charlie", "price": 3500, "status": "visited"},
+            {"name": "Diana", "price": 2500, "status": "waiting"},
+        ],
+    })
+    assert record_resp.status_code == 201
+    record_id = record_resp.json()["id"]
+
+    record = await db_session.get(Record, record_id)
+    return record
+
+
+@pytest.fixture
+async def sample_activity_with_capacity(api_client, db_session):
+    """Create an Activity with capacity=10, no records. Capacity check should pass."""
+    from datetime import UTC, datetime, timedelta
+    from src.models.activity import Activity
+
+    master = api_client.post("/api/v1/masters", json={
+        "first_name": "Cap", "last_name": "Master", "color": "#5B8C7A",
+        "position": "мастер", "specialty": "живопись",
+    }).json()
+    service = api_client.post("/api/v1/services", json={
+        "title": "Cap Service", "description": "Test", "image_url": "https://example.com/t.jpg",
+        "specialty": "живопись", "min_age": 6, "max_age": 99, "duration": 90, "record_info": "test",
+    }).json()
+    location = api_client.post("/api/v1/locations", json={
+        "name": "Cap Studio", "address": "Cap Address", "capacity": 20,
+    }).json()
+    act_resp = api_client.post("/api/v1/activities", json={
+        "master_id": master["id"], "service_id": service["id"],
+        "location_id": location["id"],
+        "start": (datetime.now(UTC) + timedelta(days=1)).isoformat(),
+        "duration": 90, "capacity": 10, "is_private": False,
+    })
+    assert act_resp.status_code == 201
+    activity_id = act_resp.json()["id"]
+
+    activity = await db_session.get(Activity, activity_id)
+    return activity
+
+
+@pytest.fixture
+async def sample_activity_at_capacity(api_client, db_session):
+    """Create an Activity (capacity=1) with a record using all seats.
+
+    Then check_activity_capacity(seats=1) should raise 409.
+    """
+    import uuid as _local_uuid
+    from datetime import UTC, datetime, timedelta
+    from src.models.activity import Activity
+
+    master = api_client.post("/api/v1/masters", json={
+        "first_name": "Full", "last_name": "Master", "color": "#FF0000",
+        "position": "мастер", "specialty": "живопись",
+    }).json()
+    service = api_client.post("/api/v1/services", json={
+        "title": "Full Service", "description": "Test", "image_url": "https://example.com/t.jpg",
+        "specialty": "живопись", "min_age": 6, "max_age": 99, "duration": 90, "record_info": "test",
+    }).json()
+    location = api_client.post("/api/v1/locations", json={
+        "name": "Full Studio", "address": "Full Address", "capacity": 20,
+    }).json()
+    act_resp = api_client.post("/api/v1/activities", json={
+        "master_id": master["id"], "service_id": service["id"],
+        "location_id": location["id"],
+        "start": (datetime.now(UTC) + timedelta(days=1)).isoformat(),
+        "duration": 90, "capacity": 1, "is_private": False,
+    })
+    assert act_resp.status_code == 201
+    activity_id = act_resp.json()["id"]
+
+    # Create a client and record that fills the capacity
+    client_obj = api_client.post("/api/v1/clients", json={
+        "name": "Full Client", "phone": f"+7999{_local_uuid.uuid4().hex[:7]}",
+        "email": None, "channel": "telegram",
+    }).json()
+    record_resp = api_client.post("/api/v1/records", json={
+        "activity_id": activity_id,
+        "client_id": client_obj["id"],
+        "comment": "Full record",
+        "visits": [{"name": "Guest", "price": 3500, "status": "waiting"}],
+    })
+    assert record_resp.status_code == 201
+
+    activity = await db_session.get(Activity, activity_id)
+    return activity
+
+
 def query_db(sql: str) -> list[dict]:
     """Execute SQL against the test database.
 

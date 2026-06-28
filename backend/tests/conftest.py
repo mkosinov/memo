@@ -657,6 +657,105 @@ async def sample_activity_at_capacity(api_client, db_session):
     return activity
 
 
+@pytest.fixture
+async def sample_visit(api_client, db_session):
+    """Create a single active Visit ORM object with its parent Record + Activity.
+
+    Returns the Visit ORM object (not a dict). Used by VisitService CRUD tests.
+    """
+    import uuid as _uuid
+    from datetime import UTC, datetime, timedelta
+    from src.models.visit import Visit
+
+    master = api_client.post("/api/v1/masters", json={
+        "first_name": "V", "last_name": "Master", "color": "#5B8C7A",
+        "position": "мастер", "specialty": "живопись",
+    }).json()
+    service = api_client.post("/api/v1/services", json={
+        "title": "V Service", "description": "Test", "image_url": "https://example.com/t.jpg",
+        "specialty": "живопись", "min_age": 6, "max_age": 99, "duration": 90, "record_info": "test",
+    }).json()
+    location = api_client.post("/api/v1/locations", json={
+        "name": "V Studio", "address": "V Address", "capacity": 20,
+    }).json()
+    activity = api_client.post("/api/v1/activities", json={
+        "master_id": master["id"], "service_id": service["id"],
+        "location_id": location["id"],
+        "start": (datetime.now(UTC) + timedelta(days=1)).isoformat(),
+        "duration": 90, "capacity": 10, "is_private": False,
+    }).json()
+    client_obj = api_client.post("/api/v1/clients", json={
+        "name": "V Client", "phone": f"+7999{_uuid.uuid4().hex[:7]}",
+        "email": None, "channel": "telegram",
+    }).json()
+
+    record_resp = api_client.post("/api/v1/records", json={
+        "activity_id": activity["id"],
+        "client_id": client_obj["id"],
+        "comment": "Visit test record",
+        "visits": [{"name": "Solo", "price": 3000, "status": "waiting"}],
+    })
+    assert record_resp.status_code == 201
+    record_id = record_resp.json()["id"]
+    visit_id = record_resp.json()["visits"][0]["id"]
+
+    db_session.expire_all()
+    visit = await db_session.get(Visit, visit_id)
+    return visit
+
+
+@pytest.fixture
+async def sample_visits(api_client, db_session):
+    """Create a Record with 3 active Visit ORM objects. Returns list[Visit]."""
+    import uuid as _uuid
+    from datetime import UTC, datetime, timedelta
+    from src.models.visit import Visit
+
+    master = api_client.post("/api/v1/masters", json={
+        "first_name": "Vs", "last_name": "Master", "color": "#5B8C7A",
+        "position": "мастер", "specialty": "живопись",
+    }).json()
+    service = api_client.post("/api/v1/services", json={
+        "title": "Vs Service", "description": "Test", "image_url": "https://example.com/t.jpg",
+        "specialty": "живопись", "min_age": 6, "max_age": 99, "duration": 90, "record_info": "test",
+    }).json()
+    location = api_client.post("/api/v1/locations", json={
+        "name": "Vs Studio", "address": "Vs Address", "capacity": 20,
+    }).json()
+    activity = api_client.post("/api/v1/activities", json={
+        "master_id": master["id"], "service_id": service["id"],
+        "location_id": location["id"],
+        "start": (datetime.now(UTC) + timedelta(days=1)).isoformat(),
+        "duration": 90, "capacity": 10, "is_private": False,
+    }).json()
+    client_obj = api_client.post("/api/v1/clients", json={
+        "name": "Vs Client", "phone": f"+7999{_uuid.uuid4().hex[:7]}",
+        "email": None, "channel": "telegram",
+    }).json()
+
+    record_resp = api_client.post("/api/v1/records", json={
+        "activity_id": activity["id"],
+        "client_id": client_obj["id"],
+        "comment": "Visits test record",
+        "visits": [
+            {"name": "Guest1", "price": 1000, "status": "waiting"},
+            {"name": "Guest2", "price": 2000, "status": "waiting"},
+            {"name": "Guest3", "price": 3000, "status": "waiting"},
+        ],
+    })
+    assert record_resp.status_code == 201
+    record_id = record_resp.json()["id"]
+    visit_ids = [v["id"] for v in record_resp.json()["visits"]]
+
+    db_session.expire_all()
+    visits = []
+    for vid in visit_ids:
+        v = await db_session.get(Visit, vid)
+        assert v is not None, f"Visit {vid} not found"
+        visits.append(v)
+    return visits
+
+
 def query_db(sql: str) -> list[dict]:
     """Execute SQL against the test database.
 

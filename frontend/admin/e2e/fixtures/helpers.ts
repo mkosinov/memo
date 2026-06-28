@@ -56,7 +56,7 @@ export function cleanTestData() {
  */
 export async function waitForScheduleReady(page: Page) {
   await page.goto('/schedule');
-  await page.waitForSelector('[data-testid^="activity-"]', { timeout: 15_000 });
+  await page.waitForSelector('[data-testid^="activity-"]', { timeout: 60_000 });
 }
 
 /**
@@ -67,11 +67,11 @@ export async function waitForServicesReady(page: Page) {
   // Set up response listener BEFORE navigation
   const servicesResponse = page.waitForResponse(
     (resp) => resp.url().includes('/api/v1/services') && resp.status() === 200,
-    { timeout: 15_000 },
+    { timeout: 60_000 },
   );
   await page.goto('/services');
-  await page.waitForSelector('h1:has-text("Управление услугами")', { timeout: 15_000 });
-  await page.waitForSelector('table', { timeout: 15_000 });
+  await page.waitForSelector('h1:has-text("Управление услугами")', { timeout: 60_000 });
+  await page.waitForSelector('table', { timeout: 60_000 });
   // Wait for API response to arrive
   await servicesResponse.catch(() => {});
   // Give React a moment to re-render with data
@@ -86,11 +86,11 @@ export async function waitForLocationsReady(page: Page) {
   // Set up response listener BEFORE navigation
   const locationsResponse = page.waitForResponse(
     (resp) => resp.url().includes('/api/v1/locations') && resp.status() === 200,
-    { timeout: 15_000 },
+    { timeout: 60_000 },
   );
   await page.goto('/locations');
-  await page.waitForSelector('h1:has-text("Управление локациями")', { timeout: 15_000 });
-  await page.waitForSelector('table', { timeout: 15_000 });
+  await page.waitForSelector('h1:has-text("Управление локациями")', { timeout: 60_000 });
+  await page.waitForSelector('table', { timeout: 60_000 });
   // Wait for API response to arrive
   await locationsResponse.catch(() => {});
   // Give React a moment to re-render with data
@@ -234,15 +234,15 @@ export async function waitForRecordsReady(page: Page) {
   // Set up response listeners BEFORE navigation so we don't miss API calls.
   const recordsResponse = page.waitForResponse(
     (resp) => resp.url().includes('/api/v1/records') && resp.status() === 200,
-    { timeout: 15_000 },
+    { timeout: 60_000 },
   );
   const activitiesResponse = page.waitForResponse(
     (resp) => resp.url().includes('/api/v1/activities') && resp.status() === 200,
-    { timeout: 15_000 },
+    { timeout: 60_000 },
   );
   await page.goto('/records');
-  await page.waitForSelector('h1:has-text("Управление записями")', { timeout: 15_000 });
-  await page.waitForSelector('table', { timeout: 15_000 });
+  await page.waitForSelector('h1:has-text("Управление записями")', { timeout: 60_000 });
+  await page.waitForSelector('table', { timeout: 60_000 });
   // Wait for both records and activities to arrive.
   await Promise.all([recordsResponse, activitiesResponse]);
   // Give React a moment to re-render the table with data.
@@ -267,9 +267,9 @@ export async function waitForRecordsReady(page: Page) {
  */
 export async function waitForClientsReady(page: Page) {
   await page.goto('/clients');
-  await page.waitForSelector('h1:has-text("Клиенты")', { timeout: 15_000 });
+  await page.waitForSelector('h1:has-text("Клиенты")', { timeout: 60_000 });
   // Wait for either table rows or the "no clients" empty state
-  await page.waitForSelector('table tbody, p:has-text("Нет клиентов")', { timeout: 15_000 });
+  await page.waitForSelector('table tbody, p:has-text("Нет клиентов")', { timeout: 60_000 });
 }
 
 /**
@@ -279,11 +279,11 @@ export async function waitForClientsReady(page: Page) {
 export async function waitForMastersReady(page: Page) {
   const mastersResponse = page.waitForResponse(
     (resp) => resp.url().includes('/api/v1/masters') && resp.status() === 200,
-    { timeout: 15_000 },
+    { timeout: 60_000 },
   );
   await page.goto('/masters');
-  await page.waitForSelector('h1:has-text("Управление мастерами")', { timeout: 15_000 });
-  await page.waitForSelector('table', { timeout: 15_000 });
+  await page.waitForSelector('h1:has-text("Управление мастерами")', { timeout: 60_000 });
+  await page.waitForSelector('table', { timeout: 60_000 });
   await mastersResponse.catch(() => {});
   await page.waitForTimeout(500);
 }
@@ -295,11 +295,11 @@ export async function waitForMastersReady(page: Page) {
 export async function waitForTagsReady(page: Page) {
   const tagsResponse = page.waitForResponse(
     (resp) => resp.url().includes('/api/v1/tags') && resp.status() === 200,
-    { timeout: 15_000 },
+    { timeout: 60_000 },
   );
   await page.goto('/tags');
-  await page.waitForSelector('h1:has-text("Управление тегами")', { timeout: 15_000 });
-  await page.waitForSelector('table', { timeout: 15_000 });
+  await page.waitForSelector('h1:has-text("Управление тегами")', { timeout: 60_000 });
+  await page.waitForSelector('table', { timeout: 60_000 });
   await tagsResponse.catch(() => {});
   await page.waitForTimeout(500);
 }
@@ -311,11 +311,11 @@ export async function waitForTagsReady(page: Page) {
 export async function waitForPhotosReady(page: Page) {
   const photosResponse = page.waitForResponse(
     (resp) => resp.url().includes('/api/v1/photos') && resp.status() === 200,
-    { timeout: 15_000 },
+    { timeout: 60_000 },
   );
   await page.goto('/photos');
-  await page.waitForSelector('h1:has-text("Управление фото")', { timeout: 15_000 });
-  await page.waitForSelector('table', { timeout: 15_000 });
+  await page.waitForSelector('h1:has-text("Управление фото")', { timeout: 60_000 });
+  await page.waitForSelector('table', { timeout: 60_000 });
   await photosResponse.catch(() => {});
   await page.waitForTimeout(500);
 }

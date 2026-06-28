@@ -56,9 +56,9 @@ export default defineConfig({
     trace: 'on-first-retry',
     viewport: { width: 1280, height: 720 },
     navigationTimeout: 60_000,
-    expect: { timeout: 10_000 },
     actionTimeout: 15_000,
   },
+  expect: { timeout: 10_000 },
 
   // Playwright validates webServer URL before running tests.
   // In per-shard mode: test-all.sh pre-starts the server, so

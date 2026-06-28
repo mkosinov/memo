@@ -35,6 +35,7 @@ def _map_visit(visit) -> VisitResponse:
         id=visit.id,
         record_id=visit.record_id,
         visitor_id=visit.visitor_id,
+        tariff_id=visit.tariff_id,
         price=visit.price,
         custom_price=visit.custom_price,
         status=visit.status,

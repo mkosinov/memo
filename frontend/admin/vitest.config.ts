@@ -17,5 +17,9 @@ export default defineConfig({
     globals: true,
     pool: 'forks',
     exclude: ['e2e/**', 'node_modules/**'],
+    // Tests that render many DOM options (e.g. TimePicker with 1440 options)
+    // can exceed the 5s default under load. 30s gives headroom without
+    // hiding real timeouts.
+    testTimeout: 30_000,
   },
 });

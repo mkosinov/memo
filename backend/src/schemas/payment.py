@@ -27,6 +27,17 @@ class PaymentUpdate(PaymentBase):
     pass
 
 
+class PaymentPatch(BaseModel):
+    """Request schema for partial update (PATCH /api/v1/payments/{id}).
+
+    All fields optional. None means 'don't change'.
+    Setting ``amount: null`` is a no-op (stripped by the service via NOT_NULL_FIELDS).
+    """
+
+    amount: int | None = Field(default=None, gt=0)
+    method: PaymentMethod | None = None
+
+
 class PaymentResponse(PaymentBase):
     """Response schema with all payment fields."""
 

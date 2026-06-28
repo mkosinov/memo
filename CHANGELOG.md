@@ -25,6 +25,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Status doc: `docs/status/2026-06-25-backend-phase1-visit-crud.md`
   - **Tests: 628 passed (was 595, +33 new), 4 xfailed (unchanged), 0 regressions**.
 
+- **Phase 2: PATCH /api/v1/payments/{id}** — branch `feat/phase2-payment-patch`, 2026-06-28:
+  - Third of 3 phases for Visit/Payment API completion (Phase 0 = `tariff_id` round-trip, Phase 1 = Visit CRUD).
+  - New `PaymentPatch` Pydantic schema (`backend/src/schemas/payment.py`): `amount: int | None = Field(default=None, gt=0)`, `method: PaymentMethod | None = None`. All fields optional — `None` means "don't change".
+  - `PaymentService` refactored from factory-returned `GenericService` instance to proper `PaymentService(GenericService[...])` subclass. This allows the class-level `NOT_NULL_FIELDS = {"amount"}` configuration that `GenericService.patch()` consults to strip `null` for NOT NULL fields.
+  - New endpoint `PATCH /api/v1/payments/{id}` in `backend/src/api/v1/payments.py`: calls inherited `service.patch()` (no service code change needed), returns 200 with `PaymentResponse` on success, 404 with `ErrorCode.PAYMENT_NOT_FOUND` if not found. PATCH semantically differs from existing PUT (full-replace): only sent fields are updated.
+  - **Contract guarantee:** `PATCH {amount: null, method: "cash"}` silently strips `amount` (NOT NULL constraint would otherwise be violated). This is enforced by the `NOT_NULL_FIELDS` mechanism in `GenericService.patch`.
+  - 5 files changed, 104 insertions(+), 3 deletions(-): `backend/src/{schemas/payment.py, services/payment.py, api/v1/payments.py}`, `backend/tests/{test_api_payments.py, services/test_payment_service.py (NEW)}`.
+  - 3 new API tests (scenarios 21-23 in spec) + 3 new service unit tests (subclass contract: `issubclass`, `NOT_NULL_FIELDS == {"amount"}`).
+  - Design spec: `docs/specs/2026-06-25-backend-visit-payment-api-design.md`
+  - Plan: `docs/plans/2026-06-25-backend-visit-payment-api.md`
+  - Status doc: `docs/status/2026-06-25-backend-phase2-payment-patch.md`
+  - **Tests: 634 passed (was 628, +6 new), 4 xfailed (unchanged), 0 regressions**.
+
 ## [Unreleased] — 2026-06-25
 
 ### Added

@@ -1,4 +1,4 @@
-"""FastAPI router for visit read and status update endpoints."""
+"""FastAPI router for visit CRUD + status endpoints."""
 
 from datetime import datetime
 from functools import lru_cache
@@ -8,7 +8,13 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from src.db import SessionDep
 from src.errors import ErrorCode, ErrorDetail
-from src.schemas.visit import VisitResponse, VisitStatusUpdate
+from src.schemas.visit import (
+    VisitCreate,
+    VisitPatch,
+    VisitResponse,
+    VisitStatusUpdate,
+    VisitUpdate,
+)
 from src.services.visit import VisitService, get_visit_service
 
 router = APIRouter(tags=["visits"])
@@ -45,6 +51,20 @@ def _map_visit(visit) -> VisitResponse:
     )
 
 
+# ─── CRUD handlers ─────────────────────────────────────────────────────────
+
+
+@router.get("", response_model=list[VisitResponse])
+async def list_visits(
+    service: _ServiceDep,
+    session: SessionDep,
+    record_id: str | None = None,
+) -> list[VisitResponse]:
+    """List active visits, optionally filtered by record_id."""
+    visits = await service.list(db_session=session, record_id=record_id)
+    return [_map_visit(v) for v in visits]
+
+
 @router.get("/{visit_id}", response_model=VisitResponse)
 async def get_visit(
     visit_id: str,
@@ -62,6 +82,83 @@ async def get_visit(
             ).model_dump(),
         )
     return _map_visit(visit)
+
+
+@router.post("", response_model=VisitResponse, status_code=201)
+async def create_visit(
+    data: VisitCreate,
+    service: _ServiceDep,
+    session: SessionDep,
+) -> VisitResponse:
+    """Create a new visit, cascade status + seats to parent record."""
+    visit = await service.create(db_session=session, data=data)
+    if not visit:
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.RECORD_NOT_FOUND,
+                message="Parent record not found",
+            ).model_dump(),
+        )
+    return _map_visit(visit)
+
+
+@router.put("/{visit_id}", response_model=VisitResponse)
+async def update_visit(
+    visit_id: str,
+    data: VisitUpdate,
+    service: _ServiceDep,
+    session: SessionDep,
+) -> VisitResponse:
+    """Full-replace update of a visit, cascade status to parent record."""
+    visit = await service.update(db_session=session, visit_id=visit_id, data=data)
+    if not visit:
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.VISIT_NOT_FOUND,
+                message="Visit not found",
+            ).model_dump(),
+        )
+    return _map_visit(visit)
+
+
+@router.patch("/{visit_id}", response_model=VisitResponse)
+async def patch_visit(
+    visit_id: str,
+    data: VisitPatch,
+    service: _ServiceDep,
+    session: SessionDep,
+) -> VisitResponse:
+    """Partial update of a visit, cascade status to parent record."""
+    visit = await service.patch(db_session=session, visit_id=visit_id, data=data)
+    if not visit:
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.VISIT_NOT_FOUND,
+                message="Visit not found",
+            ).model_dump(),
+        )
+    return _map_visit(visit)
+
+
+@router.delete("/{visit_id}", status_code=204)
+async def delete_visit(
+    visit_id: str,
+    service: _ServiceDep,
+    session: SessionDep,
+) -> None:
+    """Soft-delete a visit (is_active=False), cascade status + seats to parent record."""
+    deleted = await service.delete(db_session=session, visit_id=visit_id)
+    if not deleted:
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.VISIT_NOT_FOUND,
+                message="Visit not found",
+            ).model_dump(),
+        )
 
 
 @router.put("/{visit_id}/status", response_model=VisitResponse)

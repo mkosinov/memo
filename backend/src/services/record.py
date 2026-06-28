@@ -3,14 +3,16 @@
 from datetime import UTC, datetime
 from functools import lru_cache
 
-from fastapi import HTTPException
-from sqlalchemy import func, select, update
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from src.errors import ErrorCode, ErrorDetail
 from src.repositories.generic import GenericRepository, get_generic_repository
-from src.models.activity import Activity
+from src.domain.record_visits import (
+    recompute_record_seats,
+    recompute_record_status,
+    check_activity_capacity,
+)
 from src.models.client import Client
 from src.models.payment import Payment
 from src.models.record import Record
@@ -18,7 +20,6 @@ from src.models.visit import Visit
 from src.models.visitor import Visitor
 from src.schemas.record import RecordCreate, RecordPatch, RecordResponse, RecordUpdate
 from src.services.generic import GenericService
-from src.domain.visit_status import VisitItem, VisitStatus, compute_record_status
 
 
 class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
@@ -92,7 +93,7 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
         """
         # ── Capacity check ─────────────────────────────────────────────
         effective_seats = len(data.visits) + (data.anonym_visits or 0)
-        await self._check_capacity(db_session, data.activity_id, seats=effective_seats)
+        await check_activity_capacity(db_session, data.activity_id, seats=effective_seats)
 
         # ── Resolve client ──────────────────────────────────────────────
         if data.phone:
@@ -116,14 +117,11 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
                 # Anonymous visit — no visitor linked
                 visitor_ids.append(None)
 
-        # ── Create Record ───────────────────────────────────────────────
+        # ── Create Record (status derived after visits flush) ──────────
         record = Record(
             activity_id=data.activity_id,
             client_id=client.id if client else data.client_id,
-            status=compute_record_status([
-                VisitItem(id=f"new_{i}", status=item.status)
-                for i, item in enumerate(data.visits)
-            ]).value,
+            status="pending",
             seats=effective_seats,
             anonym_visits=data.anonym_visits or 0,
             comment=data.comment,
@@ -144,6 +142,9 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
             db_session.add(visit)
 
         await db_session.flush()
+
+        # ── Recompute status from actual visits ─────────────────────────
+        await recompute_record_status(db_session, record.id)
         await db_session.refresh(record)
         return record
 
@@ -221,13 +222,12 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
             )
             db_session.add(visit)
 
-        # Derive status from visits
-        record.status = compute_record_status([
-            VisitItem(id=f"new_{i}", status=v.status)
-            for i, v in enumerate(data.visits)
-        ]).value
-
         await db_session.flush()
+
+        # Recompute seats and status from actual visits
+        await recompute_record_seats(db_session, record.id)
+        await recompute_record_status(db_session, record.id)
+
         await db_session.refresh(record)
         return record
 
@@ -238,7 +238,8 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
 
         Handles visits specially: if ``visits`` is provided in the patch,
         deactivates existing visits and creates new ones; otherwise visits
-        are left untouched.
+        are left untouched. Seats and status are always recomputed via
+        domain free functions after the flush.
         """
         record = await self.get(db_session, id)
         if not record:
@@ -265,64 +266,16 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
                     status=visit_item.get("status", "waiting"),
                 )
                 db_session.add(visit)
-            # When visits replaced: seats = len(new_visits) + anonym_visits
-            record.seats = len(update_data["visits"]) + record.anonym_visits
-        else:
-            # When only other fields patched: seats = len(active visits) + anonym_visits
-            active_visits = [v for v in record.visits if v.is_active]
-            record.seats = len(active_visits) + record.anonym_visits
-
-        # Derive status from active visits
-        if "visits" in update_data:
-            # Use the new visits from the patch
-            record.status = compute_record_status([
-                VisitItem(id=f"patch_{i}", status=v.get("status", "waiting"))
-                for i, v in enumerate(update_data["visits"])
-            ]).value
-        else:
-            # Use the existing active visits
-            record.status = compute_record_status([
-                VisitItem(id=v.id, status=v.status)
-                for v in record.visits
-                if v.is_active
-            ]).value
 
         record.updated_at = datetime.now(UTC)
         await db_session.flush()
+
+        # Recompute seats and status from actual active visits in DB
+        await recompute_record_seats(db_session, record.id)
+        await recompute_record_status(db_session, record.id)
+
         await db_session.refresh(record)
         return record
-
-    @staticmethod
-    async def _check_capacity(
-        db_session: AsyncSession, activity_id: str, seats: int = 1,
-    ) -> None:
-        """Check if the activity has enough capacity for the new seats.
-
-        Raises HTTPException 409 if the activity is at or over capacity.
-        """
-        result = await db_session.execute(
-            select(Activity).where(Activity.id == activity_id, Activity.is_active)
-        )
-        activity = result.scalar_one_or_none()
-        if not activity:
-            return  # activity not found — let create handle it downstream
-
-        occupied_result = await db_session.execute(
-            select(func.coalesce(func.sum(Record.seats), 0)).where(
-                Record.activity_id == activity_id,
-                Record.is_active.is_(True),  # type: ignore[union-attr]
-            )
-        )
-        occupied = occupied_result.scalar() or 0
-
-        if occupied + seats > activity.capacity:
-            raise HTTPException(
-                status_code=409,
-                detail=ErrorDetail(
-                    code=ErrorCode.ACTIVITY_AT_CAPACITY,
-                    message=f"Activity at capacity: {occupied}/{activity.capacity} seats occupied",
-                ).model_dump(),
-            )
 
 
 @lru_cache

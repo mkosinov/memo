@@ -8,6 +8,12 @@ from src.schemas.payment import PaymentCreate, PaymentResponse, PaymentUpdate
 from src.services.generic import GenericService
 
 
+class PaymentService(GenericService[PaymentCreate, PaymentUpdate, PaymentResponse]):
+    """Payment service. Strips null for NOT NULL fields (amount) in PATCH."""
+
+    NOT_NULL_FIELDS = {"amount"}
+
+
 @lru_cache
-def get_payment_service() -> GenericService[PaymentCreate, PaymentUpdate, PaymentResponse]:
-    return GenericService(get_generic_repository(), Payment, PaymentResponse)
+def get_payment_service() -> PaymentService:
+    return PaymentService(get_generic_repository(), Payment, PaymentResponse)

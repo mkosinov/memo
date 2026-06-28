@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — 2026-06-28
+
+### Added
+- **Phase 1: Visit CRUD + cascade to record (seats + status)** — branch `feat/phase1-visit-crud`, 2026-06-28:
+  - Second of 3 phases for Visit/Payment API completion (Phase 0 = `tariff_id` round-trip, Phase 2 = Payment PATCH).
+  - New `backend/src/domain/record_visits.py` with 3 free functions: `recompute_record_seats`, `recompute_record_status`, `check_activity_capacity`. Single source of truth for aggregate invariants — used by both `VisitService` and `RecordService`.
+  - `VisitService` gains 5 CRUD methods (`list`, `create`, `update`, `patch`, `delete`). Existing `update_status` refactored to use free function; `_derive_record_status` private method removed.
+  - `RecordService` refactored: `create`/`update`/`patch` now use free functions; `_check_capacity` removed (replaced by `check_activity_capacity` free function).
+  - Router gains 5 new handlers: `GET /api/v1/visits` (list), `POST /api/v1/visits` (create, 201), `PUT /api/v1/visits/{id}` (full replace), `PATCH /api/v1/visits/{id}` (partial), `DELETE /api/v1/visits/{id}` (soft-delete, 204).
+  - Pydantic schemas added: `VisitBase`, `VisitCreate`, `VisitUpdate`, `VisitPatch` (mirroring `visitor.py` pattern).
+  - Cascade behavior: creating a visit increments `record.seats` + re-derives `record.status`; soft-deleting decrements `record.seats` + re-derives `record.status`; patching re-derives only `record.status` (seats unchanged). Capacity check enforced on create (409 `ACTIVITY_AT_CAPACITY`).
+  - 10 files changed, 1113 insertions(+), 106 deletions(-): `backend/src/{domain/record_visits.py (NEW),schemas/visit.py,services/{visit.py,record.py},api/v1/visits.py}`, `backend/tests/{conftest.py,test_api_visits.py,test_record_visits.py (NEW),services/{__init__.py (NEW),test_visit_service.py (NEW)}}`.
+  - 33 new tests: 21 API tests (scenarios 5-20 in spec plus extras), 4 domain unit tests (free functions), 8 service unit tests (VisitService CRUD).
+  - Design spec: `docs/specs/2026-06-25-backend-visit-payment-api-design.md`
+  - Plan: `docs/plans/2026-06-25-backend-visit-payment-api.md`
+  - Status doc: `docs/status/2026-06-25-backend-phase1-visit-crud.md`
+  - **Tests: 628 passed (was 595, +33 new), 4 xfailed (unchanged), 0 regressions**.
+
 ## [Unreleased] — 2026-06-25
 
 ### Added

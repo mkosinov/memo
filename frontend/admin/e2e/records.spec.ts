@@ -300,10 +300,9 @@ test.describe('Records Page — Table and Filters', () => {
 
       // Click the close button (✕) in the detail panel
       await page.locator('button[aria-label="Закрыть"]').click();
-      await page.waitForTimeout(500);
 
-      // Detail panel should disappear
-      await expect(page.locator('h3:has-text("Детали записи")')).not.toBeVisible();
+      // Detail panel should disappear — wait for heading to be removed from DOM
+      await expect(page.locator('h3:has-text("Детали записи")')).not.toBeVisible({ timeout: 10_000 });
     } finally {
       await cleanup(request, `/api/v1/records/${recordId}`);
       await cleanup(request, `/api/v1/clients/${clientId}`);
@@ -322,6 +321,11 @@ test.describe('Records Page — Table and Filters', () => {
 
     try {
       await waitForRecordsReady(page);
+
+      // Expand date filter to ensure seeded records are visible regardless of default week range
+      await page.locator('input[aria-label="Фильтр по дате от"]').fill('2020-01-01');
+      await page.locator('input[aria-label="Фильтр по дате до"]').fill('2030-12-31');
+      await page.waitForTimeout(500);
 
       // Find the "Клиент" header and click it to sort
       const clientHeader = page.locator('table thead th').filter({ hasText: 'Клиент' });
@@ -462,16 +466,21 @@ test.describe('Records Page — Table and Filters', () => {
     try {
       await waitForRecordsReady(page);
 
+      // Expand date filter to ensure seeded record is visible
+      await page.locator('input[aria-label="Фильтр по дате от"]').fill('2020-01-01');
+      await page.locator('input[aria-label="Фильтр по дате до"]').fill('2030-12-31');
+      await page.waitForTimeout(500);
+
       // The status filter uses VisitStatus via StatusFiltersPicker (waiting = "Ожидание").
       await page.locator('[data-testid="booking-filters-status-trigger"]').click();
       await page.locator('[data-testid="booking-filters-status-option-waiting"]').click();
       await page.waitForTimeout(500);
 
-      // Find the status badge in the table — use .first() to avoid strict mode violation
-      const statusBadge = page.locator('tbody span.rounded-full').filter({ hasText: 'Ожидание' }).first();
+      // Find the status badge in the table — use data-testid for robustness
+      const statusBadge = page.locator('[data-testid="status-badge-waiting"]').first();
 
       // Badge should contain the status text
-      await expect(statusBadge).toBeVisible();
+      await expect(statusBadge).toBeVisible({ timeout: 10_000 });
 
       // Badge should contain the status text
       await expect(statusBadge).toContainText('Ожидание');
@@ -615,17 +624,22 @@ test.describe('Records Page — Table and Filters', () => {
     try {
       await waitForRecordsReady(page);
 
+      // Expand date filter to ensure seeded record is visible
+      await page.locator('input[aria-label="Фильтр по дате от"]').fill('2020-01-01');
+      await page.locator('input[aria-label="Фильтр по дате до"]').fill('2030-12-31');
+      await page.waitForTimeout(500);
+
+      // Wait for at least one row to appear (our seeded record)
+      await expect.poll(async () => page.locator('tbody tr').count(), { timeout: 10_000 }).toBeGreaterThan(0);
+
       // Look for payment status indicators in the table
       const paymentIndicators = page.locator('tbody td').filter({
         hasText: /Оплачено|Частично|Не оплачено/,
       });
 
-      // If there are records, at least one should have a payment indicator
-      const rowCount = await page.locator('tbody tr').count();
-      if (rowCount > 0) {
-        const indicatorCount = await paymentIndicators.count();
-        expect(indicatorCount).toBeGreaterThan(0);
-      }
+      // At least one row should have a payment indicator
+      const indicatorCount = await paymentIndicators.count();
+      expect(indicatorCount).toBeGreaterThan(0);
     } finally {
       if (paymentId) {
         await cleanup(request, `/api/v1/payments/${paymentId}`);

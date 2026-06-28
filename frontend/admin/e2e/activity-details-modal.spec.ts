@@ -66,25 +66,30 @@ test.describe('ActivityDetailsModal — Real User Scenarios', () => {
       // 2. VERIFY UI — success toast "Запись создана" appears (not just any toast)
       await expect(page.locator('text=Запись создана')).toBeVisible({ timeout: 10_000 });
 
-      // 3. VERIFY DB — client was created (allow brief commit lag)
-      await page.waitForTimeout(500);
-      clientRow = queryDBRow(`SELECT * FROM clients WHERE phone='${testPhone}' AND is_active=1`);
-      expect(clientRow).not.toBeNull();
+      // 3. VERIFY DB — client was created (retry until DB commit lands)
+      await expect.poll(async () => {
+        clientRow = queryDBRow(`SELECT * FROM clients WHERE phone='${testPhone}' AND is_active=1`);
+        return clientRow !== null;
+      }, { timeout: 15_000, intervals: [200, 500, 1000] }).toBe(true);
       expect(clientRow!.name).toBe(testClientName);
       expect(clientRow!.channel).toBeTruthy();
 
       // 4. VERIFY DB — record was created for this client
-      recordRow = queryDBRow(
-        `SELECT * FROM records WHERE client_id='${clientRow!.id}' AND is_active=1`,
-      );
-      expect(recordRow).not.toBeNull();
+      await expect.poll(async () => {
+        recordRow = queryDBRow(
+          `SELECT * FROM records WHERE client_id='${clientRow!.id}' AND is_active=1`,
+        );
+        return recordRow !== null;
+      }, { timeout: 15_000, intervals: [200, 500, 1000] }).toBe(true);
       expect(recordRow!.status).toBeTruthy();
 
       // 5. VERIFY DB — visit was created for this record
-      const visits = queryDBRows(
-        `SELECT * FROM visits WHERE record_id='${recordRow!.id}' AND is_active=1`,
-      );
-      expect(visits.length).toBeGreaterThan(0);
+      await expect.poll(async () => {
+        const visits = queryDBRows(
+          `SELECT * FROM visits WHERE record_id='${recordRow!.id}' AND is_active=1`,
+        );
+        return visits.length > 0;
+      }, { timeout: 15_000, intervals: [200, 500, 1000] }).toBe(true);
     } finally {
       // CLEANUP — always runs, even if test fails
       if (recordRow?.id) await cleanup(request, `/api/v1/records/${recordRow.id}`);
@@ -128,15 +133,13 @@ test.describe('ActivityDetailsModal — Real User Scenarios', () => {
           timeout: 3000,
         });
 
-        // Wait for undo timeout + API call (5s + buffer)
-        await page.waitForTimeout(7000);
-
-        // 4. VERIFY DB — record is soft-deleted
-        const afterRow = queryDBRow(
-          `SELECT is_active FROM records WHERE id='${record.id}'`,
-        );
-        expect(afterRow).not.toBeNull();
-        expect(afterRow!.is_active).toBe(0);
+        // Wait for undo timeout (5s) + API call, then verify DB
+        await expect.poll(async () => {
+          const afterRow = queryDBRow(
+            `SELECT is_active FROM records WHERE id='${record.id}'`,
+          );
+          return afterRow?.is_active ?? -1;
+        }, { timeout: 15_000, intervals: [500, 1000, 2000] }).toBe(0);
       }
     } finally {
       // CLEANUP — always runs, even if test fails
@@ -183,17 +186,18 @@ test.describe('ActivityDetailsModal — Real User Scenarios', () => {
         await page.locator('[data-testid="add-payment-submit"]').click();
 
         // Wait for UI update
-        await page.waitForTimeout(1000);
+        await expect(page.locator('[data-testid="modal-footer"]')).toBeVisible();
 
         // 3. VERIFY UI — footer is still visible (summary updated)
         await expect(page.locator('[data-testid="modal-footer"]')).toBeVisible();
 
-        // 4. VERIFY DB — payment row exists with amount=1500
-        const payments = queryDBRows(
-          `SELECT * FROM payments WHERE record_id='${record.id}' AND is_active=1`,
-        );
-        expect(payments.length).toBeGreaterThan(0);
-        expect(payments[0].amount).toBe(1500);
+        // 4. VERIFY DB — payment row exists with amount=1500 (retry until commit lands)
+        await expect.poll(async () => {
+          const payments = queryDBRows(
+            `SELECT * FROM payments WHERE record_id='${record.id}' AND is_active=1`,
+          );
+          return payments.length > 0 && payments[0].amount === 1500;
+        }, { timeout: 15_000, intervals: [200, 500, 1000] }).toBe(true);
       }
     } finally {
       // CLEANUP — always runs, even if test fails
@@ -227,26 +231,27 @@ test.describe('ActivityDetailsModal — Real User Scenarios', () => {
     );
 
     if (differentService) {
-      // 2. ACTION — change service in the select
+      // 2. ACTION — change service in the select (onChange triggers auto-save via onUpdate)
       const serviceSelect = page.locator('[data-testid="select-service"]');
       await expect(serviceSelect).toBeVisible();
       await serviceSelect.selectOption(differentService.id);
 
-      // Wait for save (select triggers auto-save or blur)
-      await serviceSelect.blur();
-      await page.waitForTimeout(1000);
+      // Force blur to ensure any pending events fire
+      await page.click('body');
+      await page.waitForTimeout(200);
 
-      // 3. VERIFY DB — service_id was updated
-      const afterRow = queryDBRow(
-        `SELECT service_id FROM activities WHERE id='${(activity as any).id}'`,
-      );
-      expect(afterRow).not.toBeNull();
-      expect(afterRow!.service_id).toBe(differentService.id);
+      // 3. VERIFY DB — service_id was updated (retry until API commit lands)
+      await expect.poll(async () => {
+        const afterRow = queryDBRow(
+          `SELECT service_id FROM activities WHERE id='${(activity as any).id}'`,
+        );
+        return afterRow?.service_id;
+      }, { timeout: 15_000, intervals: [200, 500, 1000] }).toBe(differentService.id);
 
       // Restore original service
       await serviceSelect.selectOption(originalServiceId);
-      await serviceSelect.blur();
-      await page.waitForTimeout(500);
+      await page.click('body');
+      await page.waitForTimeout(200);
     }
   });
 
@@ -358,14 +363,14 @@ test.describe('ActivityDetailsModal — Real User Scenarios', () => {
 
         // Click undo
         await page.locator('text=Отменить').click();
-        await page.waitForTimeout(1000);
 
-        // 4. VERIFY DB — record still active
-        const row = queryDBRow(
-          `SELECT is_active FROM records WHERE id='${record.id}'`,
-        );
-        expect(row).not.toBeNull();
-        expect(row!.is_active).toBe(1);
+        // 4. VERIFY DB — record still active (retry until undo is processed)
+        await expect.poll(async () => {
+          const row = queryDBRow(
+            `SELECT is_active FROM records WHERE id='${record.id}'`,
+          );
+          return row?.is_active ?? -1;
+        }, { timeout: 15_000, intervals: [200, 500, 1000] }).toBe(1);
       }
     } finally {
       // CLEANUP — always runs, even if test fails

@@ -37,8 +37,8 @@ test.describe('ActivityDetailsModal — Real User Scenarios', () => {
     const testVisitorName = `E2E Visitor ${uid}`;
 
     // Declare cleanup targets outside try so finally can access them
-    let recordRow: Record<string, any> | null = null;
-    let clientRow: Record<string, any> | null = null;
+    let recordRow: any = null;
+    let clientRow: any = null;
 
     try {
       // 1. ACTION — open add tab and fill form

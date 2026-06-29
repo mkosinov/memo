@@ -261,3 +261,31 @@ async def test_seed_is_idempotent(db_manager: DBManager) -> None:
 
         result = await session.execute(text("SELECT COUNT(*) FROM activities"))
         assert result.scalar() == 45
+
+
+async def test_seed_handles_month_boundary_overflow(db_manager: DBManager) -> None:
+    """Regression for seed.py:286 — day arithmetic must not overflow month boundary.
+
+    Bug: week_start.replace(day=week_start.day + day) raises ValueError when
+    the resulting day exceeds the month's length (e.g., June 29 + day=2 = 31,
+    but June has only 30 days). The fix must use timedelta or equivalent.
+
+    Triggered by: WEEK3_START computing to 2026-06-29 (a Monday), so day=2
+    (Wednesday) gives day=31 which is invalid for June.
+    """
+    from datetime import datetime
+
+    from src.seed import seed as seed_module
+    from src.seed.seed import seed_data
+
+    original_week3 = seed_module.WEEK3_START
+    # June has 30 days; 29 + 2 = 31 → ValueError before fix
+    seed_module.WEEK3_START = datetime(2026, 6, 29)
+    try:
+        await seed_data(db_manager)
+        async with db_manager.async_session() as session:
+            result = await session.execute(text("SELECT COUNT(*) FROM activities"))
+            count = result.scalar()
+            assert count > 0, "Expected activities to be created after seed"
+    finally:
+        seed_module.WEEK3_START = original_week3

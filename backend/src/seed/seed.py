@@ -283,9 +283,7 @@ async def _seed_activities(session) -> None:
             service_id = _SERVICE_NAME_TO_ID[svc_name]
             hour = int(start_h)
             minute = 30 if start_h % 1 else 0
-            start_dt = week_start.replace(
-                day=week_start.day + day, hour=hour, minute=minute
-            )
+            start_dt = (week_start + timedelta(days=day)).replace(hour=hour, minute=minute)
             duration_min = int(dur_h * 60)
             session.add(Activity(
                 id=activity_id,

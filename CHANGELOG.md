@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — 2026-06-29
+
+### Fixed
+- **Backend seed.py month-boundary overflow** — branch `feat/phase2-payment-patch` (hotfix):
+  - `backend/src/seed/seed.py:286-287` used `week_start.replace(day=week_start.day + day)` which raised `ValueError: day is out of range for month` when the resulting day exceeded the month's length (e.g., June 29 + 2 days = 31, but June has 30 days).
+  - Bug existed on main (commit `242a466`, 2026-06-17) but was dormant until the current week started on 2026-06-29.
+  - Fix: use `week_start + timedelta(days=day)` to correctly handle month/year boundaries.
+  - **Unblocks pre-push hook** (`scripts/test-all.sh`) which was failing 20+ tests because the seed crashed.
+  - 1 file changed: `backend/src/seed/seed.py`. 1 new regression test (`test_seed_handles_month_boundary_overflow` in `backend/tests/test_seed.py`) from Gate 1.
+  - 21 seed tests now pass (was 20 failing + 1 new RED). **Tests: 635 passed, 4 xfailed, 0 regressions**.
+  - Note: This is a hotfix scoped to unblock Phase 2 push. The same fix should be cherry-picked to main as a separate PR.
+
 ## [Unreleased] — 2026-06-28
 
 ### Added

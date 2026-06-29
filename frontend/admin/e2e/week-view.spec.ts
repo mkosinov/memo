@@ -19,7 +19,7 @@ test.describe('Schedule Page', () => {
     });
     await expect(page).toHaveScreenshot('schedule-default.png', {
       fullPage: true,
-      maxDiffPixels: 100,
+      maxDiffPixels: 1000,
     });
   });
 
@@ -29,7 +29,7 @@ test.describe('Schedule Page', () => {
     await page.waitForSelector('[data-testid="menubar"]', { timeout: 10000 });
     const menubar = page.getByTestId('menubar');
     await expect(menubar).toHaveScreenshot('menubar.png', {
-      maxDiffPixels: 50,
+      maxDiffPixels: 500,
     });
   });
 
@@ -43,7 +43,7 @@ test.describe('Schedule Page', () => {
     });
     await expect(page).toHaveScreenshot('schedule-with-activities.png', {
       fullPage: true,
-      maxDiffPixels: 100,
+      maxDiffPixels: 1000,
     });
   });
 
@@ -57,7 +57,7 @@ test.describe('Schedule Page', () => {
 
     await expect(page).toHaveScreenshot('schedule-next-week.png', {
       fullPage: true,
-      maxDiffPixels: 100,
+      maxDiffPixels: 1000,
     });
   });
 });

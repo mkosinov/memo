@@ -5,7 +5,7 @@
 # Each shard gets its own DB, backend port, and frontend port.
 #
 # Environment variables (all required):
-#   SHARD_ID          1-5 (determines DB path)
+#   SHARD_ID          1-2 (determines DB path)
 #   SHARD_PORT        Frontend port (e.g. 3002)
 #   BACKEND_PORT      Backend port (e.g. 8001)
 #   TEST_DB_PATH      Path to shard's SQLite DB (e.g. backend/test_memo_shard1.db)
@@ -73,8 +73,8 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-# Wait for backend to be ready (max 60s — 5 parallel FastAPI/uicorn + alembic
-# can take 30-50s each under load, allow plenty of headroom)
+# Wait for backend to be ready (max 60s — 2 parallel FastAPI/uicorn + alembic
+# can take 10-30s each under load, allow plenty of headroom)
 BACKEND_READY=false
 for i in $(seq 1 60); do
   if curl -s -o /dev/null -w "%{http_code}" "http://localhost:$BACKEND_PORT/docs" --max-time 10 2>/dev/null | grep -qE "^(2|3)"; then
@@ -114,8 +114,8 @@ _orig_cleanup() {
 }
 trap _orig_cleanup EXIT INT TERM
 
-# Wait for frontend to be ready (max 120s — 5 parallel Next.js dev servers
-# can take 30-60s each under load, allow plenty of headroom.
+# Wait for frontend to be ready (max 120s — 2 parallel Next.js dev servers
+# can take 15-30s each under load, allow plenty of headroom.
 # Use --max-time 30 for curl because Next.js dev server compiles routes
 # on first request, which can take 20+ seconds.
 for i in $(seq 1 120); do
@@ -128,6 +128,24 @@ for i in $(seq 1 120); do
     exit 1
   fi
   sleep 1
+done
+
+# Force-compile all major routes by hitting them once
+echo "[shard-$SHARD_ID] Warming up routes..."
+WARMUP_ROUTES=(
+  "/"
+  "/schedule"
+  "/clients"
+  "/records"
+  "/services"
+  "/masters"
+  "/locations"
+  "/tags"
+  "/photos"
+)
+for route in "${WARMUP_ROUTES[@]}"; do
+  HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:$SHARD_PORT$route" --max-time 60 2>/dev/null || echo "000")
+  echo "  [shard-$SHARD_ID] $route → $HTTP_CODE"
 done
 
 echo "[shard-$SHARD_ID] Stack ready. Waiting for shutdown signal..."

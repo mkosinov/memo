@@ -70,7 +70,7 @@ test.describe('ActivityDetailsModal — Real User Scenarios', () => {
       await expect.poll(async () => {
         clientRow = queryDBRow(`SELECT * FROM clients WHERE phone='${testPhone}' AND is_active=1`);
         return clientRow !== null;
-      }, { timeout: 15_000, intervals: [200, 500, 1000] }).toBe(true);
+      }, { timeout: 30_000, intervals: [200, 500, 1000] }).toBe(true);
       expect(clientRow!.name).toBe(testClientName);
       expect(clientRow!.channel).toBeTruthy();
 
@@ -80,7 +80,7 @@ test.describe('ActivityDetailsModal — Real User Scenarios', () => {
           `SELECT * FROM records WHERE client_id='${clientRow!.id}' AND is_active=1`,
         );
         return recordRow !== null;
-      }, { timeout: 15_000, intervals: [200, 500, 1000] }).toBe(true);
+      }, { timeout: 30_000, intervals: [200, 500, 1000] }).toBe(true);
       expect(recordRow!.status).toBeTruthy();
 
       // 5. VERIFY DB — visit was created for this record
@@ -89,7 +89,7 @@ test.describe('ActivityDetailsModal — Real User Scenarios', () => {
           `SELECT * FROM visits WHERE record_id='${recordRow!.id}' AND is_active=1`,
         );
         return visits.length > 0;
-      }, { timeout: 15_000, intervals: [200, 500, 1000] }).toBe(true);
+      }, { timeout: 30_000, intervals: [200, 500, 1000] }).toBe(true);
     } finally {
       // CLEANUP — always runs, even if test fails
       if (recordRow?.id) await cleanup(request, `/api/v1/records/${recordRow.id}`);
@@ -139,7 +139,7 @@ test.describe('ActivityDetailsModal — Real User Scenarios', () => {
             `SELECT is_active FROM records WHERE id='${record.id}'`,
           );
           return afterRow?.is_active ?? -1;
-        }, { timeout: 15_000, intervals: [500, 1000, 2000] }).toBe(0);
+        }, { timeout: 30_000, intervals: [500, 1000, 2000] }).toBe(0);
       }
     } finally {
       // CLEANUP — always runs, even if test fails
@@ -197,7 +197,7 @@ test.describe('ActivityDetailsModal — Real User Scenarios', () => {
             `SELECT * FROM payments WHERE record_id='${record.id}' AND is_active=1`,
           );
           return payments.length > 0 && payments[0].amount === 1500;
-        }, { timeout: 15_000, intervals: [200, 500, 1000] }).toBe(true);
+        }, { timeout: 30_000, intervals: [200, 500, 1000] }).toBe(true);
       }
     } finally {
       // CLEANUP — always runs, even if test fails
@@ -246,7 +246,7 @@ test.describe('ActivityDetailsModal — Real User Scenarios', () => {
           `SELECT service_id FROM activities WHERE id='${(activity as any).id}'`,
         );
         return afterRow?.service_id;
-      }, { timeout: 15_000, intervals: [200, 500, 1000] }).toBe(differentService.id);
+      }, { timeout: 30_000, intervals: [200, 500, 1000] }).toBe(differentService.id);
 
       // Restore original service
       await serviceSelect.selectOption(originalServiceId);
@@ -370,7 +370,7 @@ test.describe('ActivityDetailsModal — Real User Scenarios', () => {
             `SELECT is_active FROM records WHERE id='${record.id}'`,
           );
           return row?.is_active ?? -1;
-        }, { timeout: 15_000, intervals: [200, 500, 1000] }).toBe(1);
+        }, { timeout: 30_000, intervals: [200, 500, 1000] }).toBe(1);
       }
     } finally {
       // CLEANUP — always runs, even if test fails

@@ -63,6 +63,13 @@ test.describe('Scenario 1 — Activity at capacity', () => {
       // 2. Navigate to schedule and wait for the activity card
       await waitForScheduleReady(page);
 
+      // Reload to force React Query to refetch fresh data.
+      // waitForScheduleReady waits for any activity card (seed data)
+      // but the newly created activity above may not be in the initial
+      // React Query cache. Hard reload bypasses stale cache.
+      await page.reload({ waitUntil: 'networkidle' });
+      await waitForScheduleReady(page);
+
       // Find the specific activity card
       const activityCard = page.locator(`[data-testid="activity-${activity.id}"]`);
       await expect(activityCard).toBeVisible({ timeout: 30_000 });

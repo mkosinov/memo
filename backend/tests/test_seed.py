@@ -277,7 +277,7 @@ async def test_seed_creates_fixed_week_activities(db_manager: DBManager) -> None
 
 
 async def test_seed_fixed_week_dates_in_range(db_manager: DBManager) -> None:
-    """All fixed-week activities fall within 2020-01-06 to 2020-01-12 (Mon-Sun)."""
+    """All fixed-week activities fall within 2026-06-15 to 2026-06-21 (Mon-Sun)."""
     from datetime import datetime as _dt
 
     from src.seed.seed import seed_data
@@ -296,10 +296,10 @@ async def test_seed_fixed_week_dates_in_range(db_manager: DBManager) -> None:
         for row in rows:
             # SQLite stores datetime as ISO string; parse it.
             start = _dt.fromisoformat(row.start) if isinstance(row.start, str) else row.start
-            assert start.year == 2020, f"{row.id}: expected year 2020, got {start.year}"
-            assert start.month == 1, f"{row.id}: expected month 1, got {start.month}"
-            assert 6 <= start.day <= 12, (
-                f"{row.id}: expected day 6-12, got {start.day}"
+            assert start.year == 2026, f"{row.id}: expected year 2026, got {start.year}"
+            assert start.month == 6, f"{row.id}: expected month 6, got {start.month}"
+            assert 15 <= start.day <= 21, (
+                f"{row.id}: expected day 15-21, got {start.day}"
             )
 
 

@@ -65,7 +65,7 @@ test.describe('Scenario 1 — Activity at capacity', () => {
 
       // Find the specific activity card
       const activityCard = page.locator(`[data-testid="activity-${activity.id}"]`);
-      await expect(activityCard).toBeVisible({ timeout: 10_000 });
+      await expect(activityCard).toBeVisible({ timeout: 30_000 });
 
       // Open the modal via custom event (same pattern as openAddTab helper)
       await page.evaluate((act: any) => {

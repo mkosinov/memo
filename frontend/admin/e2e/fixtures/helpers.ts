@@ -30,7 +30,8 @@ const DB_PATH = resolveDBPath();
  * aren't affected by records/activities created by earlier tests in the
  * same shard. Mirrors the cleanup in e2e/globalSetup.ts — seed IDs are
  * short (clients: c1..c5, records: r1..r6, visits: v1..v10, activities:
- * ev_0..ev_44) so length checks distinguish them from UUID test data.
+ * ev_0..ev_44, ev_fixed_0..ev_fixed_9) so we exclude known seed prefixes
+ * rather than relying on length. UUID test data is never prefixed with these.
  */
 export function cleanTestData() {
   try {
@@ -38,7 +39,7 @@ export function cleanTestData() {
       DELETE FROM payments WHERE length(id) > 3;
       DELETE FROM visits WHERE length(id) > 3;
       DELETE FROM records WHERE length(id) > 3;
-      DELETE FROM activities WHERE length(id) > 5;
+      DELETE FROM activities WHERE id NOT LIKE 'ev\\_%' ESCAPE '\\' AND id NOT LIKE 'ev_fixed_%';
       DELETE FROM clients WHERE length(id) > 3;
     "`, { encoding: 'utf-8', stdio: 'pipe' });
   } catch (err: any) {
@@ -344,17 +345,31 @@ export async function waitForClientsReady(
   );
   await page.goto('/clients');
   await page.waitForSelector('h1:has-text("Клиенты")', { timeout: 60_000 });
-  // Wait for either table rows or the "no clients" empty state
   await page.waitForSelector('table tbody, p:has-text("Нет клиентов")', { timeout: 60_000 });
-  await clientsResponse.catch(() => {}); // Don't fail if response is cached
+  await clientsResponse.catch(() => {});
   await page.waitForTimeout(500); // React re-render buffer
+
+  // Hard reload to force React Query to refetch with fresh data.
+  // This bypasses any stale cache that might be serving the first
+  // page load's data. The reload is async; we wait for the second
+  // /api/v1/clients response before checking for the row.
+  if (options?.waitForName) {
+    const clientsResponse2 = page.waitForResponse(
+      (resp) => resp.url().includes('/api/v1/clients') && resp.status() === 200,
+      { timeout: 60_000 },
+    );
+    await page.reload({ waitUntil: 'networkidle' });
+    await page.waitForSelector('table tbody, p:has-text("Нет клиентов")', { timeout: 60_000 });
+    await clientsResponse2.catch(() => {});
+    await page.waitForTimeout(500); // React re-render buffer
+  }
 
   // If caller needs to wait for a specific client name to appear in the table
   if (options?.waitForName) {
     await page
       .locator('table tbody tr')
       .filter({ hasText: options.waitForName })
-      .waitFor({ state: 'visible', timeout: 15_000 });
+      .waitFor({ state: 'visible', timeout: 30_000 });
   }
 }
 

@@ -52,6 +52,17 @@ Or skip the hook once (NOT recommended):
 git push --no-verify
 ```
 
+## Test workflow
+
+For a brief overview of how tests are organized, what each test type does, and how to run them (quick vs full pre-push vs hook), see [docs/tests_workflow.md](docs/tests_workflow.md).
+
+Topics covered:
+- Test environment (dev vs E2E shard infrastructure)
+- Test commands and working directories
+- Visual regression baselines and date stability
+- E2E test patterns (`openModal` / `openAddTab` via DB lookup)
+- DB conventions
+
 ## Adding a User Scenario
 
 1. Add scenario to `docs/specs/2026-06-19-current-user-scenarios.md` (and link to E2E)

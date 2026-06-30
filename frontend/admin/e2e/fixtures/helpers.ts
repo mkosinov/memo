@@ -264,12 +264,34 @@ export async function waitForRecordsReady(page: Page) {
 /**
  * Wait for clients page to load with table or empty state.
  * Navigates to /clients and waits for the heading and content.
+ *
+ * @param options.waitForName — if provided, waits for a specific client name
+ *   to appear in the table rows. Useful after creating a client via API
+ *   where React Query may serve stale cached data.
  */
-export async function waitForClientsReady(page: Page) {
+export async function waitForClientsReady(
+  page: Page,
+  options?: { waitForName?: string },
+) {
+  // Set up response listener BEFORE navigation so we catch the fresh API call
+  const clientsResponse = page.waitForResponse(
+    (resp) => resp.url().includes('/api/v1/clients') && resp.status() === 200,
+    { timeout: 60_000 },
+  );
   await page.goto('/clients');
   await page.waitForSelector('h1:has-text("Клиенты")', { timeout: 60_000 });
   // Wait for either table rows or the "no clients" empty state
   await page.waitForSelector('table tbody, p:has-text("Нет клиентов")', { timeout: 60_000 });
+  await clientsResponse.catch(() => {}); // Don't fail if response is cached
+  await page.waitForTimeout(500); // React re-render buffer
+
+  // If caller needs to wait for a specific client name to appear in the table
+  if (options?.waitForName) {
+    await page
+      .locator('table tbody tr')
+      .filter({ hasText: options.waitForName })
+      .waitFor({ state: 'visible', timeout: 15_000 });
+  }
 }
 
 /**

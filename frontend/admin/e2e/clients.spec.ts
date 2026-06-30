@@ -103,10 +103,10 @@ test.describe('Clients page', () => {
     const clientId = client.id;
 
     try {
-      await waitForClientsReady(page);
+      await waitForClientsReady(page, { waitForName: testName });
       // Reload to ensure fresh data from API (React Query may cache old list)
       await page.reload({ waitUntil: 'networkidle' });
-      await waitForClientsReady(page);
+      await waitForClientsReady(page, { waitForName: testName });
 
       // New client should appear in the table
       const row = page
@@ -138,7 +138,7 @@ test.describe('Clients page', () => {
     const clientId = client.id;
 
     try {
-      await waitForClientsReady(page);
+      await waitForClientsReady(page, { waitForName: client.name });
 
       // Find the row with our test client
       const row = page
@@ -175,7 +175,7 @@ test.describe('Clients page', () => {
     const clientId = client.id;
 
     try {
-      await waitForClientsReady(page);
+      await waitForClientsReady(page, { waitForName: originalName });
 
       // Open client card
       const row = page
@@ -207,7 +207,7 @@ test.describe('Clients page', () => {
 
       // Reload page to pick up updated data
       await page.reload({ waitUntil: 'networkidle' });
-      await waitForClientsReady(page);
+      await waitForClientsReady(page, { waitForName: updatedName });
 
       // Verify updated name appears in table
       await expect(
@@ -226,7 +226,7 @@ test.describe('Clients page', () => {
     const clientId = client.id;
 
     try {
-      await waitForClientsReady(page);
+      await waitForClientsReady(page, { waitForName: testName });
 
       // Open client card
       const row = page
@@ -303,7 +303,7 @@ test.describe('Clients page', () => {
     const clientId = client.id;
 
     try {
-      await waitForClientsReady(page);
+      await waitForClientsReady(page, { waitForName: uniqueName });
 
       // Type the unique name into the search box
       const searchInput = page.locator('input[placeholder*="Поиск"]');
@@ -361,7 +361,7 @@ test.describe('Clients page', () => {
     const clientId = client.id;
 
     try {
-      await waitForClientsReady(page);
+      await waitForClientsReady(page, { waitForName: client.name });
 
       // Open client card
       const row = page
@@ -402,10 +402,10 @@ async function setupRecordTab(
   const activity = await createTestActivity(request);
   const record = await createTestRecord(request, activity.id, client.id);
 
-  await waitForClientsReady(page);
+  await waitForClientsReady(page, { waitForName: client.name });
   // Reload to pick up newly created client (React Query may serve stale cache)
   await page.reload({ waitUntil: 'networkidle' });
-  await waitForClientsReady(page);
+  await waitForClientsReady(page, { waitForName: client.name });
 
   // Open client card
   const row = page

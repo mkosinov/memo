@@ -54,9 +54,9 @@ WEEK3_START = _THIS_WEEK_MONDAY   # current week (so e2e tests find activities)
 
 # Fixed reference week for visual regression baselines.
 # Activities and records r1-r6 in this week have stable dates so that
-# page.clock.install({ time: '2026-06-15' }) in visual tests produces
+# page.clock.install({ time: '2020-01-06' }) in visual tests produces
 # consistent screenshots regardless of when tests are run.
-WEEK_FIXED_START = datetime(2026, 6, 15)  # Monday, 2026-06-15
+WEEK_FIXED_START = datetime(2020, 1, 6)  # Monday, 2020-01-06 (5+ years in past — never overlaps with dynamic weeks)
 
 _SERVICE_NAME_TO_ID: dict[str, str] = {
     "Морской пейзаж": "s7",
@@ -151,7 +151,7 @@ _ACTIVITIES_RAW_WEEK3: list[tuple] = [
 ]
 
 # Fixed reference week: stable dates for visual regression baselines.
-# Used with page.clock.install({ time: '2026-06-15' }) in visual tests.
+# Used with page.clock.install({ time: '2020-01-06' }) in visual tests.
 # Records r1-r6 link to activities here (indices 0,1,2,3,5,8).
 _ACTIVITIES_RAW_FIXED: list[tuple] = [
     # day, master, start_h, dur_h, svc_name, location, capacity, is_private

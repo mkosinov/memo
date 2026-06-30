@@ -13,7 +13,7 @@ test.describe('Schedule Page', () => {
     // Combined with openModal/openAddTab DB lookup (Approach B+), this makes
     // visual regression baselines date-stable.
     // Must be called BEFORE page.goto() — clock.install injects an init script.
-    await page.clock.install({ time: new Date('2026-06-15T10:00:00') });
+    await page.clock.install({ time: new Date('2020-01-06T10:00:00') });
   });
 
   test('default state visual regression', async ({ page }) => {

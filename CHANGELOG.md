@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - 1 file changed: `backend/src/seed/seed.py`. 1 new regression test (`test_seed_handles_month_boundary_overflow` in `backend/tests/test_seed.py`) from Gate 1.
   - 21 seed tests now pass (was 20 failing + 1 new RED). **Tests: 635 passed, 4 xfailed, 0 regressions**.
   - Note: This is a hotfix scoped to unblock Phase 2 push. The same fix should be cherry-picked to main as a separate PR.
+- **Pre-push hook: 5→2 shards** — `scripts/test-all.sh` was declaring 5 Playwright shards but `playwright.config.ts` only has 2 projects (`shard-schedule`, `shard-rest`). The 3 missing projects (services, records, clients) were no-ops. Aligned `test-all.sh` to declare only the 2 actual projects. The 5-shard design (`docs/specs/2026-06-18-e2e-shard-5-projects-design.md`) is deferred until the missing 3 projects are added to `playwright.config.ts`.
 
 ## [Unreleased] — 2026-06-28
 

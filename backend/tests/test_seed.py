@@ -179,14 +179,14 @@ async def test_seed_has_guest_tag(db_manager: DBManager) -> None:
 
 
 async def test_seed_populates_activities(db_manager: DBManager) -> None:
-    """Seed script creates 45 activities (three-week schedule)."""
+    """Seed script creates 55 activities (three-week + fixed reference week)."""
     from src.seed.seed import seed_data
 
     await seed_data(db_manager)
 
     async with db_manager.async_session() as session:
         result = await session.execute(text("SELECT COUNT(*) FROM activities"))
-        assert result.scalar() == 45
+        assert result.scalar() == 55
 
 
 async def test_seed_populates_clients(db_manager: DBManager) -> None:
@@ -260,7 +260,139 @@ async def test_seed_is_idempotent(db_manager: DBManager) -> None:
         assert result.scalar() == 6
 
         result = await session.execute(text("SELECT COUNT(*) FROM activities"))
-        assert result.scalar() == 45
+        assert result.scalar() == 55
+
+
+async def test_seed_creates_fixed_week_activities(db_manager: DBManager) -> None:
+    """Seed creates 10 activities with ev_fixed_ prefix for the fixed reference week."""
+    from src.seed.seed import seed_data
+
+    await seed_data(db_manager)
+
+    async with db_manager.async_session() as session:
+        result = await session.execute(
+            text("SELECT COUNT(*) FROM activities WHERE id LIKE 'ev_fixed_%'")
+        )
+        assert result.scalar() == 10
+
+
+async def test_seed_fixed_week_dates_in_range(db_manager: DBManager) -> None:
+    """All fixed-week activities fall within 2026-06-15 to 2026-06-21 (Mon-Sun)."""
+    from datetime import datetime as _dt
+
+    from src.seed.seed import seed_data
+
+    await seed_data(db_manager)
+
+    async with db_manager.async_session() as session:
+        result = await session.execute(
+            text(
+                "SELECT id, start FROM activities WHERE id LIKE 'ev_fixed_%' "
+                "ORDER BY id"
+            )
+        )
+        rows = result.all()
+        assert len(rows) == 10
+        for row in rows:
+            # SQLite stores datetime as ISO string; parse it.
+            start = _dt.fromisoformat(row.start) if isinstance(row.start, str) else row.start
+            assert start.year == 2026, f"{row.id}: expected year 2026, got {start.year}"
+            assert start.month == 6, f"{row.id}: expected month 6, got {start.month}"
+            assert 15 <= start.day <= 21, (
+                f"{row.id}: expected day 15-21, got {start.day}"
+            )
+
+
+async def test_seed_records_link_to_fixed_week(db_manager: DBManager) -> None:
+    """Records r1-r6 are linked to fixed-week activities (ev_fixed_*)."""
+    from src.seed.seed import seed_data
+
+    await seed_data(db_manager)
+
+    async with db_manager.async_session() as session:
+        result = await session.execute(
+            text(
+                "SELECT id, activity_id FROM records "
+                "WHERE id IN ('r1','r2','r3','r4','r5','r6') ORDER BY id"
+            )
+        )
+        rows = {r.id: r.activity_id for r in result.all()}
+        for rid, expected_prefix in [
+            ("r1", "ev_fixed_"),
+            ("r2", "ev_fixed_"),
+            ("r3", "ev_fixed_"),
+            ("r4", "ev_fixed_"),
+            ("r5", "ev_fixed_"),
+            ("r6", "ev_fixed_"),
+        ]:
+            assert rows[rid].startswith(expected_prefix), (
+                f"Record {rid}: expected activity starting with {expected_prefix}, "
+                f"got {rows[rid]}"
+            )
+
+
+async def test_seed_records_match_original_master_service(db_manager: DBManager) -> None:
+    """Records r1-r6 link to fixed-week activities matching original (master, service) pairs.
+
+    Original mapping:
+      r1 → m1/s7 (Морской пейзаж) Mon
+      r2 → m2/s5 (Ручная лепка) Mon
+      r3 → m3/s2 (Картина акрилом) Tue
+      r4 → m1/s3 (Мини-картина акрилом) Tue
+      r5 → m1/s7 (Морской пейзаж) Thu
+      r6 → m1/s7 (Морской пейзаж) Sat
+    """
+    from datetime import datetime as _dt
+
+    from src.seed.seed import seed_data
+
+    await seed_data(db_manager)
+
+    async with db_manager.async_session() as session:
+        result = await session.execute(
+            text(
+                "SELECT r.id AS rid, a.master_id, a.service_id, a.start "
+                "FROM records r "
+                "JOIN activities a ON r.activity_id = a.id "
+                "WHERE r.id IN ('r1','r2','r3','r4','r5','r6') "
+                "ORDER BY r.id"
+            )
+        )
+        rows = {r.rid: r for r in result.all()}
+
+        def _parse_dt(val: object) -> _dt:
+            """Parse ISO string from SQLite into datetime."""
+            return _dt.fromisoformat(val) if isinstance(val, str) else val
+
+        # r1 → m1, s7, Monday (weekday 0)
+        assert rows["r1"].master_id == "m1"
+        assert rows["r1"].service_id == "s7"
+        assert _parse_dt(rows["r1"].start).weekday() == 0  # Monday
+
+        # r2 → m2, s5, Monday (weekday 0)
+        assert rows["r2"].master_id == "m2"
+        assert rows["r2"].service_id == "s5"
+        assert _parse_dt(rows["r2"].start).weekday() == 0
+
+        # r3 → m3, s2, Tuesday (weekday 1)
+        assert rows["r3"].master_id == "m3"
+        assert rows["r3"].service_id == "s2"
+        assert _parse_dt(rows["r3"].start).weekday() == 1
+
+        # r4 → m1, s3, Tuesday (weekday 1)
+        assert rows["r4"].master_id == "m1"
+        assert rows["r4"].service_id == "s3"
+        assert _parse_dt(rows["r4"].start).weekday() == 1
+
+        # r5 → m1, s7, Thursday (weekday 3)
+        assert rows["r5"].master_id == "m1"
+        assert rows["r5"].service_id == "s7"
+        assert _parse_dt(rows["r5"].start).weekday() == 3
+
+        # r6 → m1, s7, Saturday (weekday 5)
+        assert rows["r6"].master_id == "m1"
+        assert rows["r6"].service_id == "s7"
+        assert _parse_dt(rows["r6"].start).weekday() == 5
 
 
 async def test_seed_handles_month_boundary_overflow(db_manager: DBManager) -> None:

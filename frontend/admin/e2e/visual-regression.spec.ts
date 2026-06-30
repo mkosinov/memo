@@ -21,8 +21,13 @@ import {
 // ---------------------------------------------------------------------------
 
 test.describe('Records Page — Visual Regression', () => {
-  test.beforeEach(() => {
+  test.beforeEach(async ({ page }) => {
     cleanTestData();
+    // Mock browser time to the fixed reference week (matches seed WEEK_FIXED_START)
+    // Combined with openModal/openAddTab DB lookup (Approach B+), this makes
+    // visual regression baselines date-stable.
+    // Must be called BEFORE page.goto() — clock.install injects an init script.
+    await page.clock.install({ time: new Date('2026-06-15T10:00:00') });
   });
 
   test('records page default state', async ({ page }) => {
@@ -64,6 +69,11 @@ test.describe('Records Page — Visual Regression', () => {
 test.describe('Activity Modal — Visual Regression', () => {
   test.beforeEach(async ({ page }) => {
     cleanTestData();
+    // Mock browser time to the fixed reference week (matches seed WEEK_FIXED_START)
+    // Combined with openModal/openAddTab DB lookup (Approach B+), this makes
+    // visual regression baselines date-stable.
+    // Must be called BEFORE page.goto() — clock.install injects an init script.
+    await page.clock.install({ time: new Date('2026-06-15T10:00:00') });
     await waitForScheduleReady(page);
   });
 

@@ -1,14 +1,100 @@
 'use client';
 
-import { useState, useCallback } from 'react';
-import type { VisitResponse, TariffResponse } from '@memo/api-client';
+import { useState, useCallback, useEffect } from 'react';
+import type { VisitResponse, TariffResponse, VisitPatch } from '@memo/api-client';
 import type { VisitStatus } from '@memo/domain';
 import { StatusPicker } from '@/app/components/shared/StatusPicker';
 import { StatusBadge } from '@/app/components/shared/StatusBadge';
-import type { AddVisitorPayload } from '@/app/components/shared/visitors/AddVisitorForm';
 import { safeStatus } from '@/app/lib/status-utils';
 import { RecordTable, type Column } from '@/app/components/shared/record/RecordTable';
 import { InlineEditCell } from '../InlineEditCell';
+import { InlineEditRow } from '../InlineEditRow';
+
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+export interface VisitRow {
+  id: string | null;
+  /** Transient UUID for React key. Stripped before API send. */
+  clientId: string;
+  visitor_id: string | null;
+  name: string;
+  age: number | null;
+  tariff_id: string | null;
+  price: number;
+  status: VisitStatus;
+}
+
+interface VisitFormState {
+  name: string;
+  age: number | null;
+  tariff_id: string | null;
+  price: number;
+  status: VisitStatus;
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+let _idCounter = 0;
+function transientId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `tid-${++_idCounter}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function visitResponseToRow(
+  visit: VisitResponse,
+  visitorsMap: Map<string, { name: string; age: number | null }>,
+): VisitRow {
+  if (!visit) {
+    // Defensive: should never happen, but guards against undefined API responses
+    return {
+      id: null,
+      clientId: transientId(),
+      visitor_id: null,
+      name: '',
+      age: null,
+      tariff_id: null,
+      price: 0,
+      status: 'waiting' as VisitStatus,
+    };
+  }
+  const visitor = visitorsMap.get(visit.visitor_id ?? '');
+  return {
+    id: visit.id,
+    clientId: transientId(),
+    visitor_id: visit.visitor_id ?? null,
+    name: visitor?.name ?? '',
+    age: visitor?.age ?? null,
+    tariff_id: visit.tariff_id ?? null,
+    price: visit.price,
+    status: safeStatus(visit.status) as VisitStatus,
+  };
+}
+
+function makeEmptyVisitRow(tariffs: TariffResponse[]): VisitRow {
+  const firstTariff = tariffs[0];
+  return {
+    id: null,
+    clientId: transientId(),
+    visitor_id: null,
+    name: '',
+    age: null,
+    tariff_id: firstTariff?.id ?? null,
+    price: firstTariff?.price ?? 0,
+    status: 'waiting' as VisitStatus,
+  };
+}
+
+function pickFormData(row: VisitRow): VisitFormState {
+  return {
+    name: row.name,
+    age: row.age,
+    tariff_id: row.tariff_id,
+    price: row.price,
+    status: row.status,
+  };
+}
 
 // ── Column definitions ────────────────────────────────────────────────────────
 
@@ -29,13 +115,85 @@ export interface RecordVisitsTableProps {
   anonymVisits: number;
   totalCost: number;
   recordStatus: VisitStatus;
+  /** The record's client — needed for addVisit (createVisitor requires client_id). */
+  clientId: string;
   isReadOnly?: boolean;
-  onChangeVisit: (visitId: string, data: { status?: VisitStatus; tariff_id?: string }) => void;
+  /** POST new visit (2-step: createVisitor → createVisit). Returns saved VisitResponse. */
+  onAddVisit: (data: { client_id: string; name: string; age?: number; tariff_id?: string | null; price: number }) => Promise<VisitResponse>;
+  /** PATCH existing visit (tariff/price/status). Returns updated VisitResponse. */
+  onPatchVisit: (visitId: string, data: VisitPatch) => Promise<VisitResponse>;
+  /** DELETE existing visit. */
+  onDeleteVisit: (visitId: string) => Promise<void>;
+  /** Update visitor name/age (calls updateVisitor API). */
   onChangeVisitor: (visitorId: string, data: { name?: string; age?: number | null }) => void;
-  onChangeVisitPrice: (visitId: string, price: number) => void;
-  onDeleteVisit: (visitId: string) => void;
   onAnonymVisitsChange: (value: number) => void;
-  onAddVisitor: (data: AddVisitorPayload) => void;
+}
+
+// ── Age select options (shared between new & existing rows) ───────────────────
+
+function AgeSelect({
+  value,
+  onChange,
+  testId,
+}: {
+  value: number | null;
+  onChange: (age: number | null) => void;
+  testId?: string;
+}) {
+  return (
+    <select
+      value={value != null ? String(value) : 'adult'}
+      onChange={(e) => {
+        const v = e.target.value;
+        onChange(v === 'adult' ? null : Number(v));
+      }}
+      title={value != null ? String(value) : 'Взрослый'}
+      className="w-full rounded border px-1 py-0.5 text-sm bg-white truncate"
+      style={{ borderColor: 'var(--line)' }}
+      data-testid={testId}
+    >
+      <optgroup label="Дети">
+        {[3, 4, 5, 6, 7, 8, 9, 10, 11].map((n) => (
+          <option key={n} value={String(n)}>{n}</option>
+        ))}
+      </optgroup>
+      <optgroup label="Подростки">
+        {[12, 13, 14, 15, 16, 17].map((n) => (
+          <option key={n} value={String(n)}>{n}</option>
+        ))}
+      </optgroup>
+      <option value="adult">Взрослый</option>
+    </select>
+  );
+}
+
+// ── Tariff select options (shared between new & existing rows) ────────────────
+
+function TariffSelect({
+  value,
+  tariffs,
+  onChange,
+  testId,
+}: {
+  value: string | null;
+  tariffs: TariffResponse[];
+  onChange: (tariffId: string) => void;
+  testId?: string;
+}) {
+  return (
+    <select
+      value={value ?? ''}
+      onChange={(e) => onChange(e.target.value)}
+      className="w-full rounded border px-2 py-0.5 text-sm"
+      style={{ borderColor: 'var(--line)' }}
+      data-testid={testId}
+    >
+      <option value="">— тариф —</option>
+      {tariffs.map((t) => (
+        <option key={t.id} value={t.id}>{t.title} ({t.price} ₽)</option>
+      ))}
+    </select>
+  );
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -47,22 +205,43 @@ export function RecordVisitsTable({
   anonymVisits,
   totalCost,
   recordStatus,
+  clientId,
   isReadOnly,
-  onChangeVisit,
-  onChangeVisitor,
-  onChangeVisitPrice,
+  onAddVisit,
+  onPatchVisit,
   onDeleteVisit,
+  onChangeVisitor,
   onAnonymVisitsChange,
-  onAddVisitor,
 }: RecordVisitsTableProps) {
-  const [showForm, setShowForm] = useState(false);
+  const [rows, setRows] = useState<VisitRow[]>(() =>
+    visits.map((v) => visitResponseToRow(v, visitorsMap)),
+  );
   const [anonymInput, setAnonymInput] = useState(anonymVisits);
 
-  // Inline add-row state (when showForm is true)
-  const [newName, setNewName] = useState('');
-  const [newAge, setNewAge] = useState<number | null>(null);
-  const [newTariffId, setNewTariffId] = useState('');
-  const [newPrice, setNewPrice] = useState(0);
+  // Re-sync rows when visits/visitorsMap changes (after invalidation/refetch).
+  // Preserves new rows (id === null) and existing rows' clientId (for key stability).
+  useEffect(() => {
+    setRows((prevRows) => {
+      const newRows = prevRows.filter((r) => r.id === null);
+      const updatedExisting = visits.map((visit) => {
+        const existing = prevRows.find((r) => r.id === visit.id);
+        if (existing) {
+          const visitor = visitorsMap.get(visit.visitor_id ?? '');
+          return {
+            ...existing,
+            visitor_id: visit.visitor_id ?? null,
+            name: visitor?.name ?? existing.name,
+            age: visitor?.age ?? existing.age,
+            tariff_id: visit.tariff_id ?? existing.tariff_id,
+            price: visit.price,
+            status: safeStatus(visit.status) as VisitStatus,
+          };
+        }
+        return visitResponseToRow(visit, visitorsMap);
+      });
+      return [...updatedExisting, ...newRows];
+    });
+  }, [visits, visitorsMap]);
 
   const handleAnonymChange = useCallback((value: number) => {
     setAnonymInput(value);
@@ -70,39 +249,62 @@ export function RecordVisitsTable({
     return () => clearTimeout(t);
   }, [onAnonymVisitsChange]);
 
-  const resetNewVisitor = useCallback(() => {
-    setNewName('');
-    setNewAge(null);
-    setNewTariffId('');
-    setNewPrice(0);
-  }, []);
+  // ── Row mutations ─────────────────────────────────────────────────────────
 
-  // Empty name → create visitor with empty name (backend counts it as anonym_visit)
-  const handleAdd = useCallback((data: AddVisitorPayload) => {
-    onAddVisitor(data);
-    setShowForm(false);
-    resetNewVisitor();
-  }, [onAddVisitor, resetNewVisitor]);
-
-  const handleCancelAdd = useCallback(() => {
-    setShowForm(false);
-    resetNewVisitor();
-  }, [resetNewVisitor]);
-
-  // Auto-fill price when tariff changes (if user hasn't manually edited it)
-  const handleNewTariffChange = useCallback((tariffId: string) => {
-    setNewTariffId(tariffId);
-    const tariff = tariffs.find((t) => t.id === tariffId);
-    if (tariff) setNewPrice(tariff.price);
+  const handleAddClick = useCallback(() => {
+    setRows((prev) => [...prev, makeEmptyVisitRow(tariffs)]);
   }, [tariffs]);
 
-  // Commit on Enter in price field (name field has its own inline handler)
-  const handleNewNameKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      handleAdd({ name: newName.trim(), age: newAge, tariff_id: newTariffId });
-    }
-  }, [newName, newAge, newTariffId, handleAdd]);
+  /** Remove a new (unsaved) row from the array — no API call. */
+  const handleRemove = useCallback((row: VisitRow) => {
+    setRows((prev) => prev.filter((r) => r !== row));
+  }, []);
+
+  /** DELETE a saved visit via API, then remove from array. */
+  const handleDeleteRow = useCallback(async (id: string) => {
+    await onDeleteVisit(id);
+    setRows((prev) => prev.filter((r) => r.id !== id));
+  }, [onDeleteVisit]);
+
+  /** POST a new visit (2-step: createVisitor → createVisit). Returns saved row. */
+  const handleAdd = useCallback(async (data: VisitFormState): Promise<VisitRow> => {
+    const saved = await onAddVisit({
+      client_id: clientId,
+      name: data.name,
+      age: data.age ?? undefined,
+      tariff_id: data.tariff_id,
+      price: data.price,
+    });
+    return visitResponseToRow(saved, visitorsMap);
+  }, [onAddVisit, clientId, visitorsMap]);
+
+  /** PATCH an existing visit. Returns updated row. */
+  const handleUpdate = useCallback(async (id: string, data: VisitFormState): Promise<VisitRow> => {
+    const updated = await onPatchVisit(id, {
+      tariff_id: data.tariff_id,
+      price: data.price,
+      status: data.status,
+    });
+    return visitResponseToRow(updated, visitorsMap);
+  }, [onPatchVisit, visitorsMap]);
+
+  /** Replace a row in the array by its clientId (used after onAdd resolves). */
+  const replaceRowByClientId = useCallback((rowClientId: string, savedRow: VisitRow) => {
+    setRows((prev) =>
+      prev.map((r) =>
+        r.clientId === rowClientId ? { ...savedRow, clientId: r.clientId } : r,
+      ),
+    );
+  }, []);
+
+  /** Replace a row in the array by its id (used after onPatchVisit resolves). */
+  const replaceRowById = useCallback((id: string, updatedRow: VisitRow) => {
+    setRows((prev) =>
+      prev.map((r) => (r.id === id ? { ...updatedRow, clientId: r.clientId } : r)),
+    );
+  }, []);
+
+  // ── Render ────────────────────────────────────────────────────────────────
 
   return (
     <div data-testid="record-visits-table">
@@ -113,233 +315,154 @@ export function RecordVisitsTable({
 
       {/* Table */}
       <RecordTable testId="record-visits-table-table">
-        {(visits.length > 0 || showForm) && <RecordTable.Header columns={VISIT_COLUMNS} isReadOnly={isReadOnly} />}
+        {rows.length > 0 && <RecordTable.Header columns={VISIT_COLUMNS} isReadOnly={isReadOnly} />}
 
-        {visits.map((visit) => {
-          const visitor = visitorsMap.get(visit.visitor_id ?? '');
-          const tariff = tariffs.find((t) => t.id === visit.tariff_id);
-          return (
-            <RecordTable.Row
-              key={visit.id}
-              columns={VISIT_COLUMNS}
-              testId={`visit-row-${visit.id}`}
-              cells={{
+        {rows.map((row) => (
+          <InlineEditRow<VisitRow, VisitFormState>
+            key={row.id ?? row.clientId}
+            row={row}
+            testIdPrefix="visit-row"
+            columns={VISIT_COLUMNS}
+            onAdd={handleAdd}
+            onUpdate={handleUpdate}
+            onDelete={handleDeleteRow}
+            onRemove={handleRemove}
+            emptyData={() => pickFormData(makeEmptyVisitRow(tariffs))}
+            pickFormData={pickFormData}
+            isReadOnly={isReadOnly}
+            renderCell={({ row: r, formState, isNew, handleChange }) => {
+              const visitor = visitorsMap.get(r.visitor_id ?? '');
+              const tariff = tariffs.find((t) => t.id === r.tariff_id);
+
+              return {
                 name: isReadOnly ? (
-                  <span className={`truncate ${visitor?.name ? 'text-ink' : 'text-ink-light italic'}`}>
-                    {visitor?.name || 'Аноним'}
+                  <span className={`truncate ${formState.name ? 'text-ink' : 'text-ink-light italic'}`}>
+                    {formState.name || 'Аноним'}
                   </span>
                 ) : (
                   <InlineEditCell
-                    value={visitor?.name ?? ''}
+                    value={isNew ? formState.name : (visitor?.name ?? formState.name)}
                     onCommit={(v) => {
-                      if (visit.visitor_id) onChangeVisitor(visit.visitor_id, { name: v });
-                    }}
-                    title={visitor?.name || ''}
-                    placeholder="Аноним"
-                  />
-                ),
-                age: isReadOnly ? (
-                  <span className="text-ink-mid text-sm">
-                    {visitor?.age != null ? visitor.age : 'Взрослый'}
-                  </span>
-                ) : (
-                  <select
-                    value={visitor?.age != null ? String(visitor.age) : 'adult'}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      if (visit.visitor_id) {
-                        onChangeVisitor(visit.visitor_id, { age: v === 'adult' ? null : Number(v) });
+                      if (isNew) {
+                        handleChange('name', v);
+                        // Trigger save for new rows on name commit
+                        const data: VisitFormState = { ...formState, name: v };
+                        handleAdd(data).then((savedRow) => {
+                          replaceRowByClientId(r.clientId, savedRow);
+                        });
+                      } else if (r.visitor_id) {
+                        onChangeVisitor(r.visitor_id, { name: v });
                       }
                     }}
-                    title={visitor?.age != null ? String(visitor.age) : 'Взрослый'}
-                    className="w-full rounded border px-1 py-0.5 text-sm bg-white truncate"
-                    style={{ borderColor: 'var(--line)' }}
-                    data-testid={`visit-${visit.id}-age`}
-                  >
-                    <optgroup label="Дети">
-                      {[3, 4, 5, 6, 7, 8, 9, 10, 11].map((n) => (
-                        <option key={n} value={String(n)}>{n}</option>
-                      ))}
-                    </optgroup>
-                    <optgroup label="Подростки">
-                      {[12, 13, 14, 15, 16, 17].map((n) => (
-                        <option key={n} value={String(n)}>{n}</option>
-                      ))}
-                    </optgroup>
-                    <option value="adult">Взрослый</option>
-                  </select>
+                    title={formState.name || ''}
+                    placeholder="Аноним"
+                    autoFocus={isNew}
+                    data-testid={isNew ? 'add-visitor-name' : undefined}
+                  />
                 ),
+
+                age: isReadOnly ? (
+                  <span className="text-ink-mid text-sm">
+                    {formState.age != null ? formState.age : 'Взрослый'}
+                  </span>
+                ) : (
+                  <AgeSelect
+                    value={formState.age}
+                    onChange={(age) => {
+                      if (isNew) {
+                        handleChange('age', age);
+                      } else if (r.visitor_id) {
+                        onChangeVisitor(r.visitor_id, { age });
+                      }
+                    }}
+                    testId={isNew ? 'add-visitor-age' : `visit-${r.id}-age`}
+                  />
+                ),
+
                 tariff: isReadOnly ? (
                   <span className="text-ink-mid">{tariff?.title || '—'}</span>
                 ) : (
-                  <select
-                    value={visit.tariff_id ?? ''}
-                    onChange={(e) => onChangeVisit(visit.id, { tariff_id: e.target.value })}
-                    className="w-full rounded border px-2 py-0.5 text-sm"
-                    style={{ borderColor: 'var(--line)' }}
-                    data-testid={`visit-${visit.id}-tariff`}
-                  >
-                    <option value="">— тариф —</option>
-                    {tariffs.map((t) => (
-                      <option key={t.id} value={t.id}>{t.title} ({t.price} ₽)</option>
-                    ))}
-                  </select>
+                  <TariffSelect
+                    value={formState.tariff_id}
+                    tariffs={tariffs}
+                    onChange={(tariffId) => {
+                      const selectedTariff = tariffs.find((t) => t.id === tariffId);
+                      if (isNew) {
+                        handleChange('tariff_id', tariffId);
+                        if (selectedTariff) handleChange('price', selectedTariff.price);
+                      } else {
+                        onPatchVisit(r.id!, {
+                          tariff_id: tariffId,
+                          price: selectedTariff?.price,
+                        }).then((updated) => {
+                          replaceRowById(r.id!, visitResponseToRow(updated, visitorsMap));
+                        });
+                      }
+                    }}
+                    testId={isNew ? 'add-visitor-tariff' : `visit-${r.id}-tariff`}
+                  />
                 ),
+
                 price: isReadOnly ? (
-                  <span className="text-ink-mid" data-testid={`visit-${visit.id}-price`}>
-                    {visit.price.toLocaleString('ru-RU')} ₽
+                  <span className="text-ink-mid" data-testid={`visit-${r.id}-price`}>
+                    {formState.price.toLocaleString('ru-RU')} ₽
                   </span>
                 ) : (
                   <InlineEditCell
                     type="number"
-                    value={String(visit.price)}
-                    onCommit={(v) => onChangeVisitPrice(visit.id, Number(v) || 0)}
+                    value={String(formState.price)}
+                    onCommit={(v) => {
+                      const price = Number(v) || 0;
+                      if (isNew) {
+                        handleChange('price', price);
+                      } else {
+                        onPatchVisit(r.id!, { price }).then((updated) => {
+                          replaceRowById(r.id!, visitResponseToRow(updated, visitorsMap));
+                        });
+                      }
+                    }}
                     className="text-right"
                   />
                 ),
+
                 status: isReadOnly ? (
-                  <StatusBadge status={safeStatus(visit.status)} />
+                  <StatusBadge status={safeStatus(formState.status)} />
                 ) : (
                   <StatusPicker
-                    value={safeStatus(visit.status)}
-                    onChange={(s) => onChangeVisit(visit.id, { status: s })}
+                    value={safeStatus(formState.status)}
+                    onChange={(s) => {
+                      if (isNew) {
+                        handleChange('status', s);
+                      } else {
+                        onPatchVisit(r.id!, { status: s }).then((updated) => {
+                          replaceRowById(r.id!, visitResponseToRow(updated, visitorsMap));
+                        });
+                      }
+                    }}
                     variant="icon"
                     size="sm"
-                    testIdPrefix={`visit-${visit.id}-status`}
+                    testIdPrefix={isNew ? 'add-visitor-status' : `visit-${r.id}-status`}
                   />
                 ),
-                __actions: !isReadOnly ? (
-                  <button
-                    onClick={() => onDeleteVisit(visit.id)}
-                    className="text-red-500 hover:text-red-600"
-                    aria-label="Удалить посетителя"
-                    data-testid={`visit-${visit.id}-delete`}
-                  >
-                    ×
-                  </button>
-                ) : null,
-              }}
-            />
-          );
-        })}
-
-        {!isReadOnly && showForm && (
-          <RecordTable.Row
-            testId="add-visitor-row"
-            columns={VISIT_COLUMNS}
-            cells={{
-              name: (
-                <input
-                  type="text"
-                  value={newName}
-                  onChange={(e) => setNewName(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      // Use e.currentTarget.value to avoid stale closure
-                      const name = e.currentTarget.value.trim();
-                      handleAdd({ name, age: newAge, tariff_id: newTariffId });
-                    }
-                  }}
-                  onBlur={(e) => {
-                    // Use e.currentTarget.value to avoid stale closure
-                    const name = e.currentTarget.value.trim();
-                    handleAdd({ name, age: newAge, tariff_id: newTariffId });
-                  }}
-                  placeholder="Аноним"
-                  autoFocus
-                  className="w-full rounded border px-2 py-0.5 text-sm"
-                  style={{ borderColor: 'var(--line)' }}
-                  data-testid="add-visitor-name"
-                />
-              ),
-              age: (
-                <select
-                  value={newAge != null ? String(newAge) : 'adult'}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setNewAge(v === 'adult' ? null : Number(v));
-                  }}
-                  className="w-full rounded border px-1 py-0.5 text-sm bg-white truncate"
-                  style={{ borderColor: 'var(--line)' }}
-                  data-testid="add-visitor-age"
-                >
-                  <optgroup label="Дети">
-                    {[3, 4, 5, 6, 7, 8, 9, 10, 11].map((n) => (
-                      <option key={n} value={String(n)}>{n}</option>
-                    ))}
-                  </optgroup>
-                  <optgroup label="Подростки">
-                    {[12, 13, 14, 15, 16, 17].map((n) => (
-                      <option key={n} value={String(n)}>{n}</option>
-                    ))}
-                  </optgroup>
-                  <option value="adult">Взрослый</option>
-                </select>
-              ),
-              tariff: (
-                <select
-                  value={newTariffId}
-                  onChange={(e) => handleNewTariffChange(e.target.value)}
-                  className="w-full rounded border px-2 py-0.5 text-sm"
-                  style={{ borderColor: 'var(--line)' }}
-                  data-testid="add-visitor-tariff"
-                >
-                  <option value="">— тариф —</option>
-                  {tariffs.map((t) => (
-                    <option key={t.id} value={t.id}>{t.title} ({t.price} ₽)</option>
-                  ))}
-                </select>
-              ),
-              price: (
-                <input
-                  type="number"
-                  value={newPrice || ''}
-                  onChange={(e) => setNewPrice(Number(e.target.value) || 0)}
-                  onKeyDown={handleNewNameKeyDown}
-                  className="w-full rounded border px-2 py-0.5 text-sm text-right"
-                  style={{ borderColor: 'var(--line)' }}
-                  data-testid="add-visitor-price"
-                />
-              ),
-              status: <StatusPicker value="waiting" onChange={() => {}} variant="icon" size="sm" testIdPrefix="add-visitor-status" />,
-              __actions: (
-                <button
-                  onClick={handleCancelAdd}
-                  className="text-red-500 hover:text-red-600"
-                  aria-label="Отменить"
-                  data-testid="add-visitor-cancel"
-                >
-                  ×
-                </button>
-              ),
+              };
             }}
           />
-        )}
+        ))}
 
         {!isReadOnly && (
           <RecordTable.TotalsRow
             testId="visits-total"
             columns={VISIT_COLUMNS}
             cells={{
-              name: !showForm ? (
+              name: (
                 <button
-                  onClick={() => {
-                    resetNewVisitor();
-                    // pre-fill with first tariff's price as default
-                    const firstTariff = tariffs[0];
-                    if (firstTariff) {
-                      setNewTariffId(firstTariff.id);
-                      setNewPrice(firstTariff.price);
-                    }
-                    setShowForm(true);
-                  }}
+                  onClick={handleAddClick}
                   className="text-xs text-brand hover:underline transition-colors"
                   data-testid="btn-add-visitor"
                 >
                   + Добавить
                 </button>
-              ) : null,
+              ),
               tariff: <span className="text-sm text-ink-mid text-right block">Итого</span>,
               price: <span className="text-sm font-semibold text-ink">{totalCost.toLocaleString('ru-RU')} ₽</span>,
             }}
@@ -347,13 +470,12 @@ export function RecordVisitsTable({
         )}
       </RecordTable>
 
-      {/* Empty state (shown when no visits) */}
-      {visits.length === 0 && (
+      {/* Empty state (shown when no visits and no new rows) */}
+      {rows.length === 0 && (
         <div className="px-3 py-4 text-xs text-ink-light text-center rounded-lg border" style={{ borderColor: 'var(--line)' }}>
           Нет посетителей
         </div>
       )}
-
     </div>
   );
 }

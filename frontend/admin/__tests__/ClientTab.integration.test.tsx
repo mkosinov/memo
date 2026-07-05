@@ -22,7 +22,7 @@ import {
   createMockUIContext,
 } from './helpers/mockContexts';
 
-import { updateVisitStatus } from '@memo/api-client';
+import { patchVisit as apiPatchVisit } from '@memo/api-client';
 
 // ─── API Client Mock ───────────────────────────────────────────────────────
 
@@ -45,6 +45,10 @@ vi.mock('@memo/api-client', () => ({
   patchRecord: vi.fn(),
   patchActivity: vi.fn(),
   deleteVisitor: vi.fn(),
+  createVisit: vi.fn(),
+  patchVisit: vi.fn(),
+  deleteVisit: vi.fn(),
+  updateVisitor: vi.fn(),
 }));
 
 vi.mock('@/contexts/ScheduleContext', () => ({ useSchedule: vi.fn() }));
@@ -235,8 +239,8 @@ describe('ClientTab — integration with shared atoms', () => {
 
   // ─── Status change wiring ─────────────────────────────────────────
 
-  it('status change on RecordVisitRow calls updateVisitStatus instead of onUpdateRecord', async () => {
-    vi.mocked(updateVisitStatus).mockResolvedValue({ id: 'v1', status: 'visited', custom_price: null, created_at: '', updated_at: '', is_active: true, record_id: 'r1', price: 0 } as any);
+  it('status change on RecordVisitRow calls patchVisit', async () => {
+    vi.mocked(apiPatchVisit).mockResolvedValue({ id: 'v1', status: 'visited', custom_price: null, created_at: '', updated_at: '', is_active: true, record_id: 'r1', price: 0 } as any);
     render(<ClientTab {...defaultProps} />);
 
     const statusContainer = screen.getByTestId('visit-v1-status');
@@ -247,7 +251,7 @@ describe('ClientTab — integration with shared atoms', () => {
     fireEvent.click(option);
 
     await waitFor(() => {
-      expect(updateVisitStatus).toHaveBeenCalledWith('v1', 'visited');
+      expect(apiPatchVisit).toHaveBeenCalledWith('v1', expect.objectContaining({ status: 'visited' }));
     });
     // Should NOT call the full-record onUpdateRecord for a status-only change
     expect(defaultProps.onUpdateRecord).not.toHaveBeenCalled();

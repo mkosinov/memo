@@ -11,10 +11,11 @@ export interface InlineEditCellProps {
   type?: string;
   title?: string;
   placeholder?: string;
+  autoFocus?: boolean;
   'data-testid'?: string;
 }
 
-export function InlineEditCell({ value, onCommit, className = '', type = 'text', title = '', placeholder = '', 'data-testid': dataTestId }: InlineEditCellProps) {
+export function InlineEditCell({ value, onCommit, className = '', type = 'text', title = '', placeholder = '', autoFocus = false, 'data-testid': dataTestId }: InlineEditCellProps) {
   const [draft, setDraft] = useState(value);
   const originalRef = useRef(value);
 
@@ -50,6 +51,7 @@ export function InlineEditCell({ value, onCommit, className = '', type = 'text',
       className={`w-full rounded border px-2 py-0.5 text-sm ${className}`}
       style={{ borderColor: 'var(--line)' }}
       title={title}
+      autoFocus={autoFocus}
       data-testid={dataTestId}
     />
   );

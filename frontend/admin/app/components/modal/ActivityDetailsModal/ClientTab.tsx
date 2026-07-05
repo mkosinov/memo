@@ -70,7 +70,7 @@ export function ClientTab({
   const isDeletingRef = useRef(false);
   const router = useRouter();
   const { visitorsMap: realVisitorsMap } = useRecordData(record.id, client?.id ?? '');
-  const { updateVisitStatus } = useRecordMutations(record.activity_id ?? '', record.id);
+  const { updateVisitStatus, addVisit, patchVisit, deleteVisit } = useRecordMutations(record.activity_id ?? '', record.id);
 
   // Optimistic visit mutation layer
   const {
@@ -208,12 +208,12 @@ export function ClientTab({
           anonymVisits={record.anonym_visits ?? 0}
           totalCost={totalCost}
           recordStatus={status}
-          onChangeVisit={handleVisitChange}
+          clientId={client?.id ?? ''}
+          onAddVisit={addVisit}
+          onPatchVisit={patchVisit}
+          onDeleteVisit={deleteVisit}
           onChangeVisitor={handleVisitorChange}
-          onChangeVisitPrice={handleVisitPriceChange}
-          onDeleteVisit={handleDeleteVisit}
           onAnonymVisitsChange={handleAnonymChange}
-          onAddVisitor={handleAddVisitor}
         />
 
         {/* Payments table */}

@@ -210,6 +210,31 @@ export const VisitResponseSchema = z.object({
 
 export type VisitResponse = z.infer<typeof VisitResponseSchema>;
 
+// ─── VisitCreate (request body) ──────────────────────────────────────────
+
+export const VisitCreateSchema = z.object({
+  record_id: z.string(),
+  visitor_id: z.string().nullable().optional(),
+  tariff_id: z.string().nullable().optional(),
+  price: z.number().int().min(0),
+  custom_price: z.number().nullable().optional(),
+  status: z.enum(['waiting', 'visited', 'missed', 'cancelled']).optional(),
+});
+
+export type VisitCreate = z.infer<typeof VisitCreateSchema>;
+
+// ─── VisitPatch (request body) ───────────────────────────────────────────
+
+export const VisitPatchSchema = z.object({
+  visitor_id: z.string().nullable().optional(),
+  tariff_id: z.string().nullable().optional(),
+  price: z.number().int().min(0).optional(),
+  custom_price: z.number().nullable().optional(),
+  status: z.enum(['waiting', 'visited', 'missed', 'cancelled']).optional(),
+});
+
+export type VisitPatch = z.infer<typeof VisitPatchSchema>;
+
 // ─── RecordResponse ────────────────────────────────────────────────────────
 
 export const RecordResponseSchema = z.object({

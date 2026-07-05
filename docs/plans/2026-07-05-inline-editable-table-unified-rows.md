@@ -33,6 +33,7 @@
 | `frontend/admin/hooks/useRecordMutations.ts` | Add `addVisit` (returns `VisitResponse`), `patchVisit` (returns `VisitResponse`), `deleteVisit`, `patchPayment` (returns `PaymentResponse`). Keep existing fns for other callers. |
 | `frontend/admin/app/components/shared/record/blocks/RecordVisitsTable.tsx` | Drop `showForm` + `new*` state + form-row JSX; own `rows: VisitRow[]` state; render `InlineEditRow` per row. |
 | `frontend/admin/app/components/shared/record/blocks/RecordPaymentsTable.tsx` | Same refactor; `PaymentRow` type; `useInlineEditRow`. |
+| `frontend/admin/app/components/shared/record/blocks/ClientRecordTab.tsx` (or wherever the tables are consumed) | Wire the new `addVisit`/`patchVisit`/`deleteVisit`/`patchPayment`/`addPayment` mutations into the tables' props. |
 | `docs/domain-rules/payments.md` | Add PATCH `/api/v1/payments/{id}` endpoint row; fix parity note. |
 
 ---
@@ -210,7 +211,8 @@ Add four new mutation functions to `useRecordMutations` that call the new single
       [recordId, queryClient],
     );
     ```
-  - Add `addVisit`, `patchVisit`, `deleteVisit`, `patchPayment: patchPaymentFn` to the returned object.
+  - **Also add a returning variant of `addPayment`** (the spec requires `onAdd → POST /payments` to return `PaymentResponse` for replace-in-place). Either change the existing `addPayment` to `return await createPayment(...)` (verify no other caller depends on its void signature — grep `addPayment(`), or add a new `addPaymentRow` fn that returns the created `PaymentResponse`. RED test: `addPayment`/`addPaymentRow` returns the created payment.
+  - Add `addVisit`, `patchVisit`, `deleteVisit`, `patchPayment: patchPaymentFn` (and the returning `addPayment` variant) to the returned object.
   - Run: `npm run test -- useRecordMutations` → expect PASS.
 - [ ] **REFACTOR:** DRY the `invalidateQueries(['record', recordId])` into a small local helper if it reads cleanly.
 - [ ] Run full vitest for the hook file: `npm run test -- useRecordMutations`.

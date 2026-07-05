@@ -1,7 +1,7 @@
 # InlineEditableTable — Unified Rows — Design
 
 **Date:** 2026-06-25
-**Status:** Draft (awaiting written-spec approval — G1b)
+**Status:** Approved (G1b passed 2026-07-05 — user confirmed written spec)
 **Scope:** New shared `InlineEditableTable` + `useInlineEditRow` hook; refactor of `RecordVisitsTable` and `RecordPaymentsTable`
 **Replaces:** Per-table `showForm` state + dedicated inline form-row (replicated 2×)
 
@@ -387,9 +387,28 @@ The existing `RecordTable.Row` API takes `cells: Record<string, ReactNode>`. The
 
 After extraction, `RecordVisitsTable.tsx` no longer defines `InlineEditCell` locally. Any other consumer of the local version (grep for `InlineEditCell` in the repo) must be updated. A grep pre-check (T0 prep) catches this.
 
-### Save-callback contract
+### Save-callback contract — RESOLVED (Variant A, 2026-07-05)
 
-`onAdd` and `onUpdate` are expected to return the **full saved/updated row** (not just an id), so the consumer can replace the row in place. Current `useRecordMutations` returns... need to verify during T7 prep. If it doesn't, add a `refetch` on success or change the mutation return type.
+**Investigation result (2026-07-05):** The current `useRecordMutations` hook is **invalidate-on-success** and returns `void`. Visits are mutated via bulk `patchRecord(visits[])`, NOT via single-visit endpoints. Payment PATCH is not wired in at all.
+
+**However**, the backend now exposes the correct single-entity endpoints (added by Phase 0-2, all merged into main at `f6a765a`):
+- `POST /api/v1/visits` → returns `VisitResponse`
+- `PATCH /api/v1/visits/{id}` → returns `VisitResponse` (single-visit partial update)
+- `DELETE /api/v1/visits/{id}` → 204
+- `PATCH /api/v1/payments/{id}` → returns `PaymentResponse`
+
+The api-client wrappers for these either exist (`updateVisitStatus`, `createPayment`, `deletePayment`, `updatePayment`) or must be added (single-visit `createVisit`/`patchVisit`/`deleteVisit`).
+
+**Decision (user, 2026-07-05): Variant A — wire the new single-entity endpoints into `useRecordMutations` so that add/update mutations RETURN the saved/updated row.** This enables true replace-in-place (no blink), eliminates the bulk `patchRecord(visits[])` technical debt, and uses exactly the endpoints the Phase 0-2 backend work was built for.
+
+**Contract after refactor:**
+- `onAdd(data): Promise<VisitResponse>` → calls `createVisitor` (if new visitor) + `POST /visits`, returns the saved `VisitResponse`.
+- `onUpdate(id, data): Promise<VisitResponse>` → calls `PATCH /visits/{id}`, returns the updated `VisitResponse`.
+- `onDelete(id): Promise<void>` → calls `DELETE /visits/{id}`.
+- Payments: `onAdd → POST /payments` returns `PaymentResponse`; `onUpdate → PATCH /payments/{id}` returns `PaymentResponse`; `onDelete → DELETE /payments/{id}`.
+- Consumer replaces the `{ id: null, ... }` row in the `rows` array with the returned saved row (id populated). No full-list invalidation needed for the row itself, though a lightweight `['record', recordId]` invalidation may still run to keep totals/seats in sync (cascade recompute happens backend-side per Phase 1).
+
+**Note on the visit/visitor two-step:** "Add visitor" remains a two-step flow (create `Visitor` → create `Visit` referencing `visitor_id`), because a Visit references a Visitor. The refactor changes the second step from bulk `patchRecord` to single `POST /visits`, and makes it return the created `VisitResponse`.
 
 ---
 
@@ -398,7 +417,7 @@ After extraction, `RecordVisitsTable.tsx` no longer defines `InlineEditCell` loc
 - Inline-editing of the `status` field for a new row (it always defaults to `'waiting'`; admin changes it after save).
 - Optimistic updates (the wave 6 record-status spec deferred this too; same line).
 - A true generic `InlineEditableTable<T>` that takes column DSL — explicitly non-goal.
-- Backend changes (none required; the API contract is unchanged).
+- Backend changes (none required — the single-entity endpoints already exist from Phase 0-2. This refactor only wires the frontend to them).
 
 ---
 

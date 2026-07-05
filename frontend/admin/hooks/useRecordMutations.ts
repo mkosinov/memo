@@ -11,11 +11,15 @@ import {
   deleteRecord as apiDeleteRecord,
   patchActivity,
   createPayment,
+  patchPayment as apiPatchPayment,
   deletePayment as apiDeletePayment,
   deleteVisitor as apiDeleteVisitor,
   updateVisitStatus as apiUpdateVisitStatus,
+  createVisit,
+  patchVisit as apiPatchVisit,
+  deleteVisit as apiDeleteVisit,
 } from '@memo/api-client';
-import type { RecordResponse } from '@memo/api-client';
+import type { RecordResponse, VisitPatch } from '@memo/api-client';
 
 interface VisitData {
   visitor_id?: string | null;
@@ -51,6 +55,11 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
     if (recordId) {
       queryClient.invalidateQueries({ queryKey: ['record', recordId] });
     }
+  }, [queryClient, recordId]);
+
+  /** Lighter invalidation for single-entity mutations that only affect this record. */
+  const invalidateRecord = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ['record', recordId] });
   }, [queryClient, recordId]);
 
   const createRecordMutation = useCallback(
@@ -182,8 +191,9 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
 
   const addPayment = useCallback(
     async (amount: number, method: string) => {
-      await createPayment({ record_id: recordId, amount, method: method as 'cash' | 'card' | 'transfer' });
+      const payment = await createPayment({ record_id: recordId, amount, method: method as 'cash' | 'card' | 'transfer' });
       invalidateAll();
+      return payment;
     },
     [recordId, invalidateAll],
   );
@@ -243,6 +253,52 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
     [queryClient, recordId],
   );
 
+  /**
+   * Two-step flow: create the Visitor, then create the Visit referencing it.
+   * Returns the saved VisitResponse for replace-in-place UI updates (no blink).
+   */
+  const addVisit = useCallback(
+    async (data: { client_id: string; name: string; age?: number; tariff_id?: string | null; price: number }) => {
+      const visitor = await createVisitor({ client_id: data.client_id, name: data.name, age: data.age });
+      const visit = await createVisit({
+        record_id: recordId,
+        visitor_id: visitor.id,
+        tariff_id: data.tariff_id ?? null,
+        price: data.price,
+      });
+      invalidateRecord();
+      return visit;
+    },
+    [recordId, invalidateRecord],
+  );
+
+  const patchVisit = useCallback(
+    async (visitId: string, data: VisitPatch) => {
+      const visit = await apiPatchVisit(visitId, data);
+      invalidateRecord();
+      return visit;
+    },
+    [invalidateRecord],
+  );
+
+  const deleteVisit = useCallback(
+    async (visitId: string) => {
+      await apiDeleteVisit(visitId);
+      invalidateRecord();
+    },
+    [invalidateRecord],
+  );
+
+  const patchPayment = useCallback(
+    async (paymentId: string, data: { amount?: number; method?: string }) => {
+      const payment = await apiPatchPayment(paymentId, data);
+      invalidateRecord();
+      queryClient.invalidateQueries({ queryKey: ['payments'] });
+      return payment;
+    },
+    [invalidateRecord, queryClient],
+  );
+
   return {
     createRecord: createRecordMutation,
     saveRecord,
@@ -255,5 +311,9 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
     addVisitorToRecord,
     updateAnonymVisits,
     updateVisitStatus,
+    addVisit,
+    patchVisit,
+    deleteVisit,
+    patchPayment,
   };
 }

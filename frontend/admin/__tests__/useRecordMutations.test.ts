@@ -8,9 +8,13 @@ vi.mock('@memo/api-client', () => ({
   deleteRecord: vi.fn(),
   patchActivity: vi.fn(),
   createPayment: vi.fn(),
+  patchPayment: vi.fn(),
   deletePayment: vi.fn(),
   createVisitor: vi.fn(),
   deleteVisitor: vi.fn(),
+  createVisit: vi.fn(),
+  patchVisit: vi.fn(),
+  deleteVisit: vi.fn(),
 }));
 
 import {
@@ -18,9 +22,13 @@ import {
   deleteRecord,
   patchActivity,
   createPayment,
+  patchPayment,
   deletePayment,
   createVisitor,
   deleteVisitor,
+  createVisit,
+  patchVisit,
+  deleteVisit,
 } from '@memo/api-client';
 import { useRecordMutations } from '../hooks/useRecordMutations';
 
@@ -28,9 +36,13 @@ const mockPatchRecord = vi.mocked(patchRecord);
 const mockDeleteRecord = vi.mocked(deleteRecord);
 const mockPatchActivity = vi.mocked(patchActivity);
 const mockCreatePayment = vi.mocked(createPayment);
+const mockPatchPayment = vi.mocked(patchPayment);
 const mockDeletePayment = vi.mocked(deletePayment);
 const mockCreateVisitor = vi.mocked(createVisitor);
 const mockDeleteVisitor = vi.mocked(deleteVisitor);
+const mockCreateVisit = vi.mocked(createVisit);
+const mockPatchVisit = vi.mocked(patchVisit);
+const mockDeleteVisit = vi.mocked(deleteVisit);
 
 function createQueryClientWrapper() {
   const queryClient = new QueryClient({
@@ -80,6 +92,19 @@ const mockPaymentResponse = {
   is_active: true,
 };
 
+const mockVisitResponse = {
+  id: 'visit-new',
+  record_id: recordId,
+  visitor_id: 'vis-new',
+  tariff_id: 't1',
+  price: 3500,
+  custom_price: null,
+  status: 'waiting',
+  created_at: '',
+  updated_at: '',
+  is_active: true,
+};
+
 describe('useRecordMutations', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -87,9 +112,13 @@ describe('useRecordMutations', () => {
     mockDeleteRecord.mockResolvedValue(undefined as never);
     mockPatchActivity.mockResolvedValue({ id: 'ev_1' } as never);
     mockCreatePayment.mockResolvedValue(mockPaymentResponse as never);
+    mockPatchPayment.mockResolvedValue(mockPaymentResponse as never);
     mockDeletePayment.mockResolvedValue(undefined as never);
     mockCreateVisitor.mockResolvedValue(mockVisitorResponse as never);
     mockDeleteVisitor.mockResolvedValue(undefined as never);
+    mockCreateVisit.mockResolvedValue(mockVisitResponse as never);
+    mockPatchVisit.mockResolvedValue(mockVisitResponse as never);
+    mockDeleteVisit.mockResolvedValue(undefined as never);
   });
 
   afterEach(() => vi.restoreAllMocks());
@@ -310,6 +339,141 @@ describe('useRecordMutations', () => {
 
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['record', recordId] });
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['records'] });
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['payments'] });
+    });
+
+    it('returns the created payment response', async () => {
+      const { wrapper } = createQueryClientWrapper();
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+
+      let returned: unknown;
+      await act(async () => {
+        returned = await result.current.addPayment(3500, 'card');
+      });
+
+      expect(returned).toEqual(mockPaymentResponse);
+    });
+  });
+
+  describe('addVisit', () => {
+    it('creates a visitor then a visit referencing it, and returns the visit', async () => {
+      const { wrapper } = createQueryClientWrapper();
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+
+      let returned: unknown;
+      await act(async () => {
+        returned = await result.current.addVisit({
+          client_id: 'c1',
+          name: 'Новый гость',
+          age: 10,
+          tariff_id: 't1',
+          price: 3500,
+        });
+      });
+
+      expect(mockCreateVisitor).toHaveBeenCalledWith({
+        client_id: 'c1',
+        name: 'Новый гость',
+        age: 10,
+      });
+      expect(mockCreateVisit).toHaveBeenCalledWith({
+        record_id: recordId,
+        visitor_id: mockVisitorResponse.id,
+        tariff_id: 't1',
+        price: 3500,
+      });
+      expect(returned).toEqual(mockVisitResponse);
+    });
+
+    it('invalidates record query on success', async () => {
+      const { queryClient, wrapper } = createQueryClientWrapper();
+      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+
+      await act(async () => {
+        await result.current.addVisit({ client_id: 'c1', name: 'Гость', price: 1000 });
+      });
+
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['record', recordId] });
+    });
+  });
+
+  describe('patchVisit', () => {
+    it('calls the patchVisit API and returns the updated visit', async () => {
+      const { wrapper } = createQueryClientWrapper();
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+
+      let returned: unknown;
+      await act(async () => {
+        returned = await result.current.patchVisit('visit-1', { tariff_id: 't2', price: 4000 });
+      });
+
+      expect(mockPatchVisit).toHaveBeenCalledWith('visit-1', { tariff_id: 't2', price: 4000 });
+      expect(returned).toEqual(mockVisitResponse);
+    });
+
+    it('invalidates record query on success', async () => {
+      const { queryClient, wrapper } = createQueryClientWrapper();
+      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+
+      await act(async () => {
+        await result.current.patchVisit('visit-1', { price: 4000 });
+      });
+
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['record', recordId] });
+    });
+  });
+
+  describe('deleteVisit', () => {
+    it('calls the deleteVisit API', async () => {
+      const { wrapper } = createQueryClientWrapper();
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+
+      await act(async () => {
+        await result.current.deleteVisit('visit-1');
+      });
+
+      expect(mockDeleteVisit).toHaveBeenCalledWith('visit-1');
+    });
+
+    it('invalidates record query on success', async () => {
+      const { queryClient, wrapper } = createQueryClientWrapper();
+      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+
+      await act(async () => {
+        await result.current.deleteVisit('visit-1');
+      });
+
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['record', recordId] });
+    });
+  });
+
+  describe('patchPayment', () => {
+    it('calls the patchPayment API and returns the updated payment', async () => {
+      const { wrapper } = createQueryClientWrapper();
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+
+      let returned: unknown;
+      await act(async () => {
+        returned = await result.current.patchPayment('pay1', { amount: 4000 });
+      });
+
+      expect(mockPatchPayment).toHaveBeenCalledWith('pay1', { amount: 4000 });
+      expect(returned).toEqual(mockPaymentResponse);
+    });
+
+    it('invalidates record and payments queries on success', async () => {
+      const { queryClient, wrapper } = createQueryClientWrapper();
+      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+
+      await act(async () => {
+        await result.current.patchPayment('pay1', { amount: 4000 });
+      });
+
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['record', recordId] });
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['payments'] });
     });
   });

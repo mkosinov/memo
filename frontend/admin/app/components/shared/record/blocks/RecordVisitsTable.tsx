@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback } from 'react';
 import type { VisitResponse, TariffResponse } from '@memo/api-client';
 import type { VisitStatus } from '@memo/domain';
 import { StatusPicker } from '@/app/components/shared/StatusPicker';
@@ -8,6 +8,7 @@ import { StatusBadge } from '@/app/components/shared/StatusBadge';
 import type { AddVisitorPayload } from '@/app/components/shared/visitors/AddVisitorForm';
 import { safeStatus } from '@/app/lib/status-utils';
 import { RecordTable, type Column } from '@/app/components/shared/record/RecordTable';
+import { InlineEditCell } from '../InlineEditCell';
 
 // ── Column definitions ────────────────────────────────────────────────────────
 
@@ -18,57 +19,6 @@ const VISIT_COLUMNS: Column[] = [
   { key: 'price', label: 'Стоимость', width: 'w-20 shrink-0', align: 'right' },
   { key: 'status', label: '', width: 'w-6 shrink-0' },
 ];
-
-// ── Inline-edit cell ──────────────────────────────────────────────────────────
-
-interface InlineEditCellProps {
-  value: string;
-  onCommit: (value: string) => void;
-  className?: string;
-  type?: string;
-  title?: string;
-  placeholder?: string;
-}
-
-function InlineEditCell({ value, onCommit, className = '', type = 'text', title = '', placeholder = '' }: InlineEditCellProps) {
-  const [draft, setDraft] = useState(value);
-  const originalRef = useRef(value);
-
-  // Sync with prop when it changes (e.g. async visitor data loads after first render)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => {
-    setDraft(value);
-    originalRef.current = value;
-  }, [value]);
-
-  const commitIfChanged = useCallback(() => {
-    if (draft !== originalRef.current) {
-      onCommit(draft);
-      originalRef.current = draft;
-    }
-  }, [draft, onCommit]);
-
-  return (
-    <input
-      type={type}
-      value={draft}
-      onChange={(e) => setDraft(e.target.value)}
-      onBlur={commitIfChanged}
-      onKeyDown={(e) => {
-        if (e.key === 'Escape') {
-          setDraft(originalRef.current);
-          (e.target as HTMLInputElement).blur();
-        } else if (e.key === 'Enter') {
-          (e.target as HTMLInputElement).blur();
-        }
-      }}
-      placeholder={placeholder}
-      className={`w-full rounded border px-2 py-0.5 text-sm ${className}`}
-      style={{ borderColor: 'var(--line)' }}
-      title={title}
-    />
-  );
-}
 
 // ── Props ─────────────────────────────────────────────────────────────────────
 

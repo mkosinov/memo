@@ -44,6 +44,8 @@ import {
   type VisitorUpdate,
   VisitResponseSchema,
   type VisitResponse,
+  type VisitCreate,
+  type VisitPatch,
   TagResponseSchema,
   type TagResponse,
   type TagCreate,
@@ -317,6 +319,17 @@ export async function updatePayment(id: string, data: PaymentUpdate): Promise<Pa
   });
 }
 
+// PATCH for partial updates — only send the changed fields.
+export async function patchPayment(
+  id: string,
+  data: { amount?: number; method?: string },
+): Promise<PaymentResponse> {
+  return api(`/api/v1/payments/${id}`, PaymentResponseSchema, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+}
+
 export async function deletePayment(id: string): Promise<void> {
   await api(`/api/v1/payments/${id}`, z.any(), { method: 'DELETE' });
 }
@@ -363,6 +376,26 @@ export async function updateVisitStatus(id: string, status: string): Promise<Vis
     method: 'PUT',
     body: JSON.stringify({ status }),
   });
+}
+
+// ─── Visits CRUD ────────────────────────────────────────────────────────
+
+export async function createVisit(data: VisitCreate): Promise<VisitResponse> {
+  return api('/api/v1/visits', VisitResponseSchema, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function patchVisit(id: string, data: VisitPatch): Promise<VisitResponse> {
+  return api(`/api/v1/visits/${id}`, VisitResponseSchema, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteVisit(id: string): Promise<void> {
+  await api(`/api/v1/visits/${id}`, z.any(), { method: 'DELETE' });
 }
 
 // ─── Tags ──────────────────────────────────────────────────────────────────

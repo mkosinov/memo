@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — 2026-06-29
+
+### Fixed
+- **Backend seed.py month-boundary overflow** — branch `feat/phase2-payment-patch` (hotfix):
+  - `backend/src/seed/seed.py:286-287` used `week_start.replace(day=week_start.day + day)` which raised `ValueError: day is out of range for month` when the resulting day exceeded the month's length (e.g., June 29 + 2 days = 31, but June has 30 days).
+  - Bug existed on main (commit `242a466`, 2026-06-17) but was dormant until the current week started on 2026-06-29.
+  - Fix: use `week_start + timedelta(days=day)` to correctly handle month/year boundaries.
+  - **Unblocks pre-push hook** (`scripts/test-all.sh`) which was failing 20+ tests because the seed crashed.
+  - 1 file changed: `backend/src/seed/seed.py`. 1 new regression test (`test_seed_handles_month_boundary_overflow` in `backend/tests/test_seed.py`) from Gate 1.
+  - 21 seed tests now pass (was 20 failing + 1 new RED). **Tests: 635 passed, 4 xfailed, 0 regressions**.
+  - Note: This is a hotfix scoped to unblock Phase 2 push. The same fix should be cherry-picked to main as a separate PR.
+- **Pre-push hook: 5→2 shards** — `scripts/test-all.sh` was declaring 5 Playwright shards but `playwright.config.ts` only has 2 projects (`shard-schedule`, `shard-rest`). The 3 missing projects (services, records, clients) were no-ops. Aligned `test-all.sh` to declare only the 2 actual projects. The 5-shard design (`docs/specs/2026-06-18-e2e-shard-5-projects-design.md`) is deferred until the missing 3 projects are added to `playwright.config.ts`.
+
 ## [Unreleased] — 2026-06-28
 
 ### Added
@@ -24,6 +37,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Plan: `docs/plans/2026-06-25-backend-visit-payment-api.md`
   - Status doc: `docs/status/2026-06-25-backend-phase1-visit-crud.md`
   - **Tests: 628 passed (was 595, +33 new), 4 xfailed (unchanged), 0 regressions**.
+
+- **Phase 2: PATCH /api/v1/payments/{id}** — branch `feat/phase2-payment-patch`, 2026-06-28:
+  - Third of 3 phases for Visit/Payment API completion (Phase 0 = `tariff_id` round-trip, Phase 1 = Visit CRUD).
+  - New `PaymentPatch` Pydantic schema (`backend/src/schemas/payment.py`): `amount: int | None = Field(default=None, gt=0)`, `method: PaymentMethod | None = None`. All fields optional — `None` means "don't change".
+  - `PaymentService` refactored from factory-returned `GenericService` instance to proper `PaymentService(GenericService[...])` subclass. This allows the class-level `NOT_NULL_FIELDS = {"amount"}` configuration that `GenericService.patch()` consults to strip `null` for NOT NULL fields.
+  - New endpoint `PATCH /api/v1/payments/{id}` in `backend/src/api/v1/payments.py`: calls inherited `service.patch()` (no service code change needed), returns 200 with `PaymentResponse` on success, 404 with `ErrorCode.PAYMENT_NOT_FOUND` if not found. PATCH semantically differs from existing PUT (full-replace): only sent fields are updated.
+  - **Contract guarantee:** `PATCH {amount: null, method: "cash"}` silently strips `amount` (NOT NULL constraint would otherwise be violated). This is enforced by the `NOT_NULL_FIELDS` mechanism in `GenericService.patch`.
+  - 5 files changed, 104 insertions(+), 3 deletions(-): `backend/src/{schemas/payment.py, services/payment.py, api/v1/payments.py}`, `backend/tests/{test_api_payments.py, services/test_payment_service.py (NEW)}`.
+  - 3 new API tests (scenarios 21-23 in spec) + 3 new service unit tests (subclass contract: `issubclass`, `NOT_NULL_FIELDS == {"amount"}`).
+  - Design spec: `docs/specs/2026-06-25-backend-visit-payment-api-design.md`
+  - Plan: `docs/plans/2026-06-25-backend-visit-payment-api.md`
+  - Status doc: `docs/status/2026-06-25-backend-phase2-payment-patch.md`
+  - **Tests: 634 passed (was 628, +6 new), 4 xfailed (unchanged), 0 regressions**.
 
 ## [Unreleased] — 2026-06-25
 

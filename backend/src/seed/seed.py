@@ -52,6 +52,12 @@ WEEK_START = _WEEK_BEFORE_MONDAY  # week before last — records r1-r6 link here
 WEEK2_START = _LAST_WEEK_MONDAY   # last week
 WEEK3_START = _THIS_WEEK_MONDAY   # current week (so e2e tests find activities)
 
+# Fixed reference week for visual regression baselines.
+# Activities and records r1-r6 in this week have stable dates so that
+# page.clock.install({ time: '2026-06-15' }) in visual tests produces
+# consistent screenshots regardless of when tests are run.
+WEEK_FIXED_START = datetime(2026, 6, 15)  # Monday, 2026-06-15 (original — for visual baselines)
+
 _SERVICE_NAME_TO_ID: dict[str, str] = {
     "Морской пейзаж": "s7",
     "Ручная лепка": "s5",
@@ -142,6 +148,23 @@ _ACTIVITIES_RAW_WEEK3: list[tuple] = [
     (5, "m3", 14, 2, "Картина акрилом", "alpika", 10, False),
     # ВС (day 6)
     (6, "m2", 11, 1.5, "Ручная лепка", "alpika", 6, False),
+]
+
+# Fixed reference week: stable dates for visual regression baselines.
+# Used with page.clock.install({ time: '2026-06-15' }) in visual tests.
+# Records r1-r6 link to activities here (indices 0,1,2,3,5,8).
+_ACTIVITIES_RAW_FIXED: list[tuple] = [
+    # day, master, start_h, dur_h, svc_name, location, capacity, is_private
+    (0, "m1", 10, 2, "Морской пейзаж", "grand", 8, False),       # ev_fixed_0 → r1
+    (0, "m2", 12, 1.5, "Ручная лепка", "alpika", 6, False),      # ev_fixed_1 → r2
+    (1, "m3", 11, 2, "Картина акрилом", "alpika", 10, False),    # ev_fixed_2 → r3
+    (1, "m1", 15, 1, "Мини-картина акрилом", "grand", 8, False), # ev_fixed_3 → r4
+    (2, "m2", 14, 2, "Акварель", "p1389", 8, False),             # ev_fixed_4 (filler)
+    (3, "m1", 11, 2, "Морской пейзаж", "grand", 8, False),       # ev_fixed_5 → r5
+    (3, "m3", 16, 1, "Картина маслом", "alpika", 4, False),      # ev_fixed_6 (filler)
+    (4, "m2", 10, 2, "Ручная лепка", "alpika", 6, False),        # ev_fixed_7 (filler)
+    (5, "m1", 10, 2, "Морской пейзаж", "grand", 8, False),       # ev_fixed_8 → r6
+    (6, "m2", 11, 1.5, "Мини-картина акрилом", "grand", 6, False), # ev_fixed_9 (filler)
 ]
 
 
@@ -269,23 +292,32 @@ async def _seed_tags(session) -> None:
 
 
 async def _seed_activities(session) -> None:
-    idx = 0
-    for week_start, activities in [
+    await _seed_activities_for(session, "ev", [
         (WEEK_START, _ACTIVITIES_RAW),
         (WEEK2_START, _ACTIVITIES_RAW_WEEK2),
         (WEEK3_START, _ACTIVITIES_RAW_WEEK3),
-    ]:
+    ])
+    # Fixed reference week with distinct prefix for visual regression baselines.
+    await _seed_activities_for(session, "ev_fixed", [
+        (WEEK_FIXED_START, _ACTIVITIES_RAW_FIXED),
+    ])
+
+
+async def _seed_activities_for(
+    session, id_prefix: str, weeks: list[tuple],
+) -> None:
+    """Seed activities for a list of weeks with the given ID prefix."""
+    idx = 0
+    for week_start, activities in weeks:
         for day, master, start_h, dur_h, svc_name, loc, cap, is_priv in activities:
-            activity_id = f"ev_{idx}"
+            activity_id = f"{id_prefix}_{idx}"
             idx += 1
             if await _exists(session, Activity, activity_id):
                 continue
             service_id = _SERVICE_NAME_TO_ID[svc_name]
             hour = int(start_h)
             minute = 30 if start_h % 1 else 0
-            start_dt = week_start.replace(
-                day=week_start.day + day, hour=hour, minute=minute
-            )
+            start_dt = (week_start + timedelta(days=day)).replace(hour=hour, minute=minute)
             duration_min = int(dur_h * 60)
             session.add(Activity(
                 id=activity_id,
@@ -332,12 +364,12 @@ async def _seed_visitors(session) -> None:
 
 async def _seed_records(session) -> None:
     records = [
-        {"id": "r1", "activity_id": "ev_0", "client_id": "c1", "status": "visited", "seats": 2, "comment": None},
-        {"id": "r2", "activity_id": "ev_1", "client_id": "c2", "status": "visited", "seats": 2, "comment": None},
-        {"id": "r3", "activity_id": "ev_4", "client_id": "c3", "status": "visited", "seats": 2, "comment": None},
-        {"id": "r4", "activity_id": "ev_5", "client_id": "c1", "status": "visited", "seats": 1, "comment": None},
-        {"id": "r5", "activity_id": "ev_10", "client_id": "c5", "status": "waiting", "seats": 2, "comment": None},
-        {"id": "r6", "activity_id": "ev_17", "client_id": "c4", "status": "waiting", "seats": 1, "comment": None},
+        {"id": "r1", "activity_id": "ev_fixed_0", "client_id": "c1", "status": "visited", "seats": 2, "comment": None},
+        {"id": "r2", "activity_id": "ev_fixed_1", "client_id": "c2", "status": "visited", "seats": 2, "comment": None},
+        {"id": "r3", "activity_id": "ev_fixed_2", "client_id": "c3", "status": "visited", "seats": 2, "comment": None},
+        {"id": "r4", "activity_id": "ev_fixed_3", "client_id": "c1", "status": "visited", "seats": 1, "comment": None},
+        {"id": "r5", "activity_id": "ev_fixed_5", "client_id": "c5", "status": "waiting", "seats": 2, "comment": None},
+        {"id": "r6", "activity_id": "ev_fixed_8", "client_id": "c4", "status": "waiting", "seats": 1, "comment": None},
     ]
     for r in records:
         if not await _exists(session, Record, r["id"]):

@@ -8,6 +8,7 @@
 import { type Page, expect } from '@playwright/test';
 import { execSync } from 'child_process';
 import path from 'path';
+import { queryDBRow } from './db-query';
 
 /**
  * Resolve the DB path: per-shard (test_memo_shard{id}.db) or fallback.
@@ -29,7 +30,8 @@ const DB_PATH = resolveDBPath();
  * aren't affected by records/activities created by earlier tests in the
  * same shard. Mirrors the cleanup in e2e/globalSetup.ts — seed IDs are
  * short (clients: c1..c5, records: r1..r6, visits: v1..v10, activities:
- * ev_0..ev_44) so length checks distinguish them from UUID test data.
+ * ev_0..ev_44, ev_fixed_0..ev_fixed_9) so we exclude known seed prefixes
+ * rather than relying on length. UUID test data is never prefixed with these.
  */
 export function cleanTestData() {
   try {
@@ -37,7 +39,7 @@ export function cleanTestData() {
       DELETE FROM payments WHERE length(id) > 3;
       DELETE FROM visits WHERE length(id) > 3;
       DELETE FROM records WHERE length(id) > 3;
-      DELETE FROM activities WHERE length(id) > 5;
+      DELETE FROM activities WHERE id NOT LIKE 'ev\\_%' ESCAPE '\\' AND id NOT LIKE 'ev_fixed_%';
       DELETE FROM clients WHERE length(id) > 3;
     "`, { encoding: 'utf-8', stdio: 'pipe' });
   } catch (err: any) {
@@ -48,6 +50,52 @@ export function cleanTestData() {
     // Log but don't throw — test cleanup should not fail tests
     console.warn(`[cleanTestData] Warning: ${msg.trim()}`);
   }
+}
+
+/**
+ * Resolve a record's activity.start as ISO date (YYYY-MM-DD).
+ * - Pass `recordId` to target a specific record (e.g., seed "r1")
+ * - Omit to pick any active record (deterministic: smallest id)
+ *
+ * Returns null if no record found.
+ *
+ * This is the source of truth for "when is this record's activity" —
+ * avoids fragile UI-based walk-back logic.
+ */
+function resolveRecordDate(recordId?: string): string | null {
+  const safeId = recordId ? recordId.replace(/'/g, "''") : null;
+  const sql = safeId
+    ? `SELECT substr(a.start, 1, 10) AS d
+       FROM records r
+       JOIN activities a ON r.activity_id = a.id
+       WHERE r.id = '${safeId}' AND r.is_active = 1 AND a.is_active = 1`
+    : `SELECT substr(a.start, 1, 10) AS d
+       FROM records r
+       JOIN activities a ON r.activity_id = a.id
+       WHERE r.is_active = 1 AND a.is_active = 1
+       ORDER BY r.id ASC
+       LIMIT 1`;
+  const row = queryDBRow(sql);
+  return row?.d ?? null;
+}
+
+/**
+ * Navigate the schedule page to the week containing the given date.
+ * Uses the existing __memo-switch-to-week-view event in ScheduleContext.
+ *
+ * @param page Playwright page
+ * @param date ISO date (YYYY-MM-DD)
+ */
+async function navigateToWeek(page: Page, date: string): Promise<void> {
+  await page.evaluate((d: string) => {
+    document.dispatchEvent(
+      new CustomEvent('__memo-switch-to-week-view', {
+        detail: { date: `${d}T12:00:00` },
+      }),
+    );
+  }, date);
+  await page.waitForSelector('[data-testid^="activity-"]', { timeout: 10_000 });
+  await page.waitForTimeout(300); // small buffer for activity cards to render
 }
 
 /**
@@ -120,78 +168,95 @@ export async function getFirstActivity(page: Page) {
  * Open the activity details modal for an activity that has records (client tabs).
  * Dispatches a custom event that the modal listens to.
  *
- * Tries the first few visible activities on the current page before navigating
- * to previous weeks. Seed data may place records on non-first activities,
- * so checking only the first card can miss them.
+ * Uses DB lookup to find the target record's week, then navigates directly
+ * to that week via __memo-switch-to-week-view — no fragile walk-back logic.
  *
- * Falls back to navigating up to 3 previous weeks.
+ * @param opts.recordId — target a specific record (e.g., seed "r1").
+ *   If omitted, picks any active record (deterministic: smallest id).
  */
-export async function openModal(page: Page): Promise<unknown | null> {
-  const MAX_WEEKS_BACK = 3;
-  const MAX_ACTIVITIES_PER_WEEK = 5;
-
-  for (let week = 0; week <= MAX_WEEKS_BACK; week++) {
-    const cardCount = await page.locator('[data-testid^="activity-"]').count();
-    const toTry = Math.min(cardCount, MAX_ACTIVITIES_PER_WEEK);
-
-    for (let i = 0; i < toTry; i++) {
-      const card = page.locator('[data-testid^="activity-"]').nth(i);
-      if (!(await card.isVisible())) continue;
-
-      const activity = await card.evaluate((el: any) => {
-        const fiberKey = Object.keys(el).find((k: string) => k.startsWith('__reactFiber'));
-        if (!fiberKey) return null;
-        let current = (el as any)[fiberKey];
-        while (current) {
-          if (current.memoizedProps?.activity) return current.memoizedProps.activity;
-          current = current.return;
-        }
-        return null;
-      });
-
-      if (!activity) continue;
-
-      await page.evaluate((act: any) => {
-        document.dispatchEvent(new CustomEvent('__memo-open-modal', { detail: { activity: act } }));
-      }, activity);
-
-      await page.waitForSelector('[data-testid="activity-details-modal"]', {
-        state: 'visible',
-        timeout: 10_000,
-      });
-
-      const hasClientTabs =
-        (await page.locator('[data-testid^="tab-client-"]').count()) > 0;
-      if (hasClientTabs) return activity;
-
-      // No client tabs — close modal and try next activity on this page
-      await page.evaluate(() => {
-        document.dispatchEvent(new CustomEvent('__memo-close-modal'));
-      });
-      await page.waitForTimeout(300);
-    }
-
-    // No activity on this page has records — navigate to previous week
-    const prevBtn = page.locator('[data-testid="date-nav-prev"]');
-    if (await prevBtn.isVisible()) {
-      await prevBtn.click();
-      await page.waitForSelector('[data-testid^="activity-"]', {
-        timeout: 10_000,
-      });
-      await page.waitForTimeout(500);
-    }
+export async function openModal(
+  page: Page,
+  opts?: { recordId?: string },
+): Promise<unknown | null> {
+  // Step 1: ask DB which week has the target record
+  const targetDate = resolveRecordDate(opts?.recordId);
+  if (!targetDate) {
+    console.warn(`[openModal] No record found${opts?.recordId ? ` for id ${opts.recordId}` : ''}`);
+    return null;
   }
-  // If we get here, no activity with records was found — signal to callers
+
+  // Step 2: navigate to that week
+  await navigateToWeek(page, targetDate);
+
+  // Step 3: try activities on the now-visible week until one has a record
+  const MAX_ACTIVITIES_PER_WEEK = 5;
+  const cardCount = await page.locator('[data-testid^="activity-"]').count();
+  const toTry = Math.min(cardCount, MAX_ACTIVITIES_PER_WEEK);
+
+  for (let i = 0; i < toTry; i++) {
+    const card = page.locator('[data-testid^="activity-"]').nth(i);
+    if (!(await card.isVisible())) continue;
+
+    // Read activity from React fiber (same pattern as before)
+    const activity = await card.evaluate((el: any) => {
+      const k = Object.keys(el).find((x: string) => x.startsWith('__reactFiber'));
+      if (!k) return null;
+      let c = (el as any)[k];
+      while (c) {
+        if (c.memoizedProps?.activity) return c.memoizedProps.activity;
+        c = c.return;
+      }
+      return null;
+    });
+    if (!activity) continue;
+
+    await page.evaluate((act: any) => {
+      document.dispatchEvent(new CustomEvent('__memo-open-modal', {
+        detail: { activity: act },
+      }));
+    }, activity);
+
+    await page.waitForSelector('[data-testid="activity-details-modal"]', {
+      state: 'visible',
+      timeout: 10_000,
+    });
+
+    const hasClientTabs =
+      (await page.locator('[data-testid^="tab-client-"]').count()) > 0;
+    if (hasClientTabs) return activity;
+
+    await page.evaluate(() => {
+      document.dispatchEvent(new CustomEvent('__memo-close-modal'));
+    });
+    await page.waitForTimeout(300);
+  }
   return null;
 }
 
 /**
  * Open the modal directly on the "new booking" (+) tab.
  * Useful for testing record creation flows.
+ *
+ * Navigates to the target week first (via DB lookup) so activities are visible.
+ *
+ * @param opts.date — ISO date (YYYY-MM-DD) to target. If omitted, picks
+ *   any active record's week so we land on a week with activities.
  */
-export async function openAddTab(page: Page) {
+export async function openAddTab(
+  page: Page,
+  opts?: { date?: string },
+): Promise<void> {
+  const targetDate = opts?.date ?? resolveRecordDate();
+  if (!targetDate) {
+    throw new Error('openAddTab: no active records found to navigate to');
+  }
+
+  await navigateToWeek(page, targetDate);
+
   const activity = await getFirstActivity(page);
-  if (!activity) throw new Error('No activity found on page');
+  if (!activity) {
+    throw new Error(`openAddTab: no activity found on week of ${targetDate}`);
+  }
 
   await page.evaluate((act: any) => {
     document.dispatchEvent(new CustomEvent('__memo-quick-add', { detail: { activity: act } }));
@@ -264,12 +329,48 @@ export async function waitForRecordsReady(page: Page) {
 /**
  * Wait for clients page to load with table or empty state.
  * Navigates to /clients and waits for the heading and content.
+ *
+ * @param options.waitForName — if provided, waits for a specific client name
+ *   to appear in the table rows. Useful after creating a client via API
+ *   where React Query may serve stale cached data.
  */
-export async function waitForClientsReady(page: Page) {
+export async function waitForClientsReady(
+  page: Page,
+  options?: { waitForName?: string },
+) {
+  // Set up response listener BEFORE navigation so we catch the fresh API call
+  const clientsResponse = page.waitForResponse(
+    (resp) => resp.url().includes('/api/v1/clients') && resp.status() === 200,
+    { timeout: 60_000 },
+  );
   await page.goto('/clients');
   await page.waitForSelector('h1:has-text("Клиенты")', { timeout: 60_000 });
-  // Wait for either table rows or the "no clients" empty state
   await page.waitForSelector('table tbody, p:has-text("Нет клиентов")', { timeout: 60_000 });
+  await clientsResponse.catch(() => {});
+  await page.waitForTimeout(500); // React re-render buffer
+
+  // Hard reload to force React Query to refetch with fresh data.
+  // This bypasses any stale cache that might be serving the first
+  // page load's data. The reload is async; we wait for the second
+  // /api/v1/clients response before checking for the row.
+  if (options?.waitForName) {
+    const clientsResponse2 = page.waitForResponse(
+      (resp) => resp.url().includes('/api/v1/clients') && resp.status() === 200,
+      { timeout: 60_000 },
+    );
+    await page.reload({ waitUntil: 'networkidle' });
+    await page.waitForSelector('table tbody, p:has-text("Нет клиентов")', { timeout: 60_000 });
+    await clientsResponse2.catch(() => {});
+    await page.waitForTimeout(500); // React re-render buffer
+  }
+
+  // If caller needs to wait for a specific client name to appear in the table
+  if (options?.waitForName) {
+    await page
+      .locator('table tbody tr')
+      .filter({ hasText: options.waitForName })
+      .waitFor({ state: 'visible', timeout: 30_000 });
+  }
 }
 
 /**

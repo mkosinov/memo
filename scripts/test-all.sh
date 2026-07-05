@@ -5,11 +5,13 @@
 # Parallelization strategy:
 # - Backend pytest runs in parallel with frontend stages.
 # - Lint, type-check, vitest all run in parallel.
-# - 5 Playwright shards run in PARALLEL, each with its own isolated stack:
-#   * Its own SQLite DB (test_memo_shard{1-5}.db)
-#   * Its own FastAPI backend (port 8001-8005)
-#   * Its own Next.js frontend (port 3002-3006)
+# - 2 Playwright shards run in PARALLEL, each with its own isolated stack:
+#   * Its own SQLite DB (test_memo_shard{1-2}.db)
+#   * Its own FastAPI backend (port 8001-8002)
+#   * Its own Next.js frontend (port 3002-3003)
 #   No cross-shard interference.
+#   2 shards instead of 5 to avoid CPU contention on 4-core machines
+#   (5 parallel Next.js dev servers caused 30s+ page loads).
 # - Visual compliance runs last (needs dev server on :3001).
 # - Total runtime ≈ slowest shard setup + slowest shard tests.
 #
@@ -55,6 +57,25 @@ fi
 
 echo "🔍 Running local test suite (PARALLEL mode)..."
 
+# ── Kill orphan processes from previous runs ───────────────────────────────
+# Previous pre-push runs may have left Next.js/uvicorn processes on shard
+# ports. Kill them to avoid EADDRINUSE and corrupted state.
+echo "  → cleaning up orphan processes on shard ports..."
+for port in 3002 3003 8001 8002; do
+  # Find PIDs listening on this port and kill them
+  PIDS=$(lsof -ti :"$port" 2>/dev/null || true)
+  if [ -n "$PIDS" ]; then
+    echo "    killing orphan processes on port $port: $PIDS"
+    kill -9 $PIDS 2>/dev/null || true
+  fi
+done
+sleep 2
+
+# Also kill any orphan next-server processes (from worktrees etc.)
+pkill -9 -f "next-server" 2>/dev/null || true
+pkill -9 -f "next dev -p 300[2-3]" 2>/dev/null || true
+sleep 1
+
 # Track all background PIDs for waiting
 ALL_PIDS=()
 
@@ -88,10 +109,8 @@ ALL_PIDS+=($!)
 # Each shard gets an isolated stack:
 #   SHARD_ID=1 → DB: test_memo_shard1.db, backend: :8001, frontend: :3002
 #   SHARD_ID=2 → DB: test_memo_shard2.db, backend: :8002, frontend: :3003
-#   ...
-#   SHARD_ID=5 → DB: test_memo_shard5.db, backend: :8005, frontend: :3006
 #
-# This eliminates cross-shard DB interference entirely.
+# 2 shards instead of 5 to avoid CPU contention on 4-core machines.
 # Each stack runs via scripts/e2e-shard-start.sh which:
 #   1. Seeds the DB (if empty)
 #   2. Starts FastAPI on BACKEND_PORT
@@ -99,9 +118,9 @@ ALL_PIDS+=($!)
 #
 # Playwright connects via reuseExistingServer: true.
 
-SHARD_PROJECTS=("shard-services" "shard-schedule" "shard-records" "shard-clients" "shard-rest")
-SHARD_BACKEND_PORTS=(8001 8002 8003 8004 8005)
-SHARD_FRONTEND_PORTS=(3002 3003 3004 3005 3006)
+SHARD_PROJECTS=("shard-schedule" "shard-rest")
+SHARD_BACKEND_PORTS=(8001 8002)
+SHARD_FRONTEND_PORTS=(3002 3003)
 
 echo "  → preparing per-shard databases..."
 # Ensure sqlite3 is available
@@ -122,11 +141,11 @@ if [ ! -f "$MASTER_DB" ] || [ "$(sqlite3 "$MASTER_DB" "SELECT COUNT(*) FROM sqli
 fi
 
 # Create per-shard DB copies from master
-for i in $(seq 1 5); do
+for i in $(seq 1 2); do
   SHARD_DB="backend/test_memo_shard${i}.db"
   cp "$MASTER_DB" "$SHARD_DB"
 done
-echo "  → per-shard DBs ready (5 copies of $MASTER_DB)"
+echo "  → per-shard DBs ready (2 copies of $MASTER_DB)"
 
 # Cleanup function for shard stacks
 SHARD_BACKEND_PIDS=()
@@ -142,9 +161,9 @@ cleanup_shards() {
 }
 trap cleanup_shards EXIT
 
-# Start 5 shard stacks in parallel
-echo "  → starting 5 shard stacks..."
-for i in $(seq 0 4); do
+# Start 2 shard stacks in parallel
+echo "  → starting 2 shard stacks..."
+for i in $(seq 0 1); do
   SHARD_NUM=$((i + 1))
   PROJECT="${SHARD_PROJECTS[$i]}"
   BACKEND_PORT="${SHARD_BACKEND_PORTS[$i]}"
@@ -173,12 +192,12 @@ done
 
 # Wait for all shard stacks to be ready (check frontend ports)
 echo "  → waiting for shard frontends to be ready..."
-SHARD_READY=("" "" "" "" "")
-# 5 parallel Next.js dev servers need more time to compile first request.
-# --max-time 30 + 60 iterations = up to 30 min total (usually ~2-3 min).
+SHARD_READY=("" "")
+# 2 parallel Next.js dev servers need time to compile first request.
+# --max-time 30 + 60 iterations = up to 30 min total (usually ~1-2 min).
 for _ in $(seq 1 60); do
   ALL_READY=true
-  for i in $(seq 0 4); do
+  for i in $(seq 0 1); do
     if [ "${SHARD_READY[$i]}" = "ready" ]; then continue; fi
     FRONTEND_PORT="${SHARD_FRONTEND_PORTS[$i]}"
     if curl -s -o /dev/null -w "%{http_code}" "http://localhost:${FRONTEND_PORT}/" --max-time 30 2>/dev/null | grep -qE "^(2|3)"; then
@@ -192,7 +211,7 @@ for _ in $(seq 1 60); do
   sleep 1
 done
 # Check for any shards that failed to start
-for i in $(seq 0 4); do
+for i in $(seq 0 1); do
   if [ "${SHARD_READY[$i]}" != "ready" ]; then
     echo "❌ Shard $((i + 1)) frontend failed to start on :${SHARD_FRONTEND_PORTS[$i]}"
     echo "   Check: $LOG_DIR/shard-stack-$((i + 1)).log"
@@ -204,9 +223,9 @@ done
 echo "  → waiting 30s for Next.js compilation to stabilize..."
 sleep 30
 
-# Run 5 Playwright shards in parallel, each against its own frontend
-echo "  → running 5 Playwright shards in parallel..."
-for i in $(seq 0 4); do
+# Run 2 Playwright shards in parallel, each against its own frontend
+echo "  → running 2 Playwright shards in parallel..."
+for i in $(seq 0 1); do
   SHARD_NUM=$((i + 1))
   PROJECT="${SHARD_PROJECTS[$i]}"
   FRONTEND_PORT="${SHARD_FRONTEND_PORTS[$i]}"

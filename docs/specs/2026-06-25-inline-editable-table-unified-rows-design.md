@@ -412,12 +412,56 @@ The api-client wrappers for these either exist (`updateVisitStatus`, `createPaym
 
 ---
 
+## Addendum — New-row save trigger + editable payment date (2026-07-06)
+
+Discovered during live testing after the initial refactor shipped. Two corrections to the new-row UX.
+
+### A. New-row save must fire on blur/Enter regardless of whether a field changed
+
+**Problem (regression vs the original "Save flow" section above):** the initial implementation hard-wired the POST inside a single cell's `InlineEditCell.onCommit` (payments → Amount, visits → Name). `InlineEditCell` only fires `onCommit` when the draft value **changed** (`draft !== original`). This is correct for editing an existing cell (PATCH), but WRONG for creating a new row:
+
+- **Payments (frequent):** a new payment row is pre-filled with `defaultAmount` = "К оплате" (outstanding balance). Accepting that amount verbatim and pressing Enter / blurring does NOT save it, because the value never changed. The user cannot save the exact owed amount without editing it.
+- **Visits (narrow):** a new visit row's Name starts empty; typing a name registers as a change and saves. But an **anonymous visit** (blank name = "Аноним" placeholder, only a tariff picked) never fires the Name `onCommit` → cannot be saved.
+
+**Required behavior:** for a NEW row (`id === null`), committing the row (blur leaving the row, or Enter on any editable field) MUST trigger `onAdd` **regardless of whether any individual field changed**, as long as the row is valid (see B). This matches the ORIGINAL "Save flow" section (`handleSave()` on Enter), which the implementation drifted away from.
+
+**Design:** wire the already-existing but currently-dead `useInlineEditRow.handleSave` into the save path:
+- `InlineEditRow` consumes `handleSave` from the hook and provides a row-level save trigger: on **Enter** in any cell, and on **blur leaving the whole row** (focus moves outside the row), call `handleSave()` when `isNew`.
+- `handleSave` calls `onAdd(formState)` for new rows (unconditional — not gated on field change).
+- Both tables DROP the duplicated `handleAdd(...).then(replaceRowByClientId)` from their per-cell `onCommit`; new-row saving converges on the single `handleSave` path. (For SAVED rows, per-cell PATCH-on-change via `InlineEditCell.onCommit` stays as-is — change-gating is correct there.)
+- This retires the dead `handleSave`/`onUpdate` code flagged in the Task 4.1/5.1 reviews.
+
+**Guard (amount > 0 for payments):** restore the explicit validation lost in the refactor. A new payment row with `amount <= 0` MUST NOT fire a POST (backend enforces `gt=0` → would 422). The Amount input also gets `min={1}`. For visits, a blank-name anonymous row IS valid and must save (name is optional; visitor is created "Аноним").
+
+### B. Editable payment date on new rows (auto-filled, user-adjustable)
+
+**Problem:** the old form had a `datetime-local` input auto-filled with the current time; the refactor dropped it, so a new payment row shows a blank Date cell until saved, and the user cannot set/backdate the payment time.
+
+**Required behavior:**
+- A new payment row's Date cell renders an **editable `datetime-local` input**, auto-filled with the current time (`new Date()`) at row creation.
+- The user may adjust it before saving.
+- The chosen date is sent to the backend and persisted as the payment's `created_at`.
+
+**Backend change (new — supersedes the "no backend changes" note):** `POST /api/v1/payments` must accept an optional client-supplied timestamp so the UI-entered date is persisted:
+- Add an optional field to `PaymentCreate` (e.g. `created_at: datetime | None = None`, or a dedicated `paid_at`). When provided, the service sets the payment's timestamp to it; when omitted, the DB default (now) applies.
+- Thread it through: frontend `addPayment(amount, method, date?)` → `createPayment` payload → `PaymentCreate`.
+- Keep it backward-compatible (optional; existing callers that omit it are unaffected).
+
+### New user scenarios (extend the list above)
+
+10. **Save prefilled payment without editing.** New payment row prefilled with "К оплате" = 6000 → user presses Enter (or blurs) WITHOUT changing the amount → payment is saved with amount 6000. (Currently broken.)
+11. **Save anonymous visit.** New visit row → user picks only a tariff, leaves Name blank → blur/Enter → an anonymous ("Аноним") visit is saved. (Currently broken.)
+12. **amount ≤ 0 not sent.** New payment row → user clears amount to 0 → blur/Enter → NO POST fires (guard), no 422. Inline indication that amount must be > 0.
+13. **Editable payment date persists.** New payment row shows current time in an editable datetime input → user adjusts it → saves → the payment's `created_at` reflects the user-entered time (verified via GET).
+
+---
+
 ## Out of scope (deferred)
 
 - Inline-editing of the `status` field for a new row (it always defaults to `'waiting'`; admin changes it after save).
 - Optimistic updates (the wave 6 record-status spec deferred this too; same line).
 - A true generic `InlineEditableTable<T>` that takes column DSL — explicitly non-goal.
-- Backend changes (none required — the single-entity endpoints already exist from Phase 0-2. This refactor only wires the frontend to them).
+- Backend changes: the core refactor required none (endpoints existed from Phase 0-2). **Exception:** the Addendum (B) adds ONE small backend change — an optional client-supplied timestamp on `POST /api/v1/payments` so a user-entered payment date persists.
 
 ---
 

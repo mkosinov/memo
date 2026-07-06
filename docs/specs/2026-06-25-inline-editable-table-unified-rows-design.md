@@ -431,7 +431,12 @@ Discovered during live testing after the initial refactor shipped. Two correctio
 - Both tables DROP the duplicated `handleAdd(...).then(replaceRowByClientId)` from their per-cell `onCommit`; new-row saving converges on the single `handleSave` path. (For SAVED rows, per-cell PATCH-on-change via `InlineEditCell.onCommit` stays as-is — change-gating is correct there.)
 - This retires the dead `handleSave`/`onUpdate` code flagged in the Task 4.1/5.1 reviews.
 
-**Guard (amount > 0 for payments):** restore the explicit validation lost in the refactor. A new payment row with `amount <= 0` MUST NOT fire a POST (backend enforces `gt=0` → would 422). The Amount input also gets `min={1}`. For visits, a blank-name anonymous row IS valid and must save (name is optional; visitor is created "Аноним").
+**Guard (amount > 0 for payments):** restore the explicit validation lost in the refactor.
+
+- The check `amount > 0` applies to BOTH save paths: creating a new payment (POST) AND editing an existing payment's amount (PATCH). If the admin clears an existing payment's amount to 0, the guard must also fire (backend enforces `gt=0` → would 422 otherwise).
+- **On `amount <= 0`:** show an **error toast** ("Сумма должна быть больше 0") and DO NOT send the request (no POST, no PATCH). Use the project's standard toast mechanism (error contract / `waitForToast`-compatible `role="status"` toast).
+- The Amount `<input type="number">` also keeps `min={1}` as a browser-level input hint, but the authoritative guard is the explicit `amount > 0` check in code (min alone does not prevent clearing the field to empty/0).
+- For visits, a blank-name anonymous row IS valid and must save (name is optional; visitor is created "Аноним"). No amount guard applies to visits.
 
 ### B. Editable payment date on new rows (auto-filled, user-adjustable)
 
@@ -451,7 +456,7 @@ Discovered during live testing after the initial refactor shipped. Two correctio
 
 10. **Save prefilled payment without editing.** New payment row prefilled with "К оплате" = 6000 → user presses Enter (or blurs) WITHOUT changing the amount → payment is saved with amount 6000. (Currently broken.)
 11. **Save anonymous visit.** New visit row → user picks only a tariff, leaves Name blank → blur/Enter → an anonymous ("Аноним") visit is saved. (Currently broken.)
-12. **amount ≤ 0 not sent.** New payment row → user clears amount to 0 → blur/Enter → NO POST fires (guard), no 422. Inline indication that amount must be > 0.
+12. **amount ≤ 0 not sent (new + existing).** (a) New payment row → user clears amount to 0 → blur/Enter → NO POST fires; an error toast "Сумма должна быть больше 0" is shown; no 422. (b) Existing payment row → admin edits amount to 0 → blur → NO PATCH fires; same error toast; the row keeps its previous amount.
 13. **Editable payment date persists.** New payment row shows current time in an editable datetime input → user adjusts it → saves → the payment's `created_at` reflects the user-entered time (verified via GET).
 
 ---

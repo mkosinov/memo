@@ -76,7 +76,7 @@ Allow `POST /api/v1/payments` to accept an optional client-supplied `created_at`
 ---
 
 ## Task 2: Frontend — new-row save on blur/Enter + preserve submitted values (both tables)
-### Classification: standard
+### Classification: large
 ### Required Docs
 - Spec `## Addendum` A + A.1 (save flow, replace-in-place preserve-submitted, dead `handleSave`)
 - `frontend/admin/app/components/shared/record/useInlineEditRow.ts`, `InlineEditRow.tsx`, `InlineEditCell.tsx`
@@ -90,9 +90,10 @@ Make new-row saving fire on blur-leaving-the-row OR Enter (regardless of whether
 ### Steps
 - [ ] **Wire `handleSave` into `InlineEditRow`:** consume `handleSave` from `useInlineEditRow`. Add a row-level trigger:
   - On **Enter** keydown within the row (any cell) → if `isNew`, call `handleSave()`.
-  - On **blur leaving the row** (focus moves outside the row's DOM — use `onBlur` with `relatedTarget`/`currentTarget.contains` check) → if `isNew` and the row is "dirty enough to save" (see guard below), call `handleSave()`.
+  - On **blur leaving the row** (focus moves outside the row's DOM — use `onBlur` with `relatedTarget`/`currentTarget.contains` check) → if `isNew`, call `handleSave()`. (No change-gate: saving does NOT depend on any field having changed.)
   - Guard against double-save: track a `saving` ref/state so concurrent Enter+blur don't double-POST; once saved (row gets id), subsequent commits go through the existing PATCH path.
 - [ ] **`handleSave` must save unconditionally for new rows** (not gated on any single field changing). Verify `useInlineEditRow.handleSave` calls `onAdd(formState)` for `isNew`. Keep `formState` as the source of truth for what to send.
+- [ ] **Verify `formState` re-init on `row` change:** confirm `useInlineEditRow`'s `formState` re-initializes when the `row` prop changes (after replace-in-place the row object changes). If it does NOT (no `useEffect([row])` today, and the row remounts via key change so a fresh mount re-inits — verify which happens), add a `useEffect` that re-runs `setFormState(pickFormData(row))` when `row` identity changes, so a saved row never shows stale/blank formState. Document what you found (remount-via-key vs in-place update).
 - [ ] **Preserve submitted values on replace (A.1):** change each table's `onAdd`/replace logic so the replaced row uses the submitted `formState` values (name/age for visits; amount/method/date for payments), NOT a `visitorsMap` re-lookup. Concretely, one of:
   - Make `addVisit` return `{ ...visit, name, age }` (thread the created visitor's name/age through), OR
   - In the table, `replaceRowByClientId(clientId, { ...visitResponseToRow(saved, visitorsMap), name: submitted.name, age: submitted.age })`.

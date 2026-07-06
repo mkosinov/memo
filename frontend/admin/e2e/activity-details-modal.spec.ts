@@ -180,10 +180,14 @@ test.describe('ActivityDetailsModal — Real User Scenarios', () => {
         // Read footer before
         await expect(page.locator('[data-testid="modal-footer"]')).toBeVisible();
 
-        // Add payment — click "Добавить" first to reveal inline form, then fill & submit
+        // Add payment — click "Добавить" to reveal inline row, fill amount & commit via Enter
         await page.locator('[data-testid="btn-add-payment"]').click();
-        await page.locator('[data-testid="add-payment-amount"]').fill('1500');
-        await page.locator('[data-testid="add-payment-submit"]').click();
+        const amountInput = page.locator('[data-testid="add-payment-amount"]');
+        await expect(amountInput).toBeVisible();
+        await amountInput.fill('1500');
+        await amountInput.press('Enter');
+        // Wait for save (new-row input disappears after commit)
+        await expect(amountInput).not.toBeVisible({ timeout: 5_000 });
 
         // Wait for UI update
         await expect(page.locator('[data-testid="modal-footer"]')).toBeVisible();

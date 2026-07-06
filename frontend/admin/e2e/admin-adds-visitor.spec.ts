@@ -30,15 +30,22 @@ test('US-M03: Admin can add visitor and see it in modal without F5', async ({
   await expect(addBtn).toBeVisible();
   await addBtn.click();
 
-  // Fill the name in the inline form
+  // Scenario 1: Verify empty row with placeholders
+  const newRow = page.locator('[data-testid="visit-row-new"]');
+  await expect(newRow).toBeVisible();
+  // Name input is auto-focused (has autoFocus attribute)
   const nameInput = page.locator('[data-testid="add-visitor-name"]');
   await expect(nameInput).toBeVisible();
-  await nameInput.fill('Тест Тестов');
-  // Blur the input to trigger the onBlur handler which submits the form
-  await nameInput.blur();
+  // Age shows "Взрослый" placeholder
+  await expect(page.locator('[data-testid="add-visitor-age"]')).toBeVisible();
 
-  // Wait for the visitor to be added
-  await page.waitForTimeout(1000);
+  // Fill the name and commit via Enter (blur-to-commit)
+  await nameInput.fill('Тест Тестов');
+  await nameInput.press('Enter');
+
+  // Scenario 2: After save, the new-row testid changes to visit-row-{id}
+  await expect(newRow).not.toBeVisible({ timeout: 5_000 });
+  await expect(page.locator('[data-testid^="visit-row-"]').first()).toBeVisible({ timeout: 5_000 });
 
   // Verify the visitor count increased
   const finalCount = await page.locator('[data-testid$="-age"]').count();

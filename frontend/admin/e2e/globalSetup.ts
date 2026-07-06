@@ -34,7 +34,7 @@ export default function globalSetup() {
       DELETE FROM payments WHERE length(id) > 3;
       DELETE FROM visits WHERE length(id) > 3;
       DELETE FROM records WHERE length(id) > 3;
-      DELETE FROM activities WHERE length(id) > 5;
+      DELETE FROM activities WHERE length(id) > 5 AND id NOT LIKE 'ev_fixed_%';
       DELETE FROM clients WHERE length(id) > 3;
     "`, { encoding: 'utf-8', stdio: 'pipe' });
   } catch (err: any) {

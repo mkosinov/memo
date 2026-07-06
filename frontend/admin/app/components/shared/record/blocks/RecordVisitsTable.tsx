@@ -275,7 +275,9 @@ export function RecordVisitsTable({
       tariff_id: data.tariff_id,
       price: data.price,
     });
-    return visitResponseToRow(saved, visitorsMap);
+    const row = visitResponseToRow(saved, visitorsMap);
+    // Preserve submitted values — visitorsMap may be stale (new visitor not yet loaded).
+    return { ...row, name: data.name, age: data.age };
   }, [onAddVisit, clientId, visitorsMap]);
 
   /** PATCH an existing visit. Returns updated row. */
@@ -327,6 +329,7 @@ export function RecordVisitsTable({
             onUpdate={handleUpdate}
             onDelete={handleDeleteRow}
             onRemove={handleRemove}
+            onSaved={(oldRow, savedRow) => replaceRowByClientId(oldRow.clientId, savedRow)}
             emptyData={() => pickFormData(makeEmptyVisitRow(tariffs))}
             pickFormData={pickFormData}
             isReadOnly={isReadOnly}
@@ -345,11 +348,7 @@ export function RecordVisitsTable({
                     onCommit={(v) => {
                       if (isNew) {
                         handleChange('name', v);
-                        // Trigger save for new rows on name commit
-                        const data: VisitFormState = { ...formState, name: v };
-                        handleAdd(data).then((savedRow) => {
-                          replaceRowByClientId(r.clientId, savedRow);
-                        });
+                        // Save is triggered by row-level handleSave (Enter/blur)
                       } else if (r.visitor_id) {
                         onChangeVisitor(r.visitor_id, { name: v });
                       }

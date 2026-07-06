@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 
 export interface UseInlineEditRowOptions<T extends { id: string | null }, F> {
   row: T;
@@ -18,35 +18,46 @@ export interface UseInlineEditRowOptions<T extends { id: string | null }, F> {
   onRemove: (row: T) => void;
 }
 
-export interface UseInlineEditRowResult<F> {
+export interface UseInlineEditRowResult<T, F> {
   formState: F;
   isNew: boolean;
   handleChange: <K extends keyof F>(field: K, value: F[K]) => void;
-  handleSave: () => Promise<void>;
+  handleSave: () => Promise<T | undefined>;
   handleDelete: () => Promise<void>;
   reset: () => void;
 }
 
 export function useInlineEditRow<T extends { id: string | null }, F>(
   opts: UseInlineEditRowOptions<T, F>,
-): UseInlineEditRowResult<F> {
+): UseInlineEditRowResult<T, F> {
   const { row, pickFormData, onAdd, onUpdate, onDelete, onRemove } = opts;
 
   const [formState, setFormState] = useState<F>(() => pickFormData(row));
+
+  /**
+   * Ref mirror of formState — updated synchronously in handleChange so that
+   * handleSave (called from blur/Enter handlers in the SAME event tick) always
+   * reads the latest values, even before React re-renders.
+   */
+  const formStateRef = useRef<F>(formState);
 
   const isNew = row.id === null;
 
   const handleChange = useCallback(<K extends keyof F>(field: K, value: F[K]) => {
     setFormState((s) => ({ ...s, [field]: value }));
+    // Update ref synchronously so handleSave (called from blur/Enter in the
+    // same event tick) always reads the latest values — even before React
+    // re-renders and runs the state updater.
+    formStateRef.current = { ...formStateRef.current, [field]: value };
   }, []);
 
-  const handleSave = useCallback(async () => {
+  const handleSave = useCallback(async (): Promise<T | undefined> => {
     if (isNew) {
-      await onAdd(formState);
+      return await onAdd(formStateRef.current);
     } else {
-      await onUpdate(row.id as string, formState);
+      return await onUpdate(row.id as string, formStateRef.current);
     }
-  }, [isNew, onAdd, onUpdate, row.id, formState]);
+  }, [isNew, onAdd, onUpdate, row.id]);
 
   const handleDelete = useCallback(async () => {
     if (isNew) {
@@ -57,7 +68,9 @@ export function useInlineEditRow<T extends { id: string | null }, F>(
   }, [isNew, onRemove, onDelete, row]);
 
   const reset = useCallback(() => {
-    setFormState(pickFormData(row));
+    const fresh = pickFormData(row);
+    setFormState(fresh);
+    formStateRef.current = fresh;
   }, [pickFormData, row]);
 
   return { formState, isNew, handleChange, handleSave, handleDelete, reset };

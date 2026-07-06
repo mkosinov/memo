@@ -27,6 +27,8 @@ interface RowProps {
   className?: string;
   style?: React.CSSProperties;
   testId?: string;
+  onBlur?: React.FocusEventHandler<HTMLDivElement>;
+  onKeyDown?: React.KeyboardEventHandler<HTMLDivElement>;
 }
 
 interface AnonymRowProps {
@@ -88,12 +90,14 @@ function Header({ columns, isReadOnly }: HeaderProps) {
 
 // ── Row ──────────────────────────────────────────────────────────────────────
 
-function Row({ columns, cells, className = '', style, testId }: RowProps) {
+function Row({ columns, cells, className = '', style, testId, onBlur, onKeyDown }: RowProps) {
   return (
     <div
       className={`flex items-center gap-2 px-3 py-1.5 border-b last:border-b-0 text-sm ${className}`}
       style={{ borderColor: 'var(--line)', ...style }}
       data-testid={testId}
+      onBlur={onBlur}
+      onKeyDown={onKeyDown}
     >
       {columns.map((col) => {
         const alignClass = col.align === 'right' ? 'text-right' : col.align === 'center' ? 'text-center' : '';

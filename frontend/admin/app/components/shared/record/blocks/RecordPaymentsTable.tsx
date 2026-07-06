@@ -148,7 +148,9 @@ export function RecordPaymentsTable({
   /** POST a new payment. Returns saved row. */
   const handleAdd = useCallback(async (data: PaymentFormState): Promise<PaymentRow> => {
     const saved = await onAddPayment(data.amount, data.method);
-    return paymentResponseToRow(saved);
+    const row = paymentResponseToRow(saved);
+    // Preserve submitted values — the server response may have a different created_at.
+    return { ...row, amount: data.amount, method: data.method };
   }, [onAddPayment]);
 
   /** PATCH an existing payment. Returns updated row. */
@@ -202,6 +204,7 @@ export function RecordPaymentsTable({
             onUpdate={handleUpdate}
             onDelete={handleDeleteRow}
             onRemove={handleRemove}
+            onSaved={(oldRow, savedRow) => replaceRowByClientId(oldRow.clientId, savedRow)}
             emptyData={() => pickFormData(makeEmptyPaymentRow(defaultAmount))}
             pickFormData={pickFormData}
             isReadOnly={isReadOnly}
@@ -252,11 +255,7 @@ export function RecordPaymentsTable({
                       const amount = Number(v) || 0;
                       if (isNew) {
                         handleChange('amount', amount);
-                        // Trigger save for new rows on amount commit
-                        const data: PaymentFormState = { ...formState, amount };
-                        handleAdd(data).then((savedRow) => {
-                          replaceRowByClientId(r.clientId, savedRow);
-                        });
+                        // Save is triggered by row-level handleSave (Enter/blur)
                       } else {
                         onPatchPayment(r.id!, { amount }).then((updated) => {
                           replaceRowById(r.id!, paymentResponseToRow(updated));

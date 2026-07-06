@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { RecordTable, type Column } from './RecordTable';
 import { useInlineEditRow } from './useInlineEditRow';
 
@@ -31,6 +31,8 @@ export interface InlineEditRowProps<T extends { id: string | null }, F> {
   onUpdate: (id: string, data: F) => Promise<T>;
   onDelete: (id: string) => Promise<void>;
   onRemove: (row: T) => void;
+  /** Called after a successful new-row save with (oldRow, savedRow). Consumer uses this to replace-in-place. */
+  onSaved?: (oldRow: T, savedRow: T) => void;
   emptyData: () => F;
   pickFormData: (row: T) => F;
   isReadOnly?: boolean;
@@ -40,6 +42,12 @@ export interface InlineEditRowProps<T extends { id: string | null }, F> {
  * Renders ONE table row uniformly, whether `row.id === null` (unsaved,
  * "new" row) or `row.id !== null` (saved row). Wraps `RecordTable.Row` —
  * does not modify it.
+ *
+ * **Row-level save trigger (new rows):** for new rows (`id === null`),
+ * saving fires on **Enter** keydown anywhere in the row OR on **blur
+ * leaving the row** (focus moves outside the row div). This is
+ * unconditional — not gated on any field having changed. A double-save
+ * guard prevents concurrent Enter+blur from double-POSTing.
  *
  * `__actions` cell contract: this component OWNS the `__actions` cell
  * (the × delete button) so consumers don't have to repeat the delete
@@ -58,11 +66,12 @@ export function InlineEditRow<T extends { id: string | null }, F>({
   onUpdate,
   onDelete,
   onRemove,
+  onSaved,
   emptyData,
   pickFormData,
   isReadOnly = false,
 }: InlineEditRowProps<T, F>) {
-  const { formState, isNew, handleChange, handleDelete } = useInlineEditRow<T, F>({
+  const { formState, isNew, handleChange, handleSave, handleDelete } = useInlineEditRow<T, F>({
     row,
     emptyData,
     pickFormData,
@@ -86,6 +95,45 @@ export function InlineEditRow<T extends { id: string | null }, F>({
     }
   }, [deleting, handleDelete]);
 
+  // ── Row-level save trigger (new rows only) ──────────────────────────────
+  // Double-save guard: prevent Enter+blur from double-POSTing.
+  const savingRef = useRef(false);
+
+  const triggerSave = useCallback(async () => {
+    if (!isNew || savingRef.current) return;
+    savingRef.current = true;
+    try {
+      const saved = await handleSave();
+      if (saved) {
+        onSaved?.(row, saved);
+      }
+    } finally {
+      savingRef.current = false;
+    }
+  }, [isNew, handleSave, row, onSaved]);
+
+  /** Blur handler: fires save when focus leaves the entire row. */
+  const handleRowBlur = useCallback(
+    (e: React.FocusEvent<HTMLDivElement>) => {
+      if (!isNew) return;
+      // If focus moved to another element WITHIN the row, don't save
+      if (e.currentTarget.contains(e.relatedTarget as Node)) return;
+      triggerSave();
+    },
+    [isNew, triggerSave],
+  );
+
+  /** Keydown handler: fires save on Enter anywhere in the row. */
+  const handleRowKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLDivElement>) => {
+      if (!isNew) return;
+      if (e.key === 'Enter') {
+        triggerSave();
+      }
+    },
+    [isNew, triggerSave],
+  );
+
   const testId = `${testIdPrefix}-${row.id ?? 'new'}`;
 
   const cells = renderCell({ row, formState, isNew, handleChange });
@@ -105,5 +153,13 @@ export function InlineEditRow<T extends { id: string | null }, F>({
     );
   }
 
-  return <RecordTable.Row columns={columns} cells={cells} testId={testId} />;
+  return (
+    <RecordTable.Row
+      columns={columns}
+      cells={cells}
+      testId={testId}
+      onBlur={handleRowBlur}
+      onKeyDown={handleRowKeyDown}
+    />
+  );
 }

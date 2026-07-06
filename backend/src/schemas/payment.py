@@ -16,9 +16,13 @@ class PaymentBase(BaseModel):
 
 
 class PaymentCreate(PaymentBase):
-    """Request schema for creating a new payment."""
+    """Request schema for creating a new payment.
 
-    pass
+    ``created_at`` is optional: when provided, the payment uses the
+    client-supplied timestamp; when omitted, the DB default (now) applies.
+    """
+
+    created_at: datetime | None = None
 
 
 class PaymentUpdate(PaymentBase):

@@ -231,3 +231,55 @@ class TestPaymentsCrud:
         )
         assert response.status_code == 404
         assert response.json()["detail"]["code"] == "PAYMENT_NOT_FOUND"
+
+    def test_create_payment_with_created_at_persists_it(self, api_client) -> None:
+        """POST /api/v1/payments with created_at uses the client-supplied timestamp."""
+        record_id = _create_record(api_client)
+        payload = {
+            "record_id": record_id,
+            "amount": 500,
+            "method": "card",
+            "created_at": "2026-06-01T12:00:00",
+        }
+
+        response = api_client.post("/api/v1/payments", json=payload)
+        assert response.status_code == 201, f"Create failed: {response.text}"
+        body = response.json()
+        # Compare date/time components (allow for serialization format variations)
+        from datetime import datetime
+        created = datetime.fromisoformat(body["created_at"])
+        assert created.year == 2026
+        assert created.month == 6
+        assert created.day == 1
+        assert created.hour == 12
+        assert created.minute == 0
+
+        # Confirm persistence via GET
+        get_resp = api_client.get(f"/api/v1/payments/{body['id']}")
+        assert get_resp.status_code == 200
+        get_created = datetime.fromisoformat(get_resp.json()["created_at"])
+        assert get_created.year == 2026
+        assert get_created.month == 6
+        assert get_created.day == 1
+
+    def test_create_payment_without_created_at_defaults_now(self, api_client) -> None:
+        """POST /api/v1/payments without created_at uses server default (now)."""
+        from datetime import datetime, timedelta
+
+        record_id = _create_record(api_client)
+        payload = {
+            "record_id": record_id,
+            "amount": 500,
+            "method": "card",
+        }
+
+        before = datetime.utcnow()
+        response = api_client.post("/api/v1/payments", json=payload)
+        after = datetime.utcnow()
+
+        assert response.status_code == 201, f"Create failed: {response.text}"
+        body = response.json()
+        created = datetime.fromisoformat(body["created_at"])
+        # created_at should be within the test window (with 1-minute margin)
+        assert created >= before - timedelta(minutes=1)
+        assert created <= after + timedelta(minutes=1)

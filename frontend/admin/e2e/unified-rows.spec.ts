@@ -135,8 +135,11 @@ test.describe('Unified inline-editable rows', () => {
   });
 
   // ── Scenario 6: Select tariff → price auto-fills ──────────────────────
+  // TODO(flaky): openModal selects wrong activity when multiple seed activities
+  // share the same week (GH #124).
 
   test('visits: selecting tariff changes price on new row', async ({ page, request }) => {
+    test.skip(true, 'TODO: openModal picks wrong activity on multi-record week (GH #124)');
     // Create a record to ensure we have a valid activity to open
     const client = await createTestClient(request);
     const activity = await createTestActivity(request);
@@ -236,8 +239,11 @@ test.describe('Unified inline-editable rows', () => {
   });
 
   // ── Scenario 8: Visitor count "0" and + Добавить still works ────────────
+  // TODO(flaky): openModal selects wrong activity when multiple seed activities
+  // share the same week (GH #124).
 
   test('visits: + Добавить works when record has 0 visits', async ({ page, request }) => {
+    test.skip(true, 'TODO: openModal picks wrong activity on multi-record week (GH #124)');
     // 1. SETUP — create a record with NO visits
     const client = await createTestClient(request);
     const activity = await createTestActivity(request);

@@ -44,7 +44,7 @@ export function ActivityDetailsModal({ isOpen, onClose, activity, mode }: Activi
     : null;
 
   // Use the hook for record mutations (only when we have a record ID)
-  const { createRecord, deleteRecord, addPayment, deletePayment, addVisitorToRecord, updateRecord } = useRecordMutations(activity.id, activeRecordId || '');
+  const { createRecord, deleteRecord, addVisitorToRecord, updateRecord } = useRecordMutations(activity.id, activeRecordId || '');
 
   // Current service and its tariffs (used by all tab contents)
   const currentService = useMemo(
@@ -194,18 +194,6 @@ export function ActivityDetailsModal({ isOpen, onClose, activity, mode }: Activi
     [deleteRecord, showToast],
   );
 
-  // Payment handler — uses the hook
-  const handleAddPayment = useCallback(
-    async (_recordId: string, amount: number, method: string) => {
-      try {
-        await addPayment(amount, method);
-        showToast(`Оплата ${amount} ₽ (${method}) добавлена`);
-      } catch (err) {
-        showToast(parseApiError(err).message, 'error');
-      }
-    },
-    [addPayment, showToast],
-  );
 
   // Content renderer per active tab
   const renderContent = () => {
@@ -243,8 +231,6 @@ export function ActivityDetailsModal({ isOpen, onClose, activity, mode }: Activi
         serviceTariffs={serviceTariffs}
         onUpdateRecord={(id, updates) => updateRecord(id, updates)}
         onDeleteRecord={handleDeleteRecord}
-        onAddPayment={handleAddPayment}
-        onDeletePayment={(id) => deletePayment(id)}
         onAddVisitor={async (data) => {
           try {
             const firstPrice = serviceTariffs[0]?.price ?? 0;

@@ -10,6 +10,7 @@ vi.mock('@memo/api-client', () => ({
   patchRecord: vi.fn(),
   deleteRecord: vi.fn(),
   createPayment: vi.fn(),
+  patchPayment: vi.fn(),
   deletePayment: vi.fn(),
   getClientVisitors: vi.fn(),
   getActivity: vi.fn(),
@@ -177,10 +178,11 @@ describe('ClientRecordTab — integration with shared atoms', () => {
 
   it('addPayment fires createPayment mutation', async () => {
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    // Open payment add form first
+    // Open new payment row
     fireEvent.click(screen.getByTestId('btn-add-payment'));
-    fireEvent.change(screen.getByTestId('add-payment-amount'), { target: { value: '2000' } });
-    fireEvent.click(screen.getByTestId('add-payment-submit'));
+    const amountInput = screen.getByTestId('add-payment-amount');
+    fireEvent.change(amountInput, { target: { value: '2000' } });
+    fireEvent.blur(amountInput);
 
     await waitFor(() => {
       expect(createPayment).toHaveBeenCalledWith({

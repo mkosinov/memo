@@ -32,6 +32,8 @@ vi.mock('@memo/api-client', () => {
     updateRecord: vi.fn(),
     deleteRecord: vi.fn(),
     createPayment: vi.fn(),
+    patchPayment: vi.fn(),
+    deletePayment: vi.fn(),
     getClientVisitors: vi.fn(),
   };
 });
@@ -418,14 +420,13 @@ describe('ClientCardModal ↔ ClientRecordTab integration (real components)', ()
       expect(screen.getByTestId('client-record-tab')).toBeInTheDocument();
     });
 
-    // Open payment add form first
+    // Open new payment row
     fireEvent.click(screen.getByTestId('btn-add-payment'));
 
-    // Fill payment amount
-    fireEvent.change(screen.getByTestId('add-payment-amount'), { target: { value: '2500' } });
-
-    // Click add payment
-    fireEvent.click(screen.getByTestId('add-payment-submit'));
+    // Fill payment amount and blur to trigger save
+    const amountInput = screen.getByTestId('add-payment-amount');
+    fireEvent.change(amountInput, { target: { value: '2500' } });
+    fireEvent.blur(amountInput);
 
     await waitFor(() => {
       expect(createPayment).toHaveBeenCalledWith({

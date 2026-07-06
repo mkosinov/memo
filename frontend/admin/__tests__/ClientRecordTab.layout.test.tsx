@@ -10,6 +10,7 @@ vi.mock('@memo/api-client', () => ({
   patchRecord: vi.fn(),
   deleteRecord: vi.fn(),
   createPayment: vi.fn(),
+  patchPayment: vi.fn(),
   deletePayment: vi.fn(),
   getClientVisitors: vi.fn(),
   getActivity: vi.fn(),

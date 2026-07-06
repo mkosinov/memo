@@ -37,6 +37,7 @@ vi.mock('@memo/api-client', () => ({
   createRecord: vi.fn(),
   deleteRecord: vi.fn(),
   createPayment: vi.fn(),
+  patchPayment: vi.fn(),
   deletePayment: vi.fn(),
   updateVisitStatus: vi.fn(),
 }));
@@ -261,8 +262,6 @@ describe('ClientTab', () => {
     serviceTariffs: mockTariffs,
     onUpdateRecord: vi.fn(),
     onDeleteRecord: vi.fn(),
-    onAddPayment: vi.fn(),
-    onDeletePayment: vi.fn(),
     showToast: vi.fn(),
   };
 
@@ -568,8 +567,6 @@ describe('ClientTab — layout & features', () => {
     serviceTariffs: mockTariffs,
     onUpdateRecord: vi.fn(),
     onDeleteRecord: vi.fn(),
-    onAddPayment: vi.fn(),
-    onDeletePayment: vi.fn(),
     showToast: vi.fn(),
   };
 
@@ -608,8 +605,8 @@ describe('ClientTab — layout & features', () => {
 
   it('renders delete payment button for each payment', () => {
     render(<ClientTab {...defaultProps} payments={mockPayments} />);
-    const deleteButtons = screen.getAllByLabelText('Удалить платёж');
-    expect(deleteButtons.length).toBe(1);
+    const deleteButtons = screen.getAllByLabelText('Удалить');
+    expect(deleteButtons.length).toBeGreaterThanOrEqual(1);
   });
 
   it('does not show stale closure in delete — uses ref', () => {

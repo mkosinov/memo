@@ -45,8 +45,6 @@ interface ClientTabProps {
   serviceTariffs: TariffResponse[];
   onUpdateRecord: (id: string, data: RecordPatchData) => Promise<void>;
   onDeleteRecord: (id: string) => void;
-  onAddPayment: (recordId: string, amount: number, method: string) => void;
-  onDeletePayment: (paymentId: string) => Promise<void>;
   onAddVisitor?: (data: { name: string; age?: number; price: number }) => Promise<void>;
   showToast: (message: string, undo?: () => void) => void;
   onClose?: () => void;
@@ -61,8 +59,6 @@ export function ClientTab({
   serviceTariffs,
   onUpdateRecord,
   onDeleteRecord,
-  onAddPayment,
-  onDeletePayment,
   onAddVisitor,
   showToast,
   onClose,
@@ -70,7 +66,7 @@ export function ClientTab({
   const isDeletingRef = useRef(false);
   const router = useRouter();
   const { visitorsMap: realVisitorsMap } = useRecordData(record.id, client?.id ?? '');
-  const { updateVisitStatus, addVisit, patchVisit, deleteVisit } = useRecordMutations(record.activity_id ?? '', record.id);
+  const { updateVisitStatus, addVisit, patchVisit, deleteVisit, addPayment, patchPayment, deletePayment } = useRecordMutations(record.activity_id ?? '', record.id);
 
   // Optimistic visit mutation layer
   const {
@@ -148,19 +144,6 @@ export function ClientTab({
     });
   }, [record.id, onUpdateRecord, showToast]);
 
-  const handleAddPayment = useCallback((p: { amount: number; method: string }) => {
-    onAddPayment(record.id, p.amount, p.method);
-  }, [onAddPayment, record.id]);
-
-  const handleDeletePayment = useCallback(async (paymentId: string) => {
-    try {
-      await onDeletePayment(paymentId);
-      showToast('Оплата удалена');
-    } catch {
-      showToast('Ошибка удаления оплаты');
-    }
-  }, [onDeletePayment, showToast]);
-
   const handleCommentChange = useCallback((value: string) => {
     setComment(value);
     onUpdateRecord(record.id, { comment: value } as any).catch(() => {
@@ -220,8 +203,9 @@ export function ClientTab({
         <RecordPaymentsTable
           payments={payments}
           defaultAmount={toPay}
-          onDelete={handleDeletePayment}
-          onAdd={handleAddPayment}
+          onAddPayment={addPayment}
+          onPatchPayment={patchPayment}
+          onDeletePayment={deletePayment}
         />
 
         {/* Comment */}

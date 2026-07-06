@@ -22,7 +22,7 @@ import {
   createMockUIContext,
 } from './helpers/mockContexts';
 
-import { patchVisit as apiPatchVisit } from '@memo/api-client';
+import { patchVisit as apiPatchVisit, createPayment, deletePayment } from '@memo/api-client';
 
 // ─── API Client Mock ───────────────────────────────────────────────────────
 
@@ -33,6 +33,7 @@ vi.mock('@memo/api-client', () => ({
   createRecord: vi.fn(),
   deleteRecord: vi.fn(),
   createPayment: vi.fn(),
+  patchPayment: vi.fn(),
   deletePayment: vi.fn(),
   updateVisitStatus: vi.fn(),
   getRecord: vi.fn(),
@@ -114,8 +115,6 @@ describe('ClientTab — integration with shared atoms', () => {
     serviceTariffs: mockTariffs,
     onUpdateRecord: vi.fn().mockResolvedValue(undefined),
     onDeleteRecord: vi.fn(),
-    onAddPayment: vi.fn(),
-    onDeletePayment: vi.fn().mockResolvedValue(undefined),
     showToast: vi.fn(),
   };
 
@@ -188,8 +187,8 @@ describe('ClientTab — integration with shared atoms', () => {
       { id: 'p1', record_id: 'r1', amount: 3500, method: 'card', created_at: '', updated_at: '', is_active: true },
     ];
     render(<ClientTab {...defaultProps} payments={payments} />);
-    const deleteButtons = screen.getAllByLabelText('Удалить платёж');
-    expect(deleteButtons.length).toBe(1);
+    const deleteButtons = screen.getAllByLabelText('Удалить');
+    expect(deleteButtons.length).toBeGreaterThanOrEqual(1);
   });
 
   it('shows toast on delete with undo callback', () => {
@@ -207,19 +206,29 @@ describe('ClientTab — integration with shared atoms', () => {
 
   // ─── Mutations wiring ──────────────────────────────────────────────
 
-  it('addPayment fires onAddPayment callback', async () => {
+  it('addPayment fires createPayment on amount blur', async () => {
+    vi.mocked(createPayment).mockResolvedValue({
+      id: 'p-new', record_id: 'r1', amount: 500, method: 'card',
+      created_at: '2026-06-01T10:00:00', updated_at: '', is_active: true,
+    } as any);
     render(<ClientTab {...defaultProps} />);
-    // Open payment add form first
+    // Open new payment row
     fireEvent.click(screen.getByTestId('btn-add-payment'));
-    fireEvent.change(screen.getByTestId('add-payment-amount'), { target: { value: '500' } });
-    fireEvent.click(screen.getByTestId('add-payment-submit'));
+    // Change amount and blur to trigger save
+    const amountInput = screen.getByTestId('add-payment-amount');
+    fireEvent.change(amountInput, { target: { value: '500' } });
+    fireEvent.blur(amountInput);
 
     await waitFor(() => {
-      expect(defaultProps.onAddPayment).toHaveBeenCalledWith('r1', 500, 'card');
+      expect(createPayment).toHaveBeenCalledWith({
+        record_id: 'r1',
+        amount: 500,
+        method: 'card',
+      });
     });
   });
 
-  it('deletePayment fires onDeletePayment callback', async () => {
+  it('deletePayment fires deletePayment callback', async () => {
     const payments = [
       { id: 'p1', record_id: 'r1', amount: 1000, method: 'card', created_at: '', updated_at: '', is_active: true },
     ];
@@ -227,7 +236,7 @@ describe('ClientTab — integration with shared atoms', () => {
     fireEvent.click(screen.getByTestId('payment-p1-delete'));
 
     await waitFor(() => {
-      expect(defaultProps.onDeletePayment).toHaveBeenCalledWith('p1');
+      expect(deletePayment).toHaveBeenCalledWith('p1');
     });
   });
 

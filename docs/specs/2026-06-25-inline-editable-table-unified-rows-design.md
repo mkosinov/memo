@@ -431,6 +431,19 @@ Discovered during live testing after the initial refactor shipped. Two correctio
 - Both tables DROP the duplicated `handleAdd(...).then(replaceRowByClientId)` from their per-cell `onCommit`; new-row saving converges on the single `handleSave` path. (For SAVED rows, per-cell PATCH-on-change via `InlineEditCell.onCommit` stays as-is — change-gating is correct there.)
 - This retires the dead `handleSave`/`onUpdate` code flagged in the Task 4.1/5.1 reviews.
 
+### A.1. Replace-in-place must preserve the just-submitted values (name blanks after save bug)
+
+**Problem (live-testing bug):** after saving a new visitor (type name → Enter), the name input goes BLANK (shows "Аноним" placeholder), yet after F5 the name displays correctly. Root cause (traced):
+- `addVisit` returns a `VisitResponse` that has NO `name` (only `visitor_id`); the created visitor's name is discarded.
+- `visitResponseToRow(saved, visitorsMap)` re-derives the row's `name`/`age` by looking up `visitorsMap[visitor_id]`, but the invalidation refetch hasn't completed, so `visitorsMap` is a **stale closure** without the new visitor → `name` resolves to `''`.
+- The row's `id` goes `null → real`, changing the React `key` (`row.id ?? clientId`) → the row **remounts** → `formState` re-inits from the blank-name row → input shows blank.
+
+**Required fix:** when replacing the `{id:null}` row with the saved row, **preserve the values the user just submitted** rather than re-deriving them from a not-yet-refreshed `visitorsMap`. E.g. `replaceRowByClientId(clientId, { ...visitResponseToRow(saved, visitorsMap), name: submittedName, age: submittedAge })`. Equivalent hardening options: have `addVisit` return the created visitor's name/age, or make `visitResponseToRow` fall back to the submitted values on a `visitorsMap` miss.
+
+**Apply the same principle to payments:** after saving a new payment, the replaced row must show the submitted amount/method (and the date — see B), not blank/placeholder, without waiting for refetch.
+
+**Acceptance:** after Enter on a new visitor row, the name stays visible immediately (no blank, no need to F5). Same for a new payment row's amount/method/date.
+
 **Guard (amount > 0 for payments):** restore the explicit validation lost in the refactor.
 
 - The check `amount > 0` applies to BOTH save paths: creating a new payment (POST) AND editing an existing payment's amount (PATCH). If the admin clears an existing payment's amount to 0, the guard must also fire (backend enforces `gt=0` → would 422 otherwise).
@@ -458,6 +471,8 @@ Discovered during live testing after the initial refactor shipped. Two correctio
 11. **Save anonymous visit.** New visit row → user picks only a tariff, leaves Name blank → blur/Enter → an anonymous ("Аноним") visit is saved. (Currently broken.)
 12. **amount ≤ 0 not sent (new + existing).** (a) New payment row → user clears amount to 0 → blur/Enter → NO POST fires; an error toast "Сумма должна быть больше 0" is shown; no 422. (b) Existing payment row → admin edits amount to 0 → blur → NO PATCH fires; same error toast; the row keeps its previous amount.
 13. **Editable payment date persists.** New payment row shows current time in an editable datetime input → user adjusts it → saves → the payment's `created_at` reflects the user-entered time (verified via GET).
+
+14. **Name stays visible immediately after save (no blank, no F5).** New visitor row → type "Анна" → Enter → the row is saved AND the name "Анна" remains displayed in the row immediately (input does NOT blank to the "Аноним" placeholder). No page reload needed. (Currently: name blanks after Enter and only reappears after F5.) Same for a new payment's amount/method/date after save.
 
 ---
 

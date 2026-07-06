@@ -37,7 +37,8 @@ A Payment is a financial transaction for a Record. Payments track how much a cli
 | GET | /api/v1/payments?record_id=X | List by record |
 | GET | /api/v1/payments/{id} | Get |
 | POST | /api/v1/payments | Create |
-| PUT | /api/v1/payments/{id} | Update |
+| PUT | /api/v1/payments/{id} | Update (full replace) |
+| PATCH | /api/v1/payments/{id} | Partial update (PaymentPatch: amount? gt=0, method?) → PaymentResponse |
 | DELETE | /api/v1/payments/{id} | Soft delete |
 
 ## Relationships

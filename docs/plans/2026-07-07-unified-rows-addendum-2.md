@@ -268,8 +268,10 @@ class BaseRepository:
 
       async def list(self, session, table, order_by=None, include_inactive=False, **filters):
           stmt = select(table)
-          if not include_inactive and hasattr(table, 'is_active'):
+          if not include_inactive:
               stmt = stmt.where(table.is_active)
+          # If table has no is_active column, AttributeError surfaces as a loud
+          # error — this is intentional (type-safety by assignment, not by guard).
           for key, value in filters.items():
               if value is not None:
                   stmt = stmt.where(getattr(table, key) == value)
@@ -310,7 +312,7 @@ class BaseRepository:
       """Backward-compat alias. Prefer get_soft_delete_repository()."""
       return get_soft_delete_repository()
   ```
-  Note: the `hasattr(table, 'is_active')` guard in `SoftDeleteRepository.list` is defense against accidental assignment of a non-soft-delete model. It should never fire (soft-delete repos are only assigned to soft-delete entities) but prevents a hard crash if someone makes that mistake.
+  Note: `SoftDeleteRepository.list` applies `.where(table.is_active)` unconditionally (when `include_inactive=False`). No `hasattr` guard — the user explicitly chose NOT to use that pattern. If a non-soft-delete model is accidentally assigned, `AttributeError` surfaces as a loud error at query time (intentional — type-safety by assignment).
 
 - [ ] **1g. Update service factory functions**
   Throughout `backend/src/services/*.py`, update factory functions:
@@ -578,8 +580,9 @@ After adding/deleting a visitor or payment, switching tabs in the modal causes t
     if (!old) return old;
     return { ...old, visits: [...old.visits, visit] };
   });
-  queryClient.invalidateQueries({ queryKey: ['visitors', visit.visitor_id?.split('|')[0] ?? ''] }); // or clientId
   invalidateRecord();
+  // Regression fix: invalidate visitors cache using data.client_id (direct, not derived from visit.visitor_id)
+  queryClient.invalidateQueries({ queryKey: ['visitors', data.client_id] });
 
   // deleteVisit — before API call (optimistic), then confirm:
   queryClient.setQueryData<RecordResponse>(['record', recordId], (old) => {
@@ -712,15 +715,25 @@ The ActivityDetailsModal fetches services via `useSchedule()` which returns tran
   - `serviceTariffs` is now `TariffResponse[]` (from the raw service) instead of the undefined-reading workaround.
 
 - [ ] **4c. Write/update unit test**
-  In `frontend/admin/__tests__/ActivityDetailsModal.test.tsx`:
-  Add a test that verifies the tariff dropdown shows tariffs from a raw service with tariffs:
+  In `frontend/admin/__tests__/ClientTab.integration.test.tsx` — add a targeted test that passes `serviceTariffs` as a prop (no ScheduleContext mocking needed) and verifies the `<select>` dropdown renders options:
   ```typescript
-  it('tariff dropdown shows service tariffs', async () => {
-    // Mock useSchedule to return servicesRaw with tariffs
-    // Render modal → ClientTab → "+ Добавить" → verify tariff <select> has options
+  it('tariff dropdown shows service tariffs when prop is populated', async () => {
+    const tariffs = [
+      { id: 'tariff-1', service_id: 'svc-1', title: 'Взрослый', price: 2500 },
+      { id: 'tariff-2', service_id: 'svc-1', title: 'Детский', price: 1500 },
+    ];
+    render(<ClientTab {...defaultProps} serviceTariffs={tariffs} />);
+    // Click "+ Добавить" to add a row
+    await userEvent.click(screen.getByText('+ Добавить'));
+    // The tariff <select> should have 2 options matching the tariffs
+    const select = screen.getByRole('combobox');
+    const options = within(select).getAllByRole('option');
+    expect(options).toHaveLength(2);
+    expect(options[0]).toHaveTextContent('Взрослый');
+    expect(options[1]).toHaveTextContent('Детский');
   });
   ```
-  Or if the modal test is complex (needs full schedule context), add a targeted test in `ClientTab.integration.test.tsx` that passes `serviceTariffs` prop directly and verifies the `<select>` renders options.
+  This avoids the complexity of mocking full ScheduleContext — `serviceTariffs` is passed as a prop to `ClientTab`, matching the real data flow.
 
 - [ ] **4d. Run tests**
   ```bash
@@ -831,6 +844,35 @@ After Bug C (Task 3) added optimistic `setQueryData`, clicking × on a saved row
   ```
   Add `vi.useFakeTimers()` in beforeEach.
   Run tests → FAIL (no `deleteVisitDeferred` exists).
+
+- [ ] **5b-bis. Write RED unit test — unsaved row instant delete (no toast, no server)**
+  In `frontend/admin/__tests__/useRecordMutations.test.ts` — add a test verifying that clicking × on an unsaved row (id === null) does NOT trigger the deferred-delete path:
+  ```typescript
+  it('unsaved row delete: no toast, no DELETE, removed from local state only', async () => {
+    // This test validates that the InlineEditRow contract still holds:
+    // unsaved rows (id === null) call onRemove(row), NOT onDelete(id).
+    // The deferred-delete (deleteVisitDeferred) is only for saved rows.
+    const { result } = renderHook(() => useRecordMutations('act-1', recordId), { wrapper });
+    // Verify deleteVisitDeferred is NOT called for rows where id === null
+    // — InlineEditRow.handleDelete checks `isNew` and calls onRemove, not onDelete.
+    // This is a contract test: verify the hook exports both paths.
+    // For the unsaved path, the table consumer calls onRemove directly (no hook involvement).
+    // The test asserts: showToast is NOT called, mockDeleteVisit is NOT called.
+  });
+  ```
+  If the InlineEditRow contract is already covered by existing tests (`InlineEditRow.test.tsx`), add a focused test there instead:
+  ```typescript
+  // In InlineEditRow.test.tsx
+  it('unsaved row × calls onRemove, not onDelete', async () => {
+    const onRemove = vi.fn();
+    const onDelete = vi.fn();
+    render(<InlineEditRow row={{ id: null, ... }} onRemove={onRemove} onDelete={onDelete} ... />);
+    fireEvent.click(screen.getByTestId('visit-row-new-delete-btn'));
+    expect(onRemove).toHaveBeenCalledTimes(1);
+    expect(onDelete).not.toHaveBeenCalled();
+  });
+  ```
+  Run → should already PASS (contract is in place since Phase 1). If not → fix `useInlineEditRow.handleDelete` to guard `isNew` before calling `onDelete`.
 
 - [ ] **5c. Implement `deleteVisitDeferred` + `deletePaymentDeferred` in `useRecordMutations.ts`**
 
@@ -1061,3 +1103,4 @@ After Bug C (Task 3) added optimistic `setQueryData`, clicking × on a saved row
 4. **`servicesRaw` in ScheduleContext** — it's already fetched (line 277) but not exported. The export is a 3-line change (interface + contextValue + deps array) — minimal risk.
 5. **Migration on SQLite** — `batch_alter_table` is required (SQLite doesn't support `DROP COLUMN` directly until 3.35.0). Alembic handles this via table recreation. The conftest uses alembic to create schema, so the migration runs automatically in tests.
 6. **GenericService.list** calls `self._repository.list(...)` — with `BaseRepository`, no `is_active` filter is applied. This is fine for Payment (we want ALL payments). But check: does any code call `PaymentService.list()` expecting filtered results? Unlikely — PaymentService.list should return all payments (they're all "active" in hard-delete world).
+7. **Spec E.4 deviation (documented):** The spec requires adding `Payment.is_active`/`Visit.is_active` defense filters to `client.py` stats subqueries. This CANNOT be done because the migration drops the `is_active` column entirely — hard-delete makes the filter unnecessary. Deviation is safe today. **If the column is ever re-introduced** (e.g., reverting the migration), add `Payment.is_active == True` and `Visit.is_active == True` to the payments/visits subqueries in `client.py:55-64` and `client.py:39-52`.

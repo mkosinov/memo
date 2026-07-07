@@ -182,3 +182,27 @@ describe('InlineEditRow — new-row save trigger', () => {
     });
   });
 });
+
+describe('InlineEditRow — delete contract', () => {
+  it('unsaved row (id === null) × calls onRemove, not onDelete', async () => {
+    const { onDelete, onRemove } = renderNewRow();
+
+    const deleteBtn = screen.getByTestId('test-new-delete');
+    fireEvent.click(deleteBtn);
+
+    await waitFor(() => expect(onRemove).toHaveBeenCalledTimes(1));
+    expect(onDelete).not.toHaveBeenCalled();
+  });
+
+  it('saved row (id !== null) × calls onDelete, not onRemove', async () => {
+    const savedRow = makeRow({ id: 'existing-1', name: 'Test' });
+    const { onDelete, onRemove } = renderNewRow({ row: savedRow });
+
+    const deleteBtn = screen.getByTestId('test-existing-1-delete');
+    fireEvent.click(deleteBtn);
+
+    await waitFor(() => expect(onDelete).toHaveBeenCalledTimes(1));
+    expect(onDelete).toHaveBeenCalledWith('existing-1');
+    expect(onRemove).not.toHaveBeenCalled();
+  });
+});

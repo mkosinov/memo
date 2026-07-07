@@ -77,6 +77,7 @@ vi.mock('@tanstack/react-query', () => ({
     invalidateQueries: mockInvalidateQueries,
     setQueryData: vi.fn(),
     fetchQuery: vi.fn(),
+    getQueryData: vi.fn(() => null),
   })),
   useQuery: vi.fn(() => ({
     data: undefined,
@@ -229,16 +230,30 @@ describe('ClientTab — integration with shared atoms', () => {
     });
   });
 
-  it('deletePayment fires deletePayment callback', async () => {
+  it('deletePayment fires deferred delete after 5s delay', async () => {
+    vi.useFakeTimers();
     const payments = [
       { id: 'p1', record_id: 'r1', amount: 1000, method: 'card', created_at: '', updated_at: '', is_active: true },
     ];
     render(<ClientTab {...defaultProps} payments={payments} />);
     fireEvent.click(screen.getByTestId('payment-p1-delete'));
 
-    await waitFor(() => {
-      expect(deletePayment).toHaveBeenCalledWith('p1');
-    });
+    // Toast should be shown immediately with undo callback
+    expect(defaultProps.showToast).toHaveBeenCalledWith(
+      'Удалено. Отменить',
+      expect.any(Function),
+    );
+
+    // API should NOT be called yet (deferred)
+    expect(deletePayment).not.toHaveBeenCalled();
+
+    // Advance past the 5s delay
+    await vi.advanceTimersByTimeAsync(5000);
+
+    // Now the API should be called
+    expect(deletePayment).toHaveBeenCalledWith('p1');
+
+    vi.useRealTimers();
   });
 
   it('renders seats summary', () => {

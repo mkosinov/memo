@@ -31,6 +31,7 @@ import {
   deleteVisit,
 } from '@memo/api-client';
 import { useRecordMutations } from '../hooks/useRecordMutations';
+import type { RecordResponse, PaymentResponse } from '@memo/api-client';
 
 const mockPatchRecord = vi.mocked(patchRecord);
 const mockDeleteRecord = vi.mocked(deleteRecord);
@@ -615,6 +616,206 @@ describe('useRecordMutations', () => {
         ['payments', recordId],
         expect.any(Function),
       );
+    });
+  });
+
+  // ─── Deferred delete with undo (Bug E) ──────────────────────────────────
+
+  describe('deferred delete with undo', () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    const existingVisit = {
+      id: 'visit-existing',
+      record_id: recordId,
+      visitor_id: 'vis-1',
+      tariff_id: 't1',
+      price: 3500,
+      custom_price: null,
+      status: 'waiting',
+      created_at: '',
+      updated_at: '',
+    };
+
+    const existingPayment = {
+      id: 'pay-existing',
+      record_id: recordId,
+      amount: 2500,
+      method: 'card' as const,
+      created_at: '',
+      updated_at: '',
+    };
+
+    function seedRecordWithVisit(queryClient: QueryClient) {
+      queryClient.setQueryData(['record', recordId], {
+        ...mockRecordResponse,
+        visits: [existingVisit],
+      });
+    }
+
+    function seedPaymentsCache(queryClient: QueryClient) {
+      queryClient.setQueryData(['payments', recordId], [existingPayment]);
+    }
+
+    it('deleteVisitDeferred removes row + shows toast, no DELETE sent', async () => {
+      const { queryClient, wrapper } = createQueryClientWrapper();
+      seedRecordWithVisit(queryClient);
+      const setQueryDataSpy = vi.spyOn(queryClient, 'setQueryData');
+
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+      const mockShowToast = vi.fn();
+
+      await act(async () => {
+        await result.current.deleteVisitDeferred('visit-existing', mockShowToast);
+      });
+
+      // Row removed from cache (setQueryData called to filter it out)
+      expect(setQueryDataSpy).toHaveBeenCalledWith(
+        ['record', recordId],
+        expect.any(Function),
+      );
+      // DELETE NOT sent yet
+      expect(mockDeleteVisit).not.toHaveBeenCalled();
+      // Toast shown with undo callback
+      expect(mockShowToast).toHaveBeenCalledTimes(1);
+      expect(mockShowToast).toHaveBeenCalledWith(
+        expect.stringContaining('Удалено'),
+        expect.any(Function),
+      );
+    });
+
+    it('deleteVisitDeferred fires DELETE after 5s if not undone', async () => {
+      const { queryClient, wrapper } = createQueryClientWrapper();
+      seedRecordWithVisit(queryClient);
+
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+      const mockShowToast = vi.fn();
+
+      await act(async () => {
+        await result.current.deleteVisitDeferred('visit-existing', mockShowToast);
+      });
+
+      // DELETE not sent yet
+      expect(mockDeleteVisit).not.toHaveBeenCalled();
+
+      // Fast-forward 5s
+      await act(async () => {
+        vi.advanceTimersByTime(5000);
+      });
+
+      expect(mockDeleteVisit).toHaveBeenCalledTimes(1);
+      expect(mockDeleteVisit).toHaveBeenCalledWith('visit-existing');
+    });
+
+    it('undo cancels the deferred DELETE and restores the row', async () => {
+      const { queryClient, wrapper } = createQueryClientWrapper();
+      seedRecordWithVisit(queryClient);
+
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+      const mockShowToast = vi.fn();
+
+      await act(async () => {
+        await result.current.deleteVisitDeferred('visit-existing', mockShowToast);
+      });
+
+      // Grab the undo function from the toast call
+      const undoFn = mockShowToast.mock.calls[0][1] as () => void;
+
+      // Call undo
+      await act(async () => {
+        undoFn();
+      });
+
+      // Fast-forward 5s — DELETE should NOT fire
+      await act(async () => {
+        vi.advanceTimersByTime(5000);
+      });
+
+      expect(mockDeleteVisit).not.toHaveBeenCalled();
+
+      // Row restored in cache — verify by reading cache
+      const cached = queryClient.getQueryData<RecordResponse>(['record', recordId]);
+      expect(cached?.visits).toHaveLength(1);
+      expect(cached?.visits[0].id).toBe('visit-existing');
+    });
+
+    it('deletePaymentDeferred removes row + shows toast, no DELETE sent', async () => {
+      const { queryClient, wrapper } = createQueryClientWrapper();
+      seedPaymentsCache(queryClient);
+
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+      const mockShowToast = vi.fn();
+
+      await act(async () => {
+        await result.current.deletePaymentDeferred('pay-existing', mockShowToast);
+      });
+
+      // DELETE NOT sent yet
+      expect(mockDeletePayment).not.toHaveBeenCalled();
+      // Toast shown with undo callback
+      expect(mockShowToast).toHaveBeenCalledTimes(1);
+      expect(mockShowToast).toHaveBeenCalledWith(
+        expect.stringContaining('Удалено'),
+        expect.any(Function),
+      );
+      // Payment removed from cache
+      const cached = queryClient.getQueryData<PaymentResponse[]>(['payments', recordId]);
+      expect(cached).toHaveLength(0);
+    });
+
+    it('deletePaymentDeferred fires DELETE after 5s if not undone', async () => {
+      const { queryClient, wrapper } = createQueryClientWrapper();
+      seedPaymentsCache(queryClient);
+
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+      const mockShowToast = vi.fn();
+
+      await act(async () => {
+        await result.current.deletePaymentDeferred('pay-existing', mockShowToast);
+      });
+
+      expect(mockDeletePayment).not.toHaveBeenCalled();
+
+      await act(async () => {
+        vi.advanceTimersByTime(5000);
+      });
+
+      expect(mockDeletePayment).toHaveBeenCalledTimes(1);
+      expect(mockDeletePayment).toHaveBeenCalledWith('pay-existing');
+    });
+
+    it('undo restores payment and cancels deferred DELETE', async () => {
+      const { queryClient, wrapper } = createQueryClientWrapper();
+      seedPaymentsCache(queryClient);
+
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+      const mockShowToast = vi.fn();
+
+      await act(async () => {
+        await result.current.deletePaymentDeferred('pay-existing', mockShowToast);
+      });
+
+      const undoFn = mockShowToast.mock.calls[0][1] as () => void;
+
+      await act(async () => {
+        undoFn();
+      });
+
+      await act(async () => {
+        vi.advanceTimersByTime(5000);
+      });
+
+      expect(mockDeletePayment).not.toHaveBeenCalled();
+
+      // Payment restored in cache
+      const cached = queryClient.getQueryData<PaymentResponse[]>(['payments', recordId]);
+      expect(cached).toHaveLength(1);
+      expect(cached![0].id).toBe('pay-existing');
     });
   });
 });

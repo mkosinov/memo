@@ -62,10 +62,11 @@ export function UIProvider({ children }: { children: React.ReactNode }) {
     }
     const id = `toast-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     setToasts(prev => [...prev, { id, kind, message, undo: undoFn }]);
+    const duration = undoFn ? 5000 : 4500; // undo toasts stay 5s
     const timerId = setTimeout(() => {
       toastTimers.current.delete(id);
       setToasts(prev => prev.filter(t => t.id !== id));
-    }, 4500);
+    }, duration);
     toastTimers.current.set(id, timerId);
   }, []);
 

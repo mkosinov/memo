@@ -1,7 +1,7 @@
 'use client';
 
 import { useQueryClient } from '@tanstack/react-query';
-import { useCallback } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import {
   createRecord,
   createClient,
@@ -333,6 +333,111 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
     [recordId, queryClient, invalidateRecord],
   );
 
+  // ── Deferred delete with undo (Bug E) ────────────────────────────────────
+
+  const pendingDeleteTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+
+  // Cleanup: clear all pending deferred-delete timers on unmount
+  useEffect(() => {
+    const timers = pendingDeleteTimers.current;
+    return () => {
+      timers.forEach((timer) => clearTimeout(timer));
+      timers.clear();
+    };
+  }, []);
+
+  const deleteVisitDeferred = useCallback(
+    async (visitId: string, showToastFn: (msg: string, undo: () => void) => void) => {
+      // 1. Save the visit from cache for potential restore
+      const record = queryClient.getQueryData<RecordResponse>(['record', recordId]);
+      const savedVisit = record?.visits.find(v => v.id === visitId);
+
+      // 2. Optimistically remove from cache
+      queryClient.setQueryData<RecordResponse>(['record', recordId], (old) => {
+        if (!old) return old;
+        return { ...old, visits: old.visits.filter(v => v.id !== visitId) };
+      });
+
+      // 3. Cancel any existing timer for this id
+      const existing = pendingDeleteTimers.current.get(visitId);
+      if (existing) clearTimeout(existing);
+
+      // 4. Show toast with undo
+      let undone = false;
+      showToastFn('Удалено. Отменить', () => {
+        undone = true;
+        // Restore the row
+        if (savedVisit) {
+          queryClient.setQueryData<RecordResponse>(['record', recordId], (old) => {
+            if (!old) return old;
+            return { ...old, visits: [...old.visits, savedVisit] };
+          });
+        }
+        const timer = pendingDeleteTimers.current.get(visitId);
+        if (timer) {
+          clearTimeout(timer);
+          pendingDeleteTimers.current.delete(visitId);
+        }
+      });
+
+      // 5. Schedule the actual DELETE after 5s
+      const timer = setTimeout(async () => {
+        if (!undone) {
+          await apiDeleteVisit(visitId);
+          invalidateRecord();
+        }
+        pendingDeleteTimers.current.delete(visitId);
+      }, 5000);
+      pendingDeleteTimers.current.set(visitId, timer);
+    },
+    [recordId, queryClient, invalidateRecord],
+  );
+
+  const deletePaymentDeferred = useCallback(
+    async (paymentId: string, showToastFn: (msg: string, undo: () => void) => void) => {
+      // 1. Save the payment from cache for potential restore
+      const savedPayments = queryClient.getQueryData<PaymentResponse[]>(['payments', recordId]);
+      const savedPayment = savedPayments?.find(p => p.id === paymentId);
+
+      // 2. Optimistically remove from cache
+      queryClient.setQueryData<PaymentResponse[]>(['payments', recordId], (old) => {
+        return (old ?? []).filter(p => p.id !== paymentId);
+      });
+
+      // 3. Cancel any existing timer for this id
+      const existing = pendingDeleteTimers.current.get(paymentId);
+      if (existing) clearTimeout(existing);
+
+      // 4. Show toast with undo
+      let undone = false;
+      showToastFn('Удалено. Отменить', () => {
+        undone = true;
+        // Restore the payment
+        if (savedPayment) {
+          queryClient.setQueryData<PaymentResponse[]>(['payments', recordId], (old) => {
+            return [...(old ?? []), savedPayment];
+          });
+        }
+        const timer = pendingDeleteTimers.current.get(paymentId);
+        if (timer) {
+          clearTimeout(timer);
+          pendingDeleteTimers.current.delete(paymentId);
+        }
+      });
+
+      // 5. Schedule the actual DELETE after 5s
+      const timer = setTimeout(async () => {
+        if (!undone) {
+          await apiDeletePayment(paymentId);
+          invalidateRecord();
+        }
+        pendingDeleteTimers.current.delete(paymentId);
+      }, 5000);
+      pendingDeleteTimers.current.set(paymentId, timer);
+    },
+    [recordId, queryClient, invalidateRecord],
+  );
+
   return {
     createRecord: createRecordMutation,
     saveRecord,
@@ -349,5 +454,7 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
     patchVisit,
     deleteVisit,
     patchPayment,
+    deleteVisitDeferred,
+    deletePaymentDeferred,
   };
 }

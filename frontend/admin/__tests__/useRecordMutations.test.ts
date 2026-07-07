@@ -502,4 +502,119 @@ describe('useRecordMutations', () => {
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['payments'] });
     });
   });
+
+  // ─── Optimistic setQueryData tests (Bug C) ──────────────────────────────
+
+  describe('optimistic cache updates (setQueryData)', () => {
+    it('addVisit updates [record, recordId] cache with the new visit', async () => {
+      const { queryClient, wrapper } = createQueryClientWrapper();
+      const setQueryDataSpy = vi.spyOn(queryClient, 'setQueryData');
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+
+      await act(async () => {
+        await result.current.addVisit({
+          client_id: 'c1',
+          name: 'Test',
+          tariff_id: 't1',
+          price: 3500,
+        });
+      });
+
+      expect(setQueryDataSpy).toHaveBeenCalledWith(
+        ['record', recordId],
+        expect.any(Function),
+      );
+    });
+
+    it('addVisit invalidates [visitors, clientId] (regression fix)', async () => {
+      const { queryClient, wrapper } = createQueryClientWrapper();
+      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+
+      await act(async () => {
+        await result.current.addVisit({
+          client_id: 'c1',
+          name: 'Test',
+          price: 3500,
+        });
+      });
+
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['visitors', 'c1'] });
+    });
+
+    it('deleteVisit optimistically removes visit from [record, recordId] cache', async () => {
+      const { queryClient, wrapper } = createQueryClientWrapper();
+      const setQueryDataSpy = vi.spyOn(queryClient, 'setQueryData');
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+
+      await act(async () => {
+        await result.current.deleteVisit('visit-1');
+      });
+
+      expect(setQueryDataSpy).toHaveBeenCalledWith(
+        ['record', recordId],
+        expect.any(Function),
+      );
+    });
+
+    it('patchVisit updates [record, recordId] cache with patched visit', async () => {
+      const { queryClient, wrapper } = createQueryClientWrapper();
+      const setQueryDataSpy = vi.spyOn(queryClient, 'setQueryData');
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+
+      await act(async () => {
+        await result.current.patchVisit('visit-1', { price: 4000 });
+      });
+
+      expect(setQueryDataSpy).toHaveBeenCalledWith(
+        ['record', recordId],
+        expect.any(Function),
+      );
+    });
+
+    it('addPayment updates [payments, recordId] cache with the new payment', async () => {
+      const { queryClient, wrapper } = createQueryClientWrapper();
+      const setQueryDataSpy = vi.spyOn(queryClient, 'setQueryData');
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+
+      await act(async () => {
+        await result.current.addPayment(3500, 'card');
+      });
+
+      expect(setQueryDataSpy).toHaveBeenCalledWith(
+        ['payments', recordId],
+        expect.any(Function),
+      );
+    });
+
+    it('deletePayment optimistically removes payment from [payments, recordId] cache', async () => {
+      const { queryClient, wrapper } = createQueryClientWrapper();
+      const setQueryDataSpy = vi.spyOn(queryClient, 'setQueryData');
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+
+      await act(async () => {
+        await result.current.deletePayment('pay1');
+      });
+
+      expect(setQueryDataSpy).toHaveBeenCalledWith(
+        ['payments', recordId],
+        expect.any(Function),
+      );
+    });
+
+    it('patchPayment updates [payments, recordId] cache with patched payment', async () => {
+      const { queryClient, wrapper } = createQueryClientWrapper();
+      const setQueryDataSpy = vi.spyOn(queryClient, 'setQueryData');
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+
+      await act(async () => {
+        await result.current.patchPayment('pay1', { amount: 4000 });
+      });
+
+      expect(setQueryDataSpy).toHaveBeenCalledWith(
+        ['payments', recordId],
+        expect.any(Function),
+      );
+    });
+  });
 });

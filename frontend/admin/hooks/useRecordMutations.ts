@@ -19,7 +19,7 @@ import {
   patchVisit as apiPatchVisit,
   deleteVisit as apiDeleteVisit,
 } from '@memo/api-client';
-import type { RecordResponse, VisitPatch } from '@memo/api-client';
+import type { RecordResponse, PaymentResponse, VisitPatch } from '@memo/api-client';
 
 interface VisitData {
   visitor_id?: string | null;
@@ -197,18 +197,26 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
         method: method as 'cash' | 'card' | 'transfer',
         ...(date ? { created_at: date } : {}),
       });
+      // Optimistic cache update so tab remounts see fresh data immediately
+      queryClient.setQueryData<PaymentResponse[]>(['payments', recordId], (old) => {
+        return [...(old ?? []), payment];
+      });
       invalidateAll();
       return payment;
     },
-    [recordId, invalidateAll],
+    [recordId, queryClient, invalidateAll],
   );
 
   const deletePayment = useCallback(
     async (paymentId: string) => {
+      // Optimistic: remove payment from cache before API call
+      queryClient.setQueryData<PaymentResponse[]>(['payments', recordId], (old) => {
+        return (old ?? []).filter(p => p.id !== paymentId);
+      });
       await apiDeletePayment(paymentId);
       invalidateAll();
     },
-    [invalidateAll],
+    [recordId, queryClient, invalidateAll],
   );
 
   const addVisitorToRecord = useCallback(
@@ -271,37 +279,58 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
         tariff_id: data.tariff_id ?? null,
         price: data.price,
       });
+      // Optimistic cache update so tab remounts see fresh data immediately
+      queryClient.setQueryData<RecordResponse>(['record', recordId], (old) => {
+        if (!old) return old;
+        return { ...old, visits: [...old.visits, visit] };
+      });
       invalidateRecord();
+      // Regression fix: invalidate visitors cache using direct client_id
+      queryClient.invalidateQueries({ queryKey: ['visitors', data.client_id] });
       return visit;
     },
-    [recordId, invalidateRecord],
+    [recordId, queryClient, invalidateRecord],
   );
 
   const patchVisit = useCallback(
     async (visitId: string, data: VisitPatch) => {
       const visit = await apiPatchVisit(visitId, data);
+      // Optimistic cache update with the server-confirmed visit
+      queryClient.setQueryData<RecordResponse>(['record', recordId], (old) => {
+        if (!old) return old;
+        return { ...old, visits: old.visits.map(v => v.id === visitId ? { ...v, ...visit } : v) };
+      });
       invalidateRecord();
       return visit;
     },
-    [invalidateRecord],
+    [recordId, queryClient, invalidateRecord],
   );
 
   const deleteVisit = useCallback(
     async (visitId: string) => {
+      // Optimistic: remove visit from cache before API call
+      queryClient.setQueryData<RecordResponse>(['record', recordId], (old) => {
+        if (!old) return old;
+        return { ...old, visits: old.visits.filter(v => v.id !== visitId) };
+      });
       await apiDeleteVisit(visitId);
       invalidateRecord();
     },
-    [invalidateRecord],
+    [recordId, queryClient, invalidateRecord],
   );
 
   const patchPayment = useCallback(
     async (paymentId: string, data: { amount?: number; method?: string }) => {
       const payment = await apiPatchPayment(paymentId, data);
+      // Optimistic cache update with the server-confirmed payment
+      queryClient.setQueryData<PaymentResponse[]>(['payments', recordId], (old) => {
+        return (old ?? []).map(p => p.id === paymentId ? { ...p, ...payment } : p);
+      });
       invalidateRecord();
       queryClient.invalidateQueries({ queryKey: ['payments'] });
       return payment;
     },
-    [invalidateRecord, queryClient],
+    [recordId, queryClient, invalidateRecord],
   );
 
   return {

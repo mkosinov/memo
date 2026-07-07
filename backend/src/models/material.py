@@ -3,10 +3,10 @@
 from sqlalchemy import String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from src.models.abstract import AbstractModel
+from src.models.abstract import AbstractModelSoftDelete
 
 
-class Material(AbstractModel):
+class Material(AbstractModelSoftDelete):
     __tablename__ = "materials"
 
     title: Mapped[str] = mapped_column(String(200))

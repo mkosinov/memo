@@ -125,7 +125,6 @@ export const mockVisit: VisitResponse = {
   status: 'waiting',
   created_at: '',
   updated_at: '',
-  is_active: true,
 };
 
 export const mockRecord: RecordResponse = {
@@ -150,7 +149,6 @@ export const mockPayment: PaymentResponse = {
   method: 'card',
   created_at: '',
   updated_at: '',
-  is_active: true,
 };
 
 // ─── Tariffs (used by SettingsTab, NewBookingTab, ClientTab) ──────────────

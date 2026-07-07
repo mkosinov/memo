@@ -5,14 +5,13 @@ import { useSchedule } from '@/contexts/ScheduleContext';
 import { useRecords } from '@/contexts/RecordsContext';
 import { useClients } from '@/contexts/ClientsContext';
 import { useUI } from '@/contexts/UIContext';
-import type { Activity, Service } from '@memo/domain';
+import type { Activity } from '@memo/domain';
 import { formatActivityContext, formatTime } from '@/lib/utils';
 import { TabNav, type Tab } from './TabNav';
 import { SettingsTab } from './SettingsTab';
 import { ClientTab } from './ClientTab';
 import { NewBookingTab } from './NewBookingTab';
 import { Modal } from '@/app/components/shared/modal/Modal';
-import type { TariffResponse } from '@memo/api-client';
 import { useRecordMutations } from '@/hooks/useRecordMutations';
 import { parseApiError } from '@/app/lib/api/parseApiError';
 
@@ -23,15 +22,8 @@ interface ActivityDetailsModalProps {
   mode: 'edit' | 'quickAdd';
 }
 
-/** Get tariffs from a service (if the API response includes them). */
-function getServiceTariffs(service: Service | undefined): TariffResponse[] {
-  if (!service) return [];
-  const svc = service as Service & { tariffs?: TariffResponse[] };
-  return svc.tariffs || [];
-}
-
 export function ActivityDetailsModal({ isOpen, onClose, activity, mode }: ActivityDetailsModalProps) {
-  const { services, updateActivity, deleteActivity } = useSchedule();
+  const { services, servicesRaw, updateActivity, deleteActivity } = useSchedule();
   const { records, clients, payments } = useRecords();
   const { clients: clientsList } = useClients();
   const { showToast } = useUI();
@@ -44,14 +36,21 @@ export function ActivityDetailsModal({ isOpen, onClose, activity, mode }: Activi
     : null;
 
   // Use the hook for record mutations (only when we have a record ID)
-  const { createRecord, deleteRecord, addPayment, deletePayment, addVisitorToRecord, updateRecord } = useRecordMutations(activity.id, activeRecordId || '');
+  const { createRecord, deleteRecord, addVisitorToRecord, updateRecord } = useRecordMutations(activity.id, activeRecordId || '');
 
   // Current service and its tariffs (used by all tab contents)
   const currentService = useMemo(
     () => services.find((s) => s.id === activity.serviceId),
     [services, activity.serviceId],
   );
-  const serviceTariffs = useMemo(() => getServiceTariffs(currentService), [currentService]);
+  const currentRawService = useMemo(
+    () => servicesRaw.find((s) => s.id === activity.serviceId),
+    [servicesRaw, activity.serviceId],
+  );
+  const serviceTariffs = useMemo(
+    () => currentRawService?.tariffs ?? [],
+    [currentRawService],
+  );
 
   // Get records for this activity
   const activityRecords = useMemo(
@@ -194,18 +193,6 @@ export function ActivityDetailsModal({ isOpen, onClose, activity, mode }: Activi
     [deleteRecord, showToast],
   );
 
-  // Payment handler — uses the hook
-  const handleAddPayment = useCallback(
-    async (_recordId: string, amount: number, method: string) => {
-      try {
-        await addPayment(amount, method);
-        showToast(`Оплата ${amount} ₽ (${method}) добавлена`);
-      } catch (err) {
-        showToast(parseApiError(err).message, 'error');
-      }
-    },
-    [addPayment, showToast],
-  );
 
   // Content renderer per active tab
   const renderContent = () => {
@@ -243,8 +230,6 @@ export function ActivityDetailsModal({ isOpen, onClose, activity, mode }: Activi
         serviceTariffs={serviceTariffs}
         onUpdateRecord={(id, updates) => updateRecord(id, updates)}
         onDeleteRecord={handleDeleteRecord}
-        onAddPayment={handleAddPayment}
-        onDeletePayment={(id) => deletePayment(id)}
         onAddVisitor={async (data) => {
           try {
             const firstPrice = serviceTariffs[0]?.price ?? 0;

@@ -531,14 +531,11 @@ test.describe('Record tab', () => {
       await expect(addPaymentBtn).toBeVisible();
       await addPaymentBtn.click();
 
-      // Fill payment amount in the inline form
+      // Fill payment amount in the inline form and commit via Enter (blur-to-commit)
       const amountInput = page.locator('[data-testid="add-payment-amount"]');
       await expect(amountInput).toBeVisible();
       await amountInput.fill('1500');
-
-      // Submit the payment
-      const submitBtn = page.locator('[data-testid="add-payment-submit"]');
-      await submitBtn.click();
+      await amountInput.press('Enter');
 
       // Wait for the payment to appear in the list
       await page.waitForTimeout(1000);

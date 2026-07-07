@@ -3,10 +3,10 @@
 from sqlalchemy import ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from src.models.abstract import AbstractModel
+from src.models.abstract import AbstractModelSoftDelete
 
 
-class UserSettings(AbstractModel):
+class UserSettings(AbstractModelSoftDelete):
     __tablename__ = "user_settings"
 
     user_id: Mapped[str] = mapped_column(

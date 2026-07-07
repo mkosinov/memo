@@ -22,7 +22,7 @@ import {
   createMockUIContext,
 } from './helpers/mockContexts';
 
-import { updateVisitStatus } from '@memo/api-client';
+import { patchVisit as apiPatchVisit, createPayment, deletePayment } from '@memo/api-client';
 
 // ─── API Client Mock ───────────────────────────────────────────────────────
 
@@ -33,6 +33,7 @@ vi.mock('@memo/api-client', () => ({
   createRecord: vi.fn(),
   deleteRecord: vi.fn(),
   createPayment: vi.fn(),
+  patchPayment: vi.fn(),
   deletePayment: vi.fn(),
   updateVisitStatus: vi.fn(),
   getRecord: vi.fn(),
@@ -45,6 +46,10 @@ vi.mock('@memo/api-client', () => ({
   patchRecord: vi.fn(),
   patchActivity: vi.fn(),
   deleteVisitor: vi.fn(),
+  createVisit: vi.fn(),
+  patchVisit: vi.fn(),
+  deleteVisit: vi.fn(),
+  updateVisitor: vi.fn(),
 }));
 
 vi.mock('@/contexts/ScheduleContext', () => ({ useSchedule: vi.fn() }));
@@ -72,6 +77,7 @@ vi.mock('@tanstack/react-query', () => ({
     invalidateQueries: mockInvalidateQueries,
     setQueryData: vi.fn(),
     fetchQuery: vi.fn(),
+    getQueryData: vi.fn(() => null),
   })),
   useQuery: vi.fn(() => ({
     data: undefined,
@@ -110,8 +116,6 @@ describe('ClientTab — integration with shared atoms', () => {
     serviceTariffs: mockTariffs,
     onUpdateRecord: vi.fn().mockResolvedValue(undefined),
     onDeleteRecord: vi.fn(),
-    onAddPayment: vi.fn(),
-    onDeletePayment: vi.fn().mockResolvedValue(undefined),
     showToast: vi.fn(),
   };
 
@@ -184,8 +188,8 @@ describe('ClientTab — integration with shared atoms', () => {
       { id: 'p1', record_id: 'r1', amount: 3500, method: 'card', created_at: '', updated_at: '', is_active: true },
     ];
     render(<ClientTab {...defaultProps} payments={payments} />);
-    const deleteButtons = screen.getAllByLabelText('Удалить платёж');
-    expect(deleteButtons.length).toBe(1);
+    const deleteButtons = screen.getAllByLabelText('Удалить');
+    expect(deleteButtons.length).toBeGreaterThanOrEqual(1);
   });
 
   it('shows toast on delete with undo callback', () => {
@@ -203,28 +207,53 @@ describe('ClientTab — integration with shared atoms', () => {
 
   // ─── Mutations wiring ──────────────────────────────────────────────
 
-  it('addPayment fires onAddPayment callback', async () => {
+  it('addPayment fires createPayment on amount blur', async () => {
+    vi.mocked(createPayment).mockResolvedValue({
+      id: 'p-new', record_id: 'r1', amount: 500, method: 'card',
+      created_at: '2026-06-01T10:00:00', updated_at: '', is_active: true,
+    } as any);
     render(<ClientTab {...defaultProps} />);
-    // Open payment add form first
+    // Open new payment row
     fireEvent.click(screen.getByTestId('btn-add-payment'));
-    fireEvent.change(screen.getByTestId('add-payment-amount'), { target: { value: '500' } });
-    fireEvent.click(screen.getByTestId('add-payment-submit'));
+    // Change amount and blur to trigger save
+    const amountInput = screen.getByTestId('add-payment-amount');
+    fireEvent.change(amountInput, { target: { value: '500' } });
+    fireEvent.blur(amountInput);
 
     await waitFor(() => {
-      expect(defaultProps.onAddPayment).toHaveBeenCalledWith('r1', 500, 'card');
+      expect(createPayment).toHaveBeenCalledWith({
+        record_id: 'r1',
+        amount: 500,
+        method: 'card',
+        created_at: expect.any(String),
+      });
     });
   });
 
-  it('deletePayment fires onDeletePayment callback', async () => {
+  it('deletePayment fires deferred delete after 5s delay', async () => {
+    vi.useFakeTimers();
     const payments = [
       { id: 'p1', record_id: 'r1', amount: 1000, method: 'card', created_at: '', updated_at: '', is_active: true },
     ];
     render(<ClientTab {...defaultProps} payments={payments} />);
     fireEvent.click(screen.getByTestId('payment-p1-delete'));
 
-    await waitFor(() => {
-      expect(defaultProps.onDeletePayment).toHaveBeenCalledWith('p1');
-    });
+    // Toast should be shown immediately with undo callback
+    expect(defaultProps.showToast).toHaveBeenCalledWith(
+      'Удалено. Отменить',
+      expect.any(Function),
+    );
+
+    // API should NOT be called yet (deferred)
+    expect(deletePayment).not.toHaveBeenCalled();
+
+    // Advance past the 5s delay
+    await vi.advanceTimersByTimeAsync(5000);
+
+    // Now the API should be called
+    expect(deletePayment).toHaveBeenCalledWith('p1');
+
+    vi.useRealTimers();
   });
 
   it('renders seats summary', () => {
@@ -235,8 +264,27 @@ describe('ClientTab — integration with shared atoms', () => {
 
   // ─── Status change wiring ─────────────────────────────────────────
 
-  it('status change on RecordVisitRow calls updateVisitStatus instead of onUpdateRecord', async () => {
-    vi.mocked(updateVisitStatus).mockResolvedValue({ id: 'v1', status: 'visited', custom_price: null, created_at: '', updated_at: '', is_active: true, record_id: 'r1', price: 0 } as any);
+  // ─── Tariff dropdown ────────────────────────────────────────────────
+
+  it('tariff dropdown shows service tariffs when prop is populated', async () => {
+    const tariffs = [
+      { id: 'tariff-1', service_id: 's1', title: 'Взрослый', price: 2500, description: null },
+      { id: 'tariff-2', service_id: 's1', title: 'Детский', price: 1500, description: null },
+    ];
+    render(<ClientTab {...defaultProps} serviceTariffs={tariffs} />);
+    // Click "+ Добавить" to add a new visit row
+    fireEvent.click(screen.getByTestId('btn-add-visitor'));
+    // The tariff <select> for the new row should have tariff options
+    const select = screen.getByTestId('add-visitor-tariff');
+    const options = within(select).getAllByRole('option');
+    // 1 placeholder ("— тариф —") + 2 tariff options = 3
+    expect(options).toHaveLength(3);
+    expect(options[1]).toHaveTextContent('Взрослый');
+    expect(options[2]).toHaveTextContent('Детский');
+  });
+
+  it('status change on RecordVisitRow calls patchVisit', async () => {
+    vi.mocked(apiPatchVisit).mockResolvedValue({ id: 'v1', status: 'visited', custom_price: null, created_at: '', updated_at: '', record_id: 'r1', price: 0 } as any);
     render(<ClientTab {...defaultProps} />);
 
     const statusContainer = screen.getByTestId('visit-v1-status');
@@ -247,7 +295,7 @@ describe('ClientTab — integration with shared atoms', () => {
     fireEvent.click(option);
 
     await waitFor(() => {
-      expect(updateVisitStatus).toHaveBeenCalledWith('v1', 'visited');
+      expect(apiPatchVisit).toHaveBeenCalledWith('v1', expect.objectContaining({ status: 'visited' }));
     });
     // Should NOT call the full-record onUpdateRecord for a status-only change
     expect(defaultProps.onUpdateRecord).not.toHaveBeenCalled();

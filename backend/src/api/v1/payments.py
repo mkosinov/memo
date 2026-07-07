@@ -111,7 +111,7 @@ async def delete_payment(
     service: _ServiceDep,
     session: SessionDep,
 ) -> None:
-    """Soft-delete a payment (set is_active=False)."""
+    """Hard-delete a payment (physically remove the row)."""
     deleted = await service.delete(db_session=session, id=payment_id)
     if not deleted:
         raise HTTPException(

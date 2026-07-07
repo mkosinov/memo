@@ -1,7 +1,7 @@
 # InlineEditableTable — Unified Rows — Design
 
 **Date:** 2026-06-25
-**Status:** Draft (awaiting written-spec approval — G1b)
+**Status:** Approved (G1b passed 2026-07-05 — user confirmed written spec)
 **Scope:** New shared `InlineEditableTable` + `useInlineEditRow` hook; refactor of `RecordVisitsTable` and `RecordPaymentsTable`
 **Replaces:** Per-table `showForm` state + dedicated inline form-row (replicated 2×)
 
@@ -387,9 +387,147 @@ The existing `RecordTable.Row` API takes `cells: Record<string, ReactNode>`. The
 
 After extraction, `RecordVisitsTable.tsx` no longer defines `InlineEditCell` locally. Any other consumer of the local version (grep for `InlineEditCell` in the repo) must be updated. A grep pre-check (T0 prep) catches this.
 
-### Save-callback contract
+### Save-callback contract — RESOLVED (Variant A, 2026-07-05)
 
-`onAdd` and `onUpdate` are expected to return the **full saved/updated row** (not just an id), so the consumer can replace the row in place. Current `useRecordMutations` returns... need to verify during T7 prep. If it doesn't, add a `refetch` on success or change the mutation return type.
+**Investigation result (2026-07-05):** The current `useRecordMutations` hook is **invalidate-on-success** and returns `void`. Visits are mutated via bulk `patchRecord(visits[])`, NOT via single-visit endpoints. Payment PATCH is not wired in at all.
+
+**However**, the backend now exposes the correct single-entity endpoints (added by Phase 0-2, all merged into main at `f6a765a`):
+- `POST /api/v1/visits` → returns `VisitResponse`
+- `PATCH /api/v1/visits/{id}` → returns `VisitResponse` (single-visit partial update)
+- `DELETE /api/v1/visits/{id}` → 204
+- `PATCH /api/v1/payments/{id}` → returns `PaymentResponse`
+
+The api-client wrappers for these either exist (`updateVisitStatus`, `createPayment`, `deletePayment`, `updatePayment`) or must be added (single-visit `createVisit`/`patchVisit`/`deleteVisit`).
+
+**Decision (user, 2026-07-05): Variant A — wire the new single-entity endpoints into `useRecordMutations` so that add/update mutations RETURN the saved/updated row.** This enables true replace-in-place (no blink), eliminates the bulk `patchRecord(visits[])` technical debt, and uses exactly the endpoints the Phase 0-2 backend work was built for.
+
+**Contract after refactor:**
+- `onAdd(data): Promise<VisitResponse>` → calls `createVisitor` (if new visitor) + `POST /visits`, returns the saved `VisitResponse`.
+- `onUpdate(id, data): Promise<VisitResponse>` → calls `PATCH /visits/{id}`, returns the updated `VisitResponse`.
+- `onDelete(id): Promise<void>` → calls `DELETE /visits/{id}`.
+- Payments: `onAdd → POST /payments` returns `PaymentResponse`; `onUpdate → PATCH /payments/{id}` returns `PaymentResponse`; `onDelete → DELETE /payments/{id}`.
+- Consumer replaces the `{ id: null, ... }` row in the `rows` array with the returned saved row (id populated). No full-list invalidation needed for the row itself, though a lightweight `['record', recordId]` invalidation may still run to keep totals/seats in sync (cascade recompute happens backend-side per Phase 1).
+
+**Note on the visit/visitor two-step:** "Add visitor" remains a two-step flow (create `Visitor` → create `Visit` referencing `visitor_id`), because a Visit references a Visitor. The refactor changes the second step from bulk `patchRecord` to single `POST /visits`, and makes it return the created `VisitResponse`.
+
+---
+
+## Addendum — New-row save trigger + editable payment date (2026-07-06)
+
+Discovered during live testing after the initial refactor shipped. Two corrections to the new-row UX.
+
+### A. New-row save must fire on blur/Enter regardless of whether a field changed
+
+**Problem (regression vs the original "Save flow" section above):** the initial implementation hard-wired the POST inside a single cell's `InlineEditCell.onCommit` (payments → Amount, visits → Name). `InlineEditCell` only fires `onCommit` when the draft value **changed** (`draft !== original`). This is correct for editing an existing cell (PATCH), but WRONG for creating a new row:
+
+- **Payments (frequent):** a new payment row is pre-filled with `defaultAmount` = "К оплате" (outstanding balance). Accepting that amount verbatim and pressing Enter / blurring does NOT save it, because the value never changed. The user cannot save the exact owed amount without editing it.
+- **Visits (narrow):** a new visit row's Name starts empty; typing a name registers as a change and saves. But an **anonymous visit** (blank name = "Аноним" placeholder, only a tariff picked) never fires the Name `onCommit` → cannot be saved.
+
+**Required behavior:** for a NEW row (`id === null`), committing the row (blur leaving the row, or Enter on any editable field) MUST trigger `onAdd` **regardless of whether any individual field changed**, as long as the row is valid (see B). This matches the ORIGINAL "Save flow" section (`handleSave()` on Enter), which the implementation drifted away from.
+
+**Design:** wire the already-existing but currently-dead `useInlineEditRow.handleSave` into the save path:
+- `InlineEditRow` consumes `handleSave` from the hook and provides a row-level save trigger: on **Enter** in any cell, and on **blur leaving the whole row** (focus moves outside the row), call `handleSave()` when `isNew`.
+- `handleSave` calls `onAdd(formState)` for new rows (unconditional — not gated on field change).
+- Both tables DROP the duplicated `handleAdd(...).then(replaceRowByClientId)` from their per-cell `onCommit`; new-row saving converges on the single `handleSave` path. (For SAVED rows, per-cell PATCH-on-change via `InlineEditCell.onCommit` stays as-is — change-gating is correct there.)
+- This retires the dead `handleSave`/`onUpdate` code flagged in the Task 4.1/5.1 reviews.
+
+### A.1. Replace-in-place must preserve the just-submitted values (name blanks after save bug)
+
+**Problem (live-testing bug):** after saving a new visitor (type name → Enter), the name input goes BLANK (shows "Аноним" placeholder), yet after F5 the name displays correctly. Root cause (traced):
+- `addVisit` returns a `VisitResponse` that has NO `name` (only `visitor_id`); the created visitor's name is discarded.
+- `visitResponseToRow(saved, visitorsMap)` re-derives the row's `name`/`age` by looking up `visitorsMap[visitor_id]`, but the invalidation refetch hasn't completed, so `visitorsMap` is a **stale closure** without the new visitor → `name` resolves to `''`.
+- The row's `id` goes `null → real`, changing the React `key` (`row.id ?? clientId`) → the row **remounts** → `formState` re-inits from the blank-name row → input shows blank.
+
+**Required fix:** when replacing the `{id:null}` row with the saved row, **preserve the values the user just submitted** rather than re-deriving them from a not-yet-refreshed `visitorsMap`. E.g. `replaceRowByClientId(clientId, { ...visitResponseToRow(saved, visitorsMap), name: submittedName, age: submittedAge })`. Equivalent hardening options: have `addVisit` return the created visitor's name/age, or make `visitResponseToRow` fall back to the submitted values on a `visitorsMap` miss.
+
+**Apply the same principle to payments:** after saving a new payment, the replaced row must show the submitted amount/method (and the date — see B), not blank/placeholder, without waiting for refetch.
+
+**Acceptance:** after Enter on a new visitor row, the name stays visible immediately (no blank, no need to F5). Same for a new payment row's amount/method/date.
+
+**Guard (amount > 0 for payments):** restore the explicit validation lost in the refactor.
+
+- The check `amount > 0` applies to BOTH save paths: creating a new payment (POST) AND editing an existing payment's amount (PATCH). If the admin clears an existing payment's amount to 0, the guard must also fire (backend enforces `gt=0` → would 422 otherwise).
+- **On `amount <= 0`:** show an **error toast** ("Сумма должна быть больше 0") and DO NOT send the request (no POST, no PATCH). Use the project's standard toast mechanism (error contract / `waitForToast`-compatible `role="status"` toast).
+- The Amount `<input type="number">` also keeps `min={1}` as a browser-level input hint, but the authoritative guard is the explicit `amount > 0` check in code (min alone does not prevent clearing the field to empty/0).
+- For visits, a blank-name anonymous row IS valid and must save (name is optional; visitor is created "Аноним"). No amount guard applies to visits.
+
+### B. Editable payment date on new rows (auto-filled, user-adjustable)
+
+**Problem:** the old form had a `datetime-local` input auto-filled with the current time; the refactor dropped it, so a new payment row shows a blank Date cell until saved, and the user cannot set/backdate the payment time.
+
+**Required behavior:**
+- A new payment row's Date cell renders an **editable `datetime-local` input**, auto-filled with the current time (`new Date()`) at row creation.
+- The user may adjust it before saving.
+- The chosen date is sent to the backend and persisted as the payment's `created_at`.
+
+**Backend change (new — supersedes the "no backend changes" note):** `POST /api/v1/payments` must accept an optional client-supplied timestamp so the UI-entered date is persisted:
+- Add an optional field to `PaymentCreate` (e.g. `created_at: datetime | None = None`, or a dedicated `paid_at`). When provided, the service sets the payment's timestamp to it; when omitted, the DB default (now) applies.
+- Thread it through: frontend `addPayment(amount, method, date?)` → `createPayment` payload → `PaymentCreate`.
+- Keep it backward-compatible (optional; existing callers that omit it are unaffected).
+
+### New user scenarios (extend the list above)
+
+10. **Save prefilled payment without editing.** New payment row prefilled with "К оплате" = 6000 → user presses Enter (or blurs) WITHOUT changing the amount → payment is saved with amount 6000. (Currently broken.)
+11. **Save anonymous visit.** New visit row → user picks only a tariff, leaves Name blank → blur/Enter → an anonymous ("Аноним") visit is saved. (Currently broken.)
+12. **amount ≤ 0 not sent (new + existing).** (a) New payment row → user clears amount to 0 → blur/Enter → NO POST fires; an error toast "Сумма должна быть больше 0" is shown; no 422. (b) Existing payment row → admin edits amount to 0 → blur → NO PATCH fires; same error toast; the row keeps its previous amount.
+13. **Editable payment date persists.** New payment row shows current time in an editable datetime input → user adjusts it → saves → the payment's `created_at` reflects the user-entered time (verified via GET).
+
+14. **Name stays visible immediately after save (no blank, no F5).** New visitor row → type "Анна" → Enter → the row is saved AND the name "Анна" remains displayed in the row immediately (input does NOT blank to the "Аноним" placeholder). No page reload needed. (Currently: name blanks after Enter and only reappears after F5.) Same for a new payment's amount/method/date after save.
+
+---
+
+## Addendum 2 — Cache sync, tariffs in modal, hard-delete + Undo (2026-07-06, live-test round 2)
+
+Three more bugs found in live testing, plus an architectural decision on delete semantics.
+
+### C. Mutation cache sync — no F5 needed after add/delete (regression + design gap)
+
+**Problem:** after adding or deleting a visitor/payment, switching tabs inside the modal (or closing+reopening it) causes the table to remount and re-initialize from a STALE `['record', recordId]` cache — the just-added row vanishes / the just-deleted row reappears, until F5.
+
+**Root cause (traced):**
+- The new single-entity mutations (`addVisit`/`deleteVisit`/`patchVisit`/payment equivalents) only call `invalidateRecord()` (marks `['record', recordId]` stale → BACKGROUND refetch). They do NOT optimistically update the cache. If the table remounts before the refetch completes, it reads stale data.
+- **Regression:** `addVisit` no longer invalidates `['visitors', clientId]` (the old `handleAddVisitor` did — `ClientRecordTab.tsx`). So even after the record refetch, `visitorsMap` is stale and the new visitor's name can't be joined.
+
+**Required fix (hybrid — optimistic cache write now; full useMutation refactor deferred):**
+- In `addVisit`/`deleteVisit`/`patchVisit` (and `addPayment`/`deletePayment`/`patchPayment`), OPTIMISTICALLY update the React Query cache BEFORE/AROUND the API call: `queryClient.setQueryData(['record', recordId], (old) => ...)` to add/remove/update the visit in `old.visits` (and `['payments', recordId]` for payments), so any remount reads fresh data immediately.
+- Restore `queryClient.invalidateQueries({ queryKey: ['visitors', clientId] })` in `addVisit` (regression fix).
+- Keep `invalidateRecord()` (and existing invalidations) as the server-confirmation pass.
+- **Deferred (separate tech-debt PR):** migrating these mutations to `useMutation` with `onMutate` optimistic + rollback. This addendum does the minimal `setQueryData` fix.
+
+### D. Tariff dropdown empty in the modal (pre-existing)
+
+**Problem:** in the ActivityDetailsModal → client tab → visitors table, the Tariff `<select>` for a new row is empty (only "— тариф —"), even though the service has tariffs. (The /clients-page `ClientRecordTab` is NOT affected — it fetches raw services with tariffs.)
+
+**Root cause:** `useServices()` applies `select: transformService`, and `transformService` (`transformers.ts`) DROPS the `tariffs` field (keeps only `defaultAdultPrice`). The domain `Service` type has no `tariffs`. `ActivityDetailsModal.getServiceTariffs(svc)` reads `svc.tariffs` → `undefined` → `[]`.
+
+**Required fix:** make the modal receive the service's tariffs. Preferred: in `ActivityDetailsModal`, obtain the raw service (with tariffs) — either use the raw services already fetched in `useSchedule()`/`ScheduleContext` (expose `servicesRaw`), or add a dedicated raw `useQuery(['services'])` (no `select`) for tariff lookup. Do NOT break the domain `Service` transform used elsewhere. Document the chosen approach. **Acceptance:** the Tariff dropdown in the modal shows the service's tariffs; selecting one auto-fills price (scenario 6 already covered).
+
+### E. Delete semantics: HARD delete Payment + Visit + Undo toast
+
+**Decision (user, 2026-07-06):** Payment and Visit switch from soft-delete to **HARD delete** (physical row removal). Rationale: they are leaf tables (no FK references), operational (not primary financial records), and soft-delete caused deleted payments to still count in client stats (bug 3) + imposes a permanent "remember to filter is_active" tax. Audit trail, if ever needed, belongs in a separate append-only `audit_log` — NOT soft-delete on the entity. All OTHER entities (Client, Service, Master, Location, Activity, Record, Visitor, ...) KEEP soft-delete (they have FK dependents).
+
+**Safety (verified):** nothing references Payment.id/Visit.id as FK; Visit "cancelled" is a STATUS (is_active=true), not a delete, so cancelled history is safe; `recompute_record_seats/status` filter `is_active=True` so a gone row behaves identically to a soft-deleted one — the parent Record's seats/status recompute correctly.
+
+**Required implementation:**
+- **Backend (per-service override — do NOT touch the generic soft-delete):**
+  - `PaymentService.delete`: physical `DELETE FROM payments WHERE id=? AND is_active=True`; return False (→ 404) if no row matched (preserve the API contract).
+  - `VisitService.delete`: change the `is_active=False` set to a physical row delete; KEEP the two recompute calls afterward (they already work with the row gone).
+  - Fix bug 3 as a natural consequence + also add `Payment.is_active`/`Visit.is_active` filters to the client-stats subqueries (`client.py`) as defense (though hard-delete makes deleted rows vanish anyway — add the filter so any FUTURE soft-deleted-by-mistake row isn't counted).
+  - Update tests: `test_delete_payment_soft_deletes` → expect 404 after delete; `test_delete_visit_soft_flag_in_db` / `test_visit_service_delete_*` → expect row absent.
+- **Frontend Undo toast (deferred delete pattern — no soft-delete needed):**
+  - Clicking × on a SAVED visit/payment row: remove the row from the UI immediately, show a toast "Удалено. Отменить" for ~5 seconds. Do NOT send the DELETE immediately.
+  - If the user clicks "Отменить" within 5s → restore the row in the UI; NO server call was made.
+  - If 5s elapse with no undo → send the hard `DELETE`.
+  - Use the project's toast mechanism (`useUI`) with an action button. (If `useUI` toasts don't support an action button, extend minimally or use the smallest viable approach; document it.)
+  - Deleting a NEW (unsaved, id===null) row stays instant (no toast, no server call — it was never saved).
+
+### New user scenarios (extend the list)
+
+15. **No F5 after add.** Add a visitor → close the modal and open it again (click the same activity slot) → the visitor is still there (no reload). Same for payments.
+16. **No F5 after delete.** Delete a visitor → close the modal and open it again → the visitor is still gone (does not reappear). Same for payments.
+17. **Tariff dropdown populated in modal.** Open a record in the ActivityDetailsModal → visitors → "+ Добавить" → the Tariff dropdown lists the service's tariffs; selecting one fills the price.
+18. **Hard delete removes from stats.** Delete a payment → the client's `total_paid` no longer includes it (backend, no F5-dependent). The payment is physically gone (GET by id → 404).
+19. **Undo delete.** Click × on a saved payment → row disappears + toast "Удалено. Отменить" → click "Отменить" within 5s → the payment reappears, and NO delete was sent to the server (verify via network). If not undone within 5s → the payment is hard-deleted.
 
 ---
 
@@ -398,7 +536,7 @@ After extraction, `RecordVisitsTable.tsx` no longer defines `InlineEditCell` loc
 - Inline-editing of the `status` field for a new row (it always defaults to `'waiting'`; admin changes it after save).
 - Optimistic updates (the wave 6 record-status spec deferred this too; same line).
 - A true generic `InlineEditableTable<T>` that takes column DSL — explicitly non-goal.
-- Backend changes (none required; the API contract is unchanged).
+- Backend changes: the core refactor required none (endpoints existed from Phase 0-2). **Exception:** the Addendum (B) adds ONE small backend change — an optional client-supplied timestamp on `POST /api/v1/payments` so a user-entered payment date persists.
 
 ---
 

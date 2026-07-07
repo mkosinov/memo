@@ -205,10 +205,34 @@ export const VisitResponseSchema = z.object({
   status: z.string(),
   created_at: z.string(),
   updated_at: z.string(),
-  is_active: z.boolean(),
 });
 
 export type VisitResponse = z.infer<typeof VisitResponseSchema>;
+
+// ─── VisitCreate (request body) ──────────────────────────────────────────
+
+export const VisitCreateSchema = z.object({
+  record_id: z.string(),
+  visitor_id: z.string().nullable().optional(),
+  tariff_id: z.string().nullable().optional(),
+  price: z.number().int().min(0),
+  custom_price: z.number().nullable().optional(),
+  status: z.enum(['waiting', 'visited', 'missed', 'cancelled']).optional(),
+});
+
+export type VisitCreate = z.infer<typeof VisitCreateSchema>;
+
+// ─── VisitPatch (request body) ───────────────────────────────────────────
+
+export const VisitPatchSchema = z.object({
+  visitor_id: z.string().nullable().optional(),
+  tariff_id: z.string().nullable().optional(),
+  price: z.number().int().min(0).optional(),
+  custom_price: z.number().nullable().optional(),
+  status: z.enum(['waiting', 'visited', 'missed', 'cancelled']).optional(),
+});
+
+export type VisitPatch = z.infer<typeof VisitPatchSchema>;
 
 // ─── RecordResponse ────────────────────────────────────────────────────────
 
@@ -286,7 +310,6 @@ export const PaymentResponseSchema = z.object({
   method: z.string().nullable(),
   created_at: z.string(),
   updated_at: z.string(),
-  is_active: z.boolean(),
 });
 
 export type PaymentResponse = z.infer<typeof PaymentResponseSchema>;
@@ -321,6 +344,8 @@ export const PaymentCreateSchema = z.object({
   record_id: z.string(),
   amount: z.number(),
   method: z.enum(['cash', 'card', 'transfer']).optional(),
+  /** Optional client-supplied timestamp (ISO 8601). If omitted, backend defaults to now. */
+  created_at: z.string().optional(),
 });
 
 export type PaymentCreate = z.infer<typeof PaymentCreateSchema>;

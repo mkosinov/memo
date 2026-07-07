@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db import SessionDep
 from src.models.user_settings import UserSettings
-from src.repositories.generic import GenericRepository, get_generic_repository
+from src.repositories.generic import SoftDeleteRepository, get_soft_delete_repository
 from src.schemas.user_settings import (
     UserSettingsCreate,
     UserSettingsResponse,
@@ -36,7 +36,7 @@ def _to_response(model: UserSettings) -> UserSettingsResponse:
 class UserSettingsService:
     """CRUD service for UserSettings with JSON ↔ list conversion."""
 
-    def __init__(self, repo: GenericRepository) -> None:
+    def __init__(self, repo: SoftDeleteRepository) -> None:
         self._repo = repo
 
     async def get_by_user_id(
@@ -114,4 +114,4 @@ class UserSettingsService:
 
 def get_user_settings_service() -> UserSettingsService:
     """Factory for UserSettingsService."""
-    return UserSettingsService(get_generic_repository())
+    return UserSettingsService(get_soft_delete_repository())

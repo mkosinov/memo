@@ -2,6 +2,23 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import React from 'react';
 
+// ─── Mock UIContext ────────────────────────────────────────────────────────
+vi.mock('@/contexts/UIContext', () => ({
+  useUI: () => ({
+    deleteMode: false,
+    toggleDeleteMode: vi.fn(),
+    toasts: [],
+    showToast: vi.fn(),
+    hideToast: vi.fn(),
+    sidebarCollapsed: false,
+    toggleSidebar: vi.fn(),
+    rightPanelCollapsed: true,
+    toggleRightPanel: vi.fn(),
+    theme: 'light' as const,
+    toggleTheme: vi.fn(),
+  }),
+}));
+
 // ─── Mock api-client ───────────────────────────────────────────────────────
 
 vi.mock('@memo/api-client', () => ({
@@ -10,6 +27,7 @@ vi.mock('@memo/api-client', () => ({
   patchRecord: vi.fn(),
   deleteRecord: vi.fn(),
   createPayment: vi.fn(),
+  patchPayment: vi.fn(),
   deletePayment: vi.fn(),
   getClientVisitors: vi.fn(),
   getActivity: vi.fn(),
@@ -21,6 +39,10 @@ vi.mock('@memo/api-client', () => ({
   patchActivity: vi.fn(),
   createVisitor: vi.fn(),
   deleteVisitor: vi.fn(),
+  createVisit: vi.fn(),
+  patchVisit: vi.fn(),
+  deleteVisit: vi.fn(),
+  updateVisitor: vi.fn(),
 }));
 
 // ─── Mock ScheduleContext ────────────────────────────────────────────────
@@ -58,6 +80,8 @@ import {
   deletePayment,
   createVisitor,
   deleteVisitor,
+  createVisit,
+  deleteVisit as apiDeleteVisit,
 } from '@memo/api-client';
 
 // ─── Shared mock data ──────────────────────────────────────────────────────
@@ -92,7 +116,7 @@ describe('ClientRecordTab — API interactions', () => {
     vi.mocked(deleteRecord).mockResolvedValue(undefined);
     vi.mocked(createPayment).mockResolvedValue({
       id: 'p1', record_id: 'r1', amount: 1000, method: 'card',
-      created_at: '', updated_at: '', is_active: true,
+      created_at: '', updated_at: '',
     });
     vi.mocked(deletePayment).mockResolvedValue(undefined);
     vi.mocked(createVisitor).mockResolvedValue({
@@ -100,6 +124,12 @@ describe('ClientRecordTab — API interactions', () => {
       created_at: '', updated_at: '', is_active: true,
     });
     vi.mocked(deleteVisitor).mockResolvedValue(undefined);
+    vi.mocked(createVisit).mockResolvedValue({
+      id: 'v_new', record_id: 'r1', visitor_id: 'vis_new', tariff_id: 't1',
+      price: 3500, custom_price: null, status: 'waiting',
+      created_at: '', updated_at: '',
+    });
+    vi.mocked(apiDeleteVisit).mockResolvedValue(undefined);
   });
 
   afterEach(() => {

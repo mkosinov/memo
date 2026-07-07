@@ -5,13 +5,13 @@ from typing import TYPE_CHECKING
 from sqlalchemy import ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from src.models.abstract import AbstractModel
+from src.models.abstract import AbstractModelSoftDelete
 
 if TYPE_CHECKING:
     from src.models.service import Service
 
 
-class Tariff(AbstractModel):
+class Tariff(AbstractModelSoftDelete):
     __tablename__ = "tariffs"
 
     service_id: Mapped[str] = mapped_column(String(36), ForeignKey("services.id"))

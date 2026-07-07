@@ -89,6 +89,7 @@ export interface ScheduleContextType {
   scheduleIndex: DomainScheduleIndex<ScheduleAdminDTO>;
   masters: Master[];
   services: Service[];
+  servicesRaw: ServiceResponse[];
   locations: Location[];
   currentWeek: Date;
   stamp: StampState;
@@ -490,6 +491,7 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
     scheduleIndex,
     masters,
     services,
+    servicesRaw,
     locations,
     currentWeek,
     stamp,
@@ -522,7 +524,7 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
     prevPeriod,
     nextPeriod,
   }), [
-    filteredItems, scheduleIndex, masters, services, locations,
+    filteredItems, scheduleIndex, masters, services, servicesRaw, locations,
     currentWeek, stamp, filterMasterIds, filterLocationIds,
     viewMode, selectedDay, columnMode,
     setCurrentWeek, addActivity, updateActivityFn, deleteActivityById, setStamp, copyLastWeek,

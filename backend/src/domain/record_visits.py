@@ -35,7 +35,6 @@ async def recompute_record_seats(
     result = await db_session.execute(
         select(func.count()).select_from(Visit).where(
             Visit.record_id == record_id,
-            Visit.is_active.is_(True),
         )
     )
     active_count = result.scalar() or 0
@@ -60,7 +59,6 @@ async def recompute_record_status(
     result = await db_session.execute(
         select(Visit).where(
             Visit.record_id == record_id,
-            Visit.is_active.is_(True),
         )
     )
     active_visits = list(result.scalars().all())

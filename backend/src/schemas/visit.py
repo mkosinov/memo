@@ -61,4 +61,3 @@ class VisitResponse(BaseModel):
     status: str
     created_at: str
     updated_at: str
-    is_active: bool

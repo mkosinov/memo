@@ -11,7 +11,7 @@ from typing import Generic, TypeVar
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.repositories.generic import GenericRepository
+from src.repositories.generic import BaseRepository
 
 CreateSchemaT = TypeVar("CreateSchemaT", bound=BaseModel)
 UpdateSchemaT = TypeVar("UpdateSchemaT", bound=BaseModel)
@@ -36,7 +36,7 @@ class GenericService(Generic[CreateSchemaT, UpdateSchemaT, ResponseSchemaT]):
 
     def __init__(
         self,
-        repository: GenericRepository,
+        repository: BaseRepository,
         model: type,
         response_schema: type[ResponseSchemaT],
     ) -> None:

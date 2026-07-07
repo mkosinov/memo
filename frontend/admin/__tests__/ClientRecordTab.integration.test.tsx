@@ -2,6 +2,23 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import React from 'react';
 
+// ─── Mock UIContext ────────────────────────────────────────────────────────
+vi.mock('@/contexts/UIContext', () => ({
+  useUI: () => ({
+    deleteMode: false,
+    toggleDeleteMode: vi.fn(),
+    toasts: [],
+    showToast: vi.fn(),
+    hideToast: vi.fn(),
+    sidebarCollapsed: false,
+    toggleSidebar: vi.fn(),
+    rightPanelCollapsed: true,
+    toggleRightPanel: vi.fn(),
+    theme: 'light' as const,
+    toggleTheme: vi.fn(),
+  }),
+}));
+
 // ─── Mock api-client ───────────────────────────────────────────────────────
 
 vi.mock('@memo/api-client', () => ({
@@ -10,6 +27,7 @@ vi.mock('@memo/api-client', () => ({
   patchRecord: vi.fn(),
   deleteRecord: vi.fn(),
   createPayment: vi.fn(),
+  patchPayment: vi.fn(),
   deletePayment: vi.fn(),
   getClientVisitors: vi.fn(),
   getActivity: vi.fn(),
@@ -21,6 +39,10 @@ vi.mock('@memo/api-client', () => ({
   patchActivity: vi.fn(),
   createVisitor: vi.fn(),
   deleteVisitor: vi.fn(),
+  createVisit: vi.fn(),
+  patchVisit: vi.fn(),
+  deleteVisit: vi.fn(),
+  updateVisitor: vi.fn(),
 }));
 
 vi.mock('@/contexts/ScheduleContext', () => ({
@@ -50,6 +72,8 @@ import {
   deletePayment,
   createVisitor,
   updateVisitStatus,
+  createVisit,
+  patchVisit as apiPatchVisit,
 } from '@memo/api-client';
 
 import {
@@ -78,12 +102,22 @@ describe('ClientRecordTab — integration with shared atoms', () => {
     vi.mocked(deleteRecord).mockResolvedValue(undefined);
     vi.mocked(createPayment).mockResolvedValue({
       id: 'p_new', record_id: 'r1', amount: 1000, method: 'card',
-      created_at: '', updated_at: '', is_active: true,
+      created_at: '', updated_at: '',
     });
     vi.mocked(deletePayment).mockResolvedValue(undefined);
     vi.mocked(createVisitor).mockResolvedValue({
       id: 'vis_new', client_id: 'c1', name: 'Новый', age: null,
       created_at: '', updated_at: '', is_active: true,
+    });
+    vi.mocked(createVisit).mockResolvedValue({
+      id: 'v_new', record_id: 'r1', visitor_id: 'vis_new', tariff_id: 't1',
+      price: 3500, custom_price: null, status: 'waiting',
+      created_at: '', updated_at: '',
+    });
+    vi.mocked(apiPatchVisit).mockResolvedValue({
+      id: 'v1', record_id: 'r1', visitor_id: 'vis1', tariff_id: 't1',
+      price: 3500, custom_price: null, status: 'visited',
+      created_at: '', updated_at: '',
     });
   });
 
@@ -152,8 +186,8 @@ describe('ClientRecordTab — integration with shared atoms', () => {
   it('shows AddVisitorForm when add button clicked', () => {
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
     fireEvent.click(screen.getByTestId('btn-add-visitor'));
-    // The add visitor form is an inline row with name input
-    expect(screen.getByTestId('add-visitor-row')).toBeInTheDocument();
+    // The new unified row renders with id===null → testId visit-row-new
+    expect(screen.getByTestId('visit-row-new')).toBeInTheDocument();
     expect(screen.getByTestId('add-visitor-name')).toBeInTheDocument();
   });
 
@@ -161,16 +195,18 @@ describe('ClientRecordTab — integration with shared atoms', () => {
 
   it('addPayment fires createPayment mutation', async () => {
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
-    // Open payment add form first
+    // Open new payment row
     fireEvent.click(screen.getByTestId('btn-add-payment'));
-    fireEvent.change(screen.getByTestId('add-payment-amount'), { target: { value: '2000' } });
-    fireEvent.click(screen.getByTestId('add-payment-submit'));
+    const amountInput = screen.getByTestId('add-payment-amount');
+    fireEvent.change(amountInput, { target: { value: '2000' } });
+    fireEvent.blur(amountInput);
 
     await waitFor(() => {
       expect(createPayment).toHaveBeenCalledWith({
         record_id: 'r1',
         amount: 2000,
         method: 'card',
+        created_at: expect.any(String),
       });
     });
   });
@@ -216,8 +252,7 @@ describe('ClientRecordTab — integration with shared atoms', () => {
 
   // ─── Status change wiring ─────────────────────────────────────────
 
-  it('status change on RecordVisitRow calls updateVisitStatus', async () => {
-    vi.mocked(updateVisitStatus).mockResolvedValue({ id: 'v1', status: 'visited', custom_price: null, created_at: '', updated_at: '', is_active: true, record_id: 'r1', price: 0 } as any);
+  it('status change on RecordVisitRow calls patchVisit', async () => {
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
 
     const statusContainer = screen.getByTestId('visit-v1-status');
@@ -228,7 +263,7 @@ describe('ClientRecordTab — integration with shared atoms', () => {
     fireEvent.click(option);
 
     await waitFor(() => {
-      expect(updateVisitStatus).toHaveBeenCalledWith('v1', 'visited');
+      expect(apiPatchVisit).toHaveBeenCalledWith('v1', expect.objectContaining({ status: 'visited' }));
     });
   });
 });

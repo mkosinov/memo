@@ -345,7 +345,6 @@ const validVisit = {
   status: 'waiting',
   created_at: '2024-06-01T12:00:00Z',
   updated_at: '2024-06-01T12:00:00Z',
-  is_active: true,
 };
 
 describe('VisitResponseSchema', () => {
@@ -356,7 +355,6 @@ describe('VisitResponseSchema', () => {
     expect(result.visitor_id).toBe('visitor-1');
     expect(result.price).toBe(2500);
     expect(result.status).toBe('waiting');
-    expect(result.is_active).toBe(true);
   });
 
   it('rejects missing required field', () => {
@@ -451,7 +449,6 @@ const validPayment = {
   method: 'card',
   created_at: '2024-06-01T12:00:00Z',
   updated_at: '2024-06-01T12:00:00Z',
-  is_active: true,
 };
 
 describe('PaymentResponseSchema', () => {
@@ -461,7 +458,6 @@ describe('PaymentResponseSchema', () => {
     expect(result.record_id).toBe('record-1');
     expect(result.amount).toBe(5000);
     expect(result.method).toBe('card');
-    expect(result.is_active).toBe(true);
   });
 
   it('parses payment with null method', () => {

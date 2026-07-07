@@ -33,7 +33,7 @@ export function ClientRecordTab({ recordId, clientId, onClose, client }: ClientR
   const { record, visitors, activity, services, masters, locations, payments, visitorsMap, tariffs, isLoading, recordData, status } =
     useRecordData(recordId, clientId);
 
-  const { saveRecord, deleteRecord, addVisitor, deleteVisitor, addPayment, deletePayment, updateAnonymVisits, updateVisitStatus, updateRecord } =
+  const { saveRecord, deleteRecord, addVisitor, deleteVisitor, addPayment, patchPayment, deletePayment, updateAnonymVisits, updateVisitStatus, updateRecord, addVisit, patchVisit, deleteVisit } =
     useRecordMutations(record?.activity_id ?? '', recordId);
 
   // Optimistic visit mutation layer
@@ -157,13 +157,7 @@ export function ClientRecordTab({ recordId, clientId, onClose, client }: ClientR
     queryClient.invalidateQueries({ queryKey: ['visitors', clientId] });
   }, [record, saveRecord, queryClient, clientId]);
 
-  const handleAddPayment = useCallback((p: { amount: number; method: string }) => {
-    addPayment(p.amount, p.method);
-  }, [addPayment]);
 
-  const handleDeletePayment = useCallback((paymentId: string) => {
-    deletePayment(paymentId);
-  }, [deletePayment]);
 
   const handleAnonymChange = useCallback((value: number) => {
     updateAnonymVisits(recordId, value);
@@ -259,12 +253,12 @@ export function ClientRecordTab({ recordId, clientId, onClose, client }: ClientR
         anonymVisits={record.anonym_visits ?? 0}
         totalCost={total}
         recordStatus={status}
-        onChangeVisit={handleVisitChange}
+        clientId={clientId}
+        onAddVisit={addVisit}
+        onPatchVisit={patchVisit}
+        onDeleteVisit={deleteVisit}
         onChangeVisitor={handleVisitorChange}
-        onChangeVisitPrice={handleVisitPriceChange}
-        onDeleteVisit={handleDeleteVisitor}
         onAnonymVisitsChange={handleAnonymChange}
-        onAddVisitor={handleAddVisitor}
       />
 
       {/* Custom price override (unique to /clients) */}
@@ -280,8 +274,9 @@ export function ClientRecordTab({ recordId, clientId, onClose, client }: ClientR
       {/* Payments table */}
       <RecordPaymentsTable
         payments={Array.isArray(payments) ? payments : []}
-        onAdd={handleAddPayment}
-        onDelete={handleDeletePayment}
+        onAddPayment={addPayment}
+        onPatchPayment={patchPayment}
+        onDeletePayment={deletePayment}
       />
 
       {/* Comment */}

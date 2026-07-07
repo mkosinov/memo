@@ -2,6 +2,23 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import React from 'react';
 
+// ─── Mock UIContext ────────────────────────────────────────────────────────
+vi.mock('@/contexts/UIContext', () => ({
+  useUI: () => ({
+    deleteMode: false,
+    toggleDeleteMode: vi.fn(),
+    toasts: [],
+    showToast: vi.fn(),
+    hideToast: vi.fn(),
+    sidebarCollapsed: false,
+    toggleSidebar: vi.fn(),
+    rightPanelCollapsed: true,
+    toggleRightPanel: vi.fn(),
+    theme: 'light' as const,
+    toggleTheme: vi.fn(),
+  }),
+}));
+
 // ─── Mock api-client ───────────────────────────────────────────────────────
 
 vi.mock('@memo/api-client', () => ({
@@ -10,6 +27,7 @@ vi.mock('@memo/api-client', () => ({
   patchRecord: vi.fn(),
   deleteRecord: vi.fn(),
   createPayment: vi.fn(),
+  patchPayment: vi.fn(),
   deletePayment: vi.fn(),
   getClientVisitors: vi.fn(),
   getActivity: vi.fn(),
@@ -21,6 +39,10 @@ vi.mock('@memo/api-client', () => ({
   patchActivity: vi.fn(),
   createVisitor: vi.fn(),
   deleteVisitor: vi.fn(),
+  createVisit: vi.fn(),
+  patchVisit: vi.fn(),
+  deleteVisit: vi.fn(),
+  updateVisitor: vi.fn(),
 }));
 
 // ─── Mock ScheduleContext ────────────────────────────────────────────────
@@ -54,6 +76,7 @@ import {
   deleteRecord,
   createPayment,
   deletePayment,
+  createVisit,
 } from '@memo/api-client';
 
 // ─── Shared mock data ──────────────────────────────────────────────────────
@@ -89,9 +112,14 @@ describe('ClientRecordTab — interactions', () => {
     vi.mocked(deleteRecord).mockResolvedValue(undefined);
     vi.mocked(createPayment).mockResolvedValue({
       id: 'p1', record_id: 'r1', amount: 1000, method: 'card',
-      created_at: '', updated_at: '', is_active: true,
+      created_at: '', updated_at: '',
     });
     vi.mocked(deletePayment).mockResolvedValue(undefined);
+    vi.mocked(createVisit).mockResolvedValue({
+      id: 'v_new', record_id: 'r1', visitor_id: 'vis_new', tariff_id: 't1',
+      price: 3500, custom_price: null, status: 'waiting',
+      created_at: '', updated_at: '',
+    });
   });
 
   afterEach(() => {
@@ -141,7 +169,7 @@ describe('ClientRecordTab — interactions', () => {
   it('uses custom_price for total when set', () => {
     buildDefaultQueryImpl(mockUseQuery, {
       record: { data: { ...mockRecord, custom_price: 5000 }, isLoading: false, error: null },
-      payments: { data: [{ id: 'p1', record_id: 'r1', amount: 2000, method: 'card', created_at: '', updated_at: '', is_active: true }], isLoading: false, error: null },
+      payments: { data: [{ id: 'p1', record_id: 'r1', amount: 2000, method: 'card', created_at: '', updated_at: '' }], isLoading: false, error: null },
     });
 
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
@@ -226,8 +254,8 @@ describe('ClientRecordTab — interactions', () => {
   it('shows AddVisitorForm when add visitor button clicked', () => {
     render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
     fireEvent.click(screen.getByTestId('btn-add-visitor'));
-    // The add visitor form is an inline row with name/age inputs
-    expect(screen.getByTestId('add-visitor-row')).toBeInTheDocument();
+    // The new unified row renders with id===null → testId visit-row-new
+    expect(screen.getByTestId('visit-row-new')).toBeInTheDocument();
     expect(screen.getByTestId('add-visitor-name')).toBeInTheDocument();
     expect(screen.getByTestId('add-visitor-age')).toBeInTheDocument();
   });

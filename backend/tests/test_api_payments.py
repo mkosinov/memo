@@ -102,7 +102,6 @@ class TestPaymentsCrud:
         assert "id" in body
         assert "created_at" in body
         assert "updated_at" in body
-        assert body["is_active"] is True
 
     def test_list_payments_includes_created(self, api_client) -> None:
         """GET /api/payments returns a list containing the created payment."""
@@ -149,8 +148,8 @@ class TestPaymentsCrud:
         assert body["amount"] == 5000
         assert body["method"] == "cash"
 
-    def test_delete_payment_soft_deletes(self, api_client) -> None:
-        """DELETE /api/payments/{id} soft-deletes and list excludes it."""
+    def test_delete_payment_hard_deletes(self, api_client) -> None:
+        """DELETE /api/payments/{id} hard-deletes and GET returns 404."""
         record_id = _create_record(api_client)
         payload = {**PAYMENT_PAYLOAD, "record_id": record_id}
         create_resp = api_client.post("/api/v1/payments", json=payload)
@@ -160,10 +159,9 @@ class TestPaymentsCrud:
         response = api_client.delete(f"/api/v1/payments/{payment_id}")
         assert response.status_code == 204
 
-        # GET by id should still return it (soft delete)
+        # GET by id should return 404 (hard delete — row is gone)
         response = api_client.get(f"/api/v1/payments/{payment_id}")
-        assert response.status_code == 200
-        assert response.json()["is_active"] is False
+        assert response.status_code == 404
 
         # List should NOT include the deleted payment
         response = api_client.get("/api/v1/payments")
@@ -231,3 +229,55 @@ class TestPaymentsCrud:
         )
         assert response.status_code == 404
         assert response.json()["detail"]["code"] == "PAYMENT_NOT_FOUND"
+
+    def test_create_payment_with_created_at_persists_it(self, api_client) -> None:
+        """POST /api/v1/payments with created_at uses the client-supplied timestamp."""
+        record_id = _create_record(api_client)
+        payload = {
+            "record_id": record_id,
+            "amount": 500,
+            "method": "card",
+            "created_at": "2026-06-01T12:00:00",
+        }
+
+        response = api_client.post("/api/v1/payments", json=payload)
+        assert response.status_code == 201, f"Create failed: {response.text}"
+        body = response.json()
+        # Compare date/time components (allow for serialization format variations)
+        from datetime import datetime
+        created = datetime.fromisoformat(body["created_at"])
+        assert created.year == 2026
+        assert created.month == 6
+        assert created.day == 1
+        assert created.hour == 12
+        assert created.minute == 0
+
+        # Confirm persistence via GET
+        get_resp = api_client.get(f"/api/v1/payments/{body['id']}")
+        assert get_resp.status_code == 200
+        get_created = datetime.fromisoformat(get_resp.json()["created_at"])
+        assert get_created.year == 2026
+        assert get_created.month == 6
+        assert get_created.day == 1
+
+    def test_create_payment_without_created_at_defaults_now(self, api_client) -> None:
+        """POST /api/v1/payments without created_at uses server default (now)."""
+        from datetime import datetime, timedelta
+
+        record_id = _create_record(api_client)
+        payload = {
+            "record_id": record_id,
+            "amount": 500,
+            "method": "card",
+        }
+
+        before = datetime.utcnow()
+        response = api_client.post("/api/v1/payments", json=payload)
+        after = datetime.utcnow()
+
+        assert response.status_code == 201, f"Create failed: {response.text}"
+        body = response.json()
+        created = datetime.fromisoformat(body["created_at"])
+        # created_at should be within the test window (with 1-minute margin)
+        assert created >= before - timedelta(minutes=1)
+        assert created <= after + timedelta(minutes=1)

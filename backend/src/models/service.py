@@ -5,14 +5,14 @@ from typing import TYPE_CHECKING
 from sqlalchemy import Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from src.models.abstract import AbstractModel
+from src.models.abstract import AbstractModelSoftDelete
 
 if TYPE_CHECKING:
     from src.models.tag import Tag
     from src.models.tariff import Tariff
 
 
-class Service(AbstractModel):
+class Service(AbstractModelSoftDelete):
     __tablename__ = "services"
 
     title: Mapped[str] = mapped_column(String(200))

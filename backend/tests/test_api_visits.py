@@ -87,7 +87,6 @@ class TestVisitCreate:
         data = response.json()
         assert data["record_id"] == record["id"]
         assert data["price"] == 100
-        assert data["is_active"] is True
 
     def test_create_visit_missing_record_id_returns_422(self, api_client) -> None:
         """Scenario 6: POST /api/v1/visits with missing record_id returns 422."""
@@ -274,13 +273,13 @@ class TestVisitDelete:
         response = api_client.delete("/api/v1/visits/nonexistent-id")
         assert response.status_code == 404
 
-    def test_delete_visit_soft_flag_in_db(self, api_client, create_record) -> None:
-        """After DELETE, is_active=False at DB level."""
+    def test_delete_visit_hard_deletes_row(self, api_client, create_record) -> None:
+        """After DELETE, row is absent from DB."""
         record = create_record()
         visit_id = record["visits"][0]["id"]
         api_client.delete(f"/api/v1/visits/{visit_id}")
-        rows = query_db(f"SELECT is_active FROM visits WHERE id='{visit_id}'")
-        assert rows[0]["is_active"] == 0
+        rows = query_db(f"SELECT * FROM visits WHERE id='{visit_id}'")
+        assert len(rows) == 0
 
 
 class TestVisitGet:

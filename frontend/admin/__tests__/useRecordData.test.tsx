@@ -106,7 +106,7 @@ const mockLocations = [
 ];
 
 const mockPayments = [
-  { id: 'p1', record_id: 'r1', amount: 1500, method: 'card', created_at: '', updated_at: '', is_active: true },
+  { id: 'p1', record_id: 'r1', amount: 1500, method: 'card', created_at: '', updated_at: '' },
 ];
 
 // ─── Helpers ───────────────────────────────────────────────────────────────

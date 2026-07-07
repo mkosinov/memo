@@ -12,7 +12,7 @@ from src.models.client import Client
 from src.models.payment import Payment
 from src.models.record import Record
 from src.models.visit import Visit
-from src.repositories.generic import get_generic_repository
+from src.repositories.generic import get_soft_delete_repository
 from src.schemas.client import (
     ClientCreate,
     ClientListParams,
@@ -26,7 +26,7 @@ from src.services.generic import GenericService
 
 @lru_cache
 def get_client_service() -> GenericService[ClientCreate, ClientUpdate, ClientResponse]:
-    return GenericService(get_generic_repository(), Client, ClientResponse)
+    return GenericService(get_soft_delete_repository(), Client, ClientResponse)
 
 
 async def list_clients_with_stats(

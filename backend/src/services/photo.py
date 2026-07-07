@@ -10,7 +10,7 @@ from sqlalchemy.orm import selectinload
 
 from src.models.photo import Photo
 from src.models.tag import Tag
-from src.repositories.generic import get_generic_repository
+from src.repositories.generic import get_soft_delete_repository
 from src.schemas.photo import PhotoCreate, PhotoResponse, PhotoUpdate
 from src.services.generic import GenericService
 
@@ -107,4 +107,4 @@ class PhotoService(GenericService[PhotoCreate, PhotoUpdate, PhotoResponse]):
 
 @lru_cache
 def get_photo_service() -> PhotoService:
-    return PhotoService(get_generic_repository(), Photo, PhotoResponse)
+    return PhotoService(get_soft_delete_repository(), Photo, PhotoResponse)

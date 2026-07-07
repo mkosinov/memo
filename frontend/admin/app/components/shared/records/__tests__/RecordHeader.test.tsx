@@ -24,7 +24,6 @@ const mockVisit: VisitResponse = {
   status: 'waiting',
   created_at: '',
   updated_at: '',
-  is_active: true,
 };
 
 function makeData(overrides: Partial<RecordWithDerived> = {}): RecordWithDerived {

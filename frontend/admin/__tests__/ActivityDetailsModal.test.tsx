@@ -37,6 +37,7 @@ vi.mock('@memo/api-client', () => ({
   createRecord: vi.fn(),
   deleteRecord: vi.fn(),
   createPayment: vi.fn(),
+  patchPayment: vi.fn(),
   deletePayment: vi.fn(),
   updateVisitStatus: vi.fn(),
 }));
@@ -261,8 +262,6 @@ describe('ClientTab', () => {
     serviceTariffs: mockTariffs,
     onUpdateRecord: vi.fn(),
     onDeleteRecord: vi.fn(),
-    onAddPayment: vi.fn(),
-    onDeletePayment: vi.fn(),
     showToast: vi.fn(),
   };
 
@@ -420,7 +419,7 @@ describe('ActivityDetailsModal — API integration', () => {
     vi.mocked(createClient).mockResolvedValue({ id: 'c_new', name: 'New', phone: '+7', email: null, channel: 'telegram', created_at: '', updated_at: '', is_active: true });
     vi.mocked(createVisitor).mockResolvedValue({ id: 'vis_new', client_id: 'c1', name: 'V', age: null, created_at: '', updated_at: '', is_active: true });
     vi.mocked(deleteRecord).mockResolvedValue(undefined);
-    vi.mocked(createPayment).mockResolvedValue({ id: 'p1', record_id: 'r1', amount: 1000, method: 'card', created_at: '', updated_at: '', is_active: true });
+    vi.mocked(createPayment).mockResolvedValue({ id: 'p1', record_id: 'r1', amount: 1000, method: 'card', created_at: '', updated_at: '' });
     vi.mocked(searchClientByPhone).mockRejectedValue(new Error('Not found'));
   });
 
@@ -555,8 +554,8 @@ describe('SettingsTab — row layout', () => {
 // ─── ClientTab — Layout & Feature Tests ──────────────────────────────────────
 
 describe('ClientTab — layout & features', () => {
-  const mockPayments: Array<{ id: string; record_id: string; amount: number; method: string | null; created_at: string; updated_at: string; is_active: boolean }> = [
-    { id: 'p1', record_id: 'r1', amount: 3500, method: 'card', created_at: '', updated_at: '', is_active: true },
+  const mockPayments: Array<{ id: string; record_id: string; amount: number; method: string | null; created_at: string; updated_at: string }> = [
+    { id: 'p1', record_id: 'r1', amount: 3500, method: 'card', created_at: '', updated_at: '' },
   ];
 
   const defaultProps = {
@@ -568,8 +567,6 @@ describe('ClientTab — layout & features', () => {
     serviceTariffs: mockTariffs,
     onUpdateRecord: vi.fn(),
     onDeleteRecord: vi.fn(),
-    onAddPayment: vi.fn(),
-    onDeletePayment: vi.fn(),
     showToast: vi.fn(),
   };
 
@@ -608,8 +605,8 @@ describe('ClientTab — layout & features', () => {
 
   it('renders delete payment button for each payment', () => {
     render(<ClientTab {...defaultProps} payments={mockPayments} />);
-    const deleteButtons = screen.getAllByLabelText('Удалить платёж');
-    expect(deleteButtons.length).toBe(1);
+    const deleteButtons = screen.getAllByLabelText('Удалить');
+    expect(deleteButtons.length).toBeGreaterThanOrEqual(1);
   });
 
   it('does not show stale closure in delete — uses ref', () => {

@@ -30,8 +30,8 @@ class VisitService:
     async def list(
         self, db_session: AsyncSession, record_id: str | None = None,
     ) -> list[Visit]:
-        """Return active visits, optionally filtered by record_id."""
-        stmt = select(Visit).where(Visit.is_active.is_(True))
+        """Return all visits, optionally filtered by record_id."""
+        stmt = select(Visit)
         if record_id is not None:
             stmt = stmt.where(Visit.record_id == record_id)
         result = await db_session.execute(stmt)
@@ -108,19 +108,16 @@ class VisitService:
         return visit
 
     async def delete(self, db_session: AsyncSession, visit_id: str) -> bool:
-        """Soft-delete the visit (is_active=False) and cascade: derive record.status + record.seats.
-
-        seats -= 1 because the deleted visit is no longer in len(active_visits).
-        """
+        """Hard-delete the visit and cascade: derive record.status + record.seats."""
         visit = await self.get(db_session, visit_id)
         if not visit:
             return False
-        visit.is_active = False
-        visit.updated_at = datetime.now(UTC)
+        record_id = visit.record_id
+        await db_session.delete(visit)
         await db_session.flush()
         # Cascade via domain functions
-        await recompute_record_status(db_session, visit.record_id)
-        await recompute_record_seats(db_session, visit.record_id)
+        await recompute_record_status(db_session, record_id)
+        await recompute_record_seats(db_session, record_id)
         await db_session.flush()
         return True
 

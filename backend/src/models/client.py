@@ -7,13 +7,13 @@ from typing import TYPE_CHECKING
 from sqlalchemy import String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from src.models.abstract import AbstractModel
+from src.models.abstract import AbstractModelSoftDelete
 
 if TYPE_CHECKING:
     from src.models.tag import Tag
 
 
-class Client(AbstractModel):
+class Client(AbstractModelSoftDelete):
     __tablename__ = "clients"
 
     name: Mapped[str | None] = mapped_column(String(200), nullable=True)

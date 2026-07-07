@@ -48,10 +48,8 @@ def _map_record(record) -> RecordResponse:
             status=v.status,
             created_at=_dt_to_str(v.created_at),
             updated_at=_dt_to_str(v.updated_at),
-            is_active=v.is_active,
         )
         for v in record.visits
-        if v.is_active
     ]
 
     return RecordResponse(

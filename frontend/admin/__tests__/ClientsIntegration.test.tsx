@@ -32,6 +32,8 @@ vi.mock('@memo/api-client', () => {
     updateRecord: vi.fn(),
     deleteRecord: vi.fn(),
     createPayment: vi.fn(),
+    patchPayment: vi.fn(),
+    deletePayment: vi.fn(),
     getClientVisitors: vi.fn(),
   };
 });
@@ -129,7 +131,6 @@ const mockRecord: RecordResponse = {
       status: 'waiting',
       created_at: '',
       updated_at: '',
-      is_active: true,
     },
   ],
 };
@@ -335,7 +336,6 @@ describe('ClientCardModal ↔ ClientRecordTab integration (real components)', ()
       method: 'card',
       created_at: '',
       updated_at: '',
-      is_active: true,
     });
     vi.mocked(getClientVisitors).mockResolvedValue(mockVisitors);
 
@@ -418,20 +418,20 @@ describe('ClientCardModal ↔ ClientRecordTab integration (real components)', ()
       expect(screen.getByTestId('client-record-tab')).toBeInTheDocument();
     });
 
-    // Open payment add form first
+    // Open new payment row
     fireEvent.click(screen.getByTestId('btn-add-payment'));
 
-    // Fill payment amount
-    fireEvent.change(screen.getByTestId('add-payment-amount'), { target: { value: '2500' } });
-
-    // Click add payment
-    fireEvent.click(screen.getByTestId('add-payment-submit'));
+    // Fill payment amount and blur to trigger save
+    const amountInput = screen.getByTestId('add-payment-amount');
+    fireEvent.change(amountInput, { target: { value: '2500' } });
+    fireEvent.blur(amountInput);
 
     await waitFor(() => {
       expect(createPayment).toHaveBeenCalledWith({
         record_id: 'rec1',
         amount: 2500,
         method: 'card',
+        created_at: expect.any(String),
       });
     });
   });
@@ -541,7 +541,6 @@ describe('Cross-page integration: create client → view → edit → save', () 
       method: 'card',
       created_at: '',
       updated_at: '',
-      is_active: true,
     });
     vi.mocked(getClientVisitors).mockResolvedValue(mockVisitors);
     vi.mocked(apiUpdateClient).mockResolvedValue(mockClient);
@@ -652,7 +651,6 @@ describe('Error scenarios: create client fails', () => {
       method: 'card',
       created_at: '',
       updated_at: '',
-      is_active: true,
     });
     vi.mocked(getClientVisitors).mockResolvedValue(mockVisitors);
     vi.mocked(apiUpdateClient).mockResolvedValue(mockClient);

@@ -28,7 +28,7 @@ const mockShowToast = vi.fn();
 function renderPaymentsTable(opts: {
   payments?: PaymentResponse[];
   defaultAmount?: number;
-  onAddPayment?: (amount: number, method: string) => Promise<PaymentResponse>;
+  onAddPayment?: (amount: number, method: string, date: string) => Promise<PaymentResponse>;
   onPatchPayment?: (id: string, data: { amount?: number; method?: string }) => Promise<PaymentResponse>;
 } = {}) {
   mockUseUI.mockReturnValue({
@@ -92,8 +92,8 @@ describe('RecordPaymentsTable — new-row save + preserve values', () => {
     fireEvent.keyDown(amountInput, { key: 'Enter' });
 
     await waitFor(() => expect(onAddPayment).toHaveBeenCalledTimes(1));
-    // Should be called with the prefilled amount (6000)
-    expect(onAddPayment).toHaveBeenCalledWith(6000, 'card');
+    // Should be called with the prefilled amount (6000), method, and a date string
+    expect(onAddPayment).toHaveBeenCalledWith(6000, 'card', expect.any(String));
   });
 
   it('saves prefilled amount on blur leaving the row', async () => {
@@ -109,7 +109,7 @@ describe('RecordPaymentsTable — new-row save + preserve values', () => {
     fireEvent.blur(amountInput, { relatedTarget: addBtn });
 
     await waitFor(() => expect(onAddPayment).toHaveBeenCalledTimes(1));
-    expect(onAddPayment).toHaveBeenCalledWith(6000, 'card');
+    expect(onAddPayment).toHaveBeenCalledWith(6000, 'card', expect.any(String));
   });
 
   it('after save, row shows the submitted amount (not blank)', async () => {
@@ -146,7 +146,7 @@ describe('RecordPaymentsTable — new-row save + preserve values', () => {
     fireEvent.keyDown(amountInput, { key: 'Enter' });
 
     await waitFor(() => expect(onAddPayment).toHaveBeenCalledTimes(1));
-    expect(onAddPayment).toHaveBeenCalledWith(3000, 'cash');
+    expect(onAddPayment).toHaveBeenCalledWith(3000, 'cash', expect.any(String));
   });
 });
 
@@ -224,5 +224,70 @@ describe('RecordPaymentsTable — amount > 0 guard', () => {
     // Guard should fire
     expect(mockShowToast).toHaveBeenCalledWith('Сумма должна быть больше 0', 'error');
     expect(onPatchPayment).not.toHaveBeenCalled();
+  });
+});
+
+// ─── Editable payment date tests ──────────────────────────────────────────────
+
+describe('RecordPaymentsTable — editable payment date on new rows', () => {
+  it('new row renders datetime-local input prefilled with ~now', () => {
+    renderPaymentsTable({ defaultAmount: 0 });
+
+    // Click "+ Добавить" to add a new row
+    fireEvent.click(screen.getByTestId('btn-add-payment'));
+
+    // Should render a datetime-local input with testid "add-payment-date"
+    const dateInput = screen.getByTestId('add-payment-date') as HTMLInputElement;
+    expect(dateInput).toBeTruthy();
+    expect(dateInput.type).toBe('datetime-local');
+
+    // The value should be a valid datetime-local string close to now
+    const value = dateInput.value;
+    expect(value).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/);
+
+    // Should be within 2 minutes of current local time
+    const inputTime = new Date(value).getTime();
+    const now = Date.now();
+    expect(Math.abs(inputTime - now)).toBeLessThan(120_000);
+  });
+
+  it('saved row shows read-only date, NOT a datetime-local input', () => {
+    const existingPayment: PaymentResponse = {
+      id: 'p_existing',
+      record_id: 'r1',
+      amount: 5000,
+      method: 'card',
+      created_at: '2026-07-01T10:00:00',
+      updated_at: '2026-07-01T10:00:00',
+      is_active: true,
+    };
+
+    renderPaymentsTable({ payments: [existingPayment] });
+
+    // Should NOT have a datetime-local input
+    expect(screen.queryByTestId('add-payment-date')).toBeNull();
+
+    // Should display the formatted date
+    const row = screen.getByTestId('payment-p_existing');
+    expect(row.textContent).toContain('01.07.2026');
+  });
+
+  it('editing date and saving calls onAddPayment with the chosen created_at', async () => {
+    const { onAddPayment } = renderPaymentsTable({ defaultAmount: 5000 });
+
+    fireEvent.click(screen.getByTestId('btn-add-payment'));
+
+    // Change the date
+    const dateInput = screen.getByTestId('add-payment-date') as HTMLInputElement;
+    fireEvent.change(dateInput, { target: { value: '2026-07-05T15:30' } });
+
+    // Press Enter on the amount input to save
+    const amountInput = screen.getByTestId('add-payment-amount');
+    fireEvent.keyDown(amountInput, { key: 'Enter' });
+
+    await waitFor(() => expect(onAddPayment).toHaveBeenCalledTimes(1));
+
+    // Should be called with amount, method, and the chosen date (with seconds appended for ISO 8601)
+    expect(onAddPayment).toHaveBeenCalledWith(5000, 'card', '2026-07-05T15:30:00');
   });
 });

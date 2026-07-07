@@ -21,6 +21,7 @@ export interface PaymentRow {
 interface PaymentFormState {
   amount: number;
   method: string;
+  created_at: string;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -31,6 +32,30 @@ function transientId(): string {
     return crypto.randomUUID();
   }
   return `tid-${++_idCounter}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/**
+ * Format a Date as a LOCAL datetime-local string: "YYYY-MM-DDTHH:mm".
+ * Uses local date components (not UTC) so the value matches what the user
+ * sees in their timezone when used with <input type="datetime-local">.
+ */
+function formatLocalDatetime(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  const h = String(date.getHours()).padStart(2, '0');
+  const min = String(date.getMinutes()).padStart(2, '0');
+  return `${y}-${m}-${d}T${h}:${min}`;
+}
+
+/**
+ * Convert a datetime-local value ("YYYY-MM-DDTHH:mm", local time) to an
+ * ISO 8601 string with seconds ("YYYY-MM-DDTHH:mm:00") suitable for the
+ * backend's Pydantic datetime parser. No timezone conversion — the local
+ * time is preserved as-is (naive datetime).
+ */
+function localDatetimeToISO(localDT: string): string {
+  return localDT.length === 16 ? `${localDT}:00` : localDT;
 }
 
 function paymentResponseToRow(payment: PaymentResponse): PaymentRow {
@@ -49,7 +74,7 @@ function makeEmptyPaymentRow(defaultAmount: number = 0): PaymentRow {
     clientId: transientId(),
     amount: defaultAmount > 0 ? defaultAmount : 0,
     method: 'card',
-    created_at: '',
+    created_at: formatLocalDatetime(new Date()),
   };
 }
 
@@ -57,6 +82,7 @@ function pickFormData(row: PaymentRow): PaymentFormState {
   return {
     amount: row.amount,
     method: row.method,
+    created_at: row.created_at,
   };
 }
 
@@ -87,7 +113,7 @@ export interface RecordPaymentsTableProps {
   /** Pre-fill amount when opening the add form (e.g. "К оплате" from RecordSummary) */
   defaultAmount?: number;
   /** POST new payment. Returns saved PaymentResponse. */
-  onAddPayment: (amount: number, method: string) => Promise<PaymentResponse>;
+  onAddPayment: (amount: number, method: string, date: string) => Promise<PaymentResponse>;
   /** PATCH existing payment. Returns updated PaymentResponse. */
   onPatchPayment: (paymentId: string, data: { amount?: number; method?: string }) => Promise<PaymentResponse>;
   /** DELETE existing payment. */
@@ -153,9 +179,11 @@ export function RecordPaymentsTable({
     if (data.amount <= 0) {
       showToast('Сумма должна быть больше 0', 'error');
       // Return a placeholder row with id=null — the row stays editable so the user can fix the amount.
-      return { id: null, clientId: '', amount: data.amount, method: data.method, created_at: '' };
+      return { id: null, clientId: '', amount: data.amount, method: data.method, created_at: data.created_at };
     }
-    const saved = await onAddPayment(data.amount, data.method);
+    // Convert datetime-local value (local "YYYY-MM-DDTHH:mm") to ISO 8601 with seconds
+    const isoDate = localDatetimeToISO(data.created_at);
+    const saved = await onAddPayment(data.amount, data.method, isoDate);
     const row = paymentResponseToRow(saved);
     // Preserve submitted values — the server response may have a different created_at.
     return { ...row, amount: data.amount, method: data.method };
@@ -218,7 +246,16 @@ export function RecordPaymentsTable({
             isReadOnly={isReadOnly}
             renderCell={({ row: r, formState, isNew, handleChange }) => {
               return {
-                date: (
+                date: isNew ? (
+                  <input
+                    type="datetime-local"
+                    value={formState.created_at}
+                    onChange={(e) => handleChange('created_at', e.target.value)}
+                    className="w-full rounded border px-2 py-0.5 text-sm bg-white whitespace-nowrap"
+                    style={{ borderColor: 'var(--line)' }}
+                    data-testid="add-payment-date"
+                  />
+                ) : (
                   <span className="whitespace-nowrap text-ink-mid">
                     {r.created_at
                       ? new Date(r.created_at).toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'short' })

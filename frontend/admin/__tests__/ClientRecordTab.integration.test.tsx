@@ -206,6 +206,7 @@ describe('ClientRecordTab — integration with shared atoms', () => {
         record_id: 'r1',
         amount: 2000,
         method: 'card',
+        created_at: expect.any(String),
       });
     });
   });

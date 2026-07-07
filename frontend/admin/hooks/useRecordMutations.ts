@@ -190,8 +190,13 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
   );
 
   const addPayment = useCallback(
-    async (amount: number, method: string) => {
-      const payment = await createPayment({ record_id: recordId, amount, method: method as 'cash' | 'card' | 'transfer' });
+    async (amount: number, method: string, date?: string) => {
+      const payment = await createPayment({
+        record_id: recordId,
+        amount,
+        method: method as 'cash' | 'card' | 'transfer',
+        ...(date ? { created_at: date } : {}),
+      });
       invalidateAll();
       return payment;
     },

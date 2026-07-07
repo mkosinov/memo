@@ -346,6 +346,8 @@ export const PaymentCreateSchema = z.object({
   record_id: z.string(),
   amount: z.number(),
   method: z.enum(['cash', 'card', 'transfer']).optional(),
+  /** Optional client-supplied timestamp (ISO 8601). If omitted, backend defaults to now. */
+  created_at: z.string().optional(),
 });
 
 export type PaymentCreate = z.infer<typeof PaymentCreateSchema>;

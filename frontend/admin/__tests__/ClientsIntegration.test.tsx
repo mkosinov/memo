@@ -433,6 +433,7 @@ describe('ClientCardModal ↔ ClientRecordTab integration (real components)', ()
         record_id: 'rec1',
         amount: 2500,
         method: 'card',
+        created_at: expect.any(String),
       });
     });
   });

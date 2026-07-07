@@ -3,6 +3,8 @@
 import { useState, useCallback, useEffect } from 'react';
 import type { VisitResponse, TariffResponse, VisitPatch } from '@memo/api-client';
 import type { VisitStatus } from '@memo/domain';
+import { useUI } from '@/contexts/UIContext';
+import { parseApiError } from '@/app/lib/api/parseApiError';
 import { StatusPicker } from '@/app/components/shared/StatusPicker';
 import { StatusBadge } from '@/app/components/shared/StatusBadge';
 import { safeStatus } from '@/app/lib/status-utils';
@@ -213,6 +215,7 @@ export function RecordVisitsTable({
   onChangeVisitor,
   onAnonymVisitsChange,
 }: RecordVisitsTableProps) {
+  const { showToast } = useUI();
   const [rows, setRows] = useState<VisitRow[]>(() =>
     visits.map((v) => visitResponseToRow(v, visitorsMap)),
   );
@@ -266,19 +269,24 @@ export function RecordVisitsTable({
     setRows((prev) => prev.filter((r) => r.id !== id));
   }, [onDeleteVisit]);
 
-  /** POST a new visit (2-step: createVisitor → createVisit). Returns saved row. */
-  const handleAdd = useCallback(async (data: VisitFormState): Promise<VisitRow> => {
-    const saved = await onAddVisit({
-      client_id: clientId,
-      name: data.name,
-      age: data.age ?? undefined,
-      tariff_id: data.tariff_id,
-      price: data.price,
-    });
-    const row = visitResponseToRow(saved, visitorsMap);
-    // Preserve submitted values — visitorsMap may be stale (new visitor not yet loaded).
-    return { ...row, name: data.name, age: data.age };
-  }, [onAddVisit, clientId, visitorsMap]);
+  /** POST a new visit (2-step: createVisitor → createVisit). Returns saved row, or undefined on error. */
+  const handleAdd = useCallback(async (data: VisitFormState): Promise<VisitRow | undefined> => {
+    try {
+      const saved = await onAddVisit({
+        client_id: clientId,
+        name: data.name,
+        age: data.age ?? undefined,
+        tariff_id: data.tariff_id,
+        price: data.price,
+      });
+      const row = visitResponseToRow(saved, visitorsMap);
+      // Preserve submitted values — visitorsMap may be stale (new visitor not yet loaded).
+      return { ...row, name: data.name, age: data.age };
+    } catch (err) {
+      showToast(parseApiError(err).message, 'error');
+      return undefined;
+    }
+  }, [onAddVisit, clientId, visitorsMap, showToast]);
 
   /** PATCH an existing visit. Returns updated row. */
   const handleUpdate = useCallback(async (id: string, data: VisitFormState): Promise<VisitRow> => {

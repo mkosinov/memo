@@ -1,6 +1,6 @@
 """ORM models package — re-exports all entities and join tables."""
 
-from src.models.abstract import AbstractModel
+from src.models.abstract import AbstractModel, AbstractModelSoftDelete
 from src.models.activity import Activity
 from src.models.client import Client
 from src.models.enums import Channel, RecordStatus, UserRole
@@ -23,7 +23,7 @@ from src.models.visit import Visit
 from src.models.visitor import Visitor
 
 __all__ = [
-    "AbstractModel",
+    "AbstractModel", "AbstractModelSoftDelete",
     "Activity", "Client", "Location", "Master", "Material", "Payment", "Photo",
     "Record", "Service", "Tag", "Tariff", "User", "UserSettings", "Visit", "Visitor",
     "Channel", "RecordStatus", "UserRole",

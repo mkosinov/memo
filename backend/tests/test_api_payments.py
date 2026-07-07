@@ -102,7 +102,6 @@ class TestPaymentsCrud:
         assert "id" in body
         assert "created_at" in body
         assert "updated_at" in body
-        assert body["is_active"] is True
 
     def test_list_payments_includes_created(self, api_client) -> None:
         """GET /api/payments returns a list containing the created payment."""
@@ -149,8 +148,8 @@ class TestPaymentsCrud:
         assert body["amount"] == 5000
         assert body["method"] == "cash"
 
-    def test_delete_payment_soft_deletes(self, api_client) -> None:
-        """DELETE /api/payments/{id} soft-deletes and list excludes it."""
+    def test_delete_payment_hard_deletes(self, api_client) -> None:
+        """DELETE /api/payments/{id} hard-deletes and GET returns 404."""
         record_id = _create_record(api_client)
         payload = {**PAYMENT_PAYLOAD, "record_id": record_id}
         create_resp = api_client.post("/api/v1/payments", json=payload)
@@ -160,10 +159,9 @@ class TestPaymentsCrud:
         response = api_client.delete(f"/api/v1/payments/{payment_id}")
         assert response.status_code == 204
 
-        # GET by id should still return it (soft delete)
+        # GET by id should return 404 (hard delete — row is gone)
         response = api_client.get(f"/api/v1/payments/{payment_id}")
-        assert response.status_code == 200
-        assert response.json()["is_active"] is False
+        assert response.status_code == 404
 
         # List should NOT include the deleted payment
         response = api_client.get("/api/v1/payments")

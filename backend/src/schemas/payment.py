@@ -50,4 +50,3 @@ class PaymentResponse(PaymentBase):
     id: str
     created_at: datetime
     updated_at: datetime
-    is_active: bool

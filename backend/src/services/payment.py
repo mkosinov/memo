@@ -5,7 +5,7 @@ from functools import lru_cache
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.repositories.generic import get_generic_repository
+from src.repositories.generic import get_base_repository
 from src.models.payment import Payment
 from src.schemas.payment import PaymentCreate, PaymentResponse, PaymentUpdate
 from src.services.generic import GenericService
@@ -40,4 +40,4 @@ class PaymentService(GenericService[PaymentCreate, PaymentUpdate, PaymentRespons
 
 @lru_cache
 def get_payment_service() -> PaymentService:
-    return PaymentService(get_generic_repository(), Payment, PaymentResponse)
+    return PaymentService(get_base_repository(), Payment, PaymentResponse)

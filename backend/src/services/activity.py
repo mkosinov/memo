@@ -9,7 +9,7 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.repositories.generic import GenericRepository, get_generic_repository
+from src.repositories.generic import SoftDeleteRepository, get_soft_delete_repository
 from src.models.activity import Activity
 from src.models.record import Record
 from src.schemas.activity import ActivityCreate, ActivityResponse, ActivityUpdate
@@ -28,7 +28,7 @@ class ActivityService(GenericService[ActivityCreate, ActivityUpdate, ActivityRes
     ACTIVE_RECORD_STATUSES = ("waiting", "visited")
 
     def __init__(
-        self, repository: GenericRepository, model: type[Activity]
+        self, repository: SoftDeleteRepository, model: type[Activity]
     ) -> None:
         super().__init__(repository, model, response_schema=ActivityResponse)
 
@@ -93,4 +93,4 @@ class ActivityService(GenericService[ActivityCreate, ActivityUpdate, ActivityRes
 @lru_cache
 def get_activity_service() -> ActivityService:
     """Returns a singleton ActivityService."""
-    return ActivityService(get_generic_repository(), Activity)
+    return ActivityService(get_soft_delete_repository(), Activity)

@@ -126,7 +126,6 @@ class TestPaymentFlow:
         assert payment["record_id"] == record["id"]
         assert payment["amount"] == 1500
         assert payment["method"] == "cash"
-        assert payment["is_active"] is True
 
         # Verify payment accessible by ID
         get_resp = api_client.get(f"/api/v1/payments/{payment['id']}")
@@ -152,7 +151,7 @@ class TestPaymentFlow:
         # Verify total via SQL
         result = query_db(
             f"SELECT COALESCE(SUM(amount), 0) as total "
-            f"FROM payments WHERE record_id='{record['id']}' AND is_active=1"
+            f"FROM payments WHERE record_id='{record['id']}'"
         )
         assert result[0]["total"] == 3500
 
@@ -196,28 +195,28 @@ class TestDeleteCascade:
         ids = [r["id"] for r in list_resp.json()]
         assert record_id not in ids
 
-    def test_delete_record_soft_deletes_visits_in_db(self, api_client, create_record) -> None:
-        """Soft-delete record → visits are cascade-soft-deleted at DB level."""
+    def test_delete_record_hard_deletes_visits_in_db(self, api_client, create_record) -> None:
+        """Soft-delete record → visits are hard-deleted at DB level."""
         record = create_record()
         record_id = record["id"]
 
         # Verify visits exist
         visits_before = query_db(
-            f"SELECT * FROM visits WHERE record_id='{record_id}' AND is_active=1"
+            f"SELECT * FROM visits WHERE record_id='{record_id}'"
         )
         assert len(visits_before) > 0
 
         # Delete record
         api_client.delete(f"/api/v1/records/{record_id}")
 
-        # Visits are cascaded — they are soft-deleted
+        # Visits are hard-deleted — rows are gone
         visits_after = query_db(
-            f"SELECT * FROM visits WHERE record_id='{record_id}' AND is_active=1"
+            f"SELECT * FROM visits WHERE record_id='{record_id}'"
         )
         assert len(visits_after) == 0
 
     def test_delete_record_cascades_to_visits_and_payments(self, api_client, create_record) -> None:
-        """Soft-delete record → visits AND payments should also be soft-deleted."""
+        """Soft-delete record → visits AND payments should also be hard-deleted."""
         record = create_record()
         record_id = record["id"]
 
@@ -229,15 +228,15 @@ class TestDeleteCascade:
         # Delete record
         api_client.delete(f"/api/v1/records/{record_id}")
 
-        # Visits should be soft-deleted
+        # Visits should be hard-deleted (rows gone)
         visits = query_db(
-            f"SELECT * FROM visits WHERE record_id='{record_id}' AND is_active=1"
+            f"SELECT * FROM visits WHERE record_id='{record_id}'"
         )
         assert len(visits) == 0
 
-        # Payments should be soft-deleted
+        # Payments should be hard-deleted (rows gone)
         payments = query_db(
-            f"SELECT * FROM payments WHERE record_id='{record_id}' AND is_active=1"
+            f"SELECT * FROM payments WHERE record_id='{record_id}'"
         )
         assert len(payments) == 0
 

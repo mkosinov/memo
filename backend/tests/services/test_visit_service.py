@@ -93,16 +93,18 @@ async def test_visit_service_patch_partial(db_session, sample_visit):
 
 
 @pytest.mark.asyncio
-async def test_visit_service_delete_soft_deletes_and_cascades(db_session, sample_visit):
-    """delete soft-deletes (is_active=False) and cascades to record."""
+async def test_visit_service_delete_hard_deletes_and_cascades(db_session, sample_visit):
+    """delete hard-deletes the row and cascades to record."""
     from src.services.visit import VisitService
 
     service = VisitService()
     result = await service.delete(db_session=db_session, visit_id=sample_visit.id)
     assert result is True
-    # Verify is_active=False
-    await db_session.refresh(sample_visit)
-    assert sample_visit.is_active is False
+    # Verify row is absent from DB (hard delete)
+    from sqlalchemy import select
+    from src.models.visit import Visit
+    rows = await db_session.execute(select(Visit).where(Visit.id == sample_visit.id))
+    assert rows.scalar_one_or_none() is None
 
 
 @pytest.mark.asyncio

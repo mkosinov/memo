@@ -47,7 +47,6 @@ def _map_visit(visit) -> VisitResponse:
         status=visit.status,
         created_at=_dt_to_str(visit.created_at),
         updated_at=_dt_to_str(visit.updated_at),
-        is_active=visit.is_active,
     )
 
 
@@ -149,7 +148,7 @@ async def delete_visit(
     service: _ServiceDep,
     session: SessionDep,
 ) -> None:
-    """Soft-delete a visit (is_active=False), cascade status + seats to parent record."""
+    """Hard-delete a visit, cascade status + seats to parent record."""
     deleted = await service.delete(db_session=session, visit_id=visit_id)
     if not deleted:
         raise HTTPException(

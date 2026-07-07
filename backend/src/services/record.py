@@ -3,11 +3,11 @@
 from datetime import UTC, datetime
 from functools import lru_cache
 
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from src.repositories.generic import GenericRepository, get_generic_repository
+from src.repositories.generic import SoftDeleteRepository, get_soft_delete_repository
 from src.domain.record_visits import (
     recompute_record_seats,
     recompute_record_status,
@@ -26,7 +26,7 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
     """Record service with nested visit management."""
 
     def __init__(
-        self, repository: GenericRepository, model: type[Record]
+        self, repository: SoftDeleteRepository, model: type[Record]
     ) -> None:
         super().__init__(repository, model, response_schema=RecordResponse)
 
@@ -59,23 +59,19 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
         return result.scalar_one_or_none()
 
     async def delete(self, db_session: AsyncSession, id: str) -> bool:
-        """Soft-delete a record and cascade-soft-delete its visits and payments."""
+        """Soft-delete a record and hard-delete its visits and payments."""
         record = await self._repository.get(db_session, Record, id)
         if not record or not record.is_active:
             return False
 
-        # Cascade: soft-delete all related visits
+        # Cascade: hard-delete all related visits
         await db_session.execute(
-            update(Visit)
-            .where(Visit.record_id == id, Visit.is_active.is_(True))  # type: ignore[union-attr]
-            .values(is_active=False)
+            delete(Visit).where(Visit.record_id == id)
         )
 
-        # Cascade: soft-delete all related payments
+        # Cascade: hard-delete all related payments
         await db_session.execute(
-            update(Payment)
-            .where(Payment.record_id == id, Payment.is_active.is_(True))  # type: ignore[union-attr]
-            .values(is_active=False)
+            delete(Payment).where(Payment.record_id == id)
         )
 
         # Soft-delete the record itself
@@ -209,8 +205,8 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
         record.seats = len(data.visits) + (data.anonym_visits or 0)
         record.updated_at = datetime.now(UTC)
 
-        for existing_visit in record.visits:
-            existing_visit.is_active = False
+        for existing_visit in list(record.visits):
+            await db_session.delete(existing_visit)
 
         for visit_item in data.visits:
             visit = Visit(
@@ -254,8 +250,8 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
         if "anonym_visits" in update_data:
             record.anonym_visits = update_data["anonym_visits"] or 0
         if "visits" in update_data:
-            for existing_visit in record.visits:
-                existing_visit.is_active = False
+            for existing_visit in list(record.visits):
+                await db_session.delete(existing_visit)
             for visit_item in update_data["visits"]:
                 visit = Visit(
                     record_id=record.id,
@@ -281,4 +277,4 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
 @lru_cache
 def get_record_service() -> RecordService:
     """Returns a singleton RecordService."""
-    return RecordService(get_generic_repository(), Record)
+    return RecordService(get_soft_delete_repository(), Record)

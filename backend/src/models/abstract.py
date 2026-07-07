@@ -1,4 +1,4 @@
-"""Abstract base model with UUID PK, timestamps, and soft-delete flag."""
+"""Abstract base models: timestamps + optional soft-delete."""
 
 import uuid
 from datetime import datetime
@@ -10,6 +10,7 @@ from src.db.base import Base
 
 
 class AbstractModel(Base):
+    """Base model with UUID PK and timestamps. No soft-delete flag."""
     __abstract__ = True
 
     id: Mapped[str] = mapped_column(
@@ -22,4 +23,10 @@ class AbstractModel(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow,
     )
+
+
+class AbstractModelSoftDelete(AbstractModel):
+    """Extends AbstractModel with a soft-delete flag (is_active)."""
+    __abstract__ = True
+
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)

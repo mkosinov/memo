@@ -84,7 +84,7 @@ class TestModelImports:
     def test_all_exports(self):
         from src.models import __all__
         expected = [
-            "AbstractModel",
+            "AbstractModel", "AbstractModelSoftDelete",
             "Master", "User", "Location", "Service", "Tariff", "Tag",
             "Activity", "Client", "Visitor", "Photo", "Record", "Visit", "Payment",
             "Material", "UserSettings",

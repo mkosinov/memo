@@ -8,7 +8,7 @@ async def test_recompute_record_seats_counts_active_visits(db_session, sample_re
     from src.domain.record_visits import recompute_record_seats
 
     record = await recompute_record_seats(db_session, sample_record.id)
-    assert record.seats == len([v for v in sample_record.visits if v.is_active]) + sample_record.anonym_visits
+    assert record.seats == len(sample_record.visits) + sample_record.anonym_visits
 
 
 @pytest.mark.asyncio
@@ -20,7 +20,7 @@ async def test_recompute_record_status_derives_from_visits(db_session, sample_re
     from src.domain.visit_status import compute_record_status, VisitItem
     expected = compute_record_status([
         VisitItem(id=v.id, status=v.status)
-        for v in sample_record_with_visits.visits if v.is_active
+        for v in sample_record_with_visits.visits
     ]).value
     assert record.status == expected
 

@@ -8,13 +8,13 @@ from typing import TYPE_CHECKING
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from src.models.abstract import AbstractModel
+from src.models.abstract import AbstractModelSoftDelete
 
 if TYPE_CHECKING:
     from src.models.tag import Tag
 
 
-class Activity(AbstractModel):
+class Activity(AbstractModelSoftDelete):
     __tablename__ = "activities"
 
     master_id: Mapped[str] = mapped_column(String(36), ForeignKey("masters.id"))

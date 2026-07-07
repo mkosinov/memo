@@ -8,7 +8,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from src.repositories.generic import GenericRepository, get_generic_repository
+from src.repositories.generic import SoftDeleteRepository, get_soft_delete_repository
 from src.models.service import Service
 from src.models.tag import service_tags
 from src.models.tariff import Tariff
@@ -20,7 +20,7 @@ class ServiceService(GenericService[ServiceCreate, ServiceUpdate, ServiceRespons
     """Service service with eager-loaded tariffs/tags and nested create/update."""
 
     def __init__(
-        self, repository: GenericRepository, model: type[Service]
+        self, repository: SoftDeleteRepository, model: type[Service]
     ) -> None:
         super().__init__(repository, model, response_schema=ServiceResponse)
 
@@ -116,4 +116,4 @@ class ServiceService(GenericService[ServiceCreate, ServiceUpdate, ServiceRespons
 @lru_cache
 def get_service_service() -> ServiceService:
     """Returns a singleton ServiceService."""
-    return ServiceService(get_generic_repository(), Service)
+    return ServiceService(get_soft_delete_repository(), Service)

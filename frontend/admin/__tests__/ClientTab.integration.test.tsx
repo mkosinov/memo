@@ -249,6 +249,25 @@ describe('ClientTab — integration with shared atoms', () => {
 
   // ─── Status change wiring ─────────────────────────────────────────
 
+  // ─── Tariff dropdown ────────────────────────────────────────────────
+
+  it('tariff dropdown shows service tariffs when prop is populated', async () => {
+    const tariffs = [
+      { id: 'tariff-1', service_id: 's1', title: 'Взрослый', price: 2500, description: null },
+      { id: 'tariff-2', service_id: 's1', title: 'Детский', price: 1500, description: null },
+    ];
+    render(<ClientTab {...defaultProps} serviceTariffs={tariffs} />);
+    // Click "+ Добавить" to add a new visit row
+    fireEvent.click(screen.getByTestId('btn-add-visitor'));
+    // The tariff <select> for the new row should have tariff options
+    const select = screen.getByTestId('add-visitor-tariff');
+    const options = within(select).getAllByRole('option');
+    // 1 placeholder ("— тариф —") + 2 tariff options = 3
+    expect(options).toHaveLength(3);
+    expect(options[1]).toHaveTextContent('Взрослый');
+    expect(options[2]).toHaveTextContent('Детский');
+  });
+
   it('status change on RecordVisitRow calls patchVisit', async () => {
     vi.mocked(apiPatchVisit).mockResolvedValue({ id: 'v1', status: 'visited', custom_price: null, created_at: '', updated_at: '', record_id: 'r1', price: 0 } as any);
     render(<ClientTab {...defaultProps} />);

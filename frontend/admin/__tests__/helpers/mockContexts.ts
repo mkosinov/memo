@@ -25,6 +25,7 @@ export function createMockScheduleContext(
   return {
     masters: mockMasters,
     services: mockServices,
+    servicesRaw: [],
     locations: mockLocations,
     activities: [],
     scheduleIndex: {

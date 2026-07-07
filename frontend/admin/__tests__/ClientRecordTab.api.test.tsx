@@ -2,6 +2,23 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import React from 'react';
 
+// ─── Mock UIContext ────────────────────────────────────────────────────────
+vi.mock('@/contexts/UIContext', () => ({
+  useUI: () => ({
+    deleteMode: false,
+    toggleDeleteMode: vi.fn(),
+    toasts: [],
+    showToast: vi.fn(),
+    hideToast: vi.fn(),
+    sidebarCollapsed: false,
+    toggleSidebar: vi.fn(),
+    rightPanelCollapsed: true,
+    toggleRightPanel: vi.fn(),
+    theme: 'light' as const,
+    toggleTheme: vi.fn(),
+  }),
+}));
+
 // ─── Mock api-client ───────────────────────────────────────────────────────
 
 vi.mock('@memo/api-client', () => ({

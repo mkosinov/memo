@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useEffect } from 'react';
 import type { PaymentResponse } from '@memo/api-client';
+import { useUI } from '@/contexts/UIContext';
 import { RecordTable, type Column } from '@/app/components/shared/record/RecordTable';
 import { InlineEditCell } from '../InlineEditCell';
 import { InlineEditRow } from '../InlineEditRow';
@@ -103,6 +104,8 @@ export function RecordPaymentsTable({
   onPatchPayment,
   onDeletePayment,
 }: RecordPaymentsTableProps) {
+  const { showToast } = useUI();
+
   const [rows, setRows] = useState<PaymentRow[]>(() =>
     payments.map(paymentResponseToRow),
   );
@@ -147,11 +150,16 @@ export function RecordPaymentsTable({
 
   /** POST a new payment. Returns saved row. */
   const handleAdd = useCallback(async (data: PaymentFormState): Promise<PaymentRow> => {
+    if (data.amount <= 0) {
+      showToast('Сумма должна быть больше 0', 'error');
+      // Return a placeholder row with id=null — the row stays editable so the user can fix the amount.
+      return { id: null, clientId: '', amount: data.amount, method: data.method, created_at: '' };
+    }
     const saved = await onAddPayment(data.amount, data.method);
     const row = paymentResponseToRow(saved);
     // Preserve submitted values — the server response may have a different created_at.
     return { ...row, amount: data.amount, method: data.method };
-  }, [onAddPayment]);
+  }, [onAddPayment, showToast]);
 
   /** PATCH an existing payment. Returns updated row. */
   const handleUpdate = useCallback(async (id: string, data: PaymentFormState): Promise<PaymentRow> => {
@@ -257,6 +265,10 @@ export function RecordPaymentsTable({
                         handleChange('amount', amount);
                         // Save is triggered by row-level handleSave (Enter/blur)
                       } else {
+                        if (amount <= 0) {
+                          showToast('Сумма должна быть больше 0', 'error');
+                          return false; // Reject — InlineEditCell reverts to previous value
+                        }
                         onPatchPayment(r.id!, { amount }).then((updated) => {
                           replaceRowById(r.id!, paymentResponseToRow(updated));
                         });
@@ -265,6 +277,7 @@ export function RecordPaymentsTable({
                     className="text-right"
                     placeholder="0"
                     autoFocus={isNew}
+                    min={1}
                     data-testid={isNew ? 'add-payment-amount' : undefined}
                   />
                 ),

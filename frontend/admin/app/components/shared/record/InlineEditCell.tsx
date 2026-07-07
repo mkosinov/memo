@@ -6,16 +6,17 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 
 export interface InlineEditCellProps {
   value: string;
-  onCommit: (value: string) => void;
+  onCommit: (value: string) => void | false;
   className?: string;
   type?: string;
   title?: string;
   placeholder?: string;
   autoFocus?: boolean;
+  min?: number;
   'data-testid'?: string;
 }
 
-export function InlineEditCell({ value, onCommit, className = '', type = 'text', title = '', placeholder = '', autoFocus = false, 'data-testid': dataTestId }: InlineEditCellProps) {
+export function InlineEditCell({ value, onCommit, className = '', type = 'text', title = '', placeholder = '', autoFocus = false, min, 'data-testid': dataTestId }: InlineEditCellProps) {
   const [draft, setDraft] = useState(value);
   const originalRef = useRef(value);
 
@@ -28,8 +29,13 @@ export function InlineEditCell({ value, onCommit, className = '', type = 'text',
 
   const commitIfChanged = useCallback(() => {
     if (draft !== originalRef.current) {
-      onCommit(draft);
-      originalRef.current = draft;
+      const result = onCommit(draft);
+      if (result === false) {
+        // Commit rejected — revert to original value
+        setDraft(originalRef.current);
+      } else {
+        originalRef.current = draft;
+      }
     }
   }, [draft, onCommit]);
 
@@ -52,6 +58,7 @@ export function InlineEditCell({ value, onCommit, className = '', type = 'text',
       style={{ borderColor: 'var(--line)' }}
       title={title}
       autoFocus={autoFocus}
+      min={min}
       data-testid={dataTestId}
     />
   );

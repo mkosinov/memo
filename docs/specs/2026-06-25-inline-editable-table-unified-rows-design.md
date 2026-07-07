@@ -523,8 +523,8 @@ Three more bugs found in live testing, plus an architectural decision on delete 
 
 ### New user scenarios (extend the list)
 
-15. **No F5 after add.** Add a visitor → switch to "Настройки" tab and back → the visitor is still there (no reload). Same for payments.
-16. **No F5 after delete.** Delete a visitor → switch tab and back → the visitor is still gone (does not reappear). Same for payments.
+15. **No F5 after add.** Add a visitor → close the modal and open it again (click the same activity slot) → the visitor is still there (no reload). Same for payments.
+16. **No F5 after delete.** Delete a visitor → close the modal and open it again → the visitor is still gone (does not reappear). Same for payments.
 17. **Tariff dropdown populated in modal.** Open a record in the ActivityDetailsModal → visitors → "+ Добавить" → the Tariff dropdown lists the service's tariffs; selecting one fills the price.
 18. **Hard delete removes from stats.** Delete a payment → the client's `total_paid` no longer includes it (backend, no F5-dependent). The payment is physically gone (GET by id → 404).
 19. **Undo delete.** Click × on a saved payment → row disappears + toast "Удалено. Отменить" → click "Отменить" within 5s → the payment reappears, and NO delete was sent to the server (verify via network). If not undone within 5s → the payment is hard-deleted.

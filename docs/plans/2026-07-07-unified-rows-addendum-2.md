@@ -16,8 +16,8 @@
 
 How this feature behaves for the user, mapped to spec acceptance criteria:
 
-- **No F5 after add (scenario 15)** → After adding a visitor or payment, switching to another tab in the modal and back shows the new row immediately — no page reload needed.
-- **No F5 after delete (scenario 16)** → After deleting a visitor or payment, switching tabs and back shows the row still gone — it does not reappear.
+- **No F5 after add (scenario 15)** → After adding a visitor or payment, closing the modal and reopening it (clicking the same slot) shows the new row immediately — no page reload needed.
+- **No F5 after delete (scenario 16)** → After deleting a visitor or payment, closing the modal and reopening it shows the row still gone — it does not reappear.
 - **Tariff dropdown populated (scenario 17)** → Opening a record's modal → visitors → "+ Добавить" shows the service's actual tariffs in the dropdown; selecting one fills the price.
 - **Hard delete removes from stats (scenario 18)** → Deleting a payment makes the client's `total_paid` decrease immediately; the payment is physically gone (GET by id → 404).
 - **Undo delete (scenario 19)** → Clicking × on a saved payment/visit removes the row and shows "Удалено. Отменить" toast for ~5s; clicking "Отменить" restores the row with no server call; letting the toast expire sends the hard DELETE.
@@ -1019,23 +1019,23 @@ After Bug C (Task 3) added optimistic `setQueryData`, clicking × on a saved row
     test('scenario 15: no F5 after add visitor', async ({ page, request }) => {
       // Setup: create activity + record via API
       // Open modal → ClientTab → add a visitor (blur to save)
-      // Switch to "Настройки" tab → switch back to "Клиент" tab
-      // Assert: visitor row is still visible (no stale cache)
+      // Close the modal (click ✕ or click outside) → reopen same activity slot
+      // Assert: visitor row is still visible (cache served fresh data, no stale read)
     });
 
     test('scenario 15b: no F5 after add payment', async ({ page, request }) => {
-      // Same pattern for payments
+      // Same pattern for payments — add payment, close+reopen modal, still there
     });
 
     test('scenario 16: no F5 after delete visitor', async ({ page, request }) => {
       // Setup: create activity + record with a visitor
       // Open modal → delete visitor (× button)
-      // Switch to "Настройки" → back to "Клиент"
-      // Assert: visitor is still gone (does not reappear)
+      // Close the modal → reopen it
+      // Assert: visitor is still gone (does not reappear from stale cache)
     });
 
     test('scenario 16b: no F5 after delete payment', async ({ page, request }) => {
-      // Same for payments
+      // Same for payments — delete payment, close+reopen modal, still gone
     });
 
     test('scenario 17: tariff dropdown populated in modal', async ({ page, request }) => {

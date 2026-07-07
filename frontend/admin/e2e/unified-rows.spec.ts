@@ -391,4 +391,178 @@ test.describe('Unified inline-editable rows', () => {
       await expect(page.locator('[data-testid="payment-new"]')).toHaveCount(2);
     });
   });
+
+  // ── Scenario 10: Save prefilled payment without editing ─────────────────
+
+  test('scenario 10: prefilled payment saves without editing amount', async ({ page }) => {
+    await openClientRecordTab(page);
+
+    // Click "+ Добавить" — amount is prefilled from "К оплате" (outstanding balance)
+    await page.locator('[data-testid="btn-add-payment"]').click();
+    const newRow = page.locator('[data-testid="payment-new"]');
+    await expect(newRow).toBeVisible();
+
+    // The amount input should have a prefilled value (from defaultAmount prop)
+    const amountInput = page.locator('[data-testid="add-payment-amount"]');
+    await expect(amountInput).toBeVisible();
+    const prefilledValue = await amountInput.inputValue();
+    // Prefilled value should be > 0 (from the record's outstanding balance)
+    expect(Number(prefilledValue)).toBeGreaterThan(0);
+
+    // Press Enter WITHOUT editing the amount
+    await amountInput.press('Enter');
+
+    // After save, the new-row input disappears (row gets an id)
+    await expect(amountInput).not.toBeVisible({ timeout: 5_000 });
+
+    // The TotalsRow should show the total (at least the prefilled amount)
+    const totalsRow = page.locator('[data-testid="payments-total"]');
+    await expect(totalsRow).toBeVisible();
+  });
+
+  // ── Scenario 11: Save anonymous visit ───────────────────────────────────
+
+  test('scenario 11: anonymous visit saves with blank name', async ({ page }) => {
+    await openClientRecordTab(page);
+
+    // Click "+ Добавить" to add a new visit row
+    await page.locator('[data-testid="btn-add-visitor"]').click();
+    const newRow = page.locator('[data-testid="visit-row-new"]');
+    await expect(newRow).toBeVisible();
+
+    // Leave name blank (anonymous visit), but pick a tariff
+    const tariffSelect = page.locator('[data-testid="add-visitor-tariff"]');
+    await expect(tariffSelect).toBeVisible();
+
+    // Select the first non-empty tariff option
+    const options = await tariffSelect.locator('option:not([value=""])').all();
+    if (options.length > 0) {
+      const firstValue = await options[0].getAttribute('value');
+      if (firstValue) {
+        await tariffSelect.selectOption(firstValue);
+      }
+    }
+
+    // Press Enter to save (name is blank → anonymous visit)
+    const nameInput = page.locator('[data-testid="add-visitor-name"]');
+    await nameInput.press('Enter');
+
+    // After save, the new-row input disappears (row gets an id)
+    await expect(nameInput).not.toBeVisible({ timeout: 5_000 });
+
+    // A saved visit row should appear (with a real id, not "new")
+    // The row should show "Аноним" placeholder for the blank name
+    const savedRows = page.locator('[data-testid^="visit-row-"]:not([data-testid="visit-row-new"])');
+    await expect(savedRows.first()).toBeVisible({ timeout: 5_000 });
+  });
+
+  // ── Scenario 12: Amount 0 → toast, no request ──────────────────────────
+
+  test('scenario 12: amount=0 shows error toast and no POST fires', async ({ page }) => {
+    // Track API requests
+    const postPayments: string[] = [];
+    page.on('request', (req) => {
+      if (req.method() === 'POST' && req.url().includes('/api/v1/payments')) {
+        postPayments.push(req.url());
+      }
+    });
+
+    await openClientRecordTab(page);
+
+    // Click "+ Добавить" to add a new payment row
+    await page.locator('[data-testid="btn-add-payment"]').click();
+    const newRow = page.locator('[data-testid="payment-new"]');
+    await expect(newRow).toBeVisible();
+
+    // Set amount to 0
+    const amountInput = page.locator('[data-testid="add-payment-amount"]');
+    await amountInput.fill('0');
+
+    // Snapshot API calls before attempting save
+    const callsBefore = postPayments.length;
+
+    // Press Enter to attempt save
+    await amountInput.press('Enter');
+
+    // Wait a bit for any potential request
+    await page.waitForTimeout(500);
+
+    // Error toast should appear
+    const toast = page.locator('[role="status"]');
+    await expect(toast.first()).toBeVisible({ timeout: 3_000 });
+    await expect(toast.first()).toContainText('Сумма должна быть больше 0');
+
+    // No POST /payments should have fired
+    const newCalls = postPayments.slice(callsBefore);
+    expect(newCalls).toHaveLength(0);
+
+    // Row should still be editable (new row still in DOM)
+    await expect(newRow).toBeVisible();
+  });
+
+  // ── Scenario 13: Editable payment date persists ─────────────────────────
+
+  test('scenario 13: editable payment date persists after save', async ({ page }) => {
+    await openClientRecordTab(page);
+
+    // Click "+ Добавить" to add a new payment row
+    await page.locator('[data-testid="btn-add-payment"]').click();
+    const newRow = page.locator('[data-testid="payment-new"]');
+    await expect(newRow).toBeVisible();
+
+    // The datetime-local input should be present and prefilled
+    const dateInput = page.locator('[data-testid="add-payment-date"]');
+    await expect(dateInput).toBeVisible();
+    const prefilledDate = await dateInput.inputValue();
+    expect(prefilledDate).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/);
+
+    // Set a specific date
+    const customDate = '2026-07-05T15:30';
+    await dateInput.fill(customDate);
+
+    // Fill amount (must be > 0)
+    const amountInput = page.locator('[data-testid="add-payment-amount"]');
+    await amountInput.fill('1500');
+
+    // Press Enter to save
+    await amountInput.press('Enter');
+
+    // After save, the new-row input disappears
+    await expect(dateInput).not.toBeVisible({ timeout: 5_000 });
+
+    // The saved row should display the chosen date (formatted)
+    // Look for a payment row that contains "05.07.2026" (Russian locale format)
+    const savedPaymentRow = page.locator('[data-testid^="payment-"]:not([data-testid="payment-new"])').filter({
+      hasText: '05.07.2026',
+    });
+    await expect(savedPaymentRow.first()).toBeVisible({ timeout: 5_000 });
+  });
+
+  // ── Scenario 14: Name stays visible after save ──────────────────────────
+
+  test('scenario 14: name stays visible immediately after save (no blank)', async ({ page }) => {
+    await openClientRecordTab(page);
+
+    // Click "+ Добавить" to add a new visit row
+    await page.locator('[data-testid="btn-add-visitor"]').click();
+    const newRow = page.locator('[data-testid="visit-row-new"]');
+    await expect(newRow).toBeVisible();
+
+    // Type a name
+    const nameInput = page.locator('[data-testid="add-visitor-name"]');
+    await nameInput.fill('Анна');
+
+    // Press Enter to save
+    await nameInput.press('Enter');
+
+    // After save, the new-row input disappears (row gets an id)
+    await expect(nameInput).not.toBeVisible({ timeout: 5_000 });
+
+    // The name "Анна" should be visible in the saved row immediately
+    // (no blank, no "Аноним" placeholder, no need to reload)
+    const savedRow = page.locator('[data-testid^="visit-row-"]:not([data-testid="visit-row-new"])').filter({
+      hasText: 'Анна',
+    });
+    await expect(savedRow.first()).toBeVisible({ timeout: 5_000 });
+  });
 });

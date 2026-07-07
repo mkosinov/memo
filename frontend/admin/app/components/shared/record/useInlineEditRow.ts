@@ -8,8 +8,8 @@ export interface UseInlineEditRowOptions<T extends { id: string | null }, F> {
   emptyData: () => F;
   /** T → F (form fields only) */
   pickFormData: (row: T) => F;
-  /** POST; returns saved row with id */
-  onAdd: (data: F) => Promise<T>;
+  /** POST; returns saved row with id, or undefined if save was blocked (e.g. validation guard) */
+  onAdd: (data: F) => Promise<T | undefined>;
   /** PATCH; returns updated row */
   onUpdate: (id: string, data: F) => Promise<T>;
   /** DELETE (saved rows only) */

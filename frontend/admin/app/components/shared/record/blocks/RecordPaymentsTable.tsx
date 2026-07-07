@@ -174,12 +174,13 @@ export function RecordPaymentsTable({
     setRows((prev) => prev.filter((r) => r.id !== id));
   }, [onDeletePayment]);
 
-  /** POST a new payment. Returns saved row. */
-  const handleAdd = useCallback(async (data: PaymentFormState): Promise<PaymentRow> => {
+  /** POST a new payment. Returns saved row, or undefined if guard blocked. */
+  const handleAdd = useCallback(async (data: PaymentFormState): Promise<PaymentRow | undefined> => {
     if (data.amount <= 0) {
       showToast('Сумма должна быть больше 0', 'error');
-      // Return a placeholder row with id=null — the row stays editable so the user can fix the amount.
-      return { id: null, clientId: '', amount: data.amount, method: data.method, created_at: data.created_at };
+      // Return undefined — InlineEditRow.triggerSave checks `if (saved)` and
+      // skips onSaved, so the row keeps its original clientId and stays editable.
+      return undefined;
     }
     // Convert datetime-local value (local "YYYY-MM-DDTHH:mm") to ISO 8601 with seconds
     const isoDate = localDatetimeToISO(data.created_at);

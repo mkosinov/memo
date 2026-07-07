@@ -1,0 +1,17 @@
+# Lock files — large, rarely need grep
+*.lock
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
+composer.lock
+Cargo.lock
+Pipfile.lock
+poetry.lock
+uv.lock
+
+# Minified assets
+*.min.js
+*.min.css
+*.js.map
+*.css.map
+*.wasm

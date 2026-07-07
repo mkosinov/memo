@@ -89,7 +89,6 @@ const mockPaymentResponse = {
   method: 'card',
   created_at: '',
   updated_at: '',
-  is_active: true,
 };
 
 const mockVisitResponse = {
@@ -102,7 +101,6 @@ const mockVisitResponse = {
   status: 'waiting',
   created_at: '',
   updated_at: '',
-  is_active: true,
 };
 
 describe('useRecordMutations', () => {

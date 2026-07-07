@@ -39,7 +39,6 @@ function renderVisitsTable(opts: {
     status: 'waiting',
     created_at: '',
     updated_at: '',
-    is_active: true,
   } as VisitResponse);
 
   const onPatchVisit = vi.fn();

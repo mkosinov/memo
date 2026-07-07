@@ -116,7 +116,7 @@ describe('ClientRecordTab — API interactions', () => {
     vi.mocked(deleteRecord).mockResolvedValue(undefined);
     vi.mocked(createPayment).mockResolvedValue({
       id: 'p1', record_id: 'r1', amount: 1000, method: 'card',
-      created_at: '', updated_at: '', is_active: true,
+      created_at: '', updated_at: '',
     });
     vi.mocked(deletePayment).mockResolvedValue(undefined);
     vi.mocked(createVisitor).mockResolvedValue({
@@ -127,7 +127,7 @@ describe('ClientRecordTab — API interactions', () => {
     vi.mocked(createVisit).mockResolvedValue({
       id: 'v_new', record_id: 'r1', visitor_id: 'vis_new', tariff_id: 't1',
       price: 3500, custom_price: null, status: 'waiting',
-      created_at: '', updated_at: '', is_active: true,
+      created_at: '', updated_at: '',
     });
     vi.mocked(apiDeleteVisit).mockResolvedValue(undefined);
   });

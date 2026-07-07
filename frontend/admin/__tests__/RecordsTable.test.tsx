@@ -109,7 +109,6 @@ const mockRecord: RecordResponse = {
       status: 'active',
       created_at: '2024-06-15T10:00:00Z',
       updated_at: '2024-06-15T10:00:00Z',
-      is_active: true,
     },
   ],
 };
@@ -121,7 +120,6 @@ const mockPayment: PaymentResponse = {
   method: 'card',
   created_at: '2024-06-15T10:00:00Z',
   updated_at: '2024-06-15T10:00:00Z',
-  is_active: true,
 };
 
 // ─── Mutable mock context ───────────────────────────────────────────────────

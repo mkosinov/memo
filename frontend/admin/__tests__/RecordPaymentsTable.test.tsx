@@ -52,7 +52,6 @@ function renderPaymentsTable(opts: {
     method: 'card',
     created_at: '2026-07-06T12:00:00',
     updated_at: '2026-07-06T12:00:00',
-    is_active: true,
   } as PaymentResponse);
 
   const onPatchPayment = opts.onPatchPayment ?? vi.fn();
@@ -200,7 +199,6 @@ describe('RecordPaymentsTable — amount > 0 guard', () => {
       method: 'card',
       created_at: '2026-07-01T10:00:00',
       updated_at: '2026-07-01T10:00:00',
-      is_active: true,
     };
 
     const { onPatchPayment } = renderPaymentsTable({
@@ -259,7 +257,6 @@ describe('RecordPaymentsTable — editable payment date on new rows', () => {
       method: 'card',
       created_at: '2026-07-01T10:00:00',
       updated_at: '2026-07-01T10:00:00',
-      is_active: true,
     };
 
     renderPaymentsTable({ payments: [existingPayment] });

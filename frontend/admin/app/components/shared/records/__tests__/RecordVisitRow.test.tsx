@@ -17,7 +17,6 @@ const mockVisit: VisitResponse = {
   status: 'waiting',
   created_at: '',
   updated_at: '',
-  is_active: true,
 };
 
 describe('RecordVisitRow', () => {

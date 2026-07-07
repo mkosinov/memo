@@ -11,7 +11,6 @@ const mockPayments: PaymentResponse[] = [
     method: 'card',
     created_at: '2026-05-10T10:00:00',
     updated_at: '2026-05-10T10:00:00',
-    is_active: true,
   },
   {
     id: 'p2',
@@ -20,7 +19,6 @@ const mockPayments: PaymentResponse[] = [
     method: 'cash',
     created_at: '2026-05-11T12:00:00',
     updated_at: '2026-05-11T12:00:00',
-    is_active: true,
   },
 ];
 

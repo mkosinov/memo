@@ -205,7 +205,6 @@ export const VisitResponseSchema = z.object({
   status: z.string(),
   created_at: z.string(),
   updated_at: z.string(),
-  is_active: z.boolean(),
 });
 
 export type VisitResponse = z.infer<typeof VisitResponseSchema>;
@@ -311,7 +310,6 @@ export const PaymentResponseSchema = z.object({
   method: z.string().nullable(),
   created_at: z.string(),
   updated_at: z.string(),
-  is_active: z.boolean(),
 });
 
 export type PaymentResponse = z.infer<typeof PaymentResponseSchema>;

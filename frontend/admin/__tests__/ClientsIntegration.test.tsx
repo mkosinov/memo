@@ -131,7 +131,6 @@ const mockRecord: RecordResponse = {
       status: 'waiting',
       created_at: '',
       updated_at: '',
-      is_active: true,
     },
   ],
 };
@@ -337,7 +336,6 @@ describe('ClientCardModal ↔ ClientRecordTab integration (real components)', ()
       method: 'card',
       created_at: '',
       updated_at: '',
-      is_active: true,
     });
     vi.mocked(getClientVisitors).mockResolvedValue(mockVisitors);
 
@@ -543,7 +541,6 @@ describe('Cross-page integration: create client → view → edit → save', () 
       method: 'card',
       created_at: '',
       updated_at: '',
-      is_active: true,
     });
     vi.mocked(getClientVisitors).mockResolvedValue(mockVisitors);
     vi.mocked(apiUpdateClient).mockResolvedValue(mockClient);
@@ -654,7 +651,6 @@ describe('Error scenarios: create client fails', () => {
       method: 'card',
       created_at: '',
       updated_at: '',
-      is_active: true,
     });
     vi.mocked(getClientVisitors).mockResolvedValue(mockVisitors);
     vi.mocked(apiUpdateClient).mockResolvedValue(mockClient);

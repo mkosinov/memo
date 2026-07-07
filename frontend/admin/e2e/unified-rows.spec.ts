@@ -102,7 +102,7 @@ test.describe('Unified inline-editable rows', () => {
     const visitRow = queryDBRow(
       `SELECT v.id, v.visitor_id FROM visits v
        JOIN records r ON v.record_id = r.id
-       WHERE r.id = 'r1' AND v.is_active = 1 AND v.visitor_id IS NOT NULL
+        WHERE r.id = 'r1' AND v.visitor_id IS NOT NULL
        LIMIT 1`,
     );
     if (!visitRow?.visitor_id) {
@@ -210,7 +210,7 @@ test.describe('Unified inline-editable rows', () => {
     const visitRow = queryDBRow(
       `SELECT v.id FROM visits v
        JOIN records r ON v.record_id = r.id
-       WHERE r.id = 'r2' AND v.is_active = 1
+        WHERE r.id = 'r2'
        LIMIT 1`,
     );
     if (!visitRow) {

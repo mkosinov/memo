@@ -86,7 +86,7 @@ test.describe('ActivityDetailsModal — Real User Scenarios', () => {
       // 5. VERIFY DB — visit was created for this record
       await expect.poll(async () => {
         const visits = queryDBRows(
-          `SELECT * FROM visits WHERE record_id='${recordRow!.id}' AND is_active=1`,
+          `SELECT * FROM visits WHERE record_id='${recordRow!.id}'`,
         );
         return visits.length > 0;
       }, { timeout: 30_000, intervals: [200, 500, 1000] }).toBe(true);
@@ -162,7 +162,7 @@ test.describe('ActivityDetailsModal — Real User Scenarios', () => {
     try {
       // Verify no payments initially
       const beforePayments = queryDBRows(
-        `SELECT * FROM payments WHERE record_id='${record.id}' AND is_active=1`,
+        `SELECT * FROM payments WHERE record_id='${record.id}'`,
       );
       expect(beforePayments.length).toBe(0);
 
@@ -198,7 +198,7 @@ test.describe('ActivityDetailsModal — Real User Scenarios', () => {
         // 4. VERIFY DB — payment row exists with amount=1500 (retry until commit lands)
         await expect.poll(async () => {
           const payments = queryDBRows(
-            `SELECT * FROM payments WHERE record_id='${record.id}' AND is_active=1`,
+            `SELECT * FROM payments WHERE record_id='${record.id}'`,
           );
           return payments.length > 0 && payments[0].amount === 1500;
         }, { timeout: 30_000, intervals: [200, 500, 1000] }).toBe(true);

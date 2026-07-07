@@ -394,30 +394,44 @@ test.describe('Unified inline-editable rows', () => {
 
   // ── Scenario 10: Save prefilled payment without editing ─────────────────
 
-  test('scenario 10: prefilled payment saves without editing amount', async ({ page }) => {
-    await openClientRecordTab(page);
+  test('scenario 10: prefilled payment saves without editing amount', async ({ page, request }) => {
+    // Create a record with a known outstanding balance (visit price=3500, no payments → outstanding=3500).
+    // Using factory approach (not seed recordId) because GH #124 makes recordId targeting unreliable
+    // when multiple activities share a week. Factory activity is for "today" so it's isolated.
+    const client = await createTestClient(request);
+    const activity = await createTestActivity(request);
+    const record = await createTestRecord(request, activity.id, client.id);
 
-    // Click "+ Добавить" — amount is prefilled from "К оплате" (outstanding balance)
-    await page.locator('[data-testid="btn-add-payment"]').click();
-    const newRow = page.locator('[data-testid="payment-new"]');
-    await expect(newRow).toBeVisible();
+    try {
+      await page.goto('/schedule');
+      await waitForScheduleReady(page);
+      await openClientRecordTab(page, { recordId: record.id });
 
-    // The amount input should have a prefilled value (from defaultAmount prop)
-    const amountInput = page.locator('[data-testid="add-payment-amount"]');
-    await expect(amountInput).toBeVisible();
-    const prefilledValue = await amountInput.inputValue();
-    // Prefilled value should be > 0 (from the record's outstanding balance)
-    expect(Number(prefilledValue)).toBeGreaterThan(0);
+      // Click "+ Добавить" — amount is prefilled from "К оплате" (outstanding balance)
+      await page.locator('[data-testid="btn-add-payment"]').click();
+      const newRow = page.locator('[data-testid="payment-new"]');
+      await expect(newRow).toBeVisible();
 
-    // Press Enter WITHOUT editing the amount
-    await amountInput.press('Enter');
+      // The amount input should have a prefilled value (from defaultAmount prop)
+      const amountInput = page.locator('[data-testid="add-payment-amount"]');
+      await expect(amountInput).toBeVisible();
+      const prefilledValue = await amountInput.inputValue();
+      // Prefilled value should be > 0 (from the record's outstanding balance)
+      expect(Number(prefilledValue)).toBeGreaterThan(0);
 
-    // After save, the new-row input disappears (row gets an id)
-    await expect(amountInput).not.toBeVisible({ timeout: 5_000 });
+      // Press Enter WITHOUT editing the amount
+      await amountInput.press('Enter');
 
-    // The TotalsRow should show the total (at least the prefilled amount)
-    const totalsRow = page.locator('[data-testid="payments-total"]');
-    await expect(totalsRow).toBeVisible();
+      // After save, the new-row input disappears (row gets an id)
+      await expect(amountInput).not.toBeVisible({ timeout: 5_000 });
+
+      // The TotalsRow should show the total (at least the prefilled amount)
+      const totalsRow = page.locator('[data-testid="payments-total"]');
+      await expect(totalsRow).toBeVisible();
+    } finally {
+      await cleanup(request, `/api/v1/records/${record.id}`);
+      await cleanup(request, `/api/v1/clients/${client.id}`);
+    }
   });
 
   // ── Scenario 11: Save anonymous visit ───────────────────────────────────
@@ -487,10 +501,11 @@ test.describe('Unified inline-editable rows', () => {
     // Wait a bit for any potential request
     await page.waitForTimeout(500);
 
-    // Error toast should appear
-    const toast = page.locator('[role="status"]');
-    await expect(toast.first()).toBeVisible({ timeout: 3_000 });
-    await expect(toast.first()).toContainText('Сумма должна быть больше 0');
+    // Error toast should appear — use data-testid to avoid matching the dnd-kit live region
+    // which also has role="status" but is empty (#DndLiveRegion-2 at index [0]).
+    const toast = page.locator('[data-testid="toast-error"]');
+    await expect(toast).toBeVisible({ timeout: 3_000 });
+    await expect(toast).toContainText('Сумма должна быть больше 0');
 
     // No POST /payments should have fired
     const newCalls = postPayments.slice(callsBefore);
@@ -559,10 +574,11 @@ test.describe('Unified inline-editable rows', () => {
     await expect(nameInput).not.toBeVisible({ timeout: 5_000 });
 
     // The name "Анна" should be visible in the saved row immediately
-    // (no blank, no "Аноним" placeholder, no need to reload)
-    const savedRow = page.locator('[data-testid^="visit-row-"]:not([data-testid="visit-row-new"])').filter({
-      hasText: 'Анна',
-    });
+    // (no blank, no "Аноним" placeholder, no need to reload).
+    // The name is rendered inside an <input value="Анна">, not as text content,
+    // so we must match on the input value, not hasText.
+    const savedRow = page.locator('[data-testid^="visit-row-"]:not([data-testid="visit-row-new"])')
+      .filter({ has: page.locator('input[value="Анна"]') });
     await expect(savedRow.first()).toBeVisible({ timeout: 5_000 });
   });
 });

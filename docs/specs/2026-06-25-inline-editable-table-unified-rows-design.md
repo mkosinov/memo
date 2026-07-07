@@ -476,6 +476,61 @@ Discovered during live testing after the initial refactor shipped. Two correctio
 
 ---
 
+## Addendum 2 — Cache sync, tariffs in modal, hard-delete + Undo (2026-07-06, live-test round 2)
+
+Three more bugs found in live testing, plus an architectural decision on delete semantics.
+
+### C. Mutation cache sync — no F5 needed after add/delete (regression + design gap)
+
+**Problem:** after adding or deleting a visitor/payment, switching tabs inside the modal (or closing+reopening it) causes the table to remount and re-initialize from a STALE `['record', recordId]` cache — the just-added row vanishes / the just-deleted row reappears, until F5.
+
+**Root cause (traced):**
+- The new single-entity mutations (`addVisit`/`deleteVisit`/`patchVisit`/payment equivalents) only call `invalidateRecord()` (marks `['record', recordId]` stale → BACKGROUND refetch). They do NOT optimistically update the cache. If the table remounts before the refetch completes, it reads stale data.
+- **Regression:** `addVisit` no longer invalidates `['visitors', clientId]` (the old `handleAddVisitor` did — `ClientRecordTab.tsx`). So even after the record refetch, `visitorsMap` is stale and the new visitor's name can't be joined.
+
+**Required fix (hybrid — optimistic cache write now; full useMutation refactor deferred):**
+- In `addVisit`/`deleteVisit`/`patchVisit` (and `addPayment`/`deletePayment`/`patchPayment`), OPTIMISTICALLY update the React Query cache BEFORE/AROUND the API call: `queryClient.setQueryData(['record', recordId], (old) => ...)` to add/remove/update the visit in `old.visits` (and `['payments', recordId]` for payments), so any remount reads fresh data immediately.
+- Restore `queryClient.invalidateQueries({ queryKey: ['visitors', clientId] })` in `addVisit` (regression fix).
+- Keep `invalidateRecord()` (and existing invalidations) as the server-confirmation pass.
+- **Deferred (separate tech-debt PR):** migrating these mutations to `useMutation` with `onMutate` optimistic + rollback. This addendum does the minimal `setQueryData` fix.
+
+### D. Tariff dropdown empty in the modal (pre-existing)
+
+**Problem:** in the ActivityDetailsModal → client tab → visitors table, the Tariff `<select>` for a new row is empty (only "— тариф —"), even though the service has tariffs. (The /clients-page `ClientRecordTab` is NOT affected — it fetches raw services with tariffs.)
+
+**Root cause:** `useServices()` applies `select: transformService`, and `transformService` (`transformers.ts`) DROPS the `tariffs` field (keeps only `defaultAdultPrice`). The domain `Service` type has no `tariffs`. `ActivityDetailsModal.getServiceTariffs(svc)` reads `svc.tariffs` → `undefined` → `[]`.
+
+**Required fix:** make the modal receive the service's tariffs. Preferred: in `ActivityDetailsModal`, obtain the raw service (with tariffs) — either use the raw services already fetched in `useSchedule()`/`ScheduleContext` (expose `servicesRaw`), or add a dedicated raw `useQuery(['services'])` (no `select`) for tariff lookup. Do NOT break the domain `Service` transform used elsewhere. Document the chosen approach. **Acceptance:** the Tariff dropdown in the modal shows the service's tariffs; selecting one auto-fills price (scenario 6 already covered).
+
+### E. Delete semantics: HARD delete Payment + Visit + Undo toast
+
+**Decision (user, 2026-07-06):** Payment and Visit switch from soft-delete to **HARD delete** (physical row removal). Rationale: they are leaf tables (no FK references), operational (not primary financial records), and soft-delete caused deleted payments to still count in client stats (bug 3) + imposes a permanent "remember to filter is_active" tax. Audit trail, if ever needed, belongs in a separate append-only `audit_log` — NOT soft-delete on the entity. All OTHER entities (Client, Service, Master, Location, Activity, Record, Visitor, ...) KEEP soft-delete (they have FK dependents).
+
+**Safety (verified):** nothing references Payment.id/Visit.id as FK; Visit "cancelled" is a STATUS (is_active=true), not a delete, so cancelled history is safe; `recompute_record_seats/status` filter `is_active=True` so a gone row behaves identically to a soft-deleted one — the parent Record's seats/status recompute correctly.
+
+**Required implementation:**
+- **Backend (per-service override — do NOT touch the generic soft-delete):**
+  - `PaymentService.delete`: physical `DELETE FROM payments WHERE id=? AND is_active=True`; return False (→ 404) if no row matched (preserve the API contract).
+  - `VisitService.delete`: change the `is_active=False` set to a physical row delete; KEEP the two recompute calls afterward (they already work with the row gone).
+  - Fix bug 3 as a natural consequence + also add `Payment.is_active`/`Visit.is_active` filters to the client-stats subqueries (`client.py`) as defense (though hard-delete makes deleted rows vanish anyway — add the filter so any FUTURE soft-deleted-by-mistake row isn't counted).
+  - Update tests: `test_delete_payment_soft_deletes` → expect 404 after delete; `test_delete_visit_soft_flag_in_db` / `test_visit_service_delete_*` → expect row absent.
+- **Frontend Undo toast (deferred delete pattern — no soft-delete needed):**
+  - Clicking × on a SAVED visit/payment row: remove the row from the UI immediately, show a toast "Удалено. Отменить" for ~5 seconds. Do NOT send the DELETE immediately.
+  - If the user clicks "Отменить" within 5s → restore the row in the UI; NO server call was made.
+  - If 5s elapse with no undo → send the hard `DELETE`.
+  - Use the project's toast mechanism (`useUI`) with an action button. (If `useUI` toasts don't support an action button, extend minimally or use the smallest viable approach; document it.)
+  - Deleting a NEW (unsaved, id===null) row stays instant (no toast, no server call — it was never saved).
+
+### New user scenarios (extend the list)
+
+15. **No F5 after add.** Add a visitor → switch to "Настройки" tab and back → the visitor is still there (no reload). Same for payments.
+16. **No F5 after delete.** Delete a visitor → switch tab and back → the visitor is still gone (does not reappear). Same for payments.
+17. **Tariff dropdown populated in modal.** Open a record in the ActivityDetailsModal → visitors → "+ Добавить" → the Tariff dropdown lists the service's tariffs; selecting one fills the price.
+18. **Hard delete removes from stats.** Delete a payment → the client's `total_paid` no longer includes it (backend, no F5-dependent). The payment is physically gone (GET by id → 404).
+19. **Undo delete.** Click × on a saved payment → row disappears + toast "Удалено. Отменить" → click "Отменить" within 5s → the payment reappears, and NO delete was sent to the server (verify via network). If not undone within 5s → the payment is hard-deleted.
+
+---
+
 ## Out of scope (deferred)
 
 - Inline-editing of the `status` field for a new row (it always defaults to `'waiting'`; admin changes it after save).

@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — 2026-07-07
+
+### Added
+- **Addendum-2: InlineEditableTable unified rows + hard-delete + deferred undo (6 tasks + FasTP Bug #1)** — branch `feat-inline-editable-unified-rows`:
+  - **1. Backend hard-delete + repo split + migration:** Payment/Visit → hard delete (`is_active` removed), model hierarchy split (`AbstractModel` + `AbstractModelSoftDelete`), repository split (`BaseRepository`/`SoftDeleteRepository`), Alembic migration `DROP COLUMN is_active`, 13 entities on soft-delete, 2 on hard-delete. 641 backend tests pass.
+  - **2. Frontend Zod schemas + test fixtures:** `is_active` removed from Visit/Payment Zod schemas + 19 test mocks, E2E SQL fixtures aligned. 1134 vitest pass (1 GH #123 baseline flake).
+  - **3. Optimistic cache `setQueryData`:** 6 mutations update cache (visits → `['record', recordId]`, payments → `['payments', recordId]`) + regression fix `['visitors', clientId]` invalidation in addVisit. 7 new unit tests.
+  - **4. Tariff dropdown in modal:** `servicesRaw` from ScheduleContext → ActivityDetailsModal → populated tariff dropdown. Old `getServiceTariffs` workaround removed.
+  - **5. Undo toast deferred delete:** `deleteVisitDeferred` + `deletePaymentDeferred` — optimistic remove → toast "Удалено. Отменить" 5s → hard DELETE on expiry. UIConfig toast 5000ms for undo. 6 unit tests + 2 InlineEditRow contract tests.
+  - **6. E2E scenarios 15-19:** 3 pass (15, 15b, 18), 4 skip (GH #124 — openModal wrong-activity).
+  - **FasTP Bug #1 (live-test round 3):** Over-capacity `ApiError` caught in `RecordVisitsTable.handleAdd` → `showToast(parseApiError)` + `return undefined` (row stays editable). WIP commit with UIProvider mock wrapper.
+  - **Known limitations:** GH #123 (CalendarPopover/Menubar vitest flake — baseline), GH #124 (openModal wrong-activity blocks E2E 16/16b/17/19 — test bodies ready), GH #127 (cache duplication architecture — unified cache records/visits/payments deferred to new session).
+  - Design spec: `sketches/2026-07-02-spec-addendum-2.md`
+  - Plans: `sketches/2026-07-02-plan-addendum-2.md` (+ review amendments)
+
 ## [Unreleased] — 2026-06-29
 
 ### Fixed

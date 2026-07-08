@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — 2026-07-08
+
+### Fixed
+- **#105 — Client stats cartesian product bug (scalar-subqueries rewrite)** — branch `fix-client-stats-scalar-subqueries`:
+  - Rewrote `list_clients_with_stats` in `backend/src/services/client.py` to replace two `outerjoin→GROUP BY` subqueries with four independent correlated scalar subqueries (`.correlate(Client).scalar_subquery()`). Each subquery reads exactly one relation, making cross-relation multiplication (cartesian product) structurally impossible.
+  - Added guard test (`test_total_paid_not_multiplied_by_visit_count`) that pins the exact data shape (1 record + multiple visits + payment) that would trigger the bug: `total_paid == 3000` (not 6000).
+  - **Tests: 642 passed, 4 xfailed** (same baseline as before — no new failures).
+  - **No migration, no frontend, no API change**.
+  - Design spec: `docs/specs/2026-07-08-client-stats-scalar-subqueries-design.md`
+  - Plan: `docs/plans/2026-07-08-client-stats-scalar-subqueries.md`
+
 ## [Unreleased] — 2026-07-07
 
 ### Added

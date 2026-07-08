@@ -211,6 +211,8 @@ No API shape change, no migration, no frontend change.
 
 - [ ] **Run GREEN:** `cd backend && python -m pytest tests/test_edge_cases.py -k "capacity_check_excludes" -x` → expect pass.
 
+- [ ] **Verify create-ordering (spec edge-case row 1):** read `backend/src/services/record.py::create` and confirm `check_activity_capacity` (line ~92) runs BEFORE the `Record(...)` is added/flushed (line ~117). The new record must NOT count against its own capacity check. This is already true in the current code — add a one-line assertion in `test_capacity_check_excludes_cancelled_record` right after `create_record` (the initial fill) that the fill itself succeeded at exactly capacity (no off-by-one): `assert len(r1["visits"]) == 3`. No code change expected; this step is a documented verification.
+
 - [ ] **Run full capacity/occupied regression:** `cd backend && python -m pytest tests/test_edge_cases.py tests/test_record_visits.py tests/test_api_visits.py -k "capacity or occupied" -x` → expect all pass.
 
 - [ ] **Commit:** `git add -A && git commit -m "fix(#98): capacity check excludes cancelled/missed records (CRITICAL)"`
@@ -252,6 +254,45 @@ No API shape change, no migration, no frontend change.
   - Update the docstring to reference the shared helper.
 
 - [ ] **Run GREEN (behavior unchanged):** `cd backend && python -m pytest tests/test_edge_cases.py tests/test_api_activities.py -k "occupied" -x` → expect pass.
+
+- [ ] **Add explicit agreement test** (spec testing-strategy item 3) in `backend/tests/test_edge_cases.py`, same class:
+  ```python
+  def test_capacity_view_and_check_agree(
+      self, api_client, create_record, _create_activity_payload
+  ):
+      """sum_active_seats (view 'occupied') and check_activity_capacity agree:
+      after cancelling a record, the view occupied drops AND a booking for the
+      freed seats is admitted — same underlying active_record_filter."""
+      act_payload = _create_activity_payload()
+      act_payload["capacity"] = 4
+      act_id = api_client.post("/api/v1/activities", json=act_payload).json()["id"]
+
+      r1 = create_record(activity_id=act_id, visits=[
+          {"name": "A", "price": 1000},
+          {"name": "B", "price": 1000},
+      ])
+      create_record(activity_id=act_id, visits=[
+          {"name": "C", "price": 1000},
+          {"name": "D", "price": 1000},
+      ])
+      # view: full
+      assert api_client.get(f"/api/v1/activities/{act_id}").json()["occupied"] == 4
+
+      # cancel r1 (2 seats)
+      for visit in r1["visits"]:
+          api_client.put(f"/api/v1/visits/{visit['id']}/status", json={"status": "cancelled"})
+
+      # view now reports 2
+      assert api_client.get(f"/api/v1/activities/{act_id}").json()["occupied"] == 2
+      # check agrees: a 2-seat booking is admitted (not 409)
+      after = api_client.post("/api/v1/records", json={
+          "activity_id": act_id,
+          "visits": [{"name": "E", "price": 1000}, {"name": "F", "price": 1000}],
+      })
+      assert after.status_code == 201, f"view/check disagree: {after.text}"
+  ```
+
+- [ ] **Run it:** `cd backend && python -m pytest tests/test_edge_cases.py -k "view_and_check_agree" -x` → expect pass.
 
 - [ ] **Grep to confirm no stray references** to the removed attribute: `cd backend && grep -rn "ACTIVE_RECORD_STATUSES" src/ tests/` → expect references ONLY in `domain/visit_status.py` (definition), `domain/record_visits.py` (import/use), and any test importing it. NO reference to `self.ACTIVE_RECORD_STATUSES` or `ActivityService.ACTIVE_RECORD_STATUSES`.
 
@@ -407,6 +448,8 @@ Two domain-rules docs currently describe "occupied" inconsistently (`_overview.m
 - `last_visit` correctness fix → Task 4
 - domain-rules sync + full suite → Task 5
 - User Scenarios 1-5 → Tasks 2 (1,2,3) + 4 (4,5)
+- Spec test `test_capacity_view_and_check_agree` → Task 3 (explicit)
+- Spec edge-case "verify create ordering" → Task 2 (verification step)
 
 **Out of scope confirmed absent:** no `records_count`/`total_paid`/`missed_visits` changes; no enum dedup (#134); no `last_record_activity` (#133); no migration; no frontend.
 

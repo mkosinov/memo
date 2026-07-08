@@ -28,7 +28,10 @@ An Activity is a scheduled instance of a Service. It ties together a Master, Ser
 ## Business Logic
 
 ### Backend
-- **occupied** = COUNT(DISTINCT Records WHERE activity_id = X AND is_active = True)
+- **occupied** = SUM(Record.seats) WHERE activity_id = X AND is_active = True AND status IN ('waiting','visited')
+  - Implemented via `active_record_filter()` in `src/domain/record_visits.py` (shared with the booking guard `check_activity_capacity`)
+  - Source of truth: `ACTIVE_RECORD_STATUSES` constant in `src/domain/visit_status.py`
+  - Cancelled / missed records free their seats (excluded from the sum)
 - **No capacity re-validation** when updating Activity
 - **No cascade** on activity delete — orphan Records remain active
 - **Date-range filtering:** Only returns is_active = True activities

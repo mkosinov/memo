@@ -110,7 +110,7 @@ A Record is a booking for an Activity. It links a Client to an Activity and cont
 ## Business Logic
 
 ### Backend
-- **Capacity check on create:** Sums all active Record.seats for the Activity. If occupied + new_seats > capacity → 409.
+- **Capacity check on create:** Sums all active Record.seats for the Activity via `check_activity_capacity()` / `active_record_filter()`. If occupied + new_seats > capacity → 409. The "active" filter is `Record.is_active = True AND Record.status IN ('waiting','visited')` — cancelled and missed records free their seats. Single source of truth: `ACTIVE_RECORD_STATUSES` constant in `src/domain/visit_status.py`, reused by both the booking guard and `ActivityService.sum_active_seats`.
 - **Client resolution (dual flow):**
   - Phone-based (web): find-or-create Client by phone
   - Client-ID-based (admin): link directly

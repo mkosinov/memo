@@ -727,21 +727,35 @@ class TestClientListSortExtended:
     def test_sort_by_last_visit_desc(
         self, api_client, create_activity, create_client
     ) -> None:
-        """sort_by=last_visit desc orders by most recent visit."""
+        """sort_by=last_visit desc orders by most recent Activity.start of visited visits."""
+        from datetime import UTC, datetime, timedelta
+
+        early_start = datetime.now(UTC) - timedelta(days=30)
+        late_start = datetime.now(UTC) - timedelta(days=5)
+
+        # EarlyVisitor: visited an activity 30 days ago
         c1, _ = _create_client_with_record(
             api_client, create_activity, create_client,
             client={"name": "EarlyVisitor", "phone": "+79998000030"},
         )
+        early_act = create_activity(start=early_start)
+        api_client.post("/api/v1/records", json={
+            "activity_id": early_act["id"],
+            "client_id": c1["id"],
+            "comment": "Early",
+            "visits": [{"name": "G", "price": 3500, "status": "visited"}],
+        })
+
+        # LateVisitor: visited an activity 5 days ago (more recent)
         c2, _ = _create_client_with_record(
             api_client, create_activity, create_client,
             client={"name": "LateVisitor", "phone": "+79998000031"},
         )
-        # Add a second record for c2 to make its last_visit newer
-        activity2 = create_activity()
+        late_act = create_activity(start=late_start)
         api_client.post("/api/v1/records", json={
-            "activity_id": activity2["id"],
+            "activity_id": late_act["id"],
             "client_id": c2["id"],
-            "comment": "Later",
+            "comment": "Late",
             "visits": [{"name": "G", "price": 3500, "status": "visited"}],
         })
 
@@ -751,7 +765,7 @@ class TestClientListSortExtended:
         items = resp.json()["items"]
         relevant = [c for c in items if c["name"] in ("EarlyVisitor", "LateVisitor")]
         assert len(relevant) == 2
-        # LateVisitor should be first (more recent last_visit)
+        # LateVisitor should be first (later Activity.start = more recent last_visit)
         assert relevant[0]["name"] == "LateVisitor"
 
     def test_sort_by_updated_at_asc(
@@ -1034,6 +1048,53 @@ class TestClientStatsAggregationExtended:
     ) -> None:
         """Client without records has last_visit=None."""
         client = create_client(name="NoVisitClient")
+        resp = api_client.get("/api/v1/clients")
+        item = next(c for c in resp.json()["items"] if c["id"] == client["id"])
+        assert item["last_visit"] is None
+
+    def test_last_visit_uses_activity_start_of_visited(
+        self, api_client, create_activity, create_client
+    ) -> None:
+        """last_visit = Activity.start of the client's last VISITED visit,
+        not created_at, and not a future WAITING booking.
+        """
+        from datetime import UTC, datetime, timedelta
+
+        client = create_client(name="AttendVsBooked", phone="+79999111001")
+
+        past = datetime.now(UTC) - timedelta(days=10)
+        future = datetime.now(UTC) + timedelta(days=10)
+        act_past = create_activity(start=past)
+        act_future = create_activity(start=future)
+
+        # Attended the past activity
+        api_client.post("/api/v1/records", json={
+            "activity_id": act_past["id"], "client_id": client["id"],
+            "visits": [{"name": "V", "price": 1000, "status": "visited"}],
+        })
+        # Booked (waiting) for the future activity
+        api_client.post("/api/v1/records", json={
+            "activity_id": act_future["id"], "client_id": client["id"],
+            "visits": [{"name": "V", "price": 1000, "status": "waiting"}],
+        })
+
+        resp = api_client.get("/api/v1/clients")
+        item = next(c for c in resp.json()["items"] if c["id"] == client["id"])
+        assert item["last_visit"] is not None
+        # Must be the PAST activity's start (attended), not the future booking
+        assert item["last_visit"].startswith(past.date().isoformat())
+
+    def test_last_visit_null_without_visited(
+        self, api_client, create_activity, create_client
+    ) -> None:
+        """A client with only waiting/cancelled visits has last_visit=None."""
+        client = create_client(name="NeverAttended", phone="+79999111002")
+        act = create_activity()
+        api_client.post("/api/v1/records", json={
+            "activity_id": act["id"], "client_id": client["id"],
+            "visits": [{"name": "V", "price": 1000, "status": "waiting"}],
+        })
+
         resp = api_client.get("/api/v1/clients")
         item = next(c for c in resp.json()["items"] if c["id"] == client["id"])
         assert item["last_visit"] is None

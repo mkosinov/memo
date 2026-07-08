@@ -1,6 +1,24 @@
 """Unit tests for src/domain/record_visits.py free functions."""
 import pytest
 
+from src.domain.visit_status import ACTIVE_RECORD_STATUSES
+
+
+def test_active_record_statuses_excludes_cancelled_and_missed():
+    """ACTIVE_RECORD_STATUSES contains only statuses that occupy a seat."""
+    assert "waiting" in ACTIVE_RECORD_STATUSES
+    assert "visited" in ACTIVE_RECORD_STATUSES
+    assert "cancelled" not in ACTIVE_RECORD_STATUSES
+    assert "missed" not in ACTIVE_RECORD_STATUSES
+
+
+def test_active_record_filter_returns_three_conditions():
+    """active_record_filter yields 3 WHERE conditions: activity_id, is_active, status IN."""
+    from src.domain.record_visits import active_record_filter
+
+    conds = active_record_filter("act-123")
+    assert len(conds) == 3
+
 
 @pytest.mark.asyncio
 async def test_recompute_record_seats_counts_active_visits(db_session, sample_record):

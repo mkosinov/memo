@@ -12,6 +12,15 @@ class VisitStatus(str, Enum):
     CANCELLED = "cancelled"
 
 
+# Record statuses that occupy a seat in an activity's capacity.
+# "active record" = is_active AND status IN these values.
+# cancelled/missed records do NOT occupy a seat.
+ACTIVE_RECORD_STATUSES: tuple[str, ...] = (
+    VisitStatus.WAITING.value,
+    VisitStatus.VISITED.value,
+)
+
+
 # Minimal input model for the derivation function
 class VisitItem(BaseModel):
     id: str

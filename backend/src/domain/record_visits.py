@@ -13,7 +13,9 @@ from fastapi import HTTPException
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.domain.visit_status import VisitItem, compute_record_status
+from src.domain.visit_status import (
+    VisitItem, compute_record_status, ACTIVE_RECORD_STATUSES,
+)
 from src.errors import ErrorCode, ErrorDetail
 from src.models.activity import Activity
 from src.models.record import Record
@@ -69,6 +71,20 @@ async def recompute_record_status(
     record.updated_at = datetime.now(UTC)
     await db_session.flush()
     return record
+
+
+def active_record_filter(activity_id: str):
+    """WHERE conditions for records that occupy a seat in an activity's capacity.
+
+    Active = is_active AND status IN (waiting, visited).
+    Shared by check_activity_capacity (booking guard) and
+    ActivityService.sum_active_seats (view) so both agree.
+    """
+    return (
+        Record.activity_id == activity_id,
+        Record.is_active.is_(True),
+        Record.status.in_(ACTIVE_RECORD_STATUSES),
+    )
 
 
 async def check_activity_capacity(

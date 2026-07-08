@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from functools import lru_cache
 
-from sqlalchemy import case, func, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.client import Client
@@ -35,35 +35,49 @@ async def list_clients_with_stats(
 ) -> ClientListResponse:
     """Return paginated clients with aggregated visit/payment stats."""
 
-    # 1a. Visits subquery (Record + Visit) — for visits_count, last_visit, missed_visits
-    visits_subq = (
-        select(
-            Record.client_id,
-            func.count(func.distinct(Record.id)).label("visits_count"),
-            func.max(Visit.created_at).label("last_visit"),
-            func.sum(case((Visit.status == "missed", 1), else_=0)).label(
-                "missed_visits"
-            ),
+    # 1. Correlated scalar subqueries — one per stat, each reads ONE relation
+    #    (no join-then-aggregate → cartesian product is structurally impossible).
+    records_count_sq = (
+        select(func.count(Record.id))
+        .where(Record.client_id == Client.id, Record.is_active == True)  # noqa: E712
+        .correlate(Client)
+        .scalar_subquery()
+    )
+    last_visit_sq = (
+        select(func.max(Visit.created_at))
+        .select_from(Visit)
+        .join(Record, Visit.record_id == Record.id)
+        .where(Record.client_id == Client.id, Record.is_active == True)  # noqa: E712
+        .correlate(Client)
+        .scalar_subquery()
+    )
+    missed_visits_sq = (
+        select(func.count(Visit.id))
+        .select_from(Visit)
+        .join(Record, Visit.record_id == Record.id)
+        .where(
+            Record.client_id == Client.id,
+            Record.is_active == True,  # noqa: E712
+            Visit.status == "missed",
         )
-        .outerjoin(Visit, Visit.record_id == Record.id)
-        .where(Record.is_active == True)  # noqa: E712
-        .group_by(Record.client_id)
-        .subquery()
+        .correlate(Client)
+        .scalar_subquery()
+    )
+    total_paid_sq = (
+        select(func.coalesce(func.sum(Payment.amount), 0))
+        .select_from(Payment)
+        .join(Record, Payment.record_id == Record.id)
+        .where(Record.client_id == Client.id, Record.is_active == True)  # noqa: E712
+        .correlate(Client)
+        .scalar_subquery()
     )
 
-    # 1b. Payments subquery (Record + Payment) — for total_paid (no cartesian product!)
-    payments_subq = (
-        select(
-            Record.client_id,
-            func.coalesce(func.sum(Payment.amount), 0).label("total_paid"),
-        )
-        .outerjoin(Payment, Payment.record_id == Record.id)
-        .where(Record.is_active == True)  # noqa: E712
-        .group_by(Record.client_id)
-        .subquery()
-    )
+    visits_count_col = records_count_sq.label("visits_count")
+    last_visit_col = last_visit_sq.label("last_visit")
+    missed_visits_col = missed_visits_sq.label("missed_visits")
+    total_paid_col = total_paid_sq.label("total_paid")
 
-    # 2. Select specific columns from Client and both subqueries
+    # 2. Select Client columns + the four stat scalar subqueries
     base_cols = [
         Client.id,
         Client.name,
@@ -73,24 +87,17 @@ async def list_clients_with_stats(
         Client.created_at,
         Client.updated_at,
         Client.is_active,
-        visits_subq.c.visits_count,
-        visits_subq.c.last_visit,
-        payments_subq.c.total_paid,
-        visits_subq.c.missed_visits,
+        visits_count_col,
+        last_visit_col,
+        total_paid_col,
+        missed_visits_col,
     ]
 
-    # 3. Count query (total matching clients)
-    count_query = (
-        select(func.count(Client.id))
-        .outerjoin(visits_subq, Client.id == visits_subq.c.client_id)
-    )
+    # 3. Count query (total matching clients) — independent of stats
+    count_query = select(func.count(Client.id))
 
-    # 4. Main query
-    query = (
-        select(*base_cols)
-        .outerjoin(visits_subq, Client.id == visits_subq.c.client_id)
-        .outerjoin(payments_subq, Client.id == payments_subq.c.client_id)
-    )
+    # 4. Main query — no outerjoin to stat subqueries; scalar subqueries are inline
+    query = select(*base_cols)
 
     # 5. Apply is_active filter: default to True (active only) when not specified
     is_active_filter = params.is_active if params.is_active is not None else True
@@ -129,12 +136,12 @@ async def list_clients_with_stats(
 
     # Stats-based filters (applied to both queries)
     stats_filter_map = {
-        "min_visits": visits_subq.c.visits_count,
-        "max_visits": visits_subq.c.visits_count,
-        "min_paid": payments_subq.c.total_paid,
-        "max_paid": payments_subq.c.total_paid,
-        "missed_from": visits_subq.c.missed_visits,
-        "missed_to": visits_subq.c.missed_visits,
+        "min_visits": records_count_sq,
+        "max_visits": records_count_sq,
+        "min_paid": total_paid_sq,
+        "max_paid": total_paid_sq,
+        "missed_from": missed_visits_sq,
+        "missed_to": missed_visits_sq,
     }
     ops_map = {
         "min_visits": lambda col, val: col >= val,
@@ -159,10 +166,10 @@ async def list_clients_with_stats(
     # 7. Apply sorting
     sort_column_map = {
         "name": Client.name,
-        "visits_count": visits_subq.c.visits_count,
-        "last_visit": visits_subq.c.last_visit,
-        "total_paid": payments_subq.c.total_paid,
-        "missed_visits": visits_subq.c.missed_visits,
+        "visits_count": records_count_sq,
+        "last_visit": last_visit_sq,
+        "total_paid": total_paid_sq,
+        "missed_visits": missed_visits_sq,
         "created_at": Client.created_at,
         "updated_at": Client.updated_at,
     }

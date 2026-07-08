@@ -10,6 +10,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased] — 2026-07-08
 
 ### Fixed
+- **#98 — Unify "active record" definition (occupied capacity) + fix last_visit metric** — branch `fix-unify-active-record`:
+  - **CRITICAL (booking capacity):** `check_activity_capacity` now excludes cancelled/missed records via the shared `active_record_filter()` SQL helper and `ACTIVE_RECORD_STATUSES` constant. Cancelled/no-show records no longer phantom-occupy seats. This unifies the capacity check with the activity-view `occupied` metric — both now read from the same source of truth.
+  - **Correctness (client stats):** Client stat `last_visit` now reflects `MAX(Activity.start)` over attended (`visited`) visits, not the booking-creation date (`Visit.created_at`).
+  - **Shared helper:** New `ACTIVE_RECORD_STATUSES` constant (`{waiting, visited}`) in `backend/src/domain/visit_status.py` and `active_record_filter()` in `backend/src/domain/record_visits.py` — used by both `check_activity_capacity` (capacity domain) and `sum_active_seats` (activity view).
+  - **Refactored:** `sum_active_seats` in `backend/src/services/activity.py` drops its local constant in favor of the shared helper + agreement test.
+  - **Domain-rules synced:** 4 docs (`activities.md`, `_overview.md`, `records.md`, `clients.md`) now define "active record" consistently.
+  - **Tests: 649 passed, 4 xfailed** (baseline was 642 + 5 new capacity/last_visit tests). **No regression.**
+  - **No migration, no frontend, no API change.**
+  - **Spun-off:** GH #133 (backfill `last_record_activity` stat), GH #134 (deduplicate `VisitStatus` enum — Python & TypeScript share one definition).
+  - Design spec: `docs/specs/2026-07-08-unify-active-record-definition-design.md`
+  - Plan: `docs/plans/2026-07-08-unify-active-record-definition.md`
+
 - **#105 — Client stats cartesian product bug (scalar-subqueries rewrite)** — branch `fix-client-stats-scalar-subqueries`:
   - Rewrote `list_clients_with_stats` in `backend/src/services/client.py` to replace two `outerjoin→GROUP BY` subqueries with four independent correlated scalar subqueries (`.correlate(Client).scalar_subquery()`). Each subquery reads exactly one relation, making cross-relation multiplication (cartesian product) structurally impossible.
   - Added guard test (`test_total_paid_not_multiplied_by_visit_count`) that pins the exact data shape (1 record + multiple visits + payment) that would trigger the bug: `total_paid == 3000` (not 6000).

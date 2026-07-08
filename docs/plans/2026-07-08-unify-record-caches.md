@@ -36,7 +36,7 @@ How this behaves for the user, mapped to spec acceptance criteria (§4 User Scen
 **Modified files:**
 - `frontend/admin/hooks/useRecordMutations.ts` — fine-grained mutations write canonical + list keys via helpers; deferred-delete delegates to PendingActions; remove `invalidateAll` hammer.
 - `frontend/admin/hooks/useRecordData.ts` — unchanged signature; ensure it's the canonical reader (may add seeding note).
-- `frontend/admin/contexts/RecordsContext.tsx` — seed canonical `['record', id]` from list; keep `['records', df, dt]` + `['payments']` readers.
+- `frontend/admin/contexts/RecordsContext.tsx` — seed canonical `['record', id]` from list (Task 3b); keep `['records', df, dt]` + `['payments']` readers.
 - `frontend/admin/app/components/shared/record/blocks/RecordVisitsTable.tsx` — useMemo(saved)+useState(drafts), delete useEffect-sync.
 - `frontend/admin/app/components/shared/record/blocks/RecordPaymentsTable.tsx` — same pattern.
 - `frontend/admin/app/components/modal/ActivityDetailsModal/ClientTab.tsx` — fully hook-driven; drop visits/payments props; remove optimistic layer usage.
@@ -52,7 +52,8 @@ How this behaves for the user, mapped to spec acceptance criteria (§4 User Scen
 Foundation-first, each task leaves the app working:
 1. Cache-sync helpers (pure, testable) — no behavior change yet.
 2. PendingActions provider (isolated, no consumers yet).
-3. Rewire mutations to helpers + provider (behavior improves, old paths still present).
+3. Mount provider + seed canonical cache from list (RecordsContext).
+4. Rewire mutations to helpers + provider (behavior improves, old paths still present).
 4. Tables → useMemo+drafts (fixes row-disappears).
 5. ClientTab hook-driven + remove optimistic layer (fixes dual-source).
 6. ClientRecordTab fine-grained + remove optimistic layer.
@@ -214,6 +215,44 @@ Place it between `ClientsProvider` and `UserSettingsProvider` (or wrapping `{chi
 
 ### DoD
 - Provider mounted inside QueryClient + UIProvider; no test regressions.
+
+---
+
+## Task 3b: Seed canonical `['record', id]` from RecordsContext list
+
+### Classification: small
+
+### Required Docs
+- `docs/specs/2026-07-08-unify-record-caches-design.md` — §2.1 ("List caches are seeded from responses"), §7.
+- `frontend/admin/lib/cache/recordCacheSync.ts` (Task 1) — `seedRecordFromList` signature.
+- Current `frontend/admin/contexts/RecordsContext.tsx` — the `['records', df, dt]` query (line ~50).
+
+### Task Description
+Wire the `seedRecordFromList` helper (created in Task 1) into `RecordsContext.tsx` so that
+when the list query `['records', dateFrom, dateTo]` resolves, each record seeds the canonical
+`['record', id]` store (only if absent — the helper no-ops when present). This satisfies spec
+§2.1's seeding requirement and avoids a redundant `getRecord(recordId)` request the first time
+a record is opened from the schedule/records list.
+
+Implementation: after the records `useQuery` resolves, iterate the records and call
+`seedRecordFromList(queryClient, record)`. Use the query's data in an effect keyed on the
+records array (or React Query's `onSuccess`-equivalent pattern used elsewhere in the codebase —
+check existing patterns; TanStack v5 removed `onSuccess`, so use a `useEffect` on the resolved
+data). Guard against overwriting a fresher canonical entry (helper already no-ops if present).
+
+### Steps
+- [ ] Write/extend `frontend/admin/__tests__/RecordsContext.test.tsx` (RED): render the
+      provider with a mocked list response containing a record `r1`; assert that after the
+      query resolves, `queryClient.getQueryData(['record','r1'])` is populated (seeded); assert
+      it does NOT overwrite an already-present `['record','r1']` (fresher) entry.
+- [ ] Run `cd frontend/admin && npm run test -- RecordsContext` → FAIL.
+- [ ] Modify `RecordsContext.tsx` to call `seedRecordFromList` for each resolved record.
+- [ ] Run `npm run test -- RecordsContext` → PASS.
+- [ ] `npx tsc --noEmit` → clean.
+- [ ] Commit: `feat(#127): seed canonical record cache from RecordsContext list`
+
+### DoD
+- List responses seed `['record', id]`; no overwrite of fresher entries; no redundant getRecord on first open; tests pass.
 
 ---
 
@@ -494,6 +533,7 @@ Scenarios → tests:
 
 **Spec coverage:**
 - §2.1 Layer1 canonical+list sync → Tasks 1, 4, 9.
+- §2.1 list-to-canonical **seeding** → Task 1 (helper) + Task 3b (wired into RecordsContext).
 - §2.2 ClientTab hook-driven → Task 7.
 - §2.2b unify mutations + remove optimistic → Tasks 7, 8, 9.
 - §2.3 Variant X deferred-delete → Task 4.

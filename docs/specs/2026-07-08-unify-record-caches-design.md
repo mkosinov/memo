@@ -108,6 +108,36 @@ payments, visitorsMap all from the canonical `['record', recordId]` store. The
 prop-passing of visits/payments from the parent is removed. This mirrors `ClientRecordTab`
 (the /clients tab), which is already fully hook-driven — an existing correct template.
 
+#### 2.2b Unify visit mutations on fine-grained + remove the optimistic override layer
+
+Recon (2026-07-08) found **three coexisting visit-mutation mechanisms**, which is the deeper
+reason the caches diverge:
+
+1. **Fine-grained** — `addVisit` / `patchVisit` / `deleteVisit` (write `['record', recordId]`).
+2. **Coarse** — `saveRecord` / `patchRecord` with a full `visits[]` array (ClientTab's
+   `handleDeleteVisit`/`handleAddVisitor` via `onUpdateRecord`/`addVisitorToRecord`, and
+   ClientRecordTab's `handleDeleteVisitor`/`handleAddVisitor` via `saveRecord`).
+3. **`useOptimisticVisitMutation`** — a THIRD optimistic layer holding local
+   `visitOverrides` / `visitorOverrides` state, merging them into `mergedVisits` /
+   `mergedVisitorsMap`, and calling coarse `onUpdateRecord` under the hood.
+
+This triple mechanism is a second source of truth on top of the cache split. The refactor
+**unifies all visit mutations on the fine-grained path** (which writes the canonical store)
+and **removes `useOptimisticVisitMutation`** entirely:
+
+- Both `ClientTab` and `ClientRecordTab` use ONLY `addVisit` / `patchVisit` / `deleteVisit`
+  (+ `deleteVisitDeferred`) for visit CRUD. The coarse full-array `saveRecord`/`patchRecord`
+  path for visit add/delete is removed from the visit tables' flow.
+- `useOptimisticVisitMutation` is deleted. Its optimistic behavior is now provided by the
+  fine-grained mutations' own `setQueryData` on the canonical store (Section 2.1) — once
+  mutations write the cache the UI reads, local override state is redundant.
+- `mergedVisits`/`mergedVisitorsMap` consumers switch to reading directly from
+  `useRecordData` (canonical) — no merge layer.
+
+**Note:** `saveRecord`/`patchRecord` remain for record-level fields (custom_price, comment,
+activity/date/service changes, anonym_visits) — those are NOT visit CRUD and stay coarse.
+Only the visit add/delete/patch flow is moved off the full-array path.
+
 #### 2.3 Deferred-delete = optimistic setQueryData (Variant X)
 
 Deleting a **saved** row (5s undo window) must "hide" the row before the real DELETE fires,
@@ -186,7 +216,8 @@ in without rewriting the provider. No speculative report/notify handlers are bui
 ### In scope
 - Layer 1 cache unification (canonical `['record', recordId]`, list-key sync, `['payments']` unify, remove `invalidateAll` hammer).
 - Fix `['records', 'client', clientId]` (add writer / include in sync).
-- Layer 2: useMemo+drafts tables, ClientTab hook-driven, optimistic deferred-delete, app-level undo provider.
+- Layer 2: useMemo+drafts tables, ClientTab hook-driven, optimistic deferred-delete, app-level PendingActions provider.
+- **Unify visit mutations on fine-grained path + remove `useOptimisticVisitMutation`** (Section 2.2b). Both ClientTab and ClientRecordTab use only addVisit/patchVisit/deleteVisit for visit CRUD.
 - **Absorbs #130** (deleteRecord bare-key + deletePaymentDeferred missing invalidation dissolve under single source of truth). Close #130 as superseded-by-#127 once this lands.
 
 ### Out of scope (explicit)
@@ -196,9 +227,11 @@ in without rewriting the provider. No speculative report/notify handlers are bui
   cross-entity shared sub-objects appear.
 
 ### Blast radius (files)
-`RecordsContext`, `useRecordData`, `useRecordMutations`, `useOptimisticVisitMutation`,
+`RecordsContext`, `useRecordData`, `useRecordMutations`, `useOptimisticVisitMutation` (DELETED),
 `ActivityDetailsModal`, `ClientTab`, `ClientRecordTab`, `ClientCardModal` (both /records and
-/clients variants), `RecordVisitsTable`, `RecordPaymentsTable`, + new app-level undo provider.
+/clients variants), `RecordVisitsTable`, `RecordPaymentsTable`, + new app-level
+`PendingActionsProvider`. Existing toast infra (`UIContext.showToast(msg, undo)` +
+`ToastContainer`) is REUSED by the provider — not duplicated.
 
 ---
 

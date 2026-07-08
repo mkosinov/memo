@@ -491,6 +491,41 @@ class TestActivityEdgeCases:
         })
         assert after.status_code == 201, f"seat should be free after missed: {after.text}"
 
+    def test_capacity_view_and_check_agree(
+        self, api_client, create_record, _create_activity_payload
+    ):
+        """sum_active_seats (view 'occupied') and check_activity_capacity agree:
+        after cancelling a record, the view occupied drops AND a booking for the
+        freed seats is admitted — same underlying active_record_filter."""
+        act_payload = _create_activity_payload()
+        act_payload["capacity"] = 4
+        act_id = api_client.post("/api/v1/activities", json=act_payload).json()["id"]
+
+        r1 = create_record(activity_id=act_id, visits=[
+            {"name": "A", "price": 1000},
+            {"name": "B", "price": 1000},
+        ])
+        create_record(activity_id=act_id, visits=[
+            {"name": "C", "price": 1000},
+            {"name": "D", "price": 1000},
+        ])
+        # view: full
+        assert api_client.get(f"/api/v1/activities/{act_id}").json()["occupied"] == 4
+
+        # cancel r1 (2 seats)
+        for visit in r1["visits"]:
+            api_client.put(f"/api/v1/visits/{visit['id']}/status", json={"status": "cancelled"})
+
+        # view now reports 2
+        assert api_client.get(f"/api/v1/activities/{act_id}").json()["occupied"] == 2
+        # check agrees: a 2-seat booking is admitted (not 409)
+        after = api_client.post("/api/v1/records", json={
+            "activity_id": act_id,
+            "visits": [],
+            "anonym_visits": 2,
+        })
+        assert after.status_code == 201, f"view/check disagree: {after.text}"
+
     def test_activity_no_records_occupied_zero(self, api_client, create_activity):
         """Activity with no records → occupied=0."""
         activity = create_activity()

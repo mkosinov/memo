@@ -14,6 +14,7 @@ from src.models.activity import Activity
 from src.models.record import Record
 from src.schemas.activity import ActivityCreate, ActivityResponse, ActivityUpdate
 from src.services.generic import GenericService
+from src.domain.record_visits import active_record_filter
 
 
 class ActivityService(GenericService[ActivityCreate, ActivityUpdate, ActivityResponse]):
@@ -22,10 +23,6 @@ class ActivityService(GenericService[ActivityCreate, ActivityUpdate, ActivityRes
     # Fields that map to NOT NULL columns in the activities table.
     # Patch should silently ignore null values for these fields.
     NOT_NULL_FIELDS = {"master_id", "service_id", "location_id", "start", "duration", "capacity"}
-
-    # Only VisitStatus values that mean "the visit will happen or has happened".
-    # Cancelled and missed are excluded from the sum.
-    ACTIVE_RECORD_STATUSES = ("waiting", "visited")
 
     def __init__(
         self, repository: SoftDeleteRepository, model: type[Activity]
@@ -67,13 +64,13 @@ class ActivityService(GenericService[ActivityCreate, ActivityUpdate, ActivityRes
     ) -> int:
         """Return SUM(seats) for active records (excludes cancelled/missed).
 
-        Active = is_active AND status IN ('waiting', 'visited').
+        Active definition is shared with check_activity_capacity via
+        domain.record_visits.active_record_filter so the view and the
+        capacity check can never drift apart.
         """
         result = await db_session.execute(
             select(func.coalesce(func.sum(Record.seats), 0)).where(
-                Record.activity_id == activity_id,
-                Record.is_active.is_(True),  # type: ignore[union-attr]
-                Record.status.in_(self.ACTIVE_RECORD_STATUSES),
+                *active_record_filter(activity_id)
             )
         )
         return int(result.scalar() or 0)

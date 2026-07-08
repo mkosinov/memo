@@ -123,21 +123,61 @@ while keeping the cache as the single source of truth:
 
 No separate `pendingDeleteIds` Set — the cache is the source of truth for "hidden" too.
 
-#### 2.4 App-level undo provider (Bug #2)
+#### 2.4 App-level PendingActions provider (Bug #2)
 
 Deferred-delete timers currently live in `useRecordMutations`' `useRef<Map>` (338-347),
 with a cleanup `useEffect` that clears them on unmount. Closing the modal unmounts the hook
 → pending DELETE cancelled → cache says "deleted", server says "not deleted" → zombie row
 returns on reopen (this is the C-clarification symptom).
 
-Fix: move the pending-delete queue (timers + toast + optimistic cache operations) into an
-**app-level provider** mounted above the modals. The provider owns the full deferred-delete
-lifecycle:
-- schedules the timer (survives modal unmount → DELETE completes),
-- performs the optimistic cache remove/restore (Variant X),
+Fix: move the deferred-action queue into an **app-level `PendingActionsProvider`** mounted
+above the modals. It is **generic by mechanism (command pattern)** — the provider does NOT
+know about visits/payments/recordId. It only stores and runs closures supplied by the caller.
+
+**Interface:**
+```ts
+type PendingAction = {
+  id: string;                    // dedupe / cancel key (e.g. the visit/payment id)
+  kind: 'delete';                // OPEN string union — 'report' | 'notify' | ... added later
+  message: string;               // toast text, e.g. 'Удалено. Отменить'
+  delayMs: number;               // undo window (5000 for delete)
+  commit: () => Promise<void>;   // the real action on timeout (API DELETE + reconcile)
+  undo:   () => void;            // rollback the optimistic change (restore snapshot into its cache)
+};
+
+// provider API
+enqueuePendingAction(action: PendingAction): void;
+```
+
+The **caller** (the mutation) owns everything entity-specific:
+- takes the snapshot from its own cache BEFORE removing (the "what to restore"),
+- does the optimistic remove via `setQueryData` on its own key (the "where"),
+- passes `undo` = restore-snapshot-into-that-key, `commit` = API DELETE + reconcile.
+
+Example (visit delete — the caller knows its entity + cache key):
+```ts
+const snapshot = getQueryData(['record', recordId])?.visits.find(v => v.id === visitId);
+setQueryData(['record', recordId], removeVisit(visitId));   // optimistic hide (Variant X)
+enqueuePendingAction({
+  id: visitId,
+  kind: 'delete',
+  message: 'Удалено. Отменить',
+  delayMs: 5000,
+  undo:   () => setQueryData(['record', recordId], addBack(snapshot)),
+  commit: () => apiDeleteVisit(visitId).then(() => /* targeted reconcile */),
+});
+```
+
+The provider owns only the generic lifecycle:
+- schedules the timer (**survives modal unmount** → `commit()` completes),
+- on undo click → calls `action.undo()` + clears the timer,
 - renders the undo toast at app level.
 
 Because the timer no longer lives in the modal, closing the modal does not cancel the DELETE.
+
+**Scope discipline (YAGNI):** in THIS PR only `kind: 'delete'` for visit/payment is
+implemented. `kind` is an open union so future `'report'` / `'notify'` deferred actions plug
+in without rewriting the provider. No speculative report/notify handlers are built now.
 
 ---
 
@@ -210,7 +250,20 @@ Because the timer no longer lives in the modal, closing the modal does not cance
 - Removing `invalidateAll()` must not under-invalidate: each mutation's targeted updates must
   cover every reader of the changed data. The plan must enumerate reader→writer pairs per
   mutation (recon map in scratchpad is the source).
-- App-level undo provider changes app composition (a new provider high in the tree) — verify
+- App-level provider changes app composition (a new provider high in the tree) — verify
   it wraps all pages that use deferred-delete (/schedule, /clients, /records).
 - ClientCardModal (/clients) currently fetches its own `['records','client',id]` — decide in
   the plan whether it seeds the canonical store or reads a synced list key.
+- **Undo snapshot correctness:** the caller must snapshot the FULL row from the correct cache
+  key BEFORE the optimistic remove; `undo` writes that snapshot back into the SAME key. The
+  provider never inspects the snapshot — it only calls `undo()`. Visits and payments live in
+  different keys (`['record',id].visits` vs `['payments',recordId]`), so each caller's
+  `undo`/`commit` closures are entity-specific by construction.
+- **Stale-cache on restore:** if a refetch replaces the cache during the 5s window, `undo`'s
+  `setQueryData(old => …)` must guard `old == null` (preserve current `if (!old) return old`
+  behavior) so restore never throws or writes into a deleted record.
+- **Multiple concurrent pending actions:** the provider keys by `action.id`; enqueueing the
+  same id cancels the prior timer first (preserve current "cancel existing timer" behavior).
+- **Future kinds (out of scope, noted for extensibility):** `PendingReporting` /
+  `PendingNotification` etc. reuse the same `enqueuePendingAction` with a different `commit`
+  and `kind`; no provider change needed.

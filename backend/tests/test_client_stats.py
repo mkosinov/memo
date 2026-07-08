@@ -926,6 +926,39 @@ class TestClientStatsAggregationExtended:
         item = next(c for c in resp.json()["items"] if c["id"] == client["id"])
         assert item["total_paid"] == 5000
 
+    def test_total_paid_not_multiplied_by_visit_count(
+        self, api_client, create_activity, create_client
+    ) -> None:
+        """Guard against cartesian product: 1 record with multiple visits + payments.
+
+        total_paid must equal the true payment sum, NOT sum * number_of_visits.
+        This is the exact shape that triggered the historical inflated-total bug (#105).
+        """
+        # 1 record with 2 visits (this is what multiplies payments if joined naively)
+        client, record = _create_client_with_record(
+            api_client, create_activity, create_client,
+            client={"name": "CartesianGuard", "phone": "+79999123456"},
+            visits=[
+                {"name": "V1", "price": 3500, "status": "missed"},
+                {"name": "V2", "price": 2500, "status": "visited"},
+            ],
+        )
+        # 2 payments totaling 3000
+        _add_payment(api_client, record["id"], amount=1000, method="card")
+        _add_payment(api_client, record["id"], amount=2000, method="cash")
+
+        resp = api_client.get("/api/v1/clients")
+        item = next(c for c in resp.json()["items"] if c["id"] == client["id"])
+
+        # total_paid must be exactly 3000, NOT 6000 (= 3000 * 2 visits)
+        assert item["total_paid"] == 3000, (
+            f"total_paid inflated by cartesian product: got {item['total_paid']}, "
+            f"expected 3000 (payments must not be multiplied by visit count)"
+        )
+        # sanity: other stats unaffected by the same query
+        assert item["visits_count"] == 1  # one record, not two visits
+        assert item["missed_visits"] == 1  # only the 'missed' visit
+
     def test_last_visit_is_most_recent(
         self, api_client, create_activity, create_client
     ) -> None:

@@ -386,6 +386,7 @@ Migrate `RecordStatus` (pending/confirmed/cancelled/no_show) to derived `VisitSt
 ---
 
 ## Changelog
+- 2026-07-08: **#105 — Client stats cartesian product fix** — Rewrote `list_clients_with_stats` with scalar subqueries to eliminate cross-relation multiplication. Branch `fix-client-stats-scalar-subqueries`.
 - 2026-07-07: **Addendum-2: InlineEditableTable unified rows + hard-delete + deferred undo** — 6 main tasks (backend hard-delete + repo split, frontend Zod schema cleanup, optimistic cache sync, tariff dropdown, deferred delete with undo toast, E2E scenarios 15-19) + FasTP Bug #1 (over-capacity toast). Branch `feat-inline-editable-unified-rows`, 17 commits.
 - 2026-06-19: **Wave 5 — 14 P1/P3 UX Bugs** — closed #74–#86 (except #73) in ActivityDetailsModal, ClientTab, ActivityCard; 14 commits, 7/7 visual checks passed (branch `fix/wave5-ux-bugs`).
 - 2026-06-19: **Wave 4.5 — Fix TS Errors Blocking Pre-Push Hook** — 55→0 TS errors, 11 commits, closes #88. Deleted 2 dead files, added `maxAge` to `ActivitySchema` + `required` to `TagsFieldConfig`, updated 5 test mock files, type guard + `Array.from` fixes. No suppressions added (branch `fix/ts-errors-blocking-hook`).

@@ -65,6 +65,7 @@
 ## Cross-Entity Invariants
 
 1. **Capacity:** `occupied + seats <= activity.capacity` (on Record create only)
+   - `occupied` is the SUM of `Record.seats` for records matching `active_record_filter()` — i.e. `is_active = True AND status IN ('waiting','visited')`. Cancelled and missed records do NOT occupy a seat. See `src/domain/record_visits.py` and `ACTIVE_RECORD_STATUSES` in `src/domain/visit_status.py`.
 2. **Seats = len(visits):** Always computed, never user-set
 3. **Cascade soft-delete:** Record → Visits + Payments
 4. **No cascade:** Activity delete does NOT affect Records

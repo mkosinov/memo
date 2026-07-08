@@ -8,6 +8,7 @@ from functools import lru_cache
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.models.activity import Activity
 from src.models.client import Client
 from src.models.payment import Payment
 from src.models.record import Record
@@ -44,10 +45,15 @@ async def list_clients_with_stats(
         .scalar_subquery()
     )
     last_visit_sq = (
-        select(func.max(Visit.created_at))
+        select(func.max(Activity.start))
         .select_from(Visit)
         .join(Record, Visit.record_id == Record.id)
-        .where(Record.client_id == Client.id, Record.is_active == True)  # noqa: E712
+        .join(Activity, Record.activity_id == Activity.id)
+        .where(
+            Record.client_id == Client.id,
+            Record.is_active == True,  # noqa: E712
+            Visit.status == "visited",
+        )
         .correlate(Client)
         .scalar_subquery()
     )

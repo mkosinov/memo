@@ -412,6 +412,85 @@ class TestActivityEdgeCases:
         response = api_client.get(f"/api/v1/activities/{act_id}")
         assert response.json()["occupied"] == 3  # only r1 counts (3 seats)
 
+    # ─── BUG #98 CRITICAL: capacity check must exclude cancelled/missed records ─
+
+    def test_capacity_check_excludes_cancelled_record(
+        self, api_client, create_record, _create_activity_payload
+    ):
+        """A cancelled record frees its seat for a new booking (capacity guard)."""
+        act_payload = _create_activity_payload()
+        act_payload["capacity"] = 3
+        act_resp = api_client.post("/api/v1/activities", json=act_payload)
+        assert act_resp.status_code == 201
+        act_id = act_resp.json()["id"]
+
+        # Fill all 3 seats
+        r1 = create_record(activity_id=act_id, visits=[
+            {"name": "A", "price": 1000},
+            {"name": "B", "price": 1000},
+            {"name": "C", "price": 1000},
+        ])
+        # Spec edge-case #1: create-ordering — the new record must NOT
+        # count against its own capacity check (create runs BEFORE flush).
+        assert len(r1["visits"]) == 3
+
+        # Sanity: activity now full → a new booking is rejected.
+        # Use anonym_visits=1 to avoid the unrelated NOT NULL constraint
+        # on visitors.client_id (visitors.client_id is NOT NULL, and the
+        # capacity check 409s BEFORE any visitor insert, so this is fine
+        # for the sanity check).
+        full = api_client.post("/api/v1/records", json={
+            "activity_id": act_id,
+            "visits": [],
+            "anonym_visits": 1,
+        })
+        assert full.status_code == 409, f"expected full: {full.text}"
+
+        # Cancel all visits of r1 → record status becomes 'cancelled' → seats freed
+        for visit in r1["visits"]:
+            api_client.put(
+                f"/api/v1/visits/{visit['id']}/status",
+                json={"status": "cancelled"},
+            )
+
+        # Now the same booking must succeed (anonym_visits avoids the
+        # visitor/client_id insert path entirely — we are only testing
+        # the capacity check, not the visitor resolver).
+        after = api_client.post("/api/v1/records", json={
+            "activity_id": act_id,
+            "visits": [],
+            "anonym_visits": 1,
+        })
+        assert after.status_code == 201, f"seat should be free after cancel: {after.text}"
+
+    def test_capacity_check_excludes_missed_record(
+        self, api_client, create_record, _create_activity_payload
+    ):
+        """A missed (no-show) record frees its seat for a new booking."""
+        act_payload = _create_activity_payload()
+        act_payload["capacity"] = 3
+        act_resp = api_client.post("/api/v1/activities", json=act_payload)
+        assert act_resp.status_code == 201
+        act_id = act_resp.json()["id"]
+
+        r1 = create_record(activity_id=act_id, visits=[
+            {"name": "A", "price": 1000},
+            {"name": "B", "price": 1000},
+            {"name": "C", "price": 1000},
+        ])
+        for visit in r1["visits"]:
+            api_client.put(
+                f"/api/v1/visits/{visit['id']}/status",
+                json={"status": "missed"},
+            )
+
+        after = api_client.post("/api/v1/records", json={
+            "activity_id": act_id,
+            "visits": [],
+            "anonym_visits": 1,
+        })
+        assert after.status_code == 201, f"seat should be free after missed: {after.text}"
+
     def test_activity_no_records_occupied_zero(self, api_client, create_activity):
         """Activity with no records → occupied=0."""
         activity = create_activity()

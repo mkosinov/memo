@@ -105,8 +105,7 @@ async def check_activity_capacity(
 
     occupied_result = await db_session.execute(
         select(func.coalesce(func.sum(Record.seats), 0)).where(
-            Record.activity_id == activity_id,
-            Record.is_active.is_(True),
+            *active_record_filter(activity_id)
         )
     )
     occupied = occupied_result.scalar() or 0

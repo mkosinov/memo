@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useCallback, useContext, useMemo } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   getRecords,
@@ -21,6 +21,7 @@ import type {
   LocationResponse,
 } from '@memo/api-client';
 import { useNavigation } from '@/contexts/NavigationContext';
+import { seedRecordFromList } from '@/lib/cache/recordCacheSync';
 
 export interface RecordsContextType {
   records: RecordResponse[];
@@ -50,6 +51,14 @@ export function RecordsProvider({ children }: { children: React.ReactNode }) {
     queryKey: ['records', dateFrom, dateTo],
     queryFn: () => getRecords({ date_from: dateFrom, date_to: dateTo }),
   });
+
+  // Seed canonical ['record', id] from list responses. Avoids a redundant
+  // getRecord() request the first time a record is opened (spec §2.1).
+  // The helper no-ops if ['record', id] is already populated, so a fresher
+  // entry (e.g. from an in-flight useRecordData fetch) is never overwritten.
+  useEffect(() => {
+    records.forEach((r) => seedRecordFromList(queryClient, r));
+  }, [records, queryClient]);
 
   const { data: activitiesRaw = [] } = useQuery<ActivityResponse[]>({
     queryKey: ['activities', dateFrom, dateTo],

@@ -1,10 +1,10 @@
 'use client';
 
 import React, { useState, useCallback, useRef } from 'react';
-import type { RecordResponse, ClientResponse, VisitorResponse, PaymentResponse, TariffResponse, ClientWithStats } from '@memo/api-client';
-import type { RecordPatchData } from '@/hooks/useRecordMutations';
+import type { ClientResponse, ClientWithStats } from '@memo/api-client';
 import type { VisitStatus } from '@memo/domain';
-import { useRouter } from 'next/navigation';
+import { useQueryClient } from '@tanstack/react-query';
+import { updateVisitor } from '@memo/api-client';
 import { RecordSummary } from '@/app/components/shared/record/blocks/RecordSummary';
 import { RecordVisitsTable } from '@/app/components/shared/record/blocks/RecordVisitsTable';
 import { RecordPaymentsTable } from '@/app/components/shared/record/blocks/RecordPaymentsTable';
@@ -13,86 +13,126 @@ import { RecordTimestamps } from '@/app/components/shared/record/blocks/RecordTi
 import { ClientStatistics } from '@/app/components/shared/record/blocks/ClientStatistics';
 import { useRecordData } from '@/hooks/useRecordData';
 import { useRecordMutations } from '@/hooks/useRecordMutations';
-import { useOptimisticVisitMutation } from '@/hooks/useOptimisticVisitMutation';
-import type { RecordWithDerived } from '@/app/components/shared/records/types';
-import { computeRecordStatus } from '@memo/domain';
+import { useUI } from '@/contexts/UIContext';
 import { safeStatus } from '@/app/lib/status-utils';
-import { WaitingIcon, VisitedIcon, MissedIcon, CancelledIcon } from '@/app/components/shared/icons/StatusIcons';
-
-const STATUS_CONFIG: Record<VisitStatus, { label: string; color: string }> = {
-  waiting: { label: 'Ожидание', color: '#F59E0B' },
-  visited: { label: 'Посетил', color: '#10B981' },
-  cancelled: { label: 'Отменён', color: '#6B7280' },
-  missed: { label: 'Неявка', color: '#EF4444' },
-};
-
-function renderStatusIcon(status: VisitStatus): React.ReactNode {
-  const iconClass = 'w-3.5 h-3.5';
-  switch (status) {
-    case 'waiting': return <WaitingIcon className={iconClass} />;
-    case 'visited': return <VisitedIcon className={iconClass} />;
-    case 'cancelled': return <CancelledIcon className={iconClass} />;
-    case 'missed': return <MissedIcon className={iconClass} />;
-  }
-}
+import { computeRecordStatus } from '@memo/domain';
+import { parseApiError } from '@/app/lib/api/parseApiError';
 
 interface ClientTabProps {
-  record: RecordResponse;
+  recordId: string;
+  activityId: string;
+  clientId: string;
   client: ClientResponse | ClientWithStats | undefined;
-  visitors: VisitorResponse[];
-  visits: RecordResponse['visits'];
-  payments: PaymentResponse[];
-  serviceTariffs: TariffResponse[];
-  onUpdateRecord: (id: string, data: RecordPatchData) => Promise<void>;
   onDeleteRecord: (id: string) => void;
-  onAddVisitor?: (data: { name: string; age?: number; price: number }) => Promise<void>;
-  showToast: (message: string, undo?: () => void) => void;
   onClose?: () => void;
 }
 
 export function ClientTab({
-  record,
+  recordId,
+  activityId,
+  clientId,
   client,
-  visitors,
-  visits,
-  payments,
-  serviceTariffs,
-  onUpdateRecord,
   onDeleteRecord,
-  onAddVisitor,
-  showToast,
-  onClose,
+  onClose: _onClose,
 }: ClientTabProps) {
   const isDeletingRef = useRef(false);
-  const router = useRouter();
-  const { visitorsMap: realVisitorsMap } = useRecordData(record.id, client?.id ?? '');
-  const { updateVisitStatus, addVisit, patchVisit, deleteVisit: _deleteVisit, addPayment, patchPayment, deletePayment: _deletePayment, deleteVisitDeferred, deletePaymentDeferred } = useRecordMutations(record.activity_id ?? '', record.id);
+  const queryClient = useQueryClient();
+  const { showToast } = useUI();
 
-  // Optimistic visit mutation layer
+  // ── Canonical data from useRecordData (single source of truth) ──────
   const {
-    mergedVisitorsMap,
-    mergedVisits,
-    handleVisitorChange,
-    handleVisitChange,
-    handleVisitPriceChange,
-  } = useOptimisticVisitMutation({
     record,
-    visitorsMap: realVisitorsMap,
-    serviceTariffs,
-    onUpdateRecord,
-    updateVisitStatus,
-    showToast,
-  });
+    visitorsMap,
+    tariffs,
+    payments,
+    status,
+  } = useRecordData(recordId, clientId);
 
-  // Derive status from visits
-  const status: VisitStatus = computeRecordStatus(
-    (visits || []).map(v => ({ id: v.id, status: safeStatus(v.status) })),
+  // ── Mutations (fine-grained where possible) ──────────────────────────
+  const {
+    updateRecord,
+    addVisit,
+    patchVisit,
+    deleteVisitDeferred,
+    addPayment,
+    patchPayment,
+    deletePaymentDeferred,
+  } = useRecordMutations(activityId, recordId);
+
+  // ── Local state ──────────────────────────────────────────────────────
+  const [comment, setComment] = useState(record?.comment || '');
+
+  // Sync local comment when the record changes (e.g. after invalidation).
+  React.useEffect(() => {
+    if (record?.comment !== undefined) {
+      setComment(record.comment || '');
+    }
+  }, [record?.comment]);
+
+  // ── Handlers ─────────────────────────────────────────────────────────
+
+  /**
+   * Visitor name/age change — fine-grained: updateVisitor + invalidate
+   * ['visitors', clientId] so the canonical hook refetches. No optimistic
+   * override layer.
+   */
+  const handleVisitorChange = useCallback(
+    (visitorId: string, data: { name?: string; age?: number | null }) => {
+      const apiData = { ...data, age: data.age ?? undefined };
+      updateVisitor(visitorId, apiData)
+        .then(() => {
+          // Reader: ['visitors', clientId] in useRecordData
+          queryClient.invalidateQueries({ queryKey: ['visitors', clientId] });
+        })
+        .catch((err) => {
+          showToast(parseApiError(err).message, 'error');
+        });
+    },
+    [clientId, queryClient, showToast],
   );
 
-  // Comment state
-  const [comment, setComment] = useState(record.comment || '');
+  // Status change on the record (RecordSummary StatusPicker) — coarse
+  // record-level patch: all visits set to the new status in one PATCH.
+  // Spec allows record-level ops to stay via `updateRecord` from the hook.
+  const handleStatusChange = useCallback(
+    async (newStatus: VisitStatus) => {
+      const visits = record?.visits ?? [];
+      const updatedVisits = visits.map((v) => ({
+        visitor_id: v.visitor_id,
+        price: v.price,
+        status: newStatus,
+      }));
+      try {
+        await updateRecord(recordId, { visits: updatedVisits } as any);
+      } catch {
+        showToast('Ошибка обновления статуса', 'error');
+      }
+    },
+    [record?.visits, recordId, updateRecord, showToast],
+  );
 
-  // ── Handlers ─────────────────────────────────────────────────────────────
+  const handleAnonymChange = useCallback(
+    async (value: number) => {
+      try {
+        await updateRecord(recordId, { anonym_visits: value } as any);
+      } catch {
+        showToast('Ошибка изменения анонимных посетителей', 'error');
+      }
+    },
+    [recordId, updateRecord, showToast],
+  );
+
+  const handleCommentChange = useCallback(
+    async (value: string) => {
+      setComment(value);
+      try {
+        await updateRecord(recordId, { comment: value } as any);
+      } catch {
+        showToast('Ошибка сохранения комментария', 'error');
+      }
+    },
+    [recordId, updateRecord, showToast],
+  );
 
   const handleDelete = useCallback(() => {
     isDeletingRef.current = true;
@@ -101,71 +141,34 @@ export function ClientTab({
     });
     setTimeout(() => {
       if (isDeletingRef.current) {
-        onDeleteRecord(record.id);
+        onDeleteRecord(recordId);
       }
     }, 5000);
-  }, [onDeleteRecord, record.id, showToast]);
+  }, [onDeleteRecord, recordId, showToast]);
 
-  const handleStatusChange = useCallback((newStatus: VisitStatus) => {
-    // Update all visits to the new status
-    const updatedVisits = (visits || []).map(v => ({
-      visitor_id: v.visitor_id,
-      price: v.price,
-      status: newStatus,
-    }));
-    onUpdateRecord(record.id, { visits: updatedVisits } as any).catch(() => {
-      showToast('Ошибка обновления статуса');
-    });
-  }, [visits, record.id, onUpdateRecord, showToast]);
+  // ── Derived data ─────────────────────────────────────────────────────
 
-  const handleDeleteVisit = useCallback(async (visitId: string) => {
-    const remaining = (visits || []).filter(v => v.id !== visitId).map(v => ({
-      visitor_id: v.visitor_id,
-      price: v.price,
-      status: v.status,
-    }));
-    try {
-      await onUpdateRecord(record.id, { visits: remaining } as any);
-    } catch {
-      showToast('Ошибка удаления посетителя');
-    }
-  }, [visits, record.id, onUpdateRecord, showToast]);
+  const visits = record?.visits ?? [];
+  const derivedStatus: VisitStatus =
+    status ??
+    computeRecordStatus(
+      visits.map((v) => ({ id: v.id, status: safeStatus(v.status) })),
+    );
 
-  const handleAddVisitor = useCallback(async (data: { name: string; age: number | null; tariff_id: string }) => {
-    if (onAddVisitor) {
-      const tariff = serviceTariffs.find(t => t.id === data.tariff_id);
-      await onAddVisitor({ name: data.name, age: data.age ?? undefined, price: tariff?.price ?? 0 });
-    }
-  }, [onAddVisitor, serviceTariffs]);
-
-  const handleAnonymChange = useCallback((value: number) => {
-    onUpdateRecord(record.id, { anonym_visits: value } as any).catch(() => {
-      showToast('Ошибка изменения анонимных посетителей');
-    });
-  }, [record.id, onUpdateRecord, showToast]);
-
-  const handleCommentChange = useCallback((value: string) => {
-    setComment(value);
-    onUpdateRecord(record.id, { comment: value } as any).catch(() => {
-      showToast('Ошибка сохранения комментария');
-    });
-  }, [record.id, onUpdateRecord, showToast]);
-
-  // ── Derived data ─────────────────────────────────────────────────────────
-
-  const totalCost = (visits || []).reduce((sum, v) => sum + v.price, 0);
+  const totalCost = visits.reduce((sum, v) => sum + v.price, 0);
   const totalPaid = payments.reduce((sum, p) => sum + p.amount, 0);
   const toPay = Math.max(0, totalCost - totalPaid);
 
   // Compute stats for ClientStatistics
-  const stats = client && 'visits_count' in client
-    ? {
-        visitsCount: client.visits_count,
-        missedVisits: client.missed_visits,
-        lastVisit: client.last_visit,
-        totalPaid: client.total_paid,
-      }
-    : undefined;
+  const stats =
+    client && 'visits_count' in client
+      ? {
+          visitsCount: client.visits_count,
+          missedVisits: client.missed_visits,
+          lastVisit: client.last_visit,
+          totalPaid: client.total_paid,
+        }
+      : undefined;
 
   return (
     <div className="flex flex-col flex-1 min-h-0" data-testid="client-tab">
@@ -175,8 +178,8 @@ export function ClientTab({
         <RecordSummary
           totalCost={totalCost}
           totalPaid={totalPaid}
-          seats={(visits || []).length + (record.anonym_visits ?? 0)}
-          status={status}
+          seats={visits.length + (record?.anonym_visits ?? 0)}
+          status={derivedStatus}
           onStatusChange={handleStatusChange}
         />
 
@@ -185,13 +188,13 @@ export function ClientTab({
 
         {/* Visits table */}
         <RecordVisitsTable
-          visits={mergedVisits}
-          visitorsMap={mergedVisitorsMap}
-          tariffs={serviceTariffs}
-          anonymVisits={record.anonym_visits ?? 0}
+          visits={visits}
+          visitorsMap={visitorsMap}
+          tariffs={tariffs}
+          anonymVisits={record?.anonym_visits ?? 0}
           totalCost={totalCost}
-          recordStatus={status}
-          clientId={client?.id ?? ''}
+          recordStatus={derivedStatus}
+          clientId={clientId}
           onAddVisit={addVisit}
           onPatchVisit={patchVisit}
           onDeleteVisit={(visitId: string) => deleteVisitDeferred(visitId)}
@@ -217,7 +220,10 @@ export function ClientTab({
         className="shrink-0 border-t px-4 py-3 bg-white flex items-center justify-between gap-4"
         style={{ borderColor: 'var(--line)' }}
       >
-        <RecordTimestamps createdAt={record.created_at} updatedAt={record.updated_at} />
+        <RecordTimestamps
+          createdAt={record?.created_at ?? ''}
+          updatedAt={record?.updated_at ?? ''}
+        />
         <button
           onClick={handleDelete}
           className="text-sm text-red-500 hover:text-red-600 transition-colors shrink-0"

@@ -24,7 +24,7 @@ interface ActivityDetailsModalProps {
 
 export function ActivityDetailsModal({ isOpen, onClose, activity, mode }: ActivityDetailsModalProps) {
   const { services, servicesRaw, updateActivity, deleteActivity } = useSchedule();
-  const { records, clients, payments } = useRecords();
+  const { records, clients } = useRecords();
   const { clients: clientsList } = useClients();
   const { showToast } = useUI();
 
@@ -36,7 +36,7 @@ export function ActivityDetailsModal({ isOpen, onClose, activity, mode }: Activi
     : null;
 
   // Use the hook for record mutations (only when we have a record ID)
-  const { createRecord, deleteRecord, addVisitorToRecord, updateRecord } = useRecordMutations(activity.id, activeRecordId || '');
+  const { createRecord, deleteRecord } = useRecordMutations(activity.id, activeRecordId || '');
 
   // Current service and its tariffs (used by all tab contents)
   const currentService = useMemo(
@@ -60,24 +60,7 @@ export function ActivityDetailsModal({ isOpen, onClose, activity, mode }: Activi
 
   // Build a visitors map from records' visits (visitors are embedded in visits via visitor_id)
   // We need to look up visitor details from RecordsContext or we pass visits directly
-  const visitorsByRecord = useMemo(() => {
-    // Since visitors are not stored separately in RecordsContext,
-    // we derive them from visits embedded in records
-    const map = new Map<string, Array<{ id: string; name: string; age: number | null }>>();
-    for (const record of activityRecords) {
-      // Visits contain visitor_id, but we need actual visitor objects.
-      // For now, we create lightweight visitor objects from visit data.
-      map.set(
-        record.id,
-        record.visits.map((v) => ({
-          id: v.visitor_id ?? '',
-          name: '', // Will be resolved by ClientTab if needed
-          age: null,
-        })),
-      );
-    }
-    return map;
-  }, [activityRecords]);
+  // (#127 Task 7: removed — ClientTab now reads visitors from useRecordData, not from props)
 
   // Build a map from useClients() (has stats) for O(1) lookup
   const clientsWithStats = useMemo(() => {
@@ -217,29 +200,14 @@ export function ActivityDetailsModal({ isOpen, onClose, activity, mode }: Activi
     if (!record) return null;
 
     const client = clients.get(record.client_id ?? '');
-    const recordPayments = payments.get(record.id) || [];
-    const recordVisitors = visitorsByRecord.get(record.id) || [];
 
     return (
       <ClientTab
-        record={record}
+        recordId={recordId}
+        activityId={activity.id}
+        clientId={record.client_id ?? ''}
         client={client}
-        visitors={recordVisitors as any}
-        visits={record.visits}
-        payments={recordPayments}
-        serviceTariffs={serviceTariffs}
-        onUpdateRecord={(id, updates) => updateRecord(id, updates)}
         onDeleteRecord={handleDeleteRecord}
-        onAddVisitor={async (data) => {
-          try {
-            const firstPrice = serviceTariffs[0]?.price ?? 0;
-            await addVisitorToRecord({ ...data, price: firstPrice });
-            showToast('Посетитель добавлен');
-          } catch (err) {
-            showToast(parseApiError(err).message, 'error');
-          }
-        }}
-        showToast={showToast}
         onClose={onClose}
       />
     );

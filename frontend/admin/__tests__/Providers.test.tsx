@@ -32,4 +32,43 @@ describe('Providers architecture (SSR fix)', () => {
     expect(content).toMatch(/<Providers>/);
     expect(content).toMatch(/<\/Providers>/);
   });
+
+  it('providers.tsx mounts PendingActionsProvider inside QueryClient + UIProvider, between ClientsProvider and UserSettingsProvider', () => {
+    const filePath = path.join(appDir, 'providers.tsx');
+    const content = fs.readFileSync(filePath, 'utf-8');
+
+    // Import the provider from the contexts module.
+    expect(content).toMatch(
+      /import\s*\{[^}]*\bPendingActionsProvider\b[^}]*\}\s*from\s*['"]\.\.\/contexts\/PendingActionsContext['"]/,
+    );
+
+    // Capture the body of the `Providers` function's `return` statement.
+    // The return body is everything from the first `<` after `return (` up to
+    // the matching `);` at the function scope — easiest with the literal
+    // closing pattern: `</ErrorBoundary>` (the outermost wrapper).
+    const returnMatch = content.match(/return\s*\(([\s\S]*?)<\/ErrorBoundary>\s*\)/);
+    expect(
+      returnMatch,
+      'Could not find the Providers return body in providers.tsx',
+    ).not.toBeNull();
+    const body = returnMatch![1];
+
+    // Required provider order (outermost inwards):
+    //   ErrorBoundary > UIProvider > QueryClientWithErrorReporting
+    //   > ClientsProvider > PendingActionsProvider > UserSettingsProvider > {children}
+    const order = [
+      'ErrorBoundary',
+      'UIProvider',
+      'QueryClientWithErrorReporting',
+      'ClientsProvider',
+      'PendingActionsProvider',
+      'UserSettingsProvider',
+    ];
+    let lastIndex = -1;
+    for (const tag of order) {
+      const openIdx = body.indexOf(`<${tag}`);
+      expect(openIdx, `Expected <${tag}> in provider tree`).toBeGreaterThan(lastIndex);
+      lastIndex = openIdx;
+    }
+  });
 });

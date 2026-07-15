@@ -5,6 +5,7 @@ import { useState } from 'react';
 import { UIProvider, useUI } from '../contexts/UIContext';
 import { UserSettingsProvider } from '../contexts/UserSettingsContext';
 import { ClientsProvider } from '../contexts/ClientsContext';
+import { PendingActionsProvider } from '../contexts/PendingActionsContext';
 import { ErrorBoundary } from './components/error';
 import { ToastContainer } from './components/toast/ToastContainer';
 import { parseApiError } from './lib/api/parseApiError';
@@ -39,9 +40,11 @@ export function Providers({ children }: { children: React.ReactNode }) {
       <UIProvider>
         <QueryClientWithErrorReporting>
           <ClientsProvider>
-            <UserSettingsProvider>
-              {children}
-            </UserSettingsProvider>
+            <PendingActionsProvider>
+              <UserSettingsProvider>
+                {children}
+              </UserSettingsProvider>
+            </PendingActionsProvider>
           </ClientsProvider>
         </QueryClientWithErrorReporting>
         <ToastContainer />

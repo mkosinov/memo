@@ -13,44 +13,42 @@ import { RecordComments } from '@/app/components/shared/record/blocks/RecordComm
 import { RecordTimestamps } from '@/app/components/shared/record/blocks/RecordTimestamps';
 import { useRecordData } from '@/hooks/useRecordData';
 import { useRecordMutations } from '@/hooks/useRecordMutations';
-import { useOptimisticVisitMutation } from '@/hooks/useOptimisticVisitMutation';
+import { useUI } from '@/contexts/UIContext';
 import { useSchedule } from '@/contexts/ScheduleContext';
-import type { VisitStatus } from '@memo/domain';
+import { parseApiError } from '@/app/lib/api/parseApiError';
+import { updateVisitor, patchActivity } from '@memo/api-client';
 import type { ClientWithStats } from '@memo/api-client';
 
 interface ClientRecordTabProps {
   recordId: string;
   clientId: string;
-  onClose: () => void;
   /** Client-level stats (optional, from parent). */
   client?: ClientWithStats | null;
 }
 
-export function ClientRecordTab({ recordId, clientId, onClose, client }: ClientRecordTabProps) {
+export function ClientRecordTab({ recordId, clientId, client }: ClientRecordTabProps) {
   const queryClient = useQueryClient();
   const { gridFrequency } = useSchedule();
+  const { showToast } = useUI();
 
-  const { record, visitors, activity, services, masters, locations, payments, visitorsMap, tariffs, isLoading, recordData, status } =
+  const { record, activity, services, masters, locations, payments, visitorsMap, tariffs, isLoading, recordData, status } =
     useRecordData(recordId, clientId);
 
-  const { saveRecord, deleteRecord, addVisitor, deleteVisitor, addPayment, patchPayment, deletePayment, updateAnonymVisits, updateVisitStatus, updateRecord, addVisit, patchVisit, deleteVisit } =
-    useRecordMutations(record?.activity_id ?? '', recordId);
-
-  // Optimistic visit mutation layer
+  // Fine-grained mutations. Note: `saveRecord` is gone — record-level ops
+  // (custom_price, comment, date/service) go through `updateRecord` +
+  // `patchActivity` directly. Visit CRUD is fine-grained (addVisit,
+  // patchVisit, deleteVisitDeferred).
   const {
-    mergedVisitorsMap,
-    mergedVisits,
-    handleVisitorChange,
-    handleVisitChange,
-    handleVisitPriceChange,
-  } = useOptimisticVisitMutation({
-    record,
-    visitorsMap,
-    serviceTariffs: tariffs,
-    onUpdateRecord: updateRecord,
-    updateVisitStatus,
-    showToast: console.warn,
-  });
+    deleteRecord,
+    addPayment,
+    patchPayment,
+    deletePayment,
+    updateAnonymVisits,
+    updateRecord,
+    addVisit,
+    patchVisit,
+    deleteVisitDeferred,
+  } = useRecordMutations(record?.activity_id ?? '', recordId);
 
   // ── Surface-specific editable state ─────────────────────────────────────
   const [date, setDate] = useState('');
@@ -85,24 +83,41 @@ export function ClientRecordTab({ recordId, clientId, onClose, client }: ClientR
 
   // ── Handlers ─────────────────────────────────────────────────────────────
 
+  /**
+   * Record-level Save: only patches record fields (custom_price, comment)
+   * and the activity (date, service) — no visit CRUD. Visits are managed
+   * by the fine-grained addVisit/patchVisit/deleteVisitDeferred mutations.
+   */
   const handleSave = useCallback(async () => {
     if (!record || !activity) return;
-    const existingVisits = (record.visits || []).map(v => ({
-      visitor_id: v.visitor_id,
-      price: v.custom_price ?? v.price,
-      custom_price: v.custom_price,
-      status: v.status,
-    }));
-    await saveRecord({
-      activityId: serviceId !== activity.service_id || `${date}T${time}:00` !== activity.start ? activity.id : undefined,
-      activityStart: `${date}T${time}:00`,
-      activityServiceId: serviceId,
-      customPrice,
-      comment,
-      visits: existingVisits,
-    });
+    const activityChanged =
+      serviceId !== activity.service_id ||
+      `${date}T${time}:00` !== activity.start;
+
+    if (activityChanged) {
+      try {
+        await patchActivity(activity.id, {
+          start: `${date}T${time}:00`,
+          service_id: serviceId,
+        });
+      } catch (err) {
+        showToast(parseApiError(err).message, 'error');
+        return;
+      }
+    }
+
+    try {
+      await updateRecord(recordId, {
+        custom_price: customPrice.trim() ? Number(customPrice) : null,
+        comment: comment || null,
+      });
+    } catch (err) {
+      showToast(parseApiError(err).message, 'error');
+      return;
+    }
+
     setHasChanges(false);
-  }, [saveRecord, record, activity, date, time, serviceId, customPrice, comment]);
+  }, [updateRecord, record, activity, date, time, serviceId, customPrice, comment, recordId, showToast]);
 
   const handleCancel = useCallback(() => {
     if (activity) {
@@ -126,38 +141,24 @@ export function ClientRecordTab({ recordId, clientId, onClose, client }: ClientR
     }
   }, [clientId, deleteRecord, queryClient]);
 
-  const handleAddVisitor = useCallback(async (data: { name: string; age: number | null; tariff_id: string }) => {
-    const age = data.age ?? undefined;
-    const visitor = await addVisitor({ client_id: clientId, name: data.name, age });
-    const existingVisits = (record?.visits || []).map(v => ({
-      visitor_id: v.visitor_id,
-      price: v.custom_price ?? v.price,
-      custom_price: v.custom_price,
-      status: v.status,
-    }));
-    const tariff = tariffs.find(t => t.id === data.tariff_id) ?? tariffs[0];
-    await saveRecord({
-      visits: [...existingVisits, { visitor_id: visitor.id, price: tariff?.price ?? 0, status: 'waiting' }],
-    });
-    queryClient.invalidateQueries({ queryKey: ['visitors', clientId] });
-  }, [clientId, addVisitor, saveRecord, record, tariffs, queryClient]);
-
-  const handleDeleteVisitor = useCallback(async (visitId: string) => {
-    if (!record) return;
-    const visit = record.visits.find(v => v.id === visitId);
-    if (visit?.visitor_id) {
-      const remaining = record.visits.filter(v => v.visitor_id !== visit.visitor_id).map(v => ({
-        visitor_id: v.visitor_id,
-        price: v.custom_price ?? v.price,
-        custom_price: v.custom_price,
-        status: v.status,
-      }));
-      await saveRecord({ visits: remaining });
-    }
-    queryClient.invalidateQueries({ queryKey: ['visitors', clientId] });
-  }, [record, saveRecord, queryClient, clientId]);
-
-
+  /**
+   * Visitor name/age change — direct visitor update (no optimistic override
+   * state). Mirrors the ClientTab Task 7 pattern.
+   */
+  const handleVisitorChange = useCallback(
+    (visitorId: string, data: { name?: string; age?: number | null }) => {
+      const apiData = { ...data, age: data.age ?? undefined };
+      updateVisitor(visitorId, apiData)
+        .then(() => {
+          // Reader: ['visitors', clientId] in useRecordData
+          queryClient.invalidateQueries({ queryKey: ['visitors', clientId] });
+        })
+        .catch((err) => {
+          showToast(parseApiError(err).message, 'error');
+        });
+    },
+    [clientId, queryClient, showToast],
+  );
 
   const handleAnonymChange = useCallback((value: number) => {
     updateAnonymVisits(recordId, value);
@@ -168,9 +169,8 @@ export function ClientRecordTab({ recordId, clientId, onClose, client }: ClientR
   if (isLoading) return <div className="p-4">Загрузка...</div>;
   if (!record) return <div className="p-4">Запись не найдена</div>;
 
-  const total = (record.visits || []).reduce((sum, v) => sum + (v.custom_price ?? v.price ?? 0), 0);
-  const displayTotal = customPrice.trim() !== '' ? Number(customPrice) : total;
-  const totalPaid = Array.isArray(payments) ? payments.reduce((sum, p) => sum + p.amount, 0) : 0;
+  const visits = record.visits ?? [];
+  const total = visits.reduce((sum, v) => sum + (v.custom_price ?? v.price ?? 0), 0);
 
   const inputClass = 'rounded-lg border px-3 py-2 text-sm bg-white';
   const inputStyle = { borderColor: 'var(--line)' };
@@ -245,10 +245,10 @@ export function ClientRecordTab({ recordId, clientId, onClose, client }: ClientR
         </div>
       </div>
 
-      {/* Visitors table */}
+      {/* Visitors table — visits read from canonical record.visits, no optimistic layer */}
       <RecordVisitsTable
-        visits={mergedVisits}
-        visitorsMap={mergedVisitorsMap}
+        visits={visits}
+        visitorsMap={visitorsMap}
         tariffs={tariffs}
         anonymVisits={record.anonym_visits ?? 0}
         totalCost={total}
@@ -256,7 +256,7 @@ export function ClientRecordTab({ recordId, clientId, onClose, client }: ClientR
         clientId={clientId}
         onAddVisit={addVisit}
         onPatchVisit={patchVisit}
-        onDeleteVisit={deleteVisit}
+        onDeleteVisit={deleteVisitDeferred}
         onChangeVisitor={handleVisitorChange}
         onAnonymVisitsChange={handleAnonymChange}
       />

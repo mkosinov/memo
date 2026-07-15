@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import React from 'react';
+import fs from 'fs';
+import path from 'path';
 
 // ─── Mock UIContext ────────────────────────────────────────────────────────
 vi.mock('@/contexts/UIContext', () => ({
@@ -58,10 +60,14 @@ vi.mock('@/contexts/ScheduleContext', () => ({
 }));
 
 vi.mock('@/contexts/PendingActionsContext', () => ({
-  usePendingActions: () => ({ enqueuePendingAction: vi.fn() }),
+  usePendingActions: () => ({ enqueuePendingAction: mockEnqueuePendingAction }),
 }));
 
 import { useSchedule } from '@/contexts/ScheduleContext';
+
+// ─── PendingActions mock (captures enqueuePendingAction calls) ─────────────
+
+const mockEnqueuePendingAction = vi.fn();
 
 // ─── Mock react-query ──────────────────────────────────────────────────────
 
@@ -69,7 +75,14 @@ const mockInvalidateQueries = vi.fn();
 const mockSetQueryData = vi.fn();
 const mockSetQueriesData = vi.fn();
 const mockFetchQuery = vi.fn();
-const mockQueryClient = { invalidateQueries: mockInvalidateQueries, setQueryData: mockSetQueryData, setQueriesData: mockSetQueriesData, fetchQuery: mockFetchQuery };
+const mockGetQueryData = vi.fn(() => undefined);
+const mockQueryClient = {
+  invalidateQueries: mockInvalidateQueries,
+  setQueryData: mockSetQueryData,
+  setQueriesData: mockSetQueriesData,
+  fetchQuery: mockFetchQuery,
+  getQueryData: mockGetQueryData,
+};
 
 vi.mock('@tanstack/react-query', () => ({
   useQuery: vi.fn(),
@@ -88,6 +101,7 @@ import {
   deleteVisitor,
   createVisit,
   deleteVisit as apiDeleteVisit,
+  updateVisitor,
 } from '@memo/api-client';
 
 // ─── Shared mock data ──────────────────────────────────────────────────────
@@ -112,11 +126,12 @@ import { ClientRecordTab } from '../app/(main)/clients/components/ClientRecordTa
 // ─── Tests ─────────────────────────────────────────────────────────────────
 
 describe('ClientRecordTab — API interactions', () => {
-  const onClose = vi.fn();
+
 
   beforeEach(() => {
     vi.clearAllMocks();
     buildDefaultQueryImpl(mockUseQuery);
+    mockEnqueuePendingAction.mockReset();
     vi.mocked(patchRecord).mockResolvedValue(mockRecord);
     vi.mocked(patchActivity).mockResolvedValue(mockActivityResponse);
     vi.mocked(deleteRecord).mockResolvedValue(undefined);
@@ -146,7 +161,7 @@ describe('ClientRecordTab — API interactions', () => {
 
   it('calls deleteRecord when delete clicked', async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true);
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" />);
     fireEvent.click(screen.getByText('Удалить запись'));
 
     await waitFor(() => {
@@ -156,7 +171,7 @@ describe('ClientRecordTab — API interactions', () => {
 
   it('invalidates records query after delete', async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true);
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" />);
     fireEvent.click(screen.getByText('Удалить запись'));
 
     await waitFor(() => {
@@ -167,7 +182,7 @@ describe('ClientRecordTab — API interactions', () => {
   // ─── Save (patchRecord) calls ─────────────────────────────────────────
 
   it('calls patchRecord on save with comment', async () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" />);
     const textarea = screen.getByPlaceholderText('Добавить комментарий...');
     fireEvent.change(textarea, { target: { value: 'Новый комментарий' } });
     fireEvent.click(screen.getByTestId('btn-save-record'));
@@ -180,7 +195,7 @@ describe('ClientRecordTab — API interactions', () => {
   });
 
   it('patchActivity is called when date is changed', async () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" />);
     const dateInput = screen.getByLabelText('Дата');
     fireEvent.change(dateInput, { target: { value: '2026-06-01' } });
     fireEvent.click(screen.getByTestId('btn-save-record'));
@@ -193,7 +208,7 @@ describe('ClientRecordTab — API interactions', () => {
   });
 
   it('invalidates queries after save', async () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" />);
     const textarea = screen.getByPlaceholderText('Добавить комментарий...');
     fireEvent.change(textarea, { target: { value: 'test' } });
     fireEvent.click(screen.getByTestId('btn-save-record'));
@@ -207,7 +222,7 @@ describe('ClientRecordTab — API interactions', () => {
   // ─── Add visitor via AddVisitorForm atom ───────────────────────────
 
   it('creates visitor and adds to record via AddVisitorForm', async () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" />);
     fireEvent.click(screen.getByTestId('btn-add-visitor'));
 
     fireEvent.change(screen.getByTestId('add-visitor-name'), { target: { value: 'Новый Гость' } });
@@ -222,5 +237,88 @@ describe('ClientRecordTab — API interactions', () => {
         age: 10,
       });
     });
+  });
+
+  // ─── T8 RED: fine-grained visit CRUD (no coarse saveRecord({visits})) ──
+
+  it('add visitor uses fine-grained addVisit (createVisit called, not coarse patchRecord with visits)', async () => {
+    render(<ClientRecordTab recordId="r1" clientId="c1" />);
+    fireEvent.click(screen.getByTestId('btn-add-visitor'));
+    const nameInput = screen.getByTestId('add-visitor-name');
+    fireEvent.change(nameInput, { target: { value: 'Новый Гость' } });
+    // The add visitor form auto-submits on blur (no explicit submit button)
+    fireEvent.blur(nameInput);
+
+    // Fine-grained path: addVisit in useRecordMutations calls createVisitor + createVisit.
+    // The coarse path (handleAddVisitor using saveRecord({visits: [...]}) is gone.
+    await waitFor(() => {
+      expect(createVisit).toHaveBeenCalled();
+    });
+  });
+
+  it('delete visit uses deleteVisitDeferred (enqueuePendingAction), not direct deleteVisit API', async () => {
+    render(<ClientRecordTab recordId="r1" clientId="c1" />);
+    // Click × button on the saved visit row
+    fireEvent.click(screen.getByTestId('visit-row-v1-delete'));
+
+    // deleteVisitDeferred delegates to PendingActions — must call enqueuePendingAction
+    // and must NOT immediately call deleteVisit API (the provider owns the timer).
+    await waitFor(() => {
+      expect(mockEnqueuePendingAction).toHaveBeenCalledWith(
+        expect.objectContaining({
+          kind: 'delete',
+          message: expect.stringContaining('Отменить'),
+        }),
+      );
+    });
+    expect(apiDeleteVisit).not.toHaveBeenCalled();
+  });
+
+  it('record-level Save calls patchRecord with custom_price+comment (no visits field)', async () => {
+    render(<ClientRecordTab recordId="r1" clientId="c1" />);
+    const textarea = screen.getByPlaceholderText('Добавить комментарий...');
+    fireEvent.change(textarea, { target: { value: 'Test comment' } });
+    fireEvent.click(screen.getByTestId('btn-save-record'));
+
+    // After T8: record-level Save does NOT include visits — visits are managed
+    // by the fine-grained addVisit/patchVisit/deleteVisitDeferred mutations.
+    await waitFor(() => {
+      const lastCall = vi.mocked(patchRecord).mock.calls.at(-1);
+      expect(lastCall).toBeDefined();
+      expect(lastCall![0]).toBe('r1');
+      // No visits field in the patchRecord body
+      expect(lastCall![1]).not.toHaveProperty('visits');
+    });
+  });
+
+  it('visitor name change calls updateVisitor directly (no optimistic override layer)', async () => {
+    vi.mocked(updateVisitor).mockResolvedValue({
+      id: 'vis1', client_id: 'c1', name: 'Новое Имя', age: 30,
+      created_at: '', updated_at: '', is_active: true,
+    });
+
+    render(<ClientRecordTab recordId="r1" clientId="c1" />);
+    const visitRow = screen.getByTestId('visit-row-v1');
+    const nameInput = visitRow.querySelector('input') as HTMLInputElement;
+    fireEvent.change(nameInput, { target: { value: 'Новое Имя' } });
+    fireEvent.blur(nameInput);
+
+    // Direct path: handleVisitorChange calls updateVisitor immediately,
+    // not via the optimistic override layer.
+    await waitFor(() => {
+      expect(updateVisitor).toHaveBeenCalledWith(
+        'vis1',
+        expect.objectContaining({ name: 'Новое Имя' }),
+      );
+    });
+  });
+
+  it('ClientRecordTab.tsx does not import useOptimisticVisitMutation', () => {
+    const filePath = path.resolve(
+      __dirname,
+      '../app/(main)/clients/components/ClientRecordTab.tsx',
+    );
+    const src = fs.readFileSync(filePath, 'utf-8');
+    expect(src).not.toMatch(/useOptimisticVisitMutation/);
   });
 });

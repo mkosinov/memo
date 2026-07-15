@@ -1,10 +1,21 @@
 /**
  * Tests for RecordPaymentsTable — prefilled amount save + preserve values
- * + amount > 0 guard with error toast.
+ * + amount > 0 guard with error toast, and the #127 Task 6 row-state
+ * architecture (saved = useMemo, drafts = useState).
  *
- * Verifies that a prefilled payment row can be saved without editing the amount,
- * that the submitted values are preserved after save, and that amount <= 0
- * is blocked with an error toast on both create and edit paths.
+ * Spec (#127 Task 6, mirrors Task 5 for visits):
+ *   - Saved rows = useMemo(() => payments.map(paymentResponseToRow), [payments])
+ *   - Draft rows (id === null) = separate useState
+ *   - Render = dedupe(saved) + drafts
+ *   - handleAddClick → setDrafts(...)
+ *   - handleRemove (draft) → setDrafts(prev => prev.filter(r => r !== row))
+ *   - handleDeleteRow (saved) → call onDeletePayment(id) — NO local filter
+ *   - onSaved → replace draft in drafts with saved row (pending-saved state)
+ *     until the cache catches up
+ *
+ * The component must NOT use a useEffect to re-sync local state from the
+ * payments prop (Bug #3 "row disappears" — effect overwrites local editing
+ * state mid-edit).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
@@ -288,3 +299,292 @@ describe('RecordPaymentsTable — editable payment date on new rows', () => {
     expect(onAddPayment).toHaveBeenCalledWith(5000, 'card', '2026-07-05T15:30:00');
   });
 });
+
+// ─── #127 Task 6: saved rows derive from payments prop (useMemo) ────────────
+
+describe('RecordPaymentsTable — saved rows derive from payments prop (useMemo)', () => {
+  /** Render the table from raw props and return the test utils (with .rerender). */
+  function renderRaw(initial: {
+    payments: PaymentResponse[];
+    onDeletePayment?: (id: string) => Promise<void>;
+  }) {
+    mockUseUI.mockReturnValue({
+      deleteMode: false,
+      toggleDeleteMode: vi.fn(),
+      toasts: [],
+      showToast: vi.fn(),
+      hideToast: vi.fn(),
+      sidebarCollapsed: false,
+      toggleSidebar: vi.fn(),
+      rightPanelCollapsed: true,
+      toggleRightPanel: vi.fn(),
+      theme: 'light' as const,
+      toggleTheme: vi.fn(),
+    });
+
+    const onDeletePayment = initial.onDeletePayment ?? vi.fn().mockResolvedValue(undefined);
+    const utils = render(
+      <RecordPaymentsTable
+        payments={initial.payments}
+        onAddPayment={vi.fn().mockResolvedValue({} as PaymentResponse)}
+        onPatchPayment={vi.fn()}
+        onDeletePayment={onDeletePayment}
+      />,
+    );
+    return { onDeletePayment, utils };
+  }
+
+  function rerenderRaw(utils: ReturnType<typeof render>, payments: PaymentResponse[], onDeletePayment: any) {
+    utils.rerender(
+      <RecordPaymentsTable
+        payments={payments}
+        onAddPayment={vi.fn().mockResolvedValue({} as PaymentResponse)}
+        onPatchPayment={vi.fn()}
+        onDeletePayment={onDeletePayment}
+      />,
+    );
+  }
+
+  it('renders saved rows derived from payments prop', () => {
+    const payments: PaymentResponse[] = [
+      { id: 'p1', record_id: 'r1', amount: 1000, method: 'card', created_at: '2026-07-01T10:00:00', updated_at: '2026-07-01T10:00:00' },
+      { id: 'p2', record_id: 'r1', amount: 2000, method: 'cash', created_at: '2026-07-02T10:00:00', updated_at: '2026-07-02T10:00:00' },
+    ];
+    renderRaw({ payments });
+
+    expect(screen.getByTestId('payment-p1')).toBeInTheDocument();
+    expect(screen.getByTestId('payment-p2')).toBeInTheDocument();
+  });
+
+  it('saved row disappears when payments prop no longer contains it (cache update)', () => {
+    const payments: PaymentResponse[] = [
+      { id: 'p1', record_id: 'r1', amount: 1000, method: 'card', created_at: '2026-07-01T10:00:00', updated_at: '2026-07-01T10:00:00' },
+      { id: 'p2', record_id: 'r1', amount: 2000, method: 'cash', created_at: '2026-07-02T10:00:00', updated_at: '2026-07-02T10:00:00' },
+    ];
+    const { onDeletePayment, utils } = renderRaw({ payments });
+    expect(screen.getByTestId('payment-p1')).toBeInTheDocument();
+
+    // Simulate the parent re-rendering after p1 was removed from the cache
+    // (e.g. by the optimistic `removePayment` helper from Task 4).
+    const remaining: PaymentResponse[] = [
+      { id: 'p2', record_id: 'r1', amount: 2000, method: 'cash', created_at: '2026-07-02T10:00:00', updated_at: '2026-07-02T10:00:00' },
+    ];
+    rerenderRaw(utils, remaining, onDeletePayment);
+
+    expect(screen.queryByTestId('payment-p1')).not.toBeInTheDocument();
+    expect(screen.getByTestId('payment-p2')).toBeInTheDocument();
+  });
+
+  it('does not keep a stale local copy of a deleted saved row', async () => {
+    const payments: PaymentResponse[] = [
+      { id: 'p1', record_id: 'r1', amount: 1000, method: 'card', created_at: '2026-07-01T10:00:00', updated_at: '2026-07-01T10:00:00' },
+      { id: 'p2', record_id: 'r1', amount: 2000, method: 'cash', created_at: '2026-07-02T10:00:00', updated_at: '2026-07-02T10:00:00' },
+    ];
+    const { onDeletePayment, utils } = renderRaw({ payments });
+
+    // Click × on p1
+    fireEvent.click(screen.getByTestId('payment-p1-delete'));
+    await waitFor(() => expect(onDeletePayment).toHaveBeenCalledWith('p1'));
+
+    // Parent rerenders without p1 (optimistic cache update)
+    const remaining: PaymentResponse[] = [
+      { id: 'p2', record_id: 'r1', amount: 2000, method: 'cash', created_at: '2026-07-02T10:00:00', updated_at: '2026-07-02T10:00:00' },
+    ];
+    rerenderRaw(utils, remaining, onDeletePayment);
+
+    // p1 is gone
+    expect(screen.queryByTestId('payment-p1')).not.toBeInTheDocument();
+    // p2 still present
+    expect(screen.getByTestId('payment-p2')).toBeInTheDocument();
+  });
+
+  it('does NOT locally filter the deleted row — if the payments prop still has it, the row stays (cache rollback)', async () => {
+    // Spec (Task 6): "handleDeleteRow (saved) → call onDeletePayment(id) — do NOT
+    // locally filter saved rows; the useMemo reacts to the cache change."
+    const payments: PaymentResponse[] = [
+      { id: 'p1', record_id: 'r1', amount: 1000, method: 'card', created_at: '2026-07-01T10:00:00', updated_at: '2026-07-01T10:00:00' },
+      { id: 'p2', record_id: 'r1', amount: 2000, method: 'cash', created_at: '2026-07-02T10:00:00', updated_at: '2026-07-02T10:00:00' },
+    ];
+    const { onDeletePayment, utils } = renderRaw({ payments });
+
+    // Click × on p1 — onDeletePayment is called
+    fireEvent.click(screen.getByTestId('payment-p1-delete'));
+    await waitFor(() => expect(onDeletePayment).toHaveBeenCalledWith('p1'));
+
+    // Simulate a cache rollback: parent re-renders with the SAME payments
+    // (delete undone server-side, payment is back in the list).
+    rerenderRaw(utils, payments, onDeletePayment);
+
+    // In the new architecture (useMemo), the row MUST still be visible —
+    // there is no local filter to hide it. (The OLD architecture with
+    // setRows(prev => prev.filter(...)) would have hidden it.)
+    expect(screen.getByTestId('payment-p1')).toBeInTheDocument();
+    expect(screen.getByTestId('payment-p2')).toBeInTheDocument();
+  });
+});
+
+describe('RecordPaymentsTable — drafts isolated from payments prop', () => {
+  it('draft row renders alongside saved rows', () => {
+    const payments: PaymentResponse[] = [
+      { id: 'p1', record_id: 'r1', amount: 1000, method: 'card', created_at: '2026-07-01T10:00:00', updated_at: '2026-07-01T10:00:00' },
+    ];
+    renderPaymentsTable({ payments });
+
+    expect(screen.getByTestId('payment-p1')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('btn-add-payment'));
+    expect(screen.getByTestId('payment-new')).toBeInTheDocument();
+    // saved row is still there
+    expect(screen.getByTestId('payment-p1')).toBeInTheDocument();
+  });
+
+  it('draft editing state is preserved when parent rerenders with the same payments (no useEffect overwrite)', () => {
+    // Reproduces Bug #3: in the old code, a useEffect on `payments` re-derived
+    // local state and clobbered the user's in-progress draft.
+    const payments: PaymentResponse[] = [
+      { id: 'p1', record_id: 'r1', amount: 1000, method: 'card', created_at: '2026-07-01T10:00:00', updated_at: '2026-07-01T10:00:00' },
+    ];
+    const onDeletePayment = vi.fn().mockResolvedValue(undefined);
+    mockUseUI.mockReturnValue({
+      deleteMode: false,
+      toggleDeleteMode: vi.fn(),
+      toasts: [],
+      showToast: vi.fn(),
+      hideToast: vi.fn(),
+      sidebarCollapsed: false,
+      toggleSidebar: vi.fn(),
+      rightPanelCollapsed: true,
+      toggleRightPanel: vi.fn(),
+      theme: 'light' as const,
+      toggleTheme: vi.fn(),
+    });
+    const utils = render(
+      <RecordPaymentsTable
+        payments={payments}
+        onAddPayment={vi.fn().mockResolvedValue({} as PaymentResponse)}
+        onPatchPayment={vi.fn()}
+        onDeletePayment={onDeletePayment}
+      />,
+    );
+
+    // Add a draft
+    fireEvent.click(screen.getByTestId('btn-add-payment'));
+    const amountInput = screen.getByTestId('add-payment-amount') as HTMLInputElement;
+    fireEvent.change(amountInput, { target: { value: '1234' } });
+    expect(amountInput.value).toBe('1234');
+
+    // Parent rerenders with the same payments (new array reference — common after
+    // unrelated refetches). The draft input must keep its value.
+    const samePaymentsRef: PaymentResponse[] = [
+      { id: 'p1', record_id: 'r1', amount: 1000, method: 'card', created_at: '2026-07-01T10:00:00', updated_at: '2026-07-01T10:00:00' },
+    ];
+    utils.rerender(
+      <RecordPaymentsTable
+        payments={samePaymentsRef}
+        onAddPayment={vi.fn().mockResolvedValue({} as PaymentResponse)}
+        onPatchPayment={vi.fn()}
+        onDeletePayment={onDeletePayment}
+      />,
+    );
+
+    // The draft row is still there with the typed amount
+    const draftRow = screen.getByTestId('payment-new');
+    expect(draftRow).toBeInTheDocument();
+    const preservedInput = screen.getByTestId('add-payment-amount') as HTMLInputElement;
+    expect(preservedInput.value).toBe('1234');
+  });
+
+  it('handleRemove on a draft row removes only the draft (saved rows untouched)', () => {
+    const payments: PaymentResponse[] = [
+      { id: 'p1', record_id: 'r1', amount: 1000, method: 'card', created_at: '2026-07-01T10:00:00', updated_at: '2026-07-01T10:00:00' },
+    ];
+    renderPaymentsTable({ payments });
+
+    // Add a draft
+    fireEvent.click(screen.getByTestId('btn-add-payment'));
+    expect(screen.getByTestId('payment-new')).toBeInTheDocument();
+
+    // Click × on the draft
+    fireEvent.click(screen.getByTestId('payment-new-delete'));
+
+    // Draft is gone, saved row remains
+    expect(screen.queryByTestId('payment-new')).not.toBeInTheDocument();
+    expect(screen.getByTestId('payment-p1')).toBeInTheDocument();
+  });
+});
+
+describe('RecordPaymentsTable — onSaved replaces the draft with a pending-saved row', () => {
+  it('after save, the draft is replaced in drafts (id != null) until cache catches up', async () => {
+    const mocks = {
+      onAddPayment: vi.fn().mockResolvedValue({
+        id: 'p_new',
+        record_id: 'r1',
+        amount: 6000,
+        method: 'card',
+        created_at: '2026-07-06T12:00:00',
+        updated_at: '2026-07-06T12:00:00',
+      } as PaymentResponse),
+      onPatchPayment: vi.fn(),
+      onDeletePayment: vi.fn().mockResolvedValue(undefined),
+    };
+    renderPaymentsTable({ defaultAmount: 6000, ...mocks });
+
+    // 1. Add draft
+    fireEvent.click(screen.getByTestId('btn-add-payment'));
+    const amountInput = screen.getByTestId('add-payment-amount');
+    fireEvent.keyDown(amountInput, { key: 'Enter' });
+
+    // 2. Wait for onAddPayment to resolve and onSaved to fire
+    await waitFor(() => expect(mocks.onAddPayment).toHaveBeenCalledTimes(1));
+
+    // Without the parent rerendering, the saved row (id=p_new) must be in the DOM
+    // as a "pending-saved" row (id !== null) — preserved until the cache catches up.
+    await waitFor(() => {
+      const savedRow = screen.getByTestId('payment-p_new');
+      expect(savedRow).toBeInTheDocument();
+    });
+
+    // The amount input must show 6000 (submitted value), not blank.
+    const savedRow = screen.getByTestId('payment-p_new');
+    expect(savedRow.textContent).toContain('6');
+  });
+
+  it('preserves submitted amount/method between onSaved and the cache refetch (no flicker to blank)', async () => {
+    const mocks = {
+      onAddPayment: vi.fn().mockResolvedValue({
+        id: 'p_new',
+        record_id: 'r1',
+        amount: 3000, // server returns a different amount
+        method: 'card',
+        created_at: '2026-07-06T12:00:00',
+        updated_at: '2026-07-06T12:00:00',
+      } as PaymentResponse),
+      onPatchPayment: vi.fn(),
+      onDeletePayment: vi.fn().mockResolvedValue(undefined),
+    };
+    renderPaymentsTable({ defaultAmount: 5000, ...mocks });
+
+    fireEvent.click(screen.getByTestId('btn-add-payment'));
+    const amountInput = screen.getByTestId('add-payment-amount');
+    // User changes to 7777
+    fireEvent.change(amountInput, { target: { value: '7777' } });
+    fireEvent.keyDown(amountInput, { key: 'Enter' });
+
+    await waitFor(() => expect(mocks.onAddPayment).toHaveBeenCalledTimes(1));
+    await waitFor(() => {
+      const savedRow = screen.getByTestId('payment-p_new');
+      expect(savedRow).toBeInTheDocument();
+    });
+
+    // The amount cell must show 7 777 ₽ (the submitted value), not 3000 (server)
+    // or 5000 (defaultAmount). Read the input value (saved row is editable
+    // because the cache hasn't caught up yet — the pending-saved row is
+    // rendered as editable with submitted values until the useMemo produces
+    // the same id from props).
+    const savedRow = screen.getByTestId('payment-p_new');
+    const input = savedRow.querySelector('input[type="number"]') as HTMLInputElement | null;
+    expect(input).toBeTruthy();
+    expect(input!.value).toBe('7777');
+  });
+});
+

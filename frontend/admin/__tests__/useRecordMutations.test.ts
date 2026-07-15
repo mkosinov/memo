@@ -483,6 +483,35 @@ describe('useRecordMutations', () => {
       expect(listCache?.[0]?.visits.map((v) => v.id)).toContain('visit-new');
     });
 
+    // Regression for #127 §3: per-client list cache ['records', 'client', clientId]
+    // was previously dead — helper's setQueriesData prefix must now also seed it.
+    it('syncs new visit into per-client list cache [records, client, clientId]', async () => {
+      const { queryClient, wrapper } = createQueryClientWrapper();
+      // Seed canonical AND per-client list (this list is what ClientRecordTab reads
+      // when a client is selected from the clients page).
+      queryClient.setQueryData(['record', recordId], {
+        ...mockRecordResponse,
+        visits: [],
+      });
+      queryClient.setQueryData(['records', 'client', 'c1'], [
+        { ...mockRecordResponse, visits: [] },
+      ]);
+
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+
+      await act(async () => {
+        await result.current.addVisit({ client_id: 'c1', name: 'Гость', tariff_id: 't1', price: 1000 });
+      });
+
+      // Per-client list cache was updated by the helper's setQueriesData prefix match
+      const clientList = queryClient.getQueryData<RecordResponse[]>([
+        'records',
+        'client',
+        'c1',
+      ]);
+      expect(clientList?.[0]?.visits.map((v) => v.id)).toContain('visit-new');
+    });
+
     it('invalidates [visitors, clientId] (regression fix) — no 5-key blanket', async () => {
       const { queryClient, wrapper } = createQueryClientWrapper();
       const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');

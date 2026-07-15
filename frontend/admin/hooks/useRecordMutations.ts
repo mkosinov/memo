@@ -1,7 +1,7 @@
 'use client';
 
 import { useQueryClient } from '@tanstack/react-query';
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback } from 'react';
 import {
   createRecord,
   createClient,
@@ -20,6 +20,13 @@ import {
   deleteVisit as apiDeleteVisit,
 } from '@memo/api-client';
 import type { RecordResponse, PaymentResponse, VisitPatch } from '@memo/api-client';
+import {
+  removePayment,
+  removeVisit,
+  upsertPayment,
+  upsertVisit,
+} from '@/lib/cache/recordCacheSync';
+import { usePendingActions } from '@/contexts/PendingActionsContext';
 
 interface VisitData {
   visitor_id?: string | null;
@@ -46,21 +53,28 @@ interface CreateRecordInput {
 
 export function useRecordMutations(activityId: string, recordId: string = '') {
   const queryClient = useQueryClient();
+  const { enqueuePendingAction } = usePendingActions();
 
-  const invalidateAll = useCallback(() => {
+  // ── Targeted invalidations ─────────────────────────────────────────────
+  // Per #127 Task 4: do NOT use a 5-key blanket hammer on fine-grained ops.
+  // Each invalidate below is paired with a comment naming its reader.
+
+  /** Reader: RecordModal (['record', id]) + ScheduleActivityCard (['records', df, dt]). */
+  const invalidateRecordAndLists = useCallback(() => {
+    if (recordId) {
+      queryClient.invalidateQueries({ queryKey: ['record', recordId] });
+    }
     queryClient.invalidateQueries({ queryKey: ['records'] });
-    queryClient.invalidateQueries({ queryKey: ['activities'] });
-    queryClient.invalidateQueries({ queryKey: ['payments'] });
-    queryClient.invalidateQueries({ queryKey: ['clients'] });
+  }, [queryClient, recordId]);
+
+  /** Lighter invalidation for ops that only change a single record's canonical store. */
+  const invalidateRecord = useCallback(() => {
     if (recordId) {
       queryClient.invalidateQueries({ queryKey: ['record', recordId] });
     }
   }, [queryClient, recordId]);
 
-  /** Lighter invalidation for single-entity mutations that only affect this record. */
-  const invalidateRecord = useCallback(() => {
-    queryClient.invalidateQueries({ queryKey: ['record', recordId] });
-  }, [queryClient, recordId]);
+  // ── Record-level mutations ─────────────────────────────────────────────
 
   const createRecordMutation = useCallback(
     async (
@@ -124,10 +138,11 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
         }),
       });
 
-      // 5. Invalidate all relevant queries
-      invalidateAll();
+      // 5. Invalidate readers of the new record
+      // Reader: ScheduleActivityCard (['records',df,dt]) + RecordModal (['record',id])
+      invalidateRecordAndLists();
     },
-    [activityId, invalidateAll],
+    [activityId, invalidateRecordAndLists],
   );
 
   const saveRecord = useCallback(
@@ -150,27 +165,33 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
         comment: data.comment || null,
         visits: data.visits,
       });
-      invalidateAll();
+      // Reader: RecordModal (['record',id]) + ScheduleActivityCard (['records',df,dt])
+      invalidateRecordAndLists();
     },
-    [recordId, invalidateAll],
+    [recordId, invalidateRecordAndLists],
   );
 
   const updateRecord = useCallback(
     async (id: string, updates: RecordPatchData): Promise<void> => {
       await patchRecord(id, updates);
-      invalidateAll();
+      // Reader: RecordModal (['record',id]) + ScheduleActivityCard (['records',df,dt])
+      invalidateRecordAndLists();
     },
-    [invalidateAll],
+    [invalidateRecordAndLists],
   );
 
   const deleteRecord = useCallback(async () => {
     await apiDeleteRecord(recordId);
-    // Optimistic update: remove record from cache immediately for snappy UX
-    queryClient.setQueryData<RecordResponse[]>(['records'], (old) =>
-      old ? old.filter((r) => r.id !== recordId) : old,
+    // Optimistic update: remove record from EVERY ['records', ...] cache via prefix match
+    // (Absorbs #130 Bug 1 — the old bare setQueryData only touched the exact key ['records'],
+    //  not ['records', df, dt] or ['records', 'client', id]).
+    queryClient.setQueriesData<RecordResponse[] | undefined>(
+      { queryKey: ['records'] },
+      (old) => (old == null ? old : old.filter((r) => r.id !== recordId)),
     );
-    invalidateAll();
-  }, [recordId, queryClient, invalidateAll]);
+    // Targeted invalidation: ScheduleActivityCard + RecordModal
+    invalidateRecordAndLists();
+  }, [recordId, queryClient, invalidateRecordAndLists]);
 
   const addVisitor = useCallback(
     async (data: { client_id: string; name: string; age?: number }) => {
@@ -184,10 +205,13 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
       await apiDeleteVisitor(visitorId);
       const remaining = currentVisits.filter((v) => v.visitor_id !== visitorId);
       await patchRecord(recordId, { visits: remaining });
-      invalidateAll();
+      // Reader: RecordModal (['record',id]) + ScheduleActivityCard (['records',df,dt])
+      invalidateRecordAndLists();
     },
-    [recordId, invalidateAll],
+    [recordId, invalidateRecordAndLists],
   );
+
+  // ── Payment mutations (fine-grained — use cacheSync helpers) ─────────
 
   const addPayment = useCallback(
     async (amount: number, method: string, date?: string) => {
@@ -197,27 +221,28 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
         method: method as 'cash' | 'card' | 'transfer',
         ...(date ? { created_at: date } : {}),
       });
-      // Optimistic cache update so tab remounts see fresh data immediately
-      queryClient.setQueryData<PaymentResponse[]>(['payments', recordId], (old) => {
-        return [...(old ?? []), payment];
-      });
-      invalidateAll();
+      // Optimistic cache update — writes BOTH per-record and global ['payments'].
+      // Reader: RecordModal (['payments', recordId]) + future global payments reader (['payments'])
+      upsertPayment(queryClient, recordId, payment);
+      // Targeted invalidation for the record's visit/visit-cell UI.
+      invalidateRecord();
       return payment;
     },
-    [recordId, queryClient, invalidateAll],
+    [recordId, queryClient, invalidateRecord],
   );
 
   const deletePayment = useCallback(
     async (paymentId: string) => {
-      // Optimistic: remove payment from cache before API call
-      queryClient.setQueryData<PaymentResponse[]>(['payments', recordId], (old) => {
-        return (old ?? []).filter(p => p.id !== paymentId);
-      });
+      // Optimistic: remove from BOTH per-record and global ['payments'] caches.
+      removePayment(queryClient, recordId, paymentId);
       await apiDeletePayment(paymentId);
-      invalidateAll();
+      // Targeted invalidation: the record's payment tab uses ['payments', recordId].
+      invalidateRecord();
     },
-    [recordId, queryClient, invalidateAll],
+    [recordId, queryClient, invalidateRecord],
   );
+
+  // ── Record-level visit / visitor mutations (non fine-grained) ─────────
 
   const addVisitorToRecord = useCallback(
     async (data: { name: string; age?: number; price: number }) => {
@@ -242,29 +267,31 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
       await patchRecord(recordId, {
         visits: [...(record.visits as unknown as VisitData[]), newVisit],
       });
-      invalidateAll();
+      // Reader: RecordModal (['record',id]) + ScheduleActivityCard (['records',df,dt])
+      invalidateRecordAndLists();
     },
-    [recordId, queryClient, invalidateAll],
+    [recordId, queryClient, invalidateRecordAndLists],
   );
 
   const updateAnonymVisits = useCallback(
     async (recordId: string, anonymVisits: number) => {
       await patchRecord(recordId, { anonym_visits: anonymVisits });
-      invalidateAll();
+      // Reader: RecordModal (['record',id]) + ScheduleActivityCard (['records',df,dt])
+      invalidateRecordAndLists();
     },
-    [invalidateAll],
+    [invalidateRecordAndLists],
   );
 
   const updateVisitStatus = useCallback(
     async (visitId: string, status: string) => {
       await apiUpdateVisitStatus(visitId, status);
-      queryClient.invalidateQueries({ queryKey: ['records'] });
-      if (recordId) {
-        queryClient.invalidateQueries({ queryKey: ['record', recordId] });
-      }
+      // Reader: ScheduleActivityCard (['records',df,dt]) + RecordModal (['record',id])
+      invalidateRecordAndLists();
     },
-    [queryClient, recordId],
+    [invalidateRecordAndLists],
   );
+
+  // ── Fine-grained visit mutations (use cacheSync helpers) ─────────────
 
   /**
    * Two-step flow: create the Visitor, then create the Visit referencing it.
@@ -279,163 +306,122 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
         tariff_id: data.tariff_id ?? null,
         price: data.price,
       });
-      // Optimistic cache update so tab remounts see fresh data immediately
-      queryClient.setQueryData<RecordResponse>(['record', recordId], (old) => {
-        if (!old) return old;
-        return { ...old, visits: [...old.visits, visit] };
-      });
-      invalidateRecord();
+      // Optimistic cache update — helper syncs canonical ['record',id] + every ['records',...] list.
+      // Reader: ScheduleActivityCard (['records',df,dt]) + RecordModal (['record',id])
+      upsertVisit(queryClient, recordId, visit);
       // Regression fix: invalidate visitors cache using direct client_id
+      // Reader: ClientInfoTab visitors list (['visitors', clientId])
       queryClient.invalidateQueries({ queryKey: ['visitors', data.client_id] });
       return visit;
     },
-    [recordId, queryClient, invalidateRecord],
+    [recordId, queryClient],
   );
 
   const patchVisit = useCallback(
     async (visitId: string, data: VisitPatch) => {
       const visit = await apiPatchVisit(visitId, data);
-      // Optimistic cache update with the server-confirmed visit
-      queryClient.setQueryData<RecordResponse>(['record', recordId], (old) => {
-        if (!old) return old;
-        return { ...old, visits: old.visits.map(v => v.id === visitId ? { ...v, ...visit } : v) };
-      });
-      invalidateRecord();
+      // Optimistic cache update via helper — syncs canonical + every list.
+      // Reader: ScheduleActivityCard + RecordModal
+      upsertVisit(queryClient, recordId, visit);
       return visit;
     },
-    [recordId, queryClient, invalidateRecord],
+    [recordId, queryClient],
   );
 
   const deleteVisit = useCallback(
     async (visitId: string) => {
-      // Optimistic: remove visit from cache before API call
-      queryClient.setQueryData<RecordResponse>(['record', recordId], (old) => {
-        if (!old) return old;
-        return { ...old, visits: old.visits.filter(v => v.id !== visitId) };
-      });
+      // Optimistic: remove visit from BOTH canonical and list caches via helper.
+      // Reader: ScheduleActivityCard + RecordModal
+      removeVisit(queryClient, recordId, visitId);
       await apiDeleteVisit(visitId);
-      invalidateRecord();
     },
-    [recordId, queryClient, invalidateRecord],
+    [recordId, queryClient],
   );
 
   const patchPayment = useCallback(
     async (paymentId: string, data: { amount?: number; method?: string }) => {
       const payment = await apiPatchPayment(paymentId, data);
-      // Optimistic cache update with the server-confirmed payment
-      queryClient.setQueryData<PaymentResponse[]>(['payments', recordId], (old) => {
-        return (old ?? []).map(p => p.id === paymentId ? { ...p, ...payment } : p);
-      });
-      invalidateRecord();
-      queryClient.invalidateQueries({ queryKey: ['payments'] });
+      // Optimistic cache update via helper — writes BOTH per-record and global ['payments'].
+      // Reader: RecordModal (['payments', recordId]) + future global payments reader
+      upsertPayment(queryClient, recordId, payment);
       return payment;
     },
-    [recordId, queryClient, invalidateRecord],
+    [recordId, queryClient],
   );
 
-  // ── Deferred delete with undo (Bug E) ────────────────────────────────────
-
-  const pendingDeleteTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
-
-  // Cleanup: clear all pending deferred-delete timers on unmount
-  useEffect(() => {
-    const timers = pendingDeleteTimers.current;
-    return () => {
-      timers.forEach((timer) => clearTimeout(timer));
-      timers.clear();
-    };
-  }, []);
+  // ── Deferred delete with undo (delegate to PendingActions provider) ───
 
   const deleteVisitDeferred = useCallback(
-    async (visitId: string, showToastFn: (msg: string, undo: () => void) => void) => {
-      // 1. Save the visit from cache for potential restore
+    async (visitId: string) => {
+      // 1. Snapshot the visit from the canonical cache BEFORE removing.
+      //    The helper guards `old == null` so we still pass through safely.
       const record = queryClient.getQueryData<RecordResponse>(['record', recordId]);
-      const savedVisit = record?.visits.find(v => v.id === visitId);
+      const savedVisit = record?.visits.find((v) => v.id === visitId);
 
-      // 2. Optimistically remove from cache
-      queryClient.setQueryData<RecordResponse>(['record', recordId], (old) => {
-        if (!old) return old;
-        return { ...old, visits: old.visits.filter(v => v.id !== visitId) };
-      });
+      // 2. Optimistically remove from canonical + list caches via helper.
+      removeVisit(queryClient, recordId, visitId);
 
-      // 3. Cancel any existing timer for this id
-      const existing = pendingDeleteTimers.current.get(visitId);
-      if (existing) clearTimeout(existing);
-
-      // 4. Show toast with undo
-      let undone = false;
-      showToastFn('Удалено. Отменить', () => {
-        undone = true;
-        // Restore the row
-        if (savedVisit) {
-          queryClient.setQueryData<RecordResponse>(['record', recordId], (old) => {
-            if (!old) return old;
-            return { ...old, visits: [...old.visits, savedVisit] };
-          });
-        }
-        const timer = pendingDeleteTimers.current.get(visitId);
-        if (timer) {
-          clearTimeout(timer);
-          pendingDeleteTimers.current.delete(visitId);
-        }
-      });
-
-      // 5. Schedule the actual DELETE after 5s
-      const timer = setTimeout(async () => {
-        if (!undone) {
+      // 3. Delegate timer+toast to the provider. The provider:
+      //    - shows the toast with the undo callback,
+      //    - schedules the commit() after 5s,
+      //    - cancels both if undo runs first.
+      // Bug #2 fix: the action survives modal close because the provider
+      // lives at app level.
+      enqueuePendingAction({
+        id: `delete-visit-${visitId}`,
+        kind: 'delete',
+        message: 'Удалено. Отменить',
+        delayMs: 5000,
+        // Undo: write the snapshotted visit back via the helper.
+        // The helper guards `old == null` (spec §7) — if the canonical
+        // record was removed, we silently no-op.
+        undo: () => {
+          if (savedVisit) upsertVisit(queryClient, recordId, savedVisit);
+        },
+        // Commit: call the real API and reconcile (canonical + lists).
+        // The optimistic remove already removed it from caches; if the API
+        // fails, the row is gone from cache but also from the server — the
+        // remaining inconsistency is acceptable for a delete.
+        commit: async () => {
           await apiDeleteVisit(visitId);
-          invalidateRecord();
-        }
-        pendingDeleteTimers.current.delete(visitId);
-      }, 5000);
-      pendingDeleteTimers.current.set(visitId, timer);
+          // Targeted reconcile: a failed optimistic remove or stale cache
+          // would be re-aligned by re-running the helper.
+          removeVisit(queryClient, recordId, visitId);
+        },
+      });
     },
-    [recordId, queryClient, invalidateRecord],
+    [recordId, queryClient, enqueuePendingAction],
   );
 
   const deletePaymentDeferred = useCallback(
-    async (paymentId: string, showToastFn: (msg: string, undo: () => void) => void) => {
-      // 1. Save the payment from cache for potential restore
+    async (paymentId: string) => {
+      // 1. Snapshot the payment from the per-record cache BEFORE removing.
       const savedPayments = queryClient.getQueryData<PaymentResponse[]>(['payments', recordId]);
-      const savedPayment = savedPayments?.find(p => p.id === paymentId);
+      const savedPayment = savedPayments?.find((p) => p.id === paymentId);
 
-      // 2. Optimistically remove from cache
-      queryClient.setQueryData<PaymentResponse[]>(['payments', recordId], (old) => {
-        return (old ?? []).filter(p => p.id !== paymentId);
-      });
+      // 2. Optimistically remove from BOTH per-record and global ['payments'] via helper.
+      removePayment(queryClient, recordId, paymentId);
 
-      // 3. Cancel any existing timer for this id
-      const existing = pendingDeleteTimers.current.get(paymentId);
-      if (existing) clearTimeout(existing);
-
-      // 4. Show toast with undo
-      let undone = false;
-      showToastFn('Удалено. Отменить', () => {
-        undone = true;
-        // Restore the payment
-        if (savedPayment) {
-          queryClient.setQueryData<PaymentResponse[]>(['payments', recordId], (old) => {
-            return [...(old ?? []), savedPayment];
-          });
-        }
-        const timer = pendingDeleteTimers.current.get(paymentId);
-        if (timer) {
-          clearTimeout(timer);
-          pendingDeleteTimers.current.delete(paymentId);
-        }
-      });
-
-      // 5. Schedule the actual DELETE after 5s
-      const timer = setTimeout(async () => {
-        if (!undone) {
+      // 3. Delegate timer+toast to the provider.
+      enqueuePendingAction({
+        id: `delete-payment-${paymentId}`,
+        kind: 'delete',
+        message: 'Удалено. Отменить',
+        delayMs: 5000,
+        undo: () => {
+          if (savedPayment) upsertPayment(queryClient, recordId, savedPayment);
+        },
+        // Commit: API delete + targeted reconcile of per-record + global ['payments'].
+        // Absorbs #130 Bug 2 — old code did not reconcile ['payments'] after API success.
+        commit: async () => {
           await apiDeletePayment(paymentId);
-          invalidateRecord();
-        }
-        pendingDeleteTimers.current.delete(paymentId);
-      }, 5000);
-      pendingDeleteTimers.current.set(paymentId, timer);
+          // Targeted reconcile: ensure both caches reflect the deletion even if
+          // an external mutation or a stale optimistic state drifted.
+          removePayment(queryClient, recordId, paymentId);
+        },
+      });
     },
-    [recordId, queryClient, invalidateRecord],
+    [recordId, queryClient, enqueuePendingAction],
   );
 
   return {

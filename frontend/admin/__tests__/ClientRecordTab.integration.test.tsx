@@ -54,6 +54,10 @@ vi.mock('@/contexts/ScheduleContext', () => ({
   })),
 }));
 
+vi.mock('@/contexts/PendingActionsContext', () => ({
+  usePendingActions: () => ({ enqueuePendingAction: vi.fn() }),
+}));
+
 const mockInvalidateQueries = vi.fn();
 const mockQueryClient = { invalidateQueries: mockInvalidateQueries, setQueryData: vi.fn(), fetchQuery: vi.fn() };
 

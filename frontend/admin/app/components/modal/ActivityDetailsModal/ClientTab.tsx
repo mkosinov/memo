@@ -194,7 +194,7 @@ export function ClientTab({
           clientId={client?.id ?? ''}
           onAddVisit={addVisit}
           onPatchVisit={patchVisit}
-          onDeleteVisit={(visitId: string) => deleteVisitDeferred(visitId, showToast)}
+          onDeleteVisit={(visitId: string) => deleteVisitDeferred(visitId)}
           onChangeVisitor={handleVisitorChange}
           onAnonymVisitsChange={handleAnonymChange}
         />
@@ -205,7 +205,7 @@ export function ClientTab({
           defaultAmount={toPay}
           onAddPayment={addPayment}
           onPatchPayment={patchPayment}
-          onDeletePayment={(paymentId: string) => deletePaymentDeferred(paymentId, showToast)}
+          onDeletePayment={(paymentId: string) => deletePaymentDeferred(paymentId)}
         />
 
         {/* Comment */}

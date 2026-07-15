@@ -43,6 +43,7 @@ vi.mock('@memo/api-client', () => ({
   patchVisit: vi.fn(),
   deleteVisit: vi.fn(),
   updateVisitor: vi.fn(),
+  ApiError: class ApiError extends Error { code: string; constructor(msg: string, code: string) { super(msg); this.code = code; } },
 }));
 
 // ─── Mock ScheduleContext ────────────────────────────────────────────────
@@ -56,14 +57,19 @@ vi.mock('@/contexts/ScheduleContext', () => ({
   })),
 }));
 
+vi.mock('@/contexts/PendingActionsContext', () => ({
+  usePendingActions: () => ({ enqueuePendingAction: vi.fn() }),
+}));
+
 import { useSchedule } from '@/contexts/ScheduleContext';
 
 // ─── Mock react-query ──────────────────────────────────────────────────────
 
 const mockInvalidateQueries = vi.fn();
 const mockSetQueryData = vi.fn();
+const mockSetQueriesData = vi.fn();
 const mockFetchQuery = vi.fn();
-const mockQueryClient = { invalidateQueries: mockInvalidateQueries, setQueryData: mockSetQueryData, fetchQuery: mockFetchQuery };
+const mockQueryClient = { invalidateQueries: mockInvalidateQueries, setQueryData: mockSetQueryData, setQueriesData: mockSetQueriesData, fetchQuery: mockFetchQuery };
 
 vi.mock('@tanstack/react-query', () => ({
   useQuery: vi.fn(),

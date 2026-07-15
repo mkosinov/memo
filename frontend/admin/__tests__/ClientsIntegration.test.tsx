@@ -65,6 +65,11 @@ vi.mock('@/contexts/ClientsContext', () => ({
   ClientsProvider: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));
 
+vi.mock('@/contexts/PendingActionsContext', () => ({
+  usePendingActions: () => ({ enqueuePendingAction: vi.fn() }),
+  PendingActionsProvider: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+}));
+
 import { useClients } from '@/contexts/ClientsContext';
 const mockUseClients = vi.mocked(useClients);
 

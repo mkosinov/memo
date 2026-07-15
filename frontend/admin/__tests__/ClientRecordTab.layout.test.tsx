@@ -56,6 +56,10 @@ vi.mock('@/contexts/ScheduleContext', () => ({
   })),
 }));
 
+vi.mock('@/contexts/PendingActionsContext', () => ({
+  usePendingActions: () => ({ enqueuePendingAction: vi.fn() }),
+}));
+
 import { useSchedule } from '@/contexts/ScheduleContext';
 
 // ─── Mock react-query ──────────────────────────────────────────────────────

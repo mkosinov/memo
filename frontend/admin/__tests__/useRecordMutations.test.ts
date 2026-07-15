@@ -17,6 +17,12 @@ vi.mock('@memo/api-client', () => ({
   deleteVisit: vi.fn(),
 }));
 
+// Mock the PendingActions provider so the hook's usePendingActions() call is controlled by tests.
+const mockEnqueuePendingAction = vi.fn();
+vi.mock('@/contexts/PendingActionsContext', () => ({
+  usePendingActions: () => ({ enqueuePendingAction: mockEnqueuePendingAction }),
+}));
+
 import {
   patchRecord,
   deleteRecord,
@@ -107,6 +113,7 @@ const mockVisitResponse = {
 describe('useRecordMutations', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockEnqueuePendingAction.mockReset();
     mockPatchRecord.mockResolvedValue(mockRecordResponse as never);
     mockDeleteRecord.mockResolvedValue(undefined as never);
     mockPatchActivity.mockResolvedValue({ id: 'ev_1' } as never);
@@ -198,7 +205,7 @@ describe('useRecordMutations', () => {
       });
     });
 
-    it('invalidates record and records queries on success', async () => {
+    it('invalidates targeted record + records queries on success (no 5-key blanket)', async () => {
       const { queryClient, wrapper } = createQueryClientWrapper();
       const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
       const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
@@ -207,9 +214,12 @@ describe('useRecordMutations', () => {
         await result.current.saveRecord({ visits: [] });
       });
 
+      // Reader: ScheduleActivityCard (uses ['records',df,dt]) + RecordModal (uses ['record',id])
+      // Not: ['activities'], ['clients'] (not changed)
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['record', recordId] });
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['records'] });
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['payments'] });
+      // payments not invalidated by saveRecord (no payment changed)
+      expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: ['payments'] });
     });
   });
 
@@ -225,8 +235,17 @@ describe('useRecordMutations', () => {
       expect(mockDeleteRecord).toHaveBeenCalledWith(recordId);
     });
 
-    it('invalidates record and records queries on success', async () => {
+    it('prefix-matches all records caches via setQueriesData and invalidates record', async () => {
       const { queryClient, wrapper } = createQueryClientWrapper();
+      // Seed two list caches (date-bounded and per-client) AND the canonical
+      const otherRecord = { ...mockRecordResponse, id: 'r2', visits: [] };
+      const dateList = [mockRecordResponse, otherRecord];
+      const clientList = [mockRecordResponse, otherRecord];
+      queryClient.setQueryData(['records', '2026-06-10', '2026-06-10'], dateList);
+      queryClient.setQueryData(['records', 'client', 'c1'], clientList);
+      queryClient.setQueryData(['record', recordId], mockRecordResponse);
+
+      const setQueriesDataSpy = vi.spyOn(queryClient, 'setQueriesData');
       const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
       const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
 
@@ -234,9 +253,29 @@ describe('useRecordMutations', () => {
         await result.current.deleteRecord();
       });
 
+      // Must use prefix-match (not bare ['records'])
+      expect(setQueriesDataSpy).toHaveBeenCalledWith(
+        { queryKey: ['records'] },
+        expect.any(Function),
+      );
+      // After the updater runs, r1 should be gone from BOTH list caches
+      const dateListAfter = queryClient.getQueryData<RecordResponse[]>([
+        'records',
+        '2026-06-10',
+        '2026-06-10',
+      ]);
+      const clientListAfter = queryClient.getQueryData<RecordResponse[]>([
+        'records',
+        'client',
+        'c1',
+      ]);
+      expect(dateListAfter?.find((r) => r.id === recordId)).toBeUndefined();
+      expect(clientListAfter?.find((r) => r.id === recordId)).toBeUndefined();
+      // Targeted invalidation (not 5-key blanket)
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['record', recordId] });
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['records'] });
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['payments'] });
+      expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: ['activities'] });
+      expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: ['clients'] });
     });
   });
 
@@ -296,7 +335,7 @@ describe('useRecordMutations', () => {
       });
     });
 
-    it('invalidates queries on success', async () => {
+    it('invalidates record and records queries on success (no 5-key blanket)', async () => {
       const { queryClient, wrapper } = createQueryClientWrapper();
       const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
       const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
@@ -305,9 +344,13 @@ describe('useRecordMutations', () => {
         await result.current.deleteVisitor('vis1', [{ visitor_id: 'vis1', price: 3500 }]);
       });
 
+      // Reader: ScheduleActivityCard (['records',df,dt]) + RecordModal (['record',id])
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['record', recordId] });
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['records'] });
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['payments'] });
+      // No blanket 5-key invalidation
+      expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: ['activities'] });
+      expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: ['clients'] });
+      expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: ['payments'] });
     });
   });
 
@@ -327,7 +370,7 @@ describe('useRecordMutations', () => {
       });
     });
 
-    it('invalidates queries on success', async () => {
+    it('invalidates record queries on success (no 5-key blanket; payments synced via helper)', async () => {
       const { queryClient, wrapper } = createQueryClientWrapper();
       const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
       const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
@@ -336,9 +379,12 @@ describe('useRecordMutations', () => {
         await result.current.addPayment(3500, 'cash');
       });
 
+      // Reader: RecordModal visit + visit cells use ['record',id] only.
+      // The new payment is pushed to both ['payments', recordId] and ['payments'] via upsertPayment helper.
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['record', recordId] });
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['records'] });
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['payments'] });
+      // No blanket 5-key
+      expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: ['activities'] });
+      expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: ['clients'] });
     });
 
     it('returns the created payment response', async () => {
@@ -351,6 +397,30 @@ describe('useRecordMutations', () => {
       });
 
       expect(returned).toEqual(mockPaymentResponse);
+    });
+
+    it('writes the new payment into BOTH [payments, recordId] and global [payments] via helper', async () => {
+      const { queryClient, wrapper } = createQueryClientWrapper();
+      // Seed both caches with a sentinel payment so we can verify the new one is appended
+      queryClient.setQueryData(['payments', recordId], [
+        { ...mockPaymentResponse, id: 'pay-prev', amount: 100 },
+      ]);
+      queryClient.setQueryData(['payments'], [
+        { ...mockPaymentResponse, id: 'pay-prev', amount: 100 },
+      ]);
+
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+
+      await act(async () => {
+        await result.current.addPayment(3500, 'card');
+      });
+
+      // Per-record cache contains the new payment
+      const perRecord = queryClient.getQueryData<PaymentResponse[]>(['payments', recordId]);
+      expect(perRecord?.map((p) => p.id)).toEqual(['pay-prev', 'pay1']);
+      // Global cache ALSO contains the new payment (canonical ['payments'] reader sees it)
+      const global = queryClient.getQueryData<PaymentResponse[]>(['payments']);
+      expect(global?.map((p) => p.id)).toEqual(['pay-prev', 'pay1']);
     });
   });
 
@@ -384,16 +454,54 @@ describe('useRecordMutations', () => {
       expect(returned).toEqual(mockVisitResponse);
     });
 
-    it('invalidates record query on success', async () => {
+    it('syncs new visit into canonical AND list caches via upsertVisit helper', async () => {
+      const { queryClient, wrapper } = createQueryClientWrapper();
+      // Seed both canonical and date-bounded list so the helper can mirror the new visit
+      queryClient.setQueryData(['record', recordId], {
+        ...mockRecordResponse,
+        visits: [],
+      });
+      queryClient.setQueryData(['records', '2026-06-10', '2026-06-10'], [
+        { ...mockRecordResponse, visits: [] },
+      ]);
+
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+
+      await act(async () => {
+        await result.current.addVisit({ client_id: 'c1', name: 'Гость', tariff_id: 't1', price: 1000 });
+      });
+
+      // Canonical cache
+      const canonical = queryClient.getQueryData<RecordResponse>(['record', recordId]);
+      expect(canonical?.visits.map((v) => v.id)).toContain('visit-new');
+      // List cache (date-bounded) — the helper's setQueriesData mirrored the same record
+      const listCache = queryClient.getQueryData<RecordResponse[]>([
+        'records',
+        '2026-06-10',
+        '2026-06-10',
+      ]);
+      expect(listCache?.[0]?.visits.map((v) => v.id)).toContain('visit-new');
+    });
+
+    it('invalidates [visitors, clientId] (regression fix) — no 5-key blanket', async () => {
       const { queryClient, wrapper } = createQueryClientWrapper();
       const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
       const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
 
       await act(async () => {
-        await result.current.addVisit({ client_id: 'c1', name: 'Гость', price: 1000 });
+        await result.current.addVisit({
+          client_id: 'c1',
+          name: 'Test',
+          price: 3500,
+        });
       });
 
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['record', recordId] });
+      // Reader: ClientInfoTab visitors list uses ['visitors', clientId]
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['visitors', 'c1'] });
+      // No blanket
+      expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: ['activities'] });
+      expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: ['clients'] });
+      expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: ['payments'] });
     });
   });
 
@@ -411,16 +519,49 @@ describe('useRecordMutations', () => {
       expect(returned).toEqual(mockVisitResponse);
     });
 
-    it('invalidates record query on success', async () => {
+    it('syncs patched visit into canonical AND list caches via upsertVisit helper', async () => {
       const { queryClient, wrapper } = createQueryClientWrapper();
-      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+      const existingVisit = {
+        id: 'visit-1',
+        record_id: recordId,
+        visitor_id: 'vis-1',
+        tariff_id: 't1',
+        price: 3500,
+        custom_price: null,
+        status: 'waiting',
+        created_at: '',
+        updated_at: '',
+      };
+      const otherRecord = { ...mockRecordResponse, id: 'r2', visits: [] };
+      queryClient.setQueryData(['record', recordId], {
+        ...mockRecordResponse,
+        visits: [existingVisit],
+      });
+      queryClient.setQueryData(['records', '2026-06-10', '2026-06-10'], [
+        { ...mockRecordResponse, visits: [existingVisit] },
+        otherRecord,
+      ]);
+      // Server returns the patched visit shape (price: 4000).
+      mockPatchVisit.mockResolvedValue({ ...existingVisit, price: 4000 } as never);
+
       const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
 
       await act(async () => {
         await result.current.patchVisit('visit-1', { price: 4000 });
       });
 
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['record', recordId] });
+      // Canonical price updated
+      const canonical = queryClient.getQueryData<RecordResponse>(['record', recordId]);
+      expect(canonical?.visits[0].price).toBe(4000);
+      // List-cache copy of the same record ALSO updated
+      const listCache = queryClient.getQueryData<RecordResponse[]>([
+        'records',
+        '2026-06-10',
+        '2026-06-10',
+      ]);
+      expect(listCache?.[0]?.visits[0].price).toBe(4000);
+      // r2 untouched
+      expect(listCache?.[1]?.id).toBe('r2');
     });
   });
 
@@ -436,16 +577,47 @@ describe('useRecordMutations', () => {
       expect(mockDeleteVisit).toHaveBeenCalledWith('visit-1');
     });
 
-    it('invalidates record query on success', async () => {
+    it('optimistically removes visit from BOTH canonical and list caches via removeVisit helper', async () => {
       const { queryClient, wrapper } = createQueryClientWrapper();
-      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+      const existingVisit = {
+        id: 'visit-1',
+        record_id: recordId,
+        visitor_id: 'vis-1',
+        tariff_id: 't1',
+        price: 3500,
+        custom_price: null,
+        status: 'waiting',
+        created_at: '',
+        updated_at: '',
+      };
+      const otherRecord = { ...mockRecordResponse, id: 'r2', visits: [] };
+      queryClient.setQueryData(['record', recordId], {
+        ...mockRecordResponse,
+        visits: [existingVisit],
+      });
+      queryClient.setQueryData(['records', '2026-06-10', '2026-06-10'], [
+        { ...mockRecordResponse, visits: [existingVisit] },
+        otherRecord,
+      ]);
+
       const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
 
       await act(async () => {
         await result.current.deleteVisit('visit-1');
       });
 
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['record', recordId] });
+      // Canonical no longer has visit-1
+      const canonical = queryClient.getQueryData<RecordResponse>(['record', recordId]);
+      expect(canonical?.visits).toHaveLength(0);
+      // List cache copy also no longer has visit-1
+      const listCache = queryClient.getQueryData<RecordResponse[]>([
+        'records',
+        '2026-06-10',
+        '2026-06-10',
+      ]);
+      expect(listCache?.[0]?.visits).toHaveLength(0);
+      // r2 untouched
+      expect(listCache?.[1]?.id).toBe('r2');
     });
   });
 
@@ -463,17 +635,24 @@ describe('useRecordMutations', () => {
       expect(returned).toEqual(mockPaymentResponse);
     });
 
-    it('invalidates record and payments queries on success', async () => {
+    it('writes patched payment into BOTH [payments, recordId] AND global [payments] via helper', async () => {
       const { queryClient, wrapper } = createQueryClientWrapper();
-      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+      const existing = { ...mockPaymentResponse, id: 'pay1', amount: 3500 };
+      queryClient.setQueryData(['payments', recordId], [existing]);
+      queryClient.setQueryData(['payments'], [existing]);
+      // apiPatchPayment returns the new patched shape (uses mockPaymentResponse with amount 3500)
+      mockPatchPayment.mockResolvedValue({ ...mockPaymentResponse, id: 'pay1', amount: 4000 } as never);
+
       const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
 
       await act(async () => {
         await result.current.patchPayment('pay1', { amount: 4000 });
       });
 
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['record', recordId] });
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['payments'] });
+      const perRecord = queryClient.getQueryData<PaymentResponse[]>(['payments', recordId]);
+      expect(perRecord?.[0].amount).toBe(4000);
+      const global = queryClient.getQueryData<PaymentResponse[]>(['payments']);
+      expect(global?.[0].amount).toBe(4000);
     });
   });
 
@@ -489,27 +668,35 @@ describe('useRecordMutations', () => {
       expect(mockDeletePayment).toHaveBeenCalledWith('pay1');
     });
 
-    it('invalidates queries on success', async () => {
+    it('removes payment from BOTH [payments, recordId] AND global [payments] via helper', async () => {
       const { queryClient, wrapper } = createQueryClientWrapper();
-      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+      const existing = { ...mockPaymentResponse, id: 'pay1', amount: 3500 };
+      const other = { ...mockPaymentResponse, id: 'pay-other', amount: 100 };
+      queryClient.setQueryData(['payments', recordId], [existing, other]);
+      queryClient.setQueryData(['payments'], [existing, other]);
+
       const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
 
       await act(async () => {
         await result.current.deletePayment('pay1');
       });
 
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['record', recordId] });
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['records'] });
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['payments'] });
+      const perRecord = queryClient.getQueryData<PaymentResponse[]>(['payments', recordId]);
+      expect(perRecord?.map((p) => p.id)).toEqual(['pay-other']);
+      const global = queryClient.getQueryData<PaymentResponse[]>(['payments']);
+      expect(global?.map((p) => p.id)).toEqual(['pay-other']);
     });
   });
 
-  // ─── Optimistic setQueryData tests (Bug C) ──────────────────────────────
+  // ─── Optimistic cache update tests — helpers route through setQueryData + setQueriesData ─
 
-  describe('optimistic cache updates (setQueryData)', () => {
-    it('addVisit updates [record, recordId] cache with the new visit', async () => {
+  describe('optimistic cache updates (helpers route through setQueryData + setQueriesData)', () => {
+    it('addVisit uses upsertVisit helper (canonical + list keys via setQueryData/setQueriesData)', async () => {
       const { queryClient, wrapper } = createQueryClientWrapper();
       const setQueryDataSpy = vi.spyOn(queryClient, 'setQueryData');
+      const setQueriesDataSpy = vi.spyOn(queryClient, 'setQueriesData');
+      // Seed canonical so the helper can patch
+      queryClient.setQueryData(['record', recordId], { ...mockRecordResponse, visits: [] });
       const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
 
       await act(async () => {
@@ -521,31 +708,36 @@ describe('useRecordMutations', () => {
         });
       });
 
+      // Canonical key + list prefix via helpers
       expect(setQueryDataSpy).toHaveBeenCalledWith(
         ['record', recordId],
         expect.any(Function),
       );
+      expect(setQueriesDataSpy).toHaveBeenCalledWith(
+        { queryKey: ['records'] },
+        expect.any(Function),
+      );
     });
 
-    it('addVisit invalidates [visitors, clientId] (regression fix)', async () => {
-      const { queryClient, wrapper } = createQueryClientWrapper();
-      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
-      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
-
-      await act(async () => {
-        await result.current.addVisit({
-          client_id: 'c1',
-          name: 'Test',
-          price: 3500,
-        });
-      });
-
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['visitors', 'c1'] });
-    });
-
-    it('deleteVisit optimistically removes visit from [record, recordId] cache', async () => {
+    it('deleteVisit uses removeVisit helper (canonical + list keys)', async () => {
       const { queryClient, wrapper } = createQueryClientWrapper();
       const setQueryDataSpy = vi.spyOn(queryClient, 'setQueryData');
+      const setQueriesDataSpy = vi.spyOn(queryClient, 'setQueriesData');
+      const existingVisit = {
+        id: 'visit-1',
+        record_id: recordId,
+        visitor_id: 'vis-1',
+        tariff_id: 't1',
+        price: 3500,
+        custom_price: null,
+        status: 'waiting',
+        created_at: '',
+        updated_at: '',
+      };
+      queryClient.setQueryData(['record', recordId], {
+        ...mockRecordResponse,
+        visits: [existingVisit],
+      });
       const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
 
       await act(async () => {
@@ -556,11 +748,31 @@ describe('useRecordMutations', () => {
         ['record', recordId],
         expect.any(Function),
       );
+      expect(setQueriesDataSpy).toHaveBeenCalledWith(
+        { queryKey: ['records'] },
+        expect.any(Function),
+      );
     });
 
-    it('patchVisit updates [record, recordId] cache with patched visit', async () => {
+    it('patchVisit uses upsertVisit helper (canonical + list keys)', async () => {
       const { queryClient, wrapper } = createQueryClientWrapper();
       const setQueryDataSpy = vi.spyOn(queryClient, 'setQueryData');
+      const setQueriesDataSpy = vi.spyOn(queryClient, 'setQueriesData');
+      const existingVisit = {
+        id: 'visit-1',
+        record_id: recordId,
+        visitor_id: 'vis-1',
+        tariff_id: 't1',
+        price: 3500,
+        custom_price: null,
+        status: 'waiting',
+        created_at: '',
+        updated_at: '',
+      };
+      queryClient.setQueryData(['record', recordId], {
+        ...mockRecordResponse,
+        visits: [existingVisit],
+      });
       const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
 
       await act(async () => {
@@ -571,51 +783,78 @@ describe('useRecordMutations', () => {
         ['record', recordId],
         expect.any(Function),
       );
+      expect(setQueriesDataSpy).toHaveBeenCalledWith(
+        { queryKey: ['records'] },
+        expect.any(Function),
+      );
     });
 
-    it('addPayment updates [payments, recordId] cache with the new payment', async () => {
+    it('addPayment uses upsertPayment helper (per-record + global keys)', async () => {
       const { queryClient, wrapper } = createQueryClientWrapper();
       const setQueryDataSpy = vi.spyOn(queryClient, 'setQueryData');
+      queryClient.setQueryData(['payments', recordId], []);
+      queryClient.setQueryData(['payments'], []);
+
       const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
 
       await act(async () => {
         await result.current.addPayment(3500, 'card');
       });
 
-      expect(setQueryDataSpy).toHaveBeenCalledWith(
-        ['payments', recordId],
-        expect.any(Function),
+      // Per-record + global ['payments']
+      const perRecordCall = setQueryDataSpy.mock.calls.find(
+        (call) => Array.isArray(call[0]) && call[0][0] === 'payments' && call[0][1] === recordId,
       );
+      const globalCall = setQueryDataSpy.mock.calls.find(
+        (call) => Array.isArray(call[0]) && call[0][0] === 'payments' && call[0].length === 1,
+      );
+      expect(perRecordCall).toBeDefined();
+      expect(globalCall).toBeDefined();
     });
 
-    it('deletePayment optimistically removes payment from [payments, recordId] cache', async () => {
+    it('deletePayment uses removePayment helper (per-record + global keys)', async () => {
       const { queryClient, wrapper } = createQueryClientWrapper();
       const setQueryDataSpy = vi.spyOn(queryClient, 'setQueryData');
+      queryClient.setQueryData(['payments', recordId], [mockPaymentResponse]);
+      queryClient.setQueryData(['payments'], [mockPaymentResponse]);
+
       const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
 
       await act(async () => {
         await result.current.deletePayment('pay1');
       });
 
-      expect(setQueryDataSpy).toHaveBeenCalledWith(
-        ['payments', recordId],
-        expect.any(Function),
+      const perRecordCall = setQueryDataSpy.mock.calls.find(
+        (call) => Array.isArray(call[0]) && call[0][0] === 'payments' && call[0][1] === recordId,
       );
+      const globalCall = setQueryDataSpy.mock.calls.find(
+        (call) => Array.isArray(call[0]) && call[0][0] === 'payments' && call[0].length === 1,
+      );
+      expect(perRecordCall).toBeDefined();
+      expect(globalCall).toBeDefined();
     });
 
-    it('patchPayment updates [payments, recordId] cache with patched payment', async () => {
+    it('patchPayment uses upsertPayment helper (per-record + global keys)', async () => {
       const { queryClient, wrapper } = createQueryClientWrapper();
       const setQueryDataSpy = vi.spyOn(queryClient, 'setQueryData');
+      const existing = { ...mockPaymentResponse, amount: 3500 };
+      queryClient.setQueryData(['payments', recordId], [existing]);
+      queryClient.setQueryData(['payments'], [existing]);
+
       const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
 
       await act(async () => {
         await result.current.patchPayment('pay1', { amount: 4000 });
       });
 
-      expect(setQueryDataSpy).toHaveBeenCalledWith(
-        ['payments', recordId],
-        expect.any(Function),
+      const perRecordCall = setQueryDataSpy.mock.calls.find(
+        (call) => Array.isArray(call[0]) && call[0][0] === 'payments' && call[0][1] === recordId,
       );
+      const globalCall = setQueryDataSpy.mock.calls.find(
+        (call) => Array.isArray(call[0]) && call[0][0] === 'payments' && call[0].length === 1,
+      );
+      expect(perRecordCall).toBeDefined();
+      expect(globalCall).toBeDefined();
     });
   });
 
@@ -662,157 +901,169 @@ describe('useRecordMutations', () => {
       queryClient.setQueryData(['payments', recordId], [existingPayment]);
     }
 
-    it('deleteVisitDeferred removes row + shows toast, no DELETE sent', async () => {
+    it('deleteVisitDeferred removes row + enqueues pending action, no DELETE sent', async () => {
       const { queryClient, wrapper } = createQueryClientWrapper();
       seedRecordWithVisit(queryClient);
       const setQueryDataSpy = vi.spyOn(queryClient, 'setQueryData');
 
       const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
-      const mockShowToast = vi.fn();
 
       await act(async () => {
-        await result.current.deleteVisitDeferred('visit-existing', mockShowToast);
+        await result.current.deleteVisitDeferred('visit-existing');
       });
 
-      // Row removed from cache (setQueryData called to filter it out)
+      // Row removed from cache optimistically (canonical via removeVisit helper)
       expect(setQueryDataSpy).toHaveBeenCalledWith(
         ['record', recordId],
         expect.any(Function),
       );
       // DELETE NOT sent yet
       expect(mockDeleteVisit).not.toHaveBeenCalled();
-      // Toast shown with undo callback
-      expect(mockShowToast).toHaveBeenCalledTimes(1);
-      expect(mockShowToast).toHaveBeenCalledWith(
-        expect.stringContaining('Удалено'),
-        expect.any(Function),
-      );
+      // enqueuePendingAction called with delete kind + 5s + Russian message + undo+commit
+      expect(mockEnqueuePendingAction).toHaveBeenCalledTimes(1);
+      const action = mockEnqueuePendingAction.mock.calls[0][0] as {
+        id: string;
+        kind: string;
+        message: string;
+        delayMs: number;
+        undo: () => void;
+        commit: () => Promise<void>;
+      };
+      expect(action.kind).toBe('delete');
+      expect(action.delayMs).toBe(5000);
+      expect(action.message).toContain('Удалено');
+      expect(action.message).toContain('Отменить');
+      expect(typeof action.undo).toBe('function');
+      expect(typeof action.commit).toBe('function');
     });
 
-    it('deleteVisitDeferred fires DELETE after 5s if not undone', async () => {
+    it('deleteVisitDeferred fires DELETE after 5s via commit() (provider owns timer)', async () => {
       const { queryClient, wrapper } = createQueryClientWrapper();
       seedRecordWithVisit(queryClient);
 
       const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
-      const mockShowToast = vi.fn();
 
       await act(async () => {
-        await result.current.deleteVisitDeferred('visit-existing', mockShowToast);
+        await result.current.deleteVisitDeferred('visit-existing');
       });
 
-      // DELETE not sent yet
+      // Commit function not called yet — provider schedules it
       expect(mockDeleteVisit).not.toHaveBeenCalled();
 
-      // Fast-forward 5s
+      // Simulate the provider firing commit after 5s
+      const action = mockEnqueuePendingAction.mock.calls[0][0] as {
+        commit: () => Promise<void>;
+      };
       await act(async () => {
-        vi.advanceTimersByTime(5000);
+        await action.commit();
       });
 
       expect(mockDeleteVisit).toHaveBeenCalledTimes(1);
       expect(mockDeleteVisit).toHaveBeenCalledWith('visit-existing');
     });
 
-    it('undo cancels the deferred DELETE and restores the row', async () => {
+    it('undo restores the visit via upsertVisit helper and cancels the commit', async () => {
       const { queryClient, wrapper } = createQueryClientWrapper();
       seedRecordWithVisit(queryClient);
 
       const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
-      const mockShowToast = vi.fn();
 
       await act(async () => {
-        await result.current.deleteVisitDeferred('visit-existing', mockShowToast);
+        await result.current.deleteVisitDeferred('visit-existing');
       });
 
-      // Grab the undo function from the toast call
-      const undoFn = mockShowToast.mock.calls[0][1] as () => void;
-
-      // Call undo
+      // Grab the undo function
+      const action = mockEnqueuePendingAction.mock.calls[0][0] as {
+        undo: () => void;
+      };
       await act(async () => {
-        undoFn();
+        action.undo();
       });
 
-      // Fast-forward 5s — DELETE should NOT fire
-      await act(async () => {
-        vi.advanceTimersByTime(5000);
-      });
-
-      expect(mockDeleteVisit).not.toHaveBeenCalled();
-
-      // Row restored in cache — verify by reading cache
+      // The provider would not call commit() if undo runs first; verify the undo
+      // restored the canonical cache (the row is back).
       const cached = queryClient.getQueryData<RecordResponse>(['record', recordId]);
       expect(cached?.visits).toHaveLength(1);
       expect(cached?.visits[0].id).toBe('visit-existing');
     });
 
-    it('deletePaymentDeferred removes row + shows toast, no DELETE sent', async () => {
+    it('deletePaymentDeferred removes row + enqueues pending action, no DELETE sent', async () => {
       const { queryClient, wrapper } = createQueryClientWrapper();
       seedPaymentsCache(queryClient);
 
       const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
-      const mockShowToast = vi.fn();
 
       await act(async () => {
-        await result.current.deletePaymentDeferred('pay-existing', mockShowToast);
+        await result.current.deletePaymentDeferred('pay-existing');
       });
 
       // DELETE NOT sent yet
       expect(mockDeletePayment).not.toHaveBeenCalled();
-      // Toast shown with undo callback
-      expect(mockShowToast).toHaveBeenCalledTimes(1);
-      expect(mockShowToast).toHaveBeenCalledWith(
-        expect.stringContaining('Удалено'),
-        expect.any(Function),
-      );
-      // Payment removed from cache
+      // enqueuePendingAction called
+      expect(mockEnqueuePendingAction).toHaveBeenCalledTimes(1);
+      const action = mockEnqueuePendingAction.mock.calls[0][0] as {
+        id: string;
+        kind: string;
+        delayMs: number;
+        undo: () => void;
+        commit: () => Promise<void>;
+      };
+      expect(action.kind).toBe('delete');
+      expect(action.delayMs).toBe(5000);
+      expect(typeof action.undo).toBe('function');
+      expect(typeof action.commit).toBe('function');
+      // Payment removed from per-record cache optimistically
       const cached = queryClient.getQueryData<PaymentResponse[]>(['payments', recordId]);
       expect(cached).toHaveLength(0);
     });
 
-    it('deletePaymentDeferred fires DELETE after 5s if not undone', async () => {
+    it('deletePaymentDeferred fires DELETE after 5s via commit() and reconciles [payments]', async () => {
       const { queryClient, wrapper } = createQueryClientWrapper();
       seedPaymentsCache(queryClient);
 
       const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
-      const mockShowToast = vi.fn();
 
       await act(async () => {
-        await result.current.deletePaymentDeferred('pay-existing', mockShowToast);
+        await result.current.deletePaymentDeferred('pay-existing');
       });
 
       expect(mockDeletePayment).not.toHaveBeenCalled();
 
+      const action = mockEnqueuePendingAction.mock.calls[0][0] as {
+        commit: () => Promise<void>;
+      };
       await act(async () => {
-        vi.advanceTimersByTime(5000);
+        await action.commit();
       });
 
       expect(mockDeletePayment).toHaveBeenCalledTimes(1);
       expect(mockDeletePayment).toHaveBeenCalledWith('pay-existing');
+      // After commit, [payments, recordId] is reconciled (row stays removed) and
+      // global [payments] has pay-existing filtered out via removePayment helper.
+      const perRecord = queryClient.getQueryData<PaymentResponse[]>(['payments', recordId]);
+      expect(perRecord).toHaveLength(0);
+      const global = queryClient.getQueryData<PaymentResponse[]>(['payments']);
+      expect(global?.find((p) => p.id === 'pay-existing')).toBeUndefined();
     });
 
-    it('undo restores payment and cancels deferred DELETE', async () => {
+    it('undo restores payment and cancels the commit', async () => {
       const { queryClient, wrapper } = createQueryClientWrapper();
       seedPaymentsCache(queryClient);
 
       const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
-      const mockShowToast = vi.fn();
 
       await act(async () => {
-        await result.current.deletePaymentDeferred('pay-existing', mockShowToast);
+        await result.current.deletePaymentDeferred('pay-existing');
       });
 
-      const undoFn = mockShowToast.mock.calls[0][1] as () => void;
-
+      const action = mockEnqueuePendingAction.mock.calls[0][0] as {
+        undo: () => void;
+      };
       await act(async () => {
-        undoFn();
+        action.undo();
       });
 
-      await act(async () => {
-        vi.advanceTimersByTime(5000);
-      });
-
-      expect(mockDeletePayment).not.toHaveBeenCalled();
-
-      // Payment restored in cache
+      // Payment restored in per-record cache
       const cached = queryClient.getQueryData<PaymentResponse[]>(['payments', recordId]);
       expect(cached).toHaveLength(1);
       expect(cached![0].id).toBe('pay-existing');

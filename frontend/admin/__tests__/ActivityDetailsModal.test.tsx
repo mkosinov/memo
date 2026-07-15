@@ -71,6 +71,10 @@ vi.mock('@/contexts/ClientsContext', () => ({
   useClients: vi.fn(),
 }));
 
+vi.mock('@/contexts/PendingActionsContext', () => ({
+  usePendingActions: () => ({ enqueuePendingAction: vi.fn() }),
+}));
+
 vi.mock('@/hooks/useRecordData', () => ({
   useRecordData: vi.fn(() => ({
     recordData: null,

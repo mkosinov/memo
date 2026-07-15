@@ -185,6 +185,7 @@ describe('ClientCardModal ↔ ClientInfoTab integration (real components)', () =
     vi.mocked(useQueryClient).mockReturnValue({
       invalidateQueries: mockInvalidateQueries,
       setQueryData: vi.fn(),
+      setQueriesData: vi.fn(),
       fetchQuery: vi.fn(),
     } as any);
 
@@ -347,6 +348,7 @@ describe('ClientCardModal ↔ ClientRecordTab integration (real components)', ()
     vi.mocked(useQueryClient).mockReturnValue({
       invalidateQueries: mockInvalidateQueries,
       setQueryData: vi.fn(),
+      setQueriesData: vi.fn(),
       fetchQuery: vi.fn(),
     } as any);
 
@@ -553,6 +555,7 @@ describe('Cross-page integration: create client → view → edit → save', () 
     vi.mocked(useQueryClient).mockReturnValue({
       invalidateQueries: mockInvalidateQueries,
       setQueryData: vi.fn(),
+      setQueriesData: vi.fn(),
       fetchQuery: vi.fn(),
     } as any);
 
@@ -663,6 +666,7 @@ describe('Error scenarios: create client fails', () => {
     vi.mocked(useQueryClient).mockReturnValue({
       invalidateQueries: mockInvalidateQueries,
       setQueryData: vi.fn(),
+      setQueriesData: vi.fn(),
       fetchQuery: vi.fn(),
     } as any);
 

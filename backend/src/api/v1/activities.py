@@ -33,9 +33,15 @@ async def _to_response(
     db_session: AsyncSession,
     activity,
 ) -> ActivityResponse:
-    """Map an Activity ORM object to ActivityResponse with computed occupied."""
+    """Single-activity response (computes occupied via one SUM)."""
+    occupied = await service.sum_active_seats(db_session=db_session, activity_id=activity.id)
+    return _map_response(activity, occupied)
+
+
+def _map_response(activity, occupied: int) -> ActivityResponse:
+    """Pure mapper — ORM Activity + precomputed occupied → response."""
     data = ActivityResponse.model_validate(activity)
-    data.occupied = await service.sum_active_seats(db_session=db_session, activity_id=activity.id)
+    data.occupied = occupied
     return data
 
 
@@ -48,7 +54,10 @@ async def list_activities(
 ) -> list[ActivityResponse]:
     """Return all active activities, optionally filtered by date range."""
     activities = await service.list(db_session=session, date_from=date_from, date_to=date_to)
-    return [await _to_response(service, db_session=session, activity=a) for a in activities]
+    occupied_map = await service.sum_active_seats_bulk(
+        db_session=session, activity_ids=[a.id for a in activities]
+    )
+    return [_map_response(a, occupied=occupied_map.get(a.id, 0)) for a in activities]
 
 
 @router.get("/{activity_id}", response_model=ActivityResponse)

@@ -285,6 +285,51 @@ class TestActivitiesOccupied:
         assert response.json()["occupied"] == 1
 
 
+class TestActivitiesOccupiedBatch:
+    """US-1 / US-3: occupied is correct after the batched N+1 fix."""
+
+    def test_occupied_correct_for_multiple_activities(
+        self, api_client, create_activity, create_client
+    ) -> None:
+        """US-1: each activity reports its own occupied seats in the list."""
+        from datetime import UTC, datetime, timedelta
+        start = datetime.now(UTC) + timedelta(days=1)
+        df = start.date().isoformat()
+        dt = (start + timedelta(days=1)).date().isoformat()
+
+        a1 = create_activity(start=start, capacity=10)
+        a2 = create_activity(start=start, capacity=10)
+        # a1 gets 2 seats, a2 gets 0
+        c = create_client()
+        api_client.post("/api/v1/records", json={
+            "activity_id": a1["id"], "client_id": c["id"], "comment": "x",
+            "visits": [
+                {"name": "A", "price": 1000, "status": "waiting"},
+                {"name": "B", "price": 1000, "status": "waiting"},
+            ],
+        })
+
+        resp = api_client.get(f"/api/v1/activities?date_from={df}&date_to={dt}")
+        assert resp.status_code == 200
+        by_id = {a["id"]: a for a in resp.json()}
+        assert by_id[a1["id"]]["occupied"] == 2
+        assert by_id[a2["id"]]["occupied"] == 0
+
+    def test_occupied_zero_for_activity_with_no_records(
+        self, api_client, create_activity
+    ) -> None:
+        """US-3: an activity with no active records returns occupied=0."""
+        from datetime import UTC, datetime, timedelta
+        start = datetime.now(UTC) + timedelta(days=1)
+        df = start.date().isoformat()
+        dt = (start + timedelta(days=1)).date().isoformat()
+        create_activity(start=start)
+
+        resp = api_client.get(f"/api/v1/activities?date_from={df}&date_to={dt}")
+        assert resp.status_code == 200
+        assert all(a["occupied"] == 0 for a in resp.json())
+
+
 import asyncio  # noqa: E402
 
 

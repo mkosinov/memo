@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -52,7 +52,25 @@ function renderWithProviders() {
   );
 }
 
+// Freeze system time so date-dependent assertions (mini calendar month name,
+// "Сегодня" button text) are deterministic regardless of the real calendar
+// date (avoids month/year-edge flakes, see GH #123).
+// NOTE: intentionally NOT using vi.useFakeTimers() here — several tests in
+// this file rely on real async timing via `waitFor`/`fireEvent`, and fake
+// timers would need manual advancing that isn't otherwise required. Per
+// Vitest docs, vi.setSystemTime() without useFakeTimers() only mocks
+// `Date.*` calls while leaving real timers (setTimeout, etc.) untouched.
+const MOCK_NOW = new Date('2026-06-15T12:00:00');
+
 describe('Menubar', () => {
+  beforeEach(() => {
+    vi.setSystemTime(MOCK_NOW);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('renders the logo with alt text "Colour Mountains"', () => {
     renderWithProviders();
     expect(screen.getByRole('img', { name: 'Colour Mountains' })).toBeInTheDocument();

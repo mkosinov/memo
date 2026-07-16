@@ -16,8 +16,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Cleanup:** Deleted `hooks/useOptimisticVisitMutation.ts` (-313 lines), `invalidateAll` completely removed from fine-grained mutations.
   - **Bugs fixed:** Bug #2 (undo dies on modal close → app-level `PendingActionsProvider`), Bug #3 (row disappears mid-edit → `useMemo+saved`+`useState(drafts)`), Bug #1/#130 (`['records','client',id]` stale → prefix-match `setQueriesData`), tab-switch stale row → canonical cache + list sync.
   - **Tests:** 28 files changed, +3946 / -1272 lines (net +2674), 13 commits. Vitest ~1178 passed (1 known flake #123). E2E US-1..US-7 written (factory pattern, avoids #124). Visual Compliance 4/4 PASS.
-  - Design spec: `docs/specs/2026-07-08-unify-record-caches-design.md`
-  - Plan: `docs/plans/2026-07-08-unify-record-caches.md`
+   - Design spec: `docs/specs/2026-07-08-unify-record-caches-design.md`
+   - Plan: `docs/plans/2026-07-08-unify-record-caches.md`
+
+- **#129 — Backend health: N+1 fix, capacity re-check, dedup seats** — branch `feat-backend-health-129` (3 commits 625fea5, 4689765, e4a7214):
+  - **N+1 fix:** `list_activities` query count 6→2 for 5 activities via batched `ActivityService.sum_active_seats_bulk` (single GROUP BY). Reuses `ACTIVE_RECORD_STATUSES` (no rule duplication). API contract unchanged (`occupied` field identical).
+  - **Capacity re-check on update/patch:** `RecordService.update`/`patch` now call `check_activity_capacity`. Variant 1: delete old visits → `recompute_record_seats` (resets own seats — CRITICAL because capacity sums the stored `Record.seats` column) → check → insert new visits. 409 on over-capacity (symmetric with create), rollback via session model. Patch skips check when seats untouched (comment-only patch on full activity → 200). Edit-in-place on a sold-out activity (price/tariff/relink visitor_id, same seat count) → 200 (US-9, user requirement).
+  - **Dedup seats:** `create` now calls `recompute_record_seats` (like update/patch already did). Dead inline `record.seats = len(...)` in update removed. Single source of truth for final persisted `seats` across all three write paths.
+  - **Bonus fix (inline, in T2):** `tariff_id` now passed in `update`'s `Visit` constructor (was silently dropped; `patch` already had it). Needed for US-9 test (PUT with tariff_id round-trip).
+  - **Tests:** 9 user scenarios → 10 new tests (659 total, baseline 649 → 659, 0 regression). Covers US-1 (occupied correct after batch), US-2 (query-count bounded, no N+1), US-3 (occupied=0 for empty), US-4 (update grow→409), US-5 (patch grow→409), US-6 (shrink→200), US-7 (comment-only patch on full→200), US-8 (create/update/patch identical seats), US-9 (edit price/tariff/relink on full→200).
+  - Design spec: `docs/specs/2026-07-16-backend-health-129-design.md`
+  - Plan: `docs/plans/2026-07-16-backend-health-129.md`
 
 ## [Unreleased] — 2026-07-08
 

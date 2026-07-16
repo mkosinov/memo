@@ -52,7 +52,7 @@ Backend `services/client.py` `stats_filter_map` (lines 144-150): ключи `min
 | Слой | Файл | Что меняется |
 |---|---|---|
 | **Zod schema** (public API contract) | `packages/api-client/src/schemas.ts:285-288` | 3 поля переименованы: `visits_count`→`records_count`, `last_visit`→`last_record`, `missed_visits`→`missed_records`. Type `ClientWithStats` обновляется автоматически через `z.infer`. |
-| **Column defs** | `ClientsTable.tsx` (`COLUMNS`, `getStoredColumns`, `storageKey`) | Ключи `visits_count`→`records_count`, `last_visit`→`last_record`. Labels: `"Кол-во визитов"`→`"Кол-во записей"`, `"Последний визит"`→`"Последняя запись"`. **localStorage migration:** `getStoredColumns` (line 29) — если в сохранённом массиве видны старые ключи `visits_count`/`last_visit`, замапировать на новые (`records_count`/`last_record`). Бэкворд-компат на read (один IF на загрузке). |
+| **Column defs** | `ClientsTable.tsx` (`COLUMNS`, `getStoredColumns`, `storageKey`) | Ключи `visits_count`→`records_count`, `last_visit`→`last_record`. Labels: `"Кол-во визитов"`→`"Всего записей"`, `"Последний визит"`→`"Последняя запись"`. localStorage `clients-columns` — без миграции (pre-prod, старые ключи молча проигнорируются при несовпадении с новыми `COLUMNS`, сброс через ColumnPicker). |
 | **Cell rendering** | `ClientsTable.tsx:137-145` | `client.visits_count` → `client.records_count`, `client.last_visit` → `client.last_record`. `visibleKeys.includes('visits_count')` → `'records_count'`, то же для `last_visit`. |
 | **Stats маппинг** (raw → camelCase prop) | `ClientInfoTab.tsx:169-171`, `ClientRecordTab.tsx:201-203`, `ClientTab.tsx` (ActivityDetailsModal):164-168 | `visitsCount: client.visits_count` → `recordsCount: client.records_count` (3 поля × 3 файла). Type-guard в `ClientTab.tsx:164`: `'visits_count' in client` → `'records_count' in client`. |
 | **Компонент-prop interface** | `ClientStatistics.tsx:4-6` | `visitsCount`→`recordsCount`, `missedVisits`→`missedRecords`, `lastVisit`→`lastRecord` (в interface + использовании внутри компонента). |
@@ -105,7 +105,7 @@ return null;
 - `frontend/admin/__tests__/ClientsFilters.test.tsx` (8 refs в lines 97,106,191,202,205,213,216,223) — bindings к `min_visits`/`max_visits` → новые; label asserts `"Визиты"` → `"Записи"`.
 
 ### E2E
-- `frontend/admin/e2e/clients.spec.ts:74-75` — ассерты на `'Кол-во визитов'`/`'Последний визит'` → `'Кол-во записей'`/`'Последняя запись'`.
+- `frontend/admin/e2e/clients.spec.ts:74-75` — ассерты на `'Кол-во визитов'`/`'Последний визит'` → `'Всего записей'`/`'Последняя запись'`.
 
 ### TDD подход (issue-специфичный)
 T1 (backend) — пишет сначала новые RED-тесты `test_records_count_renamed`, `test_missed_records_uses_record_status` (проверка: missed_records основан на `Record.status='missed'`, НЕ на `Visit.status='missed'`), `test_last_record_uses_activity_start` (проверка: last_record основан на `MAX(Activity.start)`, без фильтра статуса) → green → остальные backend-тесты переименовываются в рамках того же task.
@@ -146,7 +146,7 @@ T2-T4 — фронтовый rename-рефактор, TDD через обнов�
 - ClientsTable (columns, rendering, localStorage migration)
 - ClientInfoTab, ClientRecordTab, ClientTab (ActivityDetailsModal), ClientStatistics (prop interface + mapping)
 - ClientsContext, ClientsFilters (param names + UI labels)
-- UI-тексты: `"Кол-во записей"`, `"Последняя запись"`, `"Записи"` (filter group)
+- UI-тексты: `"Всего записей"`, `"Последняя запись"`, `"Записи"` (filter group)
 - Все тесты (backend unit + frontend unit + E2E) обновлены
 - `docs/domain-rules/clients.md` обновлён
 
@@ -167,11 +167,11 @@ T2-T4 — фронтовый rename-рефактор, TDD через обнов�
 
 | # | Сценарий | Покрытие |
 |---|----------|----------|
-| US-1 | Администратор открывает страницу клиентов и видит колонку «Кол-во записей» с числом записей каждого клиента (вместо «Кол-во визитов»). | `e2e/clients.spec.ts:74` — ассерт на `'Кол-во записей'` |
+| US-1 | Администратор открывает страницу клиентов и видит колонку «Всего записей» с числом записей каждого клиента (вместо «Кол-во визитов»). | `e2e/clients.spec.ts:74` — ассерт на `'Всего записей'` |
 | US-2 | Администратор видит колонку «Последняя запись» с датой последнего (по `Activity.start`) мероприятия, на которое клиент был записан — даже если клиент отменил или пропустил эту запись. | `e2e/clients.spec.ts:75` — ассерт на `'Последняя запись'` |
-| US-3 | Администратор сортирует клиентов по «Кол-во записей» (desc) — порядок соответствует количеству записей. | `ClientsTable.test.tsx` sort test → `sort_by='records_count'` |
+| US-3 | Администратор сортирует клиентов по «Всего записей» (desc) — порядок соответствует количеству записей. | `ClientsTable.test.tsx` sort test → `sort_by='records_count'` |
 | US-4 | Администратор фильтрует клиентов с «Записей: от 5» → ожидает клиентов с `records_count >= 5` (вместо старого `min_visits`). | `ClientsFilters.test.tsx` — bindings + label `"Записи"` |
-| US-5 | Администратор видит в карточке клиента статистику «Кол-во записей», «Пропущено», «Последняя запись» (camelCase props в `ClientStatistics`). | `ClientInfoTab.test.tsx` + `ClientCardModal.test.tsx` — mockStats с новыми ключами |
+| US-5 | Администратор видит в карточке клиента статистику «Всего записей», «Пропущено», «Последняя запись» (camelCase props в `ClientStatistics`). | `ClientInfoTab.test.tsx` + `ClientCardModal.test.tsx` — mockStats с новыми ключами |
 | US-6 | Client с 1 visited-записью и 1 missed-записью (Activity.start позже) → `records_count=2`, `missed_records=1`, `last_record = MAX(Activity.start)` (та, что позднее по дате, даже если missed). | `test_client_stats.py` — `test_last_record_uses_activity_start` (TDD anchor) |
 | US-7 | Client со всеми отменёнными записями → `missed_records=0`, `last_record = MAX(Activity.start)` самой поздней отмены. | `test_client_stats.py` — edge case test |
 
@@ -181,12 +181,12 @@ T2-T4 — фронтовый rename-рефактор, TDD через обнов�
 
 Специфичные UI-маркеры для автоматизированной проверки (Step 4.5 в workflow).
 
-- [ ] На странице `/clients` заголовок таблицы содержит «Кол-во записей» (не «Кол-во визитов»)
+- [ ] На странице `/clients` заголовок таблицы содержит «Всего записей» (не «Кол-во визитов»)
 - [ ] На странице `/clients` заголовок таблицы содержит «Последняя запись» (не «Последний визит»)
 - [ ] В фильтрах клиентов группа «Визиты» переименована в «Записи»
 - [ ] В карточке клиента (ClientCardModal) секция статистики отображает новые подписи (если подписи менялись в `ClientStatistics.tsx`)
 - [ ] `localStorage['clients-columns']` — старые сохранённые массивы мигрируют: `['visits_count','name','last_visit']` → `['records_count','name','last_record']` при загрузке страницы
-- [ ] Сортировка по «Кол-во записей» работает (`sort_by=records_count` в query param)
+- [ ] Сортировка по «Всего записей» работает (`sort_by=records_count` в query param)
 
 ---
 

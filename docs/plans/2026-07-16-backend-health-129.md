@@ -110,6 +110,8 @@ Eliminate the 1+N query pattern in `list_activities`. Add a single batched aggre
       assert counter["n"] <= 3, f"N+1 regression: {counter['n']} SELECTs for 5 activities"
   ```
 
+  > **Implementer note:** the constant `<= 3` is an estimate (1 list query + 1 batch SUM + 1 buffer). Its real value is as an N+1 **regression guard** — the count must be BOUNDED and NOT scale with the number of activities. After GREEN, verify the actual count and micro-adjust the constant if SQLAlchemy issues an extra query, but keep it a small fixed number (do NOT make it `~N`). If in doubt, add a second assertion that seeding 10 activities yields the same count as 5.
+
 - [ ] Run it, confirm it FAILS (current code does ~6 SELECTs): `cd backend && pytest tests/test_list_activities_query_count.py -x -q`
 - [ ] **GREEN:** Add `sum_active_seats_bulk` to `ActivityService` in `backend/src/services/activity.py`:
 
@@ -308,7 +310,15 @@ Add a capacity re-check to `RecordService.update` and `RecordService.patch`. Do 
       await db_session.delete(existing_visit)
   await db_session.flush()
 
-  # capacity re-check with the record's own seats already removed from the sum
+  # CRITICAL: check_activity_capacity sums the stored Record.seats COLUMN, not
+  # live visit counts. Deleting visits does NOT change Record.seats — it stays at
+  # the old value until recompute_record_seats runs. So we MUST recompute seats
+  # here (→ 0 visits + current anonym_visits) BEFORE the capacity check, otherwise
+  # the occupied sum still includes this record's stale old seats → double-count
+  # → a shrink (US-6) would falsely 409. This resets the record's own contribution.
+  await recompute_record_seats(db_session, record.id)
+
+  # capacity re-check with the record's own seats already reset in the sum
   effective_seats = len(data.visits) + record.anonym_visits
   await check_activity_capacity(db_session, data.activity_id, seats=effective_seats)
 
@@ -379,6 +389,12 @@ Add a capacity re-check to `RecordService.update` and `RecordService.patch`. Do 
       await db_session.flush()
 
   if seats_changed:
+      # CRITICAL (same as update): reset Record.seats to reflect the current DB
+      # state BEFORE the capacity check, so the occupied sum doesn't double-count
+      # this record's stale old seats. recompute_record_seats counts visits still
+      # in the DB (0 if we just deleted them for a visits-patch; unchanged for an
+      # anonym-only patch) + record.anonym_visits.
+      await recompute_record_seats(db_session, record.id)
       new_anonym = record.anonym_visits  # already updated above if present
       if "visits" in update_data:
           new_visit_count = len(update_data["visits"])

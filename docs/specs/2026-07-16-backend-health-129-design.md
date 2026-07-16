@@ -146,19 +146,25 @@ the record's own visits are removed (and its `anonym_visits` set to the new valu
 
 **Order of operations in `update` / `patch` (when visits or anonym_visits change):**
 
-1. Delete the record's existing visits (flush) — the record no longer occupies its
-   old seats in the DB sum.
-2. Set `record.anonym_visits` to the new value (so the record's current DB
-   contribution reflects only the new anonym count, not the old visits).
-3. Compute `effective_seats = len(new_visits) + new_anonym_visits`.
-4. Call the **unchanged** `check_activity_capacity(db_session, activity_id,
+1. Delete the record's existing visits (flush).
+2. Set `record.anonym_visits` to the new value.
+3. **Recompute `record.seats` via `recompute_record_seats` BEFORE the check.**
+   This is load-bearing: `check_activity_capacity` sums the stored `Record.seats`
+   **column** (`domain/record_visits.py:106-111`), NOT live visit counts. Deleting
+   visits does not change `Record.seats` — it keeps its old value until recompute
+   runs. Without this step the occupied sum still includes this record's stale old
+   seats → double-count → a shrink would falsely 409. After recompute, the record's
+   own contribution to the sum = 0 visits + new anonym.
+4. Compute `effective_seats = len(new_visits) + new_anonym_visits`.
+5. Call the **unchanged** `check_activity_capacity(db_session, activity_id,
    seats=effective_seats)` — same function used by `create`. Because the record's own
-   visits are already removed, the occupied sum now reflects only *other* records +
+   seats were reset in step 3, the occupied sum now reflects only *other* records +
    this record's (new) anonym count. No `exclude_record_id` needed.
-5. If over capacity → raise 409 → transaction rolls back → deleted visits restored on
+6. If over capacity → raise 409 → transaction rolls back → deleted visits restored on
    disk (nothing was committed).
-6. If OK → insert the new visits, then `recompute_record_seats` +
-   `recompute_record_status` as today.
+7. If OK → insert the new visits, then `recompute_record_seats` (again, now with the
+   new visits) + `recompute_record_status` as today. The extra recompute in step 3 is
+   idempotent — recomputing twice is harmless.
 
 **`check_activity_capacity` and `active_record_filter` are NOT modified.** Zero new
 domain code. The only change is the *order* of existing operations plus the added

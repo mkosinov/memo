@@ -60,10 +60,10 @@ class ClientResponse(BaseModel):
 class ClientWithStats(ClientResponse):
     """Response schema extending ClientResponse with aggregated metrics."""
 
-    visits_count: int = 0
-    last_visit: str | None = None
+    records_count: int = 0
+    last_record: str | None = None
     total_paid: int = 0
-    missed_visits: int = 0
+    missed_records: int = 0
 
 
 class ClientListParams(BaseModel):
@@ -77,8 +77,8 @@ class ClientListParams(BaseModel):
     created_to: date | None = None
     updated_from: date | None = None
     updated_to: date | None = None
-    min_visits: int | None = None
-    max_visits: int | None = None
+    min_records: int | None = None
+    max_records: int | None = None
     min_paid: int | None = None
     max_paid: int | None = None
     missed_from: int | None = None

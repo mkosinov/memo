@@ -12,7 +12,6 @@ from src.models.activity import Activity
 from src.models.client import Client
 from src.models.payment import Payment
 from src.models.record import Record
-from src.models.visit import Visit
 from src.repositories.generic import get_soft_delete_repository
 from src.schemas.client import (
     ClientCreate,
@@ -34,7 +33,7 @@ async def list_clients_with_stats(
     db_session: AsyncSession,
     params: ClientListParams,
 ) -> ClientListResponse:
-    """Return paginated clients with aggregated visit/payment stats."""
+    """Return paginated clients with aggregated record/payment stats."""
 
     # 1. Correlated scalar subqueries — one per stat, each reads ONE relation
     #    (no join-then-aggregate → cartesian product is structurally impossible).
@@ -44,27 +43,23 @@ async def list_clients_with_stats(
         .correlate(Client)
         .scalar_subquery()
     )
-    last_visit_sq = (
+    last_record_sq = (
         select(func.max(Activity.start))
-        .select_from(Visit)
-        .join(Record, Visit.record_id == Record.id)
+        .select_from(Record)
         .join(Activity, Record.activity_id == Activity.id)
         .where(
             Record.client_id == Client.id,
             Record.is_active == True,  # noqa: E712
-            Visit.status == "visited",
         )
         .correlate(Client)
         .scalar_subquery()
     )
-    missed_visits_sq = (
-        select(func.count(Visit.id))
-        .select_from(Visit)
-        .join(Record, Visit.record_id == Record.id)
+    missed_records_sq = (
+        select(func.count(Record.id))
         .where(
             Record.client_id == Client.id,
             Record.is_active == True,  # noqa: E712
-            Visit.status == "missed",
+            Record.status == "missed",
         )
         .correlate(Client)
         .scalar_subquery()
@@ -78,9 +73,9 @@ async def list_clients_with_stats(
         .scalar_subquery()
     )
 
-    visits_count_col = records_count_sq.label("visits_count")
-    last_visit_col = last_visit_sq.label("last_visit")
-    missed_visits_col = missed_visits_sq.label("missed_visits")
+    records_count_col = records_count_sq.label("records_count")
+    last_record_col = last_record_sq.label("last_record")
+    missed_records_col = missed_records_sq.label("missed_records")
     total_paid_col = total_paid_sq.label("total_paid")
 
     # 2. Select Client columns + the four stat scalar subqueries
@@ -93,10 +88,10 @@ async def list_clients_with_stats(
         Client.created_at,
         Client.updated_at,
         Client.is_active,
-        visits_count_col,
-        last_visit_col,
+        records_count_col,
+        last_record_col,
         total_paid_col,
-        missed_visits_col,
+        missed_records_col,
     ]
 
     # 3. Count query (total matching clients) — independent of stats
@@ -142,16 +137,16 @@ async def list_clients_with_stats(
 
     # Stats-based filters (applied to both queries)
     stats_filter_map = {
-        "min_visits": records_count_sq,
-        "max_visits": records_count_sq,
+        "min_records": records_count_sq,
+        "max_records": records_count_sq,
         "min_paid": total_paid_sq,
         "max_paid": total_paid_sq,
-        "missed_from": missed_visits_sq,
-        "missed_to": missed_visits_sq,
+        "missed_from": missed_records_sq,
+        "missed_to": missed_records_sq,
     }
     ops_map = {
-        "min_visits": lambda col, val: col >= val,
-        "max_visits": lambda col, val: col <= val,
+        "min_records": lambda col, val: col >= val,
+        "max_records": lambda col, val: col <= val,
         "min_paid": lambda col, val: col >= val,
         "max_paid": lambda col, val: col <= val,
         "missed_from": lambda col, val: col >= val,
@@ -172,10 +167,10 @@ async def list_clients_with_stats(
     # 7. Apply sorting
     sort_column_map = {
         "name": Client.name,
-        "visits_count": records_count_sq,
-        "last_visit": last_visit_sq,
+        "records_count": records_count_sq,
+        "last_record": last_record_sq,
         "total_paid": total_paid_sq,
-        "missed_visits": missed_visits_sq,
+        "missed_records": missed_records_sq,
         "created_at": Client.created_at,
         "updated_at": Client.updated_at,
     }
@@ -195,9 +190,9 @@ async def list_clients_with_stats(
 
     items: list[ClientWithStats] = []
     for row in rows:
-        last_visit = None
-        if row.last_visit:
-            last_visit = row.last_visit.isoformat() if isinstance(row.last_visit, datetime) else str(row.last_visit)
+        last_record = None
+        if row.last_record:
+            last_record = row.last_record.isoformat() if isinstance(row.last_record, datetime) else str(row.last_record)
 
         items.append(
             ClientWithStats(
@@ -209,10 +204,10 @@ async def list_clients_with_stats(
                 created_at=row.created_at,
                 updated_at=row.updated_at,
                 is_active=row.is_active,
-                visits_count=row.visits_count or 0,
-                last_visit=last_visit,
+                records_count=row.records_count or 0,
+                last_record=last_record,
                 total_paid=row.total_paid or 0,
-                missed_visits=row.missed_visits or 0,
+                missed_records=row.missed_records or 0,
             )
         )
 

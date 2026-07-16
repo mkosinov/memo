@@ -160,17 +160,17 @@ class TestClientWithStats:
             created_at="2025-01-01T00:00:00",
             updated_at="2025-01-01T00:00:00",
             is_active=True,
-            visits_count=5,
-            last_visit="2025-06-01",
+            records_count=5,
+            last_record="2025-06-01",
             total_paid=15000,
-            missed_visits=1,
+            missed_records=1,
         )
         assert cws.id == "test-id"
         assert cws.name == "Stats Client"
-        assert cws.visits_count == 5
-        assert cws.last_visit == "2025-06-01"
+        assert cws.records_count == 5
+        assert cws.last_record == "2025-06-01"
         assert cws.total_paid == 15000
-        assert cws.missed_visits == 1
+        assert cws.missed_records == 1
 
     @pytest.mark.pure_unit
     def test_client_with_stats_defaults(self):
@@ -183,10 +183,10 @@ class TestClientWithStats:
             updated_at="2025-01-01T00:00:00",
             is_active=True,
         )
-        assert cws.visits_count == 0
-        assert cws.last_visit is None
+        assert cws.records_count == 0
+        assert cws.last_record is None
         assert cws.total_paid == 0
-        assert cws.missed_visits == 0
+        assert cws.missed_records == 0
 
     @pytest.mark.pure_unit
     def test_client_with_stats_nullable_client_fields(self):

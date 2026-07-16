@@ -134,7 +134,7 @@ This is the first task — backend rename. After this task, backend tests pass w
 - [ ] Update `base_cols` (lines 96-99): replace `visits_count_col`/`last_visit_col`/`missed_visits_col` → `records_count_col`/`last_record_col`/`missed_records_col`
 - [ ] Update `stats_filter_map` (lines 144-150):
   - `"min_visits"` → `"min_records"`, value still `records_count_sq`
-  - `"max_visits"` → `"max_rows"`, value still `records_count_sq`
+  - `"max_visits"` → `"max_records"`, value still `records_count_sq`
   - `"missed_from": missed_visits_sq` → `"missed_from": missed_records_sq`
   - `"missed_to": missed_visits_sq` → `"missed_to": missed_records_sq`
   - `min_paid`/`max_paid` — no change
@@ -176,6 +176,16 @@ This is the first task — backend rename. After this task, backend tests pass w
     - Record B: Activity.start = 2026-01-20, Visit status=`cancelled`
   - `GET /api/v1/clients` → assert `last_record` = 2026-01-10T... (Activity.start of record B, the LATEST by Activity.start, even though cancelled)
   - Old behavior: `last_visit` would return 2026-01-10 (only visited). New: 2026-01-20 (no status filter).
+  - Run: expect RED → GREEN after 1b
+
+- [ ] Write RED test `test_all_cancelled_records_missed_zero` (US-7 edge case) in `test_client_stats.py`:
+  - Create client with 2 records, all visits `status='cancelled'` → `Record.status='cancelled'` for both
+  - Record A: Activity.start = 2026-01-10
+  - Record B: Activity.start = 2026-01-22
+  - `GET /api/v1/clients` → assert:
+    - `missed_records == 0` (both records have status `cancelled`, NOT `missed`)
+    - `last_record` = Activity.start of Record B (2026-01-22, the latest, even though cancelled)
+  - This validates US-7: all-cancelled client → `missed_records=0`, `last_record` = MAX(Activity.start) of latest cancelled
   - Run: expect RED → GREEN after 1b
 
 - [ ] Update all existing test references in `test_client_stats.py` (44 lines):

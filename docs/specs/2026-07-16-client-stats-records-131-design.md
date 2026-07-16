@@ -59,24 +59,9 @@ Backend `services/client.py` `stats_filter_map` (lines 144-150): ключи `min
 | **Filters (context)** | `ClientsContext.tsx` (`ClientFilters` interface, defaults, `sort_by` param passthrough lines 25-26, 40-41, 84) | `min_visits`→`min_records`, `max_visits`→`max_records` в интерфейсе, defaults и query-параметре. |
 | **Filters (UI)** | `ClientsFilters.tsx` ( bindings lines 57-60, label line 55) | `min_visits`/`max_visits` → `min_records`/`max_records`. Group label: `"Визиты"` → `"Записи"`. `missed_from`/`missed_to` bindings не меняются. |
 
-### localStorage migration — спецификация
+### localStorage — без миграции
 
-В `ClientsTable.tsx` функция чтения сохранённых колонок (line 29, `getStoredColumns`):
-```ts
-// псевдокод
-const stored = localStorage.getItem('clients-columns');
-if (stored) {
-  const keys = JSON.parse(stored) as string[];
-  // backward-compat map
-  const mapped = keys.map(k => 
-    k === 'visits_count' ? 'records_count' :
-    k === 'last_visit' ? 'last_record' : k
-  );
-  return mapped;
-}
-return null;
-```
-Старые данные в `localStorage` молча мигрируют на новые ключи при первом открытии страницы клиентов. После первой загрузки — `localStorage` перезапишется уже новыми ключами (через COLUMN Picker `onSave`). Никакого version-flag, никакого отдельного upgrade-stepа.
+Продукт не в проде, реальных пользователей нет (user decision 2026-07-16). Старые ключи в `localStorage['clients-columns']` молча проигнорируются при несовпадении с новыми `COLUMNS` ключами — колонки просто не отобразятся, сброс через ColumnPicker "Сбросить колонки". Никакого runtime-mapper, никакого backward-compat кода.
 
 ---
 
@@ -95,7 +80,7 @@ return null;
 - **`backend/tests/test_schemas_client.py:163-189`** — переименовать поля в schema validation asserts.
 
 ### Frontend unit (~29 refs в 5 файлах + 2 helper файла)
-- `frontend/admin/__tests__/ClientsTable.test.tsx` (16 refs) — column headers, mock data, sort keys, `localStorage.getItem('clients-columns')` seeded data → мигрировать на новые ключи.
+- `frontend/admin/__tests__/ClientsTable.test.tsx` (16 refs) — column headers, mock data, sort keys, `localStorage.getItem('clients-columns')` seeded data → переименовать ключи на новые.
 - `frontend/admin/__tests__/ClientsPage.test.tsx` (3 refs)
 - `frontend/admin/__tests__/ClientsIntegration.test.tsx` (5 refs)
 - `frontend/admin/__tests__/ClientInfoTab.test.tsx` (2 refs — `lastVisit` → `lastRecord` в mockStats)
@@ -118,7 +103,7 @@ T2-T4 — фронтовый rename-рефактор, TDD через обнов�
 
 - `Record.status` уже персистится и backfilled миграцией `4d5e6f7a8b9c` (PR #135) — 4-step UPDATE: visited → missed → cancelled → waiting. Все CRUD-пути вызывают `recompute_record_status()`.
 - **No alembic migration** в #131.
-- localStorage-миграция — **runtime only** (read-time mapper в `getStoredColumns`), не backend/БД.
+- localStorage — **без миграции** (pre-prod, старые ключи молча проигнорируются, сброс через ColumnPicker).
 
 ### Defense-in-depth Checks
 - `Record.status` model (line 23): `String(20)`, NOT nullable, без default. Каждый CRUD-путь явно задаёт `status` через `recompute_record_status()`. Проверка в T1 тест-кейсом: create record без visits → `status = 'waiting'`, `missed_records` не увеличивается.
@@ -143,7 +128,7 @@ T2-T4 — фронтовый rename-рефактор, TDD через обнов�
 - 3 backend-поля (schema `ClientWithStats` + 3 SQL subqueries + sort_column_map keys + response mapping)
 - 2 параметра API: `min_visits`/`max_visits` → `min_records`/`max_records` (semantics + name)
 - Zod-схема + type
-- ClientsTable (columns, rendering, localStorage migration)
+- ClientsTable (columns, rendering)
 - ClientInfoTab, ClientRecordTab, ClientTab (ActivityDetailsModal), ClientStatistics (prop interface + mapping)
 - ClientsContext, ClientsFilters (param names + UI labels)
 - UI-тексты: `"Всего записей"`, `"Последняя запись"`, `"Записи"` (filter group)
@@ -185,7 +170,6 @@ T2-T4 — фронтовый rename-рефактор, TDD через обнов�
 - [ ] На странице `/clients` заголовок таблицы содержит «Последняя запись» (не «Последний визит»)
 - [ ] В фильтрах клиентов группа «Визиты» переименована в «Записи»
 - [ ] В карточке клиента (ClientCardModal) секция статистики отображает новые подписи (если подписи менялись в `ClientStatistics.tsx`)
-- [ ] `localStorage['clients-columns']` — старые сохранённые массивы мигрируют: `['visits_count','name','last_visit']` → `['records_count','name','last_record']` при загрузке страницы
 - [ ] Сортировка по «Всего записей» работает (`sort_by=records_count` в query param)
 
 ---
@@ -196,6 +180,5 @@ T2-T4 — фронтовый rename-рефактор, TDD через обнов�
 |---|---|
 | Backend-frontend рассинхрон в окне между T1 (backend merge) и T4 (frontend E2E) | Approach A: один PR, T1→T2-T4 sequential. Промежуточные коммиты в worktree-ветке — E2E временно красные между T1 и T4, финально зелёные. |
 | `Record.status` stale rows (pre-#98) | Устранено миграцией #135 backfill + каждый CRUD вызывает `recompute_record_status`. Подтверждено в recon (ses_094d4c936ffe). T1 тест `test_missed_records_uses_record_status` валидирует логику. |
-| localStorage-данные старых ключей ломают ColumnPicker | Runtime migration в `getStoredColumns` (§3). T2 test на `localStorage.getItem('clients-columns')` с seeded старыми ключами → pass. |
 | Существующий E2E clients.spec.ts:74-75 падает на старых текстах | T4 обновляет ассерты одновременно с UI label changes — atomic. |
 | `last_record` семантический сдвиг ломает существующий UI-dates test (old: visited-only → new: all records) | T1 обновляет backend-тест `test_last_record_*` с новой семантикой. Frontend `ClientsTable.test.tsx` mock-data имеет `last_visit: '2026-05-15T14:00:00'` — после переименования `last_record` просто меняет ключ в mock-фабрике. Дата hasn't changed in mock (1 visited record), остаётся зелёным. |

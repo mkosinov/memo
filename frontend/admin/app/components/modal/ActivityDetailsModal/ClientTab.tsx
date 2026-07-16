@@ -161,11 +161,11 @@ export function ClientTab({
 
   // Compute stats for ClientStatistics
   const stats =
-    client && 'visits_count' in client
+    client && 'records_count' in client
       ? {
-          visitsCount: client.visits_count,
-          missedVisits: client.missed_visits,
-          lastVisit: client.last_visit,
+          recordsCount: client.records_count,
+          missedRecords: client.missed_records,
+          lastRecord: client.last_record,
           totalPaid: client.total_paid,
         }
       : undefined;

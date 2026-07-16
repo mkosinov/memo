@@ -11,8 +11,8 @@ import type { ClientWithStats } from '@memo/api-client';
 const COLUMNS: { key: string; label: string; sortable: boolean; defaultVisible: boolean }[] = [
   { key: 'name', label: 'Имя', sortable: true, defaultVisible: true },
   { key: 'phone', label: 'Телефон', sortable: true, defaultVisible: true },
-  { key: 'visits_count', label: 'Кол-во визитов', sortable: true, defaultVisible: true },
-  { key: 'last_visit', label: 'Последний визит', sortable: true, defaultVisible: true },
+  { key: 'records_count', label: 'Всего записей', sortable: true, defaultVisible: true },
+  { key: 'last_record', label: 'Последняя запись', sortable: true, defaultVisible: true },
   { key: 'total_paid', label: 'Сумма оплат', sortable: true, defaultVisible: true },
 ];
 
@@ -37,8 +37,8 @@ export function ClientsTable({ onClientClick }: ClientsTableProps) {
   const hasActiveFilters =
     filters.search ||
     filters.is_active !== null ||
-    filters.min_visits !== null ||
-    filters.max_visits !== null ||
+    filters.min_records !== null ||
+    filters.max_records !== null ||
     filters.min_paid !== null ||
     filters.max_paid !== null;
 
@@ -134,15 +134,15 @@ export function ClientsTable({ onClientClick }: ClientsTableProps) {
                 {client.phone || 'Не указан'}
               </td>
               )}
-              {visibleKeys.includes('visits_count') && (
+              {visibleKeys.includes('records_count') && (
               <td className="px-4 py-3 text-sm" style={{ color: 'var(--ink-mid)' }}>
-                {client.visits_count}
+                {client.records_count}
               </td>
               )}
-              {visibleKeys.includes('last_visit') && (
+              {visibleKeys.includes('last_record') && (
               <td className="px-4 py-3 text-sm" style={{ color: 'var(--ink-mid)' }}>
-                {client.last_visit
-                  ? new Date(client.last_visit).toLocaleDateString('ru-RU')
+                {client.last_record
+                  ? new Date(client.last_record).toLocaleDateString('ru-RU')
                   : '—'}
               </td>
               )}

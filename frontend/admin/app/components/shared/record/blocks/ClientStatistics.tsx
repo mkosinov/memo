@@ -1,9 +1,9 @@
 'use client';
 
 export interface ClientStatisticsStats {
-  visitsCount?: number;
-  missedVisits?: number;
-  lastVisit?: string | null;
+  recordsCount?: number;
+  missedRecords?: number;
+  lastRecord?: string | null;
   totalPaid?: number;
 }
 
@@ -19,23 +19,23 @@ export function ClientStatistics({ stats }: ClientStatisticsProps) {
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 p-3 rounded-lg border" style={{ borderColor: 'var(--line)' }}>
         <div className="text-center">
           <div className="text-lg font-semibold">
-            {stats?.visitsCount ?? '—'}
+            {stats?.recordsCount ?? '—'}
           </div>
-          <div className="text-xs text-ink-light">Визитов</div>
+          <div className="text-xs text-ink-light">Записей</div>
         </div>
         <div className="text-center">
           <div className="text-lg font-semibold">
-            {stats?.missedVisits ?? '—'}
+            {stats?.missedRecords ?? '—'}
           </div>
           <div className="text-xs text-ink-light">Пропущено</div>
         </div>
         <div className="text-center">
           <div className="text-lg font-semibold">
-            {stats?.lastVisit
-              ? new Date(stats.lastVisit).toLocaleDateString('ru-RU')
+            {stats?.lastRecord
+              ? new Date(stats.lastRecord).toLocaleDateString('ru-RU')
               : '—'}
           </div>
-          <div className="text-xs text-ink-light">Последний</div>
+          <div className="text-xs text-ink-light">Последняя</div>
         </div>
         <div className="text-center">
           <div className="text-lg font-semibold">

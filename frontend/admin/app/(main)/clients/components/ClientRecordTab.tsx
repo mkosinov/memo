@@ -198,9 +198,9 @@ export function ClientRecordTab({ recordId, clientId, client }: ClientRecordTabP
       {/* Client statistics */}
       <ClientStatistics
         stats={client ? {
-          visitsCount: client.visits_count,
-          missedVisits: client.missed_visits,
-          lastVisit: client.last_visit,
+          recordsCount: client.records_count,
+          missedRecords: client.missed_records,
+          lastRecord: client.last_record,
           totalPaid: client.total_paid,
         } : undefined}
       />

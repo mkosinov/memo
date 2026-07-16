@@ -192,7 +192,15 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
     async def update(
         self, db_session: AsyncSession, id: str, data: RecordUpdate
     ) -> Record | None:
-        """Full-update record: replace visits, recalculate seats."""
+        """Full-update record: replace visits, recalculate seats.
+
+        Re-checks activity capacity (Variant 1 from #129): after the record's own
+        visits are deleted and `anonym_visits` is updated, the record's stored
+        ``seats`` is recomputed BEFORE the capacity check so the occupied sum
+        reflects only *other* records + this record's (new) anonym count. If
+        over capacity, raises 409 and the transaction rolls back, restoring the
+        record to its pre-update state.
+        """
         record = await self.get(db_session, id)
         if not record:
             return None
@@ -202,16 +210,34 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
         record.comment = data.comment
         record.custom_price = data.custom_price
         record.anonym_visits = data.anonym_visits or 0
-        record.seats = len(data.visits) + (data.anonym_visits or 0)
         record.updated_at = datetime.now(UTC)
 
+        # Remove the record's own existing visits first (so they don't self-count)
         for existing_visit in list(record.visits):
             await db_session.delete(existing_visit)
+        await db_session.flush()
 
+        # CRITICAL: check_activity_capacity sums the stored Record.seats COLUMN,
+        # not live visit counts. Deleting visits does NOT change Record.seats —
+        # it keeps its old value until recompute_record_seats runs. So we MUST
+        # recompute seats here (→ 0 visits + current anonym_visits) BEFORE the
+        # capacity check, otherwise the occupied sum still includes this
+        # record's stale old seats → double-count → a shrink (US-6) would
+        # falsely 409. This resets the record's own contribution.
+        await recompute_record_seats(db_session, record.id)
+
+        # Capacity re-check with the record's own seats already reset in the sum
+        effective_seats = len(data.visits) + record.anonym_visits
+        await check_activity_capacity(
+            db_session, data.activity_id, seats=effective_seats
+        )
+
+        # Only now insert the new visits
         for visit_item in data.visits:
             visit = Visit(
                 record_id=record.id,
                 visitor_id=visit_item.visitor_id,
+                tariff_id=visit_item.tariff_id,
                 price=visit_item.price,
                 custom_price=visit_item.custom_price,
                 status=visit_item.status.value,
@@ -236,6 +262,11 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
         deactivates existing visits and creates new ones; otherwise visits
         are left untouched. Seats and status are always recomputed via
         domain free functions after the flush.
+
+        Capacity re-check (#129 Variant 1): only fires when the patch touches
+        ``visits`` or ``anonym_visits`` (the ``seats_changed`` guard). A patch
+        of only ``comment``/``custom_price`` does not change seats and skips
+        the capacity query.
         """
         record = await self.get(db_session, id)
         if not record:
@@ -249,9 +280,35 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
             record.custom_price = update_data["custom_price"]
         if "anonym_visits" in update_data:
             record.anonym_visits = update_data["anonym_visits"] or 0
+
+        # ── Capacity re-check (only when seats may change) ─────────────
+        seats_changed = "visits" in update_data or "anonym_visits" in update_data
         if "visits" in update_data:
             for existing_visit in list(record.visits):
                 await db_session.delete(existing_visit)
+            await db_session.flush()
+
+        if seats_changed:
+            # CRITICAL (same as update): reset Record.seats to reflect the
+            # current DB state BEFORE the capacity check, so the occupied
+            # sum doesn't double-count this record's stale old seats.
+            # recompute_record_seats counts visits still in the DB (0 if we
+            # just deleted them for a visits-patch; unchanged for an
+            # anonym-only patch) + record.anonym_visits.
+            await recompute_record_seats(db_session, record.id)
+            new_anonym = record.anonym_visits  # already updated above if present
+            if "visits" in update_data:
+                new_visit_count = len(update_data["visits"])
+            else:
+                # anonym-only change: count current visits still in DB
+                new_visit_count = len(list(record.visits))
+            effective_seats = new_visit_count + new_anonym
+            await check_activity_capacity(
+                db_session, record.activity_id, seats=effective_seats
+            )
+
+        # ── Insert new visits (if provided) ───────────────────────────
+        if "visits" in update_data:
             for visit_item in update_data["visits"]:
                 visit = Visit(
                     record_id=record.id,

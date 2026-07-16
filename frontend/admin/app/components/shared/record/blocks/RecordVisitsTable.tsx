@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import type { VisitResponse, TariffResponse, VisitPatch } from '@memo/api-client';
 import type { VisitStatus } from '@memo/domain';
 import { useUI } from '@/contexts/UIContext';
@@ -216,35 +216,23 @@ export function RecordVisitsTable({
   onAnonymVisitsChange,
 }: RecordVisitsTableProps) {
   const { showToast } = useUI();
-  const [rows, setRows] = useState<VisitRow[]>(() =>
-    visits.map((v) => visitResponseToRow(v, visitorsMap)),
-  );
-  const [anonymInput, setAnonymInput] = useState(anonymVisits);
 
-  // Re-sync rows when visits/visitorsMap changes (after invalidation/refetch).
-  // Preserves new rows (id === null) and existing rows' clientId (for key stability).
-  useEffect(() => {
-    setRows((prevRows) => {
-      const newRows = prevRows.filter((r) => r.id === null);
-      const updatedExisting = visits.map((visit) => {
-        const existing = prevRows.find((r) => r.id === visit.id);
-        if (existing) {
-          const visitor = visitorsMap.get(visit.visitor_id ?? '');
-          return {
-            ...existing,
-            visitor_id: visit.visitor_id ?? null,
-            name: visitor?.name ?? existing.name,
-            age: visitor?.age ?? existing.age,
-            tariff_id: visit.tariff_id ?? existing.tariff_id,
-            price: visit.price,
-            status: safeStatus(visit.status) as VisitStatus,
-          };
-        }
-        return visitResponseToRow(visit, visitorsMap);
-      });
-      return [...updatedExisting, ...newRows];
-    });
-  }, [visits, visitorsMap]);
+  // ── Row state (#127 Task 5) ────────────────────────────────────────────
+  // Single source of truth = the `visits` prop (cache-backed after Task 4).
+  // Drafts (id === null) live in a separate useState so they're not clobbered
+  // by an effect-driven re-sync (Bug #3 "row disappears").
+  const savedRows = useMemo<VisitRow[]>(
+    () => visits.map((v) => visitResponseToRow(v, visitorsMap)),
+    [visits, visitorsMap],
+  );
+
+  // Drafts also include "pending saved" rows (id !== null) that were just
+  // added — kept here with the user's submitted values until the cache catches
+  // up and the useMemo produces the same id from props. This is the
+  // "preserve submitted values behavior" window.
+  const [drafts, setDrafts] = useState<VisitRow[]>([]);
+
+  const [anonymInput, setAnonymInput] = useState(anonymVisits);
 
   const handleAnonymChange = useCallback((value: number) => {
     setAnonymInput(value);
@@ -254,19 +242,24 @@ export function RecordVisitsTable({
 
   // ── Row mutations ─────────────────────────────────────────────────────────
 
+  /** Add a new empty draft row (id === null). */
   const handleAddClick = useCallback(() => {
-    setRows((prev) => [...prev, makeEmptyVisitRow(tariffs)]);
+    setDrafts((prev) => [...prev, makeEmptyVisitRow(tariffs)]);
   }, [tariffs]);
 
-  /** Remove a new (unsaved) row from the array — no API call. */
+  /** Remove a new (unsaved) draft row from the array — no API call. */
   const handleRemove = useCallback((row: VisitRow) => {
-    setRows((prev) => prev.filter((r) => r !== row));
+    setDrafts((prev) => prev.filter((r) => r !== row));
   }, []);
 
-  /** DELETE a saved visit via API, then remove from array. */
+  /**
+   * DELETE a saved visit. The cache is mutated optimistically by the parent
+   * (Task 4) — `savedRows` will re-derive from the updated `visits` prop.
+   * We do NOT locally filter saved rows: this component trusts the prop
+   * as the single source of truth.
+   */
   const handleDeleteRow = useCallback(async (id: string) => {
     await onDeleteVisit(id);
-    setRows((prev) => prev.filter((r) => r.id !== id));
   }, [onDeleteVisit]);
 
   /** POST a new visit (2-step: createVisitor → createVisit). Returns saved row, or undefined on error. */
@@ -298,23 +291,34 @@ export function RecordVisitsTable({
     return visitResponseToRow(updated, visitorsMap);
   }, [onPatchVisit, visitorsMap]);
 
-  /** Replace a row in the array by its clientId (used after onAdd resolves). */
-  const replaceRowByClientId = useCallback((rowClientId: string, savedRow: VisitRow) => {
-    setRows((prev) =>
-      prev.map((r) =>
-        r.clientId === rowClientId ? { ...savedRow, clientId: r.clientId } : r,
-      ),
-    );
+  /**
+   * Called by InlineEditRow after a successful new-row save. Replaces the
+   * unsaved draft with a saved row in the drafts array, preserving the
+   * submitted values. Once the cache catches up and `savedRows` produces the
+   * same id, the pending entry is dropped from the rendered list (deduped
+   * by id below).
+   */
+  const handleSaved = useCallback((oldRow: VisitRow, savedRow: VisitRow) => {
+    setDrafts((prev) => prev.map((r) => (r === oldRow ? savedRow : r)));
   }, []);
 
-  /** Replace a row in the array by its id (used after onPatchVisit resolves). */
-  const replaceRowById = useCallback((id: string, updatedRow: VisitRow) => {
-    setRows((prev) =>
-      prev.map((r) => (r.id === id ? { ...updatedRow, clientId: r.clientId } : r)),
-    );
-  }, []);
-
-  // ── Render ────────────────────────────────────────────────────────────────
+  // ── Render list ─────────────────────────────────────────────────────────
+  // Saved rows are the canonical source. Drafts (id === null) are appended.
+  // "Pending saved" drafts (id !== null) are appended only if not already
+  // covered by savedRows (cache hasn't caught up yet).
+  const displayedRows = useMemo(() => {
+    const savedIds = new Set(savedRows.map((r) => r.id));
+    const newDrafts: VisitRow[] = [];
+    const pendingSaved: VisitRow[] = [];
+    for (const d of drafts) {
+      if (d.id === null) {
+        newDrafts.push(d);
+      } else if (!savedIds.has(d.id)) {
+        pendingSaved.push(d);
+      }
+    }
+    return [...savedRows, ...pendingSaved, ...newDrafts];
+  }, [savedRows, drafts]);
 
   return (
     <div data-testid="record-visits-table">
@@ -325,9 +329,9 @@ export function RecordVisitsTable({
 
       {/* Table */}
       <RecordTable testId="record-visits-table-table">
-        {rows.length > 0 && <RecordTable.Header columns={VISIT_COLUMNS} isReadOnly={isReadOnly} />}
+        {displayedRows.length > 0 && <RecordTable.Header columns={VISIT_COLUMNS} isReadOnly={isReadOnly} />}
 
-        {rows.map((row) => (
+        {displayedRows.map((row) => (
           <InlineEditRow<VisitRow, VisitFormState>
             key={row.id ?? row.clientId}
             row={row}
@@ -337,7 +341,7 @@ export function RecordVisitsTable({
             onUpdate={handleUpdate}
             onDelete={handleDeleteRow}
             onRemove={handleRemove}
-            onSaved={(oldRow, savedRow) => replaceRowByClientId(oldRow.clientId, savedRow)}
+            onSaved={handleSaved}
             emptyData={() => pickFormData(makeEmptyVisitRow(tariffs))}
             pickFormData={pickFormData}
             isReadOnly={isReadOnly}
@@ -401,8 +405,6 @@ export function RecordVisitsTable({
                         onPatchVisit(r.id!, {
                           tariff_id: tariffId,
                           price: selectedTariff?.price,
-                        }).then((updated) => {
-                          replaceRowById(r.id!, visitResponseToRow(updated, visitorsMap));
                         });
                       }
                     }}
@@ -423,9 +425,7 @@ export function RecordVisitsTable({
                       if (isNew) {
                         handleChange('price', price);
                       } else {
-                        onPatchVisit(r.id!, { price }).then((updated) => {
-                          replaceRowById(r.id!, visitResponseToRow(updated, visitorsMap));
-                        });
+                        onPatchVisit(r.id!, { price });
                       }
                     }}
                     className="text-right"
@@ -441,9 +441,7 @@ export function RecordVisitsTable({
                       if (isNew) {
                         handleChange('status', s);
                       } else {
-                        onPatchVisit(r.id!, { status: s }).then((updated) => {
-                          replaceRowById(r.id!, visitResponseToRow(updated, visitorsMap));
-                        });
+                        onPatchVisit(r.id!, { status: s });
                       }
                     }}
                     variant="icon"
@@ -478,7 +476,7 @@ export function RecordVisitsTable({
       </RecordTable>
 
       {/* Empty state (shown when no visits and no new rows) */}
-      {rows.length === 0 && (
+      {displayedRows.length === 0 && (
         <div className="px-3 py-4 text-xs text-ink-light text-center rounded-lg border" style={{ borderColor: 'var(--line)' }}>
           Нет посетителей
         </div>

@@ -43,6 +43,7 @@ vi.mock('@memo/api-client', () => ({
   patchVisit: vi.fn(),
   deleteVisit: vi.fn(),
   updateVisitor: vi.fn(),
+  ApiError: class ApiError extends Error { code: string; constructor(msg: string, code: string) { super(msg); this.code = code; } },
 }));
 
 vi.mock('@/contexts/ScheduleContext', () => ({
@@ -54,8 +55,20 @@ vi.mock('@/contexts/ScheduleContext', () => ({
   })),
 }));
 
+vi.mock('@/contexts/PendingActionsContext', () => ({
+  usePendingActions: () => ({ enqueuePendingAction: mockEnqueuePendingAction }),
+}));
+
 const mockInvalidateQueries = vi.fn();
-const mockQueryClient = { invalidateQueries: mockInvalidateQueries, setQueryData: vi.fn(), fetchQuery: vi.fn() };
+const mockQueryClient = {
+  invalidateQueries: mockInvalidateQueries,
+  setQueryData: vi.fn(),
+  setQueriesData: vi.fn(),
+  getQueryData: vi.fn(),
+  fetchQuery: vi.fn(),
+};
+
+const mockEnqueuePendingAction = vi.fn();
 
 vi.mock('@tanstack/react-query', () => ({
   useQuery: vi.fn(),
@@ -92,10 +105,11 @@ const mockUseQuery = vi.mocked(useQuery);
 import { ClientRecordTab } from '../app/(main)/clients/components/ClientRecordTab';
 
 describe('ClientRecordTab — integration with shared atoms', () => {
-  const onClose = vi.fn();
+
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockEnqueuePendingAction.mockReset();
     buildDefaultQueryImpl(mockUseQuery);
     vi.mocked(patchRecord).mockResolvedValue(mockRecord);
     vi.mocked(patchActivity).mockResolvedValue(mockActivityResponse);
@@ -126,31 +140,31 @@ describe('ClientRecordTab — integration with shared atoms', () => {
   // ─── RecordHeader atom ──────────────────────────────────────────────
 
   it('renders RecordHeader with client name', () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" />);
     expect(screen.getByTestId('record-header')).toBeInTheDocument();
     // useRecordData doesn't fetch full client — RecordHeader shows "Без имени" as placeholder
     expect(screen.getByText('Без имени')).toBeInTheDocument();
   });
 
   it('renders StatusBadge in RecordHeader', () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" />);
     expect(screen.getByTestId('status-badge-waiting')).toBeInTheDocument();
   });
 
   it('renders anonym-visits input in RecordHeader', () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" />);
     expect(screen.getByTestId('anonym-visits-input')).toBeInTheDocument();
   });
 
   // ─── RecordVisitRow atom ───────────────────────────────────────────
 
   it('renders one RecordVisitRow per visit', () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" />);
     expect(screen.getByTestId('visit-row-v1')).toBeInTheDocument();
   });
 
   it('renders visit name inside RecordVisitRow', () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" />);
     const visitRow = screen.getByTestId('visit-row-v1');
     const nameInput = visitRow.querySelector('input') as HTMLInputElement;
     expect(nameInput).toBeInTheDocument();
@@ -160,7 +174,7 @@ describe('ClientRecordTab — integration with shared atoms', () => {
   // ─── PaymentList atom ──────────────────────────────────────────────
 
   it('renders PaymentList with existing payments', () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" />);
     expect(screen.getByTestId('record-payments-table')).toBeInTheDocument();
     expect(screen.getByTestId('payment-p1')).toBeInTheDocument();
   });
@@ -168,7 +182,7 @@ describe('ClientRecordTab — integration with shared atoms', () => {
   // ─── PaymentTotals atom ────────────────────────────────────────────
 
   it('renders PaymentTotals with correct values', () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" />);
     expect(screen.getByTestId('payments-total')).toBeInTheDocument();
     // Paid=1500 (from mockPayments)
     expect(screen.getAllByText('1 500 ₽').length).toBeGreaterThan(0);
@@ -177,14 +191,14 @@ describe('ClientRecordTab — integration with shared atoms', () => {
   // ─── PaymentForm atom ──────────────────────────────────────────────
 
   it('renders PaymentForm', () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" />);
     expect(screen.getByTestId('btn-add-payment')).toBeInTheDocument();
   });
 
   // ─── AddVisitorForm atom ───────────────────────────────────────────
 
   it('shows AddVisitorForm when add button clicked', () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" />);
     fireEvent.click(screen.getByTestId('btn-add-visitor'));
     // The new unified row renders with id===null → testId visit-row-new
     expect(screen.getByTestId('visit-row-new')).toBeInTheDocument();
@@ -194,7 +208,7 @@ describe('ClientRecordTab — integration with shared atoms', () => {
   // ─── Mutations wiring ──────────────────────────────────────────────
 
   it('addPayment fires createPayment mutation', async () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" />);
     // Open new payment row
     fireEvent.click(screen.getByTestId('btn-add-payment'));
     const amountInput = screen.getByTestId('add-payment-amount');
@@ -212,7 +226,7 @@ describe('ClientRecordTab — integration with shared atoms', () => {
   });
 
   it('addVisitor fires createVisitor then patchRecord', async () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" />);
     fireEvent.click(screen.getByTestId('btn-add-visitor'));
     const nameInput = screen.getByTestId('add-visitor-name');
     fireEvent.change(nameInput, { target: { value: 'Новый Гость' } });
@@ -229,7 +243,7 @@ describe('ClientRecordTab — integration with shared atoms', () => {
   });
 
   it('deletePayment fires deletePayment mutation', async () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" />);
     fireEvent.click(screen.getByTestId('payment-p1-delete'));
 
     await waitFor(() => {
@@ -238,7 +252,7 @@ describe('ClientRecordTab — integration with shared atoms', () => {
   });
 
   it('saveRecord fires patchRecord on save', async () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" />);
     const textarea = screen.getByPlaceholderText('Добавить комментарий...');
     fireEvent.change(textarea, { target: { value: 'Test comment' } });
     fireEvent.click(screen.getByTestId('btn-save-record'));
@@ -253,7 +267,7 @@ describe('ClientRecordTab — integration with shared atoms', () => {
   // ─── Status change wiring ─────────────────────────────────────────
 
   it('status change on RecordVisitRow calls patchVisit', async () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" />);
 
     const statusContainer = screen.getByTestId('visit-v1-status');
     const trigger = within(statusContainer).getByTestId('visit-v1-status-trigger');
@@ -264,6 +278,25 @@ describe('ClientRecordTab — integration with shared atoms', () => {
 
     await waitFor(() => {
       expect(apiPatchVisit).toHaveBeenCalledWith('v1', expect.objectContaining({ status: 'visited' }));
+    });
+  });
+
+  // ─── T8: delete-visit goes through deleteVisitDeferred (PendingActions) ──
+
+  it('delete-visit goes through deleteVisitDeferred (PendingActions) — fine-grained', async () => {
+    render(<ClientRecordTab recordId="r1" clientId="c1" />);
+    // Click the × button on the saved visit row
+    fireEvent.click(screen.getByTestId('visit-row-v1-delete'));
+
+    // deleteVisitDeferred delegates to PendingActions — must call enqueuePendingAction
+    // and must NOT immediately call the deleteVisit API (the provider owns the timer).
+    await waitFor(() => {
+      expect(mockEnqueuePendingAction).toHaveBeenCalledWith(
+        expect.objectContaining({
+          kind: 'delete',
+          message: expect.stringContaining('Отменить'),
+        }),
+      );
     });
   });
 });

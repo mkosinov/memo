@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import type { PaymentResponse } from '@memo/api-client';
 import { useUI } from '@/contexts/UIContext';
 import { RecordTable, type Column } from '@/app/components/shared/record/RecordTable';
@@ -132,46 +132,41 @@ export function RecordPaymentsTable({
 }: RecordPaymentsTableProps) {
   const { showToast } = useUI();
 
-  const [rows, setRows] = useState<PaymentRow[]>(() =>
-    payments.map(paymentResponseToRow),
+  // ── Row state (#127 Task 6) ────────────────────────────────────────────
+  // Single source of truth = the `payments` prop (cache-backed after Task 4).
+  // Drafts (id === null) live in a separate useState so they're not clobbered
+  // by an effect-driven re-sync (Bug #3 "row disappears").
+  const savedRows = useMemo<PaymentRow[]>(
+    () => payments.map(paymentResponseToRow),
+    [payments],
   );
 
-  // Re-sync rows when payments changes (after invalidation/refetch).
-  // Preserves new rows (id === null).
-  useEffect(() => {
-    setRows((prevRows) => {
-      const newRows = prevRows.filter((r) => r.id === null);
-      const updatedExisting = payments.map((payment) => {
-        const existing = prevRows.find((r) => r.id === payment.id);
-        if (existing) {
-          return {
-            ...existing,
-            amount: payment.amount,
-            method: payment.method ?? existing.method,
-            created_at: payment.created_at,
-          };
-        }
-        return paymentResponseToRow(payment);
-      });
-      return [...updatedExisting, ...newRows];
-    });
-  }, [payments]);
+  // Drafts also include "pending saved" rows (id !== null) that were just
+  // added — kept here with the user's submitted values until the cache catches
+  // up and the useMemo produces the same id from props. This is the
+  // "preserve submitted values behavior" window.
+  const [drafts, setDrafts] = useState<PaymentRow[]>([]);
 
   // ── Row mutations ─────────────────────────────────────────────────────────
 
+  /** Add a new empty draft row (id === null). */
   const handleAddClick = useCallback(() => {
-    setRows((prev) => [...prev, makeEmptyPaymentRow(defaultAmount)]);
+    setDrafts((prev) => [...prev, makeEmptyPaymentRow(defaultAmount)]);
   }, [defaultAmount]);
 
-  /** Remove a new (unsaved) row from the array — no API call. */
+  /** Remove a new (unsaved) draft row from the array — no API call. */
   const handleRemove = useCallback((row: PaymentRow) => {
-    setRows((prev) => prev.filter((r) => r !== row));
+    setDrafts((prev) => prev.filter((r) => r !== row));
   }, []);
 
-  /** DELETE a saved payment via API, then remove from array. */
+  /**
+   * DELETE a saved payment. The cache is mutated optimistically by the parent
+   * (Task 4) — `savedRows` will re-derive from the updated `payments` prop.
+   * We do NOT locally filter saved rows: this component trusts the prop
+   * as the single source of truth.
+   */
   const handleDeleteRow = useCallback(async (id: string) => {
     await onDeletePayment(id);
-    setRows((prev) => prev.filter((r) => r.id !== id));
   }, [onDeletePayment]);
 
   /** POST a new payment. Returns saved row, or undefined if guard blocked. */
@@ -196,25 +191,38 @@ export function RecordPaymentsTable({
     return paymentResponseToRow(updated);
   }, [onPatchPayment]);
 
-  /** Replace a row in the array by its clientId (used after onAdd resolves). */
-  const replaceRowByClientId = useCallback((rowClientId: string, savedRow: PaymentRow) => {
-    setRows((prev) =>
-      prev.map((r) =>
-        r.clientId === rowClientId ? { ...savedRow, clientId: r.clientId } : r,
-      ),
-    );
+  /**
+   * Called by InlineEditRow after a successful new-row save. Replaces the
+   * unsaved draft with a saved row in the drafts array, preserving the
+   * submitted values. Once the cache catches up and `savedRows` produces the
+   * same id, the pending entry is dropped from the rendered list (deduped
+   * by id below).
+   */
+  const handleSaved = useCallback((oldRow: PaymentRow, savedRow: PaymentRow) => {
+    setDrafts((prev) => prev.map((r) => (r === oldRow ? savedRow : r)));
   }, []);
 
-  /** Replace a row in the array by its id (used after onPatchPayment resolves). */
-  const replaceRowById = useCallback((id: string, updatedRow: PaymentRow) => {
-    setRows((prev) =>
-      prev.map((r) => (r.id === id ? { ...updatedRow, clientId: r.clientId } : r)),
-    );
-  }, []);
+  // ── Render list ─────────────────────────────────────────────────────────
+  // Saved rows are the canonical source. Drafts (id === null) are appended.
+  // "Pending saved" drafts (id !== null) are appended only if not already
+  // covered by savedRows (cache hasn't caught up yet).
+  const displayedRows = useMemo(() => {
+    const savedIds = new Set(savedRows.map((r) => r.id));
+    const newDrafts: PaymentRow[] = [];
+    const pendingSaved: PaymentRow[] = [];
+    for (const d of drafts) {
+      if (d.id === null) {
+        newDrafts.push(d);
+      } else if (!savedIds.has(d.id)) {
+        pendingSaved.push(d);
+      }
+    }
+    return [...savedRows, ...pendingSaved, ...newDrafts];
+  }, [savedRows, drafts]);
 
   // ── Derived ──────────────────────────────────────────────────────────────
 
-  const totalPaid = rows
+  const totalPaid = displayedRows
     .filter((r) => r.id !== null)
     .reduce((sum, r) => sum + r.amount, 0);
 
@@ -229,9 +237,9 @@ export function RecordPaymentsTable({
 
       {/* Table */}
       <RecordTable testId="record-payments-table-table">
-        {rows.length > 0 && <RecordTable.Header columns={PAYMENT_COLUMNS} isReadOnly={isReadOnly} />}
+        {displayedRows.length > 0 && <RecordTable.Header columns={PAYMENT_COLUMNS} isReadOnly={isReadOnly} />}
 
-        {rows.map((row) => (
+        {displayedRows.map((row) => (
           <InlineEditRow<PaymentRow, PaymentFormState>
             key={row.id ?? row.clientId}
             row={row}
@@ -241,7 +249,7 @@ export function RecordPaymentsTable({
             onUpdate={handleUpdate}
             onDelete={handleDeleteRow}
             onRemove={handleRemove}
-            onSaved={(oldRow, savedRow) => replaceRowByClientId(oldRow.clientId, savedRow)}
+            onSaved={handleSaved}
             emptyData={() => pickFormData(makeEmptyPaymentRow(defaultAmount))}
             pickFormData={pickFormData}
             isReadOnly={isReadOnly}
@@ -275,7 +283,8 @@ export function RecordPaymentsTable({
                         handleChange('method', method);
                       } else {
                         onPatchPayment(r.id!, { method }).then((updated) => {
-                          replaceRowById(r.id!, paymentResponseToRow(updated));
+                          // PATCH: trust the prop as the source of truth.
+                          // No local state mutation — useMemo re-derives from props.
                         });
                       }
                     }}
@@ -307,9 +316,9 @@ export function RecordPaymentsTable({
                           showToast('Сумма должна быть больше 0', 'error');
                           return false; // Reject — InlineEditCell reverts to previous value
                         }
-                        onPatchPayment(r.id!, { amount }).then((updated) => {
-                          replaceRowById(r.id!, paymentResponseToRow(updated));
-                        });
+                        onPatchPayment(r.id!, { amount });
+                        // PATCH: trust the prop as the source of truth.
+                        // No local state mutation — useMemo re-derives from props.
                       }
                     }}
                     className="text-right"
@@ -324,7 +333,7 @@ export function RecordPaymentsTable({
           />
         ))}
 
-        {rows.length === 0 && (
+        {displayedRows.length === 0 && (
           <RecordTable.EmptyState testId="payment-list-empty">
             Нет платежей
           </RecordTable.EmptyState>

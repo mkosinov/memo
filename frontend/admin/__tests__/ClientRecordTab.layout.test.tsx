@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import React from 'react';
+import fs from 'fs';
+import path from 'path';
 
 // ─── Mock UIContext ────────────────────────────────────────────────────────
 vi.mock('@/contexts/UIContext', () => ({
@@ -56,6 +58,10 @@ vi.mock('@/contexts/ScheduleContext', () => ({
   })),
 }));
 
+vi.mock('@/contexts/PendingActionsContext', () => ({
+  usePendingActions: () => ({ enqueuePendingAction: vi.fn() }),
+}));
+
 import { useSchedule } from '@/contexts/ScheduleContext';
 
 // ─── Mock react-query ──────────────────────────────────────────────────────
@@ -101,7 +107,7 @@ import { ClientRecordTab } from '../app/(main)/clients/components/ClientRecordTa
 // ─── Tests ─────────────────────────────────────────────────────────────────
 
 describe('ClientRecordTab — layout', () => {
-  const onClose = vi.fn();
+
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -134,7 +140,7 @@ describe('ClientRecordTab — layout', () => {
       error: null,
     } as any);
 
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" />);
     expect(screen.getByText('Загрузка...')).toBeInTheDocument();
   });
 
@@ -145,31 +151,31 @@ describe('ClientRecordTab — layout', () => {
       error: null,
     } as any);
 
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" />);
     expect(screen.getByText('Запись не найдена')).toBeInTheDocument();
   });
 
   // ─── Date / Time / Service ─────────────────────────────────────────────
 
   it('renders date input with activity date', () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" />);
     const dateInput = screen.getByLabelText('Дата') as HTMLInputElement;
     expect(dateInput.value).toBe('2026-05-15');
   });
 
   it('renders time input with activity time', () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" />);
     const timeInput = screen.getByLabelText('Время') as HTMLInputElement;
     expect(timeInput.value).toBe('14:00');
   });
 
   it('renders service dropdown with current service', () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" />);
     expect(screen.getByText('Картина маслом')).toBeInTheDocument();
   });
 
   it('renders all service options in dropdown', () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" />);
     const triggers = screen.getAllByTestId('custom-select-trigger');
     // Triggers: [0]=location, [1]=service
     fireEvent.click(triggers[1]);
@@ -180,19 +186,19 @@ describe('ClientRecordTab — layout', () => {
   // ─── Master / Location ─────────────────────────────────────────────────
 
   it('renders master dropdown with current master', () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" />);
     expect(screen.getByText('Ольга Середа')).toBeInTheDocument();
   });
 
   it('renders location dropdown with current location', () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" />);
     expect(screen.getByText('Альпика')).toBeInTheDocument();
   });
 
   // ─── Visit status (atom-based StatusPicker) ────────────────────────────
 
   it('renders visit status via StatusPicker atom', () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" />);
     // RecordVisitRow renders StatusPicker — verify the row exists with status picker
     const visitRow = screen.getByTestId('visit-row-v1');
     expect(visitRow.querySelector('[data-testid$="-status-trigger"]')).toBeInTheDocument();
@@ -201,18 +207,18 @@ describe('ClientRecordTab — layout', () => {
   // ─── Visitors section ─────────────────────────────────────────────────
 
   it('renders visitors section', () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" />);
     expect(screen.getByText('Посетители')).toBeInTheDocument();
   });
 
   it('renders visitor rows via RecordVisitRow atom', () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" />);
     // RecordVisitRow renders with data-testid="visit-row-{id}"
     expect(screen.getByTestId('visit-row-v1')).toBeInTheDocument();
   });
 
   it('renders visitor name input inside RecordVisitRow', () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" />);
     const visitRow = screen.getByTestId('visit-row-v1');
     const nameInput = visitRow.querySelector('input') as HTMLInputElement;
     expect(nameInput).toBeInTheDocument();
@@ -220,61 +226,72 @@ describe('ClientRecordTab — layout', () => {
   });
 
   it('renders tariff select inside RecordVisitRow', () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" />);
     expect(screen.getByTestId('visit-v1-tariff')).toBeInTheDocument();
   });
 
   // ─── Payment section (atoms) ──────────────────────────────────────────
 
   it('renders payment summary', () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" />);
     expect(screen.getByText('Оплаты')).toBeInTheDocument();
   });
 
   it('renders PaymentTotals with correct values', () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" />);
     expect(screen.getByTestId('payments-total')).toBeInTheDocument();
     // Paid=1500 (from mockPayments), total cost shows in input-custom-price
     expect(screen.getAllByText('1 500 ₽').length).toBeGreaterThan(0);
   });
 
   it('shows total cost in custom-price input', () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" />);
     const customPriceInput = screen.getByTestId('input-custom-price');
     expect(customPriceInput).toHaveValue(3500);
   });
 
   it('renders PaymentList with existing payments', () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" />);
     expect(screen.getByTestId('record-payments-table')).toBeInTheDocument();
     expect(screen.getByTestId('payment-p1')).toBeInTheDocument();
   });
 
   it('renders PaymentForm for adding payments', () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" />);
     expect(screen.getByTestId('btn-add-payment')).toBeInTheDocument();
   });
 
   // ─── Comment / Delete / Visitor button ────────────────────────────────
 
   it('renders comment textarea', () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" />);
     expect(screen.getByText('Комментарий')).toBeInTheDocument();
     expect(screen.getByPlaceholderText('Добавить комментарий...')).toBeInTheDocument();
   });
 
   it('renders delete button', () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" />);
     expect(screen.getByText('Удалить запись')).toBeInTheDocument();
   });
 
   it('renders add visitor button', () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" />);
     expect(screen.getByTestId('btn-add-visitor')).toBeInTheDocument();
   });
 
   it('displays activity service name in CustomSelect', () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" />);
     expect(screen.getByText('Картина маслом')).toBeInTheDocument();
+  });
+
+  // ─── T8: source file does not import useOptimisticVisitMutation ──────
+
+  it('ClientRecordTab.tsx does not import useOptimisticVisitMutation (T8 remove)', () => {
+    const filePath = path.resolve(
+      __dirname,
+      '../app/(main)/clients/components/ClientRecordTab.tsx',
+    );
+    const src = fs.readFileSync(filePath, 'utf-8');
+    expect(src).not.toMatch(/useOptimisticVisitMutation/);
   });
 });

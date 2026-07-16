@@ -56,6 +56,10 @@ vi.mock('@/contexts/ScheduleContext', () => ({
   })),
 }));
 
+vi.mock('@/contexts/PendingActionsContext', () => ({
+  usePendingActions: () => ({ enqueuePendingAction: vi.fn() }),
+}));
+
 import { useSchedule } from '@/contexts/ScheduleContext';
 
 // ─── Mock react-query ──────────────────────────────────────────────────────
@@ -102,7 +106,7 @@ import { ClientRecordTab } from '../app/(main)/clients/components/ClientRecordTa
 // ─── Tests ─────────────────────────────────────────────────────────────────
 
 describe('ClientRecordTab — interactions', () => {
-  const onClose = vi.fn();
+
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -134,7 +138,7 @@ describe('ClientRecordTab — interactions', () => {
       payments: { data: [], isLoading: false, error: null },
     });
 
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" />);
     // RecordVisitRow shows age as "(взр.)" when visitorAge is null
     const visitRow = screen.getByTestId('visit-row-v1');
     expect(visitRow).toBeInTheDocument();
@@ -150,7 +154,7 @@ describe('ClientRecordTab — interactions', () => {
       record: { data: { ...mockRecord, id: 'r3', visits: [] }, isLoading: false, error: null },
     });
 
-    render(<ClientRecordTab recordId="r3" clientId="c1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r3" clientId="c1" />);
     expect(screen.getByText('Нет посетителей')).toBeInTheDocument();
   });
 
@@ -160,7 +164,7 @@ describe('ClientRecordTab — interactions', () => {
       record: { data: mockRecordMultipleVisits, isLoading: false, error: null },
     });
 
-    render(<ClientRecordTab recordId="r2" clientId="c1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r2" clientId="c1" />);
     // Both visit rows should be rendered
     expect(screen.getByTestId('visit-row-v1')).toBeInTheDocument();
     expect(screen.getByTestId('visit-row-v2')).toBeInTheDocument();
@@ -172,7 +176,7 @@ describe('ClientRecordTab — interactions', () => {
       payments: { data: [{ id: 'p1', record_id: 'r1', amount: 2000, method: 'card', created_at: '', updated_at: '' }], isLoading: false, error: null },
     });
 
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" />);
     expect(screen.getByTestId('input-custom-price')).toHaveValue(5000);
   });
 
@@ -182,7 +186,7 @@ describe('ClientRecordTab — interactions', () => {
       payments: { data: [], isLoading: false, error: null },
     });
 
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" />);
     const textarea = screen.getByPlaceholderText('Добавить комментарий...');
     expect(textarea).toHaveValue('Тестовый комментарий');
   });
@@ -190,54 +194,54 @@ describe('ClientRecordTab — interactions', () => {
   // ─── Payment display (atoms) ──────────────────────────────────────
 
   it('renders payment list with existing payments via PaymentList atom', () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" />);
     expect(screen.getByTestId('record-payments-table')).toBeInTheDocument();
     // PaymentList renders items with data-testid="payment-{id}"
     expect(screen.getByTestId('payment-p1')).toBeInTheDocument();
   });
 
   it('renders PaymentForm for adding payments', () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" />);
     expect(screen.getByTestId('btn-add-payment')).toBeInTheDocument();
   });
 
   // ─── Save button state ────────────────────────────────────────────
 
   it('save button is disabled when no changes', () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" />);
     const saveBtn = screen.getByTestId('btn-save-record');
     expect(saveBtn).toBeDisabled();
   });
 
   it('cancel button is disabled when no changes', () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" />);
     const cancelBtn = screen.getByRole('button', { name: /Отмена/ });
     expect(cancelBtn).toBeDisabled();
   });
 
   it('save button enables when date is changed', () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" />);
     const dateInput = screen.getByLabelText('Дата');
     fireEvent.change(dateInput, { target: { value: '2026-06-01' } });
     expect(screen.getByTestId('btn-save-record')).toBeEnabled();
   });
 
   it('save button enables when comment is changed', () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" />);
     const textarea = screen.getByPlaceholderText('Добавить комментарий...');
     fireEvent.change(textarea, { target: { value: 'Новый комментарий' } });
     expect(screen.getByTestId('btn-save-record')).toBeEnabled();
   });
 
   it('save button enables when custom price is changed', () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" />);
     const priceInput = screen.getByTestId('input-custom-price');
     fireEvent.change(priceInput, { target: { value: '5000' } });
     expect(screen.getByTestId('btn-save-record')).toBeEnabled();
   });
 
   it('cancel resets all changes', () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" />);
     const textarea = screen.getByPlaceholderText('Добавить комментарий...');
     fireEvent.change(textarea, { target: { value: 'Новый комментарий' } });
     expect(screen.getByTestId('btn-save-record')).toBeEnabled();
@@ -252,11 +256,27 @@ describe('ClientRecordTab — interactions', () => {
   // ─── Add visitor (via AddVisitorForm atom) ────────────────────────
 
   it('shows AddVisitorForm when add visitor button clicked', () => {
-    render(<ClientRecordTab recordId="r1" clientId="c1" onClose={onClose} />);
+    render(<ClientRecordTab recordId="r1" clientId="c1" />);
     fireEvent.click(screen.getByTestId('btn-add-visitor'));
     // The new unified row renders with id===null → testId visit-row-new
     expect(screen.getByTestId('visit-row-new')).toBeInTheDocument();
     expect(screen.getByTestId('add-visitor-name')).toBeInTheDocument();
     expect(screen.getByTestId('add-visitor-age')).toBeInTheDocument();
+  });
+
+  // ─── T8: render visit row from canonical `record.visits` (no optimistic overrides) ──
+
+  it('renders visit rows from record.visits canonical source (not optimistic override)', () => {
+    // The hook returns a single visit (v1) from mockRecord. The component must
+    // render it directly from `record.visits`, not from the optimistic layer's
+    // mergedVisits. Override state would not change the row count here, but
+    // verifies the read path is hook-driven.
+    render(<ClientRecordTab recordId="r1" clientId="c1" />);
+    expect(screen.getByTestId('visit-row-v1')).toBeInTheDocument();
+    // The visitor name is resolved from the visitorsMap (canonical),
+    // not from a visitorOverride map. Read path: hook → render.
+    const visitRow = screen.getByTestId('visit-row-v1');
+    const nameInput = visitRow.querySelector('input') as HTMLInputElement;
+    expect(nameInput.value).toBe('Анна Иванова');
   });
 });

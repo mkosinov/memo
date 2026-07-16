@@ -16,10 +16,10 @@ const mockClientsWithStats: ClientWithStats[] = [
     created_at: '2026-01-01T00:00:00',
     updated_at: '2026-01-01T00:00:00',
     is_active: true,
-    visits_count: 5,
-    last_visit: '2026-05-20T10:00:00',
+    records_count: 5,
+    last_record: '2026-05-20T10:00:00',
     total_paid: 17500,
-    missed_visits: 1,
+    missed_records: 1,
   },
   {
     id: 'c2',
@@ -30,10 +30,10 @@ const mockClientsWithStats: ClientWithStats[] = [
     created_at: '2026-02-01T00:00:00',
     updated_at: '2026-02-01T00:00:00',
     is_active: true,
-    visits_count: 2,
-    last_visit: '2026-04-10T14:00:00',
+    records_count: 2,
+    last_record: '2026-04-10T14:00:00',
     total_paid: 5000,
-    missed_visits: 0,
+    missed_records: 0,
   },
 ];
 
@@ -49,29 +49,29 @@ let mockContextValue: ClientsContextType = {
     is_active: null,
     created_from: '',
     created_to: '',
-    updated_from: '',
-    updated_to: '',
-    min_visits: null,
-    max_visits: null,
-    min_paid: null,
-    max_paid: null,
-    missed_from: null,
-    missed_to: null,
-  },
-  sortBy: 'name',
-  sortOrder: 'asc',
-  isLoading: false,
-  error: null,
-  refetch: vi.fn(),
-  setPage: vi.fn(),
-  setPerPage: vi.fn(),
-  setFilters: vi.fn(),
-  setSort: vi.fn(),
-  resetFilters: vi.fn(),
-  createClient: vi.fn(),
-  updateClient: vi.fn(),
-  patchClient: vi.fn(),
-  deleteClient: vi.fn(),
+        updated_from: '',
+        updated_to: '',
+        min_records: null,
+        max_records: null,
+        min_paid: null,
+        max_paid: null,
+        missed_from: null,
+        missed_to: null,
+      },
+      sortBy: 'name',
+      sortOrder: 'asc',
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+      setPage: vi.fn(),
+      setPerPage: vi.fn(),
+      setFilters: vi.fn(),
+      setSort: vi.fn(),
+      resetFilters: vi.fn(),
+      createClient: vi.fn(),
+      updateClient: vi.fn(),
+      patchClient: vi.fn(),
+      deleteClient: vi.fn(),
 };
 
 vi.mock('@/contexts/ClientsContext', () => ({
@@ -99,8 +99,8 @@ describe('ClientsTable', () => {
         created_to: '',
         updated_from: '',
         updated_to: '',
-        min_visits: null,
-        max_visits: null,
+        min_records: null,
+        max_records: null,
         min_paid: null,
         max_paid: null,
         missed_from: null,
@@ -253,13 +253,13 @@ describe('ClientsTable', () => {
     expect(screen.getByText('Не указан')).toBeTruthy();
   });
 
-  it('shows "—" for client with null last_visit', () => {
+  it('shows "—" for client with null last_record', () => {
     mockContextValue = {
       ...mockContextValue,
       clients: [
         {
           ...mockClientsWithStats[0],
-          last_visit: null,
+          last_record: null,
         },
       ],
     };
@@ -268,10 +268,10 @@ describe('ClientsTable', () => {
   });
 
   it('shows sort indicator for active sort column', () => {
-    mockContextValue = { ...mockContextValue, sortBy: 'visits_count', sortOrder: 'desc' };
+    mockContextValue = { ...mockContextValue, sortBy: 'records_count', sortOrder: 'desc' };
     render(<ClientsTable onClientClick={vi.fn()} />);
     // The column header should contain the arrow indicator
-    const header = screen.getByText(/Кол-во визитов/);
+    const header = screen.getByText(/Всего записей/);
     expect(header.textContent).toContain('↓');
   });
 
@@ -285,7 +285,7 @@ describe('ClientsTable', () => {
   });
 
   it('calls setSort with field and reversed direction on column click', () => {
-    mockContextValue = { ...mockContextValue, sortBy: 'visits_count', sortOrder: 'desc' };
+    mockContextValue = { ...mockContextValue, sortBy: 'records_count', sortOrder: 'desc' };
     render(<ClientsTable onClientClick={vi.fn()} />);
     fireEvent.click(screen.getByText('Имя'));
     expect(mockContextValue.setSort).toHaveBeenCalledWith('name', 'asc');
@@ -303,7 +303,7 @@ describe('ClientsTable', () => {
   it('renders zero visits count correctly', () => {
     mockContextValue = {
       ...mockContextValue,
-      clients: [{ ...mockClientsWithStats[0], visits_count: 0 }],
+      clients: [{ ...mockClientsWithStats[0], records_count: 0 }],
     };
     render(<ClientsTable onClientClick={vi.fn()} />);
     expect(screen.getByText('0')).toBeTruthy();
@@ -329,8 +329,8 @@ describe('ClientsTable', () => {
     render(<ClientsTable onClientClick={vi.fn()} />);
     expect(screen.getByText('Имя')).toBeTruthy();
     expect(screen.getByText('Телефон')).toBeTruthy();
-    expect(screen.getByText(/Кол-во визитов/)).toBeTruthy();
-    expect(screen.getByText('Последний визит')).toBeTruthy();
+    expect(screen.getByText(/Всего записей/)).toBeTruthy();
+    expect(screen.getByText('Последняя запись')).toBeTruthy();
     expect(screen.getByText('Сумма оплат')).toBeTruthy();
   });
 
@@ -362,8 +362,8 @@ describe('ClientsTable', () => {
     render(<ClientsTable onClientClick={vi.fn()} />);
     expect(screen.getByText('Имя')).toBeInTheDocument();
     expect(screen.getByText('Телефон')).toBeInTheDocument();
-    expect(screen.getByText('Кол-во визитов')).toBeInTheDocument();
-    expect(screen.getByText('Последний визит')).toBeInTheDocument();
+    expect(screen.getByText('Всего записей')).toBeInTheDocument();
+    expect(screen.getByText('Последняя запись')).toBeInTheDocument();
     expect(screen.getByText('Сумма оплат')).toBeInTheDocument();
   });
 

@@ -34,7 +34,7 @@ describe('ClientsFilters', () => {
 
   it('renders visit range inputs', () => {
     render(<ClientsFilters />);
-    expect(screen.getByText('Визиты')).toBeInTheDocument();
+    expect(screen.getByText('Записи')).toBeInTheDocument();
     expect(screen.getAllByPlaceholderText('от').length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByPlaceholderText('до').length).toBeGreaterThanOrEqual(1);
   });
@@ -94,7 +94,7 @@ describe('ClientsFilters', () => {
     render(<ClientsFilters />);
     const minVisitsInputs = screen.getAllByPlaceholderText('от');
     fireEvent.change(minVisitsInputs[0], { target: { value: '3' } });
-    expect(setFilters).toHaveBeenCalledWith({ min_visits: 3 });
+    expect(setFilters).toHaveBeenCalledWith({ min_records: 3 });
   });
 
   it('calls setFilters with null when min visits is zero', () => {
@@ -103,7 +103,7 @@ describe('ClientsFilters', () => {
     render(<ClientsFilters />);
     const minVisitsInputs = screen.getAllByPlaceholderText('от');
     fireEvent.change(minVisitsInputs[0], { target: { value: '0' } });
-    expect(setFilters).toHaveBeenCalledWith({ min_visits: 0 });
+    expect(setFilters).toHaveBeenCalledWith({ min_records: 0 });
   });
 
   it('calls setFilters when created_from date changes', () => {
@@ -188,7 +188,7 @@ describe('ClientsFilters', () => {
     render(<ClientsFilters />);
     const maxVisitsInputs = screen.getAllByPlaceholderText('до');
     fireEvent.change(maxVisitsInputs[0], { target: { value: '10' } });
-    expect(setFilters).toHaveBeenCalledWith({ max_visits: 10 });
+    expect(setFilters).toHaveBeenCalledWith({ max_records: 10 });
   });
 
   it('calls setFilters with null when max visits is cleared', () => {
@@ -199,7 +199,7 @@ describe('ClientsFilters', () => {
     // Set a value first, then clear it
     fireEvent.change(maxVisitsInputs[0], { target: { value: '10' } });
     fireEvent.change(maxVisitsInputs[0], { target: { value: '' } });
-    expect(setFilters).toHaveBeenLastCalledWith({ max_visits: null });
+    expect(setFilters).toHaveBeenLastCalledWith({ max_records: null });
   });
 
   it('calls setFilters when missed_from changes', () => {

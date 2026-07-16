@@ -137,10 +137,10 @@ const mockClientWithStats: ClientWithStats = {
   created_at: '2026-01-01T00:00:00',
   updated_at: '2026-01-01T00:00:00',
   is_active: true,
-  visits_count: 5,
-  last_visit: '2026-05-10',
+  records_count: 5,
+  last_record: '2026-05-10',
   total_paid: 17500,
-  missed_visits: 1,
+  missed_records: 1,
 };
 
 const mockRecords = [

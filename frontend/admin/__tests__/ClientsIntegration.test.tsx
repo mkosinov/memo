@@ -98,10 +98,10 @@ const mockClient: ClientWithStats = {
   created_at: '2026-01-01T00:00:00',
   updated_at: '2026-01-01T00:00:00',
   is_active: true,
-  visits_count: 5,
-  last_visit: '2026-05-20T10:00:00',
+  records_count: 5,
+  last_record: '2026-05-20T10:00:00',
   total_paid: 17500,
-  missed_visits: 1,
+  missed_records: 1,
 };
 
 const mockClient2: ClientWithStats = {
@@ -109,9 +109,9 @@ const mockClient2: ClientWithStats = {
   id: 'c2',
   name: 'Борис Петров',
   phone: '+7 (900) 987-65-43',
-  visits_count: 2,
+  records_count: 2,
   total_paid: 5000,
-  missed_visits: 0,
+  missed_records: 0,
 };
 
 const mockRecord: RecordResponse = {

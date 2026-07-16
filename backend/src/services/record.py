@@ -139,7 +139,13 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
 
         await db_session.flush()
 
-        # ── Recompute status from actual visits ─────────────────────────
+        # ── Recompute seats and status from actual visits ────────────────
+        # Route final persisted seats through recompute_record_seats so
+        # create/update/patch all share the same single source of truth
+        # (US-8). The inline `seats=effective_seats` above is only an
+        # initial value before the visits are flushed; after the flush
+        # we always recompute from the DB.
+        await recompute_record_seats(db_session, record.id)
         await recompute_record_status(db_session, record.id)
         await db_session.refresh(record)
         return record

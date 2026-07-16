@@ -238,9 +238,19 @@ API/service behaviors and map to **pytest** tests (not E2E).
 | **US-6** | Update that shrinks seats → succeeds | shrink always allowed | pytest — API update |
 | **US-7** | Patch only `comment` on a full activity → succeeds without 409 | capacity check skipped when seats untouched | pytest — API patch |
 | **US-8** | Create + Update + Patch yield the same final `seats` for the same visit set | dedup: single `recompute_record_seats` across all paths | pytest — service |
+| **US-9** | On a **fully-booked** activity (occupied == capacity), update/patch a record's visit fields (`price`, `tariff_id`, re-link `visitor_id`) **without changing the seat count** → 200, fields updated | capacity check subtracts the record's own seats before comparing, so same-size edits on a full activity are allowed | pytest — API update + patch |
 
 US-2 is the anchor test: it pins the query count so an N+1 regression cannot silently
 return during future refactors.
+
+US-9 is the anchor for the "edit-in-place on a full activity" guarantee: because the
+capacity re-check recomputes the record's own seats to their new value *before*
+summing occupied, an edit that keeps the seat count constant never trips 409 even when
+`occupied == capacity`. This is the behavior an admin relies on (change price/tariff on
+a sold-out class). It is distinct from US-6 (shrink): US-9 keeps size *equal*, at the
+capacity boundary. **Note:** changing a Visitor's `name`/`age` is NOT done via
+record update/patch (those paths re-link `visitor_id` but ignore `name`/`age`) — that
+is a separate concern, out of scope for #129.
 
 ---
 

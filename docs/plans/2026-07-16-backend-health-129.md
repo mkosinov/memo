@@ -19,6 +19,7 @@ How this behaves, mapped to spec acceptance criteria (all backend/API-observable
 - **N+1 removed (US-1, US-2, US-3)** → Listing a week of activities returns the same correct `occupied` values as before, but the backend issues a fixed, small number of DB queries regardless of how many activities are in the list (was 1-per-activity).
 - **Capacity re-check on update (US-4, US-6)** → Editing a record so its seats would exceed the activity's capacity is rejected with HTTP 409 (same as create); the record is left unchanged. Shrinking a record always succeeds.
 - **Capacity re-check on patch (US-5, US-7)** → Patching a record's visit list past capacity is rejected with 409; patching only non-seat fields (e.g. `comment`) on a full activity still succeeds.
+- **Edit-in-place on a full activity (US-9)** → On a sold-out activity (occupied == capacity), an admin can still change a record's `price`/`tariff_id` or re-link a visit to another `visitor_id` as long as the number of seats stays the same — no false 409. (Changing a Visitor's name/age is a separate path, not covered here.)
 - **Dedup seats (US-8)** → Create, update and patch all compute the final persisted `seats` identically (visits-in-DB + anonym), via a single code path.
 
 ---
@@ -434,7 +435,83 @@ Add a capacity re-check to `RecordService.update` and `RecordService.patch`. Do 
 
 - [ ] Run US-7, confirm PASSES (the `seats_changed` guard skips the capacity query).
 
-- [ ] Run the whole capacity file: `cd backend && pytest tests/test_record_capacity_recheck.py -q` — all 4 pass.
+- [ ] **RED→GREEN (US-9):** Add a test proving that on a FULL activity (occupied == capacity) you can still edit a record's visit fields (`price`, `tariff_id`, re-link `visitor_id`) as long as the seat count stays the same. This is the "edit-in-place on a sold-out class" guarantee. Cover BOTH update (PUT) and patch (PATCH):
+
+  ```python
+  def test_edit_fields_on_full_activity_same_seatcount_succeeds(
+      api_client, create_activity, create_client, sample_tariff
+  ) -> None:
+      """US-9: on a full activity, changing price/tariff/visitor_id (same seat count) → 200."""
+      # capacity=2, fill it exactly with ONE record holding 2 visits → occupied == capacity
+      activity, record = _make_activity_with_record(
+          api_client, create_activity, create_client, capacity=2, n_visits=2
+      )
+      # sanity: activity is full
+      df = None  # (occupied verified via activity GET below)
+      act = api_client.get(f"/api/v1/activities/{activity['id']}").json()
+      assert act["occupied"] == 2  # == capacity
+
+      # --- PUT: same 2 visits but new price + tariff_id (seat count unchanged) ---
+      put_resp = api_client.put(f"/api/v1/records/{record['id']}", json={
+          "activity_id": activity["id"],
+          "client_id": record["client_id"],
+          "comment": "x",
+          "visits": [
+              {"name": "A", "price": 9999, "tariff_id": sample_tariff, "status": "waiting"},
+              {"name": "B", "price": 8888, "tariff_id": sample_tariff, "status": "waiting"},
+          ],
+      })
+      assert put_resp.status_code == 200, put_resp.text
+      put_body = put_resp.json()
+      assert len(put_body["visits"]) == 2
+      assert {v["price"] for v in put_body["visits"]} == {9999, 8888}
+      assert all(v["tariff_id"] == sample_tariff for v in put_body["visits"])
+
+      # --- PATCH: same 2 visits, change price again (seat count still unchanged) ---
+      patch_resp = api_client.patch(f"/api/v1/records/{record['id']}", json={
+          "visits": [
+              {"price": 100, "tariff_id": sample_tariff, "status": "waiting"},
+              {"price": 200, "tariff_id": sample_tariff, "status": "waiting"},
+          ],
+      })
+      assert patch_resp.status_code == 200, patch_resp.text
+      assert {v["price"] for v in patch_resp.json()["visits"]} == {100, 200}
+
+
+  def test_relink_visitor_on_full_activity_succeeds(
+      api_client, create_activity, create_client
+  ) -> None:
+      """US-9: on a full activity, re-linking a visit to another visitor_id (same seat count) → 200."""
+      activity, record = _make_activity_with_record(
+          api_client, create_activity, create_client, capacity=1, n_visits=1
+      )
+      # create another visitor via a throwaway record's visit, or via visitor API if available.
+      # Simplest: use ID-based visit with a visitor_id from a second client's record.
+      other_client = create_client()
+      seed = api_client.post("/api/v1/records", json={
+          "activity_id": create_activity(capacity=5)["id"],  # different activity, just to mint a visitor
+          "client_id": other_client["id"], "comment": "seed",
+          "visits": [{"name": "OtherPerson", "price": 1000, "status": "waiting"}],
+      }).json()
+      other_visitor_id = seed["visits"][0]["visitor_id"]
+      assert other_visitor_id is not None
+
+      # re-link the full-activity record's single visit to the other visitor (seat count stays 1)
+      resp = api_client.put(f"/api/v1/records/{record['id']}", json={
+          "activity_id": activity["id"],
+          "client_id": record["client_id"],
+          "comment": "x",
+          "visits": [{"visitor_id": other_visitor_id, "price": 1000, "status": "waiting"}],
+      })
+      assert resp.status_code == 200, resp.text
+      assert resp.json()["visits"][0]["visitor_id"] == other_visitor_id
+  ```
+
+  > **Implementer note:** `sample_tariff` fixture exists in conftest (inserts a tariff row). Confirm `VisitResponse` exposes `tariff_id` (it does — `schemas/record.py:35`). For the re-link test, verify the seed-visitor approach works with your visitor-creation flow; if a direct visitor API/fixture is cleaner, use it. The intent: same seat count, changed visit fields, on a full activity → 200.
+
+- [ ] Run US-9 tests, confirm PASS. **This is the load-bearing guarantee for editing a sold-out class** — if they fail, the `recompute_record_seats`-before-check ordering is wrong.
+
+- [ ] Run the whole capacity file: `cd backend && pytest tests/test_record_capacity_recheck.py -q` — all 6 pass.
 - [ ] Regression: `cd backend && pytest tests/test_api_records.py tests/test_record_visits.py -q`
 - [ ] Commit: `git add -A && git commit -m "fix(#129): capacity re-check on record update/patch (409 on over-capacity)"`
 
@@ -443,8 +520,11 @@ Add a capacity re-check to `RecordService.update` and `RecordService.patch`. Do 
 - Patch visits past capacity → 409 (US-5).
 - Shrinking succeeds (US-6).
 - Comment-only patch on full activity succeeds — no capacity query (US-7).
+- Editing visit fields (price/tariff_id/re-link visitor_id) on a FULL activity with an
+  unchanged seat count succeeds via both PUT and PATCH (US-9).
 - `check_activity_capacity` and `active_record_filter` are UNCHANGED.
-- Capacity check sits between delete-old-visits and insert-new-visits.
+- Capacity check sits between delete-old-visits and insert-new-visits, with
+  `recompute_record_seats` called BEFORE the check (resets own seats).
 
 ---
 

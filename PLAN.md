@@ -385,9 +385,60 @@ Migrate `RecordStatus` (pending/confirmed/cancelled/no_show) to derived `VisitSt
 
 ---
 
+## GH #127 — Unify Records/Visits/Payments Caches (Single Source of Truth): ✅ Completed 2026-07-16
+
+**Goal:** Make `['record', recordId]` the single source of truth for a record's visits/payments, remove the divergent cache/mutation/optimistic layers, and move deferred-delete to an app-level provider — eliminating "row disappears", "F5 needed", and "undo dies on modal close".
+
+**Branch:** `feat-unify-record-caches`
+
+**Total commits:** 13
+
+**LOC change:** 28 files changed, +3946 / -1272 lines (net +2674)
+
+**Design spec:** `docs/specs/2026-07-08-unify-record-caches-design.md`
+
+**Plan:** `docs/plans/2026-07-08-unify-record-caches.md`
+
+### Foundation Tasks
+
+- **T1 — Cache-sync helpers:** `lib/cache/recordCacheSync.ts` — 6 pure helpers (`patchRecordEverywhere`, `upsertVisit`, `removeVisit`, `upsertPayment`, `removePayment`, `seedRecordFromList`) for canonical + list cache sync. All tested with real QueryClient.
+- **T2 — PendingActionsProvider:** `contexts/PendingActionsContext.tsx` — generic command-pattern provider for deferred delete (5s undo window, survives modal unmount). Full test coverage (commit, undo, per-id cancel, fake timers).
+- **T3 — Mount provider:** `PendingActionsProvider` mounted in app tree (inside `QueryClientWithErrorReporting` + `UIProvider`).
+- **T3b — Seed canonical cache:** `RecordsContext` seeds `['record', id]` from list responses via `seedRecordFromList` (no overwrite of fresher entries).
+
+### Core Refactoring (T4-T8)
+
+- **T4 — Rewire `useRecordMutations`:** Fine-grained visit/payment mutations use `recordCacheSync` helpers (sync canonical + all list keys). `deleteRecord` uses prefix-match `setQueriesData`. `deleteVisitDeferred`/`deletePaymentDeferred` delegate to `PendingActions` (survives modal close — fixes Bug #2). Removed 5-key `invalidateAll` hammer. Absorbed #130 Bug 1 & 2.
+- **T5 — RecordVisitsTable:** `useMemo(saved) + useState(drafts)` pattern — deleted `useEffect`-sync (fixes Bug #3: row disappearing mid-edit).
+- **T6 — RecordPaymentsTable:** Same pattern as T5.
+- **T7 — ClientTab:** Fully hook-driven (reads from `useRecordData`, not props). Removed `useOptimisticVisitMutation` usage (fixes dual-source).
+- **T8 — ClientRecordTab:** Fine-grained visit CRUD via `addVisit`/`deleteVisitDeferred`. Removed `useOptimisticVisitMutation` usage.
+
+### Cleanup (T9-T10)
+
+- **T9 — Deleted `useOptimisticVisitMutation.ts`:** -313 lines removed. `invalidateAll` completely gone from fine-grained mutations. Remaining narrow invalidations documented per-reader.
+- **T10 — E2E coverage US-1..US-7:** 7 Playwright tests using factory pattern (avoids #124 trap). E2E written but not run live (shard DB empty — environment issue, not code).
+
+### Bugs Fixed
+
+- **Bug #2:** Undo deferred-delete dies on modal close → fixed by app-level `PendingActionsProvider` (timer survives unmount)
+- **Bug #3:** Row disappears mid-edit → fixed by `useMemo(saved)+useState(drafts)` pattern, no `useEffect`-sync
+- **Bug #1/#130:** `['records','client',id]` always stale + dead `['records']` deleteRecord → fixed by prefix-match `setQueriesData`
+- **C-clarification:** Tab-switch stale row → fixed by canonical cache + list sync
+
+### Test Results
+
+- **Vitest:** ~1178 passed, 1 known flake (CalendarPopover #123), 1 skipped
+- **tsc:** clean (0 errors)
+- **E2E:** 7 tests written (US-1..US-7), not run live (environment issue)
+- **Visual Compliance:** 4/4 PASS via manual Playwright checks against live dev server
+
+---
+
 ## Changelog
 - 2026-07-08: **#98 — Unify "active record" definition** — `check_activity_capacity` excludes cancelled/missed from occupied count; `last_visit` stat uses `Activity.start` over visited visits. Shared `ACTIVE_RECORD_STATUSES` + `active_record_filter()`. Branch `fix-unify-active-record`. Spun off #133, #134.
 - 2026-07-08: **#105 — Client stats cartesian product fix** — Rewrote `list_clients_with_stats` with scalar subqueries to eliminate cross-relation multiplication. Branch `fix-client-stats-scalar-subqueries`.
+- 2026-07-16: **#127 — Unify records/visits/payments caches** — Single source of truth (`['record', recordId]`), `recordCacheSync` helpers, `PendingActionsProvider`, deleted `useOptimisticVisitMutation`, fixed Bugs #2/#3/#130. 13 commits, 28 files (+3946/-1272). Branch `feat-unify-record-caches`.
 - 2026-07-07: **Addendum-2: InlineEditableTable unified rows + hard-delete + deferred undo** — 6 main tasks (backend hard-delete + repo split, frontend Zod schema cleanup, optimistic cache sync, tariff dropdown, deferred delete with undo toast, E2E scenarios 15-19) + FasTP Bug #1 (over-capacity toast). Branch `feat-inline-editable-unified-rows`, 17 commits.
 - 2026-06-19: **Wave 5 — 14 P1/P3 UX Bugs** — closed #74–#86 (except #73) in ActivityDetailsModal, ClientTab, ActivityCard; 14 commits, 7/7 visual checks passed (branch `fix/wave5-ux-bugs`).
 - 2026-06-19: **Wave 4.5 — Fix TS Errors Blocking Pre-Push Hook** — 55→0 TS errors, 11 commits, closes #88. Deleted 2 dead files, added `maxAge` to `ActivitySchema` + `required` to `TagsFieldConfig`, updated 5 test mock files, type guard + `Array.from` fixes. No suppressions added (branch `fix/ts-errors-blocking-hook`).

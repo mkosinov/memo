@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — 2026-07-16
+
+### Added
+- **#127 — Unify records/visits/payments caches (single source of truth)** — branch `feat-unify-record-caches`:
+  - **Foundation:** `lib/cache/recordCacheSync.ts` (6 pure helpers for canonical + list key sync), `contexts/PendingActionsContext.tsx` (app-level deferred-delete with 5s undo window surviving modal unmount), `RecordsContext` seeds canonical `['record', id]` from list responses.
+  - **Core refactoring:** `useRecordMutations` rewired to cache helpers + `PendingActions` (removed 5-key `invalidateAll` hammer, prefix-match `setQueriesData` for `['records']`), `RecordVisitsTable`/`RecordPaymentsTable` use `useMemo(saved)+useState(drafts)` pattern (deleted `useEffect`-sync), `ClientTab` fully hook-driven (reads from `useRecordData`, dropped prop dual-source), `ClientRecordTab` fine-grained visit CRUD.
+  - **Cleanup:** Deleted `hooks/useOptimisticVisitMutation.ts` (-313 lines), `invalidateAll` completely removed from fine-grained mutations.
+  - **Bugs fixed:** Bug #2 (undo dies on modal close → app-level `PendingActionsProvider`), Bug #3 (row disappears mid-edit → `useMemo+saved`+`useState(drafts)`), Bug #1/#130 (`['records','client',id]` stale → prefix-match `setQueriesData`), tab-switch stale row → canonical cache + list sync.
+  - **Tests:** 28 files changed, +3946 / -1272 lines (net +2674), 13 commits. Vitest ~1178 passed (1 known flake #123). E2E US-1..US-7 written (factory pattern, avoids #124). Visual Compliance 4/4 PASS.
+  - Design spec: `docs/specs/2026-07-08-unify-record-caches-design.md`
+  - Plan: `docs/plans/2026-07-08-unify-record-caches.md`
+
 ## [Unreleased] — 2026-07-08
 
 ### Fixed

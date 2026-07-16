@@ -15,6 +15,7 @@ from src.models.record import Record
 from src.schemas.activity import ActivityCreate, ActivityResponse, ActivityUpdate
 from src.services.generic import GenericService
 from src.domain.record_visits import active_record_filter
+from src.domain.visit_status import ACTIVE_RECORD_STATUSES
 
 
 class ActivityService(GenericService[ActivityCreate, ActivityUpdate, ActivityResponse]):
@@ -74,6 +75,27 @@ class ActivityService(GenericService[ActivityCreate, ActivityUpdate, ActivityRes
             )
         )
         return int(result.scalar() or 0)
+
+    async def sum_active_seats_bulk(
+        self, db_session: AsyncSession, activity_ids: list[str]
+    ) -> dict[str, int]:
+        """Return {activity_id: occupied_seats} for the given activities in ONE query.
+
+        Active definition reuses ACTIVE_RECORD_STATUSES (same as active_record_filter)
+        so the batch view can never drift from the per-activity capacity check.
+        """
+        if not activity_ids:
+            return {}
+        result = await db_session.execute(
+            select(Record.activity_id, func.coalesce(func.sum(Record.seats), 0))
+            .where(
+                Record.activity_id.in_(activity_ids),
+                Record.is_active.is_(True),
+                Record.status.in_(ACTIVE_RECORD_STATUSES),
+            )
+            .group_by(Record.activity_id)
+        )
+        return {row[0]: int(row[1]) for row in result.all()}
 
     async def count_records(
         self, db_session: AsyncSession, activity_id: str

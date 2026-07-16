@@ -220,7 +220,7 @@ This is the first task — backend rename. After this task, backend tests pass w
 - [ ] `missed_records_sq` uses `Record.status == 'missed'`, no Visit join
 - [ ] `sort_column_map` keys are `records_count`/`last_record`/`missed_records`
 - [ ] `stats_filter_map` keys are `min_records`/`max_records`/`missed_from`/`missed_to`
-- [ ] 3 new TDD tests pass: `test_records_count_renamed`, `test_missed_records_uses_record_status`, `test_last_record_uses_activity_start_no_status_filter`
+- [ ] 4 new TDD tests pass: `test_records_count_renamed`, `test_missed_records_uses_record_status`, `test_last_record_uses_activity_start_no_status_filter`, `test_all_cancelled_records_missed_zero`
 - [ ] All existing backend tests pass (renamed)
 - [ ] `uv run pytest -q` → 0 failures
 

@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] — 2026-07-16
 
+### Changed
+- **#131 — Client-stats refactor: "visits"→"records" semantics** — branch `feat-client-stats-131` (5 commits: 9916a35, 6cf8447, 501e048, 6e36fe9, 16af531):
+  - **Backend:** `visits_count` → `records_count` (rename only), `missed_visits` → `missed_records` (redefined: `COUNT(Record.id) WHERE Record.status='missed'` — no longer counts individual missed visits), `last_visit` → `last_record` (redefined: `MAX(Activity.start)` over ALL active records, no status filter). API params `min_visits/max_visits` → `min_records/max_records`. Removed Visit joins from 2 subqueries — uses persisted `Record.status` directly.
+  - **Frontend (Zod):** `packages/api-client/src/schemas.ts` renamed fields. Mock data + contexts synced (commit 6cf8447).
+  - **Frontend (Components):** 7 components renamed labels in ClientsTable, ClientStatistics, ClientInfoTab, ClientRecordTab, ClientTab, ClientsContext, ClientsFilters (commit 501e048).
+  - **Frontend (Tests):** 7 test files + E2E renamed (commit 6e36fe9).
+  - **Domain-rules:** `docs/domain-rules/clients.md` updated (commit 16af531).
+  - **Tests:** Backend 663 passed (4 xfailed) — 4 new TDD tests + rename. Frontend 1178 passed (1 known flake #123), tsc 0 errors. Visual compliance: PASSED (/clients page shows new labels).
+
 ### Added
 - **#127 — Unify records/visits/payments caches (single source of truth)** — branch `feat-unify-record-caches`:
   - **Foundation:** `lib/cache/recordCacheSync.ts` (6 pure helpers for canonical + list key sync), `contexts/PendingActionsContext.tsx` (app-level deferred-delete with 5s undo window surviving modal unmount), `RecordsContext` seeds canonical `['record', id]` from list responses.

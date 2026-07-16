@@ -435,10 +435,41 @@ Migrate `RecordStatus` (pending/confirmed/cancelled/no_show) to derived `VisitSt
 
 ---
 
+## GH #131 — Client-Stats Refactor: "visits"→"records" Semantics: ✅ Completed 2026-07-16
+
+**Goal:** Rename and redefine client-stats fields from "visits"-based to "records"-based semantics across the full stack, simplified by removing Visit joins from 2 subqueries (now uses persisted `Record.status` from #98).
+
+**Branch:** `feat-client-stats-131`
+
+**Total commits:** 5 (9916a35, 6cf8447, 501e048, 6e36fe9, 16af531)
+
+**Changed files:** 22
+
+### Tasks
+
+- **T1 (standard) — Backend schema + SQL rewrite:** `backend/src/schemas/client.py`, `backend/src/services/client.py`. Renamed `visits_count`→`records_count`, `missed_visits`→`missed_records` (redefined: `COUNT(Record.id) WHERE Record.status='missed'`), `last_visit`→`last_record` (redefined: `MAX(Activity.start)` over ALL active records, no status filter). API params `min_visits`/`max_visits`→`min_records`/`max_records`. 4 new TDD tests + existing tests renamed. Commit 9916a35.
+- **T2 (small) — Zod schema + mock:** `packages/api-client/src/schemas.ts` renamed. Mock data + contexts synced. Commit 6cf8447.
+- **T3 (standard) — Frontend components:** 7 components renamed labels (ClientsTable, ClientStatistics, ClientInfoTab, ClientRecordTab, ClientTab, ClientsContext, ClientsFilters). Commit 501e048.
+- **T4 (standard) — Frontend tests:** 7 test files + E2E `clients.spec.ts` renamed. Commit 6e36fe9.
+- **T5 (trivial) — Domain-rules:** `docs/domain-rules/clients.md` updated. Commit 16af531.
+
+### Key Simplification
+
+Removed Visit joins from 2 subqueries in `list_clients_with_stats` — now uses persisted `Record.status` (from #98) directly for `missed_records` and `last_record`. No more cartesian product risk between visits and records.
+
+### Test Results
+
+- **Backend:** 663 passed, 4 xfailed (659 baseline + 4 new TDD tests). Zero failures.
+- **Frontend:** 1178 passed, 1 skipped, 1 failed (CalendarPopover #123 — known baseline flake, NOT #131 regression). tsc: 0 errors.
+- **Visual Compliance:** PASSED (/clients page shows new labels).
+
+---
+
 ## Changelog
 - 2026-07-08: **#98 — Unify "active record" definition** — `check_activity_capacity` excludes cancelled/missed from occupied count; `last_visit` stat uses `Activity.start` over visited visits. Shared `ACTIVE_RECORD_STATUSES` + `active_record_filter()`. Branch `fix-unify-active-record`. Spun off #133, #134.
 - 2026-07-08: **#105 — Client stats cartesian product fix** — Rewrote `list_clients_with_stats` with scalar subqueries to eliminate cross-relation multiplication. Branch `fix-client-stats-scalar-subqueries`.
 - 2026-07-16: **#127 — Unify records/visits/payments caches** — Single source of truth (`['record', recordId]`), `recordCacheSync` helpers, `PendingActionsProvider`, deleted `useOptimisticVisitMutation`, fixed Bugs #2/#3/#130. 13 commits, 28 files (+3946/-1272). Branch `feat-unify-record-caches`.
+- 2026-07-16: **#131 — Client-stats refactor: "visits"→"records" semantics** — Renamed `visits_count`→`records_count`, `missed_visits`→`missed_records` (redefined: `COUNT(Record.id) WHERE Record.status='missed'`), `last_visit`→`last_record` (redefined: `MAX(Activity.start)` over ALL active records). API params `min_visits/max_visits`→`min_records/max_records`. Removed Visit joins from 2 subqueries — uses persisted `Record.status`. 7 frontend components + 7 test files + E2E + Zod + domain-rules renamed. 5 commits, 22 files. Backend 663 passed, frontend 1178 passed, visual compliance PASSED. Branch `feat-client-stats-131`.
 - 2026-07-16: **#129 — Backend health: N+1 fix, capacity re-check, dedup seats** — `list_activities` query count halved (6→2 for 5 activities), update/patch enforce capacity check with 409 on over-capacity, `recompute_record_seats` now single source for `seats` across create/update/patch, bonus `tariff_id` fix in update's Visit constructor, 10 new tests (649→659, 0 regression). 3 commits (625fea5, 4689765, e4a7214). Branch `feat-backend-health-129`.
 - 2026-07-07: **Addendum-2: InlineEditableTable unified rows + hard-delete + deferred undo** — 6 main tasks (backend hard-delete + repo split, frontend Zod schema cleanup, optimistic cache sync, tariff dropdown, deferred delete with undo toast, E2E scenarios 15-19) + FasTP Bug #1 (over-capacity toast). Branch `feat-inline-editable-unified-rows`, 17 commits.
 - 2026-06-19: **Wave 5 — 14 P1/P3 UX Bugs** — closed #74–#86 (except #73) in ActivityDetailsModal, ClientTab, ActivityCard; 14 commits, 7/7 visual checks passed (branch `fix/wave5-ux-bugs`).

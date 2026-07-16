@@ -97,11 +97,11 @@ describe('ClientInfoTab', () => {
     expect(select.value).toBe('telegram');
   });
 
-  it('shows metrics: visits, missed, last visit, total paid', () => {
+  it('shows metrics: records, missed, last record, total paid', () => {
     renderClientInfoTab();
-    expect(screen.getByText('Визитов')).toBeInTheDocument();
+    expect(screen.getByText('Записей')).toBeInTheDocument();
     expect(screen.getByText('Пропущено')).toBeInTheDocument();
-    expect(screen.getByText('Последний')).toBeInTheDocument();
+    expect(screen.getByText('Последняя')).toBeInTheDocument();
     expect(screen.getByText('Оплачено')).toBeInTheDocument();
     expect(screen.getByText('5')).toBeInTheDocument();
     expect(screen.getByText('1')).toBeInTheDocument();
@@ -313,8 +313,8 @@ describe('ClientInfoTab', () => {
       });
     });
 
-    it('shows "—" for client with null last_visit', () => {
-      const clientNoVisit = { ...mockClientWithStats, last_visit: null as string | null };
+    it('shows "—" for client with null last_record', () => {
+      const clientNoVisit = { ...mockClientWithStats, last_record: null as string | null };
       renderClientInfoTab({ client: clientNoVisit });
       expect(screen.getByText('—')).toBeInTheDocument();
     });

@@ -100,10 +100,10 @@ export const mockClient: ClientResponse = {
 
 export const mockClientWithStats: ClientWithStats = {
   ...mockClient,
-  visits_count: 5,
-  last_visit: '2026-05-15T14:00:00',
+  records_count: 5,
+  last_record: '2026-05-15T14:00:00',
   total_paid: 17500,
-  missed_visits: 1,
+  missed_records: 1,
 };
 
 export const mockVisitor: VisitorResponse = {

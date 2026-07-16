@@ -52,12 +52,12 @@ export function ClientsFilters() {
           </select>
         </div>
         <div>
-          <label className="text-xs text-ink-mid block mb-1">Визиты</label>
+          <label className="text-xs text-ink-mid block mb-1">Записи</label>
           <div className="flex gap-1">
             <input type="number" placeholder="от" className={`w-20 ${inputClass}`} style={inputStyle}
-              onChange={(e) => setFilters({ min_visits: e.target.value ? Number(e.target.value) : null })} />
+              onChange={(e) => setFilters({ min_records: e.target.value ? Number(e.target.value) : null })} />
             <input type="number" placeholder="до" className={`w-20 ${inputClass}`} style={inputStyle}
-              onChange={(e) => setFilters({ max_visits: e.target.value ? Number(e.target.value) : null })} />
+              onChange={(e) => setFilters({ max_records: e.target.value ? Number(e.target.value) : null })} />
           </div>
         </div>
         <div>

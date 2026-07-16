@@ -166,9 +166,9 @@ export const ClientInfoTab = forwardRef<ClientInfoTabHandle, ClientInfoTabProps>
       {mode === 'view' && client && (
         <ClientStatistics
           stats={{
-            visitsCount: client.visits_count,
-            missedVisits: client.missed_visits,
-            lastVisit: client.last_visit,
+            recordsCount: client.records_count,
+            missedRecords: client.missed_records,
+            lastRecord: client.last_record,
             totalPaid: client.total_paid,
           }}
         />

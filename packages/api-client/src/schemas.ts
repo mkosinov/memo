@@ -282,10 +282,10 @@ export type ClientCreate = z.infer<typeof ClientCreateSchema>;
 // ─── ClientWithStats ────────────────────────────────────────────────────────
 
 export const ClientWithStatsSchema = ClientResponseSchema.extend({
-  visits_count: z.number(),
-  last_visit: z.string().nullable(),
+  records_count: z.number(),
+  last_record: z.string().nullable(),
   total_paid: z.number(),
-  missed_visits: z.number(),
+  missed_records: z.number(),
 });
 
 export type ClientWithStats = z.infer<typeof ClientWithStatsSchema>;

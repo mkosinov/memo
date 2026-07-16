@@ -18,8 +18,8 @@ export interface ClientFilters {
   created_to: string;
   updated_from: string;
   updated_to: string;
-  min_visits: number | null;
-  max_visits: number | null;
+  min_records: number | null;
+  max_records: number | null;
   min_paid: number | null;
   max_paid: number | null;
   missed_from: number | null;
@@ -33,8 +33,8 @@ const defaultFilters: ClientFilters = {
   created_to: '',
   updated_from: '',
   updated_to: '',
-  min_visits: null,
-  max_visits: null,
+  min_records: null,
+  max_records: null,
   min_paid: null,
   max_paid: null,
   missed_from: null,

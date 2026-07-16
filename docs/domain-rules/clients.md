@@ -17,17 +17,18 @@ A Client is a customer who books master classes. All fields are nullable — a C
 ## Invariants
 - Client can exist with all null fields
 - No uniqueness constraint on phone (duplicates possible)
-- Stats (visits_count, total_paid, etc.) are computed, not stored
+- Stats (records_count, total_paid, etc.) are computed, not stored
 
 ## Business Logic
 
 ### Backend
 - **Phone search:** `GET /clients/search?phone=X` — exact match, returns first result or 404
-- **Stats aggregation:** visits_count, last_visit, total_paid, missed_visits — computed on list
-- **`last_visit`** = `MAX(Activity.start)` over all `Visit` rows where `Visit.status = 'visited'` AND `Record.is_active = True` (i.e. attended visits on active records). `null` if the client has never attended. Implemented as a correlated scalar subquery in `ClientService` (`last_visit_sq`).
-- **`last_record_activity`** (upcoming booking): *not implemented yet* — tracked in #133. Would be `MIN(Activity.start)` over active records where `Activity.start > now()`. Distinct from `last_visit`: a client may have a `last_visit` in the past AND a `last_record_activity` in the future.
-- **Filters:** search (ILIKE on name/phone), date ranges, visit count ranges, payment ranges
-- **Sort columns:** name, visits_count, last_visit, total_paid, missed_visits, created_at, updated_at
+- **Stats aggregation:** records_count, last_record, total_paid, missed_records — computed on list
+- **`last_record`** = `MAX(Activity.start)` over all active Records of this client (NO status filter — includes cancelled/missed/waiting). Shows the latest activity date among all records the client was booked for. `null` if the client has no active records. Implemented as a correlated scalar subquery in `ClientService` (`last_record_sq`). NOTE: prior to #131 this was called `last_visit` and filtered by `Visit.status='visited'`.
+- **`missed_records`** = `COUNT(Record.id) WHERE Record.status='missed' AND Record.is_active=True` (relies on persisted `Record.status` — see `compute_record_status` in `docs/domain-rules/records.md`). Rule: priority visited > missed > cancelled > waiting. A record with 1 visited + 1 missed visit → `Record.status='visited'` → NOT counted in `missed_records`.
+- **`last_record_activity`** (upcoming booking): *not implemented yet* — tracked in #133. Would be `MIN(Activity.start)` over active records where `Activity.start > now()`. Distinct from `last_record`: a client may have a `last_record` in the past AND a `last_record_activity` in the future.
+- **Filters:** search (ILIKE on name/phone), date ranges, record count ranges (`min_records`/`max_records`), missed ranges (`missed_from`/`missed_to`), payment ranges (`min_paid`/`max_paid`)
+- **Sort columns:** name, records_count, last_record, total_paid, missed_records, created_at, updated_at
 - **Pagination:** page (default 1), per_page (default 20, max 100)
 
 ### Frontend

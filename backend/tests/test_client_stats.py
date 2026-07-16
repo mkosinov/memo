@@ -67,10 +67,10 @@ class TestClientListResponseShape:
 
         # Find our client
         our_client = next(c for c in items if c["id"] == client["id"])
-        assert "visits_count" in our_client, f"Missing visits_count: {our_client.keys()}"
-        assert "last_visit" in our_client, f"Missing last_visit: {our_client.keys()}"
+        assert "records_count" in our_client, f"Missing records_count: {our_client.keys()}"
+        assert "last_record" in our_client, f"Missing last_record: {our_client.keys()}"
         assert "total_paid" in our_client, f"Missing total_paid: {our_client.keys()}"
-        assert "missed_visits" in our_client, f"Missing missed_visits: {our_client.keys()}"
+        assert "missed_records" in our_client, f"Missing missed_records: {our_client.keys()}"
 
 
 # ─── Stats Aggregation Tests ──────────────────────────────────────────────────
@@ -78,22 +78,22 @@ class TestClientListResponseShape:
 class TestClientStatsAggregation:
     """Verify stats are computed correctly from records/visits/payments."""
 
-    def test_visits_count_with_single_record(
+    def test_records_count_with_single_record(
         self, api_client, create_activity, create_client
     ) -> None:
-        """Client with 1 record (1 visit) has visits_count=1."""
+        """Client with 1 record (1 visit) has records_count=1."""
         client, record = _create_client_with_record(
             api_client, create_activity, create_client,
             visits=[{"name": "Guest", "price": 3500, "status": "visited"}],
         )
         resp = api_client.get("/api/v1/clients")
         item = next(c for c in resp.json()["items"] if c["id"] == client["id"])
-        assert item["visits_count"] == 1
+        assert item["records_count"] == 1
 
-    def test_visits_count_with_multiple_visits_in_one_record(
+    def test_records_count_with_multiple_visits_in_one_record(
         self, api_client, create_activity, create_client
     ) -> None:
-        """Client with 1 record (2 visits) has visits_count=1 (counts records, not visits)."""
+        """Client with 1 record (2 visits) has records_count=1 (counts records, not visits)."""
         client, record = _create_client_with_record(
             api_client, create_activity, create_client,
             visits=[
@@ -103,12 +103,12 @@ class TestClientStatsAggregation:
         )
         resp = api_client.get("/api/v1/clients")
         item = next(c for c in resp.json()["items"] if c["id"] == client["id"])
-        assert item["visits_count"] == 1  # Should count 1 record, not 2 visits
+        assert item["records_count"] == 1  # Should count 1 record, not 2 visits
 
-    def test_visits_count_with_multiple_records(
+    def test_records_count_with_multiple_records(
         self, api_client, create_activity, create_client
     ) -> None:
-        """Client with 2 records (each 1 visit) has visits_count=2."""
+        """Client with 2 records (each 1 visit) has records_count=2."""
         client1, _ = _create_client_with_record(
             api_client, create_activity, create_client,
             visits=[{"name": "Guest", "price": 3500, "status": "visited"}],
@@ -125,7 +125,7 @@ class TestClientStatsAggregation:
 
         resp = api_client.get("/api/v1/clients")
         item = next(c for c in resp.json()["items"] if c["id"] == client1["id"])
-        assert item["visits_count"] == 2
+        assert item["records_count"] == 2
 
     def test_total_paid_zero_when_no_payments(
         self, api_client, create_activity, create_client
@@ -154,20 +154,24 @@ class TestClientStatsAggregation:
         item = next(c for c in resp.json()["items"] if c["id"] == client["id"])
         assert item["total_paid"] == 5000
 
-    def test_missed_visits_count(
+    def test_missed_records_count(
         self, api_client, create_activity, create_client
     ) -> None:
-        """Client with 2 missed visits has missed_visits=2."""
-        client, record = _create_client_with_record(
+        """Client with 2 records, each having 1 missed visit, has missed_records=2."""
+        client, _ = _create_client_with_record(
             api_client, create_activity, create_client,
-            visits=[
-                {"name": "Guest1", "price": 3500, "status": "missed"},
-                {"name": "Guest2", "price": 2500, "status": "missed"},
-            ],
+            visits=[{"name": "Guest1", "price": 3500, "status": "missed"}],
         )
+        activity2 = create_activity()
+        api_client.post("/api/v1/records", json={
+            "activity_id": activity2["id"],
+            "client_id": client["id"],
+            "comment": "Second",
+            "visits": [{"name": "Guest2", "price": 2500, "status": "missed"}],
+        })
         resp = api_client.get("/api/v1/clients")
         item = next(c for c in resp.json()["items"] if c["id"] == client["id"])
-        assert item["missed_visits"] == 2
+        assert item["missed_records"] == 2
 
     def test_client_without_records_has_zero_stats(
         self, api_client, create_client
@@ -177,9 +181,9 @@ class TestClientStatsAggregation:
 
         resp = api_client.get("/api/v1/clients")
         item = next(c for c in resp.json()["items"] if c["id"] == client["id"])
-        assert item["visits_count"] == 0
+        assert item["records_count"] == 0
         assert item["total_paid"] == 0
-        assert item["missed_visits"] == 0
+        assert item["missed_records"] == 0
 
 
 # ─── Pagination Tests ─────────────────────────────────────────────────────────
@@ -377,34 +381,38 @@ class TestClientListSort:
         names = [c["name"] for c in items if c["name"] in ("Alice", "Charlie")]
         assert names == sorted(names, reverse=True)
 
-    def test_sort_by_visits_count(
+    def test_sort_by_records_count(
         self, api_client, create_activity, create_client
     ) -> None:
-        """sort_by=visits_count orders by number of visits."""
-        # Client with 1 visit
+        """sort_by=records_count orders by number of records."""
+        # Client with 1 record
         _create_client_with_record(
             api_client, create_activity, create_client,
             client={"name": "OneVisit", "phone": "+79996000001"},
             visits=[{"name": "Guest", "price": 3500, "status": "waiting"}],
         )
-        # Client with 2 visits
+        # Client with 2 records
         c2, _ = _create_client_with_record(
             api_client, create_activity, create_client,
             client={"name": "TwoVisits", "phone": "+79996000002"},
-            visits=[
-                {"name": "G1", "price": 3500, "status": "visited"},
-                {"name": "G2", "price": 2500, "status": "visited"},
-            ],
+            visits=[{"name": "G1", "price": 3500, "status": "visited"}],
         )
+        activity2 = create_activity()
+        api_client.post("/api/v1/records", json={
+            "activity_id": activity2["id"],
+            "client_id": c2["id"],
+            "comment": "Extra",
+            "visits": [{"name": "G2", "price": 2500, "status": "visited"}],
+        })
 
         resp = api_client.get("/api/v1/clients", params={
-            "sort_by": "visits_count", "sort_order": "desc", "per_page": 100,
+            "sort_by": "records_count", "sort_order": "desc", "per_page": 100,
         })
         items = resp.json()["items"]
         # Our two clients should have TwoVisits before OneVisit
         relevant = [c for c in items if c["name"] in ("OneVisit", "TwoVisits")]
         assert len(relevant) == 2
-        assert relevant[0]["visits_count"] >= relevant[1]["visits_count"]
+        assert relevant[0]["records_count"] >= relevant[1]["records_count"]
 
 
 # ─── Filter Tests ─────────────────────────────────────────────────────────────
@@ -495,14 +503,14 @@ class TestClientListFilterDateRanges:
 class TestClientListFilterStats:
     """Verify stats-based filters."""
 
-    def test_filter_min_visits(self, api_client, create_activity, create_client) -> None:
-        """min_visits=2 returns only clients with >= 2 visits."""
-        # Client with 1 visit
+    def test_filter_min_records(self, api_client, create_activity, create_client) -> None:
+        """min_records=2 returns only clients with >= 2 records."""
+        # Client with 1 record
         c1, _ = _create_client_with_record(
             api_client, create_activity, create_client,
             client={"name": "MinVisit1", "phone": "+79997000001"},
         )
-        # Client with 2 visits
+        # Client with 2 records
         c2, _ = _create_client_with_record(
             api_client, create_activity, create_client,
             client={"name": "MinVisit2", "phone": "+79997000002"},
@@ -515,13 +523,13 @@ class TestClientListFilterStats:
             "visits": [{"name": "G2", "price": 3000, "status": "visited"}],
         })
 
-        resp = api_client.get("/api/v1/clients", params={"min_visits": "2", "per_page": 100})
+        resp = api_client.get("/api/v1/clients", params={"min_records": "2", "per_page": 100})
         ids = [c["id"] for c in resp.json()["items"]]
         assert c2["id"] in ids
         assert c1["id"] not in ids
 
-    def test_filter_max_visits(self, api_client, create_activity, create_client) -> None:
-        """max_visits=1 returns only clients with <= 1 visits."""
+    def test_filter_max_records(self, api_client, create_activity, create_client) -> None:
+        """max_records=1 returns only clients with <= 1 record."""
         c1, _ = _create_client_with_record(
             api_client, create_activity, create_client,
             client={"name": "MaxV1", "phone": "+79997000010"},
@@ -538,7 +546,7 @@ class TestClientListFilterStats:
             "visits": [{"name": "G2", "price": 3000, "status": "visited"}],
         })
 
-        resp = api_client.get("/api/v1/clients", params={"max_visits": "1", "per_page": 100})
+        resp = api_client.get("/api/v1/clients", params={"max_records": "1", "per_page": 100})
         ids = [c["id"] for c in resp.json()["items"]]
         assert c1["id"] in ids
         assert c2["id"] not in ids
@@ -580,7 +588,7 @@ class TestClientListFilterStats:
         assert c2["id"] not in ids
 
     def test_filter_missed_from(self, api_client, create_activity, create_client) -> None:
-        """missed_from=2 returns clients with >= 2 missed visits."""
+        """missed_from=2 returns clients with >= 2 missed records."""
         c1, _ = _create_client_with_record(
             api_client, create_activity, create_client,
             client={"name": "Miss1", "phone": "+79997000040"},
@@ -589,11 +597,15 @@ class TestClientListFilterStats:
         c2, _ = _create_client_with_record(
             api_client, create_activity, create_client,
             client={"name": "Miss2", "phone": "+79997000041"},
-            visits=[
-                {"name": "G1", "price": 3500, "status": "missed"},
-                {"name": "G2", "price": 2500, "status": "missed"},
-            ],
+            visits=[{"name": "G1", "price": 3500, "status": "missed"}],
         )
+        activity2 = create_activity()
+        api_client.post("/api/v1/records", json={
+            "activity_id": activity2["id"],
+            "client_id": c2["id"],
+            "comment": "Second missed record",
+            "visits": [{"name": "G2", "price": 2500, "status": "missed"}],
+        })
 
         resp = api_client.get("/api/v1/clients", params={"missed_from": "2", "per_page": 100})
         ids = [c["id"] for c in resp.json()["items"]]
@@ -618,16 +630,16 @@ class TestClientListFilterStats:
         assert c1["id"] in ids
         assert c2["id"] not in ids
 
-    def test_filter_min_and_max_visits_combined(
+    def test_filter_min_and_max_records_combined(
         self, api_client, create_activity, create_client
     ) -> None:
-        """min_visits + max_visits narrows to a range."""
-        # Client with 1 visit
+        """min_records + max_records narrows to a range."""
+        # Client with 1 record
         c1, _ = _create_client_with_record(
             api_client, create_activity, create_client,
             client={"name": "RangeV1", "phone": "+79997000060"},
         )
-        # Client with 3 visits
+        # Client with 3 records
         c3, _ = _create_client_with_record(
             api_client, create_activity, create_client,
             client={"name": "RangeV3", "phone": "+79997000061"},
@@ -642,7 +654,7 @@ class TestClientListFilterStats:
             })
 
         resp = api_client.get("/api/v1/clients", params={
-            "min_visits": "2", "max_visits": "4", "per_page": 100,
+            "min_records": "2", "max_records": "4", "per_page": 100,
         })
         ids = [c["id"] for c in resp.json()["items"]]
         assert c3["id"] in ids
@@ -677,31 +689,35 @@ class TestClientListSortExtended:
         assert len(relevant) == 2
         assert relevant[0]["total_paid"] >= relevant[1]["total_paid"]
 
-    def test_sort_by_missed_visits_desc(
+    def test_sort_by_missed_records_desc(
         self, api_client, create_activity, create_client
     ) -> None:
-        """sort_by=missed_visits orders by missed count."""
+        """sort_by=missed_records orders by missed record count."""
         _create_client_with_record(
             api_client, create_activity, create_client,
             client={"name": "NoMissSort", "phone": "+79998000010"},
             visits=[{"name": "G", "price": 3500, "status": "visited"}],
         )
-        _create_client_with_record(
+        c2, _ = _create_client_with_record(
             api_client, create_activity, create_client,
             client={"name": "MissSort", "phone": "+79998000011"},
-            visits=[
-                {"name": "G1", "price": 3500, "status": "missed"},
-                {"name": "G2", "price": 2500, "status": "missed"},
-            ],
+            visits=[{"name": "G1", "price": 3500, "status": "missed"}],
         )
+        activity2 = create_activity()
+        api_client.post("/api/v1/records", json={
+            "activity_id": activity2["id"],
+            "client_id": c2["id"],
+            "comment": "Second missed",
+            "visits": [{"name": "G2", "price": 2500, "status": "missed"}],
+        })
 
         resp = api_client.get("/api/v1/clients", params={
-            "sort_by": "missed_visits", "sort_order": "desc", "per_page": 100,
+            "sort_by": "missed_records", "sort_order": "desc", "per_page": 100,
         })
         items = resp.json()["items"]
         relevant = [c for c in items if c["name"] in ("NoMissSort", "MissSort")]
         assert len(relevant) == 2
-        assert relevant[0]["missed_visits"] >= relevant[1]["missed_visits"]
+        assert relevant[0]["missed_records"] >= relevant[1]["missed_records"]
 
     def test_sort_by_created_at_desc(
         self, api_client, create_activity, create_client
@@ -724,16 +740,16 @@ class TestClientListSortExtended:
         assert len(relevant) == 2
         assert relevant[0]["created_at"] >= relevant[1]["created_at"]
 
-    def test_sort_by_last_visit_desc(
+    def test_sort_by_last_record_desc(
         self, api_client, create_activity, create_client
     ) -> None:
-        """sort_by=last_visit desc orders by most recent Activity.start of visited visits."""
+        """sort_by=last_record desc orders by most recent Activity.start (no status filter)."""
         from datetime import UTC, datetime, timedelta
 
         early_start = datetime.now(UTC) - timedelta(days=30)
         late_start = datetime.now(UTC) - timedelta(days=5)
 
-        # EarlyVisitor: visited an activity 30 days ago
+        # EarlyVisitor: activity 30 days ago
         c1, _ = _create_client_with_record(
             api_client, create_activity, create_client,
             client={"name": "EarlyVisitor", "phone": "+79998000030"},
@@ -746,7 +762,7 @@ class TestClientListSortExtended:
             "visits": [{"name": "G", "price": 3500, "status": "visited"}],
         })
 
-        # LateVisitor: visited an activity 5 days ago (more recent)
+        # LateVisitor: activity 5 days ago (more recent)
         c2, _ = _create_client_with_record(
             api_client, create_activity, create_client,
             client={"name": "LateVisitor", "phone": "+79998000031"},
@@ -760,12 +776,12 @@ class TestClientListSortExtended:
         })
 
         resp = api_client.get("/api/v1/clients", params={
-            "sort_by": "last_visit", "sort_order": "desc", "per_page": 100,
+            "sort_by": "last_record", "sort_order": "desc", "per_page": 100,
         })
         items = resp.json()["items"]
         relevant = [c for c in items if c["name"] in ("EarlyVisitor", "LateVisitor")]
         assert len(relevant) == 2
-        # LateVisitor should be first (later Activity.start = more recent last_visit)
+        # LateVisitor should be first (later Activity.start = more recent last_record)
         assert relevant[0]["name"] == "LateVisitor"
 
     def test_sort_by_updated_at_asc(
@@ -970,13 +986,15 @@ class TestClientStatsAggregationExtended:
             f"expected 3000 (payments must not be multiplied by visit count)"
         )
         # sanity: other stats unaffected by the same query
-        assert item["visits_count"] == 1  # one record, not two visits
-        assert item["missed_visits"] == 1  # only the 'missed' visit
+        assert item["records_count"] == 1  # one record, not two visits
+        # Record.status is 'visited' (1 visited visit wins priority), so
+        # the record is NOT counted in missed_records.
+        assert item["missed_records"] == 0  # record-level 'visited', not 'missed'
 
-    def test_last_visit_is_most_recent(
+    def test_last_record_is_most_recent(
         self, api_client, create_activity, create_client
     ) -> None:
-        """last_visit field reflects the most recent visit datetime."""
+        """last_record field reflects the most recent record's Activity.start."""
         client, _ = _create_client_with_record(
             api_client, create_activity, create_client,
             client={"name": "LastVisitAcc", "phone": "+79999000010"},
@@ -992,12 +1010,18 @@ class TestClientStatsAggregationExtended:
 
         resp = api_client.get("/api/v1/clients")
         item = next(c for c in resp.json()["items"] if c["id"] == client["id"])
-        assert item["last_visit"] is not None
+        assert item["last_record"] is not None
 
     def test_mixed_visit_statuses_count(
         self, api_client, create_activity, create_client
     ) -> None:
-        """Mixed visited/missed/cancelled: missed count excludes visited+cancelled, visits_count counts records."""
+        """Mixed visited/missed/cancelled within a single record.
+
+        Record-level status is 'visited' (priority: any-visited > all-missed >
+        all-cancelled > waiting), so missed_records==0 for this record
+        (record status is 'visited', not 'missed'). This validates the
+        semantic shift: counts are at the Record level, not the Visit level.
+        """
         client, _ = _create_client_with_record(
             api_client, create_activity, create_client,
             client={"name": "MixedStatus", "phone": "+79999000020"},
@@ -1010,8 +1034,9 @@ class TestClientStatsAggregationExtended:
 
         resp = api_client.get("/api/v1/clients")
         item = next(c for c in resp.json()["items"] if c["id"] == client["id"])
-        assert item["visits_count"] == 1  # counts 1 record, not 3 visits
-        assert item["missed_visits"] == 1  # only missed
+        assert item["records_count"] == 1  # counts 1 record, not 3 visits
+        # Record.status = 'visited' (priority: visited > missed > cancelled)
+        assert item["missed_records"] == 0  # record is 'visited', not 'missed'
 
     def test_payments_only_count_active_records(
         self, api_client, create_activity, create_client
@@ -1043,20 +1068,20 @@ class TestClientStatsAggregationExtended:
         item = next(c for c in resp.json()["items"] if c["id"] == client["id"])
         assert item["total_paid"] == 6000
 
-    def test_no_last_visit_when_no_visits(
+    def test_no_last_record_when_no_visits(
         self, api_client, create_client
     ) -> None:
-        """Client without records has last_visit=None."""
+        """Client without records has last_record=None."""
         client = create_client(name="NoVisitClient")
         resp = api_client.get("/api/v1/clients")
         item = next(c for c in resp.json()["items"] if c["id"] == client["id"])
-        assert item["last_visit"] is None
+        assert item["last_record"] is None
 
-    def test_last_visit_uses_activity_start_of_visited(
+    def test_last_record_uses_activity_start_of_record(
         self, api_client, create_activity, create_client
     ) -> None:
-        """last_visit = Activity.start of the client's last VISITED visit,
-        not created_at, and not a future WAITING booking.
+        """last_record = MAX(Activity.start) over all active records of the client.
+        NO status filter: cancelled/missed/waiting are included.
         """
         from datetime import UTC, datetime, timedelta
 
@@ -1080,24 +1105,21 @@ class TestClientStatsAggregationExtended:
 
         resp = api_client.get("/api/v1/clients")
         item = next(c for c in resp.json()["items"] if c["id"] == client["id"])
-        assert item["last_visit"] is not None
-        # Must be the PAST activity's start (attended), not the future booking
-        assert item["last_visit"].startswith(past.date().isoformat())
+        assert item["last_record"] is not None
+        # Must be the FUTURE activity's start — the latest by Activity.start,
+        # because last_record is the MAX over all records regardless of status.
+        assert item["last_record"].startswith(future.date().isoformat())
 
-    def test_last_visit_null_without_visited(
+    def test_last_record_is_none_when_no_records(
         self, api_client, create_activity, create_client
     ) -> None:
-        """A client with only waiting/cancelled visits has last_visit=None."""
+        """A client with NO records has last_record=None."""
         client = create_client(name="NeverAttended", phone="+79999111002")
-        act = create_activity()
-        api_client.post("/api/v1/records", json={
-            "activity_id": act["id"], "client_id": client["id"],
-            "visits": [{"name": "V", "price": 1000, "status": "waiting"}],
-        })
+        # No record at all — last_record should be None.
 
         resp = api_client.get("/api/v1/clients")
         item = next(c for c in resp.json()["items"] if c["id"] == client["id"])
-        assert item["last_visit"] is None
+        assert item["last_record"] is None
 
 
 # ─── Combined Filter Tests ────────────────────────────────────────────────────
@@ -1118,10 +1140,10 @@ class TestClientListCombinedFilters:
         assert active["id"] in ids
         assert inactive["id"] not in ids
 
-    def test_search_with_min_visits(
+    def test_search_with_min_records(
         self, api_client, create_activity, create_client
     ) -> None:
-        """search + min_visits filter together."""
+        """search + min_records filter together."""
         c1, _ = _create_client_with_record(
             api_client, create_activity, create_client,
             client={"name": "SearchVisit1", "phone": "+79999500010"},
@@ -1139,7 +1161,7 @@ class TestClientListCombinedFilters:
         })
 
         resp = api_client.get("/api/v1/clients", params={
-            "search": "SearchVisit", "min_visits": "2", "per_page": 100,
+            "search": "SearchVisit", "min_records": "2", "per_page": 100,
         })
         ids = [c["id"] for c in resp.json()["items"]]
         assert c2["id"] in ids
@@ -1167,3 +1189,146 @@ class TestClientListCombinedFilters:
         items = resp.json()["items"]
         names = [c["name"] for c in items if c["name"].startswith("DateSort")]
         assert names == sorted(names)
+
+
+# ─── TDD #131 — Records-based semantics ────────────────────────────────────────
+#
+# These tests pin down the public contract of the renamed stats fields:
+#   visits_count   → records_count
+#   last_visit     → last_record
+#   missed_visits  → missed_records
+#
+# They were written BEFORE the production rename (RED phase) and were
+# expected to fail because the old field names are still emitted.
+
+class TestClientStatsRecordsRename:
+    """Issue #131: client-stats now uses Record as the single semantic unit."""
+
+    def test_records_count_renamed(
+        self, api_client, create_activity, create_client
+    ) -> None:
+        """Response exposes `records_count` (not `visits_count`).
+        Backed by `Record.is_active=True` rows, not visits.
+        """
+        client, _ = _create_client_with_record(
+            api_client, create_activity, create_client,
+            client={"name": "RenameCount", "phone": "+79990001301"},
+            visits=[
+                {"name": "A", "price": 1000, "status": "waiting"},
+                {"name": "B", "price": 1000, "status": "waiting"},
+            ],
+        )
+        resp = api_client.get("/api/v1/clients", params={"per_page": 100})
+        item = next(c for c in resp.json()["items"] if c["id"] == client["id"])
+        assert item["records_count"] == 1  # one record, regardless of 2 visits
+        assert "visits_count" not in item
+
+    def test_missed_records_uses_record_status(
+        self, api_client, create_activity, create_client
+    ) -> None:
+        """`missed_records` is derived from Record.status='missed', NOT Visit.status.
+
+        Client A: 1 record, 2 visits all 'missed' → Record.status='missed'
+                  → missed_records == 1 (record-level, not 2 visit-level).
+        Client B: 1 record, 1 'visited' + 1 'missed' visit
+                  → Record.status='visited' (priority: visited > missed)
+                  → missed_records == 0 (record is 'visited', not 'missed').
+        """
+        # Client A: all-missed record
+        client_a, _ = _create_client_with_record(
+            api_client, create_activity, create_client,
+            client={"name": "AllMissed", "phone": "+79990001302"},
+            visits=[
+                {"name": "A1", "price": 1000, "status": "missed"},
+                {"name": "A2", "price": 1000, "status": "missed"},
+            ],
+        )
+
+        # Client B: visited + missed record (priority: visited wins)
+        client_b, _ = _create_client_with_record(
+            api_client, create_activity, create_client,
+            client={"name": "VisitedWins", "phone": "+79990001303"},
+            visits=[
+                {"name": "B1", "price": 1000, "status": "visited"},
+                {"name": "B2", "price": 1000, "status": "missed"},
+            ],
+        )
+
+        resp = api_client.get("/api/v1/clients", params={"per_page": 100})
+        items = {c["id"]: c for c in resp.json()["items"]}
+
+        # Client A: the record IS 'missed' (both visits missed) → count 1
+        assert items[client_a["id"]]["missed_records"] == 1
+        # Client B: the record is 'visited' (priority rule) → count 0
+        assert items[client_b["id"]]["missed_records"] == 0
+
+    def test_last_record_uses_activity_start_no_status_filter(
+        self, api_client, create_activity, create_client
+    ) -> None:
+        """`last_record` = MAX(Activity.start) over all active records of the client,
+        with NO status filter (cancelled/missed/waiting are included).
+
+        Record A: Activity.start=2026-01-10, visit status='visited'
+        Record B: Activity.start=2026-01-20, visit status='cancelled'
+
+        Expected: last_record == '2026-01-20' (Record B wins by Activity.start,
+        even though its only visit is 'cancelled' — no status filter).
+        """
+        from datetime import UTC, datetime
+
+        client = create_client(name="LastRecordMix", phone="+79990001304")
+
+        early = datetime(2026, 1, 10, 12, 0, tzinfo=UTC)
+        late = datetime(2026, 1, 20, 12, 0, tzinfo=UTC)
+
+        act_early = create_activity(start=early)
+        api_client.post("/api/v1/records", json={
+            "activity_id": act_early["id"], "client_id": client["id"],
+            "visits": [{"name": "V1", "price": 1000, "status": "visited"}],
+        })
+        act_late = create_activity(start=late)
+        api_client.post("/api/v1/records", json={
+            "activity_id": act_late["id"], "client_id": client["id"],
+            "visits": [{"name": "V2", "price": 1000, "status": "cancelled"}],
+        })
+
+        resp = api_client.get("/api/v1/clients", params={"per_page": 100})
+        item = next(c for c in resp.json()["items"] if c["id"] == client["id"])
+        assert item["last_record"] is not None
+        # Record B (cancelled) has the later Activity.start — must win
+        assert item["last_record"].startswith("2026-01-20")
+
+    def test_all_cancelled_records_missed_zero(
+        self, api_client, create_activity, create_client
+    ) -> None:
+        """US-7 edge case: client with all-cancelled records.
+
+        Record A: Activity.start=2026-01-10, visit status='cancelled'
+        Record B: Activity.start=2026-01-22, visit status='cancelled'
+
+        Both records' status = 'cancelled' (NOT 'missed').
+        Expected: missed_records == 0, last_record = '2026-01-22'.
+        """
+        from datetime import UTC, datetime
+
+        client = create_client(name="AllCancelled", phone="+79990001305")
+
+        first = datetime(2026, 1, 10, 12, 0, tzinfo=UTC)
+        second = datetime(2026, 1, 22, 12, 0, tzinfo=UTC)
+
+        act1 = create_activity(start=first)
+        api_client.post("/api/v1/records", json={
+            "activity_id": act1["id"], "client_id": client["id"],
+            "visits": [{"name": "C1", "price": 1000, "status": "cancelled"}],
+        })
+        act2 = create_activity(start=second)
+        api_client.post("/api/v1/records", json={
+            "activity_id": act2["id"], "client_id": client["id"],
+            "visits": [{"name": "C2", "price": 1000, "status": "cancelled"}],
+        })
+
+        resp = api_client.get("/api/v1/clients", params={"per_page": 100})
+        item = next(c for c in resp.json()["items"] if c["id"] == client["id"])
+        assert item["missed_records"] == 0
+        assert item["last_record"] is not None
+        assert item["last_record"].startswith("2026-01-22")

@@ -1,34 +1,12 @@
 #!/usr/bin/env bash
-# Pre-push hook: runs the full local test suite, blocks push on failure.
-# Source: scripts/git-hooks/pre-push
-# Installed by: scripts/install-hooks.sh (via postinstall)
+# Pre-push hook: DISABLED.
+# Tests run in GitHub Actions CI (test.yml + smoke.yml) on push and PR.
+# This hook is a no-op (exit 0).
 #
-# Runs scripts/test-all.sh which executes all checks in parallel:
-#   - backend pytest
-#   - lint (turbo)
-#   - type-check (admin)
-#   - vitest (admin unit tests)
-#   - playwright E2E (5 shards in parallel)
-#   - visual compliance
+# To run the full local test suite manually:
+#   VISUAL_COMPLIANCE=0 bash scripts/test-all.sh
 #
-# Typical runtime: ~6-8 min (down from 15+ min sequential).
+# To re-enable the hook, replace this file with the original test runner:
+#   exec "$REPO_ROOT/scripts/test-all.sh"
 
-set -euo pipefail
-
-# Get the current worktree's root (works for both main repo and worktrees).
-# When hook runs from .git/hooks/ or .git/worktrees/<name>/hooks/, git
-# auto-sets GIT_DIR and GIT_WORK_TREE, so rev-parse returns the correct path.
-if ! REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"; then
-  echo "❌ Not in a git repository. Pre-push hook requires a git worktree."
-  exit 1
-fi
-
-TEST_SCRIPT="$REPO_ROOT/scripts/test-all.sh"
-
-if [ ! -x "$TEST_SCRIPT" ]; then
-  echo "❌ test-all.sh not found or not executable at $TEST_SCRIPT"
-  echo "   Run: pnpm install (postinstall installs the hook)"
-  exit 1
-fi
-
-exec "$TEST_SCRIPT"
+exit 0

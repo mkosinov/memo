@@ -98,3 +98,95 @@ jobs:
         env:
           NODE_OPTIONS: --max-old-space-size=4096
 
+  e2e-tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shard-name: shard-schedule
+            shard-id: 1
+            shard-port: 3002
+            backend-port: 8001
+          - shard-name: shard-rest
+            shard-id: 2
+            shard-port: 3003
+            backend-port: 8002
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: frontend/admin/pnpm-lock.yaml
+
+      - name: Install backend dependencies
+        run: uv sync --extra dev
+        working-directory: backend
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: frontend/admin
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+        working-directory: frontend/admin
+
+      - name: Start E2E stack (${{ matrix.shard-name }})
+        run: |
+          SHARD_ID=${{ matrix.shard-id }} \
+          SHARD_PORT=${{ matrix.shard-port }} \
+          BACKEND_PORT=${{ matrix.backend-port }} \
+          TEST_DB_PATH=backend/test_memo_shard${{ matrix.shard-id }}.db \
+          BACKEND_URL=http://127.0.0.1:${{ matrix.backend-port }} \
+          NEXT_PUBLIC_API_URL=http://127.0.0.1:${{ matrix.backend-port }} \
+            bash scripts/e2e-shard-start.sh &
+
+          # Wait for frontend to be ready (up to 120s)
+          echo "Waiting for frontend on :${{ matrix.shard-port }}..."
+          for i in $(seq 1 120); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:${{ matrix.shard-port }}/" --max-time 30 2>/dev/null || echo "000")
+            if echo "$code" | grep -qE "^(2|3)"; then
+              echo "Frontend ready on :${{ matrix.shard-port }} (HTTP $code)"
+              break
+            fi
+            if [ "$i" -eq 120 ]; then
+              echo "ERROR: Frontend failed to start on :${{ matrix.shard-port }}"
+              exit 1
+            fi
+            sleep 1
+          done
+          # Buffer for Next.js compilation to stabilize
+          sleep 10
+
+      - name: Run Playwright tests (${{ matrix.shard-name }})
+        run: pnpm exec playwright test --project=${{ matrix.shard-name }} --workers=1
+        working-directory: frontend/admin
+        env:
+          SHARD_ID: ${{ matrix.shard-id }}
+          SHARD_PORT: ${{ matrix.shard-port }}
+          BACKEND_PORT: ${{ matrix.backend-port }}
+          TEST_DB_PATH: ${{ github.workspace }}/backend/test_memo_shard${{ matrix.shard-id }}.db
+          BACKEND_URL: http://127.0.0.1:${{ matrix.backend-port }}
+          NEXT_PUBLIC_API_URL: http://127.0.0.1:${{ matrix.backend-port }}
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-${{ matrix.shard-name }}
+          path: frontend/admin/playwright-report/
+          retention-days: 7
+

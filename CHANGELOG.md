@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — 2026-07-17
+
+### Fixed
+- **E2E infra roots (#108 DB lock, #126 standalone warmup)** — branch `feat-e2e-infra-roots` (7 commits: 1c30c24, be0b08b, 713ce3f, 662ea67, f39856d, 51dac4c, 5d6028b):
+  - **(#108) DB lock fix:** Global `event.listens_for(Engine, "connect")` hook sets `PRAGMA busy_timeout=5000` + `PRAGMA journal_mode=WAL` on every SQLite connection (app async + Alembic + sqladmin engines). Guarded to sqlite dialect only. Shared `sqliteExecWithRetry` helper extracted to `e2e/fixtures/sqlite-exec.ts`. `globalSetup.ts` + `cleanTestData()` use the shared helper; `cleanTestData` THROWS on persistent lock instead of silent swallow.
+  - **(#126) Standalone warmup:** `playwright test` now warms up 9 routes in `globalSetup` (gated `!SHARD_ID`). Shared `WARMUP_ROUTES` list. Warmup-routes test detects TS↔shell drift via shell-file parsing.
+  - **ADR 001:** WAL-backup caveat documented; `*.db-wal`/`*.db-shm` added to `.gitignore`.
+  - **Tests:** Backend 664 passed + 4 xfailed (1 new WAL/busy_timeout test); frontend vitest 1189 passed + 1 skipped (new: sqlite-exec, cleanTestData, warmup-routes tests). US-1 (#126 warmup) live-verified on cold cache.
+  - Design spec: `docs/specs/2026-07-17-e2e-infra-roots-108-126-design.md`
+  - Plan: `docs/plans/2026-07-17-e2e-infra-roots-108-126.md`
+
 ## [Unreleased] — 2026-07-16
 
 ### Changed

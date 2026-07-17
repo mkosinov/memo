@@ -1,0 +1,102 @@
+name: Update Snapshots (shard-rest)
+
+# Manually-triggered workflow to regenerate Playwright `toHaveScreenshot`
+# baselines for the `shard-rest` project ON the exact `ubuntu-latest` CI
+# runner image. This guarantees the font stack / browser build matches the
+# environment where the `e2e-tests` job runs, avoiding font-render drift.
+#
+# It mirrors the `e2e-tests` job in test.yml (shard-rest matrix entry:
+# SHARD_ID=2, SHARD_PORT=3003, BACKEND_PORT=8002) but adds `--update-snapshots`
+# and uploads the regenerated snapshot PNGs as an artifact.
+#
+# Usage:
+#   gh workflow run update-snapshots.yml --ref feat-ci-green
+# Then download the `updated-snapshots-shard-rest` artifact and commit the PNGs.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  update-snapshots:
+    runs-on: ubuntu-latest
+
+    env:
+      SHARD_ID: 2
+      SHARD_PORT: 3003
+      BACKEND_PORT: 8002
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install backend dependencies
+        run: uv sync --extra dev
+        working-directory: backend
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: frontend/admin
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+        working-directory: frontend/admin
+
+      - name: Start E2E stack (shard-rest)
+        run: |
+          SHARD_ID=2 \
+          SHARD_PORT=3003 \
+          BACKEND_PORT=8002 \
+          TEST_DB_PATH=backend/test_memo_shard2.db \
+          BACKEND_URL=http://127.0.0.1:8002 \
+          NEXT_PUBLIC_API_URL=http://127.0.0.1:8002 \
+            bash scripts/e2e-shard-start.sh &
+
+          # Wait for frontend to be ready (up to 120s)
+          echo "Waiting for frontend on :3003..."
+          for i in $(seq 1 120); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:3003/" --max-time 30 2>/dev/null || echo "000")
+            if echo "$code" | grep -qE "^(2|3)"; then
+              echo "Frontend ready on :3003 (HTTP $code)"
+              break
+            fi
+            if [ "$i" -eq 120 ]; then
+              echo "ERROR: Frontend failed to start on :3003"
+              exit 1
+            fi
+            sleep 1
+          done
+          # Buffer for Next.js compilation to stabilize
+          sleep 10
+
+      - name: Regenerate shard-rest snapshots
+        run: pnpm exec playwright test --project=shard-rest --update-snapshots --workers=1
+        working-directory: frontend/admin
+        env:
+          SHARD_ID: 2
+          SHARD_PORT: 3003
+          BACKEND_PORT: 8002
+          TEST_DB_PATH: ${{ github.workspace }}/backend/test_memo_shard2.db
+          BACKEND_URL: http://127.0.0.1:8002
+          NEXT_PUBLIC_API_URL: http://127.0.0.1:8002
+
+      - name: Upload updated snapshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: updated-snapshots-shard-rest
+          path: frontend/admin/e2e/**/*-snapshots/**
+          retention-days: 7

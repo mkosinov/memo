@@ -83,6 +83,23 @@ class TestDBManager:
         await manager.engine.dispose()
 
 
+class TestSqlitePragmas:
+    """Verify the process-global connect hook sets busy_timeout + WAL."""
+
+    async def test_engine_sets_wal_and_busy_timeout(self, tmp_path) -> None:
+        """Every new DBAPI connection gets busy_timeout=5000 and journal_mode=WAL."""
+        from src.db.database import DBManager
+
+        db_file = tmp_path / "pragma_test.db"
+        manager = DBManager(f"sqlite+aiosqlite:///{db_file}")
+        async with manager.engine.connect() as conn:
+            jm = (await conn.exec_driver_sql("PRAGMA journal_mode")).scalar()
+            bt = (await conn.exec_driver_sql("PRAGMA busy_timeout")).scalar()
+        assert str(jm).lower() == "wal"
+        assert int(bt) == 5000
+        await manager.engine.dispose()
+
+
 class TestBase:
     """Verify declarative base is available."""
 

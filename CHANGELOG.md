@@ -58,6 +58,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Final CI result on `93cfd18`:** test.yml 12/12 green (backend all, frontend 1-5, both E2E shards), smoke.yml 2/2 green. #123 closed by this PR.
   - **Remaining:** #124, #125 remain open (deferred flaky tests, now explicitly skipped with annotations). #121/#126 remain open (adjacent E2E infra debt).
 
+- **E2E Fixme Cleanup Wave 1 (#121)** — branch `feat-e2e-fixme-wave1` (2 commits: 0be5188, 0e0ee33):
+  - Re-enabled 13 previously-disabled E2E tests whose blocker issues (#84 occupied-calc, #127 cache unification) are now CLOSED.
+  - **occupied-calc.spec.ts:** 1 test re-enabled (US-S03 occupancy validation).
+  - **error-messages.spec.ts:** 1 test re-enabled ("Недостаточно мест" capacity error).
+  - **clients.spec.ts:** 11 tests re-enabled (create/view/edit/delete/search/modal/record-tab/status/payment/save/cancel). Test 11 (status filter) left skipped — tracked in #125.
+  - **Shard-mode verification (CI-equivalent, 2 runs):** 23/23 active tests pass, 1 skip, 0 flakes. GATE PASS.
+  - **Zero product-code changes** — pure un-disable of tests plus stripping stale #XXX comments.
+  - Design spec: `docs/specs/2026-07-17-e2e-fixme-wave1-design.md`
+  - Plan: `docs/plans/2026-07-17-e2e-fixme-wave1.md`
+
 ## [Unreleased] — 2026-07-08
 
 ### Fixed

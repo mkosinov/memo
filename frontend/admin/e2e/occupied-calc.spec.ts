@@ -2,9 +2,7 @@ import { test, expect } from '@playwright/test';
 import { waitForScheduleReady } from './fixtures/helpers';
 import { createTestActivity, createTestClient, createTestRecord } from './fixtures/factories';
 
-// Pending bug #84: current code counts records (2), not sum of visits (4).
-// Marked fixme — will PASS once bug #84 is fixed.
-test.fixme('US-S03: occupied = sum of visits for active records (excludes cancelled) — pending bug #84 fix', async ({
+test('US-S03: occupied = sum of visits for active records (excludes cancelled)', async ({
   page,
   request,
 }) => {
@@ -30,8 +28,6 @@ test.fixme('US-S03: occupied = sum of visits for active records (excludes cancel
   await waitForScheduleReady(page);
 
   // ASSERT: occupied should be 4/20 (sum of visits: 1 + 3 = 4)
-  // Bug #84: current code counts records (2), not sum of visits (4)
-  // This assertion is intentionally RED — FAILS now, PASS after bug #84 fix.
   const card = page.locator(`[data-testid="activity-${activity.id}"]`);
   await expect(card).toBeVisible();
   await expect(card).toContainText('4/20');

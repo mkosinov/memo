@@ -13,8 +13,8 @@
  * Seed IDs are short (c1..c5, r1..r6, v1..v10, p1..p6, ev_0..ev_44)
  * so length checks distinguish them from UUID test data.
  */
-import { execSync } from 'child_process';
 import path from 'path';
+import { sqliteExecWithRetry } from './fixtures/sqlite-exec';
 
 export default function globalSetup() {
   // Per-shard DB: test_memo_shard{id}.db
@@ -30,13 +30,13 @@ export default function globalSetup() {
   // Delete all non-seed data (children first to respect FK constraints).
   // Order: payments → visits → records → activities → clients.
   try {
-    execSync(`sqlite3 "${dbPath}" "
+    sqliteExecWithRetry(`sqlite3 "${dbPath}" "
       DELETE FROM payments WHERE length(id) > 3;
       DELETE FROM visits WHERE length(id) > 3;
       DELETE FROM records WHERE length(id) > 3;
       DELETE FROM activities WHERE length(id) > 5 AND id NOT LIKE 'ev_fixed_%';
       DELETE FROM clients WHERE length(id) > 3;
-    "`, { encoding: 'utf-8', stdio: 'pipe' });
+    "`);
   } catch (err: any) {
     // Only swallow "no such table" (DB not yet created) or "no such file"
     const msg = String(err?.stderr || err?.message || '');

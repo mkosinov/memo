@@ -6,9 +6,9 @@
  */
 
 import { type Page, expect } from '@playwright/test';
-import { execSync } from 'child_process';
 import path from 'path';
 import { queryDBRow } from './db-query';
+import { sqliteExecWithRetry } from './sqlite-exec';
 
 /**
  * Resolve the DB path: per-shard (test_memo_shard{id}.db) or fallback.
@@ -35,20 +35,21 @@ const DB_PATH = resolveDBPath();
  */
 export function cleanTestData() {
   try {
-    execSync(`sqlite3 "${DB_PATH}" "
+    sqliteExecWithRetry(`sqlite3 "${DB_PATH}" "
       DELETE FROM payments WHERE length(id) > 3;
       DELETE FROM visits WHERE length(id) > 3;
       DELETE FROM records WHERE length(id) > 3;
       DELETE FROM activities WHERE id NOT LIKE 'ev\\_%' ESCAPE '\\' AND id NOT LIKE 'ev_fixed_%';
       DELETE FROM clients WHERE length(id) > 3;
-    "`, { encoding: 'utf-8', stdio: 'pipe' });
+    "`);
   } catch (err: any) {
     const msg = String(err?.stderr || err?.message || '');
     if (msg.includes('no such table') || msg.includes('no such file') || msg.includes('unable to open database')) {
       return; // DB not ready yet — ok
     }
-    // Log but don't throw — test cleanup should not fail tests
-    console.warn(`[cleanTestData] Warning: ${msg.trim()}`);
+    // Real errors (including a lock that survived retries) should propagate —
+    // silent no-op here would leave stale UUID data poisoning later tests.
+    throw err;
   }
 }
 

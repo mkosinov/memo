@@ -13,10 +13,11 @@
  * Seed IDs are short (c1..c5, r1..r6, v1..v10, p1..p6, ev_0..ev_44)
  * so length checks distinguish them from UUID test data.
  */
-import { execSync } from 'child_process';
 import path from 'path';
+import { sqliteExecWithRetry } from './fixtures/sqlite-exec';
+import { WARMUP_ROUTES } from './fixtures/warmup-routes';
 
-export default function globalSetup() {
+export default async function globalSetup() {
   // Per-shard DB: test_memo_shard{id}.db
   // Falls back to TEST_DB_PATH or default test_memo.db for backwards compat.
   const shardId = process.env.SHARD_ID;
@@ -30,22 +31,39 @@ export default function globalSetup() {
   // Delete all non-seed data (children first to respect FK constraints).
   // Order: payments → visits → records → activities → clients.
   try {
-    execSync(`sqlite3 "${dbPath}" "
+    sqliteExecWithRetry(`sqlite3 "${dbPath}" "
       DELETE FROM payments WHERE length(id) > 3;
       DELETE FROM visits WHERE length(id) > 3;
       DELETE FROM records WHERE length(id) > 3;
       DELETE FROM activities WHERE length(id) > 5 AND id NOT LIKE 'ev_fixed_%';
       DELETE FROM clients WHERE length(id) > 3;
-    "`, { encoding: 'utf-8', stdio: 'pipe' });
+    "`);
   } catch (err: any) {
     // Only swallow "no such table" (DB not yet created) or "no such file"
     const msg = String(err?.stderr || err?.message || '');
     if (msg.includes('no such table') || msg.includes('no such file') || msg.includes('unable to open database')) {
       console.warn(`[globalSetup] DB not ready or missing tables, skipping clean: ${msg.trim()}`);
-      return;
+      // Fall through to warmup below — DB-not-ready is not fatal, and
+      // warmup runs regardless of the clean outcome (only a real error
+      // that propagates as a throw should abort before warmup runs).
+    } else {
+      // Real errors should propagate (DB locked, permissions, etc.)
+      console.error(`[globalSetup] ERROR cleaning DB: ${msg}`);
+      throw err;
     }
-    // Real errors should propagate (DB locked, permissions, etc.)
-    console.error(`[globalSetup] ERROR cleaning DB: ${msg}`);
-    throw err;
+  }
+
+  // #126: standalone mode has no shell warmup — pre-compile routes so the
+  // first test doesn't race Next.js dev compilation (404 _next/static).
+  if (!process.env.SHARD_ID) {
+    const port = process.env.SHARD_PORT || '3002';
+    console.log(`[globalSetup] Warming up ${WARMUP_ROUTES.length} routes on :${port} (standalone mode)`);
+    for (const route of WARMUP_ROUTES) {
+      try {
+        await fetch(`http://localhost:${port}${route}`, { signal: AbortSignal.timeout(60_000) });
+      } catch {
+        // best-effort: request still triggers dev compile even on failure
+      }
+    }
   }
 }

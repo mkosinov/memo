@@ -15,8 +15,8 @@
  * Retries on "database is locked" to handle concurrent backend writes.
  */
 
-import { execSync } from 'child_process';
 import path from 'path';
+import { sqliteExecWithRetry } from './sqlite-exec';
 
 /**
  * Resolve DB path: per-shard (test_memo_shard{id}.db) or fallback.
@@ -34,34 +34,6 @@ function resolveDBPath(): string {
 
 const DB_PATH = resolveDBPath();
 
-const MAX_RETRIES = 5;
-const RETRY_DELAY_MS = 200;
-
-/**
- * Execute a sqlite3 command with retry on "database is locked" errors.
- */
-function sqliteExecSync(cmd: string): string {
-  let lastError: Error | undefined;
-  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-    try {
-      return execSync(cmd, { encoding: 'utf-8' }).trim();
-    } catch (err: any) {
-      const msg = String(err?.stderr || err?.message || '');
-      if (msg.includes('database is locked') && attempt < MAX_RETRIES - 1) {
-        lastError = err;
-        // Busy wait — simple synchronous delay
-        const start = Date.now();
-        while (Date.now() - start < RETRY_DELAY_MS) {
-          // spin
-        }
-        continue;
-      }
-      throw err;
-    }
-  }
-  throw lastError;
-}
-
 function escapeSql(sql: string): string {
   return sql.replace(/"/g, '\\"');
 }
@@ -71,7 +43,7 @@ function escapeSql(sql: string): string {
  */
 export function queryDB(sql: string): string {
   try {
-    return sqliteExecSync(`sqlite3 "${DB_PATH}" "${escapeSql(sql)}"`);
+    return sqliteExecWithRetry(`sqlite3 "${DB_PATH}" "${escapeSql(sql)}"`);
   } catch (error) {
     throw new Error(`DB query failed: ${sql}\n${error}`);
   }
@@ -83,7 +55,7 @@ export function queryDB(sql: string): string {
  */
 export function queryDBRow(sql: string): Record<string, any> | null {
   try {
-    const output = sqliteExecSync(`sqlite3 -json "${DB_PATH}" "${escapeSql(sql)}"`);
+    const output = sqliteExecWithRetry(`sqlite3 -json "${DB_PATH}" "${escapeSql(sql)}"`);
     if (!output || output === '[]') return null;
     const rows = JSON.parse(output);
     return rows[0] || null;
@@ -97,7 +69,7 @@ export function queryDBRow(sql: string): Record<string, any> | null {
  */
 export function queryDBRows(sql: string): Record<string, any>[] {
   try {
-    const output = sqliteExecSync(`sqlite3 -json "${DB_PATH}" "${escapeSql(sql)}"`);
+    const output = sqliteExecWithRetry(`sqlite3 -json "${DB_PATH}" "${escapeSql(sql)}"`);
     if (!output || output === '[]') return [];
     return JSON.parse(output);
   } catch (error) {

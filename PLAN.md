@@ -295,6 +295,7 @@ New `frontend/master/` — Next.js 14, mobile-first.
 | — Testing Strategy v2 | 2 | Pre-push gate, User Scenarios, 10 full-flow E2E, smoke CI | @tester + @infra | ✅ (2026-06-19) |
 | — Wave 4.5 — Fix TS Errors | 1 | TypeScript errors 55→0 for pre-push hook | @frontend-coder | ✅ (2026-06-19) |
 | — CI Green-Up (PR #145) | 1 | E2E pnpm-cache, #123 flake, snapshot regen | @tester + @deployer | ✅ (2026-07-17) |
+| — E2E Infra Roots (#108, #126) | 1 | SQLite DB lock fix, standalone warmup, retry helper | @tester + @backend-coder | ✅ (2026-07-17) |
 | 7 — P4 Artist App | 4 | Mobile app for artists | @frontend-coder | ⬜ Backlog |
 | 8 — P5 AI Concierge | 3 | Chat assistant | @frontend-coder | ⬜ Backlog |
 | 9 — Tests and Polish | 3 | Tests, a11y, build, SEO | @tester + @frontend-coder | ⬜ Backlog |
@@ -492,7 +493,43 @@ Removed Visit joins from 2 subqueries in `list_clients_with_stats` — now uses 
 
 - **Final CI result on `93cfd18`:** test.yml 12/12 green (backend all, frontend 1-5, both E2E shards), smoke.yml 2/2 green.
 - **Closed:** #123.
-- **Remaining:** #124 and #125 remain open (deferred flaky/snapshot tests, now explicitly skipped with annotations). #121/#126 remain open (adjacent E2E infra debt).
+- **Remaining:** #124 and #125 remain open (deferred flaky/snapshot tests, now explicitly skipped with annotations). #121 remains open (adjacent E2E infra debt). #126 fixed in separate branch `feat-e2e-infra-roots`.
+
+---
+
+## E2E Infra Roots (#108, #126): ✅ Completed 2026-07-17
+
+**Goal:** Eliminate two root causes of E2E flakiness — SQLite DB locks (retry + WAL) and cold-cache hangs on standalone `playwright test` (route warmup).
+
+**Branch:** `feat-e2e-infra-roots`
+
+**Total commits:** 7 (1c30c24, be0b08b, 713ce3f, 662ea67, f39856d, 51dac4c, 5d6028b)
+
+**Design spec:** `docs/specs/2026-07-17-e2e-infra-roots-108-126-design.md`
+
+**Plan:** `docs/plans/2026-07-17-e2e-infra-roots-108-126.md`
+
+### What shipped
+
+1. **fix(#108): global `event.listens_for(Engine, "connect")` hook** sets `PRAGMA busy_timeout=5000` + `PRAGMA journal_mode=WAL` on every SQLite connection (covers app async + Alembic + sqladmin engines).
+2. **fix(#108): sqlite dialect guard** — hook bails early if `"sqlite" not in type(dbapi_connection).__module__`, so a future non-SQLite engine isn't broken.
+3. **refactor(#108): `sqliteExecWithRetry` helper** extracted to `e2e/fixtures/sqlite-exec.ts` — single source of retry-on-lock truth for all E2E test data setup/cleanup.
+4. **fix(#108): `globalSetup.ts` + `cleanTestData()`** now use the shared retry helper; `cleanTestData` THROWS on persistent lock instead of silently swallowing (stops stale-data poisoning later tests).
+5. **fix(#126): standalone warmup** — `playwright test` warms up 9 routes in `globalSetup` (gated `!SHARD_ID`) so cold-cache runs don't hang on "Загрузка" / 404 `_next/static`. Shared `WARMUP_ROUTES` list; shard mode untouched.
+6. **test(#126): warmup-routes test** parses `e2e-shard-start.sh` to detect TS↔shell drift.
+7. **docs(#108): ADR 001** — WAL-backup caveat documented; `*.db-wal`/`*.db-shm` added to `.gitignore`.
+
+### Test Results
+
+- **Backend pytest:** 664 passed + 4 xfailed (1 new WAL/busy_timeout test)
+- **Frontend vitest:** 1189 passed + 1 skipped (new: sqlite-exec, cleanTestData, warmup-routes tests)
+- **E2E US-1 (#126 warmup):** live-verified on cold cache
+- **Visual gate:** N/A (infra/test-only)
+
+### Status
+
+- **Closed:** #108 (DB lock fix via WAL + busy_timeout + retry helper), #126 (standalone warmup)
+- **Remaining open (E2E cluster):** #124, #125, #121, #122, #109, #106, #107 — out of scope (separate packages)
 
 ---
 
@@ -502,6 +539,7 @@ Removed Visit joins from 2 subqueries in `list_clients_with_stats` — now uses 
 - 2026-07-16: **#127 — Unify records/visits/payments caches** — Single source of truth (`['record', recordId]`), `recordCacheSync` helpers, `PendingActionsProvider`, deleted `useOptimisticVisitMutation`, fixed Bugs #2/#3/#130. 13 commits, 28 files (+3946/-1272). Branch `feat-unify-record-caches`.
 - 2026-07-16: **#131 — Client-stats refactor: "visits"→"records" semantics** — Renamed `visits_count`→`records_count`, `missed_visits`→`missed_records` (redefined: `COUNT(Record.id) WHERE Record.status='missed'`), `last_visit`→`last_record` (redefined: `MAX(Activity.start)` over ALL active records). API params `min_visits/max_visits`→`min_records/max_records`. Removed Visit joins from 2 subqueries — uses persisted `Record.status`. 7 frontend components + 7 test files + E2E + Zod + domain-rules renamed. 5 commits, 22 files. Backend 663 passed, frontend 1178 passed, visual compliance PASSED. Branch `feat-client-stats-131`.
 - 2026-07-17: **CI Green-Up (PR #145)** — E2E pnpm-cache path fix (test.yml cache-dependency-path dropped from e2e job), #123 date-flake frozen (CalendarPopover + Menubar via `vi.setSystemTime`), 4 flaky E2E tests skip-tracked (#124, #125), 9 shard-rest snapshot baselines regenerated via new `update-snapshots.yml` workflow. test.yml 12/12 green, smoke.yml 2/2 green. Branch `feat-ci-green`, 5 commits (e3f67e4, d7dc689, 9785eba, 89520d0, 26fa0eb).
+- 2026-07-17: **E2E Infra Roots (#108, #126)** — SQLite DB lock fix (global WAL + busy_timeout hook, `sqliteExecWithRetry` helper, `cleanTestData` throws on lock), standalone warmup (9 routes in `globalSetup` gated `!SHARD_ID`), ADR 001 WAL-backup caveat. 7 commits (1c30c24, be0b08b, 713ce3f, 662ea67, f39856d, 51dac4c, 5d6028b). Branch `feat-e2e-infra-roots`. Backend 664+4xfail, frontend 1189+1skip.
 - 2026-07-16: **#129 — Backend health: N+1 fix, capacity re-check, dedup seats** — `list_activities` query count halved (6→2 for 5 activities), update/patch enforce capacity check with 409 on over-capacity, `recompute_record_seats` now single source for `seats` across create/update/patch, bonus `tariff_id` fix in update's Visit constructor, 10 new tests (649→659, 0 regression). 3 commits (625fea5, 4689765, e4a7214). Branch `feat-backend-health-129`.
 - 2026-07-07: **Addendum-2: InlineEditableTable unified rows + hard-delete + deferred undo** — 6 main tasks (backend hard-delete + repo split, frontend Zod schema cleanup, optimistic cache sync, tariff dropdown, deferred delete with undo toast, E2E scenarios 15-19) + FasTP Bug #1 (over-capacity toast). Branch `feat-inline-editable-unified-rows`, 17 commits.
 - 2026-06-19: **Wave 5 — 14 P1/P3 UX Bugs** — closed #74–#86 (except #73) in ActivityDetailsModal, ClientTab, ActivityCard; 14 commits, 7/7 visual checks passed (branch `fix/wave5-ux-bugs`).

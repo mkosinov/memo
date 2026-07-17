@@ -73,6 +73,8 @@ token-usage-output.txt
 
 # Databases
 *.db
+*.db-wal
+*.db-shm
 *.sqlite
 *.sqlite3
 backend/.coverage

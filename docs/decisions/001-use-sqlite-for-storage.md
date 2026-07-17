@@ -38,7 +38,7 @@ Use **SQLite** as the primary database.
 ## Consequences
 
 ### Positive
-- Simple deployment — just copy the `.db` file
+- Simple deployment — just copy the `.db` file (see WAL backup caveat below)
 - Fast development — no DB setup required
 - Easy testing — in-memory SQLite for unit tests
 - Low resource usage — no separate process
@@ -47,6 +47,7 @@ Use **SQLite** as the primary database.
 - No concurrent writes — not suitable for multi-user (but we don't need it)
 - Limited data types — no native JSON, array types (but we don't need them)
 - No built-in replication — manual backup required
+- **WAL backup caveat (since #108, 2026-07-17):** WAL journal mode is enabled for concurrency. A raw copy of the `.db` file alone can lose uncheckpointed writes held in the `-wal`/`-shm` sidecar files. To back up safely, either run `PRAGMA wal_checkpoint(TRUNCATE)` first, or copy the `.db`, `.db-wal`, and `.db-shm` files together (or use `sqlite3 <db> ".backup <dest>"`). See `docs/specs/2026-07-17-e2e-infra-roots-108-126-design.md`.
 
 ### Risks
 - If we need multi-user later → migration to PostgreSQL required (but unlikely)

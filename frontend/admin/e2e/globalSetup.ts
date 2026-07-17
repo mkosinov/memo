@@ -15,8 +15,9 @@
  */
 import path from 'path';
 import { sqliteExecWithRetry } from './fixtures/sqlite-exec';
+import { WARMUP_ROUTES } from './fixtures/warmup-routes';
 
-export default function globalSetup() {
+export default async function globalSetup() {
   // Per-shard DB: test_memo_shard{id}.db
   // Falls back to TEST_DB_PATH or default test_memo.db for backwards compat.
   const shardId = process.env.SHARD_ID;
@@ -42,10 +43,27 @@ export default function globalSetup() {
     const msg = String(err?.stderr || err?.message || '');
     if (msg.includes('no such table') || msg.includes('no such file') || msg.includes('unable to open database')) {
       console.warn(`[globalSetup] DB not ready or missing tables, skipping clean: ${msg.trim()}`);
-      return;
+      // Fall through to warmup below — DB-not-ready is not fatal, and
+      // warmup runs regardless of the clean outcome (only a real error
+      // that propagates as a throw should abort before warmup runs).
+    } else {
+      // Real errors should propagate (DB locked, permissions, etc.)
+      console.error(`[globalSetup] ERROR cleaning DB: ${msg}`);
+      throw err;
     }
-    // Real errors should propagate (DB locked, permissions, etc.)
-    console.error(`[globalSetup] ERROR cleaning DB: ${msg}`);
-    throw err;
+  }
+
+  // #126: standalone mode has no shell warmup — pre-compile routes so the
+  // first test doesn't race Next.js dev compilation (404 _next/static).
+  if (!process.env.SHARD_ID) {
+    const port = process.env.SHARD_PORT || '3002';
+    console.log(`[globalSetup] Warming up ${WARMUP_ROUTES.length} routes on :${port} (standalone mode)`);
+    for (const route of WARMUP_ROUTES) {
+      try {
+        await fetch(`http://localhost:${port}${route}`, { signal: AbortSignal.timeout(60_000) });
+      } catch {
+        // best-effort: request still triggers dev compile even on failure
+      }
+    }
   }
 }

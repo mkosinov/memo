@@ -131,6 +131,8 @@ for i in $(seq 1 120); do
 done
 
 # Force-compile all major routes by hitting them once
+# Keep this list in sync with frontend/admin/e2e/fixtures/warmup-routes.ts
+# (TS-side source of truth; bash can't import TS, so we keep a copy here).
 echo "[shard-$SHARD_ID] Warming up routes..."
 WARMUP_ROUTES=(
   "/"

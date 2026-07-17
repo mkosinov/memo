@@ -1,7 +1,11 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import React from 'react';
 import { CalendarPopover } from '../app/components/shared/CalendarPopover';
+
+// Freeze system time so "today" highlighting is deterministic regardless of
+// the real calendar date (avoids month/year-edge flakes, see GH #123).
+const MOCK_NOW = new Date('2026-06-15T12:00:00');
 
 describe('CalendarPopover', () => {
   const defaultProps = {
@@ -13,6 +17,12 @@ describe('CalendarPopover', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.useFakeTimers();
+    vi.setSystemTime(MOCK_NOW);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it('does not render when isOpen is false', () => {
@@ -94,9 +104,9 @@ describe('CalendarPopover', () => {
   });
 
   it('highlights today', () => {
-    // Date-agnostic: find today's day number and check for data-today attribute
-    const today = new Date();
-    const todayDay = today.getDate();
+    // System time is frozen to MOCK_NOW (June 15, 2026) in beforeEach,
+    // so "today" is deterministic regardless of the real calendar date.
+    const todayDay = MOCK_NOW.getDate();
     render(<CalendarPopover {...defaultProps} />);
     const todayEl = screen.getByText(String(todayDay));
     expect(todayEl.closest('[data-today="true"]')).toBeInTheDocument();

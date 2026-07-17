@@ -130,7 +130,6 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-          cache-dependency-path: frontend/admin/pnpm-lock.yaml
 
       - name: Install backend dependencies
         run: uv sync --extra dev

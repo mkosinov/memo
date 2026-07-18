@@ -69,8 +69,8 @@ class ClientWithStats(ClientResponse):
 class ClientListParams(BaseModel):
     """Query parameters for GET /api/v1/clients with filtering, pagination, sorting."""
 
-    page: int = 1
-    per_page: int = Field(default=20, le=100)
+    page: int = Field(default=1, ge=1)
+    per_page: int = Field(default=20, ge=1, le=100)
     search: str | None = None
     is_active: bool | None = None
     created_from: date | None = None

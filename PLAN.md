@@ -535,6 +535,7 @@ Removed Visit joins from 2 subqueries in `list_clients_with_stats` — now uses 
 ---
 
 ## Changelog
+- 2026-07-18: **Wave A — ClientListParams page/per_page ge=1 constraint** — `backend/src/schemas/client.py`: `Field(ge=1)` на page и per_page. Закрыта дыра валидации пагинации (page=0/-1, per_page=0/-5 → 422). Сняты 4 xfail(strict=True) теста в `test_client_stats.py`. Backend: 668 passed, 0 xfailed (было 664+4xfail). Next scope: #149 (numeric filters ge=0). Branch `fix-clientlistparams-ge1`. Commits: a29474e (design), 3c253a8 (plan), a3d9f13 (impl).
 - 2026-07-08: **#98 — Unify "active record" definition** — `check_activity_capacity` excludes cancelled/missed from occupied count; `last_visit` stat uses `Activity.start` over visited visits. Shared `ACTIVE_RECORD_STATUSES` + `active_record_filter()`. Branch `fix-unify-active-record`. Spun off #133, #134.
 - 2026-07-08: **#105 — Client stats cartesian product fix** — Rewrote `list_clients_with_stats` with scalar subqueries to eliminate cross-relation multiplication. Branch `fix-client-stats-scalar-subqueries`.
 - 2026-07-16: **#127 — Unify records/visits/payments caches** — Single source of truth (`['record', recordId]`), `recordCacheSync` helpers, `PendingActionsProvider`, deleted `useOptimisticVisitMutation`, fixed Bugs #2/#3/#130. 13 commits, 28 files (+3946/-1272). Branch `feat-unify-record-caches`.

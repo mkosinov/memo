@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — 2026-07-18
+
+### Fixed
+- **#149 Wave A — ClientListParams page/per_page ge=1 constraint** — branch `fix-clientlistparams-ge1` (3 commits: a29474e, 3c253a8, a3d9f13):
+  - **Backend schema validation:** `ClientListParams.page` and `per_page` now enforce `Field(ge=1)` — page=0 / page=-1 / per_page=0 / per_page=-5 → 422 `VALIDATION_ERROR` instead of silent zero/negative value.
+  - **Test debt closed:** 4 xfail(strict=True) tests in `backend/tests/test_client_stats.py` now pass (validation gap in pagination params). Backend suite: 668 passed, 0 xfailed (was 664+4xfail).
+  - **Next scope:** Issue #149 created — `ge=0` for remaining numeric filters (`min_records`, `max_records`, `total_paid_min`, etc.) — deferred to separate wave.
+  - Design spec: `docs/specs/2026-07-18-clientlistparams-ge1-design.md`
+  - Plan: `docs/plans/2026-07-18-clientlistparams-ge1.md`
+
 ## [Unreleased] — 2026-07-17
 
 ### Fixed

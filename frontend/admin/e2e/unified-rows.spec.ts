@@ -22,7 +22,7 @@ async function openClientRecordTab(
   page: import('@playwright/test').Page,
   opts?: { recordId?: string },
 ) {
-  await openModal(page, opts);
+  await openModal(page, { recordId: opts?.recordId ?? 'r1' });
   await switchToRecordsTab(page);
   await expect(page.locator('[data-testid="record-visits-table"]')).toBeVisible({ timeout: 5_000 });
   await expect(page.locator('[data-testid="record-payments-table"]')).toBeVisible({ timeout: 5_000 });

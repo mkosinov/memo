@@ -854,38 +854,21 @@ class TestClientListSortExtended:
 class TestClientListPaginationEdgeCases:
     """Edge cases for pagination parameters."""
 
-    @pytest.mark.xfail(
-        reason="GAP: ClientListParams.page has no ge=1 constraint — page=0 is accepted by Pydantic. "
-               "Fix: add `ge=1` to page field in ClientListParams schema.",
-        strict=True,
-    )
     def test_page_zero_returns_422(self, api_client) -> None:
         """page=0 returns 422 validation error."""
         resp = api_client.get("/api/v1/clients", params={"page": 0})
         assert resp.status_code == 422
 
-    @pytest.mark.xfail(
-        reason="GAP: ClientListParams.page has no ge=1 constraint — negative pages are accepted.",
-        strict=True,
-    )
     def test_negative_page_returns_422(self, api_client) -> None:
         """Negative page returns 422 validation error."""
         resp = api_client.get("/api/v1/clients", params={"page": -1})
         assert resp.status_code == 422
 
-    @pytest.mark.xfail(
-        reason="GAP: ClientListParams.per_page has le=100 but no ge=1 — per_page=0 is accepted.",
-        strict=True,
-    )
     def test_per_page_zero_returns_422(self, api_client) -> None:
         """per_page=0 returns 422 validation error."""
         resp = api_client.get("/api/v1/clients", params={"per_page": 0})
         assert resp.status_code == 422
 
-    @pytest.mark.xfail(
-        reason="GAP: ClientListParams.per_page has le=100 but no ge=1 — negative values accepted.",
-        strict=True,
-    )
     def test_negative_per_page_returns_422(self, api_client) -> None:
         """Negative per_page returns 422 validation error."""
         resp = api_client.get("/api/v1/clients", params={"per_page": -5})

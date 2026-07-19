@@ -13,11 +13,10 @@
 
 ## Scope: A (user-approved)
 
-**8 skipped сценариев в `unified-rows.spec.ts`** (явные openModal+seed):
+**7 skipped сценариев в `unified-rows.spec.ts`** (явные openModal+seed):
 
 | # | Сценарий | Root |
 |---|---|---|
-| 5 | edit existing visitor name → PUT | openModal (+ возможный InlineEditCell timing — диагностируем) |
 | 6 | selecting tariff changes price | openModal + **seed gap** |
 | 7 | × on existing row → DELETE | openModal |
 | 9c | × on existing payment → DELETE | openModal |
@@ -26,7 +25,11 @@
 | 17 | tariff dropdown populated | openModal + **seed gap** |
 | 19 | undo delete restores payment | openModal |
 
-**OUT of scope:** сценарии 10/15/15b — помечены #124 но audit (ses_091bf0bc4ffe) нашёл их **MISLABELED** (factory isolated, реальный root = stale-cache #121). Не трогаем. Relabel в #121 hygiene отдельно.
+**Сценарий 5 (edit existing visitor name → API call)** — остаётся **skipped до Wave 2**: тест ждёт `PATCH /visitors/{id}` (single-field edit семантика), которая появится только после CRUD PATCH consolidation (VisitorPatch). Un-skip переносится в Wave 2 scope. Skip-аннотация обновляется: "waiting for PATCH /visitors (Wave 2)".
+
+**OUT of scope:**
+- Сценарий 5 (edit visitor name) — ждёт PATCH в Wave 2 (выше)
+- Сценарии 10/15/15b — помечены #124 но audit (ses_091bf0bc4ffe) нашёл их **MISLABELED** (factory isolated, реальный root = stale-cache #121). Не трогаем. Relabel в #121 hygiene отдельно.
 
 ## Approach: Hybrid testid targeting + fiber payload (user-approved)
 
@@ -43,13 +46,14 @@
 ## Test Strategy
 
 **DoD anchor (RED→GREEN):**
-1. RED: 8 сценариев skipped → снимаем `test.skip` → они FAIL (openModal picks wrong activity / tariff insufficient)
-2. GREEN: фикс openModal + seed → 8 сценариев PASS
-3. Регрессия: остальные unified-rows + полный E2E shard-run (shard-rest) — 0 новых фейлов
+1. RED: 7 сценариев skipped → снимаем `test.skip` → они FAIL (openModal picks wrong activity / tariff insufficient)
+2. GREEN: фикс openModal + seed → 7 сценариев PASS
+3. Сценарий 5: skip-аннотация обновляется на "waiting for PATCH /visitors (Wave 2)" (остаётся skipped)
+4. Регрессия: остальные unified-rows + полный E2E shard-run (shard-rest) — 0 новых фейлов
 
 **Верификация:** локальный shard-прогон (project `shard-rest`, SHARD_ID=2) ×2 → 0 флейков. Затем CI на PR.
 
-**Ожидаемая не-openModal неудача:** сценарий 5 (InlineEditCell commit timing) может упасть после openModal fix — диагностируем внутри волны. Если это отдельный prod/UI баг — фиксим здесь (bug-fix two-gate), если крупный — отдельное issue.
+**Ожидаемые не-openModal неудачи:** если после openModal fix какой-то из 7 упадёт на НЕ-openModal причине (UI/timing/seed) — диагностируем внутри волны. Мелкий prod/UI баг → фиксим здесь (bug-fix two-gate), крупный → отдельное issue.
 
 ## Out of Scope
 
@@ -60,10 +64,10 @@
 
 ## User Scenarios
 
-- **US-1:** E2E сценарий 5 — openModal открывает r1's activity, edit visitor name триггерит PUT /visitors/{id} → PASS
-- **US-2:** E2E сценарий 6 — openModal открывает factory activity, tariff select имеет ≥2 опции (seed), переключение меняет price → PASS
-- **US-3:** E2E сценарий 7 — openModal открывает r2's activity, × на visit row триггерит DELETE → PASS
-- **US-4:** E2E сценарии 9c, 16, 16b, 17, 19 — openModal открывает правильный activity, reopen/delete/undo flows работают → PASS
+- **US-1:** E2E сценарий 6 — openModal открывает factory activity, tariff select имеет ≥2 опции (seed), переключение меняет price → PASS
+- **US-2:** E2E сценарий 7 — openModal открывает r2's activity, × на visit row триггерит DELETE → PASS
+- **US-3:** E2E сценарии 9c, 16, 16b, 17, 19 — openModal открывает правильный activity, reopen/delete/undo flows работают → PASS
+- **US-4:** Сценарий 5 skip-аннотация обновлена на "waiting for PATCH /visitors (Wave 2)" (остаётся skipped, un-skip в Wave 2)
 - **US-5 (регрессия):** остальные unified-rows тесты + shard-rest run — 0 новых фейлов
 
 ## Visual Compliance Checks

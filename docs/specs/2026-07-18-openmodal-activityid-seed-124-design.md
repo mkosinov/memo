@@ -13,12 +13,13 @@
 
 ## Scope: A (user-approved)
 
-**7 skipped сценариев в `unified-rows.spec.ts`** (явные openModal+seed):
+**8 skipped сценариев в `unified-rows.spec.ts`** (явные openModal+seed):
 
 | # | Сценарий | Root |
 |---|---|---|
 | 6 | selecting tariff changes price | openModal + **seed gap** |
 | 7 | × on existing row → DELETE | openModal |
+| 8 | + Добавить при 0 visits | openModal |
 | 9c | × on existing payment → DELETE | openModal |
 | 16 | no F5 after delete visitor (reopen) | openModal |
 | 16b | no F5 after delete payment (reopen) | openModal |
@@ -46,8 +47,8 @@
 ## Test Strategy
 
 **DoD anchor (RED→GREEN):**
-1. RED: 7 сценариев skipped → снимаем `test.skip` → они FAIL (openModal picks wrong activity / tariff insufficient)
-2. GREEN: фикс openModal + seed → 7 сценариев PASS
+1. RED: 8 сценариев skipped → снимаем `test.skip` → они FAIL (openModal picks wrong activity / tariff insufficient)
+2. GREEN: фикс openModal + seed → 8 сценариев PASS
 3. Сценарий 5: skip-аннотация обновляется на "waiting for PATCH /visitors (Wave 2)" (остаётся skipped)
 4. Регрессия: остальные unified-rows + полный E2E shard-run (shard-rest) — 0 новых фейлов
 
@@ -66,7 +67,7 @@
 
 - **US-1:** E2E сценарий 6 — openModal открывает factory activity, tariff select имеет ≥2 опции (seed), переключение меняет price → PASS
 - **US-2:** E2E сценарий 7 — openModal открывает r2's activity, × на visit row триггерит DELETE → PASS
-- **US-3:** E2E сценарии 9c, 16, 16b, 17, 19 — openModal открывает правильный activity, reopen/delete/undo flows работают → PASS
+- **US-3:** E2E сценарии 8, 9c, 16, 16b, 17, 19 — openModal открывает правильный activity, add-with-0-visits/reopen/delete/undo flows работают → PASS
 - **US-4:** Сценарий 5 skip-аннотация обновлена на "waiting for PATCH /visitors (Wave 2)" (остаётся skipped, un-skip в Wave 2)
 - **US-5 (регрессия):** остальные unified-rows тесты + shard-rest run — 0 новых фейлов
 

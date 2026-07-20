@@ -97,7 +97,7 @@ test.describe('Unified inline-editable rows', () => {
   // share the same week. InlineEditCell commit also needs timing investigation.
 
   test('visits: edit existing visitor name triggers API call', async ({ page }) => {
-    test.skip(true, 'TODO: openModal picks wrong activity on multi-record week + InlineEditCell commit timing');
+    test.skip(true, 'waiting for PATCH /visitors (Wave 2 CRUD consolidation)');
     // Use seed record r1 (already visible on the schedule page)
     const visitRow = queryDBRow(
       `SELECT v.id, v.visitor_id FROM visits v
@@ -139,7 +139,6 @@ test.describe('Unified inline-editable rows', () => {
   // share the same week (GH #124).
 
   test('visits: selecting tariff changes price on new row', async ({ page, request }) => {
-    test.skip(true, 'TODO: openModal picks wrong activity on multi-record week (GH #124)');
     // Create a record to ensure we have a valid activity to open
     const client = await createTestClient(request);
     const activity = await createTestActivity(request);
@@ -205,7 +204,6 @@ test.describe('Unified inline-editable rows', () => {
   // share the same week — opens r1 tab instead of r2.
 
   test('visits: × on existing row calls DELETE API', async ({ page }) => {
-    test.skip(true, 'TODO: openModal picks wrong activity on multi-record week');
     // Use seed record r2 (already visible on the schedule page)
     const visitRow = queryDBRow(
       `SELECT v.id FROM visits v
@@ -243,7 +241,6 @@ test.describe('Unified inline-editable rows', () => {
   // share the same week (GH #124).
 
   test('visits: + Добавить works when record has 0 visits', async ({ page, request }) => {
-    test.skip(true, 'TODO: openModal picks wrong activity on multi-record week (GH #124)');
     // 1. SETUP — create a record with NO visits
     const client = await createTestClient(request);
     const activity = await createTestActivity(request);
@@ -344,7 +341,6 @@ test.describe('Unified inline-editable rows', () => {
     // share the same week — opens wrong record tab.
 
     test('× on existing payment calls DELETE API', async ({ page, request }) => {
-      test.skip(true, 'TODO: openModal picks wrong activity on multi-record week');
       // Use seed record r3 — create a payment on it via API
       const paymentResp = await request.post(`${BACKEND}/api/v1/payments`, {
         data: { record_id: 'r3', amount: 2500, method: 'card' },
@@ -703,7 +699,6 @@ test.describe('addendum-2: cache sync, tariffs, undo', () => {
   // openModal picks a different activity without records.
 
   test('scenario 16: no F5 after delete visitor (close+reopen)', async ({ page, request }) => {
-    test.skip(true, 'TODO: openModal picks wrong activity on reopen (GH #124)');
     // 1. SETUP — create activity + record with a visitor
     const client = await createTestClient(request);
     const activity = await createTestActivity(request);
@@ -727,7 +722,7 @@ test.describe('addendum-2: cache sync, tariffs, undo', () => {
       await visitRow.locator(`[data-testid="visit-row-${visitId}-delete"]`).click();
 
       // Toast appears: "Удалено. Отменить"
-      const toast = page.locator('[role="status"]');
+      const toast = page.locator('[data-testid="toast-info"]');
       await expect(toast.first()).toContainText('Удалено', { timeout: 3_000 });
 
       // Row disappeared from UI (optimistic)
@@ -758,7 +753,6 @@ test.describe('addendum-2: cache sync, tariffs, undo', () => {
   // activities share the same week (GH #124). The reopen step fails.
 
   test('scenario 16b: no F5 after delete payment (close+reopen)', async ({ page, request }) => {
-    test.skip(true, 'TODO: openModal picks wrong activity on reopen (GH #124)');
     // 1. SETUP — create activity + record + payment
     const client = await createTestClient(request);
     const activity = await createTestActivity(request);
@@ -784,7 +778,7 @@ test.describe('addendum-2: cache sync, tariffs, undo', () => {
       await paymentRow.locator(`[data-testid="payment-${payment.id}-delete"]`).click();
 
       // Toast appears
-      const toast = page.locator('[role="status"]');
+      const toast = page.locator('[data-testid="toast-info"]');
       await expect(toast.first()).toContainText('Удалено', { timeout: 3_000 });
 
       // Row disappeared from UI (optimistic)
@@ -815,7 +809,6 @@ test.describe('addendum-2: cache sync, tariffs, undo', () => {
   // activities share the same week (GH #124).
 
   test('scenario 17: tariff dropdown populated in modal', async ({ page, request }) => {
-    test.skip(true, 'TODO: openModal picks wrong activity (GH #124)');
     // 1. SETUP — create activity with a service that has tariffs
     const client = await createTestClient(request);
     const activity = await createTestActivity(request);
@@ -922,7 +915,6 @@ test.describe('addendum-2: cache sync, tariffs, undo', () => {
   // activities share the same week (GH #124).
 
   test('scenario 19: undo delete restores payment row', async ({ page, request }) => {
-    test.skip(true, 'TODO: openModal picks wrong activity (GH #124)');
     // 1. SETUP — create activity + record + payment
     const client = await createTestClient(request);
     const activity = await createTestActivity(request);
@@ -956,7 +948,7 @@ test.describe('addendum-2: cache sync, tariffs, undo', () => {
       await paymentRow.locator(`[data-testid="payment-${payment.id}-delete"]`).click();
 
       // 3. ASSERT — toast "Удалено. Отменить" appears
-      const toast = page.locator('[role="status"]');
+      const toast = page.locator('[data-testid="toast-info"]');
       await expect(toast.first()).toContainText('Удалено', { timeout: 3_000 });
 
       // 4. ASSERT — payment row disappeared from table

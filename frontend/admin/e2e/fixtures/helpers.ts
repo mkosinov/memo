@@ -63,21 +63,21 @@ export function cleanTestData() {
  * This is the source of truth for "when is this record's activity" —
  * avoids fragile UI-based walk-back logic.
  */
-function resolveRecordDate(recordId?: string): string | null {
+function resolveRecordDate(recordId?: string): { date: string; activityId: string } | null {
   const safeId = recordId ? recordId.replace(/'/g, "''") : null;
   const sql = safeId
-    ? `SELECT substr(a.start, 1, 10) AS d
+    ? `SELECT substr(a.start, 1, 10) AS d, a.id AS activityId
        FROM records r
        JOIN activities a ON r.activity_id = a.id
        WHERE r.id = '${safeId}' AND r.is_active = 1 AND a.is_active = 1`
-    : `SELECT substr(a.start, 1, 10) AS d
+    : `SELECT substr(a.start, 1, 10) AS d, a.id AS activityId
        FROM records r
        JOIN activities a ON r.activity_id = a.id
        WHERE r.is_active = 1 AND a.is_active = 1
        ORDER BY r.id ASC
        LIMIT 1`;
   const row = queryDBRow(sql);
-  return row?.d ?? null;
+  return row ? { date: row.d, activityId: row.activityId } : null;
 }
 
 /**
@@ -183,59 +183,96 @@ export async function openModal(
   page: Page,
   opts?: { recordId?: string },
 ): Promise<unknown | null> {
-  // Step 1: ask DB which week has the target record
-  const targetDate = resolveRecordDate(opts?.recordId);
-  if (!targetDate) {
+  // Step 1: ask DB which week and activity contain the target record
+  const resolved = resolveRecordDate(opts?.recordId);
+  if (!resolved) {
     console.warn(`[openModal] No record found${opts?.recordId ? ` for id ${opts.recordId}` : ''}`);
     return null;
   }
 
   // Step 2: navigate to that week
-  await navigateToWeek(page, targetDate);
+  await navigateToWeek(page, resolved.date);
 
-  // Step 3: try activities on the now-visible week until one has a record
-  const MAX_ACTIVITIES_PER_WEEK = 5;
-  const cardCount = await page.locator('[data-testid^="activity-"]').count();
-  const toTry = Math.min(cardCount, MAX_ACTIVITIES_PER_WEEK);
+  let card: ReturnType<typeof page.locator> | null = null;
+  let activity: unknown = null;
 
-  for (let i = 0; i < toTry; i++) {
-    const card = page.locator('[data-testid^="activity-"]').nth(i);
-    if (!(await card.isVisible())) continue;
-
-    // Read activity from React fiber (same pattern as before)
-    const activity = await card.evaluate((el: any) => {
-      const k = Object.keys(el).find((x: string) => x.startsWith('__reactFiber'));
-      if (!k) return null;
-      let c = (el as any)[k];
-      while (c) {
-        if (c.memoizedProps?.activity) return c.memoizedProps.activity;
-        c = c.return;
-      }
-      return null;
-    });
-    if (!activity) continue;
-
-    await page.evaluate((act: any) => {
-      document.dispatchEvent(new CustomEvent('__memo-open-modal', {
-        detail: { activity: act },
-      }));
-    }, activity);
-
-    await page.waitForSelector('[data-testid="activity-details-modal"]', {
-      state: 'visible',
-      timeout: 10_000,
-    });
-
-    const hasClientTabs =
-      (await page.locator('[data-testid^="tab-client-"]').count()) > 0;
-    if (hasClientTabs) return activity;
-
-    await page.evaluate(() => {
-      document.dispatchEvent(new CustomEvent('__memo-close-modal'));
-    });
-    await page.waitForTimeout(300);
+  if (opts?.recordId) {
+    // Targeted mode: pick the card whose testid matches the resolved activity id.
+    const targeted = page.locator(`[data-testid="activity-${resolved.activityId}"]`);
+    const count = await targeted.count();
+    if (count > 0) {
+      card = targeted.first();
+      activity = await card.evaluate((el: any) => {
+        const k = Object.keys(el).find((x: string) => x.startsWith('__reactFiber'));
+        if (!k) return null;
+        let c = (el as any)[k];
+        while (c) {
+          if (c.memoizedProps?.activity) return c.memoizedProps.activity;
+          c = c.return;
+        }
+        return null;
+      });
+    }
   }
-  return null;
+
+  if (!activity) {
+    // Fallback / no recordId: scan visible cards for the first one with client tabs.
+    const MAX_ACTIVITIES_PER_WEEK = 5;
+    const cardCount = await page.locator('[data-testid^="activity-"]').count();
+    const toTry = Math.min(cardCount, MAX_ACTIVITIES_PER_WEEK);
+
+    for (let i = 0; i < toTry; i++) {
+      const candidate = page.locator('[data-testid^="activity-"]').nth(i);
+      if (!(await candidate.isVisible())) continue;
+
+      const candidateActivity = await candidate.evaluate((el: any) => {
+        const k = Object.keys(el).find((x: string) => x.startsWith('__reactFiber'));
+        if (!k) return null;
+        let c = (el as any)[k];
+        while (c) {
+          if (c.memoizedProps?.activity) return c.memoizedProps.activity;
+          c = c.return;
+        }
+        return null;
+      });
+      if (!candidateActivity) continue;
+
+      await page.evaluate((act: any) => {
+        document.dispatchEvent(new CustomEvent('__memo-open-modal', {
+          detail: { activity: act },
+        }));
+      }, candidateActivity);
+
+      await page.waitForSelector('[data-testid="activity-details-modal"]', {
+        state: 'visible',
+        timeout: 10_000,
+      });
+
+      const hasClientTabs =
+        (await page.locator('[data-testid^="tab-client-"]').count()) > 0;
+      if (hasClientTabs) return candidateActivity;
+
+      await page.evaluate(() => {
+        document.dispatchEvent(new CustomEvent('__memo-close-modal'));
+      });
+      await page.waitForTimeout(300);
+    }
+    return null;
+  }
+
+  // Targeted mode: dispatch the activity from the matched card and verify modal.
+  await page.evaluate((act: any) => {
+    document.dispatchEvent(new CustomEvent('__memo-open-modal', {
+      detail: { activity: act },
+    }));
+  }, activity);
+
+  await page.waitForSelector('[data-testid="activity-details-modal"]', {
+    state: 'visible',
+    timeout: 10_000,
+  });
+
+  return activity;
 }
 
 /**
@@ -251,7 +288,7 @@ export async function openAddTab(
   page: Page,
   opts?: { date?: string },
 ): Promise<void> {
-  const targetDate = opts?.date ?? resolveRecordDate();
+  const targetDate = opts?.date ?? resolveRecordDate()?.date;
   if (!targetDate) {
     throw new Error('openAddTab: no active records found to navigate to');
   }

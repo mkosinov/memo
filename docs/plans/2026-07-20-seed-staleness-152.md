@@ -96,12 +96,14 @@ Modify `scripts/e2e-shard-start.sh` to remove the shard DB file before starting 
 ### TDD steps
 
 - [ ] **RED:** Write `scripts/e2e-shard-start.dryrun.test.sh` (new file, chmod +x) that:
-  - Stubs `uv`, `pnpm`, `next` on PATH via `mkdir -p /tmp/shard-stub && printf '#!/bin/sh\nexit 0\n' > /tmp/shard-stub/uv && ... ; chmod +x /tmp/shard-stub/*`
+  - Stubs `uv`, `pnpm`, `curl` on PATH via `mkdir -p /tmp/shard-stub && printf '#!/bin/sh\nexit 0\n' > /tmp/shard-stub/uv && ... ; chmod +x /tmp/shard-stub/*`. The `curl` stub is needed to short-circuit the backend-ready wait loop (it issues `curl ... --max-time 10` up to 60 times); without stubbing curl, the success-path test hangs ≥60s.
+  - The `uv` stub is special — its body reads the state of the target DB and prints "FILE_ABSENT" if the file does not exist OR "FILE_PRESENT: <contents>" if it does, then exits 0. This intercepts the `uv run uvicorn ...` call site after the wipe and reports whether the wipe happened.
   - Creates a fake DB file at `$FAKE_DB_PATH` (containing text "old data")
-  - Sources `e2e-shard-start.sh` with all required env vars (`SHARD_ID`, `SHARD_PORT`, `BACKEND_PORT`, `TEST_DB_PATH=$FAKE_DB_PATH`, `BACKEND_URL`, `NEXT_PUBLIC_API_URL`), intercepts execution right before the `cd "$BACKEND_DIR"` for uvicorn. **Strategy:** modify the stub `uv` to print the state of `$ABS_DB_PATH` and exit. The stub `uv run uvicorn ...` is the call site after the wipe. If the wipe worked, the stub sees file-absent and prints "FILE_ABSENT". If wipe did NOT happen, stub sees "old data" and prints "FILE_PRESENT".
-  - Asserts stub output contains "FILE_ABSENT" (RED before fix: stub sees the file because `rm -f` not yet added; GREEN after fix).
-  - Asserts guard rejects a non-test path: set `TEST_DB_PATH="/tmp/memo.db"` (no `test_memo` substring), run script, expect exit code 1 and stderr contains "refusing to delete non-test DB".
-- [ ] Run: `bash scripts/e2e-shard-start.dryrun.test.sh` — RED (assertion fails because no `rm -f` yet).
+  - **Runs `e2e-shard-start.sh` as a subprocess** (NOT `source` — the script uses `set -euo pipefail` + `exit 1` in guards, so sourcing would terminate the test shell). Use: `bash scripts/e2e-shard-start.sh > /tmp/shard-run.log 2>&1 ; echo "EXIT=$?" >> /tmp/shard-run.log`. Then read the log and assert.
+  - Also wrap the subprocess in `timeout 10` to bound test runtime: `timeout 10 bash scripts/e2e-shard-start.sh > /tmp/shard-run.log 2>&1 || true` — the test must terminate even if curl stub is wrong.
+  - Asserts log output contains "FILE_ABSENT" (RED before fix: stub sees the file because `rm -f` not yet added; GREEN after fix).
+  - Asserts guard rejects a non-test path: set `TEST_DB_PATH="/tmp/memo.db"` (no `test_memo` substring), run the subprocess (also timeout 10), expect non-zero exit code AND log contains "refusing to delete non-test DB".
+- [ ] Run: `bash scripts/e2e-shard-start.dryrun.test.sh` — RED (assertion fails because no `rm -f` yet, so log contains "FILE_PRESENT").
 - [ ] **GREEN:** Apply changes 1+2 above to `scripts/e2e-shard-start.sh`.
 - [ ] Run: `bash scripts/e2e-shard-start.dryrun.test.sh` — GREEN (stubs see FILE_ABSENT; guard rejects non-test path).
 - [ ] Verify no real stack run regression (optional, manual): `SHARD_ID=1 SHARD_PORT=3002 BACKEND_PORT=8001 TEST_DB_PATH=backend/test_memo_shard1.db BACKEND_URL=http://127.0.0.1:8001 NEXT_PUBLIC_API_URL=http://127.0.0.1:8001 bash scripts/e2e-shard-start.sh` — start stack, confirm fresh DB created. Kill after warmup.
@@ -123,8 +125,9 @@ Modify `scripts/e2e-shard-start.sh` to remove the shard DB file before starting 
 - Spec: `docs/specs/2026-07-20-seed-staleness-152-design.md` — items D, R-3 (fail-loud = feature), ADR-1
 - `backend/src/seed/seed.py` (full file, 551 lines) — particularly:
   - `_exists()` definition at lines 175-178
-  - 14 call sites: lines 195, 209, 245, 282, 290, 315, 343, 361, 375, 393, 407, 473, 499 (each in `if not await _exists(...)` or `if await _exists(...)` pattern)
+  - 13 call sites (excluding the definition): lines 195, 209, 245, 282, 290, 315, 343, 361, 375, 393, 407, 473, 499 (each in `if not await _exists(...)` or `if await _exists(...)` pattern). Plus the definition at line 175, making 14 total references to the name `_exists`.
   - Module docstring at lines 1-7
+  - `seed_data()` function docstring around line 510 (currently: "Idempotent — safe to run multiple times" — MUST also be updated, see Step 5 below)
 - `backend/tests/test_seed.py` (423 lines) — existing pattern: uses `DBManager("sqlite+aiosqlite:///:memory:")` fixture, calls `seed_data()`, asserts row counts. Use this pattern for new test.
 
 ### Task Description
@@ -142,9 +145,7 @@ Remove the idempotent guard from `seed.py`, establishing the "seed assumes empty
        return result.scalar_one_or_none() is not None
    ```
 
-2. Remove the `from sqlalchemy import select` import at line 15 (it's now unused after removing `_exists`; verify with `grep -n "select" backend/src/seed/seed.py` — only line 15 plus `_exists` used it; the seed functions add rows via `session.add(Model(**kwargs))` directly). **Note:** verify there are no other `select(...)` uses in seed.py before removing. If grep shows other legitimate uses of `select` (e.g., in `_seed_service_tags` / `_seed_activity_tags` / `_seed_photos` for the join-table check), keep the import.
-
-   - Expected: lines 425, 446, 481 use `select(model).where(...)` patterns for join-table existence checks. **These uses are DIFFERENT** — they check link-table rows by composite key, not by single-PK. **Keep them as `select` calls**, OR extract a similar `_link_exists(session, table, where_clause)` helper. The implementer decides: minimal-change approach is to leave the three join-table checks alone (they don't depend on `_exists` since they have inline `select(...)` already). Verify with `grep -n "select" backend/src/seed/seed.py` and only remove `from sqlalchemy import select` if zero uses remain.
+2. Remove the `from sqlalchemy import select` import at line 15 ONLY if zero `select(...)` uses remain after step 1. **Verified:** the three join-table existence checks at lines ~425, 446, 481 (in `_seed_service_tags`, `_seed_activity_tags`, `_seed_photos`) use `select(service_tags).where(...)`, `select(activity_tags).where(...)`, `select(photo_tags).where(...)` patterns and DO depend on `select`. **Keep the `from sqlalchemy import select` import — confirmed by spec-reviewer, see `grep -n "select(" backend/src/seed/seed.py` (4 hits: 1 in `_exists` (deleted by step 1) + 3 in join-table checks (retained)). Step 2 of the plan effectively becomes a no-op — leave it documented for the implementer that the import must NOT be removed.
 
 3. Remove every `if not await _exists(session, Model, id):` guard in the 13 PK-based seed functions (`_seed_masters`, `_seed_locations`, `_seed_services`, `_seed_tariffs`, `_seed_tags`, `_seed_activities_for`, `_seed_clients`, `_seed_visitors`, `_seed_records`, `_seed_visits`, `_seed_payments`, `_seed_photos`, `_seed_materials`). The pattern is consistently:
 
@@ -213,9 +214,51 @@ Remove the idempotent guard from `seed.py`, establishing the "seed assumes empty
    """
    ```
 
+5. **Also** update the `seed_data()` function docstring (around line 510):
+
+   Current:
+   ```python
+   async def seed_data(manager: DBManager) -> None:
+       """Seed the database with mock development data.
+
+       Idempotent — safe to run multiple times.
+       """
+   ```
+
+   Replace with:
+   ```python
+   async def seed_data(manager: DBManager) -> None:
+       """Seed the database with mock development data.
+
+       Contract: assumes an EMPTY database — see module docstring.
+       Running on a populated DB raises IntegrityError (intended fail-loud).
+       """
+   ```
+
+6. **Replace existing test `test_seed_is_idempotent`** at `backend/tests/test_seed.py:251-265`. The current test calls `seed_data()` twice and asserts no duplication — this asserted the old idempotency contract which T2 abolishes. After removing `_exists`, the second `seed_data()` call raises `IntegrityError`, so this test WILL FAIL if left in place. Replace the test with the new "raises on populated DB" assertion (per spec-reviewer Finding 1, CRITICAL):
+
+   **Delete the existing test body:**
+   ```python
+   async def test_seed_is_idempotent(db_manager: DBManager) -> None:
+       """Running seed twice does not duplicate data."""
+       from src.seed.seed import seed_data
+
+       await seed_data(db_manager)
+       await seed_data(db_manager)
+
+       async with db_manager.async_session() as session:
+           result = await session.execute(text("SELECT COUNT(*) FROM masters"))
+           assert result.scalar() == 6
+
+           result = await session.execute(text("SELECT COUNT(*) FROM activities"))
+           assert result.scalar() == 55
+   ```
+
+   **Replace with** the new test (note: TDD RED phase below uses this same assertion as the new test definition — so the RED phase actually replaces this test).
+
 ### TDD steps
 
-- [ ] **RED:** Add to `backend/tests/test_seed.py` a new test:
+- [ ] **RED:** In `backend/tests/test_seed.py`, **replace** the existing `test_seed_is_idempotent` test (at line 251-265) which currently asserts the OLD idempotency contract (calling `seed_data()` twice and asserting no duplication) with the new contract asserted below. **This test currently passes under code WITH `_exists`** because the guard skips duplicates on the second call; under T2 the new contract will REPLACE it (the old test WILL FAIL once `_exists` is removed, so deleting + replacing is mandatory, not optional):
 
    ```python
    async def test_seed_raises_on_populated_db(db_manager: DBManager) -> None:
@@ -223,28 +266,41 @@ Remove the idempotent guard from `seed.py`, establishing the "seed assumes empty
 
        Contract: seed assumes empty DB (see module docstring). E2E test stacks
        wipe the DB before re-seeding. UNIQUE violation is the diagnostic.
+
+       Replaces the old test_seed_is_idempotent which asserted skip-on-exists
+       (a contract abolished in #152).
        """
        from src.seed.seed import seed_data
        from sqlalchemy.exc import IntegrityError
 
-       await seed_data(db_manager)  # first run: OK
+       await seed_data(db_manager)  # first run: OK on empty DB
 
        with pytest.raises(IntegrityError):
-           await seed_data(db_manager)  # second run: raises
+           await seed_data(db_manager)  # second run: raises on duplicate PK
    ```
 
-- [ ] Run: `cd backend && uv run pytest tests/test_seed.py::test_seed_raises_on_populated_db -xvs` — RED (current code with `_exists` skip does NOT raise, so the `with pytest.raises` block fails its "raises expected" assertion).
-- [ ] **GREEN:** Apply changes 1-4 above. Run the same test — GREEN (UNIQUE raised on second `seed_data` call).
-- [ ] Run full `backend/tests/test_seed.py` to ensure no regression: `cd backend && uv run pytest tests/test_seed.py -q` — all existing tests still green.
+   Delete the old `test_seed_is_idempotent` body entirely — it can no longer pass once `_exists` is removed.
+
+- [ ] Run: `cd backend && uv run pytest tests/test_seed.py::test_seed_raises_on_populated_db -xvs` — RED status depends on current state:
+   - If running before T2's `_exists` removal AND old test still in place: skip (the new test doesn't exist yet).
+   - If running AFTER adding the new test but BEFORE removing `_exists`: the new test FAILS (seed does NOT raise because `_exists` skips duplicates — `with pytest.raises` block's "raised expected" assertion fails).
+   - If running AFTER removing `_exists`: GREEN.
+   - **Expected RED:** with new test added, old test deleted, but `_exists` removal NOT yet applied → run, expect FAIL.
+- [ ] **GREEN:** Apply changes 1-6 above (delete `_exists`, remove 13 skip branches, update module + function docstrings). Run the same test — GREEN (UNIQUE raised on second `seed_data` call).
+- [ ] Run full `backend/tests/test_seed.py` to ensure no regression: `cd backend && uv run pytest tests/test_seed.py -q` — all remaining tests green. Specifically verify:
+   - `test_seed_populates_*` (count-based tests) — still green because they run seed once on empty DB
+   - `test_seed_creates_fixed_week_activities`, `test_seed_fixed_week_dates_in_range` — still green
+   - Any tests that previously depended on idempotency — now deleted or rewritten per change 6
 - [ ] Run rest of backend to be safe: `cd backend && uv run pytest -q` — green.
 - [ ] Commit: `fix(#152): remove idempotent _exists guard from seed; empty-DB contract`
 
 ### DoD
 
 - New test `test_seed_raises_on_populated_db` passes (seed raises IntegrityError on second run).
-- All existing `test_seed.py` tests still pass.
-- Module docstring updated as shown.
-- `grep -n "_exists\|await _exists" backend/src/seed/seed.py` returns zero matches for the deleted function; only `select` join-table checks remain (if any).
+- Old test `test_seed_is_idempotent` is **deleted** (no longer applicable to the new contract — see Step 6 above).
+- All remaining `test_seed.py` tests pass (run once on empty in-memory DB — no impact from removing _exists).
+- Module docstring AND `seed_data()` function docstring updated as shown in steps 4 and 5.
+- `grep -n "_exists\|await _exists" backend/src/seed/seed.py` returns zero matches for the deleted function; only `select` join-table checks (lines currently at 424, 443, 479) remain — `from sqlalchemy import select` import KEPT.
 
 ---
 

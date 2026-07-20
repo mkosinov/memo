@@ -57,4 +57,27 @@ describe('globalSetup #152 diagnostics', () => {
 
     await expect(globalSetupFunc()).resolves.toBeUndefined();
   });
+
+  it('uses BACKEND_URL (not SHARD_PORT) for the activities API call (bug from PR #153 CI red)', async () => {
+    // Setup env like CI: backend on :8002, frontend on :3003 (SHARD_PORT).
+    vi.stubEnv('BACKEND_URL', 'http://127.0.0.1:8002');
+    vi.stubEnv('SHARD_PORT', '3003');      // frontend — must NOT end up in the URL
+    vi.stubEnv('BACKEND_PORT', '8002');
+
+    vi.mocked(sqliteExecWithRetry)
+      .mockReturnValueOnce('')        // UUID cleanup (existing call)
+      .mockReturnValueOnce('30');     // seed-rows check (new diagnostic branch 1)
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+      ok: true,
+      json: async () => [{ id: 'ev_0' }],
+    } as any);
+
+    await globalSetupFunc();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const calledUrl = fetchMock.mock.calls[0][0];
+    // Must point at BACKEND_URL (backend 8002), NOT SHARD_PORT (frontend 3003)
+    expect(String(calledUrl)).toContain('8002');
+    expect(String(calledUrl)).not.toContain('3003');
+  });
 });

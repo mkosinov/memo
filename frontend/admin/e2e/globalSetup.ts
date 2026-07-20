@@ -79,7 +79,11 @@ export default async function globalSetup() {
   }
 
   // (b) Current-week activities check (with 5×1s retry for 503 race)
-  const port = process.env.SHARD_PORT || process.env.BACKEND_PORT || '8001';
+  // #153: use BACKEND_URL (exported by test-all.sh:181 and test.yml:152 as
+  // http://127.0.0.1:8001/8002). Do NOT use SHARD_PORT — that's the Next.js
+  // frontend port; /api/v1/* returns 404 from Next.js dev server.
+  const backendBase = process.env.BACKEND_URL
+    || `http://localhost:${process.env.BACKEND_PORT || '8001'}`;
   const today = new Date();
   const monday = new Date(today);
   monday.setDate(today.getDate() - ((today.getDay() + 6) % 7)); // Mon=0
@@ -88,7 +92,7 @@ export default async function globalSetup() {
   sunday.setDate(monday.getDate() + 6);
   sunday.setHours(23, 59, 59, 999);
   const fmt = (d: Date) => d.toISOString().slice(0, 10);
-  const activitiesUrl = `http://localhost:${port}/api/v1/activities?date_from=${fmt(monday)}&date_to=${fmt(sunday)}`;
+  const activitiesUrl = `${backendBase}/api/v1/activities?date_from=${fmt(monday)}&date_to=${fmt(sunday)}`;
 
   let activitiesResponse: Response | null = null;
   let lastErr: any = null;

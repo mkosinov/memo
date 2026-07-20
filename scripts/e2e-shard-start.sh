@@ -57,6 +57,18 @@ export DATABASE_URL="sqlite+aiosqlite:///$ABS_DB_PATH"
 
 echo "[shard-$SHARD_ID] Starting stack: frontend=:$SHARD_PORT backend=:$BACKEND_PORT db=$ABS_DB_PATH"
 
+# #152: wipe shard DB so seed runs on an empty schema. alembic recreates
+# the schema on backend startup; seed then populates with current-week
+# dates. Without this, idempotent seed skip leaves ev_* on past weeks.
+# Guard: refuse to delete non-test DBs (e.g. dev memo.db).
+if [[ "$ABS_DB_PATH" != *"test_memo"* ]]; then
+  echo "[shard-$SHARD_ID] ERROR: refusing to delete non-test DB: $ABS_DB_PATH" >&2
+  echo "[shard-$SHARD_ID]        TEST_DB_PATH must contain 'test_memo' (e.g. backend/test_memo_shard1.db)" >&2
+  exit 1
+fi
+rm -f "$ABS_DB_PATH"
+echo "[shard-$SHARD_ID] Wiped shard DB: $ABS_DB_PATH"
+
 # ── Start FastAPI backend ──────────────────────────────────────────────────
 # Backend starts first so Alembic can create/migrate tables.
 cd "$BACKEND_DIR"

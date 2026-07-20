@@ -105,7 +105,11 @@ async function navigateToWeek(page: Page, date: string): Promise<void> {
  */
 export async function waitForScheduleReady(page: Page) {
   await page.goto('/schedule');
-  await page.waitForSelector('[data-testid^="activity-"]', { timeout: 60_000 });
+  // 10s is UI-render-sync only — data validation (#152) lives in
+  // globalSetup.ts (asserts /api/v1/activities non-empty before any
+  // worker starts). If cards don't appear in 10s, the bug is real, not
+  // a warmup race; fast failure is preferable to 60s of silence.
+  await page.waitForSelector('[data-testid^="activity-"]', { timeout: 10_000 });
 }
 
 /**

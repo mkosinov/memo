@@ -248,19 +248,22 @@ async def test_seed_populates_payments(db_manager: DBManager) -> None:
         assert count >= 5
 
 
-async def test_seed_is_idempotent(db_manager: DBManager) -> None:
-    """Running seed twice does not duplicate data."""
+async def test_seed_raises_on_populated_db(db_manager: DBManager) -> None:
+    """Seed is NOT idempotent: running twice on the same DB raises IntegrityError.
+
+    Contract: seed assumes empty DB (see module docstring). E2E test stacks
+    wipe the DB before re-seeding. UNIQUE violation is the diagnostic.
+
+    Replaces the old test_seed_is_idempotent which asserted skip-on-exists
+    (a contract abolished in #152).
+    """
     from src.seed.seed import seed_data
+    from sqlalchemy.exc import IntegrityError
 
-    await seed_data(db_manager)
-    await seed_data(db_manager)
+    await seed_data(db_manager)  # first run: OK on empty DB
 
-    async with db_manager.async_session() as session:
-        result = await session.execute(text("SELECT COUNT(*) FROM masters"))
-        assert result.scalar() == 6
-
-        result = await session.execute(text("SELECT COUNT(*) FROM activities"))
-        assert result.scalar() == 55
+    with pytest.raises(IntegrityError):
+        await seed_data(db_manager)  # second run: raises on duplicate PK
 
 
 async def test_seed_creates_fixed_week_activities(db_manager: DBManager) -> None:

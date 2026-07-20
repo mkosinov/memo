@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — 2026-07-20
+
+### Fixed
+- **#152 — Seed staleness + E2E harness resilience** — branch `feat-seed-staleness-152` (4 commits: 0e4ea6c, e76f5d2, 05e0eb6, ad77118):
+  - **Root cause:** `seed.py WEEK3_START = _get_week_monday(today)` used current server date on first seed run; idempotent guard `if await _exists: continue` then skipped existing `ev_*` rows on subsequent runs → after a Sunday→Monday rollover activities stayed on last week's dates → schedule default view empty → `waitForScheduleReady` waited 60s × 22 tests → all E2E schedule tests timeout every Monday/Tuesday.
+  - **Fix (wipe + reseed):** `scripts/e2e-shard-start.sh` — `rm -f` shard DB before seed (with path-guard rejecting non-test DBs). `backend/src/seed/seed.py` — removed `_exists` + 13 skip branches; seed assumes empty DB by contract, fails loud on UNIQUE violation. `frontend/admin/e2e/globalSetup.ts` — two diagnostic branches that abort playwright before any test runs if seed contract violated (a) leftover rows missing → "re-run shard-start"; (b) current-week activities API empty → "seed did not populate". `frontend/admin/e2e/fixtures/helpers.ts` — `waitForScheduleReady` timeout 60→10s (UI render-sync only; data validation moved to globalSetup).
+  - **New tests:** `scripts/e2e-shard-start.dryrun.test.sh` (shell dry-run), `globalSetup.diagnostic.test.ts` (3 vitest cases), `test_seed_raises_on_populated_db` (replaces obsolete `test_seed_is_idempotent`).
+  - **Test counts:** backend 668 passed (same count: −1 idempotency +1 fail-loud), frontend 1192 passed (baseline 1189 + 3 new diagnostic).
+  - Design spec: `docs/specs/2026-07-20-seed-staleness-152-design.md`
+  - Plan: `docs/plans/2026-07-20-seed-staleness-152.md`
+
 ## [Unreleased] — 2026-07-18
 
 ### Fixed

@@ -297,6 +297,7 @@ New `frontend/master/` — Next.js 14, mobile-first.
 | — CI Green-Up (PR #145) | 1 | E2E pnpm-cache, #123 flake, snapshot regen | @tester + @deployer | ✅ (2026-07-17) |
 | — E2E Infra Roots (#108, #126) | 1 | SQLite DB lock fix, standalone warmup, retry helper | @tester + @backend-coder | ✅ (2026-07-17) |
 | — E2E Fixme Cleanup Wave 1 (#121) | 1 | Re-enable 13 disabled E2E tests, blockers #84/#127 closed | @tester | ✅ (2026-07-17) |
+| — Seed Staleness + E2E Harness Resilience (#152) | 1 | Wipe+reseed fix for Monday seed stale dates; fail-fast diagnostics in globalSetup; shard-start path guard | @tester + @backend-coder | ✅ (2026-07-20) |
 | 7 — P4 Artist App | 4 | Mobile app for artists | @frontend-coder | ⬜ Backlog |
 | 8 — P5 AI Concierge | 3 | Chat assistant | @frontend-coder | ⬜ Backlog |
 | 9 — Tests and Polish | 3 | Tests, a11y, build, SEO | @tester + @frontend-coder | ⬜ Backlog |
@@ -534,6 +535,37 @@ Removed Visit joins from 2 subqueries in `list_clients_with_stats` — now uses 
 
 ---
 
+## Seed Staleness + E2E Harness Resilience (#152): ✅ Completed 2026-07-20
+
+**Goal:** Fix seed-data staleness after calendar week rollover (Monday morning) that caused all E2E schedule tests to timeout — and add fail-fast diagnostics so the root cause surfaces immediately instead of 60s × 22 test timeouts.
+
+**Branch:** `feat-seed-staleness-152`
+
+**Total commits:** 4 (0e4ea6c, e76f5d2, 05e0eb6, ad77118)
+
+**Design spec:** `docs/specs/2026-07-20-seed-staleness-152-design.md`
+
+**Plan:** `docs/plans/2026-07-20-seed-staleness-152.md`
+
+### Root cause
+
+`seed.py` has `WEEK3_START = _get_week_monday(today)` — on first seed run it computes dates relative to the current server date. The `_seed_activities_for` loop has an idempotent guard: `if await _exists: continue`. When Alembic + seed run on an already-populated DB (subsequent `e2e-shard-start.sh` runs within the same week), _every_ `ev_*` activity hits the guard and skips. After a Sunday→Monday rollover, the `ev_*` rows still exist in the DB with **last week's dates** → the schedule default view (current week) shows empty → `waitForScheduleReady` waits 60s → all 22 schedule E2E tests timeout.
+
+### What shipped
+
+1. **fix(#152): wipe shard DB before seed + path guard** (`0e4ea6c`) — `scripts/e2e-shard-start.sh` adds `rm -f {SHARD_DIR}/*.db` before alembic+seed, plus path guard that rejects non-`/tmp/` paths so prod DBs are never accidentally wiped. New `scripts/e2e-shard-start.dryrun.test.sh` (shell dry-run test).
+2. **fix(#152): remove idempotent `_exists` guard from seed; empty-DB contract** (`e76f5d2`) — `backend/src/seed/seed.py`: removed the `_exists` helper + all 13 skip branches. Seed now assumes empty DB by contract; fails loud with UNIQUE constraint violation if a second seed run happens. Updated docstrings. Replaced `test_seed_is_idempotent` with `test_seed_raises_on_populated_db`.
+3. **fix(#152): fail-fast diagnostics in globalSetup** (`05e0eb6`) — `frontend/admin/e2e/globalSetup.ts`: two diagnostic branches that abort playwright before any test runs: (a) leftover seed rows (services, masters, locations) missing → error "re-run shard-start"; (b) current-week activities API empty → error "seed did not populate current week". Both include 5×1s retry for 503 race. New `globalSetup.diagnostic.test.ts` (3 vitest cases).
+4. **fix(#152): waitForScheduleReady timeout 60→10s** (`ad77118`) — `frontend/admin/e2e/fixtures/helpers.ts`: reduced to 10s (UI render-sync only; data validation moved to globalSetup).
+
+### Test Results
+
+- **Backend pytest:** 668 passed, 0 failed, 0 skipped (baseline 668; −1 idempotency test, +1 fail-loud test = same count)
+- **Frontend vitest:** 1192 passed, 0 failed, 1 skipped (baseline 1189 + 3 new diagnostic tests)
+- **Type-check:** clean
+- **Lint:** clean
+- **Visual gate:** N/A (test-infra only)
+
 ## Changelog
 - 2026-07-18: **Wave A — ClientListParams page/per_page ge=1 constraint** — `backend/src/schemas/client.py`: `Field(ge=1)` на page и per_page. Закрыта дыра валидации пагинации (page=0/-1, per_page=0/-5 → 422). Сняты 4 xfail(strict=True) теста в `test_client_stats.py`. Backend: 668 passed, 0 xfailed (было 664+4xfail). Next scope: #149 (numeric filters ge=0). Branch `fix-clientlistparams-ge1`. Commits: a29474e (design), 3c253a8 (plan), a3d9f13 (impl).
 - 2026-07-08: **#98 — Unify "active record" definition** — `check_activity_capacity` excludes cancelled/missed from occupied count; `last_visit` stat uses `Activity.start` over visited visits. Shared `ACTIVE_RECORD_STATUSES` + `active_record_filter()`. Branch `fix-unify-active-record`. Spun off #133, #134.
@@ -543,6 +575,7 @@ Removed Visit joins from 2 subqueries in `list_clients_with_stats` — now uses 
 - 2026-07-17: **CI Green-Up (PR #145)** — E2E pnpm-cache path fix (test.yml cache-dependency-path dropped from e2e job), #123 date-flake frozen (CalendarPopover + Menubar via `vi.setSystemTime`), 4 flaky E2E tests skip-tracked (#124, #125), 9 shard-rest snapshot baselines regenerated via new `update-snapshots.yml` workflow. test.yml 12/12 green, smoke.yml 2/2 green. Branch `feat-ci-green`, 5 commits (e3f67e4, d7dc689, 9785eba, 89520d0, 26fa0eb).
 - 2026-07-17: **E2E Infra Roots (#108, #126)** — SQLite DB lock fix (global WAL + busy_timeout hook, `sqliteExecWithRetry` helper, `cleanTestData` throws on lock), standalone warmup (9 routes in `globalSetup` gated `!SHARD_ID`), ADR 001 WAL-backup caveat. 7 commits (1c30c24, be0b08b, 713ce3f, 662ea67, f39856d, 51dac4c, 5d6028b). Branch `feat-e2e-infra-roots`. Backend 664+4xfail, frontend 1189+1skip.
 - 2026-07-17: **E2E Fixme Cleanup Wave 1 (#121)** — Re-enabled 13 previously-disabled E2E tests whose blocker issues (#84 occupied-calc, #127 cache unification) are now CLOSED. Occupied-calc: 1 test re-enabled (US-S03). Error-messages: 1 test re-enabled ("Недостаточно мест" capacity). Clients: 11 tests re-enabled (create/view/edit/delete/search/modal/record-tab/status/payment/save/cancel). Test 11 (status filter) left skipped (#125). Shard-mode verification gate: 23/23 active tests pass, 0 flakes. Zero product-code changes. 2 commits (0be5188, 0e0ee33). Branch `feat-e2e-fixme-wave1`.
+- 2026-07-20: **#152 — Seed staleness + E2E harness resilience** — Wipe+reseep fix: shard-start `rm -f` shard DB + path guard (shell dry-run test); removed `_exists` guard from seed (fail-loud on UNIQUE, empty-DB contract); globalSetup fail-fast diagnostics (stale DB + missing current-week activities); waitForScheduleReady timeout 60→10s. 4 commits (0e4ea6c, e76f5d2, 05e0eb6, ad77118). Branch `feat-seed-staleness-152`. Backend 668 pass, frontend 1192 pass.
 - 2026-07-16: **#129 — Backend health: N+1 fix, capacity re-check, dedup seats** — `list_activities` query count halved (6→2 for 5 activities), update/patch enforce capacity check with 409 on over-capacity, `recompute_record_seats` now single source for `seats` across create/update/patch, bonus `tariff_id` fix in update's Visit constructor, 10 new tests (649→659, 0 regression). 3 commits (625fea5, 4689765, e4a7214). Branch `feat-backend-health-129`.
 - 2026-07-07: **Addendum-2: InlineEditableTable unified rows + hard-delete + deferred undo** — 6 main tasks (backend hard-delete + repo split, frontend Zod schema cleanup, optimistic cache sync, tariff dropdown, deferred delete with undo toast, E2E scenarios 15-19) + FasTP Bug #1 (over-capacity toast). Branch `feat-inline-editable-unified-rows`, 17 commits.
 - 2026-06-19: **Wave 5 — 14 P1/P3 UX Bugs** — closed #74–#86 (except #73) in ActivityDetailsModal, ClientTab, ActivityCard; 14 commits, 7/7 visual checks passed (branch `fix/wave5-ux-bugs`).

@@ -93,8 +93,6 @@ test.describe('Unified inline-editable rows', () => {
   });
 
   // ── Scenario 5: Edit existing visitor name → PUT ──────────────────────
-  // TODO(flaky): openModal selects wrong activity when multiple seed activities
-  // share the same week. InlineEditCell commit also needs timing investigation.
 
   test('visits: edit existing visitor name triggers API call', async ({ page }) => {
     test.skip(true, 'waiting for PATCH /visitors (Wave 2 CRUD consolidation)');
@@ -135,8 +133,7 @@ test.describe('Unified inline-editable rows', () => {
   });
 
   // ── Scenario 6: Select tariff → price auto-fills ──────────────────────
-  // TODO(flaky): openModal selects wrong activity when multiple seed activities
-  // share the same week (GH #124).
+  
 
   test('visits: selecting tariff changes price on new row', async ({ page, request }) => {
     // Create a record to ensure we have a valid activity to open
@@ -200,8 +197,6 @@ test.describe('Unified inline-editable rows', () => {
   });
 
   // ── Scenario 7: × on existing row → DELETE ────────────────────────────
-  // TODO(flaky): openModal selects wrong activity when multiple seed activities
-  // share the same week — opens r1 tab instead of r2.
 
   test('visits: × on existing row calls DELETE API', async ({ page }) => {
     // Use seed record r2 (already visible on the schedule page)
@@ -237,8 +232,7 @@ test.describe('Unified inline-editable rows', () => {
   });
 
   // ── Scenario 8: Visitor count "0" and + Добавить still works ────────────
-  // TODO(flaky): openModal selects wrong activity when multiple seed activities
-  // share the same week (GH #124).
+  
 
   test('visits: + Добавить works when record has 0 visits', async ({ page, request }) => {
     // 1. SETUP — create a record with NO visits
@@ -337,8 +331,6 @@ test.describe('Unified inline-editable rows', () => {
     });
 
     // ── 9c: × on existing payment → DELETE ──────────────────────────────
-    // TODO(flaky): openModal selects wrong activity when multiple seed activities
-    // share the same week — opens wrong record tab.
 
     test('× on existing payment calls DELETE API', async ({ page, request }) => {
       // Use seed record r3 — create a payment on it via API
@@ -694,9 +686,6 @@ test.describe('addendum-2: cache sync, tariffs, undo', () => {
   });
 
   // ── Scenario 16: No F5 after delete visitor ──────────────────────────────
-  // TODO(flaky): openModal selects wrong activity when multiple test-created
-  // activities share the same week (GH #124). The reopen step fails because
-  // openModal picks a different activity without records.
 
   test('scenario 16: no F5 after delete visitor (close+reopen)', async ({ page, request }) => {
     // 1. SETUP — create activity + record with a visitor
@@ -749,8 +738,6 @@ test.describe('addendum-2: cache sync, tariffs, undo', () => {
   });
 
   // ── Scenario 16b: No F5 after delete payment ─────────────────────────────
-  // TODO(flaky): openModal selects wrong activity when multiple test-created
-  // activities share the same week (GH #124). The reopen step fails.
 
   test('scenario 16b: no F5 after delete payment (close+reopen)', async ({ page, request }) => {
     // 1. SETUP — create activity + record + payment
@@ -805,8 +792,7 @@ test.describe('addendum-2: cache sync, tariffs, undo', () => {
   });
 
   // ── Scenario 17: Tariff dropdown populated in modal ──────────────────────
-  // TODO(flaky): openModal selects wrong activity when multiple test-created
-  // activities share the same week (GH #124).
+  
 
   test('scenario 17: tariff dropdown populated in modal', async ({ page, request }) => {
     // 1. SETUP — create activity with a service that has tariffs
@@ -911,8 +897,7 @@ test.describe('addendum-2: cache sync, tariffs, undo', () => {
   });
 
   // ── Scenario 19: Undo delete ─────────────────────────────────────────────
-  // TODO(flaky): openModal selects wrong activity when multiple test-created
-  // activities share the same week (GH #124).
+  
 
   test('scenario 19: undo delete restores payment row', async ({ page, request }) => {
     // 1. SETUP — create activity + record + payment

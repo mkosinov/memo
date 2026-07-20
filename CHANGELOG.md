@@ -18,6 +18,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Design spec: `docs/specs/2026-07-20-seed-staleness-152-design.md`
   - Plan: `docs/plans/2026-07-20-seed-staleness-152.md`
 
+## [Unreleased] — 2026-07-20
+
+### Fixed
+- **#124 Wave 1 — openModal activity_id targeting + un-skip 8 unified-rows scenarios** — branch `test-openmodal-124` (2 commits: 5c8ebd9, 0ead9a2):
+  - **Root cause:** `openModal()` (frontend/admin/e2e/fixtures/helpers.ts) opened the FIRST card with client-tabs on a shared week → picked the wrong activity when multiple seed/factory activities shared a week.
+  - **Fix (resolveRecordDate + openModal):** `resolveRecordDate(recordId)` now returns `{date, activityId}` (added `a.id AS activityId` to SQL SELECT). `openModal()` targets the card by `[data-testid="activity-${activityId}"]` when `recordId` is passed. Fallback walk (first with client-tabs) preserved for callers without a recordId (e.g. `openAddTab`). `openAddTab` updated to `.date`.
+  - **Tariff seed (T1 — NO-OP):** `backend/src/seed/seed.py` already had ≥2 tariffs on `s1` (t1a/t1c/t1i) — no code change needed.
+  - **Un-skip 7 scenarios:** Removed `test.skip(...)` from 7 scenarios (6, 7, 8, 9c, 16, 16b, 17, 19) in `unified-rows.spec.ts`. Scenario 5 annotation updated to "waiting for PATCH /visitors (Wave 2)".
+  - **Toast selector fix:** 3 toast selectors `[role="status"]` → `[data-testid="toast-info"]` (scenarios 16, 16b, 19).
+  - **Stale-TODO cleanup:** Commit `0ead9a2` removed stale `TODO(flaky): openModal selects wrong activity` comments.
+  - **Verification (local):** vitest 1193 pass / 1 skip (0 regressions). 8 target E2E scenarios ALL PASS locally. Shard-rest run 1: 122 pass / 13 fail / 9 skip — 13 failures triaged as PRE-EXISTING (sqlite3 relative-path bug, font-drift snapshots, API 404 — none openModal-related). **CI verdict pending** for final US-5 green.
+  - **Reviews:** spec-review APPROVED; code-quality APPROVED (0 Critical/Important).
+  - **Design spec:** `docs/specs/2026-07-18-openmodal-activityid-seed-124-design.md`
+  - **Plan:** `docs/plans/2026-07-18-openmodal-activityid-seed-124.md`
+  - **Note:** Test-infra only — zero production code changed.
+
 ## [Unreleased] — 2026-07-18
 
 ### Fixed

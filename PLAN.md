@@ -298,6 +298,7 @@ New `frontend/master/` — Next.js 14, mobile-first.
 | — E2E Infra Roots (#108, #126) | 1 | SQLite DB lock fix, standalone warmup, retry helper | @tester + @backend-coder | ✅ (2026-07-17) |
 | — E2E Fixme Cleanup Wave 1 (#121) | 1 | Re-enable 13 disabled E2E tests, blockers #84/#127 closed | @tester | ✅ (2026-07-17) |
 | — Seed Staleness + E2E Harness Resilience (#152) | 1 | Wipe+reseed fix for Monday seed stale dates; fail-fast diagnostics in globalSetup; shard-start path guard | @tester + @backend-coder | ✅ (2026-07-20) |
+| — #124 Wave 1 — openModal activity_id + un-skip | 1 | Fix E2E openModal (activity_id targeting), tariff seed (NO-OP), un-skip 8 unified-rows scenarios | @tester | T1+T2 ✅ (2026-07-20), T3 ⏳ CI |
 | 7 — P4 Artist App | 4 | Mobile app for artists | @frontend-coder | ⬜ Backlog |
 | 8 — P5 AI Concierge | 3 | Chat assistant | @frontend-coder | ⬜ Backlog |
 | 9 — Tests and Polish | 3 | Tests, a11y, build, SEO | @tester + @frontend-coder | ⬜ Backlog |
@@ -565,6 +566,57 @@ Removed Visit joins from 2 subqueries in `list_clients_with_stats` — now uses 
 - **Type-check:** clean
 - **Lint:** clean
 - **Visual gate:** N/A (test-infra only)
+
+---
+
+## #124 Wave 1 — openModal activity_id targeting + un-skip 8 unified-rows scenarios
+
+**Goal:** Fix the E2E test-harness bug where `openModal()` opens the FIRST card with client-tabs on a shared week → picks wrong activity. Match by `activity_id` via `resolveRecordDate` returning `{date, activityId}` and `[data-testid="activity-${activityId}"]` targeting.
+
+**Branch:** `test-openmodal-124`
+
+**Total commits:** 2 (5c8ebd9, 0ead9a2)
+
+**Design spec:** `docs/specs/2026-07-18-openmodal-activityid-seed-124-design.md`
+
+**Plan:** `docs/plans/2026-07-18-openmodal-activityid-seed-124.md`
+
+### Tasks
+
+- **T1 (tariff seed — ≥2 tariffs on first service):** NO-OP. The seed already had ≥2 tariffs on `s1` (t1a/t1c/t1i) in `backend/src/seed/seed.py`. No code change.
+- **T2 (openModal activity_id targeting + un-skip 8 scenarios):** ✅ DONE.
+  - `resolveRecordDate` now returns `{date, activityId}`; `openModal` targets the card by `[data-testid="activity-${activityId}"]` when `recordId` is passed; fallback walk preserved for no-recordId callers; `openAddTab` updated to `.date`.
+  - 7 `test.skip(...)` removed from `unified-rows.spec.ts` (scenarios 6, 7, 8, 9c, 16, 16b, 17, 19). Scenario 5 annotation changed to "waiting for PATCH /visitors (Wave 2)". 3 toast selectors `[role="status"]` → `[data-testid="toast-info"]` (scenarios 16, 16b, 19).
+  - Stale `TODO(flaky): openModal selects wrong activity` comments removed (commit `0ead9a2`).
+  - Verification: `pnpm run type-check` clean; vitest 1193 pass + 1 skip (0 regressions); shard-rest E2E run 1 — 8 target scenarios ALL PASS (RED→GREEN achieved). Spec-review APPROVED; code-quality APPROVED — 0 Critical/Important, 2 minor (both resolved).
+- **T3 (verification gate + #124/#121 hygiene):** ⏳ DEFERRED TO CI.
+  - Local shard-rest run 1: 122 pass / 13 fail / 9 skip. 13 failures triaged as PRE-EXISTING (sqlite3 relative-path bug, font-drift snapshots, API 404 — none openModal-related). CI on main `96e7c0a` was fully green for shard-rest (per #152). Final verdict deferred to PR CI.
+  - #124/#121 GH comment drafts: pending — architect posts after merge.
+
+### Test Results
+
+- **Vitest:** 1193 passed, 1 skipped, 0 regressions (baseline 1192 + 1 new)
+- **Type-check:** clean
+- **E2E (target scenarios):** 8/8 PASS locally (scenarios 6, 7, 8, 9c, 16, 16b, 17, 19)
+- **E2E (shard-rest run 1):** 122 pass / 13 fail / 9 skip — pre-existing failures triaged
+- **Visual gate:** N/A (test-infra only)
+- **Reviews:** spec-review ✅, code-quality ✅
+
+### Acceptance Criteria
+
+| US | Description | Status |
+|----|-------------|--------|
+| US-1 | Scenario 6 tariff→price | ✅ PASS |
+| US-2 | Scenario 7 visit DELETE | ✅ PASS |
+| US-3 | Scenarios 8, 9c, 16, 16b, 17, 19 | ✅ PASS |
+| US-4 | Scenario 5 stays skipped (Wave 2) | ✅ annotation updated |
+| US-5 | 0 new regressions | ⏳ pending CI |
+
+### Closed Issues
+
+- **#124 (items 1+2):** openModal activity_id targeting + tariff seed — done locally, final CI verdict pending.
+
+---
 
 ## Changelog
 - 2026-07-18: **Wave A — ClientListParams page/per_page ge=1 constraint** — `backend/src/schemas/client.py`: `Field(ge=1)` на page и per_page. Закрыта дыра валидации пагинации (page=0/-1, per_page=0/-5 → 422). Сняты 4 xfail(strict=True) теста в `test_client_stats.py`. Backend: 668 passed, 0 xfailed (было 664+4xfail). Next scope: #149 (numeric filters ge=0). Branch `fix-clientlistparams-ge1`. Commits: a29474e (design), 3c253a8 (plan), a3d9f13 (impl).

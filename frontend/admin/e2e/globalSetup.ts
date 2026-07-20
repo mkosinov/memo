@@ -53,6 +53,64 @@ export default async function globalSetup() {
     }
   }
 
+  // #152: diagnostic — assert seed contract before tests run. Two checks:
+  // (a) reject if leftover seed rows exist (ev_*, r1-r6, etc.) — means the DB
+  //     was not wiped + reseeded by scripts/e2e-shard-start.sh, likely a
+  //     manual `npx playwright test` bypass. Abort with diagnostic.
+  // (b) assert API returns ≥1 activity for the current week. Empty = seed
+  //     did not populate (e.g., seed failure, week rollover against stale
+  //     data, missing seed subprocess). Abort with diagnostic.
+
+  // (a) Leftover seed rows check
+  let leftoverSeedRows = 0;
+  try {
+    const result = sqliteExecWithRetry(`sqlite3 "${dbPath}" "SELECT COUNT(*) FROM (SELECT 1 FROM activities WHERE id LIKE 'ev_%' OR id LIKE 'ev_fixed_%' UNION SELECT 1 FROM records WHERE id IN ('r1','r2','r3','r4','r5','r6') UNION SELECT 1 FROM visits WHERE id IN ('v1','v2','v3','v4','v5','v6','v7','v8','v9','v10') UNION SELECT 1 FROM payments WHERE id IN ('p1','p2','p3','p4','p5','p6'))"`);
+    leftoverSeedRows = parseInt(result, 10) || 0;
+  } catch (err: any) {
+    const msg = String(err?.stderr || err?.message || '');
+    if (msg.includes('no such table') || msg.includes('no such file')) {
+      // DB missing → probably first run, shard-start hasn't run yet. Fail loud too.
+      throw new Error(`[#152] Test DB not initialized at ${dbPath}. The shard stack was not started via scripts/e2e-shard-start.sh. Run \`bash scripts/test-all.sh\` (CI/local) or \`SHARD_ID=N ... bash scripts/e2e-shard-start.sh\` (standalone), then retry playwright. Original error: ${msg.trim()}`);
+    }
+    throw err;
+  }
+  if (leftoverSeedRows === 0) {
+    throw new Error(`[#152] Seed data is missing from ${dbPath}. Expected ev_*/ev_fixed_*/r1-r6/v1-v10/p1-p6 rows. The shard stack was not started via scripts/e2e-shard-start.sh (which wipes + reseeds the DB). Run \`bash scripts/test-all.sh\` or \`SHARD_ID=N ... bash scripts/e2e-shard-start.sh\`, then retry playwright.`);
+  }
+
+  // (b) Current-week activities check (with 5×1s retry for 503 race)
+  const port = process.env.SHARD_PORT || process.env.BACKEND_PORT || '8001';
+  const today = new Date();
+  const monday = new Date(today);
+  monday.setDate(today.getDate() - ((today.getDay() + 6) % 7)); // Mon=0
+  monday.setHours(0, 0, 0, 0);
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+  sunday.setHours(23, 59, 59, 999);
+  const fmt = (d: Date) => d.toISOString().slice(0, 10);
+  const activitiesUrl = `http://localhost:${port}/api/v1/activities?date_from=${fmt(monday)}&date_to=${fmt(sunday)}`;
+
+  let activitiesResponse: Response | null = null;
+  let lastErr: any = null;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      activitiesResponse = await fetch(activitiesUrl, { signal: AbortSignal.timeout(5000) });
+      if (activitiesResponse.ok) break;
+    } catch (err: any) {
+      lastErr = err;
+    }
+    await new Promise(r => setTimeout(r, 1000));
+  }
+
+  if (!activitiesResponse || !activitiesResponse.ok) {
+    throw new Error(`[#152] Backend /api/v1/activities not responding at ${activitiesUrl} after 5 retries. Last error: ${lastErr?.message || 'HTTP ' + activitiesResponse?.status}. Backend not started? Run \`bash scripts/test-all.sh\` to start the full stack.`);
+  }
+  const activitiesJson = await activitiesResponse.json() as any[];
+  if (activitiesJson.length === 0) {
+    throw new Error(`[#152] No activities for the current week (${fmt(monday)} to ${fmt(sunday)}) at ${dbPath}. Seed did not populate — likely a stale DB or calendar week rollover without re-seed. Run \`bash scripts/test-all.sh\` or \`SHARD_ID=N ... bash scripts/e2e-shard-start.sh\` to wipe+reseed, then retry.`);
+  }
+  console.log(`[globalSetup] Seed contract verified: ${leftoverSeedRows} seed rows + ${activitiesJson.length} activities for current week.`);
+
   // #126: standalone mode has no shell warmup — pre-compile routes so the
   // first test doesn't race Next.js dev compilation (404 _next/static).
   if (!process.env.SHARD_ID) {

@@ -1,5 +1,11 @@
 """Seed script — populates the database with mock data for development.
 
+Contract: seed assumes an EMPTY database. Running on a populated DB
+raises SQLAlchemy IntegrityError on the first duplicate primary key —
+this is intended fail-loud behaviour. Test stacks (`scripts/e2e-shard-start.sh`)
+wipe the DB file before starting the backend, so alembic recreates the
+schema and seed runs on empty.
+
 Usage:
     uv run python -m seed.seed          # direct module
     uv run python -m seed               # via __main__
@@ -171,11 +177,11 @@ _ACTIVITIES_RAW_FIXED: list[tuple] = [
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-async def _exists(session, model, id_value: str) -> bool:
-    """Return True if a row with the given primary key exists."""
-    result = await session.execute(select(model).where(model.id == id_value))
-    return result.scalar_one_or_none() is not None
+# NOTE: no `_exists` guard — seed assumes an empty DB (see module docstring).
+# `from sqlalchemy import select` below is kept for the three join-table
+# existence checks in `_seed_service_tags`, `_seed_activity_tags`, and
+# `_seed_photos` (they use `select(service_tags)`, `select(activity_tags)`,
+# `select(photo_tags)` patterns, not PK existence).
 
 
 # ---------------------------------------------------------------------------
@@ -192,8 +198,7 @@ async def _seed_masters(session) -> None:
         {"id": "m7", "first_name": "Ирина", "last_name": "Горох", "color": "#9A5870", "specialty": "керамика", "position": "мастер", "sort_order": 5},
     ]
     for m in masters:
-        if not await _exists(session, Master, m["id"]):
-            session.add(Master(**m))
+        session.add(Master(**m))
 
 
 async def _seed_locations(session) -> None:
@@ -206,8 +211,7 @@ async def _seed_locations(session) -> None:
          "location_hint": "2 этаж, рядом с детской зоной", "sort_order": 2},
     ]
     for loc in locations:
-        if not await _exists(session, Location, loc["id"]):
-            session.add(Location(**loc))
+        session.add(Location(**loc))
 
 
 async def _seed_services(session) -> None:
@@ -242,8 +246,7 @@ async def _seed_services(session) -> None:
          "material_hint": "Масляные краски, холст 50×60 см, набор кистей, мастихин"},
     ]
     for s in services:
-        if not await _exists(session, Service, s["id"]):
-            session.add(Service(**s))
+        session.add(Service(**s))
 
 
 async def _seed_tariffs(session) -> None:
@@ -279,16 +282,14 @@ async def _seed_tariffs(session) -> None:
         ("t7i", "s7", "Индивидуальный", 5500),
     ]
     for tid, sid, title, price in tariff_data:
-        if not await _exists(session, Tariff, tid):
-            session.add(Tariff(id=tid, service_id=sid, title=title, price=price))
+        session.add(Tariff(id=tid, service_id=sid, title=title, price=price))
 
 
 async def _seed_tags(session) -> None:
     tag_names = ["новинка", "хит", "для детей", "популярное", "индивидуальное", "сезонное", "гость"]
     for i, name in enumerate(tag_names, start=1):
         tag_id = f"tag{i}"
-        if not await _exists(session, Tag, tag_id):
-            session.add(Tag(id=tag_id, tag=name))
+        session.add(Tag(id=tag_id, tag=name))
 
 
 async def _seed_activities(session) -> None:
@@ -312,8 +313,6 @@ async def _seed_activities_for(
         for day, master, start_h, dur_h, svc_name, loc, cap, is_priv in activities:
             activity_id = f"{id_prefix}_{idx}"
             idx += 1
-            if await _exists(session, Activity, activity_id):
-                continue
             service_id = _SERVICE_NAME_TO_ID[svc_name]
             hour = int(start_h)
             minute = 30 if start_h % 1 else 0
@@ -340,8 +339,7 @@ async def _seed_clients(session) -> None:
         {"id": "c5", "name": "Ольга Новикова", "phone": "+79005678901", "email": None, "channel": "telegram"},
     ]
     for c in clients:
-        if not await _exists(session, Client, c["id"]):
-            session.add(Client(**c))
+        session.add(Client(**c))
 
 
 async def _seed_visitors(session) -> None:
@@ -358,8 +356,7 @@ async def _seed_visitors(session) -> None:
         {"id": "vis10", "client_id": "c4", "name": "Алиса Козлова", "age": 12},
     ]
     for v in visitors:
-        if not await _exists(session, Visitor, v["id"]):
-            session.add(Visitor(**v))
+        session.add(Visitor(**v))
 
 
 async def _seed_records(session) -> None:
@@ -372,8 +369,7 @@ async def _seed_records(session) -> None:
         {"id": "r6", "activity_id": "ev_fixed_8", "client_id": "c4", "status": "waiting", "seats": 1, "comment": None},
     ]
     for r in records:
-        if not await _exists(session, Record, r["id"]):
-            session.add(Record(**r))
+        session.add(Record(**r))
 
 
 async def _seed_visits(session) -> None:
@@ -390,8 +386,7 @@ async def _seed_visits(session) -> None:
         {"id": "v10", "record_id": "r6", "visitor_id": "vis7", "tariff_id": "t7a", "price": 3800, "status": "waiting"},
     ]
     for v in visits:
-        if not await _exists(session, Visit, v["id"]):
-            session.add(Visit(**v))
+        session.add(Visit(**v))
 
 
 async def _seed_payments(session) -> None:
@@ -404,8 +399,7 @@ async def _seed_payments(session) -> None:
         {"id": "p6", "record_id": "r6", "amount": 1500, "method": "cash"},
     ]
     for p in payments:
-        if not await _exists(session, Payment, p["id"]):
-            session.add(Payment(**p))
+        session.add(Payment(**p))
 
 
 async def _seed_service_tags(session) -> None:
@@ -470,8 +464,7 @@ async def _seed_photos(session) -> None:
          "activity_id": "ev_4", "is_public": True},
     ]
     for p in photos:
-        if not await _exists(session, Photo, p["id"]):
-            session.add(Photo(**p))
+        session.add(Photo(**p))
 
     # Tag ph6, ph7 as "гость" via photo_tags
     for photo_id in ["ph6", "ph7"]:
@@ -496,8 +489,7 @@ async def _seed_materials(session) -> None:
         {"id": "mat4", "title": "Гуашь", "description": "Гуашь — плотные матовые краски на водной основе, идеальны для детей."},
     ]
     for m in materials:
-        if not await _exists(session, Material, m["id"]):
-            session.add(Material(**m))
+        session.add(Material(**m))
 
 
 # ---------------------------------------------------------------------------
@@ -507,7 +499,8 @@ async def _seed_materials(session) -> None:
 async def seed_data(manager: DBManager) -> None:
     """Seed the database with mock development data.
 
-    Idempotent — safe to run multiple times.
+    Contract: assumes an EMPTY database — see module docstring.
+    Running on a populated DB raises IntegrityError (intended fail-loud).
     """
     # Ensure tables exist.
     async with manager.engine.begin() as conn:

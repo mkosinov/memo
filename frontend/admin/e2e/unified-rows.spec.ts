@@ -383,7 +383,6 @@ test.describe('Unified inline-editable rows', () => {
   // ── Scenario 10: Save prefilled payment without editing ─────────────────
 
   test('scenario 10: prefilled payment saves without editing amount', async ({ page, request }) => {
-    test.skip(true, '[flaky: unified-rows stale-cache tab-client timeout, tracked in #124]');
     // Create a record with a known outstanding balance (visit price=3500, no payments → outstanding=3500).
     // Using factory approach (not seed recordId) because GH #124 makes recordId targeting unreliable
     // when multiple activities share a week. Factory activity is for "today" so it's isolated.
@@ -582,7 +581,7 @@ test.describe('addendum-2: cache sync, tariffs, undo', () => {
   // ── Scenario 15: No F5 after add visitor ─────────────────────────────────
 
   test('scenario 15: no F5 after add visitor (close+reopen)', async ({ page, request }) => {
-    test.skip(true, '[flaky: unified-rows stale-cache tab-client timeout, tracked in #124]');
+    test.skip(true, '[flaky: unified-rows stale-cache tab-client timeout, tracked in #164]');
     // 1. SETUP — create activity + record via API
     const client = await createTestClient(request);
     const activity = await createTestActivity(request);
@@ -640,7 +639,7 @@ test.describe('addendum-2: cache sync, tariffs, undo', () => {
   // ── Scenario 15b: No F5 after add payment ────────────────────────────────
 
   test('scenario 15b: no F5 after add payment (close+reopen)', async ({ page, request }) => {
-    test.skip(true, '[flaky: unified-rows stale-cache tab-client timeout, tracked in #124]');
+    test.skip(true, '[flaky: unified-rows stale-cache tab-client timeout, tracked in #164]');
     // 1. SETUP
     const client = await createTestClient(request);
     const activity = await createTestActivity(request);

@@ -20,6 +20,7 @@ from src.models.visit import Visit
 from src.models.visitor import Visitor
 from src.schemas.record import RecordCreate, RecordPatch, RecordResponse, RecordUpdate
 from src.services.generic import GenericService
+from src.services.decorators import transactional
 
 
 class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
@@ -58,6 +59,7 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
         )
         return result.scalar_one_or_none()
 
+    @transactional
     async def delete(self, db_session: AsyncSession, id: str) -> bool:
         """Soft-delete a record and hard-delete its visits and payments."""
         record = await self._repository.get(db_session, Record, id)
@@ -79,6 +81,7 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
         await db_session.flush()
         return True
 
+    @transactional
     async def create(
         self, db_session: AsyncSession, data: RecordCreate
     ) -> Record:
@@ -195,6 +198,7 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
             await db_session.flush()
         return visitor
 
+    @transactional
     async def update(
         self, db_session: AsyncSession, id: str, data: RecordUpdate
     ) -> Record | None:
@@ -259,6 +263,7 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
         await db_session.refresh(record)
         return record
 
+    @transactional
     async def patch(
         self, db_session: AsyncSession, id: str, data: RecordPatch
     ) -> Record | None:

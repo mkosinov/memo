@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.repositories.generic import BaseRepository
+from src.services.decorators import transactional
 
 CreateSchemaT = TypeVar("CreateSchemaT", bound=BaseModel)
 UpdateSchemaT = TypeVar("UpdateSchemaT", bound=BaseModel)
@@ -60,6 +61,7 @@ class GenericService(Generic[CreateSchemaT, UpdateSchemaT, ResponseSchemaT]):
             return None
         return self._response_schema.model_validate(orm)
 
+    @transactional
     async def create(
         self, db_session: AsyncSession, data: CreateSchemaT
     ) -> ResponseSchemaT:
@@ -67,6 +69,7 @@ class GenericService(Generic[CreateSchemaT, UpdateSchemaT, ResponseSchemaT]):
         orm = await self._repository.create(db_session, data, self._model)
         return self._response_schema.model_validate(orm)
 
+    @transactional
     async def update(
         self, db_session: AsyncSession, id: str, data: UpdateSchemaT
     ) -> ResponseSchemaT | None:
@@ -76,6 +79,7 @@ class GenericService(Generic[CreateSchemaT, UpdateSchemaT, ResponseSchemaT]):
             return None
         return self._response_schema.model_validate(orm)
 
+    @transactional
     async def patch(
         self, db_session: AsyncSession, id: str, data: BaseModel
     ) -> ResponseSchemaT | None:
@@ -98,10 +102,12 @@ class GenericService(Generic[CreateSchemaT, UpdateSchemaT, ResponseSchemaT]):
             return None
         return self._response_schema.model_validate(orm)
 
+    @transactional
     async def delete(self, db_session: AsyncSession, id: str) -> bool:
         """Soft-delete a record.  Returns ``True`` if deleted, ``False`` if not found."""
         return await self._repository.delete(db_session, self._model, id)
 
+    @transactional
     async def reorder(
         self, db_session: AsyncSession, ids: list[str]
     ) -> list[ResponseSchemaT]:

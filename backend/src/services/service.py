@@ -14,6 +14,7 @@ from src.models.tag import service_tags
 from src.models.tariff import Tariff
 from src.schemas.service import ServiceCreate, ServiceResponse, ServiceUpdate
 from src.services.generic import GenericService
+from src.services.decorators import transactional
 
 
 class ServiceService(GenericService[ServiceCreate, ServiceUpdate, ServiceResponse]):
@@ -46,6 +47,7 @@ class ServiceService(GenericService[ServiceCreate, ServiceUpdate, ServiceRespons
         )
         return result.scalar_one_or_none()
 
+    @transactional
     async def create(
         self, db_session: AsyncSession, data: ServiceCreate
     ) -> Service:
@@ -75,6 +77,7 @@ class ServiceService(GenericService[ServiceCreate, ServiceUpdate, ServiceRespons
         await db_session.flush()
         return await self.get(db_session, service.id)
 
+    @transactional
     async def update(
         self, db_session: AsyncSession, id: str, data: ServiceUpdate
     ) -> Service | None:

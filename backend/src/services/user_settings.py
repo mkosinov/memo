@@ -17,6 +17,7 @@ from src.schemas.user_settings import (
     UserSettingsResponse,
     UserSettingsUpdate,
 )
+from src.services.decorators import transactional
 
 
 def _to_response(model: UserSettings) -> UserSettingsResponse:
@@ -53,6 +54,7 @@ class UserSettingsService:
             return None
         return _to_response(orm)
 
+    @transactional
     async def create(
         self, session: AsyncSession, data: UserSettingsCreate
     ) -> UserSettingsResponse:
@@ -69,6 +71,7 @@ class UserSettingsService:
         await session.refresh(orm)
         return _to_response(orm)
 
+    @transactional
     async def update_by_user_id(
         self, session: AsyncSession, user_id: str, data: UserSettingsUpdate
     ) -> UserSettingsResponse | None:
@@ -107,6 +110,7 @@ class UserSettingsService:
         await session.refresh(orm)
         return _to_response(orm)
 
+    @transactional
     async def delete(self, session: AsyncSession, id: str) -> bool:
         """Soft-delete a settings record by its primary key ID."""
         return await self._repo.delete(session, UserSettings, id)

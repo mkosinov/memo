@@ -13,6 +13,7 @@ from src.models.tag import Tag
 from src.repositories.generic import get_soft_delete_repository
 from src.schemas.photo import PhotoCreate, PhotoResponse, PhotoUpdate
 from src.services.generic import GenericService
+from src.services.decorators import transactional
 
 
 class PhotoService(GenericService[PhotoCreate, PhotoUpdate, PhotoResponse]):
@@ -46,6 +47,7 @@ class PhotoService(GenericService[PhotoCreate, PhotoUpdate, PhotoResponse]):
             return None
         return self._response_schema.model_validate(orm)
 
+    @transactional
     async def create(
         self, db_session: AsyncSession, data: PhotoCreate
     ) -> PhotoResponse:
@@ -78,6 +80,7 @@ class PhotoService(GenericService[PhotoCreate, PhotoUpdate, PhotoResponse]):
         # Reload with tags
         return await self.get(db_session, orm.id)
 
+    @transactional
     async def update(
         self, db_session: AsyncSession, id: str, data: PhotoUpdate
     ) -> PhotoResponse | None:
@@ -85,12 +88,12 @@ class PhotoService(GenericService[PhotoCreate, PhotoUpdate, PhotoResponse]):
         orm = await self._repository.get(db_session, Photo, id)
         if orm is None:
             return None
-        
+
         # Update basic fields
         update_data = data.model_dump(exclude={'tag_ids'}, exclude_unset=True)
         for key, value in update_data.items():
             setattr(orm, key, value)
-        
+
         # Update tags if provided
         if data.tag_ids is not None:
             result = await db_session.execute(
@@ -98,9 +101,7 @@ class PhotoService(GenericService[PhotoCreate, PhotoUpdate, PhotoResponse]):
             )
             tags = result.scalars().all()
             orm.tags = list(tags)
-        
-        await db_session.commit()
-        
+
         # Reload with tags
         return await self.get(db_session, id)
 

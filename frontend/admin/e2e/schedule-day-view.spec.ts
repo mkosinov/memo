@@ -102,10 +102,7 @@ test.describe('Schedule — Column Mode (По мастерам / По локац
     await waitForScheduleReady(page);
   });
 
-  // FIXME: Flaky in CI — column mode dropdown toggle is unreliable.
-  // See docs/audits/2026-06-18-e2e-audit.md for details.
-  // Original test: replaced with test.fixme to skip without removing the code.
-  test.fixme('column mode dropdown opens and shows two options', async ({ page }) => {
+  test('column mode dropdown opens and shows two options', async ({ page }) => {
     // Click day-button: switches to day view AND opens column-mode dropdown
     await page.locator('[data-testid="day-button"]').click();
     // Auto-wait for the dropdown menu to be visible

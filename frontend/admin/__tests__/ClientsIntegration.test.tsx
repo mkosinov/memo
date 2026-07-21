@@ -35,6 +35,7 @@ vi.mock('@memo/api-client', () => {
     patchPayment: vi.fn(),
     deletePayment: vi.fn(),
     getClientVisitors: vi.fn(),
+    patchVisit: vi.fn(),
   };
 });
 
@@ -48,6 +49,7 @@ import {
   deleteRecord,
   createPayment,
   getClientVisitors,
+  patchVisit,
   ApiError,
 } from '@memo/api-client';
 
@@ -344,9 +346,11 @@ describe('ClientCardModal ↔ ClientRecordTab integration (real components)', ()
       updated_at: '',
     });
     vi.mocked(getClientVisitors).mockResolvedValue(mockVisitors);
+    vi.mocked(patchVisit).mockResolvedValue({ ...mockRecord.visits[0], status: 'visited' });
 
     vi.mocked(useQueryClient).mockReturnValue({
       invalidateQueries: mockInvalidateQueries,
+      getQueryData: vi.fn(() => undefined),
       setQueryData: vi.fn(),
       setQueriesData: vi.fn(),
       fetchQuery: vi.fn(),
@@ -443,8 +447,7 @@ describe('ClientCardModal ↔ ClientRecordTab integration (real components)', ()
     });
   });
 
-  it.skip('record tab status icon cycles visit status', async () => {
-    // SKIPPED: Real ClientRecordTab uses visit-status-select (dropdown), not visit-status-icon (button)
+  it('record tab visit status cycles via StatusPicker', async () => {
     const { ClientCardModal } = await import('@/app/(main)/clients/components/ClientCardModal');
     render(
       <UIProvider><QueryClientProvider client={createQueryClient()}>
@@ -454,17 +457,25 @@ describe('ClientCardModal ↔ ClientRecordTab integration (real components)', ()
 
     // Switch to record tab
     fireEvent.click(screen.getByText(/10\.05\.2026/));
-
     await waitFor(() => {
       expect(screen.getByTestId('client-record-tab')).toBeInTheDocument();
     });
 
-    // Click the status icon to cycle
-    fireEvent.click(screen.getByTestId('visit-status-icon'));
+    // Wait for visits table to render, find the status picker trigger
+    // testid pattern: visit-${visitId}-status-trigger (visit id = 'v1' from mockRecord)
+    const statusTrigger = await screen.findByTestId('visit-v1-status-trigger');
+    fireEvent.click(statusTrigger);
 
-    // Save button should be enabled
+    // Popover opens, select "visited" option
+    const visitedOption = await screen.findByTestId('visit-v1-status-option-visited');
+    fireEvent.click(visitedOption);
+
+    // Assert patchVisit was called with { status: 'visited' }
     await waitFor(() => {
-      expect(screen.getByTestId('btn-save-record')).toBeEnabled();
+      expect(patchVisit).toHaveBeenCalledWith(
+        'v1',
+        expect.objectContaining({ status: 'visited' }),
+      );
     });
   });
 

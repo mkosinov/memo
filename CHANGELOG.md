@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — 2026-07-21
+
+### Fixed
+- **Wave 2A — Test-debt cleanup: un-skip 2 E2E, delete 2 dead test files, rewrite 1 vitest test** — branch `feat-test-debt-wave2a` (5 commits: e8c4e21, 1f0eab8, 3c51498, e8c68cc, 604e592):
+  - **#155 — un-skip scenario 18:** Removed `test.skip(true,...)` — stats are per-request SQL scalar subqueries (no cache). Flake was on `GET /payments/{id}` payment-existence check, not stats. No poll — investigate root cause in Wave 3 if CI flakes. 1 line changed.
+  - **#156 — un-skip US-M09 modal-no-jump:** `test.fixme` → `test`. openModal wrong-activity bug fixed in #124 Wave 1. Cross-tab dimension comparison kept as code test (stronger than visual screenshots). #XXX → #156.
+  - **#157 — delete modal-blur-footer.spec.ts:** Weak z-index proxy (`zIndex > 0`) — NOT actual blur. Bug #86 (badge z-110 above modal z-50) covered by existing `modal-settings.png` visual regression. 30 lines deleted.
+  - **#158 — delete private-toggle-layout.spec.ts:** Point-fix regression for bug #83 (CSS `flex-row`→`flex-col` on "Приватное" label/toggle). Covered by existing `modal-settings.png` screenshot. 36 lines deleted.
+  - **#163 — rewrite visit-status-cycle vitest test:** Replaced `it.skip` with real test using StatusPicker testid pattern (`visit-v1-status-trigger`, `visit-v1-status-option-visited`). Added `patchVisit` to `@memo/api-client` mock block + `getQueryData` to `useQueryClient` mock. Asserts `patchVisit` called with `('v1', {status:'visited'})`. +18/-7 lines.
+  - **Test counts:** backend 668 pass (untouched), frontend vitest 1194 pass + 0 skip (up from 1193 + 1), type-check clean. E2E verification deferred to CI.
+  - **Zero production code changed.**
+  - Design spec: `docs/specs/2026-07-21-test-debt-wave2a-design.md`
+  - Plan: `docs/plans/2026-07-21-test-debt-wave2a.md`
+
 ## [Unreleased] — 2026-07-20
 
 ### Fixed

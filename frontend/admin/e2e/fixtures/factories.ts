@@ -35,25 +35,7 @@ export async function createTestClient(
     data: { name, phone, channel: 'telegram' },
   });
   expect(resp.ok()).toBeTruthy();
-  const client = await resp.json();
-
-  // Verify the new client is queryable before returning.
-  // The backend's get_db_session commits in the finally block — AFTER the
-  // HTTP response is sent. Without this, page.goto('/clients') can trigger
-  // a GET that arrives before the commit is visible, returning stale data.
-  await expect
-    .poll(
-      async () => {
-        const listResp = await api.get(`${BACKEND}/api/v1/clients?per_page=100`);
-        const list = await listResp.json();
-        const items = list.items || list; // handle both paginated and flat responses
-        return items.some((c: any) => c.id === client.id);
-      },
-      { timeout: 5_000, intervals: [50, 100, 200, 500] },
-    )
-    .toBe(true);
-
-  return client;
+  return await resp.json();
 }
 
 /**
@@ -86,21 +68,7 @@ export async function createTestActivity(
     },
   });
   expect(resp.ok()).toBeTruthy();
-  const activity = await resp.json();
-
-  // Verify the new activity is queryable before returning (commit-race fix).
-  await expect
-    .poll(
-      async () => {
-        const listResp = await api.get(`${BACKEND}/api/v1/activities`);
-        const items = await listResp.json();
-        return items.some((a: any) => a.id === activity.id);
-      },
-      { timeout: 5_000, intervals: [50, 100, 200, 500] },
-    )
-    .toBe(true);
-
-  return activity;
+  return await resp.json();
 }
 
 /**
@@ -124,22 +92,7 @@ export async function createTestRecord(
     },
   });
   expect(resp.ok()).toBeTruthy();
-  const record = await resp.json();
-
-  // Verify the new record is queryable before returning (commit-race fix).
-  await expect
-    .poll(
-      async () => {
-        const listResp = await api.get(`${BACKEND}/api/v1/records`);
-        const list = await listResp.json();
-        const items = list.items || list; // handle both paginated and flat responses
-        return items.some((r: any) => r.id === record.id);
-      },
-      { timeout: 5_000, intervals: [50, 100, 200, 500] },
-    )
-    .toBe(true);
-
-  return record;
+  return await resp.json();
 }
 
 /**

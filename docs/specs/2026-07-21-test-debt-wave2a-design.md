@@ -1,242 +1,162 @@
-# Design: Test-debt Wave 2A — Cheap wins + un-skip verification
+# Design: Test-debt Wave 2A — Cheap wins + dead-test removal
 
 > Spec for Wave 2A of the test-debt cleanup.
 > Base commit: `be2fa8c` (main, includes Wave 0 inventory doc).
-> Date: 2026-07-21.
-> GH issues: #155, #156, #157, #158, #163.
-> Related: #124 (Wave 1 openModal fix — merged), #164 (Wave 2B stale-cache — out of scope).
+> Date: 2026-07-21 (revised per user feedback).
+> GH issues: #155, #156, #163.
+> Related: #124 (Wave 1 openModal fix — merged), #157 #158 (closing via deletion).
 
 ## Rationale
 
-After Wave 0 (inventory) and Wave 1 #124 (openModal fix), several disabled tests
-are now likely unblocked. Wave 2A re-enables them and fixes one vitest test
-that mismatches the current implementation. This is pure test-debt cleanup —
-**no production code changes**. The goal is to reduce the disabled-test count
-by 5 (4 E2E + 1 vitest) and verify they PASS on CI.
+After Wave 0 (inventory) and Wave 1 #124 (openModal fix), some disabled tests
+are now unblocked; others are low-value point-fix regression tests better
+retired than maintained. Wave 2A re-enables 2 (1 E2E + 1 vitest) and deletes
+2 dead E2E tests whose regressions are covered by existing visual regression
+screenshots. This is pure test-debt cleanup — **no production code changes**.
 
 ## Scope
 
-### IN scope (3 tasks, one branch `feat-test-debt-wave2a`)
+### IN scope (5 changes, one branch `feat-test-debt-wave2a`)
 
-| # | Task | GH issue | Files | Classification |
-|---|------|----------|-------|-----------------|
-| 2.1 | scenario 18: retry/poll around `GET /payments/{id}` | #155 | `frontend/admin/e2e/unified-rows.spec.ts` (~5 lines) | small |
-| 2.2 | US-M09 + US-M10 + US-M01: un-skip 3 `test.fixme` + verify | #156, #157, #158 | `modal-blur-footer.spec.ts`, `modal-no-jump.spec.ts`, `private-toggle-layout.spec.ts` | small |
-| 2.3 | vitest ClientsIntegration:446: full test rewrite for `StatusPicker` | #163 | `frontend/admin/__tests__/ClientsIntegration.test.tsx` (~30 lines) | small |
-
-### Cascade free-win verify (no code change)
-
-`activity-details-modal.spec.ts:219` — test 4 "Settings update — service_id changes
-in DB" has a defensive guard `if (!activity) { test.skip(); return; }` after
-`openModal`. After #124 Wave 1, `openModal` reliably returns an activity, so
-this guard should never fire. **No code change** — just verify the test PASSes
-on CI. If it FAILs → it's a real bug (not our regression), escalate.
+| # | Change | GH issue | Files | Classification |
+|---|--------|----------|-------|-----------------|
+| 2.1 | scenario 18: un-skip (no poll) | #155 | `frontend/admin/e2e/unified-rows.spec.ts` (~1 line) | trivial |
+| 2.2 | US-M09: un-skip fixme + update annotation | #156 | `frontend/admin/e2e/modal-no-jump.spec.ts` (2 lines) | trivial |
+| 2.3 | US-M10: DELETE test file (weak z-index proxy, not blur) | #157 (close) | `frontend/admin/e2e/modal-blur-footer.spec.ts` (delete) | trivial |
+| 2.4 | US-M01: DELETE test file (point-fix regression, covered by `modal-settings.png`) | #158 (close) | `frontend/admin/e2e/private-toggle-layout.spec.ts` (delete) | trivial |
+| 2.5 | vitest #163: full test rewrite for `StatusPicker` | #163 | `frontend/admin/__tests__/ClientsIntegration.test.tsx` (~30 lines) | small |
 
 ### OUT of scope (explicit)
 
-- **2.4** visual-regression snapshot regen (#109) → separate followup micro-PR
-  (requires `workflow_dispatch` on pushed branch for baseline regen).
-- **2.5** unified-rows stale-cache (#164) → Wave 2B (needs React Query audit first).
-- **#160** column-mode dropdown race (6 fixme) → Wave 3 (real product bug in Topbar.tsx).
-- **#159** records detail panel (2 fixme) → Wave 3.
-- **#155** backend write-visibility root cause → Wave 3 (we only harden the test in 2.1).
-- **#161** wave6 cond-skip verification (6 tests) → Wave 4.
-- **#162** wave6 "Add visitor button not found" → Wave 4.
-- **Production code** (.tsx, .ts, .py, .css) → NOT touched at all.
+- **2.4 (original)** visual-regression snapshot regen (#109) → separate followup micro-PR
+- **2.5 (original)** unified-rows stale-cache (#164) → Wave 2B
+- **#160** column-mode dropdown race (6 fixme) → Wave 3
+- **#159** records detail panel (2 fixme) → Wave 3
+- **#155** backend write-visibility root cause → Wave 3 (if CI still flakes after un-skip)
+- **#161** wave6 cond-skip verification (6 tests) → Wave 4
+- **#162** wave6 "Add visitor button not found" → Wave 4
+- **Production code** (.tsx, .ts, .py, .css) → NOT touched
 
-## Task Details
+## Design decisions (from user review)
 
-### 2.1 — scenario 18: retry/poll around GET /payments/{id} (#155)
+### 2.1 — scenario 18: no poll, just un-skip (#155)
 
-**Problem:** `unified-rows.spec.ts:854` scenario 18 is a pure API test
-(`async ({ request })` — no `page` fixture, never calls `openModal`). It was
-skipped after #124 Wave 1 because un-skipping 7 earlier scenarios shifted test
-ordering and exposed a backend write-visibility flake: `GET /payments/{id}`
-returns non-OK immediately after `POST /api/v1/payments` creates the payment.
+User: "if POST hard-delete is done, GET should immediately return updated stats
+because stats are computed per-request on the backend."
 
-**Fix:** Replace `test.skip(true, 'pre-existing backend flake...')` with
-`test(...)`. Wrap the line-870 `expect(getResp.ok()).toBeTruthy()` in an
-`expect.poll` with timeout 5s and intervals [200, 500, 1000]:
+Verified: `total_paid` is an inline SQL scalar subquery
+(`backend/src/services/client.py:67-74`), computed per-request. No caching.
+The DELETE flow (`BaseRepository.delete` → `session.flush()` → DI commit
+before response) ensures committed data is visible to subsequent GETs.
 
-```typescript
-// Verify payment exists via API (retry — backend write may not be immediately readable, GH #155)
-await expect.poll(async () => {
-  const r = await request.get(`${BACKEND}/api/v1/payments/${payment.id}`);
-  return r.ok();
-}, { timeout: 5_000, intervals: [200, 500, 1000] }).toBeTruthy();
-```
+The original flake was on `GET /payments/{payment.id}` (line 870, payment
+existence check), NOT on stats. If this flakes on CI after un-skip → we
+investigate the root cause (SQLite write-visibility), NOT mask it with a poll.
+**No poll added.** Just `test.skip` → `test`.
 
-This pattern is already used in `activity-details-modal.spec.ts:248` — it is
-the idiomatic retry approach in this codebase. The `try/finally` cleanup block
-is preserved unchanged.
+### 2.2 — US-M09: keep as code test, un-skip (#156)
 
-**Annotation update:** Replace `test.skip(true, 'pre-existing backend flake (GH #155)...')`
-with a `test(...)` call. Add a comment above the poll explaining the retry:
-`// GH #155: backend write not immediately readable — poll until OK`.
+User: "keep this test as a code test." The cross-tab dimension comparison
+(width/height/x across settings → client → settings) is a strong behavioral
+assertion that a visual screenshot cannot fully replicate (screenshots compare
+to baselines, not to each other). Keep as `test(...)`, update `#XXX` → `#156`.
 
-### 2.2 — US-M09 + US-M10 + US-M01: un-skip 3 fixme (#156, #157, #158)
+### 2.3 — US-M10: DELETE (weak proxy test) (#157)
 
-**Problem:** 3 E2E tests marked `test.fixme` because `openModal` was not opening
-the dialog (blocking all 3). The annotation used `#XXX` placeholder (no real
-issue filed). Wave 0 created issues #156, #157, #158. #124 Wave 1 fixed
-`openModal` to target by `activity_id` via `resolveRecordDate` — these tests
-should now PASS.
+User: "delete." The test checks `zIndex > 0` on the dialog element — NOT actual
+blur. Bug #86 was about z-index stacking (badge z-110 above modal z-50, fix
+raised modal to z-[200]). The existing `modal-settings.png` visual regression
+screenshot captures the full modal including any badge overlap — if the z-index
+regression returns, the screenshot diff catches it. Zero loss from deletion.
 
-**Fix (per file):**
+### 2.4 — US-M01: DELETE (point-fix regression test) (#158)
 
-1. **`modal-blur-footer.spec.ts:8`** (US-M10, #157):
-   - `test.fixme(` → `test(`
-   - Annotation: `[deferred: openModal dialog not opening, see GH issue #XXX]` → `[GH #157 — unblocked by #124 Wave 1 openModal fix]`
-   - Also update stale header comment `#XXX` → `#157`
+User: "this was a point fix with a test. The test is no longer needed."
 
-2. **`modal-no-jump.spec.ts:8`** (US-M09, #156):
-   - `test.fixme(` → `test(`
-   - Annotation: `[deferred: openModal dialog not opening, see GH issue #XXX]` → `[GH #156 — unblocked by #124 Wave 1 openModal fix]`
-   - Also update stale header comment `#XXX` → `#156`
+Bug #83 was a CSS class change (`flex-row` → `flex-col` on the "Приватное"
+label/toggle wrapper in `SettingsTab.tsx:154`). The existing
+`modal-settings.png` visual regression screenshot captures the full settings
+tab — if `flex-col` is removed, the label/toggle layout changes and the
+screenshot diff catches it. The test was a 1-assertion point check with heavy
+E2E overhead (open schedule → open modal → switch to settings → measure y
+coordinates). Delete the file.
 
-3. **`private-toggle-layout.spec.ts:8`** (US-M01, #158):
-   - `test.fixme(` → `test(`
-   - Annotation: `[deferred: settings tab not found, see GH issue #XXX]` → `[GH #158 — unblocked by #124 Wave 1 openModal fix]`
-   - Also update stale header comment `#XXX` → `#158`
-   - **Note:** This test also clicks `[data-testid="tab-settings"]` then expects
-     `[data-testid="settings-tab"]`. If the settings-tab testid has drifted,
-     the test will fail on `toBeVisible()` — that would be a real UI testid
-     mismatch (separate issue), NOT an openModal problem.
+### 2.5 — vitest #163: full rewrite (kept from original spec)
 
-**Risk handling:** If any of the 3 FAILs on CI:
-- Check if it's an openModal regression (dialog not visible) → re-skip + investigate
-- Check if it's a testid drift (selector not found) → re-skip with correct issue reference
-- Check if it's a real UI bug → re-skip, leave issue open with CI artifact comment
-
-### 2.3 — vitest ClientsIntegration:446: full test rewrite (#163)
-
-**Problem:** `ClientsIntegration.test.tsx:446` is `it.skip` with comment
-"Real ClientRecordTab uses visit-status-select (dropdown), not
-visit-status-icon (button)". This premise is **doubly wrong**:
-
-1. `visit-status-select` does NOT exist anywhere in the codebase.
-2. `visit-status-icon` does NOT exist either — the real implementation is
-   `StatusPicker` (`variant="icon"`) rendered by `RecordVisitsTable` with
-   testid prefix `visit-${visitId}-status`.
-3. Clicking status does NOT enable `btn-save-record` — visit status changes go
-   through `onPatchVisit(visitId, {status})` directly (not through the
-   record-level `hasChanges` / `handleSave` flow).
+The skipped test has a doubly-wrong premise:
+1. `visit-status-icon` testid does not exist — real impl is `StatusPicker`
+   with testid `visit-${visitId}-status-{trigger,popover,option-${status}}`.
+2. Clicking status does NOT enable `btn-save-record` — visit status changes go
+   through `onPatchVisit(visitId, {status})` directly.
 
 **Real implementation (verified):**
 - `RecordVisitsTable.tsx:438` renders `<StatusPicker testIdPrefix={isNew ? 'add-visitor-status' : \`visit-${r.id}-status\`} />`
-- `StatusPicker.tsx` renders:
-  - Trigger button: `data-testid="${prefix}-trigger"`
-  - Popover: `data-testid="${prefix}-popover"` (when open)
-  - Options: `data-testid="${prefix}-option-${status}"` (waiting, visited, missed, cancelled)
-- Selecting an option calls `onChange(status)` → `onPatchVisit(r.id!, {status})`
+- `StatusPicker.tsx` renders trigger (`${prefix}-trigger`), popover (`${prefix}-popover`), options (`${prefix}-option-${status}`)
+- Selecting an option → `onChange(status)` → `onPatchVisit(r.id!, {status})` → `apiPatchVisit(visitId, VisitPatch)`
 
-**New test (replaces the skipped one):**
+**New test:** render ClientCardModal → switch to record tab → find
+`visit-v1-status-trigger` → click → find `visit-v1-status-option-visited` →
+click → assert `patchVisit` called with `('v1', { status: 'visited' })`.
 
-```typescript
-it('record tab visit status cycles via StatusPicker', async () => {
-  // Setup: render ClientCardModal with a record that has 1 visit
-  const { ClientCardModal } = await import('@/app/(main)/clients/components/ClientCardModal');
-  render(
-    <UIProvider><QueryClientProvider client={createQueryClient()}>
-      <ClientCardModal client={mockClientWithRecords} isOpen={true} onClose={vi.fn()} mode="view" />
-    </QueryClientProvider></UIProvider>,
-  );
-
-  // Switch to record tab
-  fireEvent.click(screen.getByText(/10\.05\.2026/));
-  await waitFor(() => {
-    expect(screen.getByTestId('client-record-tab')).toBeInTheDocument();
-  });
-
-  // Wait for visits table to render, find the status picker trigger
-  // testid pattern: visit-${visitId}-status-trigger
-  const statusTrigger = await screen.findByTestId(/visit-.*-status-trigger/);
-  fireEvent.click(statusTrigger);
-
-  // Popover opens, select "visited" option
-  const visitedOption = await screen.findByTestId(/visit-.*-status-option-visited/);
-  fireEvent.click(visitedOption);
-
-  // Assert patchVisit mock was called with { status: 'visited' }
-  await waitFor(() => {
-    expect(patchVisit).toHaveBeenCalledWith(
-      expect.any(String),
-      expect.objectContaining({ status: 'visited' }),
-    );
-  });
-});
-```
-
-**TDD approach:**
-- RED: write the new test first → it fails (mock not set up, or selectors wrong)
-- GREEN: wire up `patchVisit` mock in the test's mock setup block, adjust selectors
-- The mock setup for `patchVisit` must match existing patterns in the test file
-  (check how `createPayment`, `deleteRecord`, `updateRecord` are mocked)
-
-**Annotation:** Remove `it.skip` → `it`. Remove the stale comment about
-`visit-status-select` / `visit-status-icon`.
+The `@memo/api-client` mock block (lines 11-39) currently does NOT export
+`patchVisit` — it must be added. See plan for exact mock setup.
 
 **Domain rules reference:** `docs/domain-rules/visits.md` — VisitStatus enum:
 waiting, visited, missed, cancelled. PATCH /api/v1/visits/{id} updates status.
-
-### Cascade free-win verify (no code change)
-
-`activity-details-modal.spec.ts:215` test 4 "Settings update — service_id
-changes in DB" has `if (!activity) { test.skip(); return; }` at line 219.
-After #124 Wave 1, `openModal` reliably returns an activity object. This test
-is NOT fixme or skip-annotated — it's a regular `test(...)` with a defensive
-inner guard. We just verify it PASSes on CI. No code change in this file.
 
 ## Verification Strategy
 
 ### Local (before push)
 - **Vitest:** `cd frontend/admin && pnpm run test` — baseline 1193 pass + 1 skip.
-  After 2.3: expect 1194 pass + 0 skip (the vitest `it.skip` is un-skipped).
+  After 2.5: expect 1194 pass + 0 skip (the vitest `it.skip` is un-skipped).
 - **Type-check:** `cd frontend/admin && pnpm run type-check` — no regressions
-  (test-only changes, but the rewritten test may have type errors).
-- **E2E local (optional, flaky):** shard-rest local run to spot-check 2.1 + 2.2.
-  CI is the decisive arbiter (local shard env is flaky per #124 experience).
+- **E2E local (optional, flaky):** CI is the decisive arbiter
 
 ### CI (decisive)
-- `test.yml` all jobs:
-  - Backend: unchanged (668 pass, we touch no backend)
-  - Frontend vitest (5 groups): +1 test (2.3 un-skipped) → 1194 pass
-  - E2E shard-schedule: should be unaffected (our tests are in shard-rest files)
-  - E2E shard-rest: +4 tests really running (2.1 scenario 18 + 2.2 × 3 fixme).
-    All 4 should PASS. Cascade guard (activity-details-modal test 4) also runs.
+- `test.yml`:
+  - Backend: unchanged (668 pass)
+  - Frontend vitest (5 groups): +1 test (2.5 un-skipped) → 1194 pass
+  - E2E shard-schedule: should be unaffected (our tests are in shard-rest)
+  - E2E shard-rest: +2 tests really running (2.1 scenario 18 + 2.2 US-M09).
+    -2 test files deleted (2.3 US-M10 + 2.4 US-M01 — removed from suite).
+    Net: shard-rest test count stays similar, 2 more really running.
 
 ### Visual Compliance Gate
 N/A — Wave 2A touches only test files (`.spec.ts`, `.test.tsx`). No `.tsx`,
-`.css`, `.py`, `tailwind.config` changes. Gate skipped per scratchpad policy.
+`.css`, `.py`, `tailwind.config` changes. Gate skipped.
+
+### Post-CI: scenario 18 flake handling
+If scenario 18 (#155) flakes on CI after un-skip (the original symptom: GET
+/payments/{id} non-OK after POST):
+- **Do NOT add a poll/mask.** User directive: "if CI flakes, we investigate
+  WHY it flakes. On prod it categorically should not flake like this."
+- Re-skip with accurate annotation → escalate to Wave 3 backend investigation
+  (SQLite write-visibility root cause).
 
 ## Bundle: Wave 0 inventory doc
 
 The Wave 0 commit `be2fa8c` (`docs/test-debt-inventory.md`) is on local main
-but NOT pushed. It will be cherry-picked (or included via branch base) into
-the `feat-test-debt-wave2a` worktree so it ships with this PR.
+but NOT pushed. It will be included via branch base into the
+`feat-test-debt-wave2a` worktree so it ships with this PR.
 
 ## User Scenarios
 
-| # | Scenario | Test file:line | Kind |
-|---|----------|----------------|------|
-| US-1 | scenario 18: hard delete removes payment from stats (retry on GET) | `unified-rows.spec.ts:854` | E2E API-only |
-| US-2 | US-M09: modal does not jump when switching tabs | `modal-no-jump.spec.ts:8` | E2E UI |
-| US-3 | US-M10: schedule footer blurs when modal is open | `modal-blur-footer.spec.ts:8` | E2E UI |
-| US-4 | US-M01: "Приватное" label stacked above selector | `private-toggle-layout.spec.ts:8` | E2E UI |
-| US-5 | visit status cycle via StatusPicker dropdown | `ClientsIntegration.test.tsx:446` | vitest unit |
+| # | Scenario | Test file:line | Kind | Action |
+|---|----------|----------------|------|--------|
+| US-1 | scenario 18: hard delete removes payment from stats | `unified-rows.spec.ts:854` | E2E API-only | un-skip |
+| US-2 | US-M09: modal does not jump when switching tabs | `modal-no-jump.spec.ts:8` | E2E UI | un-skip |
+| US-3 | US-M10: schedule footer blurs when modal open | `modal-blur-footer.spec.ts:8` | E2E UI | DELETE file |
+| US-4 | US-M01: "Приватное" label stacked above selector | `private-toggle-layout.spec.ts:8` | E2E UI | DELETE file |
+| US-5 | visit status cycle via StatusPicker dropdown | `ClientsIntegration.test.tsx:446` | vitest unit | rewrite |
 
-Each scenario maps to a re-enabled test that was previously disabled. Success
-= all 5 PASS on CI (green PR). Failure = investigate and either fix or re-skip
-with accurate annotation.
+Success = all remaining tests PASS on CI (green PR) + 2 files deleted.
 
 ## Open risks
 
-1. **2.2 private-toggle-layout #158:** May fail on `settings-tab` testid drift
-   (not openModal). If so → re-skip with accurate issue, NOT a Wave 2A blocker.
-2. **2.1 scenario 18 #155:** The retry/poll may not be enough if the backend
-   has a deeper write-visibility bug (not just timing). If poll times out at
-   5s → re-skip, escalate to Wave 3 backend investigation.
-3. **2.3 StatusPicker testid:** The test relies on `findByTestId(/visit-.*-status-trigger/)`.
-   If the mock visit data doesn't have an `id` field (mock may return `{}` or
-   `null`), the testid won't render. The mock setup must include a visit with
-   a valid `id` field.
+1. **2.1 scenario 18 #155:** May flake (GET /payments/{id} after POST). If so →
+   re-skip + investigate root cause (NOT poll). Escalate to Wave 3.
+2. **2.5 StatusPicker testid:** The test uses `findByTestId('visit-v1-status-trigger')`.
+   Mock visit id is `'v1'` (from `mockRecord.visits[0].id`). If the mock renders
+   differently (e.g., loading state before visits table appears), `findByTestId`
+   may time out. The test uses `findByTestId` (waits up to 1000ms by default),
+   but may need a `waitFor` wrapper if async rendering delays the picker.

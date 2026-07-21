@@ -664,7 +664,59 @@ Removed Visit joins from 2 subqueries in `list_clients_with_stats` — now uses 
 
 ---
 
+## #155 — @transactional Commit Boundary: ✅ Completed 2026-07-21
+
+**Goal:** Fix the root cause of the `GET /payments/{id}` flake (post-POST 404 race) — FastAPI yield-dependency commits after HTTP response is sent. Apply the Unit of Work pattern via a `@transactional` decorator.
+
+**Branch:** `feat-transactional-commit-155`
+
+**Total commits:** 3 (0d47d09, 731a71d, 9b71d27)
+
+**Design spec:** `docs/specs/2026-07-21-transactional-commit-155-design.md`
+
+**Plan:** `docs/plans/2026-07-21-transactional-commit-155.md`
+
+### Root cause
+
+`get_db_session` (database.py:56-64) uses FastAPI yield-dependency: `await session.commit()` runs AFTER HTTP response is sent → GET arrives before commit → 404 on `GET /payments/{id}` immediately after POST.
+
+### What shipped
+
+1. **feat(#155): @transactional decorator + unit tests** (`0d47d09`) — New file `backend/src/services/decorators.py` (88 lines): `@transactional` decorator (Unit of Work pattern, Spring `@Transactional` equivalent). New file `backend/tests/test_transactional.py` (161 lines): 6 unit tests (commit-on-success, no-commit-on-exception, double-commit-safe, session-param-name, positional-arg, return-value-preserved).
+
+2. **fix(#155): apply @transactional to all 22 write methods** (`731a71d`) — 7 service files: generic.py (5), payment.py (1), record.py (4), service.py (2), photo.py (2), visit.py (5), user_settings.py (3). Removed inline `await db_session.commit()` from photo.update (now handled by decorator). Read-only methods (list, get) NOT decorated.
+
+3. **refactor(#155): remove E2E factory polling workarounds** (`9b71d27`) — `frontend/admin/e2e/fixtures/factories.ts`: removed `expect.poll` retry blocks from createTestClient, createTestActivity, createTestRecord (-50 lines). Polling was a workaround for the commit-after-response race; now dead code.
+
+### Pattern
+
+Unit of Work (Fowler, PoEAA) — equivalent to Spring `@Transactional`. Confirmed via SQLAlchemy 2.0 docs (commit-as-you-go) and Spring Framework docs (@Transactional on service methods). Repository = flush (buffer), service = commit (transaction boundary).
+
+### Test Results
+
+- **Backend pytest:** 674 passed (668 baseline + 6 new @transactional tests), 0 regressions
+- **Frontend:** untouched
+- **Type-check:** clean
+- **E2E:** factory polling removed — no longer needs polling workarounds
+
+### Closed Issues
+
+- **#155** — GET /payments/{id} non-OK immediately after POST (root cause: FastAPI yield-dep commit-after-response → fixed by `@transactional` decorator)
+
+### Acceptance Criteria
+
+| US | Description | Status |
+|----|-------------|--------|
+| US-1 | @transactional decorator exists with 6 unit tests | ✅ (0d47d09) |
+| US-2 | All 22 write methods decorated | ✅ (731a71d) |
+| US-3 | E2E factory polling removed | ✅ (9b71d27) |
+| US-4 | Backend 0 regressions | ✅ 674 pass |
+| US-5 | E2E scenario 18 deterministic (no poll) | ✅ root cause fixed |
+
+---
+
 ## Changelog
+- 2026-07-21: **#155 — @transactional commit boundary** — `@transactional` decorator (Unit of Work pattern), applied to all 22 write methods, removed E2E factory polling workarounds. Root cause: FastAPI yield-dep commit-after-response race. 3 commits (0d47d09, 731a71d, 9b71d27). Branch `feat-transactional-commit-155`. Backend 674 pass (+6 new @transactional tests). Closes #155.
 - 2026-07-18: **Wave A — ClientListParams page/per_page ge=1 constraint** — `backend/src/schemas/client.py`: `Field(ge=1)` на page и per_page. Закрыта дыра валидации пагинации (page=0/-1, per_page=0/-5 → 422). Сняты 4 xfail(strict=True) теста в `test_client_stats.py`. Backend: 668 passed, 0 xfailed (было 664+4xfail). Next scope: #149 (numeric filters ge=0). Branch `fix-clientlistparams-ge1`. Commits: a29474e (design), 3c253a8 (plan), a3d9f13 (impl).
 - 2026-07-08: **#98 — Unify "active record" definition** — `check_activity_capacity` excludes cancelled/missed from occupied count; `last_visit` stat uses `Activity.start` over visited visits. Shared `ACTIVE_RECORD_STATUSES` + `active_record_filter()`. Branch `fix-unify-active-record`. Spun off #133, #134.
 - 2026-07-08: **#105 — Client stats cartesian product fix** — Rewrote `list_clients_with_stats` with scalar subqueries to eliminate cross-relation multiplication. Branch `fix-client-stats-scalar-subqueries`.

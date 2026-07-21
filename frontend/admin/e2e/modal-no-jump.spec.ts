@@ -3,9 +3,9 @@ import { waitForScheduleReady, openModal } from './fixtures/helpers';
 
 // Tests in this file are temporarily marked as test.fixme due to
 // pre-existing flakes in the parallel-shard E2E setup. See GH issue
-// #XXX (to be filed separately) for the proper fix.
+// #156 for the proper fix.
 
-test.fixme('US-M09: Modal does not jump when switching tabs [deferred: openModal dialog not opening, see GH issue #XXX]', async ({ page }) => {
+test('US-M09: Modal does not jump when switching tabs [GH #156 — unblocked by #124 Wave 1 openModal fix]', async ({ page }) => {
   await page.goto('/schedule');
   await waitForScheduleReady(page);
 

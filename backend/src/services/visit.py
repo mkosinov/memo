@@ -18,6 +18,7 @@ from src.domain.record_visits import (
 from src.models.record import Record
 from src.models.visit import Visit
 from src.schemas.visit import VisitCreate, VisitUpdate, VisitPatch
+from src.services.decorators import transactional
 
 
 class VisitService:
@@ -44,6 +45,7 @@ class VisitService:
         )
         return result.scalar_one_or_none()
 
+    @transactional
     async def create(
         self, db_session: AsyncSession, data: VisitCreate,
     ) -> Visit | None:
@@ -69,6 +71,7 @@ class VisitService:
         await db_session.refresh(visit)
         return visit
 
+    @transactional
     async def update(
         self, db_session: AsyncSession, visit_id: str, data: VisitUpdate,
     ) -> Visit | None:
@@ -86,6 +89,7 @@ class VisitService:
         await db_session.refresh(visit)
         return visit
 
+    @transactional
     async def patch(
         self, db_session: AsyncSession, visit_id: str, data: VisitPatch,
     ) -> Visit | None:
@@ -107,6 +111,7 @@ class VisitService:
         await db_session.refresh(visit)
         return visit
 
+    @transactional
     async def delete(self, db_session: AsyncSession, visit_id: str) -> bool:
         """Hard-delete the visit and cascade: derive record.status + record.seats."""
         visit = await self.get(db_session, visit_id)
@@ -121,6 +126,7 @@ class VisitService:
         await db_session.flush()
         return True
 
+    @transactional
     async def update_status(
         self, db_session: AsyncSession, visit_id: str, status: str,
     ) -> Visit | None:

@@ -9,6 +9,7 @@ from src.repositories.generic import get_base_repository
 from src.models.payment import Payment
 from src.schemas.payment import PaymentCreate, PaymentResponse, PaymentUpdate
 from src.services.generic import GenericService
+from src.services.decorators import transactional
 
 
 class PaymentService(GenericService[PaymentCreate, PaymentUpdate, PaymentResponse]):
@@ -22,6 +23,7 @@ class PaymentService(GenericService[PaymentCreate, PaymentUpdate, PaymentRespons
 
     NOT_NULL_FIELDS = {"amount"}
 
+    @transactional
     async def create(
         self, db_session: AsyncSession, data: PaymentCreate
     ) -> PaymentResponse:

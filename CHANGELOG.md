@@ -10,8 +10,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased] — 2026-07-21
 
 ### Fixed
+- **#155 — @transactional commit boundary (root cause of GET /payments/{id} flake)** — branch `feat-transactional-commit-155` (3 commits: 0d47d09, 731a71d, 9b71d27):
+  - **Root cause:** `get_db_session` (database.py:56-64) uses FastAPI yield-dependency — `await session.commit()` runs AFTER HTTP response is sent → GET arrives before commit → 404 on `GET /payments/{id}` immediately after POST. Fix: `@transactional` decorator commits in the service method, before the route handler returns to FastAPI. `get_db_session` commit retained as fallback (double-commit = SQLAlchemy no-op).
+  - **New `@transactional` decorator** (`backend/src/services/decorators.py`, 88 lines) — Unit of Work pattern (Spring `@Transactional` equivalent). Supports positional & keyword `db_session` param, double-commit safe, preserves return value. 6 unit tests (`backend/tests/test_transactional.py`, 161 lines).
+  - **Applied to all 22 write methods** across 7 service files: generic.py (5), payment.py (1), record.py (4), service.py (2), photo.py (2), visit.py (5), user_settings.py (3). Removed inline `await db_session.commit()` from photo.update (now handled by decorator).
+  - **Removed E2E factory polling workarounds** (`frontend/admin/e2e/fixtures/factories.ts`): deleted `expect.poll` retry blocks from `createTestClient`, `createTestActivity`, `createTestRecord` (-50 lines). Polling was a workaround for the commit-after-response race; now dead code.
+  - **Pattern:** Unit of Work (Fowler, PoEAA) — equivalent to Spring `@Transactional`. Confirmed via SQLAlchemy 2.0 docs (commit-as-you-go) and Spring Framework docs (@Transactional on service methods). Repository = flush (buffer), service = commit (transaction boundary).
+  - **Test counts:** backend 674 passed (668 baseline + 6 new @transactional tests), 0 regressions. E2E factory polling removed (deterministic now).
+  - Design spec: `docs/specs/2026-07-21-transactional-commit-155-design.md`
+  - Plan: `docs/plans/2026-07-21-transactional-commit-155.md`
+
 - **Wave 2A — Test-debt cleanup: un-skip 2 E2E, delete 2 dead test files, rewrite 1 vitest test** — branch `feat-test-debt-wave2a` (5 commits: e8c4e21, 1f0eab8, 3c51498, e8c68cc, 604e592):
-  - **#155 — un-skip scenario 18:** Removed `test.skip(true,...)` — stats are per-request SQL scalar subqueries (no cache). Flake was on `GET /payments/{id}` payment-existence check, not stats. No poll — investigate root cause in Wave 3 if CI flakes. 1 line changed.
+  - **#155 — un-skip scenario 18:** Removed `test.skip(true,...)` — stats are per-request SQL scalar subqueries (no cache). Flake was on `GET /payments/{id}` payment-existence check, not stats. Un-skipped in Wave 2A (root cause fixed later in this branch). 1 line changed.
   - **#156 — un-skip US-M09 modal-no-jump:** `test.fixme` → `test`. openModal wrong-activity bug fixed in #124 Wave 1. Cross-tab dimension comparison kept as code test (stronger than visual screenshots). #XXX → #156.
   - **#157 — delete modal-blur-footer.spec.ts:** Weak z-index proxy (`zIndex > 0`) — NOT actual blur. Bug #86 (badge z-110 above modal z-50) covered by existing `modal-settings.png` visual regression. 30 lines deleted.
   - **#158 — delete private-toggle-layout.spec.ts:** Point-fix regression for bug #83 (CSS `flex-row`→`flex-col` on "Приватное" label/toggle). Covered by existing `modal-settings.png` screenshot. 36 lines deleted.

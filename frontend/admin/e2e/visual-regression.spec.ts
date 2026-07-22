@@ -30,7 +30,7 @@ test.describe('Records Page — Visual Regression', () => {
     await page.clock.install({ time: new Date('2026-06-15T10:00:00') });
   });
 
-  test.fixme('records page default state [deferred: screenshot diff (seed state), see GH issue #XXX]', async ({ page }) => {
+  test('records page default state', async ({ page }) => {
     await waitForRecordsReady(page);
     // Other tests in this shard may create records that appear here,
     // so use a generous pixel diff to tolerate extra table rows.

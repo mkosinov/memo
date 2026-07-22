@@ -325,17 +325,20 @@ test.describe('Clients page', () => {
   // ── 11. Status filter narrows results ──────────────────────────────────
 
   test('11. Status filter narrows results', async ({ page }) => {
-    test.skip(true, '[flaky: status filter selector/timing, tracked in #125]');
     await waitForClientsReady(page);
 
     // Get initial row count (active clients by default)
     const initialCount = await page.locator('table tbody tr').count();
     expect(initialCount).toBeGreaterThan(0);
 
-    // Select "Неактивные" status filter
+    // Select "Неактивные" status filter — wait for filtered API response
     const statusSelect = page.locator('select:has(option:text("Все"))');
+    const filterResponse = page.waitForResponse(
+      (resp) => resp.url().includes('/api/v1/clients') && resp.url().includes('is_active=false'),
+      { timeout: 10_000 },
+    );
     await statusSelect.selectOption('false');
-    await page.waitForTimeout(1500);
+    await filterResponse;
 
     // After filtering, the table should show different results
     // (either fewer rows if no inactive clients, or different set of clients)
@@ -344,8 +347,12 @@ test.describe('Clients page', () => {
     // Don't assert <= because inactive clients could outnumber active ones
 
     // Reset and verify original count returns
+    const resetResponse = page.waitForResponse(
+      (resp) => resp.url().includes('/api/v1/clients') && !resp.url().includes('is_active=false'),
+      { timeout: 10_000 },
+    );
     await page.locator('text=Сбросить фильтры').click();
-    await page.waitForTimeout(1500);
+    await resetResponse;
     const resetCount = await page.locator('table tbody tr').count();
     expect(resetCount).toBe(initialCount);
   });

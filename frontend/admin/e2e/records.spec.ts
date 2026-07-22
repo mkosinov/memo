@@ -23,10 +23,6 @@ import {
 // Tests — Records Page
 // ---------------------------------------------------------------------------
 
-// Tests in this file are temporarily marked as test.fixme due to
-// pre-existing flakes in the parallel-shard E2E setup. See GH issue
-// #XXX (to be filed separately) for the proper fix.
-
 test.describe('Records Page — Table and Filters', () => {
   // ── 1. Page loads with header and table ──────────────────────────────────
 
@@ -215,7 +211,7 @@ test.describe('Records Page — Table and Filters', () => {
 
   // ── 8. Click row — opens detail panel ────────────────────────────────────
 
-  test.fixme('8. Click row — opens detail panel [deferred: pre-existing UI issue, see GH issue #XXX]', async ({ page, request }) => {
+  test('8. Click row — opens detail panel', async ({ page, request }) => {
     const client = await createTestClient(request, { name: 'Detail Panel Test' });
     const activity = await createTestActivity(request);
     const record = await createTestRecord(request, activity.id, client.id);
@@ -283,7 +279,7 @@ test.describe('Records Page — Table and Filters', () => {
 
   // ── 10. Detail panel close button ────────────────────────────────────────
 
-  test.fixme('10. Detail panel close button dismisses panel [deferred: cascade from test 8 pre-existing UI issue, see GH issue #XXX]', async ({ page, request }) => {
+  test('10. Detail panel close button dismisses panel', async ({ page, request }) => {
     const client = await createTestClient(request);
     const activity = await createTestActivity(request);
     const record = await createTestRecord(request, activity.id, client.id);

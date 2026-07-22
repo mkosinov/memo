@@ -47,11 +47,6 @@ test.describe('Wave 6 — StatusPicker shared across sites', () => {
 
     // Find a client tab
     const clientTabs = page.locator('[data-testid^="tab-client-"]');
-    if ((await clientTabs.count()) === 0) {
-      test.skip(true, 'No client records on schedule');
-      return;
-    }
-
     await clientTabs.first().click();
     await expect(page.locator('[data-testid="client-tab"]')).toBeVisible({ timeout: 10_000 });
 
@@ -87,11 +82,6 @@ test.describe('Wave 6 — StatusPicker shared across sites', () => {
     await openModal(page);
 
     const clientTabs = page.locator('[data-testid^="tab-client-"]');
-    if ((await clientTabs.count()) === 0) {
-      test.skip(true, 'No client records');
-      return;
-    }
-
     await clientTabs.first().click();
     await expect(page.locator('[data-testid="client-tab"]')).toBeVisible({ timeout: 10_000 });
 

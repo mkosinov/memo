@@ -7,7 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased] — 2026-07-21
+## [Unreleased] — 2026-07-22
+
+### Fixed
+- **Test-debt Wave 4 — cond-skip verify-first (#161 #162 #124-cascade)** — branch `feat-test-debt-wave4` (4 commits: 1a8ca91, 950b82f, b4f6f97, e41d1f1):
+  - **8 condblock `test.skip` guards removed** across 3 E2E spec files:
+    - `wave6-record-status-derived.spec.ts` — 4 tests (#161 wave6-record-status-derived) + 1 test (#162 scenario 4 add-visitor)
+    - `wave6-status-shared.spec.ts` — 2 tests (#161 wave6-status-shared)
+    - `activity-details-modal.spec.ts` — 1 test (#124 cascade, scenario 4 Sc4)
+  - **Pattern proven 4× now:** prior waves (#124 Wave-1, #152, #155) fixed the root causes that made these guards fire. No code changes needed — pure guard removal.
+  - **Test counts:** vitest 1194 pass, 0 regressions. tsc clean. Backend untouched (unchanged 674 pass).
+  - **CI is decisive arbiter** — all guards removed locally; any flake would indicate an unresolved root cause requiring a new issue.
+  - **Zero production code changed** — test-only cleanup.
+  - Stats: 3 files, -38 lines
+  - Design spec: `docs/specs/2026-07-22-test-debt-wave4-verify-first-design.md`
+  - Plan: `docs/plans/2026-07-22-test-debt-wave4-verify-first.md`
 
 ### Fixed
 - **#155 — @transactional commit boundary (root cause of GET /payments/{id} flake)** — branch `feat-transactional-commit-155` (3 commits: 0d47d09, 731a71d, 9b71d27):

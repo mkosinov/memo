@@ -215,10 +215,6 @@ test.describe('ActivityDetailsModal — Real User Scenarios', () => {
   test('4. Settings update — service_id changes in DB', async ({ page, request }) => {
     // 1. ACTION — open modal on Settings tab
     const activity = await openModal(page);
-    if (!activity) {
-      test.skip();
-      return;
-    }
 
     // Read initial service from DB via the activity that has the modal open
     const beforeRow = queryDBRow(

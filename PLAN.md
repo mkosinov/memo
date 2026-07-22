@@ -664,6 +664,55 @@ Removed Visit joins from 2 subqueries in `list_clients_with_stats` — now uses 
 
 ---
 
+## Wave 4 — Test-debt cleanup: cond-skip verify-first (#161 #162 #124-cascade): ✅ Completed 2026-07-22
+
+**Goal:** Remove 8 conditional `test.skip` guards whose root causes were resolved in prior waves (#124 Wave-1, #152, #155). Prove the pattern 4×: fix root cause → verify guard no longer fires → remove guard.
+
+**Branch:** `feat-test-debt-wave4`
+
+**Total commits:** 4 (1a8ca91, 950b82f, b4f6f97, e41d1f1)
+
+**Design spec:** `docs/specs/2026-07-22-test-debt-wave4-verify-first-design.md`
+
+**Plan:** `docs/plans/2026-07-22-test-debt-wave4-verify-first.md`
+
+**GH issues touched:** #161 (6 tests), #162 (1 test), #124 cascade (1 test)
+
+### What shipped
+
+1. **test(#161): un-skip 4 wave6-record-status cond-skip guards** (`1a8ca91`) — Removed 4 conditional `test.skip` guards from `wave6-record-status-derived.spec.ts` (scenarios US1, US2, US3, US4). These were cond-skips from Wave 6 whose root causes (openModal wrong-activity, seed staleness, commit-after-response race) are all fixed in #124, #152, #155 respectively.
+
+2. **test(#162): un-skip 'Add visitor button not found' cond-skip guard** (`950b82f`) — Removed 1 conditional `test.skip` from `wave6-record-status-derived.spec.ts` (scenario 4 add-visitor). Same root cause chain as #161.
+
+3. **test(#161): un-skip 2 wave6-status-shared cond-skip guards** (`b4f6f97`) — Removed 2 conditional `test.skip` guards from `wave6-status-shared.spec.ts`. StatusPicker shared-component tests (scenario 5/5b) — flake root causes resolved.
+
+4. **test(#124): un-skip activity-details-modal Sc4 cond-skip guard** (`e41d1f1`) — Removed 1 conditional `test.skip` from `activity-details-modal.spec.ts` (scenario 4 Sc4). This was a #124-cascade guard — openModal activity_id targeting fix (#124 Wave-1) resolved the root cause.
+
+### Test Results
+
+- **Backend pytest:** 674 pass (untouched, baseline unchanged from #155)
+- **Frontend vitest:** 1194 pass, 0 regressions (baseline unchanged)
+- **Type-check:** clean (exit 0)
+- **E2E:** not run locally (verification strategy per user directive). CI on PR is decisive arbiter — any flake indicates an unresolved root cause.
+- **Visual gate:** N/A (test-debt cleanup only — no product code changed)
+
+### Acceptance Criteria
+
+| US | Description | Status |
+|----|-------------|--------|
+| US-1 | 4 wave6-record-status-derived guards removed (#161) | ✅ (1a8ca91) |
+| US-2 | 1 add-visitor guard removed (#162) | ✅ (950b82f) |
+| US-3 | 2 wave6-status-shared guards removed (#161) | ✅ (b4f6f97) |
+| US-4 | 1 activity-details-modal Sc4 guard removed (#124 cascade) | ✅ (e41d1f1) |
+| US-5 | 0 new regressions (vitest 1194 pass, tsc clean) | ✅ PASS |
+
+### Test-debt Inventory Update
+
+- **Wave 4:** 8 cond-skip guards removed — #161 (6 tests), #162 (1), #124 cascade (1).
+- **Tracking:** 23 of 33 inventory rows closed. Remaining: #159 records panel (2 fixme), #125 status filter timing (1 skip), #109 snapshot regen (1 fixme), #124 visitor PATCH backend (1 skip — out of scope), 7 legit cond-skip guards in unified-rows (no action).
+
+---
+
 ## #155 — @transactional Commit Boundary: ✅ Completed 2026-07-21
 
 **Goal:** Fix the root cause of the `GET /payments/{id}` flake (post-POST 404 race) — FastAPI yield-dependency commits after HTTP response is sent. Apply the Unit of Work pattern via a `@transactional` decorator.
@@ -726,6 +775,7 @@ Unit of Work (Fowler, PoEAA) — equivalent to Spring `@Transactional`. Confirme
 - 2026-07-17: **E2E Infra Roots (#108, #126)** — SQLite DB lock fix (global WAL + busy_timeout hook, `sqliteExecWithRetry` helper, `cleanTestData` throws on lock), standalone warmup (9 routes in `globalSetup` gated `!SHARD_ID`), ADR 001 WAL-backup caveat. 7 commits (1c30c24, be0b08b, 713ce3f, 662ea67, f39856d, 51dac4c, 5d6028b). Branch `feat-e2e-infra-roots`. Backend 664+4xfail, frontend 1189+1skip.
 - 2026-07-17: **E2E Fixme Cleanup Wave 1 (#121)** — Re-enabled 13 previously-disabled E2E tests whose blocker issues (#84 occupied-calc, #127 cache unification) are now CLOSED. Occupied-calc: 1 test re-enabled (US-S03). Error-messages: 1 test re-enabled ("Недостаточно мест" capacity). Clients: 11 tests re-enabled (create/view/edit/delete/search/modal/record-tab/status/payment/save/cancel). Test 11 (status filter) left skipped (#125). Shard-mode verification gate: 23/23 active tests pass, 0 flakes. Zero product-code changes. 2 commits (0be5188, 0e0ee33). Branch `feat-e2e-fixme-wave1`.
 - 2026-07-20: **#152 — Seed staleness + E2E harness resilience** — Wipe+reseep fix: shard-start `rm -f` shard DB + path guard (shell dry-run test); removed `_exists` guard from seed (fail-loud on UNIQUE, empty-DB contract); globalSetup fail-fast diagnostics (stale DB + missing current-week activities); waitForScheduleReady timeout 60→10s. 4 commits (0e4ea6c, e76f5d2, 05e0eb6, ad77118). Branch `feat-seed-staleness-152`. Backend 668 pass, frontend 1192 pass.
+- 2026-07-22: **Wave 4 — Test-debt cleanup: cond-skip verify-first (#161 #162 #124-cascade)** — Removed 8 condblock `test.skip` guards across 3 E2E spec files: wave6-record-status-derived (4 tests #161 + 1 test #162), wave6-status-shared (2 tests #161), activity-details-modal (1 test #124 cascade). Pattern proven 4×: prior waves (#124 Wave-1, #152, #155) fixed root causes. Zero production code changed. 4 commits (1a8ca91, 950b82f, b4f6f97, e41d1f1). Branch `feat-test-debt-wave4`. Backend 674 pass, frontend 1194 pass. 3 files, -38 lines. 23 of 33 inventory rows closed.
 - 2026-07-21: **Wave 2A — Test-debt cleanup: un-skip 2 E2E, delete 2 dead test files, rewrite 1 vitest test** — Un-skipped scenario 18 (no poll, #155) + US-M09 (#156), deleted modal-blur-footer (#157, covered by visual regression) + private-toggle-layout (#158, covered by visual regression), rewrote vitest visit-status-cycle for StatusPicker (#163, 1193+1→1194+0). Zero production code changed. 5 commits (e8c4e21, 1f0eab8, 3c51498, e8c68cc, 604e592). Branch `feat-test-debt-wave2a`. Backend 668 pass, frontend 1194+0.
 - 2026-07-16: **#129 — Backend health: N+1 fix, capacity re-check, dedup seats** — `list_activities` query count halved (6→2 for 5 activities), update/patch enforce capacity check with 409 on over-capacity, `recompute_record_seats` now single source for `seats` across create/update/patch, bonus `tariff_id` fix in update's Visit constructor, 10 new tests (649→659, 0 regression). 3 commits (625fea5, 4689765, e4a7214). Branch `feat-backend-health-129`.
 - 2026-07-07: **Addendum-2: InlineEditableTable unified rows + hard-delete + deferred undo** — 6 main tasks (backend hard-delete + repo split, frontend Zod schema cleanup, optimistic cache sync, tariff dropdown, deferred delete with undo toast, E2E scenarios 15-19) + FasTP Bug #1 (over-capacity toast). Branch `feat-inline-editable-unified-rows`, 17 commits.

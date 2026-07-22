@@ -32,8 +32,8 @@ These 5 entities have no nested collections and no custom service overrides. PAT
 
 | # | Entity | Patch fields | NOT_NULL_FIELDS |
 |---|--------|-------------|-----------------|
-| 1 | **visitors** | `name`, `age` | `{"name"}` |
-| 2 | **locations** | `name`, `short_title`, `address`, `description`, `capacity`, `yandex_map_url`, `review_url`, `record_info`, `image_url`, `location_hint`, `sort_order` | `{"name", "capacity", "sort_order"}` |
+| 1 | **visitors** | `name`, `age` | `{"name"}` — name is NOT NULL in DB; anonymous visitors don't create Visitor records (they get `visitor_id=None` on the Visit), so every Visitor in DB has a name |
+| 2 | **locations** | `name`, `short_title`, `address`, `description`, `capacity`, `yandex_map_url`, `review_url`, `record_info`, `image_url`, `location_hint`, `sort_order` | `{"name", "capacity", "sort_order"}` — note: `name` field rename to `title` tracked in #172, NOT in this scope |
 | 3 | **materials** | `title`, `description` | `{"title", "description"}` |
 | 4 | **tags** | `tag` | `{"tag"}` |
 | 5 | **masters** | `first_name`, `last_name`, `color`, `position`, `specialty`, `avatar_url`, `sort_order` | `{"first_name", "last_name", "color", "position", "specialty", "sort_order"}` |

@@ -128,10 +128,6 @@ test.describe('Wave 6 — Record status derived from visits', () => {
 
     // Click "Добавить посетителя"
     const addBtn = page.locator('[data-testid="btn-add-visitor"]');
-    if ((await addBtn.count()) === 0) {
-      test.skip(true, 'Add visitor button not found');
-      return;
-    }
     await addBtn.click();
 
     // Wait for form to appear (may be inline)

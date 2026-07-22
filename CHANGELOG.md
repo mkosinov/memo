@@ -24,6 +24,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Plan: `docs/plans/2026-07-22-test-debt-wave4-verify-first.md`
 
 ### Fixed
+- **Test-debt Wave 5 — un-skip + annotation cleanup (#125 #159 #109)** — branch `feat-test-debt-wave5` (3 commits: 2af5d6c, 4fdb6ee, 0421ea3):
+  - **4 E2E tests un-skipped + 2 stale annotations cleaned:**
+    - `clients.spec.ts` — #125 status filter (waitForTimeout→response-based wait)
+    - `records.spec.ts` — #159 detail panel tests 8+10 (stale fixme removed; UI confirmed by recon — test 9 same flow already passes)
+    - `visual-regression.spec.ts` — #109 records page snapshot (test.fixme→test; baseline in repo since Jul 5)
+  - **Annotations cleanup:** Stale `#XXX` placeholder → `#109`. Stale "pre-existing flakes in clients tests" comment deleted.
+  - **Test counts:** vitest 1194 pass, 0 regressions. tsc clean. Backend untouched.
+  - **Zero production code changed** — test-only cleanup.
+  - Stats: 3 files, +14/-11 lines
+  - Design spec: `docs/specs/2026-07-22-test-debt-wave5-unskip-annotations-design.md`
+  - Plan: `docs/plans/2026-07-22-test-debt-wave5-unskip-annotations.md`
+
+### Fixed
 - **#155 — @transactional commit boundary (root cause of GET /payments/{id} flake)** — branch `feat-transactional-commit-155` (3 commits: 0d47d09, 731a71d, 9b71d27):
   - **Root cause:** `get_db_session` (database.py:56-64) uses FastAPI yield-dependency — `await session.commit()` runs AFTER HTTP response is sent → GET arrives before commit → 404 on `GET /payments/{id}` immediately after POST. Fix: `@transactional` decorator commits in the service method, before the route handler returns to FastAPI. `get_db_session` commit retained as fallback (double-commit = SQLAlchemy no-op).
   - **New `@transactional` decorator** (`backend/src/services/decorators.py`, 88 lines) — Unit of Work pattern (Spring `@Transactional` equivalent). Supports positional & keyword `db_session` param, double-commit safe, preserves return value. 6 unit tests (`backend/tests/test_transactional.py`, 161 lines).

@@ -53,6 +53,25 @@ class ServiceUpdate(ServiceBase):
     tag_ids: list[str] = []
 
 
+class ServicePatch(BaseModel):
+    """Request schema for partial update (PATCH /api/v1/services/{id}).
+    All fields optional. None means 'don't change'.
+
+    ``tag_ids``: if sent → hard-replace all tag links. If not sent → preserve existing.
+    ``tariffs``: NOT included — managed via PUT only (see #171 for TariffService extraction).
+    """
+    title: str | None = None
+    description: str | None = None
+    image_url: str | None = None
+    specialty: str | None = None
+    min_age: int | None = None
+    max_age: int | None = None
+    duration: int | None = None
+    record_info: str | None = None
+    material_hint: str | None = None
+    tag_ids: list[str] | None = None
+
+
 class ServiceResponse(ServiceBase):
     model_config = ConfigDict(from_attributes=True)
     id: str

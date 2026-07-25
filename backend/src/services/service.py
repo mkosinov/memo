@@ -12,13 +12,15 @@ from src.repositories.generic import SoftDeleteRepository, get_soft_delete_repos
 from src.models.service import Service
 from src.models.tag import service_tags
 from src.models.tariff import Tariff
-from src.schemas.service import ServiceCreate, ServiceResponse, ServiceUpdate
+from src.schemas.service import ServiceCreate, ServicePatch, ServiceResponse, ServiceUpdate
 from src.services.generic import GenericService
 from src.services.decorators import transactional
 
 
 class ServiceService(GenericService[ServiceCreate, ServiceUpdate, ServiceResponse]):
     """Service service with eager-loaded tariffs/tags and nested create/update."""
+
+    NOT_NULL_FIELDS = {"title", "description", "image_url", "specialty", "min_age", "duration", "record_info"}
 
     def __init__(
         self, repository: SoftDeleteRepository, model: type[Service]
@@ -110,6 +112,55 @@ class ServiceService(GenericService[ServiceCreate, ServiceUpdate, ServiceRespons
                         service_id=service.id, tag_id=tid
                     )
                 )
+
+        await db_session.flush()
+        db_session.expunge(service)
+        return await self.get(db_session, id)
+
+    @transactional
+    async def patch(
+        self, db_session: AsyncSession, id: str, data: ServicePatch
+    ) -> Service | None:
+        """Partial-update a service — only sent fields are changed.
+
+        Scalar fields: applied via exclude_unset. NOT NULL fields
+        with null values are silently stripped.
+
+        tag_ids: if sent → hard-replace all tag links (delete + insert).
+        If not sent → existing tag links are preserved.
+
+        tariffs: NOT touched by PATCH. Use PUT to replace tariffs.
+        """
+        service = await self.get(db_session, id)
+        if not service:
+            return None
+
+        data_dict = data.model_dump(exclude_unset=True)
+
+        # Separate tag_ids from scalar fields
+        tag_ids = data_dict.pop("tag_ids", None)
+
+        # Strip NOT NULL fields sent as null
+        for field in self.NOT_NULL_FIELDS:
+            if field in data_dict and data_dict[field] is None:
+                del data_dict[field]
+
+        # Apply scalar fields
+        for key, value in data_dict.items():
+            setattr(service, key, value)
+
+        # Handle tag_ids: if sent (even if empty list), hard-replace links
+        if tag_ids is not None:
+            await db_session.execute(
+                delete(service_tags).where(service_tags.c.service_id == id)
+            )
+            if tag_ids:
+                for tid in tag_ids:
+                    await db_session.execute(
+                        service_tags.insert().values(
+                            service_id=id, tag_id=tid
+                        )
+                    )
 
         await db_session.flush()
         db_session.expunge(service)

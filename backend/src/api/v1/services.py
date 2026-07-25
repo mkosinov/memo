@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from src.db import SessionDep
 from src.errors import ErrorCode, ErrorDetail
-from src.schemas.service import ServiceCreate, ServiceResponse, ServiceUpdate
+from src.schemas.service import ServiceCreate, ServicePatch, ServiceResponse, ServiceUpdate
 from src.services.service import ServiceService, get_service_service
 
 router = APIRouter(tags=["services"])
@@ -71,6 +71,26 @@ async def update_service(
 ) -> ServiceResponse:
     """Full-update a service by ID (PUT, not PATCH). Replaces tariffs and tag links."""
     svc = await service.update(db_session=session, id=service_id, data=data)
+    if not svc:
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.SERVICE_NOT_FOUND,
+                message="Service not found",
+            ).model_dump(),
+        )
+    return ServiceResponse.model_validate(svc)
+
+
+@router.patch("/{service_id}", response_model=ServiceResponse)
+async def patch_service(
+    service_id: str,
+    data: ServicePatch,
+    service: _ServiceDep,
+    session: SessionDep,
+) -> ServiceResponse:
+    """Partial-update a service by ID (PATCH)."""
+    svc = await service.patch(db_session=session, id=service_id, data=data)
     if not svc:
         raise HTTPException(
             status_code=404,

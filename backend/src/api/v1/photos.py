@@ -10,7 +10,7 @@ from sqlalchemy.orm import selectinload
 from src.db import SessionDep
 from src.errors import ErrorCode, ErrorDetail
 from src.models.photo import Photo
-from src.schemas.photo import PhotoCreate, PhotoResponse, PhotoUpdate
+from src.schemas.photo import PhotoCreate, PhotoPatch, PhotoResponse, PhotoUpdate
 from src.services.generic import GenericService
 from src.services.photo import get_photo_service
 
@@ -90,6 +90,26 @@ async def update_photo(
 ) -> PhotoResponse:
     """Full-update a photo by ID."""
     photo = await service.update(db_session=session, id=photo_id, data=data)
+    if not photo:
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.PHOTO_NOT_FOUND,
+                message="Photo not found",
+            ).model_dump(),
+        )
+    return photo
+
+
+@router.patch("/{photo_id}", response_model=PhotoResponse)
+async def patch_photo(
+    photo_id: str,
+    data: PhotoPatch,
+    service: _ServiceDep,
+    session: SessionDep,
+) -> PhotoResponse:
+    """Partial-update a photo by ID (PATCH)."""
+    photo = await service.patch(db_session=session, id=photo_id, data=data)
     if not photo:
         raise HTTPException(
             status_code=404,

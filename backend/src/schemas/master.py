@@ -29,6 +29,20 @@ class MasterUpdate(MasterBase):
     pass
 
 
+class MasterPatch(BaseModel):
+    """Request schema for partial update (PATCH /api/v1/masters/{id}).
+    All fields optional. None means 'don't change'.
+    """
+
+    first_name: str | None = None
+    last_name: str | None = None
+    color: str | None = None
+    position: str | None = None
+    specialty: str | None = None
+    avatar_url: str | None = None
+    sort_order: int | None = None
+
+
 class MasterResponse(MasterBase):
     """Response schema with all master fields."""
 

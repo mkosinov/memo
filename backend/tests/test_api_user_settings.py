@@ -179,6 +179,62 @@ class TestUpdateUserSettings:
         assert resp.json()["theme"] == "light"  # unchanged
 
 
+class TestPatchSettings:
+    """Tests for PATCH /api/v1/user-settings?user_id=..."""
+
+    def test_patch_theme_only(self, api_client, _user) -> None:
+        """PATCH updates only theme."""
+        api_client.post("/api/v1/user-settings", json={
+            "user_id": _user["id"], "theme": "light", "language": "ru",
+        })
+
+        response = api_client.patch(
+            f"/api/v1/user-settings?user_id={_user['id']}",
+            json={"theme": "dark"},
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["theme"] == "dark"
+        assert body["language"] == "ru"  # unchanged
+
+    def test_patch_language_only(self, api_client, _user) -> None:
+        """PATCH updates only language."""
+        api_client.post("/api/v1/user-settings", json={
+            "user_id": _user["id"], "theme": "light", "language": "ru",
+        })
+
+        response = api_client.patch(
+            f"/api/v1/user-settings?user_id={_user['id']}",
+            json={"language": "en"},
+        )
+        assert response.status_code == 200
+        assert response.json()["language"] == "en"
+        assert response.json()["theme"] == "light"  # unchanged
+
+    def test_patch_not_found_404(self, api_client, _user) -> None:
+        """PATCH for nonexistent user settings returns 404."""
+        response = api_client.patch(
+            f"/api/v1/user-settings?user_id={_user['id']}",
+            json={"theme": "dark"},
+        )
+        assert response.status_code == 404
+
+    def test_patch_empty_body_noop(self, api_client, _user) -> None:
+        """PATCH with empty body makes no changes."""
+        api_client.post("/api/v1/user-settings", json={
+            "user_id": _user["id"], "theme": "light", "language": "ru",
+        })
+
+        response = api_client.patch(
+            f"/api/v1/user-settings?user_id={_user['id']}",
+            json={},
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["theme"] == "light"
+        assert body["language"] == "ru"
+
+
 class TestDeleteUserSettings:
     """DELETE /api/v1/user-settings/{id}"""
 

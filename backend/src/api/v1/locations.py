@@ -9,20 +9,25 @@ from sqlalchemy import asc
 from src.db import SessionDep
 from src.errors import ErrorCode, ErrorDetail
 from src.models.location import Location
-from src.schemas.location import LocationCreate, LocationResponse, LocationUpdate, ReorderRequest
-from src.services.generic import GenericService
-from src.services.location import get_location_service
+from src.schemas.location import (
+    LocationCreate,
+    LocationPatch,
+    LocationResponse,
+    LocationUpdate,
+    ReorderRequest,
+)
+from src.services.location import LocationService, get_location_service
 
 router = APIRouter(tags=["locations"])
 
 
 @lru_cache
-def _get_location_service() -> GenericService[LocationCreate, LocationUpdate, LocationResponse]:
+def _get_location_service() -> LocationService:
     """Dependency factory returning a singleton LocationService."""
     return get_location_service()
 
 
-_ServiceDep = Annotated[GenericService[LocationCreate, LocationUpdate, LocationResponse], Depends(_get_location_service)]
+_ServiceDep = Annotated[LocationService, Depends(_get_location_service)]
 
 
 @router.get("", response_model=list[LocationResponse])
@@ -85,6 +90,26 @@ async def update_location(
 ) -> LocationResponse:
     """Full-update a location by ID (PUT, not PATCH)."""
     location = await service.update(db_session=session, id=location_id, data=data)
+    if not location:
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.LOCATION_NOT_FOUND,
+                message="Location not found",
+            ).model_dump(),
+        )
+    return location
+
+
+@router.patch("/{location_id}", response_model=LocationResponse)
+async def patch_location(
+    location_id: str,
+    data: LocationPatch,
+    service: _ServiceDep,
+    session: SessionDep,
+) -> LocationResponse:
+    """Partial-update a location by ID (PATCH)."""
+    location = await service.patch(db_session=session, id=location_id, data=data)
     if not location:
         raise HTTPException(
             status_code=404,

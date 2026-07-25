@@ -7,7 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased] — 2026-07-22
+## [Unreleased] — 2026-07-25
+
+### Added
+- **PATCH endpoints for all 8 backend entities** — branch `feat-patch-all-entities` (9 commits: 8209e4c, 6356705, c3a54ce, 2d8cbff, 703f69e, 34e1590, 90f3759, 8142ac3; Task 1/Tags via PR #173 in main):
+  - **New `<Entity>Patch` schema pattern:** all fields optional — `None` = "don't change". Nullable fields CAN be set to `null` explicitly (`exclude_unset`, not `exclude_none`). Every entity gets a dedicated Patch schema (even when identical to Update schema) for schema-evolution safety.
+  - **`NOT_NULL_FIELDS` class attr mechanism:** services/locations/materials with NOT NULL columns silently strip null values instead of 422 (via `GenericService.patch`). UserSettings reuses `UserSettingsUpdate` (trivial, no NOT NULL columns).
+  - **M2M `tag_ids` handling (Services + Photos):** sent → hard-replace links; `[]` → clear; omitted → preserve. Requires service-level `patch()` override for join tables `service_tags` / `photo_tags`.
+  - **Tariffs NOT patchable** on services (PUT only; GH #171).
+  - **`client_id` NOT patchable** on visitors (business invariant).
+  - **Bonus fix (Task 8 Photos):** `create()`/`update()` rewritten to use `photo_tags` join table — fixed pre-existing MissingGreenlet async lazy-load bug.
+  - **Domain-rules:** 4 new docs (materials.md, tags.md, photos.md, user_settings.md) + 4 updated (locations.md, masters.md, services.md, visitors.md) — all PATCH endpoints documented.
+  - **Test results:** 725 passed, 0 failed (+51 new PATCH tests vs 674 baseline). Step 4.5 Visual Compliance: N/A (backend-only).
+  - **Changed files:** 34 — 7 routers, 6 schemas, 6 services, 7 test files, 8 domain-rules docs.
+  - Design spec: `docs/specs/2026-07-22-patch-all-entities-design.md`
+  - Plan: `docs/plans/2026-07-22-patch-all-entities-plan.md`
 
 ### Fixed
 - **Test-debt Wave 4 — cond-skip verify-first (#161 #162 #124-cascade)** — branch `feat-test-debt-wave4` (4 commits: 1a8ca91, 950b82f, b4f6f97, e41d1f1):

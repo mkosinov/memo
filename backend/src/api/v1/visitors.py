@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from src.db import SessionDep
 from src.errors import ErrorCode, ErrorDetail
-from src.schemas.visitor import VisitorCreate, VisitorResponse, VisitorUpdate
+from src.schemas.visitor import VisitorCreate, VisitorPatch, VisitorResponse, VisitorUpdate
 from src.services.visitor import get_visitor_service, VisitorService
 
 router = APIRouter(tags=["visitors"])
@@ -60,6 +60,26 @@ async def update_visitor(
 ) -> VisitorResponse:
     """Full-update a visitor by ID (PUT, not PATCH)."""
     visitor = await service.update(db_session=session, id=visitor_id, data=data)
+    if not visitor:
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.VISITOR_NOT_FOUND,
+                message="Visitor not found",
+            ).model_dump(),
+        )
+    return visitor
+
+
+@router.patch("/{visitor_id}", response_model=VisitorResponse)
+async def patch_visitor(
+    visitor_id: str,
+    data: VisitorPatch,
+    service: _ServiceDep,
+    session: SessionDep,
+) -> VisitorResponse:
+    """Partial-update a visitor by ID (PATCH)."""
+    visitor = await service.patch(db_session=session, id=visitor_id, data=data)
     if not visitor:
         raise HTTPException(
             status_code=404,

@@ -40,6 +40,7 @@ A Location is a physical studio space where master classes take place.
 | GET | /api/v1/locations/{id} | Get |
 | POST | /api/v1/locations | Create |
 | PUT | /api/v1/locations/{id} | Full update |
+| PATCH | /api/v1/locations/{id} | Partial update |
 | DELETE | /api/v1/locations/{id} | Soft delete |
 
 ## Relationships

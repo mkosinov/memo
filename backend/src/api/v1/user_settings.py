@@ -75,6 +75,29 @@ async def update_settings(
     return result
 
 
+@router.patch("", response_model=UserSettingsResponse)
+async def patch_settings(
+    user_id: str,
+    data: UserSettingsUpdate,
+    service: _ServiceDep,
+    session: SessionDep,
+) -> UserSettingsResponse:
+    """Partial-update settings by user_id (PATCH).
+
+    Same behavior as PUT — both use update_by_user_id() with exclude_unset.
+    """
+    result = await service.update_by_user_id(session, user_id, data)
+    if not result:
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.SETTINGS_NOT_FOUND,
+                message="No settings found for user",
+            ).model_dump(),
+        )
+    return result
+
+
 @router.delete("/{settings_id}", status_code=204)
 async def delete_settings(
     settings_id: str,

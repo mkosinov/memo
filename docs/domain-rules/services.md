@@ -51,6 +51,7 @@ A Service represents a type of master class (painting, sculpture, etc.). It defi
 | GET | /api/v1/services/{id} | Get with tariffs |
 | POST | /api/v1/services | Create with tariffs |
 | PUT | /api/v1/services/{id} | Full update (tariffs replaced) |
+| PATCH | /api/v1/services/{id} | Partial update (tag_ids hard-replace when sent) |
 | DELETE | /api/v1/services/{id} | Soft delete (tariffs hard-deleted via cascade) |
 
 ## Relationships

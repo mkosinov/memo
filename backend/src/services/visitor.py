@@ -14,6 +14,8 @@ from src.services.generic import GenericService
 class VisitorService(GenericService[VisitorCreate, VisitorUpdate, VisitorResponse]):
     """Visitor service with client-based filtering."""
 
+    NOT_NULL_FIELDS = {"name"}
+
     def __init__(
         self, repository: SoftDeleteRepository, model: type[Visitor]
     ) -> None:

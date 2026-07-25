@@ -35,6 +35,7 @@ A Visitor is an individual person attending a master class. Visitors belong to a
 | GET | /api/v1/visitors/{id} | Get |
 | POST | /api/v1/visitors | Create |
 | PUT | /api/v1/visitors/{id} | Update |
+| PATCH | /api/v1/visitors/{id} | Partial update |
 | DELETE | /api/v1/visitors/{id} | Soft delete |
 
 ## Relationships

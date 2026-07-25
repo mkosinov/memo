@@ -29,6 +29,20 @@ class PhotoUpdate(BaseModel):
     tag_ids: list[str] | None = None
 
 
+class PhotoPatch(BaseModel):
+    """Request schema for partial update (PATCH /api/v1/photos/{id}).
+    All fields optional. None means 'don't change'.
+
+    ``tag_ids``: if sent → hard-replace all tag links. If not sent → preserve existing.
+    """
+    filename: str | None = None
+    visitor_id: str | None = None
+    service_id: str | None = None
+    activity_id: str | None = None
+    is_public: bool | None = None
+    tag_ids: list[str] | None = None
+
+
 class PhotoTagResponse(BaseModel):
     """Tag reference in photo response."""
     model_config = ConfigDict(from_attributes=True)

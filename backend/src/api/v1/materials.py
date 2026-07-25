@@ -7,20 +7,19 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from src.db import SessionDep
 from src.errors import ErrorCode, ErrorDetail
-from src.schemas.material import MaterialCreate, MaterialResponse, MaterialUpdate
-from src.services.generic import GenericService
-from src.services.material import get_material_service
+from src.schemas.material import MaterialCreate, MaterialPatch, MaterialResponse, MaterialUpdate
+from src.services.material import MaterialService, get_material_service
 
 router = APIRouter(tags=["materials"])
 
 
 @lru_cache
-def _get_material_service() -> GenericService[MaterialCreate, MaterialUpdate, MaterialResponse]:
+def _get_material_service() -> MaterialService:
     """Dependency factory returning a singleton MaterialService."""
     return get_material_service()
 
 
-_ServiceDep = Annotated[GenericService[MaterialCreate, MaterialUpdate, MaterialResponse], Depends(_get_material_service)]
+_ServiceDep = Annotated[MaterialService, Depends(_get_material_service)]
 
 
 @router.get("", response_model=list[MaterialResponse])
@@ -70,6 +69,26 @@ async def update_material(
 ) -> MaterialResponse:
     """Full-update a material by ID (PUT, not PATCH)."""
     material = await service.update(db_session=session, id=material_id, data=data)
+    if not material:
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.MATERIAL_NOT_FOUND,
+                message="Material not found",
+            ).model_dump(),
+        )
+    return material
+
+
+@router.patch("/{material_id}", response_model=MaterialResponse)
+async def patch_material(
+    material_id: str,
+    data: MaterialPatch,
+    service: _ServiceDep,
+    session: SessionDep,
+) -> MaterialResponse:
+    """Partial-update a material by ID (PATCH)."""
+    material = await service.patch(db_session=session, id=material_id, data=data)
     if not material:
         raise HTTPException(
             status_code=404,

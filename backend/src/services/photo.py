@@ -4,20 +4,21 @@ from __future__ import annotations
 
 from functools import lru_cache
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from src.models.photo import Photo
-from src.models.tag import Tag
+from src.models.photo import Photo, photo_tags
 from src.repositories.generic import get_soft_delete_repository
-from src.schemas.photo import PhotoCreate, PhotoResponse, PhotoUpdate
+from src.schemas.photo import PhotoCreate, PhotoPatch, PhotoResponse, PhotoUpdate
 from src.services.generic import GenericService
 from src.services.decorators import transactional
 
 
 class PhotoService(GenericService[PhotoCreate, PhotoUpdate, PhotoResponse]):
     """Extended photo service with tag handling."""
+
+    NOT_NULL_FIELDS = {"filename", "is_public"}
 
     async def list(
         self, db_session: AsyncSession, **filters
@@ -51,7 +52,12 @@ class PhotoService(GenericService[PhotoCreate, PhotoUpdate, PhotoResponse]):
     async def create(
         self, db_session: AsyncSession, data: PhotoCreate
     ) -> PhotoResponse:
-        """Create a new photo with tags."""
+        """Create a new photo with tag links.
+
+        tag_ids: link via the photo_tags join table directly (NOT the ORM
+        relationship), because ``orm.tags = list(tags)`` triggers a lazy load
+        on AsyncSession and crashes with MissingGreenlet.
+        """
         # Extract tag_ids before creating photo
         tag_ids = data.tag_ids if hasattr(data, 'tag_ids') else []
 
@@ -68,14 +74,12 @@ class PhotoService(GenericService[PhotoCreate, PhotoUpdate, PhotoResponse]):
         await db_session.flush()
         await db_session.refresh(orm)
 
-        # Add tags if provided
-        if tag_ids:
-            result = await db_session.execute(
-                select(Tag).where(Tag.id.in_(tag_ids))
+        # Link tags via the join table directly (avoids async lazy-load bug)
+        for tid in tag_ids or []:
+            await db_session.execute(
+                photo_tags.insert().values(photo_id=orm.id, tag_id=tid)
             )
-            tags = result.scalars().all()
-            orm.tags = list(tags)
-            await db_session.flush()
+        await db_session.flush()
 
         # Reload with tags
         return await self.get(db_session, orm.id)
@@ -84,25 +88,76 @@ class PhotoService(GenericService[PhotoCreate, PhotoUpdate, PhotoResponse]):
     async def update(
         self, db_session: AsyncSession, id: str, data: PhotoUpdate
     ) -> PhotoResponse | None:
-        """Update photo with tags."""
+        """Full-update: replace scalar fields and tag links.
+
+        tag_ids: handled via the photo_tags join table (not the ORM
+        relationship) to avoid the async lazy-load bug.
+        """
         orm = await self._repository.get(db_session, Photo, id)
         if orm is None:
             return None
 
-        # Update basic fields
+        # Update scalar fields (exclude tag_ids)
         update_data = data.model_dump(exclude={'tag_ids'}, exclude_unset=True)
         for key, value in update_data.items():
             setattr(orm, key, value)
 
-        # Update tags if provided
+        # Replace tag links via the join table if tag_ids was sent
         if data.tag_ids is not None:
-            result = await db_session.execute(
-                select(Tag).where(Tag.id.in_(data.tag_ids))
+            await db_session.execute(
+                delete(photo_tags).where(photo_tags.c.photo_id == id)
             )
-            tags = result.scalars().all()
-            orm.tags = list(tags)
+            for tid in data.tag_ids:
+                await db_session.execute(
+                    photo_tags.insert().values(photo_id=id, tag_id=tid)
+                )
 
-        # Reload with tags
+        await db_session.flush()
+        # Reload with tags eagerly loaded
+        return await self.get(db_session, id)
+
+    @transactional
+    async def patch(
+        self, db_session: AsyncSession, id: str, data: PhotoPatch
+    ) -> PhotoResponse | None:
+        """Partial-update a photo — only sent fields are changed.
+
+        Scalar fields: applied via exclude_unset. NOT NULL fields
+        with null values are silently stripped.
+
+        tag_ids: if sent → hard-replace all tag links via the photo_tags
+        join table. If not sent → existing tag links are preserved.
+        """
+        orm = await self._repository.get(db_session, Photo, id)
+        if orm is None:
+            return None
+
+        data_dict = data.model_dump(exclude_unset=True)
+
+        # Separate tag_ids from scalar fields
+        tag_ids = data_dict.pop("tag_ids", None)
+
+        # Strip NOT NULL fields sent as null
+        for field in self.NOT_NULL_FIELDS:
+            if field in data_dict and data_dict[field] is None:
+                del data_dict[field]
+
+        # Apply scalar fields
+        for key, value in data_dict.items():
+            setattr(orm, key, value)
+
+        # Handle tag_ids via the join table directly
+        if tag_ids is not None:
+            await db_session.execute(
+                delete(photo_tags).where(photo_tags.c.photo_id == id)
+            )
+            for tid in tag_ids:
+                await db_session.execute(
+                    photo_tags.insert().values(photo_id=id, tag_id=tid)
+                )
+
+        await db_session.flush()
+        # Reload with tags eagerly loaded
         return await self.get(db_session, id)
 
 

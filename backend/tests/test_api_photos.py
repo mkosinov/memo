@@ -193,6 +193,121 @@ class TestPhotosCRUD:
         assert all(p["is_public"] for p in photos)
 
 
+class TestPhotoPatch:
+    """Tests for PATCH /api/v1/photos/{id}."""
+
+    def test_patch_photo_is_public_only(self, api_client) -> None:
+        """PATCH updates only is_public, filename preserved."""
+        create = api_client.post("/api/v1/photos", json={
+            "filename": "test.jpg", "is_public": False,
+        })
+        photo_id = create.json()["id"]
+
+        response = api_client.patch(f"/api/v1/photos/{photo_id}", json={"is_public": True})
+        assert response.status_code == 200
+        body = response.json()
+        assert body["is_public"] is True
+        assert body["filename"] == "test.jpg"  # unchanged
+
+    def test_patch_photo_not_found_404(self, api_client) -> None:
+        """PATCH nonexistent photo returns 404."""
+        response = api_client.patch("/api/v1/photos/nonexistent-id", json={"is_public": True})
+        assert response.status_code == 404
+
+    def test_patch_photo_empty_body(self, api_client) -> None:
+        """PATCH with empty body makes no changes."""
+        create = api_client.post("/api/v1/photos", json={
+            "filename": "keep.jpg", "is_public": False,
+        })
+        photo_id = create.json()["id"]
+
+        response = api_client.patch(f"/api/v1/photos/{photo_id}", json={})
+        assert response.status_code == 200
+        assert response.json()["filename"] == "keep.jpg"
+
+    def test_patch_photo_null_filename_stripped(self, api_client) -> None:
+        """PATCH with null for NOT NULL filename is stripped."""
+        create = api_client.post("/api/v1/photos", json={
+            "filename": "keepname.jpg", "is_public": False,
+        })
+        photo_id = create.json()["id"]
+
+        response = api_client.patch(f"/api/v1/photos/{photo_id}", json={"filename": None})
+        assert response.status_code == 200
+        assert response.json()["filename"] == "keepname.jpg"
+
+    def test_patch_photo_visitor_id_to_null(self, api_client) -> None:
+        """PATCH can set nullable visitor_id to null."""
+        client = api_client.post("/api/v1/clients", json={
+            "name": "Test", "phone": "+79990001234", "email": None, "channel": "telegram",
+        }).json()
+        visitor = api_client.post("/api/v1/visitors", json={
+            "client_id": client["id"], "name": "Test Visitor",
+        }).json()
+
+        create = api_client.post("/api/v1/photos", json={
+            "filename": "test.jpg", "is_public": False,
+            "visitor_id": visitor["id"],
+        })
+        photo_id = create.json()["id"]
+        assert create.json()["visitor_id"] == visitor["id"]
+
+        response = api_client.patch(f"/api/v1/photos/{photo_id}", json={"visitor_id": None})
+        assert response.status_code == 200
+        assert response.json()["visitor_id"] is None
+
+    def test_patch_photo_tag_ids_replaces(self, api_client) -> None:
+        """PATCH with tag_ids replaces all tag links."""
+        tag1 = api_client.post("/api/v1/tags", json={"tag": "photo-tag-1"}).json()
+        tag2 = api_client.post("/api/v1/tags", json={"tag": "photo-tag-2"}).json()
+        tag3 = api_client.post("/api/v1/tags", json={"tag": "photo-tag-3"}).json()
+
+        create = api_client.post("/api/v1/photos", json={
+            "filename": "test.jpg", "is_public": True,
+            "tag_ids": [tag1["id"], tag2["id"]],
+        })
+        photo_id = create.json()["id"]
+        assert len(create.json()["tags"]) == 2
+
+        response = api_client.patch(f"/api/v1/photos/{photo_id}", json={
+            "tag_ids": [tag3["id"]],
+        })
+        assert response.status_code == 200
+        tags = response.json()["tags"]
+        assert len(tags) == 1
+        assert tags[0]["tag"] == "photo-tag-3"
+
+    def test_patch_photo_without_tag_ids_preserves(self, api_client) -> None:
+        """PATCH without tag_ids preserves existing tag links."""
+        tag1 = api_client.post("/api/v1/tags", json={"tag": "preserve-photo"}).json()
+
+        create = api_client.post("/api/v1/photos", json={
+            "filename": "test.jpg", "is_public": True,
+            "tag_ids": [tag1["id"]],
+        })
+        photo_id = create.json()["id"]
+
+        response = api_client.patch(f"/api/v1/photos/{photo_id}", json={"is_public": False})
+        assert response.status_code == 200
+        tags = response.json()["tags"]
+        assert len(tags) == 1
+        assert tags[0]["tag"] == "preserve-photo"
+
+    def test_patch_photo_tag_ids_empty_clears(self, api_client) -> None:
+        """PATCH with empty tag_ids clears all tag links."""
+        tag1 = api_client.post("/api/v1/tags", json={"tag": "remove-photo"}).json()
+
+        create = api_client.post("/api/v1/photos", json={
+            "filename": "test.jpg", "is_public": True,
+            "tag_ids": [tag1["id"]],
+        })
+        photo_id = create.json()["id"]
+
+        response = api_client.patch(f"/api/v1/photos/{photo_id}", json={"tag_ids": []})
+        assert response.status_code == 200
+        assert response.json()["tags"] == []
+
+
 async def _insert_photo_direct(
     id: str,
     filename: str,

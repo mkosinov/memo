@@ -8,6 +8,12 @@ from src.schemas.tag import TagCreate, TagResponse
 from src.services.generic import GenericService
 
 
+class TagService(GenericService[TagCreate, TagCreate, TagResponse]):
+    """Tag service with NOT NULL field protection on PATCH."""
+
+    NOT_NULL_FIELDS = {"tag"}
+
+
 @lru_cache
-def get_tag_service() -> GenericService[TagCreate, TagCreate, TagResponse]:
-    return GenericService(get_soft_delete_repository(), Tag, TagResponse)
+def get_tag_service() -> TagService:
+    return TagService(get_soft_delete_repository(), Tag, TagResponse)

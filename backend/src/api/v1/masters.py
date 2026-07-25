@@ -9,20 +9,19 @@ from sqlalchemy import asc
 from src.db import SessionDep
 from src.errors import ErrorCode, ErrorDetail
 from src.models.master import Master
-from src.schemas.master import MasterCreate, MasterResponse, MasterUpdate, ReorderRequest
-from src.services.generic import GenericService
-from src.services.master import get_master_service
+from src.schemas.master import MasterCreate, MasterPatch, MasterResponse, MasterUpdate, ReorderRequest
+from src.services.master import MasterService, get_master_service
 
 router = APIRouter(tags=["masters"])
 
 
 @lru_cache
-def _get_master_service() -> GenericService[MasterCreate, MasterUpdate, MasterResponse]:
+def _get_master_service() -> MasterService:
     """Dependency factory returning a singleton MasterService."""
     return get_master_service()
 
 
-_ServiceDep = Annotated[GenericService[MasterCreate, MasterUpdate, MasterResponse], Depends(_get_master_service)]
+_ServiceDep = Annotated[MasterService, Depends(_get_master_service)]
 
 
 @router.get("", response_model=list[MasterResponse])
@@ -85,6 +84,26 @@ async def update_master(
 ) -> MasterResponse:
     """Full-update a master by ID (PUT, not PATCH)."""
     master = await service.update(db_session=session, id=master_id, data=data)
+    if not master:
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.MASTER_NOT_FOUND,
+                message="Master not found",
+            ).model_dump(),
+        )
+    return master
+
+
+@router.patch("/{master_id}", response_model=MasterResponse)
+async def patch_master(
+    master_id: str,
+    data: MasterPatch,
+    service: _ServiceDep,
+    session: SessionDep,
+) -> MasterResponse:
+    """Partial-update a master by ID (PATCH)."""
+    master = await service.patch(db_session=session, id=master_id, data=data)
     if not master:
         raise HTTPException(
             status_code=404,

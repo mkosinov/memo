@@ -34,6 +34,7 @@
 | GET | /api/v1/masters/{id} | Get master by ID |
 | POST | /api/v1/masters | Create master |
 | PUT | /api/v1/masters/{id} | Update master |
+| PATCH | /api/v1/masters/{id} | Partial update |
 | DELETE | /api/v1/masters/{id} | Soft-delete master |
 
 ## Relationships

@@ -18,6 +18,16 @@ class MaterialUpdate(MaterialBase):
     pass
 
 
+class MaterialPatch(BaseModel):
+    """Request schema for partial update (PATCH /api/v1/materials/{id}).
+
+    All fields optional. None means 'don't change'.
+    """
+
+    title: str | None = None
+    description: str | None = None
+
+
 class MaterialResponse(MaterialBase):
     model_config = ConfigDict(from_attributes=True)
     id: str

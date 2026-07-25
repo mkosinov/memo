@@ -8,6 +8,12 @@ from src.schemas.material import MaterialCreate, MaterialResponse, MaterialUpdat
 from src.services.generic import GenericService
 
 
+class MaterialService(GenericService[MaterialCreate, MaterialUpdate, MaterialResponse]):
+    """Material service with NOT NULL field protection on PATCH."""
+
+    NOT_NULL_FIELDS = {"title", "description"}
+
+
 @lru_cache
-def get_material_service() -> GenericService[MaterialCreate, MaterialUpdate, MaterialResponse]:
-    return GenericService(get_soft_delete_repository(), Material, MaterialResponse)
+def get_material_service() -> MaterialService:
+    return MaterialService(get_soft_delete_repository(), Material, MaterialResponse)

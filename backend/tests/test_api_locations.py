@@ -125,3 +125,86 @@ class TestLocationsCrud:
         """DELETE /api/locations/{fake_id} returns 404."""
         response = api_client.delete("/api/v1/locations/nonexistent-id")
         assert response.status_code == 404
+
+
+class TestLocationPatch:
+    """Tests for PATCH /api/v1/locations/{id}."""
+
+    def test_patch_location_capacity_only(self, api_client) -> None:
+        """PATCH updates only capacity, other fields preserved."""
+        create = api_client.post("/api/v1/locations", json={
+            "name": "Test Studio", "capacity": 20,
+        })
+        loc_id = create.json()["id"]
+
+        response = api_client.patch(f"/api/v1/locations/{loc_id}", json={"capacity": 30})
+        assert response.status_code == 200
+        body = response.json()
+        assert body["capacity"] == 30
+        assert body["name"] == "Test Studio"  # unchanged
+
+    def test_patch_location_not_found_404(self, api_client) -> None:
+        """PATCH nonexistent location returns 404."""
+        response = api_client.patch("/api/v1/locations/nonexistent-id", json={"capacity": 10})
+        assert response.status_code == 404
+
+    def test_patch_location_empty_body(self, api_client) -> None:
+        """PATCH with empty body makes no changes."""
+        create = api_client.post("/api/v1/locations", json={
+            "name": "Unchanged", "capacity": 15,
+        })
+        loc_id = create.json()["id"]
+
+        response = api_client.patch(f"/api/v1/locations/{loc_id}", json={})
+        assert response.status_code == 200
+        assert response.json()["name"] == "Unchanged"
+        assert response.json()["capacity"] == 15
+
+    def test_patch_location_null_name_stripped(self, api_client) -> None:
+        """PATCH with null for NOT NULL name is stripped."""
+        create = api_client.post("/api/v1/locations", json={
+            "name": "KeepName", "capacity": 20,
+        })
+        loc_id = create.json()["id"]
+
+        response = api_client.patch(f"/api/v1/locations/{loc_id}", json={"name": None})
+        assert response.status_code == 200
+        assert response.json()["name"] == "KeepName"
+
+    def test_patch_location_null_capacity_stripped(self, api_client) -> None:
+        """PATCH with null for NOT NULL capacity is stripped."""
+        create = api_client.post("/api/v1/locations", json={
+            "name": "Studio", "capacity": 20,
+        })
+        loc_id = create.json()["id"]
+
+        response = api_client.patch(f"/api/v1/locations/{loc_id}", json={"capacity": None})
+        assert response.status_code == 200
+        assert response.json()["capacity"] == 20
+
+    def test_patch_location_nullable_field_to_null(self, api_client) -> None:
+        """PATCH can set nullable address to null."""
+        create = api_client.post("/api/v1/locations", json={
+            "name": "Studio", "capacity": 20, "address": "123 Main St",
+        })
+        loc_id = create.json()["id"]
+
+        response = api_client.patch(f"/api/v1/locations/{loc_id}", json={"address": None})
+        assert response.status_code == 200
+        assert response.json()["address"] is None
+
+    def test_patch_location_multiple_fields(self, api_client) -> None:
+        """PATCH updates multiple fields at once."""
+        create = api_client.post("/api/v1/locations", json={
+            "name": "Old", "capacity": 10, "address": "Old Addr",
+        })
+        loc_id = create.json()["id"]
+
+        response = api_client.patch(f"/api/v1/locations/{loc_id}", json={
+            "name": "New Name", "capacity": 25,
+        })
+        assert response.status_code == 200
+        body = response.json()
+        assert body["name"] == "New Name"
+        assert body["capacity"] == 25
+        assert body["address"] == "Old Addr"  # unchanged

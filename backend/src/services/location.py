@@ -8,6 +8,12 @@ from src.schemas.location import LocationCreate, LocationResponse, LocationUpdat
 from src.services.generic import GenericService
 
 
+class LocationService(GenericService[LocationCreate, LocationUpdate, LocationResponse]):
+    """Location service with NOT NULL field protection on PATCH."""
+
+    NOT_NULL_FIELDS = {"name", "capacity", "sort_order"}
+
+
 @lru_cache
-def get_location_service() -> GenericService[LocationCreate, LocationUpdate, LocationResponse]:
-    return GenericService(get_soft_delete_repository(), Location, LocationResponse)
+def get_location_service() -> LocationService:
+    return LocationService(get_soft_delete_repository(), Location, LocationResponse)

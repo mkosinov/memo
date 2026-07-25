@@ -123,15 +123,15 @@ File: `backend/src/services/tag.py`
 
 Read the file first. It uses a factory function returning a plain `GenericService` instance. We need to change it to a subclass with `NOT_NULL_FIELDS`.
 
-If the service file uses a plain `GenericService` instance (no subclass), we need to create a `TagService` subclass:
+If the service file uses a plain `GenericService` instance (no subclass), we need to create a `TagService` subclass. **Keep the existing UpdateSchemaT** (don't change the second type parameter) — the `patch()` method accepts `BaseModel` regardless of the type annotation:
 
 ```python
 from src.services.generic import GenericService
 from src.models.tag import Tag
-from src.schemas.tag import TagCreate, TagPatch, TagResponse
+from src.schemas.tag import TagCreate, TagResponse
 
 
-class TagService(GenericService[TagCreate, TagPatch, TagResponse]):
+class TagService(GenericService[TagCreate, TagCreate, TagResponse]):
     """Tag service with NOT NULL field protection on PATCH."""
     NOT_NULL_FIELDS = {"tag"}
 ```
@@ -170,7 +170,17 @@ Also update the import line to include `TagPatch`:
 from src.schemas.tag import TagCreate, TagPatch, TagResponse
 ```
 
-And update the `_ServiceDep` type annotation to use the new TagService (if the service was changed from bare GenericService to TagService).
+And update the `_ServiceDep` type annotation to use the new `TagService`:
+```python
+_ServiceDep = Annotated[TagService, Depends(_get_tag_service)]
+```
+
+Also update the `_get_tag_service` return type:
+```python
+def _get_tag_service() -> TagService:
+    """Dependency factory returning a singleton TagService."""
+    return get_tag_service()
+```
 
 **Step 4: Write tests**
 
@@ -213,23 +223,7 @@ class TestTagPatch:
         response = api_client.patch(f"/api/v1/tags/{tag_id}", json={"tag": None})
         assert response.status_code == 200
         assert response.json()["tag"] == "KeepMe"
-
-    def test_patch_tag_updates_updated_at(self, api_client) -> None:
-        """PATCH changes the updated_at timestamp."""
-        create = api_client.post("/api/v1/tags", json={"tag": "Timestamp"})
-        tag_id = create.json()["id"]
-        original_updated = create.json()["updated_at"]
-
-        # Small delay to ensure timestamp changes
-        import time
-        time.sleep(1.1)
-
-        response = api_client.patch(f"/api/v1/tags/{tag_id}", json={"tag": "Updated"})
-        assert response.status_code == 200
-        assert response.json()["updated_at"] != original_updated
 ```
-
-Note: `TagResponse` currently has no `updated_at` field. Check if the test `test_patch_tag_updates_updated_at` will work — if `TagResponse` doesn't include `updated_at`, remove that test.
 
 **Step 5: Run tests**
 
@@ -278,10 +272,10 @@ class MaterialPatch(BaseModel):
 
 File: `backend/src/services/material.py`
 
-Create a `MaterialService` subclass (if it uses bare GenericService) with:
+If the service uses bare `GenericService`, create a `MaterialService` subclass. **Keep the existing UpdateSchemaT** — the `patch()` method accepts `BaseModel` regardless:
 
 ```python
-class MaterialService(GenericService[MaterialCreate, MaterialPatch, MaterialResponse]):
+class MaterialService(GenericService[MaterialCreate, MaterialUpdate, MaterialResponse]):
     """Material service with NOT NULL field protection on PATCH."""
     NOT_NULL_FIELDS = {"title", "description"}
 ```
@@ -316,6 +310,11 @@ async def patch_material(
 ```
 
 Update import: `from src.schemas.material import MaterialCreate, MaterialPatch, MaterialResponse`
+
+Also update `_ServiceDep` to use `MaterialService` (if the service was changed from bare GenericService to MaterialService):
+```python
+_ServiceDep = Annotated[MaterialService, Depends(_get_material_service)]
+```
 
 **Step 4: Write tests**
 
@@ -623,10 +622,10 @@ class MasterPatch(BaseModel):
 
 File: `backend/src/services/master.py`
 
-If the service uses bare `GenericService`, create a `MasterService` subclass:
+If the service uses bare `GenericService`, create a `MasterService` subclass. **Keep the existing UpdateSchemaT** — the `patch()` method accepts `BaseModel` regardless:
 
 ```python
-class MasterService(GenericService[MasterCreate, MasterPatch, MasterResponse]):
+class MasterService(GenericService[MasterCreate, MasterUpdate, MasterResponse]):
     """Master service with NOT NULL field protection on PATCH."""
     NOT_NULL_FIELDS = {"first_name", "last_name", "color", "position", "specialty", "sort_order"}
 ```
@@ -661,6 +660,11 @@ async def patch_master(
 ```
 
 Update import: `from src.schemas.master import MasterCreate, MasterPatch, MasterResponse, MasterUpdate`
+
+Also update `_ServiceDep` to use `MasterService` (if the service was changed from bare GenericService to MasterService):
+```python
+_ServiceDep = Annotated[MasterService, Depends(_get_master_service)]
+```
 
 **Step 4: Write tests**
 
@@ -812,10 +816,10 @@ class LocationPatch(BaseModel):
 
 File: `backend/src/services/location.py`
 
-Create a `LocationService` subclass (if bare GenericService):
+Create a `LocationService` subclass (if bare GenericService). **Keep the existing UpdateSchemaT** — the `patch()` method accepts `BaseModel` regardless:
 
 ```python
-class LocationService(GenericService[LocationCreate, LocationPatch, LocationResponse]):
+class LocationService(GenericService[LocationCreate, LocationUpdate, LocationResponse]):
     """Location service with NOT NULL field protection on PATCH."""
     NOT_NULL_FIELDS = {"name", "capacity", "sort_order"}
 ```
@@ -850,6 +854,11 @@ async def patch_location(
 ```
 
 Update import: `from src.schemas.location import LocationCreate, LocationPatch, LocationResponse, LocationUpdate`
+
+Also update `_ServiceDep` to use `LocationService` (if the service was changed from bare GenericService to LocationService):
+```python
+_ServiceDep = Annotated[LocationService, Depends(_get_location_service)]
+```
 
 **Step 4: Write tests**
 

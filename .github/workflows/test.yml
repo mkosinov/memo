@@ -98,6 +98,22 @@ jobs:
         env:
           NODE_OPTIONS: --max-old-space-size=4096
 
+  skip-tracker:
+    name: Skip-tracker (warning only)
+    runs-on: ubuntu-latest
+    # Жёлтая проверка: никогда не роняет билд. Если что-то сломается
+    # внутри скрипта — continue-on-error на всякий случай.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run skip-tracker
+        run: python3 scripts/check_skipped_tests.py
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+
   e2e-tests:
     runs-on: ubuntu-latest
     strategy:

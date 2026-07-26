@@ -95,7 +95,7 @@ test.describe('Unified inline-editable rows', () => {
   // ── Scenario 5: Edit existing visitor name → PUT ──────────────────────
 
   test('visits: edit existing visitor name triggers API call', async ({ page }) => {
-    test.skip(true, 'waiting for PATCH /visitors (Wave 2 CRUD consolidation)');
+    test.skip(true, 'GH #176');
     // Use seed record r1 (already visible on the schedule page)
     const visitRow = queryDBRow(
       `SELECT v.id, v.visitor_id FROM visits v

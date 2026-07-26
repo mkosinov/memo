@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — 2026-07-26
+
+### Fixed
+- **#151 — Next.js build: wrap ClientsPage in Suspense for useSearchParams** — `frontend/admin/app/(main)/clients/page.tsx`: extracted `ClientsPageContent` and wrapped it in `<Suspense fallback={null}>` inside `ScheduleProvider`. `useSearchParams()` requires Suspense boundary in Next.js 14 App Router static export mode. Fix verified: `npx next build` passes (clients page renders as static ○); vitest 1194/1194 pass (incl. ClientsPage.test.tsx). 1 commit (149e566), direct-to-main (FasTP). Reviews: code-quality ✅, spec-review ✅ (DoD compliance).
+
 ## [Unreleased] — 2026-07-25
 
 ### Added

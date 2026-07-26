@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { Suspense, useState, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useClients } from '@/contexts/ClientsContext';
 import { ScheduleProvider } from '@/contexts/ScheduleContext';
@@ -121,7 +121,9 @@ function ClientsPageContent() {
 export default function ClientsPage() {
   return (
     <ScheduleProvider>
-      <ClientsPageContent />
+      <Suspense fallback={<div className="p-4">Загрузка...</div>}>
+        <ClientsPageContent />
+      </Suspense>
     </ScheduleProvider>
   );
 }

@@ -333,8 +333,16 @@ class TestGenericServicePatchContract:
         patched = await service.patch(db_session, created.id, cfg.patch_schema())
         assert patched is not None
 
-        # All fields equal creation values
-        for field_name in type(created).model_fields:
+        # Explicit per-field assertions — no model_fields reflection.
+        # Collect fields known to the test config: create_data, FK maps, and
+        # the not_null / nullable sentinel fields.
+        fields_to_check: set[str] = set(cfg.create_data.keys()) | set(cfg.fk_map.keys())
+        if cfg.not_null_field:
+            fields_to_check.add(cfg.not_null_field)
+        if cfg.nullable_field:
+            fields_to_check.add(cfg.nullable_field)
+
+        for field_name in fields_to_check:
             assert getattr(patched, field_name) == getattr(created, field_name), (
                 f"{field_name} changed after empty patch"
             )

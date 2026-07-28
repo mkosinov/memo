@@ -30,6 +30,10 @@ vi.mock('@/hooks/useLocationsMutations', () => ({
     mutateAsync: vi.fn().mockResolvedValue({}),
     isPending: false,
   })),
+  usePatchLocation: vi.fn(() => ({
+    mutateAsync: vi.fn().mockResolvedValue({}),
+    isPending: false,
+  })),
   useDeleteLocation: vi.fn(() => ({
     mutateAsync: vi.fn().mockResolvedValue({}),
     isPending: false,

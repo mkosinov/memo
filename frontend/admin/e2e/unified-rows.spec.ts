@@ -7,7 +7,7 @@ import {
   createTestRecord,
   cleanup,
 } from './fixtures/factories';
-import { queryDBRow } from './fixtures/db-query';
+import { queryDB, queryDBRow } from './fixtures/db-query';
 
 const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
 
@@ -92,10 +92,9 @@ test.describe('Unified inline-editable rows', () => {
     expect(newCalls).toHaveLength(0);
   });
 
-  // ── Scenario 5: Edit existing visitor name → PUT ──────────────────────
+  // ── Scenario 5: Edit existing visitor name → PATCH ────────────────────
 
   test('visits: edit existing visitor name triggers API call', async ({ page }) => {
-    test.skip(true, 'GH #176');
     // Use seed record r1 (already visible on the schedule page)
     const visitRow = queryDBRow(
       `SELECT v.id, v.visitor_id FROM visits v
@@ -103,10 +102,18 @@ test.describe('Unified inline-editable rows', () => {
         WHERE r.id = 'r1' AND v.visitor_id IS NOT NULL
        LIMIT 1`,
     );
+    // Conditional skip: seed DB must have a visit with a linked visitor on r1
     if (!visitRow?.visitor_id) {
       test.skip();
       return;
     }
+
+    // Reset the visitor name to the seed value — globalSetup only deletes
+    // non-seed rows, so a previous run of this test would leave the edited
+    // name in place and the fill below would be a no-op (no PATCH fired).
+    queryDB(
+      `UPDATE visitors SET name = 'Анна Иванова' WHERE id = '${visitRow.visitor_id}'`,
+    );
 
     await openClientRecordTab(page, { recordId: 'r1' });
 
@@ -118,18 +125,22 @@ test.describe('Unified inline-editable rows', () => {
     const nameInput = savedRow.locator('input').first();
     await expect(nameInput).toBeVisible({ timeout: 3_000 });
     await expect(nameInput).toHaveValue(/\S/, { timeout: 5_000 });
-    await nameInput.fill('Edited Name');
-    await nameInput.press('Enter');
-    // Explicitly blur to ensure commit fires
-    await nameInput.evaluate((el: HTMLInputElement) => el.blur());
 
-    // Verify PUT /visitors/{id} was called
-    await page.waitForRequest(
+    // Register the request waiter BEFORE triggering the commit — the PATCH
+    // fires on blur (Enter → blur), so waiting after would race and miss it.
+    const patchRequest = page.waitForRequest(
       (req) =>
-        req.method() === 'PUT' &&
+        req.method() === 'PATCH' &&
         req.url().includes(`/api/v1/visitors/${visitRow.visitor_id}`),
       { timeout: 5_000 },
     );
+
+    await nameInput.fill('Edited Name');
+    // Enter commits the InlineEditCell via blur → PATCH /visitors/{id}
+    await nameInput.press('Enter');
+
+    // Verify PATCH /visitors/{id} was called
+    await patchRequest;
   });
 
   // ── Scenario 6: Select tariff → price auto-fills ──────────────────────
@@ -163,6 +174,7 @@ test.describe('Unified inline-editable rows', () => {
       // Filter out the placeholder
       const tariffOptions = options.filter((t) => t !== '— тариф —');
 
+      // Conditional skip: service needs ≥2 tariffs to test switching
       if (tariffOptions.length < 2) {
         test.skip();
         return;
@@ -172,6 +184,7 @@ test.describe('Unified inline-editable rows', () => {
       // Find an option whose value differs from the default
       const optionElements = tariffSelect.locator('option:not([value=""]):not([value="' + defaultValue + '"])');
       const firstAltValue = await optionElements.first().getAttribute('value');
+      // Conditional skip: no alternative tariff option found in the DOM
       if (!firstAltValue) {
         test.skip();
         return;
@@ -206,6 +219,7 @@ test.describe('Unified inline-editable rows', () => {
         WHERE r.id = 'r2'
        LIMIT 1`,
     );
+    // Conditional skip: seed DB must have a visit on r2
     if (!visitRow) {
       test.skip();
       return;
@@ -815,7 +829,7 @@ test.describe('addendum-2: cache sync, tariffs, undo', () => {
       const tariffOptions = await tariffSelect.locator('option:not([value=""])').allTextContents();
 
       // The service should have at least one tariff (seed data has tariffs)
-      // If no tariffs, skip (test environment may not have tariffs configured)
+      // Conditional skip: test environment may not have tariffs configured
       if (tariffOptions.length === 0) {
         test.skip();
         return;
@@ -826,6 +840,7 @@ test.describe('addendum-2: cache sync, tariffs, undo', () => {
 
       // 4. Select a tariff → assert price auto-fills
       const firstOptionValue = await tariffSelect.locator('option:not([value=""])').first().getAttribute('value');
+      // Conditional skip: no non-empty tariff option found in the DOM
       if (!firstOptionValue) {
         test.skip();
         return;

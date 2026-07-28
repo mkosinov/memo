@@ -49,8 +49,11 @@ class ServiceCreate(ServiceBase):
 
 
 class ServiceUpdate(ServiceBase):
+    """Request schema for updating a service (full replacement via PUT)."""
+
     tariffs: list[TariffCreate] = []
     tag_ids: list[str] = []
+    is_active: bool = True
 
 
 class ServicePatch(BaseModel):
@@ -58,7 +61,7 @@ class ServicePatch(BaseModel):
     All fields optional. None means 'don't change'.
 
     ``tag_ids``: if sent → hard-replace all tag links. If not sent → preserve existing.
-    ``tariffs``: NOT included — managed via PUT only (see #171 for TariffService extraction).
+    ``tariffs``: if sent → hard-replace all tariffs. If not sent → preserve existing.
     """
     title: str | None = None
     description: str | None = None
@@ -70,6 +73,8 @@ class ServicePatch(BaseModel):
     record_info: str | None = None
     material_hint: str | None = None
     tag_ids: list[str] | None = None
+    tariffs: list[TariffCreate] | None = None
+    is_active: bool | None = None
 
 
 class ServiceResponse(ServiceBase):

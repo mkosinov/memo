@@ -30,6 +30,10 @@ vi.mock('@/hooks/useMastersMutations', () => ({
     mutateAsync: vi.fn().mockResolvedValue({}),
     isPending: false,
   })),
+  usePatchMaster: vi.fn(() => ({
+    mutateAsync: vi.fn().mockResolvedValue({}),
+    isPending: false,
+  })),
   useDeleteMaster: vi.fn(() => ({
     mutateAsync: vi.fn().mockResolvedValue({}),
     isPending: false,

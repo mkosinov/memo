@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { z } from 'zod';
-import { getMasters, getMaster, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, deleteActivity, getWebPhotos, getRecords, getClients, getPayments, createRecord, updateRecord, deleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, deleteVisitor, searchClientByPhone, updateVisitStatus, getTags, createService, updateService, deleteService, createLocation, updateLocation, deleteLocation, getClientsWithStats, patchClient, reorderMasters, reorderLocations } from './endpoints';
+import { getMasters, getMaster, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, deleteActivity, getWebPhotos, getRecords, getClients, getPayments, createRecord, updateRecord, deleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, searchClientByPhone, updateVisitStatus, getTags, createService, updateService, deleteService, createLocation, updateLocation, deleteLocation, getClientsWithStats, patchClient, reorderMasters, reorderLocations, patchMaster, patchLocation, patchMaterial, patchService, patchUserSettings } from './endpoints';
 import { ServiceCreateSchema, LocationCreateSchema } from './schemas';
 
 // Mock the api function from client
@@ -451,6 +451,21 @@ describe('updateVisitor', () => {
   });
 });
 
+describe('patchVisitor', () => {
+  it('calls PATCH /api/v1/visitors/:id with partial body', async () => {
+    vi.mocked(api).mockResolvedValue({ id: 'v-1' });
+    await patchVisitor('v-1', { name: 'Мария' });
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/visitors/v-1',
+      expect.anything(),
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({ name: 'Мария' }),
+      }),
+    );
+  });
+});
+
 describe('deleteVisitor', () => {
   it('calls DELETE /api/v1/visitors/:id', async () => {
     vi.mocked(api).mockResolvedValue(undefined);
@@ -589,6 +604,81 @@ describe('deleteLocation', () => {
       '/api/v1/locations/l-1',
       expect.anything(),
       expect.objectContaining({ method: 'DELETE' }),
+    );
+  });
+});
+
+describe('patchMaster', () => {
+  it('calls PATCH /api/v1/masters/:id with partial body', async () => {
+    vi.mocked(api).mockResolvedValue({ id: 'm-1' });
+    await patchMaster('m-1', { is_active: false });
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/masters/m-1',
+      expect.anything(),
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({ is_active: false }),
+      }),
+    );
+  });
+});
+
+describe('patchLocation', () => {
+  it('calls PATCH /api/v1/locations/:id with partial body', async () => {
+    vi.mocked(api).mockResolvedValue({ id: 'l-1' });
+    await patchLocation('l-1', { is_active: false });
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/locations/l-1',
+      expect.anything(),
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({ is_active: false }),
+      }),
+    );
+  });
+});
+
+describe('patchMaterial', () => {
+  it('calls PATCH /api/v1/materials/:id with partial body', async () => {
+    vi.mocked(api).mockResolvedValue({ id: 'mat-1' });
+    await patchMaterial('mat-1', { is_active: false });
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/materials/mat-1',
+      expect.anything(),
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({ is_active: false }),
+      }),
+    );
+  });
+});
+
+describe('patchService', () => {
+  it('calls PATCH /api/v1/services/:id with partial body', async () => {
+    vi.mocked(api).mockResolvedValue({ id: 's-1' });
+    await patchService('s-1', { is_active: false });
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/services/s-1',
+      expect.anything(),
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({ is_active: false }),
+      }),
+    );
+  });
+});
+
+describe('patchUserSettings', () => {
+  it('calls PATCH /api/v1/user-settings?user_id= with partial body', async () => {
+    vi.mocked(api).mockResolvedValue({ user_id: 'u-1' });
+    await patchUserSettings('u-1', { locale: 'en' });
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/user-settings?user_id=u-1',
+      expect.anything(),
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({ locale: 'en' }),
+      }),
     );
   });
 });

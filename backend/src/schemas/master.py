@@ -26,7 +26,7 @@ class MasterCreate(MasterBase):
 class MasterUpdate(MasterBase):
     """Request schema for updating a master (full replacement via PUT)."""
 
-    pass
+    is_active: bool = True
 
 
 class MasterPatch(BaseModel):
@@ -41,6 +41,7 @@ class MasterPatch(BaseModel):
     specialty: str | None = None
     avatar_url: str | None = None
     sort_order: int | None = None
+    is_active: bool | None = None
 
 
 class MasterResponse(MasterBase):

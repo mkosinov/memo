@@ -4,7 +4,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getServices } from '@memo/api-client';
 import type { ServiceResponse } from '@memo/api-client';
-import { useUpdateService, useCreateService, useDeleteService } from '@/hooks/useServicesMutations';
+import { useUpdateService, usePatchService, useCreateService, useDeleteService } from '@/hooks/useServicesMutations';
 import { useUI } from '@/contexts/UIContext';
 import { ServiceModal } from './ServiceModal';
 import { ServiceFilters } from './ServiceFilters';
@@ -173,6 +173,7 @@ export function ServicesTable() {
   });
 
   const updateService = useUpdateService();
+  const patchService = usePatchService();
   const createService = useCreateService();
   const deleteService = useDeleteService();
   const { showToast } = useUI();
@@ -304,10 +305,10 @@ export function ServicesTable() {
   const handleArchive = async (service: ServiceResponse) => {
     setActionMenuId(null);
     try {
-      // ServiceUpdate doesn't include is_active — cast needed for archive/restore
-      await updateService.mutateAsync({
+      // ServiceUpdate doesn't include is_active — archive/restore is a partial update
+      await patchService.mutateAsync({
         id: service.id,
-        data: { is_active: !service.is_active } as never,
+        data: { is_active: !service.is_active },
       });
       showToast(
         service.is_active ? 'Услуга в архиве' : 'Услуга восстановлена',

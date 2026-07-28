@@ -30,7 +30,7 @@ class LocationCreate(LocationBase):
 class LocationUpdate(LocationBase):
     """Request schema for updating a location (full replacement via PUT)."""
 
-    pass
+    is_active: bool = True
 
 
 class LocationPatch(BaseModel):
@@ -49,6 +49,7 @@ class LocationPatch(BaseModel):
     image_url: str | None = None
     location_hint: str | None = None
     sort_order: int | None = None
+    is_active: bool | None = None
 
 
 class LocationResponse(LocationBase):

@@ -4,7 +4,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getLocations } from '@memo/api-client';
 import type { LocationResponse } from '@memo/api-client';
-import { useUpdateLocation, useCreateLocation, useDeleteLocation } from '@/hooks/useLocationsMutations';
+import { useUpdateLocation, usePatchLocation, useCreateLocation, useDeleteLocation } from '@/hooks/useLocationsMutations';
 import type { LocationUpdate } from '@memo/api-client';
 import { useUI } from '@/contexts/UIContext';
 import { LocationModal } from './LocationModal';
@@ -44,6 +44,7 @@ export function LocationsTable() {
   });
 
   const updateLocation = useUpdateLocation();
+  const patchLocation = usePatchLocation();
   const createLocation = useCreateLocation();
   const deleteLocation = useDeleteLocation();
   const { showToast } = useUI();
@@ -173,9 +174,9 @@ export function LocationsTable() {
 
   const handleToggleActive = async (loc: LocationResponse) => {
     try {
-      await updateLocation.mutateAsync({
+      await patchLocation.mutateAsync({
         id: loc.id,
-        data: { is_active: !loc.is_active } as Record<string, unknown>,
+        data: { is_active: !loc.is_active },
       });
       showToast(loc.is_active ? 'Локация архивирована' : 'Локация восстановлена');
       setOpenDropdownId(null);

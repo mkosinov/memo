@@ -129,7 +129,8 @@ class ServiceService(GenericService[ServiceCreate, ServiceUpdate, ServiceRespons
         tag_ids: if sent → hard-replace all tag links (delete + insert).
         If not sent → existing tag links are preserved.
 
-        tariffs: NOT touched by PATCH. Use PUT to replace tariffs.
+        tariffs: if sent → hard-replace all tariffs (delete + insert).
+        If not sent → existing tariffs are preserved.
         """
         service = await self.get(db_session, id)
         if not service:
@@ -137,8 +138,9 @@ class ServiceService(GenericService[ServiceCreate, ServiceUpdate, ServiceRespons
 
         data_dict = data.model_dump(exclude_unset=True)
 
-        # Separate tag_ids from scalar fields
+        # Separate tag_ids and tariffs from scalar fields
         tag_ids = data_dict.pop("tag_ids", None)
+        tariffs_data = data_dict.pop("tariffs", None)
 
         # Strip NOT NULL fields sent as null
         for field in self.NOT_NULL_FIELDS:
@@ -161,6 +163,15 @@ class ServiceService(GenericService[ServiceCreate, ServiceUpdate, ServiceRespons
                             service_id=id, tag_id=tid
                         )
                     )
+
+        # Handle tariffs: if sent (even if empty list), hard-replace tariffs
+        if tariffs_data is not None:
+            await db_session.execute(
+                delete(Tariff).where(Tariff.service_id == id)
+            )
+            for td in tariffs_data:
+                tariff = Tariff(service_id=service.id, **td)
+                db_session.add(tariff)
 
         await db_session.flush()
         db_session.expunge(service)

@@ -126,7 +126,7 @@ export interface RecordVisitsTableProps {
   onPatchVisit: (visitId: string, data: VisitPatch) => Promise<VisitResponse>;
   /** DELETE existing visit. */
   onDeleteVisit: (visitId: string) => Promise<void>;
-  /** Update visitor name/age (calls updateVisitor API). */
+  /** Update visitor name/age (calls patchVisitor API — PATCH /visitors/{id}). */
   onChangeVisitor: (visitorId: string, data: { name?: string; age?: number | null }) => void;
   onAnonymVisitsChange: (value: number) => void;
 }

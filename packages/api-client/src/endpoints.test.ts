@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { z } from 'zod';
-import { getMasters, getMaster, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, deleteActivity, getWebPhotos, getRecords, getClients, getPayments, createRecord, updateRecord, deleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, deleteVisitor, searchClientByPhone, updateVisitStatus, getTags, createService, updateService, deleteService, createLocation, updateLocation, deleteLocation, getClientsWithStats, patchClient, reorderMasters, reorderLocations } from './endpoints';
+import { getMasters, getMaster, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, deleteActivity, getWebPhotos, getRecords, getClients, getPayments, createRecord, updateRecord, deleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, searchClientByPhone, updateVisitStatus, getTags, createService, updateService, deleteService, createLocation, updateLocation, deleteLocation, getClientsWithStats, patchClient, reorderMasters, reorderLocations } from './endpoints';
 import { ServiceCreateSchema, LocationCreateSchema } from './schemas';
 
 // Mock the api function from client
@@ -445,6 +445,21 @@ describe('updateVisitor', () => {
       expect.anything(),
       expect.objectContaining({
         method: 'PUT',
+        body: JSON.stringify({ name: 'Мария' }),
+      }),
+    );
+  });
+});
+
+describe('patchVisitor', () => {
+  it('calls PATCH /api/v1/visitors/:id with partial body', async () => {
+    vi.mocked(api).mockResolvedValue({ id: 'v-1' });
+    await patchVisitor('v-1', { name: 'Мария' });
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/visitors/v-1',
+      expect.anything(),
+      expect.objectContaining({
+        method: 'PATCH',
         body: JSON.stringify({ name: 'Мария' }),
       }),
     );

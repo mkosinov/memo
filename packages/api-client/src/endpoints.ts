@@ -356,6 +356,13 @@ export async function updateVisitor(id: string, data: VisitorUpdate): Promise<Vi
   });
 }
 
+export async function patchVisitor(id: string, data: VisitorUpdate): Promise<VisitorResponse> {
+  return api(`/api/v1/visitors/${id}`, VisitorResponseSchema, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+}
+
 export async function deleteVisitor(id: string): Promise<void> {
   await api(`/api/v1/visitors/${id}`, z.any(), { method: 'DELETE' });
 }

@@ -16,7 +16,7 @@ import { useRecordMutations } from '@/hooks/useRecordMutations';
 import { useUI } from '@/contexts/UIContext';
 import { useSchedule } from '@/contexts/ScheduleContext';
 import { parseApiError } from '@/app/lib/api/parseApiError';
-import { updateVisitor, patchActivity } from '@memo/api-client';
+import { patchVisitor, patchActivity } from '@memo/api-client';
 import type { ClientWithStats } from '@memo/api-client';
 
 interface ClientRecordTabProps {
@@ -148,7 +148,7 @@ export function ClientRecordTab({ recordId, clientId, client }: ClientRecordTabP
   const handleVisitorChange = useCallback(
     (visitorId: string, data: { name?: string; age?: number | null }) => {
       const apiData = { ...data, age: data.age ?? undefined };
-      updateVisitor(visitorId, apiData)
+      patchVisitor(visitorId, apiData)
         .then(() => {
           // Reader: ['visitors', clientId] in useRecordData
           queryClient.invalidateQueries({ queryKey: ['visitors', clientId] });

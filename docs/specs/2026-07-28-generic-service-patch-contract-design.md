@@ -142,6 +142,12 @@ override — список исключений сам является доку�
 
 - **Client:** после выравнивания (3.1) включается в contract-прогон;
   `NOT_NULL_FIELDS` пуст → тест 3 skip с reason.
+- **`is_active` (появился в PATCH-схемах после PR #180):** поле не входит в
+  generic-контракт — это soft-delete toggle, не обычное patchable-поле.
+  Contract-тест его игнорирует; per-entity `is_active`-семантику покрывают
+  новые `test_patch_is_active.py` / `test_put_is_active.py` (из #180).
+  Config-тест NOT_NULL_FIELDS исключает `is_active` из сверки (он nullable
+  с default, в NOT_NULL_FIELDS не входит).
 - **Visit, UserSettings, Health:** standalone-сервисы (не GenericService) →
   вне scope.
 - **Tag:** нет nullable полей и нет `updated_at` в Response — тест 4 skip,

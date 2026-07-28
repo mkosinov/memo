@@ -316,6 +316,58 @@ class TestRecordPatch:
         assert response.status_code == 404
         assert response.json()["detail"]["code"] == "RECORD_NOT_FOUND"
 
+    def test_patch_custom_price_null_clears(self, api_client, create_record) -> None:
+        """PATCH {"custom_price": null} clears custom_price (nullable field)."""
+        record = create_record(custom_price=5000)
+        assert record["custom_price"] == 5000
+
+        response = api_client.patch(
+            f"/api/v1/records/{record['id']}",
+            json={"custom_price": None},
+        )
+        assert response.status_code == 200
+        assert response.json()["custom_price"] is None
+
+    def test_patch_record_empty_body_noop(self, api_client, create_record) -> None:
+        """PATCH {} leaves scalar fields unchanged.
+
+        Note: RecordService.patch() always advances updated_at (it sets
+        ``record.updated_at = datetime.now(UTC)`` unconditionally), so
+        updated_at is NOT expected to remain unchanged here.
+        """
+        record = create_record(comment="original comment", custom_price=3000)
+
+        response = api_client.patch(f"/api/v1/records/{record['id']}", json={})
+        assert response.status_code == 200
+        patched = response.json()
+
+        assert patched["comment"] == "original comment"
+        assert patched["custom_price"] == 3000
+        assert patched["seats"] == record["seats"]
+        assert patched["anonym_visits"] == record["anonym_visits"]
+        assert patched["status"] == record["status"]
+
+    def test_patch_record_advances_updated_at(self, api_client, create_record) -> None:
+        """PATCH always advances updated_at (set unconditionally in RecordService.patch)."""
+        import time
+
+        record = create_record()
+        original_updated_at = record["updated_at"]
+
+        # Small delay to ensure timestamp differs
+        time.sleep(0.05)
+
+        response = api_client.patch(
+            f"/api/v1/records/{record['id']}",
+            json={"comment": "touched"},
+        )
+        assert response.status_code == 200
+        patched_updated_at = response.json()["updated_at"]
+
+        assert patched_updated_at > original_updated_at, (
+            f"updated_at did not advance: {patched_updated_at} <= {original_updated_at}"
+        )
+
 
 class TestRecordCreatePhoneFlow:
     """Phone-based record creation flow — auto-creates client and visitors."""

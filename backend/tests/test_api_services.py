@@ -311,3 +311,47 @@ class TestServicePatch:
         response = api_client.patch(f"/api/v1/services/{service_id}", json={"tag_ids": []})
         assert response.status_code == 200
         assert response.json()["tags"] == []
+
+    def test_patch_service_max_age_to_null(self, api_client) -> None:
+        """PATCH {"max_age": null} sets max_age to null (nullable field)."""
+        create = api_client.post("/api/v1/services", json={
+            **SERVICE_PAYLOAD, "max_age": 50,
+        })
+        service_id = create.json()["id"]
+        assert create.json()["max_age"] == 50
+
+        response = api_client.patch(
+            f"/api/v1/services/{service_id}",
+            json={"max_age": None},
+        )
+        assert response.status_code == 200
+        assert response.json()["max_age"] is None
+
+    def test_patch_service_empty_body_noop(self, api_client) -> None:
+        """PATCH {} leaves all fields unchanged."""
+        create = api_client.post("/api/v1/services", json=SERVICE_PAYLOAD)
+        service_id = create.json()["id"]
+        original = create.json()
+
+        response = api_client.patch(f"/api/v1/services/{service_id}", json={})
+        assert response.status_code == 200
+        patched = response.json()
+
+        assert patched["title"] == original["title"]
+        assert patched["description"] == original["description"]
+        assert patched["max_age"] == original["max_age"]
+        assert patched["duration"] == original["duration"]
+        assert patched["min_age"] == original["min_age"]
+
+    def test_patch_service_null_title_stripped(self, api_client) -> None:
+        """PATCH {"title": null} leaves title unchanged (NOT NULL field, null silently stripped)."""
+        create = api_client.post("/api/v1/services", json=SERVICE_PAYLOAD)
+        service_id = create.json()["id"]
+        original_title = create.json()["title"]
+
+        response = api_client.patch(
+            f"/api/v1/services/{service_id}",
+            json={"title": None},
+        )
+        assert response.status_code == 200
+        assert response.json()["title"] == original_title

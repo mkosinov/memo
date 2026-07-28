@@ -155,7 +155,7 @@ class TestVisitorPatch:
         assert response.json()["detail"]["code"] == "VISITOR_NOT_FOUND"
 
     def test_patch_visitor_client_id_immutable(self, api_client) -> None:
-        """PATCH with client_id field — verify actual behavior (422 or silent ignore)."""
+        """PATCH cannot reassign a visitor to a different client — client_id is locked in at creation."""
         client_id = _create_client(api_client)
         create = api_client.post("/api/v1/visitors", json={
             "client_id": client_id, "name": "Alice", "age": 28,

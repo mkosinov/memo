@@ -92,6 +92,17 @@ export async function updateMaster(id: string, data: MasterUpdate): Promise<Mast
   });
 }
 
+// PATCH for partial updates — only send the changed fields.
+export async function patchMaster(
+  id: string,
+  data: Partial<MasterUpdate> & { is_active?: boolean }, // TODO(#178): drop is_active intersection once MasterUpdateSchema includes is_active
+): Promise<MasterResponse> {
+  return api(`/api/v1/masters/${id}`, MasterResponseSchema, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+}
+
 export async function deleteMaster(id: string): Promise<void> {
   await api(`/api/v1/masters/${id}`, z.any(), { method: 'DELETE' });
 }
@@ -445,6 +456,17 @@ export async function updateService(id: string, data: ServiceUpdate): Promise<Se
   });
 }
 
+// PATCH for partial updates — only send the changed fields.
+export async function patchService(
+  id: string,
+  data: Partial<ServiceUpdate> & { is_active?: boolean }, // TODO(#178): drop is_active intersection once ServiceUpdateSchema includes is_active
+): Promise<ServiceResponse> {
+  return api(`/api/v1/services/${id}`, ServiceResponseSchema, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+}
+
 export async function deleteService(id: string): Promise<void> {
   await api(`/api/v1/services/${id}`, z.any(), { method: 'DELETE' });
 }
@@ -461,6 +483,17 @@ export async function createLocation(data: z.input<typeof LocationCreateSchema>)
 export async function updateLocation(id: string, data: LocationUpdate): Promise<LocationResponse> {
   return api(`/api/v1/locations/${id}`, LocationResponseSchema, {
     method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+// PATCH for partial updates — only send the changed fields.
+export async function patchLocation(
+  id: string,
+  data: Partial<LocationUpdate> & { is_active?: boolean }, // TODO(#178): drop is_active intersection once LocationUpdateSchema includes is_active
+): Promise<LocationResponse> {
+  return api(`/api/v1/locations/${id}`, LocationResponseSchema, {
+    method: 'PATCH',
     body: JSON.stringify(data),
   });
 }
@@ -492,6 +525,17 @@ export async function createMaterial(data: MaterialCreate): Promise<MaterialResp
 export async function updateMaterial(id: string, data: MaterialUpdate): Promise<MaterialResponse> {
   return api(`/api/v1/materials/${id}`, MaterialResponseSchema, {
     method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+// PATCH for partial updates — only send the changed fields.
+export async function patchMaterial(
+  id: string,
+  data: Partial<MaterialUpdate> & { is_active?: boolean }, // TODO(#178): drop is_active intersection once MaterialUpdateSchema includes is_active
+): Promise<MaterialResponse> {
+  return api(`/api/v1/materials/${id}`, MaterialResponseSchema, {
+    method: 'PATCH',
     body: JSON.stringify(data),
   });
 }
@@ -545,6 +589,21 @@ export async function updateUserSettings(
     UserSettingsResponseSchema,
     {
       method: 'PUT',
+      body: JSON.stringify(data),
+    },
+  );
+}
+
+// PATCH for partial updates — only send the changed fields.
+export async function patchUserSettings(
+  userId: string,
+  data: Partial<UserSettingsUpdate>,
+): Promise<UserSettingsResponse> {
+  return api(
+    `/api/v1/user-settings?user_id=${encodeURIComponent(userId)}`,
+    UserSettingsResponseSchema,
+    {
+      method: 'PATCH',
       body: JSON.stringify(data),
     },
   );

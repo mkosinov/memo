@@ -98,6 +98,7 @@ vi.mock('@memo/api-client', () => ({
 vi.mock('@/hooks/useServicesMutations', () => ({
   useCreateService: () => ({ mutateAsync: mockMutateAsync, isPending: false }),
   useUpdateService: () => ({ mutateAsync: mockMutateAsync, isPending: false }),
+  usePatchService: () => ({ mutateAsync: mockMutateAsync, isPending: false }),
   useDeleteService: () => ({ mutateAsync: mockMutateAsync, isPending: false }),
 }));
 

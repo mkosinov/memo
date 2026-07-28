@@ -70,17 +70,25 @@ not_null_field, nullable_field, not_null_sentinel, nullable_sentinel}`.
 nullable поля (Material, Tag) — параметр теста 4 для неё **skip**
 (`pytest.param(..., marks=pytest.mark.skip(reason=...))`), не пропуск молча.
 
-**Вывод по Client:** `get_client_service()` — прямой экземпляр
-`GenericService`, не подкласс. `__subclasses__()` его не видит. У Client
-`NOT_NULL_FIELDS` пуст (все поля nullable), поэтому generic-контракт
-тривиален: per-entity тесты clients **сохраняются как есть** (в т.ч.
-null→null семантика), Client в contract-тест не включается. Зафиксировать
-в разделе «Исключения и границы».
+**ClientService — выравнивание под общий паттерн (G1b-approved, единственное
+разрешённое изменение в `src/`):** `get_client_service()` сейчас возвращает
+прямой экземпляр `GenericService`, не подкласс — невидим для
+`__subclasses__()`. Механический рефакторинг без изменения поведения:
 
-**Вопрос к G1b:** включать ли Client через ручную регистрацию
-(`GenericService` instance не виден через `__subclasses__`)? Рекомендация:
-нет — контракт Client тривиален (нет NOT NULL полей), per-entity тесты уже
-покрывают; авто-обнаружение важнее полноты.
+```python
+# backend/src/services/client.py
+class ClientService(GenericService[ClientCreate, ClientUpdate, ClientResponse]):
+    """Client service — стандартный GenericService, NOT_NULL_FIELDS пуст."""
+```
+
+`get_client_service()` инстанцирует `ClientService(...)` вместо
+`GenericService(...)`; импорты/аннотации типов в роутере
+`backend/src/api/v1/clients.py` обновляются. После этого `ClientService`
+автоматически обнаруживается и **включается** в contract-прогон. Так как
+`NOT_NULL_FIELDS` пуст: тест 3 (NOT NULL strip) для Client — skip с reason
+(нет NOT NULL полей), все nullable-тесты (4) работают. Per-entity тесты
+clients сокращаются по общим правилам (3.4): остаются smoke/wiring +
+ClientPatch schema-тесты (`test_schemas_client.py`, pure_unit — не трогаем).
 
 ### 3.2 Config-тест: NOT_NULL_FIELDS ↔ nullability модели
 
@@ -123,17 +131,17 @@ override — список исключений сам является доку�
 3. **Override-тесты** (tag_ids у services/photos — 6 тестов, не трогаем).
 4. **Специальные случаи:** Record — весь файл по сути инварианты/override,
    сокращается только явный дубль (updated_at, generic partial duplicates);
-   Clients — сохраняются (см. 3.1); Visits/UserSettings — standalone-сервисы,
+   Visits/UserSettings — standalone-сервисы,
    вне contract-теста, их generic-дубли (4+4 теста) **не сокращаются** в этом
-   issue (вне GenericService-контракта) — кандидат на отдельный issue.
+   issue (вне GenericService-контракта) — отдельный issue (менеджер создаст).
 
 **Целевой итог:** ~51 → ~15-18 API PATCH-тестов (дельта по подсчёту GH #175).
 Точный список удалений/сохранений — в плане (per-file таблица).
 
 ## 4. Исключения и границы
 
-- **Client:** не подкласс GenericService → вне авто-обнаружения; per-entity
-  тесты сохраняются.
+- **Client:** после выравнивания (3.1) включается в contract-прогон;
+  `NOT_NULL_FIELDS` пуст → тест 3 skip с reason.
 - **Visit, UserSettings, Health:** standalone-сервисы (не GenericService) →
   вне scope.
 - **Tag:** нет nullable полей и нет `updated_at` в Response — тест 4 skip,
@@ -170,16 +178,18 @@ override — список исключений сам является доку�
 5. Весь backend test-suite зелёный (`npm run test` / pytest), покрытие
    patch-семантик не снижено (diff coverage generic.py/repositories —
    не падает).
-6. Ни одного изменения в `src/` — только `tests/`.
+6. Изменения в `src/` ограничены выравниванием ClientService (3.1) —
+   механический рефакторинг без изменения поведения; остальное — только
+   `tests/`.
 
 ## 7. Visual Compliance Checks
 
 N/A — backend-only test refactoring, нет user-visible UI.
 
-## 8. Открытые вопросы для G1b
+## 8. Решённые вопросы (G1b, 2026-07-28)
 
-1. Client: подтвердить исключение из contract-теста (рекомендация: да).
-2. Smoke/wiring-тест: дорабатывать существующие 404-тесты assertion'ом
-   `ErrorCode.*_NOT_FOUND` (по образцу payments) — подтвердить.
-3. Visits/UserSettings generic-дубли: оставить как есть в этом issue
-   (рекомендация: да, отдельный issue).
+1. **Client:** ✅ выравнивается под общий паттерн (ClientService subclass),
+   включается в contract-прогон.
+2. **Smoke/wiring:** ✅ доработать существующие 404-тесты assertion'ом
+   `detail.code == "<ENTITY>_NOT_FOUND"` (по образцу payments).
+3. **Visits/UserSettings:** ✅ не трогаем — отдельный issue (менеджер создаст).

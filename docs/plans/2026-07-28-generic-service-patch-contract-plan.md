@@ -216,19 +216,24 @@ FK-подстановка: фабрики `create_master` и т.п. — суще
 ```python
 @pytest.fixture
 def make_entity(request, db_session):
-    """Создаёт сущность через её сервис, подтягивая FK-фикстуры по имени."""
+    """Создаёт сущность через её сервис, подтягивая FK-фикстуры по имени.
+
+    ВАЖНО: conftest-фабрики (create_master и др.) возвращают factory-callable,
+    а не dict — фабрику нужно ВЫЗВАТЬ, чтобы получить dict с "id".
+    """
     async def _make(cfg) -> tuple[object, object]:
         create_data = dict(cfg.create_data)
         for field, fixture_name in cfg.fk_map.items():
-            created = request.getfixturevalue(fixture_name)
-            create_data[field] = created["id"] if isinstance(created, dict) else created
+            factory = request.getfixturevalue(fixture_name)
+            created = factory()  # factory-callable → dict с "id"
+            create_data[field] = created["id"]
         service = cfg.service_factory()
         created_resp = await service.create(db_session, cfg.create_schema(**create_data))
         return service, created_resp
     return _make
 ```
 
-Примечание: `create_record` (для Payment) — существующая фикстура, создающая полную цепочку через API; возвращает dict с `"id"` записи. Подходит.
+Примечание: `create_record` (для Payment) — существующая фикстура-фабрика, создающая полную цепочку (activity+client+record) через API; вызов `factory()` возвращает dict записи с `"id"`. Подходит. Implementer сверяет сигнатуру каждой фабрики в `tests/conftest.py` по факту (у некоторых фабрик могут быть обязательные аргументы — тогда передаются явно).
 
 Примечание по Payment: `create_schema(**create_data)` — `PaymentCreate(amount=100, method="card", record_id=...)`. `method` — `PaymentMethod` enum; в create_data использовать строковые значения enum'а, pydantic сконвертит.
 
@@ -341,7 +346,7 @@ assert response.status_code == 404
 assert response.json()["detail"]["code"] == "<ENTITY>_NOT_FOUND"
 ```
 
-Проверить фактические значения `ErrorCode.*_NOT_FOUND` enum'ов (названия могут отличаться, напр. `ACTIVITY_NOT_FOUND` vs другое) — implementer сверяет с `src/api/errors.py` (или где определён ErrorCode) по факту.
+Проверить фактические значения `ErrorCode.*_NOT_FOUND` enum'ов — implementer сверяет с `src/errors.py` по факту (названия подтверждены при plan review: MATERIAL_NOT_FOUND, PHOTO_NOT_FOUND, SERVICE_NOT_FOUND, LOCATION_NOT_FOUND, ACTIVITY_NOT_FOUND, TAG_NOT_FOUND, MASTER_NOT_FOUND, PAYMENT_NOT_FOUND, VISITOR_NOT_FOUND, CLIENT_NOT_FOUND, RECORD_NOT_FOUND — все существуют).
 
 **Проверка:** полный backend suite зелёный; подсчёт: API PATCH-тестов осталось ~15-18 (implementer прикладывает `pytest --collect-only -q | grep -c patch` до/после).
 

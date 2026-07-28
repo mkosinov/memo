@@ -44,7 +44,7 @@ vi.mock('@memo/api-client', () => ({
   createVisit: vi.fn(),
   patchVisit: vi.fn(),
   deleteVisit: vi.fn(),
-  updateVisitor: vi.fn(),
+  patchVisitor: vi.fn(),
   ApiError: class ApiError extends Error { code: string; constructor(msg: string, code: string) { super(msg); this.code = code; } },
 }));
 
@@ -101,7 +101,7 @@ import {
   deleteVisitor,
   createVisit,
   deleteVisit as apiDeleteVisit,
-  updateVisitor,
+  patchVisitor,
 } from '@memo/api-client';
 
 // ─── Shared mock data ──────────────────────────────────────────────────────
@@ -291,8 +291,8 @@ describe('ClientRecordTab — API interactions', () => {
     });
   });
 
-  it('visitor name change calls updateVisitor directly (no optimistic override layer)', async () => {
-    vi.mocked(updateVisitor).mockResolvedValue({
+  it('visitor name change calls patchVisitor (PATCH) directly (no optimistic override layer)', async () => {
+    vi.mocked(patchVisitor).mockResolvedValue({
       id: 'vis1', client_id: 'c1', name: 'Новое Имя', age: 30,
       created_at: '', updated_at: '', is_active: true,
     });
@@ -303,10 +303,10 @@ describe('ClientRecordTab — API interactions', () => {
     fireEvent.change(nameInput, { target: { value: 'Новое Имя' } });
     fireEvent.blur(nameInput);
 
-    // Direct path: handleVisitorChange calls updateVisitor immediately,
+    // Direct path: handleVisitorChange calls patchVisitor immediately,
     // not via the optimistic override layer.
     await waitFor(() => {
-      expect(updateVisitor).toHaveBeenCalledWith(
+      expect(patchVisitor).toHaveBeenCalledWith(
         'vis1',
         expect.objectContaining({ name: 'Новое Имя' }),
       );

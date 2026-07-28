@@ -42,7 +42,7 @@ vi.mock('@memo/api-client', () => ({
   createVisit: vi.fn(),
   patchVisit: vi.fn(),
   deleteVisit: vi.fn(),
-  updateVisitor: vi.fn(),
+  patchVisitor: vi.fn(),
   ApiError: class ApiError extends Error { code: string; constructor(msg: string, code: string) { super(msg); this.code = code; } },
 }));
 

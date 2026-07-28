@@ -4,7 +4,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getMaterials } from '@memo/api-client';
 import type { MaterialResponse } from '@memo/api-client';
-import { useUpdateMaterial, useCreateMaterial, useDeleteMaterial } from '@/hooks/useMaterialsMutations';
+import { useUpdateMaterial, usePatchMaterial, useCreateMaterial, useDeleteMaterial } from '@/hooks/useMaterialsMutations';
 import { useUI } from '@/contexts/UIContext';
 import { MaterialModal } from './MaterialModal';
 import { ColumnPicker } from './ColumnPicker';
@@ -97,6 +97,7 @@ export function MaterialsTable() {
   });
 
   const updateMaterial = useUpdateMaterial();
+  const patchMaterial = usePatchMaterial();
   const createMaterial = useCreateMaterial();
   const deleteMaterial = useDeleteMaterial();
   const { showToast } = useUI();
@@ -228,9 +229,9 @@ export function MaterialsTable() {
   const handleArchive = async (material: MaterialResponse) => {
     setActionMenuId(null);
     try {
-      await updateMaterial.mutateAsync({
+      await patchMaterial.mutateAsync({
         id: material.id,
-        data: { is_active: !material.is_active } as never,
+        data: { is_active: !material.is_active },
       });
       showToast(
         material.is_active ? 'Материал в архиве' : 'Материал восстановлен',

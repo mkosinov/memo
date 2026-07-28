@@ -1,7 +1,7 @@
 'use client';
 
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { createService, updateService, deleteService } from '@memo/api-client';
+import { createService, updateService, patchService, deleteService } from '@memo/api-client';
 import type { ServiceCreate, ServiceUpdate } from '@memo/api-client';
 
 export function useCreateService() {
@@ -16,6 +16,15 @@ export function useUpdateService() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: ServiceUpdate }) => updateService(id, data),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['services'] }),
+  });
+}
+
+export function usePatchService() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: Partial<ServiceUpdate> & { is_active?: boolean } }) =>
+      patchService(id, data),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['services'] }),
   });
 }

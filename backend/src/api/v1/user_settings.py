@@ -9,6 +9,7 @@ from src.db import SessionDep
 from src.errors import ErrorCode, ErrorDetail
 from src.schemas.user_settings import (
     UserSettingsCreate,
+    UserSettingsPatch,
     UserSettingsResponse,
     UserSettingsUpdate,
 )
@@ -62,7 +63,13 @@ async def update_settings(
     service: _ServiceDep,
     session: SessionDep,
 ) -> UserSettingsResponse:
-    """Partial-update settings by user_id."""
+    """Partial-update settings by user_id.
+    
+    TODO: PUT should use a strict schema with all fields required (full replacement
+    semantics). Currently uses all-optional UserSettingsUpdate for backward compatibility
+    with frontend that sends partial data. After frontend migration, create
+    UserSettingsStrict schema with required fields and use it here.
+    """
     result = await service.update_by_user_id(session, user_id, data)
     if not result:
         raise HTTPException(
@@ -78,12 +85,13 @@ async def update_settings(
 @router.patch("", response_model=UserSettingsResponse)
 async def patch_settings(
     user_id: str,
-    data: UserSettingsUpdate,
+    data: UserSettingsPatch,
     service: _ServiceDep,
     session: SessionDep,
 ) -> UserSettingsResponse:
     """Partial-update settings by user_id (PATCH).
 
+    Uses UserSettingsPatch schema (all-optional) for semantic correctness.
     Same behavior as PUT — both use update_by_user_id() with exclude_unset.
     """
     result = await service.update_by_user_id(session, user_id, data)

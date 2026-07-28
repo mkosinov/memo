@@ -122,13 +122,13 @@ export function UserSettingsProvider({ children }: { children: React.ReactNode }
       const next = { ...prev, ...partial };
       saveToStorage(next);
       // Optimistic backend update (fire-and-forget)
-      import('@memo/api-client').then(({ updateUserSettings }) => {
+      import('@memo/api-client').then(({ patchUserSettings }) => {
         const apiPartial: Record<string, unknown> = {};
         if (partial.theme !== undefined) apiPartial.theme = partial.theme;
         if (partial.language !== undefined) apiPartial.language = partial.language;
         if (partial.columnOrderMasters !== undefined) apiPartial.column_order_masters = partial.columnOrderMasters;
         if (partial.columnOrderLocations !== undefined) apiPartial.column_order_locations = partial.columnOrderLocations;
-        updateUserSettings(DEV_USER_ID, apiPartial).catch(() => {});
+        patchUserSettings(DEV_USER_ID, apiPartial).catch(() => {});
       }).catch(() => {});
       return next;
     });

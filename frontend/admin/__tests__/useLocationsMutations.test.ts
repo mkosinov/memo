@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { createElement, type ReactNode } from 'react';
@@ -6,23 +6,27 @@ import { createElement, type ReactNode } from 'react';
 vi.mock('@memo/api-client', () => ({
   createLocation: vi.fn(),
   updateLocation: vi.fn(),
+  patchLocation: vi.fn(),
   deleteLocation: vi.fn(),
 }));
 
 import {
   useCreateLocation,
   useUpdateLocation,
+  usePatchLocation,
   useDeleteLocation,
 } from '../hooks/useLocationsMutations';
 import {
   createLocation,
   updateLocation,
+  patchLocation,
   deleteLocation,
 } from '@memo/api-client';
 import type { LocationCreate, LocationUpdate } from '@memo/api-client';
 
 const mockCreateLocation = vi.mocked(createLocation);
 const mockUpdateLocation = vi.mocked(updateLocation);
+const mockPatchLocation = vi.mocked(patchLocation);
 const mockDeleteLocation = vi.mocked(deleteLocation);
 
 const locationCreatePayload: LocationCreate = {
@@ -49,6 +53,7 @@ function createQueryClientWrapper() {
 }
 
 describe('useLocationsMutations', () => {
+  beforeEach(() => vi.clearAllMocks());
   afterEach(() => vi.restoreAllMocks());
 
   describe('useCreateLocation', () => {
@@ -110,6 +115,36 @@ describe('useLocationsMutations', () => {
 
       await act(async () => {
         await result.current.mutateAsync({ id: 'loc-1', data: { name: 'Updated' } });
+      });
+
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['locations'] });
+    });
+  });
+
+  describe('usePatchLocation', () => {
+    it('calls patchLocation with id and partial data (archive toggle)', async () => {
+      const { wrapper } = createQueryClientWrapper();
+      mockPatchLocation.mockResolvedValue({ ...locationResponse, is_active: false });
+
+      const { result } = renderHook(() => usePatchLocation(), { wrapper });
+
+      await act(async () => {
+        await result.current.mutateAsync({ id: 'loc-1', data: { is_active: false } });
+      });
+
+      expect(mockPatchLocation).toHaveBeenCalledWith('loc-1', { is_active: false });
+      expect(mockUpdateLocation).not.toHaveBeenCalled();
+    });
+
+    it('invalidates the locations query cache on success', async () => {
+      const { queryClient, wrapper } = createQueryClientWrapper();
+      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+      mockPatchLocation.mockResolvedValue({ ...locationResponse, is_active: false });
+
+      const { result } = renderHook(() => usePatchLocation(), { wrapper });
+
+      await act(async () => {
+        await result.current.mutateAsync({ id: 'loc-1', data: { is_active: false } });
       });
 
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['locations'] });

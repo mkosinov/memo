@@ -4,7 +4,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getMasters } from '@memo/api-client';
 import type { MasterResponse } from '@memo/api-client';
-import { useUpdateMaster, useCreateMaster, useDeleteMaster } from '@/hooks/useMastersMutations';
+import { useUpdateMaster, usePatchMaster, useCreateMaster, useDeleteMaster } from '@/hooks/useMastersMutations';
 import type { MasterUpdate } from '@memo/api-client';
 import { useUI } from '@/contexts/UIContext';
 import { displayMasterName } from '@/lib/utils';
@@ -41,6 +41,7 @@ export function MastersTable() {
   });
 
   const updateMaster = useUpdateMaster();
+  const patchMaster = usePatchMaster();
   const createMaster = useCreateMaster();
   const deleteMaster = useDeleteMaster();
   const { showToast } = useUI();
@@ -174,9 +175,9 @@ export function MastersTable() {
 
   const handleToggleActive = async (master: MasterResponse) => {
     try {
-      await updateMaster.mutateAsync({
+      await patchMaster.mutateAsync({
         id: master.id,
-        data: { is_active: !master.is_active } as Record<string, unknown>,
+        data: { is_active: !master.is_active },
       });
       showToast(master.is_active ? 'Мастер архивирован' : 'Мастер восстановлен');
       setOpenDropdownId(null);

@@ -6,23 +6,27 @@ import { createElement, type ReactNode } from 'react';
 vi.mock('@memo/api-client', () => ({
   createService: vi.fn(),
   updateService: vi.fn(),
+  patchService: vi.fn(),
   deleteService: vi.fn(),
 }));
 
 import {
   useCreateService,
   useUpdateService,
+  usePatchService,
   useDeleteService,
 } from '../hooks/useServicesMutations';
 import {
   createService,
   updateService,
+  patchService,
   deleteService,
 } from '@memo/api-client';
 import type { ServiceCreate, ServiceUpdate } from '@memo/api-client';
 
 const mockCreateService = vi.mocked(createService);
 const mockUpdateService = vi.mocked(updateService);
+const mockPatchService = vi.mocked(patchService);
 const mockDeleteService = vi.mocked(deleteService);
 
 const serviceResponse = {
@@ -43,6 +47,7 @@ function createQueryClientWrapper() {
 }
 
 describe('useServicesMutations', () => {
+  beforeEach(() => vi.clearAllMocks());
   afterEach(() => vi.restoreAllMocks());
 
   describe('useCreateService', () => {
@@ -112,6 +117,36 @@ describe('useServicesMutations', () => {
 
       await act(async () => {
         await result.current.mutateAsync({ id: 's1', data: { title: 'Updated' } });
+      });
+
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['services'] });
+    });
+  });
+
+  describe('usePatchService', () => {
+    it('calls patchService with id and partial data (archive toggle)', async () => {
+      const { wrapper } = createQueryClientWrapper();
+      mockPatchService.mockResolvedValue({ ...serviceResponse, is_active: false });
+
+      const { result } = renderHook(() => usePatchService(), { wrapper });
+
+      await act(async () => {
+        await result.current.mutateAsync({ id: 's1', data: { is_active: false } });
+      });
+
+      expect(mockPatchService).toHaveBeenCalledWith('s1', { is_active: false });
+      expect(mockUpdateService).not.toHaveBeenCalled();
+    });
+
+    it('invalidates the services query cache on success', async () => {
+      const { queryClient, wrapper } = createQueryClientWrapper();
+      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+      mockPatchService.mockResolvedValue({ ...serviceResponse, is_active: false });
+
+      const { result } = renderHook(() => usePatchService(), { wrapper });
+
+      await act(async () => {
+        await result.current.mutateAsync({ id: 's1', data: { is_active: false } });
       });
 
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['services'] });

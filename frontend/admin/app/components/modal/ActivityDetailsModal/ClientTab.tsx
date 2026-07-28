@@ -4,7 +4,7 @@ import React, { useState, useCallback, useRef } from 'react';
 import type { ClientResponse, ClientWithStats } from '@memo/api-client';
 import type { VisitStatus } from '@memo/domain';
 import { useQueryClient } from '@tanstack/react-query';
-import { updateVisitor } from '@memo/api-client';
+import { patchVisitor } from '@memo/api-client';
 import { RecordSummary } from '@/app/components/shared/record/blocks/RecordSummary';
 import { RecordVisitsTable } from '@/app/components/shared/record/blocks/RecordVisitsTable';
 import { RecordPaymentsTable } from '@/app/components/shared/record/blocks/RecordPaymentsTable';
@@ -72,14 +72,14 @@ export function ClientTab({
   // ── Handlers ─────────────────────────────────────────────────────────
 
   /**
-   * Visitor name/age change — fine-grained: updateVisitor + invalidate
+   * Visitor name/age change — fine-grained: patchVisitor (PATCH) + invalidate
    * ['visitors', clientId] so the canonical hook refetches. No optimistic
    * override layer.
    */
   const handleVisitorChange = useCallback(
     (visitorId: string, data: { name?: string; age?: number | null }) => {
       const apiData = { ...data, age: data.age ?? undefined };
-      updateVisitor(visitorId, apiData)
+      patchVisitor(visitorId, apiData)
         .then(() => {
           // Reader: ['visitors', clientId] in useRecordData
           queryClient.invalidateQueries({ queryKey: ['visitors', clientId] });

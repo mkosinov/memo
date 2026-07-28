@@ -73,6 +73,36 @@
 6. **Client phone:** No uniqueness constraint (duplicates possible)
 7. **Visitor (client_id, name):** Uniqueness enforced at service level only
 
+## PATCH Contract
+
+`GenericService.patch()` — базовая семантика partial update для всех сущностей:
+
+| Правило | Поведение |
+|---------|-----------|
+| Partial update | Обновляются только поля, явно переданные в запросе (`exclude_unset=True`) |
+| `None` для NOT NULL полей | Молча стрипится (поле не обновляется) |
+| `None` для nullable полей | Применяется — поле обнуляется |
+| Entity not found | Возвращает `None` → API возвращает 404 |
+| `updated_at` | Обновляется автоматически через SQLAlchemy `onupdate` |
+
+**Источник истины:** `backend/tests/services/test_generic_service_patch.py` — параметризованный contract-тест по всем подклассам `GenericService`.
+
+### Исключения (override-семантика)
+
+Некоторые сервисы переопределяют базовую семантику:
+
+| Сервис | Override | Тесты |
+|--------|----------|-------|
+| `ServiceService` | `tag_ids` — hard-replace; `tariffs` — пересоздаются | `test_api_services.py` |
+| `PhotoService` | `tag_ids` — hard-replace | `test_api_photos.py` |
+| `RecordService` | `visits`/`seats`/`status` — пересчитываются автоматически | `test_api_records.py` |
+
+### Правила при изменениях
+
+1. **Новый подкласс `GenericService`** → добавить config-запись в contract-тест, иначе guard-тест падает.
+2. **Новая NOT NULL колонка в модели** → обновить `NOT_NULL_FIELDS` сервиса; config-тест `test_not_null_fields_match_model` падает, если не совпадают.
+3. **Per-entity API-тесты** держат только smoke/wiring (404 + ErrorCode) и override-семантику — generic-семантики **НЕ дублировать** (они уже в contract-тесте).
+
 ## Critical Parity Issues (Backend ↔ Frontend)
 
 | # | Entity | Issue |

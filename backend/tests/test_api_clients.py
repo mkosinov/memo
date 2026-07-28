@@ -148,42 +148,11 @@ class TestClientsCrud:
         )
         assert response.status_code == 404
 
-    def test_patch_client_updates_name(self, api_client) -> None:
-        """PATCH /api/v1/clients/{id} partially updates a client."""
-        create_resp = api_client.post("/api/v1/clients", json=CLIENT_PAYLOAD)
-        client_id = create_resp.json()["id"]
-        original_phone = create_resp.json()["phone"]
-
-        response = api_client.patch(f"/api/v1/clients/{client_id}", json={"name": "Updated Name"})
-        assert response.status_code == 200
-        body = response.json()
-        assert body["name"] == "Updated Name"
-        assert body["phone"] == original_phone  # unchanged
-
     def test_patch_client_not_found(self, api_client) -> None:
         """PATCH /api/v1/clients/{fake_id} returns 404."""
         response = api_client.patch("/api/v1/clients/nonexistent", json={"name": "Test"})
         assert response.status_code == 404
-
-    def test_patch_client_updates_channel(self, api_client) -> None:
-        """PATCH /api/v1/clients/{id} can update channel field."""
-        create_resp = api_client.post("/api/v1/clients", json=CLIENT_PAYLOAD)
-        client_id = create_resp.json()["id"]
-
-        response = api_client.patch(f"/api/v1/clients/{client_id}", json={"channel": "whatsapp"})
-        assert response.status_code == 200
-        assert response.json()["channel"] == "whatsapp"
-
-    def test_patch_client_empty_body(self, api_client) -> None:
-        """PATCH /api/v1/clients/{id} with empty body returns unchanged client."""
-        create_resp = api_client.post("/api/v1/clients", json=CLIENT_PAYLOAD)
-        client_id = create_resp.json()["id"]
-
-        response = api_client.patch(f"/api/v1/clients/{client_id}", json={})
-        assert response.status_code == 200
-        body = response.json()
-        assert body["name"] == CLIENT_PAYLOAD["name"]
-        assert body["phone"] == CLIENT_PAYLOAD["phone"]
+        assert response.json()["detail"]["code"] == "CLIENT_NOT_FOUND"
 
     def test_list_visitors_for_client(self, api_client) -> None:
         """GET /api/clients/{id}/visitors returns visitors for that client."""
@@ -301,58 +270,6 @@ class TestClientCreateEdgeCases:
 class TestPatchClientEdgeCases:
     """Edge cases for PATCH /api/v1/clients/{id}."""
 
-    def test_patch_multiple_fields_at_once(self, api_client) -> None:
-        """PATCH updates multiple fields in one request."""
-        create_resp = api_client.post("/api/v1/clients", json=CLIENT_PAYLOAD)
-        client_id = create_resp.json()["id"]
-
-        resp = api_client.patch(f"/api/v1/clients/{client_id}", json={
-            "name": "Multi Update",
-            "phone": "+79995556677",
-            "channel": "max",
-        })
-        assert resp.status_code == 200
-        body = resp.json()
-        assert body["name"] == "Multi Update"
-        assert body["phone"] == "+79995556677"
-        assert body["channel"] == "max"
-
-    def test_patch_sets_name_to_null(self, api_client) -> None:
-        """PATCH with name=null clears the name."""
-        create_resp = api_client.post("/api/v1/clients", json=CLIENT_PAYLOAD)
-        client_id = create_resp.json()["id"]
-
-        resp = api_client.patch(f"/api/v1/clients/{client_id}", json={"name": None})
-        assert resp.status_code == 200
-        assert resp.json()["name"] is None
-
-    def test_patch_sets_phone_to_null(self, api_client) -> None:
-        """PATCH with phone=null clears the phone."""
-        create_resp = api_client.post("/api/v1/clients", json=CLIENT_PAYLOAD)
-        client_id = create_resp.json()["id"]
-
-        resp = api_client.patch(f"/api/v1/clients/{client_id}", json={"phone": None})
-        assert resp.status_code == 200
-        assert resp.json()["phone"] is None
-
-    def test_patch_sets_email_to_null(self, api_client) -> None:
-        """PATCH with email=null clears the email."""
-        create_resp = api_client.post("/api/v1/clients", json=CLIENT_PAYLOAD)
-        client_id = create_resp.json()["id"]
-
-        resp = api_client.patch(f"/api/v1/clients/{client_id}", json={"email": None})
-        assert resp.status_code == 200
-        assert resp.json()["email"] is None
-
-    def test_patch_sets_channel_to_null(self, api_client) -> None:
-        """PATCH with channel=null clears the channel."""
-        create_resp = api_client.post("/api/v1/clients", json=CLIENT_PAYLOAD)
-        client_id = create_resp.json()["id"]
-
-        resp = api_client.patch(f"/api/v1/clients/{client_id}", json={"channel": None})
-        assert resp.status_code == 200
-        assert resp.json()["channel"] is None
-
     def test_patch_invalid_channel_returns_422(self, api_client) -> None:
         """PATCH with invalid channel value returns 422."""
         create_resp = api_client.post("/api/v1/clients", json=CLIENT_PAYLOAD)
@@ -362,36 +279,6 @@ class TestPatchClientEdgeCases:
             f"/api/v1/clients/{client_id}", json={"channel": "instagram"}
         )
         assert resp.status_code == 422
-
-    def test_patch_preserves_other_fields_when_updating_one(
-        self, api_client
-    ) -> None:
-        """PATCH email only does not touch name, phone, channel."""
-        create_resp = api_client.post("/api/v1/clients", json=CLIENT_PAYLOAD)
-        client_id = create_resp.json()["id"]
-        original = create_resp.json()
-
-        resp = api_client.patch(
-            f"/api/v1/clients/{client_id}", json={"email": "new@example.com"}
-        )
-        assert resp.status_code == 200
-        body = resp.json()
-        assert body["email"] == "new@example.com"
-        assert body["name"] == original["name"]
-        assert body["phone"] == original["phone"]
-        assert body["channel"] == original["channel"]
-
-    def test_patch_updates_updated_at_timestamp(self, api_client) -> None:
-        """PATCH changes the updated_at timestamp."""
-        create_resp = api_client.post("/api/v1/clients", json=CLIENT_PAYLOAD)
-        client_id = create_resp.json()["id"]
-        original_updated = create_resp.json()["updated_at"]
-
-        resp = api_client.patch(
-            f"/api/v1/clients/{client_id}", json={"name": "Timestamp Test"}
-        )
-        assert resp.status_code == 200
-        assert resp.json()["updated_at"] >= original_updated
 
 
 # ─── PUT Edge Cases ───────────────────────────────────────────────────────────
@@ -504,19 +391,6 @@ class TestClientResponseContract:
         resp = api_client.post("/api/v1/clients", json=CLIENT_PAYLOAD)
         validated = ClientResponse.model_validate(resp.json())
         assert validated.name == "John Smith"
-
-    def test_patch_response_validates(self, api_client) -> None:
-        """PATCH response validates against ClientResponse."""
-        from src.schemas.client import ClientResponse
-
-        create_resp = api_client.post("/api/v1/clients", json=CLIENT_PAYLOAD)
-        client_id = create_resp.json()["id"]
-
-        resp = api_client.patch(
-            f"/api/v1/clients/{client_id}", json={"name": "Patched"}
-        )
-        validated = ClientResponse.model_validate(resp.json())
-        assert validated.name == "Patched"
 
 
 # ─── Channel Tolerance (Issue #60) ─────────────────────────────────────────

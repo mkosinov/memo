@@ -16,15 +16,14 @@ from src.schemas.client import (
     ClientUpdate,
 )
 from src.schemas.visitor import VisitorResponse
-from src.services.client import get_client_service, list_clients_with_stats
-from src.services.generic import GenericService
+from src.services.client import ClientService, get_client_service, list_clients_with_stats
 from src.services.visitor import get_visitor_service
 
 router = APIRouter(tags=["clients"])
 
 
 @lru_cache
-def _get_client_service() -> GenericService[ClientCreate, ClientUpdate, ClientResponse]:
+def _get_client_service() -> ClientService:
     """Dependency factory returning a singleton ClientService."""
     return get_client_service()
 
@@ -35,7 +34,7 @@ def _get_visitor_service():
     return get_visitor_service()
 
 
-_ServiceDep = Annotated[GenericService[ClientCreate, ClientUpdate, ClientResponse], Depends(_get_client_service)]
+_ServiceDep = Annotated[ClientService, Depends(_get_client_service)]
 _VisitorServiceDep = Annotated[any, Depends(_get_visitor_service)]
 
 

@@ -515,38 +515,6 @@ class TestRepositoryListFilters:
 class TestRepositoryPatch:
     """Test GenericRepository.patch (partial update)."""
 
-    def test_patch_activity_capacity(self, api_client):
-        """PATCH /api/activities/{id} updates only capacity."""
-        prereqs = _create_prereqs(api_client)
-        create_resp = api_client.post(
-            "/api/v1/activities", json=_make_activity(prereqs)
-        )
-        activity_id = create_resp.json()["id"]
-
-        resp = api_client.patch(
-            f"/api/v1/activities/{activity_id}",
-            json={"capacity": 50},
-        )
-        assert resp.status_code == 200
-        assert resp.json()["capacity"] == 50
-        # Other fields unchanged
-        assert resp.json()["duration"] == 90
-
-    def test_patch_activity_comment(self, api_client):
-        """PATCH /api/activities/{id} updates only comment."""
-        prereqs = _create_prereqs(api_client)
-        create_resp = api_client.post(
-            "/api/v1/activities", json=_make_activity(prereqs)
-        )
-        activity_id = create_resp.json()["id"]
-
-        resp = api_client.patch(
-            f"/api/v1/activities/{activity_id}",
-            json={"comment": "Updated comment only"},
-        )
-        assert resp.status_code == 200
-        assert resp.json()["comment"] == "Updated comment only"
-
 
 # ─── Additional API endpoint coverage ────────────────────────────────────────
 

@@ -72,34 +72,8 @@ class TestTagsCrud:
 class TestTagPatch:
     """Tests for PATCH /api/v1/tags/{id}."""
 
-    def test_patch_tag_partial_update(self, api_client) -> None:
-        """PATCH updates only the sent field."""
-        create = api_client.post("/api/v1/tags", json={"tag": "Old"})
-        tag_id = create.json()["id"]
-
-        response = api_client.patch(f"/api/v1/tags/{tag_id}", json={"tag": "New"})
-        assert response.status_code == 200
-        assert response.json()["tag"] == "New"
-
     def test_patch_tag_not_found_404(self, api_client) -> None:
         """PATCH nonexistent tag returns 404."""
         response = api_client.patch("/api/v1/tags/nonexistent-id", json={"tag": "New"})
         assert response.status_code == 404
-
-    def test_patch_tag_empty_body(self, api_client) -> None:
-        """PATCH with empty body makes no changes."""
-        create = api_client.post("/api/v1/tags", json={"tag": "Unchanged"})
-        tag_id = create.json()["id"]
-
-        response = api_client.patch(f"/api/v1/tags/{tag_id}", json={})
-        assert response.status_code == 200
-        assert response.json()["tag"] == "Unchanged"
-
-    def test_patch_tag_null_stripped(self, api_client) -> None:
-        """PATCH with null for NOT NULL field is silently stripped."""
-        create = api_client.post("/api/v1/tags", json={"tag": "KeepMe"})
-        tag_id = create.json()["id"]
-
-        response = api_client.patch(f"/api/v1/tags/{tag_id}", json={"tag": None})
-        assert response.status_code == 200
-        assert response.json()["tag"] == "KeepMe"
+        assert response.json()["detail"]["code"] == "TAG_NOT_FOUND"

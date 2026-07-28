@@ -246,76 +246,11 @@ class TestServiceMaxAgeNullable:
 class TestServicePatch:
     """Tests for PATCH /api/v1/services/{id}."""
 
-    def test_patch_service_duration_only(self, api_client) -> None:
-        """PATCH updates only duration, other fields preserved."""
-        tag = api_client.post("/api/v1/tags", json={"tag": "popular"}).json()
-
-        create = api_client.post("/api/v1/services", json={
-            "title": "Test Service", "description": "desc",
-            "image_url": "https://example.com/test.jpg",
-            "specialty": "живопись", "min_age": 6, "max_age": 99,
-            "duration": 90, "record_info": "info",
-            "tariffs": [{"title": "Adult", "price": 3500}],
-            "tag_ids": [tag["id"]],
-        })
-        service_id = create.json()["id"]
-
-        response = api_client.patch(f"/api/v1/services/{service_id}", json={"duration": 120})
-        assert response.status_code == 200
-        body = response.json()
-        assert body["duration"] == 120
-        assert body["title"] == "Test Service"  # unchanged
-        assert len(body["tariffs"]) == 1
-        assert body["tariffs"][0]["title"] == "Adult"
-        assert len(body["tags"]) == 1
-        assert body["tags"][0]["tag"] == "popular"
-
     def test_patch_service_not_found_404(self, api_client) -> None:
         """PATCH nonexistent service returns 404."""
         response = api_client.patch("/api/v1/services/nonexistent-id", json={"duration": 120})
         assert response.status_code == 404
-
-    def test_patch_service_empty_body(self, api_client) -> None:
-        """PATCH with empty body makes no changes."""
-        create = api_client.post("/api/v1/services", json={
-            "title": "Keep", "description": "desc",
-            "image_url": "https://example.com/test.jpg",
-            "specialty": "живопись", "min_age": 6, "max_age": 99,
-            "duration": 90, "record_info": "info",
-        })
-        service_id = create.json()["id"]
-
-        response = api_client.patch(f"/api/v1/services/{service_id}", json={})
-        assert response.status_code == 200
-        assert response.json()["title"] == "Keep"
-
-    def test_patch_service_null_title_stripped(self, api_client) -> None:
-        """PATCH with null for NOT NULL title is stripped."""
-        create = api_client.post("/api/v1/services", json={
-            "title": "KeepTitle", "description": "desc",
-            "image_url": "https://example.com/test.jpg",
-            "specialty": "живопись", "min_age": 6, "max_age": 99,
-            "duration": 90, "record_info": "info",
-        })
-        service_id = create.json()["id"]
-
-        response = api_client.patch(f"/api/v1/services/{service_id}", json={"title": None})
-        assert response.status_code == 200
-        assert response.json()["title"] == "KeepTitle"
-
-    def test_patch_service_max_age_to_null(self, api_client) -> None:
-        """PATCH can set nullable max_age to null."""
-        create = api_client.post("/api/v1/services", json={
-            "title": "Service", "description": "desc",
-            "image_url": "https://example.com/test.jpg",
-            "specialty": "живопись", "min_age": 6, "max_age": 18,
-            "duration": 90, "record_info": "info",
-        })
-        service_id = create.json()["id"]
-
-        response = api_client.patch(f"/api/v1/services/{service_id}", json={"max_age": None})
-        assert response.status_code == 200
-        assert response.json()["max_age"] is None
+        assert response.json()["detail"]["code"] == "SERVICE_NOT_FOUND"
 
     def test_patch_service_tag_ids_replaces(self, api_client) -> None:
         """PATCH with tag_ids replaces all tag links."""
@@ -376,3 +311,47 @@ class TestServicePatch:
         response = api_client.patch(f"/api/v1/services/{service_id}", json={"tag_ids": []})
         assert response.status_code == 200
         assert response.json()["tags"] == []
+
+    def test_patch_service_max_age_to_null(self, api_client) -> None:
+        """PATCH {"max_age": null} sets max_age to null (nullable field)."""
+        create = api_client.post("/api/v1/services", json={
+            **SERVICE_PAYLOAD, "max_age": 50,
+        })
+        service_id = create.json()["id"]
+        assert create.json()["max_age"] == 50
+
+        response = api_client.patch(
+            f"/api/v1/services/{service_id}",
+            json={"max_age": None},
+        )
+        assert response.status_code == 200
+        assert response.json()["max_age"] is None
+
+    def test_patch_service_empty_body_noop(self, api_client) -> None:
+        """PATCH {} leaves all fields unchanged."""
+        create = api_client.post("/api/v1/services", json=SERVICE_PAYLOAD)
+        service_id = create.json()["id"]
+        original = create.json()
+
+        response = api_client.patch(f"/api/v1/services/{service_id}", json={})
+        assert response.status_code == 200
+        patched = response.json()
+
+        assert patched["title"] == original["title"]
+        assert patched["description"] == original["description"]
+        assert patched["max_age"] == original["max_age"]
+        assert patched["duration"] == original["duration"]
+        assert patched["min_age"] == original["min_age"]
+
+    def test_patch_service_null_title_stripped(self, api_client) -> None:
+        """PATCH {"title": null} leaves title unchanged (NOT NULL field, null silently stripped)."""
+        create = api_client.post("/api/v1/services", json=SERVICE_PAYLOAD)
+        service_id = create.json()["id"]
+        original_title = create.json()["title"]
+
+        response = api_client.patch(
+            f"/api/v1/services/{service_id}",
+            json={"title": None},
+        )
+        assert response.status_code == 200
+        assert response.json()["title"] == original_title

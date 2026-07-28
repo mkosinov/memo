@@ -77,6 +77,13 @@ How this feature behaves, mapped to spec acceptance criteria:
 
 Выровнять Client под общий subclass-паттерн (как TagService), чтобы ClientService обнаруживался через `__subclasses__()`. Поведение не меняется.
 
+**Pre-step: rebase на свежий main (обязательно).** Main ушёл вперёд (PR #180, bf48aa9 — PATCH alignment: `is_active` добавлен в Patch-схемы, `ServiceService.patch()` теперь обрабатывает и `tariffs`). Конфликтов с файлами #175 нет, но rebase обязателен, чтобы contract-тест писался против актуальных схем:
+
+```bash
+cd .worktrees/gh-175-patch-contract-test
+git rebase main   # main = 4c78471 (или новее на момент старта)
+```
+
 **Step 1: `backend/src/services/client.py`**
 
 Прочитать файл. Заменить фабрику, возвращающую прямой экземпляр `GenericService`, на подкласс по образцу `TagService` (`src/services/tag.py`):
@@ -197,6 +204,8 @@ Per-service config — `CONTRACT_CONFIG: dict[type, EntityConfig]`, где Entit
 - `fk_fixtures: tuple[str, ...]` — имена pytest-фикстур, которые должны выполниться ДО создания сущности (для FK): например `("create_master", "create_service", "create_location")` для Activity — их возвращаемые dict'ы дают id'ы, подставляемые в create_data через `fk_map: dict[str, str]` (поле → имя фикстуры)
 - `not_null_field: str | None`, `not_null_sentinel` — новое валидное значение (не None) для теста strip/partial
 - `nullable_field: str | None`, `nullable_sentinel` — не-None значение для создания, затем patch None
+
+⚠️ **`is_active` после PR #180:** Patch-схемы Location/Master/Material/Service получили поле `is_active: bool | None`. Это soft-delete toggle, НЕ обычное patchable-поле — в generic-контракт не включаем (ни как not_null_field, ни как nullable_field). Per-entity `is_active`-семантика покрыта новыми `test_patch_is_active.py` / `test_put_is_active.py` из #180. Config-тест NOT_NULL_FIELDS исключает `is_active` из сверки.
 
 Конкретные значения (8 сущностей):
 
@@ -338,6 +347,7 @@ def test_not_null_fields_match_model(service_cls, cfg):
 | `test_edge_cases.py` | patch-тест activity (`test_patch_partial`) | остальное без изменений |
 | `test_nullable_consolidation.py` | **файл удалить целиком** | — |
 | `test_api_visits.py`, `test_api_user_settings.py`, `test_schemas_client.py`, `services/test_visit_service.py`, `services/test_payment_service.py` | — | **не трогаем** |
+| `test_patch_is_active.py`, `test_put_is_active.py`, `test_patch_service_tariffs.py`, `test_user_settings_patch.py` (новые из PR #180) | — | **не трогаем** — покрывают `is_active`-toggle и `tariffs`-override, вне generic-контракта |
 
 Шаблон доработки 404 (по образцу `test_api_payments.py:224`):
 

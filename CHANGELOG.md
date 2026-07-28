@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — 2026-07-28
+
+### Added
+- **GH #175 — Contract test for GenericService.patch() replacing N×M per-entity PATCH duplication** — branch `gh-175-patch-contract-test` (6 commits: 22df61f, 9f66e14, 7226813, 2cd7e95, 17765a2, 6296991):
+  - **Parametrized contract test** (`backend/tests/services/test_generic_service_patch.py`, +487 lines): 6 contract tests (partial update, empty body, NOT NULL strip, nullable apply, 404, updated_at) parametrized across 8 entities via `GenericService.__subclasses__()` auto-discovery. Config test verifies `NOT_NULL_FIELDS ↔` model nullability. Guard test catches new subclasses without config.
+  - **Per-entity dedup:** −978 lines removed from 14 test files (`+692/−978` net in branch). 13 files modified (API tests for activities, clients, locations, masters, materials, payments, photos, records, services, tags, visitors; coverage_boost, edge_cases). `test_nullable_consolidation.py` deleted (245 lines). 9 exception-service tests restored (Service, Photo, Record — their override patches).
+  - **ClientService alignment** (sole `src/` change): `backend/src/services/client.py` + `backend/src/api/v1/clients.py` — subclass pattern (no behavior change). Client now auto-discovered by contract test.
+  - **Domain-rules:** PATCH Contract section in `docs/domain-rules/_overview.md` — contract test as single source of truth, 3 documented exceptions (ServiceService, PhotoService, RecordService), rules for new subclasses/columns.
+  - **Acceptance criteria:** Contract test ✅ green; config test ✅; guard test ✅ implemented (proven on dummy subclass then reverted); per-entity ~22 API PATCH tests (11×404+code, 6 tag_ids, invariants); full suite ✅ 734 passed, 0 failed, 3 skipped; `src/` ✅ only ClientService alignment.
+  - Design spec: `docs/specs/2026-07-28-generic-service-patch-contract-design.md`
+  - Plan: `docs/plans/2026-07-28-generic-service-patch-contract-plan.md`
+
 ## [Unreleased] — 2026-07-26
 
 ### Fixed

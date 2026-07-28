@@ -196,65 +196,11 @@ class TestPhotosCRUD:
 class TestPhotoPatch:
     """Tests for PATCH /api/v1/photos/{id}."""
 
-    def test_patch_photo_is_public_only(self, api_client) -> None:
-        """PATCH updates only is_public, filename preserved."""
-        create = api_client.post("/api/v1/photos", json={
-            "filename": "test.jpg", "is_public": False,
-        })
-        photo_id = create.json()["id"]
-
-        response = api_client.patch(f"/api/v1/photos/{photo_id}", json={"is_public": True})
-        assert response.status_code == 200
-        body = response.json()
-        assert body["is_public"] is True
-        assert body["filename"] == "test.jpg"  # unchanged
-
     def test_patch_photo_not_found_404(self, api_client) -> None:
         """PATCH nonexistent photo returns 404."""
         response = api_client.patch("/api/v1/photos/nonexistent-id", json={"is_public": True})
         assert response.status_code == 404
-
-    def test_patch_photo_empty_body(self, api_client) -> None:
-        """PATCH with empty body makes no changes."""
-        create = api_client.post("/api/v1/photos", json={
-            "filename": "keep.jpg", "is_public": False,
-        })
-        photo_id = create.json()["id"]
-
-        response = api_client.patch(f"/api/v1/photos/{photo_id}", json={})
-        assert response.status_code == 200
-        assert response.json()["filename"] == "keep.jpg"
-
-    def test_patch_photo_null_filename_stripped(self, api_client) -> None:
-        """PATCH with null for NOT NULL filename is stripped."""
-        create = api_client.post("/api/v1/photos", json={
-            "filename": "keepname.jpg", "is_public": False,
-        })
-        photo_id = create.json()["id"]
-
-        response = api_client.patch(f"/api/v1/photos/{photo_id}", json={"filename": None})
-        assert response.status_code == 200
-        assert response.json()["filename"] == "keepname.jpg"
-
-    def test_patch_photo_visitor_id_to_null(self, api_client) -> None:
-        """PATCH can set nullable visitor_id to null."""
-        client = api_client.post("/api/v1/clients", json={
-            "name": "Test", "phone": "+79990001234", "email": None, "channel": "telegram",
-        }).json()
-        visitor = api_client.post("/api/v1/visitors", json={
-            "client_id": client["id"], "name": "Test Visitor",
-        }).json()
-
-        create = api_client.post("/api/v1/photos", json={
-            "filename": "test.jpg", "is_public": False,
-            "visitor_id": visitor["id"],
-        })
-        photo_id = create.json()["id"]
-        assert create.json()["visitor_id"] == visitor["id"]
-
-        response = api_client.patch(f"/api/v1/photos/{photo_id}", json={"visitor_id": None})
-        assert response.status_code == 200
-        assert response.json()["visitor_id"] is None
+        assert response.json()["detail"]["code"] == "PHOTO_NOT_FOUND"
 
     def test_patch_photo_tag_ids_replaces(self, api_client) -> None:
         """PATCH with tag_ids replaces all tag links."""
@@ -306,6 +252,64 @@ class TestPhotoPatch:
         response = api_client.patch(f"/api/v1/photos/{photo_id}", json={"tag_ids": []})
         assert response.status_code == 200
         assert response.json()["tags"] == []
+
+    def test_patch_photo_visitor_id_to_null(self, api_client) -> None:
+        """PATCH {"visitor_id": null} sets visitor_id to null (nullable field)."""
+        # Create a visitor to link the photo to
+        client_resp = api_client.post("/api/v1/clients", json={
+            "name": "PhotoClient", "phone": "+79991112233",
+        })
+        client_id = client_resp.json()["id"]
+        visitor_resp = api_client.post("/api/v1/visitors", json={
+            "client_id": client_id, "name": "PhotoVisitor", "age": 25,
+        })
+        visitor_id = visitor_resp.json()["id"]
+
+        create = api_client.post("/api/v1/photos", json={
+            "filename": "linked.jpg",
+            "visitor_id": visitor_id,
+            "is_public": True,
+        })
+        photo_id = create.json()["id"]
+        assert create.json()["visitor_id"] == visitor_id
+
+        response = api_client.patch(
+            f"/api/v1/photos/{photo_id}",
+            json={"visitor_id": None},
+        )
+        assert response.status_code == 200
+        assert response.json()["visitor_id"] is None
+
+    def test_patch_photo_empty_body_noop(self, api_client) -> None:
+        """PATCH {} leaves all fields unchanged."""
+        create = api_client.post("/api/v1/photos", json={
+            "filename": "noop.jpg", "is_public": True,
+        })
+        photo_id = create.json()["id"]
+        original = create.json()
+
+        response = api_client.patch(f"/api/v1/photos/{photo_id}", json={})
+        assert response.status_code == 200
+        patched = response.json()
+
+        assert patched["filename"] == original["filename"]
+        assert patched["is_public"] == original["is_public"]
+        assert patched["visitor_id"] == original["visitor_id"]
+
+    def test_patch_photo_null_filename_stripped(self, api_client) -> None:
+        """PATCH {"filename": null} leaves filename unchanged (NOT NULL field, null silently stripped)."""
+        create = api_client.post("/api/v1/photos", json={
+            "filename": "keep-me.jpg", "is_public": False,
+        })
+        photo_id = create.json()["id"]
+        original_filename = create.json()["filename"]
+
+        response = api_client.patch(
+            f"/api/v1/photos/{photo_id}",
+            json={"filename": None},
+        )
+        assert response.status_code == 200
+        assert response.json()["filename"] == original_filename
 
 
 async def _insert_photo_direct(

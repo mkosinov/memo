@@ -188,39 +188,6 @@ class TestPaymentsCrud:
         response = api_client.delete("/api/v1/payments/nonexistent-id")
         assert response.status_code == 404
 
-    def test_patch_payment_partial(self, api_client) -> None:
-        """Scenario 21: PATCH /api/v1/payments/{id} partial update."""
-        record_id = _create_record(api_client)
-        payload = {**PAYMENT_PAYLOAD, "record_id": record_id}
-        create_resp = api_client.post("/api/v1/payments", json=payload)
-        payment_id = create_resp.json()["id"]
-
-        response = api_client.patch(
-            f"/api/v1/payments/{payment_id}",
-            json={"method": "cash"},
-        )
-        assert response.status_code == 200
-        body = response.json()
-        assert body["method"] == "cash"
-        assert body["amount"] == 3000  # unchanged
-
-    def test_patch_payment_null_amount_stripped(self, api_client) -> None:
-        """Scenario 22: PATCH with amount: null is silently stripped via NOT_NULL_FIELDS."""
-        record_id = _create_record(api_client)
-        payload = {**PAYMENT_PAYLOAD, "record_id": record_id}
-        create_resp = api_client.post("/api/v1/payments", json=payload)
-        payment_id = create_resp.json()["id"]
-        original_amount = create_resp.json()["amount"]
-
-        response = api_client.patch(
-            f"/api/v1/payments/{payment_id}",
-            json={"amount": None, "method": "cash"},
-        )
-        assert response.status_code == 200
-        body = response.json()
-        assert body["amount"] == original_amount  # NOT nulled out
-        assert body["method"] == "cash"
-
     def test_patch_payment_not_found_404(self, api_client) -> None:
         """Scenario 23: PATCH non-existent ID returns 404 with PAYMENT_NOT_FOUND code."""
         response = api_client.patch(

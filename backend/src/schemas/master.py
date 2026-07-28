@@ -41,6 +41,7 @@ class MasterPatch(BaseModel):
     specialty: str | None = None
     avatar_url: str | None = None
     sort_order: int | None = None
+    is_active: bool | None = None
 
 
 class MasterResponse(MasterBase):

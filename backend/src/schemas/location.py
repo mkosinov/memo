@@ -49,6 +49,7 @@ class LocationPatch(BaseModel):
     image_url: str | None = None
     location_hint: str | None = None
     sort_order: int | None = None
+    is_active: bool | None = None
 
 
 class LocationResponse(LocationBase):

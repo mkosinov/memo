@@ -28,6 +28,7 @@ class MaterialPatch(BaseModel):
 
     title: str | None = None
     description: str | None = None
+    is_active: bool | None = None
 
 
 class MaterialResponse(MaterialBase):

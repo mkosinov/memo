@@ -74,6 +74,7 @@ class ServicePatch(BaseModel):
     material_hint: str | None = None
     tag_ids: list[str] | None = None
     tariffs: list[TariffCreate] | None = None
+    is_active: bool | None = None
 
 
 class ServiceResponse(ServiceBase):

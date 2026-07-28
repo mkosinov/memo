@@ -26,7 +26,7 @@ class MasterCreate(MasterBase):
 class MasterUpdate(MasterBase):
     """Request schema for updating a master (full replacement via PUT)."""
 
-    pass
+    is_active: bool = True
 
 
 class MasterPatch(BaseModel):

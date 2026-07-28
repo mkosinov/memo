@@ -15,7 +15,9 @@ class MaterialCreate(MaterialBase):
 
 
 class MaterialUpdate(MaterialBase):
-    pass
+    """Request schema for updating a material (full replacement via PUT)."""
+
+    is_active: bool = True
 
 
 class MaterialPatch(BaseModel):

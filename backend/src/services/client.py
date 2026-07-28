@@ -24,9 +24,13 @@ from src.schemas.client import (
 from src.services.generic import GenericService
 
 
+class ClientService(GenericService[ClientCreate, ClientUpdate, ClientResponse]):
+    """Client service — стандартный GenericService без NOT NULL полей."""
+
+
 @lru_cache
-def get_client_service() -> GenericService[ClientCreate, ClientUpdate, ClientResponse]:
-    return GenericService(get_soft_delete_repository(), Client, ClientResponse)
+def get_client_service() -> ClientService:
+    return ClientService(get_soft_delete_repository(), Client, ClientResponse)
 
 
 async def list_clients_with_stats(

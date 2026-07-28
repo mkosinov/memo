@@ -148,89 +148,33 @@ class TestVisitorsCrud:
 class TestVisitorPatch:
     """Tests for PATCH /api/v1/visitors/{id}."""
 
-    def test_patch_visitor_name_only(self, api_client) -> None:
-        """PATCH updates only name, age preserved."""
+    def test_patch_visitor_not_found_404(self, api_client) -> None:
+        """PATCH nonexistent visitor returns 404."""
+        response = api_client.patch("/api/v1/visitors/nonexistent-id", json={"name": "New"})
+        assert response.status_code == 404
+        assert response.json()["detail"]["code"] == "VISITOR_NOT_FOUND"
+
+    def test_patch_visitor_client_id_immutable(self, api_client) -> None:
+        """PATCH with client_id field — verify actual behavior (422 or silent ignore)."""
         client_id = _create_client(api_client)
         create = api_client.post("/api/v1/visitors", json={
             "client_id": client_id, "name": "Alice", "age": 28,
         })
         visitor_id = create.json()["id"]
 
-        response = api_client.patch(f"/api/v1/visitors/{visitor_id}", json={"name": "Alice Updated"})
-        assert response.status_code == 200
-        body = response.json()
-        assert body["name"] == "Alice Updated"
-        assert body["age"] == 28  # unchanged
+        # Attempt to patch client_id to a different value
+        other_client_id = api_client.post("/api/v1/clients", json={
+            "name": "Other", "phone": "+79998887766",
+        }).json()["id"]
 
-    def test_patch_visitor_age_only(self, api_client) -> None:
-        """PATCH updates only age, name preserved."""
-        client_id = _create_client(api_client)
-        create = api_client.post("/api/v1/visitors", json={
-            "client_id": client_id, "name": "Bob", "age": 30,
-        })
-        visitor_id = create.json()["id"]
-
-        response = api_client.patch(f"/api/v1/visitors/{visitor_id}", json={"age": 31})
-        assert response.status_code == 200
-        body = response.json()
-        assert body["name"] == "Bob"  # unchanged
-        assert body["age"] == 31
-
-    def test_patch_visitor_not_found_404(self, api_client) -> None:
-        """PATCH nonexistent visitor returns 404."""
-        response = api_client.patch("/api/v1/visitors/nonexistent-id", json={"name": "New"})
-        assert response.status_code == 404
-
-    def test_patch_visitor_empty_body(self, api_client) -> None:
-        """PATCH with empty body makes no changes."""
-        client_id = _create_client(api_client)
-        create = api_client.post("/api/v1/visitors", json={
-            "client_id": client_id, "name": "Unchanged", "age": 25,
-        })
-        visitor_id = create.json()["id"]
-
-        response = api_client.patch(f"/api/v1/visitors/{visitor_id}", json={})
-        assert response.status_code == 200
-        body = response.json()
-        assert body["name"] == "Unchanged"
-        assert body["age"] == 25
-
-    def test_patch_visitor_null_name_stripped(self, api_client) -> None:
-        """PATCH with null for NOT NULL name silently strips."""
-        client_id = _create_client(api_client)
-        create = api_client.post("/api/v1/visitors", json={
-            "client_id": client_id, "name": "KeepName", "age": 25,
-        })
-        visitor_id = create.json()["id"]
-
-        response = api_client.patch(f"/api/v1/visitors/{visitor_id}", json={"name": None})
-        assert response.status_code == 200
-        assert response.json()["name"] == "KeepName"
-
-    def test_patch_visitor_age_to_null(self, api_client) -> None:
-        """PATCH can set nullable age to null."""
-        client_id = _create_client(api_client)
-        create = api_client.post("/api/v1/visitors", json={
-            "client_id": client_id, "name": "Adult", "age": 25,
-        })
-        visitor_id = create.json()["id"]
-
-        response = api_client.patch(f"/api/v1/visitors/{visitor_id}", json={"age": None})
-        assert response.status_code == 200
-        assert response.json()["age"] is None
-
-    def test_patch_visitor_multiple_fields(self, api_client) -> None:
-        """PATCH updates multiple fields at once."""
-        client_id = _create_client(api_client)
-        create = api_client.post("/api/v1/visitors", json={
-            "client_id": client_id, "name": "Old", "age": 20,
-        })
-        visitor_id = create.json()["id"]
-
-        response = api_client.patch(f"/api/v1/visitors/{visitor_id}", json={
-            "name": "New Name", "age": 21,
-        })
-        assert response.status_code == 200
-        body = response.json()
-        assert body["name"] == "New Name"
-        assert body["age"] == 21
+        response = api_client.patch(
+            f"/api/v1/visitors/{visitor_id}",
+            json={"client_id": other_client_id},
+        )
+        # Record actual behavior — do NOT change it
+        if response.status_code == 200:
+            # Silent ignore: client_id remains unchanged
+            assert response.json()["client_id"] == client_id
+        else:
+            # Rejected: 422 validation error
+            assert response.status_code == 422

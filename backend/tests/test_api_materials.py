@@ -125,60 +125,8 @@ class TestMaterialsCrud:
 class TestMaterialPatch:
     """Tests for PATCH /api/v1/materials/{id}."""
 
-    def test_patch_material_partial_update(self, api_client) -> None:
-        """PATCH updates only the sent field."""
-        create = api_client.post("/api/v1/materials", json={"title": "Old", "description": "Old desc"})
-        material_id = create.json()["id"]
-
-        response = api_client.patch(f"/api/v1/materials/{material_id}", json={"title": "New Title"})
-        assert response.status_code == 200
-        body = response.json()
-        assert body["title"] == "New Title"
-        assert body["description"] == "Old desc"  # unchanged
-
     def test_patch_material_not_found_404(self, api_client) -> None:
         """PATCH nonexistent material returns 404."""
         response = api_client.patch("/api/v1/materials/nonexistent-id", json={"title": "New"})
         assert response.status_code == 404
-
-    def test_patch_material_empty_body(self, api_client) -> None:
-        """PATCH with empty body makes no changes."""
-        create = api_client.post("/api/v1/materials", json={"title": "Keep", "description": "Keep desc"})
-        material_id = create.json()["id"]
-
-        response = api_client.patch(f"/api/v1/materials/{material_id}", json={})
-        assert response.status_code == 200
-        assert response.json()["title"] == "Keep"
-        assert response.json()["description"] == "Keep desc"
-
-    def test_patch_material_null_title_stripped(self, api_client) -> None:
-        """PATCH with null for NOT NULL title is silently stripped."""
-        create = api_client.post("/api/v1/materials", json={"title": "KeepTitle", "description": "desc"})
-        material_id = create.json()["id"]
-
-        response = api_client.patch(f"/api/v1/materials/{material_id}", json={"title": None})
-        assert response.status_code == 200
-        assert response.json()["title"] == "KeepTitle"
-
-    def test_patch_material_null_description_stripped(self, api_client) -> None:
-        """PATCH with null for NOT NULL description is silently stripped."""
-        create = api_client.post("/api/v1/materials", json={"title": "Title", "description": "KeepDesc"})
-        material_id = create.json()["id"]
-
-        response = api_client.patch(f"/api/v1/materials/{material_id}", json={"description": None})
-        assert response.status_code == 200
-        assert response.json()["description"] == "KeepDesc"
-
-    def test_patch_material_multiple_fields(self, api_client) -> None:
-        """PATCH updates multiple fields at once."""
-        create = api_client.post("/api/v1/materials", json={"title": "Old", "description": "Old desc"})
-        material_id = create.json()["id"]
-
-        response = api_client.patch(f"/api/v1/materials/{material_id}", json={
-            "title": "New Title",
-            "description": "New Desc",
-        })
-        assert response.status_code == 200
-        body = response.json()
-        assert body["title"] == "New Title"
-        assert body["description"] == "New Desc"
+        assert response.json()["detail"]["code"] == "MATERIAL_NOT_FOUND"

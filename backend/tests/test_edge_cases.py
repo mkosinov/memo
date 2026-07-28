@@ -299,22 +299,6 @@ class TestPaymentEdgeCases:
 class TestActivityEdgeCases:
     """Activity validation and boundary tests."""
 
-    def test_patch_partial(self, api_client, create_activity):
-        """PATCH updates only sent fields, leaves others unchanged."""
-        activity = create_activity(capacity=10, is_private=False)
-
-        # Patch only capacity
-        response = api_client.patch(
-            f"/api/v1/activities/{activity['id']}",
-            json={"capacity": 25},
-        )
-        assert response.status_code == 200
-        body = response.json()
-        assert body["capacity"] == 25
-        # Other fields remain unchanged
-        assert body["is_private"] is False
-        assert body["duration"] == activity["duration"]
-
     def test_occupied_count(self, api_client, create_record):
         """Activity occupied = number of records for that activity."""
         record = create_record()

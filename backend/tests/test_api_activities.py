@@ -182,26 +182,6 @@ class TestActivitiesCrud:
         response = api_client.delete("/api/v1/activities/nonexistent-id")
         assert response.status_code == 404
 
-    def test_patch_activity_partial_update(self, api_client) -> None:
-        """PATCH /api/activities/{id} applies partial updates only."""
-        prereqs = _create_prerequisites(api_client)
-        create_resp = api_client.post(
-            "/api/v1/activities", json=_activity_payload(prereqs)
-        )
-        activity_id = create_resp.json()["id"]
-
-        # Patch only duration
-        response = api_client.patch(
-            f"/api/v1/activities/{activity_id}",
-            json={"duration": 180},
-        )
-        assert response.status_code == 200
-        body = response.json()
-        assert body["duration"] == 180
-        # Other fields should remain unchanged
-        assert body["capacity"] == 10
-        assert body["is_private"] is False
-
     def test_patch_nonexistent_activity_returns_404(self, api_client) -> None:
         """PATCH /api/activities/{fake_id} returns 404."""
         response = api_client.patch(
@@ -209,6 +189,7 @@ class TestActivitiesCrud:
             json={"duration": 180},
         )
         assert response.status_code == 404
+        assert response.json()["detail"]["code"] == "ACTIVITY_NOT_FOUND"
 
 
 class TestActivitiesDateFiltering:

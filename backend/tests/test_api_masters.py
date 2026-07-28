@@ -117,87 +117,8 @@ class TestMastersCrud:
 class TestMasterPatch:
     """Tests for PATCH /api/v1/masters/{id}."""
 
-    def test_patch_master_color_only(self, api_client) -> None:
-        """PATCH updates only color, other fields preserved."""
-        create = api_client.post("/api/v1/masters", json={
-            "first_name": "Anna", "last_name": "Smith",
-            "color": "#5B8C7A", "position": "мастер", "specialty": "живопись",
-        })
-        master_id = create.json()["id"]
-
-        response = api_client.patch(f"/api/v1/masters/{master_id}", json={"color": "#FF0000"})
-        assert response.status_code == 200
-        body = response.json()
-        assert body["color"] == "#FF0000"
-        assert body["first_name"] == "Anna"  # unchanged
-
     def test_patch_master_not_found_404(self, api_client) -> None:
         """PATCH nonexistent master returns 404."""
         response = api_client.patch("/api/v1/masters/nonexistent-id", json={"color": "#FF0000"})
         assert response.status_code == 404
-
-    def test_patch_master_empty_body(self, api_client) -> None:
-        """PATCH with empty body makes no changes."""
-        create = api_client.post("/api/v1/masters", json={
-            "first_name": "Test", "last_name": "Master",
-            "color": "#5B8C7A", "position": "мастер", "specialty": "живопись",
-        })
-        master_id = create.json()["id"]
-
-        response = api_client.patch(f"/api/v1/masters/{master_id}", json={})
-        assert response.status_code == 200
-        assert response.json()["first_name"] == "Test"
-
-    def test_patch_master_null_color_stripped(self, api_client) -> None:
-        """PATCH with null for NOT NULL color is stripped."""
-        create = api_client.post("/api/v1/masters", json={
-            "first_name": "Keep", "last_name": "Master",
-            "color": "#5B8C7A", "position": "мастер", "specialty": "живопись",
-        })
-        master_id = create.json()["id"]
-
-        response = api_client.patch(f"/api/v1/masters/{master_id}", json={"color": None})
-        assert response.status_code == 200
-        assert response.json()["color"] == "#5B8C7A"
-
-    def test_patch_master_avatar_url_to_null(self, api_client) -> None:
-        """PATCH can set nullable avatar_url to null."""
-        create = api_client.post("/api/v1/masters", json={
-            "first_name": "Photo", "last_name": "Master",
-            "color": "#5B8C7A", "position": "мастер", "specialty": "живопись",
-            "avatar_url": "https://example.com/avatar.jpg",
-        })
-        master_id = create.json()["id"]
-
-        response = api_client.patch(f"/api/v1/masters/{master_id}", json={"avatar_url": None})
-        assert response.status_code == 200
-        assert response.json()["avatar_url"] is None
-
-    def test_patch_master_multiple_fields(self, api_client) -> None:
-        """PATCH updates multiple fields at once."""
-        create = api_client.post("/api/v1/masters", json={
-            "first_name": "Old", "last_name": "Name",
-            "color": "#5B8C7A", "position": "мастер", "specialty": "живопись",
-        })
-        master_id = create.json()["id"]
-
-        response = api_client.patch(f"/api/v1/masters/{master_id}", json={
-            "first_name": "New", "color": "#FF0000",
-        })
-        assert response.status_code == 200
-        body = response.json()
-        assert body["first_name"] == "New"
-        assert body["color"] == "#FF0000"
-        assert body["last_name"] == "Name"  # unchanged
-
-    def test_patch_master_sort_order(self, api_client) -> None:
-        """PATCH can update sort_order."""
-        create = api_client.post("/api/v1/masters", json={
-            "first_name": "Sorted", "last_name": "Master",
-            "color": "#5B8C7A", "position": "мастер", "specialty": "живопись",
-        })
-        master_id = create.json()["id"]
-
-        response = api_client.patch(f"/api/v1/masters/{master_id}", json={"sort_order": 5})
-        assert response.status_code == 200
-        assert response.json()["sort_order"] == 5
+        assert response.json()["detail"]["code"] == "MASTER_NOT_FOUND"

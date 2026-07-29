@@ -28,12 +28,14 @@ The failure is **silent** — no error, just wrong numbers.
 
 ### Backend — batch aggregate endpoint
 
-- Extend `GET /api/v1/payments` with a new optional query param **`record_ids`** (list of record IDs, `?record_ids=a&record_ids=b&...`).
-- When `record_ids` is provided, the response is an aggregate map: `{ totals: { "<record_id>": <total_amount>, ... } }` — SQL `WHERE record_id IN (...) GROUP BY record_id` with `SUM(amount)`.
-  - Concrete shape (decided for plan): a **dedicated route** `GET /api/v1/payments/totals?record_ids=...`, to avoid overloading the paginated list response with a different schema. FastAPI resolves static route `/payments/totals` before `/payments/{id}` if declared first — plan must declare it before the `{payment_id}` route.
-- Records with **no payments** are simply absent from the map (frontend treats missing key as 0).
-- Only active (non-soft-deleted) payments are summed.
-- Pattern to follow: SQL aggregates on the backend as in `list_clients_with_stats` (`backend/src/services/client.py` lines 36–223). The generic repository's `filters` (exact equality only, `backend/src/repositories/generic.py` lines 28–39) does **not** support `IN` — implement a dedicated repository/service method with a custom SQLAlchemy query rather than extending the generic filters mechanism (YAGNI: payments totals is the only consumer).
+- New **dedicated route** `GET /api/v1/payments/totals?record_ids=a&record_ids=b&...` (repeated query params) returning `{ totals: { "<record_id>": <total_amount>, ... } }` — SQL `WHERE record_id IN (...) GROUP BY record_id` with `SUM(amount)`. A dedicated route avoids overloading the paginated list response with a different schema.
+  - **Route ordering (critical):** FastAPI resolves static routes before path params only if declared first — the `/totals` route MUST be inserted before the existing `GET /payments/{payment_id}` route (currently `backend/src/api/v1/payments.py` line 42).
+- Records with **no payments** are absent from the map (frontend treats missing key as 0).
+- Payments are **hard-deleted** in this codebase (no `is_active` on the Payment model — migration `a1b2c3d4e5f6` dropped it). The aggregate therefore needs **no soft-delete filter**; it sums all payment rows for the given record IDs.
+- The aggregate deliberately does **not** join through `Record.is_active` — per-record totals are keyed by record_id, and the caller (RecordsContext) only ever passes IDs of active records it has loaded. This differs from `total_paid` in `list_clients_with_stats` (which joins through active Records because it aggregates across a client's whole history); both are correct for their use case.
+- Pattern to follow: `list_clients_with_stats` in `backend/src/services/client.py` (lines 36–223) — a **module-level async function** in the service module with direct SQLAlchemy, called from the router. Implement `get_payment_totals(session, record_ids)` the same way in `backend/src/services/payment.py` — NOT as a `PaymentService` class method, and NOT by extending the generic repository `filters` mechanism (exact-equality only, `backend/src/repositories/generic.py` lines 28–39; YAGNI — this aggregate is the only `IN` consumer).
+- **Cardinality guard:** `record_ids` is capped (e.g. `max_length=200` on the query param list — page-sized sets are ≤100 after #182; exact cap in plan). Over the cap → 422. GET with repeated query params is fine at this size (~36 chars/UUID × 200 ≈ 7.5 KB worst case, within typical 8 KB limits); a POST-body variant is rejected as needless complexity for one page-sized consumer.
+- **Empty `record_ids`** (`?record_ids=` with no values, i.e. empty list): return **200 with `{ "totals": {} }`**. Frontend skips the request entirely when there are no visible records (`enabled: recordIds.length > 0`), so this path is only defensive.
 - No batch raw-payment list endpoint — only the aggregate.
 - `record_id` on Payment is a required FK — orphan payments are out of scope.
 
@@ -44,16 +46,18 @@ The failure is **silent** — no error, just wrong numbers.
 ### Frontend — RecordsContext
 
 - `frontend/admin/contexts/RecordsContext.tsx` (~line 97): remove the global `getPayments({ per_page: 100 })` query and the lookup map built from it (lines 131–139).
-- Instead: collect `record_ids` of the records currently loaded in context, fetch totals in **one** call, query key `['payments', 'totals', recordIds]` (sorted/joined for stability) — self-invalidating when the record set changes.
+- Instead: collect `record_ids` of the records currently loaded in context, fetch totals in **one** call, query key `['payments', 'totals', recordIds]` (IDs sorted, then joined for key stability) — self-invalidating when the record set changes. The query is disabled (`enabled: recordIds.length > 0`) while the records list is empty (initial load, period switch), so no empty/400 request fires; while totals are loading, the payment column renders the same loading placeholder it uses today (no new UI).
 - Expose the totals map to consumers with the same shape the lookup map had (per-record paid sum), so `RecordsTable` consumers need minimal changes:
   - `RecordsTable.tsx` lines 179–188 (sort), 216–217 (`paidForRecord`), 404–414 (payment column) keep working off the new map. Missing key → 0 → "Не оплачено".
-- Loading/empty states: while totals are loading, payment column may render the same placeholder/skeleton it uses today for loading state (no new UI).
+- **Error state:** if the totals query fails, the payment column shows the same "Не оплачено" fallback (missing data → 0) and react-query's default retry applies; no new error UI (matches current behavior for the payments query failing).
 
 ### Frontend — ClientCardModal
 
 - `app/(main)/records/components/ClientCardModal.tsx` lines 45–54:
   - "Потрачено" — take from the **server-side `total_paid`** already computed by the clients with-stats endpoint (`backend/src/api/v1/clients.py` line 66 → `src/services/client.py`). Remove the frontend recomputation from the lookup map.
-  - Per-record payment status in the modal's record history — from the RecordsContext batch totals map (same source as the table column). If the modal can show records outside the currently loaded context set, it must request totals for its own record list via the same `getPaymentTotals` (query key per its record IDs) — plan decides by inspecting actual modal data flow.
+  - **Semantic note (accepted):** current frontend `totalSpent` excludes cancelled records (lines 52–54); server `total_paid` sums payments over all active records regardless of status. The server's broader definition is the intended one going forward (a cancelled record's payments are still real money paid) — this is a deliberate behavior change, aligned with the Clients page, which already displays server `total_paid`.
+  - **Divergence note (pre-existing, documented):** "Потрачено" is an all-time figure, while the modal's record history shows only the current period's records (from context). Sum of visible rows' statuses need not equal "Потрачено" — accepted, no UI change.
+  - Per-record payment status in the modal's record history — from the RecordsContext batch totals map (same source as the table column). The modal filters `records` from the same context (ClientCardModal.tsx line 33), so its records are always a subset of the loaded set — no separate fetch needed.
 - Detail panel: **no changes** (per-record `useRecordData`).
 
 ## Adjacent Bug Assessment: `GET /records` ignores `date_from`/`date_to`
@@ -69,6 +73,13 @@ Reasons:
 
 The user approves/rejects this recommendation at G1b.
 
+## Design Alternatives Considered
+
+- **Rejected: extend `GET /payments` with optional `record_ids`** — overloads the paginated list response with a different schema; a dedicated `/totals` sub-resource keeps both contracts clean. (Panel-agreed fix of the spec's original contradictory framing.)
+- **Rejected: add `total_paid` to `RecordResponse` via correlated subquery in the records list** (simplicity panelist's proposal) — genuinely fewer moving parts (no new endpoint/client function/query cache), but rejected because: (1) it changes the `GET /records` contract for every consumer while only RecordsContext needs the sum; (2) a correlated subquery per row in the records list couples payment aggregation to records pagination/filtering, including any future server-side date filtering; (3) `ClientCardModal` and future consumers may need totals for record sets that did not come through the records list endpoint. The standalone aggregate keyed by explicit IDs is the more decoupled contract.
+- **Rejected: POST with body for the ID list** — no benefit at page-sized cardinality (≤200 IDs ≈ ≤8 KB URL); GET keeps react-query/caching semantics simple.
+- **Rejected: extend generic repository `filters` with `IN` support** — YAGNI, one consumer.
+
 ## Non-Goals
 
 - No batch raw-payments endpoint.
@@ -78,13 +89,13 @@ The user approves/rejects this recommendation at G1b.
 
 ## Acceptance Criteria
 
-- [ ] `GET /api/v1/payments/totals?record_ids=...` returns `{ totals: { record_id: sum } }` computed in SQL (IN + GROUP BY + SUM), active payments only.
-- [ ] Records with no payments are absent from the map (frontend treats missing key as 0). Behavior for an empty `record_ids` param is explicit (200 with empty totals or 400) and tested — exact choice made in plan.
-- [ ] RecordsContext no longer calls unfiltered `getPayments`; totals query key includes record IDs.
+- [ ] `GET /api/v1/payments/totals?record_ids=...` returns `{ totals: { record_id: sum } }` computed in SQL (IN + GROUP BY + SUM); route declared before `/payments/{payment_id}`.
+- [ ] Records with no payments are absent from the map (frontend treats missing key as 0). Empty `record_ids` → 200 `{ "totals": {} }`; over the cardinality cap → 422. Both tested.
+- [ ] RecordsContext no longer calls unfiltered `getPayments`; totals query key includes sorted record IDs; query disabled when no records loaded.
 - [ ] Payment status column + sorting show correct values with >100 payments in DB (regression test or E2E).
-- [ ] ClientCardModal "Потрачено" uses server `total_paid`; matches backend aggregate.
+- [ ] ClientCardModal "Потрачено" uses server `total_paid` (deliberate semantic change: now includes cancelled records' payments, matching the Clients page).
 - [ ] Domain rules `payments.md` updated with the new endpoint (via docser at IMPL).
-- [ ] Backend tests: totals endpoint (multiple records, record without payments, soft-deleted payment excluded).
+- [ ] Backend tests: totals endpoint (multiple records, record without payments, empty record_ids → 200 `{}`, over-cap → 422).
 - [ ] Frontend tests: RecordsContext totals wiring; RecordsTable status/sort against totals map; ClientCardModal total_paid.
 
 ## Visual Compliance Checks

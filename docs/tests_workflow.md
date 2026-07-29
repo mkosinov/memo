@@ -117,6 +117,12 @@ Visual regression tests use Playwright's `toHaveScreenshot` with committed PNG b
 - `cd frontend/admin && pnpm run test:e2e:update`
 - Then commit the new PNG files
 
+> **Note on baseline provenance:** All screenshot baselines in this repo
+> (the snapshot directories listed above) are recorded in the CI environment
+> via `.github/workflows/update-snapshots.yml`, deliberately — to avoid
+> font/OS rendering drift between local and CI. This has a known consequence
+> described under [Known caveats](#known-caveats) below.
+
 **Date stability:**
 - The 8 visual tests in `week-view.spec.ts` and `visual-regression.spec.ts` use `page.clock.install()` in `test.beforeEach` to mock browser time
 - Combined with `WEEK_FIXED_START = datetime(2026, 6, 15)` in `seed.py`, this produces date-stable screenshots
@@ -170,6 +176,40 @@ In CI:
 - `retries: 1` (vs 0 locally) — one automatic retry for flaky tests
 - `workers: 1` (vs undefined locally) — sequential shard execution inside each project
 - `forbidOnly: true` — `test.only` blocks CI from passing
+
+## Known caveats
+
+### Screenshot e2e can pixel-diff locally while CI is green
+
+Screenshot-based e2e specs (`visual-regression.spec.ts`,
+`wave6-status-snapshots.spec.ts`, the `toHaveScreenshot` part of
+`visual-compliance-checks.spec.ts`, and the `week-view.spec.ts` snapshots)
+use PNG baselines that were recorded **inside the CI runner** via
+[`.github/workflows/update-snapshots.yml`](../.github/workflows/update-snapshots.yml).
+This is intentional: rendering fonts/system UI depends on the host OS, and
+recording baselines in CI keeps them consistent across machines.
+
+Practical implications:
+
+- **A local pixel-diff is not a code regression.** It is environment drift
+  (different font metrics / OS subpixel rendering between your machine and
+  the CI runner). Do not "fix" the code or re-record baselines locally to
+  silence it.
+- **CI is the source of truth for screenshot e2e.** If the `e2e-tests` jobs
+  in `.github/workflows/test.yml` are green on `main` and on the PR, the
+  visual specs are passing — full stop. Investigate other failure modes
+  (logic, layout selector, etc.) before assuming a visual regression.
+- **Re-recording baselines is a CI-only operation.** Always run
+  `.github/workflows/update-snapshots.yml` to refresh snapshots; never run
+  `pnpm run test:e2e:update` locally and commit the result. Local baselines
+  will drift again on the next CI run.
+- **Worktree runs amplify this.** Tests run in a fresh git worktree on a
+  different host can show extra diffs; again, defer to CI.
+
+Precedent: 2026-07-29 (IMPL #182) — 6 visual e2e failures appeared in a
+local worktree run while the same commits' `e2e-tests` CI jobs on `main`
+and the PR were green. Root cause was classified as environment drift,
+not a code regression.
 
 ## See also
 

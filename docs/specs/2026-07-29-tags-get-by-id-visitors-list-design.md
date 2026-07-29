@@ -6,6 +6,11 @@
 - Predecessor spec: `docs/specs/2026-07-28-list-pagination-migration-design.md` (defines the paginated form, `per_page` cap=100, 422 policy, contract-test style)
 - Domain rules: `docs/domain-rules/tags.md`, `docs/domain-rules/visitors.md` (both need endpoint-table updates on completion)
 
+### G1a rationale (binding context)
+
+- **Visitors bare list vs. the old domain rule.** `docs/domain-rules/visitors.md` states "No standalone list-all endpoint — only by client". That rule is **superseded by this spec** (user-approved at G1a): visitors is a generic entity, and without a bare list it is the only generic entity excluded from the generic contract coverage that #184/#185 will build. Endpoint cost is trivial since #182 built the template. §4.4 defines the domain-rules amendment.
+- **Why visitors was excluded from #182:** it had no bare list at all — #182 only paginated existing endpoints. #183 creates the endpoint, deliberately adopting the #182 form from day one.
+
 ## 1. Background & Problem
 
 Two gaps in the generic-entity contract:
@@ -72,14 +77,18 @@ async def list_visitors(
     per_page: int = Query(20, ge=1, le=100),
 ) -> PaginatedResponse[VisitorResponse]:
     """Return all active visitors, paginated."""
-    return await service.list(db_session=session, page=page, per_page=per_page)
+    return await service.list(
+        db_session=session, page=page, per_page=per_page,
+        order_by=[asc(Visitor.created_at), asc(Visitor.id)],
+    )
 ```
 
 - `PaginatedResponse` (`backend/src/schemas/common.py:10-16`) and the paginated `GenericService.list()` (`backend/src/services/generic.py:51-74`) already exist from #182 — reuse as-is.
 - `VisitorService` extends `GenericService[VisitorCreate, VisitorUpdate, VisitorResponse]`, so `service.list()` is already available.
+- **Explicit `order_by` is required** (unlike the tags list): pagination without ORDER BY is non-deterministic — rows can shift between pages, breaking slice-disjointness. `created_at, id` gives a stable total order; `asc` / `Visitor` imports follow the masters.py precedent.
 - Pagination policy (from #182 G1b, binding): `page >= 1`, `per_page` 1..100 hard cap; out-of-bounds params → explicit **422** validation error, never silent clamping.
+- **Soft-delete semantics:** `GenericService.list()` filters `is_active` — soft-deleted visitors are excluded from this list (docstring "Return all active visitors" reflects this). Note the pre-existing asymmetry: `GET /visitors/{id}` uses `GenericService.get()`, which does NOT filter `is_active`, so a soft-deleted visitor remains fetchable by id. That asymmetry exists across all generic entities and is **out of scope** here (candidate for #184).
 - Route placement: **before** `GET "/{visitor_id}"` in `backend/src/api/v1/visitors.py`, matching how other routers order bare-list vs by-id (FastAPI resolves `GET ""` exactly, so ordering is defensive style-consistency, not a correctness requirement).
-- No `order_by` customization (tags list precedent) — default ordering.
 - **Scoped route unchanged:** `GET /api/v1/clients/{id}/visitors` (in `clients.py`, standalone service path) is NOT touched — no pagination, same response shape.
 
 ### 4.3 Frontend: api-client
@@ -102,10 +111,12 @@ export async function getVisitors(params?: ListParams): Promise<PaginatedRespons
 
 ### 4.4 Domain-rules docs update
 
-On completion, update endpoint tables (implementation task, part of the docs commit):
+On completion, update domain rules (implementation task, part of the docs commit):
 
-- `docs/domain-rules/tags.md`: add `GET /api/v1/tags/{id}` row.
-- `docs/domain-rules/visitors.md`: add `GET /api/v1/visitors` row; amend the "No standalone list-all endpoint" business-logic note.
+- `docs/domain-rules/tags.md`: add `GET | /api/v1/tags/{id} | Get` row to the API Endpoints table.
+- `docs/domain-rules/visitors.md`:
+  - Add `GET | /api/v1/visitors | List all (paginated)` row to the API Endpoints table.
+  - Replace the business-logic note "**No standalone list-all endpoint — only by client**" with: "**List-all endpoint:** `GET /api/v1/visitors` — paginated generic list (added in #183; supersedes the previous no-list-all rule)".
 
 ## 5. Test Strategy
 
@@ -114,14 +125,18 @@ On completion, update endpoint tables (implementation task, part of the docs com
 **Tags — `backend/tests/test_api_tags.py`:**
 1. `GET /tags/{id}` after POST → 200, payload matches the created tag (`id`, `tag`).
 2. `GET /tags/nonexistent-id` → 404, `detail.code == "TAG_NOT_FOUND"`.
+3. Lifecycle: POST a tag → DELETE it → `GET /tags/{id}` → 404 (tags are hard-deleted; deleted id is truly gone).
 
 **Visitors — `backend/tests/test_api_visitors.py`:**
 1. Envelope shape: `items/total/page/per_page` keys; defaults `page=1, per_page=20`.
 2. `total` correctness with N created visitors (via client + N visitor POSTs).
-3. `page=2&per_page=k` slice is disjoint from page 1.
+3. `page=2&per_page=k` slice is disjoint from page 1 (deterministic under the mandated `created_at, id` ordering).
 4. `per_page` respected (e.g. `per_page=2` returns exactly 2 items).
 5. Out-of-range page → empty `items`, correct `total`.
 6. 422 on `per_page=101`, `per_page=0`, `page=0`.
+
+**Scoped-route regression guard (acceptance criterion 3) — `backend/tests/test_api_visitors.py`:**
+7. `GET /api/v1/clients/{id}/visitors` still returns a **bare JSON array** (not the envelope) with exactly the created visitors — guards against accidental migration of the scoped route.
 
 ### Frontend (vitest, existing api-client test style — mock `api`, assert URL + schema)
 
@@ -136,7 +151,7 @@ On completion, update endpoint tables (implementation task, part of the docs com
 ## 6. Acceptance Criteria
 
 1. `GET /api/v1/tags/{id}` returns 200 + `TagResponse` for an existing tag; 404 with `TAG_NOT_FOUND` otherwise.
-2. `GET /api/v1/visitors` returns `{items, total, page, per_page}` with `page >= 1`, `per_page` 1..100; violations → 422; out-of-range page → empty items + correct total.
+2. `GET /api/v1/visitors` returns `{items, total, page, per_page}` with `page >= 1`, `per_page` 1..100; violations → 422; out-of-range page → empty items + correct total; items ordered deterministically by `created_at, id`.
 3. `GET /api/v1/clients/{id}/visitors` behavior byte-identical to before (scoped, unpaginated).
 4. api-client exports `getTag` and `getVisitors` with the signatures in §4.3.
 5. Backend `pytest` green; api-client unit tests green; no other frontend changes.

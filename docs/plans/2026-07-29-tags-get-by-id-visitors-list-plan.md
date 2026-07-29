@@ -14,7 +14,7 @@
 
 How this feature behaves, mapped to spec acceptance criteria:
 
-- **AC1 — tag by id** → Requesting a single tag by its id returns the tag (`{id, tag}`) with 200; a nonexistent id returns 404 with error code `TAG_NOT_FOUND`. Tags are soft-deleted: fetching a deleted tag returns 200 with `is_active: false` (the list excludes it) — same behavior as every other generic entity.
+- **AC1 — tag by id** → Requesting a single tag by its id returns the tag (`{id, tag}`) with 200; a nonexistent id returns 404 with error code `TAG_NOT_FOUND`. Tags are soft-deleted: fetching a deleted tag still returns 200, while the tag disappears from the list — same behavior as every other generic entity.
 - **AC2 — visitors list** → `GET /api/v1/visitors` returns a paginated envelope `{items, total, page, per_page}` (defaults page=1, per_page=20, per_page capped at 100). Requesting page 2 returns items disjoint from page 1; a page beyond the data returns empty items with the correct total. Invalid params (`page=0`, `per_page=0`, `per_page=101`) are rejected with 422 — never silently clamped.
 - **AC3 — scoped route untouched** → `GET /api/v1/clients/{id}/visitors` behaves exactly as before: a plain JSON array, unpaginated. It remains the production read path for visitors; the new bare list exists only for generic-contract completeness.
 - **AC4 — api-client** → The api-client library exports `getTag(id)` and `getVisitors({page?, per_page?})` matching the backend contract.
@@ -77,16 +77,21 @@ Add a get-by-id endpoint to the tags router, copying the `get_visitor`/`get_mast
         assert response.status_code == 404
         assert response.json()["detail"]["code"] == "TAG_NOT_FOUND"
 
-    def test_get_deleted_tag_returns_200_inactive(self, api_client) -> None:
-        """Soft-deleted tag stays fetchable by id with is_active=False (generic-entity contract)."""
+    def test_get_deleted_tag_returns_200(self, api_client) -> None:
+        """Soft-deleted tag stays fetchable by id (200) but is excluded from the list."""
         create = api_client.post("/api/v1/tags", json={"tag": "Ephemeral"})
         tag_id = create.json()["id"]
         delete = api_client.delete(f"/api/v1/tags/{tag_id}")
         assert delete.status_code == 204
 
+        # Soft-delete: row remains fetchable by id (TagResponse has no is_active field)
         response = api_client.get(f"/api/v1/tags/{tag_id}")
         assert response.status_code == 200
-        assert response.json()["is_active"] is False
+        assert response.json()["id"] == tag_id
+
+        # ... but is excluded from the list
+        body = api_client.get("/api/v1/tags").json()
+        assert not any(t["id"] == tag_id for t in body["items"])
 ```
 
 - [ ] **Step 2 — Run RED.** `cd backend && uv run pytest tests/test_api_tags.py -x -q` — expected: the 3 new tests FAIL (404→405 or 404 on the new route / wrong behavior); all 9 pre-existing tests pass.
@@ -405,7 +410,7 @@ Update the two domain-rules files with the exact wording approved at G1b. No cod
 - [ ] **Step 2 — tags.md, correct the stale delete invariant.** In `## Invariants`, replace `- Tags are hard-deleted (no is_active flag)` with:
 
 ```markdown
-- Tags are soft-deleted (is_active flag, SoftDeleteRepository). GET-by-id returns the soft-deleted row (200, is_active: false); the list excludes it.
+- Tags are soft-deleted (is_active flag, SoftDeleteRepository). GET-by-id returns the soft-deleted row (200); the list excludes it. Note: TagResponse does not expose is_active.
 ```
 
   And in the API Endpoints table, change the DELETE row description `Hard delete` → `Soft delete`.

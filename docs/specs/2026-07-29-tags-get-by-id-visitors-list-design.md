@@ -115,8 +115,8 @@ On completion, update domain rules (implementation task, part of the docs commit
 
 - `docs/domain-rules/tags.md`: add `GET | /api/v1/tags/{id} | Get` row to the API Endpoints table.
 - `docs/domain-rules/visitors.md`:
-  - Add `GET | /api/v1/visitors | List all (paginated)` row to the API Endpoints table.
-  - Replace the business-logic note "**No standalone list-all endpoint — only by client**" with: "**List-all endpoint:** `GET /api/v1/visitors` — paginated generic list (added in #183; supersedes the previous no-list-all rule)".
+  - Add `GET | /api/v1/visitors | List all (paginated, contract-only — see Business Logic)` row to the API Endpoints table.
+  - Replace the business-logic note "**No standalone list-all endpoint — only by client**" with: "**List-all endpoint:** `GET /api/v1/visitors` — paginated generic list, introduced in #183 **for contract completeness with GenericService** so visitors is no longer the only generic entity excluded from generic list contract coverage (#184/#185). It supersedes the previous no-list-all rule. The **production-use read path for visitors remains the scoped `GET /clients/{id}/visitors`** — the bare list is a contract endpoint, not a production consumer-facing read path.".
 
 ## 5. Test Strategy
 
@@ -155,7 +155,7 @@ On completion, update domain rules (implementation task, part of the docs commit
 3. `GET /api/v1/clients/{id}/visitors` behavior byte-identical to before (scoped, unpaginated).
 4. api-client exports `getTag` and `getVisitors` with the signatures in §4.3.
 5. Backend `pytest` green; api-client unit tests green; no other frontend changes.
-6. Domain-rules endpoint tables updated for tags and visitors.
+6. Domain-rules updated for tags and visitors with the exact wording in §4.4, including: the bare list exists **for contract completeness with GenericService**, and the **production-use read path remains the scoped `GET /clients/{id}/visitors`**.
 
 ## 7. User Scenarios → Test Mapping
 

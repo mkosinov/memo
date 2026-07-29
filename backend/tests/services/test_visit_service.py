@@ -9,12 +9,13 @@ import pytest
 
 @pytest.mark.asyncio
 async def test_visit_service_list(db_session, sample_visits):
-    """list returns all active visits."""
+    """list returns all active visits in a PaginatedResponse envelope."""
     from src.services.visit import VisitService
 
     service = VisitService()
-    visits = await service.list(db_session=db_session)
-    assert len(visits) == len(sample_visits)
+    result = await service.list(db_session=db_session)
+    assert result.total == len(sample_visits)
+    assert len(result.items) == len(sample_visits)
 
 
 @pytest.mark.asyncio
@@ -24,9 +25,9 @@ async def test_visit_service_list_filter_by_record(db_session, sample_visits):
 
     service = VisitService()
     record_id = sample_visits[0].record_id
-    visits = await service.list(db_session=db_session, record_id=record_id)
-    assert all(v.record_id == record_id for v in visits)
-    assert len(visits) == len(sample_visits)
+    result = await service.list(db_session=db_session, record_id=record_id)
+    assert all(v.record_id == record_id for v in result.items)
+    assert result.total == len(sample_visits)
 
 
 @pytest.mark.asyncio

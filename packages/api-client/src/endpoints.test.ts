@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { z } from 'zod';
-import { getMasters, getMaster, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, deleteActivity, getWebPhotos, getRecords, getClients, getPayments, createRecord, updateRecord, deleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, searchClientByPhone, updateVisitStatus, getTags, createService, updateService, deleteService, createLocation, updateLocation, deleteLocation, getClientsWithStats, patchClient, reorderMasters, reorderLocations, patchMaster, patchLocation, patchMaterial, patchService, patchUserSettings } from './endpoints';
+import { getMasters, getMaster, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, deleteActivity, getWebPhotos, getRecords, getClients, getPayments, createRecord, updateRecord, deleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, searchClientByPhone, updateVisitStatus, getTags, createService, updateService, deleteService, createLocation, updateLocation, deleteLocation, getClientsWithStats, patchClient, reorderMasters, reorderLocations, patchMaster, patchLocation, patchMaterial, patchService, patchUserSettings, getMaterials } from './endpoints';
 import { ServiceCreateSchema, LocationCreateSchema } from './schemas';
 
 // Mock the api function from client
@@ -27,10 +27,16 @@ beforeEach(() => {
 // ─── Masters ────────────────────────────────────────────────────────────────
 
 describe('getMasters', () => {
-  it('calls /api/v1/masters with array schema', async () => {
-    vi.mocked(api).mockResolvedValue([]);
+  it('calls /api/v1/masters without params', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
     await getMasters();
     expect(api).toHaveBeenCalledWith('/api/v1/masters', expect.anything());
+  });
+
+  it('calls /api/v1/masters with pagination params', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 100 });
+    await getMasters({ per_page: 100 });
+    expect(api).toHaveBeenCalledWith('/api/v1/masters?per_page=100', expect.anything());
   });
 });
 
@@ -60,10 +66,16 @@ describe('reorderMasters', () => {
 // ─── Locations ──────────────────────────────────────────────────────────────
 
 describe('getLocations', () => {
-  it('calls /api/v1/locations with array schema', async () => {
-    vi.mocked(api).mockResolvedValue([]);
+  it('calls /api/v1/locations without params', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
     await getLocations();
     expect(api).toHaveBeenCalledWith('/api/v1/locations', expect.anything());
+  });
+
+  it('calls /api/v1/locations with pagination params', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 2, per_page: 100 });
+    await getLocations({ page: 2, per_page: 100 });
+    expect(api).toHaveBeenCalledWith('/api/v1/locations?page=2&per_page=100', expect.anything());
   });
 });
 
@@ -85,10 +97,32 @@ describe('reorderLocations', () => {
 // ─── Services ──────────────────────────────────────────────────────────────
 
 describe('getServices', () => {
-  it('calls /api/v1/services with array schema', async () => {
-    vi.mocked(api).mockResolvedValue([]);
+  it('calls /api/v1/services without params', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
     await getServices();
     expect(api).toHaveBeenCalledWith('/api/v1/services', expect.anything());
+  });
+
+  it('calls /api/v1/services with pagination params', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 100 });
+    await getServices({ per_page: 100 });
+    expect(api).toHaveBeenCalledWith('/api/v1/services?per_page=100', expect.anything());
+  });
+});
+
+// ─── Materials ──────────────────────────────────────────────────────────────
+
+describe('getMaterials', () => {
+  it('calls /api/v1/materials without params', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
+    await getMaterials();
+    expect(api).toHaveBeenCalledWith('/api/v1/materials', expect.anything());
+  });
+
+  it('calls /api/v1/materials with pagination params', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 100 });
+    await getMaterials({ per_page: 100 });
+    expect(api).toHaveBeenCalledWith('/api/v1/materials?per_page=100', expect.anything());
   });
 });
 
@@ -115,10 +149,19 @@ describe('getWebPhotos', () => {
 
 describe('getActivities', () => {
   it('calls /api/v1/activities with date_from and date_to params', async () => {
-    vi.mocked(api).mockResolvedValue([]);
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
     await getActivities({ date_from: '2024-01-01', date_to: '2024-01-07' });
     expect(api).toHaveBeenCalledWith(
       '/api/v1/activities?date_from=2024-01-01&date_to=2024-01-07',
+      expect.anything(),
+    );
+  });
+
+  it('calls /api/v1/activities with date range and pagination params', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 100 });
+    await getActivities({ date_from: '2024-01-01', date_to: '2024-01-07', per_page: 100 });
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/activities?date_from=2024-01-01&date_to=2024-01-07&per_page=100',
       expect.anything(),
     );
   });
@@ -186,13 +229,13 @@ describe('deleteActivity', () => {
 
 describe('getRecords', () => {
   it('calls /api/v1/records without params', async () => {
-    vi.mocked(api).mockResolvedValue([]);
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
     await getRecords();
     expect(api).toHaveBeenCalledWith('/api/v1/records', expect.anything());
   });
 
   it('calls /api/v1/records with date_from and date_to params', async () => {
-    vi.mocked(api).mockResolvedValue([]);
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
     await getRecords({ date_from: '2024-01-01', date_to: '2024-01-07' });
     expect(api).toHaveBeenCalledWith(
       '/api/v1/records?date_from=2024-01-01&date_to=2024-01-07',
@@ -201,10 +244,19 @@ describe('getRecords', () => {
   });
 
   it('calls /api/v1/records with only date_from', async () => {
-    vi.mocked(api).mockResolvedValue([]);
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
     await getRecords({ date_from: '2024-01-01' });
     expect(api).toHaveBeenCalledWith(
       '/api/v1/records?date_from=2024-01-01',
+      expect.anything(),
+    );
+  });
+
+  it('calls /api/v1/records with filters and pagination params', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 2, per_page: 100 });
+    await getRecords({ client_id: 'c-1', page: 2, per_page: 100 });
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/records?client_id=c-1&page=2&per_page=100',
       expect.anything(),
     );
   });
@@ -213,10 +265,12 @@ describe('getRecords', () => {
 // ─── Clients ────────────────────────────────────────────────────────────────
 
 describe('getClients', () => {
-  it('calls /api/v1/clients with array schema', async () => {
-    vi.mocked(api).mockResolvedValue([]);
-    await getClients();
-    expect(api).toHaveBeenCalledWith('/api/v1/clients', expect.anything());
+  it('calls /api/v1/clients?per_page=100 and returns the items array', async () => {
+    const item = { id: 'c-1', name: 'Иван' };
+    vi.mocked(api).mockResolvedValue({ items: [item], total: 1, page: 1, per_page: 100 });
+    const result = await getClients();
+    expect(api).toHaveBeenCalledWith('/api/v1/clients?per_page=100', expect.anything());
+    expect(result).toEqual([item]);
   });
 });
 
@@ -285,16 +339,25 @@ describe('patchClient', () => {
 
 describe('getPayments', () => {
   it('calls /api/v1/payments without params', async () => {
-    vi.mocked(api).mockResolvedValue([]);
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
     await getPayments();
     expect(api).toHaveBeenCalledWith('/api/v1/payments', expect.anything());
   });
 
   it('calls /api/v1/payments with record_id param', async () => {
-    vi.mocked(api).mockResolvedValue([]);
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
     await getPayments({ record_id: 'r-1' });
     expect(api).toHaveBeenCalledWith(
       '/api/v1/payments?record_id=r-1',
+      expect.anything(),
+    );
+  });
+
+  it('calls /api/v1/payments with record_id and pagination params', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 100 });
+    await getPayments({ record_id: 'r-1', per_page: 100 });
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/payments?record_id=r-1&per_page=100',
       expect.anything(),
     );
   });
@@ -511,10 +574,16 @@ describe('updateVisitStatus', () => {
 // ─── Tags ──────────────────────────────────────────────────────────────────
 
 describe('getTags', () => {
-  it('calls /api/v1/tags with array schema', async () => {
-    vi.mocked(api).mockResolvedValue([]);
+  it('calls /api/v1/tags without params', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
     await getTags();
     expect(api).toHaveBeenCalledWith('/api/v1/tags', expect.anything());
+  });
+
+  it('calls /api/v1/tags with pagination params', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 100 });
+    await getTags({ per_page: 100 });
+    expect(api).toHaveBeenCalledWith('/api/v1/tags?per_page=100', expect.anything());
   });
 });
 

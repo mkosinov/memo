@@ -37,7 +37,7 @@ const COLUMNS: Column[] = [
 export function MastersTable() {
   const { data: masters = [], isLoading, error, refetch } = useQuery<MasterResponse[]>({
     queryKey: ['masters'],
-    queryFn: getMasters,
+    queryFn: () => getMasters({ per_page: 100 }).then(r => r.items),
   });
 
   const updateMaster = useUpdateMaster();

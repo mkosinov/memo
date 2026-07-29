@@ -89,7 +89,7 @@ vi.mock('@tanstack/react-query', () => ({
 }));
 
 vi.mock('@memo/api-client', () => ({
-  getServices: vi.fn().mockResolvedValue([]),
+  getServices: vi.fn().mockResolvedValue({ items: [], total: 0, page: 1, per_page: 100 }),
   createService: vi.fn(),
   updateService: vi.fn(),
   deleteService: vi.fn(),

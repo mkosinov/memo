@@ -96,8 +96,9 @@ class TestActivitiesCrud:
 
         response = api_client.get("/api/v1/activities")
         assert response.status_code == 200
-        activities = response.json()
-        assert isinstance(activities, list)
+        body = response.json()
+        activities = body["items"]
+        assert body["total"] >= 1
         ids = [a["id"] for a in activities]
         assert activity_id in ids
 
@@ -159,8 +160,8 @@ class TestActivitiesCrud:
 
         # List should NOT include the deleted activity
         response = api_client.get("/api/v1/activities")
-        activities = response.json()
-        ids = [a["id"] for a in activities]
+        body = response.json()
+        ids = [a["id"] for a in body["items"]]
         assert activity_id not in ids
 
     def test_get_nonexistent_activity_returns_404(self, api_client) -> None:
@@ -217,8 +218,10 @@ class TestActivitiesDateFiltering:
             },
         )
         assert response.status_code == 200
-        activities = response.json()
+        body = response.json()
+        activities = body["items"]
         assert len(activities) == 2
+        assert body["total"] == 2
 
     def test_list_activities_no_date_filter_returns_all(self, api_client) -> None:
         """GET /api/activities without date params returns all active activities."""
@@ -232,8 +235,10 @@ class TestActivitiesDateFiltering:
 
         response = api_client.get("/api/v1/activities")
         assert response.status_code == 200
-        activities = response.json()
+        body = response.json()
+        activities = body["items"]
         assert len(activities) == 2
+        assert body["total"] == 2
 
 
 class TestActivitiesOccupied:
@@ -292,7 +297,7 @@ class TestActivitiesOccupiedBatch:
 
         resp = api_client.get(f"/api/v1/activities?date_from={df}&date_to={dt}")
         assert resp.status_code == 200
-        by_id = {a["id"]: a for a in resp.json()}
+        by_id = {a["id"]: a for a in resp.json()["items"]}
         assert by_id[a1["id"]]["occupied"] == 2
         assert by_id[a2["id"]]["occupied"] == 0
 
@@ -308,7 +313,7 @@ class TestActivitiesOccupiedBatch:
 
         resp = api_client.get(f"/api/v1/activities?date_from={df}&date_to={dt}")
         assert resp.status_code == 200
-        assert all(a["occupied"] == 0 for a in resp.json())
+        assert all(a["occupied"] == 0 for a in resp.json()["items"])
 
 
 import asyncio  # noqa: E402

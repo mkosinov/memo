@@ -14,6 +14,7 @@ from src.schemas.activity import (
     ActivityResponse,
     ActivityUpdate,
 )
+from src.schemas.common import PaginatedResponse
 from src.services.activity import ActivityService, get_activity_service
 
 router = APIRouter(tags=["activities"])
@@ -38,26 +39,35 @@ async def _to_response(
     return _map_response(activity, occupied)
 
 
-def _map_response(activity, occupied: int) -> ActivityResponse:
-    """Pure mapper — ORM Activity + precomputed occupied → response."""
-    data = ActivityResponse.model_validate(activity)
-    data.occupied = occupied
-    return data
+def _map_response(activity: ActivityResponse, occupied: int) -> ActivityResponse:
+    """Set occupied on a validated ActivityResponse."""
+    activity.occupied = occupied
+    return activity
 
 
-@router.get("", response_model=list[ActivityResponse])
+@router.get("", response_model=PaginatedResponse[ActivityResponse])
 async def list_activities(
     service: _ServiceDep,
     session: SessionDep,
+    page: int = Query(1, ge=1),
+    per_page: int = Query(20, ge=1, le=100),
     date_from: str | None = Query(None),
     date_to: str | None = Query(None),
-) -> list[ActivityResponse]:
+) -> PaginatedResponse[ActivityResponse]:
     """Return all active activities, optionally filtered by date range."""
-    activities = await service.list(db_session=session, date_from=date_from, date_to=date_to)
-    occupied_map = await service.sum_active_seats_bulk(
-        db_session=session, activity_ids=[a.id for a in activities]
+    result = await service.list(
+        db_session=session, page=page, per_page=per_page,
+        date_from=date_from, date_to=date_to,
     )
-    return [_map_response(a, occupied=occupied_map.get(a.id, 0)) for a in activities]
+    occupied_map = await service.sum_active_seats_bulk(
+        db_session=session, activity_ids=[a.id for a in result.items]
+    )
+    return PaginatedResponse(
+        items=[_map_response(a, occupied=occupied_map.get(a.id, 0)) for a in result.items],
+        total=result.total,
+        page=result.page,
+        per_page=result.per_page,
+    )
 
 
 @router.get("/{activity_id}", response_model=ActivityResponse)

@@ -268,21 +268,21 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
   // Raw API data (shared cache keys with domain hooks — same fetch, different select)
   const { data: activitiesRaw = [], isLoading: activitiesLoading, error: activitiesError } = useQuery<ActivityResponse[]>({
     queryKey: ['activities', weekStart, weekEnd],
-    queryFn: () => getActivities({ date_from: weekStart, date_to: weekEnd }),
+    queryFn: () => getActivities({ date_from: weekStart, date_to: weekEnd, per_page: 100 }).then(r => r.items),
   });
   const { data: mastersRaw = [] } = useQuery<MasterResponse[]>({
     queryKey: ['masters'],
-    queryFn: () => getMasters(),
+    queryFn: () => getMasters({ per_page: 100 }).then(r => r.items),
     staleTime: 5 * 60 * 1000,
   });
   const { data: servicesRaw = [] } = useQuery<ServiceResponse[]>({
     queryKey: ['services'],
-    queryFn: () => getServices(),
+    queryFn: () => getServices({ per_page: 100 }).then(r => r.items),
     staleTime: 5 * 60 * 1000,
   });
   const { data: locationsRaw = [] } = useQuery<LocationResponse[]>({
     queryKey: ['locations'],
-    queryFn: () => getLocations(),
+    queryFn: () => getLocations({ per_page: 100 }).then(r => r.items),
     staleTime: 5 * 60 * 1000,
   });
 

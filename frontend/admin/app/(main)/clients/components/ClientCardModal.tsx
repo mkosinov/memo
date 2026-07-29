@@ -53,7 +53,7 @@ export function ClientCardModal({ client, isOpen, onClose, onClientCreated, mode
   // Fetch records for this client (only in view mode)
   const { data: records } = useQuery({
     queryKey: ['records', 'client', client?.id],
-    queryFn: () => getRecords({ client_id: client?.id! }),
+    queryFn: () => getRecords({ client_id: client?.id!, per_page: 100 }).then(r => r.items),
     enabled: isOpen && mode === 'view' && !!client?.id,
   });
 

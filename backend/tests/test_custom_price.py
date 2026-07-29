@@ -135,7 +135,7 @@ class TestCustomPriceResponse:
 
         resp = api_client.get("/api/v1/records")
         assert resp.status_code == 200
-        found = next(r for r in resp.json() if r["id"] == record["id"])
+        found = next(r for r in resp.json()["items"] if r["id"] == record["id"])
         assert found["custom_price"] == 4200
 
     def test_get_record_includes_custom_price(self, api_client, create_record) -> None:

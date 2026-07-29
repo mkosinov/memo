@@ -111,6 +111,10 @@ const mockPayments = [
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
+function envelope<T>(items: T[]) {
+  return { items, total: items.length, page: 1, per_page: 100 };
+}
+
 function createWrapper() {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -131,10 +135,10 @@ describe('useRecordData', () => {
     vi.mocked(getRecord).mockResolvedValue(mockRecord as any);
     vi.mocked(getClientVisitors).mockResolvedValue(mockVisitors as any);
     vi.mocked(getActivity).mockResolvedValue(mockActivity as any);
-    vi.mocked(getServices).mockResolvedValue(mockServices as any);
-    vi.mocked(getMasters).mockResolvedValue(mockMasters as any);
-    vi.mocked(getLocations).mockResolvedValue(mockLocations as any);
-    vi.mocked(getPayments).mockResolvedValue(mockPayments as any);
+    vi.mocked(getServices).mockResolvedValue(envelope(mockServices) as any);
+    vi.mocked(getMasters).mockResolvedValue(envelope(mockMasters) as any);
+    vi.mocked(getLocations).mockResolvedValue(envelope(mockLocations) as any);
+    vi.mocked(getPayments).mockResolvedValue(envelope(mockPayments) as any);
   });
 
   it('exports useRecordData function', async () => {
@@ -222,7 +226,7 @@ describe('useRecordData', () => {
       { wrapper: createWrapper() },
     );
 
-    await waitFor(() => expect(getPayments).toHaveBeenCalledWith({ record_id: 'r1' }));
+    await waitFor(() => expect(getPayments).toHaveBeenCalledWith({ record_id: 'r1', per_page: 100 }));
   });
 
   it('returns visitors array', async () => {

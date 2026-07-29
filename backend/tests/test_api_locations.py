@@ -50,8 +50,9 @@ class TestLocationsCrud:
 
         response = api_client.get("/api/v1/locations")
         assert response.status_code == 200
-        locations = response.json()
-        assert isinstance(locations, list)
+        body = response.json()
+        locations = body["items"]
+        assert body["total"] >= 1
         ids = [loc["id"] for loc in locations]
         assert location_id in ids
 
@@ -104,8 +105,8 @@ class TestLocationsCrud:
 
         # List should NOT include the deleted location
         response = api_client.get("/api/v1/locations")
-        locations = response.json()
-        ids = [loc["id"] for loc in locations]
+        body = response.json()
+        ids = [loc["id"] for loc in body["items"]]
         assert location_id not in ids
 
     def test_get_nonexistent_location_returns_404(self, api_client) -> None:

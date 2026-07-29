@@ -172,7 +172,7 @@ class TestLocationApiShortTitle:
         )
         resp = api_client.get("/api/v1/locations")
         assert resp.status_code == 200
-        locations = resp.json()
+        locations = resp.json()["items"]
         assert any(loc["short_title"] == "T" for loc in locations)
 
 

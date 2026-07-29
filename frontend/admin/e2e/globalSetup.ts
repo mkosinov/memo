@@ -109,11 +109,13 @@ export default async function globalSetup() {
   if (!activitiesResponse || !activitiesResponse.ok) {
     throw new Error(`[#152] Backend /api/v1/activities not responding at ${activitiesUrl} after 5 retries. Last error: ${lastErr?.message || 'HTTP ' + activitiesResponse?.status}. Backend not started? Run \`bash scripts/test-all.sh\` to start the full stack.`);
   }
-  const activitiesJson = await activitiesResponse.json() as any[];
-  if (activitiesJson.length === 0) {
+  const activitiesJson = await activitiesResponse.json() as any;
+  // #182: activities list is paginated ({items,total,page,per_page}) — unwrap envelope
+  const activitiesList: any[] = activitiesJson.items || activitiesJson;
+  if (activitiesList.length === 0) {
     throw new Error(`[#152] No activities for the current week (${fmt(monday)} to ${fmt(sunday)}) at ${dbPath}. Seed did not populate — likely a stale DB or calendar week rollover without re-seed. Run \`bash scripts/test-all.sh\` or \`SHARD_ID=N ... bash scripts/e2e-shard-start.sh\` to wipe+reseed, then retry.`);
   }
-  console.log(`[globalSetup] Seed contract verified: ${leftoverSeedRows} seed rows + ${activitiesJson.length} activities for current week.`);
+  console.log(`[globalSetup] Seed contract verified: ${leftoverSeedRows} seed rows + ${activitiesList.length} activities for current week.`);
 
   // #126: standalone mode has no shell warmup — pre-compile routes so the
   // first test doesn't race Next.js dev compilation (404 _next/static).

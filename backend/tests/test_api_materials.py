@@ -12,7 +12,9 @@ class TestMaterialsCrud:
         """GET /api/v1/materials returns empty list when no materials exist."""
         response = api_client.get("/api/v1/materials")
         assert response.status_code == 200
-        assert response.json() == []
+        body = response.json()
+        assert body["items"] == []
+        assert body["total"] == 0
 
     def test_create_material(self, api_client) -> None:
         """POST /api/v1/materials creates a material and returns 201."""
@@ -84,8 +86,8 @@ class TestMaterialsCrud:
 
         # List should NOT include the deleted material
         response = api_client.get("/api/v1/materials")
-        materials = response.json()
-        ids = [m["id"] for m in materials]
+        body = response.json()
+        ids = [m["id"] for m in body["items"]]
         assert material_id not in ids
 
     def test_list_materials_includes_created(self, api_client) -> None:
@@ -98,8 +100,9 @@ class TestMaterialsCrud:
 
         response = api_client.get("/api/v1/materials")
         assert response.status_code == 200
-        materials = response.json()
-        assert isinstance(materials, list)
+        body = response.json()
+        materials = body["items"]
+        assert body["total"] >= 1
         ids = [m["id"] for m in materials]
         assert material_id in ids
 

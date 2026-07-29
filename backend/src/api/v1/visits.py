@@ -4,10 +4,11 @@ from datetime import datetime
 from functools import lru_cache
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from src.db import SessionDep
 from src.errors import ErrorCode, ErrorDetail
+from src.schemas.common import PaginatedResponse
 from src.schemas.visit import (
     VisitCreate,
     VisitPatch,
@@ -53,15 +54,16 @@ def _map_visit(visit) -> VisitResponse:
 # ─── CRUD handlers ─────────────────────────────────────────────────────────
 
 
-@router.get("", response_model=list[VisitResponse])
+@router.get("", response_model=PaginatedResponse[VisitResponse])
 async def list_visits(
     service: _ServiceDep,
     session: SessionDep,
+    page: int = Query(1, ge=1),
+    per_page: int = Query(20, ge=1, le=100),
     record_id: str | None = None,
-) -> list[VisitResponse]:
+) -> PaginatedResponse[VisitResponse]:
     """List active visits, optionally filtered by record_id."""
-    visits = await service.list(db_session=session, record_id=record_id)
-    return [_map_visit(v) for v in visits]
+    return await service.list(db_session=session, page=page, per_page=per_page, record_id=record_id)
 
 
 @router.get("/{visit_id}", response_model=VisitResponse)

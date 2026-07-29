@@ -53,9 +53,7 @@ def test_list_activities_query_count_is_bounded(
         event.remove(db_engine.sync_engine, "before_cursor_execute", listener)
 
     assert resp.status_code == 200
-    assert len(resp.json()) == 5
+    assert len(resp.json()["items"]) == 5
     # Before fix: ~1 (list) + 5 (per-activity SUM) = 6+. After: list + ONE batch SUM.
-    # Assert the occupied computation adds at most 1 query beyond the list query,
-    # independent of activity count. Allow a small constant for the list itself.
-    # Final settled value: 2 (verified). < 3 leaves a small buffer.
-    assert counter["n"] <= 3, f"N+1 regression: {counter['n']} SELECTs for 5 activities"
+    # Pagination adds one extra count query. Final settled value: 3. < 5 leaves buffer.
+    assert counter["n"] <= 4, f"N+1 regression: {counter['n']} SELECTs for 5 activities"

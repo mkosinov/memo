@@ -497,3 +497,30 @@ export const TagSearchResultSchema = z.object({
   tag: z.string(),
 });
 export type TagSearchResult = z.infer<typeof TagSearchResultSchema>;
+
+// ─── Paginated list envelopes ────────────────────────────────────────────────
+
+export interface PaginatedResponse<T> {
+  items: T[];
+  total: number;
+  page: number;
+  per_page: number;
+}
+
+export function paginatedSchema<T extends z.ZodType>(itemSchema: T) {
+  return z.object({
+    items: z.array(itemSchema),
+    total: z.number(),
+    page: z.number(),
+    per_page: z.number(),
+  });
+}
+
+export const MasterListResponseSchema = paginatedSchema(MasterResponseSchema);
+export const LocationListResponseSchema = paginatedSchema(LocationResponseSchema);
+export const TagListResponseSchema = paginatedSchema(TagResponseSchema);
+export const MaterialListResponseSchema = paginatedSchema(MaterialResponseSchema);
+export const ServiceListResponseSchema = paginatedSchema(ServiceResponseSchema);
+export const ActivityListResponseSchema = paginatedSchema(ActivityResponseSchema);
+export const PaymentListResponseSchema = paginatedSchema(PaymentResponseSchema);
+export const RecordListResponseSchema = paginatedSchema(RecordResponseSchema);

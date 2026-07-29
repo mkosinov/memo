@@ -38,8 +38,11 @@ class TestMastersCrud:
 
         response = api_client.get("/api/v1/masters")
         assert response.status_code == 200
-        masters = response.json()
-        assert isinstance(masters, list)
+        body = response.json()
+        masters = body["items"]
+        assert body["total"] >= 1
+        assert body["page"] == 1
+        assert body["per_page"] == 20
         ids = [m["id"] for m in masters]
         assert master_id in ids
 
@@ -91,8 +94,8 @@ class TestMastersCrud:
 
         # List should NOT include the deleted master
         response = api_client.get("/api/v1/masters")
-        masters = response.json()
-        ids = [m["id"] for m in masters]
+        body = response.json()
+        ids = [m["id"] for m in body["items"]]
         assert master_id not in ids
 
     def test_get_nonexistent_master_returns_404(self, api_client) -> None:

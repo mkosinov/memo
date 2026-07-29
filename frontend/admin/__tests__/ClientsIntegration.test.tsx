@@ -27,7 +27,7 @@ vi.mock('@memo/api-client', () => {
     patchClient: vi.fn(),
     deleteClient: vi.fn(),
     getRecord: vi.fn(),
-    getRecords: vi.fn().mockResolvedValue([]),
+    getRecords: vi.fn().mockResolvedValue({ items: [], total: 0, page: 1, per_page: 100 }),
     patchRecord: vi.fn(),
     updateRecord: vi.fn(),
     deleteRecord: vi.fn(),

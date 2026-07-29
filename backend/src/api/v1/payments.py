@@ -3,10 +3,11 @@
 from functools import lru_cache
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from src.db import SessionDep
 from src.errors import ErrorCode, ErrorDetail
+from src.schemas.common import PaginatedResponse
 from src.schemas.payment import PaymentCreate, PaymentPatch, PaymentResponse, PaymentUpdate
 from src.services.generic import GenericService
 from src.services.payment import get_payment_service
@@ -23,17 +24,19 @@ def _get_payment_service() -> GenericService[PaymentCreate, PaymentUpdate, Payme
 _ServiceDep = Annotated[GenericService[PaymentCreate, PaymentUpdate, PaymentResponse], Depends(_get_payment_service)]
 
 
-@router.get("", response_model=list[PaymentResponse])
+@router.get("", response_model=PaginatedResponse[PaymentResponse])
 async def list_payments(
     service: _ServiceDep,
     session: SessionDep,
+    page: int = Query(1, ge=1),
+    per_page: int = Query(20, ge=1, le=100),
     record_id: str | None = None,
-) -> list[PaymentResponse]:
+) -> PaginatedResponse[PaymentResponse]:
     """Return all active payments, optionally filtered by record_id."""
     filters = {}
     if record_id:
         filters["record_id"] = record_id
-    return await service.list(db_session=session, **filters)
+    return await service.list(db_session=session, page=page, per_page=per_page, **filters)
 
 
 @router.get("/{payment_id}", response_model=PaymentResponse)

@@ -9,9 +9,11 @@ from __future__ import annotations
 from typing import Generic, TypeVar
 
 from pydantic import BaseModel
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.repositories.generic import BaseRepository
+from src.schemas.common import PaginatedResponse
 from src.services.decorators import transactional
 
 CreateSchemaT = TypeVar("CreateSchemaT", bound=BaseModel)
@@ -45,12 +47,31 @@ class GenericService(Generic[CreateSchemaT, UpdateSchemaT, ResponseSchemaT]):
         self._model = model
         self._response_schema = response_schema
 
+    # NOTE: filter logic mirrors SoftDeleteRepository.list() — keep in sync (#182)
     async def list(
-        self, db_session: AsyncSession, order_by=None, **filters
-    ) -> list[ResponseSchemaT]:
-        """Return all active records, optionally filtered and ordered."""
-        orm_list = await self._repository.list(db_session, self._model, order_by=order_by, **filters)
-        return [self._response_schema.model_validate(o) for o in orm_list]
+        self,
+        db_session: AsyncSession,
+        page: int = 1,
+        per_page: int = 20,
+        order_by=None,
+        **filters,
+    ) -> PaginatedResponse[ResponseSchemaT]:
+        """Return a paginated page of active records, optionally filtered/ordered."""
+        stmt = select(self._model)
+        stmt = stmt.where(self._model.is_active)
+        for key, value in filters.items():
+            if value is not None:
+                stmt = stmt.where(getattr(self._model, key) == value)
+        if order_by is not None:
+            stmt = stmt.order_by(*order_by)
+        total = (
+            await db_session.execute(select(func.count()).select_from(stmt.subquery()))
+        ).scalar_one()
+        result = await db_session.execute(
+            stmt.limit(per_page).offset((page - 1) * per_page)
+        )
+        items = [self._response_schema.model_validate(o) for o in result.scalars().all()]
+        return PaginatedResponse(items=items, total=total, page=page, per_page=per_page)
 
     async def get(
         self, db_session: AsyncSession, id: str

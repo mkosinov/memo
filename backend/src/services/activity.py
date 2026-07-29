@@ -13,6 +13,7 @@ from src.repositories.generic import SoftDeleteRepository, get_soft_delete_repos
 from src.models.activity import Activity
 from src.models.record import Record
 from src.schemas.activity import ActivityCreate, ActivityResponse, ActivityUpdate
+from src.schemas.common import PaginatedResponse
 from src.services.generic import GenericService
 from src.domain.record_visits import active_record_filter
 from src.domain.visit_status import ACTIVE_RECORD_STATUSES
@@ -33,22 +34,26 @@ class ActivityService(GenericService[ActivityCreate, ActivityUpdate, ActivityRes
     async def list(
         self,
         db_session: AsyncSession,
+        page: int = 1,
+        per_page: int = 20,
         date_from: str | None = None,
         date_to: str | None = None,
         **filters,
-    ) -> list[Activity]:
-        """List activities with optional date range filter."""
+    ) -> PaginatedResponse[ActivityResponse]:
+        """List activities with optional date range filter, paginated."""
         if date_from or date_to:
-            return await self._list_by_date(db_session, date_from, date_to)
-        return await super().list(db_session, **filters)
+            return await self._list_by_date(db_session, date_from, date_to, page, per_page)
+        return await super().list(db_session, page=page, per_page=per_page, **filters)
 
     async def _list_by_date(
         self,
         db_session: AsyncSession,
         date_from: str | None,
         date_to: str | None,
-    ) -> list[Activity]:
-        """Return active activities filtered by date range."""
+        page: int,
+        per_page: int,
+    ) -> PaginatedResponse[ActivityResponse]:
+        """Return a paginated page of active activities filtered by date range."""
         stmt = select(Activity).where(Activity.is_active)
         if date_from:
             from_dt = datetime.fromisoformat(date_from)
@@ -57,8 +62,14 @@ class ActivityService(GenericService[ActivityCreate, ActivityUpdate, ActivityRes
             to_dt = datetime.fromisoformat(date_to)
             to_dt = to_dt.replace(hour=23, minute=59, second=59)
             stmt = stmt.where(Activity.start <= to_dt)
-        result = await db_session.execute(stmt)
-        return list(result.scalars().all())
+        total = (
+            await db_session.execute(select(func.count()).select_from(stmt.subquery()))
+        ).scalar_one()
+        result = await db_session.execute(
+            stmt.limit(per_page).offset((page - 1) * per_page)
+        )
+        items = [ActivityResponse.model_validate(a) for a in result.scalars().all()]
+        return PaginatedResponse(items=items, total=total, page=page, per_page=per_page)
 
     async def sum_active_seats(
         self, db_session: AsyncSession, activity_id: str

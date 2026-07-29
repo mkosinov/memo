@@ -92,7 +92,7 @@ function loadVisibleKeys(): string[] | null {
 export function MaterialsTable() {
   const { data: materials = [], isLoading } = useQuery<MaterialResponse[], Error>({
     queryKey: ['materials'],
-    queryFn: () => getMaterials(),
+    queryFn: () => getMaterials({ per_page: 100 }).then(r => r.items),
     staleTime: 5 * 60 * 1000,
   });
 

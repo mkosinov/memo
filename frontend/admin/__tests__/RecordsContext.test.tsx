@@ -91,6 +91,10 @@ function makeRecord(
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
+function envelope<T>(items: T[]) {
+  return { items, total: items.length, page: 1, per_page: 100 };
+}
+
 function createWrapper() {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -111,18 +115,18 @@ describe('RecordsContext — canonical cache seeding', () => {
   beforeEach(() => {
     vi.clearAllMocks();
 
-    vi.mocked(getRecords).mockResolvedValue([]);
+    vi.mocked(getRecords).mockResolvedValue(envelope([]));
     vi.mocked(getClients).mockResolvedValue([]);
-    vi.mocked(getPayments).mockResolvedValue([]);
-    vi.mocked(getActivities).mockResolvedValue([]);
-    vi.mocked(getMasters).mockResolvedValue([]);
-    vi.mocked(getServices).mockResolvedValue([]);
-    vi.mocked(getLocations).mockResolvedValue([]);
+    vi.mocked(getPayments).mockResolvedValue(envelope([]));
+    vi.mocked(getActivities).mockResolvedValue(envelope([]));
+    vi.mocked(getMasters).mockResolvedValue(envelope([]));
+    vi.mocked(getServices).mockResolvedValue(envelope([]));
+    vi.mocked(getLocations).mockResolvedValue(envelope([]));
   });
 
   it('seeds canonical ["record", id] from list response after query resolves', async () => {
     const rec1 = makeRecord('r1');
-    vi.mocked(getRecords).mockResolvedValue([rec1]);
+    vi.mocked(getRecords).mockResolvedValue(envelope([rec1]));
 
     const { Wrapper, queryClient } = createWrapper();
 
@@ -139,7 +143,7 @@ describe('RecordsContext — canonical cache seeding', () => {
 
   it('does NOT overwrite an already-present ["record", id] entry (fresher data wins)', async () => {
     const rec1 = makeRecord('r1', { status: 'confirmed' });
-    vi.mocked(getRecords).mockResolvedValue([rec1]);
+    vi.mocked(getRecords).mockResolvedValue(envelope([rec1]));
 
     const { Wrapper, queryClient } = createWrapper();
 
@@ -162,7 +166,7 @@ describe('RecordsContext — canonical cache seeding', () => {
   it('seeds multiple records from a multi-item list response', async () => {
     const rec1 = makeRecord('r1');
     const rec2 = makeRecord('r2');
-    vi.mocked(getRecords).mockResolvedValue([rec1, rec2]);
+    vi.mocked(getRecords).mockResolvedValue(envelope([rec1, rec2]));
 
     const { Wrapper, queryClient } = createWrapper();
 

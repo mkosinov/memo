@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — 2026-07-29
+
+### Added
+- **GH #183 — GET /api/v1/tags/{id} + GET /api/v1/visitors paginated bare list** — branch `feat/183-tags-get-by-id-visitors-list`:
+  - **Backend:** `GET /api/v1/tags/{id}` endpoint (get-by-id, 3 tests). `GET /api/v1/visitors` paginated list (page/per_page query params, GenericService subclass pattern, 7 tests incl. scoped-route regression guard ensuring `/api/v1/visitors` doesn't shadow other routes).
+  - **api-client:** `VisitorListResponseSchema` added. `getTag(id)` + `getVisitors({page?, per_page?})` methods + unit tests for both.
+  - **Domain-rules:** `docs/domain-rules/tags.md` updated with GET by-id + soft-delete invariant correction (hard-delete restore is follow-up #189). `docs/domain-rules/visitors.md` updated with paginated list contract.
+  - **Test results:** Backend 787 passed / 0 failed / 3 skipped; api-client 136 passed / 4 failed (all 4 = known pre-existing issue #188 in schemas.test.ts, fails on main too, out of scope).
+  - **Design spec:** `docs/specs/2026-07-29-tags-get-by-id-visitors-list-design.md`
+  - **Plan:** `docs/plans/2026-07-29-tags-get-by-id-visitors-list-plan.md`
+
 ## [Unreleased] — 2026-07-28
 
 ### Added

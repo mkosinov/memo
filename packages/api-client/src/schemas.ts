@@ -524,3 +524,4 @@ export const ServiceListResponseSchema = paginatedSchema(ServiceResponseSchema);
 export const ActivityListResponseSchema = paginatedSchema(ActivityResponseSchema);
 export const PaymentListResponseSchema = paginatedSchema(PaymentResponseSchema);
 export const RecordListResponseSchema = paginatedSchema(RecordResponseSchema);
+export const VisitorListResponseSchema = paginatedSchema(VisitorResponseSchema);

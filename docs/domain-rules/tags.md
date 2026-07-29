@@ -12,7 +12,7 @@ A Tag is a free-form label attached to entities (Services, Photos, Masters, Loca
 - None.
 
 ## Invariants
-- Tags are hard-deleted (no is_active flag)
+- Tags are soft-deleted (is_active flag, SoftDeleteRepository). GET-by-id returns the soft-deleted row (200); the list excludes it. Note: TagResponse does not expose is_active.
 
 ## Business Logic
 
@@ -26,10 +26,11 @@ A Tag is a free-form label attached to entities (Services, Photos, Masters, Loca
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | /api/v1/tags | List all |
+| GET | /api/v1/tags/{id} | Get |
 | POST | /api/v1/tags | Create |
 | PUT | /api/v1/tags/{id} | Full update |
 | PATCH | /api/v1/tags/{id} | Partial update |
-| DELETE | /api/v1/tags/{id} | Hard delete |
+| DELETE | /api/v1/tags/{id} | Soft delete |
 
 ## Relationships
 - Tag → M2M Service, Master, Location, Photo

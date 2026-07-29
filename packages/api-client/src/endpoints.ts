@@ -74,6 +74,7 @@ import {
   ActivityListResponseSchema,
   PaymentListResponseSchema,
   RecordListResponseSchema,
+  VisitorListResponseSchema,
   type PaginatedResponse,
 } from './schemas';
 
@@ -389,6 +390,10 @@ export async function getClientVisitors(clientId: string): Promise<VisitorRespon
 
 // ─── Visitors CRUD ────────────────────────────────────────────────────────
 
+export async function getVisitors(params?: ListParams): Promise<PaginatedResponse<VisitorResponse>> {
+  return api(`/api/v1/visitors${listQuery(params)}`, VisitorListResponseSchema);
+}
+
 export async function createVisitor(data: VisitorCreate): Promise<VisitorResponse> {
   return api('/api/v1/visitors', VisitorResponseSchema, {
     method: 'POST',
@@ -456,6 +461,10 @@ export async function deleteVisit(id: string): Promise<void> {
 
 export async function getTags(params?: ListParams): Promise<PaginatedResponse<TagResponse>> {
   return api(`/api/v1/tags${listQuery(params)}`, TagListResponseSchema);
+}
+
+export async function getTag(id: string): Promise<TagResponse> {
+  return api(`/api/v1/tags/${id}`, TagResponseSchema);
 }
 
 export async function createTag(data: TagCreate): Promise<TagResponse> {

@@ -3,10 +3,11 @@
 from functools import lru_cache
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from src.db import SessionDep
 from src.errors import ErrorCode, ErrorDetail
+from src.schemas.common import PaginatedResponse
 from src.schemas.visitor import VisitorCreate, VisitorPatch, VisitorResponse, VisitorUpdate
 from src.services.visitor import get_visitor_service, VisitorService
 
@@ -20,6 +21,17 @@ def _get_visitor_service() -> VisitorService:
 
 
 _ServiceDep = Annotated[VisitorService, Depends(_get_visitor_service)]
+
+
+@router.get("", response_model=PaginatedResponse[VisitorResponse])
+async def list_visitors(
+    service: _ServiceDep,
+    session: SessionDep,
+    page: int = Query(1, ge=1),
+    per_page: int = Query(20, ge=1, le=100),
+) -> PaginatedResponse[VisitorResponse]:
+    """Return all active visitors, paginated."""
+    return await service.list(db_session=session, page=page, per_page=per_page)
 
 
 @router.get("/{visitor_id}", response_model=VisitorResponse)

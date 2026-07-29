@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { z } from 'zod';
-import { getMasters, getMaster, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, deleteActivity, getWebPhotos, getRecords, getClients, getPayments, createRecord, updateRecord, deleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, searchClientByPhone, updateVisitStatus, getTags, createService, updateService, deleteService, createLocation, updateLocation, deleteLocation, getClientsWithStats, patchClient, reorderMasters, reorderLocations, patchMaster, patchLocation, patchMaterial, patchService, patchUserSettings, getMaterials } from './endpoints';
+import { getMasters, getMaster, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, deleteActivity, getWebPhotos, getRecords, getClients, getPayments, createRecord, updateRecord, deleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, searchClientByPhone, updateVisitStatus, getTags, createService, updateService, deleteService, createLocation, updateLocation, deleteLocation, getClientsWithStats, patchClient, reorderMasters, reorderLocations, patchMaster, patchLocation, patchMaterial, patchService, patchUserSettings, getMaterials, getTag, getVisitors } from './endpoints';
 import { ServiceCreateSchema, LocationCreateSchema } from './schemas';
 
 // Mock the api function from client
@@ -749,5 +749,27 @@ describe('patchUserSettings', () => {
         body: JSON.stringify({ locale: 'en' }),
       }),
     );
+  });
+});
+
+describe('getTag', () => {
+  it('calls /api/v1/tags/:id with tag schema', async () => {
+    vi.mocked(api).mockResolvedValue({ id: 't-1', tag: 'VIP' });
+    await getTag('t-1');
+    expect(api).toHaveBeenCalledWith('/api/v1/tags/t-1', expect.anything());
+  });
+});
+
+describe('getVisitors', () => {
+  it('calls /api/v1/visitors without params', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
+    await getVisitors();
+    expect(api).toHaveBeenCalledWith('/api/v1/visitors', expect.anything());
+  });
+
+  it('calls /api/v1/visitors with pagination params', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 100 });
+    await getVisitors({ per_page: 100 });
+    expect(api).toHaveBeenCalledWith('/api/v1/visitors?per_page=100', expect.anything());
   });
 });

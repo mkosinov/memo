@@ -22,7 +22,7 @@ A Visitor is an individual person attending a master class. Visitors belong to a
 ### Backend
 - **Scoped to Client:** list_by_client(client_id) returns only active visitors
 - **Auto-created by RecordService** when name-based visit is created
-- No standalone list-all endpoint — only by client
+- **List-all endpoint:** `GET /api/v1/visitors` — paginated generic list, introduced in #183 **for contract completeness with GenericService** so visitors is no longer the only generic entity excluded from generic list contract coverage (#184/#185). It supersedes the previous no-list-all rule. The **production-use read path for visitors remains the scoped `GET /clients/{id}/visitors`** — the bare list is a contract endpoint, not a production consumer-facing read path.
 
 ### Frontend
 - **Create form:** name (required), age (optional)
@@ -32,6 +32,7 @@ A Visitor is an individual person attending a master class. Visitors belong to a
 ## API Endpoints
 | Method | Path | Description |
 |--------|------|-------------|
+| GET | /api/v1/visitors | List all (paginated, contract-only — see Business Logic) |
 | GET | /api/v1/visitors/{id} | Get |
 | POST | /api/v1/visitors | Create |
 | PUT | /api/v1/visitors/{id} | Update |

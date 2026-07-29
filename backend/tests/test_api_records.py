@@ -77,8 +77,9 @@ class TestRecordsCrud:
 
         response = api_client.get("/api/v1/records")
         assert response.status_code == 200
-        records = response.json()
-        assert isinstance(records, list)
+        body = response.json()
+        records = body["items"]
+        assert body["total"] >= 1
         ids = [r["id"] for r in records]
         assert record_id in ids
         # Verify visits are nested in list response
@@ -194,8 +195,8 @@ class TestRecordsCrud:
 
         # List should NOT include the deleted record
         response = api_client.get("/api/v1/records")
-        records = response.json()
-        ids = [r["id"] for r in records]
+        body = response.json()
+        ids = [r["id"] for r in body["items"]]
         assert record_id not in ids
 
     def test_get_nonexistent_record_returns_404(self, api_client) -> None:

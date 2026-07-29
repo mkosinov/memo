@@ -12,7 +12,9 @@ class TestTagsCrud:
         """GET /api/v1/tags returns empty list when no tags exist."""
         response = api_client.get("/api/v1/tags")
         assert response.status_code == 200
-        assert response.json() == []
+        body = response.json()
+        assert body["items"] == []
+        assert body["total"] == 0
 
     def test_create_tag(self, api_client) -> None:
         """POST /api/v1/tags creates a tag and returns 201."""
@@ -27,8 +29,9 @@ class TestTagsCrud:
         api_client.post("/api/v1/tags", json={"tag": "Постоянный"})
         response = api_client.get("/api/v1/tags")
         assert response.status_code == 200
-        tags = response.json()
-        assert len(tags) >= 1
+        body = response.json()
+        tags = body["items"]
+        assert body["total"] >= 1
         assert any(t["tag"] == "Постоянный" for t in tags)
 
     def test_update_tag(self, api_client) -> None:
@@ -52,8 +55,8 @@ class TestTagsCrud:
         tag_id = create.json()["id"]
         api_client.delete(f"/api/v1/tags/{tag_id}")
         response = api_client.get("/api/v1/tags")
-        tags = response.json()
-        assert not any(t["id"] == tag_id for t in tags)
+        body = response.json()
+        assert not any(t["id"] == tag_id for t in body["items"])
 
     def test_update_nonexistent_tag_returns_404(self, api_client) -> None:
         """PUT /api/v1/tags/{fake_id} returns 404."""

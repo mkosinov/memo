@@ -68,7 +68,7 @@ class TestMasterSortOrder:
 
         resp = api_client.get("/api/v1/masters")
         assert resp.status_code == 200
-        masters = resp.json()
+        masters = resp.json()["items"]
         sort_orders = [m["sort_order"] for m in masters]
         assert sort_orders == sorted(sort_orders)
         # Verify within same sort_order, name is secondary
@@ -146,7 +146,7 @@ class TestLocationSortOrder:
 
         resp = api_client.get("/api/v1/locations")
         assert resp.status_code == 200
-        locations = resp.json()
+        locations = resp.json()["items"]
         assert locations[0]["name"] == "Альпика"
         assert locations[1]["name"] == "Гранд"
         assert locations[2]["name"] == "Поляна"
@@ -207,7 +207,7 @@ class TestMastersReorder:
         })
 
         resp = api_client.get("/api/v1/masters")
-        masters = resp.json()
+        masters = resp.json()["items"]
         # m2 should now be first (sort_order=0)
         assert masters[0]["id"] == m2["id"]
         assert masters[1]["id"] == m1["id"]

@@ -3,10 +3,11 @@
 from functools import lru_cache
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from src.db import SessionDep
 from src.errors import ErrorCode, ErrorDetail
+from src.schemas.common import PaginatedResponse
 from src.schemas.service import ServiceCreate, ServicePatch, ServiceResponse, ServiceUpdate
 from src.services.service import ServiceService, get_service_service
 
@@ -22,14 +23,15 @@ def _get_service_service() -> ServiceService:
 _ServiceDep = Annotated[ServiceService, Depends(_get_service_service)]
 
 
-@router.get("", response_model=list[ServiceResponse])
+@router.get("", response_model=PaginatedResponse[ServiceResponse])
 async def list_services(
     service: _ServiceDep,
     session: SessionDep,
-) -> list[ServiceResponse]:
+    page: int = Query(1, ge=1),
+    per_page: int = Query(20, ge=1, le=100),
+) -> PaginatedResponse[ServiceResponse]:
     """Return all active services with tariffs and tags."""
-    services = await service.list(db_session=session)
-    return [ServiceResponse.model_validate(s) for s in services]
+    return await service.list(db_session=session, page=page, per_page=per_page)
 
 
 @router.get("/{service_id}", response_model=ServiceResponse)

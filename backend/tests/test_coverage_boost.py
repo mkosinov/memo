@@ -350,7 +350,7 @@ class TestActivityServiceDateFiltering:
         )
         assert resp.status_code == 200
         # Should include tomorrow and next_week (2 activities)
-        assert len(resp.json()) == 2
+        assert len(resp.json()["items"]) == 2
 
     def test_list_activities_date_to_only(self, api_client):
         """List activities with only date_to filter."""
@@ -370,7 +370,7 @@ class TestActivityServiceDateFiltering:
         )
         assert resp.status_code == 200
         # Should include today and tomorrow (2 activities)
-        assert len(resp.json()) == 2
+        assert len(resp.json()["items"]) == 2
 
     def test_activity_count_records_with_multiple_records(self, api_client, create_record):
         """count_records returns correct count when multiple records exist."""
@@ -483,7 +483,7 @@ class TestRepositoryListFilters:
         })
         resp = api_client.get("/api/v1/masters")
         assert resp.status_code == 200
-        assert len(resp.json()) >= 1
+        assert len(resp.json()["items"]) >= 1
 
     def test_list_locations(self, api_client):
         """GET /api/v1/locations returns active locations."""
@@ -492,7 +492,7 @@ class TestRepositoryListFilters:
         })
         resp = api_client.get("/api/v1/locations")
         assert resp.status_code == 200
-        assert len(resp.json()) >= 1
+        assert len(resp.json()["items"]) >= 1
 
     def test_list_services(self, api_client):
         """GET /api/v1/services returns active services."""
@@ -502,14 +502,14 @@ class TestRepositoryListFilters:
         })
         resp = api_client.get("/api/v1/services")
         assert resp.status_code == 200
-        assert len(resp.json()) >= 1
+        assert len(resp.json()["items"]) >= 1
 
     def test_list_tags(self, api_client):
         """GET /api/v1/tags returns active tags."""
         api_client.post("/api/v1/tags", json={"tag": "test-tag"})
         resp = api_client.get("/api/v1/tags")
         assert resp.status_code == 200
-        assert len(resp.json()) >= 1
+        assert len(resp.json()["items"]) >= 1
 
 
 class TestRepositoryPatch:
@@ -590,7 +590,7 @@ class TestPaymentCreation:
         })
         resp = api_client.get("/api/v1/payments")
         assert resp.status_code == 200
-        assert len(resp.json()) >= 1
+        assert len(resp.json()["items"]) >= 1
 
 
 class TestRecordNotFound:

@@ -3,12 +3,13 @@
 from functools import lru_cache
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import asc
 
 from src.db import SessionDep
 from src.errors import ErrorCode, ErrorDetail
 from src.models.location import Location
+from src.schemas.common import PaginatedResponse
 from src.schemas.location import (
     LocationCreate,
     LocationPatch,
@@ -30,14 +31,18 @@ def _get_location_service() -> LocationService:
 _ServiceDep = Annotated[LocationService, Depends(_get_location_service)]
 
 
-@router.get("", response_model=list[LocationResponse])
+@router.get("", response_model=PaginatedResponse[LocationResponse])
 async def list_locations(
     service: _ServiceDep,
     session: SessionDep,
-) -> list[LocationResponse]:
+    page: int = Query(1, ge=1),
+    per_page: int = Query(20, ge=1, le=100),
+) -> PaginatedResponse[LocationResponse]:
     """Return all active locations sorted by sort_order, then name."""
     return await service.list(
         db_session=session,
+        page=page,
+        per_page=per_page,
         order_by=[asc(Location.sort_order), asc(Location.name)],
     )
 

@@ -192,7 +192,7 @@ class TestDeleteCascade:
 
         # Record excluded from list
         list_resp = api_client.get("/api/v1/records")
-        ids = [r["id"] for r in list_resp.json()]
+        ids = [r["id"] for r in list_resp.json()["items"]]
         assert record_id not in ids
 
     def test_delete_record_hard_deletes_visits_in_db(self, api_client, create_record) -> None:
@@ -253,7 +253,7 @@ class TestDeleteCascade:
         api_client.delete(f"/api/v1/records/{record['id']}")
 
         # Payment is cascade-soft-deleted — excluded from list
-        payments = api_client.get("/api/v1/payments").json()
+        payments = api_client.get("/api/v1/payments").json()["items"]
         ids = [p["id"] for p in payments]
         assert payment["id"] not in ids
 

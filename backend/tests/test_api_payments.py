@@ -112,8 +112,9 @@ class TestPaymentsCrud:
 
         response = api_client.get("/api/v1/payments")
         assert response.status_code == 200
-        payments = response.json()
-        assert isinstance(payments, list)
+        body = response.json()
+        payments = body["items"]
+        assert body["total"] >= 1
         ids = [p["id"] for p in payments]
         assert payment_id in ids
 
@@ -165,8 +166,8 @@ class TestPaymentsCrud:
 
         # List should NOT include the deleted payment
         response = api_client.get("/api/v1/payments")
-        payments = response.json()
-        ids = [p["id"] for p in payments]
+        body = response.json()
+        ids = [p["id"] for p in body["items"]]
         assert payment_id not in ids
 
     def test_get_nonexistent_payment_returns_404(self, api_client) -> None:

@@ -89,8 +89,9 @@ class TestServicesCrud:
 
         response = api_client.get("/api/v1/services")
         assert response.status_code == 200
-        services = response.json()
-        assert isinstance(services, list)
+        body = response.json()
+        services = body["items"]
+        assert body["total"] >= 1
         ids = [s["id"] for s in services]
         assert service_id in ids
 
@@ -170,8 +171,8 @@ class TestServicesCrud:
 
         # List should NOT include the deleted service
         response = api_client.get("/api/v1/services")
-        services = response.json()
-        ids = [s["id"] for s in services]
+        body = response.json()
+        ids = [s["id"] for s in body["items"]]
         assert service_id not in ids
 
     def test_get_nonexistent_service_returns_404(self, api_client) -> None:

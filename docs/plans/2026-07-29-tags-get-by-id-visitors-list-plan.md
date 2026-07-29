@@ -14,7 +14,7 @@
 
 How this feature behaves, mapped to spec acceptance criteria:
 
-- **AC1 — tag by id** → Requesting a single tag by its id returns the tag (`{id, tag}`) with 200; a nonexistent id returns 404 with error code `TAG_NOT_FOUND`. A tag that was deleted stays gone: fetching it after deletion returns 404 (tags are hard-deleted).
+- **AC1 — tag by id** → Requesting a single tag by its id returns the tag (`{id, tag}`) with 200; a nonexistent id returns 404 with error code `TAG_NOT_FOUND`. Tags are soft-deleted: fetching a deleted tag returns 200 with `is_active: false` (the list excludes it) — same behavior as every other generic entity.
 - **AC2 — visitors list** → `GET /api/v1/visitors` returns a paginated envelope `{items, total, page, per_page}` (defaults page=1, per_page=20, per_page capped at 100). Requesting page 2 returns items disjoint from page 1; a page beyond the data returns empty items with the correct total. Invalid params (`page=0`, `per_page=0`, `per_page=101`) are rejected with 422 — never silently clamped.
 - **AC3 — scoped route untouched** → `GET /api/v1/clients/{id}/visitors` behaves exactly as before: a plain JSON array, unpaginated. It remains the production read path for visitors; the new bare list exists only for generic-contract completeness.
 - **AC4 — api-client** → The api-client library exports `getTag(id)` and `getVisitors({page?, per_page?})` matching the backend contract.
@@ -43,7 +43,7 @@ How this feature behaves, mapped to spec acceptance criteria:
 
 ### Required Docs
 - `docs/specs/2026-07-29-tags-get-by-id-visitors-list-design.md` — §4.1 (endpoint design), §5 (test strategy)
-- `docs/domain-rules/tags.md` — tags are hard-deleted (drives the lifecycle test)
+- `docs/domain-rules/tags.md` — entity fields. NOTE: this file's "hard-deleted" invariant is stale; tags are **soft-deleted** (Task 6 corrects the doc). The lifecycle test below encodes the true behavior.
 - Skill: `pytest-patterns` — existing contract-test style
 - Skill: `test-driven-development` — RED-GREEN-REFACTOR
 
@@ -77,15 +77,16 @@ Add a get-by-id endpoint to the tags router, copying the `get_visitor`/`get_mast
         assert response.status_code == 404
         assert response.json()["detail"]["code"] == "TAG_NOT_FOUND"
 
-    def test_get_deleted_tag_returns_404(self, api_client) -> None:
-        """Hard-deleted tag is gone: GET by id after DELETE returns 404."""
+    def test_get_deleted_tag_returns_200_inactive(self, api_client) -> None:
+        """Soft-deleted tag stays fetchable by id with is_active=False (generic-entity contract)."""
         create = api_client.post("/api/v1/tags", json={"tag": "Ephemeral"})
         tag_id = create.json()["id"]
         delete = api_client.delete(f"/api/v1/tags/{tag_id}")
         assert delete.status_code == 204
 
         response = api_client.get(f"/api/v1/tags/{tag_id}")
-        assert response.status_code == 404
+        assert response.status_code == 200
+        assert response.json()["is_active"] is False
 ```
 
 - [ ] **Step 2 — Run RED.** `cd backend && uv run pytest tests/test_api_tags.py -x -q` — expected: the 3 new tests FAIL (404→405 or 404 on the new route / wrong behavior); all 9 pre-existing tests pass.
@@ -341,7 +342,7 @@ Add unit tests in the existing style (mock `api` from `./client`, assert URL + s
 
 ### Steps
 
-- [ ] **Step 1 — Extend the endpoints import.** In `packages/api-client/src/endpoints.test.ts` line 2, add `getTag` and `getVisitors` to the destructured import from `'./endpoints'` (alphabetical grouping is not enforced — append near the existing `getTags` entry).
+- [ ] **Step 1 — Extend the endpoints import.** In `packages/api-client/src/endpoints.test.ts`, in the multi-line destructured import from `'./endpoints'` at the top of the file (starts line 3 — the import containing `getMasters, getMaster, ...`), add `getTag` and `getVisitors` near the existing `getTags` entry.
 - [ ] **Step 2 — RED: add the test blocks.** Append at the end of `packages/api-client/src/endpoints.test.ts`:
 
 ```typescript
@@ -395,19 +396,27 @@ Update the two domain-rules files with the exact wording approved at G1b. No cod
 
 ### Steps
 
-- [ ] **Step 1 — tags.md.** In the API Endpoints table, insert a row after the `GET | /api/v1/tags | List all` row:
+- [ ] **Step 1 — tags.md, endpoint table.** In the API Endpoints table, insert a row after the `GET | /api/v1/tags | List all` row:
 
 ```markdown
 | GET | /api/v1/tags/{id} | Get |
 ```
 
-- [ ] **Step 2 — visitors.md, endpoint table.** In the API Endpoints table, insert a row **before** the `GET | /api/v1/visitors/{id} | Get` row:
+- [ ] **Step 2 — tags.md, correct the stale delete invariant.** In `## Invariants`, replace `- Tags are hard-deleted (no is_active flag)` with:
+
+```markdown
+- Tags are soft-deleted (is_active flag, SoftDeleteRepository). GET-by-id returns the soft-deleted row (200, is_active: false); the list excludes it.
+```
+
+  And in the API Endpoints table, change the DELETE row description `Hard delete` → `Soft delete`.
+
+- [ ] **Step 3 — visitors.md, endpoint table.** In the API Endpoints table, insert a row **before** the `GET | /api/v1/visitors/{id} | Get` row:
 
 ```markdown
 | GET | /api/v1/visitors | List all (paginated, contract-only — see Business Logic) |
 ```
 
-- [ ] **Step 3 — visitors.md, business-logic note.** Replace the line `- **Scoped to Client:** list_by_client(client_id) returns only active visitors` ... — specifically replace the bullet `- No standalone list-all endpoint — only by client` with exactly:
+- [ ] **Step 4 — visitors.md, business-logic note.** Replace the bullet `- No standalone list-all endpoint — only by client` with exactly:
 
 ```markdown
 - **List-all endpoint:** `GET /api/v1/visitors` — paginated generic list, introduced in #183 **for contract completeness with GenericService** so visitors is no longer the only generic entity excluded from generic list contract coverage (#184/#185). It supersedes the previous no-list-all rule. The **production-use read path for visitors remains the scoped `GET /clients/{id}/visitors`** — the bare list is a contract endpoint, not a production consumer-facing read path.
@@ -415,7 +424,7 @@ Update the two domain-rules files with the exact wording approved at G1b. No cod
 
 (Keep the existing `- **Scoped to Client:** ...` and `- **Auto-created by RecordService** ...` bullets unchanged.)
 
-- [ ] **Step 4 — Commit.** `git add docs/domain-rules/tags.md docs/domain-rules/visitors.md && git commit -m "docs: update tags/visitors domain rules for #183 endpoints"`
+- [ ] **Step 5 — Commit.** `git add docs/domain-rules/tags.md docs/domain-rules/visitors.md && git commit -m "docs: update tags/visitors domain rules for #183 endpoints"`
 
 ### DoD
 - Both files match the spec §4.4 wording exactly (including the two G1b-required statements).

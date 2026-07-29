@@ -110,7 +110,9 @@ export async function getVisitors(params?: ListParams): Promise<PaginatedRespons
 
 On completion, update domain rules (implementation task, part of the docs commit):
 
-- `docs/domain-rules/tags.md`: add `GET | /api/v1/tags/{id} | Get` row to the API Endpoints table.
+- `docs/domain-rules/tags.md`:
+  - Add `GET | /api/v1/tags/{id} | Get` row to the API Endpoints table.
+  - Correct the stale invariant "Tags are hard-deleted (no is_active flag)" → tags are **soft-deleted** (`is_active` flag, `SoftDeleteRepository`); GET-by-id returns the soft-deleted row (200, `is_active: false`), the list excludes it. Also fix the DELETE row description "Hard delete" → "Soft delete".
 - `docs/domain-rules/visitors.md`:
   - Add `GET | /api/v1/visitors | List all (paginated, contract-only — see Business Logic)` row to the API Endpoints table.
   - Replace the business-logic note "**No standalone list-all endpoint — only by client**" with: "**List-all endpoint:** `GET /api/v1/visitors` — paginated generic list, introduced in #183 **for contract completeness with GenericService** so visitors is no longer the only generic entity excluded from generic list contract coverage (#184/#185). It supersedes the previous no-list-all rule. The **production-use read path for visitors remains the scoped `GET /clients/{id}/visitors`** — the bare list is a contract endpoint, not a production consumer-facing read path.".
@@ -122,7 +124,7 @@ On completion, update domain rules (implementation task, part of the docs commit
 **Tags — `backend/tests/test_api_tags.py`:**
 1. `GET /tags/{id}` after POST → 200, payload matches the created tag (`id`, `tag`).
 2. `GET /tags/nonexistent-id` → 404, `detail.code == "TAG_NOT_FOUND"`.
-3. Lifecycle: POST a tag → DELETE it → `GET /tags/{id}` → 404 (tags are hard-deleted; deleted id is truly gone).
+3. Lifecycle: POST a tag → DELETE it → `GET /tags/{id}` → **200 with `is_active: false`**. Tags are **soft-deleted** (`Tag(AbstractModelSoftDelete)`, `SoftDeleteRepository`); `GenericService.get()` has no `is_active` filter, so the row remains fetchable by id while the list excludes it — the same asymmetry documented for visitors in §4.2. (This test also corrects the stale "hard-deleted" claim in `docs/domain-rules/tags.md` — see §4.4.)
 
 **Visitors — `backend/tests/test_api_visitors.py`:**
 1. Envelope shape: `items/total/page/per_page` keys; defaults `page=1, per_page=20`.
@@ -147,7 +149,7 @@ On completion, update domain rules (implementation task, part of the docs commit
 
 ## 6. Acceptance Criteria
 
-1. `GET /api/v1/tags/{id}` returns 200 + `TagResponse` for an existing tag; 404 with `TAG_NOT_FOUND` otherwise.
+1. `GET /api/v1/tags/{id}` returns 200 + `TagResponse` for an existing tag; 404 with `TAG_NOT_FOUND` for a nonexistent id; 200 with `is_active: false` for a soft-deleted tag (consistent with all generic entities).
 2. `GET /api/v1/visitors` returns `{items, total, page, per_page}` with `page >= 1`, `per_page` 1..100; violations → 422; out-of-range page → empty items + correct total; consecutive pages return disjoint items.
 3. `GET /api/v1/clients/{id}/visitors` behavior byte-identical to before (scoped, unpaginated).
 4. api-client exports `getTag` and `getVisitors` with the signatures in §4.3.

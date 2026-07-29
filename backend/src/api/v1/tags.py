@@ -34,6 +34,25 @@ async def list_tags(
     return await service.list(db_session=session, page=page, per_page=per_page)
 
 
+@router.get("/{tag_id}", response_model=TagResponse)
+async def get_tag(
+    tag_id: str,
+    service: _ServiceDep,
+    session: SessionDep,
+) -> TagResponse:
+    """Return a single tag by ID."""
+    tag = await service.get(db_session=session, id=tag_id)
+    if not tag:
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.TAG_NOT_FOUND,
+                message="Tag not found",
+            ).model_dump(),
+        )
+    return tag
+
+
 @router.post("", response_model=TagResponse, status_code=201)
 async def create_tag(
     data: TagCreate,

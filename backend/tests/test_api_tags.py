@@ -34,6 +34,39 @@ class TestTagsCrud:
         assert body["total"] >= 1
         assert any(t["tag"] == "Постоянный" for t in tags)
 
+    def test_get_tag_by_id(self, api_client) -> None:
+        """GET /api/v1/tags/{id} returns the specific tag."""
+        create = api_client.post("/api/v1/tags", json={"tag": "VIP"})
+        tag_id = create.json()["id"]
+
+        response = api_client.get(f"/api/v1/tags/{tag_id}")
+        assert response.status_code == 200
+        body = response.json()
+        assert body["id"] == tag_id
+        assert body["tag"] == "VIP"
+
+    def test_get_nonexistent_tag_returns_404(self, api_client) -> None:
+        """GET /api/v1/tags/{fake_id} returns 404 with TAG_NOT_FOUND."""
+        response = api_client.get("/api/v1/tags/nonexistent-id")
+        assert response.status_code == 404
+        assert response.json()["detail"]["code"] == "TAG_NOT_FOUND"
+
+    def test_get_deleted_tag_returns_200(self, api_client) -> None:
+        """Soft-deleted tag stays fetchable by id (200) but is excluded from the list."""
+        create = api_client.post("/api/v1/tags", json={"tag": "Ephemeral"})
+        tag_id = create.json()["id"]
+        delete = api_client.delete(f"/api/v1/tags/{tag_id}")
+        assert delete.status_code == 204
+
+        # Soft-delete: row remains fetchable by id (TagResponse has no is_active field)
+        response = api_client.get(f"/api/v1/tags/{tag_id}")
+        assert response.status_code == 200
+        assert response.json()["id"] == tag_id
+
+        # ... but is excluded from the list
+        body = api_client.get("/api/v1/tags").json()
+        assert not any(t["id"] == tag_id for t in body["items"])
+
     def test_update_tag(self, api_client) -> None:
         """PUT /api/v1/tags/{id} updates a tag."""
         create = api_client.post("/api/v1/tags", json={"tag": "Old"})

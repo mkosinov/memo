@@ -44,10 +44,10 @@ How this feature behaves for the user, mapped to spec acceptance criteria:
 
 **Frontend — modify:**
 - `packages/api-client/src/schemas.ts` — `PaginatedResponse` type + per-entity list schemas
-- `packages/api-client/src/endpoints.ts` — 8 list functions (`getMasters`, `getLocations`, `getTags`, `getMaterials`, `getServices`, `getActivities`, `getPayments`, `getRecords`, `getClients`)
+- `packages/api-client/src/endpoints.ts` — 9 list functions (`getMasters`, `getLocations`, `getTags`, `getMaterials`, `getServices`, `getActivities`, `getPayments`, `getRecords`, `getClients`)
 - `packages/api-client/src/endpoints.test.ts` — envelope mocks/URL assertions
 - `frontend/admin/contexts/RecordsContext.tsx`, `ScheduleContext.tsx` — unwrap `.items`
-- `frontend/admin/hooks/useRecordData.ts` — unwrap `.items`
+- `frontend/admin/hooks/useRecordData.ts`, `useMasters.ts`, `useLocations.ts`, `useServices.ts`, `useActivities.ts` — unwrap `.items` in queryFn
 - `frontend/admin/app/(main)/clients/components/ClientCardModal.tsx` — unwrap `.items`
 - `frontend/admin/__tests__/` — mocks returning envelopes (~13 files, mechanical)
 
@@ -121,6 +121,7 @@ Important implementation notes:
 - Add imports: `from sqlalchemy import func, select` and `from src.schemas.common import PaginatedResponse`.
 - The current `GenericService.list()` delegates to `self._repository.list(...)`. The repository pattern for soft-delete entities (`SoftDeleteRepository.list()`) adds `where(table.is_active)`. **All GenericService instances in the codebase use `GenericRepository = SoftDeleteRepository`** — replicate the `is_active` filter inline as shown above (with a plain `stmt = stmt.where(self._model.is_active)`; there is no `include_inactive` usage through GenericService.list in the codebase — verify by grepping for `include_inactive` before writing; if a caller exists, keep an `include_inactive: bool = False` kwarg mirroring the repository). Remove the `if not include_inactive` line if you confirm no such param is needed.
 - **Do not delete `BaseRepository.list()` / `SoftDeleteRepository.list()`** — other code may use repositories directly (e.g. coverage tests, photo service). Leave repository layer untouched.
+- **Sync hazard (accepted, documented):** the new `GenericService.list()` inlines query building (soft-delete filter, field filters, order_by) that duplicates `SoftDeleteRepository.list()` logic. Future changes to repository filter semantics must be mirrored in the service. Add a code comment in `generic.py` above the new `list()`: `# NOTE: filter logic mirrors SoftDeleteRepository.list() — keep in sync (#182)`.
 - `page`/`per_page` bounds are NOT validated in the service (type-level only); HTTP 422 validation happens at the endpoint layer via `Query(ge=1, le=100)`.
 
 **Tests — create `backend/tests/services/test_generic_service_list.py`** mirroring the structure of `backend/tests/services/test_generic_service_patch.py` (read it first; reuse its `EntityConfig`/`CONTRACT_CONFIG` approach but simplified — only fields needed for list):
@@ -266,7 +267,7 @@ Four services have custom list logic that bypasses or wraps `GenericService.list
 
 Notes: current override returns raw ORM `list[Service]` (endpoint validates). New version validates into `ServiceResponse` like the base class — the endpoint already calls `ServiceResponse.model_validate(s)` and will be simplified in Task 3. Add imports `from sqlalchemy import func` and `from src.schemas.common import PaginatedResponse` (`select`, `selectinload` already imported; check `ServiceResponse` import exists).
 
-**2b. `backend/src/services/record.py`** — replace `list()` (keep `client_id` filter, eager visits):
+**2b. `backend/src/services/record.py`** — replace `list()` (keep `client_id` filter, eager visits). **Return type is `PaginatedResponse` over ORM `Record` items (NOT validated)** — see the datetime warning below:
 
 ```python
     async def list(
@@ -276,8 +277,8 @@ Notes: current override returns raw ORM `list[Service]` (endpoint validates). Ne
         per_page: int = 20,
         client_id: str | None = None,
         **filters,
-    ) -> PaginatedResponse[RecordResponse]:
-        """Return a paginated page of active records with visits eagerly loaded."""
+    ) -> PaginatedResponse:  # items are ORM Record instances
+        """Return a paginated page of active records (ORM items, visits eagerly loaded)."""
         stmt = (
             select(Record)
             .where(Record.is_active)
@@ -294,11 +295,23 @@ Notes: current override returns raw ORM `list[Service]` (endpoint validates). Ne
         result = await db_session.execute(
             stmt.limit(per_page).offset((page - 1) * per_page)
         )
-        items = [RecordResponse.model_validate(r) for r in result.scalars().all()]
-        return PaginatedResponse(items=items, total=total, page=page, per_page=per_page)
+        orm_items = list(result.scalars().all())
+        return PaginatedResponse(items=orm_items, total=total, page=page, per_page=per_page)
 ```
 
-Note: endpoint currently maps ORM via `_map_record(r)` (which handles nested visits mapping). Check whether `RecordResponse.model_validate(r)` on an ORM object with eager-loaded visits produces the identical shape as `_map_record` — read the current `_map_record` in `backend/src/api/v1/records.py` and `RecordResponse` schema. If `_map_record` does extra work (e.g. computing fields), then keep returning raw ORM from the service and let the endpoint map items; in that case use `PaginatedResponse[Record]`-style construction at the endpoint (see Task 3 note) OR keep service returning `PaginatedResponse[RecordResponse]` only if validation is equivalent. Decide by reading the code; the invariant is: **response JSON identical shape to before, wrapped in envelope**.
+Note on `PaginatedResponse` typing with ORM items: `PaginatedResponse` is `Generic[ItemT]` with `ItemT bound=BaseModel` — ORM instances don't satisfy the bound for static typing, but at runtime Pydantic v2 generic models with unparameterized usage won't validate items against a concrete type. To keep mypy/tsc-equivalent cleanliness, annotate the return as `PaginatedResponse` unparameterized (as shown) and let the endpoint produce the typed `PaginatedResponse[RecordResponse]` after `_map_record`. If pydantic runtime complains about ORM items during construction (it shouldn't for unparameterized generics — verify with the RED test), fall back to constructing via `PaginatedResponse[RecordResponse].model_construct(items=orm_items, ...)` and note it in the report.
+
+Note: endpoint currently maps ORM via `_map_record(r)` (which handles nested visits mapping). **WARNING — structural incompatibility confirmed at review time:** `_map_record` formats datetimes via `_dt_to_str(dt)` → `dt.isoformat()` (`"2024-01-15T10:30:00"`), while `RecordResponse.model_validate(orm)` coerces `datetime`→`str` differently (`"2024-01-15 10:30:00"`). **Therefore: keep the service returning raw ORM items** (build `PaginatedResponse` over ORM `Record` items) and let the endpoint keep applying `_map_record` to each item — do NOT validate in the service. Concretely, the service constructs the envelope with ORM items:
+
+```python
+        result = await db_session.execute(
+            stmt.limit(per_page).offset((page - 1) * per_page)
+        )
+        orm_items = list(result.scalars().all())
+        return PaginatedResponse(items=orm_items, total=total, page=page, per_page=per_page)
+```
+
+(The endpoint in Task 3 wraps `_map_record` over `result.items`.) The response JSON must be byte-identical in field formats to before, wrapped in the envelope.
 
 **2c. `backend/src/services/activity.py`** — paginate both branches:
 
@@ -446,7 +459,7 @@ Imports per router: `from fastapi import Query` (where missing) and `from src.sc
 - `test_api_locations.py`, `test_location_short_title.py` — same pattern (`body["items"]`).
 - `test_api_tags.py` (2 tests: empty → `body["items"] == []`, `body["total"] == 0`; after_create → items contain created).
 - `test_api_materials.py` (2 tests), `test_api_services.py` (1 test) — same pattern.
-- `test_api_activities.py` (3 tests): `activities = response.json()["items"]`; the date-range test keeps `len(activities) == 2` and adds `assert response.json()["total"] == 2`.
+- `test_api_activities.py` (all 3 list tests): `activities = response.json()["items"]` in each of `test_list_activities_includes_created`, `test_list_activities_with_date_range`, **`test_list_activities_no_date_filter_returns_all`** (don't miss this third one). The date-range test keeps `len(activities) == 2` and adds `assert response.json()["total"] == 2`; the no-date-filter test similarly adds a total assertion.
 - `test_api_payments.py::test_list_payments_includes_created` — same pattern.
 - `test_api_visits.py` (3 tests): `data = response.json()["items"]`; `len(data) >= 1` becomes `response.json()["total"] >= 1` where appropriate; filtered test iterates `data` (now items).
 - `test_api_records.py::test_list_records_includes_created` — `records = response.json()["items"]`.
@@ -647,6 +660,7 @@ Return type corrected `ClientResponse[]` → `ClientWithStats[]` (that's what th
 
 - Mock resolution values become envelopes: `vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 })`.
 - URL assertions: `getMasters()` → `'/api/v1/masters'`; `getMasters({ per_page: 100 })` → `'/api/v1/masters?per_page=100'`; `getActivities({date_from:'2024-01-01', date_to:'2024-01-07'})` → `'/api/v1/activities?date_from=2024-01-01&date_to=2024-01-07'`; with pagination → `'...&per_page=100'`.
+- **`getMaterials` has NO existing test in `endpoints.test.ts`** (only `patchMaterial` is covered) — ADD a new `getMaterials` test following the same pattern (URL assertion + envelope mock).
 - New test: `getClients` calls `'/api/v1/clients?per_page=100'` and returns `items` array (mock envelope with 1 item, assert result equals items array).
 
 ### Steps

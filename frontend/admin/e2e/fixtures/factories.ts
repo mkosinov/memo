@@ -51,9 +51,13 @@ export async function createTestActivity(
     api.get(`${BACKEND}/api/v1/services`),
     api.get(`${BACKEND}/api/v1/locations`),
   ]);
-  const masters = await mastersResp.json();
-  const services = await servicesResp.json();
-  const locations = await locationsResp.json();
+  const mastersJson = await mastersResp.json();
+  const servicesJson = await servicesResp.json();
+  const locationsJson = await locationsResp.json();
+  // #182: list endpoints are paginated ({items,total,page,per_page}) — unwrap envelopes
+  const masters = mastersJson.items || mastersJson;
+  const services = servicesJson.items || servicesJson;
+  const locations = locationsJson.items || locationsJson;
 
   const resp = await api.post(`${BACKEND}/api/v1/activities`, {
     data: {

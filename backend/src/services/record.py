@@ -3,7 +3,7 @@
 from datetime import UTC, datetime
 from functools import lru_cache
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -18,6 +18,7 @@ from src.models.payment import Payment
 from src.models.record import Record
 from src.models.visit import Visit
 from src.models.visitor import Visitor
+from src.schemas.common import PaginatedResponse
 from src.schemas.record import RecordCreate, RecordPatch, RecordResponse, RecordUpdate
 from src.services.generic import GenericService
 from src.services.decorators import transactional
@@ -32,12 +33,14 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
         super().__init__(repository, model, response_schema=RecordResponse)
 
     async def list(
-        self, db_session: AsyncSession, client_id: str | None = None, **filters
-    ) -> list[Record]:
-        """Return all active records with visits eagerly loaded (raw ORM).
-
-        Optionally filter by client_id.
-        """
+        self,
+        db_session: AsyncSession,
+        page: int = 1,
+        per_page: int = 20,
+        client_id: str | None = None,
+        **filters,
+    ) -> PaginatedResponse:  # items are ORM Record instances
+        """Return a paginated page of active records (ORM items, visits eagerly loaded)."""
         stmt = (
             select(Record)
             .where(Record.is_active)
@@ -45,8 +48,17 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
         )
         if client_id:
             stmt = stmt.where(Record.client_id == client_id)
-        result = await db_session.execute(stmt)
-        return list(result.scalars().all())
+        for key, value in filters.items():
+            if value is not None:
+                stmt = stmt.where(getattr(Record, key) == value)
+        total = (
+            await db_session.execute(select(func.count()).select_from(stmt.subquery()))
+        ).scalar_one()
+        result = await db_session.execute(
+            stmt.limit(per_page).offset((page - 1) * per_page)
+        )
+        orm_items = list(result.scalars().all())
+        return PaginatedResponse.model_construct(items=orm_items, total=total, page=page, per_page=per_page)
 
     async def get(
         self, db_session: AsyncSession, id: str

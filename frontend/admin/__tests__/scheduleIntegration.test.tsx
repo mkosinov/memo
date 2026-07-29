@@ -64,6 +64,10 @@ vi.mock('@dnd-kit/core', async () => {
 
 // ─── Helper ───────────────────────────────────────────────────────────────────
 
+function wrap<T>(items: T[]) {
+  return { items, total: items.length, page: 1, per_page: 100 };
+}
+
 function createTestQueryClient() {
   return new QueryClient({
     defaultOptions: {
@@ -80,7 +84,7 @@ describe('Schedule pipeline integration: enrichment from API to ActivityCard', (
     vi.clearAllMocks();
 
     // Mock masters API (raw MasterResponse, not transformed Master)
-    vi.mocked(getMasters).mockResolvedValue([
+    vi.mocked(getMasters).mockResolvedValue(wrap([
       {
         id: 'm1',
         first_name: 'Ольга',
@@ -93,10 +97,10 @@ describe('Schedule pipeline integration: enrichment from API to ActivityCard', (
         created_at: '2024-01-01T00:00:00Z',
         updated_at: '2024-01-01T00:00:00Z',
       },
-    ]);
+    ]));
 
     // Mock services API (raw ServiceResponse, not transformed Service)
-    vi.mocked(getServices).mockResolvedValue([
+    vi.mocked(getServices).mockResolvedValue(wrap([
       {
         id: 's1',
         title: 'Картина маслом',
@@ -115,10 +119,10 @@ describe('Schedule pipeline integration: enrichment from API to ActivityCard', (
         created_at: '2024-01-01T00:00:00Z',
         updated_at: '2024-01-01T00:00:00Z',
       },
-    ]);
+    ]));
 
     // Mock locations API (raw LocationResponse, not transformed Location)
-    vi.mocked(getLocations).mockResolvedValue([
+    vi.mocked(getLocations).mockResolvedValue(wrap([
       {
         id: 'loc1',
         name: 'Альпика',
@@ -133,14 +137,14 @@ describe('Schedule pipeline integration: enrichment from API to ActivityCard', (
         created_at: '2024-01-01T00:00:00Z',
         updated_at: '2024-01-01T00:00:00Z',
       },
-    ]);
+    ]));
 
     // ═══ CRITICAL: Mock activities WITHOUT service_name or min_age ═══
     // This simulates what the real backend returns — ActivityResponse
     // does NOT include service_name or min_age fields.
     // transformActivity() in transformers.ts does NOT set them either.
     // The enrichment MUST come from toScheduleItems() in buildSchedule.ts.
-    vi.mocked(getActivities).mockResolvedValue([
+    vi.mocked(getActivities).mockResolvedValue(wrap([
       {
         id: 'a1',
         master_id: 'm1',
@@ -157,7 +161,7 @@ describe('Schedule pipeline integration: enrichment from API to ActivityCard', (
         is_active: true,
         occupied: 3,
       },
-    ]);
+    ]));
   });
 
   it('should enrich activity with serviceName from service data and display it in ActivityCard', async () => {
@@ -220,7 +224,7 @@ describe('Schedule pipeline: nullable visitor_id impact', () => {
   beforeEach(() => {
     vi.clearAllMocks();
 
-    vi.mocked(getMasters).mockResolvedValue([
+    vi.mocked(getMasters).mockResolvedValue(wrap([
       {
         id: 'm1',
         first_name: 'Ольга',
@@ -233,9 +237,9 @@ describe('Schedule pipeline: nullable visitor_id impact', () => {
         created_at: '2024-01-01T00:00:00Z',
         updated_at: '2024-01-01T00:00:00Z',
       },
-    ]);
+    ]));
 
-    vi.mocked(getServices).mockResolvedValue([
+    vi.mocked(getServices).mockResolvedValue(wrap([
       {
         id: 's1',
         title: 'Картина маслом',
@@ -254,9 +258,9 @@ describe('Schedule pipeline: nullable visitor_id impact', () => {
         created_at: '2024-01-01T00:00:00Z',
         updated_at: '2024-01-01T00:00:00Z',
       },
-    ]);
+    ]));
 
-    vi.mocked(getLocations).mockResolvedValue([
+    vi.mocked(getLocations).mockResolvedValue(wrap([
       {
         id: 'loc1',
         name: 'Альпика',
@@ -271,7 +275,7 @@ describe('Schedule pipeline: nullable visitor_id impact', () => {
         created_at: '2024-01-01T00:00:00Z',
         updated_at: '2024-01-01T00:00:00Z',
       },
-    ]);
+    ]));
   });
 
   it('renders activity card correctly even when activity has occupied > 0 with null visitor_ids', async () => {
@@ -279,7 +283,7 @@ describe('Schedule pipeline: nullable visitor_id impact', () => {
     // visits with null visitor_ids) still render correctly in the schedule.
     // The occupied count is provided directly by the ActivityResponse, so null
     // visitor_ids on visits do not break the schedule rendering pipeline.
-    vi.mocked(getActivities).mockResolvedValue([
+    vi.mocked(getActivities).mockResolvedValue(wrap([
       {
         id: 'a1',
         master_id: 'm1',
@@ -296,7 +300,7 @@ describe('Schedule pipeline: nullable visitor_id impact', () => {
         is_active: true,
         occupied: 3, // Simulates visits with null visitor_ids — occupied is still tracked
       },
-    ]);
+    ]));
 
     const queryClient = createTestQueryClient();
 
@@ -319,7 +323,7 @@ describe('Schedule pipeline: nullable visitor_id impact', () => {
   });
 
   it('renders activity with zero occupied when all visits have null visitor_ids', async () => {
-    vi.mocked(getActivities).mockResolvedValue([
+    vi.mocked(getActivities).mockResolvedValue(wrap([
       {
         id: 'a1',
         master_id: 'm1',
@@ -336,7 +340,7 @@ describe('Schedule pipeline: nullable visitor_id impact', () => {
         is_active: true,
         occupied: 0, // All visits with null visitor_ids → occupied = 0
       },
-    ]);
+    ]));
 
     const queryClient = createTestQueryClient();
 

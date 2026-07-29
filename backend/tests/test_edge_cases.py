@@ -532,7 +532,7 @@ class TestDataIntegrity:
 
         # Verify in list
         response = api_client.get("/api/v1/records")
-        ids = [r["id"] for r in response.json()]
+        ids = [r["id"] for r in response.json()["items"]]
         assert record_id in ids
 
         # Soft-delete
@@ -540,7 +540,7 @@ class TestDataIntegrity:
 
         # Not in list
         response = api_client.get("/api/v1/records")
-        ids = [r["id"] for r in response.json()]
+        ids = [r["id"] for r in response.json()["items"]]
         assert record_id not in ids
 
         # Still accessible by ID
@@ -618,7 +618,7 @@ class TestResponseContracts:
         create_record()  # ensure at least one record exists
         resp = api_client.get("/api/v1/records")
         assert resp.status_code == 200
-        for item in resp.json():
+        for item in resp.json()["items"]:
             RecordResponse.model_validate(item)  # raises ValidationError if mismatch
 
     def test_clients_schema(self, api_client, create_client):
@@ -643,7 +643,7 @@ class TestResponseContracts:
         )
         resp = api_client.get("/api/v1/payments")
         assert resp.status_code == 200
-        for item in resp.json():
+        for item in resp.json()["items"]:
             PaymentResponse.model_validate(item)
 
     def test_activities_schema(self, api_client, create_activity):
@@ -651,7 +651,7 @@ class TestResponseContracts:
         create_activity()
         resp = api_client.get("/api/v1/activities")
         assert resp.status_code == 200
-        for item in resp.json():
+        for item in resp.json()["items"]:
             ActivityResponse.model_validate(item)
 
     def test_services_schema(self, api_client, create_service):
@@ -659,5 +659,5 @@ class TestResponseContracts:
         create_service()
         resp = api_client.get("/api/v1/services")
         assert resp.status_code == 200
-        for item in resp.json():
+        for item in resp.json()["items"]:
             ServiceResponse.model_validate(item)

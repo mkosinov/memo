@@ -30,6 +30,10 @@ import type { MasterResponse, LocationResponse, ServiceResponse, ActivityRespons
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
+function envelope<T>(items: T[]) {
+  return { items, total: items.length, page: 1, per_page: 100 };
+}
+
 function createWrapper() {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -121,7 +125,7 @@ describe('useMasters', () => {
   });
 
   it('calls getMasters and transforms results', async () => {
-    vi.mocked(getMasters).mockResolvedValue(mastersFixture);
+    vi.mocked(getMasters).mockResolvedValue(envelope(mastersFixture));
 
     const { useMasters } = await import('@/hooks/useMasters');
     const { result } = renderHook(() => useMasters(), { wrapper: createWrapper() });
@@ -138,7 +142,7 @@ describe('useMasters', () => {
   });
 
   it('uses queryKey ["masters"]', async () => {
-    vi.mocked(getMasters).mockResolvedValue(mastersFixture);
+    vi.mocked(getMasters).mockResolvedValue(envelope(mastersFixture));
 
     const { useMasters } = await import('@/hooks/useMasters');
     const { result } = renderHook(() => useMasters(), { wrapper: createWrapper() });
@@ -158,7 +162,7 @@ describe('useLocations', () => {
   });
 
   it('calls getLocations and transforms results', async () => {
-    vi.mocked(getLocations).mockResolvedValue(locationsFixture);
+    vi.mocked(getLocations).mockResolvedValue(envelope(locationsFixture));
 
     const { useLocations } = await import('@/hooks/useLocations');
     const { result } = renderHook(() => useLocations(), { wrapper: createWrapper() });
@@ -183,7 +187,7 @@ describe('useServices', () => {
   });
 
   it('calls getServices and transforms results', async () => {
-    vi.mocked(getServices).mockResolvedValue(servicesFixture);
+    vi.mocked(getServices).mockResolvedValue(envelope(servicesFixture));
 
     const { useServices } = await import('@/hooks/useServices');
     const { result } = renderHook(() => useServices(), { wrapper: createWrapper() });
@@ -211,7 +215,7 @@ describe('useActivities', () => {
   });
 
   it('calls getActivities with date range and transforms results', async () => {
-    vi.mocked(getActivities).mockResolvedValue(activitiesFixture);
+    vi.mocked(getActivities).mockResolvedValue(envelope(activitiesFixture));
 
     const { useActivities } = await import('@/hooks/useActivities');
     const { result } = renderHook(
@@ -224,6 +228,7 @@ describe('useActivities', () => {
     expect(getActivities).toHaveBeenCalledWith({
       date_from: weekStart,
       date_to: weekEnd,
+      per_page: 100,
     });
     expect(transformActivity).toHaveBeenCalledWith(
       activitiesFixture[0],
@@ -234,7 +239,7 @@ describe('useActivities', () => {
   });
 
   it('uses queryKey ["activities", weekStart, weekEnd]', async () => {
-    vi.mocked(getActivities).mockResolvedValue(activitiesFixture);
+    vi.mocked(getActivities).mockResolvedValue(envelope(activitiesFixture));
 
     const { useActivities } = await import('@/hooks/useActivities');
     const { result } = renderHook(

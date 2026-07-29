@@ -8,7 +8,7 @@ import type { Activity } from '@memo/domain';
 export function useActivities(weekStart: string, weekEnd: string) {
   return useQuery<ActivityResponse[], Error, Activity[]>({
     queryKey: ['activities', weekStart, weekEnd],
-    queryFn: () => getActivities({ date_from: weekStart, date_to: weekEnd }),
+    queryFn: () => getActivities({ date_from: weekStart, date_to: weekEnd, per_page: 100 }).then(r => r.items),
     select: (raw) => raw.map(transformActivity),
   });
 }

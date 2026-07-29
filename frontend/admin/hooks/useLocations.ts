@@ -8,7 +8,7 @@ import type { Location } from '@memo/domain';
 export function useLocations() {
   return useQuery<LocationResponse[], Error, Location[]>({
     queryKey: ['locations'],
-    queryFn: () => getLocations(),
+    queryFn: () => getLocations({ per_page: 100 }).then(r => r.items),
     select: (raw) => raw.map(transformLocation),
     staleTime: 5 * 60 * 1000,
   });

@@ -30,7 +30,7 @@ const COLUMNS: Column[] = [
 export function TagsTable() {
   const { data: tags = [], isLoading, error, refetch } = useQuery<TagResponse[]>({
     queryKey: ['tags'],
-    queryFn: getTags,
+    queryFn: () => getTags({ per_page: 100 }).then(r => r.items),
   });
 
   const updateTag = useUpdateTag();

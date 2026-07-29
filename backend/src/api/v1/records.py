@@ -4,10 +4,11 @@ from datetime import datetime
 from functools import lru_cache
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from src.db import SessionDep
 from src.errors import ErrorCode, ErrorDetail
+from src.schemas.common import PaginatedResponse
 from src.schemas.record import (
     RecordCreate,
     RecordPatch,
@@ -68,15 +69,22 @@ def _map_record(record) -> RecordResponse:
     )
 
 
-@router.get("", response_model=list[RecordResponse])
+@router.get("", response_model=PaginatedResponse[RecordResponse])
 async def list_records(
     service: _ServiceDep,
     session: SessionDep,
+    page: int = Query(1, ge=1),
+    per_page: int = Query(20, ge=1, le=100),
     client_id: str | None = None,
-) -> list[RecordResponse]:
+) -> PaginatedResponse[RecordResponse]:
     """Return all active records with nested visits, optionally filtered by client_id."""
-    records = await service.list(db_session=session, client_id=client_id)
-    return [_map_record(r) for r in records]
+    result = await service.list(db_session=session, page=page, per_page=per_page, client_id=client_id)
+    return PaginatedResponse(
+        items=[_map_record(r) for r in result.items],
+        total=result.total,
+        page=result.page,
+        per_page=result.per_page,
+    )
 
 
 @router.get("/{record_id}", response_model=RecordResponse)

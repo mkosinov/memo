@@ -3,10 +3,11 @@
 from functools import lru_cache
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from src.db import SessionDep
 from src.errors import ErrorCode, ErrorDetail
+from src.schemas.common import PaginatedResponse
 from src.schemas.material import MaterialCreate, MaterialPatch, MaterialResponse, MaterialUpdate
 from src.services.material import MaterialService, get_material_service
 
@@ -22,13 +23,15 @@ def _get_material_service() -> MaterialService:
 _ServiceDep = Annotated[MaterialService, Depends(_get_material_service)]
 
 
-@router.get("", response_model=list[MaterialResponse])
+@router.get("", response_model=PaginatedResponse[MaterialResponse])
 async def list_materials(
     service: _ServiceDep,
     session: SessionDep,
-) -> list[MaterialResponse]:
+    page: int = Query(1, ge=1),
+    per_page: int = Query(20, ge=1, le=100),
+) -> PaginatedResponse[MaterialResponse]:
     """Return all active materials."""
-    return await service.list(db_session=session)
+    return await service.list(db_session=session, page=page, per_page=per_page)
 
 
 @router.get("/{material_id}", response_model=MaterialResponse)

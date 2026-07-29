@@ -49,7 +49,7 @@ export function RecordsProvider({ children }: { children: React.ReactNode }) {
   // Period-based data
   const { data: records = [], isLoading: recordsLoading, error: recordsError } = useQuery<RecordResponse[]>({
     queryKey: ['records', dateFrom, dateTo],
-    queryFn: () => getRecords({ date_from: dateFrom, date_to: dateTo }),
+    queryFn: () => getRecords({ date_from: dateFrom, date_to: dateTo, per_page: 100 }).then(r => r.items),
   });
 
   // Seed canonical ['record', id] from list responses. Avoids a redundant
@@ -62,25 +62,25 @@ export function RecordsProvider({ children }: { children: React.ReactNode }) {
 
   const { data: activitiesRaw = [] } = useQuery<ActivityResponse[]>({
     queryKey: ['activities', dateFrom, dateTo],
-    queryFn: () => getActivities({ date_from: dateFrom, date_to: dateTo }),
+    queryFn: () => getActivities({ date_from: dateFrom, date_to: dateTo, per_page: 100 }).then(r => r.items),
   });
 
   // Always-cached reference data
   const { data: mastersRaw = [] } = useQuery<MasterResponse[]>({
     queryKey: ['masters'],
-    queryFn: () => getMasters(),
+    queryFn: () => getMasters({ per_page: 100 }).then(r => r.items),
     staleTime: Infinity,
   });
 
   const { data: servicesRaw = [] } = useQuery<ServiceResponse[]>({
     queryKey: ['services'],
-    queryFn: () => getServices(),
+    queryFn: () => getServices({ per_page: 100 }).then(r => r.items),
     staleTime: Infinity,
   });
 
   const { data: locationsRaw = [] } = useQuery<LocationResponse[]>({
     queryKey: ['locations'],
-    queryFn: () => getLocations(),
+    queryFn: () => getLocations({ per_page: 100 }).then(r => r.items),
     staleTime: Infinity,
   });
 
@@ -94,7 +94,7 @@ export function RecordsProvider({ children }: { children: React.ReactNode }) {
   // Payments (all — API only supports record_id filter, not date range)
   const { data: paymentsRaw = [] } = useQuery<PaymentResponse[]>({
     queryKey: ['payments'],
-    queryFn: () => getPayments(),
+    queryFn: () => getPayments({ per_page: 100 }).then(r => r.items),
   });
 
   // Build maps for O(1) lookup

@@ -10,6 +10,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased] — 2026-07-28
 
 ### Added
+- **GH #182 — GenericService.list() mandatory pagination + API & frontend migration** — branch `feature/182-list-pagination` (6 commits: 8ffc378, 68fb1b4, e6edaf5, 4dd60cb, 7254c75, cde75d6):
+  - **Backend:** `PaginatedResponse[ItemT]` envelope `{items,total,page,per_page}` on `GenericService.list()` (mandatory `page`/`per_page` params). 4 service overrides with custom list logic (ServiceService, RecordService, ActivityService, VisitService) + PaymentService override (hard-delete model). 9 list endpoints gain `page`/`per_page` query params (ge=1, le=100 → 422) and envelope `response_model`. Client search-by-phone adapted to envelope. New contract test `test_generic_service_list.py` (parametrized across subclasses) + `test_api_pagination_params.py` (422 validation).
+  - **api-client:** `paginatedSchema()` factory + 8 per-entity list schemas. 8 list functions (`getMasters`, `getLocations`, `getTags`, `getMaterials`, `getServices`, `getActivities`, `getPayments`, `getRecords`) accept optional `{page, per_page}` params returning `PaginatedResponse<T>`. `getClients()` fixed with `per_page=100` (previously silently truncated to 20 items — the fix closes the truncation bug).
+  - **Frontend/admin:** 13 consumers unwrap `.items` at queryFn layer with `per_page=100` (RecordsContext, ScheduleContext, useRecordData, useMasters, useLocations, useServices, useActivities, ClientCardModal, 5 table components). All component signatures unchanged.
+  - **E2E infrastructure:** 3 e2e files unwrap envelopes (activity-details-modal.spec.ts, factories.ts, globalSetup.ts).
+  - **Spec:** `docs/specs/2026-07-28-list-pagination-migration-design.md`
+  - **Plan:** `docs/plans/2026-07-28-list-pagination-migration-plan.md`
+  - **Test results:** Backend 777 passed / 3 skipped; frontend vitest 1210 passed / 87 files; e2e 216 passed (6 pre-existing screenshot-baseline/seed-state flakes documented, 2 flaky passed on retry).
+  - **Known pre-existing issues (not in scope):** 4 failures in `packages/api-client/src/schemas.test.ts` (visit/record schema datetime parsing) — present on branch base AND on main; filed for follow-up.
+  - **Acceptance criteria (spec §7/§8):** All met — 9 endpoints paginated, 422 on out-of-range, `/clients` byte-identical, getClients fix, no bare-list endpoint, no pagination UI, byte-identical datetime formats.
+  - **69 files changed, +787 / -356 lines.**
+
 - **GH #175 — Contract test for GenericService.patch() replacing N×M per-entity PATCH duplication** — branch `gh-175-patch-contract-test` (6 commits: 22df61f, 9f66e14, 7226813, 2cd7e95, 17765a2, 6296991):
   - **Parametrized contract test** (`backend/tests/services/test_generic_service_patch.py`, +487 lines): 6 contract tests (partial update, empty body, NOT NULL strip, nullable apply, 404, updated_at) parametrized across 8 entities via `GenericService.__subclasses__()` auto-discovery. Config test verifies `NOT_NULL_FIELDS ↔` model nullability. Guard test catches new subclasses without config.
   - **Per-entity dedup:** −978 lines removed from 14 test files (`+692/−978` net in branch). 13 files modified (API tests for activities, clients, locations, masters, materials, payments, photos, records, services, tags, visitors; coverage_boost, edge_cases). `test_nullable_consolidation.py` deleted (245 lines). 9 exception-service tests restored (Service, Photo, Record — their override patches).

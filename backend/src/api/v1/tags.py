@@ -3,10 +3,11 @@
 from functools import lru_cache
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from src.db import SessionDep
 from src.errors import ErrorCode, ErrorDetail
+from src.schemas.common import PaginatedResponse
 from src.schemas.tag import TagCreate, TagPatch, TagResponse
 from src.services.tag import TagService, get_tag_service
 
@@ -22,13 +23,15 @@ def _get_tag_service() -> TagService:
 _ServiceDep = Annotated[TagService, Depends(_get_tag_service)]
 
 
-@router.get("", response_model=list[TagResponse])
+@router.get("", response_model=PaginatedResponse[TagResponse])
 async def list_tags(
     service: _ServiceDep,
     session: SessionDep,
-) -> list[TagResponse]:
+    page: int = Query(1, ge=1),
+    per_page: int = Query(20, ge=1, le=100),
+) -> PaginatedResponse[TagResponse]:
     """Return all active tags."""
-    return await service.list(db_session=session)
+    return await service.list(db_session=session, page=page, per_page=per_page)
 
 
 @router.post("", response_model=TagResponse, status_code=201)

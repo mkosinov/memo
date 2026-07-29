@@ -98,7 +98,7 @@ vi.mock('@memo/api-client', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@memo/api-client')>();
   return {
     ...actual,
-    getRecords: vi.fn().mockResolvedValue([]),
+    getRecords: vi.fn().mockResolvedValue({ items: [], total: 0, page: 1, per_page: 100 }),
   };
 });
 

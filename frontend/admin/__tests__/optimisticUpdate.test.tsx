@@ -9,11 +9,12 @@ import { getMonday, formatDateISO } from '@/lib/utils';
 // ─── Mock api-client ─────────────────────────────────────────────────────
 vi.mock('@memo/api-client', () => {
   const update = vi.fn();
+  const wrap = (items: any[]) => ({ items, total: items.length, page: 1, per_page: 100 });
   return {
-    getMasters: vi.fn().mockResolvedValue([]),
-    getLocations: vi.fn().mockResolvedValue([]),
-    getServices: vi.fn().mockResolvedValue([]),
-    getActivities: vi.fn().mockResolvedValue([]),
+    getMasters: vi.fn().mockResolvedValue(wrap([])),
+    getLocations: vi.fn().mockResolvedValue(wrap([])),
+    getServices: vi.fn().mockResolvedValue(wrap([])),
+    getActivities: vi.fn().mockResolvedValue(wrap([])),
     createActivity: vi.fn(),
     updateActivity: update,
     patchActivity: update,

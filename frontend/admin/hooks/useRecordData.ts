@@ -30,22 +30,22 @@ export function useRecordData(recordId: string, clientId: string) {
 
   const { data: services = [] } = useQuery({
     queryKey: ['services'],
-    queryFn: () => getServices(),
+    queryFn: () => getServices({ per_page: 100 }).then(r => r.items),
   });
 
   const { data: masters = [] } = useQuery({
     queryKey: ['masters'],
-    queryFn: () => getMasters(),
+    queryFn: () => getMasters({ per_page: 100 }).then(r => r.items),
   });
 
   const { data: locations = [] } = useQuery({
     queryKey: ['locations'],
-    queryFn: () => getLocations(),
+    queryFn: () => getLocations({ per_page: 100 }).then(r => r.items),
   });
 
   const { data: payments = [] } = useQuery({
     queryKey: ['payments', recordId],
-    queryFn: () => getPayments({ record_id: recordId }),
+    queryFn: () => getPayments({ record_id: recordId, per_page: 100 }).then(r => r.items),
     enabled: !!recordId,
   });
 

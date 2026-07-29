@@ -6,16 +6,19 @@ import { ScheduleProvider, useSchedule } from '../contexts/ScheduleContext';
 import { NavigationProvider } from '../contexts/NavigationContext';
 
 // ─── Mock api-client ─────────────────────────────────────────────────────────
-vi.mock('@memo/api-client', () => ({
-  getMasters: vi.fn().mockResolvedValue([]),
-  getLocations: vi.fn().mockResolvedValue([]),
-  getServices: vi.fn().mockResolvedValue([]),
-  getActivities: vi.fn().mockResolvedValue([]),
+vi.mock('@memo/api-client', () => {
+  const wrap = (items: any[]) => ({ items, total: items.length, page: 1, per_page: 100 });
+  return ({
+  getMasters: vi.fn().mockResolvedValue(wrap([])),
+  getLocations: vi.fn().mockResolvedValue(wrap([])),
+  getServices: vi.fn().mockResolvedValue(wrap([])),
+  getActivities: vi.fn().mockResolvedValue(wrap([])),
   createActivity: vi.fn(),
   updateActivity: vi.fn(),
   patchActivity: vi.fn(),
   deleteActivity: vi.fn(),
-}));
+  });
+});
 
 function createTestQueryClient() {
   return new QueryClient({

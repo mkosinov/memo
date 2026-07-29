@@ -43,9 +43,9 @@ class TestVisitList:
         record = create_record()
         response = api_client.get("/api/v1/visits")
         assert response.status_code == 200
-        data = response.json()
-        assert isinstance(data, list)
-        assert len(data) >= 1
+        body = response.json()
+        data = body["items"]
+        assert body["total"] >= 1
         # The visit we just created should be in the list
         visit_ids = [v["id"] for v in data]
         assert record["visits"][0]["id"] in visit_ids
@@ -55,8 +55,9 @@ class TestVisitList:
         record = create_record()
         response = api_client.get(f"/api/v1/visits?record_id={record['id']}")
         assert response.status_code == 200
-        data = response.json()
-        assert isinstance(data, list)
+        body = response.json()
+        data = body["items"]
+        assert body["total"] >= 1
         for visit in data:
             assert visit["record_id"] == record["id"]
 
@@ -69,7 +70,8 @@ class TestVisitList:
         # List should not include it
         response = api_client.get(f"/api/v1/visits?record_id={record['id']}")
         assert response.status_code == 200
-        visit_ids = [v["id"] for v in response.json()]
+        body = response.json()
+        visit_ids = [v["id"] for v in body["items"]]
         assert visit_id not in visit_ids
 
 
@@ -132,7 +134,7 @@ class TestVisitCreate:
         """Scenario 19: POST /api/v1/visits returns 409 when activity is full."""
         activity = sample_activity_at_capacity
         # The activity already has capacity=1 and is full. Find its record.
-        records = api_client.get("/api/v1/records").json()
+        records = api_client.get("/api/v1/records").json()["items"]
         activity_records = [r for r in records if r.get("activity_id") == activity.id]
         assert len(activity_records) >= 1
         record_id = activity_records[0]["id"]

@@ -2,7 +2,15 @@
 
 - Date: 2026-07-28
 - GitHub issue: #182 (refs: #175, PR #181)
-- Status: draft, awaiting G1b approval
+- Status: approved at G1b (with user amendments below), 2026-07-28
+
+### G1b user amendments (binding)
+
+1. Scope approved: all 9 bare-list GenericService endpoints including visits/records/services; visitors excluded (no bare list endpoint — #183).
+2. Breaking change without shim approved.
+3. **`per_page` cap = 100.** Exceeding the cap (or `per_page < 1`, `page < 1`) returns an **explicit 422 validation error** — never silent truncation. The frontend must know the limit explicitly.
+4. **No separate bare-list endpoint for reference data.** Masters/locations/services/tags/materials are size-bounded and covered by `per_page=100`; one unified contract beats two response shapes. Pagination UI is out of scope.
+5. `getClients()` lookup fix (RecordsContext): `per_page=100`.
 
 ## 1. Background & Problem
 
@@ -90,7 +98,7 @@ async def list(
 
 Behavior:
 
-- `page >= 1`, `per_page` bounded (e.g. 1..500 — exact bound decided in plan; must be large enough for legitimate "load all reference data" frontend use).
+- `page >= 1`, `per_page` bounded **1..100** (hard cap, user decision G1b). Reference-data consumers load all with `per_page=100`; datasets exceeding 100 rows are out of scope (no pagination UI — future follow-up).
 - `total` = count of rows matching filters (before limit/offset).
 - `items` = rows for the requested page, validated into `ResponseSchemaT` (same validation as today).
 - Existing `order_by` and `**filters` semantics unchanged.
@@ -100,7 +108,7 @@ Behavior:
 
 Each of the 9 generic list endpoints:
 
-- Accepts query params `page: int = Query(1, ge=1)`, `per_page: int = Query(20, ge=1, le=<bound>)` in addition to existing filter params.
+- Accepts query params `page: int = Query(1, ge=1)`, `per_page: int = Query(20, ge=1, le=100)` in addition to existing filter params. Values outside bounds → **422 validation error** (FastAPI standard `RequestValidationError`), never silent clamping/truncation.
 - `response_model` changes from `list[XResponse]` to `PaginatedResponse[XResponse]`.
 - Delegates to `service.list(db_session, page=page, per_page=per_page, ...)`.
 
@@ -115,9 +123,9 @@ Endpoints that today apply their own filters (e.g. activities date-range, visits
 
 Reference-data consumers (masters, locations, services, tags, materials, activities) load the **full dataset** for dropdowns/maps. To avoid regressions from the default `per_page=20`:
 
-- These call sites request an explicit high `per_page` (e.g. `per_page=500`) matching today's "load all" behavior. Rationale: reference data sets are small (tens of rows); introducing real pagination UI is out of scope.
-- Payments / visits / records lists: migrate to `.items`; if a table needs full data today, use explicit high `per_page` likewise.
-- `getClients()` bug fix: `getClients()` passes explicit `per_page` high enough to return all clients (dropdown semantics), or loops pages — decided at plan level. Type corrected to reflect `ClientWithStats[]` reality (or a proper `ClientResponse[]` endpoint — flag if needed).
+- These call sites request `per_page=100` (the hard cap, user decision G1b) matching today's "load all" behavior. Rationale: reference data sets are small (tens of rows); no separate bare-list endpoint is introduced (unified contract preferred); pagination UI is out of scope. If a reference dataset ever exceeds 100 rows, that's a future follow-up — out of scope here.
+- Payments / visits / records lists: migrate to `.items`; if a table needs full data today, use `per_page=100` likewise.
+- `getClients()` bug fix: `getClients()` passes `per_page=100` (dropdown semantics for the RecordsContext client map). Type corrected to reflect the actual `ClientWithStats[]` payload returned via the envelope's `.items`.
 
 Consumers to touch (from codebase survey):
 
@@ -141,6 +149,7 @@ All listed endpoints change response shape `[...]` → `{items, total, page, per
   - `total` reflects filter-matching count independent of page size.
   - `page=2` slice correctness (items disjoint from page 1).
   - `per_page` respected; out-of-range page returns empty `items` with correct `total`.
+  - `per_page=101`, `per_page=0`, `page=0` → 422 validation error (explicit, no silent clamping).
   - Query-count bound preserved for activities list.
 - `/clients` tests (`test_api_clients.py`, `test_client_stats.py`) must pass unchanged — regression guard for the untouched read-side.
 
@@ -153,17 +162,19 @@ All listed endpoints change response shape `[...]` → `{items, total, page, per
 ## 6. Acceptance Criteria
 
 1. `GenericService.list()` requires/accepts `page`/`per_page` and returns `PaginatedResponse`.
-2. All 9 generic list endpoints return `{items, total, page, per_page}` and accept `page`/`per_page` query params.
+2. All 9 generic list endpoints return `{items, total, page, per_page}` and accept `page`/`per_page` query params (`per_page ≤ 100`, violations → 422).
 3. `GET /clients` response shape and behavior byte-identical to before.
 4. Frontend: all list consumers migrated; selects/lists show the same data as pre-migration (no 20-item truncation anywhere, including the clients dropdown bug).
 5. Backend `pytest` green; frontend `pnpm test:all` green.
 6. No changes to non-generic endpoints (`/photos`, `/search/*`, `/clients/{id}/visitors`, `/visitors/{id}`).
 
-## 7. Open Questions / Flags
+## 7. Resolved Decisions (G1b)
 
-1. **`visits`, `records`, `services` were not named in the issue's endpoint list** (masters, locations, tags, materials, visitors, payments, activities) but are also bare-list `GenericService` endpoints. Spec includes them for consistency — flag to user at G1b. (`visitors` is excluded: no bare list endpoint exists; that's #183.)
-2. **`per_page` upper bound**: 500 proposed; frontend "load all" call sites rely on it. Needs confirmation it's acceptable vs. introducing real pagination UI later.
-3. **`getClients()` fix shape**: high-`per_page` single request (simple) vs. page-loop (robust for >500 clients). Proposal: high `per_page`, revisit when client count grows.
+1. ✅ Scope: all 9 bare-list GenericService endpoints (masters, locations, tags, materials, services, activities, payments, visits, records); visitors excluded (#183).
+2. ✅ Breaking change, no shim — atomic backend+frontend PR.
+3. ✅ `per_page` cap = 100; out-of-bounds params → explicit 422, no silent truncation.
+4. ✅ No bare-list endpoint for reference data — unified contract only.
+5. ✅ `getClients()` fix via `per_page=100` (no page loop; client count is far below 100).
 
 ## 8. Visual Compliance Checks
 

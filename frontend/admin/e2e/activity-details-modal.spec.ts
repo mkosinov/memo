@@ -225,7 +225,9 @@ test.describe('ActivityDetailsModal — Real User Scenarios', () => {
 
     // Get a different service to switch to
     const servicesResp = await request.get(`${BACKEND}/api/v1/services`);
-    const services = await servicesResp.json();
+    const servicesJson = await servicesResp.json();
+    // #182: services list is paginated ({items,total,page,per_page}) — unwrap envelope
+    const services: any[] = servicesJson.items || servicesJson;
     const differentService = services.find(
       (s: any) => s.id !== originalServiceId,
     );

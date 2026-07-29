@@ -66,12 +66,36 @@ import {
   type ActivitySearchResult,
   TagSearchResultSchema,
   type TagSearchResult,
+  MasterListResponseSchema,
+  LocationListResponseSchema,
+  TagListResponseSchema,
+  MaterialListResponseSchema,
+  ServiceListResponseSchema,
+  ActivityListResponseSchema,
+  PaymentListResponseSchema,
+  RecordListResponseSchema,
+  type PaginatedResponse,
 } from './schemas';
+
+// ─── List pagination ─────────────────────────────────────────────────────────
+
+export interface ListParams {
+  page?: number;
+  per_page?: number;
+}
+
+function listQuery(params?: ListParams): string {
+  const search = new URLSearchParams();
+  if (params?.page) search.set('page', String(params.page));
+  if (params?.per_page) search.set('per_page', String(params.per_page));
+  const qs = search.toString();
+  return qs ? `?${qs}` : '';
+}
 
 // ─── Masters ───────────────────────────────────────────────────────────────
 
-export async function getMasters(): Promise<MasterResponse[]> {
-  return api('/api/v1/masters', z.array(MasterResponseSchema));
+export async function getMasters(params?: ListParams): Promise<PaginatedResponse<MasterResponse>> {
+  return api(`/api/v1/masters${listQuery(params)}`, MasterListResponseSchema);
 }
 
 export async function getMaster(id: string): Promise<MasterResponse> {
@@ -116,8 +140,8 @@ export async function reorderMasters(ids: string[]): Promise<void> {
 
 // ─── Locations ─────────────────────────────────────────────────────────────
 
-export async function getLocations(): Promise<LocationResponse[]> {
-  return api('/api/v1/locations', z.array(LocationResponseSchema));
+export async function getLocations(params?: ListParams): Promise<PaginatedResponse<LocationResponse>> {
+  return api(`/api/v1/locations${listQuery(params)}`, LocationListResponseSchema);
 }
 
 // ─── Photos ─────────────────────────────────────────────────────────────────
@@ -155,8 +179,8 @@ export async function deletePhoto(id: string): Promise<void> {
 
 // ─── Services ──────────────────────────────────────────────────────────────
 
-export async function getServices(): Promise<ServiceResponse[]> {
-  return api('/api/v1/services', z.array(ServiceResponseSchema));
+export async function getServices(params?: ListParams): Promise<PaginatedResponse<ServiceResponse>> {
+  return api(`/api/v1/services${listQuery(params)}`, ServiceListResponseSchema);
 }
 
 // ─── Activities ────────────────────────────────────────────────────────────
@@ -164,11 +188,15 @@ export async function getServices(): Promise<ServiceResponse[]> {
 export async function getActivities(params: {
   date_from: string;
   date_to: string;
-}): Promise<ActivityResponse[]> {
+  page?: number;
+  per_page?: number;
+}): Promise<PaginatedResponse<ActivityResponse>> {
   const search = new URLSearchParams();
   search.set('date_from', params.date_from);
   search.set('date_to', params.date_to);
-  return api(`/api/v1/activities?${search.toString()}`, z.array(ActivityResponseSchema));
+  if (params.page) search.set('page', String(params.page));
+  if (params.per_page) search.set('per_page', String(params.per_page));
+  return api(`/api/v1/activities?${search.toString()}`, ActivityListResponseSchema);
 }
 
 export async function getActivity(id: string): Promise<ActivityResponse> {
@@ -218,19 +246,23 @@ export async function getRecords(params?: {
   date_from?: string;
   date_to?: string;
   client_id?: string;
-}): Promise<RecordResponse[]> {
+  page?: number;
+  per_page?: number;
+}): Promise<PaginatedResponse<RecordResponse>> {
   const search = new URLSearchParams();
   if (params?.date_from) search.set('date_from', params.date_from);
   if (params?.date_to) search.set('date_to', params.date_to);
   if (params?.client_id) search.set('client_id', params.client_id);
+  if (params?.page) search.set('page', String(params.page));
+  if (params?.per_page) search.set('per_page', String(params.per_page));
   const qs = search.toString();
-  return api(`/api/v1/records${qs ? `?${qs}` : ''}`, z.array(RecordResponseSchema));
+  return api(`/api/v1/records${qs ? `?${qs}` : ''}`, RecordListResponseSchema);
 }
 
 // ─── Clients ────────────────────────────────────────────────────────────────
 
-export async function getClients(): Promise<ClientResponse[]> {
-  return api('/api/v1/clients', ClientListResponseSchema).then(r => r.items);
+export async function getClients(): Promise<ClientWithStats[]> {
+  return api('/api/v1/clients?per_page=100', ClientListResponseSchema).then(r => r.items);
 }
 
 export async function getClientsWithStats(
@@ -280,11 +312,15 @@ export async function deleteClient(id: string): Promise<void> {
 
 export async function getPayments(params?: {
   record_id?: string;
-}): Promise<PaymentResponse[]> {
+  page?: number;
+  per_page?: number;
+}): Promise<PaginatedResponse<PaymentResponse>> {
   const search = new URLSearchParams();
   if (params?.record_id) search.set('record_id', params.record_id);
+  if (params?.page) search.set('page', String(params.page));
+  if (params?.per_page) search.set('per_page', String(params.per_page));
   const qs = search.toString();
-  return api(`/api/v1/payments${qs ? `?${qs}` : ''}`, z.array(PaymentResponseSchema));
+  return api(`/api/v1/payments${qs ? `?${qs}` : ''}`, PaymentListResponseSchema);
 }
 
 // ─── Records CRUD ─────────────────────────────────────────────────────────
@@ -418,8 +454,8 @@ export async function deleteVisit(id: string): Promise<void> {
 
 // ─── Tags ──────────────────────────────────────────────────────────────────
 
-export async function getTags(): Promise<TagResponse[]> {
-  return api('/api/v1/tags', z.array(TagResponseSchema));
+export async function getTags(params?: ListParams): Promise<PaginatedResponse<TagResponse>> {
+  return api(`/api/v1/tags${listQuery(params)}`, TagListResponseSchema);
 }
 
 export async function createTag(data: TagCreate): Promise<TagResponse> {
@@ -511,8 +547,8 @@ export async function reorderLocations(ids: string[]): Promise<void> {
 
 // ─── Materials ──────────────────────────────────────────────────────────
 
-export async function getMaterials(): Promise<MaterialResponse[]> {
-  return api('/api/v1/materials', z.array(MaterialResponseSchema));
+export async function getMaterials(params?: ListParams): Promise<PaginatedResponse<MaterialResponse>> {
+  return api(`/api/v1/materials${listQuery(params)}`, MaterialListResponseSchema);
 }
 
 export async function createMaterial(data: MaterialCreate): Promise<MaterialResponse> {

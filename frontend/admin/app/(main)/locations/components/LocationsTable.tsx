@@ -40,7 +40,7 @@ const COLUMNS: Column[] = [
 export function LocationsTable() {
   const { data: locations = [], isLoading, error, refetch } = useQuery<LocationResponse[]>({
     queryKey: ['locations'],
-    queryFn: getLocations,
+    queryFn: () => getLocations({ per_page: 100 }).then(r => r.items),
   });
 
   const updateLocation = useUpdateLocation();

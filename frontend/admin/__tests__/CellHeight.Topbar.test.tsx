@@ -6,15 +6,18 @@ import { Topbar } from '../app/components/layout/Topbar';
 import { NavigationProvider } from '../contexts/NavigationContext';
 import { UIProvider } from '../contexts/UIContext';
 
-vi.mock('@memo/api-client', () => ({
-  getMasters: vi.fn().mockResolvedValue([]),
-  getLocations: vi.fn().mockResolvedValue([]),
-  getServices: vi.fn().mockResolvedValue([]),
-  getActivities: vi.fn().mockResolvedValue([]),
+vi.mock('@memo/api-client', () => {
+  const wrap = (items: any[]) => ({ items, total: items.length, page: 1, per_page: 100 });
+  return ({
+  getMasters: vi.fn().mockResolvedValue(wrap([])),
+  getLocations: vi.fn().mockResolvedValue(wrap([])),
+  getServices: vi.fn().mockResolvedValue(wrap([])),
+  getActivities: vi.fn().mockResolvedValue(wrap([])),
   createActivity: vi.fn(),
   updateActivity: vi.fn(),
   deleteActivity: vi.fn(),
-}));
+  });
+});
 
 const defaultScheduleMock = {
   masters: [],

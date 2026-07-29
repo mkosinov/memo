@@ -8,7 +8,7 @@ import type { Service } from '@memo/domain';
 export function useServices() {
   return useQuery<ServiceResponse[], Error, Service[]>({
     queryKey: ['services'],
-    queryFn: () => getServices(),
+    queryFn: () => getServices({ per_page: 100 }).then(r => r.items),
     select: (raw) => raw.map(transformService),
     staleTime: 5 * 60 * 1000,
   });

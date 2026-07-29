@@ -168,7 +168,7 @@ function loadVisibleKeys(): string[] | null {
 export function ServicesTable() {
   const { data: services = [], isLoading, error, refetch } = useQuery<ServiceResponse[], Error>({
     queryKey: ['services'],
-    queryFn: () => getServices(),
+    queryFn: () => getServices({ per_page: 100 }).then(r => r.items),
     staleTime: 5 * 60 * 1000,
   });
 

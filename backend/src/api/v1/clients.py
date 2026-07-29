@@ -45,8 +45,8 @@ async def search_client_by_phone(
     phone: str = Query(..., min_length=3),
 ) -> ClientResponse:
     """Search for an active client by phone number."""
-    clients = await service.list(db_session=session, phone=phone)
-    if not clients:
+    result = await service.list(db_session=session, phone=phone)
+    if not result.items:
         raise HTTPException(
             status_code=404,
             detail=ErrorDetail(
@@ -54,7 +54,7 @@ async def search_client_by_phone(
                 message="Client not found",
             ).model_dump(),
         )
-    return clients[0]
+    return result.items[0]
 
 
 @router.get("", response_model=ClientListResponse)

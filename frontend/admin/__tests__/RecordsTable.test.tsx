@@ -4,17 +4,16 @@ import React from 'react';
 import type { RecordsContextType } from '../contexts/RecordsContext';
 import type {
   RecordResponse,
-  ClientResponse,
+  ClientWithStats,
   ActivityResponse,
   ServiceResponse,
   MasterResponse,
   LocationResponse,
-  PaymentResponse,
 } from '@memo/api-client';
 
 // ─── Mock data ──────────────────────────────────────────────────────────────
 
-const mockClient: ClientResponse = {
+const mockClient: ClientWithStats = {
   id: 'client-1',
   name: 'Анна Смирнова',
   phone: '+7 900 111-22-33',
@@ -23,6 +22,10 @@ const mockClient: ClientResponse = {
   created_at: '2024-01-01T00:00:00Z',
   updated_at: '2024-01-01T00:00:00Z',
   is_active: true,
+  records_count: 5,
+  last_record: '2024-06-15',
+  total_paid: 2500,
+  missed_records: 0,
 };
 
 const mockActivity: ActivityResponse = {
@@ -113,21 +116,12 @@ const mockRecord: RecordResponse = {
   ],
 };
 
-const mockPayment: PaymentResponse = {
-  id: 'pay-1',
-  record_id: 'rec-1',
-  amount: 2500,
-  method: 'card',
-  created_at: '2024-06-15T10:00:00Z',
-  updated_at: '2024-06-15T10:00:00Z',
-};
-
 // ─── Mutable mock context ───────────────────────────────────────────────────
 
 let mockContextValue: RecordsContextType = {
   records: [mockRecord],
   clients: new Map([['client-1', mockClient]]),
-  payments: new Map([['rec-1', [mockPayment]]]),
+  payments: new Map([['rec-1', 2500]]),
   activities: new Map([['act-1', mockActivity]]),
   masters: new Map([['master-1', mockMaster]]),
   services: new Map([['svc-1', mockService]]),
@@ -159,7 +153,7 @@ describe('RecordsTable', () => {
     mockContextValue = {
       records: [mockRecord],
       clients: new Map([['client-1', mockClient]]),
-      payments: new Map([['rec-1', [mockPayment]]]),
+      payments: new Map([['rec-1', 2500]]),
       activities: new Map([['act-1', mockActivity]]),
       masters: new Map([['master-1', mockMaster]]),
       services: new Map([['svc-1', mockService]]),
@@ -199,6 +193,51 @@ describe('RecordsTable', () => {
   it('shows payment status when fully paid', () => {
     render(<RecordsTable filters={filters} />);
     expect(screen.getByText('✓ Оплачено')).toBeTruthy();
+  });
+
+  it('record with no entry in totals map renders Не оплачено', () => {
+    mockContextValue = {
+      ...mockContextValue,
+      payments: new Map(),
+    };
+    render(<RecordsTable filters={filters} />);
+    expect(screen.getByText('Не оплачено')).toBeTruthy();
+  });
+
+  it('sorts by payment status: paid, then partial, then unpaid', () => {
+    const recordPaid: RecordResponse = {
+      ...mockRecord,
+      id: 'rec-paid',
+      client_id: null,
+    };
+    const recordPartial: RecordResponse = {
+      ...mockRecord,
+      id: 'rec-partial',
+      client_id: null,
+    };
+    const recordUnpaid: RecordResponse = {
+      ...mockRecord,
+      id: 'rec-unpaid',
+      client_id: null,
+    };
+    mockContextValue = {
+      ...mockContextValue,
+      records: [recordUnpaid, recordPartial, recordPaid],
+      payments: new Map([
+        ['rec-paid', 2500],
+        ['rec-partial', 1000],
+      ]),
+    };
+    render(<RecordsTable filters={filters} />);
+
+    // Click "Оплата" header to sort ascending
+    fireEvent.click(screen.getByText(/Оплата/));
+
+    const rows = document.querySelectorAll('tbody tr');
+    expect(rows).toHaveLength(3);
+    expect(rows[0].textContent).toContain('✓ Оплачено');
+    expect(rows[1].textContent).toContain('Частично');
+    expect(rows[2].textContent).toContain('Не оплачено');
   });
 
   it('shows empty state when no records', () => {

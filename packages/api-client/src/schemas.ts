@@ -314,6 +314,12 @@ export const PaymentResponseSchema = z.object({
 
 export type PaymentResponse = z.infer<typeof PaymentResponseSchema>;
 
+export const PaymentTotalsResponseSchema = z.object({
+  totals: z.record(z.string(), z.number()),
+});
+
+export type PaymentTotalsResponse = z.infer<typeof PaymentTotalsResponseSchema>;
+
 // ─── RecordCreate (request body) ─────────────────────────────────────────
 
 export const RecordCreateSchema = z.object({

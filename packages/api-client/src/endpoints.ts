@@ -35,6 +35,7 @@ import {
   ClientListResponseSchema,
   type ClientListResponse,
   PaymentResponseSchema,
+  PaymentTotalsResponseSchema,
   type PaymentResponse,
   type PaymentCreate,
   type PaymentUpdate,
@@ -322,6 +323,14 @@ export async function getPayments(params?: {
   if (params?.per_page) search.set('per_page', String(params.per_page));
   const qs = search.toString();
   return api(`/api/v1/payments${qs ? `?${qs}` : ''}`, PaymentListResponseSchema);
+}
+
+export async function getPaymentTotals(recordIds: string[]): Promise<Record<string, number>> {
+  const search = new URLSearchParams();
+  recordIds.forEach((id) => search.append('record_ids', id));
+  const qs = search.toString();
+  const res = await api(`/api/v1/payments/totals${qs ? `?${qs}` : ''}`, PaymentTotalsResponseSchema);
+  return res.totals;
 }
 
 // ─── Records CRUD ─────────────────────────────────────────────────────────

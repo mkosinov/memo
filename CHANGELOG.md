@@ -10,6 +10,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased] — 2026-07-29
 
 ### Added
+- **GH #186 — Payments batch aggregate (GET /api/v1/payments/totals)** — branch `feat/payments-batch-aggregate-186`:
+  - **Backend:** `GET /api/v1/payments/totals?record_ids=...` — new schema `PaymentTotalsResponse` (keyed map), module-level `get_payment_totals(session, record_ids)` in `payment.py` (SQL `IN+GROUP BY+SUM`), route declared before `/{payment_id}` for correct FastAPI resolution. 5 API tests (multiple records, record without payments, empty → 200 `{}`, over-cap → 422, mixed results).
+  - **api-client:** `getPaymentTotals(recordIds)` method + `PaymentTotalsResponseSchema` Zod schema + endpoint tests.
+  - **RecordsContext:** Removed unfiltered `getPayments({ per_page: 100 })` call. Totals query keyed by sorted record IDs (`['payments', 'totals', sortedIds]`), `enabled: recordIds.length > 0`. Map exposed as `payments: Map<string, number>`.
+  - **RecordsTable + ClientCardModal:** Status/sort/ClientCardModal per-record statuses consumed from totals map. Drive-by `ClientWithStats[]` type fix. Detail panel per-record payment list unchanged (via `useRecordData`).
+  - **Regression guard:** Backend test verifying totals correct with >105 payments in DB; `RecordsContext.test.tsx` guard asserting `getPayments` is never called.
+  - **Test results:** Backend 793 passed / 3 skipped (baseline 787p/3s + 6 new); admin vitest 1218 passed / 87 files; api-client 139 passed / 4 failed (4 = known pre-existing #188, unchanged). Visual compliance: 4/4 passed.
+  - **Design spec:** `docs/specs/2026-07-29-payments-batch-aggregate-design.md`
+  - **Plan:** `docs/plans/2026-07-29-payments-batch-aggregate-plan.md`
+  - **Domain rules:** `docs/domain-rules/payments.md` updated with batch aggregate endpoint contract.
+
 - **GH #183 — GET /api/v1/tags/{id} + GET /api/v1/visitors paginated bare list** — branch `feat/183-tags-get-by-id-visitors-list`:
   - **Backend:** `GET /api/v1/tags/{id}` endpoint (get-by-id, 3 tests). `GET /api/v1/visitors` paginated list (page/per_page query params, GenericService subclass pattern, 7 tests incl. scoped-route regression guard ensuring `/api/v1/visitors` doesn't shadow other routes).
   - **api-client:** `VisitorListResponseSchema` added. `getTag(id)` + `getVisitors({page?, per_page?})` methods + unit tests for both.

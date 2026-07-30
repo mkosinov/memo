@@ -306,3 +306,15 @@ class TestPaymentTotals:
         )
         assert response.status_code == 200
         assert response.json() == {"totals": {}}
+
+    def test_totals_not_limited_by_list_pagination(self, api_client) -> None:
+        """Regression #186: aggregate must include payments beyond the per_page<=100 list cap."""
+        r1 = _create_record(api_client)
+        for _ in range(105):
+            self._create_payment(api_client, r1, 100)
+        response = api_client.get(
+            "/api/v1/payments/totals",
+            params=[("record_ids", r1)],
+        )
+        assert response.status_code == 200
+        assert response.json() == {"totals": {r1: 10500}}

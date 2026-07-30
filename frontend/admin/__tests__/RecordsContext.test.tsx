@@ -19,6 +19,7 @@ vi.mock('@memo/api-client', () => ({
   getRecords: vi.fn(),
   getClients: vi.fn(),
   getPaymentTotals: vi.fn(),
+  getPayments: vi.fn(),
   getActivities: vi.fn(),
   getMasters: vi.fn(),
   getServices: vi.fn(),
@@ -29,6 +30,7 @@ import {
   getRecords,
   getClients,
   getPaymentTotals,
+  getPayments,
   getActivities,
   getMasters,
   getServices,
@@ -239,5 +241,20 @@ describe('RecordsContext — payment totals aggregate', () => {
     });
 
     expect(result.current.payments.get('rec-without')).toBeUndefined();
+  });
+
+  it('never calls unfiltered getPayments for payment status (uses getPaymentTotals only)', async () => {
+    const rec1 = makeRecord('rec-1');
+    vi.mocked(getRecords).mockResolvedValue(envelope([rec1]));
+
+    const { Wrapper } = createWrapper();
+    renderHook(() => useRecords(), { wrapper: Wrapper });
+
+    await waitFor(() => {
+      expect(vi.mocked(getPaymentTotals)).toHaveBeenCalled();
+    });
+
+    // Regression #186: context must use the aggregate endpoint, not the per_page-capped list
+    expect(vi.mocked(getPayments)).not.toHaveBeenCalled();
   });
 });

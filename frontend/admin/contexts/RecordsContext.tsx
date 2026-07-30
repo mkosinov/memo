@@ -5,7 +5,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   getRecords,
   getClients,
-  getPayments,
+  getPaymentTotals,
   getActivities,
   getMasters,
   getServices,
@@ -13,8 +13,7 @@ import {
 } from '@memo/api-client';
 import type {
   RecordResponse,
-  ClientResponse,
-  PaymentResponse,
+  ClientWithStats,
   ActivityResponse,
   MasterResponse,
   ServiceResponse,
@@ -25,8 +24,8 @@ import { seedRecordFromList } from '@/lib/cache/recordCacheSync';
 
 export interface RecordsContextType {
   records: RecordResponse[];
-  clients: Map<string, ClientResponse>;
-  payments: Map<string, PaymentResponse[]>;
+  clients: Map<string, ClientWithStats>;
+  payments: Map<string, number>; // record_id → total paid amount
   activities: Map<string, ActivityResponse>;
   masters: Map<string, MasterResponse>;
   services: Map<string, ServiceResponse>;
@@ -85,16 +84,18 @@ export function RecordsProvider({ children }: { children: React.ReactNode }) {
   });
 
   // Clients (all active clients — not period-based)
-  const { data: clientsRaw = [] } = useQuery<ClientResponse[]>({
+  const { data: clientsRaw = [] } = useQuery<ClientWithStats[]>({
     queryKey: ['clients'],
     queryFn: () => getClients(),
     staleTime: Infinity,
   });
 
-  // Payments (all — API only supports record_id filter, not date range)
-  const { data: paymentsRaw = [] } = useQuery<PaymentResponse[]>({
-    queryKey: ['payments'],
-    queryFn: () => getPayments({ per_page: 100 }).then(r => r.items),
+  // Payment totals for the currently loaded records (batch aggregate — replaces unfiltered getPayments, #186)
+  const recordIds = useMemo(() => records.map((r) => r.id).sort(), [records]);
+  const { data: paymentTotals } = useQuery({
+    queryKey: ['payments', 'totals', recordIds],
+    queryFn: () => getPaymentTotals(recordIds),
+    enabled: recordIds.length > 0,
   });
 
   // Build maps for O(1) lookup
@@ -123,20 +124,18 @@ export function RecordsProvider({ children }: { children: React.ReactNode }) {
   }, [locationsRaw]);
 
   const clients = useMemo(() => {
-    const map = new Map<string, ClientResponse>();
+    const map = new Map<string, ClientWithStats>();
     clientsRaw.forEach(c => map.set(c.id, c));
     return map;
   }, [clientsRaw]);
 
   const payments = useMemo(() => {
-    const map = new Map<string, PaymentResponse[]>();
-    paymentsRaw.forEach(p => {
-      const arr = map.get(p.record_id) ?? [];
-      arr.push(p);
-      map.set(p.record_id, arr);
-    });
+    const map = new Map<string, number>();
+    if (paymentTotals) {
+      Object.entries(paymentTotals).forEach(([recordId, total]) => map.set(recordId, total));
+    }
     return map;
-  }, [paymentsRaw]);
+  }, [paymentTotals]);
 
   const contextValue = useMemo(
     () => ({

@@ -40,9 +40,8 @@ export function ClientCardModal({ clientId, onClose }: ClientCardModalProps) {
       const activity = activities.get(record.activity_id);
       const service = activity ? services.get(activity.service_id) : null;
       const location = activity ? locations.get(activity.location_id) : null;
-      const recordPayments = payments.get(record.id) ?? [];
       const totalPrice = record.visits.reduce((s, v) => s + v.price, 0);
-      const paidAmount = recordPayments.reduce((s, p) => s + p.amount, 0);
+      const paidAmount = payments.get(record.id) ?? 0;
       return { record, activity, service, location, totalPrice, paidAmount };
     });
   }, [clientRecords, activities, services, locations, payments]);

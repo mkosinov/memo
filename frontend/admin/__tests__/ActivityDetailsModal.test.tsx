@@ -15,6 +15,7 @@ import {
   mockLocations,
   mockActivity,
   mockClient,
+  mockClientWithStats,
   mockRecord,
   mockVisitor,
   mockPayment,
@@ -412,7 +413,7 @@ describe('ActivityDetailsModal — API integration', () => {
   const mockRecords = [mockRecord];
 
   const mockClientMap = new Map([
-    ['c1', mockClient],
+    ['c1', mockClientWithStats],
   ]);
 
   const mockVisitorsMap = new Map([
@@ -437,7 +438,7 @@ describe('ActivityDetailsModal — API integration', () => {
       ...createMockRecordsContext(),
       records: mockRecords,
       clients: mockClientMap,
-      payments: new Map([['r1', []]]),
+      payments: new Map([['r1', 0]]),
     });
 
     render(
@@ -458,7 +459,7 @@ describe('ActivityDetailsModal — API integration', () => {
       ...createMockRecordsContext(),
       records: mockRecords,
       clients: mockClientMap,
-      payments: new Map([['r1', []]]),
+      payments: new Map([['r1', 0]]),
     });
 
     render(

@@ -36,12 +36,32 @@ A Payment is a financial transaction for a Record. Payments track how much a cli
 ## API Endpoints
 | Method | Path | Description |
 |--------|------|-------------|
+| GET | /api/v1/payments/totals?record_ids=... | Batch aggregate — per-record SUM(amount) for given record IDs |
 | GET | /api/v1/payments?record_id=X | List by record |
 | GET | /api/v1/payments/{id} | Get |
 | POST | /api/v1/payments | Create (body: `record_id`, `amount` gt=0, `method?`, `created_at?` datetime) |
 | PUT | /api/v1/payments/{id} | Update (full replace) |
 | PATCH | /api/v1/payments/{id} | Partial update (PaymentPatch: `amount?` gt=0, `method?`) → PaymentResponse |
-| DELETE | /api/v1/payments/{id} | Soft delete |
+| DELETE | /api/v1/payments/{id} | Hard delete |
+
+### Batch Aggregate Endpoint: `GET /api/v1/payments/totals`
+
+**Purpose:** Batch aggregate of payment amounts per record — used by the Records page to derive per-record payment status (оплачено/частично/не оплачено) and sorting-by-payment, and by ClientCardModal for per-record statuses in the client history.
+
+**Contract:**
+- `record_ids` — repeated query param, e.g. `?record_ids=a&record_ids=b&...`
+- Cardinality cap: **max 200** IDs (page-sized sets are ≤100 after #182). Over cap → **422**.
+- Empty list (`?record_ids=` with no values) → **200** `{"totals": {}}` (defensive — frontend skips request when no visible records).
+- Response: `{"totals": {"<record_id>": <sum_amount>, ...}}` — computed via SQL `WHERE record_id IN (...) GROUP BY record_id` with `SUM(amount)`.
+- Records with **no payments** are absent from the map. Frontend treats missing key as 0 → "Не оплачено".
+
+**Hard-delete note:** Payments in this codebase are **hard-deleted** (no `is_active` on Payment model — migration `a1b2c3d4e5f6` dropped it). The aggregate needs **no soft-delete filter**; it sums all payment rows for the given record IDs. The aggregate does NOT join through `Record.is_active` — the caller (RecordsContext) only ever passes IDs of active records it has loaded.
+
+**Route-ordering invariant (critical):** The `/totals` route MUST be declared BEFORE `GET /payments/{payment_id}` in the router file. FastAPI resolves static routes before path params only if declared first. See `backend/src/api/v1/payments.py`.
+
+**Implementation pattern:** Module-level async function `get_payment_totals(session, record_ids)` in `backend/src/services/payment.py` — NOT a `PaymentService` class method, NOT via generic repository filters.
+
+**Tests:** 5 backend API tests (multiple records, record without payments, empty record_ids → 200 `{}`, over-cap → 422, mixed results). 1 regression guard test with >100 payments in DB (backend). Frontend tests for RecordsContext totals wiring, RecordsTable status/sort, ClientCardModal per-record statuses.
 
 ## Relationships
 - Payment → belongs to Record

@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { useRecords } from '@/contexts/RecordsContext';
+import { useRecordData } from '@/hooks/useRecordData';
 import type { RecordResponse, ActivityResponse } from '@memo/api-client';
 import { displayMasterName } from '@/lib/utils';
 import { ClientCardModal } from './ClientCardModal';
@@ -179,8 +180,8 @@ export function RecordsTable({ filters }: RecordsTableProps) {
         case 'payment': {
           const aTot2 = a.visits.reduce((s, v) => s + v.price, 0);
           const bTot2 = b.visits.reduce((s, v) => s + v.price, 0);
-          const aPaid = (payments.get(a.id) ?? []).reduce((s, p) => s + p.amount, 0);
-          const bPaid = (payments.get(b.id) ?? []).reduce((s, p) => s + p.amount, 0);
+          const aPaid = payments.get(a.id) ?? 0;
+          const bPaid = payments.get(b.id) ?? 0;
           const aLevel = aPaid >= aTot2 ? 0 : aPaid > 0 ? 1 : 2;
           const bLevel = bPaid >= bTot2 ? 0 : bPaid > 0 ? 1 : 2;
           cmp = aLevel - bLevel;
@@ -208,13 +209,18 @@ export function RecordsTable({ filters }: RecordsTableProps) {
   const selectedActivity = selectedRecord ? getActivity(selectedRecord.activity_id) : null;
   const selectedClient = selectedRecord?.client_id ? clients.get(selectedRecord.client_id) : null;
   const selectedVisits = selectedRecord?.visits ?? [];
-  const selectedPayments = selectedRecord ? (payments.get(selectedRecord.id) ?? []) : [];
+  // Per-record payments for the detail panel come from useRecordData
+  // (hook is called unconditionally; ids are empty strings when nothing is selected,
+  // which disables the underlying queries).
+  const { payments: selectedPayments } = useRecordData(
+    selectedRecord?.id ?? '',
+    selectedRecord?.client_id ?? '',
+  );
   const totalForRecord = (recordId: string): number => {
     const record = records.find((r) => r.id === recordId);
     return record?.visits.reduce((s, v) => s + v.price, 0) ?? 0;
   };
-  const paidForRecord = (recordId: string): number =>
-    (payments.get(recordId) ?? []).reduce((s, p) => s + p.amount, 0);
+  const paidForRecord = (recordId: string): number => payments.get(recordId) ?? 0;
 
   if (error) {
     return (

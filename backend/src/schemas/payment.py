@@ -50,3 +50,9 @@ class PaymentResponse(PaymentBase):
     id: str
     created_at: datetime
     updated_at: datetime
+
+
+class PaymentTotalsResponse(BaseModel):
+    """Response schema for the batch aggregate totals endpoint."""
+
+    totals: dict[str, int]

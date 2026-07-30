@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { z } from 'zod';
-import { getMasters, getMaster, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, deleteActivity, getWebPhotos, getRecords, getClients, getPayments, createRecord, updateRecord, deleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, searchClientByPhone, updateVisitStatus, getTags, createService, updateService, deleteService, createLocation, updateLocation, deleteLocation, getClientsWithStats, patchClient, reorderMasters, reorderLocations, patchMaster, patchLocation, patchMaterial, patchService, patchUserSettings, getMaterials, getTag, getVisitors } from './endpoints';
+import { getMasters, getMaster, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, deleteActivity, getWebPhotos, getRecords, getClients, getPayments, getPaymentTotals, createRecord, updateRecord, deleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, searchClientByPhone, updateVisitStatus, getTags, createService, updateService, deleteService, createLocation, updateLocation, deleteLocation, getClientsWithStats, patchClient, reorderMasters, reorderLocations, patchMaster, patchLocation, patchMaterial, patchService, patchUserSettings, getMaterials, getTag, getVisitors } from './endpoints';
 import { ServiceCreateSchema, LocationCreateSchema } from './schemas';
 
 // Mock the api function from client
@@ -360,6 +360,29 @@ describe('getPayments', () => {
       '/api/v1/payments?record_id=r-1&per_page=100',
       expect.anything(),
     );
+  });
+});
+
+describe('getPaymentTotals', () => {
+  it('calls /api/v1/payments/totals with repeated record_ids params', async () => {
+    vi.mocked(api).mockResolvedValue({ totals: { 'r-1': 4500, 'r-2': 1500 } });
+    await getPaymentTotals(['r-1', 'r-2']);
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/payments/totals?record_ids=r-1&record_ids=r-2',
+      expect.anything(),
+    );
+  });
+
+  it('calls /api/v1/payments/totals without query string for empty ids', async () => {
+    vi.mocked(api).mockResolvedValue({ totals: {} });
+    await getPaymentTotals([]);
+    expect(api).toHaveBeenCalledWith('/api/v1/payments/totals', expect.anything());
+  });
+
+  it('returns the plain record_id -> total map', async () => {
+    vi.mocked(api).mockResolvedValue({ totals: { r1: 4500 } });
+    const result = await getPaymentTotals(['r1']);
+    expect(result).toEqual({ r1: 4500 });
   });
 });
 

@@ -18,6 +18,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 vi.mock('@memo/api-client', () => ({
   getRecords: vi.fn(),
   getClients: vi.fn(),
+  getPaymentTotals: vi.fn(),
   getPayments: vi.fn(),
   getActivities: vi.fn(),
   getMasters: vi.fn(),
@@ -28,6 +29,7 @@ vi.mock('@memo/api-client', () => ({
 import {
   getRecords,
   getClients,
+  getPaymentTotals,
   getPayments,
   getActivities,
   getMasters,
@@ -117,7 +119,7 @@ describe('RecordsContext — canonical cache seeding', () => {
 
     vi.mocked(getRecords).mockResolvedValue(envelope([]));
     vi.mocked(getClients).mockResolvedValue([]);
-    vi.mocked(getPayments).mockResolvedValue(envelope([]));
+    vi.mocked(getPaymentTotals).mockResolvedValue({});
     vi.mocked(getActivities).mockResolvedValue(envelope([]));
     vi.mocked(getMasters).mockResolvedValue(envelope([]));
     vi.mocked(getServices).mockResolvedValue(envelope([]));
@@ -178,5 +180,81 @@ describe('RecordsContext — canonical cache seeding', () => {
 
     expect(queryClient.getQueryData<RecordResponse>(['record', 'r1'])).toEqual(rec1);
     expect(queryClient.getQueryData<RecordResponse>(['record', 'r2'])).toEqual(rec2);
+  });
+});
+
+describe('RecordsContext — payment totals aggregate', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+
+    vi.mocked(getRecords).mockResolvedValue(envelope([]));
+    vi.mocked(getClients).mockResolvedValue([]);
+    vi.mocked(getPaymentTotals).mockResolvedValue({ 'rec-1': 3000 });
+    vi.mocked(getActivities).mockResolvedValue(envelope([]));
+    vi.mocked(getMasters).mockResolvedValue(envelope([]));
+    vi.mocked(getServices).mockResolvedValue(envelope([]));
+    vi.mocked(getLocations).mockResolvedValue(envelope([]));
+  });
+
+  it('fetches payment totals for loaded record IDs', async () => {
+    const rec1 = makeRecord('rec-1');
+    const rec2 = makeRecord('rec-2');
+    vi.mocked(getRecords).mockResolvedValue(envelope([rec2, rec1]));
+
+    const { Wrapper } = createWrapper();
+    const { result } = renderHook(() => useRecords(), { wrapper: Wrapper });
+
+    await waitFor(() => {
+      expect(vi.mocked(getPaymentTotals)).toHaveBeenCalled();
+    });
+
+    // IDs must be sorted
+    expect(vi.mocked(getPaymentTotals)).toHaveBeenCalledWith(['rec-1', 'rec-2']);
+
+    await waitFor(() => {
+      expect(result.current.payments.get('rec-1')).toBe(3000);
+    });
+  });
+
+  it('does not fetch totals when no records loaded', async () => {
+    const { Wrapper } = createWrapper();
+    renderHook(() => useRecords(), { wrapper: Wrapper });
+
+    // Give queries a chance to settle
+    await waitFor(() => {
+      expect(vi.mocked(getRecords)).toHaveBeenCalled();
+    });
+
+    expect(vi.mocked(getPaymentTotals)).not.toHaveBeenCalled();
+  });
+
+  it('record without payments has no entry in the map', async () => {
+    const rec1 = makeRecord('rec-1');
+    const recWithout = makeRecord('rec-without');
+    vi.mocked(getRecords).mockResolvedValue(envelope([rec1, recWithout]));
+
+    const { Wrapper } = createWrapper();
+    const { result } = renderHook(() => useRecords(), { wrapper: Wrapper });
+
+    await waitFor(() => {
+      expect(result.current.payments.get('rec-1')).toBe(3000);
+    });
+
+    expect(result.current.payments.get('rec-without')).toBeUndefined();
+  });
+
+  it('never calls unfiltered getPayments for payment status (uses getPaymentTotals only)', async () => {
+    const rec1 = makeRecord('rec-1');
+    vi.mocked(getRecords).mockResolvedValue(envelope([rec1]));
+
+    const { Wrapper } = createWrapper();
+    renderHook(() => useRecords(), { wrapper: Wrapper });
+
+    await waitFor(() => {
+      expect(vi.mocked(getPaymentTotals)).toHaveBeenCalled();
+    });
+
+    // Regression #186: context must use the aggregate endpoint, not the per_page-capped list
+    expect(vi.mocked(getPayments)).not.toHaveBeenCalled();
   });
 });

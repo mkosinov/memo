@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { useRecords } from '@/contexts/RecordsContext';
+import { useRecordData } from '@/hooks/useRecordData';
 import type { RecordResponse, ActivityResponse } from '@memo/api-client';
 import { displayMasterName } from '@/lib/utils';
 import { ClientCardModal } from './ClientCardModal';
@@ -208,7 +209,13 @@ export function RecordsTable({ filters }: RecordsTableProps) {
   const selectedActivity = selectedRecord ? getActivity(selectedRecord.activity_id) : null;
   const selectedClient = selectedRecord?.client_id ? clients.get(selectedRecord.client_id) : null;
   const selectedVisits = selectedRecord?.visits ?? [];
-  const selectedPaidTotal = selectedRecord ? (payments.get(selectedRecord.id) ?? 0) : 0;
+  // Per-record payments for the detail panel come from useRecordData
+  // (hook is called unconditionally; ids are empty strings when nothing is selected,
+  // which disables the underlying queries).
+  const { payments: selectedPayments } = useRecordData(
+    selectedRecord?.id ?? '',
+    selectedRecord?.client_id ?? '',
+  );
   const totalForRecord = (recordId: string): number => {
     const record = records.find((r) => r.id === recordId);
     return record?.visits.reduce((s, v) => s + v.price, 0) ?? 0;
@@ -555,13 +562,20 @@ export function RecordsTable({ filters }: RecordsTableProps) {
           {/* Payments */}
           <div className="rounded-lg border p-3" style={{ borderColor: 'var(--line)', backgroundColor: 'var(--white)' }}>
             <div className="text-xs mb-2" style={{ color: 'var(--ink-light)' }}>Оплата</div>
-            {selectedPaidTotal > 0 ? (
-              <div className="flex justify-between items-center text-sm">
-                <div className="flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500" />
-                  <span style={{ color: 'var(--ink-mid)' }}>Оплачено</span>
-                </div>
-                <span className="font-medium text-emerald-600">{formatPrice(selectedPaidTotal)}</span>
+            {selectedPayments.length > 0 ? (
+              <div className="space-y-2">
+                {selectedPayments.map((payment) => {
+                  const methodLabels: Record<string, string> = { cash: 'Наличные', card: 'Карта', transfer: 'Перевод' };
+                  return (
+                    <div key={payment.id} className="flex justify-between items-center text-sm">
+                      <div className="flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                        <span style={{ color: 'var(--ink-mid)' }}>{payment.method ? methodLabels[payment.method] ?? payment.method : 'Без метода'}</span>
+                      </div>
+                      <span className="font-medium text-emerald-600">{formatPrice(payment.amount)}</span>
+                    </div>
+                  );
+                })}
               </div>
             ) : (
               <div className="text-sm" style={{ color: 'var(--ink-light)' }}>Нет платежей</div>

@@ -9,7 +9,9 @@ import type {
   ServiceResponse,
   MasterResponse,
   LocationResponse,
+  PaymentResponse,
 } from '@memo/api-client';
+import { mockPayment } from './helpers/mockData';
 
 // ─── Mock data ──────────────────────────────────────────────────────────────
 
@@ -135,6 +137,27 @@ vi.mock('@/contexts/RecordsContext', () => ({
   useRecords: () => mockContextValue,
 }));
 
+// ─── Mock useRecordData (per-record payments in detail panel) ───────────────
+
+let mockRecordPayments: PaymentResponse[] = [mockPayment];
+
+vi.mock('@/hooks/useRecordData', () => ({
+  useRecordData: () => ({
+    recordData: null,
+    record: null,
+    visitors: [],
+    activity: undefined,
+    services: [],
+    masters: [],
+    locations: [],
+    payments: mockRecordPayments,
+    visitorsMap: new Map(),
+    tariffs: [],
+    isLoading: false,
+    status: 'waiting' as const,
+  }),
+}));
+
 import { RecordsTable } from '../app/(main)/records/components/RecordsTable';
 
 const filters = {
@@ -149,6 +172,7 @@ const filters = {
 describe('RecordsTable', () => {
   beforeEach(() => {
     localStorage.clear();
+    mockRecordPayments = [mockPayment];
     // Reset to default context
     mockContextValue = {
       records: [mockRecord],
@@ -305,6 +329,22 @@ describe('RecordsTable', () => {
     // Should show dash for the record without client_id
     const clientCells = screen.getAllByText('—');
     expect(clientCells.length).toBeGreaterThanOrEqual(1);
+  });
+
+  // ─── Detail panel payments (per-payment list via useRecordData) ──────────
+
+  it('detail panel lists payments with amount and method', () => {
+    render(<RecordsTable filters={filters} />);
+    fireEvent.click(screen.getByText('Анна Смирнова').closest('tr')!);
+    expect(screen.getByText('Карта')).toBeInTheDocument();
+    expect(screen.getByText('3 500₽')).toBeInTheDocument();
+  });
+
+  it('detail panel shows Нет платежей when record has no payments', () => {
+    mockRecordPayments = [];
+    render(<RecordsTable filters={filters} />);
+    fireEvent.click(screen.getByText('Анна Смирнова').closest('tr')!);
+    expect(screen.getByText('Нет платежей')).toBeInTheDocument();
   });
 
   // ─── Column picker ──────────────────────────────────────────────────────

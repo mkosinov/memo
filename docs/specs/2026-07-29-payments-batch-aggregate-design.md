@@ -20,7 +20,7 @@ The failure is **silent** — no error, just wrong numbers.
 1. **Admin opens "Записи"** (period = current week) → the "Оплата" column shows ✓ Оплачено / Частично / Не оплачено per record, computed as `sum(payments for the record) >= record price`.
 2. **Admin sorts by "Оплата"** → sorting uses the same per-record payment sums.
 3. **Admin clicks a row** → detail panel lists that record's payments (amount + method) — per-record fetch via `useRecordData`, already works, **no changes**.
-4. **Admin opens ClientCardModal** → "Потрачено" shows the client's total paid across ALL records (not just visible ones); each record row in the modal's history shows its payment status from the batch aggregate.
+4. **Admin opens ClientCardModal** → each record row in the modal's history shows its payment status from the batch aggregate (no longer from the broken lookup map). The "Потрачено" figure keeps its current frontend computation — fixing its semantics/source is **GH #192, out of scope here**.
 5. **Admin switches the period / records change** → aggregates refetch automatically for the new visible record set (query key invalidation).
 6. **Regression guard:** with >100 payment rows in the DB, all of the above still show correct values.
 
@@ -53,25 +53,21 @@ The failure is **silent** — no error, just wrong numbers.
 
 ### Frontend — ClientCardModal
 
-- `app/(main)/records/components/ClientCardModal.tsx` lines 45–54:
-  - "Потрачено" — take from the **server-side `total_paid`** already computed by the clients with-stats endpoint (`backend/src/api/v1/clients.py` line 66 → `src/services/client.py`). Remove the frontend recomputation from the lookup map.
-  - **Semantic note (accepted):** current frontend `totalSpent` excludes cancelled records (lines 52–54); server `total_paid` sums payments over all active records regardless of status. The server's broader definition is the intended one going forward (a cancelled record's payments are still real money paid) — this is a deliberate behavior change, aligned with the Clients page, which already displays server `total_paid`.
-  - **Divergence note (pre-existing, documented):** "Потрачено" is an all-time figure, while the modal's record history shows only the current period's records (from context). Sum of visible rows' statuses need not equal "Потрачено" — accepted, no UI change.
-  - Per-record payment status in the modal's record history — from the RecordsContext batch totals map (same source as the table column). The modal filters `records` from the same context (ClientCardModal.tsx line 33), so its records are always a subset of the loaded set — no separate fetch needed.
+- `app/(main)/records/components/ClientCardModal.tsx`:
+  - Per-record payment status in the modal's record history — from the RecordsContext batch totals map (same source as the table column), replacing the broken lookup-map source. The modal filters `records` from the same context (line 33), so its records are always a subset of the loaded set — no separate fetch needed.
+  - **"Потрачено" (lines 45–54): OUT OF SCOPE — moved to GH #192 by user decision at G1b.** The existing frontend `totalSpent` computation stays as-is in #186. #192 will switch it to server `total_paid` and resolve the cancelled-records semantic question. (Note for #192: once the unfiltered `getPayments` call is removed, the lookup map feeding `totalSpent` no longer exists — #192 must rewire "Потрачено" to server `total_paid`; it cannot keep the current computation. If the current computation cannot survive without the removed query, the minimal #186 behavior is: leave the code path compiling against the totals map and flag the semantic gap to #192.)
 - Detail panel: **no changes** (per-record `useRecordData`).
 
 ## Adjacent Bug Assessment: `GET /records` ignores `date_from`/`date_to`
 
 Backend `GET /api/v1/records` declares only `client_id` and silently ignores `date_from`/`date_to` sent by the frontend; date filtering happens client-side in RecordsTable.
 
-**Assessment: OUT OF SCOPE for #186 — recommend a separate issue.**
+**G1b decision (2026-07-29): confirmed OUT OF SCOPE — filed as GH #191.**
 
-Reasons:
+Reasons it stays out of #186:
 - #186 is about payment aggregates; the fix is orthogonal and self-contained.
 - Moving date filtering server-side changes pagination semantics (page/per_page over a filtered set) and interacts with the #182 pagination migration — deserves its own design (where does filtering live: service vs. repository, interaction with existing client-side filters, seed/test data implications).
 - Bundling it would double review surface and delay the silent-data-corruption fix.
-
-The user approves/rejects this recommendation at G1b.
 
 ## Design Alternatives Considered
 
@@ -84,7 +80,8 @@ The user approves/rejects this recommendation at G1b.
 
 - No batch raw-payments endpoint.
 - No changes to detail panel payment list.
-- No server-side date filtering for records (see above).
+- No server-side date filtering for records (GH #191).
+- No change to ClientCardModal "Потрачено" semantics/source (GH #192).
 - No changes to payment CRUD semantics.
 
 ## Acceptance Criteria
@@ -93,10 +90,10 @@ The user approves/rejects this recommendation at G1b.
 - [ ] Records with no payments are absent from the map (frontend treats missing key as 0). Empty `record_ids` → 200 `{ "totals": {} }`; over the cardinality cap → 422. Both tested.
 - [ ] RecordsContext no longer calls unfiltered `getPayments`; totals query key includes sorted record IDs; query disabled when no records loaded.
 - [ ] Payment status column + sorting show correct values with >100 payments in DB (regression test or E2E).
-- [ ] ClientCardModal "Потрачено" uses server `total_paid` (deliberate semantic change: now includes cancelled records' payments, matching the Clients page).
+- [ ] ClientCardModal per-record payment statuses come from the totals map. "Потрачено" behavior is preserved or explicitly deferred to #192 (no semantic change in #186).
 - [ ] Domain rules `payments.md` updated with the new endpoint (via docser at IMPL).
 - [ ] Backend tests: totals endpoint (multiple records, record without payments, empty record_ids → 200 `{}`, over-cap → 422).
-- [ ] Frontend tests: RecordsContext totals wiring; RecordsTable status/sort against totals map; ClientCardModal total_paid.
+- [ ] Frontend tests: RecordsContext totals wiring; RecordsTable status/sort against totals map; ClientCardModal per-record statuses.
 
 ## Visual Compliance Checks
 

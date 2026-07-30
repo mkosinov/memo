@@ -249,3 +249,60 @@ class TestPaymentsCrud:
         # created_at should be within the test window (with 1-minute margin)
         assert created >= before - timedelta(minutes=1)
         assert created <= after + timedelta(minutes=1)
+
+
+class TestPaymentTotals:
+    """GET /api/v1/payments/totals — batch aggregate endpoint."""
+
+    def _create_payment(self, api_client, record_id: str, amount: int) -> None:
+        response = api_client.post(
+            "/api/v1/payments",
+            json={**PAYMENT_PAYLOAD, "record_id": record_id, "amount": amount},
+        )
+        assert response.status_code == 201
+
+    def test_totals_multiple_records(self, api_client) -> None:
+        r1, r2 = _create_record(api_client), _create_record(api_client)
+        self._create_payment(api_client, r1, 3000)
+        self._create_payment(api_client, r1, 1500)
+        self._create_payment(api_client, r2, 2000)
+        response = api_client.get(
+            "/api/v1/payments/totals",
+            params=[("record_ids", r1), ("record_ids", r2)],
+        )
+        assert response.status_code == 200
+        assert response.json() == {"totals": {r1: 4500, r2: 2000}}
+
+    def test_totals_record_without_payments_absent(self, api_client) -> None:
+        r1, r2 = _create_record(api_client), _create_record(api_client)
+        self._create_payment(api_client, r1, 3000)
+        response = api_client.get(
+            "/api/v1/payments/totals",
+            params=[("record_ids", r1), ("record_ids", r2)],
+        )
+        assert response.status_code == 200
+        assert response.json() == {"totals": {r1: 3000}}
+
+    def test_totals_empty_record_ids_returns_empty(self, api_client) -> None:
+        response = api_client.get("/api/v1/payments/totals")
+        assert response.status_code == 200
+        assert response.json() == {"totals": {}}
+
+    def test_totals_over_cap_returns_422(self, api_client) -> None:
+        params = [("record_ids", f"rec-{i}") for i in range(201)]
+        response = api_client.get("/api/v1/payments/totals", params=params)
+        assert response.status_code == 422
+
+    def test_totals_excludes_deleted_payments(self, api_client) -> None:
+        r1 = _create_record(api_client)
+        self._create_payment(api_client, r1, 3000)
+        list_resp = api_client.get("/api/v1/payments", params={"record_id": r1})
+        payment_id = list_resp.json()["items"][0]["id"]
+        del_resp = api_client.delete(f"/api/v1/payments/{payment_id}")
+        assert del_resp.status_code == 204
+        response = api_client.get(
+            "/api/v1/payments/totals",
+            params=[("record_ids", r1)],
+        )
+        assert response.status_code == 200
+        assert response.json() == {"totals": {}}

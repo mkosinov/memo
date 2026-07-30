@@ -68,3 +68,22 @@ class PaymentService(GenericService[PaymentCreate, PaymentUpdate, PaymentRespons
 @lru_cache
 def get_payment_service() -> PaymentService:
     return PaymentService(get_base_repository(), Payment, PaymentResponse)
+
+
+async def get_payment_totals(
+    db_session: AsyncSession,
+    record_ids: list[str],
+) -> dict[str, int]:
+    """Return {record_id: sum(amount)} for the given record IDs.
+
+    Payments are hard-deleted — no is_active filter needed.
+    """
+    if not record_ids:
+        return {}
+    stmt = (
+        select(Payment.record_id, func.sum(Payment.amount))
+        .where(Payment.record_id.in_(record_ids))
+        .group_by(Payment.record_id)
+    )
+    result = await db_session.execute(stmt)
+    return {row[0]: row[1] for row in result.all()}

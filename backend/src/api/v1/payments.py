@@ -8,9 +8,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from src.db import SessionDep
 from src.errors import ErrorCode, ErrorDetail
 from src.schemas.common import PaginatedResponse
-from src.schemas.payment import PaymentCreate, PaymentPatch, PaymentResponse, PaymentUpdate
+from src.schemas.payment import PaymentCreate, PaymentPatch, PaymentResponse, PaymentTotalsResponse, PaymentUpdate
 from src.services.generic import GenericService
-from src.services.payment import get_payment_service
+from src.services.payment import get_payment_service, get_payment_totals
 
 router = APIRouter(tags=["payments"])
 
@@ -37,6 +37,16 @@ async def list_payments(
     if record_id:
         filters["record_id"] = record_id
     return await service.list(db_session=session, page=page, per_page=per_page, **filters)
+
+
+@router.get("/totals", response_model=PaymentTotalsResponse)
+async def get_payment_totals_route(
+    session: SessionDep,
+    record_ids: Annotated[list[str], Query(max_length=200)] = [],
+) -> PaymentTotalsResponse:
+    """Return per-record payment sums for a list of record IDs."""
+    totals = await get_payment_totals(db_session=session, record_ids=record_ids)
+    return PaymentTotalsResponse(totals=totals)
 
 
 @router.get("/{payment_id}", response_model=PaymentResponse)

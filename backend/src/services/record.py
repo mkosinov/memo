@@ -72,24 +72,21 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
 
     @transactional
     async def delete(self, db_session: AsyncSession, id: str) -> bool:
-        """Hard-delete a record and cascade its visits and payments."""
+        """Hard-delete a record and its visits and payments.
+
+        All cascade deletes run as explicit SQL inside this single
+        ``@transactional`` transaction (no per-record commit) so the
+        unit is atomic: if any statement fails, nothing persists. The
+        dependent rows (visits, payments) are removed BEFORE the record
+        so no FK constraint can fire (#194).
+        """
         record = await self._repository.get(db_session, Record, id)
         if not record:
             return False
 
-        # Cascade: hard-delete all related visits
-        await db_session.execute(
-            delete(Visit).where(Visit.record_id == id)
-        )
-
-        # Cascade: hard-delete all related payments
-        await db_session.execute(
-            delete(Payment).where(Payment.record_id == id)
-        )
-
-        # Hard-delete the record itself
-        await db_session.delete(record)
-        await db_session.flush()
+        await db_session.execute(delete(Visit).where(Visit.record_id == id))
+        await db_session.execute(delete(Payment).where(Payment.record_id == id))
+        await db_session.execute(delete(Record).where(Record.id == id))
         return True
 
     @transactional

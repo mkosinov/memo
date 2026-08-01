@@ -6,15 +6,19 @@ from datetime import datetime
 from functools import lru_cache
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.repositories.generic import BaseRepository, get_base_repository
 from src.models.activity import Activity
+from src.models.payment import Payment
+from src.models.photo import Photo
 from src.models.record import Record
+from src.models.visit import Visit
 from src.schemas.activity import ActivityCreate, ActivityResponse, ActivityUpdate
 from src.schemas.common import PaginatedResponse
 from src.services.generic import GenericService
+from src.services.decorators import transactional
 from src.domain.record_visits import active_record_filter
 from src.domain.visit_status import ACTIVE_RECORD_STATUSES
 
@@ -117,6 +121,38 @@ class ActivityService(GenericService[ActivityCreate, ActivityUpdate, ActivityRes
             )
         )
         return int(result.scalar() or 0)
+
+    @transactional
+    async def delete(self, db_session: AsyncSession, id: str) -> bool:
+        """Hard-delete an activity, its records (with their visits/payments),
+        and unlink photos (SET NULL).
+
+        All cascade deletes run as explicit SQL inside this single
+        ``@transactional`` transaction (no per-record commit) so the whole
+        graph is removed atomically. Order matters: visits and payments
+        reference records, so they are removed BEFORE the records; the
+        records are removed BEFORE the activity. Photos are unlinked
+        (activity_id := NULL) rather than deleted — a photo survives the
+        activity that produced it (#194, G1b).
+        """
+        activity = await self._repository.get(db_session, Activity, id)
+        if not activity:
+            return False
+
+        record_ids = (
+            await db_session.execute(
+                select(Record.id).where(Record.activity_id == id)
+            )
+        ).scalars().all()
+        if record_ids:
+            await db_session.execute(delete(Visit).where(Visit.record_id.in_(record_ids)))
+            await db_session.execute(delete(Payment).where(Payment.record_id.in_(record_ids)))
+            await db_session.execute(delete(Record).where(Record.id.in_(record_ids)))
+        await db_session.execute(
+            update(Photo).where(Photo.activity_id == id).values(activity_id=None)
+        )
+        await db_session.execute(delete(Activity).where(Activity.id == id))
+        return True
 
 
 @lru_cache

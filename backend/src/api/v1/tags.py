@@ -30,7 +30,7 @@ async def list_tags(
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
 ) -> PaginatedResponse[TagResponse]:
-    """Return all active tags."""
+    """Return all tags, paginated."""
     return await service.list(db_session=session, page=page, per_page=per_page)
 
 

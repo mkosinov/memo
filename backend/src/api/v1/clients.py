@@ -159,6 +159,6 @@ async def list_client_visitors(
     visitor_service: _VisitorServiceDep,
     session: SessionDep,
 ) -> list[VisitorResponse]:
-    """Return all active visitors for a given client."""
+    """Return all visitors for a given client."""
     visitors = await visitor_service.list_by_client(db_session=session, client_id=client_id)
     return [VisitorResponse.model_validate(v) for v in visitors]

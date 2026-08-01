@@ -33,7 +33,7 @@ async def get_settings(
     service: _ServiceDep,
     session: SessionDep,
 ) -> UserSettingsResponse:
-    """Find active settings by user_id."""
+    """Find settings by user_id."""
     result = await service.get_by_user_id(session, user_id)
     if not result:
         raise HTTPException(
@@ -112,7 +112,7 @@ async def delete_settings(
     service: _ServiceDep,
     session: SessionDep,
 ) -> None:
-    """Soft-delete a settings record by its primary key ID."""
+    """Delete a settings record by its primary key ID."""
     deleted = await service.delete(session, settings_id)
     if not deleted:
         raise HTTPException(

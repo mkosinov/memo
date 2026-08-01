@@ -106,7 +106,7 @@ class UserSettingsService:
 
     @transactional
     async def delete(self, session: AsyncSession, id: str) -> bool:
-        """Soft-delete a settings record by its primary key ID."""
+        """Delete a settings record by its primary key ID."""
         return await self._repo.delete(session, UserSettings, id)
 
 

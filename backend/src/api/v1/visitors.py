@@ -30,7 +30,7 @@ async def list_visitors(
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
 ) -> PaginatedResponse[VisitorResponse]:
-    """Return all active visitors, paginated."""
+    """Return all visitors, paginated."""
     return await service.list(db_session=session, page=page, per_page=per_page)
 
 

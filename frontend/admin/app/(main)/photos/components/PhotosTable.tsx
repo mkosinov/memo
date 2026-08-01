@@ -27,7 +27,6 @@ const COLUMNS: Column[] = [
   { key: 'service', label: 'Услуга', width: 'w-[150px]', defaultVisible: false },
   { key: 'activity', label: 'Активность', width: 'w-[150px]', defaultVisible: false },
   { key: 'is_public', label: 'Публичное', width: 'w-[100px]', defaultVisible: true },
-  { key: 'status', label: 'Статус', width: 'w-[100px]', defaultVisible: true },
 ];
 
 // ─── Component ───────────────────────────────────────────────────────────
@@ -58,7 +57,6 @@ export function PhotosTable() {
 
   // ─── Filter state ──────────────────────────────────────────────────
   const [search, setSearch] = useState('');
-  const [status, setStatus] = useState('');
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(10);
 
@@ -78,7 +76,7 @@ export function PhotosTable() {
   // Reset page when filters change
   useEffect(() => {
     setPage(0);
-  }, [search, status]);
+  }, [search]);
 
   // ─── Filtered data ─────────────────────────────────────────────────
 
@@ -88,11 +86,9 @@ export function PhotosTable() {
         const q = search.toLowerCase();
         if (!photo.filename.toLowerCase().includes(q)) return false;
       }
-      if (status === 'active' && !photo.is_active) return false;
-      if (status === 'archived' && photo.is_active) return false;
       return true;
     });
-  }, [photos, search, status]);
+  }, [photos, search]);
 
   // ─── Sorted data ───────────────────────────────────────────────────
 
@@ -257,20 +253,6 @@ export function PhotosTable() {
               ✕
             </button>
           )}
-          <select
-            value={status}
-            onChange={(e) => setStatus(e.target.value)}
-            className="rounded-lg border px-2 py-2 text-sm"
-            style={{
-              borderColor: 'var(--line)',
-              backgroundColor: 'var(--white)',
-              color: 'var(--ink-mid)',
-            }}
-          >
-            <option value="">Все статусы</option>
-            <option value="active">Активен</option>
-            <option value="archived">Архив</option>
-          </select>
         </div>
         <div className="flex items-center gap-2">
           <ColumnPicker
@@ -382,21 +364,6 @@ export function PhotosTable() {
                       }`}
                     >
                       {photo.is_public ? 'Да' : 'Нет'}
-                    </span>
-                  </td>
-                )}
-
-                {/* Status */}
-                {visibleKeys.includes('status') && (
-                  <td className="px-4 py-3 text-sm">
-                    <span
-                      className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                        photo.is_active
-                          ? 'bg-emerald-100 text-emerald-700'
-                          : 'bg-gray-100 text-gray-600'
-                      }`}
-                    >
-                      {photo.is_active ? 'Активен' : 'Архив'}
                     </span>
                   </td>
                 )}

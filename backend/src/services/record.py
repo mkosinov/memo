@@ -7,7 +7,7 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from src.repositories.generic import SoftDeleteRepository, get_soft_delete_repository
+from src.repositories.generic import BaseRepository, get_base_repository
 from src.domain.record_visits import (
     recompute_record_seats,
     recompute_record_status,
@@ -28,7 +28,7 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
     """Record service with nested visit management."""
 
     def __init__(
-        self, repository: SoftDeleteRepository, model: type[Record]
+        self, repository: BaseRepository, model: type[Record]
     ) -> None:
         super().__init__(repository, model, response_schema=RecordResponse)
 
@@ -357,4 +357,4 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
 @lru_cache
 def get_record_service() -> RecordService:
     """Returns a singleton RecordService."""
-    return RecordService(get_soft_delete_repository(), Record)
+    return RecordService(get_base_repository(), Record)

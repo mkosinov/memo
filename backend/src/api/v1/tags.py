@@ -109,7 +109,7 @@ async def delete_tag(
     service: _ServiceDep,
     session: SessionDep,
 ) -> None:
-    """Soft-delete a tag (set is_active=False)."""
+    """Delete a tag (hard delete)."""
     deleted = await service.delete(db_session=session, id=tag_id)
     if not deleted:
         raise HTTPException(

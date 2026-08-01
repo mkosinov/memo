@@ -109,7 +109,7 @@ async def delete_visitor(
     service: _ServiceDep,
     session: SessionDep,
 ) -> None:
-    """Soft-delete a visitor (set is_active=False)."""
+    """Delete a visitor (hard delete)."""
     deleted = await service.delete(db_session=session, id=visitor_id)
     if not deleted:
         raise HTTPException(

@@ -47,7 +47,10 @@ class GenericService(Generic[CreateSchemaT, UpdateSchemaT, ResponseSchemaT]):
         self._model = model
         self._response_schema = response_schema
 
-    # NOTE: filter logic mirrors SoftDeleteRepository.list() — keep in sync (#182)
+    # NOTE: is_active filter is applied only when the model's ``soft_delete``
+    # class flag is True (AbstractModelSoftDelete). Hard-delete models
+    # (AbstractModel, soft_delete=False) have no is_active column and list all
+    # rows. Mirrors SoftDeleteRepository.list() — keep in sync (#182/#194).
     async def list(
         self,
         db_session: AsyncSession,
@@ -56,9 +59,11 @@ class GenericService(Generic[CreateSchemaT, UpdateSchemaT, ResponseSchemaT]):
         order_by=None,
         **filters,
     ) -> PaginatedResponse[ResponseSchemaT]:
-        """Return a paginated page of active records, optionally filtered/ordered."""
+        """Return a paginated page of records (active only for soft-delete
+        entities), optionally filtered/ordered."""
         stmt = select(self._model)
-        stmt = stmt.where(self._model.is_active)
+        if self._model.soft_delete:
+            stmt = stmt.where(self._model.is_active)
         for key, value in filters.items():
             if value is not None:
                 stmt = stmt.where(getattr(self._model, key) == value)
@@ -125,7 +130,10 @@ class GenericService(Generic[CreateSchemaT, UpdateSchemaT, ResponseSchemaT]):
 
     @transactional
     async def delete(self, db_session: AsyncSession, id: str) -> bool:
-        """Soft-delete a record.  Returns ``True`` if deleted, ``False`` if not found."""
+        """Delete a record (soft or hard depending on the model's repository).
+
+        Returns ``True`` if deleted, ``False`` if not found.
+        """
         return await self._repository.delete(db_session, self._model, id)
 
     @transactional

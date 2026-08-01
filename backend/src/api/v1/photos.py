@@ -127,7 +127,7 @@ async def delete_photo(
     service: _ServiceDep,
     session: SessionDep,
 ) -> None:
-    """Soft-delete a photo (set is_active=False)."""
+    """Delete a photo (hard delete)."""
     deleted = await service.delete(db_session=session, id=photo_id)
     if not deleted:
         raise HTTPException(

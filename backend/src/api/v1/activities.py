@@ -146,7 +146,7 @@ async def delete_activity(
     service: _ServiceDep,
     session: SessionDep,
 ) -> None:
-    """Soft-delete an activity (set is_active=False)."""
+    """Delete an activity (hard delete)."""
     deleted = await service.delete(db_session=session, id=activity_id)
     if not deleted:
         raise HTTPException(

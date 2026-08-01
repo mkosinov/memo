@@ -28,13 +28,13 @@ An Activity is a scheduled instance of a Service. It ties together a Master, Ser
 ## Business Logic
 
 ### Backend
-- **occupied** = SUM(Record.seats) WHERE activity_id = X AND is_active = True AND status IN ('waiting','visited')
+- **occupied** = SUM(Record.seats) WHERE activity_id = X AND status IN ('waiting','visited')
   - Implemented via `active_record_filter()` in `src/domain/record_visits.py` (shared with the booking guard `check_activity_capacity`)
   - Source of truth: `ACTIVE_RECORD_STATUSES` constant in `src/domain/visit_status.py`
   - Cancelled / missed records free their seats (excluded from the sum)
 - **No capacity re-validation** when updating Activity
-- **No cascade** on activity delete — orphan Records remain active
-- **Date-range filtering:** Only returns is_active = True activities
+- **Cascade on delete:** hard-delete cascades to Records (and transitively their Visits + Payments); photos have `activity_id` set to NULL (photos survive); activity_tag join rows cleaned. Entire cascade is atomic.
+- **Date-range filtering:** Returns activities within the requested date range
 
 ### Frontend
 - **Auto-fill from Service:** When service selected → duration, capacity, minAge auto-filled
@@ -51,7 +51,7 @@ An Activity is a scheduled instance of a Service. It ties together a Master, Ser
 | POST | /api/v1/activities | Create |
 | PUT | /api/v1/activities/{id} | Full update |
 | PATCH | /api/v1/activities/{id} | Partial update |
-| DELETE | /api/v1/activities/{id} | Soft delete (no cascade) |
+| DELETE | /api/v1/activities/{id} | Hard delete (cascade: records + their visits/payments hard-deleted, photos SET NULL, tag join rows cleaned) |
 
 ## Relationships
 - Activity → belongs to Service
@@ -64,7 +64,7 @@ An Activity is a scheduled instance of a Service. It ties together a Master, Ser
 - [ ] occupied computed correctly
 - [ ] Auto-fill from Service works
 - [ ] Optimistic updates roll back on error
-- [ ] Delete does NOT cascade to Records
+- [ ] Delete cascades hard-delete to Records (and transitively Visits + Payments)
 
 ## Parity Notes
 | Backend (Pydantic) | Frontend (Zod) | Match |

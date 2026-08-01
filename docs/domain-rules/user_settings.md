@@ -17,7 +17,7 @@ UserSettings stores per-user UI preferences: theme, language, and column orderin
 
 ## Invariants
 - One UserSettings record per user_id (uniqueness enforced at service level)
-- Records are archived (is_active = false), never hard-deleted
+- Records are hard-deleted (row physically removed)
 
 ## Business Logic
 
@@ -36,7 +36,7 @@ UserSettings stores per-user UI preferences: theme, language, and column orderin
 | POST | /api/v1/user-settings | Create |
 | PUT | /api/v1/user-settings?user_id={id} | Partial update (by user_id) |
 | PATCH | /api/v1/user-settings?user_id={id} | Partial update (by user_id) |
-| DELETE | /api/v1/user-settings/{settings_id} | Soft delete by primary key |
+| DELETE | /api/v1/user-settings/{settings_id} | Hard delete by primary key |
 
 ## Relationships
 - UserSettings → belongs to User (logical, not enforced FK)

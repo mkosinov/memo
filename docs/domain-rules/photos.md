@@ -17,7 +17,7 @@ A Photo is an image file (filename only — file storage is external) attached t
 - None.
 
 ## Invariants
-- Photos are archived (is_active = false), never hard-deleted
+- Photos are hard-deleted (row physically removed). Photo is a general resource — on Visitor or Activity deletion, `photos.visitor_id` / `photos.activity_id` is set to NULL (photo survives); the photo is never deleted by cascade.
 
 ## Business Logic
 
@@ -39,7 +39,7 @@ A Photo is an image file (filename only — file storage is external) attached t
 | POST | /api/v1/photos | Create |
 | PUT | /api/v1/photos/{id} | Full update |
 | PATCH | /api/v1/photos/{id} | Partial update (tag_ids hard-replace when sent) |
-| DELETE | /api/v1/photos/{id} | Soft delete |
+| DELETE | /api/v1/photos/{id} | Hard delete |
 
 ## Relationships
 - Photo → belongs to (Visitor | Service | Activity) — exactly one of the three

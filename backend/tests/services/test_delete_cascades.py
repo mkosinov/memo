@@ -25,6 +25,7 @@ from __future__ import annotations
 from datetime import datetime
 
 import pytest
+from sqlalchemy import select
 
 from src.models.activity import Activity
 from src.models.client import Client
@@ -34,12 +35,12 @@ from src.models.payment import Payment
 from src.models.photo import Photo
 from src.models.record import Record
 from src.models.service import Service
+from src.models.tag import Tag, activity_tags, record_tags, visitor_tags
 from src.models.visit import Visit
 from src.models.visitor import Visitor
 from src.services.activity import get_activity_service
 from src.services.record import get_record_service
 from src.services.visitor import get_visitor_service
-from sqlalchemy import select
 
 pytestmark = pytest.mark.asyncio
 
@@ -319,3 +320,104 @@ async def test_activity_delete_is_atomic_on_partial_failure(db_session, monkeypa
     assert query_db("SELECT COUNT(*) AS c FROM records")[0]["c"] == n_records
     assert query_db("SELECT COUNT(*) AS c FROM visits")[0]["c"] == n_visits
     assert query_db("SELECT COUNT(*) AS c FROM payments")[0]["c"] == n_payments
+
+
+# ─── Tag join-row cleanup (#194 follow-up) ─────────────────────────────────────
+# The *_tags join tables (record_tags, activity_tags, visitor_tags) have FKs
+# with NO ondelete action, so deleting a tagged entity either raises
+# IntegrityError (FK on) or leaves orphaned join rows (FK off). The cascade
+# must therefore explicit-delete the join rows BEFORE the parent entity.
+# Tags themselves are independent entities and must survive.
+
+async def _insert_tag(db_session, label: str = "T") -> Tag:
+    """Insert a Tag (committed)."""
+    tag = Tag(tag=label)
+    db_session.add(tag)
+    await db_session.commit()
+    return tag
+
+
+async def test_record_delete_cleans_record_tags_join_rows(db_session):
+    """Deleting a tagged record removes its record_tags join rows; the tag survives."""
+    activity = await _insert_activity(db_session)
+    client = await _insert_client(db_session)
+    record = await _insert_record(db_session, activity, client)
+    tag = await _insert_tag(db_session, "rec-tag")
+    await db_session.execute(
+        record_tags.insert().values(record_id=record.id, tag_id=tag.id)
+    )
+    await db_session.commit()
+
+    service = get_record_service()
+    result = await service.delete(db_session=db_session, id=record.id)
+
+    assert result is True
+    from tests.conftest import query_db
+    # join rows gone
+    assert query_db(
+        f"SELECT COUNT(*) AS c FROM record_tags WHERE record_id='{record.id}'"
+    )[0]["c"] == 0
+    assert query_db("SELECT COUNT(*) AS c FROM record_tags")[0]["c"] == 0
+    # tag row survives (independent entity)
+    assert query_db(f"SELECT COUNT(*) AS c FROM tags WHERE id='{tag.id}'")[0]["c"] == 1
+
+
+async def test_activity_delete_cleans_activity_tags_and_record_tags_join_rows(db_session):
+    """Deleting a tagged activity removes its activity_tags join rows AND the
+    record_tags join rows of its tagged records; the tags survive.
+    """
+    activity = await _insert_activity(db_session)
+    client = await _insert_client(db_session)
+    r1 = await _insert_record(db_session, activity, client)
+    await _insert_record(db_session, activity, client)
+    act_tag = await _insert_tag(db_session, "act-tag")
+    rec_tag = await _insert_tag(db_session, "rec-tag")
+    await db_session.execute(
+        activity_tags.insert().values(activity_id=activity.id, tag_id=act_tag.id)
+    )
+    await db_session.execute(
+        record_tags.insert().values(record_id=r1.id, tag_id=rec_tag.id)
+    )
+    await db_session.commit()
+
+    service = get_activity_service()
+    result = await service.delete(db_session=db_session, id=activity.id)
+
+    assert result is True
+    from tests.conftest import query_db
+    # both join tables fully cleaned
+    assert query_db(
+        f"SELECT COUNT(*) AS c FROM activity_tags WHERE activity_id='{activity.id}'"
+    )[0]["c"] == 0
+    assert query_db("SELECT COUNT(*) AS c FROM activity_tags")[0]["c"] == 0
+    assert query_db(
+        f"SELECT COUNT(*) AS c FROM record_tags WHERE record_id='{r1.id}'"
+    )[0]["c"] == 0
+    assert query_db("SELECT COUNT(*) AS c FROM record_tags")[0]["c"] == 0
+    # both tag rows survive
+    assert query_db(f"SELECT COUNT(*) AS c FROM tags WHERE id='{act_tag.id}'")[0]["c"] == 1
+    assert query_db(f"SELECT COUNT(*) AS c FROM tags WHERE id='{rec_tag.id}'")[0]["c"] == 1
+
+
+async def test_visitor_delete_cleans_visitor_tags_join_rows(db_session):
+    """Deleting a tagged visitor removes its visitor_tags join rows; the tag survives."""
+    client = await _insert_client(db_session)
+    visitor = await _insert_visitor(db_session, client)
+    tag = await _insert_tag(db_session, "vis-tag")
+    await db_session.execute(
+        visitor_tags.insert().values(visitor_id=visitor.id, tag_id=tag.id)
+    )
+    await db_session.commit()
+
+    service = get_visitor_service()
+    result = await service.delete(db_session=db_session, id=visitor.id)
+
+    assert result is True
+    from tests.conftest import query_db
+    # join rows gone
+    assert query_db(
+        f"SELECT COUNT(*) AS c FROM visitor_tags WHERE visitor_id='{visitor.id}'"
+    )[0]["c"] == 0
+    assert query_db("SELECT COUNT(*) AS c FROM visitor_tags")[0]["c"] == 0
+    # tag row survives (independent entity)
+    assert query_db(f"SELECT COUNT(*) AS c FROM tags WHERE id='{tag.id}'")[0]["c"] == 1

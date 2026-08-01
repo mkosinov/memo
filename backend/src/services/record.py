@@ -16,6 +16,7 @@ from src.domain.record_visits import (
 from src.models.client import Client
 from src.models.payment import Payment
 from src.models.record import Record
+from src.models.tag import record_tags
 from src.models.visit import Visit
 from src.models.visitor import Visitor
 from src.schemas.common import PaginatedResponse
@@ -72,13 +73,16 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
 
     @transactional
     async def delete(self, db_session: AsyncSession, id: str) -> bool:
-        """Hard-delete a record and its visits and payments.
+        """Hard-delete a record and its visits, payments, and record_tags join rows.
 
         All cascade deletes run as explicit SQL inside this single
         ``@transactional`` transaction (no per-record commit) so the
         unit is atomic: if any statement fails, nothing persists. The
         dependent rows (visits, payments) are removed BEFORE the record
-        so no FK constraint can fire (#194).
+        so no FK constraint can fire. The record_tags join table has FKs
+        with NO ondelete action, so its rows are removed BEFORE the
+        record — otherwise the DB raises IntegrityError (FK on) or
+        leaves orphan rows (FK off) (#194).
         """
         record = await self._repository.get(db_session, Record, id)
         if not record:
@@ -86,6 +90,7 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
 
         await db_session.execute(delete(Visit).where(Visit.record_id == id))
         await db_session.execute(delete(Payment).where(Payment.record_id == id))
+        await db_session.execute(delete(record_tags).where(record_tags.c.record_id == id))
         await db_session.execute(delete(Record).where(Record.id == id))
         return True
 

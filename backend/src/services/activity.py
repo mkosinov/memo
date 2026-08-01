@@ -14,6 +14,7 @@ from src.models.activity import Activity
 from src.models.payment import Payment
 from src.models.photo import Photo
 from src.models.record import Record
+from src.models.tag import activity_tags, record_tags
 from src.models.visit import Visit
 from src.schemas.activity import ActivityCreate, ActivityResponse, ActivityUpdate
 from src.schemas.common import PaginatedResponse
@@ -125,15 +126,19 @@ class ActivityService(GenericService[ActivityCreate, ActivityUpdate, ActivityRes
     @transactional
     async def delete(self, db_session: AsyncSession, id: str) -> bool:
         """Hard-delete an activity, its records (with their visits/payments),
-        and unlink photos (SET NULL).
+        their record_tags join rows, the activity_tags join rows, and unlink
+        photos (SET NULL).
 
         All cascade deletes run as explicit SQL inside this single
         ``@transactional`` transaction (no per-record commit) so the whole
         graph is removed atomically. Order matters: visits and payments
         reference records, so they are removed BEFORE the records; the
-        records are removed BEFORE the activity. Photos are unlinked
-        (activity_id := NULL) rather than deleted — a photo survives the
-        activity that produced it (#194, G1b).
+        records are removed BEFORE the activity. The *_tags join tables
+        have FKs with NO ondelete action, so their rows must be removed
+        explicitly BEFORE the parent (records/activity) — otherwise the
+        DB raises IntegrityError (FK on) or leaves orphan rows (FK off).
+        Photos are unlinked (activity_id := NULL) rather than deleted —
+        a photo survives the activity that produced it (#194, G1b).
         """
         activity = await self._repository.get(db_session, Activity, id)
         if not activity:
@@ -147,10 +152,12 @@ class ActivityService(GenericService[ActivityCreate, ActivityUpdate, ActivityRes
         if record_ids:
             await db_session.execute(delete(Visit).where(Visit.record_id.in_(record_ids)))
             await db_session.execute(delete(Payment).where(Payment.record_id.in_(record_ids)))
+            await db_session.execute(delete(record_tags).where(record_tags.c.record_id.in_(record_ids)))
             await db_session.execute(delete(Record).where(Record.id.in_(record_ids)))
         await db_session.execute(
             update(Photo).where(Photo.activity_id == id).values(activity_id=None)
         )
+        await db_session.execute(delete(activity_tags).where(activity_tags.c.activity_id == id))
         await db_session.execute(delete(Activity).where(Activity.id == id))
         return True
 

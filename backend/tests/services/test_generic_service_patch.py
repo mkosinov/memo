@@ -8,9 +8,10 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, NamedTuple
+from typing import Any, Literal, NamedTuple
 
 import pytest
+from sqlalchemy import select
 
 # ─── Явные импорты ВСЕХ сервисов — иначе __subclasses__() видит только загруженные модули ───
 import src.services.activity  # noqa: F401
@@ -77,6 +78,14 @@ GENERIC_PATCH_EXCEPTIONS: set[type] = {ServiceService, PhotoService, RecordServi
 
 
 # ─── EntityConfig ────────────────────────────────────────────────────────────────
+# Spec: docs/specs/2026-08-01-deletion-policy-design.md §2.6 —
+# ``delete_semantics`` is the test-side record of the deletion domain policy:
+#   * ``"hard"`` — DELETE physically removes the row (Tag/Photo/Visitor/
+#     Activity/Record/UserSettings/Payment/Visit).
+#   * ``"soft"`` — is_active is flipped to False (Master/Location/Service/
+#     Material/Client).
+# The generic delete test asserts each entity's behavior matches its declared
+# semantics. Adding new entity configs below requires setting this field.
 class EntityConfig(NamedTuple):
     service_factory: Any  # callable() → service instance
     model: type
@@ -88,6 +97,7 @@ class EntityConfig(NamedTuple):
     not_null_sentinel: Any
     nullable_field: str | None
     nullable_sentinel: Any
+    delete_semantics: Literal["soft", "hard"]
 
 
 # ─── Per-service config ──────────────────────────────────────────────────────────
@@ -112,6 +122,7 @@ CONTRACT_CONFIG: dict[type, EntityConfig] = {
         not_null_sentinel=99,
         nullable_field="comment",
         nullable_sentinel="initial",
+        delete_semantics="hard",
     ),
     ClientService: EntityConfig(
         service_factory=get_client_service,
@@ -124,6 +135,7 @@ CONTRACT_CONFIG: dict[type, EntityConfig] = {
         not_null_sentinel=None,
         nullable_field="name",
         nullable_sentinel="Ivan",
+        delete_semantics="soft",
     ),
     LocationService: EntityConfig(
         service_factory=get_location_service,
@@ -136,6 +148,7 @@ CONTRACT_CONFIG: dict[type, EntityConfig] = {
         not_null_sentinel="Loc2",
         nullable_field="address",
         nullable_sentinel="addr",
+        delete_semantics="soft",
     ),
     MasterService: EntityConfig(
         service_factory=get_master_service,
@@ -155,6 +168,7 @@ CONTRACT_CONFIG: dict[type, EntityConfig] = {
         not_null_sentinel="#000000",
         nullable_field="avatar_url",
         nullable_sentinel="http://x",
+        delete_semantics="soft",
     ),
     MaterialService: EntityConfig(
         service_factory=get_material_service,
@@ -167,6 +181,7 @@ CONTRACT_CONFIG: dict[type, EntityConfig] = {
         not_null_sentinel="T2",
         nullable_field=None,
         nullable_sentinel=None,
+        delete_semantics="soft",
     ),
     PaymentService: EntityConfig(
         service_factory=get_payment_service,
@@ -179,6 +194,7 @@ CONTRACT_CONFIG: dict[type, EntityConfig] = {
         not_null_sentinel=200,
         nullable_field="method",
         nullable_sentinel="cash",
+        delete_semantics="hard",
     ),
     TagService: EntityConfig(
         service_factory=get_tag_service,
@@ -191,6 +207,7 @@ CONTRACT_CONFIG: dict[type, EntityConfig] = {
         not_null_sentinel="t2",
         nullable_field=None,
         nullable_sentinel=None,
+        delete_semantics="hard",
     ),
     VisitorService: EntityConfig(
         service_factory=get_visitor_service,
@@ -203,6 +220,7 @@ CONTRACT_CONFIG: dict[type, EntityConfig] = {
         not_null_sentinel="V2",
         nullable_field="age",
         nullable_sentinel=10,
+        delete_semantics="hard",
     ),
 }
 
@@ -450,7 +468,15 @@ class TestGenericServicePatchContract:
 
 
 # ─── Config-тест: NOT_NULL_FIELDS ↔ model nullability ────────────────────────────
-GENERIC_COLUMNS_EXCLUDED = {"id", "created_at", "updated_at", "is_active"}
+# ``is_active`` was removed from the exclusion set per #194 Task 9: it is now
+# a real column ONLY on soft-delete entities (AbstractModelSoftDelete) and is
+# governed by the soft-delete lifecycle (NOT_NULL_FIELDS deals with patch
+# fieldset semantics, not lifecycle flags). For soft-delete entities the
+# parity check excludes ``is_active`` conditionally via ``model.soft_delete``
+# — hard-delete entities have no such column, so the unconditional exclusion
+# became a no-op anyway. See docs/specs/2026-08-01-deletion-policy-design.md
+# §2.6 for the policy rationale.
+GENERIC_COLUMNS_EXCLUDED = {"id", "created_at", "updated_at"}
 
 
 @pytest.mark.parametrize("service_cls,cfg", _contract_params())
@@ -465,6 +491,16 @@ def test_not_null_fields_match_model(service_cls, cfg):
         for col in cfg.model.__table__.columns
         if not col.nullable and col.name not in GENERIC_COLUMNS_EXCLUDED
     }
+    # ``is_active`` is a NOT NULL column on soft-delete entities but is
+    # governed by the soft-delete lifecycle (delete flips it to False),
+    # not by patch-fieldset semantics. NOT_NULL_FIELDS protects patch
+    # bodies from NULL writes; ``is_active`` is therefore excluded from
+    # the parity check for soft-delete entities. Hard-delete entities
+    # have no such column (the unconditional GENERIC_COLUMNS_EXCLUDED
+    # entry was a no-op there). Spec: docs/specs/2026-08-01-deletion-
+    # policy-design.md §2.6.
+    if cfg.model.soft_delete:
+        model_not_null -= {"is_active"}
     service = cfg.service_factory()
     service_not_null = set(service.NOT_NULL_FIELDS)
 
@@ -485,3 +521,60 @@ def test_not_null_fields_match_model(service_cls, cfg):
             else ""
         )
     )
+
+
+# ─── Contract-test: delete semantics per entity (#194 Task 9) ───────────────────
+# Spec: docs/specs/2026-08-01-deletion-policy-design.md §2.6 —
+# ``EntityConfig.delete_semantics`` is the test-side record of the deletion
+# policy (hard = row physically removed; soft = is_active flipped to False).
+# Tag/Photo/Visitor/Activity/Record/UserSettings/Payment/Visit → hard;
+# Master/Location/Service/Material/Client → soft. This contract test
+# exercises the real ``service.delete()`` path so custom cascades
+# (ActivityService, VisitorService) are implicitly covered.
+class TestGenericServiceDeleteSemantics:
+    @pytest.mark.parametrize("service_cls,cfg", _contract_params())
+    async def test_delete_semantics_per_entity(
+        self, service_cls, cfg, db_session, make_entity
+    ):
+        """service.delete() honors per-entity ``delete_semantics``.
+
+        Hard-delete → row physically gone (fresh SELECT returns None).
+        Soft-delete → row survives with ``is_active=False``.
+        """
+        assert cfg is not None, (
+            f"{service_cls.__name__} detected via __subclasses__() but "
+            f"missing from CONTRACT_CONFIG"
+        )
+        service, created = await make_entity(cfg)
+        entity_id = created.id
+
+        ok = await service.delete(db_session, entity_id)
+        assert ok, (
+            f"{service_cls.__name__}.delete() returned False — entity "
+            f"was not found (or already inactive for soft-delete)"
+        )
+
+        # Drop the identity-map cache so the assertion SELECT hits the DB
+        # (Core-DELETE cascades in ActivityService/VisitorService leave the
+        # stale ORM instance in the identity map).
+        db_session.expire_all()
+        orm = (
+            await db_session.execute(
+                select(cfg.model).where(cfg.model.id == entity_id)
+            )
+        ).scalar_one_or_none()
+
+        if cfg.delete_semantics == "hard":
+            assert orm is None, (
+                f"{service_cls.__name__} (hard-delete): row still present "
+                f"after delete — expected physically removed"
+            )
+        else:  # soft
+            assert orm is not None, (
+                f"{service_cls.__name__} (soft-delete): row gone — "
+                f"expected present with is_active=False"
+            )
+            assert orm.is_active is False, (
+                f"{service_cls.__name__} (soft-delete): is_active="
+                f"{orm.is_active!r}, expected False"
+            )

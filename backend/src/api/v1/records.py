@@ -64,7 +64,6 @@ def _map_record(record) -> RecordResponse:
         custom_price=record.custom_price,
         created_at=_dt_to_str(record.created_at),
         updated_at=_dt_to_str(record.updated_at),
-        is_active=record.is_active,
         visits=visits,
     )
 
@@ -77,7 +76,7 @@ async def list_records(
     per_page: int = Query(20, ge=1, le=100),
     client_id: str | None = None,
 ) -> PaginatedResponse[RecordResponse]:
-    """Return all active records with nested visits, optionally filtered by client_id."""
+    """Return all records with nested visits, optionally filtered by client_id."""
     result = await service.list(db_session=session, page=page, per_page=per_page, client_id=client_id)
     return PaginatedResponse(
         items=[_map_record(r) for r in result.items],

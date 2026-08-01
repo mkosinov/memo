@@ -24,12 +24,9 @@ class VisitorService(GenericService[VisitorCreate, VisitorUpdate, VisitorRespons
     async def list_by_client(
         self, db_session: AsyncSession, client_id: str
     ) -> list[Visitor]:
-        """Return all active visitors for a given client."""
+        """Return all visitors for a given client."""
         result = await db_session.execute(
-            select(Visitor).where(
-                Visitor.client_id == client_id,
-                Visitor.is_active,
-            )
+            select(Visitor).where(Visitor.client_id == client_id)
         )
         return list(result.scalars().all())
 

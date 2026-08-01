@@ -40,10 +40,9 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
         client_id: str | None = None,
         **filters,
     ) -> PaginatedResponse:  # items are ORM Record instances
-        """Return a paginated page of active records (ORM items, visits eagerly loaded)."""
+        """Return a paginated page of records (ORM items, visits eagerly loaded)."""
         stmt = (
             select(Record)
-            .where(Record.is_active)
             .options(selectinload(Record.visits))
         )
         if client_id:
@@ -73,9 +72,9 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
 
     @transactional
     async def delete(self, db_session: AsyncSession, id: str) -> bool:
-        """Soft-delete a record and hard-delete its visits and payments."""
+        """Hard-delete a record and cascade its visits and payments."""
         record = await self._repository.get(db_session, Record, id)
-        if not record or not record.is_active:
+        if not record:
             return False
 
         # Cascade: hard-delete all related visits
@@ -88,8 +87,8 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
             delete(Payment).where(Payment.record_id == id)
         )
 
-        # Soft-delete the record itself
-        record.is_active = False
+        # Hard-delete the record itself
+        await db_session.delete(record)
         await db_session.flush()
         return True
 

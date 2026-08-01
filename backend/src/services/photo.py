@@ -23,10 +23,9 @@ class PhotoService(GenericService[PhotoCreate, PhotoUpdate, PhotoResponse]):
     async def list(
         self, db_session: AsyncSession, **filters
     ) -> list[PhotoResponse]:
-        """Return all active photos with tags eagerly loaded."""
+        """Return all photos with tags eagerly loaded."""
         stmt = (
             select(Photo)
-            .where(Photo.is_active)
             .options(selectinload(Photo.tags))
         )
         result = await db_session.execute(stmt)

@@ -43,11 +43,8 @@ class UserSettingsService:
     async def get_by_user_id(
         self, session: AsyncSession, user_id: str
     ) -> UserSettingsResponse | None:
-        """Find active settings by user_id. Returns None if not found."""
-        stmt = select(UserSettings).where(
-            UserSettings.user_id == user_id,
-            UserSettings.is_active == True,  # noqa: E712
-        )
+        """Find settings by user_id. Returns None if not found."""
+        stmt = select(UserSettings).where(UserSettings.user_id == user_id)
         result = await session.execute(stmt)
         orm = result.scalar_one_or_none()
         if orm is None:
@@ -76,10 +73,7 @@ class UserSettingsService:
         self, session: AsyncSession, user_id: str, data: UserSettingsUpdate
     ) -> UserSettingsResponse | None:
         """Partial-update settings by user_id. Returns None if not found."""
-        stmt = select(UserSettings).where(
-            UserSettings.user_id == user_id,
-            UserSettings.is_active == True,  # noqa: E712
-        )
+        stmt = select(UserSettings).where(UserSettings.user_id == user_id)
         result = await session.execute(stmt)
         orm = result.scalar_one_or_none()
         if orm is None:

@@ -53,8 +53,8 @@ class ActivityService(GenericService[ActivityCreate, ActivityUpdate, ActivityRes
         page: int,
         per_page: int,
     ) -> PaginatedResponse[ActivityResponse]:
-        """Return a paginated page of active activities filtered by date range."""
-        stmt = select(Activity).where(Activity.is_active)
+        """Return a paginated page of activities filtered by date range."""
+        stmt = select(Activity)
         if date_from:
             from_dt = datetime.fromisoformat(date_from)
             stmt = stmt.where(Activity.start >= from_dt)
@@ -101,7 +101,6 @@ class ActivityService(GenericService[ActivityCreate, ActivityUpdate, ActivityRes
             select(Record.activity_id, func.coalesce(func.sum(Record.seats), 0))
             .where(
                 Record.activity_id.in_(activity_ids),
-                Record.is_active.is_(True),
                 Record.status.in_(ACTIVE_RECORD_STATUSES),
             )
             .group_by(Record.activity_id)

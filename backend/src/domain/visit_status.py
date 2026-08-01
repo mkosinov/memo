@@ -13,7 +13,7 @@ class VisitStatus(str, Enum):
 
 
 # Record statuses that occupy a seat in an activity's capacity.
-# "active record" = is_active AND status IN these values.
+# "active record" = status IN these values (records are hard-deleted).
 # cancelled/missed records do NOT occupy a seat.
 ACTIVE_RECORD_STATUSES: tuple[str, ...] = (
     VisitStatus.WAITING.value,

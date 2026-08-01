@@ -43,7 +43,7 @@ async def list_clients_with_stats(
     #    (no join-then-aggregate → cartesian product is structurally impossible).
     records_count_sq = (
         select(func.count(Record.id))
-        .where(Record.client_id == Client.id, Record.is_active == True)  # noqa: E712
+        .where(Record.client_id == Client.id)
         .correlate(Client)
         .scalar_subquery()
     )
@@ -51,10 +51,7 @@ async def list_clients_with_stats(
         select(func.max(Activity.start))
         .select_from(Record)
         .join(Activity, Record.activity_id == Activity.id)
-        .where(
-            Record.client_id == Client.id,
-            Record.is_active == True,  # noqa: E712
-        )
+        .where(Record.client_id == Client.id)
         .correlate(Client)
         .scalar_subquery()
     )
@@ -62,7 +59,6 @@ async def list_clients_with_stats(
         select(func.count(Record.id))
         .where(
             Record.client_id == Client.id,
-            Record.is_active == True,  # noqa: E712
             Record.status == "missed",
         )
         .correlate(Client)
@@ -72,7 +68,7 @@ async def list_clients_with_stats(
         select(func.coalesce(func.sum(Payment.amount), 0))
         .select_from(Payment)
         .join(Record, Payment.record_id == Record.id)
-        .where(Record.client_id == Client.id, Record.is_active == True)  # noqa: E712
+        .where(Record.client_id == Client.id)
         .correlate(Client)
         .scalar_subquery()
     )

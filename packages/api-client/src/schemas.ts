@@ -67,7 +67,6 @@ export const PhotoResponseSchema = z.object({
   tags: z.array(z.object({ id: z.string(), tag: z.string() })).default([]),
   created_at: z.string(),
   updated_at: z.string(),
-  is_active: z.boolean(),
 });
 
 export type PhotoResponse = z.infer<typeof PhotoResponseSchema>;
@@ -140,7 +139,7 @@ export const ServiceResponseSchema = z.object({
 
 export type ServiceResponse = z.infer<typeof ServiceResponseSchema>;
 
-// ─── ActivityCreate (request body — no id, created_at, updated_at, is_active, occupied) ─
+// ─── ActivityCreate (request body — no id, created_at, updated_at, occupied) ─
 // Fields with backend defaults use .optional() — the backend handles default logic.
 
 export const ActivityCreateSchema = z.object({
@@ -173,7 +172,6 @@ export const ActivityResponseSchema = z.object({
   record_info: z.string().nullable(),
   created_at: z.string(), // ISO datetime string
   updated_at: z.string(), // ISO datetime string
-  is_active: z.boolean(),
   occupied: z.number(),
 });
 
@@ -188,7 +186,6 @@ export const VisitorResponseSchema = z.object({
   age: z.number().nullable(),
   created_at: z.string(),
   updated_at: z.string(),
-  is_active: z.boolean(),
 });
 
 export type VisitorResponse = z.infer<typeof VisitorResponseSchema>;
@@ -247,7 +244,6 @@ export const RecordResponseSchema = z.object({
   custom_price: z.number().nullable(),
   created_at: z.string(),
   updated_at: z.string(),
-  is_active: z.boolean(),
   visits: z.array(VisitResponseSchema),
 });
 

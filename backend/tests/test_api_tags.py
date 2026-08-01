@@ -51,19 +51,18 @@ class TestTagsCrud:
         assert response.status_code == 404
         assert response.json()["detail"]["code"] == "TAG_NOT_FOUND"
 
-    def test_get_deleted_tag_returns_200(self, api_client) -> None:
-        """Soft-deleted tag stays fetchable by id (200) but is excluded from the list."""
+    def test_get_deleted_tag_returns_404(self, api_client) -> None:
+        """Hard-deleted tag is gone: GET by id returns 404 and list excludes it."""
         create = api_client.post("/api/v1/tags", json={"tag": "Ephemeral"})
         tag_id = create.json()["id"]
         delete = api_client.delete(f"/api/v1/tags/{tag_id}")
         assert delete.status_code == 204
 
-        # Soft-delete: row remains fetchable by id (TagResponse has no is_active field)
+        # Hard-delete: row is physically gone, GET by id returns 404
         response = api_client.get(f"/api/v1/tags/{tag_id}")
-        assert response.status_code == 200
-        assert response.json()["id"] == tag_id
+        assert response.status_code == 404
 
-        # ... but is excluded from the list
+        # ... and is excluded from the list
         body = api_client.get("/api/v1/tags").json()
         assert not any(t["id"] == tag_id for t in body["items"])
 
@@ -76,14 +75,20 @@ class TestTagsCrud:
         assert response.json()["tag"] == "New"
 
     def test_delete_tag(self, api_client) -> None:
-        """DELETE /api/v1/tags/{id} soft-deletes a tag (204)."""
+        """DELETE /api/v1/tags/{id} hard-deletes a tag (204); row gone at DB level."""
+        from tests.conftest import query_db
+
         create = api_client.post("/api/v1/tags", json={"tag": "ToDelete"})
         tag_id = create.json()["id"]
         response = api_client.delete(f"/api/v1/tags/{tag_id}")
         assert response.status_code == 204
 
+        # Row is physically removed from the database
+        rows = query_db(f"SELECT id FROM tags WHERE id='{tag_id}'")
+        assert rows == []
+
     def test_deleted_tag_excluded_from_list(self, api_client) -> None:
-        """Soft-deleted tags are excluded from GET /api/v1/tags."""
+        """Deleted tags are excluded from GET /api/v1/tags."""
         create = api_client.post("/api/v1/tags", json={"tag": "Ghost"})
         tag_id = create.json()["id"]
         api_client.delete(f"/api/v1/tags/{tag_id}")

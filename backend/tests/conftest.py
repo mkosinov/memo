@@ -761,7 +761,7 @@ def query_db(sql: str) -> list[dict]:
 
     Usage::
 
-        rows = query_db("SELECT is_active FROM records WHERE id='...'")
+        rows = query_db("SELECT is_active FROM masters WHERE id='...'")
         assert rows[0]["is_active"] == 0  # SQLite stores bool as 0/1
     """
     conn = sqlite3.connect(_db_file.name)

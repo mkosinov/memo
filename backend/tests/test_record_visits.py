@@ -12,12 +12,17 @@ def test_active_record_statuses_excludes_cancelled_and_missed():
     assert "missed" not in ACTIVE_RECORD_STATUSES
 
 
-def test_active_record_filter_returns_three_conditions():
-    """active_record_filter yields 3 WHERE conditions: activity_id, is_active, status IN."""
+def test_active_record_filter_returns_two_conditions():
+    """active_record_filter yields 2 WHERE conditions: activity_id, status IN.
+
+    Records are hard-deleted (#194), so any row that exists is active by
+    definition — no is_active filter is applied. Active = status IN
+    (waiting, visited).
+    """
     from src.domain.record_visits import active_record_filter
 
     conds = active_record_filter("act-123")
-    assert len(conds) == 3
+    assert len(conds) == 2
 
 
 @pytest.mark.asyncio

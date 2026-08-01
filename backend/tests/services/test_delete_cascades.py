@@ -2,13 +2,12 @@
 
 These are SERVICE-LEVEL tests: they call the service methods directly against
 a real async ``db_session`` and verify the resulting DB state with ORM selects.
-No HTTP, no Pydantic response schemas — this sidesteps the in-flight
-schema refactor (#194 Task 6) where response schemas still require ``is_active``
-for the now-hard-delete entities.
+No HTTP, no Pydantic response schemas — the service layer is tested in
+isolation, independent of the API serialization layer.
 
 Data is set up via direct ORM inserts (committed) rather than the API factories,
-because the ``create_activity``/``create_record``/``create_visitor`` factories go
-through response serialization that currently raises ValidationError.
+because these tests target the service's cascade SQL directly; ORM inserts give
+precise control over the pre-delete DB state without going through the API.
 
 Cascade contract (#194 Task 5):
   * RecordService.delete       → delete record + its visits + its payments

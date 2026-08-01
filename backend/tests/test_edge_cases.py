@@ -523,10 +523,10 @@ class TestActivityEdgeCases:
 
 
 class TestDataIntegrity:
-    """Soft-delete and data consistency tests."""
+    """Delete semantics and data consistency tests."""
 
-    def test_soft_delete_excludes(self, api_client, create_record):
-        """Deleted record not in list, but still accessible by ID."""
+    def test_hard_delete_excludes(self, api_client, create_record):
+        """Deleted record not in list, and GET by id returns 404."""
         record = create_record()
         record_id = record["id"]
 
@@ -535,7 +535,7 @@ class TestDataIntegrity:
         ids = [r["id"] for r in response.json()["items"]]
         assert record_id in ids
 
-        # Soft-delete
+        # Hard-delete
         api_client.delete(f"/api/v1/records/{record_id}")
 
         # Not in list
@@ -543,10 +543,9 @@ class TestDataIntegrity:
         ids = [r["id"] for r in response.json()["items"]]
         assert record_id not in ids
 
-        # Still accessible by ID
+        # Row is gone — GET by id returns 404
         response = api_client.get(f"/api/v1/records/{record_id}")
-        assert response.status_code == 200
-        assert response.json()["is_active"] is False
+        assert response.status_code == 404
 
     def test_soft_delete_client_excludes(self, api_client, create_client):
         """Deleted client not in list."""
@@ -574,7 +573,7 @@ class TestDataIntegrity:
         assert response.status_code == 404
 
     def test_client_visitors_excludes_deleted(self, api_client, create_client):
-        """Soft-deleted visitors excluded from client visitors list."""
+        """Deleted visitors excluded from client visitors list."""
         client = create_client()
 
         # Create a visitor
@@ -590,7 +589,7 @@ class TestDataIntegrity:
         })
         v2_id = v2_resp.json()["id"]
 
-        # Soft-delete v2
+        # Delete v2
         api_client.delete(f"/api/v1/visitors/{v2_id}")
 
         # List client visitors — should only include v1

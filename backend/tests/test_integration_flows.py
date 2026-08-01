@@ -170,10 +170,10 @@ class TestPaymentFlow:
 
 
 class TestDeleteCascade:
-    """Soft-delete record → visits excluded from list, but record still accessible by ID."""
+    """Hard-delete record → record gone (GET by id 404), visits + payments cascade-deleted."""
 
-    def test_delete_record_hides_from_list(self, api_client, create_record) -> None:
-        """Soft-delete record → record excluded from list, but GET by ID still works."""
+    def test_delete_record_hard_deletes(self, api_client, create_record) -> None:
+        """Hard-delete record → record excluded from list, GET by id returns 404."""
         record = create_record()
         record_id = record["id"]
 
@@ -181,14 +181,13 @@ class TestDeleteCascade:
         detail = api_client.get(f"/api/v1/records/{record_id}").json()
         assert len(detail["visits"]) > 0
 
-        # Soft-delete record
+        # Hard-delete record
         resp = api_client.delete(f"/api/v1/records/{record_id}")
         assert resp.status_code == 204
 
-        # Record still accessible by ID (soft delete)
+        # Record is gone — GET by id returns 404
         resp = api_client.get(f"/api/v1/records/{record_id}")
-        assert resp.status_code == 200
-        assert resp.json()["is_active"] is False
+        assert resp.status_code == 404
 
         # Record excluded from list
         list_resp = api_client.get("/api/v1/records")
@@ -196,7 +195,7 @@ class TestDeleteCascade:
         assert record_id not in ids
 
     def test_delete_record_hard_deletes_visits_in_db(self, api_client, create_record) -> None:
-        """Soft-delete record → visits are hard-deleted at DB level."""
+        """Hard-delete record → visits are hard-deleted at DB level."""
         record = create_record()
         record_id = record["id"]
 
@@ -216,7 +215,7 @@ class TestDeleteCascade:
         assert len(visits_after) == 0
 
     def test_delete_record_cascades_to_visits_and_payments(self, api_client, create_record) -> None:
-        """Soft-delete record → visits AND payments should also be hard-deleted."""
+        """Hard-delete record → visits AND payments are cascade-deleted."""
         record = create_record()
         record_id = record["id"]
 
@@ -241,7 +240,7 @@ class TestDeleteCascade:
         assert len(payments) == 0
 
     def test_delete_record_then_payment_still_visible(self, api_client, create_record) -> None:
-        """After deleting record, associated payments are cascade-soft-deleted."""
+        """After deleting record, associated payments are cascade-deleted — excluded from list."""
         record = create_record()
 
         # Add a payment
@@ -252,7 +251,7 @@ class TestDeleteCascade:
         # Delete record
         api_client.delete(f"/api/v1/records/{record['id']}")
 
-        # Payment is cascade-soft-deleted — excluded from list
+        # Payment is cascade-deleted — excluded from list
         payments = api_client.get("/api/v1/payments").json()["items"]
         ids = [p["id"] for p in payments]
         assert payment["id"] not in ids

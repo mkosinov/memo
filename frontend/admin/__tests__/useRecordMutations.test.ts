@@ -75,7 +75,6 @@ const mockRecordResponse = {
   custom_price: null,
   created_at: '',
   updated_at: '',
-  is_active: true,
   visits: [],
 };
 
@@ -86,7 +85,6 @@ const mockVisitorResponse = {
   age: null,
   created_at: '',
   updated_at: '',
-  is_active: true,
 };
 
 const mockPaymentResponse = {

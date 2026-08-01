@@ -38,7 +38,6 @@ function makeData(overrides: Partial<RecordWithDerived> = {}): RecordWithDerived
       custom_price: null,
       created_at: '2026-05-10T10:00:00',
       updated_at: '2026-05-10T10:00:00',
-      is_active: true,
       visits: [mockVisit],
     },
     status: 'waiting',

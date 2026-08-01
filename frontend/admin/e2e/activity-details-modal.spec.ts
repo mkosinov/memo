@@ -77,7 +77,7 @@ test.describe('ActivityDetailsModal — Real User Scenarios', () => {
       // 4. VERIFY DB — record was created for this client
       await expect.poll(async () => {
         recordRow = queryDBRow(
-          `SELECT * FROM records WHERE client_id='${clientRow!.id}' AND is_active=1`,
+          `SELECT * FROM records WHERE client_id='${clientRow!.id}'`,
         );
         return recordRow !== null;
       }, { timeout: 30_000, intervals: [200, 500, 1000] }).toBe(true);
@@ -97,9 +97,9 @@ test.describe('ActivityDetailsModal — Real User Scenarios', () => {
     }
   });
 
-  // ── Scenario 2: Delete record — verify DB soft-delete ──────────────────
+  // ── Scenario 2: Delete record — verify DB hard-delete ────────────────
 
-  test('2. Delete record — timeout removes it (is_active=0 in DB)', async ({
+  test('2. Delete record — timeout removes it (row gone from DB)', async ({
     page,
     request,
   }) => {
@@ -111,10 +111,9 @@ test.describe('ActivityDetailsModal — Real User Scenarios', () => {
     try {
       // Verify it exists before delete
       const beforeRow = queryDBRow(
-        `SELECT is_active FROM records WHERE id='${record.id}'`,
+        `SELECT id FROM records WHERE id='${record.id}'`,
       );
       expect(beforeRow).not.toBeNull();
-      expect(beforeRow!.is_active).toBe(1);
 
       // Reload to pick up new data
       await page.goto('/schedule');
@@ -133,13 +132,13 @@ test.describe('ActivityDetailsModal — Real User Scenarios', () => {
           timeout: 3000,
         });
 
-        // Wait for undo timeout (5s) + API call, then verify DB
+        // Wait for undo timeout (5s) + API call, then verify DB row is gone
         await expect.poll(async () => {
           const afterRow = queryDBRow(
-            `SELECT is_active FROM records WHERE id='${record.id}'`,
+            `SELECT id FROM records WHERE id='${record.id}'`,
           );
-          return afterRow?.is_active ?? -1;
-        }, { timeout: 30_000, intervals: [500, 1000, 2000] }).toBe(0);
+          return afterRow === null;
+        }, { timeout: 30_000, intervals: [500, 1000, 2000] }).toBe(true);
       }
     } finally {
       // CLEANUP — always runs, even if test fails
@@ -366,13 +365,13 @@ test.describe('ActivityDetailsModal — Real User Scenarios', () => {
         // Click undo
         await page.locator('text=Отменить').click();
 
-        // 4. VERIFY DB — record still active (retry until undo is processed)
+        // 4. VERIFY DB — record still exists (retry until undo is processed)
         await expect.poll(async () => {
           const row = queryDBRow(
-            `SELECT is_active FROM records WHERE id='${record.id}'`,
+            `SELECT id FROM records WHERE id='${record.id}'`,
           );
-          return row?.is_active ?? -1;
-        }, { timeout: 30_000, intervals: [200, 500, 1000] }).toBe(1);
+          return row !== null;
+        }, { timeout: 30_000, intervals: [200, 500, 1000] }).toBe(true);
       }
     } finally {
       // CLEANUP — always runs, even if test fails

@@ -43,7 +43,6 @@ const mockActivity: ActivityResponse = {
   record_info: null,
   created_at: '2024-06-15T10:00:00Z',
   updated_at: '2024-06-15T10:00:00Z',
-  is_active: true,
   occupied: 2,
 };
 
@@ -103,7 +102,6 @@ const mockRecord: RecordResponse = {
   custom_price: null,
   created_at: '2024-06-15T10:00:00Z',
   updated_at: '2024-06-15T10:00:00Z',
-  is_active: true,
   visits: [
     {
       id: 'vis-1',

@@ -85,7 +85,6 @@ function makeRecord(
     custom_price: null,
     created_at: '2026-01-15T10:00:00',
     updated_at: '2026-01-15T10:00:00',
-    is_active: true,
     visits: [makeVisit('v1', { record_id: id })],
     ...overrides,
   };

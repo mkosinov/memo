@@ -37,7 +37,6 @@ const mockRecord = {
   custom_price: null,
   created_at: '2026-05-10T10:00:00',
   updated_at: '2026-05-10T10:00:00',
-  is_active: true,
   visits: [
     {
       id: 'v1',
@@ -48,14 +47,13 @@ const mockRecord = {
       status: 'waiting',
       created_at: '',
       updated_at: '',
-      is_active: true,
     },
   ],
 };
 
 const mockVisitors = [
-  { id: 'vis1', client_id: 'c1', name: 'Анна Иванова', age: 30, created_at: '', updated_at: '', is_active: true },
-  { id: 'vis2', client_id: 'c1', name: 'Мария Петрова', age: 25, created_at: '', updated_at: '', is_active: true },
+  { id: 'vis1', client_id: 'c1', name: 'Анна Иванова', age: 30, created_at: '', updated_at: '' },
+  { id: 'vis2', client_id: 'c1', name: 'Мария Петрова', age: 25, created_at: '', updated_at: '' },
 ];
 
 const mockActivity = {
@@ -71,7 +69,6 @@ const mockActivity = {
   record_info: null,
   created_at: '2026-05-01T00:00:00',
   updated_at: '2026-05-01T00:00:00',
-  is_active: true,
   occupied: 3,
 };
 

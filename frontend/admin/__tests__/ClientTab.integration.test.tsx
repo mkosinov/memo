@@ -229,7 +229,7 @@ describe('ClientTab — fully hook-driven (#127 Task 7)', () => {
     const { createVisitor, createVisit } = await import('@memo/api-client');
     vi.mocked(createVisitor).mockResolvedValue({
       id: 'vis_new', client_id: 'c1', name: 'New Visitor', age: null,
-      created_at: '', updated_at: '', is_active: true,
+      created_at: '', updated_at: '',
     } as any);
     vi.mocked(createVisit).mockResolvedValue({
       id: 'v_new', record_id: 'r1', visitor_id: 'vis_new',

@@ -23,9 +23,8 @@ test.describe('Tags — Table and Navigation', () => {
   test('table has expected column headers', async ({ page }) => {
     await waitForTagsReady(page);
 
-    // Tags table has "Тег" and "Статус" columns
+    // Tags table has a single "Тег" column (status column dropped in GH #194)
     await expect(page.locator('table thead th').filter({ hasText: 'Тег' })).toBeVisible();
-    await expect(page.locator('table thead th').filter({ hasText: 'Статус' })).toBeVisible();
   });
 
   test('tags are loaded from API and displayed in table', async ({ page }) => {
@@ -115,11 +114,9 @@ test.describe('Tags — Column Picker', () => {
   test('column picker toggles column visibility', async ({ page }) => {
     await waitForTagsReady(page);
     await page.click('[aria-label="Настроить колонки"]');
-    // The "Статус" text appears both in the column picker and table header.
-    // Use exact match to find the column picker item.
-    await expect(page.getByText('Статус', { exact: true }).first()).toBeVisible();
-    // Toggle status column off
-    await page.getByText('Статус', { exact: true }).first().click();
+    // Single column "Тег" (status column dropped in GH #194)
+    await expect(page.getByText('Тег', { exact: true }).first()).toBeVisible();
+    await page.getByText('Тег', { exact: true }).first().click();
     await page.keyboard.press('Escape');
   });
 });

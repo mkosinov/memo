@@ -45,7 +45,7 @@ function recordActivityDate(recordId: string): string | null {
     || path.resolve(__dirname, '../../../../backend/test_memo.db');
   const safeId = recordId.replace(/'/g, "''");
   const out = execSync(
-    `sqlite3 -json "${dbPath}" "SELECT substr(a.start, 1, 10) AS d FROM records r JOIN activities a ON r.activity_id = a.id WHERE r.id = '${safeId}' AND r.is_active = 1"`,
+    `sqlite3 -json "${dbPath}" "SELECT substr(a.start, 1, 10) AS d FROM records r JOIN activities a ON r.activity_id = a.id WHERE r.id = '${safeId}'"`,
     { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] },
   ).trim();
   if (!out || out === '[]') return null;

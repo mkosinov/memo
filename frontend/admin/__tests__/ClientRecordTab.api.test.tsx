@@ -142,7 +142,7 @@ describe('ClientRecordTab — API interactions', () => {
     vi.mocked(deletePayment).mockResolvedValue(undefined);
     vi.mocked(createVisitor).mockResolvedValue({
       id: 'vis_new', client_id: 'c1', name: 'Новый Гость', age: 10,
-      created_at: '', updated_at: '', is_active: true,
+      created_at: '', updated_at: '',
     });
     vi.mocked(deleteVisitor).mockResolvedValue(undefined);
     vi.mocked(createVisit).mockResolvedValue({
@@ -294,7 +294,7 @@ describe('ClientRecordTab — API interactions', () => {
   it('visitor name change calls patchVisitor (PATCH) directly (no optimistic override layer)', async () => {
     vi.mocked(patchVisitor).mockResolvedValue({
       id: 'vis1', client_id: 'c1', name: 'Новое Имя', age: 30,
-      created_at: '', updated_at: '', is_active: true,
+      created_at: '', updated_at: '',
     });
 
     render(<ClientRecordTab recordId="r1" clientId="c1" />);

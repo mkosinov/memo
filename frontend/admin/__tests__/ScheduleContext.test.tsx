@@ -234,8 +234,8 @@ describe('ScheduleProvider', () => {
       { id: 'grand', name: 'Гранд Отель Поляна', address: 'Гранд Отель, лобби', description: null, capacity: 10, yandex_map_url: null, review_url: null, record_info: null, image_url: null, is_active: true, created_at: '', updated_at: '' },
     ]));
     vi.mocked(getActivities).mockResolvedValue(wrap([
-      { id: 'a1', master_id: 'm1', service_id: 's1', location_id: 'alpika', start: '2024-12-25T10:00:00Z', duration: 120, capacity: 8, is_private: false, comment: null, record_info: null, created_at: '', updated_at: '', is_active: true, occupied: 3 },
-      { id: 'a2', master_id: 'm2', service_id: 's1', location_id: 'grand', start: '2024-12-26T14:00:00Z', duration: 90, capacity: 6, is_private: false, comment: null, record_info: null, created_at: '', updated_at: '', is_active: true, occupied: 4 },
+      { id: 'a1', master_id: 'm1', service_id: 's1', location_id: 'alpika', start: '2024-12-25T10:00:00Z', duration: 120, capacity: 8, is_private: false, comment: null, record_info: null, created_at: '', updated_at: '', occupied: 3 },
+      { id: 'a2', master_id: 'm2', service_id: 's1', location_id: 'grand', start: '2024-12-26T14:00:00Z', duration: 90, capacity: 6, is_private: false, comment: null, record_info: null, created_at: '', updated_at: '', occupied: 4 },
     ]));
 
     renderWithContext();
@@ -293,7 +293,7 @@ describe('ScheduleProvider', () => {
     vi.mocked(createActivity).mockResolvedValue({
       id: 'new-id', master_id: 'm1', service_id: 's1', location_id: 'alpika',
       start: '2024-12-25T10:00:00Z', duration: 120, capacity: 8, is_private: false,
-      comment: null, record_info: null, created_at: '', updated_at: '', is_active: true, occupied: 0,
+      comment: null, record_info: null, created_at: '', updated_at: '', occupied: 0,
     });
 
     renderWithContext();
@@ -329,12 +329,12 @@ describe('ScheduleProvider', () => {
       { id: 'alpika', name: 'Альпика', address: 'Альпика, 1 этаж', description: null, capacity: 10, yandex_map_url: null, review_url: null, record_info: null, image_url: null, location_hint: null, is_active: true, created_at: '', updated_at: '' },
     ]));
     vi.mocked(getActivities).mockResolvedValue(wrap([
-      { id: 'a1', master_id: 'm1', service_id: 's1', location_id: 'alpika', start: '2024-12-25T10:00:00Z', duration: 120, capacity: 8, is_private: false, comment: null, record_info: null, created_at: '', updated_at: '', is_active: true, occupied: 3 },
+      { id: 'a1', master_id: 'm1', service_id: 's1', location_id: 'alpika', start: '2024-12-25T10:00:00Z', duration: 120, capacity: 8, is_private: false, comment: null, record_info: null, created_at: '', updated_at: '', occupied: 3 },
     ]));
     vi.mocked(patchActivity).mockResolvedValue({
       id: 'a1', master_id: 'm1', service_id: 's1', location_id: 'alpika',
       start: '2024-12-25T10:00:00Z', duration: 120, capacity: 8, is_private: false,
-      comment: null, record_info: null, created_at: '', updated_at: '', is_active: true, occupied: 5,
+      comment: null, record_info: null, created_at: '', updated_at: '', occupied: 5,
     });
 
     renderWithContext();
@@ -366,12 +366,12 @@ describe('ScheduleProvider', () => {
       { id: 'alpika', name: 'Альпика', address: 'Альпика, 1 этаж', description: null, capacity: 10, yandex_map_url: null, review_url: null, record_info: null, image_url: null, location_hint: null, is_active: true, created_at: '', updated_at: '' },
     ]));
     vi.mocked(getActivities).mockResolvedValue(wrap([
-      { id: 'a1', master_id: 'm1', service_id: 's1', location_id: 'alpika', start: '2024-12-25T10:00:00Z', duration: 120, capacity: 8, is_private: false, comment: null, record_info: null, created_at: '', updated_at: '', is_active: true, occupied: 3 },
+      { id: 'a1', master_id: 'm1', service_id: 's1', location_id: 'alpika', start: '2024-12-25T10:00:00Z', duration: 120, capacity: 8, is_private: false, comment: null, record_info: null, created_at: '', updated_at: '', occupied: 3 },
     ]));
     vi.mocked(patchActivity).mockResolvedValue({
       id: 'a1', master_id: 'm1', service_id: 's1', location_id: 'alpika',
       start: '2024-12-25T10:00:00Z', duration: 120, capacity: 8, is_private: false,
-      comment: null, record_info: null, created_at: '', updated_at: '', is_active: true, occupied: 5,
+      comment: null, record_info: null, created_at: '', updated_at: '', occupied: 5,
     });
 
     renderWithContext();
@@ -397,12 +397,12 @@ describe('ScheduleProvider', () => {
       { id: 'alpika', name: 'Альпика', address: 'Альпика, 1 этаж', description: null, capacity: 10, yandex_map_url: null, review_url: null, record_info: null, image_url: null, location_hint: null, is_active: true, created_at: '', updated_at: '' },
     ]));
     vi.mocked(getActivities).mockResolvedValue(wrap([
-      { id: 'a1', master_id: 'm1', service_id: 's1', location_id: 'alpika', start: '2024-12-25T10:00:00Z', duration: 120, capacity: 8, is_private: false, comment: null, record_info: null, created_at: '', updated_at: '', is_active: true, occupied: 3 },
+      { id: 'a1', master_id: 'm1', service_id: 's1', location_id: 'alpika', start: '2024-12-25T10:00:00Z', duration: 120, capacity: 8, is_private: false, comment: null, record_info: null, created_at: '', updated_at: '', occupied: 3 },
     ]));
     vi.mocked(patchActivity).mockResolvedValue({
       id: 'a1', master_id: 'm1', service_id: 's1', location_id: 'alpika',
       start: '2024-12-25T10:00:00Z', duration: 120, capacity: 8, is_private: false,
-      comment: null, record_info: null, created_at: '', updated_at: '', is_active: true, occupied: 5,
+      comment: null, record_info: null, created_at: '', updated_at: '', occupied: 5,
     });
 
     renderWithContext();
@@ -440,7 +440,7 @@ describe('ScheduleProvider', () => {
       { id: 'alpika', name: 'Альпика', address: 'Альпика, 1 этаж', description: null, capacity: 10, yandex_map_url: null, review_url: null, record_info: null, image_url: null, location_hint: null, is_active: true, created_at: '', updated_at: '' },
     ]));
     vi.mocked(getActivities).mockResolvedValue(wrap([
-      { id: 'a1', master_id: 'm1', service_id: 's1', location_id: 'alpika', start: '2024-12-25T10:00:00Z', duration: 120, capacity: 8, is_private: false, comment: null, record_info: null, created_at: '', updated_at: '', is_active: true, occupied: 3 },
+      { id: 'a1', master_id: 'm1', service_id: 's1', location_id: 'alpika', start: '2024-12-25T10:00:00Z', duration: 120, capacity: 8, is_private: false, comment: null, record_info: null, created_at: '', updated_at: '', occupied: 3 },
     ]));
 
     renderWithContext();

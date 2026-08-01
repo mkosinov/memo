@@ -113,7 +113,6 @@ export const mockVisitor: VisitorResponse = {
   age: 30,
   created_at: '',
   updated_at: '',
-  is_active: true,
 };
 
 export const mockVisit: VisitResponse = {
@@ -138,7 +137,6 @@ export const mockRecord: RecordResponse = {
   custom_price: null,
   created_at: '2026-05-10T10:00:00',
   updated_at: '2026-05-10T10:00:00',
-  is_active: true,
   visits: [mockVisit],
 };
 

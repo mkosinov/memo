@@ -153,7 +153,6 @@ const mockRecords = [
     comment: null,
     created_at: '2026-05-10T10:00:00',
     updated_at: '2026-05-10T10:00:00',
-    is_active: true,
     visits: [],
   },
   {
@@ -165,7 +164,6 @@ const mockRecords = [
     comment: null,
     created_at: '2026-04-20T10:00:00',
     updated_at: '2026-04-20T10:00:00',
-    is_active: true,
     visits: [],
   },
 ];

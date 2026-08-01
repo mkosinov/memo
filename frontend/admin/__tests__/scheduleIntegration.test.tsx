@@ -158,7 +158,6 @@ describe('Schedule pipeline integration: enrichment from API to ActivityCard', (
         record_info: null,
         created_at: '2024-01-01T00:00:00Z',
         updated_at: '2024-01-01T00:00:00Z',
-        is_active: true,
         occupied: 3,
       },
     ]));
@@ -297,7 +296,6 @@ describe('Schedule pipeline: nullable visitor_id impact', () => {
         record_info: null,
         created_at: '2024-01-01T00:00:00Z',
         updated_at: '2024-01-01T00:00:00Z',
-        is_active: true,
         occupied: 3, // Simulates visits with null visitor_ids — occupied is still tracked
       },
     ]));
@@ -337,7 +335,6 @@ describe('Schedule pipeline: nullable visitor_id impact', () => {
         record_info: null,
         created_at: '2024-01-01T00:00:00Z',
         updated_at: '2024-01-01T00:00:00Z',
-        is_active: true,
         occupied: 0, // All visits with null visitor_ids → occupied = 0
       },
     ]));

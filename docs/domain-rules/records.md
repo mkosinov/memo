@@ -110,7 +110,7 @@ A Record is a booking for an Activity. It links a Client to an Activity and cont
 ## Business Logic
 
 ### Backend
-- **Capacity check on create:** Sums all active Record.seats for the Activity via `check_activity_capacity()` / `active_record_filter()`. If occupied + new_seats > capacity → 409. The "active" filter is `Record.is_active = True AND Record.status IN ('waiting','visited')` — cancelled and missed records free their seats. Single source of truth: `ACTIVE_RECORD_STATUSES` constant in `src/domain/visit_status.py`, reused by both the booking guard and `ActivityService.sum_active_seats`.
+- **Capacity check on create:** Sums all active Record.seats for the Activity via `check_activity_capacity()` / `active_record_filter()`. If occupied + new_seats > capacity → 409. The "active" filter is `Record.status IN ('waiting','visited')` — cancelled and missed records free their seats. Single source of truth: `ACTIVE_RECORD_STATUSES` constant in `src/domain/visit_status.py`, reused by both the booking guard and `ActivityService.sum_active_seats`.
 - **Client resolution (dual flow):**
   - Phone-based (web): find-or-create Client by phone
   - Client-ID-based (admin): link directly
@@ -122,7 +122,7 @@ A Record is a booking for an Activity. It links a Client to an Activity and cont
 - **Create sequence:** check capacity → resolve client → resolve visitors → create Record → create Visits
 - **Update (PUT):** Full replacement, old Visits soft-deactivated, new Visits created, seats recalculated. NO capacity re-check.
 - **Patch:** Partial update. If visits in payload → old visits soft-deactivated, new created. NO capacity re-check.
-- **Delete:** Cascade soft-delete: Visits + Payments + Record all soft-deactivated.
+- **Delete:** Cascade hard-delete: Visits + Payments + record_tags join rows hard-deleted; Record row physically removed.
 
 ### Frontend
 - **Phone blur auto-fill:** searchClientByPhone on blur if phone >= 10 chars
@@ -141,7 +141,7 @@ A Record is a booking for an Activity. It links a Client to an Activity and cont
 | POST | /api/v1/records | Create (capacity check) |
 | PUT | /api/v1/records/{id} | Full update (visits replaced) |
 | PATCH | /api/v1/records/{id} | Partial update |
-| DELETE | /api/v1/records/{id} | Cascade soft-delete |
+| DELETE | /api/v1/records/{id} | Cascade hard-delete (visits + payments + record_tags cleaned) |
 
 ## Relationships
 - Record → belongs to Activity

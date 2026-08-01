@@ -69,11 +69,10 @@ function resolveRecordDate(recordId?: string): { date: string; activityId: strin
     ? `SELECT substr(a.start, 1, 10) AS d, a.id AS activityId
        FROM records r
        JOIN activities a ON r.activity_id = a.id
-       WHERE r.id = '${safeId}' AND r.is_active = 1 AND a.is_active = 1`
+       WHERE r.id = '${safeId}'`
     : `SELECT substr(a.start, 1, 10) AS d, a.id AS activityId
        FROM records r
        JOIN activities a ON r.activity_id = a.id
-       WHERE r.is_active = 1 AND a.is_active = 1
        ORDER BY r.id ASC
        LIMIT 1`;
   const row = queryDBRow(sql);

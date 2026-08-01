@@ -53,3 +53,36 @@ describe('TagsTable error state', () => {
     expect(screen.queryByTestId('error-state')).not.toBeInTheDocument();
   });
 });
+
+describe('TagsTable status column removal (GH #194)', () => {
+  // Minimal mock tag — TagResponse only has { id, tag }
+  const mockTag = { id: 't-1', tag: 'Живопись' };
+
+  it('does not render a "Статус" column header', () => {
+    vi.mocked(useQuery).mockReturnValue({
+      data: [],
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof useQuery>);
+
+    render(<TagsTable />);
+    // exact:false → catches "Статус ↕" (sort icon appended to header label).
+    expect(screen.queryByText('Статус', { exact: false })).not.toBeInTheDocument();
+  });
+
+  it('does not render an "Активен" status badge for a row', () => {
+    vi.mocked(useQuery).mockReturnValue({
+      data: [mockTag],
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof useQuery>);
+
+    render(<TagsTable />);
+    // The row itself should render the tag name…
+    expect(screen.getByText('Живопись')).toBeInTheDocument();
+    // …but no "Активен" badge (the dead status badge).
+    expect(screen.queryByText('Активен')).not.toBeInTheDocument();
+  });
+});

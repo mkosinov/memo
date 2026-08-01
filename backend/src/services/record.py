@@ -7,7 +7,7 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from src.repositories.generic import SoftDeleteRepository, get_soft_delete_repository
+from src.repositories.generic import BaseRepository, get_base_repository
 from src.domain.record_visits import (
     recompute_record_seats,
     recompute_record_status,
@@ -16,6 +16,7 @@ from src.domain.record_visits import (
 from src.models.client import Client
 from src.models.payment import Payment
 from src.models.record import Record
+from src.models.tag import record_tags
 from src.models.visit import Visit
 from src.models.visitor import Visitor
 from src.schemas.common import PaginatedResponse
@@ -28,7 +29,7 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
     """Record service with nested visit management."""
 
     def __init__(
-        self, repository: SoftDeleteRepository, model: type[Record]
+        self, repository: BaseRepository, model: type[Record]
     ) -> None:
         super().__init__(repository, model, response_schema=RecordResponse)
 
@@ -40,10 +41,9 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
         client_id: str | None = None,
         **filters,
     ) -> PaginatedResponse:  # items are ORM Record instances
-        """Return a paginated page of active records (ORM items, visits eagerly loaded)."""
+        """Return a paginated page of records (ORM items, visits eagerly loaded)."""
         stmt = (
             select(Record)
-            .where(Record.is_active)
             .options(selectinload(Record.visits))
         )
         if client_id:
@@ -73,24 +73,25 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
 
     @transactional
     async def delete(self, db_session: AsyncSession, id: str) -> bool:
-        """Soft-delete a record and hard-delete its visits and payments."""
+        """Hard-delete a record and its visits, payments, and record_tags join rows.
+
+        All cascade deletes run as explicit SQL inside this single
+        ``@transactional`` transaction (no per-record commit) so the
+        unit is atomic: if any statement fails, nothing persists. The
+        dependent rows (visits, payments) are removed BEFORE the record
+        so no FK constraint can fire. The record_tags join table has FKs
+        with NO ondelete action, so its rows are removed BEFORE the
+        record — otherwise the DB raises IntegrityError (FK on) or
+        leaves orphan rows (FK off) (#194).
+        """
         record = await self._repository.get(db_session, Record, id)
-        if not record or not record.is_active:
+        if not record:
             return False
 
-        # Cascade: hard-delete all related visits
-        await db_session.execute(
-            delete(Visit).where(Visit.record_id == id)
-        )
-
-        # Cascade: hard-delete all related payments
-        await db_session.execute(
-            delete(Payment).where(Payment.record_id == id)
-        )
-
-        # Soft-delete the record itself
-        record.is_active = False
-        await db_session.flush()
+        await db_session.execute(delete(Visit).where(Visit.record_id == id))
+        await db_session.execute(delete(Payment).where(Payment.record_id == id))
+        await db_session.execute(delete(record_tags).where(record_tags.c.record_id == id))
+        await db_session.execute(delete(Record).where(Record.id == id))
         return True
 
     @transactional
@@ -357,4 +358,4 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
 @lru_cache
 def get_record_service() -> RecordService:
     """Returns a singleton RecordService."""
-    return RecordService(get_soft_delete_repository(), Record)
+    return RecordService(get_base_repository(), Record)

@@ -25,7 +25,7 @@ A Payment is a financial transaction for a Record. Payments track how much a cli
 - **Amount must be positive** (Pydantic `Field(gt=0)` — enforced on both POST and PATCH)
 - **Optional `created_at`** on POST: client may supply a timestamp (e.g. from an editable datetime-local input); if omitted, the service defaults to `datetime.now()`. This allows backdating payments.
 - Filtered by record_id
-- Soft-deactivated on Record delete (cascade)
+- Hard-deleted on Record delete (cascade)
 
 ### Frontend
 - **Add payment form:** datetime-local input (auto-filled with now, editable) + method select (card/cash/transfer/online) + amount input
@@ -55,7 +55,7 @@ A Payment is a financial transaction for a Record. Payments track how much a cli
 - Response: `{"totals": {"<record_id>": <sum_amount>, ...}}` — computed via SQL `WHERE record_id IN (...) GROUP BY record_id` with `SUM(amount)`.
 - Records with **no payments** are absent from the map. Frontend treats missing key as 0 → "Не оплачено".
 
-**Hard-delete note:** Payments in this codebase are **hard-deleted** (no `is_active` on Payment model — migration `a1b2c3d4e5f6` dropped it). The aggregate needs **no soft-delete filter**; it sums all payment rows for the given record IDs. The aggregate does NOT join through `Record.is_active` — the caller (RecordsContext) only ever passes IDs of active records it has loaded.
+**Hard-delete note:** Payments in this codebase are **hard-deleted** (row physically removed; migration `a1b2c3d4e5f6` dropped the legacy flag column). The aggregate sums all payment rows for the given record IDs with no inactive filter. The caller (RecordsContext) only ever passes IDs of records it has loaded.
 
 **Route-ordering invariant (critical):** The `/totals` route MUST be declared BEFORE `GET /payments/{payment_id}` in the router file. FastAPI resolves static routes before path params only if declared first. See `backend/src/api/v1/payments.py`.
 
@@ -74,7 +74,7 @@ A Payment is a financial transaction for a Record. Payments track how much a cli
 ## Acceptance Criteria
 - [ ] Amount > 0
 - [ ] Method is valid enum value
-- [ ] Cascade soft-delete with Record
+- [ ] Cascade hard-delete with Record
 
 ## Parity Notes
 | Backend (Pydantic) | Frontend | Match |

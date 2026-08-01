@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 import { waitForPhotosReady } from './fixtures/helpers';
 
 /**
- * E2E tests for Photos page: table rendering, search, status filter,
+ * E2E tests for Photos page: table rendering, search,
  * sorting, pagination, create/edit modal, column picker.
  *
  * Requires: dev server on :3001, backend on :8000
@@ -23,8 +23,9 @@ test.describe('Photos — Table and Navigation', () => {
   test('table has expected column headers', async ({ page }) => {
     await waitForPhotosReady(page);
 
-    // Default visible columns: Превью, Файл, Посетитель, Публичное, Статус
-    const expectedHeaders = ['Превью', 'Файл', 'Посетитель', 'Публичное', 'Статус'];
+    // Default visible columns: Превью, Файл, Посетитель, Публичное
+    // (Статус column + status filter dropped in GH #194)
+    const expectedHeaders = ['Превью', 'Файл', 'Посетитель', 'Публичное'];
 
     for (const headerText of expectedHeaders) {
       await expect(
@@ -39,26 +40,6 @@ test.describe('Photos — Table and Navigation', () => {
     const searchInput = page.getByPlaceholder('Поиск фото...');
     await expect(searchInput).toBeVisible();
     await searchInput.fill('test');
-    await page.waitForTimeout(500);
-  });
-
-  test('status filter narrows results', async ({ page }) => {
-    await waitForPhotosReady(page);
-
-    const initialCount = await page.locator('table tbody tr').count();
-
-    const statusSelect = page.locator('select').filter({ hasText: 'Все статусы' });
-    await expect(statusSelect).toBeVisible();
-
-    // Select "Активен" filter
-    await statusSelect.selectOption('active');
-    await page.waitForTimeout(500);
-
-    const filteredCount = await page.locator('table tbody tr').count();
-    expect(filteredCount).toBeLessThanOrEqual(initialCount);
-
-    // Reset filter
-    await statusSelect.selectOption('');
     await page.waitForTimeout(500);
   });
 

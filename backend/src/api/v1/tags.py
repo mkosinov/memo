@@ -30,7 +30,7 @@ async def list_tags(
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
 ) -> PaginatedResponse[TagResponse]:
-    """Return all active tags."""
+    """Return all tags, paginated."""
     return await service.list(db_session=session, page=page, per_page=per_page)
 
 
@@ -109,7 +109,7 @@ async def delete_tag(
     service: _ServiceDep,
     session: SessionDep,
 ) -> None:
-    """Soft-delete a tag (set is_active=False)."""
+    """Delete a tag (hard delete)."""
     deleted = await service.delete(db_session=session, id=tag_id)
     if not deleted:
         raise HTTPException(

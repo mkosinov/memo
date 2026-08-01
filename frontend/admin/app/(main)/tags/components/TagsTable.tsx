@@ -22,7 +22,6 @@ interface Column {
 
 const COLUMNS: Column[] = [
   { key: 'tag', label: 'Тег', width: 'flex-1', defaultVisible: true },
-  { key: 'status', label: 'Статус', width: 'w-[100px]', defaultVisible: true },
 ];
 
 // ─── Component ───────────────────────────────────────────────────────────
@@ -53,7 +52,6 @@ export function TagsTable() {
 
   // ─── Filter state ────────────────────────────────────────────────────
   const [search, setSearch] = useState('');
-  const [status, setStatus] = useState('');
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(10);
 
@@ -73,7 +71,7 @@ export function TagsTable() {
   // Reset page when filters change
   useEffect(() => {
     setPage(0);
-  }, [search, status]);
+  }, [search]);
 
   // ─── Filtered data ───────────────────────────────────────────────────
 
@@ -84,11 +82,9 @@ export function TagsTable() {
         const q = search.toLowerCase();
         if (!tag.tag.toLowerCase().includes(q)) return false;
       }
-      // Status filter (tags don't have is_active in response, but we can show them all)
-      // For now, show all tags as the API only returns active ones
       return true;
     });
-  }, [tags, search, status]);
+  }, [tags, search]);
 
   // ─── Sorted data ─────────────────────────────────────────────────────
 
@@ -283,15 +279,6 @@ export function TagsTable() {
                 {visibleKeys.includes('tag') && (
                   <td className="px-4 py-3 text-sm font-medium" style={{ color: 'var(--ink)' }}>
                     {tag.tag}
-                  </td>
-                )}
-
-                {/* Status — tags from API are always active */}
-                {visibleKeys.includes('status') && (
-                  <td className="px-4 py-3 text-sm">
-                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700">
-                      Активен
-                    </span>
                   </td>
                 )}
 

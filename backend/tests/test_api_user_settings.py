@@ -245,16 +245,16 @@ class TestDeleteUserSettings:
         resp = api_client.delete(f"/api/v1/user-settings/{settings_id}")
         assert resp.status_code == 204
 
-    def test_delete_sets_is_active_false(self, api_client, _user) -> None:
+    def test_delete_removes_row(self, api_client, _user) -> None:
         create_resp = api_client.post("/api/v1/user-settings", json={"user_id": _user["id"]})
         settings_id = create_resp.json()["id"]
 
         api_client.delete(f"/api/v1/user-settings/{settings_id}")
 
+        # Hard-delete: row is physically removed from the database
         from tests.conftest import query_db
-        rows = query_db(f"SELECT is_active FROM user_settings WHERE id='{settings_id}'")
-        assert len(rows) == 1
-        assert rows[0]["is_active"] == 0  # SQLite stores bool as 0/1
+        rows = query_db(f"SELECT id FROM user_settings WHERE id='{settings_id}'")
+        assert rows == []
 
     def test_delete_returns_404_for_nonexistent(self, api_client) -> None:
         resp = api_client.delete("/api/v1/user-settings/nonexistent-id")

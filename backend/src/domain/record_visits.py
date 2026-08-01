@@ -76,13 +76,13 @@ async def recompute_record_status(
 def active_record_filter(activity_id: str):
     """WHERE conditions for records that occupy a seat in an activity's capacity.
 
-    Active = is_active AND status IN (waiting, visited).
+    Active = status IN (waiting, visited). Records are hard-deleted, so any
+    record that exists is by definition active.
     Shared by check_activity_capacity (booking guard) and
     ActivityService.sum_active_seats (view) so both agree.
     """
     return (
         Record.activity_id == activity_id,
-        Record.is_active.is_(True),
         Record.status.in_(ACTIVE_RECORD_STATUSES),
     )
 
@@ -97,7 +97,7 @@ async def check_activity_capacity(
     with the other cascade functions. Both services use this directly.
     """
     result = await db_session.execute(
-        select(Activity).where(Activity.id == activity_id, Activity.is_active)
+        select(Activity).where(Activity.id == activity_id)
     )
     activity = result.scalar_one_or_none()
     if not activity:

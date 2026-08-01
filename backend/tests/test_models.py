@@ -1,12 +1,30 @@
 """Test all ORM models — import, table creation, CRUD round-trip."""
 
 from datetime import datetime
+from typing import ClassVar
 
 import pytest
 from sqlalchemy import create_engine, event, inspect
 from sqlalchemy.orm import Session
 
 from src.db.base import Base
+from src.models import (
+    Activity,
+    Client,
+    Location,
+    Master,
+    Material,
+    Payment,
+    Photo,
+    Record,
+    Service,
+    Tag,
+    Tariff,
+    User,
+    UserSettings,
+    Visit,
+    Visitor,
+)
 
 
 def _make_engine():
@@ -724,7 +742,8 @@ class TestModelCrud:
         assert fetched.language == "ru"
         assert fetched.column_order_masters == '["last_name","color"]'
         assert fetched.column_order_locations == '["name","capacity"]'
-        assert fetched.is_active is True
+        # UserSettings switched to hard-delete base (task #194): no is_active column.
+        assert not hasattr(fetched, "is_active")
 
     def test_user_settings_defaults(self, session: Session):
         """UserSettings columns use sensible defaults."""
@@ -773,3 +792,39 @@ class TestModelCrud:
             assert "UNIQUE" in str(exc) or "unique" in str(exc).lower()
         finally:
             session.rollback()
+
+
+@pytest.mark.pure_unit
+class TestSoftDeleteFlag:
+    """Class-level ``soft_delete`` flag drives GenericService.list filtering (#194).
+
+    Hard-delete models expose ``soft_delete is False`` and have NO ``is_active``
+    column. Soft-delete models expose ``soft_delete is True`` and keep
+    ``is_active``.
+
+    Hard-delete: Tag, Photo, Visitor, Activity, Record, UserSettings, Visit, Payment.
+    Soft-delete: Master, User, Location, Service, Tariff, Material, Client.
+    """
+
+    _HARD_DELETE: ClassVar[list[type]] = [
+        Tag, Photo, Visitor, Activity, Record, UserSettings, Visit, Payment,
+    ]
+    _SOFT_DELETE: ClassVar[list[type]] = [Master, User, Location, Service, Tariff, Material, Client]
+
+    @pytest.mark.parametrize("model", _HARD_DELETE, ids=lambda m: m.__name__)
+    def test_hard_delete_flag(self, model):
+        assert getattr(model, "soft_delete", None) is False, (
+            f"{model.__name__} should declare soft_delete = False"
+        )
+        assert not hasattr(model, "is_active"), (
+            f"{model.__name__} must not have an is_active column (hard-delete)"
+        )
+
+    @pytest.mark.parametrize("model", _SOFT_DELETE, ids=lambda m: m.__name__)
+    def test_soft_delete_flag(self, model):
+        assert getattr(model, "soft_delete", None) is True, (
+            f"{model.__name__} should declare soft_delete = True"
+        )
+        assert hasattr(model, "is_active"), (
+            f"{model.__name__} must keep an is_active column (soft-delete)"
+        )

@@ -108,20 +108,31 @@ async def test_list_returns_paginated_envelope_tag(db_session):
     assert len(result.items) == 3
 
 
-async def test_list_excludes_inactive_tag(db_session):
-    """Soft-deleted tags excluded from items AND total."""
-    await _create_tags(db_session, 2)
-    inactive = Tag(tag="inactive-tag", is_active=False)
-    db_session.add(inactive)
+async def test_list_flag_driven_filter(db_session):
+    """Flag-driven list: hard-delete entities list ALL rows; soft-delete exclude inactive.
+
+    Tag has ``soft_delete=False`` (no is_active column) so list returns every
+    row — no is_active filter is applied.  Master has ``soft_delete=True`` so
+    is_active=False rows are excluded from both items and total.
+    """
+    # ── Hard-delete entity (Tag) — all rows returned, no is_active filter ──
+    await _create_tags(db_session, 3)
+    tag_service = get_tag_service()
+    tag_result = await tag_service.list(db_session, page=1, per_page=20)
+    assert tag_result.total == 3
+    assert len(tag_result.items) == 3
+
+    # ── Soft-delete entity (Master) — is_active=False rows excluded ────────
+    await _create_masters(db_session, 2)
+    db_session.add(Master(
+        first_name="X", last_name="Y", color="#111111",
+        position="p", specialty="s", is_active=False,
+    ))
     await db_session.flush()
-    service = get_tag_service()
-    result = await service.list(db_session, page=1, per_page=20)
-    # total=2 proves the inactive row is excluded from the count
-    assert result.total == 2
-    assert len(result.items) == 2
-    # The inactive tag's id must not appear in items
-    tag_values = {t.tag for t in result.items}
-    assert "inactive-tag" not in tag_values
+    master_service = get_master_service()
+    master_result = await master_service.list(db_session, page=1, per_page=20)
+    assert master_result.total == 2
+    assert all(m.is_active for m in master_result.items)
 
 
 # ─── ServiceService.list pagination (2a) ────────────────────────────────────────

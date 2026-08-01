@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from src.models.photo import Photo, photo_tags
-from src.repositories.generic import get_soft_delete_repository
+from src.repositories.generic import get_base_repository
 from src.schemas.photo import PhotoCreate, PhotoPatch, PhotoResponse, PhotoUpdate
 from src.services.generic import GenericService
 from src.services.decorators import transactional
@@ -23,10 +23,9 @@ class PhotoService(GenericService[PhotoCreate, PhotoUpdate, PhotoResponse]):
     async def list(
         self, db_session: AsyncSession, **filters
     ) -> list[PhotoResponse]:
-        """Return all active photos with tags eagerly loaded."""
+        """Return all photos with tags eagerly loaded."""
         stmt = (
             select(Photo)
-            .where(Photo.is_active)
             .options(selectinload(Photo.tags))
         )
         result = await db_session.execute(stmt)
@@ -163,4 +162,4 @@ class PhotoService(GenericService[PhotoCreate, PhotoUpdate, PhotoResponse]):
 
 @lru_cache
 def get_photo_service() -> PhotoService:
-    return PhotoService(get_soft_delete_repository(), Photo, PhotoResponse)
+    return PhotoService(get_base_repository(), Photo, PhotoResponse)

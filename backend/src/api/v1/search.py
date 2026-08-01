@@ -27,7 +27,7 @@ async def search_visitors(
     pattern = f"%{q}%"
     result = await session.execute(
         select(Visitor)
-        .where(Visitor.name.ilike(pattern), Visitor.is_active == True)  # noqa: E712
+        .where(Visitor.name.ilike(pattern))
         .limit(10)
     )
     return [
@@ -65,10 +65,7 @@ async def search_activities(
     stmt = (
         select(Activity.id, Activity.start, Activity.service_id, Service.title.label("service_title"))
         .join(Service, Activity.service_id == Service.id)
-        .where(
-            Service.title.ilike(pattern),
-            Activity.is_active == True,  # noqa: E712
-        )
+        .where(Service.title.ilike(pattern))
     )
     if service_id:
         stmt = stmt.where(Activity.service_id == service_id)

@@ -7,16 +7,16 @@ from typing import TYPE_CHECKING
 from sqlalchemy import ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from src.models.abstract import AbstractModelSoftDelete
+from src.models.abstract import AbstractModel
 
 if TYPE_CHECKING:
     from src.models.tag import Tag
 
 
-class Record(AbstractModelSoftDelete):
+class Record(AbstractModel):
     __tablename__ = "records"
 
-    activity_id: Mapped[str] = mapped_column(String(36), ForeignKey("activities.id"))
+    activity_id: Mapped[str] = mapped_column(String(36), ForeignKey("activities.id", ondelete="CASCADE"))
     client_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("clients.id"), nullable=True,
     )

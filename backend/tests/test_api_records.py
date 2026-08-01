@@ -49,7 +49,6 @@ class TestRecordsCrud:
         assert body["visits"][0]["status"] == "waiting"
         assert "id" in body
         assert "created_at" in body
-        assert body["is_active"] is True
 
     def test_list_records_includes_created(self, api_client, create_activity, create_client) -> None:
         """GET /api/records returns a list containing created records with visits."""
@@ -160,8 +159,8 @@ class TestRecordsCrud:
         assert body["visits"][0]["price"] == 2000
         assert body["visits"][0]["status"] == "visited"
 
-    def test_delete_record_soft_deletes(self, api_client, create_activity, create_client) -> None:
-        """DELETE /api/records/{id} soft-deletes and list excludes it."""
+    def test_delete_record_hard_deletes(self, api_client, create_activity, create_client) -> None:
+        """DELETE /api/records/{id} hard-deletes; GET by id returns 404 and list excludes it."""
         activity = create_activity()
         client = create_client()
 
@@ -188,10 +187,9 @@ class TestRecordsCrud:
         response = api_client.delete(f"/api/v1/records/{record_id}")
         assert response.status_code == 204
 
-        # GET by id should still return it (soft delete)
+        # Hard-delete: GET by id returns 404
         response = api_client.get(f"/api/v1/records/{record_id}")
-        assert response.status_code == 200
-        assert response.json()["is_active"] is False
+        assert response.status_code == 404
 
         # List should NOT include the deleted record
         response = api_client.get("/api/v1/records")

@@ -62,13 +62,22 @@
 
 **Rule:** When introducing new code, always use the code name from this table. If you see a forbidden name in existing code, rename it.
 
+## Deletion Policy
+
+| Delete semantics | Entities |
+|---|---|
+| **Soft-delete** (`is_active` flag) | Master, Location, Service, Material, Client |
+| **Hard-delete** (row physically removed) | Tag, Photo, Visitor, Activity, Record, UserSettings |
+| Already hard-delete (untouched) | Payment, Visit |
+| Stays as-is (implicit soft-delete, out of scope) | User, Tariff (carry `is_active`, used e.g. in `admin/setup.py:35`) |
+
 ## Cross-Entity Invariants
 
 1. **Capacity:** `occupied + seats <= activity.capacity` (on Record create only)
-   - `occupied` is the SUM of `Record.seats` for records matching `active_record_filter()` — i.e. `is_active = True AND status IN ('waiting','visited')`. Cancelled and missed records do NOT occupy a seat. See `src/domain/record_visits.py` and `ACTIVE_RECORD_STATUSES` in `src/domain/visit_status.py`.
+   - `occupied` is the SUM of `Record.seats` for records matching `active_record_filter()` — i.e. `status IN ('waiting','visited')`. Cancelled and missed records do NOT occupy a seat. See `src/domain/record_visits.py` and `ACTIVE_RECORD_STATUSES` in `src/domain/visit_status.py`.
 2. **Seats = len(visits):** Always computed, never user-set
-3. **Cascade soft-delete:** Record → Visits + Payments
-4. **No cascade:** Activity delete does NOT affect Records
+3. **Cascade hard-delete:** Record → Visits + Payments
+4. **Cascade hard-delete:** Activity delete → Records (and transitively their Visits + Payments); photos SET NULL
 5. **Phone search:** Exact match, no format validation
 6. **Client phone:** No uniqueness constraint (duplicates possible)
 7. **Visitor (client_id, name):** Uniqueness enforced at service level only
@@ -129,7 +138,7 @@
 3. **No payment sum validation** (can exceed record price)
 4. **No phone format validation** (backend accepts anything)
 5. **Hard delete of Tariffs** on Service update (no audit trail)
-6. **Activity delete orphans Records** (no cascade)
+6. ~~Activity delete orphans Records~~ — resolved: Activity delete now cascades hard-delete to Records
 
 ## Planned Improvements (from user requirements)
 

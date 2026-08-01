@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — 2026-08-01
+
+### Added
+- **GH #194 — Deletion policy refactor: hard-delete for Tag/Photo/Visitor/Activity/Record/UserSettings** — branch `deletion-policy-194` (15 commits: 51a287e, 1058988, 114d08d, 0f7a41c, caadb7d, cea4daa, 3202656, 07cc2eb, 540a6bd, 20dbceb, 68452fa, 17ee2e0, 8806596, ee8a07c, 6ff6eec):
+  - **Backend:** one Alembic migration (`b7c8d9e0f1a2`) drops 6 `is_active` columns and re-creates FKs with cascade semantics (records.activity_id → CASCADE, visits.visitor_id → CASCADE, photos.visitor_id/activity_id → SET NULL). 6 models switch to the hard-delete base; a class-level `soft_delete` ClassVar flag on the abstract base drives `GenericService.list`'s filter so one code path serves both delete semantics. 6 services moved to `BaseRepository`.
+  - **Delete cascades:** Record→visits+payments+record_tags, Activity→records (and their visits/payments/record_tags)+activity_tags, Visitor→visits+visitor_tags — service-level with ORM/FK backstops. Bonus fix found in quality review (beyond plan scope): tag join tables (record_tags/visitor_tags/activity_tags) had FKs with no ON DELETE — explicit join-row deletes added + 3 tests.
+  - **API surface:** `is_active` removed from Photo/Visitor/Activity/Record response schemas and swept from services/domain/mappers; api-client zod schemas + `schemas.test.ts` updated.
+  - **Admin:** TagsTable «Статус» column and PhotosTable status filter/column removed; mocks + e2e rewritten for hard-delete semantics.
+  - **Tests:** `EntityConfig.delete_semantics` + generic delete contract test; backend 824 passed / 0 failed / 3 skipped (baseline 793p/3s); api-client 139 passed / 4 failed (4 = known pre-existing #188, unchanged); admin vitest 1223 passed / 0 failed + type-check clean; targeted e2e 42/42 (activity-details-modal 13/13, tags-crud+photos-crud+unify-caches 29/29); visual compliance 6/6.
+  - **Domain rules:** 9 docs synced from soft-delete to hard-delete policy (`docs/domain-rules/`).
+  - **Follow-ups (out of scope, noted for future work):** stale "old Visits soft-deactivated" wording in records.md:123-124; `Record.is_active=True` reference in clients.md:28; PaymentService.list override now redundant with flag-driven filter (silently drops order_by).
+  - **87 files changed, +1201 / -386.**
+  - Design spec: `docs/specs/2026-08-01-deletion-policy-design.md`
+  - Plan: `docs/plans/2026-08-01-deletion-policy-plan.md`
+
 ## [Unreleased] — 2026-07-29
 
 ### Added

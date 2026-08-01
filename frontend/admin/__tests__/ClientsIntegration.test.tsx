@@ -127,7 +127,6 @@ const mockRecord: RecordResponse = {
   custom_price: null,
   created_at: '2026-05-10T10:00:00',
   updated_at: '2026-05-10T10:00:00',
-  is_active: true,
   visits: [
     {
       id: 'v1',
@@ -153,11 +152,11 @@ const mockClientWithRecords: ClientWithStats & {
 };
 
 const mockVisitors = [
-  { id: 'vis1', client_id: 'c1', name: 'Анна Иванова', age: 30, created_at: '', updated_at: '', is_active: true },
+  { id: 'vis1', client_id: 'c1', name: 'Анна Иванова', age: 30, created_at: '', updated_at: '' },
 ];
 
 const mockActivityResponses = [
-  { id: 'ev_1', master_id: 'm1', service_id: 's1', location_id: 'loc1', start: '2026-05-10T14:00:00', duration: 150, capacity: 8, is_private: false, comment: null, record_info: null, created_at: '', updated_at: '', is_active: true, occupied: 3 },
+  { id: 'ev_1', master_id: 'm1', service_id: 's1', location_id: 'loc1', start: '2026-05-10T14:00:00', duration: 150, capacity: 8, is_private: false, comment: null, record_info: null, created_at: '', updated_at: '', occupied: 3 },
 ];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────

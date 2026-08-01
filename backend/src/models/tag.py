@@ -6,7 +6,7 @@ from sqlalchemy import Column, ForeignKey, String, Table
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.db.base import Base
-from src.models.abstract import AbstractModelSoftDelete
+from src.models.abstract import AbstractModel
 
 if TYPE_CHECKING:
     from src.models.client import Client
@@ -62,7 +62,7 @@ record_tags = Table(
 )
 
 
-class Tag(AbstractModelSoftDelete):
+class Tag(AbstractModel):
     __tablename__ = "tags"
 
     tag: Mapped[str] = mapped_column(String(100), unique=True)

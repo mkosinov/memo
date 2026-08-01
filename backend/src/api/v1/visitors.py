@@ -30,7 +30,7 @@ async def list_visitors(
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
 ) -> PaginatedResponse[VisitorResponse]:
-    """Return all active visitors, paginated."""
+    """Return all visitors, paginated."""
     return await service.list(db_session=session, page=page, per_page=per_page)
 
 
@@ -109,7 +109,7 @@ async def delete_visitor(
     service: _ServiceDep,
     session: SessionDep,
 ) -> None:
-    """Soft-delete a visitor (set is_active=False)."""
+    """Delete a visitor (hard delete)."""
     deleted = await service.delete(db_session=session, id=visitor_id)
     if not deleted:
         raise HTTPException(

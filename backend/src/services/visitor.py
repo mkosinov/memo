@@ -2,13 +2,17 @@
 
 from functools import lru_cache
 
-from sqlalchemy import select
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.repositories.generic import SoftDeleteRepository, get_soft_delete_repository
+from src.repositories.generic import BaseRepository, get_base_repository
+from src.models.photo import Photo
+from src.models.tag import visitor_tags
+from src.models.visit import Visit
 from src.models.visitor import Visitor
 from src.schemas.visitor import VisitorCreate, VisitorResponse, VisitorUpdate
 from src.services.generic import GenericService
+from src.services.decorators import transactional
 
 
 class VisitorService(GenericService[VisitorCreate, VisitorUpdate, VisitorResponse]):
@@ -17,24 +21,45 @@ class VisitorService(GenericService[VisitorCreate, VisitorUpdate, VisitorRespons
     NOT_NULL_FIELDS = {"name"}
 
     def __init__(
-        self, repository: SoftDeleteRepository, model: type[Visitor]
+        self, repository: BaseRepository, model: type[Visitor]
     ) -> None:
         super().__init__(repository, model, response_schema=VisitorResponse)
 
     async def list_by_client(
         self, db_session: AsyncSession, client_id: str
     ) -> list[Visitor]:
-        """Return all active visitors for a given client."""
+        """Return all visitors for a given client."""
         result = await db_session.execute(
-            select(Visitor).where(
-                Visitor.client_id == client_id,
-                Visitor.is_active,
-            )
+            select(Visitor).where(Visitor.client_id == client_id)
         )
         return list(result.scalars().all())
+
+    @transactional
+    async def delete(self, db_session: AsyncSession, id: str) -> bool:
+        """Hard-delete a visitor and its visits; unlink photos (SET NULL);
+        delete visitor_tags join rows.
+
+        All cascade deletes run as explicit SQL inside this single
+        ``@transactional`` transaction so the unit is atomic. Visits are
+        removed BEFORE the visitor (visits.reference visitors via FK).
+        The visitor_tags join table has FKs with NO ondelete action, so its
+        rows must be removed BEFORE the visitor — otherwise the DB raises
+        IntegrityError (FK on) or leaves orphan rows (FK off). Photos are
+        unlinked (visitor_id := NULL) rather than deleted — a photo
+        survives losing its depicted visitor (#194, G1b).
+        """
+        visitor = await self._repository.get(db_session, Visitor, id)
+        if not visitor:
+            return False
+
+        await db_session.execute(delete(Visit).where(Visit.visitor_id == id))
+        await db_session.execute(update(Photo).where(Photo.visitor_id == id).values(visitor_id=None))
+        await db_session.execute(delete(visitor_tags).where(visitor_tags.c.visitor_id == id))
+        await db_session.execute(delete(Visitor).where(Visitor.id == id))
+        return True
 
 
 @lru_cache
 def get_visitor_service() -> VisitorService:
     """Returns a singleton VisitorService."""
-    return VisitorService(get_soft_delete_repository(), Visitor)
+    return VisitorService(get_base_repository(), Visitor)

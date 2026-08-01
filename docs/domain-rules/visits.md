@@ -15,7 +15,6 @@ A Visit is the attendance record of a single Visitor within a Record (booking). 
 | status | enum | ❌ | — | — | waiting | VisitStatus |
 | created_at | string | — | — | — | — | ISO timestamp (response only) |
 | updated_at | string | — | — | — | — | ISO timestamp (response only) |
-| is_active | bool | — | — | — | — | Soft-delete flag (response only) |
 
 ## Cross-field Rules
 - None.
@@ -24,7 +23,7 @@ A Visit is the attendance record of a single Visitor within a Record (booking). 
 - price >= 0 (enforced by Pydantic Field(ge=0))
 - record_id must reference existing Record (FK enforced; create returns 404 if parent missing)
 - Seats of parent Record = count of active Visits (always computed, never user-set)
-- Cascade soft-delete: Visit is soft-deactivated on parent Record delete
+- Cascade hard-delete: Visit is hard-deleted on parent Record delete
 
 ## Business Logic
 
@@ -47,7 +46,7 @@ A Visit is the attendance record of a single Visitor within a Record (booking). 
 | POST | /api/v1/visits | Create (record_id + price required) | VisitCreate | VisitResponse (201) |
 | PUT | /api/v1/visits/{id} | Full-replace update | VisitUpdate | VisitResponse |
 | PATCH | /api/v1/visits/{id} | Partial update (all optional, no record_id) | VisitPatch | VisitResponse |
-| DELETE | /api/v1/visits/{id} | Soft delete | — | 204 |
+| DELETE | /api/v1/visits/{id} | Hard delete | — | 204 |
 | PUT | /api/v1/visits/{id}/status | Update status only | VisitStatusUpdate | VisitResponse |
 
 ## Relationships
@@ -67,7 +66,7 @@ A Visit is the attendance record of a single Visitor within a Record (booking). 
 - [ ] record_id required on create; POST returns 404 if parent Record missing
 - [ ] PATCH updates only provided fields
 - [ ] Mutations recompute parent Record seats + status
-- [ ] Cascade soft-delete with Record
+- [ ] Cascade hard-delete with Record
 
 ## Parity Notes
 | Backend (Pydantic) | Frontend (Zod) | Match |

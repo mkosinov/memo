@@ -8,24 +8,24 @@ from sqlalchemy import Boolean, Column, ForeignKey, String, Table, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.db.base import Base
-from src.models.abstract import AbstractModelSoftDelete
+from src.models.abstract import AbstractModel
 
 if TYPE_CHECKING:
     from src.models.tag import Tag
 
 
-class Photo(AbstractModelSoftDelete):
+class Photo(AbstractModel):
     __tablename__ = "photos"
 
     filename: Mapped[str] = mapped_column(Text)
     visitor_id: Mapped[str | None] = mapped_column(
-        String(36), ForeignKey("visitors.id"), nullable=True,
+        String(36), ForeignKey("visitors.id", ondelete="SET NULL"), nullable=True,
     )
     service_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("services.id"), nullable=True,
     )
     activity_id: Mapped[str | None] = mapped_column(
-        String(36), ForeignKey("activities.id"), nullable=True,
+        String(36), ForeignKey("activities.id", ondelete="SET NULL"), nullable=True,
     )
     is_public: Mapped[bool] = mapped_column(Boolean, default=False)
 

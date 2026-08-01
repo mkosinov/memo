@@ -40,7 +40,6 @@ class TestVisitorsCrud:
         assert body["client_id"] == client_id
         assert "id" in body
         assert "created_at" in body
-        assert body["is_active"] is True
 
     def test_list_visitors_for_client(self, api_client) -> None:
         """GET /api/clients/{client_id}/visitors returns visitors for that client."""
@@ -91,8 +90,8 @@ class TestVisitorsCrud:
         assert body["name"] == "Alice Updated"
         assert body["age"] == 29
 
-    def test_delete_visitor_soft_deletes(self, api_client) -> None:
-        """DELETE /api/visitors/{id} soft-deletes and list excludes it."""
+    def test_delete_visitor_hard_deletes(self, api_client) -> None:
+        """DELETE /api/v1/visitors/{id} hard-deletes; GET by id returns 404 and list excludes it."""
         client_id = _create_client(api_client)
 
         visitor_payload = {"client_id": client_id, "name": "Alice", "age": 28}
@@ -103,10 +102,9 @@ class TestVisitorsCrud:
         response = api_client.delete(f"/api/v1/visitors/{visitor_id}")
         assert response.status_code == 204
 
-        # GET by id should still return it (soft delete)
+        # Hard-delete: GET by id returns 404
         response = api_client.get(f"/api/v1/visitors/{visitor_id}")
-        assert response.status_code == 200
-        assert response.json()["is_active"] is False
+        assert response.status_code == 404
 
         # List for client should NOT include the deleted visitor
         response = api_client.get(f"/api/v1/clients/{client_id}/visitors")

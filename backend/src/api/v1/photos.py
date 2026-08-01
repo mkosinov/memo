@@ -30,10 +30,10 @@ async def list_public_photos(
     session: SessionDep,
     activity_id: str | None = Query(None),
 ) -> list[PhotoResponse]:
-    """Return public photos (is_public=true, is_active=true). Optionally filter by activity_id."""
+    """Return public photos (is_public=true). Optionally filter by activity_id."""
     stmt = (
         select(Photo)
-        .where(Photo.is_public == True, Photo.is_active == True)
+        .where(Photo.is_public == True)
         .options(selectinload(Photo.tags))
     )
     if activity_id:
@@ -48,7 +48,7 @@ async def list_photos(
     service: _ServiceDep,
     session: SessionDep,
 ) -> list[PhotoResponse]:
-    """Return all active photos (admin view)."""
+    """Return all photos (admin view)."""
     return await service.list(db_session=session)
 
 
@@ -127,7 +127,7 @@ async def delete_photo(
     service: _ServiceDep,
     session: SessionDep,
 ) -> None:
-    """Soft-delete a photo (set is_active=False)."""
+    """Delete a photo (hard delete)."""
     deleted = await service.delete(db_session=session, id=photo_id)
     if not deleted:
         raise HTTPException(

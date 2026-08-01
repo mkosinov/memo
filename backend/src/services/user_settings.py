@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db import SessionDep
 from src.models.user_settings import UserSettings
-from src.repositories.generic import SoftDeleteRepository, get_soft_delete_repository
+from src.repositories.generic import BaseRepository, get_base_repository
 from src.schemas.user_settings import (
     UserSettingsCreate,
     UserSettingsResponse,
@@ -37,17 +37,14 @@ def _to_response(model: UserSettings) -> UserSettingsResponse:
 class UserSettingsService:
     """CRUD service for UserSettings with JSON ↔ list conversion."""
 
-    def __init__(self, repo: SoftDeleteRepository) -> None:
+    def __init__(self, repo: BaseRepository) -> None:
         self._repo = repo
 
     async def get_by_user_id(
         self, session: AsyncSession, user_id: str
     ) -> UserSettingsResponse | None:
-        """Find active settings by user_id. Returns None if not found."""
-        stmt = select(UserSettings).where(
-            UserSettings.user_id == user_id,
-            UserSettings.is_active == True,  # noqa: E712
-        )
+        """Find settings by user_id. Returns None if not found."""
+        stmt = select(UserSettings).where(UserSettings.user_id == user_id)
         result = await session.execute(stmt)
         orm = result.scalar_one_or_none()
         if orm is None:
@@ -76,10 +73,7 @@ class UserSettingsService:
         self, session: AsyncSession, user_id: str, data: UserSettingsUpdate
     ) -> UserSettingsResponse | None:
         """Partial-update settings by user_id. Returns None if not found."""
-        stmt = select(UserSettings).where(
-            UserSettings.user_id == user_id,
-            UserSettings.is_active == True,  # noqa: E712
-        )
+        stmt = select(UserSettings).where(UserSettings.user_id == user_id)
         result = await session.execute(stmt)
         orm = result.scalar_one_or_none()
         if orm is None:
@@ -112,10 +106,10 @@ class UserSettingsService:
 
     @transactional
     async def delete(self, session: AsyncSession, id: str) -> bool:
-        """Soft-delete a settings record by its primary key ID."""
+        """Delete a settings record by its primary key ID."""
         return await self._repo.delete(session, UserSettings, id)
 
 
 def get_user_settings_service() -> UserSettingsService:
     """Factory for UserSettingsService."""
-    return UserSettingsService(get_soft_delete_repository())
+    return UserSettingsService(get_base_repository())

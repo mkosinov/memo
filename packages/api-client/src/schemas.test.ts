@@ -279,7 +279,6 @@ const validActivityResponse = {
   id: 'activity-1',
   created_at: '2024-06-01T12:00:00Z',
   updated_at: '2024-06-01T12:00:00Z',
-  is_active: true,
   occupied: 3,
 };
 
@@ -288,7 +287,7 @@ describe('ActivityResponseSchema', () => {
     const result = ActivityResponseSchema.parse(validActivityResponse);
     expect(result.id).toBe('activity-1');
     expect(result.occupied).toBe(3);
-    expect(result.is_active).toBe(true);
+    expect(result.is_active).toBeUndefined();
   });
 
   it('rejects activity without occupied', () => {
@@ -308,7 +307,6 @@ const validPhoto = {
   is_public: true,
   created_at: '2024-06-01T12:00:00Z',
   updated_at: '2024-06-01T12:00:00Z',
-  is_active: true,
 };
 
 describe('PhotoResponseSchema', () => {
@@ -320,7 +318,7 @@ describe('PhotoResponseSchema', () => {
     expect(result.service_id).toBe('service-1');
     expect(result.activity_id).toBe('activity-1');
     expect(result.is_public).toBe(true);
-    expect(result.is_active).toBe(true);
+    expect(result.is_active).toBeUndefined();
   });
 
   it('parses photo with non-null visitor_id', () => {
@@ -375,7 +373,6 @@ const validRecord = {
   custom_price: null,
   created_at: '2024-06-01T12:00:00Z',
   updated_at: '2024-06-01T12:00:00Z',
-  is_active: true,
   visits: [validVisit],
 };
 

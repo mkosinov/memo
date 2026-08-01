@@ -84,7 +84,6 @@ class TestActivitiesCrud:
         assert body["occupied"] == 0
         assert "id" in body
         assert "created_at" in body
-        assert body["is_active"] is True
 
     def test_list_activities_includes_created(self, api_client) -> None:
         """GET /api/activities returns a list containing the created activity."""
@@ -141,8 +140,8 @@ class TestActivitiesCrud:
         assert body["is_private"] is True
         assert body["comment"] == "Updated comment"
 
-    def test_delete_activity_soft_deletes(self, api_client) -> None:
-        """DELETE /api/activities/{id} soft-deletes and list excludes it."""
+    def test_delete_activity_hard_deletes(self, api_client) -> None:
+        """DELETE /api/activities/{id} hard-deletes; GET by id returns 404 and list excludes it."""
         prereqs = _create_prerequisites(api_client)
         create_resp = api_client.post(
             "/api/v1/activities", json=_activity_payload(prereqs)
@@ -153,10 +152,9 @@ class TestActivitiesCrud:
         response = api_client.delete(f"/api/v1/activities/{activity_id}")
         assert response.status_code == 204
 
-        # GET by id should still return it (soft delete)
+        # Hard-delete: GET by id returns 404
         response = api_client.get(f"/api/v1/activities/{activity_id}")
-        assert response.status_code == 200
-        assert response.json()["is_active"] is False
+        assert response.status_code == 404
 
         # List should NOT include the deleted activity
         response = api_client.get("/api/v1/activities")

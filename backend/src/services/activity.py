@@ -6,15 +6,20 @@ from datetime import datetime
 from functools import lru_cache
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.repositories.generic import SoftDeleteRepository, get_soft_delete_repository
+from src.repositories.generic import BaseRepository, get_base_repository
 from src.models.activity import Activity
+from src.models.payment import Payment
+from src.models.photo import Photo
 from src.models.record import Record
+from src.models.tag import activity_tags, record_tags
+from src.models.visit import Visit
 from src.schemas.activity import ActivityCreate, ActivityResponse, ActivityUpdate
 from src.schemas.common import PaginatedResponse
 from src.services.generic import GenericService
+from src.services.decorators import transactional
 from src.domain.record_visits import active_record_filter
 from src.domain.visit_status import ACTIVE_RECORD_STATUSES
 
@@ -27,7 +32,7 @@ class ActivityService(GenericService[ActivityCreate, ActivityUpdate, ActivityRes
     NOT_NULL_FIELDS = {"master_id", "service_id", "location_id", "start", "duration", "capacity"}
 
     def __init__(
-        self, repository: SoftDeleteRepository, model: type[Activity]
+        self, repository: BaseRepository, model: type[Activity]
     ) -> None:
         super().__init__(repository, model, response_schema=ActivityResponse)
 
@@ -53,8 +58,8 @@ class ActivityService(GenericService[ActivityCreate, ActivityUpdate, ActivityRes
         page: int,
         per_page: int,
     ) -> PaginatedResponse[ActivityResponse]:
-        """Return a paginated page of active activities filtered by date range."""
-        stmt = select(Activity).where(Activity.is_active)
+        """Return a paginated page of activities filtered by date range."""
+        stmt = select(Activity)
         if date_from:
             from_dt = datetime.fromisoformat(date_from)
             stmt = stmt.where(Activity.start >= from_dt)
@@ -101,7 +106,6 @@ class ActivityService(GenericService[ActivityCreate, ActivityUpdate, ActivityRes
             select(Record.activity_id, func.coalesce(func.sum(Record.seats), 0))
             .where(
                 Record.activity_id.in_(activity_ids),
-                Record.is_active.is_(True),
                 Record.status.in_(ACTIVE_RECORD_STATUSES),
             )
             .group_by(Record.activity_id)
@@ -119,8 +123,46 @@ class ActivityService(GenericService[ActivityCreate, ActivityUpdate, ActivityRes
         )
         return int(result.scalar() or 0)
 
+    @transactional
+    async def delete(self, db_session: AsyncSession, id: str) -> bool:
+        """Hard-delete an activity, its records (with their visits/payments),
+        their record_tags join rows, the activity_tags join rows, and unlink
+        photos (SET NULL).
+
+        All cascade deletes run as explicit SQL inside this single
+        ``@transactional`` transaction (no per-record commit) so the whole
+        graph is removed atomically. Order matters: visits and payments
+        reference records, so they are removed BEFORE the records; the
+        records are removed BEFORE the activity. The *_tags join tables
+        have FKs with NO ondelete action, so their rows must be removed
+        explicitly BEFORE the parent (records/activity) — otherwise the
+        DB raises IntegrityError (FK on) or leaves orphan rows (FK off).
+        Photos are unlinked (activity_id := NULL) rather than deleted —
+        a photo survives the activity that produced it (#194, G1b).
+        """
+        activity = await self._repository.get(db_session, Activity, id)
+        if not activity:
+            return False
+
+        record_ids = (
+            await db_session.execute(
+                select(Record.id).where(Record.activity_id == id)
+            )
+        ).scalars().all()
+        if record_ids:
+            await db_session.execute(delete(Visit).where(Visit.record_id.in_(record_ids)))
+            await db_session.execute(delete(Payment).where(Payment.record_id.in_(record_ids)))
+            await db_session.execute(delete(record_tags).where(record_tags.c.record_id.in_(record_ids)))
+            await db_session.execute(delete(Record).where(Record.id.in_(record_ids)))
+        await db_session.execute(
+            update(Photo).where(Photo.activity_id == id).values(activity_id=None)
+        )
+        await db_session.execute(delete(activity_tags).where(activity_tags.c.activity_id == id))
+        await db_session.execute(delete(Activity).where(Activity.id == id))
+        return True
+
 
 @lru_cache
 def get_activity_service() -> ActivityService:
     """Returns a singleton ActivityService."""
-    return ActivityService(get_soft_delete_repository(), Activity)
+    return ActivityService(get_base_repository(), Activity)

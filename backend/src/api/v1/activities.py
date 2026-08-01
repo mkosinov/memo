@@ -54,7 +54,7 @@ async def list_activities(
     date_from: str | None = Query(None),
     date_to: str | None = Query(None),
 ) -> PaginatedResponse[ActivityResponse]:
-    """Return all active activities, optionally filtered by date range."""
+    """Return all activities, optionally filtered by date range."""
     result = await service.list(
         db_session=session, page=page, per_page=per_page,
         date_from=date_from, date_to=date_to,
@@ -146,7 +146,7 @@ async def delete_activity(
     service: _ServiceDep,
     session: SessionDep,
 ) -> None:
-    """Soft-delete an activity (set is_active=False)."""
+    """Delete an activity (hard delete)."""
     deleted = await service.delete(db_session=session, id=activity_id)
     if not deleted:
         raise HTTPException(

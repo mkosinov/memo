@@ -1191,7 +1191,7 @@ class TestClientStatsRecordsRename:
         self, api_client, create_activity, create_client
     ) -> None:
         """Response exposes `records_count` (not `visits_count`).
-        Backed by `Record.is_active=True` rows, not visits.
+        Backed by existing Record rows (hard-delete entity — no is_active filter), not visits.
         """
         client, _ = _create_client_with_record(
             api_client, create_activity, create_client,

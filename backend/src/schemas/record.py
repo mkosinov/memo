@@ -105,5 +105,4 @@ class RecordResponse(RecordBase):
     id: str
     created_at: str
     updated_at: str
-    is_active: bool
     visits: list[VisitResponse] = []

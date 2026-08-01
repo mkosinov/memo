@@ -45,4 +45,3 @@ class VisitorResponse(VisitorBase):
     client_id: str
     created_at: datetime
     updated_at: datetime
-    is_active: bool

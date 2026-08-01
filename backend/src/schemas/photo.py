@@ -65,4 +65,3 @@ class PhotoResponse(BaseModel):
     tags: list[PhotoTagResponse] = []
     created_at: datetime
     updated_at: datetime
-    is_active: bool

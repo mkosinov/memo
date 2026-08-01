@@ -24,12 +24,10 @@ class TestPhotoResponse:
             is_public=True,
             created_at=now,
             updated_at=now,
-            is_active=True,
         )
         assert schema.id == "123e4567-e89b-12d3-a456-426614174000"
         assert schema.filename == "photo_001.jpg"
         assert schema.is_public is True
-        assert schema.is_active is True
 
     def test_photo_response_default_is_public(self):
         """PhotoResponse defaults is_public to False."""
@@ -41,7 +39,6 @@ class TestPhotoResponse:
             filename="pic.jpg",
             created_at=now,
             updated_at=now,
-            is_active=True,
         )
         assert schema.is_public is False
 
@@ -55,7 +52,6 @@ class TestPhotoResponse:
             id="test-uuid-1234",
             filename="orm_test.jpg",
             is_public=True,
-            is_active=True,
             created_at=now,
             updated_at=now,
         )

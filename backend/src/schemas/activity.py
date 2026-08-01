@@ -53,5 +53,4 @@ class ActivityResponse(ActivityBase):
     id: str
     created_at: datetime
     updated_at: datetime
-    is_active: bool
     occupied: int = 0  # computed: count of Records for this activity

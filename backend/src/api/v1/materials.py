@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from src.db import SessionDep
 from src.errors import ErrorCode, ErrorDetail
+from src.models.enums import ArchiveStatus
 from src.schemas.common import PaginatedResponse
 from src.schemas.material import MaterialCreate, MaterialPatch, MaterialResponse, MaterialUpdate
 from src.services.material import MaterialService, get_material_service
@@ -29,9 +30,17 @@ async def list_materials(
     session: SessionDep,
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
+    status: ArchiveStatus = Query(ArchiveStatus.ACTIVE),
 ) -> PaginatedResponse[MaterialResponse]:
-    """Return all active materials."""
-    return await service.list(db_session=session, page=page, per_page=per_page)
+    """Return materials filtered by archive status (default: active).
+
+    ``status`` accepts ``active`` (default), ``archived``, or ``all`` — see
+    ``ArchiveStatus``. Invalid values are rejected with 422 by FastAPI's
+    enum validation.
+    """
+    return await service.list(
+        db_session=session, page=page, per_page=per_page, status=status
+    )
 
 
 @router.get("/{material_id}", response_model=MaterialResponse)

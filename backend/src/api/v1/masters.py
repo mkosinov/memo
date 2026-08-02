@@ -8,6 +8,7 @@ from sqlalchemy import asc
 
 from src.db import SessionDep
 from src.errors import ErrorCode, ErrorDetail
+from src.models.enums import ArchiveStatus
 from src.models.master import Master
 from src.schemas.common import PaginatedResponse
 from src.schemas.master import MasterCreate, MasterPatch, MasterResponse, MasterUpdate, ReorderRequest
@@ -31,12 +32,20 @@ async def list_masters(
     session: SessionDep,
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
+    status: ArchiveStatus = Query(ArchiveStatus.ACTIVE),
 ) -> PaginatedResponse[MasterResponse]:
-    """Return all active masters sorted by sort_order, then name."""
+    """Return masters filtered by archive status (default: active),
+    sorted by sort_order, then name.
+
+    ``status`` accepts ``active`` (default), ``archived``, or ``all`` — see
+    ``ArchiveStatus``. Invalid values are rejected with 422 by FastAPI's
+    enum validation.
+    """
     return await service.list(
         db_session=session,
         page=page,
         per_page=per_page,
+        status=status,
         order_by=[asc(Master.sort_order), asc(Master.first_name)],
     )
 

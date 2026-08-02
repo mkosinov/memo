@@ -5,11 +5,12 @@ from __future__ import annotations
 from datetime import datetime
 from functools import lru_cache
 
-from sqlalchemy import func, select
+from sqlalchemy import func, not_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.activity import Activity
 from src.models.client import Client
+from src.models.enums import ArchiveStatus
 from src.models.payment import Payment
 from src.models.record import Record
 from src.repositories.generic import get_soft_delete_repository
@@ -100,10 +101,13 @@ async def list_clients_with_stats(
     # 4. Main query — no outerjoin to stat subqueries; scalar subqueries are inline
     query = select(*base_cols)
 
-    # 5. Apply is_active filter: default to True (active only) when not specified
-    is_active_filter = params.is_active if params.is_active is not None else True
-    query = query.where(Client.is_active == is_active_filter)
-    count_query = count_query.where(Client.is_active == is_active_filter)
+    # 5. Apply archive status filter (default: active only; ALL = no filter)
+    if params.status == ArchiveStatus.ACTIVE:
+        query = query.where(Client.is_active)
+        count_query = count_query.where(Client.is_active)
+    elif params.status == ArchiveStatus.ARCHIVED:
+        query = query.where(not_(Client.is_active))
+        count_query = count_query.where(not_(Client.is_active))
 
     # 6. Apply other filters
     if params.search:

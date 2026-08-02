@@ -4,7 +4,7 @@ from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.models.enums import Channel
+from src.models.enums import ArchiveStatus, Channel
 
 
 class ClientBase(BaseModel):
@@ -72,7 +72,7 @@ class ClientListParams(BaseModel):
     page: int = Field(default=1, ge=1)
     per_page: int = Field(default=20, ge=1, le=100)
     search: str | None = None
-    is_active: bool | None = None
+    status: ArchiveStatus = ArchiveStatus.ACTIVE
     created_from: date | None = None
     created_to: date | None = None
     updated_from: date | None = None

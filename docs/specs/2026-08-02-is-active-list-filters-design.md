@@ -9,7 +9,7 @@
 
 ## 1. Problem Statement
 
-Soft-delete entities (masters, locations, services, materials) support archive/restore (`is_active` flag, `PATCH .../restore`), but their **list endpoints always return only active records**. The admin tables therefore cannot show archived records, and the existing status filter dropdowns in 4 tables are **dead client-side filters** — they filter only within the already-active-only page of data, so "Все" and "Архив" never show archived rows.
+Soft-delete entities (masters, locations, services, materials) support archive/restore (`is_active` flag; restore = `PATCH /{id}` with `{is_active: true}` via the Patch schemas — there is no dedicated restore endpoint), but their **list endpoints always return only active records**. The admin tables therefore cannot show archived records, and the existing status filter dropdowns in 4 tables are **dead client-side filters** — they filter only within the already-active-only page of data, so "Все" and "Архив" never show archived rows.
 
 Additionally, the **clients endpoint has a latent bug**: `services/client.py` (~103–106) computes `is_active_filter = params.is_active if params.is_active is not None else True` — absent param is coerced to active-only, so the ClientsTable «Все» filter can never show archived records server-side. Clients is aligned to the new convention in this feature.
 
@@ -28,9 +28,11 @@ Additionally, the **clients endpoint has a latent bug**: `services/client.py` (~
 - **API default backward compatibility** — waived by user. Callers needing active-only must pass `is_active=true` (caller audit, §4a).
 - **No new archive/restore button work** — existing buttons already invalidate queries.
 - **No E2E tests** — project practice is unit/integration only.
-- **ClientsTable frontend** — no changes (already sends `is_active` per filter; the fix is backend-only).
+- **ClientsTable frontend** — one change only: `defaultFilters.is_active` `null → true` (§5.5). No other changes (already sends `is_active` per filter).
 - **Pagination/`per_page` behavior** — unchanged (tables fetch `per_page: 100` and slice client-side; archive/all views inherit the same cap — accepted limitation).
 - **Empty-state UX copy** — filtered-empty views use the existing generic "not found" row.
+- **Delete-on-archived-row UX** — known limitation (accepted): row «Удалить» on an already-archived record → `SoftDeleteRepository.delete` returns `False` → 404 toast (all 5 entities; newly reachable via «Архив»/«Все» views). Follow-up: hide the delete action for archived rows.
+- **Clients restore UI** — archived clients visible but unrestorable from the UI (§5.5); covered by the existing ClientsTable restore-buttons follow-up issue.
 - No changes to non-soft-delete entities (tags, visitors stay on base `GenericService`).
 
 ## 4. Param Encoding (user decision, rev 5)
@@ -53,9 +55,9 @@ Additionally, the **clients endpoint has a latent bug**: `services/client.py` (~
 
 Because absent param now returns **all** records (was active-only), the implementation MUST audit and update every existing caller that relies on active-only behavior:
 
-- **Frontend:** all callers of `getMasters` / `getLocations` / `getServices` / `getMaterials` outside the 4 tables (schedule page, booking/record forms, selects, legends, etc.) must pass `is_active: true` where archived records must not appear. Deliverable: a list of audited call sites in the PR description; each either passes `is_active: true` or is confirmed all-records-tolerant.
-- **Backend:** all internal callers of `SoftDeleteRepository.list` / `GenericService.list` / `ServiceService.list` (other services, stats queries) must pass `is_active=True` explicitly where they need active-only. Callers previously passing `include_inactive=True` map to `is_active=None`.
-- **Clients:** `ClientService.list` callers audited the same way (default flips from active-only to all).
+- **Frontend (admin AND public web):** all callers of `getMasters` / `getLocations` / `getServices` / `getMaterials` outside the 4 tables (schedule page, booking/record forms, selects, legends, etc.) must pass `is_active: true` where archived records must not appear. **Includes the public web app (`frontend/web`):** `app/hooks/useSchedule.ts:41/47/53` calls `getServices()`/`getMasters()`/`getLocations()` with no params — without the fix the public colourmountains schedule renders archived entities. **`getClients` callers:** `RecordsContext.tsx:89` (`getClients()` — record-form client picker) must pass `is_active: true`. Deliverable: a list of audited call sites in the PR description; each either passes `is_active: true` or is confirmed all-records-tolerant.
+- **Backend:** all internal callers of `SoftDeleteRepository.list` / `GenericService.list` / `SoftDeleteService.list` / `ServiceService.list` (other services, stats queries) must pass `is_active=True` explicitly where they need active-only.
+- **Clients:** `ClientService.list` callers audited the same way (default flips from active-only to all) — see §5.5 for the phone-search caller.
 
 ## 5. Backend Changes
 
@@ -65,13 +67,13 @@ Because absent param now returns **all** records (was active-only), the implemen
 - Logic:
   - `is_active is None` → **no is_active filter** (all records)
   - `isinstance(is_active, bool)` → `where(table.is_active == is_active)`
-- All repository callers updated in the same PR (§4a); `include_inactive=True` → `is_active=None`.
+- `include_inactive=True` callers: **none exist** (panel verified — it is a dead parameter today); the rename is trivially safe, no caller mapping needed.
 
 ### 5.2 `backend/src/services/generic.py` — GenericService + NEW SoftDeleteService (user decision: polymorphism)
 
 - **Base `GenericService`:** NO is_active knowledge at all — no param, no `soft_delete` branching in `list()` (the current `if self._model.soft_delete:` guard + unconditional `where(table.is_active)` at ~65–66 is removed from base). `TagService` and `VisitorService` stay on base `GenericService` — structurally unaffected (eliminates the rev-4 BLOCKER by construction).
 - **NEW `SoftDeleteService(GenericService)`:** overrides `list()` accepting `is_active: bool | None = None`; applies `where(is_active == value)` only when not `None`; otherwise delegates to the base query unchanged. `get()` unchanged (no is_active filter today).
-- **Migration:** Master, Location, Material services move from `GenericService` → `SoftDeleteService`.
+- **Migration:** Master, Location, Material, **Client** services move from `GenericService` → `SoftDeleteService`. (Client is a soft-delete model — `AbstractModelSoftDelete`. ClientService keeps its custom list/stats overrides; the inherited `SoftDeleteService.list` governs the generic path used by phone search, §5.5.)
 - The `is_active` param is an **explicit named parameter**, never routed through `**filters` (double-where hazard from rev-3 panel).
 
 ### 5.3 `backend/src/services/service.py` — ServiceService (lines 31–54)
@@ -91,6 +93,9 @@ Because absent param now returns **all** records (was active-only), the implemen
 
 - `backend/src/services/client.py` (~103–106): remove the `else True` coercion — `is_active=None` → no filter (all). Net change: the `is_active_filter` fallback disappears.
 - `ClientListParams` (`schemas/client.py:75`): `is_active: bool | None = None` unchanged (default already None).
+- **Phone search (MAJOR from panel):** `GET /api/v1/clients/search?phone=` (clients.py:41–57, docstring "Search for an **active** client", calls `service.list(phone=...)`) must pass `is_active=True` explicitly — after the default flip it would return archived clients, and it feeds booking dedupe (useRecordMutations.ts:88, NewBookingTab.tsx:40): a new booking could attach to an archived client.
+- **ClientsTable default filter (MAJOR from panel):** `ClientsContext.defaultFilters.is_active = null` («Все» is the default) — after the coercion removal, archived clients would appear in the **default** table view. Change the default to `is_active: true` («Активные») so the default view is unchanged; archived clients appear only on explicit «Все»/«Архив» selection. This is the only ClientsTable frontend change.
+- **Restore gap (documented, out of scope):** restore for all entities is `PATCH /{id}` with `{is_active: true}` via the Patch schemas — there is no dedicated `restore` endpoint. `ClientPatch`/`ClientUpdate` omit `is_active` entirely, so archived clients are visible under «Все»/«Архив» but **cannot be restored from the UI** (existing follow-up issue covers restore buttons in ClientsTable).
 - Caller audit per §4a.
 
 ## 6. API Client Changes
@@ -144,11 +149,11 @@ Remove **only the dead status predicate** from the client-side filter memos (the
 
 Scenarios 2–3 make archived rows clickable into the edit modal for the first time. Hazard: the edit modals don't send `is_active`, the 4 `Update` schemas default `is_active: bool = True` (schemas/master.py:29, material.py:20, location.py:33, service.py:56), and `GenericService.update` does `model_dump()` — a PUT edit of an archived entity would **silently flip it back to active**.
 
-**Fix (frontend, minimal):** the edit modals for the 4 entities include the record's current `is_active` value in the update payload. No UI change, no backend update-path change, no schema change.
+**Fix (frontend, minimal):** the edit modals for the 4 entities include the record's current `is_active` value in the update payload. No UI change, no backend update-path change, no schema change. **Noted root hazard:** the backend `Update`-schema default (`is_active: bool = True`) remains a resurrection trap for any *future* or non-modal PUT caller — flagged here so it isn't reintroduced; fixing the schema default is out of scope.
 
 ### 7.6 Caller audit (frontend side of §4a)
 
-Audit all non-table callers of the 4 getters (schedule page, booking/record forms, selects, legends); pass `is_active: true` where archived records must not appear. Deliverable: audited call-site list in the PR description.
+Audit all non-table callers of the 4 getters **in both apps** (`frontend/admin` and `frontend/web` — including `useSchedule.ts:41/47/53` on the public site) plus `getClients` callers (`RecordsContext.tsx:89`); pass `is_active: true` where archived records must not appear. Deliverable: audited call-site list in the PR description.
 
 ## 8. User Scenarios (Acceptance Criteria)
 
@@ -157,7 +162,7 @@ Audit all non-table callers of the 4 getters (schedule page, booking/record form
 3. Filter «Архив» → request with `is_active=false` → only archived masters → «Восстановить» button returns a master to active; after invalidation the row disappears from the archive view.
 3a. Inverse flow: in «Активные» view, archiving a row → after invalidation the row disappears from the active view (and appears under «Архив»).
 4. Same behavior on `/locations`, `/services`, `/materials` (options «Активные»/«Все»/«Архив», default «Активные»).
-5. `/clients` — filter «Все» now correctly shows active + archived clients (latent backend bug fixed); «Активные»/«Архив» unchanged.
+5. `/clients` — default view unchanged («Активные» default); filter «Все» now correctly shows active + archived clients (latent backend bug fixed); archived clients are identifiable but **not restorable from the UI** (§5.5 restore gap, follow-up issue).
 6. API contract: `GET /api/v1/masters` without `is_active` returns **all** records (breaking change, explicitly waived; all in-repo callers updated per §4a).
 
 ## 9. Testing Approach
@@ -165,7 +170,8 @@ Audit all non-table callers of the 4 getters (schedule page, booking/record form
 ### Backend (pytest)
 
 - Extend the `TestClientListFilterIsActive` pattern (`backend/tests/test_client_stats.py:420–450`) for the 4 entities, parametrized: **absent (=all) / `is_active=true` / `is_active=false`** — all three behaviorally distinct under the rev-5 encoding.
-- **Update the existing clients tests** for the new semantics: absent `is_active` → all records (the current test suite encodes the old `else True` coercion and will fail until updated).
+- **Update the existing clients tests** for the new semantics: absent `is_active` → all records. Note (panel): `test_filter_is_active_none_returns_all` currently asserts only `total >= 1` and passes under both semantics — it must be strengthened to **assert archived inclusion** (e.g. an archived client appears in the absent-param response), or the new behavior is unverified.
+- Phone-search test: `GET /api/v1/clients/search?phone=` returns only active clients (locks the §5.5 `is_active=True` fix).
 - Unit tests for `SoftDeleteService.list` (new class: None / True / False) and `ServiceService.list` (eager-load override with the same 3 states), including keeping `is_active` out of `**filters`.
 - **Regression (simplified by polymorphism):** `GET /api/v1/tags` and `GET /api/v1/visitors` return 200 — structurally guaranteed (tags/visitors stay on base `GenericService`), smoke-level assertion suffices.
 - Router-level test: `?is_active=true/false` parse as bools; absent → None; `?is_active=foo` → 422 (documented behavior: previously the undeclared param was silently ignored).
@@ -206,8 +212,8 @@ Audit all non-table callers of the 4 getters (schedule page, booking/record form
 - [ ] `/locations`: same three-option filter behavior
 - [ ] `/services`: same three-option filter behavior
 - [ ] `/materials` (tab/section under services): same three-option filter behavior
-- [ ] `/clients`: «Все» shows active + archived clients
-- [ ] Schedule page and booking forms show no archived entities in their selects/lists (caller audit)
+- [ ] `/clients`: default view shows active clients only; «Все» shows active + archived clients
+- [ ] Admin schedule page AND public web schedule (colourmountains.ru) show no archived entities in their selects/lists (caller audit, §4a/§7.6)
 
 ## 12. Spec Panel Findings — Resolution History
 
@@ -242,7 +248,26 @@ Audit all non-table callers of the 4 getters (schedule page, booking/record form
 | `IsActiveFilter` alias placement → layering inversion | simplicity | MINOR | Rev 5: moot — alias dropped, inline `bool \| None` |
 | Mixed bool/"all" sentinel acceptable but enum more canonical | best-practices | MINOR | Rev 5: moot — sentinel encoding replaced per user decision |
 
-### Rev 5 panel (3-state `bool | None` encoding + SoftDeleteService + clients alignment) — pending, see G1b report
+### Rev 5 panel (2026-08-02, 3-state `bool | None` encoding + SoftDeleteService + clients alignment; 2/5 perspectives available)
+
+**Availability:** completeness ✅, simplicity ✅; feasibility ❌ unavailable (malformed output + empty retry), consistency ❌ unavailable (empty + cancelled), best-practices ❌ unavailable (empty + cancelled) — all per availability policy (1 retry each).
+
+| Finding | Perspective | Severity | Resolution |
+|---------|-------------|----------|------------|
+| ClientService omitted from SoftDeleteService migration — after base loses the guard, `GET /clients/search?phone=` returns archived clients → bookings can attach to archived clients (booking dedupe) | completeness | MAJOR | §5.2: ClientService added to migration; §5.5: phone search passes `is_active=True` |
+| Second consumer app missed: `frontend/web` useSchedule.ts:41/47/53 calls the 3 getters with no params → public schedule would render archived entities | completeness | MAJOR | §4a/§7.6: audit extended to frontend/web + explicit call sites; §11 visual check added |
+| Clients default view would flip to «Все» (defaultFilters.is_active=null) showing archived, unrestorable, badge-less clients | completeness | MAJOR | §5.5: defaultFilters.is_active → `true`; restore gap documented (§3/§5.5) |
+| `RecordsContext.tsx:89 getClients()` (record-form client picker) outside both audit lists → would include archived clients | completeness | MAJOR | §4a/§7.6: getClients callers added, pass `is_active: true` |
+| Delete on archived row → 404 toast (newly reachable) | completeness | MINOR | §3: accepted known limitation + follow-up (hide delete for archived rows) |
+| §5.1 overstatement: `include_inactive` is never passed by any caller (dead param) | completeness | MINOR | §5.1 corrected: rename trivially safe |
+| No restore endpoint exists; restore = PATCH {is_active:true}; clients can't be restored (ClientPatch omits is_active) | completeness | MINOR | §1/§5.5 stated explicitly |
+| Clients test `test_filter_is_active_none_returns_all` passes under both semantics (asserts total>=1) | completeness | MINOR | §9: must assert archived inclusion |
+| §7.5 frontend-only fix leaves backend Update-schema default as resurrection trap | completeness | MINOR | §7.5 root hazard documented |
+| `''` → `'all'` state rename is optional churn beyond minimum | simplicity | MINOR | Kept (harmless polish, explicit state union); acknowledged |
+| §7.5 extends pre-approved "minimal frontend" envelope (4 modals + mocks) | simplicity | MINOR | Real hazard, simplest fix; flagged for user confirmation at G1b |
+| is_active logic in 3 places (repository, SoftDeleteService, ServiceService override) | simplicity | MINOR | Direction noted; ServiceService may compose via shared path in plan if trivial |
+
+Verdicts: completeness SOUND_WITH_CONCERNS (all concerns resolved above), simplicity SOUND_WITH_CONCERNS (no BLOCKER/MAJOR).
 
 ## 13. Open Questions
 

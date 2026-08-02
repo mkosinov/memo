@@ -26,7 +26,7 @@ import src.services.service  # noqa: F401
 import src.services.tag  # noqa: F401
 import src.services.visitor  # noqa: F401
 
-from src.services.generic import GenericService
+from src.services.generic import GenericService, SoftDeleteService
 
 # Service classes + factories
 from src.services.activity import ActivityService, get_activity_service
@@ -74,7 +74,26 @@ from src.schemas.visitor import VisitorPatch
 
 # ─── Исключения: сервисы с override-семантикой patch ────────────────────────────
 # Обязаны иметь собственные тесты (test_api_services.py / test_api_photos.py / test_api_records.py).
-GENERIC_PATCH_EXCEPTIONS: set[type] = {ServiceService, PhotoService, RecordService}
+# ``SoftDeleteService`` — абстрактный промежуточный базовый класс (#195):
+# не привязан к конкретной модели/схеме, не тестируется напрямую; его
+# конкретные подклассы (Master/Location/Material/Client) покрыты через
+# CONTRACT_CONFIG и обнаруживаются рекурсивно через ``_all_subclasses``.
+GENERIC_PATCH_EXCEPTIONS: set[type] = {ServiceService, PhotoService, RecordService, SoftDeleteService}
+
+
+def _all_subclasses(cls: type) -> list[type]:
+    """Рекурсивно собрать всех транзитивных потомков ``cls``.
+
+    ``GenericService.__subclasses__()`` возвращает только прямых наследников.
+    После #195 появилась промежуточная база ``SoftDeleteService``, чьи
+    конкретные подклассы (Master/Location/Material/Client) — внуки
+    ``GenericService`` и без рекурсии выпадали бы из contract-покрытия.
+    """
+    found: list[type] = []
+    for sub in cls.__subclasses__():
+        found.append(sub)
+        found.extend(_all_subclasses(sub))
+    return found
 
 
 # ─── EntityConfig ────────────────────────────────────────────────────────────────
@@ -283,7 +302,7 @@ def make_entity(request, db_session):
 # ─── Параметризация ──────────────────────────────────────────────────────────────
 def _contract_params() -> list:
     params = []
-    for cls in GenericService.__subclasses__():
+    for cls in _all_subclasses(GenericService):
         if cls in GENERIC_PATCH_EXCEPTIONS:
             continue
         cfg = CONTRACT_CONFIG.get(cls)
@@ -296,8 +315,8 @@ def _contract_params() -> list:
 
 # ─── Guard-тест ──────────────────────────────────────────────────────────────────
 def test_all_generic_subclasses_covered_or_excepted():
-    """Каждый подкласс GenericService — в CONTRACT_CONFIG или в исключениях."""
-    for cls in GenericService.__subclasses__():
+    """Каждый (транзитивный) подкласс GenericService — в CONTRACT_CONFIG или в исключениях."""
+    for cls in _all_subclasses(GenericService):
         assert cls in CONTRACT_CONFIG or cls in GENERIC_PATCH_EXCEPTIONS, (
             f"{cls.__name__} не покрыт contract-тестом и не в GENERIC_PATCH_EXCEPTIONS"
         )

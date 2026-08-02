@@ -9,9 +9,10 @@ from __future__ import annotations
 from typing import Generic, TypeVar
 
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import func, not_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.models.enums import ArchiveStatus
 from src.repositories.generic import BaseRepository
 from src.schemas.common import PaginatedResponse
 from src.services.decorators import transactional
@@ -47,26 +48,19 @@ class GenericService(Generic[CreateSchemaT, UpdateSchemaT, ResponseSchemaT]):
         self._model = model
         self._response_schema = response_schema
 
-    # NOTE: is_active filter is applied only when the model's ``soft_delete``
-    # class flag is True (AbstractModelSoftDelete). Hard-delete models
-    # (AbstractModel, soft_delete=False) have no is_active column and list all
-    # rows. Mirrors SoftDeleteRepository.list() — keep in sync (#182/#194).
-    async def list(
-        self,
-        db_session: AsyncSession,
-        page: int = 1,
-        per_page: int = 20,
-        order_by=None,
-        **filters,
-    ) -> PaginatedResponse[ResponseSchemaT]:
-        """Return a paginated page of records (active only for soft-delete
-        entities), optionally filtered/ordered."""
+    # Base GenericService has NO is_active knowledge. Soft-delete filtering
+    # lives in SoftDeleteService below (#195).
+    def _list_stmt(self, **filters):
+        """Build the base select with equality filters applied."""
         stmt = select(self._model)
-        if self._model.soft_delete:
-            stmt = stmt.where(self._model.is_active)
         for key, value in filters.items():
             if value is not None:
                 stmt = stmt.where(getattr(self._model, key) == value)
+        return stmt
+
+    async def _paginate(
+        self, db_session: AsyncSession, stmt, page: int, per_page: int, order_by=None
+    ) -> PaginatedResponse[ResponseSchemaT]:
         if order_by is not None:
             stmt = stmt.order_by(*order_by)
         total = (
@@ -77,6 +71,19 @@ class GenericService(Generic[CreateSchemaT, UpdateSchemaT, ResponseSchemaT]):
         )
         items = [self._response_schema.model_validate(o) for o in result.scalars().all()]
         return PaginatedResponse(items=items, total=total, page=page, per_page=per_page)
+
+    async def list(
+        self,
+        db_session: AsyncSession,
+        page: int = 1,
+        per_page: int = 20,
+        order_by=None,
+        **filters,
+    ) -> PaginatedResponse[ResponseSchemaT]:
+        """Return a paginated page of records, optionally filtered/ordered."""
+        return await self._paginate(
+            db_session, self._list_stmt(**filters), page, per_page, order_by
+        )
 
     async def get(
         self, db_session: AsyncSession, id: str
@@ -143,3 +150,30 @@ class GenericService(Generic[CreateSchemaT, UpdateSchemaT, ResponseSchemaT]):
         """Reorder records by assigning sort_order based on the order of IDs."""
         orm_list = await self._repository.reorder(db_session, self._model, ids)
         return [self._response_schema.model_validate(o) for o in orm_list]
+
+
+class SoftDeleteService(GenericService[CreateSchemaT, UpdateSchemaT, ResponseSchemaT]):
+    """GenericService for soft-delete models (AbstractModelSoftDelete) with
+    archive-status list filtering (#195)."""
+
+    def _list_stmt(self, status: ArchiveStatus = ArchiveStatus.ACTIVE, **filters):
+        stmt = super()._list_stmt(**filters)
+        if status == ArchiveStatus.ACTIVE:
+            stmt = stmt.where(self._model.is_active)
+        elif status == ArchiveStatus.ARCHIVED:
+            stmt = stmt.where(not_(self._model.is_active))
+        return stmt
+
+    async def list(
+        self,
+        db_session: AsyncSession,
+        page: int = 1,
+        per_page: int = 20,
+        order_by=None,
+        status: ArchiveStatus = ArchiveStatus.ACTIVE,
+        **filters,
+    ) -> PaginatedResponse[ResponseSchemaT]:
+        """Return a paginated page filtered by archive status."""
+        return await self._paginate(
+            db_session, self._list_stmt(status=status, **filters), page, per_page, order_by
+        )

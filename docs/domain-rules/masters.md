@@ -30,7 +30,7 @@
 ## API Endpoints
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | /api/v1/masters | List all active masters |
+| GET | /api/v1/masters | List records — `?status=active` (default) \| `archived` \| `all` |
 | GET | /api/v1/masters/{id} | Get master by ID |
 | POST | /api/v1/masters | Create master |
 | PUT | /api/v1/masters/{id} | Update master |

@@ -27,7 +27,7 @@ A Client is a customer who books master classes. All fields are nullable — a C
 - **`last_record`** = `MAX(Activity.start)` over all active Records of this client (NO status filter — includes cancelled/missed/waiting). Shows the latest activity date among all records the client was booked for. `null` if the client has no active records. Implemented as a correlated scalar subquery in `ClientService` (`last_record_sq`). NOTE: prior to #131 this was called `last_visit` and filtered by `Visit.status='visited'`.
 - **`missed_records`** = `COUNT(Record.id) WHERE Record.status='missed' AND Record.is_active=True` (relies on persisted `Record.status` — see `compute_record_status` in `docs/domain-rules/records.md`). Rule: priority visited > missed > cancelled > waiting. A record with 1 visited + 1 missed visit → `Record.status='visited'` → NOT counted in `missed_records`.
 - **`last_record_activity`** (upcoming booking): *not implemented yet* — tracked in #133. Would be `MIN(Activity.start)` over active records where `Activity.start > now()`. Distinct from `last_record`: a client may have a `last_record` in the past AND a `last_record_activity` in the future.
-- **Filters:** search (ILIKE on name/phone), date ranges, record count ranges (`min_records`/`max_records`), missed ranges (`missed_from`/`missed_to`), payment ranges (`min_paid`/`max_paid`)
+- **Filters:** `status` (default `active`; `archived` | `all` — replaces the retired `is_active` query param), search (ILIKE on name/phone), date ranges, record count ranges (`min_records`/`max_records`), missed ranges (`missed_from`/`missed_to`), payment ranges (`min_paid`/`max_paid`)
 - **Sort columns:** name, records_count, last_record, total_paid, missed_records, created_at, updated_at
 - **Pagination:** page (default 1), per_page (default 20, max 100)
 
@@ -40,7 +40,7 @@ A Client is a customer who books master classes. All fields are nullable — a C
 ## API Endpoints
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | /api/v1/clients | List with pagination, filters, sorting |
+| GET | /api/v1/clients | List with pagination, filters, sorting — `?status=active` (default) \| `archived` \| `all` |
 | GET | /api/v1/clients/search?phone=X | Search by phone |
 | GET | /api/v1/clients/{id} | Get with stats |
 | POST | /api/v1/clients | Create |

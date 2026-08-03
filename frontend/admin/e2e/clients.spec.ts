@@ -334,10 +334,10 @@ test.describe('Clients page', () => {
     // Select "Неактивные" status filter — wait for filtered API response
     const statusSelect = page.locator('select:has(option:text("Все"))');
     const filterResponse = page.waitForResponse(
-      (resp) => resp.url().includes('/api/v1/clients') && resp.url().includes('is_active=false'),
+      (resp) => resp.url().includes('/api/v1/clients') && resp.url().includes('status=archived'),
       { timeout: 10_000 },
     );
-    await statusSelect.selectOption('false');
+    await statusSelect.selectOption('archived');
     await filterResponse;
 
     // After filtering, the table should show different results
@@ -346,14 +346,13 @@ test.describe('Clients page', () => {
     // Just verify the filter was applied — count changed or is 0
     // Don't assert <= because inactive clients could outnumber active ones
 
-    // Reset and verify filters are cleared. "Сбросить фильтры" calls
-    // resetFilters() which sets state to defaultFilters and triggers a refetch
-    // via the React Query hook — but the resulting URL pattern is hard to match
-    // (the param is simply omitted, not sent as is_active=true/false). Use a
-    // content-based assertion on the status select: it must return to "Все"
-    // (empty value) after reset.
+    // Reset and verify filters return to default. "Сбросить фильтры" calls
+    // resetFilters() which sets state to defaultFilters (status='active') and
+    // triggers a refetch via the React Query hook sending status=active. Use a
+    // content-based assertion on the status select: it must return to
+    // "Активные" (value 'active') after reset.
     await page.locator('text=Сбросить фильтры').click();
-    await expect(statusSelect).toHaveValue('', { timeout: 10_000 });
+    await expect(statusSelect).toHaveValue('active', { timeout: 10_000 });
     const resetCount = await page.locator('table tbody tr').count();
     expect(resetCount).toBe(initialCount);
   });

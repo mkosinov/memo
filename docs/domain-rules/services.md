@@ -47,7 +47,7 @@ A Service represents a type of master class (painting, sculpture, etc.). It defi
 ## API Endpoints
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | /api/v1/services | List active |
+| GET | /api/v1/services | List records — `?status=active` (default) \| `archived` \| `all` |
 | GET | /api/v1/services/{id} | Get with tariffs |
 | POST | /api/v1/services | Create with tariffs |
 | PUT | /api/v1/services/{id} | Full update (tariffs replaced) |

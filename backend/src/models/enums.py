@@ -42,3 +42,11 @@ class Channel(str, enum.Enum):
     TELEGRAM = "telegram"
     MAX = "max"
     WHATSAPP = "whatsapp"
+
+
+class ArchiveStatus(str, enum.Enum):
+    """List filter for soft-delete entities: active (default), archived, or all."""
+
+    ACTIVE = "active"
+    ARCHIVED = "archived"
+    ALL = "all"

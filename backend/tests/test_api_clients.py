@@ -357,6 +357,62 @@ class TestSearchClientEdgeCases:
         assert resp.status_code == 422
 
 
+# ─── Phone Search active-only regression (spec §5.5, #195) ────────────────────
+
+
+class TestPhoneSearchActiveOnlyRegression:
+    """Lock spec §5.5: GET /api/v1/clients/search?phone=X must always be
+    active-only — archived clients must NEVER surface via phone search.
+
+    This is a regression guard for the #195 archive-status refactor: although
+    the list filter gained a `status=all` mode, the phone search endpoint
+    is required to keep excluding soft-deleted clients.
+    """
+
+    def test_archived_client_phone_search_returns_404(
+        self, api_client, create_client
+    ) -> None:
+        """Archive a client with a known phone → search must 404."""
+        client = create_client(phone="+79990009988", name="To Archive")
+        api_client.delete(f"/api/v1/clients/{client['id']}")
+
+        resp = api_client.get(
+            "/api/v1/clients/search", params={"phone": "+79990009988"}
+        )
+        assert resp.status_code == 404
+
+    def test_active_client_phone_search_returns_200(
+        self, api_client, create_client
+    ) -> None:
+        """Active client with the same phone number stays searchable."""
+        client = create_client(phone="+79990008877", name="Stays Active")
+
+        resp = api_client.get(
+            "/api/v1/clients/search", params={"phone": "+79990008877"}
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["id"] == client["id"]
+        assert body["is_active"] is True
+
+    def test_archived_excluded_even_if_partner_active(
+        self, api_client, create_client
+    ) -> None:
+        """Two clients share a phone; the archived one is never returned."""
+        shared = "+79990007766"
+        active_client = create_client(phone=shared, name="Active Sharer")
+        archived_client = create_client(phone=shared, name="Archived Sharer")
+        api_client.delete(f"/api/v1/clients/{archived_client['id']}")
+
+        resp = api_client.get(
+            "/api/v1/clients/search", params={"phone": shared}
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["id"] == active_client["id"]
+        assert body["is_active"] is True
+
+
 # ─── Response Contract ────────────────────────────────────────────────────────
 
 

@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { getLocations } from '@memo/api-client';
 import type { LocationResponse } from '@memo/api-client';
 import { useUpdateLocation, usePatchLocation, useCreateLocation, useDeleteLocation } from '@/hooks/useLocationsMutations';
@@ -38,9 +38,18 @@ const COLUMNS: Column[] = [
 // ─── Component ───────────────────────────────────────────────────────────
 
 export function LocationsTable() {
+  // ─── Filter state ────────────────────────────────────────────────────
+  // `status` is declared above `useQuery` because the query is keyed on it
+  // (server-side archive filter via ListParams.status).
+  const [search, setSearch] = useState('');
+  const [status, setStatus] = useState<'active' | 'all' | 'archived'>('active');
+  const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState(10);
+
   const { data: locations = [], isLoading, error, refetch } = useQuery<LocationResponse[]>({
-    queryKey: ['locations'],
-    queryFn: () => getLocations({ per_page: 100 }).then(r => r.items),
+    queryKey: ['locations', status],
+    queryFn: () => getLocations({ per_page: 100, status }).then(r => r.items),
+    placeholderData: keepPreviousData,
   });
 
   const updateLocation = useUpdateLocation();
@@ -59,12 +68,6 @@ export function LocationsTable() {
   });
 
   const VISIBLE_COLUMNS = COLUMNS.filter((c) => visibleKeys.includes(c.key));
-
-  // ─── Filter state ────────────────────────────────────────────────────
-  const [search, setSearch] = useState('');
-  const [status, setStatus] = useState('');
-  const [page, setPage] = useState(0);
-  const [pageSize, setPageSize] = useState(10);
 
   // ─── Sort state ──────────────────────────────────────────────────────
   const [sortField, setSortField] = useState<string | null>(null);
@@ -88,19 +91,15 @@ export function LocationsTable() {
 
   const filteredLocations = useMemo(() => {
     return locations.filter((loc) => {
-      // Search filter (name or address contains)
       if (search) {
         const q = search.toLowerCase();
         const nameMatch = loc.name.toLowerCase().includes(q);
         const addrMatch = (loc.address ?? '').toLowerCase().includes(q);
         if (!nameMatch && !addrMatch) return false;
       }
-      // Status filter
-      if (status === 'active' && !loc.is_active) return false;
-      if (status === 'archived' && loc.is_active) return false;
       return true;
     });
-  }, [locations, search, status]);
+  }, [locations, search]);
 
   // ─── Sorted data ─────────────────────────────────────────────────────
 
@@ -158,6 +157,8 @@ export function LocationsTable() {
         (payload as Record<string, unknown>)[key] = val;
       }
     }
+    // Preserve archive state — backend Update schema defaults is_active=True (#195)
+    (payload as Record<string, unknown>).is_active = editLocation.is_active;
     try {
       await updateLocation.mutateAsync({
         id: editLocation.id,
@@ -246,8 +247,8 @@ export function LocationsTable() {
           search={search}
           status={status}
           onSearchChange={setSearch}
-          onStatusChange={setStatus}
-          onReset={() => { setSearch(''); setStatus(''); }}
+          onStatusChange={(v) => setStatus(v as 'active' | 'all' | 'archived')}
+          onReset={() => { setSearch(''); setStatus('active'); }}
         />
         <div className="flex items-center gap-2">
           <ColumnPicker

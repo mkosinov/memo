@@ -29,7 +29,8 @@ describe('ClientsFilters', () => {
   it('renders status filter select', () => {
     render(<ClientsFilters />);
     expect(screen.getByText('Статус')).toBeInTheDocument();
-    expect(screen.getByDisplayValue('Все')).toBeInTheDocument();
+    // Default is «Активные» (filters.status === 'active')
+    expect(screen.getByDisplayValue('Активные')).toBeInTheDocument();
   });
 
   it('renders visit range inputs', () => {
@@ -69,23 +70,35 @@ describe('ClientsFilters', () => {
     expect(resetFilters).toHaveBeenCalledTimes(1);
   });
 
-  it('calls setFilters when status select changes', () => {
+  it('selecting «Неактивные» sets status to archived', () => {
     const setFilters = vi.fn();
     mockUseClients.mockReturnValue(createMockClientsContext({ setFilters }));
     render(<ClientsFilters />);
-    const select = screen.getByDisplayValue('Все');
-    fireEvent.change(select, { target: { value: 'true' } });
-    expect(setFilters).toHaveBeenCalledWith({ is_active: true });
+    const select = screen.getByDisplayValue('Активные');
+    fireEvent.change(select, { target: { value: 'archived' } });
+    expect(setFilters).toHaveBeenCalledWith({ status: 'archived' });
   });
 
-  it('calls setFilters with null when status reset to all', () => {
+  it('selecting «Все» sets status to all', () => {
     const setFilters = vi.fn();
     mockUseClients.mockReturnValue(createMockClientsContext({ setFilters }));
     render(<ClientsFilters />);
-    const select = screen.getByDisplayValue('Все');
-    fireEvent.change(select, { target: { value: 'true' } });
-    fireEvent.change(select, { target: { value: '' } });
-    expect(setFilters).toHaveBeenLastCalledWith({ is_active: null });
+    const select = screen.getByDisplayValue('Активные');
+    // Switch away from default first, then back to «Все»
+    fireEvent.change(select, { target: { value: 'archived' } });
+    fireEvent.change(select, { target: { value: 'all' } });
+    expect(setFilters).toHaveBeenLastCalledWith({ status: 'all' });
+  });
+
+  it('selecting «Активные» sets status to active', () => {
+    const setFilters = vi.fn();
+    mockUseClients.mockReturnValue(createMockClientsContext({ setFilters }));
+    render(<ClientsFilters />);
+    const select = screen.getByDisplayValue('Активные');
+    // Switch to another option then back to «Активные»
+    fireEvent.change(select, { target: { value: 'all' } });
+    fireEvent.change(select, { target: { value: 'active' } });
+    expect(setFilters).toHaveBeenLastCalledWith({ status: 'active' });
   });
 
   it('calls setFilters when min visits input changes', () => {

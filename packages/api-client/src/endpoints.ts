@@ -84,12 +84,16 @@ import {
 export interface ListParams {
   page?: number;
   per_page?: number;
+  /** Archive filter — soft-delete entities only (masters/locations/services/materials).
+   *  Ignored by endpoints that don't declare it (tags, visitors). */
+  status?: 'active' | 'all' | 'archived' | null;
 }
 
 function listQuery(params?: ListParams): string {
   const search = new URLSearchParams();
   if (params?.page) search.set('page', String(params.page));
   if (params?.per_page) search.set('per_page', String(params.per_page));
+  if (params?.status) search.set('status', params.status);
   const qs = search.toString();
   return qs ? `?${qs}` : '';
 }

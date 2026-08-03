@@ -11,10 +11,11 @@ from functools import lru_cache
 from typing import TypeVar
 
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import not_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.base import Base
+from src.models.enums import ArchiveStatus
 
 ModelType = TypeVar("ModelType", bound=Base)
 
@@ -116,7 +117,10 @@ class BaseRepository:
 class SoftDeleteRepository(BaseRepository):
     """Repository for soft-deletable models — adds is_active filtering.
 
-    ``list()`` filters by ``is_active=True`` unless ``include_inactive=True``.
+    ``list()`` returns rows filtered by the ``status`` parameter:
+    ``ArchiveStatus.ACTIVE`` (default) → only is_active=True,
+    ``ArchiveStatus.ARCHIVED`` → only is_active=False,
+    ``ArchiveStatus.ALL`` → both active and archived.
     ``delete()`` sets ``is_active=False`` instead of removing the row.
     If the table has no ``is_active`` column, ``AttributeError`` surfaces
     as a loud error — this is intentional (type-safety by assignment).
@@ -124,12 +128,14 @@ class SoftDeleteRepository(BaseRepository):
 
     async def list(
         self, session: AsyncSession, table: type[ModelType], order_by=None,
-        include_inactive: bool = False, **filters
+        status: ArchiveStatus = ArchiveStatus.ACTIVE, **filters
     ) -> list[ModelType]:
-        """Return all active records, optionally filtered and ordered."""
+        """Return records filtered by archive status, optionally filtered and ordered."""
         stmt = select(table)
-        if not include_inactive:
+        if status == ArchiveStatus.ACTIVE:
             stmt = stmt.where(table.is_active)
+        elif status == ArchiveStatus.ARCHIVED:
+            stmt = stmt.where(not_(table.is_active))
         for key, value in filters.items():
             if value is not None:
                 stmt = stmt.where(getattr(table, key) == value)

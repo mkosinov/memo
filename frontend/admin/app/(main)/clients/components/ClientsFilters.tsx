@@ -2,6 +2,7 @@
 
 import { useCallback, useRef } from 'react';
 import { useClients } from '@/contexts/ClientsContext';
+import type { ClientFilters } from '@/contexts/ClientsContext';
 
 function useDebouncedCallback(callback: (value: string) => void, delay: number): (value: string) => void {
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -43,12 +44,12 @@ export function ClientsFilters() {
           <select
             className={inputClass}
             style={inputStyle}
-            value={filters.is_active === null ? '' : String(filters.is_active)}
-            onChange={(e) => setFilters({ is_active: e.target.value === '' ? null : e.target.value === 'true' })}
+            value={filters.status}
+            onChange={(e) => setFilters({ status: e.target.value as ClientFilters['status'] })}
           >
-            <option value="">Все</option>
-            <option value="true">Активные</option>
-            <option value="false">Неактивные</option>
+            <option value="all">Все</option>
+            <option value="active">Активные</option>
+            <option value="archived">Неактивные</option>
           </select>
         </div>
         <div>

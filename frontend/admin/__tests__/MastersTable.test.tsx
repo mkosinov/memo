@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, within } from '@testing-library/react';
+import { render, screen, fireEvent, within, waitFor } from '@testing-library/react';
 import {
   mockMasterResponse,
   mockMasterResponseArchived,
@@ -10,6 +10,10 @@ import {
 
 vi.mock('@tanstack/react-query', () => ({
   useQuery: vi.fn(),
+  // `keepPreviousData` is a sentinel symbol in real react-query; the component
+  // imports it for `placeholderData`. Provide a stable sentinel so the import
+  // resolves. The mocked `useQuery` ignores `placeholderData` anyway.
+  keepPreviousData: Symbol('keepPreviousData'),
   useQueryClient: vi.fn(() => ({
     invalidateQueries: vi.fn(),
   })),
@@ -19,6 +23,13 @@ vi.mock('@tanstack/react-query', () => ({
     isPending: false,
   })),
 }));
+
+// ─── Mock @memo/api-client — spy on getMasters (preserve other exports) ───
+
+vi.mock('@memo/api-client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@memo/api-client')>();
+  return { ...actual, getMasters: vi.fn() };
+});
 
 import { useQuery } from '@tanstack/react-query';
 const mockUseQuery = vi.mocked(useQuery);
@@ -59,10 +70,12 @@ vi.mock('@/contexts/UIContext', () => ({
 import { MastersTable } from '@/app/(main)/masters/components/MastersTable';
 import { useUpdateMaster, useDeleteMaster } from '@/hooks/useMastersMutations';
 import { useUI } from '@/contexts/UIContext';
+import { getMasters } from '@memo/api-client';
 
 const mockUseUpdateMaster = vi.mocked(useUpdateMaster);
 const mockUseDeleteMaster = vi.mocked(useDeleteMaster);
 const mockUseUI = vi.mocked(useUI);
+const mockGetMasters = vi.mocked(getMasters);
 
 // ─── Test data ───────────────────────────────────────────────────────────
 
@@ -82,34 +95,55 @@ const TEST_MASTERS = [
 // ─── Helpers ─────────────────────────────────────────────────────────────
 
 function setupQuery(masters: typeof TEST_MASTERS, isLoading = false) {
-  mockUseQuery.mockReturnValue({
-    data: masters,
-    isLoading,
-    error: null,
-    refetch: vi.fn(),
-    isSuccess: true,
-    isError: false,
-    isPending: false,
-    isFetching: false,
-    status: 'success',
-    fetchStatus: 'idle',
-    dataUpdatedAt: 0,
-    errorUpdatedAt: 0,
-    failureCount: 0,
-    failureReason: null,
-    errorUpdateCount: 0,
-    isFetched: true,
-    isFetchedAfterMount: true,
-    isInitialLoading: false,
-    isLoadingError: false,
-    isPlaceholderData: false,
-    isRefetchError: false,
-    isStale: false,
-    isRefetching: false,
-    isLoadingSuccess: true,
-    remove: vi.fn(),
-    promise: Promise.resolve({ data: TEST_MASTERS }),
-  } as unknown as ReturnType<typeof useQuery>);
+  // Resolve the getMasters spy with the supplied list so the component's
+  // `queryFn` (which calls `getMasters(...).then(r => r.items)`) settles.
+  mockGetMasters.mockResolvedValue({
+    items: masters,
+    total: masters.length,
+    page: 1,
+    per_page: 100,
+  });
+  // Drive `useQuery` through `mockImplementation` so the real `queryFn` is
+  // invoked on every render — this is what lets the getMasters spy record
+  // the call args (including the current `status`). The resolved promise is
+  // discarded; we inject the static `data` synchronously to keep these unit
+  // tests independent of react-query's async fetch machinery.
+  mockUseQuery.mockImplementation((((opts: { queryFn?: () => unknown }) => {
+    try {
+      void opts?.queryFn?.();
+    } catch {
+      // queryFn errors don't affect the injected static data
+    }
+    return {
+      data: masters,
+      isLoading,
+      error: null,
+      refetch: vi.fn(),
+      isSuccess: true,
+      isError: false,
+      isPending: false,
+      isFetching: false,
+      status: 'success',
+      fetchStatus: 'idle',
+      dataUpdatedAt: 0,
+      errorUpdatedAt: 0,
+      failureCount: 0,
+      failureReason: null,
+      errorUpdateCount: 0,
+      isFetched: true,
+      isFetchedAfterMount: true,
+      isInitialLoading: false,
+      isLoadingError: false,
+      isPlaceholderData: false,
+      isRefetchError: false,
+      isStale: false,
+      isRefetching: false,
+      isLoadingSuccess: true,
+      remove: vi.fn(),
+      promise: Promise.resolve({ data: masters }),
+    };
+  }) as unknown) as typeof useQuery);
+  return mockGetMasters;
 }
 
 function setupUpdateMock() {
@@ -223,16 +257,46 @@ describe('MastersTable', () => {
     expect(screen.queryByText('Петрова Анна')).not.toBeInTheDocument();
   });
 
-  it('filters by active status', () => {
-    setupQuery(TEST_MASTERS);
+  it('requests active masters by default', () => {
+    const spy = setupQuery(TEST_MASTERS);
     render(<MastersTable />);
 
-    const statusSelect = screen.getByLabelText('Фильтр по статусу');
-    fireEvent.change(statusSelect, { target: { value: 'active' } });
+    expect(spy).toHaveBeenCalledWith({ per_page: 100, status: 'active' });
+  });
 
-    expect(screen.getByText('Середа Ольга')).toBeInTheDocument();
-    expect(screen.getByText('Петрова Анна')).toBeInTheDocument();
-    expect(screen.queryByText('Большакова Юлия')).not.toBeInTheDocument();
+  it('requests archived masters when filter is "Архив"', () => {
+    const spy = setupQuery(TEST_MASTERS);
+    render(<MastersTable />);
+
+    fireEvent.change(screen.getByLabelText('Фильтр по статусу'), {
+      target: { value: 'archived' },
+    });
+
+    expect(spy).toHaveBeenCalledWith({ per_page: 100, status: 'archived' });
+  });
+
+  it('requests all masters when filter is "Все"', () => {
+    const spy = setupQuery(TEST_MASTERS);
+    render(<MastersTable />);
+
+    fireEvent.change(screen.getByLabelText('Фильтр по статусу'), {
+      target: { value: 'all' },
+    });
+
+    expect(spy).toHaveBeenCalledWith({ per_page: 100, status: 'all' });
+  });
+
+  it('resets status filter to active when reset button clicked', () => {
+    const spy = setupQuery(TEST_MASTERS);
+    render(<MastersTable />);
+
+    fireEvent.change(screen.getByLabelText('Фильтр по статусу'), {
+      target: { value: 'archived' },
+    });
+    fireEvent.click(screen.getByText('Сбросить'));
+
+    expect(screen.getByLabelText('Фильтр по статусу')).toHaveValue('active');
+    expect(spy).toHaveBeenLastCalledWith({ per_page: 100, status: 'active' });
   });
 
   it('resets filters when reset button clicked', () => {
@@ -463,5 +527,29 @@ describe('MastersTable', () => {
     const tbody = container.querySelector('tbody');
     // Should have a dash character in the avatar column
     expect(tbody?.textContent).toContain('—');
+  });
+
+  // ─── Edit preserves archive state (GH #195) ───────────────────────────
+
+  it('edit submit preserves is_active=false on archived master (GH #195)', async () => {
+    const updateMutateAsync = setupUpdateMock();
+    setupQuery(TEST_MASTERS);
+    render(<MastersTable />);
+
+    // Open the edit modal on the archived row (mockMasterResponseArchived id=m2,
+    // displayed as "Большакова Юлия").
+    const archivedRow = screen.getByText('Большакова Юлия').closest('tr')!;
+    fireEvent.click(archivedRow);
+
+    // Submit the modal — pre-populated fields are valid for the fixture.
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+    // Backend MasterUpdate schema defaults is_active=True; without sending
+    // the row's current value, editing an archived row silently resurrects
+    // it. The handler must propagate the row's is_active. (GH #195)
+    await waitFor(() => expect(updateMutateAsync).toHaveBeenCalled());
+    const [callArg] = updateMutateAsync.mock.calls[0];
+    expect(callArg.id).toBe(mockMasterResponseArchived.id);
+    expect(callArg.data.is_active).toBe(false);
   });
 });

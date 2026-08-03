@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — 2026-08-02
+
+### Added
+- **GH #195 — `status` filter param (ArchiveStatus: active|archived|all, default active) for soft-delete list endpoints + frontend archive views** — branch `feat/status-filter-archive-views-195` (12 commits: 724f8f6, 9d3a52a, 7209033, 18d0b57, 73aa5e7, 156c4a7, 0dff55e, 4e3f58c, 365b15d, e5bd15a, 81eef68, d3524bf):
+  - **Backend:** `ArchiveStatus` enum; `SoftDeleteRepository.list` param renamed `is_active` → `status`; new `SoftDeleteService` (archive-status filtering) replaces `GenericService` for soft-delete entities; 4 service migrations (Master/Location/Material/Client) + ServiceService eager-load override; `status` query param on masters/locations/materials/services list endpoints; clients `ClientListParams.status` + `list_clients_with_stats`.
+  - **api-client:** `ListParams.status` + `listQuery` serialization (default `active` omitted from query string).
+  - **Admin:** server-side archive filtering on Masters/Locations/Services/Materials tables (3 filter components); clients filters `is_active` → `status` enum, default «Активные»; edit modals preserve `is_active` on archived rows (4 tables); E2E `clients.spec.ts` updated (run deferred to CI).
+  - **Domain rules:** 5 docs synced (`docs/domain-rules/`).
+  - **Test results:** backend 854 passed / 3 skipped; api-client 144 passed / 4 failed (4 = known pre-existing #188, unchanged); admin vitest 1239 passed / 0 failed; tsc --noEmit clean.
+  - **Visual Compliance Gate (spec §11): ALL 8 checks PASS** — verified via dedicated Playwright scripts against a live stack (screenshots `/tmp/visual-compliance/section11/`). NOTE: the bundled `scripts/visual-compliance-check.sh` has a tooling bug (`networkidle` never resolves under Next.js HMR → false "ALL CHECKS PASSED" with 0 checks run); verification bypassed it — known tooling gap.
+  - **Deviations (architect-sanctioned, reviewed):** (1) Task 3 absorbed the services router `status` param (plan had it in Task 4) so API tests were real; (2) `services.py` router therefore untouched in Task 4.
+  - **Known follow-ups (not in scope):** restore buttons in ClientsTable (archived clients visible, not restorable from UI); `visual-compliance-check.sh` networkidle bug; dev-workflow seeding caveat (`seed.py` ignores `ENV_FILE`, pass `DATABASE_URL` explicitly).
+  - **48 files changed, +1564 / -278.**
+  - Design spec: `docs/specs/2026-08-02-is-active-list-filters-design.md` (rev 6, approved G1b)
+  - Plan: `docs/plans/2026-08-02-status-filter-archive-views-plan.md` (approved G2)
+
 ## [Unreleased] — 2026-08-01
 
 ### Added

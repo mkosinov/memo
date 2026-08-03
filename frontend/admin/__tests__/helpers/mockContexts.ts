@@ -142,7 +142,7 @@ export function createMockClientsContext(
     perPage: 20,
     filters: {
       search: '',
-      is_active: null,
+      status: 'active',
       created_from: '',
       created_to: '',
       updated_from: '',

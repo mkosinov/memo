@@ -13,7 +13,7 @@ import type { ClientWithStats, ClientResponse, ClientListResponse } from '@memo/
 
 export interface ClientFilters {
   search: string;
-  is_active: boolean | null;
+  status: 'active' | 'all' | 'archived';
   created_from: string;
   created_to: string;
   updated_from: string;
@@ -28,7 +28,7 @@ export interface ClientFilters {
 
 const defaultFilters: ClientFilters = {
   search: '',
-  is_active: null,
+  status: 'active',
   created_from: '',
   created_to: '',
   updated_from: '',

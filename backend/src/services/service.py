@@ -4,22 +4,30 @@ from __future__ import annotations
 
 from functools import lru_cache
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, not_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from src.models.enums import ArchiveStatus
 from src.repositories.generic import SoftDeleteRepository, get_soft_delete_repository
 from src.models.service import Service
 from src.models.tag import service_tags
 from src.models.tariff import Tariff
 from src.schemas.common import PaginatedResponse
 from src.schemas.service import ServiceCreate, ServicePatch, ServiceResponse, ServiceUpdate
-from src.services.generic import GenericService
+from src.services.generic import SoftDeleteService
 from src.services.decorators import transactional
 
 
-class ServiceService(GenericService[ServiceCreate, ServiceUpdate, ServiceResponse]):
-    """Service service with eager-loaded tariffs/tags and nested create/update."""
+class ServiceService(SoftDeleteService[ServiceCreate, ServiceUpdate, ServiceResponse]):
+    """Service service with eager-loaded tariffs/tags and nested create/update.
+
+    Overrides ``list`` to eager-load ``tariffs``/``tags`` via ``selectinload``.
+    The eager-load makes the select structurally incompatible with the
+    ``SoftDeleteService._list_stmt`` base (which uses a bare ``select(model)``),
+    so the archive-status clause is applied inline here rather than composed
+    (spec §5.3 explicitly permits this duplication for the eager-load override).
+    """
 
     NOT_NULL_FIELDS = {"title", "description", "image_url", "specialty", "min_age", "duration", "record_info"}
 
@@ -33,14 +41,19 @@ class ServiceService(GenericService[ServiceCreate, ServiceUpdate, ServiceRespons
         db_session: AsyncSession,
         page: int = 1,
         per_page: int = 20,
+        status: ArchiveStatus = ArchiveStatus.ACTIVE,
         **filters,
     ) -> PaginatedResponse[ServiceResponse]:
-        """Return a paginated page of active services with tariffs/tags eagerly loaded."""
+        """Return a paginated page of services filtered by archive status,
+        with tariffs/tags eagerly loaded."""
         stmt = (
             select(Service)
-            .where(Service.is_active)
             .options(selectinload(Service.tariffs), selectinload(Service.tags))
         )
+        if status == ArchiveStatus.ACTIVE:
+            stmt = stmt.where(Service.is_active)
+        elif status == ArchiveStatus.ARCHIVED:
+            stmt = stmt.where(not_(Service.is_active))
         for key, value in filters.items():
             if value is not None:
                 stmt = stmt.where(getattr(Service, key) == value)

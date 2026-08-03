@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, within } from '@testing-library/react';
+import { render, screen, fireEvent, within, waitFor } from '@testing-library/react';
 import {
   mockLocationResponse,
   mockLocationResponseArchived,
@@ -10,6 +10,10 @@ import {
 
 vi.mock('@tanstack/react-query', () => ({
   useQuery: vi.fn(),
+  // `keepPreviousData` is a sentinel symbol in real react-query; the component
+  // imports it for `placeholderData`. Provide a stable sentinel so the import
+  // resolves. The mocked `useQuery` ignores `placeholderData` anyway.
+  keepPreviousData: Symbol('keepPreviousData'),
   useQueryClient: vi.fn(() => ({
     invalidateQueries: vi.fn(),
   })),
@@ -19,6 +23,13 @@ vi.mock('@tanstack/react-query', () => ({
     isPending: false,
   })),
 }));
+
+// ─── Mock @memo/api-client — spy on getLocations (preserve other exports) ─
+
+vi.mock('@memo/api-client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@memo/api-client')>();
+  return { ...actual, getLocations: vi.fn() };
+});
 
 import { useQuery } from '@tanstack/react-query';
 const mockUseQuery = vi.mocked(useQuery);
@@ -59,10 +70,12 @@ vi.mock('@/contexts/UIContext', () => ({
 import { LocationsTable } from '@/app/(main)/locations/components/LocationsTable';
 import { useUpdateLocation, useDeleteLocation } from '@/hooks/useLocationsMutations';
 import { useUI } from '@/contexts/UIContext';
+import { getLocations } from '@memo/api-client';
 
 const mockUseUpdateLocation = vi.mocked(useUpdateLocation);
 const mockUseDeleteLocation = vi.mocked(useDeleteLocation);
 const mockUseUI = vi.mocked(useUI);
+const mockGetLocations = vi.mocked(getLocations);
 
 // ─── Test data ───────────────────────────────────────────────────────────
 
@@ -82,34 +95,55 @@ const TEST_LOCATIONS = [
 // ─── Helpers ─────────────────────────────────────────────────────────────
 
 function setupQuery(locations: typeof TEST_LOCATIONS, isLoading = false) {
-  mockUseQuery.mockReturnValue({
-    data: locations,
-    isLoading,
-    error: null,
-    refetch: vi.fn(),
-    isSuccess: true,
-    isError: false,
-    isPending: false,
-    isFetching: false,
-    status: 'success',
-    fetchStatus: 'idle',
-    dataUpdatedAt: 0,
-    errorUpdatedAt: 0,
-    failureCount: 0,
-    failureReason: null,
-    errorUpdateCount: 0,
-    isFetched: true,
-    isFetchedAfterMount: true,
-    isInitialLoading: false,
-    isLoadingError: false,
-    isPlaceholderData: false,
-    isRefetchError: false,
-    isStale: false,
-    isRefetching: false,
-    isLoadingSuccess: true,
-    remove: vi.fn(),
-    promise: Promise.resolve({ data: TEST_LOCATIONS }),
-  } as unknown as ReturnType<typeof useQuery>);
+  // Resolve the getLocations spy with the supplied list so the component's
+  // `queryFn` (which calls `getLocations(...).then(r => r.items)`) settles.
+  mockGetLocations.mockResolvedValue({
+    items: locations,
+    total: locations.length,
+    page: 1,
+    per_page: 100,
+  });
+  // Drive `useQuery` through `mockImplementation` so the real `queryFn` is
+  // invoked on every render — this is what lets the getLocations spy record
+  // the call args (including the current `status`). The resolved promise is
+  // discarded; we inject the static `data` synchronously to keep these unit
+  // tests independent of react-query's async fetch machinery.
+  mockUseQuery.mockImplementation((((opts: { queryFn?: () => unknown }) => {
+    try {
+      void opts?.queryFn?.();
+    } catch {
+      // queryFn errors don't affect the injected static data
+    }
+    return {
+      data: locations,
+      isLoading,
+      error: null,
+      refetch: vi.fn(),
+      isSuccess: true,
+      isError: false,
+      isPending: false,
+      isFetching: false,
+      status: 'success',
+      fetchStatus: 'idle',
+      dataUpdatedAt: 0,
+      errorUpdatedAt: 0,
+      failureCount: 0,
+      failureReason: null,
+      errorUpdateCount: 0,
+      isFetched: true,
+      isFetchedAfterMount: true,
+      isInitialLoading: false,
+      isLoadingError: false,
+      isPlaceholderData: false,
+      isRefetchError: false,
+      isStale: false,
+      isRefetching: false,
+      isLoadingSuccess: true,
+      remove: vi.fn(),
+      promise: Promise.resolve({ data: locations }),
+    };
+  }) as unknown) as typeof useQuery);
+  return mockGetLocations;
 }
 
 function setupUpdateMock() {
@@ -262,28 +296,46 @@ describe('LocationsTable', () => {
     expect(screen.queryByText('Альпика')).not.toBeInTheDocument();
   });
 
-  it('filters by active status', () => {
-    setupQuery(TEST_LOCATIONS);
+  it('requests active locations by default', () => {
+    const spy = setupQuery(TEST_LOCATIONS);
     render(<LocationsTable />);
 
-    const statusSelect = screen.getByLabelText('Фильтр по статусу');
-    fireEvent.change(statusSelect, { target: { value: 'active' } });
-
-    expect(screen.getByText('Студия на Невском')).toBeInTheDocument();
-    expect(screen.getByText('Альпика')).toBeInTheDocument();
-    expect(screen.queryByText('Гранд Отель Поляна')).not.toBeInTheDocument();
+    expect(spy).toHaveBeenCalledWith({ per_page: 100, status: 'active' });
   });
 
-  it('shows all locations when status filter is "all"', () => {
-    setupQuery(TEST_LOCATIONS);
+  it('requests archived locations when filter is "Архив"', () => {
+    const spy = setupQuery(TEST_LOCATIONS);
     render(<LocationsTable />);
 
-    const statusSelect = screen.getByLabelText('Фильтр по статусу');
-    fireEvent.change(statusSelect, { target: { value: '' } });
+    fireEvent.change(screen.getByLabelText('Фильтр по статусу'), {
+      target: { value: 'archived' },
+    });
 
-    expect(screen.getByText('Студия на Невском')).toBeInTheDocument();
-    expect(screen.getByText('Гранд Отель Поляна')).toBeInTheDocument();
-    expect(screen.getByText('Альпика')).toBeInTheDocument();
+    expect(spy).toHaveBeenCalledWith({ per_page: 100, status: 'archived' });
+  });
+
+  it('requests all locations when filter is "Все"', () => {
+    const spy = setupQuery(TEST_LOCATIONS);
+    render(<LocationsTable />);
+
+    fireEvent.change(screen.getByLabelText('Фильтр по статусу'), {
+      target: { value: 'all' },
+    });
+
+    expect(spy).toHaveBeenCalledWith({ per_page: 100, status: 'all' });
+  });
+
+  it('resets status filter to active when reset button clicked', () => {
+    const spy = setupQuery(TEST_LOCATIONS);
+    render(<LocationsTable />);
+
+    fireEvent.change(screen.getByLabelText('Фильтр по статусу'), {
+      target: { value: 'archived' },
+    });
+    fireEvent.click(screen.getByText('Сбросить'));
+
+    expect(screen.getByLabelText('Фильтр по статусу')).toHaveValue('active');
+    expect(spy).toHaveBeenLastCalledWith({ per_page: 100, status: 'active' });
   });
 
   it('resets filters when reset button clicked', () => {
@@ -524,5 +576,28 @@ describe('LocationsTable', () => {
     fireEvent.click(screen.getByLabelText('Название'));
     const theadAfter = document.querySelector('thead');
     expect(theadAfter?.textContent).toMatch(/Название/);
+  });
+
+  // ─── Edit preserves archive state (GH #195) ────────────────────────────
+
+  it('edit submit preserves is_active=false on archived location (GH #195)', async () => {
+    const updateMutateAsync = setupUpdateMock();
+    setupQuery(TEST_LOCATIONS);
+    render(<LocationsTable />);
+
+    // Open the edit modal on the archived row (mockLocationResponseArchived
+    // id=loc-2, displayed as "Гранд Отель Поляна").
+    const archivedRow = screen.getByText('Гранд Отель Поляна').closest('tr')!;
+    fireEvent.click(archivedRow);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+    // Backend LocationUpdate schema defaults is_active=True; without sending
+    // the row's current value, editing an archived row silently resurrects
+    // it. The handler must propagate the row's is_active. (GH #195)
+    await waitFor(() => expect(updateMutateAsync).toHaveBeenCalled());
+    const [callArg] = updateMutateAsync.mock.calls[0];
+    expect(callArg.id).toBe(mockLocationResponseArchived.id);
+    expect(callArg.data.is_active).toBe(false);
   });
 });

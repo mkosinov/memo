@@ -417,37 +417,46 @@ class TestClientListSort:
 
 # ─── Filter Tests ─────────────────────────────────────────────────────────────
 
-class TestClientListFilterIsActive:
-    """Verify is_active filter."""
+class TestClientListFilterStatus:
+    """Verify status filter (active default / archived / all)."""
 
-    def test_filter_is_active_true(self, api_client, create_client) -> None:
-        """is_active=true returns only active clients."""
+    def test_filter_status_active_default(self, api_client, create_client) -> None:
+        """Absent status returns only active clients (safe default)."""
         active = create_client(name="Active One")
-        # Create and delete another to have an inactive one
         inactive = create_client(name="Inactive One")
         api_client.delete(f"/api/v1/clients/{inactive['id']}")
 
-        resp = api_client.get("/api/v1/clients", params={"is_active": "true"})
+        resp = api_client.get("/api/v1/clients")
         ids = [c["id"] for c in resp.json()["items"]]
         assert active["id"] in ids
         assert inactive["id"] not in ids
 
-    def test_filter_is_active_false(self, api_client, create_client) -> None:
-        """is_active=false returns only soft-deleted clients."""
+    def test_filter_status_archived(self, api_client, create_client) -> None:
+        """status=archived returns only soft-deleted clients."""
         active = create_client(name="Active Two")
         inactive = create_client(name="Inactive Two")
         api_client.delete(f"/api/v1/clients/{inactive['id']}")
 
-        resp = api_client.get("/api/v1/clients", params={"is_active": "false"})
+        resp = api_client.get("/api/v1/clients", params={"status": "archived"})
         ids = [c["id"] for c in resp.json()["items"]]
         assert inactive["id"] in ids
         assert active["id"] not in ids
 
-    def test_filter_is_active_none_returns_all(self, api_client, create_client) -> None:
-        """No is_active filter returns all active clients (default behavior)."""
-        create_client(name="Default Client")
-        resp = api_client.get("/api/v1/clients")
-        assert resp.json()["total"] >= 1
+    def test_filter_status_all_includes_archived(self, api_client, create_client) -> None:
+        """status=all returns active AND archived clients (regression: must
+        assert archived inclusion, not just total >= 1)."""
+        active = create_client(name="Active Three")
+        inactive = create_client(name="Inactive Three")
+        api_client.delete(f"/api/v1/clients/{inactive['id']}")
+
+        resp = api_client.get("/api/v1/clients", params={"status": "all"})
+        ids = [c["id"] for c in resp.json()["items"]]
+        assert active["id"] in ids
+        assert inactive["id"] in ids
+
+    def test_filter_status_invalid_returns_422(self, api_client) -> None:
+        resp = api_client.get("/api/v1/clients", params={"status": "foo"})
+        assert resp.status_code == 422
 
 
 class TestClientListFilterDateRanges:
@@ -1110,14 +1119,14 @@ class TestClientStatsAggregationExtended:
 class TestClientListCombinedFilters:
     """Verify multiple filters working together."""
 
-    def test_search_with_is_active(self, api_client, create_client) -> None:
-        """search + is_active filter together."""
+    def test_search_with_status_active(self, api_client, create_client) -> None:
+        """search + status filter together."""
         active = create_client(name="Combined Active", phone="+79999500001")
         inactive = create_client(name="Combined Inactive", phone="+79999500002")
         api_client.delete(f"/api/v1/clients/{inactive['id']}")
 
         resp = api_client.get("/api/v1/clients", params={
-            "search": "Combined", "is_active": "true",
+            "search": "Combined", "status": "active",
         })
         ids = [c["id"] for c in resp.json()["items"]]
         assert active["id"] in ids

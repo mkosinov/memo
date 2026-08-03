@@ -297,7 +297,10 @@ export function ServicesTable() {
     try {
       await updateService.mutateAsync({
         id: editingService.id,
-        data: data as Record<string, unknown>,
+        // Preserve archive state — backend Update schema defaults is_active=True (#195).
+        // ServiceUpdate type intentionally excludes is_active (TODO #178); cast through
+        // Record<string, unknown> to match the previous pattern.
+        data: { ...(data as Record<string, unknown>), is_active: editingService.is_active } as Record<string, unknown>,
       });
       showToast('Услуга обновлена', undefined);
     } catch (err) {

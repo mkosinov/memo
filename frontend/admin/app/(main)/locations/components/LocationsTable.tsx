@@ -157,6 +157,8 @@ export function LocationsTable() {
         (payload as Record<string, unknown>)[key] = val;
       }
     }
+    // Preserve archive state — backend Update schema defaults is_active=True (#195)
+    (payload as Record<string, unknown>).is_active = editLocation.is_active;
     try {
       await updateLocation.mutateAsync({
         id: editLocation.id,

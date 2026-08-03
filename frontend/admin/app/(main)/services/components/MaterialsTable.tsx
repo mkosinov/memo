@@ -219,7 +219,10 @@ export function MaterialsTable() {
     try {
       await updateMaterial.mutateAsync({
         id: editingMaterial.id,
-        data: data as Record<string, unknown>,
+        // Preserve archive state — backend Update schema defaults is_active=True (#195).
+        // MaterialUpdate type intentionally excludes is_active (TODO #178); cast through
+        // Record<string, unknown> to match the previous pattern.
+        data: { ...(data as Record<string, unknown>), is_active: editingMaterial.is_active } as Record<string, unknown>,
       });
       showToast('Материал обновлён', undefined);
     } catch (err) {

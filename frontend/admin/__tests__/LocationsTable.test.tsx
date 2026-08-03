@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, within } from '@testing-library/react';
+import { render, screen, fireEvent, within, waitFor } from '@testing-library/react';
 import {
   mockLocationResponse,
   mockLocationResponseArchived,
@@ -576,5 +576,28 @@ describe('LocationsTable', () => {
     fireEvent.click(screen.getByLabelText('Название'));
     const theadAfter = document.querySelector('thead');
     expect(theadAfter?.textContent).toMatch(/Название/);
+  });
+
+  // ─── Edit preserves archive state (GH #195) ────────────────────────────
+
+  it('edit submit preserves is_active=false on archived location (GH #195)', async () => {
+    const updateMutateAsync = setupUpdateMock();
+    setupQuery(TEST_LOCATIONS);
+    render(<LocationsTable />);
+
+    // Open the edit modal on the archived row (mockLocationResponseArchived
+    // id=loc-2, displayed as "Гранд Отель Поляна").
+    const archivedRow = screen.getByText('Гранд Отель Поляна').closest('tr')!;
+    fireEvent.click(archivedRow);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+    // Backend LocationUpdate schema defaults is_active=True; without sending
+    // the row's current value, editing an archived row silently resurrects
+    // it. The handler must propagate the row's is_active. (GH #195)
+    await waitFor(() => expect(updateMutateAsync).toHaveBeenCalled());
+    const [callArg] = updateMutateAsync.mock.calls[0];
+    expect(callArg.id).toBe(mockLocationResponseArchived.id);
+    expect(callArg.data.is_active).toBe(false);
   });
 });

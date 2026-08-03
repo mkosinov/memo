@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import type { MaterialResponse } from '@memo/api-client';
 
 // ─── Mock data (minimal — only what filter → queryFn tests need) ────────────
@@ -29,6 +29,13 @@ const TEST_MATERIALS: MaterialResponse[] = [
 
 // ─── Mocks ──────────────────────────────────────────────────────────────────
 
+// Shared mutateAsync so tests can assert on update calls. Because the mock
+// factory below is hoisted above this const by vitest, the factory is only
+// invoked when `@/hooks/useMaterialsMutations` is imported — by which point
+// the module-level const has been initialized. (Same pattern as
+// ServicesTable.test.tsx.)
+const mockMutateAsync = vi.fn().mockResolvedValue({});
+
 vi.mock('@tanstack/react-query', () => ({
   useQuery: vi.fn(),
   // `keepPreviousData` is a sentinel symbol in real react-query; the component
@@ -51,10 +58,10 @@ vi.mock('@memo/api-client', async (importOriginal) => {
 });
 
 vi.mock('@/hooks/useMaterialsMutations', () => ({
-  useUpdateMaterial: () => ({ mutateAsync: vi.fn().mockResolvedValue({}), isPending: false }),
-  usePatchMaterial: () => ({ mutateAsync: vi.fn().mockResolvedValue({}), isPending: false }),
-  useCreateMaterial: () => ({ mutateAsync: vi.fn().mockResolvedValue({}), isPending: false }),
-  useDeleteMaterial: () => ({ mutateAsync: vi.fn().mockResolvedValue({}), isPending: false }),
+  useUpdateMaterial: () => ({ mutateAsync: mockMutateAsync, isPending: false }),
+  usePatchMaterial: () => ({ mutateAsync: mockMutateAsync, isPending: false }),
+  useCreateMaterial: () => ({ mutateAsync: mockMutateAsync, isPending: false }),
+  useDeleteMaterial: () => ({ mutateAsync: mockMutateAsync, isPending: false }),
 }));
 
 vi.mock('@/contexts/UIContext', () => ({
@@ -165,5 +172,30 @@ describe('MaterialsTable', () => {
     });
 
     expect(spy).toHaveBeenCalledWith({ per_page: 100, status: 'all' });
+  });
+
+  // ─── Edit preserves archive state (GH #195) ────────────────────────────
+
+  it('edit submit preserves is_active=false on archived material (GH #195)', async () => {
+    // Switch to "all" so the archived mockMaterialArchived ("Старые кисти",
+    // id=mat-2) is rendered by the table.
+    setupQuery(TEST_MATERIALS);
+    render(<MaterialsTable />);
+    fireEvent.change(screen.getByLabelText('Фильтр по статусу'), {
+      target: { value: 'all' },
+    });
+
+    const archivedRow = screen.getByText('Старые кисти').closest('tr')!;
+    fireEvent.click(archivedRow);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+    // Backend MaterialUpdate schema defaults is_active=True; without sending
+    // the row's current value, editing an archived row silently resurrects
+    // it. The handler must propagate the row's is_active. (GH #195)
+    await waitFor(() => expect(mockMutateAsync).toHaveBeenCalled());
+    const [arg] = mockMutateAsync.mock.calls[0];
+    expect(arg.id).toBe(mockMaterialArchived.id);
+    expect(arg.data.is_active).toBe(false);
   });
 });

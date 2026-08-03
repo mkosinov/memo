@@ -158,6 +158,8 @@ export function MastersTable() {
         (payload as Record<string, unknown>)[key] = val;
       }
     }
+    // Preserve archive state — backend Update schema defaults is_active=True (#195)
+    (payload as Record<string, unknown>).is_active = editMaster.is_active;
     try {
       await updateMaster.mutateAsync({
         id: editMaster.id,

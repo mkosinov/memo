@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, within } from '@testing-library/react';
-import React from 'react';
+import { render, screen, fireEvent, within, waitFor } from '@testing-library/react';
 import type { ServiceResponse } from '@memo/api-client';
 
 // ─── Mock data ──────────────────────────────────────────────────────────────
@@ -362,5 +361,38 @@ describe('ServicesTable', () => {
     fireEvent.click(screen.getByText('Удалить'));
     expect(window.confirm).toHaveBeenCalledWith('Удалить услугу?');
     expect(mockMutateAsync).not.toHaveBeenCalled();
+  });
+
+  // ─── Edit preserves archive state (GH #195) ────────────────────────────
+
+  it('edit submit preserves is_active=false on archived service (GH #195)', async () => {
+    // Switch to "all" so the archived mockService3 ("Ручная лепка", id=svc-3)
+    // is rendered by the table.
+    setupQuery(TEST_SERVICES);
+    render(<ServicesTable />);
+    fireEvent.change(screen.getByLabelText(/Фильтр по статусу/), {
+      target: { value: 'all' },
+    });
+
+    const archivedRow = screen.getByText('Ручная лепка').closest('tr')!;
+    fireEvent.click(archivedRow);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+    // Backend ServiceUpdate schema defaults is_active=True; without sending
+    // the row's current value, editing an archived row silently resurrects
+    // it. The handler must propagate the row's is_active. (GH #195)
+    await waitFor(() => expect(mockMutateAsync).toHaveBeenCalled());
+    // The mockMutateAsync is shared across all service mutations, so find
+    // the call shaped like an update ({id, data}).
+    const updateCall = mockMutateAsync.mock.calls.find(
+      ([arg]) =>
+        typeof arg === 'object' &&
+        arg !== null &&
+        arg.id === 'svc-3' &&
+        typeof arg.data === 'object',
+    );
+    expect(updateCall).toBeDefined();
+    expect(updateCall![0].data.is_active).toBe(false);
   });
 });

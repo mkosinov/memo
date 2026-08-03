@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, within } from '@testing-library/react';
+import { render, screen, fireEvent, within, waitFor } from '@testing-library/react';
 import {
   mockMasterResponse,
   mockMasterResponseArchived,
@@ -527,5 +527,29 @@ describe('MastersTable', () => {
     const tbody = container.querySelector('tbody');
     // Should have a dash character in the avatar column
     expect(tbody?.textContent).toContain('—');
+  });
+
+  // ─── Edit preserves archive state (GH #195) ───────────────────────────
+
+  it('edit submit preserves is_active=false on archived master (GH #195)', async () => {
+    const updateMutateAsync = setupUpdateMock();
+    setupQuery(TEST_MASTERS);
+    render(<MastersTable />);
+
+    // Open the edit modal on the archived row (mockMasterResponseArchived id=m2,
+    // displayed as "Большакова Юлия").
+    const archivedRow = screen.getByText('Большакова Юлия').closest('tr')!;
+    fireEvent.click(archivedRow);
+
+    // Submit the modal — pre-populated fields are valid for the fixture.
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+    // Backend MasterUpdate schema defaults is_active=True; without sending
+    // the row's current value, editing an archived row silently resurrects
+    // it. The handler must propagate the row's is_active. (GH #195)
+    await waitFor(() => expect(updateMutateAsync).toHaveBeenCalled());
+    const [callArg] = updateMutateAsync.mock.calls[0];
+    expect(callArg.id).toBe(mockMasterResponseArchived.id);
+    expect(callArg.data.is_active).toBe(false);
   });
 });

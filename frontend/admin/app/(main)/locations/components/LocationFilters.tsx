@@ -59,7 +59,7 @@ export function LocationFilters({
           aria-label="Фильтр по статусу"
         >
           <option value="active">Активные</option>
-          <option value="">Все</option>
+          <option value="all">Все</option>
           <option value="archived">Архив</option>
         </select>
       </div>

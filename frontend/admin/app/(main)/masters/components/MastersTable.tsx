@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { getMasters } from '@memo/api-client';
 import type { MasterResponse } from '@memo/api-client';
 import { useUpdateMaster, usePatchMaster, useCreateMaster, useDeleteMaster } from '@/hooks/useMastersMutations';
@@ -35,9 +35,18 @@ const COLUMNS: Column[] = [
 // ─── Component ───────────────────────────────────────────────────────────
 
 export function MastersTable() {
+  // ─── Filter state ────────────────────────────────────────────────────
+  // `status` is declared above `useQuery` because the query is keyed on it
+  // (server-side archive filter via ListParams.status).
+  const [search, setSearch] = useState('');
+  const [status, setStatus] = useState<'active' | 'all' | 'archived'>('active');
+  const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState(10);
+
   const { data: masters = [], isLoading, error, refetch } = useQuery<MasterResponse[]>({
-    queryKey: ['masters'],
-    queryFn: () => getMasters({ per_page: 100 }).then(r => r.items),
+    queryKey: ['masters', status],
+    queryFn: () => getMasters({ per_page: 100, status }).then(r => r.items),
+    placeholderData: keepPreviousData,
   });
 
   const updateMaster = useUpdateMaster();
@@ -56,12 +65,6 @@ export function MastersTable() {
   });
 
   const VISIBLE_COLUMNS = COLUMNS.filter((c) => visibleKeys.includes(c.key));
-
-  // ─── Filter state ────────────────────────────────────────────────────
-  const [search, setSearch] = useState('');
-  const [status, setStatus] = useState('');
-  const [page, setPage] = useState(0);
-  const [pageSize, setPageSize] = useState(10);
 
   // ─── Sort state ──────────────────────────────────────────────────────
   const [sortField, setSortField] = useState<string | null>(null);
@@ -85,19 +88,15 @@ export function MastersTable() {
 
   const filteredMasters = useMemo(() => {
     return masters.filter((m) => {
-      // Search filter (first_name or last_name contains)
       if (search) {
         const q = search.toLowerCase();
         const firstNameMatch = m.first_name.toLowerCase().includes(q);
         const lastNameMatch = m.last_name.toLowerCase().includes(q);
         if (!firstNameMatch && !lastNameMatch) return false;
       }
-      // Status filter
-      if (status === 'active' && !m.is_active) return false;
-      if (status === 'archived' && m.is_active) return false;
       return true;
     });
-  }, [masters, search, status]);
+  }, [masters, search]);
 
   // ─── Sorted data ─────────────────────────────────────────────────────
 
@@ -247,8 +246,8 @@ export function MastersTable() {
           search={search}
           status={status}
           onSearchChange={setSearch}
-          onStatusChange={setStatus}
-          onReset={() => { setSearch(''); setStatus(''); }}
+          onStatusChange={(v) => setStatus(v as 'active' | 'all' | 'archived')}
+          onReset={() => { setSearch(''); setStatus('active'); }}
         />
         <div className="flex items-center gap-2">
           <ColumnPicker

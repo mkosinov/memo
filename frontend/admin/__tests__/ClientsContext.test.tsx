@@ -71,7 +71,7 @@ describe('ClientsContext', () => {
       expect(result.current.sortBy).toBe('name');
       expect(result.current.sortOrder).toBe('asc');
       expect(result.current.filters.search).toBe('');
-      expect(result.current.filters.is_active).toBeNull();
+      expect(result.current.filters.status).toBe('active');
     });
 
     it('fetches clients on mount', async () => {
@@ -162,7 +162,7 @@ describe('ClientsContext', () => {
       });
 
       act(() => {
-        result.current.setFilters({ search: 'test', is_active: true });
+        result.current.setFilters({ search: 'test', status: 'archived' });
         result.current.setPage(5);
       });
 
@@ -171,7 +171,7 @@ describe('ClientsContext', () => {
       });
 
       expect(result.current.filters.search).toBe('');
-      expect(result.current.filters.is_active).toBeNull();
+      expect(result.current.filters.status).toBe('active');
       expect(result.current.page).toBe(1);
     });
   });

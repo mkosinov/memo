@@ -46,7 +46,7 @@ let mockContextValue: ClientsContextType = {
   perPage: 20,
   filters: {
     search: '',
-    is_active: null,
+    status: 'active',
     created_from: '',
     created_to: '',
         updated_from: '',
@@ -94,7 +94,7 @@ describe('ClientsTable', () => {
       perPage: 20,
       filters: {
         search: '',
-        is_active: null,
+        status: 'active',
         created_from: '',
         created_to: '',
         updated_from: '',
@@ -185,6 +185,33 @@ describe('ClientsTable', () => {
     render(<ClientsTable onClientClick={vi.fn()} />);
     expect(screen.getByText('Ничего не найдено')).toBeTruthy();
     expect(screen.getByText('Сбросить фильтры')).toBeTruthy();
+  });
+
+  it('shows "Нет клиентов" (not "Ничего не найдено") with default status=active and no other filters', () => {
+    mockContextValue = { ...mockContextValue, clients: [] };
+    render(<ClientsTable onClientClick={vi.fn()} />);
+    expect(screen.getByText('Нет клиентов')).toBeTruthy();
+    expect(screen.queryByText('Ничего не найдено')).not.toBeTruthy();
+  });
+
+  it('shows "Ничего не найдено" when status=all and no results (all counts as active filter)', () => {
+    mockContextValue = {
+      ...mockContextValue,
+      clients: [],
+      filters: { ...mockContextValue.filters, status: 'all' },
+    };
+    render(<ClientsTable onClientClick={vi.fn()} />);
+    expect(screen.getByText('Ничего не найдено')).toBeTruthy();
+  });
+
+  it('shows "Ничего не найдено" when status=archived and no results (archived counts as active filter)', () => {
+    mockContextValue = {
+      ...mockContextValue,
+      clients: [],
+      filters: { ...mockContextValue.filters, status: 'archived' },
+    };
+    render(<ClientsTable onClientClick={vi.fn()} />);
+    expect(screen.getByText('Ничего не найдено')).toBeTruthy();
   });
 
   it('calls resetFilters when reset link clicked in empty-filtered state', () => {

@@ -36,7 +36,7 @@ export function ClientsTable({ onClientClick }: ClientsTableProps) {
 
   const hasActiveFilters =
     filters.search ||
-    filters.is_active !== null ||
+    filters.status !== 'active' ||
     filters.min_records !== null ||
     filters.max_records !== null ||
     filters.min_paid !== null ||

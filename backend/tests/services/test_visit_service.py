@@ -127,3 +127,22 @@ async def test_visit_service_get_nonexistent(db_session):
     service = VisitService()
     result = await service.get(db_session=db_session, visit_id="nonexistent-id")
     assert result is None
+
+
+@pytest.mark.asyncio
+async def test_visit_service_list_paginated(db_session, sample_visits):
+    """VisitService.list returns envelope; record_id filter still works.
+
+    Moved verbatim from test_generic_service_list.py:177-186.
+    """
+    from src.schemas.common import PaginatedResponse
+    from src.services.visit import VisitService
+
+    result = await VisitService().list(db_session, page=1, per_page=2)
+    assert isinstance(result, PaginatedResponse)
+    assert result.total == len(sample_visits)
+    assert len(result.items) == 2
+    # record_id filter — use attribute directly from visit ORM fixture
+    rid = sample_visits[0].record_id
+    filtered = await VisitService().list(db_session, page=1, per_page=20, record_id=rid)
+    assert all(v.record_id == rid for v in filtered.items)

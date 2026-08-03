@@ -75,3 +75,7 @@ A Service represents a type of master class (painting, sculpture, etc.). It defi
 | tariff.price: int (no constraints) | price: min(0) | ❌ Backend missing |
 | description: required | description: optional | ⚠️ |
 | image_url: required | image_url: optional | ⚠️ |
+
+## Archive semantics on write
+
+Service is a soft-delete entity. See `docs/domain-rules/_overview.md` → "is_active semantics on get/update/patch" for the general rule. **Entity note:** `ServiceService` overrides `update`/`patch` (for `tag_ids`/`tariffs` handling) and reimplements the `is_active` sticky-field strip via the shared `_strip_is_active_none` helper (`services/generic.py:25`) — not directly inherited from `SoftDeleteService`.

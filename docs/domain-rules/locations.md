@@ -57,3 +57,7 @@ A Location is a physical studio space where master classes take place.
 | name: str (no constraints) | name: min(1).max(200) | ❌ Backend missing |
 | capacity: int (no constraints) | capacity: min(1).max(500) | ❌ Backend missing |
 | tag_ids: missing | tag_ids: present | ❌ Backend missing |
+
+## Archive semantics on write
+
+Location is a soft-delete entity. See `docs/domain-rules/_overview.md` → "is_active semantics on get/update/patch" for the general rule. **Entity note:** sticky-field handling inherited from `SoftDeleteService` (no override).

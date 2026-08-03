@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — 2026-08-03
+
+### Added
+- **GH #184 — GenericService full-CRUD service contract (create/get/list/update/delete) + sticky `is_active` production fix** — branch `gh-184-service-crud-contract` (9 commits: 7565b65, f4cf95f, b961a62, 2aa1197, 2ce401c, 8cabb48, ef7d73d, 948b480, 18479e5):
+  - **Contract test:** new `backend/tests/services/test_generic_service_contract.py` (+1307 lines) replaces `test_generic_service_patch.py` (599) and `test_generic_service_list.py` (186) — ONE parametrized file covering full CRUD for all `GenericService` subclasses via `__subclasses__()` auto-discovery + `EntityConfig` + `make_entity`. New entity = one config entry → full create/get/list/update/delete coverage for free.
+  - **Create/get:** `create` test forces a DB read (no in-memory echo); `get` returns archived rows — user decision 1 locked by test.
+  - **List:** parametrized list contract (pagination envelope, soft-delete filtering) replaces the 2-entity hand-written `test_generic_service_list.py`.
+  - **Update (PUT full-replace):** full-replace semantics incl. default-reversion of omitted fields + nonexistent → `None`, parametrized across entities (was completely untested).
+  - **Delete edge cases:** nonexistent → `False`, already-inactive soft row → `False`, soft-deleted row absent from `list()`.
+  - **Production fix (sticky `is_active`, G1b directive):** Update/Patch schemas for the 5 soft-delete entities flipped `is_active: bool = True` → `bool | None = None` (`schemas/{master,location,material,service,client}.py`); `SoftDeleteService.update` injects the stored value on omitted/None; `_patch_payload` hook + shared `_strip_is_active_none` helper (`services/generic.py:25`) also used by `ServiceService` overrides — PUT/PATCH omitting `is_active` on an archived row no longer silently reactivates it; explicit `true` = legal reactivation, `false` = archive, `null` = don't touch. `ClientUpdate`/`ClientPatch` gained `is_active` — archive/restore via PATCH now possible at the API level.
+  - **Domain-rules:** `_overview.md` new section "is_active semantics on get/update/patch" + PATCH-table row; per-entity "Archive semantics on write" sections (masters/locations/materials/services/clients); clients.md restore note + parity-table row. Prior spec `2026-08-02-is-active-list-filters-design.md` addendum cross-references #184 (fixes its §7.5 hazard).
+  - **Test results:** backend 990 passed / 5 skipped (baseline 854p/3s); api-client 144 passed / 4 failed (4 = known pre-existing #188, unchanged); domain 22/22; admin vitest 1239 passed / 0 failed; `tsc --noEmit` clean. No generated OpenAPI types to regenerate (hand-written Zod, compatible).
+  - **Mutation checks:** green-by-failure (T4 step 4, T6 step 9); guard sanity (dummy-subclass) failed-as-expected.
+  - **AC checklist (spec §6.1–6.9): 9/9 met.** Visual compliance gate: N/A (no user-visible UI).
+  - **Production diff:** exactly 7 `src/` files (`schemas/{master,location,material,client,service}.py`, `services/{generic,service}.py`).
+  - **20 files changed, +1684 / -799.**
+  - Design spec: `docs/specs/2026-08-03-generic-service-crud-contract-design.md` (rev 4, G1b-approved)
+  - Plan: `docs/plans/2026-08-03-generic-service-crud-contract-plan.md` (G2-approved)
+
 ## [Unreleased] — 2026-08-02
 
 ### Added

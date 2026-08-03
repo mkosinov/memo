@@ -92,6 +92,12 @@ from src.schemas.visitor import VisitorUpdate
 # CONTRACT_CONFIG и обнаруживаются рекурсивно через ``_all_subclasses``.
 GENERIC_CONTRACT_EXCEPTIONS: set[type] = {ServiceService, PhotoService, RecordService, SoftDeleteService}
 
+# Shared missing-config message used by the guard-line assertion in every
+# contract test class. Parametrized ids already announce the class via
+# `pytest.param(cls, None, id=f"{cls.__name__}-MISSING-CONFIG")` so the
+# message can be terse.
+MISSING_MSG = "subclass detected via __subclasses__() but missing from CONTRACT_CONFIG"
+
 
 def _all_subclasses(cls: type) -> list[type]:
     """Рекурсивно собрать всех транзитивных потомков ``cls``.
@@ -321,6 +327,25 @@ def _ensure_different(sentinel: Any, current: Any) -> Any:
         elif isinstance(sentinel, (int, float)):
             return sentinel + 1
     return sentinel
+
+
+def _update_kwargs(cfg: EntityConfig, sent: Any) -> dict:
+    """Build a PUT payload for the update contract tests.
+
+    PUT payload = create fields (parsed, incl. resolved FK ids) + update_data,
+    filtered to update_schema fields. FK values come from ``sent`` (the
+    create_schema instance returned by ``make_entity(with_input=True)``) —
+    reused unchanged (D2/D3). ``VisitorUpdate`` has no ``client_id`` and
+    ``is_active`` is never sent explicitly here — both dropped by the
+    model_fields filter / never added.
+
+    Spec: 2026-08-03-generic-service-crud-contract-design.md §3.2 (payload
+    construction), §3.3 Update row (D7).
+    """
+    allowed = set(cfg.update_schema.model_fields)
+    data = {k: v for k, v in sent.model_dump().items() if k in allowed}
+    data.update(cfg.update_data)
+    return data
 
 
 # ─── Fixtures ────────────────────────────────────────────────────────────────────
@@ -893,4 +918,81 @@ class TestGenericServiceListContract:
         )
         assert resp.items[0].id == target.id, (
             f"{service_cls.__name__}.list: id filter items[0].id != target.id"
+        )
+
+
+# ─── Contract-test: update (PUT full-replace) semantics ─────────────────────────
+# Spec: docs/specs/2026-08-03-generic-service-crud-contract-design.md §3.3 (Update
+# row, D7), §2 — full replace (PUT, RFC 9110 §9.3.4): omitted fields revert to
+# schema defaults, except sticky fields (id, created_at, is_active — the last
+# pinned by the future TestGenericServiceIsActiveContract, not exercised here).
+# Payload construction via ``_update_kwargs`` (§3.2, D2/D3): create fields +
+# update_data, filtered to update_schema.model_fields.
+class TestGenericServiceUpdateContract:
+    @pytest.mark.parametrize("service_cls,cfg", _contract_params())
+    async def test_update_applies_update_data(
+        self, service_cls, cfg, db_session, make_entity
+    ):
+        """update(): update_data fields changed to update_data values; other
+        payload fields (create fields reused unchanged) remain at sent values."""
+        assert cfg is not None, MISSING_MSG
+        service, created, sent = await make_entity(cfg, with_input=True)
+        payload = _update_kwargs(cfg, sent)
+        updated = await service.update(
+            db_session, created.id, cfg.update_schema(**payload)
+        )
+        assert updated is not None
+        after = await service.get(db_session, created.id)
+        for field, value in cfg.update_data.items():
+            assert getattr(after, field) == value, (
+                f"{service_cls.__name__}: update_data field {field} not applied"
+            )
+        sent_dump = sent.model_dump()
+        for field in set(payload) - set(cfg.update_data):
+            assert getattr(after, field) == sent_dump[field], (
+                f"{service_cls.__name__}: field {field} unexpectedly changed"
+            )
+
+    @pytest.mark.parametrize("service_cls,cfg", _contract_params())
+    async def test_update_nonexistent_returns_none(
+        self, service_cls, cfg, db_session, make_entity
+    ):
+        """update(nonexistent-id, ...) → None."""
+        assert cfg is not None, MISSING_MSG
+        service, created, sent = await make_entity(cfg, with_input=True)  # entity only to build a valid payload
+        payload = _update_kwargs(cfg, sent)
+        assert await service.update(
+            db_session, "nonexistent-id", cfg.update_schema(**payload)
+        ) is None
+
+    @pytest.mark.parametrize("service_cls,cfg", _contract_params())
+    async def test_update_omitted_optional_field_reverts_to_default(
+        self, service_cls, cfg, db_session, make_entity
+    ):
+        """PUT discrimination: omitting nullable_field from the payload
+        reverts the column to its update_schema default (full-replace
+        semantics). Explicit pop — the field otherwise rides along via
+        create_data (spec panel fix). Tag/Material skip (no nullable_field).
+        """
+        assert cfg is not None, MISSING_MSG
+        if cfg.nullable_field is None:
+            pytest.skip(
+                f"{service_cls.__name__}: no nullable field "
+                f"(PUT default-reversion not exercisable)"
+            )
+        service, created, sent = await make_entity(cfg, with_input=True)
+        # created row already carries a non-default nullable_field value via
+        # create_data (verified: all 8 configs)
+        payload = _update_kwargs(cfg, sent)
+        payload.pop(cfg.nullable_field, None)  # explicit pop
+        updated = await service.update(
+            db_session, created.id, cfg.update_schema(**payload)
+        )
+        assert updated is not None
+        after = await service.get(db_session, created.id)
+        expected_default = cfg.update_schema.model_fields[cfg.nullable_field].default
+        assert getattr(after, cfg.nullable_field) == expected_default, (
+            f"{service_cls.__name__}: omitted {cfg.nullable_field} did not revert "
+            f"to schema default — full-replace (PUT) semantics broken "
+            f"(patch semantics leakage?)"
         )

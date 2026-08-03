@@ -90,7 +90,7 @@ payload = { **create_data, **resolved_fk_map, **update_data }  filtered to updat
 
 **Multi-row seeding (pagination):** `seed_rows(cfg, db_session, n)` helper resolves `fk_map` factories **once** (shared parents), creates `n` rows via `service.create` with `{unique_row_field: f"{value}-{i}"}` override when configured (Tag). Service-level creation only; ORM seeding rejected (D8).
 
-**Estimated delta:** +132 new parametrized cases (112 CRUD = 16 create + 16 get + 48 list + 22 update + 16 delete; 20 is_active = 5 × 4 soft entities) − 10 from the deleted list file → **net ≈ +122 parametrized**; plus 5 per-entity Service is_active tests in `test_service_service.py` → **net ≈ +127 total, +2 skips** (omission test on Tag/Material). Backend suite ≈ 854p/3s → ≈ 981p/5s.
+**Estimated delta (corrected at plan review):** +145 new collected cases (140 parametrized: create 16 + get 16 + list 48 + update 24 [2 skip on Tag/Material] + delete 16 + is_active 20; 5 per-entity Service) − 10 from the deleted list file → **net ≈ +135 collected / +133 passed, +2 skips**. IsActiveContract and the two soft-only delete tests parametrize over a `_soft_params()` helper (delete_semantics == "soft") instead of in-test skips — avoids 28 skip no-ops. Backend suite ≈ 854p/3s → ≈ 987p/5s.
 
 ### 3.4 Absorption of `test_generic_service_list.py` (no coverage silently dropped)
 
@@ -177,7 +177,7 @@ Then **delete** `backend/tests/services/test_generic_service_list.py`.
 6. The 3 non-generic list tests live in `test_service_service.py` (new), `test_record_service.py` (new), `test_visit_service.py` (extended); `test_generic_service_list.py` deleted; §3.4 mapping holds.
 7. Production changes confined to §3.5 files (`git diff --name-only backend/src/` shows exactly: schemas/{master,location,material,client,service}.py, services/{generic,service}.py).
 8. `docs/domain-rules/_overview.md` (new is_active-semantics section, PATCH-table third row, create-side line, reorder line, `:97` reference fix), 5 per-entity files updated (incl. `clients.md:30-32` reframe), and the one-line addendum in `docs/specs/2026-08-02-is-active-list-filters-design.md` §3.
-9. Full backend suite green (≈ 981p/5s); admin vitest + type-check green (incl. the 4 modal is_active tests); api-client types verified against the changed schemas.
+9. Full backend suite green (≈ 987p/5s); admin vitest + type-check green (incl. the 4 modal is_active tests); api-client types verified against the changed schemas.
 
 ## 7. Visual Compliance Checks
 

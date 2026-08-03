@@ -360,10 +360,17 @@ Three additions to the existing `TestGenericServiceDeleteSemantics` class (param
 
 **Steps:**
 
-- [ ] 1. `test_delete_nonexistent_returns_false`: `service = cfg.service_factory()`; `assert await service.delete(db_session, "nonexistent-id") is False`.
-- [ ] 2. `test_delete_already_deleted_soft_returns_false`: `if cfg.delete_semantics != "soft": pytest.skip(...)`; create via `make_entity` → first `delete()` returns True → second `delete()` returns False (locks `SoftDeleteRepository.delete` already-inactive edge, `repositories/generic.py:147-156`).
-- [ ] 3. `test_soft_deleted_absent_from_list`: `if cfg.delete_semantics != "soft": pytest.skip(...)`; create → `delete()` → `resp = await service.list(db_session)`; assert `created.id not in [i.id for i in resp.items]` and `resp.total == 0` ("list hides" half of the list/get pairing).
-- [ ] 4. Verify: `cd backend && python -m pytest tests/services/test_generic_service_contract.py -q` — green (16 new cases).
+- [ ] 0. Add a soft-only params helper to the contract file (next to `_contract_params`):
+  ```python
+  def _soft_params() -> list:
+      """Parametrization over soft-delete entities only (delete_semantics == "soft").
+      Cleaner than in-test skips: a 9th soft entity is auto-included via its config entry."""
+      return [p for p in _contract_params() if p.values[1] is not None and p.values[1].delete_semantics == "soft"]
+  ```
+- [ ] 1. `test_delete_nonexistent_returns_false` (full `_contract_params()` — applies to all 8): `service = cfg.service_factory()`; `assert await service.delete(db_session, "nonexistent-id") is False`.
+- [ ] 2. `test_delete_already_deleted_soft_returns_false` (parametrized via `_soft_params()` — no in-test skip): create via `make_entity` → first `delete()` returns True → second `delete()` returns False (locks `SoftDeleteRepository.delete` already-inactive edge, `repositories/generic.py:147-156`).
+- [ ] 3. `test_soft_deleted_absent_from_list` (parametrized via `_soft_params()`): create → `delete()` → `resp = await service.list(db_session)`; assert `created.id not in [i.id for i in resp.items]` and `resp.total == 0` ("list hides" half of the list/get pairing).
+- [ ] 4. Verify: `cd backend && python -m pytest tests/services/test_generic_service_contract.py -q` — green (16 new cases: 8 + 4 + 4).
 - [ ] 5. Commit: `test: delete edge cases in generic service contract (#184)`
 
 ---
@@ -384,7 +391,7 @@ User-directed semantics (G1b): get returns archived rows; update/patch preserve 
 
 **Steps — RED:**
 
-- [ ] 1. Add `TestGenericServiceIsActiveContract` to the contract file (parametrized like the other classes; every test starts with the `assert cfg is not None` line and `if cfg.delete_semantics != "soft": pytest.skip(f"{service_cls.__name__}: hard-delete entity")`):
+- [ ] 1. Add `TestGenericServiceIsActiveContract` to the contract file (parametrized via `@pytest.mark.parametrize("service_cls,cfg", _soft_params())` — soft entities only, NO in-test skip; every test still starts with the `assert cfg is not None` line):
   ```python
   class TestGenericServiceIsActiveContract:
       async def test_get_archived_returns_row_with_is_active_false(self, service_cls, cfg, db_session, make_entity):
@@ -416,8 +423,14 @@ User-directed semantics (G1b): get returns archived rows; update/patch preserve 
           # list() contains the row again
   ```
   Multi-phase tests use labeled asserts (messages above) for failure localization (spec D-log).
-- [ ] 2. Add the 5 per-entity Service tests to `backend/tests/services/test_service_service.py` (Service is a contract exception with its own update/patch — spec D11). Mirror the 5 flows above against `ServiceService` directly: create the row via the existing `create_service` API factory (as the moved list test does), then operate via `ServiceService()` methods with `ServiceUpdate`/`ServicePatch`. For the `ServiceUpdate` payload, mirror the exact field set used by the existing green service PUT test in `backend/tests/test_put_is_active.py:95-115` (read it and copy its data shape, changing values). Assert the same 5 semantics (get archived → returned; update/patch preserve on omitted/None; explicit False archives; explicit True reactivates + visible in list).
-- [ ] 3. Run RED: `cd backend && python -m pytest tests/services/test_generic_service_contract.py -k IsActive tests/services/test_service_service.py -q`. Expected: `test_update_preserves_is_active_when_omitted` FAILS (silent resurrection), `test_patch_preserves_is_active_when_omitted_or_none` FAILS on the explicit-None phase (NULL write / IntegrityError); the get-archived and explicit-bool tests pass already. If the RED failures differ, STOP and report — do not proceed to GREEN.
+- [ ] 2. Add the 5 per-entity Service tests to `backend/tests/services/test_service_service.py` (Service is a contract exception with its own update/patch — spec D11). Mirror the 5 flows above against ServiceService directly: instantiate the service via the existing **`get_service_service()`** factory (the one the moved list test uses — `ServiceService()` requires constructor args), and **seed rows via ORM `db_session.add(Service(...))` exactly as the moved `test_service_service_list_paginated` does** (it does NOT use the `create_service` API factory). Then operate via the service's `get`/`update`/`patch`/`delete` methods with `ServiceUpdate`/`ServicePatch`. For the `ServiceUpdate` payload, mirror the exact field set used by the existing green service PUT test in `backend/tests/test_put_is_active.py:95-115` (read it and copy its data shape, changing values). Assert the same 5 semantics (get archived → returned; update/patch preserve on omitted/None; explicit False archives; explicit True reactivates + visible in list).
+- [ ] 3. Run RED: `cd backend && python -m pytest tests/services/test_generic_service_contract.py -k IsActive tests/services/test_service_service.py -q`. **Expected RED matrix (verified at plan review):**
+  - FAIL ×3: `test_update_preserves_is_active_when_omitted` on Master/Location/Material (silent resurrection). Client **passes vacuously** here — `ClientUpdate` has no `is_active` yet (Pydantic v2 default `extra="ignore"` drops the payload key), so nothing touches the stored value; the test becomes a real injection-path check only after GREEN step 5.
+  - FAIL ×3: `test_patch_preserves_is_active_when_omitted_or_none` on Master/Location/Material (explicit-None phase → NULL write / IntegrityError). Client passes vacuously (same schema gap).
+  - FAIL ×2: `test_update_explicit_is_active_applies` and `test_patch_explicit_is_active_applies` **on Client only** — the explicit `False` is silently dropped by the schema gap, `is_active` stays True. Master/Location/Material pass (explicit bool already applies).
+  - FAIL ×2 in `test_service_service.py`: update-preserves (resurrection via ServiceService's own update) and patch-preserves-None (NULL write); the other 3 Service tests pass.
+  - `test_get_archived_returns_row_with_is_active_false` passes everywhere (get has no is_active filter — correct already).
+  If the RED failures differ from this matrix, STOP and report — do not proceed to GREEN.
 
 **Steps — GREEN (production fix, bounded to spec §3.5 files):**
 
@@ -492,7 +505,7 @@ User-directed semantics (G1b): get returns archived rows; update/patch preserve 
 
 ## Verification (final, phase-level)
 
-1. `cd backend && python -m pytest -q` — green; counts ≈ 981 passed / 5 skipped (baseline 854p/3s + net +127 tests, +2 skips; implementer reports actual `pytest -q` tail).
+1. `cd backend && python -m pytest -q` — green; counts ≈ 987 passed / 5 skipped (baseline 854p/3s; +145 new collected = 143 pass + 2 skip [update-omission on Tag/Material], −10 removed from the deleted list file → net +133 passed; soft-only parametrization of IsActiveContract and the two soft delete tests avoids 28 skip no-ops; implementer reports actual `pytest -q` tail).
 2. `git diff main --stat -- src/` — exactly: `schemas/{master,location,material,client,service}.py`, `services/{generic,service}.py`.
 3. `git diff main --name-only -- tests/` — shows: renamed contract file, deleted list file, new `test_service_service.py` / `test_record_service.py`, modified `test_visit_service.py`; nothing else.
 4. Mutation checks reported green-by-failure (Task 4 step 4, Task 6 step 9).

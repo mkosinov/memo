@@ -24,7 +24,7 @@ How this feature behaves, mapped to spec acceptance criteria (backend feature �
 - **AC1 — contract file exists, 116 cases, sync-only** → Running the backend suite now hits every generic entity's HTTP endpoints exactly as a client would: POST returns 201 with precisely the response schema's fields, GET/PUT return 200 with the sent values echoed, list returns exactly `{items,total,page,per_page}` with working `page`/`per_page` params (and 422 on `page=0`/`per_page=0`/`per_page=101`), DELETE returns 204, and every unknown id returns the entity's own `<ENTITY>_NOT_FOUND` code. Soft-deleted rows stay GETtable with `is_active: false` but disappear from list; hard-deleted rows 404.
 - **AC2 — shared config module** → One config table (`backend/tests/generic_contract.py`) now drives both the service-level and the HTTP-level contract; a future entity configured without its HTTP wiring data fails loudly at import.
 - **AC3 — per-entity dedup** → Each `test_api_*.py` file shrinks to only what makes that entity special (date/status filters, search, payment totals, channel edge cases); `test_api_tags.py` disappears entirely; the pagination-params file keeps only services/records/visits.
-- **AC4 — net ≈ −350 lines** → ~930 lines of duplicated tests replaced by ~580 lines of shared contract + config.
+- **AC4 — net ≈ −600…−700 lines** → ~930 lines of duplicated per-entity tests removed; the new contract file is ≈ 260 lines and the config extraction is a near-pure move (≈ net +30). (Spec AC4's "≈ −350" assumed a ≈ 550-line contract file; the final code is denser — the dedup lands *better* than promised.)
 - **AC5 — mutations verified** → Proven during implementation (then reverted): unmounting a router, narrowing a route's `response_model`, or flipping a status code makes the contract fail.
 - **AC6 — suite green, no prod changes** → `backend/src/` untouched; backend suite ≈ 990–1000 passed, ~5s.
 - **AC7 — ADR 006** → `docs/decisions/` gains ADR 006 (why HTTP contract tests are end-to-end, not mocked-service), and the README index gains its missing 005 row plus 006.
@@ -440,7 +440,7 @@ Delete the contract-covered tests; keep entity-specific extras. **Rule:** if a K
 - [ ] `cd backend && python -m pytest tests/ -q` → full suite green (≈ 990–1000 passed; removed 107 cases [83 per-entity + 24 pagination params], added 116 → net ≈ +9 vs the pre-#185 suite).
 - [ ] Verify no orphaned names: `cd backend && python -m ruff check tests/ 2>/dev/null || true` — if ruff is not configured, manually confirm no unused imports/constants remain in the 8 edited files (unused imports fail CI lint).
 - [ ] `git add -A backend/tests && git commit -m "test: dedup per-entity API CRUD tests into generic contract (#185)"`
-- [ ] **AC4 check (after the commit):** `git diff --stat $BASE_SHA..HEAD -- backend/tests/` (base recorded in Task 1 Step 1) → net ≈ **−350 lines** (gross removal ≈ 930 vs added ≈ 580). If wildly off (e.g. removal < 700), re-check the keep/remove tables before proceeding.
+- [ ] **AC4 check (after the commit):** `git diff --stat $BASE_SHA..HEAD -- backend/tests/` (base recorded in Task 1 Step 1) → net ≈ **−600…−700 lines** (per-entity removal ≈ −930; contract file ≈ +260; config move nets ≈ +30). An overshoot beyond the spec's original "≈ −350" is EXPECTED and fine (that estimate assumed a ≈ 550-line contract file). Only investigate if removal < 700 gross or the per-entity files still contain contract-category tests.
 
 ---
 

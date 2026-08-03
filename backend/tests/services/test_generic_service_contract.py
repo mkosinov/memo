@@ -674,7 +674,7 @@ class TestGenericServiceCreateContract:
             f"{service_cls.__name__} обнаружен через __subclasses__(), "
             f"но отсутствует в CONTRACT_CONFIG"
         )
-        service, created, sent = await make_entity(cfg, with_input=True)
+        _, created, sent = await make_entity(cfg, with_input=True)
         for field in cfg.create_data:
             if field in type(created).model_fields:
                 assert getattr(created, field) == getattr(sent, field), (
@@ -690,7 +690,10 @@ class TestGenericServiceCreateContract:
             f"{service_cls.__name__} обнаружен через __subclasses__(), "
             f"но отсутствует в CONTRACT_CONFIG"
         )
-        service, created = await make_entity(cfg)
+        _, created = await make_entity(cfg)
+        # Drop the identity-map cache so db_session.get hits the DB — a
+        # no-flush create would otherwise return the in-memory instance.
+        db_session.expire_all()
         row = await db_session.get(cfg.model, created.id)  # ORM-level, distinct from service.get
         assert row is not None, f"{service_cls.__name__}.create: row not persisted"
 

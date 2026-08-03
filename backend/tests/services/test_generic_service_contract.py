@@ -420,6 +420,21 @@ def _contract_params() -> list:
     return params
 
 
+def _soft_params() -> list:
+    """Parametrization over soft-delete entities only (delete_semantics == "soft").
+
+    Cleaner than in-test skips: a 9th soft entity is auto-included via its
+    config entry. Used by the soft-only DeleteSemantics edge tests
+    (``test_delete_already_deleted_soft_returns_false``,
+    ``test_soft_deleted_absent_from_list``) — spec §3.3 (DeleteSemantics row).
+    """
+    return [
+        p
+        for p in _contract_params()
+        if p.values[1] is not None and p.values[1].delete_semantics == "soft"
+    ]
+
+
 # ─── Guard-тест ──────────────────────────────────────────────────────────────────
 def test_all_generic_subclasses_covered_or_excepted():
     """Каждый (транзитивный) подкласс GenericService — в CONTRACT_CONFIG или в исключениях."""
@@ -704,6 +719,85 @@ class TestGenericServiceDeleteSemantics:
                 f"{service_cls.__name__} (soft-delete): is_active="
                 f"{orm.is_active!r}, expected False"
             )
+
+    @pytest.mark.parametrize("service_cls,cfg", _contract_params())
+    async def test_delete_nonexistent_returns_false(
+        self, service_cls, cfg, db_session
+    ):
+        """delete(nonexistent-id) → False (no row, no exception).
+
+        Applies to all 8 entities — both ``BaseRepository.delete``
+        (hard path, returns False on missing instance) and
+        ``SoftDeleteRepository.delete`` (soft path, same) honor this.
+        """
+        assert cfg is not None, (
+            f"{service_cls.__name__} detected via __subclasses__() but "
+            f"missing from CONTRACT_CONFIG"
+        )
+        service = cfg.service_factory()
+        assert await service.delete(db_session, "nonexistent-id") is False, (
+            f"{service_cls.__name__}: delete(nonexistent-id) returned "
+            f"True, expected False"
+        )
+
+    @pytest.mark.parametrize("service_cls,cfg", _soft_params())
+    async def test_delete_already_deleted_soft_returns_false(
+        self, service_cls, cfg, db_session, make_entity
+    ):
+        """delete() on an already-archived soft row → False (idempotent soft delete).
+
+        Locks the ``SoftDeleteRepository.delete`` already-inactive edge
+        (``repositories/generic.py:147-156``): the ``not instance.is_active``
+        guard makes a second ``delete()`` return False — never re-flip and
+        never no-op-True.
+        """
+        assert cfg is not None, (
+            f"{service_cls.__name__} detected via __subclasses__() but "
+            f"missing from CONTRACT_CONFIG"
+        )
+        service, created = await make_entity(cfg)
+
+        first = await service.delete(db_session, created.id)
+        assert first, (
+            f"{service_cls.__name__}: first delete() returned False — "
+            f"setup failure (created row not active or delete failed)"
+        )
+
+        second = await service.delete(db_session, created.id)
+        assert second is False, (
+            f"{service_cls.__name__}: second delete() on already-inactive "
+            f"soft row returned {second!r}, expected False"
+        )
+
+    @pytest.mark.parametrize("service_cls,cfg", _soft_params())
+    async def test_soft_deleted_absent_from_list(
+        self, service_cls, cfg, db_session, make_entity
+    ):
+        """Soft-deleted row is hidden from list() items AND excluded from total.
+
+        The *list hides* half of the list/get pairing (spec §2: archived
+        rows must not surface in the default active-only view — SoftDeleteService.list
+        filters ``is_active`` by default, ``ArchiveStatus.ACTIVE``).
+        """
+        assert cfg is not None, (
+            f"{service_cls.__name__} detected via __subclasses__() but "
+            f"missing from CONTRACT_CONFIG"
+        )
+        service, created = await make_entity(cfg)
+
+        ok = await service.delete(db_session, created.id)
+        assert ok, (
+            f"{service_cls.__name__}: setup delete() returned False"
+        )
+
+        resp = await service.list(db_session)
+        assert created.id not in [i.id for i in resp.items], (
+            f"{service_cls.__name__}: archived row leaked into list items"
+        )
+        assert resp.total == 0, (
+            f"{service_cls.__name__}: archived row counted in list total "
+            f"(got {resp.total!r}, expected 0)"
+        )
 
 
 # ─── Contract-test: create semantics ───────────────────────────────────────────

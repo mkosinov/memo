@@ -22,6 +22,17 @@ UpdateSchemaT = TypeVar("UpdateSchemaT", bound=BaseModel)
 ResponseSchemaT = TypeVar("ResponseSchemaT", bound=BaseModel)
 
 
+def _strip_is_active_none(payload: dict) -> dict:
+    """Drop is_active when None — sticky field: absent/None preserves the stored value (#184).
+
+    Shared by SoftDeleteService._patch_payload and ServiceService.update/patch
+    (ServiceService re-implements update/patch without super() — single helper
+    prevents the drift that hid the resurrection hazard there)."""
+    if payload.get("is_active") is None:
+        payload.pop("is_active", None)
+    return payload
+
+
 class GenericService(Generic[CreateSchemaT, UpdateSchemaT, ResponseSchemaT]):
     """Generic service providing standard CRUD with schema validation.
 
@@ -122,18 +133,28 @@ class GenericService(Generic[CreateSchemaT, UpdateSchemaT, ResponseSchemaT]):
         to prevent NOT NULL constraint violations on columns that must never
         be null (e.g. capacity, master_id, start, etc.).
         """
+        payload = self._patch_payload(data)
+        orm = await self._repository.patch(
+            db_session, self._model, id, payload
+        )
+        if orm is None:
+            return None
+        return self._response_schema.model_validate(orm)
+
+    def _patch_payload(self, data: BaseModel) -> dict:
+        """Build the apply-dict for ``patch()``: ``exclude_unset`` dump with
+        ``None`` values for ``NOT_NULL_FIELDS`` stripped (client intent is
+        "don't change", not "set to null"). Extracted so ``SoftDeleteService``
+        can override to additionally strip ``is_active=None`` (#184 sticky-
+        field semantics) without the base class knowing about ``is_active``.
+        """
         data_dict = data.model_dump(exclude_unset=True)
         # Strip nulls for NOT NULL fields — client intent is "don't change",
         # not "set to null"
         for field in self.NOT_NULL_FIELDS:
             if field in data_dict and data_dict[field] is None:
                 del data_dict[field]
-        orm = await self._repository.patch(
-            db_session, self._model, id, data_dict
-        )
-        if orm is None:
-            return None
-        return self._response_schema.model_validate(orm)
+        return data_dict
 
     @transactional
     async def delete(self, db_session: AsyncSession, id: str) -> bool:
@@ -177,3 +198,29 @@ class SoftDeleteService(GenericService[CreateSchemaT, UpdateSchemaT, ResponseSch
         return await self._paginate(
             db_session, self._list_stmt(status=status, **filters), page, per_page, order_by
         )
+
+    async def update(
+        self, db_session: AsyncSession, id: str, data: UpdateSchemaT
+    ) -> ResponseSchemaT | None:
+        """PUT with sticky is_active: None/absent → stored value injected before full replace (#184).
+
+        Injection (not stripping) is required: base update re-dumps the schema internally,
+        so a stripped key would re-enter as the schema default. Explicit bool passes through
+        (True on an archived row = legal reactivation). ``is_active`` is a documented
+        sticky-field exception to PUT full-replace (like ``id`` / ``created_at``).
+        """
+        if "is_active" in type(data).model_fields and data.is_active is None:
+            current = await self.get(db_session, id)
+            if current is None:
+                return None
+            data = data.model_copy(update={"is_active": current.is_active})
+        return await super().update(db_session, id, data)
+
+    def _patch_payload(self, data: BaseModel) -> dict:
+        """Soft-delete patch payload: additionally strip ``is_active`` when None
+        (#184 sticky-field semantics). The base NOT_NULL strip does not cover
+        ``is_active`` (it is governed by the soft-delete lifecycle, not by the
+        patch-fieldset parity), so an explicit ``None`` would otherwise write
+        NULL to the NOT NULL column.
+        """
+        return _strip_is_active_none(super()._patch_payload(data))

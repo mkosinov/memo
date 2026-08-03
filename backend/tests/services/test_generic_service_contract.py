@@ -1092,3 +1092,216 @@ class TestGenericServiceUpdateContract:
             f"to schema default — full-replace (PUT) semantics broken "
             f"(patch semantics leakage?)"
         )
+
+
+# ─── Contract-test: is_active stickiness on update/patch (user directive G1b) ─
+# Spec: docs/specs/2026-08-03-generic-service-crud-contract-design.md §2 (amended
+# contract table), §3.3 (IsActiveContract row), §8 D12/D13 — user-directed
+# semantics: ``get`` deliberately returns archived rows (*list hides* / *get
+# returns* pairing — user decision 1); ``update``/``patch`` preserve
+# ``is_active`` when absent/None; explicit bool applies (``True`` on archived =
+# legal reactivation). ``is_active`` is a sticky-field exception to PUT
+# full-replace (like ``id`` / ``created_at``).
+#
+# Parametrized over soft entities only via ``_soft_params()`` — NO in-test
+# skips; every test still starts with the ``assert cfg is not None`` line for
+# symmetry with the other contract classes (``_soft_params`` already filters
+# MISSING-CONFIG entries, so the assert is a no-op invariant here).
+#
+# Multi-phase tests use **labeled assertions** (assert messages per direction)
+# for failure localization (panel conflict resolution round 2 — Assertion
+# Roulette dismissed). ``ServiceService`` is a contract exception (own
+# ``update``/``patch`` overrides) and is covered in
+# ``backend/tests/services/test_service_service.py``.
+class TestGenericServiceIsActiveContract:
+    @pytest.mark.parametrize("service_cls,cfg", _soft_params())
+    async def test_get_archived_returns_row_with_is_active_false(
+        self, service_cls, cfg, db_session, make_entity
+    ):
+        """get() deliberately returns archived rows (user decision 1).
+
+        No ``is_active`` filter on ``get`` — the *list hides* / *get returns*
+        pairing is locked here; the row's archive state is visible via the
+        Response schema (``is_active`` is exposed on all 5 soft entities).
+        """
+        assert cfg is not None, MISSING_MSG
+        service, created = await make_entity(cfg)
+        ok = await service.delete(db_session, created.id)
+        assert ok, f"{service_cls.__name__}: setup delete() returned False"
+        fetched = await service.get(db_session, created.id)
+        assert fetched is not None, (
+            f"{service_cls.__name__}: get must return archived rows "
+            f"(user decision 1)"
+        )
+        assert fetched.is_active is False, (
+            f"{service_cls.__name__}: archived row's is_active must be False"
+        )
+
+    @pytest.mark.parametrize("service_cls,cfg", _soft_params())
+    async def test_update_preserves_is_active_when_omitted(
+        self, service_cls, cfg, db_session, make_entity
+    ):
+        """PUT without ``is_active`` in payload preserves the stored value:
+        archived stays archived (phase 1), active stays active (phase 2).
+
+        The omitting-resurrection hazard (#195 §3.5) is exercised in phase 1:
+        the 4 soft Update schemas default ``is_active: bool = True``
+        (``MasterUpdate``/``LocationUpdate``/``MaterialUpdate``; ``ServiceUpdate``
+        tested in ``test_service_service.py``) → ``BaseRepository.update`` applies
+        the full ``model_dump()`` → archived row silently reactivated. After the
+        §3.5 fix (default flip to ``bool | None = None`` + ``SoftDeleteService.update``
+        stored-value injection) the stored value is preserved instead.
+        """
+        assert cfg is not None, MISSING_MSG
+        # phase 1: archived stays archived (PUT without is_active must not resurrect)
+        service, created, sent = await make_entity(cfg, with_input=True)
+        ok = await service.delete(db_session, created.id)
+        assert ok, f"{service_cls.__name__}: phase 1 setup delete() returned False"
+        payload = _update_kwargs(cfg, sent)
+        assert "is_active" not in payload, (
+            f"{service_cls.__name__}: test invariant — payload must not include "
+            f"is_active (sticky-field semantics are the subject under test)"
+        )
+        await service.update(
+            db_session, created.id, cfg.update_schema(**payload)
+        )
+        after = await service.get(db_session, created.id)
+        assert after is not None, f"{service_cls.__name__}: phase 1 row vanished"
+        assert after.is_active is False, (
+            f"{service_cls.__name__}: PUT without is_active must not resurrect"
+        )
+        # phase 2: active stays active (fresh make_entity call)
+        service2, created2, sent2 = await make_entity(cfg, with_input=True)
+        payload2 = _update_kwargs(cfg, sent2)
+        assert "is_active" not in payload2, (
+            f"{service_cls.__name__}: phase 2 test invariant"
+        )
+        await service2.update(
+            db_session, created2.id, cfg.update_schema(**payload2)
+        )
+        after2 = await service2.get(db_session, created2.id)
+        assert after2 is not None, f"{service_cls.__name__}: phase 2 row vanished"
+        assert after2.is_active is True, (
+            f"{service_cls.__name__}: PUT without is_active must preserve active state"
+        )
+
+    @pytest.mark.parametrize("service_cls,cfg", _soft_params())
+    async def test_update_explicit_is_active_applies(
+        self, service_cls, cfg, db_session, make_entity
+    ):
+        """PUT with explicit ``is_active`` bool applies it: False archives an
+        active row (phase 1), True reactivates an archived row (phase 2), and
+        the reactivated row must be visible in ``list()`` again (phase 3).
+
+        ``True`` on archived = legal reactivation (user decision 3).
+        """
+        assert cfg is not None, MISSING_MSG
+        service, created, sent = await make_entity(cfg, with_input=True)
+        payload = _update_kwargs(cfg, sent)
+        payload["is_active"] = False
+        await service.update(
+            db_session, created.id, cfg.update_schema(**payload)
+        )
+        archived = await service.get(db_session, created.id)
+        assert archived is not None, (
+            f"{service_cls.__name__}: row vanished after archive"
+        )
+        assert archived.is_active is False, (
+            f"{service_cls.__name__}: explicit False must archive"
+        )
+        # phase 2: explicit True reactivates the archived row
+        payload["is_active"] = True
+        await service.update(
+            db_session, created.id, cfg.update_schema(**payload)
+        )
+        reactivated = await service.get(db_session, created.id)
+        assert reactivated is not None, (
+            f"{service_cls.__name__}: row vanished after reactivate"
+        )
+        assert reactivated.is_active is True, (
+            f"{service_cls.__name__}: explicit True must reactivate"
+        )
+        # phase 3: reactivated row visible in list() again (default active-only)
+        resp = await service.list(db_session)
+        assert created.id in [i.id for i in resp.items], (
+            f"{service_cls.__name__}: reactivated row visible in list again"
+        )
+
+    @pytest.mark.parametrize("service_cls,cfg", _soft_params())
+    async def test_patch_preserves_is_active_when_omitted_or_none(
+        self, service_cls, cfg, db_session, make_entity
+    ):
+        """PATCH preserves ``is_active`` in two flavors: (phase 1) field
+        omitted from the patch entirely → no-op; (phase 2) field sent as
+        ``None`` → stripped, never written as NULL to the NOT NULL column
+        (user-directed semantics, spec §2 amended patch row).
+
+        The explicit-None hazard: the 4 soft Patch schemas already declare
+        ``is_active: bool | None = None``, but ``GenericService.patch`` only
+        strips None for ``NOT_NULL_FIELDS`` (and ``is_active`` is in no
+        service's ``NOT_NULL_FIELDS``) → PATCH ``{"is_active": null}`` writes
+        NULL → DB NOT NULL violation. After the §3.5 fix
+        (``SoftDeleteService._patch_payload`` pops is_active=None) the
+        stored value is preserved instead.
+        """
+        assert cfg is not None, MISSING_MSG
+        service, created = await make_entity(cfg)
+        ok = await service.delete(db_session, created.id)
+        assert ok, f"{service_cls.__name__}: setup delete() returned False"
+        # phase 1: omitted (empty patch) → no-op
+        await service.patch(
+            db_session, created.id, cfg.patch_schema()
+        )
+        after1 = await service.get(db_session, created.id)
+        assert after1 is not None, f"{service_cls.__name__}: phase 1 row vanished"
+        assert after1.is_active is False, (
+            f"{service_cls.__name__}: patch omitted is_active must preserve "
+            f"archived state"
+        )
+        # phase 2: explicit None (must mean preserve, never NULL)
+        await service.patch(
+            db_session, created.id, cfg.patch_schema(is_active=None)
+        )
+        after2 = await service.get(db_session, created.id)
+        assert after2 is not None, f"{service_cls.__name__}: phase 2 row vanished"
+        assert after2.is_active is False, (
+            f"{service_cls.__name__}: is_active=None must mean preserve, "
+            f"never NULL"
+        )
+
+    @pytest.mark.parametrize("service_cls,cfg", _soft_params())
+    async def test_patch_explicit_is_active_applies(
+        self, service_cls, cfg, db_session, make_entity
+    ):
+        """PATCH with explicit ``is_active`` bool applies it (both directions):
+        False archives an active row (phase 1), True reactivates an archived
+        row (phase 2) and the row reappears in ``list()`` (phase 3)."""
+        assert cfg is not None, MISSING_MSG
+        service, created = await make_entity(cfg)
+        # phase 1: explicit False archives
+        await service.patch(
+            db_session, created.id, cfg.patch_schema(is_active=False)
+        )
+        archived = await service.get(db_session, created.id)
+        assert archived is not None, (
+            f"{service_cls.__name__}: row vanished after archive"
+        )
+        assert archived.is_active is False, (
+            f"{service_cls.__name__}: patch explicit False must archive"
+        )
+        # phase 2: explicit True reactivates
+        await service.patch(
+            db_session, created.id, cfg.patch_schema(is_active=True)
+        )
+        reactivated = await service.get(db_session, created.id)
+        assert reactivated is not None, (
+            f"{service_cls.__name__}: row vanished after reactivate"
+        )
+        assert reactivated.is_active is True, (
+            f"{service_cls.__name__}: patch explicit True must reactivate"
+        )
+        # phase 3: reactivated row visible in list()
+        resp = await service.list(db_session)
+        assert created.id in [i.id for i in resp.items], (
+            f"{service_cls.__name__}: reactivated row visible in list again"
+        )

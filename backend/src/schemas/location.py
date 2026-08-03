@@ -30,7 +30,7 @@ class LocationCreate(LocationBase):
 class LocationUpdate(LocationBase):
     """Request schema for updating a location (full replacement via PUT)."""
 
-    is_active: bool = True
+    is_active: bool | None = None  # None = preserve stored value; sticky field (#184)
 
 
 class LocationPatch(BaseModel):

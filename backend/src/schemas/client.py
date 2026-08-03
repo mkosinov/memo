@@ -25,7 +25,7 @@ class ClientCreate(ClientBase):
 class ClientUpdate(ClientBase):
     """Request schema for updating a client (full replacement via PUT)."""
 
-    pass
+    is_active: bool | None = None  # None = preserve stored value; sticky field (#184)
 
 
 class ClientPatch(BaseModel):
@@ -35,6 +35,7 @@ class ClientPatch(BaseModel):
     phone: str | None = None
     email: str | None = None
     channel: Channel | None = None
+    is_active: bool | None = None  # None = preserve stored value; sticky field (#184)
 
 
 class ClientResponse(BaseModel):

@@ -15,7 +15,7 @@ from src.models.tag import service_tags
 from src.models.tariff import Tariff
 from src.schemas.common import PaginatedResponse
 from src.schemas.service import ServiceCreate, ServicePatch, ServiceResponse, ServiceUpdate
-from src.services.generic import SoftDeleteService
+from src.services.generic import SoftDeleteService, _strip_is_active_none
 from src.services.decorators import transactional
 
 
@@ -118,7 +118,7 @@ class ServiceService(SoftDeleteService[ServiceCreate, ServiceUpdate, ServiceResp
 
         tag_ids = data.tag_ids
         tariff_data = data.tariffs
-        update_data = data.model_dump(exclude={"tariffs", "tag_ids"})
+        update_data = _strip_is_active_none(data.model_dump(exclude={"tariffs", "tag_ids"}))
 
         for key, value in update_data.items():
             setattr(service, key, value)
@@ -174,6 +174,9 @@ class ServiceService(SoftDeleteService[ServiceCreate, ServiceUpdate, ServiceResp
         for field in self.NOT_NULL_FIELDS:
             if field in data_dict and data_dict[field] is None:
                 del data_dict[field]
+
+        # Strip is_active when None (#184 sticky-field semantics)
+        data_dict = _strip_is_active_none(data_dict)
 
         # Apply scalar fields
         for key, value in data_dict.items():

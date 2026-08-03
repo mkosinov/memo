@@ -46,6 +46,7 @@ Pure move + extension. No test behavior changes; the service contract suite must
 
 **Step 1 — baseline:**
 - [ ] `cd backend && python -m pytest tests/services/test_generic_service_contract.py -q` → note pass count (baseline).
+- [ ] Record the pre-#185 base for the AC4 line-delta check in Task 3: `BASE_SHA=$(git rev-parse HEAD)` — keep this value (e.g. write it into your task notes).
 
 **Step 2 — create `backend/tests/generic_contract.py`** with this structure:
 - Module docstring: `"""Shared config for GenericService contract tests (service level + HTTP level, GH #184/#185). One entry per entity drives both contracts. The explicit service imports below power __subclasses__() discovery — do not trim."""`
@@ -438,8 +439,8 @@ Delete the contract-covered tests; keep entity-specific extras. **Rule:** if a K
 - [ ] `cd backend && python -m pytest tests/test_api_activities.py tests/test_api_clients.py tests/test_api_locations.py tests/test_api_masters.py tests/test_api_materials.py tests/test_api_payments.py tests/test_api_visitors.py tests/test_api_pagination_params.py tests/test_generic_api_contract.py -q` → all green.
 - [ ] `cd backend && python -m pytest tests/ -q` → full suite green (≈ 990–1000 passed; removed 107 cases [83 per-entity + 24 pagination params], added 116 → net ≈ +9 vs the pre-#185 suite).
 - [ ] Verify no orphaned names: `cd backend && python -m ruff check tests/ 2>/dev/null || true` — if ruff is not configured, manually confirm no unused imports/constants remain in the 8 edited files (unused imports fail CI lint).
-- [ ] **AC4 check:** `git diff --stat main...HEAD -- backend/tests/` (or against the pre-#185 base) → net ≈ **−350 lines** (gross removal ≈ 930 vs added ≈ 580). If wildly off (e.g. removal < 700), re-check the keep/remove tables before committing.
 - [ ] `git add -A backend/tests && git commit -m "test: dedup per-entity API CRUD tests into generic contract (#185)"`
+- [ ] **AC4 check (after the commit):** `git diff --stat $BASE_SHA..HEAD -- backend/tests/` (base recorded in Task 1 Step 1) → net ≈ **−350 lines** (gross removal ≈ 930 vs added ≈ 580). If wildly off (e.g. removal < 700), re-check the keep/remove tables before proceeding.
 
 ---
 
@@ -477,7 +478,7 @@ Delete the contract-covered tests; keep entity-specific extras. **Rule:** if a K
 Prove the contract catches the three wiring-break classes. Each mutation is applied, tested, then **fully reverted** before the next. Do NOT commit mutations.
 
 - [ ] **Mutation A — unmounted router:** in `backend/src/main.py`, comment out ONE `app.include_router(...)` line (pick `masters`). Run `cd backend && python -m pytest tests/test_generic_api_contract.py -q -k "Master"` → EXPECT failures: `test_create_returns_201...` (404≠201), list tests (404≠200), `test_get_nonexistent...` (code mismatch — default 404 body lacks `MASTER_NOT_FOUND`... note: Activity is the documented exception, D13; masters is not). `git checkout -- backend/src/main.py`. Verify the file is pristine.
-- [ ] **Mutation B — narrowed/wrong response_model:** in `backend/src/api/v1/masters.py`, on the GET `/{master_id}` route temporarily change `response_model=MasterResponse` to `response_model=TagResponse` (FastAPI then validates the returned Master against Tag's model → `ResponseValidationError` → HTTP 500). Run `cd backend && python -m pytest tests/test_generic_api_contract.py -q -k "Master and get"` → EXPECT `test_get_returns_created_entity[MasterService]` to FAIL (on the 200-status assertion: route 500s). The point is the contract goes red when the response model is wrong. NOTE: do NOT mutate by merely dropping the `response_model=` kwarg — that is the documented blind spot (spec D12; services return validated schema instances → byte-identical body). `git checkout -- backend/src/api/v1/masters.py`. Verify pristine.
+- [ ] **Mutation B — narrowed/wrong response_model:** in `backend/src/api/v1/masters.py`, on the GET `/{master_id}` route temporarily change `response_model=MasterResponse` to `response_model=TagResponse` (FastAPI then validates the returned Master against Tag's model → `ResponseValidationError`). Run `cd backend && python -m pytest tests/test_generic_api_contract.py -q -k "Master and get"` → EXPECT red: the session-scoped `TestClient` runs with `raise_server_exceptions=True`, so the case **ERRORs with `ResponseValidationError` raised inside the test** (not a 500 status assertion failure). Either way the contract goes red — that is the point. NOTE: do NOT mutate by merely dropping the `response_model=` kwarg — that is the documented blind spot (spec D12; services return validated schema instances → byte-identical body). `git checkout -- backend/src/api/v1/masters.py`. Verify pristine.
 - [ ] **Mutation C — status flip:** in `backend/src/api/v1/masters.py`, change POST's `status_code=201` to `status_code=200`. Run `pytest tests/test_generic_api_contract.py -q -k "Master and create"` → EXPECT failure on the 201 assertion. `git checkout -- backend/src/api/v1/masters.py`.
 - [ ] `git status` → `backend/src/` must show ZERO modifications.
 - [ ] `cd backend && python -m pytest tests/ -q` → full suite green.

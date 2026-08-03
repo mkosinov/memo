@@ -21,7 +21,7 @@ How this feature behaves, mapped to spec acceptance criteria:
 - **Clients API** → Update/Patch schemas gain an optional `is_active` field, aligning clients with the other soft-delete entities (no UI change; restore-buttons UI remains a follow-up).
 - **Developer adds a new GenericService subclass** → writes one `CONTRACT_CONFIG` entry → gets full CRUD + (if soft-delete) `is_active` semantics coverage automatically; without the entry, a guard test fails with MISSING-CONFIG.
 - **Developer breaks generic semantics** (update nonexistent ≠ None, PUT partially applying fields, soft-deleted row in list, `is_active` resurrection) → the contract fails across all entities in one file, not scattered per-entity tests.
-- **Test suite** → backend ≈ 854p/3s becomes ≈ 981p/5s; `test_generic_service_list.py` dissolved (generic parts parametrized into the contract file, 3 service-specific tests moved to per-entity files); production diff confined to 7 files under `backend/src/`.
+- **Test suite** → backend ≈ 854p/3s becomes ≈ 987p/5s; `test_generic_service_list.py` dissolved (generic parts parametrized into the contract file, 3 service-specific tests moved to per-entity files); production diff confined to 7 files under `backend/src/`.
 
 ---
 

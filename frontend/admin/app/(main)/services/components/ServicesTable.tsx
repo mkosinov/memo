@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { getServices } from '@memo/api-client';
 import type { ServiceResponse } from '@memo/api-client';
 import { useUpdateService, usePatchService, useCreateService, useDeleteService } from '@/hooks/useServicesMutations';
@@ -166,10 +166,17 @@ function loadVisibleKeys(): string[] | null {
 // ─── Component ────────────────────────────────────────────────────────────
 
 export function ServicesTable() {
+  // ─── Filter state ────────────────────────────────────────────────────
+  // `status` is declared above `useQuery` because the query is keyed on it
+  // (server-side archive filter via ListParams.status).
+  const [search, setSearch] = useState('');
+  const [status, setStatus] = useState<'active' | 'all' | 'archived'>('active');
+
   const { data: services = [], isLoading, error, refetch } = useQuery<ServiceResponse[], Error>({
-    queryKey: ['services'],
-    queryFn: () => getServices({ per_page: 100 }).then(r => r.items),
+    queryKey: ['services', status],
+    queryFn: () => getServices({ per_page: 100, status }).then(r => r.items),
     staleTime: 5 * 60 * 1000,
+    placeholderData: keepPreviousData,
   });
 
   const updateService = useUpdateService();
@@ -178,9 +185,7 @@ export function ServicesTable() {
   const deleteService = useDeleteService();
   const { showToast } = useUI();
 
-  // Filters
-  const [search, setSearch] = useState('');
-  const [status, setStatus] = useState('active');
+  // Sort state
 
   // Sort
   const [sortField, setSortField] = useState<string | null>(null);
@@ -220,11 +225,9 @@ export function ServicesTable() {
     return services.filter((s) => {
       if (search && !s.title.toLowerCase().includes(search.toLowerCase()))
         return false;
-      if (status === 'active' && !s.is_active) return false;
-      if (status === 'archived' && s.is_active) return false;
       return true;
     });
-  }, [services, search, status]);
+  }, [services, search]);
 
   // ─── Sorting ────────────────────────────────────────────────────────────
 
@@ -372,7 +375,7 @@ export function ServicesTable() {
             search={search}
             status={status}
             onSearchChange={setSearch}
-            onStatusChange={setStatus}
+            onStatusChange={(v) => setStatus(v as 'active' | 'all' | 'archived')}
             onReset={() => {
               setSearch('');
               setStatus('active');

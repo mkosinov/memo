@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { getMaterials } from '@memo/api-client';
 import type { MaterialResponse } from '@memo/api-client';
 import { useUpdateMaterial, usePatchMaterial, useCreateMaterial, useDeleteMaterial } from '@/hooks/useMaterialsMutations';
@@ -90,10 +90,17 @@ function loadVisibleKeys(): string[] | null {
 // ─── Component ────────────────────────────────────────────────────────
 
 export function MaterialsTable() {
+  // ─── Filter state ────────────────────────────────────────────────────
+  // `status` is declared above `useQuery` because the query is keyed on it
+  // (server-side archive filter via ListParams.status).
+  const [search, setSearch] = useState('');
+  const [status, setStatus] = useState<'active' | 'all' | 'archived'>('active');
+
   const { data: materials = [], isLoading } = useQuery<MaterialResponse[], Error>({
-    queryKey: ['materials'],
-    queryFn: () => getMaterials({ per_page: 100 }).then(r => r.items),
+    queryKey: ['materials', status],
+    queryFn: () => getMaterials({ per_page: 100, status }).then(r => r.items),
     staleTime: 5 * 60 * 1000,
+    placeholderData: keepPreviousData,
   });
 
   const updateMaterial = useUpdateMaterial();
@@ -102,11 +109,7 @@ export function MaterialsTable() {
   const deleteMaterial = useDeleteMaterial();
   const { showToast } = useUI();
 
-  // Filters
-  const [search, setSearch] = useState('');
-  const [status, setStatus] = useState('active');
-
-  // Sort
+  // Sort state
   const [sortField, setSortField] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
 
@@ -144,11 +147,9 @@ export function MaterialsTable() {
     return materials.filter((m) => {
       if (search && !m.title.toLowerCase().includes(search.toLowerCase()))
         return false;
-      if (status === 'active' && !m.is_active) return false;
-      if (status === 'archived' && m.is_active) return false;
       return true;
     });
-  }, [materials, search, status]);
+  }, [materials, search]);
 
   // ─── Sorting ────────────────────────────────────────────────────────
 
@@ -313,7 +314,7 @@ export function MaterialsTable() {
               </label>
               <select
                 value={status}
-                onChange={(e) => setStatus(e.target.value)}
+                onChange={(e) => setStatus(e.target.value as 'active' | 'all' | 'archived')}
                 className="rounded-lg border px-2 py-1.5 text-xs"
                 style={{
                   borderColor: 'var(--line)',
@@ -323,7 +324,7 @@ export function MaterialsTable() {
                 aria-label="Фильтр по статусу"
               >
                 <option value="active">Активные</option>
-                <option value="">Все</option>
+                <option value="all">Все</option>
                 <option value="archived">Архив</option>
               </select>
             </div>

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, within } from '@testing-library/react';
 import React from 'react';
 import type { ServiceResponse } from '@memo/api-client';
@@ -64,9 +64,11 @@ const mockService3: ServiceResponse = {
   updated_at: '2024-03-01T00:00:00Z',
 };
 
-// ─── Mutable state ──────────────────────────────────────────────────────────
-
-let mockServices: ServiceResponse[] = [mockService1, mockService2, mockService3];
+const TEST_SERVICES: ServiceResponse[] = [
+  mockService1,
+  mockService2,
+  mockService3,
+];
 
 // ─── Mocks ──────────────────────────────────────────────────────────────────
 
@@ -74,11 +76,11 @@ const mockMutateAsync = vi.fn().mockResolvedValue({});
 const mockShowToast = vi.fn();
 
 vi.mock('@tanstack/react-query', () => ({
-  useQuery: vi.fn(() => ({
-    data: mockServices,
-    isLoading: false,
-    error: null,
-  })),
+  useQuery: vi.fn(),
+  // `keepPreviousData` is a sentinel symbol in real react-query; the component
+  // imports it for `placeholderData`. Provide a stable sentinel so the import
+  // resolves. The mocked `useQuery` ignores `placeholderData` anyway.
+  keepPreviousData: Symbol('keepPreviousData'),
   useMutation: vi.fn(() => ({
     mutateAsync: mockMutateAsync,
     isPending: false,
@@ -88,12 +90,11 @@ vi.mock('@tanstack/react-query', () => ({
   })),
 }));
 
-vi.mock('@memo/api-client', () => ({
-  getServices: vi.fn().mockResolvedValue({ items: [], total: 0, page: 1, per_page: 100 }),
-  createService: vi.fn(),
-  updateService: vi.fn(),
-  deleteService: vi.fn(),
-}));
+// Spy on getServices (preserve other api-client exports via importOriginal)
+vi.mock('@memo/api-client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@memo/api-client')>();
+  return { ...actual, getServices: vi.fn() };
+});
 
 vi.mock('@/hooks/useServicesMutations', () => ({
   useCreateService: () => ({ mutateAsync: mockMutateAsync, isPending: false }),
@@ -110,32 +111,113 @@ vi.mock('@/contexts/UIContext', () => ({
   }),
 }));
 
+import { useQuery } from '@tanstack/react-query';
+import { getServices } from '@memo/api-client';
+
+const mockUseQuery = vi.mocked(useQuery);
+const mockGetServices = vi.mocked(getServices);
+
 import { ServicesTable } from '../app/(main)/services/components/ServicesTable';
+
+// ─── Helpers ───────────────────────────────────────────────────────────────
+
+// Simulate the server's archive filtering per `ListParams.status`. The mock
+// `useQuery` discards the `queryFn`'s resolved value and returns the injected
+// `data` synchronously, so we must inject already-filtered lists matching the
+// status the component requested. This mirrors how the real backend responds.
+const ACTIVE_SERVICES = TEST_SERVICES.filter((s) => s.is_active);
+const ARCHIVED_SERVICES = TEST_SERVICES.filter((s) => !s.is_active);
+
+function setupQuery(services: ServiceResponse[] = ACTIVE_SERVICES, isLoading = false) {
+  // Resolve the getServices spy with the supplied list so the component's
+  // `queryFn` (which calls `getServices(...).then(r => r.items)`) settles.
+  mockGetServices.mockResolvedValue({
+    items: services,
+    total: services.length,
+    page: 1,
+    per_page: 100,
+  });
+  // Drive `useQuery` through `mockImplementation` so the real `queryFn` is
+  // invoked on every render — this is what lets the getServices spy record
+  // the call args (including the current `status`). The resolved promise is
+  // discarded; we inject the static `data` synchronously to keep these unit
+  // tests independent of react-query's async fetch machinery.
+  mockUseQuery.mockImplementation((((opts: { queryFn?: () => unknown }) => {
+    try {
+      void opts?.queryFn?.();
+    } catch {
+      // queryFn errors don't affect the injected static data
+    }
+    return {
+      data: services,
+      isLoading,
+      error: null,
+      refetch: vi.fn(),
+      isSuccess: true,
+      isError: false,
+      isPending: false,
+      isFetching: false,
+      status: 'success',
+      fetchStatus: 'idle',
+      dataUpdatedAt: 0,
+      errorUpdatedAt: 0,
+      failureCount: 0,
+      failureReason: null,
+      errorUpdateCount: 0,
+      isFetched: true,
+      isFetchedAfterMount: true,
+      isInitialLoading: false,
+      isLoadingError: false,
+      isPlaceholderData: false,
+      isRefetchError: false,
+      isStale: false,
+      isRefetching: false,
+      isLoadingSuccess: true,
+      remove: vi.fn(),
+      promise: Promise.resolve({ data: services }),
+    };
+  }) as unknown) as typeof useQuery);
+  return mockGetServices;
+}
 
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
 describe('ServicesTable', () => {
   beforeEach(() => {
-    mockServices = [mockService1, mockService2, mockService3];
-    mockMutateAsync.mockClear();
-    mockShowToast.mockClear();
+    vi.clearAllMocks();
+    setupQuery();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it('renders active service titles by default', () => {
     render(<ServicesTable />);
     expect(screen.getByText('Картина маслом')).toBeTruthy();
     expect(screen.getByText('Картина акрилом')).toBeTruthy();
-    // Ручная лепка is inactive, not shown by default (status=active)
+    // Archived service is filtered out server-side (status: 'active' default)
     expect(screen.queryByText('Ручная лепка')).toBeNull();
+    // Default server-side filter requests status: 'active' (GH #195)
+    expect(mockGetServices).toHaveBeenCalledWith({
+      per_page: 100,
+      status: 'active',
+    });
   });
 
   it('renders all services when status filter is "all"', () => {
+    // Simulate server returning all services (active + archived) for status='all'
+    setupQuery(TEST_SERVICES);
     render(<ServicesTable />);
     const statusSelect = screen.getByLabelText(/Фильтр по статусу/);
-    fireEvent.change(statusSelect, { target: { value: '' } });
+    fireEvent.change(statusSelect, { target: { value: 'all' } });
     expect(screen.getByText('Картина маслом')).toBeTruthy();
     expect(screen.getByText('Картина акрилом')).toBeTruthy();
     expect(screen.getByText('Ручная лепка')).toBeTruthy();
+    expect(mockGetServices).toHaveBeenCalledWith({
+      per_page: 100,
+      status: 'all',
+    });
   });
 
   it('renders duration formatted as minutes', () => {
@@ -200,16 +282,21 @@ describe('ServicesTable', () => {
   });
 
   it('filters by status (archived)', () => {
+    // Simulate server returning only archived services for status='archived'
+    setupQuery(ARCHIVED_SERVICES);
     render(<ServicesTable />);
     const statusSelect = screen.getByLabelText(/Фильтр по статусу/);
-    // Switch to archived
+    // Switch to archived — request now carries status: 'archived' (GH #195)
     fireEvent.change(statusSelect, { target: { value: 'archived' } });
-    expect(screen.queryByText('Картина маслом')).toBeNull();
     expect(screen.getByText('Ручная лепка')).toBeTruthy();
+    expect(mockGetServices).toHaveBeenCalledWith({
+      per_page: 100,
+      status: 'archived',
+    });
   });
 
   it('shows empty state when no services match', () => {
-    mockServices = [];
+    setupQuery([]);
     render(<ServicesTable />);
     expect(screen.getByText('Услуги не найдены')).toBeTruthy();
   });
@@ -265,7 +352,6 @@ describe('ServicesTable', () => {
     fireEvent.click(screen.getByText('Удалить'));
     expect(window.confirm).toHaveBeenCalledWith('Удалить услугу?');
     expect(mockMutateAsync).toHaveBeenCalled();
-    vi.restoreAllMocks();
   });
 
   it('does not call deleteService when confirmation cancelled', () => {
@@ -276,6 +362,5 @@ describe('ServicesTable', () => {
     fireEvent.click(screen.getByText('Удалить'));
     expect(window.confirm).toHaveBeenCalledWith('Удалить услугу?');
     expect(mockMutateAsync).not.toHaveBeenCalled();
-    vi.restoreAllMocks();
   });
 });

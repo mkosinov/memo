@@ -654,3 +654,81 @@ class TestGenericServiceDeleteSemantics:
                 f"{service_cls.__name__} (soft-delete): is_active="
                 f"{orm.is_active!r}, expected False"
             )
+
+
+# ─── Contract-test: create semantics ───────────────────────────────────────────
+# Spec: docs/specs/2026-08-03-generic-service-crud-contract-design.md §3.3 —
+# ``test_create_response_contains_create_data_fields`` locks the response↔input
+# parity for ``create_data`` keys (fields that round-trip through the Response
+# schema). ``test_create_persists_row`` asserts the row is reachable via a
+# fresh ORM-level ``db_session.get`` — a path distinct from the service's own
+# ``get()``, so a service that returns a populated object without flushing
+# cannot pass.
+class TestGenericServiceCreateContract:
+    @pytest.mark.parametrize("service_cls,cfg", _contract_params())
+    async def test_create_response_contains_create_data_fields(
+        self, service_cls, cfg, db_session, make_entity
+    ):
+        """Response create fields match the values sent in the input schema."""
+        assert cfg is not None, (
+            f"{service_cls.__name__} обнаружен через __subclasses__(), "
+            f"но отсутствует в CONTRACT_CONFIG"
+        )
+        service, created, sent = await make_entity(cfg, with_input=True)
+        for field in cfg.create_data:
+            if field in type(created).model_fields:
+                assert getattr(created, field) == getattr(sent, field), (
+                    f"{service_cls.__name__}.create: response field {field} mismatch"
+                )
+
+    @pytest.mark.parametrize("service_cls,cfg", _contract_params())
+    async def test_create_persists_row(
+        self, service_cls, cfg, db_session, make_entity
+    ):
+        """Create flushes the row — reachable by a fresh ORM ``db_session.get``."""
+        assert cfg is not None, (
+            f"{service_cls.__name__} обнаружен через __subclasses__(), "
+            f"но отсутствует в CONTRACT_CONFIG"
+        )
+        service, created = await make_entity(cfg)
+        row = await db_session.get(cfg.model, created.id)  # ORM-level, distinct from service.get
+        assert row is not None, f"{service_cls.__name__}.create: row not persisted"
+
+
+# ─── Contract-test: get semantics ───────────────────────────────────────────────
+# Spec: docs/specs/2026-08-03-generic-service-crud-contract-design.md §2/§3.3 —
+# ``get`` deliberately returns archived rows (*list hides, get returns*); the
+# nonexistent-id → ``None`` edge is half of the contract. ``fk_map`` fields are
+# skipped in the round-trip assertion because the input schema carries the
+# FK id while the persisted/returned ORM row is compared via the same field —
+# the FK comparison would be tautological and obscures real value-set drift.
+class TestGenericServiceGetContract:
+    @pytest.mark.parametrize("service_cls,cfg", _contract_params())
+    async def test_get_returns_created_entity(
+        self, service_cls, cfg, db_session, make_entity
+    ):
+        """get(id) returns the row created via the service with matching fields."""
+        assert cfg is not None, (
+            f"{service_cls.__name__} обнаружен через __subclasses__(), "
+            f"но отсутствует в CONTRACT_CONFIG"
+        )
+        service, created, sent = await make_entity(cfg, with_input=True)
+        fetched = await service.get(db_session, created.id)
+        assert fetched is not None
+        for field in cfg.create_data:
+            if field in type(fetched).model_fields and field not in cfg.fk_map:
+                assert getattr(fetched, field) == getattr(sent, field), (
+                    f"{service_cls.__name__}.get: field {field} mismatch"
+                )
+
+    @pytest.mark.parametrize("service_cls,cfg", _contract_params())
+    async def test_get_nonexistent_returns_none(
+        self, service_cls, cfg, db_session
+    ):
+        """get(nonexistent-id) → None (no row, no exception)."""
+        assert cfg is not None, (
+            f"{service_cls.__name__} обнаружен через __subclasses__(), "
+            f"но отсутствует в CONTRACT_CONFIG"
+        )
+        service = cfg.service_factory()
+        assert await service.get(db_session, "nonexistent-id") is None

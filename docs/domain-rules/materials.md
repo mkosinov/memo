@@ -26,7 +26,7 @@ A Material is a physical supply or tool used in master classes (e.g., paint, cla
 ## API Endpoints
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | /api/v1/materials | List active |
+| GET | /api/v1/materials | List records — `?status=active` (default) \| `archived` \| `all` |
 | GET | /api/v1/materials/{id} | Get |
 | POST | /api/v1/materials | Create |
 | PUT | /api/v1/materials/{id} | Full update |

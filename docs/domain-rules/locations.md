@@ -36,7 +36,7 @@ A Location is a physical studio space where master classes take place.
 ## API Endpoints
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | /api/v1/locations | List active |
+| GET | /api/v1/locations | List records — `?status=active` (default) \| `archived` \| `all` |
 | GET | /api/v1/locations/{id} | Get |
 | POST | /api/v1/locations | Create |
 | PUT | /api/v1/locations/{id} | Full update |

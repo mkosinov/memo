@@ -49,7 +49,7 @@ Pure move + extension. No test behavior changes; the service contract suite must
 
 **Step 2 — create `backend/tests/generic_contract.py`** with this structure:
 - Module docstring: `"""Shared config for GenericService contract tests (service level + HTTP level, GH #184/#185). One entry per entity drives both contracts. The explicit service imports below power __subclasses__() discovery — do not trim."""`
-- The FULL import block currently at `test_generic_service_contract.py` L10–83 (all explicit service imports, service classes/factories, models, Create/Patch/Update schema imports), **PLUS** these 8 new imports (append after the Update schema imports):
+- The FULL import block currently at `test_generic_service_contract.py` L10–83 (all explicit service imports, service classes/factories, models, Create/Patch/Update schema imports) **with ONE exception: drop `from sqlalchemy import select` (L16) — unused in the new module, would be a ruff F401**, **PLUS** these 8 new imports (append after the Update schema imports):
 
 ```python
 # Schemas — Response (HTTP-level contract: exact-keys + model_validate on bodies)
@@ -126,6 +126,7 @@ from tests.generic_contract import (
 **Step 7 — verify + commit:**
 - [ ] `cd backend && python -m pytest tests/services/test_generic_service_contract.py -q` → same pass count as Step 1 baseline.
 - [ ] `cd backend && python -m pytest tests/services/ -q` → all green.
+- [ ] `cd backend && python -m ruff check tests/generic_contract.py tests/services/test_generic_service_contract.py` → clean (no F401/unused imports in either file).
 - [ ] `git add backend/tests/generic_contract.py backend/tests/services/test_generic_service_contract.py && git commit -m "test: extract shared generic-contract config module (#185)"`
 
 ---
@@ -416,7 +417,7 @@ Delete the contract-covered tests; keep entity-specific extras. **Rule:** if a K
 
 **`backend/tests/test_api_activities.py`** — REMOVE 9 tests: `TestActivitiesCrud.test_create_activity`, `.test_list_activities_includes_created`, `.test_get_activity_by_id`, `.test_update_activity`, `.test_delete_activity_hard_deletes`, `.test_get_nonexistent_activity_returns_404`, `.test_update_nonexistent_activity_returns_404`, `.test_delete_nonexistent_activity_returns_404`, `.test_patch_nonexistent_activity_returns_404`. KEEP: all of `TestActivitiesDateFiltering` (2), `TestActivitiesOccupied` (1), `TestActivitiesOccupiedBatch` (2). Helpers `_create_prerequisites`, `_activity_payload`, payload constants, `_insert_record_direct`, late `import asyncio` all stay (used by kept tests). If removing `TestActivitiesCrud` empties the class, delete the class shell too.
 
-**`backend/tests/test_api_clients.py`** — REMOVE 9 tests: `TestClientsCrud.test_create_client`, `.test_list_clients_includes_created`, `.test_get_client_by_id`, `.test_update_client`, `.test_delete_client_soft_deletes`, `.test_get_nonexistent_client_returns_404`, `.test_update_nonexistent_client_returns_404`, `.test_delete_nonexistent_client_returns_404`, `.test_patch_client_not_found`. KEEP everything else (27 tests incl. search, `/clients/{id}/visitors`, create edge cases, channel tolerance, #195 regression, schema contract). `CLIENT_PAYLOAD` stays.
+**`backend/tests/test_api_clients.py`** — REMOVE 9 tests: `TestClientsCrud.test_create_client`, `.test_list_clients_includes_created`, `.test_get_client_by_id`, `.test_update_client`, `.test_delete_client_soft_deletes`, `.test_get_nonexistent_client_returns_404`, `.test_update_nonexistent_client_returns_404`, `.test_delete_nonexistent_client_returns_404`, `.test_patch_client_not_found`. KEEP everything else (28 tests incl. search, `/clients/{id}/visitors`, create edge cases, channel tolerance, #195 regression, schema contract). `CLIENT_PAYLOAD` stays.
 
 **`backend/tests/test_api_locations.py`** — REMOVE 9 tests: `TestLocationsCrud.test_create_location`, `.test_list_locations_includes_created`, `.test_get_location_by_id`, `.test_update_location`, `.test_delete_location_soft_deletes`, `.test_get_nonexistent_location_returns_404`, `.test_update_nonexistent_location_returns_404`, `.test_delete_nonexistent_location_returns_404`; and `TestLocationPatch.test_patch_location_not_found_404` (delete the now-empty `TestLocationPatch` class). **KEEP `TestLocationsCrud.test_create_location_without_location_hint`** (create edge case — omitted optional field → null; mirrors the kept clients create edge cases; keeps `LOCATION_PAYLOAD` in use) and all 4 `TestLocationListStatusFilter` tests.
 
@@ -437,6 +438,7 @@ Delete the contract-covered tests; keep entity-specific extras. **Rule:** if a K
 - [ ] `cd backend && python -m pytest tests/test_api_activities.py tests/test_api_clients.py tests/test_api_locations.py tests/test_api_masters.py tests/test_api_materials.py tests/test_api_payments.py tests/test_api_visitors.py tests/test_api_pagination_params.py tests/test_generic_api_contract.py -q` → all green.
 - [ ] `cd backend && python -m pytest tests/ -q` → full suite green (≈ 990–1000 passed; removed 107 cases [83 per-entity + 24 pagination params], added 116 → net ≈ +9 vs the pre-#185 suite).
 - [ ] Verify no orphaned names: `cd backend && python -m ruff check tests/ 2>/dev/null || true` — if ruff is not configured, manually confirm no unused imports/constants remain in the 8 edited files (unused imports fail CI lint).
+- [ ] **AC4 check:** `git diff --stat main...HEAD -- backend/tests/` (or against the pre-#185 base) → net ≈ **−350 lines** (gross removal ≈ 930 vs added ≈ 580). If wildly off (e.g. removal < 700), re-check the keep/remove tables before committing.
 - [ ] `git add -A backend/tests && git commit -m "test: dedup per-entity API CRUD tests into generic contract (#185)"`
 
 ---
@@ -475,7 +477,7 @@ Delete the contract-covered tests; keep entity-specific extras. **Rule:** if a K
 Prove the contract catches the three wiring-break classes. Each mutation is applied, tested, then **fully reverted** before the next. Do NOT commit mutations.
 
 - [ ] **Mutation A — unmounted router:** in `backend/src/main.py`, comment out ONE `app.include_router(...)` line (pick `masters`). Run `cd backend && python -m pytest tests/test_generic_api_contract.py -q -k "Master"` → EXPECT failures: `test_create_returns_201...` (404≠201), list tests (404≠200), `test_get_nonexistent...` (code mismatch — default 404 body lacks `MASTER_NOT_FOUND`... note: Activity is the documented exception, D13; masters is not). `git checkout -- backend/src/main.py`. Verify the file is pristine.
-- [ ] **Mutation B — narrowed/wrong response_model:** in `backend/src/api/v1/masters.py`, on the GET `/{master_id}` route temporarily change `response_model=MasterResponse` to `response_model=TagResponse` (FastAPI then filters the body down to Tag's fields). Run `cd backend && python -m pytest tests/test_generic_api_contract.py -q -k "Master and get"` → EXPECT `test_get_returns_created_entity[MasterService]` to fail (exact-keys assertion). NOTE: do NOT mutate by merely dropping the `response_model=` kwarg — that is the documented blind spot (spec D12; services return validated schema instances → byte-identical body). `git checkout -- backend/src/api/v1/masters.py`. Verify pristine.
+- [ ] **Mutation B — narrowed/wrong response_model:** in `backend/src/api/v1/masters.py`, on the GET `/{master_id}` route temporarily change `response_model=MasterResponse` to `response_model=TagResponse` (FastAPI then validates the returned Master against Tag's model → `ResponseValidationError` → HTTP 500). Run `cd backend && python -m pytest tests/test_generic_api_contract.py -q -k "Master and get"` → EXPECT `test_get_returns_created_entity[MasterService]` to FAIL (on the 200-status assertion: route 500s). The point is the contract goes red when the response model is wrong. NOTE: do NOT mutate by merely dropping the `response_model=` kwarg — that is the documented blind spot (spec D12; services return validated schema instances → byte-identical body). `git checkout -- backend/src/api/v1/masters.py`. Verify pristine.
 - [ ] **Mutation C — status flip:** in `backend/src/api/v1/masters.py`, change POST's `status_code=201` to `status_code=200`. Run `pytest tests/test_generic_api_contract.py -q -k "Master and create"` → EXPECT failure on the 201 assertion. `git checkout -- backend/src/api/v1/masters.py`.
 - [ ] `git status` → `backend/src/` must show ZERO modifications.
 - [ ] `cd backend && python -m pytest tests/ -q` → full suite green.

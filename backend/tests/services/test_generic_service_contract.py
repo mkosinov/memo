@@ -1,8 +1,10 @@
-"""Contract-тест GenericService.patch() — единый источник истины generic-семантик.
+"""Contract-тест GenericService full-CRUD (create/get/list/update/patch/delete).
 
-Сущности обнаруживаются автоматически через GenericService.__subclasses__().
-Новый подкласс без config-записи в CONTRACT_CONFIG → падение при сборе параметров.
-Исключения (override-семантика patch) обязаны иметь собственные тесты.
+Единый источник истины generic-семантик. Сущности обнаруживаются
+автоматически через GenericService.__subclasses__(). Новый подкласс без
+config-записи в CONTRACT_CONFIG → падение при сборе параметров. Исключения
+(override-семантика одного или нескольких generic-методов) обязаны иметь
+собственные тесты.
 """
 
 from __future__ import annotations
@@ -71,14 +73,24 @@ from src.schemas.payment import PaymentPatch
 from src.schemas.tag import TagPatch
 from src.schemas.visitor import VisitorPatch
 
+# Schemas — Update (PUT full-replace; Tag has no TagUpdate — reuses TagCreate)
+from src.schemas.activity import ActivityUpdate
+from src.schemas.client import ClientUpdate
+from src.schemas.location import LocationUpdate
+from src.schemas.master import MasterUpdate
+from src.schemas.material import MaterialUpdate
+from src.schemas.payment import PaymentUpdate
+from src.schemas.visitor import VisitorUpdate
 
-# ─── Исключения: сервисы с override-семантикой patch ────────────────────────────
-# Обязаны иметь собственные тесты (test_api_services.py / test_api_photos.py / test_api_records.py).
-# ``SoftDeleteService`` — абстрактный промежуточный базовый класс (#195):
-# не привязан к конкретной модели/схеме, не тестируется напрямую; его
-# конкретные подклассы (Master/Location/Material/Client) покрыты через
+
+# ─── Исключения: сервисы с override-семантикой одного или нескольких
+# ─── generic-методов (create/get/list/update/patch/delete) ─────────────────────
+# Обязаны иметь собственные тесты (test_api_services.py / test_api_photos.py /
+# test_api_records.py). ``SoftDeleteService`` — абстрактный промежуточный базовый
+# класс (#195): не привязан к конкретной модели/схеме, не тестируется напрямую;
+# его конкретные подклассы (Master/Location/Material/Client) покрыты через
 # CONTRACT_CONFIG и обнаруживаются рекурсивно через ``_all_subclasses``.
-GENERIC_PATCH_EXCEPTIONS: set[type] = {ServiceService, PhotoService, RecordService, SoftDeleteService}
+GENERIC_CONTRACT_EXCEPTIONS: set[type] = {ServiceService, PhotoService, RecordService, SoftDeleteService}
 
 
 def _all_subclasses(cls: type) -> list[type]:
@@ -117,6 +129,15 @@ class EntityConfig(NamedTuple):
     nullable_field: str | None
     nullable_sentinel: Any
     delete_semantics: Literal["soft", "hard"]
+    # PUT-style schema (full replace). Tag has no TagUpdate → reuses TagCreate.
+    update_schema: type
+    # Fields present in update_schema, values != create_data; never contains
+    # is_active (sticky-field semantics are pinned by TestGenericServiceIsActiveContract).
+    update_data: dict
+    # Column with a DB unique constraint that multi-row tests must vary per row
+    # (only Tag.tag is unique=True among the 8 models). Must be last — has a
+    # default — so unspecified entries keep working.
+    unique_row_field: str | None = None
 
 
 # ─── Per-service config ──────────────────────────────────────────────────────────
@@ -142,6 +163,12 @@ CONTRACT_CONFIG: dict[type, EntityConfig] = {
         nullable_field="comment",
         nullable_sentinel="initial",
         delete_semantics="hard",
+        update_schema=ActivityUpdate,
+        update_data={
+            "start": datetime(2030, 2, 2, 12, 0),
+            "duration": 90,
+            "capacity": 20,
+        },
     ),
     ClientService: EntityConfig(
         service_factory=get_client_service,
@@ -155,6 +182,8 @@ CONTRACT_CONFIG: dict[type, EntityConfig] = {
         nullable_field="name",
         nullable_sentinel="Ivan",
         delete_semantics="soft",
+        update_schema=ClientUpdate,
+        update_data={"name": "Petr", "phone": "+79111111111"},
     ),
     LocationService: EntityConfig(
         service_factory=get_location_service,
@@ -168,6 +197,8 @@ CONTRACT_CONFIG: dict[type, EntityConfig] = {
         nullable_field="address",
         nullable_sentinel="addr",
         delete_semantics="soft",
+        update_schema=LocationUpdate,
+        update_data={"name": "Loc2", "capacity": 10},
     ),
     MasterService: EntityConfig(
         service_factory=get_master_service,
@@ -188,6 +219,12 @@ CONTRACT_CONFIG: dict[type, EntityConfig] = {
         nullable_field="avatar_url",
         nullable_sentinel="http://x",
         delete_semantics="soft",
+        update_schema=MasterUpdate,
+        update_data={
+            "first_name": "A2",
+            "last_name": "B2",
+            "color": "#000000",
+        },
     ),
     MaterialService: EntityConfig(
         service_factory=get_material_service,
@@ -201,6 +238,8 @@ CONTRACT_CONFIG: dict[type, EntityConfig] = {
         nullable_field=None,
         nullable_sentinel=None,
         delete_semantics="soft",
+        update_schema=MaterialUpdate,
+        update_data={"title": "T2", "description": "D2"},
     ),
     PaymentService: EntityConfig(
         service_factory=get_payment_service,
@@ -214,6 +253,8 @@ CONTRACT_CONFIG: dict[type, EntityConfig] = {
         nullable_field="method",
         nullable_sentinel="cash",
         delete_semantics="hard",
+        update_schema=PaymentUpdate,
+        update_data={"amount": 200, "method": "cash"},
     ),
     TagService: EntityConfig(
         service_factory=get_tag_service,
@@ -227,6 +268,9 @@ CONTRACT_CONFIG: dict[type, EntityConfig] = {
         nullable_field=None,
         nullable_sentinel=None,
         delete_semantics="hard",
+        update_schema=TagCreate,  # Tag has no TagUpdate — TagService is GenericService[TagCreate, TagCreate, TagResponse]
+        update_data={"tag": "t2-upd"},
+        unique_row_field="tag",
     ),
     VisitorService: EntityConfig(
         service_factory=get_visitor_service,
@@ -240,6 +284,8 @@ CONTRACT_CONFIG: dict[type, EntityConfig] = {
         nullable_field="age",
         nullable_sentinel=10,
         delete_semantics="hard",
+        update_schema=VisitorUpdate,
+        update_data={"name": "V2", "age": 11},
     ),
 }
 
@@ -284,16 +330,27 @@ def make_entity(request, db_session):
 
     conftest-фабрики (create_master и др.) возвращают factory-callable,
     а не dict — фабрику нужно ВЫЗВАТЬ, чтобы получить dict с "id".
+
+    Параметры ``_make``:
+      * ``**overrides`` — поля, перетирающие ``cfg.create_data`` (например
+        ``tag="t-X"`` для многострочного посева Tag с уникальными значениями);
+      * ``with_input=True`` — вернуть дополнительно сконструированный
+        ``create_schema`` (parsed типы + разрешённые FK id). Существующие
+        места вызова без этих параметров остаются совместимыми.
     """
 
-    async def _make(cfg: EntityConfig):
+    async def _make(cfg: EntityConfig, with_input: bool = False, **overrides):
         create_data = dict(cfg.create_data)
         for field, fixture_name in cfg.fk_map.items():
             factory = request.getfixturevalue(fixture_name)
             created = factory()  # factory-callable → dict с "id"
             create_data[field] = created["id"]
+        create_data.update(overrides)
         service = cfg.service_factory()
-        created_resp = await service.create(db_session, cfg.create_schema(**create_data))
+        input_schema = cfg.create_schema(**create_data)
+        created_resp = await service.create(db_session, input_schema)
+        if with_input:
+            return service, created_resp, input_schema
         return service, created_resp
 
     return _make
@@ -303,7 +360,7 @@ def make_entity(request, db_session):
 def _contract_params() -> list:
     params = []
     for cls in _all_subclasses(GenericService):
-        if cls in GENERIC_PATCH_EXCEPTIONS:
+        if cls in GENERIC_CONTRACT_EXCEPTIONS:
             continue
         cfg = CONTRACT_CONFIG.get(cls)
         if cfg is None:
@@ -317,8 +374,8 @@ def _contract_params() -> list:
 def test_all_generic_subclasses_covered_or_excepted():
     """Каждый (транзитивный) подкласс GenericService — в CONTRACT_CONFIG или в исключениях."""
     for cls in _all_subclasses(GenericService):
-        assert cls in CONTRACT_CONFIG or cls in GENERIC_PATCH_EXCEPTIONS, (
-            f"{cls.__name__} не покрыт contract-тестом и не в GENERIC_PATCH_EXCEPTIONS"
+        assert cls in CONTRACT_CONFIG or cls in GENERIC_CONTRACT_EXCEPTIONS, (
+            f"{cls.__name__} не покрыт contract-тестом и не в GENERIC_CONTRACT_EXCEPTIONS"
         )
 
 

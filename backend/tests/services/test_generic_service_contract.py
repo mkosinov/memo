@@ -92,10 +92,12 @@ from src.schemas.visitor import VisitorUpdate
 # CONTRACT_CONFIG и обнаруживаются рекурсивно через ``_all_subclasses``.
 GENERIC_CONTRACT_EXCEPTIONS: set[type] = {ServiceService, PhotoService, RecordService, SoftDeleteService}
 
-# Shared missing-config message used by the guard-line assertion in every
-# contract test class. Parametrized ids already announce the class via
-# `pytest.param(cls, None, id=f"{cls.__name__}-MISSING-CONFIG")` so the
-# message can be terse.
+# Shared missing-config guard message — newer contract classes
+# (TestGenericServiceUpdateContract and onward) use this constant; older
+# classes (Patch/Create/Get/List/Delete semantics) keep their inline
+# f-string messages for historical parity. Parametrized ids already
+# announce the class via `pytest.param(cls, None,
+# id=f"{cls.__name__}-MISSING-CONFIG")` so the message itself can be terse.
 MISSING_MSG = "subclass detected via __subclasses__() but missing from CONTRACT_CONFIG"
 
 
@@ -959,7 +961,7 @@ class TestGenericServiceUpdateContract:
     ):
         """update(nonexistent-id, ...) → None."""
         assert cfg is not None, MISSING_MSG
-        service, created, sent = await make_entity(cfg, with_input=True)  # entity only to build a valid payload
+        service, _, sent = await make_entity(cfg, with_input=True)  # entity only to build a valid payload
         payload = _update_kwargs(cfg, sent)
         assert await service.update(
             db_session, "nonexistent-id", cfg.update_schema(**payload)

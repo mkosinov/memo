@@ -796,3 +796,37 @@ describe('getVisitors', () => {
     expect(api).toHaveBeenCalledWith('/api/v1/visitors?per_page=100', expect.anything());
   });
 });
+
+// ─── listQuery status param (GH #195) ───────────────────────────────────────
+
+describe('listQuery status param', () => {
+  it('serializes status=archived into the URL', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
+    await getMasters({ status: 'archived' });
+    expect(api).toHaveBeenCalledWith('/api/v1/masters?status=archived', expect.anything());
+  });
+
+  it('serializes status=all into the URL', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
+    await getMasters({ status: 'all' });
+    expect(api).toHaveBeenCalledWith('/api/v1/masters?status=all', expect.anything());
+  });
+
+  it('serializes status=active into the URL', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
+    await getMasters({ status: 'active' });
+    expect(api).toHaveBeenCalledWith('/api/v1/masters?status=active', expect.anything());
+  });
+
+  it('omits status when null', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
+    await getMasters({ status: null });
+    expect(api).toHaveBeenCalledWith('/api/v1/masters', expect.anything());
+  });
+
+  it('omits status when not provided', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
+    await getMasters({});
+    expect(api).toHaveBeenCalledWith('/api/v1/masters', expect.anything());
+  });
+});

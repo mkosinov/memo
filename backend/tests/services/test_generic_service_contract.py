@@ -356,6 +356,29 @@ def make_entity(request, db_session):
     return _make
 
 
+@pytest.fixture
+def seed_rows(request, db_session):
+    """Create n rows via the entity's service. FK parents resolved ONCE and shared;
+    unique_row_field (Tag.tag) suffixed per row to respect the DB unique constraint."""
+
+    async def _seed(cfg: EntityConfig, n: int):
+        base_data = dict(cfg.create_data)
+        fk_ids: dict[str, Any] = {}
+        for field, fixture_name in cfg.fk_map.items():
+            factory = request.getfixturevalue(fixture_name)
+            fk_ids[field] = factory()["id"]
+        service = cfg.service_factory()
+        created = []
+        for i in range(n):
+            data: dict[str, Any] = {**base_data, **fk_ids}
+            if cfg.unique_row_field:
+                data[cfg.unique_row_field] = f"{base_data[cfg.unique_row_field]}-{i}"
+            created.append(await service.create(db_session, cfg.create_schema(**data)))
+        return service, created
+
+    return _seed
+
+
 # ─── Параметризация ──────────────────────────────────────────────────────────────
 def _contract_params() -> list:
     params = []
@@ -735,3 +758,139 @@ class TestGenericServiceGetContract:
         )
         service = cfg.service_factory()
         assert await service.get(db_session, "nonexistent-id") is None
+
+
+# ─── Contract-test: list semantics ──────────────────────────────────────────────
+# Spec: docs/specs/2026-08-03-generic-service-crud-contract-design.md §3.3 —
+# ``TestGenericServiceListContract`` locks the generic list semantics across
+# all 8 non-excepted entities: envelope shape, content, empty-state, pagination
+# slicing, out-of-range page, and id-filter narrowing. Replaces the dissolved
+# ``test_generic_service_list.py`` (§3.4 absorption mapping).
+class TestGenericServiceListContract:
+    @pytest.mark.parametrize("service_cls,cfg", _contract_params())
+    async def test_list_envelope_shape(
+        self, service_cls, cfg, db_session, make_entity
+    ):
+        """list() returns PaginatedResponse with exactly {items,total,page,per_page}."""
+        assert cfg is not None, (
+            f"{service_cls.__name__} обнаружен через __subclasses__(), "
+            f"но отсутствует в CONTRACT_CONFIG"
+        )
+        _, created = await make_entity(cfg)
+
+        service = cfg.service_factory()
+        resp = await service.list(db_session)
+
+        assert resp.page == 1, f"{service_cls.__name__}.list: page != 1"
+        assert resp.per_page == 20, f"{service_cls.__name__}.list: per_page != 20"
+        assert resp.total == 1, f"{service_cls.__name__}.list: total != 1"
+        assert isinstance(resp.items, list), (
+            f"{service_cls.__name__}.list: items is not a list"
+        )
+        assert set(type(resp).model_fields) == {"items", "total", "page", "per_page"}, (
+            f"{service_cls.__name__}.list: envelope fields != {{items,total,page,per_page}}"
+        )
+
+    @pytest.mark.parametrize("service_cls,cfg", _contract_params())
+    async def test_list_contains_created_entity(
+        self, service_cls, cfg, db_session, make_entity
+    ):
+        """A row created via the service appears in items and counts toward total."""
+        assert cfg is not None, (
+            f"{service_cls.__name__} обнаружен через __subclasses__(), "
+            f"но отсутствует в CONTRACT_CONFIG"
+        )
+        _, created = await make_entity(cfg)
+
+        service = cfg.service_factory()
+        resp = await service.list(db_session)
+
+        assert created.id in [item.id for item in resp.items], (
+            f"{service_cls.__name__}.list: created row not in items"
+        )
+        assert resp.total == 1, (
+            f"{service_cls.__name__}.list: total != 1 after single create"
+        )
+
+    @pytest.mark.parametrize("service_cls,cfg", _contract_params())
+    async def test_list_empty(self, service_cls, cfg, db_session):
+        """Fresh DB (reset_db autouse) → total==0, items==[]."""
+        assert cfg is not None, (
+            f"{service_cls.__name__} обнаружен через __subclasses__(), "
+            f"но отсутствует в CONTRACT_CONFIG"
+        )
+        service = cfg.service_factory()
+        resp = await service.list(db_session)
+
+        assert resp.total == 0, f"{service_cls.__name__}.list: total != 0 on empty DB"
+        assert resp.items == [], f"{service_cls.__name__}.list: items != [] on empty DB"
+
+    @pytest.mark.parametrize("service_cls,cfg", _contract_params())
+    async def test_list_pagination_slices_and_total(
+        self, service_cls, cfg, db_session, seed_rows
+    ):
+        """per_page=2 over 3 rows → page1 has 2 items, page2 has 1; totals agree;
+        the two pages are disjoint."""
+        assert cfg is not None, (
+            f"{service_cls.__name__} обнаружен через __subclasses__(), "
+            f"но отсутствует в CONTRACT_CONFIG"
+        )
+        service, _rows = await seed_rows(cfg, 3)
+
+        page1 = await service.list(db_session, page=1, per_page=2)
+        page2 = await service.list(db_session, page=2, per_page=2)
+
+        assert len(page1.items) == 2, (
+            f"{service_cls.__name__}.list: page1 len != 2"
+        )
+        assert len(page2.items) == 1, (
+            f"{service_cls.__name__}.list: page2 len != 1"
+        )
+        assert page1.total == 3, f"{service_cls.__name__}.list: page1.total != 3"
+        assert page2.total == 3, f"{service_cls.__name__}.list: page2.total != 3"
+        ids_p1 = {item.id for item in page1.items}
+        ids_p2 = {item.id for item in page2.items}
+        assert ids_p1.isdisjoint(ids_p2), (
+            f"{service_cls.__name__}.list: page1 and page2 ids overlap"
+        )
+
+    @pytest.mark.parametrize("service_cls,cfg", _contract_params())
+    async def test_list_out_of_range_page(
+        self, service_cls, cfg, db_session, seed_rows
+    ):
+        """page beyond the end → items==[], total still reflects all rows."""
+        assert cfg is not None, (
+            f"{service_cls.__name__} обнаружен через __subclasses__(), "
+            f"но отсутствует в CONTRACT_CONFIG"
+        )
+        service, _rows = await seed_rows(cfg, 3)
+
+        resp = await service.list(db_session, page=99, per_page=2)
+
+        assert resp.items == [], (
+            f"{service_cls.__name__}.list: out-of-range page items != []"
+        )
+        assert resp.total == 3, (
+            f"{service_cls.__name__}.list: out-of-range page total != 3"
+        )
+
+    @pytest.mark.parametrize("service_cls,cfg", _contract_params())
+    async def test_list_id_filter_narrows_items_and_total(
+        self, service_cls, cfg, db_session, seed_rows
+    ):
+        """id= filter narrows items to one row and total to 1."""
+        assert cfg is not None, (
+            f"{service_cls.__name__} обнаружен через __subclasses__(), "
+            f"но отсутствует в CONTRACT_CONFIG"
+        )
+        service, rows = await seed_rows(cfg, 3)
+        target = rows[0]
+
+        resp = await service.list(db_session, id=target.id)
+
+        assert resp.total == 1, (
+            f"{service_cls.__name__}.list: id filter total != 1"
+        )
+        assert resp.items[0].id == target.id, (
+            f"{service_cls.__name__}.list: id filter items[0].id != target.id"
+        )

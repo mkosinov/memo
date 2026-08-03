@@ -71,6 +71,17 @@
 | Already hard-delete (untouched) | Payment, Visit |
 | Stays as-is (implicit soft-delete, out of scope) | User, Tariff (carry `is_active`, used e.g. in `admin/setup.py:35`) |
 
+## is_active semantics on get/update/patch
+
+Applies to the **soft-delete entities** (Master, Location, Service, Material, Client). Implementation: `SoftDeleteService` + `ServiceService` overrides (see spec GH #184, rev 4 §3.5).
+
+1. **`get` returns archived rows** — no `is_active` filter on the get path; `is_active` is exposed in all 5 soft-delete Response schemas. This pairs deliberately with `list()` hiding archived rows: *list hides, get returns*.
+2. **`update` (PUT) and `patch` preserve the stored `is_active`** when the field is absent or `None`; an explicit boolean always applies — `true` on an archived record is the legal reactivation path, `false` archives.
+3. **`is_active` is a documented sticky-field exception to PUT full-replace** (like `id`/`created_at`), implemented in `SoftDeleteService` (+ `ServiceService` overrides, via the shared `_strip_is_active_none` helper, `services/generic.py:25`) — see spec GH #184.
+
+- **Create always yields `is_active=True`** — Create schemas do not expose the field; adding it there would bypass sticky semantics (trap, do not do).
+- **`reorder` silently skips archived rows** (`repositories/generic.py:169`) — a reactivated row becomes reorder-eligible again.
+
 ## Cross-Entity Invariants
 
 1. **Capacity:** `occupied + seats <= activity.capacity` (on Record create only)
@@ -91,10 +102,11 @@
 | Partial update | Обновляются только поля, явно переданные в запросе (`exclude_unset=True`) |
 | `None` для NOT NULL полей | Молча стрипится (поле не обновляется) |
 | `None` для nullable полей | Применяется — поле обнуляется |
+| `is_active: None` (soft-delete entities) | Stripped — stored value preserved (sticky field; see "is_active semantics on get/update/patch" above) |
 | Entity not found | Возвращает `None` → API возвращает 404 |
 | `updated_at` | Обновляется автоматически через SQLAlchemy `onupdate` |
 
-**Источник истины:** `backend/tests/services/test_generic_service_patch.py` — параметризованный contract-тест по всем подклассам `GenericService`.
+**Источник истины:** `backend/tests/services/test_generic_service_contract.py` — параметризованный contract-тест по всем подклассам `GenericService`.
 
 ### Исключения (override-семантика)
 

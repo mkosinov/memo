@@ -30,6 +30,7 @@ A Client is a customer who books master classes. All fields are nullable — a C
 - **Filters:** `status` (default `active`; `archived` | `all` — replaces the retired `is_active` query param), search (ILIKE on name/phone), date ranges, record count ranges (`min_records`/`max_records`), missed ranges (`missed_from`/`missed_to`), payment ranges (`min_paid`/`max_paid`)
 - **Sort columns:** name, records_count, last_record, total_paid, missed_records, created_at, updated_at
 - **Pagination:** page (default 1), per_page (default 20, max 100)
+- **Restore:** `PATCH /api/v1/clients/{id}` with an explicit `{"is_active": bool}` (sticky-field semantics — see `_overview.md` → "is_active semantics on get/update/patch"). The schema-level gap (`ClientPatch`/`ClientUpdate` lacked `is_active`) is closed by #184 §3.5; only the frontend restore-buttons UI remains a follow-up.
 
 ### Frontend
 - **No required fields** on create/edit
@@ -71,3 +72,7 @@ A Client is a customer who books master classes. All fields are nullable — a C
 | All fields optional | All fields optional | ✅ |
 | channel: Channel enum | channel: string | ⚠️ Frontend doesn't enforce enum |
 | name: str \| None | name: string (optional) | ⚠️ Empty string vs null |
+
+## Archive semantics on write
+
+Client is a soft-delete entity. See `docs/domain-rules/_overview.md` → "is_active semantics on get/update/patch" for the general rule. **Entity note:** `is_active` is now accepted by `ClientUpdate` and `ClientPatch` (defaults flipped to `bool | None = None`, GH #184 §3.5); archive/restore via PATCH is possible. Only the frontend restore-buttons UI remains a follow-up.

@@ -31,6 +31,7 @@ Additionally, the **clients endpoint has a latent gap**: `services/client.py` (~
 - **Delete-on-archived-row UX** — known limitation (accepted): row «Удалить» on an already-archived record → `SoftDeleteRepository.delete` returns `False` → 404 toast (all 5 entities; newly reachable via «Архив»/«Все» views). Follow-up: hide the delete action for archived rows.
 - **Clients restore UI** — archived clients visible under «Все»/«Неактивные» but unrestorable from the UI (ClientPatch omits `is_active`; covered by the existing ClientsTable restore-buttons follow-up issue).
 - **Backend Update-schema `is_active: bool = True` default** — root resurrection hazard, documented in §7.5; fixing the schema itself is out of scope.
+  - *Addressed by GH #184 (rev 4 §3.5): defaults flipped to `bool | None = None`, sticky-field semantics.*
 - No changes to non-soft-delete entities (tags, visitors stay on base `GenericService`).
 
 ## 4. Param Encoding (user decision, rev 6)

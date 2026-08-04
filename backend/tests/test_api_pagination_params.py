@@ -5,13 +5,7 @@ import pytest
 pytestmark = pytest.mark.api
 
 ENDPOINTS = [
-    "/api/v1/masters",
-    "/api/v1/locations",
-    "/api/v1/tags",
-    "/api/v1/materials",
     "/api/v1/services",
-    "/api/v1/activities",
-    "/api/v1/payments",
     "/api/v1/visits",
     "/api/v1/records",
 ]

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { z } from 'zod';
 import { getMasters, getMaster, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, deleteActivity, getWebPhotos, getRecords, getClients, getPayments, getPaymentTotals, createRecord, updateRecord, deleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, searchClientByPhone, updateVisitStatus, getTags, createService, updateService, deleteService, createLocation, updateLocation, deleteLocation, getClientsWithStats, patchClient, reorderMasters, reorderLocations, patchMaster, patchLocation, patchMaterial, patchService, patchUserSettings, getMaterials, getTag, getVisitors } from './endpoints';
-import { ServiceCreateSchema, LocationCreateSchema } from './schemas';
+import { ServiceCreateSchema, LocationCreateSchema, type ServiceUpdate, type LocationUpdate } from './schemas';
 
 // Mock the api function from client
 vi.mock('./client', () => ({
@@ -629,15 +629,29 @@ describe('createService', () => {
 });
 
 describe('updateService', () => {
-  it('calls PUT /api/v1/services/:id with partial body', async () => {
+  it('calls PUT /api/v1/services/:id with full body', async () => {
     vi.mocked(api).mockResolvedValue({ id: 's-1' });
-    await updateService('s-1', { title: 'Обновлённое' });
+    const payload: ServiceUpdate = {
+      title: 'Обновлённое',
+      description: '',
+      image_url: '',
+      specialty: '',
+      min_age: 0,
+      max_age: 18,
+      duration: 60,
+      record_info: '',
+      material_hint: '',
+      tariffs: [],
+      tag_ids: [],
+      is_active: true,
+    };
+    await updateService('s-1', payload);
     expect(api).toHaveBeenCalledWith(
       '/api/v1/services/s-1',
       expect.anything(),
       expect.objectContaining({
         method: 'PUT',
-        body: JSON.stringify({ title: 'Обновлённое' }),
+        body: JSON.stringify(payload),
       }),
     );
   });
@@ -674,15 +688,29 @@ describe('createLocation', () => {
 });
 
 describe('updateLocation', () => {
-  it('calls PUT /api/v1/locations/:id with partial body', async () => {
+  it('calls PUT /api/v1/locations/:id with full body', async () => {
     vi.mocked(api).mockResolvedValue({ id: 'l-1' });
-    await updateLocation('l-1', { name: 'Обновлённая' });
+    const payload: LocationUpdate = {
+      name: 'Обновлённая',
+      short_title: '',
+      address: '',
+      description: '',
+      capacity: 10,
+      yandex_map_url: '',
+      review_url: '',
+      record_info: '',
+      image_url: '',
+      location_hint: '',
+      tag_ids: [],
+      is_active: true,
+    };
+    await updateLocation('l-1', payload);
     expect(api).toHaveBeenCalledWith(
       '/api/v1/locations/l-1',
       expect.anything(),
       expect.objectContaining({
         method: 'PUT',
-        body: JSON.stringify({ name: 'Обновлённая' }),
+        body: JSON.stringify(payload),
       }),
     );
   });

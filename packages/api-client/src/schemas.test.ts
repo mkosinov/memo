@@ -23,6 +23,8 @@ import {
   PaymentResponseSchema,
   type PaymentResponse,
   TariffCreateSchema,
+  MasterUpdateSchema,
+  MaterialUpdateSchema,
   ServiceCreateSchema,
   ServiceUpdateSchema,
   type ServiceUpdate,
@@ -533,7 +535,20 @@ describe('Type exports', () => {
   });
 
   it('ServiceUpdate is a valid type', () => {
-    const s: ServiceUpdate = { title: 'Обновлённое название' };
+    const s: ServiceUpdate = {
+      title: 'Обновлённое название',
+      description: '',
+      image_url: '',
+      specialty: '',
+      min_age: 0,
+      max_age: 18,
+      duration: 60,
+      record_info: '',
+      material_hint: '',
+      tariffs: [],
+      tag_ids: [],
+      is_active: true,
+    };
     expect(s.title).toBe('Обновлённое название');
   });
 
@@ -548,7 +563,20 @@ describe('Type exports', () => {
   });
 
   it('LocationUpdate is a valid type', () => {
-    const l: LocationUpdate = { name: 'Обновлённая студия' };
+    const l: LocationUpdate = {
+      name: 'Обновлённая студия',
+      short_title: '',
+      address: '',
+      description: '',
+      capacity: 10,
+      yandex_map_url: '',
+      review_url: '',
+      record_info: '',
+      image_url: '',
+      location_hint: '',
+      tag_ids: [],
+      is_active: true,
+    };
     expect(l.name).toBe('Обновлённая студия');
   });
 
@@ -658,15 +686,24 @@ describe('ServiceCreateSchema', () => {
 // ─── ServiceUpdateSchema ─────────────────────────────────────────────────
 
 describe('ServiceUpdateSchema', () => {
-  it('accepts partial update with only title', () => {
-    const result = ServiceUpdateSchema.parse({ title: 'Новое название' });
+  it('accepts a full canonical update payload', () => {
+    const result = ServiceUpdateSchema.parse({
+      title: 'Новое название',
+      duration: 90,
+      is_active: true,
+    });
     expect(result.title).toBe('Новое название');
-    expect(result.duration).toBeUndefined();
+    expect(result.is_active).toBe(true);
   });
 
-  it('accepts empty update', () => {
-    const result = ServiceUpdateSchema.parse({});
-    expect(Object.keys(result)).toHaveLength(0);
+  it('rejects update missing is_active', () => {
+    expect(() =>
+      ServiceUpdateSchema.parse({ title: 'Новое название', duration: 90 }),
+    ).toThrow();
+  });
+
+  it('rejects update missing required create fields', () => {
+    expect(() => ServiceUpdateSchema.parse({ is_active: true })).toThrow();
   });
 });
 
@@ -730,14 +767,64 @@ describe('LocationCreateSchema', () => {
 // ─── LocationUpdateSchema ────────────────────────────────────────────────
 
 describe('LocationUpdateSchema', () => {
-  it('accepts partial update with only name', () => {
-    const result = LocationUpdateSchema.parse({ name: 'Обновлённое' });
+  it('accepts a full canonical update payload', () => {
+    const result = LocationUpdateSchema.parse({
+      name: 'Обновлённое',
+      capacity: 20,
+      is_active: true,
+    });
     expect(result.name).toBe('Обновлённое');
-    expect(result.capacity).toBeUndefined();
+    expect(result.is_active).toBe(true);
   });
 
-  it('accepts empty update', () => {
-    const result = LocationUpdateSchema.parse({});
-    expect(Object.keys(result)).toHaveLength(0);
+  it('rejects update missing is_active', () => {
+    expect(() =>
+      LocationUpdateSchema.parse({ name: 'Обновлённое', capacity: 20 }),
+    ).toThrow();
+  });
+
+  it('rejects update missing required create fields', () => {
+    expect(() => LocationUpdateSchema.parse({ is_active: true })).toThrow();
+  });
+});
+
+// ─── MasterUpdateSchema ────────────────────────────────────────────────────
+
+describe('MasterUpdateSchema', () => {
+  it('accepts a full canonical update payload', () => {
+    const result = MasterUpdateSchema.parse({
+      first_name: 'Пётр',
+      last_name: 'Иванов',
+      color: '#AABBCC',
+      position: 'мастер',
+      specialty: 'живопись',
+      is_active: true,
+    });
+    expect(result.is_active).toBe(true);
+  });
+
+  it('rejects update missing is_active', () => {
+    expect(() =>
+      MasterUpdateSchema.parse({
+        first_name: 'Пётр',
+        last_name: 'Иванов',
+        color: '#AABBCC',
+        position: 'мастер',
+        specialty: 'живопись',
+      }),
+    ).toThrow();
+  });
+});
+
+// ─── MaterialUpdateSchema ──────────────────────────────────────────────────
+
+describe('MaterialUpdateSchema', () => {
+  it('accepts a full canonical update payload', () => {
+    const result = MaterialUpdateSchema.parse({ title: 'Глина', is_active: true });
+    expect(result.is_active).toBe(true);
+  });
+
+  it('rejects update missing is_active', () => {
+    expect(() => MaterialUpdateSchema.parse({ title: 'Глина' })).toThrow();
   });
 });

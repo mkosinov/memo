@@ -130,6 +130,7 @@ class TestServicesCrud:
         tag2_id = tag2_resp.json()["id"]
 
         update_data = {
+            "is_active": True,
             "title": "Advanced Oil Painting",
             "description": "Master oil painting techniques",
             "image_url": "https://example.com/advanced-oil.jpg",
@@ -184,9 +185,17 @@ class TestServicesCrud:
         """PUT /api/services/{fake_id} returns 404."""
         response = api_client.put(
             "/api/v1/services/nonexistent-id",
-            json=SERVICE_PAYLOAD,
+            json={**SERVICE_PAYLOAD, "is_active": True},
         )
         assert response.status_code == 404
+
+    def test_update_service_without_is_active_returns_422(self, api_client) -> None:
+        """PUT /api/v1/services/{id} without is_active → 422 (canonical PUT, GH #178)."""
+        create_resp = api_client.post("/api/v1/services", json=SERVICE_PAYLOAD)
+        service_id = create_resp.json()["id"]
+
+        response = api_client.put(f"/api/v1/services/{service_id}", json=SERVICE_PAYLOAD)
+        assert response.status_code == 422
 
     def test_delete_nonexistent_service_returns_404(self, api_client) -> None:
         """DELETE /api/services/{fake_id} returns 404."""
@@ -225,7 +234,7 @@ class TestServiceMaxAgeNullable:
         assert create_resp.json()["max_age"] == 12
 
         # Update to null
-        update_data = {**SERVICE_PAYLOAD, "max_age": None}
+        update_data = {**SERVICE_PAYLOAD, "max_age": None, "is_active": True}
         response = api_client.put(f"/api/v1/services/{service_id}", json=update_data)
         assert response.status_code == 200
         assert response.json()["max_age"] is None

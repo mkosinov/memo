@@ -17,7 +17,7 @@ class MaterialCreate(MaterialBase):
 class MaterialUpdate(MaterialBase):
     """Request schema for updating a material (full replacement via PUT)."""
 
-    is_active: bool | None = None  # None = preserve stored value; sticky field (#184)
+    is_active: bool  # required on PUT — canonical full-replace (#178); PATCH sticky via MaterialPatch
 
 
 class MaterialPatch(BaseModel):

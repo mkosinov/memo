@@ -53,7 +53,7 @@ class ServiceUpdate(ServiceBase):
 
     tariffs: list[TariffCreate] = []
     tag_ids: list[str] = []
-    is_active: bool | None = None  # None = preserve stored value; sticky field (#184)
+    is_active: bool  # required on PUT — canonical full-replace (#178); PATCH sticky via ServicePatch
 
 
 class ServicePatch(BaseModel):

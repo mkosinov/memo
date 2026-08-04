@@ -23,7 +23,7 @@ export function useUpdateService() {
 export function usePatchService() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, data }: { id: string; data: Partial<ServiceUpdate> & { is_active?: boolean } }) =>
+    mutationFn: ({ id, data }: { id: string; data: Partial<ServiceUpdate> }) =>
       patchService(id, data),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['services'] }),
   });

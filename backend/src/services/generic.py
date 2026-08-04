@@ -25,8 +25,8 @@ ResponseSchemaT = TypeVar("ResponseSchemaT", bound=BaseModel)
 def _strip_is_active_none(payload: dict) -> dict:
     """Drop is_active when None — sticky field: absent/None preserves the stored value (#184).
 
-    Shared by SoftDeleteService._patch_payload and ServiceService.update/patch
-    (ServiceService re-implements update/patch without super() — single helper
+    Shared by SoftDeleteService._patch_payload and ServiceService.patch
+    (ServiceService re-implements patch without super() — single helper
     prevents the drift that hid the resurrection hazard there)."""
     if payload.get("is_active") is None:
         payload.pop("is_active", None)
@@ -198,23 +198,6 @@ class SoftDeleteService(GenericService[CreateSchemaT, UpdateSchemaT, ResponseSch
         return await self._paginate(
             db_session, self._list_stmt(status=status, **filters), page, per_page, order_by
         )
-
-    async def update(
-        self, db_session: AsyncSession, id: str, data: UpdateSchemaT
-    ) -> ResponseSchemaT | None:
-        """PUT with sticky is_active: None/absent → stored value injected before full replace (#184).
-
-        Injection (not stripping) is required: base update re-dumps the schema internally,
-        so a stripped key would re-enter as the schema default. Explicit bool passes through
-        (True on an archived row = legal reactivation). ``is_active`` is a documented
-        sticky-field exception to PUT full-replace (like ``id`` / ``created_at``).
-        """
-        if "is_active" in type(data).model_fields and data.is_active is None:
-            current = await self.get(db_session, id)
-            if current is None:
-                return None
-            data = data.model_copy(update={"is_active": current.is_active})
-        return await super().update(db_session, id, data)
 
     def _patch_payload(self, data: BaseModel) -> dict:
         """Soft-delete patch payload: additionally strip ``is_active`` when None

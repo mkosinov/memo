@@ -22,7 +22,7 @@ import {
   patchMaster,
   deleteMaster,
 } from '@memo/api-client';
-import type { MasterCreate } from '@memo/api-client';
+import type { MasterCreate, MasterUpdate } from '@memo/api-client';
 
 const mockCreateMaster = vi.mocked(createMaster);
 const mockUpdateMaster = vi.mocked(updateMaster);
@@ -94,11 +94,22 @@ describe('useMastersMutations', () => {
 
       const { result } = renderHook(() => useUpdateMaster(), { wrapper });
 
+      // Canonical PUT (GH #178): full typed MasterUpdate — every field listed.
+      const payload: MasterUpdate = {
+        first_name: 'Пётр',
+        last_name: 'Иванов',
+        color: '#AABBCC',
+        position: 'мастер',
+        specialty: 'живопись',
+        avatar_url: '',
+        is_active: true,
+      };
+
       await act(async () => {
-        await result.current.mutateAsync({ id: 'm-1', data: { first_name: 'Пётр' } });
+        await result.current.mutateAsync({ id: 'm-1', data: payload });
       });
 
-      expect(mockUpdateMaster).toHaveBeenCalledWith('m-1', { first_name: 'Пётр' });
+      expect(mockUpdateMaster).toHaveBeenCalledWith('m-1', payload);
     });
   });
 

@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { getMaterials } from '@memo/api-client';
-import type { MaterialResponse } from '@memo/api-client';
+import type { MaterialResponse, MaterialUpdate } from '@memo/api-client';
 import { useUpdateMaterial, usePatchMaterial, useCreateMaterial, useDeleteMaterial } from '@/hooks/useMaterialsMutations';
 import { useUI } from '@/contexts/UIContext';
 import { MaterialModal } from './MaterialModal';
@@ -216,14 +216,14 @@ export function MaterialsTable() {
 
   const handleEditSubmit = async (data: Record<string, unknown>) => {
     if (!editingMaterial) return;
+    // Canonical PUT (GH #178): full typed MaterialUpdate — every field listed.
+    const payload: MaterialUpdate = {
+      title: data.title as string,
+      description: (data.description as string | null | undefined) ?? '',
+      is_active: editingMaterial.is_active,
+    };
     try {
-      await updateMaterial.mutateAsync({
-        id: editingMaterial.id,
-        // Preserve archive state — backend Update schema defaults is_active=True (#195).
-        // MaterialUpdate type intentionally excludes is_active (TODO #178); cast through
-        // Record<string, unknown> to match the previous pattern.
-        data: { ...(data as Record<string, unknown>), is_active: editingMaterial.is_active } as Record<string, unknown>,
-      });
+      await updateMaterial.mutateAsync({ id: editingMaterial.id, data: payload });
       showToast('Материал обновлён', undefined);
     } catch (err) {
       showToast(parseApiError(err).message, 'error');

@@ -129,6 +129,7 @@ class TestLocationApiShortTitle:
         resp = api_client.put(
             f"/api/v1/locations/{loc_id}",
             json={
+                "is_active": True,
                 "name": "Studio",
                 "capacity": 10,
                 "short_title": "ST",
@@ -152,6 +153,7 @@ class TestLocationApiShortTitle:
         resp = api_client.put(
             f"/api/v1/locations/{loc_id}",
             json={
+                "is_active": True,
                 "name": "Studio",
                 "capacity": 10,
                 "short_title": None,

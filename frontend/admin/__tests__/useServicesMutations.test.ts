@@ -96,16 +96,30 @@ describe('useServicesMutations', () => {
 
       const { result } = renderHook(() => useUpdateService(), { wrapper });
 
+      // Canonical PUT (GH #178): full typed ServiceUpdate — every field listed.
       const payload: { id: string; data: ServiceUpdate } = {
         id: 's1',
-        data: { title: 'Updated' },
+        data: {
+          title: 'Updated',
+          description: '',
+          image_url: '',
+          specialty: '',
+          min_age: 0,
+          max_age: 18,
+          duration: 180,
+          record_info: '',
+          material_hint: '',
+          tariffs: [],
+          tag_ids: [],
+          is_active: true,
+        },
       };
 
       await act(async () => {
         await result.current.mutateAsync(payload);
       });
 
-      expect(mockUpdateService).toHaveBeenCalledWith('s1', { title: 'Updated' });
+      expect(mockUpdateService).toHaveBeenCalledWith('s1', payload.data);
     });
 
     it('invalidates the services query cache on success', async () => {
@@ -115,8 +129,23 @@ describe('useServicesMutations', () => {
 
       const { result } = renderHook(() => useUpdateService(), { wrapper });
 
+      const payload: ServiceUpdate = {
+        title: 'Updated',
+        description: '',
+        image_url: '',
+        specialty: '',
+        min_age: 0,
+        max_age: 18,
+        duration: 180,
+        record_info: '',
+        material_hint: '',
+        tariffs: [],
+        tag_ids: [],
+        is_active: true,
+      };
+
       await act(async () => {
-        await result.current.mutateAsync({ id: 's1', data: { title: 'Updated' } });
+        await result.current.mutateAsync({ id: 's1', data: payload });
       });
 
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['services'] });

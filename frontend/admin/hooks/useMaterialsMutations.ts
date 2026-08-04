@@ -23,7 +23,7 @@ export function useUpdateMaterial() {
 export function usePatchMaterial() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, data }: { id: string; data: Partial<MaterialUpdate> & { is_active?: boolean } }) =>
+    mutationFn: ({ id, data }: { id: string; data: Partial<MaterialUpdate> }) =>
       patchMaterial(id, data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['materials'] }),
   });

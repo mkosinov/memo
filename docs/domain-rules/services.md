@@ -78,4 +78,4 @@ A Service represents a type of master class (painting, sculpture, etc.). It defi
 
 ## Archive semantics on write
 
-Service is a soft-delete entity. See `docs/domain-rules/_overview.md` → "is_active semantics on get/update/patch" for the general rule. **Entity note:** `ServiceService` overrides `update`/`patch` (for `tag_ids`/`tariffs` handling) and reimplements the `is_active` sticky-field strip via the shared `_strip_is_active_none` helper (`services/generic.py:25`) — not directly inherited from `SoftDeleteService`.
+Service is a soft-delete entity. See `docs/domain-rules/_overview.md` → "is_active semantics on get/update/patch" for the general rule. **Entity note:** PUT requires explicit `is_active` (GH #178). `ServiceService` overrides `update`/`patch` (tag_ids/tariffs handling); the PATCH path strips `is_active: None` via the shared `_strip_is_active_none` helper (`services/generic.py:25`) — the update-path strip was removed in #178.

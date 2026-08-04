@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from pydantic import ValidationError
 from sqlalchemy import select
 
 from src.services.activity import ActivityService
@@ -76,8 +77,8 @@ def _update_kwargs(cfg: EntityConfig, sent: Any) -> dict:
     filtered to update_schema fields. FK values come from ``sent`` (the
     create_schema instance returned by ``make_entity(with_input=True)``) —
     reused unchanged (D2/D3). ``VisitorUpdate`` has no ``client_id`` and
-    ``is_active`` is never sent explicitly here — both dropped by the
-    model_fields filter / never added.
+    ``is_active`` is injected as ``True`` for soft entities (required PUT
+    field, GH #178) — both dropped by the model_fields filter / never added.
 
     Spec: 2026-08-03-generic-service-crud-contract-design.md §3.2 (payload
     construction), §3.3 Update row (D7).
@@ -85,6 +86,11 @@ def _update_kwargs(cfg: EntityConfig, sent: Any) -> dict:
     allowed = set(cfg.update_schema.model_fields)
     data = {k: v for k, v in sent.model_dump().items() if k in allowed}
     data.update(cfg.update_data)
+    # GH #178: is_active is a required PUT field for soft entities — the
+    # create schema never carries it, so inject it explicitly. Hard
+    # entities (no is_active in update_schema) are unaffected by the filter.
+    if "is_active" in allowed:
+        data.setdefault("is_active", True)
     return data
 
 
@@ -729,8 +735,10 @@ class TestGenericServiceListContract:
 # ─── Contract-test: update (PUT full-replace) semantics ─────────────────────────
 # Spec: docs/specs/2026-08-03-generic-service-crud-contract-design.md §3.3 (Update
 # row, D7), §2 — full replace (PUT, RFC 9110 §9.3.4): omitted fields revert to
-# schema defaults, except sticky fields (id, created_at, is_active — the last
-# pinned by the future TestGenericServiceIsActiveContract, not exercised here).
+# schema defaults, except sticky fields (id, created_at — never in the Update
+# schema, so never touched). ``is_active`` is a required PUT field on soft
+# entities (GH #178), not a sticky PUT exception; its PATCH stickiness is
+# pinned by TestGenericServiceIsActiveContract.
 # Payload construction via ``_update_kwargs`` (§3.2, D2/D3): create fields +
 # update_data, filtered to update_schema.model_fields.
 class TestGenericServiceUpdateContract:
@@ -753,7 +761,7 @@ class TestGenericServiceUpdateContract:
                 f"{service_cls.__name__}: update_data field {field} not applied"
             )
         sent_dump = sent.model_dump()
-        for field in set(payload) - set(cfg.update_data):
+        for field in set(payload) - set(cfg.update_data) - {"is_active"}:
             assert getattr(after, field) == sent_dump[field], (
                 f"{service_cls.__name__}: field {field} unexpectedly changed"
             )
@@ -803,19 +811,24 @@ class TestGenericServiceUpdateContract:
         )
 
 
-# ─── Contract-test: is_active stickiness on update/patch (user directive G1b) ─
+# ─── Contract-test: is_active semantics on update/patch (#178 canonical PUT) ─
 # Spec: docs/specs/2026-08-03-generic-service-crud-contract-design.md §2 (amended
 # contract table), §3.3 (IsActiveContract row), §8 D12/D13 — user-directed
 # semantics: ``get`` deliberately returns archived rows (*list hides* / *get
-# returns* pairing — user decision 1); ``update``/``patch`` preserve
-# ``is_active`` when absent/None; explicit bool applies (``True`` on archived =
-# legal reactivation). ``is_active`` is a sticky-field exception to PUT
-# full-replace (like ``id`` / ``created_at``).
+# returns* pairing — user decision 1); PUT requires ``is_active`` (canonical
+# full-replace, GH #178 — omitted → 422 from the Update schema before any DB
+# write; explicit bool applies, ``True`` on archived = legal reactivation);
+# PATCH is sticky (omitted / explicit ``None`` preserve the stored value;
+# explicit bool applies). ``is_active`` is no longer a PUT sticky-field
+# exception — it is a required PUT field, like any other NOT NULL column.
 #
-# Parametrized over soft entities only via ``_soft_params()`` — NO in-test
-# skips; every test still starts with the ``assert cfg is not None`` line for
-# symmetry with the other contract classes (``_soft_params`` already filters
-# MISSING-CONFIG entries, so the assert is a no-op invariant here).
+# Parametrized over soft entities only via ``_soft_params()`` — one in-test
+# skip: ``test_update_without_is_active_raises_validation_error`` skips Client
+# until GH #201 redefines Client PUT semantics (the check is data-driven via
+# ``FieldInfo.is_required()`` and lifts itself when #201 flips ClientUpdate to
+# required). Every test still starts with the ``assert cfg is not None`` line
+# for symmetry with the other contract classes (``_soft_params`` already
+# filters MISSING-CONFIG entries, so the assert is a no-op invariant here).
 #
 # Multi-phase tests use **labeled assertions** (assert messages per direction)
 # for failure localization (panel conflict resolution round 2 — Assertion
@@ -847,52 +860,33 @@ class TestGenericServiceIsActiveContract:
         )
 
     @pytest.mark.parametrize("service_cls,cfg", _soft_params())
-    async def test_update_preserves_is_active_when_omitted(
+    async def test_update_without_is_active_raises_validation_error(
         self, service_cls, cfg, db_session, make_entity
     ):
-        """PUT without ``is_active`` in payload preserves the stored value:
-        archived stays archived (phase 1), active stays active (phase 2).
+        """PUT without ``is_active`` → the Update schema refuses construction
+        (canonical full-replace, GH #178): ``is_active`` is required, so
+        Pydantic raises ``ValidationError`` before any DB write.
 
-        The omitting-resurrection hazard (#195 §3.5) is exercised in phase 1:
-        the 4 soft Update schemas default ``is_active: bool = True``
-        (``MasterUpdate``/``LocationUpdate``/``MaterialUpdate``; ``ServiceUpdate``
-        tested in ``test_service_service.py``) → ``BaseRepository.update`` applies
-        the full ``model_dump()`` → archived row silently reactivated. After the
-        §3.5 fix (default flip to ``bool | None = None`` + ``SoftDeleteService.update``
-        stored-value injection) the stored value is preserved instead.
+        Entities whose Update schema still treats ``is_active`` as optional
+        (Client — until GH #201 redefines Client PUT semantics) skip: the
+        check is data-driven via ``FieldInfo.is_required()`` and lifts
+        itself automatically when #201 flips ClientUpdate to required.
         """
         assert cfg is not None, MISSING_MSG
-        # phase 1: archived stays archived (PUT without is_active must not resurrect)
-        service, created, sent = await make_entity(cfg, with_input=True)
-        ok = await service.delete(db_session, created.id)
-        assert ok, f"{service_cls.__name__}: phase 1 setup delete() returned False"
+        field = cfg.update_schema.model_fields.get("is_active")
+        assert field is not None, (
+            f"{service_cls.__name__}: soft entity must expose is_active"
+        )
+        if not field.is_required():
+            pytest.skip(
+                "GH #201: is_active not yet required for this entity "
+                "(Client PUT semantics redefined there)"
+            )
+        _, _, sent = await make_entity(cfg, with_input=True)
         payload = _update_kwargs(cfg, sent)
-        assert "is_active" not in payload, (
-            f"{service_cls.__name__}: test invariant — payload must not include "
-            f"is_active (sticky-field semantics are the subject under test)"
-        )
-        await service.update(
-            db_session, created.id, cfg.update_schema(**payload)
-        )
-        after = await service.get(db_session, created.id)
-        assert after is not None, f"{service_cls.__name__}: phase 1 row vanished"
-        assert after.is_active is False, (
-            f"{service_cls.__name__}: PUT without is_active must not resurrect"
-        )
-        # phase 2: active stays active (fresh make_entity call)
-        service2, created2, sent2 = await make_entity(cfg, with_input=True)
-        payload2 = _update_kwargs(cfg, sent2)
-        assert "is_active" not in payload2, (
-            f"{service_cls.__name__}: phase 2 test invariant"
-        )
-        await service2.update(
-            db_session, created2.id, cfg.update_schema(**payload2)
-        )
-        after2 = await service2.get(db_session, created2.id)
-        assert after2 is not None, f"{service_cls.__name__}: phase 2 row vanished"
-        assert after2.is_active is True, (
-            f"{service_cls.__name__}: PUT without is_active must preserve active state"
-        )
+        payload.pop("is_active")
+        with pytest.raises(ValidationError):
+            cfg.update_schema(**payload)
 
     @pytest.mark.parametrize("service_cls,cfg", _soft_params())
     async def test_update_explicit_is_active_applies(

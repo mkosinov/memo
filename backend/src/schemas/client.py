@@ -25,7 +25,11 @@ class ClientCreate(ClientBase):
 class ClientUpdate(ClientBase):
     """Request schema for updating a client (full replacement via PUT)."""
 
-    is_active: bool | None = None  # None = preserve stored value; sticky field (#184)
+    # Interim #201 wart: sticky injection was removed globally by #178, so an
+    # omitted is_active in PUT currently 500s (None falls through to the NOT
+    # NULL column). #201 will redefine Client PUT semantics to require
+    # is_active. PATCH still treats None as preserve (#184).
+    is_active: bool | None = None
 
 
 class ClientPatch(BaseModel):

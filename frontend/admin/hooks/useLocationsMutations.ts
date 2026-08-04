@@ -23,7 +23,7 @@ export function useUpdateLocation() {
 export function usePatchLocation() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, data }: { id: string; data: Partial<LocationUpdate> & { is_active?: boolean } }) =>
+    mutationFn: ({ id, data }: { id: string; data: Partial<LocationUpdate> }) =>
       patchLocation(id, data),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['locations'] }),
   });

@@ -193,6 +193,7 @@ class TestPutClientEdgeCases:
         client_id = create_resp.json()["id"]
 
         resp = api_client.put(f"/api/v1/clients/{client_id}", json={
+            "is_active": True,
             "name": None,
             "phone": None,
             "email": None,
@@ -216,12 +217,12 @@ class TestPutClientEdgeCases:
         })
         assert resp.status_code == 422
 
-    def test_put_empty_body(self, api_client) -> None:
-        """PUT with empty body sets all fields to null."""
+    def test_put_minimal_body_sets_others_to_null(self, api_client) -> None:
+        """PUT with only is_active sets all nullable fields to null. A truly empty body 500s in the #178→#201 window (Client PUT de-facto requires explicit is_active); #201 redefines Client PUT semantics."""
         create_resp = api_client.post("/api/v1/clients", json=CLIENT_PAYLOAD)
         client_id = create_resp.json()["id"]
 
-        resp = api_client.put(f"/api/v1/clients/{client_id}", json={})
+        resp = api_client.put(f"/api/v1/clients/{client_id}", json={"is_active": True})
         assert resp.status_code == 200
         body = resp.json()
         assert body["name"] is None

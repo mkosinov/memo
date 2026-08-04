@@ -125,7 +125,7 @@ export async function updateMaster(id: string, data: MasterUpdate): Promise<Mast
 // PATCH for partial updates — only send the changed fields.
 export async function patchMaster(
   id: string,
-  data: Partial<MasterUpdate> & { is_active?: boolean }, // TODO(#178): drop is_active intersection once MasterUpdateSchema includes is_active
+  data: Partial<MasterUpdate>,
 ): Promise<MasterResponse> {
   return api(`/api/v1/masters/${id}`, MasterResponseSchema, {
     method: 'PATCH',
@@ -517,7 +517,7 @@ export async function updateService(id: string, data: ServiceUpdate): Promise<Se
 // PATCH for partial updates — only send the changed fields.
 export async function patchService(
   id: string,
-  data: Partial<ServiceUpdate> & { is_active?: boolean }, // TODO(#178): drop is_active intersection once ServiceUpdateSchema includes is_active
+  data: Partial<ServiceUpdate>,
 ): Promise<ServiceResponse> {
   return api(`/api/v1/services/${id}`, ServiceResponseSchema, {
     method: 'PATCH',
@@ -548,7 +548,7 @@ export async function updateLocation(id: string, data: LocationUpdate): Promise<
 // PATCH for partial updates — only send the changed fields.
 export async function patchLocation(
   id: string,
-  data: Partial<LocationUpdate> & { is_active?: boolean }, // TODO(#178): drop is_active intersection once LocationUpdateSchema includes is_active
+  data: Partial<LocationUpdate>,
 ): Promise<LocationResponse> {
   return api(`/api/v1/locations/${id}`, LocationResponseSchema, {
     method: 'PATCH',
@@ -590,7 +590,7 @@ export async function updateMaterial(id: string, data: MaterialUpdate): Promise<
 // PATCH for partial updates — only send the changed fields.
 export async function patchMaterial(
   id: string,
-  data: Partial<MaterialUpdate> & { is_active?: boolean }, // TODO(#178): drop is_active intersection once MaterialUpdateSchema includes is_active
+  data: Partial<MaterialUpdate>,
 ): Promise<MaterialResponse> {
   return api(`/api/v1/materials/${id}`, MaterialResponseSchema, {
     method: 'PATCH',

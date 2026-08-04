@@ -30,7 +30,7 @@ export const MasterCreateSchema = z.object({
 });
 export type MasterCreate = z.infer<typeof MasterCreateSchema>;
 
-export const MasterUpdateSchema = MasterCreateSchema.partial();
+export const MasterUpdateSchema = MasterCreateSchema.extend({ is_active: z.boolean() });
 export type MasterUpdate = z.infer<typeof MasterUpdateSchema>;
 
 // ─── LocationResponse ──────────────────────────────────────────────────────
@@ -396,7 +396,7 @@ export const ServiceCreateSchema = z.object({
 
 export type ServiceCreate = z.infer<typeof ServiceCreateSchema>;
 
-export const ServiceUpdateSchema = ServiceCreateSchema.partial();
+export const ServiceUpdateSchema = ServiceCreateSchema.extend({ is_active: z.boolean() });
 export type ServiceUpdate = z.infer<typeof ServiceUpdateSchema>;
 
 // ─── LocationCreate (request body) ───────────────────────────────────────
@@ -417,7 +417,7 @@ export const LocationCreateSchema = z.object({
 
 export type LocationCreate = z.infer<typeof LocationCreateSchema>;
 
-export const LocationUpdateSchema = LocationCreateSchema.partial();
+export const LocationUpdateSchema = LocationCreateSchema.extend({ is_active: z.boolean() });
 export type LocationUpdate = z.infer<typeof LocationUpdateSchema>;
 
 // ─── MaterialResponse ───────────────────────────────────────────────────
@@ -440,7 +440,7 @@ export const MaterialCreateSchema = z.object({
 });
 export type MaterialCreate = z.infer<typeof MaterialCreateSchema>;
 
-export const MaterialUpdateSchema = MaterialCreateSchema.partial();
+export const MaterialUpdateSchema = MaterialCreateSchema.extend({ is_active: z.boolean() });
 export type MaterialUpdate = z.infer<typeof MaterialUpdateSchema>;
 
 // ─── UserSettingsResponse ───────────────────────────────────────────────

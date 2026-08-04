@@ -43,4 +43,4 @@
 
 ## Archive semantics on write
 
-Master is a soft-delete entity. See `docs/domain-rules/_overview.md` → "is_active semantics on get/update/patch" for the general rule. **Entity note:** sticky-field handling inherited from `SoftDeleteService` (no override).
+Master is a soft-delete entity. See `docs/domain-rules/_overview.md` → "is_active semantics on get/update/patch" for the general rule. **Entity note:** PUT requires explicit `is_active` (GH #178); PATCH sticky inherited from `SoftDeleteService` (no override).

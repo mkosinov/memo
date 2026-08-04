@@ -94,16 +94,30 @@ describe('useLocationsMutations', () => {
 
       const { result } = renderHook(() => useUpdateLocation(), { wrapper });
 
+      // Canonical PUT (GH #178): full typed LocationUpdate — every field listed.
       const payload: { id: string; data: LocationUpdate } = {
         id: 'loc-1',
-        data: { name: 'Updated' },
+        data: {
+          name: 'Updated',
+          short_title: '',
+          address: '',
+          description: '',
+          capacity: 10,
+          yandex_map_url: '',
+          review_url: '',
+          record_info: '',
+          image_url: '',
+          location_hint: '',
+          tag_ids: [],
+          is_active: true,
+        },
       };
 
       await act(async () => {
         await result.current.mutateAsync(payload);
       });
 
-      expect(mockUpdateLocation).toHaveBeenCalledWith('loc-1', { name: 'Updated' });
+      expect(mockUpdateLocation).toHaveBeenCalledWith('loc-1', payload.data);
     });
 
     it('invalidates the locations query cache on success', async () => {
@@ -113,8 +127,23 @@ describe('useLocationsMutations', () => {
 
       const { result } = renderHook(() => useUpdateLocation(), { wrapper });
 
+      const payload: LocationUpdate = {
+        name: 'Updated',
+        short_title: '',
+        address: '',
+        description: '',
+        capacity: 10,
+        yandex_map_url: '',
+        review_url: '',
+        record_info: '',
+        image_url: '',
+        location_hint: '',
+        tag_ids: [],
+        is_active: true,
+      };
+
       await act(async () => {
-        await result.current.mutateAsync({ id: 'loc-1', data: { name: 'Updated' } });
+        await result.current.mutateAsync({ id: 'loc-1', data: payload });
       });
 
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['locations'] });

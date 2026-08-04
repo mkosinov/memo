@@ -22,7 +22,7 @@ import {
   patchMaterial,
   deleteMaterial,
 } from '@memo/api-client';
-import type { MaterialCreate } from '@memo/api-client';
+import type { MaterialCreate, MaterialUpdate } from '@memo/api-client';
 
 const mockCreateMaterial = vi.mocked(createMaterial);
 const mockUpdateMaterial = vi.mocked(updateMaterial);
@@ -87,11 +87,18 @@ describe('useMaterialsMutations', () => {
 
       const { result } = renderHook(() => useUpdateMaterial(), { wrapper });
 
+      // Canonical PUT (GH #178): full typed MaterialUpdate — every field listed.
+      const payload: MaterialUpdate = {
+        title: 'Глина 2',
+        description: '',
+        is_active: true,
+      };
+
       await act(async () => {
-        await result.current.mutateAsync({ id: 'mat-1', data: { title: 'Глина 2' } });
+        await result.current.mutateAsync({ id: 'mat-1', data: payload });
       });
 
-      expect(mockUpdateMaterial).toHaveBeenCalledWith('mat-1', { title: 'Глина 2' });
+      expect(mockUpdateMaterial).toHaveBeenCalledWith('mat-1', payload);
     });
   });
 

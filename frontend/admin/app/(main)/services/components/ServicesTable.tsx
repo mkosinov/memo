@@ -320,7 +320,8 @@ export function ServicesTable() {
   const handleArchive = async (service: ServiceResponse) => {
     setActionMenuId(null);
     try {
-      // ServiceUpdate doesn't include is_active — archive/restore is a partial update
+      // Archive/restore uses PATCH partial update (GH #178): only is_active
+      // changes, so other fields stay untouched (sticky semantics).
       await patchService.mutateAsync({
         id: service.id,
         data: { is_active: !service.is_active },

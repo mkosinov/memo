@@ -735,8 +735,10 @@ class TestGenericServiceListContract:
 # ─── Contract-test: update (PUT full-replace) semantics ─────────────────────────
 # Spec: docs/specs/2026-08-03-generic-service-crud-contract-design.md §3.3 (Update
 # row, D7), §2 — full replace (PUT, RFC 9110 §9.3.4): omitted fields revert to
-# schema defaults, except sticky fields (id, created_at, is_active — the last
-# pinned by the future TestGenericServiceIsActiveContract, not exercised here).
+# schema defaults, except sticky fields (id, created_at — never in the Update
+# schema, so never touched). ``is_active`` is a required PUT field on soft
+# entities (GH #178), not a sticky PUT exception; its PATCH stickiness is
+# pinned by TestGenericServiceIsActiveContract.
 # Payload construction via ``_update_kwargs`` (§3.2, D2/D3): create fields +
 # update_data, filtered to update_schema.model_fields.
 class TestGenericServiceUpdateContract:
@@ -762,10 +764,6 @@ class TestGenericServiceUpdateContract:
         for field in set(payload) - set(cfg.update_data) - {"is_active"}:
             assert getattr(after, field) == sent_dump[field], (
                 f"{service_cls.__name__}: field {field} unexpectedly changed"
-            )
-        if "is_active" in cfg.update_schema.model_fields:
-            assert after.is_active is True, (
-                f"{service_cls.__name__}: explicit is_active=True not applied"
             )
 
     @pytest.mark.parametrize("service_cls,cfg", _contract_params())
@@ -813,19 +811,24 @@ class TestGenericServiceUpdateContract:
         )
 
 
-# ─── Contract-test: is_active stickiness on update/patch (user directive G1b) ─
+# ─── Contract-test: is_active semantics on update/patch (#178 canonical PUT) ─
 # Spec: docs/specs/2026-08-03-generic-service-crud-contract-design.md §2 (amended
 # contract table), §3.3 (IsActiveContract row), §8 D12/D13 — user-directed
 # semantics: ``get`` deliberately returns archived rows (*list hides* / *get
-# returns* pairing — user decision 1); ``update``/``patch`` preserve
-# ``is_active`` when absent/None; explicit bool applies (``True`` on archived =
-# legal reactivation). ``is_active`` is a sticky-field exception to PUT
-# full-replace (like ``id`` / ``created_at``).
+# returns* pairing — user decision 1); PUT requires ``is_active`` (canonical
+# full-replace, GH #178 — omitted → 422 from the Update schema before any DB
+# write; explicit bool applies, ``True`` on archived = legal reactivation);
+# PATCH is sticky (omitted / explicit ``None`` preserve the stored value;
+# explicit bool applies). ``is_active`` is no longer a PUT sticky-field
+# exception — it is a required PUT field, like any other NOT NULL column.
 #
-# Parametrized over soft entities only via ``_soft_params()`` — NO in-test
-# skips; every test still starts with the ``assert cfg is not None`` line for
-# symmetry with the other contract classes (``_soft_params`` already filters
-# MISSING-CONFIG entries, so the assert is a no-op invariant here).
+# Parametrized over soft entities only via ``_soft_params()`` — one in-test
+# skip: ``test_update_without_is_active_raises_validation_error`` skips Client
+# until GH #201 redefines Client PUT semantics (the check is data-driven via
+# ``FieldInfo.is_required()`` and lifts itself when #201 flips ClientUpdate to
+# required). Every test still starts with the ``assert cfg is not None`` line
+# for symmetry with the other contract classes (``_soft_params`` already
+# filters MISSING-CONFIG entries, so the assert is a no-op invariant here).
 #
 # Multi-phase tests use **labeled assertions** (assert messages per direction)
 # for failure localization (panel conflict resolution round 2 — Assertion

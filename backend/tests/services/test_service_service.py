@@ -32,16 +32,17 @@ async def test_service_service_list_paginated(db_session):
     assert hasattr(result.items[0], "tags")
 
 
-# ─── ServiceService is_active stickiness (D11 — contract exception) ────────────────
+# ─── ServiceService is_active contract (D11 — contract exception) ────────────────
 # Spec: docs/specs/2026-08-03-generic-service-crud-contract-design.md §3.3, §3.5,
 # §8 D11/D13. ``ServiceService`` is a soft-delete entity with its own
-# ``update``/``patch`` overrides that bypass ``SoftDeleteService.update`` /
-# ``GenericService.patch`` (they build apply-dicts via
-# ``data.model_dump(exclude={...})`` + ``setattr`` directly). Same is_active
-# stickiness hazards as the 4 contract soft entities; pinned here so the
-# ServiceService exception stays honest. Test class wraps the 5 per-entity
-# flows so the ``-k IsActive`` filter collects them alongside
-# ``TestGenericServiceIsActiveContract`` (Service is in
+# ``update``/``patch`` overrides (the bypass exists to handle nested
+# tariffs/tags, not stickiness): ``update`` does canonical PUT full-replace via
+# ``data.model_dump(exclude={"tariffs", "tag_ids"})`` + ``setattr`` —
+# ``is_active`` is required (#178), no stickiness; ``patch`` does partial
+# update via ``exclude_unset`` and strips ``is_active=None`` (#184 sticky
+# PATCH). Pinned here so the ServiceService exception stays honest. Test class
+# wraps the 5 per-entity flows so the ``-k IsActive`` filter collects them
+# alongside ``TestGenericServiceIsActiveContract`` (Service is in
 # ``GENERIC_CONTRACT_EXCEPTIONS`` — not parametrized by the contract file).
 # Multi-phase tests use labeled assertions (assert messages per direction)
 # mirroring ``TestGenericServiceIsActiveContract``.
@@ -51,9 +52,11 @@ async def test_service_service_list_paginated(db_session):
 # API factory — ``ServiceService()`` requires constructor args). The
 # ServiceUpdate payload field set mirrors the green service PUT test
 # ``backend/tests/test_put_is_active.py:95-115``
-# (``test_put_service_with_is_active_false``), with values changed. ``is_active``
-# is added/removed per-test to exercise the sticky-field semantics; ``tariffs``
-# and ``tag_ids`` default to empty lists in ``ServiceUpdate`` (not sent).
+# (``test_put_service_with_is_active_false``), with values changed.
+# ``is_active`` is NOT in ``_SERVICE_UPDATE_FIELDS``; only
+# ``test_update_explicit_is_active_applies`` adds it (explicit bool).
+# ``tariffs`` and ``tag_ids`` default to empty lists in ``ServiceUpdate``
+# (not sent).
 _SERVICE_UPDATE_FIELDS: dict = {
     "title": "Updated Service",
     "description": "Updated description",

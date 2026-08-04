@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { getServices } from '@memo/api-client';
-import type { ServiceResponse } from '@memo/api-client';
+import type { ServiceResponse, ServiceUpdate } from '@memo/api-client';
 import { useUpdateService, usePatchService, useCreateService, useDeleteService } from '@/hooks/useServicesMutations';
 import { useUI } from '@/contexts/UIContext';
 import { ServiceModal } from './ServiceModal';
@@ -294,14 +294,23 @@ export function ServicesTable() {
 
   const handleEditSubmit = async (data: Record<string, unknown>) => {
     if (!editingService) return;
+    // Canonical PUT (GH #178): full typed ServiceUpdate — every field listed.
+    const payload: ServiceUpdate = {
+      title: data.title as string,
+      description: (data.description as string | null | undefined) ?? '',
+      image_url: (data.image_url as string | null | undefined) ?? '',
+      specialty: (data.specialty as string | null | undefined) ?? '',
+      min_age: (data.min_age as number | null | undefined) ?? 0,
+      max_age: (data.max_age as number | null | undefined) ?? 18,
+      duration: data.duration as number,
+      record_info: (data.record_info as string | null | undefined) ?? '',
+      material_hint: (data.material_hint as string | null | undefined) ?? '',
+      tariffs: (data.tariffs as ServiceUpdate['tariffs'] | undefined) ?? [],
+      tag_ids: (data.tag_ids as string[] | undefined) ?? [],
+      is_active: editingService.is_active,
+    };
     try {
-      await updateService.mutateAsync({
-        id: editingService.id,
-        // Preserve archive state — backend Update schema defaults is_active=True (#195).
-        // ServiceUpdate type intentionally excludes is_active (TODO #178); cast through
-        // Record<string, unknown> to match the previous pattern.
-        data: { ...(data as Record<string, unknown>), is_active: editingService.is_active } as Record<string, unknown>,
-      });
+      await updateService.mutateAsync({ id: editingService.id, data: payload });
       showToast('Услуга обновлена', undefined);
     } catch (err) {
       showToast(parseApiError(err).message, 'error');

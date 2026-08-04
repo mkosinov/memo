@@ -152,14 +152,18 @@ export function MastersTable() {
 
   const handleEdit = async (data: Record<string, unknown>) => {
     if (!editMaster) return;
-    const payload: MasterUpdate = {};
-    for (const [key, val] of Object.entries(data)) {
-      if (val !== null && val !== undefined) {
-        (payload as Record<string, unknown>)[key] = val;
-      }
-    }
-    // Preserve archive state — backend Update schema defaults is_active=True (#195)
-    (payload as Record<string, unknown>).is_active = editMaster.is_active;
+    // Canonical PUT (GH #178): every MasterUpdate field listed — tsc fails on
+    // missing/extra fields. Form values are untyped → per-field extraction;
+    // null optionals coerce to the Create default (backend does the same).
+    const payload: MasterUpdate = {
+      first_name: data.first_name as string,
+      last_name: data.last_name as string,
+      color: data.color as string,
+      position: data.position as MasterUpdate['position'],
+      specialty: data.specialty as MasterUpdate['specialty'],
+      avatar_url: (data.avatar_url as string | null | undefined) ?? '',
+      is_active: editMaster.is_active,
+    };
     try {
       await updateMaster.mutateAsync({
         id: editMaster.id,

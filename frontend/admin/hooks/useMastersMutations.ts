@@ -23,7 +23,7 @@ export function useUpdateMaster() {
 export function usePatchMaster() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, data }: { id: string; data: Partial<MasterUpdate> & { is_active?: boolean } }) =>
+    mutationFn: ({ id, data }: { id: string; data: Partial<MasterUpdate> }) =>
       patchMaster(id, data),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['masters'] }),
   });

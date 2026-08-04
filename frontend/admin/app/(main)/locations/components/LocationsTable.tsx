@@ -150,15 +150,23 @@ export function LocationsTable() {
 
   const handleEdit = async (data: Record<string, unknown>) => {
     if (!editLocation) return;
-    // Strip null values to match LocationUpdate (string | undefined, not null)
-    const payload: LocationUpdate = {};
-    for (const [key, val] of Object.entries(data)) {
-      if (val !== null && val !== undefined) {
-        (payload as Record<string, unknown>)[key] = val;
-      }
-    }
-    // Preserve archive state — backend Update schema defaults is_active=True (#195)
-    (payload as Record<string, unknown>).is_active = editLocation.is_active;
+    // Canonical PUT (GH #178): every LocationUpdate field listed — tsc fails on
+    // missing/extra fields. Form values are untyped → per-field extraction;
+    // null optionals coerce to the Create default (backend does the same).
+    const payload: LocationUpdate = {
+      name: data.name as string,
+      short_title: (data.short_title as string | null | undefined) ?? '',
+      address: (data.address as string | null | undefined) ?? '',
+      description: (data.description as string | null | undefined) ?? '',
+      capacity: data.capacity as number,
+      yandex_map_url: (data.yandex_map_url as string | null | undefined) ?? '',
+      review_url: (data.review_url as string | null | undefined) ?? '',
+      record_info: (data.record_info as string | null | undefined) ?? '',
+      image_url: (data.image_url as string | null | undefined) ?? '',
+      location_hint: (data.location_hint as string | null | undefined) ?? '',
+      tag_ids: (data.tag_ids as string[] | undefined) ?? [],
+      is_active: editLocation.is_active,
+    };
     try {
       await updateLocation.mutateAsync({
         id: editLocation.id,

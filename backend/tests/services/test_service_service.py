@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
 
 from src.models.service import Service
 from src.schemas.common import PaginatedResponse
@@ -82,11 +83,11 @@ async def _seed_service(db_session) -> str:
 
 
 class TestServiceIsActiveContract:
-    """``ServiceService`` is_active stickiness contract — 5 per-entity tests
-    mirroring ``TestGenericServiceIsActiveContract`` against ServiceService
-    directly (own ``update``/``patch`` overrides — spec D11). Class name
-    carries ``IsActive`` so the ``-k IsActive`` selector collects them
-    alongside the generic contract class.
+    """``ServiceService`` is_active contract — canonical PUT (#178) + sticky
+    PATCH. 5 per-entity tests mirroring ``TestGenericServiceIsActiveContract``
+    against ServiceService directly (own ``update``/``patch`` overrides —
+    spec D11). Class name carries ``IsActive`` so the ``-k IsActive``
+    selector collects them alongside the generic contract class.
     """
 
     async def test_get_archived_returns_row_with_is_active_false(self, db_session):
@@ -99,43 +100,12 @@ class TestServiceIsActiveContract:
         assert fetched is not None, "get must return archived rows (user decision 1)"
         assert fetched.is_active is False, "archived row's is_active must be False"
 
-    async def test_update_preserves_is_active_when_omitted(self, db_session):
-        """PUT without is_active in ServiceUpdate must preserve the stored
-        value: archived stays archived (phase 1), active stays active (phase 2).
-
-        The omitting-resurrection hazard (spec §3.5): ``ServiceUpdate.is_active``
-        defaults to ``True`` → ``ServiceService.update``'s update-dict
-        (``data.model_dump(exclude={"tariffs", "tag_ids"})``) carries the default
-        → ``setattr`` resurrects the archived row.
-        """
-        service = get_service_service()
-
-        # phase 1: archived stays archived (PUT without is_active must not resurrect)
-        service_id = await _seed_service(db_session)
-        ok = await service.delete(db_session, service_id)
-        assert ok, "phase 1 setup delete() returned False"
+    async def test_update_without_is_active_raises_validation_error(self, db_session):
+        """PUT without is_active → ServiceUpdate refuses construction (GH #178)."""
         payload = dict(_SERVICE_UPDATE_FIELDS)
-        assert "is_active" not in payload, (
-            "test invariant — payload must not include is_active "
-            "(sticky-field semantics are the subject under test)"
-        )
-        await service.update(db_session, service_id, ServiceUpdate(**payload))
-        after = await service.get(db_session, service_id)
-        assert after is not None, "phase 1 row vanished"
-        assert after.is_active is False, (
-            "ServiceService.update: PUT without is_active must not resurrect"
-        )
-
-        # phase 2: active stays active (fresh seed)
-        service_id2 = await _seed_service(db_session)
-        payload2 = dict(_SERVICE_UPDATE_FIELDS)
-        assert "is_active" not in payload2, "phase 2 test invariant"
-        await service.update(db_session, service_id2, ServiceUpdate(**payload2))
-        after2 = await service.get(db_session, service_id2)
-        assert after2 is not None, "phase 2 row vanished"
-        assert after2.is_active is True, (
-            "ServiceService.update: PUT without is_active must preserve active state"
-        )
+        payload.pop("is_active", None)
+        with pytest.raises(ValidationError):
+            ServiceUpdate(**payload)
 
     async def test_update_explicit_is_active_applies(self, db_session):
         """PUT with explicit is_active bool applies it: False archives an active

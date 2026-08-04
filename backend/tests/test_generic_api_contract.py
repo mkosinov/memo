@@ -50,7 +50,12 @@ def _create_payload(cfg: EntityConfig, fk_ids: dict[str, Any]) -> dict[str, Any]
 def _update_payload(cfg: EntityConfig, fk_ids: dict[str, Any]) -> dict[str, Any]:
     """PUT body: create_data + FKs + update_data, filtered to update_schema fields (#184 D3)."""
     merged = {**cfg.create_data, **fk_ids, **cfg.update_data}
-    return _jsonable({k: v for k, v in merged.items() if k in cfg.update_schema.model_fields})
+    payload = _jsonable({k: v for k, v in merged.items() if k in cfg.update_schema.model_fields})
+    # GH #178: is_active is a required PUT field for soft entities (Client
+    # included — omitting it now 500s until #201).
+    if "is_active" in cfg.update_schema.model_fields:
+        payload.setdefault("is_active", True)
+    return payload
 
 
 def _create_entity(api_client, cfg: EntityConfig, fk_ids: dict[str, Any]) -> dict[str, Any]:

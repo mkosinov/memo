@@ -270,6 +270,7 @@ class TestServiceWithTariffsAndTags:
 
         # Update with completely new tariffs and tags
         update_data = {
+            "is_active": True,
             "title": "Advanced Ceramics",
             "description": "Advanced clay techniques",
             "image_url": "https://example.com/ceramics2.jpg",
@@ -311,6 +312,7 @@ class TestServiceWithTariffsAndTags:
         assert len(create_resp.json()["tariffs"]) == 2
 
         update_data = {
+            "is_active": True,
             "title": "Ceramics",
             "description": "Clay sculpting",
             "image_url": "https://example.com/ceramics.jpg",

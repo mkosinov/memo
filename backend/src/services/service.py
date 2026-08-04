@@ -118,7 +118,7 @@ class ServiceService(SoftDeleteService[ServiceCreate, ServiceUpdate, ServiceResp
 
         tag_ids = data.tag_ids
         tariff_data = data.tariffs
-        update_data = _strip_is_active_none(data.model_dump(exclude={"tariffs", "tag_ids"}))
+        update_data = data.model_dump(exclude={"tariffs", "tag_ids"})
 
         for key, value in update_data.items():
             setattr(service, key, value)

@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — 2026-08-04
+
+### Added
+- **GH #185 — GenericService HTTP CRUD contract + test_api dedup** — branch `gh-185-api-crud-contract` (4 commits: 522b12e, 333f68d, 541731b, a521bb5):
+  - **HTTP-level CRUD contract:** new `backend/tests/test_generic_api_contract.py` (+247) — 116 parametrized sync-only cases over 8 entities (activities/clients/locations/masters/materials/payments/services/visitors) through `TestClient` against the real test SQLite (ADR 006). Pins the transport surface the service contract (#184) cannot see: URL prefixes, HTTP status codes (201/200/204), `response_model` shape via exact body key-set + `model_validate`, pagination query-param binding, per-entity 404 error codes and ADR-005 error-body shape.
+  - **Shared contract config module:** new `backend/tests/generic_contract.py` (+365) — single source of entity config (schemas, payload builders, `fk_map`) driving BOTH the service contract (`test_generic_service_contract.py`, refactored to import it) and the new HTTP contract.
+  - **Per-entity dedup:** 7 `test_api_*.py` files trimmed (−1014/+26), `test_api_tags.py` deleted; `test_api_pagination_params.py` trimmed to services/records/visits. Suite arithmetic: 107 old cases removed, 116 added → net +9 vs pre-#185 baseline (990p → 999p).
+  - **ADR 006:** `docs/decisions/006-http-contract-tests-end-to-end.md` (verbatim from spec §3.6) + `docs/decisions/README.md` index rows 005+006.
+  - **Hard constraint honored:** `backend/src/` untouched (zero production code changes). AC1–AC7 all verified ✅ COMPLIANT by final full-feature review with independent suite run.
+  - **Mutation checks (T5, all reverted):** unmounted router prefix, narrowed `response_model`, status-code flip — all turned contract red; tree pristine.
+  - **Documented blind spot (spec D12, explicit user decision):** a `response_model=` kwarg dropped without changing the route's return value is undetectable at body level (services return validated schema instances → byte-identical body). Docs-only — NO guard test, per user decision; noted here so it is not re-litigated.
+  - **Pre-existing lint baseline:** ruff in `backend/tests/` (143 findings, Cyrillic RUF001/002/003 etc.) untouched — no new lint introduced.
+  - **Test results:** backend full suite 999 passed / 5 skipped (three independent confirmations: implementer, quality reviewer, final spec reviewer); contract file 116/116 green.
+  - **Stats:** test-files-only net −667 lines (AC4 band, within −600…−700); full branch diff 14 files, +696 / −1318.
+  - Design spec: `docs/specs/2026-08-03-generic-api-crud-contract-design.md` (rev 2)
+  - Plan: `docs/plans/2026-08-03-generic-api-crud-contract-plan.md`
+
 ## [Unreleased] — 2026-08-03
 
 ### Added

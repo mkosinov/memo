@@ -13,101 +13,7 @@ CLIENT_PAYLOAD = {
 
 
 class TestClientsCrud:
-    """Full CRUD round-trip for /api/clients."""
-
-    def test_create_client(self, api_client) -> None:
-        """POST /api/clients creates a client and returns 201."""
-        response = api_client.post("/api/v1/clients", json=CLIENT_PAYLOAD)
-
-        assert response.status_code == 201
-        body = response.json()
-        assert body["name"] == "John Smith"
-        assert body["phone"] == "+79991234567"
-        assert body["email"] == "john@example.com"
-        assert body["channel"] == "telegram"
-        assert "id" in body
-        assert "created_at" in body
-        assert "updated_at" in body
-        assert body["is_active"] is True
-
-    def test_list_clients_includes_created(self, api_client) -> None:
-        """GET /api/clients returns a paginated response containing the created client."""
-        create_resp = api_client.post("/api/v1/clients", json=CLIENT_PAYLOAD)
-        client_id = create_resp.json()["id"]
-
-        response = api_client.get("/api/v1/clients")
-        assert response.status_code == 200
-        body = response.json()
-        assert "items" in body
-        assert "total" in body
-        ids = [c["id"] for c in body["items"]]
-        assert client_id in ids
-
-    def test_get_client_by_id(self, api_client) -> None:
-        """GET /api/clients/{id} returns the specific client."""
-        create_resp = api_client.post("/api/v1/clients", json=CLIENT_PAYLOAD)
-        client_id = create_resp.json()["id"]
-
-        response = api_client.get(f"/api/v1/clients/{client_id}")
-        assert response.status_code == 200
-        body = response.json()
-        assert body["id"] == client_id
-        assert body["name"] == "John Smith"
-
-    def test_update_client(self, api_client) -> None:
-        """PUT /api/clients/{id} updates all fields."""
-        create_resp = api_client.post("/api/v1/clients", json=CLIENT_PAYLOAD)
-        client_id = create_resp.json()["id"]
-
-        update_data = {
-            "name": "John Updated",
-            "phone": "+79997654321",
-            "email": "john.updated@example.com",
-            "channel": "telegram",
-        }
-        response = api_client.put(f"/api/v1/clients/{client_id}", json=update_data)
-        assert response.status_code == 200
-        body = response.json()
-        assert body["name"] == "John Updated"
-        assert body["phone"] == "+79997654321"
-        assert body["channel"] == "telegram"
-
-    def test_delete_client_soft_deletes(self, api_client) -> None:
-        """DELETE /api/clients/{id} soft-deletes and list excludes it."""
-        create_resp = api_client.post("/api/v1/clients", json=CLIENT_PAYLOAD)
-        client_id = create_resp.json()["id"]
-
-        # Delete
-        response = api_client.delete(f"/api/v1/clients/{client_id}")
-        assert response.status_code == 204
-
-        # GET by id should still return it (soft delete)
-        response = api_client.get(f"/api/v1/clients/{client_id}")
-        assert response.status_code == 200
-        assert response.json()["is_active"] is False
-
-        # List should NOT include the deleted client
-        response = api_client.get("/api/v1/clients")
-        ids = [c["id"] for c in response.json()["items"]]
-        assert client_id not in ids
-
-    def test_get_nonexistent_client_returns_404(self, api_client) -> None:
-        """GET /api/clients/{fake_id} returns 404."""
-        response = api_client.get("/api/v1/clients/nonexistent-id")
-        assert response.status_code == 404
-
-    def test_update_nonexistent_client_returns_404(self, api_client) -> None:
-        """PUT /api/clients/{fake_id} returns 404."""
-        response = api_client.put(
-            "/api/v1/clients/nonexistent-id",
-            json=CLIENT_PAYLOAD,
-        )
-        assert response.status_code == 404
-
-    def test_delete_nonexistent_client_returns_404(self, api_client) -> None:
-        """DELETE /api/clients/{fake_id} returns 404."""
-        response = api_client.delete("/api/v1/clients/nonexistent-id")
-        assert response.status_code == 404
+    """Search-by-phone and scoped client-visitors sub-routes for /api/clients."""
 
     def test_search_client_by_phone_found(self, api_client) -> None:
         """GET /api/v1/clients/search?phone=... returns the matching client."""
@@ -147,12 +53,6 @@ class TestClientsCrud:
             "/api/v1/clients/search", params={"phone": "+79991234567"}
         )
         assert response.status_code == 404
-
-    def test_patch_client_not_found(self, api_client) -> None:
-        """PATCH /api/v1/clients/{fake_id} returns 404."""
-        response = api_client.patch("/api/v1/clients/nonexistent", json={"name": "Test"})
-        assert response.status_code == 404
-        assert response.json()["detail"]["code"] == "CLIENT_NOT_FOUND"
 
     def test_list_visitors_for_client(self, api_client) -> None:
         """GET /api/clients/{id}/visitors returns visitors for that client."""

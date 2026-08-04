@@ -14,6 +14,8 @@ An ADR captures a significant architectural decision, its context, and consequen
 | 002 | Use React Query for data fetching | Accepted | 2026-05-20 |
 | 003 | Domain Rules as single source of truth | Accepted | 2026-05-28 |
 | 004 | SuperAgents workflow for development | Accepted | 2026-05-15 |
+| 005 | End-to-End Error Contract with Machine-Readable Codes | Accepted | 2026-06-20 |
+| 006 | HTTP Contract Tests Are End-to-End (TestClient + Test SQLite), Not Mocked-Service | Accepted | 2026-08-03 |
 
 ## When to create an ADR?
 

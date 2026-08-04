@@ -10,6 +10,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased] — 2026-08-04
 
 ### Added
+- **GH #178 — Canonical PUT/PATCH types (api-client + backend, 4 entities: Master, Service, Location, Material)** — branch `gh-178-canonical-put-patch` (6 commits: 7a71b55, 58e7365, 3d85488, 2576a90, bee8246, cb444ac):
+  - **Backend:** PUT is now true full-replace for the 4 soft-delete entities — `MasterUpdate`/`ServiceUpdate`/`LocationUpdate`/`MaterialUpdate` require `is_active: bool` (omission → 422), replacing the #184 sticky `bool | None = None`. Sticky-injection override removed from `SoftDeleteService.update`; `ServiceService.update` drops the `_strip_is_active_none` call on the update path (PATCH keeps it). `ClientUpdate.is_active` stays `bool | None = None` as a documented interim #201 wart — a Client PUT omitting `is_active` errors (500) in the window, user-accepted (Next Up #201 redefines Client PUT with explicit-null wipe semantics).
+  - **api-client:** 4 `*UpdateSchema` switch from `CreateSchema.partial()` to `CreateSchema.extend({ is_active: z.boolean() })` — canonical full-replace typing; PATCH endpoints drop the `& { is_active?: boolean }` workaround intersections (TODO(#178) comments removed) — `Partial<Update>` is now the canonical PATCH type; `schemas.test.ts` + `endpoints.test.ts` updated.
+  - **Admin:** `useMastersMutations`/`useLocationsMutations`/`useMaterialsMutations`/`useServicesMutations` hooks + 4 tables (Masters/Locations/Materials/Services) send typed canonical PUT payloads (incl. `is_active`); 4 hook test files updated.
+  - **Domain-rules:** `_overview.md` "is_active semantics on get/update/patch" rewritten (PUT requires explicit bool for the 4 entities; PATCH stays sticky; Client #178→#201 window documented) + 5 entity notes synced (masters/locations/materials/services/clients).
+  - **Test results:** backend 999 passed / 6 skipped; api-client 150 passed / 4 failed (4 = known pre-existing #188, unchanged); admin vitest 1239 passed / 0 failed; admin `tsc --noEmit` clean.
+  - **AC1–AC7 all met (spec §6).** Visual Compliance Gate (spec §7): 5/5 PASS — 4 admin tables render + edit-save PUT 200.
+  - **Pre-existing issue surfaced (NOT a #178 regression):** `ServiceModal.tsx` maps NULL `max_age`→0, blocking edit-save client-side on seed services with open-ended `max_age` — file byte-identical to main; flagged for follow-up.
+  - **Known window:** client PUT omitting `is_active` → 500 until GH #201 (user-accepted; Next Up 2 starts immediately after merge).
+  - **37 files changed, +411 / -224.**
+  - Design spec: `docs/specs/2026-08-04-canonical-put-patch-design.md` (rev 3)
+  - Plan: `docs/plans/2026-08-04-canonical-put-patch-plan.md`
+
+## [Unreleased] — 2026-08-04
+
+### Added
 - **GH #185 — GenericService HTTP CRUD contract + test_api dedup** — branch `gh-185-api-crud-contract` (4 commits: 522b12e, 333f68d, 541731b, a521bb5):
   - **HTTP-level CRUD contract:** new `backend/tests/test_generic_api_contract.py` (+247) — 116 parametrized sync-only cases over 8 entities (activities/clients/locations/masters/materials/payments/services/visitors) through `TestClient` against the real test SQLite (ADR 006). Pins the transport surface the service contract (#184) cannot see: URL prefixes, HTTP status codes (201/200/204), `response_model` shape via exact body key-set + `model_validate`, pagination query-param binding, per-entity 404 error codes and ADR-005 error-body shape.
   - **Shared contract config module:** new `backend/tests/generic_contract.py` (+365) — single source of entity config (schemas, payload builders, `fk_map`) driving BOTH the service contract (`test_generic_service_contract.py`, refactored to import it) and the new HTTP contract.

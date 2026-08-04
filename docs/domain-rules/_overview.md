@@ -76,8 +76,8 @@
 Applies to the **soft-delete entities** (Master, Location, Service, Material, Client). Implementation: `SoftDeleteService` + `ServiceService` overrides (see spec GH #184, rev 4 §3.5).
 
 1. **`get` returns archived rows** — no `is_active` filter on the get path; `is_active` is exposed in all 5 soft-delete Response schemas. This pairs deliberately with `list()` hiding archived rows: *list hides, get returns*.
-2. **`update` (PUT) and `patch` preserve the stored `is_active`** when the field is absent or `None`; an explicit boolean always applies — `true` on an archived record is the legal reactivation path, `false` archives.
-3. **`is_active` is a documented sticky-field exception to PUT full-replace** (like `id`/`created_at`), implemented in `SoftDeleteService` (+ `ServiceService` overrides, via the shared `_strip_is_active_none` helper, `services/generic.py:25`) — see spec GH #184.
+2. **`update` (PUT) requires an explicit `is_active` boolean** for Master, Location, Material, Service (GH #178 — canonical full-replace; omission → 422). Explicit `true` on an archived record is the legal reactivation path, `false` archives. **Client exception until GH #201:** `ClientUpdate.is_active` stays optional (`bool | None = None`) and the #184 sticky-preserve injection was removed with #178 — a Client PUT omitting `is_active` currently errors (accepted window; #201 redefines Client PUT with explicit-null wipe semantics).
+3. **`patch` preserves the stored `is_active`** when the field is absent or `None` (sticky — all soft entities incl. Client); an explicit boolean always applies. `None` is stripped via the shared `_strip_is_active_none` helper (`services/generic.py:25`).
 
 - **Create always yields `is_active=True`** — Create schemas do not expose the field; adding it there would bypass sticky semantics (trap, do not do).
 - **`reorder` silently skips archived rows** (`repositories/generic.py:169`) — a reactivated row becomes reorder-eligible again.

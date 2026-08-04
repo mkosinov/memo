@@ -31,7 +31,7 @@ How this feature behaves, mapped to spec acceptance criteria (cross-layer type/c
 - **AC3 — backend required `is_active` + leniency removed** → `curl -X PUT` on a master/service/location/material without `is_active` now returns **422** (previously 200 with silent state injection). Client PUT without `is_active` temporarily 500s (accepted window until #201); Client tests carry `#201`-referenced skips so the suite stays green by design.
 - **AC4 — PATCH sticky unchanged** → Archiving/restoring via single-field PATCH (`{"is_active": false}`/`true`) works exactly as before for all soft entities.
 - **AC5 — typed frontend payloads** → The 4 admin edit flows (masters/services/locations/materials tables) build fully typed payload objects — no blanket casts; a null optional field (e.g. avatar) is sent as `''` (the Create default) instead of being dropped.
-- **AC6 — suites green** → Backend ≈ 1000p/6s (was 999p/5s: +1 new 422 test, +1 `#201` Client skip), api-client 144+passing with 4 pre-existing #188 failures unchanged, admin vitest green.
+- **AC6 — suites green** → Backend ≈ 999p/6s (baseline 999p/5s: +1 new 422 test, +1 `#201` Client skip replacing a pass), api-client passing with 4 pre-existing #188 failures unchanged, admin vitest green.
 - **AC7 — domain rules synced** → `docs/domain-rules/_overview.md` + entity notes describe the new PUT canon and the #178→#201 Client window.
 
 ---
@@ -53,7 +53,7 @@ Single TDD cycle: RED (test changes asserting the NEW semantics fail against old
 
 - [ ] **1a. `backend/tests/services/test_generic_service_contract.py`** — 3 edits:
   1. Add import if absent: `from pydantic import ValidationError`.
-  2. `_update_kwargs` helper (:72-88) — after `data.update(cfg.update_data)` append:
+  2. `_update_kwargs` helper (:72-88) — after `data.update(cfg.update_data)` append (entity-conditional guarded injection — spec §3.4, plan-review-aligned):
      ```python
          # GH #178: is_active is a required PUT field for soft entities — the
          # create schema never carries it, so inject it explicitly. Hard
@@ -113,7 +113,7 @@ Single TDD cycle: RED (test changes asserting the NEW semantics fail against old
                  ServiceUpdate(**payload)
      ```
   3. Sweep the file: `rg -n "ServiceUpdate\(|_SERVICE_UPDATE_FIELDS" backend/tests/services/test_service_service.py` — every OTHER construction site (e.g. tariff/tag update tests, `test_update_explicit_is_active_applies` already sets it explicitly) must pass `is_active` explicitly; add `payload["is_active"] = True` where missing. Adjust the class docstring (:85-90): "stickiness contract" → "is_active contract — canonical PUT (#178) + sticky PATCH".
-- [ ] **1c. `backend/tests/test_generic_api_contract.py`** — in the `_update_payload` helper (used at :171/:183), after the payload is built append:
+- [ ] **1c. `backend/tests/test_generic_api_contract.py`** — the `_update_payload` helper (used at :171/:183) currently builds via a `merged` dict returned in one expression. First bind the return value to a local (e.g. `payload = merged ... ; ` restructure minimally), then append before the return:
      ```python
          # GH #178: is_active is a required PUT field for soft entities (Client
          # included — omitting it now 500s until #201).
@@ -161,7 +161,7 @@ Single TDD cycle: RED (test changes asserting the NEW semantics fail against old
 - [ ] **2c. `backend/src/services/service.py:121`:** `update_data = _strip_is_active_none(data.model_dump(exclude={"tariffs", "tag_ids"}))` → `update_data = data.model_dump(exclude={"tariffs", "tag_ids"})` (`is_active` is now always a real bool; the `setattr` loop applies it). The `patch` override (:178-179) keeps `_strip_is_active_none`. If `_strip_is_active_none` becomes an unused import in this file → remove from imports; it is still used at :179, so it will not.
 
 **Step 3 — verify + commit:**
-- [ ] `cd backend && python -m pytest -q` → full suite green. Expected ≈ 1000 passed / 6 skipped (999p/5s baseline + 1 new 422 test + 1 `#201` Client skip). Report exact numbers.
+- [ ] `cd backend && python -m pytest -q` → full suite green. Expected ≈ **999 passed / 6 skipped** (baseline 999p/5s: +1 new 422 test, Client param of the flipped IsActive test moves pass→skip — the two cancel on the pass count). Report exact numbers.
 - [ ] `cd backend && python -m ruff check src/schemas src/services tests` → clean.
 - [ ] `git add backend/ && git commit -m "feat(backend): canonical PUT — required is_active, drop sticky injection (#178)"`
 
@@ -266,7 +266,7 @@ RED (flipped/new schema tests fail against `.partial()` schemas) → GREEN (`.ex
     });
   });
   ```
-- [ ] **RED run:** `cd packages/api-client && pnpm test` → the 4 "rejects update missing is_active" / "rejects … required create fields" tests FAIL (old `.partial()` schemas accept everything). Pre-existing: 4 known #188 failures in this suite — they must remain exactly 4, do not touch them.
+- [ ] **RED run:** `cd packages/api-client && pnpm test` → the 6 "rejects update missing is_active" / "rejects … required create fields" tests FAIL — Service ×2, Location ×2, Master ×1, Material ×1 (old `.partial()` schemas accept everything). Pre-existing: 4 known #188 failures in this suite — they must remain exactly 4, do not touch them.
 
 **Step 2 — GREEN: `packages/api-client/src/schemas.ts` + `endpoints.ts`.**
 - [ ] Replace 4 lines:
@@ -430,6 +430,6 @@ Markdown-only edits, committed into the feature branch (docs land with the code 
 ## Self-Review Notes (architect)
 
 - **Spec coverage:** AC1→Task 2, AC2→Tasks 2+3, AC3→Task 1, AC4→Task 1 (patch tests untouched, stay green), AC5→Task 3, AC6→all, AC7→Task 4. User scenarios 1-4 pinned by Tasks 2/1/3/1 respectively; scenario 5 = #201 (out of scope).
-- **Green-between-tasks:** Task 1 commits backend green standalone (backend tests don't depend on api-client). Task 2's api-client type changes compile independently of Task 3 (the old frontend intersections/casts remain valid against the new types — `Partial<XUpdate> & {is_active?: boolean}` and `XUpdate = {}` + cast still compile). Task 3 then cleans the frontend. Verified ordering safe.
+- **Green-between-tasks:** Task 1 commits backend green standalone (backend tests don't depend on api-client). Task 2's gates (api-client vitest + `pnpm build` dts) do NOT type-check `frontend/admin`, and admin vitest runs without type-checking — so the 4 old admin PUT sites (`const payload: XUpdate = {}` ×2, `as Record<string, unknown>` spreads ×2) are **temporarily tsc-broken after Task 2** until Task 3 rewrites them (accepted: tsc for admin is Task 3's gate; the two tasks land back-to-back in the same branch). Task 2's own package compiles clean independently. Verified ordering safe.
 - **Type consistency:** zod output types make `.default()` fields required — all literals in Tasks 2-3 include them; backend Update schemas keep Base defaults (documented leniency, spec §2).
 - **Known unresolved-in-plan detail:** `LocationUpdate` (zod) carries `tag_ids` which backend `LocationUpdate` (LocationBase) does not declare — Task 1 Step 1h verifies no `extra="forbid"` so the extra key is ignored on the wire; Task 3 sources it `?? []` (mirrors today's behavior: form doesn't edit location tags).

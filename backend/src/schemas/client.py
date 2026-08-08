@@ -8,7 +8,7 @@ from src.models.enums import ArchiveStatus, Channel
 
 
 class ClientBase(BaseModel):
-    """Shared fields for client creation and updates."""
+    """Shared fields for client creation."""
 
     name: str | None = None
     phone: str | None = None

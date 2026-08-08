@@ -833,10 +833,10 @@ class TestGenericServiceUpdateContract:
 #
 # Parametrized over soft entities only via ``_soft_params()`` — Client
 # required ``is_active`` optionally until GH #201; now all 5 soft entities
-# share the required-``is_active`` PUT contract (omission → 422 from the
-# Update schema before any DB write). Every test still starts with the ``assert cfg is not None`` line
-# for symmetry with the other contract classes (``_soft_params`` already
-# filters MISSING-CONFIG entries, so the assert is a no-op invariant here).
+# share the required-``is_active`` PUT contract (omission → 422 from the Update schema
+# before any DB write). Every test still starts with the ``assert cfg is not None`` line
+# for symmetry with the other contract classes (``_soft_params`` already filters
+# MISSING-CONFIG entries, so the assert is a no-op invariant here).
 #
 # Multi-phase tests use **labeled assertions** (assert messages per direction)
 # for failure localization (panel conflict resolution round 2 — Assertion

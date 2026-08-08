@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — 2026-08-08
+
+### Added
+- **GH #201 — Client canonical PUT/PATCH (closes the #178 Client PUT 500-window)** — branch `gh-201-client-canonical-put` (7 commits: 32a8ce9, 9cb5070, 3035777, bfaa156, c282734, c5e7d99, 77af79e):
+  - **Backend:** `ClientUpdate` became a standalone 5-key **required** schema (previously `ClientBase` with `is_active` optional) — PUT is true full-replace with **explicit-null wipe semantics**: all 5 fields (`phone`, `name`, `comment`, `email`, `is_active`) required, `None` explicitly wipes nullable fields, omission of any required key → 422. Closes the #178 window where a Client PUT omitting `is_active` hit a 500 (soft-delete sticky-injection path).
+  - **api-client:** `ClientUpdateSchema` (required 5-key, explicit-null) + `updateClient(id, ClientUpdate)` typed method; Create-typing bug fixed (`updateClient` previously accepted the Create shape).
+  - **Admin:** ClientCardModal/ClientInfoTab edit-save now sends a typed canonical `ClientUpdate` payload — `''` → `null` on save (no more empty-string 422s), save-time channel guard (omitted/invalid phone preserved), `is_active` included in the PUT.
+  - **Tests:** e2e `clients.spec.ts` edit-save test **unskipped** (window closed, 17/17 green); backend contract data enriched + data-driven omit flip + payload pinning.
+  - **Domain-rules:** `clients.md` + `_overview.md` — Client canonical PUT canon (required-key full replace, explicit-null wipe) + null-semantics divergence note (`null` wipes on PUT vs "don't change" on PATCH).
+  - **Test results:** backend 1008 passed / 5 skipped; api-client 156 passed / 4 failed (4 = known pre-existing #188, unchanged); admin vitest 1239 passed / 0 failed + `tsc --noEmit` clean; e2e clients 17/17; Visual Compliance Gate G4.5: 3/3 PASS (autonomous, Playwright fallback).
+  - **AC1–AC7 all met (spec §6).** AC8 (CI green) pending PR checks at finishing.
+  - **20 files changed, +221 / -73.**
+  - Design spec: `docs/specs/2026-08-04-client-canonical-put-design.md` (rev 2, G1b-approved)
+  - Plan: `docs/plans/2026-08-08-client-canonical-put-plan.md` (G2-approved)
+
 ## [Unreleased] — 2026-08-04
 
 ### Added

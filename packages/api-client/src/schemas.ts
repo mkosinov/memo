@@ -275,6 +275,21 @@ export const ClientCreateSchema = z.object({
 
 export type ClientCreate = z.infer<typeof ClientCreateSchema>;
 
+// ─── ClientUpdate (request body, GH #201 — canonical full-replace PUT) ────
+// All keys required: 4 required-nullable personal fields (explicit null =
+// deliberate clear) + required is_active. Intentionally NOT Create.extend() —
+// Create is lenient (booking auto-create), Update is the strict contract.
+
+export const ClientUpdateSchema = z.object({
+  name: z.string().nullable(),
+  phone: z.string().nullable(),
+  email: z.string().nullable(),
+  channel: z.enum(['telegram', 'whatsapp', 'max']).nullable(),
+  is_active: z.boolean(),
+});
+
+export type ClientUpdate = z.infer<typeof ClientUpdateSchema>;
+
 // ─── ClientWithStats ────────────────────────────────────────────────────────
 
 export const ClientWithStatsSchema = ClientResponseSchema.extend({

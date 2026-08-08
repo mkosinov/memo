@@ -20,6 +20,7 @@ import {
   type RecordResponse,
   ClientResponseSchema,
   type ClientResponse,
+  ClientUpdateSchema,
   PaymentResponseSchema,
   type PaymentResponse,
   TariffCreateSchema,
@@ -436,6 +437,50 @@ describe('ClientResponseSchema', () => {
   it('rejects missing required field', () => {
     const { id, ...without } = validClient;
     expect(() => ClientResponseSchema.parse(without)).toThrow();
+  });
+});
+
+// ─── ClientUpdateSchema (GH #201) ─────────────────────────────────────────
+
+describe('ClientUpdateSchema', () => {
+  it('accepts a full canonical update payload', () => {
+    const result = ClientUpdateSchema.parse({
+      name: 'Иван', phone: '+79991234567', email: null,
+      channel: 'telegram', is_active: true,
+    });
+    expect(result.is_active).toBe(true);
+  });
+
+  it('accepts all-null personal fields (deliberate wipe) + is_active', () => {
+    const result = ClientUpdateSchema.parse({
+      name: null, phone: null, email: null, channel: null, is_active: false,
+    });
+    expect(result.channel).toBeNull();
+  });
+
+  it('rejects missing is_active', () => {
+    expect(() =>
+      ClientUpdateSchema.parse({
+        name: 'Иван', phone: null, email: null, channel: null,
+      }),
+    ).toThrow();
+  });
+
+  it('rejects a missing personal field (required keys)', () => {
+    expect(() =>
+      ClientUpdateSchema.parse({
+        name: 'Иван', phone: null, channel: null, is_active: true,
+      } as never),
+    ).toThrow();
+  });
+
+  it('rejects an invalid channel string', () => {
+    expect(() =>
+      ClientUpdateSchema.parse({
+        name: null, phone: null, email: null,
+        channel: 'instagram', is_active: true,
+      }),
+    ).toThrow();
   });
 });
 

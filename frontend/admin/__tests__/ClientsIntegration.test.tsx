@@ -316,8 +316,9 @@ describe('ClientCardModal ↔ ClientInfoTab integration (real components)', () =
       expect(mockUpdateClient).toHaveBeenCalledWith('c1', {
         name: 'Новое Имя',
         phone: '+7 (000) 000-00-00',
-        email: '',
+        email: null,
         channel: 'telegram',
+        is_active: mockClient.is_active,
       });
     });
   });

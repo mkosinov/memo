@@ -10,7 +10,7 @@ vi.mock('../app/(main)/clients/components/ClientInfoTab', () => ({
   ClientInfoTab: ({ client, onSave, onDelete }: any) => (
     <div data-testid="client-info-tab">
       <span data-testid="info-client-name">{client?.name}</span>
-      <button data-testid="info-save" onClick={() => onSave({ name: 'updated' })}>Save</button>
+      <button data-testid="info-save" onClick={() => onSave({ name: 'updated', phone: null, email: null, channel: null, is_active: true })}>Save</button>
       <button data-testid="info-delete" onClick={onDelete}>Delete</button>
     </div>
   ),
@@ -293,7 +293,7 @@ describe('ClientCardModal', () => {
     mockUseClients.mockReturnValue(createMockClientsContext({ updateClient }));
     render(<ClientCardModal {...defaultProps} />);
     fireEvent.click(screen.getByTestId('info-save'));
-    expect(updateClient).toHaveBeenCalledWith('c1', { name: 'updated' });
+    expect(updateClient).toHaveBeenCalledWith('c1', { name: 'updated', phone: null, email: null, channel: null, is_active: true });
   });
 
   it('ClientInfoTab onDelete wraps deleteClient with confirm', async () => {

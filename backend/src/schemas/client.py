@@ -8,7 +8,7 @@ from src.models.enums import ArchiveStatus, Channel
 
 
 class ClientBase(BaseModel):
-    """Shared fields for client creation and updates."""
+    """Shared fields for client creation."""
 
     name: str | None = None
     phone: str | None = None
@@ -22,14 +22,15 @@ class ClientCreate(ClientBase):
     pass
 
 
-class ClientUpdate(ClientBase):
-    """Request schema for updating a client (full replacement via PUT)."""
+class ClientUpdate(BaseModel):
+    """Full-replace PUT schema (GH #201): all 5 keys required; explicit null =
+    deliberate clear. Omitted key → 422. `ClientCreate`/`ClientPatch` unchanged."""
 
-    # Interim #201 wart: sticky injection was removed globally by #178, so an
-    # omitted is_active in PUT currently 500s (None falls through to the NOT
-    # NULL column). #201 will redefine Client PUT semantics to require
-    # is_active. PATCH still treats None as preserve (#184).
-    is_active: bool | None = None
+    name: str | None
+    phone: str | None
+    email: str | None
+    channel: Channel | None
+    is_active: bool
 
 
 class ClientPatch(BaseModel):

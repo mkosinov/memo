@@ -9,7 +9,7 @@ import {
   patchClient as apiPatchClient,
   deleteClient as apiDeleteClient,
 } from '@memo/api-client';
-import type { ClientWithStats, ClientResponse, ClientListResponse } from '@memo/api-client';
+import type { ClientWithStats, ClientResponse, ClientListResponse, ClientUpdate } from '@memo/api-client';
 
 export interface ClientFilters {
   search: string;
@@ -58,7 +58,7 @@ export interface ClientsContextType {
   setSort: (field: string, order: 'asc' | 'desc') => void;
   resetFilters: () => void;
   createClient: (data: ClientCreateData) => Promise<ClientResponse>;
-  updateClient: (id: string, data: ClientCreateData) => Promise<void>;
+  updateClient: (id: string, data: ClientUpdate) => Promise<void>;
   patchClient: (id: string, data: Record<string, unknown>) => Promise<void>;
   deleteClient: (id: string) => Promise<void>;
 }
@@ -113,7 +113,7 @@ export function ClientsProvider({ children }: { children: React.ReactNode }) {
   });
 
   const updateMutation = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: ClientCreateData }) => apiUpdateClient(id, data),
+    mutationFn: ({ id, data }: { id: string; data: ClientUpdate }) => apiUpdateClient(id, data),
     onSuccess: invalidateClients,
   });
 
@@ -136,7 +136,7 @@ export function ClientsProvider({ children }: { children: React.ReactNode }) {
   );
 
   const updateClient = useCallback(
-    async (id: string, data: ClientCreateData) => {
+    async (id: string, data: ClientUpdate) => {
       await updateMutation.mutateAsync({ id, data });
     },
     [updateMutation],

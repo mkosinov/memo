@@ -74,20 +74,46 @@ class TestClientCreateNullableFields:
 
 
 class TestClientUpdateNullableFields:
-    """ClientUpdate inherits nullable fields from ClientBase."""
+    """ClientUpdate (GH #201): standalone 5-key required schema — 4
+    required-nullable personal fields (explicit null = deliberate clear) +
+    required is_active. Omitted key → ValidationError."""
 
     @pytest.mark.pure_unit
     def test_update_with_all_fields(self):
-        """ClientUpdate works with all fields."""
-        cu = ClientUpdate(name="Updated", phone="+79990001111", channel=Channel.MAX)
+        """Full 5-key payload is valid."""
+        cu = ClientUpdate(
+            name="Updated", phone="+79990001111", email="u@example.com",
+            channel=Channel.MAX, is_active=True,
+        )
         assert cu.name == "Updated"
+        assert cu.is_active is True
 
     @pytest.mark.pure_unit
-    def test_update_with_no_fields(self):
-        """ClientUpdate accepts empty payload."""
-        cu = ClientUpdate()
+    def test_update_with_all_nulls_valid(self):
+        """Explicit null in all personal fields = deliberate wipe — valid."""
+        cu = ClientUpdate(
+            name=None, phone=None, email=None, channel=None, is_active=False,
+        )
         assert cu.name is None
-        assert cu.phone is None
+        assert cu.is_active is False
+
+    @pytest.mark.pure_unit
+    @pytest.mark.parametrize("missing", ["name", "phone", "email", "channel", "is_active"])
+    def test_update_missing_required_field_raises(self, missing):
+        """Omitting any of the 5 required keys → ValidationError."""
+        payload = {
+            "name": "X", "phone": "+79990001111", "email": None,
+            "channel": None, "is_active": True,
+        }
+        payload.pop(missing)
+        with pytest.raises(ValidationError):
+            ClientUpdate(**payload)
+
+    @pytest.mark.pure_unit
+    def test_update_with_no_fields_raises(self):
+        """Empty payload → ValidationError (no more silent full-wipe accept)."""
+        with pytest.raises(ValidationError):
+            ClientUpdate()
 
 
 class TestClientPatch:

@@ -184,13 +184,18 @@ export function ClientCardModal({ client, isOpen, onClose, onClientCreated, mode
               onSave={mode === 'create'
                 ? async (data) => {
                     try {
-                      const newClient = await createClient(data as any);
+                      const newClient = await createClient({
+                        name: data.name ?? '',
+                        phone: data.phone ?? undefined,
+                        email: data.email ?? undefined,
+                        channel: data.channel ?? undefined,
+                      });
                       onClientCreated?.(newClient as any);
                     } catch (err) {
                       showToast(parseApiError(err).message, 'error');
                     }
                   }
-                : async (data: any) => {
+                : async (data) => {
                     try {
                       await updateClient(client!.id, data);
                     } catch (err) {

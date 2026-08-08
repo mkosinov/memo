@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { z } from 'zod';
-import { getMasters, getMaster, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, deleteActivity, getWebPhotos, getRecords, getClients, getPayments, getPaymentTotals, createRecord, updateRecord, deleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, searchClientByPhone, updateVisitStatus, getTags, createService, updateService, deleteService, createLocation, updateLocation, deleteLocation, getClientsWithStats, patchClient, reorderMasters, reorderLocations, patchMaster, patchLocation, patchMaterial, patchService, patchUserSettings, getMaterials, getTag, getVisitors } from './endpoints';
-import { ServiceCreateSchema, LocationCreateSchema, type ServiceUpdate, type LocationUpdate } from './schemas';
+import { getMasters, getMaster, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, deleteActivity, getWebPhotos, getRecords, getClients, getPayments, getPaymentTotals, createRecord, updateRecord, deleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, searchClientByPhone, updateVisitStatus, getTags, createService, updateService, deleteService, createLocation, updateLocation, deleteLocation, getClientsWithStats, updateClient, patchClient, reorderMasters, reorderLocations, patchMaster, patchLocation, patchMaterial, patchService, patchUserSettings, getMaterials, getTag, getVisitors } from './endpoints';
+import { ServiceCreateSchema, LocationCreateSchema, type ServiceUpdate, type LocationUpdate, type ClientUpdate } from './schemas';
 
 // Mock the api function from client
 vi.mock('./client', () => ({
@@ -331,6 +331,24 @@ describe('patchClient', () => {
         method: 'PATCH',
         body: JSON.stringify({ phone: '+79991234567' }),
       }),
+    );
+  });
+});
+
+// ─── Update Client (GH #201) ────────────────────────────────────────────────
+
+describe('updateClient', () => {
+  it('calls PUT /api/v1/clients/:id with full typed body', async () => {
+    vi.mocked(api).mockResolvedValue({ id: 'c-1' });
+    const payload: ClientUpdate = {
+      name: 'Updated', phone: null, email: null,
+      channel: 'whatsapp', is_active: true,
+    };
+    await updateClient('c-1', payload);
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/clients/c-1',
+      expect.anything(),
+      expect.objectContaining({ method: 'PUT', body: JSON.stringify(payload) }),
     );
   });
 });

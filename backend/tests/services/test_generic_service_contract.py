@@ -786,6 +786,8 @@ class TestGenericServiceUpdateContract:
         reverts the column to its update_schema default (full-replace
         semantics). Explicit pop — the field otherwise rides along via
         create_data (spec panel fix). Tag/Material skip (no nullable_field).
+        Client post-#201: nullable_field is required → omission raises
+        ValidationError (data-driven branch).
         """
         assert cfg is not None, MISSING_MSG
         if cfg.nullable_field is None:
@@ -798,6 +800,13 @@ class TestGenericServiceUpdateContract:
         # create_data (verified: all 8 configs)
         payload = _update_kwargs(cfg, sent)
         payload.pop(cfg.nullable_field, None)  # explicit pop
+        # GH #201: a required-nullable Update field (Client post-#201) makes
+        # omission a ValidationError, not a default reversion — flip the
+        # expectation data-driven, same pattern as the #178 is_active guard.
+        if cfg.update_schema.model_fields[cfg.nullable_field].is_required():
+            with pytest.raises(ValidationError):
+                cfg.update_schema(**payload)
+            return
         updated = await service.update(
             db_session, created.id, cfg.update_schema(**payload)
         )
@@ -822,13 +831,12 @@ class TestGenericServiceUpdateContract:
 # explicit bool applies). ``is_active`` is no longer a PUT sticky-field
 # exception — it is a required PUT field, like any other NOT NULL column.
 #
-# Parametrized over soft entities only via ``_soft_params()`` — one in-test
-# skip: ``test_update_without_is_active_raises_validation_error`` skips Client
-# until GH #201 redefines Client PUT semantics (the check is data-driven via
-# ``FieldInfo.is_required()`` and lifts itself when #201 flips ClientUpdate to
-# required). Every test still starts with the ``assert cfg is not None`` line
-# for symmetry with the other contract classes (``_soft_params`` already
-# filters MISSING-CONFIG entries, so the assert is a no-op invariant here).
+# Parametrized over soft entities only via ``_soft_params()`` — Client
+# required ``is_active`` optionally until GH #201; now all 5 soft entities
+# share the required-``is_active`` PUT contract (omission → 422 from the Update schema
+# before any DB write). Every test still starts with the ``assert cfg is not None`` line
+# for symmetry with the other contract classes (``_soft_params`` already filters
+# MISSING-CONFIG entries, so the assert is a no-op invariant here).
 #
 # Multi-phase tests use **labeled assertions** (assert messages per direction)
 # for failure localization (panel conflict resolution round 2 — Assertion
@@ -867,21 +875,10 @@ class TestGenericServiceIsActiveContract:
         (canonical full-replace, GH #178): ``is_active`` is required, so
         Pydantic raises ``ValidationError`` before any DB write.
 
-        Entities whose Update schema still treats ``is_active`` as optional
-        (Client — until GH #201 redefines Client PUT semantics) skip: the
-        check is data-driven via ``FieldInfo.is_required()`` and lifts
-        itself automatically when #201 flips ClientUpdate to required.
+        All 5 soft entities require ``is_active`` on PUT post-#178+#201
+        (omission → 422 from the Update schema before any DB write).
         """
         assert cfg is not None, MISSING_MSG
-        field = cfg.update_schema.model_fields.get("is_active")
-        assert field is not None, (
-            f"{service_cls.__name__}: soft entity must expose is_active"
-        )
-        if not field.is_required():
-            pytest.skip(
-                "GH #201: is_active not yet required for this entity "
-                "(Client PUT semantics redefined there)"
-            )
         _, _, sent = await make_entity(cfg, with_input=True)
         payload = _update_kwargs(cfg, sent)
         payload.pop("is_active")

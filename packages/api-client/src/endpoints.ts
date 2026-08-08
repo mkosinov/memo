@@ -30,6 +30,7 @@ import {
   ClientResponseSchema,
   type ClientResponse,
   type ClientCreate,
+  type ClientUpdate,
   ClientWithStatsSchema,
   type ClientWithStats,
   ClientListResponseSchema,
@@ -293,7 +294,7 @@ export async function createClient(data: ClientCreate): Promise<ClientResponse> 
   });
 }
 
-export async function updateClient(id: string, data: ClientCreate): Promise<ClientResponse> {
+export async function updateClient(id: string, data: ClientUpdate): Promise<ClientResponse> {
   return api(`/api/v1/clients/${id}`, ClientResponseSchema, {
     method: 'PUT',
     body: JSON.stringify(data),

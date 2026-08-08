@@ -1,9 +1,14 @@
 'use client';
 
 import { useState, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react';
-import type { ClientWithStats, VisitorResponse } from '@memo/api-client';
+import type { ClientWithStats, ClientUpdate, VisitorResponse } from '@memo/api-client';
 import { getClientVisitors, createVisitor, deleteVisitor } from '@memo/api-client';
 import { ClientStatistics } from '@/app/components/shared/record/blocks/ClientStatistics';
+
+const CHANNEL_VALUES = ['telegram', 'whatsapp', 'max'] as const;
+type ChannelValue = (typeof CHANNEL_VALUES)[number];
+const isKnownChannel = (v: string): v is ChannelValue =>
+  (CHANNEL_VALUES as readonly string[]).includes(v);
 
 export interface ClientInfoTabHandle {
   save: () => Promise<void>;
@@ -13,7 +18,7 @@ export interface ClientInfoTabHandle {
 interface ClientInfoTabProps {
   client: ClientWithStats | null;
   mode?: 'view' | 'create';
-  onSave: (data: Partial<ClientWithStats>) => Promise<void>;
+  onSave: (data: ClientUpdate) => Promise<void>;
   onDelete?: () => void;
   onHasChanges?: (hasChanges: boolean) => void;
 }
@@ -25,7 +30,7 @@ export const ClientInfoTab = forwardRef<ClientInfoTabHandle, ClientInfoTabProps>
   const [name, setName] = useState(client?.name || '');
   const [phone, setPhone] = useState(client?.phone || '');
   const [email, setEmail] = useState(client?.email || '');
-  const [channel, setChannel] = useState(client?.channel || '');
+  const [channel, setChannel] = useState(client?.channel && isKnownChannel(client.channel) ? client.channel : '');
   const [hasChanges, setHasChanges] = useState(false);
 
   // Visitors state
@@ -56,9 +61,15 @@ export const ClientInfoTab = forwardRef<ClientInfoTabHandle, ClientInfoTabProps>
   const handleChange = useCallback(() => setHasChanges(true), []);
 
   const handleSave = useCallback(async () => {
-    await onSave({ name, phone, email, channel });
+    await onSave({
+      name: name || null,
+      phone: phone || null,
+      email: email || null,
+      channel: isKnownChannel(channel) ? channel : null,
+      is_active: client?.is_active ?? true,
+    });
     setHasChanges(false);
-  }, [name, phone, email, channel, onSave]);
+  }, [name, phone, email, channel, client?.is_active, onSave]);
 
   const handleCancel = useCallback(() => {
     setName(client?.name || '');

@@ -831,11 +831,10 @@ class TestGenericServiceUpdateContract:
 # explicit bool applies). ``is_active`` is no longer a PUT sticky-field
 # exception — it is a required PUT field, like any other NOT NULL column.
 #
-# Parametrized over soft entities only via ``_soft_params()`` — one in-test
-# skip: ``test_update_without_is_active_raises_validation_error`` skips Client
-# until GH #201 redefines Client PUT semantics (the check is data-driven via
-# ``FieldInfo.is_required()`` and lifts itself when #201 flips ClientUpdate to
-# required). Every test still starts with the ``assert cfg is not None`` line
+# Parametrized over soft entities only via ``_soft_params()`` — Client
+# required ``is_active`` optionally until GH #201; now all 5 soft entities
+# share the required-``is_active`` PUT contract (omission → 422 from the
+# Update schema before any DB write). Every test still starts with the ``assert cfg is not None`` line
 # for symmetry with the other contract classes (``_soft_params`` already
 # filters MISSING-CONFIG entries, so the assert is a no-op invariant here).
 #
@@ -876,21 +875,10 @@ class TestGenericServiceIsActiveContract:
         (canonical full-replace, GH #178): ``is_active`` is required, so
         Pydantic raises ``ValidationError`` before any DB write.
 
-        Entities whose Update schema still treats ``is_active`` as optional
-        (Client — until GH #201 redefines Client PUT semantics) skip: the
-        check is data-driven via ``FieldInfo.is_required()`` and lifts
-        itself automatically when #201 flips ClientUpdate to required.
+        All 5 soft entities require ``is_active`` on PUT post-#178+#201
+        (omission → 422 from the Update schema before any DB write).
         """
         assert cfg is not None, MISSING_MSG
-        field = cfg.update_schema.model_fields.get("is_active")
-        assert field is not None, (
-            f"{service_cls.__name__}: soft entity must expose is_active"
-        )
-        if not field.is_required():
-            pytest.skip(
-                "GH #201: is_active not yet required for this entity "
-                "(Client PUT semantics redefined there)"
-            )
         _, _, sent = await make_entity(cfg, with_input=True)
         payload = _update_kwargs(cfg, sent)
         payload.pop("is_active")

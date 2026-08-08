@@ -234,16 +234,26 @@ class TestPutClientEdgeCases:
         })
         assert resp.status_code == 422
 
-    def test_put_minimal_body_sets_others_to_null(self, api_client) -> None:
-        """PUT with only is_active sets all nullable fields to null. A truly empty body 500s in the #178→#201 window (Client PUT de-facto requires explicit is_active); #201 redefines Client PUT semantics."""
+    def test_put_empty_body_returns_422(self, api_client) -> None:
+        """PUT {} → 422 (GH #201): all 5 keys required — silent full-wipe is impossible."""
         create_resp = api_client.post("/api/v1/clients", json=CLIENT_PAYLOAD)
         client_id = create_resp.json()["id"]
+        resp = api_client.put(f"/api/v1/clients/{client_id}", json={})
+        assert resp.status_code == 422
 
+    def test_put_is_active_only_returns_422(self, api_client) -> None:
+        """PUT {is_active} only → 422: personal keys are required (required-nullable)."""
+        create_resp = api_client.post("/api/v1/clients", json=CLIENT_PAYLOAD)
+        client_id = create_resp.json()["id"]
         resp = api_client.put(f"/api/v1/clients/{client_id}", json={"is_active": True})
-        assert resp.status_code == 200
-        body = resp.json()
-        assert body["name"] is None
-        assert body["phone"] is None
+        assert resp.status_code == 422
+
+    def test_put_missing_is_active_returns_422(self, api_client) -> None:
+        """PUT full personal payload minus is_active → 422 (closes the #178→#201 500 window)."""
+        create_resp = api_client.post("/api/v1/clients", json=CLIENT_PAYLOAD)
+        client_id = create_resp.json()["id"]
+        resp = api_client.put(f"/api/v1/clients/{client_id}", json=CLIENT_PAYLOAD)
+        assert resp.status_code == 422
 
 
 # ─── Search Edge Cases ────────────────────────────────────────────────────────

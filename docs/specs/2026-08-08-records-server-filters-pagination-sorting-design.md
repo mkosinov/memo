@@ -64,7 +64,7 @@ The Records admin page (`/records`) is the only major admin table still doing ev
 
 ### 5.1 `RecordListParams` — validated params model
 
-New params model in `backend/src/schemas/record.py`, injected via `Depends()` (mirrors `ClientListParams` in `schemas/client.py:75-93` + `clients.py:60-66`):
+New params model in `backend/src/schemas/record.py`, injected as a **FastAPI Query Parameter Model**: `params: Annotated[RecordListParams, Query()]` in the router signature (official pattern since FastAPI 0.115; the repo locks 0.136.3). **NOT `Depends()`** — panel-verified: Depends-injected Pydantic models are not officially supported and a model-level validator on that path raises 500 instead of 422 (fastapi#4974, #2180); the existing `ClientListParams = Depends()` precedent only works because it has no model-level validator. With `Query()`, the `model_validator` below correctly produces 422.
 
 ```python
 class RecordListParams(BaseModel):
@@ -107,15 +107,16 @@ New module `backend/src/domain/dates.py` (precedent for shared domain predicates
 
 ```python
 def day_range(date_from: date | None, date_to: date | None) -> tuple[datetime | None, datetime | None]:
-    """Convert inclusive YYYY-MM-DD bounds to a [from_dt, to_dt_exclusive) datetime range.
+    """Convert inclusive YYYY-MM-DD bounds to an inclusive [from_dt, to_dt] datetime range.
 
-    Whole-day inclusive semantics (G1a binding): date_from covers from 00:00,
-    date_to covers through 23:59 — implemented as an exclusive next-day upper bound.
+    Whole-day inclusive semantics (G1a binding): date_from covers from 00:00:00,
+    date_to covers through 23:59:59.999999 — via datetime.combine(d, time.min / time.max),
+    the existing codebase idiom (client.py:128-129); overflow-free, no edge guards.
     """
 ```
 
 - Input is already-validated `date` objects (Pydantic parsed at the router) — the util never raises 422 itself; validation lives in the params layer.
-- Upper bound is **exclusive next-day 00:00** (`date_to + 1 day`), which is exactly equivalent to "23:59:59.999999 inclusive" without the fragile `replace(hour=23, ...)` trick. Semantics preserved, implementation detail owned here per G1a decision 3.
+- Inclusive bounds (`>= from_dt`, `<= to_dt`) replace the fragile `replace(hour=23, minute=59, second=59)` hack — same semantics, exact precision, and no year-9999 overflow branch.
 - Consumers: `RecordService.list` (on `Activity.start`) and `ActivityService._list_by_date`.
 
 ### 5.3 `RecordService.list` — Filter → Sort → Paginate
@@ -134,7 +135,7 @@ async def list(self, db_session, params: RecordListParams) -> PaginatedResponse:
     if from_dt is not None:
         stmt = stmt.where(Activity.start >= from_dt)
     if to_dt is not None:
-        stmt = stmt.where(Activity.start < to_dt)
+        stmt = stmt.where(Activity.start <= to_dt)
     if params.location_id:
         stmt = stmt.where(Activity.location_id == params.location_id)
     if params.service_id:
@@ -152,14 +153,14 @@ async def list(self, db_session, params: RecordListParams) -> PaginatedResponse:
 ```
 
 - `Record.activity_id` is NOT NULL FK → INNER JOIN is safe (no row loss/multiplication; Activity is many-to-one).
-- The equality `**filters` loop is deleted; `client_id` handling folds into the explicit filter list. `activity_id` is newly added (needed by ActivityDetailsModal, §6.4).
-- Router `list_records` becomes `params: RecordListParams = Depends()` → `service.list(db_session=session, params=params)` → maps ORM items via the existing `_map_record` (unchanged, nested visits mapping stays in the router).
+- The equality `**filters` loop is deleted; `client_id` handling folds into the explicit filter list. `activity_id` is newly added (needed by ActivityDetailsModal, §7.4).
+- Router `list_records` becomes `params: Annotated[RecordListParams, Query()]` → `service.list(db_session=session, params=params)` → maps ORM items via the existing `_map_record` (unchanged, nested visits mapping stays in the router).
 
 ### 5.4 Activities refactor (G1a decision 4)
 
 - Activities router (`backend/src/api/v1/activities.py:48-70`): `date_from: str | None = Query(None)` → `date_from: date | None = Query(None)` (same for `date_to`). Pydantic now 422s on garbage instead of the service 500ing on `datetime.fromisoformat`. **This is the user-mandated 500 → 422 fix.**
 - `ActivityService._list_by_date` rebuilds its WHERE via `day_range(...)` and paginates via the shared `_paginate` (`GenericService._paginate`, which already validates `ActivityResponse` per item — identical to today's inline code). The `replace(hour=23, minute=59, second=59)` hack and the duplicated COUNT/LIMIT/OFFSET block die.
-- **Otherwise behavior unchanged**: no ordering added (pre-existing quirk, follow-up), same response shape, same occupied-seats enrichment in the router. Existing activities date tests (`test_api_activities.py::TestActivitiesFilter`) are the regression gate + gain one new case: invalid date → 422.
+- **Otherwise behavior unchanged**: no ordering added (pre-existing quirk, follow-up), same response shape, same occupied-seats enrichment in the router. Existing activities date tests (`test_api_activities.py::TestActivitiesDateFiltering`) are the regression gate + gain one new case: invalid date → 422.
 - `date_from > date_to` on activities: keeps today's silent-empty behavior (no params model on that router; minimal-change mandate). Noted as a follow-up inconsistency.
 
 ### 5.5 Shared pagination
@@ -168,8 +169,8 @@ Per G1a principle 2, pagination is a technical mechanism → one shared implemen
 
 - `GenericService._paginate` (`generic.py:72-84`) is the canonical COUNT + LIMIT/OFFSET. `ActivityService` inherits it directly.
 - `RecordService.list` returns raw ORM items (router maps them), so it cannot reuse the schema-validating `_paginate` as-is. Implementation (plan-level detail): extract the COUNT+slice core into a shared helper usable with ORM items (e.g. `_paginate` gains an internal ORM mode, or a module-level `paginate_stmt(db, stmt, page, per_page)` both paths call). Either way the third hand-rolled copy is deleted.
-- `total` = COUNT over the FILTERED statement (before LIMIT/OFFSET) — #182 requirement, covers User Scenario 2.
-- Query-count discipline: 1 COUNT + 1 SELECT (+ selectinload visits) — no N+1. Correlated sort subqueries (§7) are evaluated only for the page's rows.
+- **`total` is computed from the filtered but UNORDERED statement.** `_paginate` counts via `select(func.count()).select_from(stmt.subquery())` — if the statement already has ORDER BY with correlated subqueries, the sort keys get evaluated inside the count too. Order of operations is therefore: build filters → count → apply ORDER BY → LIMIT/OFFSET (the shared helper takes the unordered statement for COUNT).
+- Sort-key subqueries (§6) are evaluated for the whole filtered set, not just the page's rows — ORDER BY is computed before LIMIT applies. Acceptable at this scale (admin table, thousands of rows max; OFFSET pagination with a unique tiebreak is the recommended pattern up to ~10k rows). No N+1: 1 COUNT + 1 SELECT (+ selectinload visits).
 
 ## 6. Sorting Design
 
@@ -182,14 +183,18 @@ RecordsTable's current comparator (`RecordsTable.tsx:122-194`) defines 9 keys; t
 | `date` (default) | `Activity.start` | date string compare + startTime tiebreak |
 | `client` | `Client.name` (correlated scalar subquery; LEFT semantics) | lookup-map name `localeCompare`, `''` for anonymous |
 | `service` | `Service.title` (correlated subquery via Activity) | service title `localeCompare` |
-| `master` | `Master.last_name`, then `Master.first_name` | `displayMasterName` = `"Last First"` localeCompare |
+| `master` | `Master.last_name`, then `Master.first_name` (two keys) | `displayMasterName` = `"Last First"` localeCompare |
 | `location` | `Location.name` (correlated subquery via Activity) | location name `localeCompare` |
-| `guests` | `Record.seats` | `visits.length` (domain invariant: `seats == len(visits)`, records.md) |
+| `guests` | `Record.seats - Record.anonym_visits` (= live visits count) | `visits.length` |
 | `status` | `Record.status` | status string `localeCompare` |
 | `total` | `COALESCE(SUM(Visit.price), 0)` correlated subquery | `visits.reduce((s,v)=>s+v.price,0)` |
 | `payment` | `CASE WHEN paid >= total THEN 0 WHEN paid > 0 THEN 1 ELSE 2 END` | 3-level bucket: fully paid → partial → unpaid |
 
-Name-based sorts use correlated scalar subqueries (precedent: `client.py:53-60`) rather than additional JOINs — keeps the FROM clause to `records JOIN activities` regardless of sort key.
+Name-based sorts use correlated scalar subqueries (precedent: `client.py:53-60`) rather than additional JOINs — keeps the FROM clause to `records JOIN activities` regardless of sort key. (`master` needs two scalar subquery keys — last_name, first_name — not one.)
+
+**`guests` correctness note (panel BLOCKER, resolved):** the cited invariant "seats == len(visits)" in `records.md` is **stale** — the code (`recompute_record_seats`, `domain/record_visits.py:43`) computes `seats = len(visits) + anonym_visits`, and `records.md:13` itself says anonym visits add to seats. Sorting by raw `Record.seats` would NOT mirror the deleted `visits.length` comparator (e.g. 0 visits + 5 anonym seats would sort as 5). The sort expression is `Record.seats - Record.anonym_visits`, which exactly equals live `visits.length` for every record. The stale invariant wording in `records.md` is corrected via docser at IMPL (§10).
+
+**Collation note (panel-verified, accepted divergence):** server-side SQLite BINARY collation orders Cyrillic/Latin and case differently than the browser's ru-locale `localeCompare`. Name sorts (`client`/`service`/`master`/`location`) therefore mirror the comparator's KEYS, not its byte-exact ordering — the same divergence the Clients page already accepted. Deterministic and consistent across pages, which is what matters (Scenario 4).
 
 ### 6.2 Payment-status sort semantics (binding definition)
 
@@ -218,16 +223,29 @@ Reference: `ClientsContext.tsx:72-98` (`queryKey = ['clients', page, perPage, fi
 New provider state: `page` (1-based, default 1), `perPage` (default 10 — mirrors current RecordsTable UI default), `filters` (`{locationId, serviceId, masterId, status}` — moved from `page.tsx:11-16` local state into the provider per dispatch decision), `sortBy`/`sortOrder` (default `date`/`asc`). Dates stay in `NavigationContext` (shared with the schedule page; `BookingFilters` already writes them there via `selectDateRange`).
 
 ```tsx
-const queryFilters = { date_from: dateFrom, date_to: dateTo, ...filters };  // dates from useNavigation()
 const { data, isLoading, error } = useQuery<PaginatedResponse<RecordResponse>>({
-  queryKey: ['records', page, perPage, queryFilters, sortBy, sortOrder],
-  queryFn: () => getRecords({ page, per_page: perPage, sort_by: sortBy, sort_order: sortOrder, ...queryFilters }),
+  queryKey: ['records', page, perPage, dateFrom, dateTo, filters, sortBy, sortOrder],
+  queryFn: () => getRecords({
+    page,
+    per_page: perPage,
+    date_from: dateFrom || undefined,
+    date_to: dateTo || undefined,
+    location_id: filters.locationId || undefined,   // explicit camelCase → snake_case mapping
+    service_id: filters.serviceId || undefined,
+    master_id: filters.masterId || undefined,
+    status: (filters.status || undefined) as RecordStatus | undefined,
+    sort_by: sortBy,
+    sort_order: sortOrder,
+  }),
+  placeholderData: keepPreviousData,   // page flips keep showing previous page while fetching (TanStack v5 paginated-query pattern)
 });
 ```
 
+- **No blind spread** — filter state stays camelCase (matches BookingFilters props) and the queryFn maps each key explicitly to the snake_case wire contract (§7.6). Empty-string filter values map to `undefined` and are omitted from the URL (both existing URL builders skip falsy values — sending `status=` would 422 the `Literal`).
+
 - queryKey includes ALL server params (page, per_page, all six filters, sort_by, sort_order) — exact key composition is plan-level; every param must be in the key.
 - **Envelope is cached** (not `.then(r => r.items)`) — provider exposes `records: data?.items ?? []` and `total: data?.total ?? 0`. This is the shape change that ripples into the cache-sync helpers (§7.5).
-- `setFilters(...)` resets `page` to 1 (mirrors ClientsContext). Date-range changes (NavigationContext) also reset `page` to 1 (effect watching `dateFrom`/`dateTo`). `setSort(key)`: new key → asc, same key → toggle (preserves current RecordsTable UX — NOT ClientsTable's quirkier always-toggle).
+- `setFilters(...)` resets `page` to 1 (mirrors ClientsContext). Date-range changes (NavigationContext) also reset `page` to 1 (effect watching `dateFrom`/`dateTo`). **Per-page change also resets `page` to 1** (preserves current RecordsTable UX — `RecordsTable.tsx:440`; deliberately NOT the ClientsContext behavior, which doesn't reset). `setSort(key)`: new key → asc, same key → toggle (preserves current RecordsTable UX — NOT ClientsTable's quirkier always-toggle).
 - `getPaymentTotals` batch query: **unchanged** — keyed off the current page's record IDs, still drives the payment badge display (§7.3). Sorting no longer depends on it (server-side now).
 - Lookup maps (`activities`, `masters`, `services`, `locations`, `clients`) unchanged — still needed for row rendering.
 
@@ -253,14 +271,18 @@ Payment badges keep reading the `payments` map built from `getPaymentTotals` ove
 
 With the context now holding ONE server page instead of "up to 100 records", two consumers that filtered the context set client-side would silently lose data. Both get their own dedicated queries (pattern already established by the clients-folder ClientCardModal):
 
-- **Records-folder ClientCardModal** (`records/components/ClientCardModal.tsx:34`, today `records.filter(r => r.client_id === clientId)`) → own query `['records', 'client', clientId]` → `getRecords({ client_id, per_page: 100 })` — identical to the clients-folder modal (`clients/components/ClientCardModal.tsx:54-58`). Payment badges in it keep using the context `payments` map where available (page records) and may fall back to "Не оплачено" otherwise — same fallback semantics as today when a record is outside the loaded set. (Keeps User Scenario 6 intact.)
+- **Records-folder ClientCardModal** (`records/components/ClientCardModal.tsx:34`, today `records.filter(r => r.client_id === clientId)`) → mirrors the clients-folder modal's data strategy wholesale (`clients/components/ClientCardModal.tsx:54-68`):
+  - Own records query `['records', 'client', clientId]` → `getRecords({ client_id, per_page: 100 })`.
+  - Own activities batch fetch for its record IDs (`['activities', 'for-records', ids]`, as the clients-folder modal does) — otherwise records outside the current week render '—' for service/location/time.
+  - Own `getPaymentTotals` over its own record IDs (≤100 IDs, within the 200 cap) — NOT a fallback to the context `payments` map, which after this change only covers the current table page. Without this, off-page records would degrade to "Не оплачено" and the "Потрачено" header stat would undercount (panel-verified regression; today the map covers the modal's whole record set). "Потрачено" stays a frontend computation over paid sums — the #192 semantic change (server `total_paid`) is untouched.
+  - Net effect: modal behavior is preserved (actually improved — full history regardless of table filters/page), and User Scenario 6 holds for BOTH modals.
 - **ActivityDetailsModal** (`ActivityDetailsModal.tsx:57`, today `records.filter(r => r.activity_id === activity.id)` — mounted on the schedule page) → own query `['records', 'activity', activityId]` → `getRecords({ activity_id, per_page: 100 })` — enabled by the NEW `activity_id` param (§5.3). This also fixes today's latent bug: the modal silently misses bookings once >100 records exist overall.
 
 ### 7.5 Cache-sync helpers — envelope awareness
 
-`lib/cache/recordCacheSync.ts` helpers (`patchRecordEverywhere`, `upsertVisit`, `removeVisit`, `upsertPayment`, `removePayment`, `seedRecordFromList`) patch every `['records', ...]` list cache via `setQueriesData({queryKey: ['records']})` prefix. After the shape change:
+`lib/cache/recordCacheSync.ts` helpers (`patchRecordEverywhere`, `upsertVisit`, `removeVisit`, `upsertPayment`, `removePayment`, `seedRecordFromList`) patch every `['records', ...]` list cache via `setQueriesData({queryKey: ['records']})` prefix. **Plus one inline call site: `deleteRecord`'s optimistic removal in `useRecordMutations.ts:188-191` does `(old) => old.filter(...)` — it must get the same shape guard, otherwise it throws `TypeError` on envelope caches** (panel-verified: reachable from ActivityDetailsModal while a records-page envelope cache exists in the same QueryClient). After the shape change:
 
-- Main list caches (envelope `{items, total, page, per_page}`) and per-client/per-activity caches (plain arrays) coexist → helpers get a shape guard (`Array.isArray` vs envelope) and patch `items` in place.
+- Main list caches (envelope `{items, total, page, per_page}`) and per-client/per-activity caches (plain arrays) coexist → all the above updaters get a shape guard (`Array.isArray` vs envelope) and patch `items` in place.
 - `envelope.total` is NOT adjusted optimistically — every mutation path already follows with `invalidateQueries({queryKey: ['records']})` (`useRecordMutations.ts:67,189`), so the authoritative total returns on refetch (sub-second stale "N всего" label, acceptable UX).
 - Prefix invalidation `['records']` continues to cover all key variants (main paged list, `['records','client',id]`, `['records','activity',id]`) — no key-topology change for invalidation.
 - `seedRecordFromList` effect: unchanged logic, iterates `data.items`.
@@ -285,21 +307,21 @@ With the context now holding ONE server page instead of "up to 100 records", two
 
 New/updated in `backend/tests/` (API-based fixtures per conftest pattern: `create_master/service/location/client/activity/record`, payments via POST /payments):
 
-- **Filters** (`test_api_records.py`, new class): each filter alone — date range (boundary: record at date_to 23:30 included, record next day 00:00 excluded), location_id, service_id, master_id, status, client_id (existing), activity_id; representative combinations (date+status, location+master+status); `total` reflects filtered count.
-- **Sorting**: each of the 9 columns asc+desc with seeded distinct values; payment bucket ordering (fully-paid < partial < unpaid on asc) via records with full/partial/no payments; deterministic pagination — page 1 and page 2 disjoint under each sort; anonymous-client record sorts first on `client` asc.
+- **Filters** (`test_api_records.py`, new class): each filter alone — date range (boundary: record at date_to 23:30 included, record next day 00:00 excluded; single-bound `date_from`-only and `date_to`-only cases), location_id, service_id, master_id, status, client_id (existing), activity_id; representative combinations (date+status, location+master+status); `total` reflects filtered count.
+- **Sorting**: each of the 9 columns asc+desc with seeded distinct values; **`guests` sort seeded with an anonym-visits record** (0 visits + N anonym seats must sort as live visits count, not seats); payment bucket ordering (fully-paid < partial < unpaid on asc) via records with full/partial/no payments; deterministic pagination — page 1 and page 2 disjoint under each sort; anonymous-client record sorts first on `client` asc.
 - **422 cases**: garbage `date_from`/`date_to`; `date_from > date_to`; invalid `status`; invalid `sort_by`; invalid `sort_order`; page/per_page bounds (existing `test_api_pagination_params.py` covers).
-- **Regression**: `test_api_activities.py::TestActivitiesFilter` (date range) stays green — the activities refactor regression gate; NEW: invalid date on `/activities` → 422 (was 500). `test_record_service.py` updated to the params-model signature. `test_list_activities_query_count.py` stays green (no N+1).
+- **Regression**: `test_api_activities.py::TestActivitiesDateFiltering` (date range) stays green — the activities refactor regression gate; NEW: invalid date on `/activities` → 422 (was 500). `backend/tests/services/test_record_service.py` updated to the params-model signature. `test_list_activities_query_count.py` stays green (no N+1).
 
 ### 9.2 Frontend unit (vitest)
 
 - **api-client** (`endpoints.test.ts`): URL building for all new getRecords params + combinations.
-- **RecordsContext.test.tsx**: update queryKey literals (lines 138/158/177) to the new key shape; new coverage — server params passed (page/filters/sort), `setFilters` resets page, `setSort` toggle semantics, `total` exposed.
+- **RecordsContext.test.tsx**: update queryKey literals (lines 138/158/177) to the new key shape; new coverage — server params passed (page/filters/sort with correct snake_case mapping), `setFilters` resets page, date-range change resets page, per-page change resets page, `setSort` toggle semantics, `total` exposed.
 - **recordCacheSync.test.ts** (6 spots): main-list caches seeded as envelopes; client-list caches stay arrays; helpers patch both shapes.
-- **useRecordMutations.test.ts** (5 spots): seeded list caches updated to envelope where applicable; prefix-invalidate assertions unchanged.
+- **useRecordMutations.test.ts** (5 spots): seeded list caches updated to envelope where applicable; prefix-invalidate assertions unchanged; **new: deleteRecord's optimistic removal works on BOTH cache shapes** (envelope + array) — the §7.5 inline-updater guard.
 - **ClientsIntegration.test.tsx**: `['records','client',id]` branch unchanged (stays an array cache) — verify only.
 - **ClientRecordTab.api.test.tsx**: `['records']` prefix invalidation unchanged — verify only.
 - **RecordsTable.test.tsx**: delete client-side filter/sort/pagination tests; new tests — header click calls `setSort` with right key, pagination controls call `setPage`/`setPerPage`, rows render from props/context, payment badges unchanged.
-- **Context mocks**: `__tests__/helpers/mockContexts.ts` (`createMockRecordsContext`) and `renderWithProviders.tsx` updated to the new context shape (records, total, page, perPage, filters, sortBy, sortOrder, setters); dependent suites (`ClientTab.integration.test.tsx`, `ActivityDetailsModal.test.tsx`) updated — ActivityDetailsModal tests now mock the `['records','activity',id]` api call.
+- **Context mocks**: `__tests__/helpers/mockContexts.ts` (`createMockRecordsContext`) and `renderWithProviders.tsx` updated to the new context shape (records, total, page, perPage, filters, sortBy, sortOrder, setters); dependent suites (`ClientTab.integration.test.tsx`, `ActivityDetailsModal.test.tsx`) updated — ActivityDetailsModal tests now mock the `['records','activity',id]` api call; records-folder ClientCardModal tests mock its three dedicated queries (records + activities batch + payment totals).
 
 ### 9.3 E2E (playwright, real backend — no page.route)
 
@@ -309,8 +331,9 @@ New/updated in `backend/tests/` (API-based fixtures per conftest pattern: `creat
 - **Test 11** (sorting): strengthen — capture the request on header click, assert `sort_by=client` + `sort_order` toggling in the URL, assert row order actually changes.
 - **Test 12** (pagination total): now asserts server `total`; extended — navigate to page 2 with `waitForResponse` asserting `page=2`, verify disjoint rows.
 - **Test 15** (status badges): replace timeouts with response waits; keep badge assertions.
-- **Tests 13/20** (date inputs / payment indicator): expected to stay green; watch item — default sort `date` asc must keep seeded current-week records on page 1 (per_page 10; seed set is small).
-- **New coverage**: pagination navigation (seed >10 records → page buttons reflect server total, page 2 disjoint), payment-column sort e2e (seed full/partial/unpaid records → assert asc order = Оплачено → Частично → Не оплачено).
+- **Tests 13/20** (date inputs / payment indicator): expected to stay green; watch item — under the new default sort `date` asc, freshly-seeded "now"-dated records land at the END of the current-week set; reworked tests must isolate their seeded records via explicit date-range narrowing/expansion (as test 11 already does), not rely on page-1 visibility luck.
+- **New coverage**: pagination navigation (seed >10 records → page buttons reflect server total, page 2 disjoint); payment-column sort e2e (seed full/partial/unpaid records → assert asc order = Оплачено → Частично → Не оплачено). **Isolation mechanism for the payment-sort test (panel-required):** seed the three records on explicitly early-dated activities AND narrow the date range to exclude seed data (globalSetup wipes per-run, not per-test — seed records r1-r6/p1-p6 would otherwise pollute the absolute-order assertion); waitForResponse predicates must match on the full param set (e.g. `sort_by=payment` + `sort_order=asc`), since waitForResponse binds the FIRST matching response.
+- **Schedule spec watch item**: `activity-details-modal.spec.ts` + the `openActivityDetailsModal` helper gain a response-wait on `/api/v1/records?...activity_id=...` — the modal's booking tabs now render only after that fetch resolves (previously synchronous from context). Included in "schedule specs green" (§10).
 
 ## 10. Acceptance Criteria
 
@@ -324,7 +347,7 @@ New/updated in `backend/tests/` (API-based fixtures per conftest pattern: `creat
 - [ ] Records-folder ClientCardModal + schedule ActivityDetailsModal show complete data via dedicated queries (not clipped by the current page).
 - [ ] `getRecords({client_id, per_page:100})` + `['records','client',id]` behavior unchanged (clients-folder modal regression).
 - [ ] Backend pytest green; admin vitest green; api-client tests green; e2e records + clients + schedule specs green; type-check clean.
-- [ ] Domain rules updated at IMPL via docser (records.md: new list params incl. activity_id; payments.md: payment-sort semantics note; activities.md: 422 behavior).
+- [ ] Domain rules updated at IMPL via docser (records.md: new list params incl. activity_id + correct the stale `seats == len(visits)` invariant to `seats = len(visits) + anonym_visits`; payments.md: payment-sort semantics note; activities.md: 422 behavior).
 
 ## 11. Visual Compliance Checks
 

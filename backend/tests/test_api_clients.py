@@ -12,6 +12,13 @@ CLIENT_PAYLOAD = {
 }
 
 
+def _client_stats(api_client, client_id: str) -> tuple:
+    """(records_count, total_paid) for one client from the stats list endpoint."""
+    items = api_client.get("/api/v1/clients").json()["items"]
+    row = next(c for c in items if c["id"] == client_id)
+    return row["records_count"], row["total_paid"]
+
+
 class TestClientsCrud:
     """Search-by-phone and scoped client-visitors sub-routes for /api/clients."""
 
@@ -187,10 +194,17 @@ class TestPatchClientEdgeCases:
 class TestPutClientEdgeCases:
     """Edge cases for PUT /api/v1/clients/{id}."""
 
-    def test_put_sets_all_nullable_to_null(self, api_client) -> None:
-        """PUT with all null fields clears everything."""
+    def test_put_sets_all_nullable_to_null(self, api_client, create_record) -> None:
+        """PUT with explicit null in all 4 fields = deliberate data wipe (GH #201
+        canonical pin): personal fields become NULL; payments/stats by client_id
+        joins stay intact."""
         create_resp = api_client.post("/api/v1/clients", json=CLIENT_PAYLOAD)
         client_id = create_resp.json()["id"]
+        record = create_record(client_id=client_id)
+        api_client.post("/api/v1/payments", json={
+            "record_id": record["id"], "amount": 1500, "method": "cash",
+        })
+        stats_before = _client_stats(api_client, client_id)
 
         resp = api_client.put(f"/api/v1/clients/{client_id}", json={
             "is_active": True,
@@ -205,6 +219,8 @@ class TestPutClientEdgeCases:
         assert body["phone"] is None
         assert body["email"] is None
         assert body["channel"] is None
+        # stats intact: records_count/total_paid unchanged after the wipe
+        assert _client_stats(api_client, client_id) == stats_before
 
     def test_put_invalid_channel_returns_422(self, api_client) -> None:
         """PUT with invalid channel returns 422."""
@@ -214,6 +230,7 @@ class TestPutClientEdgeCases:
         resp = api_client.put(f"/api/v1/clients/{client_id}", json={
             **CLIENT_PAYLOAD,
             "channel": "invalid_channel",
+            "is_active": True,
         })
         assert resp.status_code == 422
 

@@ -786,6 +786,8 @@ class TestGenericServiceUpdateContract:
         reverts the column to its update_schema default (full-replace
         semantics). Explicit pop — the field otherwise rides along via
         create_data (spec panel fix). Tag/Material skip (no nullable_field).
+        Client post-#201: nullable_field is required → omission raises
+        ValidationError (data-driven branch).
         """
         assert cfg is not None, MISSING_MSG
         if cfg.nullable_field is None:
@@ -798,6 +800,13 @@ class TestGenericServiceUpdateContract:
         # create_data (verified: all 8 configs)
         payload = _update_kwargs(cfg, sent)
         payload.pop(cfg.nullable_field, None)  # explicit pop
+        # GH #201: a required-nullable Update field (Client post-#201) makes
+        # omission a ValidationError, not a default reversion — flip the
+        # expectation data-driven, same pattern as the #178 is_active guard.
+        if cfg.update_schema.model_fields[cfg.nullable_field].is_required():
+            with pytest.raises(ValidationError):
+                cfg.update_schema(**payload)
+            return
         updated = await service.update(
             db_session, created.id, cfg.update_schema(**payload)
         )

@@ -92,10 +92,7 @@ All changes in this task pass BOTH before and after the schema flip (Task 2) —
         api_client.post("/api/v1/payments", json={
             "record_id": record["id"], "amount": 1500, "method": "cash",
         })
-        stats_before = api_client.get(
-            "/api/v1/clients/with-stats", params={"search": "John Smith"}
-        ).json()
-        # locate this client's stats row (with-stats list pattern used elsewhere in this file)
+        stats_before = _client_stats(api_client, client_id)
 
         resp = api_client.put(f"/api/v1/clients/{client_id}", json={
             "is_active": True,
@@ -111,12 +108,17 @@ All changes in this task pass BOTH before and after the schema flip (Task 2) —
         assert body["email"] is None
         assert body["channel"] is None
         # stats intact: records_count/total_paid unchanged after the wipe
-        stats_after = api_client.get(
-            "/api/v1/clients/with-stats", params={"search": "John Smith"}
-        ).json()
-        assert stats_after == stats_before
+        assert _client_stats(api_client, client_id) == stats_before
   ```
-  IMPLEMENTER NOTE: use the exact with-stats fetch pattern already present in `test_api_clients.py` stats tests (params/filters may differ — copy the in-file idiom; the assertion that matters: the wiped client's `records_count` and `total_paid` are identical before/after). The `create_record` factory (:315-344 conftest) creates activity+client+record+visit; `client_id` override re-targets it to our client. This test passes pre-flip too (explicit-null PUT is already legal today).
+  with a local helper (module-level in `test_api_clients.py`, next to `CLIENT_PAYLOAD`):
+  ```python
+  def _client_stats(api_client, client_id: str) -> tuple:
+      """(records_count, total_paid) for one client from the stats list endpoint."""
+      items = api_client.get("/api/v1/clients").json()["items"]
+      row = next(c for c in items if c["id"] == client_id)
+      return row["records_count"], row["total_paid"]
+  ```
+  IMPLEMENTER NOTE: the stats list endpoint is `GET /api/v1/clients` (there is **no** `/with-stats` route — plan-review verified against `src/api/v1/clients.py:60-66`); copy the exact response-key/pagination idiom from `test_client_stats.py` if it differs from `"items"` above. Two details matter: (a) locate the row **by `client_id`**, never by `search=` — search is ILIKE on name/phone, both nulled by the wipe, so a search-based fetch would miss the row post-wipe (and could 404-identically → vacuous pass, silently restoring the m4 gap); (b) assert equality of the `(records_count, total_paid)` tuple before/after. The `create_record` factory (conftest :315-344) creates activity+client+record+visit; the `client_id` override re-targets it to our client. This test passes pre-flip too (explicit-null PUT is already legal today).
 
 - [ ] **1.5 — Verify suite unchanged:** `cd backend && python -m pytest -q` → **999 passed, 6 skipped** (identical to baseline). Commit: `test: #201 prep — enrich Client contract data, data-driven omit flip, pin payloads (GH #201)`.
 
@@ -230,11 +232,11 @@ Task 1 made the shared helpers and pins flip-proof. This task writes the RED tes
 
 - [ ] **2.4 — Clean the self-lifted skip + `#201` markers.**
   a. `test_generic_service_contract.py:814-837` block comment: rewrite the `#201` forward-references to past tense ("Client required `is_active` optionally until GH #201; now all 5 soft entities share the required-`is_active` PUT contract"). Keep the rest.
-  b. Same file, `test_update_without_is_active_raises_validation_error` (:862-889): update the docstring (drop "Entities whose Update schema still treats is_active as optional (Client — until GH #201)…" → "All 5 soft entities required post-#178+#201"); **delete the guard** at :876-884 (`if not field.is_required(): pytest.skip("GH #201…")`) — the Client param now runs for real.
+  b. Same file, `test_update_without_is_active_raises_validation_error` (:862-889): update the docstring (drop "Entities whose Update schema still treats is_active as optional (Client — until GH #201)…" → "All 5 soft entities required post-#178+#201"); **delete the now-dead `is_required()` machinery wholesale (:876-884)** — the `field = cfg.update_schema.model_fields.get("is_active")` retrieval, the `assert field is not None` line, and the `if not field.is_required(): pytest.skip("GH #201…")` guard (`field` feeds only the guard — plan-review verified). The Client param now runs for real.
   c. `test_generic_api_contract.py:54-55`: delete the stale window comment ("Client included — omitting it now 500s until #201") — keep the `is_active` setdefault logic untouched.
   Run the two contract files: `python -m pytest tests/services/test_generic_service_contract.py tests/test_generic_api_contract.py -q` → green; skip count drops **6 → 5** (Client param of the is_active test no longer skips).
 
-- [ ] **2.5 — Verify + grep gate:** `cd backend && python -m pytest -q` → ≈ **1003 passed, 5 skipped** (+4 net: schema class 2→4, canaries 1→3; ±1 vs spec estimate — re-verified here). Then `grep -rn "GH #201\|#201" tests/ src/` → only past-tense historical references allowed; fix any leftover forward-refs. Commit: `feat: ClientUpdate standalone 5-key required schema — closes PUT window (GH #201)`.
+- [ ] **2.5 — Verify + grep gate:** `cd backend && python -m pytest -q` → ≈ **1007 passed, 5 skipped** (+8 net: schema class 2→8 pytest cases — the missing-field test is parametrized ×5 — plus canaries 1→3 = +2; re-verify actual count here). Then `grep -rn "GH #201\|#201" tests/ src/` → only past-tense historical references allowed; fix any leftover forward-refs. Commit: `feat: ClientUpdate standalone 5-key required schema — closes PUT window (GH #201)`.
 
 ---
 

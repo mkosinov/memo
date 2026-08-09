@@ -1,6 +1,9 @@
 'use client';
 
 import React, { useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { getRecords, getActivity, getPaymentTotals } from '@memo/api-client';
+import type { RecordResponse, ActivityResponse } from '@memo/api-client';
 import { useRecords } from '@/contexts/RecordsContext';
 import { DiamondIcon } from '@/app/components/shared/DiamondIcon';
 import { StatusBadge } from '@/app/components/shared/StatusBadge';
@@ -27,24 +30,39 @@ interface ClientCardModalProps {
 }
 
 export function ClientCardModal({ clientId, onClose }: ClientCardModalProps) {
-  const { clients, records, activities, services, locations, payments } = useRecords();
+  const { clients, services, locations } = useRecords(); // reference-data maps stay
+
+  // Own data — the context records list is now one server page (#191)
+  const { data: clientRecords = [] } = useQuery<RecordResponse[]>({
+    queryKey: ['records', 'client', clientId],
+    queryFn: () => getRecords({ client_id: clientId, per_page: 100 }).then((r) => r.items),
+    enabled: !!clientId,
+  });
+  const { data: recordActivities = [] } = useQuery<ActivityResponse[]>({
+    queryKey: ['activities', 'for-records', clientRecords.map((r) => r.activity_id)],
+    queryFn: () => Promise.all(clientRecords.map((r) => getActivity(r.activity_id))),
+    enabled: clientRecords.length > 0,
+  });
+  const recordIds = useMemo(() => clientRecords.map((r) => r.id).sort(), [clientRecords]);
+  const { data: paymentTotals } = useQuery({
+    queryKey: ['payments', 'totals', recordIds],
+    queryFn: () => getPaymentTotals(recordIds),
+    enabled: recordIds.length > 0,
+  });
 
   const client = clients.get(clientId) ?? null;
-  const clientRecords = useMemo(
-    () => records.filter((r) => r.client_id === clientId),
-    [records, clientId],
-  );
 
   const recordDetails = useMemo(() => {
+    const activityById = new Map(recordActivities.map((a) => [a.id, a]));
     return clientRecords.map((record) => {
-      const activity = activities.get(record.activity_id);
+      const activity = activityById.get(record.activity_id);
       const service = activity ? services.get(activity.service_id) : null;
       const location = activity ? locations.get(activity.location_id) : null;
       const totalPrice = record.visits.reduce((s, v) => s + v.price, 0);
-      const paidAmount = payments.get(record.id) ?? 0;
+      const paidAmount = paymentTotals?.[record.id] ?? 0;
       return { record, activity, service, location, totalPrice, paidAmount };
     });
-  }, [clientRecords, activities, services, locations, payments]);
+  }, [clientRecords, recordActivities, services, locations, paymentTotals]);
 
   const totalVisitCount = clientRecords.filter((r) => r.status === 'visited').length;
   const totalGuests = clientRecords.reduce((s, r) => s + Math.max(1, r.visits.length), 0);

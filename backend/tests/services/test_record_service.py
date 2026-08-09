@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from src.schemas.common import PaginatedResponse
+from src.schemas.record import RecordListParams
 from src.services.record import get_record_service
 
 pytestmark = pytest.mark.asyncio
@@ -21,8 +22,14 @@ async def test_record_service_list_paginated_with_client_filter(db_session, samp
     client_id = record.client_id
 
     service = get_record_service()
-    result = await service.list(db_session, page=1, per_page=20, client_id=client_id)
+    result = await service.list(
+        db_session=db_session,
+        params=RecordListParams(client_id=client_id, per_page=20),
+    )
     assert isinstance(result, PaginatedResponse)
     assert result.total >= 1
-    result_other = await service.list(db_session, page=1, per_page=20, client_id="nonexistent")
+    result_other = await service.list(
+        db_session=db_session,
+        params=RecordListParams(client_id="nonexistent", per_page=20),
+    )
     assert result_other.total == 0

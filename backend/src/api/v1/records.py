@@ -11,6 +11,7 @@ from src.errors import ErrorCode, ErrorDetail
 from src.schemas.common import PaginatedResponse
 from src.schemas.record import (
     RecordCreate,
+    RecordListParams,
     RecordPatch,
     RecordResponse,
     RecordUpdate,
@@ -72,12 +73,10 @@ def _map_record(record) -> RecordResponse:
 async def list_records(
     service: _ServiceDep,
     session: SessionDep,
-    page: int = Query(1, ge=1),
-    per_page: int = Query(20, ge=1, le=100),
-    client_id: str | None = None,
+    params: Annotated[RecordListParams, Query()],
 ) -> PaginatedResponse[RecordResponse]:
-    """Return all records with nested visits, optionally filtered by client_id."""
-    result = await service.list(db_session=session, page=page, per_page=per_page, client_id=client_id)
+    """Return records with nested visits — server-side filter, sort, paginate (#191)."""
+    result = await service.list(db_session=session, params=params)
     return PaginatedResponse(
         items=[_map_record(r) for r in result.items],
         total=result.total,

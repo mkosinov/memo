@@ -579,3 +579,271 @@ class TestRecordTariffId:
             f"'tariff_id' not in patched visit: {list(patched_visits[0].keys())}"
         )
         assert patched_visits[0]["tariff_id"] == sample_tariff
+
+
+class TestRecordsListFilters:
+    """Server-side filters on GET /api/v1/records (#191)."""
+
+    def test_filter_date_range_whole_day_inclusive(self, api_client, create_activity, create_record):
+        late = create_activity(start=datetime(2026, 8, 5, 23, 30))
+        early_next = create_activity(start=datetime(2026, 8, 6, 0, 0))
+        r_in = create_record(activity_id=late["id"])
+        r_out = create_record(activity_id=early_next["id"])
+        resp = api_client.get("/api/v1/records", params={"date_from": "2026-08-05", "date_to": "2026-08-05"})
+        assert resp.status_code == 200
+        ids = [r["id"] for r in resp.json()["items"]]
+        assert r_in["id"] in ids and r_out["id"] not in ids
+
+    def test_filter_date_from_only(self, api_client, create_activity, create_record):
+        before = create_activity(start=datetime(2026, 8, 1, 10, 0))
+        after = create_activity(start=datetime(2026, 8, 5, 10, 0))
+        r_before = create_record(activity_id=before["id"])
+        r_after = create_record(activity_id=after["id"])
+        resp = api_client.get("/api/v1/records", params={"date_from": "2026-08-03"})
+        ids = [r["id"] for r in resp.json()["items"]]
+        assert r_after["id"] in ids and r_before["id"] not in ids
+
+    def test_filter_date_to_only(self, api_client, create_activity, create_record):
+        before = create_activity(start=datetime(2026, 8, 1, 10, 0))
+        after = create_activity(start=datetime(2026, 8, 5, 10, 0))
+        r_before = create_record(activity_id=before["id"])
+        r_after = create_record(activity_id=after["id"])
+        resp = api_client.get("/api/v1/records", params={"date_to": "2026-08-03"})
+        ids = [r["id"] for r in resp.json()["items"]]
+        assert r_before["id"] in ids and r_after["id"] not in ids
+
+    def test_filter_location_id(self, api_client, create_activity, create_record):
+        a = create_activity()
+        b = create_activity()
+        r_a = create_record(activity_id=a["id"])
+        r_b = create_record(activity_id=b["id"])
+        resp = api_client.get("/api/v1/records", params={"location_id": a["location_id"]})
+        ids = [r["id"] for r in resp.json()["items"]]
+        assert r_a["id"] in ids and r_b["id"] not in ids
+
+    def test_filter_service_id(self, api_client, create_activity, create_record):
+        a = create_activity()
+        b = create_activity()
+        r_a = create_record(activity_id=a["id"])
+        r_b = create_record(activity_id=b["id"])
+        resp = api_client.get("/api/v1/records", params={"service_id": a["service_id"]})
+        ids = [r["id"] for r in resp.json()["items"]]
+        assert r_a["id"] in ids and r_b["id"] not in ids
+
+    def test_filter_master_id(self, api_client, create_activity, create_record):
+        a = create_activity()
+        b = create_activity()
+        r_a = create_record(activity_id=a["id"])
+        r_b = create_record(activity_id=b["id"])
+        resp = api_client.get("/api/v1/records", params={"master_id": a["master_id"]})
+        ids = [r["id"] for r in resp.json()["items"]]
+        assert r_a["id"] in ids and r_b["id"] not in ids
+
+    def test_filter_status(self, api_client, create_record):
+        r_waiting = create_record()  # visits default status waiting
+        r_visited = create_record(visits=[{"name": "Гость", "price": 3500, "status": "visited"}])
+        resp = api_client.get("/api/v1/records", params={"status": "visited"})
+        ids = [r["id"] for r in resp.json()["items"]]
+        assert r_visited["id"] in ids and r_waiting["id"] not in ids
+
+    def test_filter_activity_id(self, api_client, create_activity, create_record):
+        a = create_activity()
+        r_a = create_record(activity_id=a["id"])
+        r_other = create_record()
+        resp = api_client.get("/api/v1/records", params={"activity_id": a["id"]})
+        body = resp.json()
+        assert [r["id"] for r in body["items"]] == [r_a["id"]] and body["total"] == 1
+
+    def test_filter_combined_location_master_status(self, api_client, create_activity, create_record):
+        a = create_activity()
+        b = create_activity()
+        r_a = create_record(activity_id=a["id"], visits=[{"name": "Гость", "price": 3500, "status": "visited"}])
+        create_record(activity_id=a["id"])  # same master+location, wrong status
+        create_record(activity_id=b["id"], visits=[{"name": "Гость", "price": 3500, "status": "visited"}])  # right status, wrong activity refs
+        resp = api_client.get(
+            "/api/v1/records",
+            params={"location_id": a["location_id"], "master_id": a["master_id"], "status": "visited"},
+        )
+        body = resp.json()
+        assert [r["id"] for r in body["items"]] == [r_a["id"]] and body["total"] == 1
+
+    def test_filter_combined_date_status(self, api_client, create_activity, create_record):
+        in_range = create_activity(start=datetime(2026, 8, 5, 10, 0))
+        out_range = create_activity(start=datetime(2026, 9, 5, 10, 0))
+        r_match = create_record(activity_id=in_range["id"], visits=[{"name": "Гость", "price": 3500, "status": "visited"}])
+        create_record(activity_id=in_range["id"])  # in range, wrong status
+        create_record(activity_id=out_range["id"], visits=[{"name": "Гость", "price": 3500, "status": "visited"}])  # right status, out of range
+        resp = api_client.get("/api/v1/records", params={"date_from": "2026-08-01", "date_to": "2026-08-31", "status": "visited"})
+        body = resp.json()
+        assert [r["id"] for r in body["items"]] == [r_match["id"]] and body["total"] == 1
+
+    def test_total_reflects_filtered_count(self, api_client, create_activity, create_record):
+        a = create_activity()
+        create_record(activity_id=a["id"])
+        create_record(activity_id=a["id"])
+        create_record()
+        resp = api_client.get("/api/v1/records", params={"activity_id": a["id"], "per_page": 1})
+        body = resp.json()
+        assert body["total"] == 2 and len(body["items"]) == 1
+
+
+class TestRecordsListSorting:
+    """Server-side sorting on GET /api/v1/records (#191)."""
+
+    @staticmethod
+    def _ids(resp) -> list[str]:
+        assert resp.status_code == 200
+        return [r["id"] for r in resp.json()["items"]]
+
+    def test_sort_date_asc_desc(self, api_client, create_activity, create_record):
+        early = create_record(activity_id=create_activity(start=datetime(2026, 8, 4, 10, 0))["id"])
+        late = create_record(activity_id=create_activity(start=datetime(2026, 8, 6, 10, 0))["id"])
+        params = {"date_from": "2026-08-01", "date_to": "2026-08-10"}
+        asc = self._ids(api_client.get("/api/v1/records", params={**params, "sort_by": "date", "sort_order": "asc"}))
+        desc = self._ids(api_client.get("/api/v1/records", params={**params, "sort_by": "date", "sort_order": "desc"}))
+        assert asc.index(early["id"]) < asc.index(late["id"])
+        assert desc.index(late["id"]) < desc.index(early["id"])
+
+    def test_sort_client_name_anonymous_first_on_asc(self, api_client, create_client, create_record):
+        named = create_record(client_id=create_client(name="Анна")["id"])
+        anon = create_record(client_id=None, visits=[], anonym_visits=1)
+        asc = self._ids(api_client.get("/api/v1/records", params={"sort_by": "client", "sort_order": "asc"}))
+        assert asc.index(anon["id"]) < asc.index(named["id"])  # NULLS FIRST on asc (mirrors ''-first comparator)
+
+    def test_sort_client_name_anonymous_last_on_desc(self, api_client, create_client, create_record):
+        named = create_record(client_id=create_client(name="Анна")["id"])
+        anon = create_record(client_id=None, visits=[], anonym_visits=1)
+        desc = self._ids(api_client.get("/api/v1/records", params={"sort_by": "client", "sort_order": "desc"}))
+        assert desc.index(named["id"]) < desc.index(anon["id"])  # NULLS LAST on desc
+
+    def test_sort_guests_counts_live_visits_not_anonym_seats(self, api_client, create_record):
+        # BLOCKER-guard test: anonym-visits record must sort by live visits count (seats - anonym_visits)
+        anon = create_record(visits=[], anonym_visits=3)   # seats=3, live visits=0
+        two = create_record(visits=[
+            {"name": "А", "price": 1000, "status": "waiting"},
+            {"name": "Б", "price": 1000, "status": "waiting"},
+        ])  # seats=2, live visits=2
+        asc = self._ids(api_client.get("/api/v1/records", params={"sort_by": "guests", "sort_order": "asc"}))
+        assert asc.index(anon["id"]) < asc.index(two["id"])  # 0 < 2; raw-seats sort would invert
+
+    def test_sort_guests_desc(self, api_client, create_record):
+        one = create_record(visits=[{"name": "А", "price": 1000, "status": "waiting"}])
+        two = create_record(visits=[
+            {"name": "А", "price": 1000, "status": "waiting"},
+            {"name": "Б", "price": 1000, "status": "waiting"},
+        ])
+        desc = self._ids(api_client.get("/api/v1/records", params={"sort_by": "guests", "sort_order": "desc"}))
+        assert desc.index(two["id"]) < desc.index(one["id"])
+
+    def test_sort_total(self, api_client, create_record):
+        cheap = create_record(visits=[{"name": "А", "price": 1000, "status": "waiting"}])
+        pricey = create_record(visits=[{"name": "А", "price": 5000, "status": "waiting"}])
+        ids = self._ids(api_client.get("/api/v1/records", params={"sort_by": "total", "sort_order": "asc"}))
+        assert ids.index(cheap["id"]) < ids.index(pricey["id"])
+
+    def test_sort_payment_bucket_asc(self, api_client, create_record):
+        full = create_record(visits=[{"name": "А", "price": 3500, "status": "waiting"}])
+        partial = create_record(visits=[{"name": "Б", "price": 3500, "status": "waiting"}])
+        unpaid = create_record(visits=[{"name": "В", "price": 3500, "status": "waiting"}])
+        api_client.post("/api/v1/payments", json={"record_id": full["id"], "amount": 3500, "method": "card"})
+        api_client.post("/api/v1/payments", json={"record_id": partial["id"], "amount": 1500, "method": "card"})
+        ids = self._ids(api_client.get("/api/v1/records", params={"sort_by": "payment", "sort_order": "asc"}))
+        assert ids.index(full["id"]) < ids.index(partial["id"]) < ids.index(unpaid["id"])
+
+    def test_sort_payment_bucket_desc(self, api_client, create_record):
+        full = create_record(visits=[{"name": "А", "price": 3500, "status": "waiting"}])
+        partial = create_record(visits=[{"name": "Б", "price": 3500, "status": "waiting"}])
+        unpaid = create_record(visits=[{"name": "В", "price": 3500, "status": "waiting"}])
+        api_client.post("/api/v1/payments", json={"record_id": full["id"], "amount": 3500, "method": "card"})
+        api_client.post("/api/v1/payments", json={"record_id": partial["id"], "amount": 1500, "method": "card"})
+        ids = self._ids(api_client.get("/api/v1/records", params={"sort_by": "payment", "sort_order": "desc"}))
+        assert ids.index(unpaid["id"]) < ids.index(partial["id"]) < ids.index(full["id"])
+
+    def test_sort_pages_disjoint(self, api_client, create_record):
+        for _ in range(3):
+            create_record()
+        p1 = self._ids(api_client.get("/api/v1/records", params={"sort_by": "date", "page": 1, "per_page": 2}))
+        p2 = self._ids(api_client.get("/api/v1/records", params={"sort_by": "date", "page": 2, "per_page": 2}))
+        assert not set(p1) & set(p2)
+
+    # --- name-based sorts: explicit reference names via factory overrides ---
+    # create_activity spawns its own master/service/location, so for name-controlled
+    # sorts build the activity manually on factories with explicit names:
+
+    @staticmethod
+    def _activity_on(api_client, *, master_id, service_id, location_id, start):
+        resp = api_client.post("/api/v1/activities", json={
+            "master_id": master_id, "service_id": service_id, "location_id": location_id,
+            "start": start.isoformat(), "duration": 90, "capacity": 10, "is_private": False,
+        })
+        assert resp.status_code == 201
+        return resp.json()
+
+    def test_sort_service_title_asc_desc(self, api_client, create_master, create_service, create_location, create_record):
+        master, location = create_master(), create_location()
+        svc_a = create_service(title="Аква")
+        svc_b = create_service(title="Яла")
+        a = self._activity_on(api_client, master_id=master["id"], service_id=svc_a["id"], location_id=location["id"], start=datetime(2026, 8, 5, 10, 0))
+        b = self._activity_on(api_client, master_id=master["id"], service_id=svc_b["id"], location_id=location["id"], start=datetime(2026, 8, 5, 12, 0))
+        r_a = create_record(activity_id=a["id"])
+        r_b = create_record(activity_id=b["id"])
+        asc = self._ids(api_client.get("/api/v1/records", params={"sort_by": "service", "sort_order": "asc"}))
+        desc = self._ids(api_client.get("/api/v1/records", params={"sort_by": "service", "sort_order": "desc"}))
+        assert asc.index(r_a["id"]) < asc.index(r_b["id"])
+        assert desc.index(r_b["id"]) < desc.index(r_a["id"])
+
+    def test_sort_master_name_asc_desc(self, api_client, create_master, create_service, create_location, create_record):
+        service, location = create_service(), create_location()
+        m_a = create_master(first_name="Иван", last_name="Арбузов")
+        m_b = create_master(first_name="Пётр", last_name="Яблонев")
+        a = self._activity_on(api_client, master_id=m_a["id"], service_id=service["id"], location_id=location["id"], start=datetime(2026, 8, 5, 10, 0))
+        b = self._activity_on(api_client, master_id=m_b["id"], service_id=service["id"], location_id=location["id"], start=datetime(2026, 8, 5, 12, 0))
+        r_a = create_record(activity_id=a["id"])
+        r_b = create_record(activity_id=b["id"])
+        asc = self._ids(api_client.get("/api/v1/records", params={"sort_by": "master", "sort_order": "asc"}))
+        desc = self._ids(api_client.get("/api/v1/records", params={"sort_by": "master", "sort_order": "desc"}))
+        assert asc.index(r_a["id"]) < asc.index(r_b["id"])  # Арбузов < Яблонев (displayMasterName = "Last First")
+        assert desc.index(r_b["id"]) < desc.index(r_a["id"])
+
+    def test_sort_location_name_asc_desc(self, api_client, create_master, create_service, create_location, create_record):
+        master, service = create_master(), create_service()
+        l_a = create_location(name="Арбат")
+        l_b = create_location(name="Яуза")
+        a = self._activity_on(api_client, master_id=master["id"], service_id=service["id"], location_id=l_a["id"], start=datetime(2026, 8, 5, 10, 0))
+        b = self._activity_on(api_client, master_id=master["id"], service_id=service["id"], location_id=l_b["id"], start=datetime(2026, 8, 5, 12, 0))
+        r_a = create_record(activity_id=a["id"])
+        r_b = create_record(activity_id=b["id"])
+        asc = self._ids(api_client.get("/api/v1/records", params={"sort_by": "location", "sort_order": "asc"}))
+        desc = self._ids(api_client.get("/api/v1/records", params={"sort_by": "location", "sort_order": "desc"}))
+        assert asc.index(r_a["id"]) < asc.index(r_b["id"])
+        assert desc.index(r_b["id"]) < desc.index(r_a["id"])
+
+    def test_sort_status_asc_desc(self, api_client, create_record):
+        visited = create_record(visits=[{"name": "А", "price": 1000, "status": "visited"}])
+        waiting = create_record()  # visits default status waiting
+        asc = self._ids(api_client.get("/api/v1/records", params={"sort_by": "status", "sort_order": "asc"}))
+        desc = self._ids(api_client.get("/api/v1/records", params={"sort_by": "status", "sort_order": "desc"}))
+        assert asc.index(visited["id"]) < asc.index(waiting["id"])  # 'visited' < 'waiting'
+        assert desc.index(waiting["id"]) < desc.index(visited["id"])
+
+    def test_sort_total_desc(self, api_client, create_record):
+        cheap = create_record(visits=[{"name": "А", "price": 1000, "status": "waiting"}])
+        pricey = create_record(visits=[{"name": "А", "price": 5000, "status": "waiting"}])
+        ids = self._ids(api_client.get("/api/v1/records", params={"sort_by": "total", "sort_order": "desc"}))
+        assert ids.index(pricey["id"]) < ids.index(cheap["id"])
+
+
+class TestRecordsList422:
+    """Explicit 422 validation on GET /api/v1/records (#191, #182 style)."""
+
+    @pytest.mark.parametrize("params", [
+        {"sort_by": "bogus"},
+        {"sort_order": "sideways"},
+        {"status": "bogus"},
+        {"date_from": "not-a-date"},
+        {"date_from": "2026-08-09", "date_to": "2026-08-03"},
+    ])
+    def test_invalid_params_return_422(self, api_client, params):
+        resp = api_client.get("/api/v1/records", params=params)
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["code"] == "VALIDATION_ERROR"

@@ -3,7 +3,7 @@
 from datetime import UTC, datetime
 from functools import lru_cache
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import case, delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -13,15 +13,20 @@ from src.domain.record_visits import (
     recompute_record_status,
     check_activity_capacity,
 )
+from src.domain.dates import day_range
+from src.models.activity import Activity
 from src.models.client import Client
+from src.models.location import Location
+from src.models.master import Master
 from src.models.payment import Payment
 from src.models.record import Record
+from src.models.service import Service
 from src.models.tag import record_tags
 from src.models.visit import Visit
 from src.models.visitor import Visitor
 from src.schemas.common import PaginatedResponse
-from src.schemas.record import RecordCreate, RecordPatch, RecordResponse, RecordUpdate
-from src.services.generic import GenericService
+from src.schemas.record import RecordCreate, RecordListParams, RecordPatch, RecordResponse, RecordUpdate
+from src.services.generic import GenericService, paginate_orm
 from src.services.decorators import transactional
 
 
@@ -34,31 +39,97 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
         super().__init__(repository, model, response_schema=RecordResponse)
 
     async def list(
-        self,
-        db_session: AsyncSession,
-        page: int = 1,
-        per_page: int = 20,
-        client_id: str | None = None,
-        **filters,
+        self, db_session: AsyncSession, params: RecordListParams
     ) -> PaginatedResponse:  # items are ORM Record instances
-        """Return a paginated page of records (ORM items, visits eagerly loaded)."""
+        """Return a paginated page of records (ORM items, visits eagerly loaded).
+
+        Filter → Sort → Paginate, fully server-side (#191).
+        Business filters are hand-written here (G1a principle); pagination/date
+        mechanics are shared helpers (paginate_orm, day_range).
+        """
         stmt = (
             select(Record)
+            .join(Activity, Record.activity_id == Activity.id)
             .options(selectinload(Record.visits))
         )
-        if client_id:
-            stmt = stmt.where(Record.client_id == client_id)
-        for key, value in filters.items():
-            if value is not None:
-                stmt = stmt.where(getattr(Record, key) == value)
-        total = (
-            await db_session.execute(select(func.count()).select_from(stmt.subquery()))
-        ).scalar_one()
-        result = await db_session.execute(
-            stmt.limit(per_page).offset((page - 1) * per_page)
+        # --- Filter ---
+        from_dt, to_dt = day_range(params.date_from, params.date_to)
+        if from_dt is not None:
+            stmt = stmt.where(Activity.start >= from_dt)
+        if to_dt is not None:
+            stmt = stmt.where(Activity.start <= to_dt)
+        if params.location_id is not None:
+            stmt = stmt.where(Activity.location_id == params.location_id)
+        if params.service_id is not None:
+            stmt = stmt.where(Activity.service_id == params.service_id)
+        if params.master_id is not None:
+            stmt = stmt.where(Activity.master_id == params.master_id)
+        if params.status is not None:
+            stmt = stmt.where(Record.status == params.status)
+        if params.client_id is not None:
+            stmt = stmt.where(Record.client_id == params.client_id)
+        if params.activity_id is not None:
+            stmt = stmt.where(Record.activity_id == params.activity_id)
+        # --- Sort (whitelist map) + Paginate (COUNT before ORDER BY) ---
+        items, total = await paginate_orm(
+            db_session, stmt, params.page, params.per_page,
+            order_by=self._sort_columns(params),
         )
-        orm_items = list(result.scalars().all())
-        return PaginatedResponse.model_construct(items=orm_items, total=total, page=page, per_page=per_page)
+        return PaginatedResponse.model_construct(
+            items=items, total=total, page=params.page, per_page=params.per_page
+        )
+
+    @staticmethod
+    def _sort_columns(params: RecordListParams) -> list:
+        """Whitelist sort map → ORDER BY expressions (#191, mirrors the deleted
+        client-side comparator; collation note: SQLite BINARY ≠ localeCompare)."""
+        client_name = (
+            select(Client.name).where(Client.id == Record.client_id).scalar_subquery()
+        )
+        service_title = (
+            select(Service.title).where(Service.id == Activity.service_id).scalar_subquery()
+        )
+        master_last = (
+            select(Master.last_name).where(Master.id == Activity.master_id).scalar_subquery()
+        )
+        master_first = (
+            select(Master.first_name).where(Master.id == Activity.master_id).scalar_subquery()
+        )
+        location_name = (
+            select(Location.name).where(Location.id == Activity.location_id).scalar_subquery()
+        )
+        total_price = (
+            select(func.coalesce(func.sum(Visit.price), 0))
+            .where(Visit.record_id == Record.id)
+            .scalar_subquery()
+        )
+        paid_sum = (
+            select(func.coalesce(func.sum(Payment.amount), 0))
+            .where(Payment.record_id == Record.id)
+            .scalar_subquery()
+        )
+        payment_bucket = case(
+            (paid_sum >= total_price, 0),
+            (paid_sum > 0, 1),
+            else_=2,
+        )
+        sort_map: dict[str, list] = {
+            "date": [Activity.start],
+            "client": [client_name],
+            "service": [service_title],
+            "master": [master_last, master_first],
+            "location": [location_name],
+            "guests": [Record.seats - Record.anonym_visits],  # == live visits count
+            "status": [Record.status],
+            "total": [total_price],
+            "payment": [payment_bucket],
+        }
+        columns = sort_map[params.sort_by]  # Literal-validated upstream; KeyError impossible
+        if params.sort_order == "desc":
+            ordered = [c.desc().nullslast() for c in columns]
+        else:
+            ordered = [c.asc().nullsfirst() for c in columns]
+        return [*ordered, Record.id.asc()]  # deterministic tiebreak — cross-page stability
 
     async def get(
         self, db_session: AsyncSession, id: str

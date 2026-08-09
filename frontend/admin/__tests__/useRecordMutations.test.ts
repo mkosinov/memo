@@ -37,7 +37,7 @@ import {
   deleteVisit,
 } from '@memo/api-client';
 import { useRecordMutations } from '../hooks/useRecordMutations';
-import type { RecordResponse, PaymentResponse } from '@memo/api-client';
+import type { PaginatedResponse, RecordResponse, PaymentResponse } from '@memo/api-client';
 
 const mockPatchRecord = vi.mocked(patchRecord);
 const mockDeleteRecord = vi.mocked(deleteRecord);
@@ -235,12 +235,15 @@ describe('useRecordMutations', () => {
 
     it('prefix-matches all records caches via setQueriesData and invalidates record', async () => {
       const { queryClient, wrapper } = createQueryClientWrapper();
-      // Seed two list caches (date-bounded and per-client) AND the canonical
+      // Seed two list caches (envelope main list and per-client array) AND the canonical
       const otherRecord = { ...mockRecordResponse, id: 'r2', visits: [] };
-      const dateList = [mockRecordResponse, otherRecord];
-      const clientList = [mockRecordResponse, otherRecord];
-      queryClient.setQueryData(['records', '2026-06-10', '2026-06-10'], dateList);
-      queryClient.setQueryData(['records', 'client', 'c1'], clientList);
+      queryClient.setQueryData(['records', '2026-06-10', '2026-06-10'], {
+        items: [mockRecordResponse, otherRecord],
+        total: 2,
+        page: 1,
+        per_page: 10,
+      });
+      queryClient.setQueryData(['records', 'client', 'c1'], [mockRecordResponse, otherRecord]);
       queryClient.setQueryData(['record', recordId], mockRecordResponse);
 
       const setQueriesDataSpy = vi.spyOn(queryClient, 'setQueriesData');
@@ -257,7 +260,7 @@ describe('useRecordMutations', () => {
         expect.any(Function),
       );
       // After the updater runs, r1 should be gone from BOTH list caches
-      const dateListAfter = queryClient.getQueryData<RecordResponse[]>([
+      const dateListAfter = queryClient.getQueryData<PaginatedResponse<RecordResponse>>([
         'records',
         '2026-06-10',
         '2026-06-10',
@@ -267,13 +270,39 @@ describe('useRecordMutations', () => {
         'client',
         'c1',
       ]);
-      expect(dateListAfter?.find((r) => r.id === recordId)).toBeUndefined();
+      expect(dateListAfter?.items.find((r) => r.id === recordId)).toBeUndefined();
       expect(clientListAfter?.find((r) => r.id === recordId)).toBeUndefined();
       // Targeted invalidation (not 5-key blanket)
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['record', recordId] });
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['records'] });
       expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: ['activities'] });
       expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: ['clients'] });
+    });
+
+    it('removes from BOTH envelope and array records caches', async () => {
+      const { queryClient, wrapper } = createQueryClientWrapper();
+      queryClient.setQueryData(['records', 1, 10], {
+        items: [mockRecordResponse],
+        total: 1,
+        page: 1,
+        per_page: 10,
+      });
+      queryClient.setQueryData(['records', 'client', 'c1'], [mockRecordResponse]);
+
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+
+      await act(async () => {
+        await result.current.deleteRecord();
+      });
+
+      const envelope = queryClient.getQueryData<PaginatedResponse<RecordResponse>>([
+        'records',
+        1,
+        10,
+      ]);
+      const array = queryClient.getQueryData<RecordResponse[]>(['records', 'client', 'c1']);
+      expect(envelope?.items).toEqual([]);
+      expect(array).toEqual([]);
     });
   });
 
@@ -459,9 +488,12 @@ describe('useRecordMutations', () => {
         ...mockRecordResponse,
         visits: [],
       });
-      queryClient.setQueryData(['records', '2026-06-10', '2026-06-10'], [
-        { ...mockRecordResponse, visits: [] },
-      ]);
+      queryClient.setQueryData(['records', '2026-06-10', '2026-06-10'], {
+        items: [{ ...mockRecordResponse, visits: [] }],
+        total: 1,
+        page: 1,
+        per_page: 10,
+      });
 
       const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
 
@@ -472,13 +504,13 @@ describe('useRecordMutations', () => {
       // Canonical cache
       const canonical = queryClient.getQueryData<RecordResponse>(['record', recordId]);
       expect(canonical?.visits.map((v) => v.id)).toContain('visit-new');
-      // List cache (date-bounded) — the helper's setQueriesData mirrored the same record
-      const listCache = queryClient.getQueryData<RecordResponse[]>([
+      // List cache (envelope) — the helper's setQueriesData mirrored the same record
+      const listCache = queryClient.getQueryData<PaginatedResponse<RecordResponse>>([
         'records',
         '2026-06-10',
         '2026-06-10',
       ]);
-      expect(listCache?.[0]?.visits.map((v) => v.id)).toContain('visit-new');
+      expect(listCache?.items[0]?.visits.map((v) => v.id)).toContain('visit-new');
     });
 
     // Regression for #127 §3: per-client list cache ['records', 'client', clientId]
@@ -564,10 +596,12 @@ describe('useRecordMutations', () => {
         ...mockRecordResponse,
         visits: [existingVisit],
       });
-      queryClient.setQueryData(['records', '2026-06-10', '2026-06-10'], [
-        { ...mockRecordResponse, visits: [existingVisit] },
-        otherRecord,
-      ]);
+      queryClient.setQueryData(['records', '2026-06-10', '2026-06-10'], {
+        items: [{ ...mockRecordResponse, visits: [existingVisit] }, otherRecord],
+        total: 2,
+        page: 1,
+        per_page: 10,
+      });
       // Server returns the patched visit shape (price: 4000).
       mockPatchVisit.mockResolvedValue({ ...existingVisit, price: 4000 } as never);
 
@@ -581,14 +615,14 @@ describe('useRecordMutations', () => {
       const canonical = queryClient.getQueryData<RecordResponse>(['record', recordId]);
       expect(canonical?.visits[0].price).toBe(4000);
       // List-cache copy of the same record ALSO updated
-      const listCache = queryClient.getQueryData<RecordResponse[]>([
+      const listCache = queryClient.getQueryData<PaginatedResponse<RecordResponse>>([
         'records',
         '2026-06-10',
         '2026-06-10',
       ]);
-      expect(listCache?.[0]?.visits[0].price).toBe(4000);
+      expect(listCache?.items[0]?.visits[0].price).toBe(4000);
       // r2 untouched
-      expect(listCache?.[1]?.id).toBe('r2');
+      expect(listCache?.items[1]?.id).toBe('r2');
     });
   });
 
@@ -622,10 +656,12 @@ describe('useRecordMutations', () => {
         ...mockRecordResponse,
         visits: [existingVisit],
       });
-      queryClient.setQueryData(['records', '2026-06-10', '2026-06-10'], [
-        { ...mockRecordResponse, visits: [existingVisit] },
-        otherRecord,
-      ]);
+      queryClient.setQueryData(['records', '2026-06-10', '2026-06-10'], {
+        items: [{ ...mockRecordResponse, visits: [existingVisit] }, otherRecord],
+        total: 2,
+        page: 1,
+        per_page: 10,
+      });
 
       const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
 
@@ -637,14 +673,14 @@ describe('useRecordMutations', () => {
       const canonical = queryClient.getQueryData<RecordResponse>(['record', recordId]);
       expect(canonical?.visits).toHaveLength(0);
       // List cache copy also no longer has visit-1
-      const listCache = queryClient.getQueryData<RecordResponse[]>([
+      const listCache = queryClient.getQueryData<PaginatedResponse<RecordResponse>>([
         'records',
         '2026-06-10',
         '2026-06-10',
       ]);
-      expect(listCache?.[0]?.visits).toHaveLength(0);
+      expect(listCache?.items[0]?.visits).toHaveLength(0);
       // r2 untouched
-      expect(listCache?.[1]?.id).toBe('r2');
+      expect(listCache?.items[1]?.id).toBe('r2');
     });
   });
 

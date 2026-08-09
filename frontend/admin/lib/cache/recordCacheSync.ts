@@ -3,8 +3,13 @@
  *
  * The single source of truth for the cache-key topology:
  *   - ['record', id]               — canonical single-record store
- *   - ['records', dateFrom, dateTo] — date-bounded list
- *   - ['records', 'client', id]     — per-client list
+ *   - ['records', ...params]        — main list; keyed by all server params
+ *                                     (page/per_page/filters/sort) and holds the
+ *                                     envelope {items,total,page,per_page} (#191);
+ *                                     before #191 it was date-keyed and held a
+ *                                     plain array — updaters are shape-agnostic
+ *   - ['records', 'client', id]     — per-client list (plain array)
+ *   - ['records', 'activity', id]   — per-activity list (plain array)
  *   - ['payments', recordId]        — per-record payments
  *   - ['payments']                  — global payments list
  *
@@ -14,10 +19,31 @@
  */
 import type { QueryClient } from '@tanstack/react-query';
 import type {
+  PaginatedResponse,
   PaymentResponse,
   RecordResponse,
   VisitResponse,
 } from '@memo/api-client';
+
+export type RecordsListCache =
+  | RecordResponse[]
+  | PaginatedResponse<RecordResponse>;
+
+/**
+ * Apply `fn` to the items of any ['records', ...] list cache, shape-agnostic:
+ * the paged main list caches the envelope {items,total,page,per_page} (#191);
+ * per-client/per-activity caches hold plain arrays. `total` is NOT adjusted —
+ * every mutation path follows with invalidateQueries(['records']).
+ */
+export function mapRecordsListCache(
+  old: RecordsListCache | undefined,
+  fn: (items: RecordResponse[]) => RecordResponse[],
+): RecordsListCache | undefined {
+  if (old == null) return old;
+  if (Array.isArray(old)) return fn(old);
+  if (Array.isArray(old.items)) return { ...old, items: fn(old.items) };
+  return old;
+}
 
 /** Patch a single record everywhere it lives: canonical + every list cache. */
 export function patchRecordEverywhere(
@@ -31,12 +57,12 @@ export function patchRecordEverywhere(
     ['record', recordId],
     (old) => (old == null ? old : updater(old)),
   );
-  qc.setQueriesData<RecordResponse[] | undefined>(
+  qc.setQueriesData<RecordsListCache | undefined>(
     { queryKey: ['records'] },
-    (old) => {
-      if (old == null) return old;
-      return old.map((r) => (r.id === recordId ? updater(r) : r));
-    },
+    (old) =>
+      mapRecordsListCache(old, (items) =>
+        items.map((r) => (r.id === recordId ? updater(r) : r)),
+      ),
   );
 }
 

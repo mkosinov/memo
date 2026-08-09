@@ -4,14 +4,15 @@
  *
  * Uses a real QueryClient (no mocks) to verify the actual cache-key topology:
  *   - ['record', id]               — canonical
- *   - ['records', dateFrom, dateTo] — date list
- *   - ['records', 'client', id]     — per-client list
+ *   - ['records', ...params]        — main list (envelope {items,total,page,per_page})
+ *   - ['records', 'client', id]     — per-client list (plain array)
  *   - ['payments', recordId]        — per-record payments
  *   - ['payments']                  — global payments list
  */
 import { describe, it, expect, beforeEach } from 'vitest';
 import { QueryClient } from '@tanstack/react-query';
 import type {
+  PaginatedResponse,
   RecordResponse,
   VisitResponse,
   PaymentResponse,
@@ -93,12 +94,14 @@ beforeEach(() => {
 
 describe('patchRecordEverywhere', () => {
   it('patches canonical key AND every list key containing this record', () => {
-    // Seed: canonical + date list + per-client list
+    // Seed: canonical + envelope main list + per-client list (plain array)
     qc.setQueryData(['record', recordId], makeRecord(recordId));
-    qc.setQueryData(
-      ['records', '2026-01-01', '2026-01-31'],
-      [makeRecord(recordId), makeRecord(otherRecordId)],
-    );
+    qc.setQueryData(['records', '2026-01-01', '2026-01-31'], {
+      items: [makeRecord(recordId), makeRecord(otherRecordId)],
+      total: 2,
+      page: 1,
+      per_page: 10,
+    });
     qc.setQueryData(
       ['records', 'client', 'c1'],
       [makeRecord(recordId)],
@@ -113,14 +116,16 @@ describe('patchRecordEverywhere', () => {
     expect(qc.getQueryData<RecordResponse>(['record', recordId])?.status).toBe(
       'cancelled',
     );
-    // Date list — the matching record is patched, other stays
-    const dateList = qc.getQueryData<RecordResponse[]>([
+    // Main list (envelope) — the matching record is patched, other stays
+    const dateList = qc.getQueryData<PaginatedResponse<RecordResponse>>([
       'records',
       '2026-01-01',
       '2026-01-31',
     ]);
-    expect(dateList?.find((r) => r.id === recordId)?.status).toBe('cancelled');
-    expect(dateList?.find((r) => r.id === otherRecordId)?.status).toBe(
+    expect(dateList?.items.find((r) => r.id === recordId)?.status).toBe(
+      'cancelled',
+    );
+    expect(dateList?.items.find((r) => r.id === otherRecordId)?.status).toBe(
       'confirmed',
     );
     // Per-client list
@@ -129,12 +134,37 @@ describe('patchRecordEverywhere', () => {
     ).toBe('cancelled');
   });
 
+  it('patches envelope caches, preserving page metadata', () => {
+    qc.setQueryData(['record', recordId], makeRecord(recordId));
+    qc.setQueryData(['records', 1, 10], {
+      items: [makeRecord(recordId), makeRecord(otherRecordId)],
+      total: 2,
+      page: 1,
+      per_page: 10,
+    });
+
+    patchRecordEverywhere(qc, recordId, (r) => ({ ...r, comment: 'patched' }));
+
+    const after = qc.getQueryData<PaginatedResponse<RecordResponse>>([
+      'records',
+      1,
+      10,
+    ]);
+    expect(after?.items.find((r) => r.id === recordId)?.comment).toBe(
+      'patched',
+    );
+    expect(after?.total).toBe(2);
+    expect(after?.page).toBe(1);
+  });
+
   it('is a no-op when canonical cache is missing (null guard)', () => {
     // No canonical entry seeded; lists seeded only
-    qc.setQueryData(
-      ['records', '2026-01-01', '2026-01-31'],
-      [makeRecord(recordId)],
-    );
+    qc.setQueryData(['records', '2026-01-01', '2026-01-31'], {
+      items: [makeRecord(recordId)],
+      total: 1,
+      page: 1,
+      per_page: 10,
+    });
 
     let calledWith = 0;
     patchRecordEverywhere(qc, recordId, (r) => {
@@ -146,8 +176,11 @@ describe('patchRecordEverywhere', () => {
     expect(calledWith).toBe(0);
     // List cache must remain untouched
     expect(
-      qc.getQueryData<RecordResponse[]>(['records', '2026-01-01', '2026-01-31'])?.[0]
-        ?.status,
+      qc.getQueryData<PaginatedResponse<RecordResponse>>([
+        'records',
+        '2026-01-01',
+        '2026-01-31',
+      ])?.items[0]?.status,
     ).toBe('confirmed');
   });
 });
@@ -156,10 +189,12 @@ describe('upsertVisit', () => {
   it('adds a new visit to canonical AND every list cache', () => {
     const listRecord = makeRecord(recordId, { visits: [] });
     qc.setQueryData(['record', recordId], listRecord);
-    qc.setQueryData(
-      ['records', '2026-01-01', '2026-01-31'],
-      [listRecord],
-    );
+    qc.setQueryData(['records', '2026-01-01', '2026-01-31'], {
+      items: [listRecord],
+      total: 1,
+      page: 1,
+      per_page: 10,
+    });
     qc.setQueryData(['records', 'client', 'c1'], [listRecord]);
 
     const newVisit = makeVisit('v-new');
@@ -170,13 +205,13 @@ describe('upsertVisit', () => {
     expect(canonical?.visits).toHaveLength(1);
     expect(canonical?.visits[0].id).toBe('v-new');
 
-    // Date list
-    const dateList = qc.getQueryData<RecordResponse[]>([
+    // Main list (envelope)
+    const dateList = qc.getQueryData<PaginatedResponse<RecordResponse>>([
       'records',
       '2026-01-01',
       '2026-01-31',
     ]);
-    expect(dateList?.[0].visits[0].id).toBe('v-new');
+    expect(dateList?.items[0].visits[0].id).toBe('v-new');
 
     // Per-client list
     const clientList = qc.getQueryData<RecordResponse[]>([
@@ -189,10 +224,12 @@ describe('upsertVisit', () => {
 
   it('replaces an existing visit by id (no duplicate)', () => {
     qc.setQueryData(['record', recordId], makeRecord(recordId));
-    qc.setQueryData(
-      ['records', '2026-01-01', '2026-01-31'],
-      [makeRecord(recordId)],
-    );
+    qc.setQueryData(['records', '2026-01-01', '2026-01-31'], {
+      items: [makeRecord(recordId)],
+      total: 1,
+      page: 1,
+      per_page: 10,
+    });
 
     const updated = makeVisit(visitId, { status: 'visited', price: 9999 });
     upsertVisit(qc, recordId, updated);
@@ -202,23 +239,25 @@ describe('upsertVisit', () => {
     expect(canonical?.visits[0].status).toBe('visited');
     expect(canonical?.visits[0].price).toBe(9999);
 
-    const dateList = qc.getQueryData<RecordResponse[]>([
+    const dateList = qc.getQueryData<PaginatedResponse<RecordResponse>>([
       'records',
       '2026-01-01',
       '2026-01-31',
     ]);
-    expect(dateList?.[0].visits).toHaveLength(1);
-    expect(dateList?.[0].visits[0].status).toBe('visited');
+    expect(dateList?.items[0].visits).toHaveLength(1);
+    expect(dateList?.items[0].visits[0].status).toBe('visited');
   });
 });
 
 describe('removeVisit', () => {
   it('removes the visit from canonical AND list caches', () => {
     qc.setQueryData(['record', recordId], makeRecord(recordId));
-    qc.setQueryData(
-      ['records', '2026-01-01', '2026-01-31'],
-      [makeRecord(recordId)],
-    );
+    qc.setQueryData(['records', '2026-01-01', '2026-01-31'], {
+      items: [makeRecord(recordId)],
+      total: 1,
+      page: 1,
+      per_page: 10,
+    });
     qc.setQueryData(['records', 'client', 'c1'], [makeRecord(recordId)]);
 
     removeVisit(qc, recordId, visitId);
@@ -227,8 +266,11 @@ describe('removeVisit', () => {
       [],
     );
     expect(
-      qc.getQueryData<RecordResponse[]>(['records', '2026-01-01', '2026-01-31'])?.[0]
-        .visits,
+      qc.getQueryData<PaginatedResponse<RecordResponse>>([
+        'records',
+        '2026-01-01',
+        '2026-01-31',
+      ])?.items[0].visits,
     ).toEqual([]);
     expect(
       qc.getQueryData<RecordResponse[]>(['records', 'client', 'c1'])?.[0].visits,
@@ -236,17 +278,22 @@ describe('removeVisit', () => {
   });
 
   it('is a no-op when canonical is missing (null guard)', () => {
-    qc.setQueryData(
-      ['records', '2026-01-01', '2026-01-31'],
-      [makeRecord(recordId)],
-    );
+    qc.setQueryData(['records', '2026-01-01', '2026-01-31'], {
+      items: [makeRecord(recordId)],
+      total: 1,
+      page: 1,
+      per_page: 10,
+    });
 
     removeVisit(qc, recordId, visitId);
 
     // List is untouched because canonical was absent
     expect(
-      qc.getQueryData<RecordResponse[]>(['records', '2026-01-01', '2026-01-31'])?.[0]
-        .visits,
+      qc.getQueryData<PaginatedResponse<RecordResponse>>([
+        'records',
+        '2026-01-01',
+        '2026-01-31',
+      ])?.items[0].visits,
     ).toHaveLength(1);
   });
 });

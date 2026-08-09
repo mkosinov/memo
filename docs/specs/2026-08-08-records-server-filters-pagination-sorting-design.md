@@ -51,7 +51,7 @@ The Records admin page (`/records`) is the only major admin table still doing ev
 
 ## 4. Non-Goals (explicit follow-ups — NOT in scope)
 
-- >100 cap for OTHER tables (masters/services/locations/materials/tags/photos) + their server pagination.
+- >100 cap for OTHER tables (masters/services/locations/materials/tags/photos) + their server pagination — **filed as #205**.
 - Router-inline query violations in `photos.py:34-43` and `search.py:65-71`.
 - Equality-loop copy-paste in `record.py`/`payment.py`/`service.py` services.
 - `custom_price` is NOT reflected in the `total`/`payment` sort semantics (mirrors today's UI — see §6.4 quirk note). A custom_price-aware total is a separate follow-up.

@@ -22,6 +22,26 @@ UpdateSchemaT = TypeVar("UpdateSchemaT", bound=BaseModel)
 ResponseSchemaT = TypeVar("ResponseSchemaT", bound=BaseModel)
 
 
+async def paginate_orm(
+    db_session: AsyncSession, stmt, page: int, per_page: int, order_by=None
+) -> tuple[list, int]:
+    """Shared pagination core (#191): COUNT the (unordered) statement, then ORDER + slice.
+
+    COUNT is computed BEFORE order_by is applied so correlated sort-key
+    subqueries are never evaluated inside the count query.
+    Returns (orm_items, total).
+    """
+    total = (
+        await db_session.execute(select(func.count()).select_from(stmt.subquery()))
+    ).scalar_one()
+    if order_by is not None:
+        stmt = stmt.order_by(*order_by)
+    result = await db_session.execute(
+        stmt.limit(per_page).offset((page - 1) * per_page)
+    )
+    return list(result.scalars().all()), total
+
+
 def _strip_is_active_none(payload: dict) -> dict:
     """Drop is_active when None — sticky field: absent/None preserves the stored value (#184).
 
@@ -72,15 +92,8 @@ class GenericService(Generic[CreateSchemaT, UpdateSchemaT, ResponseSchemaT]):
     async def _paginate(
         self, db_session: AsyncSession, stmt, page: int, per_page: int, order_by=None
     ) -> PaginatedResponse[ResponseSchemaT]:
-        if order_by is not None:
-            stmt = stmt.order_by(*order_by)
-        total = (
-            await db_session.execute(select(func.count()).select_from(stmt.subquery()))
-        ).scalar_one()
-        result = await db_session.execute(
-            stmt.limit(per_page).offset((page - 1) * per_page)
-        )
-        items = [self._response_schema.model_validate(o) for o in result.scalars().all()]
+        items_orm, total = await paginate_orm(db_session, stmt, page, per_page, order_by)
+        items = [self._response_schema.model_validate(o) for o in items_orm]
         return PaginatedResponse(items=items, total=total, page=page, per_page=per_page)
 
     async def list(

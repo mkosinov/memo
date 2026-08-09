@@ -1,7 +1,7 @@
 'use client';
 
-import React, { createContext, useCallback, useContext, useEffect, useMemo } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   getRecords,
   getClients,
@@ -12,6 +12,7 @@ import {
   getLocations,
 } from '@memo/api-client';
 import type {
+  PaginatedResponse,
   RecordResponse,
   ClientWithStats,
   ActivityResponse,
@@ -22,8 +23,33 @@ import type {
 import { useNavigation } from '@/contexts/NavigationContext';
 import { seedRecordFromList } from '@/lib/cache/recordCacheSync';
 
+export interface RecordFilters {
+  locationId: string;
+  serviceId: string;
+  masterId: string;
+  status: string;
+}
+
+export type RecordSortField =
+  | 'date' | 'client' | 'service' | 'master' | 'location'
+  | 'guests' | 'status' | 'total' | 'payment';
+export type RecordSortOrder = 'asc' | 'desc';
+
+const DEFAULT_FILTERS: RecordFilters = { locationId: '', serviceId: '', masterId: '', status: '' };
+
 export interface RecordsContextType {
   records: RecordResponse[];
+  total: number;
+  page: number;
+  perPage: number;
+  filters: RecordFilters;
+  sortBy: RecordSortField;
+  sortOrder: RecordSortOrder;
+  setPage: (page: number) => void;
+  setPerPage: (perPage: number) => void;
+  setFilters: (newFilters: Partial<RecordFilters>) => void;
+  setSort: (field: RecordSortField) => void;
+  resetFilters: () => void;
   clients: Map<string, ClientWithStats>;
   payments: Map<string, number>; // record_id → total paid amount
   activities: Map<string, ActivityResponse>;
@@ -41,15 +67,64 @@ export function RecordsProvider({ children }: { children: React.ReactNode }) {
   const { dateFrom, dateTo } = useNavigation();
   const queryClient = useQueryClient();
 
+  const [page, setPage] = useState(1);
+  const [perPage, setPerPageState] = useState(10);
+  const [filters, setFiltersState] = useState<RecordFilters>(DEFAULT_FILTERS);
+  const [sortBy, setSortBy] = useState<RecordSortField>('date');
+  const [sortOrder, setSortOrder] = useState<RecordSortOrder>('asc');
+
   const refetch = useCallback(() => {
     void queryClient.refetchQueries({ queryKey: ['records'] });
   }, [queryClient]);
 
-  // Period-based data
-  const { data: records = [], isLoading: recordsLoading, error: recordsError } = useQuery<RecordResponse[]>({
-    queryKey: ['records', dateFrom, dateTo],
-    queryFn: () => getRecords({ date_from: dateFrom, date_to: dateTo, per_page: 100 }).then(r => r.items),
+  // Server-driven records list (#191) — queryKey carries every server param
+  const { data, isLoading: recordsLoading, error: recordsError } = useQuery<PaginatedResponse<RecordResponse>>({
+    queryKey: ['records', page, perPage, dateFrom, dateTo, filters, sortBy, sortOrder],
+    queryFn: () => getRecords({
+      page,
+      per_page: perPage,
+      date_from: dateFrom || undefined,
+      date_to: dateTo || undefined,
+      location_id: filters.locationId || undefined,
+      service_id: filters.serviceId || undefined,
+      master_id: filters.masterId || undefined,
+      status: filters.status || undefined,
+      sort_by: sortBy,
+      sort_order: sortOrder,
+    }),
+    placeholderData: keepPreviousData,
   });
+  const records = useMemo(() => data?.items ?? [], [data]);
+  const total = data?.total ?? 0;
+
+  const setFilters = useCallback((newFilters: Partial<RecordFilters>) => {
+    setFiltersState((prev) => ({ ...prev, ...newFilters }));
+    setPage(1);
+  }, []);
+
+  const resetFilters = useCallback(() => {
+    setFiltersState(DEFAULT_FILTERS);
+    setPage(1);
+  }, []);
+
+  const setPerPage = useCallback((pp: number) => {
+    setPerPageState(pp);
+    setPage(1);
+  }, []);
+
+  const setSort = useCallback((field: RecordSortField) => {
+    if (field === sortBy) {
+      setSortOrder((o) => (o === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortBy(field);
+      setSortOrder('asc');
+    }
+  }, [sortBy]);
+
+  // Date-range change (NavigationContext) resets to page 1
+  useEffect(() => {
+    setPage(1);
+  }, [dateFrom, dateTo]);
 
   // Seed canonical ['record', id] from list responses. Avoids a redundant
   // getRecord() request the first time a record is opened (spec §2.1).
@@ -132,7 +207,7 @@ export function RecordsProvider({ children }: { children: React.ReactNode }) {
   const payments = useMemo(() => {
     const map = new Map<string, number>();
     if (paymentTotals) {
-      Object.entries(paymentTotals).forEach(([recordId, total]) => map.set(recordId, total));
+      Object.entries(paymentTotals).forEach(([recordId, paidTotal]) => map.set(recordId, paidTotal));
     }
     return map;
   }, [paymentTotals]);
@@ -140,6 +215,17 @@ export function RecordsProvider({ children }: { children: React.ReactNode }) {
   const contextValue = useMemo(
     () => ({
       records,
+      total,
+      page,
+      perPage,
+      filters,
+      sortBy,
+      sortOrder,
+      setPage,
+      setPerPage,
+      setFilters,
+      setSort,
+      resetFilters,
       clients,
       payments,
       activities,
@@ -150,7 +236,7 @@ export function RecordsProvider({ children }: { children: React.ReactNode }) {
       error: recordsError ?? null,
       refetch,
     }),
-    [records, clients, payments, activities, masters, services, locations, recordsLoading, recordsError, refetch],
+    [records, total, page, perPage, filters, sortBy, sortOrder, setPerPage, setFilters, setSort, resetFilters, clients, payments, activities, masters, services, locations, recordsLoading, recordsError, refetch],
   );
 
   return (

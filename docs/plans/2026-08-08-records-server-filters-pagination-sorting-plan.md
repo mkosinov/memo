@@ -436,6 +436,16 @@ class TestRecordsListFilters:
         body = resp.json()
         assert [r["id"] for r in body["items"]] == [r_a["id"]] and body["total"] == 1
 
+    def test_filter_combined_date_status(self, api_client, create_activity, create_record):
+        in_range = create_activity(start=datetime(2026, 8, 5, 10, 0))
+        out_range = create_activity(start=datetime(2026, 9, 5, 10, 0))
+        r_match = create_record(activity_id=in_range["id"], visits=[{"name": "Гость", "price": 3500, "status": "visited"}])
+        create_record(activity_id=in_range["id"])  # in range, wrong status
+        create_record(activity_id=out_range["id"], visits=[{"name": "Гость", "price": 3500, "status": "visited"}])  # right status, out of range
+        resp = api_client.get("/api/v1/records", params={"date_from": "2026-08-01", "date_to": "2026-08-31", "status": "visited"})
+        body = resp.json()
+        assert [r["id"] for r in body["items"]] == [r_match["id"]] and body["total"] == 1
+
     def test_total_reflects_filtered_count(self, api_client, create_activity, create_record):
         a = create_activity()
         create_record(activity_id=a["id"])
@@ -501,6 +511,72 @@ class TestRecordsListSorting:
         p1 = self._ids(api_client.get("/api/v1/records", params={"sort_by": "date", "page": 1, "per_page": 2}))
         p2 = self._ids(api_client.get("/api/v1/records", params={"sort_by": "date", "page": 2, "per_page": 2}))
         assert not set(p1) & set(p2)
+
+    # --- name-based sorts: explicit reference names via factory overrides ---
+    # create_activity spawns its own master/service/location, so for name-controlled
+    # sorts build the activity manually on factories with explicit names:
+
+    @staticmethod
+    def _activity_on(api_client, *, master_id, service_id, location_id, start):
+        resp = api_client.post("/api/v1/activities", json={
+            "master_id": master_id, "service_id": service_id, "location_id": location_id,
+            "start": start.isoformat(), "duration": 90, "capacity": 10, "is_private": False,
+        })
+        assert resp.status_code == 201
+        return resp.json()
+
+    def test_sort_service_title_asc_desc(self, api_client, create_master, create_service, create_location, create_record):
+        master, location = create_master(), create_location()
+        svc_a = create_service(title="Аква")
+        svc_b = create_service(title="Яла")
+        a = self._activity_on(api_client, master_id=master["id"], service_id=svc_a["id"], location_id=location["id"], start=datetime(2026, 8, 5, 10, 0))
+        b = self._activity_on(api_client, master_id=master["id"], service_id=svc_b["id"], location_id=location["id"], start=datetime(2026, 8, 5, 12, 0))
+        r_a = create_record(activity_id=a["id"])
+        r_b = create_record(activity_id=b["id"])
+        asc = self._ids(api_client.get("/api/v1/records", params={"sort_by": "service", "sort_order": "asc"}))
+        desc = self._ids(api_client.get("/api/v1/records", params={"sort_by": "service", "sort_order": "desc"}))
+        assert asc.index(r_a["id"]) < asc.index(r_b["id"])
+        assert desc.index(r_b["id"]) < desc.index(r_a["id"])
+
+    def test_sort_master_name_asc_desc(self, api_client, create_master, create_service, create_location, create_record):
+        service, location = create_service(), create_location()
+        m_a = create_master(first_name="Иван", last_name="Арбузов")
+        m_b = create_master(first_name="Пётр", last_name="Яблонев")
+        a = self._activity_on(api_client, master_id=m_a["id"], service_id=service["id"], location_id=location["id"], start=datetime(2026, 8, 5, 10, 0))
+        b = self._activity_on(api_client, master_id=m_b["id"], service_id=service["id"], location_id=location["id"], start=datetime(2026, 8, 5, 12, 0))
+        r_a = create_record(activity_id=a["id"])
+        r_b = create_record(activity_id=b["id"])
+        asc = self._ids(api_client.get("/api/v1/records", params={"sort_by": "master", "sort_order": "asc"}))
+        desc = self._ids(api_client.get("/api/v1/records", params={"sort_by": "master", "sort_order": "desc"}))
+        assert asc.index(r_a["id"]) < asc.index(r_b["id"])  # Арбузов < Яблонев (displayMasterName = "Last First")
+        assert desc.index(r_b["id"]) < desc.index(r_a["id"])
+
+    def test_sort_location_name_asc_desc(self, api_client, create_master, create_service, create_location, create_record):
+        master, service = create_master(), create_service()
+        l_a = create_location(name="Арбат")
+        l_b = create_location(name="Яуза")
+        a = self._activity_on(api_client, master_id=master["id"], service_id=service["id"], location_id=l_a["id"], start=datetime(2026, 8, 5, 10, 0))
+        b = self._activity_on(api_client, master_id=master["id"], service_id=service["id"], location_id=l_b["id"], start=datetime(2026, 8, 5, 12, 0))
+        r_a = create_record(activity_id=a["id"])
+        r_b = create_record(activity_id=b["id"])
+        asc = self._ids(api_client.get("/api/v1/records", params={"sort_by": "location", "sort_order": "asc"}))
+        desc = self._ids(api_client.get("/api/v1/records", params={"sort_by": "location", "sort_order": "desc"}))
+        assert asc.index(r_a["id"]) < asc.index(r_b["id"])
+        assert desc.index(r_b["id"]) < desc.index(r_a["id"])
+
+    def test_sort_status_asc_desc(self, api_client, create_record):
+        visited = create_record(visits=[{"name": "А", "price": 1000, "status": "visited"}])
+        waiting = create_record()  # visits default status waiting
+        asc = self._ids(api_client.get("/api/v1/records", params={"sort_by": "status", "sort_order": "asc"}))
+        desc = self._ids(api_client.get("/api/v1/records", params={"sort_by": "status", "sort_order": "desc"}))
+        assert asc.index(visited["id"]) < asc.index(waiting["id"])  # 'visited' < 'waiting'
+        assert desc.index(waiting["id"]) < desc.index(visited["id"])
+
+    def test_sort_total_desc(self, api_client, create_record):
+        cheap = create_record(visits=[{"name": "А", "price": 1000, "status": "waiting"}])
+        pricey = create_record(visits=[{"name": "А", "price": 5000, "status": "waiting"}])
+        ids = self._ids(api_client.get("/api/v1/records", params={"sort_by": "total", "sort_order": "desc"}))
+        assert ids.index(pricey["id"]) < ids.index(cheap["id"])
 ```
 
 ```python
@@ -731,7 +807,7 @@ Extend `getRecords` with the 7 new params and pin the wire contract with URL-bui
       per_page: 50,
     });
     expect(api).toHaveBeenCalledWith(
-      '/api/v1/records?date_from=2026-08-03&date_to=2026-08-09&location_id=l-1&service_id=s-1&master_id=m-1&status=waiting&activity_id=a-1&sort_by=payment&sort_order=desc&page=2&per_page=50',
+      '/api/v1/records?date_from=2026-08-03&date_to=2026-08-09&activity_id=a-1&location_id=l-1&service_id=s-1&master_id=m-1&status=waiting&sort_by=payment&sort_order=desc&page=2&per_page=50',
       expect.anything(),
     );
   });
@@ -819,7 +895,7 @@ it('patchRecordEverywhere patches envelope caches, preserving page metadata', ()
 });
 ```
 
-In `useRecordMutations.test.ts`: flip seeded date-list caches (lines 242, 462, 494, 567, 625) to envelopes; keep `['records','client','c1']` arrays. Add:
+In `useRecordMutations.test.ts`: flip seeded date-list caches (lines 242, 462, 567, 625) to envelopes; line 494 seeds `['records','client','c1']` — it STAYS a plain array. Add:
 
 ```ts
 it('deleteRecord removes from BOTH envelope and array records caches', async () => {
@@ -1329,7 +1405,7 @@ Honest rework of the filter/sort/pagination e2e against the real server (no page
 
 ### Steps
 
-- [ ] 1. `helpers.ts` — in `openActivityDetailsModal` (and any helper clicking into booking tabs), add a response wait on `r.url().includes('/api/v1/records') && r.url().includes('activity_id=')` before the click that opens the modal, awaited after.
+- [ ] 1. `helpers.ts` — in the schedule-modal helper `openModal` (helpers.ts:181 — it opens the modal via CustomEvent, not a click), register a `page.waitForResponse` on `(r) => r.url().includes('/api/v1/records') && r.url().includes('activity_id=')` BEFORE triggering the modal open, and await it after. Apply the same to any other helper that opens the activity details modal or clicks into its booking tabs.
 - [ ] 2. Test 6 (status filter) — replace `waitForTimeout(500)` + `count <=` with:
 
 ```ts
@@ -1357,6 +1433,22 @@ Honest rework of the filter/sort/pagination e2e against the real server (no page
 - [ ] 10. Tests 13/20 — replace timeouts with date-param response waits; keep assertions (they isolate via date range already).
 - [ ] 11. Run the records e2e spec + `activity-details-modal.spec.ts` + `clients.spec.ts` via the project's shard script (see dev-workflow skill: `frontend/admin` e2e with real backend) — all green, no `waitForTimeout` left in records.spec.ts except the helpers' re-render buffers.
 - [ ] 12. Commit: `test(e2e): records spec honest server-side rework (#191)`
+
+---
+
+## Task 13: Domain-rules sync (architect-owned, docser handoff)
+
+### Classification: trivial
+### Required Docs
+- `docs/specs/2026-08-08-records-server-filters-pagination-sorting-design.md` §10 — the exact doc updates mandated
+
+### Task Description
+
+NOT an implementer task — executed via `@docser` dispatch at IMPL Step 5 (Documentation Commit). Listed here so spec §10's final acceptance bullet has an explicit owner:
+
+- `docs/domain-rules/records.md` — new GET /records list params (all filters + sort incl. `activity_id`); correct the stale invariant to `seats = len(visits) + anonym_visits`.
+- `docs/domain-rules/payments.md` — payment-status sort semantics (3-level bucket shared by display and ORDER BY).
+- `docs/domain-rules/activities.md` — invalid date strings now 422 (was 500); date filter via shared `day_range`.
 
 ---
 

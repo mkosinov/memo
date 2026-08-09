@@ -477,8 +477,14 @@ class TestRecordsListSorting:
     def test_sort_client_name_anonymous_first_on_asc(self, api_client, create_client, create_record):
         named = create_record(client_id=create_client(name="Анна")["id"])
         anon = create_record(client_id=None)
-        ids = self._ids(api_client.get("/api/v1/records", params={"sort_by": "client", "sort_order": "asc"}))
-        assert ids.index(anon["id"]) < ids.index(named["id"])
+        asc = self._ids(api_client.get("/api/v1/records", params={"sort_by": "client", "sort_order": "asc"}))
+        assert asc.index(anon["id"]) < asc.index(named["id"])  # NULLS FIRST on asc (mirrors ''-first comparator)
+
+    def test_sort_client_name_anonymous_last_on_desc(self, api_client, create_client, create_record):
+        named = create_record(client_id=create_client(name="Анна")["id"])
+        anon = create_record(client_id=None)
+        desc = self._ids(api_client.get("/api/v1/records", params={"sort_by": "client", "sort_order": "desc"}))
+        assert desc.index(named["id"]) < desc.index(anon["id"])  # NULLS LAST on desc
 
     def test_sort_guests_counts_live_visits_not_anonym_seats(self, api_client, create_record):
         # BLOCKER-guard test: anonym-visits record must sort by live visits count (seats - anonym_visits)
@@ -487,8 +493,17 @@ class TestRecordsListSorting:
             {"name": "А", "price": 1000, "status": "waiting"},
             {"name": "Б", "price": 1000, "status": "waiting"},
         ])  # seats=2, live visits=2
-        ids = self._ids(api_client.get("/api/v1/records", params={"sort_by": "guests", "sort_order": "asc"}))
-        assert ids.index(anon["id"]) < ids.index(two["id"])  # 0 < 2; raw-seats sort would invert
+        asc = self._ids(api_client.get("/api/v1/records", params={"sort_by": "guests", "sort_order": "asc"}))
+        assert asc.index(anon["id"]) < asc.index(two["id"])  # 0 < 2; raw-seats sort would invert
+
+    def test_sort_guests_desc(self, api_client, create_record):
+        one = create_record(visits=[{"name": "А", "price": 1000, "status": "waiting"}])
+        two = create_record(visits=[
+            {"name": "А", "price": 1000, "status": "waiting"},
+            {"name": "Б", "price": 1000, "status": "waiting"},
+        ])
+        desc = self._ids(api_client.get("/api/v1/records", params={"sort_by": "guests", "sort_order": "desc"}))
+        assert desc.index(two["id"]) < desc.index(one["id"])
 
     def test_sort_total(self, api_client, create_record):
         cheap = create_record(visits=[{"name": "А", "price": 1000, "status": "waiting"}])
@@ -504,6 +519,15 @@ class TestRecordsListSorting:
         api_client.post("/api/v1/payments", json={"record_id": partial["id"], "amount": 1500, "method": "card"})
         ids = self._ids(api_client.get("/api/v1/records", params={"sort_by": "payment", "sort_order": "asc"}))
         assert ids.index(full["id"]) < ids.index(partial["id"]) < ids.index(unpaid["id"])
+
+    def test_sort_payment_bucket_desc(self, api_client, create_record):
+        full = create_record(visits=[{"name": "А", "price": 3500, "status": "waiting"}])
+        partial = create_record(visits=[{"name": "Б", "price": 3500, "status": "waiting"}])
+        unpaid = create_record(visits=[{"name": "В", "price": 3500, "status": "waiting"}])
+        api_client.post("/api/v1/payments", json={"record_id": full["id"], "amount": 3500, "method": "card"})
+        api_client.post("/api/v1/payments", json={"record_id": partial["id"], "amount": 1500, "method": "card"})
+        ids = self._ids(api_client.get("/api/v1/records", params={"sort_by": "payment", "sort_order": "desc"}))
+        assert ids.index(unpaid["id"]) < ids.index(partial["id"]) < ids.index(full["id"])
 
     def test_sort_pages_disjoint(self, api_client, create_record):
         for _ in range(3):

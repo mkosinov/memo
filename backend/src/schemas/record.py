@@ -1,6 +1,9 @@
 """Pydantic schemas for the records domain."""
 
-from pydantic import BaseModel, ConfigDict
+from datetime import date
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.models.enums import VisitStatus
 
@@ -106,3 +109,38 @@ class RecordResponse(RecordBase):
     created_at: str
     updated_at: str
     visits: list[VisitResponse] = []
+
+
+RecordSortBy = Literal[
+    "date", "client", "service", "master", "location",
+    "guests", "status", "total", "payment",
+]
+RecordSortOrder = Literal["asc", "desc"]
+RecordStatusFilter = Literal["waiting", "visited", "missed", "cancelled"]
+
+
+class RecordListParams(BaseModel):
+    """Query parameters for GET /api/v1/records with filtering, pagination, sorting (#191).
+
+    Injected as FastAPI Query Parameter Model: ``Annotated[RecordListParams, Query()]``.
+    NOT Depends() — Depends-injected models + model_validator raise 500 (fastapi#4974).
+    """
+
+    page: int = Field(default=1, ge=1)
+    per_page: int = Field(default=20, ge=1, le=100)
+    client_id: str | None = None
+    activity_id: str | None = None
+    date_from: date | None = None
+    date_to: date | None = None
+    location_id: str | None = None
+    service_id: str | None = None
+    master_id: str | None = None
+    status: RecordStatusFilter | None = None
+    sort_by: RecordSortBy = "date"
+    sort_order: RecordSortOrder = "asc"
+
+    @model_validator(mode="after")
+    def _check_date_range(self) -> "RecordListParams":
+        if self.date_from and self.date_to and self.date_from > self.date_to:
+            raise ValueError("date_from must be on or before date_to")
+        return self

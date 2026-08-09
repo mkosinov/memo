@@ -12,6 +12,7 @@ import type {
   PaymentResponse,
 } from '@memo/api-client';
 import { mockPayment } from './helpers/mockData';
+import { createMockRecordsContext } from './helpers/mockContexts';
 
 // ─── Mock data ──────────────────────────────────────────────────────────────
 
@@ -118,7 +119,7 @@ const mockRecord: RecordResponse = {
 
 // ─── Mutable mock context ───────────────────────────────────────────────────
 
-let mockContextValue: RecordsContextType = {
+const baseOverrides: Partial<RecordsContextType> = {
   records: [mockRecord],
   clients: new Map([['client-1', mockClient]]),
   payments: new Map([['rec-1', 2500]]),
@@ -126,10 +127,9 @@ let mockContextValue: RecordsContextType = {
   masters: new Map([['master-1', mockMaster]]),
   services: new Map([['svc-1', mockService]]),
   locations: new Map([['loc-1', mockLocation]]),
-  loading: false,
-  error: null,
-  refetch: vi.fn(),
 };
+
+let mockContextValue: RecordsContextType;
 
 vi.mock('@/contexts/RecordsContext', () => ({
   useRecords: () => mockContextValue,
@@ -158,122 +158,61 @@ vi.mock('@/hooks/useRecordData', () => ({
 
 import { RecordsTable } from '../app/(main)/records/components/RecordsTable';
 
-const filters = {
-  dateFrom: '',
-  dateTo: '',
-  locationId: '',
-  serviceId: '',
-  masterId: '',
-  status: '',
-};
+function renderTable(overrides: Partial<RecordsContextType> = {}) {
+  mockContextValue = createMockRecordsContext({ ...baseOverrides, ...overrides });
+  return render(<RecordsTable />);
+}
 
 describe('RecordsTable', () => {
   beforeEach(() => {
     localStorage.clear();
     mockRecordPayments = [mockPayment];
-    // Reset to default context
-    mockContextValue = {
-      records: [mockRecord],
-      clients: new Map([['client-1', mockClient]]),
-      payments: new Map([['rec-1', 2500]]),
-      activities: new Map([['act-1', mockActivity]]),
-      masters: new Map([['master-1', mockMaster]]),
-      services: new Map([['svc-1', mockService]]),
-      locations: new Map([['loc-1', mockLocation]]),
-      loading: false,
-      error: null,
-      refetch: vi.fn(),
-    };
   });
 
   it('renders client name from context', () => {
-    render(<RecordsTable filters={filters} />);
+    renderTable();
     expect(screen.getByText('Анна Смирнова')).toBeTruthy();
   });
 
   it('renders service title from context', () => {
-    render(<RecordsTable filters={filters} />);
+    renderTable();
     expect(screen.getByText('Рисование акварелью')).toBeTruthy();
   });
 
   it('renders master color dot', () => {
-    const { container } = render(<RecordsTable filters={filters} />);
+    const { container } = renderTable();
     const dot = container.querySelector('[title="Иванова Мария"]');
     expect(dot).toBeTruthy();
   });
 
   it('renders location name from context', () => {
-    render(<RecordsTable filters={filters} />);
+    renderTable();
     expect(screen.getByText('Студия на Арбате')).toBeTruthy();
   });
 
   it('shows total price from visits', () => {
-    render(<RecordsTable filters={filters} />);
+    renderTable();
     expect(screen.getByText('2 500₽')).toBeTruthy();
   });
 
   it('shows payment status when fully paid', () => {
-    render(<RecordsTable filters={filters} />);
+    renderTable();
     expect(screen.getByText('✓ Оплачено')).toBeTruthy();
   });
 
   it('record with no entry in totals map renders Не оплачено', () => {
-    mockContextValue = {
-      ...mockContextValue,
-      payments: new Map(),
-    };
-    render(<RecordsTable filters={filters} />);
+    renderTable({ payments: new Map() });
     expect(screen.getByText('Не оплачено')).toBeTruthy();
   });
 
-  it('sorts by payment status: paid, then partial, then unpaid', () => {
-    const recordPaid: RecordResponse = {
-      ...mockRecord,
-      id: 'rec-paid',
-      client_id: null,
-    };
-    const recordPartial: RecordResponse = {
-      ...mockRecord,
-      id: 'rec-partial',
-      client_id: null,
-    };
-    const recordUnpaid: RecordResponse = {
-      ...mockRecord,
-      id: 'rec-unpaid',
-      client_id: null,
-    };
-    mockContextValue = {
-      ...mockContextValue,
-      records: [recordUnpaid, recordPartial, recordPaid],
-      payments: new Map([
-        ['rec-paid', 2500],
-        ['rec-partial', 1000],
-      ]),
-    };
-    render(<RecordsTable filters={filters} />);
-
-    // Click "Оплата" header to sort ascending
-    fireEvent.click(screen.getByText(/Оплата/));
-
-    const rows = document.querySelectorAll('tbody tr');
-    expect(rows).toHaveLength(3);
-    expect(rows[0].textContent).toContain('✓ Оплачено');
-    expect(rows[1].textContent).toContain('Частично');
-    expect(rows[2].textContent).toContain('Не оплачено');
-  });
-
   it('shows empty state when no records', () => {
-    mockContextValue = {
-      ...mockContextValue,
-      records: [],
-    };
-    render(<RecordsTable filters={filters} />);
+    renderTable({ records: [] });
     expect(screen.getByText('Записи не найдены')).toBeTruthy();
   });
 
   it('renders client name from client_id lookup', () => {
     // Record with known client_id should show client name
-    render(<RecordsTable filters={filters} />);
+    renderTable();
     expect(screen.getByText('Анна Смирнова')).toBeTruthy();
   });
 
@@ -284,11 +223,7 @@ describe('RecordsTable', () => {
       id: 'rec-no-client',
       client_id: null,
     };
-    mockContextValue = {
-      ...mockContextValue,
-      records: [recordNoClient],
-    };
-    render(<RecordsTable filters={filters} />);
+    renderTable({ records: [recordNoClient] });
     // The client column should show '—' (em dash) when client_id is null
     const clientCells = screen.getAllByText('—');
     expect(clientCells.length).toBeGreaterThanOrEqual(1);
@@ -301,11 +236,7 @@ describe('RecordsTable', () => {
       id: 'rec-unknown-client',
       client_id: 'nonexistent-client',
     };
-    mockContextValue = {
-      ...mockContextValue,
-      records: [recordUnknownClient],
-    };
-    render(<RecordsTable filters={filters} />);
+    renderTable({ records: [recordUnknownClient] });
     // Should show '—' when client is not in the map
     const clientCells = screen.getAllByText('—');
     expect(clientCells.length).toBeGreaterThanOrEqual(1);
@@ -317,11 +248,7 @@ describe('RecordsTable', () => {
       id: 'rec-no-client',
       client_id: null,
     };
-    mockContextValue = {
-      ...mockContextValue,
-      records: [mockRecord, recordNoClient],
-    };
-    render(<RecordsTable filters={filters} />);
+    renderTable({ records: [mockRecord, recordNoClient] });
     // Should show the known client name
     expect(screen.getByText('Анна Смирнова')).toBeTruthy();
     // Should show dash for the record without client_id
@@ -329,10 +256,37 @@ describe('RecordsTable', () => {
     expect(clientCells.length).toBeGreaterThanOrEqual(1);
   });
 
+  // ─── Server-driven sort wiring ──────────────────────────────────────────
+
+  it('header click calls setSort with the column key', () => {
+    const setSort = vi.fn();
+    renderTable({ setSort });
+    fireEvent.click(screen.getByText(/Оплата/));
+    expect(setSort).toHaveBeenCalledWith('payment');
+  });
+
+  it('sort indicator reflects context sortBy/sortOrder', () => {
+    renderTable({ sortBy: 'payment', sortOrder: 'desc' });
+    expect(screen.getByText(/Оплата/).textContent).toContain('↓');
+  });
+
+  // ─── Server-driven pagination wiring ────────────────────────────────────
+
+  it('pagination shows server total and calls setPage/setPerPage', () => {
+    const setPage = vi.fn();
+    const setPerPage = vi.fn();
+    renderTable({ total: 42, page: 2, perPage: 10, setPage, setPerPage });
+    expect(screen.getByText('42 всего')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '3' }));
+    expect(setPage).toHaveBeenCalledWith(3);
+    fireEvent.change(screen.getByDisplayValue('10'), { target: { value: '50' } });
+    expect(setPerPage).toHaveBeenCalledWith(50);
+  });
+
   // ─── Detail panel payments (per-payment list via useRecordData) ──────────
 
   it('detail panel lists payments with amount and method', () => {
-    render(<RecordsTable filters={filters} />);
+    renderTable();
     fireEvent.click(screen.getByText('Анна Смирнова').closest('tr')!);
     expect(screen.getByText('Карта')).toBeInTheDocument();
     expect(screen.getByText('3 500₽')).toBeInTheDocument();
@@ -340,7 +294,7 @@ describe('RecordsTable', () => {
 
   it('detail panel shows Нет платежей when record has no payments', () => {
     mockRecordPayments = [];
-    render(<RecordsTable filters={filters} />);
+    renderTable();
     fireEvent.click(screen.getByText('Анна Смирнова').closest('tr')!);
     expect(screen.getByText('Нет платежей')).toBeInTheDocument();
   });
@@ -348,12 +302,12 @@ describe('RecordsTable', () => {
   // ─── Column picker ──────────────────────────────────────────────────────
 
   it('renders column picker gear button', () => {
-    render(<RecordsTable filters={filters} />);
+    renderTable();
     expect(screen.getByLabelText('Настроить колонки')).toBeInTheDocument();
   });
 
   it('shows all default column headers', () => {
-    render(<RecordsTable filters={filters} />);
+    renderTable();
     expect(screen.getByText(/Дата \/ Время/)).toBeTruthy();
     expect(screen.getByText(/Клиент/)).toBeTruthy();
     expect(screen.getByText(/Гостей/)).toBeTruthy();
@@ -366,7 +320,7 @@ describe('RecordsTable', () => {
   });
 
   it('hides column when unchecked via ColumnPicker', () => {
-    render(<RecordsTable filters={filters} />);
+    renderTable();
 
     // Open picker
     fireEvent.click(screen.getByLabelText('Настроить колонки'));

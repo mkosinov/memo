@@ -9,7 +9,7 @@ A Record is a booking for an Activity. It links a Client to an Activity and cont
 | activity_id | string | ✅ | — | — | — | FK to Activity |
 | client_id | string | ❌ | — | — | null | FK to Client (nullable for anonymous) |
 | status | enum | ❌ | — | — | waiting | **DERIVED** from VisitStatus (see [RecordStatus derivation](#recordstatus-derivation)). Same enum as VisitItem.status: waiting / visited / missed / cancelled |
-| seats | integer | ✅ | — | — | — | Computed: len(visits), never set by user |
+| seats | integer | ✅ | — | — | — | Computed: len(visits) + anonym_visits, never set by user |
 | anonym_visits | integer | ❌ | — | — | 0 | Number of "anonymous" seats (no visitor assigned). Adds to seats count without a Visit row. Used for "walk-ins" / phone reservations. |
 | comment | string | ❌ | — | — | null | Комментарий |
 | custom_price | integer | ❌ | — | — | null | Override price (replaces sum of visit prices) |
@@ -26,12 +26,12 @@ A Record is a booking for an Activity. It links a Client to an Activity and cont
 | status | enum | ❌ | waiting / visited / missed / cancelled (default: waiting) |
 
 ## Cross-field Rules
-- `seats` MUST equal `len(visits)` at all times
+- `seats` MUST equal `len(visits) + anonym_visits` at all times (recomputed via `recompute_record_seats()` in `src/domain/record_visits.py`)
 - Either `name` or `visitor_id` should be provided for each visit (or neither for anonymous)
 - `custom_price` at Record level overrides sum of visit prices
 
 ## ⚠️ FUTURE REQUIREMENT: Flexible Seats
-**Status:** Not implemented. Currently `seats = len(visits)` always.
+**Status:** Not implemented. Currently `seats = len(visits) + anonym_visits` always.
 
 **Planned behavior (hybrid):**
 - User can EITHER specify `seats` count manually OR add visitors one by one
@@ -118,7 +118,7 @@ A Record is a booking for an Activity. It links a Client to an Activity and cont
   - Name-based: find-or-create Visitor by (client_id, name)
   - ID-based: link existing Visitor
   - Anonymous: visitor is None
-- **Seats = len(visits):** Always computed, never user-set
+- **Seats = len(visits) + anonym_visits:** Always computed — `recompute_record_seats()` recalculates on create/update/patch; never user-set
 - **Create sequence:** check capacity → resolve client → resolve visitors → create Record → create Visits
 - **Update (PUT):** Full replacement, old Visits soft-deactivated, new Visits created, seats recalculated. NO capacity re-check.
 - **Patch:** Partial update. If visits in payload → old visits soft-deactivated, new created. NO capacity re-check.
@@ -136,12 +136,55 @@ A Record is a booking for an Activity. It links a Client to an Activity and cont
 ## API Endpoints
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | /api/v1/records | List (filter by client_id) |
+| GET | /api/v1/records | List — server-side filter/sort/paginate (see [list contract](#records-list-endpoint-get-apiv1records) below) |
 | GET | /api/v1/records/{id} | Get with visits |
 | POST | /api/v1/records | Create (capacity check) |
 | PUT | /api/v1/records/{id} | Full update (visits replaced) |
 | PATCH | /api/v1/records/{id} | Partial update |
 | DELETE | /api/v1/records/{id} | Cascade hard-delete (visits + payments + record_tags cleaned) |
+
+### Records list endpoint (GET /api/v1/records)
+
+**Purpose:** The Records page list is fully **server-side** (#191): filters, sorting, and pagination are applied in SQL, not on the client. Returns the standard `PaginatedResponse<RecordResponse>` envelope `{items, total, page, per_page}` with nested `visits`.
+
+**Query params** (FastAPI Query parameter model `RecordListParams`; all optional except as noted):
+
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| page | int | 1 | 1-based page number (`ge=1`) |
+| per_page | int | 20 | Page size, 1–100 (`ge=1`, `le=100`) |
+| client_id | string | — | Filter by client FK |
+| activity_id | string | — | Filter by activity FK |
+| date_from | date | — | Inclusive from-day (YYYY-MM-DD), covers from 00:00:00 |
+| date_to | date | — | Inclusive to-day (YYYY-MM-DD), covers through 23:59:59.999999 |
+| location_id | string | — | Filter by activity's location |
+| service_id | string | — | Filter by activity's service |
+| master_id | string | — | Filter by activity's master |
+| status | enum | — | `waiting` / `visited` / `missed` / `cancelled` |
+| sort_by | enum | `date` | `date`, `client`, `service`, `master`, `location`, `guests`, `status`, `total`, `payment` |
+| sort_order | enum | `asc` | `asc` / `desc` |
+
+**Validation → 422 VALIDATION_ERROR:** invalid `status` / `sort_by` / `sort_order` enum values, `page < 1`, `per_page` outside 1–100, unparseable date strings, and `date_from > date_to` (cross-field `model_validator`). Note: `RecordListParams` is injected as a Query parameter model (`Annotated[RecordListParams, Query()]`), NOT `Depends()` — Depends-injected models combined with `model_validator` raise 500 (fastapi#4974).
+
+**Date-range semantics:** `date_from` / `date_to` filter on `Activity.start` via the shared `day_range()` util in `backend/src/domain/dates.py` — whole-day inclusive via `datetime.combine(date, time.min / time.max)`: `date_from` covers from 00:00:00, `date_to` through 23:59:59.999999 (overflow-free, no year-9999 edge case; same idiom as the `created_*` filters in client.py).
+
+**Sort semantics (server-side whitelist map):** `RecordService._sort_columns()` builds ORDER BY expressions from a dict keyed by `sort_by`; the key is Literal-validated upstream, so a missing key is impossible. Keys referencing related entities use **correlated scalar subqueries** (mirrors the deleted client-side comparator; note SQLite BINARY collation ≠ JS `localeCompare`):
+
+| sort_by | ORDER BY expression |
+|---------|---------------------|
+| date | `Activity.start` |
+| client | `Client.name` (correlated subquery on `Record.client_id`) |
+| service | `Service.title` (correlated subquery on `Activity.service_id`) |
+| master | `Master.last_name, Master.first_name` |
+| location | `Location.name` (correlated subquery on activity) |
+| guests | `Record.seats - Record.anonym_visits` (live visits count) |
+| status | `Record.status` |
+| total | `SUM(Visit.price)` (coalesced to 0) |
+| payment | 3-level bucket over paid vs total — see [payments.md](payments.md) |
+
+**Null ordering + tiebreak:** `asc` → `NULLS FIRST`, `desc` → `NULLS LAST` (matters for `client` — anonymous records have no Client row); a deterministic `Record.id asc()` tiebreak guarantees cross-page stability.
+
+**Pagination mechanics:** shared `paginate_orm()` core in `backend/src/services/generic.py` — the COUNT query runs BEFORE `order_by` is applied (correlated sort-key subqueries are never evaluated inside the count), then ORDER + LIMIT/OFFSET slice. Pipeline order: Filter → Sort → Paginate; business filters are hand-written in `RecordService.list` (G1a principle), pagination/date mechanics are the shared helpers.
 
 ## Relationships
 - Record → belongs to Activity
@@ -160,7 +203,7 @@ A Record is a booking for an Activity. It links a Client to an Activity and cont
 
 ## Acceptance Criteria
 - [ ] Capacity check prevents overbooking on create
-- [ ] seats = len(visits) always
+- [ ] seats = len(visits) + anonym_visits always
 - [ ] Client resolution works (phone-based and ID-based)
 - [ ] Visitor resolution works (name-based, ID-based, anonymous)
 - [ ] Delete cascades to Visits and Payments

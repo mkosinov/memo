@@ -1,5 +1,6 @@
 """FastAPI router for activity CRUD endpoints with date filtering."""
 
+from datetime import date
 from functools import lru_cache
 from typing import Annotated
 
@@ -51,8 +52,8 @@ async def list_activities(
     session: SessionDep,
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
-    date_from: str | None = Query(None),
-    date_to: str | None = Query(None),
+    date_from: date | None = Query(None),
+    date_to: date | None = Query(None),
 ) -> PaginatedResponse[ActivityResponse]:
     """Return all activities, optionally filtered by date range."""
     result = await service.list(

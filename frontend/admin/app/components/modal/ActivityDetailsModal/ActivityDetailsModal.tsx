@@ -1,6 +1,8 @@
 'use client';
 
 import React, { useState, useMemo, useCallback } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { getRecords, type RecordResponse } from '@memo/api-client';
 import { useSchedule } from '@/contexts/ScheduleContext';
 import { useRecords } from '@/contexts/RecordsContext';
 import { useClients } from '@/contexts/ClientsContext';
@@ -24,7 +26,7 @@ interface ActivityDetailsModalProps {
 
 export function ActivityDetailsModal({ isOpen, onClose, activity, mode }: ActivityDetailsModalProps) {
   const { services, servicesRaw, updateActivity, deleteActivity } = useSchedule();
-  const { records, clients } = useRecords();
+  const { clients } = useRecords();
   const { clients: clientsList } = useClients();
   const { showToast } = useUI();
 
@@ -52,11 +54,12 @@ export function ActivityDetailsModal({ isOpen, onClose, activity, mode }: Activi
     [currentRawService],
   );
 
-  // Get records for this activity
-  const activityRecords = useMemo(
-    () => records.filter((r) => r.activity_id === activity.id),
-    [records, activity.id],
-  );
+  // Own data — context records is now one server page; activity bookings need the full set (#191)
+  const { data: activityRecords = [] } = useQuery<RecordResponse[]>({
+    queryKey: ['records', 'activity', activity.id],
+    queryFn: () => getRecords({ activity_id: activity.id, per_page: 100 }).then((r) => r.items),
+    enabled: isOpen && !!activity?.id,
+  });
 
   // Build a visitors map from records' visits (visitors are embedded in visits via visitor_id)
   // We need to look up visitor details from RecordsContext or we pass visits directly

@@ -253,6 +253,13 @@ export async function getRecords(params?: {
   date_from?: string;
   date_to?: string;
   client_id?: string;
+  activity_id?: string;
+  location_id?: string;
+  service_id?: string;
+  master_id?: string;
+  status?: string;
+  sort_by?: string;
+  sort_order?: string;
   page?: number;
   per_page?: number;
 }): Promise<PaginatedResponse<RecordResponse>> {
@@ -260,6 +267,13 @@ export async function getRecords(params?: {
   if (params?.date_from) search.set('date_from', params.date_from);
   if (params?.date_to) search.set('date_to', params.date_to);
   if (params?.client_id) search.set('client_id', params.client_id);
+  if (params?.activity_id) search.set('activity_id', params.activity_id);
+  if (params?.location_id) search.set('location_id', params.location_id);
+  if (params?.service_id) search.set('service_id', params.service_id);
+  if (params?.master_id) search.set('master_id', params.master_id);
+  if (params?.status) search.set('status', params.status);
+  if (params?.sort_by) search.set('sort_by', params.sort_by);
+  if (params?.sort_order) search.set('sort_order', params.sort_order);
   if (params?.page) search.set('page', String(params.page));
   if (params?.per_page) search.set('per_page', String(params.per_page));
   const qs = search.toString();

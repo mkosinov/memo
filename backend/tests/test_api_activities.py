@@ -109,6 +109,11 @@ class TestActivitiesDateFiltering:
         assert len(activities) == 2
         assert body["total"] == 2
 
+    def test_list_activities_invalid_date_returns_422(self, api_client) -> None:
+        """GET /api/v1/activities?date_from=garbage must reject with 422 (#191)."""
+        resp = api_client.get("/api/v1/activities", params={"date_from": "garbage"})
+        assert resp.status_code == 422
+
 
 class TestActivitiesOccupied:
     """Occupied field computation (count of Records)."""

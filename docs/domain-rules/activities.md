@@ -34,7 +34,7 @@ An Activity is a scheduled instance of a Service. It ties together a Master, Ser
   - Cancelled / missed records free their seats (excluded from the sum)
 - **No capacity re-validation** when updating Activity
 - **Cascade on delete:** hard-delete cascades to Records (and transitively their Visits + Payments); photos have `activity_id` set to NULL (photos survive); activity_tag join rows cleaned. Entire cascade is atomic.
-- **Date-range filtering:** Returns activities within the requested date range
+- **Date-range filtering:** `date_from` / `date_to` are typed `date` query params (YYYY-MM-DD) — invalid date strings are rejected by FastAPI with **422 VALIDATION_ERROR** (was 500 before #191). Bounds are converted to a whole-day inclusive range via the shared `day_range()` util in `backend/src/domain/dates.py` (`datetime.combine` idiom: `date_from` covers from 00:00:00, `date_to` through 23:59:59.999999); the legacy untyped `datetime.fromisoformat` string parsing was removed. Pagination uses the shared `_paginate()` / `paginate_orm()` core.
 
 ### Frontend
 - **Auto-fill from Service:** When service selected → duration, capacity, minAge auto-filled
@@ -46,7 +46,7 @@ An Activity is a scheduled instance of a Service. It ties together a Master, Ser
 ## API Endpoints
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | /api/v1/activities | List (date range filter) |
+| GET | /api/v1/activities | List (date range filter; invalid dates → 422) |
 | GET | /api/v1/activities/{id} | Get with occupied count |
 | POST | /api/v1/activities | Create |
 | PUT | /api/v1/activities/{id} | Full update |

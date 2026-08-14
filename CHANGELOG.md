@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — 2026-08-09
+
+### Added
+- **GH #191 — Records list fully server-side: filters + pagination + sorting** — branch `feat-records-server-filters` (12 commits: d8c54e1..bfbc39c):
+  - **Backend:** `GET /api/v1/records` is now a server-side filtered / paginated / sorted list driven by a validated `RecordListParams` Query parameter model (`Annotated[..., Query()]`, NOT `Depends()` — Depends + model_validator raise 500). Filters: `client_id`, `activity_id`, `date_from`/`date_to` (whole-day inclusive via the new shared `day_range()` util in `backend/src/domain/dates.py`), `location_id`, `service_id`, `master_id`, `status` (waiting/visited/missed/cancelled). Pagination: `page` (ge=1) + `per_page` (1–100, default 20) via the shared `paginate_orm()` core (COUNT before ORDER BY so correlated sort-key subqueries never run in the count). Sorting: `sort_by` whitelist map (9 keys: date, client, service, master, location, guests, status, total, payment) + `sort_order` (asc/desc) — correlated scalar-subquery sort keys, NULLS FIRST on asc / NULLS LAST on desc (anonymous clients), deterministic `Record.id` tiebreak for cross-page stability; `payment` = 3-level bucket (paid ≥ total → 0, 0 < paid < total → 1, paid = 0 → 2). All invalid params → **422 VALIDATION_ERROR** (incl. `date_from > date_to`).
+  - **Activities refactor:** `GET /api/v1/activities` date filter moved onto the shared `day_range` util + `_paginate` core; `date_from`/`date_to` re-typed as `date` — invalid date strings now **422** (was 500 on `fromisoformat`).
+  - **api-client:** `getRecords` accepts the full filter/sort param set (`activity_id`, `location_id`, `service_id`, `master_id`, `status`, `sort_by`, `sort_order`) with query-string serialization.
+  - **Admin:** Records page is context-driven — `RecordsContext` holds server-driven page/filters/sort state (paginated query, shape-agnostic list cache updaters, `setQueriesData` prefix sync); `RecordsTable` server-driven sort/pagination + page-filter wiring; `ClientCardModal` and `ActivityDetailsModal` moved to dedicated (scoped) queries instead of the shared list.
+  - **Tests:** e2e `records.spec.ts` honestly reworked against the server-side contract (21/21); activity-details-modal 13/13, clients 17/17. Backend 1054 passed / 5 skipped; api-client 158 passed / 4 failed (4 = pre-existing #188, unchanged); admin vitest 1256 passed / 0 failed, `tsc --noEmit` clean; Visual Compliance Gate G4.5 passed (8/8 DOM checks; 2 environmental sub-skips covered by e2e).
+  - **Spec §10 acceptance criteria all met (§10.1–§10.9 + Scenario 2).** No user-facing breaking changes (deviation details are test-side only, not user-facing).
+  - **Domain-rules:** `records.md` (list-contract: params/validation/sort semantics + `seats = len(visits) + anonym_visits` invariant correction), `payments.md` (3-level payment-status bucket shared by display and ORDER BY), `activities.md` (shared `day_range` + 422 on invalid dates).
+  - **30 files changed, +2032 / -666.**
+  - Design spec: `docs/specs/2026-08-08-records-server-filters-pagination-sorting-design.md`
+  - Plan: `docs/plans/2026-08-08-records-server-filters-pagination-sorting-plan.md`
+
 ## [Unreleased] — 2026-08-08
 
 ### Added

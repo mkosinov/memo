@@ -77,6 +77,17 @@ export function createMockRecordsContext(
 ): RecordsContextType {
   return {
     records: [],
+    total: 0,
+    page: 1,
+    perPage: 10,
+    filters: { locationId: '', serviceId: '', masterId: '', status: '' },
+    sortBy: 'date',
+    sortOrder: 'asc',
+    setPage: vi.fn(),
+    setPerPage: vi.fn(),
+    setFilters: vi.fn(),
+    setSort: vi.fn(),
+    resetFilters: vi.fn(),
     clients: new Map(),
     payments: new Map(),
     activities: new Map(),

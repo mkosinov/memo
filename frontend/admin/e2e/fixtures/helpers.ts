@@ -169,6 +169,25 @@ export async function getFirstActivity(page: Page) {
 }
 
 /**
+ * Wait for the activity-details modal's records fetch — the modal loads
+ * ['records','activity',id] via GET /api/v1/records?activity_id=… on mount,
+ * and its booking tabs render only after that resolves (#191).
+ *
+ * Register BEFORE dispatching the open event. Tolerant (.catch) in case
+ * React Query dedupes the request (e.g. same activity re-opened while a
+ * fetch is already in flight) — helper must never introduce flakiness.
+ */
+function waitForModalRecords(page: Page): Promise<void> {
+  return page
+    .waitForResponse(
+      (r) => r.url().includes('/api/v1/records') && r.url().includes('activity_id='),
+      { timeout: 10_000 },
+    )
+    .then(() => {})
+    .catch(() => {});
+}
+
+/**
  * Open the activity details modal for an activity that has records (client tabs).
  * Dispatches a custom event that the modal listens to.
  *
@@ -236,11 +255,13 @@ export async function openModal(
       });
       if (!candidateActivity) continue;
 
+      const recordsWait = waitForModalRecords(page);
       await page.evaluate((act: any) => {
         document.dispatchEvent(new CustomEvent('__memo-open-modal', {
           detail: { activity: act },
         }));
       }, candidateActivity);
+      await recordsWait;
 
       await page.waitForSelector('[data-testid="activity-details-modal"]', {
         state: 'visible',
@@ -260,11 +281,13 @@ export async function openModal(
   }
 
   // Targeted mode: dispatch the activity from the matched card and verify modal.
+  const recordsWait = waitForModalRecords(page);
   await page.evaluate((act: any) => {
     document.dispatchEvent(new CustomEvent('__memo-open-modal', {
       detail: { activity: act },
     }));
   }, activity);
+  await recordsWait;
 
   await page.waitForSelector('[data-testid="activity-details-modal"]', {
     state: 'visible',
@@ -299,9 +322,11 @@ export async function openAddTab(
     throw new Error(`openAddTab: no activity found on week of ${targetDate}`);
   }
 
+  const recordsWait = waitForModalRecords(page);
   await page.evaluate((act: any) => {
     document.dispatchEvent(new CustomEvent('__memo-quick-add', { detail: { activity: act } }));
   }, activity);
+  await recordsWait;
 
   await page.waitForSelector('[data-testid="activity-details-modal"]', {
     state: 'visible',

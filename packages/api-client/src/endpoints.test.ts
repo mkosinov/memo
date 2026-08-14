@@ -260,6 +260,33 @@ describe('getRecords', () => {
       expect.anything(),
     );
   });
+
+  it('sends all new filter and sort params', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
+    await getRecords({
+      date_from: '2026-08-03',
+      date_to: '2026-08-09',
+      location_id: 'l-1',
+      service_id: 's-1',
+      master_id: 'm-1',
+      status: 'waiting',
+      activity_id: 'a-1',
+      sort_by: 'payment',
+      sort_order: 'desc',
+      page: 2,
+      per_page: 50,
+    });
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/records?date_from=2026-08-03&date_to=2026-08-09&activity_id=a-1&location_id=l-1&service_id=s-1&master_id=m-1&status=waiting&sort_by=payment&sort_order=desc&page=2&per_page=50',
+      expect.anything(),
+    );
+  });
+
+  it('omits empty/undefined params from the URL', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
+    await getRecords({ page: 1, per_page: 10, status: undefined, location_id: undefined });
+    expect(api).toHaveBeenCalledWith('/api/v1/records?page=1&per_page=10', expect.anything());
+  });
 });
 
 // ─── Clients ────────────────────────────────────────────────────────────────

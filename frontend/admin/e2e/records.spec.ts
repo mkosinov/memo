@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 import { waitForRecordsReady } from './fixtures/helpers';
 import {
   createTestClient,
@@ -9,15 +9,26 @@ import {
   cleanup,
 } from './fixtures/factories';
 
+const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
+
 /**
- * E2E tests for Records page functionality: filters, table display, search,
+ * E2E tests for Records page functionality: filters, table display,
  * sorting, pagination, and detail panel.
  *
- * The Records page loads data from the backend API via RecordsContext.
- * Filter dropdown options (location, service, master) come from mock data.
+ * Server-driven rework (#191): filters/sort/pagination are server params.
+ * Every interaction test registers page.waitForResponse with a URL-param
+ * predicate BEFORE the UI action, awaits it after, then asserts post-state.
+ * No page.route mocking, no waitForTimeout for server-sync waits.
  *
- * Requires: dev server on :3001, backend on :8000
+ * Requires: backend on :8000 (frontend via playwright webServer).
  */
+
+/** Read the server total from the "N всего" pagination label. */
+async function readServerTotal(page: Page): Promise<number> {
+  const text = (await page.locator('text=/\\d+\\s*всего/').first().textContent()) ?? '';
+  const m = text.match(/(\d+)\s*всего/);
+  return m ? parseInt(m[1], 10) : 0;
+}
 
 // ---------------------------------------------------------------------------
 // Tests — Records Page
@@ -119,50 +130,42 @@ test.describe('Records Page — Table and Filters', () => {
 
     // Status filter is a StatusFiltersPicker dropdown — open it to count options
     await page.locator('[data-testid="booking-filters-status-trigger"]').click();
-    await page.waitForTimeout(200);
     const statusOptions = page.locator('[data-testid^="booking-filters-status-option-"]');
+    await expect(statusOptions.first()).toBeVisible();
     const statusCount = await statusOptions.count();
     expect(statusCount).toBe(5); // all + waiting, visited, cancelled, missed
     // Close the dropdown
     await page.locator('[data-testid="booking-filters-status-trigger"]').click();
   });
 
-  // ── 6. Filter by status — table updates ──────────────────────────────────
+  // ── 6. Filter by status — server filters rows ────────────────────────────
 
   test('6. Filter by status — table updates', async ({ page, request }) => {
-    // Create test data — new records default to record status "pending"
+    // New records default to status "waiting"
     const client = await createTestClient(request);
     const activity = await createTestActivity(request);
     const record = await createTestRecord(request, activity.id, client.id);
 
-    let recordId = record.id;
-    let clientId = client.id;
+    const recordId = record.id;
+    const clientId = client.id;
 
     try {
-      // Reload to pick up new data
       await waitForRecordsReady(page);
 
-      // Count initial rows (before filtering)
-      const initialCount = await page.locator('tbody tr').count();
-
-      // Select "Ожидание" (waiting) status filter via StatusFiltersPicker dropdown
+      // Select "Ожидание" (waiting) — wait for the filtered server response
+      const filterResponse = page.waitForResponse(
+        (r) => r.url().includes('/api/v1/records') && r.url().includes('status=waiting'),
+        { timeout: 10_000 },
+      );
       await page.locator('[data-testid="booking-filters-status-trigger"]').click();
       await page.locator('[data-testid="booking-filters-status-option-waiting"]').click();
-      await page.waitForTimeout(500);
+      await filterResponse;
 
-      // Filtered count should be <= initial count
-      const filteredCount = await page.locator('tbody tr').count();
-      expect(filteredCount).toBeLessThanOrEqual(initialCount);
-
-      // If there are filtered rows (not empty state), all should have the correct status badge
-      if (filteredCount > 0) {
-        const emptyState = page.locator('td:has-text("Записи не найдены")');
-        const isEmptyState = await emptyState.isVisible().catch(() => false);
-        if (!isEmptyState) {
-          const statusBadges = page.locator('tbody tr span:text("Ожидание")');
-          const badgeCount = await statusBadges.count();
-          expect(badgeCount).toBe(filteredCount);
-        }
+      // Post-state: every visible status badge is "waiting"
+      const badges = page.locator('tbody tr [data-testid^="status-badge-"]');
+      await expect(badges.first()).toBeVisible();
+      for (const badge of await badges.all()) {
+        await expect(badge).toHaveAttribute('data-testid', 'status-badge-waiting');
       }
     } finally {
       await cleanup(request, `/api/v1/records/${recordId}`);
@@ -170,39 +173,54 @@ test.describe('Records Page — Table and Filters', () => {
     }
   });
 
-  // ── 7. Reset filters — returns to initial state ─────────────────────────
+  // ── 7. Reset filters — returns to unfiltered page 1 ─────────────────────
 
   test('7. Reset filters — returns to initial state', async ({ page, request }) => {
     const client = await createTestClient(request);
     const activity = await createTestActivity(request);
     const record = await createTestRecord(request, activity.id, client.id);
 
-    let recordId = record.id;
-    let clientId = client.id;
+    const recordId = record.id;
+    const clientId = client.id;
 
     try {
       await waitForRecordsReady(page);
 
-      const initialCount = await page.locator('tbody tr').count();
-
-      // Apply a filter
+      // Apply a status filter (same response-wait as test 6)
+      const filterResponse = page.waitForResponse(
+        (r) => r.url().includes('/api/v1/records') && r.url().includes('status=waiting'),
+        { timeout: 10_000 },
+      );
       await page.locator('[data-testid="booking-filters-status-trigger"]').click();
-      await page.locator('[data-testid="booking-filters-status-option-cancelled"]').click();
-      await page.waitForTimeout(500);
+      await page.locator('[data-testid="booking-filters-status-option-waiting"]').click();
+      await filterResponse;
 
-      // Click reset
+      const filteredCount = await page.locator('tbody tr').count();
+      const filteredTotal = await readServerTotal(page);
+
+      // Click reset. NOTE: after reset the query key returns to the initial
+      // unfiltered page-1 entry, which is still fresh (global staleTime 30s),
+      // so React Query serves it from cache — no network request fires. The
+      // honest assertions are therefore: (a) no records request WITH status=
+      // may fire after reset (negative watch), (b) post-state below.
+      const staleStatusRequest = page.waitForResponse(
+        (r) => r.url().includes('/api/v1/records') && r.url().includes('status='),
+        { timeout: 5_000 },
+      ).then(() => 'fired').catch(() => 'none');
       await page.locator('button:has-text("Сбросить")').click();
-      await page.waitForTimeout(500);
+      expect(await staleStatusRequest).toBe('none');
 
-      // All filter selects should be reset to empty
+      // All filter controls back to defaults
       await expect(page.locator('select[aria-label="Фильтр по локации"]')).toHaveValue('');
       await expect(page.locator('select[aria-label="Фильтр по услуге"]')).toHaveValue('');
       await expect(page.locator('select[aria-label="Фильтр по мастеру"]')).toHaveValue('');
       await expect(page.locator('[data-testid="booking-filters-status-trigger"]')).toContainText('Все статусы');
 
-      // Row count should be >= initial count (reset may expand date range to full week)
+      // Row count and server total grew or stayed equal after reset
       const resetCount = await page.locator('tbody tr').count();
-      expect(resetCount).toBeGreaterThanOrEqual(initialCount);
+      expect(resetCount).toBeGreaterThanOrEqual(filteredCount);
+      const resetTotal = await readServerTotal(page);
+      expect(resetTotal).toBeGreaterThanOrEqual(filteredTotal);
     } finally {
       await cleanup(request, `/api/v1/records/${recordId}`);
       await cleanup(request, `/api/v1/clients/${clientId}`);
@@ -216,8 +234,8 @@ test.describe('Records Page — Table and Filters', () => {
     const activity = await createTestActivity(request);
     const record = await createTestRecord(request, activity.id, client.id);
 
-    let recordId = record.id;
-    let clientId = client.id;
+    const recordId = record.id;
+    const clientId = client.id;
 
     try {
       await waitForRecordsReady(page);
@@ -228,7 +246,6 @@ test.describe('Records Page — Table and Filters', () => {
 
       // Click the first row
       await firstRow.click();
-      await page.waitForTimeout(500);
 
       // Detail panel should appear with "Детали записи" heading
       await expect(page.locator('h3:has-text("Детали записи")')).toBeVisible({ timeout: 5000 });
@@ -251,8 +268,8 @@ test.describe('Records Page — Table and Filters', () => {
     const activity = await createTestActivity(request);
     const record = await createTestRecord(request, activity.id, client.id);
 
-    let recordId = record.id;
-    let clientId = client.id;
+    const recordId = record.id;
+    const clientId = client.id;
 
     try {
       await waitForRecordsReady(page);
@@ -262,12 +279,10 @@ test.describe('Records Page — Table and Filters', () => {
 
       // Click to open detail panel
       await firstRow.click();
-      await page.waitForTimeout(500);
       await expect(page.locator('h3:has-text("Детали записи")')).toBeVisible({ timeout: 5000 });
 
       // Click again to close
       await firstRow.click();
-      await page.waitForTimeout(500);
 
       // Detail panel should disappear
       await expect(page.locator('h3:has-text("Детали записи")')).not.toBeVisible();
@@ -284,8 +299,8 @@ test.describe('Records Page — Table and Filters', () => {
     const activity = await createTestActivity(request);
     const record = await createTestRecord(request, activity.id, client.id);
 
-    let recordId = record.id;
-    let clientId = client.id;
+    const recordId = record.id;
+    const clientId = client.id;
 
     try {
       await waitForRecordsReady(page);
@@ -295,7 +310,6 @@ test.describe('Records Page — Table and Filters', () => {
 
       // Open detail panel
       await firstRow.click();
-      await page.waitForTimeout(500);
       await expect(page.locator('h3:has-text("Детали записи")')).toBeVisible({ timeout: 5000 });
 
       // Click the close button (✕) in the detail panel
@@ -309,65 +323,75 @@ test.describe('Records Page — Table and Filters', () => {
     }
   });
 
-  // ── 11. Sorting — click header toggles sort direction ────────────────────
+  // ── 11. Sorting — click header toggles server sort direction ─────────────
 
   test('11. Sorting — click header toggles sort direction', async ({ page, request }) => {
     // Seed 3 records with different clients for deterministic sort test
+    const ts = Date.now();
     const seeded = [
-      await createTestRecordWithClient(request, `АClient-${Date.now()}`),
-      await createTestRecordWithClient(request, `БClient-${Date.now() + 1}`),
-      await createTestRecordWithClient(request, `ВClient-${Date.now() + 2}`),
+      await createTestRecordWithClient(request, `АClient-${ts}`),
+      await createTestRecordWithClient(request, `БClient-${ts + 1}`),
+      await createTestRecordWithClient(request, `ВClient-${ts + 2}`),
     ];
 
     try {
       await waitForRecordsReady(page);
 
-      // Expand date filter to ensure seeded records are visible regardless of default week range
+      // Expand date filter to ensure seeded records are visible regardless
+      // of the default week range — each fill triggers a server request.
+      const dateFromWait = page.waitForResponse(
+        (r) => r.url().includes('/api/v1/records') && r.url().includes('date_from=2020-01-01'),
+        { timeout: 10_000 },
+      );
       await page.locator('input[aria-label="Фильтр по дате от"]').fill('2020-01-01');
+      await dateFromWait;
+      const dateToWait = page.waitForResponse(
+        (r) => r.url().includes('/api/v1/records') && r.url().includes('date_to=2030-12-31'),
+        { timeout: 10_000 },
+      );
       await page.locator('input[aria-label="Фильтр по дате до"]').fill('2030-12-31');
-      await page.waitForTimeout(500);
+      await dateToWait;
 
-      // Find the "Клиент" header and click it to sort
+      // Find the "Клиент" header
       const clientHeader = page.locator('table thead th').filter({ hasText: 'Клиент' });
       await expect(clientHeader).toBeVisible();
 
-      // Get initial order of client names
       const getName = async (index: number) =>
         page.locator('tbody tr').nth(index).locator('td').nth(1).textContent();
 
       // Wait for at least 3 rows (our seeded records)
-      await expect.poll(async () => page.locator('tbody tr').count(), { timeout: 10_000 }).toBeGreaterThanOrEqual(3);
+      await expect
+        .poll(async () => page.locator('tbody tr').count(), { timeout: 10_000 })
+        .toBeGreaterThanOrEqual(3);
 
-      const initialFirst = await getName(0);
-      const initialLast = await getName((await page.locator('tbody tr').count()) - 1);
-
-      // Click header to sort ascending
+      // First click on a NEW sort field → server request with sort_order=asc
+      const ascWait = page.waitForResponse(
+        (r) => r.url().includes('sort_by=client') && r.url().includes('sort_order=asc'),
+        { timeout: 10_000 },
+      );
       await clientHeader.click();
-      // Wait for network response to indicate sort completed
-      await page.waitForResponse(
-        (r) => r.url().includes('/api/v1/records') && r.status() === 200,
-        { timeout: 5_000 },
-      ).catch(() => {});
+      await ascWait;
 
+      const rowCount = await page.locator('tbody tr').count();
       const afterFirstAsc = await getName(0);
-      const afterLastAsc = await getName((await page.locator('tbody tr').count()) - 1);
+      const afterLastAsc = await getName(rowCount - 1);
 
-      // Click again to sort descending
+      // Second click on the SAME field → toggles to sort_order=desc
+      const descWait = page.waitForResponse(
+        (r) => r.url().includes('sort_by=client') && r.url().includes('sort_order=desc'),
+        { timeout: 10_000 },
+      );
       await clientHeader.click();
-      await page.waitForResponse(
-        (r) => r.url().includes('/api/v1/records') && r.status() === 200,
-        { timeout: 5_000 },
-      ).catch(() => {});
+      await descWait;
 
       const afterFirstDesc = await getName(0);
-      const afterLastDesc = await getName((await page.locator('tbody tr').count()) - 1);
 
-      // Ascending and descending should have different first elements (unless all same)
-      if (initialFirst !== initialLast) {
-        expect(afterFirstAsc).not.toBe(afterFirstDesc);
+      // Ascending and descending have different first elements (unless all same)
+      if (afterFirstAsc !== afterLastAsc) {
+        expect(afterFirstDesc).not.toBe(afterFirstAsc);
       }
 
-      // Verify sort indicator changes
+      // Sort indicator shows descending after the second click
       await expect(clientHeader).toContainText('↓');
     } finally {
       for (const s of seeded) {
@@ -377,18 +401,53 @@ test.describe('Records Page — Table and Filters', () => {
     }
   });
 
-  // ── 12. Pagination — page count selector works ───────────────────────────
+  // ── 12. Pagination — server total + page 2 disjoint ──────────────────────
 
-  test('12. Pagination — shows total count', async ({ page }) => {
-    await waitForRecordsReady(page);
+  test('12. Pagination — server total and page navigation', async ({ page, request }) => {
+    // Seed 12 records (> default per_page=10) on current-week activities.
+    // Seed records r1-r6 live in the fixed week 2026-06-15, so the current-week
+    // server total is driven by our 12 records alone.
+    const ts = Date.now();
+    const seeded = [];
+    for (let i = 0; i < 12; i++) {
+      seeded.push(await createTestRecordWithClient(request, `PgClient-${ts}-${i}`));
+    }
 
-    // Pagination area should show total count
-    await expect(page.locator('text=/\\d+ всего/')).toBeVisible();
+    try {
+      await waitForRecordsReady(page);
 
-    // Page size selector should be visible
-    const pageSizeSelect = page.locator('select').filter({ hasText: '10' });
-    if (await pageSizeSelect.isVisible()) {
-      await expect(pageSizeSelect).toBeVisible();
+      // "N всего" reflects the server total — at least our 12 records
+      const total = await readServerTotal(page);
+      expect(total).toBeGreaterThanOrEqual(12);
+
+      // Page 1: collect client names (unique per seeded record; the date
+      // column is useless for disjointness — all activities share "now")
+      const pageOneNames = await page
+        .locator('tbody tr td:nth-child(2)')
+        .allTextContents();
+      expect(pageOneNames.length).toBe(10); // default per_page
+
+      // Navigate to page 2 — server request carries page=2
+      const pageTwoWait = page.waitForResponse(
+        (r) => r.url().includes('/api/v1/records') && r.url().includes('page=2'),
+        { timeout: 10_000 },
+      );
+      await page.getByRole('button', { name: '2', exact: true }).click();
+      await pageTwoWait;
+
+      // Page 2 rows are disjoint from page 1 rows
+      const pageTwoNames = await page
+        .locator('tbody tr td:nth-child(2)')
+        .allTextContents();
+      expect(pageTwoNames.length).toBeGreaterThanOrEqual(2);
+      for (const name of pageTwoNames) {
+        expect(pageOneNames).not.toContain(name);
+      }
+    } finally {
+      for (const s of seeded) {
+        await cleanup(request, `/api/v1/records/${s.recordId}`);
+        await cleanup(request, `/api/v1/clients/${s.clientId}`);
+      }
     }
   });
 
@@ -397,21 +456,23 @@ test.describe('Records Page — Table and Filters', () => {
   test('13. Empty state — shows message when no records match', async ({ page }) => {
     await waitForRecordsReady(page);
 
-    // Set a very narrow date range unlikely to have records
-    const dateFromInput = page.locator('input[aria-label="Фильтр по дате от"]');
-    const dateToInput = page.locator('input[aria-label="Фильтр по дате до"]');
-    await dateFromInput.fill('2020-01-01');
-    await dateToInput.fill('2020-01-02');
-    await page.waitForTimeout(500);
+    // Narrow date range no seed data shares (seed weeks are relative to
+    // today plus the fixed week 2026-06-15) — each fill is a server request.
+    const dateFromWait = page.waitForResponse(
+      (r) => r.url().includes('/api/v1/records') && r.url().includes('date_from=2020-01-01'),
+      { timeout: 10_000 },
+    );
+    await page.locator('input[aria-label="Фильтр по дате от"]').fill('2020-01-01');
+    await dateFromWait;
+    const dateToWait = page.waitForResponse(
+      (r) => r.url().includes('/api/v1/records') && r.url().includes('date_to=2020-01-02'),
+      { timeout: 10_000 },
+    );
+    await page.locator('input[aria-label="Фильтр по дате до"]').fill('2020-01-02');
+    await dateToWait;
 
-    // If there are no records in that range, empty state should show
-    const emptyState = page.locator('td:has-text("Записи не найдены")');
-    const rowCount = await page.locator('tbody tr').count();
-
-    if (rowCount === 1) {
-      // Only the empty state row
-      await expect(emptyState).toBeVisible();
-    }
+    // Server returned an empty page for that range
+    await expect(page.locator('td:has-text("Записи не найдены")')).toBeVisible();
   });
 
   // ── 14. Client name is clickable — opens client card modal ───────────────
@@ -421,8 +482,8 @@ test.describe('Records Page — Table and Filters', () => {
     const activity = await createTestActivity(request);
     const record = await createTestRecord(request, activity.id, client.id);
 
-    let recordId = record.id;
-    let clientId = client.id;
+    const recordId = record.id;
+    const clientId = client.id;
 
     try {
       await waitForRecordsReady(page);
@@ -433,7 +494,6 @@ test.describe('Records Page — Table and Filters', () => {
       if (await clientButton.isVisible()) {
         // Click the client name button
         await clientButton.click();
-        await page.waitForTimeout(500);
 
         // Client card modal should appear (has the client name in a header)
         // The modal uses fixed positioning with z-50
@@ -445,7 +505,7 @@ test.describe('Records Page — Table and Filters', () => {
 
         // Close the modal
         await modal.locator('button[aria-label="Закрыть"]').click();
-        await page.waitForTimeout(300);
+        await expect(modal).not.toBeVisible();
       }
     } finally {
       await cleanup(request, `/api/v1/records/${recordId}`);
@@ -460,29 +520,40 @@ test.describe('Records Page — Table and Filters', () => {
     const activity = await createTestActivity(request);
     const record = await createTestRecord(request, activity.id, client.id);
 
-    let recordId = record.id;
-    let clientId = client.id;
+    const recordId = record.id;
+    const clientId = client.id;
 
     try {
       await waitForRecordsReady(page);
 
-      // Expand date filter to ensure seeded record is visible
+      // Expand date filter via server requests so the seeded record is visible
+      const dateFromWait = page.waitForResponse(
+        (r) => r.url().includes('/api/v1/records') && r.url().includes('date_from=2020-01-01'),
+        { timeout: 10_000 },
+      );
       await page.locator('input[aria-label="Фильтр по дате от"]').fill('2020-01-01');
+      await dateFromWait;
+      const dateToWait = page.waitForResponse(
+        (r) => r.url().includes('/api/v1/records') && r.url().includes('date_to=2030-12-31'),
+        { timeout: 10_000 },
+      );
       await page.locator('input[aria-label="Фильтр по дате до"]').fill('2030-12-31');
-      await page.waitForTimeout(500);
+      await dateToWait;
 
-      // The status filter uses VisitStatus via StatusFiltersPicker (waiting = "Ожидание").
+      // Filter by waiting status via StatusFiltersPicker — server request
+      const filterResponse = page.waitForResponse(
+        (r) => r.url().includes('/api/v1/records') && r.url().includes('status=waiting'),
+        { timeout: 10_000 },
+      );
       await page.locator('[data-testid="booking-filters-status-trigger"]').click();
       await page.locator('[data-testid="booking-filters-status-option-waiting"]').click();
-      await page.waitForTimeout(500);
+      await filterResponse;
 
       // Find the status badge in the table — use data-testid for robustness
       const statusBadge = page.locator('[data-testid="status-badge-waiting"]').first();
 
       // Badge should contain the status text
       await expect(statusBadge).toBeVisible({ timeout: 10_000 });
-
-      // Badge should contain the status text
       await expect(statusBadge).toContainText('Ожидание');
 
       // Badge should have amber styling (for "waiting" / "Ожидание" status)
@@ -494,91 +565,158 @@ test.describe('Records Page — Table and Filters', () => {
     }
   });
 
-  // ── 16. Filter by location — table updates ───────────────────────────────
+  // ── 16. Filter by location — server filters rows ─────────────────────────
 
-  test('16. Filter by location — narrows results', async ({ page }) => {
-    await waitForRecordsReady(page);
+  test('16. Filter by location — narrows results', async ({ page, request }) => {
+    // Seed a record on a known activity to learn a real location_id
+    const clientName = `LocFilter ${Date.now()}`;
+    const seeded = await createTestRecordWithClient(request, clientName);
 
-    const initialCount = await page.locator('tbody tr').count();
+    try {
+      const actResp = await request.get(`${BACKEND}/api/v1/activities/${seeded.activityId}`);
+      expect(actResp.ok()).toBeTruthy();
+      const activity = await actResp.json();
 
-    // Select the first non-empty location option
-    const locationSelect = page.locator('select[aria-label="Фильтр по локации"]');
-    const options = locationSelect.locator('option');
-    const optionCount = await options.count();
+      const locResp = await request.get(`${BACKEND}/api/v1/locations`);
+      const locations = (await locResp.json()).items ?? [];
+      const locationName = locations.find((l: any) => l.id === activity.location_id)?.name;
+      expect(locationName).toBeTruthy();
 
-    if (optionCount > 1) {
-      // Select the second option (first real location)
-      await locationSelect.selectOption({ index: 1 });
-      await page.waitForTimeout(500);
+      await waitForRecordsReady(page);
 
-      const filteredCount = await page.locator('tbody tr').count();
-      expect(filteredCount).toBeLessThanOrEqual(initialCount);
+      // Select that location — server request carries location_id=
+      const filterResponse = page.waitForResponse(
+        (r) =>
+          r.url().includes('/api/v1/records') &&
+          r.url().includes(`location_id=${activity.location_id}`),
+        { timeout: 10_000 },
+      );
+      await page
+        .locator('select[aria-label="Фильтр по локации"]')
+        .selectOption(activity.location_id);
+      await filterResponse;
+
+      // Post-state: our seeded record's row shows the selected location
+      const ourRow = page.locator('tbody tr').filter({ hasText: clientName });
+      await expect(ourRow.first().locator('td').nth(5)).toHaveText(locationName);
+
+      // Every other visible row shows the same location — or "—" when the row
+      // belongs to a parallel worker's record whose activity is not in the
+      // frontend's (stale, date-scoped) activities map yet. A row showing a
+      // DIFFERENT location name is a genuine filter violation and fails.
+      const rows = page.locator('tbody tr');
+      for (const row of await rows.all()) {
+        const text = (await row.locator('td').nth(5).textContent())?.trim();
+        expect([locationName, '—']).toContain(text);
+      }
+    } finally {
+      await cleanup(request, `/api/v1/records/${seeded.recordId}`);
+      await cleanup(request, `/api/v1/clients/${seeded.clientId}`);
     }
   });
 
-  // ── 17. Filter by service — table updates ────────────────────────────────
+  // ── 17. Filter by service — server filters rows ──────────────────────────
 
-  test('17. Filter by service — narrows results', async ({ page }) => {
-    await waitForRecordsReady(page);
+  test('17. Filter by service — narrows results', async ({ page, request }) => {
+    // Seed a record on a known activity to learn a real service_id
+    const clientName = `SvcFilter ${Date.now()}`;
+    const seeded = await createTestRecordWithClient(request, clientName);
 
-    const initialCount = await page.locator('tbody tr').count();
+    try {
+      const actResp = await request.get(`${BACKEND}/api/v1/activities/${seeded.activityId}`);
+      expect(actResp.ok()).toBeTruthy();
+      const activity = await actResp.json();
 
-    // Select the first non-empty service option
-    const serviceSelect = page.locator('select[aria-label="Фильтр по услуге"]');
-    const options = serviceSelect.locator('option');
-    const optionCount = await options.count();
+      const svcResp = await request.get(`${BACKEND}/api/v1/services`);
+      const services = (await svcResp.json()).items ?? [];
+      const serviceTitle = services.find((s: any) => s.id === activity.service_id)?.title;
+      expect(serviceTitle).toBeTruthy();
 
-    if (optionCount > 1) {
-      await serviceSelect.selectOption({ index: 1 });
-      await page.waitForTimeout(500);
+      await waitForRecordsReady(page);
 
-      const filteredCount = await page.locator('tbody tr').count();
-      expect(filteredCount).toBeLessThanOrEqual(initialCount);
+      // Select that service — server request carries service_id=
+      const filterResponse = page.waitForResponse(
+        (r) =>
+          r.url().includes('/api/v1/records') &&
+          r.url().includes(`service_id=${activity.service_id}`),
+        { timeout: 10_000 },
+      );
+      await page
+        .locator('select[aria-label="Фильтр по услуге"]')
+        .selectOption(activity.service_id);
+      await filterResponse;
+
+      // Post-state: our seeded record's row shows the selected service
+      const ourRow = page.locator('tbody tr').filter({ hasText: clientName });
+      await expect(ourRow.first().locator('td').nth(3)).toContainText(serviceTitle);
+
+      // Every other visible row shows the same service — or "—" when the row
+      // belongs to a parallel worker's record whose activity is not in the
+      // frontend's (stale, date-scoped) activities map yet. A row showing a
+      // DIFFERENT service title is a genuine filter violation and fails.
+      const rows = page.locator('tbody tr');
+      for (const row of await rows.all()) {
+        const text = (await row.locator('td').nth(3).textContent())?.trim() ?? '';
+        if (text !== '—') {
+          expect(text).toContain(serviceTitle);
+        }
+      }
+    } finally {
+      await cleanup(request, `/api/v1/records/${seeded.recordId}`);
+      await cleanup(request, `/api/v1/clients/${seeded.clientId}`);
     }
   });
 
-  // ── 18. Multiple filters — compound filtering ────────────────────────────
+  // ── 18. Multiple filters — URL accumulates both params ───────────────────
 
-  test('18. Multiple filters — compound filtering narrows results', async ({
+  test('18. Multiple filters — compound filtering accumulates params', async ({
     page,
     request,
   }) => {
-    // Create test data — new records default to record status "pending"
-    const client = await createTestClient(request, { name: 'Compound Filter' });
-    const activity = await createTestActivity(request);
-    const record = await createTestRecord(request, activity.id, client.id);
-
-    let recordId = record.id;
-    let clientId = client.id;
+    // Seed a record on a known activity to learn a real master_id
+    const seeded = await createTestRecordWithClient(request, `CompoundFilter ${Date.now()}`);
 
     try {
+      const actResp = await request.get(`${BACKEND}/api/v1/activities/${seeded.activityId}`);
+      expect(actResp.ok()).toBeTruthy();
+      const activity = await actResp.json();
+
       await waitForRecordsReady(page);
 
-      const initialCount = await page.locator('tbody tr').count();
-
-      // Apply status filter — use visit status "waiting" via StatusFiltersPicker
+      // First filter: status=waiting
+      const statusWait = page.waitForResponse(
+        (r) => r.url().includes('/api/v1/records') && r.url().includes('status=waiting'),
+        { timeout: 10_000 },
+      );
       await page.locator('[data-testid="booking-filters-status-trigger"]').click();
       await page.locator('[data-testid="booking-filters-status-option-waiting"]').click();
-      await page.waitForTimeout(300);
+      await statusWait;
 
-      const afterStatus = await page.locator('tbody tr').count();
-      expect(afterStatus).toBeLessThanOrEqual(initialCount);
+      // Second filter: master — the request URL accumulates BOTH params
+      const masterWait = page.waitForResponse(
+        (r) =>
+          r.url().includes('/api/v1/records') &&
+          r.url().includes('status=waiting') &&
+          r.url().includes(`master_id=${activity.master_id}`),
+        { timeout: 10_000 },
+      );
+      await page
+        .locator('select[aria-label="Фильтр по мастеру"]')
+        .selectOption(activity.master_id);
+      const masterResponse = await masterWait;
 
-      // Apply master filter on top of status filter
-      const masterSelect = page.locator('select[aria-label="Фильтр по мастеру"]');
-      const masterOptions = masterSelect.locator('option');
-      const masterOptionCount = await masterOptions.count();
+      expect(masterResponse.url()).toContain('status=waiting');
+      expect(masterResponse.url()).toContain(`master_id=${activity.master_id}`);
 
-      if (masterOptionCount > 1) {
-        await masterSelect.selectOption({ index: 1 });
-        await page.waitForTimeout(300);
-
-        const afterMaster = await page.locator('tbody tr').count();
-        expect(afterMaster).toBeLessThanOrEqual(afterStatus);
+      // Post-state: our seeded record matches both filters; all badges waiting
+      const badges = page.locator('tbody tr [data-testid^="status-badge-"]');
+      await expect(badges.first()).toBeVisible();
+      for (const badge of await badges.all()) {
+        await expect(badge).toHaveAttribute('data-testid', 'status-badge-waiting');
       }
     } finally {
-      await cleanup(request, `/api/v1/records/${recordId}`);
-      await cleanup(request, `/api/v1/clients/${clientId}`);
+      await cleanup(request, `/api/v1/records/${seeded.recordId}`);
+      await cleanup(request, `/api/v1/clients/${seeded.clientId}`);
     }
   });
 
@@ -591,8 +729,8 @@ test.describe('Records Page — Table and Filters', () => {
       visits: [{ name: `Price Test ${Date.now()}`, price: 3500 }],
     });
 
-    let recordId = record.id;
-    let clientId = client.id;
+    const recordId = record.id;
+    const clientId = client.id;
 
     try {
       await waitForRecordsReady(page);
@@ -624,13 +762,24 @@ test.describe('Records Page — Table and Filters', () => {
     try {
       await waitForRecordsReady(page);
 
-      // Expand date filter to ensure seeded record is visible
+      // Expand date filter via server requests so the seeded record is visible
+      const dateFromWait = page.waitForResponse(
+        (r) => r.url().includes('/api/v1/records') && r.url().includes('date_from=2020-01-01'),
+        { timeout: 10_000 },
+      );
       await page.locator('input[aria-label="Фильтр по дате от"]').fill('2020-01-01');
+      await dateFromWait;
+      const dateToWait = page.waitForResponse(
+        (r) => r.url().includes('/api/v1/records') && r.url().includes('date_to=2030-12-31'),
+        { timeout: 10_000 },
+      );
       await page.locator('input[aria-label="Фильтр по дате до"]').fill('2030-12-31');
-      await page.waitForTimeout(500);
+      await dateToWait;
 
       // Wait for at least one row to appear (our seeded record)
-      await expect.poll(async () => page.locator('tbody tr').count(), { timeout: 10_000 }).toBeGreaterThan(0);
+      await expect
+        .poll(async () => page.locator('tbody tr').count(), { timeout: 10_000 })
+        .toBeGreaterThan(0);
 
       // Look for payment status indicators in the table
       const paymentIndicators = page.locator('tbody td').filter({
@@ -646,6 +795,78 @@ test.describe('Records Page — Table and Filters', () => {
       }
       await cleanup(request, `/api/v1/records/${recordId}`);
       await cleanup(request, `/api/v1/clients/${clientId}`);
+    }
+  });
+
+  // ── 21. Sorting by payment — ascending groups paid first ─────────────────
+
+  test('21. Sorting by payment — ascending order is Оплачено → Частично → Не оплачено', async ({
+    page,
+    request,
+  }) => {
+    // Isolation (spec §9.3): three records on explicitly early-dated activities
+    // inside a narrow range no seed data shares (seed weeks are relative to
+    // today plus the fixed week 2026-06-15). One record per payment bucket.
+    const mkRecord = async (bucket: 'full' | 'partial' | 'none') => {
+      const client = await createTestClient(request);
+      const activity = await createTestActivity(request, { start: '2026-01-05T10:00:00' });
+      const record = await createTestRecord(request, activity.id, client.id);
+      let paymentId: string | null = null;
+      const amount = bucket === 'full' ? 3500 : bucket === 'partial' ? 1500 : 0;
+      if (amount > 0) {
+        const resp = await request.post(`${BACKEND}/api/v1/payments`, {
+          data: { record_id: record.id, amount, method: 'card' },
+        });
+        expect(resp.ok()).toBeTruthy();
+        paymentId = (await resp.json()).id;
+      }
+      return { clientId: client.id, recordId: record.id, paymentId };
+    };
+
+    const seeded = [await mkRecord('full'), await mkRecord('partial'), await mkRecord('none')];
+
+    try {
+      await waitForRecordsReady(page);
+
+      // Narrow the date range to the isolated window — server requests
+      const dateFromWait = page.waitForResponse(
+        (r) => r.url().includes('/api/v1/records') && r.url().includes('date_from=2026-01-01'),
+        { timeout: 10_000 },
+      );
+      await page.locator('input[aria-label="Фильтр по дате от"]').fill('2026-01-01');
+      await dateFromWait;
+      const dateToWait = page.waitForResponse(
+        (r) => r.url().includes('/api/v1/records') && r.url().includes('date_to=2026-01-10'),
+        { timeout: 10_000 },
+      );
+      await page.locator('input[aria-label="Фильтр по дате до"]').fill('2026-01-10');
+      await dateToWait;
+
+      // Click "Оплата" header — first click on a new field sends asc.
+      // Predicate matches the full param set (waitForResponse binds the FIRST
+      // matching response).
+      const sortWait = page.waitForResponse(
+        (r) => r.url().includes('sort_by=payment') && r.url().includes('sort_order=asc'),
+        { timeout: 10_000 },
+      );
+      await page.locator('table thead th').filter({ hasText: 'Оплата' }).click();
+      await sortWait;
+
+      // Exactly our three isolated records, paid buckets top → bottom
+      const rows = page.locator('tbody tr');
+      await expect(rows).toHaveCount(3);
+      const paymentCell = (i: number) => rows.nth(i).locator('td').nth(8);
+      await expect(paymentCell(0)).toContainText('Оплачено');
+      await expect(paymentCell(1)).toContainText('Частично');
+      await expect(paymentCell(2)).toContainText('Не оплачено');
+    } finally {
+      for (const s of seeded) {
+        if (s.paymentId) {
+          await cleanup(request, `/api/v1/payments/${s.paymentId}`);
+        }
+        await cleanup(request, `/api/v1/records/${s.recordId}`);
+        await cleanup(request, `/api/v1/clients/${s.clientId}`);
+      }
     }
   });
 });

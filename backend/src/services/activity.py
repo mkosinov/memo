@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date
 from functools import lru_cache
 from typing import Any
 
@@ -10,6 +10,7 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.repositories.generic import BaseRepository, get_base_repository
+from src.domain.dates import day_range
 from src.models.activity import Activity
 from src.models.payment import Payment
 from src.models.photo import Photo
@@ -41,8 +42,8 @@ class ActivityService(GenericService[ActivityCreate, ActivityUpdate, ActivityRes
         db_session: AsyncSession,
         page: int = 1,
         per_page: int = 20,
-        date_from: str | None = None,
-        date_to: str | None = None,
+        date_from: date | None = None,
+        date_to: date | None = None,
         **filters,
     ) -> PaginatedResponse[ActivityResponse]:
         """List activities with optional date range filter, paginated."""
@@ -53,28 +54,19 @@ class ActivityService(GenericService[ActivityCreate, ActivityUpdate, ActivityRes
     async def _list_by_date(
         self,
         db_session: AsyncSession,
-        date_from: str | None,
-        date_to: str | None,
+        date_from: date | None,
+        date_to: date | None,
         page: int,
         per_page: int,
     ) -> PaginatedResponse[ActivityResponse]:
         """Return a paginated page of activities filtered by date range."""
         stmt = select(Activity)
-        if date_from:
-            from_dt = datetime.fromisoformat(date_from)
+        from_dt, to_dt = day_range(date_from, date_to)
+        if from_dt is not None:
             stmt = stmt.where(Activity.start >= from_dt)
-        if date_to:
-            to_dt = datetime.fromisoformat(date_to)
-            to_dt = to_dt.replace(hour=23, minute=59, second=59)
+        if to_dt is not None:
             stmt = stmt.where(Activity.start <= to_dt)
-        total = (
-            await db_session.execute(select(func.count()).select_from(stmt.subquery()))
-        ).scalar_one()
-        result = await db_session.execute(
-            stmt.limit(per_page).offset((page - 1) * per_page)
-        )
-        items = [ActivityResponse.model_validate(a) for a in result.scalars().all()]
-        return PaginatedResponse(items=items, total=total, page=page, per_page=per_page)
+        return await self._paginate(db_session, stmt, page, per_page)
 
     async def sum_active_seats(
         self, db_session: AsyncSession, activity_id: str

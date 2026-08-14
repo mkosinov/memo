@@ -63,6 +63,20 @@ A Payment is a financial transaction for a Record. Payments track how much a cli
 
 **Tests:** 5 backend API tests (multiple records, record without payments, empty record_ids → 200 `{}`, over-cap → 422, mixed results). 1 regression guard test with >100 payments in DB (backend). Frontend tests for RecordsContext totals wiring, RecordsTable status/sort, ClientCardModal per-record statuses.
 
+### Payment-status bucket — shared by display and ORDER BY
+
+Per-record payment status («Оплачено» / «Частично» / «Не оплачено») and the records-list `sort_by=payment` ORDER BY use the **same 3-level bucket**, computed over `paid = SUM(Payment.amount)` (from the totals map) and `total = SUM(Visit.price)`:
+
+| Bucket | Condition | Label |
+|--------|-----------|-------|
+| 0 | paid ≥ total | Оплачено |
+| 1 | 0 < paid < total | Частично |
+| 2 | paid = 0 | Не оплачено |
+
+**Backend (#191):** the SQL `case()` expression lives in `RecordService._sort_columns()` (`backend/src/services/record.py`) and is consumed only by the `payment` sort key of `GET /api/v1/records` (records.md list contract). A record with no visits and no payments lands in bucket 0 (`0 ≥ 0`), which matches the frontend display (`paid >= total`).
+
+**Frontend:** RecordsTable and ClientCardModal derive the same labels from the totals map (missing key = paid 0 = «Не оплачено»). Because both paths use identical thresholds (`paid >= total` → 0/«Оплачено», `paid > 0` → 1/«Частично», else → 2/«Не оплачено»), the server sort order and the displayed labels can never disagree.
+
 ## Relationships
 - Payment → belongs to Record
 

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useState } from 'react';
 import { useRecords } from '@/contexts/RecordsContext';
 import { useRecordData } from '@/hooks/useRecordData';
 import type { RecordResponse, ActivityResponse } from '@memo/api-client';
@@ -52,25 +52,14 @@ function parseActivityStart(start: string): { date: string; day: number; startTi
   return { date, day, startTime };
 }
 
-interface RecordsTableProps {
-  filters: {
-    dateFrom: string;
-    dateTo: string;
-    locationId: string;
-    serviceId: string;
-    masterId: string;
-    status: string;
-  };
-}
-
-export function RecordsTable({ filters }: RecordsTableProps) {
-  const { records, clients, payments, activities, masters, services, locations, error, refetch } = useRecords();
+export function RecordsTable() {
+  const {
+    records, clients, payments, activities, masters, services, locations,
+    total, page, perPage, setPage, setPerPage, sortBy, sortOrder, setSort,
+    error, refetch,
+  } = useRecords();
 
   const [selectedRecord, setSelectedRecord] = useState<RecordResponse | null>(null);
-  const [sortField, setSortField] = useState<string | null>(null);
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
-  const [page, setPage] = useState(0);
-  const [pageSize, setPageSize] = useState(10);
   const [clientModalId, setClientModalId] = useState<string | null>(null);
 
   const [visibleKeys, setVisibleKeys] = useState<string[]>(() => {
@@ -84,126 +73,10 @@ export function RecordsTable({ filters }: RecordsTableProps) {
   const getActivity = (id: string): ActivityResponse | undefined =>
     activities.get(id);
 
-  const filteredRecords = useMemo(() => {
-    return records.filter((r) => {
-      const activity = getActivity(r.activity_id);
-      if (!activity) return false;
-      const { date } = parseActivityStart(activity.start);
-      // Date range
-      if (filters.dateFrom && date < filters.dateFrom) return false;
-      if (filters.dateTo && date > filters.dateTo) return false;
-      // Location
-      if (filters.locationId && activity.location_id !== filters.locationId) return false;
-      // Service
-      if (filters.serviceId && activity.service_id !== filters.serviceId) return false;
-      // Master
-      if (filters.masterId && activity.master_id !== filters.masterId) return false;
-      // Status
-      if (filters.status && r.status !== filters.status) return false;
-      return true;
-    });
-  }, [records, filters, activities]);
-
-  // Sort
-  const handleSort = (field: string) => {
-    if (sortField === field) {
-      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
-    } else {
-      setSortField(field);
-      setSortDir('asc');
-    }
-  };
-
-  const sortIcon = (field: string) => {
-    if (sortField !== field) return ' ↕';
-    return sortDir === 'asc' ? ' ↑' : ' ↓';
-  };
-
-  const sortedRecords = useMemo(() => {
-    if (!sortField) return filteredRecords;
-    const sorted = [...filteredRecords];
-    sorted.sort((a, b) => {
-      const aAct = getActivity(a.activity_id);
-      const bAct = getActivity(b.activity_id);
-      let cmp = 0;
-      switch (sortField) {
-        case 'date': {
-          const aParsed = aAct ? parseActivityStart(aAct.start) : null;
-          const bParsed = bAct ? parseActivityStart(bAct.start) : null;
-          if (aParsed && !bParsed) { cmp = -1; break; }
-          if (!aParsed && bParsed) { cmp = 1; break; }
-          if (aParsed && bParsed) {
-            cmp = aParsed.date.localeCompare(bParsed.date);
-            if (cmp === 0) cmp = aParsed.startTime - bParsed.startTime;
-          } else {
-            cmp = 0;
-          }
-          break;
-        }
-        case 'client': {
-          const aCl = a.client_id ? clients.get(a.client_id)?.name || '' : '';
-          const bCl = b.client_id ? clients.get(b.client_id)?.name || '' : '';
-          cmp = aCl.localeCompare(bCl);
-          break;
-        }
-        case 'service': {
-          const aSvc = aAct ? services.get(aAct.service_id)?.title || '' : '';
-          const bSvc = bAct ? services.get(bAct.service_id)?.title || '' : '';
-          cmp = aSvc.localeCompare(bSvc);
-          break;
-        }
-        case 'master': {
-          const aMst = aAct ? displayMasterName(masters.get(aAct.master_id) ?? { first_name: '', last_name: '' }) : '';
-          const bMst = bAct ? displayMasterName(masters.get(bAct.master_id) ?? { first_name: '', last_name: '' }) : '';
-          cmp = aMst.localeCompare(bMst);
-          break;
-        }
-        case 'location': {
-          const aLoc = aAct ? locations.get(aAct.location_id)?.name || '' : '';
-          const bLoc = bAct ? locations.get(bAct.location_id)?.name || '' : '';
-          cmp = aLoc.localeCompare(bLoc);
-          break;
-        }
-        case 'guests': {
-          cmp = a.visits.length - b.visits.length;
-          break;
-        }
-        case 'status':
-          cmp = a.status.localeCompare(b.status);
-          break;
-        case 'total': {
-          const aTot = a.visits.reduce((s, v) => s + v.price, 0);
-          const bTot = b.visits.reduce((s, v) => s + v.price, 0);
-          cmp = aTot - bTot;
-          break;
-        }
-        case 'payment': {
-          const aTot2 = a.visits.reduce((s, v) => s + v.price, 0);
-          const bTot2 = b.visits.reduce((s, v) => s + v.price, 0);
-          const aPaid = payments.get(a.id) ?? 0;
-          const bPaid = payments.get(b.id) ?? 0;
-          const aLevel = aPaid >= aTot2 ? 0 : aPaid > 0 ? 1 : 2;
-          const bLevel = bPaid >= bTot2 ? 0 : bPaid > 0 ? 1 : 2;
-          cmp = aLevel - bLevel;
-          break;
-        }
-      }
-      return sortDir === 'asc' ? cmp : -cmp;
-    });
-    return sorted;
-  }, [filteredRecords, sortField, sortDir, clients, services, masters, locations, payments]);
-
-  // Pagination
-  const paginatedRecords = useMemo(() => {
-    return sortedRecords.slice(page * pageSize, (page + 1) * pageSize);
-  }, [sortedRecords, page, pageSize]);
-
-  const totalPages = Math.ceil(sortedRecords.length / pageSize);
-
-  // Reset page when filters change
-  useEffect(() => {
-    setPage(0);
-  }, [filters]);
+  // Sort is server-driven: header clicks go to the context, indicator reads it
+  const sortIcon = (field: string) =>
+    sortBy !== field ? ' ↕' : sortOrder === 'asc' ? ' ↑' : ' ↓';
+  const totalPages = Math.ceil(total / perPage);
 
   // Detail helpers
   const selectedActivity = selectedRecord ? getActivity(selectedRecord.activity_id) : null;
@@ -249,60 +122,60 @@ export function RecordsTable({ filters }: RecordsTableProps) {
           <thead>
             <tr className="border-b" style={{ borderColor: 'var(--line)', backgroundColor: 'var(--surface)' }}>
               {visibleKeys.includes('date') && (
-              <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: 'var(--ink-light)' }} onClick={() => handleSort('date')}>
+              <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: 'var(--ink-light)' }} onClick={() => setSort('date')}>
                 Дата / Время {sortIcon('date')}
               </th>
               )}
               {visibleKeys.includes('client') && (
-              <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: 'var(--ink-light)' }} onClick={() => handleSort('client')}>
+              <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: 'var(--ink-light)' }} onClick={() => setSort('client')}>
                 Клиент {sortIcon('client')}
               </th>
               )}
               {visibleKeys.includes('guests') && (
-              <th className="text-center px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: 'var(--ink-light)' }} onClick={() => handleSort('guests')}>
+              <th className="text-center px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: 'var(--ink-light)' }} onClick={() => setSort('guests')}>
                 Гостей {sortIcon('guests')}
               </th>
               )}
               {visibleKeys.includes('service') && (
-              <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: 'var(--ink-light)' }} onClick={() => handleSort('service')}>
+              <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: 'var(--ink-light)' }} onClick={() => setSort('service')}>
                 Услуга {sortIcon('service')}
               </th>
               )}
               {visibleKeys.includes('master') && (
-              <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: 'var(--ink-light)' }} onClick={() => handleSort('master')}>
+              <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: 'var(--ink-light)' }} onClick={() => setSort('master')}>
                 Мастер {sortIcon('master')}
               </th>
               )}
               {visibleKeys.includes('location') && (
-              <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: 'var(--ink-light)' }} onClick={() => handleSort('location')}>
+              <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: 'var(--ink-light)' }} onClick={() => setSort('location')}>
                 Локация {sortIcon('location')}
               </th>
               )}
               {visibleKeys.includes('status') && (
-              <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: 'var(--ink-light)' }} onClick={() => handleSort('status')}>
+              <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: 'var(--ink-light)' }} onClick={() => setSort('status')}>
                 Статус {sortIcon('status')}
               </th>
               )}
               {visibleKeys.includes('total') && (
-              <th className="text-right px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: 'var(--ink-light)' }} onClick={() => handleSort('total')}>
+              <th className="text-right px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: 'var(--ink-light)' }} onClick={() => setSort('total')}>
                 Сумма {sortIcon('total')}
               </th>
               )}
               {visibleKeys.includes('payment') && (
-              <th className="text-center px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: 'var(--ink-light)' }} onClick={() => handleSort('payment')}>
+              <th className="text-center px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: 'var(--ink-light)' }} onClick={() => setSort('payment')}>
                 Оплата {sortIcon('payment')}
               </th>
               )}
             </tr>
           </thead>
           <tbody>
-            {paginatedRecords.map((record) => {
+            {records.map((record) => {
               const activity = getActivity(record.activity_id);
               const client = record.client_id ? clients.get(record.client_id) : null;
               const service = activity ? services.get(activity.service_id) : null;
               const location = activity ? locations.get(activity.location_id) : null;
-              const total = totalForRecord(record.id);
-              const paid = paidForRecord(record.id);
+              const recordTotal = totalForRecord(record.id);
+              const recordPaid = paidForRecord(record.id);
               const isSelected = selectedRecord?.id === record.id;
 
               return (
@@ -402,17 +275,17 @@ export function RecordsTable({ filters }: RecordsTableProps) {
                   {/* Сумма */}
                   {visibleKeys.includes('total') && (
                   <td className="px-4 py-3 text-sm text-right font-medium" style={{ color: 'var(--ink)' }}>
-                    {formatPrice(total)}
+                    {formatPrice(recordTotal)}
                   </td>
                   )}
 
                   {/* Оплата */}
                   {visibleKeys.includes('payment') && (
                   <td className="px-4 py-3 text-center">
-                    {paid >= total ? (
+                    {recordPaid >= recordTotal ? (
                       <span className="inline-flex items-center gap-1 text-xs font-medium" style={{ color: 'var(--success)' }}>✓ Оплачено</span>
-                    ) : paid > 0 ? (
-                      <span className="inline-flex items-center gap-1 text-xs font-medium" style={{ color: 'var(--warning)' }}>Частично ({formatPrice(paid)})</span>
+                    ) : recordPaid > 0 ? (
+                      <span className="inline-flex items-center gap-1 text-xs font-medium" style={{ color: 'var(--warning)' }}>Частично ({formatPrice(recordPaid)})</span>
                     ) : (
                       <span className="inline-flex items-center gap-1 text-xs font-medium" style={{ color: 'var(--danger)' }}>Не оплачено</span>
                     )}
@@ -421,7 +294,7 @@ export function RecordsTable({ filters }: RecordsTableProps) {
                 </tr>
               );
             })}
-            {paginatedRecords.length === 0 && (
+            {records.length === 0 && (
               <tr>
                 <td colSpan={visibleKeys.length} className="px-4 py-12 text-center text-sm" style={{ color: 'var(--ink-light)' }}>
                   Записи не найдены
@@ -436,8 +309,8 @@ export function RecordsTable({ filters }: RecordsTableProps) {
           <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--ink-light)' }}>
             <span>Строк:</span>
             <select
-              value={pageSize}
-              onChange={(e) => { setPageSize(Number(e.target.value)); setPage(0); }}
+              value={perPage}
+              onChange={(e) => setPerPage(Number(e.target.value))}
               className="border rounded px-2 py-1 text-xs"
               style={{ borderColor: 'var(--line)', backgroundColor: 'var(--white)', color: 'var(--ink)' }}
             >
@@ -446,34 +319,34 @@ export function RecordsTable({ filters }: RecordsTableProps) {
               <option value={50}>50</option>
               <option value={100}>100</option>
             </select>
-            <span>{sortedRecords.length} всего</span>
+            <span>{total} всего</span>
           </div>
           <div className="flex items-center gap-1">
             <button
-              onClick={() => setPage(Math.max(0, page - 1))}
-              disabled={page === 0}
+              onClick={() => setPage(Math.max(1, page - 1))}
+              disabled={page <= 1}
               className="px-3 py-1 text-sm rounded border disabled:opacity-30"
               style={{ borderColor: 'var(--line)', color: 'var(--ink)' }}
             >
               ←
             </button>
-            {Array.from({ length: totalPages }, (_, i) => (
+            {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
               <button
-                key={i}
-                onClick={() => setPage(i)}
-                className={`px-3 py-1 text-sm rounded border ${i === page ? 'font-bold' : ''}`}
+                key={p}
+                onClick={() => setPage(p)}
+                className={`px-3 py-1 text-sm rounded border ${p === page ? 'font-bold' : ''}`}
                 style={{
                   borderColor: 'var(--line)',
-                  backgroundColor: i === page ? 'var(--brand)' : 'transparent',
-                  color: i === page ? 'white' : 'var(--ink)',
+                  backgroundColor: p === page ? 'var(--brand)' : 'transparent',
+                  color: p === page ? 'white' : 'var(--ink)',
                 }}
               >
-                {i + 1}
+                {p}
               </button>
             ))}
             <button
-              onClick={() => setPage(Math.min(totalPages - 1, page + 1))}
-              disabled={page >= totalPages - 1}
+              onClick={() => setPage(Math.min(totalPages, page + 1))}
+              disabled={page >= totalPages}
               className="px-3 py-1 text-sm rounded border disabled:opacity-30"
               style={{ borderColor: 'var(--line)', color: 'var(--ink)' }}
             >

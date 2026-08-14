@@ -21,10 +21,12 @@ import {
 } from '@memo/api-client';
 import type { RecordResponse, PaymentResponse, VisitPatch } from '@memo/api-client';
 import {
+  mapRecordsListCache,
   removePayment,
   removeVisit,
   upsertPayment,
   upsertVisit,
+  type RecordsListCache,
 } from '@/lib/cache/recordCacheSync';
 import { usePendingActions } from '@/contexts/PendingActionsContext';
 
@@ -185,9 +187,9 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
     // Optimistic update: remove record from EVERY ['records', ...] cache via prefix match
     // (Absorbs #130 Bug 1 — the old bare setQueryData only touched the exact key ['records'],
     //  not ['records', df, dt] or ['records', 'client', id]).
-    queryClient.setQueriesData<RecordResponse[] | undefined>(
+    queryClient.setQueriesData<RecordsListCache | undefined>(
       { queryKey: ['records'] },
-      (old) => (old == null ? old : old.filter((r) => r.id !== recordId)),
+      (old) => mapRecordsListCache(old, (items) => items.filter((r) => r.id !== recordId)),
     );
     // Targeted invalidation: ScheduleActivityCard + RecordModal
     invalidateRecordAndLists();

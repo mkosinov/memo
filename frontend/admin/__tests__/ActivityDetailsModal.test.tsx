@@ -41,6 +41,7 @@ vi.mock('@memo/api-client', () => ({
   patchPayment: vi.fn(),
   deletePayment: vi.fn(),
   updateVisitStatus: vi.fn(),
+  getRecords: vi.fn(),
 }));
 
 import {
@@ -52,6 +53,7 @@ import {
   createPayment,
   deletePayment,
   updateVisitStatus,
+  getRecords,
 } from '@memo/api-client';
 
 // ─── Context Mocks ──────────────────────────────────────────────────────────
@@ -127,11 +129,30 @@ import { useRecords } from '@/contexts/RecordsContext';
 import { useUI } from '@/contexts/UIContext';
 import { useClients } from '@/contexts/ClientsContext';
 import { useRecordData } from '@/hooks/useRecordData';
+import { useQuery } from '@tanstack/react-query';
 
 const mockUseSchedule = vi.mocked(useSchedule);
 const mockUseRecords = vi.mocked(useRecords);
 const mockUseUI = vi.mocked(useUI);
 const mockUseClients = vi.mocked(useClients);
+const mockUseQuery = vi.mocked(useQuery);
+
+// Helper: make the mocked useQuery serve the per-activity records query (#191).
+// Context `records` is now one server page, so the modal must get the activity's
+// bookings from its own ['records', 'activity', activityId] query instead.
+function stubActivityRecordsQuery(records: unknown[]) {
+  mockUseQuery.mockImplementation((opts: unknown) => {
+    const key = (opts as { queryKey: unknown }).queryKey;
+    if (Array.isArray(key) && key[0] === 'records' && key[1] === 'activity') {
+      return { data: records, isLoading: false } as never;
+    }
+    return { data: undefined, isLoading: false } as never;
+  });
+}
+
+function resetActivityRecordsQuery() {
+  mockUseQuery.mockImplementation(() => ({ data: undefined, isLoading: false } as never));
+}
 
 beforeEach(() => {
   mockUseSchedule.mockReturnValue(createMockScheduleContext());
@@ -427,9 +448,12 @@ describe('ActivityDetailsModal — API integration', () => {
     vi.mocked(deleteRecord).mockResolvedValue(undefined);
     vi.mocked(createPayment).mockResolvedValue({ id: 'p1', record_id: 'r1', amount: 1000, method: 'card', created_at: '', updated_at: '' });
     vi.mocked(searchClientByPhone).mockRejectedValue(new Error('Not found'));
+    // #191: booking tabs come from the activity-records query, not context records
+    stubActivityRecordsQuery(mockRecords);
   });
 
   afterEach(() => {
+    resetActivityRecordsQuery();
     vi.clearAllMocks();
   });
 
@@ -472,6 +496,74 @@ describe('ActivityDetailsModal — API integration', () => {
     // ClientTab should render with client data
     expect(screen.getByTestId('client-tab')).toBeInTheDocument();
     expect(screen.getByTestId('record-summary')).toBeInTheDocument();
+  });
+});
+
+// ─── ActivityDetailsModal: dedicated activity-records query (#191) ───────────
+
+describe('ActivityDetailsModal — dedicated activity-records query (#191)', () => {
+  const mockClientMap = new Map([
+    ['c1', mockClientWithStats],
+  ]);
+
+  beforeEach(() => {
+    vi.mocked(getRecords).mockResolvedValue({
+      items: [mockRecord],
+      total: 1,
+      page: 1,
+      per_page: 100,
+      pages: 1,
+    } as never);
+    // Context records is ONE server page — deliberately EMPTY to prove the modal
+    // no longer builds booking tabs from it
+    mockUseRecords.mockReturnValue({
+      ...createMockRecordsContext(),
+      records: [],
+      clients: mockClientMap,
+    });
+    stubActivityRecordsQuery([mockRecord]);
+  });
+
+  afterEach(() => {
+    resetActivityRecordsQuery();
+    vi.clearAllMocks();
+  });
+
+  it('renders booking tabs from the activity-records query, not context records', () => {
+    render(
+      <ActivityDetailsModal isOpen={true} onClose={vi.fn()} activity={mockActivity} mode="edit" />,
+    );
+    expect(screen.getByText('Анна Иванова')).toBeInTheDocument();
+  });
+
+  it('queries records with activity_id and per_page=100 when open', async () => {
+    render(
+      <ActivityDetailsModal isOpen={true} onClose={vi.fn()} activity={mockActivity} mode="edit" />,
+    );
+
+    const activityQuery = mockUseQuery.mock.calls
+      .map(([opts]) => opts as { queryKey: unknown; enabled?: boolean; queryFn: () => Promise<unknown> })
+      .find((o) => Array.isArray(o.queryKey) && (o.queryKey as unknown[])[0] === 'records' && (o.queryKey as unknown[])[1] === 'activity');
+
+    expect(activityQuery).toBeDefined();
+    expect(activityQuery!.queryKey).toEqual(['records', 'activity', mockActivity.id]);
+    expect(activityQuery!.enabled).toBe(true);
+
+    await activityQuery!.queryFn();
+    expect(getRecords).toHaveBeenCalledWith({ activity_id: mockActivity.id, per_page: 100 });
+  });
+
+  it('disables the query when the modal is closed', () => {
+    render(
+      <ActivityDetailsModal isOpen={false} onClose={vi.fn()} activity={mockActivity} mode="edit" />,
+    );
+
+    const activityQuery = mockUseQuery.mock.calls
+      .map(([opts]) => opts as { queryKey: unknown; enabled?: boolean })
+      .find((o) => Array.isArray(o.queryKey) && (o.queryKey as unknown[])[0] === 'records' && (o.queryKey as unknown[])[1] === 'activity');
+
+    expect(activityQuery).toBeDefined();
+    expect(activityQuery!.enabled).toBe(false);
   });
 });
 

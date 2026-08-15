@@ -46,7 +46,11 @@ Model/DB → is_active: bool column (UNCHANGED — no migration, no rename)
 
 ### 3.1 Response schema (all 5 entities)
 
-`is_active: bool` → `archived: bool` (**INVERSION: `true` = in archive**). The DB column stays `is_active`; the API only ever exposes `archived = not is_active`. Mapper translation lives in the Service/response-builder layer.
+`is_active: bool` → `archived: bool` (**INVERSION: `archived = true` = in archive = `is_active = false`**). The DB column stays `is_active`; the API only ever exposes `archived = not is_active`. Mapper translation lives in the Service/response-builder layer.
+
+**Two mapper paths for Client (not one):**
+1. `ClientResponse` — the standard entity response (inverted in the service/mapper).
+2. `ClientWithStats` (extends `ClientResponse`, built manually in `list_clients_with_stats` — service builds it and currently passes `is_active=row.is_active` directly). This manual mapper is a **second inversion point** that the ".response schemas" wording would miss and which will break the Pydantic model at compile time once `is_active` leaves the schema. The plan MUST invert it to `archived = not row.is_active` explicitly (it is not reached via the generic path).
 
 ### 3.2 PUT/PATCH schemas (all 5 entities)
 
@@ -112,7 +116,7 @@ Returned by `DELETE /{id}` when dependencies exist. No rows modified. Contains *
   "dependencies": [
     {"entity": "activities", "count": 3, "allowed_actions": [], "message": "Remove activities first or archive"},
     {"entity": "visitors", "count": 12, "allowed_actions": ["cascade"],
-     "cascade_preview": {"visits": 45, "payments": {"count": 30, "total": 15000}}},
+     "cascade_preview": {"visits": 45}},
     {"entity": "records", "count": 47, "allowed_actions": ["nullify"]},
     {"entity": "client_tags", "count": 5, "allowed_actions": ["cascade"]}
   ]
@@ -125,7 +129,7 @@ Field semantics:
 - `allowed_actions: ["nullify"]` / `["cascade"]` → choice required from the user (non-auto dep).
 - `allowed_actions: ["cascade"]` with no entry in the user's `resolutions` body on `POST /{id}/delete` → 422 (resolution required for all non-auto deps).
 - Auto deps (`*_tags`, tariffs, photos-service) appear in the tree with `allowed_actions` matching the auto-action but are **never** part of the user's `resolutions` body — server resolves them automatically.
-- `cascade_preview` — downstream aggregates for cascade actions. For Client → visitors cascade: `visits` count, `payments` count + `total` sum. Absent for nullify actions (nothing downstream is hard-deleted).
+- `cascade_preview` — downstream aggregates for cascade actions. For Client → visitors cascade: `visits` count (the rows physically deleted when visitors cascade to visits). **Payments are EXCLUDED** — `Payment` is record-scoped (`payments.record_id → records.id`), and Client→records is *nullify* (records survive), so their payments are NOT part of the visitors cascade and survive with the nullified records. Absent for nullify actions (nothing downstream is hard-deleted).
 - `message` — human hint, free-form Russian string (shown in the frontend dialog).
 
 ---
@@ -200,7 +204,9 @@ These already exist (from #194) and are the **reference pattern** for the `POST 
 - `VisitorService.delete` — `services/visitor.py:37-59` (visits → photos SET NULL → visitor_tags → visitor)
 - `ActivityService.delete` — `services/activity.py:126-162` (visits/payments → record_tags → records → photos SET NULL → activity_tags → activity)
 
-All three run dependency-ordered SQL inside one `@transactional` method. `POST /{id}/delete` for Client delegates the visitors cascade to `VisitorService.delete` (or its shared core) so visits → payments cascade automatically. For Master/Location/Service there is no cascade (only block/nullify/auto-cascade-tags/tariffs) so the transaction is simpler.
+All three run dependency-ordered SQL inside one `@transactional` method. `POST /{id}/delete` for Client delegates the visitors cascade to `VisitorService.delete`'s internal ordering so visits → payments cascade automatically. For Master/Location/Service there is no cascade (only block/nullify/auto-cascade-tags/tariffs) so the transaction is simpler.
+
+**Atomicity requirement (BLOCKER-class, must be explicit in the plan):** `VisitorService.delete` as written is a **per-visitor** `@transactional` method — calling it in a loop over N visitors is NOT atomic (each `@transactional` commits the session at `services/decorators.py`, so a mid-loop failure leaves the records-nullify and prior visitor deletes committed). The Client→visitors cascade MUST instead call a **non-decorated extracted core** (e.g. `VisitorService._delete_cascade(visitor, session)` operating on the passed session) within the single outer `ClientService.delete` `@transactional` transaction — i.e. extract the per-visitor delete body into a pure-function helper that takes the session, and have both `VisitorService.delete` (decorated, own session) and the Client cascade (decorated once, shared session) call it. The plan MUST schedule this extraction as an explicit step; the AC below asserts it.
 
 ---
 
@@ -261,9 +267,9 @@ Each scenario maps 1:1 to an E2E test (Playwright, `frontend/admin/e2e/`).
 **E2E:** `e2e/masters-delete-blocked.spec.ts` — seed master+3 activities, click delete, assert Mode B dialog, click archive, assert `archived: true`, assert restore button appears, click restore, assert `archived: false`.
 
 ### S4 — Delete Client → resolves records (nullify) + visitors (cascade with downstream) + tags (auto)
-**User:** opens Clients table, clicks "Удалить" on a client with 47 records, 12 visitors (across 45 visits, 30 payments totaling 15000), and 5 client_tags, but no activities (records is the booking, not the activity).
-**Expected:** `DELETE /clients/{id}` returns 409 with `records` (47, `["nullify"]`), `visitors` (12, `["cascade"]`, `cascade_preview: {visits: 45, payments: {count: 30, total: 15000}}`), `client_tags` (5, `["cascade"]`, auto). Dialog Mode A shows all three + the cascade preview totals. User types client name, clicks "Удалить" → `POST /clients/{id}/delete` with `{"resolutions": {"records": "nullify", "visitors": "cascade"}}` (tags auto). 204 in one transaction. Verify: records survive with `client_id=null`; visitors+visits+payments+client_tags all gone; client row gone.
-**E2E:** `e2e/clients-delete-cascade.spec.ts` — seed client+records+visitors+visits+payments+tags, open dialog, assert cascade_preview numbers, type-confirm, assert 204 + records.client_id=null + visitors/visits/payments absent + client gone.
+**User:** opens Clients table, clicks "Удалить" on a client with 47 records, 12 visitors (across 45 visits), and 5 client_tags, but no activities (records is the booking, not the activity).
+**Expected:** `DELETE /clients/{id}` returns 409 with `records` (47, `["nullify"]`), `visitors` (12, `["cascade"]`, `cascade_preview: {visits: 45}`), `client_tags` (5, `["cascade"]`, auto). Dialog Mode A shows all three + the cascade preview visits total. User types client name, clicks "Удалить" → `POST /clients/{id}/delete` with `{"resolutions": {"records": "nullify", "visitors": "cascade"}}` (tags auto). 204 in one transaction. Verify: records survive with `client_id=null` (and their payments survive with them); visitors + visits + client_tags all gone; client row gone. Payments are record-scoped and are NOT deleted by the visitors cascade (records are nullified, not deleted) — assert payments rows still present, attached to the now-anonymous records.
+**E2E:** `e2e/clients-delete-cascade.spec.ts` — seed client+records+visitors+visits+payments+tags, open dialog, assert cascade_preview visits count, type-confirm, assert 204 + records.client_id=null + payments still present (record-scoped, survive nullify) + visitors/visits/client_tags absent + client gone.
 
 ### S5 — Archive and restore (all 5 entities, + #198 Client parity)
 **User:** for each of Master, Location, Service, Material, Client: clicks "В архив" → entity leaves the active list, "Восстановить" appears; clicks "Восстановить" → entity returns.
@@ -302,10 +308,12 @@ Each scenario maps 1:1 to an E2E test (Playwright, `frontend/admin/e2e/`).
 - [ ] `activities` always blocks (`allowed_actions: []`); DELETE/POST-delete impossible while activities exist; 409/422 communicates "archive instead".
 - [ ] Material always deletes (zero deps) — `DELETE /materials/{id}` → 204 unconditionally.
 - [ ] Response schemas (backend Pydantic + api-client Zod) for all 5 entities: `is_active` → `archived` (inverted); `is_active` removed from all Update/Patch request schemas; PUT/PATCH with `is_active` → 422 (#178 auto-closed).
+- [ ] `ClientWithStats` manual mapper (second inversion point in `list_clients_with_stats`) inverted to `archived = not is_active` — not just the generic `ClientResponse` path.
+- [ ] Dead code removed: `_strip_is_active_none` helper no longer has a caller (is_active gone from PATCH) → deleted; `is_active` entry in `GENERIC_COLUMNS_EXCLUDED` → removed. `test_put_is_active.py` / `test_patch_is_active.py` inverted — they currently assert `is_active` round-trips via PUT/PATCH for Master/Location/Material/Service (and Client via #201); now they assert PUT/PATCH with `is_active` → 422, and archive/restore assertions move to dedicated endpoint tests.
 - [ ] Rename: `SoftDeleteRepository` → `ArchiveRepository`, `SoftDeleteService` → `ArchiveService`, `get_soft_delete_repository` → `get_archive_repository`; 5 entity services inherit `ArchiveService`; `ArchiveRepository.delete` inherited hard from `BaseRepository` (no override).
 - [ ] `?status=active|archived|all` filter unchanged (`ArchiveStatus` enum reused); archived rows hidden from default active list.
-- [ ] Client → visitors cascade follows `VisitorService.delete` precedent (visits → payments → visitor_tags → visitor); Client → records nullify (records survive, `client_id=null`).
-- [ ] 409 response contains counters + sums only (`cascade_preview` for Client visitors cascade: visits count, payments count + total); no individual row data.
+- [ ] Client → visitors cascade follows `VisitorService.delete` precedent (visits → payments → visitor_tags → visitor) via an **extracted non-decorated shared core** run inside the single outer `ClientService.delete` transaction (NOT a per-visitor `@transactional` loop — see §8 atomicity requirement); Client → records nullify (records survive, `client_id=null`; their payments survive).
+- [ ] 409 response contains counters + sums only (`cascade_preview` for Client visitors cascade: `visits` count only — payments excluded as record-scoped, see §5); no individual row data.
 - [ ] Frontend: delete dialog Mode A (resolvable, type-to-confirm) + Mode B (blocked → archive); "В архив"/"Восстановить" for all 5 incl. Client (#198 closed); `PATCH {is_active}` replaced by `POST /archive` + `POST /restore`.
 - [ ] #184/#185 GenericService contract tests updated: delete = hard, archive/restore contract added; `ServiceService` per-entity delete (conditional on activities) covered.
 - [ ] Backend test suite green; api-client tests green; admin vitest + e2e green (incl. the 7 scenarios S1–S7).

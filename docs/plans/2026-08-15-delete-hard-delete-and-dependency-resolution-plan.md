@@ -36,29 +36,29 @@ How this feature behaves for the user, mapped to spec acceptance criteria:
 - `backend/src/services/generic.py` — rename `SoftDeleteService` → `ArchiveService`; add `archive()`/`restore()`; remove `_strip_is_active_none` (Task 3 + Task 6)
 - `backend/src/services/{master,location,service,material,client}.py` — inherit `ArchiveService`, update imports (Task 3)
 - `backend/src/services/visitor.py` — extract `_delete_cascade(visitor, session)` non-decorated core (Task 7)
-- `backend/src/services/client.py` — `list_clients_with_stats` second inversion point (`:210`) (Task 5); `delete()` resolution transaction (Task 10)
+- `backend/src/services/client.py` — `list_clients_with_stats` second inversion point (`:210`) (Task 4); `delete()` resolution transaction (Task 10)
 - `backend/src/services/service.py` — remove `_strip_is_active_none` import/usage (Task 6)
-- `backend/src/schemas/{master,location,service,material,client}.py` — Response: `is_active`→`archived` (inverted); Update/Patch: drop `is_active` (Tasks 5, 6)
-- `backend/src/api/v1/{masters,locations,services,materials,clients}.py` — DELETE→hard+409; add `POST /archive` + `POST /restore` + `POST /delete` (Tasks 11, 12)
+- `backend/src/schemas/{master,location,service,material,client}.py` — Response: `is_active`→`archived` (inverted); Update/Patch: drop `is_active` (Tasks 4, 5)
+- `backend/src/api/v1/{masters,locations,services,materials,clients}.py` — DELETE→hard+409; add `POST /archive` + `POST /restore` + `POST /delete` (Tasks 9, 10, 11)
 - `backend/src/domain/deletion.py` — NEW: FK matrix + dependency resolver + 409 builder (Task 8)
-- `backend/tests/generic_contract.py` — `EntityConfig.delete_semantics` flip soft→hard for the 5 (Task 13)
-- `backend/tests/services/test_generic_service_contract.py` — delete=hard assertion update (Task 13)
-- `backend/tests/test_put_is_active.py`, `backend/tests/test_patch_is_active.py` — invert to 422 (Task 14)
-- `backend/tests/test_api_{masters,locations,services,materials,clients}.py` — new 409/POST-delete/archive/restore tests (Task 15)
+- `backend/tests/generic_contract.py` — `EntityConfig.delete_semantics` flip soft→hard for the 5 (Task 12)
+- `backend/tests/services/test_generic_service_contract.py` — delete=hard assertion update (Task 12)
+- `backend/tests/test_put_is_active.py`, `backend/tests/test_patch_is_active.py` — invert to 422 (Task 13)
+- `backend/tests/test_api_{masters,locations,services,materials,clients}.py` — new 409/POST-delete/archive/restore tests (Tasks 13, 14)
 
 **Frontend api-client:**
-- `packages/api-client/src/schemas.ts` — Response `is_active`→`archived` (inverted) on 5 entities + `ClientWithStatsSchema`; Update schemas drop `is_active` (Tasks 16, 17)
-- `packages/api-client/src/endpoints.ts` — add `archiveX`/`restoreX` (5 each); `deleteX` stays; add `resolveDeleteX(id, resolutions)` POST (Task 17)
-- `packages/api-client/src/schemas.test.ts`, `endpoints.test.ts` — update inversions + new method tests (Task 16/17)
+- `packages/api-client/src/schemas.ts` — Response `is_active`→`archived` (inverted) on 5 entities + `ClientWithStatsSchema`; Update schemas drop `is_active` (Task 15)
+- `packages/api-client/src/endpoints.ts` — add `archiveX`/`restoreX` (5 each); `deleteX` stays; add `resolveDeleteX(id, resolutions)` POST (Task 16)
+- `packages/api-client/src/schemas.test.ts`, `endpoints.test.ts` — update inversions + new method tests (Tasks 15, 16)
 
 **Frontend admin:**
-- `frontend/admin/hooks/use{Masters,Locations,Services,Materials}Mutations.ts` — patch→archive/restore; delete→409-aware + resolve (Task 18)
-- `frontend/admin/contexts/ClientsContext.tsx` — same for Client + add restore parity (Task 18)
-- `frontend/admin/app/components/DeleteDialog.tsx` — NEW shared dialog (Mode A + Mode B) (Task 19)
-- `frontend/admin/app/(main)/{masters,locations,services,materials,clients}/components/XTable.tsx` — wire dialog + archive/restore (Task 20)
-- `frontend/admin/app/(main)/clients/components/ClientsTable.tsx`, `ClientCardModal.tsx` — restore parity + new delete (Task 20)
-- `frontend/admin/__tests__/helpers/mockData.ts` + per-entity table test fixtures — `is_active`→`archived` (Task 21)
-- `frontend/admin/e2e/*.spec.ts` — S1-S7 new specs (Task 22)
+- `frontend/admin/hooks/use{Masters,Locations,Services,Materials}Mutations.ts` — patch→archive/restore; delete→409-aware + resolve (Task 17)
+- `frontend/admin/contexts/ClientsContext.tsx` — same for Client + add restore parity (Task 17)
+- `frontend/admin/app/components/DeleteDialog.tsx` — NEW shared dialog (Mode A + Mode B) (Task 18)
+- `frontend/admin/app/(main)/{masters,locations,services,materials,clients}/components/XTable.tsx` — wire dialog + archive/restore (Task 19)
+- `frontend/admin/app/(main)/clients/components/ClientsTable.tsx`, `ClientCardModal.tsx` — restore parity + new delete (Task 19)
+- `frontend/admin/__tests__/helpers/mockData.ts` + per-entity table test fixtures — `is_active`→`archived` (Task 20)
+- `frontend/admin/e2e/*.spec.ts` — S1-S7 new specs (Task 21)
 
 **Domain docs:**
 - `docs/domain-rules/_overview.md` + per-entity files for the 5 — update deletion policy + terminology (Task 23)
@@ -109,10 +109,10 @@ Rename `SoftDeleteRepository` → `ArchiveRepository`. **Remove the `delete()` o
   - Update docstring of the class (it now does hard delete + archive-status list filtering).
   - Rename `get_soft_delete_repository()` → `get_archive_repository()` (lines 187-190); update the `GenericRepository = SoftDeleteRepository` alias (`:178`) → `GenericRepository = ArchiveRepository`; same for `get_generic_repository()` (`:193-196`).
 - [ ] Grep `backend/src/` for `SoftDeleteRepository` and `get_soft_delete_repository` — update every import + call site (the 5 entity service factories at `services/{master,location,service,material,client}.py` use `get_soft_delete_repository()`). Use a project-wide rename; verify with `grep -rn "SoftDeleteRepository\|get_soft_delete_repository" backend/src/` → empty.
-- [ ] Run `pytest backend/tests/` — the existing `test_delete_*` tests for the 5 entities that asserted `is_active=False` will now FAIL (that's the expected signal flowing into Task 13 — the contract test flip). Note them; do not fix yet (Task 13 owns the contract assertion update). For this task: only the rename + override-removal must land green; tests that asserted soft behavior are intentionally red until Task 13.
+- [ ] Run `pytest backend/tests/` — the existing `test_delete_*` contract tests for the 5 entities that asserted `is_active=False` will now FAIL (that's the expected signal flowing into **Task 12** — the contract `delete_semantics` flip soft→hard). Note them; do not fix yet (Task 12 owns the contract assertion update). For this task: only the rename + override-removal must land; tests that asserted soft behavior are intentionally red until Task 12.
 - [ ] Commit: `refactor(repo): rename SoftDeleteRepository→ArchiveRepository, delete=hard inherited (#207)`
 
-> **Note:** This task causes downstream test redness (Task 13 fixes it). That's expected — the rename is the foundational mechanical step. If the implementer finds the redness blocks local verification, sequence Task 13 immediately after.
+> **Note:** This task causes downstream test redness (Task 12 fixes the contract redness, Task 13 the put/patch-is_active redness). That's expected — the rename is the foundational mechanical step. If the implementer finds the redness blocks local verification, sequence Task 12 (and Task 13) immediately after.
 
 ---
 
@@ -124,7 +124,7 @@ Rename `SoftDeleteRepository` → `ArchiveRepository`. **Remove the `delete()` o
 - `backend/src/services/generic.py` (`SoftDeleteService:189`, the 5 entity services)
 
 ### Task Description
-Rename `SoftDeleteService` → `ArchiveService`. Add two methods: `archive(db_session, id) -> ResponseSchemaT | None` (sets `is_active=False`, returns mapped response or `None` if not found) and `restore(db_session, id) -> ResponseSchemaT | None` (sets `is_active=True`). Both delegate to `self._repository.patch(session, self._model, id, {"is_active": bool})` and return the mapped response. Update the 5 entity services (Master, Location, Service, Material, Client) to inherit `ArchiveService` instead of `SoftDeleteService`. Update all imports.
+Rename `SoftDeleteService` → `ArchiveService`. Add two methods: `archive(db_session, id) -> bool` (sets `is_active=False` via `repo.patch`, returns `True`/`False` for found/not-found — the API route (Task 11) re-fetches the entity to build the `archived`-carrying response, mirroring DELETE's `service.delete → bool` contract) and `restore(db_session, id) -> bool` (sets `is_active=True`, same bool contract). Update the 5 entity services (Master, Location, Service, Material, Client) to inherit `ArchiveService` instead of `SoftDeleteService`. Update all imports.
 
 ### Steps
 - [ ] **RED:** In `backend/tests/services/test_generic_service_contract.py` (or a new `test_archive_service.py`), add a test that an `ArchiveService` subclass has `archive`/`restore` methods and they flip `is_active`. Use a representative subclass (e.g. Master). Run → fails (methods don't exist).
@@ -144,7 +144,7 @@ Rename `SoftDeleteService` → `ArchiveService`. Add two methods: `archive(db_se
     ```
     (Verify `BaseRepository.patch` exists and sets + flushes; if it doesn't return a row, the API route will re-fetch — see Task 11 for the response mapping contract.)
 - [ ] Grep `backend/src/` for `SoftDeleteService` and update all imports + class bases (`services/{master,location,service,material,client}.py`, plus any test-construction imports). The `GENERIC_CONTRACT_EXCEPTIONS` set (`generic_contract.py:95`) currently contains `SoftDeleteService` as an abstract intermediate base — update to `ArchiveService`.
-- [ ] Run `pytest backend/tests/` — verify the new `archive`/`restore` test passes; the still-red soft-delete tests remain red (Task 13).
+- [ ] Run `pytest backend/tests/` — verify the new `archive`/`restore` test passes; the still-red soft-delete contract tests (`test_generic_service_contract.py` `TestGenericServiceDeleteSemantics` for the 5) remain red until **Task 12** (the contract flip — NOT Task 13).
 - [ ] Commit: `refactor(svc): rename SoftDeleteService→ArchiveService, add archive()/restore() (#207)`
 
 ---
@@ -176,7 +176,7 @@ For each of the 5 entities, replace `is_active: bool` (currently on `XResponse`)
     (Note: `self.is_active` requires the model class to carry the attribute. Since `MasterResponse` uses `from_attributes=True`, define `is_active` on the schema as a private/excluded field read from the ORM — use `is_active: bool = Field(..., exclude=True)` so it is parsed from ORM but NOT serialized; `archived` computed from it surfaces to the API. Verify Pydantic v2 supports `exclude=True` on `from_attributes` parse + `computed_field` reading it.)
 - [ ] Apply the identical pattern to `LocationResponse`, `ServiceResponse`, `MaterialResponse`, `ClientResponse` (each carries `is_active` on its model; the schema reads it excluded and exposes `archived` computed).
 - [ ] `backend/src/schemas/client.py`: `ClientWithStatsResponse` extends `ClientResponse` → inherits the `archived` computed field. No schema edit needed, BUT the manual builder in `services/client.py:210` (`is_active=row.is_active`) must change to pass the ORM attribute, which the computed field reads — actually since the computed field derives `archived` from the stored `is_active`, the builder should STOP passing `is_active=row.is_active` (the Pydantic model will read it via `from_attributes` from the ORM row OR the constructor — verify the `ClientWithStats(...)` construction path supplies `is_active`). If `ClientWithStats` is **constructed positionally** (not from an ORM object), pass `is_active=row.is_active` AND let `archived` derive — OR better: build from `ClientWithStatsResponse.model_validate(row)` if `row` is an ORM-shaped object. The plan: keep passing `is_active=row.is_active` in the builder (the schema still accepts it as a constructor kwarg via the excluded field) — the computed `archived` derives from it. The AC is: API response exposes `archived`, not `is_active`. Verify with a test that the serialized JSON has `archived` and lacks `is_active`.
-- [ ] Run `pytest backend/tests/ -k "schema or client"`. Fix any serializer-excluding-`is_active` issue. The API-level `test_api_*.py` assertions on `is_active` in responses will now fail — those are handled in Task 14/15.
+- [ ] Run `pytest backend/tests/ -k "schema or client"`. Fix any serializer-excluding-`is_active` issue. The API-level `test_api_*.py` assertions on `is_active` in responses will now fail — those are owned by **Task 13** (put/patch-is_active + archive/restore endpoint tests abs the response `archived` field) and **Task 14** (new 409/POST-delete scenario tests asserting `archived` in responses).
 - [ ] Commit: `feat(schema): is_active→archived (inverted) on 5 entity Response schemas + ClientWithStats (#207)`
 
 ---
@@ -217,7 +217,7 @@ Once `is_active` is removed from PATCH schemas (Task 5), the `_strip_is_active_n
 - [ ] **RED:** Add a test in `backend/tests/services/test_generic_service_patch.py` (or contract) that PATCH with `is_active` in body → 422 or the field is never stripped (assert the strip helper is gone via a grep-test on the source, OR assert the patch path raises). Run → expected behavior is no `_strip_is_active_none` exists.
 - [ ] **GREEN:** Delete `_strip_is_active_none` from `services/generic.py:45-53`. Remove the call in `_patch_payload` (`:222`) — `SoftDeleteService`/`ArchiveService._patch_payload` should just return `super()._patch_payload(data)`. Update `services/service.py:18` import + `:179` call site.
 - [ ] Find `GENERIC_COLUMNS_EXCLUDED` (grep `backend/tests/`) and remove `"is_active"`/`"is_active"` from the list; verify the contract test still passes for non-is_active columns.
-- [ ] Run `pytest backend/tests/ -k patch` → confirm patch tests green (the `is_active` strip no longer fires; the field is forbidden by Task 5's schema).
+- [ ] Run `pytest backend/tests/ -k "patch and not is_active"` → confirm the generic-patch contract tests (excluding `test_patch_is_active.py`, which stays red until **Task 13** flips it to 422-asserts) pass green. The `is_active` strip no longer fires; the field is forbidden by Task 5's schema. (Do not run `-k patch` alone — that would include the still-red `test_patch_is_active.py` and confuse the implementer.)
 - [ ] Commit: `refactor(svc): remove dead _strip_is_active_none + GENERIC_COLUMNS_EXCLUDED is_active (#207)`
 
 ---
@@ -234,7 +234,7 @@ Once `is_active` is removed from PATCH schemas (Task 5), the `_strip_is_active_n
 The current `VisitorService.delete` is one `@transactional` method that deletes visits → photos SET NULL → visitor_tags → visitor. Extract its body into a **non-decorated** inner method `_delete_cascade(self, session, visitor_id) -> bool` that operates on the passed session WITHOUT committing. Keep `VisitorService.delete` as the decorated public wrapper that calls `_delete_cascade`. This lets `ClientService.delete` (Task 10) call `_delete_cascade` inside its OWN `@transactional` cascade loop on the shared outer session — atomicity preserved (one commit at the outer boundary, not N mid-loop commits).
 
 ### Steps
-- [ ] **RED:** Add an atomicity test in `backend/tests/services/test_client_service.py` (or wherever Client delete resolves): seed a client with 3 visitors, each having visits + payments; mock the SECOND visitor's visitor-tag deletion to raise; call `client_service.delete(...)` with `visitors: cascade`; assert the entire transaction rolled back — meaning the first visitor's delete was NOT committed (records-nullify also reverted) and the client row still exists. Run → fails (currently per-visitor `@transactional` commits the first visitor before the second fails).
+- [ ] **RED:** Add a test in `backend/tests/services/test_visitor_service.py` asserting `_delete_cascade` is callable as a non-decorated method (does NOT call `session.commit()` directly — inspect that calling it leaves the session uncommitted; the existing `VisitorService.delete` calls it then commits per the wrapper). Run → fails (`_delete_cascade` doesn't exist yet). **Note:** the full atomicity test (visitor loop rolled back on mid-cascade failure) lives in **Task 14** — it requires `ClientService.resolve_delete` (Task 10) to exist; do NOT attempt that test in Task 7.
 - [ ] **GREEN:** In `backend/src/services/visitor.py`:
   - Rename the body of `delete` into `_delete_cascade`:
     ```python
@@ -271,9 +271,10 @@ The current `VisitorService.delete` is one `@transactional` method that deletes 
 Create `backend/src/domain/deletion.py` — the single source of truth for the FK matrix (§4) and the dependency resolver. Contains:
 1. `FKDependency` dataclass: `entity: str`, `relation: str`, `nullable: bool`, `action: Literal["block","nullify","cascade"]`, `auto: bool`, `allowed_actions: list[str]`, `message: str | None`.
 2. `FK_MATRIX: dict[type, list[FKDependency]]` — the full §4 table per entity model (Master, Location, Service, Material, Client). Material = `[]` (no deps). For the others, list each FK relation as per §4.
-3. `async def collect_dependencies(session, model, entity_id) -> list[DependencyNode]` — for the entity, run COUNT queries for each FK relation; return the 409 `dependencies` array (with `count`, `allowed_actions`, `message`, and `cascade_preview` for Client→visitors with `{"visits": N}` — payments EXCLUDED per §5). Skip zero-count deps (only deps with count > 0 appear in the tree).
-4. `def has_blocking_deps(nodes) -> bool` — True if any node has `allowed_actions == []`.
-5. `def validate_resolutions(model, nodes, resolutions_body) -> list[ValidationError]` — for each non-auto dep with count > 0: a resolution is required; the action must be in `allowed_actions`; blocked deps (allowed_actions=[]) → 422 always (no resolution accepts them); auto deps → ignored (any user-sent value for an auto dep is ignored, per §16). Returns a list of errors (empty = valid).
+3. `ResolutionError(Exception)` — defined HERE (raised by `validate_resolutions` / the executor in Task 10): subtypes `BlockingDepsError` (activities present — 422 "archive instead") and `InvalidResolutionError` (wrong action / missing dep — 422). The POST /delete route (Task 10) catches these and maps to HTTP 422. Defining the exception in the domain module keeps it out of the API layer.
+4. `async def collect_dependencies(session, model, entity_id) -> list[DependencyNode]` — for the entity, run COUNT queries for each FK relation; return the 409 `dependencies` array (with `count`, `allowed_actions`, `message`, and `cascade_preview` for Client→visitors with `{"visits": N}` — payments EXCLUDED per §5). Skip zero-count deps (only deps with count > 0 appear in the tree).
+5. `def has_blocking_deps(nodes) -> bool` — True if any node has `allowed_actions == []`.
+6. `def validate_resolutions(model, nodes, resolutions_body) -> list[ValidationError]` — for each non-auto dep with count > 0: a resolution is required; the action must be in `allowed_actions`; blocked deps (allowed_actions=[]) → 422 always (no resolution accepts them); auto deps → ignored (any user-sent value for an auto dep is ignored, per §16). Returns a list of errors (empty = valid).
 
 ### Steps
 - [ ] **RED:** In `backend/tests/domain/test_deletion.py` (NEW): write tests for each entity's `FK_MATRIX`:
@@ -346,16 +347,16 @@ The atomicity rule (§8): ONE `@transactional` method on ClientService.delete, c
   @transactional
   async def resolve_delete(self, db_session, entity_id, resolutions: dict[str, str]) -> bool:
       nodes = await collect_dependencies(db_session, self._model, entity_id)
-      if has_blocking_deps(nodes): raise ResolutionError("blocking dependencies — archive instead")
+      if has_blocking_deps(nodes): raise BlockingDepsError("blocking dependencies — archive instead")
       errors = validate_resolutions(self._model, nodes, resolutions)
-      if errors: raise ResolutionError(...)
+      if errors: raise InvalidResolutionError(...)
       # 1. nullify non-auto nullify deps
       # 2. cascade non-auto cascade deps (Client→visitors via visitor_service._delete_cascade in a loop)
       # 3. auto deps (tags delete, tariffs delete, photos nullify)
       # 4. hard delete entity row (self._repository.delete)
       return True
   ```
-  (Implement per matrix. For Client→visitors loop: `for v in visitors: await self._visitor_service._delete_cascade(db_session, v.id)` — single session, single outer commit.) Put the executor as a method on `ArchiveService` or as a standalone async in `domain/deletion.py` that takes the necessary services — pick the cleaner design and document.
+  (Use the `ResolutionError` subtypes defined in Task 8's `domain/deletion.py` — `BlockingDepsError` (activities present → 422 "archive instead") and `InvalidResolutionError` (wrong action / missing dep → 422). The API route catches the base `ResolutionError`. For Client→visitors loop: `for v in visitors: await self._visitor_service._delete_cascade(db_session, v.id)` — single session, single outer commit.) Put the executor as a method on `ArchiveService` or as a standalone async in `domain/deletion.py` that takes the necessary services — pick the cleaner design and document.
 - [ ] In each `api/v1/{masters,locations,services,materials,clients}.py` add the POST route:
   ```python
   @router.post("/{entity_id}/delete", status_code=204)
@@ -483,8 +484,9 @@ In `schemas.ts`, for each of the 5 `XResponseSchema`: replace `is_active: z.bool
   - `ClientUpdateSchema` (`:283-289`): remove the `is_active: z.boolean()` required field.
   - To make stray `is_active` rejected by parse (matching backend 422): add `.strict()` to the Update schemas OR rely on the default strict mode — verify the schemas.ts convention; if Update schemas already use strict mode that rejects unknown keys, nothing else; else add a `superRefine` that rejects `is_active` in input. Match backend Task 5's choice.
 - [ ] Update inferred types `MasterUpdate` etc. (`:34`, etc.) — drop `is_active`.
+- [ ] **Inversion parity test (spec §16 — required):** Add `frontend/admin/__tests__/archived-inversion-parity.test.ts` (or fold into `schemas.test.ts`): load a backend-response fixture (one per entity, the JSON shape the API emits) and assert (a) the Zod schema parses it, (b) `archived` is present and `is_active` is absent, (c) the inversion polarity matches the backend — i.e. an archived row (`is_active=false` in DB) serializes to `archived: true` and the frontend parses `archived: true`. Run against a representative active + archived fixture pair. This locks the Zod↔Pydantic inversion contract per spec §16 ("`archived = true` means IN archive" — both sides must agree exactly, no polarity flip). The fixture can be a literal tapped from a live GET response during Task 14's backend tests (paste into the test file as a JSON literal).
 - [ ] Run `pnpm --filter @memo/api-client test` → green.
-- [ ] Commit: `feat(api-client): Zod schemas is_active→archived + remove from Update (#207)`
+- [ ] Commit: `feat(api-client): Zod schemas is_active→archived + remove from Update + parity test (#207)`
 
 ---
 
@@ -533,7 +535,7 @@ Add to `endpoints.ts`:
 - `frontend/admin/contexts/ClientsContext.tsx` (delete `:126-129`, patch `:120-124`, invalidate `:105-108`)
 
 ### Task Description
-- **Mutation hooks (4 entities):** keep `useDeleteX` but rename/repurpose: it calls `deleteX(id)` and on `onError` if status 409, exposes the dependency tree (parsed from `error.response.detail.dependencies`) to the UI for the dialog (Task 19). Add `useArchiveX` (`archiveX(id)`) and `useRestoreX` (`restoreX(id)`). Remove the `patchX({is_active})` flow from the table — tables switch to `useArchiveX`/`useRestoreX` in Task 20. Invalidation: archive/restore/delete all invalidate `['X']`. Hard delete of Master/Location/Service also invalidates `['records']`-consumer queries (the `useRecordData.ts` keys on `['services']`/`['masters']`/`['locations']` — covered in Task 20's wiring; the hook invalidates `['X']` only and Task 20 adds cross-invalidation if needed).
+- **Mutation hooks (4 entities):** keep `useDeleteX` but rename/repurpose: it calls `deleteX(id)` and on `onError` if status 409, exposes the dependency tree (parsed from `error.response.detail.dependencies`) to the UI for the dialog (Task 19). Add `useArchiveX` (`archiveX(id)`) and `useRestoreX` (`restoreX(id)`). Remove the `patchX({is_active})` flow from the table — tables switch to `useArchiveX`/`useRestoreX` in Task 19. Invalidation: archive/restore/delete all invalidate `['X']`. **Cross-invalidation (sensible cache hygiene, beyond the literal spec §7/§14 but required to keep records-derived views consistent after a hard-deleted master/location/service):** hard delete of Master/Location/Service also invalidates `['records']`-consumer queries — the `useRecordData.ts` keys on `['services']`/`['masters']`/`['locations']` (built-in queries, NOT auto-invalidated by the entity mutations today); add `queryClient.invalidateQueries({queryKey:['masters']})` analogues for the cross-keys in the delete hook `onSuccess`. For Client, `invalidateClients` already covers `['records']`.
 - **ClientsContext:** add `archiveClient`/`restoreClient` (parity #198), keep `deleteClient` but route through the new resolver (same 409-aware pattern). The context's `apiDeleteClient` call becomes: try DELETE → 409 → expose deps → POST /delete with resolutions on confirm.
 
 ### Steps
@@ -571,6 +573,8 @@ Create a shared `DeleteDialog` component handling both modes per spec §7:
 ## Task 19: Wire DeleteDialog + archive/restore into the 5 table components + ClientsTable
 ### Classification: standard
 
+> **Sequencing note:** Execute **Task 20 (vitest mocks is_active→archived)** FIRST, then this task. The table-component tests in Task 19 consume mock fixtures (`mockMasterResponse` etc.); once Task 15 drops `is_active` from the api-client Zod schemas, those fixtures must carry `archived` (Task 20) for the table tests to type-check and the archive-label assertions to pass. Reversing the order leaves Task 19's RED `pnpm --filter memo-admin test -- XTable` red on missing `archived` until Task 20 lands.
+
 ### Required Docs
 - Spec §7, §14
 - `frontend/admin/app/(main)/{masters,locations,services,materials,clients}/components/XTable.tsx` (delete handler e.g. MastersTable `:217-226`, archive toggle `:181-192`, buttons `:393-412`)
@@ -594,6 +598,8 @@ For each of the 5 entities:
 ## Task 20: Vitest mocks — is_active → archived across admin test fixtures
 ### Classification: standard
 
+> **Sequencing note:** Execute this task BEFORE Task 19 (table wiring) — Task 19's table-component tests require the `archived`-carrying fixtures this task produces. See Task 19's sequencing note.
+
 ### Required Docs
 - Spec §3.5 (inversion), §14
 - `frontend/admin/__tests__/helpers/mockData.ts` (`mockClient:98`, `mockLocationResponse:173`, `mockLocationResponseArchived:190`, `mockMasterResponse:215`, `mockMasterResponseArchived:229`, `createMockLocationResponse`, `createMockMasterResponse`)
@@ -604,7 +610,7 @@ For each of the 5 entities:
 Replace every `is_active: boolean` with `archived: boolean` (inverted: `archived = not is_active`) in all admin test mock data. The fixture pairs (active + archived) invert: `mockMasterResponse.is_active = true` → `mockMasterResponse.archived = false`; `mockMasterResponseArchived.is_active = false` → `mockMasterResponseArchived.archived = true`. Update any test assertion that reads `is_active` to read `archived` (the GH #195 archive-active-filter tests at MastersTable `:534-553`, LocationsTable `:583-601`, ServicesTable `:368-396`, MaterialsTable `:179-199` use these fixtures — update assertions).
 
 ### Steps
-- [ ] **RED:** Run `pnpm --filter memo-admin test` → many fixtures + tests fail (type errors: `archived` not on the type, or `is_active` removed). That's the signal.
+- [ ] **RED:** Run `pnpm --filter memo-admin test` → many fixtures and tests fail at **runtime** (esbuild does NOT type-check, so failures are undefined-`archived` reads / missing-`is_active` assertions, not compile errors). That's the signal — the fixtures must carry `archived` to match the api-client Zod schemas from Task 15.
 - [ ] **GREEN:** Update `mockData.ts` + `clientRecordTabSetup.ts` + per-entity fixtures: replace `is_active` with `archived` (inverted). Update table tests' archive-filter assertions.
 - [ ] Run `pnpm --filter memo-admin test` → green.
 - [ ] Commit: `test(admin): is_active→archived in all vitest mocks (#207)`
@@ -645,10 +651,10 @@ Add 7 E2E specs per the spec's §12 scenarios, each following the Full Cycle pat
 - `backend/src/api/v1/{masters,locations,services,materials,clients}.py` (response builders — verify no `is_active` in any serializer path for the 5)
 
 ### Task Description
-Final sweep for any residual `is_active` in the API surface for the 5 entities. After Tasks 4/5/14, no API path should reference `is_active` on the 5 entities' responses or accept it in PUT/PATCH. Grep `backend/src/api/` + `backend/src/schemas/` for `is_active` references to the 5; confirm none serialize or accept it (only the internal DB/Model/Repo path uses `is_active`, which is allowed per the terminology boundary). Confirm the `_map_*` functions (where they exist) and the `ClientWithStats` builder do not emit `is_active`.
+Final sweep for any residual `is_active` **serialized in the API response** for the 5 entities. After Tasks 4/5/13/14, no API response path should serialize `is_active` on the 5 entities, and no PUT/PATCH should accept it. **Important caveat (Task 4 design):** the Response schemas legitimately keep an `is_active: bool = Field(..., exclude=True)` field on the Pydantic model — it is parsed from the ORM but `exclude=True` prevents serialization, and `@computed_field archived` reads it. So a grep for `is_active` in `backend/src/schemas/{master,location,service,material,client}.py` will find these legitimate `exclude=True` declarations — those are correct and must NOT be "fixed". The sweep targets: (a) any response mapper that explicitly passes `is_active` into a serialized path; (b) any Update/Patch schema that still accepts `is_active`; (c) the `ClientWithStats` manual builder (`client.py:210`) — verify it does not surface `is_active` to the JSON output (the computed `archived` derives from it). Confirm `_map_*` functions (where they exist) and the `ClientWithStats` builder do not emit `is_active`.
 
 ### Steps
-- [ ] Grep `backend/src/api/v1/{masters,locations,services,materials,clients}.py` and `backend/src/schemas/` for `is_active` → all hits should be inside DB/Repo layer only, not API responses. Fix any stragglers.
+- [ ] Grep `backend/src/api/v1/{masters,locations,services,materials,clients}.py` and `backend/src/schemas/{...}.py` for `is_active` → **allowed**: the schema `exclude=True is_active` field + the DB/Model/Repo layer (those use `is_active` per the terminology boundary). **Flag & fix**: any serializer path that surfaces `is_active` to JSON, any Update/Patch schema that still accepts it, any mapper with `is_active=...` in a non-excluded context. The `ClientWithStats` builder keeps `is_active=row.is_active` (Task 4 — feeds the excluded field that `archived` derives from); confirm with a response test that the JSON lacks `is_active` and has `archived`.
 - [ ] Run `pytest backend/tests/` → green.
 - [ ] Commit: `chore(api): final is_active sweep — no leakage in 5-entity responses (#207)`
 

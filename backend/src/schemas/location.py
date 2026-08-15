@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 
 class LocationBase(BaseModel):
@@ -53,14 +53,24 @@ class LocationPatch(BaseModel):
 
 
 class LocationResponse(LocationBase):
-    """Response schema with all location fields."""
+    """Response schema with all location fields.
+
+    ``is_active`` stays as the DB/ORM column but is ``exclude=True`` so it never
+    serializes to JSON. The API exposes ``archived`` (inverted: ``archived = not
+    is_active``, ``archived = true`` = in archive) via a computed field (#207 §3.1).
+    """
 
     model_config = ConfigDict(from_attributes=True)
 
     id: str
     created_at: datetime
     updated_at: datetime
-    is_active: bool
+    is_active: bool = Field(..., exclude=True)
+
+    @computed_field
+    @property
+    def archived(self) -> bool:
+        return not self.is_active
 
 
 class ReorderRequest(BaseModel):

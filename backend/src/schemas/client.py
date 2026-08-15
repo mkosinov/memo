@@ -2,7 +2,7 @@
 
 from datetime import date, datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 from src.models.enums import ArchiveStatus, Channel
 
@@ -49,6 +49,13 @@ class ClientResponse(BaseModel):
     Uses ``str | None`` for ``channel`` (not the Channel enum) to tolerate
     any string already stored in the DB (e.g. 'instagram', 'vk', 'website'
     from before the enum was tightened). See issue #60.
+
+    ``is_active`` stays as the DB/ORM column but is ``exclude=True`` so it never
+    serializes to JSON. The API exposes ``archived`` (inverted: ``archived = not
+    is_active``, ``archived = true`` = in archive) via a computed field (#207 §3.1).
+    ``ClientWithStats`` inherits this computed field — the manual builder in
+    ``list_clients_with_stats`` keeps passing ``is_active=row.is_active`` (the
+    excluded field still accepts it as a constructor kwarg; ``archived`` derives).
     """
 
     model_config = ConfigDict(from_attributes=True)
@@ -60,7 +67,12 @@ class ClientResponse(BaseModel):
     channel: str | None = None
     created_at: datetime
     updated_at: datetime
-    is_active: bool
+    is_active: bool = Field(..., exclude=True)
+
+    @computed_field
+    @property
+    def archived(self) -> bool:
+        return not self.is_active
 
 
 class ClientWithStats(ClientResponse):

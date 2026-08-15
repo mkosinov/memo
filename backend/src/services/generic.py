@@ -42,17 +42,6 @@ async def paginate_orm(
     return list(result.scalars().all()), total
 
 
-def _strip_is_active_none(payload: dict) -> dict:
-    """Drop is_active when None — sticky field: absent/None preserves the stored value (#184).
-
-    Shared by ArchiveService._patch_payload and ServiceService.patch
-    (ServiceService re-implements patch without super() — single helper
-    prevents the drift that hid the resurrection hazard there)."""
-    if payload.get("is_active") is None:
-        payload.pop("is_active", None)
-    return payload
-
-
 class GenericService(Generic[CreateSchemaT, UpdateSchemaT, ResponseSchemaT]):
     """Generic service providing standard CRUD with schema validation.
 
@@ -157,9 +146,7 @@ class GenericService(Generic[CreateSchemaT, UpdateSchemaT, ResponseSchemaT]):
     def _patch_payload(self, data: BaseModel) -> dict:
         """Build the apply-dict for ``patch()``: ``exclude_unset`` dump with
         ``None`` values for ``NOT_NULL_FIELDS`` stripped (client intent is
-        "don't change", not "set to null"). Extracted so ``ArchiveService``
-        can override to additionally strip ``is_active=None`` (#184 sticky-
-        field semantics) without the base class knowing about ``is_active``.
+        "don't change", not "set to null").
         """
         data_dict = data.model_dump(exclude_unset=True)
         # Strip nulls for NOT NULL fields — client intent is "don't change",
@@ -225,15 +212,6 @@ class ArchiveService(GenericService[CreateSchemaT, UpdateSchemaT, ResponseSchema
         return await self._paginate(
             db_session, self._list_stmt(status=status, **filters), page, per_page, order_by
         )
-
-    def _patch_payload(self, data: BaseModel) -> dict:
-        """Archive-aware patch payload: additionally strip ``is_active`` when
-        None (#184 sticky-field semantics). The base NOT_NULL strip does not
-        cover ``is_active`` (it is governed by the archive lifecycle, not by
-        the patch-fieldset parity), so an explicit ``None`` would otherwise
-        write NULL to the NOT NULL column.
-        """
-        return _strip_is_active_none(super()._patch_payload(data))
 
     @transactional
     async def archive(self, db_session: AsyncSession, id: str) -> bool:

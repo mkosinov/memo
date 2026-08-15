@@ -15,7 +15,7 @@ from src.models.tag import service_tags
 from src.models.tariff import Tariff
 from src.schemas.common import PaginatedResponse
 from src.schemas.service import ServiceCreate, ServicePatch, ServiceResponse, ServiceUpdate
-from src.services.generic import ArchiveService, _strip_is_active_none
+from src.services.generic import ArchiveService
 from src.services.decorators import transactional
 
 
@@ -174,9 +174,6 @@ class ServiceService(ArchiveService[ServiceCreate, ServiceUpdate, ServiceRespons
         for field in self.NOT_NULL_FIELDS:
             if field in data_dict and data_dict[field] is None:
                 del data_dict[field]
-
-        # Strip is_active when None (#184 sticky-field semantics)
-        data_dict = _strip_is_active_none(data_dict)
 
         # Apply scalar fields
         for key, value in data_dict.items():

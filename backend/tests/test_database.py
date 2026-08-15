@@ -84,7 +84,7 @@ class TestDBManager:
 
 
 class TestSqlitePragmas:
-    """Verify the process-global connect hook sets busy_timeout + WAL."""
+    """Verify the process-global connect hook sets busy_timeout + WAL + foreign_keys."""
 
     async def test_engine_sets_wal_and_busy_timeout(self, tmp_path) -> None:
         """Every new DBAPI connection gets busy_timeout=5000 and journal_mode=WAL."""
@@ -97,6 +97,17 @@ class TestSqlitePragmas:
             bt = (await conn.exec_driver_sql("PRAGMA busy_timeout")).scalar()
         assert str(jm).lower() == "wal"
         assert int(bt) == 5000
+        await manager.engine.dispose()
+
+    async def test_engine_sets_foreign_keys_on(self, tmp_path) -> None:
+        """Every new DBAPI connection gets PRAGMA foreign_keys=ON (#207 §11.3)."""
+        from src.db.database import DBManager
+
+        db_file = tmp_path / "pragma_fk_test.db"
+        manager = DBManager(f"sqlite+aiosqlite:///{db_file}")
+        async with manager.engine.connect() as conn:
+            fk = (await conn.exec_driver_sql("PRAGMA foreign_keys")).scalar()
+        assert int(fk) == 1, "PRAGMA foreign_keys must be ON per #207 §11.3"
         await manager.engine.dispose()
 
 

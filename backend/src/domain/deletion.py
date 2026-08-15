@@ -192,8 +192,11 @@ class DependencyNode(BaseModel):
     cascade_preview: dict[str, int] | None = None
 
 
-class ValidationError(BaseModel):
-    """One error from :func:`validate_resolutions` (returns ``[]`` when valid)."""
+# ─── resolutions/422 path (§6, §16) ─────────────────────────────────────────────
+
+
+class ResolutionIssue(BaseModel):
+    """One issue from :func:`validate_resolutions` (returns ``[]`` when valid)."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -379,7 +382,7 @@ def validate_resolutions(
     model: type,
     nodes: list[DependencyNode],
     resolutions_body: dict[str, str],
-) -> list[ValidationError]:
+) -> list[ResolutionIssue]:
     """Validate the user's ``resolutions`` body against the FK matrix (§6, §16).
 
     For each NON-AUTO dep with count > 0 (present in ``nodes``):
@@ -394,7 +397,7 @@ def validate_resolutions(
     Returns ``[]`` when valid.
     """
     deps_by_entity = {dep.entity: dep for dep in FK_MATRIX.get(model, [])}
-    errors: list[ValidationError] = []
+    errors: list[ResolutionIssue] = []
 
     for node in nodes:
         dep = deps_by_entity.get(node.entity)
@@ -404,7 +407,7 @@ def validate_resolutions(
         if not dep.allowed_actions:
             # Blocked → invalid no matter what the body says (§6 rule 4).
             errors.append(
-                ValidationError(
+                ResolutionIssue(
                     relation=node.relation,
                     message=(
                         f"Есть блокирующая зависимость ({node.relation}); "
@@ -421,7 +424,7 @@ def validate_resolutions(
         user_action = resolutions_body.get(node.entity)
         if user_action is None:
             errors.append(
-                ValidationError(
+                ResolutionIssue(
                     relation=node.relation,
                     message=(
                         f"Не указано действие для «{node.relation}» "
@@ -431,7 +434,7 @@ def validate_resolutions(
             )
         elif user_action not in dep.allowed_actions:
             errors.append(
-                ValidationError(
+                ResolutionIssue(
                     relation=node.relation,
                     message=(
                         f"Недопустимое действие «{user_action}» для "

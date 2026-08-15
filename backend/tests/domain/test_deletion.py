@@ -61,10 +61,6 @@ def _deps_map(model: type) -> dict[str, FKDependency]:
     return {dep.entity: dep for dep in FK_MATRIX.get(model, [])}
 
 
-def _iso_start(i: int = 0) -> str:
-    return (datetime.now(UTC) + timedelta(days=1, hours=i)).isoformat()
-
-
 async def _add_user(db_session, master_id: str) -> str:
     user = User(phone=f"+7999{_uuid.uuid4().hex[:7]}", password_hash="x", role="admin",
                 master_id=master_id)

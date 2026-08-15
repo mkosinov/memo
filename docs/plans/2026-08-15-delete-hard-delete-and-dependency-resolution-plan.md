@@ -20,7 +20,7 @@ How this feature behaves for the user, mapped to spec acceptance criteria:
 - **DELETE with dependencies → 409 + dependency tree** → user clicks "Удалить" on an entity with FK dependents; a dialog lists what will be deleted (cascade →) / unlinked (nullify ○) with counts. Type-to-confirm enables "Удалить"; clicking it executes the resolution in one transaction.
 - **DELETE with blocking deps (activities) → archive instead** → user clicks "Удалить" on a Master/Location/Service that has activities; dialog says "Нельзя удалить: есть N активностей. Сначала удалите их или архивируйте"; primary button is "[Архивировать]" — delete is not offered.
 - **POST /{id}/delete resolutions** → invalid resolution (e.g. `records: "cascade"` when only nullify allowed) → 422; missing required non-auto dep → 422; correct resolutions → 204 (visitors+visits gone, records survive with `client_id=null`, payments survive with their records).
-- **POST /{id}/archive + POST /{id}/restore** → "В архив" moves the entity out of the active list (response `archived: true`); "Восстановить" returns it (`archived: false`). Works for all 5 entities including Client (#198 closed).
+- **POST /{id}/archive + POST /{id}/restore** → "В архив" moves the entity out of the active list (**HTTP 200 with body** carrying `archived: true` — the frontend updates the row without a refetch); "Восстановить" returns it (`archived: false`). Works for all 5 entities including Client (#198 closed). *(Note: the spec §12 S3/S5 literally says "→ 204" beside "response `archived: true`" — these are contradictory; 204 carries no body. The plan picks **200-with-body** for archive/restore so the frontend gets the updated entity; this deviates from the literal "204" wording. DELETE/POST-delete still return 204. Surfaced for acknowledgment at G2.)*
 - **PUT/PATCH rejects is_active (#178)** → sending `is_active` in a PUT or PATCH body → 422. Archive/restore only via the two dedicated endpoints.
 - **Response schema `archived` inversion** → all 5 entity responses expose `archived: bool` (`true` = in archive); the DB column `is_active` is no longer surfaced directly anywhere on these 5 entities.
 - **DB FK backstop** → SQLite connections now `PRAGMA foreign_keys=ON`; service-level transactions remain primary, FK is the safety net.
@@ -414,7 +414,7 @@ Add two POST routes per entity. `POST /{id}/archive` → calls `service.archive(
 - `backend/tests/services/test_generic_service_contract.py:390-436` (`TestGenericServiceDeleteSemantics` + `:438-454` nonexistent test)
 
 ### Task Description
-The contract test currently asserts the 5 soft-delete entities' `delete_semantics == "soft"` and that the row remains with `is_active=False` after delete. Flip them: `delete_semantics == "hard"` for the 5, and `TestGenericServiceDeleteSemantics` asserts the row is physically gone after `service.delete`. Add a new contract assertion class `TestArchiveServiceArchiveRestore` that asserts `archive()`/`restore()` flip `is_active` and return the mapped response. `ServiceService` stays in `GENERIC_CONTRACT_EXCEPTIONS` (its delete is conditional on activities — per-entity test covers it).
+The contract test currently asserts the 5 soft-delete entities' `delete_semantics == "soft"` and that the row remains with `is_active=False` after delete. Flip them: `delete_semantics == "hard"` for the 5, and `TestGenericServiceDeleteSemantics` asserts the row is physically gone after `service.delete`. Add a new contract assertion class `TestArchiveServiceArchiveRestore` that asserts `archive()`/`restore()` flip the DB `is_active` column (assert `is_active=False` after `archive()`, `True` after `restore()`); the **route** re-fetches to build the `archived`-carrying response body — the contract test asserts the bool service contract (the mapped response is asserted at the API route level in Task 13). `ServiceService` stays in `GENERIC_CONTRACT_EXCEPTIONS` (its delete is conditional on activities — per-entity test covers it).
 
 ### Steps
 - [ ] **RED:** (Tests are already red from Task 2/3.) Update them now: in `backend/tests/generic_contract.py` `CONTRACT_CONFIG`, set `delete_semantics="hard"` for Master/Location/Service/Material/Client (was `"soft"`). The existing `TestGenericServiceDeleteSemantics` then asserts `orm is None` for these — which is the now-correct behavior.
@@ -450,7 +450,7 @@ These currently assert PUT/PATCH with `is_active` round-trips for Master/Locatio
 - `backend/tests/test_api_{masters,locations,services,materials,clients}.py`
 
 ### Task Description
-Lock the new behavior with backend tests mirroring the spec scenarios at the API level (the E2E in Task 22 mirrors them at the browser level). Cover:
+Lock the new behavior with backend tests mirroring the spec scenarios at the API level (the E2E in **Task 21** mirrors them at the browser level). **S4 (Client full cascade) + the mid-cascade atomicity fault-injection test are already covered as Task 10's RED-GREEN** — Task 14 should not duplicate them; reference Task 10 for S4/atomicity and focus Task 14 on S1/S2/S3/S7 (the other entities):
 - S1: Material DELETE → 204 (zero deps); GET → 404.
 - S2: Master + user + tags (no activities) → DELETE 409 (users nullify, master_tags cascade auto); POST /delete `{"resolutions":{"users":"nullify"}}` → 204; assert user survives with master_id NULL, tags gone, master gone.
 - S3: Master + 3 activities → DELETE 409 (activities block); POST /delete → 422 (blocked); POST /archive → 200; POST /restore → 200.
@@ -504,7 +504,7 @@ Add to `endpoints.ts`:
 2. `restoreX(id: string): Promise<XResponse>` — POST `/api/v1/Xs/{id}/restore`.
 3. `resolveDeleteX(id: string, resolutions: Record<string,string>): Promise<void>` — POST `/api/v1/Xs/{id}/delete` with body `{resolutions}` → 204 (no body).
 4. Keep existing `deleteX(id)` (still used for the dry-run 409 preview / instant-204 path).
-5. `patchX` no longer needs `is_active` (removed from `Partial<XUpdate>`). The mutation hooks (Task 18) will switch archive toggles from `patchX` to `archiveX`/`restoreX`.
+5. `patchX` no longer needs `is_active` (removed from `Partial<XUpdate>`). The mutation hooks (**Task 17**) will switch archive toggles from `patchX` to `archiveX`/`restoreX`.
 
 ### Steps
 - [ ] **RED:** In `endpoints.test.ts` add tests for `archiveMaster`/`restoreMaster` (POST routes asserted) + `resolveDeleteClient(id, {records:'nullify', visitors:'cascade'})` (POST body asserted) + delete tests for `deleteMaster`/`deleteMaterial`/`deleteClient` (currently absent per codebase explore — add them).
@@ -520,7 +520,7 @@ Add to `endpoints.ts`:
     await api(`/api/v1/masters/${id}/delete`, z.any(), { method: 'POST', body: { resolutions } });
   }
   ```
-- [ ] Remove the stale `patchMaster` (etc.) tests asserting `is_active` is passed in the patch payload (update them to assert archive/restore endpoints are used instead — Task 18 owns the hook side).
+- [ ] Remove the stale `patchMaster` (etc.) tests asserting `is_active` is passed in the patch payload (update them to assert archive/restore endpoints are used instead — **Task 17** owns the hook side).
 - [ ] Run `pnpm --filter @memo/api-client test` → green.
 - [ ] Commit: `feat(api-client): add archive/restore/resolveDelete endpoint methods (#207)`
 
@@ -643,7 +643,7 @@ Add 7 E2E specs per the spec's §12 scenarios, each following the Full Cycle pat
 
 ---
 
-## Task 22: Backend schema/api tests sweep + delete-confirm UI is_active removal
+## Task 22: Backend schema/api is_active sweep (final, before merge)
 ### Classification: small
 
 ### Required Docs

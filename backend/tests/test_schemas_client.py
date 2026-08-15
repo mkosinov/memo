@@ -90,36 +90,40 @@ class TestClientCreateNullableFields:
 
 
 class TestClientUpdateNullableFields:
-    """ClientUpdate (GH #201): standalone 5-key required schema — 4
-    required-nullable personal fields (explicit null = deliberate clear) +
-    required is_active. Omitted key → ValidationError."""
+    """ClientUpdate (GH #201): standalone 4-key required schema — 4
+    required-nullable personal fields (explicit null = deliberate clear).
+    Omitted personal key → ValidationError. ``is_active`` is NOT accepted
+    (#178 closed by Task 5): a stray is_active → ValidationError (422) via
+    ``extra="forbid"``; archive/restore is via the POST endpoints (Task 11)."""
 
     @pytest.mark.pure_unit
     def test_update_with_all_fields(self):
-        """Full 5-key payload is valid."""
+        """Full 4-key personal payload is valid."""
         cu = ClientUpdate(
             name="Updated", phone="+79990001111", email="u@example.com",
-            channel=Channel.MAX, is_active=True,
+            channel=Channel.MAX,
         )
         assert cu.name == "Updated"
-        assert cu.is_active is True
+        assert cu.phone == "+79990001111"
+        assert cu.email == "u@example.com"
+        assert cu.channel == Channel.MAX
 
     @pytest.mark.pure_unit
     def test_update_with_all_nulls_valid(self):
         """Explicit null in all personal fields = deliberate wipe — valid."""
-        cu = ClientUpdate(
-            name=None, phone=None, email=None, channel=None, is_active=False,
-        )
+        cu = ClientUpdate(name=None, phone=None, email=None, channel=None)
         assert cu.name is None
-        assert cu.is_active is False
+        assert cu.phone is None
+        assert cu.email is None
+        assert cu.channel is None
 
     @pytest.mark.pure_unit
-    @pytest.mark.parametrize("missing", ["name", "phone", "email", "channel", "is_active"])
+    @pytest.mark.parametrize("missing", ["name", "phone", "email", "channel"])
     def test_update_missing_required_field_raises(self, missing):
-        """Omitting any of the 5 required keys → ValidationError."""
+        """Omitting any of the 4 required personal keys → ValidationError."""
         payload = {
             "name": "X", "phone": "+79990001111", "email": None,
-            "channel": None, "is_active": True,
+            "channel": None,
         }
         payload.pop(missing)
         with pytest.raises(ValidationError):
@@ -130,6 +134,16 @@ class TestClientUpdateNullableFields:
         """Empty payload → ValidationError (no more silent full-wipe accept)."""
         with pytest.raises(ValidationError):
             ClientUpdate()
+
+    @pytest.mark.pure_unit
+    @pytest.mark.parametrize("is_active", [True, False, None])
+    def test_update_rejects_is_active(self, is_active):
+        """A stray is_active (any value) → ValidationError (extra forbidden, #178)."""
+        with pytest.raises(ValidationError):
+            ClientUpdate(
+                name="X", phone="+79990001111", email=None,
+                channel=None, is_active=is_active,
+            )
 
 
 class TestClientPatch:

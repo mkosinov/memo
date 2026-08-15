@@ -15,20 +15,29 @@ class MaterialCreate(MaterialBase):
 
 
 class MaterialUpdate(MaterialBase):
-    """Request schema for updating a material (full replacement via PUT)."""
+    """Request schema for updating a material (full replacement via PUT).
 
-    is_active: bool  # required on PUT — canonical full-replace (#178); PATCH sticky via MaterialPatch
+    ``is_active`` is NOT accepted (#178 closed by Task 5): it's a lifecycle
+    flag owned by the archive/restore POST endpoints (Task 11). A stray
+    ``is_active`` is rejected with 422 via ``extra="forbid"``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
 
 
 class MaterialPatch(BaseModel):
     """Request schema for partial update (PATCH /api/v1/materials/{id}).
 
-    All fields optional. None means 'don't change'.
+    All fields optional. None means 'don't change'. ``is_active`` is NOT
+    accepted (#178 closed by Task 5): archive/restore is via the POST
+    endpoints (Task 11). A stray ``is_active`` is rejected with 422 via
+    ``extra="forbid"``.
     """
+
+    model_config = ConfigDict(extra="forbid")
 
     title: str | None = None
     description: str | None = None
-    is_active: bool | None = None
 
 
 class MaterialResponse(MaterialBase):

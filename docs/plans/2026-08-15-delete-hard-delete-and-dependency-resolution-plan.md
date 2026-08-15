@@ -16,13 +16,15 @@
 
 How this feature behaves for the user, mapped to spec acceptance criteria:
 
-- **DELETE with no dependencies → instant hard delete** → user clicks "Удалить" on a Material (or any entity with zero deps); the row vanishes immediately, no dialog. A subsequent GET → 404.
-- **DELETE with dependencies → 409 + dependency tree** → user clicks "Удалить" on an entity with FK dependents; a dialog lists what will be deleted (cascade →) / unlinked (nullify ○) with counts. Type-to-confirm enables "Удалить"; clicking it executes the resolution in one transaction.
+- **DELETE with no deps → instant hard delete** → user clicks "Удалить" on a Material (or any entity with zero deps); the row vanishes immediately, no dialog. A subsequent GET → 404.
+- **DELETE with dependencies → 409 + dependency tree** → user clicks "Удалить" on an entity with FK dependents; a dialog lists what will be deleted (cascade →) / unlinked (nullify ○) with counts. Type-to-confirm enables "Удалить"; clicking it sends `DELETE /{id}` **with body** `{resolutions}` executing the resolution in one transaction.
 - **DELETE with blocking deps (activities) → archive instead** → user clicks "Удалить" on a Master/Location/Service that has activities; dialog says "Нельзя удалить: есть N активностей. Сначала удалите их или архивируйте"; primary button is "[Архивировать]" — delete is not offered.
-- **POST /{id}/delete resolutions** → invalid resolution (e.g. `records: "cascade"` when only nullify allowed) → 422; missing required non-auto dep → 422; correct resolutions → 204 (visitors+visits gone, records survive with `client_id=null`, payments survive with their records).
-- **POST /{id}/archive + POST /{id}/restore** → "В архив" moves the entity out of the active list (**HTTP 200 with body** carrying `archived: true` — the frontend updates the row without a refetch); "Восстановить" returns it (`archived: false`). Works for all 5 entities including Client (#198 closed). *(Note: the spec §12 S3/S5 literally says "→ 204" beside "response `archived: true`" — these are contradictory; 204 carries no body. The plan picks **200-with-body** for archive/restore so the frontend gets the updated entity; this deviates from the literal "204" wording. DELETE/POST-delete still return 204. Surfaced for acknowledgment at G2.)*
+- **DELETE /{id} resolutions (body — Change 1)** → invalid resolution (e.g. `records: "cascade"` when only nullify allowed) → 422; missing required non-auto dep → 422; correct resolutions → 204 (visitors+visits gone, records survive with `client_id=null`, payments survive with their records). Same path/verb as dry-run; body presence = execute.
+- **DELETE Master → deletes the linked user account (Change 2 §4.1)** → deleting a master with a linked user row hard-deletes the user automatically (auto-cascade, no choice) — "→ Пользователь: 1 (удалён)" in the dialog.
+- **Master archive/restore cascades to the user login (Change 3 §4.2)** → archiving a master also deactivates its linked account (`users.is_active=False`, can't log in); restoring reactivates it. Master-only special case.
+- **POST /{id}/archive + POST /{id}/restore** → "В архив" → **HTTP 200 with body** carrying `archived: true` (the frontend updates the row without a refetch — spec §12 S3/S5 literally said "204" but 204 carries no body, so the plan picks 200-with-body); "Восстановить" → 200 with `archived: false`. Works for all 5 including Client (#198 closed). Master cascades the user login per above.
 - **PUT/PATCH rejects is_active (#178)** → sending `is_active` in a PUT or PATCH body → 422. Archive/restore only via the two dedicated endpoints.
-- **Response schema `archived` inversion** → all 5 entity responses expose `archived: bool` (`true` = in archive); the DB column `is_active` is no longer surfaced directly anywhere on these 5 entities.
+- **Response schema `archived` inversion** → all 5 entity responses expose `archived: bool` (`true` = in archive); the DB column `is_active` is no longer surfaced to the API for these 5.
 - **DB FK backstop** → SQLite connections now `PRAGMA foreign_keys=ON`; service-level transactions remain primary, FK is the safety net.
 - **409 cascade_preview (Client only)** → the Client delete dialog shows downstream cascade counts ("Visits: 45") — payments are excluded (record-scoped, survive nullify).
 
@@ -39,7 +41,7 @@ How this feature behaves for the user, mapped to spec acceptance criteria:
 - `backend/src/services/client.py` — `list_clients_with_stats` second inversion point (`:210`) (Task 4); `delete()` resolution transaction (Task 10)
 - `backend/src/services/service.py` — remove `_strip_is_active_none` import/usage (Task 6)
 - `backend/src/schemas/{master,location,service,material,client}.py` — Response: `is_active`→`archived` (inverted); Update/Patch: drop `is_active` (Tasks 4, 5)
-- `backend/src/api/v1/{masters,locations,services,materials,clients}.py` — DELETE→hard+409; add `POST /archive` + `POST /restore` + `POST /delete` (Tasks 9, 10, 11)
+- `backend/src/api/v1/{masters,locations,services,materials,clients}.py` — DELETE→hard+409 (no body) / execute-with-resolutions (with body, Change 1); add `POST /archive` + `POST /restore` incl. Master→user cascade (Tasks 9, 10, 11)
 - `backend/src/domain/deletion.py` — NEW: FK matrix + dependency resolver + 409 builder (Task 8)
 - `backend/tests/generic_contract.py` — `EntityConfig.delete_semantics` flip soft→hard for the 5 (Task 12)
 - `backend/tests/services/test_generic_service_contract.py` — delete=hard assertion update (Task 12)
@@ -48,7 +50,7 @@ How this feature behaves for the user, mapped to spec acceptance criteria:
 
 **Frontend api-client:**
 - `packages/api-client/src/schemas.ts` — Response `is_active`→`archived` (inverted) on 5 entities + `ClientWithStatsSchema`; Update schemas drop `is_active` (Task 15)
-- `packages/api-client/src/endpoints.ts` — add `archiveX`/`restoreX` (5 each); `deleteX` stays; add `resolveDeleteX(id, resolutions)` POST (Task 16)
+- `packages/api-client/src/endpoints.ts` — add `archiveX`/`restoreX` (5 each, POST); `deleteX` stays (no-body dry-run); add `resolveDeleteX(id, resolutions)` (**DELETE with body**, Change 1) (Task 16)
 - `packages/api-client/src/schemas.test.ts`, `endpoints.test.ts` — update inversions + new method tests (Tasks 15, 16)
 
 **Frontend admin:**
@@ -271,7 +273,7 @@ The current `VisitorService.delete` is one `@transactional` method that deletes 
 Create `backend/src/domain/deletion.py` — the single source of truth for the FK matrix (§4) and the dependency resolver. Contains:
 1. `FKDependency` dataclass: `entity: str`, `relation: str`, `nullable: bool`, `action: Literal["block","nullify","cascade"]`, `auto: bool`, `allowed_actions: list[str]`, `message: str | None`.
 2. `FK_MATRIX: dict[type, list[FKDependency]]` — the full §4 table per entity model (Master, Location, Service, Material, Client). Material = `[]` (no deps). For the others, list each FK relation as per §4.
-3. `ResolutionError(Exception)` — defined HERE (raised by `validate_resolutions` / the executor in Task 10): subtypes `BlockingDepsError` (activities present — 422 "archive instead") and `InvalidResolutionError` (wrong action / missing dep — 422). The POST /delete route (Task 10) catches these and maps to HTTP 422. Defining the exception in the domain module keeps it out of the API layer.
+3. `ResolutionError(Exception)` — defined HERE (raised by `validate_resolutions` / the executor in Task 10): subtypes `BlockingDepsError` (activities present — 422 "archive instead") and `InvalidResolutionError` (wrong action / missing dep — 422). The DELETE-with-body route (Task 9, Change 1) catches these and maps to HTTP 422. Defining the exception in the domain module keeps it out of the API layer.
 4. `async def collect_dependencies(session, model, entity_id) -> list[DependencyNode]` — for the entity, run COUNT queries for each FK relation; return the 409 `dependencies` array (with `count`, `allowed_actions`, `message`, and `cascade_preview` for Client→visitors with `{"visits": N}` — payments EXCLUDED per §5). Skip zero-count deps (only deps with count > 0 appear in the tree).
 5. `def has_blocking_deps(nodes) -> bool` — True if any node has `allowed_actions == []`.
 6. `def validate_resolutions(model, nodes, resolutions_body) -> list[ValidationError]` — for each non-auto dep with count > 0: a resolution is required; the action must be in `allowed_actions`; blocked deps (allowed_actions=[]) → 422 always (no resolution accepts them); auto deps → ignored (any user-sent value for an auto dep is ignored, per §16). Returns a list of errors (empty = valid).
@@ -279,11 +281,11 @@ Create `backend/src/domain/deletion.py` — the single source of truth for the F
 ### Steps
 - [ ] **RED:** In `backend/tests/domain/test_deletion.py` (NEW): write tests for each entity's `FK_MATRIX`:
   - Material: `FK_MATRIX[Material] == []`.
-  - Master: deps = activities (block), users (nullify, non-auto), master_tags (cascade, auto).
+  - Master: deps = activities (block), **users (cascade, auto — Change 2 §4.1)**, master_tags (cascade, auto).
   - Location: activities (block), location_tags (cascade, auto).
   - Service: activities (block), tariffs (cascade, auto), photos (nullify, auto), service_tags (cascade, auto).
   - Client: records (nullify, non-auto), visitors (cascade, non-auto), client_tags (cascade, auto).
-  Plus `collect_dependencies` returns the right counts (seed 1 master+3 activities+1 user+2 tags → activities count 3, users count 1, master_tags count 2). Plus `validate_resolutions` returns errors for missing/wrong action, OK for correct. Run → all fail.
+  Plus `collect_dependencies` returns the right counts (seed 1 master+3 activities+1 user+2 tags → activities count 3, users count 1, master_tags count 2). Plus `validate_resolutions` returns errors for missing/wrong action, OK for correct — and ignores auto deps (Master→users, tags) even if the user sends them. Run → all fail.
 - [ ] **GREEN:** Create `backend/src/domain/deletion.py` with the dataclass + matrix + functions per the spec §4/§5. Use SQLAlchemy `select(func.count()).where(...)` for each dep. For `cascade_preview` on Client→visitors: count visits via `select(func.count(Visit.id)).join(Visitor, Visit.visitor_id == Visitor.id).where(Visitor.client_id == entity_id)`. Do NOT query payments.
 - [ ] Verify the 409 response shape matches §5 exactly: `{"detail":"has_dependencies", "dependencies":[{"entity":..., "count":..., "allowed_actions":..., "message":..., "cascade_preview":...}]}`.
 - [ ] Run `pytest backend/tests/domain/test_deletion.py` → green.
@@ -291,23 +293,41 @@ Create `backend/src/domain/deletion.py` — the single source of truth for the F
 
 ---
 
-## Task 9: DELETE /{id} → hard delete + 409 dependency tree (all 5 API modules)
+## Task 9: DELETE /{id} → unified dry-run (no body) + execute (with body) route (all 5 API modules)
 ### Classification: standard
 
 ### Required Docs
-- Spec §2 (API surface: DELETE), §5 (409), §14
+- Spec §2 (Change 1 — unified DELETE endpoint), §5 (409 dry-run), §6 (DELETE with body = execute), §14
 - `backend/src/api/v1/{masters,locations,services,materials,clients}.py` (current DELETE route, e.g. `masters.py:132-147`)
-- `backend/src/domain/deletion.py` (Task 8)
+- `backend/src/domain/deletion.py` (Task 8 — collect_dependencies); the `resolve_delete` executor comes in Task 10
 
 ### Task Description
-Flip each of the 5 `DELETE /{id}` routes to use the new resolver: call `collect_dependencies(session, model, id)`; if empty → hard delete (`service.delete`) → 204; if non-empty → 409 with the dependency tree JSON (`detail: "has_dependencies"`, `dependencies: [...]`). On 404 (entity not found) → 404 (existing behavior preserved). The hard delete itself is `service.delete` which (post Task 2/3) delegates to `ArchiveRepository.delete` (hard from Base). Material always 204 (empty deps).
+The single `DELETE /{id}` route handles both modes per Change 1:
+- **No body (dry-run):** call `collect_dependencies(session, model, id)`. If empty → `service.delete` (hard) → 204 (row deleted). If non-empty → 409 with the dependency tree JSON (`detail: "has_dependencies"`, `dependencies: [...]`).
+- **With body `{"resolutions": {...}}` (execute):** call `service.resolve_delete(session, id, resolutions)` (the executor built in Task 10) inside one transaction → 204 on success; 422 on invalid/missing resolution (caught `ResolutionError`); 404 if entity not found.
+
+FastAPI accepts an optional `Body` on a DELETE route: `resolutions: dict[str, str] | None = Body(default=None)`. When `resolutions is None` → dry-run path; when not None → execute path. On 404 (entity not found) → 404 (same for both paths). Material always 204 on the no-body path (empty deps).
 
 ### Steps
-- [ ] **RED:** In `backend/tests/test_api_masters.py` (and the 4 siblings): add tests — create master+activities → DELETE → 409 with `dependencies` containing activities (count, `allowed_actions: []`, message); create master+user+tags (no activities) → DELETE → 409 with users + master_tags; create bare master → DELETE → 204, GET → 404. Run → fail.
-- [ ] **GREEN:** In each of `api/v1/{masters,locations,services,materials,clients}.py` update the DELETE route:
+- [ ] **RED:** In `backend/tests/test_api_masters.py` (and the 4 siblings): add tests covering BOTH modes — (a) no-body path: master+activities → DELETE (no body) → 409 + activities dep; master+user+tags (no activities) → DELETE (no body) → 409 + users (`["cascade"]`, auto) + master_tags; bare master → DELETE (no body) → 204, GET → 404. (b) with-body path: master+user+tags (no activities) → DELETE body `{}` → 204, assert master gone + **user row hard-deleted** (DB query, §4.1) + tags gone; master+activities → DELETE body `{}` → 422 ("blocking"); client+records+visitors+visits+payments+tags → DELETE body `{"resolutions":{"records":"nullify","visitors":"cascade"}}` → 204 + the S4 cascade assertions from Task 10's RED (do not duplicate — reference); DELETE body `{"resolutions":{"records":"cascade"}}` → 422. Run → fail.
+- [ ] **GREEN:** In each `api/v1/{masters,locations,services,materials,clients}.py` update the DELETE route to dispatch on body presence:
   ```python
+  from fastapi import Body
   @router.delete("/{entity_id}", status_code=204)
-  async def delete_entity(entity_id: str, service: _ServiceDep, session: SessionDep) -> None:
+  async def delete_entity(
+      entity_id: str,
+      service: _ServiceDep,
+      session: SessionDep,
+      resolutions: dict[str, str] | None = Body(default=None),
+  ) -> None:
+      if resolutions is not None:
+          # Execute path (Change 1 — body present)
+          try:
+              ok = await service.resolve_delete(db_session=session, id=entity_id, resolutions=resolutions)
+          except ResolutionError as e: raise HTTPException(status_code=422, detail=str(e))
+          if not ok: raise HTTPException(status_code=404, detail=ErrorDetail(...).model_dump())
+          return  # 204
+      # Dry-run path (no body)
       deps = await collect_dependencies(session, EntityModel, entity_id)
       if deps:
           raise HTTPException(status_code=409, detail={"detail": "has_dependencies", "dependencies": [d.model_dump() for d in deps]})
@@ -315,35 +335,40 @@ Flip each of the 5 `DELETE /{id}` routes to use the new resolver: call `collect_
       if not deleted:
           raise HTTPException(status_code=404, detail=ErrorDetail(...).model_dump())
   ```
-  (Use the existing dependency-injection + error-code conventions; the 409 `detail` is a dict per FastAPI.)
-- [ ] Run the new API tests + existing 404 tests. The previous soft-delete-is-active assertions are handled in Task 13/14.
-- [ ] Commit: `feat(api): DELETE returns 409 dependency tree + hard delete (#207)`
+  (Use the existing error-code conventions; the 409 `detail` is a dict per FastAPI.)
+- [ ] Run the new API tests + existing 404 tests. The previous soft-delete-is-active assertions are handled in Task 12/13.
+- [ ] Commit: `feat(api): unified DELETE route — dry-run (no body) + execute (with body) (#207)`
 
 ---
 
-## Task 10: POST /{id}/delete with resolutions — the resolution transaction (Client + the 4)
+## Task 10: Resolution transaction executor (`service.resolve_delete`) — domain + service layer
 ### Classification: large
 
 ### Required Docs
-- Spec §6 (POST /delete rules — full), §4 (FK matrix), §8 (atomicity + VisitorService._delete_cascade), §14
-- `backend/src/api/v1/{masters,locations,services,materials,clients}.py`, `backend/src/services/{client,...}.py`
-- `backend/src/domain/deletion.py` (Task 8), `backend/src/services/visitor.py` (Task 7)
+- Spec §6 (DELETE-with-body execution rules — full), §4 (FK matrix, incl. Master→users §4.1), §8 (atomicity + VisitorService._delete_cascade), §14
+- `backend/src/services/{client,master,location,service,material}.py`, `backend/src/domain/deletion.py`
+- `backend/src/services/visitor.py` (Task 7 — `_delete_cascade`)
 
 ### Task Description
-Add `POST /{id}/delete` to all 5 entities. Body: `{"resolutions": {"entity_name": "nullify"|"cascade"}}`. Flow:
-1. Collect deps (Task 8). If any blocked (`allowed_actions == []`, i.e. activities) → 422 ("entity has blocking dependencies — archive instead").
-2. `validate_resolutions` → if errors → 422 with details.
-3. Execute in ONE `@transactional` method on the service: **nullify** non-auto nullify deps (set their FK to NULL); **cascade** non-auto cascade deps (for Client→visitors: loop `visitor_service._delete_cascade(session, visitor_id)` on the shared session — atomic, single commit); then **auto** deps (tags/tariffs/photos — cascade or nullify per matrix); then **hard-delete** the entity row.
-4. 204 on success. 404 if entity not found.
+Build the `resolve_delete(db_session, entity_id, resolutions: dict[str, str]) -> bool` executor (the implementation behind Task 9's with-body DELETE route). Called by the DELETE-with-body path; NOT a separate endpoint. Flow:
+1. Collect deps (Task 8). If any blocked (`allowed_actions == []`, i.e. activities) → raise `BlockingDepsError` → API returns 422 ("entity has blocking dependencies — archive instead").
+2. `validate_resolutions` → if errors → raise `InvalidResolutionError` → 422 with details.
+3. Execute in ONE `@transactional` method: **nullify** non-auto nullify deps (set their FK to NULL); **cascade** non-auto cascade deps (Client→visitors: loop `visitor_service._delete_cascade(session, visitor_id)` on the shared session — atomic, single commit); then **auto** deps (Master→users §4.1 hard-delete the linked user row, tags/tariffs — cascade; Service photos — nullify); then **hard-delete** the entity row.
+4. 204 on success (route returns no body). 404 if entity not found (`False` return).
 
-For Master/Location/Service (no user-choice cascade — only activities-block + nullable nullify + auto): the transaction is: nullify the users/master_id (Master) → delete master_tags (auto cascade) → delete master (hard). For Service: nullify photos.service_id (auto), delete tariffs (auto cascade), delete service_tags (auto cascade), delete service (hard). For Material: just hard delete (already done in Task 9's DELETE path — POST /delete is an alias returning 204 on bare material).
+**Per-entity transactions:**
+- **Master:** hard-delete linked `users` row (auto-cascade §4.1) → delete `master_tags` (auto) → hard-delete master. No user-choice deps if no activities. (`resolutions` body is `{}`.)
+- **Location:** delete `location_tags` (auto) → hard-delete location. (`resolutions` body is `{}`.)
+- **Service:** nullify `photos.service_id` (auto) → delete `tariffs` (auto) → delete `service_tags` (auto) → hard-delete service. (`resolutions` body is `{}`.)
+- **Material:** just hard delete (no deps — Task 9's no-body path already returns 204).
+- **Client:** nullify `records.client_id` (non-auto, user choice `nullify`) → cascade `visitors` (non-auto, user choice `cascade` — loop `_delete_cascade` on shared session, visits → photos SET NULL → visitor_tags → visitor) → delete `client_tags` (auto) → hard-delete client. (`resolutions` body = `{"records":"nullify","visitors":"cascade"}`.)
 
-The atomicity rule (§8): ONE `@transactional` method on ClientService.delete, calling `visitor_service._delete_cascade(session, vid)` in a loop — NO per-visitor commit.
+The atomicity rule (§8): ONE `@transactional` method on the service, calling `visitor_service._delete_cascade(session, vid)` in a loop — NO per-visitor commit. The Master→users hard-delete and tags-deletes happen on the same outer session.
 
 ### Steps
-- [ ] **RED:** E2E + integration tests in `backend/tests/test_api_clients.py` — S4 scenario from spec: seed client+records+visitors+visits+payments+client_tags; DELETE → 409; POST /delete with `{"resolutions":{"records":"nullify","visitors":"cascade"}}` → 204; assert records survive with `client_id=NULL`, payments survive with records, visitors/visits/client_tags gone, client gone. Plus the §6 422 tests: wrong action, missing dep, blocked-deps-present. Plus atomicity: a mid-cascade failure rolls back (mock breakage). Run → fail.
-- [ ] **GREEN:** Add the resolution executor in `backend/src/domain/deletion.py` (or a `resolve()` method on the service):
-  ```python
+- [ ] **RED:** Integration tests in `backend/tests/test_api_clients.py` — S4 scenario: seed client+records+visitors+visits+payments+client_tags; DELETE (no body) → 409; DELETE with body `{"resolutions":{"records":"nullify","visitors":"cascade"}}` → 204; assert records survive with `client_id=NULL`, payments survive with records, visitors/visits/client_tags gone, client gone. Plus the §6 422 tests on the with-body path: wrong action (`records:"cascade"`), missing dep (no `visitors`), blocked-deps-present (clients can't have activities — use Master+activities for the blocked test). Plus atomicity: a mid-cascade failure (mock `_delete_cascade` raise on 2nd visitor) rolls back — assert client still present, records still linked, first visitor NOT deleted. **Master→users cascade test:** seed master+user+tags (no activities); DELETE with body `{}` → 204; assert **user row gone** (DB query `users WHERE master_id = master.id` → 0) + master gone + tags gone. Run → fail.
+- [ ] **GREEN:** Add the resolution executor. Put it on the service (cleaner — has `self._model` + `self._repository`); the entity-specific per-dependency deletes/nullifies can dispatch on `self._model` against the `FK_MATRIX` (Task 8). For Client→visitors loop: `for v in visitors: await self._visitor_service._delete_cascade(db_session, v.id)` — single session, single outer commit. For Master→users: `await db_session.execute(delete(User).where(User.master_id == entity_id))` (the user row itself has no further dependents — verify with an explore check; if user has FK dependents, follow any existing cascade; the explore earlier did not flag user dependents, so a plain hard delete is expected to work). Sketch:
+```python
   @transactional
   async def resolve_delete(self, db_session, entity_id, resolutions: dict[str, str]) -> bool:
       nodes = await collect_dependencies(db_session, self._model, entity_id)
@@ -352,40 +377,33 @@ The atomicity rule (§8): ONE `@transactional` method on ClientService.delete, c
       if errors: raise InvalidResolutionError(...)
       # 1. nullify non-auto nullify deps
       # 2. cascade non-auto cascade deps (Client→visitors via visitor_service._delete_cascade in a loop)
-      # 3. auto deps (tags delete, tariffs delete, photos nullify)
+      # 3. auto deps: Master→users hard delete (delete(User).where(master_id==id)), *_tags delete, Service tariffs delete, Service photos SET NULL
       # 4. hard delete entity row (self._repository.delete)
       return True
   ```
-  (Use the `ResolutionError` subtypes defined in Task 8's `domain/deletion.py` — `BlockingDepsError` (activities present → 422 "archive instead") and `InvalidResolutionError` (wrong action / missing dep → 422). The API route catches the base `ResolutionError`. For Client→visitors loop: `for v in visitors: await self._visitor_service._delete_cascade(db_session, v.id)` — single session, single outer commit.) Put the executor as a method on `ArchiveService` or as a standalone async in `domain/deletion.py` that takes the necessary services — pick the cleaner design and document.
-- [ ] In each `api/v1/{masters,locations,services,materials,clients}.py` add the POST route:
-  ```python
-  @router.post("/{entity_id}/delete", status_code=204)
-  async def delete_with_resolutions(entity_id: str, body: DeleteResolutionBody, service: _ServiceDep, session: SessionDep) -> None:
-      try:
-          ok = await service.resolve_delete(session, entity_id, body.resolutions)
-      except ResolutionError as e: raise HTTPException(status_code=422, detail=str(e))
-      if not ok: raise HTTPException(status_code=404, detail=...)
-  ```
-  (Define `DeleteResolutionBody(BaseModel): resolutions: dict[str, str]` in schemas.)
-- [ ] Run `pytest backend/tests/test_api_clients.py -k delete` + the 4 siblings — green.
-- [ ] Commit: `feat(api,svc): POST /{id}/delete resolution transaction (nullify→cascade→hard) (#207)`
+  (The `ClientService` needs a reference to `VisitorService` — inject via the existing DI factory or construct in `__init__`; document the choice.) A `MasterService`-specific executor is NOT required if the generic dispatch over `FK_MATRIX[Master]` covers the users auto-cascade — but if Master→users has user-table-specific logic (verify no downstream user FKs), a `MasterService.resolve_delete` override is cleaner. Pick the design that avoids `if model is Master` branches in the generic executor; document it in the commit.
+- [ ] The route wiring is already done in Task 9 (the with-body path calls `service.resolve_delete`). Verify the route's `except ResolutionError` catches both `BlockingDepsError` and `InvalidResolutionError` (they're subtypes — Python catches the base).
+- [ ] Run `pytest backend/tests/test_api_clients.py -k delete` + the 4 siblings — green. The atomicity test passes only because `_delete_cascade` (Task 7) shares the session without committing.
+- [ ] Commit: `feat(svc): resolve_delete transaction executor — nullify→cascade(auto+users)→hard (#207)`
 
 ---
 
-## Task 11: POST /{id}/archive + POST /{id}/restore routes (5 entities)
+## Task 11: POST /{id}/archive + POST /{id}/restore routes (5 entities) + Master→user cascade
 ### Classification: standard
 
 ### Required Docs
-- Spec §2 (API surface: archive/restore), §3.4 (Service archive/restore), §14
+- Spec §2 (API surface: archive/restore — HTTP 200 with body), §3.4 (Service archive/restore — Master-only user cascade), §4.2 (Master archive/restore cascades to user.is_active — Change 3), §14
 - `backend/src/api/v1/{masters,locations,services,materials,clients}.py`
-- `backend/src/services/generic.py` (ArchiveService.archive/restore from Task 3)
+- `backend/src/services/generic.py` (ArchiveService.archive/restore from Task 3), `backend/src/services/master.py`
 
 ### Task Description
-Add two POST routes per entity. `POST /{id}/archive` → calls `service.archive(session, id)` (sets `is_active=False`), returns 204 (or 200 with the mapped response showing `archived: true` — decide per existing DELETE-route pattern; the DELETE routes return 204 no-body, so for parity make archive/restore also 204, OR return the entity with `archived` for frontend convenience. Pick 200-with-body so the frontend can update the row without a refetch — document the choice). `POST /{id}/restore` → `service.restore(session, id)` → `is_active=True` → 200 with body (`archived: false`). 404 if not found.
+Add two POST routes per entity. Both return **HTTP 200 with body** (the re-fetched entity serialized with `archived`) — the frontend updates the row without a refetch (the spec §12 S3/S5 literally said "204" but 204 carries no body, so the plan picks 200-with-body; G2 approved). `POST /{id}/archive` → `service.archive(session, id)` (sets `is_active=False`) → 200 `archived: true`. `POST /{id}/restore` → `service.restore(session, id)` → 200 `archived: false`. 404 if not found. Idempotent (archive an archived row → still 200 `archived: true`).
+
+**Master-only cascade (Change 3, §4.2):** `MasterService.archive()` and `restore()` OVERRIDE the generic `ArchiveService` methods to additionally write the linked `users.is_active` (find `User` where `users.master_id == master.id`, set `is_active` to match) in the SAME transaction as the master's `is_active` patch. This is a Master-specific override — do NOT add it to the generic `ArchiveService` (the other 4 entities don't cascade).
 
 ### Steps
-- [ ] **RED:** In `backend/tests/test_api_masters.py` etc.: test archive → 200 with body `archived: true` + DB `is_active=False`; restore → 200 `archived: false` + DB `is_active=True`; archive a non-existent id → 404; restore a non-existent id → 404; archive an already-archived → idempotent 200 (still `archived: true`); restore an active → idempotent 200. Also assert `?status=archived` now returns it. Run → fail.
-- [ ] **GREEN:** In each entity's API module add:
+- [ ] **RED:** In `backend/tests/test_api_masters.py` etc.: test archive → 200 with body `archived: true` + DB `is_active=False`; restore → 200 `archived: false` + DB `is_active=True`; archive a non-existent id → 404; restore a non-existent id → 404; archive an already-archived → idempotent 200 (still `archived: true`); restore an active → idempotent 200. Assert `?status=archived` now returns the archived row. **Master-only extra test (§4.2):** seed master+linked user (user `is_active=True`); `POST /masters/{id}/archive` → 200, assert `users.is_active=False` (DB query); `POST /masters/{id}/restore` → 200, assert `users.is_active=True`. The other 4 entities' archive/restore must NOT touch any user (no user link — assert no DB change to users). Run → fail.
+- [ ] **GREEN:** In each `api/v1/{masters,locations,services,materials,clients}.py` add:
   ```python
   @router.post("/{entity_id}/archive", response_model=XResponse)
   async def archive_entity(entity_id: str, service: _ServiceDep, session: SessionDep):
@@ -400,8 +418,20 @@ Add two POST routes per entity. `POST /{id}/archive` → calls `service.archive(
       return await service.get(...)
   ```
   (Adapt to the actual `get` signature; the response is the `XResponse` with `archived` computed via Task 4's schema.)
-- [ ] Run the new tests → green.
-- [ ] Commit: `feat(api): POST /archive + POST /restore for 5 entities (#207)`
+- [ ] **GREEN (Master cascade §4.2):** In `backend/src/services/master.py`, override `archive`/`restore`:
+  ```python
+  @transactional
+  async def archive(self, db_session, id: str) -> bool:
+      ok = await super().archive(db_session, id)  # flips master.is_active=False (super's @transactional commits — see note)
+      if not ok: return False
+      # Cascade to linked user
+      await db_session.execute(update(User).where(User.master_id == id).values(is_active=False))
+      return True
+  # Same shape for restore() with is_active=True.
+  ```
+  **Atomicity caveat:** the generic `ArchiveService.archive` (Task 3) is itself `@transactional` → commits. Overriding it and calling `super().archive()` then doing the user write would mean TWO commits (master first, then user) — NOT atomic. To fix: either (a) have `MasterService.archive` NOT call super but instead replicate the master `repo.patch` + the user write in ONE `@transactional` method (preferred — explicit, atomic); or (b) refactor `ArchiveService.archive` into a `_archive_core(session, id)` non-decorated helper (mirrors Task 7's `_delete_cascade` pattern) and override `MasterService.archive` to call `_archive_core` + the user write in one `@transactional`. **Recommended: approach (a)** — Master has exactly one cascade, replicating the patch is 2 lines, no need to refactor the generic. Document the choice in the commit message.
+- [ ] Run the new tests → green (incl. the Master→user cascade assertions).
+- [ ] Commit: `feat(api): POST /archive + POST /restore (200-with-body), Master→user cascade (#207)`
 
 ---
 
@@ -451,17 +481,18 @@ These currently assert PUT/PATCH with `is_active` round-trips for Master/Locatio
 
 ### Task Description
 Lock the new behavior with backend tests mirroring the spec scenarios at the API level (the E2E in **Task 21** mirrors them at the browser level). **S4 (Client full cascade) + the mid-cascade atomicity fault-injection test are already covered as Task 10's RED-GREEN** — Task 14 should not duplicate them; reference Task 10 for S4/atomicity and focus Task 14 on S1/S2/S3/S7 (the other entities):
-- S1: Material DELETE → 204 (zero deps); GET → 404.
-- S2: Master + user + tags (no activities) → DELETE 409 (users nullify, master_tags cascade auto); POST /delete `{"resolutions":{"users":"nullify"}}` → 204; assert user survives with master_id NULL, tags gone, master gone.
-- S3: Master + 3 activities → DELETE 409 (activities block); POST /delete → 422 (blocked); POST /archive → 200; POST /restore → 200.
-- S4: Client + records + visitors + visits + payments + tags → DELETE 409 with cascade_preview `{"visits": N}` (no payments key); POST /delete correct resolutions → 204; assert records.client_id NULL, visitors/visits gone, **payments still present** (record-scoped), client_tags gone, client gone.
-- S7: 422 paths — wrong action `{"records":"cascade"}`, missing `visitors`, blocked activities present.
+- S1: Material DELETE (no body) → 204 (zero deps); GET → 404.
+- S2: Master + user + tags (no activities) → DELETE (no body) 409 (users cascade **auto** (§4.1), master_tags cascade auto — `resolutions` body is `{}`); DELETE with body `{}` → 204; assert **user row hard-deleted** (DB query users WHERE master_id → 0), tags gone, master gone. (Change 2 — no more nullify choice on users.)
+- S3: Master + 3 activities → DELETE (no body) 409 (activities block); DELETE with body `{}` → 422 (blocked); POST /archive → 200 + `users.is_active=False` (cascade §4.2); POST /restore → 200 + `users.is_active=True`.
+- S4: (covered by Task 10 — Client full cascade + atomicity) — reference, do not duplicate.
+- S5: per 5 entities archive → 200 `archived: true`; restore → 200 `archived: false`; **Master only asserts `users.is_active` flipped both ways** (cascade §4.2); the other 4 entities assert NO user-table change. (Change 3.)
+- S7: 422 paths on DELETE-with-body — wrong action `{"records":"cascade"}`, missing `visitors`, blocked activities (use Master+activities with body `{}`).
 
 ### Steps
 - [ ] Write each test (RED-GREEN). The GREEN is the routes/services from Tasks 9/10/11 — these tests lock them. If any green fails, return DONE_WITH_CONCERNS noting the gap (the implementation task owns the fix).
-- [ ] Add an atomicity test (§8/§16): mock a failure mid-cascade (e.g. raise on the 2nd visitor's `_delete_cascade`) and assert the transaction rolled back (client row still present, records still have `client_id` set, first visitor NOT deleted). This requires injecting a fault — use a monkeypatch on `_delete_cascade` for the 2nd visitor.
-- [ ] Run `pytest backend/tests/` full suite → expected green (the 5-entity hard-delete flip + archive/restore + 409 + POST-delete all covered).
-- [ ] Commit: `test(api): dependency-resolution, 409, POST-delete, atomicity, scenarios S1-S4+S7 (#207)`
+- [ ] **Atomicity test** is owned by Task 10 (mock `_delete_cascade` raise on 2nd visitor → assert rollback). Reference it; do not duplicate.
+- [ ] Run `pytest backend/tests/` full suite → expected green (the 5-entity hard-delete flip + archive/restore + 409 + DELETE-with-body + Master→user cascades all covered).
+- [ ] Commit: `test(api): scenarios S1-S3+S5+S7 + Master→user cascade (delete §4.1 + archive §4.2) (#207)`
 
 ---
 
@@ -502,12 +533,12 @@ In `schemas.ts`, for each of the 5 `XResponseSchema`: replace `is_active: z.bool
 Add to `endpoints.ts`:
 1. `archiveX(id: string): Promise<XResponse>` — POST `/api/v1/Xs/{id}/archive` with `z.any()` or `XResponseSchema` parse.
 2. `restoreX(id: string): Promise<XResponse>` — POST `/api/v1/Xs/{id}/restore`.
-3. `resolveDeleteX(id: string, resolutions: Record<string,string>): Promise<void>` — POST `/api/v1/Xs/{id}/delete` with body `{resolutions}` → 204 (no body).
-4. Keep existing `deleteX(id)` (still used for the dry-run 409 preview / instant-204 path).
+3. `resolveDeleteX(id: string, resolutions: Record<string,string>): Promise<void>` — **`DELETE` with body** (Change 1): `api(`/api/v1/Xs/${id}`, z.any(), { method: 'DELETE', body: { resolutions } })` → 204 (no body). The existing `deleteX(id)` (no body) is the dry-run; `resolveDeleteX(id, resolutions)` (with body) is the execute.
+4. Keep existing `deleteX(id)` (the no-body dry-run / instant-204 path).
 5. `patchX` no longer needs `is_active` (removed from `Partial<XUpdate>`). The mutation hooks (**Task 17**) will switch archive toggles from `patchX` to `archiveX`/`restoreX`.
 
 ### Steps
-- [ ] **RED:** In `endpoints.test.ts` add tests for `archiveMaster`/`restoreMaster` (POST routes asserted) + `resolveDeleteClient(id, {records:'nullify', visitors:'cascade'})` (POST body asserted) + delete tests for `deleteMaster`/`deleteMaterial`/`deleteClient` (currently absent per codebase explore — add them).
+- [ ] **RED:** In `endpoints.test.ts` add tests for `archiveMaster`/`restoreMaster` (POST routes asserted) + `resolveDeleteClient(id, {records:'nullify', visitors:'cascade'})` (**DELETE-with-body** asserted — `method: 'DELETE'` + body, NOT POST) + delete tests for `deleteMaster`/`deleteMaterial`/`deleteClient` (currently absent per codebase explore — add them).
 - [ ] **GREEN:** In `endpoints.ts` add the 3 new methods per entity (15 total: 5 archive + 5 restore + 5 resolveDelete). Use the existing `api()` helper pattern:
   ```ts
   export async function archiveMaster(id: string): Promise<MasterResponse> {
@@ -517,7 +548,7 @@ Add to `endpoints.ts`:
     return api(`/api/v1/masters/${id}/restore`, MasterResponseSchema, { method: 'POST' });
   }
   export async function resolveDeleteMaster(id: string, resolutions: Record<string, string>): Promise<void> {
-    await api(`/api/v1/masters/${id}/delete`, z.any(), { method: 'POST', body: { resolutions } });
+    await api(`/api/v1/masters/${id}`, z.any(), { method: 'DELETE', body: { resolutions } });
   }
   ```
 - [ ] Remove the stale `patchMaster` (etc.) tests asserting `is_active` is passed in the patch payload (update them to assert archive/restore endpoints are used instead — **Task 17** owns the hook side).
@@ -536,7 +567,7 @@ Add to `endpoints.ts`:
 
 ### Task Description
 - **Mutation hooks (4 entities):** keep `useDeleteX` but rename/repurpose: it calls `deleteX(id)` and on `onError` if status 409, exposes the dependency tree (parsed from `error.response.detail.dependencies`) to the UI for the dialog (Task 19). Add `useArchiveX` (`archiveX(id)`) and `useRestoreX` (`restoreX(id)`). Remove the `patchX({is_active})` flow from the table — tables switch to `useArchiveX`/`useRestoreX` in Task 19. Invalidation: archive/restore/delete all invalidate `['X']`. **Cross-invalidation (sensible cache hygiene, beyond the literal spec §7/§14 but required to keep records-derived views consistent after a hard-deleted master/location/service):** hard delete of Master/Location/Service also invalidates `['records']`-consumer queries — the `useRecordData.ts` keys on `['services']`/`['masters']`/`['locations']` (built-in queries, NOT auto-invalidated by the entity mutations today); add `queryClient.invalidateQueries({queryKey:['masters']})` analogues for the cross-keys in the delete hook `onSuccess`. For Client, `invalidateClients` already covers `['records']`.
-- **ClientsContext:** add `archiveClient`/`restoreClient` (parity #198), keep `deleteClient` but route through the new resolver (same 409-aware pattern). The context's `apiDeleteClient` call becomes: try DELETE → 409 → expose deps → POST /delete with resolutions on confirm.
+- **ClientsContext:** add `archiveClient`/`restoreClient` (parity #198), keep `deleteClient` but route through the new resolver (same 409-aware pattern). The context's `apiDeleteClient` call is the no-body DELETE dry-run; on 409 → expose deps → on confirm call `resolveDeleteClient(id, resolutions)` (DELETE with body). (Master archive/restore also cascades to the linked user — that's backend-side in Task 11; the admin hook just calls `archiveMaster`/`restoreMaster` and invalidates `['masters']` + the cross-keys. The user-side is_active flip is transparent to the frontend.)
 
 ### Steps
 - [ ] **RED:** Update `useMastersMutations.test.ts` etc. — assert `useArchiveMaster` calls `archiveMaster`, `useRestoreMaster` calls `restoreMaster`. Remove the `expect(mockPatchMaster).toHaveBeenCalledWith(id, { is_active: false })` assertions (replace with archive/restore assertions). Run → fail.
@@ -557,13 +588,13 @@ Add to `endpoints.ts`:
 
 ### Task Description
 Create a shared `DeleteDialog` component handling both modes per spec §7:
-1. **Trigger flow:** parent calls `DELETE` first; if 204 → onDone (delete already succeeded); if 409 → parse `dependencies`; if any `allowed_actions == []` → render **Mode B** ("Нельзя удалить: есть N активностей." + "[Архивировать]" + "[Отмена]"); otherwise render **Mode A** (list deps with → cascade / ○ nullify, auto-deps shown but not asked, type-to-confirm input enabled when the entity name matches; on confirm → `resolveDeleteX(id, resolutions)` with only non-auto resolutions; success → onDone).
+1. **Trigger flow:** parent calls `DELETE /{id}` (no body — dry-run) first; if 204 → onDone (delete already succeeded, no deps); if 409 → parse `dependencies`; if any `allowed_actions == []` → render **Mode B** ("Нельзя удалить: есть N активностей." + "[Архивировать]" + "[Отмена]"); otherwise render **Mode A** (list deps with → cascade / ○ nullify, auto-deps shown but not asked — incl. **Master→users** "→ Пользователь: 1 (удалён)" per §4.1 Change 2, no choice, type-to-confirm input enabled when the entity name matches; on confirm → `resolveDeleteX(id, resolutions)` which sends `DELETE /{id}` **with body** — only non-auto resolutions, auto deps like Master→users/tags omitted; success → onDone).
 2. Mode A: "[Введите название для подтверждения] [Удалить] [Отмена]". "Удалить" disabled until name matches; destructive button styling.
 3. Mode B: primary "[Архивировать]" calls `archiveX(id)` then onDone; delete not offered.
 4. Mobile-first per colourmountains-design — overlay/modal pattern consistent with the rest of the admin.
 
 ### Steps
-- [ ] **RED:** Component test `frontend/admin/__tests__/DeleteDialog.test.tsx` — render Mode A with a deps fixture (users nullify, tags auto), assert the list renders, type-to-confirm disables/enables "Удалить", clicking it calls `resolveDeleteX` with `{users: 'nullify'}` (no tags in body). Render Mode B with activities-blocked deps, assert "[Архивировать]" present and "Удалить" absent, click → calls `archiveX`. Run → fail.
+- [ ] **RED:** Component test `frontend/admin/__tests__/DeleteDialog.test.tsx` — render Mode A with a deps fixture (Master: users cascade **auto** per §4.1, master_tags cascade auto — both shown as "→ ... (удалён)" with no choice, `resolutions` body is `{}`), assert the list renders, type-to-confirm disables/enables "Удалить", clicking it calls `resolveDeleteX` with `{}` (all auto). Render a Client Mode A fixture (records nullify non-auto, visitors cascade non-auto, client_tags cascade auto) → confirm calls `resolveDeleteX` with `{records:'nullify', visitors:'cascade'}` (tags omitted). Render Mode B with activities-blocked deps (Master+activities), assert "[Архивировать]" present and "Удалить" absent, click → calls `archiveX`. Run → fail.
 - [ ] **GREEN:** Implement `frontend/admin/app/components/DeleteDialog.tsx` per §7. Props: `entityName: string`, `entityType: 'master'|'location'|'service'|'material'|'client'`, `entityId: string`, `dependencies: DependencyNode[]` (already-fetched from the DELETE 409), `onDone: () => void`, `onCancel: () => void`. The parent owns the initial DELETE call (Task 19/20).
 - [ ] Run the component test → green.
 - [ ] Commit: `feat(admin): shared DeleteDialog — Mode A type-confirm + Mode B blocked→archive (#207)`
@@ -628,9 +659,9 @@ Replace every `is_active: boolean` with `archived: boolean` (inverted: `archived
 ### Task Description
 Add 7 E2E specs per the spec's §12 scenarios, each following the Full Cycle pattern (seed via API factories → navigate → act → assert UI + DB via raw SQL → cleanup):
 - `e2e/materials-delete.spec.ts` (S1) — create material, delete, assert row absent + API 404.
-- `e2e/masters-delete-nullify.spec.ts` (S2) — seed master+user+tags (no activities), open delete dialog, preview shows "○ Пользователь: 1 (отвязан)" + "→ Теги: N (удалены)", type-confirm, assert 204 + user master_id NULL + master gone.
+- `e2e/masters-delete-auto-cascade.spec.ts` (S2 — Change 2) — seed master+user+tags (no activities), open delete dialog, preview shows "→ Пользователь: 1 (удалён)" + "→ Теги: N (удалены)" (auto-cascade both, NO choice), type-confirm, `DELETE /masters/{id}` with body `{}` → assert 204 + **user row gone** (DB query, §4.1) + master gone + tags gone.
 - `e2e/masters-delete-blocked.spec.ts` (S3) — seed master+3 activities, open delete → Mode B "Нельзя удалить: есть 3 активности.", click "Архивировать" → `archived: true`, click "Восстановить" → `archived: false`.
-- `e2e/clients-delete-cascade.spec.ts` (S4) — seed client+records+visitors+visits+payments+tags, assert DELETE 409 + cascade_preview `{"visits": 45}`, type-confirm, POST /delete `{records:nullify, visitors:cascade}` → assert 204 + records.client_id NULL + **payments still present** (record-scoped) + visitors/visits/client_tags gone + client gone.
+- `e2e/clients-delete-cascade.spec.ts` (S4) — seed client+records+visitors+visits+payments+tags, assert DELETE (no body) 409 + cascade_preview `{"visits": 45}`, type-confirm, `DELETE /clients/{id}` **with body** `{resolutions:{records:'nullify', visitors:'cascade'}}` → assert 204 + records.client_id NULL + **payments still present** (record-scoped) + visitors/visits/client_tags gone + client gone.
 - `e2e/archive-restore-parity.spec.ts` (S5) — per 5 entities: archive → absent from active, present in archived; restore → back. Covers Client (#198 parity).
 - `e2e/update-rejects-is-active.spec.ts` (S6) — per 5 entities: PUT with is_active → 422 (assert error UI).
 - `e2e/clients-delete-invalid-resolution.spec.ts` (S7) — wrong action 422, missing dep 422, correct 204.
@@ -683,7 +714,7 @@ Update `docs/domain-rules/`:
 
 ## Self-Review
 
-- **Spec coverage:** every §14 AC maps to a task — FK ON (T1); rename (T2/T3); schema inversion incl. ClientWithStats (T4); PUT/PATCH rejects is_active + #178 (T5); dead-code (T6); VisitorService extracted core + atomicity (T7); FK matrix + 409 builder (T8); DELETE 409 (T9); POST /delete transaction (T10); archive/restore (T11); contract tests (T12); put/patch inversion + archive endpoint tests (T13); dep-resolution + atomicity tests (T14); api-client Zod (T15/T16); hooks (T17); DeleteDialog (T18); table wiring (T19); vitest mocks (T20); E2E S1-S7 (T21); sweep (T22); domain docs (T23). All §12 scenarios have a backend test (T14) + an E2E (T21).
+- **Spec coverage:** every §14 AC maps to a task — FK ON (T1); rename (T2/T3); schema inversion incl. ClientWithStats (T4); PUT/PATCH rejects is_active + #178 (T5); dead-code (T6); VisitorService extracted core + atomicity (T7); FK matrix + 409 builder incl. Master→users auto-cascade (T8); DELETE unified route dry-run+execute (T9); resolve_delete transaction executor (T10); archive/restore routes + Master→user cascade (T11); contract tests (T12); put/patch inversion + archive endpoint tests (T13); scenarios S1-S3+S5+S7 + Master→user cascade tests (T14); api-client Zod + parity test (T15/T16); hooks (T17); DeleteDialog (T18); table wiring (T19); vitest mocks (T20); E2E S1-S7 (T21); sweep (T22); domain docs (T23). All §12 scenarios have a backend test (T14) + an E2E (T21). **Change 1 (unified DELETE)** in T9/T16; **Change 2 (Master→users delete cascade)** in T8/T10/T14/T21; **Change 3 (Master archive/restore user cascade)** in T11/T14/T21.
 - **Placeholder scan:** no TBD/TODO/"implement later"; every step has a concrete file path or action.
 - **Type consistency:** `ArchiveService`/`ArchiveRepository` named consistently; `archived: bool` inverted consistently; `resolve_delete`/`_delete_cascade` named consistently.
 - **Required Docs:** every task carries a `### Required Docs` section.

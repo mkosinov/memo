@@ -491,7 +491,7 @@ class TestGenericServiceDeleteSemantics:
         """Soft-deleted row is hidden from list() items AND excluded from total.
 
         The *list hides* half of the list/get pairing (spec §2: archived
-        rows must not surface in the default active-only view — SoftDeleteService.list
+        rows must not surface in the default active-only view — ArchiveService.list
         filters ``is_active`` by default, ``ArchiveStatus.ACTIVE``).
         """
         assert cfg is not None, (
@@ -941,7 +941,7 @@ class TestGenericServiceIsActiveContract:
         strips None for ``NOT_NULL_FIELDS`` (and ``is_active`` is in no
         service's ``NOT_NULL_FIELDS``) → PATCH ``{"is_active": null}`` writes
         NULL → DB NOT NULL violation. After the §3.5 fix
-        (``SoftDeleteService._patch_payload`` pops is_active=None) the
+        (``ArchiveService._patch_payload`` pops is_active=None) the
         stored value is preserved instead.
         """
         assert cfg is not None, MISSING_MSG

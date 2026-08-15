@@ -20,7 +20,7 @@ import src.services.service  # noqa: F401
 import src.services.tag  # noqa: F401
 import src.services.visitor  # noqa: F401
 
-from src.services.generic import GenericService, SoftDeleteService
+from src.services.generic import GenericService, ArchiveService
 
 # Service classes + factories
 from src.services.activity import ActivityService, get_activity_service
@@ -88,18 +88,18 @@ from src.schemas.visitor import VisitorResponse
 # ─── Исключения: сервисы с override-семантикой одного или нескольких
 # ─── generic-методов (create/get/list/update/patch/delete) ─────────────────────
 # Обязаны иметь собственные тесты (test_api_services.py / test_api_photos.py /
-# test_api_records.py). ``SoftDeleteService`` — абстрактный промежуточный базовый
+# test_api_records.py). ``ArchiveService`` — абстрактный промежуточный базовый
 # класс (#195): не привязан к конкретной модели/схеме, не тестируется напрямую;
 # его конкретные подклассы (Master/Location/Material/Client) покрыты через
 # CONTRACT_CONFIG и обнаруживаются рекурсивно через ``_all_subclasses``.
-GENERIC_CONTRACT_EXCEPTIONS: set[type] = {ServiceService, PhotoService, RecordService, SoftDeleteService}
+GENERIC_CONTRACT_EXCEPTIONS: set[type] = {ServiceService, PhotoService, RecordService, ArchiveService}
 
 
 def _all_subclasses(cls: type) -> list[type]:
     """Рекурсивно собрать всех транзитивных потомков ``cls``.
 
     ``GenericService.__subclasses__()`` возвращает только прямых наследников.
-    После #195 появилась промежуточная база ``SoftDeleteService``, чьи
+    После #195 появилась промежуточная база ``ArchiveService``, чьи
     конкретные подклассы (Master/Location/Material/Client) — внуки
     ``GenericService`` и без рекурсии выпадали бы из contract-покрытия.
     """

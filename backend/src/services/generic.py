@@ -45,7 +45,7 @@ async def paginate_orm(
 def _strip_is_active_none(payload: dict) -> dict:
     """Drop is_active when None — sticky field: absent/None preserves the stored value (#184).
 
-    Shared by SoftDeleteService._patch_payload and ServiceService.patch
+    Shared by ArchiveService._patch_payload and ServiceService.patch
     (ServiceService re-implements patch without super() — single helper
     prevents the drift that hid the resurrection hazard there)."""
     if payload.get("is_active") is None:
@@ -79,8 +79,8 @@ class GenericService(Generic[CreateSchemaT, UpdateSchemaT, ResponseSchemaT]):
         self._model = model
         self._response_schema = response_schema
 
-    # Base GenericService has NO is_active knowledge. Soft-delete filtering
-    # lives in SoftDeleteService below (#195).
+    # Base GenericService has NO is_active knowledge. Archive-status
+    # filtering lives in ArchiveService below (#195).
     def _list_stmt(self, **filters):
         """Build the base select with equality filters applied."""
         stmt = select(self._model)
@@ -157,7 +157,7 @@ class GenericService(Generic[CreateSchemaT, UpdateSchemaT, ResponseSchemaT]):
     def _patch_payload(self, data: BaseModel) -> dict:
         """Build the apply-dict for ``patch()``: ``exclude_unset`` dump with
         ``None`` values for ``NOT_NULL_FIELDS`` stripped (client intent is
-        "don't change", not "set to null"). Extracted so ``SoftDeleteService``
+        "don't change", not "set to null"). Extracted so ``ArchiveService``
         can override to additionally strip ``is_active=None`` (#184 sticky-
         field semantics) without the base class knowing about ``is_active``.
         """
@@ -186,9 +186,23 @@ class GenericService(Generic[CreateSchemaT, UpdateSchemaT, ResponseSchemaT]):
         return [self._response_schema.model_validate(o) for o in orm_list]
 
 
-class SoftDeleteService(GenericService[CreateSchemaT, UpdateSchemaT, ResponseSchemaT]):
-    """GenericService for soft-delete models (AbstractModelSoftDelete) with
-    archive-status list filtering (#195)."""
+class ArchiveService(GenericService[CreateSchemaT, UpdateSchemaT, ResponseSchemaT]):
+    """Archive-aware service for ``AbstractModelSoftDelete`` models.
+
+    Combines three concerns:
+
+    * **Hard delete** — ``delete`` is inherited UNMODIFIED from
+      ``GenericService`` (and ultimately from ``BaseRepository.delete``):
+      the row is physically removed, NOT soft-archived. Archive/restore is
+      a separate two-method surface owned here (see ``archive``/``restore``).
+    * **archive()/restore()** — flip ``is_active`` False/True without
+      removing the row (atomic per call, ``@transactional``).
+    * **Archive-status list filtering** (#195) — ``list()`` accepts a
+      ``status: ArchiveStatus`` parameter (ACTIVE default / ARCHIVED / ALL)
+      so the ``is_active`` predicate is owned by a single sibling concern
+      away from the base ``GenericService`` (which has no ``is_active``
+      knowledge).
+    """
 
     def _list_stmt(self, status: ArchiveStatus = ArchiveStatus.ACTIVE, **filters):
         stmt = super()._list_stmt(**filters)
@@ -213,10 +227,34 @@ class SoftDeleteService(GenericService[CreateSchemaT, UpdateSchemaT, ResponseSch
         )
 
     def _patch_payload(self, data: BaseModel) -> dict:
-        """Soft-delete patch payload: additionally strip ``is_active`` when None
-        (#184 sticky-field semantics). The base NOT_NULL strip does not cover
-        ``is_active`` (it is governed by the soft-delete lifecycle, not by the
-        patch-fieldset parity), so an explicit ``None`` would otherwise write
-        NULL to the NOT NULL column.
+        """Archive-aware patch payload: additionally strip ``is_active`` when
+        None (#184 sticky-field semantics). The base NOT_NULL strip does not
+        cover ``is_active`` (it is governed by the archive lifecycle, not by
+        the patch-fieldset parity), so an explicit ``None`` would otherwise
+        write NULL to the NOT NULL column.
         """
         return _strip_is_active_none(super()._patch_payload(data))
+
+    @transactional
+    async def archive(self, db_session: AsyncSession, id: str) -> bool:
+        """Archive a record (set ``is_active=False``).
+
+        Returns ``True`` if the row was archived, ``False`` if not found.
+        Honors the bool service contract (spec §3.4): ``ArchiveRepository.patch``
+        returns the ORM instance (found) or ``None`` (not found), so the
+        result is coerced to a real ``bool`` to match the declared return type.
+        """
+        return await self._repository.patch(
+            db_session, self._model, id, {"is_active": False}
+        ) is not None
+
+    @transactional
+    async def restore(self, db_session: AsyncSession, id: str) -> bool:
+        """Restore an archived record (set ``is_active=True``).
+
+        Returns ``True`` if the row was restored, ``False`` if not found.
+        See ``archive`` for the bool-coercion rationale.
+        """
+        return await self._repository.patch(
+            db_session, self._model, id, {"is_active": True}
+        ) is not None

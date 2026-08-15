@@ -15,16 +15,16 @@ from src.models.tag import service_tags
 from src.models.tariff import Tariff
 from src.schemas.common import PaginatedResponse
 from src.schemas.service import ServiceCreate, ServicePatch, ServiceResponse, ServiceUpdate
-from src.services.generic import SoftDeleteService, _strip_is_active_none
+from src.services.generic import ArchiveService, _strip_is_active_none
 from src.services.decorators import transactional
 
 
-class ServiceService(SoftDeleteService[ServiceCreate, ServiceUpdate, ServiceResponse]):
+class ServiceService(ArchiveService[ServiceCreate, ServiceUpdate, ServiceResponse]):
     """Service service with eager-loaded tariffs/tags and nested create/update.
 
     Overrides ``list`` to eager-load ``tariffs``/``tags`` via ``selectinload``.
     The eager-load makes the select structurally incompatible with the
-    ``SoftDeleteService._list_stmt`` base (which uses a bare ``select(model)``),
+    ``ArchiveService._list_stmt`` base (which uses a bare ``select(model)``),
     so the archive-status clause is applied inline here rather than composed
     (spec §5.3 explicitly permits this duplication for the eager-load override).
     """

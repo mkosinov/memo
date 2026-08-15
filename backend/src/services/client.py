@@ -22,11 +22,11 @@ from src.schemas.client import (
     ClientUpdate,
     ClientWithStats,
 )
-from src.services.generic import SoftDeleteService
+from src.services.generic import ArchiveService
 
 
-class ClientService(SoftDeleteService[ClientCreate, ClientUpdate, ClientResponse]):
-    """Client service — стандартный SoftDeleteService без NOT NULL полей."""
+class ClientService(ArchiveService[ClientCreate, ClientUpdate, ClientResponse]):
+    """Client service — стандартный ArchiveService без NOT NULL полей."""
 
 
 @lru_cache

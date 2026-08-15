@@ -1,9 +1,9 @@
-"""Unit tests for SoftDeleteService.list() archive-status filtering (GH #195).
+"""Unit tests for ArchiveService.list() archive-status filtering (GH #195).
 
 Mirrors ``test_soft_delete_repository.py`` but at the SERVICE layer. After
 GH #195 the base ``GenericService`` has NO ``is_active`` knowledge — soft-delete
-filtering is owned by ``SoftDeleteService``. The four migrated services
-(Master, Location, Material, Client) inherit ``SoftDeleteService``, so their
+filtering is owned by ``ArchiveService``. The four migrated services
+(Master, Location, Material, Client) inherit ``ArchiveService``, so their
 ``list()`` accepts an explicit ``status: ArchiveStatus`` parameter that:                                                                      
 
   - ArchiveStatus.ACTIVE  (default) → only is_active=True rows

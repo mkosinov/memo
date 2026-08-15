@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from src.models.enums import ArchiveStatus
-from src.repositories.generic import SoftDeleteRepository, get_soft_delete_repository
+from src.repositories.generic import ArchiveRepository, get_archive_repository
 from src.models.service import Service
 from src.models.tag import service_tags
 from src.models.tariff import Tariff
@@ -32,7 +32,7 @@ class ServiceService(SoftDeleteService[ServiceCreate, ServiceUpdate, ServiceResp
     NOT_NULL_FIELDS = {"title", "description", "image_url", "specialty", "min_age", "duration", "record_info"}
 
     def __init__(
-        self, repository: SoftDeleteRepository, model: type[Service]
+        self, repository: ArchiveRepository, model: type[Service]
     ) -> None:
         super().__init__(repository, model, response_schema=ServiceResponse)
 
@@ -212,4 +212,4 @@ class ServiceService(SoftDeleteService[ServiceCreate, ServiceUpdate, ServiceResp
 @lru_cache
 def get_service_service() -> ServiceService:
     """Returns a singleton ServiceService."""
-    return ServiceService(get_soft_delete_repository(), Service)
+    return ServiceService(get_archive_repository(), Service)

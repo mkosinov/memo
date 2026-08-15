@@ -13,7 +13,7 @@ from src.models.client import Client
 from src.models.enums import ArchiveStatus
 from src.models.payment import Payment
 from src.models.record import Record
-from src.repositories.generic import get_soft_delete_repository
+from src.repositories.generic import get_archive_repository
 from src.schemas.client import (
     ClientCreate,
     ClientListParams,
@@ -31,7 +31,7 @@ class ClientService(SoftDeleteService[ClientCreate, ClientUpdate, ClientResponse
 
 @lru_cache
 def get_client_service() -> ClientService:
-    return ClientService(get_soft_delete_repository(), Client, ClientResponse)
+    return ClientService(get_archive_repository(), Client, ClientResponse)
 
 
 async def list_clients_with_stats(

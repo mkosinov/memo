@@ -1,4 +1,4 @@
-"""Repository hierarchy: BaseRepository (hard delete) + SoftDeleteRepository.
+"""Repository hierarchy: BaseRepository (hard delete) + ArchiveRepository.
 
 Stateless — single instance serves all models. Each method takes
 ``table`` (SQLAlchemy model class) and accepts Pydantic ``BaseModel``
@@ -114,14 +114,17 @@ class BaseRepository:
         return updated
 
 
-class SoftDeleteRepository(BaseRepository):
-    """Repository for soft-deletable models — adds is_active filtering.
+class ArchiveRepository(BaseRepository):
+    """Repository for archivable models — hard delete + archive-status filtering.
 
     ``list()`` returns rows filtered by the ``status`` parameter:
-    ``ArchiveStatus.ACTIVE`` (default) → only is_active=True,
-    ``ArchiveStatus.ARCHIVED`` → only is_active=False,
-    ``ArchiveStatus.ALL`` → both active and archived.
-    ``delete()`` sets ``is_active=False`` instead of removing the row.
+    ``ArchiveStatus.ACTIVE`` (default) -> only is_active=True,
+    ``ArchiveStatus.ARCHIVED`` -> only is_active=False,
+    ``ArchiveStatus.ALL`` -> both active and archived.
+    ``delete()`` is NOT overridden here — hard delete is inherited UNMODIFIED
+    from ``BaseRepository.delete`` (physically removes the row). Archive and
+    restore are Service-level concerns (driven via ``patch`` on is_active),
+    not repository concerns (spec §3.3).
     If the table has no ``is_active`` column, ``AttributeError`` surfaces
     as a loud error — this is intentional (type-safety by assignment).
     """
@@ -144,17 +147,6 @@ class SoftDeleteRepository(BaseRepository):
         result = await session.execute(stmt)
         return list(result.scalars().all())
 
-    async def delete(
-        self, session: AsyncSession, table: type[ModelType], id: str
-    ) -> bool:
-        """Soft-delete a record (set is_active=False). Returns False if not found or already deleted."""
-        instance = await self.get(session, table, id)
-        if not instance or not instance.is_active:
-            return False
-        instance.is_active = False
-        await session.flush()
-        return True
-
     async def reorder(
         self, session: AsyncSession, table: type[ModelType], ids: list[str]
     ) -> list[ModelType]:
@@ -175,7 +167,7 @@ class SoftDeleteRepository(BaseRepository):
 
 
 # Backward-compat alias — old code referencing GenericRepository still works
-GenericRepository = SoftDeleteRepository
+GenericRepository = ArchiveRepository
 
 
 @lru_cache
@@ -185,12 +177,12 @@ def get_base_repository() -> BaseRepository:
 
 
 @lru_cache
-def get_soft_delete_repository() -> SoftDeleteRepository:
-    """Return a singleton SoftDeleteRepository."""
-    return SoftDeleteRepository()
+def get_archive_repository() -> ArchiveRepository:
+    """Return a singleton ArchiveRepository (hard delete + archive-status list filter)."""
+    return ArchiveRepository()
 
 
 @lru_cache
-def get_generic_repository() -> SoftDeleteRepository:
-    """Backward-compat alias. Prefer get_soft_delete_repository()."""
-    return get_soft_delete_repository()
+def get_generic_repository() -> ArchiveRepository:
+    """Backward-compat alias. Prefer get_archive_repository()."""
+    return get_archive_repository()

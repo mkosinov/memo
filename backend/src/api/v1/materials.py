@@ -11,7 +11,7 @@ from src.domain.deletion import ResolutionError, collect_dependencies
 from src.errors import ErrorCode, ErrorDetail
 from src.models.enums import ArchiveStatus
 from src.models.material import Material
-from src.schemas.common import PaginatedResponse, extract_resolutions
+from src.schemas.common import PaginatedResponse
 from src.schemas.material import MaterialCreate, MaterialPatch, MaterialResponse, MaterialUpdate
 from src.services.material import MaterialService, get_material_service
 
@@ -120,17 +120,16 @@ async def delete_material(
     material_id: str,
     service: _ServiceDep,
     session: SessionDep,
-    body: dict | None = Body(default=None),
+    resolutions: dict[str, str] | None = Body(default=None, embed=True),
 ) -> None:
     """Unified DELETE — dry-run (no body) or execute (with body). Spec §2/§5/§6.
 
     Material has ZERO FK deps (spec §4 matrix): the no-body path always
-    short-circuits to 204 (hard delete); the with-body path runs the
-    executor with an empty resolution set (also 204).
+    short-circuits to 204 (hard delete); the with-body path (execute body
+    is ``{"resolutions": {...}}`` per spec §6 — ``embed=True`` rejects a
+    bare dict as a dry-run shape) runs the executor with an empty
+    resolution set (also 204).
     """
-    # GH #207 §6: the execute body is {"resolutions": {...}} (api-client
-    # sends it wrapped); a legacy bare dict is accepted too.
-    resolutions = extract_resolutions(body)
     if resolutions is not None:
         try:
             ok = await service.resolve_delete(

@@ -12,7 +12,7 @@ from src.domain.deletion import ResolutionError, collect_dependencies
 from src.errors import ErrorCode, ErrorDetail
 from src.models.enums import ArchiveStatus
 from src.models.master import Master
-from src.schemas.common import PaginatedResponse, extract_resolutions
+from src.schemas.common import PaginatedResponse
 from src.schemas.master import MasterCreate, MasterPatch, MasterResponse, MasterUpdate, ReorderRequest
 from src.services.master import MasterService, get_master_service
 
@@ -136,18 +136,19 @@ async def delete_master(
     master_id: str,
     service: _ServiceDep,
     session: SessionDep,
-    body: dict | None = Body(default=None),
+    resolutions: dict[str, str] | None = Body(default=None, embed=True),
 ) -> None:
     """Unified DELETE — dry-run (no body) or execute (with body). Spec §2/§5/§6.
 
     * No body (dry-run): ``collect_dependencies`` → empty → hard delete (204);
       non-empty → 409 + dependency tree (no rows modified).
-    * With body (execute): ``{"resolutions": {...}}`` per spec §6 (the form
-      the api-client sends); the legacy bare resolutions dict is accepted
-      too. ``service.resolve_delete`` runs the resolution transaction
-      (Task 10) → 204; ``ResolutionError`` → 422; missing → 404.
+    * With body (execute): ``{"resolutions": {...}}`` per spec §6 (§2 L24,
+      §6 L161 — the ONLY accepted body form; the api-client ``resolveDeleteX``
+      sends exactly this; ``embed=True`` rejects a bare dict as a dry-run
+      shape). A wrapped empty ``{"resolutions": {}}`` still executes (S2 —
+      all-auto deps). ``service.resolve_delete`` runs the resolution
+      transaction (Task 10) → 204; ``ResolutionError`` → 422; missing → 404.
     """
-    resolutions = extract_resolutions(body)
     if resolutions is not None:
         try:
             ok = await service.resolve_delete(

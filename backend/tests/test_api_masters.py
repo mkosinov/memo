@@ -175,7 +175,7 @@ class TestDeleteUnifiedRoute:
             f"VALUES ('{master['id']}', '{tag_id}')"
         )
 
-        resp = api_client.request("DELETE", f"/api/v1/masters/{master['id']}", json={})
+        resp = api_client.request("DELETE", f"/api/v1/masters/{master['id']}", json={"resolutions": {}})
 
         assert resp.status_code == 204
         # Master + linked user + tag join physically gone (Task 10 executor).
@@ -194,7 +194,8 @@ class TestDeleteUnifiedRoute:
         EXPECTED RED until Task 10 (resolve_delete missing → 500 today).
         """
         resp = api_client.request(
-            "DELETE", "/api/v1/masters/nonexistent-master-id", json={"users": "cascade"}
+            "DELETE", "/api/v1/masters/nonexistent-master-id",
+            json={"resolutions": {"users": "cascade"}},
         )
         assert resp.status_code == 404
 
@@ -255,7 +256,7 @@ class TestDeleteUnifiedRoute:
         master_id = activity["master_id"]
 
         resp = api_client.request(
-            "DELETE", f"/api/v1/masters/{master_id}", json={}
+            "DELETE", f"/api/v1/masters/{master_id}", json={"resolutions": {}}
         )
 
         assert resp.status_code == 422
@@ -482,8 +483,8 @@ class TestScenarioS3MasterBlockedArchiveFlow:
         # Master untouched (dry-run modifies nothing).
         assert api_client.get(f"/api/v1/masters/{master['id']}").status_code == 200
 
-        # ── 2. DELETE (with body {}) → 422: activities block the execute path
-        resp = api_client.request("DELETE", f"/api/v1/masters/{master['id']}", json={})
+        # ── 2. DELETE (with body {"resolutions": {}}) → 422: activities block the execute path
+        resp = api_client.request("DELETE", f"/api/v1/masters/{master['id']}", json={"resolutions": {}})
         assert resp.status_code == 422
         assert api_client.get(f"/api/v1/masters/{master['id']}").status_code == 200
 

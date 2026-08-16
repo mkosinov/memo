@@ -178,7 +178,7 @@ class TestDeleteUnifiedRoute:
         resp = api_client.request(
             "DELETE",
             "/api/v1/locations/nonexistent-location-id",
-            json={"location_tags": "cascade"},
+            json={"resolutions": {"location_tags": "cascade"}},
         )
         assert resp.status_code == 404
 
@@ -201,7 +201,7 @@ class TestDeleteUnifiedRoute:
         )
 
         resp = api_client.request(
-            "DELETE", f"/api/v1/locations/{location['id']}", json={}
+            "DELETE", f"/api/v1/locations/{location['id']}", json={"resolutions": {}}
         )
 
         assert resp.status_code == 204
@@ -222,7 +222,7 @@ class TestDeleteUnifiedRoute:
         location_id = activity["location_id"]
 
         resp = api_client.request(
-            "DELETE", f"/api/v1/locations/{location_id}", json={}
+            "DELETE", f"/api/v1/locations/{location_id}", json={"resolutions": {}}
         )
 
         assert resp.status_code == 422

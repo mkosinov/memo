@@ -560,7 +560,7 @@ class TestDeleteUnifiedRoute:
         service_id = activity["service_id"]
 
         resp = api_client.request(
-            "DELETE", f"/api/v1/services/{service_id}", json={}
+            "DELETE", f"/api/v1/services/{service_id}", json={"resolutions": {}}
         )
 
         assert resp.status_code == 422
@@ -596,7 +596,7 @@ class TestDeleteUnifiedRoute:
         photo_id = photo_resp.json()["id"]
 
         resp = api_client.request(
-            "DELETE", f"/api/v1/services/{service_id}", json={}
+            "DELETE", f"/api/v1/services/{service_id}", json={"resolutions": {}}
         )
 
         assert resp.status_code == 204
@@ -628,7 +628,7 @@ class TestDeleteUnifiedRoute:
         EXPECTED RED until Task 10 (resolve_delete missing → AttributeError today).
         """
         resp = api_client.request(
-            "DELETE", "/api/v1/services/nonexistent-service-id", json={}
+            "DELETE", "/api/v1/services/nonexistent-service-id", json={"resolutions": {}}
         )
         assert resp.status_code == 404
 

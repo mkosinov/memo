@@ -654,7 +654,7 @@ class TestDeleteUnifiedRoute:
         resp = api_client.request(
             "DELETE",
             "/api/v1/clients/nonexistent-client-id",
-            json={"records": "nullify", "visitors": "cascade"},
+            json={"resolutions": {"records": "nullify", "visitors": "cascade"}},
         )
         assert resp.status_code == 404
 
@@ -748,7 +748,7 @@ class TestDeleteUnifiedRoute:
         resp = api_client.request(
             "DELETE",
             f"/api/v1/clients/{client_id}",
-            json={"records": "nullify", "visitors": "cascade"},
+            json={"resolutions": {"records": "nullify", "visitors": "cascade"}},
         )
         assert resp.status_code == 204
 
@@ -788,7 +788,7 @@ class TestDeleteUnifiedRoute:
         resp = api_client.request(
             "DELETE",
             f"/api/v1/clients/{client_id}",
-            json={"records": "cascade", "visitors": "cascade"},
+            json={"resolutions": {"records": "cascade", "visitors": "cascade"}},
         )
 
         assert resp.status_code == 422
@@ -807,7 +807,7 @@ class TestDeleteUnifiedRoute:
         resp = api_client.request(
             "DELETE",
             f"/api/v1/clients/{client_id}",
-            json={"records": "nullify"},  # no visitors resolution
+            json={"resolutions": {"records": "nullify"}},  # no visitors resolution
         )
 
         assert resp.status_code == 422
@@ -869,7 +869,7 @@ class TestDeleteUnifiedRoute:
             api_client.request(
                 "DELETE",
                 f"/api/v1/clients/{client_id}",
-                json={"records": "nullify", "visitors": "cascade"},
+                json={"resolutions": {"records": "nullify", "visitors": "cascade"}},
             )
 
         # Atomicity: rollback restored client + records + BOTH visitors.

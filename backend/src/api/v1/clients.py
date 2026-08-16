@@ -9,7 +9,6 @@ from fastapi.responses import JSONResponse
 from src.db import SessionDep
 from src.domain.deletion import ResolutionError, collect_dependencies
 from src.errors import ErrorCode, ErrorDetail
-from src.schemas.common import extract_resolutions
 from src.models.client import Client
 from src.schemas.client import (
     ClientCreate,
@@ -144,18 +143,19 @@ async def delete_client(
     client_id: str,
     service: _ServiceDep,
     session: SessionDep,
-    body: dict | None = Body(default=None),
+    resolutions: dict[str, str] | None = Body(default=None, embed=True),
 ) -> None:
     """Unified DELETE — dry-run (no body) or execute (with body). Spec §2/§5/§6.
 
     * No body (dry-run): ``collect_dependencies`` → empty → hard delete (204);
       non-empty → 409 + dependency tree (no rows modified).
-    * With body (execute): ``service.resolve_delete`` runs the resolution
+    * With body (execute): ``{"resolutions": {...}}`` per spec §6 (§2 L24,
+      §6 L161 — the ONLY accepted body form; the api-client ``resolveDeleteX``
+      sends exactly this; ``embed=True`` rejects a bare dict as a dry-run
+      shape). A wrapped empty ``{"resolutions": {}}`` still executes (S2 —
+      all-auto deps). ``service.resolve_delete`` runs the resolution
       transaction (Task 10) → 204; ``ResolutionError`` → 422; missing → 404.
     """
-    # GH #207 §6: the execute body is {"resolutions": {...}} (api-client
-    # sends it wrapped); a legacy bare dict is accepted too.
-    resolutions = extract_resolutions(body)
     if resolutions is not None:
         try:
             ok = await service.resolve_delete(

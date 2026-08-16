@@ -121,7 +121,7 @@ class TestDeleteUnifiedRoute:
         material = _create_material(api_client, title="To Delete With Body")
 
         resp = api_client.request(
-            "DELETE", f"/api/v1/materials/{material['id']}", json={}
+            "DELETE", f"/api/v1/materials/{material['id']}", json={"resolutions": {}}
         )
 
         assert resp.status_code == 204
@@ -139,7 +139,7 @@ class TestDeleteUnifiedRoute:
         EXPECTED RED until Task 10 (resolve_delete missing → AttributeError today).
         """
         resp = api_client.request(
-            "DELETE", "/api/v1/materials/nonexistent-material-id", json={}
+            "DELETE", "/api/v1/materials/nonexistent-material-id", json={"resolutions": {}}
         )
         assert resp.status_code == 404
 

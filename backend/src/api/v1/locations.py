@@ -186,3 +186,67 @@ async def delete_location(
                 message="Location not found",
             ).model_dump(),
         )
+
+
+@router.post("/{location_id}/archive", response_model=LocationResponse)
+async def archive_location(
+    location_id: str,
+    service: _ServiceDep,
+    session: SessionDep,
+) -> LocationResponse:
+    """Archive a location — flip ``is_active=False`` (spec §2/§14).
+
+    Returns HTTP **200 with the re-fetched body** (``archived: true`` in the
+    response schema) so the frontend updates the row without a refetch (spec
+    §12 S5). Idempotent. Location has NO cross-entity cascade — only Master
+    does (spec §4.2).
+    """
+    ok = await service.archive(db_session=session, id=location_id)
+    if not ok:
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.LOCATION_NOT_FOUND,
+                message="Location not found",
+            ).model_dump(),
+        )
+    return await _refetch_or_404(service, session, location_id)
+
+
+@router.post("/{location_id}/restore", response_model=LocationResponse)
+async def restore_location(
+    location_id: str,
+    service: _ServiceDep,
+    session: SessionDep,
+) -> LocationResponse:
+    """Restore an archived location — flip ``is_active=True`` (spec §2/§14).
+
+    Returns HTTP **200 with the re-fetched body** (``archived: false``). 404 if
+    not found. Idempotent. No cross-entity cascade.
+    """
+    ok = await service.restore(db_session=session, id=location_id)
+    if not ok:
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.LOCATION_NOT_FOUND,
+                message="Location not found",
+            ).model_dump(),
+        )
+    return await _refetch_or_404(service, session, location_id)
+
+
+async def _refetch_or_404(
+    service: LocationService, session: SessionDep, location_id: str
+) -> LocationResponse:
+    """Re-fetch the location after a successful archive/restore (Task 11)."""
+    location = await service.get(db_session=session, id=location_id)
+    if location is None:
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.LOCATION_NOT_FOUND,
+                message="Location not found",
+            ).model_dump(),
+        )
+    return location

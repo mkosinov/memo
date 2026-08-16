@@ -206,3 +206,131 @@ class TestDeleteUnifiedRoute:
         assert resp.status_code == 422
         # Row untouched.
         assert api_client.get(f"/api/v1/locations/{location_id}").status_code == 200
+
+
+class TestArchiveRestoreEndpoints:
+    """POST /api/v1/locations/{id}/archive + POST /{id}/restore — Task 11 (#207 §2/§14).
+
+    Both endpoints return HTTP 200 with the re-fetched body (``archived``
+    computed from ``is_active``). Idempotent. ``?status=archived`` lists
+    archived rows after ``POST /archive``.
+    """
+
+    ENTITY_PATH = "/api/v1/locations"
+    NOT_FOUND_CODE = "LOCATION_NOT_FOUND"
+    DB_TABLE = "locations"
+
+    def test_archive_returns_200_with_archived_true_and_db_is_active_false(
+        self, api_client, create_location
+    ) -> None:
+        location = create_location()
+
+        resp = api_client.post(f"{self.ENTITY_PATH}/{location['id']}/archive")
+
+        assert resp.status_code == 200, f"archive failed: {resp.text}"
+        body = resp.json()
+        assert body["id"] == location["id"]
+        assert body["archived"] is True
+        rows = query_db(
+            f"SELECT is_active FROM locations WHERE id='{location['id']}'"
+        )
+        assert rows[0]["is_active"] == 0
+
+    def test_restore_returns_200_with_archived_false_and_db_is_active_true(
+        self, api_client, create_location
+    ) -> None:
+        location = create_location()
+        api_client.post(f"{self.ENTITY_PATH}/{location['id']}/archive")
+
+        resp = api_client.post(f"{self.ENTITY_PATH}/{location['id']}/restore")
+
+        assert resp.status_code == 200, f"restore failed: {resp.text}"
+        body = resp.json()
+        assert body["archived"] is False
+        rows = query_db(
+            f"SELECT is_active FROM locations WHERE id='{location['id']}'"
+        )
+        assert rows[0]["is_active"] == 1
+
+    def test_archive_nonexistent_returns_404(self, api_client) -> None:
+        resp = api_client.post(f"{self.ENTITY_PATH}/nonexistent-id/archive")
+        assert resp.status_code == 404
+        assert resp.json()["detail"]["code"] == self.NOT_FOUND_CODE
+
+    def test_restore_nonexistent_returns_404(self, api_client) -> None:
+        resp = api_client.post(f"{self.ENTITY_PATH}/nonexistent-id/restore")
+        assert resp.status_code == 404
+        assert resp.json()["detail"]["code"] == self.NOT_FOUND_CODE
+
+    def test_archive_already_archived_is_idempotent_200(
+        self, api_client, create_location
+    ) -> None:
+        location = create_location()
+        first = api_client.post(f"{self.ENTITY_PATH}/{location['id']}/archive")
+        assert first.status_code == 200
+
+        second = api_client.post(f"{self.ENTITY_PATH}/{location['id']}/archive")
+
+        assert second.status_code == 200
+        assert second.json()["archived"] is True
+
+    def test_restore_already_active_is_idempotent_200(
+        self, api_client, create_location
+    ) -> None:
+        location = create_location()  # starts active
+
+        resp = api_client.post(f"{self.ENTITY_PATH}/{location['id']}/restore")
+
+        assert resp.status_code == 200
+        assert resp.json()["archived"] is False
+
+    def test_status_archived_returns_archived_row_after_archive_endpoint(
+        self, api_client, create_location
+    ) -> None:
+        """After POST /archive, ?status=archived lists the row."""
+        location = create_location()
+        api_client.post(f"{self.ENTITY_PATH}/{location['id']}/archive")
+
+        archived_list = api_client.get(f"{self.ENTITY_PATH}?status=archived").json()
+        active_list = api_client.get(f"{self.ENTITY_PATH}?status=active").json()
+
+        archived_ids = [m["id"] for m in archived_list["items"]]
+        active_ids = [m["id"] for m in active_list["items"]]
+        assert location["id"] in archived_ids
+        assert location["id"] not in active_ids
+
+
+class TestArchiveRestoreNoUserCascade:
+    """Non-master entities MUST NOT touch the users table on archive/restore (#207 §4.2).
+
+    Only Master cascades (Master = staff profile + linked User login account).
+    Location/Service/Material/Client have no user link. Verify by creating a
+    user (is_active=true), archiving/restoring the entity, and asserting
+    users.is_active unchanged.
+    """
+
+    ENTITY_PATH = "/api/v1/locations"
+
+    def test_archive_does_not_modify_users_is_active(
+        self, api_client, create_location, _user
+    ) -> None:
+        location = create_location()
+
+        resp = api_client.post(f"{self.ENTITY_PATH}/{location['id']}/archive")
+
+        assert resp.status_code == 200
+        # User is_active unchanged (only Master cascades).
+        rows = query_db(f"SELECT is_active FROM users WHERE id='{_user['id']}'")
+        assert rows[0]["is_active"] == 1
+
+    def test_restore_does_not_modify_users_is_active(
+        self, api_client, create_location, _user
+    ) -> None:
+        location = create_location()
+        api_client.post(f"{self.ENTITY_PATH}/{location['id']}/archive")
+
+        resp = api_client.post(f"{self.ENTITY_PATH}/{location['id']}/restore")
+
+        assert resp.status_code == 200
+        rows = query_db(f"SELECT is_active FROM users WHERE id='{_user['id']}'")
+        assert rows[0]["is_active"] == 1

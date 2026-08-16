@@ -142,3 +142,123 @@ class TestDeleteUnifiedRoute:
             "DELETE", "/api/v1/materials/nonexistent-material-id", json={}
         )
         assert resp.status_code == 404
+
+
+class TestArchiveRestoreEndpoints:
+    """POST /api/v1/materials/{id}/archive + POST /{id}/restore — Task 11 (#207 §2/§14).
+
+    Both endpoints return HTTP 200 with the re-fetched body (``archived``
+    computed from ``is_active``). Idempotent. ``?status=archived`` lists
+    archived rows after ``POST /archive``.
+    """
+
+    ENTITY_PATH = "/api/v1/materials"
+    NOT_FOUND_CODE = "MATERIAL_NOT_FOUND"
+
+    def test_archive_returns_200_with_archived_true_and_db_is_active_false(
+        self, api_client
+    ) -> None:
+        material = _create_material(api_client, title="To Archive")
+
+        resp = api_client.post(f"{self.ENTITY_PATH}/{material['id']}/archive")
+
+        assert resp.status_code == 200, f"archive failed: {resp.text}"
+        body = resp.json()
+        assert body["id"] == material["id"]
+        assert body["archived"] is True
+        rows = query_db(
+            f"SELECT is_active FROM materials WHERE id='{material['id']}'"
+        )
+        assert rows[0]["is_active"] == 0
+
+    def test_restore_returns_200_with_archived_false_and_db_is_active_true(
+        self, api_client
+    ) -> None:
+        material = _create_material(api_client, title="To Restore")
+        api_client.post(f"{self.ENTITY_PATH}/{material['id']}/archive")
+
+        resp = api_client.post(f"{self.ENTITY_PATH}/{material['id']}/restore")
+
+        assert resp.status_code == 200, f"restore failed: {resp.text}"
+        body = resp.json()
+        assert body["archived"] is False
+        rows = query_db(
+            f"SELECT is_active FROM materials WHERE id='{material['id']}'"
+        )
+        assert rows[0]["is_active"] == 1
+
+    def test_archive_nonexistent_returns_404(self, api_client) -> None:
+        resp = api_client.post(f"{self.ENTITY_PATH}/nonexistent-id/archive")
+        assert resp.status_code == 404
+        assert resp.json()["detail"]["code"] == self.NOT_FOUND_CODE
+
+    def test_restore_nonexistent_returns_404(self, api_client) -> None:
+        resp = api_client.post(f"{self.ENTITY_PATH}/nonexistent-id/restore")
+        assert resp.status_code == 404
+        assert resp.json()["detail"]["code"] == self.NOT_FOUND_CODE
+
+    def test_archive_already_archived_is_idempotent_200(self, api_client) -> None:
+        material = _create_material(api_client, title="Double Archive")
+        first = api_client.post(f"{self.ENTITY_PATH}/{material['id']}/archive")
+        assert first.status_code == 200
+
+        second = api_client.post(f"{self.ENTITY_PATH}/{material['id']}/archive")
+
+        assert second.status_code == 200
+        assert second.json()["archived"] is True
+
+    def test_restore_already_active_is_idempotent_200(self, api_client) -> None:
+        material = _create_material(api_client, title="Double Restore")  # starts active
+
+        resp = api_client.post(f"{self.ENTITY_PATH}/{material['id']}/restore")
+
+        assert resp.status_code == 200
+        assert resp.json()["archived"] is False
+
+    def test_status_archived_returns_archived_row_after_archive_endpoint(
+        self, api_client
+    ) -> None:
+        material = _create_material(api_client, title="Status Check")
+        api_client.post(f"{self.ENTITY_PATH}/{material['id']}/archive")
+
+        archived_list = api_client.get(f"{self.ENTITY_PATH}?status=archived").json()
+        active_list = api_client.get(f"{self.ENTITY_PATH}?status=active").json()
+
+        archived_ids = [m["id"] for m in archived_list["items"]]
+        active_ids = [m["id"] for m in active_list["items"]]
+        assert material["id"] in archived_ids
+        assert material["id"] not in active_ids
+
+
+class TestArchiveRestoreNoUserCascade:
+    """Non-master entities MUST NOT touch the users table on archive/restore (#207 §4.2).
+
+    Only Master cascades. Material has zero FK deps and no link to users —
+    verify by creating a user (is_active=true) then asserting users.is_active
+    is unchanged after archive/restore.
+    """
+
+    ENTITY_PATH = "/api/v1/materials"
+
+    def test_archive_does_not_modify_users_is_active(
+        self, api_client, _user
+    ) -> None:
+        material = _create_material(api_client, title="No User Touch Archive")
+
+        resp = api_client.post(f"{self.ENTITY_PATH}/{material['id']}/archive")
+
+        assert resp.status_code == 200
+        rows = query_db(f"SELECT is_active FROM users WHERE id='{_user['id']}'")
+        assert rows[0]["is_active"] == 1
+
+    def test_restore_does_not_modify_users_is_active(
+        self, api_client, _user
+    ) -> None:
+        material = _create_material(api_client, title="No User Touch Restore")
+        api_client.post(f"{self.ENTITY_PATH}/{material['id']}/archive")
+
+        resp = api_client.post(f"{self.ENTITY_PATH}/{material['id']}/restore")
+
+        assert resp.status_code == 200
+        rows = query_db(f"SELECT is_active FROM users WHERE id='{_user['id']}'")
+        assert rows[0]["is_active"] == 1

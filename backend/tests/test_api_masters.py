@@ -239,3 +239,149 @@ class TestDeleteUnifiedRoute:
         assert resp.status_code == 422
         # Row untouched.
         assert api_client.get(f"/api/v1/masters/{master_id}").status_code == 200
+
+
+class TestArchiveRestoreEndpoints:
+    """POST /api/v1/masters/{id}/archive + POST /{id}/restore — Task 11 (#207 §2/§14).
+
+    Both endpoints return HTTP 200 with the re-fetched body (``archived``
+    computed from ``is_active``) so the frontend updates the row without a
+    refetch. Idempotent: archiving an already-archived row → 200 still
+    ``archived: true``; restoring an active row → 200 still ``archived: false``.
+    """
+
+    ENTITY_PATH = "/api/v1/masters"
+    NOT_FOUND_CODE = "MASTER_NOT_FOUND"
+    DB_TABLE = "masters"
+
+    def test_archive_returns_200_with_archived_true_and_db_is_active_false(
+        self, api_client, create_master
+    ) -> None:
+        """POST /archive → 200 with body archived:true; DB is_active=False."""
+        master = create_master()
+
+        resp = api_client.post(f"{self.ENTITY_PATH}/{master['id']}/archive")
+
+        assert resp.status_code == 200, f"archive failed: {resp.text}"
+        body = resp.json()
+        assert body["id"] == master["id"]
+        assert body["archived"] is True
+        rows = query_db(f"SELECT is_active FROM masters WHERE id='{master['id']}'")
+        assert rows[0]["is_active"] == 0  # SQLite bool as 0/1
+
+    def test_restore_returns_200_with_archived_false_and_db_is_active_true(
+        self, api_client, create_master
+    ) -> None:
+        """POST /restore → 200 with body archived:false; DB is_active=True."""
+        master = create_master()
+        api_client.post(f"{self.ENTITY_PATH}/{master['id']}/archive")  # archive first
+
+        resp = api_client.post(f"{self.ENTITY_PATH}/{master['id']}/restore")
+
+        assert resp.status_code == 200, f"restore failed: {resp.text}"
+        body = resp.json()
+        assert body["id"] == master["id"]
+        assert body["archived"] is False
+        rows = query_db(f"SELECT is_active FROM masters WHERE id='{master['id']}'")
+        assert rows[0]["is_active"] == 1
+
+    def test_archive_nonexistent_returns_404(self, api_client) -> None:
+        """POST /archive on a non-existent id → 404 (MASTER_NOT_FOUND)."""
+        resp = api_client.post(f"{self.ENTITY_PATH}/nonexistent-id/archive")
+        assert resp.status_code == 404
+        assert resp.json()["detail"]["code"] == self.NOT_FOUND_CODE
+
+    def test_restore_nonexistent_returns_404(self, api_client) -> None:
+        """POST /restore on a non-existent id → 404 (MASTER_NOT_FOUND)."""
+        resp = api_client.post(f"{self.ENTITY_PATH}/nonexistent-id/restore")
+        assert resp.status_code == 404
+        assert resp.json()["detail"]["code"] == self.NOT_FOUND_CODE
+
+    def test_archive_already_archived_is_idempotent_200(self, api_client, create_master) -> None:
+        """Archiving an already-archived master → still 200 with archived:true."""
+        master = create_master()
+        first = api_client.post(f"{self.ENTITY_PATH}/{master['id']}/archive")
+        assert first.status_code == 200
+
+        second = api_client.post(f"{self.ENTITY_PATH}/{master['id']}/archive")
+
+        assert second.status_code == 200
+        assert second.json()["archived"] is True
+
+    def test_restore_already_active_is_idempotent_200(self, api_client, create_master) -> None:
+        """Restoring an already-active master → still 200 with archived:false."""
+        master = create_master()  # starts active (is_active=True)
+
+        resp = api_client.post(f"{self.ENTITY_PATH}/{master['id']}/restore")
+
+        assert resp.status_code == 200
+        assert resp.json()["archived"] is False
+
+    def test_status_archived_returns_archived_row_after_archive_endpoint(
+        self, api_client, create_master
+    ) -> None:
+        """After POST /archive, ?status=archived lists the row; active list hides it."""
+        master = create_master()
+        api_client.post(f"{self.ENTITY_PATH}/{master['id']}/archive")
+
+        archived_list = api_client.get(f"{self.ENTITY_PATH}?status=archived").json()
+        active_list = api_client.get(f"{self.ENTITY_PATH}?status=active").json()
+
+        archived_ids = [m["id"] for m in archived_list["items"]]
+        active_ids = [m["id"] for m in active_list["items"]]
+        assert master["id"] in archived_ids
+        assert master["id"] not in active_ids
+
+
+class TestMasterArchiveRestoreCascade:
+    """Master-only archive/restore cascade to linked users (#207 §4.2 Change 3).
+
+    Archive a Master → linked User.is_active=False (login disabled).
+    Restore a Master → linked User.is_active=True (login re-enabled).
+    ONE transaction (atomic). Master is the ONLY entity that cascades to users —
+    see ``TestArchiveRestoreNoUserCascade`` in the other 4 entity test files.
+    """
+
+    def test_archive_master_cascades_to_user_is_active_false(
+        self, api_client, create_master, _user
+    ) -> None:
+        """Archiving a master sets the linked user's is_active=False (spec §4.2)."""
+        master = create_master()
+        # Link the user to this master (User.master_id → Master.id).
+        query_db(
+            f"UPDATE users SET master_id='{master['id']}' WHERE id='{_user['id']}'"
+        )
+        # Sanity: user starts active.
+        assert query_db(
+            f"SELECT is_active FROM users WHERE id='{_user['id']}'"
+        )[0]["is_active"] == 1
+
+        resp = api_client.post(f"/api/v1/masters/{master['id']}/archive")
+
+        assert resp.status_code == 200
+        # Cascade: the linked user is deactivated in the same transaction.
+        assert query_db(
+            f"SELECT is_active FROM users WHERE id='{_user['id']}'"
+        )[0]["is_active"] == 0
+
+    def test_restore_master_cascades_to_user_is_active_true(
+        self, api_client, create_master, _user
+    ) -> None:
+        """Restoring an archived master reactivates the linked user (spec §4.2)."""
+        master = create_master()
+        query_db(
+            f"UPDATE users SET master_id='{master['id']}' WHERE id='{_user['id']}'"
+        )
+        # Archive first — cascade deactivates the user too.
+        api_client.post(f"/api/v1/masters/{master['id']}/archive")
+        assert query_db(
+            f"SELECT is_active FROM users WHERE id='{_user['id']}'"
+        )[0]["is_active"] == 0
+
+        resp = api_client.post(f"/api/v1/masters/{master['id']}/restore")
+
+        assert resp.status_code == 200
+        # Cascade: the linked user is reactivated.
+        assert query_db(
+            f"SELECT is_active FROM users WHERE id='{_user['id']}'"
+        )[0]["is_active"] == 1

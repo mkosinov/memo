@@ -21,6 +21,129 @@ def _client_stats(api_client, client_id: str) -> tuple:
     return row["records_count"], row["total_paid"]
 
 
+# ─── Archive/Restore endpoints (Task 11, #207 §2/§4.2/§14) ────────────────────
+
+
+class TestArchiveRestoreEndpoints:
+    """POST /api/v1/clients/{id}/archive + POST /{id}/restore — Task 11 (#207 §2/§14).
+
+    Both endpoints return HTTP 200 with the re-fetched body (``archived``
+    computed from ``is_active``). Idempotent. ``?status=archived`` lists
+    archived rows after ``POST /archive``.
+    """
+
+    ENTITY_PATH = "/api/v1/clients"
+    NOT_FOUND_CODE = "CLIENT_NOT_FOUND"
+
+    def test_archive_returns_200_with_archived_true_and_db_is_active_false(
+        self, api_client, create_client
+    ) -> None:
+        client = create_client()
+
+        resp = api_client.post(f"{self.ENTITY_PATH}/{client['id']}/archive")
+
+        assert resp.status_code == 200, f"archive failed: {resp.text}"
+        body = resp.json()
+        assert body["id"] == client["id"]
+        assert body["archived"] is True
+        rows = query_db(f"SELECT is_active FROM clients WHERE id='{client['id']}'")
+        assert rows[0]["is_active"] == 0
+
+    def test_restore_returns_200_with_archived_false_and_db_is_active_true(
+        self, api_client, create_client
+    ) -> None:
+        client = create_client()
+        api_client.post(f"{self.ENTITY_PATH}/{client['id']}/archive")
+
+        resp = api_client.post(f"{self.ENTITY_PATH}/{client['id']}/restore")
+
+        assert resp.status_code == 200, f"restore failed: {resp.text}"
+        body = resp.json()
+        assert body["archived"] is False
+        rows = query_db(f"SELECT is_active FROM clients WHERE id='{client['id']}'")
+        assert rows[0]["is_active"] == 1
+
+    def test_archive_nonexistent_returns_404(self, api_client) -> None:
+        resp = api_client.post(f"{self.ENTITY_PATH}/nonexistent-id/archive")
+        assert resp.status_code == 404
+        assert resp.json()["detail"]["code"] == self.NOT_FOUND_CODE
+
+    def test_restore_nonexistent_returns_404(self, api_client) -> None:
+        resp = api_client.post(f"{self.ENTITY_PATH}/nonexistent-id/restore")
+        assert resp.status_code == 404
+        assert resp.json()["detail"]["code"] == self.NOT_FOUND_CODE
+
+    def test_archive_already_archived_is_idempotent_200(
+        self, api_client, create_client
+    ) -> None:
+        client = create_client()
+        first = api_client.post(f"{self.ENTITY_PATH}/{client['id']}/archive")
+        assert first.status_code == 200
+
+        second = api_client.post(f"{self.ENTITY_PATH}/{client['id']}/archive")
+
+        assert second.status_code == 200
+        assert second.json()["archived"] is True
+
+    def test_restore_already_active_is_idempotent_200(
+        self, api_client, create_client
+    ) -> None:
+        client = create_client()  # starts active
+
+        resp = api_client.post(f"{self.ENTITY_PATH}/{client['id']}/restore")
+
+        assert resp.status_code == 200
+        assert resp.json()["archived"] is False
+
+    def test_status_archived_returns_archived_row_after_archive_endpoint(
+        self, api_client, create_client
+    ) -> None:
+        client = create_client()
+        api_client.post(f"{self.ENTITY_PATH}/{client['id']}/archive")
+
+        archived_list = api_client.get(f"{self.ENTITY_PATH}?status=archived").json()
+        active_list = api_client.get(f"{self.ENTITY_PATH}?status=active").json()
+
+        archived_ids = [c["id"] for c in archived_list["items"]]
+        active_ids = [c["id"] for c in active_list["items"]]
+        assert client["id"] in archived_ids
+        assert client["id"] not in active_ids
+
+
+class TestArchiveRestoreNoUserCascade:
+    """Non-master entities MUST NOT touch the users table on archive/restore (#207 §4.2).
+
+    Only Master cascades. Client has no link to the users table — verify by
+    creating a user (is_active=true) then asserting users.is_active is
+    unchanged after archive/restore.
+    """
+
+    ENTITY_PATH = "/api/v1/clients"
+
+    def test_archive_does_not_modify_users_is_active(
+        self, api_client, create_client, _user
+    ) -> None:
+        client = create_client()
+
+        resp = api_client.post(f"{self.ENTITY_PATH}/{client['id']}/archive")
+
+        assert resp.status_code == 200
+        rows = query_db(f"SELECT is_active FROM users WHERE id='{_user['id']}'")
+        assert rows[0]["is_active"] == 1
+
+    def test_restore_does_not_modify_users_is_active(
+        self, api_client, create_client, _user
+    ) -> None:
+        client = create_client()
+        api_client.post(f"{self.ENTITY_PATH}/{client['id']}/archive")
+
+        resp = api_client.post(f"{self.ENTITY_PATH}/{client['id']}/restore")
+
+        assert resp.status_code == 200
+        rows = query_db(f"SELECT is_active FROM users WHERE id='{_user['id']}'")
+        assert rows[0]["is_active"] == 1
+
+
 class TestClientsCrud:
     """Search-by-phone and scoped client-visitors sub-routes for /api/clients."""
 

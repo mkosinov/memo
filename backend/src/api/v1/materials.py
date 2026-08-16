@@ -163,3 +163,67 @@ async def delete_material(
                 message="Material not found",
             ).model_dump(),
         )
+
+
+@router.post("/{material_id}/archive", response_model=MaterialResponse)
+async def archive_material(
+    material_id: str,
+    service: _ServiceDep,
+    session: SessionDep,
+) -> MaterialResponse:
+    """Archive a material — flip ``is_active=False`` (spec §2/§14).
+
+    Returns HTTP **200 with the re-fetched body** (``archived: true`` in the
+    response schema) so the frontend updates the row without a refetch (spec
+    §12 S5). Idempotent. Material has NO cross-entity cascade — only Master
+    does (spec §4.2).
+    """
+    ok = await service.archive(db_session=session, id=material_id)
+    if not ok:
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.MATERIAL_NOT_FOUND,
+                message="Material not found",
+            ).model_dump(),
+        )
+    return await _refetch_or_404(service, session, material_id)
+
+
+@router.post("/{material_id}/restore", response_model=MaterialResponse)
+async def restore_material(
+    material_id: str,
+    service: _ServiceDep,
+    session: SessionDep,
+) -> MaterialResponse:
+    """Restore an archived material — flip ``is_active=True`` (spec §2/§14).
+
+    Returns HTTP **200 with the re-fetched body** (``archived: false``). 404 if
+    not found. Idempotent. No cross-entity cascade.
+    """
+    ok = await service.restore(db_session=session, id=material_id)
+    if not ok:
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.MATERIAL_NOT_FOUND,
+                message="Material not found",
+            ).model_dump(),
+        )
+    return await _refetch_or_404(service, session, material_id)
+
+
+async def _refetch_or_404(
+    service: MaterialService, session: SessionDep, material_id: str
+) -> MaterialResponse:
+    """Re-fetch the material after a successful archive/restore (Task 11)."""
+    material = await service.get(db_session=session, id=material_id)
+    if material is None:
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.MATERIAL_NOT_FOUND,
+                message="Material not found",
+            ).model_dump(),
+        )
+    return material

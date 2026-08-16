@@ -25,6 +25,7 @@ import {
   type PaymentResponse,
   TariffCreateSchema,
   MasterUpdateSchema,
+  MaterialResponseSchema,
   MaterialUpdateSchema,
   ServiceCreateSchema,
   ServiceUpdateSchema,
@@ -32,7 +33,9 @@ import {
   LocationCreateSchema,
   LocationUpdateSchema,
   type LocationUpdate,
+  ClientWithStatsSchema,
 } from './schemas';
+import backendFixtures from './__fixtures__/backend-responses.json';
 
 // ─── MasterResponse ────────────────────────────────────────────────────────
 
@@ -44,7 +47,7 @@ const validMaster = {
   position: 'мастер',
   specialty: 'живопись',
   avatar_url: 'https://example.com/avatar.jpg',
-  is_active: true,
+  archived: false,
   created_at: '2024-01-15T10:00:00Z',
   updated_at: '2024-06-01T12:00:00Z',
 };
@@ -59,7 +62,7 @@ describe('MasterResponseSchema', () => {
     expect(result.position).toBe('мастер');
     expect(result.specialty).toBe('живопись');
     expect(result.avatar_url).toBe('https://example.com/avatar.jpg');
-    expect(result.is_active).toBe(true);
+    expect(result.archived).toBe(false);
   });
 
   it('parses master with nullable avatar_url', () => {
@@ -97,7 +100,7 @@ const validLocation = {
   review_url: 'https://yandex.ru/reviews/...',
   record_info: 'Запись по телефону',
   image_url: 'https://example.com/studio.jpg',
-  is_active: true,
+  archived: false,
   created_at: '2024-01-15T10:00:00Z',
   updated_at: '2024-06-01T12:00:00Z',
 };
@@ -190,7 +193,7 @@ const validService = {
   record_info: 'Запись за 24 часа',
   tariffs: [validTariff],
   tags: [validTag],
-  is_active: true,
+  archived: false,
   created_at: '2024-01-15T10:00:00Z',
   updated_at: '2024-06-01T12:00:00Z',
 };
@@ -421,7 +424,7 @@ const validClient = {
   channel: 'phone',
   created_at: '2024-06-01T12:00:00Z',
   updated_at: '2024-06-01T12:00:00Z',
-  is_active: true,
+  archived: false,
 };
 
 describe('ClientResponseSchema', () => {
@@ -431,7 +434,7 @@ describe('ClientResponseSchema', () => {
     expect(result.name).toBe('Иван Петров');
     expect(result.phone).toBe('+79991234567');
     expect(result.channel).toBe('phone');
-    expect(result.is_active).toBe(true);
+    expect(result.archived).toBe(false);
   });
 
   it('rejects missing required field', () => {
@@ -440,28 +443,28 @@ describe('ClientResponseSchema', () => {
   });
 });
 
-// ─── ClientUpdateSchema (GH #201) ─────────────────────────────────────────
+// ─── ClientUpdateSchema (GH #201, #207 — is_active removed) ───────────────
 
 describe('ClientUpdateSchema', () => {
   it('accepts a full canonical update payload', () => {
     const result = ClientUpdateSchema.parse({
       name: 'Иван', phone: '+79991234567', email: null,
-      channel: 'telegram', is_active: true,
+      channel: 'telegram',
     });
-    expect(result.is_active).toBe(true);
+    expect(result.channel).toBe('telegram');
   });
 
-  it('accepts all-null personal fields (deliberate wipe) + is_active', () => {
+  it('accepts all-null personal fields (deliberate wipe)', () => {
     const result = ClientUpdateSchema.parse({
-      name: null, phone: null, email: null, channel: null, is_active: false,
+      name: null, phone: null, email: null, channel: null,
     });
     expect(result.channel).toBeNull();
   });
 
-  it('rejects missing is_active', () => {
+  it('rejects a stray is_active (backend 422 parity, extra="forbid")', () => {
     expect(() =>
       ClientUpdateSchema.parse({
-        name: 'Иван', phone: null, email: null, channel: null,
+        name: 'Иван', phone: null, email: null, channel: null, is_active: true,
       }),
     ).toThrow();
   });
@@ -469,7 +472,7 @@ describe('ClientUpdateSchema', () => {
   it('rejects a missing personal field (required keys)', () => {
     expect(() =>
       ClientUpdateSchema.parse({
-        name: 'Иван', phone: null, channel: null, is_active: true,
+        name: 'Иван', phone: null, channel: null,
       } as never),
     ).toThrow();
   });
@@ -478,7 +481,7 @@ describe('ClientUpdateSchema', () => {
     expect(() =>
       ClientUpdateSchema.parse({
         name: null, phone: null, email: null,
-        channel: 'instagram', is_active: true,
+        channel: 'instagram',
       }),
     ).toThrow();
   });
@@ -592,7 +595,6 @@ describe('Type exports', () => {
       material_hint: '',
       tariffs: [],
       tag_ids: [],
-      is_active: true,
     };
     expect(s.title).toBe('Обновлённое название');
   });
@@ -620,7 +622,6 @@ describe('Type exports', () => {
       image_url: '',
       location_hint: '',
       tag_ids: [],
-      is_active: true,
     };
     expect(l.name).toBe('Обновлённая студия');
   });
@@ -735,20 +736,18 @@ describe('ServiceUpdateSchema', () => {
     const result = ServiceUpdateSchema.parse({
       title: 'Новое название',
       duration: 90,
-      is_active: true,
     });
     expect(result.title).toBe('Новое название');
-    expect(result.is_active).toBe(true);
   });
 
-  it('rejects update missing is_active', () => {
+  it('rejects a stray is_active (backend 422 parity, extra="forbid")', () => {
     expect(() =>
-      ServiceUpdateSchema.parse({ title: 'Новое название', duration: 90 }),
+      ServiceUpdateSchema.parse({ title: 'Новое название', duration: 90, is_active: true }),
     ).toThrow();
   });
 
   it('rejects update missing required create fields', () => {
-    expect(() => ServiceUpdateSchema.parse({ is_active: true })).toThrow();
+    expect(() => ServiceUpdateSchema.parse({})).toThrow();
   });
 });
 
@@ -816,20 +815,18 @@ describe('LocationUpdateSchema', () => {
     const result = LocationUpdateSchema.parse({
       name: 'Обновлённое',
       capacity: 20,
-      is_active: true,
     });
     expect(result.name).toBe('Обновлённое');
-    expect(result.is_active).toBe(true);
   });
 
-  it('rejects update missing is_active', () => {
+  it('rejects a stray is_active (backend 422 parity, extra="forbid")', () => {
     expect(() =>
-      LocationUpdateSchema.parse({ name: 'Обновлённое', capacity: 20 }),
+      LocationUpdateSchema.parse({ name: 'Обновлённое', capacity: 20, is_active: true }),
     ).toThrow();
   });
 
   it('rejects update missing required create fields', () => {
-    expect(() => LocationUpdateSchema.parse({ is_active: true })).toThrow();
+    expect(() => LocationUpdateSchema.parse({})).toThrow();
   });
 });
 
@@ -843,12 +840,11 @@ describe('MasterUpdateSchema', () => {
       color: '#AABBCC',
       position: 'мастер',
       specialty: 'живопись',
-      is_active: true,
     });
-    expect(result.is_active).toBe(true);
+    expect(result.first_name).toBe('Пётр');
   });
 
-  it('rejects update missing is_active', () => {
+  it('rejects a stray is_active (backend 422 parity, extra="forbid")', () => {
     expect(() =>
       MasterUpdateSchema.parse({
         first_name: 'Пётр',
@@ -856,6 +852,7 @@ describe('MasterUpdateSchema', () => {
         color: '#AABBCC',
         position: 'мастер',
         specialty: 'живопись',
+        is_active: true,
       }),
     ).toThrow();
   });
@@ -865,11 +862,57 @@ describe('MasterUpdateSchema', () => {
 
 describe('MaterialUpdateSchema', () => {
   it('accepts a full canonical update payload', () => {
-    const result = MaterialUpdateSchema.parse({ title: 'Глина', is_active: true });
-    expect(result.is_active).toBe(true);
+    const result = MaterialUpdateSchema.parse({ title: 'Глина' });
+    expect(result.title).toBe('Глина');
   });
 
-  it('rejects update missing is_active', () => {
-    expect(() => MaterialUpdateSchema.parse({ title: 'Глина' })).toThrow();
+  it('rejects a stray is_active (backend 422 parity, extra="forbid")', () => {
+    expect(() => MaterialUpdateSchema.parse({ title: 'Глина', is_active: true })).toThrow();
+  });
+});
+
+// ─── archived-inversion parity (spec #207 §16) ──────────────────────────────
+// Fixtures are serialized by the backend's own Pydantic response schemas
+// (same objects FastAPI emits — the dev server on :8000 was unreachable at
+// capture time, so the schemas themselves were the source of truth). They
+// pin the API contract: responses expose `archived` (true = in archive) and
+// never `is_active`; the frontend Zod schemas must round-trip them as-is.
+// regenerate (repo root, backend venv):
+//   backend/.venv/bin/python packages/api-client/scripts/gen_backend_fixtures.py
+
+describe('archived-inversion parity with backend responses (spec #207 §16)', () => {
+  it.each([
+    ['master', MasterResponseSchema],
+    ['location', LocationResponseSchema],
+    ['service', ServiceResponseSchema],
+    ['material', MaterialResponseSchema],
+    ['client', ClientResponseSchema],
+  ] as const)('%s: parses backend response with correct archived polarity', (entity, schema) => {
+    const { active, archived } = backendFixtures[entity];
+    const parsedActive = schema.parse(active);
+    const parsedArchived = schema.parse(archived);
+    // Active DB row (is_active=true) serializes to archived=false, and vice versa.
+    expect(parsedActive.archived).toBe(false);
+    expect(parsedArchived.archived).toBe(true);
+  });
+
+  it.each([
+    ['master', MasterResponseSchema],
+    ['location', LocationResponseSchema],
+    ['service', ServiceResponseSchema],
+    ['material', MaterialResponseSchema],
+    ['client', ClientResponseSchema],
+  ] as const)('%s: backend response has archived, never is_active', (entity, schema) => {
+    const row = backendFixtures[entity].archived;
+    expect(row).toHaveProperty('archived');
+    expect(row).not.toHaveProperty('is_active');
+    expect(schema.parse(row).archived).toBe(true);
+  });
+
+  it('client_with_stats inherits archived from ClientResponse', () => {
+    const { active, archived } = backendFixtures.client_with_stats;
+    expect(ClientWithStatsSchema.parse(active).archived).toBe(false);
+    expect(ClientWithStatsSchema.parse(archived).archived).toBe(true);
+    expect(backendFixtures.client_with_stats.archived).not.toHaveProperty('is_active');
   });
 });

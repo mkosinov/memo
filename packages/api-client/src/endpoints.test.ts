@@ -369,7 +369,7 @@ describe('updateClient', () => {
     vi.mocked(api).mockResolvedValue({ id: 'c-1' });
     const payload: ClientUpdate = {
       name: 'Updated', phone: null, email: null,
-      channel: 'whatsapp', is_active: true,
+      channel: 'whatsapp',
     };
     await updateClient('c-1', payload);
     expect(api).toHaveBeenCalledWith(
@@ -688,7 +688,6 @@ describe('updateService', () => {
       material_hint: '',
       tariffs: [],
       tag_ids: [],
-      is_active: true,
     };
     await updateService('s-1', payload);
     expect(api).toHaveBeenCalledWith(
@@ -747,7 +746,6 @@ describe('updateLocation', () => {
       image_url: '',
       location_hint: '',
       tag_ids: [],
-      is_active: true,
     };
     await updateLocation('l-1', payload);
     expect(api).toHaveBeenCalledWith(
@@ -776,13 +774,13 @@ describe('deleteLocation', () => {
 describe('patchMaster', () => {
   it('calls PATCH /api/v1/masters/:id with partial body', async () => {
     vi.mocked(api).mockResolvedValue({ id: 'm-1' });
-    await patchMaster('m-1', { is_active: false });
+    await patchMaster('m-1', { first_name: 'Анна' });
     expect(api).toHaveBeenCalledWith(
       '/api/v1/masters/m-1',
       expect.anything(),
       expect.objectContaining({
         method: 'PATCH',
-        body: JSON.stringify({ is_active: false }),
+        body: JSON.stringify({ first_name: 'Анна' }),
       }),
     );
   });
@@ -791,13 +789,13 @@ describe('patchMaster', () => {
 describe('patchLocation', () => {
   it('calls PATCH /api/v1/locations/:id with partial body', async () => {
     vi.mocked(api).mockResolvedValue({ id: 'l-1' });
-    await patchLocation('l-1', { is_active: false });
+    await patchLocation('l-1', { name: 'Обновлённая' });
     expect(api).toHaveBeenCalledWith(
       '/api/v1/locations/l-1',
       expect.anything(),
       expect.objectContaining({
         method: 'PATCH',
-        body: JSON.stringify({ is_active: false }),
+        body: JSON.stringify({ name: 'Обновлённая' }),
       }),
     );
   });
@@ -806,13 +804,13 @@ describe('patchLocation', () => {
 describe('patchMaterial', () => {
   it('calls PATCH /api/v1/materials/:id with partial body', async () => {
     vi.mocked(api).mockResolvedValue({ id: 'mat-1' });
-    await patchMaterial('mat-1', { is_active: false });
+    await patchMaterial('mat-1', { title: 'Новая глина' });
     expect(api).toHaveBeenCalledWith(
       '/api/v1/materials/mat-1',
       expect.anything(),
       expect.objectContaining({
         method: 'PATCH',
-        body: JSON.stringify({ is_active: false }),
+        body: JSON.stringify({ title: 'Новая глина' }),
       }),
     );
   });
@@ -821,13 +819,13 @@ describe('patchMaterial', () => {
 describe('patchService', () => {
   it('calls PATCH /api/v1/services/:id with partial body', async () => {
     vi.mocked(api).mockResolvedValue({ id: 's-1' });
-    await patchService('s-1', { is_active: false });
+    await patchService('s-1', { title: 'Новое название' });
     expect(api).toHaveBeenCalledWith(
       '/api/v1/services/s-1',
       expect.anything(),
       expect.objectContaining({
         method: 'PATCH',
-        body: JSON.stringify({ is_active: false }),
+        body: JSON.stringify({ title: 'Новое название' }),
       }),
     );
   });

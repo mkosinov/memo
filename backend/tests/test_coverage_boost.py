@@ -269,8 +269,9 @@ class TestServiceWithTariffsAndTags:
         tag2 = api_client.post("/api/v1/tags", json={"tag": "updated"}).json()
 
         # Update with completely new tariffs and tags
+        # #207 §3.2: is_active removed from ServiceUpdate (PUT) — archive/restore
+        # only via POST /{id}/archive + /{id}/restore.
         update_data = {
-            "is_active": True,
             "title": "Advanced Ceramics",
             "description": "Advanced clay techniques",
             "image_url": "https://example.com/ceramics2.jpg",
@@ -312,7 +313,7 @@ class TestServiceWithTariffsAndTags:
         assert len(create_resp.json()["tariffs"]) == 2
 
         update_data = {
-            "is_active": True,
+            # #207 §3.2: is_active removed from ServiceUpdate (PUT).
             "title": "Ceramics",
             "description": "Clay sculpting",
             "image_url": "https://example.com/ceramics.jpg",

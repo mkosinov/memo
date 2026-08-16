@@ -7,6 +7,22 @@ from tests.conftest import query_db
 pytestmark = pytest.mark.api
 
 
+def _archive_master(master_id: str) -> None:
+    """Archive a master row directly in the DB (sets is_active=0).
+
+    Mirrors the ``_archive_material`` helper (test_api_materials.py) and
+    ``_archive_service`` (test_api_services.py): ``DELETE /masters/{id}`` is
+    now HARD (#207 — leaves no row to list under ``?status=archived``).
+    Status-filter tests touch the ``is_active`` column directly via
+    ``query_db`` (the same write the ``POST /{id}/archive`` endpoint performs
+    via ``ArchiveService.archive`` → ``repo.patch({is_active: False})`` in
+    Task 11 — kept direct here to avoid coupling the filter test to the
+    archive endpoint, which has its own coverage in
+    ``TestArchiveRestoreEndpoints``).
+    """
+    query_db(f"UPDATE masters SET is_active=0 WHERE id='{master_id}'")
+
+
 class TestMasterListStatusFilter:
     """GET /api/v1/masters?status={active|archived|all} archive filtering (GH #195).
 
@@ -22,10 +38,14 @@ class TestMasterListStatusFilter:
     def test_list_status_archived_returns_only_archived(
         self, api_client, create_master
     ) -> None:
-        """?status=archived hides active masters, surfaces soft-deleted ones."""
+        """?status=archived hides active masters, surfaces archived ones.
+
+        #207 Task 13 Part B expanded: archival is via ``_archive_master``
+        (DELETE is now hard — leaves no row to list under ``?status=archived``).
+        """
         active = create_master()
         archived = create_master()
-        api_client.delete(f"/api/v1/masters/{archived['id']}")
+        _archive_master(archived["id"])
 
         resp = api_client.get("/api/v1/masters?status=archived")
         assert resp.status_code == 200, f"list failed: {resp.text}"
@@ -35,7 +55,9 @@ class TestMasterListStatusFilter:
         ids = [m["id"] for m in body["items"]]
         assert archived["id"] in ids
         assert active["id"] not in ids
-        assert body["items"][0]["is_active"] is False
+        # #207 §3.1: `archived` is the inverted serialized field (True = in
+        # archive); `is_active` itself never serializes (Field exclude=True).
+        assert body["items"][0]["archived"] is True
 
     def test_list_status_all_returns_both_active_and_archived(
         self, api_client, create_master
@@ -43,7 +65,7 @@ class TestMasterListStatusFilter:
         """?status=all returns every master regardless of is_active."""
         active = create_master()
         archived = create_master()
-        api_client.delete(f"/api/v1/masters/{archived['id']}")
+        _archive_master(archived["id"])
 
         resp = api_client.get("/api/v1/masters?status=all")
         assert resp.status_code == 200, f"list failed: {resp.text}"
@@ -59,7 +81,7 @@ class TestMasterListStatusFilter:
         """?status=active behaves the same as the default (no query param)."""
         active = create_master()
         archived = create_master()
-        api_client.delete(f"/api/v1/masters/{archived['id']}")
+        _archive_master(archived["id"])
 
         explicit = api_client.get("/api/v1/masters?status=active").json()
         default = api_client.get("/api/v1/masters").json()

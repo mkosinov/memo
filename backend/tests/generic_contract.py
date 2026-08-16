@@ -116,12 +116,16 @@ def _all_subclasses(cls: type) -> list[type]:
 
 
 # ─── EntityConfig ────────────────────────────────────────────────────────────────
-# Spec: docs/specs/2026-08-01-deletion-policy-design.md §2.6 —
-# ``delete_semantics`` is the test-side record of the deletion domain policy:
-#   * ``"hard"`` — DELETE physically removes the row (Tag/Photo/Visitor/
-#     Activity/Record/UserSettings/Payment/Visit).
-#   * ``"soft"`` — is_active is flipped to False (Master/Location/Service/
-#     Material/Client).
+# Spec: docs/specs/2026-08-15-delete-hard-delete-and-dependency-resolution-design.md
+# §1/§3.3 — ``delete_semantics`` is the test-side record of the deletion domain
+# policy. After #207 ALL 5 archive-capable entities (Master/Location/Service/
+# Material/Client) join the hard-delete group: ``DELETE`` is now a real hard
+# delete (with dependency-resolution for FK blockers), and archive/restore moved
+# to dedicated ``POST /{id}/archive`` + ``POST /{id}/restore`` endpoints (Task 11).
+#   * ``"hard"`` — DELETE physically removes the row (all entities post-#207).
+#   * ``"soft"`` — kept for backward-compat with the ``_soft_params`` parameterizer
+#     but currently empty: no entity declares it. Pinned by
+#     ``test_no_entity_declares_soft_delete_semantics``.
 # The generic delete test asserts each entity's behavior matches its declared
 # semantics. Adding new entity configs below requires setting this field.
 class EntityConfig(NamedTuple):
@@ -383,12 +387,18 @@ def _contract_params() -> list:
 
 
 def _soft_params() -> list:
-    """Parametrization over soft-delete entities only (delete_semantics == "soft").
+    """Parametrization over soft-delete entities only (``delete_semantics == "soft"``).
 
-    Cleaner than in-test skips: a 9th soft entity is auto-included via its
-    config entry. Used by the soft-only DeleteSemantics edge tests
-    (``test_delete_already_deleted_soft_returns_false``,
-    ``test_soft_deleted_absent_from_list``) — spec §3.3 (DeleteSemantics row).
+    Post-#207: ALL 5 archive-capable entities (Master/Location/Service/Material/
+    Client) joined the hard-delete group — ``DELETE`` is a real hard delete and
+    archive/restore moved to dedicated ``POST /{id}/archive`` + ``POST /{id}/restore``
+    endpoints (spec §1/§3.3). No entity currently declares ``"soft"``, so this
+    returns ``[]``. The invariant is pinned by
+    ``test_no_entity_declares_soft_delete_semantics`` in
+    ``tests/services/test_generic_service_contract.py`` — if a future entity
+    regresses to soft-delete semantics, that contract test fails loudly and
+    re-activates the (deleted) soft-only edge tests that were folded into the
+    hard-delete world (spec Part B3 of #207 Task 13).
     """
     return [
         p
@@ -408,6 +418,30 @@ def _hard_params() -> list:
         for p in _contract_params()
         if p.values[1] is not None and p.values[1].delete_semantics == "hard"
     ]
+
+
+def _serialized_keys(schema_cls: type) -> set[str]:
+    """Field names a Pydantic Response schema actually SERIALIZES to JSON.
+
+    The 5 archive-capable Response schemas (Master/Location/Service/Material/
+    Client, #207 §3.1) keep ``is_active`` as ``Field(..., exclude=True)`` (parsed
+    in the constructor, NOT serialized) and expose ``archived`` via a
+    ``@computed_field`` (serialized, but absent from ``model_fields``).
+    Contract helpers that previously used ``set(model_fields.keys())`` compared
+    against the stale parsed set and missed ``archived`` while asserting
+    ``is_active`` — this helper computes what the API actually emits so the
+    contract pins the wire shape (declared the approved Task 4 design — do NOT
+    ``model_validate`` the body back, the excluded required field makes that
+    raise). Hard-delete entity Response schemas have no ``exclude=True`` field
+    and no computed fields → the helper returns ``set(model_fields)`` for them.
+    """
+    serialized: set[str] = set()
+    for name, field in schema_cls.model_fields.items():
+        if field.exclude is True:
+            continue
+        serialized.add(name)
+    serialized |= set(schema_cls.model_computed_fields.keys())
+    return serialized
 
 
 def _archive_params() -> list:

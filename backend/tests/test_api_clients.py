@@ -3,6 +3,7 @@
 import pytest
 
 from tests.conftest import query_db
+from tests.generic_contract import _serialized_keys
 
 pytestmark = pytest.mark.api
 
@@ -164,7 +165,9 @@ class TestClientsCrud:
         assert body["email"] == "john@example.com"
         assert body["channel"] == "telegram"
         assert "id" in body
-        assert body["is_active"] is True
+        # #207 §3.1: `archived` is the inverted serialized field; `is_active`
+        # itself is Field(exclude=True) and never in the JSON body.
+        assert body["archived"] is False
 
     def test_search_client_by_phone_not_found(self, api_client) -> None:
         """GET /api/v1/clients/search?phone=... returns 404 for unknown phone."""
@@ -231,7 +234,8 @@ class TestClientCreateEdgeCases:
         assert body["phone"] is None
         assert body["email"] is None
         assert body["channel"] is None
-        assert body["is_active"] is True
+        # #207 §3.1: `archived` (inverted) — active by default.
+        assert body["archived"] is False
 
     def test_create_client_with_only_name(self, api_client) -> None:
         """POST with only name creates client."""
@@ -277,14 +281,15 @@ class TestClientCreateEdgeCases:
         assert resp.json()["channel"] is None
 
     def test_create_client_response_has_all_fields(self, api_client) -> None:
-        """POST response contains id, created_at, updated_at, is_active."""
+        """POST response contains id, created_at, updated_at, archived (#207 §3.1)."""
         resp = api_client.post("/api/v1/clients", json=CLIENT_PAYLOAD)
         body = resp.json()
         assert isinstance(body["id"], str)
         assert len(body["id"]) > 0
         assert "created_at" in body
         assert "updated_at" in body
-        assert body["is_active"] is True
+        # #207 §3.1: `archived` (inverted is_active) — active by default.
+        assert body["archived"] is False
 
     def test_create_two_clients_different_ids(self, api_client) -> None:
         """Two created clients have different IDs."""
@@ -331,8 +336,9 @@ class TestPutClientEdgeCases:
         })
         stats_before = _client_stats(api_client, client_id)
 
+        # #207 §3.2: is_active removed from ClientUpdate — PUT body is now the
+        # 4 personal keys only (is_active would 422 via extra="forbid").
         resp = api_client.put(f"/api/v1/clients/{client_id}", json={
-            "is_active": True,
             "name": None,
             "phone": None,
             "email": None,
@@ -355,29 +361,23 @@ class TestPutClientEdgeCases:
         resp = api_client.put(f"/api/v1/clients/{client_id}", json={
             **CLIENT_PAYLOAD,
             "channel": "invalid_channel",
-            "is_active": True,
         })
         assert resp.status_code == 422
 
     def test_put_empty_body_returns_422(self, api_client) -> None:
-        """PUT {} → 422 (GH #201): all 5 keys required — silent full-wipe is impossible."""
+        """PUT {} → 422 (GH #201): all 4 keys required — silent full-wipe impossible."""
         create_resp = api_client.post("/api/v1/clients", json=CLIENT_PAYLOAD)
         client_id = create_resp.json()["id"]
         resp = api_client.put(f"/api/v1/clients/{client_id}", json={})
         assert resp.status_code == 422
 
     def test_put_is_active_only_returns_422(self, api_client) -> None:
-        """PUT {is_active} only → 422: personal keys are required (required-nullable)."""
+        """PUT {is_active} only → 422: personal keys are required, AND a stray
+        is_active is itself rejected post-#207 (#178 closed). Either reason
+        fires before the body reaches the service."""
         create_resp = api_client.post("/api/v1/clients", json=CLIENT_PAYLOAD)
         client_id = create_resp.json()["id"]
         resp = api_client.put(f"/api/v1/clients/{client_id}", json={"is_active": True})
-        assert resp.status_code == 422
-
-    def test_put_missing_is_active_returns_422(self, api_client) -> None:
-        """PUT full personal payload minus is_active → 422 (closes the #178→#201 500 window)."""
-        create_resp = api_client.post("/api/v1/clients", json=CLIENT_PAYLOAD)
-        client_id = create_resp.json()["id"]
-        resp = api_client.put(f"/api/v1/clients/{client_id}", json=CLIENT_PAYLOAD)
         assert resp.status_code == 422
 
 
@@ -446,16 +446,27 @@ class TestPhoneSearchActiveOnlyRegression:
         assert resp.status_code == 200
         body = resp.json()
         assert body["id"] == client["id"]
-        assert body["is_active"] is True
+        # #207 §3.1: serialized `archived` (inverted); active row → False.
+        assert body["archived"] is False
 
     def test_archived_excluded_even_if_partner_active(
         self, api_client, create_client
     ) -> None:
-        """Two clients share a phone; the archived one is never returned."""
+        """Two clients share a phone; the archived one is never returned.
+
+        Post-#207 the archive state is set via the dedicated ``POST /archive``
+        endpoint (Task 11) — DELETE is now hard and would just remove the
+        row. Both states produce the same observable behavior for phone search
+        (archived/deleted partner never surfaces); using archive keeps the
+        test's stated premise (one partner archived, not deleted) honest.
+        """
         shared = "+79990007766"
         active_client = create_client(phone=shared, name="Active Sharer")
         archived_client = create_client(phone=shared, name="Archived Sharer")
-        api_client.delete(f"/api/v1/clients/{archived_client['id']}")
+        # #207 §2/§10: archive lifecycle via dedicated endpoint, NOT DELETE.
+        archive_resp = api_client.post(f"/api/v1/clients/{archived_client['id']}/archive")
+        assert archive_resp.status_code == 200
+        assert archive_resp.json()["archived"] is True
 
         resp = api_client.get(
             "/api/v1/clients/search", params={"phone": shared}
@@ -463,43 +474,68 @@ class TestPhoneSearchActiveOnlyRegression:
         assert resp.status_code == 200
         body = resp.json()
         assert body["id"] == active_client["id"]
-        assert body["is_active"] is True
+        assert body["archived"] is False
 
 
 # ─── Response Contract ────────────────────────────────────────────────────────
 
 
 class TestClientResponseContract:
-    """Verify API responses validate against Pydantic schemas."""
+    """Verify API responses match the serialized Pydantic schemas.
+
+    #207 §3.1: ``ClientResponse.is_active: bool = Field(..., exclude=True)`` is a
+    REQUIRED input field but NEVER serialized to JSON. The API emits ``archived``
+    (a ``@computed_field`` absent from ``model_fields``). ``model_validate(body)``
+    therefore raises (the body lacks the required ``is_active``), and the
+    generic ``_assert_exact_response_keys`` would miss ``archived`` while
+    expecting ``is_active``. The wire-shape contract is the SERIALIZED field
+    set (via ``_serialized_keys`` from ``tests.generic_contract``).
+    """
 
     def test_single_client_response_validates(self, api_client) -> None:
-        """GET /api/v1/clients/{id} response validates against ClientResponse."""
+        """GET /api/v1/clients/{id} body has exactly the serialized
+        ClientResponse keys — locks the contract without ``model_validate``."""
         from src.schemas.client import ClientResponse
 
         create_resp = api_client.post("/api/v1/clients", json=CLIENT_PAYLOAD)
         client_id = create_resp.json()["id"]
 
         resp = api_client.get(f"/api/v1/clients/{client_id}")
-        validated = ClientResponse.model_validate(resp.json())
-        assert str(validated.id) == client_id
+        body = resp.json()
+        assert set(body.keys()) == _serialized_keys(ClientResponse), (
+            f"single GET body keys mismatch serialized ClientResponse: "
+            f"missing={_serialized_keys(ClientResponse) - set(body.keys())}, "
+            f"extra={set(body.keys()) - _serialized_keys(ClientResponse)}"
+        )
+        assert body["id"] == client_id
 
     def test_list_client_items_validate(self, api_client) -> None:
-        """Each item in GET /api/v1/clients validates against ClientWithStats."""
+        """Each GET /api/v1/clients item has exactly the serialized ClientWithStats keys."""
         from src.schemas.client import ClientWithStats
 
         api_client.post("/api/v1/clients", json=CLIENT_PAYLOAD)
 
         resp = api_client.get("/api/v1/clients")
+        expected = _serialized_keys(ClientWithStats)
         for item in resp.json()["items"]:
-            ClientWithStats.model_validate(item)
+            assert set(item.keys()) == expected, (
+                f"list item keys mismatch serialized ClientWithStats: "
+                f"missing={expected - set(item.keys())}, "
+                f"extra={set(item.keys()) - expected}"
+            )
 
     def test_create_response_validates(self, api_client) -> None:
-        """POST response validates against ClientResponse."""
+        """POST response body has exactly the serialized ClientResponse keys."""
         from src.schemas.client import ClientResponse
 
         resp = api_client.post("/api/v1/clients", json=CLIENT_PAYLOAD)
-        validated = ClientResponse.model_validate(resp.json())
-        assert validated.name == "John Smith"
+        body = resp.json()
+        assert set(body.keys()) == _serialized_keys(ClientResponse), (
+            f"POST body keys mismatch serialized ClientResponse: "
+            f"missing={_serialized_keys(ClientResponse) - set(body.keys())}, "
+            f"extra={set(body.keys()) - _serialized_keys(ClientResponse)}"
+        )
+        assert body["name"] == "John Smith"
 
 
 # ─── Channel Tolerance (Issue #60) ─────────────────────────────────────────

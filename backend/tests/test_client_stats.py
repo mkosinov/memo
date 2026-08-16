@@ -421,10 +421,20 @@ class TestClientListFilterStatus:
     """Verify status filter (active default / archived / all)."""
 
     def test_filter_status_active_default(self, api_client, create_client) -> None:
-        """Absent status returns only active clients (safe default)."""
+        """Absent status returns only active clients (safe default).
+
+        #207 §2: archive lifecycle via ``POST /{id}/archive`` (Task 11). The
+        archived row stays in the DB with ``is_active=False`` but the default
+        ``?status=ACTIVE`` list filter hides it — same observable behavior the
+        old ``DELETE``-as-archive setup produced, now via the real archive
+        endpoint (keeps the test's stated premise "archived not in default
+        list" honest post-#207 where DELETE is hard, not soft).
+        """
         active = create_client(name="Active One")
         inactive = create_client(name="Inactive One")
-        api_client.delete(f"/api/v1/clients/{inactive['id']}")
+        archive_resp = api_client.post(f"/api/v1/clients/{inactive['id']}/archive")
+        assert archive_resp.status_code == 200
+        assert archive_resp.json()["archived"] is True
 
         resp = api_client.get("/api/v1/clients")
         ids = [c["id"] for c in resp.json()["items"]]
@@ -432,10 +442,12 @@ class TestClientListFilterStatus:
         assert inactive["id"] not in ids
 
     def test_filter_status_archived(self, api_client, create_client) -> None:
-        """status=archived returns only soft-deleted clients."""
+        """status=archived returns only archived clients (set via POST /archive)."""
         active = create_client(name="Active Two")
         inactive = create_client(name="Inactive Two")
-        api_client.delete(f"/api/v1/clients/{inactive['id']}")
+        archive_resp = api_client.post(f"/api/v1/clients/{inactive['id']}/archive")
+        assert archive_resp.status_code == 200
+        assert archive_resp.json()["archived"] is True
 
         resp = api_client.get("/api/v1/clients", params={"status": "archived"})
         ids = [c["id"] for c in resp.json()["items"]]
@@ -447,7 +459,9 @@ class TestClientListFilterStatus:
         assert archived inclusion, not just total >= 1)."""
         active = create_client(name="Active Three")
         inactive = create_client(name="Inactive Three")
-        api_client.delete(f"/api/v1/clients/{inactive['id']}")
+        archive_resp = api_client.post(f"/api/v1/clients/{inactive['id']}/archive")
+        assert archive_resp.status_code == 200
+        assert archive_resp.json()["archived"] is True
 
         resp = api_client.get("/api/v1/clients", params={"status": "all"})
         ids = [c["id"] for c in resp.json()["items"]]

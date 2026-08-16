@@ -18,7 +18,12 @@ from typing import Any
 
 import pytest
 
-from tests.generic_contract import EntityConfig, _contract_params, _hard_params, _soft_params
+from tests.generic_contract import (
+    EntityConfig,
+    _contract_params,
+    _hard_params,
+    _serialized_keys,
+)
 
 
 # ─── helpers ────────────────────────────────────────────────────────────────
@@ -48,7 +53,17 @@ def _create_payload(cfg: EntityConfig, fk_ids: dict[str, Any]) -> dict[str, Any]
 
 
 def _update_payload(cfg: EntityConfig, fk_ids: dict[str, Any]) -> dict[str, Any]:
-    """PUT body: create_data + FKs + update_data, filtered to update_schema fields (#184 D3)."""
+    """PUT body: create_data + FKs + update_data, filtered to update_schema fields.
+
+    #207 §3.2 (#178 auto-close): ``is_active`` was removed from all Update
+    schemas for the 5 archive-capable entities (MasterUpdate/LocationUpdate/
+    ServiceUpdate/MaterialUpdate/ClientUpdate), so the ``model_fields`` filter
+    below drops it for them and the ``setdefault`` injection below is a no-op.
+    Hard-delete entities never had ``is_active`` in their Update schema, so the
+    injection is also a no-op there. The 422-on-stray-``is_active`` contract is
+    pinned by ``test_update_rejects_is_active.py`` (Task 5) +
+    ``test_put_is_active.py`` (Task 13 acceptance).
+    """
     merged = {**cfg.create_data, **fk_ids, **cfg.update_data}
     payload = _jsonable({k: v for k, v in merged.items() if k in cfg.update_schema.model_fields})
     if "is_active" in cfg.update_schema.model_fields:
@@ -63,20 +78,54 @@ def _create_entity(api_client, cfg: EntityConfig, fk_ids: dict[str, Any]) -> dic
 
 
 def _assert_exact_response_keys(body: dict[str, Any], cfg: EntityConfig) -> None:
-    expected = set(cfg.response_schema.model_fields.keys())
+    # #207 §3.1: Response schemas for the 5 archive-capable entities keep
+    # ``is_active: bool = Field(..., exclude=True)`` (parsed, NOT serialized)
+    # and expose ``archived`` via a ``@computed_field`` (serialized, absent from
+    # ``model_fields``). Comparing against ``model_fields.keys()`` would assert
+    # ``is_active`` is in the body (False — excluded) and miss ``archived``
+    # (False — computed). Compute the SERIALIZED field set instead so the
+    # contract pins what the API actually emits. Hard-delete entities have no
+    # excluded or computed fields → the helper reduces to ``set(model_fields)``.
+    expected = _serialized_keys(cfg.response_schema)
     actual = set(body.keys())
     assert actual == expected, (
-        f"response keys must equal {cfg.response_schema.__name__} fields exactly; "
-        f"missing={sorted(expected - actual)}, extra={sorted(actual - expected)}"
+        f"response keys must equal {cfg.response_schema.__name__} serialized "
+        f"fields exactly; missing={sorted(expected - actual)}, "
+        f"extra={sorted(actual - expected)}"
     )
 
 
 def _assert_sent_fields_echoed(body: dict[str, Any], cfg: EntityConfig, sent: dict[str, Any]) -> None:
-    """Typed comparison through the validated response model (datetimes round-trip, spec D11)."""
-    parsed = cfg.response_schema.model_validate(body)
+    """Typed comparison through the validated response model (datetimes round-trip, spec D11).
+
+    Delegates the ``model_validate`` round-trip to ``_validate_response_body``
+    (which handles the #207 §3.1 ``is_active: Field(exclude=True)`` injection for
+    archive-capable entities — see that helper for details).
+    """
+    parsed = _validate_response_body(body, cfg)
     for key, value in sent.items():
         if key in cfg.response_schema.model_fields:
             assert getattr(parsed, key) == value, f"field {key!r} must echo the sent value"
+
+
+def _validate_response_body(body: dict[str, Any], cfg: EntityConfig):
+    """Run ``cfg.response_schema.model_validate`` on an API body with the #207
+    §3.1 ``is_active`` injection for archive-capable entities.
+
+    Archive-capable Response schemas (Master/Location/Service/Material/Client)
+    keep ``is_active: bool = Field(..., exclude=True)`` — REQUIRED on input but
+    NEVER serialized. ``model_validate(body)`` raises because the body lacks
+    ``is_active``. Inject it from the inverted ``archived`` computed field
+    (``is_active = not archived``) before validation so the type-coercion
+    round-trip still works (datetimes, enums — spec D11). Hard-delete entities
+    (Activity/Payment/Visitor/Tag) have no ``is_active`` field → the guard is a
+    no-op, the original ``model_validate(body)`` path is preserved.
+    """
+    validate_dict = dict(body)
+    is_active_field = cfg.response_schema.model_fields.get("is_active")
+    if is_active_field is not None and is_active_field.exclude is True:
+        validate_dict["is_active"] = not body.get("archived", False)
+    return cfg.response_schema.model_validate(validate_dict)
 
 
 def _assert_not_found(resp, cfg: EntityConfig) -> None:
@@ -139,7 +188,10 @@ class TestGenericApiListContract:
         assert body["total"] == 1, "exactly the created row must be counted (reset_db guarantees empty start)"
         matches = [item for item in body["items"] if item["id"] == created["id"]]
         assert len(matches) == 1, "created entity must appear in items"
-        cfg.response_schema.model_validate(matches[0])  # item shape; extras ignored (ClientWithStats)
+        # #207 §3.1: archive-capable Response schemas need is_active injected
+        # from inverted `archived` before model_validate (see
+        # _validate_response_body). Hard-delete entities → no-op.
+        _validate_response_body(matches[0], cfg)  # item shape; extras ignored (ClientWithStats)
 
     @pytest.mark.parametrize("service_cls,cfg", _contract_params())
     def test_list_explicit_pagination_echoed(self, service_cls, cfg, api_client):
@@ -175,7 +227,10 @@ class TestGenericApiUpdateContract:
         assert resp.status_code == 200, f"PUT must return 200, got {resp.status_code}: {resp.text}"
         body = resp.json()
         _assert_exact_response_keys(body, cfg)
-        parsed = cfg.response_schema.model_validate(body)
+        # #207 §3.1: archive-capable Response schemas need is_active injected
+        # from inverted `archived` before model_validate (see
+        # _validate_response_body). Hard-delete entities → no-op.
+        parsed = _validate_response_body(body, cfg)
         for key, value in cfg.update_data.items():
             assert getattr(parsed, key) == value, f"update_data field {key!r} must be applied"
 
@@ -202,21 +257,6 @@ class TestGenericApiDeleteContract:
         assert cfg is not None, f"{service_cls.__name__}: missing CONTRACT_CONFIG entry"
         _assert_not_found(api_client.delete(f"{cfg.router_prefix}/nonexistent-id"), cfg)
 
-    @pytest.mark.parametrize("service_cls,cfg", _soft_params())
-    def test_delete_soft_visibility(self, service_cls, cfg, api_client, request):
-        assert cfg is not None, f"{service_cls.__name__}: missing CONTRACT_CONFIG entry"
-        fk_ids = _resolve_fk_ids(request, cfg)
-        created = _create_entity(api_client, cfg, fk_ids)
-        assert api_client.delete(f"{cfg.router_prefix}/{created['id']}").status_code == 204
-        get_resp = api_client.get(f"{cfg.router_prefix}/{created['id']}")
-        assert get_resp.status_code == 200, "soft-deleted row stays GETtable (list hides, get returns)"
-        assert get_resp.json()["is_active"] is False, "archived row must report is_active=false"
-        body = api_client.get(cfg.router_prefix).json()
-        assert created["id"] not in [item["id"] for item in body["items"]], (
-            "list (default status=active) must hide the archived row"
-        )
-        assert body["total"] == 0
-
     @pytest.mark.parametrize("service_cls,cfg", _hard_params())
     def test_delete_hard_visibility(self, service_cls, cfg, api_client, request):
         assert cfg is not None, f"{service_cls.__name__}: missing CONTRACT_CONFIG entry"
@@ -230,14 +270,25 @@ class TestGenericApiDeleteContract:
         assert created["id"] not in [item["id"] for item in body["items"]]
         assert body["total"] == 0
 
-    @pytest.mark.parametrize("service_cls,cfg", _soft_params())
-    def test_delete_soft_second_delete_returns_404(self, service_cls, cfg, api_client, request):
+    @pytest.mark.parametrize("service_cls,cfg", _hard_params())
+    def test_delete_hard_second_delete_returns_404(self, service_cls, cfg, api_client, request):
+        """Deleting an already-hard-deleted id → 404 (row gone, ``service.delete``
+        returns False on missing instance).
+
+        Replaces the deleted ``test_delete_soft_second_delete_returns_404``
+        (#207 Task 13 Part B3): the soft-delete world's "second delete on an
+        archived row returns False" guard is now redundant because there is no
+        archived state — a hard-delete already 204s the first call, and the
+        second call hits a missing row the same way
+        ``test_delete_nonexistent_returns_404_with_entity_code`` does. Kept as a
+        dedicated parity test for the second-call semantics.
+        """
         assert cfg is not None, f"{service_cls.__name__}: missing CONTRACT_CONFIG entry"
         fk_ids = _resolve_fk_ids(request, cfg)
         created = _create_entity(api_client, cfg, fk_ids)
         assert api_client.delete(f"{cfg.router_prefix}/{created['id']}").status_code == 204
         resp = api_client.delete(f"{cfg.router_prefix}/{created['id']}")
-        assert resp.status_code == 404, "deleting an already-archived row returns False → 404"
+        assert resp.status_code == 404, "second DELETE on a hard-deleted row → 404"
         assert resp.json()["detail"]["code"] == cfg.not_found_code
 
 

@@ -88,7 +88,8 @@ class TestMasterSortOrder:
         master_id = create_resp.json()["id"]
 
         resp = api_client.put(f"/api/v1/masters/{master_id}", json={
-            "is_active": True,
+            # #207 §3.2: is_active removed from MasterUpdate (PUT) —
+            # archive/restore only via POST endpoints.
             "first_name": "Дима",
             "last_name": "Тест",
             "color": "#444444",

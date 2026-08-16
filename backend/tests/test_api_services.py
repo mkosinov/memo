@@ -34,6 +34,22 @@ def _create_tag(api_client) -> str:
     return response.json()["id"]
 
 
+def _archive_service(service_id: str) -> None:
+    """Archive a service row directly in the DB (sets is_active=0).
+
+    Mirrors the ``_archive_material`` helper in ``test_api_materials.py`` (#207
+    Task 13 Part B1): ``DELETE /services/{id}`` is now HARD (Task 2/3 of #207 —
+    no row left to list under ``?status=archived``). Status-filter tests that
+    need an archived row touch the ``is_active`` column directly via
+    ``query_db`` (the same write the ``POST /{id}/archive`` endpoint performs
+    via ``ArchiveService.archive`` → ``repo.patch({is_active: False})`` in
+    Task 11 — kept as a direct DB write here to avoid coupling the filter test
+    to the archive endpoint, which has its own coverage in
+    ``TestArchiveRestoreEndpoints``).
+    """
+    query_db(f"UPDATE services SET is_active=0 WHERE id='{service_id}'")
+
+
 class TestServicesCrud:
     """Full CRUD round-trip for /api/services."""
 
@@ -52,7 +68,9 @@ class TestServicesCrud:
         assert "id" in body
         assert "created_at" in body
         assert "updated_at" in body
-        assert body["is_active"] is True
+        # #207 §3.1: Response exposes `archived` (inverted from is_active),
+        # `is_active` itself is Field(exclude=True) and never serializes.
+        assert body["archived"] is False
         assert body["tariffs"] == []
         assert body["tags"] == []
         assert body["material_hint"] == "Масляные краски, холст на подрамнике 40×50 см"
@@ -132,7 +150,8 @@ class TestServicesCrud:
         tag2_id = tag2_resp.json()["id"]
 
         update_data = {
-            "is_active": True,
+            # #207 §3.2: is_active removed from ServiceUpdate (PUT) —
+            # archive/restore only via POST /{id}/archive + /{id}/restore.
             "title": "Advanced Oil Painting",
             "description": "Master oil painting techniques",
             "image_url": "https://example.com/advanced-oil.jpg",
@@ -158,26 +177,6 @@ class TestServicesCrud:
         assert len(body["tags"]) == 1
         assert body["tags"][0]["tag"] == "advanced"
 
-    def test_delete_service_soft_deletes(self, api_client) -> None:
-        """DELETE /api/services/{id} soft-deletes and list excludes it."""
-        create_resp = api_client.post("/api/v1/services", json=SERVICE_PAYLOAD)
-        service_id = create_resp.json()["id"]
-
-        # Delete
-        response = api_client.delete(f"/api/v1/services/{service_id}")
-        assert response.status_code == 204
-
-        # GET by id should still return it (soft delete)
-        response = api_client.get(f"/api/v1/services/{service_id}")
-        assert response.status_code == 200
-        assert response.json()["is_active"] is False
-
-        # List should NOT include the deleted service
-        response = api_client.get("/api/v1/services")
-        body = response.json()
-        ids = [s["id"] for s in body["items"]]
-        assert service_id not in ids
-
     def test_get_nonexistent_service_returns_404(self, api_client) -> None:
         """GET /api/services/{fake_id} returns 404."""
         response = api_client.get("/api/v1/services/nonexistent-id")
@@ -185,19 +184,34 @@ class TestServicesCrud:
 
     def test_update_nonexistent_service_returns_404(self, api_client) -> None:
         """PUT /api/services/{fake_id} returns 404."""
+        # #207 §3.2: is_active removed from ServiceUpdate — body must pass
+        # schema validation (no is_active) so a missing-entity 404 wins over
+        # an extra-field 422.
         response = api_client.put(
             "/api/v1/services/nonexistent-id",
-            json={**SERVICE_PAYLOAD, "is_active": True},
+            json=SERVICE_PAYLOAD,
         )
         assert response.status_code == 404
 
-    def test_update_service_without_is_active_returns_422(self, api_client) -> None:
-        """PUT /api/v1/services/{id} without is_active → 422 (canonical PUT, GH #178)."""
+    def test_update_service_without_is_active_succeeds_200(self, api_client) -> None:
+        """PUT /api/v1/services/{id} without is_active now SUCCEEDS (200).
+
+        #207 §3.2 (auto-closes #178): ``is_active`` was removed from
+        ``ServiceUpdate``. The old #178 canonical-PUT contract required
+        ``is_active`` (omission → 422); the inverted contract is the opposite —
+        PUT without ``is_active`` is the normal path, and a stray
+        ``is_active`` would now 422 (pinned by
+        ``test_put_service_rejects_is_active`` in ``test_put_is_active.py``
+        + ``test_update_rejects_is_active.py``). The service stays active after
+        the update (PUT is a full-replace that no longer touches the lifecycle
+        flag).
+        """
         create_resp = api_client.post("/api/v1/services", json=SERVICE_PAYLOAD)
         service_id = create_resp.json()["id"]
 
         response = api_client.put(f"/api/v1/services/{service_id}", json=SERVICE_PAYLOAD)
-        assert response.status_code == 422
+        assert response.status_code == 200
+        assert response.json()["archived"] is False
 
     def test_delete_nonexistent_service_returns_404(self, api_client) -> None:
         """DELETE /api/services/{fake_id} returns 404."""
@@ -236,7 +250,10 @@ class TestServiceMaxAgeNullable:
         assert create_resp.json()["max_age"] == 12
 
         # Update to null
-        update_data = {**SERVICE_PAYLOAD, "max_age": None, "is_active": True}
+        # #207 §3.2: is_active removed from ServiceUpdate — drop the field so
+        # the PUT validates (a stray is_active would 422 obscuring the max_age
+        # nullification behavior under test).
+        update_data = {**SERVICE_PAYLOAD, "max_age": None}
         response = api_client.put(f"/api/v1/services/{service_id}", json=update_data)
         assert response.status_code == 200
         assert response.json()["max_age"] is None
@@ -384,10 +401,14 @@ class TestServiceListStatusFilter:
     def test_list_status_archived_returns_only_archived(
         self, api_client, create_service
     ) -> None:
-        """?status=archived hides active services, surfaces soft-deleted ones."""
+        """?status=archived hides active services, surfaces archived ones.
+
+        #207 Task 13 Part B1: archival is via the ``_archive_service`` DB helper
+        (DELETE is now hard — leaves no row to list).
+        """
         active = create_service()
         archived = create_service()
-        api_client.delete(f"/api/v1/services/{archived['id']}")
+        _archive_service(archived["id"])
 
         resp = api_client.get("/api/v1/services?status=archived")
         assert resp.status_code == 200, f"list failed: {resp.text}"
@@ -397,7 +418,9 @@ class TestServiceListStatusFilter:
         ids = [s["id"] for s in body["items"]]
         assert archived["id"] in ids
         assert active["id"] not in ids
-        assert body["items"][0]["is_active"] is False
+        # #207 §3.1: `archived` is the inverted serialized field (True = in
+        # archive). `is_active` itself never serializes (Field exclude=True).
+        assert body["items"][0]["archived"] is True
         # Eager-loaded relationships still present on archived rows
         assert "tariffs" in body["items"][0]
         assert "tags" in body["items"][0]
@@ -408,7 +431,7 @@ class TestServiceListStatusFilter:
         """?status=all returns every row regardless of is_active."""
         active = create_service()
         archived = create_service()
-        api_client.delete(f"/api/v1/services/{archived['id']}")
+        _archive_service(archived["id"])
 
         resp = api_client.get("/api/v1/services?status=all")
         assert resp.status_code == 200, f"list failed: {resp.text}"
@@ -424,7 +447,7 @@ class TestServiceListStatusFilter:
         """?status=active behaves the same as the default (no query param)."""
         active = create_service()
         archived = create_service()
-        api_client.delete(f"/api/v1/services/{archived['id']}")
+        _archive_service(archived["id"])
 
         explicit = api_client.get("/api/v1/services?status=active").json()
         default = api_client.get("/api/v1/services").json()

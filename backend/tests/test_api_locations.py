@@ -19,6 +19,22 @@ LOCATION_PAYLOAD = {
 }
 
 
+def _archive_location(location_id: str) -> None:
+    """Archive a location row directly in the DB (sets is_active=0).
+
+    Mirrors the ``_archive_material`` helper (test_api_materials.py) and
+    ``_archive_service`` (test_api_services.py): ``DELETE /locations/{id}`` is
+    now HARD (#207 — leaves no row to list under ``?status=archived``).
+    Status-filter tests touch the ``is_active`` column directly via
+    ``query_db`` (the same write the ``POST /{id}/archive`` endpoint performs
+    via ``ArchiveService.archive`` → ``repo.patch({is_active: False})`` in
+    Task 11 — kept direct here to avoid coupling the filter test to the
+    archive endpoint, which has its own coverage in
+    ``TestArchiveRestoreEndpoints``).
+    """
+    query_db(f"UPDATE locations SET is_active=0 WHERE id='{location_id}'")
+
+
 class TestLocationsCrud:
     """Create-edge-case extras for /api/locations (CRUD covered by contract)."""
 
@@ -46,10 +62,14 @@ class TestLocationListStatusFilter:
     def test_list_status_archived_returns_only_archived(
         self, api_client, create_location
     ) -> None:
-        """?status=archived hides active locations, surfaces soft-deleted ones."""
+        """?status=archived hides active locations, surfaces archived ones.
+
+        #207 Task 13 Part B expanded: archival is via ``_archive_location``
+        (DELETE is now hard — leaves no row to list under ``?status=archived``).
+        """
         active = create_location()
         archived = create_location()
-        api_client.delete(f"/api/v1/locations/{archived['id']}")
+        _archive_location(archived["id"])
 
         resp = api_client.get("/api/v1/locations?status=archived")
         assert resp.status_code == 200, f"list failed: {resp.text}"
@@ -59,7 +79,9 @@ class TestLocationListStatusFilter:
         ids = [loc["id"] for loc in body["items"]]
         assert archived["id"] in ids
         assert active["id"] not in ids
-        assert body["items"][0]["is_active"] is False
+        # #207 §3.1: `archived` is the inverted serialized field (True = in
+        # archive); `is_active` itself never serializes (Field exclude=True).
+        assert body["items"][0]["archived"] is True
 
     def test_list_status_all_returns_both_active_and_archived(
         self, api_client, create_location
@@ -67,7 +89,7 @@ class TestLocationListStatusFilter:
         """?status=all returns every location regardless of is_active."""
         active = create_location()
         archived = create_location()
-        api_client.delete(f"/api/v1/locations/{archived['id']}")
+        _archive_location(archived["id"])
 
         resp = api_client.get("/api/v1/locations?status=all")
         assert resp.status_code == 200, f"list failed: {resp.text}"
@@ -83,7 +105,7 @@ class TestLocationListStatusFilter:
         """?status=active behaves the same as the default (no query param)."""
         active = create_location()
         archived = create_location()
-        api_client.delete(f"/api/v1/locations/{archived['id']}")
+        _archive_location(archived["id"])
 
         explicit = api_client.get("/api/v1/locations?status=active").json()
         default = api_client.get("/api/v1/locations").json()

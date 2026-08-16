@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { z } from 'zod';
-import { getMasters, getMaster, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, deleteActivity, getWebPhotos, getRecords, getClients, getPayments, getPaymentTotals, createRecord, updateRecord, deleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, searchClientByPhone, updateVisitStatus, getTags, createService, updateService, deleteService, createLocation, updateLocation, deleteLocation, getClientsWithStats, updateClient, patchClient, reorderMasters, reorderLocations, patchMaster, patchLocation, patchMaterial, patchService, patchUserSettings, getMaterials, getTag, getVisitors } from './endpoints';
+import { getMasters, getMaster, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, deleteActivity, getWebPhotos, getRecords, getClients, getPayments, getPaymentTotals, createRecord, updateRecord, deleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, searchClientByPhone, updateVisitStatus, getTags, createService, updateService, deleteService, createLocation, updateLocation, deleteLocation, getClientsWithStats, updateClient, patchClient, reorderMasters, reorderLocations, patchMaster, patchLocation, patchMaterial, patchService, patchUserSettings, getMaterials, getTag, getVisitors, deleteMaster, deleteMaterial, deleteClient, archiveMaster, restoreMaster, resolveDeleteMaster, archiveLocation, restoreLocation, resolveDeleteLocation, archiveService, restoreService, resolveDeleteService, archiveMaterial, restoreMaterial, resolveDeleteMaterial, archiveClient, restoreClient, resolveDeleteClient } from './endpoints';
 import { ServiceCreateSchema, LocationCreateSchema, type ServiceUpdate, type LocationUpdate, type ClientUpdate } from './schemas';
 
 // Mock the api function from client
@@ -865,6 +865,205 @@ describe('getVisitors', () => {
     vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 100 });
     await getVisitors({ per_page: 100 });
     expect(api).toHaveBeenCalledWith('/api/v1/visitors?per_page=100', expect.anything());
+  });
+});
+
+// ─── Deletes — masters / materials / clients (GH #207) ──────────────────────
+
+describe('deleteMaster', () => {
+  it('calls DELETE /api/v1/masters/:id with no body (dry-run / instant path)', async () => {
+    vi.mocked(api).mockResolvedValue(undefined);
+    await deleteMaster('m-1');
+    expect(api).toHaveBeenCalledWith('/api/v1/masters/m-1', expect.anything(), {
+      method: 'DELETE',
+    });
+  });
+});
+
+describe('deleteMaterial', () => {
+  it('calls DELETE /api/v1/materials/:id with no body (dry-run / instant path)', async () => {
+    vi.mocked(api).mockResolvedValue(undefined);
+    await deleteMaterial('mat-1');
+    expect(api).toHaveBeenCalledWith('/api/v1/materials/mat-1', expect.anything(), {
+      method: 'DELETE',
+    });
+  });
+});
+
+describe('deleteClient', () => {
+  it('calls DELETE /api/v1/clients/:id with no body (dry-run / instant path)', async () => {
+    vi.mocked(api).mockResolvedValue(undefined);
+    await deleteClient('c-1');
+    expect(api).toHaveBeenCalledWith('/api/v1/clients/c-1', expect.anything(), {
+      method: 'DELETE',
+    });
+  });
+});
+
+// ─── Archive / restore / resolveDelete (GH #207) ────────────────────────────
+
+describe('archiveMaster', () => {
+  it('calls POST /api/v1/masters/:id/archive and returns the parsed entity', async () => {
+    vi.mocked(api).mockResolvedValue({ id: 'm-1', archived: true });
+    const result = await archiveMaster('m-1');
+    expect(api).toHaveBeenCalledWith('/api/v1/masters/m-1/archive', expect.anything(), {
+      method: 'POST',
+    });
+    expect(result).toEqual({ id: 'm-1', archived: true });
+  });
+});
+
+describe('restoreMaster', () => {
+  it('calls POST /api/v1/masters/:id/restore and returns the parsed entity', async () => {
+    vi.mocked(api).mockResolvedValue({ id: 'm-1', archived: false });
+    const result = await restoreMaster('m-1');
+    expect(api).toHaveBeenCalledWith('/api/v1/masters/m-1/restore', expect.anything(), {
+      method: 'POST',
+    });
+    expect(result).toEqual({ id: 'm-1', archived: false });
+  });
+});
+
+describe('resolveDeleteMaster', () => {
+  it('calls DELETE /api/v1/masters/:id with resolutions body (execute path)', async () => {
+    vi.mocked(api).mockResolvedValue(undefined);
+    await resolveDeleteMaster('m-1', {});
+    expect(api).toHaveBeenCalledWith('/api/v1/masters/m-1', expect.anything(), {
+      method: 'DELETE',
+      body: JSON.stringify({ resolutions: {} }),
+    });
+  });
+});
+
+describe('archiveLocation', () => {
+  it('calls POST /api/v1/locations/:id/archive and returns the parsed entity', async () => {
+    vi.mocked(api).mockResolvedValue({ id: 'l-1', archived: true });
+    const result = await archiveLocation('l-1');
+    expect(api).toHaveBeenCalledWith('/api/v1/locations/l-1/archive', expect.anything(), {
+      method: 'POST',
+    });
+    expect(result).toEqual({ id: 'l-1', archived: true });
+  });
+});
+
+describe('restoreLocation', () => {
+  it('calls POST /api/v1/locations/:id/restore and returns the parsed entity', async () => {
+    vi.mocked(api).mockResolvedValue({ id: 'l-1', archived: false });
+    const result = await restoreLocation('l-1');
+    expect(api).toHaveBeenCalledWith('/api/v1/locations/l-1/restore', expect.anything(), {
+      method: 'POST',
+    });
+    expect(result).toEqual({ id: 'l-1', archived: false });
+  });
+});
+
+describe('resolveDeleteLocation', () => {
+  it('calls DELETE /api/v1/locations/:id with resolutions body (execute path)', async () => {
+    vi.mocked(api).mockResolvedValue(undefined);
+    await resolveDeleteLocation('l-1', {});
+    expect(api).toHaveBeenCalledWith('/api/v1/locations/l-1', expect.anything(), {
+      method: 'DELETE',
+      body: JSON.stringify({ resolutions: {} }),
+    });
+  });
+});
+
+describe('archiveService', () => {
+  it('calls POST /api/v1/services/:id/archive and returns the parsed entity', async () => {
+    vi.mocked(api).mockResolvedValue({ id: 's-1', archived: true });
+    const result = await archiveService('s-1');
+    expect(api).toHaveBeenCalledWith('/api/v1/services/s-1/archive', expect.anything(), {
+      method: 'POST',
+    });
+    expect(result).toEqual({ id: 's-1', archived: true });
+  });
+});
+
+describe('restoreService', () => {
+  it('calls POST /api/v1/services/:id/restore and returns the parsed entity', async () => {
+    vi.mocked(api).mockResolvedValue({ id: 's-1', archived: false });
+    const result = await restoreService('s-1');
+    expect(api).toHaveBeenCalledWith('/api/v1/services/s-1/restore', expect.anything(), {
+      method: 'POST',
+    });
+    expect(result).toEqual({ id: 's-1', archived: false });
+  });
+});
+
+describe('resolveDeleteService', () => {
+  it('calls DELETE /api/v1/services/:id with resolutions body (execute path)', async () => {
+    vi.mocked(api).mockResolvedValue(undefined);
+    await resolveDeleteService('s-1', {});
+    expect(api).toHaveBeenCalledWith('/api/v1/services/s-1', expect.anything(), {
+      method: 'DELETE',
+      body: JSON.stringify({ resolutions: {} }),
+    });
+  });
+});
+
+describe('archiveMaterial', () => {
+  it('calls POST /api/v1/materials/:id/archive and returns the parsed entity', async () => {
+    vi.mocked(api).mockResolvedValue({ id: 'mat-1', archived: true });
+    const result = await archiveMaterial('mat-1');
+    expect(api).toHaveBeenCalledWith('/api/v1/materials/mat-1/archive', expect.anything(), {
+      method: 'POST',
+    });
+    expect(result).toEqual({ id: 'mat-1', archived: true });
+  });
+});
+
+describe('restoreMaterial', () => {
+  it('calls POST /api/v1/materials/:id/restore and returns the parsed entity', async () => {
+    vi.mocked(api).mockResolvedValue({ id: 'mat-1', archived: false });
+    const result = await restoreMaterial('mat-1');
+    expect(api).toHaveBeenCalledWith('/api/v1/materials/mat-1/restore', expect.anything(), {
+      method: 'POST',
+    });
+    expect(result).toEqual({ id: 'mat-1', archived: false });
+  });
+});
+
+describe('resolveDeleteMaterial', () => {
+  it('calls DELETE /api/v1/materials/:id with resolutions body (execute path)', async () => {
+    vi.mocked(api).mockResolvedValue(undefined);
+    await resolveDeleteMaterial('mat-1', {});
+    expect(api).toHaveBeenCalledWith('/api/v1/materials/mat-1', expect.anything(), {
+      method: 'DELETE',
+      body: JSON.stringify({ resolutions: {} }),
+    });
+  });
+});
+
+describe('archiveClient', () => {
+  it('calls POST /api/v1/clients/:id/archive and returns the parsed entity', async () => {
+    vi.mocked(api).mockResolvedValue({ id: 'c-1', archived: true });
+    const result = await archiveClient('c-1');
+    expect(api).toHaveBeenCalledWith('/api/v1/clients/c-1/archive', expect.anything(), {
+      method: 'POST',
+    });
+    expect(result).toEqual({ id: 'c-1', archived: true });
+  });
+});
+
+describe('restoreClient', () => {
+  it('calls POST /api/v1/clients/:id/restore and returns the parsed entity', async () => {
+    vi.mocked(api).mockResolvedValue({ id: 'c-1', archived: false });
+    const result = await restoreClient('c-1');
+    expect(api).toHaveBeenCalledWith('/api/v1/clients/c-1/restore', expect.anything(), {
+      method: 'POST',
+    });
+    expect(result).toEqual({ id: 'c-1', archived: false });
+  });
+});
+
+describe('resolveDeleteClient', () => {
+  it('calls DELETE /api/v1/clients/:id with resolutions body (execute path, NOT POST)', async () => {
+    vi.mocked(api).mockResolvedValue(undefined);
+    await resolveDeleteClient('c-1', { records: 'nullify', visitors: 'cascade' });
+    expect(api).toHaveBeenCalledWith('/api/v1/clients/c-1', expect.anything(), {
+      method: 'DELETE',
+      body: JSON.stringify({ resolutions: { records: 'nullify', visitors: 'cascade' } }),
+    });
   });
 });
 

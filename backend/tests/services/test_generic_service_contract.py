@@ -24,6 +24,7 @@ from tests.generic_contract import (
     GENERIC_CONTRACT_EXCEPTIONS,
     EntityConfig,
     _all_subclasses,
+    _archive_params,
     _contract_params,
     _soft_params,
 )
@@ -1004,4 +1005,100 @@ class TestGenericServiceIsActiveContract:
         resp = await service.list(db_session)
         assert created.id in [i.id for i in resp.items], (
             f"{service_cls.__name__}: reactivated row visible in list again"
+        )
+
+
+# ─── Contract-test: archive/restore bool service contract (#207 Task 12) ───────
+# Spec: docs/specs/2026-08-15-delete-hard-delete-and-dependency-resolution-design.md
+#   * §10 (#184/#185 reconciliation) — ``delete = hard`` + add archive/restore
+#     contract.
+#   * §3.4 — ``ArchiveService.archive``/``restore`` are the bool service
+#     contract: flip ``is_active`` False/True (atomic per call, ``@transactional``).
+#     The HTTP route re-fetches the row and builds the ``archived``-carrying
+#     response body (archived = not is_active, §3.1) — Task 13 pins that
+#     mapping at the API route level.
+#   * §14 — `#184/#185 GenericService contract tests updated: delete = hard,
+#     archive/restore contract added`.
+# Parameterized over the 5 archive-capable entities (concrete ``ArchiveService``
+# subclasses with an ``is_active`` column): Master/Location/Service/Material/
+# Client — via ``_archive_params``. MasterService overrides archive/restore to
+# additionally cascade the linked ``users.is_active`` (spec §4.2, Change 3);
+# this contract only locks the master row's ``is_active`` flip — the user
+# cascade has its own dedicated tests at the API route level (test_api_masters).
+class TestArchiveServiceArchiveRestore:
+    @pytest.mark.parametrize("service_cls,cfg", _archive_params())
+    async def test_archive_flips_is_active_false(
+        self, service_cls, cfg, db_session, make_entity
+    ):
+        """archive() returns True and flips the DB is_active column to False
+        (row survives — archive is NOT delete, spec §16 last bullet)."""
+        assert cfg is not None, MISSING_MSG
+        service, created = await make_entity(cfg)
+        # Capture the id as a plain str BEFORE archive() / expire_all() —
+        # ServiceService.create returns an ORM row (not a Pydantic response
+        # like the other 4), and after expire_all() attribute access on the
+        # expired ORM would trigger a sync refresh → MissingGreenlet against
+        # the async aiosqlite driver.
+        entity_id = created.id
+
+        ok = await service.archive(db_session, entity_id)
+        assert ok is True, (
+            f"{service_cls.__name__}.archive() returned {ok!r}, expected True"
+        )
+
+        # Drop the identity-map cache so the assertion SELECT hits the DB
+        # fresh (the @transactional archive() commits on its own connection;
+        # the test session's identity map otherwise sees the stale pre-archive
+        # state).
+        db_session.expire_all()
+        row = (
+            await db_session.execute(
+                select(cfg.model).where(cfg.model.id == entity_id)
+            )
+        ).scalar_one_or_none()
+        assert row is not None, (
+            f"{service_cls.__name__}: row vanished after archive — archive is "
+            f"NOT delete (spec §16: 'archive is a reversible state, not a delete')"
+        )
+        assert row.is_active is False, (
+            f"{service_cls.__name__}: DB is_active={row.is_active!r} after "
+            f"archive(), expected False"
+        )
+
+    @pytest.mark.parametrize("service_cls,cfg", _archive_params())
+    async def test_restore_flips_is_active_true(
+        self, service_cls, cfg, db_session, make_entity
+    ):
+        """restore() returns True and reverts an archived row: DB is_active
+        flips back to True (round-trip)."""
+        assert cfg is not None, MISSING_MSG
+        service, created = await make_entity(cfg)
+        entity_id = created.id  # see test_archive_flips_is_active_false: captured
+        # before archive/restore calls because ServiceService.create returns an
+        # ORM row whose attribute access after expire_all triggers MissingGreenlet.
+
+        # Setup: archive first (the round-trip is archive → restore).
+        archive_ok = await service.archive(db_session, entity_id)
+        assert archive_ok is True, (
+            f"{service_cls.__name__}: setup archive() returned {archive_ok!r}"
+        )
+
+        restore_ok = await service.restore(db_session, entity_id)
+        assert restore_ok is True, (
+            f"{service_cls.__name__}.restore() returned {restore_ok!r}, "
+            f"expected True"
+        )
+
+        db_session.expire_all()
+        row = (
+            await db_session.execute(
+                select(cfg.model).where(cfg.model.id == entity_id)
+            )
+        ).scalar_one_or_none()
+        assert row is not None, (
+            f"{service_cls.__name__}: row vanished after restore"
+        )
+        assert row.is_active is True, (
+            f"{service_cls.__name__}: DB is_active={row.is_active!r} after "
+            f"restore(), expected True"
         )

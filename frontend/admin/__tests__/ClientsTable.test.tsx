@@ -1,8 +1,37 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import React from 'react';
 import type { ClientsContextType } from '../contexts/ClientsContext';
-import type { ClientWithStats } from '@memo/api-client';
+import type { ClientWithStats, DependencyNode } from '@memo/api-client';
+import { ApiError } from '@memo/api-client';
+
+// ─── Dependency tree fixtures (mirror backend src/domain/deletion.py) ─────
+
+// Client with choice deps (records nullify, visitors cascade) + auto tags →
+// Mode A; resolutions = { records:'nullify', visitors:'cascade' }.
+const DEPS_CHOICE: DependencyNode[] = [
+  { entity: 'records', relation: 'Запись', count: 47, allowed_actions: ['nullify'], message: null },
+  {
+    entity: 'visitors',
+    relation: 'Посетитель',
+    count: 12,
+    allowed_actions: ['cascade'],
+    message: null,
+    cascade_preview: { visits: 45 },
+  },
+  { entity: 'client_tags', relation: 'Тег', count: 5, allowed_actions: ['cascade'], message: null },
+];
+
+// Client with activities → delete blocked → Mode B (archive only).
+const DEPS_BLOCKED: DependencyNode[] = [
+  {
+    entity: 'activities',
+    relation: 'Активность',
+    count: 2,
+    allowed_actions: [],
+    message: 'Удалите активности вручную или архивируйте',
+  },
+];
 
 // ─── Mock data ──────────────────────────────────────────────────────────────
 
@@ -233,18 +262,117 @@ describe('ClientsTable', () => {
     expect(mockContextValue.resetFilters).toHaveBeenCalledTimes(1);
   });
 
-  it('delete button calls deleteClient after confirmation', () => {
-    const deleteClient = vi.fn();
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
+  it('clicking "Удалить" calls deleteClient (dry-run); 409 opens the DeleteDialog', async () => {
+    const deleteClient = vi.fn().mockRejectedValue(
+      new ApiError(409, 'Удаление невозможно', 'CONFLICT', DEPS_CHOICE),
+    );
+    mockContextValue = { ...mockContextValue, deleteClient, dependencies: DEPS_CHOICE };
+    render(<ClientsTable onClientClick={vi.fn()} />);
+
+    // Open the row-1 actions dropdown and click "Удалить"
+    fireEvent.click(screen.getAllByLabelText('Действия')[0]);
+    fireEvent.click(screen.getByText('Удалить'));
+
+    await waitFor(() => expect(deleteClient).toHaveBeenCalledWith('c1'));
+    // window.confirm is gone — the dialog takes over (§7.3 fetch flow)
+    await waitFor(() => expect(screen.getByTestId('delete-dialog')).toBeInTheDocument());
+    expect(screen.getByTestId('delete-dialog-title').textContent).toContain('Анна Иванова');
+  });
+
+  it('Mode A confirm sends resolveDeleteClient with the picked resolutions', async () => {
+    const deleteClient = vi.fn().mockRejectedValue(
+      new ApiError(409, 'Удаление невозможно', 'CONFLICT', DEPS_CHOICE),
+    );
+    const resolveDeleteClient = vi.fn().mockResolvedValue(undefined);
+    mockContextValue = {
+      ...mockContextValue,
+      deleteClient,
+      resolveDeleteClient,
+      dependencies: DEPS_CHOICE,
+    };
+    render(<ClientsTable onClientClick={vi.fn()} />);
+
+    fireEvent.click(screen.getAllByLabelText('Действия')[0]);
+    fireEvent.click(screen.getByText('Удалить'));
+
+    await waitFor(() => expect(screen.getByTestId('delete-dialog-confirm-input')).toBeInTheDocument());
+    // Pick the choice deps (nullify records, cascade visitors) + type-to-confirm
+    fireEvent.click(screen.getByText(/Записи: 47/));
+    fireEvent.click(screen.getByText(/Посетители: 12/));
+    fireEvent.change(screen.getByTestId('delete-dialog-confirm-input'), {
+      target: { value: 'Анна Иванова' },
+    });
+    fireEvent.click(screen.getByTestId('delete-dialog-confirm-btn'));
+
+    await waitFor(() =>
+      expect(resolveDeleteClient).toHaveBeenCalledWith('c1', {
+        records: 'nullify',
+        visitors: 'cascade',
+      }),
+    );
+    await waitFor(() => expect(screen.queryByTestId('delete-dialog')).not.toBeInTheDocument());
+  });
+
+  it('Mode B (activities present) offers "Архивировать" via archiveClient', async () => {
+    const deleteClient = vi.fn().mockRejectedValue(
+      new ApiError(409, 'Удаление невозможно', 'CONFLICT', DEPS_BLOCKED),
+    );
+    const archiveClient = vi.fn().mockResolvedValue({ ...mockClientsWithStats[0], archived: true });
+    mockContextValue = {
+      ...mockContextValue,
+      deleteClient,
+      archiveClient,
+      dependencies: DEPS_BLOCKED,
+    };
+    render(<ClientsTable onClientClick={vi.fn()} />);
+
+    fireEvent.click(screen.getAllByLabelText('Действия')[0]);
+    fireEvent.click(screen.getByText('Удалить'));
+
+    await waitFor(() => expect(screen.getByTestId('delete-dialog-archive-btn')).toBeInTheDocument());
+    expect(screen.queryByTestId('delete-dialog-confirm-btn')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('delete-dialog-archive-btn'));
+
+    await waitFor(() => expect(archiveClient).toHaveBeenCalledWith('c1'));
+    await waitFor(() => expect(screen.queryByTestId('delete-dialog')).not.toBeInTheDocument());
+  });
+
+  it('204 dry-run success → instant delete, no dialog opens', async () => {
+    const deleteClient = vi.fn().mockResolvedValue(undefined);
     mockContextValue = { ...mockContextValue, deleteClient };
     render(<ClientsTable onClientClick={vi.fn()} />);
-    // Find the delete button (has the trash icon SVG inside)
-    const deleteButtons = document.querySelectorAll('button');
-    const deleteBtn = Array.from(deleteButtons).find(btn => btn.querySelector('svg'));
-    expect(deleteBtn).toBeTruthy();
-    fireEvent.click(deleteBtn!);
-    expect(deleteClient).toHaveBeenCalledWith('c1');
-    vi.mocked(window.confirm).mockRestore();
+
+    fireEvent.click(screen.getAllByLabelText('Действия')[0]);
+    fireEvent.click(screen.getByText('Удалить'));
+
+    await waitFor(() => expect(deleteClient).toHaveBeenCalledWith('c1'));
+    expect(screen.queryByTestId('delete-dialog')).not.toBeInTheDocument();
+  });
+
+  it('calls archiveClient when "В архив" clicked on an active client (#198 parity)', async () => {
+    const archiveClient = vi.fn().mockResolvedValue({ ...mockClientsWithStats[0], archived: true });
+    mockContextValue = { ...mockContextValue, archiveClient };
+    render(<ClientsTable onClientClick={vi.fn()} />);
+
+    fireEvent.click(screen.getAllByLabelText('Действия')[0]);
+    fireEvent.click(screen.getByText('В архив'));
+
+    await waitFor(() => expect(archiveClient).toHaveBeenCalledWith('c1'));
+  });
+
+  it('calls restoreClient when "Восстановить" clicked on an archived client (#198 parity)', async () => {
+    const restoreClient = vi.fn().mockResolvedValue({ ...mockClientsWithStats[0], archived: false });
+    mockContextValue = {
+      ...mockContextValue,
+      clients: [{ ...mockClientsWithStats[0], archived: true }],
+      restoreClient,
+    };
+    render(<ClientsTable onClientClick={vi.fn()} />);
+
+    fireEvent.click(screen.getAllByLabelText('Действия')[0]);
+    fireEvent.click(screen.getByText('Восстановить'));
+
+    await waitFor(() => expect(restoreClient).toHaveBeenCalledWith('c1'));
   });
 
   it('calls setSort when a sortable column header is clicked', () => {

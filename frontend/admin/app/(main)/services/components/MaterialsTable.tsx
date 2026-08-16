@@ -1,13 +1,15 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { useQuery, keepPreviousData } from '@tanstack/react-query';
+import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { getMaterials } from '@memo/api-client';
-import type { MaterialResponse, MaterialUpdate } from '@memo/api-client';
-import { useUpdateMaterial, usePatchMaterial, useCreateMaterial, useDeleteMaterial } from '@/hooks/useMaterialsMutations';
+import type { MaterialResponse, MaterialUpdate, DependencyNode } from '@memo/api-client';
+import { resolveDeleteMaterial, ApiError } from '@memo/api-client';
+import { useUpdateMaterial, useCreateMaterial, useDeleteMaterial, useArchiveMaterial, useRestoreMaterial } from '@/hooks/useMaterialsMutations';
 import { useUI } from '@/contexts/UIContext';
 import { MaterialModal } from './MaterialModal';
 import { ColumnPicker } from './ColumnPicker';
+import { DeleteDialog } from '@/app/components/DeleteDialog';
 import { parseApiError } from '@/app/lib/api/parseApiError';
 
 // ─── Column definitions ─────────────────────────────────────────────────
@@ -44,21 +46,21 @@ const ALL_COLUMNS: ColumnDef[] = [
     sortValue: (m) => m.description,
   },
   {
-    key: 'is_active',
+    key: 'archived',
     label: 'Статус',
     defaultVisible: true,
     render: (m) => (
       <span
         className="inline-flex px-2 py-0.5 rounded-full text-xs font-medium"
         style={{
-          backgroundColor: m.is_active ? 'var(--success-bg, #dcfce7)' : 'var(--surface)',
-          color: m.is_active ? 'var(--success, #16a34a)' : 'var(--ink-light)',
+          backgroundColor: !m.archived ? 'var(--success-bg, #dcfce7)' : 'var(--surface)',
+          color: !m.archived ? 'var(--success, #16a34a)' : 'var(--ink-light)',
         }}
       >
-        {m.is_active ? 'Активен' : 'Архив'}
+        {m.archived ? 'Архив' : 'Активен'}
       </span>
     ),
-    sortValue: (m) => (m.is_active ? 0 : 1),
+    sortValue: (m) => (m.archived ? 1 : 0),
   },
   {
     key: 'created_at',
@@ -104,9 +106,11 @@ export function MaterialsTable() {
   });
 
   const updateMaterial = useUpdateMaterial();
-  const patchMaterial = usePatchMaterial();
   const createMaterial = useCreateMaterial();
   const deleteMaterial = useDeleteMaterial();
+  const archiveMaterial = useArchiveMaterial();
+  const restoreMaterial = useRestoreMaterial();
+  const queryClient = useQueryClient();
   const { showToast } = useUI();
 
   // Sort state
@@ -135,6 +139,12 @@ export function MaterialsTable() {
 
   // Action dropdown
   const [actionMenuId, setActionMenuId] = useState<string | null>(null);
+
+  // ─── Delete dialog state (§7.3: parent owns dry-run + open/close) ────
+  const [deleteTarget, setDeleteTarget] = useState<{
+    material: MaterialResponse;
+    dependencies: DependencyNode[];
+  } | null>(null);
 
   const visibleColumns = useMemo(
     () => ALL_COLUMNS.filter((c) => visibleKeys.includes(c.key)),
@@ -217,10 +227,11 @@ export function MaterialsTable() {
   const handleEditSubmit = async (data: Record<string, unknown>) => {
     if (!editingMaterial) return;
     // Canonical PUT (GH #178): full typed MaterialUpdate — every field listed.
+    // #207: the Update schema carries no archive flag — archive/restore goes
+    // through POST /materials/{id}/archive|restore, so PUT never flips it.
     const payload: MaterialUpdate = {
       title: data.title as string,
       description: (data.description as string | null | undefined) ?? '',
-      is_active: editingMaterial.is_active,
     };
     try {
       await updateMaterial.mutateAsync({ id: editingMaterial.id, data: payload });
@@ -230,17 +241,16 @@ export function MaterialsTable() {
     }
   };
 
-  const handleArchive = async (material: MaterialResponse) => {
+  const handleArchiveToggle = async (material: MaterialResponse) => {
     setActionMenuId(null);
     try {
-      await patchMaterial.mutateAsync({
-        id: material.id,
-        data: { is_active: !material.is_active },
-      });
-      showToast(
-        material.is_active ? 'Материал в архиве' : 'Материал восстановлен',
-        undefined,
-      );
+      if (material.archived) {
+        await restoreMaterial.mutateAsync(material.id);
+        showToast('Материал восстановлен', undefined);
+      } else {
+        await archiveMaterial.mutateAsync(material.id);
+        showToast('Материал в архиве', undefined);
+      }
     } catch (err) {
       showToast(parseApiError(err).message, 'error');
     }
@@ -259,14 +269,21 @@ export function MaterialsTable() {
     }
   };
 
+  // #207 §7.3 dry-run flow: Material has ZERO FK deps (§4), so the no-body
+  // DELETE normally returns 204 (instant delete). The 409 branch is
+  // defensive but keeps the uniform DeleteDialog wiring.
   const handleDelete = async (material: MaterialResponse) => {
     setActionMenuId(null);
-    if (!window.confirm('Удалить материал?')) return;
     try {
       await deleteMaterial.mutateAsync(material.id);
+      // 204 — already deleted (zero deps): refresh handled by the hook.
       showToast('Материал удалён', undefined);
     } catch (err) {
-      showToast(parseApiError(err).message, 'error');
+      if (err instanceof ApiError && err.status === 409 && err.dependencies) {
+        setDeleteTarget({ material, dependencies: err.dependencies });
+      } else {
+        showToast(parseApiError(err).message, 'error');
+      }
     }
   };
 
@@ -423,12 +440,12 @@ export function MaterialsTable() {
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          handleArchive(material);
+                          handleArchiveToggle(material);
                         }}
                         className="w-full text-left px-4 py-2 text-sm transition-colors hover:opacity-80"
                         style={{ color: 'var(--ink)' }}
                       >
-                        {material.is_active ? 'В архив' : 'Восстановить'}
+                        {material.archived ? 'Восстановить' : 'В архив'}
                       </button>
                       <button
                         onClick={(e) => {
@@ -548,6 +565,24 @@ export function MaterialsTable() {
           onSubmit={handleCreateSubmit}
           onClose={() => setCreatingMaterial(false)}
           title="Новый материал"
+        />
+      )}
+
+      {/* Delete dialog — §7.3: opened on dry-run 409 (defensive), closed on done/cancel */}
+      {deleteTarget && (
+        <DeleteDialog
+          entityName={deleteTarget.material.title}
+          entityType="material"
+          entityId={deleteTarget.material.id}
+          dependencies={deleteTarget.dependencies}
+          onResolve={async (id, resolutions) => {
+            await resolveDeleteMaterial(id, resolutions);
+            queryClient.invalidateQueries({ queryKey: ['materials'] });
+            showToast('Материал удалён', undefined);
+          }}
+          onArchive={(id) => archiveMaterial.mutateAsync(id)}
+          onDone={() => setDeleteTarget(null)}
+          onCancel={() => setDeleteTarget(null)}
         />
       )}
     </>

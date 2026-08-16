@@ -1,14 +1,16 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { useQuery, keepPreviousData } from '@tanstack/react-query';
+import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { getServices } from '@memo/api-client';
-import type { ServiceResponse, ServiceUpdate } from '@memo/api-client';
-import { useUpdateService, usePatchService, useCreateService, useDeleteService } from '@/hooks/useServicesMutations';
+import type { ServiceResponse, ServiceUpdate, DependencyNode } from '@memo/api-client';
+import { resolveDeleteService, ApiError } from '@memo/api-client';
+import { useUpdateService, useCreateService, useDeleteService, useArchiveService, useRestoreService } from '@/hooks/useServicesMutations';
 import { useUI } from '@/contexts/UIContext';
 import { ServiceModal } from './ServiceModal';
 import { ServiceFilters } from './ServiceFilters';
 import { ColumnPicker } from './ColumnPicker';
+import { DeleteDialog } from '@/app/components/DeleteDialog';
 import { ErrorState } from '@/app/components/error';
 import { parseApiError } from '@/app/lib/api/parseApiError';
 
@@ -120,21 +122,21 @@ const ALL_COLUMNS: ColumnDef[] = [
     ),
   },
   {
-    key: 'is_active',
+    key: 'archived',
     label: 'Статус',
     defaultVisible: false,
     render: (s) => (
       <span
         className="inline-flex px-2 py-0.5 rounded-full text-xs font-medium"
         style={{
-          backgroundColor: s.is_active ? 'var(--success-bg, #dcfce7)' : 'var(--surface)',
-          color: s.is_active ? 'var(--success, #16a34a)' : 'var(--ink-light)',
+          backgroundColor: !s.archived ? 'var(--success-bg, #dcfce7)' : 'var(--surface)',
+          color: !s.archived ? 'var(--success, #16a34a)' : 'var(--ink-light)',
         }}
       >
-        {s.is_active ? 'Активна' : 'Архив'}
+        {s.archived ? 'Архив' : 'Активна'}
       </span>
     ),
-    sortValue: (s) => (s.is_active ? 0 : 1),
+    sortValue: (s) => (s.archived ? 1 : 0),
   },
   {
     key: 'created_at',
@@ -180,9 +182,11 @@ export function ServicesTable() {
   });
 
   const updateService = useUpdateService();
-  const patchService = usePatchService();
   const createService = useCreateService();
   const deleteService = useDeleteService();
+  const archiveService = useArchiveService();
+  const restoreService = useRestoreService();
+  const queryClient = useQueryClient();
   const { showToast } = useUI();
 
   // Sort state
@@ -213,6 +217,12 @@ export function ServicesTable() {
 
   // Action dropdown
   const [actionMenuId, setActionMenuId] = useState<string | null>(null);
+
+  // ─── Delete dialog state (§7.3: parent owns dry-run + open/close) ────
+  const [deleteTarget, setDeleteTarget] = useState<{
+    service: ServiceResponse;
+    dependencies: DependencyNode[];
+  } | null>(null);
 
   const visibleColumns = useMemo(
     () => ALL_COLUMNS.filter((c) => visibleKeys.includes(c.key)),
@@ -295,6 +305,8 @@ export function ServicesTable() {
   const handleEditSubmit = async (data: Record<string, unknown>) => {
     if (!editingService) return;
     // Canonical PUT (GH #178): full typed ServiceUpdate — every field listed.
+    // #207: the Update schema carries no archive flag — archive/restore goes
+    // through POST /services/{id}/archive|restore, so PUT never flips it.
     const payload: ServiceUpdate = {
       title: data.title as string,
       description: (data.description as string | null | undefined) ?? '',
@@ -307,7 +319,6 @@ export function ServicesTable() {
       material_hint: (data.material_hint as string | null | undefined) ?? '',
       tariffs: (data.tariffs as ServiceUpdate['tariffs'] | undefined) ?? [],
       tag_ids: (data.tag_ids as string[] | undefined) ?? [],
-      is_active: editingService.is_active,
     };
     try {
       await updateService.mutateAsync({ id: editingService.id, data: payload });
@@ -317,19 +328,16 @@ export function ServicesTable() {
     }
   };
 
-  const handleArchive = async (service: ServiceResponse) => {
+  const handleArchiveToggle = async (service: ServiceResponse) => {
     setActionMenuId(null);
     try {
-      // Archive/restore uses PATCH partial update (GH #178): only is_active
-      // changes, so other fields stay untouched (sticky semantics).
-      await patchService.mutateAsync({
-        id: service.id,
-        data: { is_active: !service.is_active },
-      });
-      showToast(
-        service.is_active ? 'Услуга в архиве' : 'Услуга восстановлена',
-        undefined,
-      );
+      if (service.archived) {
+        await restoreService.mutateAsync(service.id);
+        showToast('Услуга восстановлена', undefined);
+      } else {
+        await archiveService.mutateAsync(service.id);
+        showToast('Услуга в архиве', undefined);
+      }
     } catch (err) {
       showToast(parseApiError(err).message, 'error');
     }
@@ -348,14 +356,21 @@ export function ServicesTable() {
     }
   };
 
+  // #207 §7.3 dry-run flow: no-body DELETE → 204 (instant delete, no deps)
+  // or 409 + dependency tree → DeleteDialog (Mode A/B). The parent owns the
+  // call + open/close state; the dialog receives the parsed tree.
   const handleDelete = async (service: ServiceResponse) => {
     setActionMenuId(null);
-    if (!window.confirm('Удалить услугу?')) return;
     try {
       await deleteService.mutateAsync(service.id);
+      // 204 — already deleted (zero deps): refresh handled by the hook.
       showToast('Услуга удалена', undefined);
     } catch (err) {
-      showToast(parseApiError(err).message, 'error');
+      if (err instanceof ApiError && err.status === 409 && err.dependencies) {
+        setDeleteTarget({ service, dependencies: err.dependencies });
+      } else {
+        showToast(parseApiError(err).message, 'error');
+      }
     }
   };
 
@@ -475,12 +490,12 @@ export function ServicesTable() {
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          handleArchive(service);
+                          handleArchiveToggle(service);
                         }}
                         className="w-full text-left px-4 py-2 text-sm transition-colors hover:opacity-80"
                         style={{ color: 'var(--ink)' }}
                       >
-                        {service.is_active ? 'В архив' : 'Восстановить'}
+                        {service.archived ? 'Восстановить' : 'В архив'}
                       </button>
                       <button
                         onClick={(e) => {
@@ -600,6 +615,27 @@ export function ServicesTable() {
           onSubmit={handleCreateSubmit}
           onClose={() => setCreatingService(false)}
           title="Новая услуга"
+        />
+      )}
+
+      {/* Delete dialog — §7.3: opened on dry-run 409, closed on done/cancel */}
+      {deleteTarget && (
+        <DeleteDialog
+          entityName={deleteTarget.service.title}
+          entityType="service"
+          entityId={deleteTarget.service.id}
+          dependencies={deleteTarget.dependencies}
+          onResolve={async (id, resolutions) => {
+            await resolveDeleteService(id, resolutions);
+            // The resolve call bypasses the hook's onSuccess, so refresh
+            // here — incl. cross-key ['records'] (useRecordData consumers).
+            queryClient.invalidateQueries({ queryKey: ['services'] });
+            queryClient.invalidateQueries({ queryKey: ['records'] });
+            showToast('Услуга удалена', undefined);
+          }}
+          onArchive={(id) => archiveService.mutateAsync(id)}
+          onDone={() => setDeleteTarget(null)}
+          onCancel={() => setDeleteTarget(null)}
         />
       )}
     </>

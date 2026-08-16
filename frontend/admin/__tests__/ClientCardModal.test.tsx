@@ -2,7 +2,15 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, within, waitFor } from '@testing-library/react';
 import React from 'react';
 import { ClientCardModal } from '../app/(main)/clients/components/ClientCardModal';
-import type { ClientWithStats } from '@memo/api-client';
+import type { ClientWithStats, DependencyNode } from '@memo/api-client';
+import { ApiError } from '@memo/api-client';
+
+// ─── Dependency tree fixtures (mirror backend src/domain/deletion.py) ─────
+
+const DEPS_CHOICE: DependencyNode[] = [
+  { entity: 'records', relation: 'Запись', count: 2, allowed_actions: ['nullify'], message: null },
+  { entity: 'client_tags', relation: 'Тег', count: 1, allowed_actions: ['cascade'], message: null },
+];
 
 // ─── Mock child components ────────────────────────────────────────────────
 
@@ -296,17 +304,78 @@ describe('ClientCardModal', () => {
     expect(updateClient).toHaveBeenCalledWith('c1', { name: 'updated', phone: null, email: null, channel: null });
   });
 
-  it('ClientInfoTab onDelete wraps deleteClient with confirm', async () => {
+  it('ClientInfoTab onDelete triggers the DeleteDialog flow (no window.confirm)', async () => {
+    const deleteClient = vi.fn().mockRejectedValue(
+      new ApiError(409, 'Удаление невозможно', 'CONFLICT', DEPS_CHOICE),
+    );
+    const onClose = vi.fn();
+    mockUseClients.mockReturnValue(
+      createMockClientsContext({ deleteClient, dependencies: DEPS_CHOICE }),
+    );
+    render(<ClientCardModal {...defaultProps} onClose={onClose} />);
+    fireEvent.click(screen.getByTestId('info-delete'));
+
+    await waitFor(() => expect(deleteClient).toHaveBeenCalledWith('c1'));
+    // 409 + dependencies → DeleteDialog opens
+    await waitFor(() => expect(screen.getByTestId('delete-dialog')).toBeInTheDocument());
+    expect(screen.getByTestId('delete-dialog-title').textContent).toContain('Анна Иванова');
+  });
+
+  it('footer "Удалить" with 204 dry-run success closes the modal immediately', async () => {
     const deleteClient = vi.fn().mockResolvedValue(undefined);
     const onClose = vi.fn();
     mockUseClients.mockReturnValue(createMockClientsContext({ deleteClient }));
     render(<ClientCardModal {...defaultProps} onClose={onClose} />);
-    fireEvent.click(screen.getByTestId('info-delete'));
-    // jsdom's window.confirm returns false by default, so deleteClient should not be called
-    await vi.waitFor(() => {
-      expect(deleteClient).not.toHaveBeenCalled();
-    });
-    expect(onClose).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText('Удалить'));
+
+    await waitFor(() => expect(deleteClient).toHaveBeenCalledWith('c1'));
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(screen.queryByTestId('delete-dialog')).not.toBeInTheDocument();
+  });
+
+  it('Mode B "Архивировать" calls archiveClient and closes the modal', async () => {
+    const blocked: DependencyNode[] = [
+      { entity: 'activities', relation: 'Активность', count: 1, allowed_actions: [], message: null },
+    ];
+    const deleteClient = vi.fn().mockRejectedValue(
+      new ApiError(409, 'Удаление невозможно', 'CONFLICT', blocked),
+    );
+    const archiveClient = vi.fn().mockResolvedValue({ ...mockClientWithStats, archived: true });
+    const onClose = vi.fn();
+    mockUseClients.mockReturnValue(
+      createMockClientsContext({ deleteClient, archiveClient, dependencies: blocked }),
+    );
+    render(<ClientCardModal {...defaultProps} onClose={onClose} />);
+    fireEvent.click(screen.getByText('Удалить'));
+
+    await waitFor(() => expect(screen.getByTestId('delete-dialog-archive-btn')).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId('delete-dialog-archive-btn'));
+
+    await waitFor(() => expect(archiveClient).toHaveBeenCalledWith('c1'));
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+  });
+
+  it('shows "В архив" button for an active client and "Восстановить" for an archived one (#198)', async () => {
+    const archiveClient = vi.fn().mockResolvedValue({ ...mockClientWithStats, archived: true });
+    const restoreClient = vi.fn().mockResolvedValue({ ...mockClientWithStats, archived: false });
+    const onClose = vi.fn();
+
+    mockUseClients.mockReturnValue(
+      createMockClientsContext({ archiveClient, restoreClient }),
+    );
+    const { unmount } = render(<ClientCardModal {...defaultProps} onClose={onClose} />);
+    fireEvent.click(screen.getByText('В архив'));
+    await waitFor(() => expect(archiveClient).toHaveBeenCalledWith('c1'));
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    unmount();
+
+    const archivedClient = { ...mockClientWithStats, archived: true };
+    mockUseClients.mockReturnValue(
+      createMockClientsContext({ archiveClient, restoreClient }),
+    );
+    render(<ClientCardModal {...defaultProps} client={archivedClient} onClose={onClose} />);
+    fireEvent.click(screen.getByText('Восстановить'));
+    await waitFor(() => expect(restoreClient).toHaveBeenCalledWith('c1'));
   });
 
   // ─── Tab switching edge cases ───────────────────────────────────────────

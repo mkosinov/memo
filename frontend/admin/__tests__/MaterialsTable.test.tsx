@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import type { MaterialResponse } from '@memo/api-client';
+import type { MaterialResponse, DependencyNode } from '@memo/api-client';
+import { ApiError } from '@memo/api-client';
 
 // ─── Mock data (minimal — only what filter → queryFn tests need) ────────────
 
@@ -29,12 +30,21 @@ const TEST_MATERIALS: MaterialResponse[] = [
 
 // ─── Mocks ──────────────────────────────────────────────────────────────────
 
-// Shared mutateAsync so tests can assert on update calls. Because the mock
-// factory below is hoisted above this const by vitest, the factory is only
-// invoked when `@/hooks/useMaterialsMutations` is imported — by which point
-// the module-level const has been initialized. (Same pattern as
-// ServicesTable.test.tsx.)
-const mockMutateAsync = vi.fn().mockResolvedValue({});
+// Per-hook spies so tests can assert which mutation the table calls
+// (#207: delete ≠ patch(is_active) — archive/restore are dedicated hooks).
+// Shared consts (like ServicesTable.test.tsx) read by the hoisted factory at
+// render time.
+const mockCreateMutateAsync = vi.fn().mockResolvedValue({});
+const mockUpdateMutateAsync = vi.fn().mockResolvedValue({});
+const mockPatchMutateAsync = vi.fn().mockResolvedValue({});
+const mockDeleteMutateAsync = vi.fn().mockResolvedValue({});
+const mockArchiveMutateAsync = vi.fn().mockResolvedValue({});
+const mockRestoreMutateAsync = vi.fn().mockResolvedValue({});
+// The hook's `dependencies` (409 dry-run tree) — mutable per test.
+let mockDeleteDependencies: DependencyNode[] | null = null;
+
+// Shared so tests can assert invalidation (#207: ['materials'] on dialog done).
+const mockInvalidateQueries = vi.fn().mockResolvedValue(undefined);
 
 vi.mock('@tanstack/react-query', () => ({
   useQuery: vi.fn(),
@@ -43,7 +53,7 @@ vi.mock('@tanstack/react-query', () => ({
   // resolves. The mocked `useQuery` ignores `placeholderData` anyway.
   keepPreviousData: Symbol('keepPreviousData'),
   useQueryClient: vi.fn(() => ({
-    invalidateQueries: vi.fn(),
+    invalidateQueries: mockInvalidateQueries,
   })),
   useMutation: vi.fn(() => ({
     mutateAsync: vi.fn().mockResolvedValue({}),
@@ -54,14 +64,20 @@ vi.mock('@tanstack/react-query', () => ({
 // Spy on getMaterials (preserve other api-client exports via importOriginal)
 vi.mock('@memo/api-client', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@memo/api-client')>();
-  return { ...actual, getMaterials: vi.fn() };
+  return { ...actual, getMaterials: vi.fn(), resolveDeleteMaterial: vi.fn() };
 });
 
 vi.mock('@/hooks/useMaterialsMutations', () => ({
-  useUpdateMaterial: () => ({ mutateAsync: mockMutateAsync, isPending: false }),
-  usePatchMaterial: () => ({ mutateAsync: mockMutateAsync, isPending: false }),
-  useCreateMaterial: () => ({ mutateAsync: mockMutateAsync, isPending: false }),
-  useDeleteMaterial: () => ({ mutateAsync: mockMutateAsync, isPending: false }),
+  useUpdateMaterial: () => ({ mutateAsync: mockUpdateMutateAsync, isPending: false }),
+  usePatchMaterial: () => ({ mutateAsync: mockPatchMutateAsync, isPending: false }),
+  useCreateMaterial: () => ({ mutateAsync: mockCreateMutateAsync, isPending: false }),
+  useDeleteMaterial: () => ({
+    mutateAsync: mockDeleteMutateAsync,
+    dependencies: mockDeleteDependencies,
+    isPending: false,
+  }),
+  useArchiveMaterial: () => ({ mutateAsync: mockArchiveMutateAsync, isPending: false }),
+  useRestoreMaterial: () => ({ mutateAsync: mockRestoreMutateAsync, isPending: false }),
 }));
 
 vi.mock('@/contexts/UIContext', () => ({
@@ -73,10 +89,11 @@ vi.mock('@/contexts/UIContext', () => ({
 }));
 
 import { useQuery } from '@tanstack/react-query';
-import { getMaterials } from '@memo/api-client';
+import { getMaterials, resolveDeleteMaterial } from '@memo/api-client';
 
 const mockUseQuery = vi.mocked(useQuery);
 const mockGetMaterials = vi.mocked(getMaterials);
+const mockResolveDeleteMaterial = vi.mocked(resolveDeleteMaterial);
 
 import { MaterialsTable } from '@/app/(main)/services/components/MaterialsTable';
 
@@ -193,10 +210,78 @@ describe('MaterialsTable', () => {
     // #207 inverted the schema: Update bodies carry no archive flag at all
     // (archive/restore goes through POST endpoints), so editing an archived
     // material can no longer resurrect it. The payload must carry no flag.
-    // (Until Task 19 rewires the table, the key survives as undefined.)
-    await waitFor(() => expect(mockMutateAsync).toHaveBeenCalled());
-    const [arg] = mockMutateAsync.mock.calls[0];
+    await waitFor(() => expect(mockUpdateMutateAsync).toHaveBeenCalled());
+    const [arg] = mockUpdateMutateAsync.mock.calls[0];
     expect(arg.id).toBe(mockMaterialArchived.id);
     expect(arg.data.is_active).toBeUndefined();
+  });
+
+  // ─── Delete → instant 204 (Material has zero FK deps, §4 matrix) ───────
+
+  it('calls delete dry-run when "Удалить" clicked (204 → instant delete, no dialog)', async () => {
+    mockDeleteMutateAsync.mockResolvedValue(undefined);
+    mockDeleteDependencies = null;
+    setupQuery(TEST_MATERIALS);
+    render(<MaterialsTable />);
+
+    fireEvent.click(screen.getAllByLabelText('Действия')[0]);
+    fireEvent.click(screen.getByText('Удалить'));
+
+    await waitFor(() => expect(mockDeleteMutateAsync).toHaveBeenCalledWith('mat-1'));
+    expect(screen.queryByTestId('delete-dialog')).not.toBeInTheDocument();
+  });
+
+  // ─── Delete → DeleteDialog flow (#207 §7) — defensive 409 branch ────────
+
+  /** Dry-run rejects with a 409 carrying the given tree; hook exposes it. */
+  function setupDeleteConflict(deps: DependencyNode[]) {
+    mockDeleteDependencies = deps;
+    mockDeleteMutateAsync.mockRejectedValue(
+      new ApiError(409, 'Удаление невозможно', 'CONFLICT', deps),
+    );
+  }
+
+  it('opens DeleteDialog when a 409 conflict occurs (defensive)', async () => {
+    setupDeleteConflict([
+      { entity: 'service_materials', relation: 'Услуга', count: 1, allowed_actions: ['nullify'], message: null },
+    ]);
+    setupQuery(TEST_MATERIALS);
+    render(<MaterialsTable />);
+
+    fireEvent.click(screen.getAllByLabelText('Действия')[0]);
+    fireEvent.click(screen.getByText('Удалить'));
+
+    await waitFor(() => expect(screen.getByTestId('delete-dialog')).toBeInTheDocument());
+  });
+
+  // ─── Archive / Restore (#207 §7.2, replaces patchX({is_active})) ────────
+
+  it('calls archiveMaterial when "В архив" clicked on an active material', async () => {
+    mockArchiveMutateAsync.mockResolvedValue({});
+    setupQuery(TEST_MATERIALS);
+    render(<MaterialsTable />);
+
+    fireEvent.click(screen.getAllByLabelText('Действия')[0]);
+    fireEvent.click(screen.getByText('В архив'));
+
+    await waitFor(() => expect(mockArchiveMutateAsync).toHaveBeenCalledWith('mat-1'));
+    expect(mockPatchMutateAsync).not.toHaveBeenCalled();
+  });
+
+  it('calls restoreMaterial when "Восстановить" clicked on an archived material', async () => {
+    // Switch to "all" so the archived mockMaterialArchived ("Старые кисти",
+    // id=mat-2) is rendered.
+    setupQuery(TEST_MATERIALS);
+    render(<MaterialsTable />);
+    fireEvent.change(screen.getByLabelText('Фильтр по статусу'), {
+      target: { value: 'all' },
+    });
+
+    mockRestoreMutateAsync.mockResolvedValue({});
+    fireEvent.click(screen.getAllByLabelText('Действия')[1]); // mat-2 row
+    fireEvent.click(screen.getByText('Восстановить'));
+
+    await waitFor(() => expect(mockRestoreMutateAsync).toHaveBeenCalledWith('mat-2'));
+    expect(mockPatchMutateAsync).not.toHaveBeenCalled();
   });
 });

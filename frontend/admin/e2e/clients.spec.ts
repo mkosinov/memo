@@ -238,14 +238,16 @@ test.describe('Clients page', () => {
       const modal = page.locator('[data-testid="client-card-modal"]');
       await expect(modal).toBeVisible({ timeout: 5000 });
 
-      // Click "Удалить" — accept confirm dialog, soft-deletes and closes modal
+      // Click "Удалить" — #207: no-body DELETE dry-run; the freshly created
+      // client has zero deps → 204 instant hard delete, modal closes.
+      // (No confirm dialog anymore; the listener is a defensive no-op.)
       page.on('dialog', (dialog) => dialog.accept());
       await page.locator('button:has-text("Удалить")').click();
 
       // Modal should close
       await expect(modal).not.toBeVisible({ timeout: 5000 });
 
-      // Reload page — soft-deleted client (is_active=false) won't appear
+      // Reload page — hard-deleted client is gone from the list
       await page.reload({ waitUntil: 'networkidle' });
       await waitForClientsReady(page);
 

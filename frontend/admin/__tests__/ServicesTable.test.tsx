@@ -1,6 +1,26 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, within, waitFor } from '@testing-library/react';
-import type { ServiceResponse } from '@memo/api-client';
+import type { ServiceResponse, DependencyNode } from '@memo/api-client';
+
+// ─── Dependency tree fixtures (mirror backend src/domain/deletion.py) ─────
+
+// Service with activities → delete blocked → Mode B (archive only).
+const DEPS_BLOCKED: DependencyNode[] = [
+  {
+    entity: 'activities',
+    relation: 'Активность',
+    count: 3,
+    allowed_actions: [],
+    message: 'Удалите активности вручную или архивируйте',
+  },
+  { entity: 'service_tags', relation: 'Тег', count: 2, allowed_actions: ['cascade'], message: null },
+];
+
+// Service with only auto deps (tariffs + tags) → Mode A, resolutions body {}.
+const DEPS_AUTO: DependencyNode[] = [
+  { entity: 'tariffs', relation: 'Тариф', count: 3, allowed_actions: ['cascade'], message: null },
+  { entity: 'service_tags', relation: 'Тег', count: 2, allowed_actions: ['cascade'], message: null },
+];
 
 // ─── Mock data ──────────────────────────────────────────────────────────────
 
@@ -71,8 +91,21 @@ const TEST_SERVICES: ServiceResponse[] = [
 
 // ─── Mocks ──────────────────────────────────────────────────────────────────
 
-const mockMutateAsync = vi.fn().mockResolvedValue({});
+// Per-hook spies so tests can assert which mutation the table calls
+// (#207: delete ≠ patch(is_active) — archive/restore are dedicated hooks).
+const mockCreateMutateAsync = vi.fn().mockResolvedValue({});
+const mockUpdateMutateAsync = vi.fn().mockResolvedValue({});
+const mockPatchMutateAsync = vi.fn().mockResolvedValue({});
+const mockDeleteMutateAsync = vi.fn().mockResolvedValue({});
+const mockArchiveMutateAsync = vi.fn().mockResolvedValue({});
+const mockRestoreMutateAsync = vi.fn().mockResolvedValue({});
+// The hook's `dependencies` (409 dry-run tree) — mutable per test; read by the
+// factory arrow at render time.
+let mockDeleteDependencies: DependencyNode[] | null = null;
 const mockShowToast = vi.fn();
+
+// Shared so tests can assert invalidation (#207: ['services'] on dialog done).
+const mockInvalidateQueries = vi.fn().mockResolvedValue(undefined);
 
 vi.mock('@tanstack/react-query', () => ({
   useQuery: vi.fn(),
@@ -81,25 +114,31 @@ vi.mock('@tanstack/react-query', () => ({
   // resolves. The mocked `useQuery` ignores `placeholderData` anyway.
   keepPreviousData: Symbol('keepPreviousData'),
   useMutation: vi.fn(() => ({
-    mutateAsync: mockMutateAsync,
+    mutateAsync: vi.fn().mockResolvedValue({}),
     isPending: false,
   })),
   useQueryClient: vi.fn(() => ({
-    invalidateQueries: vi.fn(),
+    invalidateQueries: mockInvalidateQueries,
   })),
 }));
 
 // Spy on getServices (preserve other api-client exports via importOriginal)
 vi.mock('@memo/api-client', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@memo/api-client')>();
-  return { ...actual, getServices: vi.fn() };
+  return { ...actual, getServices: vi.fn(), resolveDeleteService: vi.fn() };
 });
 
 vi.mock('@/hooks/useServicesMutations', () => ({
-  useCreateService: () => ({ mutateAsync: mockMutateAsync, isPending: false }),
-  useUpdateService: () => ({ mutateAsync: mockMutateAsync, isPending: false }),
-  usePatchService: () => ({ mutateAsync: mockMutateAsync, isPending: false }),
-  useDeleteService: () => ({ mutateAsync: mockMutateAsync, isPending: false }),
+  useCreateService: () => ({ mutateAsync: mockCreateMutateAsync, isPending: false }),
+  useUpdateService: () => ({ mutateAsync: mockUpdateMutateAsync, isPending: false }),
+  usePatchService: () => ({ mutateAsync: mockPatchMutateAsync, isPending: false }),
+  useDeleteService: () => ({
+    mutateAsync: mockDeleteMutateAsync,
+    dependencies: mockDeleteDependencies,
+    isPending: false,
+  }),
+  useArchiveService: () => ({ mutateAsync: mockArchiveMutateAsync, isPending: false }),
+  useRestoreService: () => ({ mutateAsync: mockRestoreMutateAsync, isPending: false }),
 }));
 
 vi.mock('@/contexts/UIContext', () => ({
@@ -111,10 +150,11 @@ vi.mock('@/contexts/UIContext', () => ({
 }));
 
 import { useQuery } from '@tanstack/react-query';
-import { getServices } from '@memo/api-client';
+import { getServices, resolveDeleteService, ApiError } from '@memo/api-client';
 
 const mockUseQuery = vi.mocked(useQuery);
 const mockGetServices = vi.mocked(getServices);
+const mockResolveDeleteService = vi.mocked(resolveDeleteService);
 
 import { ServicesTable } from '../app/(main)/services/components/ServicesTable';
 
@@ -341,26 +381,117 @@ describe('ServicesTable', () => {
     expect(screen.getByText('Удалить')).toBeTruthy();
   });
 
-  it('calls deleteService when "Удалить" clicked and confirmed', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
+  it('calls deleteService dry-run when "Удалить" clicked (204 → no dialog)', async () => {
+    mockDeleteMutateAsync.mockResolvedValue(undefined);
+    mockDeleteDependencies = null;
     render(<ServicesTable />);
-    // Open action menu
     const actionButtons = screen.getAllByLabelText('Действия');
     fireEvent.click(actionButtons[0]);
-    // Click delete
     fireEvent.click(screen.getByText('Удалить'));
-    expect(window.confirm).toHaveBeenCalledWith('Удалить услугу?');
-    expect(mockMutateAsync).toHaveBeenCalled();
+    await waitFor(() => expect(mockDeleteMutateAsync).toHaveBeenCalledWith('svc-1'));
+    expect(screen.queryByTestId('delete-dialog')).not.toBeInTheDocument();
   });
 
-  it('does not call deleteService when confirmation cancelled', () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(false);
+  // ─── Delete → DeleteDialog flow (#207 §7) ──────────────────────────────
+
+  /** Dry-run rejects with a 409 carrying the given tree; hook exposes it. */
+  function setupDeleteConflict(deps: DependencyNode[]) {
+    mockDeleteDependencies = deps;
+    mockDeleteMutateAsync.mockRejectedValue(
+      new ApiError(409, 'Удаление невозможно', 'CONFLICT', deps),
+    );
+  }
+
+  it('opens DeleteDialog in Mode B when delete conflicts with activities', async () => {
+    setupDeleteConflict(DEPS_BLOCKED);
     render(<ServicesTable />);
-    const actionButtons = screen.getAllByLabelText('Действия');
-    fireEvent.click(actionButtons[0]);
+
+    fireEvent.click(screen.getAllByLabelText('Действия')[0]);
     fireEvent.click(screen.getByText('Удалить'));
-    expect(window.confirm).toHaveBeenCalledWith('Удалить услугу?');
-    expect(mockMutateAsync).not.toHaveBeenCalled();
+
+    await waitFor(() => expect(screen.getByTestId('delete-dialog')).toBeInTheDocument());
+    expect(screen.getByTestId('delete-dialog-block-message').textContent).toContain('3 активности');
+    expect(screen.queryByTestId('delete-dialog-confirm-btn')).not.toBeInTheDocument();
+    expect(screen.getByTestId('delete-dialog-archive-btn')).toBeInTheDocument();
+  });
+
+  it('Mode B "Архивировать" calls archiveService and closes the dialog', async () => {
+    setupDeleteConflict(DEPS_BLOCKED);
+    mockArchiveMutateAsync.mockResolvedValue({});
+    render(<ServicesTable />);
+
+    fireEvent.click(screen.getAllByLabelText('Действия')[0]);
+    fireEvent.click(screen.getByText('Удалить'));
+
+    await waitFor(() => expect(screen.getByTestId('delete-dialog-archive-btn')).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId('delete-dialog-archive-btn'));
+
+    await waitFor(() => expect(mockArchiveMutateAsync).toHaveBeenCalledWith('svc-1'));
+    await waitFor(() => expect(screen.queryByTestId('delete-dialog')).not.toBeInTheDocument());
+  });
+
+  it('Mode A confirm calls resolveDeleteService with {} (all deps auto) and closes', async () => {
+    setupDeleteConflict(DEPS_AUTO);
+    mockResolveDeleteService.mockResolvedValue(undefined);
+    render(<ServicesTable />);
+
+    fireEvent.click(screen.getAllByLabelText('Действия')[0]);
+    fireEvent.click(screen.getByText('Удалить'));
+
+    await waitFor(() => expect(screen.getByTestId('delete-dialog-confirm-input')).toBeInTheDocument());
+    fireEvent.change(screen.getByTestId('delete-dialog-confirm-input'), {
+      target: { value: 'Картина маслом' },
+    });
+    fireEvent.click(screen.getByTestId('delete-dialog-confirm-btn'));
+
+    await waitFor(() => expect(mockResolveDeleteService).toHaveBeenCalledWith('svc-1', {}));
+    await waitFor(() =>
+      expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['services'] }),
+    );
+    await waitFor(() => expect(screen.queryByTestId('delete-dialog')).not.toBeInTheDocument());
+  });
+
+  it('cancel closes the dialog without executing a delete', async () => {
+    setupDeleteConflict(DEPS_BLOCKED);
+    render(<ServicesTable />);
+
+    fireEvent.click(screen.getAllByLabelText('Действия')[0]);
+    fireEvent.click(screen.getByText('Удалить'));
+
+    await waitFor(() => expect(screen.getByTestId('delete-dialog-cancel-btn')).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId('delete-dialog-cancel-btn'));
+
+    expect(screen.queryByTestId('delete-dialog')).not.toBeInTheDocument();
+    expect(mockDeleteMutateAsync).toHaveBeenCalledTimes(1);
+  });
+
+  // ─── Archive / Restore (#207 §7.2, replaces patchX({is_active})) ────────
+
+  it('calls archiveService when "В архив" clicked on an active service', async () => {
+    mockArchiveMutateAsync.mockResolvedValue({});
+    render(<ServicesTable />);
+
+    fireEvent.click(screen.getAllByLabelText('Действия')[0]);
+    fireEvent.click(screen.getByText('В архив'));
+
+    await waitFor(() => expect(mockArchiveMutateAsync).toHaveBeenCalledWith('svc-1'));
+    expect(mockPatchMutateAsync).not.toHaveBeenCalled();
+  });
+
+  it('calls restoreService when "Восстановить" clicked on an archived service', async () => {
+    // Switch to "all" so the archived mockService3 ("Ручная лепка", id=svc-3) renders.
+    setupQuery(TEST_SERVICES);
+    render(<ServicesTable />);
+    fireEvent.change(screen.getByLabelText(/Фильтр по статусу/), {
+      target: { value: 'all' },
+    });
+
+    mockRestoreMutateAsync.mockResolvedValue({});
+    fireEvent.click(screen.getAllByLabelText('Действия')[2]); // svc-3 row
+    fireEvent.click(screen.getByText('Восстановить'));
+
+    await waitFor(() => expect(mockRestoreMutateAsync).toHaveBeenCalledWith('svc-3'));
+    expect(mockPatchMutateAsync).not.toHaveBeenCalled();
   });
 
   // ─── Edit does not resurrect archived services (GH #195 via #207) ────────
@@ -382,11 +513,9 @@ describe('ServicesTable', () => {
     // #207 inverted the schema: Update bodies carry no archive flag at all
     // (archive/restore goes through POST endpoints), so editing an archived
     // service can no longer resurrect it. The payload must carry no flag.
-    // (Until Task 19 rewires the table, the key survives as undefined.)
-    await waitFor(() => expect(mockMutateAsync).toHaveBeenCalled());
-    // The mockMutateAsync is shared across all service mutations, so find
-    // the call shaped like an update ({id, data}).
-    const updateCall = mockMutateAsync.mock.calls.find(
+    await waitFor(() => expect(mockUpdateMutateAsync).toHaveBeenCalled());
+    // Find the call shaped like an update ({id, data}) for the archived row.
+    const updateCall = mockUpdateMutateAsync.mock.calls.find(
       ([arg]) =>
         typeof arg === 'object' &&
         arg !== null &&

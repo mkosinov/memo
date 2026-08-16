@@ -283,7 +283,7 @@ describe('ClientCardModal ↔ ClientInfoTab integration (real components)', () =
     expect(saveBtn).toBeEnabled();
   });
 
-  it('delete button calls context deleteClient after confirm', async () => {
+  it('delete button calls context deleteClient (dry-run; 204 closes the modal)', async () => {
     const { ClientCardModal } = await import('@/app/(main)/clients/components/ClientCardModal');
     const onClose = vi.fn();
     render(
@@ -294,14 +294,18 @@ describe('ClientCardModal ↔ ClientInfoTab integration (real components)', () =
 
     const deleteBtn = screen.getByRole('button', { name: /Удалить/i });
 
-    // jsdom's window.confirm returns false by default (not implemented)
-    // so deleteClient should NOT be called without explicit confirm mock
+    // #207: window.confirm is gone — clicking runs the no-body DELETE
+    // dry-run; a 204 means the client is already deleted → modal closes.
     fireEvent.click(deleteBtn);
 
     await waitFor(() => {
-      expect(mockDeleteClient).not.toHaveBeenCalled();
+      expect(mockDeleteClient).toHaveBeenCalledWith('c1');
     });
-    expect(onClose).not.toHaveBeenCalled();
+    await waitFor(() => {
+      expect(onClose).toHaveBeenCalled();
+    });
+    // No dialog for the zero-deps case
+    expect(screen.queryByTestId('delete-dialog')).not.toBeInTheDocument();
   });
 
   it('save button sends correct data to context updateClient', async () => {

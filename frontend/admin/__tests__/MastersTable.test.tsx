@@ -5,8 +5,32 @@ import {
   mockMasterResponseArchived,
   createMockMasterResponse,
 } from './helpers/mockData';
+import type { DependencyNode } from '@memo/api-client';
+
+// ─── Dependency tree fixtures (mirror backend src/domain/deletion.py) ─────
+
+// Master with activities → delete blocked → Mode B (archive only).
+const DEPS_BLOCKED: DependencyNode[] = [
+  {
+    entity: 'activities',
+    relation: 'Активность',
+    count: 3,
+    allowed_actions: [],
+    message: 'Удалите активности вручную или архивируйте',
+  },
+  { entity: 'master_tags', relation: 'Тег', count: 2, allowed_actions: ['cascade'], message: null },
+];
+
+// Master with only auto deps (users + tags) → Mode A, resolutions body {}.
+const DEPS_AUTO: DependencyNode[] = [
+  { entity: 'users', relation: 'Пользователь', count: 1, allowed_actions: ['cascade'], message: null },
+  { entity: 'master_tags', relation: 'Тег', count: 2, allowed_actions: ['cascade'], message: null },
+];
 
 // ─── Mock @tanstack/react-query ──────────────────────────────────────────
+
+// Shared so tests can assert cross-invalidation (#207: ['masters'] + ['records']).
+const mockInvalidateQueries = vi.fn().mockResolvedValue(undefined);
 
 vi.mock('@tanstack/react-query', () => ({
   useQuery: vi.fn(),
@@ -15,7 +39,7 @@ vi.mock('@tanstack/react-query', () => ({
   // resolves. The mocked `useQuery` ignores `placeholderData` anyway.
   keepPreviousData: Symbol('keepPreviousData'),
   useQueryClient: vi.fn(() => ({
-    invalidateQueries: vi.fn(),
+    invalidateQueries: mockInvalidateQueries,
   })),
   useMutation: vi.fn(() => ({
     mutate: vi.fn(),
@@ -28,7 +52,7 @@ vi.mock('@tanstack/react-query', () => ({
 
 vi.mock('@memo/api-client', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@memo/api-client')>();
-  return { ...actual, getMasters: vi.fn() };
+  return { ...actual, getMasters: vi.fn(), resolveDeleteMaster: vi.fn() };
 });
 
 import { useQuery } from '@tanstack/react-query';
@@ -47,9 +71,18 @@ vi.mock('@/hooks/useMastersMutations', () => ({
   })),
   useDeleteMaster: vi.fn(() => ({
     mutateAsync: vi.fn().mockResolvedValue({}),
+    dependencies: null,
     isPending: false,
   })),
   useCreateMaster: vi.fn(() => ({
+    mutateAsync: vi.fn().mockResolvedValue({}),
+    isPending: false,
+  })),
+  useArchiveMaster: vi.fn(() => ({
+    mutateAsync: vi.fn().mockResolvedValue({}),
+    isPending: false,
+  })),
+  useRestoreMaster: vi.fn(() => ({
     mutateAsync: vi.fn().mockResolvedValue({}),
     isPending: false,
   })),
@@ -68,14 +101,24 @@ vi.mock('@/contexts/UIContext', () => ({
 // ─── Import after mocks ──────────────────────────────────────────────────
 
 import { MastersTable } from '@/app/(main)/masters/components/MastersTable';
-import { useUpdateMaster, useDeleteMaster } from '@/hooks/useMastersMutations';
+import {
+  useUpdateMaster,
+  usePatchMaster,
+  useDeleteMaster,
+  useArchiveMaster,
+  useRestoreMaster,
+} from '@/hooks/useMastersMutations';
 import { useUI } from '@/contexts/UIContext';
-import { getMasters } from '@memo/api-client';
+import { getMasters, resolveDeleteMaster, ApiError } from '@memo/api-client';
 
 const mockUseUpdateMaster = vi.mocked(useUpdateMaster);
+const mockUsePatchMaster = vi.mocked(usePatchMaster);
 const mockUseDeleteMaster = vi.mocked(useDeleteMaster);
+const mockUseArchiveMaster = vi.mocked(useArchiveMaster);
+const mockUseRestoreMaster = vi.mocked(useRestoreMaster);
 const mockUseUI = vi.mocked(useUI);
 const mockGetMasters = vi.mocked(getMasters);
+const mockResolveDeleteMaster = vi.mocked(resolveDeleteMaster);
 
 // ─── Test data ───────────────────────────────────────────────────────────
 
@@ -168,26 +211,9 @@ function setupUpdateMock() {
   return mutateAsync;
 }
 
-function setupDeleteMock() {
-  const mutateAsync = vi.fn().mockResolvedValue({});
-  mockUseDeleteMaster.mockReturnValue({
-    mutateAsync,
-    mutate: vi.fn(),
-    isPending: false,
-    isSuccess: false,
-    isError: false,
-    isIdle: true,
-    data: undefined,
-    error: null,
-    status: 'idle',
-    reset: vi.fn(),
-    failureCount: 0,
-    failureReason: null,
-    variables: undefined,
-    context: undefined,
-    submittedAt: 0,
-  } as unknown as ReturnType<typeof useDeleteMaster>);
-  return mutateAsync;
+/** A 409 ApiError carrying the dependency tree — what deleteMaster rejects with on conflict. */
+function conflictError(dependencies: DependencyNode[]): ApiError {
+  return new ApiError(409, 'Удаление невозможно', 'CONFLICT', dependencies);
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────
@@ -355,27 +381,34 @@ describe('MastersTable', () => {
     expect(screen.getByText('Удалить')).toBeInTheDocument();
   });
 
-  it('calls deleteMaster when "Удалить" clicked and confirmed', async () => {
-    const deleteMutateAsync = vi.fn().mockResolvedValue({});
+  // ─── Delete → DeleteDialog flow (#207 §7) ──────────────────────────────
+
+  /** Delete hook whose dry-run dry-rejects with a 409 carrying the given tree. */
+  function setupDeleteConflict(deps: DependencyNode[]) {
+    const mutateAsync = vi.fn().mockRejectedValue(conflictError(deps));
     mockUseDeleteMaster.mockReturnValue({
-      mutateAsync: deleteMutateAsync,
+      mutateAsync,
+      dependencies: deps,
       mutate: vi.fn(),
       isPending: false,
       isSuccess: false,
       isError: false,
       isIdle: true,
       data: undefined,
-      error: null,
-      status: 'idle',
+      error: conflictError(deps),
+      status: 'error',
       reset: vi.fn(),
-      failureCount: 0,
-      failureReason: null,
+      failureCount: 1,
+      failureReason: conflictError(deps),
       variables: undefined,
       context: undefined,
       submittedAt: 0,
     } as unknown as ReturnType<typeof useDeleteMaster>);
+    return mutateAsync;
+  }
 
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
+  it('opens DeleteDialog with the 409 dependency tree when delete conflicts', async () => {
+    const deleteMutateAsync = setupDeleteConflict(DEPS_BLOCKED);
     setupQuery(TEST_MASTERS);
     render(<MastersTable />);
 
@@ -383,15 +416,75 @@ describe('MastersTable', () => {
     fireEvent.click(actionButtons[0]);
     fireEvent.click(screen.getByText('Удалить'));
 
-    expect(window.confirm).toHaveBeenCalledWith('Удалить мастера?');
-    expect(deleteMutateAsync).toHaveBeenCalled();
-    vi.restoreAllMocks();
+    expect(deleteMutateAsync).toHaveBeenCalledWith('m1');
+    // window.confirm is gone — the dialog takes over (§7.3 fetch flow)
+    await waitFor(() => expect(screen.getByTestId('delete-dialog')).toBeInTheDocument());
+    expect(screen.getByTestId('delete-dialog-title').textContent).toContain('Середа Ольга');
   });
 
-  it('does not call deleteMaster when confirmation cancelled', () => {
-    const deleteMutateAsync = vi.fn();
+  it('Mode B (blocked by activities) shows "Архивировать" instead of "Удалить"', async () => {
+    setupDeleteConflict(DEPS_BLOCKED);
+    setupQuery(TEST_MASTERS);
+    render(<MastersTable />);
+
+    fireEvent.click(screen.getAllByLabelText('Действия')[0]);
+    fireEvent.click(screen.getByText('Удалить'));
+
+    await waitFor(() => expect(screen.getByTestId('delete-dialog-block-message')).toBeInTheDocument());
+    expect(screen.getByTestId('delete-dialog-block-message').textContent).toContain('3 активности');
+    expect(screen.queryByTestId('delete-dialog-confirm-btn')).not.toBeInTheDocument();
+    expect(screen.getByTestId('delete-dialog-archive-btn')).toBeInTheDocument();
+  });
+
+  it('Mode B "Архивировать" calls archiveMaster and closes the dialog', async () => {
+    setupDeleteConflict(DEPS_BLOCKED);
+    const archiveMutateAsync = vi.fn().mockResolvedValue(createMockMasterResponse({ id: 'm1', archived: true }));
+    mockUseArchiveMaster.mockReturnValue({ mutateAsync: archiveMutateAsync, isPending: false } as never);
+    setupQuery(TEST_MASTERS);
+    render(<MastersTable />);
+
+    fireEvent.click(screen.getAllByLabelText('Действия')[0]);
+    fireEvent.click(screen.getByText('Удалить'));
+
+    await waitFor(() => expect(screen.getByTestId('delete-dialog-archive-btn')).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId('delete-dialog-archive-btn'));
+
+    await waitFor(() => expect(archiveMutateAsync).toHaveBeenCalledWith('m1'));
+    await waitFor(() => expect(screen.queryByTestId('delete-dialog')).not.toBeInTheDocument());
+  });
+
+  it('Mode A confirm calls resolveDeleteMaster with {} (all deps auto) and closes', async () => {
+    setupDeleteConflict(DEPS_AUTO);
+    mockResolveDeleteMaster.mockResolvedValue(undefined);
+    setupQuery(TEST_MASTERS);
+    render(<MastersTable />);
+
+    fireEvent.click(screen.getAllByLabelText('Действия')[0]);
+    fireEvent.click(screen.getByText('Удалить'));
+
+    await waitFor(() => expect(screen.getByTestId('delete-dialog-confirm-input')).toBeInTheDocument());
+    // Type-to-confirm unlocks the button
+    fireEvent.change(screen.getByTestId('delete-dialog-confirm-input'), {
+      target: { value: 'Середа Ольга' },
+    });
+    fireEvent.click(screen.getByTestId('delete-dialog-confirm-btn'));
+
+    await waitFor(() => expect(mockResolveDeleteMaster).toHaveBeenCalledWith('m1', {}));
+    await waitFor(() =>
+      expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['masters'] }),
+    );
+    await waitFor(() => expect(screen.queryByTestId('delete-dialog')).not.toBeInTheDocument());
+  });
+
+  it('204 dry-run success → instant delete: dry-run call happens, no dialog opens', async () => {
+    // Hook-level cross-invalidation (['masters'] + ['records']) is covered by
+    // useMastersMutations.test.ts — the mutation is mocked out here, so this
+    // test asserts table behavior only: the dry-run fires and the dialog
+    // never opens when the delete succeeds.
+    const deleteMutateAsync = vi.fn().mockResolvedValue(undefined);
     mockUseDeleteMaster.mockReturnValue({
       mutateAsync: deleteMutateAsync,
+      dependencies: null,
       mutate: vi.fn(),
       isPending: false,
       isSuccess: false,
@@ -407,18 +500,63 @@ describe('MastersTable', () => {
       context: undefined,
       submittedAt: 0,
     } as unknown as ReturnType<typeof useDeleteMaster>);
-
-    vi.spyOn(window, 'confirm').mockReturnValue(false);
     setupQuery(TEST_MASTERS);
     render(<MastersTable />);
 
-    const actionButtons = screen.getAllByLabelText('Действия');
-    fireEvent.click(actionButtons[0]);
+    fireEvent.click(screen.getAllByLabelText('Действия')[0]);
     fireEvent.click(screen.getByText('Удалить'));
 
-    expect(window.confirm).toHaveBeenCalledWith('Удалить мастера?');
-    expect(deleteMutateAsync).not.toHaveBeenCalled();
-    vi.restoreAllMocks();
+    await waitFor(() => expect(deleteMutateAsync).toHaveBeenCalledWith('m1'));
+    expect(screen.queryByTestId('delete-dialog')).not.toBeInTheDocument();
+  });
+
+  it('cancel closes the dialog without executing a delete', async () => {
+    const deleteMutateAsync = setupDeleteConflict(DEPS_BLOCKED);
+    setupQuery(TEST_MASTERS);
+    render(<MastersTable />);
+
+    fireEvent.click(screen.getAllByLabelText('Действия')[0]);
+    fireEvent.click(screen.getByText('Удалить'));
+
+    await waitFor(() => expect(screen.getByTestId('delete-dialog-cancel-btn')).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId('delete-dialog-cancel-btn'));
+
+    expect(screen.queryByTestId('delete-dialog')).not.toBeInTheDocument();
+    // Only the dry-run attempt happened — never executed beyond it
+    expect(deleteMutateAsync).toHaveBeenCalledTimes(1);
+  });
+
+  // ─── Archive / Restore (#207 §7.2, replaces patchX({is_active})) ────────
+
+  it('calls archiveMaster when "В архив" clicked on an active master', async () => {
+    const archiveMutateAsync = vi.fn().mockResolvedValue(createMockMasterResponse({ id: 'm1', archived: true }));
+    const patchMutateAsync = vi.fn();
+    mockUseArchiveMaster.mockReturnValue({ mutateAsync: archiveMutateAsync, isPending: false } as never);
+    mockUsePatchMaster.mockReturnValue({ mutateAsync: patchMutateAsync, isPending: false } as never);
+    setupQuery(TEST_MASTERS);
+    render(<MastersTable />);
+
+    fireEvent.click(screen.getAllByLabelText('Действия')[0]);
+    fireEvent.click(screen.getByText('В архив'));
+
+    await waitFor(() => expect(archiveMutateAsync).toHaveBeenCalledWith('m1'));
+    expect(patchMutateAsync).not.toHaveBeenCalled();
+  });
+
+  it('calls restoreMaster when "Восстановить" clicked on an archived master', async () => {
+    const restoreMutateAsync = vi.fn().mockResolvedValue(createMockMasterResponse({ id: 'm2', archived: false }));
+    const patchMutateAsync = vi.fn();
+    mockUseRestoreMaster.mockReturnValue({ mutateAsync: restoreMutateAsync, isPending: false } as never);
+    mockUsePatchMaster.mockReturnValue({ mutateAsync: patchMutateAsync, isPending: false } as never);
+    setupQuery(TEST_MASTERS);
+    render(<MastersTable />);
+
+    // m2 is archived → its dropdown shows "Восстановить"
+    fireEvent.click(screen.getAllByLabelText('Действия')[1]);
+    fireEvent.click(screen.getByText('Восстановить'));
+
+    await waitFor(() => expect(restoreMutateAsync).toHaveBeenCalledWith('m2'));
+    expect(patchMutateAsync).not.toHaveBeenCalled();
   });
 
   it('renders color swatch for each master', () => {

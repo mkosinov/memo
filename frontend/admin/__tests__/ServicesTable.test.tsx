@@ -20,7 +20,7 @@ const mockService1: ServiceResponse = {
     { id: 't-2', service_id: 'svc-1', title: 'Детский', description: null, price: 2500 },
   ],
   tags: [{ id: 'tag-1', tag: 'масло' }],
-  is_active: true,
+  archived: false,
   created_at: '2024-01-01T00:00:00Z',
   updated_at: '2024-01-01T00:00:00Z',
 };
@@ -40,7 +40,7 @@ const mockService2: ServiceResponse = {
     { id: 't-3', service_id: 'svc-2', title: 'Взрослый', description: null, price: 2800 },
   ],
   tags: [{ id: 'tag-2', tag: 'акрил' }],
-  is_active: true,
+  archived: false,
   created_at: '2024-02-01T00:00:00Z',
   updated_at: '2024-02-01T00:00:00Z',
 };
@@ -58,7 +58,7 @@ const mockService3: ServiceResponse = {
   material_hint: null,
   tariffs: [],
   tags: [],
-  is_active: false,
+  archived: true,
   created_at: '2024-03-01T00:00:00Z',
   updated_at: '2024-03-01T00:00:00Z',
 };
@@ -124,8 +124,8 @@ import { ServicesTable } from '../app/(main)/services/components/ServicesTable';
 // `useQuery` discards the `queryFn`'s resolved value and returns the injected
 // `data` synchronously, so we must inject already-filtered lists matching the
 // status the component requested. This mirrors how the real backend responds.
-const ACTIVE_SERVICES = TEST_SERVICES.filter((s) => s.is_active);
-const ARCHIVED_SERVICES = TEST_SERVICES.filter((s) => !s.is_active);
+const ACTIVE_SERVICES = TEST_SERVICES.filter((s) => !s.archived);
+const ARCHIVED_SERVICES = TEST_SERVICES.filter((s) => s.archived);
 
 function setupQuery(services: ServiceResponse[] = ACTIVE_SERVICES, isLoading = false) {
   // Resolve the getServices spy with the supplied list so the component's
@@ -363,9 +363,9 @@ describe('ServicesTable', () => {
     expect(mockMutateAsync).not.toHaveBeenCalled();
   });
 
-  // ─── Edit preserves archive state (GH #195) ────────────────────────────
+  // ─── Edit does not resurrect archived services (GH #195 via #207) ────────
 
-  it('edit submit preserves is_active=false on archived service (GH #195)', async () => {
+  it('edit submit on archived service sends no archive flag (GH #195/#207)', async () => {
     // Switch to "all" so the archived mockService3 ("Ручная лепка", id=svc-3)
     // is rendered by the table.
     setupQuery(TEST_SERVICES);
@@ -379,9 +379,10 @@ describe('ServicesTable', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
 
-    // Backend ServiceUpdate schema defaults is_active=True; without sending
-    // the row's current value, editing an archived row silently resurrects
-    // it. The handler must propagate the row's is_active. (GH #195)
+    // #207 inverted the schema: Update bodies carry no archive flag at all
+    // (archive/restore goes through POST endpoints), so editing an archived
+    // service can no longer resurrect it. The payload must carry no flag.
+    // (Until Task 19 rewires the table, the key survives as undefined.)
     await waitFor(() => expect(mockMutateAsync).toHaveBeenCalled());
     // The mockMutateAsync is shared across all service mutations, so find
     // the call shaped like an update ({id, data}).
@@ -393,6 +394,6 @@ describe('ServicesTable', () => {
         typeof arg.data === 'object',
     );
     expect(updateCall).toBeDefined();
-    expect(updateCall![0].data.is_active).toBe(false);
+    expect(updateCall![0].data.is_active).toBeUndefined();
   });
 });

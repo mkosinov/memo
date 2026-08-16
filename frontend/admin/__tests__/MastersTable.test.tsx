@@ -88,7 +88,7 @@ const TEST_MASTERS = [
     last_name: 'Петрова',
     specialty: 'живопись',
     position: 'администратор',
-    is_active: true,
+    archived: false,
   }),
 ];
 
@@ -489,7 +489,7 @@ describe('MastersTable', () => {
         id: `m-${i}`,
         first_name: `Имя${String(i).padStart(2, '0')}`,
         last_name: `Фамилия${String(i).padStart(2, '0')}`,
-        is_active: true,
+        archived: false,
       }),
     );
     setupQuery(manyMasters);
@@ -529,9 +529,9 @@ describe('MastersTable', () => {
     expect(tbody?.textContent).toContain('—');
   });
 
-  // ─── Edit preserves archive state (GH #195) ───────────────────────────
+  // ─── Edit does not resurrect archived masters (GH #195 via #207) ────────
 
-  it('edit submit preserves is_active=false on archived master (GH #195)', async () => {
+  it('edit submit on archived master sends no archive flag (GH #195/#207)', async () => {
     const updateMutateAsync = setupUpdateMock();
     setupQuery(TEST_MASTERS);
     render(<MastersTable />);
@@ -544,12 +544,13 @@ describe('MastersTable', () => {
     // Submit the modal — pre-populated fields are valid for the fixture.
     fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
 
-    // Backend MasterUpdate schema defaults is_active=True; without sending
-    // the row's current value, editing an archived row silently resurrects
-    // it. The handler must propagate the row's is_active. (GH #195)
+    // #207 inverted the schema: Update bodies carry no archive flag at all
+    // (archive/restore goes through POST endpoints), so editing an archived
+    // master can no longer resurrect it. The payload must carry no flag.
+    // (Until Task 19 rewires the table, the key survives as undefined.)
     await waitFor(() => expect(updateMutateAsync).toHaveBeenCalled());
     const [callArg] = updateMutateAsync.mock.calls[0];
     expect(callArg.id).toBe(mockMasterResponseArchived.id);
-    expect(callArg.data.is_active).toBe(false);
+    expect((callArg.data as Record<string, unknown>).is_active).toBeUndefined();
   });
 });

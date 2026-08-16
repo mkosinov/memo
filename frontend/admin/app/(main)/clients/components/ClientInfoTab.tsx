@@ -66,10 +66,9 @@ export const ClientInfoTab = forwardRef<ClientInfoTabHandle, ClientInfoTabProps>
       phone: phone || null,
       email: email || null,
       channel: isKnownChannel(channel) ? channel : null,
-      is_active: client?.is_active ?? true,
     });
     setHasChanges(false);
-  }, [name, phone, email, channel, client?.is_active, onSave]);
+  }, [name, phone, email, channel, onSave]);
 
   const handleCancel = useCallback(() => {
     setName(client?.name || '');

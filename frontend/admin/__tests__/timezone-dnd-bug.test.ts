@@ -30,7 +30,7 @@ const mockMaster: MasterResponse = {
   avatar_url: null,
   position: 'master',
   specialty: 'ceramics',
-  is_active: true,
+  archived: false,
   created_at: '2025-01-01T00:00:00Z',
   updated_at: '2025-01-01T00:00:00Z',
 };
@@ -48,7 +48,7 @@ const mockService: ServiceResponse = {
   material_hint: 'глина',
   tariffs: [{ id: 't1', service_id: 's1', title: 'Взрослый', description: null, price: 2500 }],
   tags: [{ id: 'tag1', tag: 'глина' }],
-  is_active: true,
+  archived: false,
   created_at: '2025-01-01T00:00:00Z',
   updated_at: '2025-01-01T00:00:00Z',
 };
@@ -64,7 +64,7 @@ const mockLocation: LocationResponse = {
   record_info: null,
   image_url: null,
   location_hint: null,
-  is_active: true,
+  archived: false,
   created_at: '2025-01-01T00:00:00Z',
   updated_at: '2025-01-01T00:00:00Z',
 };

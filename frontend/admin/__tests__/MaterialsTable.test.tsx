@@ -8,7 +8,7 @@ const mockMaterialActive: MaterialResponse = {
   id: 'mat-1',
   title: 'Фартук',
   description: 'Защитная одежда',
-  is_active: true,
+  archived: false,
   created_at: '2024-01-01T00:00:00Z',
   updated_at: '2024-01-01T00:00:00Z',
 };
@@ -17,7 +17,7 @@ const mockMaterialArchived: MaterialResponse = {
   id: 'mat-2',
   title: 'Старые кисти',
   description: 'Архивный набор',
-  is_active: false,
+  archived: true,
   created_at: '2024-02-01T00:00:00Z',
   updated_at: '2024-02-01T00:00:00Z',
 };
@@ -174,9 +174,9 @@ describe('MaterialsTable', () => {
     expect(spy).toHaveBeenCalledWith({ per_page: 100, status: 'all' });
   });
 
-  // ─── Edit preserves archive state (GH #195) ────────────────────────────
+  // ─── Edit does not resurrect archived materials (GH #195 via #207) ───────
 
-  it('edit submit preserves is_active=false on archived material (GH #195)', async () => {
+  it('edit submit on archived material sends no archive flag (GH #195/#207)', async () => {
     // Switch to "all" so the archived mockMaterialArchived ("Старые кисти",
     // id=mat-2) is rendered by the table.
     setupQuery(TEST_MATERIALS);
@@ -190,12 +190,13 @@ describe('MaterialsTable', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
 
-    // Backend MaterialUpdate schema defaults is_active=True; without sending
-    // the row's current value, editing an archived row silently resurrects
-    // it. The handler must propagate the row's is_active. (GH #195)
+    // #207 inverted the schema: Update bodies carry no archive flag at all
+    // (archive/restore goes through POST endpoints), so editing an archived
+    // material can no longer resurrect it. The payload must carry no flag.
+    // (Until Task 19 rewires the table, the key survives as undefined.)
     await waitFor(() => expect(mockMutateAsync).toHaveBeenCalled());
     const [arg] = mockMutateAsync.mock.calls[0];
     expect(arg.id).toBe(mockMaterialArchived.id);
-    expect(arg.data.is_active).toBe(false);
+    expect(arg.data.is_active).toBeUndefined();
   });
 });

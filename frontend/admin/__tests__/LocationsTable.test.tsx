@@ -88,7 +88,7 @@ const TEST_LOCATIONS = [
     address: 'Альпика, 1 этаж',
     capacity: 15,
     location_hint: null,
-    is_active: true,
+    archived: false,
   }),
 ];
 
@@ -375,7 +375,7 @@ describe('LocationsTable', () => {
         id: `loc-${i}`,
         name: `Локация ${String(i).padStart(2, '0')}`,
         capacity: i + 1,
-        is_active: true,
+        archived: false,
       }),
     );
     setupQuery(manyLocations);
@@ -578,9 +578,9 @@ describe('LocationsTable', () => {
     expect(theadAfter?.textContent).toMatch(/Название/);
   });
 
-  // ─── Edit preserves archive state (GH #195) ────────────────────────────
+  // ─── Edit does not resurrect archived locations (GH #195 via #207) ─────
 
-  it('edit submit preserves is_active=false on archived location (GH #195)', async () => {
+  it('edit submit on archived location sends no archive flag (GH #195/#207)', async () => {
     const updateMutateAsync = setupUpdateMock();
     setupQuery(TEST_LOCATIONS);
     render(<LocationsTable />);
@@ -592,12 +592,13 @@ describe('LocationsTable', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
 
-    // Backend LocationUpdate schema defaults is_active=True; without sending
-    // the row's current value, editing an archived row silently resurrects
-    // it. The handler must propagate the row's is_active. (GH #195)
+    // #207 inverted the schema: Update bodies carry no archive flag at all
+    // (archive/restore goes through POST endpoints), so editing an archived
+    // location can no longer resurrect it. The payload must carry no flag.
+    // (Until Task 19 rewires the table, the key survives as undefined.)
     await waitFor(() => expect(updateMutateAsync).toHaveBeenCalled());
     const [callArg] = updateMutateAsync.mock.calls[0];
     expect(callArg.id).toBe(mockLocationResponseArchived.id);
-    expect(callArg.data.is_active).toBe(false);
+    expect((callArg.data as Record<string, unknown>).is_active).toBeUndefined();
   });
 });

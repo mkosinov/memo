@@ -10,7 +10,7 @@ vi.mock('../app/(main)/clients/components/ClientInfoTab', () => ({
   ClientInfoTab: ({ client, onSave, onDelete }: any) => (
     <div data-testid="client-info-tab">
       <span data-testid="info-client-name">{client?.name}</span>
-      <button data-testid="info-save" onClick={() => onSave({ name: 'updated', phone: null, email: null, channel: null, is_active: true })}>Save</button>
+      <button data-testid="info-save" onClick={() => onSave({ name: 'updated', phone: null, email: null, channel: null })}>Save</button>
       <button data-testid="info-delete" onClick={onDelete}>Delete</button>
     </div>
   ),
@@ -136,7 +136,7 @@ const mockClientWithStats: ClientWithStats = {
   channel: 'telegram',
   created_at: '2026-01-01T00:00:00',
   updated_at: '2026-01-01T00:00:00',
-  is_active: true,
+  archived: false,
   records_count: 5,
   last_record: '2026-05-10',
   total_paid: 17500,
@@ -293,7 +293,7 @@ describe('ClientCardModal', () => {
     mockUseClients.mockReturnValue(createMockClientsContext({ updateClient }));
     render(<ClientCardModal {...defaultProps} />);
     fireEvent.click(screen.getByTestId('info-save'));
-    expect(updateClient).toHaveBeenCalledWith('c1', { name: 'updated', phone: null, email: null, channel: null, is_active: true });
+    expect(updateClient).toHaveBeenCalledWith('c1', { name: 'updated', phone: null, email: null, channel: null });
   });
 
   it('ClientInfoTab onDelete wraps deleteClient with confirm', async () => {

@@ -11,7 +11,7 @@ from src.domain.deletion import ResolutionError, collect_dependencies
 from src.errors import ErrorCode, ErrorDetail
 from src.models.enums import ArchiveStatus
 from src.models.service import Service
-from src.schemas.common import PaginatedResponse
+from src.schemas.common import PaginatedResponse, extract_resolutions
 from src.schemas.service import ServiceCreate, ServicePatch, ServiceResponse, ServiceUpdate
 from src.services.service import ServiceService, get_service_service
 
@@ -119,7 +119,7 @@ async def delete_service(
     service_id: str,
     service: _ServiceDep,
     session: SessionDep,
-    resolutions: dict[str, str] | None = Body(default=None),
+    body: dict | None = Body(default=None),
 ) -> None:
     """Unified DELETE — dry-run (no body) or execute (with body). Spec §2/§5/§6.
 
@@ -128,6 +128,9 @@ async def delete_service(
     * With body (execute): ``service.resolve_delete`` runs the resolution
       transaction (Task 10) → 204; ``ResolutionError`` → 422; missing → 404.
     """
+    # GH #207 §6: the execute body is {"resolutions": {...}} (api-client
+    # sends it wrapped); a legacy bare dict is accepted too.
+    resolutions = extract_resolutions(body)
     if resolutions is not None:
         try:
             ok = await service.resolve_delete(

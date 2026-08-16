@@ -353,7 +353,11 @@ test.describe('Clients page', () => {
     // triggers a refetch via the React Query hook sending status=active. Use a
     // content-based assertion on the status select: it must return to
     // "Активные" (value 'active') after reset.
-    await page.locator('text=Сбросить фильтры').click();
+    // Scope to the filters panel (#195): the same "Сбросить фильтры" text
+    // also exists in ClientsTable's empty state (rendered when the filtered
+    // list is empty), which is a strict-mode violation without scoping.
+    const filtersPanel = page.locator('div.rounded-xl').filter({ has: statusSelect });
+    await filtersPanel.getByText('Сбросить фильтры').click();
     await expect(statusSelect).toHaveValue('active', { timeout: 10_000 });
     const resetCount = await page.locator('table tbody tr').count();
     expect(resetCount).toBe(initialCount);

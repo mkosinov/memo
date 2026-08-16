@@ -407,3 +407,122 @@ class TestMasterArchiveRestoreCascade:
         assert query_db(
             f"SELECT is_active FROM users WHERE id='{_user['id']}'"
         )[0]["is_active"] == 1
+
+
+class TestScenarioS3MasterBlockedArchiveFlow:
+    """Spec §12 S3 — Delete Master WITH activities → blocked, archive instead.
+
+    Integrated API-level lock mirroring the S3 E2E flow: master + 3 activities
+    + linked user → 409 (no body, activities block) → 422 (with body ``{}``,
+    blocked) → POST /archive 200 archived:true (archive escapes the block
+    because archive ≠ delete, spec §7.2 Mode B) AND §4.2 cascade sets the
+    linked user ``is_active=False`` → POST /restore 200 archived:false AND
+    §4.2 cascade sets the user ``is_active=True``. Activities survive archive
+    AND restore (archive is a reversible state, NOT a delete — spec §16
+    "archived≠deleted").
+
+    Pieces of S3 are locked individually elsewhere:
+      * 409-with-activities-no-body → ``test_delete_master_with_activities_no_body_returns_409``
+        (1 activity, no user).
+      * 422-with-activities-body → ``test_delete_master_with_activities_with_body_returns_422_blocking``
+        (1 activity, no user).
+      * archive/restore user cascade → ``TestMasterArchiveRestoreCascade`` (no
+        activities).
+    This test chains ALL of them with the spec's exact S3 fixture (3 activities
+    + linked user), closing the gap that archive WITH activities present still
+    performs the §4.2 user cascade (the existing cascade tests use a bare
+    master with no activities, so an incorrect "skip cascade when blocked"
+    regression would slip past them).
+    """
+
+    def test_master_with_3_activities_409_422_archive_restore_user_cascade(
+        self, api_client, create_master, create_service, create_location, _user
+    ) -> None:
+        """S3 integrated flow: 409 → 422 → archive (200 + user off) → restore
+        (200 + user on); activities survive both archive and restore."""
+        from datetime import UTC, datetime, timedelta
+
+        # ── Fixture: master + linked user + 3 activities ───────────────────
+        master = create_master()
+        service = create_service()
+        location = create_location()
+        # Link the user to this master (User.master_id → Master.id, §4.2 link).
+        query_db(
+            f"UPDATE users SET master_id='{master['id']}' WHERE id='{_user['id']}'"
+        )
+        # Sanity: user starts active.
+        assert query_db(
+            f"SELECT is_active FROM users WHERE id='{_user['id']}'"
+        )[0]["is_active"] == 1
+        base_start = datetime.now(UTC) + timedelta(days=1)
+        for i in range(3):
+            resp = api_client.post(
+                "/api/v1/activities",
+                json={
+                    "master_id": master["id"],
+                    "service_id": service["id"],
+                    "location_id": location["id"],
+                    "start": (base_start + timedelta(hours=i)).isoformat(),
+                    "duration": 90,
+                    "capacity": 10,
+                    "is_private": False,
+                },
+            )
+            assert resp.status_code == 201, f"create activity {i} failed: {resp.text}"
+
+        # ── 1. DELETE (no body) → 409: activities block (count 3, []) ──────
+        resp = api_client.delete(f"/api/v1/masters/{master['id']}")
+        assert resp.status_code == 409
+        body = resp.json()
+        assert body["detail"] == "has_dependencies"
+        deps = {d["entity"]: d for d in body["dependencies"]}
+        assert deps["activities"]["count"] == 3
+        assert deps["activities"]["allowed_actions"] == []
+        assert deps["activities"]["message"] is not None
+        # Master untouched (dry-run modifies nothing).
+        assert api_client.get(f"/api/v1/masters/{master['id']}").status_code == 200
+
+        # ── 2. DELETE (with body {}) → 422: activities block the execute path
+        resp = api_client.request("DELETE", f"/api/v1/masters/{master['id']}", json={})
+        assert resp.status_code == 422
+        assert api_client.get(f"/api/v1/masters/{master['id']}").status_code == 200
+
+        # ── 3. POST /archive → 200 archived:true + §4.2 cascade (user off)
+        # Archive is the escape hatch when delete is blocked (spec §7.2 Mode B).
+        resp = api_client.post(f"/api/v1/masters/{master['id']}/archive")
+        assert resp.status_code == 200, f"archive failed: {resp.text}"
+        body = resp.json()
+        assert body["id"] == master["id"]
+        assert body["archived"] is True
+        # §4.2 cascade: linked user deactivated in the same transaction.
+        assert query_db(
+            f"SELECT is_active FROM users WHERE id='{_user['id']}'"
+        )[0]["is_active"] == 0
+        # Master is_active flipped (archived row in DB).
+        assert query_db(
+            f"SELECT is_active FROM masters WHERE id='{master['id']}'"
+        )[0]["is_active"] == 0
+        # Activities survive archive (archive ≠ delete; spec §16 archived≠deleted).
+        assert (
+            len(query_db(f"SELECT * FROM activities WHERE master_id='{master['id']}'"))
+            == 3
+        )
+
+        # ── 4. POST /restore → 200 archived:false + §4.2 cascade (user on)
+        resp = api_client.post(f"/api/v1/masters/{master['id']}/restore")
+        assert resp.status_code == 200, f"restore failed: {resp.text}"
+        body = resp.json()
+        assert body["id"] == master["id"]
+        assert body["archived"] is False
+        # §4.2 cascade: linked user reactivated.
+        assert query_db(
+            f"SELECT is_active FROM users WHERE id='{_user['id']}'"
+        )[0]["is_active"] == 1
+        assert query_db(
+            f"SELECT is_active FROM masters WHERE id='{master['id']}'"
+        )[0]["is_active"] == 1
+        # Activities still present (restore doesn't delete either).
+        assert (
+            len(query_db(f"SELECT * FROM activities WHERE master_id='{master['id']}'"))
+            == 3
+        )

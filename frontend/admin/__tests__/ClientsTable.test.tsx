@@ -72,6 +72,10 @@ let mockContextValue: ClientsContextType = {
       updateClient: vi.fn(),
       patchClient: vi.fn(),
       deleteClient: vi.fn(),
+      archiveClient: vi.fn(),
+      restoreClient: vi.fn(),
+      resolveDeleteClient: vi.fn(),
+      dependencies: null,
 };
 
 vi.mock('@/contexts/ClientsContext', () => ({
@@ -120,6 +124,10 @@ describe('ClientsTable', () => {
       updateClient: vi.fn(),
       patchClient: vi.fn(),
       deleteClient: vi.fn(),
+      archiveClient: vi.fn(),
+      restoreClient: vi.fn(),
+      resolveDeleteClient: vi.fn(),
+      dependencies: null,
     };
   });
 

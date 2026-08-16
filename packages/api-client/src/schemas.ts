@@ -524,6 +524,19 @@ export const TagSearchResultSchema = z.object({
 });
 export type TagSearchResult = z.infer<typeof TagSearchResultSchema>;
 
+// ─── Delete dry-run dependency tree (§5 — GH #207) ───────────────────────────
+// 409 Conflict body of the unified DELETE (no-body dry-run). Counters + sums only,
+// never individual rows. Mirrors backend `DependencyNode` (src/domain/deletion.py).
+
+export interface DependencyNode {
+  entity: string;
+  relation: string;
+  count: number;
+  allowed_actions: string[]; // [] = blocked (delete impossible — archive instead)
+  message?: string | null;
+  cascade_preview?: Record<string, number> | null;
+}
+
 // ─── Paginated list envelopes ────────────────────────────────────────────────
 
 export interface PaginatedResponse<T> {

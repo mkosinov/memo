@@ -3,34 +3,47 @@ import { renderHook, act } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { createElement, type ReactNode } from 'react';
 
-vi.mock('@memo/api-client', () => ({
-  createMaterial: vi.fn(),
-  updateMaterial: vi.fn(),
-  patchMaterial: vi.fn(),
-  deleteMaterial: vi.fn(),
-}));
+vi.mock('@memo/api-client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@memo/api-client')>();
+  return {
+    ...actual,
+    createMaterial: vi.fn(),
+    updateMaterial: vi.fn(),
+    patchMaterial: vi.fn(),
+    deleteMaterial: vi.fn(),
+    archiveMaterial: vi.fn(),
+    restoreMaterial: vi.fn(),
+  };
+});
 
 import {
   useCreateMaterial,
   useUpdateMaterial,
   usePatchMaterial,
   useDeleteMaterial,
+  useArchiveMaterial,
+  useRestoreMaterial,
 } from '../hooks/useMaterialsMutations';
 import {
   createMaterial,
   updateMaterial,
   patchMaterial,
   deleteMaterial,
+  archiveMaterial,
+  restoreMaterial,
+  ApiError,
 } from '@memo/api-client';
-import type { MaterialCreate, MaterialUpdate } from '@memo/api-client';
+import type { MaterialCreate, MaterialUpdate, DependencyNode } from '@memo/api-client';
 
 const mockCreateMaterial = vi.mocked(createMaterial);
 const mockUpdateMaterial = vi.mocked(updateMaterial);
 const mockPatchMaterial = vi.mocked(patchMaterial);
 const mockDeleteMaterial = vi.mocked(deleteMaterial);
+const mockArchiveMaterial = vi.mocked(archiveMaterial);
+const mockRestoreMaterial = vi.mocked(restoreMaterial);
 
 const materialResponse = {
-  id: 'mat-1', title: 'Глина', description: '', is_active: true,
+  id: 'mat-1', title: 'Глина', description: '', archived: false,
   created_at: '', updated_at: '',
 };
 
@@ -88,10 +101,10 @@ describe('useMaterialsMutations', () => {
       const { result } = renderHook(() => useUpdateMaterial(), { wrapper });
 
       // Canonical PUT (GH #178): full typed MaterialUpdate — every field listed.
+      // is_active is gone from Update (#207): archive/restore is via POST endpoints.
       const payload: MaterialUpdate = {
         title: 'Глина 2',
         description: '',
-        is_active: true,
       };
 
       await act(async () => {
@@ -103,29 +116,29 @@ describe('useMaterialsMutations', () => {
   });
 
   describe('usePatchMaterial', () => {
-    it('calls patchMaterial with id and partial data (archive toggle)', async () => {
+    it('calls patchMaterial with id and partial data', async () => {
       const { wrapper } = createQueryClientWrapper();
-      mockPatchMaterial.mockResolvedValue({ ...materialResponse, is_active: false });
+      mockPatchMaterial.mockResolvedValue({ ...materialResponse, title: 'Patched' });
 
       const { result } = renderHook(() => usePatchMaterial(), { wrapper });
 
       await act(async () => {
-        await result.current.mutateAsync({ id: 'mat-1', data: { is_active: false } });
+        await result.current.mutateAsync({ id: 'mat-1', data: { title: 'Patched' } });
       });
 
-      expect(mockPatchMaterial).toHaveBeenCalledWith('mat-1', { is_active: false });
+      expect(mockPatchMaterial).toHaveBeenCalledWith('mat-1', { title: 'Patched' });
       expect(mockUpdateMaterial).not.toHaveBeenCalled();
     });
 
     it('invalidates the materials query cache on success', async () => {
       const { queryClient, wrapper } = createQueryClientWrapper();
       const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
-      mockPatchMaterial.mockResolvedValue({ ...materialResponse, is_active: false });
+      mockPatchMaterial.mockResolvedValue({ ...materialResponse, title: 'Patched' });
 
       const { result } = renderHook(() => usePatchMaterial(), { wrapper });
 
       await act(async () => {
-        await result.current.mutateAsync({ id: 'mat-1', data: { is_active: false } });
+        await result.current.mutateAsync({ id: 'mat-1', data: { title: 'Patched' } });
       });
 
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['materials'] });
@@ -144,6 +157,94 @@ describe('useMaterialsMutations', () => {
       });
 
       expect(mockDeleteMaterial).toHaveBeenCalledWith('mat-1');
+    });
+
+    it('invalidates the materials query cache on success', async () => {
+      const { queryClient, wrapper } = createQueryClientWrapper();
+      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+      mockDeleteMaterial.mockResolvedValue(undefined);
+
+      const { result } = renderHook(() => useDeleteMaterial(), { wrapper });
+
+      await act(async () => {
+        await result.current.mutateAsync('mat-1');
+      });
+
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['materials'] });
+    });
+
+    it('exposes the dependency tree if the dry-run DELETE ever fails with 409', async () => {
+      // Material has zero FK deps (§4 matrix) so 409 cannot happen today —
+      // the hook still keeps the uniform 409-aware shape for all entities.
+      const { wrapper } = createQueryClientWrapper();
+      const deps: DependencyNode[] = [];
+      mockDeleteMaterial.mockRejectedValue(new ApiError(409, 'has_dependencies', undefined, deps));
+
+      const { result } = renderHook(() => useDeleteMaterial(), { wrapper });
+
+      await act(async () => {
+        await expect(result.current.mutateAsync('mat-1')).rejects.toThrow(ApiError);
+      });
+
+      expect(result.current.dependencies).toEqual(deps);
+    });
+  });
+
+  describe('useArchiveMaterial', () => {
+    it('calls archiveMaterial with the provided id', async () => {
+      const { wrapper } = createQueryClientWrapper();
+      mockArchiveMaterial.mockResolvedValue({ ...materialResponse, archived: true });
+
+      const { result } = renderHook(() => useArchiveMaterial(), { wrapper });
+
+      await act(async () => {
+        await result.current.mutateAsync('mat-1');
+      });
+
+      expect(mockArchiveMaterial).toHaveBeenCalledWith('mat-1');
+    });
+
+    it('invalidates the materials query cache on success', async () => {
+      const { queryClient, wrapper } = createQueryClientWrapper();
+      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+      mockArchiveMaterial.mockResolvedValue({ ...materialResponse, archived: true });
+
+      const { result } = renderHook(() => useArchiveMaterial(), { wrapper });
+
+      await act(async () => {
+        await result.current.mutateAsync('mat-1');
+      });
+
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['materials'] });
+    });
+  });
+
+  describe('useRestoreMaterial', () => {
+    it('calls restoreMaterial with the provided id', async () => {
+      const { wrapper } = createQueryClientWrapper();
+      mockRestoreMaterial.mockResolvedValue({ ...materialResponse, archived: false });
+
+      const { result } = renderHook(() => useRestoreMaterial(), { wrapper });
+
+      await act(async () => {
+        await result.current.mutateAsync('mat-1');
+      });
+
+      expect(mockRestoreMaterial).toHaveBeenCalledWith('mat-1');
+    });
+
+    it('invalidates the materials query cache on success', async () => {
+      const { queryClient, wrapper } = createQueryClientWrapper();
+      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+      mockRestoreMaterial.mockResolvedValue({ ...materialResponse, archived: false });
+
+      const { result } = renderHook(() => useRestoreMaterial(), { wrapper });
+
+      await act(async () => {
+        await result.current.mutateAsync('mat-1');
+      });
+
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['materials'] });
     });
   });
 });

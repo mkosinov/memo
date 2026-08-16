@@ -179,6 +179,10 @@ export function createMockClientsContext(
     updateClient: vi.fn(),
     patchClient: vi.fn(),
     deleteClient: vi.fn(),
+    archiveClient: vi.fn(),
+    restoreClient: vi.fn(),
+    resolveDeleteClient: vi.fn(),
+    dependencies: null,
     ...overrides,
   };
 }

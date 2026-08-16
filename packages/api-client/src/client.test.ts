@@ -136,3 +136,62 @@ describe('api() error extraction', () => {
     }
   });
 });
+
+// ─── 409 dependency-tree exposure (GH #207 §5) ────────────────────────────────
+// The unified DELETE dry-run answers {detail: "has_dependencies", dependencies: [...]}.
+// The hook layer needs the tree to render the delete dialog (§7), so ApiError
+// must carry the parsed dependencies array — the parsed body must not be dropped.
+
+describe('api() 409 dependency-tree exposure', () => {
+  const dependencyTree = [
+    { entity: 'records', relation: 'Запись', count: 47, allowed_actions: ['nullify'] },
+    {
+      entity: 'visitors', relation: 'Посетитель', count: 12,
+      allowed_actions: ['cascade'], cascade_preview: { visits: 45 },
+    },
+    {
+      entity: 'client_tags', relation: 'Тег', count: 5,
+      allowed_actions: ['cascade'], message: null,
+    },
+  ];
+
+  it('exposes dependencies from a 409 {detail: "has_dependencies"} body', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      mockFetchResponse(409, {
+        detail: 'has_dependencies',
+        dependencies: dependencyTree,
+      })
+    ));
+
+    let caught: unknown;
+    try {
+      await api('/test', schema);
+    } catch (e) {
+      caught = e;
+    }
+
+    expect(caught).toBeInstanceOf(ApiError);
+    const err = caught as ApiError;
+    expect(err.status).toBe(409);
+    expect(err.message).toBe('has_dependencies');
+    expect(err.dependencies).toEqual(dependencyTree);
+  });
+
+  it('leaves dependencies undefined when the error body has no dependency tree', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      mockFetchResponse(404, {
+        detail: { code: 'MASTER_NOT_FOUND', message: 'Master not found' },
+      })
+    ));
+
+    let caught: unknown;
+    try {
+      await api('/test', schema);
+    } catch (e) {
+      caught = e;
+    }
+
+    expect(caught).toBeInstanceOf(ApiError);
+    expect((caught as ApiError).dependencies).toBeUndefined();
+  });
+});

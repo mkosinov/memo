@@ -3,36 +3,49 @@ import { renderHook, act } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { createElement, type ReactNode } from 'react';
 
-vi.mock('@memo/api-client', () => ({
-  createMaster: vi.fn(),
-  updateMaster: vi.fn(),
-  patchMaster: vi.fn(),
-  deleteMaster: vi.fn(),
-}));
+vi.mock('@memo/api-client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@memo/api-client')>();
+  return {
+    ...actual,
+    createMaster: vi.fn(),
+    updateMaster: vi.fn(),
+    patchMaster: vi.fn(),
+    deleteMaster: vi.fn(),
+    archiveMaster: vi.fn(),
+    restoreMaster: vi.fn(),
+  };
+});
 
 import {
   useCreateMaster,
   useUpdateMaster,
   usePatchMaster,
   useDeleteMaster,
+  useArchiveMaster,
+  useRestoreMaster,
 } from '../hooks/useMastersMutations';
 import {
   createMaster,
   updateMaster,
   patchMaster,
   deleteMaster,
+  archiveMaster,
+  restoreMaster,
+  ApiError,
 } from '@memo/api-client';
-import type { MasterCreate, MasterUpdate } from '@memo/api-client';
+import type { MasterCreate, MasterUpdate, DependencyNode } from '@memo/api-client';
 
 const mockCreateMaster = vi.mocked(createMaster);
 const mockUpdateMaster = vi.mocked(updateMaster);
 const mockPatchMaster = vi.mocked(patchMaster);
 const mockDeleteMaster = vi.mocked(deleteMaster);
+const mockArchiveMaster = vi.mocked(archiveMaster);
+const mockRestoreMaster = vi.mocked(restoreMaster);
 
 const masterResponse = {
   id: 'm-1', first_name: 'Иван', last_name: 'Иванов', color: '#004D56',
   position: 'мастер', specialty: 'живопись', avatar_url: null,
-  is_active: true, created_at: '', updated_at: '',
+  archived: false, created_at: '', updated_at: '',
 };
 
 function createQueryClientWrapper() {
@@ -95,6 +108,7 @@ describe('useMastersMutations', () => {
       const { result } = renderHook(() => useUpdateMaster(), { wrapper });
 
       // Canonical PUT (GH #178): full typed MasterUpdate — every field listed.
+      // is_active is gone from Update (#207): archive/restore is via POST endpoints.
       const payload: MasterUpdate = {
         first_name: 'Пётр',
         last_name: 'Иванов',
@@ -102,7 +116,6 @@ describe('useMastersMutations', () => {
         position: 'мастер',
         specialty: 'живопись',
         avatar_url: '',
-        is_active: true,
       };
 
       await act(async () => {
@@ -114,29 +127,29 @@ describe('useMastersMutations', () => {
   });
 
   describe('usePatchMaster', () => {
-    it('calls patchMaster with id and partial data (archive toggle)', async () => {
+    it('calls patchMaster with id and partial data', async () => {
       const { wrapper } = createQueryClientWrapper();
-      mockPatchMaster.mockResolvedValue({ ...masterResponse, is_active: false });
+      mockPatchMaster.mockResolvedValue({ ...masterResponse, specialty: 'керамика' });
 
       const { result } = renderHook(() => usePatchMaster(), { wrapper });
 
       await act(async () => {
-        await result.current.mutateAsync({ id: 'm-1', data: { is_active: false } });
+        await result.current.mutateAsync({ id: 'm-1', data: { specialty: 'керамика' } });
       });
 
-      expect(mockPatchMaster).toHaveBeenCalledWith('m-1', { is_active: false });
+      expect(mockPatchMaster).toHaveBeenCalledWith('m-1', { specialty: 'керамика' });
       expect(mockUpdateMaster).not.toHaveBeenCalled();
     });
 
     it('invalidates the masters query cache on success', async () => {
       const { queryClient, wrapper } = createQueryClientWrapper();
       const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
-      mockPatchMaster.mockResolvedValue({ ...masterResponse, is_active: false });
+      mockPatchMaster.mockResolvedValue({ ...masterResponse, specialty: 'керамика' });
 
       const { result } = renderHook(() => usePatchMaster(), { wrapper });
 
       await act(async () => {
-        await result.current.mutateAsync({ id: 'm-1', data: { is_active: false } });
+        await result.current.mutateAsync({ id: 'm-1', data: { specialty: 'керамика' } });
       });
 
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['masters'] });
@@ -155,6 +168,109 @@ describe('useMastersMutations', () => {
       });
 
       expect(mockDeleteMaster).toHaveBeenCalledWith('m-1');
+    });
+
+    it('invalidates masters AND records caches on success (cross-invalidation)', async () => {
+      const { queryClient, wrapper } = createQueryClientWrapper();
+      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+      mockDeleteMaster.mockResolvedValue(undefined);
+
+      const { result } = renderHook(() => useDeleteMaster(), { wrapper });
+
+      await act(async () => {
+        await result.current.mutateAsync('m-1');
+      });
+
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['masters'] });
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['records'] });
+    });
+
+    it('exposes the dependency tree when the dry-run DELETE fails with 409', async () => {
+      const { wrapper } = createQueryClientWrapper();
+      const deps: DependencyNode[] = [
+        { entity: 'users', relation: 'Пользователь', count: 1, allowed_actions: ['cascade'] },
+        { entity: 'master_tags', relation: 'Тег', count: 3, allowed_actions: ['cascade'] },
+      ];
+      mockDeleteMaster.mockRejectedValue(new ApiError(409, 'has_dependencies', undefined, deps));
+
+      const { result } = renderHook(() => useDeleteMaster(), { wrapper });
+
+      await act(async () => {
+        await expect(result.current.mutateAsync('m-1')).rejects.toThrow(ApiError);
+      });
+
+      expect(result.current.dependencies).toEqual(deps);
+    });
+
+    it('keeps dependencies null for non-409 errors', async () => {
+      const { wrapper } = createQueryClientWrapper();
+      mockDeleteMaster.mockRejectedValue(new ApiError(404, 'Master not found', 'MASTER_NOT_FOUND'));
+
+      const { result } = renderHook(() => useDeleteMaster(), { wrapper });
+
+      await act(async () => {
+        await expect(result.current.mutateAsync('m-1')).rejects.toThrow(ApiError);
+      });
+
+      expect(result.current.dependencies).toBeNull();
+    });
+  });
+
+  describe('useArchiveMaster', () => {
+    it('calls archiveMaster with the provided id', async () => {
+      const { wrapper } = createQueryClientWrapper();
+      mockArchiveMaster.mockResolvedValue({ ...masterResponse, archived: true });
+
+      const { result } = renderHook(() => useArchiveMaster(), { wrapper });
+
+      await act(async () => {
+        await result.current.mutateAsync('m-1');
+      });
+
+      expect(mockArchiveMaster).toHaveBeenCalledWith('m-1');
+    });
+
+    it('invalidates the masters query cache on success', async () => {
+      const { queryClient, wrapper } = createQueryClientWrapper();
+      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+      mockArchiveMaster.mockResolvedValue({ ...masterResponse, archived: true });
+
+      const { result } = renderHook(() => useArchiveMaster(), { wrapper });
+
+      await act(async () => {
+        await result.current.mutateAsync('m-1');
+      });
+
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['masters'] });
+    });
+  });
+
+  describe('useRestoreMaster', () => {
+    it('calls restoreMaster with the provided id', async () => {
+      const { wrapper } = createQueryClientWrapper();
+      mockRestoreMaster.mockResolvedValue({ ...masterResponse, archived: false });
+
+      const { result } = renderHook(() => useRestoreMaster(), { wrapper });
+
+      await act(async () => {
+        await result.current.mutateAsync('m-1');
+      });
+
+      expect(mockRestoreMaster).toHaveBeenCalledWith('m-1');
+    });
+
+    it('invalidates the masters query cache on success', async () => {
+      const { queryClient, wrapper } = createQueryClientWrapper();
+      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+      mockRestoreMaster.mockResolvedValue({ ...masterResponse, archived: false });
+
+      const { result } = renderHook(() => useRestoreMaster(), { wrapper });
+
+      await act(async () => {
+        await result.current.mutateAsync('m-1');
+      });
+
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['masters'] });
     });
   });
 });

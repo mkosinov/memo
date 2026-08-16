@@ -9,9 +9,19 @@ from __future__ import annotations
 from typing import Generic, TypeVar
 
 from pydantic import BaseModel
-from sqlalchemy import func, not_, select
+from sqlalchemy import delete, func, not_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.domain.deletion import (
+    CASCADE_HANDLERS,
+    FK_MATRIX,
+    NULLIFY_HANDLERS,
+    BlockingDepsError,
+    InvalidResolutionError,
+    collect_dependencies,
+    has_blocking_deps,
+    validate_resolutions,
+)
 from src.models.enums import ArchiveStatus
 from src.repositories.generic import BaseRepository
 from src.schemas.common import PaginatedResponse
@@ -228,11 +238,92 @@ class ArchiveService(GenericService[CreateSchemaT, UpdateSchemaT, ResponseSchema
 
     @transactional
     async def restore(self, db_session: AsyncSession, id: str) -> bool:
-        """Restore an archived record (set ``is_active=True``).
+        """Restore an archived record (set is_active=True).
 
-        Returns ``True`` if the row was restored, ``False`` if not found.
-        See ``archive`` for the bool-coercion rationale.
+        Returns True if the row was restored, False if not found.
+        See archive for the bool-coercion rationale.
         """
         return await self._repository.patch(
             db_session, self._model, id, {"is_active": True}
         ) is not None
+
+    @transactional
+    async def resolve_delete(
+        self,
+        db_session: AsyncSession,
+        id: str,
+        resolutions: dict[str, str],
+    ) -> bool:
+        """Execute the unified DELETE-with-body resolution transaction (Task 10).
+
+        Spec §6 (rules) + §8 (atomicity — ONE outer ``@transactional``; NO
+        per-dep commits): all nullify/cascade writes land on this session and
+        commit once at the outer boundary; any exception → rollback via
+        ``get_db_session`` (the decorator skips commit on raise).
+
+        Flow:
+          1. Existence check — ``False`` if entity missing (route maps to 404).
+          2. Collect FK deps (``collect_dependencies``).
+          3. ``has_blocking_deps`` → raise ``BlockingDepsError`` (route → 422
+             "archive instead").
+          4. ``validate_resolutions`` → raise ``InvalidResolutionError`` if
+             errors (route → 422 with detail).
+          5. Dispatch deps in spec §6 execution order: **nullify first, then
+             cascade** (each via ``NULLIFY_HANDLERS`` / ``CASCADE_HANDLERS``
+             keyed by ``(self._model, dep.entity)`` — NO ``if model is X``
+             branches; the matrix IS the dispatch). Blocked deps never reach
+             the executor (step 3 raised).
+          6. Hard-delete the entity row.
+          7. Return ``True`` (existed, executed).
+
+        Returns the bool contract per spec: ``True`` on success, ``False`` if
+        the entity was missing (404). Raises ``ResolutionError`` subtypes for
+        422 paths (caught in the router).
+        """
+        # 1. Existence — repository.get reuses the same session's identity-map
+        #    cache. Return False on miss (router maps to 404).
+        entity = await self._repository.get(db_session, self._model, id)
+        if entity is None:
+            return False
+
+        # 2. Collect deps (COUNT queries against the matrix for this model).
+        deps = await collect_dependencies(db_session, self._model, id)
+
+        # 3. Blocked deps → 422 "archive instead" (activities present).
+        if has_blocking_deps(deps):
+            raise BlockingDepsError(
+                "Entity has blocking dependencies — archive instead"
+            )
+
+        # 4. Validate resolutions body against the matrix (§6 rules).
+        issues = validate_resolutions(self._model, deps, resolutions)
+        if issues:
+            msg = "; ".join(f"{i.relation}: {i.message}" for i in issues)
+            raise InvalidResolutionError(msg)
+
+        # 5. Execute deps in spec §6 order: nullify → cascade → hard delete.
+        #    Two phases so the nullify handlers run BEFORE any cascade handler
+        #    (regardless of the matrix's declaration order — e.g. Service has
+        #    tariffs(cascade) listed BEFORE photos(nullify) in FK_MATRIX, but
+        #    the spec requires nullify-first to break FK links before any
+        #    downstream cascade-delete triggers row-level checks).
+        matrix_deps = FK_MATRIX.get(self._model, [])
+        for dep in matrix_deps:
+            if dep.action != "nullify":
+                continue
+            handler = NULLIFY_HANDLERS.get((self._model, dep.entity))
+            if handler is not None:
+                await handler(self, db_session, id)
+        for dep in matrix_deps:
+            if dep.action != "cascade":
+                continue
+            handler = CASCADE_HANDLERS.get((self._model, dep.entity))
+            if handler is not None:
+                await handler(self, db_session, id)
+            # block deps never reach here (step 3 raised BlockingDepsError).
+
+        # 6. Hard-delete the entity row.
+        await db_session.execute(
+            delete(self._model).where(self._model.id == id)
+        )
+        return True

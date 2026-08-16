@@ -3,11 +3,14 @@
 from functools import lru_cache
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi.responses import JSONResponse
 
 from src.db import SessionDep
+from src.domain.deletion import ResolutionError, collect_dependencies
 from src.errors import ErrorCode, ErrorDetail
 from src.models.enums import ArchiveStatus
+from src.models.service import Service
 from src.schemas.common import PaginatedResponse
 from src.schemas.service import ServiceCreate, ServicePatch, ServiceResponse, ServiceUpdate
 from src.services.service import ServiceService, get_service_service
@@ -116,8 +119,41 @@ async def delete_service(
     service_id: str,
     service: _ServiceDep,
     session: SessionDep,
+    resolutions: dict[str, str] | None = Body(default=None),
 ) -> None:
-    """Soft-delete a service (set is_active=False)."""
+    """Unified DELETE — dry-run (no body) or execute (with body). Spec §2/§5/§6.
+
+    * No body (dry-run): ``collect_dependencies`` → empty → hard delete (204);
+      non-empty → 409 + dependency tree (no rows modified).
+    * With body (execute): ``service.resolve_delete`` runs the resolution
+      transaction (Task 10) → 204; ``ResolutionError`` → 422; missing → 404.
+    """
+    if resolutions is not None:
+        try:
+            ok = await service.resolve_delete(
+                db_session=session, id=service_id, resolutions=resolutions
+            )
+        except ResolutionError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+        if not ok:
+            raise HTTPException(
+                status_code=404,
+                detail=ErrorDetail(
+                    code=ErrorCode.SERVICE_NOT_FOUND,
+                    message="Service not found",
+                ).model_dump(),
+            )
+        return
+
+    deps = await collect_dependencies(session, Service, service_id)
+    if deps:
+        return JSONResponse(
+            status_code=409,
+            content={
+                "detail": "has_dependencies",
+                "dependencies": [d.model_dump() for d in deps],
+            },
+        )
     deleted = await service.delete(db_session=session, id=service_id)
     if not deleted:
         raise HTTPException(

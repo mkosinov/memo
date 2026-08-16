@@ -3,11 +3,14 @@
 from functools import lru_cache
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi.responses import JSONResponse
 
 from src.db import SessionDep
+from src.domain.deletion import ResolutionError, collect_dependencies
 from src.errors import ErrorCode, ErrorDetail
 from src.models.enums import ArchiveStatus
+from src.models.material import Material
 from src.schemas.common import PaginatedResponse
 from src.schemas.material import MaterialCreate, MaterialPatch, MaterialResponse, MaterialUpdate
 from src.services.material import MaterialService, get_material_service
@@ -117,8 +120,40 @@ async def delete_material(
     material_id: str,
     service: _ServiceDep,
     session: SessionDep,
+    resolutions: dict[str, str] | None = Body(default=None),
 ) -> None:
-    """Soft-delete a material (set is_active=False)."""
+    """Unified DELETE — dry-run (no body) or execute (with body). Spec §2/§5/§6.
+
+    Material has ZERO FK deps (spec §4 matrix): the no-body path always
+    short-circuits to 204 (hard delete); the with-body path runs the
+    executor with an empty resolution set (also 204).
+    """
+    if resolutions is not None:
+        try:
+            ok = await service.resolve_delete(
+                db_session=session, id=material_id, resolutions=resolutions
+            )
+        except ResolutionError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+        if not ok:
+            raise HTTPException(
+                status_code=404,
+                detail=ErrorDetail(
+                    code=ErrorCode.MATERIAL_NOT_FOUND,
+                    message="Material not found",
+                ).model_dump(),
+            )
+        return
+
+    deps = await collect_dependencies(session, Material, material_id)
+    if deps:
+        return JSONResponse(
+            status_code=409,
+            content={
+                "detail": "has_dependencies",
+                "dependencies": [d.model_dump() for d in deps],
+            },
+        )
     deleted = await service.delete(db_session=session, id=material_id)
     if not deleted:
         raise HTTPException(

@@ -2,6 +2,8 @@
 
 import pytest
 
+from tests.conftest import query_db
+
 pytestmark = pytest.mark.api
 
 CLIENT_PAYLOAD = {
@@ -431,3 +433,296 @@ class TestClientChannelTolerance:
         assert resp.status_code == 422, (
             f"Expected 422 for unknown channel, got {resp.status_code}: {resp.text}"
         )
+
+
+# ─── Unified DELETE route (Tasks 9 + 10 of #207) ──────────────────────────────
+
+
+def _link_client_tag(api_client, client_id: str, tag_name: str | None = None) -> str:
+    """Insert a ``client_tags`` join row directly via SQL and return the tag id.
+
+    The clients API does not expose tag linking on create/update, so we go via
+    ``query_db`` to seed the auto-cascade dep (FK-ON-safe: both ids exist).
+    """
+    tag_name = tag_name or f"ct-{client_id[:8]}"
+    tag_id = api_client.post("/api/v1/tags", json={"tag": tag_name}).json()["id"]
+    query_db(
+        f"INSERT INTO client_tags (client_id, tag_id) "
+        f"VALUES ('{client_id}', '{tag_id}')"
+    )
+    return tag_id
+
+
+class TestDeleteUnifiedRoute:
+    """DELETE /api/v1/clients/{id} — unified dry-run (no body) + execute (with body).
+
+    Spec: docs/specs/2026-08-15-delete-hard-delete-and-dependency-resolution-design.md
+      * §2  — Change 1: body presence distinguishes dry-run vs execute.
+      * §4  — Client FK deps: records=nullify (user choice), visitors=cascade
+              (user choice, cascades through visits/photos/visitor_tags per
+              VisitorService._delete_cascade), client_tags=auto cascade.
+      * §5  — 409 Conflict response (counters + ``cascade_preview``).
+      * §6  — DELETE with resolutions body (executor = Task 10).
+      * §8  — atomicity (single outer ``@transactional``; loop calls the
+              non-decorated ``VisitorService._delete_cascade`` on a shared
+              session — NO per-visitor commit).
+      * S4  — User scenario at §12.S4 (records survive nullify; visitors
+              + visits + client_tags gone; payments survive with records).
+    """
+
+    def test_delete_bare_client_no_body_returns_204_and_row_gone(
+        self, api_client, create_client
+    ) -> None:
+        """No body + zero deps → 204 hard delete; row physically gone (spec §2)."""
+        client = create_client()
+
+        resp = api_client.delete(f"/api/v1/clients/{client['id']}")
+
+        assert resp.status_code == 204
+        assert api_client.get(f"/api/v1/clients/{client['id']}").status_code == 404
+
+    def test_delete_nonexistent_client_no_body_returns_404(self, api_client) -> None:
+        """No body + nonexistent id → 404 (service.delete returns False)."""
+        resp = api_client.delete("/api/v1/clients/nonexistent-client-id")
+        assert resp.status_code == 404
+        assert resp.json()["detail"]["code"] == "CLIENT_NOT_FOUND"
+
+    def test_delete_nonexistent_client_with_body_returns_404(self, api_client) -> None:
+        """With body + nonexistent id → 404 (executor returns False).
+
+        EXPECTED RED until Task 10 (resolve_delete missing → AttributeError today).
+        """
+        resp = api_client.request(
+            "DELETE",
+            "/api/v1/clients/nonexistent-client-id",
+            json={"records": "nullify", "visitors": "cascade"},
+        )
+        assert resp.status_code == 404
+
+    def test_delete_client_with_deps_no_body_returns_409(
+        self, api_client, create_record
+    ) -> None:
+        """No body + deps (records + visitors + client_tags) → 409 + tree (spec §5).
+
+        The 409 carries counters and the ``cascade_preview`` for visitors (visits
+        count only — payments EXCLUDED per §5, since they are record-scoped and
+        survive the records nullify).
+        """
+        record = create_record(
+            visits=[{"name": "Alice", "price": 3500, "status": "waiting"}]
+        )
+        client_id = record["client_id"]
+        _link_client_tag(api_client, client_id, tag_name=f"ct-{client_id[:8]}")
+
+        resp = api_client.delete(f"/api/v1/clients/{client_id}")
+
+        assert resp.status_code == 409
+        body = resp.json()
+        assert body["detail"] == "has_dependencies"
+        deps = {d["entity"]: d for d in body["dependencies"]}
+        assert deps["records"]["count"] == 1
+        assert deps["records"]["allowed_actions"] == ["nullify"]
+        assert deps["visitors"]["count"] == 1
+        assert deps["visitors"]["allowed_actions"] == ["cascade"]
+        # cascade_preview exists on visitors with downstream visits count.
+        assert deps["visitors"]["cascade_preview"] == {"visits": 1}
+        assert deps["client_tags"]["count"] == 1
+        assert deps["client_tags"]["allowed_actions"] == ["cascade"]
+        # Row untouched (dry-run modifies nothing).
+        assert api_client.get(f"/api/v1/clients/{client_id}").status_code == 200
+
+    def test_delete_client_with_cascade_resolutions_executes_204(
+        self, api_client, create_record
+    ) -> None:
+        """S4 scenario: DELETE with body → atomic nullify (records) + cascade
+        (visitors, visits, photos SET NULL, visitor_tags) + auto cascade
+        (client_tags) + hard delete client.
+
+        EXPECTED RED until Task 10 lands ``ClientService.resolve_delete``.
+
+        Per spec §12.S4 / §8 atomicity: ONE outer ``@transactional``; the
+        VisitorService._delete_cascade reuses the SHARED session (no
+        per-visitor commit).
+        """
+        # 1 record + 2 visits + 2 visitors (Alice, Bob) for one client.
+        record = create_record(
+            visits=[
+                {"name": "Alice", "price": 3500, "status": "waiting"},
+                {"name": "Bob", "price": 2500, "status": "waiting"},
+            ]
+        )
+        client_id = record["client_id"]
+        record_id = record["id"]
+        # Capture visitor IDs.
+        visitors = query_db(
+            f"SELECT id FROM visitors WHERE client_id='{client_id}' ORDER BY id"
+        )
+        assert len(visitors) == 2
+        alice_vid = visitors[0]["id"]
+        bob_vid = visitors[1]["id"]
+        # Capture visit IDs (one per visitor).
+        alice_visit = query_db(
+            f"SELECT id FROM visits WHERE visitor_id='{alice_vid}'"
+        )
+        bob_visit = query_db(
+            f"SELECT id FROM visits WHERE visitor_id='{bob_vid}'"
+        )
+        assert len(alice_visit) == 1
+        assert len(bob_visit) == 1
+        alice_visit_id = alice_visit[0]["id"]
+        bob_visit_id = bob_visit[0]["id"]
+        # Payment on the record (record-scoped — survives the records nullify).
+        apipayment = api_client.post(
+            "/api/v1/payments",
+            json={"record_id": record_id, "amount": 1000, "method": "cash"},
+        )
+        assert apipayment.status_code == 201
+        payment_id = apipayment.json()["id"]
+        # Tag link (auto-cascade).
+        _link_client_tag(api_client, client_id, tag_name=f"ct-{client_id[:8]}")
+
+        # No-body dry-run → 409 (deps present).
+        resp = api_client.delete(f"/api/v1/clients/{client_id}")
+        assert resp.status_code == 409
+
+        # With-body execute → 204.
+        resp = api_client.request(
+            "DELETE",
+            f"/api/v1/clients/{client_id}",
+            json={"records": "nullify", "visitors": "cascade"},
+        )
+        assert resp.status_code == 204
+
+        # S4 outcome assertions:
+        # records survive with client_id=NULL (nullify).
+        rec_rows = query_db(
+            f"SELECT client_id FROM records WHERE id='{record_id}'"
+        )
+        assert len(rec_rows) == 1
+        assert rec_rows[0]["client_id"] is None
+        # payments survive (record-scoped — NOT part of visitors cascade).
+        pay_rows = query_db(f"SELECT * FROM payments WHERE id='{payment_id}'")
+        assert len(pay_rows) == 1
+        # visitors + visits + visitor_tags + client_tags gone.
+        assert query_db(f"SELECT * FROM visitors WHERE id='{alice_vid}'") == []
+        assert query_db(f"SELECT * FROM visitors WHERE id='{bob_vid}'") == []
+        assert query_db(f"SELECT * FROM visits WHERE id='{alice_visit_id}'") == []
+        assert query_db(f"SELECT * FROM visits WHERE id='{bob_visit_id}'") == []
+        assert query_db(
+            f"SELECT * FROM visitor_tags WHERE visitor_id IN ('{alice_vid}','{bob_vid}')"
+        ) == []
+        assert query_db(
+            f"SELECT * FROM client_tags WHERE client_id='{client_id}'"
+        ) == []
+        # client row physically gone.
+        assert api_client.get(f"/api/v1/clients/{client_id}").status_code == 404
+
+    def test_delete_client_with_wrong_action_returns_422(
+        self, api_client, create_record
+    ) -> None:
+        """§6 rule 1: ``records: "cascade"`` (records only allows nullify) → 422."""
+        record = create_record(
+            visits=[{"name": "Alice", "price": 3500, "status": "waiting"}]
+        )
+        client_id = record["client_id"]
+
+        resp = api_client.request(
+            "DELETE",
+            f"/api/v1/clients/{client_id}",
+            json={"records": "cascade", "visitors": "cascade"},
+        )
+
+        assert resp.status_code == 422
+        # Row untouched.
+        assert api_client.get(f"/api/v1/clients/{client_id}").status_code == 200
+
+    def test_delete_client_with_missing_dep_returns_422(
+        self, api_client, create_record
+    ) -> None:
+        """§6 rule 2: body omits ``visitors`` (a required non-auto dep) → 422."""
+        record = create_record(
+            visits=[{"name": "Alice", "price": 3500, "status": "waiting"}]
+        )
+        client_id = record["client_id"]
+
+        resp = api_client.request(
+            "DELETE",
+            f"/api/v1/clients/{client_id}",
+            json={"records": "nullify"},  # no visitors resolution
+        )
+
+        assert resp.status_code == 422
+        assert api_client.get(f"/api/v1/clients/{client_id}").status_code == 200
+
+    def test_delete_client_cascade_failure_rolls_back_atomically(
+        self, api_client, create_record, monkeypatch
+    ) -> None:
+        """§8 atomicity: mid-cascade failure (``_delete_cascade`` raise on 2nd
+        visitor) rolls back the WHOLE outer transaction — client still present,
+        records still linked (NOT nullified), first visitor NOT deleted.
+
+        EXPECTED RED until Task 10 — until ``ClientService.resolve_delete``
+        wires the VisitorService loop AND runs in one outer ``@transactional``,
+        a mid-loop raise either (a) is unreachable (executor doesn't exist) →
+        500/AttributeError, or (b) commits per-visitor → first visitor lost.
+
+        NB: the api_client fixture uses the default ``raise_server_exceptions=
+        True``, so the unhandled ``RuntimeError`` bubbles up to the test client
+        (Starlette re-raises before FastAPI's ``exception_handler(Exception)``
+        can convert it to 500). We expect that exactly — the spec §8 contract
+        is "rollback on mid-cascade failure", not "200/422 status code". The
+        response status is whatever FastAPI decided to do; the IMPORTANT part
+        is the DB-level rollback observation afterwards.
+        """
+        record = create_record(
+            visits=[
+                {"name": "Alice", "price": 3500, "status": "waiting"},
+                {"name": "Bob", "price": 2500, "status": "waiting"},
+            ]
+        )
+        client_id = record["client_id"]
+        record_id = record["id"]
+        visitors = query_db(
+            f"SELECT id FROM visitors WHERE client_id='{client_id}' ORDER BY id"
+        )
+        assert len(visitors) == 2
+
+        # Patch VisitorService singleton: 2nd _delete_cascade call raises.
+        from src.services.visitor import get_visitor_service
+
+        visitor_service = get_visitor_service()
+        original = visitor_service._delete_cascade
+        call_count = {"n": 0}
+
+        async def patched(db_session, visitor_id):
+            call_count["n"] += 1
+            if call_count["n"] == 2:
+                raise RuntimeError("mid-cascade simulated failure")
+            return await original(db_session, visitor_id)
+
+        monkeypatch.setattr(visitor_service, "_delete_cascade", patched)
+
+        # The unhandled RuntimeError bubbles to the test client (above). The
+        # outer ``@transactional`` in ``resolve_delete`` saw the raise, skipped
+        # its commit, and ``get_db_session`` rolls back the session on exit —
+        # leaving the DB state atomic (NO mid-loop commit).
+        with pytest.raises(RuntimeError, match="mid-cascade"):
+            api_client.request(
+                "DELETE",
+                f"/api/v1/clients/{client_id}",
+                json={"records": "nullify", "visitors": "cascade"},
+            )
+
+        # Atomicity: rollback restored client + records + BOTH visitors.
+        # (If the loop had committed per-visitor, the 1st visitor would be
+        # gone and the records would be NULL — spec §8 BLOCKER-class guards
+        # precisely against that.)
+        assert api_client.get(f"/api/v1/clients/{client_id}").status_code == 200
+        rec = query_db(f"SELECT client_id FROM records WHERE id='{record_id}'")
+        assert rec[0]["client_id"] == client_id  # NULL was rolled back.
+        assert (
+            len(query_db(f"SELECT * FROM visitors WHERE client_id='{client_id}'"))
+            == 2
+        )
+        # The 1st-processed visitor survived the rollback (NO mid-loop commit).
+        assert call_count["n"] == 2

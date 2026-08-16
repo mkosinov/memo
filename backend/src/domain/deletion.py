@@ -35,7 +35,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.activity import Activity
@@ -59,6 +59,7 @@ from src.models.visitor import Visitor
 
 if TYPE_CHECKING:
     from src.db.base import Base
+    from src.services.generic import ArchiveService
 
 
 # ─── Exception hierarchy ────────────────────────────────────────────────────────
@@ -444,3 +445,153 @@ def validate_resolutions(
             )
 
     return errors
+
+
+# ─── Per-(Model, FK-entity) dep handlers — Task 10 executor dispatch ───────────
+# Called by ``ArchiveService.resolve_delete`` (spec §6 execution order
+# nullify → cascade → hard delete). Each handler is a free async function
+# taking ``(self, session, entity_id)`` so that ``_h_cascade_client_visitors``
+# can access ``self._visitor_service`` (injected only on ``ClientService``);
+# all other handlers ignore the ``self`` arg.
+
+type _FkHandlerFn = Callable[
+    ["ArchiveService", AsyncSession, str], Awaitable[None]
+]
+
+
+# ─── nullify handlers ───────────────────────────────────────────────────────────
+
+
+async def _h_nullify_service_photos(
+    _self: ArchiveService, session: AsyncSession, entity_id: str,
+) -> None:
+    """Service → photos auto-nullify: ``Photo.service_id`` set NULL (survives)."""
+    await session.execute(
+        update(Photo).where(Photo.service_id == entity_id).values(service_id=None)
+    )
+
+
+async def _h_nullify_client_records(
+    _self: ArchiveService, session: AsyncSession, entity_id: str,
+) -> None:
+    """Client → records user-choice nullify: ``Record.client_id`` set NULL
+    (records become anonymous — survive with their payments record-scoped)."""
+    await session.execute(
+        update(Record).where(Record.client_id == entity_id).values(client_id=None)
+    )
+
+
+# ─── cascade handlers ───────────────────────────────────────────────────────────
+
+
+async def _h_cascade_master_users(
+    _self: ArchiveService, session: AsyncSession, entity_id: str,
+) -> None:
+    """Master → users auto-cascade (§4.1, Change 2): hard-delete the linked
+    ``User`` row. The User is the master's login account; deleting the profile but
+    keeping the account = orphan, so the account goes with it (no user choice).
+
+    NB: ``user_settings.user_id`` (NOT NULL, no ``ondelete``) FK-references
+    ``users.id`` — if a settings row exists for the linked user, this DELETE will
+    FK-violate. Spec §4.1 scopes this to a User with NO downstream rows; the
+    #207 test scenarios use the bare ``_user`` fixture which inserts no settings.
+    A future spec revision would have to extend this handler (e.g., delete
+    user_settings first) — out of scope for #207.
+    """
+    await session.execute(delete(User).where(User.master_id == entity_id))
+
+
+async def _h_cascade_master_tags(
+    _self: ArchiveService, session: AsyncSession, entity_id: str,
+) -> None:
+    """Master → master_tags auto-cascade (join): hard-delete rows where master_id."""
+    await session.execute(
+        delete(master_tags).where(master_tags.c.master_id == entity_id)
+    )
+
+
+async def _h_cascade_location_tags(
+    _self: ArchiveService, session: AsyncSession, entity_id: str,
+) -> None:
+    """Location → location_tags auto-cascade (join): hard-delete rows where location_id."""
+    await session.execute(
+        delete(location_tags).where(location_tags.c.location_id == entity_id)
+    )
+
+
+async def _h_cascade_service_tariffs(
+    _self: ArchiveService, session: AsyncSession, entity_id: str,
+) -> None:
+    """Service → tariffs auto-cascade: hard-delete rows where service_id."""
+    await session.execute(delete(Tariff).where(Tariff.service_id == entity_id))
+
+
+async def _h_cascade_service_tags(
+    _self: ArchiveService, session: AsyncSession, entity_id: str,
+) -> None:
+    """Service → service_tags auto-cascade (join): hard-delete rows where service_id."""
+    await session.execute(
+        delete(service_tags).where(service_tags.c.service_id == entity_id)
+    )
+
+
+async def _h_cascade_client_tags(
+    _self: ArchiveService, session: AsyncSession, entity_id: str,
+) -> None:
+    """Client → client_tags auto-cascade (join): hard-delete rows where client_id."""
+    await session.execute(
+        delete(client_tags).where(client_tags.c.client_id == entity_id)
+    )
+
+
+async def _h_cascade_client_visitors(
+    self: ArchiveService, session: AsyncSession, entity_id: str,
+) -> None:
+    """Client → visitors USER-CHOICE cascade — loop ``VisitorService._delete_cascade``
+    on the SHARED session (atomicity with the outer ``ClientService.resolve_delete``
+    transaction — spec §8 BLOCKER-class: NO per-visitor commit).
+
+    Each iteration triggers (per ``VisitorService._delete_cascade`` §8 reference):
+      1. ``DELETE FROM visits WHERE visitor_id=<vid>``
+      2. ``UPDATE photos SET visitor_id=NULL WHERE visitor_id=<vid>`` (photo survives)
+      3. ``DELETE FROM visitor_tags WHERE visitor_id=<vid>``
+      4. ``DELETE FROM visitors WHERE id=<vid>``
+
+    Payments are record-scoped and EXCLUDED — records are nullified (not deleted)
+    so their payments do not flow through this cascade (§5).
+
+    ``self`` is the ``ClientService`` instance — only it carries
+    ``self._visitor_service`` (injected via DI in ``get_client_service``).
+    Base ``ArchiveService`` is never dispatched here for visitors because
+    ``(Client, "visitors")`` appears only in ``FK_MATRIX[Client]``.
+    """
+    visitor_ids_result = await session.execute(
+        select(Visitor.id).where(Visitor.client_id == entity_id)
+    )
+    visitor_ids = list(visitor_ids_result.scalars().all())
+    visitor_service = self._visitor_service  # type: ignore[attr-defined]
+    for vid in visitor_ids:
+        await visitor_service._delete_cascade(session, vid)
+
+
+# ─── Dispatch tables ───────────────────────────────────────────────────────────
+# Per-(Model, dep_entity) → handler. Adding a new pair requires BOTH a
+# FKDependency entry in :data:`FK_MATRIX` above (with the right ``action``) AND
+# a handler entry in the matching table below (nullify/cascade). The base
+# ``ArchiveService.resolve_delete`` executor iterates ``FK_MATRIX[self._model]``
+# in spec §6 order (nullify → cascade → hard delete) and dispatches each dep.
+
+NULLIFY_HANDLERS: dict[tuple[type[Base], str], _FkHandlerFn] = {
+    (Service, "photos"): _h_nullify_service_photos,
+    (Client, "records"): _h_nullify_client_records,
+}
+
+CASCADE_HANDLERS: dict[tuple[type[Base], str], _FkHandlerFn] = {
+    (Master, "users"): _h_cascade_master_users,
+    (Master, "master_tags"): _h_cascade_master_tags,
+    (Location, "location_tags"): _h_cascade_location_tags,
+    (Service, "tariffs"): _h_cascade_service_tariffs,
+    (Service, "service_tags"): _h_cascade_service_tags,
+    (Client, "client_tags"): _h_cascade_client_tags,
+    (Client, "visitors"): _h_cascade_client_visitors,  # uses self._visitor_service
+}

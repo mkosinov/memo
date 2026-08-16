@@ -2,6 +2,8 @@
 
 import pytest
 
+from tests.conftest import query_db
+
 pytestmark = pytest.mark.api
 
 SERVICE_PAYLOAD = {
@@ -435,3 +437,174 @@ class TestServiceListStatusFilter:
         """?status=foo (not a valid ArchiveStatus) → 422 from enum validation."""
         resp = api_client.get("/api/v1/services?status=foo")
         assert resp.status_code == 422
+
+
+class TestDeleteUnifiedRoute:
+    """DELETE /api/v1/services/{id} — unified dry-run (no body) + execute (with body).
+
+    Spec: docs/specs/2026-08-15-delete-hard-delete-and-dependency-resolution-design.md
+      * §2  — Change 1: body presence distinguishes dry-run vs execute.
+      * §4  — Service FK deps: activities=block, tariffs=auto-cascade,
+              photos=auto-nullify, service_tags=auto-cascade.
+      * §5  — 409 Conflict response (counters + sums only).
+      * §6  — DELETE with resolutions body (executor = Task 10).
+      * §14 — acceptance criteria.
+    """
+
+    def test_delete_service_with_activities_no_body_returns_409(
+        self, api_client, create_activity
+    ) -> None:
+        """No body + blocking dep (activities) → 409 + dependency tree (spec §5)."""
+        activity = create_activity()
+        service_id = activity["service_id"]
+
+        resp = api_client.delete(f"/api/v1/services/{service_id}")
+
+        assert resp.status_code == 409
+        body = resp.json()
+        assert body["detail"] == "has_dependencies"
+        deps = {d["entity"]: d for d in body["dependencies"]}
+        assert "activities" in deps
+        assert deps["activities"]["count"] == 1
+        assert deps["activities"]["allowed_actions"] == []
+        assert deps["activities"]["message"] is not None
+        # Row untouched.
+        assert api_client.get(f"/api/v1/services/{service_id}").status_code == 200
+
+    def test_delete_service_with_auto_deps_no_body_returns_409(
+        self, api_client, create_service
+    ) -> None:
+        """No body + all-auto deps (tariffs+photos+service_tags, NO activities)
+        → 409 + dependency tree (spec §5).
+
+        All Service non-block deps are AUTO (tariffs cascade, photos nullify,
+        service_tags cascade). The dry-run still surfaces them for informed
+        consent — the user's ``resolutions`` body would be ``{}`` to execute.
+        """
+        tag_id = _create_tag(api_client)
+        service = create_service(
+            tariffs=[TARIFF_PAYLOAD], tag_ids=[tag_id]
+        )
+        service_id = service["id"]
+        # Add a photo linked to this service (auto-nullify dep).
+        photo_resp = api_client.post(
+            "/api/v1/photos",
+            json={"filename": f"svc-{service_id[:8]}.jpg", "service_id": service_id},
+        )
+        assert photo_resp.status_code == 201
+        photo_id = photo_resp.json()["id"]
+
+        resp = api_client.delete(f"/api/v1/services/{service_id}")
+
+        assert resp.status_code == 409
+        body = resp.json()
+        assert body["detail"] == "has_dependencies"
+        deps = {d["entity"]: d for d in body["dependencies"]}
+        # All non-auto deps are absent from tree (zero-count filters):
+        # activities (count 0) is skipped.
+        assert "activities" not in deps
+        # tariffs (auto cascade) — shown for consent.
+        assert deps["tariffs"]["count"] == 1
+        assert deps["tariffs"]["allowed_actions"] == ["cascade"]
+        # photos (auto nullify) — shown for consent.
+        assert deps["photos"]["count"] == 1
+        assert deps["photos"]["allowed_actions"] == ["nullify"]
+        # service_tags (auto cascade) — shown for consent.
+        assert deps["service_tags"]["count"] == 1
+        assert deps["service_tags"]["allowed_actions"] == ["cascade"]
+        # Row + photo + tariff + tag join untouched (dry-run).
+        assert api_client.get(f"/api/v1/services/{service_id}").status_code == 200
+        assert query_db(f"SELECT service_id FROM photos WHERE id='{photo_id}'")[0][
+            "service_id"
+        ] == service_id
+
+    def test_delete_bare_service_no_body_returns_204_and_row_gone(
+        self, api_client, create_service
+    ) -> None:
+        """No body + zero deps → 204 hard delete; row physically gone (spec §2)."""
+        service = create_service()
+
+        resp = api_client.delete(f"/api/v1/services/{service['id']}")
+
+        assert resp.status_code == 204
+        assert api_client.get(f"/api/v1/services/{service['id']}").status_code == 404
+
+    def test_delete_service_with_activities_with_body_returns_422_blocking(
+        self, api_client, create_activity
+    ) -> None:
+        """With body + blocking dep (activities) → 422 'archive instead' (spec §6.4)."""
+        activity = create_activity()
+        service_id = activity["service_id"]
+
+        resp = api_client.request(
+            "DELETE", f"/api/v1/services/{service_id}", json={}
+        )
+
+        assert resp.status_code == 422
+        # Row untouched.
+        assert api_client.get(f"/api/v1/services/{service_id}").status_code == 200
+
+    def test_delete_service_with_auto_deps_with_body_executes_204(
+        self, api_client, create_service
+    ) -> None:
+        """With body ``{}`` + all-auto deps → 204 execute.
+
+        EXPECTED RED until Task 10 lands ``ArchiveService.resolve_delete``.
+
+        Outcomes (spec §6 execution order nullify → cascade → hard delete):
+        * photos: ``service_id`` SET NULL (photo survives, auto-nullify).
+        * tariffs: hard-deleted (auto-cascade).
+        * service_tags: hard-deleted (auto-cascade).
+        * service: hard-deleted.
+        """
+        tag_id = _create_tag(api_client)
+        service = create_service(
+            tariffs=[TARIFF_PAYLOAD], tag_ids=[tag_id]
+        )
+        service_id = service["id"]
+        # Capture tariff + photo IDs before delete.
+        tariff_id_before = query_db(
+            f"SELECT id FROM tariffs WHERE service_id='{service_id}'"
+        )[0]["id"]
+        photo_resp = api_client.post(
+            "/api/v1/photos",
+            json={"filename": f"svc-{service_id[:8]}.jpg", "service_id": service_id},
+        )
+        photo_id = photo_resp.json()["id"]
+
+        resp = api_client.request(
+            "DELETE", f"/api/v1/services/{service_id}", json={}
+        )
+
+        assert resp.status_code == 204
+        # Service row gone.
+        assert api_client.get(f"/api/v1/services/{service_id}").status_code == 404
+        # Tariffs hard-deleted (auto-cascade).
+        assert query_db(f"SELECT * FROM tariffs WHERE id='{tariff_id_before}'") == []
+        # service_tags join rows hard-deleted (auto-cascade).
+        assert (
+            query_db(
+                f"SELECT * FROM service_tags WHERE service_id='{service_id}'"
+            )
+            == []
+        )
+        # Photo survives with service_id=NULL (auto-nullify).
+        photo_rows = query_db(f"SELECT service_id FROM photos WHERE id='{photo_id}'")
+        assert len(photo_rows) == 1
+        assert photo_rows[0]["service_id"] is None
+
+    def test_delete_nonexistent_service_no_body_returns_404(self, api_client) -> None:
+        """No body + nonexistent id → 404 (service.delete returns False)."""
+        resp = api_client.delete("/api/v1/services/nonexistent-service-id")
+        assert resp.status_code == 404
+        assert resp.json()["detail"]["code"] == "SERVICE_NOT_FOUND"
+
+    def test_delete_nonexistent_service_with_body_returns_404(self, api_client) -> None:
+        """With body + nonexistent id → 404 (executor returns False).
+
+        EXPECTED RED until Task 10 (resolve_delete missing → AttributeError today).
+        """
+        resp = api_client.request(
+            "DELETE", "/api/v1/services/nonexistent-service-id", json={}
+        )
+        assert resp.status_code == 404

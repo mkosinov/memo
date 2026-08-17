@@ -20,6 +20,8 @@ import pytest
 
 from tests.generic_contract import (
     EntityConfig,
+    TagService,
+    _all_params,
     _contract_params,
     _hard_params,
     _serialized_keys,
@@ -48,8 +50,16 @@ def _jsonable(payload: dict[str, Any]) -> dict[str, Any]:
     return {k: (v.isoformat() if isinstance(v, datetime) else v) for k, v in payload.items()}
 
 
-def _create_payload(cfg: EntityConfig, fk_ids: dict[str, Any]) -> dict[str, Any]:
-    return _jsonable({**cfg.create_data, **fk_ids})
+def _create_payload(cfg: EntityConfig, fk_ids: dict[str, Any], data: dict[str, Any] | None = None) -> dict[str, Any]:
+    """POST body: ``data`` (defaults to ``cfg.create_data``) + FK ids, JSON-serialized.
+
+    The optional ``data`` override lets a test POST a row whose sort key
+    differs from ``cfg.create_data`` (used by the ``/all`` default-order
+    contract to seed a sentinel that sorts BEFORE the default row per
+    spec §4.4).
+    """
+    base = data if data is not None else cfg.create_data
+    return _jsonable({**base, **fk_ids})
 
 
 def _update_payload(cfg: EntityConfig, fk_ids: dict[str, Any]) -> dict[str, Any]:
@@ -71,8 +81,15 @@ def _update_payload(cfg: EntityConfig, fk_ids: dict[str, Any]) -> dict[str, Any]
     return payload
 
 
-def _create_entity(api_client, cfg: EntityConfig, fk_ids: dict[str, Any]) -> dict[str, Any]:
-    resp = api_client.post(cfg.router_prefix, json=_create_payload(cfg, fk_ids))
+def _create_entity(
+    api_client,
+    cfg: EntityConfig,
+    fk_ids: dict[str, Any],
+    data: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """POST a row and return the created body. Optional ``data`` overrides
+    ``cfg.create_data`` (see ``_create_payload``)."""
+    resp = api_client.post(cfg.router_prefix, json=_create_payload(cfg, fk_ids, data=data))
     assert resp.status_code == 201, f"POST {cfg.router_prefix} → {resp.status_code}: {resp.text}"
     return resp.json()
 
@@ -299,3 +316,182 @@ class TestGenericApiPatchWiring:
     def test_patch_nonexistent_returns_404_with_entity_code(self, service_cls, cfg, api_client):
         assert cfg is not None, f"{service_cls.__name__}: missing CONTRACT_CONFIG entry"
         _assert_not_found(api_client.patch(f"{cfg.router_prefix}/nonexistent-id", json={}), cfg)
+
+
+# ─── /all contract (GH #205 Task 4) ─────────────────────────────────────────
+# Spec §4.6: opt-in parametrizer (``_all_params`` in generic_contract.py)
+# filtered to the 5 dictionary service classes. Covers: bare-array shape +
+# item schema, deterministic default order (§4.4), status parity for archive
+# entities (tags skipped), limit 422 + boundary (tags only — cheapest bulk
+# insert; enforcement is the single shared ``list_all`` choke point), and a
+# negative route-presence guard for non-dictionaries.
+
+
+class TestGenericApiAllContract:
+    """``GET {prefix}/all`` contract for the 5 dictionaries (spec §4.6, #205).
+
+    Mirrors ``TestGenericApiListContract``'s style but asserts the bare-array
+    second response shape approved at G1a: a top-level JSON array (NOT the
+    ``PaginatedResponse`` envelope), items validating against
+    ``cfg.response_schema``, §4.4 deterministic default order, and archive-
+    status parity for the 4 archive-capable dictionaries (tags skipped —
+    non-archive, hard-delete only).
+    """
+
+    @pytest.mark.parametrize("service_cls,cfg", _all_params())
+    def test_all_returns_bare_array_with_valid_items(self, service_cls, cfg, api_client, request):
+        assert cfg is not None, f"{service_cls.__name__}: missing CONTRACT_CONFIG entry"
+        fk_ids = _resolve_fk_ids(request, cfg)
+        created = _create_entity(api_client, cfg, fk_ids)
+        resp = api_client.get(cfg.router_prefix + "/all")
+        assert resp.status_code == 200, f"GET {cfg.router_prefix}/all → {resp.status_code}: {resp.text}"
+        body = resp.json()
+        assert isinstance(body, list), "/all must be a bare array, not an envelope"
+        # Negative assertion on envelope keys: a list has no ``items``/``total``
+        # keys — ``isinstance(body, list)`` above IS that assertion.
+        matches = [item for item in body if item["id"] == created["id"]]
+        assert len(matches) == 1, "created entity must appear in /all exactly once"
+        _validate_response_body(matches[0], cfg)
+
+    @pytest.mark.parametrize("service_cls,cfg", _all_params())
+    def test_all_deterministic_default_order(self, service_cls, cfg, api_client, request):
+        """§4.4 default order: the ``earlier_create_data`` sentinel sorts
+        BEFORE the default ``create_data`` row, so it must appear earlier in
+        the ``/all`` array regardless of insertion order."""
+        assert cfg is not None, f"{service_cls.__name__}: missing CONTRACT_CONFIG entry"
+        assert cfg.earlier_create_data is not None, (
+            f"{service_cls.__name__}: earlier_create_data must be set on the config "
+            f"to exercise the §4.4 default-order contract"
+        )
+        fk_ids = _resolve_fk_ids(request, cfg)
+        # Insert "later" FIRST, then "earlier" — order must come from §4.4
+        # columns, not insertion/id order.
+        later = _create_entity(api_client, cfg, fk_ids)
+        earlier_data = {**cfg.create_data, **cfg.earlier_create_data}
+        earlier = _create_entity(api_client, cfg, fk_ids, data=earlier_data)
+        body = api_client.get(cfg.router_prefix + "/all").json()
+        ids = [item["id"] for item in body]
+        assert ids.index(earlier["id"]) < ids.index(later["id"]), (
+            f"{service_cls.__name__} /all default order per spec §4.4: the "
+            f"sentinel row must sort before the default-create_data row"
+        )
+
+    @pytest.mark.parametrize("service_cls,cfg", _all_params())
+    def test_all_status_filter_parity(self, service_cls, cfg, api_client, request):
+        """Archive entities: ``/all`` honors ``status`` the same way as the
+        paginated list — active default hides archived, ``status=all`` and
+        ``status=archived`` include them. Tags have no archive surface → skip."""
+        assert cfg is not None, f"{service_cls.__name__}: missing CONTRACT_CONFIG entry"
+        if service_cls is TagService:
+            pytest.skip("tags have no archive status (non-archive, hard-delete only)")
+        fk_ids = _resolve_fk_ids(request, cfg)
+        created = _create_entity(api_client, cfg, fk_ids)
+        archive = api_client.post(f"{cfg.router_prefix}/{created['id']}/archive")
+        assert archive.status_code == 200, f"archive → {archive.status_code}: {archive.text}"
+        # Default (active) hides the archived row.
+        assert all(item["id"] != created["id"] for item in api_client.get(cfg.router_prefix + "/all").json()), (
+            "archived row must NOT appear in /all with default (active) status"
+        )
+        # status=all includes it.
+        assert any(
+            item["id"] == created["id"]
+            for item in api_client.get(cfg.router_prefix + "/all", params={"status": "all"}).json()
+        ), "archived row MUST appear in /all?status=all"
+        # status=archived includes it.
+        assert any(
+            item["id"] == created["id"]
+            for item in api_client.get(cfg.router_prefix + "/all", params={"status": "archived"}).json()
+        ), "archived row MUST appear in /all?status=archived"
+
+
+# ─── /all limit + boundary (tags only — cheapest bulk insert) ───────────────
+# Enforcement lives in the single shared ``GenericService.list_all`` choke
+# point (LIMIT BARE_LIST_MAX_ROWS + 1 probe → BareListLimitExceededError).
+# One entity suffices to cover all 5 (spec §4.6). Tags are the cheapest
+# (single String column, no FKs, no nested relationships).
+
+
+def _bulk_seed_tags(db_engine, n: int) -> None:
+    """Bulk-insert ``n`` tag rows directly via SQLAlchemy (sync test → asyncio.run).
+
+    Mirrors conftest's ``reset_db`` ``asyncio.run`` idiom (:145-156). Explicit
+    uuid4 ids + created_at/updated_at are supplied because bulk ``insert()``
+    with a list of dicts does not reliably invoke Python-side column defaults
+    across SQLAlchemy versions — supplying them keeps the test deterministic.
+    """
+    import asyncio
+    import uuid as _uuid
+    from datetime import datetime
+
+    async def _seed() -> None:
+        from sqlalchemy import insert
+        from sqlalchemy.ext.asyncio import async_sessionmaker
+
+        from src.models.tag import Tag
+
+        factory = async_sessionmaker(db_engine, expire_on_commit=False)
+        now = datetime.utcnow()
+        rows = [
+            {
+                "id": str(_uuid.uuid4()),
+                "tag": f"bulk-{i:05d}",
+                "created_at": now,
+                "updated_at": now,
+            }
+            for i in range(n)
+        ]
+        async with factory() as session:
+            await session.execute(insert(Tag), rows)
+            await session.commit()
+
+    asyncio.run(_seed())
+
+
+def test_all_limit_exceeded_422(api_client, db_engine):
+    """``BARE_LIST_MAX_ROWS + 1`` rows → 422 with the standard envelope
+    (``code=VALIDATION_ERROR``, English message naming the entity + limit)."""
+    from src.services.generic import BARE_LIST_MAX_ROWS
+
+    _bulk_seed_tags(db_engine, BARE_LIST_MAX_ROWS + 1)
+    resp = api_client.get("/api/v1/tags/all")
+    assert resp.status_code == 422, f"limit exceeded → 422, got {resp.status_code}: {resp.text}"
+    detail = resp.json()["detail"]
+    assert detail["code"] == "VALIDATION_ERROR"
+    assert "tags" in detail["message"], "message must name the entity ('tags')"
+    assert str(BARE_LIST_MAX_ROWS) in detail["message"], "message must cite the limit value"
+
+
+def test_all_limit_boundary_ok(api_client, db_engine):
+    """Exactly ``BARE_LIST_MAX_ROWS`` rows → 200 with the full array (boundary)."""
+    from src.services.generic import BARE_LIST_MAX_ROWS
+
+    _bulk_seed_tags(db_engine, BARE_LIST_MAX_ROWS)
+    resp = api_client.get("/api/v1/tags/all")
+    assert resp.status_code == 200, f"boundary → 200, got {resp.status_code}: {resp.text}"
+    body = resp.json()
+    assert isinstance(body, list)
+    assert len(body) == BARE_LIST_MAX_ROWS, "exactly BARE_LIST_MAX_ROWS rows must be returned"
+
+
+# ─── /all route-presence negative guard (non-dictionaries → 404) ────────────
+# Spec §4.6 + G1b: ``/all`` is dictionaries-only. The 6 non-dictionary
+# prefixes must NOT have a ``/all`` route — a 404 keeps the opt-in semantics
+# pinned (#205).
+
+
+@pytest.mark.parametrize(
+    "prefix",
+    [
+        "/api/v1/clients",
+        "/api/v1/records",
+        "/api/v1/activities",
+        "/api/v1/visits",
+        "/api/v1/payments",
+        "/api/v1/visitors",
+    ],
+)
+def test_all_absent_on_non_dictionaries(api_client, prefix):
+    resp = api_client.get(prefix + "/all")
+    assert resp.status_code == 404, (
+        f"{prefix}/all must NOT exist — /all is dictionaries-only (#205)"
+    )

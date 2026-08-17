@@ -248,6 +248,29 @@ def create_location(api_client):
 
 
 @pytest.fixture
+def create_tag(api_client):
+    """Factory: creates a tag via API. Uses UUID for unique tag value.
+
+    Usage::
+
+        tag = create_tag()
+        tag = create_tag(tag="beginner")
+    """
+    import uuid as _uuid
+
+    def factory(**overrides):
+        unique = _uuid.uuid4().hex[:8]
+        payload = {
+            "tag": f"tag-{unique}",
+            **overrides,
+        }
+        resp = api_client.post("/api/v1/tags", json=payload)
+        assert resp.status_code == 201, f"create_tag failed: {resp.status_code}: {resp.text}"
+        return resp.json()
+    return factory
+
+
+@pytest.fixture
 def create_client(api_client):
     """Factory: creates a client via API. Uses UUID for unique phone.
 

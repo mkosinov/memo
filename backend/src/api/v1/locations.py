@@ -9,6 +9,7 @@ from sqlalchemy import asc
 
 from src.db import SessionDep
 from src.domain.deletion import ResolutionError, collect_dependencies
+from src.domain.errors import BareListLimitExceededError
 from src.errors import ErrorCode, ErrorDetail
 from src.models.enums import ArchiveStatus
 from src.models.location import Location
@@ -56,6 +57,28 @@ async def list_locations(
         status=status,
         order_by=[asc(Location.sort_order), asc(Location.name)],
     )
+
+
+@router.get("/all", response_model=list[LocationResponse])
+async def list_all_locations(
+    service: _ServiceDep,
+    session: SessionDep,
+    status: ArchiveStatus = Query(ArchiveStatus.ACTIVE),
+) -> list[LocationResponse]:
+    """Return all locations as a bare JSON array (GH #205).
+
+    Unpaginated, capped by ``BARE_LIST_MAX_ROWS`` (1000). Sorted by
+    ``sort_order ASC, name ASC, id ASC`` (spec §4.4). ``status``
+    mirrors the paginated list endpoint (active default / archived / all).
+    """
+    try:
+        return await service.list_all(
+            db_session=session,
+            status=status,
+            order_by=[asc(Location.sort_order), asc(Location.name), asc(Location.id)],
+        )
+    except BareListLimitExceededError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.put("/reorder", response_model=list[LocationResponse])

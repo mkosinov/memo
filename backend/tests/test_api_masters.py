@@ -527,3 +527,38 @@ class TestScenarioS3MasterBlockedArchiveFlow:
             len(query_db(f"SELECT * FROM activities WHERE master_id='{master['id']}'"))
             == 3
         )
+
+
+class TestMasterAllEndpoint:
+    """GET /api/v1/masters/all — bare array (GH #205 Task 2).
+
+    Minimal smoke: returns a bare JSON array (not an envelope) containing
+    created masters, with ``status`` parity to the paginated list endpoint.
+    Full generic contract lands in Task 4.
+    """
+
+    def test_all_returns_bare_array(self, api_client, create_master) -> None:
+        created = create_master()
+        resp = api_client.get("/api/v1/masters/all")
+        assert resp.status_code == 200, f"GET /all failed: {resp.text}"
+        body = resp.json()
+        assert isinstance(body, list), "/all must return a bare array, not an envelope"
+        assert any(item["id"] == created["id"] for item in body)
+
+    def test_all_status_filter(self, api_client, create_master) -> None:
+        """Default (?status=active) excludes archived; ?status=all includes them."""
+        active = create_master()
+        archived = create_master()
+        _archive_master(archived["id"])
+
+        default = api_client.get("/api/v1/masters/all")
+        assert default.status_code == 200
+        default_ids = [m["id"] for m in default.json()]
+        assert active["id"] in default_ids
+        assert archived["id"] not in default_ids
+
+        all_resp = api_client.get("/api/v1/masters/all?status=all")
+        assert all_resp.status_code == 200
+        all_ids = [m["id"] for m in all_resp.json()]
+        assert active["id"] in all_ids
+        assert archived["id"] in all_ids

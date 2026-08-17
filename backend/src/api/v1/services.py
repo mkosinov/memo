@@ -5,9 +5,11 @@ from typing import Annotated
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
+from sqlalchemy import asc
 
 from src.db import SessionDep
 from src.domain.deletion import ResolutionError, collect_dependencies
+from src.domain.errors import BareListLimitExceededError
 from src.errors import ErrorCode, ErrorDetail
 from src.models.enums import ArchiveStatus
 from src.models.service import Service
@@ -42,6 +44,29 @@ async def list_services(
     enum validation.
     """
     return await service.list(db_session=session, page=page, per_page=per_page, status=status)
+
+
+@router.get("/all", response_model=list[ServiceResponse])
+async def list_all_services(
+    service: _ServiceDep,
+    session: SessionDep,
+    status: ArchiveStatus = Query(ArchiveStatus.ACTIVE),
+) -> list[ServiceResponse]:
+    """Return all services as a bare JSON array (GH #205).
+
+    Unpaginated, capped by ``BARE_LIST_MAX_ROWS`` (1000). Sorted by
+    ``title ASC, id ASC`` (spec §4.4). ``status`` mirrors the paginated
+    list endpoint (active default / archived / all). Tariffs and tags are
+    eagerly loaded (``ServiceService.list_all`` override).
+    """
+    try:
+        return await service.list_all(
+            db_session=session,
+            status=status,
+            order_by=[asc(Service.title), asc(Service.id)],
+        )
+    except BareListLimitExceededError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get("/{service_id}", response_model=ServiceResponse)

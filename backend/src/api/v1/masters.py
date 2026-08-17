@@ -9,6 +9,7 @@ from sqlalchemy import asc
 
 from src.db import SessionDep
 from src.domain.deletion import ResolutionError, collect_dependencies
+from src.domain.errors import BareListLimitExceededError
 from src.errors import ErrorCode, ErrorDetail
 from src.models.enums import ArchiveStatus
 from src.models.master import Master
@@ -50,6 +51,28 @@ async def list_masters(
         status=status,
         order_by=[asc(Master.sort_order), asc(Master.first_name)],
     )
+
+
+@router.get("/all", response_model=list[MasterResponse])
+async def list_all_masters(
+    service: _ServiceDep,
+    session: SessionDep,
+    status: ArchiveStatus = Query(ArchiveStatus.ACTIVE),
+) -> list[MasterResponse]:
+    """Return all masters as a bare JSON array (GH #205).
+
+    Unpaginated, capped by ``BARE_LIST_MAX_ROWS`` (1000). Sorted by
+    ``sort_order ASC, first_name ASC, id ASC`` (spec §4.4). ``status``
+    mirrors the paginated list endpoint (active default / archived / all).
+    """
+    try:
+        return await service.list_all(
+            db_session=session,
+            status=status,
+            order_by=[asc(Master.sort_order), asc(Master.first_name), asc(Master.id)],
+        )
+    except BareListLimitExceededError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.put("/reorder", response_model=list[MasterResponse])

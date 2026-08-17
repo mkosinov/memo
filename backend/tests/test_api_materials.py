@@ -262,3 +262,19 @@ class TestArchiveRestoreNoUserCascade:
         assert resp.status_code == 200
         rows = query_db(f"SELECT is_active FROM users WHERE id='{_user['id']}'")
         assert rows[0]["is_active"] == 1
+
+
+class TestMaterialAllEndpoint:
+    """GET /api/v1/materials/all — bare array (GH #205 Task 2).
+
+    Minimal smoke: returns a bare JSON array (not an envelope) containing
+    created materials. Full generic contract lands in Task 4.
+    """
+
+    def test_all_returns_bare_array(self, api_client) -> None:
+        created = _create_material(api_client, title="All Endpoint Test")
+        resp = api_client.get("/api/v1/materials/all")
+        assert resp.status_code == 200, f"GET /all failed: {resp.text}"
+        body = resp.json()
+        assert isinstance(body, list), "/all must return a bare array, not an envelope"
+        assert any(item["id"] == created["id"] for item in body)

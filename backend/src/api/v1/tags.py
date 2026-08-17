@@ -4,9 +4,12 @@ from functools import lru_cache
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import asc
 
 from src.db import SessionDep
+from src.domain.errors import BareListLimitExceededError
 from src.errors import ErrorCode, ErrorDetail
+from src.models.tag import Tag
 from src.schemas.common import PaginatedResponse
 from src.schemas.tag import TagCreate, TagPatch, TagResponse
 from src.services.tag import TagService, get_tag_service
@@ -32,6 +35,26 @@ async def list_tags(
 ) -> PaginatedResponse[TagResponse]:
     """Return all tags, paginated."""
     return await service.list(db_session=session, page=page, per_page=per_page)
+
+
+@router.get("/all", response_model=list[TagResponse])
+async def list_all_tags(
+    service: _ServiceDep,
+    session: SessionDep,
+) -> list[TagResponse]:
+    """Return all tags as a bare JSON array (GH #205).
+
+    Unpaginated, capped by ``BARE_LIST_MAX_ROWS`` (1000). Sorted by
+    ``tag ASC, id ASC`` (spec §4.4). Tags are non-archive (hard-delete
+    only) — no ``status`` param.
+    """
+    try:
+        return await service.list_all(
+            db_session=session,
+            order_by=[asc(Tag.tag), asc(Tag.id)],
+        )
+    except BareListLimitExceededError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get("/{tag_id}", response_model=TagResponse)

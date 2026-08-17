@@ -22,6 +22,7 @@ from src.domain.deletion import (
     has_blocking_deps,
     validate_resolutions,
 )
+from src.domain.errors import BareListLimitExceededError
 from src.models.enums import ArchiveStatus
 from src.repositories.generic import BaseRepository
 from src.schemas.common import PaginatedResponse
@@ -30,6 +31,10 @@ from src.services.decorators import transactional
 CreateSchemaT = TypeVar("CreateSchemaT", bound=BaseModel)
 UpdateSchemaT = TypeVar("UpdateSchemaT", bound=BaseModel)
 ResponseSchemaT = TypeVar("ResponseSchemaT", bound=BaseModel)
+
+# Protective limit for bare /all dictionary lists (#205). Enforced in the
+# single shared ``GenericService.list_all`` choke point via a LIMIT+1 probe.
+BARE_LIST_MAX_ROWS = 1000
 
 
 async def paginate_orm(
@@ -107,6 +112,31 @@ class GenericService(Generic[CreateSchemaT, UpdateSchemaT, ResponseSchemaT]):
         return await self._paginate(
             db_session, self._list_stmt(**filters), page, per_page, order_by
         )
+
+    async def list_all(
+        self,
+        db_session: AsyncSession,
+        order_by=None,
+        **filters,
+    ) -> list[ResponseSchemaT]:
+        """Unpaginated list for dictionary /all endpoints, capped by BARE_LIST_MAX_ROWS.
+
+        Reuses ``_list_stmt(**filters)`` (same equality-filter semantics as
+        ``list()``). Applies ``order_by`` when given. Executes with
+        ``LIMIT BARE_LIST_MAX_ROWS + 1``; if the extra row is present, raises
+        ``BareListLimitExceededError`` (single query, never materializes
+        unbounded rows). Boundary: exactly ``BARE_LIST_MAX_ROWS`` rows → OK;
+        the 1001st row → raise. Returns validated ``ResponseSchemaT`` objects
+        (same idiom as ``_paginate``).
+        """
+        stmt = self._list_stmt(**filters)
+        if order_by is not None:
+            stmt = stmt.order_by(*order_by)
+        result = await db_session.execute(stmt.limit(BARE_LIST_MAX_ROWS + 1))
+        rows = list(result.scalars().all())
+        if len(rows) > BARE_LIST_MAX_ROWS:
+            raise BareListLimitExceededError(self._model.__tablename__, BARE_LIST_MAX_ROWS)
+        return [self._response_schema.model_validate(o) for o in rows]
 
     async def get(
         self, db_session: AsyncSession, id: str
@@ -222,6 +252,21 @@ class ArchiveService(GenericService[CreateSchemaT, UpdateSchemaT, ResponseSchema
         return await self._paginate(
             db_session, self._list_stmt(status=status, **filters), page, per_page, order_by
         )
+
+    async def list_all(
+        self,
+        db_session: AsyncSession,
+        order_by=None,
+        status: ArchiveStatus = ArchiveStatus.ACTIVE,
+        **filters,
+    ) -> list[ResponseSchemaT]:
+        """Unpaginated list filtered by archive status (mirrors ``list()``).
+
+        Delegates to ``GenericService.list_all`` passing ``status`` through as
+        a filter — ``ArchiveService._list_stmt(status=...)`` already applies
+        the ``is_active`` predicate, so no extra handling is needed here.
+        """
+        return await super().list_all(db_session, order_by=order_by, status=status, **filters)
 
     @transactional
     async def archive(self, db_session: AsyncSession, id: str) -> bool:

@@ -8,6 +8,7 @@ from sqlalchemy import delete, func, not_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from src.domain.errors import BareListLimitExceededError
 from src.models.enums import ArchiveStatus
 from src.repositories.generic import ArchiveRepository, get_archive_repository
 from src.models.service import Service
@@ -15,7 +16,7 @@ from src.models.tag import service_tags
 from src.models.tariff import Tariff
 from src.schemas.common import PaginatedResponse
 from src.schemas.service import ServiceCreate, ServicePatch, ServiceResponse, ServiceUpdate
-from src.services.generic import ArchiveService
+from src.services.generic import ArchiveService, BARE_LIST_MAX_ROWS
 from src.services.decorators import transactional
 
 
@@ -65,6 +66,41 @@ class ServiceService(ArchiveService[ServiceCreate, ServiceUpdate, ServiceRespons
         )
         items = [ServiceResponse.model_validate(s) for s in result.scalars().all()]
         return PaginatedResponse(items=items, total=total, page=page, per_page=per_page)
+
+    async def list_all(
+        self,
+        db_session: AsyncSession,
+        order_by=None,
+        status: ArchiveStatus = ArchiveStatus.ACTIVE,
+        **filters,
+    ) -> list[ServiceResponse]:
+        """Unpaginated list of services with tariffs/tags eagerly loaded.
+
+        Mirrors the ``list()`` override: the eager-load (``selectinload``) is
+        MANDATORY because ``ServiceResponse`` nests tariffs and tags, and
+        validating it from lazily-loaded relationships under async SQLAlchemy
+        crashes with ``MissingGreenlet`` (spec §4.1). The base
+        ``_list_stmt`` has no ``.options(...)``, so the override builds the
+        select inline with the same archive-status + equality-filter clauses.
+        Enforces ``BARE_LIST_MAX_ROWS`` via the LIMIT+1 probe.
+        """
+        stmt = select(Service).options(
+            selectinload(Service.tariffs), selectinload(Service.tags)
+        )
+        if status == ArchiveStatus.ACTIVE:
+            stmt = stmt.where(Service.is_active)
+        elif status == ArchiveStatus.ARCHIVED:
+            stmt = stmt.where(not_(Service.is_active))
+        for key, value in filters.items():
+            if value is not None:
+                stmt = stmt.where(getattr(Service, key) == value)
+        if order_by is not None:
+            stmt = stmt.order_by(*order_by)
+        result = await db_session.execute(stmt.limit(BARE_LIST_MAX_ROWS + 1))
+        rows = list(result.scalars().all())
+        if len(rows) > BARE_LIST_MAX_ROWS:
+            raise BareListLimitExceededError(Service.__tablename__, BARE_LIST_MAX_ROWS)
+        return [ServiceResponse.model_validate(s) for s in rows]
 
     async def get(
         self, db_session: AsyncSession, id: str

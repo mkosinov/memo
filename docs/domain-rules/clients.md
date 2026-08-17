@@ -1,7 +1,7 @@
 # Client — Domain Rules
 
 ## Description
-A Client is a customer who books master classes. All fields are nullable — a Client can exist with no name, no phone, no email. Clients are soft-deleted (archived).
+A Client is a customer who books master classes. All fields are nullable — a Client can exist with no name, no phone, no email. Clients are archive-aware (archive/restore via dedicated endpoints; hard-delete-with-resolutions per spec GH #207).
 
 ## Fields
 | Field | Type | Required | Min | Max | Default | Description |
@@ -30,7 +30,7 @@ A Client is a customer who books master classes. All fields are nullable — a C
 - **Filters:** `status` (default `active`; `archived` | `all` — replaces the retired `is_active` query param), search (ILIKE on name/phone), date ranges, record count ranges (`min_records`/`max_records`), missed ranges (`missed_from`/`missed_to`), payment ranges (`min_paid`/`max_paid`)
 - **Sort columns:** name, records_count, last_record, total_paid, missed_records, created_at, updated_at
 - **Pagination:** page (default 1), per_page (default 20, max 100)
-- **Restore:** `PATCH /api/v1/clients/{id}` with an explicit `{"is_active": bool}` (sticky-field semantics — see `_overview.md` → "is_active semantics on get/update/patch"). The schema-level gap is closed: `ClientPatch` carries sticky `is_active` (PATCH restore path, #184) and `ClientUpdate` requires `is_active: bool` (PUT, #201); only the frontend restore-buttons UI remains a follow-up.
+- **Restore:** `POST /api/v1/clients/{id}/restore` (sets `archived: false`, HTTP 200 with body) — spec GH #207. *Previously* restore was via `PATCH /clients/{id}` with explicit `{"is_active": bool}`; that path now 422s (`is_active` removed from all PUT/PATCH schemas — auto-closes #201). Restore-buttons UI parity for Client landed in #207 (closes #198).
 
 ### Frontend
 - **No required fields** on create/edit
@@ -47,13 +47,18 @@ A Client is a customer who books master classes. All fields are nullable — a C
 | POST | /api/v1/clients | Create |
 | PUT | /api/v1/clients/{id} | Full update |
 | PATCH | /api/v1/clients/{id} | Partial update |
-| DELETE | /api/v1/clients/{id} | Soft delete |
+| DELETE | /api/v1/clients/{id} | Hard delete with resolutions (no body + 0 deps → 204; no body + deps → 409 dry-run; body `{"resolutions": {"records": "nullify", "visitors": "cascade"}}` → 204 on success / 422 on invalid-or-missing) — spec GH #207 |
+| POST | /api/v1/clients/{id}/archive | Archive (sets `archived: true`, HTTP 200 with body) — GH #207 |
+| POST | /api/v1/clients/{id}/restore | Restore (sets `archived: false`, HTTP 200 with body) — GH #207 (closes #198) |
 | GET | /api/v1/clients/{id}/visitors | List client's visitors |
 
 ## Relationships
 - Client → has many Visitors
 - Client → has many Records
-- Client → has many Tags (M2M)
+- Client → has many Tags (M2M via client_tags)
+
+## Response field: `archived` (inverted)
+The Response schema exposes `archived: bool` instead of `is_active` (inversion: `archived = true` = in archive = `is_active = false`). The DB column stays `is_active`. **Two mapper paths for Client** (not one): the generic `ClientResponse` path AND the manual `ClientWithStats` builder in `list_clients_with_stats` — both invert; the manual path is a second inversion point that would silently break the Pydantic model at compile time once `is_active` left the schema (spec §3.1). See `_overview.md` → "Archive terminology boundary".
 
 ## Enums & Constants
 | Enum | Values |
@@ -64,17 +69,44 @@ A Client is a customer who books master classes. All fields are nullable — a C
 - [ ] All fields nullable
 - [ ] Phone search returns exact match
 - [ ] Stats computed correctly
-- [ ] Soft delete preserves related entities
+- [ ] `DELETE /{id}` with resolutions: records `nullify` (survive, become anonymous — `client_id=null`), visitors `cascade` (deleted), `client_tags` auto-cascade (deleted). Payments are record-scoped and survive with the nullified records (NOT deleted by the visitors cascade).
 
 ## Parity Notes
 | Backend (Pydantic) | Frontend (Zod) | Match |
 |--------------------|----------------|-------|
 | **Create:** all fields optional; `channel: Channel \| None` | **Create:** all fields optional; `channel: string` (free-form) | ⚠️ Create path intentionally lenient (booking auto-create, external flows; spec §3.2) |
-| **Update:** `ClientUpdate` — 4 required-nullable fields + required `is_active: bool`; `channel: Channel \| None` | **Update:** `ClientUpdateSchema` — 4 required-nullable fields + required `is_active: z.boolean()`; `channel: z.enum([...]).nullable()` | ✅ Update path enforces `Channel` enum on both sides (GH #201) |
+| **Update:** `ClientUpdate` — 4 required-nullable fields (`name`/`phone`/`email`/`channel`); `channel: Channel \| None`. **`is_active` REMOVED** (GH #207 §3.2 — auto-closes #201); a PUT body containing `is_active` → 422. | **Update:** `ClientUpdateSchema` — 4 required-nullable fields; `channel: z.enum([...]).nullable()`. **`is_active` REMOVED**; `archived: z.boolean()` added to Response. | ✅ Update path enforces `Channel` enum on both sides (GH #201); #207 removes `is_active` and inverts to `archived` in Response |
+| **Response:** `archived: bool` (inverted from `is_active`) on `ClientResponse` AND on the manual `ClientWithStats` builder in `list_clients_with_stats` (second inversion point — spec §3.1). | **Response:** `archived: z.boolean()` in all Client response schemas (incl. `ClientWithStats`). | ✅ Parity maintained after the GH #207 inversion |
 | `name: str \| None` | `name: z.string().nullable()` | ✅ Update; Create: `name: string (optional)` — ⚠️ empty string vs null (admin converts `'' → null` on save) |
 
-## Archive semantics on write
+## Archive & delete semantics (GH #207)
 
-Client is a soft-delete entity. See `docs/domain-rules/_overview.md` → "is_active semantics on get/update/patch" for the general rule. **PUT canon (GH #201):** `ClientUpdate` is a standalone 5-key required schema — `name`/`phone`/`email`/`channel` are required-nullable (no defaults; key must be present, explicit `null` = deliberate clear) and `is_active: bool` is required. Omitted key → **422**. Explicit `null` in a personal field erases it (data-wipe semantics — never `'xxxxx'` strings; null renders as «не указан»/«Дорогой гость» in UI and doesn't match phone search). Stats (`records_count`, `total_paid`, …) and Payments are computed/joined by `client_id` — wiping personal fields leaves them **intact**. **PATCH sticky unchanged** (#184): `ClientPatch.is_active` stays `bool | None = None`; absent or `null` preserves the stored value, an explicit boolean applies.
+Client is one of the 5 archive-aware entities. PUT/PATCH no longer accept `is_active` (auto-closes #178, #201); archive/restore only via `POST /archive` + `POST /restore`. Archive/restore is a single-row `is_active` flip — **no cross-entity write**. The 4 required-nullable personal keys on `ClientUpdate` are unchanged (`name`/`phone`/`email`/`channel` — required-nullable, key must be present, explicit `null` = deliberate clear; omitted key → 422; null renders as «не указан»/«Дорогой гость» and doesn't match phone search). Stats (`records_count`, `total_paid`, …) and payments are computed/joined by `client_id`; wiping personal fields leaves them intact.
 
-**Null-semantics divergence (footgun for API consumers):** the PATCH media type is plain `application/json`, **not** `application/merge-patch+json` — sticky `null` → preserve **deviates from RFC 7396** (which would clear on `null`); this is documented to avoid misleading OpenAPI/codegen consumers. Consequently the **same JSON `null` carries divergent semantics per method**: **clear on PUT, preserve on PATCH**. Only the frontend restore-buttons UI remains a follow-up (PATCH restore path: `{"is_active": true}`).
+### Client FK dependencies (DELETE `/{id}`)
+
+| Relation | Nullable? | Action | User choice? |
+|---|---|---|---|
+| **records** (client_id) | nullable | **nullify** | **choice: `["nullify"]`** — non-auto; user must include `{"records": "nullify"}` in the resolutions body (missing → 422). Record survives, becomes anonymous (`client_id=null`). |
+| **visitors** (client_id) | NOT NULL | **cascade** | **choice: `["cascade"]`** — non-auto; user must include `{"visitors": "cascade"}` (missing → 422). Cascade follows `VisitorService._delete_cascade` (visits → photos SET NULL → visitor_tags → visitor). Payments are NOT part of this cascade (record-scoped, survive with the nullified records — see `cascade_preview` below). |
+| **client_tags** (join) | NOT NULL PK | **cascade** (auto) | auto — join table rows deleted automatically; omitted from resolutions body. |
+
+- **`cascade_preview` for the visitors cascade: `{"visits": <count>}` only.** `Payment` is **record-scoped** (`payments.record_id → records.id`); Client→records is *nullify* (records survive, become anonymous), so their payments are NOT part of the visitors cascade and survive with the nullified records. Absent for nullify actions (nothing downstream is hard-deleted). (Spec §5.)
+- **DELETE `/{id}` (no body):** zero deps → 204 hard delete (row gone). Any dep → 409 + dependency tree (counters + sums only, no rows modified). For a Client with 47 records, 12 visitors (across 45 visits), and 5 client_tags:
+  ```json
+  {
+    "detail": "has_dependencies",
+    "dependencies": [
+      {"entity": "records", "count": 47, "allowed_actions": ["nullify"]},
+      {"entity": "visitors", "count": 12, "allowed_actions": ["cascade"],
+       "cascade_preview": {"visits": 45}},
+      {"entity": "client_tags", "count": 5, "allowed_actions": ["cascade"]}
+    ]
+  }
+  ```
+- **DELETE `/{id}` (with body):** `{"resolutions": {"records": "nullify", "visitors": "cascade"}}` (tags auto — omitted from body). Invalid action → 422 (e.g. `{"records": "cascade"}` — records only allows nullify; `{"activities": "cascade"}` — activities is blocked). Missing a non-auto dep → 422 ("resolution required for entity records/visitors"). Auto deps sent in body are ignored. On success → 204, executed in ONE `@transactional` method: **nullify** records (set `client_id=null`) → **cascade** visitors via the extracted `VisitorService._delete_cascade` core on the shared session (NOT a per-visitor `@transactional` loop — atomicity, §8) → **cascade** client_tags → **hard delete** the client row. (Spec §6.)
+- **Result of a successful delete:** records survive with `client_id=null` (anonymous); **payments survive** with their nullified records (record-scoped, NOT deleted by the visitors cascade); visitors + their visits + visitor_tags + client_tags + the client row are physically gone.
+
+### Master-only contrast (NOT applicable to Client)
+
+Master archive/restore cascades to the linked `users.is_active` (§4.2, Change 3). Client archive/restore is a single-row `is_active` flip with **no cross-entity write** — there is no Client→users-style login-account link. (See `masters.md` for the Master special case.)

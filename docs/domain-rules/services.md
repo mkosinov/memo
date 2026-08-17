@@ -29,7 +29,7 @@ A Service represents a type of master class (painting, sculpture, etc.). It defi
 - `min_age` must be <= `max_age` (enforced in frontend only)
 
 ## Invariants
-- Services are archived (is_active = false), never hard-deleted
+- Services can be hard-deleted via `DELETE /{id}` with the dependency-resolution mechanism; archived state via `POST /{id}/archive` (sets `archived: true`) and restored via `POST /{id}/restore`. See `_overview.md` → "Hard-delete FK dependency matrix".
 - Tariffs are hard-deleted and recreated on every Service update
 
 ## Business Logic
@@ -52,12 +52,17 @@ A Service represents a type of master class (painting, sculpture, etc.). It defi
 | POST | /api/v1/services | Create with tariffs |
 | PUT | /api/v1/services/{id} | Full update (tariffs replaced) |
 | PATCH | /api/v1/services/{id} | Partial update (tag_ids hard-replace when sent) |
-| DELETE | /api/v1/services/{id} | Soft delete (tariffs hard-deleted via cascade) |
+| DELETE | /api/v1/services/{id} | Hard delete with resolutions (no body + 0 deps → 204; no body + deps → 409 dry-run; body `{"resolutions": {...}}` → 204 on success / 422 on invalid) — spec GH #207 |
+| POST | /api/v1/services/{id}/archive | Archive (sets `archived: true`, HTTP 200 with body) — GH #207 |
+| POST | /api/v1/services/{id}/restore | Restore (sets `archived: false`, HTTP 200 with body) — GH #207 |
 
 ## Relationships
 - Service → has many Tariffs (cascade delete-orphan)
 - Service → has many Tags (M2M)
 - Activity → belongs to Service
+
+## Response field: `archived` (inverted)
+The Response schema exposes `archived: bool` instead of `is_active` (inversion: `archived = true` = in archive = `is_active = false`). The DB column stays `is_active`; `ServiceService` applies the inversion. See `_overview.md` → "Archive terminology boundary".
 
 ## Acceptance Criteria
 - [ ] Title required, 1-200 chars
@@ -76,6 +81,18 @@ A Service represents a type of master class (painting, sculpture, etc.). It defi
 | description: required | description: optional | ⚠️ |
 | image_url: required | image_url: optional | ⚠️ |
 
-## Archive semantics on write
+## Archive & delete semantics (GH #207)
 
-Service is a soft-delete entity. See `docs/domain-rules/_overview.md` → "is_active semantics on get/update/patch" for the general rule. **Entity note:** PUT requires explicit `is_active` (GH #178). `ServiceService` overrides `update`/`patch` (tag_ids/tariffs handling); the PATCH path strips `is_active: None` via the shared `_strip_is_active_none` helper (`services/generic.py:25`) — the update-path strip was removed in #178.
+Service is one of the 5 archive-aware entities. PUT/PATCH no longer accept `is_active` (auto-closes #178); archive/restore only via `POST /archive` + `POST /restore`. Archive/restore is a single-row `is_active` flip — **no cross-entity write**. `ServiceService` overrides `update`/`patch` (tag_ids/tariffs handling); `delete()` inherits hard from `ArchiveService`.
+
+### Service FK dependencies (DELETE `/{id}`)
+
+| Relation | Nullable? | Action | User choice? |
+|---|---|---|---|
+| **activities** (service_id) | NOT NULL | **block** | N/A — `allowed_actions: []`. Activity has no `is_active`, cannot be archived; user must remove activities manually OR archive the service. |
+| **tariffs** (service_id) | NOT NULL | **cascade** (auto) | auto — config of the service, unambiguous; tariff rows deleted automatically. |
+| **photos** (service_id) | nullable | **nullify** (auto) | auto — photo becomes unlinked (survives); Photo is a general resource (per #194 SET NULL policy). |
+| **service_tags** (join) | NOT NULL PK | **cascade** (auto) | auto — join table rows deleted automatically. |
+
+- **DELETE `/{id}` (no body):** zero deps → 204 hard delete (row gone). Any dep → 409 + dependency tree. `activities` present → 409 with `allowed_actions: []` (blocks DELETE; only archive is offered).
+- **DELETE `/{id}` (with body):** Service has no non-auto deps (`tariffs`, `photos`, `service_tags` are all auto) → the resolutions body is `{}`. Server resolves the auto deps automatically (nullify photos, cascade tariffs + service_tags, then hard-delete the service row) in ONE transaction → 204. Blocked (`activities` present) → 422 always.

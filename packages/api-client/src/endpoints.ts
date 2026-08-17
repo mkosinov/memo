@@ -73,6 +73,11 @@ import {
   TagListResponseSchema,
   MaterialListResponseSchema,
   ServiceListResponseSchema,
+  MasterAllResponseSchema,
+  LocationAllResponseSchema,
+  ServiceAllResponseSchema,
+  TagAllResponseSchema,
+  MaterialAllResponseSchema,
   ActivityListResponseSchema,
   PaymentListResponseSchema,
   RecordListResponseSchema,
@@ -88,6 +93,9 @@ export interface ListParams {
   /** Archive filter — soft-delete entities only (masters/locations/services/materials).
    *  Ignored by endpoints that don't declare it (tags, visitors). */
   status?: 'active' | 'all' | 'archived' | null;
+  /** Server-side sort — dictionary list endpoints only (#205); must be in the endpoint's whitelist. */
+  sort_by?: string;
+  sort_order?: 'asc' | 'desc';
 }
 
 function listQuery(params?: ListParams): string {
@@ -95,6 +103,8 @@ function listQuery(params?: ListParams): string {
   if (params?.page) search.set('page', String(params.page));
   if (params?.per_page) search.set('per_page', String(params.per_page));
   if (params?.status) search.set('status', params.status);
+  if (params?.sort_by) search.set('sort_by', params.sort_by);
+  if (params?.sort_order) search.set('sort_order', params.sort_order);
   const qs = search.toString();
   return qs ? `?${qs}` : '';
 }
@@ -680,6 +690,41 @@ export async function restoreMaterial(id: string): Promise<MaterialResponse> {
 // Execute a hard delete with dependency resolutions (GH #207 §6) — DELETE with body.
 export async function resolveDeleteMaterial(id: string, resolutions: Record<string, string>): Promise<void> {
   await api(`/api/v1/materials/${id}`, z.any(), { method: 'DELETE', body: JSON.stringify({ resolutions }) });
+}
+
+// ─── Dictionary bare /all endpoints (GH #205) ────────────────────────────────
+
+/** Params for bare /all dictionary endpoints (#205). */
+export interface AllParams {
+  status?: 'active' | 'all' | 'archived';
+}
+
+function allQuery(params?: AllParams): string {
+  const search = new URLSearchParams();
+  if (params?.status) search.set('status', params.status);
+  const qs = search.toString();
+  return qs ? `?${qs}` : '';
+}
+
+export async function getAllMasters(params?: AllParams): Promise<MasterResponse[]> {
+  return api(`/api/v1/masters/all${allQuery(params)}`, MasterAllResponseSchema);
+}
+
+export async function getAllLocations(params?: AllParams): Promise<LocationResponse[]> {
+  return api(`/api/v1/locations/all${allQuery(params)}`, LocationAllResponseSchema);
+}
+
+export async function getAllServices(params?: AllParams): Promise<ServiceResponse[]> {
+  return api(`/api/v1/services/all${allQuery(params)}`, ServiceAllResponseSchema);
+}
+
+export async function getAllMaterials(params?: AllParams): Promise<MaterialResponse[]> {
+  return api(`/api/v1/materials/all${allQuery(params)}`, MaterialAllResponseSchema);
+}
+
+/** Tags have no archive status — no params. */
+export async function getAllTags(): Promise<TagResponse[]> {
+  return api('/api/v1/tags/all', TagAllResponseSchema);
 }
 
 // ─── Search Endpoints ──────────────────────────────────────────────────

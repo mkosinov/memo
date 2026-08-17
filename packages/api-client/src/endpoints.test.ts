@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { z } from 'zod';
-import { getMasters, getMaster, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, deleteActivity, getWebPhotos, getRecords, getClients, getPayments, getPaymentTotals, createRecord, updateRecord, deleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, searchClientByPhone, updateVisitStatus, getTags, createService, updateService, deleteService, createLocation, updateLocation, deleteLocation, getClientsWithStats, updateClient, patchClient, reorderMasters, reorderLocations, patchMaster, patchLocation, patchMaterial, patchService, patchUserSettings, getMaterials, getTag, getVisitors, deleteMaster, deleteMaterial, deleteClient, archiveMaster, restoreMaster, resolveDeleteMaster, archiveLocation, restoreLocation, resolveDeleteLocation, archiveService, restoreService, resolveDeleteService, archiveMaterial, restoreMaterial, resolveDeleteMaterial, archiveClient, restoreClient, resolveDeleteClient } from './endpoints';
+import { getMasters, getMaster, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, deleteActivity, getWebPhotos, getRecords, getClients, getPayments, getPaymentTotals, createRecord, updateRecord, deleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, searchClientByPhone, updateVisitStatus, getTags, createService, updateService, deleteService, createLocation, updateLocation, deleteLocation, getClientsWithStats, updateClient, patchClient, reorderMasters, reorderLocations, patchMaster, patchLocation, patchMaterial, patchService, patchUserSettings, getMaterials, getTag, getVisitors, deleteMaster, deleteMaterial, deleteClient, archiveMaster, restoreMaster, resolveDeleteMaster, archiveLocation, restoreLocation, resolveDeleteLocation, archiveService, restoreService, resolveDeleteService, archiveMaterial, restoreMaterial, resolveDeleteMaterial, archiveClient, restoreClient, resolveDeleteClient, getAllMasters, getAllLocations, getAllServices, getAllMaterials, getAllTags } from './endpoints';
 import { ServiceCreateSchema, LocationCreateSchema, type ServiceUpdate, type LocationUpdate, type ClientUpdate } from './schemas';
 
 // Mock the api function from client
@@ -1098,5 +1098,76 @@ describe('listQuery status param', () => {
     vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
     await getMasters({});
     expect(api).toHaveBeenCalledWith('/api/v1/masters', expect.anything());
+  });
+});
+
+// ─── listQuery sort params (GH #205) ────────────────────────────────────────
+
+describe('listQuery sort params', () => {
+  it('serializes sort_by and sort_order into the URL', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 2, per_page: 50 });
+    await getMasters({ page: 2, per_page: 50, sort_by: 'name', sort_order: 'desc' });
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/masters?page=2&per_page=50&sort_by=name&sort_order=desc',
+      expect.anything(),
+    );
+  });
+
+  it('omits sort params when not provided', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
+    await getMasters({});
+    expect(api).toHaveBeenCalledWith('/api/v1/masters', expect.anything());
+  });
+});
+
+// ─── Dictionary bare /all endpoints (GH #205) ───────────────────────────────
+
+describe('getAllMasters', () => {
+  it('calls GET /api/v1/masters/all and returns the parsed bare array', async () => {
+    const master = { id: 'm-1', first_name: 'Анна', last_name: 'Иванова' };
+    vi.mocked(api).mockResolvedValue([master]);
+    const result = await getAllMasters();
+    expect(api).toHaveBeenCalledWith('/api/v1/masters/all', expect.anything());
+    expect(result).toEqual([master]);
+  });
+
+  it('serializes status=all into the URL', async () => {
+    vi.mocked(api).mockResolvedValue([]);
+    await getAllMasters({ status: 'all' });
+    expect(api).toHaveBeenCalledWith('/api/v1/masters/all?status=all', expect.anything());
+  });
+});
+
+describe('getAllLocations', () => {
+  it('calls GET /api/v1/locations/all', async () => {
+    vi.mocked(api).mockResolvedValue([]);
+    await getAllLocations();
+    expect(api).toHaveBeenCalledWith('/api/v1/locations/all', expect.anything());
+  });
+});
+
+describe('getAllServices', () => {
+  it('calls GET /api/v1/services/all', async () => {
+    vi.mocked(api).mockResolvedValue([]);
+    await getAllServices();
+    expect(api).toHaveBeenCalledWith('/api/v1/services/all', expect.anything());
+  });
+});
+
+describe('getAllMaterials', () => {
+  it('calls GET /api/v1/materials/all', async () => {
+    vi.mocked(api).mockResolvedValue([]);
+    await getAllMaterials();
+    expect(api).toHaveBeenCalledWith('/api/v1/materials/all', expect.anything());
+  });
+});
+
+describe('getAllTags', () => {
+  it('calls GET /api/v1/tags/all with no params', async () => {
+    const tag = { id: 't-1', tag: 'VIP' };
+    vi.mocked(api).mockResolvedValue([tag]);
+    const result = await getAllTags();
+    expect(api).toHaveBeenCalledWith('/api/v1/tags/all', expect.anything());
+    expect(result).toEqual([tag]);
   });
 });

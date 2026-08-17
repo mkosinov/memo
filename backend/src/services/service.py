@@ -43,10 +43,16 @@ class ServiceService(ArchiveService[ServiceCreate, ServiceUpdate, ServiceRespons
         page: int = 1,
         per_page: int = 20,
         status: ArchiveStatus = ArchiveStatus.ACTIVE,
+        order_by=None,
         **filters,
     ) -> PaginatedResponse[ServiceResponse]:
         """Return a paginated page of services filtered by archive status,
-        with tariffs/tags eagerly loaded."""
+        with tariffs/tags eagerly loaded.
+
+        ``order_by`` is applied AFTER the COUNT query (same pattern as
+        ``paginate_orm``) so correlated sort-key subqueries (e.g. the
+        ``tariffs`` count) are never evaluated inside the count query.
+        """
         stmt = (
             select(Service)
             .options(selectinload(Service.tariffs), selectinload(Service.tags))
@@ -61,6 +67,8 @@ class ServiceService(ArchiveService[ServiceCreate, ServiceUpdate, ServiceRespons
         total = (
             await db_session.execute(select(func.count()).select_from(stmt.subquery()))
         ).scalar_one()
+        if order_by is not None:
+            stmt = stmt.order_by(*order_by)
         result = await db_session.execute(
             stmt.limit(per_page).offset((page - 1) * per_page)
         )

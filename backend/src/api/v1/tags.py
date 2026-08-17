@@ -10,8 +10,8 @@ from src.db import SessionDep
 from src.domain.errors import BareListLimitExceededError
 from src.errors import ErrorCode, ErrorDetail
 from src.models.tag import Tag
-from src.schemas.common import PaginatedResponse
-from src.schemas.tag import TagCreate, TagPatch, TagResponse
+from src.schemas.common import PaginatedResponse, SortOrder
+from src.schemas.tag import TagCreate, TagPatch, TagResponse, TagSortBy
 from src.services.tag import TagService, get_tag_service
 
 router = APIRouter(tags=["tags"])
@@ -25,6 +25,30 @@ def _get_tag_service() -> TagService:
 
 _ServiceDep = Annotated[TagService, Depends(_get_tag_service)]
 
+# Sort whitelist map: UI key → list of ORM columns (#205 Task 3, spec §4.5).
+# Tags have a single sortable column: ``tag``.
+_TAG_SORT_MAP: dict[str, list] = {
+    "tag": [Tag.tag],
+}
+
+
+def _tag_order_by(sort_by: TagSortBy | None, sort_order: SortOrder) -> list:
+    """Build the ``order_by`` list for GET /api/v1/tags.
+
+    * ``sort_by=None`` → spec §4.4 default: ``tag ASC, id ASC`` (NEW —
+      tags had no order_by before #205).
+    * User sort → mapped columns with nulls-first (asc) / nulls-last (desc),
+      then ``id ASC`` tiebreak (records idiom).
+    """
+    if sort_by is None:
+        return [asc(Tag.tag), asc(Tag.id)]
+    cols = _TAG_SORT_MAP[sort_by]
+    ordered = [
+        c.desc().nullslast() if sort_order == "desc" else c.asc().nullsfirst()
+        for c in cols
+    ]
+    return [*ordered, asc(Tag.id)]
+
 
 @router.get("", response_model=PaginatedResponse[TagResponse])
 async def list_tags(
@@ -32,9 +56,22 @@ async def list_tags(
     session: SessionDep,
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
+    sort_by: TagSortBy | None = Query(None),
+    sort_order: SortOrder = Query("asc"),
 ) -> PaginatedResponse[TagResponse]:
-    """Return all tags, paginated."""
-    return await service.list(db_session=session, page=page, per_page=per_page)
+    """Return all tags, paginated.
+
+    ``sort_by`` selects a whitelisted sort key (spec §4.5); ``sort_order``
+    is ``asc`` (default) or ``desc``. Unknown ``sort_by`` → 422 via Literal
+    validation. ``sort_by=None`` → spec §4.4 default order (``tag ASC,
+    id ASC``). Tags are non-archive (no ``status`` param).
+    """
+    return await service.list(
+        db_session=session,
+        page=page,
+        per_page=per_page,
+        order_by=_tag_order_by(sort_by, sort_order),
+    )
 
 
 @router.get("/all", response_model=list[TagResponse])

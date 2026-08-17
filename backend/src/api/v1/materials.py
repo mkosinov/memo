@@ -13,8 +13,14 @@ from src.domain.errors import BareListLimitExceededError
 from src.errors import ErrorCode, ErrorDetail
 from src.models.enums import ArchiveStatus
 from src.models.material import Material
-from src.schemas.common import PaginatedResponse
-from src.schemas.material import MaterialCreate, MaterialPatch, MaterialResponse, MaterialUpdate
+from src.schemas.common import PaginatedResponse, SortOrder
+from src.schemas.material import (
+    MaterialCreate,
+    MaterialPatch,
+    MaterialResponse,
+    MaterialSortBy,
+    MaterialUpdate,
+)
 from src.services.material import MaterialService, get_material_service
 
 router = APIRouter(tags=["materials"])
@@ -28,6 +34,33 @@ def _get_material_service() -> MaterialService:
 
 _ServiceDep = Annotated[MaterialService, Depends(_get_material_service)]
 
+# Sort whitelist map: UI key → list of ORM columns (#205 Task 3, spec §4.5).
+# ``archived`` → is_active (asc = is_active ASC = archived-first).
+_MATERIAL_SORT_MAP: dict[str, list] = {
+    "title": [Material.title],
+    "description": [Material.description],
+    "archived": [Material.is_active],
+    "created_at": [Material.created_at],
+}
+
+
+def _material_order_by(sort_by: MaterialSortBy | None, sort_order: SortOrder) -> list:
+    """Build the ``order_by`` list for GET /api/v1/materials.
+
+    * ``sort_by=None`` → spec §4.4 default: ``title ASC, id ASC`` (NEW —
+      materials had no order_by before #205).
+    * User sort → mapped columns with nulls-first (asc) / nulls-last (desc),
+      then ``id ASC`` tiebreak (records idiom).
+    """
+    if sort_by is None:
+        return [asc(Material.title), asc(Material.id)]
+    cols = _MATERIAL_SORT_MAP[sort_by]
+    ordered = [
+        c.desc().nullslast() if sort_order == "desc" else c.asc().nullsfirst()
+        for c in cols
+    ]
+    return [*ordered, asc(Material.id)]
+
 
 @router.get("", response_model=PaginatedResponse[MaterialResponse])
 async def list_materials(
@@ -36,15 +69,26 @@ async def list_materials(
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
     status: ArchiveStatus = Query(ArchiveStatus.ACTIVE),
+    sort_by: MaterialSortBy | None = Query(None),
+    sort_order: SortOrder = Query("asc"),
 ) -> PaginatedResponse[MaterialResponse]:
     """Return materials filtered by archive status (default: active).
 
     ``status`` accepts ``active`` (default), ``archived``, or ``all`` — see
     ``ArchiveStatus``. Invalid values are rejected with 422 by FastAPI's
     enum validation.
+
+    ``sort_by`` selects a whitelisted sort key (spec §4.5); ``sort_order``
+    is ``asc`` (default) or ``desc``. Unknown ``sort_by`` → 422 via Literal
+    validation. ``sort_by=None`` → spec §4.4 default order (``title ASC,
+    id ASC``).
     """
     return await service.list(
-        db_session=session, page=page, per_page=per_page, status=status
+        db_session=session,
+        page=page,
+        per_page=per_page,
+        status=status,
+        order_by=_material_order_by(sort_by, sort_order),
     )
 
 

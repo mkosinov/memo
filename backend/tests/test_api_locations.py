@@ -372,3 +372,65 @@ class TestLocationAllEndpoint:
         body = resp.json()
         assert isinstance(body, list), "/all must return a bare array, not an envelope"
         assert any(item["id"] == created["id"] for item in body)
+
+
+class TestLocationListSorting:
+    """Server-side sorting on GET /api/v1/locations (#205 Task 3).
+
+    sort_by whitelist: name, short_title, capacity, address, location_hint,
+    description, archived, yandex_map_url, created_at.
+    sort_order: asc (default) / desc. Unknown sort_by → 422 (Literal validation).
+    Default (sort_by=None): sort_order ASC, name ASC, id ASC (spec §4.4).
+    """
+
+    @staticmethod
+    def _ids(resp) -> list[str]:
+        assert resp.status_code == 200, f"list failed: {resp.text}"
+        return [m["id"] for m in resp.json()["items"]]
+
+    def test_sort_name_asc_desc(self, api_client, create_location) -> None:
+        """sort_by=name → [name]; asc/desc both differ from default (sort_order)."""
+        l1 = create_location(name="Zoo", sort_order=1)
+        l2 = create_location(name="Apple", sort_order=0)
+        l3 = create_location(name="Moon", sort_order=2)
+
+        asc = self._ids(api_client.get("/api/v1/locations?sort_by=name&sort_order=asc"))
+        assert asc.index(l2["id"]) < asc.index(l3["id"]) < asc.index(l1["id"])
+
+        desc = self._ids(api_client.get("/api/v1/locations?sort_by=name&sort_order=desc"))
+        assert desc.index(l1["id"]) < desc.index(l3["id"]) < desc.index(l2["id"])
+
+    def test_sort_archived_asc_desc(self, api_client, create_location) -> None:
+        """sort_by=archived → [is_active]; asc = archived-first, desc = active-first."""
+        arch_a = create_location(name="ArchA", sort_order=0)
+        active = create_location(name="Activ", sort_order=1)
+        arch_b = create_location(name="ArchB", sort_order=2)
+        _archive_location(arch_a["id"])
+        _archive_location(arch_b["id"])
+
+        asc = self._ids(api_client.get("/api/v1/locations?status=all&sort_by=archived&sort_order=asc"))
+        assert asc.index(arch_a["id"]) < asc.index(active["id"])
+        assert asc.index(arch_b["id"]) < asc.index(active["id"])
+
+        desc = self._ids(api_client.get("/api/v1/locations?status=all&sort_by=archived&sort_order=desc"))
+        assert desc.index(active["id"]) < desc.index(arch_a["id"])
+        assert desc.index(active["id"]) < desc.index(arch_b["id"])
+
+    def test_sort_invalid_key_422(self, api_client) -> None:
+        """sort_by=bogus → 422 from Literal validation."""
+        resp = api_client.get("/api/v1/locations?sort_by=bogus")
+        assert resp.status_code == 422
+
+    def test_default_order_locked_with_id_tiebreak(self, api_client, create_location) -> None:
+        """Default: sort_order ASC, name ASC, id ASC. The id tiebreak is NEW.
+        Two locations with same sort_order AND same name → id ASC decides.
+        IDs set via query_db to reverse insertion order (RED- deterministic)."""
+        l1 = create_location(name="Same", sort_order=0)
+        l2 = create_location(name="Same", sort_order=0)
+        l1_new = "ffffffff-ffff-ffff-ffff-ffffffffffff"
+        l2_new = "00000000-0000-0000-0000-000000000000"
+        query_db(f"UPDATE locations SET id='{l1_new}' WHERE id='{l1['id']}'")
+        query_db(f"UPDATE locations SET id='{l2_new}' WHERE id='{l2['id']}'")
+
+        ids = self._ids(api_client.get("/api/v1/locations"))
+        assert ids == [l2_new, l1_new]  # id ASC: 000... < fff...

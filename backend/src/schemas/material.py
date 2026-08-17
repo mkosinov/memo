@@ -1,8 +1,12 @@
 """Pydantic schemas for materials."""
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
+
+# Sort whitelist for GET /api/v1/materials (#205 Task 3, spec §4.5).
+MaterialSortBy = Literal["title", "description", "archived", "created_at"]
 
 
 class MaterialBase(BaseModel):

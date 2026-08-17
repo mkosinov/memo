@@ -2,6 +2,8 @@
 
 import pytest
 
+from tests.conftest import query_db
+
 pytestmark = pytest.mark.api
 
 SERVICE_PAYLOAD = {
@@ -32,6 +34,22 @@ def _create_tag(api_client) -> str:
     return response.json()["id"]
 
 
+def _archive_service(service_id: str) -> None:
+    """Archive a service row directly in the DB (sets is_active=0).
+
+    Mirrors the ``_archive_material`` helper in ``test_api_materials.py`` (#207
+    Task 13 Part B1): ``DELETE /services/{id}`` is now HARD (Task 2/3 of #207 —
+    no row left to list under ``?status=archived``). Status-filter tests that
+    need an archived row touch the ``is_active`` column directly via
+    ``query_db`` (the same write the ``POST /{id}/archive`` endpoint performs
+    via ``ArchiveService.archive`` → ``repo.patch({is_active: False})`` in
+    Task 11 — kept as a direct DB write here to avoid coupling the filter test
+    to the archive endpoint, which has its own coverage in
+    ``TestArchiveRestoreEndpoints``).
+    """
+    query_db(f"UPDATE services SET is_active=0 WHERE id='{service_id}'")
+
+
 class TestServicesCrud:
     """Full CRUD round-trip for /api/services."""
 
@@ -50,7 +68,9 @@ class TestServicesCrud:
         assert "id" in body
         assert "created_at" in body
         assert "updated_at" in body
-        assert body["is_active"] is True
+        # #207 §3.1: Response exposes `archived` (inverted from is_active),
+        # `is_active` itself is Field(exclude=True) and never serializes.
+        assert body["archived"] is False
         assert body["tariffs"] == []
         assert body["tags"] == []
         assert body["material_hint"] == "Масляные краски, холст на подрамнике 40×50 см"
@@ -130,7 +150,8 @@ class TestServicesCrud:
         tag2_id = tag2_resp.json()["id"]
 
         update_data = {
-            "is_active": True,
+            # #207 §3.2: is_active removed from ServiceUpdate (PUT) —
+            # archive/restore only via POST /{id}/archive + /{id}/restore.
             "title": "Advanced Oil Painting",
             "description": "Master oil painting techniques",
             "image_url": "https://example.com/advanced-oil.jpg",
@@ -156,26 +177,6 @@ class TestServicesCrud:
         assert len(body["tags"]) == 1
         assert body["tags"][0]["tag"] == "advanced"
 
-    def test_delete_service_soft_deletes(self, api_client) -> None:
-        """DELETE /api/services/{id} soft-deletes and list excludes it."""
-        create_resp = api_client.post("/api/v1/services", json=SERVICE_PAYLOAD)
-        service_id = create_resp.json()["id"]
-
-        # Delete
-        response = api_client.delete(f"/api/v1/services/{service_id}")
-        assert response.status_code == 204
-
-        # GET by id should still return it (soft delete)
-        response = api_client.get(f"/api/v1/services/{service_id}")
-        assert response.status_code == 200
-        assert response.json()["is_active"] is False
-
-        # List should NOT include the deleted service
-        response = api_client.get("/api/v1/services")
-        body = response.json()
-        ids = [s["id"] for s in body["items"]]
-        assert service_id not in ids
-
     def test_get_nonexistent_service_returns_404(self, api_client) -> None:
         """GET /api/services/{fake_id} returns 404."""
         response = api_client.get("/api/v1/services/nonexistent-id")
@@ -183,19 +184,34 @@ class TestServicesCrud:
 
     def test_update_nonexistent_service_returns_404(self, api_client) -> None:
         """PUT /api/services/{fake_id} returns 404."""
+        # #207 §3.2: is_active removed from ServiceUpdate — body must pass
+        # schema validation (no is_active) so a missing-entity 404 wins over
+        # an extra-field 422.
         response = api_client.put(
             "/api/v1/services/nonexistent-id",
-            json={**SERVICE_PAYLOAD, "is_active": True},
+            json=SERVICE_PAYLOAD,
         )
         assert response.status_code == 404
 
-    def test_update_service_without_is_active_returns_422(self, api_client) -> None:
-        """PUT /api/v1/services/{id} without is_active → 422 (canonical PUT, GH #178)."""
+    def test_update_service_without_is_active_succeeds_200(self, api_client) -> None:
+        """PUT /api/v1/services/{id} without is_active now SUCCEEDS (200).
+
+        #207 §3.2 (auto-closes #178): ``is_active`` was removed from
+        ``ServiceUpdate``. The old #178 canonical-PUT contract required
+        ``is_active`` (omission → 422); the inverted contract is the opposite —
+        PUT without ``is_active`` is the normal path, and a stray
+        ``is_active`` would now 422 (pinned by
+        ``test_put_service_rejects_is_active`` in ``test_put_is_active.py``
+        + ``test_update_rejects_is_active.py``). The service stays active after
+        the update (PUT is a full-replace that no longer touches the lifecycle
+        flag).
+        """
         create_resp = api_client.post("/api/v1/services", json=SERVICE_PAYLOAD)
         service_id = create_resp.json()["id"]
 
         response = api_client.put(f"/api/v1/services/{service_id}", json=SERVICE_PAYLOAD)
-        assert response.status_code == 422
+        assert response.status_code == 200
+        assert response.json()["archived"] is False
 
     def test_delete_nonexistent_service_returns_404(self, api_client) -> None:
         """DELETE /api/services/{fake_id} returns 404."""
@@ -234,7 +250,10 @@ class TestServiceMaxAgeNullable:
         assert create_resp.json()["max_age"] == 12
 
         # Update to null
-        update_data = {**SERVICE_PAYLOAD, "max_age": None, "is_active": True}
+        # #207 §3.2: is_active removed from ServiceUpdate — drop the field so
+        # the PUT validates (a stray is_active would 422 obscuring the max_age
+        # nullification behavior under test).
+        update_data = {**SERVICE_PAYLOAD, "max_age": None}
         response = api_client.put(f"/api/v1/services/{service_id}", json=update_data)
         assert response.status_code == 200
         assert response.json()["max_age"] is None
@@ -382,10 +401,14 @@ class TestServiceListStatusFilter:
     def test_list_status_archived_returns_only_archived(
         self, api_client, create_service
     ) -> None:
-        """?status=archived hides active services, surfaces soft-deleted ones."""
+        """?status=archived hides active services, surfaces archived ones.
+
+        #207 Task 13 Part B1: archival is via the ``_archive_service`` DB helper
+        (DELETE is now hard — leaves no row to list).
+        """
         active = create_service()
         archived = create_service()
-        api_client.delete(f"/api/v1/services/{archived['id']}")
+        _archive_service(archived["id"])
 
         resp = api_client.get("/api/v1/services?status=archived")
         assert resp.status_code == 200, f"list failed: {resp.text}"
@@ -395,7 +418,9 @@ class TestServiceListStatusFilter:
         ids = [s["id"] for s in body["items"]]
         assert archived["id"] in ids
         assert active["id"] not in ids
-        assert body["items"][0]["is_active"] is False
+        # #207 §3.1: `archived` is the inverted serialized field (True = in
+        # archive). `is_active` itself never serializes (Field exclude=True).
+        assert body["items"][0]["archived"] is True
         # Eager-loaded relationships still present on archived rows
         assert "tariffs" in body["items"][0]
         assert "tags" in body["items"][0]
@@ -406,7 +431,7 @@ class TestServiceListStatusFilter:
         """?status=all returns every row regardless of is_active."""
         active = create_service()
         archived = create_service()
-        api_client.delete(f"/api/v1/services/{archived['id']}")
+        _archive_service(archived["id"])
 
         resp = api_client.get("/api/v1/services?status=all")
         assert resp.status_code == 200, f"list failed: {resp.text}"
@@ -422,7 +447,7 @@ class TestServiceListStatusFilter:
         """?status=active behaves the same as the default (no query param)."""
         active = create_service()
         archived = create_service()
-        api_client.delete(f"/api/v1/services/{archived['id']}")
+        _archive_service(archived["id"])
 
         explicit = api_client.get("/api/v1/services?status=active").json()
         default = api_client.get("/api/v1/services").json()
@@ -435,3 +460,298 @@ class TestServiceListStatusFilter:
         """?status=foo (not a valid ArchiveStatus) → 422 from enum validation."""
         resp = api_client.get("/api/v1/services?status=foo")
         assert resp.status_code == 422
+
+
+class TestDeleteUnifiedRoute:
+    """DELETE /api/v1/services/{id} — unified dry-run (no body) + execute (with body).
+
+    Spec: docs/specs/2026-08-15-delete-hard-delete-and-dependency-resolution-design.md
+      * §2  — Change 1: body presence distinguishes dry-run vs execute.
+      * §4  — Service FK deps: activities=block, tariffs=auto-cascade,
+              photos=auto-nullify, service_tags=auto-cascade.
+      * §5  — 409 Conflict response (counters + sums only).
+      * §6  — DELETE with resolutions body (executor = Task 10).
+      * §14 — acceptance criteria.
+    """
+
+    def test_delete_service_with_activities_no_body_returns_409(
+        self, api_client, create_activity
+    ) -> None:
+        """No body + blocking dep (activities) → 409 + dependency tree (spec §5)."""
+        activity = create_activity()
+        service_id = activity["service_id"]
+
+        resp = api_client.delete(f"/api/v1/services/{service_id}")
+
+        assert resp.status_code == 409
+        body = resp.json()
+        assert body["detail"] == "has_dependencies"
+        deps = {d["entity"]: d for d in body["dependencies"]}
+        assert "activities" in deps
+        assert deps["activities"]["count"] == 1
+        assert deps["activities"]["allowed_actions"] == []
+        assert deps["activities"]["message"] is not None
+        # Row untouched.
+        assert api_client.get(f"/api/v1/services/{service_id}").status_code == 200
+
+    def test_delete_service_with_auto_deps_no_body_returns_409(
+        self, api_client, create_service
+    ) -> None:
+        """No body + all-auto deps (tariffs+photos+service_tags, NO activities)
+        → 409 + dependency tree (spec §5).
+
+        All Service non-block deps are AUTO (tariffs cascade, photos nullify,
+        service_tags cascade). The dry-run still surfaces them for informed
+        consent — the user's ``resolutions`` body would be ``{}`` to execute.
+        """
+        tag_id = _create_tag(api_client)
+        service = create_service(
+            tariffs=[TARIFF_PAYLOAD], tag_ids=[tag_id]
+        )
+        service_id = service["id"]
+        # Add a photo linked to this service (auto-nullify dep).
+        photo_resp = api_client.post(
+            "/api/v1/photos",
+            json={"filename": f"svc-{service_id[:8]}.jpg", "service_id": service_id},
+        )
+        assert photo_resp.status_code == 201
+        photo_id = photo_resp.json()["id"]
+
+        resp = api_client.delete(f"/api/v1/services/{service_id}")
+
+        assert resp.status_code == 409
+        body = resp.json()
+        assert body["detail"] == "has_dependencies"
+        deps = {d["entity"]: d for d in body["dependencies"]}
+        # All non-auto deps are absent from tree (zero-count filters):
+        # activities (count 0) is skipped.
+        assert "activities" not in deps
+        # tariffs (auto cascade) — shown for consent.
+        assert deps["tariffs"]["count"] == 1
+        assert deps["tariffs"]["allowed_actions"] == ["cascade"]
+        # photos (auto nullify) — shown for consent.
+        assert deps["photos"]["count"] == 1
+        assert deps["photos"]["allowed_actions"] == ["nullify"]
+        # service_tags (auto cascade) — shown for consent.
+        assert deps["service_tags"]["count"] == 1
+        assert deps["service_tags"]["allowed_actions"] == ["cascade"]
+        # Row + photo + tariff + tag join untouched (dry-run).
+        assert api_client.get(f"/api/v1/services/{service_id}").status_code == 200
+        assert query_db(f"SELECT service_id FROM photos WHERE id='{photo_id}'")[0][
+            "service_id"
+        ] == service_id
+
+    def test_delete_bare_service_no_body_returns_204_and_row_gone(
+        self, api_client, create_service
+    ) -> None:
+        """No body + zero deps → 204 hard delete; row physically gone (spec §2)."""
+        service = create_service()
+
+        resp = api_client.delete(f"/api/v1/services/{service['id']}")
+
+        assert resp.status_code == 204
+        assert api_client.get(f"/api/v1/services/{service['id']}").status_code == 404
+
+    def test_delete_service_with_activities_with_body_returns_422_blocking(
+        self, api_client, create_activity
+    ) -> None:
+        """With body + blocking dep (activities) → 422 'archive instead' (spec §6.4)."""
+        activity = create_activity()
+        service_id = activity["service_id"]
+
+        resp = api_client.request(
+            "DELETE", f"/api/v1/services/{service_id}", json={"resolutions": {}}
+        )
+
+        assert resp.status_code == 422
+        # Row untouched.
+        assert api_client.get(f"/api/v1/services/{service_id}").status_code == 200
+
+    def test_delete_service_with_auto_deps_with_body_executes_204(
+        self, api_client, create_service
+    ) -> None:
+        """With body ``{}`` + all-auto deps → 204 execute.
+
+        EXPECTED RED until Task 10 lands ``ArchiveService.resolve_delete``.
+
+        Outcomes (spec §6 execution order nullify → cascade → hard delete):
+        * photos: ``service_id`` SET NULL (photo survives, auto-nullify).
+        * tariffs: hard-deleted (auto-cascade).
+        * service_tags: hard-deleted (auto-cascade).
+        * service: hard-deleted.
+        """
+        tag_id = _create_tag(api_client)
+        service = create_service(
+            tariffs=[TARIFF_PAYLOAD], tag_ids=[tag_id]
+        )
+        service_id = service["id"]
+        # Capture tariff + photo IDs before delete.
+        tariff_id_before = query_db(
+            f"SELECT id FROM tariffs WHERE service_id='{service_id}'"
+        )[0]["id"]
+        photo_resp = api_client.post(
+            "/api/v1/photos",
+            json={"filename": f"svc-{service_id[:8]}.jpg", "service_id": service_id},
+        )
+        photo_id = photo_resp.json()["id"]
+
+        resp = api_client.request(
+            "DELETE", f"/api/v1/services/{service_id}", json={"resolutions": {}}
+        )
+
+        assert resp.status_code == 204
+        # Service row gone.
+        assert api_client.get(f"/api/v1/services/{service_id}").status_code == 404
+        # Tariffs hard-deleted (auto-cascade).
+        assert query_db(f"SELECT * FROM tariffs WHERE id='{tariff_id_before}'") == []
+        # service_tags join rows hard-deleted (auto-cascade).
+        assert (
+            query_db(
+                f"SELECT * FROM service_tags WHERE service_id='{service_id}'"
+            )
+            == []
+        )
+        # Photo survives with service_id=NULL (auto-nullify).
+        photo_rows = query_db(f"SELECT service_id FROM photos WHERE id='{photo_id}'")
+        assert len(photo_rows) == 1
+        assert photo_rows[0]["service_id"] is None
+
+    def test_delete_nonexistent_service_no_body_returns_404(self, api_client) -> None:
+        """No body + nonexistent id → 404 (service.delete returns False)."""
+        resp = api_client.delete("/api/v1/services/nonexistent-service-id")
+        assert resp.status_code == 404
+        assert resp.json()["detail"]["code"] == "SERVICE_NOT_FOUND"
+
+    def test_delete_nonexistent_service_with_body_returns_404(self, api_client) -> None:
+        """With body + nonexistent id → 404 (executor returns False).
+
+        EXPECTED RED until Task 10 (resolve_delete missing → AttributeError today).
+        """
+        resp = api_client.request(
+            "DELETE", "/api/v1/services/nonexistent-service-id", json={"resolutions": {}}
+        )
+        assert resp.status_code == 404
+
+
+class TestArchiveRestoreEndpoints:
+    """POST /api/v1/services/{id}/archive + POST /{id}/restore — Task 11 (#207 §2/§14).
+
+    Both endpoints return HTTP 200 with the re-fetched body (``archived``
+    computed from ``is_active``). Idempotent. ``?status=archived`` lists
+    archived rows after ``POST /archive``.
+    """
+
+    ENTITY_PATH = "/api/v1/services"
+    NOT_FOUND_CODE = "SERVICE_NOT_FOUND"
+
+    def test_archive_returns_200_with_archived_true_and_db_is_active_false(
+        self, api_client, create_service
+    ) -> None:
+        service = create_service()
+
+        resp = api_client.post(f"{self.ENTITY_PATH}/{service['id']}/archive")
+
+        assert resp.status_code == 200, f"archive failed: {resp.text}"
+        body = resp.json()
+        assert body["id"] == service["id"]
+        assert body["archived"] is True
+        rows = query_db(
+            f"SELECT is_active FROM services WHERE id='{service['id']}'"
+        )
+        assert rows[0]["is_active"] == 0
+
+    def test_restore_returns_200_with_archived_false_and_db_is_active_true(
+        self, api_client, create_service
+    ) -> None:
+        service = create_service()
+        api_client.post(f"{self.ENTITY_PATH}/{service['id']}/archive")
+
+        resp = api_client.post(f"{self.ENTITY_PATH}/{service['id']}/restore")
+
+        assert resp.status_code == 200, f"restore failed: {resp.text}"
+        body = resp.json()
+        assert body["archived"] is False
+        rows = query_db(
+            f"SELECT is_active FROM services WHERE id='{service['id']}'"
+        )
+        assert rows[0]["is_active"] == 1
+
+    def test_archive_nonexistent_returns_404(self, api_client) -> None:
+        resp = api_client.post(f"{self.ENTITY_PATH}/nonexistent-id/archive")
+        assert resp.status_code == 404
+        assert resp.json()["detail"]["code"] == self.NOT_FOUND_CODE
+
+    def test_restore_nonexistent_returns_404(self, api_client) -> None:
+        resp = api_client.post(f"{self.ENTITY_PATH}/nonexistent-id/restore")
+        assert resp.status_code == 404
+        assert resp.json()["detail"]["code"] == self.NOT_FOUND_CODE
+
+    def test_archive_already_archived_is_idempotent_200(
+        self, api_client, create_service
+    ) -> None:
+        service = create_service()
+        first = api_client.post(f"{self.ENTITY_PATH}/{service['id']}/archive")
+        assert first.status_code == 200
+
+        second = api_client.post(f"{self.ENTITY_PATH}/{service['id']}/archive")
+
+        assert second.status_code == 200
+        assert second.json()["archived"] is True
+
+    def test_restore_already_active_is_idempotent_200(
+        self, api_client, create_service
+    ) -> None:
+        service = create_service()  # starts active
+
+        resp = api_client.post(f"{self.ENTITY_PATH}/{service['id']}/restore")
+
+        assert resp.status_code == 200
+        assert resp.json()["archived"] is False
+
+    def test_status_archived_returns_archived_row_after_archive_endpoint(
+        self, api_client, create_service
+    ) -> None:
+        service = create_service()
+        api_client.post(f"{self.ENTITY_PATH}/{service['id']}/archive")
+
+        archived_list = api_client.get(f"{self.ENTITY_PATH}?status=archived").json()
+        active_list = api_client.get(f"{self.ENTITY_PATH}?status=active").json()
+
+        archived_ids = [m["id"] for m in archived_list["items"]]
+        active_ids = [m["id"] for m in active_list["items"]]
+        assert service["id"] in archived_ids
+        assert service["id"] not in active_ids
+
+
+class TestArchiveRestoreNoUserCascade:
+    """Non-master entities MUST NOT touch the users table on archive/restore (#207 §4.2).
+
+    Only Master cascades. Service has no link to the users table — verify by
+    creating a user (is_active=true) then asserting users.is_active is
+    unchanged after archive/restore.
+    """
+
+    ENTITY_PATH = "/api/v1/services"
+
+    def test_archive_does_not_modify_users_is_active(
+        self, api_client, create_service, _user
+    ) -> None:
+        service = create_service()
+
+        resp = api_client.post(f"{self.ENTITY_PATH}/{service['id']}/archive")
+
+        assert resp.status_code == 200
+        rows = query_db(f"SELECT is_active FROM users WHERE id='{_user['id']}'")
+        assert rows[0]["is_active"] == 1
+
+    def test_restore_does_not_modify_users_is_active(
+        self, api_client, create_service, _user
+    ) -> None:
+        service = create_service()
+        api_client.post(f"{self.ENTITY_PATH}/{service['id']}/archive")
+
+        resp = api_client.post(f"{self.ENTITY_PATH}/{service['id']}/restore")
+
+        assert resp.status_code == 200
+        rows = query_db(f"SELECT is_active FROM users WHERE id='{_user['id']}'")
+        assert rows[0]["is_active"] == 1

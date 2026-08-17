@@ -2,13 +2,13 @@
 
 from functools import lru_cache
 
-from src.repositories.generic import get_soft_delete_repository
+from src.repositories.generic import get_archive_repository
 from src.models.material import Material
 from src.schemas.material import MaterialCreate, MaterialResponse, MaterialUpdate
-from src.services.generic import SoftDeleteService
+from src.services.generic import ArchiveService
 
 
-class MaterialService(SoftDeleteService[MaterialCreate, MaterialUpdate, MaterialResponse]):
+class MaterialService(ArchiveService[MaterialCreate, MaterialUpdate, MaterialResponse]):
     """Material service with NOT NULL field protection on PATCH."""
 
     NOT_NULL_FIELDS = {"title", "description"}
@@ -16,4 +16,4 @@ class MaterialService(SoftDeleteService[MaterialCreate, MaterialUpdate, Material
 
 @lru_cache
 def get_material_service() -> MaterialService:
-    return MaterialService(get_soft_delete_repository(), Material, MaterialResponse)
+    return MaterialService(get_archive_repository(), Material, MaterialResponse)

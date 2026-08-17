@@ -5,7 +5,7 @@
  * waiting for data, navigating tabs) so test files stay readable.
  */
 
-import { type Page, expect } from '@playwright/test';
+import { type Locator, type Page, expect } from '@playwright/test';
 import path from 'path';
 import { queryDBRow } from './db-query';
 import { sqliteExecWithRetry } from './sqlite-exec';
@@ -469,6 +469,70 @@ export async function waitForTagsReady(page: Page) {
   await page.waitForSelector('table', { timeout: 60_000 });
   await tagsResponse.catch(() => {});
   await page.waitForTimeout(500);
+}
+
+/**
+ * Wait for the materials view to load with table.
+ * Navigates to /services, switches to the "Материалы" tab view (the h1
+ * heading flips to "Управление материалами" — assert THAT so a stale tab
+ * switch can't pass), then waits for the table.
+ */
+export async function waitForMaterialsReady(page: Page) {
+  const materialsResponse = page.waitForResponse(
+    (resp) => resp.url().includes('/api/v1/materials') && resp.status() === 200,
+    { timeout: 60_000 },
+  );
+  await page.goto('/services');
+  await page.waitForSelector('h1:has-text("Управление услугами")', { timeout: 60_000 });
+  await page.getByRole('button', { name: 'Материалы' }).click();
+  await page.waitForSelector('h1:has-text("Управление материалами")', { timeout: 15_000 });
+  await page.waitForSelector('table', { timeout: 60_000 });
+  await materialsResponse.catch(() => {});
+  await page.waitForTimeout(500);
+}
+
+/**
+ * Open the row action dropdown (⋯ button) for a given row.
+ * Row locators: [data-testid="master-row-{id}"], [data-testid="location-row-{id}"]
+ * (Masters/locations carry row test IDs; clients/materials rows are looked
+ * up by name text).
+ */
+export async function openRowActionDropdown(row: Locator) {
+  await row.getByRole('button', { name: 'Действия' }).click();
+  const dropdown = row.locator('[data-testid^="dropdown-"]');
+  if (await dropdown.count() > 0) {
+    await expect(dropdown).toBeVisible({ timeout: 5_000 });
+    return dropdown;
+  }
+  // Services/materials: no dropdown testid — the menu items live on the row.
+  await expect(
+    row.getByRole('button', { name: /В архив|Восстановить/ }),
+  ).toBeVisible({ timeout: 5_000 });
+  return row;
+}
+
+/** Click the "Удалить" item in an open row action dropdown (or row scope). */
+export async function clickRowDelete(dropdownOrRow: Locator): Promise<void> {
+  await dropdownOrRow.getByRole('button', { name: 'Удалить' }).click();
+}
+
+/** Click the "В архив" or "Восстановить" item in an open row dropdown (or row scope). */
+export async function clickRowArchiveAction(
+  dropdownOrRow: Locator,
+  action: 'В архив' | 'Восстановить',
+): Promise<void> {
+  await dropdownOrRow.getByRole('button', { name: action }).click();
+}
+
+/**
+ * Type the entity name into the DeleteDialog confirm field and click confirm.
+ * The confirm button enables only when the typed name matches (Mode A).
+ */
+export async function confirmDeleteDialog(page: Page, entityName: string) {
+  await expect(page.locator('[data-testid="delete-dialog"]')).toBeVisible({ timeout: 10_000 });
+  await page.locator('[data-testid="delete-dialog-confirm-input"]').fill(entityName);
+  await expect(page.locator('[data-testid="delete-dialog-confirm-btn"]')).toBeEnabled();
+  await page.locator('[data-testid="delete-dialog-confirm-btn"]').click();
 }
 
 /**

@@ -88,18 +88,18 @@ const mockServices = [
       { id: 't2', service_id: 's1', title: 'Детский', price: 2500, description: null },
     ],
     tags: [],
-    is_active: true,
+    archived: false,
     created_at: '',
     updated_at: '',
   },
 ];
 
 const mockMasters = [
-  { id: 'm1', first_name: 'Ольга', last_name: 'Середа', color: '#5B8C7A', position: 'artist', specialty: 'живопись', avatar_url: null, is_active: true, created_at: '', updated_at: '' },
+  { id: 'm1', first_name: 'Ольга', last_name: 'Середа', color: '#5B8C7A', position: 'artist', specialty: 'живопись', avatar_url: null, archived: false, created_at: '', updated_at: '' },
 ];
 
 const mockLocations = [
-  { id: 'loc1', name: 'Альпика', address: 'Альпика, 1 этаж', description: null, capacity: 20, yandex_map_url: null, review_url: null, record_info: null, image_url: null, is_active: true, created_at: '', updated_at: '' },
+  { id: 'loc1', name: 'Альпика', address: 'Альпика, 1 этаж', description: null, capacity: 20, yandex_map_url: null, review_url: null, record_info: null, image_url: null, archived: false, created_at: '', updated_at: '' },
 ];
 
 const mockPayments = [

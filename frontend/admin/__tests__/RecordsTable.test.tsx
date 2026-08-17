@@ -24,7 +24,7 @@ const mockClient: ClientWithStats = {
   channel: 'phone',
   created_at: '2024-01-01T00:00:00Z',
   updated_at: '2024-01-01T00:00:00Z',
-  is_active: true,
+  archived: false,
   records_count: 5,
   last_record: '2024-06-15',
   total_paid: 2500,
@@ -59,7 +59,7 @@ const mockService: ServiceResponse = {
   record_info: '',
   tariffs: [{ id: 't-1', service_id: 'svc-1', title: 'Стандарт', description: null, price: 2500 }],
   tags: [],
-  is_active: true,
+  archived: false,
   created_at: '2024-01-01T00:00:00Z',
   updated_at: '2024-01-01T00:00:00Z',
 };
@@ -72,7 +72,7 @@ const mockMaster: MasterResponse = {
   position: 'artist',
   specialty: 'art',
   avatar_url: null,
-  is_active: true,
+  archived: false,
   created_at: '2024-01-01T00:00:00Z',
   updated_at: '2024-01-01T00:00:00Z',
 };
@@ -87,7 +87,7 @@ const mockLocation: LocationResponse = {
   review_url: null,
   record_info: null,
   image_url: null,
-  is_active: true,
+  archived: false,
   created_at: '2024-01-01T00:00:00Z',
   updated_at: '2024-01-01T00:00:00Z',
 };

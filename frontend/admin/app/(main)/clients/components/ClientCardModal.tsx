@@ -2,13 +2,14 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { getRecords, getActivity } from '@memo/api-client';
+import { getRecords, getActivity, ApiError } from '@memo/api-client';
 import { useClients } from '@/contexts/ClientsContext';
 import { useUI } from '@/contexts/UIContext';
 import { ClientInfoTab, type ClientInfoTabHandle } from './ClientInfoTab';
 import { ClientRecordTab } from './ClientRecordTab';
 import { Modal } from '@/app/components/shared/modal/Modal';
-import type { ClientWithStats, ActivityResponse } from '@memo/api-client';
+import { DeleteDialog } from '@/app/components/DeleteDialog';
+import type { ClientWithStats, ActivityResponse, DependencyNode } from '@memo/api-client';
 import { parseApiError } from '@/app/lib/api/parseApiError';
 
 interface ClientCardModalProps {
@@ -23,8 +24,14 @@ export function ClientCardModal({ client, isOpen, onClose, onClientCreated, mode
   const [activeTab, setActiveTab] = useState('client');
   const [hasChanges, setHasChanges] = useState(false);
   const clientInfoRef = useRef<ClientInfoTabHandle>(null);
-  const { createClient, updateClient, deleteClient } = useClients();
+  const { createClient, updateClient, deleteClient, archiveClient, restoreClient, resolveDeleteClient, dependencies } = useClients();
   const { showToast } = useUI();
+
+  // ─── Delete dialog state (§7.3: parent owns dry-run + open/close) ────
+  const [deleteTarget, setDeleteTarget] = useState<{
+    client: ClientWithStats;
+    dependencies: DependencyNode[];
+  } | null>(null);
 
   // Close on Escape
   useEffect(() => {
@@ -38,17 +45,47 @@ export function ClientCardModal({ client, isOpen, onClose, onClientCreated, mode
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, onClose]);
 
+  // ─── Delete — §7.3 dry-run flow ───────────────────────────────────────
+  // No-body DELETE → 204 (instant delete → close modal) or 409 + tree →
+  // DeleteDialog (Mode A: resolve / Mode B: archive). window.confirm replaced
+  // per #207.
   const handleDelete = useCallback(async () => {
-    const clientName = client?.name ?? 'клиента';
-    if (window.confirm(`Удалить ${clientName}? Это скроет клиента из списка.`)) {
-      try {
-        await deleteClient(client!.id);
-        onClose();
-      } catch (err) {
-        showToast(parseApiError(err).message, 'error');
+    if (!client) return;
+    try {
+      await deleteClient(client.id);
+      // 204 — already deleted (zero deps): close the modal.
+      showToast('Клиент удалён');
+      onClose();
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        // Prefer the tree on the failing 409 response itself (always fresh);
+        // the context-parked `dependencies` is only a fallback.
+        const deps = err.dependencies ?? dependencies ?? [];
+        if (deps.length > 0) {
+          setDeleteTarget({ client, dependencies: deps });
+          return;
+        }
       }
+      showToast(parseApiError(err).message, 'error');
     }
-  }, [client, deleteClient, onClose, showToast]);
+  }, [client, deleteClient, dependencies, onClose, showToast]);
+
+  // ─── Archive / Restore (#198 parity) ─────────────────────────────────
+  const handleArchiveToggle = useCallback(async () => {
+    if (!client) return;
+    try {
+      if (client.archived) {
+        await restoreClient(client.id);
+        showToast('Клиент восстановлен');
+      } else {
+        await archiveClient(client.id);
+        showToast('Клиент в архиве');
+      }
+      onClose();
+    } catch (err) {
+      showToast(parseApiError(err).message, 'error');
+    }
+  }, [client, archiveClient, restoreClient, onClose, showToast]);
 
   // Fetch records for this client (only in view mode)
   const { data: records } = useQuery({
@@ -67,9 +104,14 @@ export function ClientCardModal({ client, isOpen, onClose, onClientCreated, mode
     enabled: !!records && records.length > 0,
   });
 
-  // Reset tab to 'client' whenever the modal opens
+  // Reset tab to 'client' whenever the modal opens; drop any pending delete
+  // dialog when it closes (so reopening doesn't resurrect a stale dialog).
   useEffect(() => {
-    if (isOpen) setActiveTab('client');
+    if (isOpen) {
+      setActiveTab('client');
+    } else {
+      setDeleteTarget(null);
+    }
   }, [isOpen]);
 
   if (!isOpen) return null;
@@ -93,12 +135,21 @@ export function ClientCardModal({ client, isOpen, onClose, onClientCreated, mode
           activeTab === 'client' ? (
             <div className="flex justify-between items-center">
               {mode === 'view' && client ? (
-                <button
-                  onClick={handleDelete}
-                  className="px-4 py-2 text-sm text-red-500 hover:text-red-600 rounded-lg transition-colors"
-                >
-                  Удалить
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleArchiveToggle}
+                    className="px-4 py-2 text-sm rounded-lg border transition-colors"
+                    style={{ borderColor: 'var(--line)', color: 'var(--ink)' }}
+                  >
+                    {client.archived ? 'Восстановить' : 'В архив'}
+                  </button>
+                  <button
+                    onClick={handleDelete}
+                    className="px-4 py-2 text-sm text-red-500 hover:text-red-600 rounded-lg transition-colors"
+                  >
+                    Удалить
+                  </button>
+                </div>
               ) : <div />}
               <div className="flex gap-2">
                 {mode === 'view' && (
@@ -210,6 +261,26 @@ export function ClientCardModal({ client, isOpen, onClose, onClientCreated, mode
           )}
         </div>
       </Modal>
+
+      {/* Delete dialog — §7.3: opened on dry-run 409, closed on done/cancel */}
+      {deleteTarget && (
+        <DeleteDialog
+          entityName={deleteTarget.client.name || 'Дорогой гость'}
+          entityType="client"
+          entityId={deleteTarget.client.id}
+          dependencies={deleteTarget.dependencies}
+          onResolve={async (id, resolutions) => {
+            await resolveDeleteClient(id, resolutions);
+            showToast('Клиент удалён');
+          }}
+          onArchive={(id) => archiveClient(id)}
+          onDone={() => {
+            setDeleteTarget(null);
+            onClose();
+          }}
+          onCancel={() => setDeleteTarget(null)}
+        />
+      )}
     </div>
   );
 }

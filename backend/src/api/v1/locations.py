@@ -3,10 +3,12 @@
 from functools import lru_cache
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi.responses import JSONResponse
 from sqlalchemy import asc
 
 from src.db import SessionDep
+from src.domain.deletion import ResolutionError, collect_dependencies
 from src.errors import ErrorCode, ErrorDetail
 from src.models.enums import ArchiveStatus
 from src.models.location import Location
@@ -140,8 +142,45 @@ async def delete_location(
     location_id: str,
     service: _ServiceDep,
     session: SessionDep,
+    resolutions: dict[str, str] | None = Body(default=None, embed=True),
 ) -> None:
-    """Soft-delete a location (set is_active=False)."""
+    """Unified DELETE — dry-run (no body) or execute (with body). Spec §2/§5/§6.
+
+    * No body (dry-run): ``collect_dependencies`` → empty → hard delete (204);
+      non-empty → 409 + dependency tree (no rows modified).
+    * With body (execute): ``{"resolutions": {...}}`` per spec §6 (§2 L24,
+      §6 L161 — the ONLY accepted body form; the api-client ``resolveDeleteX``
+      sends exactly this; ``embed=True`` rejects a bare dict as a dry-run
+      shape). A wrapped empty ``{"resolutions": {}}`` still executes (S2 —
+      all-auto deps). ``service.resolve_delete`` runs the resolution
+      transaction (Task 10) → 204; ``ResolutionError`` → 422; missing → 404.
+    """
+    if resolutions is not None:
+        try:
+            ok = await service.resolve_delete(
+                db_session=session, id=location_id, resolutions=resolutions
+            )
+        except ResolutionError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+        if not ok:
+            raise HTTPException(
+                status_code=404,
+                detail=ErrorDetail(
+                    code=ErrorCode.LOCATION_NOT_FOUND,
+                    message="Location not found",
+                ).model_dump(),
+            )
+        return
+
+    deps = await collect_dependencies(session, Location, location_id)
+    if deps:
+        return JSONResponse(
+            status_code=409,
+            content={
+                "detail": "has_dependencies",
+                "dependencies": [d.model_dump() for d in deps],
+            },
+        )
     deleted = await service.delete(db_session=session, id=location_id)
     if not deleted:
         raise HTTPException(
@@ -151,3 +190,67 @@ async def delete_location(
                 message="Location not found",
             ).model_dump(),
         )
+
+
+@router.post("/{location_id}/archive", response_model=LocationResponse)
+async def archive_location(
+    location_id: str,
+    service: _ServiceDep,
+    session: SessionDep,
+) -> LocationResponse:
+    """Archive a location — flip ``is_active=False`` (spec §2/§14).
+
+    Returns HTTP **200 with the re-fetched body** (``archived: true`` in the
+    response schema) so the frontend updates the row without a refetch (spec
+    §12 S5). Idempotent. Location has NO cross-entity cascade — only Master
+    does (spec §4.2).
+    """
+    ok = await service.archive(db_session=session, id=location_id)
+    if not ok:
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.LOCATION_NOT_FOUND,
+                message="Location not found",
+            ).model_dump(),
+        )
+    return await _refetch_or_404(service, session, location_id)
+
+
+@router.post("/{location_id}/restore", response_model=LocationResponse)
+async def restore_location(
+    location_id: str,
+    service: _ServiceDep,
+    session: SessionDep,
+) -> LocationResponse:
+    """Restore an archived location — flip ``is_active=True`` (spec §2/§14).
+
+    Returns HTTP **200 with the re-fetched body** (``archived: false``). 404 if
+    not found. Idempotent. No cross-entity cascade.
+    """
+    ok = await service.restore(db_session=session, id=location_id)
+    if not ok:
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.LOCATION_NOT_FOUND,
+                message="Location not found",
+            ).model_dump(),
+        )
+    return await _refetch_or_404(service, session, location_id)
+
+
+async def _refetch_or_404(
+    service: LocationService, session: SessionDep, location_id: str
+) -> LocationResponse:
+    """Re-fetch the location after a successful archive/restore (Task 11)."""
+    location = await service.get(db_session=session, id=location_id)
+    if location is None:
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.LOCATION_NOT_FOUND,
+                message="Location not found",
+            ).model_dump(),
+        )
+    return location

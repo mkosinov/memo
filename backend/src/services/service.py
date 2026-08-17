@@ -9,22 +9,22 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from src.models.enums import ArchiveStatus
-from src.repositories.generic import SoftDeleteRepository, get_soft_delete_repository
+from src.repositories.generic import ArchiveRepository, get_archive_repository
 from src.models.service import Service
 from src.models.tag import service_tags
 from src.models.tariff import Tariff
 from src.schemas.common import PaginatedResponse
 from src.schemas.service import ServiceCreate, ServicePatch, ServiceResponse, ServiceUpdate
-from src.services.generic import SoftDeleteService, _strip_is_active_none
+from src.services.generic import ArchiveService
 from src.services.decorators import transactional
 
 
-class ServiceService(SoftDeleteService[ServiceCreate, ServiceUpdate, ServiceResponse]):
+class ServiceService(ArchiveService[ServiceCreate, ServiceUpdate, ServiceResponse]):
     """Service service with eager-loaded tariffs/tags and nested create/update.
 
     Overrides ``list`` to eager-load ``tariffs``/``tags`` via ``selectinload``.
     The eager-load makes the select structurally incompatible with the
-    ``SoftDeleteService._list_stmt`` base (which uses a bare ``select(model)``),
+    ``ArchiveService._list_stmt`` base (which uses a bare ``select(model)``),
     so the archive-status clause is applied inline here rather than composed
     (spec §5.3 explicitly permits this duplication for the eager-load override).
     """
@@ -32,7 +32,7 @@ class ServiceService(SoftDeleteService[ServiceCreate, ServiceUpdate, ServiceResp
     NOT_NULL_FIELDS = {"title", "description", "image_url", "specialty", "min_age", "duration", "record_info"}
 
     def __init__(
-        self, repository: SoftDeleteRepository, model: type[Service]
+        self, repository: ArchiveRepository, model: type[Service]
     ) -> None:
         super().__init__(repository, model, response_schema=ServiceResponse)
 
@@ -175,9 +175,6 @@ class ServiceService(SoftDeleteService[ServiceCreate, ServiceUpdate, ServiceResp
             if field in data_dict and data_dict[field] is None:
                 del data_dict[field]
 
-        # Strip is_active when None (#184 sticky-field semantics)
-        data_dict = _strip_is_active_none(data_dict)
-
         # Apply scalar fields
         for key, value in data_dict.items():
             setattr(service, key, value)
@@ -212,4 +209,4 @@ class ServiceService(SoftDeleteService[ServiceCreate, ServiceUpdate, ServiceResp
 @lru_cache
 def get_service_service() -> ServiceService:
     """Returns a singleton ServiceService."""
-    return ServiceService(get_soft_delete_repository(), Service)
+    return ServiceService(get_archive_repository(), Service)

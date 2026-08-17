@@ -4,13 +4,16 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { getLocations } from '@memo/api-client';
 import type { LocationResponse } from '@memo/api-client';
-import { useUpdateLocation, usePatchLocation, useCreateLocation, useDeleteLocation } from '@/hooks/useLocationsMutations';
-import type { LocationUpdate } from '@memo/api-client';
+import { useUpdateLocation, useCreateLocation, useDeleteLocation, useArchiveLocation, useRestoreLocation } from '@/hooks/useLocationsMutations';
+import type { LocationUpdate, DependencyNode } from '@memo/api-client';
+import { resolveDeleteLocation, ApiError } from '@memo/api-client';
+import { useQueryClient } from '@tanstack/react-query';
 import { useUI } from '@/contexts/UIContext';
 import { LocationModal } from './LocationModal';
 import { LocationFilters } from './LocationFilters';
 import { LOCATION_FIELDS } from './locationFields';
 import { ColumnPicker } from '@/app/components/shared/ColumnPicker';
+import { DeleteDialog } from '@/app/components/DeleteDialog';
 import { ErrorState } from '@/app/components/error';
 import { parseApiError } from '@/app/lib/api/parseApiError';
 
@@ -30,7 +33,7 @@ const COLUMNS: Column[] = [
   { key: 'address', label: 'Адрес', width: 'flex-1', defaultVisible: true },
   { key: 'location_hint', label: 'Подсказка', width: 'w-[150px]', defaultVisible: true },
   { key: 'description', label: 'Описание', defaultVisible: false },
-  { key: 'is_active', label: 'Статус', defaultVisible: false },
+  { key: 'archived', label: 'Статус', defaultVisible: false },
   { key: 'yandex_map_url', label: 'Карта', defaultVisible: false },
   { key: 'created_at', label: 'Создано', defaultVisible: false },
 ];
@@ -53,9 +56,11 @@ export function LocationsTable() {
   });
 
   const updateLocation = useUpdateLocation();
-  const patchLocation = usePatchLocation();
   const createLocation = useCreateLocation();
   const deleteLocation = useDeleteLocation();
+  const archiveLocation = useArchiveLocation();
+  const restoreLocation = useRestoreLocation();
+  const queryClient = useQueryClient();
   const { showToast } = useUI();
 
   // ─── Column visibility state ───────────────────────────────────────
@@ -81,6 +86,12 @@ export function LocationsTable() {
 
   // ─── Action dropdown state ───────────────────────────────────────────
   const [openDropdownId, setOpenDropdownId] = useState<string | null>(null);
+
+  // ─── Delete dialog state (§7.3: parent owns dry-run + open/close) ────
+  const [deleteTarget, setDeleteTarget] = useState<{
+    location: LocationResponse;
+    dependencies: DependencyNode[];
+  } | null>(null);
 
   // Reset page when filters change
   useEffect(() => {
@@ -153,6 +164,8 @@ export function LocationsTable() {
     // Canonical PUT (GH #178): every LocationUpdate field listed — tsc fails on
     // missing/extra fields. Form values are untyped → per-field extraction;
     // null optionals coerce to the Create default (backend does the same).
+    // #207: the Update schema carries no archive flag — archive/restore goes
+    // through POST /locations/{id}/archive|restore, so PUT never flips it.
     const payload: LocationUpdate = {
       name: data.name as string,
       short_title: (data.short_title as string | null | undefined) ?? '',
@@ -165,7 +178,6 @@ export function LocationsTable() {
       image_url: (data.image_url as string | null | undefined) ?? '',
       location_hint: (data.location_hint as string | null | undefined) ?? '',
       tag_ids: (data.tag_ids as string[] | undefined) ?? [],
-      is_active: editLocation.is_active,
     };
     try {
       await updateLocation.mutateAsync({
@@ -180,14 +192,18 @@ export function LocationsTable() {
   };
 
   // ─── Archive / Restore ───────────────────────────────────────────────
+  // #207: dedicated POST endpoints. Label and action drive off
+  // `row.archived` (inverted response field).
 
-  const handleToggleActive = async (loc: LocationResponse) => {
+  const handleArchiveToggle = async (loc: LocationResponse) => {
     try {
-      await patchLocation.mutateAsync({
-        id: loc.id,
-        data: { is_active: !loc.is_active },
-      });
-      showToast(loc.is_active ? 'Локация архивирована' : 'Локация восстановлена');
+      if (loc.archived) {
+        await restoreLocation.mutateAsync(loc.id);
+        showToast('Локация восстановлена');
+      } else {
+        await archiveLocation.mutateAsync(loc.id);
+        showToast('Локация архивирована');
+      }
       setOpenDropdownId(null);
     } catch (err) {
       showToast(parseApiError(err).message, 'error');
@@ -216,15 +232,22 @@ export function LocationsTable() {
   };
 
   // ─── Delete ─────────────────────────────────────────────────────────
+  // #207 §7.3 dry-run flow: no-body DELETE → 204 (instant delete, no deps)
+  // or 409 + dependency tree → DeleteDialog (Mode A/B). The parent owns the
+  // call + open/close state; the dialog receives the parsed tree.
 
   const handleDelete = async (loc: LocationResponse) => {
     setOpenDropdownId(null);
-    if (!window.confirm('Удалить локацию?')) return;
     try {
       await deleteLocation.mutateAsync(loc.id);
+      // 204 — already deleted (zero deps): refresh handled by the hook.
       showToast('Локация удалена');
     } catch (err) {
-      showToast(parseApiError(err).message, 'error');
+      if (err instanceof ApiError && err.status === 409 && err.dependencies) {
+        setDeleteTarget({ location: loc, dependencies: err.dependencies });
+      } else {
+        showToast(parseApiError(err).message, 'error');
+      }
     }
   };
 
@@ -350,11 +373,11 @@ export function LocationsTable() {
                 </td>
                 )}
 
-                {/* Is Active */}
-                {visibleKeys.includes('is_active') && (
+                {/* Status */}
+                {visibleKeys.includes('archived') && (
                 <td className="px-4 py-3 text-sm">
-                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${loc.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500'}`}>
-                    {loc.is_active ? 'Активен' : 'Архив'}
+                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${loc.archived ? 'bg-gray-100 text-gray-500' : 'bg-emerald-100 text-emerald-700'}`}>
+                    {loc.archived ? 'Архив' : 'Активен'}
                   </span>
                 </td>
                 )}
@@ -418,12 +441,12 @@ export function LocationsTable() {
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              handleToggleActive(loc);
+                              handleArchiveToggle(loc);
                             }}
                             className="w-full text-left px-3 py-2 text-sm transition-colors hover:opacity-80"
                             style={{ color: 'var(--ink)' }}
                           >
-                            {loc.is_active ? 'В архив' : 'Восстановить'}
+                            {loc.archived ? 'Восстановить' : 'В архив'}
                           </button>
                           <button
                             onClick={(e) => {
@@ -539,6 +562,27 @@ export function LocationsTable() {
           onSubmit={handleCreateSubmit}
           onClose={() => setCreatingLocation(false)}
           title="Новая локация"
+        />
+      )}
+
+      {/* Delete dialog — §7.3: opened on dry-run 409, closed on done/cancel */}
+      {deleteTarget && (
+        <DeleteDialog
+          entityName={deleteTarget.location.name}
+          entityType="location"
+          entityId={deleteTarget.location.id}
+          dependencies={deleteTarget.dependencies}
+          onResolve={async (id, resolutions) => {
+            await resolveDeleteLocation(id, resolutions);
+            // The resolve call bypasses the hook's onSuccess, so refresh
+            // here — incl. cross-key ['records'] (useRecordData consumers).
+            queryClient.invalidateQueries({ queryKey: ['locations'] });
+            queryClient.invalidateQueries({ queryKey: ['records'] });
+            showToast('Локация удалена');
+          }}
+          onArchive={(id) => archiveLocation.mutateAsync(id)}
+          onDone={() => setDeleteTarget(null)}
+          onCancel={() => setDeleteTarget(null)}
         />
       )}
     </div>

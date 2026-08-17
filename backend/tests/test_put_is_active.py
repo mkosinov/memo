@@ -1,7 +1,21 @@
-"""Tests for Task 1: PUT endpoints should accept and apply is_active field.
+"""Tests pinning that PUT endpoints REJECT the ``is_active`` field (422).
 
-PUT = full replacement, so the Update schema must cover is_active.
-These tests verify that PUT can deactivate an entity by setting is_active=False.
+#207 §3.2 + §10 (auto-closes #178): ``is_active`` was removed from all Update
+(PUT) schemas for the 5 archive-capable entities (Master/Location/Service/
+Material/Client). Archive/restore is exclusively via the dedicated
+``POST /{id}/archive`` + ``POST /{id}/restore`` endpoints (Task 11). A stray
+``is_active`` in a PUT body is rejected with **422** via ``extra="forbid"`` on
+the Update schema. The API now exposes ``archived`` (= ``not is_active``) on
+the Response; ``is_active`` itself never serializes (``Field(exclude=True)``).
+
+These are the **inverted** acceptance assertions (spec §14): they previously
+asserted ``is_active`` round-trips via PUT for Master/Location/Material/
+Service; now they assert PUT with ``is_active`` → 422 and the entity stays
+active (a rejected PUT is atomic — no partial write reaches the DB). Client
+coverage is added for parity (#201). Bare 422-status smoke checks live in
+``test_update_rejects_is_active.py`` (Task 5); the archive/restore round-trip
+moved to the ``TestArchiveRestoreEndpoints`` classes in each
+``test_api_{entity}.py`` (Task 11).
 """
 
 import pytest
@@ -9,107 +23,136 @@ import pytest
 pytestmark = pytest.mark.api
 
 
-class TestMasterPutIsActive:
-    """PUT /api/v1/masters/{id} should accept is_active field."""
+# ─── valid full-replace PUT payloads (no is_active) ──────────────────────────
+# Each is a complete body for the entity's Update schema; archived/restore via
+# POST endpoints, never via PUT.
 
-    def test_put_master_with_is_active_false(self, api_client) -> None:
-        """PUT with is_active=False deactivates the master."""
-        create = api_client.post("/api/v1/masters", json={
-            "first_name": "Active", "last_name": "Master",
-            "color": "#5B8C7A", "position": "мастер", "specialty": "живопись",
-        })
-        master_id = create.json()["id"]
-        assert create.json()["is_active"] is True
+MASTER_PUT = {
+    "first_name": "Active",
+    "last_name": "Master",
+    "color": "#5B8C7A",
+    "position": "мастер",
+    "specialty": "живопись",
+}
 
-        # PUT with is_active=False
-        update_data = {
-            "first_name": "Active", "last_name": "Master",
-            "color": "#5B8C7A", "position": "мастер", "specialty": "живопись",
-            "is_active": False,
-        }
-        response = api_client.put(f"/api/v1/masters/{master_id}", json=update_data)
-        assert response.status_code == 200, f"PUT failed: {response.text}"
-        assert response.json()["is_active"] is False
+LOCATION_PUT = {
+    "name": "Test Studio",
+    "address": "Test Address",
+    "capacity": 20,
+}
 
-    def test_put_master_with_is_active_true(self, api_client) -> None:
-        """PUT with is_active=True keeps the master active."""
-        create = api_client.post("/api/v1/masters", json={
-            "first_name": "Test", "last_name": "Master",
-            "color": "#5B8C7A", "position": "мастер", "specialty": "живопись",
-        })
-        master_id = create.json()["id"]
+MATERIAL_PUT = {
+    "title": "Test Material",
+    "description": "Test description",
+}
 
-        update_data = {
-            "first_name": "Test", "last_name": "Master",
-            "color": "#5B8C7A", "position": "мастер", "specialty": "живопись",
-            "is_active": True,
-        }
-        response = api_client.put(f"/api/v1/masters/{master_id}", json=update_data)
-        assert response.status_code == 200
-        assert response.json()["is_active"] is True
+SERVICE_PUT = {
+    "title": "Test Service",
+    "description": "Test",
+    "image_url": "https://example.com/test.jpg",
+    "specialty": "живопись",
+    "min_age": 6,
+    "max_age": 99,
+    "duration": 90,
+    "record_info": "info",
+}
 
-
-class TestLocationPutIsActive:
-    """PUT /api/v1/locations/{id} should accept is_active field."""
-
-    def test_put_location_with_is_active_false(self, api_client) -> None:
-        """PUT with is_active=False deactivates the location."""
-        create = api_client.post("/api/v1/locations", json={
-            "name": "Test Studio", "address": "Test Address", "capacity": 20,
-        })
-        location_id = create.json()["id"]
-        assert create.json()["is_active"] is True
-
-        update_data = {
-            "name": "Test Studio", "address": "Test Address", "capacity": 20,
-            "is_active": False,
-        }
-        response = api_client.put(f"/api/v1/locations/{location_id}", json=update_data)
-        assert response.status_code == 200, f"PUT failed: {response.text}"
-        assert response.json()["is_active"] is False
+# ClientUpdate requires all 4 personal keys (value may be null, GH #201).
+CLIENT_PUT = {
+    "name": "John Smith",
+    "phone": "+79991234567",
+    "email": "john@example.com",
+    "channel": "telegram",
+}
 
 
-class TestMaterialPutIsActive:
-    """PUT /api/v1/materials/{id} should accept is_active field."""
+class TestMasterPutRejectsIsActive:
+    """PUT /api/v1/masters/{id} with is_active in the body → 422."""
 
-    def test_put_material_with_is_active_false(self, api_client) -> None:
-        """PUT with is_active=False deactivates the material."""
-        create = api_client.post("/api/v1/materials", json={
-            "title": "Test Material", "description": "Test description",
-        })
-        material_id = create.json()["id"]
-        assert create.json()["is_active"] is True
+    def test_put_master_with_is_active_false_rejected(self, api_client) -> None:
+        """A stray is_active=False (old archive direction) → 422; master stays active."""
+        master_id = api_client.post("/api/v1/masters", json=MASTER_PUT).json()["id"]
 
-        update_data = {
-            "title": "Test Material", "description": "Test description",
-            "is_active": False,
-        }
-        response = api_client.put(f"/api/v1/materials/{material_id}", json=update_data)
-        assert response.status_code == 200, f"PUT failed: {response.text}"
-        assert response.json()["is_active"] is False
+        resp = api_client.put(
+            f"/api/v1/masters/{master_id}",
+            json={**MASTER_PUT, "is_active": False},
+        )
+        assert resp.status_code == 422, f"Expected 422, got {resp.status_code}: {resp.text}"
+
+        # Rejection is atomic — no partial write; master is still active.
+        after = api_client.get(f"/api/v1/masters/{master_id}").json()
+        assert after["archived"] is False
+
+    def test_put_master_with_is_active_true_rejected(self, api_client) -> None:
+        """A stray is_active=True (old restore direction) → 422 too (both polarities)."""
+        master_id = api_client.post("/api/v1/masters", json=MASTER_PUT).json()["id"]
+
+        resp = api_client.put(
+            f"/api/v1/masters/{master_id}",
+            json={**MASTER_PUT, "is_active": True},
+        )
+        assert resp.status_code == 422, f"Expected 422, got {resp.status_code}: {resp.text}"
 
 
-class TestServicePutIsActive:
-    """PUT /api/v1/services/{id} should accept is_active field."""
+class TestLocationPutRejectsIsActive:
+    """PUT /api/v1/locations/{id} with is_active in the body → 422."""
 
-    def test_put_service_with_is_active_false(self, api_client) -> None:
-        """PUT with is_active=False deactivates the service."""
-        create = api_client.post("/api/v1/services", json={
-            "title": "Test Service", "description": "Test",
-            "image_url": "https://example.com/test.jpg",
-            "specialty": "живопись", "min_age": 6, "max_age": 99,
-            "duration": 90, "record_info": "info",
-        })
-        service_id = create.json()["id"]
-        assert create.json()["is_active"] is True
+    def test_put_location_with_is_active_rejected(self, api_client) -> None:
+        loc_id = api_client.post("/api/v1/locations", json=LOCATION_PUT).json()["id"]
 
-        update_data = {
-            "title": "Test Service", "description": "Test",
-            "image_url": "https://example.com/test.jpg",
-            "specialty": "живопись", "min_age": 6, "max_age": 99,
-            "duration": 90, "record_info": "info",
-            "is_active": False,
-        }
-        response = api_client.put(f"/api/v1/services/{service_id}", json=update_data)
-        assert response.status_code == 200, f"PUT failed: {response.text}"
-        assert response.json()["is_active"] is False
+        resp = api_client.put(
+            f"/api/v1/locations/{loc_id}",
+            json={**LOCATION_PUT, "is_active": False},
+        )
+        assert resp.status_code == 422, f"Expected 422, got {resp.status_code}: {resp.text}"
+
+        after = api_client.get(f"/api/v1/locations/{loc_id}").json()
+        assert after["archived"] is False
+
+
+class TestMaterialPutRejectsIsActive:
+    """PUT /api/v1/materials/{id} with is_active in the body → 422."""
+
+    def test_put_material_with_is_active_rejected(self, api_client) -> None:
+        material_id = api_client.post("/api/v1/materials", json=MATERIAL_PUT).json()["id"]
+
+        resp = api_client.put(
+            f"/api/v1/materials/{material_id}",
+            json={**MATERIAL_PUT, "is_active": False},
+        )
+        assert resp.status_code == 422, f"Expected 422, got {resp.status_code}: {resp.text}"
+
+        after = api_client.get(f"/api/v1/materials/{material_id}").json()
+        assert after["archived"] is False
+
+
+class TestServicePutRejectsIsActive:
+    """PUT /api/v1/services/{id} with is_active in the body → 422."""
+
+    def test_put_service_with_is_active_rejected(self, api_client) -> None:
+        service_id = api_client.post("/api/v1/services", json=SERVICE_PUT).json()["id"]
+
+        resp = api_client.put(
+            f"/api/v1/services/{service_id}",
+            json={**SERVICE_PUT, "is_active": False},
+        )
+        assert resp.status_code == 422, f"Expected 422, got {resp.status_code}: {resp.text}"
+
+        after = api_client.get(f"/api/v1/services/{service_id}").json()
+        assert after["archived"] is False
+
+
+class TestClientPutRejectsIsActive:
+    """PUT /api/v1/clients/{id} with is_active in the body → 422 (#201 parity)."""
+
+    def test_put_client_with_is_active_rejected(self, api_client) -> None:
+        client_id = api_client.post("/api/v1/clients", json=CLIENT_PUT).json()["id"]
+
+        resp = api_client.put(
+            f"/api/v1/clients/{client_id}",
+            json={**CLIENT_PUT, "is_active": False},
+        )
+        assert resp.status_code == 422, f"Expected 422, got {resp.status_code}: {resp.text}"
+
+        after = api_client.get(f"/api/v1/clients/{client_id}").json()
+        assert after["archived"] is False

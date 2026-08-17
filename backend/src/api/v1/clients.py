@@ -3,10 +3,13 @@
 from functools import lru_cache
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi.responses import JSONResponse
 
 from src.db import SessionDep
+from src.domain.deletion import ResolutionError, collect_dependencies
 from src.errors import ErrorCode, ErrorDetail
+from src.models.client import Client
 from src.schemas.client import (
     ClientCreate,
     ClientListParams,
@@ -140,8 +143,45 @@ async def delete_client(
     client_id: str,
     service: _ServiceDep,
     session: SessionDep,
+    resolutions: dict[str, str] | None = Body(default=None, embed=True),
 ) -> None:
-    """Soft-delete a client (set is_active=False)."""
+    """Unified DELETE — dry-run (no body) or execute (with body). Spec §2/§5/§6.
+
+    * No body (dry-run): ``collect_dependencies`` → empty → hard delete (204);
+      non-empty → 409 + dependency tree (no rows modified).
+    * With body (execute): ``{"resolutions": {...}}`` per spec §6 (§2 L24,
+      §6 L161 — the ONLY accepted body form; the api-client ``resolveDeleteX``
+      sends exactly this; ``embed=True`` rejects a bare dict as a dry-run
+      shape). A wrapped empty ``{"resolutions": {}}`` still executes (S2 —
+      all-auto deps). ``service.resolve_delete`` runs the resolution
+      transaction (Task 10) → 204; ``ResolutionError`` → 422; missing → 404.
+    """
+    if resolutions is not None:
+        try:
+            ok = await service.resolve_delete(
+                db_session=session, id=client_id, resolutions=resolutions
+            )
+        except ResolutionError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+        if not ok:
+            raise HTTPException(
+                status_code=404,
+                detail=ErrorDetail(
+                    code=ErrorCode.CLIENT_NOT_FOUND,
+                    message="Client not found",
+                ).model_dump(),
+            )
+        return
+
+    deps = await collect_dependencies(session, Client, client_id)
+    if deps:
+        return JSONResponse(
+            status_code=409,
+            content={
+                "detail": "has_dependencies",
+                "dependencies": [d.model_dump() for d in deps],
+            },
+        )
     deleted = await service.delete(db_session=session, id=client_id)
     if not deleted:
         raise HTTPException(
@@ -162,3 +202,67 @@ async def list_client_visitors(
     """Return all visitors for a given client."""
     visitors = await visitor_service.list_by_client(db_session=session, client_id=client_id)
     return [VisitorResponse.model_validate(v) for v in visitors]
+
+
+@router.post("/{client_id}/archive", response_model=ClientResponse)
+async def archive_client(
+    client_id: str,
+    service: _ServiceDep,
+    session: SessionDep,
+) -> ClientResponse:
+    """Archive a client — flip ``is_active=False`` (spec §2/§14).
+
+    Returns HTTP **200 with the re-fetched body** (``archived: true`` in the
+    response schema) so the frontend updates the row without a refetch (spec
+    §12 S5). Idempotent. Closes #198 (Client restore parity). Client has NO
+    cross-entity cascade — only Master does (spec §4.2).
+    """
+    ok = await service.archive(db_session=session, id=client_id)
+    if not ok:
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.CLIENT_NOT_FOUND,
+                message="Client not found",
+            ).model_dump(),
+        )
+    return await _refetch_or_404(service, session, client_id)
+
+
+@router.post("/{client_id}/restore", response_model=ClientResponse)
+async def restore_client(
+    client_id: str,
+    service: _ServiceDep,
+    session: SessionDep,
+) -> ClientResponse:
+    """Restore an archived client — flip ``is_active=True`` (spec §2/§14).
+
+    Returns HTTP **200 with the re-fetched body** (``archived: false``). 404 if
+    not found. Idempotent. No cross-entity cascade.
+    """
+    ok = await service.restore(db_session=session, id=client_id)
+    if not ok:
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.CLIENT_NOT_FOUND,
+                message="Client not found",
+            ).model_dump(),
+        )
+    return await _refetch_or_404(service, session, client_id)
+
+
+async def _refetch_or_404(
+    service: ClientService, session: SessionDep, client_id: str
+) -> ClientResponse:
+    """Re-fetch the client after a successful archive/restore (Task 11)."""
+    client = await service.get(db_session=session, id=client_id)
+    if client is None:
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.CLIENT_NOT_FOUND,
+                message="Client not found",
+            ).model_dump(),
+        )
+    return client

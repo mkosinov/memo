@@ -138,6 +138,19 @@ export async function deleteMaster(id: string): Promise<void> {
   await api(`/api/v1/masters/${id}`, z.any(), { method: 'DELETE' });
 }
 
+export async function archiveMaster(id: string): Promise<MasterResponse> {
+  return api(`/api/v1/masters/${id}/archive`, MasterResponseSchema, { method: 'POST' });
+}
+
+export async function restoreMaster(id: string): Promise<MasterResponse> {
+  return api(`/api/v1/masters/${id}/restore`, MasterResponseSchema, { method: 'POST' });
+}
+
+// Execute a hard delete with dependency resolutions (GH #207 §6) — DELETE with body.
+export async function resolveDeleteMaster(id: string, resolutions: Record<string, string>): Promise<void> {
+  await api(`/api/v1/masters/${id}`, z.any(), { method: 'DELETE', body: JSON.stringify({ resolutions }) });
+}
+
 export async function reorderMasters(ids: string[]): Promise<void> {
   await api('/api/v1/masters/reorder', z.any(), {
     method: 'PUT',
@@ -327,6 +340,19 @@ export async function patchClient(
 
 export async function deleteClient(id: string): Promise<void> {
   await api(`/api/v1/clients/${id}`, z.any(), { method: 'DELETE' });
+}
+
+export async function archiveClient(id: string): Promise<ClientResponse> {
+  return api(`/api/v1/clients/${id}/archive`, ClientResponseSchema, { method: 'POST' });
+}
+
+export async function restoreClient(id: string): Promise<ClientResponse> {
+  return api(`/api/v1/clients/${id}/restore`, ClientResponseSchema, { method: 'POST' });
+}
+
+// Execute a hard delete with dependency resolutions (GH #207 §6) — DELETE with body.
+export async function resolveDeleteClient(id: string, resolutions: Record<string, string>): Promise<void> {
+  await api(`/api/v1/clients/${id}`, z.any(), { method: 'DELETE', body: JSON.stringify({ resolutions }) });
 }
 
 // ─── Payments ───────────────────────────────────────────────────────────────
@@ -544,6 +570,19 @@ export async function deleteService(id: string): Promise<void> {
   await api(`/api/v1/services/${id}`, z.any(), { method: 'DELETE' });
 }
 
+export async function archiveService(id: string): Promise<ServiceResponse> {
+  return api(`/api/v1/services/${id}/archive`, ServiceResponseSchema, { method: 'POST' });
+}
+
+export async function restoreService(id: string): Promise<ServiceResponse> {
+  return api(`/api/v1/services/${id}/restore`, ServiceResponseSchema, { method: 'POST' });
+}
+
+// Execute a hard delete with dependency resolutions (GH #207 §6) — DELETE with body.
+export async function resolveDeleteService(id: string, resolutions: Record<string, string>): Promise<void> {
+  await api(`/api/v1/services/${id}`, z.any(), { method: 'DELETE', body: JSON.stringify({ resolutions }) });
+}
+
 // ─── Locations CRUD ────────────────────────────────────────────────────────
 
 export async function createLocation(data: z.input<typeof LocationCreateSchema>): Promise<LocationResponse> {
@@ -573,6 +612,19 @@ export async function patchLocation(
 
 export async function deleteLocation(id: string): Promise<void> {
   await api(`/api/v1/locations/${id}`, z.any(), { method: 'DELETE' });
+}
+
+export async function archiveLocation(id: string): Promise<LocationResponse> {
+  return api(`/api/v1/locations/${id}/archive`, LocationResponseSchema, { method: 'POST' });
+}
+
+export async function restoreLocation(id: string): Promise<LocationResponse> {
+  return api(`/api/v1/locations/${id}/restore`, LocationResponseSchema, { method: 'POST' });
+}
+
+// Execute a hard delete with dependency resolutions (GH #207 §6) — DELETE with body.
+export async function resolveDeleteLocation(id: string, resolutions: Record<string, string>): Promise<void> {
+  await api(`/api/v1/locations/${id}`, z.any(), { method: 'DELETE', body: JSON.stringify({ resolutions }) });
 }
 
 export async function reorderLocations(ids: string[]): Promise<void> {
@@ -615,6 +667,19 @@ export async function patchMaterial(
 
 export async function deleteMaterial(id: string): Promise<void> {
   await api(`/api/v1/materials/${id}`, z.any(), { method: 'DELETE' });
+}
+
+export async function archiveMaterial(id: string): Promise<MaterialResponse> {
+  return api(`/api/v1/materials/${id}/archive`, MaterialResponseSchema, { method: 'POST' });
+}
+
+export async function restoreMaterial(id: string): Promise<MaterialResponse> {
+  return api(`/api/v1/materials/${id}/restore`, MaterialResponseSchema, { method: 'POST' });
+}
+
+// Execute a hard delete with dependency resolutions (GH #207 §6) — DELETE with body.
+export async function resolveDeleteMaterial(id: string, resolutions: Record<string, string>): Promise<void> {
+  await api(`/api/v1/materials/${id}`, z.any(), { method: 'DELETE', body: JSON.stringify({ resolutions }) });
 }
 
 // ─── Search Endpoints ──────────────────────────────────────────────────

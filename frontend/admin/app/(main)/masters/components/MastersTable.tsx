@@ -4,13 +4,16 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { getMasters } from '@memo/api-client';
 import type { MasterResponse } from '@memo/api-client';
-import { useUpdateMaster, usePatchMaster, useCreateMaster, useDeleteMaster } from '@/hooks/useMastersMutations';
-import type { MasterUpdate } from '@memo/api-client';
+import { useUpdateMaster, useCreateMaster, useDeleteMaster, useArchiveMaster, useRestoreMaster } from '@/hooks/useMastersMutations';
+import type { MasterUpdate, DependencyNode } from '@memo/api-client';
+import { resolveDeleteMaster, ApiError } from '@memo/api-client';
+import { useQueryClient } from '@tanstack/react-query';
 import { useUI } from '@/contexts/UIContext';
 import { displayMasterName } from '@/lib/utils';
 import { MasterModal } from './MasterModal';
 import { MasterFilters } from './MasterFilters';
 import { ColumnPicker } from '@/app/components/shared/ColumnPicker';
+import { DeleteDialog } from '@/app/components/DeleteDialog';
 import { ErrorState } from '@/app/components/error';
 import { parseApiError } from '@/app/lib/api/parseApiError';
 
@@ -50,9 +53,11 @@ export function MastersTable() {
   });
 
   const updateMaster = useUpdateMaster();
-  const patchMaster = usePatchMaster();
   const createMaster = useCreateMaster();
   const deleteMaster = useDeleteMaster();
+  const archiveMaster = useArchiveMaster();
+  const restoreMaster = useRestoreMaster();
+  const queryClient = useQueryClient();
   const { showToast } = useUI();
 
   // ─── Column visibility state ───────────────────────────────────────
@@ -78,6 +83,12 @@ export function MastersTable() {
 
   // ─── Action dropdown state ───────────────────────────────────────────
   const [openDropdownId, setOpenDropdownId] = useState<string | null>(null);
+
+  // ─── Delete dialog state (§7.3: parent owns dry-run + open/close) ────
+  const [deleteTarget, setDeleteTarget] = useState<{
+    master: MasterResponse;
+    dependencies: DependencyNode[];
+  } | null>(null);
 
   // Reset page when filters change
   useEffect(() => {
@@ -155,6 +166,8 @@ export function MastersTable() {
     // Canonical PUT (GH #178): every MasterUpdate field listed — tsc fails on
     // missing/extra fields. Form values are untyped → per-field extraction;
     // null optionals coerce to the Create default (backend does the same).
+    // #207: the Update schema carries no archive flag — archive/restore goes
+    // through POST /masters/{id}/archive|restore, so PUT never flips it.
     const payload: MasterUpdate = {
       first_name: data.first_name as string,
       last_name: data.last_name as string,
@@ -162,7 +175,6 @@ export function MastersTable() {
       position: data.position as MasterUpdate['position'],
       specialty: data.specialty as MasterUpdate['specialty'],
       avatar_url: (data.avatar_url as string | null | undefined) ?? '',
-      is_active: editMaster.is_active,
     };
     try {
       await updateMaster.mutateAsync({
@@ -177,14 +189,19 @@ export function MastersTable() {
   };
 
   // ─── Archive / Restore ───────────────────────────────────────────────
+  // #207: dedicated POST endpoints (also cascade to the linked user's
+  // is_active server-side, §4.2 — transparent to the frontend). Label and
+  // action drive off `row.archived` (inverted response field).
 
-  const handleToggleActive = async (master: MasterResponse) => {
+  const handleArchiveToggle = async (master: MasterResponse) => {
     try {
-      await patchMaster.mutateAsync({
-        id: master.id,
-        data: { is_active: !master.is_active },
-      });
-      showToast(master.is_active ? 'Мастер архивирован' : 'Мастер восстановлен');
+      if (master.archived) {
+        await restoreMaster.mutateAsync(master.id);
+        showToast('Мастер восстановлен');
+      } else {
+        await archiveMaster.mutateAsync(master.id);
+        showToast('Мастер архивирован');
+      }
       setOpenDropdownId(null);
     } catch (err) {
       showToast(parseApiError(err).message, 'error');
@@ -213,15 +230,22 @@ export function MastersTable() {
   };
 
   // ─── Delete ─────────────────────────────────────────────────────────
+  // #207 §7.3 dry-run flow: no-body DELETE → 204 (instant delete, no deps)
+  // or 409 + dependency tree → DeleteDialog (Mode A/B). The parent owns the
+  // call + open/close state; the dialog receives the parsed tree.
 
   const handleDelete = async (master: MasterResponse) => {
     setOpenDropdownId(null);
-    if (!window.confirm('Удалить мастера?')) return;
     try {
       await deleteMaster.mutateAsync(master.id);
+      // 204 — already deleted (zero deps): refresh handled by the hook.
       showToast('Мастер удалён');
     } catch (err) {
-      showToast(parseApiError(err).message, 'error');
+      if (err instanceof ApiError && err.status === 409 && err.dependencies) {
+        setDeleteTarget({ master, dependencies: err.dependencies });
+      } else {
+        showToast(parseApiError(err).message, 'error');
+      }
     }
   };
 
@@ -359,8 +383,8 @@ export function MastersTable() {
                 {/* Status */}
                 {visibleKeys.includes('status') && (
                 <td className="px-4 py-3 text-sm">
-                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${master.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500'}`}>
-                    {master.is_active ? 'Активен' : 'Архив'}
+                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${master.archived ? 'bg-gray-100 text-gray-500' : 'bg-emerald-100 text-emerald-700'}`}>
+                    {master.archived ? 'Архив' : 'Активен'}
                   </span>
                 </td>
                 )}
@@ -393,12 +417,12 @@ export function MastersTable() {
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              handleToggleActive(master);
+                              handleArchiveToggle(master);
                             }}
                             className="w-full text-left px-3 py-2 text-sm transition-colors hover:opacity-80"
                             style={{ color: 'var(--ink)' }}
                           >
-                            {master.is_active ? 'В архив' : 'Восстановить'}
+                            {master.archived ? 'Восстановить' : 'В архив'}
                           </button>
                           <button
                             onClick={(e) => {
@@ -514,6 +538,27 @@ export function MastersTable() {
           onSubmit={handleCreateSubmit}
           onClose={() => setCreatingMaster(false)}
           title="Новый мастер"
+        />
+      )}
+
+      {/* Delete dialog — §7.3: opened on dry-run 409, closed on done/cancel */}
+      {deleteTarget && (
+        <DeleteDialog
+          entityName={displayMasterName(deleteTarget.master)}
+          entityType="master"
+          entityId={deleteTarget.master.id}
+          dependencies={deleteTarget.dependencies}
+          onResolve={async (id, resolutions) => {
+            await resolveDeleteMaster(id, resolutions);
+            // The resolve call bypasses the hook's onSuccess, so refresh
+            // here — incl. cross-key ['records'] (useRecordData consumers).
+            queryClient.invalidateQueries({ queryKey: ['masters'] });
+            queryClient.invalidateQueries({ queryKey: ['records'] });
+            showToast('Мастер удалён');
+          }}
+          onArchive={(id) => archiveMaster.mutateAsync(id)}
+          onDone={() => setDeleteTarget(null)}
+          onCancel={() => setDeleteTarget(null)}
         />
       )}
     </div>

@@ -34,29 +34,48 @@ class VisitorService(GenericService[VisitorCreate, VisitorUpdate, VisitorRespons
         )
         return list(result.scalars().all())
 
-    @transactional
-    async def delete(self, db_session: AsyncSession, id: str) -> bool:
+    async def _delete_cascade(self, db_session: AsyncSession, visitor_id: str) -> bool:
         """Hard-delete a visitor and its visits; unlink photos (SET NULL);
-        delete visitor_tags join rows.
+        delete visitor_tags join rows — on the GIVEN session, WITHOUT committing.
 
-        All cascade deletes run as explicit SQL inside this single
-        ``@transactional`` transaction so the unit is atomic. Visits are
-        removed BEFORE the visitor (visits.reference visitors via FK).
-        The visitor_tags join table has FKs with NO ondelete action, so its
-        rows must be removed BEFORE the visitor — otherwise the DB raises
+        Extracted (Task 7 of #207) from ``delete`` so ``ClientService`` can call
+        this inside its OWN ``@transactional`` outer cascade loop on a SHARED
+        session — atomicity with ONE commit at the outer boundary, not N
+        mid-loop commits (§8 atomicity requirement — BLOCKER-class).
+
+        All cascade deletes run as explicit SQL inside the caller's transaction.
+        Visits are removed BEFORE the visitor (visits reference visitors via FK).
+        The visitor_tags join table has FKs with NO ondelete action, so its rows
+        must be removed BEFORE the visitor — otherwise the DB raises
         IntegrityError (FK on) or leaves orphan rows (FK off). Photos are
-        unlinked (visitor_id := NULL) rather than deleted — a photo
-        survives losing its depicted visitor (#194, G1b).
+        unlinked (visitor_id := NULL) rather than deleted — a photo survives
+        losing its depicted visitor (#194, G1b).
+
+        Returns False if the visitor does not exist. Does NOT commit — the
+        caller owns the transaction boundary.
         """
-        visitor = await self._repository.get(db_session, Visitor, id)
+        visitor = await self._repository.get(db_session, Visitor, visitor_id)
         if not visitor:
             return False
 
-        await db_session.execute(delete(Visit).where(Visit.visitor_id == id))
-        await db_session.execute(update(Photo).where(Photo.visitor_id == id).values(visitor_id=None))
-        await db_session.execute(delete(visitor_tags).where(visitor_tags.c.visitor_id == id))
-        await db_session.execute(delete(Visitor).where(Visitor.id == id))
+        await db_session.execute(delete(Visit).where(Visit.visitor_id == visitor_id))
+        await db_session.execute(update(Photo).where(Photo.visitor_id == visitor_id).values(visitor_id=None))
+        await db_session.execute(delete(visitor_tags).where(visitor_tags.c.visitor_id == visitor_id))
+        await db_session.execute(delete(Visitor).where(Visitor.id == visitor_id))
         return True
+
+    @transactional
+    async def delete(self, db_session: AsyncSession, id: str) -> bool:
+        """Hard-delete a visitor and cascade (visits, photos SET NULL,
+        visitor_tags) inside one ``@transactional`` transaction.
+
+        Thin decorated wrapper around the non-decorated ``_delete_cascade``
+        core (Task 7 of #207) so standalone ``VisitorService.delete`` still
+        commits exactly as before — existing callers are unaffected.
+        ``ClientService`` reuses ``_delete_cascade`` directly on a shared outer
+        session (Task 10) keeping the Client→visitors cascade atomic.
+        """
+        return await self._delete_cascade(db_session, id)
 
 
 @lru_cache

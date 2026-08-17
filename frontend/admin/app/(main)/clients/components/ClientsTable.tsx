@@ -4,9 +4,11 @@ import React, { useState } from 'react';
 import { useClients } from '@/contexts/ClientsContext';
 import { useUI } from '@/contexts/UIContext';
 import { ColumnPicker } from '@/app/components/shared/ColumnPicker';
+import { DeleteDialog } from '@/app/components/DeleteDialog';
 import { ErrorState } from '@/app/components/error';
 import { parseApiError } from '@/app/lib/api/parseApiError';
-import type { ClientWithStats } from '@memo/api-client';
+import type { ClientWithStats, DependencyNode } from '@memo/api-client';
+import { ApiError } from '@memo/api-client';
 
 const COLUMNS: { key: string; label: string; sortable: boolean; defaultVisible: boolean }[] = [
   { key: 'name', label: 'Имя', sortable: true, defaultVisible: true },
@@ -21,7 +23,10 @@ interface ClientsTableProps {
 }
 
 export function ClientsTable({ onClientClick }: ClientsTableProps) {
-  const { clients, isLoading, error, refetch, filters, sortBy, sortOrder, setSort, resetFilters, deleteClient } = useClients();
+  const {
+    clients, isLoading, error, refetch, filters, sortBy, sortOrder, setSort, resetFilters,
+    deleteClient, archiveClient, restoreClient, resolveDeleteClient, dependencies,
+  } = useClients();
   const { showToast } = useUI();
 
   const [visibleKeys, setVisibleKeys] = useState<string[]>(() => {
@@ -32,6 +37,17 @@ export function ClientsTable({ onClientClick }: ClientsTableProps) {
     return COLUMNS.filter((c) => c.defaultVisible).map((c) => c.key);
   });
 
+  // ─── Action dropdown state ───────────────────────────────────────────
+  const [openDropdownId, setOpenDropdownId] = useState<string | null>(null);
+
+  // ─── Delete dialog state (§7.3: parent owns dry-run + open/close) ────
+  // `dependencies` (the 409 tree parked by ClientsContext) is read on conflict:
+  // the context keeps it for the dialog; the open/close state stays local.
+  const [deleteTarget, setDeleteTarget] = useState<{
+    client: ClientWithStats;
+    dependencies: DependencyNode[];
+  } | null>(null);
+
   const visibleColumns = COLUMNS.filter((c) => visibleKeys.includes(c.key));
 
   const hasActiveFilters =
@@ -41,6 +57,47 @@ export function ClientsTable({ onClientClick }: ClientsTableProps) {
     filters.max_records !== null ||
     filters.min_paid !== null ||
     filters.max_paid !== null;
+
+  // ─── Archive / Restore (#198 parity) ─────────────────────────────────
+  // Dedicated POST endpoints; label + action drive off `row.archived`.
+
+  const handleArchiveToggle = async (client: ClientWithStats) => {
+    setOpenDropdownId(null);
+    try {
+      if (client.archived) {
+        await restoreClient(client.id);
+        showToast('Клиент восстановлен');
+      } else {
+        await archiveClient(client.id);
+        showToast('Клиент в архиве');
+      }
+    } catch (err) {
+      showToast(parseApiError(err).message, 'error');
+    }
+  };
+
+  // ─── Delete — §7.3 dry-run flow ───────────────────────────────────────
+  // No-body DELETE → 204 (instant delete, no deps) or 409 + tree → dialog.
+
+  const handleDelete = async (client: ClientWithStats) => {
+    setOpenDropdownId(null);
+    try {
+      await deleteClient(client.id);
+      // 204 — already deleted (zero deps): refresh handled by the context.
+      showToast('Клиент удалён');
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        // Prefer the tree on the failing 409 response itself (always fresh);
+        // the context-parked `dependencies` is only a fallback.
+        const deps = err.dependencies ?? dependencies ?? [];
+        if (deps.length > 0) {
+          setDeleteTarget({ client, dependencies: deps });
+          return;
+        }
+      }
+      showToast(parseApiError(err).message, 'error');
+    }
+  };
 
   if (error) {
     return (
@@ -75,7 +132,7 @@ export function ClientsTable({ onClientClick }: ClientsTableProps) {
     return (
       <div className="text-center py-12">
         <svg className="w-12 h-12 mx-auto text-gray-300 mb-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-          <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2M9 11a4 4 010-8 4 4 0 018 0M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75" />
+          <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2M9 11a4 4 0 010-8 4 4 0 018 0M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75" />
         </svg>
         <p style={{ color: 'var(--ink-light)' }}>Нет клиентов</p>
       </div>
@@ -152,28 +209,64 @@ export function ClientsTable({ onClientClick }: ClientsTableProps) {
               </td>
               )}
               <td className="py-3 px-4">
-                <button
-                  onClick={async (e) => {
-                    e.stopPropagation();
-                    if (window.confirm(`Удалить ${client.name ?? 'клиента'}?`)) {
-                      try {
-                        await deleteClient(client.id);
-                      } catch (err) {
-                        showToast(parseApiError(err).message, 'error');
-                      }
-                    }
-                  }}
-                  className="text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
-                >
-                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
-                  </svg>
-                </button>
+                {/* Actions dropdown — #207: archive/restore parity + delete dialog */}
+                <div className="relative" onClick={(e) => e.stopPropagation()}>
+                  <button
+                    onClick={() => setOpenDropdownId(openDropdownId === client.id ? null : client.id)}
+                    className="w-7 h-7 flex items-center justify-center rounded-lg text-sm transition-colors opacity-0 group-hover:opacity-100"
+                    style={{ color: 'var(--ink-light)' }}
+                    aria-label="Действия"
+                  >
+                    ⋯
+                  </button>
+                  {openDropdownId === client.id && (
+                    <div
+                      className="absolute right-0 top-full mt-1 z-10 border rounded-lg shadow-lg py-1 min-w-[160px]"
+                      style={{
+                        borderColor: 'var(--line)',
+                        backgroundColor: 'var(--white)',
+                      }}
+                      data-testid={`dropdown-${client.id}`}
+                    >
+                      <button
+                        onClick={() => handleArchiveToggle(client)}
+                        className="w-full text-left px-3 py-2 text-sm transition-colors hover:opacity-80"
+                        style={{ color: 'var(--ink)' }}
+                      >
+                        {client.archived ? 'Восстановить' : 'В архив'}
+                      </button>
+                      <button
+                        onClick={() => handleDelete(client)}
+                        className="w-full text-left px-3 py-2 text-sm transition-colors hover:opacity-80"
+                        style={{ color: 'var(--danger, #dc2626)' }}
+                      >
+                        Удалить
+                      </button>
+                    </div>
+                  )}
+                </div>
               </td>
             </tr>
           ))}
         </tbody>
       </table>
+
+      {/* Delete dialog — §7.3: opened on dry-run 409, closed on done/cancel */}
+      {deleteTarget && (
+        <DeleteDialog
+          entityName={deleteTarget.client.name || 'Дорогой гость'}
+          entityType="client"
+          entityId={deleteTarget.client.id}
+          dependencies={deleteTarget.dependencies}
+          onResolve={async (id, resolutions) => {
+            await resolveDeleteClient(id, resolutions);
+            showToast('Клиент удалён');
+          }}
+          onArchive={(id) => archiveClient(id)}
+          onDone={() => setDeleteTarget(null)}
+          onCancel={() => setDeleteTarget(null)}
+        />
+      )}
     </div>
   );
 }

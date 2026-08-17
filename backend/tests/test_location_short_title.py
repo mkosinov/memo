@@ -129,7 +129,8 @@ class TestLocationApiShortTitle:
         resp = api_client.put(
             f"/api/v1/locations/{loc_id}",
             json={
-                "is_active": True,
+                # #207 §3.2: is_active removed from LocationUpdate (PUT) —
+                # archive/restore only via POST endpoints.
                 "name": "Studio",
                 "capacity": 10,
                 "short_title": "ST",
@@ -153,7 +154,7 @@ class TestLocationApiShortTitle:
         resp = api_client.put(
             f"/api/v1/locations/{loc_id}",
             json={
-                "is_active": True,
+                # #207 §3.2: is_active removed from LocationUpdate (PUT).
                 "name": "Studio",
                 "capacity": 10,
                 "short_title": None,

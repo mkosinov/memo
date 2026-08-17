@@ -238,14 +238,16 @@ test.describe('Clients page', () => {
       const modal = page.locator('[data-testid="client-card-modal"]');
       await expect(modal).toBeVisible({ timeout: 5000 });
 
-      // Click "Удалить" — accept confirm dialog, soft-deletes and closes modal
+      // Click "Удалить" — #207: no-body DELETE dry-run; the freshly created
+      // client has zero deps → 204 instant hard delete, modal closes.
+      // (No confirm dialog anymore; the listener is a defensive no-op.)
       page.on('dialog', (dialog) => dialog.accept());
       await page.locator('button:has-text("Удалить")').click();
 
       // Modal should close
       await expect(modal).not.toBeVisible({ timeout: 5000 });
 
-      // Reload page — soft-deleted client (is_active=false) won't appear
+      // Reload page — hard-deleted client is gone from the list
       await page.reload({ waitUntil: 'networkidle' });
       await waitForClientsReady(page);
 
@@ -351,7 +353,11 @@ test.describe('Clients page', () => {
     // triggers a refetch via the React Query hook sending status=active. Use a
     // content-based assertion on the status select: it must return to
     // "Активные" (value 'active') after reset.
-    await page.locator('text=Сбросить фильтры').click();
+    // Scope to the filters panel (#195): the same "Сбросить фильтры" text
+    // also exists in ClientsTable's empty state (rendered when the filtered
+    // list is empty), which is a strict-mode violation without scoping.
+    const filtersPanel = page.locator('div.rounded-xl').filter({ has: statusSelect });
+    await filtersPanel.getByText('Сбросить фильтры').click();
     await expect(statusSelect).toHaveValue('active', { timeout: 10_000 });
     const resetCount = await page.locator('table tbody tr').count();
     expect(resetCount).toBe(initialCount);

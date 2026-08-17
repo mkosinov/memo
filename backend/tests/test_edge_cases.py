@@ -4,11 +4,12 @@ import pytest
 from pydantic import ValidationError
 
 from src.schemas.activity import ActivityResponse
-from src.schemas.client import ClientResponse
+from src.schemas.client import ClientWithStats
 from src.schemas.payment import PaymentResponse
 from src.schemas.record import RecordResponse
 from src.schemas.service import ServiceResponse
 from tests.conftest import query_db
+from tests.generic_contract import _serialized_keys
 
 pytestmark = pytest.mark.integration
 
@@ -621,12 +622,27 @@ class TestResponseContracts:
             RecordResponse.model_validate(item)  # raises ValidationError if mismatch
 
     def test_clients_schema(self, api_client, create_client):
-        """GET /api/v1/clients — each item validates against ClientResponse."""
+        """GET /api/v1/clients — each item's keys match the serialized
+        ClientWithStats (the list endpoint shape).
+
+        #207 §3.1: ``ClientResponse.is_active: Field(..., exclude=True)`` is
+        required-on-input but excluded from JSON; ``model_validate(body)``
+        raises. Keys-check via ``_serialized_keys(ClientWithStats)`` pins the
+        wire contract (matches the generic ``_assert_exact_response_keys``
+        fix in test_generic_api_contract.py). The list endpoint emits
+        ``ClientWithStats`` items, so check against that (not the bare
+        ``ClientResponse``).
+        """
         create_client()
         resp = api_client.get("/api/v1/clients")
         assert resp.status_code == 200
+        expected = _serialized_keys(ClientWithStats)
         for item in resp.json()["items"]:
-            ClientResponse.model_validate(item)
+            assert set(item.keys()) == expected, (
+                f"client list item keys mismatch serialized ClientWithStats: "
+                f"missing={expected - set(item.keys())}, "
+                f"extra={set(item.keys()) - expected}"
+            )
 
     def test_payments_schema(self, api_client, create_record):
         """GET /api/v1/payments — each item validates against PaymentResponse."""
@@ -654,9 +670,18 @@ class TestResponseContracts:
             ActivityResponse.model_validate(item)
 
     def test_services_schema(self, api_client, create_service):
-        """GET /api/v1/services — each item validates against ServiceResponse."""
+        """GET /api/v1/services — each item's keys match the serialized
+        ServiceResponse (see ``test_clients_schema`` above for the
+        #207 §3.1 rationale — ``model_validate`` cannot round-trip the
+        ``exclude=True`` required ``is_active``; keys-check pins the wire shape).
+        """
         create_service()
         resp = api_client.get("/api/v1/services")
         assert resp.status_code == 200
+        expected = _serialized_keys(ServiceResponse)
         for item in resp.json()["items"]:
-            ServiceResponse.model_validate(item)
+            assert set(item.keys()) == expected, (
+                f"service list item keys mismatch serialized ServiceResponse: "
+                f"missing={expected - set(item.keys())}, "
+                f"extra={set(item.keys()) - expected}"
+            )

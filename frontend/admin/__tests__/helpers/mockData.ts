@@ -95,7 +95,7 @@ export const mockClient: ClientResponse = {
   channel: 'telegram',
   created_at: '2026-01-01T00:00:00',
   updated_at: '2026-01-01T00:00:00',
-  is_active: true,
+  archived: false,
 };
 
 export const mockClientWithStats: ClientWithStats = {
@@ -170,7 +170,7 @@ export const mockLocationResponse: LocationResponse = {
   image_url: 'https://example.com/studio.jpg',
   location_hint: 'Вход со двора',
   sort_order: 0,
-  is_active: true,
+  archived: false,
   created_at: '2024-01-15T10:00:00Z',
   updated_at: '2024-06-01T12:00:00Z',
 };
@@ -187,7 +187,7 @@ export const mockLocationResponseArchived: LocationResponse = {
   image_url: null,
   location_hint: null,
   sort_order: 1,
-  is_active: false,
+  archived: true,
   created_at: '2024-01-10T10:00:00Z',
   updated_at: '2024-05-01T12:00:00Z',
 };
@@ -212,7 +212,7 @@ export const mockMasterResponse: MasterResponse = {
   position: 'мастер',
   specialty: 'живопись',
   avatar_url: 'https://example.com/avatar.jpg',
-  is_active: true,
+  archived: false,
   sort_order: 0,
   created_at: '2024-01-15T10:00:00Z',
   updated_at: '2024-06-01T12:00:00Z',
@@ -226,7 +226,7 @@ export const mockMasterResponseArchived: MasterResponse = {
   position: 'мастер',
   specialty: 'керамика',
   avatar_url: null,
-  is_active: false,
+  archived: true,
   sort_order: 1,
   created_at: '2024-01-10T10:00:00Z',
   updated_at: '2024-05-01T12:00:00Z',

@@ -3,10 +3,12 @@
 from functools import lru_cache
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi.responses import JSONResponse
 from sqlalchemy import asc
 
 from src.db import SessionDep
+from src.domain.deletion import ResolutionError, collect_dependencies
 from src.errors import ErrorCode, ErrorDetail
 from src.models.enums import ArchiveStatus
 from src.models.master import Master
@@ -134,8 +136,45 @@ async def delete_master(
     master_id: str,
     service: _ServiceDep,
     session: SessionDep,
+    resolutions: dict[str, str] | None = Body(default=None, embed=True),
 ) -> None:
-    """Soft-delete a master (set is_active=False)."""
+    """Unified DELETE — dry-run (no body) or execute (with body). Spec §2/§5/§6.
+
+    * No body (dry-run): ``collect_dependencies`` → empty → hard delete (204);
+      non-empty → 409 + dependency tree (no rows modified).
+    * With body (execute): ``{"resolutions": {...}}`` per spec §6 (§2 L24,
+      §6 L161 — the ONLY accepted body form; the api-client ``resolveDeleteX``
+      sends exactly this; ``embed=True`` rejects a bare dict as a dry-run
+      shape). A wrapped empty ``{"resolutions": {}}`` still executes (S2 —
+      all-auto deps). ``service.resolve_delete`` runs the resolution
+      transaction (Task 10) → 204; ``ResolutionError`` → 422; missing → 404.
+    """
+    if resolutions is not None:
+        try:
+            ok = await service.resolve_delete(
+                db_session=session, id=master_id, resolutions=resolutions
+            )
+        except ResolutionError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+        if not ok:
+            raise HTTPException(
+                status_code=404,
+                detail=ErrorDetail(
+                    code=ErrorCode.MASTER_NOT_FOUND,
+                    message="Master not found",
+                ).model_dump(),
+            )
+        return
+
+    deps = await collect_dependencies(session, Master, master_id)
+    if deps:
+        return JSONResponse(
+            status_code=409,
+            content={
+                "detail": "has_dependencies",
+                "dependencies": [d.model_dump() for d in deps],
+            },
+        )
     deleted = await service.delete(db_session=session, id=master_id)
     if not deleted:
         raise HTTPException(
@@ -145,3 +184,78 @@ async def delete_master(
                 message="Master not found",
             ).model_dump(),
         )
+
+
+@router.post("/{master_id}/archive", response_model=MasterResponse)
+async def archive_master(
+    master_id: str,
+    service: _ServiceDep,
+    session: SessionDep,
+) -> MasterResponse:
+    """Archive a master — flip ``is_active=False`` (spec §2/§14).
+
+    Returns HTTP **200 with the re-fetched body** (``archived: true`` computed
+    in the schema) so the frontend updates the row without a refetch (spec §12
+    S5: 200-with-body chosen over 204 for this reason — 204 carries no body).
+    Idempotent: archiving an already-archived row → still 200 ``archived:true``.
+    **Master-only cascade (§4.2, Change 3):** additionally writes the linked
+    ``users.is_active=False`` in the same transaction (handled in
+    ``MasterService.archive``).
+    """
+    ok = await service.archive(db_session=session, id=master_id)
+    if not ok:
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.MASTER_NOT_FOUND,
+                message="Master not found",
+            ).model_dump(),
+        )
+    return await _refetch_or_404(service, session, master_id)
+
+
+@router.post("/{master_id}/restore", response_model=MasterResponse)
+async def restore_master(
+    master_id: str,
+    service: _ServiceDep,
+    session: SessionDep,
+) -> MasterResponse:
+    """Restore an archived master — flip ``is_active=True`` (spec §2/§14).
+
+    Returns HTTP **200 with the re-fetched body** (``archived: false``). 404 if
+    not found. Idempotent. **Master-only cascade (§4.2, Change 3):** linked
+    ``users.is_active=True`` in the same transaction.
+    """
+    ok = await service.restore(db_session=session, id=master_id)
+    if not ok:
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.MASTER_NOT_FOUND,
+                message="Master not found",
+            ).model_dump(),
+        )
+    return await _refetch_or_404(service, session, master_id)
+
+
+async def _refetch_or_404(
+    service: MasterService, session: SessionDep, master_id: str
+) -> MasterResponse:
+    """Re-fetch the master after a successful archive/restore (Task 11).
+
+    Archive/restore are soft ``is_active`` flips — the row persists. The route
+    re-fetched via ``service.get`` so the response carries the updated
+    ``archived`` computed field (spec §2: 200-with-body).
+    """
+    master = await service.get(db_session=session, id=master_id)
+    if master is None:
+        # Defensive: archive/restore are soft — the row must still exist.
+        # Surface as 404 if it somehow vanished between the two calls.
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.MASTER_NOT_FOUND,
+                message="Master not found",
+            ).model_dump(),
+        )
+    return master

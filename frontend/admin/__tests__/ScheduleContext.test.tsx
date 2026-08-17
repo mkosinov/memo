@@ -223,15 +223,15 @@ describe('ScheduleProvider', () => {
 
   it('provides masters, services, locations from React Query hooks', async () => {
     vi.mocked(getMasters).mockResolvedValue(wrap([
-      { id: 'm1', first_name: 'Ольга', last_name: 'Середа', color: '#5B8C7A', position: 'мастер', specialty: 'живопись', avatar_url: null, is_active: true, sort_order: 0, created_at: '2024-01-01', updated_at: '2024-01-01' },
-      { id: 'm2', first_name: 'Юлия', last_name: 'Большакова', color: '#6B7E9C', position: 'мастер', specialty: 'живопись', avatar_url: null, is_active: true, sort_order: 0, created_at: '2024-01-01', updated_at: '2024-01-01' },
+      { id: 'm1', first_name: 'Ольга', last_name: 'Середа', color: '#5B8C7A', position: 'мастер', specialty: 'живопись', avatar_url: null, archived: false, sort_order: 0, created_at: '2024-01-01', updated_at: '2024-01-01' },
+      { id: 'm2', first_name: 'Юлия', last_name: 'Большакова', color: '#6B7E9C', position: 'мастер', specialty: 'живопись', avatar_url: null, archived: false, sort_order: 0, created_at: '2024-01-01', updated_at: '2024-01-01' },
     ]));
     vi.mocked(getServices).mockResolvedValue(wrap([
-      { id: 's1', title: 'Картина маслом', description: '', image_url: '', specialty: '', min_age: 12, max_age: 99, duration: 150, record_info: '', tariffs: [], tags: [], is_active: true, created_at: '', updated_at: '' },
+      { id: 's1', title: 'Картина маслом', description: '', image_url: '', specialty: '', min_age: 12, max_age: 99, duration: 150, record_info: '', tariffs: [], tags: [], archived: false, created_at: '', updated_at: '' },
     ]));
     vi.mocked(getLocations).mockResolvedValue(wrap([
-      { id: 'alpika', name: 'Альпика', address: 'Альпика, 1 этаж', description: null, capacity: 10, yandex_map_url: null, review_url: null, record_info: null, image_url: null, is_active: true, created_at: '', updated_at: '' },
-      { id: 'grand', name: 'Гранд Отель Поляна', address: 'Гранд Отель, лобби', description: null, capacity: 10, yandex_map_url: null, review_url: null, record_info: null, image_url: null, is_active: true, created_at: '', updated_at: '' },
+      { id: 'alpika', name: 'Альпика', address: 'Альпика, 1 этаж', description: null, capacity: 10, yandex_map_url: null, review_url: null, record_info: null, image_url: null, archived: false, created_at: '', updated_at: '' },
+      { id: 'grand', name: 'Гранд Отель Поляна', address: 'Гранд Отель, лобби', description: null, capacity: 10, yandex_map_url: null, review_url: null, record_info: null, image_url: null, archived: false, created_at: '', updated_at: '' },
     ]));
     vi.mocked(getActivities).mockResolvedValue(wrap([
       { id: 'a1', master_id: 'm1', service_id: 's1', location_id: 'alpika', start: '2024-12-25T10:00:00Z', duration: 120, capacity: 8, is_private: false, comment: null, record_info: null, created_at: '', updated_at: '', occupied: 3 },
@@ -320,13 +320,13 @@ describe('ScheduleProvider', () => {
 
   it('calls patchActivity mutation when updateActivity is called', async () => {
     vi.mocked(getMasters).mockResolvedValue(wrap([
-      { id: 'm1', first_name: 'Ольга', last_name: 'Середа', color: '#5B8C7A', position: 'мастер', specialty: 'живопись', avatar_url: null, is_active: true, sort_order: 0, created_at: '2024-01-01', updated_at: '2024-01-01' },
+      { id: 'm1', first_name: 'Ольга', last_name: 'Середа', color: '#5B8C7A', position: 'мастер', specialty: 'живопись', avatar_url: null, archived: false, sort_order: 0, created_at: '2024-01-01', updated_at: '2024-01-01' },
     ]));
     vi.mocked(getServices).mockResolvedValue(wrap([
-      { id: 's1', title: 'Картина маслом', description: '', image_url: '', specialty: '', min_age: 12, max_age: 99, duration: 120, record_info: '', tariffs: [], tags: [], is_active: true, created_at: '', updated_at: '' },
+      { id: 's1', title: 'Картина маслом', description: '', image_url: '', specialty: '', min_age: 12, max_age: 99, duration: 120, record_info: '', tariffs: [], tags: [], archived: false, created_at: '', updated_at: '' },
     ]));
     vi.mocked(getLocations).mockResolvedValue(wrap([
-      { id: 'alpika', name: 'Альпика', address: 'Альпика, 1 этаж', description: null, capacity: 10, yandex_map_url: null, review_url: null, record_info: null, image_url: null, location_hint: null, is_active: true, created_at: '', updated_at: '' },
+      { id: 'alpika', name: 'Альпика', address: 'Альпика, 1 этаж', description: null, capacity: 10, yandex_map_url: null, review_url: null, record_info: null, image_url: null, location_hint: null, archived: false, created_at: '', updated_at: '' },
     ]));
     vi.mocked(getActivities).mockResolvedValue(wrap([
       { id: 'a1', master_id: 'm1', service_id: 's1', location_id: 'alpika', start: '2024-12-25T10:00:00Z', duration: 120, capacity: 8, is_private: false, comment: null, record_info: null, created_at: '', updated_at: '', occupied: 3 },
@@ -357,13 +357,13 @@ describe('ScheduleProvider', () => {
 
   it('excludes capacity from PATCH payload when capacity is null (BUG-63 regression)', async () => {
     vi.mocked(getMasters).mockResolvedValue(wrap([
-      { id: 'm1', first_name: 'Ольга', last_name: 'Середа', color: '#5B8C7A', position: 'мастер', specialty: 'живопись', avatar_url: null, is_active: true, sort_order: 0, created_at: '2024-01-01', updated_at: '2024-01-01' },
+      { id: 'm1', first_name: 'Ольга', last_name: 'Середа', color: '#5B8C7A', position: 'мастер', specialty: 'живопись', avatar_url: null, archived: false, sort_order: 0, created_at: '2024-01-01', updated_at: '2024-01-01' },
     ]));
     vi.mocked(getServices).mockResolvedValue(wrap([
-      { id: 's1', title: 'Картина маслом', description: '', image_url: '', specialty: '', min_age: 12, max_age: null, duration: 120, record_info: '', tariffs: [], tags: [], is_active: true, created_at: '', updated_at: '' },
+      { id: 's1', title: 'Картина маслом', description: '', image_url: '', specialty: '', min_age: 12, max_age: null, duration: 120, record_info: '', tariffs: [], tags: [], archived: false, created_at: '', updated_at: '' },
     ]));
     vi.mocked(getLocations).mockResolvedValue(wrap([
-      { id: 'alpika', name: 'Альпика', address: 'Альпика, 1 этаж', description: null, capacity: 10, yandex_map_url: null, review_url: null, record_info: null, image_url: null, location_hint: null, is_active: true, created_at: '', updated_at: '' },
+      { id: 'alpika', name: 'Альпика', address: 'Альпика, 1 этаж', description: null, capacity: 10, yandex_map_url: null, review_url: null, record_info: null, image_url: null, location_hint: null, archived: false, created_at: '', updated_at: '' },
     ]));
     vi.mocked(getActivities).mockResolvedValue(wrap([
       { id: 'a1', master_id: 'm1', service_id: 's1', location_id: 'alpika', start: '2024-12-25T10:00:00Z', duration: 120, capacity: 8, is_private: false, comment: null, record_info: null, created_at: '', updated_at: '', occupied: 3 },
@@ -388,13 +388,13 @@ describe('ScheduleProvider', () => {
 
   it('includes capacity in PATCH payload when capacity has a defined value (BUG-63 regression)', async () => {
     vi.mocked(getMasters).mockResolvedValue(wrap([
-      { id: 'm1', first_name: 'Ольга', last_name: 'Середа', color: '#5B8C7A', position: 'мастер', specialty: 'живопись', avatar_url: null, is_active: true, sort_order: 0, created_at: '2024-01-01', updated_at: '2024-01-01' },
+      { id: 'm1', first_name: 'Ольга', last_name: 'Середа', color: '#5B8C7A', position: 'мастер', specialty: 'живопись', avatar_url: null, archived: false, sort_order: 0, created_at: '2024-01-01', updated_at: '2024-01-01' },
     ]));
     vi.mocked(getServices).mockResolvedValue(wrap([
-      { id: 's1', title: 'Картина маслом', description: '', image_url: '', specialty: '', min_age: 12, max_age: null, duration: 120, record_info: '', tariffs: [], tags: [], is_active: true, created_at: '', updated_at: '' },
+      { id: 's1', title: 'Картина маслом', description: '', image_url: '', specialty: '', min_age: 12, max_age: null, duration: 120, record_info: '', tariffs: [], tags: [], archived: false, created_at: '', updated_at: '' },
     ]));
     vi.mocked(getLocations).mockResolvedValue(wrap([
-      { id: 'alpika', name: 'Альпика', address: 'Альпика, 1 этаж', description: null, capacity: 10, yandex_map_url: null, review_url: null, record_info: null, image_url: null, location_hint: null, is_active: true, created_at: '', updated_at: '' },
+      { id: 'alpika', name: 'Альпика', address: 'Альпика, 1 этаж', description: null, capacity: 10, yandex_map_url: null, review_url: null, record_info: null, image_url: null, location_hint: null, archived: false, created_at: '', updated_at: '' },
     ]));
     vi.mocked(getActivities).mockResolvedValue(wrap([
       { id: 'a1', master_id: 'm1', service_id: 's1', location_id: 'alpika', start: '2024-12-25T10:00:00Z', duration: 120, capacity: 8, is_private: false, comment: null, record_info: null, created_at: '', updated_at: '', occupied: 3 },
@@ -421,7 +421,7 @@ describe('ScheduleProvider', () => {
     const mockRaw = {
       id: 's1', title: 'Картина маслом', duration: 120, min_age: 12, max_age: null,
       tariffs: [], tags: [], description: '', image_url: '', specialty: '', record_info: '',
-      is_active: true, created_at: '', updated_at: '',
+      archived: false, created_at: '', updated_at: '',
     } as any;
     const result = transformService(mockRaw);
     expect(result).not.toHaveProperty('maxCapacity');
@@ -431,13 +431,13 @@ describe('ScheduleProvider', () => {
 
   it('calls deleteActivity mutation when deleteActivity is called', async () => {
     vi.mocked(getMasters).mockResolvedValue(wrap([
-      { id: 'm1', first_name: 'Ольга', last_name: 'Середа', color: '#5B8C7A', position: 'мастер', specialty: 'живопись', avatar_url: null, is_active: true, sort_order: 0, created_at: '2024-01-01', updated_at: '2024-01-01' },
+      { id: 'm1', first_name: 'Ольга', last_name: 'Середа', color: '#5B8C7A', position: 'мастер', specialty: 'живопись', avatar_url: null, archived: false, sort_order: 0, created_at: '2024-01-01', updated_at: '2024-01-01' },
     ]));
     vi.mocked(getServices).mockResolvedValue(wrap([
-      { id: 's1', title: 'Картина маслом', description: '', image_url: '', specialty: '', min_age: 12, max_age: 99, duration: 120, record_info: '', tariffs: [], tags: [], is_active: true, created_at: '', updated_at: '' },
+      { id: 's1', title: 'Картина маслом', description: '', image_url: '', specialty: '', min_age: 12, max_age: 99, duration: 120, record_info: '', tariffs: [], tags: [], archived: false, created_at: '', updated_at: '' },
     ]));
     vi.mocked(getLocations).mockResolvedValue(wrap([
-      { id: 'alpika', name: 'Альпика', address: 'Альпика, 1 этаж', description: null, capacity: 10, yandex_map_url: null, review_url: null, record_info: null, image_url: null, location_hint: null, is_active: true, created_at: '', updated_at: '' },
+      { id: 'alpika', name: 'Альпика', address: 'Альпика, 1 этаж', description: null, capacity: 10, yandex_map_url: null, review_url: null, record_info: null, image_url: null, location_hint: null, archived: false, created_at: '', updated_at: '' },
     ]));
     vi.mocked(getActivities).mockResolvedValue(wrap([
       { id: 'a1', master_id: 'm1', service_id: 's1', location_id: 'alpika', start: '2024-12-25T10:00:00Z', duration: 120, capacity: 8, is_private: false, comment: null, record_info: null, created_at: '', updated_at: '', occupied: 3 },

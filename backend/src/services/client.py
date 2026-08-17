@@ -13,7 +13,7 @@ from src.models.client import Client
 from src.models.enums import ArchiveStatus
 from src.models.payment import Payment
 from src.models.record import Record
-from src.repositories.generic import get_soft_delete_repository
+from src.repositories.generic import ArchiveRepository, get_archive_repository
 from src.schemas.client import (
     ClientCreate,
     ClientListParams,
@@ -22,16 +22,55 @@ from src.schemas.client import (
     ClientUpdate,
     ClientWithStats,
 )
-from src.services.generic import SoftDeleteService
+from src.services.generic import ArchiveService
+from src.services.visitor import VisitorService, get_visitor_service
 
 
-class ClientService(SoftDeleteService[ClientCreate, ClientUpdate, ClientResponse]):
-    """Client service — стандартный SoftDeleteService без NOT NULL полей."""
+class ClientService(ArchiveService[ClientCreate, ClientUpdate, ClientResponse]):
+    """Client service — standard ``ArchiveService`` PLUS the Client→visitors cascade.
+
+    The unified DELETE executor (``ArchiveService.resolve_delete``) dispatches
+    on ``(self._model, dep.entity)`` via :data:`CASCADE_HANDLERS` in
+    ``src.domain.deletion``. The Client→visitors handler
+    (``_h_cascade_client_visitors``) is the ONLY dep in the §4 matrix that
+    needs an external-service reference — it loops the non-decorated
+    ``VisitorService._delete_cascade`` per visitor on the SHARED outer
+    session (atomic with the Client resolve_delete transaction — spec §8
+    BLOCKER-class: NO per-visitor commit).
+
+    To keep the executor free of ``if model is Client`` branches, the handler
+    is injected via the service instance: ``self._visitor_service``. The base
+    ``ArchiveService`` has no such attr; ``ClientService`` is the ONLY subclass
+    that adds one (via the DI factory below). Other services (Master/Location/
+    Service/Material) dispatch through the matrix's free-function handlers —
+    no service injection needed there.
+    """
+
+    def __init__(
+        self,
+        repository: ArchiveRepository,
+        model: type[Client],
+        response_schema: type[ClientResponse],
+        visitor_service: VisitorService,
+    ) -> None:
+        super().__init__(repository, model, response_schema)
+        self._visitor_service = visitor_service
 
 
 @lru_cache
 def get_client_service() -> ClientService:
-    return ClientService(get_soft_delete_repository(), Client, ClientResponse)
+    """Singleton ClientService — injects the VisitorService singleton.
+
+    Both singletons are ``@lru_cache``d, so tests that monkey-patch
+    ``VisitorService._delete_cascade`` (the atomicity test) patch the SAME
+    instance the ClientService holds — the executor sees the patched method.
+    """
+    return ClientService(
+        get_archive_repository(),
+        Client,
+        ClientResponse,
+        get_visitor_service(),
+    )
 
 
 async def list_clients_with_stats(

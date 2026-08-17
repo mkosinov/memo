@@ -3,11 +3,14 @@
 from functools import lru_cache
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi.responses import JSONResponse
 
 from src.db import SessionDep
+from src.domain.deletion import ResolutionError, collect_dependencies
 from src.errors import ErrorCode, ErrorDetail
 from src.models.enums import ArchiveStatus
+from src.models.material import Material
 from src.schemas.common import PaginatedResponse
 from src.schemas.material import MaterialCreate, MaterialPatch, MaterialResponse, MaterialUpdate
 from src.services.material import MaterialService, get_material_service
@@ -117,8 +120,42 @@ async def delete_material(
     material_id: str,
     service: _ServiceDep,
     session: SessionDep,
+    resolutions: dict[str, str] | None = Body(default=None, embed=True),
 ) -> None:
-    """Soft-delete a material (set is_active=False)."""
+    """Unified DELETE — dry-run (no body) or execute (with body). Spec §2/§5/§6.
+
+    Material has ZERO FK deps (spec §4 matrix): the no-body path always
+    short-circuits to 204 (hard delete); the with-body path (execute body
+    is ``{"resolutions": {...}}`` per spec §6 — ``embed=True`` rejects a
+    bare dict as a dry-run shape) runs the executor with an empty
+    resolution set (also 204).
+    """
+    if resolutions is not None:
+        try:
+            ok = await service.resolve_delete(
+                db_session=session, id=material_id, resolutions=resolutions
+            )
+        except ResolutionError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+        if not ok:
+            raise HTTPException(
+                status_code=404,
+                detail=ErrorDetail(
+                    code=ErrorCode.MATERIAL_NOT_FOUND,
+                    message="Material not found",
+                ).model_dump(),
+            )
+        return
+
+    deps = await collect_dependencies(session, Material, material_id)
+    if deps:
+        return JSONResponse(
+            status_code=409,
+            content={
+                "detail": "has_dependencies",
+                "dependencies": [d.model_dump() for d in deps],
+            },
+        )
     deleted = await service.delete(db_session=session, id=material_id)
     if not deleted:
         raise HTTPException(
@@ -128,3 +165,67 @@ async def delete_material(
                 message="Material not found",
             ).model_dump(),
         )
+
+
+@router.post("/{material_id}/archive", response_model=MaterialResponse)
+async def archive_material(
+    material_id: str,
+    service: _ServiceDep,
+    session: SessionDep,
+) -> MaterialResponse:
+    """Archive a material — flip ``is_active=False`` (spec §2/§14).
+
+    Returns HTTP **200 with the re-fetched body** (``archived: true`` in the
+    response schema) so the frontend updates the row without a refetch (spec
+    §12 S5). Idempotent. Material has NO cross-entity cascade — only Master
+    does (spec §4.2).
+    """
+    ok = await service.archive(db_session=session, id=material_id)
+    if not ok:
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.MATERIAL_NOT_FOUND,
+                message="Material not found",
+            ).model_dump(),
+        )
+    return await _refetch_or_404(service, session, material_id)
+
+
+@router.post("/{material_id}/restore", response_model=MaterialResponse)
+async def restore_material(
+    material_id: str,
+    service: _ServiceDep,
+    session: SessionDep,
+) -> MaterialResponse:
+    """Restore an archived material — flip ``is_active=True`` (spec §2/§14).
+
+    Returns HTTP **200 with the re-fetched body** (``archived: false``). 404 if
+    not found. Idempotent. No cross-entity cascade.
+    """
+    ok = await service.restore(db_session=session, id=material_id)
+    if not ok:
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.MATERIAL_NOT_FOUND,
+                message="Material not found",
+            ).model_dump(),
+        )
+    return await _refetch_or_404(service, session, material_id)
+
+
+async def _refetch_or_404(
+    service: MaterialService, session: SessionDep, material_id: str
+) -> MaterialResponse:
+    """Re-fetch the material after a successful archive/restore (Task 11)."""
+    material = await service.get(db_session=session, id=material_id)
+    if material is None:
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.MATERIAL_NOT_FOUND,
+                message="Material not found",
+            ).model_dump(),
+        )
+    return material

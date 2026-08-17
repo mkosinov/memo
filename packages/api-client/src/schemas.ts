@@ -10,7 +10,7 @@ export const MasterResponseSchema = z.object({
   position: z.string(),
   specialty: z.string(),
   avatar_url: z.string().nullable(),
-  is_active: z.boolean(),
+  archived: z.boolean(), // inverted: archived = true means the master is in the archive (#207)
   sort_order: z.number().optional(),
   created_at: z.string(), // ISO datetime string
   updated_at: z.string(), // ISO datetime string
@@ -30,7 +30,9 @@ export const MasterCreateSchema = z.object({
 });
 export type MasterCreate = z.infer<typeof MasterCreateSchema>;
 
-export const MasterUpdateSchema = MasterCreateSchema.extend({ is_active: z.boolean() });
+// is_active is NOT accepted (#207): archive/restore is via POST endpoints.
+// .strict() mirrors backend extra="forbid" — a stray is_active is rejected (422).
+export const MasterUpdateSchema = MasterCreateSchema.strict();
 export type MasterUpdate = z.infer<typeof MasterUpdateSchema>;
 
 // ─── LocationResponse ──────────────────────────────────────────────────────
@@ -48,7 +50,7 @@ export const LocationResponseSchema = z.object({
   image_url: z.string().nullable(),
   location_hint: z.string().nullable().optional(),
   sort_order: z.number().optional(),
-  is_active: z.boolean(),
+  archived: z.boolean(), // inverted: archived = true means the location is in the archive (#207)
   created_at: z.string(), // ISO datetime string
   updated_at: z.string(), // ISO datetime string
 });
@@ -132,7 +134,7 @@ export const ServiceResponseSchema = z.object({
   material_hint: z.string().nullable().optional(),
   tariffs: z.array(TariffResponseSchema),
   tags: z.array(TagResponseSchema),
-  is_active: z.boolean(),
+  archived: z.boolean(), // inverted: archived = true means the service is in the archive (#207)
   created_at: z.string(), // ISO datetime string
   updated_at: z.string(), // ISO datetime string
 });
@@ -259,7 +261,7 @@ export const ClientResponseSchema = z.object({
   channel: z.string().nullable(),
   created_at: z.string(),
   updated_at: z.string(),
-  is_active: z.boolean(),
+  archived: z.boolean(), // inverted: archived = true means the client is in the archive (#207)
 });
 
 export type ClientResponse = z.infer<typeof ClientResponseSchema>;
@@ -277,16 +279,17 @@ export type ClientCreate = z.infer<typeof ClientCreateSchema>;
 
 // ─── ClientUpdate (request body, GH #201 — canonical full-replace PUT) ────
 // All keys required: 4 required-nullable personal fields (explicit null =
-// deliberate clear) + required is_active. Intentionally NOT Create.extend() —
-// Create is lenient (booking auto-create), Update is the strict contract.
+// deliberate clear). Intentionally NOT Create.extend() — Create is lenient
+// (booking auto-create), Update is the strict contract. is_active is NOT
+// accepted (#207): archive/restore is via POST endpoints; .strict() mirrors
+// backend extra="forbid" so a stray is_active is rejected (422).
 
 export const ClientUpdateSchema = z.object({
   name: z.string().nullable(),
   phone: z.string().nullable(),
   email: z.string().nullable(),
   channel: z.enum(['telegram', 'whatsapp', 'max']).nullable(),
-  is_active: z.boolean(),
-});
+}).strict();
 
 export type ClientUpdate = z.infer<typeof ClientUpdateSchema>;
 
@@ -411,7 +414,9 @@ export const ServiceCreateSchema = z.object({
 
 export type ServiceCreate = z.infer<typeof ServiceCreateSchema>;
 
-export const ServiceUpdateSchema = ServiceCreateSchema.extend({ is_active: z.boolean() });
+// is_active is NOT accepted (#207): archive/restore is via POST endpoints.
+// .strict() mirrors backend extra="forbid" — a stray is_active is rejected (422).
+export const ServiceUpdateSchema = ServiceCreateSchema.strict();
 export type ServiceUpdate = z.infer<typeof ServiceUpdateSchema>;
 
 // ─── LocationCreate (request body) ───────────────────────────────────────
@@ -432,7 +437,9 @@ export const LocationCreateSchema = z.object({
 
 export type LocationCreate = z.infer<typeof LocationCreateSchema>;
 
-export const LocationUpdateSchema = LocationCreateSchema.extend({ is_active: z.boolean() });
+// is_active is NOT accepted (#207): archive/restore is via POST endpoints.
+// .strict() mirrors backend extra="forbid" — a stray is_active is rejected (422).
+export const LocationUpdateSchema = LocationCreateSchema.strict();
 export type LocationUpdate = z.infer<typeof LocationUpdateSchema>;
 
 // ─── MaterialResponse ───────────────────────────────────────────────────
@@ -441,7 +448,7 @@ export const MaterialResponseSchema = z.object({
   id: z.string(),
   title: z.string(),
   description: z.string(),
-  is_active: z.boolean(),
+  archived: z.boolean(), // inverted: archived = true means the material is in the archive (#207)
   created_at: z.string(),
   updated_at: z.string(),
 });
@@ -455,7 +462,9 @@ export const MaterialCreateSchema = z.object({
 });
 export type MaterialCreate = z.infer<typeof MaterialCreateSchema>;
 
-export const MaterialUpdateSchema = MaterialCreateSchema.extend({ is_active: z.boolean() });
+// is_active is NOT accepted (#207): archive/restore is via POST endpoints.
+// .strict() mirrors backend extra="forbid" — a stray is_active is rejected (422).
+export const MaterialUpdateSchema = MaterialCreateSchema.strict();
 export type MaterialUpdate = z.infer<typeof MaterialUpdateSchema>;
 
 // ─── UserSettingsResponse ───────────────────────────────────────────────
@@ -514,6 +523,19 @@ export const TagSearchResultSchema = z.object({
   tag: z.string(),
 });
 export type TagSearchResult = z.infer<typeof TagSearchResultSchema>;
+
+// ─── Delete dry-run dependency tree (§5 — GH #207) ───────────────────────────
+// 409 Conflict body of the unified DELETE (no-body dry-run). Counters + sums only,
+// never individual rows. Mirrors backend `DependencyNode` (src/domain/deletion.py).
+
+export interface DependencyNode {
+  entity: string;
+  relation: string;
+  count: number;
+  allowed_actions: string[]; // [] = blocked (delete impossible — archive instead)
+  message?: string | null;
+  cascade_preview?: Record<string, number> | null;
+}
 
 // ─── Paginated list envelopes ────────────────────────────────────────────────
 

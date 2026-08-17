@@ -465,6 +465,8 @@ async def _seed_photos(session) -> None:
     ]
     for p in photos:
         session.add(Photo(**p))
+    # Flush photo rows so the photo_tags FK insert below sees them (#207 §11.3).
+    await session.flush()
 
     # Tag ph6, ph7 as "гость" via photo_tags
     for photo_id in ["ph6", "ph7"]:
@@ -507,17 +509,35 @@ async def seed_data(manager: DBManager) -> None:
         await conn.run_sync(Base.metadata.create_all)
 
     async with manager.async_session() as session:
+        # FK=ON (#207 §11.3): SQLAlchemy's unit-of-work orders inserts by
+        # relationships, NOT by bare FK constraints — and most seed rows
+        # reference parents by literal-string FK (no relationship), so a single
+        # end-of-flow flush can emit children before parents and trip FK.
+        # The _seed_* calls below are already in dependency order, so a flush
+        # after each guarantees each parent batch is in the DB before later
+        # batches reference it by literal id.
         await _seed_masters(session)
+        await session.flush()
         await _seed_locations(session)
+        await session.flush()
         await _seed_services(session)
+        await session.flush()
         await _seed_tariffs(session)
+        await session.flush()
         await _seed_tags(session)
+        await session.flush()
         await _seed_activities(session)
+        await session.flush()
         await _seed_clients(session)
+        await session.flush()
         await _seed_visitors(session)
+        await session.flush()
         await _seed_records(session)
+        await session.flush()
         await _seed_visits(session)
+        await session.flush()
         await _seed_payments(session)
+        await session.flush()
         await _seed_service_tags(session)
         await _seed_activity_tags(session)
         await _seed_photos(session)

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { DependencyNode } from './schemas';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || (typeof window !== 'undefined' ? `http://${window.location.hostname}:8000` : 'http://localhost:8000');
 
@@ -7,6 +8,8 @@ export class ApiError extends Error {
     public status: number,
     message: string,
     public code?: string,
+    /** 409 dry-run dependency tree (GH #207 §5) — present only on DELETE conflicts. */
+    public dependencies?: DependencyNode[],
   ) {
     super(message);
     this.name = 'ApiError';
@@ -24,11 +27,12 @@ async function api<T>(path: string, schema: z.ZodType<T, z.ZodTypeDef, unknown>,
 
   if (!res.ok) {
     let code: string | undefined;
+    let dependencies: DependencyNode[] | undefined;
     let message = `API error: ${res.status} ${res.statusText}`;
 
     // Try to read structured error from body
     try {
-      const body = await res.json() as { detail?: unknown };
+      const body = await res.json() as { detail?: unknown; dependencies?: unknown };
       const detail = body?.detail;
 
       if (typeof detail === 'object' && detail !== null) {
@@ -49,11 +53,17 @@ async function api<T>(path: string, schema: z.ZodType<T, z.ZodTypeDef, unknown>,
         // Legacy: {detail: "string"} — pre-refactor, still possible
         message = detail;
       }
+
+      // 409 dry-run dependency tree (GH #207 §5) — {detail, dependencies: [...]}.
+      // Carried up so the delete dialog can render the tree without re-parsing.
+      if (Array.isArray(body?.dependencies)) {
+        dependencies = body.dependencies as DependencyNode[];
+      }
     } catch {
       // Body not JSON or empty; use default message
     }
 
-    throw new ApiError(res.status, message, code);
+    throw new ApiError(res.status, message, code, dependencies);
   }
 
   // Handle 204 No Content (e.g. DELETE responses)

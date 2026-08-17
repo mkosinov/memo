@@ -42,9 +42,9 @@ export function BookingFilters({
   const { dateFrom, dateTo, selectDateRange } = useNavigation();
   const { locations, services, masters } = useRecords();
 
-  const locationList = Array.from(locations.values()).filter(l => l.is_active);
-  const serviceList = Array.from(services.values()).filter(s => s.is_active);
-  const masterList = Array.from(masters.values()).filter(m => m.is_active);
+  const locationList = Array.from(locations.values()).filter(l => !l.archived);
+  const serviceList = Array.from(services.values()).filter(s => !s.archived);
+  const masterList = Array.from(masters.values()).filter(m => !m.archived);
 
   const handleReset = () => {
     onReset();

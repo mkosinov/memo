@@ -17,7 +17,7 @@ const masterFixture: MasterResponse = {
   position: 'мастер',
   specialty: 'живопись',
   avatar_url: 'https://example.com/avatar.jpg',
-  is_active: true,
+  archived: false,
   created_at: '2024-01-15T10:00:00Z',
   updated_at: '2024-06-01T12:00:00Z',
 };
@@ -34,7 +34,7 @@ const locationFixture: LocationResponse = {
   review_url: 'https://yandex.ru/reviews/...',
   record_info: 'Запись по телефону',
   image_url: 'https://example.com/studio.jpg',
-  is_active: true,
+  archived: false,
   created_at: '2024-01-15T10:00:00Z',
   updated_at: '2024-06-01T12:00:00Z',
 };
@@ -53,7 +53,7 @@ const serviceFixture: ServiceResponse = {
   record_info: 'Запись за 24 часа',
   tariffs: [{ id: 'tariff-1', service_id: 'service-1', title: 'Взрослый', description: 'Билет для взрослого', price: 2500 }],
   tags: [{ id: 'tag-1', tag: 'масло' }],
-  is_active: true,
+  archived: false,
   created_at: '2024-01-15T10:00:00Z',
   updated_at: '2024-06-01T12:00:00Z',
 };

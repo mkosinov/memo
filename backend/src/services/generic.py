@@ -9,9 +9,19 @@ from __future__ import annotations
 from typing import Generic, TypeVar
 
 from pydantic import BaseModel
-from sqlalchemy import func, not_, select
+from sqlalchemy import delete, func, not_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.domain.deletion import (
+    CASCADE_HANDLERS,
+    FK_MATRIX,
+    NULLIFY_HANDLERS,
+    BlockingDepsError,
+    InvalidResolutionError,
+    collect_dependencies,
+    has_blocking_deps,
+    validate_resolutions,
+)
 from src.models.enums import ArchiveStatus
 from src.repositories.generic import BaseRepository
 from src.schemas.common import PaginatedResponse
@@ -42,17 +52,6 @@ async def paginate_orm(
     return list(result.scalars().all()), total
 
 
-def _strip_is_active_none(payload: dict) -> dict:
-    """Drop is_active when None — sticky field: absent/None preserves the stored value (#184).
-
-    Shared by SoftDeleteService._patch_payload and ServiceService.patch
-    (ServiceService re-implements patch without super() — single helper
-    prevents the drift that hid the resurrection hazard there)."""
-    if payload.get("is_active") is None:
-        payload.pop("is_active", None)
-    return payload
-
-
 class GenericService(Generic[CreateSchemaT, UpdateSchemaT, ResponseSchemaT]):
     """Generic service providing standard CRUD with schema validation.
 
@@ -79,8 +78,8 @@ class GenericService(Generic[CreateSchemaT, UpdateSchemaT, ResponseSchemaT]):
         self._model = model
         self._response_schema = response_schema
 
-    # Base GenericService has NO is_active knowledge. Soft-delete filtering
-    # lives in SoftDeleteService below (#195).
+    # Base GenericService has NO is_active knowledge. Archive-status
+    # filtering lives in ArchiveService below (#195).
     def _list_stmt(self, **filters):
         """Build the base select with equality filters applied."""
         stmt = select(self._model)
@@ -157,9 +156,7 @@ class GenericService(Generic[CreateSchemaT, UpdateSchemaT, ResponseSchemaT]):
     def _patch_payload(self, data: BaseModel) -> dict:
         """Build the apply-dict for ``patch()``: ``exclude_unset`` dump with
         ``None`` values for ``NOT_NULL_FIELDS`` stripped (client intent is
-        "don't change", not "set to null"). Extracted so ``SoftDeleteService``
-        can override to additionally strip ``is_active=None`` (#184 sticky-
-        field semantics) without the base class knowing about ``is_active``.
+        "don't change", not "set to null").
         """
         data_dict = data.model_dump(exclude_unset=True)
         # Strip nulls for NOT NULL fields — client intent is "don't change",
@@ -186,9 +183,23 @@ class GenericService(Generic[CreateSchemaT, UpdateSchemaT, ResponseSchemaT]):
         return [self._response_schema.model_validate(o) for o in orm_list]
 
 
-class SoftDeleteService(GenericService[CreateSchemaT, UpdateSchemaT, ResponseSchemaT]):
-    """GenericService for soft-delete models (AbstractModelSoftDelete) with
-    archive-status list filtering (#195)."""
+class ArchiveService(GenericService[CreateSchemaT, UpdateSchemaT, ResponseSchemaT]):
+    """Archive-aware service for ``AbstractModelSoftDelete`` models.
+
+    Combines three concerns:
+
+    * **Hard delete** — ``delete`` is inherited UNMODIFIED from
+      ``GenericService`` (and ultimately from ``BaseRepository.delete``):
+      the row is physically removed, NOT soft-archived. Archive/restore is
+      a separate two-method surface owned here (see ``archive``/``restore``).
+    * **archive()/restore()** — flip ``is_active`` False/True without
+      removing the row (atomic per call, ``@transactional``).
+    * **Archive-status list filtering** (#195) — ``list()`` accepts a
+      ``status: ArchiveStatus`` parameter (ACTIVE default / ARCHIVED / ALL)
+      so the ``is_active`` predicate is owned by a single sibling concern
+      away from the base ``GenericService`` (which has no ``is_active``
+      knowledge).
+    """
 
     def _list_stmt(self, status: ArchiveStatus = ArchiveStatus.ACTIVE, **filters):
         stmt = super()._list_stmt(**filters)
@@ -212,11 +223,107 @@ class SoftDeleteService(GenericService[CreateSchemaT, UpdateSchemaT, ResponseSch
             db_session, self._list_stmt(status=status, **filters), page, per_page, order_by
         )
 
-    def _patch_payload(self, data: BaseModel) -> dict:
-        """Soft-delete patch payload: additionally strip ``is_active`` when None
-        (#184 sticky-field semantics). The base NOT_NULL strip does not cover
-        ``is_active`` (it is governed by the soft-delete lifecycle, not by the
-        patch-fieldset parity), so an explicit ``None`` would otherwise write
-        NULL to the NOT NULL column.
+    @transactional
+    async def archive(self, db_session: AsyncSession, id: str) -> bool:
+        """Archive a record (set ``is_active=False``).
+
+        Returns ``True`` if the row was archived, ``False`` if not found.
+        Honors the bool service contract (spec §3.4): ``ArchiveRepository.patch``
+        returns the ORM instance (found) or ``None`` (not found), so the
+        result is coerced to a real ``bool`` to match the declared return type.
         """
-        return _strip_is_active_none(super()._patch_payload(data))
+        return await self._repository.patch(
+            db_session, self._model, id, {"is_active": False}
+        ) is not None
+
+    @transactional
+    async def restore(self, db_session: AsyncSession, id: str) -> bool:
+        """Restore an archived record (set is_active=True).
+
+        Returns True if the row was restored, False if not found.
+        See archive for the bool-coercion rationale.
+        """
+        return await self._repository.patch(
+            db_session, self._model, id, {"is_active": True}
+        ) is not None
+
+    @transactional
+    async def resolve_delete(
+        self,
+        db_session: AsyncSession,
+        id: str,
+        resolutions: dict[str, str],
+    ) -> bool:
+        """Execute the unified DELETE-with-body resolution transaction (Task 10).
+
+        Spec §6 (rules) + §8 (atomicity — ONE outer ``@transactional``; NO
+        per-dep commits): all nullify/cascade writes land on this session and
+        commit once at the outer boundary; any exception → rollback via
+        ``get_db_session`` (the decorator skips commit on raise).
+
+        Flow:
+          1. Existence check — ``False`` if entity missing (route maps to 404).
+          2. Collect FK deps (``collect_dependencies``).
+          3. ``has_blocking_deps`` → raise ``BlockingDepsError`` (route → 422
+             "archive instead").
+          4. ``validate_resolutions`` → raise ``InvalidResolutionError`` if
+             errors (route → 422 with detail).
+          5. Dispatch deps in spec §6 execution order: **nullify first, then
+             cascade** (each via ``NULLIFY_HANDLERS`` / ``CASCADE_HANDLERS``
+             keyed by ``(self._model, dep.entity)`` — NO ``if model is X``
+             branches; the matrix IS the dispatch). Blocked deps never reach
+             the executor (step 3 raised).
+          6. Hard-delete the entity row.
+          7. Return ``True`` (existed, executed).
+
+        Returns the bool contract per spec: ``True`` on success, ``False`` if
+        the entity was missing (404). Raises ``ResolutionError`` subtypes for
+        422 paths (caught in the router).
+        """
+        # 1. Existence — repository.get reuses the same session's identity-map
+        #    cache. Return False on miss (router maps to 404).
+        entity = await self._repository.get(db_session, self._model, id)
+        if entity is None:
+            return False
+
+        # 2. Collect deps (COUNT queries against the matrix for this model).
+        deps = await collect_dependencies(db_session, self._model, id)
+
+        # 3. Blocked deps → 422 "archive instead" (activities present).
+        if has_blocking_deps(deps):
+            raise BlockingDepsError(
+                "Entity has blocking dependencies — archive instead"
+            )
+
+        # 4. Validate resolutions body against the matrix (§6 rules).
+        issues = validate_resolutions(self._model, deps, resolutions)
+        if issues:
+            msg = "; ".join(f"{i.relation}: {i.message}" for i in issues)
+            raise InvalidResolutionError(msg)
+
+        # 5. Execute deps in spec §6 order: nullify → cascade → hard delete.
+        #    Two phases so the nullify handlers run BEFORE any cascade handler
+        #    (regardless of the matrix's declaration order — e.g. Service has
+        #    tariffs(cascade) listed BEFORE photos(nullify) in FK_MATRIX, but
+        #    the spec requires nullify-first to break FK links before any
+        #    downstream cascade-delete triggers row-level checks).
+        matrix_deps = FK_MATRIX.get(self._model, [])
+        for dep in matrix_deps:
+            if dep.action != "nullify":
+                continue
+            handler = NULLIFY_HANDLERS.get((self._model, dep.entity))
+            if handler is not None:
+                await handler(self, db_session, id)
+        for dep in matrix_deps:
+            if dep.action != "cascade":
+                continue
+            handler = CASCADE_HANDLERS.get((self._model, dep.entity))
+            if handler is not None:
+                await handler(self, db_session, id)
+            # block deps never reach here (step 3 raised BlockingDepsError).
+
+        # 6. Hard-delete the entity row.
+        await db_session.execute(
+            delete(self._model).where(self._model.id == id)
+        )
+        return True

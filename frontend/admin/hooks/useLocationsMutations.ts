@@ -1,8 +1,17 @@
 'use client';
 
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { createLocation, updateLocation, patchLocation, deleteLocation } from '@memo/api-client';
-import type { LocationCreate, LocationUpdate } from '@memo/api-client';
+import { useState } from 'react';
+import {
+  createLocation,
+  updateLocation,
+  patchLocation,
+  deleteLocation,
+  archiveLocation,
+  restoreLocation,
+  ApiError,
+} from '@memo/api-client';
+import type { LocationCreate, LocationUpdate, DependencyNode } from '@memo/api-client';
 
 export function useCreateLocation() {
   const queryClient = useQueryClient();
@@ -29,10 +38,50 @@ export function usePatchLocation() {
   });
 }
 
+/**
+ * Dry-run hard delete (GH #207 §7.3): no-body DELETE → 204 (no deps) or
+ * 409 + dependency tree. On 409 the tree is exposed via `dependencies` so
+ * the DeleteDialog (Task 18/19) can render Mode A/B; the mutation still
+ * rejects so callers control the flow.
+ */
 export function useDeleteLocation() {
   const queryClient = useQueryClient();
-  return useMutation({
+  const [dependencies, setDependencies] = useState<DependencyNode[] | null>(null);
+
+  const mutation = useMutation({
     mutationFn: (id: string) => deleteLocation(id),
+    onMutate: () => setDependencies(null), // clear stale tree from a prior attempt
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['locations'] });
+      // Cross-invalidation (cache hygiene): a hard-deleted location may have
+      // been referenced by records-derived views that key on ['locations']
+      // (useRecordData.ts) and by records lists themselves.
+      queryClient.invalidateQueries({ queryKey: ['records'] });
+    },
+    onError: (err) => {
+      if (err instanceof ApiError && err.status === 409 && err.dependencies) {
+        setDependencies(err.dependencies);
+      }
+    },
+  });
+
+  return { ...mutation, dependencies };
+}
+
+/** Archive a location (#207). */
+export function useArchiveLocation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => archiveLocation(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['locations'] }),
+  });
+}
+
+/** Restore an archived location (#207). */
+export function useRestoreLocation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => restoreLocation(id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['locations'] }),
   });
 }

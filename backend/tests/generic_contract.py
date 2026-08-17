@@ -20,7 +20,7 @@ import src.services.service  # noqa: F401
 import src.services.tag  # noqa: F401
 import src.services.visitor  # noqa: F401
 
-from src.services.generic import GenericService, SoftDeleteService
+from src.services.generic import GenericService, ArchiveService
 
 # Service classes + factories
 from src.services.activity import ActivityService, get_activity_service
@@ -31,7 +31,7 @@ from src.services.material import MaterialService, get_material_service
 from src.services.payment import PaymentService, get_payment_service
 from src.services.photo import PhotoService
 from src.services.record import RecordService
-from src.services.service import ServiceService
+from src.services.service import ServiceService, get_service_service
 from src.services.tag import TagService, get_tag_service
 from src.services.visitor import VisitorService, get_visitor_service
 
@@ -42,6 +42,7 @@ from src.models.location import Location
 from src.models.master import Master
 from src.models.material import Material
 from src.models.payment import Payment
+from src.models.service import Service
 from src.models.tag import Tag
 from src.models.visitor import Visitor
 
@@ -52,6 +53,7 @@ from src.schemas.location import LocationCreate
 from src.schemas.master import MasterCreate
 from src.schemas.material import MaterialCreate
 from src.schemas.payment import PaymentCreate
+from src.schemas.service import ServiceCreate
 from src.schemas.tag import TagCreate
 from src.schemas.visitor import VisitorCreate
 
@@ -62,6 +64,7 @@ from src.schemas.location import LocationPatch
 from src.schemas.master import MasterPatch
 from src.schemas.material import MaterialPatch
 from src.schemas.payment import PaymentPatch
+from src.schemas.service import ServicePatch
 from src.schemas.tag import TagPatch
 from src.schemas.visitor import VisitorPatch
 
@@ -72,6 +75,7 @@ from src.schemas.location import LocationUpdate
 from src.schemas.master import MasterUpdate
 from src.schemas.material import MaterialUpdate
 from src.schemas.payment import PaymentUpdate
+from src.schemas.service import ServiceUpdate
 from src.schemas.visitor import VisitorUpdate
 
 # Schemas — Response (HTTP-level contract: exact-keys + model_validate on bodies)
@@ -81,6 +85,7 @@ from src.schemas.location import LocationResponse
 from src.schemas.master import MasterResponse
 from src.schemas.material import MaterialResponse
 from src.schemas.payment import PaymentResponse
+from src.schemas.service import ServiceResponse
 from src.schemas.tag import TagResponse
 from src.schemas.visitor import VisitorResponse
 
@@ -88,18 +93,18 @@ from src.schemas.visitor import VisitorResponse
 # ─── Исключения: сервисы с override-семантикой одного или нескольких
 # ─── generic-методов (create/get/list/update/patch/delete) ─────────────────────
 # Обязаны иметь собственные тесты (test_api_services.py / test_api_photos.py /
-# test_api_records.py). ``SoftDeleteService`` — абстрактный промежуточный базовый
+# test_api_records.py). ``ArchiveService`` — абстрактный промежуточный базовый
 # класс (#195): не привязан к конкретной модели/схеме, не тестируется напрямую;
 # его конкретные подклассы (Master/Location/Material/Client) покрыты через
 # CONTRACT_CONFIG и обнаруживаются рекурсивно через ``_all_subclasses``.
-GENERIC_CONTRACT_EXCEPTIONS: set[type] = {ServiceService, PhotoService, RecordService, SoftDeleteService}
+GENERIC_CONTRACT_EXCEPTIONS: set[type] = {ServiceService, PhotoService, RecordService, ArchiveService}
 
 
 def _all_subclasses(cls: type) -> list[type]:
     """Рекурсивно собрать всех транзитивных потомков ``cls``.
 
     ``GenericService.__subclasses__()`` возвращает только прямых наследников.
-    После #195 появилась промежуточная база ``SoftDeleteService``, чьи
+    После #195 появилась промежуточная база ``ArchiveService``, чьи
     конкретные подклассы (Master/Location/Material/Client) — внуки
     ``GenericService`` и без рекурсии выпадали бы из contract-покрытия.
     """
@@ -111,12 +116,16 @@ def _all_subclasses(cls: type) -> list[type]:
 
 
 # ─── EntityConfig ────────────────────────────────────────────────────────────────
-# Spec: docs/specs/2026-08-01-deletion-policy-design.md §2.6 —
-# ``delete_semantics`` is the test-side record of the deletion domain policy:
-#   * ``"hard"`` — DELETE physically removes the row (Tag/Photo/Visitor/
-#     Activity/Record/UserSettings/Payment/Visit).
-#   * ``"soft"`` — is_active is flipped to False (Master/Location/Service/
-#     Material/Client).
+# Spec: docs/specs/2026-08-15-delete-hard-delete-and-dependency-resolution-design.md
+# §1/§3.3 — ``delete_semantics`` is the test-side record of the deletion domain
+# policy. After #207 ALL 5 archive-capable entities (Master/Location/Service/
+# Material/Client) join the hard-delete group: ``DELETE`` is now a real hard
+# delete (with dependency-resolution for FK blockers), and archive/restore moved
+# to dedicated ``POST /{id}/archive`` + ``POST /{id}/restore`` endpoints (Task 11).
+#   * ``"hard"`` — DELETE physically removes the row (all entities post-#207).
+#   * ``"soft"`` — kept for backward-compat with the ``_soft_params`` parameterizer
+#     but currently empty: no entity declares it. Pinned by
+#     ``test_no_entity_declares_soft_delete_semantics``.
 # The generic delete test asserts each entity's behavior matches its declared
 # semantics. Adding new entity configs below requires setting this field.
 class EntityConfig(NamedTuple):
@@ -193,7 +202,7 @@ CONTRACT_CONFIG: dict[type, EntityConfig] = {
         not_null_sentinel=None,
         nullable_field="name",
         nullable_sentinel="Ivan",
-        delete_semantics="soft",
+        delete_semantics="hard",
         update_schema=ClientUpdate,
         update_data={"name": "Petr", "phone": "+79111111111", "email": "petr@example.com", "channel": "whatsapp"},
         router_prefix="/api/v1/clients",
@@ -211,7 +220,7 @@ CONTRACT_CONFIG: dict[type, EntityConfig] = {
         not_null_sentinel="Loc2",
         nullable_field="address",
         nullable_sentinel="addr",
-        delete_semantics="soft",
+        delete_semantics="hard",
         update_schema=LocationUpdate,
         update_data={"name": "Loc2", "capacity": 10},
         router_prefix="/api/v1/locations",
@@ -236,7 +245,7 @@ CONTRACT_CONFIG: dict[type, EntityConfig] = {
         not_null_sentinel="#000000",
         nullable_field="avatar_url",
         nullable_sentinel="http://x",
-        delete_semantics="soft",
+        delete_semantics="hard",
         update_schema=MasterUpdate,
         update_data={
             "first_name": "A2",
@@ -258,7 +267,7 @@ CONTRACT_CONFIG: dict[type, EntityConfig] = {
         not_null_sentinel="T2",
         nullable_field=None,
         nullable_sentinel=None,
-        delete_semantics="soft",
+        delete_semantics="hard",
         update_schema=MaterialUpdate,
         update_data={"title": "T2", "description": "D2"},
         router_prefix="/api/v1/materials",
@@ -282,6 +291,46 @@ CONTRACT_CONFIG: dict[type, EntityConfig] = {
         router_prefix="/api/v1/payments",
         not_found_code="PAYMENT_NOT_FOUND",
         response_schema=PaymentResponse,
+    ),
+    # #207 Task 12: ServiceService is in GENERIC_CONTRACT_EXCEPTIONS (it
+    # overrides update/patch for nested tariffs/tag_ids), but it shares the
+    # ArchiveService.archive/restore surface with the other 4 archive-capable
+    # entities. This config entry seeds the new TestArchiveServiceArchiveRestore
+    # contract (via _archive_params); the standard _contract_params() skips
+    # it (still excepted), so the CRUD contracts remain unaffected.
+    ServiceService: EntityConfig(
+        service_factory=get_service_service,
+        model=Service,
+        create_schema=ServiceCreate,
+        patch_schema=ServicePatch,
+        create_data={
+            "title": "T",
+            "description": "D",
+            "image_url": "http://x",
+            "specialty": "s",
+            "min_age": 6,
+            "duration": 60,
+            "record_info": "ri",
+        },
+        fk_map={},
+        not_null_field="title",
+        not_null_sentinel="T2",
+        nullable_field="material_hint",
+        nullable_sentinel="mh",
+        delete_semantics="hard",
+        update_schema=ServiceUpdate,
+        update_data={
+            "title": "T2",
+            "description": "D2",
+            "image_url": "http://x2",
+            "specialty": "s2",
+            "min_age": 7,
+            "duration": 90,
+            "record_info": "ri2",
+        },
+        router_prefix="/api/v1/services",
+        not_found_code="SERVICE_NOT_FOUND",
+        response_schema=ServiceResponse,
     ),
     TagService: EntityConfig(
         service_factory=get_tag_service,
@@ -338,12 +387,18 @@ def _contract_params() -> list:
 
 
 def _soft_params() -> list:
-    """Parametrization over soft-delete entities only (delete_semantics == "soft").
+    """Parametrization over soft-delete entities only (``delete_semantics == "soft"``).
 
-    Cleaner than in-test skips: a 9th soft entity is auto-included via its
-    config entry. Used by the soft-only DeleteSemantics edge tests
-    (``test_delete_already_deleted_soft_returns_false``,
-    ``test_soft_deleted_absent_from_list``) — spec §3.3 (DeleteSemantics row).
+    Post-#207: ALL 5 archive-capable entities (Master/Location/Service/Material/
+    Client) joined the hard-delete group — ``DELETE`` is a real hard delete and
+    archive/restore moved to dedicated ``POST /{id}/archive`` + ``POST /{id}/restore``
+    endpoints (spec §1/§3.3). No entity currently declares ``"soft"``, so this
+    returns ``[]``. The invariant is pinned by
+    ``test_no_entity_declares_soft_delete_semantics`` in
+    ``tests/services/test_generic_service_contract.py`` — if a future entity
+    regresses to soft-delete semantics, that contract test fails loudly and
+    re-activates the (deleted) soft-only edge tests that were folded into the
+    hard-delete world (spec Part B3 of #207 Task 13).
     """
     return [
         p
@@ -363,3 +418,61 @@ def _hard_params() -> list:
         for p in _contract_params()
         if p.values[1] is not None and p.values[1].delete_semantics == "hard"
     ]
+
+
+def _serialized_keys(schema_cls: type) -> set[str]:
+    """Field names a Pydantic Response schema actually SERIALIZES to JSON.
+
+    The 5 archive-capable Response schemas (Master/Location/Service/Material/
+    Client, #207 §3.1) keep ``is_active`` as ``Field(..., exclude=True)`` (parsed
+    in the constructor, NOT serialized) and expose ``archived`` via a
+    ``@computed_field`` (serialized, but absent from ``model_fields``).
+    Contract helpers that previously used ``set(model_fields.keys())`` compared
+    against the stale parsed set and missed ``archived`` while asserting
+    ``is_active`` — this helper computes what the API actually emits so the
+    contract pins the wire shape (declared the approved Task 4 design — do NOT
+    ``model_validate`` the body back, the excluded required field makes that
+    raise). Hard-delete entity Response schemas have no ``exclude=True`` field
+    and no computed fields → the helper returns ``set(model_fields)`` for them.
+    """
+    serialized: set[str] = set()
+    for name, field in schema_cls.model_fields.items():
+        if field.exclude is True:
+            continue
+        serialized.add(name)
+    serialized |= set(schema_cls.model_computed_fields.keys())
+    return serialized
+
+
+def _archive_params() -> list:
+    """Parametrization over archive-capable ``ArchiveService`` subclasses —
+    the 5 entities with an ``is_active`` column: Master/Location/Service/
+    Material/Client (concrete descendants of ``ArchiveService``).
+
+    Spec §10 (#184/#185 reconciliation) + §14 acceptance criterion — drives
+    ``TestArchiveServiceArchiveRestore``: the bool service contract for
+    ``archive()``/``restore()`` (DB ``is_active`` False/True flip). The
+    HTTP-level ``archived`` response body mapping (archived = not is_active)
+    is asserted at the API route level (Task 13).
+
+    Note: ``ServiceService`` shares this surface (inherits
+    ``ArchiveService.archive``/``restore`` UNCHANGED — unlike ``update``/
+    ``patch`` which it overrides) and stays in ``GENERIC_CONTRACT_EXCEPTIONS``
+    for the standard CRUD contract tests. Its CONTRACT_CONFIG entry seeds the
+    archive/restore round-trip here. Fail loudly if a new ArchiveService
+    subclass lands without a config (mirror of ``_contract_params`` guard).
+    """
+    params = []
+    for cls in _all_subclasses(ArchiveService):
+        if cls is ArchiveService:
+            continue
+        cfg = CONTRACT_CONFIG.get(cls)
+        assert cfg is not None, (
+            f"{cls.__name__} is an ArchiveService subclass (concrete archive/"
+            f"restore surface — has an is_active column) but missing from "
+            f"CONTRACT_CONFIG. Add a config entry so the archive/restore "
+            f"contract round-trip can seed a row, or drop the ArchiveService "
+            f"base from the class."
+        )
+        params.append(pytest.param(cls, cfg, id=cls.__name__))
+    return params

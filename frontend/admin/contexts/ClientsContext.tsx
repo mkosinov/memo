@@ -8,8 +8,18 @@ import {
   updateClient as apiUpdateClient,
   patchClient as apiPatchClient,
   deleteClient as apiDeleteClient,
+  archiveClient as apiArchiveClient,
+  restoreClient as apiRestoreClient,
+  resolveDeleteClient as apiResolveDeleteClient,
+  ApiError,
 } from '@memo/api-client';
-import type { ClientWithStats, ClientResponse, ClientListResponse, ClientUpdate } from '@memo/api-client';
+import type {
+  ClientWithStats,
+  ClientResponse,
+  ClientListResponse,
+  ClientUpdate,
+  DependencyNode,
+} from '@memo/api-client';
 
 export interface ClientFilters {
   search: string;
@@ -61,6 +71,18 @@ export interface ClientsContextType {
   updateClient: (id: string, data: ClientUpdate) => Promise<void>;
   patchClient: (id: string, data: Record<string, unknown>) => Promise<void>;
   deleteClient: (id: string) => Promise<void>;
+  /** Archive (#207, #198 parity) — POST /clients/{id}/archive. */
+  archiveClient: (id: string) => Promise<ClientResponse>;
+  /** Restore (#207, #198 parity) — POST /clients/{id}/restore. */
+  restoreClient: (id: string) => Promise<ClientResponse>;
+  /** Execute a hard delete with user resolutions (§6) — DELETE /clients/{id} with body. */
+  resolveDeleteClient: (id: string, resolutions: Record<string, string>) => Promise<void>;
+  /**
+   * Dependency tree from the dry-run DELETE 409 (§5/§7.3), or null.
+   * deleteClient (no body) rejects on 409 and exposes the tree here so the
+   * DeleteDialog (Task 18/19) can render Mode A/B.
+   */
+  dependencies: DependencyNode[] | null;
 }
 
 const ClientsContext = createContext<ClientsContextType | null>(null);
@@ -74,6 +96,9 @@ export function ClientsProvider({ children }: { children: React.ReactNode }) {
   const [filters, setFiltersState] = useState<ClientFilters>(defaultFilters);
   const [sortBy, setSortBy] = useState('name');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
+  // §5: dependency tree from the dry-run DELETE 409 — consumed by the
+  // DeleteDialog (Task 18/19). Null when no dry-run conflict is pending.
+  const [dependencies, setDependencies] = useState<DependencyNode[] | null>(null);
 
   const { data, isLoading, error, refetch } = useQuery<ClientListResponse>({
     queryKey: ['clients', page, perPage, filters, sortBy, sortOrder],
@@ -124,7 +149,34 @@ export function ClientsProvider({ children }: { children: React.ReactNode }) {
   });
 
   const deleteMutation = useMutation({
+    // No-body DELETE = dry-run (§7.3): 204 when the client had no deps,
+    // 409 + dependency tree otherwise. On 409 the tree is parked in
+    // `dependencies` for the dialog; the mutation still rejects so the
+    // caller can branch on it.
     mutationFn: (id: string) => apiDeleteClient(id),
+    onMutate: () => setDependencies(null), // clear stale tree from a prior attempt
+    onSuccess: invalidateClients,
+    onError: (err) => {
+      if (err instanceof ApiError && err.status === 409 && err.dependencies) {
+        setDependencies(err.dependencies);
+      }
+    },
+  });
+
+  const archiveMutation = useMutation({
+    mutationFn: (id: string) => apiArchiveClient(id),
+    onSuccess: invalidateClients,
+  });
+
+  const restoreMutation = useMutation({
+    mutationFn: (id: string) => apiRestoreClient(id),
+    onSuccess: invalidateClients,
+  });
+
+  const resolveDeleteMutation = useMutation({
+    // DELETE with body (§6): executes nullify → cascade → hard delete.
+    mutationFn: ({ id, resolutions }: { id: string; resolutions: Record<string, string> }) =>
+      apiResolveDeleteClient(id, resolutions),
     onSuccess: invalidateClients,
   });
 
@@ -156,6 +208,27 @@ export function ClientsProvider({ children }: { children: React.ReactNode }) {
     [deleteMutation],
   );
 
+  const archiveClient = useCallback(
+    async (id: string) => {
+      return await archiveMutation.mutateAsync(id);
+    },
+    [archiveMutation],
+  );
+
+  const restoreClient = useCallback(
+    async (id: string) => {
+      return await restoreMutation.mutateAsync(id);
+    },
+    [restoreMutation],
+  );
+
+  const resolveDeleteClient = useCallback(
+    async (id: string, resolutions: Record<string, string>) => {
+      await resolveDeleteMutation.mutateAsync({ id, resolutions });
+    },
+    [resolveDeleteMutation],
+  );
+
   const value = useMemo(
     () => ({
       clients: data?.items || [],
@@ -177,6 +250,10 @@ export function ClientsProvider({ children }: { children: React.ReactNode }) {
       updateClient,
       patchClient,
       deleteClient,
+      archiveClient,
+      restoreClient,
+      resolveDeleteClient,
+      dependencies,
     }),
     [
       data,
@@ -192,6 +269,10 @@ export function ClientsProvider({ children }: { children: React.ReactNode }) {
       updateClient,
       patchClient,
       deleteClient,
+      archiveClient,
+      restoreClient,
+      resolveDeleteClient,
+      dependencies,
     ],
   );
 

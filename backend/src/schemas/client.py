@@ -2,7 +2,7 @@
 
 from datetime import date, datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 from src.models.enums import ArchiveStatus, Channel
 
@@ -23,24 +23,34 @@ class ClientCreate(ClientBase):
 
 
 class ClientUpdate(BaseModel):
-    """Full-replace PUT schema (GH #201): all 5 keys required; explicit null =
-    deliberate clear. Omitted key → 422. `ClientCreate`/`ClientPatch` unchanged."""
+    """Full-replace PUT schema (GH #201): all 4 personal keys required; explicit
+    null = deliberate clear. Omitted key → 422. ``is_active`` is NOT accepted
+    (#178 closed by Task 5): it's a lifecycle flag owned by the archive/restore
+    POST endpoints (Task 11), and a stray ``is_active`` is rejected with 422 via
+    ``extra="forbid"``. ``ClientCreate``/``ClientPatch`` unchanged."""
+
+    model_config = ConfigDict(extra="forbid")
 
     name: str | None
     phone: str | None
     email: str | None
     channel: Channel | None
-    is_active: bool
 
 
 class ClientPatch(BaseModel):
-    """Request schema for partial updates (PATCH). All fields optional."""
+    """Request schema for partial updates (PATCH). All fields optional.
+
+    ``is_active`` is NOT accepted (#178 closed by Task 5): archive/restore is
+    via the POST endpoints (Task 11). A stray ``is_active`` is rejected with
+    422 via ``extra="forbid"``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
 
     name: str | None = None
     phone: str | None = None
     email: str | None = None
     channel: Channel | None = None
-    is_active: bool | None = None  # None = preserve stored value; sticky field (#184)
 
 
 class ClientResponse(BaseModel):
@@ -49,6 +59,13 @@ class ClientResponse(BaseModel):
     Uses ``str | None`` for ``channel`` (not the Channel enum) to tolerate
     any string already stored in the DB (e.g. 'instagram', 'vk', 'website'
     from before the enum was tightened). See issue #60.
+
+    ``is_active`` stays as the DB/ORM column but is ``exclude=True`` so it never
+    serializes to JSON. The API exposes ``archived`` (inverted: ``archived = not
+    is_active``, ``archived = true`` = in archive) via a computed field (#207 §3.1).
+    ``ClientWithStats`` inherits this computed field — the manual builder in
+    ``list_clients_with_stats`` keeps passing ``is_active=row.is_active`` (the
+    excluded field still accepts it as a constructor kwarg; ``archived`` derives).
     """
 
     model_config = ConfigDict(from_attributes=True)
@@ -60,7 +77,12 @@ class ClientResponse(BaseModel):
     channel: str | None = None
     created_at: datetime
     updated_at: datetime
-    is_active: bool
+    is_active: bool = Field(..., exclude=True)
+
+    @computed_field
+    @property
+    def archived(self) -> bool:
+        return not self.is_active
 
 
 class ClientWithStats(ClientResponse):

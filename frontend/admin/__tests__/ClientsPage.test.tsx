@@ -61,7 +61,7 @@ const mockClient: ClientWithStats = {
   channel: 'telegram',
   created_at: '2026-01-01T00:00:00',
   updated_at: '2026-01-01T00:00:00',
-  is_active: true,
+  archived: false,
   records_count: 5,
   last_record: '2026-05-20T10:00:00',
   total_paid: 17500,

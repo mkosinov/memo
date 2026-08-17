@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — 2026-08-17
+
+### Added
+- **GH #207 — DELETE = real hard delete + granular dependency resolutions (пересмотр #194)** — branch `feat-delete-hard-deps` (23 commits: 68aa333..9994b93):
+  - **Backend:** `PRAGMA foreign_keys=ON` on all SQLite connections (seed FK insert ordering fixed). `SoftDeleteRepository`/`SoftDeleteService` renamed → `ArchiveRepository`/`ArchiveService` — `delete` is now a **hard delete**, with new `archive()`/`restore()` methods. Response schemas for the 5 soft-delete entities flip `is_active` → `archived` (inverted, `exclude=True` pattern); `is_active` removed from PUT/PATCH schemas — sending it now returns **422** (auto-closes #178). New `domain/deletion.py` — FK dependency matrix + resolver. One unified `DELETE /api/v1/{entity}/{id}` route with two modes: **dry-run** (no body → 204 if deletable, 409 + dependency tree if blocked) and **execute** (wrapped body `{"resolutions": {...}}` → 204 / 422 / 404). `resolve_delete` executor runs nullify → cascade → auto → hard in a single transaction. New `POST /api/v1/{entity}/{id}/archive` + `/restore` (200-with-body). Master→users cascades: delete = auto (§4.1), archive/restore = user cascade (§4.2). `VisitorService._delete_cascade` extracted as a non-decorated core for atomic reuse.
+  - **api-client:** Zod schemas flipped `is_active` → `archived` + strict `Update` schemas (no `is_active`) + new `DependencyNode`; new `archiveX`/`restoreX`/`resolveDeleteX` endpoint methods (DELETE with wrapped body).
+  - **Admin:** mutation hooks + `ClientsContext` — 409-aware delete with cross-invalidation; shared `DeleteDialog` (Mode A type-to-confirm destroy, Mode B blocked→archive); 5 tables wired (+Client restore parity, auto-closes #198); all fixtures migrated to `archived`.
+  - **Tests:** backend 1205 passed / 0 failed / 5 skipped; admin vitest 1331 passed / 0 failed; `tsc` 0 errors; api-client 189 passed / 4 failed (4 = pre-existing #188 baseline, unchanged); e2e 35 new green (7 new specs S1–S7 + `clients.spec.ts` #11 locator fix); Visual Compliance Gate 7/7 PASS (mobile screenshots `/tmp/visual-compliance-gh207/fallback/`).
+  - **Docs:** domain-rules synced (Task 23, commit `9994b93`) — hard-delete + archive terminology + FK matrix.
+  - **Notable mid-flight fix:** wrapped-only resolutions envelope (`802d891`) — E2E caught a cross-layer contract mismatch that unit tests missed.
+  - **Closes:** #207; auto-closes #178, #198; absorbs #189.
+  - **121 files changed, +10953 / -1471.**
+  - Design spec: `docs/specs/2026-08-15-delete-hard-delete-and-dependency-resolution-design.md` (on main)
+  - Plan: `docs/plans/2026-08-15-delete-hard-delete-and-dependency-resolution-plan.md` (on main)
+
 ## [Unreleased] — 2026-08-09
 
 ### Added

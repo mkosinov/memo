@@ -112,7 +112,7 @@ async def list_all_masters(
 
 - New domain error, e.g. `BareListLimitExceededError` (alongside the deletion domain errors or in a small shared domain-errors module — plan-level placement), raised by `list_all` when the limit is exceeded.
 - Router converts it exactly like #207's `ResolutionError`: `except BareListLimitExceededError as exc: raise HTTPException(status_code=422, detail=str(exc))` → existing global handler emits `{"detail": {"code": "VALIDATION_ERROR", "message": "<human text>"}}`.
-- Message is human-readable (Russian, matching admin-facing error idioms) naming the entity and pointing to the paginated endpoint, e.g. `"Справочник мастеров превысил лимит 1000 записей для /all — используйте пагинированный GET /api/v1/masters"`.
+- Message is human-readable **English** (G1b amendment — API error details are a developer-facing contract, consistent English), naming the entity and pointing to the paginated endpoint, e.g. `"Dictionary 'masters' exceeded the /all limit of 1000 rows — use the paginated GET /api/v1/masters endpoint"`.
 - 422 (not 500/413): consistent with the #182 policy that limit violations are explicit validation-style errors, and with the existing `ErrorCode.VALIDATION_ERROR` envelope — no new error infrastructure.
 
 ### 4.4 Deterministic default order
@@ -176,7 +176,7 @@ Each table gets a lightweight per-entity context mirroring the `ClientsContext` 
 Per table (Masters/Locations/Services/Materials/Tags):
 
 - Replace local `useQuery(per_page=100)` + `page`/`pageSize` + filter/sort/slice memo chain with `useX()` context consumption.
-- Delete: client-side `.filter()` (search — subject to §6 Q1), `.sort()` memo, `.slice()` memo, local `totalPages`.
+- Delete: client-side `.sort()` memo, `.slice()` memo, local `totalPages`. **KEEP: the client-side `.filter()` search memo** operating on the loaded page's items (G1b Q1 resolution — untouched until #212).
 - Pager: inline JSX driven by envelope `total` (Records/Clients precedent: page-size select `data-testid="page-size-select"` with 10/20/50/100, numbered buttons, prev/next, total label). Page-size change resets to page 1 (existing table behavior, preserved).
 - Sort headers call `setSort(key)` instead of local sort state; sort keys map to the §4.5 whitelist; **sort change resets to page 1** (§5.2).
 - Status tabs (archive entities) call `setStatus` — query param, refetch, reset page (current behavior preserved).
@@ -213,15 +213,21 @@ Frontend handling of the 422 limit error: react-query error state → existing `
 - Scope visibility for planning: the 4 existing table test files total ~2800 lines (MastersTable.test.tsx alone 694) — the query-param and client-slice assertion rewrites are the bulk of the frontend effort.
 - api-client tests per §5.1.
 
-## 6. Open questions for G1b
+## 6. G1b resolutions (BINDING, decided 2026-08-17)
 
-**Q1 — client-side search boxes in the 5 dictionary tables** (G1b decision becomes a binding amendment recorded in this section before planning). All 5 tables have a free-text search input that filters the loaded rows client-side. Under server pagination this silently searches only the current page — the same silent-truncation bug class this issue fixes. Server-side `?q=` is explicitly out of scope (#212). Options:
+**Q1 — client-side search boxes in the 5 dictionary tables → RESOLVED: left UNTOUCHED in #205.** The search inputs stay exactly as they are — client-side filtering over the currently loaded page. This is an **accepted temporary degradation**: under server pagination the box searches only the loaded page (worst case: silent miss at >perPage rows — the known trade-off, consciously accepted by the user). No hint UI, no removal. Server `?q=` for tables of ALL entities (dictionaries included) arrives with #212. Consequence for §5.3: the client-side `.filter()` search memo is KEPT (operating on the page's items); only the `.sort()`/`.slice()` memos are removed.
 
-- **(a) Remove the search inputs** from the 5 tables until #212 lands proper server-side search. Explicit, no silent wrongness; temporary UX regression (finding a row = paging/sorting). **Recommended** — consistent with the "explicit over silent" philosophy of #182/#207.
-- (b) Keep the inputs, filtering the loaded page only, with a visible hint when `total > items.length` ("поиск по загруженным N из M"). Keeps utility for small dictionaries today; risks user confusion at >100 rows.
-- (c) Pull minimal server `?q=` for dictionaries into THIS issue. Rejected a priori — user put it in #212; listed only for completeness.
+**Q2 — deviation CONFIRMED as approved approach:** explicit per-router `/all` declaration in the 5 dictionary routers (no router factory exists or is introduced).
 
-**Q2 — deviation notice (not a decision):** G1a wording assumed a "generic router-factory registration flag". No router factory exists (5 hand-written routers). The opt-in is therefore explicit per-router route declaration — same semantics, no factory introduced. Flagged here per the "never silently reinterpret requirements" rule.
+**Search mechanism matrix (binding terminology, fixed once and for all):**
+
+| Surface | Mechanism | Ships in |
+|---|---|---|
+| Table search input (any entity, incl. dictionaries) | server `?q=` | #212 |
+| Form dropdowns for dictionaries | client-side filter over `/all` (combobox) | #214 (data source `/all` ships in #205) |
+| Form dropdowns for growing entities (clients/activities) | server `?q=` typeahead | #212 |
+
+Note: #212's issue body was updated to include dictionary tables in its scope.
 
 ## 7. Acceptance criteria
 
@@ -250,7 +256,7 @@ Frontend handling of the 422 limit error: react-query error state → existing `
 - [ ] Records page: master/service/location dropdowns and name lookup-maps still render all dictionary values (sourced from `/all`).
 - [ ] Schedule page: master/service/location filters still populate fully.
 - [ ] Record create/edit modal (useRecordData): service/master/location selects fully populated.
-- [ ] Search input in dictionary tables: removed or annotated per Q1 decision (verify the chosen option).
+- [ ] Search input in dictionary tables: present and unchanged, filters the loaded page's rows (G1b Q1 resolution).
 - [ ] No console errors; loading and error states render during refetch.
 
 ## 9. Non-goals / risks

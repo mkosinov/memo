@@ -84,11 +84,11 @@ async def list_all(
 
 Behavior:
 
-- Reuses `_list_stmt(**filters)` (same equality-filter semantics as `list()`); `ArchiveService` adds its `status: ArchiveStatus = ArchiveStatus.ACTIVE` filter the same way its `list()` does.
+- Reuses `_list_stmt(**filters)` (same equality-filter semantics as `list()`); `ArchiveService` adds its `status: ArchiveStatus = ArchiveStatus.ACTIVE` filter the same way its `list()` does. `TagService` extends plain `GenericService` — its `/all` has no status filter anywhere.
+- **Eager-loading override (mandatory):** `ServiceService.list()` is fully overridden with `selectinload(Service.tariffs), selectinload(Service.tags)` (`service.py:39-67`) because `ServiceResponse` nests tariffs and tags. `ServiceService` MUST override `list_all()` with the same eager loading — the base `_list_stmt` has no `.options(...)`, and validating `ServiceResponse` from lazily-loaded relationships under async SQLAlchemy crashes (`MissingGreenlet`). The generic contract test for services `/all` (§4.6) guards this.
 - Applies `order_by` when given; **routers always pass an explicit deterministic order** (§4.4) — `list_all` itself stays order-agnostic like `list()`.
-- **Protective limit** enforced here (single shared choke point): the query is executed with `LIMIT BARE_LIST_MAX_ROWS + 1`; if the extra row is present, raise a domain error (see §4.3). Only up to the limit is validated/returned — the limit+1 probe keeps it to one query and never materializes unbounded rows.
-- `BARE_LIST_MAX_ROWS = 1000`, sourced from app settings (env-overridable) so tests can set a small value instead of seeding 1001 rows.
-- No page/per_page params, no envelope, no COUNT query.
+- **Protective limit** enforced here (single shared choke point): the query is executed with `LIMIT BARE_LIST_MAX_ROWS + 1`; if the extra row is present, raise a domain error (see §4.3). Only up to the limit is validated/returned — the limit+1 probe keeps it to one query and never materializes unbounded rows. Boundary: exactly 1000 rows → 200 OK; the 1001st row → 422.
+- `BARE_LIST_MAX_ROWS = 1000` is a **module-level constant** in the service layer (not app settings — no new service→settings coupling for a safety-net value). Since enforcement lives in one shared method, ONE limit contract test (cheapest factory) covers all 5 entities; the test seeds 1001 rows via bulk insert.
 
 ### 4.2 `/all` routes
 
@@ -124,10 +124,10 @@ async def list_all_masters(
 | masters   | `sort_order ASC, first_name ASC, id ASC`     | extends existing `[sort_order, first_name]` |
 | locations | `sort_order ASC, name ASC, id ASC`           | extends existing `[sort_order, name]` |
 | services  | `title ASC, id ASC`                          | new (no order today); services have no sort_order column |
-| tags      | `name ASC, id ASC`                           | new |
+| tags      | `tag ASC, id ASC`                            | new; the Tag column is named `tag` (`models/tag.py:68`) |
 | materials | `title ASC, id ASC`                          | new |
 
-The paginated list endpoints keep their current order_by behavior (masters/locations unchanged; services/tags/materials gain the same default so server-side pagination is deterministic there too). Default order = `/all` order per entity.
+The paginated list endpoints keep their current order_by behavior where defined (masters/locations unchanged); services/tags/materials gain the same default order so server-side pagination is deterministic there too. Default order = `/all` order per entity. The tags paginated endpoint has no `status` param (tags are non-archive, hard-delete only) and gains none — it only gains the §4.5 sort params.
 
 ### 4.5 `sort_by`/`sort_order` on dictionary list endpoints
 
@@ -147,35 +147,28 @@ Via the #184/#185 infra (`backend/tests/generic_contract.py` + `test_generic_api
 - New test class asserting, per entity:
   1. `GET {prefix}/all` → 200, body is a JSON **array** (not an envelope — negative assertion on `items/total` keys), items validate against `cfg.response_schema`.
   2. Deterministic order: created entities come back in the §4.4 order.
-  3. Status filter parity for archive entities (active default; `status=all` includes archived). Tags: N/A.
-  4. Limit: with `BARE_LIST_MAX_ROWS` overridden to a small value (settings override fixture), seeding limit+1 rows → 422 with the standard error envelope and a human message.
+  3. Status filter parity for archive entities (active default; `status=all` includes archived). Tags: N/A (no status anywhere).
+  4. Limit: ONE entity (cheapest factory) seeded with `BARE_LIST_MAX_ROWS + 1` rows via bulk insert → 422 with the standard error envelope and a human message; boundary check — exactly `BARE_LIST_MAX_ROWS` rows → 200 (same test or a sibling). One test suffices: enforcement lives in the single shared `list_all` choke point.
 - Route-presence negative test: `GET /api/v1/{clients,records,activities,visits,payments,visitors}/all` → 404 (cheap guard that `/all` stays dictionaries-only).
 
 ## 5. Design — api-client & frontend
 
 ### 5.1 api-client
 
-- New bare-array schemas + methods, following the `getClients()` precedent:
-
-```ts
-// schemas.ts
-export const MastersAllResponseSchema = z.array(MasterResponseSchema); // ×5 entities
-// endpoints.ts
-export async function getAllMasters(params?: { status?: ArchiveStatus }): Promise<MasterResponse[]>
-```
-
-- Methods: `getAllMasters`, `getAllLocations`, `getAllServices`, `getAllTags`, `getAllMaterials` → `GET /api/v1/{entity}/all` (+ `?status=` for archive entities; tags none).
+- Method shape follows the `getClients()` precedent (typed params → `api()` → parsed response). Note: the zod **bare-array response schema** (`z.array(XResponseSchema)`) is genuinely new in api-client — `getClients()` parses the envelope and unwraps `.items`, which does not apply here. Per-index zod error paths for arrays are well-behaved (panel-verified).
+- Methods: `getAllMasters`, `getAllLocations`, `getAllServices`, `getAllTags`, `getAllMaterials` → `GET /api/v1/{entity}/all` (+ `?status=` for archive entities; tags none). All 5 ship for api-client↔backend surface symmetry (a few lines each, unit-tested against the real endpoints); tags/materials consumers arrive with #214 — recorded as a deliberate decision, not overlooked dead code.
 - `ListParams` for the 5 paginated list methods gains `sort_by`/`sort_order` (optional), serialized by `listQuery()`.
 - api-client unit tests: new methods, status serialization, sort param serialization.
 
 ### 5.2 Dictionary table contexts
 
-Each table gets a lightweight per-entity context mirroring `ClientsContext` shape (the G1a-approved "state in context" pattern):
+Each table gets a lightweight per-entity context mirroring the `ClientsContext` shape (the G1a-approved "state in context" pattern), implemented via **one shared generic factory + 5 thin per-entity wrappers** (rule-of-three: five hand-written copies would be pure duplication; the factory preserves the exact context shape of the Clients/Records precedent):
 
-- New: `MastersContext`, `LocationsContext`, `ServicesContext`, `MaterialsContext`, `TagsContext` under `frontend/admin/contexts/`.
-- State: `page` (1-based, as Clients), `perPage` (default 10 — current table default), `status` (archive entities), `sortBy`, `sortOrder`, `total`, `items`, `isLoading`, `error` + setters `setPage/setPerPage/setStatus/setSort`.
-- queryKey embeds ALL server params: `['masters', page, perPage, status, sortBy, sortOrder]`; queryFn → `getMasters({ page, per_page, status, sort_by, sort_order })`; `placeholderData: keepPreviousData` (Records precedent).
-- Providers wired into the existing provider tree per page (same nesting point as Clients/Records contexts).
+- Shared: `createPagedListContext<T>({ queryKeyPrefix, fetcher, defaultSortBy, withStatus })` (working name, plan-level) holding all state/query wiring; per-entity wrappers: `MastersContext`, `LocationsContext`, `ServicesContext`, `MaterialsContext`, `TagsContext` under `frontend/admin/contexts/`.
+- State: `page` (1-based, as Clients), `perPage` (default 10 — current table default), `status` (archive entities only — the tags wrapper has none), `sortBy`, `sortOrder`, `total`, `items`, `isLoading`/`isFetching`, `error` + setters `setPage/setPerPage/setStatus/setSort`.
+- **`setSort` MUST reset `page` to 1** (deliberate deviation from the Clients/Records precedent, where sorting from page N can land on an out-of-range empty page — TanStack `manualPagination` best practice, panel-verified). Fixing the two existing contexts is a separate follow-up, not this issue.
+- queryKey embeds ALL server params: `['masters', page, perPage, status, sortBy, sortOrder]`; queryFn → `getMasters({ page, per_page, status, sort_by, sort_order })`; `placeholderData: keepPreviousData` (Records precedent; caveat: `isLoading` does not refire on page change — loading nuance uses `isFetching`/`isPlaceholderData`, plan-level).
+- **Providers are per-page wrappers** (Records precedent: `RecordsProvider` wraps only the pages that consume it) — NOT added to the global `providers.tsx` tree; each dictionary page wraps its own table route.
 - CRUD/delete-deps state stays where it is today (tables keep their existing modal/mutation wiring; only list-fetch state moves). No feature merging beyond list state — minimal delta.
 
 ### 5.3 Table migration
@@ -185,7 +178,7 @@ Per table (Masters/Locations/Services/Materials/Tags):
 - Replace local `useQuery(per_page=100)` + `page`/`pageSize` + filter/sort/slice memo chain with `useX()` context consumption.
 - Delete: client-side `.filter()` (search — subject to §6 Q1), `.sort()` memo, `.slice()` memo, local `totalPages`.
 - Pager: inline JSX driven by envelope `total` (Records/Clients precedent: page-size select `data-testid="page-size-select"` with 10/20/50/100, numbered buttons, prev/next, total label). Page-size change resets to page 1 (existing table behavior, preserved).
-- Sort headers call `setSort(key)` instead of local sort state; sort keys map to the §4.5 whitelist.
+- Sort headers call `setSort(key)` instead of local sort state; sort keys map to the §4.5 whitelist; **sort change resets to page 1** (§5.2).
 - Status tabs (archive entities) call `setStatus` — query param, refetch, reset page (current behavior preserved).
 
 ### 5.4 What does NOT change in tables
@@ -203,8 +196,9 @@ Per table (Masters/Locations/Services/Materials/Tags):
 | useServices.ts / useLocations.ts / useMasters.ts :11 | `getX({per_page:100}).then(r=>r.items)` + domain `select` | `getAllX()` + same `select` |
 | RecordsContext/ScheduleContext **activities** | `per_page:100` | **UNCHANGED** (out of scope) |
 | useRecordData payments | keyed `['payments', recordId]` | **UNCHANGED** |
+| Menubar.tsx:464 | via `useMasters()` | migrated automatically with the hook |
 
-Cache keys stay identical (`['masters']` etc.) so existing invalidation keeps working. Note: after migration the same dictionary is cached under two granularities — paged table cache (`['masters', page, …]`) and full lookup cache (`['masters']` via `/all`) — inherent to the design (uniform server-paged tables + full reference data for dropdowns). `getTags`/`getMaterials` have no lookup consumers; tags/materials appear in dropdowns only via their own tables' CRUD, so no `/all` frontend consumers beyond future comboboxes (#214) — the endpoints are still shipped for contract uniformity and #214 readiness.
+**Cache keys.** Lookup keys stay identical (`['masters']` etc.) — existing invalidation keeps working. The table keys are NEW shapes (`['masters', page, perPage, status, sortBy, sortOrder]`). Mutations invalidate by array prefix — `invalidateQueries({queryKey: ['masters']})` matches BOTH shapes under react-query prefix matching; the plan adds an explicit invalidation test proving CRUD/archive/restore refreshes both the table cache and the `/all` lookup cache. `staleTime` per consumer stays as today (`Infinity` in RecordsContext, 5 min in ScheduleContext/hooks). The two-granularity caching (paged table + full lookup) is inherent to the design: uniform server-paged tables + full reference data for dropdowns. `getTags`/`getMaterials` have no lookup consumers; the `getAllTags`/`getAllMaterials` api-client methods still ship for surface symmetry (§5.1), consumed by #214 comboboxes.
 
 Frontend handling of the 422 limit error: react-query error state → existing `ErrorState` component in the consuming view (no new UX; the limit is a safety net, not an expected state).
 
@@ -214,13 +208,14 @@ Frontend handling of the 422 limit error: react-query error state → existing `
   - Assert query params: `getX({ page, per_page, status, sort_by, sort_order })` instead of `{per_page:100}`.
   - Pagination tests drive `setPage`/`setPerPage` with envelope `total` (replace the current client-slice assertions, e.g. MastersTable.test.tsx:624-648, LocationsTable.test.tsx:396-424).
   - Sort-header click → `setSort` → refetch with sort params.
-- New: TagsTable test file does not exist today — add pagination/sort coverage for it as part of its migration (it gets a context like the others).
-- Context tests for the 5 new contexts (mirroring ClientsContext test coverage, plan-level).
+- TagsTable: `__tests__/tags/TagsTable.test.tsx` (88 lines) EXISTS but is shallow (mocks `useQuery`, covers error state + a status-column regression) — extend it with pagination/sort coverage as part of its migration (no per_page=100 spy assertion to remove, unlike the other 4 tables).
+- Shared factory tests: one thorough suite for `createPagedListContext` + smoke tests per wrapper (mirrors ClientsContext coverage at the shape level).
+- Scope visibility for planning: the 4 existing table test files total ~2800 lines (MastersTable.test.tsx alone 694) — the query-param and client-slice assertion rewrites are the bulk of the frontend effort.
 - api-client tests per §5.1.
 
 ## 6. Open questions for G1b
 
-**Q1 — client-side search boxes in the 5 dictionary tables.** All 5 tables have a free-text search input that filters the loaded rows client-side. Under server pagination this silently searches only the current page — the same silent-truncation bug class this issue fixes. Server-side `?q=` is explicitly out of scope (#212). Options:
+**Q1 — client-side search boxes in the 5 dictionary tables** (G1b decision becomes a binding amendment recorded in this section before planning). All 5 tables have a free-text search input that filters the loaded rows client-side. Under server pagination this silently searches only the current page — the same silent-truncation bug class this issue fixes. Server-side `?q=` is explicitly out of scope (#212). Options:
 
 - **(a) Remove the search inputs** from the 5 tables until #212 lands proper server-side search. Explicit, no silent wrongness; temporary UX regression (finding a row = paging/sorting). **Recommended** — consistent with the "explicit over silent" philosophy of #182/#207.
 - (b) Keep the inputs, filtering the loaded page only, with a visible hint when `total > items.length` ("поиск по загруженным N из M"). Keeps utility for small dictionaries today; risks user confusion at >100 rows.
@@ -233,14 +228,14 @@ Frontend handling of the 422 limit error: react-query error state → existing `
 **Backend**
 
 1. `GET /api/v1/{masters,locations,services,tags,materials}/all` → 200 bare JSON array in the §4.4 deterministic order; `status` parity for archive entities; tags without status.
-2. Protective limit (default 1000, settings-overridable): exceeded → 422 standard envelope with human-readable message; not exceeded → full array.
+2. Protective limit (module constant `BARE_LIST_MAX_ROWS = 1000`): 1001st row → 422 standard envelope with human-readable message; exactly 1000 rows → 200 full array.
 3. `/all` absent on all non-dictionary routers (404).
 4. Dictionary paginated list endpoints accept whitelisted `sort_by`/`sort_order`; unknown sort key → 422; default order deterministic (id tiebreaker).
 5. `/all` contract tests parametrized over the 5 entities + negative route-presence test; full backend suite green.
 
 **Frontend**
 
-6. The 5 tables render via server pagination (pager from envelope `total`); no client-side slice/sort remains; page/perPage/sort changes issue parametrized requests.
+6. The 5 tables render via server pagination (pager from envelope `total`); no client-side slice/sort remains; page/perPage/sort changes issue parametrized requests; sort change and page-size change reset to page 1.
 7. Lookup maps/dropdowns listed in §5.5 fetch via `/all` (no `per_page=100` remains for masters/locations/services anywhere in frontend; activities untouched).
 8. api-client `getAllX` methods + schemas + tests.
 9. admin vitest green (incl. rewritten table tests), `tsc` clean, api-client tests green.
@@ -250,7 +245,7 @@ Frontend handling of the 422 limit error: react-query error state → existing `
 
 - [ ] Masters table: pager visible (page-size select + numbered buttons), driven by server `total`; changing page refetches (network request with `page`/`per_page`).
 - [ ] Locations, Services, Materials, Tags tables: same pager behavior.
-- [ ] Sorting a column header in each table refetches with `sort_by`/`sort_order` and re-renders sorted page.
+- [ ] Sorting a column header in each table refetches with `sort_by`/`sort_order` and re-renders sorted page; sorting while on page >1 returns to page 1 (no empty out-of-range page).
 - [ ] Status tabs (Masters/Locations/Services/Materials) still filter and reset to page 1.
 - [ ] Records page: master/service/location dropdowns and name lookup-maps still render all dictionary values (sourced from `/all`).
 - [ ] Schedule page: master/service/location filters still populate fully.
@@ -260,7 +255,11 @@ Frontend handling of the 422 limit error: react-query error state → existing `
 
 ## 9. Non-goals / risks
 
-- **Risk: two cache granularities** for the same dictionary (paged + `/all`). Mutations already invalidate by key prefix; plan verifies invalidation covers both key shapes (`['masters']` and `['masters', page, …]` — react-query prefix matching handles it, plan asserts in tests).
+- **Risk: two cache granularities** for the same dictionary (paged + `/all`) — mitigated by react-query array-prefix invalidation (`['masters']` matches both shapes); plan asserts in tests (§5.5).
 - **Risk: services/tags/materials default order change** on the paginated endpoint (from unspecified DB order to §4.4). User-visible only as a stable, sensible ordering; called out here explicitly.
+- **Risk: services `/all` payload weight** — `ServiceResponse` nests tariffs+tags; at the 1000-row limit this is heavier than the other 4 dictionaries. Accepted: the shape stays uniform (a "lite" shape would introduce a third contract), realistic dictionaries are tens of rows, and the limit bounds the worst case.
+- **Risk: bare top-level JSON array** — flagged by OWASP AJAX guidance / DAST scanners; moot for an internal SameSite-protected admin API, and the shape is a binding G1a decision. Recorded consequence: adding metadata to `/all` later would be a breaking change for the client.
+- **No feature flag / staged rollout** — ships in one change; rollback = git revert (project convention per #182 G1b: breaking change without shim).
 - **Non-goal:** performance tuning of `/all` (dictionaries are size-bounded by the 1000-row limit; single SELECT, no COUNT).
+- **Non-goal:** fixing the missing sort→page-1 reset in the existing Clients/Records contexts (follow-up candidate; new dictionary contexts get it right from the start).
 - **Non-goal:** any change to clients/records/activities/payments/visits/photos/visitors endpoints or their consumers.

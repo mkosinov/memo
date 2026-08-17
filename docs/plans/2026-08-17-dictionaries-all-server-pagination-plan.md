@@ -39,7 +39,7 @@ How this feature behaves for the user, mapped to spec acceptance criteria:
 - `backend/tests/services/test_list_all.py` — NEW: service-level tests (Task 1)
 - `backend/tests/generic_contract.py` — `BARE_ALL_ENTITIES` + `_all_params()` + `earlier_create_data` on 5 configs (Task 4)
 - `backend/tests/test_generic_api_contract.py` — `TestGenericApiAllContract` + non-dictionary 404 test (Task 4)
-- `backend/tests/test_api_{masters,locations,services,materials,tags}.py` — sort/default-order tests (Task 3)
+- `backend/tests/test_api_{masters,locations,services,materials}.py` — sort/default-order tests (Task 3); `backend/tests/test_api_tags.py` — NEW (tags smoke + sort tests, Tasks 2–3)
 
 **api-client:**
 - `packages/api-client/src/schemas.ts` — 5 `XAllResponseSchema = z.array(XResponseSchema)` (Task 5)
@@ -76,11 +76,9 @@ No DB schema changes → no migrations, no seed changes.
 Create the shared unpaginated list path. New domain error in a NEW module `backend/src/domain/errors.py`. `BARE_LIST_MAX_ROWS = 1000` module-level constant in `generic.py`. `GenericService.list_all()` runs `_list_stmt(**filters)` + optional `order_by` + `LIMIT 1001` probe; >1000 rows → raise; else validate into response schema (same idiom as `_paginate`). `ArchiveService.list_all()` passes `status` through (its `_list_stmt` override already handles the status filter). `ServiceService.list_all()` mirrors its `list()` override with `selectinload(Service.tariffs), selectinload(Service.tags)` — MANDATORY, else async lazy-load crash (spec §4.1).
 
 ### Steps
-- [ ] **RED:** Create `backend/tests/services/test_list_all.py` with failing tests:
+- [ ] **RED:** Create `backend/tests/services/test_list_all.py` with failing tests. NOTE: the `create_master`/`create_service` conftest fixtures are SYNC factory callables (`factory(**overrides)` wrapping `api_client.post`, returning plain dicts) — no `await`, access ids via `["id"]`. Async tests follow the project's existing async-test idiom (check how other `db_session`-based tests are declared/marked).
   ```python
   """Service-level tests for GenericService.list_all (#205)."""
-  import asyncio
-  import uuid
   import pytest
   from sqlalchemy import insert, asc
   from src.domain.errors import BareListLimitExceededError
@@ -94,27 +92,30 @@ Create the shared unpaginated list path. New domain error in a NEW module `backe
 
   # 1. returns full list, no envelope
   async def test_list_all_returns_all_rows(db_session, create_master):
-      await create_master()  # mirror existing factory fixture signature
+      created = create_master()
       result = await get_master_service().list_all(db_session)
-      assert isinstance(result, list) and len(result) == 1
+      assert isinstance(result, list) and [m.id for m in result] == [created["id"]]
 
   # 2. ArchiveService status filter parity
   async def test_list_all_status_filter(db_session, create_master):
-      m = await create_master()
+      m = create_master()
       svc = get_master_service()
-      await svc.archive(db_session, m.id)  # use the actual archive() signature from ArchiveService
+      await svc.archive(db_session, m["id"])  # ArchiveService.archive(db_session, id) — generic.py:227
       assert await svc.list_all(db_session) == []
       assert len(await svc.list_all(db_session, status=ArchiveStatus.ALL)) == 1
       assert len(await svc.list_all(db_session, status=ArchiveStatus.ARCHIVED)) == 1
 
   # 3. order_by applied
   async def test_list_all_order_by(db_session, create_master):
-      await create_master()  # then create a second master whose first_name sorts first
-      ...  # assert [b, a] ordering via order_by=[asc(Master.first_name)]
+      b = create_master(first_name="Boris")
+      a = create_master(first_name="Anna")
+      result = await get_master_service().list_all(db_session, order_by=[asc(Master.first_name)])
+      ids = [m.id for m in result]
+      assert ids.index(a["id"]) < ids.index(b["id"])
 
   # 4. limit: 1001 rows → raise; message names table + limit
   async def test_list_all_limit_raises(db_session):
-      rows = [{"id": uuid.uuid4().hex, "tag": f"bulk-{i:05d}"} for i in range(BARE_LIST_MAX_ROWS + 1)]
+      rows = [{"tag": f"bulk-{i:05d}"} for i in range(BARE_LIST_MAX_ROWS + 1)]
       await db_session.execute(insert(Tag), rows)
       await db_session.commit()
       with pytest.raises(BareListLimitExceededError, match="tags.*1000"):
@@ -122,18 +123,18 @@ Create the shared unpaginated list path. New domain error in a NEW module `backe
 
   # 5. boundary: exactly 1000 → OK
   async def test_list_all_boundary_ok(db_session):
-      rows = [{"id": uuid.uuid4().hex, "tag": f"bulk-{i:05d}"} for i in range(BARE_LIST_MAX_ROWS)]
+      rows = [{"tag": f"bulk-{i:05d}"} for i in range(BARE_LIST_MAX_ROWS)]
       await db_session.execute(insert(Tag), rows)
       await db_session.commit()
       assert len(await get_tag_service().list_all(db_session)) == BARE_LIST_MAX_ROWS
 
   # 6. ServiceService: eager loads tariffs+tags (no MissingGreenlet)
   async def test_service_list_all_eager_loads(db_session, create_service):
-      await create_service()  # factory creates service with tariff+tag associations
+      create_service()  # factory creates service with tariff+tag associations
       result = await get_service_service().list_all(db_session)
       assert result[0].tariffs is not None and result[0].tags is not None
   ```
-  Notes for the implementer: check the model `id` defaults before bulk insert — if `Tag.id` has a Python-side default, drop the explicit `id` key. Check `create_master`/`create_service` fixture names/signatures in `backend/tests/conftest.py` and the `ArchiveService.archive()` signature before writing tests 2–3; adapt accordingly. Async tests follow the project's existing async-test idiom (check how other `db_session`-based tests are declared/marked).
+  Note for the implementer: check the model `id` defaults before the bulk inserts (tests 4–5) — if `Tag.id` has no Python-side default, add `"id": uuid.uuid4().hex` to each row dict.
   Run `pytest backend/tests/services/test_list_all.py` → all fail (ImportError / AttributeError).
 - [ ] **GREEN:** Create `backend/src/domain/errors.py`:
   ```python
@@ -239,7 +240,7 @@ Create the shared unpaginated list path. New domain error in a NEW module `backe
 Add `GET /all` to each of the 5 dictionary routers, declared IMMEDIATELY AFTER the `GET ""` list endpoint and BEFORE any `/{id}` route (path params are `str` — registration order decides). Archive entities take `status: ArchiveStatus = Query(ArchiveStatus.ACTIVE)`; tags take no params. `BareListLimitExceededError` → `HTTPException(422, detail=str(exc))` (the #207 `ResolutionError` idiom; the global handler in main.py wraps it into the standard `{"detail": {"code": "VALIDATION_ERROR", ...}}` envelope). Per-entity `order_by` per spec §4.4 (WITH `id ASC` tiebreaker).
 
 ### Steps
-- [ ] **RED:** Add one smoke test per entity to the existing `backend/tests/test_api_{masters,locations,services,materials,tags}.py`:
+- [ ] **RED:** Add one smoke test per entity to the existing `backend/tests/test_api_{masters,locations,services,materials}.py`; for tags CREATE `backend/tests/test_api_tags.py` (does not exist today — mirror the masters file's fixture/style idiom):
   ```python
   def test_all_returns_bare_array(api_client, create_master):  # fixture per entity
       created = create_master()  # sync factory idiom as used in the file
@@ -311,7 +312,7 @@ The dictionary tables sort client-side today; server pagination requires server 
 - tags: `tag` → `[Tag.tag]`
 
 ### Steps
-- [ ] **RED:** Add tests to each `backend/tests/test_api_{...}.py`:
+- [ ] **RED:** Add tests to each `backend/tests/test_api_{masters,locations,services,materials}.py` and the NEW `backend/tests/test_api_tags.py` (created in Task 2):
   - `test_list_sort_<key>_asc/desc` for at least: the name/title/tag key, one composite (`masters name`), `archived`/`status`, and (services only) `tariffs` count — create 2-3 rows via the file's factories with known orderings, GET with `sort_by`/`sort_order`, assert the `items` id sequence.
   - `test_list_sort_invalid_key_422`: `GET {prefix}?sort_by=bogus` → 422.
   - `test_list_default_order_locked`: create rows whose insertion order differs from §4.4 default; GET without sort params → assert default order (services: `title ASC, id ASC`; tags: `tag ASC, id ASC`; materials: `title ASC, id ASC`; masters/locations: unchanged + id tiebreak).
@@ -340,7 +341,7 @@ The dictionary tables sort client-side today; server pagination requires server 
       "specialty": [Master.specialty],
       "position": [Master.position],
       "color": [Master.color],
-      "avatar": [Master.avatar],
+      "avatar": [Master.avatar_url],
       "status": [Master.is_active],
   }
 
@@ -407,7 +408,7 @@ Wire `/all` into the #184/#185 contract infra as an opt-in set. Five entities on
 ### Steps
 - [ ] **RED:** In `backend/tests/generic_contract.py`:
   - Add an optional field to `EntityConfig`: `earlier_create_data: dict | None = None` (field overrides that produce a row sorting BEFORE `create_data` per §4.4 default order).
-  - Populate it on the 5 dictionary configs: masters `{"first_name": "AAA-contract"}`; locations `{"name": "AAA-contract"}`; services `{"title": "AAA-contract"}`; tags `{"tag": "aaa-contract"}`; materials `{"title": "AAA-contract"}`. (If a config's `create_data` already sorts before these values, pick smaller sentinel values — verify against the existing `create_data`.)
+  - Populate it on the 5 dictionary configs: masters `{"first_name": "!AAA-contract"}` (must sort BEFORE the config's existing `create_data` first_name `"A"` — `"!"` < `"A"` in ASCII); locations `{"name": "!AAA-contract"}`; services `{"title": "!AAA-contract"}`; tags `{"tag": "!aaa-contract"}`; materials `{"title": "!AAA-contract"}`. (Verify each sentinel against the existing `create_data` — the sentinel must sort first per §4.4.)
   - Add:
     ```python
     BARE_ALL_ENTITIES: list[type] = [MasterService, LocationService, ServiceService, TagService, MaterialService]
@@ -603,13 +604,13 @@ Create the shared factory that Tasks 7–11 instantiate per entity. It reproduce
   // (vi.fn returning a PaginatedResponse), assert behavior through the context value.
   ```
   Cases (each = one `it`):
-  1. initial fetch called with `{ page: 1, per_page: 10, sort_by: <defaultSortBy>, sort_order: 'asc', status: 'active' }` (withStatus config) and items/total come from the envelope;
+  1. initial fetch called with `{ page: 1, per_page: 10, status: 'active' }` — NO `sort_by`/`sort_order` keys (initial `sortBy` is `null` → server §4.4 default order; this preserves today's behavior where tables render in server order with no initial client sort — important for masters/locations whose `sort_order` column drives a manual reorder feature); items/total in the context value come from the envelope;
   2. `setPage(3)` → refetch with `page: 3`;
   3. `setPerPage(50)` → refetch with `per_page: 50` AND `page` reset to 1 (call setPage(3) first);
-  4. `setSort('title', 'desc')` → refetch with sort params AND `page` reset to 1;
+  4. `setSort('title', 'desc')` → refetch with `sort_by: 'title', sort_order: 'desc'` AND `page` reset to 1;
   5. `setStatus('archived')` → refetch with `status: 'archived'` AND `page` reset to 1;
   6. `withStatus: false` config → fetcher params contain NO `status` key and queryKey has no status slot;
-  7. queryKey shape: `['<prefix>', page, perPage, status, sortBy, sortOrder]` (withStatus) — assert via a mocked useQuery capture or cache inspection (mirror how ClientsContext.test.tsx does it);
+  7. queryKey shape: `['<prefix>', page, perPage, status, sortBy, sortOrder]` (withStatus; `sortBy` slot is `null` initially) — assert via a mocked useQuery capture or cache inspection (mirror how ClientsContext.test.tsx does it);
   8. `usePagedList` outside Provider → throws.
   Use the project's established react-query test wrapper (check `__tests__/ClientsContext.test.tsx` for the QueryClientProvider wrapper idiom). Run → fails (module missing).
 - [ ] **GREEN:** Create `frontend/admin/contexts/createPagedListContext.tsx`:
@@ -626,8 +627,9 @@ Create the shared factory that Tasks 7–11 instantiate per entity. It reproduce
   export interface PagedListFetcherParams {
     page: number;
     per_page: number;
-    sort_by: string;
-    sort_order: SortOrder;
+    /** Present only after the user picks a sort — initial state sends neither (server default order). */
+    sort_by?: string;
+    sort_order?: SortOrder;
     status?: ArchiveFilter;
   }
 
@@ -636,7 +638,7 @@ Create the shared factory that Tasks 7–11 instantiate per entity. It reproduce
     total: number;
     page: number;
     perPage: number;
-    sortBy: string;
+    sortBy: string | null;
     sortOrder: SortOrder;
     status: ArchiveFilter;
     isLoading: boolean;
@@ -652,7 +654,6 @@ Create the shared factory that Tasks 7–11 instantiate per entity. It reproduce
   interface PagedListConfig<T> {
     queryKeyPrefix: string;
     fetcher: (params: PagedListFetcherParams) => Promise<PaginatedResponse<T>>;
-    defaultSortBy: string;
     withStatus?: boolean;
     defaultPerPage?: number;
   }
@@ -661,15 +662,17 @@ Create the shared factory that Tasks 7–11 instantiate per entity. It reproduce
    * Shared server-pagination context factory for dictionary tables (#205).
    * Shape mirrors ClientsContext; setSort/setPerPage/setStatus reset page to 1
    * (deliberate upgrade over the Clients/Records precedent, spec §5.2).
+   * sortBy starts null → initial fetch omits sort params → server default order
+   * (spec §4.4), preserving today's unsorted-initial-render behavior.
    */
   export function createPagedListContext<T>(config: PagedListConfig<T>) {
-    const { queryKeyPrefix, fetcher, defaultSortBy, withStatus = false, defaultPerPage = 10 } = config;
+    const { queryKeyPrefix, fetcher, withStatus = false, defaultPerPage = 10 } = config;
     const Context = createContext<PagedListContextValue<T> | null>(null);
 
     function Provider({ children }: { children: React.ReactNode }) {
       const [page, setPage] = useState(1);
       const [perPage, setPerPageState] = useState(defaultPerPage);
-      const [sortBy, setSortBy] = useState(defaultSortBy);
+      const [sortBy, setSortBy] = useState<string | null>(null);
       const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
       const [status, setStatusState] = useState<ArchiveFilter>('active');
 
@@ -683,8 +686,7 @@ Create the shared factory that Tasks 7–11 instantiate per entity. It reproduce
           fetcher({
             page,
             per_page: perPage,
-            sort_by: sortBy,
-            sort_order: sortOrder,
+            ...(sortBy ? { sort_by: sortBy, sort_order: sortOrder } : {}),
             ...(withStatus ? { status } : {}),
           }),
         placeholderData: keepPreviousData,
@@ -734,9 +736,9 @@ Migrate MastersTable to server pagination/sort via a `MastersContext` wrapper. R
 
 ### Steps
 - [ ] **RED:** Rewrite `frontend/admin/__tests__/MastersTable.test.tsx` around the context (mirror RecordsTable.test.tsx's mocking approach — mock `@/contexts/MastersContext`'s `useMastersTable`, or wrap in the real provider with `@memo/api-client` mocked; follow the RecordsTable precedent exactly). Core assertions:
-  - fetch params: `getMasters` called with `{ page: 1, per_page: 10, status: 'active', sort_by: 'name', sort_order: 'asc' }` initially (if using the real provider);
-  - pager: with `total: 42` from the envelope → renders 4 numbered pages + "42" total label; clicking page 2 → `setPage(2)`; changing page-size select (`data-testid="page-size-select"`) → `setPerPage(20)`;
-  - sort: clicking the "name" header → `setSort('name', 'desc')` (toggle from asc); clicking another column → `setSort(thatKey, 'asc')`;
+  - fetch params: `getMasters` called with `{ page: 1, per_page: 10, status: 'active' }` initially — NO sort params (initial sortBy is null → server default `[sort_order, first_name, id]`, preserving today's render order incl. the manual reorder feature);
+  - pager: with `total: 42` from the envelope → renders 5 numbered pages + "42" total label; clicking page 2 → `setPage(2)`; changing page-size select (`data-testid="page-size-select"`) → `setPerPage(20)`;
+  - sort: clicking the "name" header → `setSort('name', 'asc')` (initial sortBy is null → any first click is a new key → asc); clicking it again → `setSort('name', 'desc')` (toggle);
   - status tabs → `setStatus('archived')` etc.;
   - search box still filters the loaded `items` client-side (type a query → non-matching rows of the loaded page disappear);
   - delete the old client-slice assertions (`624-648` pattern) and old query-param assertions expecting `per_page: 100`.
@@ -759,7 +761,6 @@ Migrate MastersTable to server pagination/sort via a `MastersContext` wrapper. R
         sort_by: p.sort_by,
         sort_order: p.sort_order,
       }),
-    defaultSortBy: 'name',
     withStatus: true,
   });
 
@@ -769,7 +770,7 @@ Migrate MastersTable to server pagination/sort via a `MastersContext` wrapper. R
   ```
 - [ ] Wrap the page: `frontend/admin/app/(main)/masters/page.tsx` — wrap `<MastersTable />` in `<MastersProvider>` (import from `@/contexts/MastersContext`).
 - [ ] Rewrite MastersTable: replace the fetch/state/memo block (:46-144 approx) with `const { items, total, page, perPage, sortBy, sortOrder, status, isLoading, isFetching, error, setPage, setPerPage, setSort, setStatus } = useMastersTable();`; keep the `search` useState + the filter memo over `items`; rows render from the filtered items directly (no sort/slice memos); `handleSort(col.key)` → toggle: same key → `setSort(key, sortOrder === 'asc' ? 'desc' : 'asc')`, new key → `setSort(key, 'asc')`; pager JSX reads context (`totalPages = Math.max(1, Math.ceil(total / perPage))`); status tab handler → `setStatus(...)` (replaces local status state — check how status currently flows into the `['masters', status]` queryKey and remove that useQuery entirely). Keep everything else (modals, mutations, column defs, DeleteDialog wiring) untouched.
-- [ ] Sort key sanity: the COLUMNS keys (`name`, `specialty`, `position`, `color`, `avatar`, `status`) must all be in the backend masters whitelist (Task 3) — they are; do not add new sortable columns.
+- [ ] Sort key sanity: the COLUMNS keys (`name`, `specialty`, `position`, `color`, `avatar`, `status`) must all be in the backend masters whitelist (Task 3) — key SET matches; note the `avatar` UI key maps to the `avatar_url` column server-side (Task 3 map). Do not add new sortable columns.
 - [ ] Run `npx vitest run __tests__/MastersTable.test.tsx` → pass. Then `npm run test:all` (UI change) → green + tsc clean.
 - [ ] Commit: `feat(admin): MastersTable server pagination/sort via MastersContext (#205)`
 
@@ -782,7 +783,7 @@ Migrate MastersTable to server pagination/sort via a `MastersContext` wrapper. R
 - Same as Task 7, mutatis mutandis: `locations/components/LocationsTable.tsx`, `__tests__/LocationsTable.test.tsx` (old slice test :396-424), `docs/domain-rules/locations.md`
 
 ### Task Description
-Identical migration to Task 7 for Locations. `defaultSortBy: 'name'`, `withStatus: true`, fetcher → `getLocations({...})`. Provider `LocationsProvider`, hook `useLocationsTable`, wrapper `frontend/admin/contexts/LocationsContext.tsx`. Sort keys must match the locations whitelist (`name`, `short_title`, `capacity`, `address`, `location_hint`, `description`, `archived`, `yandex_map_url`, `created_at`) — COLUMNS keys already align; verify while editing.
+Identical migration to Task 7 for Locations. No `defaultSortBy` (initial fetch unsorted → server default `[sort_order, name, id]` — preserves the manual reorder feature), `withStatus: true`, fetcher → `getLocations({...})`. Provider `LocationsProvider`, hook `useLocationsTable`, wrapper `frontend/admin/contexts/LocationsContext.tsx`. Sort keys must match the locations whitelist (`name`, `short_title`, `capacity`, `address`, `location_hint`, `description`, `archived`, `yandex_map_url`, `created_at`) — COLUMNS keys already align; verify while editing.
 
 ### Steps
 - [ ] **RED:** Rewrite `__tests__/LocationsTable.test.tsx` per the Task 7 pattern (fetch params with `sort_by: 'name'`; pager from envelope `total`; setSort/setStatus/setPage/setPerPage assertions; search filters loaded items; remove slice assertions at :396-424 and `per_page: 100` expectations at :328-363). Run → fail.
@@ -799,7 +800,7 @@ Identical migration to Task 7 for Locations. `defaultSortBy: 'name'`, `withStatu
 - Same as Task 7: `services/components/ServicesTable.tsx` (sortable keys gated by `col.sortValue` :446; keys: `title`, `duration`, `age`, `material_hint`, `tariffs`, `specialty`, `archived`, `created_at`), `__tests__/ServicesTable.test.tsx` (:242-332 query-param assertions), `docs/domain-rules/services.md`
 
 ### Task Description
-Identical migration for Services. `defaultSortBy: 'title'`, `withStatus: true`, fetcher → `getServices({...})`. Provider `ServicesProvider`, hook `useServicesTable`, file `contexts/ServicesContext.tsx`. NOTE: the `age` column sorts via `min_age` and `tariffs` via the count subquery — the TABLE keeps sending `age`/`tariffs` as keys; the backend whitelist maps them (Task 3). Do not "fix" the keys client-side.
+Identical migration for Services. No `defaultSortBy` (initial fetch unsorted → new server default `title ASC, id ASC`), `withStatus: true`, fetcher → `getServices({...})`. Provider `ServicesProvider`, hook `useServicesTable`, file `contexts/ServicesContext.tsx`. NOTE: the `age` column sorts via `min_age` and `tariffs` via the count subquery — the TABLE keeps sending `age`/`tariffs` as keys; the backend whitelist maps them (Task 3). Do not "fix" the keys client-side.
 
 ### Steps
 - [ ] **RED:** Rewrite `__tests__/ServicesTable.test.tsx` per the Task 7 pattern (replace :242-332 param assertions; add sort assertions incl. `age` → `setSort('age', ...)` and `tariffs` → `setSort('tariffs', ...)`; keep search filtering loaded items). Run → fail.
@@ -816,7 +817,7 @@ Identical migration for Services. `defaultSortBy: 'title'`, `withStatus: true`, 
 - Same as Task 7: `services/components/MaterialsTable.tsx` (sortable keys `title`, `description`, `archived`, `created_at`), `__tests__/MaterialsTable.test.tsx` (:169-191 param assertions), `docs/domain-rules/materials.md`
 
 ### Task Description
-Identical migration for Materials. `defaultSortBy: 'title'`, `withStatus: true`, fetcher → `getMaterials({...})`. Provider `MaterialsProvider`, hook `useMaterialsTable`, file `contexts/MaterialsContext.tsx`. MaterialsTable lives under `app/(main)/services/components/` — find its host page/embedding and wrap there.
+Identical migration for Materials. No `defaultSortBy` (initial fetch unsorted → new server default `title ASC, id ASC`), `withStatus: true`, fetcher → `getMaterials({...})`. Provider `MaterialsProvider`, hook `useMaterialsTable`, file `contexts/MaterialsContext.tsx`. MaterialsTable lives under `app/(main)/services/components/` — find its host page/embedding and wrap there.
 
 ### Steps
 - [ ] **RED:** Rewrite `__tests__/MaterialsTable.test.tsx` per the Task 7 pattern. Run → fail.
@@ -833,7 +834,7 @@ Identical migration for Materials. `defaultSortBy: 'title'`, `withStatus: true`,
 - Same as Task 7: `tags/components/TagsTable.tsx` (no status filter; single sortable key `tag`), `__tests__/tags/TagsTable.test.tsx` (existing 88-line shallow file — EXTEND, don't replace), `docs/domain-rules/tags.md`
 
 ### Task Description
-Identical migration for Tags with two differences: `withStatus: false` (no status anywhere — no param, no queryKey slot) and the existing test file is extended with pagination/sort cases (its current error-state and status-column regression tests stay). `defaultSortBy: 'tag'`, fetcher → `getTags({ page, per_page, sort_by, sort_order })` (no status). Provider `TagsProvider`, hook `useTagsTable`, file `contexts/TagsContext.tsx`.
+Identical migration for Tags with two differences: `withStatus: false` (no status anywhere — no param, no queryKey slot) and the existing test file is extended with pagination/sort cases (its current error-state and status-column regression tests stay). No `defaultSortBy` (initial fetch unsorted → new server default `tag ASC, id ASC`); the fetcher passes sort params through once set: `getTags({ page: p.page, per_page: p.per_page, sort_by: p.sort_by, sort_order: p.sort_order })` (undefined keys are skipped by `listQuery`). Provider `TagsProvider`, hook `useTagsTable`, file `contexts/TagsContext.tsx`.
 
 ### Steps
 - [ ] **RED:** Extend `__tests__/tags/TagsTable.test.tsx` with the Task 7 pattern cases (fetch params WITHOUT a status key; pager from envelope total; `setSort('tag', 'desc')` on header click; search filters loaded items). Existing tests must keep passing after GREEN. Run → new cases fail.

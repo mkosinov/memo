@@ -112,12 +112,3 @@ class ClientListParams(PaginationParams):
     missed_to: int | None = None
     sort_by: str = "name"
     sort_order: str = "asc"
-
-
-class ClientListResponse(BaseModel):
-    """Paginated response for client listing with stats."""
-
-    items: list[ClientWithStats]
-    total: int
-    page: int
-    per_page: int

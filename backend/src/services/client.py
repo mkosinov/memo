@@ -17,11 +17,11 @@ from src.repositories.generic import ArchiveRepository, get_archive_repository
 from src.schemas.client import (
     ClientCreate,
     ClientListParams,
-    ClientListResponse,
     ClientResponse,
     ClientUpdate,
     ClientWithStats,
 )
+from src.schemas.common import PaginatedResponse
 from src.services.generic import ArchiveService
 from src.services.visitor import VisitorService, get_visitor_service
 
@@ -76,8 +76,13 @@ def get_client_service() -> ClientService:
 async def list_clients_with_stats(
     db_session: AsyncSession,
     params: ClientListParams,
-) -> ClientListResponse:
-    """Return paginated clients with aggregated record/payment stats."""
+) -> PaginatedResponse[ClientWithStats]:
+    """Return paginated clients with aggregated record/payment stats.
+
+    Accepted exception to repo-owned list (GH #206): non-ORM projection +
+    separate count query excluding correlated stat subqueries. Stays
+    service-owned; CQRS read-side evaluation tracked in GH #217.
+    """
 
     # 1. Correlated scalar subqueries — one per stat, each reads ONE relation
     #    (no join-then-aggregate → cartesian product is structurally impossible).
@@ -254,7 +259,7 @@ async def list_clients_with_stats(
             )
         )
 
-    return ClientListResponse(
+    return PaginatedResponse(
         items=items,
         total=total,
         page=params.page,

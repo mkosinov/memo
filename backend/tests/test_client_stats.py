@@ -39,8 +39,8 @@ def _add_payment(api_client, record_id, amount=3000, method="card"):
 
 # ─── Response Shape Tests ─────────────────────────────────────────────────────
 
-class TestClientListResponseShape:
-    """Verify the response shape matches ClientListResponse schema."""
+class TestClientListPaginatedResponseShape:
+    """Verify the response shape matches PaginatedResponse[ClientWithStats] schema."""
 
     def test_list_returns_paginated_response(self, api_client) -> None:
         """GET /api/v1/clients returns {items, total, page, per_page}."""

@@ -38,7 +38,7 @@ This is a pure backend refactor with **zero user-visible behavior change**. Ever
 | `backend/src/services/service.py` | `ServiceService.list` collapsed to `repo.list(..., options=[selectinload×2])` | T3 |
 | `backend/src/services/payment.py` | `PaymentService.list` override **deleted** (inherits generic) | T4 |
 | `backend/src/services/visit.py` | `VisitService` gains repo DI; `list` collapsed | T5 |
-| `backend/tests/services/test_visit_service.py` | 9 instantiation sites updated | T5 |
+| `backend/tests/services/test_visit_service.py` | 10 instantiation sites (in 9 tests) updated | T5 |
 | `backend/src/services/record.py` | `paginate_orm(...)` → `repo.list_custom(...)` | T6 |
 | `backend/src/services/activity.py` | `_list_by_date` → `repo.list_custom(...)` | T6 |
 | `backend/src/schemas/pagination.py` | NEW — `PaginationParams` | T7 |
@@ -193,7 +193,7 @@ assert all(m.is_active for m in rows)
 1. `test_list_filters_and_none_skip` — seed 3 masters (2 with `position="мастер"`, 1 with `position="senior"`); `repo.list(db, Master, filters={"position": "мастер", "last_name": None}, limit=100)` → 2 items, total 2 (None filter skipped).
 2. `test_list_limit_offset_slice_and_total` — seed 5 masters; `limit=2, offset=2` → 2 items, total 5; `offset=4` → 1 item, total 5.
 3. `test_list_order_by_applied` — seed 3 masters with distinct `first_name`; `order_by=[Master.first_name.desc()]`, `limit=100` → items in desc order, total 3.
-4. `test_list_options_selectinload_does_not_break_count` — use Service with tariffs/tags if convenient, else Master with `options=[selectinload(Master.activities)]` is wrong (Master has no such rel) — simplest: seed 1 Service via the existing service fixture pattern from `tests/services/test_service_service.py` (or create Service directly with `title`, `duration`, `price`); call `repo.list(db, Service, limit=100, options=[selectinload(Service.tariffs), selectinload(Service.tags)])` → total 1, items 1, `items[0].tariffs` loaded without lazy IO.
+4. `test_list_options_selectinload_does_not_break_count` — seed 1 Service with the full NOT NULL field set, mirroring the fixture in `tests/services/test_service_service.py`: `Service(title="...", description="...", image_url="...", specialty="...", min_age=0, duration=60, record_info="...")` (Service has NO `price` field — do not pass one); call `repo.list(db, Service, limit=100, options=[selectinload(Service.tariffs), selectinload(Service.tags)])` → total 1, items 1, `items[0].tariffs` loaded without lazy IO.
 5. `test_list_custom_count_excludes_order_by` — build `stmt = select(Master)`; `repo.list_custom(db, stmt, order_by=[Master.first_name], limit=2, offset=0)` on 3 seeded masters → 2 items ordered asc, total 3. Then a second case with a **correlated scalar-subquery order key**: `sub = select(func.count(Record.id)).where(Record.master_id == Master.id).correlate(Master).scalar_subquery()` — if Record has no master_id FK use Activity: `select(func.count(Activity.id)).where(Activity.master_id == Master.id).correlate(Master).scalar_subquery()`; `list_custom(db, select(Master), order_by=[sub.desc()], limit=100)` → total 3, items ordered by the subquery (proves count runs on unordered stmt — a count containing the subquery would still pass here, so the real guard is: this must not error and must return total 3).
 6. `test_list_custom_limit_offset` — `stmt = select(Master)`, 4 seeded, `limit=1, offset=3` → 1 item, total 4.
 7. `test_archive_list_status_default_and_override` — covered by the rewritten `test_soft_delete_repository.py` (do not duplicate).
@@ -334,7 +334,7 @@ async def list(
 
 **File:** `backend/src/services/payment.py`. `PaymentService.list` (L30-49) is a field-for-field duplicate of the generic path — **delete the entire override** so `PaymentService` inherits `GenericService.list` (Task 2 version). Signature compatibility: the generic adds an optional `order_by=None` kwarg the old override lacked — harmless (callers don't pass it; routers that need sorting pass it and would previously have errored, which no router does for payments).
 
-Check imports: after deletion, `func`, `select` may be unused in payment.py — remove them if so; keep anything still referenced. `PaginatedResponse` import stays only if used in remaining annotations — the deleted method was its only use; remove if unused.
+Check imports: after deletion, `func` and `select` REMAIN used by `get_payment_totals` (payment.py:84) — do NOT remove them. `PaginatedResponse` import: the deleted method was its only use in this file — verify and remove if unused.
 
 **Steps:**
 - [ ] Delete the override + clean imports.
@@ -461,13 +461,13 @@ return PaginatedResponse(items=items, total=total, page=page, per_page=per_page)
 
 Ensure `PaginatedResponse` is imported in activity.py (check — likely already; add `from src.schemas.common import PaginatedResponse` if not).
 
-**3. `generic.py`** — now that all callers are migrated: delete `paginate_orm` (L40-57) and `GenericService._paginate` (L96-101). Verify zero references first:
+**3. `generic.py`** — now that all callers are migrated: delete `paginate_orm` (L40-57) and `GenericService._paginate` (L96-101). Also update two stale docstrings so the verification sweep can pass: `record.py` L48 docstring ("pagination/date mechanics are shared helpers (paginate_orm, day_range)" → name `list_custom` on the repository instead) and `generic.py` L130 `list_all` docstring ("same idiom as `_paginate`" → "same count idiom as `BaseRepository.list`"). Verify zero references:
 
 ```
 rg "paginate_orm|_paginate" backend/src backend/tests
 ```
 
-Expected after deletion: zero hits. Clean now-unused imports in generic.py (`func` is still used? `_list_stmt` uses `select` only; check `func`, `delete`, `not_` usage — `not_` used by ArchiveService._list_stmt, `delete`/`func` used by delete/reorder paths — verify before removing anything).
+Expected after deletion + docstring updates: zero hits. Clean now-unused imports in generic.py (`func` is still used? `_list_stmt` uses `select` only; check `func`, `delete`, `not_` usage — `not_` used by ArchiveService._list_stmt, `delete`/`func` used by delete/reorder paths — verify before removing anything).
 
 **Steps:**
 - [ ] Apply record.py + activity.py changes. Run `pytest backend/tests/services/test_record_service.py backend/tests/test_list_activities_query_count.py backend/tests/test_api_records.py backend/tests/test_custom_price.py` → green.
@@ -553,7 +553,7 @@ async def list_visitors(
 **Files:** `backend/src/schemas/client.py`, `backend/src/api/v1/clients.py`, `backend/src/services/client.py`, `backend/tests/test_client_stats.py` (and grep-sweep `backend/tests` for other refs).
 
 - `schemas/client.py`: **delete** `ClientListResponse` (L118-124).
-- `services/client.py`: return type of `list_clients_with_stats` `ClientListResponse` → `PaginatedResponse[ClientWithStats]`; construction at L257 `ClientListResponse(items=..., total=..., page=..., per_page=...)` → `PaginatedResponse(items=..., total=..., page=..., per_page=...)`; update imports (`from src.schemas.common import PaginatedResponse`; drop `ClientListResponse` from the client-schema import).
+- `services/client.py`: return type of `list_clients_with_stats` `ClientListResponse` → `PaginatedResponse[ClientWithStats]`; construction at L257 `ClientListResponse(items=..., total=..., page=..., per_page=...)` → `PaginatedResponse(items=..., total=..., page=..., per_page=...)`; update imports (`from src.schemas.common import PaginatedResponse`; drop `ClientListResponse` from the client-schema import). **Add the concession comment** (spec §7/§12) as a docstring line on `list_clients_with_stats`: "Accepted exception to repo-owned list (GH #206): non-ORM projection + separate count query excluding correlated stat subqueries. Stays service-owned; CQRS read-side evaluation tracked in GH #217."
 - `api/v1/clients.py`: `response_model=ClientListResponse` → `response_model=PaginatedResponse[ClientWithStats]`; return annotation likewise; imports updated (add `PaginatedResponse` + `ClientWithStats` imports, drop `ClientListResponse`).
 - `tests/test_client_stats.py` L42-43 (docstring mentioning ClientListResponse) and any import of `ClientListResponse` — update to `PaginatedResponse` wording/imports. Assertion bodies are envelope-shape based and should need no changes.
 - Sweep: `rg "ClientListResponse" backend/` → zero hits when done (except none — frontend refs handled in Task 9).
@@ -575,9 +575,9 @@ async def list_visitors(
 
 **Files:** `packages/api-client/src/schemas.ts`, `frontend/admin/contexts/ClientsContext.tsx`, possibly `packages/api-client/src/schemas.test.ts` + `endpoints.ts`/`endpoints.test.ts` (grep first).
 
-**1. api-client** (`packages/api-client/src/schemas.ts` L307-316): mirror the existing per-entity paginated-envelope pattern used for other list responses in that file (e.g. how `PaginatedResponse`X schemas are declared — follow the file's own convention exactly: if it uses a `paginatedResponse(itemSchema)` factory or per-entity `z.object({items, total, page, per_page})` blocks, do the same). Replace the `ClientListResponseSchema` block with a `ClientListResponse` typed via the paginated pattern over `ClientWithStatsSchema`. **Decision:** keep the exported NAME `ClientListResponse` as an alias only if other consumers use it — grep `rg "ClientListResponse" packages/ frontend/` first; the only consumer is `ClientsContext.tsx`, which this task updates — so rename to whatever the file's paginated convention produces (e.g. `PaginatedClientWithStats` / inline generic), preferring consistency with sibling types.
+**1. api-client** (`packages/api-client/src/schemas.ts` L307-316): mirror the existing per-entity paginated-envelope pattern used for other list responses in that file (e.g. how `PaginatedResponse`X schemas are declared — follow the file's own convention exactly: if it uses a `paginatedResponse(itemSchema)` factory or per-entity `z.object({items, total, page, per_page})` blocks, do the same). Replace the `ClientListResponseSchema` block with a `ClientListResponse` typed via the paginated pattern over `ClientWithStatsSchema`. Consumers of the old name (verified): `packages/api-client/src/endpoints.ts` (type import L37, L314; schema import L36, L309, L324) and `frontend/admin/contexts/ClientsContext.tsx` (L19, L103) — all updated in this task, so no backward-compat alias is kept: rename to whatever the file's paginated convention produces (e.g. `PaginatedClientWithStats`), preferring consistency with sibling types.
 - Update `packages/api-client/src/schemas.test.ts` refs if any.
-- Update `packages/api-client/src/endpoints.ts` return-type annotation of `getClientsWithStats` if it names `ClientListResponse`.
+- Update `packages/api-client/src/endpoints.ts` — the `getClientsWithStats` return-type annotation and the response-parse schema refs (L36-37, L309-324).
 
 **2. frontend** (`frontend/admin/contexts/ClientsContext.tsx`): L19 import — replace `ClientListResponse` with the new type name; L103 `useQuery<ClientListResponse>` → `useQuery<NewType>`. No runtime/visual change.
 
@@ -600,13 +600,15 @@ async def list_visitors(
 **Files:** `docs/domain-rules/records.md` + grep sweep.
 
 - `records.md` (~L187): the pagination mechanics wording references `paginate_orm` — rewrite to describe repo-owned pagination: `BaseRepository.list_custom` wraps the record stmt (JOIN Activity + selectinload visits), count runs on the unordered stmt (correlated sort subqueries never evaluated in count), sort whitelist stays in `RecordService._sort_columns`, repo owns order/limit/offset.
-- Sweep: `rg -l "paginate_orm" docs/` — update every hit (expected: records.md only; if others, apply the same mechanic rename).
+- `activities.md` (L37): also references `_paginate()`/`paginate_orm()` — same rewrite (date-range path now via `repo.list_custom`).
+- Sweep: `rg -l "paginate_orm" docs/domain-rules/` — expected hits: records.md, activities.md (both handled above). If other domain-rules files hit, apply the same mechanic rename.
 - Sweep: `rg -l "_paginate|_list_stmt" docs/domain-rules/` — update wording where the generic path is described (services keep page↔offset + envelope; repo owns SQL).
+- Historical specs/plans under `docs/specs/` and `docs/plans/` that mention `paginate_orm` are historical documents — do NOT rewrite them (out of scope per spec §8 step 8: domain-rules only).
 - No other domain-rules content changes (fields/endpoints unchanged).
 
 **Steps:**
 - [ ] Apply doc updates.
-- [ ] `rg "paginate_orm" docs/ backend/` → zero hits.
+- [ ] `rg "paginate_orm" backend/src docs/domain-rules/` → zero hits.
 - [ ] Commit: `docs(#206): sync domain-rules pagination mechanics with repo-owned list`
 
 ---

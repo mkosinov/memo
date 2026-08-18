@@ -1,11 +1,10 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { getTags } from '@memo/api-client';
+import React, { useMemo, useState } from 'react';
 import type { TagResponse } from '@memo/api-client';
 import { useUpdateTag, useCreateTag, useDeleteTag } from '@/hooks/useTagsMutations';
 import { useUI } from '@/contexts/UIContext';
+import { useTagsTable } from '@/contexts/TagsContext';
 import { TagModal } from './TagModal';
 import { ColumnPicker } from '@/app/components/shared/ColumnPicker';
 import { ErrorState } from '@/app/components/error';
@@ -20,6 +19,7 @@ interface Column {
   defaultVisible?: boolean;
 }
 
+// Single sortable key — matches the backend tags sort whitelist (just `tag`).
 const COLUMNS: Column[] = [
   { key: 'tag', label: 'Тег', width: 'flex-1', defaultVisible: true },
 ];
@@ -27,10 +27,21 @@ const COLUMNS: Column[] = [
 // ─── Component ───────────────────────────────────────────────────────────
 
 export function TagsTable() {
-  const { data: tags = [], isLoading, error, refetch } = useQuery<TagResponse[]>({
-    queryKey: ['tags'],
-    queryFn: () => getTags({ per_page: 100 }).then(r => r.items),
-  });
+  // ─── Server pagination/sort state (TagsContext, #205 §5.2) ───────────────
+  const {
+    items,
+    total,
+    page,
+    perPage,
+    sortBy,
+    sortOrder,
+    isLoading,
+    error,
+    setPage,
+    setPerPage,
+    setSort,
+    refetch,
+  } = useTagsTable();
 
   const updateTag = useUpdateTag();
   const createTag = useCreateTag();
@@ -51,13 +62,9 @@ export function TagsTable() {
   const VISIBLE_COLUMNS = COLUMNS.filter((c) => visibleKeys.includes(c.key));
 
   // ─── Filter state ────────────────────────────────────────────────────
+  // Search stays client-side (G1b Q1): it filters the currently loaded page
+  // only — the temporary degradation until server ?q= lands in #212.
   const [search, setSearch] = useState('');
-  const [page, setPage] = useState(0);
-  const [pageSize, setPageSize] = useState(10);
-
-  // ─── Sort state ──────────────────────────────────────────────────────
-  const [sortField, setSortField] = useState<string | null>(null);
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
 
   // ─── Edit modal state ────────────────────────────────────────────────
   const [editTag, setEditTag] = useState<TagResponse | null>(null);
@@ -68,15 +75,10 @@ export function TagsTable() {
   // ─── Action dropdown state ───────────────────────────────────────────
   const [openDropdownId, setOpenDropdownId] = useState<string | null>(null);
 
-  // Reset page when filters change
-  useEffect(() => {
-    setPage(0);
-  }, [search]);
-
-  // ─── Filtered data ───────────────────────────────────────────────────
+  // ─── Filtered data (client-side search over the loaded page) ───────────
 
   const filteredTags = useMemo(() => {
-    return tags.filter((tag) => {
+    return items.filter((tag) => {
       // Search filter (tag name contains)
       if (search) {
         const q = search.toLowerCase();
@@ -84,47 +86,25 @@ export function TagsTable() {
       }
       return true;
     });
-  }, [tags, search]);
+  }, [items, search]);
 
-  // ─── Sorted data ─────────────────────────────────────────────────────
+  // ─── Pagination (server-driven) ────────────────────────────────────────
 
-  const sortedTags = useMemo(() => {
-    if (!sortField) return filteredTags;
-    const sorted = [...filteredTags];
-    sorted.sort((a, b) => {
-      const aVal = a[sortField as keyof TagResponse];
-      const bVal = b[sortField as keyof TagResponse];
-      let cmp = 0;
-      if (typeof aVal === 'string' && typeof bVal === 'string') {
-        cmp = aVal.localeCompare(bVal, 'ru');
-      }
-      return sortDir === 'asc' ? cmp : -cmp;
-    });
-    return sorted;
-  }, [filteredTags, sortField, sortDir]);
-
-  // ─── Pagination ──────────────────────────────────────────────────────
-
-  const paginatedTags = useMemo(() => {
-    return sortedTags.slice(page * pageSize, (page + 1) * pageSize);
-  }, [sortedTags, page, pageSize]);
-
-  const totalPages = Math.max(1, Math.ceil(sortedTags.length / (pageSize || 10)));
+  const totalPages = Math.max(1, Math.ceil(total / perPage));
 
   // ─── Sort handler ────────────────────────────────────────────────────
 
   const handleSort = (field: string) => {
-    if (sortField === field) {
-      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    if (sortBy === field) {
+      setSort(field, sortOrder === 'asc' ? 'desc' : 'asc');
     } else {
-      setSortField(field);
-      setSortDir('asc');
+      setSort(field, 'asc');
     }
   };
 
   const sortIcon = (field: string) => {
-    if (sortField !== field) return ' ↕';
-    return sortDir === 'asc' ? ' ↑' : ' ↓';
+    if (sortBy !== field) return ' ↕';
+    return sortOrder === 'asc' ? ' ↑' : ' ↓';
   };
 
   // ─── Edit handlers ───────────────────────────────────────────────────
@@ -267,7 +247,7 @@ export function TagsTable() {
             </tr>
           </thead>
           <tbody>
-            {paginatedTags.map((tag) => (
+            {filteredTags.map((tag) => (
               <tr
                 key={tag.id}
                 onClick={() => setEditTag(tag)}
@@ -334,7 +314,7 @@ export function TagsTable() {
                 </td>
               </tr>
             ))}
-            {paginatedTags.length === 0 && (
+            {filteredTags.length === 0 && (
               <tr>
                 <td
                   colSpan={VISIBLE_COLUMNS.length + 1}
@@ -357,11 +337,8 @@ export function TagsTable() {
         <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--ink-light)' }}>
           <span>Строк:</span>
           <select
-            value={pageSize}
-            onChange={(e) => {
-              setPageSize(Number(e.target.value) || 10);
-              setPage(0);
-            }}
+            value={perPage}
+            onChange={(e) => setPerPage(Number(e.target.value) || 10)}
             className="border rounded px-2 py-1 text-xs"
             style={{
               borderColor: 'var(--line)',
@@ -373,35 +350,36 @@ export function TagsTable() {
             <option value={10}>10</option>
             <option value={20}>20</option>
             <option value={50}>50</option>
+            <option value={100}>100</option>
           </select>
-          <span>{sortedTags.length} всего</span>
+          <span>{total} всего</span>
         </div>
         <div className="flex items-center gap-1">
           <button
-            onClick={() => setPage(Math.max(0, page - 1))}
-            disabled={page === 0}
+            onClick={() => setPage(Math.max(1, page - 1))}
+            disabled={page <= 1}
             className="px-3 py-1 text-sm rounded border disabled:opacity-30"
             style={{ borderColor: 'var(--line)', color: 'var(--ink)' }}
           >
             ←
           </button>
-          {Array.from({ length: totalPages }, (_, i) => (
+          {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
             <button
-              key={i}
-              onClick={() => setPage(i)}
-              className={`px-3 py-1 text-sm rounded border ${i === page ? 'font-bold' : ''}`}
+              key={p}
+              onClick={() => setPage(p)}
+              className={`px-3 py-1 text-sm rounded border ${p === page ? 'font-bold' : ''}`}
               style={{
                 borderColor: 'var(--line)',
-                backgroundColor: i === page ? 'var(--brand)' : 'transparent',
-                color: i === page ? 'white' : 'var(--ink)',
+                backgroundColor: p === page ? 'var(--brand)' : 'transparent',
+                color: p === page ? 'white' : 'var(--ink)',
               }}
             >
-              {i + 1}
+              {p}
             </button>
           ))}
           <button
-            onClick={() => setPage(Math.min(totalPages - 1, page + 1))}
-            disabled={page >= totalPages - 1}
+            onClick={() => setPage(Math.min(totalPages, page + 1))}
+            disabled={page >= totalPages}
             className="px-3 py-1 text-sm rounded border disabled:opacity-30"
             style={{ borderColor: 'var(--line)', color: 'var(--ink)' }}
           >

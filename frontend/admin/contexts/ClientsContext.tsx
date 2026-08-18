@@ -16,9 +16,9 @@ import {
 import type {
   ClientWithStats,
   ClientResponse,
-  ClientListResponse,
   ClientUpdate,
   DependencyNode,
+  PaginatedResponse,
 } from '@memo/api-client';
 
 export interface ClientFilters {
@@ -100,7 +100,7 @@ export function ClientsProvider({ children }: { children: React.ReactNode }) {
   // DeleteDialog (Task 18/19). Null when no dry-run conflict is pending.
   const [dependencies, setDependencies] = useState<DependencyNode[] | null>(null);
 
-  const { data, isLoading, error, refetch } = useQuery<ClientListResponse>({
+  const { data, isLoading, error, refetch } = useQuery<PaginatedResponse<ClientWithStats>>({
     queryKey: ['clients', page, perPage, filters, sortBy, sortOrder],
     queryFn: () =>
       getClientsWithStats({

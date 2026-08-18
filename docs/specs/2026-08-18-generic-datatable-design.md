@@ -54,9 +54,9 @@ Every mechanics change (e.g. a11y, skeleton, delete flow) currently costs 8 edit
 | Services | `app/(main)/services/components/ServicesTable.tsx` | 602 | server (factory) | "Загрузка..." | ↕/↑/↓ | DeleteDialog |
 | Clients | `app/(main)/clients/components/ClientsTable.tsx` | 272 | server (hand-rolled ctx) | shimmer skeleton | ↑/↓ active-only (:169) | DeleteDialog |
 | Photos | `app/(main)/photos/components/PhotosTable.tsx` | 523 | **client-side slice** (#206 migrates) | "Загрузка..." | ↕/↑/↓ | `window.confirm` (:195) |
-| Records | `app/(main)/records/components/RecordsTable.tsx` | 477 | server (hand-rolled ctx) | none (keepPreviousData) | ↕/↑/↓ | **none in table** |
+| Records | `app/(main)/records/components/RecordsTable.tsx` | 477 | server (hand-rolled ctx) | none (keepPreviousData); error → `ErrorState` cmp | ↕/↑/↓ | **none in table** |
 
-Total: 3897 lines. Contexts: factory-backed ×5 (Tags, Locations, Masters, Services, Materials); hand-rolled ×2 (Clients, Records — same shape, server-paginated); Photos has **no context** (local `useState` sort, PhotosTable.tsx:64–65).
+Total: 3897 lines. Contexts: factory-backed ×5 (Tags, Locations, Masters, Services, Materials); hand-rolled ×2 (Clients, Records — server-paginated but **field-shape diverges from the factory**, see §6.4); Photos has **no context** (local `useState` sort, PhotosTable.tsx:64–65).
 
 ### 4.2 Shared pieces
 
@@ -95,10 +95,12 @@ interface DataTableProps<T> {
   emptyLabel?: string;                   // default "Нет записей"
   toolbarExtras?: ReactNode;             // escape hatch (per-table extras)
   withStatus?: boolean;                  // render status filter; default false (DoD #2)
+  withSearch?: boolean;                  // render search input; default false (panel fix: Records has no search)
 }
 ```
 
-- DataTable renders: toolbar (ColumnPicker **always** + search input + conditional status filter + `toolbarExtras`), head (sortable buttons with `↕`), body (rows + action dropdown), skeleton/empty/error states, pager.
+- DataTable renders: toolbar (ColumnPicker **always** + search input when `withSearch` + status filter when `withStatus` + `toolbarExtras`), head (sortable buttons with `↕`), body (rows + action dropdown in the **last** column), skeleton/empty/error states, pager.
+- `withStatus` / `withSearch` are explicit parent-controlled props (matching the entity's factory config); DataTable does not infer them from `tableState`.
 - DataTable owns: column-visibility state + localStorage persistence (read/write `storageKey`), dropdown open/close + outside-click + menu a11y, sort-header rendering, pager rendering.
 - DataTable has **zero delete awareness**: no `onDelete`/`onEdit` seam; delete/edit are RowActions whose `onClick` the parent wires (e.g. open `DeleteDialog`).
 - `onRowClick` ignores clicks originating from `button, a, [role="button"], input` inside cells — implemented ONCE in DataTable (not per-render closure).
@@ -143,14 +145,28 @@ type RowAction<T> = {
 
 - DataTable consumes `tableState: PagedListState<T>` directly — the return shape of `createPagedListContext<T>(config)`.
 - `PagedListState<T>` must be an **exported interface** (so test fixtures and mock contexts type-check). Grounding: the factory already exports `PagedListContextValue<T>` (incl. `refetch`); the change is a **type alias** `export type PagedListState<T> = PagedListContextValue<T>` in `createPagedListContext.tsx`, re-exported from `tableTypes.ts`. No runtime change.
-- Hand-rolled `ClientsContext` / `RecordsContext` must structurally satisfy `PagedListState<T>` (they already expose the same fields; Records gets the locked two-arg `setSort(field, order)`, §6.10).
+- `PagedListState<T>` additions (all small, additive): `isPending` pass-through from `useQuery` (needed for the §6.8 skeleton condition — today the factory exposes only `isLoading`/`isFetching`); optional `search?: string` / `setSearch?: (s: string) => void` (§6.7).
+- **Hand-rolled contexts need alignment, not just structural luck** (panel BLOCKER — corrected). Field-level delta:
+
+| `PagedListState<T>` field | ClientsContext today | RecordsContext today |
+|---|---|---|
+| `items: T[]` | `clients` — rename/alias needed | `records` — rename/alias needed |
+| `isLoading` | ✓ present | `loading` — rename needed |
+| `isFetching` | absent — add pass-through | absent — add pass-through |
+| `isPending` | absent — add pass-through | absent — add pass-through |
+| `status` / `setStatus` | compound `filters`/`setFilters` — expose status view | compound `filters`/`setFilters` — expose status view |
+| `error` | `string \| null` — align to `Error \| null` | `Error \| null` ✓ |
+| `setSort(field, order)` | ✓ two-arg (gains `setPage(1)`, §6.10) | one-arg — locked change to two-arg |
+
+  Alignment is **additive where possible** (new fields alongside old, old ones retired within the same task); every consumer hook call site and test mock of `useClients`/`useRecords` updates in the same migration task (B2 category, §8).
 - Parents wire ~5 props; zero wiring copy-paste.
 
 ### 6.5 ColumnPicker → controlled presentational
 
 - New API: `{ columns, visibleKeys, onToggle }` — fully controlled; `storageKey` prop and the internal `localStorage` write are **deleted** (visibility state + persistence move up to DataTable). Consistent with the LS hard cut (§6.11).
 - Shown **always**, even TagsTable with 1 column (uniformity).
-- The last-visible-column checkbox is **disabled** (prevents an empty table with no way back).
+- The last-visible-column checkbox is **disabled** (prevents an empty table with no way back). ColumnPicker computes this itself from `visibleKeys.length === 1` (no new prop needed).
+- Popover open/close state stays internal to ColumnPicker (as today); its outside-`mousedown` handler and the action dropdown's outside-click handler operate independently (opening one does not require closing the other — they don't overlap).
 
 ### 6.6 File layout
 
@@ -170,9 +186,9 @@ app/(main)/<entity>/components/
 └── <Entity>Modal.tsx          ← exists, unchanged
 ```
 
-- `materialsColumns.tsx` colocates in `services/components/` (no relocation).
+- `materialsColumns.tsx` colocates in `services/components/` (no relocation — the principle: config file lives next to its table, wherever the table already is).
 - `DeleteDialog.tsx` stays at `app/components/DeleteDialog.tsx` (unchanged, parent-owned; see §12 note).
-- Thin wrapper is enforced: `<Entity>Table.tsx` = `<DataTable storageKey columns tableState={useXTable()} actions onRowClick? />` — wiring only.
+- Thin wrapper is enforced: `<Entity>Table.tsx` contains **no table-mechanics logic** — only DataTable wiring + entity-level dialog/modal state (e.g. `editTarget`, `deleteTarget`, modal open flags) and mutation-hook calls. The Records filter bar (`BookingFilters` etc.) stays OUTSIDE DataTable, rendered by the page as today — `*Filters.tsx` components are out of scope (§3); `toolbarExtras` hosts small per-table extras only.
 
 ### 6.7 Data flow
 
@@ -185,21 +201,31 @@ createPagedListContext<T>(config)
   → PaginatedResponse<T> = { items, total, page, per_page }
   → PagedListState<T> (incl. refetch)
   → <DataTable tableState={…}>
-  → toolbar (ColumnPicker + search + conditional status) · head (↕ sort)
-    · body (rows + action dropdown) · skeleton/empty/error · pager
+  → toolbar (ColumnPicker always + search when `withSearch` + status when `withStatus`)
+    · head (↕ sort) · body (rows + action dropdown) · skeleton/empty/error · pager
 ```
 
-- **Search mechanics (D3, locked):** debounce 300ms + Enter-to-submit-immediately. DataTable owns the input; `PagedListState` gains `search` / `setSearch`. Per-entity search **semantics unchanged**: dictionary tables keep client-side filtering over the loaded page (#205 G1b amendment Q1; server `?q=` is #212, out of scope); Clients/Records wire to their existing context search. The dict client-filter moves from table components into the factory as part of extraction.
-- **No optimistic updates.** Parent calls `queryClient.invalidateQueries([entity])` on delete/archive/edit success → React Query refetches → DataTable does nothing.
-- **Page-clamp:** `items.length === 0 && page > 1 && !isLoading` → `setPage(page - 1)` — implemented in the CONTEXT (factory + the two hand-rolled contexts), NOT in DataTable.
+- **Search mechanics (D3, locked):** debounce 300ms + Enter-to-submit-immediately (Enter submits the current value and cancels the pending debounce). DataTable owns the input, rendered only when `withSearch` (§6.1). `PagedListState` gains **optional** `search`/`setSearch`. Per-entity search **semantics unchanged**: dictionary tables keep client-side filtering over the loaded page (#205 G1b amendment Q1; server `?q=` is #212, out of scope); Clients wires to its existing context search. **Records has no search today** (no input, no context field — verified) → Records renders no search input; Records server search is #212 scope. The dict client-filter predicate moves from table components into the factory (config callback per entity); `PagedListState.items` remains the server page — the filtered view is derived (`visibleItems = items.filter(predicate)`) so the `items` contract does not change.
+- **No optimistic updates.** Parent calls `queryClient.invalidateQueries([entity])` on delete/archive/edit success (existing mutation hooks already do this — the thin wrapper just calls the hook) → React Query refetches → DataTable does nothing.
+- **Page-clamp (mechanism pinned, panel fix):** a `useEffect` in the CONTEXT (factory + both hand-rolled contexts), NOT in DataTable:
+
+  ```ts
+  useEffect(() => {
+    if (!isPending && !isFetching && items.length === 0 && page > 1) setPage(page - 1);
+  }, [isPending, isFetching, items.length, page]);
+  ```
+
+  Fires only after a settled fetch returns an empty non-first page (e.g. last row of page N deleted). The `!isFetching` guard prevents mid-refetch races with `keepPreviousData`.
+- **Refetch-failure rule:** when a refetch fails while rows from a previous successful load exist, the rows persist on screen (`keepPreviousData`); the §6.8 error row replaces the body ONLY when there is no data to show (`items.length === 0`).
 
 ### 6.8 Loading / Error / Empty (unified)
 
 | State | Condition | Render |
 |---|---|---|
-| Initial load | `isPending` | 10-row skeleton, visible columns only — **all 8 tables** (replaces "Загрузка..." ×6, shimmer ×1, none ×1) |
-| Query failure | `error` | Error row: `Ошибка загрузки: {message}` + "Повторить" button → `tableState.refetch()`. Unified UX (today: silent empty/toast). No 4xx/5xx branching — retry is meaningful for network/5xx and harmless for 4xx |
-| Empty | `items.length === 0 && !isPending && !error` | Empty row: `emptyLabel ?? "Нет записей"` |
+| Initial load | `isPending` (no data for current query key yet; factory exposes `isPending` pass-through, §6.4) | 10-row skeleton, visible columns only — **all 8 tables** (replaces "Загрузка..." ×6, shimmer ×1, none ×1) |
+| Query failure | `error && items.length === 0` | Error row reusing the existing `ErrorState` component (already used by Records/Photos today): `Ошибка загрузки: {error.message}` + "Повторить" button → `tableState.refetch()`. Unified UX (today: silent empty/toast in most tables; Records/Photos already use `ErrorState`). No 4xx/5xx branching — retry is meaningful for network/5xx and harmless for 4xx |
+| Empty | `items.length === 0 && !isPending && !error` | Empty row: `emptyLabel ?? "Нет записей"` (plan enumerates each table's current empty copy; unify to the default unless a table's copy is deliberately distinct) |
+| Refetch failure with rows on screen | `error && items.length > 0` | Rows persist (§6.7 rule); no error row replacing data |
 
 ### 6.9 Delete pattern (unified)
 
@@ -210,8 +236,9 @@ createPagedListContext<T>(config)
 ### 6.10 Sorting & pagination unification (locked drift fixes — intentional behavior changes)
 
 1. **Sort indicator:** neutral `↕` on all inactive sortable headers, all 8 tables (Clients today: arrow-only-when-active).
-2. **Page-reset-on-sort:** ALL 8 reset page→1 on sort change (Records/Clients today don't — intentional change; factory contexts already do this; the two hand-rolled contexts gain `setPage(1)` in `setSort`). Toggle semantics locked: same field → flip order; new field → asc.
-3. **Records `setSort(field)` → `setSort(field, order)`** (matches Clients/factory two-arg signature; internal toggle logic moves to the caller/DataTable contract).
+2. **Page-reset-on-sort:** ALL 8 reset page→1 on sort change (Records/Clients today don't — intentional change; factory contexts already do this; the two hand-rolled contexts gain `setPage(1)` in `setSort`, incl. `useCallback` dep updates).
+3. **Records `setSort(field)` → `setSort(field, order)`** (matches Clients/factory two-arg signature).
+4. **Toggle contract (panel fix — pinned):** the flip logic lives in **DataTable**, once. On sortable-header click DataTable computes `nextOrder = (clickedField === sortBy && sortOrder === 'asc') ? 'desc' : 'asc'` and calls `setSort(clickedSortField ?? clickedKey, nextOrder)`. This handles the initial-state case automatically (first click on the default-sorted field flips asc→desc). Callers never implement toggling.
 
 ### 6.11 localStorage keys — hard cut
 
@@ -227,7 +254,8 @@ createPagedListContext<T>(config)
 
 ### 6.13 ClientCardModal disambiguation (variant A — rename, no merge)
 
-- Records-version `ClientCardModal.tsx` (173 ln, read-only viewer) → **renamed to `ClientQuickCard`** (final name confirmed here; file + imports + test describe blocks updated).
+- Records-version `ClientCardModal.tsx` (173 ln, read-only viewer) → **renamed to `ClientQuickCard`** (final name confirmed here; component + file + imports + test references updated).
+- **Blast radius (panel finding, enumerated):** ~87 grep matches across ≥6 test files (`ClientCardModal.test.tsx` — clients side, untouched; `RecordsClientCardModal.test.tsx` → renamed to `ClientQuickCard.test.tsx`; `ClientsIntegration.test.tsx`, `ClientsPage.test.tsx`, `ClientInfoTab.test.tsx`, `wave6-status-shared.spec.ts` references) plus a `describe('ClientCardModal — Record tab integration', …)` block. The rename task greps `ClientCardModal` repo-wide and updates every records-side reference; B2 category §8.
 - Clients-version `ClientCardModal.tsx` (286 ln, full editor) keeps its name.
 - Merge of the two components is a follow-up issue, not #139.
 
@@ -239,12 +267,13 @@ Dropdown moving into DataTable makes menu a11y shared mechanics:
 - Trigger: `aria-haspopup="menu"`, `aria-expanded`, `aria-label="Действия"`.
 - Sort headers: keyboard-focusable `<button>` with `aria-sort`.
 - Pager controls: labeled (`aria-label`).
+- Implementation follows the WAI-ARIA APG **menu button** pattern; plan-level choices (roving tabindex vs `aria-activedescendant`, Home/End, `aria-controls`, Tab-closes-menu) are pinned in the plan, both APG-endorsed variants acceptable. Menu items use `role="menuitem"`.
 - Screen-reader page announcements: follow-up issue (no gold-plating).
 
 ### 6.15 Performance / memoization contract
 
 - The 8 instances never co-render (separate pages) — no cross-table concern.
-- Contract: parents MUST `useMemo` the outputs of columns/actions factories; DataTable MUST NOT depend on referential stability (defensive rendering).
+- Contract: parents MUST `useMemo` the **outputs** of the columns/actions factories (i.e. the `ColumnDef[]` array and the `actions` function identity); DataTable MUST NOT depend on referential stability of inline literals (defensive rendering — no `useEffect`/`useRef` keyed on props identity). The open dropdown is keyed by **row identity**, not by action-object identity, so a re-render with fresh action objects does not close or reset an open menu.
 - 300ms debounce is sufficient; no virtualization in scope.
 
 ### 6.16 TypeScript rules
@@ -264,9 +293,11 @@ Dropdown moving into DataTable makes menu a11y shared mechanics:
 **Per-table template (4 steps):**
 
 1. **Extract config** → create `<entity>Columns.tsx` (columns factory + actions factory).
-2. **Thin the wrapper** → `<Entity>Table.tsx` = `<DataTable … />` wiring only.
+2. **Thin the wrapper** → `<Entity>Table.tsx` = `<DataTable … />` + entity modal/dialog state only (§6.6). `useMemo` the factory outputs (§6.15). Delete the migrated per-table mechanics (sort handlers, skeleton/loading JSX, pager markup, LS code) in the same commit — no dead code left behind.
 3. **Update tests** → B2-audit intentional edits (§8); wiring/contract assertions stay on the real Provider.
 4. **Verify** → unit suite green, e2e spec green, visual check vs baseline.
+
+T1 additionally includes the shared foundation: `tableTypes.ts`, `DataTable.tsx`, ColumnPicker controlled conversion, factory additions (`PagedListState` alias, `isPending`, optional `search`/`setSearch`, page-clamp effect, client-filter predicate hook). T6 (Clients) and T8 (Records) each include their hand-rolled **context alignment** (§6.4 table) inside the same task. T7 (Photos) requires the Photos server-paginated context to exist (lands via #206/#211) — hard dependency, checked before T7 starts.
 
 ## 8. Testing Strategy (locked: additive — option b)
 
@@ -278,16 +309,22 @@ Dropdown moving into DataTable makes menu a11y shared mechanics:
   2. Old LS keys (`services-column-visibility`, `materials-column-visibility`).
   3. Old sort glyph (Clients no-`↕` assertions).
   4. Old loading assertions ("Загрузка..." ×6 suites) → 10-row skeleton.
-  5. Records/Clients page-reset-on-sort behavior.
+  5. Records/Clients page-reset-on-sort behavior (incl. Clients sort↔page interaction tests).
   6. Records sort-toggle sequences (`setSort(field)` single-arg → two-arg).
-  7. Records button/row-count queries (new dropdown column shifts cell indexes).
-  - Exhaustive per-suite line edits = plan level, not spec.
+  7. Records button/row-count queries (new dropdown column, appended **last**).
+  8. ColumnPicker API: `onChange` → `onToggle`, `storageKey` removal, internal-LS assertions (`ColumnPicker.test.tsx`).
+  9. Query-key shape assertions (`createPagedListContext.test.tsx`, `dictionaryCacheInvalidation.test.tsx`) — `search` joins the key.
+  10. Hand-rolled context field alignment (§6.4): `useClients`/`useRecords` consumer call sites + every mock of those hooks across test files.
+  11. `aria-label="Действия"` unification — any per-table label queries.
+  12. `ClientCardModal` → `ClientQuickCard` rename references (records side only, §6.13).
+  - Exhaustive per-suite line edits = plan level, not spec. Tests falling outside these categories are expected to pass unedited; any extra breakage is investigated, not silently edited.
+- **E2E coverage note:** materials has NO `materials-crud.spec.ts` (only `materials-delete.spec.ts`) — the Materials migration safety net is the unit suite + visual gate (§9); creating a new e2e spec is out of scope. Records' new dropdown gains e2e smoke coverage in `records.spec.ts` (menu open, delete via menu) — the ONLY e2e addition in #139.
 - Context tests keep `createMock*Context` helpers (different level — fetch mapping/state transitions, not rendering).
 - **E2E specs: unchanged** — testids/aria-labels preserved: `page-size-select`, `dropdown-*`, `Настроить колонки`, `Действия`, `tag-row-*`.
 
 ## 9. Visual Gate (G4.5)
 
-- Capture baselines for **all 8 tables BEFORE T1** (states: skeleton / filled / empty / error / dropdown-open).
+- Capture baselines for **all 8 tables BEFORE T1**. Baseline states per table (7): skeleton / filled / empty / error / dropdown-open / picker-open / sort-active. Toolbar layout differs between `withStatus` and non-status tables — capture each table in its own variant (no separate per-variant doubling; 7 states × 8 tables ≈ 56 baselines).
 - Visual diff after each migration task Ti.
 - Pass = parity EXCEPT locked intentional deltas: 10-row skeleton everywhere, `↕` on Clients, DeleteDialog path unchanged for Tags/Photos (`window.confirm` kept), Clients action-dropdown presentation, Records new dropdown column.
 - Full pass after T8.
@@ -319,23 +356,27 @@ Dropdown moving into DataTable makes menu a11y shared mechanics:
 Non-decision documentation fixes found during 2026-08-18 grounding (no locked decision changed):
 
 1. `createPagedListContext` **already exports** `PagedListContextValue<T>` incl. `refetch` — the "typing/export change" reduces to adding the `PagedListState<T>` alias (§6.4).
-2. ColumnPicker is already prop-controlled for columns/visibility but **owns the LS write** — the conversion removes `storageKey` + the internal write (§6.5).
+2. ColumnPicker is already prop-controlled for columns/visibility but **owns the LS write** — the conversion removes `storageKey` + the internal write and renames `onChange` → `onToggle` (§6.5).
 3. `DeleteDialog.tsx` lives at `app/components/DeleteDialog.tsx`, not `shared/` — it stays there (no relocation, consistent with the materialsColumns no-move rule); the §6.6 tree reflects this.
 4. LS keys: 6/8 already use `<entity>-columns`; only Services + Materials drift (§6.11).
-5. Clients/Records contexts are hand-rolled (not factory) — they must satisfy `PagedListState<T>` structurally and gain page-clamp + page-reset-on-sort + (Records) two-arg `setSort` (§6.4, §6.10).
-6. Records table has no delete UX today; the delete RowAction is new (part of variant B dropdown).
-7. Search state is not currently in the factory — `search`/`setSearch` is added to `PagedListState` and the dict client-filter moves into the factory; semantics per entity unchanged (§6.7).
-8. `withStatus` prop added to the DataTableProps list — it is required by locked DoD #2 wording (§6.1).
+5. Clients/Records contexts are hand-rolled (not factory) and their field shapes **diverge** from `PagedListState<T>` — the field-level delta + alignment work is enumerated in §6.4 (panel-corrected; the original "structurally satisfy" claim was wrong).
+6. Records table has no delete UX today; the delete RowAction is new (part of variant B dropdown). Records also has **no search** today — it renders no search input (§6.7).
+7. Search state is not currently in the factory — optional `search`/`setSearch` is added to `PagedListState`; the dict client-filter predicate moves into the factory as a config callback while `items` keeps its server-page contract (§6.7). Only Clients + the 5 factory dicts get `withSearch`; server `?q=` remains #212.
+8. `withStatus` prop added to the DataTableProps list — it is required by locked DoD #2 wording (§6.1). `withSearch` added by panel fix (§6.1).
 9. Measured table total is 3897 lines (issue says "~3500").
+10. Speculative-surface fields (`RowAction.icon`, `RowAction.hidden`, `ColumnDef.accessor`, `ColumnDef.width/align`, `sortable` default) have no current consumer in some tables — **kept as locked at G1a** (API freeze covers all 8 configs incl. future needs); panel simplicity objections noted and dismissed per locked concept.
+11. `ErrorState` component (already used by Records/Photos) is the named implementation of the unified error row (§6.8).
 
 ## 13. Risks / Open Questions
 
 | Risk | Mitigation |
 |---|---|
-| Photos/Records migration blocked on #206 | Locked order puts them T7/T8; T1–T6 merge independently |
-| Per-entity test suites break in non-obvious spots | B2 audit grep categories (§8) before each migration; per-table PRs keep blast radius small |
-| Records new dropdown column shifts cell indexes in tests | B2 category 7; plan-level per-suite line edits |
-| Hand-rolled Clients/Records contexts drift from `PagedListState<T>` | Structural typing + context tests; interface is the contract |
-| Visual regressions in 8 pages | Baselines before T1 + diff after each Ti (§9) |
+| Photos/Records migration blocked on #206 (+#211 for Photos context) | Locked order puts them T7/T8; T1–T6 merge independently; dependency checked before T7 starts |
+| Hand-rolled context alignment breaks other consumers (`useClients`/`useRecords` mocks ×many test files) | Additive alignment where possible; B2 category 10; per-table PRs contain blast radius |
+| Per-entity test suites break in non-obvious spots | B2 audit grep categories (§8, 12 categories) before each migration; per-table PRs keep blast radius small |
+| Records new dropdown column shifts cell indexes in tests | B2 category 7; dropdown column pinned LAST; plan-level per-suite line edits |
+| Materials has no CRUD e2e spec | Unit suite + visual gate as safety net (§8); new e2e out of scope |
+| Visual regressions in 8 pages | 7-state baselines × 8 tables before T1 + diff after each Ti (§9) |
+| Page-clamp/skeleton flag confusion (`isPending` vs `isLoading` vs `isFetching`) | Semantics pinned in §6.4/§6.7/§6.8; `isPending` pass-through added to factory |
 
-No open questions — all design decisions were locked at G1a.
+No open **design** questions — all decisions locked at G1a; remaining specifics (per-suite line edits, APG menu implementation choice, per-entity empty-label copy) are pinned at plan level.

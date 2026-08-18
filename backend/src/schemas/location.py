@@ -1,8 +1,15 @@
 """Pydantic schemas for the location domain."""
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
+
+# Sort whitelist for GET /api/v1/locations (#205 Task 3, spec §4.5).
+LocationSortBy = Literal[
+    "name", "short_title", "capacity", "address", "location_hint",
+    "description", "archived", "yandex_map_url", "created_at",
+]
 
 
 class LocationBase(BaseModel):

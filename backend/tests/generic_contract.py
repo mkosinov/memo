@@ -153,9 +153,15 @@ class EntityConfig(NamedTuple):
     not_found_code: str  # e.g. "MASTER_NOT_FOUND" — explicit, NOT derived (activities → ACTIVITY, spec D15)
     response_schema: type  # <Entity>Response — model_validate + exact-keys on HTTP bodies
     # Column with a DB unique constraint that multi-row tests must vary per row
-    # (only Tag.tag is unique=True among the 8 models). Must be last — has a
-    # default — so unspecified entries keep working.
+    # (only Tag.tag is unique=True among the 8 models). Trailing fields below
+    # all have defaults so unspecified entries keep working.
     unique_row_field: str | None = None
+    # Field overrides that produce a row sorting BEFORE ``create_data`` per
+    # §4.4 default order (GH #205 Task 4). Used by the ``/all`` default-order
+    # contract test: the sentinel row must sort before the default-
+    # ``create_data`` row regardless of insertion order. Only set on the 5
+    # dictionary configs (masters/locations/services/tags/materials).
+    earlier_create_data: dict | None = None
 
 
 # ─── Per-service config ──────────────────────────────────────────────────────────
@@ -226,6 +232,10 @@ CONTRACT_CONFIG: dict[type, EntityConfig] = {
         router_prefix="/api/v1/locations",
         not_found_code="LOCATION_NOT_FOUND",
         response_schema=LocationResponse,
+        # §4.4 default order: sort_order ASC, name ASC, id ASC. Both rows share
+        # sort_order=0 (column default), so ``name`` decides. "!" (0x21) < "L"
+        # (0x4C) → sentinel sorts BEFORE the default ``name="Loc"``.
+        earlier_create_data={"name": "!AAA-contract"},
     ),
     MasterService: EntityConfig(
         service_factory=get_master_service,
@@ -255,6 +265,11 @@ CONTRACT_CONFIG: dict[type, EntityConfig] = {
         router_prefix="/api/v1/masters",
         not_found_code="MASTER_NOT_FOUND",
         response_schema=MasterResponse,
+        # §4.4 default order: sort_order ASC, first_name ASC, id ASC. Both rows
+        # share sort_order=0 (column default), so ``first_name`` decides.
+        # "!" (0x21) < "A" (0x41) → sentinel sorts BEFORE the default
+        # ``first_name="A"``.
+        earlier_create_data={"first_name": "!AAA-contract"},
     ),
     MaterialService: EntityConfig(
         service_factory=get_material_service,
@@ -273,6 +288,9 @@ CONTRACT_CONFIG: dict[type, EntityConfig] = {
         router_prefix="/api/v1/materials",
         not_found_code="MATERIAL_NOT_FOUND",
         response_schema=MaterialResponse,
+        # §4.4 default order: title ASC, id ASC. "!" (0x21) < "T" (0x54) →
+        # sentinel sorts BEFORE the default ``title="T"``.
+        earlier_create_data={"title": "!AAA-contract"},
     ),
     PaymentService: EntityConfig(
         service_factory=get_payment_service,
@@ -331,6 +349,9 @@ CONTRACT_CONFIG: dict[type, EntityConfig] = {
         router_prefix="/api/v1/services",
         not_found_code="SERVICE_NOT_FOUND",
         response_schema=ServiceResponse,
+        # §4.4 default order: title ASC, id ASC. "!" (0x21) < "T" (0x54) →
+        # sentinel sorts BEFORE the default ``title="T"``.
+        earlier_create_data={"title": "!AAA-contract"},
     ),
     TagService: EntityConfig(
         service_factory=get_tag_service,
@@ -350,6 +371,9 @@ CONTRACT_CONFIG: dict[type, EntityConfig] = {
         not_found_code="TAG_NOT_FOUND",
         response_schema=TagResponse,
         unique_row_field="tag",
+        # §4.4 default order: tag ASC, id ASC. "!" (0x21) < "t" (0x74) →
+        # sentinel sorts BEFORE the default ``tag="t1"``.
+        earlier_create_data={"tag": "!aaa-contract"},
     ),
     VisitorService: EntityConfig(
         service_factory=get_visitor_service,
@@ -475,4 +499,34 @@ def _archive_params() -> list:
             f"base from the class."
         )
         params.append(pytest.param(cls, cfg, id=cls.__name__))
+    return params
+
+
+# ─── /all dictionary contract parametrizer (GH #205 Task 4, spec §4.6) ───────
+# Opt-in set: the 5 dictionaries that ship a bare ``GET {prefix}/all`` route
+# (masters/locations/services/tags/materials). ``ServiceService`` IS in
+# ``GENERIC_CONTRACT_EXCEPTIONS`` for the CRUD contract (it overrides
+# update/patch for nested tariffs/tag_ids), but it has a ``CONTRACT_CONFIG``
+# entry and its ``list_all`` override (eager-loads tariffs+tags) is exactly
+# what this contract guards — so it joins the ``/all`` set. The parametrizer
+# reads ``CONTRACT_CONFIG`` directly (not ``_contract_params``), so the
+# exceptions list does not filter it out.
+BARE_ALL_ENTITIES: list[type] = [MasterService, LocationService, ServiceService, TagService, MaterialService]
+
+
+def _all_params() -> list:
+    """Opt-in parametrizer for the dictionary ``/all`` contract (#205).
+
+    Returns one ``pytest.param`` per dictionary service class, carrying its
+    ``EntityConfig`` (or ``None`` if missing — the test asserts non-None and
+    fails loudly, mirroring ``_contract_params``'s guard). Entities outside
+    this list are never parametrized — the ``/all`` contract stays opt-in.
+    """
+    params = []
+    for cls in BARE_ALL_ENTITIES:
+        cfg = CONTRACT_CONFIG.get(cls)
+        if cfg is None:
+            params.append(pytest.param(cls, None, id=f"{cls.__name__}-all-MISSING-CONFIG"))
+            continue
+        params.append(pytest.param(cls, cfg, id=f"{cls.__name__}-all"))
     return params

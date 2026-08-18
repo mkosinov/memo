@@ -564,3 +564,11 @@ export const ActivityListResponseSchema = paginatedSchema(ActivityResponseSchema
 export const PaymentListResponseSchema = paginatedSchema(PaymentResponseSchema);
 export const RecordListResponseSchema = paginatedSchema(RecordResponseSchema);
 export const VisitorListResponseSchema = paginatedSchema(VisitorResponseSchema);
+
+// ─── Bare-array /all dictionary responses (GH #205) ─────────────────────────
+
+export const MasterAllResponseSchema = z.array(MasterResponseSchema);
+export const LocationAllResponseSchema = z.array(LocationResponseSchema);
+export const ServiceAllResponseSchema = z.array(ServiceResponseSchema);
+export const TagAllResponseSchema = z.array(TagResponseSchema);
+export const MaterialAllResponseSchema = z.array(MaterialResponseSchema);

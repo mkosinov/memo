@@ -5,14 +5,17 @@ from typing import Annotated
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
+from sqlalchemy import asc, func, select
 
 from src.db import SessionDep
 from src.domain.deletion import ResolutionError, collect_dependencies
+from src.domain.errors import BareListLimitExceededError
 from src.errors import ErrorCode, ErrorDetail
 from src.models.enums import ArchiveStatus
 from src.models.service import Service
-from src.schemas.common import PaginatedResponse
-from src.schemas.service import ServiceCreate, ServicePatch, ServiceResponse, ServiceUpdate
+from src.models.tariff import Tariff
+from src.schemas.common import PaginatedResponse, SortOrder
+from src.schemas.service import ServiceCreate, ServicePatch, ServiceResponse, ServiceSortBy, ServiceUpdate
 from src.services.service import ServiceService, get_service_service
 
 router = APIRouter(tags=["services"])
@@ -26,6 +29,43 @@ def _get_service_service() -> ServiceService:
 
 _ServiceDep = Annotated[ServiceService, Depends(_get_service_service)]
 
+# Sort whitelist map: UI key → list of ORM columns / subqueries (#205 Task 3,
+# spec §4.5). ``age`` → min_age; ``archived`` → is_active; ``tariffs`` →
+# correlated COUNT subquery (records idiom for aggregate sort keys).
+_SERVICE_SORT_MAP: dict[str, list] = {
+    "title": [Service.title],
+    "duration": [Service.duration],
+    "age": [Service.min_age],
+    "material_hint": [Service.material_hint],
+    "tariffs": [
+        select(func.count(Tariff.id))
+        .where(Tariff.service_id == Service.id)
+        .correlate(Service)
+        .scalar_subquery()
+    ],
+    "specialty": [Service.specialty],
+    "archived": [Service.is_active],
+    "created_at": [Service.created_at],
+}
+
+
+def _service_order_by(sort_by: ServiceSortBy | None, sort_order: SortOrder) -> list:
+    """Build the ``order_by`` list for GET /api/v1/services.
+
+    * ``sort_by=None`` → spec §4.4 default: ``title ASC, id ASC`` (NEW —
+      services had no order_by before #205).
+    * User sort → mapped columns/subqueries with nulls-first (asc) /
+      nulls-last (desc), then ``id ASC`` tiebreak (records idiom).
+    """
+    if sort_by is None:
+        return [asc(Service.title), asc(Service.id)]
+    cols = _SERVICE_SORT_MAP[sort_by]
+    ordered = [
+        c.desc().nullslast() if sort_order == "desc" else c.asc().nullsfirst()
+        for c in cols
+    ]
+    return [*ordered, asc(Service.id)]
+
 
 @router.get("", response_model=PaginatedResponse[ServiceResponse])
 async def list_services(
@@ -34,14 +74,50 @@ async def list_services(
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
     status: ArchiveStatus = Query(ArchiveStatus.ACTIVE),
+    sort_by: ServiceSortBy | None = Query(None),
+    sort_order: SortOrder = Query("asc"),
 ) -> PaginatedResponse[ServiceResponse]:
     """Return services filtered by archive status with tariffs and tags.
 
     ``status`` accepts ``active`` (default), ``archived``, or ``all`` — see
     ``ArchiveStatus``. Invalid values are rejected with 422 by FastAPI's
     enum validation.
+
+    ``sort_by`` selects a whitelisted sort key (spec §4.5); ``sort_order``
+    is ``asc`` (default) or ``desc``. Unknown ``sort_by`` → 422 via Literal
+    validation. ``sort_by=None`` → spec §4.4 default order (``title ASC,
+    id ASC``).
     """
-    return await service.list(db_session=session, page=page, per_page=per_page, status=status)
+    return await service.list(
+        db_session=session,
+        page=page,
+        per_page=per_page,
+        status=status,
+        order_by=_service_order_by(sort_by, sort_order),
+    )
+
+
+@router.get("/all", response_model=list[ServiceResponse])
+async def list_all_services(
+    service: _ServiceDep,
+    session: SessionDep,
+    status: ArchiveStatus = Query(ArchiveStatus.ACTIVE),
+) -> list[ServiceResponse]:
+    """Return all services as a bare JSON array (GH #205).
+
+    Unpaginated, capped by ``BARE_LIST_MAX_ROWS`` (1000). Sorted by
+    ``title ASC, id ASC`` (spec §4.4). ``status`` mirrors the paginated
+    list endpoint (active default / archived / all). Tariffs and tags are
+    eagerly loaded (``ServiceService.list_all`` override).
+    """
+    try:
+        return await service.list_all(
+            db_session=session,
+            status=status,
+            order_by=[asc(Service.title), asc(Service.id)],
+        )
+    except BareListLimitExceededError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get("/{service_id}", response_model=ServiceResponse)

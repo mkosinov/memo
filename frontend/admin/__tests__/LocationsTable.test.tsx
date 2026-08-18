@@ -1,11 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, within, waitFor } from '@testing-library/react';
+import React from 'react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import {
   mockLocationResponse,
   mockLocationResponseArchived,
   createMockLocationResponse,
 } from './helpers/mockData';
-import type { DependencyNode } from '@memo/api-client';
+import type { DependencyNode, LocationResponse, PaginatedResponse } from '@memo/api-client';
 
 // ─── Dependency tree fixtures (mirror backend src/domain/deletion.py) ─────
 
@@ -27,25 +29,23 @@ const DEPS_AUTO: DependencyNode[] = [
 ];
 
 // ─── Mock @tanstack/react-query ──────────────────────────────────────────
+// Only useQueryClient is mocked (invalidate spy shared with the delete flow
+// assertions). useQuery/QueryClientProvider stay REAL: the table renders
+// inside the real LocationsProvider, and the server-pagination wiring is
+// asserted through the getLocations spy (RecordsTable precedent).
 
-// Shared so tests can assert invalidation (#207: ['locations'] on dialog done).
+// Shared so tests can assert cross-invalidation (#207: ['locations'] + ['records']).
 const mockInvalidateQueries = vi.fn().mockResolvedValue(undefined);
 
-vi.mock('@tanstack/react-query', () => ({
-  useQuery: vi.fn(),
-  // `keepPreviousData` is a sentinel symbol in real react-query; the component
-  // imports it for `placeholderData`. Provide a stable sentinel so the import
-  // resolves. The mocked `useQuery` ignores `placeholderData` anyway.
-  keepPreviousData: Symbol('keepPreviousData'),
-  useQueryClient: vi.fn(() => ({
-    invalidateQueries: mockInvalidateQueries,
-  })),
-  useMutation: vi.fn(() => ({
-    mutate: vi.fn(),
-    mutateAsync: vi.fn(),
-    isPending: false,
-  })),
-}));
+vi.mock('@tanstack/react-query', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@tanstack/react-query')>();
+  return {
+    ...actual,
+    useQueryClient: vi.fn(() => ({
+      invalidateQueries: mockInvalidateQueries,
+    })),
+  };
+});
 
 // ─── Mock @memo/api-client — spy on getLocations (preserve other exports) ─
 
@@ -53,9 +53,6 @@ vi.mock('@memo/api-client', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@memo/api-client')>();
   return { ...actual, getLocations: vi.fn(), resolveDeleteLocation: vi.fn() };
 });
-
-import { useQuery } from '@tanstack/react-query';
-const mockUseQuery = vi.mocked(useQuery);
 
 // ─── Mock hooks ──────────────────────────────────────────────────────────
 
@@ -100,6 +97,7 @@ vi.mock('@/contexts/UIContext', () => ({
 // ─── Import after mocks ──────────────────────────────────────────────────
 
 import { LocationsTable } from '@/app/(main)/locations/components/LocationsTable';
+import { LocationsProvider } from '@/contexts/LocationsContext';
 import {
   useUpdateLocation,
   usePatchLocation,
@@ -107,7 +105,6 @@ import {
   useArchiveLocation,
   useRestoreLocation,
 } from '@/hooks/useLocationsMutations';
-import { useUI } from '@/contexts/UIContext';
 import { getLocations, resolveDeleteLocation, ApiError } from '@memo/api-client';
 
 const mockUseUpdateLocation = vi.mocked(useUpdateLocation);
@@ -115,7 +112,6 @@ const mockUsePatchLocation = vi.mocked(usePatchLocation);
 const mockUseDeleteLocation = vi.mocked(useDeleteLocation);
 const mockUseArchiveLocation = vi.mocked(useArchiveLocation);
 const mockUseRestoreLocation = vi.mocked(useRestoreLocation);
-const mockUseUI = vi.mocked(useUI);
 const mockGetLocations = vi.mocked(getLocations);
 const mockResolveDeleteLocation = vi.mocked(resolveDeleteLocation);
 
@@ -136,56 +132,35 @@ const TEST_LOCATIONS = [
 
 // ─── Helpers ─────────────────────────────────────────────────────────────
 
-function setupQuery(locations: typeof TEST_LOCATIONS, isLoading = false) {
-  // Resolve the getLocations spy with the supplied list so the component's
-  // `queryFn` (which calls `getLocations(...).then(r => r.items)`) settles.
+function setupEnvelope(overrides: Partial<PaginatedResponse<LocationResponse>> = {}) {
   mockGetLocations.mockResolvedValue({
-    items: locations,
-    total: locations.length,
+    items: TEST_LOCATIONS,
+    total: TEST_LOCATIONS.length,
     page: 1,
-    per_page: 100,
+    per_page: 10,
+    ...overrides,
   });
-  // Drive `useQuery` through `mockImplementation` so the real `queryFn` is
-  // invoked on every render — this is what lets the getLocations spy record
-  // the call args (including the current `status`). The resolved promise is
-  // discarded; we inject the static `data` synchronously to keep these unit
-  // tests independent of react-query's async fetch machinery.
-  mockUseQuery.mockImplementation((((opts: { queryFn?: () => unknown }) => {
-    try {
-      void opts?.queryFn?.();
-    } catch {
-      // queryFn errors don't affect the injected static data
-    }
-    return {
-      data: locations,
-      isLoading,
-      error: null,
-      refetch: vi.fn(),
-      isSuccess: true,
-      isError: false,
-      isPending: false,
-      isFetching: false,
-      status: 'success',
-      fetchStatus: 'idle',
-      dataUpdatedAt: 0,
-      errorUpdatedAt: 0,
-      failureCount: 0,
-      failureReason: null,
-      errorUpdateCount: 0,
-      isFetched: true,
-      isFetchedAfterMount: true,
-      isInitialLoading: false,
-      isLoadingError: false,
-      isPlaceholderData: false,
-      isRefetchError: false,
-      isStale: false,
-      isRefetching: false,
-      isLoadingSuccess: true,
-      remove: vi.fn(),
-      promise: Promise.resolve({ data: locations }),
-    };
-  }) as unknown) as typeof useQuery);
-  return mockGetLocations;
+}
+
+/** Real LocationsProvider + real QueryClient; list data flows through the mocked getLocations. */
+function renderTable() {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <LocationsProvider>
+        <LocationsTable />
+      </LocationsProvider>
+    </QueryClientProvider>,
+  );
+}
+
+/** Render and wait for the server page to load. */
+async function renderLoaded() {
+  const view = renderTable();
+  await screen.findByText('Студия на Невском');
+  return view;
 }
 
 function setupUpdateMock() {
@@ -226,18 +201,18 @@ describe('LocationsTable', () => {
     vi.restoreAllMocks();
   });
 
-  it('renders location names in the table', () => {
-    setupQuery(TEST_LOCATIONS);
-    render(<LocationsTable />);
+  it('renders location names in the table', async () => {
+    setupEnvelope();
+    await renderLoaded();
 
     expect(screen.getByText('Студия на Невском')).toBeInTheDocument();
     expect(screen.getByText('Гранд Отель Поляна')).toBeInTheDocument();
     expect(screen.getByText('Альпика')).toBeInTheDocument();
   });
 
-  it('renders location capacities', () => {
-    setupQuery(TEST_LOCATIONS);
-    const { container } = render(<LocationsTable />);
+  it('renders location capacities', async () => {
+    setupEnvelope();
+    const { container } = await renderLoaded();
 
     // Scope queries to tbody to avoid matching select option values
     const tbody = container.querySelector('tbody');
@@ -247,59 +222,84 @@ describe('LocationsTable', () => {
     expect(within(tbody!).getByText('15')).toBeInTheDocument();
   });
 
-  it('shows empty state when no locations', () => {
-    setupQuery([]);
-    render(<LocationsTable />);
+  it('shows empty state when no locations', async () => {
+    setupEnvelope({ items: [], total: 0 });
+    renderTable();
 
-    expect(screen.getByText('Локации не найдены')).toBeInTheDocument();
+    expect(await screen.findByText('Локации не найдены')).toBeInTheDocument();
   });
 
-  it('shows loading state', () => {
-    setupQuery([], true);
-    render(<LocationsTable />);
+  it('shows loading state', async () => {
+    mockGetLocations.mockReturnValue(new Promise<PaginatedResponse<LocationResponse>>(() => {}));
+    renderTable();
 
-    expect(screen.getByText('Загрузка...')).toBeInTheDocument();
+    expect(await screen.findByText('Загрузка...')).toBeInTheDocument();
   });
 
-  it('sorts by name when column header clicked', () => {
-    setupQuery(TEST_LOCATIONS);
-    render(<LocationsTable />);
+  // ─── Server fetch params (#205 §5.2/§5.3) ──────────────────────────────
 
-    const nameHeader = screen.getByText(/Название/);
-    fireEvent.click(nameHeader);
+  it('initial fetch sends page/per_page/status with NO sort params (server default order)', async () => {
+    setupEnvelope();
+    await renderLoaded();
 
-    // After sorting asc, names should appear alphabetically
-    const rows = screen.getAllByRole('row');
-    // Row 0 is header, row 1-3 are data
-    const firstDataRow = rows[1];
-    const secondDataRow = rows[2];
-    const thirdDataRow = rows[3];
-
-    expect(within(firstDataRow).getByText('Альпика')).toBeInTheDocument();
-    expect(within(secondDataRow).getByText('Гранд Отель Поляна')).toBeInTheDocument();
-    expect(within(thirdDataRow).getByText('Студия на Невском')).toBeInTheDocument();
+    expect(mockGetLocations).toHaveBeenCalledTimes(1);
+    expect(mockGetLocations).toHaveBeenCalledWith({ page: 1, per_page: 10, status: 'active' });
+    // sortBy starts null → sort params omitted → backend default
+    // sort_order/name/id order (preserves manual reorder).
+    expect(mockGetLocations.mock.calls[0][0]).not.toHaveProperty('sort_by');
+    expect(mockGetLocations.mock.calls[0][0]).not.toHaveProperty('sort_order');
   });
 
-  it('reverses sort direction on second click', () => {
-    setupQuery(TEST_LOCATIONS);
-    render(<LocationsTable />);
+  it('status filter change refetches with the new server status param', async () => {
+    setupEnvelope();
+    await renderLoaded();
 
-    const nameHeader = screen.getByText(/Название/);
-    // Click twice for desc
-    fireEvent.click(nameHeader);
-    fireEvent.click(nameHeader);
+    fireEvent.change(screen.getByLabelText('Фильтр по статусу'), {
+      target: { value: 'archived' },
+    });
 
-    const rows = screen.getAllByRole('row');
-    const firstDataRow = rows[1];
-    const thirdDataRow = rows[3];
-
-    expect(within(firstDataRow).getByText('Студия на Невском')).toBeInTheDocument();
-    expect(within(thirdDataRow).getByText('Альпика')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(mockGetLocations).toHaveBeenCalledWith({ page: 1, per_page: 10, status: 'archived' });
+    });
   });
 
-  it('filters by search text in name', () => {
-    setupQuery(TEST_LOCATIONS);
-    render(<LocationsTable />);
+  it('status filter "Все" refetches with status=all', async () => {
+    setupEnvelope();
+    await renderLoaded();
+
+    fireEvent.change(screen.getByLabelText('Фильтр по статусу'), {
+      target: { value: 'all' },
+    });
+
+    await waitFor(() => {
+      expect(mockGetLocations).toHaveBeenCalledWith({ page: 1, per_page: 10, status: 'all' });
+    });
+  });
+
+  it('resets status filter to active when reset button clicked', async () => {
+    setupEnvelope();
+    await renderLoaded();
+
+    fireEvent.change(screen.getByLabelText('Фильтр по статусу'), {
+      target: { value: 'archived' },
+    });
+    await waitFor(() => {
+      expect(mockGetLocations).toHaveBeenLastCalledWith({ page: 1, per_page: 10, status: 'archived' });
+    });
+
+    fireEvent.click(screen.getByText('Сбросить'));
+
+    await waitFor(() => {
+      expect(mockGetLocations).toHaveBeenLastCalledWith({ page: 1, per_page: 10, status: 'active' });
+    });
+    expect(screen.getByLabelText('Фильтр по статусу')).toHaveValue('active');
+  });
+
+  // ─── Search (G1b Q1 — KEPT: client-side filter over the loaded page) ───
+
+  it('filters the loaded page by search text in name (client-side)', async () => {
+    setupEnvelope();
+    await renderLoaded();
 
     const searchInput = screen.getByLabelText('Поиск по названию или адресу');
     fireEvent.change(searchInput, { target: { value: 'Невском' } });
@@ -309,9 +309,9 @@ describe('LocationsTable', () => {
     expect(screen.queryByText('Альпика')).not.toBeInTheDocument();
   });
 
-  it('filters by search text in address', () => {
-    setupQuery(TEST_LOCATIONS);
-    render(<LocationsTable />);
+  it('filters the loaded page by search text in address (client-side)', async () => {
+    setupEnvelope();
+    await renderLoaded();
 
     const searchInput = screen.getByLabelText('Поиск по названию или адресу');
     fireEvent.change(searchInput, { target: { value: 'лобби' } });
@@ -321,111 +321,129 @@ describe('LocationsTable', () => {
     expect(screen.queryByText('Альпика')).not.toBeInTheDocument();
   });
 
-  it('requests active locations by default', () => {
-    const spy = setupQuery(TEST_LOCATIONS);
-    render(<LocationsTable />);
-
-    expect(spy).toHaveBeenCalledWith({ per_page: 100, status: 'active' });
-  });
-
-  it('requests archived locations when filter is "Архив"', () => {
-    const spy = setupQuery(TEST_LOCATIONS);
-    render(<LocationsTable />);
-
-    fireEvent.change(screen.getByLabelText('Фильтр по статусу'), {
-      target: { value: 'archived' },
-    });
-
-    expect(spy).toHaveBeenCalledWith({ per_page: 100, status: 'archived' });
-  });
-
-  it('requests all locations when filter is "Все"', () => {
-    const spy = setupQuery(TEST_LOCATIONS);
-    render(<LocationsTable />);
-
-    fireEvent.change(screen.getByLabelText('Фильтр по статусу'), {
-      target: { value: 'all' },
-    });
-
-    expect(spy).toHaveBeenCalledWith({ per_page: 100, status: 'all' });
-  });
-
-  it('resets status filter to active when reset button clicked', () => {
-    const spy = setupQuery(TEST_LOCATIONS);
-    render(<LocationsTable />);
-
-    fireEvent.change(screen.getByLabelText('Фильтр по статусу'), {
-      target: { value: 'archived' },
-    });
-    fireEvent.click(screen.getByText('Сбросить'));
-
-    expect(screen.getByLabelText('Фильтр по статусу')).toHaveValue('active');
-    expect(spy).toHaveBeenLastCalledWith({ per_page: 100, status: 'active' });
-  });
-
-  it('resets filters when reset button clicked', () => {
-    setupQuery(TEST_LOCATIONS);
-    render(<LocationsTable />);
+  it('resets search filter when reset button clicked', async () => {
+    setupEnvelope();
+    await renderLoaded();
 
     const searchInput = screen.getByLabelText('Поиск по названию или адресу');
     fireEvent.change(searchInput, { target: { value: 'Невском' } });
 
-    // Only one visible now
     expect(screen.queryByText('Гранд Отель Поляна')).not.toBeInTheDocument();
 
-    // Click reset
-    const resetButton = screen.getByText('Сбросить');
-    fireEvent.click(resetButton);
+    fireEvent.click(screen.getByText('Сбросить'));
 
-    // All visible again
     expect(screen.getByText('Студия на Невском')).toBeInTheDocument();
     expect(screen.getByText('Гранд Отель Поляна')).toBeInTheDocument();
     expect(screen.getByText('Альпика')).toBeInTheDocument();
-
-    // Search input is cleared
     expect(searchInput).toHaveValue('');
   });
 
-  it('shows page count and total', () => {
-    setupQuery(TEST_LOCATIONS);
-    render(<LocationsTable />);
+  // ─── Server-driven pagination wiring ───────────────────────────────────
+
+  it('pager renders 5 numbered pages from server total 42 and page click refetches', async () => {
+    setupEnvelope({ total: 42 });
+    await renderLoaded();
+
+    expect(screen.getByText('42 всего')).toBeInTheDocument();
+    for (let i = 1; i <= 5; i += 1) {
+      expect(screen.getByRole('button', { name: String(i) })).toBeInTheDocument();
+    }
+
+    fireEvent.click(screen.getByRole('button', { name: '2' }));
+
+    await waitFor(() => {
+      expect(mockGetLocations).toHaveBeenCalledWith({ page: 2, per_page: 10, status: 'active' });
+    });
+  });
+
+  it('page-size select refetches page 1 with the new per_page', async () => {
+    setupEnvelope({ total: 42 });
+    await renderLoaded();
+
+    fireEvent.change(screen.getByTestId('page-size-select'), { target: { value: '20' } });
+
+    await waitFor(() => {
+      expect(mockGetLocations).toHaveBeenCalledWith({ page: 1, per_page: 20, status: 'active' });
+    });
+  });
+
+  it('first header click sorts asc, second click toggles desc (server sort)', async () => {
+    setupEnvelope();
+    await renderLoaded();
+
+    const nameHeader = screen.getByText(/Название/);
+    // No sort picked yet → neutral indicator
+    expect(nameHeader.textContent).toContain('↕');
+
+    fireEvent.click(nameHeader);
+    await waitFor(() => {
+      expect(mockGetLocations).toHaveBeenCalledWith({
+        page: 1,
+        per_page: 10,
+        status: 'active',
+        sort_by: 'name',
+        sort_order: 'asc',
+      });
+    });
+    expect(screen.getByText(/Название/).textContent).toContain('↑');
+
+    fireEvent.click(nameHeader);
+    await waitFor(() => {
+      expect(mockGetLocations).toHaveBeenCalledWith({
+        page: 1,
+        per_page: 10,
+        status: 'active',
+        sort_by: 'name',
+        sort_order: 'desc',
+      });
+    });
+    expect(screen.getByText(/Название/).textContent).toContain('↓');
+  });
+
+  // ─── Chrome ─────────────────────────────────────────────────────────────
+
+  it('renders "Добавить локацию" button', async () => {
+    setupEnvelope();
+    await renderLoaded();
+    expect(screen.getByText('+ Добавить локацию')).toBeInTheDocument();
+  });
+
+  it('opens create modal when "Добавить локацию" clicked', async () => {
+    setupEnvelope();
+    await renderLoaded();
+    fireEvent.click(screen.getByText('+ Добавить локацию'));
+    expect(screen.getByText('Новая локация')).toBeInTheDocument();
+  });
+
+  it('opens create modal with empty name field', async () => {
+    setupEnvelope();
+    await renderLoaded();
+    fireEvent.click(screen.getByText('+ Добавить локацию'));
+    expect(screen.getByText('Новая локация')).toBeInTheDocument();
+    // Name input should be empty in create mode
+    const nameInput = screen.getByPlaceholderText('Студия на Тверской');
+    expect(nameInput).toHaveValue('');
+  });
+
+  it('shows "Удалить" option in action dropdown', async () => {
+    setupEnvelope();
+    await renderLoaded();
+    const actionButtons = screen.getAllByLabelText('Действия');
+    fireEvent.click(actionButtons[0]);
+    expect(screen.getByText('Удалить')).toBeInTheDocument();
+  });
+
+  it('shows page count and total', async () => {
+    setupEnvelope();
+    await renderLoaded();
 
     expect(screen.getByText('3 всего')).toBeInTheDocument();
   });
 
-  it('paginates with page size selector', () => {
-    // Create 25 locations to test pagination across 2+ pages
-    const manyLocations = Array.from({ length: 25 }, (_, i) =>
-      createMockLocationResponse({
-        id: `loc-${i}`,
-        name: `Локация ${String(i).padStart(2, '0')}`,
-        capacity: i + 1,
-        archived: false,
-      }),
-    );
-    setupQuery(manyLocations);
-    const { container } = render(<LocationsTable />);
-
-    expect(screen.getByText('25 всего')).toBeInTheDocument();
-
-    // Default page size is 10, should show 10 data rows
-    const tbody = container.querySelector('tbody');
-    expect(tbody).toBeInTheDocument();
-    let dataRows = tbody!.querySelectorAll('tr');
-    expect(dataRows).toHaveLength(10);
-
-    // Change page size to 20 (valid option)
-    const pageSizeSelect = screen.getByTestId('page-size-select');
-    fireEvent.change(pageSizeSelect, { target: { value: '20' } });
-
-    // Now shows 20 rows of data on page 1
-    dataRows = tbody!.querySelectorAll('tr');
-    expect(dataRows).toHaveLength(20);
-  });
-
-  it('shows yandex map link icon for locations with map url', () => {
-    setupQuery([mockLocationResponse]);
-    render(<LocationsTable />);
+  it('shows yandex map link icon for locations with map url', async () => {
+    setupEnvelope({ items: [mockLocationResponse], total: 1 });
+    renderTable();
+    await screen.findByText('Студия на Невском');
 
     // The location has yandex_map_url, should have a link
     const mapLink = screen.getByLabelText('Карта');
@@ -434,47 +452,12 @@ describe('LocationsTable', () => {
     expect(mapLink).toHaveAttribute('target', '_blank');
   });
 
-  it('does not show map link when yandex_map_url is null', () => {
-    setupQuery([mockLocationResponseArchived]);
-    render(<LocationsTable />);
+  it('does not show map link when yandex_map_url is null', async () => {
+    setupEnvelope({ items: [mockLocationResponseArchived], total: 1 });
+    renderTable();
+    await screen.findByText('Гранд Отель Поляна');
 
     expect(screen.queryByLabelText('Карта')).not.toBeInTheDocument();
-  });
-
-  // ─── Create functionality ────────────────────────────────────────────
-
-  it('renders "Добавить локацию" button', () => {
-    setupQuery(TEST_LOCATIONS);
-    render(<LocationsTable />);
-    expect(screen.getByText('+ Добавить локацию')).toBeInTheDocument();
-  });
-
-  it('opens create modal when "Добавить локацию" clicked', () => {
-    setupQuery(TEST_LOCATIONS);
-    render(<LocationsTable />);
-    fireEvent.click(screen.getByText('+ Добавить локацию'));
-    expect(screen.getByText('Новая локация')).toBeInTheDocument();
-  });
-
-  it('opens create modal with empty name field', () => {
-    setupQuery(TEST_LOCATIONS);
-    render(<LocationsTable />);
-    fireEvent.click(screen.getByText('+ Добавить локацию'));
-    expect(screen.getByText('Новая локация')).toBeInTheDocument();
-    // Name input should be empty in create mode
-    const nameInput = screen.getByPlaceholderText('Студия на Тверской');
-    expect(nameInput).toHaveValue('');
-  });
-
-  // ─── Delete functionality ────────────────────────────────────────────
-
-  it('shows "Удалить" option in action dropdown', () => {
-    setupQuery(TEST_LOCATIONS);
-    render(<LocationsTable />);
-    // Open action menu for first location
-    const actionButtons = screen.getAllByLabelText('Действия');
-    fireEvent.click(actionButtons[0]);
-    expect(screen.getByText('Удалить')).toBeInTheDocument();
   });
 
   // ─── Delete → DeleteDialog flow (#207 §7) ──────────────────────────────
@@ -505,22 +488,23 @@ describe('LocationsTable', () => {
 
   it('opens DeleteDialog with the 409 dependency tree when delete conflicts', async () => {
     const deleteMutateAsync = setupDeleteConflict(DEPS_BLOCKED);
-    setupQuery(TEST_LOCATIONS);
-    render(<LocationsTable />);
+    setupEnvelope();
+    await renderLoaded();
 
     const actionButtons = screen.getAllByLabelText('Действия');
     fireEvent.click(actionButtons[0]);
     fireEvent.click(screen.getByText('Удалить'));
 
     expect(deleteMutateAsync).toHaveBeenCalledWith('loc-1');
+    // window.confirm is gone — the dialog takes over (§7.3 fetch flow)
     await waitFor(() => expect(screen.getByTestId('delete-dialog')).toBeInTheDocument());
     expect(screen.getByTestId('delete-dialog-title').textContent).toContain('Студия на Невском');
   });
 
   it('Mode B (blocked by activities) shows "Архивировать" instead of "Удалить"', async () => {
     setupDeleteConflict(DEPS_BLOCKED);
-    setupQuery(TEST_LOCATIONS);
-    render(<LocationsTable />);
+    setupEnvelope();
+    await renderLoaded();
 
     fireEvent.click(screen.getAllByLabelText('Действия')[0]);
     fireEvent.click(screen.getByText('Удалить'));
@@ -535,8 +519,8 @@ describe('LocationsTable', () => {
     setupDeleteConflict(DEPS_BLOCKED);
     const archiveMutateAsync = vi.fn().mockResolvedValue(createMockLocationResponse({ id: 'loc-1', archived: true }));
     mockUseArchiveLocation.mockReturnValue({ mutateAsync: archiveMutateAsync, isPending: false } as never);
-    setupQuery(TEST_LOCATIONS);
-    render(<LocationsTable />);
+    setupEnvelope();
+    await renderLoaded();
 
     fireEvent.click(screen.getAllByLabelText('Действия')[0]);
     fireEvent.click(screen.getByText('Удалить'));
@@ -551,13 +535,14 @@ describe('LocationsTable', () => {
   it('Mode A confirm calls resolveDeleteLocation with {} (all deps auto) and closes', async () => {
     setupDeleteConflict(DEPS_AUTO);
     mockResolveDeleteLocation.mockResolvedValue(undefined);
-    setupQuery(TEST_LOCATIONS);
-    render(<LocationsTable />);
+    setupEnvelope();
+    await renderLoaded();
 
     fireEvent.click(screen.getAllByLabelText('Действия')[0]);
     fireEvent.click(screen.getByText('Удалить'));
 
     await waitFor(() => expect(screen.getByTestId('delete-dialog-confirm-input')).toBeInTheDocument());
+    // Type-to-confirm unlocks the button
     fireEvent.change(screen.getByTestId('delete-dialog-confirm-input'), {
       target: { value: 'Студия на Невском' },
     });
@@ -571,6 +556,10 @@ describe('LocationsTable', () => {
   });
 
   it('204 dry-run success → instant delete: dry-run call happens, no dialog opens', async () => {
+    // Hook-level cross-invalidation (['locations'] + ['records']) is covered by
+    // useLocationsMutations.test.ts — the mutation is mocked out here, so this
+    // test asserts table behavior only: the dry-run fires and the dialog
+    // never opens when the delete succeeds.
     const deleteMutateAsync = vi.fn().mockResolvedValue(undefined);
     mockUseDeleteLocation.mockReturnValue({
       mutateAsync: deleteMutateAsync,
@@ -590,8 +579,8 @@ describe('LocationsTable', () => {
       context: undefined,
       submittedAt: 0,
     } as unknown as ReturnType<typeof useDeleteLocation>);
-    setupQuery(TEST_LOCATIONS);
-    render(<LocationsTable />);
+    setupEnvelope();
+    await renderLoaded();
 
     fireEvent.click(screen.getAllByLabelText('Действия')[0]);
     fireEvent.click(screen.getByText('Удалить'));
@@ -602,8 +591,8 @@ describe('LocationsTable', () => {
 
   it('cancel closes the dialog without executing a delete', async () => {
     const deleteMutateAsync = setupDeleteConflict(DEPS_BLOCKED);
-    setupQuery(TEST_LOCATIONS);
-    render(<LocationsTable />);
+    setupEnvelope();
+    await renderLoaded();
 
     fireEvent.click(screen.getAllByLabelText('Действия')[0]);
     fireEvent.click(screen.getByText('Удалить'));
@@ -612,6 +601,7 @@ describe('LocationsTable', () => {
     fireEvent.click(screen.getByTestId('delete-dialog-cancel-btn'));
 
     expect(screen.queryByTestId('delete-dialog')).not.toBeInTheDocument();
+    // Only the dry-run attempt happened — never executed beyond it
     expect(deleteMutateAsync).toHaveBeenCalledTimes(1);
   });
 
@@ -622,8 +612,8 @@ describe('LocationsTable', () => {
     const patchMutateAsync = vi.fn();
     mockUseArchiveLocation.mockReturnValue({ mutateAsync: archiveMutateAsync, isPending: false } as never);
     mockUsePatchLocation.mockReturnValue({ mutateAsync: patchMutateAsync, isPending: false } as never);
-    setupQuery(TEST_LOCATIONS);
-    render(<LocationsTable />);
+    setupEnvelope();
+    await renderLoaded();
 
     fireEvent.click(screen.getAllByLabelText('Действия')[0]);
     fireEvent.click(screen.getByText('В архив'));
@@ -637,10 +627,10 @@ describe('LocationsTable', () => {
     const patchMutateAsync = vi.fn();
     mockUseRestoreLocation.mockReturnValue({ mutateAsync: restoreMutateAsync, isPending: false } as never);
     mockUsePatchLocation.mockReturnValue({ mutateAsync: patchMutateAsync, isPending: false } as never);
-    setupQuery(TEST_LOCATIONS);
-    render(<LocationsTable />);
+    setupEnvelope();
+    await renderLoaded();
 
-    // loc-2 is archived (row index 1) → its dropdown shows "Восстановить"
+    // loc-2 is archived → its dropdown shows "Восстановить"
     fireEvent.click(screen.getAllByLabelText('Действия')[1]);
     fireEvent.click(screen.getByText('Восстановить'));
 
@@ -650,15 +640,15 @@ describe('LocationsTable', () => {
 
   // ─── Column picker ──────────────────────────────────────────────────────
 
-  it('renders column picker gear button', () => {
-    setupQuery(TEST_LOCATIONS);
-    render(<LocationsTable />);
+  it('renders column picker gear button', async () => {
+    setupEnvelope();
+    await renderLoaded();
     expect(screen.getByLabelText('Настроить колонки')).toBeInTheDocument();
   });
 
-  it('shows default visible columns by default', () => {
-    setupQuery(TEST_LOCATIONS);
-    render(<LocationsTable />);
+  it('shows default visible columns by default', async () => {
+    setupEnvelope();
+    await renderLoaded();
     // Default visible: name, capacity, address, location_hint
     // Column headers include sort icon ↕, so use partial matching
     expect(screen.getByText(/Название/)).toBeInTheDocument();
@@ -667,9 +657,9 @@ describe('LocationsTable', () => {
     expect(screen.getByText(/Подсказка/)).toBeInTheDocument();
   });
 
-  it('hides non-default columns by default', () => {
-    setupQuery(TEST_LOCATIONS);
-    const { container } = render(<LocationsTable />);
+  it('hides non-default columns by default', async () => {
+    setupEnvelope();
+    const { container } = await renderLoaded();
     // Check that column headers for hidden columns are NOT in the table header
     const thead = container.querySelector('thead');
     expect(thead?.textContent).not.toMatch(/Описание/);
@@ -678,10 +668,11 @@ describe('LocationsTable', () => {
     expect(thead?.textContent).not.toMatch(/Создано/);
   });
 
-  it('shows hidden column in table when loaded from localStorage', () => {
+  it('shows hidden column in table when loaded from localStorage', async () => {
     localStorage.setItem('locations-columns', JSON.stringify(['name', 'description']));
-    setupQuery(TEST_LOCATIONS);
-    render(<LocationsTable />);
+    setupEnvelope();
+    renderTable();
+    await screen.findByText('Студия на Невском');
     // "Описание" should be visible as a column header (includes sort icon)
     expect(screen.getByText(/Описание/)).toBeInTheDocument();
     // "Вместимость" should NOT be visible (not in localStorage set)
@@ -689,9 +680,9 @@ describe('LocationsTable', () => {
     expect(thead?.textContent).not.toMatch(/Вместимость/);
   });
 
-  it('toggles column visibility via ColumnPicker', () => {
-    setupQuery(TEST_LOCATIONS);
-    render(<LocationsTable />);
+  it('toggles column visibility via ColumnPicker', async () => {
+    setupEnvelope();
+    await renderLoaded();
 
     // Open picker
     fireEvent.click(screen.getByLabelText('Настроить колонки'));
@@ -711,8 +702,8 @@ describe('LocationsTable', () => {
 
   it('edit submit on archived location sends no archive flag (GH #195/#207)', async () => {
     const updateMutateAsync = setupUpdateMock();
-    setupQuery(TEST_LOCATIONS);
-    render(<LocationsTable />);
+    setupEnvelope();
+    await renderLoaded();
 
     // Open the edit modal on the archived row (mockLocationResponseArchived
     // id=loc-2, displayed as "Гранд Отель Поляна").

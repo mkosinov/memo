@@ -1,8 +1,13 @@
 """Pydantic schemas for the masters domain."""
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
+
+# Sort whitelist for GET /api/v1/masters (#205 Task 3, spec §4.5).
+# Keys = exactly the sortable column keys the Masters table headers use.
+MasterSortBy = Literal["name", "specialty", "position", "color", "avatar", "status"]
 
 
 class MasterBase(BaseModel):

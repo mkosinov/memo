@@ -1,15 +1,17 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
-import { getMaterials } from '@memo/api-client';
+import { useQueryClient } from '@tanstack/react-query';
 import type { MaterialResponse, MaterialUpdate, DependencyNode } from '@memo/api-client';
 import { resolveDeleteMaterial, ApiError } from '@memo/api-client';
 import { useUpdateMaterial, useCreateMaterial, useDeleteMaterial, useArchiveMaterial, useRestoreMaterial } from '@/hooks/useMaterialsMutations';
 import { useUI } from '@/contexts/UIContext';
+import { useMaterialsTable } from '@/contexts/MaterialsContext';
 import { MaterialModal } from './MaterialModal';
+import { ServiceFilters } from './ServiceFilters';
 import { ColumnPicker } from './ColumnPicker';
 import { DeleteDialog } from '@/app/components/DeleteDialog';
+import { ErrorState } from '@/app/components/error';
 import { parseApiError } from '@/app/lib/api/parseApiError';
 
 // ─── Column definitions ─────────────────────────────────────────────────
@@ -19,7 +21,6 @@ interface ColumnDef {
   label: string;
   defaultVisible: boolean;
   render: (m: MaterialResponse) => React.ReactNode;
-  sortValue?: (m: MaterialResponse) => string | number;
 }
 
 const ALL_COLUMNS: ColumnDef[] = [
@@ -32,7 +33,6 @@ const ALL_COLUMNS: ColumnDef[] = [
         {m.title}
       </span>
     ),
-    sortValue: (m) => m.title,
   },
   {
     key: 'description',
@@ -43,7 +43,6 @@ const ALL_COLUMNS: ColumnDef[] = [
         {m.description || '—'}
       </span>
     ),
-    sortValue: (m) => m.description,
   },
   {
     key: 'archived',
@@ -60,7 +59,6 @@ const ALL_COLUMNS: ColumnDef[] = [
         {m.archived ? 'Архив' : 'Активен'}
       </span>
     ),
-    sortValue: (m) => (m.archived ? 1 : 0),
   },
   {
     key: 'created_at',
@@ -71,7 +69,6 @@ const ALL_COLUMNS: ColumnDef[] = [
         {new Date(m.created_at).toLocaleDateString('ru-RU')}
       </span>
     ),
-    sortValue: (m) => m.created_at,
   },
 ];
 
@@ -92,18 +89,28 @@ function loadVisibleKeys(): string[] | null {
 // ─── Component ────────────────────────────────────────────────────────
 
 export function MaterialsTable() {
-  // ─── Filter state ────────────────────────────────────────────────────
-  // `status` is declared above `useQuery` because the query is keyed on it
-  // (server-side archive filter via ListParams.status).
-  const [search, setSearch] = useState('');
-  const [status, setStatus] = useState<'active' | 'all' | 'archived'>('active');
+  // ─── Server pagination/sort state (MaterialsContext, #205 §5.2) ──────
+  const {
+    items,
+    total,
+    page,
+    perPage,
+    sortBy,
+    sortOrder,
+    status,
+    isLoading,
+    error,
+    setPage,
+    setPerPage,
+    setSort,
+    setStatus,
+    refetch,
+  } = useMaterialsTable();
 
-  const { data: materials = [], isLoading } = useQuery<MaterialResponse[], Error>({
-    queryKey: ['materials', status],
-    queryFn: () => getMaterials({ per_page: 100, status }).then(r => r.items),
-    staleTime: 5 * 60 * 1000,
-    placeholderData: keepPreviousData,
-  });
+  // ─── Filter state ────────────────────────────────────────────────────
+  // Search stays client-side (G1b Q1): it filters the currently loaded page
+  // only — the temporary degradation until server ?q= lands in #212.
+  const [search, setSearch] = useState('');
 
   const updateMaterial = useUpdateMaterial();
   const createMaterial = useCreateMaterial();
@@ -112,14 +119,6 @@ export function MaterialsTable() {
   const restoreMaterial = useRestoreMaterial();
   const queryClient = useQueryClient();
   const { showToast } = useUI();
-
-  // Sort state
-  const [sortField, setSortField] = useState<string | null>(null);
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
-
-  // Pagination
-  const [page, setPage] = useState(0);
-  const [pageSize, setPageSize] = useState(10);
 
   // Column visibility
   const defaultVisible = ALL_COLUMNS.filter((c) => c.defaultVisible).map(
@@ -151,63 +150,37 @@ export function MaterialsTable() {
     [visibleKeys],
   );
 
-  // ─── Filtering ──────────────────────────────────────────────────────
+  // ─── Filtered data (client-side search over the loaded page) ───────────
 
   const filteredMaterials = useMemo(() => {
-    return materials.filter((m) => {
+    return items.filter((m) => {
       if (search && !m.title.toLowerCase().includes(search.toLowerCase()))
         return false;
       return true;
     });
-  }, [materials, search]);
+  }, [items, search]);
 
-  // ─── Sorting ────────────────────────────────────────────────────────
+  // ─── Pagination (server-driven) ────────────────────────────────────────
+
+  const totalPages = Math.max(1, Math.ceil(total / perPage));
+
+  // ─── Sort handler ────────────────────────────────────────────────────
+  // All four material column keys (title, description, archived, created_at)
+  // are in the backend sort whitelist (#205 Task 3) — every key passes
+  // through as-is; `archived` maps to the is_active flip server-side.
 
   const handleSort = (field: string) => {
-    if (sortField === field) {
-      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    if (sortBy === field) {
+      setSort(field, sortOrder === 'asc' ? 'desc' : 'asc');
     } else {
-      setSortField(field);
-      setSortDir('asc');
+      setSort(field, 'asc');
     }
   };
 
   const sortIcon = (field: string) => {
-    if (sortField !== field) return ' ↕';
-    return sortDir === 'asc' ? ' ↑' : ' ↓';
+    if (sortBy !== field) return ' ↕';
+    return sortOrder === 'asc' ? ' ↑' : ' ↓';
   };
-
-  const sortedMaterials = useMemo(() => {
-    if (!sortField) return filteredMaterials;
-    const col = ALL_COLUMNS.find((c) => c.key === sortField);
-    if (!col?.sortValue) return filteredMaterials;
-    const sorted = [...filteredMaterials];
-    sorted.sort((a, b) => {
-      const aVal = col.sortValue!(a);
-      const bVal = col.sortValue!(b);
-      let cmp = 0;
-      if (typeof aVal === 'string' && typeof bVal === 'string') {
-        cmp = aVal.localeCompare(bVal);
-      } else {
-        cmp = (aVal as number) - (bVal as number);
-      }
-      return sortDir === 'asc' ? cmp : -cmp;
-    });
-    return sorted;
-  }, [filteredMaterials, sortField, sortDir]);
-
-  // ─── Pagination ─────────────────────────────────────────────────────
-
-  const paginatedMaterials = useMemo(() => {
-    return sortedMaterials.slice(page * pageSize, (page + 1) * pageSize);
-  }, [sortedMaterials, page, pageSize]);
-
-  const totalPages = Math.ceil(sortedMaterials.length / pageSize);
-
-  // Reset page when filters change
-  useEffect(() => {
-    setPage(0);
-  }, [search, status]);
 
   // Close action menu on outside click
   useEffect(() => {
@@ -287,6 +260,15 @@ export function MaterialsTable() {
     }
   };
 
+  if (error) {
+    return (
+      <ErrorState
+        error={error}
+        onRetry={refetch}
+      />
+    );
+  }
+
   if (isLoading) {
     return (
       <div className="px-4 py-12 text-center text-sm" style={{ color: 'var(--ink-light)' }}>
@@ -303,62 +285,16 @@ export function MaterialsTable() {
         style={{ borderColor: 'var(--line)', backgroundColor: 'var(--white)' }}
       >
         <div className="flex items-center justify-between">
-          <div className="flex flex-wrap items-end gap-3">
-            <div className="flex flex-col gap-1">
-              <label
-                className="text-xs font-medium"
-                style={{ color: 'var(--ink-light)' }}
-              >
-                Поиск
-              </label>
-              <input
-                type="text"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Название..."
-                className="rounded-lg border px-2 py-1.5 text-xs"
-                style={{
-                  borderColor: 'var(--line)',
-                  color: 'var(--ink-mid)',
-                  backgroundColor: 'var(--white)',
-                }}
-                aria-label="Поиск по названию"
-              />
-            </div>
-            <div className="flex flex-col gap-1">
-              <label
-                className="text-xs font-medium"
-                style={{ color: 'var(--ink-light)' }}
-              >
-                Статус
-              </label>
-              <select
-                value={status}
-                onChange={(e) => setStatus(e.target.value as 'active' | 'all' | 'archived')}
-                className="rounded-lg border px-2 py-1.5 text-xs"
-                style={{
-                  borderColor: 'var(--line)',
-                  color: 'var(--ink-mid)',
-                  backgroundColor: 'var(--white)',
-                }}
-                aria-label="Фильтр по статусу"
-              >
-                <option value="active">Активные</option>
-                <option value="all">Все</option>
-                <option value="archived">Архив</option>
-              </select>
-            </div>
-            <button
-              onClick={() => {
-                setSearch('');
-                setStatus('active');
-              }}
-              className="px-3 py-1.5 text-xs font-medium transition-colors rounded-lg"
-              style={{ color: 'var(--brand)', border: '1px solid var(--brand)' }}
-            >
-              Сбросить
-            </button>
-          </div>
+          <ServiceFilters
+            search={search}
+            status={status}
+            onSearchChange={setSearch}
+            onStatusChange={(v) => setStatus(v as 'active' | 'all' | 'archived')}
+            onReset={() => {
+              setSearch('');
+              setStatus('active');
+            }}
+          />
           <div className="flex items-center gap-2">
             <button
               onClick={handleCreate}
@@ -393,17 +329,17 @@ export function MaterialsTable() {
                   key={col.key}
                   className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none"
                   style={{ color: 'var(--ink-light)' }}
-                  onClick={() => col.sortValue && handleSort(col.key)}
+                  onClick={() => handleSort(col.key)}
                 >
                   {col.label}
-                  {col.sortValue ? sortIcon(col.key) : ''}
+                  {sortIcon(col.key)}
                 </th>
               ))}
               <th className="w-10" />
             </tr>
           </thead>
           <tbody>
-            {paginatedMaterials.map((material) => (
+            {filteredMaterials.map((material) => (
               <tr
                 key={material.id}
                 onClick={() => handleEdit(material)}
@@ -462,7 +398,7 @@ export function MaterialsTable() {
                 </td>
               </tr>
             ))}
-            {paginatedMaterials.length === 0 && (
+            {filteredMaterials.length === 0 && (
               <tr>
                 <td
                   colSpan={visibleColumns.length + 1}
@@ -477,72 +413,63 @@ export function MaterialsTable() {
         </table>
 
         {/* Pagination */}
-        {sortedMaterials.length > 0 && (
-          <div
-            className="flex items-center justify-between px-4 py-3 border-t"
-            style={{ borderColor: 'var(--line)' }}
-          >
-            <div
-              className="flex items-center gap-2 text-sm"
-              style={{ color: 'var(--ink-light)' }}
+        <div
+          className="flex items-center justify-between px-4 py-3 border-t"
+          style={{ borderColor: 'var(--line)' }}
+        >
+          <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--ink-light)' }}>
+            <span>Строк:</span>
+            <select
+              value={perPage}
+              onChange={(e) => setPerPage(Number(e.target.value) || 10)}
+              className="border rounded px-2 py-1 text-xs"
+              style={{
+                borderColor: 'var(--line)',
+                backgroundColor: 'var(--white)',
+                color: 'var(--ink)',
+              }}
+              data-testid="page-size-select"
             >
-              <span>Строк:</span>
-              <select
-                value={pageSize}
-                onChange={(e) => {
-                  setPageSize(Number(e.target.value));
-                  setPage(0);
-                }}
-                className="border rounded px-2 py-1 text-xs"
+              <option value={10}>10</option>
+              <option value={20}>20</option>
+              <option value={50}>50</option>
+              <option value={100}>100</option>
+            </select>
+            <span>{total} всего</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setPage(Math.max(1, page - 1))}
+              disabled={page <= 1}
+              className="px-3 py-1 text-sm rounded border disabled:opacity-30"
+              style={{ borderColor: 'var(--line)', color: 'var(--ink)' }}
+            >
+              ←
+            </button>
+            {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
+              <button
+                key={p}
+                onClick={() => setPage(p)}
+                className={`px-3 py-1 text-sm rounded border ${p === page ? 'font-bold' : ''}`}
                 style={{
                   borderColor: 'var(--line)',
-                  backgroundColor: 'var(--white)',
-                  color: 'var(--ink)',
+                  backgroundColor: p === page ? 'var(--brand)' : 'transparent',
+                  color: p === page ? 'white' : 'var(--ink)',
                 }}
               >
-                <option value={10}>10</option>
-                <option value={20}>20</option>
-                <option value={50}>50</option>
-              </select>
-              <span>{sortedMaterials.length} всего</span>
-            </div>
-            <div className="flex items-center gap-1">
-              <button
-                onClick={() => setPage(Math.max(0, page - 1))}
-                disabled={page === 0}
-                className="px-3 py-1 text-sm rounded border disabled:opacity-30"
-                style={{ borderColor: 'var(--line)', color: 'var(--ink)' }}
-              >
-                ←
+                {p}
               </button>
-              {Array.from({ length: totalPages }, (_, i) => (
-                <button
-                  key={i}
-                  onClick={() => setPage(i)}
-                  className={`px-3 py-1 text-sm rounded border ${
-                    i === page ? 'font-bold' : ''
-                  }`}
-                  style={{
-                    borderColor: 'var(--line)',
-                    backgroundColor:
-                      i === page ? 'var(--brand)' : 'transparent',
-                    color: i === page ? 'white' : 'var(--ink)',
-                  }}
-                >
-                  {i + 1}
-                </button>
-              ))}
-              <button
-                onClick={() => setPage(Math.min(totalPages - 1, page + 1))}
-                disabled={page >= totalPages - 1}
-                className="px-3 py-1 text-sm rounded border disabled:opacity-30"
-                style={{ borderColor: 'var(--line)', color: 'var(--ink)' }}
-              >
-                →
-              </button>
-            </div>
+            ))}
+            <button
+              onClick={() => setPage(Math.min(totalPages, page + 1))}
+              disabled={page >= totalPages}
+              className="px-3 py-1 text-sm rounded border disabled:opacity-30"
+              style={{ borderColor: 'var(--line)', color: 'var(--ink)' }}
+            >
+              →
+            </button>
           </div>
-        )}
+        </div>
       </div>
 
       {/* Edit Modal */}

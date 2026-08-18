@@ -2,6 +2,7 @@
 
 import React from 'react';
 import { MastersTable } from './components/MastersTable';
+import { MastersProvider } from '@/contexts/MastersContext';
 
 export default function MastersPage() {
   return (
@@ -21,7 +22,9 @@ export default function MastersPage() {
         className="rounded-xl border overflow-hidden"
         style={{ borderColor: 'var(--line)', backgroundColor: 'var(--white)' }}
       >
-        <MastersTable />
+        <MastersProvider>
+          <MastersTable />
+        </MastersProvider>
       </div>
     </div>
   );

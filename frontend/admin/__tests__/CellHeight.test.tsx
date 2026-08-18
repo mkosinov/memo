@@ -9,9 +9,9 @@ import { NavigationProvider } from '../contexts/NavigationContext';
 vi.mock('@memo/api-client', () => {
   const wrap = (items: any[]) => ({ items, total: items.length, page: 1, per_page: 100 });
   return ({
-  getMasters: vi.fn().mockResolvedValue(wrap([])),
-  getLocations: vi.fn().mockResolvedValue(wrap([])),
-  getServices: vi.fn().mockResolvedValue(wrap([])),
+  getAllMasters: vi.fn().mockResolvedValue([]),
+  getAllLocations: vi.fn().mockResolvedValue([]),
+  getAllServices: vi.fn().mockResolvedValue([]),
   getActivities: vi.fn().mockResolvedValue(wrap([])),
   createActivity: vi.fn(),
   updateActivity: vi.fn(),

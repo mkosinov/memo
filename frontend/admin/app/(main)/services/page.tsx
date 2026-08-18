@@ -3,6 +3,8 @@
 import React, { useState } from 'react';
 import { ServicesTable } from './components/ServicesTable';
 import { MaterialsTable } from './components/MaterialsTable';
+import { ServicesProvider } from '@/contexts/ServicesContext';
+import { MaterialsProvider } from '@/contexts/MaterialsContext';
 
 export default function ServicesPage() {
   const [view, setView] = useState<'services' | 'materials'>('services');
@@ -46,7 +48,18 @@ export default function ServicesPage() {
         className="rounded-xl border overflow-hidden"
         style={{ borderColor: 'var(--line)', backgroundColor: 'var(--white)' }}
       >
-        {view === 'services' ? <ServicesTable /> : <MaterialsTable />}
+        {/* Each table sits inside its own server-pagination provider (#205):
+            ServicesProvider (Task 9), MaterialsProvider (Task 10) — the two
+            branches render independently, so there's no nesting conflict. */}
+        {view === 'services' ? (
+          <ServicesProvider>
+            <ServicesTable />
+          </ServicesProvider>
+        ) : (
+          <MaterialsProvider>
+            <MaterialsTable />
+          </MaterialsProvider>
+        )}
       </div>
     </div>
   );

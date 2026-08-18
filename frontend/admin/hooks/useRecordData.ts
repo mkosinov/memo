@@ -3,8 +3,8 @@
 import { useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';
 import {
-  getRecord, getClientVisitors, getActivity, getServices,
-  getMasters, getLocations, getPayments,
+  getRecord, getClientVisitors, getActivity, getAllServices,
+  getAllMasters, getAllLocations, getPayments,
 } from '@memo/api-client';
 import type { VisitStatus } from '@memo/domain';
 import { computeRecordStatus } from '@memo/domain';
@@ -30,17 +30,17 @@ export function useRecordData(recordId: string, clientId: string) {
 
   const { data: services = [] } = useQuery({
     queryKey: ['services'],
-    queryFn: () => getServices({ per_page: 100 }).then(r => r.items),
+    queryFn: () => getAllServices(),
   });
 
   const { data: masters = [] } = useQuery({
     queryKey: ['masters'],
-    queryFn: () => getMasters({ per_page: 100 }).then(r => r.items),
+    queryFn: () => getAllMasters(),
   });
 
   const { data: locations = [] } = useQuery({
     queryKey: ['locations'],
-    queryFn: () => getLocations({ per_page: 100 }).then(r => r.items),
+    queryFn: () => getAllLocations(),
   });
 
   const { data: payments = [] } = useQuery({

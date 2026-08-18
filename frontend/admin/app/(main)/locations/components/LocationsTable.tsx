@@ -1,14 +1,13 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
-import { useQuery, keepPreviousData } from '@tanstack/react-query';
-import { getLocations } from '@memo/api-client';
+import React, { useMemo, useState } from 'react';
 import type { LocationResponse } from '@memo/api-client';
 import { useUpdateLocation, useCreateLocation, useDeleteLocation, useArchiveLocation, useRestoreLocation } from '@/hooks/useLocationsMutations';
 import type { LocationUpdate, DependencyNode } from '@memo/api-client';
 import { resolveDeleteLocation, ApiError } from '@memo/api-client';
 import { useQueryClient } from '@tanstack/react-query';
 import { useUI } from '@/contexts/UIContext';
+import { useLocationsTable } from '@/contexts/LocationsContext';
 import { LocationModal } from './LocationModal';
 import { LocationFilters } from './LocationFilters';
 import { LOCATION_FIELDS } from './locationFields';
@@ -41,19 +40,28 @@ const COLUMNS: Column[] = [
 // ─── Component ───────────────────────────────────────────────────────────
 
 export function LocationsTable() {
-  // ─── Filter state ────────────────────────────────────────────────────
-  // `status` is declared above `useQuery` because the query is keyed on it
-  // (server-side archive filter via ListParams.status).
-  const [search, setSearch] = useState('');
-  const [status, setStatus] = useState<'active' | 'all' | 'archived'>('active');
-  const [page, setPage] = useState(0);
-  const [pageSize, setPageSize] = useState(10);
+  // ─── Server pagination/sort state (LocationsContext, #205 §5.2) ────────
+  const {
+    items,
+    total,
+    page,
+    perPage,
+    sortBy,
+    sortOrder,
+    status,
+    isLoading,
+    error,
+    setPage,
+    setPerPage,
+    setSort,
+    setStatus,
+    refetch,
+  } = useLocationsTable();
 
-  const { data: locations = [], isLoading, error, refetch } = useQuery<LocationResponse[]>({
-    queryKey: ['locations', status],
-    queryFn: () => getLocations({ per_page: 100, status }).then(r => r.items),
-    placeholderData: keepPreviousData,
-  });
+  // ─── Filter state ────────────────────────────────────────────────────
+  // Search stays client-side (G1b Q1): it filters the currently loaded page
+  // only — the temporary degradation until server ?q= lands in #212.
+  const [search, setSearch] = useState('');
 
   const updateLocation = useUpdateLocation();
   const createLocation = useCreateLocation();
@@ -74,10 +82,6 @@ export function LocationsTable() {
 
   const VISIBLE_COLUMNS = COLUMNS.filter((c) => visibleKeys.includes(c.key));
 
-  // ─── Sort state ──────────────────────────────────────────────────────
-  const [sortField, setSortField] = useState<string | null>(null);
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
-
   // ─── Edit modal state ────────────────────────────────────────────────
   const [editLocation, setEditLocation] = useState<LocationResponse | null>(null);
 
@@ -93,15 +97,10 @@ export function LocationsTable() {
     dependencies: DependencyNode[];
   } | null>(null);
 
-  // Reset page when filters change
-  useEffect(() => {
-    setPage(0);
-  }, [search, status]);
-
-  // ─── Filtered data ───────────────────────────────────────────────────
+  // ─── Filtered data (client-side search over the loaded page) ───────────
 
   const filteredLocations = useMemo(() => {
-    return locations.filter((loc) => {
+    return items.filter((loc) => {
       if (search) {
         const q = search.toLowerCase();
         const nameMatch = loc.name.toLowerCase().includes(q);
@@ -110,51 +109,25 @@ export function LocationsTable() {
       }
       return true;
     });
-  }, [locations, search]);
+  }, [items, search]);
 
-  // ─── Sorted data ─────────────────────────────────────────────────────
+  // ─── Pagination (server-driven) ────────────────────────────────────────
 
-  const sortedLocations = useMemo(() => {
-    if (!sortField) return filteredLocations;
-    const sorted = [...filteredLocations];
-    sorted.sort((a, b) => {
-      const aVal = a[sortField as keyof LocationResponse];
-      const bVal = b[sortField as keyof LocationResponse];
-      let cmp = 0;
-      if (typeof aVal === 'string' && typeof bVal === 'string') {
-        cmp = aVal.localeCompare(bVal, 'ru');
-      } else if (typeof aVal === 'number' && typeof bVal === 'number') {
-        cmp = aVal - bVal;
-      } else if (typeof aVal === 'boolean' && typeof bVal === 'boolean') {
-        cmp = aVal === bVal ? 0 : aVal ? -1 : 1;
-      }
-      return sortDir === 'asc' ? cmp : -cmp;
-    });
-    return sorted;
-  }, [filteredLocations, sortField, sortDir]);
-
-  // ─── Pagination ──────────────────────────────────────────────────────
-
-  const paginatedLocations = useMemo(() => {
-    return sortedLocations.slice(page * pageSize, (page + 1) * pageSize);
-  }, [sortedLocations, page, pageSize]);
-
-  const totalPages = Math.max(1, Math.ceil(sortedLocations.length / (pageSize || 10)));
+  const totalPages = Math.max(1, Math.ceil(total / perPage));
 
   // ─── Sort handler ────────────────────────────────────────────────────
 
   const handleSort = (field: string) => {
-    if (sortField === field) {
-      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    if (sortBy === field) {
+      setSort(field, sortOrder === 'asc' ? 'desc' : 'asc');
     } else {
-      setSortField(field);
-      setSortDir('asc');
+      setSort(field, 'asc');
     }
   };
 
   const sortIcon = (field: string) => {
-    if (sortField !== field) return ' ↕';
-    return sortDir === 'asc' ? ' ↑' : ' ↓';
+    if (sortBy !== field) return ' ↕';
+    return sortOrder === 'asc' ? ' ↑' : ' ↓';
   };
 
   // ─── Edit handlers ───────────────────────────────────────────────────
@@ -323,7 +296,7 @@ export function LocationsTable() {
             </tr>
           </thead>
           <tbody>
-            {paginatedLocations.map((loc) => (
+            {filteredLocations.map((loc) => (
               <tr
                 key={loc.id}
                 onClick={() => setEditLocation(loc)}
@@ -465,7 +438,7 @@ export function LocationsTable() {
                 </td>
               </tr>
             ))}
-            {paginatedLocations.length === 0 && (
+            {filteredLocations.length === 0 && (
               <tr>
                 <td
                   colSpan={VISIBLE_COLUMNS.length + 1}
@@ -488,11 +461,8 @@ export function LocationsTable() {
         <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--ink-light)' }}>
           <span>Строк:</span>
           <select
-            value={pageSize}
-            onChange={(e) => {
-              setPageSize(Number(e.target.value) || 10);
-              setPage(0);
-            }}
+            value={perPage}
+            onChange={(e) => setPerPage(Number(e.target.value) || 10)}
             className="border rounded px-2 py-1 text-xs"
             style={{
               borderColor: 'var(--line)',
@@ -506,34 +476,34 @@ export function LocationsTable() {
             <option value={50}>50</option>
             <option value={100}>100</option>
           </select>
-          <span>{sortedLocations.length} всего</span>
+          <span>{total} всего</span>
         </div>
         <div className="flex items-center gap-1">
           <button
-            onClick={() => setPage(Math.max(0, page - 1))}
-            disabled={page === 0}
+            onClick={() => setPage(Math.max(1, page - 1))}
+            disabled={page <= 1}
             className="px-3 py-1 text-sm rounded border disabled:opacity-30"
             style={{ borderColor: 'var(--line)', color: 'var(--ink)' }}
           >
             ←
           </button>
-          {Array.from({ length: totalPages }, (_, i) => (
+          {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
             <button
-              key={i}
-              onClick={() => setPage(i)}
-              className={`px-3 py-1 text-sm rounded border ${i === page ? 'font-bold' : ''}`}
+              key={p}
+              onClick={() => setPage(p)}
+              className={`px-3 py-1 text-sm rounded border ${p === page ? 'font-bold' : ''}`}
               style={{
                 borderColor: 'var(--line)',
-                backgroundColor: i === page ? 'var(--brand)' : 'transparent',
-                color: i === page ? 'white' : 'var(--ink)',
+                backgroundColor: p === page ? 'var(--brand)' : 'transparent',
+                color: p === page ? 'white' : 'var(--ink)',
               }}
             >
-              {i + 1}
+              {p}
             </button>
           ))}
           <button
-            onClick={() => setPage(Math.min(totalPages - 1, page + 1))}
-            disabled={page >= totalPages - 1}
+            onClick={() => setPage(Math.min(totalPages, page + 1))}
+            disabled={page >= totalPages}
             className="px-3 py-1 text-sm rounded border disabled:opacity-30"
             style={{ borderColor: 'var(--line)', color: 'var(--ink)' }}
           >

@@ -36,6 +36,13 @@ A Material is a physical supply or tool used in master classes (e.g., paint, cla
 | POST | /api/v1/materials/{id}/archive | Archive (sets `archived: true`, HTTP 200 with body) — GH #207 |
 | POST | /api/v1/materials/{id}/restore | Restore (sets `archived: false`, HTTP 200 with body) — GH #207 |
 
+## List contract (GH #205)
+
+- **Paginated `GET /api/v1/materials`**: `page` (≥1), `per_page` (1-100, default 20), `status` (active|archived|all, default active), `sort_by` (Literal whitelist: `title, description, archived, created_at`; 422 on unknown), `sort_order` (asc|desc, default asc). Default order: `title ASC, id ASC` (spec §4.4).
+- **Bare `GET /api/v1/materials/all`**: bare JSON array (no envelope), `status` parity with paginated, deterministic order = same default. Protective `BARE_LIST_MAX_ROWS = 1000` → 422 English error naming entity + paginated endpoint (spec §4.3).
+- **Consumers**: Materials table = server-paginated via `MaterialsContext`; `getAllMaterials` ships for #214 combobox (no current lookup consumer) = `/all` (spec §5.5).
+- **Search matrix (spec §6)**: table search box = client-side filter over loaded page (until #212 server `?q=`); dictionary form dropdowns = client filter over `/all` (#214 combobox).
+
 ## Relationships
 - Service → has many Materials (via service_materials join)
 

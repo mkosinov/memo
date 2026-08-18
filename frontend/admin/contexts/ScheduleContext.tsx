@@ -10,7 +10,7 @@ import { useServices } from '@/hooks/useServices';
 import { useLocations } from '@/hooks/useLocations';
 import { useQuery } from '@tanstack/react-query';
 import {
-  getActivities, getMasters, getServices, getLocations,
+  getActivities, getAllMasters, getAllServices, getAllLocations,
   createActivity as apiCreateActivity,
   patchActivity as apiPatchActivity,
   deleteActivity as apiDeleteActivity,
@@ -272,17 +272,17 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
   });
   const { data: mastersRaw = [] } = useQuery<MasterResponse[]>({
     queryKey: ['masters'],
-    queryFn: () => getMasters({ per_page: 100 }).then(r => r.items),
+    queryFn: () => getAllMasters(),
     staleTime: 5 * 60 * 1000,
   });
   const { data: servicesRaw = [] } = useQuery<ServiceResponse[]>({
     queryKey: ['services'],
-    queryFn: () => getServices({ per_page: 100 }).then(r => r.items),
+    queryFn: () => getAllServices(),
     staleTime: 5 * 60 * 1000,
   });
   const { data: locationsRaw = [] } = useQuery<LocationResponse[]>({
     queryKey: ['locations'],
-    queryFn: () => getLocations({ per_page: 100 }).then(r => r.items),
+    queryFn: () => getAllLocations(),
     staleTime: 5 * 60 * 1000,
   });
 

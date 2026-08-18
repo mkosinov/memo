@@ -1,12 +1,12 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
-import { getServices } from '@memo/api-client';
+import { useQueryClient } from '@tanstack/react-query';
 import type { ServiceResponse, ServiceUpdate, DependencyNode } from '@memo/api-client';
 import { resolveDeleteService, ApiError } from '@memo/api-client';
 import { useUpdateService, useCreateService, useDeleteService, useArchiveService, useRestoreService } from '@/hooks/useServicesMutations';
 import { useUI } from '@/contexts/UIContext';
+import { useServicesTable } from '@/contexts/ServicesContext';
 import { ServiceModal } from './ServiceModal';
 import { ServiceFilters } from './ServiceFilters';
 import { ColumnPicker } from './ColumnPicker';
@@ -39,7 +39,8 @@ interface ColumnDef {
   label: string;
   defaultVisible: boolean;
   render: (s: ServiceResponse) => React.ReactNode;
-  sortValue?: (s: ServiceResponse) => string | number;
+  /** Server sort key exists in the backend whitelist (#205 Task 3). False only for `tags`. */
+  sortable?: boolean;
 }
 
 const ALL_COLUMNS: ColumnDef[] = [
@@ -52,7 +53,6 @@ const ALL_COLUMNS: ColumnDef[] = [
         {s.title}
       </span>
     ),
-    sortValue: (s) => s.title,
   },
   {
     key: 'duration',
@@ -61,7 +61,6 @@ const ALL_COLUMNS: ColumnDef[] = [
     render: (s) => (
       <span style={{ color: 'var(--ink-mid)' }}>{s.duration} мин</span>
     ),
-    sortValue: (s) => s.duration,
   },
   {
     key: 'age',
@@ -72,7 +71,6 @@ const ALL_COLUMNS: ColumnDef[] = [
         {s.min_age}–{s.max_age}
       </span>
     ),
-    sortValue: (s) => s.min_age,
   },
   {
     key: 'material_hint',
@@ -81,7 +79,6 @@ const ALL_COLUMNS: ColumnDef[] = [
     render: (s) => (
       <span style={{ color: 'var(--ink-mid)' }}>{s.material_hint ?? '—'}</span>
     ),
-    sortValue: (s) => s.material_hint ?? '',
   },
   {
     key: 'tariffs',
@@ -100,7 +97,6 @@ const ALL_COLUMNS: ColumnDef[] = [
         </span>
       );
     },
-    sortValue: (s) => s.tariffs.length,
   },
   {
     key: 'specialty',
@@ -109,12 +105,12 @@ const ALL_COLUMNS: ColumnDef[] = [
     render: (s) => (
       <span style={{ color: 'var(--ink-mid)' }}>{s.specialty || '—'}</span>
     ),
-    sortValue: (s) => s.specialty,
   },
   {
     key: 'tags',
     label: 'Теги',
     defaultVisible: false,
+    sortable: false, // no server sort key — backend whitelist has no tags mapping (#205 Task 3)
     render: (s) => (
       <span style={{ color: 'var(--ink-mid)' }}>
         {s.tags.length > 0 ? s.tags.map((t) => t.tag).join(', ') : '—'}
@@ -136,7 +132,6 @@ const ALL_COLUMNS: ColumnDef[] = [
         {s.archived ? 'Архив' : 'Активна'}
       </span>
     ),
-    sortValue: (s) => (s.archived ? 1 : 0),
   },
   {
     key: 'created_at',
@@ -147,7 +142,6 @@ const ALL_COLUMNS: ColumnDef[] = [
         {new Date(s.created_at).toLocaleDateString('ru-RU')}
       </span>
     ),
-    sortValue: (s) => s.created_at,
   },
 ];
 
@@ -168,18 +162,28 @@ function loadVisibleKeys(): string[] | null {
 // ─── Component ────────────────────────────────────────────────────────────
 
 export function ServicesTable() {
-  // ─── Filter state ────────────────────────────────────────────────────
-  // `status` is declared above `useQuery` because the query is keyed on it
-  // (server-side archive filter via ListParams.status).
-  const [search, setSearch] = useState('');
-  const [status, setStatus] = useState<'active' | 'all' | 'archived'>('active');
+  // ─── Server pagination/sort state (ServicesContext, #205 §5.2) ────────
+  const {
+    items,
+    total,
+    page,
+    perPage,
+    sortBy,
+    sortOrder,
+    status,
+    isLoading,
+    error,
+    setPage,
+    setPerPage,
+    setSort,
+    setStatus,
+    refetch,
+  } = useServicesTable();
 
-  const { data: services = [], isLoading, error, refetch } = useQuery<ServiceResponse[], Error>({
-    queryKey: ['services', status],
-    queryFn: () => getServices({ per_page: 100, status }).then(r => r.items),
-    staleTime: 5 * 60 * 1000,
-    placeholderData: keepPreviousData,
-  });
+  // ─── Filter state ────────────────────────────────────────────────────
+  // Search stays client-side (G1b Q1): it filters the currently loaded page
+  // only — the temporary degradation until server ?q= lands in #212.
+  const [search, setSearch] = useState('');
 
   const updateService = useUpdateService();
   const createService = useCreateService();
@@ -188,16 +192,6 @@ export function ServicesTable() {
   const restoreService = useRestoreService();
   const queryClient = useQueryClient();
   const { showToast } = useUI();
-
-  // Sort state
-
-  // Sort
-  const [sortField, setSortField] = useState<string | null>(null);
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
-
-  // Pagination
-  const [page, setPage] = useState(0);
-  const [pageSize, setPageSize] = useState(10);
 
   // Column visibility
   const defaultVisible = ALL_COLUMNS.filter((c) => c.defaultVisible).map(
@@ -229,63 +223,37 @@ export function ServicesTable() {
     [visibleKeys],
   );
 
-  // ─── Filtering ──────────────────────────────────────────────────────────
+  // ─── Filtered data (client-side search over the loaded page) ───────────
 
   const filteredServices = useMemo(() => {
-    return services.filter((s) => {
+    return items.filter((s) => {
       if (search && !s.title.toLowerCase().includes(search.toLowerCase()))
         return false;
       return true;
     });
-  }, [services, search]);
+  }, [items, search]);
 
-  // ─── Sorting ────────────────────────────────────────────────────────────
+  // ─── Pagination (server-driven) ────────────────────────────────────────
+
+  const totalPages = Math.max(1, Math.ceil(total / perPage));
+
+  // ─── Sort handler ────────────────────────────────────────────────────
+  // `tags` has no server sort key (backend whitelist, #205 Task 3) → gated
+  // off in its column def via `sortable`; every other key passes through
+  // as-is (`age` → min_age, `tariffs` → count subquery — backend maps them).
 
   const handleSort = (field: string) => {
-    if (sortField === field) {
-      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    if (sortBy === field) {
+      setSort(field, sortOrder === 'asc' ? 'desc' : 'asc');
     } else {
-      setSortField(field);
-      setSortDir('asc');
+      setSort(field, 'asc');
     }
   };
 
   const sortIcon = (field: string) => {
-    if (sortField !== field) return ' ↕';
-    return sortDir === 'asc' ? ' ↑' : ' ↓';
+    if (sortBy !== field) return ' ↕';
+    return sortOrder === 'asc' ? ' ↑' : ' ↓';
   };
-
-  const sortedServices = useMemo(() => {
-    if (!sortField) return filteredServices;
-    const col = ALL_COLUMNS.find((c) => c.key === sortField);
-    if (!col?.sortValue) return filteredServices;
-    const sorted = [...filteredServices];
-    sorted.sort((a, b) => {
-      const aVal = col.sortValue!(a);
-      const bVal = col.sortValue!(b);
-      let cmp = 0;
-      if (typeof aVal === 'string' && typeof bVal === 'string') {
-        cmp = aVal.localeCompare(bVal);
-      } else {
-        cmp = (aVal as number) - (bVal as number);
-      }
-      return sortDir === 'asc' ? cmp : -cmp;
-    });
-    return sorted;
-  }, [filteredServices, sortField, sortDir]);
-
-  // ─── Pagination ─────────────────────────────────────────────────────────
-
-  const paginatedServices = useMemo(() => {
-    return sortedServices.slice(page * pageSize, (page + 1) * pageSize);
-  }, [sortedServices, page, pageSize]);
-
-  const totalPages = Math.ceil(sortedServices.length / pageSize);
-
-  // Reset page when filters change
-  useEffect(() => {
-    setPage(0);
-  }, [search, status]);
 
   // Close action menu on outside click
   useEffect(() => {
@@ -443,17 +411,17 @@ export function ServicesTable() {
                   key={col.key}
                   className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none"
                   style={{ color: 'var(--ink-light)' }}
-                  onClick={() => col.sortValue && handleSort(col.key)}
+                  onClick={() => col.sortable !== false && handleSort(col.key)}
                 >
                   {col.label}
-                  {col.sortValue ? sortIcon(col.key) : ''}
+                  {col.sortable !== false ? sortIcon(col.key) : ''}
                 </th>
               ))}
               <th className="w-10" />
             </tr>
           </thead>
           <tbody>
-            {paginatedServices.map((service) => (
+            {filteredServices.map((service) => (
               <tr
                 key={service.id}
                 onClick={() => handleEdit(service)}
@@ -512,7 +480,7 @@ export function ServicesTable() {
                 </td>
               </tr>
             ))}
-            {paginatedServices.length === 0 && (
+            {filteredServices.length === 0 && (
               <tr>
                 <td
                   colSpan={visibleColumns.length + 1}
@@ -527,72 +495,63 @@ export function ServicesTable() {
         </table>
 
         {/* Pagination */}
-        {sortedServices.length > 0 && (
-          <div
-            className="flex items-center justify-between px-4 py-3 border-t"
-            style={{ borderColor: 'var(--line)' }}
-          >
-            <div
-              className="flex items-center gap-2 text-sm"
-              style={{ color: 'var(--ink-light)' }}
+        <div
+          className="flex items-center justify-between px-4 py-3 border-t"
+          style={{ borderColor: 'var(--line)' }}
+        >
+          <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--ink-light)' }}>
+            <span>Строк:</span>
+            <select
+              value={perPage}
+              onChange={(e) => setPerPage(Number(e.target.value) || 10)}
+              className="border rounded px-2 py-1 text-xs"
+              style={{
+                borderColor: 'var(--line)',
+                backgroundColor: 'var(--white)',
+                color: 'var(--ink)',
+              }}
+              data-testid="page-size-select"
             >
-              <span>Строк:</span>
-              <select
-                value={pageSize}
-                onChange={(e) => {
-                  setPageSize(Number(e.target.value));
-                  setPage(0);
-                }}
-                className="border rounded px-2 py-1 text-xs"
+              <option value={10}>10</option>
+              <option value={20}>20</option>
+              <option value={50}>50</option>
+              <option value={100}>100</option>
+            </select>
+            <span>{total} всего</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setPage(Math.max(1, page - 1))}
+              disabled={page <= 1}
+              className="px-3 py-1 text-sm rounded border disabled:opacity-30"
+              style={{ borderColor: 'var(--line)', color: 'var(--ink)' }}
+            >
+              ←
+            </button>
+            {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
+              <button
+                key={p}
+                onClick={() => setPage(p)}
+                className={`px-3 py-1 text-sm rounded border ${p === page ? 'font-bold' : ''}`}
                 style={{
                   borderColor: 'var(--line)',
-                  backgroundColor: 'var(--white)',
-                  color: 'var(--ink)',
+                  backgroundColor: p === page ? 'var(--brand)' : 'transparent',
+                  color: p === page ? 'white' : 'var(--ink)',
                 }}
               >
-                <option value={10}>10</option>
-                <option value={20}>20</option>
-                <option value={50}>50</option>
-              </select>
-              <span>{sortedServices.length} всего</span>
-            </div>
-            <div className="flex items-center gap-1">
-              <button
-                onClick={() => setPage(Math.max(0, page - 1))}
-                disabled={page === 0}
-                className="px-3 py-1 text-sm rounded border disabled:opacity-30"
-                style={{ borderColor: 'var(--line)', color: 'var(--ink)' }}
-              >
-                ←
+                {p}
               </button>
-              {Array.from({ length: totalPages }, (_, i) => (
-                <button
-                  key={i}
-                  onClick={() => setPage(i)}
-                  className={`px-3 py-1 text-sm rounded border ${
-                    i === page ? 'font-bold' : ''
-                  }`}
-                  style={{
-                    borderColor: 'var(--line)',
-                    backgroundColor:
-                      i === page ? 'var(--brand)' : 'transparent',
-                    color: i === page ? 'white' : 'var(--ink)',
-                  }}
-                >
-                  {i + 1}
-                </button>
-              ))}
-              <button
-                onClick={() => setPage(Math.min(totalPages - 1, page + 1))}
-                disabled={page >= totalPages - 1}
-                className="px-3 py-1 text-sm rounded border disabled:opacity-30"
-                style={{ borderColor: 'var(--line)', color: 'var(--ink)' }}
-              >
-                →
-              </button>
-            </div>
+            ))}
+            <button
+              onClick={() => setPage(Math.min(totalPages, page + 1))}
+              disabled={page >= totalPages}
+              className="px-3 py-1 text-sm rounded border disabled:opacity-30"
+              style={{ borderColor: 'var(--line)', color: 'var(--ink)' }}
+            >
+              →
+            </button>
           </div>
-        )}
+        </div>
       </div>
 
       {/* Edit Modal */}

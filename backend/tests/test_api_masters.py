@@ -527,3 +527,106 @@ class TestScenarioS3MasterBlockedArchiveFlow:
             len(query_db(f"SELECT * FROM activities WHERE master_id='{master['id']}'"))
             == 3
         )
+
+
+class TestMasterAllEndpoint:
+    """GET /api/v1/masters/all — bare array (GH #205 Task 2).
+
+    Minimal smoke: returns a bare JSON array (not an envelope) containing
+    created masters, with ``status`` parity to the paginated list endpoint.
+    Full generic contract lands in Task 4.
+    """
+
+    def test_all_returns_bare_array(self, api_client, create_master) -> None:
+        created = create_master()
+        resp = api_client.get("/api/v1/masters/all")
+        assert resp.status_code == 200, f"GET /all failed: {resp.text}"
+        body = resp.json()
+        assert isinstance(body, list), "/all must return a bare array, not an envelope"
+        assert any(item["id"] == created["id"] for item in body)
+
+    def test_all_status_filter(self, api_client, create_master) -> None:
+        """Default (?status=active) excludes archived; ?status=all includes them."""
+        active = create_master()
+        archived = create_master()
+        _archive_master(archived["id"])
+
+        default = api_client.get("/api/v1/masters/all")
+        assert default.status_code == 200
+        default_ids = [m["id"] for m in default.json()]
+        assert active["id"] in default_ids
+        assert archived["id"] not in default_ids
+
+        all_resp = api_client.get("/api/v1/masters/all?status=all")
+        assert all_resp.status_code == 200
+        all_ids = [m["id"] for m in all_resp.json()]
+        assert active["id"] in all_ids
+        assert archived["id"] in all_ids
+
+
+class TestMasterListSorting:
+    """Server-side sorting on GET /api/v1/masters (#205 Task 3).
+
+    sort_by whitelist: name, specialty, position, color, avatar, status.
+    sort_order: asc (default) / desc. Unknown sort_by → 422 (Literal validation).
+    Default (sort_by=None): sort_order ASC, first_name ASC, id ASC (spec §4.4).
+    """
+
+    @staticmethod
+    def _ids(resp) -> list[str]:
+        assert resp.status_code == 200, f"list failed: {resp.text}"
+        return [m["id"] for m in resp.json()["items"]]
+
+    def test_sort_name_asc_desc(self, api_client, create_master) -> None:
+        """sort_by=name → [first_name, last_name] composite; asc/desc both differ
+        from the default (sort_order-based) order."""
+        m1 = create_master(first_name="Zara", sort_order=1)   # Zara Master
+        m2 = create_master(first_name="Anna", last_name="Apple", sort_order=0)
+        m3 = create_master(first_name="Mary", sort_order=2)   # Mary Master
+
+        asc = self._ids(api_client.get("/api/v1/masters?sort_by=name&sort_order=asc"))
+        assert asc.index(m2["id"]) < asc.index(m3["id"]) < asc.index(m1["id"])
+
+        desc = self._ids(api_client.get("/api/v1/masters?sort_by=name&sort_order=desc"))
+        assert desc.index(m1["id"]) < desc.index(m3["id"]) < desc.index(m2["id"])
+
+    def test_sort_status_asc_desc(self, api_client, create_master) -> None:
+        """sort_by=status → [is_active]; asc = archived-first (is_active=0 first),
+        desc = active-first. Uses ?status=all to see both."""
+        arch_a = create_master(first_name="ArchA", sort_order=0)
+        active = create_master(first_name="Activ", sort_order=1)
+        arch_b = create_master(first_name="ArchB", sort_order=2)
+        _archive_master(arch_a["id"])
+        _archive_master(arch_b["id"])
+
+        asc = self._ids(api_client.get("/api/v1/masters?status=all&sort_by=status&sort_order=asc"))
+        assert asc.index(arch_a["id"]) < asc.index(active["id"])
+        assert asc.index(arch_b["id"]) < asc.index(active["id"])
+
+        desc = self._ids(api_client.get("/api/v1/masters?status=all&sort_by=status&sort_order=desc"))
+        assert desc.index(active["id"]) < desc.index(arch_a["id"])
+        assert desc.index(active["id"]) < desc.index(arch_b["id"])
+
+    def test_sort_invalid_key_422(self, api_client) -> None:
+        """sort_by=bogus → 422 from Literal validation (not 200 silent ignore)."""
+        resp = api_client.get("/api/v1/masters?sort_by=bogus")
+        assert resp.status_code == 422
+
+    def test_default_order_locked_with_id_tiebreak(self, api_client, create_master) -> None:
+        """Default (no sort params): sort_order ASC, first_name ASC, id ASC.
+
+        The id ASC tiebreak is NEW (#205 Task 3). Two masters with the same
+        sort_order AND same first_name → id ASC decides. We set predictable
+        IDs via query_db so the expected order is deterministic and DIFFERS
+        from the DB's rowid (insertion) order that the old code relied on.
+        """
+        m1 = create_master(first_name="Same", last_name="X", sort_order=0)
+        m2 = create_master(first_name="Same", last_name="Y", sort_order=0)
+        # Force m1.id > m2.id (reverse of insertion order).
+        m1_new = "ffffffff-ffff-ffff-ffff-ffffffffffff"
+        m2_new = "00000000-0000-0000-0000-000000000000"
+        query_db(f"UPDATE masters SET id='{m1_new}' WHERE id='{m1['id']}'")
+        query_db(f"UPDATE masters SET id='{m2_new}' WHERE id='{m2['id']}'")
+
+        ids = self._ids(api_client.get("/api/v1/masters"))
+        assert ids == [m2_new, m1_new]  # id ASC: 000... < fff...

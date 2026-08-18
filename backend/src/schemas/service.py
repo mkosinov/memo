@@ -1,8 +1,15 @@
 """Pydantic schemas for the services domain."""
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
+
+# Sort whitelist for GET /api/v1/services (#205 Task 3, spec §4.5).
+ServiceSortBy = Literal[
+    "title", "duration", "age", "material_hint", "tariffs",
+    "specialty", "archived", "created_at",
+]
 
 
 class TagResponse(BaseModel):

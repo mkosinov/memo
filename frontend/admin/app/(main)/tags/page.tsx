@@ -2,6 +2,7 @@
 
 import React from 'react';
 import { TagsTable } from './components/TagsTable';
+import { TagsProvider } from '@/contexts/TagsContext';
 
 export default function TagsPage() {
   return (
@@ -17,7 +18,9 @@ export default function TagsPage() {
         className="rounded-xl border overflow-hidden"
         style={{ borderColor: 'var(--line)', backgroundColor: 'var(--white)' }}
       >
-        <TagsTable />
+        <TagsProvider>
+          <TagsTable />
+        </TagsProvider>
       </div>
     </div>
   );

@@ -45,6 +45,13 @@ A Location is a physical studio space where master classes take place.
 | POST | /api/v1/locations/{id}/archive | Archive (sets `archived: true`, HTTP 200 with body) — GH #207 |
 | POST | /api/v1/locations/{id}/restore | Restore (sets `archived: false`, HTTP 200 with body) — GH #207 |
 
+## List contract (GH #205)
+
+- **Paginated `GET /api/v1/locations`**: `page` (≥1), `per_page` (1-100, default 20), `status` (active|archived|all, default active), `sort_by` (Literal whitelist: `name, short_title, capacity, address, location_hint, description, archived, yandex_map_url, created_at`; 422 on unknown), `sort_order` (asc|desc, default asc). Default order: `sort_order ASC, name ASC, id ASC` (spec §4.4).
+- **Bare `GET /api/v1/locations/all`**: bare JSON array (no envelope), `status` parity with paginated, deterministic order = same default. Protective `BARE_LIST_MAX_ROWS = 1000` → 422 English error naming entity + paginated endpoint (spec §4.3).
+- **Consumers**: Locations table = server-paginated via `LocationsContext`; dropdowns/lookup maps (Records/Schedule/useLocations/useRecordData) = `/all` (spec §5.5).
+- **Search matrix (spec §6)**: table search box = client-side filter over loaded page (until #212 server `?q=`); dictionary form dropdowns = client filter over `/all` (#214 combobox).
+
 ## Relationships
 - Location → has many Activities
 - Location → has many Tags (M2M via location_tags)

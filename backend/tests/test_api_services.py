@@ -755,3 +755,96 @@ class TestArchiveRestoreNoUserCascade:
         assert resp.status_code == 200
         rows = query_db(f"SELECT is_active FROM users WHERE id='{_user['id']}'")
         assert rows[0]["is_active"] == 1
+
+
+class TestServiceAllEndpoint:
+    """GET /api/v1/services/all — bare array (GH #205 Task 2).
+
+    Minimal smoke: returns a bare JSON array (not an envelope) containing
+    created services (with nested tariffs+tags). Full generic contract
+    lands in Task 4.
+    """
+
+    def test_all_returns_bare_array(self, api_client, create_service) -> None:
+        created = create_service()
+        resp = api_client.get("/api/v1/services/all")
+        assert resp.status_code == 200, f"GET /all failed: {resp.text}"
+        body = resp.json()
+        assert isinstance(body, list), "/all must return a bare array, not an envelope"
+        assert any(item["id"] == created["id"] for item in body)
+
+
+class TestServiceListSorting:
+    """Server-side sorting on GET /api/v1/services (#205 Task 3).
+
+    sort_by whitelist: title, duration, age, material_hint, tariffs, specialty,
+    archived, created_at. sort_order: asc/desc. Unknown → 422.
+    Default (sort_by=None): title ASC, id ASC (spec §4.4 — NEW, was unspecified).
+    """
+
+    @staticmethod
+    def _ids(resp) -> list[str]:
+        assert resp.status_code == 200, f"list failed: {resp.text}"
+        return [s["id"] for s in resp.json()["items"]]
+
+    def test_sort_title_asc_desc(self, api_client, create_service) -> None:
+        """sort_by=title → [title]; asc/desc both differ from insertion order."""
+        s_z = create_service(title="Zebra")  # inserted first
+        s_a = create_service(title="Apple")
+        s_m = create_service(title="Moon")
+
+        asc = self._ids(api_client.get("/api/v1/services?sort_by=title&sort_order=asc"))
+        assert asc.index(s_a["id"]) < asc.index(s_m["id"]) < asc.index(s_z["id"])
+
+        desc = self._ids(api_client.get("/api/v1/services?sort_by=title&sort_order=desc"))
+        assert desc.index(s_z["id"]) < desc.index(s_m["id"]) < desc.index(s_a["id"])
+
+    def test_sort_tariffs_count_asc_desc(self, api_client, create_service) -> None:
+        """sort_by=tariffs → correlated COUNT subquery. asc = fewer first."""
+        s2 = create_service(title="Two", tariffs=[
+            {"title": "T1", "price": 1000},
+            {"title": "T2", "price": 2000},
+        ])
+        s0 = create_service(title="Zero")
+        s1 = create_service(title="One", tariffs=[
+            {"title": "T1", "price": 1000},
+        ])
+
+        asc = self._ids(api_client.get("/api/v1/services?sort_by=tariffs&sort_order=asc"))
+        assert asc.index(s0["id"]) < asc.index(s1["id"]) < asc.index(s2["id"])
+
+        desc = self._ids(api_client.get("/api/v1/services?sort_by=tariffs&sort_order=desc"))
+        assert desc.index(s2["id"]) < desc.index(s1["id"]) < desc.index(s0["id"])
+
+    def test_sort_archived_asc_desc(self, api_client, create_service) -> None:
+        """sort_by=archived → [is_active]; asc = archived-first, desc = active-first."""
+        arch_a = create_service(title="ArchA")
+        active = create_service(title="Activ")
+        arch_b = create_service(title="ArchB")
+        _archive_service(arch_a["id"])
+        _archive_service(arch_b["id"])
+
+        asc = self._ids(api_client.get("/api/v1/services?status=all&sort_by=archived&sort_order=asc"))
+        assert asc.index(arch_a["id"]) < asc.index(active["id"])
+        assert asc.index(arch_b["id"]) < asc.index(active["id"])
+
+        desc = self._ids(api_client.get("/api/v1/services?status=all&sort_by=archived&sort_order=desc"))
+        assert desc.index(active["id"]) < desc.index(arch_a["id"])
+        assert desc.index(active["id"]) < desc.index(arch_b["id"])
+
+    def test_sort_invalid_key_422(self, api_client) -> None:
+        """sort_by=bogus → 422 from Literal validation."""
+        resp = api_client.get("/api/v1/services?sort_by=bogus")
+        assert resp.status_code == 422
+
+    def test_default_order_locked(self, api_client, create_service) -> None:
+        """Default (no sort params): title ASC, id ASC (NEW per spec §4.4).
+        Insertion order differs from title-ASC so the old unspecified DB
+        order (insertion/rowid) would return a different sequence."""
+        create_service(title="Banana")  # inserted first
+        create_service(title="Apple")
+
+        resp = api_client.get("/api/v1/services")
+        assert resp.status_code == 200
+        titles = [s["title"] for s in resp.json()["items"]]
+        assert titles == ["Apple", "Banana"]  # title ASC, not insertion order

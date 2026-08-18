@@ -9,11 +9,19 @@ from sqlalchemy import asc
 
 from src.db import SessionDep
 from src.domain.deletion import ResolutionError, collect_dependencies
+from src.domain.errors import BareListLimitExceededError
 from src.errors import ErrorCode, ErrorDetail
 from src.models.enums import ArchiveStatus
 from src.models.master import Master
-from src.schemas.common import PaginatedResponse
-from src.schemas.master import MasterCreate, MasterPatch, MasterResponse, MasterUpdate, ReorderRequest
+from src.schemas.common import PaginatedResponse, SortOrder
+from src.schemas.master import (
+    MasterCreate,
+    MasterPatch,
+    MasterResponse,
+    MasterSortBy,
+    MasterUpdate,
+    ReorderRequest,
+)
 from src.services.master import MasterService, get_master_service
 
 router = APIRouter(tags=["masters"])
@@ -27,6 +35,36 @@ def _get_master_service() -> MasterService:
 
 _ServiceDep = Annotated[MasterService, Depends(_get_master_service)]
 
+# Sort whitelist map: UI key → list of ORM columns (#205 Task 3, spec §4.5).
+# Composite UI columns map to multiple DB columns. ``avatar`` → avatar_url;
+# ``status`` → is_active (asc = is_active ASC = archived-first, preserving
+# the old client boolean-sort semantics).
+_MASTER_SORT_MAP: dict[str, list] = {
+    "name": [Master.first_name, Master.last_name],
+    "specialty": [Master.specialty],
+    "position": [Master.position],
+    "color": [Master.color],
+    "avatar": [Master.avatar_url],
+    "status": [Master.is_active],
+}
+
+
+def _master_order_by(sort_by: MasterSortBy | None, sort_order: SortOrder) -> list:
+    """Build the ``order_by`` list for GET /api/v1/masters.
+
+    * ``sort_by=None`` → spec §4.4 default: ``sort_order ASC, first_name ASC, id ASC``.
+    * User sort → mapped columns with nulls-first (asc) / nulls-last (desc),
+      then ``id ASC`` tiebreak for cross-page stability (records idiom).
+    """
+    if sort_by is None:
+        return [asc(Master.sort_order), asc(Master.first_name), asc(Master.id)]
+    cols = _MASTER_SORT_MAP[sort_by]
+    ordered = [
+        c.desc().nullslast() if sort_order == "desc" else c.asc().nullsfirst()
+        for c in cols
+    ]
+    return [*ordered, asc(Master.id)]
+
 
 @router.get("", response_model=PaginatedResponse[MasterResponse])
 async def list_masters(
@@ -35,6 +73,8 @@ async def list_masters(
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
     status: ArchiveStatus = Query(ArchiveStatus.ACTIVE),
+    sort_by: MasterSortBy | None = Query(None),
+    sort_order: SortOrder = Query("asc"),
 ) -> PaginatedResponse[MasterResponse]:
     """Return masters filtered by archive status (default: active),
     sorted by sort_order, then name.
@@ -42,14 +82,41 @@ async def list_masters(
     ``status`` accepts ``active`` (default), ``archived``, or ``all`` — see
     ``ArchiveStatus``. Invalid values are rejected with 422 by FastAPI's
     enum validation.
+
+    ``sort_by`` selects a whitelisted sort key (spec §4.5); ``sort_order``
+    is ``asc`` (default) or ``desc``. Unknown ``sort_by`` → 422 via Literal
+    validation. ``sort_by=None`` → spec §4.4 default order with ``id ASC``
+    tiebreak.
     """
     return await service.list(
         db_session=session,
         page=page,
         per_page=per_page,
         status=status,
-        order_by=[asc(Master.sort_order), asc(Master.first_name)],
+        order_by=_master_order_by(sort_by, sort_order),
     )
+
+
+@router.get("/all", response_model=list[MasterResponse])
+async def list_all_masters(
+    service: _ServiceDep,
+    session: SessionDep,
+    status: ArchiveStatus = Query(ArchiveStatus.ACTIVE),
+) -> list[MasterResponse]:
+    """Return all masters as a bare JSON array (GH #205).
+
+    Unpaginated, capped by ``BARE_LIST_MAX_ROWS`` (1000). Sorted by
+    ``sort_order ASC, first_name ASC, id ASC`` (spec §4.4). ``status``
+    mirrors the paginated list endpoint (active default / archived / all).
+    """
+    try:
+        return await service.list_all(
+            db_session=session,
+            status=status,
+            order_by=[asc(Master.sort_order), asc(Master.first_name), asc(Master.id)],
+        )
+    except BareListLimitExceededError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.put("/reorder", response_model=list[MasterResponse])

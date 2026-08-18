@@ -2,6 +2,7 @@
 
 import React from 'react';
 import { LocationsTable } from './components/LocationsTable';
+import { LocationsProvider } from '@/contexts/LocationsContext';
 
 export default function LocationsPage() {
   return (
@@ -21,7 +22,9 @@ export default function LocationsPage() {
         className="rounded-xl border overflow-hidden"
         style={{ borderColor: 'var(--line)', backgroundColor: 'var(--white)' }}
       >
-        <LocationsTable />
+        <LocationsProvider>
+          <LocationsTable />
+        </LocationsProvider>
       </div>
     </div>
   );

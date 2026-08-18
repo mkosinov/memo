@@ -6,7 +6,7 @@ operations instead of raw ORM model instances.
 
 from __future__ import annotations
 
-from typing import Generic, TypeVar
+from typing import Generic, TypeVar, cast
 
 from pydantic import BaseModel
 from sqlalchemy import delete, func, not_, select
@@ -24,7 +24,7 @@ from src.domain.deletion import (
 )
 from src.domain.errors import BareListLimitExceededError
 from src.models.enums import ArchiveStatus
-from src.repositories.generic import BaseRepository
+from src.repositories.generic import ArchiveRepository, BaseRepository
 from src.schemas.common import PaginatedResponse
 from src.services.decorators import transactional
 
@@ -109,9 +109,16 @@ class GenericService(Generic[CreateSchemaT, UpdateSchemaT, ResponseSchemaT]):
         **filters,
     ) -> PaginatedResponse[ResponseSchemaT]:
         """Return a paginated page of records, optionally filtered/ordered."""
-        return await self._paginate(
-            db_session, self._list_stmt(**filters), page, per_page, order_by
+        items_orm, total = await self._repository.list(
+            db_session,
+            self._model,
+            filters=filters,
+            order_by=order_by,
+            limit=per_page,
+            offset=(page - 1) * per_page,
         )
+        items = [self._response_schema.model_validate(o) for o in items_orm]
+        return PaginatedResponse(items=items, total=total, page=page, per_page=per_page)
 
     async def list_all(
         self,
@@ -248,10 +255,25 @@ class ArchiveService(GenericService[CreateSchemaT, UpdateSchemaT, ResponseSchema
         status: ArchiveStatus = ArchiveStatus.ACTIVE,
         **filters,
     ) -> PaginatedResponse[ResponseSchemaT]:
-        """Return a paginated page filtered by archive status."""
-        return await self._paginate(
-            db_session, self._list_stmt(status=status, **filters), page, per_page, order_by
+        """Return a paginated page filtered by archive status.
+
+        ``self._repository`` is typed ``BaseRepository`` (inherited from
+        ``GenericService.__init__``), but every Archive factory injects
+        ``get_archive_repository()`` — an ``ArchiveRepository`` whose
+        ``list()`` accepts the ``status=`` kwarg. The cast documents that
+        runtime invariant without touching the factories (#206 Task 2).
+        """
+        items_orm, total = await cast(ArchiveRepository, self._repository).list(
+            db_session,
+            self._model,
+            status=status,
+            filters=filters,
+            order_by=order_by,
+            limit=per_page,
+            offset=(page - 1) * per_page,
         )
+        items = [self._response_schema.model_validate(o) for o in items_orm]
+        return PaginatedResponse(items=items, total=total, page=page, per_page=per_page)
 
     async def list_all(
         self,

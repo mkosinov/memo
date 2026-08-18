@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import cast
 
-from sqlalchemy import delete, func, not_, select
+from sqlalchemy import delete, not_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -23,11 +24,13 @@ from src.services.decorators import transactional
 class ServiceService(ArchiveService[ServiceCreate, ServiceUpdate, ServiceResponse]):
     """Service service with eager-loaded tariffs/tags and nested create/update.
 
-    Overrides ``list`` to eager-load ``tariffs``/``tags`` via ``selectinload``.
-    The eager-load makes the select structurally incompatible with the
-    ``ArchiveService._list_stmt`` base (which uses a bare ``select(model)``),
-    so the archive-status clause is applied inline here rather than composed
-    (spec §5.3 explicitly permits this duplication for the eager-load override).
+    ``list`` delegates to ``ArchiveRepository.list`` passing ``selectinload``
+    options for ``tariffs``/``tags`` so ``ServiceResponse`` validation doesn't
+    hit ``MissingGreenlet`` under async SQLAlchemy (spec §4.1). The repository
+    owns the select/status/filter/count/slice pipeline; the service only adds
+    the eager-load options. ``list_all`` keeps its inline eager-load probe
+    (spec non-goal — the unpaginated /all path doesn't route through the
+    repo ``list``).
     """
 
     NOT_NULL_FIELDS = {"title", "description", "image_url", "specialty", "min_age", "duration", "record_info"}
@@ -46,33 +49,28 @@ class ServiceService(ArchiveService[ServiceCreate, ServiceUpdate, ServiceRespons
         order_by=None,
         **filters,
     ) -> PaginatedResponse[ServiceResponse]:
-        """Return a paginated page of services filtered by archive status,
-        with tariffs/tags eagerly loaded.
+        """Return services filtered by archive status, with tariffs and tags.
 
-        ``order_by`` is applied AFTER the COUNT query (same pattern as
-        ``paginate_orm``) so correlated sort-key subqueries (e.g. the
-        ``tariffs`` count) are never evaluated inside the count query.
+        Delegates to ``ArchiveRepository.list`` passing ``selectinload``
+        options for ``tariffs``/``tags`` so ``ServiceResponse`` validation
+        doesn't hit ``MissingGreenlet`` under async SQLAlchemy (spec §4.1).
+        ``self._repository`` is typed ``BaseRepository`` (inherited from
+        ``GenericService.__init__``), but ``get_service_service()`` injects
+        ``get_archive_repository()`` — an ``ArchiveRepository`` whose
+        ``list()`` accepts ``status=``. The cast documents that runtime
+        invariant without touching the factory (#206 Task 3).
         """
-        stmt = (
-            select(Service)
-            .options(selectinload(Service.tariffs), selectinload(Service.tags))
+        items_orm, total = await cast(ArchiveRepository, self._repository).list(
+            db_session,
+            Service,
+            status=status,
+            filters=filters,
+            order_by=order_by,
+            limit=per_page,
+            offset=(page - 1) * per_page,
+            options=[selectinload(Service.tariffs), selectinload(Service.tags)],
         )
-        if status == ArchiveStatus.ACTIVE:
-            stmt = stmt.where(Service.is_active)
-        elif status == ArchiveStatus.ARCHIVED:
-            stmt = stmt.where(not_(Service.is_active))
-        for key, value in filters.items():
-            if value is not None:
-                stmt = stmt.where(getattr(Service, key) == value)
-        total = (
-            await db_session.execute(select(func.count()).select_from(stmt.subquery()))
-        ).scalar_one()
-        if order_by is not None:
-            stmt = stmt.order_by(*order_by)
-        result = await db_session.execute(
-            stmt.limit(per_page).offset((page - 1) * per_page)
-        )
-        items = [ServiceResponse.model_validate(s) for s in result.scalars().all()]
+        items = [ServiceResponse.model_validate(s) for s in items_orm]
         return PaginatedResponse(items=items, total=total, page=page, per_page=per_page)
 
     async def list_all(

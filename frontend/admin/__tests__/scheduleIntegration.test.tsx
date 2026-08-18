@@ -27,6 +27,9 @@ vi.mock('@memo/api-client', () => ({
   getLocations: vi.fn(),
   getServices: vi.fn(),
   getActivities: vi.fn(),
+  getAllMasters: vi.fn(),
+  getAllLocations: vi.fn(),
+  getAllServices: vi.fn(),
   createActivity: vi.fn(),
   updateActivity: vi.fn(),
   patchActivity: vi.fn(),
@@ -34,10 +37,10 @@ vi.mock('@memo/api-client', () => ({
 }));
 
 import {
-  getMasters,
-  getLocations,
-  getServices,
   getActivities,
+  getAllMasters,
+  getAllLocations,
+  getAllServices,
 } from '@memo/api-client';
 
 // ─── Mock @dnd-kit/core ──────────────────────────────────────────────────────
@@ -84,7 +87,7 @@ describe('Schedule pipeline integration: enrichment from API to ActivityCard', (
     vi.clearAllMocks();
 
     // Mock masters API (raw MasterResponse, not transformed Master)
-    vi.mocked(getMasters).mockResolvedValue(wrap([
+    vi.mocked(getAllMasters).mockResolvedValue([
       {
         id: 'm1',
         first_name: 'Ольга',
@@ -97,10 +100,10 @@ describe('Schedule pipeline integration: enrichment from API to ActivityCard', (
         created_at: '2024-01-01T00:00:00Z',
         updated_at: '2024-01-01T00:00:00Z',
       },
-    ]));
+    ]);
 
     // Mock services API (raw ServiceResponse, not transformed Service)
-    vi.mocked(getServices).mockResolvedValue(wrap([
+    vi.mocked(getAllServices).mockResolvedValue([
       {
         id: 's1',
         title: 'Картина маслом',
@@ -119,10 +122,10 @@ describe('Schedule pipeline integration: enrichment from API to ActivityCard', (
         created_at: '2024-01-01T00:00:00Z',
         updated_at: '2024-01-01T00:00:00Z',
       },
-    ]));
+    ]);
 
     // Mock locations API (raw LocationResponse, not transformed Location)
-    vi.mocked(getLocations).mockResolvedValue(wrap([
+    vi.mocked(getAllLocations).mockResolvedValue([
       {
         id: 'loc1',
         name: 'Альпика',
@@ -137,7 +140,7 @@ describe('Schedule pipeline integration: enrichment from API to ActivityCard', (
         created_at: '2024-01-01T00:00:00Z',
         updated_at: '2024-01-01T00:00:00Z',
       },
-    ]));
+    ]);
 
     // ═══ CRITICAL: Mock activities WITHOUT service_name or min_age ═══
     // This simulates what the real backend returns — ActivityResponse
@@ -223,7 +226,7 @@ describe('Schedule pipeline: nullable visitor_id impact', () => {
   beforeEach(() => {
     vi.clearAllMocks();
 
-    vi.mocked(getMasters).mockResolvedValue(wrap([
+    vi.mocked(getAllMasters).mockResolvedValue([
       {
         id: 'm1',
         first_name: 'Ольга',
@@ -236,9 +239,9 @@ describe('Schedule pipeline: nullable visitor_id impact', () => {
         created_at: '2024-01-01T00:00:00Z',
         updated_at: '2024-01-01T00:00:00Z',
       },
-    ]));
+    ]);
 
-    vi.mocked(getServices).mockResolvedValue(wrap([
+    vi.mocked(getAllServices).mockResolvedValue([
       {
         id: 's1',
         title: 'Картина маслом',
@@ -257,9 +260,9 @@ describe('Schedule pipeline: nullable visitor_id impact', () => {
         created_at: '2024-01-01T00:00:00Z',
         updated_at: '2024-01-01T00:00:00Z',
       },
-    ]));
+    ]);
 
-    vi.mocked(getLocations).mockResolvedValue(wrap([
+    vi.mocked(getAllLocations).mockResolvedValue([
       {
         id: 'loc1',
         name: 'Альпика',
@@ -274,7 +277,7 @@ describe('Schedule pipeline: nullable visitor_id impact', () => {
         created_at: '2024-01-01T00:00:00Z',
         updated_at: '2024-01-01T00:00:00Z',
       },
-    ]));
+    ]);
   });
 
   it('renders activity card correctly even when activity has occupied > 0 with null visitor_ids', async () => {

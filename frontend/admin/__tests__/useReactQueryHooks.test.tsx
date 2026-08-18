@@ -9,6 +9,9 @@ vi.mock('@memo/api-client', () => ({
   getLocations: vi.fn(),
   getServices: vi.fn(),
   getActivities: vi.fn(),
+  getAllMasters: vi.fn(),
+  getAllLocations: vi.fn(),
+  getAllServices: vi.fn(),
 }));
 
 // Mock transformers
@@ -19,7 +22,15 @@ vi.mock('@/lib/transformers', () => ({
   transformActivity: vi.fn((raw: any) => ({ ...raw, id: raw.id })),
 }));
 
-import { getMasters, getLocations, getServices, getActivities } from '@memo/api-client';
+import {
+  getMasters,
+  getLocations,
+  getServices,
+  getActivities,
+  getAllMasters,
+  getAllLocations,
+  getAllServices,
+} from '@memo/api-client';
 import {
   transformMaster,
   transformLocation,
@@ -123,15 +134,16 @@ describe('useMasters', () => {
     vi.clearAllMocks();
   });
 
-  it('calls getMasters and transforms results', async () => {
-    vi.mocked(getMasters).mockResolvedValue(envelope(mastersFixture));
+  it('calls getAllMasters (bare array) and transforms results', async () => {
+    vi.mocked(getAllMasters).mockResolvedValue(mastersFixture);
 
     const { useMasters } = await import('@/hooks/useMasters');
     const { result } = renderHook(() => useMasters(), { wrapper: createWrapper() });
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
-    expect(getMasters).toHaveBeenCalledOnce();
+    expect(getAllMasters).toHaveBeenCalledOnce();
+    expect(getMasters).not.toHaveBeenCalled();
     expect(transformMaster).toHaveBeenCalledWith(
       mastersFixture[0],
       expect.any(Number),
@@ -141,7 +153,7 @@ describe('useMasters', () => {
   });
 
   it('uses queryKey ["masters"]', async () => {
-    vi.mocked(getMasters).mockResolvedValue(envelope(mastersFixture));
+    vi.mocked(getAllMasters).mockResolvedValue(mastersFixture);
 
     const { useMasters } = await import('@/hooks/useMasters');
     const { result } = renderHook(() => useMasters(), { wrapper: createWrapper() });
@@ -160,15 +172,16 @@ describe('useLocations', () => {
     vi.clearAllMocks();
   });
 
-  it('calls getLocations and transforms results', async () => {
-    vi.mocked(getLocations).mockResolvedValue(envelope(locationsFixture));
+  it('calls getAllLocations (bare array) and transforms results', async () => {
+    vi.mocked(getAllLocations).mockResolvedValue(locationsFixture);
 
     const { useLocations } = await import('@/hooks/useLocations');
     const { result } = renderHook(() => useLocations(), { wrapper: createWrapper() });
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
-    expect(getLocations).toHaveBeenCalledOnce();
+    expect(getAllLocations).toHaveBeenCalledOnce();
+    expect(getLocations).not.toHaveBeenCalled();
     expect(transformLocation).toHaveBeenCalledWith(
       locationsFixture[0],
       expect.any(Number),
@@ -185,15 +198,16 @@ describe('useServices', () => {
     vi.clearAllMocks();
   });
 
-  it('calls getServices and transforms results', async () => {
-    vi.mocked(getServices).mockResolvedValue(envelope(servicesFixture));
+  it('calls getAllServices (bare array) and transforms results', async () => {
+    vi.mocked(getAllServices).mockResolvedValue(servicesFixture);
 
     const { useServices } = await import('@/hooks/useServices');
     const { result } = renderHook(() => useServices(), { wrapper: createWrapper() });
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
-    expect(getServices).toHaveBeenCalledOnce();
+    expect(getAllServices).toHaveBeenCalledOnce();
+    expect(getServices).not.toHaveBeenCalled();
     expect(transformService).toHaveBeenCalledWith(
       servicesFixture[0],
       expect.any(Number),

@@ -7,9 +7,9 @@ import {
   getClients,
   getPaymentTotals,
   getActivities,
-  getMasters,
-  getServices,
-  getLocations,
+  getAllMasters,
+  getAllServices,
+  getAllLocations,
 } from '@memo/api-client';
 import type {
   PaginatedResponse,
@@ -139,22 +139,22 @@ export function RecordsProvider({ children }: { children: React.ReactNode }) {
     queryFn: () => getActivities({ date_from: dateFrom, date_to: dateTo, per_page: 100 }).then(r => r.items),
   });
 
-  // Always-cached reference data
+  // Always-cached reference data (bare /all lists — #205)
   const { data: mastersRaw = [] } = useQuery<MasterResponse[]>({
     queryKey: ['masters'],
-    queryFn: () => getMasters({ per_page: 100 }).then(r => r.items),
+    queryFn: () => getAllMasters(),
     staleTime: Infinity,
   });
 
   const { data: servicesRaw = [] } = useQuery<ServiceResponse[]>({
     queryKey: ['services'],
-    queryFn: () => getServices({ per_page: 100 }).then(r => r.items),
+    queryFn: () => getAllServices(),
     staleTime: Infinity,
   });
 
   const { data: locationsRaw = [] } = useQuery<LocationResponse[]>({
     queryKey: ['locations'],
-    queryFn: () => getLocations({ per_page: 100 }).then(r => r.items),
+    queryFn: () => getAllLocations(),
     staleTime: Infinity,
   });
 

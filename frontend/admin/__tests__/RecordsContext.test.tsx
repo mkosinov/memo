@@ -26,6 +26,9 @@ vi.mock('@memo/api-client', () => ({
   getMasters: vi.fn(),
   getServices: vi.fn(),
   getLocations: vi.fn(),
+  getAllMasters: vi.fn(),
+  getAllServices: vi.fn(),
+  getAllLocations: vi.fn(),
 }));
 
 import {
@@ -37,6 +40,9 @@ import {
   getMasters,
   getServices,
   getLocations,
+  getAllMasters,
+  getAllServices,
+  getAllLocations,
 } from '@memo/api-client';
 import type {
   PaginatedResponse,
@@ -144,9 +150,9 @@ describe('RecordsContext — canonical cache seeding', () => {
     vi.mocked(getClients).mockResolvedValue([]);
     vi.mocked(getPaymentTotals).mockResolvedValue({});
     vi.mocked(getActivities).mockResolvedValue(envelope([]));
-    vi.mocked(getMasters).mockResolvedValue(envelope([]));
-    vi.mocked(getServices).mockResolvedValue(envelope([]));
-    vi.mocked(getLocations).mockResolvedValue(envelope([]));
+    vi.mocked(getAllMasters).mockResolvedValue([]);
+    vi.mocked(getAllServices).mockResolvedValue([]);
+    vi.mocked(getAllLocations).mockResolvedValue([]);
   });
 
   it('seeds canonical ["record", id] from list response after query resolves', async () => {
@@ -192,6 +198,30 @@ describe('RecordsContext — canonical cache seeding', () => {
     );
   });
 
+  it('fetches masters/services/locations lookups via getAllX, not paginated get (#205 T12)', async () => {
+    const { Wrapper, queryClient } = createWrapper();
+
+    renderHook(() => useRecords(), { wrapper: Wrapper });
+
+    await waitFor(() => {
+      expect(vi.mocked(getAllMasters)).toHaveBeenCalled();
+      expect(vi.mocked(getAllServices)).toHaveBeenCalled();
+      expect(vi.mocked(getAllLocations)).toHaveBeenCalled();
+    });
+
+    // Lookup cache keys must be unchanged
+    await waitFor(() => {
+      expect(queryClient.getQueryData(['masters'])).toBeDefined();
+      expect(queryClient.getQueryData(['services'])).toBeDefined();
+      expect(queryClient.getQueryData(['locations'])).toBeDefined();
+    });
+
+    // Paginated dictionary lookups must not be used
+    expect(vi.mocked(getMasters)).not.toHaveBeenCalled();
+    expect(vi.mocked(getServices)).not.toHaveBeenCalled();
+    expect(vi.mocked(getLocations)).not.toHaveBeenCalled();
+  });
+
   it('seeds multiple records from a multi-item list response', async () => {
     const rec1 = makeRecord('r1');
     const rec2 = makeRecord('r2');
@@ -226,9 +256,9 @@ describe('RecordsContext — payment totals aggregate', () => {
     vi.mocked(getClients).mockResolvedValue([]);
     vi.mocked(getPaymentTotals).mockResolvedValue({ 'rec-1': 3000 });
     vi.mocked(getActivities).mockResolvedValue(envelope([]));
-    vi.mocked(getMasters).mockResolvedValue(envelope([]));
-    vi.mocked(getServices).mockResolvedValue(envelope([]));
-    vi.mocked(getLocations).mockResolvedValue(envelope([]));
+    vi.mocked(getAllMasters).mockResolvedValue([]);
+    vi.mocked(getAllServices).mockResolvedValue([]);
+    vi.mocked(getAllLocations).mockResolvedValue([]);
   });
 
   it('fetches payment totals for loaded record IDs', async () => {
@@ -308,9 +338,9 @@ describe('RecordsContext — server-driven page/filters/sort state (#191)', () =
     vi.mocked(getClients).mockResolvedValue([]);
     vi.mocked(getPaymentTotals).mockResolvedValue({});
     vi.mocked(getActivities).mockResolvedValue(envelope([]));
-    vi.mocked(getMasters).mockResolvedValue(envelope([]));
-    vi.mocked(getServices).mockResolvedValue(envelope([]));
-    vi.mocked(getLocations).mockResolvedValue(envelope([]));
+    vi.mocked(getAllMasters).mockResolvedValue([]);
+    vi.mocked(getAllServices).mockResolvedValue([]);
+    vi.mocked(getAllLocations).mockResolvedValue([]);
   });
 
   it('passes all server params with snake_case mapping', async () => {

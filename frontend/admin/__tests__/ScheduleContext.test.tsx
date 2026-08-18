@@ -13,6 +13,9 @@ vi.mock('@memo/api-client', () => ({
   getLocations: vi.fn(),
   getServices: vi.fn(),
   getActivities: vi.fn(),
+  getAllMasters: vi.fn(),
+  getAllLocations: vi.fn(),
+  getAllServices: vi.fn(),
   createActivity: vi.fn(),
   updateActivity: vi.fn(),
   patchActivity: vi.fn(),
@@ -24,6 +27,9 @@ import {
   getLocations,
   getServices,
   getActivities,
+  getAllMasters,
+  getAllLocations,
+  getAllServices,
   createActivity,
   patchActivity,
   deleteActivity,
@@ -200,9 +206,9 @@ describe('ScheduleProvider', () => {
     vi.clearAllMocks();
 
     // Default mock returns for API calls
-    vi.mocked(getMasters).mockResolvedValue(wrap([]));
-    vi.mocked(getLocations).mockResolvedValue(wrap([]));
-    vi.mocked(getServices).mockResolvedValue(wrap([]));
+    vi.mocked(getAllMasters).mockResolvedValue([]);
+    vi.mocked(getAllLocations).mockResolvedValue([]);
+    vi.mocked(getAllServices).mockResolvedValue([]);
     vi.mocked(getActivities).mockResolvedValue(wrap([]));
     vi.mocked(createActivity).mockResolvedValue({} as any);
     vi.mocked(patchActivity).mockResolvedValue({} as any);
@@ -221,18 +227,37 @@ describe('ScheduleProvider', () => {
     spy.mockRestore();
   });
 
+  it('fetches dictionary lookups via getAllX bare-array methods (#205 T12)', async () => {
+    vi.mocked(getAllMasters).mockResolvedValue([
+      { id: 'm1', first_name: 'Ольга', last_name: 'Середа', color: '#5B8C7A', position: 'мастер', specialty: 'живопись', avatar_url: null, archived: false, sort_order: 0, created_at: '2024-01-01', updated_at: '2024-01-01' },
+    ]);
+
+    renderWithContext();
+
+    await waitFor(() => {
+      expect(getAllMasters).toHaveBeenCalled();
+      expect(getAllServices).toHaveBeenCalled();
+      expect(getAllLocations).toHaveBeenCalled();
+    });
+
+    // Paginated lookups must NOT be used for the cached reference data
+    expect(getMasters).not.toHaveBeenCalled();
+    expect(getServices).not.toHaveBeenCalled();
+    expect(getLocations).not.toHaveBeenCalled();
+  });
+
   it('provides masters, services, locations from React Query hooks', async () => {
-    vi.mocked(getMasters).mockResolvedValue(wrap([
+    vi.mocked(getAllMasters).mockResolvedValue([
       { id: 'm1', first_name: 'Ольга', last_name: 'Середа', color: '#5B8C7A', position: 'мастер', specialty: 'живопись', avatar_url: null, archived: false, sort_order: 0, created_at: '2024-01-01', updated_at: '2024-01-01' },
       { id: 'm2', first_name: 'Юлия', last_name: 'Большакова', color: '#6B7E9C', position: 'мастер', specialty: 'живопись', avatar_url: null, archived: false, sort_order: 0, created_at: '2024-01-01', updated_at: '2024-01-01' },
-    ]));
-    vi.mocked(getServices).mockResolvedValue(wrap([
+    ]);
+    vi.mocked(getAllServices).mockResolvedValue([
       { id: 's1', title: 'Картина маслом', description: '', image_url: '', specialty: '', min_age: 12, max_age: 99, duration: 150, record_info: '', tariffs: [], tags: [], archived: false, created_at: '', updated_at: '' },
-    ]));
-    vi.mocked(getLocations).mockResolvedValue(wrap([
+    ]);
+    vi.mocked(getAllLocations).mockResolvedValue([
       { id: 'alpika', name: 'Альпика', address: 'Альпика, 1 этаж', description: null, capacity: 10, yandex_map_url: null, review_url: null, record_info: null, image_url: null, archived: false, created_at: '', updated_at: '' },
       { id: 'grand', name: 'Гранд Отель Поляна', address: 'Гранд Отель, лобби', description: null, capacity: 10, yandex_map_url: null, review_url: null, record_info: null, image_url: null, archived: false, created_at: '', updated_at: '' },
-    ]));
+    ]);
     vi.mocked(getActivities).mockResolvedValue(wrap([
       { id: 'a1', master_id: 'm1', service_id: 's1', location_id: 'alpika', start: '2024-12-25T10:00:00Z', duration: 120, capacity: 8, is_private: false, comment: null, record_info: null, created_at: '', updated_at: '', occupied: 3 },
       { id: 'a2', master_id: 'm2', service_id: 's1', location_id: 'grand', start: '2024-12-26T14:00:00Z', duration: 90, capacity: 6, is_private: false, comment: null, record_info: null, created_at: '', updated_at: '', occupied: 4 },
@@ -319,15 +344,15 @@ describe('ScheduleProvider', () => {
   });
 
   it('calls patchActivity mutation when updateActivity is called', async () => {
-    vi.mocked(getMasters).mockResolvedValue(wrap([
+    vi.mocked(getAllMasters).mockResolvedValue([
       { id: 'm1', first_name: 'Ольга', last_name: 'Середа', color: '#5B8C7A', position: 'мастер', specialty: 'живопись', avatar_url: null, archived: false, sort_order: 0, created_at: '2024-01-01', updated_at: '2024-01-01' },
-    ]));
-    vi.mocked(getServices).mockResolvedValue(wrap([
+    ]);
+    vi.mocked(getAllServices).mockResolvedValue([
       { id: 's1', title: 'Картина маслом', description: '', image_url: '', specialty: '', min_age: 12, max_age: 99, duration: 120, record_info: '', tariffs: [], tags: [], archived: false, created_at: '', updated_at: '' },
-    ]));
-    vi.mocked(getLocations).mockResolvedValue(wrap([
+    ]);
+    vi.mocked(getAllLocations).mockResolvedValue([
       { id: 'alpika', name: 'Альпика', address: 'Альпика, 1 этаж', description: null, capacity: 10, yandex_map_url: null, review_url: null, record_info: null, image_url: null, location_hint: null, archived: false, created_at: '', updated_at: '' },
-    ]));
+    ]);
     vi.mocked(getActivities).mockResolvedValue(wrap([
       { id: 'a1', master_id: 'm1', service_id: 's1', location_id: 'alpika', start: '2024-12-25T10:00:00Z', duration: 120, capacity: 8, is_private: false, comment: null, record_info: null, created_at: '', updated_at: '', occupied: 3 },
     ]));
@@ -356,15 +381,15 @@ describe('ScheduleProvider', () => {
   // ─── BUG-63 regression tests ──────────────────────────────────────────────
 
   it('excludes capacity from PATCH payload when capacity is null (BUG-63 regression)', async () => {
-    vi.mocked(getMasters).mockResolvedValue(wrap([
+    vi.mocked(getAllMasters).mockResolvedValue([
       { id: 'm1', first_name: 'Ольга', last_name: 'Середа', color: '#5B8C7A', position: 'мастер', specialty: 'живопись', avatar_url: null, archived: false, sort_order: 0, created_at: '2024-01-01', updated_at: '2024-01-01' },
-    ]));
-    vi.mocked(getServices).mockResolvedValue(wrap([
+    ]);
+    vi.mocked(getAllServices).mockResolvedValue([
       { id: 's1', title: 'Картина маслом', description: '', image_url: '', specialty: '', min_age: 12, max_age: null, duration: 120, record_info: '', tariffs: [], tags: [], archived: false, created_at: '', updated_at: '' },
-    ]));
-    vi.mocked(getLocations).mockResolvedValue(wrap([
+    ]);
+    vi.mocked(getAllLocations).mockResolvedValue([
       { id: 'alpika', name: 'Альпика', address: 'Альпика, 1 этаж', description: null, capacity: 10, yandex_map_url: null, review_url: null, record_info: null, image_url: null, location_hint: null, archived: false, created_at: '', updated_at: '' },
-    ]));
+    ]);
     vi.mocked(getActivities).mockResolvedValue(wrap([
       { id: 'a1', master_id: 'm1', service_id: 's1', location_id: 'alpika', start: '2024-12-25T10:00:00Z', duration: 120, capacity: 8, is_private: false, comment: null, record_info: null, created_at: '', updated_at: '', occupied: 3 },
     ]));
@@ -387,15 +412,15 @@ describe('ScheduleProvider', () => {
   });
 
   it('includes capacity in PATCH payload when capacity has a defined value (BUG-63 regression)', async () => {
-    vi.mocked(getMasters).mockResolvedValue(wrap([
+    vi.mocked(getAllMasters).mockResolvedValue([
       { id: 'm1', first_name: 'Ольга', last_name: 'Середа', color: '#5B8C7A', position: 'мастер', specialty: 'живопись', avatar_url: null, archived: false, sort_order: 0, created_at: '2024-01-01', updated_at: '2024-01-01' },
-    ]));
-    vi.mocked(getServices).mockResolvedValue(wrap([
+    ]);
+    vi.mocked(getAllServices).mockResolvedValue([
       { id: 's1', title: 'Картина маслом', description: '', image_url: '', specialty: '', min_age: 12, max_age: null, duration: 120, record_info: '', tariffs: [], tags: [], archived: false, created_at: '', updated_at: '' },
-    ]));
-    vi.mocked(getLocations).mockResolvedValue(wrap([
+    ]);
+    vi.mocked(getAllLocations).mockResolvedValue([
       { id: 'alpika', name: 'Альпика', address: 'Альпика, 1 этаж', description: null, capacity: 10, yandex_map_url: null, review_url: null, record_info: null, image_url: null, location_hint: null, archived: false, created_at: '', updated_at: '' },
-    ]));
+    ]);
     vi.mocked(getActivities).mockResolvedValue(wrap([
       { id: 'a1', master_id: 'm1', service_id: 's1', location_id: 'alpika', start: '2024-12-25T10:00:00Z', duration: 120, capacity: 8, is_private: false, comment: null, record_info: null, created_at: '', updated_at: '', occupied: 3 },
     ]));
@@ -430,15 +455,15 @@ describe('ScheduleProvider', () => {
   // ─── end BUG-63 regression tests ──────────────────────────────────────────
 
   it('calls deleteActivity mutation when deleteActivity is called', async () => {
-    vi.mocked(getMasters).mockResolvedValue(wrap([
+    vi.mocked(getAllMasters).mockResolvedValue([
       { id: 'm1', first_name: 'Ольга', last_name: 'Середа', color: '#5B8C7A', position: 'мастер', specialty: 'живопись', avatar_url: null, archived: false, sort_order: 0, created_at: '2024-01-01', updated_at: '2024-01-01' },
-    ]));
-    vi.mocked(getServices).mockResolvedValue(wrap([
+    ]);
+    vi.mocked(getAllServices).mockResolvedValue([
       { id: 's1', title: 'Картина маслом', description: '', image_url: '', specialty: '', min_age: 12, max_age: 99, duration: 120, record_info: '', tariffs: [], tags: [], archived: false, created_at: '', updated_at: '' },
-    ]));
-    vi.mocked(getLocations).mockResolvedValue(wrap([
+    ]);
+    vi.mocked(getAllLocations).mockResolvedValue([
       { id: 'alpika', name: 'Альпика', address: 'Альпика, 1 этаж', description: null, capacity: 10, yandex_map_url: null, review_url: null, record_info: null, image_url: null, location_hint: null, archived: false, created_at: '', updated_at: '' },
-    ]));
+    ]);
     vi.mocked(getActivities).mockResolvedValue(wrap([
       { id: 'a1', master_id: 'm1', service_id: 's1', location_id: 'alpika', start: '2024-12-25T10:00:00Z', duration: 120, capacity: 8, is_private: false, comment: null, record_info: null, created_at: '', updated_at: '', occupied: 3 },
     ]));

@@ -13,6 +13,9 @@ vi.mock('@memo/api-client', () => ({
   getMasters: vi.fn(),
   getLocations: vi.fn(),
   getPayments: vi.fn(),
+  getAllServices: vi.fn(),
+  getAllMasters: vi.fn(),
+  getAllLocations: vi.fn(),
 }));
 
 import {
@@ -23,6 +26,9 @@ import {
   getMasters,
   getLocations,
   getPayments,
+  getAllServices,
+  getAllMasters,
+  getAllLocations,
 } from '@memo/api-client';
 
 // ─── Fixtures ──────────────────────────────────────────────────────────────
@@ -132,9 +138,9 @@ describe('useRecordData', () => {
     vi.mocked(getRecord).mockResolvedValue(mockRecord as any);
     vi.mocked(getClientVisitors).mockResolvedValue(mockVisitors as any);
     vi.mocked(getActivity).mockResolvedValue(mockActivity as any);
-    vi.mocked(getServices).mockResolvedValue(envelope(mockServices) as any);
-    vi.mocked(getMasters).mockResolvedValue(envelope(mockMasters) as any);
-    vi.mocked(getLocations).mockResolvedValue(envelope(mockLocations) as any);
+    vi.mocked(getAllServices).mockResolvedValue(mockServices as any);
+    vi.mocked(getAllMasters).mockResolvedValue(mockMasters as any);
+    vi.mocked(getAllLocations).mockResolvedValue(mockLocations as any);
     vi.mocked(getPayments).mockResolvedValue(envelope(mockPayments) as any);
   });
 
@@ -186,34 +192,37 @@ describe('useRecordData', () => {
     await waitFor(() => expect(getActivity).toHaveBeenCalledWith('ev_1'));
   });
 
-  it('calls getServices', async () => {
+  it('calls getAllServices (#205 T12 /all lookup)', async () => {
     const { useRecordData } = await import('@/hooks/useRecordData');
     renderHook(
       () => useRecordData('r1', 'c1'),
       { wrapper: createWrapper() },
     );
 
-    await waitFor(() => expect(getServices).toHaveBeenCalled());
+    await waitFor(() => expect(getAllServices).toHaveBeenCalled());
+    expect(getServices).not.toHaveBeenCalled();
   });
 
-  it('calls getMasters', async () => {
+  it('calls getAllMasters (#205 T12 /all lookup)', async () => {
     const { useRecordData } = await import('@/hooks/useRecordData');
     renderHook(
       () => useRecordData('r1', 'c1'),
       { wrapper: createWrapper() },
     );
 
-    await waitFor(() => expect(getMasters).toHaveBeenCalled());
+    await waitFor(() => expect(getAllMasters).toHaveBeenCalled());
+    expect(getMasters).not.toHaveBeenCalled();
   });
 
-  it('calls getLocations', async () => {
+  it('calls getAllLocations (#205 T12 /all lookup)', async () => {
     const { useRecordData } = await import('@/hooks/useRecordData');
     renderHook(
       () => useRecordData('r1', 'c1'),
       { wrapper: createWrapper() },
     );
 
-    await waitFor(() => expect(getLocations).toHaveBeenCalled());
+    await waitFor(() => expect(getAllLocations).toHaveBeenCalled());
+    expect(getLocations).not.toHaveBeenCalled();
   });
 
   it('calls getPayments with record_id', async () => {

@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — 2026-08-18
+
+### Added
+- **GH #205 — Dictionaries: bare `/all` endpoint + server-side pagination for dictionary tables** — branch `feat/dictionaries-all-server-pagination-205` (13 commits: 05e2049..be6c8fd):
+  - **Backend:** `GenericService.list_all()` + `ArchiveService.list_all()` (status pass-through) with shared `BARE_LIST_MAX_ROWS = 1000` limit+1 probe — over-limit raises `BareListLimitExceededError` → **422 English message** (new `backend/src/domain/errors.py`; exactly 1000 rows still works). `ServiceService.list_all()` eager-load override (`selectinload` tariffs+tags — mandatory, async lazy-load crash guard). Bare `GET /api/v1/{entity}/all` routes in the 5 dictionary routers (masters/locations/services/tags/materials), declared before `/{id}` (str path params). `sort_by`/`sort_order` per-entity `Literal` whitelists + `SORT_MAP`s on the 5 list endpoints + **deterministic default orders** (services/tags/materials previously unspecified DB order), invalid sort key → 422. Dictionaries-only guard: `/all` → **404** on non-dictionaries. No DB schema changes → no migrations.
+  - **api-client:** 5 `XAllResponseSchema` bare-array Zod schemas + `getAllX` methods; `ListParams` gains `sort_by`/`sort_order` with query-string serialization.
+  - **Admin:** shared `createPagedListContext` factory + 5 thin per-entity wrappers (Masters/Locations/Services/Materials/Tags contexts) — server-driven page/per_page/sort/status state (reset to page 1 on change); 5 dictionary tables migrated to **server-side pagination + sorting** (pager 10/20/50/100, numbered pages, prev/next, «всего» label, sortable column headers; Tags withStatus: false). Dictionary lookup maps + dropdown hooks (RecordsContext, ScheduleContext, useRecordData, useMasters/useLocations/useServices) switched to `/all` — `per_page=100` gone for dictionaries. Search boxes unchanged (G1b Q1 — client-side filter of the loaded page; server `?q=` is #212).
+  - **Tests:** backend 1259 passed / 6 skipped (full pytest suite, no regressions); api-client 197 passed / 4 failed (4 = pre-existing #188, unchanged); admin vitest 1370 passed / 0 failed (93 test files); `tsc --noEmit` clean; Next build exit 0; visual gate partially verified (2/3 attempted PASS — Masters pager + sort; 1 script-issue "FAIL" not a real bug; all 9 behavioral checks covered by the 1370 unit tests).
+  - **Docs:** domain-rules "List contract" sections for the 5 dictionaries (T13, commit `be6c8fd`) — `/all` contract (bare array, 1000-row limit → 422, deterministic order, status parity), paginated list params, consumer map, search matrix pointer.
+  - **Closes:** #205. AC1–AC10 all met (spec §7).
+  - **70 files changed, +3924 / -1568.**
+  - Design spec: `docs/specs/2026-08-17-dictionaries-all-server-pagination-design.md`
+  - Plan: `docs/plans/2026-08-17-dictionaries-all-server-pagination-plan.md`
+
 ## [Unreleased] — 2026-08-17
 
 ### Added

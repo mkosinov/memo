@@ -10,6 +10,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased] — 2026-08-18
 
 ### Added
+- **GH #206 — Repo-owned list queries (pagination moved to repositories; Option C)** — branch `feat/repo-owned-list-queries-206` (10 commits: a60b72e..85fed8f):
+  - **Backend:** pagination is now owned by the repositories — `BaseRepository.list`/`list_custom` (with `selectinload` options) replace service-level list logic. `GenericService`/`ArchiveService` rewire to repo `list`; `ServiceService.list` collapsed to a `selectinload` override; `PaymentService.list` override deleted (inherits generic); `VisitService` gains repository DI, list via `repo.list`; records/activity route through `list_custom`; shared `paginate_orm` + `_paginate` core retired. New shared `PaginationParams` schema in **9 list routers** with `RecordListParams`/`ClientListParams` inheriting it. Pure backend refactor — **zero user-visible behavior change**.
+  - **Backend (client stats):** `ClientListResponse` collapsed → `PaginatedResponse[ClientWithStats]` with the CQRS read-side concession documented (GH #217).
+  - **api-client / frontend:** `ClientListResponseSchema = paginatedSchema(ClientWithStatsSchema)`; frontend `useQuery<PaginatedResponse<ClientWithStats>>`.
+  - **Docs:** domain-rules pagination mechanics synced with repo-owned lists (T10, commit `85fed8f`).
+  - **Tests:** backend 1265p/0f/6s; api-client 197p/4f (4 = pre-existing #188, unchanged); admin vitest 1370p/0f + `tsc --noEmit` clean. Visual gate SKIPPED (no user-visible UI).
+  - **Acceptance criteria (spec §12): all met** — 10/12 list endpoints repo-routed (clients concession documented, GH #217; photos unpaginated, #211), `paginate_orm` retired, shared `PaginationParams` in 9 routers, `ClientListResponse` collapsed, suites green, domain docs synced.
+  - **Follow-ups (out of scope, filed by DESIGN):** #217 (CQRS read-side eval), #218 (delete dead `get_generic_repository` + `GenericRepository` alias).
+  - **Closes:** #206.
+  - Design spec: `docs/specs/2026-08-18-repo-owned-list-queries-design.md` (on main, commit `1c0b8a5`)
+  - Plan: `docs/plans/2026-08-18-repo-owned-list-queries-plan.md` (on main, commit `c97e3be`)
+
+## [Unreleased] — 2026-08-18
+
+### Added
 - **GH #205 — Dictionaries: bare `/all` endpoint + server-side pagination for dictionary tables** — branch `feat/dictionaries-all-server-pagination-205` (13 commits: 05e2049..be6c8fd):
   - **Backend:** `GenericService.list_all()` + `ArchiveService.list_all()` (status pass-through) with shared `BARE_LIST_MAX_ROWS = 1000` limit+1 probe — over-limit raises `BareListLimitExceededError` → **422 English message** (new `backend/src/domain/errors.py`; exactly 1000 rows still works). `ServiceService.list_all()` eager-load override (`selectinload` tariffs+tags — mandatory, async lazy-load crash guard). Bare `GET /api/v1/{entity}/all` routes in the 5 dictionary routers (masters/locations/services/tags/materials), declared before `/{id}` (str path params). `sort_by`/`sort_order` per-entity `Literal` whitelists + `SORT_MAP`s on the 5 list endpoints + **deterministic default orders** (services/tags/materials previously unspecified DB order), invalid sort key → 422. Dictionaries-only guard: `/all` → **404** on non-dictionaries. No DB schema changes → no migrations.
   - **api-client:** 5 `XAllResponseSchema` bare-array Zod schemas + `getAllX` methods; `ListParams` gains `sort_by`/`sort_order` with query-string serialization.

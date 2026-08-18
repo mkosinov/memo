@@ -1,11 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, within, waitFor } from '@testing-library/react';
+import React from 'react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import {
   mockMasterResponse,
   mockMasterResponseArchived,
   createMockMasterResponse,
 } from './helpers/mockData';
-import type { DependencyNode } from '@memo/api-client';
+import type { DependencyNode, MasterResponse, PaginatedResponse } from '@memo/api-client';
 
 // ─── Dependency tree fixtures (mirror backend src/domain/deletion.py) ─────
 
@@ -28,25 +30,23 @@ const DEPS_AUTO: DependencyNode[] = [
 ];
 
 // ─── Mock @tanstack/react-query ──────────────────────────────────────────
+// Only useQueryClient is mocked (invalidate spy shared with the delete flow
+// assertions). useQuery/QueryClientProvider stay REAL: the table renders
+// inside the real MastersProvider, and the server-pagination wiring is
+// asserted through the getMasters spy (RecordsTable precedent).
 
 // Shared so tests can assert cross-invalidation (#207: ['masters'] + ['records']).
 const mockInvalidateQueries = vi.fn().mockResolvedValue(undefined);
 
-vi.mock('@tanstack/react-query', () => ({
-  useQuery: vi.fn(),
-  // `keepPreviousData` is a sentinel symbol in real react-query; the component
-  // imports it for `placeholderData`. Provide a stable sentinel so the import
-  // resolves. The mocked `useQuery` ignores `placeholderData` anyway.
-  keepPreviousData: Symbol('keepPreviousData'),
-  useQueryClient: vi.fn(() => ({
-    invalidateQueries: mockInvalidateQueries,
-  })),
-  useMutation: vi.fn(() => ({
-    mutate: vi.fn(),
-    mutateAsync: vi.fn(),
-    isPending: false,
-  })),
-}));
+vi.mock('@tanstack/react-query', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@tanstack/react-query')>();
+  return {
+    ...actual,
+    useQueryClient: vi.fn(() => ({
+      invalidateQueries: mockInvalidateQueries,
+    })),
+  };
+});
 
 // ─── Mock @memo/api-client — spy on getMasters (preserve other exports) ───
 
@@ -54,9 +54,6 @@ vi.mock('@memo/api-client', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@memo/api-client')>();
   return { ...actual, getMasters: vi.fn(), resolveDeleteMaster: vi.fn() };
 });
-
-import { useQuery } from '@tanstack/react-query';
-const mockUseQuery = vi.mocked(useQuery);
 
 // ─── Mock hooks ──────────────────────────────────────────────────────────
 
@@ -101,6 +98,7 @@ vi.mock('@/contexts/UIContext', () => ({
 // ─── Import after mocks ──────────────────────────────────────────────────
 
 import { MastersTable } from '@/app/(main)/masters/components/MastersTable';
+import { MastersProvider } from '@/contexts/MastersContext';
 import {
   useUpdateMaster,
   usePatchMaster,
@@ -108,7 +106,6 @@ import {
   useArchiveMaster,
   useRestoreMaster,
 } from '@/hooks/useMastersMutations';
-import { useUI } from '@/contexts/UIContext';
 import { getMasters, resolveDeleteMaster, ApiError } from '@memo/api-client';
 
 const mockUseUpdateMaster = vi.mocked(useUpdateMaster);
@@ -116,7 +113,6 @@ const mockUsePatchMaster = vi.mocked(usePatchMaster);
 const mockUseDeleteMaster = vi.mocked(useDeleteMaster);
 const mockUseArchiveMaster = vi.mocked(useArchiveMaster);
 const mockUseRestoreMaster = vi.mocked(useRestoreMaster);
-const mockUseUI = vi.mocked(useUI);
 const mockGetMasters = vi.mocked(getMasters);
 const mockResolveDeleteMaster = vi.mocked(resolveDeleteMaster);
 
@@ -137,56 +133,35 @@ const TEST_MASTERS = [
 
 // ─── Helpers ─────────────────────────────────────────────────────────────
 
-function setupQuery(masters: typeof TEST_MASTERS, isLoading = false) {
-  // Resolve the getMasters spy with the supplied list so the component's
-  // `queryFn` (which calls `getMasters(...).then(r => r.items)`) settles.
+function setupEnvelope(overrides: Partial<PaginatedResponse<MasterResponse>> = {}) {
   mockGetMasters.mockResolvedValue({
-    items: masters,
-    total: masters.length,
+    items: TEST_MASTERS,
+    total: TEST_MASTERS.length,
     page: 1,
-    per_page: 100,
+    per_page: 10,
+    ...overrides,
   });
-  // Drive `useQuery` through `mockImplementation` so the real `queryFn` is
-  // invoked on every render — this is what lets the getMasters spy record
-  // the call args (including the current `status`). The resolved promise is
-  // discarded; we inject the static `data` synchronously to keep these unit
-  // tests independent of react-query's async fetch machinery.
-  mockUseQuery.mockImplementation((((opts: { queryFn?: () => unknown }) => {
-    try {
-      void opts?.queryFn?.();
-    } catch {
-      // queryFn errors don't affect the injected static data
-    }
-    return {
-      data: masters,
-      isLoading,
-      error: null,
-      refetch: vi.fn(),
-      isSuccess: true,
-      isError: false,
-      isPending: false,
-      isFetching: false,
-      status: 'success',
-      fetchStatus: 'idle',
-      dataUpdatedAt: 0,
-      errorUpdatedAt: 0,
-      failureCount: 0,
-      failureReason: null,
-      errorUpdateCount: 0,
-      isFetched: true,
-      isFetchedAfterMount: true,
-      isInitialLoading: false,
-      isLoadingError: false,
-      isPlaceholderData: false,
-      isRefetchError: false,
-      isStale: false,
-      isRefetching: false,
-      isLoadingSuccess: true,
-      remove: vi.fn(),
-      promise: Promise.resolve({ data: masters }),
-    };
-  }) as unknown) as typeof useQuery);
-  return mockGetMasters;
+}
+
+/** Real MastersProvider + real QueryClient; list data flows through the mocked getMasters. */
+function renderTable() {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <MastersProvider>
+        <MastersTable />
+      </MastersProvider>
+    </QueryClientProvider>,
+  );
+}
+
+/** Render and wait for the server page to load. */
+async function renderLoaded() {
+  const view = renderTable();
+  await screen.findByText('Середа Ольга');
+  return view;
 }
 
 function setupUpdateMock() {
@@ -227,18 +202,18 @@ describe('MastersTable', () => {
     vi.restoreAllMocks();
   });
 
-  it('renders master names in the table', () => {
-    setupQuery(TEST_MASTERS);
-    render(<MastersTable />);
+  it('renders master names in the table', async () => {
+    setupEnvelope();
+    await renderLoaded();
 
     expect(screen.getByText('Середа Ольга')).toBeInTheDocument();
     expect(screen.getByText('Большакова Юлия')).toBeInTheDocument();
     expect(screen.getByText('Петрова Анна')).toBeInTheDocument();
   });
 
-  it('renders master specialties', () => {
-    setupQuery(TEST_MASTERS);
-    const { container } = render(<MastersTable />);
+  it('renders master specialties', async () => {
+    setupEnvelope();
+    const { container } = await renderLoaded();
 
     const tbody = container.querySelector('tbody');
     expect(tbody).toBeInTheDocument();
@@ -247,9 +222,9 @@ describe('MastersTable', () => {
     expect(within(tbody!).getByText('керамика')).toBeInTheDocument();
   });
 
-  it('renders master positions', () => {
-    setupQuery(TEST_MASTERS);
-    const { container } = render(<MastersTable />);
+  it('renders master positions', async () => {
+    setupEnvelope();
+    const { container } = await renderLoaded();
 
     const tbody = container.querySelector('tbody');
     expect(tbody).toBeInTheDocument();
@@ -257,23 +232,84 @@ describe('MastersTable', () => {
     expect(within(tbody!).getByText('администратор')).toBeInTheDocument();
   });
 
-  it('shows empty state when no masters', () => {
-    setupQuery([]);
-    render(<MastersTable />);
+  it('shows empty state when no masters', async () => {
+    setupEnvelope({ items: [], total: 0 });
+    renderTable();
 
-    expect(screen.getByText('Мастера не найдены')).toBeInTheDocument();
+    expect(await screen.findByText('Мастера не найдены')).toBeInTheDocument();
   });
 
-  it('shows loading state', () => {
-    setupQuery([], true);
-    render(<MastersTable />);
+  it('shows loading state', async () => {
+    mockGetMasters.mockReturnValue(new Promise<PaginatedResponse<MasterResponse>>(() => {}));
+    renderTable();
 
-    expect(screen.getByText('Загрузка...')).toBeInTheDocument();
+    expect(await screen.findByText('Загрузка...')).toBeInTheDocument();
   });
 
-  it('filters by search text in name', () => {
-    setupQuery(TEST_MASTERS);
-    render(<MastersTable />);
+  // ─── Server fetch params (#205 §5.2/§5.3) ──────────────────────────────
+
+  it('initial fetch sends page/per_page/status with NO sort params (server default order)', async () => {
+    setupEnvelope();
+    await renderLoaded();
+
+    expect(mockGetMasters).toHaveBeenCalledTimes(1);
+    expect(mockGetMasters).toHaveBeenCalledWith({ page: 1, per_page: 10, status: 'active' });
+    // sortBy starts null → sort params omitted → backend default
+    // sort_order/first_name/id order (preserves manual reorder).
+    expect(mockGetMasters.mock.calls[0][0]).not.toHaveProperty('sort_by');
+    expect(mockGetMasters.mock.calls[0][0]).not.toHaveProperty('sort_order');
+  });
+
+  it('status filter change refetches with the new server status param', async () => {
+    setupEnvelope();
+    await renderLoaded();
+
+    fireEvent.change(screen.getByLabelText('Фильтр по статусу'), {
+      target: { value: 'archived' },
+    });
+
+    await waitFor(() => {
+      expect(mockGetMasters).toHaveBeenCalledWith({ page: 1, per_page: 10, status: 'archived' });
+    });
+  });
+
+  it('status filter "Все" refetches with status=all', async () => {
+    setupEnvelope();
+    await renderLoaded();
+
+    fireEvent.change(screen.getByLabelText('Фильтр по статусу'), {
+      target: { value: 'all' },
+    });
+
+    await waitFor(() => {
+      expect(mockGetMasters).toHaveBeenCalledWith({ page: 1, per_page: 10, status: 'all' });
+    });
+  });
+
+  it('resets status filter to active when reset button clicked', async () => {
+    setupEnvelope();
+    await renderLoaded();
+
+    fireEvent.change(screen.getByLabelText('Фильтр по статусу'), {
+      target: { value: 'archived' },
+    });
+    await waitFor(() => {
+      expect(mockGetMasters).toHaveBeenLastCalledWith({ page: 1, per_page: 10, status: 'archived' });
+    });
+
+    fireEvent.click(screen.getByText('Сбросить'));
+
+    await waitFor(() => {
+      expect(mockGetMasters).toHaveBeenLastCalledWith({ page: 1, per_page: 10, status: 'active' });
+    });
+    expect(screen.getByLabelText('Фильтр по статусу')).toHaveValue('active');
+  });
+
+  // ─── Search (G1b Q1 — KEPT: client-side filter over the loaded page) ───
+
+  it('filters the loaded page by search text in name (client-side)', async () => {
+    setupEnvelope();
+    await renderLoaded();
 
     const searchInput = screen.getByLabelText('Поиск по имени или фамилии');
     fireEvent.change(searchInput, { target: { value: 'Ольга' } });
@@ -283,59 +319,16 @@ describe('MastersTable', () => {
     expect(screen.queryByText('Петрова Анна')).not.toBeInTheDocument();
   });
 
-  it('requests active masters by default', () => {
-    const spy = setupQuery(TEST_MASTERS);
-    render(<MastersTable />);
-
-    expect(spy).toHaveBeenCalledWith({ per_page: 100, status: 'active' });
-  });
-
-  it('requests archived masters when filter is "Архив"', () => {
-    const spy = setupQuery(TEST_MASTERS);
-    render(<MastersTable />);
-
-    fireEvent.change(screen.getByLabelText('Фильтр по статусу'), {
-      target: { value: 'archived' },
-    });
-
-    expect(spy).toHaveBeenCalledWith({ per_page: 100, status: 'archived' });
-  });
-
-  it('requests all masters when filter is "Все"', () => {
-    const spy = setupQuery(TEST_MASTERS);
-    render(<MastersTable />);
-
-    fireEvent.change(screen.getByLabelText('Фильтр по статусу'), {
-      target: { value: 'all' },
-    });
-
-    expect(spy).toHaveBeenCalledWith({ per_page: 100, status: 'all' });
-  });
-
-  it('resets status filter to active when reset button clicked', () => {
-    const spy = setupQuery(TEST_MASTERS);
-    render(<MastersTable />);
-
-    fireEvent.change(screen.getByLabelText('Фильтр по статусу'), {
-      target: { value: 'archived' },
-    });
-    fireEvent.click(screen.getByText('Сбросить'));
-
-    expect(screen.getByLabelText('Фильтр по статусу')).toHaveValue('active');
-    expect(spy).toHaveBeenLastCalledWith({ per_page: 100, status: 'active' });
-  });
-
-  it('resets filters when reset button clicked', () => {
-    setupQuery(TEST_MASTERS);
-    render(<MastersTable />);
+  it('resets search filter when reset button clicked', async () => {
+    setupEnvelope();
+    await renderLoaded();
 
     const searchInput = screen.getByLabelText('Поиск по имени или фамилии');
     fireEvent.change(searchInput, { target: { value: 'Ольга' } });
 
     expect(screen.queryByText('Большакова Юлия')).not.toBeInTheDocument();
 
-    const resetButton = screen.getByText('Сбросить');
-    fireEvent.click(resetButton);
+    fireEvent.click(screen.getByText('Сбросить'));
 
     expect(screen.getByText('Середа Ольга')).toBeInTheDocument();
     expect(screen.getByText('Большакова Юлия')).toBeInTheDocument();
@@ -343,29 +336,86 @@ describe('MastersTable', () => {
     expect(searchInput).toHaveValue('');
   });
 
-  it('shows page count and total', () => {
-    setupQuery(TEST_MASTERS);
-    render(<MastersTable />);
+  // ─── Server-driven pagination wiring ───────────────────────────────────
 
-    expect(screen.getByText('3 всего')).toBeInTheDocument();
+  it('pager renders 5 numbered pages from server total 42 and page click refetches', async () => {
+    setupEnvelope({ total: 42 });
+    await renderLoaded();
+
+    expect(screen.getByText('42 всего')).toBeInTheDocument();
+    for (let i = 1; i <= 5; i += 1) {
+      expect(screen.getByRole('button', { name: String(i) })).toBeInTheDocument();
+    }
+
+    fireEvent.click(screen.getByRole('button', { name: '2' }));
+
+    await waitFor(() => {
+      expect(mockGetMasters).toHaveBeenCalledWith({ page: 2, per_page: 10, status: 'active' });
+    });
   });
 
-  it('renders "Добавить мастера" button', () => {
-    setupQuery(TEST_MASTERS);
-    render(<MastersTable />);
+  it('page-size select refetches page 1 with the new per_page', async () => {
+    setupEnvelope({ total: 42 });
+    await renderLoaded();
+
+    fireEvent.change(screen.getByTestId('page-size-select'), { target: { value: '20' } });
+
+    await waitFor(() => {
+      expect(mockGetMasters).toHaveBeenCalledWith({ page: 1, per_page: 20, status: 'active' });
+    });
+  });
+
+  it('first header click sorts asc, second click toggles desc (server sort)', async () => {
+    setupEnvelope();
+    await renderLoaded();
+
+    const nameHeader = screen.getByText(/Имя/);
+    // No sort picked yet → neutral indicator
+    expect(nameHeader.textContent).toContain('↕');
+
+    fireEvent.click(nameHeader);
+    await waitFor(() => {
+      expect(mockGetMasters).toHaveBeenCalledWith({
+        page: 1,
+        per_page: 10,
+        status: 'active',
+        sort_by: 'name',
+        sort_order: 'asc',
+      });
+    });
+    expect(screen.getByText(/Имя/).textContent).toContain('↑');
+
+    fireEvent.click(nameHeader);
+    await waitFor(() => {
+      expect(mockGetMasters).toHaveBeenCalledWith({
+        page: 1,
+        per_page: 10,
+        status: 'active',
+        sort_by: 'name',
+        sort_order: 'desc',
+      });
+    });
+    expect(screen.getByText(/Имя/).textContent).toContain('↓');
+  });
+
+  // ─── Chrome ─────────────────────────────────────────────────────────────
+
+  it('renders "Добавить мастера" button', async () => {
+    setupEnvelope();
+    await renderLoaded();
     expect(screen.getByText('+ Добавить мастера')).toBeInTheDocument();
   });
 
-  it('opens create modal when "Добавить мастера" clicked', () => {
-    setupQuery(TEST_MASTERS);
-    render(<MastersTable />);
+  it('opens create modal when "Добавить мастера" clicked', async () => {
+    setupEnvelope();
+    await renderLoaded();
     fireEvent.click(screen.getByText('+ Добавить мастера'));
     expect(screen.getByText('Новый мастер')).toBeInTheDocument();
   });
 
-  it('opens create modal with empty fields', () => {
-    setupQuery(TEST_MASTERS);
-    render(<MastersTable />);
+  it('opens create modal with empty fields', async () => {
+    setupEnvelope();
+    await renderLoaded();
     fireEvent.click(screen.getByText('+ Добавить мастера'));
     expect(screen.getByText('Новый мастер')).toBeInTheDocument();
     // Name input should be empty in create mode
@@ -373,9 +423,9 @@ describe('MastersTable', () => {
     expect(firstNameInput).toHaveValue('');
   });
 
-  it('shows "Удалить" option in action dropdown', () => {
-    setupQuery(TEST_MASTERS);
-    render(<MastersTable />);
+  it('shows "Удалить" option in action dropdown', async () => {
+    setupEnvelope();
+    await renderLoaded();
     const actionButtons = screen.getAllByLabelText('Действия');
     fireEvent.click(actionButtons[0]);
     expect(screen.getByText('Удалить')).toBeInTheDocument();
@@ -383,7 +433,7 @@ describe('MastersTable', () => {
 
   // ─── Delete → DeleteDialog flow (#207 §7) ──────────────────────────────
 
-  /** Delete hook whose dry-run dry-rejects with a 409 carrying the given tree. */
+  /** Delete hook whose dry-run rejects with a 409 carrying the given tree. */
   function setupDeleteConflict(deps: DependencyNode[]) {
     const mutateAsync = vi.fn().mockRejectedValue(conflictError(deps));
     mockUseDeleteMaster.mockReturnValue({
@@ -409,8 +459,8 @@ describe('MastersTable', () => {
 
   it('opens DeleteDialog with the 409 dependency tree when delete conflicts', async () => {
     const deleteMutateAsync = setupDeleteConflict(DEPS_BLOCKED);
-    setupQuery(TEST_MASTERS);
-    render(<MastersTable />);
+    setupEnvelope();
+    await renderLoaded();
 
     const actionButtons = screen.getAllByLabelText('Действия');
     fireEvent.click(actionButtons[0]);
@@ -424,8 +474,8 @@ describe('MastersTable', () => {
 
   it('Mode B (blocked by activities) shows "Архивировать" instead of "Удалить"', async () => {
     setupDeleteConflict(DEPS_BLOCKED);
-    setupQuery(TEST_MASTERS);
-    render(<MastersTable />);
+    setupEnvelope();
+    await renderLoaded();
 
     fireEvent.click(screen.getAllByLabelText('Действия')[0]);
     fireEvent.click(screen.getByText('Удалить'));
@@ -440,8 +490,8 @@ describe('MastersTable', () => {
     setupDeleteConflict(DEPS_BLOCKED);
     const archiveMutateAsync = vi.fn().mockResolvedValue(createMockMasterResponse({ id: 'm1', archived: true }));
     mockUseArchiveMaster.mockReturnValue({ mutateAsync: archiveMutateAsync, isPending: false } as never);
-    setupQuery(TEST_MASTERS);
-    render(<MastersTable />);
+    setupEnvelope();
+    await renderLoaded();
 
     fireEvent.click(screen.getAllByLabelText('Действия')[0]);
     fireEvent.click(screen.getByText('Удалить'));
@@ -456,8 +506,8 @@ describe('MastersTable', () => {
   it('Mode A confirm calls resolveDeleteMaster with {} (all deps auto) and closes', async () => {
     setupDeleteConflict(DEPS_AUTO);
     mockResolveDeleteMaster.mockResolvedValue(undefined);
-    setupQuery(TEST_MASTERS);
-    render(<MastersTable />);
+    setupEnvelope();
+    await renderLoaded();
 
     fireEvent.click(screen.getAllByLabelText('Действия')[0]);
     fireEvent.click(screen.getByText('Удалить'));
@@ -500,8 +550,8 @@ describe('MastersTable', () => {
       context: undefined,
       submittedAt: 0,
     } as unknown as ReturnType<typeof useDeleteMaster>);
-    setupQuery(TEST_MASTERS);
-    render(<MastersTable />);
+    setupEnvelope();
+    await renderLoaded();
 
     fireEvent.click(screen.getAllByLabelText('Действия')[0]);
     fireEvent.click(screen.getByText('Удалить'));
@@ -512,8 +562,8 @@ describe('MastersTable', () => {
 
   it('cancel closes the dialog without executing a delete', async () => {
     const deleteMutateAsync = setupDeleteConflict(DEPS_BLOCKED);
-    setupQuery(TEST_MASTERS);
-    render(<MastersTable />);
+    setupEnvelope();
+    await renderLoaded();
 
     fireEvent.click(screen.getAllByLabelText('Действия')[0]);
     fireEvent.click(screen.getByText('Удалить'));
@@ -533,8 +583,8 @@ describe('MastersTable', () => {
     const patchMutateAsync = vi.fn();
     mockUseArchiveMaster.mockReturnValue({ mutateAsync: archiveMutateAsync, isPending: false } as never);
     mockUsePatchMaster.mockReturnValue({ mutateAsync: patchMutateAsync, isPending: false } as never);
-    setupQuery(TEST_MASTERS);
-    render(<MastersTable />);
+    setupEnvelope();
+    await renderLoaded();
 
     fireEvent.click(screen.getAllByLabelText('Действия')[0]);
     fireEvent.click(screen.getByText('В архив'));
@@ -548,8 +598,8 @@ describe('MastersTable', () => {
     const patchMutateAsync = vi.fn();
     mockUseRestoreMaster.mockReturnValue({ mutateAsync: restoreMutateAsync, isPending: false } as never);
     mockUsePatchMaster.mockReturnValue({ mutateAsync: patchMutateAsync, isPending: false } as never);
-    setupQuery(TEST_MASTERS);
-    render(<MastersTable />);
+    setupEnvelope();
+    await renderLoaded();
 
     // m2 is archived → its dropdown shows "Восстановить"
     fireEvent.click(screen.getAllByLabelText('Действия')[1]);
@@ -559,108 +609,54 @@ describe('MastersTable', () => {
     expect(patchMutateAsync).not.toHaveBeenCalled();
   });
 
-  it('renders color swatch for each master', () => {
-    setupQuery(TEST_MASTERS);
-    const { container } = render(<MastersTable />);
+  it('renders color swatch for each master', async () => {
+    setupEnvelope();
+    const { container } = await renderLoaded();
 
     // Color swatches are small divs with rounded-full and backgroundColor
-    const swatches = container.querySelectorAll('.rounded-full');
+    const swatches = container.querySelectorAll('tbody .rounded-full');
     expect(swatches.length).toBeGreaterThanOrEqual(TEST_MASTERS.length);
   });
 
-  it('renders column picker gear button', () => {
-    setupQuery(TEST_MASTERS);
-    render(<MastersTable />);
+  it('renders column picker gear button', async () => {
+    setupEnvelope();
+    await renderLoaded();
     expect(screen.getByLabelText('Настроить колонки')).toBeInTheDocument();
   });
 
-  it('shows default visible columns', () => {
-    setupQuery(TEST_MASTERS);
-    render(<MastersTable />);
+  it('shows default visible columns', async () => {
+    setupEnvelope();
+    await renderLoaded();
     expect(screen.getByText(/Имя/)).toBeInTheDocument();
     expect(screen.getByText(/Специальность/)).toBeInTheDocument();
     expect(screen.getByText(/Должность/)).toBeInTheDocument();
     expect(screen.getByText(/Цвет/)).toBeInTheDocument();
   });
 
-  it('hides non-default columns by default', () => {
-    setupQuery(TEST_MASTERS);
-    const { container } = render(<MastersTable />);
+  it('hides non-default columns by default', async () => {
+    setupEnvelope();
+    const { container } = await renderLoaded();
     const thead = container.querySelector('thead');
     expect(thead?.textContent).not.toMatch(/Аватар/);
     expect(thead?.textContent).not.toMatch(/Статус/);
   });
 
-  it('sorts by name when column header clicked', () => {
-    setupQuery(TEST_MASTERS);
-    render(<MastersTable />);
-
-    const nameHeader = screen.getByText(/Имя/);
-    fireEvent.click(nameHeader);
-
-    const rows = screen.getAllByRole('row');
-    const firstDataRow = rows[1];
-    const secondDataRow = rows[2];
-    const thirdDataRow = rows[3];
-
-    expect(within(firstDataRow).getByText('Петрова Анна')).toBeInTheDocument();
-    expect(within(secondDataRow).getByText('Середа Ольга')).toBeInTheDocument();
-    expect(within(thirdDataRow).getByText('Большакова Юлия')).toBeInTheDocument();
-  });
-
-  it('sorts by specialty when specialty header clicked', () => {
-    setupQuery(TEST_MASTERS);
-    render(<MastersTable />);
-
-    const specialtyHeader = screen.getByText(/Специальность/);
-    fireEvent.click(specialtyHeader);
-
-    const rows = screen.getAllByRole('row');
-    // "живопись" < "керамика" in Russian alphabet, so "живопись" comes first ascending
-    const firstDataRow = rows[1];
-    expect(within(firstDataRow).getByText('живопись')).toBeInTheDocument();
-  });
-
-  it('paginates with page size selector', () => {
-    const manyMasters = Array.from({ length: 25 }, (_, i) =>
-      createMockMasterResponse({
-        id: `m-${i}`,
-        first_name: `Имя${String(i).padStart(2, '0')}`,
-        last_name: `Фамилия${String(i).padStart(2, '0')}`,
-        archived: false,
-      }),
-    );
-    setupQuery(manyMasters);
-    const { container } = render(<MastersTable />);
-
-    expect(screen.getByText('25 всего')).toBeInTheDocument();
-
-    const tbody = container.querySelector('tbody');
-    expect(tbody).toBeInTheDocument();
-    let dataRows = tbody!.querySelectorAll('tr');
-    expect(dataRows).toHaveLength(10);
-
-    const pageSizeSelect = screen.getByTestId('page-size-select');
-    fireEvent.change(pageSizeSelect, { target: { value: '20' } });
-
-    dataRows = tbody!.querySelectorAll('tr');
-    expect(dataRows).toHaveLength(20);
-  });
-
-  it('shows avatar thumbnail when avatar_url exists', () => {
+  it('shows avatar thumbnail when avatar_url exists', async () => {
     localStorage.setItem('masters-columns', JSON.stringify(['name', 'avatar']));
-    setupQuery([mockMasterResponse]);
-    render(<MastersTable />);
+    setupEnvelope({ items: [mockMasterResponse], total: 1 });
+    renderTable();
+    await screen.findByText('Середа Ольга');
 
     const img = screen.getByAltText('avatar');
     expect(img).toBeInTheDocument();
     expect(img).toHaveAttribute('src', 'https://example.com/avatar.jpg');
   });
 
-  it('shows dash when avatar_url is null', () => {
+  it('shows dash when avatar_url is null', async () => {
     localStorage.setItem('masters-columns', JSON.stringify(['name', 'avatar']));
-    setupQuery([mockMasterResponseArchived]);
-    const { container } = render(<MastersTable />);
+    setupEnvelope({ items: [mockMasterResponseArchived], total: 1 });
+    const { container } = renderTable();
+    await screen.findByText('Большакова Юлия');
 
     const tbody = container.querySelector('tbody');
     // Should have a dash character in the avatar column
@@ -671,8 +667,8 @@ describe('MastersTable', () => {
 
   it('edit submit on archived master sends no archive flag (GH #195/#207)', async () => {
     const updateMutateAsync = setupUpdateMock();
-    setupQuery(TEST_MASTERS);
-    render(<MastersTable />);
+    setupEnvelope();
+    await renderLoaded();
 
     // Open the edit modal on the archived row (mockMasterResponseArchived id=m2,
     // displayed as "Большакова Юлия").

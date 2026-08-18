@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Generic, TypeVar, cast
 
 from pydantic import BaseModel
-from sqlalchemy import delete, func, not_, select
+from sqlalchemy import delete, not_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.domain.deletion import (
@@ -35,26 +35,6 @@ ResponseSchemaT = TypeVar("ResponseSchemaT", bound=BaseModel)
 # Protective limit for bare /all dictionary lists (#205). Enforced in the
 # single shared ``GenericService.list_all`` choke point via a LIMIT+1 probe.
 BARE_LIST_MAX_ROWS = 1000
-
-
-async def paginate_orm(
-    db_session: AsyncSession, stmt, page: int, per_page: int, order_by=None
-) -> tuple[list, int]:
-    """Shared pagination core (#191): COUNT the (unordered) statement, then ORDER + slice.
-
-    COUNT is computed BEFORE order_by is applied so correlated sort-key
-    subqueries are never evaluated inside the count query.
-    Returns (orm_items, total).
-    """
-    total = (
-        await db_session.execute(select(func.count()).select_from(stmt.subquery()))
-    ).scalar_one()
-    if order_by is not None:
-        stmt = stmt.order_by(*order_by)
-    result = await db_session.execute(
-        stmt.limit(per_page).offset((page - 1) * per_page)
-    )
-    return list(result.scalars().all()), total
 
 
 class GenericService(Generic[CreateSchemaT, UpdateSchemaT, ResponseSchemaT]):
@@ -93,13 +73,6 @@ class GenericService(Generic[CreateSchemaT, UpdateSchemaT, ResponseSchemaT]):
                 stmt = stmt.where(getattr(self._model, key) == value)
         return stmt
 
-    async def _paginate(
-        self, db_session: AsyncSession, stmt, page: int, per_page: int, order_by=None
-    ) -> PaginatedResponse[ResponseSchemaT]:
-        items_orm, total = await paginate_orm(db_session, stmt, page, per_page, order_by)
-        items = [self._response_schema.model_validate(o) for o in items_orm]
-        return PaginatedResponse(items=items, total=total, page=page, per_page=per_page)
-
     async def list(
         self,
         db_session: AsyncSession,
@@ -134,7 +107,7 @@ class GenericService(Generic[CreateSchemaT, UpdateSchemaT, ResponseSchemaT]):
         ``BareListLimitExceededError`` (single query, never materializes
         unbounded rows). Boundary: exactly ``BARE_LIST_MAX_ROWS`` rows → OK;
         the 1001st row → raise. Returns validated ``ResponseSchemaT`` objects
-        (same idiom as ``_paginate``).
+        (same count idiom as ``BaseRepository.list``).
         """
         stmt = self._list_stmt(**filters)
         if order_by is not None:

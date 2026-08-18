@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, within, waitFor } from '@testing-library/react';
-import type { ServiceResponse, DependencyNode } from '@memo/api-client';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import React from 'react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import type { ServiceResponse, DependencyNode, PaginatedResponse } from '@memo/api-client';
 
 // ─── Dependency tree fixtures (mirror backend src/domain/deletion.py) ─────
 
@@ -107,20 +109,21 @@ const mockShowToast = vi.fn();
 // Shared so tests can assert invalidation (#207: ['services'] on dialog done).
 const mockInvalidateQueries = vi.fn().mockResolvedValue(undefined);
 
-vi.mock('@tanstack/react-query', () => ({
-  useQuery: vi.fn(),
-  // `keepPreviousData` is a sentinel symbol in real react-query; the component
-  // imports it for `placeholderData`. Provide a stable sentinel so the import
-  // resolves. The mocked `useQuery` ignores `placeholderData` anyway.
-  keepPreviousData: Symbol('keepPreviousData'),
-  useMutation: vi.fn(() => ({
-    mutateAsync: vi.fn().mockResolvedValue({}),
-    isPending: false,
-  })),
-  useQueryClient: vi.fn(() => ({
-    invalidateQueries: mockInvalidateQueries,
-  })),
-}));
+// ─── Mock @tanstack/react-query ──────────────────────────────────────────
+// Only useQueryClient is mocked (invalidate spy shared with the delete flow
+// assertions). useQuery/QueryClientProvider stay REAL: the table renders
+// inside the real ServicesProvider, and the server-pagination wiring is
+// asserted through the getServices spy (MastersTable precedent, #205 Task 7).
+
+vi.mock('@tanstack/react-query', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@tanstack/react-query')>();
+  return {
+    ...actual,
+    useQueryClient: vi.fn(() => ({
+      invalidateQueries: mockInvalidateQueries,
+    })),
+  };
+});
 
 // Spy on getServices (preserve other api-client exports via importOriginal)
 vi.mock('@memo/api-client', async (importOriginal) => {
@@ -149,74 +152,44 @@ vi.mock('@/contexts/UIContext', () => ({
   }),
 }));
 
-import { useQuery } from '@tanstack/react-query';
 import { getServices, resolveDeleteService, ApiError } from '@memo/api-client';
+import { ServicesTable } from '../app/(main)/services/components/ServicesTable';
+import { ServicesProvider } from '@/contexts/ServicesContext';
 
-const mockUseQuery = vi.mocked(useQuery);
 const mockGetServices = vi.mocked(getServices);
 const mockResolveDeleteService = vi.mocked(resolveDeleteService);
 
-import { ServicesTable } from '../app/(main)/services/components/ServicesTable';
-
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
-// Simulate the server's archive filtering per `ListParams.status`. The mock
-// `useQuery` discards the `queryFn`'s resolved value and returns the injected
-// `data` synchronously, so we must inject already-filtered lists matching the
-// status the component requested. This mirrors how the real backend responds.
-const ACTIVE_SERVICES = TEST_SERVICES.filter((s) => !s.archived);
-const ARCHIVED_SERVICES = TEST_SERVICES.filter((s) => s.archived);
-
-function setupQuery(services: ServiceResponse[] = ACTIVE_SERVICES, isLoading = false) {
-  // Resolve the getServices spy with the supplied list so the component's
-  // `queryFn` (which calls `getServices(...).then(r => r.items)`) settles.
+function setupEnvelope(overrides: Partial<PaginatedResponse<ServiceResponse>> = {}) {
   mockGetServices.mockResolvedValue({
-    items: services,
-    total: services.length,
+    items: TEST_SERVICES,
+    total: TEST_SERVICES.length,
     page: 1,
-    per_page: 100,
+    per_page: 10,
+    ...overrides,
   });
-  // Drive `useQuery` through `mockImplementation` so the real `queryFn` is
-  // invoked on every render — this is what lets the getServices spy record
-  // the call args (including the current `status`). The resolved promise is
-  // discarded; we inject the static `data` synchronously to keep these unit
-  // tests independent of react-query's async fetch machinery.
-  mockUseQuery.mockImplementation((((opts: { queryFn?: () => unknown }) => {
-    try {
-      void opts?.queryFn?.();
-    } catch {
-      // queryFn errors don't affect the injected static data
-    }
-    return {
-      data: services,
-      isLoading,
-      error: null,
-      refetch: vi.fn(),
-      isSuccess: true,
-      isError: false,
-      isPending: false,
-      isFetching: false,
-      status: 'success',
-      fetchStatus: 'idle',
-      dataUpdatedAt: 0,
-      errorUpdatedAt: 0,
-      failureCount: 0,
-      failureReason: null,
-      errorUpdateCount: 0,
-      isFetched: true,
-      isFetchedAfterMount: true,
-      isInitialLoading: false,
-      isLoadingError: false,
-      isPlaceholderData: false,
-      isRefetchError: false,
-      isStale: false,
-      isRefetching: false,
-      isLoadingSuccess: true,
-      remove: vi.fn(),
-      promise: Promise.resolve({ data: services }),
-    };
-  }) as unknown) as typeof useQuery);
-  return mockGetServices;
+}
+
+/** Real ServicesProvider + real QueryClient; list data flows through the mocked getServices. */
+function renderTable() {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <ServicesProvider>
+        <ServicesTable />
+      </ServicesProvider>
+    </QueryClientProvider>,
+  );
+}
+
+/** Render and wait for the server page to load. */
+async function renderLoaded() {
+  const view = renderTable();
+  await screen.findByText('Картина маслом');
+  return view;
 }
 
 // ─── Tests ──────────────────────────────────────────────────────────────────
@@ -224,148 +197,319 @@ function setupQuery(services: ServiceResponse[] = ACTIVE_SERVICES, isLoading = f
 describe('ServicesTable', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    setupQuery();
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  it('renders active service titles by default', () => {
-    render(<ServicesTable />);
-    expect(screen.getByText('Картина маслом')).toBeTruthy();
-    expect(screen.getByText('Картина акрилом')).toBeTruthy();
-    // Archived service is filtered out server-side (status: 'active' default)
-    expect(screen.queryByText('Ручная лепка')).toBeNull();
-    // Default server-side filter requests status: 'active' (GH #195)
-    expect(mockGetServices).toHaveBeenCalledWith({
-      per_page: 100,
-      status: 'active',
-    });
+  it('renders service titles', async () => {
+    setupEnvelope();
+    await renderLoaded();
+
+    expect(screen.getByText('Картина маслом')).toBeInTheDocument();
+    expect(screen.getByText('Картина акрилом')).toBeInTheDocument();
+    expect(screen.getByText('Ручная лепка')).toBeInTheDocument();
   });
 
-  it('renders all services when status filter is "all"', () => {
-    // Simulate server returning all services (active + archived) for status='all'
-    setupQuery(TEST_SERVICES);
-    render(<ServicesTable />);
-    const statusSelect = screen.getByLabelText(/Фильтр по статусу/);
-    fireEvent.change(statusSelect, { target: { value: 'all' } });
-    expect(screen.getByText('Картина маслом')).toBeTruthy();
-    expect(screen.getByText('Картина акрилом')).toBeTruthy();
-    expect(screen.getByText('Ручная лепка')).toBeTruthy();
-    expect(mockGetServices).toHaveBeenCalledWith({
-      per_page: 100,
-      status: 'all',
-    });
+  it('renders duration formatted as minutes', async () => {
+    setupEnvelope();
+    await renderLoaded();
+
+    expect(screen.getByText('150 мин')).toBeInTheDocument();
+    expect(screen.getByText('120 мин')).toBeInTheDocument();
   });
 
-  it('renders duration formatted as minutes', () => {
-    render(<ServicesTable />);
-    expect(screen.getByText('150 мин')).toBeTruthy();
-    expect(screen.getByText('120 мин')).toBeTruthy();
+  it('renders age range', async () => {
+    setupEnvelope();
+    await renderLoaded();
+
+    expect(screen.getByText('12–18')).toBeInTheDocument();
+    expect(screen.getByText('6–14')).toBeInTheDocument();
   });
 
-  it('renders age range', () => {
-    render(<ServicesTable />);
-    expect(screen.getByText('12–18')).toBeTruthy();
-    expect(screen.getByText('6–14')).toBeTruthy();
+  it('renders tariff count and min price', async () => {
+    setupEnvelope();
+    await renderLoaded();
+
+    expect(screen.getByText('2 тарифа')).toBeInTheDocument();
+    expect(screen.getByText('от 2 500₽')).toBeInTheDocument();
+    expect(screen.getByText('1 тариф')).toBeInTheDocument();
   });
 
-  it('renders tariff count and min price', () => {
-    render(<ServicesTable />);
-    expect(screen.getByText('2 тарифа')).toBeTruthy();
-    expect(screen.getByText('от 2 500₽')).toBeTruthy();
-    expect(screen.getByText('1 тариф')).toBeTruthy();
+  it('renders material hint', async () => {
+    setupEnvelope();
+    await renderLoaded();
+
+    expect(screen.getByText('Фартук')).toBeInTheDocument();
   });
 
-  it('renders material hint', () => {
-    render(<ServicesTable />);
-    expect(screen.getByText('Фартук')).toBeTruthy();
-  });
+  it('shows "—" for services without material hint', async () => {
+    setupEnvelope();
+    await renderLoaded();
 
-  it('shows "—" for services without material hint', () => {
-    render(<ServicesTable />);
-    // Картина акрилом has material_hint: null — shows "—"
+    // Картина акрилом and Ручная лепка have material_hint: null — show "—"
     const cells = screen.getAllByText('—');
     expect(cells.length).toBeGreaterThanOrEqual(1);
   });
 
-  it('sorts by title when clicking header (asc)', () => {
-    render(<ServicesTable />);
-    const titleHeader = screen.getByText(/Название/);
-    fireEvent.click(titleHeader);
-    // Ascending: Картина акрилом before Картина маслом
-    const rows = screen.getAllByRole('row');
-    expect(within(rows[1]).getByText('Картина акрилом')).toBeTruthy();
-    expect(within(rows[2]).getByText('Картина маслом')).toBeTruthy();
+  it('shows empty state when no services', async () => {
+    setupEnvelope({ items: [], total: 0 });
+    renderTable();
+
+    expect(await screen.findByText('Услуги не найдены')).toBeInTheDocument();
   });
 
-  it('sorts by title when clicking header (desc)', () => {
-    render(<ServicesTable />);
-    const titleHeader = screen.getByText(/Название/);
-    // Click twice: asc → desc
-    fireEvent.click(titleHeader);
-    fireEvent.click(titleHeader);
-    // Descending: Картина маслом before Картина акрилом
-    const rows = screen.getAllByRole('row');
-    expect(within(rows[1]).getByText('Картина маслом')).toBeTruthy();
-    expect(within(rows[2]).getByText('Картина акрилом')).toBeTruthy();
+  it('shows loading state', async () => {
+    mockGetServices.mockReturnValue(new Promise<PaginatedResponse<ServiceResponse>>(() => {}));
+    renderTable();
+
+    expect(await screen.findByText('Загрузка...')).toBeInTheDocument();
   });
 
-  it('filters by search text', () => {
-    render(<ServicesTable />);
-    const searchInput = screen.getByLabelText(/Поиск по названию/);
-    fireEvent.change(searchInput, { target: { value: 'масл' } });
-    expect(screen.getByText('Картина маслом')).toBeTruthy();
-    expect(screen.queryByText('Картина акрилом')).toBeNull();
+  it('opens edit modal on row click', async () => {
+    setupEnvelope();
+    await renderLoaded();
+
+    const row = screen.getByText('Картина маслом').closest('tr')!;
+    fireEvent.click(row);
+    expect(screen.getByText('Редактировать услугу')).toBeInTheDocument();
   });
 
-  it('filters by status (archived)', () => {
-    // Simulate server returning only archived services for status='archived'
-    setupQuery(ARCHIVED_SERVICES);
-    render(<ServicesTable />);
-    const statusSelect = screen.getByLabelText(/Фильтр по статусу/);
-    // Switch to archived — request now carries status: 'archived' (GH #195)
-    fireEvent.change(statusSelect, { target: { value: 'archived' } });
-    expect(screen.getByText('Ручная лепка')).toBeTruthy();
-    expect(mockGetServices).toHaveBeenCalledWith({
-      per_page: 100,
-      status: 'archived',
+  // ─── Server fetch params (#205 §5.2/§5.3) ──────────────────────────────
+
+  it('initial fetch sends page/per_page/status with NO sort params (server default order)', async () => {
+    setupEnvelope();
+    await renderLoaded();
+
+    expect(mockGetServices).toHaveBeenCalledTimes(1);
+    expect(mockGetServices).toHaveBeenCalledWith({ page: 1, per_page: 10, status: 'active' });
+    // sortBy starts null → sort params omitted → backend default
+    // title/id order (server default, no defaultSortBy).
+    expect(mockGetServices.mock.calls[0][0]).not.toHaveProperty('sort_by');
+    expect(mockGetServices.mock.calls[0][0]).not.toHaveProperty('sort_order');
+  });
+
+  it('status filter change refetches with the new server status param', async () => {
+    setupEnvelope();
+    await renderLoaded();
+
+    fireEvent.change(screen.getByLabelText('Фильтр по статусу'), {
+      target: { value: 'archived' },
+    });
+
+    await waitFor(() => {
+      expect(mockGetServices).toHaveBeenCalledWith({ page: 1, per_page: 10, status: 'archived' });
     });
   });
 
-  it('shows empty state when no services match', () => {
-    setupQuery([]);
-    render(<ServicesTable />);
-    expect(screen.getByText('Услуги не найдены')).toBeTruthy();
+  it('status filter "Все" refetches with status=all', async () => {
+    setupEnvelope();
+    await renderLoaded();
+
+    fireEvent.change(screen.getByLabelText('Фильтр по статусу'), {
+      target: { value: 'all' },
+    });
+
+    await waitFor(() => {
+      expect(mockGetServices).toHaveBeenCalledWith({ page: 1, per_page: 10, status: 'all' });
+    });
   });
 
-  it('opens edit modal on row click', () => {
-    render(<ServicesTable />);
-    const row = screen.getByText('Картина маслом').closest('tr')!;
-    fireEvent.click(row);
-    expect(screen.getByText('Редактировать услугу')).toBeTruthy();
+  it('resets status filter to active when reset button clicked', async () => {
+    setupEnvelope();
+    await renderLoaded();
+
+    fireEvent.change(screen.getByLabelText('Фильтр по статусу'), {
+      target: { value: 'archived' },
+    });
+    await waitFor(() => {
+      expect(mockGetServices).toHaveBeenLastCalledWith({ page: 1, per_page: 10, status: 'archived' });
+    });
+
+    fireEvent.click(screen.getByText('Сбросить'));
+
+    await waitFor(() => {
+      expect(mockGetServices).toHaveBeenLastCalledWith({ page: 1, per_page: 10, status: 'active' });
+    });
+    expect(screen.getByLabelText('Фильтр по статусу')).toHaveValue('active');
   });
 
-  // ─── Create functionality ────────────────────────────────────────────
+  // ─── Search (G1b Q1 — KEPT: client-side filter over the loaded page) ───
 
-  it('renders "Добавить услугу" button', () => {
-    render(<ServicesTable />);
-    expect(screen.getByText('+ Добавить услугу')).toBeTruthy();
+  it('filters the loaded page by search text (client-side)', async () => {
+    setupEnvelope();
+    await renderLoaded();
+
+    const searchInput = screen.getByLabelText('Поиск по названию');
+    fireEvent.change(searchInput, { target: { value: 'масл' } });
+
+    expect(screen.getByText('Картина маслом')).toBeInTheDocument();
+    expect(screen.queryByText('Картина акрилом')).not.toBeInTheDocument();
+    expect(screen.queryByText('Ручная лепка')).not.toBeInTheDocument();
   });
 
-  it('opens create modal when "Добавить услугу" clicked', () => {
-    render(<ServicesTable />);
-    const addBtn = screen.getByText('+ Добавить услугу');
-    fireEvent.click(addBtn);
-    expect(screen.getByText('Новая услуга')).toBeTruthy();
+  it('resets search filter when reset button clicked', async () => {
+    setupEnvelope();
+    await renderLoaded();
+
+    const searchInput = screen.getByLabelText('Поиск по названию');
+    fireEvent.change(searchInput, { target: { value: 'масл' } });
+
+    expect(screen.queryByText('Картина акрилом')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('Сбросить'));
+
+    expect(screen.getByText('Картина маслом')).toBeInTheDocument();
+    expect(screen.getByText('Картина акрилом')).toBeInTheDocument();
+    expect(screen.getByText('Ручная лепка')).toBeInTheDocument();
+    expect(searchInput).toHaveValue('');
   });
 
-  it('opens create modal with empty title field', () => {
-    render(<ServicesTable />);
+  // ─── Server-driven pagination wiring ───────────────────────────────────
+
+  it('pager renders 5 numbered pages from server total 42 and page click refetches', async () => {
+    setupEnvelope({ total: 42 });
+    await renderLoaded();
+
+    expect(screen.getByText('42 всего')).toBeInTheDocument();
+    for (let i = 1; i <= 5; i += 1) {
+      expect(screen.getByRole('button', { name: String(i) })).toBeInTheDocument();
+    }
+
+    fireEvent.click(screen.getByRole('button', { name: '2' }));
+
+    await waitFor(() => {
+      expect(mockGetServices).toHaveBeenCalledWith({ page: 2, per_page: 10, status: 'active' });
+    });
+  });
+
+  it('page-size select refetches page 1 with the new per_page', async () => {
+    setupEnvelope({ total: 42 });
+    await renderLoaded();
+
+    fireEvent.change(screen.getByTestId('page-size-select'), { target: { value: '20' } });
+
+    await waitFor(() => {
+      expect(mockGetServices).toHaveBeenCalledWith({ page: 1, per_page: 20, status: 'active' });
+    });
+  });
+
+  it('first header click sorts asc, second click toggles desc (server sort)', async () => {
+    setupEnvelope();
+    await renderLoaded();
+
+    const titleHeader = screen.getByText(/Название/);
+    // No sort picked yet → neutral indicator
+    expect(titleHeader.textContent).toContain('↕');
+
+    fireEvent.click(titleHeader);
+    await waitFor(() => {
+      expect(mockGetServices).toHaveBeenCalledWith({
+        page: 1,
+        per_page: 10,
+        status: 'active',
+        sort_by: 'title',
+        sort_order: 'asc',
+      });
+    });
+    expect(screen.getByText(/Название/).textContent).toContain('↑');
+
+    fireEvent.click(titleHeader);
+    await waitFor(() => {
+      expect(mockGetServices).toHaveBeenCalledWith({
+        page: 1,
+        per_page: 10,
+        status: 'active',
+        sort_by: 'title',
+        sort_order: 'desc',
+      });
+    });
+    expect(screen.getByText(/Название/).textContent).toContain('↓');
+  });
+
+  // `age` and `tariffs` are UI sort keys — the table sends them as-is; the
+  // backend whitelist (#205 Task 3) maps age→min_age and tariffs→count
+  // subquery. Never rename/mapping happens client-side.
+
+  it('age header click sends sort_by=age (backend maps to min_age)', async () => {
+    setupEnvelope();
+    await renderLoaded();
+
+    fireEvent.click(screen.getByText(/Возраст/));
+
+    await waitFor(() => {
+      expect(mockGetServices).toHaveBeenCalledWith({
+        page: 1,
+        per_page: 10,
+        status: 'active',
+        sort_by: 'age',
+        sort_order: 'asc',
+      });
+    });
+  });
+
+  it('tariffs header click sends sort_by=tariffs (backend maps to count subquery)', async () => {
+    setupEnvelope();
+    await renderLoaded();
+
+    fireEvent.click(screen.getByText(/Тарифы/));
+
+    await waitFor(() => {
+      expect(mockGetServices).toHaveBeenCalledWith({
+        page: 1,
+        per_page: 10,
+        status: 'active',
+        sort_by: 'tariffs',
+        sort_order: 'asc',
+      });
+    });
+  });
+
+  it('sort change resets pager to page 1', async () => {
+    setupEnvelope({ total: 42 });
+    await renderLoaded();
+
+    // Go to page 2 first, then sort — server refetch must reset to page 1.
+    fireEvent.click(screen.getByRole('button', { name: '2' }));
+    await waitFor(() => {
+      expect(mockGetServices).toHaveBeenCalledWith({ page: 2, per_page: 10, status: 'active' });
+    });
+
+    fireEvent.click(screen.getByText(/Название/));
+
+    await waitFor(() => {
+      expect(mockGetServices).toHaveBeenCalledWith({
+        page: 1,
+        per_page: 10,
+        status: 'active',
+        sort_by: 'title',
+        sort_order: 'asc',
+      });
+    });
+  });
+
+  // ─── Chrome ─────────────────────────────────────────────────────────────
+
+  it('renders "Добавить услугу" button', async () => {
+    setupEnvelope();
+    await renderLoaded();
+    expect(screen.getByText('+ Добавить услугу')).toBeInTheDocument();
+  });
+
+  it('opens create modal when "Добавить услугу" clicked', async () => {
+    setupEnvelope();
+    await renderLoaded();
+    fireEvent.click(screen.getByText('+ Добавить услугу'));
+    expect(screen.getByText('Новая услуга')).toBeInTheDocument();
+  });
+
+  it('opens create modal with empty title field', async () => {
+    setupEnvelope();
+    await renderLoaded();
     fireEvent.click(screen.getByText('+ Добавить услугу'));
     // Modal should be open with the "Новая услуга" title
-    expect(screen.getByText('Новая услуга')).toBeTruthy();
+    expect(screen.getByText('Новая услуга')).toBeInTheDocument();
     // The title input should be empty
     const titleInput = screen.getByPlaceholderText('Мастер-класс по рисованию');
     expect(titleInput).toHaveValue('');
@@ -373,18 +517,20 @@ describe('ServicesTable', () => {
 
   // ─── Delete functionality ────────────────────────────────────────────
 
-  it('shows "Удалить" option in action dropdown', () => {
-    render(<ServicesTable />);
-    // Open action menu for first service
+  it('shows "Удалить" option in action dropdown', async () => {
+    setupEnvelope();
+    await renderLoaded();
     const actionButtons = screen.getAllByLabelText('Действия');
     fireEvent.click(actionButtons[0]);
-    expect(screen.getByText('Удалить')).toBeTruthy();
+    expect(screen.getByText('Удалить')).toBeInTheDocument();
   });
 
   it('calls deleteService dry-run when "Удалить" clicked (204 → no dialog)', async () => {
     mockDeleteMutateAsync.mockResolvedValue(undefined);
     mockDeleteDependencies = null;
-    render(<ServicesTable />);
+    setupEnvelope();
+    await renderLoaded();
+
     const actionButtons = screen.getAllByLabelText('Действия');
     fireEvent.click(actionButtons[0]);
     fireEvent.click(screen.getByText('Удалить'));
@@ -404,7 +550,8 @@ describe('ServicesTable', () => {
 
   it('opens DeleteDialog in Mode B when delete conflicts with activities', async () => {
     setupDeleteConflict(DEPS_BLOCKED);
-    render(<ServicesTable />);
+    setupEnvelope();
+    await renderLoaded();
 
     fireEvent.click(screen.getAllByLabelText('Действия')[0]);
     fireEvent.click(screen.getByText('Удалить'));
@@ -418,7 +565,8 @@ describe('ServicesTable', () => {
   it('Mode B "Архивировать" calls archiveService and closes the dialog', async () => {
     setupDeleteConflict(DEPS_BLOCKED);
     mockArchiveMutateAsync.mockResolvedValue({});
-    render(<ServicesTable />);
+    setupEnvelope();
+    await renderLoaded();
 
     fireEvent.click(screen.getAllByLabelText('Действия')[0]);
     fireEvent.click(screen.getByText('Удалить'));
@@ -433,7 +581,8 @@ describe('ServicesTable', () => {
   it('Mode A confirm calls resolveDeleteService with {} (all deps auto) and closes', async () => {
     setupDeleteConflict(DEPS_AUTO);
     mockResolveDeleteService.mockResolvedValue(undefined);
-    render(<ServicesTable />);
+    setupEnvelope();
+    await renderLoaded();
 
     fireEvent.click(screen.getAllByLabelText('Действия')[0]);
     fireEvent.click(screen.getByText('Удалить'));
@@ -453,7 +602,8 @@ describe('ServicesTable', () => {
 
   it('cancel closes the dialog without executing a delete', async () => {
     setupDeleteConflict(DEPS_BLOCKED);
-    render(<ServicesTable />);
+    setupEnvelope();
+    await renderLoaded();
 
     fireEvent.click(screen.getAllByLabelText('Действия')[0]);
     fireEvent.click(screen.getByText('Удалить'));
@@ -469,7 +619,8 @@ describe('ServicesTable', () => {
 
   it('calls archiveService when "В архив" clicked on an active service', async () => {
     mockArchiveMutateAsync.mockResolvedValue({});
-    render(<ServicesTable />);
+    setupEnvelope();
+    await renderLoaded();
 
     fireEvent.click(screen.getAllByLabelText('Действия')[0]);
     fireEvent.click(screen.getByText('В архив'));
@@ -479,15 +630,12 @@ describe('ServicesTable', () => {
   });
 
   it('calls restoreService when "Восстановить" clicked on an archived service', async () => {
-    // Switch to "all" so the archived mockService3 ("Ручная лепка", id=svc-3) renders.
-    setupQuery(TEST_SERVICES);
-    render(<ServicesTable />);
-    fireEvent.change(screen.getByLabelText(/Фильтр по статусу/), {
-      target: { value: 'all' },
-    });
+    setupEnvelope();
+    await renderLoaded();
 
-    mockRestoreMutateAsync.mockResolvedValue({});
-    fireEvent.click(screen.getAllByLabelText('Действия')[2]); // svc-3 row
+    // svc-3 (archived, "Ручная лепка") is row index 2 in TEST_SERVICES order
+    // — the server returns the full envelope as-is; no client filtering.
+    fireEvent.click(screen.getAllByLabelText('Действия')[2]);
     fireEvent.click(screen.getByText('Восстановить'));
 
     await waitFor(() => expect(mockRestoreMutateAsync).toHaveBeenCalledWith('svc-3'));
@@ -497,13 +645,8 @@ describe('ServicesTable', () => {
   // ─── Edit does not resurrect archived services (GH #195 via #207) ────────
 
   it('edit submit on archived service sends no archive flag (GH #195/#207)', async () => {
-    // Switch to "all" so the archived mockService3 ("Ручная лепка", id=svc-3)
-    // is rendered by the table.
-    setupQuery(TEST_SERVICES);
-    render(<ServicesTable />);
-    fireEvent.change(screen.getByLabelText(/Фильтр по статусу/), {
-      target: { value: 'all' },
-    });
+    setupEnvelope();
+    await renderLoaded();
 
     const archivedRow = screen.getByText('Ручная лепка').closest('tr')!;
     fireEvent.click(archivedRow);

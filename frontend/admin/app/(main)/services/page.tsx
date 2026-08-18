@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { ServicesTable } from './components/ServicesTable';
 import { MaterialsTable } from './components/MaterialsTable';
+import { ServicesProvider } from '@/contexts/ServicesContext';
 
 export default function ServicesPage() {
   const [view, setView] = useState<'services' | 'materials'>('services');
@@ -46,7 +47,15 @@ export default function ServicesPage() {
         className="rounded-xl border overflow-hidden"
         style={{ borderColor: 'var(--line)', backgroundColor: 'var(--white)' }}
       >
-        {view === 'services' ? <ServicesTable /> : <MaterialsTable />}
+        {/* ServicesProvider wraps ONLY the services table (Task 9); MaterialsTable
+            keeps its own data flow until Task 10 migrates it. */}
+        {view === 'services' ? (
+          <ServicesProvider>
+            <ServicesTable />
+          </ServicesProvider>
+        ) : (
+          <MaterialsTable />
+        )}
       </div>
     </div>
   );

@@ -184,7 +184,7 @@ A Record is a booking for an Activity. It links a Client to an Activity and cont
 
 **Null ordering + tiebreak:** `asc` → `NULLS FIRST`, `desc` → `NULLS LAST` (matters for `client` — anonymous records have no Client row); a deterministic `Record.id asc()` tiebreak guarantees cross-page stability.
 
-**Pagination mechanics:** shared `paginate_orm()` core in `backend/src/services/generic.py` — the COUNT query runs BEFORE `order_by` is applied (correlated sort-key subqueries are never evaluated inside the count), then ORDER + LIMIT/OFFSET slice. Pipeline order: Filter → Sort → Paginate; business filters are hand-written in `RecordService.list` (G1a principle), pagination/date mechanics are the shared helpers.
+**Pagination mechanics:** repo-owned — `BaseRepository.list_custom` (`backend/src/repositories/generic.py`) wraps the record stmt built by `RecordService.list` (JOIN `Activity` + `selectinload(Record.visits)`). Count runs on the unordered stmt via `select(func.count()).select_from(stmt.subquery())` — loader options are stripped by the subquery and the correlated sort-key subqueries are never evaluated inside the count; ORDER + LIMIT/OFFSET slice is then applied by the repo. The sort whitelist stays in `RecordService._sort_columns` (service-owned, G1a principle), which returns the ORDER BY expressions; the repo owns order/limit/offset, the service owns page↔offset conversion (`(page - 1) * per_page`) and the `PaginatedResponse` envelope. Pipeline order: Filter → Sort → Paginate; business filters are hand-written in `RecordService.list`, pagination mechanics are owned by the repo.
 
 ## Relationships
 - Record → belongs to Activity

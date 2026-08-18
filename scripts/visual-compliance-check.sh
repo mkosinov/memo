@@ -108,17 +108,33 @@ node -e "
 const fs = require('fs');
 const content = fs.readFileSync('$SPEC_FILE', 'utf8');
 
-// Find ## Visual Compliance Checks or similar section
-const sectionRegex = /##\s+(Visual Compliance Checks|UI Verification|Visual Checks)[\s\S]*?(?=##\s+|$)/i;
-const section = content.match(sectionRegex);
+// Find the Visual Compliance Checks section. Headings may carry a numeric
+// or § prefix (e.g. '## 13. Visual Compliance Checks', '## §9 Visual
+// Compliance Checks'), which older parsing missed and then fell back to a
+// whole-doc heuristic scan that mis-parsed checkboxes from other sections.
+const lines = content.split('\n');
+const sectionRegex = /^##\s+(?:\d+\.\s*|§\s*\d+\s*)*(Visual Compliance Checks|UI Verification|Visual Checks)\b/i;
+let startIdx = -1;
+for (let i = 0; i < lines.length; i++) {
+    if (sectionRegex.test(lines[i])) { startIdx = i; break; }
+}
 
 const checks = [];
-if (section) {
-    const lines = section[0].split('\n');
-    for (const line of lines) {
-        const match = line.match(/^\s*[-*]\s*\[?\s*]?\s*(.+)/);
+if (startIdx !== -1) {
+    // Collect checklist items until the next H2 section.
+    // ### subsections inside the section do NOT terminate it.
+    for (let j = startIdx + 1; j < lines.length; j++) {
+        const line = lines[j];
+        if (/^##\s/.test(line)) break;
+        if (/^\s*[-*_]{3,}\s*$/.test(line)) continue;  // horizontal rule
+        if (/^\s*\*\*/.test(line)) continue;           // bold paragraph, not a bullet
+        const match = line.match(/^\s*[-*]\s*(?:\[[ xX]?\]\s*)?(.+)/);
         if (match) {
-            checks.push({ description: match[1].trim(), selector: null, status: 'pending' });
+            const desc = match[1].trim();
+            // Skip empty captures and heading lines
+            if (desc && !/^#{1,6}\s/.test(desc)) {
+                checks.push({ description: desc, selector: null, status: 'pending' });
+            }
         }
     }
 }

@@ -71,9 +71,16 @@ for port in 3002 3003 8001 8002; do
 done
 sleep 2
 
-# Also kill any orphan next-server processes (from worktrees etc.)
-pkill -9 -f "next-server" 2>/dev/null || true
-pkill -9 -f "next dev -p 300[2-3]" 2>/dev/null || true
+# Also kill any orphan shard-stack processes from previous runs (worktrees
+# etc.). Shard frontends run `next dev -p 3002/3003`; the forked next-server
+# child loses the port from its cmdline (process title overwrites it with
+# "next-server (vX)"), so match the parent chain and kill its children.
+# NEVER `pkill -f "next-server"` — it matches EVERY Next.js dev server,
+# including the dev stack on :3000/:3001 and unrelated host instances.
+for pid in $(pgrep -f "next dev -p 300[2-3]" 2>/dev/null || true); do
+  pkill -9 -P "$pid" 2>/dev/null || true   # forked next-server child
+  kill -9 "$pid" 2>/dev/null || true       # pnpm wrapper / next dev parent
+done
 sleep 1
 
 # Track all background PIDs for waiting
@@ -271,9 +278,9 @@ if [ "${VISUAL_COMPLIANCE:-1}" != "0" ]; then
   SPEC_FILE="$ROOT/docs/specs/2026-06-19-current-user-scenarios.md"
   if [ ! -f "$SPEC_FILE" ]; then
     echo "  ⚠️  $SPEC_FILE not found; skipping visual compliance"
-  elif [ -x "$ROOT/superagents/scripts/visual-compliance-check.sh" ]; then
+  elif [ -x "$ROOT/scripts/visual-compliance-check.sh" ]; then
     VISUAL_COMPLIANCE_URL="${VISUAL_COMPLIANCE_URL:-http://localhost:3001}"
-    "$ROOT/superagents/scripts/visual-compliance-check.sh" \
+    "$ROOT/scripts/visual-compliance-check.sh" \
       "$VISUAL_COMPLIANCE_URL" \
       "$SPEC_FILE" \
       /tmp/visual-compliance \

@@ -5,6 +5,7 @@ from datetime import date, datetime
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 from src.models.enums import ArchiveStatus, Channel
+from src.schemas.pagination import PaginationParams
 
 
 class ClientBase(BaseModel):
@@ -94,11 +95,9 @@ class ClientWithStats(ClientResponse):
     missed_records: int = 0
 
 
-class ClientListParams(BaseModel):
+class ClientListParams(PaginationParams):
     """Query parameters for GET /api/v1/clients with filtering, pagination, sorting."""
 
-    page: int = Field(default=1, ge=1)
-    per_page: int = Field(default=20, ge=1, le=100)
     search: str | None = None
     status: ArchiveStatus = ArchiveStatus.ACTIVE
     created_from: date | None = None

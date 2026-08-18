@@ -15,6 +15,7 @@ from src.models.enums import ArchiveStatus
 from src.models.service import Service
 from src.models.tariff import Tariff
 from src.schemas.common import PaginatedResponse, SortOrder
+from src.schemas.pagination import PaginationParams
 from src.schemas.service import ServiceCreate, ServicePatch, ServiceResponse, ServiceSortBy, ServiceUpdate
 from src.services.service import ServiceService, get_service_service
 
@@ -71,8 +72,7 @@ def _service_order_by(sort_by: ServiceSortBy | None, sort_order: SortOrder) -> l
 async def list_services(
     service: _ServiceDep,
     session: SessionDep,
-    page: int = Query(1, ge=1),
-    per_page: int = Query(20, ge=1, le=100),
+    pagination: PaginationParams = Depends(),
     status: ArchiveStatus = Query(ArchiveStatus.ACTIVE),
     sort_by: ServiceSortBy | None = Query(None),
     sort_order: SortOrder = Query("asc"),
@@ -90,8 +90,8 @@ async def list_services(
     """
     return await service.list(
         db_session=session,
-        page=page,
-        per_page=per_page,
+        page=pagination.page,
+        per_page=pagination.per_page,
         status=status,
         order_by=_service_order_by(sort_by, sort_order),
     )

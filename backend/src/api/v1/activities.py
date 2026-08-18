@@ -16,6 +16,7 @@ from src.schemas.activity import (
     ActivityUpdate,
 )
 from src.schemas.common import PaginatedResponse
+from src.schemas.pagination import PaginationParams
 from src.services.activity import ActivityService, get_activity_service
 
 router = APIRouter(tags=["activities"])
@@ -50,14 +51,13 @@ def _map_response(activity: ActivityResponse, occupied: int) -> ActivityResponse
 async def list_activities(
     service: _ServiceDep,
     session: SessionDep,
-    page: int = Query(1, ge=1),
-    per_page: int = Query(20, ge=1, le=100),
+    pagination: PaginationParams = Depends(),
     date_from: date | None = Query(None),
     date_to: date | None = Query(None),
 ) -> PaginatedResponse[ActivityResponse]:
     """Return all activities, optionally filtered by date range."""
     result = await service.list(
-        db_session=session, page=page, per_page=per_page,
+        db_session=session, page=pagination.page, per_page=pagination.per_page,
         date_from=date_from, date_to=date_to,
     )
     occupied_map = await service.sum_active_seats_bulk(

@@ -56,6 +56,13 @@ A Service represents a type of master class (painting, sculpture, etc.). It defi
 | POST | /api/v1/services/{id}/archive | Archive (sets `archived: true`, HTTP 200 with body) — GH #207 |
 | POST | /api/v1/services/{id}/restore | Restore (sets `archived: false`, HTTP 200 with body) — GH #207 |
 
+## List contract (GH #205)
+
+- **Paginated `GET /api/v1/services`**: `page` (≥1), `per_page` (1-100, default 20), `status` (active|archived|all, default active), `sort_by` (Literal whitelist: `title, duration, age, material_hint, tariffs, specialty, archived, created_at`; 422 on unknown), `sort_order` (asc|desc, default asc). Default order: `title ASC, id ASC` (spec §4.4). Column mapping: `age`→`min_age`, `tariffs`→count subquery.
+- **Bare `GET /api/v1/services/all`**: bare JSON array (no envelope), `status` parity with paginated, deterministic order = same default. Protective `BARE_LIST_MAX_ROWS = 1000` → 422 English error naming entity + paginated endpoint (spec §4.3).
+- **Consumers**: Services table = server-paginated via `ServicesContext`; dropdowns/lookup maps (Records/Schedule/useServices/useRecordData) = `/all` (spec §5.5).
+- **Search matrix (spec §6)**: table search box = client-side filter over loaded page (until #212 server `?q=`); dictionary form dropdowns = client filter over `/all` (#214 combobox).
+
 ## Relationships
 - Service → has many Tariffs (cascade delete-orphan)
 - Service → has many Tags (M2M)

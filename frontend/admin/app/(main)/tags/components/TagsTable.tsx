@@ -95,6 +95,10 @@ export function TagsTable() {
         searchPlaceholder="Поиск тегов..."
         rowKey={(t) => t.id}
         rowTestId={(t) => `tag-row-${t.id}`}
+        // Pre-#139 row classes were `border-b cursor-pointer transition-colors
+        // hover:opacity-80`; the shared DataTable renders the base three, the
+        // hover style is entity-parity and comes through rowClassName.
+        rowClassName={() => 'hover:opacity-80'}
         toolbarExtras={
           <button
             onClick={() => setCreatingTag(true)}

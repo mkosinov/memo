@@ -249,3 +249,20 @@ describe('TagsTable server pagination/sort (#205 §5.2/§5.3)', () => {
     expect(screen.getByText(/Тег/).textContent).toContain('↓');
   });
 });
+
+describe('TagsTable row parity', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  // Review follow-up (#139 T1): rowClassName restores the pre-#139 Tags row
+  // hover style (old TagsTable <tr> classes: border-b cursor-pointer
+  // transition-colors hover:opacity-80). Prevents silent hover-parity drift.
+  it('rows keep the pre-#139 hover:opacity-80 style', async () => {
+    setupEnvelope();
+    await renderLoaded();
+
+    const row = screen.getByTestId('tag-row-t-1');
+    expect(row.className).toContain('hover:opacity-80');
+  });
+});

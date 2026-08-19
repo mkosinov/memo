@@ -45,12 +45,14 @@ export function DataTable<T>({
   onRowClick,
   emptyLabel,
   toolbarExtras,
+  toolbarLead,
   withStatus = false,
   withSearch = false,
   searchPlaceholder = 'Поиск...',
   rowClassName,
   rowKey,
   rowTestId,
+  actionCellExtra,
 }: DataTableProps<T>) {
   // ─── Column visibility (owned here; ColumnPicker is controlled) ────────
   const [visibleKeys, setVisibleKeys] = useState<string[]>(() =>
@@ -183,6 +185,9 @@ export function DataTable<T>({
         style={{ borderColor: 'var(--line)' }}
       >
         <div className="flex items-center gap-3">
+          {/* Addendum #9: dict *Filters bars ride in the toolbar's left group,
+              before search/status — single-row toolbar preserved (§6.1). */}
+          {toolbarLead}
           {withSearch && (
             <>
               <input
@@ -373,6 +378,10 @@ export function DataTable<T>({
                         if (menuOpen) openContainerRef.current = el;
                       }}
                     >
+                      {/* Addendum #10: per-row actions-cell extra before the
+                          trigger (Locations 🗺 Карта link). On-row-click guard
+                          covers `a`/`button` elements inside it (§6.1). */}
+                      {actionCellExtra?.(row)}
                       <div className="relative">
                         <button
                           type="button"

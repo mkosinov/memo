@@ -482,6 +482,39 @@ describe('DataTable action dropdown', () => {
     fireEvent.keyDown(items[1], { key: 'Home' });
     expect(document.activeElement).toBe(items[0]);
   });
+
+  it('actionCellExtra renders per-row extra BEFORE the trigger (Addendum #10)', () => {
+    renderTable(
+      {},
+      {
+        actionCellExtra: (row) =>
+          <a href={`/map/${row.id}`} data-testid={`map-link-${row.id}`}>🗺</a>,
+      },
+    );
+
+    const extra1 = screen.getByTestId('map-link-t-1');
+    const extra2 = screen.getByTestId('map-link-t-2');
+    expect(extra1).toHaveAttribute('href', '/map/t-1');
+    expect(extra2).toHaveAttribute('href', '/map/t-2');
+    // Per-row: the extra sits in the same cell as its own row's trigger.
+    const triggers = screen.getAllByLabelText('Действия');
+    expect(extra1.closest('td')).toContainElement(triggers[0]);
+    expect(extra2.closest('td')).toContainElement(triggers[1]);
+    // Order: extra precedes the ⋯ trigger in document order.
+    const pos = extra1.compareDocumentPosition(triggers[0]);
+    expect(pos & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('actionCellExtra absent renders only the trigger', () => {
+    renderTable();
+    const cells = screen.getAllByLabelText('Действия');
+    expect(cells.length).toBe(2);
+    cells.forEach((trigger) => {
+      const cell = trigger.closest('td')!;
+      // Nothing besides the dropdown wrapper inside the actions cell.
+      expect(cell.querySelectorAll('a')).toHaveLength(0);
+    });
+  });
 });
 
 // ─── Row interactions ────────────────────────────────────────────────────
@@ -630,5 +663,31 @@ describe('DataTable toolbar', () => {
   it('toolbarExtras renders the escape-hatch node', () => {
     renderTable({}, { toolbarExtras: <button type="button">+ Добавить тег</button> });
     expect(screen.getByText('+ Добавить тег')).toBeInTheDocument();
+  });
+
+  it('toolbarLead renders in the left toolbar group, before search/status (Addendum #9)', () => {
+    renderTable(
+      { status: 'active', setStatus: vi.fn() },
+      {
+        withSearch: true,
+        withStatus: true,
+        toolbarLead: <input data-testid="lead-bar" placeholder="Название или адрес..." />,
+      },
+    );
+
+    const lead = screen.getByTestId('lead-bar');
+    // The lead node comes BEFORE the search input in document order (left group,
+    // in front of the withSearch/withStatus controls).
+    const pos = lead.compareDocumentPosition(screen.getByPlaceholderText('Поиск...'));
+    expect(pos & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // Same toolbar row as the picker (not a separate stacked bar)
+    const toolbar = lead.closest('div')!.parentElement;
+    expect(toolbar).toContainElement(screen.getByLabelText('Настроить колонки'));
+  });
+
+  it('toolbarLead absent renders no lead node (zero impact when unused)', () => {
+    renderTable();
+    expect(screen.queryByTestId('lead-bar')).toBeNull();
+    expect(screen.getByLabelText('Настроить колонки')).toBeInTheDocument();
   });
 });

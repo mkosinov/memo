@@ -57,7 +57,11 @@ export interface DataTableProps<T> {
   withStatus?: boolean; // default false
   withSearch?: boolean; // default false
   searchPlaceholder?: string; // default "Поиск..."
+  /** Left-group lead node rendered BEFORE search/status controls (Addendum #9: dict *Filters bars). */
+  toolbarLead?: ReactNode;
   rowClassName?: (row: T) => string | undefined;
   rowKey?: (row: T) => string; // default: row index
   rowTestId?: (row: T) => string; // per-row data-testid on <tr>; attribute omitted when prop absent (Contract Addendum #6)
+  /** Per-row node rendered in the actions cell BEFORE the ⋯ trigger (Addendum #10: Locations 🗺 Карта link). */
+  actionCellExtra?: (row: T) => ReactNode;
 }

@@ -10,58 +10,16 @@ import { useUI } from '@/contexts/UIContext';
 import { useLocationsTable } from '@/contexts/LocationsContext';
 import { LocationModal } from './LocationModal';
 import { LocationFilters } from './LocationFilters';
-import { LOCATION_FIELDS } from './locationFields';
-import { ColumnPicker } from '@/app/components/shared/ColumnPicker';
+import { DataTable } from '@/app/components/shared/DataTable';
 import { DeleteDialog } from '@/app/components/DeleteDialog';
-import { ErrorState } from '@/app/components/error';
+import { locationColumns, locationActions } from './locationColumns';
 import { parseApiError } from '@/app/lib/api/parseApiError';
-
-// ─── Column definitions ──────────────────────────────────────────────────
-
-interface Column {
-  key: string;
-  label: string;
-  width?: string;
-  defaultVisible?: boolean;
-}
-
-const COLUMNS: Column[] = [
-  { key: 'name', label: 'Название', width: 'flex-1', defaultVisible: true },
-  { key: 'short_title', label: 'Короткое название', defaultVisible: false },
-  { key: 'capacity', label: 'Вместимость', width: 'w-[100px]', defaultVisible: true },
-  { key: 'address', label: 'Адрес', width: 'flex-1', defaultVisible: true },
-  { key: 'location_hint', label: 'Подсказка', width: 'w-[150px]', defaultVisible: true },
-  { key: 'description', label: 'Описание', defaultVisible: false },
-  { key: 'archived', label: 'Статус', defaultVisible: false },
-  { key: 'yandex_map_url', label: 'Карта', defaultVisible: false },
-  { key: 'created_at', label: 'Создано', defaultVisible: false },
-];
 
 // ─── Component ───────────────────────────────────────────────────────────
 
 export function LocationsTable() {
-  // ─── Server pagination/sort state (LocationsContext, #205 §5.2) ────────
-  const {
-    items,
-    total,
-    page,
-    perPage,
-    sortBy,
-    sortOrder,
-    status,
-    isLoading,
-    error,
-    setPage,
-    setPerPage,
-    setSort,
-    setStatus,
-    refetch,
-  } = useLocationsTable();
-
-  // ─── Filter state ────────────────────────────────────────────────────
-  // Search stays client-side (G1b Q1): it filters the currently loaded page
-  // only — the temporary degradation until server ?q= lands in #212.
-  const [search, setSearch] = useState('');
+  // Server pagination/sort/search state (LocationsContext, #205 §5.2 + #139 §6.7)
+  const locationsTable = useLocationsTable();
 
   const updateLocation = useUpdateLocation();
   const createLocation = useCreateLocation();
@@ -71,64 +29,17 @@ export function LocationsTable() {
   const queryClient = useQueryClient();
   const { showToast } = useUI();
 
-  // ─── Column visibility state ───────────────────────────────────────
-  const [visibleKeys, setVisibleKeys] = useState<string[]>(() => {
-    try {
-      const stored = localStorage.getItem('locations-columns');
-      if (stored) return JSON.parse(stored);
-    } catch {}
-    return COLUMNS.filter((c) => c.defaultVisible).map((c) => c.key);
-  });
-
-  const VISIBLE_COLUMNS = COLUMNS.filter((c) => visibleKeys.includes(c.key));
-
   // ─── Edit modal state ────────────────────────────────────────────────
   const [editLocation, setEditLocation] = useState<LocationResponse | null>(null);
 
   // ─── Create modal state ─────────────────────────────────────────────
   const [creatingLocation, setCreatingLocation] = useState(false);
 
-  // ─── Action dropdown state ───────────────────────────────────────────
-  const [openDropdownId, setOpenDropdownId] = useState<string | null>(null);
-
   // ─── Delete dialog state (§7.3: parent owns dry-run + open/close) ────
   const [deleteTarget, setDeleteTarget] = useState<{
     location: LocationResponse;
     dependencies: DependencyNode[];
   } | null>(null);
-
-  // ─── Filtered data (client-side search over the loaded page) ───────────
-
-  const filteredLocations = useMemo(() => {
-    return items.filter((loc) => {
-      if (search) {
-        const q = search.toLowerCase();
-        const nameMatch = loc.name.toLowerCase().includes(q);
-        const addrMatch = (loc.address ?? '').toLowerCase().includes(q);
-        if (!nameMatch && !addrMatch) return false;
-      }
-      return true;
-    });
-  }, [items, search]);
-
-  // ─── Pagination (server-driven) ────────────────────────────────────────
-
-  const totalPages = Math.max(1, Math.ceil(total / perPage));
-
-  // ─── Sort handler ────────────────────────────────────────────────────
-
-  const handleSort = (field: string) => {
-    if (sortBy === field) {
-      setSort(field, sortOrder === 'asc' ? 'desc' : 'asc');
-    } else {
-      setSort(field, 'asc');
-    }
-  };
-
-  const sortIcon = (field: string) => {
-    if (sortBy !== field) return ' ↕';
-    return sortOrder === 'asc' ? ' ↑' : ' ↓';
-  };
 
   // ─── Edit handlers ───────────────────────────────────────────────────
 
@@ -177,16 +88,9 @@ export function LocationsTable() {
         await archiveLocation.mutateAsync(loc.id);
         showToast('Локация архивирована');
       }
-      setOpenDropdownId(null);
     } catch (err) {
       showToast(parseApiError(err).message, 'error');
     }
-  };
-
-  // ─── Create ─────────────────────────────────────────────────────────
-
-  const handleCreate = () => {
-    setCreatingLocation(true);
   };
 
   const handleCreateSubmit = async (data: Record<string, unknown>) => {
@@ -210,7 +114,6 @@ export function LocationsTable() {
   // call + open/close state; the dialog receives the parsed tree.
 
   const handleDelete = async (loc: LocationResponse) => {
-    setOpenDropdownId(null);
     try {
       await deleteLocation.mutateAsync(loc.id);
       // 204 — already deleted (zero deps): refresh handled by the hook.
@@ -224,293 +127,76 @@ export function LocationsTable() {
     }
   };
 
-  // ─── Error ─────────────────────────────────────────────────────────
-
-  if (error) {
-    return (
-      <ErrorState
-        error={error}
-        onRetry={refetch}
-      />
-    );
-  }
-
-  // ─── Loading / Empty ─────────────────────────────────────────────────
-
-  if (isLoading) {
-    return <div className="px-4 py-12 text-center text-sm" style={{ color: 'var(--ink-light)' }}>Загрузка...</div>;
-  }
+  // §6.15 — memoize the factory outputs
+  const columns = useMemo(() => locationColumns(), []);
+  const actions = useMemo(
+    () =>
+      locationActions({
+        onToggleArchive: (loc) => void handleArchiveToggle(loc),
+        onDelete: (loc) => void handleDelete(loc),
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- §6.15 stable identity
+    [],
+  );
 
   // ─── Render ──────────────────────────────────────────────────────────
 
   return (
     <div>
-      {/* Filters */}
-      <div className="p-4 border-b flex items-center justify-between" style={{ borderColor: 'var(--line)' }}>
-        <LocationFilters
-          search={search}
-          status={status}
-          onSearchChange={setSearch}
-          onStatusChange={(v) => setStatus(v as 'active' | 'all' | 'archived')}
-          onReset={() => { setSearch(''); setStatus('active'); }}
-        />
-        <div className="flex items-center gap-2">
-          <ColumnPicker
-            columns={COLUMNS.map((c) => ({ key: c.key, label: c.label }))}
-            visibleKeys={visibleKeys}
-            onChange={setVisibleKeys}
-            storageKey="locations-columns"
+      <DataTable<LocationResponse>
+        storageKey="locations-columns"
+        columns={columns}
+        tableState={locationsTable}
+        actions={actions}
+        onRowClick={setEditLocation}
+        emptyLabel="Локации не найдены"
+        rowKey={(l) => l.id}
+        rowTestId={(l) => `location-row-${l.id}`}
+        // Pre-#139 row classes were `border-b cursor-pointer transition-colors
+        // hover:opacity-80`; the shared DataTable renders the base three, the
+        // hover style is entity-parity and comes through rowClassName.
+        rowClassName={() => 'hover:opacity-80'}
+        // Addendum #10: the pre-#139 actions cell carried an inline 🗺 Карта
+        // link next to the ⋯ trigger (old LocationsTable.tsx:377-390) — the
+        // DataTable actions cell renders the dropdown only, so the link rides
+        // through this per-row seam. Rendered only when the URL exists.
+        actionCellExtra={(l) =>
+          l.yandex_map_url ? (
+            <a
+              href={l.yandex_map_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs transition-colors"
+              style={{ color: 'var(--brand)' }}
+              aria-label="Карта"
+              onClick={(e) => e.stopPropagation()}
+            >
+              🗺
+            </a>
+          ) : null
+        }
+        // Addendum #9: the dict *Filters bar rides in the toolbar's left group —
+        // search rewired to context search/setSearch (§6.7 predicate-only),
+        // status select already context-wired; bar UI/markup untouched.
+        toolbarLead={
+          <LocationFilters
+            search={locationsTable.search}
+            status={locationsTable.status}
+            onSearchChange={locationsTable.setSearch}
+            onStatusChange={(v) => locationsTable.setStatus(v as 'active' | 'all' | 'archived')}
+            onReset={() => { locationsTable.setSearch(''); locationsTable.setStatus('active'); }}
           />
+        }
+        toolbarExtras={
           <button
-            onClick={handleCreate}
+            onClick={() => setCreatingLocation(true)}
             className="px-4 py-2 text-sm font-medium rounded-lg text-white transition-colors"
             style={{ backgroundColor: 'var(--brand)' }}
           >
             + Добавить локацию
           </button>
-        </div>
-      </div>
-
-      {/* Table */}
-      <div className="overflow-x-auto">
-        <table className="w-full">
-          <thead>
-            <tr
-              className="border-b"
-              style={{ borderColor: 'var(--line)', backgroundColor: 'var(--surface)' }}
-            >
-              {VISIBLE_COLUMNS.map((col) => (
-                <th
-                  key={col.key}
-                  className={`text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none ${col.width ?? ''}`}
-                  style={{ color: 'var(--ink-light)' }}
-                  onClick={() => handleSort(col.key)}
-                >
-                  {col.label}{sortIcon(col.key)}
-                </th>
-              ))}
-              <th
-                className="w-[60px]"
-                style={{ color: 'var(--ink-light)' }}
-              />
-            </tr>
-          </thead>
-          <tbody>
-            {filteredLocations.map((loc) => (
-              <tr
-                key={loc.id}
-                onClick={() => setEditLocation(loc)}
-                className="border-b cursor-pointer transition-colors hover:opacity-80"
-                style={{ borderColor: 'var(--line)' }}
-                data-testid={`location-row-${loc.id}`}
-              >
-                {/* Name */}
-                {visibleKeys.includes('name') && (
-                <td className="px-4 py-3 text-sm font-medium" style={{ color: 'var(--ink)' }}>
-                  {loc.name}
-                </td>
-                )}
-
-                {/* Short Title */}
-                {visibleKeys.includes('short_title') && (
-                <td className="px-4 py-3 text-sm" style={{ color: 'var(--ink-mid)' }}>
-                  {loc.short_title ?? '—'}
-                </td>
-                )}
-
-                {/* Capacity */}
-                {visibleKeys.includes('capacity') && (
-                <td className="px-4 py-3 text-sm" style={{ color: 'var(--ink-mid)' }}>
-                  {loc.capacity}
-                </td>
-                )}
-
-                {/* Address */}
-                {visibleKeys.includes('address') && (
-                <td className="px-4 py-3 text-sm" style={{ color: 'var(--ink-mid)' }}>
-                  {loc.address ?? '—'}
-                </td>
-                )}
-
-                {/* Location Hint */}
-                {visibleKeys.includes('location_hint') && (
-                <td className="px-4 py-3 text-sm" style={{ color: 'var(--ink-light)' }}>
-                  {loc.location_hint ?? '—'}
-                </td>
-                )}
-
-                {/* Description */}
-                {visibleKeys.includes('description') && (
-                <td className="px-4 py-3 text-sm max-w-[200px] truncate" style={{ color: 'var(--ink-mid)' }}>
-                  {loc.description ?? '—'}
-                </td>
-                )}
-
-                {/* Status */}
-                {visibleKeys.includes('archived') && (
-                <td className="px-4 py-3 text-sm">
-                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${loc.archived ? 'bg-gray-100 text-gray-500' : 'bg-emerald-100 text-emerald-700'}`}>
-                    {loc.archived ? 'Архив' : 'Активен'}
-                  </span>
-                </td>
-                )}
-
-                {/* Yandex Map URL */}
-                {visibleKeys.includes('yandex_map_url') && (
-                <td className="px-4 py-3 text-sm">
-                  {loc.yandex_map_url ? (
-                    <a href={loc.yandex_map_url} target="_blank" rel="noopener noreferrer" className="text-xs" style={{ color: 'var(--brand)' }}>🗺</a>
-                  ) : '—'}
-                </td>
-                )}
-
-                {/* Created At */}
-                {visibleKeys.includes('created_at') && (
-                <td className="px-4 py-3 text-sm" style={{ color: 'var(--ink-light)' }}>
-                  {new Date(loc.created_at).toLocaleDateString('ru-RU')}
-                </td>
-                )}
-
-                {/* Actions */}
-                <td className="px-4 py-3 text-center relative">
-                  <div className="flex items-center justify-center gap-2">
-                    {/* Map link icon */}
-                    {loc.yandex_map_url && (
-                      <a
-                        href={loc.yandex_map_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-xs transition-colors"
-                        style={{ color: 'var(--brand)' }}
-                        aria-label="Карта"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        🗺
-                      </a>
-                    )}
-
-                    {/* Actions dropdown */}
-                    <div className="relative">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setOpenDropdownId(openDropdownId === loc.id ? null : loc.id);
-                        }}
-                        className="w-7 h-7 flex items-center justify-center rounded-lg text-sm transition-colors"
-                        style={{ color: 'var(--ink-light)' }}
-                        aria-label="Действия"
-                      >
-                        ⋯
-                      </button>
-                      {openDropdownId === loc.id && (
-                        <div
-                          className="absolute right-0 top-full mt-1 z-10 border rounded-lg shadow-lg py-1 min-w-[160px]"
-                          style={{
-                            borderColor: 'var(--line)',
-                            backgroundColor: 'var(--white)',
-                          }}
-                          data-testid={`dropdown-${loc.id}`}
-                        >
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleArchiveToggle(loc);
-                            }}
-                            className="w-full text-left px-3 py-2 text-sm transition-colors hover:opacity-80"
-                            style={{ color: 'var(--ink)' }}
-                          >
-                            {loc.archived ? 'Восстановить' : 'В архив'}
-                          </button>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleDelete(loc);
-                            }}
-                            className="w-full text-left px-3 py-2 text-sm transition-colors hover:opacity-80"
-                            style={{ color: 'var(--danger, #dc2626)' }}
-                          >
-                            Удалить
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </td>
-              </tr>
-            ))}
-            {filteredLocations.length === 0 && (
-              <tr>
-                <td
-                  colSpan={VISIBLE_COLUMNS.length + 1}
-                  className="px-4 py-12 text-center text-sm"
-                  style={{ color: 'var(--ink-light)' }}
-                >
-                  Локации не найдены
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      {/* Pagination */}
-      <div
-        className="flex items-center justify-between px-4 py-3 border-t"
-        style={{ borderColor: 'var(--line)' }}
-      >
-        <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--ink-light)' }}>
-          <span>Строк:</span>
-          <select
-            value={perPage}
-            onChange={(e) => setPerPage(Number(e.target.value) || 10)}
-            className="border rounded px-2 py-1 text-xs"
-            style={{
-              borderColor: 'var(--line)',
-              backgroundColor: 'var(--white)',
-              color: 'var(--ink)',
-            }}
-            data-testid="page-size-select"
-          >
-            <option value={10}>10</option>
-            <option value={20}>20</option>
-            <option value={50}>50</option>
-            <option value={100}>100</option>
-          </select>
-          <span>{total} всего</span>
-        </div>
-        <div className="flex items-center gap-1">
-          <button
-            onClick={() => setPage(Math.max(1, page - 1))}
-            disabled={page <= 1}
-            className="px-3 py-1 text-sm rounded border disabled:opacity-30"
-            style={{ borderColor: 'var(--line)', color: 'var(--ink)' }}
-          >
-            ←
-          </button>
-          {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
-            <button
-              key={p}
-              onClick={() => setPage(p)}
-              className={`px-3 py-1 text-sm rounded border ${p === page ? 'font-bold' : ''}`}
-              style={{
-                borderColor: 'var(--line)',
-                backgroundColor: p === page ? 'var(--brand)' : 'transparent',
-                color: p === page ? 'white' : 'var(--ink)',
-              }}
-            >
-              {p}
-            </button>
-          ))}
-          <button
-            onClick={() => setPage(Math.min(totalPages, page + 1))}
-            disabled={page >= totalPages}
-            className="px-3 py-1 text-sm rounded border disabled:opacity-30"
-            style={{ borderColor: 'var(--line)', color: 'var(--ink)' }}
-          >
-            →
-          </button>
-        </div>
-      </div>
+        }
+      />
 
       {/* Edit modal */}
       {editLocation && (

@@ -246,7 +246,11 @@ export function DataTable<T>({
         </div>
       </div>
 
-      {/* Table */}
+      {/* Table. The overflow-x-auto wrapper restores pre-#139 markup (all 8
+          tables had it): it lets a last-row action dropdown open BELOW the
+          table without the pager intercepting clicks (the wrapper grows a
+          scroll area instead of the pager overlaying the menu). */}
+      <div className="overflow-x-auto">
       <table className="w-full">
         <thead>
           <tr
@@ -445,6 +449,7 @@ export function DataTable<T>({
           )}
         </tbody>
       </table>
+      </div>
 
       {/* Pager (pattern extracted from MastersTable/ServicesTable + a11y labels) */}
       <div

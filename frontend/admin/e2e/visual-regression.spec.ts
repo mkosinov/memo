@@ -475,11 +475,12 @@ function skeletonTest(config: PageTableConfig) {
     await page.route(`**${config.apiUrl}*`, () => new Promise<void>(() => {}));
     // Clock is already installed in beforeEach (date-stable baselines).
     await navigateDirect(page, config);
-    if (config.name === 'clients' || config.name === 'tags' || config.name === 'locations') {
+    if (config.name === 'clients' || config.name === 'tags' || config.name === 'locations' || config.name === 'masters') {
       // Clients renders 10 skeleton bars (.animate-pulse) while loading;
       // Tags renders them via the shared DataTable since #139 T1 (locked
       // delta §6.8/plan: skeleton rows replace the old "Загрузка..." div);
-      // Locations follows via the shared DataTable since #139 T2.
+      // Locations follows via the shared DataTable since #139 T2;
+      // Masters follows via the shared DataTable since #139 T3.
       await expect(page.locator('.animate-pulse').first()).toBeVisible();
     } else if (config.name === 'records') {
       // INTENTIONAL DELTA: RecordsTable never consumes `loading` — the initial

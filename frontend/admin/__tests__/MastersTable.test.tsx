@@ -241,9 +241,15 @@ describe('MastersTable', () => {
 
   it('shows loading state', async () => {
     mockGetMasters.mockReturnValue(new Promise<PaginatedResponse<MasterResponse>>(() => {}));
-    renderTable();
+    const { container } = renderTable();
 
-    expect(await screen.findByText('Загрузка...')).toBeInTheDocument();
+    // B2 cat 4 (#139 §6.8): the shared DataTable replaced the "Загрузка..."
+    // div with a 10-row skeleton (visible columns only).
+    await waitFor(() => {
+      expect(container.querySelectorAll('tbody tr').length).toBe(10);
+    });
+    expect(container.querySelectorAll('.animate-pulse').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Загрузка...')).not.toBeInTheDocument();
   });
 
   // ─── Server fetch params (#205 §5.2/§5.3) ──────────────────────────────

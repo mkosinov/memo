@@ -511,9 +511,16 @@ export async function openRowActionDropdown(row: Locator) {
   return row;
 }
 
+// #139 transition: accept legacy button + APG menuitem; drop legacy at T8 (Addendum 11).
+function menuItem(dropdownOrRow: Locator, name: string | RegExp): Locator {
+  return dropdownOrRow
+    .getByRole('button', { name })
+    .or(dropdownOrRow.getByRole('menuitem', { name }));
+}
+
 /** Click the "Удалить" item in an open row action dropdown (or row scope). */
 export async function clickRowDelete(dropdownOrRow: Locator): Promise<void> {
-  await dropdownOrRow.getByRole('button', { name: 'Удалить' }).click();
+  await menuItem(dropdownOrRow, 'Удалить').click();
 }
 
 /** Click the "В архив" or "Восстановить" item in an open row dropdown (or row scope). */
@@ -521,7 +528,7 @@ export async function clickRowArchiveAction(
   dropdownOrRow: Locator,
   action: 'В архив' | 'Восстановить',
 ): Promise<void> {
-  await dropdownOrRow.getByRole('button', { name: action }).click();
+  await menuItem(dropdownOrRow, action).click();
 }
 
 /**

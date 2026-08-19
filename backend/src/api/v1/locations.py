@@ -22,6 +22,7 @@ from src.schemas.location import (
     LocationUpdate,
     ReorderRequest,
 )
+from src.schemas.pagination import PaginationParams
 from src.services.location import LocationService, get_location_service
 
 router = APIRouter(tags=["locations"])
@@ -71,8 +72,7 @@ def _location_order_by(sort_by: LocationSortBy | None, sort_order: SortOrder) ->
 async def list_locations(
     service: _ServiceDep,
     session: SessionDep,
-    page: int = Query(1, ge=1),
-    per_page: int = Query(20, ge=1, le=100),
+    pagination: PaginationParams = Depends(),
     status: ArchiveStatus = Query(ArchiveStatus.ACTIVE),
     sort_by: LocationSortBy | None = Query(None),
     sort_order: SortOrder = Query("asc"),
@@ -91,8 +91,8 @@ async def list_locations(
     """
     return await service.list(
         db_session=session,
-        page=page,
-        per_page=per_page,
+        page=pagination.page,
+        per_page=pagination.per_page,
         status=status,
         order_by=_location_order_by(sort_by, sort_order),
     )

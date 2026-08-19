@@ -7,7 +7,7 @@ functions. VisitService orchestrates but never calls another service.
 from datetime import UTC, datetime
 from functools import lru_cache
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.domain.record_visits import (
@@ -17,17 +17,17 @@ from src.domain.record_visits import (
 )
 from src.models.record import Record
 from src.models.visit import Visit
+from src.repositories.generic import BaseRepository, get_base_repository
 from src.schemas.common import PaginatedResponse
 from src.schemas.visit import VisitCreate, VisitUpdate, VisitPatch, VisitResponse
 from src.services.decorators import transactional
 
 
 class VisitService:
-    """No __init__ deps — cascade lives in domain layer.
+    """Visit service — manual CRUD with record cascade domain hooks."""
 
-    In production, FastAPI Depends(get_visit_service) returns a singleton.
-    In tests, you can instantiate VisitService() directly (no mocks needed).
-    """
+    def __init__(self, repository: BaseRepository) -> None:
+        self._repository = repository
 
     async def list(
         self,
@@ -40,16 +40,13 @@ class VisitService:
 
         Items are validated via VisitResponse.model_validate.
         """
-        stmt = select(Visit)
-        if record_id is not None:
-            stmt = stmt.where(Visit.record_id == record_id)
-        total = (
-            await db_session.execute(select(func.count()).select_from(stmt.subquery()))
-        ).scalar_one()
-        result = await db_session.execute(
-            stmt.limit(per_page).offset((page - 1) * per_page)
+        items_orm, total = await self._repository.list(
+            db_session,
+            Visit,
+            filters={"record_id": record_id},
+            limit=per_page,
+            offset=(page - 1) * per_page,
         )
-        orm_visits = list(result.scalars().all())
         # VisitResponse has created_at: str / updated_at: str but ORM has datetime.
         # Pydantic v2 strict str doesn't coerce datetime, so convert manually.
         items = [
@@ -64,7 +61,7 @@ class VisitService:
                 created_at=v.created_at.isoformat() if v.created_at else "",
                 updated_at=v.updated_at.isoformat() if v.updated_at else "",
             )
-            for v in orm_visits
+            for v in items_orm
         ]
         return PaginatedResponse(items=items, total=total, page=page, per_page=per_page)
 
@@ -176,4 +173,4 @@ class VisitService:
 @lru_cache
 def get_visit_service() -> VisitService:
     """Returns a singleton VisitService."""
-    return VisitService()
+    return VisitService(get_base_repository())

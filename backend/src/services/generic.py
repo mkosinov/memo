@@ -6,10 +6,10 @@ operations instead of raw ORM model instances.
 
 from __future__ import annotations
 
-from typing import Generic, TypeVar
+from typing import Generic, TypeVar, cast
 
 from pydantic import BaseModel
-from sqlalchemy import delete, func, not_, select
+from sqlalchemy import delete, not_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.domain.deletion import (
@@ -24,7 +24,7 @@ from src.domain.deletion import (
 )
 from src.domain.errors import BareListLimitExceededError
 from src.models.enums import ArchiveStatus
-from src.repositories.generic import BaseRepository
+from src.repositories.generic import ArchiveRepository, BaseRepository
 from src.schemas.common import PaginatedResponse
 from src.services.decorators import transactional
 
@@ -35,26 +35,6 @@ ResponseSchemaT = TypeVar("ResponseSchemaT", bound=BaseModel)
 # Protective limit for bare /all dictionary lists (#205). Enforced in the
 # single shared ``GenericService.list_all`` choke point via a LIMIT+1 probe.
 BARE_LIST_MAX_ROWS = 1000
-
-
-async def paginate_orm(
-    db_session: AsyncSession, stmt, page: int, per_page: int, order_by=None
-) -> tuple[list, int]:
-    """Shared pagination core (#191): COUNT the (unordered) statement, then ORDER + slice.
-
-    COUNT is computed BEFORE order_by is applied so correlated sort-key
-    subqueries are never evaluated inside the count query.
-    Returns (orm_items, total).
-    """
-    total = (
-        await db_session.execute(select(func.count()).select_from(stmt.subquery()))
-    ).scalar_one()
-    if order_by is not None:
-        stmt = stmt.order_by(*order_by)
-    result = await db_session.execute(
-        stmt.limit(per_page).offset((page - 1) * per_page)
-    )
-    return list(result.scalars().all()), total
 
 
 class GenericService(Generic[CreateSchemaT, UpdateSchemaT, ResponseSchemaT]):
@@ -93,13 +73,6 @@ class GenericService(Generic[CreateSchemaT, UpdateSchemaT, ResponseSchemaT]):
                 stmt = stmt.where(getattr(self._model, key) == value)
         return stmt
 
-    async def _paginate(
-        self, db_session: AsyncSession, stmt, page: int, per_page: int, order_by=None
-    ) -> PaginatedResponse[ResponseSchemaT]:
-        items_orm, total = await paginate_orm(db_session, stmt, page, per_page, order_by)
-        items = [self._response_schema.model_validate(o) for o in items_orm]
-        return PaginatedResponse(items=items, total=total, page=page, per_page=per_page)
-
     async def list(
         self,
         db_session: AsyncSession,
@@ -109,9 +82,16 @@ class GenericService(Generic[CreateSchemaT, UpdateSchemaT, ResponseSchemaT]):
         **filters,
     ) -> PaginatedResponse[ResponseSchemaT]:
         """Return a paginated page of records, optionally filtered/ordered."""
-        return await self._paginate(
-            db_session, self._list_stmt(**filters), page, per_page, order_by
+        items_orm, total = await self._repository.list(
+            db_session,
+            self._model,
+            filters=filters,
+            order_by=order_by,
+            limit=per_page,
+            offset=(page - 1) * per_page,
         )
+        items = [self._response_schema.model_validate(o) for o in items_orm]
+        return PaginatedResponse(items=items, total=total, page=page, per_page=per_page)
 
     async def list_all(
         self,
@@ -127,7 +107,7 @@ class GenericService(Generic[CreateSchemaT, UpdateSchemaT, ResponseSchemaT]):
         ``BareListLimitExceededError`` (single query, never materializes
         unbounded rows). Boundary: exactly ``BARE_LIST_MAX_ROWS`` rows → OK;
         the 1001st row → raise. Returns validated ``ResponseSchemaT`` objects
-        (same idiom as ``_paginate``).
+        (same count idiom as ``BaseRepository.list``).
         """
         stmt = self._list_stmt(**filters)
         if order_by is not None:
@@ -248,10 +228,25 @@ class ArchiveService(GenericService[CreateSchemaT, UpdateSchemaT, ResponseSchema
         status: ArchiveStatus = ArchiveStatus.ACTIVE,
         **filters,
     ) -> PaginatedResponse[ResponseSchemaT]:
-        """Return a paginated page filtered by archive status."""
-        return await self._paginate(
-            db_session, self._list_stmt(status=status, **filters), page, per_page, order_by
+        """Return a paginated page filtered by archive status.
+
+        ``self._repository`` is typed ``BaseRepository`` (inherited from
+        ``GenericService.__init__``), but every Archive factory injects
+        ``get_archive_repository()`` — an ``ArchiveRepository`` whose
+        ``list()`` accepts the ``status=`` kwarg. The cast documents that
+        runtime invariant without touching the factories (#206 Task 2).
+        """
+        items_orm, total = await cast(ArchiveRepository, self._repository).list(
+            db_session,
+            self._model,
+            status=status,
+            filters=filters,
+            order_by=order_by,
+            limit=per_page,
+            offset=(page - 1) * per_page,
         )
+        items = [self._response_schema.model_validate(o) for o in items_orm]
+        return PaginatedResponse(items=items, total=total, page=page, per_page=per_page)
 
     async def list_all(
         self,

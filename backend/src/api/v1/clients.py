@@ -13,11 +13,12 @@ from src.models.client import Client
 from src.schemas.client import (
     ClientCreate,
     ClientListParams,
-    ClientListResponse,
     ClientPatch,
     ClientResponse,
     ClientUpdate,
+    ClientWithStats,
 )
+from src.schemas.common import PaginatedResponse
 from src.schemas.visitor import VisitorResponse
 from src.services.client import ClientService, get_client_service, list_clients_with_stats
 from src.services.visitor import get_visitor_service
@@ -60,11 +61,11 @@ async def search_client_by_phone(
     return result.items[0]
 
 
-@router.get("", response_model=ClientListResponse)
+@router.get("", response_model=PaginatedResponse[ClientWithStats])
 async def list_clients(
     session: SessionDep,
     params: ClientListParams = Depends(),
-) -> ClientListResponse:
+) -> PaginatedResponse[ClientWithStats]:
     """Return paginated clients with stats aggregation, filtering, and sorting."""
     return await list_clients_with_stats(db_session=session, params=params)
 

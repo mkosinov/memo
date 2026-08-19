@@ -304,17 +304,6 @@ export const ClientWithStatsSchema = ClientResponseSchema.extend({
 
 export type ClientWithStats = z.infer<typeof ClientWithStatsSchema>;
 
-// ─── ClientListResponse ─────────────────────────────────────────────────────
-
-export const ClientListResponseSchema = z.object({
-  items: z.array(ClientWithStatsSchema),
-  total: z.number(),
-  page: z.number(),
-  per_page: z.number(),
-});
-
-export type ClientListResponse = z.infer<typeof ClientListResponseSchema>;
-
 // ─── PaymentResponse ───────────────────────────────────────────────────────
 
 export const PaymentResponseSchema = z.object({
@@ -564,6 +553,7 @@ export const ActivityListResponseSchema = paginatedSchema(ActivityResponseSchema
 export const PaymentListResponseSchema = paginatedSchema(PaymentResponseSchema);
 export const RecordListResponseSchema = paginatedSchema(RecordResponseSchema);
 export const VisitorListResponseSchema = paginatedSchema(VisitorResponseSchema);
+export const ClientListResponseSchema = paginatedSchema(ClientWithStatsSchema);
 
 // ─── Bare-array /all dictionary responses (GH #205) ─────────────────────────
 

@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from src.db import SessionDep
 from src.errors import ErrorCode, ErrorDetail
 from src.schemas.common import PaginatedResponse
+from src.schemas.pagination import PaginationParams
 from src.schemas.payment import PaymentCreate, PaymentPatch, PaymentResponse, PaymentTotalsResponse, PaymentUpdate
 from src.services.generic import GenericService
 from src.services.payment import get_payment_service, get_payment_totals
@@ -28,15 +29,14 @@ _ServiceDep = Annotated[GenericService[PaymentCreate, PaymentUpdate, PaymentResp
 async def list_payments(
     service: _ServiceDep,
     session: SessionDep,
-    page: int = Query(1, ge=1),
-    per_page: int = Query(20, ge=1, le=100),
+    pagination: PaginationParams = Depends(),
     record_id: str | None = None,
 ) -> PaginatedResponse[PaymentResponse]:
     """Return all active payments, optionally filtered by record_id."""
     filters = {}
     if record_id:
         filters["record_id"] = record_id
-    return await service.list(db_session=session, page=page, per_page=per_page, **filters)
+    return await service.list(db_session=session, page=pagination.page, per_page=pagination.per_page, **filters)
 
 
 @router.get("/totals", response_model=PaymentTotalsResponse)

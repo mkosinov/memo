@@ -22,6 +22,7 @@ from src.schemas.master import (
     MasterUpdate,
     ReorderRequest,
 )
+from src.schemas.pagination import PaginationParams
 from src.services.master import MasterService, get_master_service
 
 router = APIRouter(tags=["masters"])
@@ -70,8 +71,7 @@ def _master_order_by(sort_by: MasterSortBy | None, sort_order: SortOrder) -> lis
 async def list_masters(
     service: _ServiceDep,
     session: SessionDep,
-    page: int = Query(1, ge=1),
-    per_page: int = Query(20, ge=1, le=100),
+    pagination: PaginationParams = Depends(),
     status: ArchiveStatus = Query(ArchiveStatus.ACTIVE),
     sort_by: MasterSortBy | None = Query(None),
     sort_order: SortOrder = Query("asc"),
@@ -90,8 +90,8 @@ async def list_masters(
     """
     return await service.list(
         db_session=session,
-        page=page,
-        per_page=per_page,
+        page=pagination.page,
+        per_page=pagination.per_page,
         status=status,
         order_by=_master_order_by(sort_by, sort_order),
     )

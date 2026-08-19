@@ -11,8 +11,9 @@ import pytest
 async def test_visit_service_list(db_session, sample_visits):
     """list returns all active visits in a PaginatedResponse envelope."""
     from src.services.visit import VisitService
+    from src.repositories.generic import get_base_repository
 
-    service = VisitService()
+    service = VisitService(get_base_repository())
     result = await service.list(db_session=db_session)
     assert result.total == len(sample_visits)
     assert len(result.items) == len(sample_visits)
@@ -22,8 +23,9 @@ async def test_visit_service_list(db_session, sample_visits):
 async def test_visit_service_list_filter_by_record(db_session, sample_visits):
     """list with record_id filter returns only matching visits."""
     from src.services.visit import VisitService
+    from src.repositories.generic import get_base_repository
 
-    service = VisitService()
+    service = VisitService(get_base_repository())
     record_id = sample_visits[0].record_id
     result = await service.list(db_session=db_session, record_id=record_id)
     assert all(v.record_id == record_id for v in result.items)
@@ -34,9 +36,10 @@ async def test_visit_service_list_filter_by_record(db_session, sample_visits):
 async def test_visit_service_create_cascades_to_record(db_session, sample_record):
     """create cascades to record.seats and record.status."""
     from src.services.visit import VisitService
+    from src.repositories.generic import get_base_repository
     from src.schemas.visit import VisitCreate
 
-    service = VisitService()
+    service = VisitService(get_base_repository())
     original_seats = sample_record.seats  # API set seats=2, anonym_visits=1 set via SQL
     visit = await service.create(
         db_session=db_session,
@@ -57,9 +60,10 @@ async def test_visit_service_create_cascades_to_record(db_session, sample_record
 async def test_visit_service_update_full_replace(db_session, sample_visit):
     """update is full-replace; price changed."""
     from src.services.visit import VisitService
+    from src.repositories.generic import get_base_repository
     from src.schemas.visit import VisitUpdate
 
-    service = VisitService()
+    service = VisitService(get_base_repository())
     result = await service.update(
         db_session=db_session,
         visit_id=sample_visit.id,
@@ -78,9 +82,10 @@ async def test_visit_service_update_full_replace(db_session, sample_visit):
 async def test_visit_service_patch_partial(db_session, sample_visit):
     """patch only updates sent fields, others unchanged."""
     from src.services.visit import VisitService
+    from src.repositories.generic import get_base_repository
     from src.schemas.visit import VisitPatch
 
-    service = VisitService()
+    service = VisitService(get_base_repository())
     original_price = sample_visit.price
     result = await service.patch(
         db_session=db_session,
@@ -97,8 +102,9 @@ async def test_visit_service_patch_partial(db_session, sample_visit):
 async def test_visit_service_delete_hard_deletes_and_cascades(db_session, sample_visit):
     """delete hard-deletes the row and cascades to record."""
     from src.services.visit import VisitService
+    from src.repositories.generic import get_base_repository
 
-    service = VisitService()
+    service = VisitService(get_base_repository())
     result = await service.delete(db_session=db_session, visit_id=sample_visit.id)
     assert result is True
     # Verify row is absent from DB (hard delete)
@@ -112,8 +118,9 @@ async def test_visit_service_delete_hard_deletes_and_cascades(db_session, sample
 async def test_visit_service_get_existing(db_session, sample_visit):
     """get returns the visit by ID."""
     from src.services.visit import VisitService
+    from src.repositories.generic import get_base_repository
 
-    service = VisitService()
+    service = VisitService(get_base_repository())
     result = await service.get(db_session=db_session, visit_id=sample_visit.id)
     assert result is not None
     assert result.id == sample_visit.id
@@ -123,8 +130,9 @@ async def test_visit_service_get_existing(db_session, sample_visit):
 async def test_visit_service_get_nonexistent(db_session):
     """get returns None for nonexistent ID."""
     from src.services.visit import VisitService
+    from src.repositories.generic import get_base_repository
 
-    service = VisitService()
+    service = VisitService(get_base_repository())
     result = await service.get(db_session=db_session, visit_id="nonexistent-id")
     assert result is None
 
@@ -137,12 +145,13 @@ async def test_visit_service_list_paginated(db_session, sample_visits):
     """
     from src.schemas.common import PaginatedResponse
     from src.services.visit import VisitService
+    from src.repositories.generic import get_base_repository
 
-    result = await VisitService().list(db_session, page=1, per_page=2)
+    result = await VisitService(get_base_repository()).list(db_session, page=1, per_page=2)
     assert isinstance(result, PaginatedResponse)
     assert result.total == len(sample_visits)
     assert len(result.items) == 2
     # record_id filter — use attribute directly from visit ORM fixture
     rid = sample_visits[0].record_id
-    filtered = await VisitService().list(db_session, page=1, per_page=20, record_id=rid)
+    filtered = await VisitService(get_base_repository()).list(db_session, page=1, per_page=20, record_id=rid)
     assert all(v.record_id == rid for v in filtered.items)

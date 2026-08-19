@@ -26,7 +26,7 @@ from src.models.visit import Visit
 from src.models.visitor import Visitor
 from src.schemas.common import PaginatedResponse
 from src.schemas.record import RecordCreate, RecordListParams, RecordPatch, RecordResponse, RecordUpdate
-from src.services.generic import GenericService, paginate_orm
+from src.services.generic import GenericService
 from src.services.decorators import transactional
 
 
@@ -45,7 +45,7 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
 
         Filter → Sort → Paginate, fully server-side (#191).
         Business filters are hand-written here (G1a principle); pagination/date
-        mechanics are shared helpers (paginate_orm, day_range).
+        mechanics are shared helpers (BaseRepository.list_custom, day_range).
         """
         stmt = (
             select(Record)
@@ -71,9 +71,12 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
         if params.activity_id is not None:
             stmt = stmt.where(Record.activity_id == params.activity_id)
         # --- Sort (whitelist map) + Paginate (COUNT before ORDER BY) ---
-        items, total = await paginate_orm(
-            db_session, stmt, params.page, params.per_page,
+        items, total = await self._repository.list_custom(
+            db_session,
+            stmt,
             order_by=self._sort_columns(params),
+            limit=params.per_page,
+            offset=(params.page - 1) * params.per_page,
         )
         return PaginatedResponse.model_construct(
             items=items, total=total, page=params.page, per_page=params.per_page

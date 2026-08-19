@@ -66,7 +66,11 @@ class ActivityService(GenericService[ActivityCreate, ActivityUpdate, ActivityRes
             stmt = stmt.where(Activity.start >= from_dt)
         if to_dt is not None:
             stmt = stmt.where(Activity.start <= to_dt)
-        return await self._paginate(db_session, stmt, page, per_page)
+        items_orm, total = await self._repository.list_custom(
+            db_session, stmt, limit=per_page, offset=(page - 1) * per_page
+        )
+        items = [ActivityResponse.model_validate(a) for a in items_orm]
+        return PaginatedResponse(items=items, total=total, page=page, per_page=per_page)
 
     async def sum_active_seats(
         self, db_session: AsyncSession, activity_id: str

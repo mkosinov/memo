@@ -11,7 +11,7 @@ from functools import lru_cache
 from typing import TypeVar
 
 from pydantic import BaseModel
-from sqlalchemy import not_, select
+from sqlalchemy import func, not_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.base import Base
@@ -27,17 +27,68 @@ class BaseRepository:
     """
 
     async def list(
-        self, session: AsyncSession, table: type[ModelType], order_by=None, **filters
-    ) -> list[ModelType]:
-        """Return all records, optionally filtered and ordered. No is_active filter."""
+        self,
+        session: AsyncSession,
+        table: type[ModelType],
+        *,
+        filters: dict | None = None,
+        order_by=None,
+        limit: int | None = None,
+        offset: int = 0,
+        options=None,
+    ) -> tuple[list[ModelType], int]:
+        """Return a paginated page of records plus the total count.
+
+        Counts on the unordered statement (loader options are stripped by
+        ``stmt.subquery()`` and never affect the count); ``order_by`` is
+        applied AFTER the count, then limit/offset slice.
+        ``limit=None`` means no LIMIT clause (not used by list endpoints).
+        """
         stmt = select(table)
-        for key, value in filters.items():
+        if options:
+            stmt = stmt.options(*options)
+        for key, value in (filters or {}).items():
             if value is not None:
                 stmt = stmt.where(getattr(table, key) == value)
+        total = (
+            await session.execute(select(func.count()).select_from(stmt.subquery()))
+        ).scalar_one()
         if order_by is not None:
             stmt = stmt.order_by(*order_by)
+        if limit is not None:
+            stmt = stmt.limit(limit)
+        if offset:
+            stmt = stmt.offset(offset)
         result = await session.execute(stmt)
-        return list(result.scalars().all())
+        return list(result.scalars().all()), total
+
+    async def list_custom(
+        self,
+        session: AsyncSession,
+        stmt,
+        *,
+        order_by=None,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> tuple[list, int]:
+        """Wrap a caller-built statement with count + slice.
+
+        Precondition: ``stmt`` must carry NO pre-baked order_by/limit/offset —
+        ordering and slicing are owned by this method. Count runs on the
+        unordered statement so correlated sort-key subqueries are never
+        evaluated inside the count query.
+        """
+        total = (
+            await session.execute(select(func.count()).select_from(stmt.subquery()))
+        ).scalar_one()
+        if order_by is not None:
+            stmt = stmt.order_by(*order_by)
+        if limit is not None:
+            stmt = stmt.limit(limit)
+        if offset:
+            stmt = stmt.offset(offset)
+        result = await session.execute(stmt)
+        return list(result.scalars().all()), total
 
     async def get(
         self, session: AsyncSession, table: type[ModelType], id: str
@@ -130,22 +181,39 @@ class ArchiveRepository(BaseRepository):
     """
 
     async def list(
-        self, session: AsyncSession, table: type[ModelType], order_by=None,
-        status: ArchiveStatus = ArchiveStatus.ACTIVE, **filters
-    ) -> list[ModelType]:
-        """Return records filtered by archive status, optionally filtered and ordered."""
+        self,
+        session: AsyncSession,
+        table: type[ModelType],
+        *,
+        status: ArchiveStatus = ArchiveStatus.ACTIVE,
+        filters: dict | None = None,
+        order_by=None,
+        limit: int | None = None,
+        offset: int = 0,
+        options=None,
+    ) -> tuple[list[ModelType], int]:
+        """Return a paginated page filtered by archive status, plus total count."""
         stmt = select(table)
+        if options:
+            stmt = stmt.options(*options)
         if status == ArchiveStatus.ACTIVE:
             stmt = stmt.where(table.is_active)
         elif status == ArchiveStatus.ARCHIVED:
             stmt = stmt.where(not_(table.is_active))
-        for key, value in filters.items():
+        for key, value in (filters or {}).items():
             if value is not None:
                 stmt = stmt.where(getattr(table, key) == value)
+        total = (
+            await session.execute(select(func.count()).select_from(stmt.subquery()))
+        ).scalar_one()
         if order_by is not None:
             stmt = stmt.order_by(*order_by)
+        if limit is not None:
+            stmt = stmt.limit(limit)
+        if offset:
+            stmt = stmt.offset(offset)
         result = await session.execute(stmt)
-        return list(result.scalars().all())
+        return list(result.scalars().all()), total
 
     async def reorder(
         self, session: AsyncSession, table: type[ModelType], ids: list[str]

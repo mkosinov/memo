@@ -3,9 +3,10 @@
 from datetime import date
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, model_validator
 
 from src.models.enums import VisitStatus
+from src.schemas.pagination import PaginationParams
 
 
 class VisitItem(BaseModel):
@@ -119,15 +120,12 @@ RecordSortOrder = Literal["asc", "desc"]
 RecordStatusFilter = Literal["waiting", "visited", "missed", "cancelled"]
 
 
-class RecordListParams(BaseModel):
+class RecordListParams(PaginationParams):
     """Query parameters for GET /api/v1/records with filtering, pagination, sorting (#191).
 
-    Injected as FastAPI Query Parameter Model: ``Annotated[RecordListParams, Query()]``.
-    NOT Depends() — Depends-injected models + model_validator raise 500 (fastapi#4974).
+    Injected as ``Annotated[RecordListParams, Query()]`` (Query, not Depends: this model is the sole query-param carrier for the records endpoint — no scalar-param mixing; Depends-with-model is discouraged upstream).
     """
 
-    page: int = Field(default=1, ge=1)
-    per_page: int = Field(default=20, ge=1, le=100)
     client_id: str | None = None
     activity_id: str | None = None
     date_from: date | None = None

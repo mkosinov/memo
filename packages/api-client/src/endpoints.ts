@@ -33,8 +33,6 @@ import {
   type ClientUpdate,
   ClientWithStatsSchema,
   type ClientWithStats,
-  ClientListResponseSchema,
-  type ClientListResponse,
   PaymentResponseSchema,
   PaymentTotalsResponseSchema,
   type PaymentResponse,
@@ -82,6 +80,7 @@ import {
   PaymentListResponseSchema,
   RecordListResponseSchema,
   VisitorListResponseSchema,
+  ClientListResponseSchema,
   type PaginatedResponse,
 } from './schemas';
 
@@ -311,7 +310,7 @@ export async function getClients(): Promise<ClientWithStats[]> {
 
 export async function getClientsWithStats(
   params?: Record<string, string | number | boolean | null | undefined>,
-): Promise<ClientListResponse> {
+): Promise<PaginatedResponse<ClientWithStats>> {
   const search = new URLSearchParams();
   if (params) {
     Object.entries(params).forEach(([key, value]) => {

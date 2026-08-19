@@ -11,6 +11,7 @@ from src.domain.errors import BareListLimitExceededError
 from src.errors import ErrorCode, ErrorDetail
 from src.models.tag import Tag
 from src.schemas.common import PaginatedResponse, SortOrder
+from src.schemas.pagination import PaginationParams
 from src.schemas.tag import TagCreate, TagPatch, TagResponse, TagSortBy
 from src.services.tag import TagService, get_tag_service
 
@@ -54,8 +55,7 @@ def _tag_order_by(sort_by: TagSortBy | None, sort_order: SortOrder) -> list:
 async def list_tags(
     service: _ServiceDep,
     session: SessionDep,
-    page: int = Query(1, ge=1),
-    per_page: int = Query(20, ge=1, le=100),
+    pagination: PaginationParams = Depends(),
     sort_by: TagSortBy | None = Query(None),
     sort_order: SortOrder = Query("asc"),
 ) -> PaginatedResponse[TagResponse]:
@@ -68,8 +68,8 @@ async def list_tags(
     """
     return await service.list(
         db_session=session,
-        page=page,
-        per_page=per_page,
+        page=pagination.page,
+        per_page=pagination.per_page,
         order_by=_tag_order_by(sort_by, sort_order),
     )
 

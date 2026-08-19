@@ -21,6 +21,7 @@ from src.schemas.material import (
     MaterialSortBy,
     MaterialUpdate,
 )
+from src.schemas.pagination import PaginationParams
 from src.services.material import MaterialService, get_material_service
 
 router = APIRouter(tags=["materials"])
@@ -66,8 +67,7 @@ def _material_order_by(sort_by: MaterialSortBy | None, sort_order: SortOrder) ->
 async def list_materials(
     service: _ServiceDep,
     session: SessionDep,
-    page: int = Query(1, ge=1),
-    per_page: int = Query(20, ge=1, le=100),
+    pagination: PaginationParams = Depends(),
     status: ArchiveStatus = Query(ArchiveStatus.ACTIVE),
     sort_by: MaterialSortBy | None = Query(None),
     sort_order: SortOrder = Query("asc"),
@@ -85,8 +85,8 @@ async def list_materials(
     """
     return await service.list(
         db_session=session,
-        page=page,
-        per_page=per_page,
+        page=pagination.page,
+        per_page=pagination.per_page,
         status=status,
         order_by=_material_order_by(sort_by, sort_order),
     )

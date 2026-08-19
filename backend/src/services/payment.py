@@ -8,7 +8,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.repositories.generic import get_base_repository
 from src.models.payment import Payment
-from src.schemas.common import PaginatedResponse
 from src.schemas.payment import PaymentCreate, PaymentResponse, PaymentUpdate
 from src.services.generic import GenericService
 from src.services.decorators import transactional
@@ -22,31 +21,12 @@ class PaymentService(GenericService[PaymentCreate, PaymentUpdate, PaymentRespons
     sets it to the current UTC time before delegating to the generic path.
     When the client supplies a value, it is passed through unchanged.
 
-    Overrides ``list`` because Payment has no ``is_active`` column (hard-delete).
+    ``list`` is inherited unmodified from ``GenericService``: Payment has no
+    ``is_active`` column (hard-delete), so the base repository path applies
+    only the equality filters — no archive-status predicate (#206 Task 4).
     """
 
     NOT_NULL_FIELDS = {"amount"}
-
-    async def list(
-        self,
-        db_session: AsyncSession,
-        page: int = 1,
-        per_page: int = 20,
-        **filters,
-    ) -> PaginatedResponse[PaymentResponse]:
-        """Return a paginated page of payments (no is_active filter)."""
-        stmt = select(Payment)
-        for key, value in filters.items():
-            if value is not None:
-                stmt = stmt.where(getattr(Payment, key) == value)
-        total = (
-            await db_session.execute(select(func.count()).select_from(stmt.subquery()))
-        ).scalar_one()
-        result = await db_session.execute(
-            stmt.limit(per_page).offset((page - 1) * per_page)
-        )
-        items = [self._response_schema.model_validate(o) for o in result.scalars().all()]
-        return PaginatedResponse(items=items, total=total, page=page, per_page=per_page)
 
     @transactional
     async def create(

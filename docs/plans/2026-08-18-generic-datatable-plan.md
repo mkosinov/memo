@@ -57,6 +57,7 @@ How the admin UI changes for the user, mapped to spec acceptance criteria (spec 
 3. `PagedListState<T>` in `tableTypes.ts` is the DataTable-facing interface (status/setStatus/search/setSearch optional per spec §6.4/§6.7). The factory's `PagedListContextValue<T>` stays its own exported interface; T1 adds a compile-time assignability assertion so drift between them fails the build.
 4. Dropdown testid/labels unify on the existing Clients pattern: trigger `aria-label="Действия"`, menu `data-testid={dropdown-${rowKey}}` (ClientsTable.tsx:218,229 today).
 5. Records delete dry-run: T8 first verifies `DeleteDialog`'s dry-run props cover the records endpoint (#207 delivered delete+deps). If a records dry-run endpoint is missing → STOP, report BLOCKED (backend follow-up needed); do not fake it.
+6. `DataTableProps` gains optional `rowTestId?: (row: T) => string` — DataTable renders `data-testid={rowTestId(row)}` on each `<tr>` only when provided. Surfaced in T1 Part A: the locked props had no row-testid mechanism while spec §8 and current e2e suites require the per-row IDs preserved (`tags-crud.spec.ts:37-40` needs `tag-row-<id>`; same for `location-row-*`, `master-row-*`, etc. + the visual-baseline row locators). Every migrated wrapper passes `rowTestId={(r) => \`<entity>-row-${r.id}\`}` with that table's existing prefix (grep-verified per migration task). Explicit prop chosen over deriving the testid from `storageKey` — no string-munging coupling, consistent with how `rowKey` was added.
 
 ## B2 Audit Checklist (15 categories — grep before each table migration)
 
@@ -194,6 +195,7 @@ export interface DataTableProps<T> {
   searchPlaceholder?: string;            // default "Поиск..."
   rowClassName?: (row: T) => string | undefined;
   rowKey?: (row: T) => string;           // default: row index
+  rowTestId?: (row: T) => string;        // per-row data-testid on <tr>, omitted when absent (Addendum 6)
 }
 ```
 

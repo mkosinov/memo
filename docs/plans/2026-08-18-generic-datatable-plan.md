@@ -27,7 +27,7 @@ How the admin UI changes for the user, mapped to spec acceptance criteria (spec 
 - **Scenario 4 — record detail** → Records row click opens the detail panel as today; new `⋯` menu offers edit/delete without opening the panel. Selected row keeps its highlight.
 - **Scenario 5 — async states** → All pages: 10-row skeleton on first load (replaces "Загрузка..." text and the Clients shimmer); query failure with no data shows "Ошибка загрузки: …" + "Повторить"; a failed refetch keeps existing rows on screen; empty pages keep their current per-entity copy ("Теги не найдены", "Записи не найдены", …).
 - **Scenario 6 — keyboard menu** → `⋯` opens with `aria-haspopup="menu"`; ↑/↓/Home/End navigate; Esc closes and returns focus to the trigger.
-- **Search (Tags/Photos/Clients only)** → 300ms debounce + Enter submits immediately + always-available ✕ clear button. Other tables gain no search box (unchanged).
+- **Search (Tags/Photos only)** → the in-table search box becomes DataTable-owned with 300ms debounce + Enter submits immediately + always-available ✕ clear button. All other pages keep their existing search exactly as-is (dict `*Filters` bars, Clients page bar — untouched, instant/debounced behavior preserved).
 - **localStorage hard cut** → `services-column-visibility` / `materials-column-visibility` keys abandoned silently; those two pages reset to default columns once.
 
 ## File Map
@@ -74,7 +74,7 @@ Per-entity suites stay on the real Provider; edits below are the ONLY sanctioned
 10. Hand-rolled context alignment consumers/mocks (`useClients`/`useRecords` across test files)
 11. `aria-label="Действия"` unification queries
 12. `ClientCardModal` → `ClientQuickCard` rename refs (records side)
-13. Dict search mechanics (instant → 300ms debounce + Enter + ✕; e.g. TagsTable.test.tsx:164-174)
+13. Tags/Photos search mechanics (instant → 300ms debounce + Enter + ✕; e.g. TagsTable.test.tsx:164-174). The 4 dict bars keep instant onChange — their suites need NO debounce edits.
 14. Empty-label copy — no edits expected (per-entity copy preserved via `emptyLabel`)
 15. Initial-sort assertions — guard only, no change expected (Records keeps `sort_by=date&sort_order=asc` initial fetch)
 
@@ -299,7 +299,7 @@ Identical template to Task 2, with:
 - Entity file: `materialsColumns.tsx` created in `app/(main)/services/components/` (colocated).
 - **B2 cat 2 in play:** old LS key `materials-column-visibility` (MaterialsTable.tsx:77) abandoned silently → new `storageKey="materials-columns"`; update any suite assertions on the old key.
 - Factory search: `searchPredicate` into `MaterialsContext`; the `ServiceFilters` instance rendered by MaterialsTable (:282-288) search rewires to context `search`/`setSearch` (UI untouched); table-local search state (:110-113) + `filtered*` memo deleted. The bar's Статус select stays context-wired; DataTable gets NO `withStatus`/`withSearch`.
-- Empty copy "Материалы не найдены"; withStatus per current factory config.
+- Empty copy "Материалы не найдены"; the FACTORY config keeps `withStatus: true` (query key/fetcher — unchanged); the DataTable prop is omitted (§6.1 matrix).
 - E2E guard: `materials-delete.spec.ts` unchanged & green (⚠️ no materials-crud spec exists — unit suite + visual gate are the net, spec §8).
 - Visual diff Materials × 7 states.
 - Commit: `feat(#139): Materials migration (T4)`.
@@ -355,7 +355,7 @@ Identical template to Task 2, with:
 - [ ] Visual diff Clients × 7 states; expected deltas: `↕` glyphs, skeleton rows, menu a11y attributes.
 - [ ] Commit: `feat(#139): Clients migration + context alignment (T6)`.
 
-**DoD:** context exposes full `PagedListState` shape (status view included); suite green with B2-only edits; 3 clients e2e specs green; visual deltas limited to locked list.
+**DoD:** context exposes the aligned `PagedListState` shape per §6.4 (items/isFetching/isPending/error/page-clamp/setSort page-reset — NO status/search additions); suite green with B2-only edits; 3 clients e2e specs green; visual deltas limited to locked list.
 
 ---
 

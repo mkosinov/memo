@@ -224,9 +224,9 @@ Parametrized where possible (generic contract suite for the 6 generic-path entit
 
 Plus endpoint-level: `GET /clients/get?phone=` — exact match 200; partial → 404; archived → 404; `phone=""` / len<3 → 422; route shadowing checks: `/clients/get` resolves to the phone route (not `/{client_id}`), and a UUID-shaped path segment still resolves to `/{client_id}`.
 
-## 8. Flagged interpretation (G1b checkpoint)
+## 8. Flagged interpretation (G1b checkpoint — RESOLVED)
 
-- **B3 / "clients typeahead":** the locked concept mentions "Clients/activities typeaheads go through list ?q=". Verified: **no clients typeahead exists** in the frontend today (client selection in record forms = phone-on-blur → `searchClientByPhone`; the top-100 `getClients` map in RecordsContext is #213's scope). This spec therefore delivers: (a) clients list `?q=` backend capability (ready for any future typeahead), (b) clients **table** server search, (c) the phone flow via renamed `getClientByPhone` — and builds **no new SearchableSelect for clients**. If a new clients form typeahead was intended in #212, that's added scope to approve at G1b.
+- **B3 / "clients typeahead" — RESOLVED at G1b (2026-08-19):** the locked concept mentioned "Clients/activities typeaheads go through list ?q=". Verified: **no clients typeahead exists** in the frontend today (client selection in record forms = phone-on-blur → `searchClientByPhone`; the top-100 `getClients` map in RecordsContext is #213's scope). **User-confirmed:** #212 builds **no new SearchableSelect for clients** — it delivers (a) clients list `?q=` backend capability (ready for any future typeahead), (b) clients **table** server search, (c) the phone flow via renamed `getClientByPhone`. A future clients form typeahead is tracked as **#221**.
 
 ## 9. Domain-rules sync (mandatory task in plan)
 

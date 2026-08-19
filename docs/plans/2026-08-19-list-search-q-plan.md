@@ -274,7 +274,7 @@ class TestGenericApiSearchContract:
 
     @pytest.mark.parametrize("service_cls,cfg", _search_params())
     def test_substring_match_case_insensitive(self, api_client, service_cls, cfg): ...
-        # create row via api_client.post(cfg.router_prefix, json={**cfg.create_data, **cfg.fk resolved, cfg.search_override})
+        # create row via api_client.post(cfg.router_prefix, json={**cfg.create_data, **resolved_fk, **cfg.search_override})
         # GET {prefix}?q={cfg.search_query} → 200, exactly the created row in items, total == 1
     # + cases: full-UUID q → exact row; partial id → no match; q len 1 and q="" → 422
     #   (assert detail.code == "VALIDATION_ERROR"); q absent → unfiltered;
@@ -292,7 +292,7 @@ class TestGenericApiSearchContract:
     search_query: str | None = None          # lowercase Cyrillic substring matching search_override
 ```
 
-and add `_search_params()` (mirror `_contract_params()`, filter `cfg.search_query is not None`) — start with only `TagService` configured: `search_override={"tag": "Живопись"}`, `search_query="жив"` (adjust to existing create_data to avoid unique-row clashes).
+and add `_search_params()` — iterate `CONTRACT_CONFIG` **directly** (like `_all_params()`, NOT like `_contract_params()`): the search matrix must NOT skip `GENERIC_CONTRACT_EXCEPTIONS` — `ServiceService` is in that set yet its custom-list q path needs matrix coverage (Task 5 adds its config). Filter: `cfg.search_query is not None`. Start with only `TagService` configured: `search_override={"tag": "Живопись"}`, `search_query="жив"` (adjust to existing create_data to avoid unique-row clashes).
 - [ ] GREEN — plumbing. In `GenericService`:
 
 ```python
@@ -482,12 +482,15 @@ ATOMIC across backend + api-client + frontend + tests in ONE commit (unknown par
 
 **Steps:**
 - [ ] Declare: `ActivityService.search_fields = [SearchField(Service.title), SearchField(Activity.id, kind="uuid")]`.
-- [ ] Rework the list override (both paths funnel through one stmt builder):
+- [ ] Rework the list override (both paths funnel through one stmt builder). Imports: add `from src.models.service import Service` (not imported today) and `search_predicate`/`SearchField`:
 
 ```python
     async def list(self, db_session, page=1, per_page=20, date_from=None, date_to=None,
                    q: str | None = None, service_id: str | None = None, **filters):
         stmt = select(Activity)
+        for key, value in filters.items():  # equality filters, same as the old super().list path
+            if value is not None:
+                stmt = stmt.where(getattr(Activity, key) == value)
         from_dt, to_dt = day_range(date_from, date_to)
         if from_dt is not None:
             stmt = stmt.where(Activity.start >= from_dt)

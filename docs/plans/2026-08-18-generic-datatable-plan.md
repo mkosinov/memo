@@ -227,7 +227,7 @@ useEffect(() => {
   - Rows: render `tableState.visibleItems ?? tableState.items`; `<tr key={rowKey?.(row) ?? i}>`; row click guard `if ((e.target as HTMLElement).closest('button, a, [role="button"], input')) return;` then `onRowClick?.(row)`; apply `rowClassName?.(row)`.
   - Cells: `col.render?.(row) ?? col.accessor?.(row) ?? ''`; respect `align`/`width` on `<th>`/`<td>`.
   - Dropdown (last column, APG menu-button, roving tabindex): trigger `<button aria-label="Действия" aria-haspopup="menu" aria-expanded={open} aria-controls={menuId}>`; menu `<div role="menu" data-testid={dropdown-${key}}>`; items `<button role="menuitem">` (danger → red style; `hidden?.(row)` filters); open state `openRowKey: string | null`; outside-`mousedown` closes; Esc closes + `triggerRef.focus()`; ↑/↓ move focus, Home/End first/last; focus menu first item on open.
-  - States: `isPending` → 10 skeleton rows (`animate-pulse`, one `<td>` per VISIBLE column); `error && rows.length === 0` → single full-width row rendering the existing `<ErrorState error={error} onRetry={refetch} />` (`app/components/error/ErrorState.tsx`); `rows.length === 0 && !isPending && !error` → full-width row `emptyLabel ?? 'Нет записей'`; `error && rows.length > 0` → rows shown, no error row.
+  - States: `isPending` → 10 skeleton rows (`animate-pulse`, one `<td>` per VISIBLE column); `error && rows.length === 0` → single full-width row rendering the existing `<ErrorState title={\`Ошибка загрузки: ${error.message}\`} error={error} onRetry={refetch} />` (`app/components/error/ErrorState.tsx` — pass `title` explicitly; its default "Не удалось загрузить данные" (:18) does NOT match the §6.8/§10 copy); `rows.length === 0 && !isPending && !error` → full-width row `emptyLabel ?? 'Нет записей'`; `error && rows.length > 0` → rows shown, no error row.
   - Pager: extract the existing pager markup pattern from MastersTable.tsx:443 / ServicesTable.tsx:513 (they share it: `data-testid="page-size-select"` select + page buttons); preserve testids and add `aria-label` to prev/next buttons. Verify against RecordsTable/ClientsTable pagers in T6/T8 (they differ — B2 guard).
   - Toolbar: search input (when `withSearch`, `placeholder={searchPlaceholder ?? 'Поиск...'}`), status `<select>` (when `withStatus`, options Активные/Все/Архив wired to `status`/`setStatus`), `<ColumnPicker columns={…} visibleKeys={…} onToggle={toggle} />` ALWAYS, `toolbarExtras` slot.
   - Defensive rendering: no `useEffect`/`useRef` keyed on `columns`/`actions` prop identity (spec §6.15); dropdown keyed by resolved row key.
@@ -237,7 +237,7 @@ useEffect(() => {
 
 - [ ] Create `app/(main)/tags/components/tagColumns.tsx`: `export const tagColumns = (): ColumnDef<TagResponse>[] => [{ key: 'tag', label: 'Тег', defaultVisible: true, accessor: (t) => t.tag }]` and `export const tagActions = (cbs: { onDelete: (t: TagResponse) => void }): (row: TagResponse) => RowAction<TagResponse>[]` — delete action `danger: true`, `onClick` → `cbs.onDelete` (parent runs `window.confirm('Удалить тег?')` then `deleteTag.mutateAsync`, preserving TagsTable.tsx:143-152 logic incl. toasts).
 - [ ] Add `searchPredicate: (t, q) => t.tag.toLowerCase().includes(q.toLowerCase())` to `TagsContext` factory config (replaces TagsTable local `search`/`filteredTags` useState/filter, :250).
-- [ ] Rewrite `TagsTable.tsx` as thin wrapper: keeps `editTag`/`creatingTag` modal state, `deleteTag` mutation + confirm handler, renders `<DataTable storageKey="tags-columns" columns={…} tableState={useTags()} actions={…} onRowClick={setEditTag} emptyLabel="Теги не найдены" withSearch searchPlaceholder="Поиск тегов..." rowKey={(t) => t.id} />` + the existing TagModal. No sort/pager/skeleton/LS/dropdown logic remains.
+- [ ] Rewrite `TagsTable.tsx` as thin wrapper: keeps `editTag`/`creatingTag` modal state, `deleteTag` mutation + confirm handler, renders `<DataTable storageKey="tags-columns" columns={useMemo(() => tagColumns(), [])} tableState={useTagsTable()} actions={useMemo(() => tagActions({ onDelete: handleDelete }), [])} onRowClick={setEditTag} emptyLabel="Теги не найдены" withSearch searchPlaceholder="Поиск тегов..." rowKey={(t) => t.id} />` + the existing TagModal (exact hook name per TagsContext.tsx — `useTagsTable`, :24). `useMemo` on both factory outputs is a §6.15 contract requirement — apply in every wrapper. No sort/pager/skeleton/LS/dropdown logic remains.
 - [ ] B2 audit on `__tests__/tags/TagsTable.test.tsx` (237 ln, 9 tests): cat 1 (confirm — now via RowAction), cat 4 ("Загрузка..." → skeleton), cat 13 (search test :164-174 → fake timers/advance debounce), cat 14 (empty copy preserved — expect no edit). Update only those.
 - [ ] `npm run test:all` (UI touched) → green incl. `tags-crud.spec.ts` e2e unchanged.
 - [ ] Visual diff Tags page × 7 baseline states; expected deltas: skeleton rows, picker present (was already), ✕/debounce behavior. Investigate any other diff.
@@ -256,10 +256,11 @@ useEffect(() => {
 - Extract from: `app/(main)/locations/components/LocationsTable.tsx` (560 ln), `contexts/LocationsContext.tsx`
 
 ### Task Description
-- [ ] B2 grep on `__tests__/LocationsTable.test.tsx` (~35 tests): expected categories = 4 ("Загрузка..." :241 → skeleton), 14 (empty "Локации не найдены" preserved — no edit). Note anything else and report it before editing.
+- [ ] B2 grep on `__tests__/LocationsTable.test.tsx` (~35 tests): expected categories = 4 ("Загрузка..." :241 → skeleton), 14 (empty "Локации не найдены" preserved — no edit). Search/filter assertions should pass UNCHANGED (state moves to context, behavior identical — instant onChange kept). Note anything else and report it before editing.
+- [ ] **Move search into the factory:** add `searchPredicate: (l, q) => /* name+address match, per LocationFilters placeholder "Название или адрес..." */` to `LocationsContext` factory config; DELETE the table-local `search` useState (:64) + `filteredLocations` memo (:102). Rewire `<LocationFilters>` (:250) to read `search`/`setSearch` from `useLocationsTable()` — the bar's UI/markup is untouched (out of #139 scope, spec §3).
 - [ ] Create `locationColumns.tsx`: extract every column verbatim from LocationsTable JSX into `ColumnDef<LocationResponse>[]` (custom cells → `render`); `locationActions({ onEdit, onDelete, onArchive/… })` matching existing menu items; delete → parent opens existing `DeleteDialog` (import unchanged from `app/components/DeleteDialog.tsx`).
-- [ ] Thin `LocationsTable.tsx`: modal/dialog state + mutations stay; `<DataTable storageKey="locations-columns" tableState={useLocations()} withStatus emptyLabel="Локации не найдены" … />` (withStatus per current status-filter presence — confirm via the context's factory `withStatus` config; match it).
-- [ ] Delete migrated mechanics from the wrapper (sort handlers, pager markup, skeleton/loading JSX, LS code, dropdown state) — same commit, no dead code.
+- [ ] Thin `LocationsTable.tsx`: modal/dialog state + mutations + `<LocationFilters>` render stay; `<DataTable storageKey="locations-columns" tableState={useLocationsTable()} withStatus emptyLabel="Локации не найдены" … />` (exact hook name per LocationsContext.tsx — `useLocationsTable`, :22; withStatus matches the context's factory `withStatus` config). `columns`/`actions` wrapped in `useMemo` (§6.15).
+- [ ] Delete migrated mechanics from the wrapper (sort handlers, pager markup, skeleton/loading JSX, LS code, dropdown state, search/filter state) — same commit, no dead code.
 - [ ] `npm run test:all` green (unit with B2-only edits + `locations-crud.spec.ts` e2e unchanged); tsc clean.
 - [ ] Visual diff Locations × 7 states; only locked deltas (skeleton).
 - [ ] Commit: `feat(#139): Locations migration (T2)`.
@@ -277,6 +278,7 @@ useEffect(() => {
 ### Task Description
 Identical template to Task 2, with:
 - Entity files: `masterColumns.tsx`; empty copy "Мастера не найдены"; `storageKey="masters-columns"`.
+- Factory search: `searchPredicate` into `MastersContext`; `<MasterFilters>` (:241-243) rewired to context `search`/`setSearch` (UI untouched, instant onChange kept); table-local `search` useState (:58-61) + `filtered*` memo deleted.
 - B2 grep `__tests__/MastersTable.test.tsx` (~33 tests): cat 4 (:234), cat 14 (no edit), plus 11 if any action-label queries exist.
 - E2E guards: `masters-crud.spec.ts` + `masters-delete-blocked.spec.ts` + `masters-delete-auto-cascade.spec.ts` all unchanged & green (DeleteDialog flow preserved via RowAction → parent dialog).
 - Visual diff Masters × 7 states.
@@ -296,6 +298,7 @@ Identical template to Task 2, with:
 Identical template to Task 2, with:
 - Entity file: `materialsColumns.tsx` created in `app/(main)/services/components/` (colocated).
 - **B2 cat 2 in play:** old LS key `materials-column-visibility` (MaterialsTable.tsx:77) abandoned silently → new `storageKey="materials-columns"`; update any suite assertions on the old key.
+- Factory search: `searchPredicate` into `MaterialsContext`; the `ServiceFilters` instance rendered by MaterialsTable (:282-288) rewired to context `search`/`setSearch` (UI untouched); table-local search state (:110-113) + `filtered*` memo deleted.
 - Empty copy "Материалы не найдены"; withStatus per current factory config.
 - E2E guard: `materials-delete.spec.ts` unchanged & green (⚠️ no materials-crud spec exists — unit suite + visual gate are the net, spec §8).
 - Visual diff Materials × 7 states.
@@ -316,6 +319,7 @@ Identical template to Task 2, with:
 - Entity file: `serviceColumns.tsx` in `services/components/`.
 - Column specifics (verified): `tariffs` → `render` (ServicesTable.tsx:83-97 markup verbatim); `age` sortable — backend maps `age`→`min_age` (:241-243), so `sortField` NOT needed (pass-through); `tags` column → `sortable: false`.
 - **B2 cat 2 in play:** `services-column-visibility` (:150) → `storageKey="services-columns"`.
+- Factory search: `searchPredicate` into `ServicesContext`; `<ServiceFilters>` (:364-374) rewired to context `search`/`setSearch` (UI untouched); table-local search state (:183-186) + `filtered*` memo deleted.
 - Empty copy "Услуги не найдены"; B2 cat 4 (:357).
 - E2E guard: `services-crud.spec.ts` unchanged & green.
 - This is the largest dict table (602 ln) — expect a heavy diff; keep extraction strictly verbatim.
@@ -365,7 +369,9 @@ Identical template to Task 2, with:
 
 ### Task Description
 
-**Part A — create `contexts/PhotosContext.tsx` via the factory with a CLIENT-ADAPTER fetcher** (photos endpoint is unpaginated — #211 will later swap internals; DataTable contract unaffected):
+> **⚠️ G2 DECISION POINT (spec §12.13b):** the locked spec gated T7 on a Photos server-paginated context "#206/#211". #206 merged without one; #211 (photos server pagination) is still OPEN. This task resolves the gap with a **client-adapter context** (factory + full-array fetcher → sort/filter/slice locally) — zero DataTable contract impact, #211 later swaps fetcher internals only. Alternatives if rejected at G2: gate T7 on #211, or defer T7 to a follow-up PR and ship T1–T6+T8.
+
+**Part A — create `contexts/PhotosContext.tsx` via the factory with a CLIENT-ADAPTER fetcher** (photos endpoint is unpaginated — verified `getPhotos(): Promise<PhotoResponse[]>`; #211 will later swap internals; DataTable contract unaffected):
 - [ ] `createPagedListContext<PhotoResponse>({ queryKeyPrefix: 'photos', searchPredicate: (p, q) => (p.title ?? '').toLowerCase().includes(q.toLowerCase()) /* confirm actual title/photo fields against schemas/photo type */, fetcher: async ({ page, per_page, sort_by, sort_order }) => { const all = await getPhotos(); /* apply client sort over sort_by when present; slice (page-1)*per_page … */ return { items, total: all.length, page, per_page }; } })` — no `status` (withStatus false). Preserve today's client sort fields/direction exactly (grep PhotosTable sort logic).
 - [ ] Unit tests for the adapter: slicing math, total, client sort order, predicate filtering via `visibleItems`.
 

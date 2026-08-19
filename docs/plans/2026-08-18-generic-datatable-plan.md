@@ -229,7 +229,7 @@ useEffect(() => {
   - Dropdown (last column, APG menu-button, roving tabindex): trigger `<button aria-label="Действия" aria-haspopup="menu" aria-expanded={open} aria-controls={menuId}>`; menu `<div role="menu" data-testid={dropdown-${key}}>`; items `<button role="menuitem">` (danger → red style; `hidden?.(row)` filters); open state `openRowKey: string | null`; outside-`mousedown` closes; Esc closes + `triggerRef.focus()`; ↑/↓ move focus, Home/End first/last; focus menu first item on open.
   - States: `isPending` → 10 skeleton rows (`animate-pulse`, one `<td>` per VISIBLE column); `error && rows.length === 0` → single full-width row rendering the existing `<ErrorState title={\`Ошибка загрузки: ${error.message}\`} error={error} onRetry={refetch} />` (`app/components/error/ErrorState.tsx` — pass `title` explicitly; its default "Не удалось загрузить данные" (:18) does NOT match the §6.8/§10 copy); `rows.length === 0 && !isPending && !error` → full-width row `emptyLabel ?? 'Нет записей'`; `error && rows.length > 0` → rows shown, no error row.
   - Pager: extract the existing pager markup pattern from MastersTable.tsx:443 / ServicesTable.tsx:513 (they share it: `data-testid="page-size-select"` select + page buttons); preserve testids and add `aria-label` to prev/next buttons. Verify against RecordsTable/ClientsTable pagers in T6/T8 (they differ — B2 guard).
-  - Toolbar: search input (when `withSearch`, `placeholder={searchPlaceholder ?? 'Поиск...'}`), status `<select>` (when `withStatus`, options Активные/Все/Архив wired to `status`/`setStatus`), `<ColumnPicker columns={…} visibleKeys={…} onToggle={toggle} />` ALWAYS, `toolbarExtras` slot.
+  - Toolbar: search input (when `withSearch`, `placeholder={searchPlaceholder ?? 'Поиск...'}`), status `<select>` (when `withStatus`, options Активные/Все/Архив wired to `status`/`setStatus` — implemented for contract completeness per locked DoD #2, but NO migrated table passes `withStatus` initially: the dict `*Filters` bars and the Clients page bar own status selects), `<ColumnPicker columns={…} visibleKeys={…} onToggle={toggle} />` ALWAYS, `toolbarExtras` slot.
   - Defensive rendering: no `useEffect`/`useRef` keyed on `columns`/`actions` prop identity (spec §6.15); dropdown keyed by resolved row key.
 - [ ] `cd frontend/admin && npm run test` → DataTable suite + factory + ColumnPicker green; tsc clean.
 
@@ -259,7 +259,7 @@ useEffect(() => {
 - [ ] B2 grep on `__tests__/LocationsTable.test.tsx` (~35 tests): expected categories = 4 ("Загрузка..." :241 → skeleton), 14 (empty "Локации не найдены" preserved — no edit). Search/filter assertions should pass UNCHANGED (state moves to context, behavior identical — instant onChange kept). Note anything else and report it before editing.
 - [ ] **Move search into the factory:** add `searchPredicate: (l, q) => /* name+address match, per LocationFilters placeholder "Название или адрес..." */` to `LocationsContext` factory config; DELETE the table-local `search` useState (:64) + `filteredLocations` memo (:102). Rewire `<LocationFilters>` (:250) to read `search`/`setSearch` from `useLocationsTable()` — the bar's UI/markup is untouched (out of #139 scope, spec §3).
 - [ ] Create `locationColumns.tsx`: extract every column verbatim from LocationsTable JSX into `ColumnDef<LocationResponse>[]` (custom cells → `render`); `locationActions({ onEdit, onDelete, onArchive/… })` matching existing menu items; delete → parent opens existing `DeleteDialog` (import unchanged from `app/components/DeleteDialog.tsx`).
-- [ ] Thin `LocationsTable.tsx`: modal/dialog state + mutations + `<LocationFilters>` render stay; `<DataTable storageKey="locations-columns" tableState={useLocationsTable()} withStatus emptyLabel="Локации не найдены" … />` (exact hook name per LocationsContext.tsx — `useLocationsTable`, :22; withStatus matches the context's factory `withStatus` config). `columns`/`actions` wrapped in `useMemo` (§6.15).
+- [ ] Thin `LocationsTable.tsx`: modal/dialog state + mutations + `<LocationFilters>` render stay; `<DataTable storageKey="locations-columns" tableState={useLocationsTable()} emptyLabel="Локации не найдены" … />` (exact hook name per LocationsContext.tsx — `useLocationsTable`, :22). **No `withStatus`/`withSearch`** — the bar owns both: its Статус select is already wired to context `setStatus` (:254, verified), its search input rewires to context `search`/`setSearch` (step above). `columns`/`actions` wrapped in `useMemo` (§6.15).
 - [ ] Delete migrated mechanics from the wrapper (sort handlers, pager markup, skeleton/loading JSX, LS code, dropdown state, search/filter state) — same commit, no dead code.
 - [ ] `npm run test:all` green (unit with B2-only edits + `locations-crud.spec.ts` e2e unchanged); tsc clean.
 - [ ] Visual diff Locations × 7 states; only locked deltas (skeleton).
@@ -278,7 +278,7 @@ useEffect(() => {
 ### Task Description
 Identical template to Task 2, with:
 - Entity files: `masterColumns.tsx`; empty copy "Мастера не найдены"; `storageKey="masters-columns"`.
-- Factory search: `searchPredicate` into `MastersContext`; `<MasterFilters>` (:241-243) rewired to context `search`/`setSearch` (UI untouched, instant onChange kept); table-local `search` useState (:58-61) + `filtered*` memo deleted.
+- Factory search: `searchPredicate` into `MastersContext`; `<MasterFilters>` (:241-243) search rewires to context `search`/`setSearch` (UI untouched, instant onChange kept); table-local `search` useState (:58-61) + `filtered*` memo deleted. The bar's Статус select already wires to context `setStatus` — untouched; DataTable gets NO `withStatus`/`withSearch`.
 - B2 grep `__tests__/MastersTable.test.tsx` (~33 tests): cat 4 (:234), cat 14 (no edit), plus 11 if any action-label queries exist.
 - E2E guards: `masters-crud.spec.ts` + `masters-delete-blocked.spec.ts` + `masters-delete-auto-cascade.spec.ts` all unchanged & green (DeleteDialog flow preserved via RowAction → parent dialog).
 - Visual diff Masters × 7 states.
@@ -298,7 +298,7 @@ Identical template to Task 2, with:
 Identical template to Task 2, with:
 - Entity file: `materialsColumns.tsx` created in `app/(main)/services/components/` (colocated).
 - **B2 cat 2 in play:** old LS key `materials-column-visibility` (MaterialsTable.tsx:77) abandoned silently → new `storageKey="materials-columns"`; update any suite assertions on the old key.
-- Factory search: `searchPredicate` into `MaterialsContext`; the `ServiceFilters` instance rendered by MaterialsTable (:282-288) rewired to context `search`/`setSearch` (UI untouched); table-local search state (:110-113) + `filtered*` memo deleted.
+- Factory search: `searchPredicate` into `MaterialsContext`; the `ServiceFilters` instance rendered by MaterialsTable (:282-288) search rewires to context `search`/`setSearch` (UI untouched); table-local search state (:110-113) + `filtered*` memo deleted. The bar's Статус select stays context-wired; DataTable gets NO `withStatus`/`withSearch`.
 - Empty copy "Материалы не найдены"; withStatus per current factory config.
 - E2E guard: `materials-delete.spec.ts` unchanged & green (⚠️ no materials-crud spec exists — unit suite + visual gate are the net, spec §8).
 - Visual diff Materials × 7 states.
@@ -319,7 +319,7 @@ Identical template to Task 2, with:
 - Entity file: `serviceColumns.tsx` in `services/components/`.
 - Column specifics (verified): `tariffs` → `render` (ServicesTable.tsx:83-97 markup verbatim); `age` sortable — backend maps `age`→`min_age` (:241-243), so `sortField` NOT needed (pass-through); `tags` column → `sortable: false`.
 - **B2 cat 2 in play:** `services-column-visibility` (:150) → `storageKey="services-columns"`.
-- Factory search: `searchPredicate` into `ServicesContext`; `<ServiceFilters>` (:364-374) rewired to context `search`/`setSearch` (UI untouched); table-local search state (:183-186) + `filtered*` memo deleted.
+- Factory search: `searchPredicate` into `ServicesContext`; `<ServiceFilters>` (:364-374) search rewires to context `search`/`setSearch` (UI untouched); table-local search state (:183-186) + `filtered*` memo deleted. The bar's Статус select stays context-wired; DataTable gets NO `withStatus`/`withSearch`.
 - Empty copy "Услуги не найдены"; B2 cat 4 (:357).
 - E2E guard: `services-crud.spec.ts` unchanged & green.
 - This is the largest dict table (602 ln) — expect a heavy diff; keep extraction strictly verbatim.
@@ -341,16 +341,16 @@ Identical template to Task 2, with:
 ### Task Description
 
 **Part A — ClientsContext alignment (spec §6.4, additive):**
-- [ ] Expose alongside existing fields: `items` (alias of `clients`), `isFetching` + `isPending` (pass-through from the existing `useQuery`), `error: Error | null` (replace the `error?.message || null` stringification at :242 — keep old field name/type until consumers migrate, then retire within this task), `status: ArchiveFilter` view over `filters.status` (:26 — same union, verified) + `setStatus(s)` → `setFilters({ status: s })`, page-clamp effect (spec §6.7 snippet), `setSort` gains `setPage(1)` (:120-123 — locked drift fix, §6.10.2).
+- [ ] Expose alongside existing fields: `items` (alias of `clients`), `isFetching` + `isPending` (pass-through from the existing `useQuery`), `error: Error | null` (replace the `error?.message || null` stringification at :242 — keep old field name/type until consumers migrate, then retire within this task), page-clamp effect (spec §6.7 snippet), `setSort` gains `setPage(1)` (:120-123 — locked drift fix, §6.10.2). Do NOT add `status`/`setStatus`/`search`/`setSearch` — the page-level `ClientsFilters` bar owns search+status via `filters`/`setFilters` (out of scope; DataTable `withStatus`/`withSearch` are false for Clients, spec §6.1 matrix).
 - [ ] Keep `sortBy: string` non-null (assignable to `string | null`; initial 'name' unchanged — B2 cat 15 guard).
 - [ ] Update all `useClients` consumers + mocks (5 non-test + 7 test files — B2 cat 10) to the aligned fields where they touch table state; retire old duplicates within this task. `mockContexts.ts` typed `Partial<…>` — renames surface via tsc; fix every error until clean.
 - [ ] Update `__tests__/ClientsContext.test.tsx` for the added fields + setSort page-reset (B2 cat 5).
 
 **Part B — table migration:**
-- [ ] B2 grep `__tests__/ClientsTable.test.tsx` (~38 tests): cat 3 (no-`↕` assertions :169), cat 4 (shimmer → 10-row skeleton :115), cat 5 (sort↔page), cat 10, 11 (dropdown labels already "Действия" :218 — likely no edit), 13 (search debounce if asserted), 14 ("Ничего не найдено" preserved), 15.
+- [ ] B2 grep `__tests__/ClientsTable.test.tsx` (~38 tests): cat 3 (no-`↕` assertions :169), cat 4 (shimmer → 10-row skeleton :115), cat 5 (sort↔page), cat 10, 11 (dropdown labels already "Действия" :218 — likely no edit), 14 ("Ничего не найдено" preserved), 15. Cat 13 NOT expected (Clients search is the page bar's, debounced already, untouched).
 - [ ] Create `clientColumns.tsx` (columns incl. existing custom cells; menu items edit/delete/archive/restore → `clientActions({...})` — archive/restore stays a LABEL toggle via `row.archived`, not `hidden`).
-- [ ] Thin `ClientsTable.tsx`: `<DataTable storageKey="clients-columns" withStatus withSearch searchPlaceholder={current placeholder} emptyLabel="Ничего не найдено" …>`; delete/archive/restore RowActions open existing DeleteDialog/flows; row-level dropdown markup (:218-229) deleted — DataTable owns it.
-- [ ] Search stays server-side via `filters.search` — wire DataTable search to `setFilters({ search })` through the context's `search`/`setSearch` additions (spec §6.7: Clients unchanged semantics).
+- [ ] Thin `ClientsTable.tsx`: `<DataTable storageKey="clients-columns" emptyLabel="Ничего не найдено" …>` — NO `withStatus`/`withSearch` (the page-level `ClientsFilters` bar owns both: search 🔍 + Статус select, wired to `setFilters`; out of scope); delete/archive/restore RowActions open existing DeleteDialog/flows; row-level dropdown markup (:218-229) deleted — DataTable owns it.
+- [ ] Clients search/status stay exactly where they are (page-level `ClientsFilters` bar → `setFilters`, server-side) — the table migration does not touch them; no `search`/`setSearch` additions to ClientsContext.
 - [ ] `npm run test:all` green (unit + `clients.spec.ts` + 2 delete e2e specs unchanged); tsc clean.
 - [ ] Visual diff Clients × 7 states; expected deltas: `↕` glyphs, skeleton rows, menu a11y attributes.
 - [ ] Commit: `feat(#139): Clients migration + context alignment (T6)`.

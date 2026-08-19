@@ -141,9 +141,12 @@ def test_full_uuid_adds_id_equality_normalized() -> None:
 
 
 def test_partial_uuid_never_matches_id() -> None:
-    pred = search_predicate("123e4567", [SearchField(Client.id, kind="uuid")])
+    pred = search_predicate(
+        "123e4567", [SearchField(Client.name), SearchField(Client.id, kind="uuid")]
+    )
     sql = _sql(pred)
-    assert "id" not in sql.split("like")[0] or "=" not in sql  # no equality clause
+    assert "like" in sql  # only the substring clause survives
+    assert "clients.id =" not in sql  # no id equality for a partial UUID
 
 
 def test_exact_kind_matches_always() -> None:
@@ -386,7 +389,7 @@ ATOMIC across backend + api-client + frontend + tests in ONE commit (unknown par
 
 **Files — api-client:**
 - Modify: `packages/api-client/src/endpoints.ts` — rename `searchClientByPhone` → `getClientByPhone`, URL `/api/v1/clients/get?phone=` (lines 487-492). Delete the old name (no alias).
-- Modify: `packages/api-client/src/endpoints.test.ts` — rename the describe block (:614-623), assert new URL.
+- Modify: `packages/api-client/src/endpoints.test.ts` — rename the describe block (:614-623), assert new URL (`/api/v1/clients/get?phone=`, encoding preserved) **and add a 404 → ApiError assertion** for `getClientByPhone` (spec §10's explicit ask; mirror the existing 404 pattern in `client.test.ts:23-35`).
 
 **Files — frontend:**
 - Modify: `frontend/admin/contexts/ClientsContext.tsx` (~lines 103-113) — replace the blind `...filters` spread in `queryFn` with explicit mapping (the `search` key must no longer reach the wire):
@@ -456,7 +459,7 @@ ATOMIC across backend + api-client + frontend + tests in ONE commit (unknown par
             )
 ```
 
-(imports: `Client` already imported for `_sort_columns`; add `Service`, `search_predicate`, `SearchField`.)
+(imports: `Client` and `Service` are already imported in record.py (used by `_sort_columns`); add only `search_predicate` + `SearchField`.)
 - [ ] RED→GREEN contract tests in `test_api_records.py`: substring match per field (client name / client phone / client email / service title); full-UUID q → the record; partial id → no match; q len 1 → 422; q + location_id/service_id/master_id/status/date filters combined; total-after-q; **record with NULL client_id**: found when searching its service title, absent when searching a client name, no error either way; Cyrillic client name found by lowercase query.
 - [ ] `uv run pytest tests/test_api_records.py -q` green; full backend suite green (watch `test_record_list_params.py` — add a q schema-param case there too).
 - [ ] Commit: `feat(backend): records list ?q= via outer joins (GH #212)`
@@ -523,14 +526,14 @@ ATOMIC across backend + api-client + frontend + tests in ONE commit (unknown par
 ```
 
 - [ ] Router: add `q: str | None = Query(None, min_length=2, max_length=100)` and `service_id: str | None = Query(None)`, forward both.
-- [ ] RED→GREEN tests (`test_api_activities.py`): q by service title (Cyrillic case pin); full-UUID q → the activity; q + service_id combined; q + date range combined; q len 1 → 422; **`service_title` present and non-null in every list item** (both with and without q); single-item `GET /activities/{id}` still 200 with `service_title: null`. Update `test_list_activities_query_count.py` expected count (+1 bounded titles query) — assert bounded, not unbounded.
+- [ ] RED→GREEN tests (`test_api_activities.py`): q by service title (Cyrillic case pin); full-UUID q → the activity; q + service_id combined; q + date range combined; q len 1 → 422; **`service_title` present and non-null in every list item** (both with and without q); single-item `GET /activities/{id}` still 200 with `service_title: null`. Update `test_list_activities_query_count.py` expected count (+1 bounded titles query) and **add a q-path variant** of the query-count assertion (spec §5.3 point 7: both paths stay bounded) — assert bounded, not unbounded.
 - [ ] Full backend suite green.
 - [ ] Commit: `feat(backend): activities list ?q= + service_id filter + service_title (GH #212)`
 
 ---
 
 ## Task 9: api-client — `q` params + activities signature (additions only, no deletions)
-### Classification: small
+### Classification: standard
 ### Required Docs
 - `docs/specs/2026-08-19-list-search-q-design.md` §5.5 point 1
 - `packages/api-client` test conventions (endpoints.test.ts)

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { PaginatedResponse, TagResponse } from '@memo/api-client';
@@ -160,17 +160,31 @@ describe('TagsTable server pagination/sort (#205 §5.2/§5.3)', () => {
   });
 
   // ─── Search (G1b Q1 — KEPT: client-side filter over the loaded page) ───
+  // B2 cat 13 (#139 T1): search moved to the factory (searchPredicate) and the
+  // DataTable input now debounces 300ms — advance the debounce before asserting.
 
   it('filters the loaded page by search text (client-side)', async () => {
     setupEnvelope();
     await renderLoaded();
 
-    fireEvent.change(screen.getByPlaceholderText('Поиск тегов...'), {
-      target: { value: 'жив' },
-    });
+    vi.useFakeTimers();
+    try {
+      fireEvent.change(screen.getByPlaceholderText('Поиск тегов...'), {
+        target: { value: 'жив' },
+      });
 
-    expect(screen.getByText('Живопись')).toBeInTheDocument();
-    expect(screen.queryByText('Керамика')).not.toBeInTheDocument();
+      // Before the 300ms debounce fires, nothing is filtered yet
+      expect(screen.getByText('Керамика')).toBeInTheDocument();
+
+      act(() => {
+        vi.advanceTimersByTime(300);
+      });
+
+      expect(screen.getByText('Живопись')).toBeInTheDocument();
+      expect(screen.queryByText('Керамика')).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   // ─── Server-driven pagination wiring ───────────────────────────────────

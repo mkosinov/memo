@@ -26,7 +26,13 @@ function envelope(
  * Mirrors the ClientsContext.test.tsx wrapper idiom: fresh QueryClient
  * (retry: false) + QueryClientProvider + the context Provider under test.
  */
-function setup(config: { withStatus?: boolean; queryKeyPrefix?: string } = {}) {
+function setup(
+  config: {
+    withStatus?: boolean;
+    queryKeyPrefix?: string;
+    searchPredicate?: (item: TestItem, q: string) => boolean;
+  } = {},
+) {
   const fetcher = vi.fn((params: PagedListFetcherParams) =>
     Promise.resolve(envelope(params.page, params.per_page, 0)),
   );
@@ -34,6 +40,7 @@ function setup(config: { withStatus?: boolean; queryKeyPrefix?: string } = {}) {
     queryKeyPrefix: config.queryKeyPrefix ?? 'tests',
     fetcher: fetcher as Fetcher,
     withStatus: config.withStatus,
+    searchPredicate: config.searchPredicate,
   });
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -75,6 +82,10 @@ describe('createPagedListContext', () => {
     expect(result.current.sortBy).toBeNull();
     expect(result.current.sortOrder).toBe('asc');
     expect(result.current.status).toBe('active');
+    // Additive defaults (#139 T1): isPending pass-through, search state, no derived view
+    expect(result.current.isPending).toBe(false);
+    expect(result.current.search).toBe('');
+    expect(result.current.visibleItems).toBeUndefined();
   });
 
   it('setPage(3) refetches with page: 3', async () => {
@@ -231,5 +242,104 @@ describe('createPagedListContext', () => {
     }
     expect(() => render(<BrokenConsumer />)).toThrow(/must be used within its Provider/);
     spy.mockRestore();
+  });
+
+  // ─── #139 T1 additions: isPending / search predicate / page clamp ─────
+
+  it('isPending is true on first load (no cached data for the query key)', async () => {
+    // Fetcher that never resolves → stays in the initial-load state
+    const fetcher = vi.fn(() => new Promise<PaginatedResponse<TestItem>>(() => {}));
+    const { Provider, usePagedList } = createPagedListContext<TestItem>({
+      queryKeyPrefix: 'tests-pending',
+      fetcher: fetcher as Fetcher,
+    });
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    function Wrapper({ children }: { children: React.ReactNode }) {
+      return (
+        <QueryClientProvider client={queryClient}>
+          <Provider>{children}</Provider>
+        </QueryClientProvider>
+      );
+    }
+
+    const { result } = renderHook(() => usePagedList(), { wrapper: Wrapper });
+
+    expect(result.current.isPending).toBe(true);
+    await waitFor(() => {
+      // the never-resolving fetch keeps isPending true even while fetching
+      expect(result.current.isPending).toBe(true);
+      expect(result.current.isFetching).toBe(true);
+    });
+  });
+
+  it('searchPredicate: setSearch filters visibleItems without refetch (key stays search-free)', async () => {
+    const { fetcher, usePagedList, Wrapper, queryClient } = setup({
+      queryKeyPrefix: 'tags-search',
+      searchPredicate: (item, q) => item.name.toLowerCase().includes(q.toLowerCase()),
+    });
+    fetcher.mockResolvedValueOnce(
+      envelope(1, 10, 2, [
+        { id: 't-1', name: 'Живопись' },
+        { id: 't-2', name: 'Керамика' },
+      ]),
+    );
+
+    const { result } = renderHook(() => usePagedList(), { wrapper: Wrapper });
+
+    await waitFor(() => {
+      expect(result.current.items).toHaveLength(2);
+    });
+
+    // No predicate application while search is empty → no derived view
+    expect(result.current.visibleItems).toBeUndefined();
+
+    act(() => {
+      result.current.setSearch('жив');
+    });
+
+    await waitFor(() => {
+      expect(result.current.visibleItems).toEqual([{ id: 't-1', name: 'Живопись' }]);
+    });
+    // items stays the full server page; only the derived view is filtered
+    expect(result.current.items).toHaveLength(2);
+    expect(result.current.search).toBe('жив');
+    // B2 cat 9 guard: search is predicate-only — no refetch, key unchanged
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    const keys = queryClient.getQueryCache().getAll().map((q) => q.queryKey);
+    expect(keys).toEqual([['tags-search', 1, 10, null, 'asc']]);
+
+    // Clearing the search restores the unfiltered view (visibleItems undefined)
+    act(() => {
+      result.current.setSearch('');
+    });
+    await waitFor(() => {
+      expect(result.current.visibleItems).toBeUndefined();
+    });
+  });
+
+  it('page clamp: settled empty non-first page decrements page', async () => {
+    const { fetcher, usePagedList, Wrapper } = setup({ queryKeyPrefix: 'tests-clamp' });
+    // Page 2 of a shrunk list → empty
+    fetcher.mockImplementation((p) =>
+      Promise.resolve(envelope(p.page, p.per_page, p.page === 1 ? 11 : 0)),
+    );
+
+    const { result } = renderHook(() => usePagedList(), { wrapper: Wrapper });
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    act(() => {
+      result.current.setPage(2);
+    });
+
+    // Page 2 fetch settles empty → clamp effect decrements back to 1
+    await waitFor(() => {
+      expect(result.current.page).toBe(1);
+    });
+    expect(fetcher).toHaveBeenCalledWith({ page: 2, per_page: 10 });
   });
 });

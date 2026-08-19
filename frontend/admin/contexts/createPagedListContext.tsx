@@ -1,8 +1,9 @@
 'use client';
 
-import React, { createContext, useCallback, useContext, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import type { PaginatedResponse } from '@memo/api-client';
+import type { PagedListState } from '@/app/components/shared/tableTypes';
 
 export type ArchiveFilter = 'active' | 'all' | 'archived';
 export type SortOrder = 'asc' | 'desc';
@@ -18,19 +19,24 @@ export interface PagedListFetcherParams {
 
 export interface PagedListContextValue<T> {
   items: T[];
+  /** Derived filtered view when a searchPredicate + non-empty search is active; undefined otherwise. */
+  visibleItems?: T[];
   total: number;
   page: number;
   perPage: number;
   sortBy: string | null;
   sortOrder: SortOrder;
   status: ArchiveFilter;
+  isPending: boolean;
   isLoading: boolean;
   isFetching: boolean;
   error: Error | null;
+  search: string;
   setPage: (page: number) => void;
   setPerPage: (perPage: number) => void;
   setSort: (field: string, order: SortOrder) => void;
   setStatus: (status: ArchiveFilter) => void;
+  setSearch: (s: string) => void;
   refetch: () => void;
 }
 
@@ -39,6 +45,12 @@ interface PagedListConfig<T> {
   fetcher: (params: PagedListFetcherParams) => Promise<PaginatedResponse<T>>;
   withStatus?: boolean;
   defaultPerPage?: number;
+  /**
+   * Client-side filter predicate (spec §6.7 — dict search is predicate-only):
+   * `search` stays OUT of the query key and fetcher params; the loaded page is
+   * filtered locally into `visibleItems`.
+   */
+  searchPredicate?: (item: T, q: string) => boolean;
 }
 
 /**
@@ -49,7 +61,13 @@ interface PagedListConfig<T> {
  * (spec §4.4), preserving today's unsorted-initial-render behavior.
  */
 export function createPagedListContext<T>(config: PagedListConfig<T>) {
-  const { queryKeyPrefix, fetcher, withStatus = false, defaultPerPage = 10 } = config;
+  const {
+    queryKeyPrefix,
+    fetcher,
+    withStatus = false,
+    defaultPerPage = 10,
+    searchPredicate,
+  } = config;
   const Context = createContext<PagedListContextValue<T> | null>(null);
 
   function Provider({ children }: { children: React.ReactNode }) {
@@ -58,12 +76,13 @@ export function createPagedListContext<T>(config: PagedListConfig<T>) {
     const [sortBy, setSortBy] = useState<string | null>(null);
     const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
     const [status, setStatusState] = useState<ArchiveFilter>('active');
+    const [search, setSearch] = useState('');
 
     const queryKey = withStatus
       ? [queryKeyPrefix, page, perPage, status, sortBy, sortOrder]
       : [queryKeyPrefix, page, perPage, sortBy, sortOrder];
 
-    const { data, isLoading, isFetching, error, refetch } = useQuery({
+    const { data, isPending, isLoading, isFetching, error, refetch } = useQuery({
       queryKey,
       queryFn: () =>
         fetcher({
@@ -91,21 +110,39 @@ export function createPagedListContext<T>(config: PagedListConfig<T>) {
       setPage(1);
     }, []);
 
+    const items = data?.items ?? [];
+
+    // Spec §6.7 — dict search is predicate-only: the loaded page is filtered
+    // locally into `visibleItems`; `items` keeps its server-page contract.
+    const visibleItems =
+      searchPredicate && search ? items.filter((i) => searchPredicate(i, search)) : undefined;
+
+    // Spec §6.7 page clamp — after a SETTLED fetch returns an empty non-first
+    // page (e.g. last row of page N deleted), step back. `!isFetching` guards
+    // against mid-refetch races with keepPreviousData.
+    useEffect(() => {
+      if (!isPending && !isFetching && items.length === 0 && page > 1) setPage(page - 1);
+    }, [isPending, isFetching, items.length, page]);
+
     const value: PagedListContextValue<T> = {
-      items: data?.items ?? [],
+      items,
+      visibleItems,
       total: data?.total ?? 0,
       page,
       perPage,
       sortBy,
       sortOrder,
       status,
+      isPending,
       isLoading,
       isFetching,
       error: (error as Error) ?? null,
+      search,
       setPage,
       setPerPage,
       setSort,
       setStatus,
+      setSearch,
       refetch,
     };
     return <Context.Provider value={value}>{children}</Context.Provider>;
@@ -119,3 +156,10 @@ export function createPagedListContext<T>(config: PagedListConfig<T>) {
 
   return { Provider, usePagedList };
 }
+
+// Compile-time drift guard (#139 T1): the factory value must always satisfy the
+// DataTable-facing PagedListState contract. Type-only import — no runtime cycle.
+const _assertAssignable: (v: PagedListContextValue<unknown>) => PagedListState<unknown> = (
+  v,
+) => v;
+void _assertAssignable;

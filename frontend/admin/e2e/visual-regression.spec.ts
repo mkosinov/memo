@@ -426,13 +426,15 @@ function emptyTest(config: PageTableConfig) {
       }),
     );
     await navigateDirect(page, config);
-    // Each page renders its own empty-state text (verified in the table components).
+    // Migrated tables use the shared DataTable default "Нет записей" (addendum 12
+    // ruling); non-migrated tables keep their per-entity copy (verified in their
+    // table components).
     const emptyText: Record<string, string> = {
-      tags: 'Теги не найдены',
-      locations: 'Локации не найдены',
-      masters: 'Мастера не найдены',
-      services: 'Услуги не найдены',
-      materials: 'Материалы не найдены',
+      tags: 'Нет записей',
+      locations: 'Нет записей',
+      masters: 'Нет записей',
+      services: 'Нет записей',
+      materials: 'Нет записей',
       clients: 'Нет клиентов',
       photos: 'Фото не найдены',
       records: 'Записи не найдены',

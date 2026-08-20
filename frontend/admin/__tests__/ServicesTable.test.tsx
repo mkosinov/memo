@@ -258,7 +258,7 @@ describe('ServicesTable', () => {
     setupEnvelope({ items: [], total: 0 });
     renderTable();
 
-    expect(await screen.findByText('Услуги не найдены')).toBeInTheDocument();
+    expect(await screen.findByText('Нет записей')).toBeInTheDocument();
   });
 
   it('shows loading state', async () => {

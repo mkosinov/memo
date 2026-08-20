@@ -236,7 +236,7 @@ describe('MastersTable', () => {
     setupEnvelope({ items: [], total: 0 });
     renderTable();
 
-    expect(await screen.findByText('Мастера не найдены')).toBeInTheDocument();
+    expect(await screen.findByText('Нет записей')).toBeInTheDocument();
   });
 
   it('shows loading state', async () => {

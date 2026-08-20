@@ -149,7 +149,6 @@ export function LocationsTable() {
         tableState={locationsTable}
         actions={actions}
         onRowClick={setEditLocation}
-        emptyLabel="Локации не найдены"
         rowKey={(l) => l.id}
         rowTestId={(l) => `location-row-${l.id}`}
         // Pre-#139 row classes were `border-b cursor-pointer transition-colors

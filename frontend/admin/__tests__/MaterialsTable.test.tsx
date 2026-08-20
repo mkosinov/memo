@@ -171,7 +171,7 @@ describe('MaterialsTable', () => {
     setupEnvelope({ items: [], total: 0 });
     renderTable();
 
-    expect(await screen.findByText('Материалы не найдены')).toBeInTheDocument();
+    expect(await screen.findByText('Нет записей')).toBeInTheDocument();
   });
 
   it('shows loading state', async () => {

@@ -128,7 +128,6 @@ export function MaterialsTable() {
         tableState={materialsTable}
         actions={actions}
         onRowClick={setEditingMaterial}
-        emptyLabel="Материалы не найдены"
         rowKey={(m) => m.id}
         // Pre-#139 row classes were `border-b cursor-pointer transition-colors
         // hover:opacity-80`; the shared DataTable renders the base three, the

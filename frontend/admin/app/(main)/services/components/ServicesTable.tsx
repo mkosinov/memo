@@ -137,7 +137,6 @@ export function ServicesTable() {
         tableState={servicesTable}
         actions={actions}
         onRowClick={setEditingService}
-        emptyLabel="Услуги не найдены"
         rowKey={(s) => s.id}
         // Pre-#139 row classes were `border-b cursor-pointer transition-colors
         // hover:opacity-80`; the shared DataTable renders the base three, the

@@ -90,7 +90,6 @@ export function TagsTable() {
         tableState={tagsTable}
         actions={actions}
         onRowClick={setEditTag}
-        emptyLabel="Теги не найдены"
         withSearch
         searchPlaceholder="Поиск тегов..."
         rowKey={(t) => t.id}

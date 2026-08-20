@@ -146,7 +146,6 @@ export function MastersTable() {
         tableState={mastersTable}
         actions={actions}
         onRowClick={setEditMaster}
-        emptyLabel="Мастера не найдены"
         rowKey={(m) => m.id}
         rowTestId={(m) => `master-row-${m.id}`}
         // Pre-#139 row classes were `border-b cursor-pointer transition-colors

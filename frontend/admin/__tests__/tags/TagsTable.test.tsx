@@ -107,7 +107,7 @@ describe('TagsTable error state', () => {
   it('does not show ErrorState when no error', async () => {
     setupEnvelope({ items: [], total: 0 });
     renderTable();
-    await screen.findByText('Теги не найдены');
+    await screen.findByText('Нет записей');
     expect(screen.queryByTestId('error-state')).not.toBeInTheDocument();
   });
 });
@@ -120,7 +120,7 @@ describe('TagsTable status column removal (GH #194)', () => {
   it('does not render a "Статус" column header', async () => {
     setupEnvelope({ items: [], total: 0 });
     renderTable();
-    await screen.findByText('Теги не найдены');
+    await screen.findByText('Нет записей');
     // exact:false → catches "Статус ↕" (sort icon appended to header label).
     expect(screen.queryByText('Статус', { exact: false })).not.toBeInTheDocument();
   });

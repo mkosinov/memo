@@ -197,6 +197,7 @@ async function renderLoaded() {
 describe('ServicesTable', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.clear();
   });
 
   afterEach(() => {
@@ -262,9 +263,15 @@ describe('ServicesTable', () => {
 
   it('shows loading state', async () => {
     mockGetServices.mockReturnValue(new Promise<PaginatedResponse<ServiceResponse>>(() => {}));
-    renderTable();
+    const { container } = renderTable();
 
-    expect(await screen.findByText('Загрузка...')).toBeInTheDocument();
+    // B2 cat 4 (#139 §6.8): the shared DataTable replaced the "Загрузка..."
+    // div with a 10-row skeleton (visible columns only).
+    await waitFor(() => {
+      expect(container.querySelectorAll('tbody tr').length).toBe(10);
+    });
+    expect(container.querySelectorAll('.animate-pulse').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Загрузка...')).not.toBeInTheDocument();
   });
 
   it('opens edit modal on row click', async () => {
@@ -487,6 +494,47 @@ describe('ServicesTable', () => {
         sort_order: 'asc',
       });
     });
+  });
+
+  // ─── Tag header: NOT sortable (#205 Task 3 — backend whitelist has no
+  // `tags` mapping; §6.2 sortable:false, key passes through nowhere)
+
+  it('tags header is not sortable — no glyph, no sort control, no pointer cursor', async () => {
+    setupEnvelope();
+    await renderLoaded();
+
+    // Column hidden by default → enable it via the picker (#139: DataTable
+    // owns visibility under services-columns; picker renders every column).
+    fireEvent.click(screen.getByLabelText('Настроить колонки'));
+    fireEvent.click(screen.getByLabelText('Теги'));
+    // Close the picker popover (outside mousedown) so "Теги" resolves to the
+    // header cell only, not the picker's checkbox label.
+    fireEvent.mouseDown(document.body);
+
+    const tagsHeader = screen.getByText(/^Теги\s*[↕↑↓]?$/);
+    expect(tagsHeader.textContent).not.toMatch(/[↕↑↓]/);
+    const th = tagsHeader.closest('th')!;
+    expect(th.querySelector('button')).toBeNull();
+    // Pre-#139 every th carried `cursor-pointer` unconditionally; the generic
+    // DataTable drops it on non-sortable headers.
+    expect(th.className).not.toContain('cursor-pointer');
+  });
+
+  // ─── Column visibility persistence (#139 B2 cat 2 — services-columns) ──
+
+  it('loads persisted column visibility from services-columns (B2 cat 2)', async () => {
+    localStorage.setItem('services-columns', JSON.stringify(['tariffs']));
+    setupEnvelope();
+    renderTable();
+    // Wait anchor: a cell of the ONE visible column (titles are hidden by the
+    // persisted set, so findByText('Картина маслом') can't serve).
+    await screen.findByText('2 тарифа');
+
+    // Only the persisted `tariffs` column renders — the default set is NOT used.
+    const thead = document.querySelector('thead');
+    expect(thead?.textContent).toMatch(/Тарифы/);
+    expect(thead?.textContent).not.toMatch(/Название/);
+    expect(thead?.textContent).not.toMatch(/Длительность/);
   });
 
   // ─── Chrome ─────────────────────────────────────────────────────────────

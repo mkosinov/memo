@@ -18,6 +18,11 @@ const { Provider, usePagedList } = createPagedListContext<ServiceResponse>({
       ...(p.sort_by ? { sort_by: p.sort_by, sort_order: p.sort_order } : {}),
     }),
   withStatus: true,
+  // #139 T5 — dict search is predicate-only (spec §6.7): filters the loaded
+  // page into `visibleItems`; `search` stays out of the query key/fetcher.
+  // Title-only match, per the pre-#139 table filter memo (title lowercase
+  // includes) — verbatim behavior moved from ServicesTable.
+  searchPredicate: (s, q) => s.title.toLowerCase().includes(q.toLowerCase()),
 });
 
 export const ServicesProvider = Provider;

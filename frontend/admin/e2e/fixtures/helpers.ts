@@ -411,7 +411,15 @@ export async function waitForClientsReady(
   );
   await page.goto('/clients');
   await page.waitForSelector('h1:has-text("Клиенты")', { timeout: 60_000 });
-  await page.waitForSelector('table tbody, p:has-text("Нет клиентов")', { timeout: 60_000 });
+  // #139 T6 + Addendum #12 — empty state = "Нет записей" (shared DataTable
+  // default) for ALL 8 tables; Clients' pre-#139 dual empty variants were
+  // dropped. Wait for either the table body or the unified empty label.
+  await page.waitForFunction(
+    () =>
+      document.querySelector('table tbody') !== null ||
+      document.body.innerText.includes('Нет записей'),
+    { timeout: 60_000 },
+  );
   await clientsResponse.catch(() => {});
   await page.waitForTimeout(500); // React re-render buffer
 
@@ -425,7 +433,12 @@ export async function waitForClientsReady(
       { timeout: 60_000 },
     );
     await page.reload({ waitUntil: 'networkidle' });
-    await page.waitForSelector('table tbody, p:has-text("Нет клиентов")', { timeout: 60_000 });
+    await page.waitForFunction(
+      () =>
+        document.querySelector('table tbody') !== null ||
+        document.body.innerText.includes('Нет записей'),
+      { timeout: 60_000 },
+    );
     await clientsResponse2.catch(() => {});
     await page.waitForTimeout(500); // React re-render buffer
   }

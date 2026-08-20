@@ -353,9 +353,11 @@ test.describe('Clients page', () => {
     // triggers a refetch via the React Query hook sending status=active. Use a
     // content-based assertion on the status select: it must return to
     // "Активные" (value 'active') after reset.
-    // Scope to the filters panel (#195): the same "Сбросить фильтры" text
-    // also exists in ClientsTable's empty state (rendered when the filtered
-    // list is empty), which is a strict-mode violation without scoping.
+    // #139 T6 + Addendum #12 — the reset button now lives ONLY in the
+    // page-level ClientsFilters bar (the table's duplicate was dropped when
+    // the empty state unified to "Нет записей"). The filters-panel scope
+    // below still selects the right one — it's the only "Сбросить фильтры"
+    // in the page now.
     const filtersPanel = page.locator('div.rounded-xl').filter({ has: statusSelect });
     await filtersPanel.getByText('Сбросить фильтры').click();
     await expect(statusSelect).toHaveValue('active', { timeout: 10_000 });

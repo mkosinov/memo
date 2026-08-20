@@ -146,7 +146,8 @@ type ClientsOverrides = Partial<ClientsContextType>;
 export function createMockClientsContext(
   overrides?: ClientsOverrides,
 ): ClientsContextType {
-  return {
+  const base: ClientsContextType = {
+    items: [],
     clients: [],
     total: 0,
     page: 1,
@@ -168,6 +169,8 @@ export function createMockClientsContext(
     sortBy: 'name',
     sortOrder: 'asc',
     isLoading: false,
+    isPending: false,
+    isFetching: false,
     error: null,
     refetch: vi.fn(),
     setPage: vi.fn(),
@@ -183,6 +186,11 @@ export function createMockClientsContext(
     restoreClient: vi.fn(),
     resolveDeleteClient: vi.fn(),
     dependencies: null,
-    ...overrides,
   };
+  // If the test passes a `clients` override (or `items`), mirror it into the
+  // other alias so the migrated DataTable and pre-#139 consumers both see it.
+  const merged = { ...base, ...overrides };
+  if (overrides?.clients !== undefined) merged.items = overrides.clients;
+  else if (overrides?.items !== undefined) merged.clients = overrides.items;
+  return merged;
 }

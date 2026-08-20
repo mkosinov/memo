@@ -435,7 +435,10 @@ function emptyTest(config: PageTableConfig) {
       masters: 'Нет записей',
       services: 'Нет записей',
       materials: 'Нет записей',
-      clients: 'Нет клиентов',
+      // #139 T6 + Addendum #12 — clients' pre-#139 empty copy
+      // ("Нет клиентов" / "Ничего не найдено") unified to "Нет записей"
+      // for ALL 8 tables per the user ruling.
+      clients: 'Нет записей',
       photos: 'Фото не найдены',
       records: 'Записи не найдены',
     };

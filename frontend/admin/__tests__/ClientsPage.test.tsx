@@ -32,13 +32,31 @@ vi.mock('../app/(main)/clients/components/ClientsFilters', () => ({
 }));
 
 vi.mock('../app/(main)/clients/components/ClientsTable', () => ({
-  ClientsTable: ({ onClientClick }: any) => (
-    <div data-testid="clients-table">
-      <button onClick={() => onClientClick({ id: 'c1', name: 'Test Client' })}>
-        Click client
-      </button>
-    </div>
-  ),
+  // #139 T6 — ClientsTable renders the unified <DataTable> which owns the pager.
+  // Mock reads `useClients` from the module scope (mocked above) and exposes
+  // the pager controls so page-level tests can assert on them.
+  ClientsTable: ({ onClientClick }: any) => {
+    // useClients is already imported at the top of this file from the mocked module.
+    const ctx = useClients();
+    return (
+      <div data-testid="clients-table">
+        <button onClick={() => onClientClick({ id: 'c1', name: 'Test Client' })}>
+          Click client
+        </button>
+        <div className="pager-stub">
+          <span>{ctx.total} всего</span>
+          <select data-testid="page-size-select" value={ctx.perPage} onChange={(e) => ctx.setPerPage(Number(e.target.value))}>
+            <option value={10}>10</option>
+            <option value={20}>20</option>
+            <option value={50}>50</option>
+            <option value={100}>100</option>
+          </select>
+          <button aria-label="Предыдущая страница" disabled={ctx.page <= 1} onClick={() => ctx.setPage(ctx.page - 1)}>←</button>
+          <button aria-label="Следующая страница" disabled={ctx.page >= Math.max(1, Math.ceil(ctx.total / ctx.perPage))} onClick={() => ctx.setPage(ctx.page + 1)}>→</button>
+        </div>
+      </div>
+    );
+  },
 }));
 
 vi.mock('../app/(main)/clients/components/ClientCardModal', () => ({
@@ -135,18 +153,8 @@ describe('ClientsPage', () => {
         <ClientsPage />
       </QueryClientProvider>,
     );
-    expect(screen.getByText('45 клиентов')).toBeInTheDocument();
-  });
-
-  it('renders current page number', async () => {
-    mockUseClients.mockReturnValue(createMockClientsContext({ total: 45, page: 2, perPage: 20 }));
-    const ClientsPage = (await import('../app/(main)/clients/page')).default;
-    render(
-      <QueryClientProvider client={createQueryClient()}>
-        <ClientsPage />
-      </QueryClientProvider>,
-    );
-    expect(screen.getByText('Стр. 2')).toBeInTheDocument();
+    // #139 T6 — legacy "N клиентов" pager removed; DataTable renders "N всего".
+    expect(screen.getByText('45 всего')).toBeInTheDocument();
   });
 
   it('renders per-page selector dropdown', async () => {
@@ -156,7 +164,7 @@ describe('ClientsPage', () => {
         <ClientsPage />
       </QueryClientProvider>,
     );
-    const select = screen.getByRole('combobox');
+    const select = screen.getByTestId('page-size-select');
     expect(select).toBeInTheDocument();
     expect(select).toHaveValue('20');
   });
@@ -168,7 +176,7 @@ describe('ClientsPage', () => {
         <ClientsPage />
       </QueryClientProvider>,
     );
-    const select = screen.getByRole('combobox');
+    const select = screen.getByTestId('page-size-select');
     const options = Array.from(select.querySelectorAll('option'));
     expect(options.map(o => o.value)).toEqual(['10', '20', '50', '100']);
   });
@@ -181,7 +189,7 @@ describe('ClientsPage', () => {
         <ClientsPage />
       </QueryClientProvider>,
     );
-    const prevButton = screen.getByText('←').closest('button');
+    const prevButton = screen.getByLabelText('Предыдущая страница');
     expect(prevButton).toBeDisabled();
   });
 
@@ -193,7 +201,7 @@ describe('ClientsPage', () => {
         <ClientsPage />
       </QueryClientProvider>,
     );
-    const nextButton = screen.getByText('→').closest('button');
+    const nextButton = screen.getByLabelText('Следующая страница');
     expect(nextButton).not.toBeDisabled();
   });
 
@@ -234,7 +242,7 @@ describe('ClientsPage', () => {
     expect(screen.queryByTestId('client-card-modal')).not.toBeInTheDocument();
   });
 
-  // ─── Pagination edge cases ─────────────────────────────────────────────
+  // ─── Pagination edge cases (#139 T6 — DataTable owns pagination) ─────
 
   describe('pagination edge cases', () => {
     it('disables next button on last page', async () => {
@@ -245,7 +253,7 @@ describe('ClientsPage', () => {
           <ClientsPage />
         </QueryClientProvider>,
       );
-      const nextButton = screen.getByText('→').closest('button');
+      const nextButton = screen.getByLabelText('Следующая страница');
       expect(nextButton).toBeDisabled();
     });
 
@@ -257,8 +265,8 @@ describe('ClientsPage', () => {
           <ClientsPage />
         </QueryClientProvider>,
       );
-      const prevButton = screen.getByText('←').closest('button');
-      const nextButton = screen.getByText('→').closest('button');
+      const prevButton = screen.getByLabelText('Предыдущая страница');
+      const nextButton = screen.getByLabelText('Следующая страница');
       expect(prevButton).not.toBeDisabled();
       expect(nextButton).not.toBeDisabled();
     });
@@ -271,7 +279,8 @@ describe('ClientsPage', () => {
           <ClientsPage />
         </QueryClientProvider>,
       );
-      expect(screen.getByText('1 клиентов')).toBeInTheDocument();
+      // #139 T6 — unified dict copy ("N всего") replaces legacy "N клиентов".
+      expect(screen.getByText('1 всего')).toBeInTheDocument();
     });
 
     it('shows zero clients count', async () => {
@@ -282,7 +291,7 @@ describe('ClientsPage', () => {
           <ClientsPage />
         </QueryClientProvider>,
       );
-      expect(screen.getByText('0 клиентов')).toBeInTheDocument();
+      expect(screen.getByText('0 всего')).toBeInTheDocument();
     });
   });
 });

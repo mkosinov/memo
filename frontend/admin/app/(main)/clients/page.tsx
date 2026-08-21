@@ -12,7 +12,9 @@ import type { ClientWithStats } from '@memo/api-client';
 function ClientsPageContent() {
   const [selectedClient, setSelectedClient] = useState<ClientWithStats | null>(null);
   const [isCreateMode, setIsCreateMode] = useState(false);
-  const { total, page, perPage, setPage, setPerPage, clients } = useClients();
+  // #139 T6 — legacy page-level pager removed; the unified <DataTable> pager
+  // owns pagination for the page (spec §6.10, dict-table unification).
+  const { clients } = useClients();
   const searchParams = useSearchParams();
   const router = useRouter();
   const clientIdFromQuery = searchParams.get('clientId');
@@ -57,43 +59,6 @@ function ClientsPageContent() {
         style={{ borderColor: 'var(--line)', backgroundColor: 'var(--white)' }}
       >
         <ClientsTable onClientClick={setSelectedClient} />
-      </div>
-
-      {/* Pagination */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <span className="text-sm" style={{ color: 'var(--ink-light)' }}>{total} клиентов</span>
-          <select
-            value={perPage}
-            onChange={(e) => setPerPage(Number(e.target.value))}
-            className="text-sm border rounded px-2 py-1"
-            style={{ borderColor: 'var(--line)' }}
-          >
-            <option value={10}>10</option>
-            <option value={20}>20</option>
-            <option value={50}>50</option>
-            <option value={100}>100</option>
-          </select>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            disabled={page <= 1}
-            onClick={() => setPage(page - 1)}
-            className="px-3 py-1 text-sm rounded border disabled:opacity-30"
-            style={{ borderColor: 'var(--line)', color: 'var(--ink)' }}
-          >
-            ←
-          </button>
-          <span className="text-sm">Стр. {page}</span>
-          <button
-            disabled={page * perPage >= total}
-            onClick={() => setPage(page + 1)}
-            className="px-3 py-1 text-sm rounded border disabled:opacity-30"
-            style={{ borderColor: 'var(--line)', color: 'var(--ink)' }}
-          >
-            →
-          </button>
-        </div>
       </div>
 
       {/* Modal */}

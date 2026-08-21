@@ -267,8 +267,9 @@ test.describe('Clients page', () => {
   test('8. Pagination shows total client count', async ({ page }) => {
     await waitForClientsReady(page);
 
-    // Pagination area should show total count
-    await expect(page.locator('text=/\\d+ клиентов/')).toBeVisible();
+    // Pagination area should show total count (#139 T6 — unified dict copy:
+    // legacy "N клиентов" removed; DataTable renders "N всего").
+    await expect(page.locator('text=/\\d+\\s+всего/').first()).toBeVisible();
   });
 
   // ── 9. Sorting — click header toggles sort direction ────────────────────

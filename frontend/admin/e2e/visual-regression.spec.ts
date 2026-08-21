@@ -439,7 +439,9 @@ function emptyTest(config: PageTableConfig) {
       // ("Нет клиентов" / "Ничего не найдено") unified to "Нет записей"
       // for ALL 8 tables per the user ruling.
       clients: 'Нет записей',
-      photos: 'Фото не найдены',
+      // #139 T7 + Addendum #12 — photos' pre-#139 empty copy ("Фото не
+      // найдены") unified to "Нет записей" for ALL 8 tables (user ruling).
+      photos: 'Нет записей',
       records: 'Записи не найдены',
     };
     await expect(page.getByText(emptyText[config.name]).first()).toBeVisible();
@@ -480,7 +482,7 @@ function skeletonTest(config: PageTableConfig) {
     await page.route(`**${config.apiUrl}*`, () => new Promise<void>(() => {}));
     // Clock is already installed in beforeEach (date-stable baselines).
     await navigateDirect(page, config);
-    if (config.name === 'clients' || config.name === 'tags' || config.name === 'locations' || config.name === 'masters' || config.name === 'materials' || config.name === 'services') {
+    if (config.name === 'clients' || config.name === 'tags' || config.name === 'locations' || config.name === 'masters' || config.name === 'materials' || config.name === 'services' || config.name === 'photos') {
       // Clients renders 10 skeleton bars (.animate-pulse) while loading;
       // Tags renders them via the shared DataTable since #139 T1 (locked
       // delta §6.8/plan: skeleton rows replace the old "Загрузка..." div);
@@ -488,6 +490,7 @@ function skeletonTest(config: PageTableConfig) {
       // Masters follows via the shared DataTable since #139 T3;
       // Materials follows via the shared DataTable since #139 T4;
       // Services follows via the shared DataTable since #139 T5.
+      // Photos follows via the shared DataTable since #139 T7.
       await expect(page.locator('.animate-pulse').first()).toBeVisible();
     } else if (config.name === 'records') {
       // INTENTIONAL DELTA: RecordsTable never consumes `loading` — the initial
@@ -495,7 +498,7 @@ function skeletonTest(config: PageTableConfig) {
       // The snapshot documents that absence; the generic DataTable adds one.
       await expect(page.getByText('Записи не найдены')).toBeVisible();
     } else {
-      // Dictionary tables + photos render a plain "Загрузка..." div.
+      // Dictionary tables render a plain "Загрузка..." div.
       await expect(page.getByText('Загрузка...').first()).toBeVisible();
     }
     await expect(page).toHaveScreenshot(`${config.name}-table-skeleton.png`, {

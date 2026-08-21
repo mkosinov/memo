@@ -2,6 +2,7 @@
 
 import React from 'react';
 import { PhotosTable } from './components/PhotosTable';
+import { PhotosProvider } from '@/contexts/PhotosContext';
 
 export default function PhotosPage() {
   return (
@@ -17,7 +18,9 @@ export default function PhotosPage() {
         className="rounded-xl border overflow-hidden"
         style={{ borderColor: 'var(--line)', backgroundColor: 'var(--white)' }}
       >
-        <PhotosTable />
+        <PhotosProvider>
+          <PhotosTable />
+        </PhotosProvider>
       </div>
     </div>
   );

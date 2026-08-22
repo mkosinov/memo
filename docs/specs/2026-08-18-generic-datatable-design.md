@@ -243,6 +243,7 @@ createPagedListContext<T>(config)
 - Shared `DeleteDialog` + 409 dry-run pre-flight for all tables that delete: Locations, Masters, Materials, Services, Clients (existing) + **Records** (new, via the added dropdown).
 - **Tags/Photos keep `window.confirm`** (locked) — their delete RowAction's `onClick` calls `window.confirm` in the parent.
 - DataTable itself never knows what "delete" is.
+- **Records substrate (USER RULING 2026-08-22, plan Addendum 13):** the records 409 dry-run substrate did NOT exist (`DELETE /records/{id}` was a plain hard delete; `FK_MATRIX` had no `Record` root; dependents — visits, payments, record_tags — cascaded SILENTLY). #139 delivers it: `Record` root in `FK_MATRIX` (dependents previewed for the 409; execution stays in the existing `@transactional` `RecordService.delete`), body/resolutions on the route mirroring masters/clients, backend contract tests. Behavior: the dialog opens on ANY dependents; dependents are deleted on explicit confirmation (no blocking, no undo-toast flow); a record with no dependents deletes instantly + toast (Materials 204 path). The two pre-existing records delete flows — `ClientRecordTab` `window.confirm` and the `ActivityDetailsModal` 5 s deferred-delete + undo toast — CONVERT to the same dialog: one records-delete UX (the bare confirm silently cascaded payments — correctness; the 5 s inline deferral has no dropdown analog).
 
 ### 6.10 Sorting & pagination unification (locked drift fixes — intentional behavior changes)
 
@@ -335,6 +336,7 @@ T1 additionally includes the shared foundation: `tableTypes.ts`, `DataTable.tsx`
   15. **Initial-sort assertions — no change expected:** hand-rolled contexts keep non-null initial `sortBy` (§6.4); Records initial fetch keeps `sort_by=date&sort_order=asc`. Guard category only.
   - Exhaustive per-suite line edits = plan level, not spec. Tests falling outside these categories are expected to pass unedited; any extra breakage is investigated, not silently edited.
 - **E2E coverage note:** materials has NO `materials-crud.spec.ts` (only `materials-delete.spec.ts`) — the Materials migration safety net is the unit suite + visual gate (§9); creating a new e2e spec is out of scope. Records' new dropdown gains e2e smoke coverage in `records.spec.ts` (menu open, delete via menu) — the ONLY e2e addition in #139.
+- **Backend tests (Addendum 13, USER RULING 2026-08-22):** records delete dry-run/confirmation gains pytest contract coverage mirroring the other entities' deletion suites (FK_MATRIX 409 preview, resolutions body, transactional execution, no-dependents 204). This is the only backend test surface in #139.
 - Context tests keep `createMock*Context` helpers (different level — fetch mapping/state transitions, not rendering).
 - **E2E specs: unchanged** — testids/aria-labels preserved: `page-size-select`, `dropdown-*`, `Настроить колонки`, `Действия`, `tag-row-*`.
 
@@ -396,5 +398,6 @@ Non-decision documentation fixes found during 2026-08-18 grounding (no locked de
 | Materials has no CRUD e2e spec | Unit suite + visual gate as safety net (§8); new e2e out of scope |
 | Visual regressions in 8 pages | 7-state baselines × 8 tables before T1 + diff after each Ti (§9) |
 | Page-clamp/skeleton flag confusion (`isPending` vs `isLoading` vs `isFetching`) | Semantics pinned in §6.4/§6.7/§6.8; `isPending` pass-through added to factory |
+| Records delete substrate absent (Addendum 5 guard fired for real in T8 — plain hard delete, no FK_MATRIX root, silent cascade of payments) | USER RULING 2026-08-22 (plan Addendum 13): build the substrate in this PR — FK_MATRIX `Record` root + route resolutions body + contract tests; cascade execution stays in `RecordService.delete`; single-PR scope stands |
 
 No open **design** questions — all decisions locked at G1a; remaining specifics (per-suite line edits, APG menu implementation choice, per-entity empty-label copy) are pinned at plan level.

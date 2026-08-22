@@ -43,6 +43,7 @@ from src.models.client import Client
 from src.models.location import Location
 from src.models.master import Master
 from src.models.material import Material
+from src.models.payment import Payment
 from src.models.photo import Photo
 from src.models.record import Record
 from src.models.service import Service
@@ -50,6 +51,7 @@ from src.models.tag import (
     client_tags,
     location_tags,
     master_tags,
+    record_tags,
     service_tags,
 )
 from src.models.tariff import Tariff
@@ -164,6 +166,20 @@ FK_MATRIX: dict[type[Base], list[FKDependency]] = {
         ),
         FKDependency(
             entity="client_tags", relation="Тег", nullable=False,
+            action="cascade", auto=True, allowed_actions=["cascade"],
+        ),
+    ],
+    Record: [
+        FKDependency(
+            entity="visits", relation="Посещение", nullable=False,
+            action="cascade", auto=False, allowed_actions=["cascade"],
+        ),
+        FKDependency(
+            entity="payments", relation="Платёж", nullable=False,
+            action="cascade", auto=False, allowed_actions=["cascade"],
+        ),
+        FKDependency(
+            entity="record_tags", relation="Тег", nullable=False,
             action="cascade", auto=True, allowed_actions=["cascade"],
         ),
     ],
@@ -315,6 +331,28 @@ async def _count_c_client_tags(s: AsyncSession, entity_id: str) -> _CountResult:
     return r.scalar_one(), None
 
 
+async def _count_r_visits(s: AsyncSession, entity_id: str) -> _CountResult:
+    r = await s.execute(
+        select(func.count()).select_from(Visit).where(Visit.record_id == entity_id)
+    )
+    return r.scalar_one(), None
+
+
+async def _count_r_payments(s: AsyncSession, entity_id: str) -> _CountResult:
+    r = await s.execute(
+        select(func.count()).select_from(Payment).where(Payment.record_id == entity_id)
+    )
+    return r.scalar_one(), None
+
+
+async def _count_r_record_tags(s: AsyncSession, entity_id: str) -> _CountResult:
+    r = await s.execute(
+        select(func.count()).select_from(record_tags)
+        .where(record_tags.c.record_id == entity_id)
+    )
+    return r.scalar_one(), None
+
+
 _COUNTERS: dict[tuple[type[Base], str], _CounterFn] = {
     (Master, "activities"): _count_m_activities,
     (Master, "users"): _count_m_users,
@@ -328,6 +366,9 @@ _COUNTERS: dict[tuple[type[Base], str], _CounterFn] = {
     (Client, "records"): _count_c_records,
     (Client, "visitors"): _count_c_visitors,
     (Client, "client_tags"): _count_c_client_tags,
+    (Record, "visits"): _count_r_visits,
+    (Record, "payments"): _count_r_payments,
+    (Record, "record_tags"): _count_r_record_tags,
 }
 
 

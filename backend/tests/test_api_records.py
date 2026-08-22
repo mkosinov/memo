@@ -5,6 +5,8 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from fastapi.testclient import TestClient
 
+from tests.conftest import query_db
+
 pytestmark = pytest.mark.api
 
 
@@ -183,8 +185,12 @@ class TestRecordsCrud:
         create_resp = api_client.post("/api/v1/records", json=payload)
         record_id = create_resp.json()["id"]
 
-        # Delete
-        response = api_client.delete(f"/api/v1/records/{record_id}")
+        # Delete (with-body execute — record has visits as deps, GH #139)
+        response = api_client.request(
+            "DELETE",
+            f"/api/v1/records/{record_id}",
+            json={"resolutions": {"visits": "cascade", "payments": "cascade"}},
+        )
         assert response.status_code == 204
 
         # Hard-delete: GET by id returns 404
@@ -847,3 +853,193 @@ class TestRecordsList422:
         resp = api_client.get("/api/v1/records", params=params)
         assert resp.status_code == 422
         assert resp.json()["detail"]["code"] == "VALIDATION_ERROR"
+
+
+# ─── Unified DELETE route (GH #139, Addendum 13) ─────────────────────────────
+
+
+def _link_record_tag(api_client, record_id: str, tag_name: str | None = None) -> str:
+    """Insert a ``record_tags`` join row directly via SQL and return the tag id.
+
+    The records API does not expose tag linking on create/update, so we go via
+    ``query_db`` to seed the auto-cascade dep (FK-ON-safe: both ids exist).
+    """
+    tag_name = tag_name or f"rt-{record_id[:8]}"
+    tag_id = api_client.post("/api/v1/tags", json={"tag": tag_name}).json()["id"]
+    query_db(
+        f"INSERT INTO record_tags (record_id, tag_id) "
+        f"VALUES ('{record_id}', '{tag_id}')"
+    )
+    return tag_id
+
+
+class TestDeleteUnifiedRoute:
+    """DELETE /api/v1/records/{id} — unified dry-run (no body) + execute (with body).
+
+    Mirrors the masters/clients deletion suites. Record deps (Addendum 13):
+      * visits   → cascade, auto=False (user choice)
+      * payments → cascade, auto=False (user choice)
+      * record_tags → cascade, auto=True (join rows)
+
+    No blocking deps (allowed_actions never empty for Record); no undo flow.
+    Record with zero deps → instant 204 (Materials-like path).
+    Execution stays in RecordService.delete (the @transactional cascade
+    visits → payments → record_tags → record) — NOT through CASCADE_HANDLERS.
+    """
+
+    def test_delete_bare_record_no_deps_returns_204_and_row_gone(
+        self, api_client, create_activity, create_client
+    ) -> None:
+        """No body + zero deps (record with no visits/payments/tags) → 204."""
+        activity = create_activity()
+        client = create_client()
+        record = api_client.post("/api/v1/records", json={
+            "activity_id": activity["id"],
+            "client_id": client["id"],
+            "visits": [],
+        }).json()
+
+        resp = api_client.delete(f"/api/v1/records/{record['id']}")
+
+        assert resp.status_code == 204
+        assert api_client.get(f"/api/v1/records/{record['id']}").status_code == 404
+
+    def test_delete_nonexistent_record_no_body_returns_404(self, api_client) -> None:
+        """No body + nonexistent id → 404."""
+        resp = api_client.delete("/api/v1/records/nonexistent-record-id")
+        assert resp.status_code == 404
+        assert resp.json()["detail"]["code"] == "RECORD_NOT_FOUND"
+
+    def test_delete_nonexistent_record_with_body_returns_404(self, api_client) -> None:
+        """With body + nonexistent id → 404 (resolve_delete returns False)."""
+        resp = api_client.request(
+            "DELETE",
+            "/api/v1/records/nonexistent-record-id",
+            json={"resolutions": {"visits": "cascade", "payments": "cascade"}},
+        )
+        assert resp.status_code == 404
+        assert resp.json()["detail"]["code"] == "RECORD_NOT_FOUND"
+
+    def test_delete_record_with_deps_no_body_returns_409(
+        self, api_client, create_record
+    ) -> None:
+        """No body + deps (visits + payments + record_tags) → 409 + tree."""
+        record = create_record(
+            visits=[{"name": "Alice", "price": 3500, "status": "waiting"}]
+        )
+        record_id = record["id"]
+        # Add a payment (dep).
+        api_client.post("/api/v1/payments", json={
+            "record_id": record_id, "amount": 1000, "method": "cash",
+        })
+        # Add a record_tag (auto dep).
+        _link_record_tag(api_client, record_id, tag_name=f"rt-{record_id[:8]}")
+
+        resp = api_client.delete(f"/api/v1/records/{record_id}")
+
+        assert resp.status_code == 409
+        body = resp.json()
+        assert body["detail"] == "has_dependencies"
+        deps = {d["entity"]: d for d in body["dependencies"]}
+        assert deps["visits"]["count"] == 1
+        assert deps["visits"]["allowed_actions"] == ["cascade"]
+        assert deps["visits"]["cascade_preview"] is None
+        assert deps["payments"]["count"] == 1
+        assert deps["payments"]["allowed_actions"] == ["cascade"]
+        assert deps["record_tags"]["count"] == 1
+        assert deps["record_tags"]["allowed_actions"] == ["cascade"]
+        # Row untouched (dry-run modifies nothing).
+        assert api_client.get(f"/api/v1/records/{record_id}").status_code == 200
+
+    def test_delete_record_with_cascade_resolutions_executes_204(
+        self, api_client, create_record
+    ) -> None:
+        """With body → atomic cascade (visits → payments → record_tags → record) → 204.
+
+        The executor is RecordService.delete (the existing @transactional
+        cascade); validation runs via the deletion layer free functions
+        (has_blocking_deps / validate_resolutions) before execution.
+        """
+        record = create_record(
+            visits=[
+                {"name": "Alice", "price": 3500, "status": "waiting"},
+                {"name": "Bob", "price": 2500, "status": "waiting"},
+            ]
+        )
+        record_id = record["id"]
+        # Capture visit IDs.
+        visit_ids = [v["id"] for v in record["visits"]]
+        assert len(visit_ids) == 2
+        # Add a payment.
+        payment = api_client.post("/api/v1/payments", json={
+            "record_id": record_id, "amount": 1000, "method": "cash",
+        }).json()
+        payment_id = payment["id"]
+        # Add a record_tag (auto dep).
+        _link_record_tag(api_client, record_id, tag_name=f"rt-{record_id[:8]}")
+
+        # No-body dry-run → 409 (deps present).
+        resp = api_client.delete(f"/api/v1/records/{record_id}")
+        assert resp.status_code == 409
+
+        # With-body execute → 204.
+        resp = api_client.request(
+            "DELETE",
+            f"/api/v1/records/{record_id}",
+            json={"resolutions": {"visits": "cascade", "payments": "cascade"}},
+        )
+        assert resp.status_code == 204
+
+        # Cascade verification: record + visits + payments + record_tags gone.
+        assert api_client.get(f"/api/v1/records/{record_id}").status_code == 404
+        for vid in visit_ids:
+            assert query_db(f"SELECT * FROM visits WHERE id='{vid}'") == []
+        assert query_db(f"SELECT * FROM payments WHERE id='{payment_id}'") == []
+        assert query_db(
+            f"SELECT * FROM record_tags WHERE record_id='{record_id}'"
+        ) == []
+
+    def test_delete_record_with_wrong_action_returns_422(
+        self, api_client, create_record
+    ) -> None:
+        """§6 rule 1: visits:cascade only; sending nullify → 422."""
+        record = create_record(
+            visits=[{"name": "Alice", "price": 3500, "status": "waiting"}]
+        )
+        record_id = record["id"]
+        # Add a payment so both non-auto deps are present.
+        api_client.post("/api/v1/payments", json={
+            "record_id": record_id, "amount": 500, "method": "cash",
+        })
+
+        resp = api_client.request(
+            "DELETE",
+            f"/api/v1/records/{record_id}",
+            json={"resolutions": {"visits": "nullify", "payments": "cascade"}},
+        )
+
+        assert resp.status_code == 422
+        # Row untouched.
+        assert api_client.get(f"/api/v1/records/{record_id}").status_code == 200
+
+    def test_delete_record_with_missing_dep_returns_422(
+        self, api_client, create_record
+    ) -> None:
+        """§6 rule 2: body omits payments (a required non-auto dep) → 422."""
+        record = create_record(
+            visits=[{"name": "Alice", "price": 3500, "status": "waiting"}]
+        )
+        record_id = record["id"]
+        # Add a payment so payments is a required non-auto dep.
+        api_client.post("/api/v1/payments", json={
+            "record_id": record_id, "amount": 500, "method": "cash",
+        })
+
+        resp = api_client.request(
+            "DELETE",
+            f"/api/v1/records/{record_id}",
+            json={"resolutions": {"visits": "cascade"}},  # no payments resolution
+        )
+
+        assert resp.status_code == 422
+        assert api_client.get(f"/api/v1/records/{record_id}").status_code == 200

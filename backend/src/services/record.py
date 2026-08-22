@@ -8,6 +8,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from src.repositories.generic import BaseRepository, get_base_repository
+from src.domain.deletion import (
+    BlockingDepsError,
+    InvalidResolutionError,
+    collect_dependencies,
+    has_blocking_deps,
+    validate_resolutions,
+)
 from src.domain.record_visits import (
     recompute_record_seats,
     recompute_record_status,
@@ -166,6 +173,61 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
         await db_session.execute(delete(Payment).where(Payment.record_id == id))
         await db_session.execute(delete(record_tags).where(record_tags.c.record_id == id))
         await db_session.execute(delete(Record).where(Record.id == id))
+        return True
+
+    async def resolve_delete(
+        self,
+        db_session: AsyncSession,
+        id: str,
+        resolutions: dict[str, str],
+    ) -> bool:
+        """Execute the unified DELETE-with-body resolution for records (GH #139).
+
+        Mirrors ``ArchiveService.resolve_delete``'s validation flow but
+        EXECUTES via ``self.delete`` (the existing ``@transactional``
+        cascade visits → payments → record_tags → record) instead of
+        dispatching through ``CASCADE_HANDLERS`` — no Record handlers are
+        registered in the deletion layer; the cascade intentionally lives
+        in ``RecordService.delete`` (Addendum 13 ruling).
+
+        Flow:
+          1. Existence check — ``False`` if record missing (route → 404).
+          2. Collect FK deps (``collect_dependencies``).
+          3. ``has_blocking_deps`` → raise ``BlockingDepsError`` (route → 422).
+             Record deps are never blocking (``allowed_actions`` always
+             non-empty), but the check stays for defensive consistency.
+          4. ``validate_resolutions`` → raise ``InvalidResolutionError`` if
+             errors (route → 422 with detail).
+          5. Execute via ``self.delete`` (the ``@transactional`` cascade
+             commits the session — no separate ``@transactional`` needed
+             here).
+
+        Returns ``True`` on success, ``False`` if the record was missing.
+        Raises ``ResolutionError`` subtypes for 422 paths (caught in the
+        router).
+        """
+        # 1. Existence check.
+        record = await self._repository.get(db_session, Record, id)
+        if record is None:
+            return False
+
+        # 2. Collect deps.
+        deps = await collect_dependencies(db_session, Record, id)
+
+        # 3. Blocked deps → 422 (won't happen for Record — all deps are cascade).
+        if has_blocking_deps(deps):
+            raise BlockingDepsError(
+                "Entity has blocking dependencies — archive instead"
+            )
+
+        # 4. Validate resolutions body against the matrix.
+        issues = validate_resolutions(Record, deps, resolutions)
+        if issues:
+            msg = "; ".join(f"{i.relation}: {i.message}" for i in issues)
+            raise InvalidResolutionError(msg)
+
+        # 5. Execute via the existing @transactional cascade.
+        await self.delete(db_session, id)
         return True
 
     @transactional

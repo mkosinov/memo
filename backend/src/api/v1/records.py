@@ -4,10 +4,13 @@ from datetime import datetime
 from functools import lru_cache
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi.responses import JSONResponse
 
 from src.db import SessionDep
+from src.domain.deletion import ResolutionError, collect_dependencies
 from src.errors import ErrorCode, ErrorDetail
+from src.models.record import Record
 from src.schemas.common import PaginatedResponse
 from src.schemas.record import (
     RecordCreate,
@@ -160,8 +163,50 @@ async def delete_record(
     record_id: str,
     service: _ServiceDep,
     session: SessionDep,
+    resolutions: dict[str, str] | None = Body(default=None, embed=True),
 ) -> None:
-    """Delete a record (hard delete)."""
+    """Unified DELETE — dry-run (no body) or execute (with body).
+
+    Mirrors the masters/clients routes (GH #139, Addendum 13). Record deps
+    (visits, payments, record_tags) are never blocking; record with none →
+    instant 204 (Materials-like path). Execution stays in
+    ``RecordService.delete`` (the ``@transactional`` cascade visits →
+    payments → record_tags → record); validation runs via the deletion
+    layer free functions in ``RecordService.resolve_delete``.
+
+    * No body (dry-run): ``collect_dependencies`` → empty → hard delete (204);
+      non-empty → 409 + dependency tree (no rows modified).
+    * With body (execute): ``{"resolutions": {...}}`` per spec §6
+      (``embed=True`` rejects a bare dict as a dry-run shape).
+      ``service.resolve_delete`` validates then executes → 204;
+      ``ResolutionError`` → 422; missing → 404.
+    """
+    if resolutions is not None:
+        try:
+            ok = await service.resolve_delete(
+                db_session=session, id=record_id, resolutions=resolutions
+            )
+        except ResolutionError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+        if not ok:
+            raise HTTPException(
+                status_code=404,
+                detail=ErrorDetail(
+                    code=ErrorCode.RECORD_NOT_FOUND,
+                    message="Record not found",
+                ).model_dump(),
+            )
+        return
+
+    deps = await collect_dependencies(session, Record, record_id)
+    if deps:
+        return JSONResponse(
+            status_code=409,
+            content={
+                "detail": "has_dependencies",
+                "dependencies": [d.model_dump() for d in deps],
+            },
+        )
     deleted = await service.delete(db_session=session, id=record_id)
     if not deleted:
         raise HTTPException(

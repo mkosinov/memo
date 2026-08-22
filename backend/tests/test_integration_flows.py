@@ -181,8 +181,12 @@ class TestDeleteCascade:
         detail = api_client.get(f"/api/v1/records/{record_id}").json()
         assert len(detail["visits"]) > 0
 
-        # Hard-delete record
-        resp = api_client.delete(f"/api/v1/records/{record_id}")
+        # Hard-delete record (with-body execute — record has visits, GH #139)
+        resp = api_client.request(
+            "DELETE",
+            f"/api/v1/records/{record_id}",
+            json={"resolutions": {"visits": "cascade", "payments": "cascade"}},
+        )
         assert resp.status_code == 204
 
         # Record is gone — GET by id returns 404
@@ -205,8 +209,12 @@ class TestDeleteCascade:
         )
         assert len(visits_before) > 0
 
-        # Delete record
-        api_client.delete(f"/api/v1/records/{record_id}")
+        # Delete record (with-body execute — record has visits, GH #139)
+        api_client.request(
+            "DELETE",
+            f"/api/v1/records/{record_id}",
+            json={"resolutions": {"visits": "cascade", "payments": "cascade"}},
+        )
 
         # Visits are hard-deleted — rows are gone
         visits_after = query_db(
@@ -224,8 +232,12 @@ class TestDeleteCascade:
             "record_id": record_id, "amount": 500, "method": "cash",
         }).json()
 
-        # Delete record
-        api_client.delete(f"/api/v1/records/{record_id}")
+        # Delete record (with-body execute — record has visits + payment, GH #139)
+        api_client.request(
+            "DELETE",
+            f"/api/v1/records/{record_id}",
+            json={"resolutions": {"visits": "cascade", "payments": "cascade"}},
+        )
 
         # Visits should be hard-deleted (rows gone)
         visits = query_db(
@@ -248,8 +260,12 @@ class TestDeleteCascade:
             "record_id": record["id"], "amount": 500, "method": "cash",
         }).json()
 
-        # Delete record
-        api_client.delete(f"/api/v1/records/{record['id']}")
+        # Delete record (with-body execute — record has visits + payment, GH #139)
+        api_client.request(
+            "DELETE",
+            f"/api/v1/records/{record['id']}",
+            json={"resolutions": {"visits": "cascade", "payments": "cascade"}},
+        )
 
         # Payment is cascade-deleted — excluded from list
         payments = api_client.get("/api/v1/payments").json()["items"]

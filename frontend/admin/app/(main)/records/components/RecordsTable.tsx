@@ -2,10 +2,11 @@
 
 import React, { useState } from 'react';
 import { useRecords } from '@/contexts/RecordsContext';
+import type { RecordSortField } from '@/contexts/RecordsContext';
 import { useRecordData } from '@/hooks/useRecordData';
 import type { RecordResponse, ActivityResponse } from '@memo/api-client';
 import { displayMasterName } from '@/lib/utils';
-import { ClientCardModal } from './ClientCardModal';
+import { ClientQuickCard } from './ClientQuickCard';
 import { DiamondIcon } from '@/app/components/shared/DiamondIcon';
 import { ColumnPicker } from '@/app/components/shared/ColumnPicker';
 import { ErrorState } from '@/app/components/error';
@@ -78,6 +79,15 @@ export function RecordsTable() {
     sortBy !== field ? ' ↕' : sortOrder === 'asc' ? ' ↑' : ' ↓';
   const totalPages = Math.ceil(total / perPage);
 
+  // PagedListState.setSort is two-arg and applies field+order verbatim
+  // (toggle moved OUT of the context — §6.10.4). This pre-#139 table keeps
+  // its historical click behavior locally: same field cycles asc→desc, a new
+  // field starts asc. After the T8 table migration, DataTable computes this.
+  const handleHeaderSort = (field: RecordSortField) => {
+    const next = sortBy === field && sortOrder === 'asc' ? 'desc' : 'asc';
+    setSort(field, next);
+  };
+
   // Detail helpers
   const selectedActivity = selectedRecord ? getActivity(selectedRecord.activity_id) : null;
   const selectedClient = selectedRecord?.client_id ? clients.get(selectedRecord.client_id) : null;
@@ -122,47 +132,47 @@ export function RecordsTable() {
           <thead>
             <tr className="border-b" style={{ borderColor: 'var(--line)', backgroundColor: 'var(--surface)' }}>
               {visibleKeys.includes('date') && (
-              <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: 'var(--ink-light)' }} onClick={() => setSort('date')}>
+              <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: 'var(--ink-light)' }} onClick={() => handleHeaderSort('date')}>
                 Дата / Время {sortIcon('date')}
               </th>
               )}
               {visibleKeys.includes('client') && (
-              <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: 'var(--ink-light)' }} onClick={() => setSort('client')}>
+              <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: 'var(--ink-light)' }} onClick={() => handleHeaderSort('client')}>
                 Клиент {sortIcon('client')}
               </th>
               )}
               {visibleKeys.includes('guests') && (
-              <th className="text-center px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: 'var(--ink-light)' }} onClick={() => setSort('guests')}>
+              <th className="text-center px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: 'var(--ink-light)' }} onClick={() => handleHeaderSort('guests')}>
                 Гостей {sortIcon('guests')}
               </th>
               )}
               {visibleKeys.includes('service') && (
-              <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: 'var(--ink-light)' }} onClick={() => setSort('service')}>
+              <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: 'var(--ink-light)' }} onClick={() => handleHeaderSort('service')}>
                 Услуга {sortIcon('service')}
               </th>
               )}
               {visibleKeys.includes('master') && (
-              <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: 'var(--ink-light)' }} onClick={() => setSort('master')}>
+              <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: 'var(--ink-light)' }} onClick={() => handleHeaderSort('master')}>
                 Мастер {sortIcon('master')}
               </th>
               )}
               {visibleKeys.includes('location') && (
-              <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: 'var(--ink-light)' }} onClick={() => setSort('location')}>
+              <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: 'var(--ink-light)' }} onClick={() => handleHeaderSort('location')}>
                 Локация {sortIcon('location')}
               </th>
               )}
               {visibleKeys.includes('status') && (
-              <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: 'var(--ink-light)' }} onClick={() => setSort('status')}>
+              <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: 'var(--ink-light)' }} onClick={() => handleHeaderSort('status')}>
                 Статус {sortIcon('status')}
               </th>
               )}
               {visibleKeys.includes('total') && (
-              <th className="text-right px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: 'var(--ink-light)' }} onClick={() => setSort('total')}>
+              <th className="text-right px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: 'var(--ink-light)' }} onClick={() => handleHeaderSort('total')}>
                 Сумма {sortIcon('total')}
               </th>
               )}
               {visibleKeys.includes('payment') && (
-              <th className="text-center px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: 'var(--ink-light)' }} onClick={() => setSort('payment')}>
+              <th className="text-center px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: 'var(--ink-light)' }} onClick={() => handleHeaderSort('payment')}>
                 Оплата {sortIcon('payment')}
               </th>
               )}
@@ -467,7 +477,7 @@ export function RecordsTable() {
 
       {/* Client Card Modal */}
       {clientModalId && (
-        <ClientCardModal
+        <ClientQuickCard
           clientId={clientModalId}
           onClose={() => setClientModalId(null)}
         />

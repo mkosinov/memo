@@ -258,11 +258,14 @@ describe('RecordsTable', () => {
 
   // ─── Server-driven sort wiring ──────────────────────────────────────────
 
-  it('header click calls setSort with the column key', () => {
+  it('header click calls setSort with field and order (two-arg §6.4)', () => {
     const setSort = vi.fn();
     renderTable({ setSort });
     fireEvent.click(screen.getByText(/Оплата/));
-    expect(setSort).toHaveBeenCalledWith('payment');
+    // New field starts asc; a repeat click on the same field cycles asc→desc
+    // (the pre-#139 wrapper keeps its own click behavior — toggle lives in
+    // DataTable only after the T8 table migration).
+    expect(setSort).toHaveBeenCalledWith('payment', 'asc');
   });
 
   it('sort indicator reflects context sortBy/sortOrder', () => {

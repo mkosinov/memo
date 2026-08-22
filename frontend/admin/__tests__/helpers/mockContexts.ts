@@ -75,7 +75,8 @@ type RecordsOverrides = Partial<RecordsContextType>;
 export function createMockRecordsContext(
   overrides?: RecordsOverrides,
 ): RecordsContextType {
-  return {
+  const base: RecordsContextType = {
+    items: [],
     records: [],
     total: 0,
     page: 1,
@@ -94,11 +95,19 @@ export function createMockRecordsContext(
     masters: new Map(),
     services: new Map(),
     locations: new Map(),
+    isLoading: false,
     loading: false,
+    isPending: false,
+    isFetching: false,
     error: null,
     refetch: vi.fn(),
-    ...overrides,
   };
+  // If the test passes a `records` override (or `items`), mirror it into the
+  // other alias so the migrated DataTable and pre-#139 consumers both see it.
+  const merged = { ...base, ...overrides };
+  if (overrides?.records !== undefined) merged.items = overrides.records;
+  else if (overrides?.items !== undefined) merged.records = overrides.items;
+  return merged;
 }
 
 // ─── UIContext ────────────────────────────────────────────────────────────

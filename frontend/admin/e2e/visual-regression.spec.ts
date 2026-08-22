@@ -178,7 +178,7 @@ interface PageTableConfig {
   /**
    * Locator for the element that proves the active sort glyph rendered.
    * `undefined` when the glyph isn't part of this table's current markup —
-   * see the per-table "intentional delta" comments (clients, records).
+   * see the per-table "intentional delta" comments (clients).
    */
   glyphSelector?: string;
   /** first data row of the filled table (row testids exist for most tables) */
@@ -277,23 +277,18 @@ const TABLE_CONFIGS: PageTableConfig[] = [
     h1Text: 'Управление записями',
     navigate: waitForRecordsReady,
     apiUrl: '/api/v1/records',
-    // INTENTIONAL DELTA (pre-T1): Records has NO per-row ⋯/actions column at
-    // all — row click opens a 360px side detail panel instead (RecordsTable.tsx:
-    // 182-190, 359-372). Its `dropdown-open` scenario captures that row-click
-    // panel so the diff after migration is explicit. Also uses the ⋯-less
-    // generic header markup — glyph check below tolerates a header-only state.
+    // Post-migration (T8-FE2b): records render via the shared DataTable —
+    // uniform ↕/↑/↓ glyphs like the other migrated tables; initial sort is
+    // `date` (B2 cat 15), so clicking `Гостей` deterministically captures
+    // the ↑ active state. The ⋯ action dropdown column is NEW in T8
+    // (Addendum 13 dry-run delete flow) — locked visual delta.
     sortHeader: (page) => thExact(page, 'Гостей'),
     glyphSelector: 'th:has-text("Гостей"):has-text("↑")',
-    // No row testids — first tbody tr (the empty-state tr renders only when 0 rows).
-    row: (page) => page.locator('tbody tr').first(),
+    // No row testids (Addendum 6: no pre-#139 prefix to preserve — same case
+    // as clients/materials/services in T5–T6); scope via the ⋯ button.
+    row: (page) => page.locator('tbody tr:has(button[aria-label="Действия"])').first(),
   },
 ];
-
-/** Records-specific: row click opens the side detail panel (no ⋯ exists). */
-async function openRecordsDetail(page: Page, row: Locator): Promise<void> {
-  await row.click();
-  await expect(page.locator('text=Детали записи')).toBeVisible();
-}
 
 /** Open the ⚙️ "Настроить колонки" popover (shared ColumnPicker, present on all 8). */
 async function openColumnPicker(page: Page): Promise<void> {
@@ -324,9 +319,11 @@ async function navigateDirect(page: Page, config: PageTableConfig): Promise<void
 /**
  * Wait for the sort glyph to appear after a header click. The clicked header's
  * <th> becomes the ONLY one containing a sort glyph in these per-table markups
- * (services/materials: no ↕ on inactive; clients: glyph only on active column;
- * records: initial sort is `date` not `Гостей`). Tolerant fallback to a settle
- * for tables where even that never renders.
+ * (services/materials: no ↕ on inactive; clients: glyph only on active column).
+ * Migrated DataTable tables render ↕ on every inactive header, but the glyph
+ * locator still pins the active one (records: initial sort is `date`, clicking
+ * `Гостей` deterministically switches the ↑ there). Tolerant fallback to a
+ * settle for tables where even that never renders.
  */
 async function expectSortGlyph(page: Page, config: PageTableConfig): Promise<void> {
   const glyph = config.glyphSelector ? page.locator(config.glyphSelector).first() : null;
@@ -348,8 +345,8 @@ function filledTest(config: PageTableConfig) {
     if (config.name === 'records') {
       // Guard: with the fixed clock (2026-06-15) the seed records r1..r6 must
       // render — never let this baseline silently capture the
-      // "Записи не найдены" empty state.
-      await expect(page.getByText('Записи не найдены')).toHaveCount(0);
+      // "Нет записей" empty state (Addendum 12 unified copy).
+      await expect(page.getByText('Нет записей')).toHaveCount(0);
     }
     await expect(page).toHaveScreenshot(`${config.name}-table-filled.png`, {
       fullPage: true,
@@ -374,20 +371,15 @@ function dropdownOpenTest(config: PageTableConfig) {
   test(`${config.name}-table-dropdown-open`, async ({ page }) => {
     await config.navigate(page);
     const row = config.row(page);
-    if (config.name === 'records') {
-      // INTENTIONAL DELTA: Records has no ⋯ column — capture the row-click
-      // detail panel instead (expected to change post-#139 migration).
-      await openRecordsDetail(page, row);
+    // Clients' ⋯ is opacity-0 until row hover — force-click handles that
+    // (records' DataTable ⋯ is always rendered; force is a no-op there).
+    await rowActionsButton(row).click({ force: true });
+    const dropdown = page.locator('[data-testid^="dropdown-"]').first();
+    if ((await dropdown.count()) > 0) {
+      await expect(dropdown).toBeVisible();
     } else {
-      // Clients' ⋯ is opacity-0 until row hover — force-click handles that.
-      await rowActionsButton(row).click({ force: true });
-      const dropdown = page.locator('[data-testid^="dropdown-"]').first();
-      if ((await dropdown.count()) > 0) {
-        await expect(dropdown).toBeVisible();
-      } else {
-        // services/materials: no dropdown container — inline row actions appear.
-        await expect(row.getByRole('button', { name: /В архив|Восстановить/ })).toBeVisible();
-      }
+      // services/materials: no dropdown container — inline row actions appear.
+      await expect(row.getByRole('button', { name: /В архив|Восстановить/ })).toBeVisible();
     }
     await expect(page).toHaveScreenshot(`${config.name}-table-dropdown-open.png`, {
       fullPage: true,
@@ -442,7 +434,9 @@ function emptyTest(config: PageTableConfig) {
       // #139 T7 + Addendum #12 — photos' pre-#139 empty copy ("Фото не
       // найдены") unified to "Нет записей" for ALL 8 tables (user ruling).
       photos: 'Нет записей',
-      records: 'Записи не найдены',
+      // #139 T8 + Addendum #12 — records' pre-#139 empty copy ("Записи не
+      // найдены") unified to "Нет записей" for ALL 8 tables (user ruling).
+      records: 'Нет записей',
     };
     await expect(page.getByText(emptyText[config.name]).first()).toBeVisible();
     await expect(page).toHaveScreenshot(`${config.name}-table-empty.png`, {
@@ -482,7 +476,7 @@ function skeletonTest(config: PageTableConfig) {
     await page.route(`**${config.apiUrl}*`, () => new Promise<void>(() => {}));
     // Clock is already installed in beforeEach (date-stable baselines).
     await navigateDirect(page, config);
-    if (config.name === 'clients' || config.name === 'tags' || config.name === 'locations' || config.name === 'masters' || config.name === 'materials' || config.name === 'services' || config.name === 'photos') {
+    if (config.name === 'clients' || config.name === 'tags' || config.name === 'locations' || config.name === 'masters' || config.name === 'materials' || config.name === 'services' || config.name === 'photos' || config.name === 'records') {
       // Clients renders 10 skeleton bars (.animate-pulse) while loading;
       // Tags renders them via the shared DataTable since #139 T1 (locked
       // delta §6.8/plan: skeleton rows replace the old "Загрузка..." div);
@@ -491,12 +485,10 @@ function skeletonTest(config: PageTableConfig) {
       // Materials follows via the shared DataTable since #139 T4;
       // Services follows via the shared DataTable since #139 T5.
       // Photos follows via the shared DataTable since #139 T7.
+      // Records follows via the shared DataTable since #139 T8 — the
+      // pre-#139 table had NO loading state at all (first render = empty
+      // table); the skeleton rows are a locked delta (§6.8).
       await expect(page.locator('.animate-pulse').first()).toBeVisible();
-    } else if (config.name === 'records') {
-      // INTENTIONAL DELTA: RecordsTable never consumes `loading` — the initial
-      // render is the empty table + "Записи не найдены" (no skeleton exists).
-      // The snapshot documents that absence; the generic DataTable adds one.
-      await expect(page.getByText('Записи не найдены')).toBeVisible();
     } else {
       // Dictionary tables render a plain "Загрузка..." div.
       await expect(page.getByText('Загрузка...').first()).toBeVisible();
@@ -522,7 +514,7 @@ for (const config of TABLE_CONFIGS) {
       // Mock browser time to the fixed reference week (matches seed WEEK_FIXED_START).
       // Date-stable baselines: the Records page filters by the *browser current
       // week* and seed records r1..r6 live in the week of 2026-06-15, so without
-      // this the table renders "Записи не найдены". Also pins any relative-date
+      // this the table renders «Нет записей». Also pins any relative-date
       // cells on the other tables (e.g. photos). Must be called BEFORE page.goto()
       // — clock.install injects an init script.
       await page.clock.install({ time: new Date('2026-06-15T10:00:00') });

@@ -472,8 +472,10 @@ test.describe('Records Page — Table and Filters', () => {
     await page.locator('input[aria-label="Фильтр по дате до"]').fill('2020-01-02');
     await dateToWait;
 
-    // Server returned an empty page for that range
-    await expect(page.locator('td:has-text("Записи не найдены")')).toBeVisible();
+    // Server returned an empty page for that range. Addendum #12 (user
+    // ruling): empty copy unified to «Нет записей» for all 8 tables — the
+    // pre-#139 «Записи не найдены» is retired with the T8 migration.
+    await expect(page.locator('td:has-text("Нет записей")')).toBeVisible();
   });
 
   // ── 14. Client name is clickable — opens client card modal ───────────────
@@ -868,6 +870,61 @@ test.describe('Records Page — Table and Filters', () => {
         await cleanupRecord(request, s.recordId);
         await cleanup(request, `/api/v1/clients/${s.clientId}`);
       }
+    }
+  });
+
+  // ── 22. Action dropdown smoke — ⋯ menu, Удалить → DeleteDialog, cancel ──
+
+  test('22. Dropdown smoke — ⋯ opens menu, Удалить opens DeleteDialog, cancel closes', async ({
+    page,
+    request,
+  }) => {
+    // T8 smoke (spec §5 scenario 3 + §8): the NEW per-row dropdown replaces
+    // the ⋯-less pre-#139 table. Factory records ALWAYS create one visit →
+    // the no-body dry-run DELETE returns 409 + dependency tree → dialog.
+    const clientName = `Dropdown Smoke ${Date.now()}`;
+    const client = await createTestClient(request, { name: clientName });
+    const activity = await createTestActivity(request);
+    const record = await createTestRecord(request, activity.id, client.id);
+
+    try {
+      await waitForRecordsReady(page);
+
+      // Scope to our seeded row by the unique client name (records carries
+      // no row testids — Addendum 6: no pre-#139 prefix existed).
+      const row = page.locator('tbody tr').filter({ hasText: clientName });
+      await expect(row).toBeVisible();
+
+      // ⋯ opens the APG menu — role=menu + data-testid dropdown-<id>
+      // (Addendum 4 unification).
+      await row.getByRole('button', { name: 'Действия' }).click();
+      const menu = page.locator(`[data-testid="dropdown-${record.id}"]`);
+      await expect(menu).toBeVisible();
+      await expect(menu).toHaveAttribute('role', 'menu');
+
+      // «Удалить» fires the dry-run DELETE (no body) → 409 conflict (the
+      // record has a visit) → DeleteDialog opens (Addendum 13 / spec §6.9).
+      const dryRun = page.waitForResponse(
+        (r) =>
+          r.url().includes(`/api/v1/records/${record.id}`) &&
+          r.request().method() === 'DELETE' &&
+          r.request().postData() === null,
+        { timeout: 10_000 },
+      );
+      await menu.getByRole('menuitem', { name: 'Удалить' }).click();
+      const dryRunResponse = await dryRun;
+      expect(dryRunResponse.status()).toBe(409);
+      await expect(page.locator('[data-testid="delete-dialog"]')).toBeVisible();
+
+      // Cancel closes the dialog without executing the delete.
+      await page.getByTestId('delete-dialog-cancel-btn').click();
+      await expect(page.locator('[data-testid="delete-dialog"]')).not.toBeVisible();
+
+      // The row survives the cancelled delete.
+      await expect(row).toBeVisible();
+    } finally {
+      await cleanupRecord(request, record.id);
+      await cleanup(request, `/api/v1/clients/${client.id}`);
     }
   });
 });

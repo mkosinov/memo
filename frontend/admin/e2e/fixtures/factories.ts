@@ -368,10 +368,34 @@ export function seedUser(overview: {
 /**
  * Delete entity via API (ignore errors — used in cleanup).
  * Always call this in test cleanup to prevent data leaking between tests.
+ *
+ * Addendum 13 / GH #139 T8: bodyless DELETE is a DRY-RUN. On 409
+ * (entity has dependencies) the body lists them, and a second DELETE with
+ * `{"resolutions": {"<entity>": "cascade"}}` executes for real. Without the
+ * retry, cleanup silently 409s and test data leaks between tests (the exact
+ * leak `cleanupRecord` was added for — generalized here so client/activity/
+ * master/service cleanups cascade their blocking deps too; e.g. a client
+ * keeps its `visitors` after its records were deleted). Only deps whose
+ * allowed_actions include "cascade" are resolved (Mode-B archive-only deps
+ * stay blocked, same as today's silent behavior).
  */
 export async function cleanup(api: APIRequestContext, path: string) {
   try {
-    await api.delete(`${BACKEND}${path}`);
+    const resp = await api.delete(`${BACKEND}${path}`);
+    if (resp.status() === 409) {
+      const body = (await resp.json().catch(() => null)) as {
+        dependencies?: Array<{ entity: string; allowed_actions?: string[] }>;
+      } | null;
+      const resolutions: Record<string, string> = {};
+      for (const dep of body?.dependencies ?? []) {
+        if ((dep.allowed_actions ?? []).includes('cascade')) {
+          resolutions[dep.entity] = 'cascade';
+        }
+      }
+      if (Object.keys(resolutions).length > 0) {
+        await api.delete(`${BACKEND}${path}`, { data: { resolutions } });
+      }
+    }
   } catch {
     // Ignore cleanup errors
   }

@@ -1,100 +1,89 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { useRecords } from '@/contexts/RecordsContext';
-import type { RecordSortField } from '@/contexts/RecordsContext';
+import type { RecordResponse, DependencyNode } from '@memo/api-client';
+import { ApiError } from '@memo/api-client';
 import { useRecordData } from '@/hooks/useRecordData';
-import type { RecordResponse, ActivityResponse } from '@memo/api-client';
-import { displayMasterName } from '@/lib/utils';
+import { useDeleteRecord } from '@/hooks/useDeleteRecord';
+import { useUI } from '@/contexts/UIContext';
+import { displayMasterName, formatRecordLabel } from '@/lib/utils';
+import { DataTable } from '@/app/components/shared/DataTable';
+import { DeleteDialog } from '@/app/components/DeleteDialog';
 import { ClientQuickCard } from './ClientQuickCard';
-import { DiamondIcon } from '@/app/components/shared/DiamondIcon';
-import { ColumnPicker } from '@/app/components/shared/ColumnPicker';
-import { ErrorState } from '@/app/components/error';
+import { recordColumns, recordsActions, formatPrice, formatDateRu, formatTime, parseActivityStart } from './recordsColumns';
 import { StatusBadge } from '@/app/components/shared/StatusBadge';
 import { safeStatus } from '@/app/lib/status-utils';
 
-// ─── Column definitions ──────────────────────────────────────────────────
-
-const TABLE_COLUMNS = [
-  { key: 'date', label: 'Дата / Время', defaultVisible: true },
-  { key: 'client', label: 'Клиент', defaultVisible: true },
-  { key: 'guests', label: 'Гостей', defaultVisible: true },
-  { key: 'service', label: 'Услуга', defaultVisible: true },
-  { key: 'master', label: 'Мастер', defaultVisible: true },
-  { key: 'location', label: 'Локация', defaultVisible: true },
-  { key: 'status', label: 'Статус', defaultVisible: true },
-  { key: 'total', label: 'Сумма', defaultVisible: true },
-  { key: 'payment', label: 'Оплата', defaultVisible: true },
-];
-
-// ─── Helpers ──────────────────────────────────────────────────────────────
-
-function formatPrice(n: number): string {
-  return `${n.toLocaleString('ru-RU')}₽`;
-}
-
-function formatDateRu(dateStr: string): string {
-  const d = new Date(dateStr + 'T00:00:00');
-  return d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' }).replace(' ', ' ');
-}
-
-function formatTime(time: number): string {
-  const h = Math.floor(time);
-  const m = Math.round((time - h) * 60);
-  return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
-}
-
-/** Normalize JS getDay() (0=Sun..6=Sat) to Mon=0..Sun=6, extract date and startTime. */
-function parseActivityStart(start: string): { date: string; day: number; startTime: number } {
-  const d = new Date(start);
-  const day = (d.getUTCDay() + 6) % 7;
-  const startTime = d.getUTCHours() + d.getUTCMinutes() / 60;
-  const date = start.slice(0, 10);
-  return { date, day, startTime };
-}
-
 export function RecordsTable() {
+  const recordsCtx = useRecords();
   const {
-    records, clients, payments, activities, masters, services, locations,
-    total, page, perPage, setPage, setPerPage, sortBy, sortOrder, setSort,
-    error, refetch,
-  } = useRecords();
+    records, clients, activities, masters, services, locations,
+  } = recordsCtx;
+  const { showToast } = useUI();
 
   const [selectedRecord, setSelectedRecord] = useState<RecordResponse | null>(null);
   const [clientModalId, setClientModalId] = useState<string | null>(null);
 
-  const [visibleKeys, setVisibleKeys] = useState<string[]>(() => {
+  // Delete — Addendum 13 / GH #139 T8: shared dry-run hook + dialog. Mirrors
+  // the FE2a call sites (ClientRecordTab/ClientTab) EXACTLY: no-body DELETE →
+  // 204 (instant, hook toasts) or 409 → park deps + open DeleteDialog; the
+  // dialog confirms via resolveDelete.
+  const deleteMutation = useDeleteRecord();
+  const [deleteTarget, setDeleteTarget] = useState<{
+    record: RecordResponse;
+    deps: DependencyNode[];
+  } | null>(null);
+
+  const handleDelete = useCallback(async (record: RecordResponse) => {
     try {
-      const stored = localStorage.getItem('records-columns');
-      if (stored) return JSON.parse(stored);
-    } catch {}
-    return TABLE_COLUMNS.filter((c) => c.defaultVisible).map((c) => c.key);
-  });
+      await deleteMutation.mutateAsync(record.id);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        const deps = err.dependencies ?? deleteMutation.dependencies ?? [];
+        if (deps.length > 0) {
+          setDeleteTarget({ record, deps });
+          return;
+        }
+      }
+      showToast(
+        err instanceof Error ? err.message : 'Не удалось удалить. Попробуйте ещё раз.',
+        'error',
+      );
+    }
+  }, [deleteMutation, showToast]);
 
-  const getActivity = (id: string): ActivityResponse | undefined =>
-    activities.get(id);
+  // §6.15 — memoize the factory outputs. The columns closure captures the
+  // current reference maps (recomputes when they change); the actions factory
+  // is stable.
+  const columns = useMemo(
+    () =>
+      recordColumns({
+        activities,
+        clients,
+        masters,
+        services,
+        locations,
+        payments: recordsCtx.payments,
+        onClientClick: (r) => {
+          if (r.client_id) setClientModalId(r.client_id);
+        },
+      }),
+    [activities, clients, masters, services, locations, recordsCtx.payments],
+  );
+  const actions = useMemo(
+    () => recordsActions({ onDelete: (r) => void handleDelete(r) }),
+    [handleDelete],
+  );
 
-  // Sort is server-driven: header clicks go to the context, indicator reads it
-  const sortIcon = (field: string) =>
-    sortBy !== field ? ' ↕' : sortOrder === 'asc' ? ' ↑' : ' ↓';
-  const totalPages = Math.ceil(total / perPage);
+  // ─── Detail panel helpers ───────────────────────────────────────────────
 
-  // PagedListState.setSort is two-arg and applies field+order verbatim
-  // (toggle moved OUT of the context — §6.10.4). This pre-#139 table keeps
-  // its historical click behavior locally: same field cycles asc→desc, a new
-  // field starts asc. After the T8 table migration, DataTable computes this.
-  const handleHeaderSort = (field: RecordSortField) => {
-    const next = sortBy === field && sortOrder === 'asc' ? 'desc' : 'asc';
-    setSort(field, next);
-  };
-
-  // Detail helpers
-  const selectedActivity = selectedRecord ? getActivity(selectedRecord.activity_id) : null;
-  const selectedClient = selectedRecord?.client_id ? clients.get(selectedRecord.client_id) : null;
+  const selectedActivity = selectedRecord ? activities.get(selectedRecord.activity_id) ?? null : null;
+  const selectedClient = selectedRecord?.client_id ? clients.get(selectedRecord.client_id) ?? null : null;
   const selectedVisits = selectedRecord?.visits ?? [];
   // Per-record payments for the detail panel come from useRecordData
-  // (hook is called unconditionally; ids are empty strings when nothing is selected,
-  // which disables the underlying queries).
+  // (hook is called unconditionally; ids are empty strings when nothing is
+  // selected, which disables the underlying queries).
   const { payments: selectedPayments } = useRecordData(
     selectedRecord?.id ?? '',
     selectedRecord?.client_id ?? '',
@@ -103,267 +92,33 @@ export function RecordsTable() {
     const record = records.find((r) => r.id === recordId);
     return record?.visits.reduce((s, v) => s + v.price, 0) ?? 0;
   };
-  const paidForRecord = (recordId: string): number => payments.get(recordId) ?? 0;
-
-  if (error) {
-    return (
-      <ErrorState
-        error={error}
-        onRetry={refetch}
-      />
-    );
-  }
 
   return (
     <div className="flex">
-      {/* Table */}
+      {/* Table — shared DataTable (spec §6.6 thin wrapper; the toolbar/pager/
+          ColumnPicker/ErrorState/empty state live inside DataTable). The
+          wrapper keeps the pre-#139 `overflow-x-auto` (Addendum 11 wrapper
+          parity): without it the flex item's automatic min-width resolves to
+          the table's min-content and pushes the 360px detail panel past the
+          page card's overflow-hidden right edge on wide rows. */}
       <div className="flex-1 overflow-x-auto">
-        {/* Column picker bar */}
-        <div className="flex items-center justify-end px-4 py-2 border-b" style={{ borderColor: 'var(--line)' }}>
-          <ColumnPicker
-            columns={TABLE_COLUMNS.map((c) => ({ key: c.key, label: c.label }))}
-            visibleKeys={visibleKeys}
-            onChange={setVisibleKeys}
-            storageKey="records-columns"
-          />
-        </div>
-
-        <table className="w-full">
-          <thead>
-            <tr className="border-b" style={{ borderColor: 'var(--line)', backgroundColor: 'var(--surface)' }}>
-              {visibleKeys.includes('date') && (
-              <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: 'var(--ink-light)' }} onClick={() => handleHeaderSort('date')}>
-                Дата / Время {sortIcon('date')}
-              </th>
-              )}
-              {visibleKeys.includes('client') && (
-              <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: 'var(--ink-light)' }} onClick={() => handleHeaderSort('client')}>
-                Клиент {sortIcon('client')}
-              </th>
-              )}
-              {visibleKeys.includes('guests') && (
-              <th className="text-center px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: 'var(--ink-light)' }} onClick={() => handleHeaderSort('guests')}>
-                Гостей {sortIcon('guests')}
-              </th>
-              )}
-              {visibleKeys.includes('service') && (
-              <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: 'var(--ink-light)' }} onClick={() => handleHeaderSort('service')}>
-                Услуга {sortIcon('service')}
-              </th>
-              )}
-              {visibleKeys.includes('master') && (
-              <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: 'var(--ink-light)' }} onClick={() => handleHeaderSort('master')}>
-                Мастер {sortIcon('master')}
-              </th>
-              )}
-              {visibleKeys.includes('location') && (
-              <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: 'var(--ink-light)' }} onClick={() => handleHeaderSort('location')}>
-                Локация {sortIcon('location')}
-              </th>
-              )}
-              {visibleKeys.includes('status') && (
-              <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: 'var(--ink-light)' }} onClick={() => handleHeaderSort('status')}>
-                Статус {sortIcon('status')}
-              </th>
-              )}
-              {visibleKeys.includes('total') && (
-              <th className="text-right px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: 'var(--ink-light)' }} onClick={() => handleHeaderSort('total')}>
-                Сумма {sortIcon('total')}
-              </th>
-              )}
-              {visibleKeys.includes('payment') && (
-              <th className="text-center px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: 'var(--ink-light)' }} onClick={() => handleHeaderSort('payment')}>
-                Оплата {sortIcon('payment')}
-              </th>
-              )}
-            </tr>
-          </thead>
-          <tbody>
-            {records.map((record) => {
-              const activity = getActivity(record.activity_id);
-              const client = record.client_id ? clients.get(record.client_id) : null;
-              const service = activity ? services.get(activity.service_id) : null;
-              const location = activity ? locations.get(activity.location_id) : null;
-              const recordTotal = totalForRecord(record.id);
-              const recordPaid = paidForRecord(record.id);
-              const isSelected = selectedRecord?.id === record.id;
-
-              return (
-                <tr
-                  key={record.id}
-                  onClick={() => setSelectedRecord(isSelected ? null : record)}
-                  className="border-b cursor-pointer transition-colors"
-                  style={{
-                    borderColor: 'var(--line)',
-                    backgroundColor: isSelected ? 'var(--surface)' : 'transparent',
-                  }}
-                >
-                  {/* Дата / Время */}
-                  {visibleKeys.includes('date') && (
-                  <td className="px-4 py-3 text-sm whitespace-nowrap" style={{ color: 'var(--ink-mid)' }}>
-                    {activity ? (() => {
-                      const parsed = parseActivityStart(activity.start);
-                      return (
-                        <>
-                          <div className="font-medium" style={{ color: 'var(--ink)' }}>
-                            {formatDateRu(parsed.date)}
-                          </div>
-                          <div className="text-xs" style={{ color: 'var(--ink-light)' }}>
-                            {formatTime(parsed.startTime)}
-                          </div>
-                        </>
-                      );
-                    })() : '—'}
-                  </td>
-                  )}
-
-                  {/* Клиент */}
-                  {visibleKeys.includes('client') && (
-                  <td className="px-4 py-3">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (record.client_id) setClientModalId(record.client_id);
-                      }}
-                      className="text-sm font-medium transition-colors text-left"
-                      style={{ color: 'var(--brand)' }}
-                    >
-                      {client?.name ?? '—'}
-                    </button>
-                  </td>
-                  )}
-
-                  {/* Гостей */}
-                  {visibleKeys.includes('guests') && (
-                  <td className="px-4 py-3 text-center text-sm" style={{ color: 'var(--ink-mid)' }}>
-                    {Math.max(1, record.visits.length)}
-                  </td>
-                  )}
-
-                  {/* Услуга */}
-                  {visibleKeys.includes('service') && (
-                  <td className="px-4 py-3 text-sm" style={{ color: 'var(--ink)' }}>
-                    <div className="flex items-center gap-2">
-                      {activity?.is_private ? (
-                        <DiamondIcon className="mr-1" />
-                      ) : null}
-                      {service?.title ?? '—'}
-                    </div>
-                  </td>
-                  )}
-
-                  {/* Мастер */}
-                  {visibleKeys.includes('master') && (
-                  <td className="px-4 py-3">
-                    {activity ? (() => {
-                      const master = masters.get(activity.master_id);
-                      return (
-                        <div
-                          className="w-5 h-5 rounded-full"
-                          style={{ backgroundColor: master?.color || '#999' }}
-                          title={master ? displayMasterName(master) : undefined}
-                        />
-                      );
-                    })() : '—'}
-                  </td>
-                  )}
-
-                  {/* Локация */}
-                  {visibleKeys.includes('location') && (
-                  <td className="px-4 py-3 text-sm" style={{ color: 'var(--ink-mid)' }}>
-                    {location?.name ?? '—'}
-                  </td>
-                  )}
-
-                  {/* Статус */}
-                  {visibleKeys.includes('status') && (
-                  <td className="px-4 py-3">
-                    <StatusBadge status={safeStatus(record.status)} />
-                  </td>
-                  )}
-
-                  {/* Сумма */}
-                  {visibleKeys.includes('total') && (
-                  <td className="px-4 py-3 text-sm text-right font-medium" style={{ color: 'var(--ink)' }}>
-                    {formatPrice(recordTotal)}
-                  </td>
-                  )}
-
-                  {/* Оплата */}
-                  {visibleKeys.includes('payment') && (
-                  <td className="px-4 py-3 text-center">
-                    {recordPaid >= recordTotal ? (
-                      <span className="inline-flex items-center gap-1 text-xs font-medium" style={{ color: 'var(--success)' }}>✓ Оплачено</span>
-                    ) : recordPaid > 0 ? (
-                      <span className="inline-flex items-center gap-1 text-xs font-medium" style={{ color: 'var(--warning)' }}>Частично ({formatPrice(recordPaid)})</span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1 text-xs font-medium" style={{ color: 'var(--danger)' }}>Не оплачено</span>
-                    )}
-                  </td>
-                  )}
-                </tr>
-              );
-            })}
-            {records.length === 0 && (
-              <tr>
-                <td colSpan={visibleKeys.length} className="px-4 py-12 text-center text-sm" style={{ color: 'var(--ink-light)' }}>
-                  Записи не найдены
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-
-        {/* Pagination */}
-        <div className="flex items-center justify-between px-4 py-3 border-t" style={{ borderColor: 'var(--line)' }}>
-          <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--ink-light)' }}>
-            <span>Строк:</span>
-            <select
-              value={perPage}
-              onChange={(e) => setPerPage(Number(e.target.value))}
-              className="border rounded px-2 py-1 text-xs"
-              style={{ borderColor: 'var(--line)', backgroundColor: 'var(--white)', color: 'var(--ink)' }}
-            >
-              <option value={10}>10</option>
-              <option value={20}>20</option>
-              <option value={50}>50</option>
-              <option value={100}>100</option>
-            </select>
-            <span>{total} всего</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <button
-              onClick={() => setPage(Math.max(1, page - 1))}
-              disabled={page <= 1}
-              className="px-3 py-1 text-sm rounded border disabled:opacity-30"
-              style={{ borderColor: 'var(--line)', color: 'var(--ink)' }}
-            >
-              ←
-            </button>
-            {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
-              <button
-                key={p}
-                onClick={() => setPage(p)}
-                className={`px-3 py-1 text-sm rounded border ${p === page ? 'font-bold' : ''}`}
-                style={{
-                  borderColor: 'var(--line)',
-                  backgroundColor: p === page ? 'var(--brand)' : 'transparent',
-                  color: p === page ? 'white' : 'var(--ink)',
-                }}
-              >
-                {p}
-              </button>
-            ))}
-            <button
-              onClick={() => setPage(Math.min(totalPages, page + 1))}
-              disabled={page >= totalPages}
-              className="px-3 py-1 text-sm rounded border disabled:opacity-30"
-              style={{ borderColor: 'var(--line)', color: 'var(--ink)' }}
-            >
-              →
-            </button>
-          </div>
-        </div>
+        <DataTable<RecordResponse>
+          storageKey="records-columns"
+          columns={columns}
+          tableState={recordsCtx}
+          actions={actions}
+          onRowClick={(r) =>
+            setSelectedRecord((sel) => (sel?.id === r.id ? null : r))
+          }
+          // Selected row carries the surface token (per the locked plan
+          // wiring — replaces the pre-#139 inline backgroundColor).
+          rowClassName={(r) => (selectedRecord?.id === r.id ? 'bg-surface' : undefined)}
+          rowKey={(r) => r.id}
+          // NO rowTestId (Addendum 6): the pre-#139 records table had none
+          // — grep-verified (visual spec: "No row testids"); the prop exists
+          // only to preserve EXISTING prefixes.
+          // NO emptyLabel (Addendum 12): unified «Нет записей» default.
+        />
       </div>
 
       {/* Detail Panel */}
@@ -475,7 +230,24 @@ export function RecordsTable() {
         </div>
       )}
 
-      {/* Client Card Modal */}
+      {/* Delete dialog — Addendum 13: opened on dry-run 409, closed on
+          done/cancel. Mirrors ClientRecordTab exactly (FE2a). */}
+      {deleteTarget && (
+        <DeleteDialog
+          entityName={formatRecordLabel(activities.get(deleteTarget.record.activity_id)?.start)}
+          entityType="record"
+          entityId={deleteTarget.record.id}
+          dependencies={deleteTarget.deps}
+          onResolve={async (id, resolutions) => {
+            await deleteMutation.resolveDelete.mutateAsync({ id, resolutions });
+          }}
+          onArchive={async () => { /* records have no archive flow — never Mode B */ }}
+          onDone={() => setDeleteTarget(null)}
+          onCancel={() => setDeleteTarget(null)}
+        />
+      )}
+
+      {/* Client Quick Card (records-side read-only viewer, §6.13 rename) */}
       {clientModalId && (
         <ClientQuickCard
           clientId={clientModalId}

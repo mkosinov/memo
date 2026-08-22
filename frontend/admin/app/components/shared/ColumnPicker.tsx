@@ -11,22 +11,13 @@ interface ColumnPickerProps {
   columns: Column[];
   visibleKeys: string[];
   /** Controlled presentational (#139 §6.5): parent owns state + persistence. */
-  onToggle?: (key: string) => void;
-  /**
-   * LEGACY SHIM (#139 T1→T8): tables T2–T8 still call the old onChange/storageKey
-   * API until their migration task switches them to `<DataTable>` (which owns the
-   * persistence). Deleted entirely once all 8 tables are migrated.
-   */
-  onChange?: (keys: string[]) => void;
-  storageKey?: string;
+  onToggle: (key: string) => void;
 }
 
 export function ColumnPicker({
   columns,
   visibleKeys,
   onToggle,
-  onChange,
-  storageKey,
 }: ColumnPickerProps) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -47,20 +38,7 @@ export function ColumnPicker({
     const isChecked = visibleKeys.includes(key);
     // Guard: never allow unchecking the sole remaining visible column.
     if (isChecked && lastVisible) return;
-
-    if (onToggle) {
-      onToggle(key);
-      return;
-    }
-    if (onChange) {
-      const next = visibleKeys.includes(key)
-        ? visibleKeys.filter((k) => k !== key)
-        : [...visibleKeys, key];
-      onChange(next);
-      // LEGACY SHIM: pre-#139 tables persist here until their migration task
-      // switches them to <DataTable> (which owns persistence).
-      if (storageKey) localStorage.setItem(storageKey, JSON.stringify(next));
-    }
+    onToggle(key);
   };
 
   return (

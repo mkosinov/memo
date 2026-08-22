@@ -122,7 +122,8 @@ A Record is a booking for an Activity. It links a Client to an Activity and cont
 - **Create sequence:** check capacity → resolve client → resolve visitors → create Record → create Visits
 - **Update (PUT):** Full replacement, old Visits soft-deactivated, new Visits created, seats recalculated. NO capacity re-check.
 - **Patch:** Partial update. If visits in payload → old visits soft-deactivated, new created. NO capacity re-check.
-- **Delete:** Cascade hard-delete: Visits + Payments + record_tags join rows hard-deleted; Record row physically removed.
+- **Delete:** Two-phase hard delete (Addendum 13 / GH #139): bare DELETE is a dry-run — 204 when no deps, 409 + dependency tree when deps exist; second DELETE with `{resolutions}` body executes the cascade hard-delete (Visits + Payments + record_tags join rows hard-deleted; Record row physically removed). Deps: visits/payments cascade (auto=False, user must resolve), record_tags cascade (auto=True, resolved server-side).
+- **Delayed delete:** REMOVED (Addendum 13) — the old 5-second setTimeout + undo toast was replaced by the DeleteDialog dry-run flow (explicit confirmation, no undo).
 
 ### Frontend
 - **Phone blur auto-fill:** searchClientByPhone on blur if phone >= 10 chars
@@ -131,7 +132,7 @@ A Record is a booking for an Activity. It links a Client to an Activity and cont
 - **Tariff required per visitor:** Toast if any visitor has no tariffId
 - **Price from first visitor:** Only first visitor's tariff price used for all visits (bug)
 - **Per-visit status:** UI edits `visits[].status` (waiting/visited/missed/cancelled). Record-level status updates automatically via derivation. StatusPicker used for both per-visit edit and read-only Record badge.
-- **Delayed delete:** 5-second setTimeout with undo toast
+- **Delete flow (Addendum 13):** shared unbound `useDeleteRecord` hook (hooks/useDeleteRecord.ts) — dry-run `deleteRecord(id)`; on 409 parks `dependencies` → DeleteDialog (entityType "record"); on confirm → `resolveDeleteRecord(id, resolutions)`; on success toast «Запись удалена» + invalidations `['records']` prefix + `['record', id]` + `['visitors']`. No optimistic removal before confirmation.
 
 ## API Endpoints
 | Method | Path | Description |

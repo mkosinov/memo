@@ -93,6 +93,9 @@ One migration (SQLite batch mode, `b7c8d9e0f1a2` precedent):
 - ADD `photos.location_id` — nullable, FK → `locations.id`, `ondelete="SET NULL"`.
 - NO data backfill (user ruling: project not in production). `alembic upgrade head` + `downgrade` both work; dev flow = `recreate_dev_db.sh` + seed.
 - `backend/src/models/photo.py`: replace `visitor_id` with `client_id`/`location_id` FK columns; `client`/`location` relationships as needed by §6.5. DB-level ondelete never fires on prod SQLite (no `PRAGMA foreign_keys`, per #194) — service-level nulling is mandatory and lives in the deletion matrix (§6.3).
+- The batch table-recreation copies existing rows; new columns are NULL for all of them — this IS the zero-backfill intent, no follow-up needed.
+- **Atomicity:** the migration, the §6.3 deletion-matrix changes, and the visitor-cascade cleanup ship in ONE commit — intermediate states break (matrix code would `UPDATE photos SET visitor_id=NULL` on a dropped column, or the schema would retain a column the code no longer knows).
+- IMPL verifies the alembic migration connection runs with `PRAGMA foreign_keys=OFF` (SQLite will not toggle it mid-transaction); check `alembic/env.py` against this before running the migration.
 
 ### 6.2 Ownership invariant + write-time validation
 
@@ -108,6 +111,7 @@ One migration (SQLite batch mode, `b7c8d9e0f1a2` precedent):
 - **Visitor cascade:** remove the `UPDATE photos SET visitor_id=NULL` step (`deletion.py:555-556,568-574`, `services/visitor.py:62`) — the column no longer exists.
 - **Soft delete (archive)** of a client/location: no FK effect (row persists); `client_name` still resolves for archived clients. Unchanged behavior, stated for clarity.
 - Photo itself remains hard-delete (row removal only, no storage side effects).
+- This section ships in the same commit as the §6.1 migration (atomicity requirement, see §6.1).
 
 ### 6.4 `PhotoListParams` — validated params model
 
@@ -128,16 +132,19 @@ New in `backend/src/schemas/photo.py`, modeled on `RecordListParams` (`schemas/r
 
 - 422 cases: `page<1`, `per_page` outside 1..100, `q` of length 1 or >100, unknown `sort_by`/`sort_order`. (FastAPI/pydantic automatic.)
 - Unknown/nonexistent filter ids → silent empty page (records equality precedent), NOT 422.
+- Injection constraint (FastAPI #12481, documented at `schemas/pagination.py:9-12`): ALL list params live exclusively in `PhotoListParams`; the handler adds no separate scalar query params (records handler precedent, `records.py:72-85`). `Depends` remains only for session/service.
 
 ### 6.5 `PhotoService.list` — paginated rewrite (accepted exception)
 
-Rewritten as a service-owned custom list (`ClientWithStats` pattern, `services/client.py:76-119`), executed via `BaseRepository.list_custom` (count + slice):
+Rewritten as a service-owned custom list following the ACTUAL `ClientWithStats` execution pattern (`services/client.py:212-260`): the service runs its own count + main queries via `session.execute()` and maps `Row` tuples → `PhotoResponse` manually. **NOT via `BaseRepository.list_custom`** — it returns `result.scalars().all()` (first column only, `repositories/generic.py:81-91`), which would silently drop `client_name` (panel-verified).
 
 - Base stmt: `select(Photo, client_name_subq.label("client_name"))` where `client_name_subq = select(Client.name).where(Client.id == Photo.client_id).scalar_subquery()` (correlated scalar subquery — records' name-sort idiom, `services/record.py:89-103`). Resolves for archived clients (no `is_active` filter on the subquery). `client_name` is NULL when `client_id` is NULL.
+- Count: `select(func.count()).select_from(filtered_stmt.subquery())` — honest total under any filter combination (incl. the §6.7 service join; 1:0..1, no double-count).
 - Eager-load tags: `selectinload(Photo.tags)` (preserved from current override).
 - Filters applied per §6.4/§6.7; q per §6.6; sort per §6.8; deterministic tiebreak `Photo.id`.
-- The service maps `(Photo, client_name)` rows → `PhotoResponse` (field `client_name: str | None = None`).
+- Response mapping: `PhotoResponse` built per row from `(Photo, client_name)` (field `client_name: str | None = None`); exact row-mapping mechanics pinned at plan time against the merged code.
 - Docstring carries the "accepted exception to repo-owned list (GH #206)" flag, mirroring `ClientWithStats`.
+- Future extension note: if more denormalized fields are added later (service_title, location_name), switch from scalar subqueries to a JOIN.
 
 ### 6.6 Search semantics (`?q=`)
 
@@ -149,7 +156,7 @@ Rewritten as a service-owned custom list (`ClientWithStats` pattern, `services/c
 ### 6.7 Filter semantics
 
 - All filters AND-combine with each other and with q.
-- `service_id` (variant A, binding): `WHERE (photos.service_id = :sid) OR (activities.service_id = :sid)` via `OUTER JOIN activities ON activities.id = photos.activity_id`. The join is 1:0..1 (a photo has at most one activity) — no row multiplication, count stays honest.
+- `service_id` (variant A, binding): `WHERE (photos.service_id = :sid) OR (activities.service_id = :sid)` via **LEFT OUTER JOIN** `activities ON activities.id = photos.activity_id` — an INNER JOIN would wrongly drop direct-service photos with no activity. The join is 1:0..1 (a photo has at most one activity) — no row multiplication, count stays honest. Acknowledged cost: the join is evaluated inside the count subquery whenever the filter is active; acceptable at seed scale.
 - `location_id` is **direct-only** (equality on `photos.location_id`). Asymmetry with service is acknowledged and accepted (G1a): `location_id` is an independent manual attribute; activity-linked photos are found via the activity filter, and activity→location inheritance for photos is not modeled. (Step-0 review flagged this; user kept variant A + direct location.)
 - `tag_id` (repeatable, OR — binding decision 5): photo matches if ANY selected tag is linked via `photo_tags` — e.g. `Photo.tags.any(Tag.id.in_(params.tag_id))`.
 - `client_id` / `activity_id`: direct equality.
@@ -158,7 +165,7 @@ Rewritten as a service-owned custom list (`ClientWithStats` pattern, `services/c
 ### 6.8 Sorting design
 
 - Whitelist `PhotoSortBy = Literal["filename","is_public","created_at"]` in `schemas/photo.py`; 422 on unknown (records Literal pattern — NOT clients' silent-fallback, which is known debt).
-- Sort map in `PhotoService.list`: filename → `Photo.filename` (Cyrillic-safe ordering per #139 adapter's 'ru' comparator parity — exact collation at plan time), is_public → `Photo.is_public` (false-first asc), created_at → `Photo.created_at`.
+- Sort map in `PhotoService.list`: filename → `Photo.filename`, is_public → `Photo.is_public` (false-first asc), created_at → `Photo.created_at`. **Known limitation (documented, not fixed):** SQLite BINARY collation sorts Cyrillic by UTF-8 codepoint, not Russian alphabetical order — same debt as records (`services/record.py:88`); acceptable for v1.
 - Default: `created_at desc`. Deterministic tiebreak: `Photo.id` (asc) appended to every ordering (records pattern).
 - FK columns, `client_name`, and preview are NOT sortable (no join-sort in scope).
 
@@ -186,6 +193,7 @@ From #139 (merged): `<DataTable>` with `withSearch` + `searchPlaceholder`; `Page
 
 - The #139 T7 adapter (`contexts/PhotosContext.tsx`, swap-point comment L7-13) is replaced by a **hand-rolled server context aligned to `PagedListState<PhotoResponse>` — RecordsContext template** (`RecordsContext.tsx`), because the factory's query key does not carry arbitrary filter params (records/clients are hand-rolled for the same reason).
 - State: `page`, `perPage` (**default 10** — UI requests `per_page=10`, binding decision 6), `sortBy/sortOrder` (default `created_at`/`desc`), `search` (server-backed; ≥2-char clamp per #212 `serverSearch` mechanics; search change resets page), `filters: {client_id?, activity_id?, service_id?, location_id?, tag_id[]}`.
+- Naming: context fields stay `search`/`setSearch` (the `PagedListState` contract name post-#139/#212); the fetcher maps `search` → the `q` query param.
 - `setFilters`/`setSearch` reset page to 1 (`RecordsContext.tsx:100-103` precedent). Page-clamp effect (last row deleted on last page → page-1) per #139 contract.
 - Query key: `['photos', {page, per_page, sort_by, sort_order, q, ...filters}]`; `placeholderData: keepPreviousData`.
 - Also loads `/services/all` once for the «Услуга» column display map (RecordsContext dictionary pattern, `RecordsContext.tsx:177-205`).
@@ -255,7 +263,7 @@ From #139 (merged): `<DataTable>` with `withSearch` + `searchPlaceholder`; `Page
 ### 10.1 Backend (pytest)
 
 - Params validation matrix: 422 on page/per_page bounds, q length 1 / >100, unknown sort_by/sort_order; unknown filter ids → 200 empty page.
-- Filter contract matrix: each filter alone; all-combined AND; service variant A — direct-only photo matches, activity-derived photo matches, unrelated service does not; tag_id single + repeated OR (photo with ANY matches, photo with none does not); q AND filter combo.
+- Filter contract matrix: each filter alone; all-combined AND; service variant A — direct-only photo matches, activity-derived photo matches, unrelated service does not; tag_id single + repeated OR (photo with ANY matches, photo with none does not); q AND filter combo; envelope `total` honest under the service join (no double-count).
 - Sort: each whitelist field asc/desc; default `created_at desc`; id tiebreak determinism.
 - Response: `client_name` present for client photos, NULL otherwise; resolves for archived client; PaginatedResponse envelope honesty (total/page/per_page).
 - Owner validation: POST/PUT with ≥2 owners → 422; PATCH adding a second owner → 422 (merged-set check); PATCH nulling → OK; zero-owner create → OK.
@@ -308,11 +316,11 @@ Gate: IMPL starts only after BOTH #139 and #212 are merged to main. At IMPL kick
 6. `deletion.py` templates (Service→photos entries) at cited lines or findable by name.
 7. Backend baseline green on the fresh worktree (note: `uv sync --extra dev` needed in fresh worktrees).
 
-If any check fails → STOP, reconcile spec vs drift before dispatching implementers.
+If any check fails → STOP. Cosmetic drift (renamed/moved code, same contract) → reconcile the spec and proceed; structural drift (changed `PagedListState` / q mechanics / DataTable contract) → escalate to the manager before dispatching implementers.
 
 ## 13. Acceptance Criteria
 
-- [ ] Alembic migration drops `photos.visitor_id`, adds `client_id`/`location_id` (nullable FKs, SET NULL); upgrade+downgrade pass; zero backfill.
+- [ ] Alembic migration drops `photos.visitor_id`, adds `client_id`/`location_id` (nullable FKs, SET NULL); upgrade+downgrade pass; zero backfill; ships in ONE commit with the §6.3 deletion-matrix/visitor-cascade changes.
 - [ ] `GET /api/v1/photos` returns `PaginatedResponse[PhotoResponse]`; 422 on invalid page/per_page/q/sort; unknown filter ids → empty page.
 - [ ] Filters: client/location/activity direct; service variant A (direct OR via activity); repeatable tag_id OR; all AND-combined; q filename ilike min2/max100.
 - [ ] Sort whitelist filename/is_public/created_at; default `created_at desc` + id tiebreak.

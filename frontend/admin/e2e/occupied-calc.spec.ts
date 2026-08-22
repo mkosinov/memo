@@ -5,6 +5,7 @@ import {
   createTestClient,
   createTestRecord,
   cleanup,
+  cleanupRecord,
 } from './fixtures/factories';
 
 test('US-S03: occupied = sum of visits for active records (excludes cancelled)', async ({
@@ -44,8 +45,8 @@ test('US-S03: occupied = sum of visits for active records (excludes cancelled)',
     await expect(card).toBeVisible();
     await expect(card).toContainText('4/20');
   } finally {
-    await cleanup(request, `/api/v1/records/${recordA.id}`);
-    await cleanup(request, `/api/v1/records/${recordB.id}`);
+    await cleanupRecord(request, recordA.id);
+    await cleanupRecord(request, recordB.id);
     await cleanup(request, `/api/v1/clients/${client1.id}`);
     await cleanup(request, `/api/v1/clients/${client2.id}`);
     await cleanup(request, `/api/v1/activities/${activity.id}`);

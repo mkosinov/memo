@@ -8,7 +8,8 @@
  *   const client = await createTestClient(request);
  *   const activity = await createTestActivity(request);
  *   const record = await createTestRecord(request, activity.id, client.id);
- *   await cleanup(request, `/api/v1/records/${record.id}`);
+ *   await cleanupRecord(request, record.id); // records: resolutions needed (Addendum 13)
+ *   await cleanup(request, `/api/v1/clients/${client.id}`);
  */
 
 import crypto from 'node:crypto';
@@ -371,6 +372,26 @@ export function seedUser(overview: {
 export async function cleanup(api: APIRequestContext, path: string) {
   try {
     await api.delete(`${BACKEND}${path}`);
+  } catch {
+    // Ignore cleanup errors
+  }
+}
+
+/**
+ * Hard-delete a record in cleanup with explicit cascade resolutions
+ * (Addendum 13 / GH #139 T8-FE2a): the no-body DELETE is a dry-run and
+ * returns 409 when the record has visits/payments, which made bare
+ * `cleanup()` calls silently leak rows. record_tags is auto=True
+ * server-side and must NOT appear in the body (validate_resolutions
+ * rejects auto deps). Safe for dep-free records too (204) and for
+ * already-deleted rows (404 — swallowed), so it is a drop-in replacement
+ * for `cleanup(api, \`/api/v1/records/{id}\`)`.
+ */
+export async function cleanupRecord(api: APIRequestContext, recordId: string) {
+  try {
+    await api.delete(`${BACKEND}/api/v1/records/${recordId}`, {
+      data: { resolutions: { visits: 'cascade', payments: 'cascade' } },
+    });
   } catch {
     // Ignore cleanup errors
   }

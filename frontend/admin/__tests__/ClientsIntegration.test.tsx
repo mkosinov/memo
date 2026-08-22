@@ -31,6 +31,7 @@ vi.mock('@memo/api-client', () => {
     patchRecord: vi.fn(),
     updateRecord: vi.fn(),
     deleteRecord: vi.fn(),
+    resolveDeleteRecord: vi.fn(),
     createPayment: vi.fn(),
     patchPayment: vi.fn(),
     deletePayment: vi.fn(),
@@ -482,12 +483,31 @@ describe('ClientCardModal ↔ ClientRecordTab integration (real components)', ()
     });
   });
 
-  it('record tab delete calls deleteRecord but does NOT close modal', async () => {
+  it('record tab delete runs the dry-run DELETE but does NOT close modal', async () => {
     const onClose = vi.fn();
-    // handleDelete calls window.confirm — mock it to allow deletion
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    // Addendum 13: window.confirm is gone — clicking runs the no-body
+    // DELETE dry-run via the shared useDeleteRecord hook; a 204 means the
+    // record is already deleted → the mutation toasted + invalidated. The
+    // modal stays open (user remains in context).
 
     const { ClientCardModal } = await import('@/app/(main)/clients/components/ClientCardModal');
+    const { useMutation: useMutationMock } = await import('@tanstack/react-query');
+    // Executing mock: run mutationFn + onSuccess so the dry-run completes.
+    vi.mocked(useMutationMock).mockImplementation(
+      ((opts: {
+        mutationFn?: (vars: unknown) => Promise<unknown>;
+        onSuccess?: (data: unknown, variables: unknown) => void;
+      }) => ({
+        mutate: vi.fn(),
+        mutateAsync: vi.fn(async (input: unknown) => {
+          const result = opts.mutationFn ? await opts.mutationFn(input) : undefined;
+          opts.onSuccess?.(result, input);
+          return result;
+        }),
+        isPending: false,
+      }) as unknown) as () => never,
+    );
+
     render(
       <UIProvider><QueryClientProvider client={createQueryClient()}>
         <ClientCardModal client={mockClientWithRecords} isOpen={true} onClose={onClose} mode="view" />
@@ -501,16 +521,17 @@ describe('ClientCardModal ↔ ClientRecordTab integration (real components)', ()
       expect(screen.getByTestId('client-record-tab')).toBeInTheDocument();
     });
 
-    // Click delete record
+    // Click delete record → dry-run DELETE fires (no confirm dialog)
     fireEvent.click(screen.getByTestId('btn-delete-record'));
 
     await waitFor(() => {
       expect(deleteRecord).toHaveBeenCalledWith('rec1');
     });
+    // No dependency dialog for the zero-deps case
+    expect(screen.queryByTestId('delete-dialog')).not.toBeInTheDocument();
     // Delete deliberately does NOT close the modal — user stays in context
     expect(onClose).not.toHaveBeenCalled();
-
-    vi.mocked(window.confirm).mockRestore();
+    vi.mocked(useMutationMock).mockRestore();
   });
 
   it('switching back to client tab from record tab shows client info', async () => {

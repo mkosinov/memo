@@ -16,7 +16,7 @@ type ArchiveFn = (id: string) => Promise<unknown>;
 
 function renderDialog(props: {
   entityName: string;
-  entityType: 'master' | 'location' | 'service' | 'material' | 'client';
+  entityType: 'master' | 'location' | 'service' | 'material' | 'client' | 'record';
   entityId: string;
   dependencies: DependencyNode[];
   onDone: () => void;
@@ -276,6 +276,59 @@ describe('DeleteDialog — Mode A (client with user-choice deps)', () => {
 
     await waitFor(() => expect(screen.getByText(/client boom/)).toBeInTheDocument());
     expect(onDone).not.toHaveBeenCalled();
+  });
+});
+
+// ─── Record (Addendum 13 / GH #139): visits+payments cascade choice deps, ──
+// record_tags auto cascade (mirrors backend src/domain/deletion.py Record row).
+const RECORD_MIXED: DependencyNode[] = [
+  { entity: 'visits', relation: 'Посещение', count: 2, allowed_actions: ['cascade'], message: null },
+  { entity: 'payments', relation: 'Платёж', count: 1, allowed_actions: ['cascade'], message: null },
+  { entity: 'record_tags', relation: 'Тег', count: 3, allowed_actions: ['cascade'], message: null },
+];
+
+describe('DeleteDialog — Mode A (record with cascade deps, Addendum 13)', () => {
+  it('renders the record title (genitive "записи") and plural dep labels', () => {
+    renderDialog({
+      entityName: '15 мая · 14:00',
+      entityType: 'record',
+      entityId: 'r1',
+      dependencies: RECORD_MIXED,
+      onDone: vi.fn(),
+      onCancel: vi.fn(),
+    });
+
+    expect(screen.getByText(/Удаление «записи 15 мая · 14:00»/)).toBeInTheDocument();
+    expect(screen.getByText(/→ Посещения: 2 \(удалены\)/)).toBeInTheDocument();
+    expect(screen.getByText(/→ Платежи: 1 \(удалён\)/)).toBeInTheDocument();
+    // record_tags is AUTO — fixed "Теги" line, not a choice button
+    const tagsRow = screen.getByTestId('dep-record_tags');
+    expect(tagsRow).toHaveTextContent('→ Теги: 3 (удалены)');
+    expect(tagsRow.querySelector('button')).toBeNull();
+  });
+
+  it('confirm sends cascade resolutions for visits+payments; auto record_tags omitted', async () => {
+    const onDone = vi.fn();
+    const { onResolve } = renderDialog({
+      entityName: '15 мая · 14:00',
+      entityType: 'record',
+      entityId: 'r1',
+      dependencies: RECORD_MIXED,
+      onDone,
+      onCancel: vi.fn(),
+    });
+
+    typeConfirmName('15 мая · 14:00');
+    expect(confirmBtn()).toBeDisabled(); // visits/payments unresolved
+
+    fireEvent.click(screen.getByText(/Посещения: 2/)); // select cascade
+    fireEvent.click(screen.getByText(/Платежи: 1/)); // select cascade
+    fireEvent.click(confirmBtn());
+
+    await waitFor(() =>
+      expect(onResolve).toHaveBeenCalledWith('r1', { visits: 'cascade', payments: 'cascade' }),
+    );
+    await waitFor(() => expect(onDone).toHaveBeenCalledTimes(1));
   });
 });
 

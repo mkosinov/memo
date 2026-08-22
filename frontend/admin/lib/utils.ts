@@ -99,6 +99,20 @@ export function formatActivityContext(date: Date): string {
   return `${dayName}, ${dayNum} ${month} · ${time}`;
 }
 
+/**
+ * Human label for a record (records have no name — Addendum 13 / GH #139
+ * T8-FE2a: used as the DeleteDialog entityName). Derived from the parent
+ * activity's start: "15 мая · 14:00". Falls back to «запись» when the
+ * activity start is not loaded.
+ */
+export function formatRecordLabel(activityStart: string | null | undefined): string {
+  if (!activityStart) return 'запись';
+  const d = new Date(activityStart);
+  if (Number.isNaN(d.getTime())) return 'запись';
+  const time = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  return `${d.getDate()} ${MONTHS_GENITIVE[d.getMonth()]} · ${time}`;
+}
+
 // ─── Time / Date Utilities ────────────────────────────────────────────────
 
 /** Format hours to "HH:MM" string. 10 → "10:00", 10.5 → "10:30", 9.25 → "09:15". */

@@ -7,6 +7,7 @@ import {
   createTestRecordWithClient,
   createTestRecordWithPayment,
   cleanup,
+  cleanupRecord,
 } from './fixtures/factories';
 
 const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
@@ -168,7 +169,7 @@ test.describe('Records Page — Table and Filters', () => {
         await expect(badge).toHaveAttribute('data-testid', 'status-badge-waiting');
       }
     } finally {
-      await cleanup(request, `/api/v1/records/${recordId}`);
+      await cleanupRecord(request, recordId);
       await cleanup(request, `/api/v1/clients/${clientId}`);
     }
   });
@@ -222,7 +223,7 @@ test.describe('Records Page — Table and Filters', () => {
       const resetTotal = await readServerTotal(page);
       expect(resetTotal).toBeGreaterThanOrEqual(filteredTotal);
     } finally {
-      await cleanup(request, `/api/v1/records/${recordId}`);
+      await cleanupRecord(request, recordId);
       await cleanup(request, `/api/v1/clients/${clientId}`);
     }
   });
@@ -256,7 +257,7 @@ test.describe('Records Page — Table and Filters', () => {
       // Panel should contain activity info section
       await expect(page.locator('text=Занятие')).toBeVisible();
     } finally {
-      await cleanup(request, `/api/v1/records/${recordId}`);
+      await cleanupRecord(request, recordId);
       await cleanup(request, `/api/v1/clients/${clientId}`);
     }
   });
@@ -287,7 +288,7 @@ test.describe('Records Page — Table and Filters', () => {
       // Detail panel should disappear
       await expect(page.locator('h3:has-text("Детали записи")')).not.toBeVisible();
     } finally {
-      await cleanup(request, `/api/v1/records/${recordId}`);
+      await cleanupRecord(request, recordId);
       await cleanup(request, `/api/v1/clients/${clientId}`);
     }
   });
@@ -318,7 +319,7 @@ test.describe('Records Page — Table and Filters', () => {
       // Detail panel should disappear — wait for heading to be removed from DOM
       await expect(page.locator('h3:has-text("Детали записи")')).not.toBeVisible({ timeout: 10_000 });
     } finally {
-      await cleanup(request, `/api/v1/records/${recordId}`);
+      await cleanupRecord(request, recordId);
       await cleanup(request, `/api/v1/clients/${clientId}`);
     }
   });
@@ -395,7 +396,7 @@ test.describe('Records Page — Table and Filters', () => {
       await expect(clientHeader).toContainText('↓');
     } finally {
       for (const s of seeded) {
-        await cleanup(request, `/api/v1/records/${s.recordId}`);
+        await cleanupRecord(request, s.recordId);
         await cleanup(request, `/api/v1/clients/${s.clientId}`);
       }
     }
@@ -445,7 +446,7 @@ test.describe('Records Page — Table and Filters', () => {
       }
     } finally {
       for (const s of seeded) {
-        await cleanup(request, `/api/v1/records/${s.recordId}`);
+        await cleanupRecord(request, s.recordId);
         await cleanup(request, `/api/v1/clients/${s.clientId}`);
       }
     }
@@ -508,7 +509,7 @@ test.describe('Records Page — Table and Filters', () => {
         await expect(modal).not.toBeVisible();
       }
     } finally {
-      await cleanup(request, `/api/v1/records/${recordId}`);
+      await cleanupRecord(request, recordId);
       await cleanup(request, `/api/v1/clients/${clientId}`);
     }
   });
@@ -560,7 +561,7 @@ test.describe('Records Page — Table and Filters', () => {
       const classes = await statusBadge.getAttribute('class');
       expect(classes).toContain('amber');
     } finally {
-      await cleanup(request, `/api/v1/records/${recordId}`);
+      await cleanupRecord(request, recordId);
       await cleanup(request, `/api/v1/clients/${clientId}`);
     }
   });
@@ -610,7 +611,7 @@ test.describe('Records Page — Table and Filters', () => {
         expect([locationName, '—']).toContain(text);
       }
     } finally {
-      await cleanup(request, `/api/v1/records/${seeded.recordId}`);
+      await cleanupRecord(request, seeded.recordId);
       await cleanup(request, `/api/v1/clients/${seeded.clientId}`);
     }
   });
@@ -662,7 +663,7 @@ test.describe('Records Page — Table and Filters', () => {
         }
       }
     } finally {
-      await cleanup(request, `/api/v1/records/${seeded.recordId}`);
+      await cleanupRecord(request, seeded.recordId);
       await cleanup(request, `/api/v1/clients/${seeded.clientId}`);
     }
   });
@@ -715,7 +716,7 @@ test.describe('Records Page — Table and Filters', () => {
         await expect(badge).toHaveAttribute('data-testid', 'status-badge-waiting');
       }
     } finally {
-      await cleanup(request, `/api/v1/records/${seeded.recordId}`);
+      await cleanupRecord(request, seeded.recordId);
       await cleanup(request, `/api/v1/clients/${seeded.clientId}`);
     }
   });
@@ -745,7 +746,7 @@ test.describe('Records Page — Table and Filters', () => {
         expect(text).toMatch(/[\d\s]+₽/);
       }
     } finally {
-      await cleanup(request, `/api/v1/records/${recordId}`);
+      await cleanupRecord(request, recordId);
       await cleanup(request, `/api/v1/clients/${clientId}`);
     }
   });
@@ -793,7 +794,7 @@ test.describe('Records Page — Table and Filters', () => {
       if (paymentId) {
         await cleanup(request, `/api/v1/payments/${paymentId}`);
       }
-      await cleanup(request, `/api/v1/records/${recordId}`);
+      await cleanupRecord(request, recordId);
       await cleanup(request, `/api/v1/clients/${clientId}`);
     }
   });
@@ -864,7 +865,7 @@ test.describe('Records Page — Table and Filters', () => {
         if (s.paymentId) {
           await cleanup(request, `/api/v1/payments/${s.paymentId}`);
         }
-        await cleanup(request, `/api/v1/records/${s.recordId}`);
+        await cleanupRecord(request, s.recordId);
         await cleanup(request, `/api/v1/clients/${s.clientId}`);
       }
     }

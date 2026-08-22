@@ -5,6 +5,7 @@ import {
   createTestActivity,
   createTestRecord,
   cleanup,
+  cleanupRecord,
 } from './fixtures/factories';
 
 const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
@@ -500,7 +501,7 @@ test.describe('Record tab', () => {
       // Close modal
       await closeByBackdrop(page);
     } finally {
-      await cleanup(request, `/api/v1/records/${record.id}`);
+      await cleanupRecord(request, record.id);
       await cleanup(request, `/api/v1/clients/${client.id}`);
     }
   });
@@ -528,7 +529,7 @@ test.describe('Record tab', () => {
       // Close modal
       await closeByBackdrop(page);
     } finally {
-      await cleanup(request, `/api/v1/records/${record.id}`);
+      await cleanupRecord(request, record.id);
       await cleanup(request, `/api/v1/clients/${client.id}`);
     }
   });
@@ -559,7 +560,7 @@ test.describe('Record tab', () => {
       // Close modal
       await closeByBackdrop(page);
     } finally {
-      await cleanup(request, `/api/v1/records/${record.id}`);
+      await cleanupRecord(request, record.id);
       await cleanup(request, `/api/v1/clients/${client.id}`);
     }
   });
@@ -586,7 +587,7 @@ test.describe('Record tab', () => {
       // Close modal
       await closeByBackdrop(page);
     } finally {
-      await cleanup(request, `/api/v1/records/${record.id}`);
+      await cleanupRecord(request, record.id);
       await cleanup(request, `/api/v1/clients/${client.id}`);
     }
   });
@@ -628,7 +629,7 @@ test.describe('Record tab', () => {
       // Close modal
       await closeByBackdrop(page);
     } finally {
-      await cleanup(request, `/api/v1/records/${record.id}`);
+      await cleanupRecord(request, record.id);
       await cleanup(request, `/api/v1/clients/${client.id}`);
     }
   });

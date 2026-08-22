@@ -9,6 +9,7 @@
 import { test, expect } from '@playwright/test';
 import {
   cleanup,
+  cleanupRecord,
   createTestActivity,
   createTestClient,
   createTestClientTag,
@@ -66,7 +67,7 @@ test.describe('S7 — Client delete resolution validation', () => {
       expect(queryDBRow(`SELECT client_id FROM records WHERE id='${record.id}'`)!.client_id).toBeNull();
       expect(queryDBRow(`SELECT COUNT(*) AS n FROM visitors WHERE client_id='${client.id}'`)!.n).toBe(0);
     } finally {
-      await cleanup(request, `/api/v1/records/${record.id}`);
+      await cleanupRecord(request, record.id);
       await cleanup(request, `/api/v1/tags/${tag.id}`);
       await cleanup(request, `/api/v1/activities/${activity.id}`);
       await cleanup(request, `/api/v1/clients/${client.id}`);

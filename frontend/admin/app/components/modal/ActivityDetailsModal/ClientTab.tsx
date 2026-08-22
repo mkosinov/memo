@@ -1,22 +1,25 @@
 'use client';
 
-import React, { useState, useCallback, useRef } from 'react';
-import type { ClientResponse, ClientWithStats } from '@memo/api-client';
+import React, { useState, useCallback } from 'react';
+import type { ClientResponse, ClientWithStats, DependencyNode } from '@memo/api-client';
 import type { VisitStatus } from '@memo/domain';
-import { useQueryClient } from '@tanstack/react-query';
-import { patchVisitor } from '@memo/api-client';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { patchVisitor, getActivity, ApiError } from '@memo/api-client';
 import { RecordSummary } from '@/app/components/shared/record/blocks/RecordSummary';
 import { RecordVisitsTable } from '@/app/components/shared/record/blocks/RecordVisitsTable';
 import { RecordPaymentsTable } from '@/app/components/shared/record/blocks/RecordPaymentsTable';
 import { RecordComments } from '@/app/components/shared/record/blocks/RecordComments';
 import { RecordTimestamps } from '@/app/components/shared/record/blocks/RecordTimestamps';
 import { ClientStatistics } from '@/app/components/shared/record/blocks/ClientStatistics';
+import { DeleteDialog } from '@/app/components/DeleteDialog';
 import { useRecordData } from '@/hooks/useRecordData';
 import { useRecordMutations } from '@/hooks/useRecordMutations';
+import { useDeleteRecord } from '@/hooks/useDeleteRecord';
 import { useUI } from '@/contexts/UIContext';
 import { safeStatus } from '@/app/lib/status-utils';
 import { computeRecordStatus } from '@memo/domain';
 import { parseApiError } from '@/app/lib/api/parseApiError';
+import { formatRecordLabel } from '@/lib/utils';
 
 interface ClientTabProps {
   recordId: string;
@@ -35,7 +38,6 @@ export function ClientTab({
   onDeleteRecord,
   onClose: _onClose,
 }: ClientTabProps) {
-  const isDeletingRef = useRef(false);
   const queryClient = useQueryClient();
   const { showToast } = useUI();
 
@@ -58,6 +60,37 @@ export function ClientTab({
     patchPayment,
     deletePaymentDeferred,
   } = useRecordMutations(activityId, recordId);
+
+  // Delete — Addendum 13 / GH #139 T8-FE2a: replaces the legacy 5-second
+  // setTimeout + undo toast with an explicit-confirmation dry-run flow.
+  const deleteMutation = useDeleteRecord();
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; deps: DependencyNode[] } | null>(null);
+
+  // Parent activity — used for the dialog's record label (records have no
+  // name; "15 мая · 14:00"). Same cache key useRecordData primes, so this
+  // dedupes with no extra fetch.
+  const { data: activity } = useQuery({
+    queryKey: ['activity', record?.activity_id],
+    queryFn: () => getActivity(record!.activity_id),
+    enabled: !!record?.activity_id,
+  });
+
+  const handleDelete = useCallback(async () => {
+    try {
+      await deleteMutation.mutateAsync(recordId);
+      // No deps — already deleted (hook toasted): keep today's navigation.
+      onDeleteRecord(recordId);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        const deps = err.dependencies ?? deleteMutation.dependencies ?? [];
+        if (deps.length > 0) {
+          setDeleteTarget({ id: recordId, deps });
+          return;
+        }
+      }
+      showToast(parseApiError(err).message, 'error');
+    }
+  }, [deleteMutation, recordId, onDeleteRecord, showToast]);
 
   // ── Local state ──────────────────────────────────────────────────────
   const [comment, setComment] = useState(record?.comment || '');
@@ -133,18 +166,6 @@ export function ClientTab({
     },
     [recordId, updateRecord, showToast],
   );
-
-  const handleDelete = useCallback(() => {
-    isDeletingRef.current = true;
-    showToast('Запись удалена через 5 секунд', () => {
-      isDeletingRef.current = false;
-    });
-    setTimeout(() => {
-      if (isDeletingRef.current) {
-        onDeleteRecord(recordId);
-      }
-    }, 5000);
-  }, [onDeleteRecord, recordId, showToast]);
 
   // ── Derived data ─────────────────────────────────────────────────────
 
@@ -225,13 +246,34 @@ export function ClientTab({
           updatedAt={record?.updated_at ?? ''}
         />
         <button
-          onClick={handleDelete}
+          onClick={() => void handleDelete()}
           className="text-sm text-red-500 hover:text-red-600 transition-colors shrink-0"
           data-testid="btn-delete-record"
         >
           Удалить запись
         </button>
       </div>
+
+      {/* Delete dialog — Addendum 13: opened on dry-run 409; confirm calls
+          resolveDelete (explicit cascade confirmation — no undo timer), then
+          keeps today's post-delete navigation via onDeleteRecord. */}
+      {deleteTarget && (
+        <DeleteDialog
+          entityName={formatRecordLabel(activity?.start)}
+          entityType="record"
+          entityId={deleteTarget.id}
+          dependencies={deleteTarget.deps}
+          onResolve={async (id, resolutions) => {
+            await deleteMutation.resolveDelete.mutateAsync({ id, resolutions });
+          }}
+          onArchive={async () => { /* records have no archive flow — never Mode B */ }}
+          onDone={() => {
+            setDeleteTarget(null);
+            onDeleteRecord(recordId);
+          }}
+          onCancel={() => setDeleteTarget(null)}
+        />
+      )}
     </div>
   );
 }

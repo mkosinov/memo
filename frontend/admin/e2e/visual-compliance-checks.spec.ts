@@ -28,6 +28,7 @@ import {
   createTestActivity,
   createTestRecord,
   cleanup,
+  cleanupRecord,
 } from './fixtures/factories';
 import { switchToRecordsTab } from './fixtures/scenarios';
 
@@ -173,7 +174,7 @@ test('Check 1: add-visitor + Enter keeps new row in the visits table', async ({ 
     await page.evaluate(() => {
       document.dispatchEvent(new CustomEvent('__memo-close-modal'));
     }).catch(() => {});
-    await cleanup(request, `/api/v1/records/${record.id}`);
+    await cleanupRecord(request, record.id);
     await cleanup(request, `/api/v1/clients/${client.id}`);
     await cleanup(request, `/api/v1/activities/${activity.id}`);
   }
@@ -227,7 +228,7 @@ test('Check 2: delete-visitor removes the row from the visits table', async ({ p
     await page.evaluate(() => {
       document.dispatchEvent(new CustomEvent('__memo-close-modal'));
     }).catch(() => {});
-    await cleanup(request, `/api/v1/records/${record.id}`);
+    await cleanupRecord(request, record.id);
     await cleanup(request, `/api/v1/clients/${client.id}`);
     await cleanup(request, `/api/v1/activities/${activity.id}`);
   }
@@ -275,7 +276,7 @@ test('Check 3: undo toast "Удалено. Отменить" is visible after de
     await page.evaluate(() => {
       document.dispatchEvent(new CustomEvent('__memo-close-modal'));
     }).catch(() => {});
-    await cleanup(request, `/api/v1/records/${record.id}`);
+    await cleanupRecord(request, record.id);
     await cleanup(request, `/api/v1/clients/${client.id}`);
     await cleanup(request, `/api/v1/activities/${activity.id}`);
   }
@@ -360,7 +361,7 @@ test('Check 4: /records payment totals update after add, no F5', async ({ page, 
 
     log(`Check 4 PASS — payment cell changed from "${beforeText}" to "${afterText}"`);
   } finally {
-    await cleanup(request, `/api/v1/records/${recordId}`);
+    await cleanupRecord(request, recordId);
     await cleanup(request, `/api/v1/activities/${activity.id}`);
     await cleanup(request, `/api/v1/clients/${client.id}`);
   }

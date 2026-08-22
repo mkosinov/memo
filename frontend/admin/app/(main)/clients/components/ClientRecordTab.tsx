@@ -11,13 +11,16 @@ import { RecordVisitsTable } from '@/app/components/shared/record/blocks/RecordV
 import { RecordPaymentsTable } from '@/app/components/shared/record/blocks/RecordPaymentsTable';
 import { RecordComments } from '@/app/components/shared/record/blocks/RecordComments';
 import { RecordTimestamps } from '@/app/components/shared/record/blocks/RecordTimestamps';
+import { DeleteDialog } from '@/app/components/DeleteDialog';
 import { useRecordData } from '@/hooks/useRecordData';
 import { useRecordMutations } from '@/hooks/useRecordMutations';
+import { useDeleteRecord } from '@/hooks/useDeleteRecord';
 import { useUI } from '@/contexts/UIContext';
 import { useSchedule } from '@/contexts/ScheduleContext';
 import { parseApiError } from '@/app/lib/api/parseApiError';
-import { patchVisitor, patchActivity } from '@memo/api-client';
-import type { ClientWithStats } from '@memo/api-client';
+import { formatRecordLabel } from '@/lib/utils';
+import { patchVisitor, patchActivity, ApiError } from '@memo/api-client';
+import type { ClientWithStats, DependencyNode } from '@memo/api-client';
 
 interface ClientRecordTabProps {
   recordId: string;
@@ -39,7 +42,6 @@ export function ClientRecordTab({ recordId, clientId, client }: ClientRecordTabP
   // `patchActivity` directly. Visit CRUD is fine-grained (addVisit,
   // patchVisit, deleteVisitDeferred).
   const {
-    deleteRecord,
     addPayment,
     patchPayment,
     deletePayment,
@@ -49,6 +51,9 @@ export function ClientRecordTab({ recordId, clientId, client }: ClientRecordTabP
     patchVisit,
     deleteVisitDeferred,
   } = useRecordMutations(record?.activity_id ?? '', recordId);
+
+  // Delete — Addendum 13 / GH #139 T8-FE2a: unbound dry-run hook + dialog.
+  const deleteMutation = useDeleteRecord();
 
   // ── Surface-specific editable state ─────────────────────────────────────
   const [date, setDate] = useState('');
@@ -134,12 +139,25 @@ export function ClientRecordTab({ recordId, clientId, client }: ClientRecordTabP
     setHasChanges(false);
   }, [activity, record]);
 
+  // ── Delete — Addendum 13 dry-run flow (mirrors ClientsTable) ───────
+  // Parent owns the state: no-body DELETE → 204 (instant, hook toasts) or
+  // 409 → park deps + open DeleteDialog; dialog confirms via resolveDelete.
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; deps: DependencyNode[] } | null>(null);
+
   const handleDelete = useCallback(async () => {
-    if (window.confirm('Удалить запись?')) {
-      await deleteRecord();
-      queryClient.invalidateQueries({ queryKey: ['visitors', clientId] });
+    try {
+      await deleteMutation.mutateAsync(recordId);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        const deps = err.dependencies ?? deleteMutation.dependencies ?? [];
+        if (deps.length > 0) {
+          setDeleteTarget({ id: recordId, deps });
+          return;
+        }
+      }
+      showToast(parseApiError(err).message, 'error');
     }
-  }, [clientId, deleteRecord, queryClient]);
+  }, [deleteMutation, recordId, showToast]);
 
   /**
    * Visitor name/age change — direct visitor update (no optimistic override
@@ -287,7 +305,7 @@ export function ClientRecordTab({ recordId, clientId, client }: ClientRecordTabP
 
       {/* Actions */}
       <div className="flex justify-between items-center pt-4 border-t" style={{ borderColor: 'var(--line)' }}>
-        <button onClick={handleDelete} className="text-sm text-red-500 hover:text-red-600 transition-colors"
+        <button onClick={() => void handleDelete()} className="text-sm text-red-500 hover:text-red-600 transition-colors"
           data-testid="btn-delete-record">Удалить запись</button>
         <div className="flex gap-2">
           <button disabled={!hasChanges} onClick={handleCancel}
@@ -299,6 +317,24 @@ export function ClientRecordTab({ recordId, clientId, client }: ClientRecordTabP
             data-testid="btn-save-record">Сохранить</button>
         </div>
       </div>
+
+      {/* Delete dialog — Addendum 13: opened on dry-run 409, closed on done/cancel.
+          The tab (and the parent modal) STAYS open after confirm — the user
+          remains in context (ClientsIntegration behavior). */}
+      {deleteTarget && (
+        <DeleteDialog
+          entityName={formatRecordLabel(activity?.start)}
+          entityType="record"
+          entityId={deleteTarget.id}
+          dependencies={deleteTarget.deps}
+          onResolve={async (id, resolutions) => {
+            await deleteMutation.resolveDelete.mutateAsync({ id, resolutions });
+          }}
+          onArchive={async () => { /* records have no archive flow — never Mode B */ }}
+          onDone={() => setDeleteTarget(null)}
+          onCancel={() => setDeleteTarget(null)}
+        />
+      )}
     </div>
   );
 }

@@ -385,7 +385,7 @@ export async function waitForRecordsReady(page: Page) {
         if (rows.length === 0) return true;
         // Either we have real data rows or the genuine empty state
         const firstCell = rows[0]?.querySelector('td');
-        return firstCell !== null; // empty state is a td with "Записи не найдены"
+        return firstCell !== null; // empty state is a td with «Нет записей» (Addendum 12)
       },
       { timeout: 5_000 },
     )

@@ -129,7 +129,7 @@ describe('DataTable async states', () => {
     expect(screen.queryByTestId('error-state')).not.toBeInTheDocument();
   });
 
-  it('empty state renders the default empty label', () => {
+  it('empty state without emptyLabel falls back to the unified «Нет записей» (Addendum 12)', () => {
     renderTable({ items: [] });
     expect(screen.getByText('Нет записей')).toBeInTheDocument();
   });
@@ -380,14 +380,14 @@ describe('DataTable search', () => {
 
 describe('DataTable action dropdown', () => {
   function openFirstMenu() {
-    const trigger = screen.getAllByLabelText('Действия')[0];
+    const trigger = screen.getAllByLabelText(/Действия/)[0];
     fireEvent.click(trigger);
     return trigger;
   }
 
   it('trigger has menu-button a11y attributes', () => {
     renderTable();
-    const trigger = screen.getAllByLabelText('Действия')[0];
+    const trigger = screen.getAllByLabelText(/Действия/)[0];
     expect(trigger).toHaveAttribute('aria-haspopup', 'menu');
     expect(trigger).toHaveAttribute('aria-expanded', 'false');
     expect(trigger).toHaveAttribute('aria-controls', 'dropdown-t-1');
@@ -497,7 +497,7 @@ describe('DataTable action dropdown', () => {
     expect(extra1).toHaveAttribute('href', '/map/t-1');
     expect(extra2).toHaveAttribute('href', '/map/t-2');
     // Per-row: the extra sits in the same cell as its own row's trigger.
-    const triggers = screen.getAllByLabelText('Действия');
+    const triggers = screen.getAllByLabelText(/Действия/);
     expect(extra1.closest('td')).toContainElement(triggers[0]);
     expect(extra2.closest('td')).toContainElement(triggers[1]);
     // Order: extra precedes the ⋯ trigger in document order.
@@ -507,7 +507,7 @@ describe('DataTable action dropdown', () => {
 
   it('actionCellExtra absent renders only the trigger', () => {
     renderTable();
-    const cells = screen.getAllByLabelText('Действия');
+    const cells = screen.getAllByLabelText(/Действия/);
     expect(cells.length).toBe(2);
     cells.forEach((trigger) => {
       const cell = trigger.closest('td')!;

@@ -251,7 +251,7 @@ export function DataTable<T>({
           table without the pager intercepting clicks (the wrapper grows a
           scroll area instead of the pager overlaying the menu). */}
       <div className="overflow-x-auto">
-      <table className="w-full">
+      <table className="w-full" aria-busy={isPending}>
         <thead>
           <tr
             className="border-b"
@@ -360,7 +360,7 @@ export function DataTable<T>({
                     }
                     onRowClick?.(row);
                   }}
-                  className={`border-b cursor-pointer transition-colors ${rowClassName?.(row) ?? ''}`}
+                  className={`border-b ${onRowClick ? 'cursor-pointer ' : ''}transition-colors ${rowClassName?.(row) ?? ''}`}
                   style={{ borderColor: 'var(--line)' }}
                   data-testid={rowTestId ? rowTestId(row) : undefined}
                 >
@@ -399,7 +399,7 @@ export function DataTable<T>({
                           }}
                           className="w-7 h-7 flex items-center justify-center rounded-lg text-sm transition-colors"
                           style={{ color: 'var(--ink-light)' }}
-                          aria-label="Действия"
+                          aria-label={`Действия — строка ${keyValue}`}
                           aria-haspopup="menu"
                           aria-expanded={menuOpen}
                           aria-controls={menuId}
@@ -492,6 +492,7 @@ export function DataTable<T>({
               key={p}
               type="button"
               onClick={() => tableState.setPage(p)}
+              aria-current={p === tableState.page ? 'page' : undefined}
               className={`px-3 py-1 text-sm rounded border ${p === tableState.page ? 'font-bold' : ''}`}
               style={{
                 borderColor: 'var(--line)',

@@ -138,7 +138,7 @@ test.describe('Photos — Actions Dropdown', () => {
 
     const count = await page.locator('table tbody tr').count();
     if (count > 0) {
-      const actionsBtn = page.locator('table tbody button[aria-label="Действия"]').first();
+      const actionsBtn = page.locator('table tbody button[aria-label^="Действия"]').first();
       await expect(actionsBtn).toBeVisible();
       await actionsBtn.click();
 

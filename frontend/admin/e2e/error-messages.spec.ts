@@ -141,7 +141,7 @@ test.describe('Scenario 2 — Delete non-existent tag', () => {
     page.on('dialog', (dialog) => dialog.accept());
 
     // Click the actions dropdown on the first tag row
-    const actionsBtn = firstRow.locator('button[aria-label="Действия"]');
+    const actionsBtn = firstRow.locator('button[aria-label^="Действия"]');
     await expect(actionsBtn).toBeVisible();
     await actionsBtn.click();
 

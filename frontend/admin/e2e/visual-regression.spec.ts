@@ -228,7 +228,7 @@ const TABLE_CONFIGS: PageTableConfig[] = [
     sortHeader: (page) => thExact(page, 'Название'),
     glyphSelector: 'th:has-text("Название ↑")',
     // No row testids — rows carry a "Действия" ⋯ button (unique per table) to scope by.
-    row: (page) => page.locator('tbody tr:has(button[aria-label="Действия"])').first(),
+    row: (page) => page.locator('tbody tr:has(button[aria-label^="Действия"])').first(),
   },
   {
     name: 'materials',
@@ -241,7 +241,7 @@ const TABLE_CONFIGS: PageTableConfig[] = [
     sortHeader: (page) => thExact(page, 'Название'),
     glyphSelector: 'th:has-text("Название ↑")',
     // No testids; rows carry "Действия" buttons, rows scoped under tbody.
-    row: (page) => page.locator('tbody tr:has(button[aria-label="Действия"])').first(),
+    row: (page) => page.locator('tbody tr:has(button[aria-label^="Действия"])').first(),
   },
   {
     name: 'clients',
@@ -258,7 +258,7 @@ const TABLE_CONFIGS: PageTableConfig[] = [
     sortHeader: (page) => thExact(page, 'Телефон'),
     glyphSelector: 'th:has-text("Телефон"):has-text("↑")',
     // No row testids — rows carry a "Действия" ⋯ button (opacity-0 until hover).
-    row: (page) => page.locator('tbody tr:has(button[aria-label="Действия"])').first(),
+    row: (page) => page.locator('tbody tr:has(button[aria-label^="Действия"])').first(),
   },
   {
     name: 'photos',
@@ -286,7 +286,7 @@ const TABLE_CONFIGS: PageTableConfig[] = [
     glyphSelector: 'th:has-text("Гостей"):has-text("↑")',
     // No row testids (Addendum 6: no pre-#139 prefix to preserve — same case
     // as clients/materials/services in T5–T6); scope via the ⋯ button.
-    row: (page) => page.locator('tbody tr:has(button[aria-label="Действия"])').first(),
+    row: (page) => page.locator('tbody tr:has(button[aria-label^="Действия"])').first(),
   },
 ];
 

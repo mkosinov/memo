@@ -7,11 +7,11 @@ import { ApiError } from '@memo/api-client';
 import { useRecordData } from '@/hooks/useRecordData';
 import { useDeleteRecord } from '@/hooks/useDeleteRecord';
 import { useUI } from '@/contexts/UIContext';
-import { displayMasterName, formatRecordLabel } from '@/lib/utils';
+import { displayMasterName, formatRecordLabel, formatTime } from '@/lib/utils';
 import { DataTable } from '@/app/components/shared/DataTable';
 import { DeleteDialog } from '@/app/components/DeleteDialog';
 import { ClientQuickCard } from './ClientQuickCard';
-import { recordColumns, recordsActions, formatPrice, formatDateRu, formatTime, parseActivityStart } from './recordsColumns';
+import { recordColumns, recordsActions, formatPrice, formatDateRu, parseActivityStart } from './recordsColumns';
 import { StatusBadge } from '@/app/components/shared/StatusBadge';
 import { safeStatus } from '@/app/lib/status-utils';
 
@@ -54,8 +54,11 @@ export function RecordsTable() {
   }, [deleteMutation, showToast]);
 
   // §6.15 — memoize the factory outputs. The columns closure captures the
-  // current reference maps (recomputes when they change); the actions factory
-  // is stable.
+  // current reference maps (recomputes when they change). The actions memo is
+  // NOT referentially stable: useDeleteRecord returns a fresh mutation object
+  // identity every render, so handleDelete — and with it this useMemo —
+  // recomputes on every render. Harmless: DataTable does not depend on the
+  // referential stability of `actions`.
   const columns = useMemo(
     () =>
       recordColumns({

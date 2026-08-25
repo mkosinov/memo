@@ -255,7 +255,7 @@ describe('ClientsTable', () => {
     render(<ClientsTable onClientClick={vi.fn()} />);
 
     // Open the row-1 actions dropdown and click "Удалить"
-    fireEvent.click(screen.getAllByLabelText('Действия')[0]);
+    fireEvent.click(screen.getAllByLabelText(/Действия/)[0]);
     fireEvent.click(screen.getByText('Удалить'));
 
     await waitFor(() => expect(deleteClient).toHaveBeenCalledWith('c1'));
@@ -277,7 +277,7 @@ describe('ClientsTable', () => {
     };
     render(<ClientsTable onClientClick={vi.fn()} />);
 
-    fireEvent.click(screen.getAllByLabelText('Действия')[0]);
+    fireEvent.click(screen.getAllByLabelText(/Действия/)[0]);
     fireEvent.click(screen.getByText('Удалить'));
 
     await waitFor(() => expect(screen.getByTestId('delete-dialog-confirm-input')).toBeInTheDocument());
@@ -311,7 +311,7 @@ describe('ClientsTable', () => {
     };
     render(<ClientsTable onClientClick={vi.fn()} />);
 
-    fireEvent.click(screen.getAllByLabelText('Действия')[0]);
+    fireEvent.click(screen.getAllByLabelText(/Действия/)[0]);
     fireEvent.click(screen.getByText('Удалить'));
 
     await waitFor(() => expect(screen.getByTestId('delete-dialog-archive-btn')).toBeInTheDocument());
@@ -327,7 +327,7 @@ describe('ClientsTable', () => {
     mockContextValue = { ...mockContextValue, deleteClient };
     render(<ClientsTable onClientClick={vi.fn()} />);
 
-    fireEvent.click(screen.getAllByLabelText('Действия')[0]);
+    fireEvent.click(screen.getAllByLabelText(/Действия/)[0]);
     fireEvent.click(screen.getByText('Удалить'));
 
     await waitFor(() => expect(deleteClient).toHaveBeenCalledWith('c1'));
@@ -339,7 +339,7 @@ describe('ClientsTable', () => {
     mockContextValue = { ...mockContextValue, archiveClient };
     render(<ClientsTable onClientClick={vi.fn()} />);
 
-    fireEvent.click(screen.getAllByLabelText('Действия')[0]);
+    fireEvent.click(screen.getAllByLabelText(/Действия/)[0]);
     fireEvent.click(screen.getByText('В архив'));
 
     await waitFor(() => expect(archiveClient).toHaveBeenCalledWith('c1'));
@@ -355,7 +355,7 @@ describe('ClientsTable', () => {
     };
     render(<ClientsTable onClientClick={vi.fn()} />);
 
-    fireEvent.click(screen.getAllByLabelText('Действия')[0]);
+    fireEvent.click(screen.getAllByLabelText(/Действия/)[0]);
     fireEvent.click(screen.getByText('Восстановить'));
 
     await waitFor(() => expect(restoreClient).toHaveBeenCalledWith('c1'));

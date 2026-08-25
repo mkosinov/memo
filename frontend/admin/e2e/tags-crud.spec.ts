@@ -126,7 +126,7 @@ test.describe('Tags — Actions Dropdown', () => {
     await waitForTagsReady(page);
 
     // Click the actions button (⋯) on the first row
-    const actionsBtn = page.locator('table tbody button[aria-label="Действия"]').first();
+    const actionsBtn = page.locator('table tbody button[aria-label^="Действия"]').first();
     await expect(actionsBtn).toBeVisible();
     await actionsBtn.click();
 

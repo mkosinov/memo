@@ -406,8 +406,9 @@ export async function cleanup(api: APIRequestContext, path: string) {
  * (Addendum 13 / GH #139 T8-FE2a): the no-body DELETE is a dry-run and
  * returns 409 when the record has visits/payments, which made bare
  * `cleanup()` calls silently leak rows. record_tags is auto=True
- * server-side and must NOT appear in the body (validate_resolutions
- * rejects auto deps). Safe for dep-free records too (204) and for
+ * server-side and is omitted from the body (validate_resolutions
+ * silently IGNORES user-sent actions for auto deps — deletion.py §16).
+ * Safe for dep-free records too (204) and for
  * already-deleted rows (404 — swallowed), so it is a drop-in replacement
  * for `cleanup(api, \`/api/v1/records/{id}\`)`.
  */

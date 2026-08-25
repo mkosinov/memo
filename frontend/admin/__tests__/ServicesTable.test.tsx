@@ -568,7 +568,7 @@ describe('ServicesTable', () => {
   it('shows "Удалить" option in action dropdown', async () => {
     setupEnvelope();
     await renderLoaded();
-    const actionButtons = screen.getAllByLabelText('Действия');
+    const actionButtons = screen.getAllByLabelText(/Действия/);
     fireEvent.click(actionButtons[0]);
     expect(screen.getByText('Удалить')).toBeInTheDocument();
   });
@@ -579,7 +579,7 @@ describe('ServicesTable', () => {
     setupEnvelope();
     await renderLoaded();
 
-    const actionButtons = screen.getAllByLabelText('Действия');
+    const actionButtons = screen.getAllByLabelText(/Действия/);
     fireEvent.click(actionButtons[0]);
     fireEvent.click(screen.getByText('Удалить'));
     await waitFor(() => expect(mockDeleteMutateAsync).toHaveBeenCalledWith('svc-1'));
@@ -601,7 +601,7 @@ describe('ServicesTable', () => {
     setupEnvelope();
     await renderLoaded();
 
-    fireEvent.click(screen.getAllByLabelText('Действия')[0]);
+    fireEvent.click(screen.getAllByLabelText(/Действия/)[0]);
     fireEvent.click(screen.getByText('Удалить'));
 
     await waitFor(() => expect(screen.getByTestId('delete-dialog')).toBeInTheDocument());
@@ -616,7 +616,7 @@ describe('ServicesTable', () => {
     setupEnvelope();
     await renderLoaded();
 
-    fireEvent.click(screen.getAllByLabelText('Действия')[0]);
+    fireEvent.click(screen.getAllByLabelText(/Действия/)[0]);
     fireEvent.click(screen.getByText('Удалить'));
 
     await waitFor(() => expect(screen.getByTestId('delete-dialog-archive-btn')).toBeInTheDocument());
@@ -632,7 +632,7 @@ describe('ServicesTable', () => {
     setupEnvelope();
     await renderLoaded();
 
-    fireEvent.click(screen.getAllByLabelText('Действия')[0]);
+    fireEvent.click(screen.getAllByLabelText(/Действия/)[0]);
     fireEvent.click(screen.getByText('Удалить'));
 
     await waitFor(() => expect(screen.getByTestId('delete-dialog-confirm-input')).toBeInTheDocument());
@@ -653,7 +653,7 @@ describe('ServicesTable', () => {
     setupEnvelope();
     await renderLoaded();
 
-    fireEvent.click(screen.getAllByLabelText('Действия')[0]);
+    fireEvent.click(screen.getAllByLabelText(/Действия/)[0]);
     fireEvent.click(screen.getByText('Удалить'));
 
     await waitFor(() => expect(screen.getByTestId('delete-dialog-cancel-btn')).toBeInTheDocument());
@@ -670,7 +670,7 @@ describe('ServicesTable', () => {
     setupEnvelope();
     await renderLoaded();
 
-    fireEvent.click(screen.getAllByLabelText('Действия')[0]);
+    fireEvent.click(screen.getAllByLabelText(/Действия/)[0]);
     fireEvent.click(screen.getByText('В архив'));
 
     await waitFor(() => expect(mockArchiveMutateAsync).toHaveBeenCalledWith('svc-1'));
@@ -683,7 +683,7 @@ describe('ServicesTable', () => {
 
     // svc-3 (archived, "Ручная лепка") is row index 2 in TEST_SERVICES order
     // — the server returns the full envelope as-is; no client filtering.
-    fireEvent.click(screen.getAllByLabelText('Действия')[2]);
+    fireEvent.click(screen.getAllByLabelText(/Действия/)[2]);
     fireEvent.click(screen.getByText('Восстановить'));
 
     await waitFor(() => expect(mockRestoreMutateAsync).toHaveBeenCalledWith('svc-3'));

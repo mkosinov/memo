@@ -391,14 +391,14 @@ describe('RecordsTable', () => {
 
   it('renders one ⋯ Действия trigger per row; the dropdown column is the 10th header', () => {
     renderTable();
-    expect(screen.getAllByLabelText('Действия')).toHaveLength(1);
+    expect(screen.getAllByLabelText(/Действия/)).toHaveLength(1);
     // 9 data columns + 1 trailing actions column (§6.3).
     expect(document.querySelectorAll('thead th')).toHaveLength(10);
   });
 
   it('clicking ⋯ opens the row menu with data-testid dropdown-<id> and role=menu', () => {
     renderTable();
-    fireEvent.click(screen.getByLabelText('Действия'));
+    fireEvent.click(screen.getByLabelText(/Действия/));
     const menu = screen.getByTestId('dropdown-rec-1');
     expect(menu).toBeInTheDocument();
     expect(menu.getAttribute('role')).toBe('menu');
@@ -419,7 +419,7 @@ describe('RecordsTable', () => {
 
   it('«Удалить» fires the dry-run delete for the row id', () => {
     renderTable();
-    fireEvent.click(screen.getByLabelText('Действия'));
+    fireEvent.click(screen.getByLabelText(/Действия/));
     fireEvent.click(screen.getByRole('menuitem', { name: 'Удалить' }));
     expect(mockDeleteMutation.mutateAsync).toHaveBeenCalledWith('rec-1');
   });
@@ -427,7 +427,7 @@ describe('RecordsTable', () => {
   it('409 dry-run conflict opens DeleteDialog with the dependency tree', async () => {
     setupDeleteConflict();
     renderTable();
-    fireEvent.click(screen.getByLabelText('Действия'));
+    fireEvent.click(screen.getByLabelText(/Действия/));
     fireEvent.click(screen.getByRole('menuitem', { name: 'Удалить' }));
 
     await waitFor(() => expect(screen.getByTestId('delete-dialog')).toBeInTheDocument());
@@ -443,7 +443,7 @@ describe('RecordsTable', () => {
   it('cancel closes the dialog without calling resolveDelete', async () => {
     setupDeleteConflict();
     renderTable();
-    fireEvent.click(screen.getByLabelText('Действия'));
+    fireEvent.click(screen.getByLabelText(/Действия/));
     fireEvent.click(screen.getByRole('menuitem', { name: 'Удалить' }));
 
     await waitFor(() => expect(screen.getByTestId('delete-dialog-cancel-btn')).toBeInTheDocument());
@@ -458,7 +458,7 @@ describe('RecordsTable', () => {
   it('confirm resolves via resolveDelete with the picked cascade resolutions', async () => {
     setupDeleteConflict();
     renderTable();
-    fireEvent.click(screen.getByLabelText('Действия'));
+    fireEvent.click(screen.getByLabelText(/Действия/));
     fireEvent.click(screen.getByRole('menuitem', { name: 'Удалить' }));
 
     await waitFor(() =>
@@ -492,7 +492,7 @@ describe('RecordsTable', () => {
     // mutateAsync resolves (mock default) → the hook already toasted/invalidated
     // (covered by useDeleteRecord.test.ts); assert table behavior only.
     renderTable();
-    fireEvent.click(screen.getByLabelText('Действия'));
+    fireEvent.click(screen.getByLabelText(/Действия/));
     fireEvent.click(screen.getByRole('menuitem', { name: 'Удалить' }));
 
     await waitFor(() => expect(mockDeleteMutation.mutateAsync).toHaveBeenCalledWith('rec-1'));

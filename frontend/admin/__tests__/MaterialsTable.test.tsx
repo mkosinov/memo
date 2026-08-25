@@ -393,7 +393,7 @@ describe('MaterialsTable', () => {
   it('shows "Удалить" option in action dropdown', async () => {
     setupEnvelope();
     await renderLoaded();
-    const actionButtons = screen.getAllByLabelText('Действия');
+    const actionButtons = screen.getAllByLabelText(/Действия/);
     fireEvent.click(actionButtons[0]);
     expect(screen.getByText('Удалить')).toBeInTheDocument();
   });
@@ -404,7 +404,7 @@ describe('MaterialsTable', () => {
     setupEnvelope();
     await renderLoaded();
 
-    fireEvent.click(screen.getAllByLabelText('Действия')[0]);
+    fireEvent.click(screen.getAllByLabelText(/Действия/)[0]);
     fireEvent.click(screen.getByText('Удалить'));
 
     await waitFor(() => expect(mockDeleteMutateAsync).toHaveBeenCalledWith('mat-1'));
@@ -430,7 +430,7 @@ describe('MaterialsTable', () => {
     setupEnvelope();
     await renderLoaded();
 
-    fireEvent.click(screen.getAllByLabelText('Действия')[0]);
+    fireEvent.click(screen.getAllByLabelText(/Действия/)[0]);
     fireEvent.click(screen.getByText('Удалить'));
 
     await waitFor(() => expect(screen.getByTestId('delete-dialog')).toBeInTheDocument());
@@ -443,7 +443,7 @@ describe('MaterialsTable', () => {
     setupEnvelope();
     await renderLoaded();
 
-    fireEvent.click(screen.getAllByLabelText('Действия')[0]);
+    fireEvent.click(screen.getAllByLabelText(/Действия/)[0]);
     fireEvent.click(screen.getByText('Удалить'));
 
     await waitFor(() => expect(screen.getByTestId('delete-dialog-cancel-btn')).toBeInTheDocument());
@@ -460,7 +460,7 @@ describe('MaterialsTable', () => {
     setupEnvelope();
     await renderLoaded();
 
-    fireEvent.click(screen.getAllByLabelText('Действия')[0]);
+    fireEvent.click(screen.getAllByLabelText(/Действия/)[0]);
     fireEvent.click(screen.getByText('В архив'));
 
     await waitFor(() => expect(mockArchiveMutateAsync).toHaveBeenCalledWith('mat-1'));
@@ -473,7 +473,7 @@ describe('MaterialsTable', () => {
 
     // mat-3 (archived, "Старые краски") is row index 2 in TEST_MATERIALS
     // order — the server returns the full envelope as-is; no client filtering.
-    fireEvent.click(screen.getAllByLabelText('Действия')[2]);
+    fireEvent.click(screen.getAllByLabelText(/Действия/)[2]);
     fireEvent.click(screen.getByText('Восстановить'));
 
     await waitFor(() => expect(mockRestoreMutateAsync).toHaveBeenCalledWith('mat-3'));

@@ -13,9 +13,10 @@ import type { ColumnDef, RowAction } from '@/app/components/shared/tableTypes';
 import { DiamondIcon } from '@/app/components/shared/DiamondIcon';
 import { StatusBadge } from '@/app/components/shared/StatusBadge';
 import { safeStatus } from '@/app/lib/status-utils';
-import { displayMasterName } from '@/lib/utils';
+import { displayMasterName, formatTime } from '@/lib/utils';
 
 // ─── Helpers (verbatim from the pre-#139 RecordsTable) ──────────────────────
+// formatTime lives in @/lib/utils (identical HH:MM zero-pad helper — dedup).
 
 export function formatPrice(n: number): string {
   return `${n.toLocaleString('ru-RU')}₽`;
@@ -24,12 +25,6 @@ export function formatPrice(n: number): string {
 export function formatDateRu(dateStr: string): string {
   const d = new Date(dateStr + 'T00:00:00');
   return d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' }).replace(' ', ' ');
-}
-
-export function formatTime(time: number): string {
-  const h = Math.floor(time);
-  const m = Math.round((time - h) * 60);
-  return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
 }
 
 /** Normalize JS getDay() (0=Sun..6=Sat) to Mon=0..Sun=6, extract date and startTime. */
@@ -66,7 +61,7 @@ export interface RecordColumnLookup {
  * at sort_by=date&sort_order=asc — B2 cat 15). Cell JSX extracted verbatim
  * from the pre-#139 RecordsTable.
  */
-export function recordColumns(lookup: RecordColumnLookup): ColumnDef<RecordResponse>[] {
+export const recordColumns = (lookup: RecordColumnLookup): ColumnDef<RecordResponse>[] => {
   const { activities, clients, masters, services, locations, payments, onClientClick } = lookup;
 
   return [
@@ -204,7 +199,7 @@ export function recordColumns(lookup: RecordColumnLookup): ColumnDef<RecordRespo
       },
     },
   ];
-}
+};
 
 // ─── Action factory (§6.3) ──────────────────────────────────────────────────
 
@@ -215,10 +210,10 @@ export function recordColumns(lookup: RecordColumnLookup): ColumnDef<RecordRespo
  * in --danger color; the parent wires it to the Addendum-13 dry-run
  * DeleteDialog flow via useDeleteRecord (§6.9).
  */
-export function recordsActions(cbs: {
+export const recordsActions = (cbs: {
   onDelete: (record: RecordResponse) => void;
-}): (row: RecordResponse) => RowAction<RecordResponse>[] {
+}): ((row: RecordResponse) => RowAction<RecordResponse>[]) => {
   return (row) => [
     { label: 'Удалить', danger: true, onClick: () => cbs.onDelete(row) },
   ];
-}
+};

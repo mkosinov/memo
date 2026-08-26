@@ -126,7 +126,7 @@ A Record is a booking for an Activity. It links a Client to an Activity and cont
 - **Delayed delete:** REMOVED (Addendum 13) — the old 5-second setTimeout + undo toast was replaced by the DeleteDialog dry-run flow (explicit confirmation, no undo).
 
 ### Frontend
-- **Phone blur auto-fill:** searchClientByPhone on blur if phone >= 10 chars
+- **Phone blur auto-fill:** `getClientByPhone` on blur if phone >= 10 chars (api-client fn; backend route is `GET /api/v1/clients/get?phone=` — GH #212, was `searchClientByPhone` + `/clients/search?phone=`)
 - **Default tariff:** New visitors initialized with first service tariff
 - **Name required:** Toast "Заполните имя" if empty
 - **Tariff required per visitor:** Toast if any visitor has no tariffId
@@ -137,7 +137,7 @@ A Record is a booking for an Activity. It links a Client to an Activity and cont
 ## API Endpoints
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | /api/v1/records | List — server-side filter/sort/paginate (see [list contract](#records-list-endpoint-get-apiv1records) below) |
+| GET | /api/v1/records | List — server-side filter/sort/paginate + `?q=` substring search (GH #212, client.name/phone/email + service.title + id) — see [list contract](#records-list-endpoint-get-apiv1records) below |
 | GET | /api/v1/records/{id} | Get with visits |
 | POST | /api/v1/records | Create (capacity check) |
 | PUT | /api/v1/records/{id} | Full update (visits replaced) |
@@ -157,15 +157,28 @@ A Record is a booking for an Activity. It links a Client to an Activity and cont
 | client_id | string | — | Filter by client FK |
 | activity_id | string | — | Filter by activity FK |
 | date_from | date | — | Inclusive from-day (YYYY-MM-DD), covers from 00:00:00 |
-| date_to | date | — | Inclusive to-day (YYYY-MM-DD), covers through 23:59:59.999999 |
+| date_to | date | — | Inclusive to-day (YYYY-MM-DD), covers through 23:59:59.999999. Overflow-free, no year-9999 edge case; same idiom as the `created_*` filters in client.py. |
 | location_id | string | — | Filter by activity's location |
 | service_id | string | — | Filter by activity's service |
 | master_id | string | — | Filter by activity's master |
 | status | enum | — | `waiting` / `visited` / `missed` / `cancelled` |
+| q | string | — | Substring search (GH #212) — `min_length=2` / `max_length=100` → else **422 VALIDATION_ERROR**. Substring fields: `client.name`, `client.phone`, `client.email`, `service.title` (via LEFT OUTER joins, both added ONLY when `q` is present). Plus exact `Record.id` match when `q` is a full 36-char UUID. See "List `?q=`" below. |
 | sort_by | enum | `date` | `date`, `client`, `service`, `master`, `location`, `guests`, `status`, `total`, `payment` |
 | sort_order | enum | `asc` | `asc` / `desc` |
 
-**Validation → 422 VALIDATION_ERROR:** invalid `status` / `sort_by` / `sort_order` enum values, `page < 1`, `per_page` outside 1–100, unparseable date strings, and `date_from > date_to` (cross-field `model_validator`). Note: `RecordListParams` is injected as a Query parameter model (`Annotated[RecordListParams, Query()]`), NOT `Depends()` — Depends-injected models combined with `model_validator` raise 500 (fastapi#4974).
+**Validation → 422 VALIDATION_ERROR:** invalid `status` / `sort_by` / `sort_order` enum values, `page < 1`, `per_page` outside 1–100, unparseable date strings, `q` outside 2–100 chars, and `date_from > date_to` (cross-field `model_validator`). Note: `RecordListParams` is injected as a Query parameter model (`Annotated[RecordListParams, Query()]`), NOT `Depends()` — Depends-injected models combined with `model_validator` raise 500 (fastapi#4974).
+
+**List `?q=` (server `?q=`, GH #212):** the `q` param is declared on `RecordListParams` with `min_length=2` / `max_length=100` via Pydantic `Field`. Substring search over the linked client's `name`/`phone`/`email` and the activity's `service.title`, plus exact `Record.id` equality when `q` parses as a full UUID. Both the `Client` and `Service` joins (LEFT OUTER, since `client_id` is nullable for anonymous records) are added ONLY when `q` is present — the default query plan is unchanged for the no-`q` case. The `q` predicate lands BEFORE the COUNT via `BaseRepository.list_custom`, so `total` reflects the q-filtered set. Searchable fields per the `RecordService.search_fields` matrix:
+
+| Field | Kind | Source |
+|-------|------|--------|
+| `Client.name` | substring | LEFT OUTER join on `Record.client_id == Client.id` |
+| `Client.phone` | substring | same join |
+| `Client.email` | substring | same join |
+| `Service.title` | substring | LEFT OUTER join on `Activity.service_id == Service.id` (Activity is already INNER-joined for date/filters/sorts; the Service join reuses it) |
+| `Record.id` | uuid | exact equality when `q` is a full 36-char UUID (case-normalized lowercase) |
+
+A partial id fragment (e.g. first 8 chars) NEVER matches by id. The `q` predicate is case-insensitive and Cyrillic-safe via the SQLite `lower()` override in `src/db/database.py` (M5).
 
 **Date-range semantics:** `date_from` / `date_to` filter on `Activity.start` via the shared `day_range()` util in `backend/src/domain/dates.py` — whole-day inclusive via `datetime.combine(date, time.min / time.max)`: `date_from` covers from 00:00:00, `date_to` through 23:59:59.999999 (overflow-free, no year-9999 edge case; same idiom as the `created_*` filters in client.py).
 

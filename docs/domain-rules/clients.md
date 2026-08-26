@@ -22,14 +22,26 @@ A Client is a customer who books master classes. All fields are nullable — a C
 ## Business Logic
 
 ### Backend
-- **Phone search:** `GET /clients/search?phone=X` — exact match, returns first result or 404
+- **Phone lookup (exact):** `GET /api/v1/clients/get?phone=X` (GH #212; was `/clients/search` then `searchClientByPhone`). Exact match on `Client.phone`, active-only (archived rows excluded from the lookup), `phone: Query(..., min_length=3)`. First-match-or-404 (returns a single `ClientResponse`); no-match → 404 `ErrorCode.CLIENT_NOT_FOUND`. The empty-string and `<3-char` cases → **422 VALIDATION_ERROR** via the Query bounds. The api-client fn is `getClientByPhone(phone)`. The lookup is implemented as a one-shot call to `ClientService.list(phone=...)` (search-predicate wired for `phone` exact-equality), so the same q-bound semantics apply (422 outside 2–100 chars). A 4-char or 5-char phone (above `min_length=3` but below the search `min_length=2` floor for the broader list) is accepted here because the phone param uses its own `min_length=3` — the lookup is a separate code path from the list `?q=`.
 - **Stats aggregation:** records_count, last_record, total_paid, missed_records — computed on list
 - **`last_record`** = `MAX(Activity.start)` over all active Records of this client (NO status filter — includes cancelled/missed/waiting). Shows the latest activity date among all records the client was booked for. `null` if the client has no active records. Implemented as a correlated scalar subquery in `ClientService` (`last_record_sq`). NOTE: prior to #131 this was called `last_visit` and filtered by `Visit.status='visited'`.
 - **`missed_records`** = `COUNT(Record.id) WHERE Record.status='missed' AND Record.is_active=True` (relies on persisted `Record.status` — see `compute_record_status` in `docs/domain-rules/records.md`). Rule: priority visited > missed > cancelled > waiting. A record with 1 visited + 1 missed visit → `Record.status='visited'` → NOT counted in `missed_records`.
 - **`last_record_activity`** (upcoming booking): *not implemented yet* — tracked in #133. Would be `MIN(Activity.start)` over active records where `Activity.start > now()`. Distinct from `last_record`: a client may have a `last_record` in the past AND a `last_record_activity` in the future.
-- **Filters:** `status` (default `active`; `archived` | `all` — replaces the retired `is_active` query param), search (ILIKE on name/phone), date ranges, record count ranges (`min_records`/`max_records`), missed ranges (`missed_from`/`missed_to`), payment ranges (`min_paid`/`max_paid`)
+- **Filters:** `status` (default `active`; `archived` | `all` — replaces the retired `is_active` query param), `?q=` (GH #212 — see "List `?q=`" below; **renamed from `?search=`**; ILIKE on name/phone/email + full-UUID id), date ranges, record count ranges (`min_records`/`max_records`), missed ranges (`missed_from`/`missed_to`), payment ranges (`min_paid`/`max_paid`)
 - **Sort columns:** name, records_count, last_record, total_paid, missed_records, created_at, updated_at
 - **Pagination:** page (default 1), per_page (default 20, max 100)
+
+### List `?q=` (server `?q=`, GH #212)
+Param `q: str | None` declared on `ClientListParams` with `min_length=2` / `max_length=100` via Pydantic `Field` → out-of-range → **422 VALIDATION_ERROR**. Empty/missing `q` is allowed and means "no search filter". Case-insensitive; Cyrillic-safe via the SQLite `lower()` override in `src/db/database.py` (M5).
+
+| Field | Kind | Notes |
+|-------|------|-------|
+| `Client.name` | substring | ilike `%q%` (case-insensitive) |
+| `Client.phone` | substring | ilike `%q%` |
+| `Client.email` | substring | **added in GH #212** (was not part of the pre-#212 `?search=` matrix) |
+| `Client.id` | uuid | exact equality only when `q` is a full 36-char UUID (case-normalized lowercase). A partial id fragment (e.g. first 8 chars) NEVER matches by id. |
+
+The `q` predicate is applied BEFORE the COUNT in `list_clients_with_stats` (`client.py:170`), so `total` always reflects the q-filtered set — never the unfiltered total. Same goes for every other entity (the matrix is identical in shape). The `phone` exact-lookup route (`GET /api/v1/clients/get?phone=`) is a separate, active-only code path — see "Phone lookup" above.
 - **Restore:** `POST /api/v1/clients/{id}/restore` (sets `archived: false`, HTTP 200 with body) — spec GH #207. *Previously* restore was via `PATCH /clients/{id}` with explicit `{"is_active": bool}`; that path now 422s (`is_active` removed from all PUT/PATCH schemas — auto-closes #201). Restore-buttons UI parity for Client landed in #207 (closes #198).
 
 ### Frontend
@@ -41,8 +53,8 @@ A Client is a customer who books master classes. All fields are nullable — a C
 ## API Endpoints
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | /api/v1/clients | List with pagination, filters, sorting — `?status=active` (default) \| `archived` \| `all` |
-| GET | /api/v1/clients/search?phone=X | Search by phone |
+| GET | /api/v1/clients | List with pagination, filters, sorting — `?status=active` (default) \| `archived` \| `all`, `?q=` substring search (name/phone/email + full-UUID id) — GH #212 (was `?search=`; **email added**; renames `search`→`q`) |
+| GET | /api/v1/clients/get?phone=X | Phone lookup — exact, active-only, 404 `CLIENT_NOT_FOUND` if no match, 422 if `len(phone) < 3` (GH #212; **renamed from `/clients/search?phone=`**) — api-client `getClientByPhone` |
 | GET | /api/v1/clients/{id} | Get with stats |
 | POST | /api/v1/clients | Create |
 | PUT | /api/v1/clients/{id} | Full update |

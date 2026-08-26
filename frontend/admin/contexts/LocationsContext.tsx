@@ -13,19 +13,14 @@ const { Provider, usePagedList } = createPagedListContext<LocationResponse>({
       status: p.status,
       // Sort params omitted until the user picks a sort — server default order (§4.4).
       ...(p.sort_by ? { sort_by: p.sort_by, sort_order: p.sort_order } : {}),
+      ...(p.q ? { q: p.q } : {}),
     }),
   withStatus: true,
-  // #139 T2 — dict search is predicate-only (spec §6.7): filters the loaded
-  // page into `visibleItems`; `search` stays out of the query key/fetcher.
-  // Name + address match, per the LocationFilters placeholder
-  // "Название или адрес..." (verbatim from the pre-#139 table filter memo).
-  searchPredicate: (l, q) => {
-    const query = q.toLowerCase();
-    return (
-      l.name.toLowerCase().includes(query) ||
-      (l.address ?? '').toLowerCase().includes(query)
-    );
-  },
+  // GH #212 T11 — dict search is server-side: the factory clamps q to ≥2
+  // chars, puts it in the query key, and the fetcher sends it on. The #139
+  // predicate mechanism (temporary degradation, §6.7) is retired here; the
+  // name+address field matching now lives in the backend list ?q=.
+  serverSearch: true,
 });
 
 export const LocationsProvider = Provider;

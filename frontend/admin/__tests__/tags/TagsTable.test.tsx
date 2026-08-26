@@ -159,11 +159,12 @@ describe('TagsTable server pagination/sort (#205 §5.2/§5.3)', () => {
     expect(mockGetTags.mock.calls[0][0]).not.toHaveProperty('status');
   });
 
-  // ─── Search (G1b Q1 — KEPT: client-side filter over the loaded page) ───
-  // B2 cat 13 (#139 T1): search moved to the factory (searchPredicate) and the
-  // DataTable input now debounces 300ms — advance the debounce before asserting.
+  // ─── Search (GH #212 T11 — server-side via ?q=; #205 degradation ends) ──
+  // The DataTable input debounces 300ms before setSearch; the factory clamps
+  // q to ≥2 chars and sends it to getTags. Rows render exactly what the
+  // server returned — no client filtering (#139 predicate removed).
 
-  it('filters the loaded page by search text (client-side)', async () => {
+  it('searches server-side via ?q= (fetch carries q, rows stay server-returned)', async () => {
     setupEnvelope();
     await renderLoaded();
 
@@ -173,18 +174,73 @@ describe('TagsTable server pagination/sort (#205 §5.2/§5.3)', () => {
         target: { value: 'жив' },
       });
 
-      // Before the 300ms debounce fires, nothing is filtered yet
-      expect(screen.getByText('Керамика')).toBeInTheDocument();
+      // Before the 300ms debounce fires, no refetch yet
+      expect(mockGetTags).toHaveBeenCalledTimes(1);
 
       act(() => {
         vi.advanceTimersByTime(300);
       });
-
-      expect(screen.getByText('Живопись')).toBeInTheDocument();
-      expect(screen.queryByText('Керамика')).not.toBeInTheDocument();
     } finally {
       vi.useRealTimers();
     }
+
+    await waitFor(() => {
+      expect(mockGetTags).toHaveBeenCalledWith(expect.objectContaining({ q: 'жив' }));
+    });
+    // No client filtering — setupEnvelope's items stay visible regardless of match
+    expect(screen.getByText('Живопись')).toBeInTheDocument();
+    expect(screen.getByText('Керамика')).toBeInTheDocument();
+  });
+
+  it('✕ clears search and refetches without q', async () => {
+    setupEnvelope();
+    await renderLoaded();
+
+    vi.useFakeTimers();
+    try {
+      fireEvent.change(screen.getByPlaceholderText('Поиск тегов...'), {
+        target: { value: 'жив' },
+      });
+      act(() => {
+        vi.advanceTimersByTime(300);
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+    await waitFor(() => {
+      expect(mockGetTags).toHaveBeenCalledWith(expect.objectContaining({ q: 'жив' }));
+    });
+
+    // ✕ submits '' immediately (no debounce) → refetch without q
+    fireEvent.click(screen.getByLabelText('Очистить поиск'));
+
+    await waitFor(() => {
+      expect(mockGetTags).toHaveBeenLastCalledWith({ page: 1, per_page: 10 });
+    });
+  });
+
+  it('does not fire q on 1 char (≥2 clamp — treated as unset)', async () => {
+    setupEnvelope();
+    await renderLoaded();
+
+    vi.useFakeTimers();
+    try {
+      fireEvent.change(screen.getByPlaceholderText('Поиск тегов...'), {
+        target: { value: 'ж' },
+      });
+      act(() => {
+        vi.advanceTimersByTime(300);
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+
+    // Raw input state reflects the char, but no q fetch fires
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText('Поиск тегов...')).toHaveValue('ж');
+    });
+    expect(mockGetTags).toHaveBeenCalledTimes(1);
+    expect(mockGetTags.mock.calls[0][0]).not.toHaveProperty('q');
   });
 
   // ─── Server-driven pagination wiring ───────────────────────────────────

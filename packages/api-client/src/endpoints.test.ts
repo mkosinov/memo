@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { z } from 'zod';
 import { getMasters, getMaster, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, deleteActivity, getWebPhotos, getRecords, getClients, getPayments, getPaymentTotals, createRecord, updateRecord, deleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, getClientByPhone, updateVisitStatus, getTags, createService, updateService, deleteService, createLocation, updateLocation, deleteLocation, getClientsWithStats, updateClient, patchClient, reorderMasters, reorderLocations, patchMaster, patchLocation, patchMaterial, patchService, patchUserSettings, getMaterials, getTag, getVisitors, deleteMaster, deleteMaterial, deleteClient, archiveMaster, restoreMaster, resolveDeleteMaster, archiveLocation, restoreLocation, resolveDeleteLocation, archiveService, restoreService, resolveDeleteService, archiveMaterial, restoreMaterial, resolveDeleteMaterial, archiveClient, restoreClient, resolveDeleteClient, resolveDeleteRecord, getAllMasters, getAllLocations, getAllServices, getAllMaterials, getAllTags } from './endpoints';
-import { ServiceCreateSchema, LocationCreateSchema, type ServiceUpdate, type LocationUpdate, type ClientUpdate } from './schemas';
+import { ServiceCreateSchema, LocationCreateSchema, ActivityResponseSchema, type ServiceUpdate, type LocationUpdate, type ClientUpdate } from './schemas';
 
 // Mock the api function from client
 vi.mock('./client', () => ({
@@ -165,6 +165,37 @@ describe('getActivities', () => {
       expect.anything(),
     );
   });
+
+  it('calls /api/v1/activities without dates — dates are optional (GH #212)', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
+    await getActivities({});
+    expect(api).toHaveBeenCalledWith('/api/v1/activities', expect.anything());
+  });
+
+  it('serializes service_id and q params (GH #212)', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
+    await getActivities({ service_id: 's-1', q: 'керамика' });
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/activities?service_id=s-1&q=%D0%BA%D0%B5%D1%80%D0%B0%D0%BC%D0%B8%D0%BA%D0%B0',
+      expect.anything(),
+    );
+  });
+
+  it('serializes all params — dates, service_id, q, pagination (GH #212)', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 2, per_page: 50 });
+    await getActivities({
+      date_from: '2024-01-01',
+      date_to: '2024-01-07',
+      service_id: 's-1',
+      q: 'керамика',
+      page: 2,
+      per_page: 50,
+    });
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/activities?date_from=2024-01-01&date_to=2024-01-07&service_id=s-1&q=%D0%BA%D0%B5%D1%80%D0%B0%D0%BC%D0%B8%D0%BA%D0%B0&page=2&per_page=50',
+      expect.anything(),
+    );
+  });
 });
 
 describe('getActivity', () => {
@@ -286,6 +317,12 @@ describe('getRecords', () => {
     vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
     await getRecords({ page: 1, per_page: 10, status: undefined, location_id: undefined });
     expect(api).toHaveBeenCalledWith('/api/v1/records?page=1&per_page=10', expect.anything());
+  });
+
+  it('serializes q param into the URL (GH #212)', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
+    await getRecords({ q: 'иван' });
+    expect(api).toHaveBeenCalledWith('/api/v1/records?q=%D0%B8%D0%B2%D0%B0%D0%BD', expect.anything());
   });
 });
 
@@ -1199,5 +1236,68 @@ describe('getAllTags', () => {
     const result = await getAllTags();
     expect(api).toHaveBeenCalledWith('/api/v1/tags/all', expect.anything());
     expect(result).toEqual([tag]);
+  });
+});
+
+// ─── listQuery q param — server-side search (GH #212) ──────────────────────
+
+describe('listQuery q param (GH #212)', () => {
+  it('serializes q into the URL', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
+    await getMasters({ q: 'анна' });
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/masters?q=%D0%B0%D0%BD%D0%BD%D0%B0',
+      expect.anything(),
+    );
+  });
+
+  it('serializes q together with pagination params', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 2, per_page: 50 });
+    await getTags({ page: 2, per_page: 50, q: 'vip' });
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/tags?page=2&per_page=50&q=vip',
+      expect.anything(),
+    );
+  });
+
+  it('omits q when empty string (server requires min 2 chars)', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
+    await getMasters({ q: '' });
+    expect(api).toHaveBeenCalledWith('/api/v1/masters', expect.anything());
+  });
+});
+
+// ─── ActivityResponseSchema service_title (GH #212) ────────────────────────
+
+const baseActivity = {
+  id: 'a-1',
+  master_id: 'm-1',
+  service_id: 's-1',
+  location_id: 'l-1',
+  start: '2024-01-01T10:00:00Z',
+  duration: 120,
+  capacity: 10,
+  is_private: false,
+  comment: null,
+  record_info: null,
+  created_at: '2024-01-01T00:00:00Z',
+  updated_at: '2024-01-01T00:00:00Z',
+  occupied: 3,
+};
+
+describe('ActivityResponseSchema service_title (GH #212)', () => {
+  it('parses service_title present as string', () => {
+    const result = ActivityResponseSchema.parse({ ...baseActivity, service_title: 'Керамика' });
+    expect(result.service_title).toBe('Керамика');
+  });
+
+  it('parses service_title present as null', () => {
+    const result = ActivityResponseSchema.parse({ ...baseActivity, service_title: null });
+    expect(result.service_title).toBeNull();
+  });
+
+  it('parses when service_title is absent (backward-compatible)', () => {
+    const result = ActivityResponseSchema.parse(baseActivity);
+    expect(result.service_title).toBeUndefined();
   });
 });

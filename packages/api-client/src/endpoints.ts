@@ -95,6 +95,8 @@ export interface ListParams {
   /** Server-side sort — dictionary list endpoints only (#205); must be in the endpoint's whitelist. */
   sort_by?: string;
   sort_order?: 'asc' | 'desc';
+  /** Server-side search (GH #212); min 2 chars server-enforced. */
+  q?: string;
 }
 
 function listQuery(params?: ListParams): string {
@@ -104,6 +106,7 @@ function listQuery(params?: ListParams): string {
   if (params?.status) search.set('status', params.status);
   if (params?.sort_by) search.set('sort_by', params.sort_by);
   if (params?.sort_order) search.set('sort_order', params.sort_order);
+  if (params?.q) search.set('q', params.q);
   const qs = search.toString();
   return qs ? `?${qs}` : '';
 }
@@ -215,17 +218,22 @@ export async function getServices(params?: ListParams): Promise<PaginatedRespons
 // ─── Activities ────────────────────────────────────────────────────────────
 
 export async function getActivities(params: {
-  date_from: string;
-  date_to: string;
+  date_from?: string;
+  date_to?: string;
+  service_id?: string;
+  q?: string;
   page?: number;
   per_page?: number;
 }): Promise<PaginatedResponse<ActivityResponse>> {
   const search = new URLSearchParams();
-  search.set('date_from', params.date_from);
-  search.set('date_to', params.date_to);
+  if (params.date_from) search.set('date_from', params.date_from);
+  if (params.date_to) search.set('date_to', params.date_to);
+  if (params.service_id) search.set('service_id', params.service_id);
+  if (params.q) search.set('q', params.q);
   if (params.page) search.set('page', String(params.page));
   if (params.per_page) search.set('per_page', String(params.per_page));
-  return api(`/api/v1/activities?${search.toString()}`, ActivityListResponseSchema);
+  const qs = search.toString();
+  return api(`/api/v1/activities${qs ? `?${qs}` : ''}`, ActivityListResponseSchema);
 }
 
 export async function getActivity(id: string): Promise<ActivityResponse> {
@@ -280,6 +288,7 @@ export async function getRecords(params?: {
   service_id?: string;
   master_id?: string;
   status?: string;
+  q?: string;
   sort_by?: string;
   sort_order?: string;
   page?: number;
@@ -294,6 +303,7 @@ export async function getRecords(params?: {
   if (params?.service_id) search.set('service_id', params.service_id);
   if (params?.master_id) search.set('master_id', params.master_id);
   if (params?.status) search.set('status', params.status);
+  if (params?.q) search.set('q', params.q);
   if (params?.sort_by) search.set('sort_by', params.sort_by);
   if (params?.sort_order) search.set('sort_order', params.sort_order);
   if (params?.page) search.set('page', String(params.page));

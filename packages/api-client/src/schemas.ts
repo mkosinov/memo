@@ -175,6 +175,8 @@ export const ActivityResponseSchema = z.object({
   created_at: z.string(), // ISO datetime string
   updated_at: z.string(), // ISO datetime string
   occupied: z.number(),
+  /** Denormalized service title for list displays (GH #212); null when the service is archived/deleted. */
+  service_title: z.string().nullable().optional(),
 });
 
 export type ActivityResponse = z.infer<typeof ActivityResponseSchema>;

@@ -113,6 +113,13 @@ export function formatRecordLabel(activityStart: string | null | undefined): str
   return `${d.getDate()} ${MONTHS_GENITIVE[d.getMonth()]} · ${time}`;
 }
 
+/** Format ISO activity start for display: "HH:mm dd.mm.yyyy" (local time, GH #212). */
+export function formatActivityStart(iso: string): string {
+  const d = new Date(iso);
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${p(d.getHours())}:${p(d.getMinutes())} ${p(d.getDate())}.${p(d.getMonth() + 1)}.${d.getFullYear()}`;
+}
+
 // ─── Time / Date Utilities ────────────────────────────────────────────────
 
 /** Format hours to "HH:MM" string. 10 → "10:00", 10.5 → "10:30", 9.25 → "09:15". */

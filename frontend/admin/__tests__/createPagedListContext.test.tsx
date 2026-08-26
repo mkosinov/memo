@@ -31,6 +31,7 @@ function setup(
     withStatus?: boolean;
     queryKeyPrefix?: string;
     searchPredicate?: (item: TestItem, q: string) => boolean;
+    serverSearch?: boolean;
   } = {},
 ) {
   const fetcher = vi.fn((params: PagedListFetcherParams) =>
@@ -41,6 +42,7 @@ function setup(
     fetcher: fetcher as Fetcher,
     withStatus: config.withStatus,
     searchPredicate: config.searchPredicate,
+    serverSearch: config.serverSearch,
   });
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -341,5 +343,195 @@ describe('createPagedListContext', () => {
       expect(result.current.page).toBe(1);
     });
     expect(fetcher).toHaveBeenCalledWith({ page: 2, per_page: 10 });
+  });
+
+  // ─── #212 T10: serverSearch — server-side q path (spec §5.5 pt 2) ──────
+
+  describe('serverSearch', () => {
+    it('setSearch with ≥2 chars refetches with q and puts q in the queryKey', async () => {
+      const { fetcher, usePagedList, Wrapper, queryClient } = setup({
+        serverSearch: true,
+        queryKeyPrefix: 'tests-ss',
+      });
+
+      const { result } = renderHook(() => usePagedList(), { wrapper: Wrapper });
+
+      await waitFor(() => {
+        expect(result.current.isLoading).toBe(false);
+      });
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      expect(fetcher).toHaveBeenCalledWith({ page: 1, per_page: 10 });
+
+      act(() => {
+        result.current.setSearch('анна');
+      });
+
+      await waitFor(() => {
+        expect(fetcher).toHaveBeenCalledWith({ page: 1, per_page: 10, q: 'анна' });
+      });
+      expect(fetcher).toHaveBeenCalledTimes(2);
+      expect(result.current.search).toBe('анна');
+      const keys = queryClient.getQueryCache().getAll().map((q) => q.queryKey);
+      expect(keys).toEqual([
+        ['tests-ss', 1, 10, null, 'asc', ''],
+        ['tests-ss', 1, 10, null, 'asc', 'анна'],
+      ]);
+    });
+
+    it('1-char search does NOT fire with q (≥2 clamp — treated as unset)', async () => {
+      const { fetcher, usePagedList, Wrapper, queryClient } = setup({
+        serverSearch: true,
+        queryKeyPrefix: 'tests-ss-clamp',
+      });
+
+      const { result } = renderHook(() => usePagedList(), { wrapper: Wrapper });
+
+      await waitFor(() => {
+        expect(result.current.isLoading).toBe(false);
+      });
+
+      act(() => {
+        result.current.setSearch('а');
+      });
+
+      // Raw state reflects the input, but no refetch fires and no q enters the key
+      await waitFor(() => {
+        expect(result.current.search).toBe('а');
+      });
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      expect(fetcher.mock.calls[0][0]).not.toHaveProperty('q');
+      const keys = queryClient.getQueryCache().getAll().map((q) => q.queryKey);
+      expect(keys).toEqual([['tests-ss-clamp', 1, 10, null, 'asc', '']]);
+    });
+
+    it('empty search sends no q and clears search resets to an unfiltered fetch', async () => {
+      const { fetcher, usePagedList, Wrapper } = setup({
+        serverSearch: true,
+        queryKeyPrefix: 'tests-ss-empty',
+      });
+
+      const { result } = renderHook(() => usePagedList(), { wrapper: Wrapper });
+
+      await waitFor(() => {
+        expect(result.current.isLoading).toBe(false);
+      });
+      // initial fetch carries no q
+      expect(fetcher.mock.calls[0][0]).not.toHaveProperty('q');
+
+      act(() => {
+        result.current.setSearch('ке');
+      });
+      await waitFor(() => {
+        expect(fetcher).toHaveBeenCalledWith({ page: 1, per_page: 10, q: 'ке' });
+      });
+
+      act(() => {
+        result.current.setSearch('');
+      });
+      await waitFor(() => {
+        // deep equality — no q key on the post-clear fetch
+        expect(fetcher).toHaveBeenLastCalledWith({ page: 1, per_page: 10 });
+      });
+      expect(fetcher.mock.calls[2][0]).not.toHaveProperty('q');
+    });
+
+    it('setSearch resets page to 1', async () => {
+      const { fetcher, usePagedList, Wrapper } = setup({
+        serverSearch: true,
+        queryKeyPrefix: 'tests-ss-page',
+      });
+      // Non-empty pages → the page clamp never interferes with this flow
+      fetcher.mockImplementation((p) =>
+        Promise.resolve(envelope(p.page, p.per_page, 30, [{ id: 't-1', name: 'Анна' }])),
+      );
+
+      const { result } = renderHook(() => usePagedList(), { wrapper: Wrapper });
+
+      await waitFor(() => {
+        expect(result.current.isLoading).toBe(false);
+      });
+
+      act(() => {
+        result.current.setPage(3);
+      });
+      await waitFor(() => {
+        expect(fetcher).toHaveBeenCalledWith({ page: 3, per_page: 10 });
+      });
+      expect(result.current.page).toBe(3);
+
+      act(() => {
+        result.current.setSearch('ива');
+      });
+
+      await waitFor(() => {
+        expect(fetcher).toHaveBeenCalledWith({ page: 1, per_page: 10, q: 'ива' });
+      });
+      expect(result.current.page).toBe(1);
+    });
+
+    it('predicate is NOT applied — visibleItems === items even with a predicate set', async () => {
+      const { fetcher, usePagedList, Wrapper } = setup({
+        serverSearch: true,
+        queryKeyPrefix: 'tests-ss-visible',
+        searchPredicate: (item, q) => item.name.toLowerCase().includes(q.toLowerCase()),
+      });
+      // Persistent response → the q-refetch returns the same 2-row page
+      fetcher.mockImplementation(() =>
+        Promise.resolve(
+          envelope(1, 10, 2, [
+            { id: 't-1', name: 'Живопись' },
+            { id: 't-2', name: 'Керамика' },
+          ]),
+        ),
+      );
+
+      const { result } = renderHook(() => usePagedList(), { wrapper: Wrapper });
+
+      await waitFor(() => {
+        expect(result.current.items).toHaveLength(2);
+      });
+
+      act(() => {
+        result.current.setSearch('жив');
+      });
+
+      // server owns the filter → the client predicate is bypassed
+      await waitFor(() => {
+        expect(fetcher).toHaveBeenCalledWith({ page: 1, per_page: 10, q: 'жив' });
+        expect(result.current.items).toHaveLength(2);
+      });
+      expect(result.current.visibleItems).toBe(result.current.items);
+      expect(result.current.visibleItems).toHaveLength(2);
+    });
+
+    it('serverSearch off: predicate behavior unchanged (#139 pins this)', async () => {
+      const { fetcher, usePagedList, Wrapper } = setup({
+        queryKeyPrefix: 'tests-ss-off',
+        searchPredicate: (item, q) => item.name.toLowerCase().includes(q.toLowerCase()),
+      });
+      fetcher.mockResolvedValueOnce(
+        envelope(1, 10, 2, [
+          { id: 't-1', name: 'Живопись' },
+          { id: 't-2', name: 'Керамика' },
+        ]),
+      );
+
+      const { result } = renderHook(() => usePagedList(), { wrapper: Wrapper });
+
+      await waitFor(() => {
+        expect(result.current.items).toHaveLength(2);
+      });
+
+      act(() => {
+        result.current.setSearch('жив');
+      });
+
+      await waitFor(() => {
+        expect(result.current.visibleItems).toEqual([{ id: 't-1', name: 'Живопись' }]);
+      });
+      // no server round-trip — predicate path only
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      expect(fetcher.mock.calls[0][0]).not.toHaveProperty('q');
+    });
   });
 });

@@ -24,12 +24,14 @@ function formatTime(time: number): string {
 
 // ─── Component ────────────────────────────────────────────────────────────
 
-interface ClientCardModalProps {
+interface ClientQuickCardProps {
   clientId: string;
   onClose: () => void;
 }
 
-export function ClientCardModal({ clientId, onClose }: ClientCardModalProps) {
+// Spec §6.13 rename (#139 T8): the records-side read-only viewer is
+// `ClientQuickCard` — disambiguated from the clients-side record-tab modal.
+export function ClientQuickCard({ clientId, onClose }: ClientQuickCardProps) {
   const { clients, services, locations } = useRecords(); // reference-data maps stay
 
   // Own data — the context records list is now one server page (#191)

@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — 2026-08-19
+
+### Added
+- **GH #139 — Generic DataTable: 8 copy-paste admin tables → shared `<DataTable>` + `PagedListState` contract** — branch `feat/generic-datatable-139` (18 commits: 55bb17a..a44fc25; baseline d97877b):
+  - **Admin:** shared `app/components/shared/DataTable.tsx` + `tableTypes.ts` (`ColumnDef`, `RowAction`) own ALL table mechanics — skeleton 10 rows, error+retry, empty state, sortable headers (↕/↑/↓ + aria-sort), pager, ColumnPicker controlled presentational with last-visible-column muted guard, row actions dropdown role=menu with Esc/focus-return a11y. Per-entity code reduced to `<entity>Columns.tsx` (columns + RowAction factories) + thin wiring wrappers. All 8 tables migrated in order Tags→Locations→Masters→Materials→Services→Clients→Photos→Records; wrappers consume `tableState: PagedListState<T>` (createPagedListContext shape; status optional). Contract addenda: rowTestId per-table prefixes, toolbarLead (dict wrappers), actionCellExtra (Locations Карта), rowKey/visibleItems. Legacy ColumnPicker shim deleted; e2e `.or()` transition fallbacks removed.
+  - **Behavior unifications (B-scope, intentional):** LS keys hard-cut to `<entity>-columns`; shared DeleteDialog + 409 dry-run for 6 tables (Tags/Photos keep window.confirm); Records/Clients page-reset-on-sort; ↕ neutral glyph everywhere incl. Clients; unified empty copy «Нет записей» on all 8 (Addendum 12, user ruling); Records gains row action dropdown («Открыть» = onRowClick only); ClientCardModal (records variant) renamed ClientQuickCard, no merge.
+  - **Backend:** records delete dry-run substrate (Addendum 13 — dialog on ANY deps incl. payments, non-blocking, user ruling 2026-08-22); domain-rules records.md synced (commit `0020abc`).
+  - **Tests:** backend pytest 1284p/0f/6s; api-client vitest 202p/4f (4 = pre-existing #188, unchanged); admin vitest 96 files/1460p/0f; `tsc` clean; eslint 0 errors on touched files; e2e shard-schedule 84/84, shard-rest 212/217 — 5 fails pre-existing & classified (3 wave6 status snapshots = local font-metric drift, CI-green on main at same lockfile; 2 records visual = full-shard seed-pollution interference, deterministically green isolated; NOT regressions; #216 flake passed); visual 8×7 matrix 60/60; G4.5 live spot-check 42 assertions PASS (screenshots `/tmp/opencode/g45-139/`).
+  - **Polish commit `a44fc25`:** stale-comment fixes, recordsColumns export idiom, formatTime dedup vs `lib/utils`, a11y minors (aria-current page, row-identity aria-labels on ⋯ triggers, skeleton role=status, tautology test title).
+  - **Closes:** #139. Acceptance criteria met (spec §11): shared mechanics in one place; TagsTable status-filter bug structurally eliminated (withStatus:false); CRUD suites green.
+  - **148 files changed, +6070 / −3428.**
+  - Design spec: `docs/specs/2026-08-18-generic-datatable-design.md` (on main, addenda #6–#13)
+  - Plan: `docs/plans/2026-08-18-generic-datatable-plan.md` (on main, addenda #6–#13)
+
 ## [Unreleased] — 2026-08-18
 
 ### Added

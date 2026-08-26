@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { queryDBRow, queryDBRows } from './fixtures/db-query';
-import { createTestClient, createTestRecord, cleanup } from './fixtures/factories';
-import { waitForScheduleReady, openModal, openAddTab, getFirstActivity } from './fixtures/helpers';
+import { createTestClient, createTestRecord, createTestPayment, cleanup, cleanupRecord } from './fixtures/factories';
+import { waitForScheduleReady, openModal, openAddTab, getFirstActivity, confirmDeleteDialog } from './fixtures/helpers';
 
 /**
  * E2E tests for ActivityDetailsModal — full user scenarios with DB verification.
@@ -92,21 +92,26 @@ test.describe('ActivityDetailsModal — Real User Scenarios', () => {
       }, { timeout: 30_000, intervals: [200, 500, 1000] }).toBe(true);
     } finally {
       // CLEANUP — always runs, even if test fails
-      if (recordRow?.id) await cleanup(request, `/api/v1/records/${recordRow.id}`);
+      if (recordRow?.id) await cleanupRecord(request, recordRow.id);
       if (clientRow?.id) await cleanup(request, `/api/v1/clients/${clientRow.id}`);
     }
   });
 
-  // ── Scenario 2: Delete record — verify DB hard-delete ────────────────
+  // ── Scenario 2: Delete record via DeleteDialog — verify DB hard-delete ──
+  // Addendum 13 (T8-FE2a): the legacy 5s undo toast is gone. Click
+  // «Удалить запись» → dry-run 409 (record has visits + payments) →
+  // DeleteDialog lists the deps → type-to-confirm + resolve → record and
+  // its cascade are hard-deleted.
 
-  test('2. Delete record — timeout removes it (row gone from DB)', async ({
+  test('2. Delete record — dialog confirm removes it (row gone from DB)', async ({
     page,
     request,
   }) => {
-    // 1. SETUP — create record via API
+    // 1. SETUP — create record with a visit AND a payment (both dialog deps)
     const client = await createTestClient(request);
     const activity = await getFirstActivity(page);
     const record = await createTestRecord(request, activity.id, client.id);
+    await createTestPayment(request, record.id);
 
     try {
       // Verify it exists before delete
@@ -119,30 +124,47 @@ test.describe('ActivityDetailsModal — Real User Scenarios', () => {
       await page.goto('/schedule');
       await page.waitForSelector('[data-testid^="activity-"]', { timeout: 15000 });
 
-      // 2. ACTION — open modal, navigate to client tab, delete
-      await openModal(page);
+      // 2. ACTION — open modal, navigate to client tab, click delete
+      await openModal(page, { recordId: record.id });
 
       const clientTab = page.locator(`[data-testid="tab-client-${record.id}"]`);
-      if (await clientTab.isVisible()) {
-        await clientTab.click();
-        await page.locator('[data-testid="btn-delete-record"]').click();
+      await expect(clientTab).toBeVisible({ timeout: 15_000 });
+      await clientTab.click();
+      await page.locator('[data-testid="btn-delete-record"]').click();
 
-        // 3. VERIFY UI — undo toast appears
-        await expect(page.locator('text=Запись удалена через 5 секунд')).toBeVisible({
-          timeout: 3000,
-        });
+      // 3. VERIFY UI — DeleteDialog opens listing visits + payments
+      await expect(page.locator('[data-testid="delete-dialog"]')).toBeVisible({ timeout: 10_000 });
+      await expect(page.locator('[data-testid="dep-visits"]')).toContainText('Посещения: 1 (удалён)');
+      await expect(page.locator('[data-testid="dep-payments"]')).toContainText('Платежи: 1 (удалён)');
 
-        // Wait for undo timeout (5s) + API call, then verify DB row is gone
-        await expect.poll(async () => {
-          const afterRow = queryDBRow(
-            `SELECT id FROM records WHERE id='${record.id}'`,
-          );
-          return afterRow === null;
-        }, { timeout: 30_000, intervals: [500, 1000, 2000] }).toBe(true);
-      }
+      // Confirm: pick the cascade deps, type the record label (records have
+      // no name — label derives from the activity start; extract it from
+      // the dialog title instead of recomputing timezones here).
+      await expect(page.locator('[data-testid="delete-dialog-confirm-btn"]')).toBeDisabled();
+      await page.locator('[data-testid="dep-visits"]').click();
+      await page.locator('[data-testid="dep-payments"]').click();
+      const title = await page.locator('[data-testid="delete-dialog-title"]').textContent();
+      const label = title?.match(/Удаление «записи (.+)»/)?.[1] ?? '';
+      expect(label).not.toBe('');
+      await confirmDeleteDialog(page, label);
+
+      // Success toast + dialog closes (text= locator — scenario 1 style:
+      // the generic [role="status"] also matches dnd-kit's empty live region).
+      await expect(page.locator('text=Запись удалена')).toBeVisible({ timeout: 10_000 });
+      await expect(page.locator('[data-testid="delete-dialog"]')).toHaveCount(0);
+
+      // 4. VERIFY DB — row gone; cascade rows (visits/payments) gone too
+      await expect.poll(async () => {
+        const afterRow = queryDBRow(
+          `SELECT id FROM records WHERE id='${record.id}'`,
+        );
+        return afterRow === null;
+      }, { timeout: 30_000, intervals: [500, 1000, 2000] }).toBe(true);
+      expect(queryDBRows(`SELECT * FROM visits WHERE record_id='${record.id}'`)).toHaveLength(0);
+      expect(queryDBRows(`SELECT * FROM payments WHERE record_id='${record.id}'`)).toHaveLength(0);
     } finally {
       // CLEANUP — always runs, even if test fails
-      await cleanup(request, `/api/v1/records/${record.id}`);
+      await cleanupRecord(request, record.id);
       await cleanup(request, `/api/v1/clients/${client.id}`);
     }
   });
@@ -204,7 +226,7 @@ test.describe('ActivityDetailsModal — Real User Scenarios', () => {
       }
     } finally {
       // CLEANUP — always runs, even if test fails
-      await cleanup(request, `/api/v1/records/${record.id}`);
+      await cleanupRecord(request, record.id);
       await cleanup(request, `/api/v1/clients/${client.id}`);
     }
   });
@@ -328,13 +350,14 @@ test.describe('ActivityDetailsModal — Real User Scenarios', () => {
     expect(Number(capacityValue)).toBeGreaterThan(0);
   });
 
-  // ── Scenario 8: Delete with undo — record survives ────────────────────
+  // ── Scenario 8: Delete dialog cancel — record survives (Addendum 13) ───
 
-  test('8. Delete record — undo within 5s preserves it in DB', async ({
+  test('8. Delete record — dialog cancel preserves it in DB', async ({
     page,
     request,
   }) => {
-    // 1. SETUP
+    // 1. SETUP — the factory always creates a visit, so the seeded record
+    // has dependencies and the dry-run returns 409 → dialog.
     const client = await createTestClient(request);
     const activity = await getFirstActivity(page);
     const record = await createTestRecord(request, activity.id, client.id);
@@ -343,39 +366,35 @@ test.describe('ActivityDetailsModal — Real User Scenarios', () => {
       await page.goto('/schedule');
       await page.waitForSelector('[data-testid^="activity-"]', { timeout: 15000 });
 
-      // 2. ACTION
-      await openModal(page);
+      // 2. ACTION — open modal → client tab → «Удалить запись» → dialog
+      await openModal(page, { recordId: record.id });
 
       const clientTab = page.locator(`[data-testid="tab-client-${record.id}"]`);
-      if (await clientTab.isVisible()) {
-        await clientTab.click();
-        await expect(page.locator('[data-testid="client-tab"]')).toBeVisible();
+      await expect(clientTab).toBeVisible({ timeout: 15_000 });
+      await clientTab.click();
+      await expect(page.locator('[data-testid="client-tab"]')).toBeVisible();
 
-        // Verify client name is displayed (shown in the tab label in WIP structure)
-        await expect(page.getByText(client.name)).toBeVisible();
+      // Verify client name is displayed (shown in the tab label in WIP structure)
+      await expect(page.getByText(client.name)).toBeVisible({ timeout: 10_000 });
 
-        // Click delete
-        await page.locator('[data-testid="btn-delete-record"]').click();
+      await page.locator('[data-testid="btn-delete-record"]').click();
 
-        // 3. VERIFY UI — undo toast
-        await expect(page.locator('text=Запись удалена через 5 секунд')).toBeVisible({
-          timeout: 3000,
-        });
+      // 3. VERIFY UI — DeleteDialog opens with the visit dependency listed
+      await expect(page.locator('[data-testid="delete-dialog"]')).toBeVisible({ timeout: 10_000 });
+      await expect(page.locator('[data-testid="dep-visits"]')).toContainText('Посещения: 1 (удалён)');
 
-        // Click undo
-        await page.locator('text=Отменить').click();
+      // Cancel — dialog closes, nothing deleted.
+      await page.locator('[data-testid="delete-dialog-cancel-btn"]').click();
+      await expect(page.locator('[data-testid="delete-dialog"]')).toHaveCount(0);
 
-        // 4. VERIFY DB — record still exists (retry until undo is processed)
-        await expect.poll(async () => {
-          const row = queryDBRow(
-            `SELECT id FROM records WHERE id='${record.id}'`,
-          );
-          return row !== null;
-        }, { timeout: 30_000, intervals: [200, 500, 1000] }).toBe(true);
-      }
+      // 4. VERIFY DB — record (and its visit) still exist
+      const row = queryDBRow(`SELECT id FROM records WHERE id='${record.id}'`);
+      expect(row).not.toBeNull();
+      const visits = queryDBRows(`SELECT * FROM visits WHERE record_id='${record.id}'`);
+      expect(visits).toHaveLength(1);
     } finally {
       // CLEANUP — always runs, even if test fails
-      await cleanup(request, `/api/v1/records/${record.id}`);
+      await cleanupRecord(request, record.id);
       await cleanup(request, `/api/v1/clients/${client.id}`);
     }
   });

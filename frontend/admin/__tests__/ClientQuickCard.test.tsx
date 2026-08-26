@@ -32,7 +32,7 @@ vi.mock('@memo/api-client', async (importOriginal) => {
 
 import { useRecords } from '@/contexts/RecordsContext';
 import { getRecords, getActivity, getPaymentTotals } from '@memo/api-client';
-import { ClientCardModal } from '../app/(main)/records/components/ClientCardModal';
+import { ClientQuickCard } from '../app/(main)/records/components/ClientQuickCard';
 
 const mockUseRecords = vi.mocked(useRecords);
 
@@ -150,14 +150,14 @@ function renderModal() {
   });
   return render(
     <QueryClientProvider client={queryClient}>
-      <ClientCardModal clientId="c1" onClose={vi.fn()} />
+      <ClientQuickCard clientId="c1" onClose={vi.fn()} />
     </QueryClientProvider>,
   );
 }
 
 // ─── Tests ─────────────────────────────────────────────────────────────────
 
-describe('records-folder ClientCardModal — dedicated queries (#191)', () => {
+describe('records-folder ClientQuickCard — dedicated queries (#191)', () => {
   beforeEach(() => {
     // Context now holds only ONE server page — the modal must not rely on it
     // for records/activities/payments; reference-data maps stay.

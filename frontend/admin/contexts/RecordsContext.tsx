@@ -20,6 +20,7 @@ import type {
   ServiceResponse,
   LocationResponse,
 } from '@memo/api-client';
+import type { SortOrder } from './createPagedListContext';
 import { useNavigation } from '@/contexts/NavigationContext';
 import { seedRecordFromList } from '@/lib/cache/recordCacheSync';
 
@@ -38,17 +39,26 @@ export type RecordSortOrder = 'asc' | 'desc';
 const DEFAULT_FILTERS: RecordFilters = { locationId: '', serviceId: '', masterId: '', status: '' };
 
 export interface RecordsContextType {
+  /** Server-page items — PagedListState.items contract (spec §6.4, #139 T8). */
+  items: RecordResponse[];
+  /** Kept alongside `items` for backwards compat with non-table consumers. */
   records: RecordResponse[];
   total: number;
   page: number;
   perPage: number;
   filters: RecordFilters;
+  /** `RecordSortField` is assignable to `string | null`; initial 'date' preserved (B2 cat 15). */
   sortBy: RecordSortField;
   sortOrder: RecordSortOrder;
   setPage: (page: number) => void;
   setPerPage: (perPage: number) => void;
   setFilters: (newFilters: Partial<RecordFilters>) => void;
-  setSort: (field: RecordSortField) => void;
+  /**
+   * PagedListState.setSort contract (spec §6.4): two-arg, param widened to
+   * `string` (DataTable passes string keys), sets field+order verbatim and
+   * resets to page 1 (§6.10.2). The asc/desc toggle lives in DataTable (§6.10.4).
+   */
+  setSort: (field: string, order: SortOrder) => void;
   resetFilters: () => void;
   clients: Map<string, ClientWithStats>;
   payments: Map<string, number>; // record_id → total paid amount
@@ -56,7 +66,13 @@ export interface RecordsContextType {
   masters: Map<string, MasterResponse>;
   services: Map<string, ServiceResponse>;
   locations: Map<string, LocationResponse>;
+  isLoading: boolean;
+  /** Kept alongside `isLoading` for backwards compat with non-table consumers. */
   loading: boolean;
+  /** Spec §6.4 — pass-through from React Query. */
+  isPending: boolean;
+  /** Spec §6.4 — pass-through from React Query. */
+  isFetching: boolean;
   error: Error | null;
   refetch: () => void;
 }
@@ -78,7 +94,7 @@ export function RecordsProvider({ children }: { children: React.ReactNode }) {
   }, [queryClient]);
 
   // Server-driven records list (#191) — queryKey carries every server param
-  const { data, isLoading: recordsLoading, error: recordsError } = useQuery<PaginatedResponse<RecordResponse>>({
+  const { data, isLoading: recordsLoading, isPending, isFetching, error: recordsError } = useQuery<PaginatedResponse<RecordResponse>>({
     queryKey: ['records', page, perPage, dateFrom, dateTo, filters, sortBy, sortOrder],
     queryFn: () => getRecords({
       page,
@@ -112,14 +128,25 @@ export function RecordsProvider({ children }: { children: React.ReactNode }) {
     setPage(1);
   }, []);
 
-  const setSort = useCallback((field: RecordSortField) => {
-    if (field === sortBy) {
-      setSortOrder((o) => (o === 'asc' ? 'desc' : 'asc'));
-    } else {
-      setSortBy(field);
-      setSortOrder('asc');
+  // PagedListState.setSort contract (spec §6.4): field+order applied verbatim
+  // + page reset (§6.10.2). Toggle-on-repeat was REMOVED — DataTable owns it
+  // (§6.10.4). `field` is `string` per the contract; the server whitelist
+  // validates it upstream.
+  const setSort = useCallback((field: string, order: SortOrder) => {
+    setSortBy(field as RecordSortField);
+    setSortOrder(order);
+    setPage(1);
+  }, []);
+
+  // Spec §6.7 page clamp — after a SETTLED fetch returns an empty non-first
+  // page (e.g. last row of page N deleted), step back. `!isFetching` guards
+  // against mid-refetch races with keepPreviousData.
+  useEffect(() => {
+    const items = data?.items || [];
+    if (!isPending && !isFetching && items.length === 0 && page > 1) {
+      setPage(page - 1);
     }
-  }, [sortBy]);
+  }, [isPending, isFetching, data, page]);
 
   // Date-range change (NavigationContext) resets to page 1
   useEffect(() => {
@@ -214,6 +241,7 @@ export function RecordsProvider({ children }: { children: React.ReactNode }) {
 
   const contextValue = useMemo(
     () => ({
+      items: records,
       records,
       total,
       page,
@@ -232,11 +260,14 @@ export function RecordsProvider({ children }: { children: React.ReactNode }) {
       masters,
       services,
       locations,
+      isLoading: recordsLoading,
       loading: recordsLoading,
+      isPending,
+      isFetching,
       error: recordsError ?? null,
       refetch,
     }),
-    [records, total, page, perPage, filters, sortBy, sortOrder, setPerPage, setFilters, setSort, resetFilters, clients, payments, activities, masters, services, locations, recordsLoading, recordsError, refetch],
+    [records, total, page, perPage, filters, sortBy, sortOrder, setPerPage, setFilters, setSort, resetFilters, clients, payments, activities, masters, services, locations, recordsLoading, isPending, isFetching, recordsError, refetch],
   );
 
   return (

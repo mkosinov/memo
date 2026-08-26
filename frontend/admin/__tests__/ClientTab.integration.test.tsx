@@ -286,14 +286,19 @@ describe('ClientTab — fully hook-driven (#127 Task 7)', () => {
     expect(options[2]).toHaveTextContent('Детский');
   });
 
-  // ─── Delete record uses useUI showToast (not prop) ──────────────────
+  // ─── Delete record — Addendum 13 dry-run flow (useUI toast, no legacy
+  // 5s timer + undo toast) ──────────────────────────────────────────────
 
-  it('delete record uses useUI showToast (no showToast prop)', () => {
+  it('delete click runs the dry-run via useDeleteRecord and navigates immediately', async () => {
     render(<ClientTab {...newProps} />);
     fireEvent.click(screen.getByTestId('btn-delete-record'));
     // The new ClientTab reads showToast from useUI (not props).
-    // The mock for useUI provides a showToast fn.
     expect(mockUseUI).toHaveBeenCalled();
+    // Addendum 13: a successful dry-run reports back to the parent right
+    // away — no 5-second setTimeout, no undo toast.
+    await waitFor(() => {
+      expect(newProps.onDeleteRecord).toHaveBeenCalledWith('r1');
+    });
   });
 
   // ─── useOptimisticVisitMutation is no longer imported ────────────────

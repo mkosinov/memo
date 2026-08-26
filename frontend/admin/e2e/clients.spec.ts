@@ -5,6 +5,7 @@ import {
   createTestActivity,
   createTestRecord,
   cleanup,
+  cleanupRecord,
 } from './fixtures/factories';
 
 const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
@@ -267,8 +268,9 @@ test.describe('Clients page', () => {
   test('8. Pagination shows total client count', async ({ page }) => {
     await waitForClientsReady(page);
 
-    // Pagination area should show total count
-    await expect(page.locator('text=/\\d+ клиентов/')).toBeVisible();
+    // Pagination area should show total count (#139 T6 — unified dict copy:
+    // legacy "N клиентов" removed; DataTable renders "N всего").
+    await expect(page.locator('text=/\\d+\\s+всего/').first()).toBeVisible();
   });
 
   // ── 9. Sorting — click header toggles sort direction ────────────────────
@@ -353,9 +355,11 @@ test.describe('Clients page', () => {
     // triggers a refetch via the React Query hook sending status=active. Use a
     // content-based assertion on the status select: it must return to
     // "Активные" (value 'active') after reset.
-    // Scope to the filters panel (#195): the same "Сбросить фильтры" text
-    // also exists in ClientsTable's empty state (rendered when the filtered
-    // list is empty), which is a strict-mode violation without scoping.
+    // #139 T6 + Addendum #12 — the reset button now lives ONLY in the
+    // page-level ClientsFilters bar (the table's duplicate was dropped when
+    // the empty state unified to "Нет записей"). The filters-panel scope
+    // below still selects the right one — it's the only "Сбросить фильтры"
+    // in the page now.
     const filtersPanel = page.locator('div.rounded-xl').filter({ has: statusSelect });
     await filtersPanel.getByText('Сбросить фильтры').click();
     await expect(statusSelect).toHaveValue('active', { timeout: 10_000 });
@@ -497,7 +501,7 @@ test.describe('Record tab', () => {
       // Close modal
       await closeByBackdrop(page);
     } finally {
-      await cleanup(request, `/api/v1/records/${record.id}`);
+      await cleanupRecord(request, record.id);
       await cleanup(request, `/api/v1/clients/${client.id}`);
     }
   });
@@ -525,7 +529,7 @@ test.describe('Record tab', () => {
       // Close modal
       await closeByBackdrop(page);
     } finally {
-      await cleanup(request, `/api/v1/records/${record.id}`);
+      await cleanupRecord(request, record.id);
       await cleanup(request, `/api/v1/clients/${client.id}`);
     }
   });
@@ -556,7 +560,7 @@ test.describe('Record tab', () => {
       // Close modal
       await closeByBackdrop(page);
     } finally {
-      await cleanup(request, `/api/v1/records/${record.id}`);
+      await cleanupRecord(request, record.id);
       await cleanup(request, `/api/v1/clients/${client.id}`);
     }
   });
@@ -583,7 +587,7 @@ test.describe('Record tab', () => {
       // Close modal
       await closeByBackdrop(page);
     } finally {
-      await cleanup(request, `/api/v1/records/${record.id}`);
+      await cleanupRecord(request, record.id);
       await cleanup(request, `/api/v1/clients/${client.id}`);
     }
   });
@@ -625,7 +629,7 @@ test.describe('Record tab', () => {
       // Close modal
       await closeByBackdrop(page);
     } finally {
-      await cleanup(request, `/api/v1/records/${record.id}`);
+      await cleanupRecord(request, record.id);
       await cleanup(request, `/api/v1/clients/${client.id}`);
     }
   });

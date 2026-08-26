@@ -69,6 +69,7 @@ const mockClientsWithStats: ClientWithStats[] = [
 // ─── Mutable mock context ───────────────────────────────────────────────────
 
 let mockContextValue: ClientsContextType = {
+  items: mockClientsWithStats,
   clients: mockClientsWithStats,
   total: 2,
   page: 1,
@@ -90,6 +91,8 @@ let mockContextValue: ClientsContextType = {
       sortBy: 'name',
       sortOrder: 'asc',
       isLoading: false,
+      isPending: false,
+      isFetching: false,
       error: null,
       refetch: vi.fn(),
       setPage: vi.fn(),
@@ -121,6 +124,7 @@ describe('ClientsTable', () => {
   beforeEach(() => {
     localStorage.clear();
     mockContextValue = {
+      items: mockClientsWithStats,
       clients: mockClientsWithStats,
       total: 2,
       page: 1,
@@ -142,6 +146,8 @@ describe('ClientsTable', () => {
       sortBy: 'name',
       sortOrder: 'asc',
       isLoading: false,
+      isPending: false,
+      isFetching: false,
       error: null,
       refetch: vi.fn(),
       setPage: vi.fn(),
@@ -199,67 +205,46 @@ describe('ClientsTable', () => {
     );
   });
 
-  it('shows loading skeleton when isLoading is true', () => {
-    mockContextValue = { ...mockContextValue, isLoading: true };
+  it('shows loading skeleton when isPending is true', () => {
+    mockContextValue = { ...mockContextValue, isPending: true };
     render(<ClientsTable onClientClick={vi.fn()} />);
     // Loading state: animated skeleton placeholders
     const skeletons = document.querySelectorAll('.animate-pulse');
     expect(skeletons.length).toBeGreaterThan(0);
   });
 
-  it('shows empty state when no clients', () => {
-    mockContextValue = { ...mockContextValue, clients: [] };
+  it('shows empty state when no clients (#12 unified copy)', () => {
+    mockContextValue = { ...mockContextValue, clients: [], items: [] };
     render(<ClientsTable onClientClick={vi.fn()} />);
-    expect(screen.getByText('Нет клиентов')).toBeTruthy();
+    // Addendum #12 (user ruling): empty state = "Нет записей" for ALL 8
+    // tables; the dual variant (Ничего не найдено + reset link + SVG) is
+    // dropped — the reset button stays in the page-level ClientsFilters bar.
+    expect(screen.getByText('Нет записей')).toBeTruthy();
   });
 
-  it('shows "Ничего не найдено" with reset link when filters active and no results', () => {
+  it('empty state is unified even when filters active (#12)', () => {
     mockContextValue = {
       ...mockContextValue,
       clients: [],
+      items: [],
       filters: { ...mockContextValue.filters, search: 'test' },
     };
     render(<ClientsTable onClientClick={vi.fn()} />);
-    expect(screen.getByText('Ничего не найдено')).toBeTruthy();
-    expect(screen.getByText('Сбросить фильтры')).toBeTruthy();
+    // No "Ничего не найдено" + reset link inside the table — both dropped.
+    expect(screen.getByText('Нет записей')).toBeTruthy();
+    expect(screen.queryByText('Ничего не найдено')).not.toBeInTheDocument();
   });
 
-  it('shows "Нет клиентов" (not "Ничего не найдено") with default status=active and no other filters', () => {
-    mockContextValue = { ...mockContextValue, clients: [] };
-    render(<ClientsTable onClientClick={vi.fn()} />);
-    expect(screen.getByText('Нет клиентов')).toBeTruthy();
-    expect(screen.queryByText('Ничего не найдено')).not.toBeTruthy();
-  });
-
-  it('shows "Ничего не найдено" when status=all and no results (all counts as active filter)', () => {
+  it('does not render reset link in the empty table — reset lives in the filters bar (#12)', () => {
     mockContextValue = {
       ...mockContextValue,
       clients: [],
-      filters: { ...mockContextValue.filters, status: 'all' },
-    };
-    render(<ClientsTable onClientClick={vi.fn()} />);
-    expect(screen.getByText('Ничего не найдено')).toBeTruthy();
-  });
-
-  it('shows "Ничего не найдено" when status=archived and no results (archived counts as active filter)', () => {
-    mockContextValue = {
-      ...mockContextValue,
-      clients: [],
-      filters: { ...mockContextValue.filters, status: 'archived' },
-    };
-    render(<ClientsTable onClientClick={vi.fn()} />);
-    expect(screen.getByText('Ничего не найдено')).toBeTruthy();
-  });
-
-  it('calls resetFilters when reset link clicked in empty-filtered state', () => {
-    mockContextValue = {
-      ...mockContextValue,
-      clients: [],
+      items: [],
       filters: { ...mockContextValue.filters, search: 'test' },
     };
     render(<ClientsTable onClientClick={vi.fn()} />);
-    fireEvent.click(screen.getByText('Сбросить фильтры'));
-    expect(mockContextValue.resetFilters).toHaveBeenCalledTimes(1);
+    // The legacy "Сбросить фильтры" inside the table is gone.
+    expect(screen.queryByText('Сбросить фильтры')).not.toBeInTheDocument();
   });
 
   it('clicking "Удалить" calls deleteClient (dry-run); 409 opens the DeleteDialog', async () => {
@@ -270,7 +255,7 @@ describe('ClientsTable', () => {
     render(<ClientsTable onClientClick={vi.fn()} />);
 
     // Open the row-1 actions dropdown and click "Удалить"
-    fireEvent.click(screen.getAllByLabelText('Действия')[0]);
+    fireEvent.click(screen.getAllByLabelText(/Действия/)[0]);
     fireEvent.click(screen.getByText('Удалить'));
 
     await waitFor(() => expect(deleteClient).toHaveBeenCalledWith('c1'));
@@ -292,7 +277,7 @@ describe('ClientsTable', () => {
     };
     render(<ClientsTable onClientClick={vi.fn()} />);
 
-    fireEvent.click(screen.getAllByLabelText('Действия')[0]);
+    fireEvent.click(screen.getAllByLabelText(/Действия/)[0]);
     fireEvent.click(screen.getByText('Удалить'));
 
     await waitFor(() => expect(screen.getByTestId('delete-dialog-confirm-input')).toBeInTheDocument());
@@ -326,7 +311,7 @@ describe('ClientsTable', () => {
     };
     render(<ClientsTable onClientClick={vi.fn()} />);
 
-    fireEvent.click(screen.getAllByLabelText('Действия')[0]);
+    fireEvent.click(screen.getAllByLabelText(/Действия/)[0]);
     fireEvent.click(screen.getByText('Удалить'));
 
     await waitFor(() => expect(screen.getByTestId('delete-dialog-archive-btn')).toBeInTheDocument());
@@ -342,7 +327,7 @@ describe('ClientsTable', () => {
     mockContextValue = { ...mockContextValue, deleteClient };
     render(<ClientsTable onClientClick={vi.fn()} />);
 
-    fireEvent.click(screen.getAllByLabelText('Действия')[0]);
+    fireEvent.click(screen.getAllByLabelText(/Действия/)[0]);
     fireEvent.click(screen.getByText('Удалить'));
 
     await waitFor(() => expect(deleteClient).toHaveBeenCalledWith('c1'));
@@ -354,7 +339,7 @@ describe('ClientsTable', () => {
     mockContextValue = { ...mockContextValue, archiveClient };
     render(<ClientsTable onClientClick={vi.fn()} />);
 
-    fireEvent.click(screen.getAllByLabelText('Действия')[0]);
+    fireEvent.click(screen.getAllByLabelText(/Действия/)[0]);
     fireEvent.click(screen.getByText('В архив'));
 
     await waitFor(() => expect(archiveClient).toHaveBeenCalledWith('c1'));
@@ -364,12 +349,13 @@ describe('ClientsTable', () => {
     const restoreClient = vi.fn().mockResolvedValue({ ...mockClientsWithStats[0], archived: false });
     mockContextValue = {
       ...mockContextValue,
+      items: [{ ...mockClientsWithStats[0], archived: true }],
       clients: [{ ...mockClientsWithStats[0], archived: true }],
       restoreClient,
     };
     render(<ClientsTable onClientClick={vi.fn()} />);
 
-    fireEvent.click(screen.getAllByLabelText('Действия')[0]);
+    fireEvent.click(screen.getAllByLabelText(/Действия/)[0]);
     fireEvent.click(screen.getByText('Восстановить'));
 
     await waitFor(() => expect(restoreClient).toHaveBeenCalledWith('c1'));
@@ -377,20 +363,26 @@ describe('ClientsTable', () => {
 
   it('calls setSort when a sortable column header is clicked', () => {
     render(<ClientsTable onClientClick={vi.fn()} />);
-    fireEvent.click(screen.getByText('Имя'));
+    fireEvent.click(screen.getByRole('button', { name: /Имя/ }));
     expect(mockContextValue.setSort).toHaveBeenCalledWith('name', expect.any(String));
   });
 
   it('toggles sort direction when clicking the same column', () => {
     mockContextValue = { ...mockContextValue, sortBy: 'name', sortOrder: 'asc' };
     render(<ClientsTable onClientClick={vi.fn()} />);
-    fireEvent.click(screen.getByText('Имя'));
+    fireEvent.click(screen.getByRole('button', { name: /Имя/ }));
     expect(mockContextValue.setSort).toHaveBeenCalledWith('name', 'desc');
   });
 
   it('shows "Дорогой гость" for client with null name', () => {
     mockContextValue = {
       ...mockContextValue,
+      items: [
+        {
+          ...mockClientsWithStats[0],
+          name: '',
+        },
+      ],
       clients: [
         {
           ...mockClientsWithStats[0],
@@ -405,6 +397,12 @@ describe('ClientsTable', () => {
   it('shows "Не указан" for client with empty phone', () => {
     mockContextValue = {
       ...mockContextValue,
+      items: [
+        {
+          ...mockClientsWithStats[0],
+          phone: '',
+        },
+      ],
       clients: [
         {
           ...mockClientsWithStats[0],
@@ -419,6 +417,12 @@ describe('ClientsTable', () => {
   it('shows "—" for client with null last_record', () => {
     mockContextValue = {
       ...mockContextValue,
+      items: [
+        {
+          ...mockClientsWithStats[0],
+          last_record: null,
+        },
+      ],
       clients: [
         {
           ...mockClientsWithStats[0],
@@ -433,8 +437,8 @@ describe('ClientsTable', () => {
   it('shows sort indicator for active sort column', () => {
     mockContextValue = { ...mockContextValue, sortBy: 'records_count', sortOrder: 'desc' };
     render(<ClientsTable onClientClick={vi.fn()} />);
-    // The column header should contain the arrow indicator
-    const header = screen.getByText(/Всего записей/);
+    // The column header (a <th>) should contain the active arrow indicator.
+    const header = screen.getByRole('columnheader', { name: /Всего записей/ });
     expect(header.textContent).toContain('↓');
   });
 
@@ -443,14 +447,23 @@ describe('ClientsTable', () => {
   it('sort indicator shows ↑ for ascending order', () => {
     mockContextValue = { ...mockContextValue, sortBy: 'name', sortOrder: 'asc' };
     render(<ClientsTable onClientClick={vi.fn()} />);
-    const header = screen.getByText(/Имя/);
+    const header = screen.getByRole('columnheader', { name: /Имя/ });
     expect(header.textContent).toContain('↑');
+  });
+
+  it('inactive sortable header shows ↕ (B2 cat 3 — post-migration)', () => {
+    mockContextValue = { ...mockContextValue, sortBy: 'name', sortOrder: 'asc' };
+    render(<ClientsTable onClientClick={vi.fn()} />);
+    // Телефон is NOT the active sort column — it should show the neutral ↕.
+    const header = screen.getByRole('columnheader', { name: /Телефон/ });
+    expect(header.textContent).toContain('↕');
   });
 
   it('calls setSort with field and reversed direction on column click', () => {
     mockContextValue = { ...mockContextValue, sortBy: 'records_count', sortOrder: 'desc' };
     render(<ClientsTable onClientClick={vi.fn()} />);
-    fireEvent.click(screen.getByText('Имя'));
+    // DataTable renders a <button> inside the <th>; click that to fire setSort.
+    fireEvent.click(screen.getByRole('button', { name: /Имя/ }));
     expect(mockContextValue.setSort).toHaveBeenCalledWith('name', 'asc');
   });
 
@@ -466,6 +479,7 @@ describe('ClientsTable', () => {
   it('renders zero visits count correctly', () => {
     mockContextValue = {
       ...mockContextValue,
+      items: [{ ...mockClientsWithStats[0], records_count: 0 }],
       clients: [{ ...mockClientsWithStats[0], records_count: 0 }],
     };
     render(<ClientsTable onClientClick={vi.fn()} />);
@@ -475,6 +489,7 @@ describe('ClientsTable', () => {
   it('renders zero total_paid correctly', () => {
     mockContextValue = {
       ...mockContextValue,
+      items: [{ ...mockClientsWithStats[0], total_paid: 0 }],
       clients: [{ ...mockClientsWithStats[0], total_paid: 0 }],
     };
     render(<ClientsTable onClientClick={vi.fn()} />);
@@ -490,16 +505,21 @@ describe('ClientsTable', () => {
 
   it('renders all sortable column headers', () => {
     render(<ClientsTable onClientClick={vi.fn()} />);
-    expect(screen.getByText('Имя')).toBeTruthy();
-    expect(screen.getByText('Телефон')).toBeTruthy();
-    expect(screen.getByText(/Всего записей/)).toBeTruthy();
-    expect(screen.getByText('Последняя запись')).toBeTruthy();
-    expect(screen.getByText('Сумма оплат')).toBeTruthy();
+    // DataTable wraps each label inside a <button> (sortable header). Scope
+    // to the table head to skip duplicates (e.g. cell values matching
+    // labels). The header IS the label container.
+    const thead = document.querySelector('thead')!;
+    expect(thead.textContent).toContain('Имя');
+    expect(thead.textContent).toContain('Телефон');
+    expect(thead.textContent).toContain('Всего записей');
+    expect(thead.textContent).toContain('Последняя запись');
+    expect(thead.textContent).toContain('Сумма оплат');
   });
 
   it('handles single client in list', () => {
     mockContextValue = {
       ...mockContextValue,
+      items: [mockClientsWithStats[0]],
       clients: [mockClientsWithStats[0]],
     };
     render(<ClientsTable onClientClick={vi.fn()} />);
@@ -508,10 +528,15 @@ describe('ClientsTable', () => {
   });
 
   it('renders loading skeleton with correct number of placeholders', () => {
-    mockContextValue = { ...mockContextValue, isLoading: true };
+    mockContextValue = { ...mockContextValue, isPending: true };
     render(<ClientsTable onClientClick={vi.fn()} />);
+    // Spec §6.8 — DataTable skeleton: 10 rows × visible columns only.
+    // Each row contributes N .animate-pulse elements (1 per visible column).
+    // 5 default columns × 10 rows = 50 placeholders.
+    const rows = document.querySelectorAll('tbody tr');
+    expect(rows).toHaveLength(10);
     const skeletons = document.querySelectorAll('.animate-pulse');
-    expect(skeletons.length).toBe(10);
+    expect(skeletons.length).toBe(50);
   });
 
   // ─── Column picker ──────────────────────────────────────────────────────
@@ -523,11 +548,12 @@ describe('ClientsTable', () => {
 
   it('shows all default columns', () => {
     render(<ClientsTable onClientClick={vi.fn()} />);
-    expect(screen.getByText('Имя')).toBeInTheDocument();
-    expect(screen.getByText('Телефон')).toBeInTheDocument();
-    expect(screen.getByText('Всего записей')).toBeInTheDocument();
-    expect(screen.getByText('Последняя запись')).toBeInTheDocument();
-    expect(screen.getByText('Сумма оплат')).toBeInTheDocument();
+    const thead = document.querySelector('thead')!;
+    expect(thead.textContent).toContain('Имя');
+    expect(thead.textContent).toContain('Телефон');
+    expect(thead.textContent).toContain('Всего записей');
+    expect(thead.textContent).toContain('Последняя запись');
+    expect(thead.textContent).toContain('Сумма оплат');
   });
 
   it('hides column when unchecked via ColumnPicker', () => {

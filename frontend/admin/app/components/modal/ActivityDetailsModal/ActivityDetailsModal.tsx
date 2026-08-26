@@ -37,8 +37,10 @@ export function ActivityDetailsModal({ isOpen, onClose, activity, mode }: Activi
     ? activeTab.replace('client-', '')
     : null;
 
-  // Use the hook for record mutations (only when we have a record ID)
-  const { createRecord, deleteRecord } = useRecordMutations(activity.id, activeRecordId || '');
+  // Hook for record mutations (only when we have a record ID). Deletion is
+  // NOT here — Addendum 13: ClientTab owns the record delete via the shared
+  // useDeleteRecord hook + DeleteDialog and reports back via onDeleteRecord.
+  const { createRecord } = useRecordMutations(activity.id, activeRecordId || '');
 
   // Current service and its tariffs (used by all tab contents)
   const currentService = useMemo(
@@ -165,19 +167,13 @@ export function ActivityDetailsModal({ isOpen, onClose, activity, mode }: Activi
     [createRecord, serviceTariffs, showToast],
   );
 
-  // Delete record handler — uses the hook
-  const handleDeleteRecord = useCallback(
-    async (_recordId: string) => {
-      try {
-        await deleteRecord();
-        showToast('Запись удалена');
-        setActiveTab('settings');
-      } catch (err) {
-        showToast(parseApiError(err).message, 'error');
-      }
-    },
-    [deleteRecord, showToast],
-  );
+  // Delete record handler — ClientTab owns the Addendum 13 dry-run flow
+  // (shared useDeleteRecord hook + DeleteDialog) and calls back here AFTER a
+  // successful delete (hook already toasted «Запись удалена»). Keep today's
+  // post-delete navigation only — no second delete.
+  const handleDeleteRecord = useCallback((_recordId: string) => {
+    setActiveTab('settings');
+  }, []);
 
 
   // Content renderer per active tab

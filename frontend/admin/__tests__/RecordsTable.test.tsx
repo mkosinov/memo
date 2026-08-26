@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import React from 'react';
 import type { RecordsContextType } from '../contexts/RecordsContext';
 import type {
@@ -10,6 +10,7 @@ import type {
   MasterResponse,
   LocationResponse,
   PaymentResponse,
+  DependencyNode,
 } from '@memo/api-client';
 import { mockPayment } from './helpers/mockData';
 import { createMockRecordsContext } from './helpers/mockContexts';
@@ -117,6 +118,16 @@ const mockRecord: RecordResponse = {
   ],
 };
 
+// ─── Records delete dry-run dependency tree (mirrors backend FK_MATRIX
+// Record root — Addendum 13): visits/payments user-visible cascade +
+// record_tags auto-handled. ─────────────────────────────────────────────────
+
+const DEPS_RECORD: DependencyNode[] = [
+  { entity: 'visits', relation: 'Посетитель', count: 1, allowed_actions: ['cascade'], message: null },
+  { entity: 'payments', relation: 'Оплата', count: 1, allowed_actions: ['cascade'], message: null },
+  { entity: 'record_tags', relation: 'Тег', count: 1, allowed_actions: ['cascade'], message: null },
+];
+
 // ─── Mutable mock context ───────────────────────────────────────────────────
 
 const baseOverrides: Partial<RecordsContextType> = {
@@ -156,17 +167,51 @@ vi.mock('@/hooks/useRecordData', () => ({
   }),
 }));
 
+// ─── Mock the shared record-delete hook (Addendum 13) + UI toasts ───────────
+
+const mockDeleteMutation = {
+  mutateAsync: vi.fn(),
+  dependencies: null as DependencyNode[] | null,
+  resolveDelete: { mutateAsync: vi.fn() },
+};
+
+vi.mock('@/hooks/useDeleteRecord', () => ({
+  useDeleteRecord: () => mockDeleteMutation,
+}));
+
+const mockShowToast = vi.fn();
+vi.mock('@/contexts/UIContext', () => ({
+  useUI: () => ({ showToast: mockShowToast }),
+}));
+
 import { RecordsTable } from '../app/(main)/records/components/RecordsTable';
+import { ApiError } from '@memo/api-client';
 
 function renderTable(overrides: Partial<RecordsContextType> = {}) {
   mockContextValue = createMockRecordsContext({ ...baseOverrides, ...overrides });
   return render(<RecordsTable />);
 }
 
+/** Delete hook whose dry-run rejects with a 409 carrying the records tree. */
+function setupDeleteConflict() {
+  mockDeleteMutation.mutateAsync = vi
+    .fn()
+    .mockRejectedValue(new ApiError(409, 'has_dependencies', 'has_dependencies', DEPS_RECORD));
+  mockDeleteMutation.dependencies = DEPS_RECORD;
+}
+
 describe('RecordsTable', () => {
   beforeEach(() => {
     localStorage.clear();
     mockRecordPayments = [mockPayment];
+    mockDeleteMutation.mutateAsync = vi.fn().mockResolvedValue(undefined);
+    mockDeleteMutation.dependencies = null;
+    mockDeleteMutation.resolveDelete.mutateAsync = vi.fn().mockResolvedValue(undefined);
+    mockShowToast.mockClear();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it('renders client name from context', () => {
@@ -205,9 +250,10 @@ describe('RecordsTable', () => {
     expect(screen.getByText('Не оплачено')).toBeTruthy();
   });
 
-  it('shows empty state when no records', () => {
+  it('shows the unified «Нет записей» empty state (Addendum 12)', () => {
     renderTable({ records: [] });
-    expect(screen.getByText('Записи не найдены')).toBeTruthy();
+    expect(screen.getByText('Нет записей')).toBeTruthy();
+    expect(screen.queryByText('Записи не найдены')).not.toBeInTheDocument();
   });
 
   it('renders client name from client_id lookup', () => {
@@ -256,13 +302,21 @@ describe('RecordsTable', () => {
     expect(clientCells.length).toBeGreaterThanOrEqual(1);
   });
 
-  // ─── Server-driven sort wiring ──────────────────────────────────────────
+  // ─── Server-driven sort wiring (DataTable computes the toggle) ──────────
 
-  it('header click calls setSort with the column key', () => {
+  it('header click calls setSort with field and order (two-arg §6.4)', () => {
     const setSort = vi.fn();
     renderTable({ setSort });
     fireEvent.click(screen.getByText(/Оплата/));
-    expect(setSort).toHaveBeenCalledWith('payment');
+    // DataTable toggle: inactive column (sortBy defaults to `date`) → asc.
+    expect(setSort).toHaveBeenCalledWith('payment', 'asc');
+  });
+
+  it('repeat click on the active asc column toggles to desc (DataTable §6.10.4)', () => {
+    const setSort = vi.fn();
+    renderTable({ setSort, sortBy: 'payment', sortOrder: 'asc' });
+    fireEvent.click(screen.getByText(/Оплата/));
+    expect(setSort).toHaveBeenCalledWith('payment', 'desc');
   });
 
   it('sort indicator reflects context sortBy/sortOrder', () => {
@@ -270,7 +324,7 @@ describe('RecordsTable', () => {
     expect(screen.getByText(/Оплата/).textContent).toContain('↓');
   });
 
-  // ─── Server-driven pagination wiring ────────────────────────────────────
+  // ─── Server-driven pagination wiring (DataTable owns the pager) ─────────
 
   it('pagination shows server total and calls setPage/setPerPage', () => {
     const setPage = vi.fn();
@@ -299,7 +353,7 @@ describe('RecordsTable', () => {
     expect(screen.getByText('Нет платежей')).toBeInTheDocument();
   });
 
-  // ─── Column picker ──────────────────────────────────────────────────────
+  // ─── Column picker (DataTable-owned, controlled ColumnPicker) ───────────
 
   it('renders column picker gear button', () => {
     renderTable();
@@ -331,5 +385,117 @@ describe('RecordsTable', () => {
     // The "Клиент" th should be gone
     const thead = document.querySelector('thead');
     expect(thead?.textContent).not.toMatch(/Клиент/);
+  });
+
+  // ─── Action dropdown column (B2 cat 7 — appended LAST) ──────────────────
+
+  it('renders one ⋯ Действия trigger per row; the dropdown column is the 10th header', () => {
+    renderTable();
+    expect(screen.getAllByLabelText(/Действия/)).toHaveLength(1);
+    // 9 data columns + 1 trailing actions column (§6.3).
+    expect(document.querySelectorAll('thead th')).toHaveLength(10);
+  });
+
+  it('clicking ⋯ opens the row menu with data-testid dropdown-<id> and role=menu', () => {
+    renderTable();
+    fireEvent.click(screen.getByLabelText(/Действия/));
+    const menu = screen.getByTestId('dropdown-rec-1');
+    expect(menu).toBeInTheDocument();
+    expect(menu.getAttribute('role')).toBe('menu');
+    // Delete-only actions factory — records have no table-level edit entry
+    // point (the detail panel is the edit path; plan Task 8 Part C).
+    expect(screen.getByRole('menuitem', { name: 'Удалить' })).toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: 'Редактировать' })).not.toBeInTheDocument();
+  });
+
+  it('row click still toggles the detail panel (closest guard lets ⋯ clicks through)', () => {
+    renderTable();
+    // Click on the row itself (not the trigger) → panel opens.
+    fireEvent.click(screen.getByText('2 500₽'));
+    expect(screen.getByText('Детали записи')).toBeInTheDocument();
+  });
+
+  // ─── Delete → DeleteDialog flow (Addendum 13 dry-run, FE2b wiring) ──────
+
+  it('«Удалить» fires the dry-run delete for the row id', () => {
+    renderTable();
+    fireEvent.click(screen.getByLabelText(/Действия/));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Удалить' }));
+    expect(mockDeleteMutation.mutateAsync).toHaveBeenCalledWith('rec-1');
+  });
+
+  it('409 dry-run conflict opens DeleteDialog with the dependency tree', async () => {
+    setupDeleteConflict();
+    renderTable();
+    fireEvent.click(screen.getByLabelText(/Действия/));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Удалить' }));
+
+    await waitFor(() => expect(screen.getByTestId('delete-dialog')).toBeInTheDocument());
+    // Title words the entity: "Удаление «записи …»".
+    expect(screen.getByTestId('delete-dialog-title').textContent).toContain('записи');
+    // User-visible dependents (visits/payments) render as choice rows; the
+    // auto join-table dep renders as an auto row — both carry dep-<entity>.
+    expect(screen.getByTestId('dep-visits')).toBeInTheDocument();
+    expect(screen.getByTestId('dep-payments')).toBeInTheDocument();
+    expect(screen.getByTestId('dep-record_tags')).toBeInTheDocument();
+  });
+
+  it('cancel closes the dialog without calling resolveDelete', async () => {
+    setupDeleteConflict();
+    renderTable();
+    fireEvent.click(screen.getByLabelText(/Действия/));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Удалить' }));
+
+    await waitFor(() => expect(screen.getByTestId('delete-dialog-cancel-btn')).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId('delete-dialog-cancel-btn'));
+
+    await waitFor(() =>
+      expect(screen.queryByTestId('delete-dialog')).not.toBeInTheDocument(),
+    );
+    expect(mockDeleteMutation.resolveDelete.mutateAsync).not.toHaveBeenCalled();
+  });
+
+  it('confirm resolves via resolveDelete with the picked cascade resolutions', async () => {
+    setupDeleteConflict();
+    renderTable();
+    fireEvent.click(screen.getByLabelText(/Действия/));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Удалить' }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('delete-dialog-confirm-input')).toBeInTheDocument(),
+    );
+
+    // Pick both user-visible deps (visits, payments) — auto picks `cascade`.
+    fireEvent.click(within(screen.getByTestId('dep-visits')).getByRole('button'));
+    fireEvent.click(within(screen.getByTestId('dep-payments')).getByRole('button'));
+
+    // Type-to-confirm unlocks the button (entityName = formatRecordLabel).
+    const titleText = screen.getByTestId('delete-dialog-title').textContent ?? '';
+    const label = titleText.replace(/^Удаление «записи /, '').replace(/»$/, '');
+    fireEvent.change(screen.getByTestId('delete-dialog-confirm-input'), {
+      target: { value: label },
+    });
+    fireEvent.click(screen.getByTestId('delete-dialog-confirm-btn'));
+
+    await waitFor(() =>
+      expect(mockDeleteMutation.resolveDelete.mutateAsync).toHaveBeenCalledWith({
+        id: 'rec-1',
+        resolutions: { visits: 'cascade', payments: 'cascade' },
+      }),
+    );
+    await waitFor(() =>
+      expect(screen.queryByTestId('delete-dialog')).not.toBeInTheDocument(),
+    );
+  });
+
+  it('204 dry-run success deletes instantly — no dialog opens', async () => {
+    // mutateAsync resolves (mock default) → the hook already toasted/invalidated
+    // (covered by useDeleteRecord.test.ts); assert table behavior only.
+    renderTable();
+    fireEvent.click(screen.getByLabelText(/Действия/));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Удалить' }));
+
+    await waitFor(() => expect(mockDeleteMutation.mutateAsync).toHaveBeenCalledWith('rec-1'));
+    expect(screen.queryByTestId('delete-dialog')).not.toBeInTheDocument();
   });
 });

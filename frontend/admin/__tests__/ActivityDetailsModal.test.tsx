@@ -723,18 +723,16 @@ describe('ClientTab — layout & features', () => {
     expect(deleteButtons.length).toBeGreaterThanOrEqual(1);
   });
 
-  it('does not show stale closure in delete — uses ref', () => {
-    vi.useFakeTimers();
+  it('delete click runs the dry-run flow and reports via onDeleteRecord — no 5s timer (Addendum 13)', async () => {
     render(<ClientTab {...defaultProps} />);
     const deleteBtn = screen.getByTestId('btn-delete-record');
     fireEvent.click(deleteBtn);
 
-    // useRecordData's mock provides showToast via useUI. We can't easily access it
-    // through defaultProps.showToast (removed in #127 Task 7), so just verify the
-    // delete button click did not throw and the timer fired.
-    expect(deleteBtn).toBeInTheDocument();
-
-    vi.useRealTimers();
+    // Addendum 13: the legacy 5-second setTimeout + undo toast is gone —
+    // a successful dry-run (204) navigates immediately via onDeleteRecord.
+    await waitFor(() => {
+      expect(defaultProps.onDeleteRecord).toHaveBeenCalledWith('r1');
+    });
   });
 });
 

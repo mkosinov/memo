@@ -536,8 +536,12 @@ class TestDataIntegrity:
         ids = [r["id"] for r in response.json()["items"]]
         assert record_id in ids
 
-        # Hard-delete
-        api_client.delete(f"/api/v1/records/{record_id}")
+        # Hard-delete (with-body execute — record has visits as deps, GH #139)
+        api_client.request(
+            "DELETE",
+            f"/api/v1/records/{record_id}",
+            json={"resolutions": {"visits": "cascade", "payments": "cascade"}},
+        )
 
         # Not in list
         response = api_client.get("/api/v1/records")
@@ -565,8 +569,12 @@ class TestDataIntegrity:
         record = create_record()
         record_id = record["id"]
 
-        # First delete succeeds
-        response = api_client.delete(f"/api/v1/records/{record_id}")
+        # First delete succeeds (with-body execute — record has visits, GH #139)
+        response = api_client.request(
+            "DELETE",
+            f"/api/v1/records/{record_id}",
+            json={"resolutions": {"visits": "cascade", "payments": "cascade"}},
+        )
         assert response.status_code == 204
 
         # Second delete should return 404 (record already deleted)

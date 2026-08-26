@@ -21,7 +21,7 @@ import type { DependencyNode } from '@memo/api-client';
 // This keeps the dialog table-agnostic and avoids a hook-per-entityType map.
 // Parents also own open/close state (the hooks' `dependencies` has no reset).
 
-export type DeleteDialogEntityType = 'master' | 'location' | 'service' | 'material' | 'client';
+export type DeleteDialogEntityType = 'master' | 'location' | 'service' | 'material' | 'client' | 'record';
 
 export interface DeleteDialogProps {
   /** Human-readable entity name — shown in the title and matched by the type-to-confirm field. */
@@ -55,6 +55,7 @@ const AUTO_ENTITIES = new Set([
   'location_tags',
   'service_tags',
   'client_tags',
+  'record_tags', // Record→record_tags auto-cascade (Addendum 13 / GH #139)
   'tariffs',
   'photos',
 ]);
@@ -68,6 +69,7 @@ const AUTO_ENTITY_LABEL: Record<string, string> = {
   location_tags: 'Теги',
   service_tags: 'Теги',
   client_tags: 'Теги',
+  record_tags: 'Теги',
   tariffs: 'Тарифы',
   photos: 'Фото',
 };
@@ -76,6 +78,9 @@ const RELATION_PLURAL: Record<string, string> = {
   Активность: 'Активности',
   Запись: 'Записи',
   Посетитель: 'Посетители',
+  // Record deps (Addendum 13 / GH #139) — backend deletion.py relation labels.
+  Посещение: 'Посещения',
+  Платёж: 'Платежи',
 };
 
 /** Genitive entity name — used in the title and the Mode B fallback hint. */
@@ -85,6 +90,7 @@ const TITLE_BY_TYPE: Record<DeleteDialogEntityType, string> = {
   service: 'услуги',
   material: 'материала',
   client: 'клиента',
+  record: 'записи',
 };
 
 // Per-relation nullify tail (spec §7.1: "○ Фото: 12 (отвязаны от услуги)").

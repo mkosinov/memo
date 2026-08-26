@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { PaginatedResponse, TagResponse } from '@memo/api-client';
@@ -107,7 +107,7 @@ describe('TagsTable error state', () => {
   it('does not show ErrorState when no error', async () => {
     setupEnvelope({ items: [], total: 0 });
     renderTable();
-    await screen.findByText('Теги не найдены');
+    await screen.findByText('Нет записей');
     expect(screen.queryByTestId('error-state')).not.toBeInTheDocument();
   });
 });
@@ -120,7 +120,7 @@ describe('TagsTable status column removal (GH #194)', () => {
   it('does not render a "Статус" column header', async () => {
     setupEnvelope({ items: [], total: 0 });
     renderTable();
-    await screen.findByText('Теги не найдены');
+    await screen.findByText('Нет записей');
     // exact:false → catches "Статус ↕" (sort icon appended to header label).
     expect(screen.queryByText('Статус', { exact: false })).not.toBeInTheDocument();
   });
@@ -160,17 +160,31 @@ describe('TagsTable server pagination/sort (#205 §5.2/§5.3)', () => {
   });
 
   // ─── Search (G1b Q1 — KEPT: client-side filter over the loaded page) ───
+  // B2 cat 13 (#139 T1): search moved to the factory (searchPredicate) and the
+  // DataTable input now debounces 300ms — advance the debounce before asserting.
 
   it('filters the loaded page by search text (client-side)', async () => {
     setupEnvelope();
     await renderLoaded();
 
-    fireEvent.change(screen.getByPlaceholderText('Поиск тегов...'), {
-      target: { value: 'жив' },
-    });
+    vi.useFakeTimers();
+    try {
+      fireEvent.change(screen.getByPlaceholderText('Поиск тегов...'), {
+        target: { value: 'жив' },
+      });
 
-    expect(screen.getByText('Живопись')).toBeInTheDocument();
-    expect(screen.queryByText('Керамика')).not.toBeInTheDocument();
+      // Before the 300ms debounce fires, nothing is filtered yet
+      expect(screen.getByText('Керамика')).toBeInTheDocument();
+
+      act(() => {
+        vi.advanceTimersByTime(300);
+      });
+
+      expect(screen.getByText('Живопись')).toBeInTheDocument();
+      expect(screen.queryByText('Керамика')).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   // ─── Server-driven pagination wiring ───────────────────────────────────
@@ -233,5 +247,22 @@ describe('TagsTable server pagination/sort (#205 §5.2/§5.3)', () => {
       });
     });
     expect(screen.getByText(/Тег/).textContent).toContain('↓');
+  });
+});
+
+describe('TagsTable row parity', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  // Review follow-up (#139 T1): rowClassName restores the pre-#139 Tags row
+  // hover style (old TagsTable <tr> classes: border-b cursor-pointer
+  // transition-colors hover:opacity-80). Prevents silent hover-parity drift.
+  it('rows keep the pre-#139 hover:opacity-80 style', async () => {
+    setupEnvelope();
+    await renderLoaded();
+
+    const row = screen.getByTestId('tag-row-t-1');
+    expect(row.className).toContain('hover:opacity-80');
   });
 });

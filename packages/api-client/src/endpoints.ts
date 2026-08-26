@@ -407,6 +407,12 @@ export async function deleteRecord(id: string): Promise<void> {
   await api(`/api/v1/records/${id}`, z.any(), { method: 'DELETE' });
 }
 
+// Execute a hard delete with dependency resolutions (Addendum 13 / GH #139
+// T8-FE2a) — mirrors resolveDeleteClient/resolveDeleteMaster: DELETE with body.
+export async function resolveDeleteRecord(id: string, resolutions: Record<string, string>): Promise<void> {
+  await api(`/api/v1/records/${id}`, z.any(), { method: 'DELETE', body: JSON.stringify({ resolutions }) });
+}
+
 export async function patchRecord(id: string, data: Partial<Pick<RecordResponse, 'status' | 'comment' | 'custom_price' | 'anonym_visits'> & { visits?: Array<{ visitor_id?: string | null; tariff_id?: string | null; price: number; custom_price?: number | null; status?: string }> }>): Promise<RecordResponse> {
   return api(`/api/v1/records/${id}`, RecordResponseSchema, {
     method: 'PATCH',

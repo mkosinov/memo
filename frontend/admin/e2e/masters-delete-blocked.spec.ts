@@ -78,7 +78,9 @@ test.describe('S3 — Master delete blocked by activities → archive instead', 
       await page.getByLabel('Фильтр по статусу').selectOption('archived');
       await expect(row).toBeVisible({ timeout: 10_000 });
       const archivedDropdown = await openRowActionDropdown(row);
-      await expect(archivedDropdown.getByRole('button', { name: 'Восстановить' })).toBeVisible();
+      await expect(
+        archivedDropdown.getByRole('menuitem', { name: 'Восстановить' }),
+      ).toBeVisible();
 
       // 6. ACTION — restore. Capture the POST /restore call.
       const restorePromise = page.waitForResponse((resp) =>

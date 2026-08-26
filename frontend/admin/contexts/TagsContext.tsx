@@ -17,6 +17,9 @@ const { Provider, usePagedList } = createPagedListContext<TagResponse>({
       ...(p.sort_by ? { sort_by: p.sort_by, sort_order: p.sort_order } : {}),
     }),
   withStatus: false,
+  // #139 T1 — dict search is predicate-only (spec §6.7): filters the loaded
+  // page into `visibleItems`; `search` stays out of the query key/fetcher.
+  searchPredicate: (t, q) => t.tag.toLowerCase().includes(q.toLowerCase()),
 });
 
 export const TagsProvider = Provider;

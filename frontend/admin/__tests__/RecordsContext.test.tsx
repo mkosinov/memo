@@ -453,7 +453,7 @@ describe('RecordsContext — server-driven page/filters/sort state (#191)', () =
     expect(result.current.perPage).toBe(50);
   });
 
-  it('setSort toggles order on same field, resets to asc on new field', async () => {
+  it('setSort(field, order) applies field and order verbatim (two-arg, §6.4)', async () => {
     const { Wrapper } = createWrapper();
     const { result } = renderHook(() => useRecords(), { wrapper: Wrapper });
 
@@ -462,22 +462,65 @@ describe('RecordsContext — server-driven page/filters/sort state (#191)', () =
     });
 
     act(() => {
-      result.current.setSort('status');
-    });
-    expect(result.current.sortBy).toBe('status');
-    expect(result.current.sortOrder).toBe('asc');
-
-    act(() => {
-      result.current.setSort('status');
+      result.current.setSort('status', 'desc');
     });
     expect(result.current.sortBy).toBe('status');
     expect(result.current.sortOrder).toBe('desc');
 
+    // Explicit order on another field — applied as given (no asc default).
     act(() => {
-      result.current.setSort('date');
+      result.current.setSort('total', 'asc');
     });
-    expect(result.current.sortBy).toBe('date');
+    expect(result.current.sortBy).toBe('total');
     expect(result.current.sortOrder).toBe('asc');
+
+    // Fetcher receives the two-arg state.
+    await waitFor(() => {
+      expect(vi.mocked(getRecords)).toHaveBeenCalledWith(
+        expect.objectContaining({ sort_by: 'total', sort_order: 'asc' }),
+      );
+    });
+  });
+
+  it('setSort does NOT toggle on a repeat call for the same field (DataTable owns toggle, §6.10.4)', async () => {
+    const { Wrapper } = createWrapper();
+    const { result } = renderHook(() => useRecords(), { wrapper: Wrapper });
+
+    await waitFor(() => {
+      expect(vi.mocked(getRecords)).toHaveBeenCalled();
+    });
+
+    act(() => {
+      result.current.setSort('status', 'desc');
+    });
+    expect(result.current.sortOrder).toBe('desc');
+
+    // Same call again — the context applies the given order verbatim;
+    // the asc/desc toggle logic lives in DataTable (§6.10.4).
+    act(() => {
+      result.current.setSort('status', 'desc');
+    });
+    expect(result.current.sortBy).toBe('status');
+    expect(result.current.sortOrder).toBe('desc');
+  });
+
+  it('setSort resets page to 1 (§6.10.2 drift fix)', async () => {
+    const { Wrapper } = createWrapper();
+    const { result } = renderHook(() => useRecords(), { wrapper: Wrapper });
+
+    await waitFor(() => {
+      expect(vi.mocked(getRecords)).toHaveBeenCalled();
+    });
+
+    act(() => {
+      result.current.setPage(5);
+    });
+    expect(result.current.page).toBe(5);
+
+    act(() => {
+      result.current.setSort('status', 'desc');
+    });
+    expect(result.current.page).toBe(1);
   });
 
   it('exposes server total', async () => {
@@ -494,6 +537,93 @@ describe('RecordsContext — server-driven page/filters/sort state (#191)', () =
 
     await waitFor(() => {
       expect(result.current.total).toBe(42);
+    });
+  });
+});
+
+describe('RecordsContext — PagedListState alignment (§6.4, #139 T8 Part A)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+
+    mockUseNavigation.mockReturnValue({
+      dateFrom: '2026-01-01',
+      dateTo: '2026-01-31',
+      selectDateRange: vi.fn(),
+    } as unknown as ReturnType<typeof useNavigation>);
+
+    vi.mocked(getRecords).mockResolvedValue(envelope([]));
+    vi.mocked(getClients).mockResolvedValue([]);
+    vi.mocked(getPaymentTotals).mockResolvedValue({});
+    vi.mocked(getActivities).mockResolvedValue(envelope([]));
+    vi.mocked(getAllMasters).mockResolvedValue([]);
+    vi.mocked(getAllServices).mockResolvedValue([]);
+    vi.mocked(getAllLocations).mockResolvedValue([]);
+  });
+
+  it('exposes items as an alias of records (§6.4)', async () => {
+    const rec1 = makeRecord('r1');
+    vi.mocked(getRecords).mockResolvedValue(envelope([rec1]));
+
+    const { Wrapper } = createWrapper();
+    const { result } = renderHook(() => useRecords(), { wrapper: Wrapper });
+
+    await waitFor(() => {
+      expect(result.current.items).toHaveLength(1);
+    });
+    expect(result.current.items).toEqual(result.current.records);
+    expect(result.current.items[0].id).toBe('r1');
+  });
+
+  it('exposes isLoading as an alias of loading (§6.4)', async () => {
+    const { Wrapper } = createWrapper();
+    const { result } = renderHook(() => useRecords(), { wrapper: Wrapper });
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+    expect(result.current.isLoading).toBe(result.current.loading);
+  });
+
+  it('exposes isPending/isFetching pass-throughs from useQuery (§6.4)', async () => {
+    const { Wrapper } = createWrapper();
+    const { result } = renderHook(() => useRecords(), { wrapper: Wrapper });
+
+    // Initial state — no data yet for the query key.
+    expect(result.current.isPending).toBe(true);
+    expect(typeof result.current.isFetching).toBe('boolean');
+
+    await waitFor(() => {
+      expect(result.current.isPending).toBe(false);
+    });
+    await waitFor(() => {
+      expect(result.current.isFetching).toBe(false);
+    });
+  });
+
+  it('page clamp: settled empty non-first page decrements page (§6.7)', async () => {
+    // Page 1 has one row; every later page is empty (list shrunk).
+    vi.mocked(getRecords).mockImplementation((p) =>
+      Promise.resolve(envelope(p?.page && p.page > 1 ? [] : [makeRecord('r1')])),
+    );
+
+    const { Wrapper } = createWrapper();
+    const { result } = renderHook(() => useRecords(), { wrapper: Wrapper });
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+      expect(result.current.records).toHaveLength(1);
+    });
+
+    act(() => {
+      result.current.setPage(2);
+    });
+
+    // Page-2 fetch settles empty → the clamp effect steps back to page 1.
+    await waitFor(() => {
+      expect(result.current.page).toBe(1);
+    });
+    await waitFor(() => {
+      expect(result.current.records).toHaveLength(1);
     });
   });
 });

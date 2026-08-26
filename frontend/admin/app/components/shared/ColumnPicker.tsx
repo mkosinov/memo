@@ -10,15 +10,14 @@ interface Column {
 interface ColumnPickerProps {
   columns: Column[];
   visibleKeys: string[];
-  onChange: (keys: string[]) => void;
-  storageKey: string;
+  /** Controlled presentational (#139 §6.5): parent owns state + persistence. */
+  onToggle: (key: string) => void;
 }
 
 export function ColumnPicker({
   columns,
   visibleKeys,
-  onChange,
-  storageKey,
+  onToggle,
 }: ColumnPickerProps) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -31,12 +30,15 @@ export function ColumnPicker({
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
+  // The last visible column can never be unchecked (§6.5 — prevents an
+  // unrecoverable empty table from the UI side).
+  const lastVisible = visibleKeys.length === 1;
+
   const toggle = (key: string) => {
-    const next = visibleKeys.includes(key)
-      ? visibleKeys.filter((k) => k !== key)
-      : [...visibleKeys, key];
-    onChange(next);
-    localStorage.setItem(storageKey, JSON.stringify(next));
+    const isChecked = visibleKeys.includes(key);
+    // Guard: never allow unchecking the sole remaining visible column.
+    if (isChecked && lastVisible) return;
+    onToggle(key);
   };
 
   return (
@@ -57,20 +59,36 @@ export function ColumnPicker({
             backgroundColor: 'var(--white)',
           }}
         >
-          {columns.map((col) => (
-            <label
-              key={col.key}
-              className="flex items-center gap-2 px-2 py-1 text-sm cursor-pointer hover:bg-surface rounded"
-            >
-              <input
-                type="checkbox"
-                checked={visibleKeys.includes(col.key)}
-                onChange={() => toggle(col.key)}
-                className="rounded"
-              />
-              <span style={{ color: 'var(--ink)' }}>{col.label}</span>
-            </label>
-          ))}
+          {columns.map((col) => {
+            const checked = visibleKeys.includes(col.key);
+            const disabled = checked && lastVisible;
+            // §6.5 — the last visible column stays checked ("prevents an empty
+            // table with no way back"). The protection is a NO-OP toggle guard
+            // (above) + muted style — NOT an HTML `disabled` attribute and NOT
+            // `aria-disabled`: Playwright treats an element inside a <label>
+            // bound to a disabled/aria-disabled control as unactionable, which
+            // breaks the unchanged tags-crud picker e2e (Tags has exactly one
+            // column ⇒ it is always the "last visible" one, yet the spec must
+            // still be able to click its label and have the attempt no-op).
+            return (
+              <label
+                key={col.key}
+                className="flex items-center gap-2 px-2 py-1 text-sm rounded"
+                style={{
+                  cursor: disabled ? 'not-allowed' : 'pointer',
+                  opacity: disabled ? 0.5 : 1,
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={() => toggle(col.key)}
+                  className="rounded"
+                />
+                <span style={{ color: 'var(--ink)' }}>{col.label}</span>
+              </label>
+            );
+          })}
         </div>
       )}
     </div>

@@ -226,14 +226,20 @@ describe('LocationsTable', () => {
     setupEnvelope({ items: [], total: 0 });
     renderTable();
 
-    expect(await screen.findByText('Локации не найдены')).toBeInTheDocument();
+    expect(await screen.findByText('Нет записей')).toBeInTheDocument();
   });
 
   it('shows loading state', async () => {
     mockGetLocations.mockReturnValue(new Promise<PaginatedResponse<LocationResponse>>(() => {}));
-    renderTable();
+    const { container } = renderTable();
 
-    expect(await screen.findByText('Загрузка...')).toBeInTheDocument();
+    // B2 cat 4 (#139 §6.8): the shared DataTable replaced the "Загрузка..."
+    // div with a 10-row skeleton (visible columns only).
+    await waitFor(() => {
+      expect(container.querySelectorAll('tbody tr').length).toBe(10);
+    });
+    expect(container.querySelectorAll('.animate-pulse').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Загрузка...')).not.toBeInTheDocument();
   });
 
   // ─── Server fetch params (#205 §5.2/§5.3) ──────────────────────────────
@@ -428,7 +434,7 @@ describe('LocationsTable', () => {
   it('shows "Удалить" option in action dropdown', async () => {
     setupEnvelope();
     await renderLoaded();
-    const actionButtons = screen.getAllByLabelText('Действия');
+    const actionButtons = screen.getAllByLabelText(/Действия/);
     fireEvent.click(actionButtons[0]);
     expect(screen.getByText('Удалить')).toBeInTheDocument();
   });
@@ -491,7 +497,7 @@ describe('LocationsTable', () => {
     setupEnvelope();
     await renderLoaded();
 
-    const actionButtons = screen.getAllByLabelText('Действия');
+    const actionButtons = screen.getAllByLabelText(/Действия/);
     fireEvent.click(actionButtons[0]);
     fireEvent.click(screen.getByText('Удалить'));
 
@@ -506,7 +512,7 @@ describe('LocationsTable', () => {
     setupEnvelope();
     await renderLoaded();
 
-    fireEvent.click(screen.getAllByLabelText('Действия')[0]);
+    fireEvent.click(screen.getAllByLabelText(/Действия/)[0]);
     fireEvent.click(screen.getByText('Удалить'));
 
     await waitFor(() => expect(screen.getByTestId('delete-dialog-block-message')).toBeInTheDocument());
@@ -522,7 +528,7 @@ describe('LocationsTable', () => {
     setupEnvelope();
     await renderLoaded();
 
-    fireEvent.click(screen.getAllByLabelText('Действия')[0]);
+    fireEvent.click(screen.getAllByLabelText(/Действия/)[0]);
     fireEvent.click(screen.getByText('Удалить'));
 
     await waitFor(() => expect(screen.getByTestId('delete-dialog-archive-btn')).toBeInTheDocument());
@@ -538,7 +544,7 @@ describe('LocationsTable', () => {
     setupEnvelope();
     await renderLoaded();
 
-    fireEvent.click(screen.getAllByLabelText('Действия')[0]);
+    fireEvent.click(screen.getAllByLabelText(/Действия/)[0]);
     fireEvent.click(screen.getByText('Удалить'));
 
     await waitFor(() => expect(screen.getByTestId('delete-dialog-confirm-input')).toBeInTheDocument());
@@ -582,7 +588,7 @@ describe('LocationsTable', () => {
     setupEnvelope();
     await renderLoaded();
 
-    fireEvent.click(screen.getAllByLabelText('Действия')[0]);
+    fireEvent.click(screen.getAllByLabelText(/Действия/)[0]);
     fireEvent.click(screen.getByText('Удалить'));
 
     await waitFor(() => expect(deleteMutateAsync).toHaveBeenCalledWith('loc-1'));
@@ -594,7 +600,7 @@ describe('LocationsTable', () => {
     setupEnvelope();
     await renderLoaded();
 
-    fireEvent.click(screen.getAllByLabelText('Действия')[0]);
+    fireEvent.click(screen.getAllByLabelText(/Действия/)[0]);
     fireEvent.click(screen.getByText('Удалить'));
 
     await waitFor(() => expect(screen.getByTestId('delete-dialog-cancel-btn')).toBeInTheDocument());
@@ -615,7 +621,7 @@ describe('LocationsTable', () => {
     setupEnvelope();
     await renderLoaded();
 
-    fireEvent.click(screen.getAllByLabelText('Действия')[0]);
+    fireEvent.click(screen.getAllByLabelText(/Действия/)[0]);
     fireEvent.click(screen.getByText('В архив'));
 
     await waitFor(() => expect(archiveMutateAsync).toHaveBeenCalledWith('loc-1'));
@@ -631,7 +637,7 @@ describe('LocationsTable', () => {
     await renderLoaded();
 
     // loc-2 is archived → its dropdown shows "Восстановить"
-    fireEvent.click(screen.getAllByLabelText('Действия')[1]);
+    fireEvent.click(screen.getAllByLabelText(/Действия/)[1]);
     fireEvent.click(screen.getByText('Восстановить'));
 
     await waitFor(() => expect(restoreMutateAsync).toHaveBeenCalledWith('loc-2'));

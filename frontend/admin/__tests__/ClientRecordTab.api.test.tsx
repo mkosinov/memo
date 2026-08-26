@@ -28,6 +28,7 @@ vi.mock('@memo/api-client', () => ({
   updateRecord: vi.fn(),
   patchRecord: vi.fn(),
   deleteRecord: vi.fn(),
+  resolveDeleteRecord: vi.fn(),
   createPayment: vi.fn(),
   patchPayment: vi.fn(),
   deletePayment: vi.fn(),
@@ -45,7 +46,17 @@ vi.mock('@memo/api-client', () => ({
   patchVisit: vi.fn(),
   deleteVisit: vi.fn(),
   patchVisitor: vi.fn(),
-  ApiError: class ApiError extends Error { code: string; constructor(msg: string, code: string) { super(msg); this.code = code; } },
+  ApiError: class ApiError extends Error {
+    status: number;
+    code?: string;
+    dependencies?: Array<{ entity: string; relation: string; count: number; allowed_actions: string[] }>;
+    constructor(status: number, message: string, code?: string, dependencies?: Array<{ entity: string; relation: string; count: number; allowed_actions: string[] }>) {
+      super(message);
+      this.status = status;
+      this.code = code;
+      this.dependencies = dependencies;
+    }
+  },
 }));
 
 // ─── Mock ScheduleContext ────────────────────────────────────────────────
@@ -87,7 +98,25 @@ const mockQueryClient = {
 vi.mock('@tanstack/react-query', () => ({
   useQuery: vi.fn(),
   useQueryClient: vi.fn(() => mockQueryClient),
-  useMutation: vi.fn(),
+  // Executing mock (Addendum 13): runs mutationFn + onSuccess so the
+  // useDeleteRecord dry-run flow (204 toast / 409 dialog parking) works.
+  useMutation: vi.fn(
+    (opts: {
+      mutationFn?: (vars: unknown) => Promise<unknown>;
+      onSuccess?: (data: unknown, variables: unknown) => void;
+    }) => ({
+      mutate: vi.fn(),
+      mutateAsync: vi.fn(async (input: unknown) => {
+        const result = opts.mutationFn ? await opts.mutationFn(input) : undefined;
+        opts.onSuccess?.(result, input);
+        return result;
+      }),
+      isPending: false,
+      isSuccess: false,
+      isError: false,
+      status: 'idle',
+    }),
+  ),
 }));
 
 import { useQuery } from '@tanstack/react-query';
@@ -95,6 +124,7 @@ import {
   patchRecord,
   patchActivity,
   deleteRecord,
+  resolveDeleteRecord,
   createPayment,
   deletePayment,
   createVisitor,
@@ -157,26 +187,86 @@ describe('ClientRecordTab — API interactions', () => {
     vi.restoreAllMocks();
   });
 
-  // ─── Delete record ────────────────────────────────────────────────
+  // ─── Delete record — Addendum 13 dry-run + DeleteDialog flow ────────
 
-  it('calls deleteRecord when delete clicked', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
+  it('click fires the no-body DELETE dry-run (no window.confirm any more)', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm');
     render(<ClientRecordTab recordId="r1" clientId="c1" />);
     fireEvent.click(screen.getByText('Удалить запись'));
 
     await waitFor(() => {
       expect(deleteRecord).toHaveBeenCalledWith('r1');
     });
+    expect(confirmSpy).not.toHaveBeenCalled();
   });
 
   it('invalidates records query after delete', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
     render(<ClientRecordTab recordId="r1" clientId="c1" />);
     fireEvent.click(screen.getByText('Удалить запись'));
 
     await waitFor(() => {
       expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['records'] });
     });
+  });
+
+  it('409 dry-run opens DeleteDialog listing deps; confirm resolves the cascade', async () => {
+    const deps = [
+      { entity: 'visits', relation: 'Посещение', count: 2, allowed_actions: ['cascade'], message: null },
+      { entity: 'payments', relation: 'Платёж', count: 1, allowed_actions: ['cascade'], message: null },
+      { entity: 'record_tags', relation: 'Тег', count: 3, allowed_actions: ['cascade'], message: null },
+    ];
+    const { ApiError } = await import('@memo/api-client');
+    vi.mocked(deleteRecord).mockRejectedValue(new ApiError(409, 'has_dependencies', undefined, deps));
+
+    render(<ClientRecordTab recordId="r1" clientId="c1" />);
+    fireEvent.click(screen.getByText('Удалить запись'));
+
+    // Dialog opens with the dep list (visits/payments cascade, tags auto)
+    await waitFor(() => {
+      expect(screen.getByTestId('delete-dialog')).toBeInTheDocument();
+    });
+    expect(screen.getByTestId('dep-visits')).toBeInTheDocument();
+    expect(screen.getByTestId('dep-payments')).toBeInTheDocument();
+
+    // Type-to-confirm — record label derives from the activity start
+    fireEvent.change(screen.getByTestId('delete-dialog-confirm-input'), {
+      target: { value: '15 мая · 14:00' },
+    });
+    // Select the two cascade choice deps (record_tags is auto — no click)
+    fireEvent.click(screen.getByText(/Посещения: 2/));
+    fireEvent.click(screen.getByText(/Платежи: 1/));
+    fireEvent.click(screen.getByTestId('delete-dialog-confirm-btn'));
+
+    await waitFor(() => {
+      expect(resolveDeleteRecord).toHaveBeenCalledWith('r1', {
+        visits: 'cascade',
+        payments: 'cascade',
+      });
+    });
+    // Dialog closes after resolve and the tab stays open (modal stays open)
+    await waitFor(() => {
+      expect(screen.queryByTestId('delete-dialog')).not.toBeInTheDocument();
+    });
+    expect(screen.getByTestId('client-record-tab')).toBeInTheDocument();
+  });
+
+  it('dialog cancel closes without resolving', async () => {
+    const deps = [
+      { entity: 'visits', relation: 'Посещение', count: 1, allowed_actions: ['cascade'], message: null },
+    ];
+    const { ApiError } = await import('@memo/api-client');
+    vi.mocked(deleteRecord).mockRejectedValue(new ApiError(409, 'has_dependencies', undefined, deps));
+
+    render(<ClientRecordTab recordId="r1" clientId="c1" />);
+    fireEvent.click(screen.getByText('Удалить запись'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('delete-dialog')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByTestId('delete-dialog-cancel-btn'));
+
+    expect(resolveDeleteRecord).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('delete-dialog')).not.toBeInTheDocument();
   });
 
   // ─── Save (patchRecord) calls ─────────────────────────────────────────

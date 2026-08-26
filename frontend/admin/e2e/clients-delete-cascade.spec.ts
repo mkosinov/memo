@@ -14,6 +14,7 @@
 import { test, expect } from '@playwright/test';
 import {
   cleanup,
+  cleanupRecord,
   createTestActivity,
   createTestClient,
   createTestClientTag,
@@ -134,7 +135,7 @@ test.describe('S4 — Client delete with nullify + cascade resolutions', () => {
       )).toHaveLength(0);
     } finally {
       // Nullified records survive the client delete — remove them explicitly.
-      await cleanup(request, `/api/v1/records/${record.id}`);
+      await cleanupRecord(request, record.id);
       await cleanup(request, `/api/v1/tags/${tag.id}`);
       await cleanup(request, `/api/v1/activities/${activity.id}`);
       await cleanup(request, `/api/v1/clients/${client.id}`);
@@ -166,7 +167,7 @@ test.describe('S4 — Client delete with nullify + cascade resolutions', () => {
       expect(queryDBRow(`SELECT id FROM clients WHERE id='${client.id}'`)).not.toBeNull();
       expect(queryDBRow(`SELECT client_id FROM records WHERE id='${record.id}'`)!.client_id).toBe(client.id);
     } finally {
-      await cleanup(request, `/api/v1/records/${record.id}`);
+      await cleanupRecord(request, record.id);
       await cleanup(request, `/api/v1/activities/${activity.id}`);
       await cleanup(request, `/api/v1/clients/${client.id}`);
     }

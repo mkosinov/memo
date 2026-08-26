@@ -8,7 +8,6 @@ import {
   createVisitor,
   searchClientByPhone,
   patchRecord,
-  deleteRecord as apiDeleteRecord,
   patchActivity,
   createPayment,
   patchPayment as apiPatchPayment,
@@ -21,12 +20,10 @@ import {
 } from '@memo/api-client';
 import type { RecordResponse, PaymentResponse, VisitPatch } from '@memo/api-client';
 import {
-  mapRecordsListCache,
   removePayment,
   removeVisit,
   upsertPayment,
   upsertVisit,
-  type RecordsListCache,
 } from '@/lib/cache/recordCacheSync';
 import { usePendingActions } from '@/contexts/PendingActionsContext';
 
@@ -181,19 +178,6 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
     },
     [invalidateRecordAndLists],
   );
-
-  const deleteRecord = useCallback(async () => {
-    await apiDeleteRecord(recordId);
-    // Optimistic update: remove record from EVERY ['records', ...] cache via prefix match
-    // (Absorbs #130 Bug 1 — the old bare setQueryData only touched the exact key ['records'],
-    //  not ['records', df, dt] or ['records', 'client', id]).
-    queryClient.setQueriesData<RecordsListCache | undefined>(
-      { queryKey: ['records'] },
-      (old) => mapRecordsListCache(old, (items) => items.filter((r) => r.id !== recordId)),
-    );
-    // Targeted invalidation: ScheduleActivityCard + RecordModal
-    invalidateRecordAndLists();
-  }, [recordId, queryClient, invalidateRecordAndLists]);
 
   const addVisitor = useCallback(
     async (data: { client_id: string; name: string; age?: number }) => {
@@ -430,7 +414,6 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
     createRecord: createRecordMutation,
     saveRecord,
     updateRecord,
-    deleteRecord,
     addVisitor,
     deleteVisitor,
     addPayment,

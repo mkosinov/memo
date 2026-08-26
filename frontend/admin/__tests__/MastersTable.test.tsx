@@ -236,14 +236,20 @@ describe('MastersTable', () => {
     setupEnvelope({ items: [], total: 0 });
     renderTable();
 
-    expect(await screen.findByText('Мастера не найдены')).toBeInTheDocument();
+    expect(await screen.findByText('Нет записей')).toBeInTheDocument();
   });
 
   it('shows loading state', async () => {
     mockGetMasters.mockReturnValue(new Promise<PaginatedResponse<MasterResponse>>(() => {}));
-    renderTable();
+    const { container } = renderTable();
 
-    expect(await screen.findByText('Загрузка...')).toBeInTheDocument();
+    // B2 cat 4 (#139 §6.8): the shared DataTable replaced the "Загрузка..."
+    // div with a 10-row skeleton (visible columns only).
+    await waitFor(() => {
+      expect(container.querySelectorAll('tbody tr').length).toBe(10);
+    });
+    expect(container.querySelectorAll('.animate-pulse').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Загрузка...')).not.toBeInTheDocument();
   });
 
   // ─── Server fetch params (#205 §5.2/§5.3) ──────────────────────────────
@@ -426,7 +432,7 @@ describe('MastersTable', () => {
   it('shows "Удалить" option in action dropdown', async () => {
     setupEnvelope();
     await renderLoaded();
-    const actionButtons = screen.getAllByLabelText('Действия');
+    const actionButtons = screen.getAllByLabelText(/Действия/);
     fireEvent.click(actionButtons[0]);
     expect(screen.getByText('Удалить')).toBeInTheDocument();
   });
@@ -462,7 +468,7 @@ describe('MastersTable', () => {
     setupEnvelope();
     await renderLoaded();
 
-    const actionButtons = screen.getAllByLabelText('Действия');
+    const actionButtons = screen.getAllByLabelText(/Действия/);
     fireEvent.click(actionButtons[0]);
     fireEvent.click(screen.getByText('Удалить'));
 
@@ -477,7 +483,7 @@ describe('MastersTable', () => {
     setupEnvelope();
     await renderLoaded();
 
-    fireEvent.click(screen.getAllByLabelText('Действия')[0]);
+    fireEvent.click(screen.getAllByLabelText(/Действия/)[0]);
     fireEvent.click(screen.getByText('Удалить'));
 
     await waitFor(() => expect(screen.getByTestId('delete-dialog-block-message')).toBeInTheDocument());
@@ -493,7 +499,7 @@ describe('MastersTable', () => {
     setupEnvelope();
     await renderLoaded();
 
-    fireEvent.click(screen.getAllByLabelText('Действия')[0]);
+    fireEvent.click(screen.getAllByLabelText(/Действия/)[0]);
     fireEvent.click(screen.getByText('Удалить'));
 
     await waitFor(() => expect(screen.getByTestId('delete-dialog-archive-btn')).toBeInTheDocument());
@@ -509,7 +515,7 @@ describe('MastersTable', () => {
     setupEnvelope();
     await renderLoaded();
 
-    fireEvent.click(screen.getAllByLabelText('Действия')[0]);
+    fireEvent.click(screen.getAllByLabelText(/Действия/)[0]);
     fireEvent.click(screen.getByText('Удалить'));
 
     await waitFor(() => expect(screen.getByTestId('delete-dialog-confirm-input')).toBeInTheDocument());
@@ -553,7 +559,7 @@ describe('MastersTable', () => {
     setupEnvelope();
     await renderLoaded();
 
-    fireEvent.click(screen.getAllByLabelText('Действия')[0]);
+    fireEvent.click(screen.getAllByLabelText(/Действия/)[0]);
     fireEvent.click(screen.getByText('Удалить'));
 
     await waitFor(() => expect(deleteMutateAsync).toHaveBeenCalledWith('m1'));
@@ -565,7 +571,7 @@ describe('MastersTable', () => {
     setupEnvelope();
     await renderLoaded();
 
-    fireEvent.click(screen.getAllByLabelText('Действия')[0]);
+    fireEvent.click(screen.getAllByLabelText(/Действия/)[0]);
     fireEvent.click(screen.getByText('Удалить'));
 
     await waitFor(() => expect(screen.getByTestId('delete-dialog-cancel-btn')).toBeInTheDocument());
@@ -586,7 +592,7 @@ describe('MastersTable', () => {
     setupEnvelope();
     await renderLoaded();
 
-    fireEvent.click(screen.getAllByLabelText('Действия')[0]);
+    fireEvent.click(screen.getAllByLabelText(/Действия/)[0]);
     fireEvent.click(screen.getByText('В архив'));
 
     await waitFor(() => expect(archiveMutateAsync).toHaveBeenCalledWith('m1'));
@@ -602,7 +608,7 @@ describe('MastersTable', () => {
     await renderLoaded();
 
     // m2 is archived → its dropdown shows "Восстановить"
-    fireEvent.click(screen.getAllByLabelText('Действия')[1]);
+    fireEvent.click(screen.getAllByLabelText(/Действия/)[1]);
     fireEvent.click(screen.getByText('Восстановить'));
 
     await waitFor(() => expect(restoreMutateAsync).toHaveBeenCalledWith('m2'));

@@ -385,7 +385,7 @@ export async function waitForRecordsReady(page: Page) {
         if (rows.length === 0) return true;
         // Either we have real data rows or the genuine empty state
         const firstCell = rows[0]?.querySelector('td');
-        return firstCell !== null; // empty state is a td with "Записи не найдены"
+        return firstCell !== null; // empty state is a td with «Нет записей» (Addendum 12)
       },
       { timeout: 5_000 },
     )
@@ -411,7 +411,15 @@ export async function waitForClientsReady(
   );
   await page.goto('/clients');
   await page.waitForSelector('h1:has-text("Клиенты")', { timeout: 60_000 });
-  await page.waitForSelector('table tbody, p:has-text("Нет клиентов")', { timeout: 60_000 });
+  // #139 T6 + Addendum #12 — empty state = "Нет записей" (shared DataTable
+  // default) for ALL 8 tables; Clients' pre-#139 dual empty variants were
+  // dropped. Wait for either the table body or the unified empty label.
+  await page.waitForFunction(
+    () =>
+      document.querySelector('table tbody') !== null ||
+      document.body.innerText.includes('Нет записей'),
+    { timeout: 60_000 },
+  );
   await clientsResponse.catch(() => {});
   await page.waitForTimeout(500); // React re-render buffer
 
@@ -425,7 +433,12 @@ export async function waitForClientsReady(
       { timeout: 60_000 },
     );
     await page.reload({ waitUntil: 'networkidle' });
-    await page.waitForSelector('table tbody, p:has-text("Нет клиентов")', { timeout: 60_000 });
+    await page.waitForFunction(
+      () =>
+        document.querySelector('table tbody') !== null ||
+        document.body.innerText.includes('Нет записей'),
+      { timeout: 60_000 },
+    );
     await clientsResponse2.catch(() => {});
     await page.waitForTimeout(500); // React re-render buffer
   }
@@ -511,9 +524,13 @@ export async function openRowActionDropdown(row: Locator) {
   return row;
 }
 
+function menuItem(dropdownOrRow: Locator, name: string | RegExp): Locator {
+  return dropdownOrRow.getByRole('menuitem', { name });
+}
+
 /** Click the "Удалить" item in an open row action dropdown (or row scope). */
 export async function clickRowDelete(dropdownOrRow: Locator): Promise<void> {
-  await dropdownOrRow.getByRole('button', { name: 'Удалить' }).click();
+  await menuItem(dropdownOrRow, 'Удалить').click();
 }
 
 /** Click the "В архив" or "Восстановить" item in an open row dropdown (or row scope). */
@@ -521,7 +538,7 @@ export async function clickRowArchiveAction(
   dropdownOrRow: Locator,
   action: 'В архив' | 'Восстановить',
 ): Promise<void> {
-  await dropdownOrRow.getByRole('button', { name: action }).click();
+  await menuItem(dropdownOrRow, action).click();
 }
 
 /**

@@ -10,6 +10,7 @@ import {
   createTestActivity,
   createTestRecord,
   cleanup,
+  cleanupRecord,
 } from './fixtures/factories';
 
 /**
@@ -98,8 +99,8 @@ test.describe('Scenario 1 — Activity at capacity', () => {
       await expectErrorToast(page, /Недостаточно мест/);
     } finally {
       // 5. CLEANUP
-      await cleanup(request, `/api/v1/records/${record1.id}`);
-      await cleanup(request, `/api/v1/records/${record2.id}`);
+      await cleanupRecord(request, record1.id);
+      await cleanupRecord(request, record2.id);
       await cleanup(request, `/api/v1/clients/${client1.id}`);
       await cleanup(request, `/api/v1/clients/${client2.id}`);
       await cleanup(request, `/api/v1/activities/${activity.id}`);
@@ -140,7 +141,7 @@ test.describe('Scenario 2 — Delete non-existent tag', () => {
     page.on('dialog', (dialog) => dialog.accept());
 
     // Click the actions dropdown on the first tag row
-    const actionsBtn = firstRow.locator('button[aria-label="Действия"]');
+    const actionsBtn = firstRow.locator('button[aria-label^="Действия"]');
     await expect(actionsBtn).toBeVisible();
     await actionsBtn.click();
 

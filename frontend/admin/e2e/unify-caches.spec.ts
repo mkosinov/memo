@@ -30,6 +30,7 @@ import {
   createTestActivity,
   createTestRecord,
   cleanup,
+  cleanupRecord,
 } from './fixtures/factories';
 
 const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
@@ -161,7 +162,7 @@ test.describe('US-1..US-7: cache unification (GH #127)', () => {
       await expect(reopenedRows.first()).toBeVisible({ timeout: 5_000 });
       expect(await reopenedRows.count()).toBeGreaterThanOrEqual(savedCount);
     } finally {
-      await cleanup(request, `/api/v1/records/${record.id}`);
+      await cleanupRecord(request, record.id);
       await cleanup(request, `/api/v1/clients/${client.id}`);
       await cleanup(request, `/api/v1/activities/${activity.id}`);
     }
@@ -220,7 +221,7 @@ test.describe('US-1..US-7: cache unification (GH #127)', () => {
       const resp = await request.get(`${BACKEND}/api/v1/visits/${visitId}`);
       expect([404, 410]).toContain(resp.status());
     } finally {
-      await cleanup(request, `/api/v1/records/${record.id}`);
+      await cleanupRecord(request, record.id);
       await cleanup(request, `/api/v1/clients/${client.id}`);
       await cleanup(request, `/api/v1/activities/${activity.id}`);
     }
@@ -288,7 +289,7 @@ test.describe('US-1..US-7: cache unification (GH #127)', () => {
       await page.waitForTimeout(5_500);
       expect(deleteRequests).toHaveLength(0);
     } finally {
-      await cleanup(request, `/api/v1/records/${record.id}`);
+      await cleanupRecord(request, record.id);
       await cleanup(request, `/api/v1/clients/${client.id}`);
       await cleanup(request, `/api/v1/activities/${activity.id}`);
     }
@@ -351,7 +352,7 @@ test.describe('US-1..US-7: cache unification (GH #127)', () => {
         page.locator(`[data-testid="visit-row-${visitId}"]`),
       ).not.toBeVisible({ timeout: 3_000 });
     } finally {
-      await cleanup(request, `/api/v1/records/${record.id}`);
+      await cleanupRecord(request, record.id);
       await cleanup(request, `/api/v1/clients/${client.id}`);
       await cleanup(request, `/api/v1/activities/${activity.id}`);
     }
@@ -398,7 +399,7 @@ test.describe('US-1..US-7: cache unification (GH #127)', () => {
       // Totals: 1500 + 200 = 1700
       await expect(totalsRow).toContainText('1 700', { timeout: 3_000 });
     } finally {
-      await cleanup(request, `/api/v1/records/${record.id}`);
+      await cleanupRecord(request, record.id);
       await cleanup(request, `/api/v1/clients/${client.id}`);
       await cleanup(request, `/api/v1/activities/${activity.id}`);
     }
@@ -469,7 +470,7 @@ test.describe('US-1..US-7: cache unification (GH #127)', () => {
         .filter({ has: page.locator('input[value="Обновлённое Имя"]') });
       await expect(updatedRow.first()).toBeVisible({ timeout: 5_000 });
     } finally {
-      await cleanup(request, `/api/v1/records/${record.id}`);
+      await cleanupRecord(request, record.id);
       await cleanup(request, `/api/v1/clients/${client.id}`);
       await cleanup(request, `/api/v1/activities/${activity.id}`);
     }
@@ -548,7 +549,7 @@ test.describe('US-1..US-7: cache unification (GH #127)', () => {
       expect(getPayment2.ok()).toBeTruthy();
     } finally {
       await cleanup(request, `/api/v1/payments/${payment2.id}`);
-      await cleanup(request, `/api/v1/records/${record.id}`);
+      await cleanupRecord(request, record.id);
       await cleanup(request, `/api/v1/clients/${client.id}`);
       await cleanup(request, `/api/v1/activities/${activity.id}`);
     }

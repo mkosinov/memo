@@ -6,6 +6,7 @@ import {
   createTestActivity,
   createTestRecord,
   cleanup,
+  cleanupRecord,
 } from './fixtures/factories';
 import { queryDB, queryDBRow } from './fixtures/db-query';
 
@@ -204,7 +205,7 @@ test.describe('Unified inline-editable rows', () => {
       // Price should be a number (may be "0" if tariff has no price, or a positive number)
       expect(Number.isNaN(Number(priceValue))).toBe(false);
     } finally {
-      await cleanup(request, `/api/v1/records/${record.id}`);
+      await cleanupRecord(request, record.id);
       await cleanup(request, `/api/v1/clients/${client.id}`);
     }
   });
@@ -280,7 +281,7 @@ test.describe('Unified inline-editable rows', () => {
       await addBtn.click();
       await expect(page.locator('[data-testid="visit-row-new"]')).toBeVisible();
     } finally {
-      await cleanup(request, `/api/v1/records/${record.id}`);
+      await cleanupRecord(request, record.id);
       await cleanup(request, `/api/v1/clients/${client.id}`);
     }
   });
@@ -431,7 +432,7 @@ test.describe('Unified inline-editable rows', () => {
       const totalsRow = page.locator('[data-testid="payments-total"]');
       await expect(totalsRow).toBeVisible();
     } finally {
-      await cleanup(request, `/api/v1/records/${record.id}`);
+      await cleanupRecord(request, record.id);
       await cleanup(request, `/api/v1/clients/${client.id}`);
     }
   });
@@ -644,7 +645,7 @@ test.describe('addendum-2: cache sync, tariffs, undo', () => {
       await expect(reopenedSavedRows.first()).toBeVisible({ timeout: 5_000 });
       expect(await reopenedSavedRows.count()).toBeGreaterThanOrEqual(savedCount);
     } finally {
-      await cleanup(request, `/api/v1/records/${record.id}`);
+      await cleanupRecord(request, record.id);
       await cleanup(request, `/api/v1/clients/${client.id}`);
     }
   });
@@ -691,7 +692,7 @@ test.describe('addendum-2: cache sync, tariffs, undo', () => {
       await expect(reopenedPayments.first()).toBeVisible({ timeout: 5_000 });
       expect(await reopenedPayments.count()).toBeGreaterThanOrEqual(savedCount);
     } finally {
-      await cleanup(request, `/api/v1/records/${record.id}`);
+      await cleanupRecord(request, record.id);
       await cleanup(request, `/api/v1/clients/${client.id}`);
     }
   });
@@ -743,7 +744,7 @@ test.describe('addendum-2: cache sync, tariffs, undo', () => {
       const deletedRow = page.locator(`[data-testid="visit-row-${visitId}"]`);
       await expect(deletedRow).not.toBeVisible({ timeout: 3_000 });
     } finally {
-      await cleanup(request, `/api/v1/records/${record.id}`);
+      await cleanupRecord(request, record.id);
       await cleanup(request, `/api/v1/clients/${client.id}`);
     }
   });
@@ -797,7 +798,7 @@ test.describe('addendum-2: cache sync, tariffs, undo', () => {
       await expect(deletedPayment).not.toBeVisible({ timeout: 3_000 });
     } finally {
       await cleanup(request, `/api/v1/payments/${payment.id}`);
-      await cleanup(request, `/api/v1/records/${record.id}`);
+      await cleanupRecord(request, record.id);
       await cleanup(request, `/api/v1/clients/${client.id}`);
     }
   });
@@ -856,7 +857,7 @@ test.describe('addendum-2: cache sync, tariffs, undo', () => {
       // Price should be a valid number
       expect(Number.isNaN(Number(priceValue))).toBe(false);
     } finally {
-      await cleanup(request, `/api/v1/records/${record.id}`);
+      await cleanupRecord(request, record.id);
       await cleanup(request, `/api/v1/clients/${client.id}`);
     }
   });
@@ -903,7 +904,7 @@ test.describe('addendum-2: cache sync, tariffs, undo', () => {
       const totalPaidAfter = clientAfter?.total_paid ?? 0;
       expect(totalPaidAfter).toBe(totalPaidBefore - 3000);
     } finally {
-      await cleanup(request, `/api/v1/records/${record.id}`);
+      await cleanupRecord(request, record.id);
       await cleanup(request, `/api/v1/clients/${client.id}`);
     }
   });
@@ -988,7 +989,7 @@ test.describe('addendum-2: cache sync, tariffs, undo', () => {
     } finally {
       await page.unroute('**/api/v1/payments/**');
       await cleanup(request, `/api/v1/payments/${payment.id}`);
-      await cleanup(request, `/api/v1/records/${record.id}`);
+      await cleanupRecord(request, record.id);
       await cleanup(request, `/api/v1/clients/${client.id}`);
     }
   });

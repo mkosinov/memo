@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { z } from 'zod';
-import { getMasters, getMaster, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, deleteActivity, getWebPhotos, getRecords, getClients, getPayments, getPaymentTotals, createRecord, updateRecord, deleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, searchClientByPhone, updateVisitStatus, getTags, createService, updateService, deleteService, createLocation, updateLocation, deleteLocation, getClientsWithStats, updateClient, patchClient, reorderMasters, reorderLocations, patchMaster, patchLocation, patchMaterial, patchService, patchUserSettings, getMaterials, getTag, getVisitors, deleteMaster, deleteMaterial, deleteClient, archiveMaster, restoreMaster, resolveDeleteMaster, archiveLocation, restoreLocation, resolveDeleteLocation, archiveService, restoreService, resolveDeleteService, archiveMaterial, restoreMaterial, resolveDeleteMaterial, archiveClient, restoreClient, resolveDeleteClient, getAllMasters, getAllLocations, getAllServices, getAllMaterials, getAllTags } from './endpoints';
+import { getMasters, getMaster, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, deleteActivity, getWebPhotos, getRecords, getClients, getPayments, getPaymentTotals, createRecord, updateRecord, deleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, searchClientByPhone, updateVisitStatus, getTags, createService, updateService, deleteService, createLocation, updateLocation, deleteLocation, getClientsWithStats, updateClient, patchClient, reorderMasters, reorderLocations, patchMaster, patchLocation, patchMaterial, patchService, patchUserSettings, getMaterials, getTag, getVisitors, deleteMaster, deleteMaterial, deleteClient, archiveMaster, restoreMaster, resolveDeleteMaster, archiveLocation, restoreLocation, resolveDeleteLocation, archiveService, restoreService, resolveDeleteService, archiveMaterial, restoreMaterial, resolveDeleteMaterial, archiveClient, restoreClient, resolveDeleteClient, resolveDeleteRecord, getAllMasters, getAllLocations, getAllServices, getAllMaterials, getAllTags } from './endpoints';
 import { ServiceCreateSchema, LocationCreateSchema, type ServiceUpdate, type LocationUpdate, type ClientUpdate } from './schemas';
 
 // Mock the api function from client
@@ -1063,6 +1063,17 @@ describe('resolveDeleteClient', () => {
     expect(api).toHaveBeenCalledWith('/api/v1/clients/c-1', expect.anything(), {
       method: 'DELETE',
       body: JSON.stringify({ resolutions: { records: 'nullify', visitors: 'cascade' } }),
+    });
+  });
+});
+
+describe('resolveDeleteRecord', () => {
+  it('calls DELETE /api/v1/records/:id with resolutions body (execute path, NOT POST)', async () => {
+    vi.mocked(api).mockResolvedValue(undefined);
+    await resolveDeleteRecord('r-1', { visits: 'cascade', payments: 'cascade' });
+    expect(api).toHaveBeenCalledWith('/api/v1/records/r-1', expect.anything(), {
+      method: 'DELETE',
+      body: JSON.stringify({ resolutions: { visits: 'cascade', payments: 'cascade' } }),
     });
   });
 });

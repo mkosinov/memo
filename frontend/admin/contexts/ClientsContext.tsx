@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useState, useCallback, useMemo } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   getClientsWithStats,
@@ -52,15 +52,24 @@ const defaultFilters: ClientFilters = {
 };
 
 export interface ClientsContextType {
+  /** Server-page items — PagedListState.items contract (spec §6.4, #139 T6). */
+  items: ClientWithStats[];
+  /** Kept alongside `items` for backwards compat with non-table consumers. */
   clients: ClientWithStats[];
   total: number;
   page: number;
   perPage: number;
   filters: ClientFilters;
+  /** `string` is assignable to `string | null`; initial 'name' preserved (B2 cat 15 guard). */
   sortBy: string;
   sortOrder: 'asc' | 'desc';
   isLoading: boolean;
-  error: string | null;
+  /** Spec §6.4 — pass-through from React Query. */
+  isPending: boolean;
+  /** Spec §6.4 — pass-through from React Query. */
+  isFetching: boolean;
+  /** Spec §6.4 — align to `Error | null` (replaces the legacy stringified error). */
+  error: Error | null;
   refetch: () => void;
   setPage: (page: number) => void;
   setPerPage: (perPage: number) => void;
@@ -100,7 +109,7 @@ export function ClientsProvider({ children }: { children: React.ReactNode }) {
   // DeleteDialog (Task 18/19). Null when no dry-run conflict is pending.
   const [dependencies, setDependencies] = useState<DependencyNode[] | null>(null);
 
-  const { data, isLoading, error, refetch } = useQuery<PaginatedResponse<ClientWithStats>>({
+  const { data, isLoading, isPending, isFetching, error, refetch } = useQuery<PaginatedResponse<ClientWithStats>>({
     queryKey: ['clients', page, perPage, filters, sortBy, sortOrder],
     queryFn: () =>
       getClientsWithStats({
@@ -117,9 +126,13 @@ export function ClientsProvider({ children }: { children: React.ReactNode }) {
     setPage(1);
   }, []);
 
+  // Spec §6.10.2 — sort change resets page to 1 (drift fix; the pre-#139
+  // hand-rolled context skipped this — DataTable and the factory contexts do
+  // it; Clients now aligns).
   const setSort = useCallback((field: string, order: 'asc' | 'desc') => {
     setSortBy(field);
     setSortOrder(order);
+    setPage(1);
   }, []);
 
   const resetFilters = useCallback(() => {
@@ -231,6 +244,7 @@ export function ClientsProvider({ children }: { children: React.ReactNode }) {
 
   const value = useMemo(
     () => ({
+      items: data?.items || [],
       clients: data?.items || [],
       total: data?.total || 0,
       page,
@@ -239,7 +253,9 @@ export function ClientsProvider({ children }: { children: React.ReactNode }) {
       sortBy,
       sortOrder,
       isLoading,
-      error: error?.message || null,
+      isPending,
+      isFetching,
+      error: (error as Error) ?? null,
       refetch,
       setPage,
       setPerPage,
@@ -263,6 +279,8 @@ export function ClientsProvider({ children }: { children: React.ReactNode }) {
       sortBy,
       sortOrder,
       isLoading,
+      isPending,
+      isFetching,
       error,
       refetch,
       createClient,
@@ -275,6 +293,16 @@ export function ClientsProvider({ children }: { children: React.ReactNode }) {
       dependencies,
     ],
   );
+
+  // Spec §6.7 page clamp — after a SETTLED fetch returns an empty non-first
+  // page (e.g. last row of page N deleted), step back. `!isFetching` guards
+  // against mid-refetch races with keepPreviousData.
+  useEffect(() => {
+    const items = data?.items || [];
+    if (!isPending && !isFetching && items.length === 0 && page > 1) {
+      setPage(page - 1);
+    }
+  }, [isPending, isFetching, data, page]);
 
   return <ClientsContext.Provider value={value}>{children}</ClientsContext.Provider>;
 }

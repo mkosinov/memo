@@ -9,6 +9,7 @@ import {
   decimalToHHMM,
   hhmmToDecimal,
   formatActivityContext,
+  formatRecordLabel,
   generateTimeSlots,
   calculateGridTimeRange,
   HOURS_START,
@@ -313,5 +314,17 @@ describe('calculateGridTimeRange', () => {
     const range = calculateGridTimeRange(activities, 9, 21);
     expect(range.start).toBe(9);
     expect(range.end).toBe(24); // Math.min(24, ceil(30)+1) = 24
+  });
+});
+
+describe('formatRecordLabel', () => {
+  it('formats an ISO activity start as "day month · HH:MM" (Addendum 13 dialog label)', () => {
+    expect(formatRecordLabel('2026-05-15T14:00:00')).toBe('15 мая · 14:00');
+  });
+
+  it('returns the generic «запись» when no activity start is known', () => {
+    expect(formatRecordLabel(null)).toBe('запись');
+    expect(formatRecordLabel(undefined)).toBe('запись');
+    expect(formatRecordLabel('')).toBe('запись');
   });
 });

@@ -5,7 +5,6 @@ import { createElement, type ReactNode } from 'react';
 
 vi.mock('@memo/api-client', () => ({
   patchRecord: vi.fn(),
-  deleteRecord: vi.fn(),
   patchActivity: vi.fn(),
   createPayment: vi.fn(),
   patchPayment: vi.fn(),
@@ -25,7 +24,6 @@ vi.mock('@/contexts/PendingActionsContext', () => ({
 
 import {
   patchRecord,
-  deleteRecord,
   patchActivity,
   createPayment,
   patchPayment,
@@ -40,7 +38,6 @@ import { useRecordMutations } from '../hooks/useRecordMutations';
 import type { PaginatedResponse, RecordResponse, PaymentResponse } from '@memo/api-client';
 
 const mockPatchRecord = vi.mocked(patchRecord);
-const mockDeleteRecord = vi.mocked(deleteRecord);
 const mockPatchActivity = vi.mocked(patchActivity);
 const mockCreatePayment = vi.mocked(createPayment);
 const mockPatchPayment = vi.mocked(patchPayment);
@@ -113,7 +110,6 @@ describe('useRecordMutations', () => {
     vi.clearAllMocks();
     mockEnqueuePendingAction.mockReset();
     mockPatchRecord.mockResolvedValue(mockRecordResponse as never);
-    mockDeleteRecord.mockResolvedValue(undefined as never);
     mockPatchActivity.mockResolvedValue({ id: 'ev_1' } as never);
     mockCreatePayment.mockResolvedValue(mockPaymentResponse as never);
     mockPatchPayment.mockResolvedValue(mockPaymentResponse as never);
@@ -221,90 +217,11 @@ describe('useRecordMutations', () => {
     });
   });
 
-  describe('deleteRecord', () => {
-    it('calls deleteRecord API with the record id', async () => {
-      const { wrapper } = createQueryClientWrapper();
-      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
-
-      await act(async () => {
-        await result.current.deleteRecord();
-      });
-
-      expect(mockDeleteRecord).toHaveBeenCalledWith(recordId);
-    });
-
-    it('prefix-matches all records caches via setQueriesData and invalidates record', async () => {
-      const { queryClient, wrapper } = createQueryClientWrapper();
-      // Seed two list caches (envelope main list and per-client array) AND the canonical
-      const otherRecord = { ...mockRecordResponse, id: 'r2', visits: [] };
-      queryClient.setQueryData(['records', '2026-06-10', '2026-06-10'], {
-        items: [mockRecordResponse, otherRecord],
-        total: 2,
-        page: 1,
-        per_page: 10,
-      });
-      queryClient.setQueryData(['records', 'client', 'c1'], [mockRecordResponse, otherRecord]);
-      queryClient.setQueryData(['record', recordId], mockRecordResponse);
-
-      const setQueriesDataSpy = vi.spyOn(queryClient, 'setQueriesData');
-      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
-      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
-
-      await act(async () => {
-        await result.current.deleteRecord();
-      });
-
-      // Must use prefix-match (not bare ['records'])
-      expect(setQueriesDataSpy).toHaveBeenCalledWith(
-        { queryKey: ['records'] },
-        expect.any(Function),
-      );
-      // After the updater runs, r1 should be gone from BOTH list caches
-      const dateListAfter = queryClient.getQueryData<PaginatedResponse<RecordResponse>>([
-        'records',
-        '2026-06-10',
-        '2026-06-10',
-      ]);
-      const clientListAfter = queryClient.getQueryData<RecordResponse[]>([
-        'records',
-        'client',
-        'c1',
-      ]);
-      expect(dateListAfter?.items.find((r) => r.id === recordId)).toBeUndefined();
-      expect(clientListAfter?.find((r) => r.id === recordId)).toBeUndefined();
-      // Targeted invalidation (not 5-key blanket)
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['record', recordId] });
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['records'] });
-      expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: ['activities'] });
-      expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: ['clients'] });
-    });
-
-    it('removes from BOTH envelope and array records caches', async () => {
-      const { queryClient, wrapper } = createQueryClientWrapper();
-      queryClient.setQueryData(['records', 1, 10], {
-        items: [mockRecordResponse],
-        total: 1,
-        page: 1,
-        per_page: 10,
-      });
-      queryClient.setQueryData(['records', 'client', 'c1'], [mockRecordResponse]);
-
-      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
-
-      await act(async () => {
-        await result.current.deleteRecord();
-      });
-
-      const envelope = queryClient.getQueryData<PaginatedResponse<RecordResponse>>([
-        'records',
-        1,
-        10,
-      ]);
-      const array = queryClient.getQueryData<RecordResponse[]>(['records', 'client', 'c1']);
-      expect(envelope?.items).toEqual([]);
-      expect(array).toEqual([]);
-    });
-  });
+  // NOTE: the bound `deleteRecord` was removed (Addendum 13 / GH #139
+  // T8-FE2a) — records deletion now flows through the shared unbound hook
+  // hooks/useDeleteRecord.ts; its tests (API call, prefix-match cache
+  // removal, targeted invalidations, dependency-tree parking) live in
+  // __tests__/useDeleteRecord.test.ts.
 
   describe('addVisitor', () => {
     it('calls createVisitor with the provided data', async () => {

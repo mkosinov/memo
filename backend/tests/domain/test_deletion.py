@@ -43,12 +43,15 @@ from src.models.client import Client
 from src.models.location import Location
 from src.models.master import Master
 from src.models.material import Material
+from src.models.payment import Payment
+from src.models.record import Record
 from src.models.service import Service
 from src.models.tag import (
     Tag,
     client_tags,
     location_tags,
     master_tags,
+    record_tags,
     service_tags,
 )
 from src.models.user import User
@@ -106,6 +109,15 @@ async def _add_client_tag_links(db_session, client: Client, n: int) -> None:
     await _link_tags(db_session, client_tags, "client_id", client.id, n, prefix="ctag")
 
 
+async def _add_record_tag_links(db_session, record: Record, n: int) -> None:
+    await _link_tags(db_session, record_tags, "record_id", record.id, n, prefix="rtag")
+
+
+async def _add_payment(db_session, record: Record, amount: int = 500) -> None:
+    db_session.add(Payment(record_id=record.id, amount=amount, method="cash"))
+    await db_session.flush()
+
+
 async def _add_activity(
     db_session, *, master: Master, service: Service, location: Location, i: int = 0,
 ) -> Activity:
@@ -131,9 +143,13 @@ async def _add_photo(db_session, service: Service) -> None:
     await db_session.flush()
 
 
-async def _add_visit(db_session, *, record, visitor: Visitor, price: int = 100) -> None:
+async def _add_visit(db_session, *, record, visitor: Visitor | None = None, price: int = 100) -> None:
     from src.models.visit import Visit
-    visit = Visit(record_id=record.id, visitor_id=visitor.id, price=price, status="waiting")
+    visit = Visit(
+        record_id=record.id,
+        visitor_id=visitor.id if visitor else None,
+        price=price, status="waiting",
+    )
     db_session.add(visit)
 
 
@@ -249,6 +265,34 @@ class TestFKMatrixClient:
         assert dep.action == "cascade"
         assert dep.auto is True
         assert dep.allowed_actions == ["cascade"]
+
+
+class TestFKMatrixRecord:
+    def test_has_exactly_three_deps(self) -> None:
+        assert {dep.entity for dep in FK_MATRIX[Record]} == {
+            "visits", "payments", "record_tags",
+        }
+
+    def test_visits_cascade_user_choice(self) -> None:
+        dep = _deps_map(Record)["visits"]
+        assert dep.action == "cascade"
+        assert dep.auto is False
+        assert dep.allowed_actions == ["cascade"]
+        assert dep.nullable is False
+
+    def test_payments_cascade_user_choice(self) -> None:
+        dep = _deps_map(Record)["payments"]
+        assert dep.action == "cascade"
+        assert dep.auto is False
+        assert dep.allowed_actions == ["cascade"]
+        assert dep.nullable is False
+
+    def test_record_tags_cascade_auto(self) -> None:
+        dep = _deps_map(Record)["record_tags"]
+        assert dep.action == "cascade"
+        assert dep.auto is True
+        assert dep.allowed_actions == ["cascade"]
+        assert dep.nullable is False
 
 
 # ─── 2. Exception hierarchy (pure) ─────────────────────────────────────────────
@@ -473,6 +517,87 @@ class TestCollectDependenciesClient:
         assert nodes == []
 
 
+class TestCollectDependenciesRecord:
+    async def test_counts_visits_payments_and_record_tags(self, db_session) -> None:
+        """Record→visits(cascade user), payments(cascade user), record_tags(auto)."""
+        master = Master(first_name="r1", last_name="m", color="#777777",
+                        position="мастер", specialty="живопись")
+        service = Service(title="rS", description="d", image_url="i", specialty="живопись",
+                          min_age=6, duration=90, record_info="r")
+        location = Location(name="rL", capacity=50)
+        db_session.add_all([master, service, location])
+        await db_session.flush()
+        activity = await _add_activity(
+            db_session, master=master, service=service, location=location,
+        )
+        record = Record(activity_id=activity.id, client_id=None,
+                        status="pending", seats=0, anonym_visits=0)
+        db_session.add(record)
+        await db_session.flush()
+        # 3 visits (anonymous — visitor_id=None), 2 payments, 2 record_tags.
+        for _ in range(3):
+            await _add_visit(db_session, record=record)
+        for _ in range(2):
+            await _add_payment(db_session, record)
+        await _add_record_tag_links(db_session, record, 2)
+        await db_session.commit()
+
+        nodes = await collect_dependencies(db_session, Record, record.id)
+        by_entity = {n.entity: n for n in nodes}
+        assert set(by_entity) == {"visits", "payments", "record_tags"}
+        assert by_entity["visits"].count == 3
+        assert by_entity["payments"].count == 2
+        assert by_entity["record_tags"].count == 2
+        # No cascade_preview on any Record dep (nothing FK-references visits/payments).
+        assert by_entity["visits"].cascade_preview is None
+        assert by_entity["payments"].cascade_preview is None
+        assert by_entity["record_tags"].cascade_preview is None
+
+    async def test_zero_count_deps_are_skipped(self, db_session) -> None:
+        """Record with visits but 0 payments + 0 record_tags → only visits in tree."""
+        master = Master(first_name="r2", last_name="m", color="#888888",
+                        position="мастер", specialty="живопись")
+        service = Service(title="r2S", description="d", image_url="i", specialty="живопись",
+                          min_age=6, duration=90, record_info="r")
+        location = Location(name="r2L", capacity=50)
+        db_session.add_all([master, service, location])
+        await db_session.flush()
+        activity = await _add_activity(
+            db_session, master=master, service=service, location=location,
+        )
+        record = Record(activity_id=activity.id, client_id=None,
+                        status="pending", seats=0, anonym_visits=0)
+        db_session.add(record)
+        await db_session.flush()
+        await _add_visit(db_session, record=record)
+        await db_session.commit()
+
+        nodes = await collect_dependencies(db_session, Record, record.id)
+        by_entity = {n.entity: n for n in nodes}
+        assert "payments" not in by_entity
+        assert "record_tags" not in by_entity
+        assert by_entity["visits"].count == 1
+
+    async def test_no_deps_returns_empty(self, db_session) -> None:
+        """Bare record (no visits/payments/tags) → empty dependency tree."""
+        master = Master(first_name="r3", last_name="m", color="#999999",
+                        position="мастер", specialty="живопись")
+        service = Service(title="r3S", description="d", image_url="i", specialty="живопись",
+                          min_age=6, duration=90, record_info="r")
+        location = Location(name="r3L", capacity=50)
+        db_session.add_all([master, service, location])
+        await db_session.flush()
+        activity = await _add_activity(
+            db_session, master=master, service=service, location=location,
+        )
+        record = Record(activity_id=activity.id, client_id=None,
+                        status="pending", seats=0, anonym_visits=0)
+        db_session.add(record)
+        await db_session.commit()
+
+        assert await collect_dependencies(db_session, Record, record.id) == []
+
+
 # ─── 5. validate_resolutions (pure — construct nodes directly) ──────────────────
 
 
@@ -501,6 +626,17 @@ def _master_blocked_nodes() -> list[DependencyNode]:
         DependencyNode(entity="activities", relation="Активность", count=3,
                        allowed_actions=[]),
         DependencyNode(entity="users", relation="Пользователь", count=1,
+                       allowed_actions=["cascade"]),
+    ]
+
+
+def _record_nodes() -> list[DependencyNode]:
+    return [
+        DependencyNode(entity="visits", relation="Посещение", count=3,
+                       allowed_actions=["cascade"]),
+        DependencyNode(entity="payments", relation="Платёж", count=2,
+                       allowed_actions=["cascade"]),
+        DependencyNode(entity="record_tags", relation="Тег", count=2,
                        allowed_actions=["cascade"]),
     ]
 
@@ -553,3 +689,40 @@ class TestValidateResolutions:
         errors = validate_resolutions(Master, _master_blocked_nodes(), {})
         assert len(errors) == 1
         assert all(e.relation == "Активность" for e in errors)
+
+    # ── Record cases (GH #139 — Addendum 13) ──────────────────────────────
+
+    def test_record_missing_non_auto_dep_returns_error(self) -> None:
+        # body provides visits:cascade but misses payments (non-auto) → error.
+        errors = validate_resolutions(Record, _record_nodes(),
+                                       {"visits": "cascade"})
+        assert len(errors) == 1
+        assert errors[0].relation == "Платёж"
+
+    def test_record_wrong_action_returns_error(self) -> None:
+        # visits only allows cascade; sending nullify → error.
+        errors = validate_resolutions(Record, _record_nodes(),
+                                       {"visits": "nullify", "payments": "cascade"})
+        assert len(errors) == 1
+        assert errors[0].relation == "Посещение"
+
+    def test_record_correct_resolutions_returns_no_errors(self) -> None:
+        errors = validate_resolutions(Record, _record_nodes(),
+                                       {"visits": "cascade", "payments": "cascade"})
+        assert errors == []
+
+    def test_record_auto_dep_ignored_even_when_sent_with_wrong_action(self) -> None:
+        # record_tags is auto: user sending wrong action is IGNORED.
+        errors = validate_resolutions(Record, _record_nodes(),
+                                       {"visits": "cascade", "payments": "cascade",
+                                        "record_tags": "nullify"})
+        assert errors == []
+
+    def test_record_auto_dep_ignored_when_body_empty_for_auto_only(self) -> None:
+        # If ONLY auto deps present (record_tags, no visits/payments) → no error.
+        auto_only_nodes = [DependencyNode(
+            entity="record_tags", relation="Тег", count=2,
+            allowed_actions=["cascade"],
+        )]
+        errors = validate_resolutions(Record, auto_only_nodes, {})
+        assert errors == []

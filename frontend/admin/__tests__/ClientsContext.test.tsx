@@ -177,6 +177,71 @@ describe('ClientsContext', () => {
       expect(result.current.sortOrder).toBe('desc');
     });
 
+    it('setSort resets page to 1 (§6.10.2 drift fix)', async () => {
+      const { Wrapper } = createWrapper();
+      const { result } = renderHook(() => useClients(), { wrapper: Wrapper });
+
+      await waitFor(() => {
+        expect(result.current.isLoading).toBe(false);
+      });
+
+      act(() => {
+        result.current.setPage(5);
+      });
+      expect(result.current.page).toBe(5);
+
+      act(() => {
+        result.current.setSort('total_paid', 'desc');
+      });
+      expect(result.current.page).toBe(1);
+    });
+
+    it('exposes items alias of clients (§6.4 PagedListState alignment)', async () => {
+      mockGetClientsWithStats.mockResolvedValue({
+        items: [{ ...clientResponse, id: 'c-9', name: 'Тест', records_count: 0, last_record: null, total_paid: 0, missed_records: 0 }],
+        total: 1,
+        page: 1,
+        per_page: 20,
+      });
+      const { Wrapper } = createWrapper();
+      const { result } = renderHook(() => useClients(), { wrapper: Wrapper });
+
+      await waitFor(() => {
+        expect(result.current.isLoading).toBe(false);
+      });
+
+      expect(result.current.items).toEqual(result.current.clients);
+      expect(result.current.items[0].id).toBe('c-9');
+    });
+
+    it('exposes isFetching and isPending pass-throughs from useQuery (§6.4)', async () => {
+      const { Wrapper } = createWrapper();
+      const { result } = renderHook(() => useClients(), { wrapper: Wrapper });
+
+      // Initial render — query is pending (no data yet).
+      expect(result.current.isPending).toBe(true);
+      // isFetching may be true or false on initial render depending on React Query internals.
+      expect(typeof result.current.isFetching).toBe('boolean');
+
+      await waitFor(() => {
+        expect(result.current.isLoading).toBe(false);
+      });
+
+      // After fetch settles, isPending=false.
+      expect(result.current.isPending).toBe(false);
+      expect(result.current.isFetching).toBe(false);
+    });
+
+    it('error is exposed as Error | null (§6.4 alignment)', async () => {
+      const { Wrapper } = createWrapper();
+      const { result } = renderHook(() => useClients(), { wrapper: Wrapper });
+
+      await waitFor(() => {
+        expect(result.current.isLoading).toBe(false);
+      });
+      expect(result.current.error).toBeNull();
+    });
+
     it('resetFilters restores default filters and resets page', async () => {
       const { Wrapper } = createWrapper();
       const { result } = renderHook(() => useClients(), { wrapper: Wrapper });

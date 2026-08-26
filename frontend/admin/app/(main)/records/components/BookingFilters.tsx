@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigation } from '@/contexts/NavigationContext';
 import { useRecords } from '@/contexts/RecordsContext';
 import { getMonday, formatDateISO } from '@/lib/utils';
@@ -12,10 +12,12 @@ interface BookingFiltersProps {
   serviceId: string;
   masterId: string;
   status: string;
+  search: string;
   onLocationChange: (v: string) => void;
   onServiceChange: (v: string) => void;
   onMasterChange: (v: string) => void;
   onStatusChange: (v: string) => void;
+  onSearchChange: (v: string) => void;
   onReset: () => void;
 }
 
@@ -33,10 +35,12 @@ export function BookingFilters({
   serviceId,
   masterId,
   status,
+  search,
   onLocationChange,
   onServiceChange,
   onMasterChange,
   onStatusChange,
+  onSearchChange,
   onReset,
 }: BookingFiltersProps) {
   const { dateFrom, dateTo, selectDateRange } = useNavigation();
@@ -46,6 +50,38 @@ export function BookingFilters({
   const serviceList = Array.from(services.values()).filter(s => !s.archived);
   const masterList = Array.from(masters.values()).filter(m => !m.archived);
 
+  // GH #212 Task 12 — search input: local draft echoes keystrokes instantly
+  // while typing is debounced 300ms before reaching onSearchChange →
+  // context setFilters({ search }) → server ?q=. Mirrors DataTable's
+  // draft+debounce pattern (spec §6.7). External `search` changes (e.g. the
+  // reset button clearing it) sync the draft and cancel a pending debounce.
+  const [draft, setDraft] = useState(search);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const cancelTimer = useCallback(() => {
+    if (timerRef.current !== null) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    setDraft(search);
+    cancelTimer();
+  }, [search, cancelTimer]);
+
+  // No stale onSearchChange after unmount.
+  useEffect(() => () => cancelTimer(), [cancelTimer]);
+
+  const handleSearchChange = (value: string) => {
+    setDraft(value);
+    cancelTimer();
+    timerRef.current = setTimeout(() => {
+      timerRef.current = null;
+      onSearchChange(value);
+    }, 300);
+  };
+
   const handleReset = () => {
     onReset();
     const { dateFrom: monday, dateTo: sunday } = getCurrentWeekRange();
@@ -54,6 +90,19 @@ export function BookingFilters({
 
   return (
     <div className="flex flex-wrap items-end gap-3">
+      <div className="flex flex-col gap-1">
+        <label className="text-xs font-medium" style={{ color: 'var(--ink-light)' }}>Поиск</label>
+        <input
+          type="text"
+          value={draft}
+          onChange={(e) => handleSearchChange(e.target.value)}
+          placeholder="Клиент или услуга..."
+          className="rounded-lg border px-2 py-1.5 text-xs"
+          style={{ borderColor: 'var(--line)', color: 'var(--ink-mid)', backgroundColor: 'var(--white)' }}
+          aria-label="Поиск по клиенту или услуге"
+        />
+      </div>
+
       <div className="flex flex-col gap-1">
         <label className="text-xs font-medium" style={{ color: 'var(--ink-light)' }}>Дата от</label>
         <input

@@ -115,7 +115,7 @@ const DEFAULT_RECORDS_KEY = [
   10,
   '2026-01-01',
   '2026-01-31',
-  { locationId: '', serviceId: '', masterId: '', status: '' },
+  { locationId: '', serviceId: '', masterId: '', status: '', search: '' },
   'date',
   'asc',
 ];
@@ -538,6 +538,150 @@ describe('RecordsContext — server-driven page/filters/sort state (#191)', () =
     await waitFor(() => {
       expect(result.current.total).toBe(42);
     });
+  });
+});
+
+describe('RecordsContext — server-side search q (GH #212 Task 12)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+
+    mockUseNavigation.mockReturnValue({
+      dateFrom: '2026-01-01',
+      dateTo: '2026-01-31',
+      selectDateRange: vi.fn(),
+    } as unknown as ReturnType<typeof useNavigation>);
+
+    vi.mocked(getRecords).mockResolvedValue(envelope([]));
+    vi.mocked(getClients).mockResolvedValue([]);
+    vi.mocked(getPaymentTotals).mockResolvedValue({});
+    vi.mocked(getActivities).mockResolvedValue(envelope([]));
+    vi.mocked(getAllMasters).mockResolvedValue([]);
+    vi.mocked(getAllServices).mockResolvedValue([]);
+    vi.mocked(getAllLocations).mockResolvedValue([]);
+  });
+
+  it('exposes search in filters with an empty default', async () => {
+    const { Wrapper } = createWrapper();
+    const { result } = renderHook(() => useRecords(), { wrapper: Wrapper });
+
+    await waitFor(() => {
+      expect(vi.mocked(getRecords)).toHaveBeenCalled();
+    });
+
+    expect(result.current.filters.search).toBe('');
+  });
+
+  it('search of ≥2 chars sends q to getRecords', async () => {
+    const { Wrapper } = createWrapper();
+    const { result } = renderHook(() => useRecords(), { wrapper: Wrapper });
+
+    await waitFor(() => {
+      expect(vi.mocked(getRecords)).toHaveBeenCalled();
+    });
+
+    act(() => {
+      result.current.setFilters({ search: 'анна' });
+    });
+
+    await waitFor(() => {
+      expect(vi.mocked(getRecords)).toHaveBeenCalledWith(
+        expect.objectContaining({ q: 'анна' }),
+      );
+    });
+  });
+
+  it('search of 1 char does NOT send q (server min_length=2)', async () => {
+    const { Wrapper } = createWrapper();
+    const { result } = renderHook(() => useRecords(), { wrapper: Wrapper });
+
+    await waitFor(() => {
+      expect(vi.mocked(getRecords)).toHaveBeenCalled();
+    });
+
+    const callsBefore = vi.mocked(getRecords).mock.calls.length;
+
+    act(() => {
+      result.current.setFilters({ search: 'а' });
+    });
+
+    // The 1-char search lands a new query key → one more fetch must fire.
+    await waitFor(() => {
+      expect(vi.mocked(getRecords).mock.calls.length).toBeGreaterThan(callsBefore);
+    });
+
+    // …and that fetch carries no q (server rejects <2 chars with 422).
+    const lastParams = vi.mocked(getRecords).mock.calls.at(-1)![0] ?? {};
+    expect(lastParams.q).toBeUndefined();
+  });
+
+  it('q combines with existing filters (objectContaining both)', async () => {
+    const { Wrapper } = createWrapper();
+    const { result } = renderHook(() => useRecords(), { wrapper: Wrapper });
+
+    await waitFor(() => {
+      expect(vi.mocked(getRecords)).toHaveBeenCalled();
+    });
+
+    act(() => {
+      result.current.setFilters({ locationId: 'loc-1', search: 'иванов' });
+    });
+
+    await waitFor(() => {
+      expect(vi.mocked(getRecords)).toHaveBeenCalledWith(
+        expect.objectContaining({ location_id: 'loc-1', q: 'иванов' }),
+      );
+    });
+  });
+
+  it('setFilters({ search }) resets page to 1', async () => {
+    const { Wrapper } = createWrapper();
+    const { result } = renderHook(() => useRecords(), { wrapper: Wrapper });
+
+    await waitFor(() => {
+      expect(vi.mocked(getRecords)).toHaveBeenCalled();
+    });
+
+    act(() => {
+      result.current.setPage(3);
+    });
+
+    await waitFor(() => {
+      expect(result.current.page).toBe(3);
+    });
+
+    act(() => {
+      result.current.setFilters({ search: 'тест' });
+    });
+
+    expect(result.current.page).toBe(1);
+    await waitFor(() => {
+      expect(vi.mocked(getRecords)).toHaveBeenLastCalledWith(
+        expect.objectContaining({ page: 1, q: 'тест' }),
+      );
+    });
+  });
+
+  it('resetFilters clears search', async () => {
+    const { Wrapper } = createWrapper();
+    const { result } = renderHook(() => useRecords(), { wrapper: Wrapper });
+
+    await waitFor(() => {
+      expect(vi.mocked(getRecords)).toHaveBeenCalled();
+    });
+
+    act(() => {
+      result.current.setFilters({ search: 'тест' });
+    });
+
+    await waitFor(() => {
+      expect(result.current.filters.search).toBe('тест');
+    });
+
+    act(() => {
+      result.current.resetFilters();
+    });
+
+    expect(result.current.filters.search).toBe('');
   });
 });
 

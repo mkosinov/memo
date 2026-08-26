@@ -927,4 +927,69 @@ test.describe('Records Page — Table and Filters', () => {
       await cleanup(request, `/api/v1/clients/${client.id}`);
     }
   });
+
+  // ── 23. Search — location filter + client-name q → only matching row ────
+
+  test('23. Search — location filter plus client-name fragment narrows to the matching record', async ({
+    page,
+    request,
+  }) => {
+    // GH #212 Task 12 (scenario 2): two records, different clients, SAME
+    // activity (hence same location). Location filter alone returns both;
+    // typing a fragment of client A's name sends ?q= → only A's row remains
+    // and the pager total reflects the narrowed result.
+    const ts = Date.now();
+    const nameA = `QSearchA-${ts}`;
+    const nameB = `QSearchB-${ts}`;
+    const clientA = await createTestClient(request, { name: nameA });
+    const clientB = await createTestClient(request, { name: nameB });
+    const activity = await createTestActivity(request);
+    const recordA = await createTestRecord(request, activity.id, clientA.id);
+    const recordB = await createTestRecord(request, activity.id, clientB.id);
+
+    try {
+      await waitForRecordsReady(page);
+
+      // Location filter → server request carries location_id= (both rows match)
+      const locationWait = page.waitForResponse(
+        (r) =>
+          r.url().includes('/api/v1/records') &&
+          r.url().includes(`location_id=${activity.location_id}`),
+        { timeout: 10_000 },
+      );
+      await page
+        .locator('select[aria-label="Фильтр по локации"]')
+        .selectOption(activity.location_id);
+      await locationWait;
+
+      // Type client A's unique name fragment into the search input —
+      // 300ms debounce, then the request accumulates location_id= AND q=.
+      const qFragment = `QSearchA-${ts}`;
+      const searchWait = page.waitForResponse(
+        (r) =>
+          r.url().includes('/api/v1/records') &&
+          r.url().includes(`location_id=${activity.location_id}`) &&
+          r.url().includes('q='),
+        { timeout: 10_000 },
+      );
+      await page.locator('input[aria-label="Поиск по клиенту или услуге"]').fill(qFragment);
+      const searchResponse = await searchWait;
+      expect(searchResponse.url()).toContain(`q=${qFragment}`);
+
+      // Post-state: exactly one row — client A's record; client B is gone.
+      const rows = page.locator('tbody tr');
+      await expect(rows).toHaveCount(1);
+      await expect(rows.first()).toContainText(nameA);
+      await expect(rows.first()).not.toContainText(nameB);
+
+      // Pager total reflects the filtered result.
+      await expect.poll(() => readServerTotal(page), { timeout: 10_000 }).toBe(1);
+    } finally {
+      await cleanupRecord(request, recordA.id);
+      await cleanupRecord(request, recordB.id);
+      await cleanup(request, `/api/v1/clients/${clientA.id}`);
+      await cleanup(request, `/api/v1/clients/${clientB.id}`);
+      await cleanup(request, `/api/v1/activities/${activity.id}`);
+    }
+  });
 });

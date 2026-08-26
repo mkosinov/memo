@@ -81,7 +81,7 @@ export function createMockRecordsContext(
     total: 0,
     page: 1,
     perPage: 10,
-    filters: { locationId: '', serviceId: '', masterId: '', status: '' },
+    filters: { locationId: '', serviceId: '', masterId: '', status: '', search: '' },
     sortBy: 'date',
     sortOrder: 'asc',
     setPage: vi.fn(),

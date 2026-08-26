@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { z } from 'zod';
-import { getMasters, getMaster, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, deleteActivity, getWebPhotos, getRecords, getClients, getPayments, getPaymentTotals, createRecord, updateRecord, deleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, searchClientByPhone, updateVisitStatus, getTags, createService, updateService, deleteService, createLocation, updateLocation, deleteLocation, getClientsWithStats, updateClient, patchClient, reorderMasters, reorderLocations, patchMaster, patchLocation, patchMaterial, patchService, patchUserSettings, getMaterials, getTag, getVisitors, deleteMaster, deleteMaterial, deleteClient, archiveMaster, restoreMaster, resolveDeleteMaster, archiveLocation, restoreLocation, resolveDeleteLocation, archiveService, restoreService, resolveDeleteService, archiveMaterial, restoreMaterial, resolveDeleteMaterial, archiveClient, restoreClient, resolveDeleteClient, resolveDeleteRecord, getAllMasters, getAllLocations, getAllServices, getAllMaterials, getAllTags } from './endpoints';
+import { getMasters, getMaster, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, deleteActivity, getWebPhotos, getRecords, getClients, getPayments, getPaymentTotals, createRecord, updateRecord, deleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, getClientByPhone, updateVisitStatus, getTags, createService, updateService, deleteService, createLocation, updateLocation, deleteLocation, getClientsWithStats, updateClient, patchClient, reorderMasters, reorderLocations, patchMaster, patchLocation, patchMaterial, patchService, patchUserSettings, getMaterials, getTag, getVisitors, deleteMaster, deleteMaterial, deleteClient, archiveMaster, restoreMaster, resolveDeleteMaster, archiveLocation, restoreLocation, resolveDeleteLocation, archiveService, restoreService, resolveDeleteService, archiveMaterial, restoreMaterial, resolveDeleteMaterial, archiveClient, restoreClient, resolveDeleteClient, resolveDeleteRecord, getAllMasters, getAllLocations, getAllServices, getAllMaterials, getAllTags } from './endpoints';
 import { ServiceCreateSchema, LocationCreateSchema, type ServiceUpdate, type LocationUpdate, type ClientUpdate } from './schemas';
 
 // Mock the api function from client
@@ -18,7 +18,7 @@ vi.mock('./client', () => ({
   },
 }));
 
-import { api } from './client';
+import { api, ApiError } from './client';
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -609,16 +609,35 @@ describe('deleteVisitor', () => {
   });
 });
 
-// ─── Client Search ────────────────────────────────────────────────────────
+// ─── Client Phone Lookup (GH #212: /clients/search → /clients/get) ──────────
 
-describe('searchClientByPhone', () => {
-  it('calls GET /api/v1/clients/search with encoded phone', async () => {
+describe('getClientByPhone', () => {
+  it('calls GET /api/v1/clients/get with encoded phone', async () => {
     vi.mocked(api).mockResolvedValue({ id: 'c-1', phone: '+79991234567' });
-    await searchClientByPhone('+79991234567');
+    await getClientByPhone('+79991234567');
     expect(api).toHaveBeenCalledWith(
-      '/api/v1/clients/search?phone=%2B79991234567',
+      '/api/v1/clients/get?phone=%2B79991234567',
       expect.anything(),
     );
+  });
+
+  it('propagates 404 as ApiError (CLIENT_NOT_FOUND, not swallowed)', async () => {
+    // Mirror of the client.test.ts:23-35 extraction pattern: the booking
+    // forms branch on the rejection falling into the create flow.
+    vi.mocked(api).mockRejectedValue(
+      new ApiError(404, 'Client not found', 'CLIENT_NOT_FOUND'),
+    );
+    let caught: unknown;
+    try {
+      await getClientByPhone('+00000000000');
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(ApiError);
+    const err = caught as ApiError;
+    expect(err.status).toBe(404);
+    expect(err.code).toBe('CLIENT_NOT_FOUND');
+    expect(err.message).toBe('Client not found');
   });
 });
 

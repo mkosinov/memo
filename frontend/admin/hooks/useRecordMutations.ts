@@ -6,7 +6,7 @@ import {
   createRecord,
   createClient,
   createVisitor,
-  searchClientByPhone,
+  getClientByPhone,
   patchRecord,
   patchActivity,
   createPayment,
@@ -84,7 +84,7 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
       let clientId: string;
       if (input.phone) {
         try {
-          const existing = await searchClientByPhone(input.phone);
+          const existing = await getClientByPhone(input.phone);
           clientId = existing.id;
         } catch {
           const created = await createClient({

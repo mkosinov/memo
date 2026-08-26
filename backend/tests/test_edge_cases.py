@@ -207,19 +207,19 @@ class TestClientEdgeCases:
     def test_search_phone_not_found(self, api_client):
         """Unknown phone → 404."""
         response = api_client.get(
-            "/api/v1/clients/search",
+            "/api/v1/clients/get",
             params={"phone": "+00000000000"},
         )
         assert response.status_code == 404
 
     def test_search_phone_inactive(self, api_client, create_client):
-        """Deleted client → 404 on phone search."""
+        """Deleted client → 404 on phone lookup."""
         client = create_client(phone="+79991112233")
         # Soft-delete
         api_client.delete(f"/api/v1/clients/{client['id']}")
 
         response = api_client.get(
-            "/api/v1/clients/search",
+            "/api/v1/clients/get",
             params={"phone": "+79991112233"},
         )
         assert response.status_code == 404

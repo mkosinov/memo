@@ -42,13 +42,13 @@ _ServiceDep = Annotated[ClientService, Depends(_get_client_service)]
 _VisitorServiceDep = Annotated[any, Depends(_get_visitor_service)]
 
 
-@router.get("/search", response_model=ClientResponse)
-async def search_client_by_phone(
+@router.get("/get", response_model=ClientResponse)
+async def get_client_by_phone(
     service: _ServiceDep,
     session: SessionDep,
     phone: str = Query(..., min_length=3),
 ) -> ClientResponse:
-    """Search for an active client by phone number."""
+    """Get an active client by exact phone (GH #212; was /clients/search)."""
     result = await service.list(db_session=session, phone=phone)
     if not result.items:
         raise HTTPException(

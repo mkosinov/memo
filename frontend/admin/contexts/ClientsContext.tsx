@@ -118,6 +118,8 @@ export function ClientsProvider({ children }: { children: React.ReactNode }) {
         sort_by: sortBy,
         sort_order: sortOrder,
         ...filters,
+        q: filters.search.length >= 2 ? filters.search : undefined,
+        search: undefined, // renamed server-side to q (GH #212)
       }),
   });
 

@@ -148,15 +148,15 @@ class TestArchiveRestoreNoUserCascade:
 class TestClientsCrud:
     """Search-by-phone and scoped client-visitors sub-routes for /api/clients."""
 
-    def test_search_client_by_phone_found(self, api_client) -> None:
-        """GET /api/v1/clients/search?phone=... returns the matching client."""
+    def test_get_client_by_phone_found(self, api_client) -> None:
+        """GET /api/v1/clients/get?phone=... returns the matching client."""
         # Create a client
         create_resp = api_client.post("/api/v1/clients", json=CLIENT_PAYLOAD)
         assert create_resp.status_code == 201
 
-        # Search by phone
+        # Lookup by phone
         response = api_client.get(
-            "/api/v1/clients/search", params={"phone": "+79991234567"}
+            "/api/v1/clients/get", params={"phone": "+79991234567"}
         )
         assert response.status_code == 200
         body = response.json()
@@ -169,23 +169,23 @@ class TestClientsCrud:
         # itself is Field(exclude=True) and never in the JSON body.
         assert body["archived"] is False
 
-    def test_search_client_by_phone_not_found(self, api_client) -> None:
-        """GET /api/v1/clients/search?phone=... returns 404 for unknown phone."""
+    def test_get_client_by_phone_not_found(self, api_client) -> None:
+        """GET /api/v1/clients/get?phone=... returns 404 for unknown phone."""
         response = api_client.get(
-            "/api/v1/clients/search", params={"phone": "+00000000000"}
+            "/api/v1/clients/get", params={"phone": "+00000000000"}
         )
         assert response.status_code == 404
 
-    def test_search_client_by_phone_excludes_inactive(self, api_client) -> None:
-        """GET /api/v1/clients/search?phone=... returns 404 for soft-deleted client."""
+    def test_get_client_by_phone_excludes_inactive(self, api_client) -> None:
+        """GET /api/v1/clients/get?phone=... returns 404 for soft-deleted client."""
         # Create then soft-delete
         create_resp = api_client.post("/api/v1/clients", json=CLIENT_PAYLOAD)
         client_id = create_resp.json()["id"]
         api_client.delete(f"/api/v1/clients/{client_id}")
 
-        # Search should not find the deleted client
+        # Lookup should not find the deleted client
         response = api_client.get(
-            "/api/v1/clients/search", params={"phone": "+79991234567"}
+            "/api/v1/clients/get", params={"phone": "+79991234567"}
         )
         assert response.status_code == 404
 
@@ -385,28 +385,28 @@ class TestPutClientEdgeCases:
 
 
 class TestSearchClientEdgeCases:
-    """Edge cases for GET /api/v1/clients/search."""
+    """Edge cases for GET /api/v1/clients/get."""
 
     def test_search_is_case_insensitive(self, api_client) -> None:
-        """Phone search matches regardless of case."""
+        """Phone lookup matches regardless of case."""
         api_client.post(
             "/api/v1/clients",
             json={"name": "CaseTest", "phone": "+79998887766"},
         )
         resp = api_client.get(
-            "/api/v1/clients/search", params={"phone": "+79998887766"}
+            "/api/v1/clients/get", params={"phone": "+79998887766"}
         )
         assert resp.status_code == 200
         assert resp.json()["phone"] == "+79998887766"
 
     def test_search_missing_phone_param_returns_422(self, api_client) -> None:
-        """GET /search without phone param returns 422."""
-        resp = api_client.get("/api/v1/clients/search")
+        """GET /get without phone param returns 422."""
+        resp = api_client.get("/api/v1/clients/get")
         assert resp.status_code == 422
 
     def test_search_short_phone_returns_422(self, api_client) -> None:
-        """GET /search with phone < 3 chars returns 422 (min_length=3)."""
-        resp = api_client.get("/api/v1/clients/search", params={"phone": "ab"})
+        """GET /get with phone < 3 chars returns 422 (min_length=3)."""
+        resp = api_client.get("/api/v1/clients/get", params={"phone": "ab"})
         assert resp.status_code == 422
 
 
@@ -414,34 +414,34 @@ class TestSearchClientEdgeCases:
 
 
 class TestPhoneSearchActiveOnlyRegression:
-    """Lock spec §5.5: GET /api/v1/clients/search?phone=X must always be
-    active-only — archived clients must NEVER surface via phone search.
+    """Lock spec §5.5: GET /api/v1/clients/get?phone=X must always be
+    active-only — archived clients must NEVER surface via phone lookup.
 
     This is a regression guard for the #195 archive-status refactor: although
-    the list filter gained a `status=all` mode, the phone search endpoint
+    the list filter gained a `status=all` mode, the phone lookup endpoint
     is required to keep excluding soft-deleted clients.
     """
 
     def test_archived_client_phone_search_returns_404(
         self, api_client, create_client
     ) -> None:
-        """Archive a client with a known phone → search must 404."""
+        """Archive a client with a known phone → lookup must 404."""
         client = create_client(phone="+79990009988", name="To Archive")
         api_client.delete(f"/api/v1/clients/{client['id']}")
 
         resp = api_client.get(
-            "/api/v1/clients/search", params={"phone": "+79990009988"}
+            "/api/v1/clients/get", params={"phone": "+79990009988"}
         )
         assert resp.status_code == 404
 
     def test_active_client_phone_search_returns_200(
         self, api_client, create_client
     ) -> None:
-        """Active client with the same phone number stays searchable."""
+        """Active client with the same phone number stays findable."""
         client = create_client(phone="+79990008877", name="Stays Active")
 
         resp = api_client.get(
-            "/api/v1/clients/search", params={"phone": "+79990008877"}
+            "/api/v1/clients/get", params={"phone": "+79990008877"}
         )
         assert resp.status_code == 200
         body = resp.json()
@@ -456,7 +456,7 @@ class TestPhoneSearchActiveOnlyRegression:
 
         Post-#207 the archive state is set via the dedicated ``POST /archive``
         endpoint (Task 11) — DELETE is now hard and would just remove the
-        row. Both states produce the same observable behavior for phone search
+        row. Both states produce the same observable behavior for phone lookup
         (archived/deleted partner never surfaces); using archive keeps the
         test's stated premise (one partner archived, not deleted) honest.
         """
@@ -469,7 +469,7 @@ class TestPhoneSearchActiveOnlyRegression:
         assert archive_resp.json()["archived"] is True
 
         resp = api_client.get(
-            "/api/v1/clients/search", params={"phone": shared}
+            "/api/v1/clients/get", params={"phone": shared}
         )
         assert resp.status_code == 200
         body = resp.json()

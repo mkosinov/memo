@@ -24,7 +24,7 @@ import { patchVisit as apiPatchVisit } from '@memo/api-client';
 // ─── API Client Mock ───────────────────────────────────────────────────────
 
 vi.mock('@memo/api-client', () => ({
-  searchClientByPhone: vi.fn(),
+  getClientByPhone: vi.fn(),
   createClient: vi.fn(),
   createVisitor: vi.fn(),
   createRecord: vi.fn(),

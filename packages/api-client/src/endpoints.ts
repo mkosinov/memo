@@ -488,11 +488,11 @@ export async function deleteVisitor(id: string): Promise<void> {
   await api(`/api/v1/visitors/${id}`, z.any(), { method: 'DELETE' });
 }
 
-// ─── Client Search ────────────────────────────────────────────────────────
+// ─── Client Phone Lookup (GH #212: /clients/search → /clients/get) ──────────
 
-export async function searchClientByPhone(phone: string): Promise<ClientResponse> {
+export async function getClientByPhone(phone: string): Promise<ClientResponse> {
   return api(
-    `/api/v1/clients/search?phone=${encodeURIComponent(phone)}`,
+    `/api/v1/clients/get?phone=${encodeURIComponent(phone)}`,
     ClientResponseSchema,
   );
 }

@@ -37,6 +37,12 @@ def _set_sqlite_pragmas(dbapi_connection: Any, connection_record: Any) -> None:
     """
     if "sqlite" not in type(dbapi_connection).__module__:
         return
+    # GH #212 M5: full-Unicode case folding for ilike — stock SQLite lower()
+    # folds ASCII only. Python str.lower agrees with SQLite lower() on ASCII,
+    # so pre-existing ASCII queries are unaffected.
+    dbapi_connection.create_function(
+        "lower", 1, lambda s: s.lower() if s is not None else None
+    )
     cursor = dbapi_connection.cursor()
     cursor.execute("PRAGMA busy_timeout=5000")
     cursor.execute("PRAGMA journal_mode=WAL")

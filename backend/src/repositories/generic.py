@@ -7,6 +7,7 @@ objects for create/update payloads.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from functools import lru_cache
 from typing import TypeVar
 
@@ -16,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.base import Base
 from src.models.enums import ArchiveStatus
+from src.repositories.search import SearchField, search_predicate
 
 ModelType = TypeVar("ModelType", bound=Base)
 
@@ -32,6 +34,8 @@ class BaseRepository:
         table: type[ModelType],
         *,
         filters: dict | None = None,
+        q: str | None = None,
+        search_fields: Sequence[SearchField] | None = None,
         order_by=None,
         limit: int | None = None,
         offset: int = 0,
@@ -43,10 +47,15 @@ class BaseRepository:
         ``stmt.subquery()`` and never affect the count); ``order_by`` is
         applied AFTER the count, then limit/offset slice.
         ``limit=None`` means no LIMIT clause (not used by list endpoints).
+        ``q`` narrows rows via ``search_predicate`` over ``search_fields``
+        BEFORE the count (total reflects the filtered count); ``q`` without
+        fields raises ValueError (fail-fast, spec §5.3 point 2).
         """
         stmt = select(table)
         if options:
             stmt = stmt.options(*options)
+        if q is not None:
+            stmt = stmt.where(search_predicate(q, search_fields or []))
         for key, value in (filters or {}).items():
             if value is not None:
                 stmt = stmt.where(getattr(table, key) == value)
@@ -187,12 +196,19 @@ class ArchiveRepository(BaseRepository):
         *,
         status: ArchiveStatus = ArchiveStatus.ACTIVE,
         filters: dict | None = None,
+        q: str | None = None,
+        search_fields: Sequence[SearchField] | None = None,
         order_by=None,
         limit: int | None = None,
         offset: int = 0,
         options=None,
     ) -> tuple[list[ModelType], int]:
-        """Return a paginated page filtered by archive status, plus total count."""
+        """Return a paginated page filtered by archive status, plus total count.
+
+        ``q`` narrows rows via ``search_predicate`` over ``search_fields``,
+        ANDed with the status predicate and applied BEFORE the count (total
+        reflects the filtered count); ``q`` without fields raises ValueError.
+        """
         stmt = select(table)
         if options:
             stmt = stmt.options(*options)
@@ -200,6 +216,8 @@ class ArchiveRepository(BaseRepository):
             stmt = stmt.where(table.is_active)
         elif status == ArchiveStatus.ARCHIVED:
             stmt = stmt.where(not_(table.is_active))
+        if q is not None:
+            stmt = stmt.where(search_predicate(q, search_fields or []))
         for key, value in (filters or {}).items():
             if value is not None:
                 stmt = stmt.where(getattr(table, key) == value)

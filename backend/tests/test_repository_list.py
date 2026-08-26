@@ -2,6 +2,9 @@
 
 Covers the repo-owned paginated list API:
   - BaseRepository.list: filters, None-skip, order_by, limit/offset, total count
+  - BaseRepository.list / ArchiveRepository.list: q + search_fields (GH #212) —
+    substring narrowing, AND with filters/status, uuid-by-id match, ValueError
+    guard, q-absent no-op
   - BaseRepository.list_custom: caller-built stmt + count/slice wrapper
   - selectinload options don't break the count subquery
   - correlated scalar-subquery order key doesn't break the count
@@ -21,7 +24,8 @@ from src.models.activity import Activity
 from src.models.location import Location
 from src.models.master import Master
 from src.models.service import Service
-from src.repositories.generic import get_base_repository
+from src.repositories.generic import get_archive_repository, get_base_repository
+from src.repositories.search import SearchField
 
 pytestmark = pytest.mark.asyncio
 
@@ -197,3 +201,119 @@ async def test_list_custom_limit_offset(db_session) -> None:
     )
     assert total == 4
     assert len(rows) == 1
+
+
+# ─── q / search_fields on list() (GH #212) ──────────────────────────────────────
+
+_master_search_fields = [
+    SearchField(Master.first_name),
+    SearchField(Master.last_name),
+]
+
+
+async def test_list_q_substring_narrows_rows_and_total(db_session) -> None:
+    """q substring-matches across OR'd fields; total is the FILTERED count."""
+    db_session.add(_master(first_name="Анна", last_name="Иванова"))
+    db_session.add(_master(first_name="Борис", last_name="Петров"))
+    db_session.add(_master(first_name="Виктор", last_name="Аннин"))
+    await db_session.flush()
+    repo = get_base_repository()
+    rows, total = await repo.list(
+        db_session,
+        Master,
+        q="анн",
+        search_fields=_master_search_fields,
+        limit=100,
+    )
+    assert total == 2  # not 3 — predicate applied BEFORE the count
+    assert {r.first_name for r in rows} == {"Анна", "Виктор"}
+
+
+async def test_list_q_combines_with_filters_and(db_session) -> None:
+    """q ANDs with filters= — intersection, not union."""
+    db_session.add(_master(first_name="Анна", position="мастер"))
+    db_session.add(_master(first_name="Анна", position="senior"))
+    db_session.add(_master(first_name="Борис", position="мастер"))
+    await db_session.flush()
+    repo = get_base_repository()
+    rows, total = await repo.list(
+        db_session,
+        Master,
+        filters={"position": "мастер"},
+        q="анн",
+        search_fields=_master_search_fields,
+        limit=100,
+    )
+    assert total == 1
+    assert rows[0].first_name == "Анна"
+    assert rows[0].position == "мастер"
+
+
+async def test_list_q_without_search_fields_raises(db_session) -> None:
+    """q with search_fields=None (or empty) raises ValueError — fail-fast guard."""
+    db_session.add(_master(first_name="A"))
+    await db_session.flush()
+    repo = get_base_repository()
+    with pytest.raises(ValueError, match="search_fields"):
+        await repo.list(db_session, Master, q="A")
+    with pytest.raises(ValueError, match="search_fields"):
+        await repo.list(db_session, Master, q="A", search_fields=[])
+
+
+async def test_list_q_full_uuid_matches_by_id(db_session) -> None:
+    """A full-UUID q (any case) matches by id, normalized to stored lowercase."""
+    target = _master(first_name="Target")
+    db_session.add(target)
+    db_session.add(_master(first_name="Other"))
+    await db_session.flush()
+    repo = get_base_repository()
+    fields = _master_search_fields + [SearchField(Master.id, kind="uuid")]
+    rows, total = await repo.list(
+        db_session, Master, q=target.id.upper(), search_fields=fields, limit=100
+    )
+    assert total == 1
+    assert rows[0].id == target.id
+
+
+async def test_list_q_absent_behavior_unchanged(db_session) -> None:
+    """q absent → no predicate, even when search_fields is passed."""
+    for name in ("A", "B", "C"):
+        db_session.add(_master(first_name=name))
+    await db_session.flush()
+    repo = get_base_repository()
+    rows, total = await repo.list(
+        db_session, Master, search_fields=_master_search_fields, limit=100
+    )
+    assert total == 3
+    assert len(rows) == 3
+
+
+# ─── q / search_fields on ArchiveRepository.list (GH #212) ──────────────────────
+
+
+async def test_archive_list_q_narrows_within_status(db_session) -> None:
+    """q ANDs with the archive-status predicate; total reflects both."""
+    db_session.add(_master(first_name="Анна"))
+    db_session.add(_master(first_name="Анна", is_active=False))
+    db_session.add(_master(first_name="Борис"))
+    await db_session.flush()
+    repo = get_archive_repository()
+    rows, total = await repo.list(
+        db_session,
+        Master,
+        q="анн",
+        search_fields=_master_search_fields,
+        limit=100,
+    )
+    assert total == 1  # archived "Анна" excluded by status, "Борис" by q
+    assert [r.first_name for r in rows] == ["Анна"]
+    assert rows[0].is_active is True
+
+
+async def test_archive_list_q_without_search_fields_raises(db_session) -> None:
+    """q with no search_fields raises ValueError on the archive path too."""
+    db_session.add(_master(first_name="A"))
+    await db_session.flush()
+    repo = get_archive_repository()
+    with pytest.raises(ValueError, match="search_fields"):
+        await repo.list(db_session, Master, q="A")

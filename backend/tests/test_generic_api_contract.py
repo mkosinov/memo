@@ -24,8 +24,10 @@ from tests.generic_contract import (
     _all_params,
     _contract_params,
     _hard_params,
+    _search_params,
     _serialized_keys,
 )
+from src.services.generic import ArchiveService
 
 
 # ─── helpers ────────────────────────────────────────────────────────────────
@@ -495,3 +497,181 @@ def test_all_absent_on_non_dictionaries(api_client, prefix):
     assert resp.status_code == 404, (
         f"{prefix}/all must NOT exist — /all is dictionaries-only (#205)"
     )
+
+
+# ─── ?q= search contract matrix (GH #212 Task 4, spec §5.1/§7) ──────────────
+# Parametrized over ``_search_params`` (opt-in: entities whose config sets
+# ``search_query``; Tasks 5-8 wire the remaining 8). The router-declared
+# ``q: Query(None, min_length=2, max_length=100)`` IS the contract — 422s
+# below come from FastAPI validation, reshaped by the app-level
+# RequestValidationError handler into ``{detail: {code: VALIDATION_ERROR}}``.
+
+
+def _search_probe_value(cfg: EntityConfig) -> str:
+    """First ``search_override`` value — the Cyrillic probe every search row carries."""
+    assert cfg.search_override is not None
+    return next(iter(cfg.search_override.values()))
+
+
+def _create_search_row(
+    api_client,
+    cfg: EntityConfig,
+    fk_ids: dict[str, Any],
+    overrides: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """POST a row carrying ``cfg.search_override`` (the Cyrillic probe).
+
+    ``overrides`` replace individual probe values (wildcard/variadic rows)
+    while keeping the remaining search_override fields intact.
+    """
+    merged = {**cfg.create_data, **fk_ids, **cfg.search_override, **(overrides or {})}
+    resp = api_client.post(cfg.router_prefix, json=_jsonable(merged))
+    assert resp.status_code == 201, f"POST {cfg.router_prefix} → {resp.status_code}: {resp.text}"
+    return resp.json()
+
+
+def _assert_q_match(resp, expected_ids: list[str]) -> dict[str, Any]:
+    """200 + envelope keys + exactly ``expected_ids`` in items + honest total."""
+    assert resp.status_code == 200, f"?q= must return 200, got {resp.status_code}: {resp.text}"
+    body = resp.json()
+    assert set(body.keys()) == {"items", "total", "page", "per_page"}
+    assert [item["id"] for item in body["items"]] == expected_ids, (
+        f"items must be exactly {expected_ids}, got {[i['id'] for i in body['items']]}"
+    )
+    assert body["total"] == len(expected_ids), "total must reflect the q-filtered count"
+    return body
+
+
+class TestGenericApiSearchContract:
+    """Server-side ``?q=`` search contract (GH #212), parametrized over ``_search_params``.
+
+    Spec §7 matrix cases portable to the generic path: 1 (substring per
+    declared field), 2 (Cyrillic M5 probe), 3 (full-UUID exact), 4 (partial
+    id fragment), 5 (len bounds 422), 6 (q absent → unfiltered), 8
+    (total-after-q pagination math), 9 (wildcard literals), 10 (no-match),
+    14 (archived row hidden under default status). Non-generic paths
+    (clients/records/activities custom lists) get dedicated blocks in
+    later tasks. Config contract: ``search_query`` is a lowercase substring
+    of EVERY ``search_override`` value, matches no default-``create_data``
+    row, and no partial-id fragment of a created row matches it.
+    """
+
+    @pytest.mark.parametrize("service_cls,cfg", _search_params())
+    def test_substring_match_case_insensitive(self, api_client, service_cls, cfg, request):
+        """Spec §7 cases 1+2: lowercase Cyrillic q finds the UPPERCASE stored
+        probe row (M5 pin) and nothing else."""
+        assert cfg is not None, f"{service_cls.__name__}: missing CONTRACT_CONFIG entry"
+        fk_ids = _resolve_fk_ids(request, cfg)
+        probe = _create_search_row(api_client, cfg, fk_ids)
+        _create_entity(api_client, cfg, fk_ids)  # non-matching decoy (default create_data)
+        resp = api_client.get(cfg.router_prefix, params={"q": cfg.search_query})
+        _assert_q_match(resp, [probe["id"]])
+
+    @pytest.mark.parametrize("service_cls,cfg", _search_params())
+    def test_full_uuid_q_returns_exact_row(self, api_client, service_cls, cfg, request):
+        """Spec §7 case 3: full 36-char UUID q → exact id equality, single row."""
+        assert cfg is not None, f"{service_cls.__name__}: missing CONTRACT_CONFIG entry"
+        fk_ids = _resolve_fk_ids(request, cfg)
+        probe = _create_search_row(api_client, cfg, fk_ids)
+        _create_entity(api_client, cfg, fk_ids)  # decoy must not surface
+        resp = api_client.get(cfg.router_prefix, params={"q": probe["id"]})
+        _assert_q_match(resp, [probe["id"]])
+
+    @pytest.mark.parametrize("service_cls,cfg", _search_params())
+    def test_partial_id_fragment_no_match(self, api_client, service_cls, cfg, request):
+        """Spec §7 case 4: partial id fragment never hits id equality (nor text fields)."""
+        assert cfg is not None, f"{service_cls.__name__}: missing CONTRACT_CONFIG entry"
+        fk_ids = _resolve_fk_ids(request, cfg)
+        probe = _create_search_row(api_client, cfg, fk_ids)
+        resp = api_client.get(cfg.router_prefix, params={"q": probe["id"][:8]})
+        _assert_q_match(resp, [])
+
+    @pytest.mark.parametrize("q", ["x", "", "а" * 101])
+    @pytest.mark.parametrize("service_cls,cfg", _search_params())
+    def test_q_length_bounds_return_422(self, api_client, service_cls, cfg, q):
+        """Spec §7 case 5: len<2 (incl. empty) and len>100 → 422 VALIDATION_ERROR
+        (English detail) from the router-declared Query constraint."""
+        assert cfg is not None, f"{service_cls.__name__}: missing CONTRACT_CONFIG entry"
+        resp = api_client.get(cfg.router_prefix, params={"q": q})
+        assert resp.status_code == 422, f"q={q[:20]!r} must 422, got {resp.status_code}: {resp.text}"
+        assert resp.json()["detail"]["code"] == "VALIDATION_ERROR"
+
+    @pytest.mark.parametrize("service_cls,cfg", _search_params())
+    def test_q_absent_returns_unfiltered(self, api_client, service_cls, cfg, request):
+        """Spec §7 case 6: q absent → no filtering, baseline parity with pre-#212 lists."""
+        assert cfg is not None, f"{service_cls.__name__}: missing CONTRACT_CONFIG entry"
+        fk_ids = _resolve_fk_ids(request, cfg)
+        probe = _create_search_row(api_client, cfg, fk_ids)
+        decoy = _create_entity(api_client, cfg, fk_ids)
+        body = api_client.get(cfg.router_prefix).json()
+        assert body["total"] == 2, "q absent must not filter anything"
+        assert {item["id"] for item in body["items"]} == {probe["id"], decoy["id"]}
+
+    @pytest.mark.parametrize("service_cls,cfg", _search_params())
+    def test_no_match_q_returns_empty(self, api_client, service_cls, cfg, request):
+        """Spec §7 case 10: no-match q → 200, items [], total 0."""
+        assert cfg is not None, f"{service_cls.__name__}: missing CONTRACT_CONFIG entry"
+        fk_ids = _resolve_fk_ids(request, cfg)
+        _create_search_row(api_client, cfg, fk_ids)
+        resp = api_client.get(cfg.router_prefix, params={"q": "zz-no-such-probe-qq"})
+        _assert_q_match(resp, [])
+
+    @pytest.mark.parametrize("service_cls,cfg", _search_params())
+    def test_wildcard_literals_matched_literally(self, api_client, service_cls, cfg, request):
+        """Spec §7 case 9: ``%``/``_`` in q match LITERALLY (escaped, no crash).
+        The plain probe decoy WOULD match an unescaped-% pattern — total pins the escaping."""
+        assert cfg is not None, f"{service_cls.__name__}: missing CONTRACT_CONFIG entry"
+        fk_ids = _resolve_fk_ids(request, cfg)
+        probe = _search_probe_value(cfg)
+        wild_val = f"{probe[:3]}%{probe[3:5]}_{probe[5:]}"
+        key = next(iter(cfg.search_override))
+        wild = _create_search_row(api_client, cfg, fk_ids, overrides={key: wild_val})
+        _create_search_row(api_client, cfg, fk_ids)  # plain probe decoy (no wildcards)
+        q_percent = wild_val[1:6]  # carries the literal %
+        q_underscore = wild_val[4:9]  # carries the literal _
+        for q in (q_percent, q_underscore):
+            assert len(q) >= 2, "probe slices must respect min_length=2"
+            _assert_q_match(
+                api_client.get(cfg.router_prefix, params={"q": q}), [wild["id"]]
+            )
+
+    @pytest.mark.parametrize("service_cls,cfg", _search_params())
+    def test_archived_row_hidden_from_q_under_default_status(self, api_client, service_cls, cfg, request):
+        """Spec §7 case 14: archived row matching q is NOT returned under the
+        default status; ``status=all`` + q finds it (typeahead parity)."""
+        assert cfg is not None, f"{service_cls.__name__}: missing CONTRACT_CONFIG entry"
+        if not issubclass(service_cls, ArchiveService):
+            pytest.skip("non-archive entity — no status surface")
+        fk_ids = _resolve_fk_ids(request, cfg)
+        probe = _create_search_row(api_client, cfg, fk_ids)
+        assert api_client.post(f"{cfg.router_prefix}/{probe['id']}/archive").status_code == 200
+        _create_entity(api_client, cfg, fk_ids)  # active non-matching decoy
+        resp = api_client.get(cfg.router_prefix, params={"q": cfg.search_query})
+        _assert_q_match(resp, [])
+        resp_all = api_client.get(
+            cfg.router_prefix, params={"q": cfg.search_query, "status": "all"}
+        )
+        _assert_q_match(resp_all, [probe["id"]])
+
+    @pytest.mark.parametrize("service_cls,cfg", _search_params())
+    def test_total_after_q_with_pagination(self, api_client, service_cls, cfg, request):
+        """Spec §7 case 8: 3 q-matching rows, per_page=2 → page 2 has 1 item,
+        total == 3 (filtered count, not page size); decoy never surfaces."""
+        assert cfg is not None, f"{service_cls.__name__}: missing CONTRACT_CONFIG entry"
+        fk_ids = _resolve_fk_ids(request, cfg)
+        variant_ids = []
+        for suffix in ("А", "Б", "В"):  # vary the LAST char: search_query span untouched
+            variant = {k: v[:-1] + suffix for k, v in cfg.search_override.items()}
+            variant_ids.append(_create_search_row(api_client, cfg, fk_ids, overrides=variant)["id"])
+        _create_entity(api_client, cfg, fk_ids)  # non-matching decoy
+        page1 = api_client.get(
+            cfg.router_prefix, params={"q": cfg.search_query, "per_page": 2, "page": 1}
+        ).json()
+        page2 = api_client.get(
+            cfg.router_prefix, params={"q": cfg.search_query, "per_page": 2, "page": 2}
+        ).json()
+        assert page2["total"] == 3, "total must be the q-filtered count, not the page size"
+        assert len(page2["items"]) == 1, "page 2 of a 3-row filtered set must carry exactly 1 item"
+        assert len(page1["items"]) == 2
+        got_ids = {item["id"] for item in page1["items"] + page2["items"]}
+        assert got_ids == set(variant_ids), "pages 1+2 together must carry exactly the 3 matching rows"

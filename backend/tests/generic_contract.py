@@ -162,6 +162,10 @@ class EntityConfig(NamedTuple):
     # ``create_data`` row regardless of insertion order. Only set on the 5
     # dictionary configs (masters/locations/services/tags/materials).
     earlier_create_data: dict | None = None
+    # GH #212 search matrix (spec §7). None → entity excluded from
+    # TestGenericApiSearchContract until Tasks 5-8 wire its config.
+    search_override: dict | None = None  # create_data overrides carrying the Cyrillic probe value (stored UPPERCASE)
+    search_query: str | None = None  # lowercase Cyrillic substring matching search_override (M5 pin)
 
 
 # ─── Per-service config ──────────────────────────────────────────────────────────
@@ -374,6 +378,12 @@ CONTRACT_CONFIG: dict[type, EntityConfig] = {
         # §4.4 default order: tag ASC, id ASC. "!" (0x21) < "t" (0x74) →
         # sentinel sorts BEFORE the default ``tag="t1"``.
         earlier_create_data={"tag": "!aaa-contract"},
+        # GH #212 search matrix probe (spec §5.2/§5.4 M5): uppercase Cyrillic
+        # stored value found by a lowercase substring query. Differs from
+        # create_data ("t1") so multi-row tests never hit the tag UNIQUE
+        # constraint.
+        search_override={"tag": "Живопись"},
+        search_query="жив",
     ),
     VisitorService: EntityConfig(
         service_factory=get_visitor_service,
@@ -519,7 +529,7 @@ def _all_params() -> list:
 
     Returns one ``pytest.param`` per dictionary service class, carrying its
     ``EntityConfig`` (or ``None`` if missing — the test asserts non-None and
-    fails loudly, mirroring ``_contract_params``'s guard). Entities outside
+    fails loudly, mirroring ``_contract_params``' guard). Entities outside
     this list are never parametrized — the ``/all`` contract stays opt-in.
     """
     params = []
@@ -530,3 +540,18 @@ def _all_params() -> list:
             continue
         params.append(pytest.param(cls, cfg, id=f"{cls.__name__}-all"))
     return params
+
+
+# ─── ?q= search matrix parametrizer (GH #212 Task 4, spec §7) ──────────────
+# Opt-in filter: only entities whose config sets ``search_query`` join the
+# matrix (Tasks 5-8 wire the remaining 8). Iterates ``CONTRACT_CONFIG``
+# DIRECTLY — like ``_all_params``, NOT like ``_contract_params`` — so the
+# search matrix must NOT skip ``GENERIC_CONTRACT_EXCEPTIONS``:
+# ``ServiceService`` is in that set (it overrides update/patch) yet its
+# custom-list q path needs matrix coverage once Task 5 adds its config.
+def _search_params() -> list:
+    return [
+        pytest.param(cls, cfg, id=f"{cls.__name__}-search")
+        for cls, cfg in CONTRACT_CONFIG.items()
+        if cfg.search_query is not None
+    ]

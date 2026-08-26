@@ -58,6 +58,7 @@ async def list_tags(
     pagination: PaginationParams = Depends(),
     sort_by: TagSortBy | None = Query(None),
     sort_order: SortOrder = Query("asc"),
+    q: str | None = Query(None, min_length=2, max_length=100),
 ) -> PaginatedResponse[TagResponse]:
     """Return all tags, paginated.
 
@@ -65,12 +66,17 @@ async def list_tags(
     is ``asc`` (default) or ``desc``. Unknown ``sort_by`` → 422 via Literal
     validation. ``sort_by=None`` → spec §4.4 default order (``tag ASC,
     id ASC``). Tags are non-archive (no ``status`` param).
+
+    ``q`` (GH #212): case-insensitive substring on ``tag`` OR exact id
+    equality for a full UUID; ``total`` reflects the filtered count.
+    len<2 / len>100 → 422 VALIDATION_ERROR.
     """
     return await service.list(
         db_session=session,
         page=pagination.page,
         per_page=pagination.per_page,
         order_by=_tag_order_by(sort_by, sort_order),
+        q=q,
     )
 
 

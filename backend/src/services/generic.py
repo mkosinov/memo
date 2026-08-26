@@ -6,6 +6,7 @@ operations instead of raw ORM model instances.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Generic, TypeVar, cast
 
 from pydantic import BaseModel
@@ -25,6 +26,7 @@ from src.domain.deletion import (
 from src.domain.errors import BareListLimitExceededError
 from src.models.enums import ArchiveStatus
 from src.repositories.generic import ArchiveRepository, BaseRepository
+from src.repositories.search import SearchField
 from src.schemas.common import PaginatedResponse
 from src.services.decorators import transactional
 
@@ -53,6 +55,11 @@ class GenericService(Generic[CreateSchemaT, UpdateSchemaT, ResponseSchemaT]):
 
     NOT_NULL_FIELDS: set[str] = set()
 
+    # GH #212: per-entity search field declarations (spec §5.2). None → the
+    # service never receives ``q`` (its router simply doesn't declare the
+    # param); the repo fail-fasts if ``q`` arrives without fields.
+    search_fields: Sequence[SearchField] | None = None
+
     def __init__(
         self,
         repository: BaseRepository,
@@ -79,13 +86,21 @@ class GenericService(Generic[CreateSchemaT, UpdateSchemaT, ResponseSchemaT]):
         page: int = 1,
         per_page: int = 20,
         order_by=None,
+        q: str | None = None,
         **filters,
     ) -> PaginatedResponse[ResponseSchemaT]:
-        """Return a paginated page of records, optionally filtered/ordered."""
+        """Return a paginated page of records, optionally filtered/ordered/searched.
+
+        ``q`` (GH #212) narrows rows via ``search_predicate`` over
+        ``self.search_fields``; the predicate lands BEFORE the COUNT, so
+        ``total`` reflects the filtered count.
+        """
         items_orm, total = await self._repository.list(
             db_session,
             self._model,
             filters=filters,
+            q=q,
+            search_fields=self.search_fields,
             order_by=order_by,
             limit=per_page,
             offset=(page - 1) * per_page,
@@ -226,9 +241,13 @@ class ArchiveService(GenericService[CreateSchemaT, UpdateSchemaT, ResponseSchema
         per_page: int = 20,
         order_by=None,
         status: ArchiveStatus = ArchiveStatus.ACTIVE,
+        q: str | None = None,
         **filters,
     ) -> PaginatedResponse[ResponseSchemaT]:
-        """Return a paginated page filtered by archive status.
+        """Return a paginated page filtered by archive status and ``q`` (GH #212).
+
+        ``q`` ANDs with the status predicate (archived rows never surface
+        under the default ACTIVE status — spec §5.1 typeahead parity).
 
         ``self._repository`` is typed ``BaseRepository`` (inherited from
         ``GenericService.__init__``), but every Archive factory injects
@@ -241,6 +260,8 @@ class ArchiveService(GenericService[CreateSchemaT, UpdateSchemaT, ResponseSchema
             self._model,
             status=status,
             filters=filters,
+            q=q,
+            search_fields=self.search_fields,
             order_by=order_by,
             limit=per_page,
             offset=(page - 1) * per_page,

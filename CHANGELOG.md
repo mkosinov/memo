@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — 2026-08-26
+
+### Added
+- **GH #212 — Server-side list search `?q=` on all list endpoints (incl. dictionaries) + atomic `search`→`q` rename** — branch `feat/list-search-q-212` (17 commits: e11ebd1..4884412):
+  - **Backend:** Unicode-aware `lower()` SQL function override on SQLite connections (Cyrillic case-insensitive search; M5 probe `test_cyrillic_search_probe.py`); new shared `search_predicate` helper (`backend/src/repositories/search.py`); `q` + `search_fields` params on `BaseRepository.list`/`ArchiveRepository.list` + generic services (tags first, then masters/materials/locations/visitors/services; per-entity field matrix — substring with UUID-exact for id/text-key fields, min 2 / max 100 chars, invalid `q` → 422); records list `?q=` via outer joins (joins only when `q` present — query counts stay green); activities list `?q=` + `service_id` filter + optional `service_title` (list endpoints only); clients `search`→`q` rename + `email` search field + `GET /clients/get?phone=` live (was `/clients/search`); **`/api/v1/search/*` router + search schemas deleted** (T14) after the migration.
+  - **api-client:** `ListParams.q` serialization; `getActivities` signature relaxed (dates optional, `service_id`/`q`); `search*` methods renamed atomically → list `?q=` consumers (`getClientByPhone` etc.).
+  - **Admin:** `serverSearch` flag on the `createPagedListContext` factory — all 5 dictionary tables search server-side via `?q=` (honest totals, ≥2-char clamp, page-reset); **Records gains the filter-bar search input** (server `?q=`, debounced); PhotoModal 4 typeaheads run on list `?q=` (`per_page=10`, ≥2 clamp, `service_title` display); post-#205 client-side `.includes` degradation ended; `useRecordData` query guard behind non-empty `recordId` (pre-existing console ZodError surfaced by the visual gate).
+  - **Tests:** backend 1396 passed / 0 failed / 8 skipped (−25 deleted search-router tests; `-k Search` matrix 156p/2s); api-client 209 passed / 4 failed (4 = pre-existing #188, unchanged); admin vitest 1493 passed / 0 failed; admin + api-client `tsc` clean (api-client 6 pre-existing parity); lint clean; e2e targeted — masters 12/12, records 23/23, photos-crud 11/11, clients 22/22 (incl. new full-UUID-paste search test, #216 pre-flight); visual gate 5/5 PASS (autonomous Playwright; script false-failure on check 3 disproven by code+network evidence).
+  - **Docs:** domain-rules synced (spec §9) — T8 partial activities sync (+6 lines, accepted deviation, kept living docs accurate) + T16 full sweep (commit `e7c2868`).
+  - **Acceptance criteria (spec §12 DoD): all 5 met** — 9 endpoints q-ready with contract matrix green (incl. Cyrillic probe + tags); search router deleted + `/clients/get` live with atomic rename; 8 tables server-side honest totals + records search input; PhotoModal typeaheads on list `?q=` with `service_title`; domain-rules synced + local suites green (CI outage policy: **local test-all is the merge gate**).
+  - **Deviations for the record:** T8 included a +6-line domain-rules/activities.md sync; check-5 console fix was out-of-scope-but-diagnosed pre-existing (one line + test); full standalone `test:all` run during T12 showed 67 pre-existing failures (font-drift shards + load flakes, A/B-proven identical at base) — NOT from this feature; targeted specs all green.
+  - **Closes:** #212.
+  - **91 files changed, +2836 / −799.**
+  - Design spec: `docs/specs/2026-08-19-list-search-q-design.md` (on main)
+  - Plan: `docs/plans/2026-08-19-list-search-q-plan.md` (on main)
+
 ## [Unreleased] — 2026-08-19
 
 ### Added

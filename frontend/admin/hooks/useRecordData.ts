@@ -14,6 +14,7 @@ export function useRecordData(recordId: string, clientId: string) {
   const { data: record, isLoading } = useQuery({
     queryKey: ['record', recordId],
     queryFn: () => getRecord(recordId),
+    enabled: !!recordId,
   });
 
   const { data: visitors = [] } = useQuery({

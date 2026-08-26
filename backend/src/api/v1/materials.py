@@ -71,6 +71,7 @@ async def list_materials(
     status: ArchiveStatus = Query(ArchiveStatus.ACTIVE),
     sort_by: MaterialSortBy | None = Query(None),
     sort_order: SortOrder = Query("asc"),
+    q: str | None = Query(None, min_length=2, max_length=100),
 ) -> PaginatedResponse[MaterialResponse]:
     """Return materials filtered by archive status (default: active).
 
@@ -82,6 +83,10 @@ async def list_materials(
     is ``asc`` (default) or ``desc``. Unknown ``sort_by`` → 422 via Literal
     validation. ``sort_by=None`` → spec §4.4 default order (``title ASC,
     id ASC``).
+
+    ``q`` (GH #212): case-insensitive substring on ``title`` OR
+    ``description`` OR exact id equality for a full UUID; ``total``
+    reflects the filtered count. len<2 / len>100 → 422 VALIDATION_ERROR.
     """
     return await service.list(
         db_session=session,
@@ -89,6 +94,7 @@ async def list_materials(
         per_page=pagination.per_page,
         status=status,
         order_by=_material_order_by(sort_by, sort_order),
+        q=q,
     )
 
 

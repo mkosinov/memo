@@ -6,6 +6,7 @@ from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.repositories.generic import BaseRepository, get_base_repository
+from src.repositories.search import SearchField
 from src.models.photo import Photo
 from src.models.tag import visitor_tags
 from src.models.visit import Visit
@@ -19,6 +20,10 @@ class VisitorService(GenericService[VisitorCreate, VisitorUpdate, VisitorRespons
     """Visitor service with client-based filtering."""
 
     NOT_NULL_FIELDS = {"name"}
+
+    # GH #212 search matrix (spec §5.2): substring on ``name``, exact id
+    # equality when q parses as a full UUID (deep-link prerequisite #216).
+    search_fields = [SearchField(Visitor.name), SearchField(Visitor.id, kind="uuid")]
 
     def __init__(
         self, repository: BaseRepository, model: type[Visitor]

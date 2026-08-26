@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.models.master import Master
 from src.models.user import User
 from src.repositories.generic import get_archive_repository
+from src.repositories.search import SearchField
 from src.schemas.master import MasterCreate, MasterResponse, MasterUpdate
 from src.services.decorators import transactional
 from src.services.generic import ArchiveService
@@ -35,6 +36,16 @@ class MasterService(ArchiveService[MasterCreate, MasterUpdate, MasterResponse]):
     """
 
     NOT_NULL_FIELDS = {"first_name", "last_name", "color", "position", "specialty", "sort_order"}
+
+    # GH #212 search matrix (spec §5.2): substring on first_name/last_name
+    # (each field ilike'd separately — no cross-field concatenation, spec
+    # §5.2 note), exact id equality when q parses as a full UUID
+    # (deep-link prerequisite #216).
+    search_fields = [
+        SearchField(Master.first_name),
+        SearchField(Master.last_name),
+        SearchField(Master.id, kind="uuid"),
+    ]
 
     @transactional
     async def archive(self, db_session: AsyncSession, id: str) -> bool:

@@ -19,11 +19,14 @@ from typing import Any
 import pytest
 
 from tests.generic_contract import (
+    CONTRACT_CONFIG,
     EntityConfig,
+    LocationService,
     TagService,
     _all_params,
     _contract_params,
     _hard_params,
+    _search_field_params,
     _search_params,
     _serialized_keys,
 )
@@ -675,3 +678,50 @@ class TestGenericApiSearchContract:
         assert len(page1["items"]) == 2
         got_ids = {item["id"] for item in page1["items"] + page2["items"]}
         assert got_ids == set(variant_ids), "pages 1+2 together must carry exactly the 3 matching rows"
+
+    @pytest.mark.parametrize("cfg,field", _search_field_params())
+    def test_each_substring_field_matches_independently(
+        self, api_client, cfg, field, request
+    ):
+        """Spec §7 case 1, per-field (Task 5): a row where ONLY ``field``
+        carries the probe (every OTHER searchable text field holds a
+        non-matching decoy) must still be found by ``q`` — pins each
+        declared substring field separately (e.g. masters first_name AND
+        last_name), which the all-fields-probe matrix row cannot prove
+        alone (it would pass if any single field were wired)."""
+        fk_ids = _resolve_fk_ids(request, cfg)
+        decoys = {k: "Хх-декой" for k in cfg.search_override if k != field}
+        target = _create_search_row(api_client, cfg, fk_ids, overrides=decoys)
+        _create_entity(api_client, cfg, fk_ids)  # default non-matching decoy
+        _assert_q_match(
+            api_client.get(cfg.router_prefix, params={"q": cfg.search_query}),
+            [target["id"]],
+        )
+
+    def test_location_url_fields_exact_full_string_match(self, api_client):
+        """Spec §5.2 (Task 5): a pasted FULL URL finds the location via the
+        exact-kind URL fields (yandex_map_url/review_url/image_url); a
+        PARTIAL URL never matches (URL columns are equality-only — no
+        ilike — and the fragment hits no substring field)."""
+        cfg = CONTRACT_CONFIG[LocationService]
+        full_url = "https://yandex.ru/maps/org/fliigel-studia/12345"
+        loc = _create_search_row(
+            api_client,
+            cfg,
+            fk_ids={},
+            overrides={
+                "yandex_map_url": full_url,
+                "review_url": "https://example.com/reviews/fliigel",
+                "image_url": "https://example.com/img/fliigel.png",
+            },
+        )
+        # Full URL → exact equality on yandex_map_url → single row.
+        _assert_q_match(
+            api_client.get(cfg.router_prefix, params={"q": full_url}),
+            [loc["id"]],
+        )
+        # Partial URL → no equality on any URL column, no substring hit → empty.
+        _assert_q_match(
+            api_client.get(cfg.router_prefix, params={"q": full_url[:-6]}),
+            [],
+        )

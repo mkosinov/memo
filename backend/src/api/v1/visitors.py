@@ -3,7 +3,7 @@
 from functools import lru_cache
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from src.db import SessionDep
 from src.errors import ErrorCode, ErrorDetail
@@ -29,9 +29,20 @@ async def list_visitors(
     service: _ServiceDep,
     session: SessionDep,
     pagination: PaginationParams = Depends(),
+    q: str | None = Query(None, min_length=2, max_length=100),
 ) -> PaginatedResponse[VisitorResponse]:
-    """Return all visitors, paginated."""
-    return await service.list(db_session=session, page=pagination.page, per_page=pagination.per_page)
+    """Return all visitors, paginated.
+
+    ``q`` (GH #212): case-insensitive substring on ``name`` OR exact id
+    equality for a full UUID; ``total`` reflects the filtered count.
+    len<2 / len>100 → 422 VALIDATION_ERROR.
+    """
+    return await service.list(
+        db_session=session,
+        page=pagination.page,
+        per_page=pagination.per_page,
+        q=q,
+    )
 
 
 @router.get("/{visitor_id}", response_model=VisitorResponse)

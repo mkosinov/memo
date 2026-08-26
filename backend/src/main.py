@@ -27,7 +27,6 @@ from src.api.v1.tags import router as tags_router
 from src.api.v1.visitors import router as visitors_router
 from src.api.v1.photos import router as photos_router
 from src.api.v1.materials import router as materials_router
-from src.api.v1.search import router as search_router
 from src.api.v1.user_settings import router as user_settings_router
 from src.api.v1.visits import router as visits_router
 
@@ -148,7 +147,6 @@ def create_app() -> FastAPI:
     app.include_router(visits_router, prefix="/api/v1/visits")
     app.include_router(payments_router, prefix="/api/v1/payments")
     app.include_router(materials_router, prefix="/api/v1/materials")
-    app.include_router(search_router, prefix="/api/v1/search")
     app.include_router(user_settings_router, prefix="/api/v1/user-settings")
     app.include_router(system_router, prefix="/api/v1")
 

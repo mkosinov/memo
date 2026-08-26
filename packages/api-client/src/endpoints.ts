@@ -58,14 +58,6 @@ import {
   type UserSettingsResponse,
   type UserSettingsCreate,
   type UserSettingsUpdate,
-  VisitorSearchResultSchema,
-  type VisitorSearchResult,
-  ServiceSearchResultSchema,
-  type ServiceSearchResult,
-  ActivitySearchResultSchema,
-  type ActivitySearchResult,
-  TagSearchResultSchema,
-  type TagSearchResult,
   MasterListResponseSchema,
   LocationListResponseSchema,
   TagListResponseSchema,
@@ -740,26 +732,6 @@ export async function getAllMaterials(params?: AllParams): Promise<MaterialRespo
 /** Tags have no archive status — no params. */
 export async function getAllTags(): Promise<TagResponse[]> {
   return api('/api/v1/tags/all', TagAllResponseSchema);
-}
-
-// ─── Search Endpoints ──────────────────────────────────────────────────
-
-export async function searchVisitors(q: string): Promise<VisitorSearchResult[]> {
-  return api(`/api/v1/search/visitors?q=${encodeURIComponent(q)}`, z.array(VisitorSearchResultSchema));
-}
-
-export async function searchServices(q: string): Promise<ServiceSearchResult[]> {
-  return api(`/api/v1/search/services?q=${encodeURIComponent(q)}`, z.array(ServiceSearchResultSchema));
-}
-
-export async function searchActivities(q: string, serviceId?: string): Promise<ActivitySearchResult[]> {
-  const params = new URLSearchParams({ q });
-  if (serviceId) params.set('service_id', serviceId);
-  return api(`/api/v1/search/activities?${params.toString()}`, z.array(ActivitySearchResultSchema));
-}
-
-export async function searchTags(q: string): Promise<TagSearchResult[]> {
-  return api(`/api/v1/search/tags?q=${encodeURIComponent(q)}`, z.array(TagSearchResultSchema));
 }
 
 // ─── User Settings ────────────────────────────────────────────────────

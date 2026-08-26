@@ -190,6 +190,118 @@ class TestActivitiesOccupiedBatch:
         assert all(a["occupied"] == 0 for a in resp.json()["items"])
 
 
+class TestActivitiesListSearch:
+    """Server-side `?q=` search on GET /api/v1/activities (GH #212, spec §5.2 activities row).
+
+    Substring over the joined Service.title; exact activity.id equality when q
+    is a full UUID. Optional ``service_id`` narrows by service. ``service_title``
+    is populated on every list item (spec §5.3 point 7); single-item endpoints
+    leave it None.
+    """
+
+    def test_search_by_service_title_cyrillic_case(
+        self, api_client, create_service, create_activity
+    ) -> None:
+        """q matches the joined Service.title; Cyrillic upper/lower fold (M5)."""
+        svc = create_service(title="Гончарная мастерская")
+        target = create_activity(service_id=svc["id"])
+        other = create_activity()  # default "Test Service N" title
+        resp = api_client.get("/api/v1/activities", params={"q": "ОНЧАРНАЯ"})
+        assert resp.status_code == 200
+        ids = [a["id"] for a in resp.json()["items"]]
+        assert target["id"] in ids and other["id"] not in ids
+
+    def test_search_full_uuid_returns_exact_activity(
+        self, api_client, create_activity
+    ) -> None:
+        target = create_activity()
+        create_activity()  # decoy: uuid clause must match exactly one row
+        body = api_client.get("/api/v1/activities", params={"q": target["id"]}).json()
+        assert [a["id"] for a in body["items"]] == [target["id"]]
+        assert body["total"] == 1
+
+    def test_search_q_combined_with_service_id(
+        self, api_client, create_service, create_activity
+    ) -> None:
+        """spec §7 case 12: q narrows by title, service_id intersects."""
+        mugs = create_service(title="Печать на кружках")
+        wood = create_service(title="Печать на дереве")
+        target = create_activity(service_id=mugs["id"])
+        create_activity(service_id=wood["id"])  # q-matches, wrong service
+        body = api_client.get("/api/v1/activities", params={
+            "q": "ечать", "service_id": mugs["id"],
+        }).json()
+        assert [a["id"] for a in body["items"]] == [target["id"]]
+        assert body["total"] == 1
+
+    def test_search_q_combined_with_date_range(
+        self, api_client, create_service, create_activity
+    ) -> None:
+        svc = create_service(title="Мозаика панно")
+        target = create_activity(service_id=svc["id"], start=datetime(2026, 8, 10, 10, 0))
+        create_activity(service_id=svc["id"], start=datetime(2026, 9, 10, 10, 0))  # q-matches, out of range
+        body = api_client.get("/api/v1/activities", params={
+            "q": "озаик", "date_from": "2026-08-01", "date_to": "2026-08-31",
+        }).json()
+        assert [a["id"] for a in body["items"]] == [target["id"]]
+        assert body["total"] == 1
+        # spec §7 case 12: service_title present (non-null) in every list item
+        assert body["items"][0]["service_title"] == "Мозаика панно"
+
+    @pytest.mark.parametrize("q", ["a", ""])
+    def test_search_q_length_validation_422(self, api_client, q) -> None:
+        resp = api_client.get("/api/v1/activities", params={"q": q})
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["code"] == "VALIDATION_ERROR"
+
+    def test_service_title_populated_in_list_items_without_q(
+        self, api_client, create_service, create_activity
+    ) -> None:
+        """List paths populate service_title even without q (spec §5.3 point 7)."""
+        svc = create_service(title="Витраж тиффани")
+        a1 = create_activity(service_id=svc["id"])
+        a2 = create_activity()  # default title "Test Service 2"
+        body = api_client.get("/api/v1/activities").json()
+        titles = {a["id"]: a["service_title"] for a in body["items"]}
+        assert titles[a1["id"]] == "Витраж тиффани"
+        # default factory title (counter is shared — don't pin the number)
+        assert titles[a2["id"]].startswith("Test Service")
+        assert all(t is not None for t in titles.values())
+
+    def test_service_title_populated_in_list_items_with_q(
+        self, api_client, create_service, create_activity
+    ) -> None:
+        svc = create_service(title="Витраж тиффани")
+        create_activity(service_id=svc["id"])
+        create_activity(service_id=svc["id"])
+        body = api_client.get("/api/v1/activities", params={"q": "витраж"}).json()
+        assert body["total"] == 2
+        assert all(a["service_title"] == "Витраж тиффани" for a in body["items"])
+
+    def test_single_item_endpoints_leave_service_title_null(
+        self, api_client, create_service, create_activity
+    ) -> None:
+        """GET/{id} and POST share ActivityResponse — field stays None there."""
+        svc = create_service(title="Витраж тиффани")
+        activity = create_activity(service_id=svc["id"])
+
+        got = api_client.get(f"/api/v1/activities/{activity['id']}")
+        assert got.status_code == 200
+        assert got.json()["service_title"] is None
+
+        created = api_client.post("/api/v1/activities", json={
+            "master_id": activity["master_id"],
+            "service_id": svc["id"],
+            "location_id": activity["location_id"],
+            "start": (datetime.now(UTC) + timedelta(days=2)).isoformat(),
+            "duration": 90,
+            "capacity": 10,
+            "is_private": False,
+        })
+        assert created.status_code == 201, created.text
+        assert created.json()["service_title"] is None
+
+
 import asyncio  # noqa: E402
 
 

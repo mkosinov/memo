@@ -54,3 +54,7 @@ class ActivityResponse(ActivityBase):
     created_at: datetime
     updated_at: datetime
     occupied: int = 0  # computed: count of Records for this activity
+    # Populated ONLY on list endpoints (Service join, GH #212 spec §5.3 point 7).
+    # Single-item endpoints (get/create/update/patch) leave it None — the schema
+    # is shared by all 5 activity endpoints, hence optional with a default.
+    service_title: str | None = None

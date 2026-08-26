@@ -10,11 +10,13 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.repositories.generic import BaseRepository, get_base_repository
+from src.repositories.search import SearchField, search_predicate
 from src.domain.dates import day_range
 from src.models.activity import Activity
 from src.models.payment import Payment
 from src.models.photo import Photo
 from src.models.record import Record
+from src.models.service import Service
 from src.models.tag import activity_tags, record_tags
 from src.models.visit import Visit
 from src.schemas.activity import ActivityCreate, ActivityResponse, ActivityUpdate
@@ -32,6 +34,12 @@ class ActivityService(GenericService[ActivityCreate, ActivityUpdate, ActivityRes
     # Patch should silently ignore null values for these fields.
     NOT_NULL_FIELDS = {"master_id", "service_id", "location_id", "start", "duration", "capacity"}
 
+    # GH #212 search matrix (spec §5.2 activities row): substring over the
+    # joined Service.title; exact activity.id when q parses as a full UUID.
+    # The Service join is added ONLY when q is present, so the default query
+    # plan is unchanged (spec §5.3 point 7).
+    search_fields = [SearchField(Service.title), SearchField(Activity.id, kind="uuid")]
+
     def __init__(
         self, repository: BaseRepository, model: type[Activity]
     ) -> None:
@@ -44,33 +52,61 @@ class ActivityService(GenericService[ActivityCreate, ActivityUpdate, ActivityRes
         per_page: int = 20,
         date_from: date | None = None,
         date_to: date | None = None,
+        q: str | None = None,
+        service_id: str | None = None,
         **filters,
     ) -> PaginatedResponse[ActivityResponse]:
-        """List activities with optional date range filter, paginated."""
-        if date_from or date_to:
-            return await self._list_by_date(db_session, date_from, date_to, page, per_page)
-        return await super().list(db_session, page=page, per_page=per_page, **filters)
+        """List activities, paginated, with date/service filters and search.
 
-    async def _list_by_date(
-        self,
-        db_session: AsyncSession,
-        date_from: date | None,
-        date_to: date | None,
-        page: int,
-        per_page: int,
-    ) -> PaginatedResponse[ActivityResponse]:
-        """Return a paginated page of activities filtered by date range."""
+        Single stmt builder — the former generic and ``_list_by_date`` paths
+        funnel through here (GH #212 spec §5.3): equality filters → day range
+        → ``service_id`` → ``q`` predicate (Service join only when q present,
+        before the repo's COUNT so ``total`` reflects the filtered count).
+        """
         stmt = select(Activity)
+        for key, value in filters.items():  # equality filters, same as the old super().list path
+            if value is not None:
+                stmt = stmt.where(getattr(Activity, key) == value)
         from_dt, to_dt = day_range(date_from, date_to)
         if from_dt is not None:
             stmt = stmt.where(Activity.start >= from_dt)
         if to_dt is not None:
             stmt = stmt.where(Activity.start <= to_dt)
+        if service_id is not None:
+            stmt = stmt.where(Activity.service_id == service_id)
+        if q is not None:
+            stmt = stmt.join(Service, Activity.service_id == Service.id).where(
+                search_predicate(q, self.search_fields)
+            )
         items_orm, total = await self._repository.list_custom(
             db_session, stmt, limit=per_page, offset=(page - 1) * per_page
         )
         items = [ActivityResponse.model_validate(a) for a in items_orm]
+        await self._populate_service_titles(db_session, items, items_orm)
         return PaginatedResponse(items=items, total=total, page=page, per_page=per_page)
+
+    async def _populate_service_titles(
+        self,
+        db_session: AsyncSession,
+        items: list[ActivityResponse],
+        items_orm: list[Activity],
+    ) -> None:
+        """Set ``service_title`` on every list item via ONE bounded bulk query.
+
+        Runs on every list call (with or without q) — spec §5.3 point 7 keeps
+        ``test_list_activities_query_count`` bounded: constant +1 SELECT,
+        never 1-per-row.
+        """
+        if not items:
+            return
+        rows = await db_session.execute(
+            select(Activity.id, Service.title)
+            .join(Service, Activity.service_id == Service.id)
+            .where(Activity.id.in_([a.id for a in items_orm]))
+        )
+        titles = {row[0]: row[1] for row in rows.all()}
+        for item in items:
+            item.service_title = titles.get(item.id)
 
     async def sum_active_seats(
         self, db_session: AsyncSession, activity_id: str

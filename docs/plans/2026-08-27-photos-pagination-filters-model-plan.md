@@ -29,7 +29,7 @@
 | `backend/src/domain/deletion.py` | modify | Client→photos, Location→photos nullify deps; remove Visitor→photos |
 | `backend/src/services/visitor.py` | modify | drop photos nullify step from cascade |
 | `backend/src/schemas/photo.py` | modify | PhotoListParams/PhotoSortBy, owner validators, response fields |
-| `backend/src/services/photo.py` | rewrite `list`/`update`/`patch` | paginated custom list + merged-set owner validation |
+| `backend/src/services/photo.py` | rewrite `list`/`create`/`update`/`patch` | paginated custom list + owner-field create + merged-set owner validation |
 | `backend/src/api/v1/photos.py` | modify | GET "" params + PaginatedResponse |
 | `backend/src/seed/seed.py` | modify | photos section rewrite (mutually-exclusive owners) |
 | `backend/tests/test_seed.py` | modify | pin update |
@@ -62,28 +62,29 @@
 
 **Classification: large** (breaking schema change + deletion domain; must land as one commit per spec §6.1 atomicity).
 
+**Transitional-red warning:** the model change in this task breaks `PhotoService.create/update` (they still reference `visitor_id`, `services/photo.py:65-71,100`) — existing `test_api_photos.py` POST/PUT/PATCH tests go RED here and are RESTORED by Task 3. Expected and accepted (spec atomicity binds migration+matrix+visitor-cascade into this one commit; service/schema code follows in Tasks 2-3 before anything is pushed). Task 1 verification therefore runs only deletion/seed/migration tests (1e).
+
 ### 1a. RED tests first
 
-In the existing deletion-matrix test file (locate via `grep -rn "dry_run\|FK_MATRIX" backend/tests/ | head`) add:
+In the existing deletion-cascade test file `backend/tests/services/test_delete_cascades.py` (fixture names follow `backend/tests/conftest.py`: sync `api_client` for HTTP, `db_session` for direct ORM, data factories per pytest-patterns) — UPDATE first, then ADD:
+
+- UPDATE `_insert_photo(...)` helper (`:106-114`): replace `visitor_id` param with `client_id`/`location_id`.
+- REWORK `test_visitor_delete_cascades_to_visits_and_nullifies_photos` (`:212`): visitor deletion no longer touches photos — keep the visits cascade assertion, drop the photos-nullify assertion, rename to `..._cascades_to_visits`.
+- ADD:
 
 ```python
-async def test_client_hard_delete_nullifies_photos(client, seeded_db):
-    # create client + photo owned by it, hard-delete client via DELETE with resolutions
-    # assert: photo still exists, photo.client_id is None
+def test_client_hard_delete_nullifies_photos(api_client, db_session):
+    # create client + photo owned by it; hard-delete client with resolutions;
+    # assert photo row survives with client_id IS NULL
     ...
 
-async def test_location_hard_delete_nullifies_photos(client, seeded_db):
+def test_location_hard_delete_nullifies_photos(api_client, db_session):
     # same shape for location_id
-    ...
-
-async def test_visitor_delete_does_not_touch_photos(client, seeded_db):
-    # visitor delete succeeds even when photos existed for the OLD visitor_id column
-    # (post-migration there is no link at all; this pins the removed cascade step)
     ...
 
 def test_photos_single_owner_check_constraint(db_session):
     from src.models.photo import Photo
-    p1 = Photo(filename="a.jpg", client_id="<uuid>", service_id="<uuid2>")
+    p1 = Photo(filename="a.jpg", client_id=C1, service_id=S1)
     db_session.add(p1)
     with pytest.raises(IntegrityError):
         db_session.commit()
@@ -184,7 +185,7 @@ Register in `NULLIFY_HANDLERS` with the exact key convention the file uses. REMO
 ### 1e. Verify + commit (single commit!)
 
 ```bash
-cd backend && uv run pytest tests/ -x -k "photo or deletion or seed"
+cd backend && uv run pytest tests/services/test_delete_cascades.py tests/test_seed.py -x   # deletion+seed only — photos API suite is transitionally red until Task 3 (see warning above)
 ./scripts/recreate_dev_db.sh   # runs alembic upgrade head + seed — must succeed
 git add -A && git commit -m "feat(#211): photos 4-owner model + migration + CHECK + deletion matrix (atomic)"
 ```
@@ -316,7 +317,21 @@ async def test_patch_nulling_ok(...):                 # PATCH {client_id: None} 
 async def test_zero_owner_and_location_only_ok(...)   # POST without owners → 201; POST location-only → 201
 ```
 
-### 3b. `backend/src/services/photo.py` — rewrite `list`, add merged-set checks to `update`/`patch`
+### 3b. `backend/src/services/photo.py` — rewrite `list` + `create` + merged-set checks in `update`/`patch`
+
+`create()` (`services/photo.py:65-71`): swap the hardcoded `visitor_id=data.visitor_id` for the new owner fields (payload validator from Task 2 already guarantees ≤1 owner):
+
+```python
+photo = Photo(
+    filename=data.filename,
+    client_id=data.client_id,
+    service_id=data.service_id,
+    activity_id=data.activity_id,
+    location_id=data.location_id,
+    is_public=data.is_public,
+)
+# tag_ids handling unchanged
+```
 
 ```python
 from sqlalchemy import func, or_, select, update
@@ -433,7 +448,7 @@ git commit -m "feat(#211): paginated PhotoService.list + q/filters/sort + merged
 - 1 tag-pair photo: tags [T1, T2]; reuse `p_tag1` shape: one of the activity photos carries only [T1] → AND demo (both tags → only the pair photo)
 - NO photo combines location_id with another owner (CHECK forbids it).
 
-Update `backend/tests/test_seed.py:132-141`: count stays 7; assert ≥1 location-owned, the both-tags pair exists, no multi-owner row.
+Update seed pins in `backend/tests/test_seed.py`: count-7 pin (`:132-141`) → assert ≥1 location-owned, the both-tags pair exists, no multi-owner row. ALSO update `test_seed_photos_guest_tagged` (`:143-151`): it asserts exactly 2 `photo_tags` rows — the new layout grows this to 5 (guest ×2 activity photos, T1+T2 pair, T1 single); recompute from the final layout and pin the exact number.
 
 Commit: `feat(#211): seed rewrite — mutually exclusive owners, location gallery, tag pair`
 
@@ -450,7 +465,17 @@ export const PhotoListResponseSchema = paginatedSchema(PhotoResponseSchema);
 export type PhotoListResponse = z.infer<typeof PhotoListResponseSchema>;
 ```
 
-`endpoints.ts` (getRecords is the serialization template — repeated params via `search.append`):
+`endpoints.ts` — add a param'd plain-clients fetch (today only no-arg `getClients()` `:309` and param'd `getClientsWithStats()` `:313` exist; photo typeaheads need the light list). getRecords is the serialization template — repeated params via `search.append`:
+
+```ts
+export interface ClientListParams { q?: string; per_page?: number; page?: number; }
+
+export async function getClientsPaged(params: ClientListParams): Promise<PaginatedResponse<Client>> {
+  const s = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== null) s.set(k, String(v));
+  return request(`/api/v1/clients?${s}`);
+}
+```
 
 ```ts
 export interface PhotoListParams {
@@ -520,7 +545,7 @@ Rewrite `PhotosContext.test.tsx` (6 tests pin client-side slicing — replace): 
 Create `frontend/admin/app/(main)/photos/components/PhotosFilters.tsx` — layout modeled on `BookingFilters.tsx` (flex-wrap, label+control markup, Сбросить button styled like records' reset). Controls:
 
 ```tsx
-// Клиент: SearchableSelect, onSearch={(q) => getClients({ q, per_page: 10 }).then(r => r.items.map(clientOption))}
+// Клиент: SearchableSelect, onSearch={(q) => getClientsPaged({ q, per_page: 10 }).then(r => r.items.map(clientOption))}
 // Активность: SearchableSelect, onSearch={(q) => getActivities({ q, per_page: 10 }).then(mapActivityOption)}
 // Услуга: <select> over servicesMap (or getServicesAll) — «Все услуги» empty option
 // Локация: <select> over locationsMap — «Все локации»
@@ -555,7 +580,7 @@ export const photoColumns: ColumnDef<PhotoResponse>[] = [
 (Column/render signatures follow the existing file's `ColumnDef` — adapt names, keep LS key `photos-columns`.)
 
 `PhotoModal.tsx` + `photoFields.tsx`:
-1. Remove «Посетитель» field; add «Клиент» searchable field: `onSearch → getClients({ q, per_page: 10 })`.
+1. Remove «Посетитель» field; add «Клиент» searchable field: `onSearch → getClientsPaged({ q, per_page: 10 })`.
 2. Add «Локация» picker: plain `<select>` over `getLocationsAll()` — extend the field-type union with a `select` member (options prop) if `photoFields.tsx` lacks one.
 3. REMOVE the activity→service auto-fill effect (`PhotoModal.tsx:118-121`); replace with mutually-exclusive pair semantics:
 

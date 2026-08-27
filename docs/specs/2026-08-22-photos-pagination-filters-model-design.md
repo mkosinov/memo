@@ -95,6 +95,7 @@ One migration (SQLite batch mode, `b7c8d9e0f1a2` precedent):
 - DROP `photos.visitor_id`.
 - ADD `photos.client_id` — nullable, FK → `clients.id`, `ondelete="SET NULL"`.
 - ADD `photos.location_id` — nullable, FK → `locations.id`, `ondelete="SET NULL"`.
+- ADD table-level `CheckConstraint` (G1b-round-2 user approval): `(client_id IS NOT NULL) + (service_id IS NOT NULL) + (activity_id IS NOT NULL) + (location_id IS NOT NULL) <= 1` — defense-in-depth for writes bypassing the API (seed/scripts get `IntegrityError`). API-level validation (§6.2) remains the user-facing path (clean 422). Also declared on the SQLAlchemy model so schema and DDL stay in sync.
 - NO data backfill (user ruling: project not in production). `alembic upgrade head` + `downgrade` both work; dev flow = `recreate_dev_db.sh` + seed.
 - `backend/src/models/photo.py`: replace `visitor_id` with `client_id`/`location_id` FK columns; `client`/`location` relationships as needed by §6.5. DB-level ondelete never fires on prod SQLite (no `PRAGMA foreign_keys`, per #194) — service-level nulling is mandatory and lives in the deletion matrix (§6.3).
 - The batch table-recreation copies existing rows; new columns are NULL for all of them — this IS the zero-backfill intent, no follow-up needed.
@@ -278,7 +279,7 @@ From #139 (merged): `<DataTable>` with `withSearch` + `searchPlaceholder`; `Page
 - Response: `client_name` present for client photos, NULL otherwise; resolves for archived client; PaginatedResponse envelope honesty (total/page/per_page).
 - Owner validation: POST/PUT with ≥2 of the 4 owner FKs in the payload → 422 (incl. location+any other); **PUT carrying one owner against a row holding a different owner → 422 (merged-set check — exclude_unset hole)**; PATCH adding a second owner → 422 (merged-set check); PATCH/PUT nulling → OK; zero-owner create → OK; location-only owner → OK.
 - Deletion matrix: Client hard-delete dry-run lists photos dep (auto-nullify) + execution nulls `client_id`; Location likewise; Visitor delete no longer touches photos; client archive leaves photo link intact.
-- Migration: `alembic upgrade head` + `downgrade` pass (SQLite batch).
+- Migration: `alembic upgrade head` + `downgrade` pass (SQLite batch); DB CHECK enforced — direct insert with ≥2 owner FKs (bypassing API validators) → IntegrityError.
 - Seed: `test_seed.py` pin re-pointed (count 7, new owner/location assertions).
 
 ### 10.2 api-client contract
@@ -330,7 +331,7 @@ If any check fails → STOP. Cosmetic drift (renamed/moved code, same contract) 
 
 ## 13. Acceptance Criteria
 
-- [ ] Alembic migration drops `photos.visitor_id`, adds `client_id`/`location_id` (nullable FKs, SET NULL); upgrade+downgrade pass; zero backfill; ships in ONE commit with the §6.3 deletion-matrix/visitor-cascade changes.
+- [ ] Alembic migration drops `photos.visitor_id`, adds `client_id`/`location_id` (nullable FKs, SET NULL) + the 4-owner exclusive-arc CHECK constraint; upgrade+downgrade pass; zero backfill; ships in ONE commit with the §6.3 deletion-matrix/visitor-cascade changes.
 - [ ] `GET /api/v1/photos` returns `PaginatedResponse[PhotoResponse]`; 422 on invalid page/per_page/q/sort; unknown filter ids → empty page.
 - [ ] Filters: client/activity direct; location direct-only (activity-owned photos never match); service variant A (direct OR via activity); repeatable tag_id AND; all filters AND-combined; q filename ilike min2/max100.
 - [ ] Sort whitelist filename/is_public/created_at; default `created_at desc` + id tiebreak.

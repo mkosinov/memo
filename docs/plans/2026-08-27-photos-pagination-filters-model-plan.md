@@ -25,6 +25,7 @@
 | File | Action | Responsibility |
 |------|--------|----------------|
 | `backend/src/models/photo.py` | modify | 4-owner columns, CHECK constraint, client/location relationships |
+| `backend/src/admin/setup.py` | modify | PhotoAdmin column_list: `visitor_id` → `client_id`/`location_id` (import-time coupling) |
 | `backend/alembic/versions/<new>_photos_owner_columns.py` | create | batch migration: drop visitor_id, add client_id/location_id + FKs + CHECK |
 | `backend/src/domain/deletion.py` | modify | Client→photos, Location→photos nullify deps; remove Visitor→photos |
 | `backend/src/services/visitor.py` | modify | drop photos nullify step from cascade |
@@ -68,8 +69,10 @@
 
 In the existing deletion-cascade test file `backend/tests/services/test_delete_cascades.py` (fixture names follow `backend/tests/conftest.py`: sync `api_client` for HTTP, `db_session` for direct ORM, data factories per pytest-patterns) — UPDATE first, then ADD:
 
-- UPDATE `_insert_photo(...)` helper (`:106-114`): replace `visitor_id` param with `client_id`/`location_id`.
-- REWORK `test_visitor_delete_cascades_to_visits_and_nullifies_photos` (`:212`): visitor deletion no longer touches photos — keep the visits cascade assertion, drop the photos-nullify assertion, rename to `..._cascades_to_visits`.
+- UPDATE `backend/tests/services/test_delete_cascades.py` `_insert_photo(...)` helper (`:106-114`): replace `visitor_id` param with `client_id`/`location_id`.
+- REWORK that file's `test_visitor_delete_cascades_to_visits_and_nullifies_photos` (`:212`): visitor deletion no longer touches photos — keep the visits cascade assertion, drop the photos-nullify assertion, rename to `..._cascades_to_visits`.
+- UPDATE `backend/tests/domain/test_deletion.py` exact-dep-set assertions (`:194`, `:245`): `FK_MATRIX[Client]` → `{"records","visitors","client_tags","photos"}`, `FK_MATRIX[Location]` → `{"activities","location_tags","photos"}`.
+- UPDATE `backend/tests/test_models.py:382` `test_photo_crud`: replace `fetched.visitor_id is None` with `fetched.client_id is None` / `fetched.location_id is None`.
 - ADD:
 
 ```python
@@ -127,6 +130,8 @@ class Photo(AbstractModel):
 ```
 
 Delete the `visitor_id` column and its relationship if present.
+
+Update `backend/src/admin/setup.py:97` in the SAME commit: `PhotoAdmin.column_list` references `Photo.visitor_id` at module import (`main.py:14` imports `setup_admin` unconditionally) — swap to `client_id`/`location_id`, or the app fails to import after the model change and EVERY `api_client` test dies (not just photos).
 
 ### 1c. Migration — `cd backend && uv run alembic revision -m "photos owner columns client location check"`, then fill:
 
@@ -203,12 +208,13 @@ git add -A && git commit -m "feat(#211): photos 4-owner model + migration + CHEC
     {"page": 0}, {"per_page": 0}, {"per_page": 101},
     {"q": "a"}, {"q": "x" * 101}, {"sort_by": "client_id"}, {"sort_order": "up"},
 ])
-async def test_photos_list_params_422(client, bad):
-    r = await client.get("/api/v1/photos", params=bad)
+def test_photos_list_params_422(api_client, bad):
+    r = api_client.get("/api/v1/photos", params=bad)
     assert r.status_code == 422
 
-async def test_photo_create_two_owners_422(client):
-    r = await client.post("/api/v1/photos", json={"filename": "a.jpg", "client_id": C1, "service_id": S1})
+def test_photo_create_two_owners_422(api_client):
+    r = api_client.post("/api/v1/photos",
+                        json={"filename": "a.jpg", "client_id": C1, "service_id": S1})
     assert r.status_code == 422
 ```
 
@@ -289,7 +295,16 @@ class PhotoResponse(BaseModel):
 
 Fixture photos: `p_client` (client C1), `p_client2` (C1), `p_act` (activity A1, A1.service=S1, A1.location=L1), `p_svc` (service S2, no activity), `p_loc` (location L2, owner=location only), `p_tags` (tags [T1,T2]), `p_tag1` (tags [T1]), all distinct filenames sharing a searchable substring where needed.
 
+**All tests sync TestClient style** (`api_client` fixture per conftest — pytest-patterns skill). Shared fixture:
+
 ```python
+@pytest.fixture(scope="module")
+def photos_fixture(api_client):
+    # create clients C1, locations L1/L2, activities A1 (service S1, location L1),
+    # services S1/S2, tags T1/T2 via API; then the 7 photos via POST:
+    # p_client, p_client2 (C1), p_act (A1), p_svc (S2), p_loc (L2 only), p_tags ([T1,T2]), p_tag1 ([T1])
+    ...
+
 CASES = [
     ("plain", {}, {"p_client","p_client2","p_act","p_svc","p_loc","p_tags","p_tag1"}),
     ("page2_empty_for_7_per_10", {"page": 2}, set()),                      # 7 items, per_page 10
@@ -306,16 +321,18 @@ CASES = [
     ("q_and_filter", {"q": "p_", "client_id": C1}, {"p_client","p_client2"}),
 ]
 @pytest.mark.parametrize("name,params,expected", CASES)
-async def test_photos_filter_matrix(client, photos_fixture, name, params, expected): ...
+def test_photos_filter_matrix(api_client, photos_fixture, name, params, expected): ...
 
-async def test_photos_sort_and_tiebreak(...):     # filename asc/desc, is_public asc (False first), created_at desc default + id tiebreak
-async def test_photos_client_name(...):           # p_client → client_name == C1.name; p_act → None; archived client still resolves
-async def test_photos_envelope(...):              # items/total/page/per_page honest under service filter (no double-count)
-async def test_put_single_owner_conflicts_row(...):   # PUT {location_id: L2} on p_client → 422 (exclude_unset hole, spec §6.2)
-async def test_patch_adding_second_owner_422(...):    # PATCH {service_id: S2} on p_client → 422
-async def test_patch_nulling_ok(...):                 # PATCH {client_id: None} on p_client → 200, owner-less
-async def test_zero_owner_and_location_only_ok(...)   # POST without owners → 201; POST location-only → 201
+def test_photos_sort_and_tiebreak(api_client, photos_fixture): ...  # filename asc/desc, is_public asc (False first), created_at desc default + id tiebreak
+def test_photos_client_name(api_client, photos_fixture): ...       # p_client → client_name == C1.name; p_act → None; archived client still resolves
+def test_photos_envelope(api_client, photos_fixture): ...          # items/total/page/per_page honest under service filter (no double-count)
+def test_put_single_owner_conflicts_row(api_client, photos_fixture): ...  # PUT {location_id: L2} on p_client → 422 (exclude_unset hole, spec §6.2)
+def test_patch_adding_second_owner_422(api_client, photos_fixture): ...   # PATCH {service_id: S2} on p_client → 422
+def test_patch_nulling_ok(api_client, photos_fixture): ...                # PATCH {client_id: None} on p_client → 200, owner-less
+def test_zero_owner_and_location_only_ok(api_client): ...                 # POST without owners → 201; POST location-only → 201
 ```
+
+**Legacy test updates in the same file (cannot be "restored" by the service rewrite — rewrite them):** `test_patch_photo_visitor_id_to_null` (`:243`) → client_id-to-null; `test_patch_photo_empty_body_noop` (`:270-284`) → assert the new optional fields instead of `visitor_id`; `test_list_photos_empty` (`:102`) and `test_deleted_photo_not_in_list` (`:164`) → envelope shape (`r.json()["items"] == []`).
 
 ### 3b. `backend/src/services/photo.py` — rewrite `list` + `create` + merged-set checks in `update`/`patch`
 

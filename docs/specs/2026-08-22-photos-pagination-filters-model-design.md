@@ -3,7 +3,7 @@
 - **Issue:** GH #211 (absorbs GH #222 — photos model expansion; #222 closes as absorbed after G1b)
 - **Date:** 2026-08-22
 - **Status:** DESIGN — pending G1b (round 2, revised per G1b feedback 2026-08-22)
-- **Depends on (IMPL gates):** #139 (generic DataTable) merged AND #212 (list search `?q=`) merged. Design docs land on main now; IMPL starts later in a fresh worktree off post-merge main.
+- **Depends on (IMPL gates):** #139 (generic DataTable) merged AND #212 (list search `?q=`) merged — **#212 is merged (PR #228, commit `959cf82`); only #139 remains**. Design docs land on main now; IMPL starts later in a fresh worktree off post-merge main.
 - **G1b revisions (binding):** location is a full 4th owner; tag filter flipped to AND semantics; location display via client-side `/locations/all` join (no endpoint denormalization); group-photo follow-up issue closed as not planned.
 
 ## G1a + Step-0 + G1b-revision user decisions (binding, 2026-08-22)
@@ -16,7 +16,7 @@
 5a. **Location filter: DIRECT-only (G1b ruling).** Equality on `photos.location_id`; OR-via-activity explicitly rejected. Consequence: activity-owned photos never carry `location_id` (owner slot taken) and never match the location filter. Service keeps variant A (direct OR via activity) — the asymmetry is intentional (§6.7).
 5b. **Location display: client-side join (G1b ruling).** The endpoint returns `location_id` only; the frontend resolves the title via a `/locations/all` map (same pattern as «Услуга»). `client_name` remains the ONLY denormalized response field (clients have no `/all`).
 6. **per_page:** server default stays 20 (`PaginationParams`, `backend/src/schemas/pagination.py:15-16` — no endpoint overrides it today); the photos UI explicitly requests `per_page=10`.
-7. **`PhotoService.list` is REWRITTEN** (paginated, service-built statement via `list_custom`, `ClientWithStats`-style accepted exception to repo-owned list), NOT deleted — `BaseRepository.list` equality filters (`repositories/generic.py:50-52`) cannot express q-ilike / tag-EXISTS / service-OR / client_name.
+7. **`PhotoService.list` is REWRITTEN** (paginated, service-owned dual-query `session.execute()` + manual Row mapping — the actual `ClientWithStats` pattern; NOT `list_custom`, which would drop `client_name`), NOT deleted — `BaseRepository.list` equality filters (`repositories/generic.py:50-52`) cannot express q-ilike / tag-EXISTS / service-OR / client_name.
 8. **Filter bar is NEW UX** — BookingFilters has no typeaheads and no tags filter (verified `BookingFilters.tsx:59-145`: date inputs, plain selects, StatusFiltersPicker). Designed from scratch in §7.3.
 9. **Sort:** Literal whitelist `filename | is_public | created_at` (422 on unknown — `RecordSortBy` pattern, `schemas/record.py:115-118`), default `created_at desc` + id tiebreak (`services/record.py:135` pattern). FK columns and preview are not sortable; `photoColumns.tsx` aligned.
 10. **Unknown filter ids → silent empty page** (records equality-filter precedent), NOT 422.
@@ -104,8 +104,8 @@ One migration (SQLite batch mode, `b7c8d9e0f1a2` precedent):
 ### 6.2 Ownership invariant + write-time validation
 
 - **Rule (binding, G1b-extended to 4 owners):** at most one of `client_id | service_id | activity_id | location_id` non-null — all four FKs participate in the invariant identically. Location-owned photos are a standalone location gallery (interiors/venues).
-- **Create/Update (POST/PUT):** pydantic `model_validator` on `PhotoCreate`/`PhotoUpdate` — ≥2 of the 4 owner FKs → ValidationError → automatic 422 (English detail).
-- **PATCH:** `PhotoPatch` sees only sent fields, so `PhotoService.patch` (existing override, `services/photo.py:118-160`) validates the MERGED owner set (existing row + patch, across all 4 FKs) and raises `HTTPException(422)` with English detail on conflict.
+- **Create (POST):** pydantic `model_validator` on `PhotoCreate` — ≥2 of the 4 owner FKs in the payload → ValidationError → automatic 422 (English detail).
+- **Update (PUT) / Patch (PATCH) — merged-set check (panel-round-2 hole):** `PhotoService.update` applies `exclude_unset=True` (`services/photo.py:100`) and owner FKs in `PhotoUpdate`/`PhotoPatch` are optional — a payload carrying a single owner can still collide with owners already on the row (PUT `{location_id: Y}` against a client-owned photo would leave 2 owners at rest). BOTH `PhotoService.update` and `PhotoService.patch` (existing override, `services/photo.py:118-160`) therefore validate the MERGED owner set (existing row + applied payload, across all 4 FKs) and raise `HTTPException(422)` with English detail on conflict. The payload-level `model_validator` on `PhotoCreate`/`PhotoUpdate` stays as the fast first line for ≥2-in-payload cases.
 - Zero owners allowed at rest (parent deletion nulls FKs; direct creation with no owner is permitted, as today).
 
 ### 6.3 Deletion-policy integration (`backend/src/domain/deletion.py`)
@@ -137,6 +137,7 @@ New in `backend/src/schemas/photo.py`, modeled on `RecordListParams` (`schemas/r
 - 422 cases: `page<1`, `per_page` outside 1..100, `q` of length 1 or >100, unknown `sort_by`/`sort_order`. (FastAPI/pydantic automatic.)
 - Unknown/nonexistent filter ids → silent empty page (records equality precedent), NOT 422.
 - Injection constraint (FastAPI #12481, documented at `schemas/pagination.py:9-12`): ALL list params live exclusively in `PhotoListParams`; the handler adds no separate scalar query params (records handler precedent, `records.py:72-85`). `Depends` remains only for session/service.
+- `tag_id` param notes: its Field description states "repeatable; AND semantics — photo must have ALL selected tags" (OpenAPI clarity); duplicate tag_ids are harmless (deduped by the conjunction); an empty-string/unknown tag id falls under the unknown-id → silent-empty rule.
 
 ### 6.5 `PhotoService.list` — paginated rewrite (accepted exception)
 
@@ -148,7 +149,7 @@ Rewritten as a service-owned custom list following the ACTUAL `ClientWithStats` 
 - Filters applied per §6.4/§6.7; q per §6.6; sort per §6.8; deterministic tiebreak `Photo.id`.
 - Response mapping: `PhotoResponse` built per row from `(Photo, client_name)` (field `client_name: str | None = None`); exact row-mapping mechanics pinned at plan time against the merged code.
 - Docstring carries the "accepted exception to repo-owned list (GH #206)" flag, mirroring `ClientWithStats`.
-- Future extension note: if more denormalized fields are ever added (e.g. service_title), switch from scalar subqueries to a JOIN. Location display is deliberately NOT denormalized — it resolves client-side via `/locations/all` (§7.4); `client_name` is the only denormalized field.
+- Location display is deliberately NOT denormalized — it resolves client-side via `/locations/all` (§7.4); `client_name` is the only denormalized field.
 
 ### 6.6 Search semantics (`?q=`)
 
@@ -165,6 +166,7 @@ Rewritten as a service-owned custom list following the ACTUAL `ClientWithStats` 
 - `tag_id` (repeatable, **AND** — binding decision 5, revised at G1b): a photo matches only if it has ALL selected tags. Pinned implementation: one `Photo.tags.any(Tag.id == t)` predicate per requested tag, AND-chained (per-tag EXISTS conjunction) — no GROUP BY/HAVING, no row multiplication, count stays honest. (Rejected alternative: join + `GROUP BY`/`HAVING COUNT(DISTINCT tag_id)=n` — needlessly complicates the count query.)
 - `client_id` / `activity_id`: direct equality.
 - Inactive (archived) entities as filter VALUES behave identically (equality match; photos of archived clients remain listed).
+- Combining two DIFFERENT owner filters (e.g. `client_id` + `service_id`) yields an empty page by construction (a photo has at most one owner) — legal, documented, no special-casing.
 
 ### 6.8 Sorting design
 
@@ -210,7 +212,7 @@ From #139 (merged): `<DataTable>` with `withSearch` + `searchPlaceholder`; `Page
 | Control | Type | Data source | Notes |
 |---------|------|-------------|-------|
 | Клиент | SearchableSelect (single) | `getClients({q, per_page:10})` — `/clients?q=` post-#212 | ≥2-char clamp; active clients by default (`ClientListParams.status=ACTIVE`) |
-| Активность | SearchableSelect (single) | `getActivities({q, service_id?, per_page:10})` | narrows by `service_id` when the service filter is set (PhotoModal coherence, #212 §5.5); item mapping formats `start` like the PhotoModal closure |
+| Активность | SearchableSelect (single) | `getActivities({q, per_page:10})` | item mapping formats `start` like the PhotoModal closure |
 | Услуга | plain `<select>` | `/services/all` | BookingFilters precedent |
 | Локация | plain `<select>` | `/locations/all` | BookingFilters precedent |
 | Теги | multi-select chips + add-typeahead | `/tags/all` | PhotoModal multi-emulation pattern (`PhotoModal.tsx:49-94`); AND semantics server-side (photo must have ALL selected tags) |
@@ -241,7 +243,7 @@ From #139 (merged): `<DataTable>` with `withSearch` + `searchPlaceholder`; `Page
 - «Посетитель» field removed; **«Клиент»** SearchableSelect added — `onSearch` → `getClients({q, per_page:10})` (#212 mechanics; replaces the visitor typeahead that #212 migrates to `/visitors?q=` — that wiring is superseded before it ships).
 - **«Локация»** picker added — plain dropdown over `/locations/all` (bounded dictionary, no typeahead). `photoFields.tsx` field-type union has no plain-select member today (text/searchable/tags only) — extend at plan time.
 - Owner fields remain independent controls (now 4: client/service/activity/location); **enforcement is server-side 422 on ≥2 of the four** (§6.2) surfaced via the existing PhotoModal error catch. No client-side lockout (accepted UX roughness, noted).
-- Service/activity fields unchanged (post-#212 typeaheads over list `?q=`); activity↔service coupling (narrow + auto-fill) preserved.
+- Service/activity fields remain post-#212 typeaheads over list `?q=`, but the **auto-fill of `service_id` on activity pick is REMOVED** (panel-round-2: `PhotoModal.tsx:118-121` auto-fill would now manufacture a guaranteed 2-owner 422). Under the 4-owner invariant service and activity are mutually exclusive: picking one CLEARS the other (replace semantics for that pair); activity-search narrowing by a selected service stays as a search aid only. Client/location fields keep plain independence (server 422 on conflicts, next bullet).
 
 ### 7.6 api-client
 
@@ -254,7 +256,7 @@ From #139 (merged): `<DataTable>` with `withSearch` + `searchPlaceholder`; `Page
 ## 8. Seed & test data
 
 - `backend/src/seed/seed.py:448-469` rewrite (7 photos, count unchanged → `test_seed.py:132-141` pin re-pointed at new owner fields). Owner slots are mutually exclusive (§6.2) — every seeded photo has AT MOST one of client_id/service_id/activity_id/location_id:
-  - ≥1 service-owned (card images), ≥1 activity-owned (guest photos, `guest` tag preserved), ≥2 client-owned (one client with 2 photos — supports scenario 3), **≥1 location-OWNED** (standalone interior/venue shot, location in the owner slot — supports scenario 5).
+  - ≥1 service-owned (card images), ≥1 activity-owned (guest photos, `guest` tag preserved), ≥2 client-owned (one client with 2 photos — supports scenario 3), **≥1 location-OWNED** (standalone interior/venue shot, location in the owner slot — supports scenario 5). Co-location pin for scenario 5's negative branch (panel-round-2): the activity-owned photo's `activities.location_id` equals the location-owned photo's location — without it the "does NOT appear" assertion is vacuous.
   - Tags for the AND filter (scenario 6): one photo carrying BOTH of two shared tags, another carrying only ONE of them — selecting both tags must leave only the first photo.
   - Not allowed under the new invariant: a photo with both another owner AND `location_id` set — the round-1 "≥1 with both location and owner" requirement is removed.
 - E2E pagination scenario creates ≥11 photos via API (full-cycle pattern) — seed does not need >10 photos.
@@ -274,7 +276,7 @@ From #139 (merged): `<DataTable>` with `withSearch` + `searchPlaceholder`; `Page
 - Filter contract matrix: each filter alone; all-combined AND; service variant A — direct-only photo matches, activity-derived photo matches, unrelated service does not; **location direct-only — location-owned photo matches, activity-owned photo at that location does NOT**; tag_id single + repeated AND (photo with ALL selected tags matches; photo with only ONE of two selected does NOT); q AND filter combo; envelope `total` honest under the service join (no double-count).
 - Sort: each whitelist field asc/desc; default `created_at desc`; id tiebreak determinism.
 - Response: `client_name` present for client photos, NULL otherwise; resolves for archived client; PaginatedResponse envelope honesty (total/page/per_page).
-- Owner validation: POST/PUT with ≥2 of the 4 owner FKs → 422 (incl. location+any other); PATCH adding a second owner → 422 (merged-set check); PATCH nulling → OK; zero-owner create → OK; location-only owner → OK.
+- Owner validation: POST/PUT with ≥2 of the 4 owner FKs in the payload → 422 (incl. location+any other); **PUT carrying one owner against a row holding a different owner → 422 (merged-set check — exclude_unset hole)**; PATCH adding a second owner → 422 (merged-set check); PATCH/PUT nulling → OK; zero-owner create → OK; location-only owner → OK.
 - Deletion matrix: Client hard-delete dry-run lists photos dep (auto-nullify) + execution nulls `client_id`; Location likewise; Visitor delete no longer touches photos; client archive leaves photo link intact.
 - Migration: `alembic upgrade head` + `downgrade` pass (SQLite batch).
 - Seed: `test_seed.py` pin re-pointed (count 7, new owner/location assertions).
@@ -287,9 +289,9 @@ From #139 (merged): `<DataTable>` with `withSearch` + `searchPlaceholder`; `Page
 ### 10.3 Frontend unit (vitest)
 
 - `PhotosContext.test.tsx` — **full rewrite** (currently 6 tests pinning client-side slice): server fetch params in query key, page reset on setFilters/setSearch, ≥2 clamp, page-clamp, per_page=10 default, sort mapping, servicesMap load.
-- `PhotosFilters` new suite: controls render, change → setFilters, activity narrowing by service filter, tags chips add/remove, reset.
+- `PhotosFilters` new suite: controls render, change → setFilters, tags chips add/remove, reset.
 - `photoColumns`: client_name render w/ '—' fallback, service/location title resolution via maps, sortable flags exactly {filename, is_public, created_at}, activity defaultVisible=false, location defaultVisible=true.
-- `PhotoModal`: client picker present / visitor absent, location picker, 422 surfacing on ≥2 owners (mock).
+- `PhotoModal`: client picker present / visitor absent, location picker, activity pick clears service and vice versa (auto-fill removed), 422 surfacing on ≥2 of the 4 owner FKs (mock).
 
 ### 10.4 E2E (playwright, real backend — no page.route)
 
@@ -304,7 +306,7 @@ Mapped to §2 scenarios 1-7. Updates to existing `photos-crud.spec.ts`: search t
 | 3 | Group photos | Model + display only — N independent rows via the normal single-owner modal; NO creation mechanism, NO follow-up (deferred-flow issue closed as not planned at G1b) |
 | 4 | Tag filter | Repeatable `tag_id`, **AND** semantics (G1b flip from OR); per-tag EXISTS conjunction |
 | 5 | per_page default | Server 20 (no override); UI requests 10 |
-| 6 | `PhotoService.list` | Rewritten paginated via `list_custom` (ClientWithStats accepted exception), not deleted |
+| 6 | `PhotoService.list` | Rewritten paginated via service-owned `session.execute()` + Row mapping (NOT `list_custom` — it drops `client_name`; `ClientWithStats` accepted-exception pattern), not deleted |
 | 7 | Filter bar | New UX (BookingFilters has no typeaheads/tags) — designed in §7.3 |
 | 8 | Sort | Literal whitelist (422), default `created_at desc` + id tiebreak; photoColumns aligned |
 | 9 | Unknown filter ids | Silent empty page (records precedent) |
@@ -314,7 +316,7 @@ Mapped to §2 scenarios 1-7. Updates to existing `photos-crud.spec.ts`: search t
 
 ## 12. Preconditions / re-verify at IMPL start
 
-Gate: IMPL starts only after BOTH #139 and #212 are merged to main. At IMPL kickoff, re-verify (cheap grep-level checks):
+Gate: IMPL starts only after BOTH #139 and #212 are merged to main (#212 already merged — PR #228, commit `959cf82`; #139 pending). At IMPL kickoff, re-verify (cheap grep-level checks):
 
 1. `PhotosContext.tsx` on main = the #139 T7 client-adapter (swap-point comment intact) — else re-baseline §7.2.
 2. `photoColumns.tsx` and `<DataTable withSearch>` contract unchanged (sortField/defaultVisible/`photos-columns` LS key).

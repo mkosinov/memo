@@ -4,8 +4,9 @@ import React, { useState, useEffect, useCallback, useId } from 'react';
 import { PHOTO_FIELDS, type PhotoFieldConfig } from './photoFields';
 import SearchableSelect from '@/app/components/shared/SearchableSelect';
 import { Modal } from '@/app/components/shared/modal/Modal';
-import { searchVisitors, searchServices, searchActivities, searchTags } from '@memo/api-client';
+import { getVisitors, getServices, getActivities, getTags } from '@memo/api-client';
 import type { PhotoResponse } from '@memo/api-client';
+import { formatActivityStart } from '@/lib/utils';
 
 export interface PhotoModalProps {
   mode: 'create' | 'edit';
@@ -84,7 +85,7 @@ function FieldRenderer({ field, value, onChange, error, formData }: FieldRendere
               onChange(field.key, [...selectedTags, { id: item.id, tag: item.tag }]);
             }
           }}
-          onSearch={searchTags}
+          onSearch={async (q) => (await getTags({ q, per_page: 10 })).items}
           label=""
           displayField="tag"
           placeholder={field.placeholder || 'Добавить тег...'}
@@ -101,13 +102,21 @@ function FieldRenderer({ field, value, onChange, error, formData }: FieldRendere
     let onSelectItem: ((item: Record<string, unknown>) => void) | undefined;
     
     if (field.key === 'visitor_id') {
-      searchFn = searchVisitors;
+      searchFn = async (q: string) => (await getVisitors({ q, per_page: 10 })).items;
     } else if (field.key === 'service_id') {
-      searchFn = searchServices;
+      searchFn = async (q: string) => (await getServices({ q, per_page: 10 })).items;
     } else {
       // For activity_id, pass the selected service_id if available
       const selectedServiceId = formData?.service_id as string | null;
-      searchFn = (q: string) => searchActivities(q, selectedServiceId || undefined);
+      searchFn = async (q: string) => {
+        const res = await getActivities({
+          q,
+          service_id: selectedServiceId || undefined,
+          per_page: 10,
+        });
+        // SearchableSelect renders raw field values — format ISO start for display
+        return res.items.map((a) => ({ ...a, start: formatActivityStart(a.start) }));
+      };
       
       // If service is already selected, show only datetime (not service_title)
       if (selectedServiceId) {

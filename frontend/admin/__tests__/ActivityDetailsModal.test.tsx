@@ -32,7 +32,7 @@ import {
 // ─── API Client Mock ───────────────────────────────────────────────────────
 
 vi.mock('@memo/api-client', () => ({
-  searchClientByPhone: vi.fn(),
+  getClientByPhone: vi.fn(),
   createClient: vi.fn(),
   createVisitor: vi.fn(),
   createRecord: vi.fn(),
@@ -45,7 +45,7 @@ vi.mock('@memo/api-client', () => ({
 }));
 
 import {
-  searchClientByPhone,
+  getClientByPhone,
   createClient,
   createVisitor,
   createRecord,
@@ -447,7 +447,7 @@ describe('ActivityDetailsModal — API integration', () => {
     vi.mocked(createVisitor).mockResolvedValue({ id: 'vis_new', client_id: 'c1', name: 'V', age: null, created_at: '', updated_at: '' });
     vi.mocked(deleteRecord).mockResolvedValue(undefined);
     vi.mocked(createPayment).mockResolvedValue({ id: 'p1', record_id: 'r1', amount: 1000, method: 'card', created_at: '', updated_at: '' });
-    vi.mocked(searchClientByPhone).mockRejectedValue(new Error('Not found'));
+    vi.mocked(getClientByPhone).mockRejectedValue(new Error('Not found'));
     // #191: booking tabs come from the activity-records query, not context records
     stubActivityRecordsQuery(mockRecords);
   });

@@ -13,19 +13,14 @@ const { Provider, usePagedList } = createPagedListContext<MasterResponse>({
       status: p.status,
       // Sort params omitted until the user picks a sort — server default order (§4.4).
       ...(p.sort_by ? { sort_by: p.sort_by, sort_order: p.sort_order } : {}),
+      ...(p.q ? { q: p.q } : {}),
     }),
   withStatus: true,
-  // #139 T3 — dict search is predicate-only (spec §6.7): filters the loaded
-  // page into `visibleItems`; `search` stays out of the query key/fetcher.
-  // First + last name match, per the MasterFilters placeholder
-  // "Имя или фамилия..." (verbatim from the pre-#139 table filter memo).
-  searchPredicate: (m, q) => {
-    const query = q.toLowerCase();
-    return (
-      m.first_name.toLowerCase().includes(query) ||
-      m.last_name.toLowerCase().includes(query)
-    );
-  },
+  // GH #212 T11 — dict search is server-side: the factory clamps q to ≥2
+  // chars, puts it in the query key, and the fetcher sends it on. The #139
+  // predicate mechanism (temporary degradation, §6.7) is retired here; the
+  // first+last name matching now lives in the backend list ?q=.
+  serverSearch: true,
 });
 
 export const MastersProvider = Provider;

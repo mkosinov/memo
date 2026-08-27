@@ -161,6 +161,39 @@ describe('ClientsContext', () => {
       expect(result.current.page).toBe(1);
     });
 
+    it('maps filters.search to the q wire param, not search (GH #212)', async () => {
+      const { Wrapper } = createWrapper();
+      const { result } = renderHook(() => useClients(), { wrapper: Wrapper });
+
+      act(() => {
+        result.current.setFilters({ search: 'Иванов' });
+      });
+
+      // The refetch carries q; the legacy `search` key is explicitly killed.
+      await waitFor(() => {
+        expect(mockGetClientsWithStats).toHaveBeenLastCalledWith(
+          expect.objectContaining({ q: 'Иванов', search: undefined }),
+        );
+      });
+    });
+
+    it('clamps 1-char search to no q param (server min_length=2, GH #212)', async () => {
+      const { Wrapper } = createWrapper();
+      const { result } = renderHook(() => useClients(), { wrapper: Wrapper });
+
+      act(() => {
+        result.current.setFilters({ search: 'И' });
+      });
+
+      await waitFor(() => {
+        expect(result.current.isLoading).toBe(false);
+      });
+      const call = mockGetClientsWithStats.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+      expect(call.q).toBeUndefined();
+      // The legacy search key must not reach the wire either (renamed to q).
+      expect(call.search).toBeUndefined();
+    });
+
     it('setSort updates sort fields', async () => {
       const { Wrapper } = createWrapper();
       const { result } = renderHook(() => useClients(), { wrapper: Wrapper });

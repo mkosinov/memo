@@ -8,7 +8,7 @@ export interface SearchableSelectProps {
   value: string | null;
   onChange: (uuid: string | null) => void;
   onSelectItem?: (item: SearchItem) => void;
-  onSearch: (query: string) => Promise<{ id: string; [key: string]: string | number | null | undefined }[]>;
+  onSearch: (query: string) => Promise<SearchItem[]>;
   label: string;
   placeholder?: string;
   required?: boolean;
@@ -18,7 +18,7 @@ export interface SearchableSelectProps {
 
 interface SearchItem {
   id: string;
-  [key: string]: string | number | null | undefined;
+  [key: string]: unknown;
 }
 
 /* ── Static styles (outside component, no re-creation) ──────────── */
@@ -92,7 +92,8 @@ export default function SearchableSelect({
 
   const search = useCallback(
     async (q: string) => {
-      if (q.length < 1) {
+      // GH #212: server-side ?q= is min-2-char; do not fire below the threshold.
+      if (q.length < 2) {
         setResults([]);
         setIsOpen(false);
         return;

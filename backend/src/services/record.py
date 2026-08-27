@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from src.repositories.generic import BaseRepository, get_base_repository
+from src.repositories.search import SearchField, search_predicate
 from src.domain.deletion import (
     BlockingDepsError,
     InvalidResolutionError,
@@ -39,6 +40,19 @@ from src.services.decorators import transactional
 
 class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
     """Record service with nested visit management."""
+
+    # GH #212 search matrix (spec §5.2 records row): substring over the
+    # client's name/phone/email and the service title; exact record.id when
+    # q parses as a full UUID. The search joins (Client / Service, both LEFT
+    # OUTER — client_id is nullable) are added ONLY when q is present, so the
+    # default query plan is unchanged.
+    search_fields = [
+        SearchField(Client.name),
+        SearchField(Client.phone),
+        SearchField(Client.email),
+        SearchField(Service.title),
+        SearchField(Record.id, kind="uuid"),
+    ]
 
     def __init__(
         self, repository: BaseRepository, model: type[Record]
@@ -77,6 +91,15 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
             stmt = stmt.where(Record.client_id == params.client_id)
         if params.activity_id is not None:
             stmt = stmt.where(Record.activity_id == params.activity_id)
+        # --- Search (GH #212) — joins only when q present ---
+        # The stmt already joins Activity (inner, for date/filters/sorts); the
+        # Service outerjoin reuses it — Activity is never double-joined.
+        if params.q:
+            stmt = (
+                stmt.outerjoin(Client, Record.client_id == Client.id)
+                    .outerjoin(Service, Activity.service_id == Service.id)
+                    .where(search_predicate(params.q, self.search_fields))
+            )
         # --- Sort (whitelist map) + Paginate (COUNT before ORDER BY) ---
         items, total = await self._repository.list_custom(
             db_session,

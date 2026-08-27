@@ -55,5 +55,44 @@ def test_list_activities_query_count_is_bounded(
     assert resp.status_code == 200
     assert len(resp.json()["items"]) == 5
     # Before fix: ~1 (list) + 5 (per-activity SUM) = 6+. After: list + ONE batch SUM.
-    # Pagination adds one extra count query. Final settled value: 3. < 5 leaves buffer.
-    assert counter["n"] <= 4, f"N+1 regression: {counter['n']} SELECTs for 5 activities"
+    # Pagination adds one extra count query. GH #212 adds ONE bounded bulk
+    # service_title query (populated on every list item, spec §5.3 point 7):
+    # settled value 4. < 5 leaves buffer.
+    assert counter["n"] <= 5, f"N+1 regression: {counter['n']} SELECTs for 5 activities"
+
+
+def test_list_activities_query_count_is_bounded_with_q(
+    api_client, db_engine, create_activity, create_client
+) -> None:
+    """spec §5.3 point 7: the q path (Service join + titles) must stay bounded too."""
+    start = datetime.now(UTC) + timedelta(days=1)
+    date_from = start.date().isoformat()
+    date_to = (start + timedelta(days=1)).date().isoformat()
+
+    # Seed 5 activities (each with its own "Test Service N"), one with a record
+    for i in range(5):
+        activity = create_activity(start=start)
+        if i == 0:
+            client = create_client()
+            resp = api_client.post("/api/v1/records", json={
+                "activity_id": activity["id"],
+                "client_id": client["id"],
+                "comment": "seat",
+                "visits": [{"name": "G", "price": 1000, "status": "waiting"}],
+            })
+            assert resp.status_code == 201
+
+    counter, listener = _count_select_queries(db_engine)
+    try:
+        resp = api_client.get(
+            f"/api/v1/activities",
+            params={"q": "Test Serv", "date_from": date_from, "date_to": date_to},
+        )
+    finally:
+        event.remove(db_engine.sync_engine, "before_cursor_execute", listener)
+
+    assert resp.status_code == 200
+    assert len(resp.json()["items"]) == 5
+    # q path: count + list (Service join) + batch SUM + ONE bulk titles query = 4.
+    # Assert bounded (constant), not scaling with N.
+    assert counter["n"] <= 5, f"N+1 regression on q path: {counter['n']} SELECTs for 5 activities"

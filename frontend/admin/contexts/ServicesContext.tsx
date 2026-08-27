@@ -16,13 +16,14 @@ const { Provider, usePagedList } = createPagedListContext<ServiceResponse>({
       // `age`/`tariffs` keys pass through — the backend whitelist (Task 3)
       // maps them to min_age and the tariffs-count subquery.
       ...(p.sort_by ? { sort_by: p.sort_by, sort_order: p.sort_order } : {}),
+      ...(p.q ? { q: p.q } : {}),
     }),
   withStatus: true,
-  // #139 T5 — dict search is predicate-only (spec §6.7): filters the loaded
-  // page into `visibleItems`; `search` stays out of the query key/fetcher.
-  // Title-only match, per the pre-#139 table filter memo (title lowercase
-  // includes) — verbatim behavior moved from ServicesTable.
-  searchPredicate: (s, q) => s.title.toLowerCase().includes(q.toLowerCase()),
+  // GH #212 T11 — dict search is server-side: the factory clamps q to ≥2
+  // chars, puts it in the query key, and the fetcher sends it on. The #139
+  // predicate mechanism (temporary degradation, §6.7) is retired here; the
+  // title matching now lives in the backend list ?q=.
+  serverSearch: true,
 });
 
 export const ServicesProvider = Provider;

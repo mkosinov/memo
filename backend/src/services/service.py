@@ -12,6 +12,7 @@ from sqlalchemy.orm import selectinload
 from src.domain.errors import BareListLimitExceededError
 from src.models.enums import ArchiveStatus
 from src.repositories.generic import ArchiveRepository, get_archive_repository
+from src.repositories.search import SearchField
 from src.models.service import Service
 from src.models.tag import service_tags
 from src.models.tariff import Tariff
@@ -35,6 +36,15 @@ class ServiceService(ArchiveService[ServiceCreate, ServiceUpdate, ServiceRespons
 
     NOT_NULL_FIELDS = {"title", "description", "image_url", "specialty", "min_age", "duration", "record_info"}
 
+    # GH #212 search matrix (spec §5.2): substring on title/description
+    # (each field ilike'd separately), exact id equality when q parses as
+    # a full UUID (deep-link prerequisite #216).
+    search_fields = [
+        SearchField(Service.title),
+        SearchField(Service.description),
+        SearchField(Service.id, kind="uuid"),
+    ]
+
     def __init__(
         self, repository: ArchiveRepository, model: type[Service]
     ) -> None:
@@ -47,6 +57,7 @@ class ServiceService(ArchiveService[ServiceCreate, ServiceUpdate, ServiceRespons
         per_page: int = 20,
         status: ArchiveStatus = ArchiveStatus.ACTIVE,
         order_by=None,
+        q: str | None = None,
         **filters,
     ) -> PaginatedResponse[ServiceResponse]:
         """Return services filtered by archive status, with tariffs and tags.
@@ -54,6 +65,8 @@ class ServiceService(ArchiveService[ServiceCreate, ServiceUpdate, ServiceRespons
         Delegates to ``ArchiveRepository.list`` passing ``selectinload``
         options for ``tariffs``/``tags`` so ``ServiceResponse`` validation
         doesn't hit ``MissingGreenlet`` under async SQLAlchemy (spec §4.1).
+        ``q`` (GH #212) narrows rows via the repo's ``search_predicate`` over
+        ``self.search_fields`` before the COUNT (honest ``total``).
         ``self._repository`` is typed ``BaseRepository`` (inherited from
         ``GenericService.__init__``), but ``get_service_service()`` injects
         ``get_archive_repository()`` — an ``ArchiveRepository`` whose
@@ -65,6 +78,8 @@ class ServiceService(ArchiveService[ServiceCreate, ServiceUpdate, ServiceRespons
             Service,
             status=status,
             filters=filters,
+            q=q,
+            search_fields=self.search_fields,
             order_by=order_by,
             limit=per_page,
             offset=(page - 1) * per_page,

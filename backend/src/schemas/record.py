@@ -3,7 +3,7 @@
 from datetime import date
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.models.enums import VisitStatus
 from src.schemas.pagination import PaginationParams
@@ -136,6 +136,7 @@ class RecordListParams(PaginationParams):
     status: RecordStatusFilter | None = None
     sort_by: RecordSortBy = "date"
     sort_order: RecordSortOrder = "asc"
+    q: str | None = Field(default=None, min_length=2, max_length=100)
 
     @model_validator(mode="after")
     def _check_date_range(self) -> "RecordListParams":

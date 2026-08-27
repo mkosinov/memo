@@ -46,15 +46,35 @@ describe('SearchableSelect', () => {
     expect(screen.getByText('*')).toBeInTheDocument();
   });
 
+  it('does not call onSearch for queries shorter than 2 characters', async () => {
+    mockSearch.mockResolvedValue([]);
+
+    renderSearchableSelect();
+    const input = screen.getByRole('textbox');
+
+    // Type a single character
+    act(() => {
+      fireEvent.change(input, { target: { value: 'А' } });
+    });
+
+    // Advance past debounce (300ms)
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+
+    // 1 char — below the ≥2 threshold: no search call
+    expect(mockSearch).not.toHaveBeenCalled();
+  });
+
   it('calls onSearch on input change (debounced)', async () => {
     mockSearch.mockResolvedValue([]);
 
     renderSearchableSelect();
     const input = screen.getByRole('textbox');
 
-    // Type a character
+    // Type two characters (≥2 threshold)
     act(() => {
-      fireEvent.change(input, { target: { value: 'А' } });
+      fireEvent.change(input, { target: { value: 'Ан' } });
     });
 
     // Before debounce fires — no search yet
@@ -66,7 +86,7 @@ describe('SearchableSelect', () => {
     });
 
     await waitFor(() => {
-      expect(mockSearch).toHaveBeenCalledWith('А');
+      expect(mockSearch).toHaveBeenCalledWith('Ан');
     });
   });
 
@@ -80,7 +100,7 @@ describe('SearchableSelect', () => {
     const input = screen.getByRole('textbox');
 
     act(() => {
-      fireEvent.change(input, { target: { value: 'А' } });
+      fireEvent.change(input, { target: { value: 'Ан' } });
     });
 
     act(() => {
@@ -104,7 +124,7 @@ describe('SearchableSelect', () => {
     const input = screen.getByRole('textbox');
 
     act(() => {
-      fireEvent.change(input, { target: { value: 'А' } });
+      fireEvent.change(input, { target: { value: 'Ан' } });
     });
 
     act(() => {
@@ -131,7 +151,7 @@ describe('SearchableSelect', () => {
     const input = screen.getByRole('textbox');
 
     act(() => {
-      fireEvent.change(input, { target: { value: 'А' } });
+      fireEvent.change(input, { target: { value: 'Ан' } });
     });
 
     act(() => {
@@ -162,7 +182,7 @@ describe('SearchableSelect', () => {
 
     // Select an item
     act(() => {
-      fireEvent.change(input, { target: { value: 'А' } });
+      fireEvent.change(input, { target: { value: 'Ан' } });
     });
 
     act(() => {
@@ -215,7 +235,7 @@ describe('SearchableSelect', () => {
     const input = screen.getByRole('textbox');
 
     act(() => {
-      fireEvent.change(input, { target: { value: 'К' } });
+      fireEvent.change(input, { target: { value: 'Ка' } });
     });
 
     act(() => {
@@ -240,7 +260,7 @@ describe('SearchableSelect', () => {
     const input = screen.getByRole('textbox');
 
     act(() => {
-      fireEvent.change(input, { target: { value: 'А' } });
+      fireEvent.change(input, { target: { value: 'Ан' } });
     });
 
     act(() => {

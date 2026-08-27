@@ -29,6 +29,8 @@ export interface RecordFilters {
   serviceId: string;
   masterId: string;
   status: string;
+  /** Server-side search (GH #212 Task 12) — sent to getRecords as `q`. */
+  search: string;
 }
 
 export type RecordSortField =
@@ -36,7 +38,7 @@ export type RecordSortField =
   | 'guests' | 'status' | 'total' | 'payment';
 export type RecordSortOrder = 'asc' | 'desc';
 
-const DEFAULT_FILTERS: RecordFilters = { locationId: '', serviceId: '', masterId: '', status: '' };
+const DEFAULT_FILTERS: RecordFilters = { locationId: '', serviceId: '', masterId: '', status: '', search: '' };
 
 export interface RecordsContextType {
   /** Server-page items — PagedListState.items contract (spec §6.4, #139 T8). */
@@ -105,6 +107,9 @@ export function RecordsProvider({ children }: { children: React.ReactNode }) {
       service_id: filters.serviceId || undefined,
       master_id: filters.masterId || undefined,
       status: filters.status || undefined,
+      // GH #212 Task 12 — server-side search. The ≥2-char clamp mirrors the
+      // server min_length=2 (shorter values are treated as unset — no 422s).
+      q: filters.search.length >= 2 ? filters.search : undefined,
       sort_by: sortBy,
       sort_order: sortOrder,
     }),

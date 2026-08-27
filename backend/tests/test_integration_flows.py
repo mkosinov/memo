@@ -21,8 +21,8 @@ class TestBookingFlow:
         """Complete booking: phone not found → create record with phone → client auto-created → visits attached."""
         phone = "+79991234567"
 
-        # Step 1: Search for phone (should return 404 — no client yet)
-        resp = api_client.get("/api/v1/clients/search", params={"phone": phone})
+        # Step 1: Lookup phone (should return 404 — no client yet)
+        resp = api_client.get("/api/v1/clients/get", params={"phone": phone})
         assert resp.status_code == 404, f"Expected 404, got {resp.status_code}"
 
         # Step 2: Create prerequisites + record with phone (client auto-created)
@@ -340,40 +340,40 @@ class TestCapacityFlow:
 
 
 class TestClientSearchFlow:
-    """Search client by phone → find exact match → verify details."""
+    """Look up client by phone → find exact match → verify details."""
 
     def test_client_search_by_phone(self, api_client, create_client) -> None:
-        """Search client by phone → find exact match."""
+        """Look up client by phone → find exact match."""
         client = create_client(phone="+79991112233")
 
-        # Search — should find the client
-        resp = api_client.get("/api/v1/clients/search", params={"phone": "+79991112233"})
+        # Lookup — should find the client
+        resp = api_client.get("/api/v1/clients/get", params={"phone": "+79991112233"})
         assert resp.status_code == 200
         assert resp.json()["id"] == client["id"]
         assert resp.json()["phone"] == "+79991112233"
 
     def test_client_search_wrong_phone(self, api_client, create_client) -> None:
-        """Search with wrong phone → 404."""
+        """Lookup with wrong phone → 404."""
         create_client(phone="+79991112233")  # create someone
 
-        resp = api_client.get("/api/v1/clients/search", params={"phone": "+00000000000"})
+        resp = api_client.get("/api/v1/clients/get", params={"phone": "+00000000000"})
         assert resp.status_code == 404
 
     def test_client_search_excludes_inactive(self, api_client, create_client) -> None:
-        """Soft-deleted client is not returned by search."""
+        """Soft-deleted client is not returned by phone lookup."""
         client = create_client(phone="+79995554433")
         api_client.delete(f"/api/v1/clients/{client['id']}")
 
-        resp = api_client.get("/api/v1/clients/search", params={"phone": "+79995554433"})
+        resp = api_client.get("/api/v1/clients/get", params={"phone": "+79995554433"})
         assert resp.status_code == 404
 
     def test_client_search_then_book(self, api_client, create_client, create_activity) -> None:
-        """Search for client → use found client_id to create a record."""
+        """Look up client → use found client_id to create a record."""
         client = create_client(phone="+79993332211")
         activity = create_activity()
 
-        # Search
-        search_resp = api_client.get("/api/v1/clients/search", params={"phone": "+79993332211"})
+        # Lookup
+        search_resp = api_client.get("/api/v1/clients/get", params={"phone": "+79993332211"})
         assert search_resp.status_code == 200
         found_id = search_resp.json()["id"]
 

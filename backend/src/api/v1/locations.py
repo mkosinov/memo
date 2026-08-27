@@ -76,6 +76,7 @@ async def list_locations(
     status: ArchiveStatus = Query(ArchiveStatus.ACTIVE),
     sort_by: LocationSortBy | None = Query(None),
     sort_order: SortOrder = Query("asc"),
+    q: str | None = Query(None, min_length=2, max_length=100),
 ) -> PaginatedResponse[LocationResponse]:
     """Return locations filtered by archive status (default: active),
     sorted by sort_order, then name.
@@ -88,6 +89,12 @@ async def list_locations(
     is ``asc`` (default) or ``desc``. Unknown ``sort_by`` → 422 via Literal
     validation. ``sort_by=None`` → spec §4.4 default order with ``id ASC``
     tiebreak.
+
+    ``q`` (GH #212): case-insensitive substring on ``name``/``short_title``/
+    ``address``/``description`` OR exact equality on ``id`` (full UUID) or
+    the URL fields (``yandex_map_url``/``review_url``/``image_url`` — full
+    string only, partial URLs never match); ``total`` reflects the filtered
+    count. len<2 / len>100 → 422 VALIDATION_ERROR.
     """
     return await service.list(
         db_session=session,
@@ -95,6 +102,7 @@ async def list_locations(
         per_page=pagination.per_page,
         status=status,
         order_by=_location_order_by(sort_by, sort_order),
+        q=q,
     )
 
 

@@ -311,35 +311,59 @@ describe('MastersTable', () => {
     expect(screen.getByLabelText('Фильтр по статусу')).toHaveValue('active');
   });
 
-  // ─── Search (G1b Q1 — KEPT: client-side filter over the loaded page) ───
+  // ─── Search (GH #212 T11 — server-side via ?q=; #205 degradation ends) ──
+  // The *Filters bar calls setSearch directly (no debounce); the factory
+  // clamps q to ≥2 chars and sends it to getMasters. Rows render exactly
+  // what the server returned — no client filtering (#139 predicate removed).
 
-  it('filters the loaded page by search text in name (client-side)', async () => {
+  it('searches server-side via ?q= (fetch carries q, rows stay server-returned)', async () => {
     setupEnvelope();
     await renderLoaded();
 
     const searchInput = screen.getByLabelText('Поиск по имени или фамилии');
     fireEvent.change(searchInput, { target: { value: 'Ольга' } });
 
-    expect(screen.getByText('Середа Ольга')).toBeInTheDocument();
-    expect(screen.queryByText('Большакова Юлия')).not.toBeInTheDocument();
-    expect(screen.queryByText('Петрова Анна')).not.toBeInTheDocument();
-  });
-
-  it('resets search filter when reset button clicked', async () => {
-    setupEnvelope();
-    await renderLoaded();
-
-    const searchInput = screen.getByLabelText('Поиск по имени или фамилии');
-    fireEvent.change(searchInput, { target: { value: 'Ольга' } });
-
-    expect(screen.queryByText('Большакова Юлия')).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByText('Сбросить'));
-
+    await waitFor(() => {
+      expect(mockGetMasters).toHaveBeenCalledWith(expect.objectContaining({ q: 'Ольга' }));
+    });
+    // No client filtering — setupEnvelope's items stay visible regardless of match
     expect(screen.getByText('Середа Ольга')).toBeInTheDocument();
     expect(screen.getByText('Большакова Юлия')).toBeInTheDocument();
     expect(screen.getByText('Петрова Анна')).toBeInTheDocument();
+  });
+
+  it('resets search and refetches without q', async () => {
+    setupEnvelope();
+    await renderLoaded();
+
+    const searchInput = screen.getByLabelText('Поиск по имени или фамилии');
+    fireEvent.change(searchInput, { target: { value: 'Ольга' } });
+    await waitFor(() => {
+      expect(mockGetMasters).toHaveBeenCalledWith(expect.objectContaining({ q: 'Ольга' }));
+    });
+
+    fireEvent.click(screen.getByText('Сбросить'));
+
+    await waitFor(() => {
+      // Deep equality — no q key on the post-reset fetch
+      expect(mockGetMasters).toHaveBeenLastCalledWith({ page: 1, per_page: 10, status: 'active' });
+    });
     expect(searchInput).toHaveValue('');
+  });
+
+  it('does not fire q on 1 char (≥2 clamp — treated as unset)', async () => {
+    setupEnvelope();
+    await renderLoaded();
+
+    const searchInput = screen.getByLabelText('Поиск по имени или фамилии');
+    fireEvent.change(searchInput, { target: { value: 'О' } });
+
+    // Raw input state reflects the char, but no q fetch fires
+    await waitFor(() => {
+      expect(searchInput).toHaveValue('О');
+    });
+    expect(mockGetMasters).toHaveBeenCalledTimes(1);
+    expect(mockGetMasters.mock.calls[0][0]).not.toHaveProperty('q');
   });
 
   // ─── Server-driven pagination wiring ───────────────────────────────────

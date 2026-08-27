@@ -162,6 +162,10 @@ class EntityConfig(NamedTuple):
     # ``create_data`` row regardless of insertion order. Only set on the 5
     # dictionary configs (masters/locations/services/tags/materials).
     earlier_create_data: dict | None = None
+    # GH #212 search matrix (spec §7). None → entity excluded from
+    # TestGenericApiSearchContract until Tasks 5-8 wire its config.
+    search_override: dict | None = None  # create_data overrides carrying the Cyrillic probe value (stored UPPERCASE)
+    search_query: str | None = None  # lowercase Cyrillic substring matching search_override (M5 pin)
 
 
 # ─── Per-service config ──────────────────────────────────────────────────────────
@@ -236,6 +240,17 @@ CONTRACT_CONFIG: dict[type, EntityConfig] = {
         # sort_order=0 (column default), so ``name`` decides. "!" (0x21) < "L"
         # (0x4C) → sentinel sorts BEFORE the default ``name="Loc"``.
         earlier_create_data={"name": "!AAA-contract"},
+        # GH #212 search matrix probe (spec §5.2/§5.4 M5): uppercase Cyrillic
+        # stored value found by a lowercase substring query. All 4 substring
+        # fields carry the probe; URL fields are exact-kind and covered by a
+        # dedicated full-URL test (partial URLs never match).
+        search_override={
+            "name": "Флигель",
+            "short_title": "Флигель",
+            "address": "Флигель, дом 1",
+            "description": "Флигель с мансардой",
+        },
+        search_query="флиг",
     ),
     MasterService: EntityConfig(
         service_factory=get_master_service,
@@ -270,6 +285,12 @@ CONTRACT_CONFIG: dict[type, EntityConfig] = {
         # "!" (0x21) < "A" (0x41) → sentinel sorts BEFORE the default
         # ``first_name="A"``.
         earlier_create_data={"first_name": "!AAA-contract"},
+        # GH #212 search matrix probe (spec §5.2/§5.4 M5): uppercase Cyrillic
+        # stored values found by a lowercase substring query. Both substring
+        # fields (first_name AND last_name) carry the probe; per-field
+        # coverage via the dedicated per-field matrix test.
+        search_override={"first_name": "Живописец", "last_name": "Живописный"},
+        search_query="живопис",
     ),
     MaterialService: EntityConfig(
         service_factory=get_material_service,
@@ -291,6 +312,11 @@ CONTRACT_CONFIG: dict[type, EntityConfig] = {
         # §4.4 default order: title ASC, id ASC. "!" (0x21) < "T" (0x54) →
         # sentinel sorts BEFORE the default ``title="T"``.
         earlier_create_data={"title": "!AAA-contract"},
+        # GH #212 search matrix probe (spec §5.2/§5.4 M5): uppercase Cyrillic
+        # stored values found by a lowercase substring query. Both substring
+        # fields (title AND description) carry the probe.
+        search_override={"title": "Гуашевый", "description": "Гуашевые краски"},
+        search_query="гуашев",
     ),
     PaymentService: EntityConfig(
         service_factory=get_payment_service,
@@ -352,6 +378,13 @@ CONTRACT_CONFIG: dict[type, EntityConfig] = {
         # §4.4 default order: title ASC, id ASC. "!" (0x21) < "T" (0x54) →
         # sentinel sorts BEFORE the default ``title="T"``.
         earlier_create_data={"title": "!AAA-contract"},
+        # GH #212 search matrix probe (spec §5.2/§5.4 M5): uppercase Cyrillic
+        # stored values found by a lowercase substring query. Both substring
+        # fields (title AND description) carry the probe; ServiceService.list
+        # is a custom override delegating to ArchiveRepository.list — its q
+        # forwarding is exactly what this matrix pins.
+        search_override={"title": "Батиковый", "description": "Батиковые изделия"},
+        search_query="батиков",
     ),
     TagService: EntityConfig(
         service_factory=get_tag_service,
@@ -374,6 +407,12 @@ CONTRACT_CONFIG: dict[type, EntityConfig] = {
         # §4.4 default order: tag ASC, id ASC. "!" (0x21) < "t" (0x74) →
         # sentinel sorts BEFORE the default ``tag="t1"``.
         earlier_create_data={"tag": "!aaa-contract"},
+        # GH #212 search matrix probe (spec §5.2/§5.4 M5): uppercase Cyrillic
+        # stored value found by a lowercase substring query. Differs from
+        # create_data ("t1") so multi-row tests never hit the tag UNIQUE
+        # constraint.
+        search_override={"tag": "Живопись"},
+        search_query="жив",
     ),
     VisitorService: EntityConfig(
         service_factory=get_visitor_service,
@@ -392,6 +431,10 @@ CONTRACT_CONFIG: dict[type, EntityConfig] = {
         router_prefix="/api/v1/visitors",
         not_found_code="VISITOR_NOT_FOUND",
         response_schema=VisitorResponse,
+        # GH #212 search matrix probe (spec §5.2/§5.4 M5): uppercase Cyrillic
+        # stored value found by a lowercase substring query (name only).
+        search_override={"name": "Серафима"},
+        search_query="серафим",
     ),
 }
 
@@ -519,7 +562,7 @@ def _all_params() -> list:
 
     Returns one ``pytest.param`` per dictionary service class, carrying its
     ``EntityConfig`` (or ``None`` if missing — the test asserts non-None and
-    fails loudly, mirroring ``_contract_params``'s guard). Entities outside
+    fails loudly, mirroring ``_contract_params``' guard). Entities outside
     this list are never parametrized — the ``/all`` contract stays opt-in.
     """
     params = []
@@ -529,4 +572,42 @@ def _all_params() -> list:
             params.append(pytest.param(cls, None, id=f"{cls.__name__}-all-MISSING-CONFIG"))
             continue
         params.append(pytest.param(cls, cfg, id=f"{cls.__name__}-all"))
+    return params
+
+
+# ─── ?q= search matrix parametrizer (GH #212 Task 4, spec §7) ──────────────
+# Opt-in filter: only entities whose config sets ``search_query`` join the
+# matrix (Task 5 wired the 5 generic dictionaries — masters/materials/
+# locations/visitors/services + tags from Task 4; Tasks 6-8 wire the custom
+# lists: clients/records/activities). Iterates ``CONTRACT_CONFIG``
+# DIRECTLY — like ``_all_params``, NOT like ``_contract_params`` — so the
+# search matrix must NOT skip ``GENERIC_CONTRACT_EXCEPTIONS``:
+# ``ServiceService`` is in that set (it overrides update/patch) yet its
+# custom-list q path needs matrix coverage (wired in Task 5).
+def _search_params() -> list:
+    return [
+        pytest.param(cls, cfg, id=f"{cls.__name__}-search")
+        for cls, cfg in CONTRACT_CONFIG.items()
+        if cfg.search_query is not None
+    ]
+
+
+def _search_field_params() -> list:
+    """Per-field rows for the substring contract (GH #212 Task 5, spec §7
+    case 1): one ``(cfg, field)`` param per ``search_override`` key — i.e.
+    per DECLARED substring field (``search_override`` carries the probe on
+    every substring field; id/URL fields are not probe fields). The matrix's
+    ``test_substring_match_case_insensitive`` seeds ONE row carrying the
+    probe on ALL fields at once (matching via ANY field passes); these rows
+    pin each field SEPARATELY: masters first_name AND last_name, materials/
+    services title AND description, locations name/short_title/address/
+    description, visitors name (single-field — parity row).
+    """
+    params = []
+    for cls, cfg in CONTRACT_CONFIG.items():
+        if cfg.search_query is None:
+            continue
+        assert cfg.search_override is not None
+        for field in cfg.search_override:
+            params.append(pytest.param(cfg, field, id=f"{cls.__name__}-{field}"))
     return params

@@ -152,13 +152,32 @@ Model/DB → is_active: bool column (UNCHANGED — no migration, no rename)
 ## Cross-Entity Invariants
 
 1. **Capacity:** `occupied + seats <= activity.capacity` (on Record create only)
-   - `occupied` is the SUM of `Record.seats` for records matching `active_record_filter()` — i.e. `status IN ('waiting','visited')`. Cancelled and missed records do NOT occupy a seat. See `src/domain/record_visits.py` and `ACTIVE_RECORD_STATUSES` in `src/domain/visit_status.py`.
+    - `occupied` is the SUM of `Record.seats` for records matching `active_record_filter()` — i.e. `status IN ('waiting','visited')`. Cancelled and missed records do NOT occupy a seat. See `src/domain/record_visits.py` and `ACTIVE_RECORD_STATUSES` in `src/domain/visit_status.py`.
 2. **Seats = len(visits):** Always computed, never user-set
 3. **Cascade hard-delete:** Record → Visits + Payments
 4. **Cascade hard-delete:** Activity delete → Records (and transitively their Visits + Payments); photos SET NULL
-5. **Phone search:** Exact match, no format validation
+5. **Phone search:** Exact match, no format validation — `GET /api/v1/clients/get?phone=` (GH #212; was `/clients/search`). Active-only (archived clients excluded from the exact-match lookup). `phone` param `min_length=3`; absent/empty → 422. No-match → 404 `CLIENT_NOT_FOUND`.
 6. **Client phone:** No uniqueness constraint (duplicates possible)
 7. **Visitor (client_id, name):** Uniqueness enforced at service level only
+8. **List `?q=` (GH #212):** All 9 list endpoints accept the same substring+id-exact search contract.
+    - **Param contract:** `q: str | None` declared on each entity's `*ListParams` with `min_length=2` / `max_length=100` (Pydantic `Field` for query models that inherit `PaginationParams`; the same bounds are applied via router `Query(...)` for the activity date-range path which uses a hand-rolled params shape). `len(q) < 2` or `len(q) > 100` → **422 VALIDATION_ERROR** (consistent across all 9 endpoints). `q` is **case-insensitive**; Cyrillic is safe because the column collation is overridden to `lower(...)` at the SQLite connect listener in `src/db/database.py` (M5) — a raw `lower()` call would otherwise crash on Cyrillic strings.
+    - **Predicate kinds:** per-field, declared in `Service.search_fields` (`src/repositories/search.py`).
+      - `kind="substring"` (default) → `column ILIKE '%q%'` with `%`/`_`/`\\` escape (case-insensitive).
+      - `kind="uuid"` → equality only when `q` is a full 36-char UUID (validated + case-normalized to lowercase). A partial id fragment (e.g. first 8 chars) NEVER matches by id. A full UUID `q` matches the row by id AND skips substring matching on other fields (id wins).
+      - `kind="exact"` → `column == q` (no ilike). Used for full URL fields on Location (yandex_map_url, review_url, image_url): a pasted full URL finds the row, partial URLs never match.
+    - **Count consistency:** the `q` predicate is applied BEFORE the COUNT on every list path (either via `BaseRepository.list_custom` or the shared `search_predicate` helper), so `total` always reflects the q-filtered set — never the unfiltered total. If a user searches `q=abc` and only 3 rows match, `items.length === 3` AND `total === 3`. The `count/total` field is the q-filtered cardinality, not a global one.
+    - **Cross-entity list `?q=` summaries** (full per-entity matrix in each entity doc):
+      | Entity | Substring fields | Exact / UUID fields | Notes |
+      |--------|------------------|---------------------|-------|
+      | Clients | `name`, `phone`, `email` | `id` (uuid) | Plus `?q=` was renamed from `?search=`; email added to the searchable fields. |
+      | Records | `client.name`, `client.phone`, `client.email`, `service.title` (LEFT OUTER joins) | `id` (uuid) | Search joins added ONLY when `q` is present (default query plan unchanged). |
+      | Masters | `first_name`, `last_name` | `id` (uuid) | Each field ilike'd separately — no cross-field concat. |
+      | Materials | `title`, `description` | `id` (uuid) | Each field ilike'd separately. |
+      | Services | `title`, `description` | `id` (uuid) | Each field ilike'd separately. |
+      | Tags | `tag` | `id` (uuid) | Single substring field. |
+      | Locations | `name`, `short_title`, `address`, `description` | `id` (uuid); `yandex_map_url`, `review_url`, `image_url` (exact) | URL fields exact-only (no ilike). |
+      | Visitors | `name` | `id` (uuid) | Single substring field. |
+      | Activities | `service.title` (INNER join, added only when q present) | `id` (uuid) | Service join is INNER only when `q` is present; without `q` the default query plan is unchanged. `?service_id=` filter param intersects with `q`. |
 
 ## PATCH Contract
 

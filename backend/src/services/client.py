@@ -14,6 +14,7 @@ from src.models.enums import ArchiveStatus
 from src.models.payment import Payment
 from src.models.record import Record
 from src.repositories.generic import ArchiveRepository, get_archive_repository
+from src.repositories.search import SearchField, search_predicate
 from src.schemas.client import (
     ClientCreate,
     ClientListParams,
@@ -55,6 +56,15 @@ class ClientService(ArchiveService[ClientCreate, ClientUpdate, ClientResponse]):
     ) -> None:
         super().__init__(repository, model, response_schema)
         self._visitor_service = visitor_service
+
+    # GH #212 search matrix (spec §5.2): substring over name/phone/email,
+    # exact id equality when q parses as a full UUID (deep-link #216).
+    search_fields = [
+        SearchField(Client.name),
+        SearchField(Client.phone),
+        SearchField(Client.email),
+        SearchField(Client.id, kind="uuid"),
+    ]
 
 
 @lru_cache
@@ -154,14 +164,12 @@ async def list_clients_with_stats(
         count_query = count_query.where(not_(Client.is_active))
 
     # 6. Apply other filters
-    if params.search:
-        search_pattern = f"%{params.search}%"
-        query = query.where(
-            (Client.name.ilike(search_pattern)) | (Client.phone.ilike(search_pattern))
-        )
-        count_query = count_query.where(
-            (Client.name.ilike(search_pattern)) | (Client.phone.ilike(search_pattern))
-        )
+    # GH #212: shared search predicate (was hand-rolled search ilike) — must
+    # hit BOTH queries so `total` stays honest (spec §7 case 8).
+    if params.q:
+        pred = search_predicate(params.q, ClientService.search_fields)
+        query = query.where(pred)
+        count_query = count_query.where(pred)
 
     if params.created_from:
         cond = Client.created_at >= datetime.combine(params.created_from, datetime.min.time())

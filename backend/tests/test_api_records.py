@@ -693,6 +693,163 @@ class TestRecordsListFilters:
         assert body["total"] == 2 and len(body["items"]) == 1
 
 
+class TestRecordsListSearch:
+    """Server-side `?q=` search on GET /api/v1/records (GH #212, spec §5.2 records row).
+
+    Substring over client.name / client.phone / client.email / service.title
+    (Client LEFT OUTER — client_id nullable; Service LEFT OUTER through the
+    already-joined Activity). Exact record.id equality when q is a full UUID.
+    """
+
+    @staticmethod
+    def _ids(resp) -> list[str]:
+        assert resp.status_code == 200, f"{resp.status_code}: {resp.text}"
+        return [r["id"] for r in resp.json()["items"]]
+
+    @staticmethod
+    def _activity_on(api_client, *, master_id, service_id, location_id, start):
+        resp = api_client.post("/api/v1/activities", json={
+            "master_id": master_id, "service_id": service_id, "location_id": location_id,
+            "start": start.isoformat(), "duration": 90, "capacity": 10, "is_private": False,
+        })
+        assert resp.status_code == 201, f"{resp.status_code}: {resp.text}"
+        return resp.json()
+
+    def test_search_by_client_name(self, api_client, create_client, create_record):
+        target = create_record(client_id=create_client(name="Аполлинария")["id"])
+        other = create_record()
+        ids = self._ids(api_client.get("/api/v1/records", params={"q": "поллина"}))
+        assert target["id"] in ids and other["id"] not in ids
+
+    def test_search_by_client_phone(self, api_client, create_client, create_record):
+        cl = create_client(phone="+79990001122")
+        target = create_record(client_id=cl["id"])
+        other = create_record()
+        ids = self._ids(api_client.get("/api/v1/records", params={"q": "000112"}))
+        assert target["id"] in ids and other["id"] not in ids
+
+    def test_search_by_client_email(self, api_client, create_client, create_record):
+        cl = create_client(email="apollinaria@example.com")
+        target = create_record(client_id=cl["id"])
+        other = create_record()  # default client email is None
+        ids = self._ids(api_client.get("/api/v1/records", params={"q": "apollinaria"}))
+        assert target["id"] in ids and other["id"] not in ids
+
+    def test_search_by_service_title(
+        self, api_client, create_master, create_service, create_location, create_record
+    ):
+        svc = create_service(title="Гончарная мастерская")
+        master, location = create_master(), create_location()
+        a = self._activity_on(
+            api_client, master_id=master["id"], service_id=svc["id"],
+            location_id=location["id"], start=datetime(2026, 8, 5, 10, 0),
+        )
+        target = create_record(activity_id=a["id"])
+        other = create_record()  # default "Test Service N" title
+        ids = self._ids(api_client.get("/api/v1/records", params={"q": "ончарная"}))
+        assert target["id"] in ids and other["id"] not in ids
+
+    def test_search_full_uuid_returns_exact_record(self, api_client, create_record):
+        rec = create_record()
+        create_record()  # decoy: uuid clause must match exactly one row
+        body = api_client.get("/api/v1/records", params={"q": rec["id"]}).json()
+        assert [r["id"] for r in body["items"]] == [rec["id"]] and body["total"] == 1
+
+    def test_search_partial_id_no_match(self, api_client, create_record):
+        rec = create_record()
+        body = api_client.get("/api/v1/records", params={"q": rec["id"][:8]}).json()
+        assert rec["id"] not in [r["id"] for r in body["items"]]
+        assert body["total"] == 0
+
+    @pytest.mark.parametrize("q", ["a", ""])
+    def test_search_q_length_validation_422(self, api_client, q):
+        resp = api_client.get("/api/v1/records", params={"q": q})
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["code"] == "VALIDATION_ERROR"
+
+    def test_search_combined_with_location_and_status(
+        self, api_client, create_activity, create_client, create_record
+    ):
+        cl = create_client(name="Клавдия")
+        a, b = create_activity(), create_activity()
+        visited = [{"name": "Гость", "price": 3500, "status": "visited"}]
+        target = create_record(activity_id=a["id"], client_id=cl["id"], visits=visited)
+        create_record(activity_id=a["id"], visits=visited)  # q-match location, wrong client
+        create_record(activity_id=b["id"], client_id=cl["id"], visits=visited)  # q-match, wrong location
+        create_record(activity_id=a["id"], client_id=cl["id"])  # q+loc match, wrong status (waiting)
+        body = api_client.get("/api/v1/records", params={
+            "q": "лавди", "location_id": a["location_id"], "status": "visited",
+        }).json()
+        assert [r["id"] for r in body["items"]] == [target["id"]] and body["total"] == 1
+
+    def test_search_combined_with_service_master_date(
+        self, api_client, create_master, create_service, create_location,
+        create_activity, create_record,
+    ):
+        svc = create_service(title="Мозаика панно")
+        master, location = create_master(), create_location()
+        a = self._activity_on(
+            api_client, master_id=master["id"], service_id=svc["id"],
+            location_id=location["id"], start=datetime(2026, 8, 5, 10, 0),
+        )
+        b_other_service = create_activity(start=datetime(2026, 8, 5, 12, 0))  # right master/date, wrong service
+        c_other_master_date = self._activity_on(
+            api_client, master_id=create_master()["id"], service_id=svc["id"],
+            location_id=location["id"], start=datetime(2026, 9, 5, 10, 0),
+        )
+        target = create_record(activity_id=a["id"])
+        create_record(activity_id=b_other_service["id"])
+        create_record(activity_id=c_other_master_date["id"])
+        body = api_client.get("/api/v1/records", params={
+            "q": "озаик", "service_id": svc["id"], "master_id": master["id"],
+            "date_from": "2026-08-01", "date_to": "2026-08-31",
+        }).json()
+        assert [r["id"] for r in body["items"]] == [target["id"]] and body["total"] == 1
+
+    def test_search_total_after_q_with_pagination(self, api_client, create_client, create_record):
+        cl = create_client(name="Многодетный")
+        for _ in range(3):
+            create_record(client_id=cl["id"])
+        other = create_record()
+        p1 = api_client.get("/api/v1/records", params={"q": "ногодет", "per_page": 2, "page": 1}).json()
+        p2 = api_client.get("/api/v1/records", params={"q": "ногодет", "per_page": 2, "page": 2}).json()
+        assert p1["total"] == 3 and len(p1["items"]) == 2
+        assert p2["total"] == 3 and len(p2["items"]) == 1
+        got = [r["id"] for r in p1["items"] + p2["items"]]
+        assert other["id"] not in got and len(set(got)) == 3
+
+    def test_search_null_client_found_by_service_title(
+        self, api_client, create_master, create_service, create_location, create_record
+    ):
+        svc = create_service(title="Плетение макраме")
+        master, location = create_master(), create_location()
+        a = self._activity_on(
+            api_client, master_id=master["id"], service_id=svc["id"],
+            location_id=location["id"], start=datetime(2026, 8, 5, 10, 0),
+        )
+        anon = create_record(activity_id=a["id"], client_id=None, visits=[], anonym_visits=2)
+        other = create_record()  # decoy: default service title must NOT match
+        ids = self._ids(api_client.get("/api/v1/records", params={"q": "летени"}))
+        assert anon["id"] in ids and other["id"] not in ids  # LEFT OUTER join keeps NULL-client rows findable
+
+    def test_search_null_client_absent_on_client_name_query(
+        self, api_client, create_client, create_record
+    ):
+        cl = create_client(name="Серафима")
+        named = create_record(client_id=cl["id"])
+        anon = create_record(client_id=None, visits=[], anonym_visits=1)
+        resp = api_client.get("/api/v1/records", params={"q": "ерафим"})  # no error either way
+        ids = self._ids(resp)
+        assert named["id"] in ids and anon["id"] not in ids
+
+    def test_search_cyrillic_case_insensitive(self, api_client, create_client, create_record):
+        cl = create_client(name="ИВАНОВ")  # stored uppercase
+        target = create_record(client_id=cl["id"])
+        other = create_record()
+        ids = self._ids(api_client.get("/api/v1/records", params={"q": "иванов"}))
+        assert target["id"] in ids and other["id"] not in ids
+
+
 class TestRecordsListSorting:
     """Server-side sorting on GET /api/v1/records (#191)."""
 

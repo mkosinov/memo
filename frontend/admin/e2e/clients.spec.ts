@@ -634,3 +634,55 @@ test.describe('Record tab', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// Tests — UUID search (#216 pre-flight)
+// ---------------------------------------------------------------------------
+
+test.describe('UUID search — #216 pre-flight', () => {
+  // ── 18. Full UUID q → exactly one row; 10-char fragment → zero ─────────
+
+  test('18. Full UUID pasted into search narrows to exactly that client; a 10-char fragment matches no id', async ({
+    page,
+    request,
+  }) => {
+    // GH #212 T15 (spec §6 S3 / §5.6 — #216 deep-link pre-flight): the
+    // server-side q treats a FULL UUID as an exact id equality (normalized
+    // to lowercase); a partial id fragment never matches by id and only hits
+    // the text fields (name/phone/email). Fixture data avoids hex-ish
+    // substrings so the fragment query matches nothing: name = "UUID Поиск
+    // <uid()>" (uid = e2e_<ts>_<rand>), phone = "+7999<digits>", no email.
+    // Seed client ids are c1-c5 (3 chars) — a 36-char UUID can never
+    // collide with them.
+    const client = await createTestClient(request, {
+      name: `UUID Поиск ${uid()}`,
+    });
+    const clientId = client.id;
+
+    try {
+      await waitForClientsReady(page, { waitForName: client.name });
+
+      const searchInput = page.locator('input[placeholder*="Поиск"]');
+      await expect(searchInput).toBeVisible();
+
+      // Full UUID → q=<uuid> → exactly one row (that client), pager total 1.
+      await searchInput.fill(clientId);
+      await expect(
+        page.locator('table tbody tr').filter({ hasText: client.name }),
+      ).toBeVisible({ timeout: 10_000 });
+      await expect(page.locator('table tbody tr')).toHaveCount(1);
+      await expect(page.getByText('1 всего')).toBeVisible();
+
+      // 10-char fragment → not a full UUID → no id equality clause; nothing
+      // matches the text fields either → "Нет записей", pager total 0.
+      await searchInput.fill(clientId.slice(0, 10));
+      await expect(page.getByText('Нет записей')).toBeVisible({ timeout: 10_000 });
+      await expect(
+        page.locator('table tbody tr').filter({ hasText: client.name }),
+      ).toHaveCount(0);
+      await expect(page.getByText('0 всего')).toBeVisible();
+    } finally {
+      await cleanup(request, `/api/v1/clients/${clientId}`);
+    }
+  });
+});

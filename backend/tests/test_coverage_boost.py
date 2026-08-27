@@ -526,19 +526,19 @@ class TestClientSearchFlow:
     """Test client phone search endpoint."""
 
     def test_search_client_by_phone_found(self, api_client, create_client):
-        """GET /api/v1/clients/search?phone=... returns matching client."""
+        """GET /api/v1/clients/get?phone=... returns matching client."""
         create_client(phone="+79991234567")
         resp = api_client.get(
-            "/api/v1/clients/search",
+            "/api/v1/clients/get",
             params={"phone": "+79991234567"},
         )
         assert resp.status_code == 200
         assert resp.json()["phone"] == "+79991234567"
 
     def test_search_client_by_phone_not_found(self, api_client):
-        """GET /api/v1/clients/search?phone=... → 404 if not found."""
+        """GET /api/v1/clients/get?phone=... → 404 if not found."""
         resp = api_client.get(
-            "/api/v1/clients/search",
+            "/api/v1/clients/get",
             params={"phone": "+00000000000"},
         )
         assert resp.status_code == 404

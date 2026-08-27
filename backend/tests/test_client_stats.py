@@ -272,7 +272,7 @@ class TestClientListSearch:
             client={"name": "Борис Петров", "phone": "+79991000002"},
         )
 
-        resp = api_client.get("/api/v1/clients", params={"search": "Анна"})
+        resp = api_client.get("/api/v1/clients", params={"q": "Анна"})
         body = resp.json()
         names = [c["name"] for c in body["items"]]
         assert "Анна Иванова" in names
@@ -287,7 +287,7 @@ class TestClientListSearch:
             client={"name": "Phone Client", "phone": "+79993001122"},
         )
 
-        resp = api_client.get("/api/v1/clients", params={"search": "+79993001122"})
+        resp = api_client.get("/api/v1/clients", params={"q": "+79993001122"})
         body = resp.json()
         assert body["total"] >= 1
         assert body["items"][0]["phone"] == "+79993001122"
@@ -296,7 +296,7 @@ class TestClientListSearch:
         self, api_client
     ) -> None:
         """search with no matches returns empty items."""
-        resp = api_client.get("/api/v1/clients", params={"search": "ZZZZNOTEXIST"})
+        resp = api_client.get("/api/v1/clients", params={"q": "ZZZZNOTEXIST"})
         body = resp.json()
         assert body["items"] == []
         assert body["total"] == 0
@@ -311,7 +311,7 @@ class TestClientListSearch:
         )
 
         # Search with different case
-        resp = api_client.get("/api/v1/clients", params={"search": "john"})
+        resp = api_client.get("/api/v1/clients", params={"q": "john"})
         body = resp.json()
         names = [c["name"] for c in body["items"]]
         assert "John Smith" in names
@@ -326,10 +326,191 @@ class TestClientListSearch:
         )
 
         # Search for partial name
-        resp = api_client.get("/api/v1/clients", params={"search": "alex"})
+        resp = api_client.get("/api/v1/clients", params={"q": "alex"})
         body = resp.json()
         names = [c["name"] for c in body["items"]]
         assert "Alexandra Petrova" in names
+
+
+# ─── ?q= contract (GH #212 Task 6, spec §5.2/§7 — clients-specific cases) ────
+
+
+class TestClientListQContract:
+    """Clients-specific ``?q=`` contract beyond the generic matrix.
+
+    The clients list is a CUSTOM query path (``list_clients_with_stats``),
+    not the generic repository: the search predicate must hit BOTH the rows
+    query and the count query (honest ``total``). Validation lives on the
+    ``ClientListParams.q`` FIELD (min 2 / max 100), not a router Query param
+    — clients list uses a params model.
+    """
+
+    def test_q_matches_email(self, api_client, create_client) -> None:
+        """Spec §5.2 matrix: q matches client email (field NEW to search)."""
+        create_client(name="EmailProbe", phone="+79992100001", email="probe.zz@example.com")
+        create_client(name="EmailDecoy", phone="+79992100002", email="other@example.com")
+
+        resp = api_client.get("/api/v1/clients", params={"q": "probe.zz"})
+        body = resp.json()
+        assert [c["name"] for c in body["items"]] == ["EmailProbe"]
+        assert body["total"] == 1
+
+    @pytest.mark.parametrize("q", ["x", "", "а" * 101])
+    def test_q_length_bounds_return_422(self, api_client, q) -> None:
+        """Spec §7 case 5: len<2 (incl. empty) and len>100 → 422
+        VALIDATION_ERROR — from the ClientListParams FIELD constraint."""
+        resp = api_client.get("/api/v1/clients", params={"q": q})
+        assert resp.status_code == 422, (
+            f"q={q[:20]!r} must 422, got {resp.status_code}: {resp.text}"
+        )
+        assert resp.json()["detail"]["code"] == "VALIDATION_ERROR"
+
+    def test_full_uuid_q_returns_exact_client(self, api_client, create_client) -> None:
+        """Spec §7 case 3: full 36-char UUID q → exact id equality."""
+        probe = create_client(name="UuidProbe", phone="+79992100003")
+        create_client(name="UuidDecoy", phone="+79992100004")
+
+        resp = api_client.get("/api/v1/clients", params={"q": probe["id"]})
+        body = resp.json()
+        assert [c["id"] for c in body["items"]] == [probe["id"]]
+        assert body["total"] == 1
+
+    def test_partial_id_fragment_no_match(self, api_client, create_client) -> None:
+        """Spec §7 case 4: partial id fragment never matches (id kind=uuid)."""
+        probe = create_client(name="PartIdProbe", phone="+79992100005")
+
+        resp = api_client.get("/api/v1/clients", params={"q": probe["id"][:8]})
+        body = resp.json()
+        assert [c["id"] for c in body["items"]] == []
+        assert body["total"] == 0
+
+    def test_total_after_q_reflects_filtered_count(self, api_client, create_client) -> None:
+        """Spec §7 case 8: total is the q-filtered count, not the page length
+        (count query must carry the predicate too)."""
+        for i in range(3):
+            create_client(name=f"TotalQ {i}", phone=f"+7999210001{i}")
+        create_client(name="Unrelated", phone="+79992100099")
+
+        resp = api_client.get("/api/v1/clients", params={"q": "TotalQ", "per_page": 2})
+        body = resp.json()
+        assert len(body["items"]) == 2
+        assert body["total"] == 3
+
+    def test_archived_client_hidden_under_default_status(self, api_client, create_client) -> None:
+        """Spec §7 case 14: archived row matching q stays hidden (status=active
+        default); surfaces with status=archived."""
+        active = create_client(name="QArchProbe Active", phone="+79992100021")
+        archived = create_client(name="QArchProbe Gone", phone="+79992100022")
+        archive_resp = api_client.post(f"/api/v1/clients/{archived['id']}/archive")
+        assert archive_resp.status_code == 200
+
+        resp = api_client.get("/api/v1/clients", params={"q": "QArchProbe"})
+        ids = [c["id"] for c in resp.json()["items"]]
+        assert ids == [active["id"]]
+
+        resp_archived = api_client.get(
+            "/api/v1/clients", params={"q": "QArchProbe", "status": "archived"}
+        )
+        assert [c["id"] for c in resp_archived.json()["items"]] == [archived["id"]]
+
+    def test_q_with_stats_filter_combined(self, api_client, create_activity, create_client) -> None:
+        """Spec §7 case 7: q + stats filter intersect (q alone insufficient)."""
+        c1, c1_record = _create_client_with_record(
+            api_client, create_activity, create_client,
+            client={"name": "QStat One", "phone": "+79992100031"},
+        )
+        _add_payment(api_client, c1_record["id"], amount=1000)
+        _create_client_with_record(
+            api_client, create_activity, create_client,
+            client={"name": "QStat Two", "phone": "+79992100032"},
+        )
+
+        resp = api_client.get("/api/v1/clients", params={"q": "QStat", "min_paid": 1})
+        ids = [c["id"] for c in resp.json()["items"]]
+        assert ids == [c1["id"]]
+
+    def test_old_search_param_is_ignored(self, api_client, create_client) -> None:
+        """GH #212 rename pin: ``search`` is no longer a known param — FastAPI
+        silently ignores unknown query params, so the list returns UNFILTERED
+        (both rows) instead of filtering."""
+        create_client(name="LegacyParam Match", phone="+79992100041")
+        create_client(name="LegacyParam Other", phone="+79992100042")
+
+        resp = api_client.get("/api/v1/clients", params={"search": "Match"})
+        body = resp.json()
+        assert resp.status_code == 200
+        assert body["total"] == 2
+        assert {c["name"] for c in body["items"]} == {
+            "LegacyParam Match", "LegacyParam Other",
+        }
+
+
+# ─── GET /clients/get phone lookup contract (GH #212 Task 6) ─────────────────
+
+
+class TestClientGetByPhoneContract:
+    """``GET /api/v1/clients/get?phone=`` — renamed from ``/clients/search``
+    (spec §5.3 point 5): exact phone equality, 404 on no-match/archived,
+    active-only, ``phone`` min_length=3.
+
+    Route-shadowing: ``/get`` is declared BEFORE ``/{client_id}`` — the bare
+    path must hit the phone route (422 missing param), never fall through to
+    the by-id route (which would 404 on id="get").
+    """
+
+    def test_exact_phone_returns_200(self, api_client, create_client) -> None:
+        """Exact phone match → 200 with the client body."""
+        client = create_client(name="GetExact", phone="+79992200001")
+
+        resp = api_client.get("/api/v1/clients/get", params={"phone": "+79992200001"})
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["id"] == client["id"]
+        assert resp.json()["phone"] == "+79992200001"
+
+    def test_partial_phone_returns_404(self, api_client, create_client) -> None:
+        """Partial phone (no exact equality match) → 404."""
+        create_client(name="GetPartial", phone="+79992200002")
+
+        resp = api_client.get("/api/v1/clients/get", params={"phone": "+7999220000"})
+        assert resp.status_code == 404
+
+    def test_archived_phone_returns_404(self, api_client, create_client) -> None:
+        """Archived client → 404 (active-only)."""
+        client = create_client(name="GetArchived", phone="+79992200003")
+        api_client.post(f"/api/v1/clients/{client['id']}/archive")
+
+        resp = api_client.get("/api/v1/clients/get", params={"phone": "+79992200003"})
+        assert resp.status_code == 404
+
+    @pytest.mark.parametrize("phone", ["", "ab", "+7"])
+    def test_phone_length_bounds_return_422(self, api_client, phone) -> None:
+        """phone shorter than min_length=3 (incl. empty) → 422."""
+        resp = api_client.get("/api/v1/clients/get", params={"phone": phone})
+        assert resp.status_code == 422, f"phone={phone!r} must 422, got {resp.status_code}"
+
+    def test_get_route_not_shadowed_by_id_route(
+        self, api_client, create_client
+    ) -> None:
+        """Route order pin: bare ``/clients/get`` is the phone route (422 for
+        the missing required param), and ``/clients/<uuid>`` still resolves to
+        the by-id route (200) — neither shadows the other."""
+        client = create_client(name="ShadowPin", phone="+79992200004")
+
+        bare = api_client.get("/api/v1/clients/get")
+        assert bare.status_code == 422, (
+            f"/get must hit the phone route (422 missing phone), got {bare.status_code} — "
+            "it is being shadowed by /{client_id}"
+        )
+
+        by_id = api_client.get(f"/api/v1/clients/{client['id']}")
+        assert by_id.status_code == 200
+        assert by_id.json()["id"] == client["id"]
+
+        by_phone = api_client.get(
+            "/api/v1/clients/get", params={"phone": "+79992200004"}
+        )
+        assert by_phone.status_code == 200
+        assert by_phone.json()["id"] == client["id"]
 
 
 # ─── Sort Tests ───────────────────────────────────────────────────────────────
@@ -1140,7 +1321,7 @@ class TestClientListCombinedFilters:
         api_client.delete(f"/api/v1/clients/{inactive['id']}")
 
         resp = api_client.get("/api/v1/clients", params={
-            "search": "Combined", "status": "active",
+            "q": "Combined", "status": "active",
         })
         ids = [c["id"] for c in resp.json()["items"]]
         assert active["id"] in ids
@@ -1167,7 +1348,7 @@ class TestClientListCombinedFilters:
         })
 
         resp = api_client.get("/api/v1/clients", params={
-            "search": "SearchVisit", "min_records": "2", "per_page": 100,
+            "q": "SearchVisit", "min_records": "2", "per_page": 100,
         })
         ids = [c["id"] for c in resp.json()["items"]]
         assert c2["id"] in ids

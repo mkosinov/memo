@@ -54,11 +54,20 @@ async def list_activities(
     pagination: PaginationParams = Depends(),
     date_from: date | None = Query(None),
     date_to: date | None = Query(None),
+    q: str | None = Query(None, min_length=2, max_length=100),
+    service_id: str | None = Query(None),
 ) -> PaginatedResponse[ActivityResponse]:
-    """Return all activities, optionally filtered by date range."""
+    """Return all activities, optionally filtered by date range and service.
+
+    ``q`` (GH #212): case-insensitive substring on the joined Service.title OR
+    exact id equality for a full UUID; ``service_id`` narrows by service;
+    ``total`` reflects the filtered count. len<2 / len>100 → 422
+    VALIDATION_ERROR. List items carry ``service_title`` (single-item
+    endpoints leave it None).
+    """
     result = await service.list(
         db_session=session, page=pagination.page, per_page=pagination.per_page,
-        date_from=date_from, date_to=date_to,
+        date_from=date_from, date_to=date_to, q=q, service_id=service_id,
     )
     occupied_map = await service.sum_active_seats_bulk(
         db_session=session, activity_ids=[a.id for a in result.items]

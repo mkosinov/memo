@@ -25,10 +25,12 @@ function RecordsPageContent() {
           serviceId={filters.serviceId}
           masterId={filters.masterId}
           status={filters.status}
+          search={filters.search}
           onLocationChange={(v) => setFilters({ locationId: v })}
           onServiceChange={(v) => setFilters({ serviceId: v })}
           onMasterChange={(v) => setFilters({ masterId: v })}
           onStatusChange={(v) => setFilters({ status: v })}
+          onSearchChange={(v) => setFilters({ search: v })}
           onReset={resetFilters}
         />
       </div>

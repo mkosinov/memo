@@ -175,6 +175,8 @@ export const ActivityResponseSchema = z.object({
   created_at: z.string(), // ISO datetime string
   updated_at: z.string(), // ISO datetime string
   occupied: z.number(),
+  /** Denormalized service title for list displays (GH #212); null when the service is archived/deleted. */
+  service_title: z.string().nullable().optional(),
 });
 
 export type ActivityResponse = z.infer<typeof ActivityResponseSchema>;
@@ -483,35 +485,6 @@ export type UserSettingsCreate = z.infer<typeof UserSettingsCreateSchema>;
 
 export const UserSettingsUpdateSchema = UserSettingsCreateSchema.partial().omit({ user_id: true });
 export type UserSettingsUpdate = z.infer<typeof UserSettingsUpdateSchema>;
-
-// ─── Search Result Schemas ──────────────────────────────────────────────
-
-export const VisitorSearchResultSchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  age: z.number().nullable(),
-});
-export type VisitorSearchResult = z.infer<typeof VisitorSearchResultSchema>;
-
-export const ServiceSearchResultSchema = z.object({
-  id: z.string(),
-  title: z.string(),
-});
-export type ServiceSearchResult = z.infer<typeof ServiceSearchResultSchema>;
-
-export const ActivitySearchResultSchema = z.object({
-  id: z.string(),
-  start: z.string(),
-  service_id: z.string(),
-  service_title: z.string(),
-});
-export type ActivitySearchResult = z.infer<typeof ActivitySearchResultSchema>;
-
-export const TagSearchResultSchema = z.object({
-  id: z.string(),
-  tag: z.string(),
-});
-export type TagSearchResult = z.infer<typeof TagSearchResultSchema>;
 
 // ─── Delete dry-run dependency tree (§5 — GH #207) ───────────────────────────
 // 409 Conflict body of the unified DELETE (no-body dry-run). Counters + sums only,

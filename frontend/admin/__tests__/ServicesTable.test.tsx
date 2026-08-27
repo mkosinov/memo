@@ -342,35 +342,59 @@ describe('ServicesTable', () => {
     expect(screen.getByLabelText('Фильтр по статусу')).toHaveValue('active');
   });
 
-  // ─── Search (G1b Q1 — KEPT: client-side filter over the loaded page) ───
+  // ─── Search (GH #212 T11 — server-side via ?q=; #205 degradation ends) ──
+  // The *Filters bar calls setSearch directly (no debounce); the factory
+  // clamps q to ≥2 chars and sends it to getServices. Rows render exactly
+  // what the server returned — no client filtering (#139 predicate removed).
 
-  it('filters the loaded page by search text (client-side)', async () => {
+  it('searches server-side via ?q= (fetch carries q, rows stay server-returned)', async () => {
     setupEnvelope();
     await renderLoaded();
 
     const searchInput = screen.getByLabelText('Поиск по названию');
     fireEvent.change(searchInput, { target: { value: 'масл' } });
 
-    expect(screen.getByText('Картина маслом')).toBeInTheDocument();
-    expect(screen.queryByText('Картина акрилом')).not.toBeInTheDocument();
-    expect(screen.queryByText('Ручная лепка')).not.toBeInTheDocument();
-  });
-
-  it('resets search filter when reset button clicked', async () => {
-    setupEnvelope();
-    await renderLoaded();
-
-    const searchInput = screen.getByLabelText('Поиск по названию');
-    fireEvent.change(searchInput, { target: { value: 'масл' } });
-
-    expect(screen.queryByText('Картина акрилом')).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByText('Сбросить'));
-
+    await waitFor(() => {
+      expect(mockGetServices).toHaveBeenCalledWith(expect.objectContaining({ q: 'масл' }));
+    });
+    // No client filtering — setupEnvelope's items stay visible regardless of match
     expect(screen.getByText('Картина маслом')).toBeInTheDocument();
     expect(screen.getByText('Картина акрилом')).toBeInTheDocument();
     expect(screen.getByText('Ручная лепка')).toBeInTheDocument();
+  });
+
+  it('resets search and refetches without q', async () => {
+    setupEnvelope();
+    await renderLoaded();
+
+    const searchInput = screen.getByLabelText('Поиск по названию');
+    fireEvent.change(searchInput, { target: { value: 'масл' } });
+    await waitFor(() => {
+      expect(mockGetServices).toHaveBeenCalledWith(expect.objectContaining({ q: 'масл' }));
+    });
+
+    fireEvent.click(screen.getByText('Сбросить'));
+
+    await waitFor(() => {
+      // Deep equality — no q key on the post-reset fetch
+      expect(mockGetServices).toHaveBeenLastCalledWith({ page: 1, per_page: 10, status: 'active' });
+    });
     expect(searchInput).toHaveValue('');
+  });
+
+  it('does not fire q on 1 char (≥2 clamp — treated as unset)', async () => {
+    setupEnvelope();
+    await renderLoaded();
+
+    const searchInput = screen.getByLabelText('Поиск по названию');
+    fireEvent.change(searchInput, { target: { value: 'м' } });
+
+    // Raw input state reflects the char, but no q fetch fires
+    await waitFor(() => {
+      expect(searchInput).toHaveValue('м');
+    });
+    expect(mockGetServices).toHaveBeenCalledTimes(1);
+    expect(mockGetServices.mock.calls[0][0]).not.toHaveProperty('q');
   });
 
   // ─── Server-driven pagination wiring ───────────────────────────────────

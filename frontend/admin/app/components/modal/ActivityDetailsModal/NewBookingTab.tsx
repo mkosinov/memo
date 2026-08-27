@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useCallback } from 'react';
-import { searchClientByPhone } from '@memo/api-client';
+import { getClientByPhone } from '@memo/api-client';
 import type { TariffResponse } from '@memo/api-client';
 import type { Activity } from '@memo/domain';
 
@@ -37,7 +37,7 @@ export function NewBookingTab({ activity, serviceTariffs, onSubmit, showToast }:
   const handlePhoneBlur = useCallback(async () => {
     if (phone.length < 10) return;
     try {
-      const client = await searchClientByPhone(phone);
+      const client = await getClientByPhone(phone);
       if (client) {
         setName(client.name || '');
       }

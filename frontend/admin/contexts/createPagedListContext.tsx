@@ -15,6 +15,8 @@ export interface PagedListFetcherParams {
   sort_by?: string;
   sort_order?: SortOrder;
   status?: ArchiveFilter;
+  /** Server-side search (#212 §5.1) — present only when serverSearch is on and search is ≥2 chars. */
+  q?: string;
 }
 
 export interface PagedListContextValue<T> {
@@ -48,9 +50,16 @@ interface PagedListConfig<T> {
   /**
    * Client-side filter predicate (spec §6.7 — dict search is predicate-only):
    * `search` stays OUT of the query key and fetcher params; the loaded page is
-   * filtered locally into `visibleItems`.
+   * filtered locally into `visibleItems`. Ignored when serverSearch is on.
    */
   searchPredicate?: (item: T, q: string) => boolean;
+  /**
+   * Server-side search (#212 §5.5 pt 2): the debounced `search` value joins the
+   * query key and is sent to the fetcher as `q` — clamped to ≥2 chars (a shorter
+   * value is treated as unset). The client predicate is bypassed
+   * (`visibleItems === items`), and setSearch resets page to 1.
+   */
+  serverSearch?: boolean;
 }
 
 /**
@@ -67,6 +76,7 @@ export function createPagedListContext<T>(config: PagedListConfig<T>) {
     withStatus = false,
     defaultPerPage = 10,
     searchPredicate,
+    serverSearch = false,
   } = config;
   const Context = createContext<PagedListContextValue<T> | null>(null);
 
@@ -78,9 +88,17 @@ export function createPagedListContext<T>(config: PagedListConfig<T>) {
     const [status, setStatusState] = useState<ArchiveFilter>('active');
     const [search, setSearch] = useState('');
 
+    // #212 §5.5 pt 2 — serverSearch: the ≥2-char clamp lives here (one place,
+    // covers DataTable withSearch inputs AND *Filters bars). Shorter values are
+    // treated as unset: no q in key/fetch, unfiltered page shown, no 422 noise.
+    const q = serverSearch && search.length >= 2 ? search : undefined;
+
     const queryKey = withStatus
       ? [queryKeyPrefix, page, perPage, status, sortBy, sortOrder]
       : [queryKeyPrefix, page, perPage, sortBy, sortOrder];
+    // q (or its absence) distinguishes cache entries → pages never collide
+    // between searches. Slot present only when serverSearch is on.
+    if (serverSearch) queryKey.push(q ?? '');
 
     const { data, isPending, isLoading, isFetching, error, refetch } = useQuery({
       queryKey,
@@ -90,6 +108,7 @@ export function createPagedListContext<T>(config: PagedListConfig<T>) {
           per_page: perPage,
           ...(sortBy ? { sort_by: sortBy, sort_order: sortOrder } : {}),
           ...(withStatus ? { status } : {}),
+          ...(q ? { q } : {}),
         }),
       placeholderData: keepPreviousData,
     });
@@ -110,12 +129,24 @@ export function createPagedListContext<T>(config: PagedListConfig<T>) {
       setPage(1);
     }, []);
 
+    // serverSearch: a new q means a new result set → restart at page 1
+    // (consistent with the setSort/setPerPage/setStatus reset contract).
+    const setSearchWithReset = useCallback((s: string) => {
+      setSearch(s);
+      if (serverSearch) setPage(1);
+    }, []);
+
     const items = data?.items ?? [];
 
     // Spec §6.7 — dict search is predicate-only: the loaded page is filtered
     // locally into `visibleItems`; `items` keeps its server-page contract.
-    const visibleItems =
-      searchPredicate && search ? items.filter((i) => searchPredicate(i, search)) : undefined;
+    // serverSearch (#212): the server owns the filter — the predicate is
+    // bypassed and visibleItems is the items array itself.
+    const visibleItems = serverSearch
+      ? items
+      : searchPredicate && search
+        ? items.filter((i) => searchPredicate(i, search))
+        : undefined;
 
     // Spec §6.7 page clamp — after a SETTLED fetch returns an empty non-first
     // page (e.g. last row of page N deleted), step back. `!isFetching` guards
@@ -142,7 +173,7 @@ export function createPagedListContext<T>(config: PagedListConfig<T>) {
       setPerPage,
       setSort,
       setStatus,
-      setSearch,
+      setSearch: setSearchWithReset,
       refetch,
     };
     return <Context.Provider value={value}>{children}</Context.Provider>;

@@ -96,9 +96,14 @@ class ClientWithStats(ClientResponse):
 
 
 class ClientListParams(PaginationParams):
-    """Query parameters for GET /api/v1/clients with filtering, pagination, sorting."""
+    """Query parameters for GET /api/v1/clients with filtering, pagination, sorting.
 
-    search: str | None = None
+    ``q`` (GH #212): renamed from ``search``; substring search over the
+    ``ClientService.search_fields`` matrix (name/phone/email + full-UUID id).
+    Length bounds live HERE (params-model field), so out-of-range q → 422.
+    """
+
+    q: str | None = Field(default=None, min_length=2, max_length=100)
     status: ArchiveStatus = ArchiveStatus.ACTIVE
     created_from: date | None = None
     created_to: date | None = None

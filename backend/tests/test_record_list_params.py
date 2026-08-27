@@ -53,3 +53,19 @@ def test_date_range_inverted_rejected():
 def test_date_range_valid():
     p = RecordListParams(date_from=date(2026, 8, 3), date_to=date(2026, 8, 9))
     assert p.date_from == date(2026, 8, 3)
+
+
+def test_q_default_none():
+    p = RecordListParams()
+    assert p.q is None
+
+
+def test_q_valid_length():
+    p = RecordListParams(q="ab")
+    assert p.q == "ab"
+
+
+@pytest.mark.parametrize("q", ["a", "", "x" * 101])
+def test_q_bounds_rejected(q):
+    with pytest.raises(ValidationError):
+        RecordListParams(q=q)

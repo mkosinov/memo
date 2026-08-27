@@ -172,6 +172,18 @@ describe('useRecordData', () => {
     await waitFor(() => expect(getRecord).toHaveBeenCalledWith('r1'));
   });
 
+  it('does not call getRecord when recordId is empty (enabled guard)', async () => {
+    const { useRecordData } = await import('@/hooks/useRecordData');
+    renderHook(
+      () => useRecordData('', 'c1'),
+      { wrapper: createWrapper() },
+    );
+
+    // Wait for an enabled sibling query to settle; the record query must stay disabled
+    await waitFor(() => expect(getClientVisitors).toHaveBeenCalledWith('c1'));
+    expect(getRecord).not.toHaveBeenCalled();
+  });
+
   it('calls getClientVisitors with clientId', async () => {
     const { useRecordData } = await import('@/hooks/useRecordData');
     renderHook(

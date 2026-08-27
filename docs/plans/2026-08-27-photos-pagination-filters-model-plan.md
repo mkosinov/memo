@@ -34,11 +34,13 @@
 | `backend/src/api/v1/photos.py` | modify | GET "" params + PaginatedResponse |
 | `backend/src/seed/seed.py` | modify | photos section rewrite (mutually-exclusive owners) |
 | `backend/tests/test_seed.py` | modify | pin update |
-| `backend/tests/test_api_photos.py` | modify | full contract matrix |
-| `backend/tests/test_deletion_matrix*.py` (existing name) | modify | client/location photos deps + CHECK |
+| `backend/tests/test_api_photos.py` | rewrite | full contract matrix + legacy test updates |
+| `backend/tests/services/test_delete_cascades.py` | modify | `_insert_photo` helper, visitor-test rework, client/location photos nullify tests |
+| `backend/tests/domain/test_deletion.py` | modify | exact-dep-set assertions gain `photos` |
+| `backend/tests/test_models.py` | modify | `test_photo_crud` field assertions |
 | `packages/api-client/src/schemas.ts` | modify | PhotoResponseSchema fields, PhotoListResponseSchema |
 | `packages/api-client/src/endpoints.ts` | modify | getPhotos(params) |
-| `packages/api-client/tests?/schemas.test.ts`, `endpoints.test.ts` | modify | photo contracts |
+| `packages/api-client/tests/schemas.test.ts`, `packages/api-client/tests/endpoints.test.ts` | modify | photo contracts (incl. getWebPhotos unchanged) |
 | `frontend/admin/contexts/PhotosContext.tsx` | rewrite | server context (RecordsContext pattern) + services/locations maps |
 | `frontend/admin/contexts/__tests__/PhotosContext.test.tsx` | rewrite | server semantics tests |
 | `frontend/admin/app/(main)/photos/components/PhotosFilters.tsx` | create | filter bar |
@@ -192,6 +194,7 @@ Register in `NULLIFY_HANDLERS` with the exact key convention the file uses. REMO
 ```bash
 cd backend && uv run pytest tests/services/test_delete_cascades.py tests/test_seed.py -x   # deletion+seed only — photos API suite is transitionally red until Task 3 (see warning above)
 ./scripts/recreate_dev_db.sh   # runs alembic upgrade head + seed — must succeed
+uv run alembic downgrade -1 && uv run alembic upgrade head   # round-trip BOTH succeed (spec §6.1/§13)
 git add -A && git commit -m "feat(#211): photos 4-owner model + migration + CHECK + deletion matrix (atomic)"
 ```
 
@@ -298,7 +301,7 @@ Fixture photos: `p_client` (client C1), `p_client2` (C1), `p_act` (activity A1, 
 **All tests sync TestClient style** (`api_client` fixture per conftest — pytest-patterns skill). Shared fixture:
 
 ```python
-@pytest.fixture(scope="module")
+@pytest.fixture()  # FUNCTION-scoped: autouse reset_db truncates per test (conftest.py:145-156) — the 7 photos are recreated each test
 def photos_fixture(api_client):
     # create clients C1, locations L1/L2, activities A1 (service S1, location L1),
     # services S1/S2, tags T1/T2 via API; then the 7 photos via POST:
@@ -485,7 +488,8 @@ export type PhotoListResponse = z.infer<typeof PhotoListResponseSchema>;
 `endpoints.ts` — add a param'd plain-clients fetch (today only no-arg `getClients()` `:309` and param'd `getClientsWithStats()` `:313` exist; photo typeaheads need the light list). getRecords is the serialization template — repeated params via `search.append`:
 
 ```ts
-export interface ClientListParams { q?: string; per_page?: number; page?: number; }
+export interface ClientListParams { q?: string; per_page?: number; page?: number; status?: "active" | "archived"; }
+// photo pickers always request status: "active" — archived clients must not surface (spec §7.3)
 
 export async function getClientsPaged(params: ClientListParams): Promise<PaginatedResponse<Client>> {
   const s = new URLSearchParams();
@@ -515,7 +519,7 @@ export async function getPhotos(params?: PhotoListParams): Promise<PhotoListResp
 }
 ```
 
-Contract tests: rewrite photo sections in `schemas.test.ts` (new fields + paginated parse) and `endpoints.test.ts` (URL building incl. repeated `tag_id`, q, filters, sort). Commit: `feat(#211): api-client paginated photos`
+Contract tests: rewrite photo sections in `schemas.test.ts` (new fields + paginated parse) and `endpoints.test.ts` (URL building incl. repeated `tag_id`, q, filters, sort; PLUS an explicit `getWebPhotos` unchanged assertion — spec §10.2). Commit: `feat(#211): api-client paginated photos`
 
 ---
 
@@ -562,7 +566,7 @@ Rewrite `PhotosContext.test.tsx` (6 tests pin client-side slicing — replace): 
 Create `frontend/admin/app/(main)/photos/components/PhotosFilters.tsx` — layout modeled on `BookingFilters.tsx` (flex-wrap, label+control markup, Сбросить button styled like records' reset). Controls:
 
 ```tsx
-// Клиент: SearchableSelect, onSearch={(q) => getClientsPaged({ q, per_page: 10 }).then(r => r.items.map(clientOption))}
+// Клиент: SearchableSelect, onSearch={(q) => getClientsPaged({ q, per_page: 10, status: "active" }).then(r => r.items.map(clientOption))}
 // Активность: SearchableSelect, onSearch={(q) => getActivities({ q, per_page: 10 }).then(mapActivityOption)}
 // Услуга: <select> over servicesMap (or getServicesAll) — «Все услуги» empty option
 // Локация: <select> over locationsMap — «Все локации»
@@ -597,7 +601,7 @@ export const photoColumns: ColumnDef<PhotoResponse>[] = [
 (Column/render signatures follow the existing file's `ColumnDef` — adapt names, keep LS key `photos-columns`.)
 
 `PhotoModal.tsx` + `photoFields.tsx`:
-1. Remove «Посетитель» field; add «Клиент» searchable field: `onSearch → getClientsPaged({ q, per_page: 10 })`.
+1. Remove «Посетитель» field; add «Клиент» searchable field: `onSearch → getClientsPaged({ q, per_page: 10, status: "active" })`.
 2. Add «Локация» picker: plain `<select>` over `getLocationsAll()` — extend the field-type union with a `select` member (options prop) if `photoFields.tsx` lacks one.
 3. REMOVE the activity→service auto-fill effect (`PhotoModal.tsx:118-121`); replace with mutually-exclusive pair semantics:
 

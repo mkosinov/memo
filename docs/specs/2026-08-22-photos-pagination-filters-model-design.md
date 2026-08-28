@@ -5,6 +5,7 @@
 - **Status:** DESIGN — pending G1b (round 2, revised per G1b feedback 2026-08-22)
 - **Depends on (IMPL gates):** #139 (generic DataTable) merged AND #212 (list search `?q=`) merged — **#212 is merged (PR #228, commit `959cf82`); only #139 remains**. Design docs land on main now; IMPL starts later in a fresh worktree off post-merge main.
 - **G1b revisions (binding):** location is a full 4th owner; tag filter flipped to AND semantics; location display via client-side `/locations/all` join (no endpoint denormalization); group-photo follow-up issue closed as not planned.
+- **Canonical activity label ruling (binding, 2026-08-27):** project-wide label format `«{dd.mm.yyyy HH:mm} — {location title} — {service_title}»`, date-first, via ONE shared formatter — §7.7.
 
 ## G1a + Step-0 + G1b-revision user decisions (binding, 2026-08-22)
 
@@ -213,7 +214,7 @@ From #139 (merged): `<DataTable>` with `withSearch` + `searchPlaceholder`; `Page
 | Control | Type | Data source | Notes |
 |---------|------|-------------|-------|
 | Клиент | SearchableSelect (single) | `getClients({q, per_page:10})` — `/clients?q=` post-#212 | ≥2-char clamp; active clients by default (`ClientListParams.status=ACTIVE`) |
-| Активность | SearchableSelect (single) | `getActivities({q, per_page:10})` | item mapping formats `start` like the PhotoModal closure |
+| Активность | SearchableSelect (single) | `getActivities({q, per_page:10})` | options rendered via the canonical activity label (§7.7) — `formatActivityLabel(a, locationsMap)` |
 | Услуга | plain `<select>` | `/services/all` | BookingFilters precedent |
 | Локация | plain `<select>` | `/locations/all` | BookingFilters precedent |
 | Теги | multi-select chips + add-typeahead | `/tags/all` | PhotoModal multi-emulation pattern (`PhotoModal.tsx:49-94`); AND semantics server-side (photo must have ALL selected tags) |
@@ -238,6 +239,7 @@ From #139 (merged): `<DataTable>` with `withSearch` + `searchPlaceholder`; `Page
 
 - **Architect decisions:** (a) «Услуга»/«Локация» resolved client-side via `/services/all` + `/locations/all` rather than left as UUIDs — zero backend cost, records precedent (location display is client-side per G1b ruling: no endpoint denormalization); (b) «Локация» is **default-visible** — it is a full owner with a properly resolved title and a headline feature of this PR (unlike «Активность», hidden only because its display would be a raw UUID pending #213); (c) «Активность» hidden by default pending #213; (d) NEW «Дата» column so the default sort (`created_at desc`) is visible in the UI (sort indicator lives on column headers).
 - Sortable flags reduced from "all 6" (pre-#139 drift) to exactly the 3 server-whitelisted fields.
+- **Cross-pinning for #213:** when the «Активность» column display lands, it MUST use the canonical activity label (§7.7) — no third format gets invented there.
 
 ### 7.5 PhotoModal changes
 
@@ -245,6 +247,19 @@ From #139 (merged): `<DataTable>` with `withSearch` + `searchPlaceholder`; `Page
 - **«Локация»** picker added — plain dropdown over `/locations/all` (bounded dictionary, no typeahead). `photoFields.tsx` field-type union has no plain-select member today (text/searchable/tags only) — extend at plan time.
 - Owner fields remain independent controls (now 4: client/service/activity/location); **enforcement is server-side 422 on ≥2 of the four** (§6.2) surfaced via the existing PhotoModal error catch. No client-side lockout (accepted UX roughness, noted).
 - Service/activity fields remain post-#212 typeaheads over list `?q=`, but the **auto-fill of `service_id` on activity pick is REMOVED** (panel-round-2: `PhotoModal.tsx:118-121` auto-fill would now manufacture a guaranteed 2-owner 422). Under the 4-owner invariant service and activity are mutually exclusive: picking one CLEARS the other (replace semantics for that pair); activity-search narrowing by a selected service stays as a search aid only. Client/location fields keep plain independence (server 422 on conflicts, next bullet).
+- **Activity options use the canonical label (§7.7)** for BOTH dropdown rows and the selected-value rendering — replacing the current `service_title — HH:mm dd.mm.yyyy` composition (`photoFields.tsx:48-55` `displayField/subtitleField` + the SearchableSelect `main — sub` join). The "datetime-only when service already selected" displayField special case (`PhotoModal.tsx:121-125`) is REMOVED — canonical label everywhere. The same `/locations/all` map that feeds the «Локация» picker feeds the label (no extra fetch).
+
+### 7.7 Canonical activity label (binding, 2026-08-27 — project-wide)
+
+THE canonical string representation of an activity in the admin frontend, everywhere an activity is rendered as an option/label:
+
+- **Format:** `«{dd.mm.yyyy HH:mm} — {location title} — {service_title}»` — DATE FIRST (e.g. «21.08.2026 14:00 — Студия Север — День рождения»).
+- **Segment omission:** a segment is omitted when its data is absent — no dangling separators («21.08.2026 14:00 — День рождения» for a location-less activity; date-only «21.08.2026 14:00» if service is absent too).
+- **Separator:** « — » (project convention, SearchableSelect `getDisplayText`).
+- **Time semantics:** #212 local-time formatting preserved (formatActivityStart idiom), only the ORDER changes to date-first «dd.mm.yyyy HH:mm» — new/adjusted helper.
+- **ONE shared formatter, single source of truth:** `formatActivityLabel(activity, locationsMap)` colocated with the date helpers (`frontend/admin/lib/utils.ts`, next to `formatActivityStart:117-121`). All consumers call it; nobody composes the string inline.
+- **Location title resolved client-side** via the `/locations/all` map — zero backend changes. Edge: `/locations/all` is active-only (`locations.py:113`) — an activity at an ARCHIVED location omits the location segment (id not in map → segment skipped, no dangling separator). Accepted and consistent with the «Локация» column ('—' for unresolvable ids).
+- **Enumerated consumers** (grep-verified 2026-08-27): photoFields.tsx activity config + PhotoModal activity branch (§7.5); planned PhotosFilters activity typeahead (§7.3); future: #213 «Активность» column (§7.4 cross-pin). SearchableSelect's only current consumer is PhotoModal — no other admin activity typeahead exists today.
 
 ### 7.6 api-client
 
@@ -267,6 +282,7 @@ From #139 (merged): `<DataTable>` with `withSearch` + `searchPlaceholder`; `Page
 - `docs/domain-rules/photos.md`: fields table (visitor_id → client_id/location_id; +client_name response field); **Cross-field rule:** at most one of the 4 owner FKs (422 on ≥2); **Invariants:** hard-delete; survives parent deletion via SET NULL (owner-less allowed); copies of group photos are independent rows (created individually via the single-owner modal; no sync mechanism); endpoints table (paginated params); relationships updated (4 owners).
 - `docs/domain-rules/visitors.md`: remove the Photo relationship line (photos no longer reference visitors).
 - `docs/domain-rules/clients.md`, `locations.md`: delete-cascade sections gain "photos → nullify (auto)" entries.
+- **Canonical activity label pin:** domain docs gain a line recording `«{dd.mm.yyyy HH:mm} — {location title} — {service_title}»` as the PROJECT-WIDE display convention for activities (§7.7) — in `docs/domain-rules/activities.md` (create the file if absent) with back-refs from photos.md.
 - **Supersession note (docs hygiene):** this spec supersedes `docs/specs/2026-08-19-list-search-q-design.md:31` ("photos list gets no q; PhotosTable search stays client-side") — #211 adds server `q` to photos. The #212 spec file itself gets a one-line amendment note at IMPL finishing (docser task).
 
 ## 10. Test Strategy
@@ -289,10 +305,11 @@ From #139 (merged): `<DataTable>` with `withSearch` + `searchPlaceholder`; `Page
 
 ### 10.3 Frontend unit (vitest)
 
+- `formatActivityLabel` (lib/utils) new suite: date-first order «dd.mm.yyyy HH:mm»; full 3-segment label; segment omission (no location → no dangling separator; no service; date-only); archived-location edge (id not in active-only map → location segment omitted); local-time semantics preserved.
 - `PhotosContext.test.tsx` — **full rewrite** (currently 6 tests pinning client-side slice): server fetch params in query key, page reset on setFilters/setSearch, ≥2 clamp, page-clamp, per_page=10 default, sort mapping, servicesMap load.
-- `PhotosFilters` new suite: controls render, change → setFilters, tags chips add/remove, reset.
+- `PhotosFilters` new suite: controls render, change → setFilters, tags chips add/remove, reset; activity options carry the canonical label.
 - `photoColumns`: client_name render w/ '—' fallback, service/location title resolution via maps, sortable flags exactly {filename, is_public, created_at}, activity defaultVisible=false, location defaultVisible=true.
-- `PhotoModal`: client picker present / visitor absent, location picker, activity pick clears service and vice versa (auto-fill removed), 422 surfacing on ≥2 of the 4 owner FKs (mock).
+- `PhotoModal`: client picker present / visitor absent, location picker, activity pick clears service and vice versa (auto-fill removed), activity options + selected value use the canonical label (special case gone), 422 surfacing on ≥2 of the 4 owner FKs (mock).
 
 ### 10.4 E2E (playwright, real backend — no page.route)
 
@@ -314,6 +331,7 @@ Mapped to §2 scenarios 1-7. Updates to existing `photos-crud.spec.ts`: search t
 | 10 | q | min2/max100, AND with filters, filename-only (documented limitation) |
 | 11 | service_id vs location filter | Service keeps variant A (direct OR via activity, G1a); location is DIRECT-only (G1b, OR explicitly rejected) — intentional asymmetry; consequence: activity-owned photos never match the location filter |
 | 12 | Denormalization | `client_name` ONLY (scalar subquery in service layer; resolves archived clients; not sortable). Service/location titles resolve client-side via `/all` maps (G1b ruling) |
+| 13 | Activity label | Canonical project-wide `«{dd.mm.yyyy HH:mm} — {location} — {service_title}»`, date-first, ONE shared `formatActivityLabel(activity, locationsMap)` (§7.7, user-ruled 2026-08-27); PhotoModal datetime-only special case removed; #213 column cross-pinned |
 
 ## 12. Preconditions / re-verify at IMPL start
 

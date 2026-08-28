@@ -10,6 +10,8 @@ import {
   hhmmToDecimal,
   formatActivityContext,
   formatActivityStart,
+  formatActivityDateTime,
+  formatActivityLabel,
   formatRecordLabel,
   generateTimeSlots,
   calculateGridTimeRange,
@@ -227,6 +229,74 @@ describe('formatActivityStart', () => {
 
   it('zero-pads single-digit hours, minutes, days and months', () => {
     expect(formatActivityStart('2026-01-05T09:07:00')).toBe('09:07 05.01.2026');
+  });
+});
+
+describe('formatActivityDateTime', () => {
+  it('formats ISO datetime date-first as "dd.mm.yyyy HH:mm" (local time)', () => {
+    expect(formatActivityDateTime('2026-06-07T14:05:00')).toBe('07.06.2026 14:05');
+  });
+
+  it('zero-pads single-digit days, months, hours and minutes', () => {
+    expect(formatActivityDateTime('2026-01-05T09:07:00')).toBe('05.01.2026 09:07');
+  });
+});
+
+describe('formatActivityLabel', () => {
+  // Active-only /locations/all map — archived locations are NOT present.
+  const locationsMap = new Map([['loc-1', { title: 'Студия на Невском' }]]);
+
+  it('builds the full canonical label «dd.mm.yyyy HH:mm — location — service»', () => {
+    const label = formatActivityLabel(
+      { start: '2026-06-07T14:05:00', location_id: 'loc-1', service_title: 'Гончарный МК' },
+      locationsMap,
+    );
+    expect(label).toBe('07.06.2026 14:05 — Студия на Невском — Гончарный МК');
+  });
+
+  it('omits the location segment when location_id is absent (2 segments)', () => {
+    const label = formatActivityLabel(
+      { start: '2026-06-07T14:05:00', service_title: 'Гончарный МК' },
+      locationsMap,
+    );
+    expect(label).toBe('07.06.2026 14:05 — Гончарный МК');
+  });
+
+  it('omits the service segment when service_title is absent (2 segments)', () => {
+    const label = formatActivityLabel(
+      { start: '2026-06-07T14:05:00', location_id: 'loc-1' },
+      locationsMap,
+    );
+    expect(label).toBe('07.06.2026 14:05 — Студия на Невском');
+  });
+
+  it('returns only the date-time when neither location nor service is present', () => {
+    const label = formatActivityLabel({ start: '2026-06-07T14:05:00' }, locationsMap);
+    expect(label).toBe('07.06.2026 14:05');
+  });
+
+  it('omits the location segment when the id does not resolve (archived location)', () => {
+    const label = formatActivityLabel(
+      { start: '2026-06-07T14:05:00', location_id: 'loc-archived', service_title: 'Гончарный МК' },
+      locationsMap,
+    );
+    expect(label).toBe('07.06.2026 14:05 — Гончарный МК');
+  });
+
+  it('returns only the date-time for an unresolvable location with no service (no dangling separator)', () => {
+    const label = formatActivityLabel(
+      { start: '2026-06-07T14:05:00', location_id: 'loc-archived' },
+      locationsMap,
+    );
+    expect(label).toBe('07.06.2026 14:05');
+  });
+
+  it('treats explicit null location_id and service_title as absent', () => {
+    const label = formatActivityLabel(
+      { start: '2026-06-07T14:05:00', location_id: null, service_title: null },
+      locationsMap,
+    );
+    expect(label).toBe('07.06.2026 14:05');
   });
 });
 

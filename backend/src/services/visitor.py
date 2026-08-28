@@ -2,18 +2,17 @@
 
 from functools import lru_cache
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.repositories.generic import BaseRepository, get_base_repository
-from src.repositories.search import SearchField
-from src.models.photo import Photo
 from src.models.tag import visitor_tags
 from src.models.visit import Visit
 from src.models.visitor import Visitor
+from src.repositories.generic import BaseRepository, get_base_repository
+from src.repositories.search import SearchField
 from src.schemas.visitor import VisitorCreate, VisitorResponse, VisitorUpdate
-from src.services.generic import GenericService
 from src.services.decorators import transactional
+from src.services.generic import GenericService
 
 
 class VisitorService(GenericService[VisitorCreate, VisitorUpdate, VisitorResponse]):
@@ -40,8 +39,8 @@ class VisitorService(GenericService[VisitorCreate, VisitorUpdate, VisitorRespons
         return list(result.scalars().all())
 
     async def _delete_cascade(self, db_session: AsyncSession, visitor_id: str) -> bool:
-        """Hard-delete a visitor and its visits; unlink photos (SET NULL);
-        delete visitor_tags join rows — on the GIVEN session, WITHOUT committing.
+        """Hard-delete a visitor and its visits; delete visitor_tags join
+        rows — on the GIVEN session, WITHOUT committing.
 
         Extracted (Task 7 of #207) from ``delete`` so ``ClientService`` can call
         this inside its OWN ``@transactional`` outer cascade loop on a SHARED
@@ -52,9 +51,9 @@ class VisitorService(GenericService[VisitorCreate, VisitorUpdate, VisitorRespons
         Visits are removed BEFORE the visitor (visits reference visitors via FK).
         The visitor_tags join table has FKs with NO ondelete action, so its rows
         must be removed BEFORE the visitor — otherwise the DB raises
-        IntegrityError (FK on) or leaves orphan rows (FK off). Photos are
-        unlinked (visitor_id := NULL) rather than deleted — a photo survives
-        losing its depicted visitor (#194, G1b).
+        IntegrityError (FK on) or leaves orphan rows (FK off). Photos are NOT
+        touched: since GH #211 a photo is never visitor-owned (4-owner model:
+        client|service|activity|location).
 
         Returns False if the visitor does not exist. Does NOT commit — the
         caller owns the transaction boundary.
@@ -64,15 +63,14 @@ class VisitorService(GenericService[VisitorCreate, VisitorUpdate, VisitorRespons
             return False
 
         await db_session.execute(delete(Visit).where(Visit.visitor_id == visitor_id))
-        await db_session.execute(update(Photo).where(Photo.visitor_id == visitor_id).values(visitor_id=None))
         await db_session.execute(delete(visitor_tags).where(visitor_tags.c.visitor_id == visitor_id))
         await db_session.execute(delete(Visitor).where(Visitor.id == visitor_id))
         return True
 
     @transactional
     async def delete(self, db_session: AsyncSession, id: str) -> bool:
-        """Hard-delete a visitor and cascade (visits, photos SET NULL,
-        visitor_tags) inside one ``@transactional`` transaction.
+        """Hard-delete a visitor and cascade (visits, visitor_tags) inside one
+        ``@transactional`` transaction.
 
         Thin decorated wrapper around the non-decorated ``_delete_cascade``
         core (Task 7 of #207) so standalone ``VisitorService.delete`` still

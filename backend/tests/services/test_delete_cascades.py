@@ -9,12 +9,14 @@ Data is set up via direct ORM inserts (committed) rather than the API factories,
 because these tests target the service's cascade SQL directly; ORM inserts give
 precise control over the pre-delete DB state without going through the API.
 
-Cascade contract (#194 Task 5):
+Cascade contract (#194 Task 5, updated by #211):
   * RecordService.delete       → delete record + its visits + its payments
   * ActivityService.delete     → delete activity + its records (+ their visits/payments)
-                                 + unlink photos (activity_id := NULL)
+                                  + unlink photos (activity_id := NULL)
   * VisitorService.delete      → delete visitor + its visits
-                                 + unlink photos (visitor_id := NULL)
+                                  (photos are NEVER visitor-owned since #211)
+  * Client/Location hard-delete (unified DELETE route) → unlink photos
+    (client_id/location_id := NULL) — auto-nullify deps (#211 matrix)
 All cascade deletes are explicit SQL inside ONE ``@transactional`` transaction,
 so a mid-cascade failure rolls back the whole unit (atomicity test).
 """
@@ -103,12 +105,32 @@ async def _insert_visitor(db_session, client: Client, name: str = "V") -> Visito
     return visitor
 
 
+async def _insert_location(db_session) -> Location:
+    """Insert a bare Location (committed) — no master/service/activity."""
+    location = Location(name="PhotoLoc", capacity=5)
+    db_session.add(location)
+    await db_session.commit()
+    return location
+
+
+async def _insert_service(db_session) -> Service:
+    """Insert a bare Service (committed)."""
+    service = Service(title="PhotoSvc", description="d", image_url="http://x",
+                      specialty="s", min_age=5, duration=60, record_info="r")
+    db_session.add(service)
+    await db_session.commit()
+    return service
+
+
 async def _insert_photo(
-    db_session, *, activity_id: str | None = None, visitor_id: str | None = None,
+    db_session, *, activity_id: str | None = None,
+    client_id: str | None = None, location_id: str | None = None,
 ) -> Photo:
-    """Insert a Photo (committed)."""
+    """Insert a Photo (committed). GH #211: photos are owned by at most ONE of
+    client/service/activity/location (``ck_photos_single_owner``)."""
     photo = Photo(filename="p.jpg", is_public=False,
-                  activity_id=activity_id, visitor_id=visitor_id)
+                  activity_id=activity_id, client_id=client_id,
+                  location_id=location_id)
     db_session.add(photo)
     await db_session.commit()
     return photo
@@ -209,9 +231,12 @@ async def test_activity_delete_with_no_records_or_photos_succeeds(db_session):
 
 # ─── VisitorService.delete ──────────────────────────────────────────────────────
 
-async def test_visitor_delete_cascades_to_visits_and_nullifies_photos(db_session):
-    """VisitorService.delete removes the visitor and its visits; linked photos
-    survive with visitor_id IS NULL; the visit's parent record is untouched.
+async def test_visitor_delete_cascades_to_visits(db_session):
+    """VisitorService.delete removes the visitor and its visits; the visit's
+    parent record is untouched.
+
+    GH #211: visitor deletion no longer touches photos — a photo is never
+    owned by a visitor (4-owner model: client|service|activity|location).
     """
     activity = await _insert_activity(db_session)
     client = await _insert_client(db_session)
@@ -229,9 +254,6 @@ async def test_visitor_delete_cascades_to_visits_and_nullifies_photos(db_session
         price=2000, custom_price=None, status="waiting",
     )
     db_session.add(visit)
-    # A photo linked to that visitor
-    photo = Photo(filename="visitor.jpg", is_public=False, visitor_id=visitor.id)
-    db_session.add(photo)
     await db_session.commit()
     visit_id = visit.id
 
@@ -246,10 +268,6 @@ async def test_visitor_delete_cascades_to_visits_and_nullifies_photos(db_session
     assert await _await_all(
         db_session, select(Visit).where(Visit.visitor_id == visitor.id),
     ) == []
-    # Photo survives, unlinked (visitor_id IS NULL)
-    surviving = await _await_scalar(db_session, select(Photo).where(Photo.id == photo.id))
-    assert surviving is not None
-    assert surviving.visitor_id is None
     # Parent record untouched
     assert await _await_scalar(db_session, select(Record).where(Record.id == record.id)) is not None
 
@@ -420,3 +438,81 @@ async def test_visitor_delete_cleans_visitor_tags_join_rows(db_session):
     assert query_db("SELECT COUNT(*) AS c FROM visitor_tags")[0]["c"] == 0
     # tag row survives (independent entity)
     assert query_db(f"SELECT COUNT(*) AS c FROM tags WHERE id='{tag.id}'")[0]["c"] == 1
+
+
+# ─── Photos 4-owner model (#211): nullify deps + single-owner CHECK ────────────
+# A photo is owned by at most ONE of client|service|activity|location
+# (``ck_photos_single_owner``). Client/Location hard-deletes auto-nullify
+# ``photos.client_id`` / ``photos.location_id`` — the photo row survives.
+
+async def test_client_hard_delete_nullifies_photos(api_client, db_session):
+    """Client hard-delete via the unified DELETE route auto-nullifies its
+    photos: the photo row survives with ``client_id IS NULL``.
+
+    The no-body dry-run returns 409 — the ``photos`` dep (with its
+    ``_count_c_photos`` counter) appears in the dependency tree.
+    """
+    from tests.conftest import query_db
+
+    client = await _insert_client(db_session)
+    photo = await _insert_photo(db_session, client_id=client.id)
+
+    # No-body dry-run → 409 (the photos dep is present in the tree).
+    resp = api_client.delete(f"/api/v1/clients/{client.id}")
+    assert resp.status_code == 409, resp.text
+
+    # photos is an AUTO dep → resolutions {} suffices → 204.
+    resp = api_client.request(
+        "DELETE", f"/api/v1/clients/{client.id}",
+        json={"resolutions": {}},
+    )
+    assert resp.status_code == 204, resp.text
+
+    # Photo row survives, unlinked (client_id IS NULL).
+    rows = query_db(f"SELECT client_id FROM photos WHERE id='{photo.id}'")
+    assert len(rows) == 1
+    assert rows[0]["client_id"] is None
+
+
+async def test_location_hard_delete_nullifies_photos(api_client, db_session):
+    """Location hard-delete via the unified DELETE route auto-nullifies its
+    photos: the photo row survives with ``location_id IS NULL``."""
+    from tests.conftest import query_db
+
+    location = await _insert_location(db_session)
+    photo = await _insert_photo(db_session, location_id=location.id)
+
+    # No-body dry-run → 409 (the photos dep is present in the tree).
+    resp = api_client.delete(f"/api/v1/locations/{location.id}")
+    assert resp.status_code == 409, resp.text
+
+    # photos is an AUTO dep → resolutions {} suffices → 204.
+    resp = api_client.request(
+        "DELETE", f"/api/v1/locations/{location.id}",
+        json={"resolutions": {}},
+    )
+    assert resp.status_code == 204, resp.text
+
+    # Photo row survives, unlinked (location_id IS NULL).
+    rows = query_db(f"SELECT location_id FROM photos WHERE id='{photo.id}'")
+    assert len(rows) == 1
+    assert rows[0]["location_id"] is None
+
+
+async def test_photos_single_owner_check_constraint(db_session):
+    """``ck_photos_single_owner`` rejects a photo with 2+ owners.
+
+    Real client + service rows are inserted first so the ONLY violation is
+    the CHECK (FKs are enforced in tests via PRAGMA foreign_keys=ON).
+    """
+    from sqlalchemy.exc import IntegrityError
+
+    client = await _insert_client(db_session)
+    service = await _insert_service(db_session)
+
+    photo = Photo(filename="two-owners.jpg", is_public=False,
+                  client_id=client.id, service_id=service.id)
+    db_session.add(photo)
+    with pytest.raises(IntegrityError):
+        await db_session.commit()
+    await db_session.rollback()

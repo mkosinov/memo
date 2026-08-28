@@ -19,7 +19,9 @@ The matrix is hand-verified against the FK shapes in ``src/models/``:
     ``is_active`` → always blocks delete on Master/Location/Service.
   * ``User.master_id`` — nullable+unique → Master cascade (auto, Change 2 §4.1).
   * ``Tariff.service_id`` — NOT NULL → Service cascade (auto).
-  * ``Photo.service_id`` — nullable → Service nullify (auto).
+  * ``Photo.service_id``/``client_id``/``location_id`` — nullable →
+    Service/Client/Location nullify (auto) — GH #211 4-owner model; a photo
+    survives losing its owner (row kept, FK set NULL).
   * ``Record.client_id`` — nullable → Client nullify (user choice).
   * ``Visitor.client_id`` — NOT NULL → Client cascade (user choice).
   * join tables ``master_tags``/``location_tags``/``service_tags``/
@@ -136,6 +138,10 @@ FK_MATRIX: dict[type[Base], list[FKDependency]] = {
             entity="location_tags", relation="Тег", nullable=False,
             action="cascade", auto=True, allowed_actions=["cascade"],
         ),
+        FKDependency(
+            entity="photos", relation="Фото", nullable=True,
+            action="nullify", auto=True, allowed_actions=["nullify"],
+        ),
     ],
     Service: [
         FKDependency(
@@ -167,6 +173,10 @@ FK_MATRIX: dict[type[Base], list[FKDependency]] = {
         FKDependency(
             entity="client_tags", relation="Тег", nullable=False,
             action="cascade", auto=True, allowed_actions=["cascade"],
+        ),
+        FKDependency(
+            entity="photos", relation="Фото", nullable=True,
+            action="nullify", auto=True, allowed_actions=["nullify"],
         ),
     ],
     Record: [
@@ -268,6 +278,13 @@ async def _count_l_location_tags(s: AsyncSession, entity_id: str) -> _CountResul
     return r.scalar_one(), None
 
 
+async def _count_l_photos(s: AsyncSession, entity_id: str) -> _CountResult:
+    r = await s.execute(
+        select(func.count()).select_from(Photo).where(Photo.location_id == entity_id)
+    )
+    return r.scalar_one(), None
+
+
 async def _count_s_activities(s: AsyncSession, entity_id: str) -> _CountResult:
     r = await s.execute(
         select(func.count()).select_from(Activity).where(Activity.service_id == entity_id)
@@ -331,6 +348,13 @@ async def _count_c_client_tags(s: AsyncSession, entity_id: str) -> _CountResult:
     return r.scalar_one(), None
 
 
+async def _count_c_photos(s: AsyncSession, entity_id: str) -> _CountResult:
+    r = await s.execute(
+        select(func.count()).select_from(Photo).where(Photo.client_id == entity_id)
+    )
+    return r.scalar_one(), None
+
+
 async def _count_r_visits(s: AsyncSession, entity_id: str) -> _CountResult:
     r = await s.execute(
         select(func.count()).select_from(Visit).where(Visit.record_id == entity_id)
@@ -359,6 +383,7 @@ _COUNTERS: dict[tuple[type[Base], str], _CounterFn] = {
     (Master, "master_tags"): _count_m_master_tags,
     (Location, "activities"): _count_l_activities,
     (Location, "location_tags"): _count_l_location_tags,
+    (Location, "photos"): _count_l_photos,
     (Service, "activities"): _count_s_activities,
     (Service, "tariffs"): _count_s_tariffs,
     (Service, "photos"): _count_s_photos,
@@ -366,6 +391,7 @@ _COUNTERS: dict[tuple[type[Base], str], _CounterFn] = {
     (Client, "records"): _count_c_records,
     (Client, "visitors"): _count_c_visitors,
     (Client, "client_tags"): _count_c_client_tags,
+    (Client, "photos"): _count_c_photos,
     (Record, "visits"): _count_r_visits,
     (Record, "payments"): _count_r_payments,
     (Record, "record_tags"): _count_r_record_tags,
@@ -522,6 +548,26 @@ async def _h_nullify_client_records(
     )
 
 
+async def _h_nullify_client_photos(
+    _self: ArchiveService, session: AsyncSession, entity_id: str,
+) -> None:
+    """Client → photos auto-nullify (GH #211): ``Photo.client_id`` set NULL.
+    The photo row survives — losing its owner never deletes a photo."""
+    await session.execute(
+        update(Photo).where(Photo.client_id == entity_id).values(client_id=None)
+    )
+
+
+async def _h_nullify_location_photos(
+    _self: ArchiveService, session: AsyncSession, entity_id: str,
+) -> None:
+    """Location → photos auto-nullify (GH #211): ``Photo.location_id`` set NULL.
+    The photo row survives — losing its owner never deletes a photo."""
+    await session.execute(
+        update(Photo).where(Photo.location_id == entity_id).values(location_id=None)
+    )
+
+
 # ─── cascade handlers ───────────────────────────────────────────────────────────
 
 
@@ -594,9 +640,11 @@ async def _h_cascade_client_visitors(
 
     Each iteration triggers (per ``VisitorService._delete_cascade`` §8 reference):
       1. ``DELETE FROM visits WHERE visitor_id=<vid>``
-      2. ``UPDATE photos SET visitor_id=NULL WHERE visitor_id=<vid>`` (photo survives)
-      3. ``DELETE FROM visitor_tags WHERE visitor_id=<vid>``
-      4. ``DELETE FROM visitors WHERE id=<vid>``
+      2. ``DELETE FROM visitor_tags WHERE visitor_id=<vid>``
+      3. ``DELETE FROM visitors WHERE id=<vid>``
+
+    Photos are NOT touched — since GH #211 a photo is never visitor-owned
+    (4-owner model: client|service|activity|location).
 
     Payments are record-scoped and EXCLUDED — records are nullified (not deleted)
     so their payments do not flow through this cascade (§5).
@@ -625,6 +673,8 @@ async def _h_cascade_client_visitors(
 NULLIFY_HANDLERS: dict[tuple[type[Base], str], _FkHandlerFn] = {
     (Service, "photos"): _h_nullify_service_photos,
     (Client, "records"): _h_nullify_client_records,
+    (Client, "photos"): _h_nullify_client_photos,
+    (Location, "photos"): _h_nullify_location_photos,
 }
 
 CASCADE_HANDLERS: dict[tuple[type[Base], str], _FkHandlerFn] = {

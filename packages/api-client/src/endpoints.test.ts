@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { z } from 'zod';
-import { getMasters, getMaster, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, deleteActivity, getWebPhotos, getRecords, getClients, getPayments, getPaymentTotals, createRecord, updateRecord, deleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, getClientByPhone, updateVisitStatus, getTags, createService, updateService, deleteService, createLocation, updateLocation, deleteLocation, getClientsWithStats, updateClient, patchClient, reorderMasters, reorderLocations, patchMaster, patchLocation, patchMaterial, patchService, patchUserSettings, getMaterials, getTag, getVisitors, deleteMaster, deleteMaterial, deleteClient, archiveMaster, restoreMaster, resolveDeleteMaster, archiveLocation, restoreLocation, resolveDeleteLocation, archiveService, restoreService, resolveDeleteService, archiveMaterial, restoreMaterial, resolveDeleteMaterial, archiveClient, restoreClient, resolveDeleteClient, resolveDeleteRecord, getAllMasters, getAllLocations, getAllServices, getAllMaterials, getAllTags } from './endpoints';
-import { ServiceCreateSchema, LocationCreateSchema, ActivityResponseSchema, type ServiceUpdate, type LocationUpdate, type ClientUpdate } from './schemas';
+import { getMasters, getMaster, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, deleteActivity, getWebPhotos, getPhotos, getClientsPaged, getRecords, getClients, getPayments, getPaymentTotals, createRecord, updateRecord, deleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, getClientByPhone, updateVisitStatus, getTags, createService, updateService, deleteService, createLocation, updateLocation, deleteLocation, getClientsWithStats, updateClient, patchClient, reorderMasters, reorderLocations, patchMaster, patchLocation, patchMaterial, patchService, patchUserSettings, getMaterials, getTag, getVisitors, deleteMaster, deleteMaterial, deleteClient, archiveMaster, restoreMaster, resolveDeleteMaster, archiveLocation, restoreLocation, resolveDeleteLocation, archiveService, restoreService, resolveDeleteService, archiveMaterial, restoreMaterial, resolveDeleteMaterial, archiveClient, restoreClient, resolveDeleteClient, resolveDeleteRecord, getAllMasters, getAllLocations, getAllServices, getAllMaterials, getAllTags } from './endpoints';
+import { ServiceCreateSchema, LocationCreateSchema, ActivityResponseSchema, PhotoListResponseSchema, ClientListResponseSchema, type ServiceUpdate, type LocationUpdate, type ClientUpdate } from './schemas';
 
 // Mock the api function from client
 vi.mock('./client', () => ({
@@ -128,6 +128,7 @@ describe('getMaterials', () => {
 
 // ─── Photos ─────────────────────────────────────────────────────────────────
 
+// spec §10.2: GET /photos/web is UNCHANGED — bare array, no pagination envelope.
 describe('getWebPhotos', () => {
   it('calls /api/v1/photos/web without query params', async () => {
     vi.mocked(api).mockResolvedValue([]);
@@ -142,6 +143,79 @@ describe('getWebPhotos', () => {
       '/api/v1/photos/web?activity_id=activity-1',
       expect.anything(),
     );
+  });
+
+  it('still parses a bare array (GH #211 did not paginate /photos/web)', async () => {
+    const photo = {
+      id: 'photo-1',
+      filename: 'workshop-2024.jpg',
+      client_id: null,
+      service_id: null,
+      activity_id: 'activity-1',
+      location_id: null,
+      is_public: true,
+      tags: [],
+      client_name: null,
+      created_at: '2024-06-01T12:00:00Z',
+      updated_at: '2024-06-01T12:00:00Z',
+    };
+    vi.mocked(api).mockResolvedValue([photo]);
+    const result = await getWebPhotos({ activity_id: 'activity-1' });
+    expect(Array.isArray(result)).toBe(true);
+    expect(result).toHaveLength(1);
+  });
+});
+
+// GH #211: getPhotos now fetches the paginated server list with filters/sort.
+describe('getPhotos', () => {
+  it('calls /api/v1/photos without query string when no params', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
+    await getPhotos();
+    expect(api).toHaveBeenCalledWith('/api/v1/photos', expect.anything());
+  });
+
+  it('parses the response with PhotoListResponseSchema', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
+    await getPhotos();
+    expect(api).toHaveBeenCalledWith('/api/v1/photos', PhotoListResponseSchema);
+  });
+
+  it('builds URL with pagination, q, filter, repeated tag_id and sort', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 2, per_page: 20 });
+    await getPhotos({
+      page: 2,
+      per_page: 20,
+      q: 'керамика',
+      client_id: 'c-1',
+      tag_id: ['t-1', 't-2'],
+      sort_by: 'created_at',
+      sort_order: 'desc',
+    });
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/photos?page=2&per_page=20&q=%D0%BA%D0%B5%D1%80%D0%B0%D0%BC%D0%B8%D0%BA%D0%B0&client_id=c-1&tag_id=t-1&tag_id=t-2&sort_by=created_at&sort_order=desc',
+      expect.anything(),
+    );
+  });
+
+  it('serializes owner filters (location, activity, service)', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
+    await getPhotos({ location_id: 'l-1', activity_id: 'a-1', service_id: 's-1' });
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/photos?location_id=l-1&activity_id=a-1&service_id=s-1',
+      expect.anything(),
+    );
+  });
+
+  it('omits undefined and null params from the URL', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
+    await getPhotos({ page: 1, per_page: 20, client_id: undefined, tag_id: undefined });
+    expect(api).toHaveBeenCalledWith('/api/v1/photos?page=1&per_page=20', expect.anything());
+  });
+
+  it('omits empty tag_id array (no repeated param emitted)', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
+    await getPhotos({ page: 1, tag_id: [] });
+    expect(api).toHaveBeenCalledWith('/api/v1/photos?page=1', expect.anything());
   });
 });
 
@@ -366,6 +440,37 @@ describe('getClientsWithStats', () => {
       '/api/v1/clients?page=1',
       expect.anything(),
     );
+  });
+});
+
+// ─── Clients Paged (GH #211: light paginated list for photo typeaheads) ─────
+
+describe('getClientsPaged', () => {
+  it('calls /api/v1/clients without query string when no params', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
+    await getClientsPaged({});
+    expect(api).toHaveBeenCalledWith('/api/v1/clients', expect.anything());
+  });
+
+  it('serializes q, pagination and status params', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 10 });
+    await getClientsPaged({ q: 'анна', per_page: 10, page: 1, status: 'active' });
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/clients?q=%D0%B0%D0%BD%D0%BD%D0%B0&per_page=10&page=1&status=active',
+      expect.anything(),
+    );
+  });
+
+  it('omits undefined and null params', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
+    await getClientsPaged({ q: undefined, status: undefined, page: undefined });
+    expect(api).toHaveBeenCalledWith('/api/v1/clients', expect.anything());
+  });
+
+  it('parses the response with ClientListResponseSchema', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
+    await getClientsPaged({ status: 'active' });
+    expect(api).toHaveBeenCalledWith('/api/v1/clients?status=active', ClientListResponseSchema);
   });
 });
 

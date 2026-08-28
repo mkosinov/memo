@@ -62,11 +62,13 @@ export type LocationResponse = z.infer<typeof LocationResponseSchema>;
 export const PhotoResponseSchema = z.object({
   id: z.string(),
   filename: z.string(),
-  visitor_id: z.string().nullable(),
+  client_id: z.string().nullable(), // GH #211: replaces visitor_id
   service_id: z.string().nullable(),
   activity_id: z.string().nullable(),
+  location_id: z.string().nullable(),
   is_public: z.boolean(),
   tags: z.array(z.object({ id: z.string(), tag: z.string() })).default([]),
+  client_name: z.string().nullable(), // denormalized for list display
   created_at: z.string(),
   updated_at: z.string(),
 });
@@ -527,6 +529,8 @@ export const PaymentListResponseSchema = paginatedSchema(PaymentResponseSchema);
 export const RecordListResponseSchema = paginatedSchema(RecordResponseSchema);
 export const VisitorListResponseSchema = paginatedSchema(VisitorResponseSchema);
 export const ClientListResponseSchema = paginatedSchema(ClientWithStatsSchema);
+export const PhotoListResponseSchema = paginatedSchema(PhotoResponseSchema);
+export type PhotoListResponse = z.infer<typeof PhotoListResponseSchema>;
 
 // ─── Bare-array /all dictionary responses (GH #205) ─────────────────────────
 

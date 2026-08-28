@@ -35,12 +35,19 @@ const DB_PATH = resolveDBPath();
  */
 export function cleanTestData() {
   try {
+    // dayview-column-reorder.spec.ts reorders seed masters/locations via
+    // PUT /masters/reorder (permanent sort_order writes) — that permutes the
+    // sidebar MasterLegend and corrupts every full-page baseline. Reset the
+    // seed order (seed.py _seed_masters/_seed_locations) alongside the row
+    // cleanup so visual baselines are deterministic.
     sqliteExecWithRetry(`sqlite3 "${DB_PATH}" "
       DELETE FROM payments WHERE length(id) > 3;
       DELETE FROM visits WHERE length(id) > 3;
       DELETE FROM records WHERE length(id) > 3;
       DELETE FROM activities WHERE id NOT LIKE 'ev\\_%' ESCAPE '\\' AND id NOT LIKE 'ev_fixed_%';
       DELETE FROM clients WHERE length(id) > 3;
+      UPDATE masters SET sort_order = CASE id WHEN 'm1' THEN 0 WHEN 'm2' THEN 1 WHEN 'm3' THEN 2 WHEN 'm4' THEN 3 WHEN 'm5' THEN 4 WHEN 'm7' THEN 5 ELSE sort_order END WHERE id IN ('m1','m2','m3','m4','m5','m7');
+      UPDATE locations SET sort_order = CASE id WHEN 'alpika' THEN 0 WHEN 'grand' THEN 1 WHEN 'p1389' THEN 2 ELSE sort_order END WHERE id IN ('alpika','grand','p1389');
     "`);
   } catch (err: any) {
     const msg = String(err?.stderr || err?.message || '');
@@ -566,4 +573,19 @@ export async function waitForPhotosReady(page: Page) {
   await page.waitForSelector('table', { timeout: 60_000 });
   await photosResponse.catch(() => {});
   await page.waitForTimeout(500);
+}
+
+/**
+ * Type into the PhotosFilters «Клиент» typeahead and pick the dropdown row
+ * by text. The typed value drives the server search (case-insensitive
+ * substring match on client name).
+ */
+export async function selectClientFilterOption(
+  page: Page,
+  queryText: string,
+  optionText: string,
+): Promise<void> {
+  const input = page.getByRole('textbox', { name: 'Клиент' });
+  await input.fill(queryText);
+  await page.getByRole('option', { name: optionText }).click();
 }

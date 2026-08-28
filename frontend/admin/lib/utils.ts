@@ -113,17 +113,12 @@ export function formatRecordLabel(activityStart: string | null | undefined): str
   return `${d.getDate()} ${MONTHS_GENITIVE[d.getMonth()]} · ${time}`;
 }
 
-/** Format ISO activity start for display: "HH:mm dd.mm.yyyy" (local time, GH #212). */
-export function formatActivityStart(iso: string): string {
-  const d = new Date(iso);
-  const p = (n: number) => String(n).padStart(2, '0');
-  return `${p(d.getHours())}:${p(d.getMinutes())} ${p(d.getDate())}.${p(d.getMonth() + 1)}.${d.getFullYear()}`;
-}
-
 /**
  * Date-first activity datetime — THE canonical project-wide representation
- * (spec §7.7, user-ruled 2026-08-27). "dd.mm.yyyy HH:mm", SAME local-time
- * semantics as formatActivityStart (GH #212) — only the order changes.
+ * (spec §7.7, user-ruled 2026-08-27). "dd.mm.yyyy HH:mm", local time
+ * (GH #212 semantics). formatActivityLabel builds on this (spec §7.7:
+ * formatActivityLabel is THE canonical label — formatActivityStart was
+ * removed with its last consumer, GH #211 Task 10).
  */
 export function formatActivityDateTime(iso: string): string {
   const d = new Date(iso);

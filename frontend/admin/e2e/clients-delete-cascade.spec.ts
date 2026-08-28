@@ -19,6 +19,7 @@ import {
   createTestClient,
   createTestClientTag,
   createTestPayment,
+  createTestPhoto,
   createTestRecord,
   createTestVisit,
   createTestVisitor,
@@ -28,6 +29,7 @@ import {
   confirmDeleteDialog,
   openRowActionDropdown,
   waitForClientsReady,
+  waitForPhotosReady,
   waitForToast,
 } from './fixtures/helpers';
 import { queryDBRow, queryDBRows } from './fixtures/db-query';
@@ -169,6 +171,70 @@ test.describe('S4 — Client delete with nullify + cascade resolutions', () => {
     } finally {
       await cleanupRecord(request, record.id);
       await cleanup(request, `/api/v1/activities/${activity.id}`);
+      await cleanup(request, `/api/v1/clients/${client.id}`);
+    }
+  });
+
+  // ── GH #211 extension — client-owned photos auto-nullify on delete ──────
+
+  test('client with photos — dry-run lists photos auto-nullify; after delete the photo row shows «—»', async ({ page, request }) => {
+    // SETUP: client owning one photo (4-owner model — the photo carries no
+    // other owner FK). The photos dep is auto (§4 matrix) — it previews in
+    // the dry-run tree but needs NO user resolution.
+    const client = await createTestClient(request, { name: `S4 Photos ${Date.now()}` });
+    const photo = await createTestPhoto(request, { client_id: client.id });
+
+    try {
+      await waitForClientsReady(page, { waitForName: client.name });
+      const row = page.locator('table tbody tr').filter({ hasText: client.name });
+      await expect(row).toBeVisible({ timeout: 10_000 });
+
+      // ACTION — request delete. Capture the dry-run 409 tree.
+      const dryRunPromise = page.waitForResponse((resp) =>
+        resp.url().includes(`/api/v1/clients/${client.id}`) && resp.status() === 409
+      );
+      const dropdown = await openRowActionDropdown(row);
+      await clickRowDelete(dropdown);
+      const dryRun = await dryRunPromise;
+      const dryRunJson = await dryRun.json();
+
+      // VERIFY — the tree lists the photos dep as auto-nullify.
+      const photosDep = (dryRunJson.dependencies as Array<{ entity: string; count: number; allowed_actions: string[] }>)
+        .find((d) => d.entity === 'photos');
+      expect(photosDep).toMatchObject({ count: 1, allowed_actions: ['nullify'] });
+
+      // VERIFY UI — the auto dep row renders (photos are auto → no click needed).
+      await expect(page.locator('[data-testid="delete-dialog"]')).toBeVisible();
+      await expect(page.locator('[data-testid="dep-photos"]')).toContainText('Фото');
+      await expect(page.locator('[data-testid="dep-photos"]')).toContainText('1');
+
+      // ACTION — confirm (typed name unlocks it); auto deps stay OUT of the
+      // resolutions body (server resolves them per §6 rule 3).
+      const resolvePromise = page.waitForResponse((resp) =>
+        resp.url().includes(`/api/v1/clients/${client.id}`) && resp.request().method() === 'DELETE'
+      );
+      await confirmDeleteDialog(page, client.name);
+      const resolve = await resolvePromise;
+      expect(resolve.status()).toBe(204);
+      const postBody = () => {
+        try { return JSON.parse(resolve.request().postData() ?? ''); }
+        catch { return undefined; }
+      };
+      expect(postBody()).toEqual({ resolutions: {} });
+      await waitForToast(page, 'Клиент удалён');
+
+      // VERIFY DB — photo survives the client delete with client_id NULLed.
+      expect(queryDBRow(`SELECT id FROM clients WHERE id='${client.id}'`)).toBeNull();
+      expect(queryDBRow(`SELECT client_id FROM photos WHERE id='${photo.id}'`)!.client_id).toBeNull();
+
+      // VERIFY UI — the photos table keeps the row; «Клиент» renders «—».
+      await waitForPhotosReady(page);
+      const photoRow = page.locator(`[data-testid="photo-row-${photo.id}"]`);
+      await expect(photoRow).toBeVisible({ timeout: 10_000 });
+      await expect(photoRow).toContainText('—');
+      await expect(photoRow).not.toContainText(client.name);
+    } finally {
+      await cleanup(request, `/api/v1/photos/${photo.id}`);
       await cleanup(request, `/api/v1/clients/${client.id}`);
     }
   });

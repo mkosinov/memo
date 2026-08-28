@@ -232,6 +232,26 @@ export async function createTestService(
   return await resp.json();
 }
 
+/**
+ * Create a test photo via backend API (GH #211 Task 10).
+ * The 4-owner model allows AT MOST ONE of client_id/service_id/activity_id/
+ * location_id — sending ≥2 yields a server 422 (used by the modal error e2e).
+ */
+export async function createTestPhoto(
+  api: APIRequestContext,
+  overrides?: Record<string, unknown>,
+) {
+  const resp = await api.post(`${BACKEND}/api/v1/photos`, {
+    data: {
+      filename: `/images/e2e-photo-${uid()}.jpg`,
+      is_public: true,
+      ...overrides,
+    },
+  });
+  expect(resp.ok()).toBeTruthy();
+  return await resp.json();
+}
+
 /** Create a test tag via backend API ({ id, tag }). */
 export async function createTestTag(
   api: APIRequestContext,
@@ -337,6 +357,13 @@ export function linkTag(
     table === 'master_tags'
       ? `INSERT INTO master_tags (master_id, tag_id) VALUES (${sqlValue(entityId)}, ${sqlValue(tagId)})`
       : `INSERT INTO client_tags (client_id, tag_id) VALUES (${sqlValue(entityId)}, ${sqlValue(tagId)})`,
+  );
+}
+
+/** Link a photo to a tag via the photo_tags join table (GH #211 Task 10). */
+export function linkPhotoTag(photoId: string, tagId: string): void {
+  executeSQL(
+    `INSERT INTO photo_tags (photo_id, tag_id) VALUES (${sqlValue(photoId)}, ${sqlValue(tagId)})`,
   );
 }
 

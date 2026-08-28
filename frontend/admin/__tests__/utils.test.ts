@@ -9,7 +9,6 @@ import {
   decimalToHHMM,
   hhmmToDecimal,
   formatActivityContext,
-  formatActivityStart,
   formatActivityDateTime,
   formatActivityLabel,
   formatRecordLabel,
@@ -219,16 +218,6 @@ describe('formatActivityContext', () => {
   it('formats Saturday June 6, 2026 14:00 correctly', () => {
     const date = new Date(2026, 5, 6, 14, 0); // June 6, 2026 = Saturday
     expect(formatActivityContext(date)).toBe('Сб, 6 июня · 14:00');
-  });
-});
-
-describe('formatActivityStart', () => {
-  it('formats ISO datetime as "HH:mm dd.mm.yyyy" (local time)', () => {
-    expect(formatActivityStart('2026-06-07T14:05:00')).toBe('14:05 07.06.2026');
-  });
-
-  it('zero-pads single-digit hours, minutes, days and months', () => {
-    expect(formatActivityStart('2026-01-05T09:07:00')).toBe('09:07 05.01.2026');
   });
 });
 

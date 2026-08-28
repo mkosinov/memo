@@ -14,6 +14,7 @@
 3. Columns: «Посетитель» replaced by «Клиент» (real names via `client_name`), «Услуга»/«Локация» show resolved titles, «Активность» hidden by default (raw id until #213), new «Дата» column.
 4. PhotoModal: «Клиент» picker replaces «Посетитель»; new «Локация» picker; picking Активность now CLEARS Услуга (auto-fill removed — they are mutually exclusive owners); submitting with 2+ owners shows a 422 error in the modal.
 5. Location-owned photos (standalone gallery: interiors/venues) are a first-class thing.
+6. Activity labels become canonical project-wide: «dd.mm.yyyy HH:mm — Локация — Услуга» (date-first, segments omitted when absent) via ONE shared `formatActivityLabel` — PhotoModal options/selected value, PhotosFilters typeahead; PhotoModal's datetime-only special case removed.
 
 **API:**
 6. `GET /api/v1/photos` → `PaginatedResponse[PhotoResponse]` with `page/per_page/q/client_id/location_id/activity_id/service_id/tag_id[]/sort_by/sort_order`; 422 on invalid params; unknown filter ids → empty page; `client_name` denormalized in the response.
@@ -43,6 +44,8 @@
 | `packages/api-client/tests/schemas.test.ts`, `packages/api-client/tests/endpoints.test.ts` | modify | photo contracts (incl. getWebPhotos unchanged) |
 | `frontend/admin/contexts/PhotosContext.tsx` | rewrite | server context (RecordsContext pattern) + services/locations maps |
 | `frontend/admin/contexts/__tests__/PhotosContext.test.tsx` | rewrite | server semantics tests |
+| `frontend/admin/lib/utils.ts` | modify | `formatActivityLabel(activity, locationsMap)` + date-first time part (next to `formatActivityStart:117`) |
+| `frontend/admin/__tests__/utils.test.ts` (or colocated suite) | create | formatter unit tests (spec §10.3) |
 | `frontend/admin/app/(main)/photos/components/PhotosFilters.tsx` | create | filter bar |
 | `frontend/admin/app/(main)/photos/photoColumns.tsx` | modify | 8 columns |
 | `frontend/admin/app/(main)/photos/components/PhotoModal.tsx` | modify | client/location pickers, auto-fill removal |
@@ -559,7 +562,37 @@ Rewrite `PhotosContext.test.tsx` (6 tests pin client-side slicing — replace): 
 
 ---
 
-## Task 7 — PhotosFilters component
+## Task 7 — `formatActivityLabel` shared formatter
+
+**Classification: small.**
+
+Create in `frontend/admin/lib/utils.ts` (next to `formatActivityStart:117-121`, which stays untouched for other consumers):
+
+```ts
+// Date-first activity label — THE canonical project-wide representation (spec §7.7, user-ruled 2026-08-27)
+export function formatActivityDateTime(iso: string): string {
+  // «dd.mm.yyyy HH:mm», SAME local-time semantics as formatActivityStart (#212) — only the order changes
+}
+
+export interface ActivityLike {
+  start: string;
+  location_id?: string | null;
+  service_title?: string | null;
+}
+
+export function formatActivityLabel(a: ActivityLike, locationsMap: Map<string, { title: string }>): string {
+  // «{dd.mm.yyyy HH:mm} — {location title} — {service_title}»
+  // Build parts array [dateTime, locationTitle, serviceTitle], drop absent segments
+  // (location: only when locationsMap resolves the id — archived locations are NOT in the active-only
+  // /locations/all map → segment silently omitted, no dangling «—»), join with « — ».
+}
+```
+
+RED first (`utils` test suite): date-first order; full 3-segment label; no location → 2 segments; no service_title → 2 segments; neither → date-time only; archived/unresolvable location_id → segment omitted; no dangling separators in any combination. GREEN → implement. `npm run test`. Commit: `feat(#211): formatActivityLabel canonical activity label helper`
+
+---
+
+## Task 8 — PhotosFilters component
 
 **Classification: standard.**
 
@@ -575,11 +608,11 @@ Create `frontend/admin/app/(main)/photos/components/PhotosFilters.tsx` — layou
 // every control change → setFilters({...filters, <field>: value}) → context resets page to 1
 ```
 
-Item mapping for activities formats `start` like the PhotoModal closure (`%H:%M %d.%m.%Y`). Wire into the photos page above PhotosTable. Unit tests (`PhotosFilters.test.tsx`): renders 5 controls + reset; change → setFilters called with right payload; chips add/remove. Run `npm run test`. Commit: `feat(#211): PhotosFilters bar`
+Activity options use the canonical label: map items via `formatActivityLabel(a, locationsMap)` (context map from Task 6) into a `label` field the SearchableSelect renders (`displayField: 'label'`). Wire into the photos page above PhotosTable. Unit tests (`PhotosFilters.test.tsx`): renders 5 controls + reset; change → setFilters called with right payload; activity options carry the canonical label (mocked getActivities + locationsMap); chips add/remove. Run `npm run test`. Commit: `feat(#211): PhotosFilters bar`
 
 ---
 
-## Task 8 — photoColumns + PhotoModal
+## Task 9 — photoColumns + PhotoModal
 
 **Classification: standard.**
 
@@ -614,12 +647,13 @@ useEffect(() => { setForm((f) => f.activity_id ? { ...f, activity_id: null } : f
 
 (Implement with the file's actual state mechanism — the semantic requirement is: setting one of the pair clears the other; no auto-fill.)
 4. Server 422 on ≥2 owners surfaces via the existing error catch — no new mechanics.
+5. **Canonical activity label (spec §7.7):** in the activity branch, stop pre-formatting `start` via `formatActivityStart` + `displayField: 'service_title'` (`photoFields.tsx:48-55`, `PhotoModal.tsx:109-133`) — map options to `{...a, label: formatActivityLabel(a, locationsMap)}` with `displayField: 'label'`, `subtitleField: undefined`, for BOTH dropdown rows and the selected-value rendering. REMOVE the "datetime-only when service already selected" displayField special case (`PhotoModal.tsx:121-125`). The modal's `getLocationsAll()` map (location picker, step 2) feeds the label — no extra fetch. Update `__tests__/PhotoModal.test.tsx` label assertions (`:231-232` currently expects `service_title` + «HH:mm dd.mm.yyyy») to the canonical date-first form. Verification grep (unification proof, spec §7.7 consumer list): `grep -rn "formatActivityStart\|subtitleField" frontend/admin --include="*.tsx" | grep -v __tests__` — remaining `formatActivityStart` hits must be inside `lib/utils.ts` only (or pre-existing non-photos consumers, if any appear — unify them to the formatter too).
 
-Tests: `photoColumns` render + sortable flags + defaultVisible; PhotoModal — client picker present/visitor absent, location picker, activity-clears-service and vice versa, 422 mock surfaces. `npm run test:all`. Commit: `feat(#211): photo columns + modal pickers + owner replace semantics`
+Tests: `photoColumns` render + sortable flags + defaultVisible; PhotoModal — client picker present/visitor absent, location picker, activity-clears-service and vice versa, canonical label in options + selected value, 422 mock surfaces. `npm run test:all`. Commit: `feat(#211): photo columns + modal pickers + owner replace semantics + canonical activity label`
 
 ---
 
-## Task 9 — E2E
+## Task 10 — E2E
 
 **Classification: standard.**
 
@@ -631,20 +665,21 @@ Tests: `photoColumns` render + sortable flags + defaultVisible; PhotoModal — c
 4. Service filter (variant A): pick service → direct + activity-derived photos both visible.
 5. Location filter: pick L1 → location-OWNED photo visible; activity-owned photos at L1 NOT visible (seed pin from Task 4).
 6. Tags AND: select T1+T2 chips → only the pair photo.
-7. Modal: create photo with client + location; attempt client+service → error surfaced; activity pick clears service field.
+7. Modal: create photo with client + location; attempt client+service → error surfaced; activity pick clears service field; selected activity value displays the canonical label («dd.mm.yyyy HH:mm — …», date-first visible).
 8. `clients-delete-cascade.spec.ts`: extend with photos — client with photos → dry-run tree lists photos auto-nullify; after delete, photo row shows «Клиент» = «—».
 
 Run the photos + clients-delete e2e suites; `npm run test:all` green. Commit: `test(#211): honest photos e2e — pagination/search/filters/modal`
 
 ---
 
-## Task 10 — Docs
+## Task 11 — Docs
 
 **Classification: trivial.**
 
 1. `docs/domain-rules/photos.md`: fields table (4 owners + client_name response field + location_id), Cross-field rule (≤1 owner, 422 on ≥2, DB CHECK), Invariants (+ group copies independent rows; owner-less allowed), endpoints table (paginated + params), Business Logic (AND tag filter, variant A service filter).
 2. `docs/domain-rules/visitors.md`: remove Photo relationship.
 3. `docs/domain-rules/clients.md` + `locations.md`: delete-cascade sections gain "photos → nullify (auto)".
+4. `docs/domain-rules/activities.md` (create if absent): pin `«{dd.mm.yyyy HH:mm} — {location title} — {service_title}»` as the PROJECT-WIDE activity display convention (spec §7.7 — shared formatter, segment omission, #213 cross-pin); back-ref from photos.md.
 4. `docs/specs/2026-08-19-list-search-q-design.md`: add supersession note near the photos non-goal line — "Amended by #211 (2026-08-27): photos list now has server `q`."
 
 Commit: `docs(#211): domain rules + #212 spec supersession note`

@@ -13,8 +13,21 @@ interface SearchableFieldConfig {
   key: string;
   label: string;
   displayField: string;
-  subtitleField?: string;
   placeholder?: string;
+  required?: boolean;
+}
+
+/**
+ * Plain <select> field (GH #211 Task 9). Options are supplied by the
+ * FieldRenderer (dictionary-backed), NOT stored here — the field config stays
+ * a pure description of the form shape.
+ */
+interface SelectFieldConfig {
+  type: 'select';
+  key: string;
+  label: string;
+  /** Empty-value option text (e.g. «Без локации»). */
+  emptyLabel: string;
   required?: boolean;
 }
 
@@ -26,17 +39,20 @@ interface TagsFieldConfig {
   required?: boolean;
 }
 
-export type PhotoFieldConfig = TextFieldConfig | SearchableFieldConfig | TagsFieldConfig;
+export type PhotoFieldConfig =
+  | TextFieldConfig
+  | SearchableFieldConfig
+  | SelectFieldConfig
+  | TagsFieldConfig;
 
 export const PHOTO_FIELDS: PhotoFieldConfig[] = [
   { type: 'text', key: 'filename', label: 'Имя файла', required: true, placeholder: 'photo-001.jpg' },
   {
     type: 'searchable',
-    key: 'visitor_id',
-    label: 'Посетитель',
+    key: 'client_id',
+    label: 'Клиент',
     displayField: 'name',
-    subtitleField: 'age',
-    placeholder: 'Введите имя...',
+    placeholder: 'Введите имя клиента...',
   },
   {
     type: 'searchable',
@@ -46,12 +62,20 @@ export const PHOTO_FIELDS: PhotoFieldConfig[] = [
     placeholder: 'Введите название...',
   },
   {
+    // Canonical activity label (spec §7.7) — options AND the selected value
+    // render the pre-formatted `label` field («dd.mm.yyyy HH:mm — Локация —
+    // Услуга»); no subtitle, no datetime-only special case.
     type: 'searchable',
     key: 'activity_id',
     label: 'Активность',
-    displayField: 'service_title',
-    subtitleField: 'start',
-    placeholder: 'Введите услугу или дату...',
+    displayField: 'label',
+    placeholder: 'Введите для поиска...',
+  },
+  {
+    type: 'select',
+    key: 'location_id',
+    label: 'Локация',
+    emptyLabel: 'Без локации',
   },
   {
     type: 'tags',

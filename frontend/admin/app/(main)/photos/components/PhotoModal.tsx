@@ -1,12 +1,19 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, useId } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useId } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { PHOTO_FIELDS, type PhotoFieldConfig } from './photoFields';
 import SearchableSelect from '@/app/components/shared/SearchableSelect';
 import { Modal } from '@/app/components/shared/modal/Modal';
-import { getVisitors, getServices, getActivities, getTags } from '@memo/api-client';
-import type { PhotoResponse } from '@memo/api-client';
-import { formatActivityStart } from '@/lib/utils';
+import {
+  getClientsPaged,
+  getServices,
+  getActivities,
+  getTags,
+  getAllLocations,
+} from '@memo/api-client';
+import type { LocationResponse, PhotoResponse } from '@memo/api-client';
+import { formatActivityLabel } from '@/lib/utils';
 
 export interface PhotoModalProps {
   mode: 'create' | 'edit';
@@ -17,6 +24,9 @@ export interface PhotoModalProps {
   subtitle?: string;
 }
 
+/** The four mutually-exclusive owner slots (GH #211 §6.2). */
+const OWNER_KEYS = ['client_id', 'service_id', 'activity_id', 'location_id'] as const;
+
 /* ── Local inline field renderer ─────────────────────────────────── */
 
 interface FieldRendererProps {
@@ -24,10 +34,24 @@ interface FieldRendererProps {
   value: unknown;
   onChange: (key: string, value: unknown) => void;
   error?: string;
-  formData?: Record<string, unknown>;
+  /** <select> options — supplied by the modal (dictionary-backed). */
+  selectOptions?: { value: string; label: string }[];
+  /** Locations map feeding the canonical activity label (spec §7.7). */
+  locationTitleMap?: Map<string, { title: string }>;
+  /** Remount key for searchable fields — bumped when the owner is cleared
+   *  by its mutually-exclusive pair, so the typeahead drops its stale label. */
+  remountKey?: number;
 }
 
-function FieldRenderer({ field, value, onChange, error, formData }: FieldRendererProps) {
+function FieldRenderer({
+  field,
+  value,
+  onChange,
+  error,
+  selectOptions,
+  locationTitleMap,
+  remountKey,
+}: FieldRendererProps) {
   const baseId = useId();
   const inputId = `${baseId}-${field.key}`;
   const errorId = `${baseId}-${field.key}-error`;
@@ -95,56 +119,76 @@ function FieldRenderer({ field, value, onChange, error, formData }: FieldRendere
   }
 
   if (field.type === 'searchable') {
-    // Map field keys to search functions
-    let searchFn;
-    let displayField = field.displayField;
-    let subtitleField = field.subtitleField;
-    let onSelectItem: ((item: Record<string, unknown>) => void) | undefined;
-    
-    if (field.key === 'visitor_id') {
-      searchFn = async (q: string) => (await getVisitors({ q, per_page: 10 })).items;
+    // Map field keys to search functions (GH #211: client/service/activity —
+    // visitor_id is gone; owners are mutually exclusive, no auto-fill).
+    // SearchableSelect's SearchItem shape: { id: string; [key: string]: unknown }.
+    let searchFn: (q: string) => Promise<Array<{ id: string; [key: string]: unknown }>>;
+
+    if (field.key === 'client_id') {
+      // Photo pickers always request active clients only (spec §7.3).
+      searchFn = async (q: string) =>
+        (await getClientsPaged({ q, per_page: 10, status: 'active' })).items.map((c) => ({
+          ...c,
+          name: c.name || 'Дорогой гость',
+        }));
     } else if (field.key === 'service_id') {
       searchFn = async (q: string) => (await getServices({ q, per_page: 10 })).items;
     } else {
-      // For activity_id, pass the selected service_id if available
-      const selectedServiceId = formData?.service_id as string | null;
+      // activity_id — options carry THE canonical label (spec §7.7):
+      // «dd.mm.yyyy HH:mm — Локация — Услуга» via formatActivityLabel; the
+      // modal's getAllLocations() map feeds it (no extra fetch). No subtitle,
+      // no datetime-only special case — options AND the selected value render
+      // the same label.
+      const titleMap = locationTitleMap ?? new Map<string, { title: string }>();
       searchFn = async (q: string) => {
-        const res = await getActivities({
-          q,
-          service_id: selectedServiceId || undefined,
-          per_page: 10,
-        });
-        // SearchableSelect renders raw field values — format ISO start for display
-        return res.items.map((a) => ({ ...a, start: formatActivityStart(a.start) }));
-      };
-      
-      // If service is already selected, show only datetime (not service_title)
-      if (selectedServiceId) {
-        displayField = 'start';
-        subtitleField = undefined;
-      }
-      
-      // Auto-fill service when activity is selected
-      onSelectItem = (item) => {
-        if (item.service_id) {
-          onChange('service_id', item.service_id);
-        }
+        const res = await getActivities({ q, per_page: 10 });
+        return res.items.map((a) => ({ ...a, label: formatActivityLabel(a, titleMap) }));
       };
     }
 
     return (
       <div className="flex flex-col gap-1">
         <SearchableSelect
+          key={remountKey ?? 0}
           value={(value as string) ?? null}
           onChange={(uuid) => onChange(field.key, uuid)}
-          onSelectItem={onSelectItem}
           onSearch={searchFn}
           label={field.label}
-          displayField={displayField}
-          subtitleField={subtitleField}
+          displayField={field.displayField}
           placeholder={field.placeholder}
           required={field.required}
         />
+        {errorEl}
+      </div>
+    );
+  }
+
+  if (field.type === 'select') {
+    return (
+      <div className="flex flex-col gap-1">
+        <label
+          htmlFor={inputId}
+          className="text-xs font-medium"
+          style={{ color: 'var(--ink-light)' }}
+        >
+          {field.label}
+          {field.required && <span className="text-red-500 ml-0.5">*</span>}
+        </label>
+        <select
+          id={inputId}
+          value={String(value ?? '')}
+          onChange={(e) => onChange(field.key, e.target.value || null)}
+          className={baseInputClasses}
+          style={baseStyle}
+          aria-describedby={ariaDescribedBy}
+        >
+          <option value="">{field.emptyLabel}</option>
+          {(selectOptions ?? []).map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
         {errorEl}
       </div>
     );
@@ -205,9 +249,54 @@ export function PhotoModal({
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isDirty, setIsDirty] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // Remount counters for the searchable owner fields — bumped when the
+  // mutually-exclusive pair clears a selection, so the typeahead re-renders
+  // without its stale selectedLabel (PhotosFilters resetKey precedent).
+  const [fieldRemount, setFieldRemount] = useState<Record<string, number>>({});
+
+  // Locations dictionary — same ['locations'] cache key as PhotosContext, so
+  // inside the provider this is a cache hit (no extra fetch). Feeds BOTH the
+  // «Локация» select options and the canonical activity label (§7.7).
+  const { data: locations = [] } = useQuery<LocationResponse[]>({
+    queryKey: ['locations'],
+    queryFn: () => getAllLocations(),
+    staleTime: Infinity,
+  });
+
+  const locationOptions = useMemo(
+    () => locations.map((l) => ({ value: l.id, label: l.name })),
+    [locations],
+  );
+
+  // formatActivityLabel's contract is Map<string, { title }> — adapt the
+  // LocationResponse list (locations carry `name`, not `title`).
+  const locationTitleMap = useMemo(() => {
+    const map = new Map<string, { title: string }>();
+    locations.forEach((l) => map.set(l.id, { title: l.name }));
+    return map;
+  }, [locations]);
 
   const handleChange = useCallback((key: string, value: unknown) => {
-    setFormData((prev) => ({ ...prev, [key]: value }));
+    setFormData((prev) => {
+      const next = { ...prev, [key]: value };
+      // Mutually-exclusive owner pair (GH #211 §6.2): picking an activity
+      // clears the selected service and vice versa — no auto-fill. Done in
+      // the change handler (not effects) so the pair can never ping-pong.
+      if (key === 'activity_id' && value && prev.service_id) {
+        next.service_id = null;
+      } else if (key === 'service_id' && value && prev.activity_id) {
+        next.activity_id = null;
+      }
+      return next;
+    });
+    // The cleared counterpart must remount so its typeahead drops the stale
+    // selected label (functional update — stable callback identity).
+    // Bumping even when the pair was already empty is harmless: the remount
+    // of a clean typeahead changes nothing visible.
+    if (key === 'activity_id' || key === 'service_id') {
+      const other = key === 'activity_id' ? 'service_id' : 'activity_id';
+      setFieldRemount((prev) => ({ ...prev, [other]: (prev[other] ?? 0) + 1 }));
+    }
     setIsDirty(true);
     setErrors((prev) => {
       const next = { ...prev };
@@ -233,11 +322,17 @@ export function PhotoModal({
   const handleSubmit = async () => {
     if (!validate()) return;
     setIsSubmitting(true);
+    // Owners travel as null (never '') — matches PhotoCreate/PhotoUpdate and
+    // lets the server's ≥2-owner 422 surface through the existing catch.
+    const payload: Record<string, unknown> = { ...formData };
+    OWNER_KEYS.forEach((k) => {
+      payload[k] = typeof payload[k] === 'string' && payload[k] !== '' ? payload[k] : null;
+    });
     try {
-      await onSubmit(formData);
+      await onSubmit(payload);
       onClose();
     } catch {
-      // Toast handled by caller
+      // Toast handled by caller; modal stays open so the error is actionable
     } finally {
       setIsSubmitting(false);
     }
@@ -311,7 +406,9 @@ export function PhotoModal({
               value={formData[field.key]}
               onChange={handleChange}
               error={errors[field.key]}
-              formData={formData}
+              selectOptions={locationOptions}
+              locationTitleMap={locationTitleMap}
+              remountKey={fieldRemount[field.key]}
             />
           ))}
 

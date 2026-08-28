@@ -1,19 +1,36 @@
 'use client';
 
-import type { PhotoResponse } from '@memo/api-client';
+import React from 'react';
+import type { LocationResponse, PhotoResponse, ServiceResponse } from '@memo/api-client';
 import type { ColumnDef, RowAction } from '@/app/components/shared/tableTypes';
 
 /**
- * Columns config for the Photos table (#139 T7). Extracted VERBATIM from the
- * pre-#139 PhotosTable COLUMNS + cell JSX. All keys stay sortable — the old
- * table attached onClick-sort to EVERY header (preview sorts a no-op column,
- * parity preserved), and the client adapter only sorts when a user picks one.
+ * Columns config for the Photos table (GH #211 Task 9). Eight columns — the
+ * four owner slots render from the list response itself («Клиент» via the
+ * denormalized client_name; «Услуга»/«Локация» resolved through the /all
+ * dictionaries) and «Активность» stays a raw id until #213 links it.
+ *
+ * Sortable ONLY filename/is_public/created_at — the server PhotoSortBy
+ * whitelist (domain-rules/photos.md); every other column is sortable:false so
+ * the header click is a no-op (preview/client/service/location/activity).
  */
-export const photoColumns = (): ColumnDef<PhotoResponse>[] => [
+
+export interface PhotoColumnLookup {
+  servicesMap: Map<string, ServiceResponse>;
+  locationsMap: Map<string, LocationResponse>;
+}
+
+/** «07.06.2026» — clientColumns' formatDate precedent (date-first, ru-RU). */
+function formatDate(iso: string): string {
+  return new Date(iso).toLocaleDateString('ru-RU');
+}
+
+export const photoColumns = ({ servicesMap, locationsMap }: PhotoColumnLookup): ColumnDef<PhotoResponse>[] => [
   {
     key: 'preview',
     label: 'Превью',
     defaultVisible: true,
+    sortable: false,
     width: 'w-[80px]',
     render: (p) => (
       <div className="w-12 h-12 rounded-lg overflow-hidden bg-gray-100 flex items-center justify-center">
@@ -36,34 +53,55 @@ export const photoColumns = (): ColumnDef<PhotoResponse>[] => [
     key: 'filename',
     label: 'Файл',
     defaultVisible: true,
+    sortField: 'filename',
     width: 'flex-1',
     render: (p) => <span className="font-medium">{p.filename}</span>,
   },
   {
-    key: 'visitor',
-    label: 'Посетитель',
+    key: 'client',
+    label: 'Клиент',
     defaultVisible: true,
+    sortable: false,
     width: 'w-[150px]',
-    render: (p) => <span style={{ color: 'var(--ink-mid)' }}>{p.visitor_id || '—'}</span>,
+    render: (p) => <span style={{ color: 'var(--ink-mid)' }}>{p.client_name ?? '—'}</span>,
   },
   {
     key: 'service',
     label: 'Услуга',
-    defaultVisible: false,
+    defaultVisible: true,
+    sortable: false,
     width: 'w-[150px]',
-    render: (p) => <span style={{ color: 'var(--ink-mid)' }}>{p.service_id || '—'}</span>,
+    render: (p) => (
+      <span style={{ color: 'var(--ink-mid)' }}>
+        {servicesMap.get(p.service_id ?? '')?.title ?? '—'}
+      </span>
+    ),
+  },
+  {
+    key: 'location',
+    label: 'Локация',
+    defaultVisible: true,
+    sortable: false,
+    width: 'w-[150px]',
+    render: (p) => (
+      <span style={{ color: 'var(--ink-mid)' }}>
+        {locationsMap.get(p.location_id ?? '')?.name ?? '—'}
+      </span>
+    ),
   },
   {
     key: 'activity',
     label: 'Активность',
-    defaultVisible: false,
+    defaultVisible: false, // raw id until #213 links it (plan Task 9)
+    sortable: false,
     width: 'w-[150px]',
-    render: (p) => <span style={{ color: 'var(--ink-mid)' }}>{p.activity_id || '—'}</span>,
+    render: (p) => <span style={{ color: 'var(--ink-mid)' }}>{p.activity_id ?? '—'}</span>,
   },
   {
     key: 'is_public',
     label: 'Публичное',
     defaultVisible: true,
+    sortField: 'is_public',
     width: 'w-[100px]',
     render: (p) => (
       <span
@@ -74,6 +112,14 @@ export const photoColumns = (): ColumnDef<PhotoResponse>[] => [
         {p.is_public ? 'Да' : 'Нет'}
       </span>
     ),
+  },
+  {
+    key: 'created_at',
+    label: 'Дата',
+    defaultVisible: true,
+    sortField: 'created_at',
+    width: 'w-[110px]',
+    render: (p) => <span style={{ color: 'var(--ink-mid)' }}>{formatDate(p.created_at)}</span>,
   },
 ];
 

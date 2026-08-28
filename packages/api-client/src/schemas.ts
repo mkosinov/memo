@@ -76,12 +76,14 @@ export const PhotoResponseSchema = z.object({
 export type PhotoResponse = z.infer<typeof PhotoResponseSchema>;
 
 // ─── PhotoCreate (request body) ──────────────────────────────────────────
-
+// GH #211: 4-owner model — at most ONE of client_id/service_id/activity_id/
+// location_id may be non-null (server 422s on ≥2; visitor_id is gone).
 export const PhotoCreateSchema = z.object({
   filename: z.string().min(1),
-  visitor_id: z.string().optional().default(''),
-  service_id: z.string().optional().default(''),
-  activity_id: z.string().optional().default(''),
+  client_id: z.string().nullable().optional(),
+  service_id: z.string().nullable().optional(),
+  activity_id: z.string().nullable().optional(),
+  location_id: z.string().nullable().optional(),
   is_public: z.boolean().default(false),
   tag_ids: z.array(z.string()).default([]),
 });

@@ -14,6 +14,9 @@ import {
   type ActivityResponse,
   PhotoResponseSchema,
   PhotoListResponseSchema,
+  PhotoCreateSchema,
+  PhotoUpdateSchema,
+  type PhotoCreate,
   type PhotoResponse,
   VisitResponseSchema,
   type VisitResponse,
@@ -359,6 +362,38 @@ describe('PhotoResponseSchema', () => {
   it('rejects missing required field', () => {
     const { id, ...without } = validPhoto;
     expect(() => PhotoResponseSchema.parse(without)).toThrow();
+  });
+});
+
+describe('PhotoCreateSchema / PhotoUpdateSchema (GH #211 4-owner model)', () => {
+  // Backend PhotoCreate (schemas/photo.py): filename required; owner slots
+  // client_id/service_id/activity_id/location_id all optional-null; NO
+  // visitor_id (dropped in GH #211).
+  it('parses a create payload with the 4 owner slots', () => {
+    const result = PhotoCreateSchema.parse({
+      filename: 'a.jpg',
+      client_id: 'client-1',
+      service_id: null,
+      activity_id: null,
+      location_id: null,
+      is_public: true,
+      tag_ids: ['tag-1'],
+    });
+    expect(result.filename).toBe('a.jpg');
+    expect(result.client_id).toBe('client-1');
+    expect(result.is_public).toBe(true);
+    expect(result.tag_ids).toEqual(['tag-1']);
+  });
+
+  it('rejects visitor_id on the PhotoCreate type', () => {
+    const data: PhotoCreate = { filename: 'a.jpg' };
+    // @ts-expect-error visitor_id no longer exists on PhotoCreate
+    expect(data.visitor_id).toBeUndefined();
+  });
+
+  it('PhotoUpdateSchema accepts a partial payload (PATCH-like)', () => {
+    const result = PhotoUpdateSchema.parse({ location_id: 'loc-1' });
+    expect(result.location_id).toBe('loc-1');
   });
 });
 

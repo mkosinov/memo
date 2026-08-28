@@ -553,7 +553,7 @@ const query = useQuery({
 
 // setFilters/setSearch reset page to 1 (RecordsContext precedent :100-103)
 // page-clamp effect when page > totalPages (last-row-deleted case)
-// dictionary loads: getServicesAll() + getLocationsAll() once → servicesMap, locationsMap
+// dictionary loads: getAllServices() + getAllLocations() once → servicesMap, locationsMap
 ```
 
 Export the `PagedListState`-aligned shape the DataTable consumes (`items/total/page/perPage/…` per #139 contract) plus `filters/setFilters`, `resetFilters` (clears filters + search, page 1), `servicesMap`, `locationsMap`. Context field stays `search`/`setSearch` (contract name; maps to `q` at the fetcher — spec §7.2).
@@ -601,9 +601,9 @@ Create `frontend/admin/app/(main)/photos/components/PhotosFilters.tsx` — layou
 ```tsx
 // Клиент: SearchableSelect, onSearch={(q) => getClientsPaged({ q, per_page: 10, status: "active" }).then(r => r.items.map(clientOption))}
 // Активность: SearchableSelect, onSearch={(q) => getActivities({ q, per_page: 10 }).then(mapActivityOption)}
-// Услуга: <select> over servicesMap (or getServicesAll) — «Все услуги» empty option
+// Услуга: <select> over servicesMap (or getAllServices) — «Все услуги» empty option
 // Локация: <select> over locationsMap — «Все локации»
-// Теги: chips + add-typeahead (PhotoModal multi-emulation pattern, PhotoModal.tsx:49-94) over getTagsAll()
+// Теги: chips + add-typeahead (PhotoModal multi-emulation pattern, PhotoModal.tsx:49-94) over getAllTags()
 // Сбросить: onClick={() => resetFilters()}
 // every control change → setFilters({...filters, <field>: value}) → context resets page to 1
 ```
@@ -635,7 +635,7 @@ export const photoColumns: ColumnDef<PhotoResponse>[] = [
 
 `PhotoModal.tsx` + `photoFields.tsx`:
 1. Remove «Посетитель» field; add «Клиент» searchable field: `onSearch → getClientsPaged({ q, per_page: 10, status: "active" })`.
-2. Add «Локация» picker: plain `<select>` over `getLocationsAll()` — extend the field-type union with a `select` member (options prop) if `photoFields.tsx` lacks one.
+2. Add «Локация» picker: plain `<select>` over `getAllLocations()` — extend the field-type union with a `select` member (options prop) if `photoFields.tsx` lacks one.
 3. REMOVE the activity→service auto-fill effect (`PhotoModal.tsx:118-121`); replace with mutually-exclusive pair semantics:
 
 ```tsx
@@ -647,7 +647,7 @@ useEffect(() => { setForm((f) => f.activity_id ? { ...f, activity_id: null } : f
 
 (Implement with the file's actual state mechanism — the semantic requirement is: setting one of the pair clears the other; no auto-fill.)
 4. Server 422 on ≥2 owners surfaces via the existing error catch — no new mechanics.
-5. **Canonical activity label (spec §7.7):** in the activity branch, stop pre-formatting `start` via `formatActivityStart` + `displayField: 'service_title'` (`photoFields.tsx:48-55`, `PhotoModal.tsx:109-133`) — map options to `{...a, label: formatActivityLabel(a, locationsMap)}` with `displayField: 'label'`, `subtitleField: undefined`, for BOTH dropdown rows and the selected-value rendering. REMOVE the "datetime-only when service already selected" displayField special case (`PhotoModal.tsx:121-125`). The modal's `getLocationsAll()` map (location picker, step 2) feeds the label — no extra fetch. Update `__tests__/PhotoModal.test.tsx` label assertions (`:231-232` currently expects `service_title` + «HH:mm dd.mm.yyyy») to the canonical date-first form. Verification grep (unification proof, spec §7.7 consumer list): `grep -rn "formatActivityStart\|subtitleField" frontend/admin --include="*.tsx" | grep -v __tests__` — remaining `formatActivityStart` hits must be inside `lib/utils.ts` only (or pre-existing non-photos consumers, if any appear — unify them to the formatter too).
+5. **Canonical activity label (spec §7.7):** in the activity branch, stop pre-formatting `start` via `formatActivityStart` + `displayField: 'service_title'` (`photoFields.tsx:48-55`, `PhotoModal.tsx:109-133`) — map options to `{...a, label: formatActivityLabel(a, locationsMap)}` with `displayField: 'label'`, `subtitleField: undefined`, for BOTH dropdown rows and the selected-value rendering. REMOVE the "datetime-only when service already selected" displayField special case (`PhotoModal.tsx:121-125`). The modal's `getAllLocations()` map (location picker, step 2) feeds the label — no extra fetch. Update `__tests__/PhotoModal.test.tsx` label assertions (`:231-232` currently expects `service_title` + «HH:mm dd.mm.yyyy») to the canonical date-first form. Verification grep (unification proof, spec §7.7 consumer list): `grep -rn "formatActivityStart\|subtitleField" frontend/admin --include="*.tsx" | grep -v __tests__` — remaining `formatActivityStart` hits must be inside `lib/utils.ts` only (or pre-existing non-photos consumers, if any appear — unify them to the formatter too).
 
 Tests: `photoColumns` render + sortable flags + defaultVisible; PhotoModal — client picker present/visitor absent, location picker, activity-clears-service and vice versa, canonical label in options + selected value, 422 mock surfaces. `npm run test:all`. Commit: `feat(#211): photo columns + modal pickers + owner replace semantics + canonical activity label`
 

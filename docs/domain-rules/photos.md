@@ -24,7 +24,7 @@ Response-only field: `client_name` (nullable, denormalized on GET /api/v1/photos
 
 ## Invariants
 - Photos are hard-deleted (row physically removed). Photo is a general resource — on owner deletion (Client/Service/Activity/Location), the photo's owner FK is set to NULL (photo survives, becomes owner-less); the photo is never deleted by cascade.
-- Group photos = N independent rows with distinct `client_id` (same filename); copies are created individually via the single-owner modal; no sync mechanism.
+- Group photos = N independent rows with distinct `client_id` (same filename); copies are created individually via the single-owner modal; no grouping/sync mechanism exists (#224 closed as not-planned).
 - Zero owners at rest is legal (parent deletion or direct creation with no owner).
 
 ## Business Logic
@@ -45,18 +45,20 @@ Response-only field: `client_name` (nullable, denormalized on GET /api/v1/photos
 ### Frontend
 - PhotoGallery public/private toggle
 - Bulk upload with tag picker
+- Owner slots are mutually exclusive in the UI: picking `activity_id` clears `service_id` and vice versa (no auto-fill)
 - Service/location titles resolve client-side via `/all` maps; `client_name` is the only denormalized response field
+- Activity display labels use the canonical `formatActivityLabel` convention — see `activities.md` → "Display label convention". #213 (display-lookup composite) will centralize activity display data further — the canonical label is cross-pinned there.
 
 ## API Endpoints
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | /api/v1/photos/web | List public photos (gallery; bare array, unpaginated) |
-| GET | /api/v1/photos | Paginated list (page/per_page/q/filters/sort; `PaginatedResponse[PhotoResponse]` envelope with honest total) |
-| GET | /api/v1/photos/{id} | Get |
-| POST | /api/v1/photos | Create |
-| PUT | /api/v1/photos/{id} | Full update (filename + is_public required) |
-| PATCH | /api/v1/photos/{id} | Partial update (tag_ids hard-replace when sent) |
-| DELETE | /api/v1/photos/{id} | Hard delete |
+| Method | Path | Params | Description |
+|--------|------|--------|-------------|
+| GET | /api/v1/photos/web | — | List public photos (gallery; bare array, unpaginated) |
+| GET | /api/v1/photos | `page`, `per_page`, `q` (filename substring, 2–100 chars), `client_id`, `location_id` (direct-only), `activity_id`, `service_id` (variant A: direct OR via activity), `tag_id` (repeatable, AND), `sort_by` (`filename` \| `is_public` \| `created_at`), `sort_order` | Paginated list (`PaginatedResponse[PhotoResponse]` envelope with honest total) |
+| GET | /api/v1/photos/{id} | — | Get |
+| POST | /api/v1/photos | — | Create |
+| PUT | /api/v1/photos/{id} | — | Full update (filename + is_public required) |
+| PATCH | /api/v1/photos/{id} | — | Partial update (tag_ids hard-replace when sent) |
+| DELETE | /api/v1/photos/{id} | — | Hard delete |
 
 ## Relationships
 - Photo → belongs to (Client | Service | Activity | Location) — at most one of the four

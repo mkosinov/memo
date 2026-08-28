@@ -111,21 +111,23 @@ Model/DB → is_active: bool column (UNCHANGED — no migration, no rename)
 | Master → **master_tags** (join) | NOT NULL PK | **cascade** (auto) | auto |
 | Location → **activities** (location_id) | NOT NULL | **block** | N/A — `allowed_actions: []` |
 | Location → **location_tags** (join) | NOT NULL PK | **cascade** (auto) | auto |
+| Location → **photos** (location_id) | nullable | **nullify** (auto) | auto — photo survives, becomes owner-less (GH #211) |
 | Service → **activities** (service_id) | NOT NULL | **block** | N/A — `allowed_actions: []` |
 | Service → **tariffs** (service_id) | NOT NULL | **cascade** (auto) | auto |
 | Service → **photos** (service_id) | nullable | **nullify** (auto) | auto |
 | Service → **service_tags** (join) | NOT NULL PK | **cascade** (auto) | auto |
 | Client → **records** (client_id) | nullable | **nullify** | choice: `["nullify"]` — record survives, becomes anonymous |
-| Client → **visitors** (client_id) | NOT NULL | **cascade** | choice: `["cascade"]` — via `VisitorService._delete_cascade` (visits → photos SET NULL → visitor_tags → visitor). Payments are NOT part of the cascade (record-scoped, survive — see cascade_preview rule below). |
+| Client → **visitors** (client_id) | NOT NULL | **cascade** | choice: `["cascade"]` — via `VisitorService._delete_cascade` (visits → visitor_tags → visitor). Payments are NOT part of the cascade (record-scoped, survive — see cascade_preview rule below). |
 | Client → **client_tags** (join) | NOT NULL PK | **cascade** (auto) | auto |
+| Client → **photos** (client_id) | nullable | **nullify** (auto) | auto — photo survives, becomes owner-less (GH #211) |
 
 **Key rules:**
 
 - **`activities = always block`** (`allowed_actions: []`). `activities.{master,location,service}_id` are NOT NULL, and `Activity` has no `is_active` (extends `AbstractModel`, not `AbstractModelSoftDelete` per #194) so it cannot be archived. DELETE is impossible while activities exist — the only option is archive.
-- **Auto deps** (join tables `*_tags`, unambiguous relations tariffs / photos-service, **Master→users** per §4.1) resolve automatically — no user choice. Server ignores any resolution the user sends for an auto dep; auto wins.
+- **Auto deps** (join tables `*_tags`, unambiguous relations tariffs / **photos** (client/location/service auto-nullify), **Master→users** per §4.1) resolve automatically — no user choice. Server ignores any resolution the user sends for an auto dep; auto wins.
 - **Master→users delete cascade (§4.1, Change 2):** `DELETE /masters/{id}` with a linked `users` row hard-deletes the user row automatically (auto-cascade, no user choice). Rationale: User is the login account, Master is the profile; deleting the profile but keeping the account = orphan. The ONLY non-join auto-cascade besides Service→tariffs.
 - **Master→users archive/restore cascade (§4.2, Change 3):** `MasterService.archive()`/`restore()` write the linked `users.is_active` in the same transaction. Master-only — the other 4 entities do NOT cascade to any user on archive/restore. This is an archive-cascade (sets `is_active`), not a delete cascade.
-- **Client→visitors cascade** runs via an **extracted non-decorated core** (`VisitorService._delete_cascade`) inside the single outer `ClientService.resolve_delete` `@transactional` transaction — NOT a per-visitor `@transactional` loop (atomicity requirement, §8): each `@transactional` commits its own session, so a mid-loop failure would leave prior work committed. Cascade order: visits → photos SET NULL → visitor_tags → visitor. Payments are **not** part of this cascade (record-scoped, survive with the nullified records — see the `cascade_preview` rule below).
+- **Client→visitors cascade** runs via an **extracted non-decorated core** (`VisitorService._delete_cascade`) inside the single outer `ClientService.resolve_delete` `@transactional` transaction — NOT a per-visitor `@transactional` loop (atomicity requirement, §8): each `@transactional` commits its own session, so a mid-loop failure would leave prior work committed. Cascade order: visits → visitor_tags → visitor. Photo `visitor_id` was dropped in GH #211 — photos are not part of this cascade (client-owned photos are auto-nullified by the client delete itself, see the matrix row above). Payments are **not** part of this cascade (record-scoped, survive with the nullified records — see the `cascade_preview` rule below).
 - **`cascade_preview` reports visits count only** for the Client → visitors cascade. `Payment` is **record-scoped** (`payments.record_id → records.id`); Client→records is *nullify* (records survive, become anonymous), so their payments are NOT part of the visitors cascade and survive with the nullified records. Absent for nullify actions (nothing downstream is hard-deleted).
 
 ### 409 / 422 contract (DELETE `/{id}`)

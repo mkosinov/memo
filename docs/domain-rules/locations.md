@@ -80,6 +80,7 @@ Location is one of the 5 archive-aware entities. PUT/PATCH no longer accept `is_
 |---|---|---|---|
 | **activities** (location_id) | NOT NULL | **block** | N/A — `allowed_actions: []`. Activity has no `is_active`, cannot be archived; user must remove activities manually OR archive the location. |
 | **location_tags** (join) | NOT NULL PK | **cascade** (auto) | auto — join table rows deleted automatically. |
+| **photos** (location_id) | nullable | **nullify** (auto) | auto — photo survives, becomes owner-less (GH #211). |
 
 - **DELETE `/{id}` (no body):** zero deps → 204 hard delete (row gone). Any dep → 409 + dependency tree. `activities` present → 409 with `allowed_actions: []` (blocks DELETE; only archive is offered).
-- **DELETE `/{id}` (with body):** Location has no non-auto deps (`location_tags` is auto) → the resolutions body is `{}`. Server resolves `location_tags` automatically, then hard-deletes the location row. Blocked (`activities` present) → 422 always.
+- **DELETE `/{id}` (with body):** Location has no non-auto deps (`location_tags` and `photos` are auto) → the resolutions body is `{}`. Server resolves `location_tags` (auto-cascade) and `photos` (auto-nullify — GH #211) automatically, then hard-deletes the location row. Blocked (`activities` present) → 422 always.

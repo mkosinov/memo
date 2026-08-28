@@ -21,7 +21,7 @@ A Visitor is an individual person attending a master class. Visitors belong to a
 
 ### Backend
 - **Scoped to Client:** list_by_client(client_id) returns all visitors for the client
-- **Cascade on delete:** hard-delete cascades to Visits (visits hard-deleted); photos have `visitor_id` set to NULL (photos survive); visitor_tag join rows cleaned
+- **Cascade on delete:** hard-delete cascades to Visits (visits hard-deleted); visitor_tag join rows cleaned. Photo `visitor_id` was dropped in GH #211 — photos are NOT linked to visitors (no photo cleanup in this cascade).
 - **Auto-created by RecordService** when name-based visit is created
 - **List-all endpoint:** `GET /api/v1/visitors` — paginated generic list, introduced in #183 **for contract completeness with GenericService** so visitors is no longer the only generic entity excluded from generic list contract coverage (#184/#185). It supersedes the previous no-list-all rule. The **production-use read path for visitors remains the scoped `GET /clients/{id}/visitors`** — the bare list is a contract endpoint, not a production consumer-facing read path.
 
@@ -48,7 +48,7 @@ The `q` predicate lands BEFORE the COUNT (inherited from `BaseRepository.list`),
 | POST | /api/v1/visitors | Create |
 | PUT | /api/v1/visitors/{id} | Update |
 | PATCH | /api/v1/visitors/{id} | Partial update |
-| DELETE | /api/v1/visitors/{id} | Hard delete (cascade: visits hard-deleted, photos SET NULL, tag join rows cleaned) |
+| DELETE | /api/v1/visitors/{id} | Hard delete (cascade: visits hard-deleted, tag join rows cleaned) |
 
 ## Relationships
 - Visitor → belongs to Client

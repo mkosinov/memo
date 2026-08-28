@@ -130,7 +130,12 @@ async def test_seed_activity_tags_exist(db_manager: DBManager) -> None:
 
 
 async def test_seed_populates_photos(db_manager: DBManager) -> None:
-    """Seed script creates 7 photos."""
+    """Seed script creates 7 photos with mutually exclusive owners (GH #211).
+
+    Layout: 2 client-owned (same client), 1 service-owned, 2 activity-owned
+    (guest photos, activities co-located at L1='alpika'), 1 location-owned
+    (L1 interior shot), 1 owner-less tag-pair photo ([T1=tag1, T2=tag2]).
+    """
     from src.seed.seed import seed_data
 
     await seed_data(db_manager)
@@ -139,15 +144,61 @@ async def test_seed_populates_photos(db_manager: DBManager) -> None:
         result = await session.execute(text("SELECT COUNT(*) FROM photos"))
         assert result.scalar() == 7
 
+        # ≥1 location-owned photo (location gallery owner slot in use)
+        result = await session.execute(
+            text("SELECT COUNT(*) FROM photos WHERE location_id IS NOT NULL")
+        )
+        assert result.scalar() >= 1
+
+        # no photo combines location_id with another owner (scenario 5 base)
+        result = await session.execute(
+            text(
+                "SELECT COUNT(*) FROM photos WHERE location_id IS NOT NULL "
+                "AND (client_id IS NOT NULL OR service_id IS NOT NULL "
+                "OR activity_id IS NOT NULL)"
+            )
+        )
+        assert result.scalar() == 0
+
+        # no multi-owner row at all (mirrors CHECK ck_photos_single_owner)
+        result = await session.execute(
+            text(
+                "SELECT COUNT(*) FROM photos WHERE (client_id IS NOT NULL) "
+                "+ (service_id IS NOT NULL) + (activity_id IS NOT NULL) "
+                "+ (location_id IS NOT NULL) > 1"
+            )
+        )
+        assert result.scalar() == 0
+
+        # the both-tags pair exists: a photo carrying T1 AND T2 (AND-demo)
+        result = await session.execute(
+            text(
+                "SELECT COUNT(*) FROM photo_tags pt1 "
+                "JOIN photo_tags pt2 ON pt1.photo_id = pt2.photo_id "
+                "WHERE pt1.tag_id = 'tag1' AND pt2.tag_id = 'tag2'"
+            )
+        )
+        assert result.scalar() >= 1
+
 
 async def test_seed_photos_guest_tagged(db_manager: DBManager) -> None:
-    """Guest photos (ph6, ph7) are tagged with 'гость'."""
+    """Guest photos (ph6, ph7) are tagged with 'гость'; tag rows total 5.
+
+    photo_tags layout (GH #211): guest ×2 (both activity photos),
+    T1+T2 pair (owner-less demo photo), T1 single (one activity photo).
+    """
     from src.seed.seed import seed_data
 
     await seed_data(db_manager)
 
     async with db_manager.async_session() as session:
         result = await session.execute(text("SELECT COUNT(*) FROM photo_tags"))
+        assert result.scalar() == 5
+
+        # guest tag (tag7) still marks exactly the 2 activity-owned photos
+        result = await session.execute(
+            text("SELECT COUNT(*) FROM photo_tags WHERE tag_id = 'tag7'")
+        )
         assert result.scalar() == 2
 
 

@@ -446,39 +446,58 @@ async def _seed_activity_tags(session) -> None:
 
 
 async def _seed_photos(session) -> None:
-    """Seed public photos linked to services/activities + guest tagged."""
+    """Seed 7 photos with mutually exclusive owners (GH #211).
+
+    Layout (L1='alpika', T1='tag1', T2='tag2'):
+    - ph1, ph2 — client-owned by the SAME client (c1); filenames share the
+      substring "client" for q-search e2e
+    - ph3 — service-owned card image (s1)
+    - ph4 — location-OWNED interior shot (alpika) → scenario 5 pin: location
+      filter L1 returns only this photo, not the activity-owned ones
+    - ph5 — owner-less tag-pair photo ([T1, T2]) → tags AND demo
+    - ph6, ph7 — activity-owned guest photos (tag 'гость'); both activities
+      are located at L1='alpika'; ph6 additionally carries T1 only
+    """
     photos = [
-        {"id": "ph1", "filename": "/images/card-seascape.jpg", "service_id": "s1",
-         "activity_id": None, "is_public": True},
-        {"id": "ph2", "filename": "/images/card-mountain-acrylic.jpg", "service_id": "s2",
-         "activity_id": None, "is_public": True},
-        {"id": "ph3", "filename": "/images/card-watercolor.jpg", "service_id": "s4",
-         "activity_id": None, "is_public": True},
-        {"id": "ph4", "filename": "/images/card-family.jpg", "service_id": "s5",
-         "activity_id": None, "is_public": True},
-        {"id": "ph5", "filename": "/images/card-shopper.jpg", "service_id": "s6",
-         "activity_id": None, "is_public": True},
-        {"id": "ph6", "filename": "/images/guest-1.jpg", "service_id": None,
-         "activity_id": "ev_0", "is_public": True},
-        {"id": "ph7", "filename": "/images/guest-2.jpg", "service_id": None,
-         "activity_id": "ev_4", "is_public": True},
+        {"id": "ph1", "filename": "/images/client-work-1.jpg", "client_id": "c1",
+         "is_public": True},
+        {"id": "ph2", "filename": "/images/client-work-2.jpg", "client_id": "c1",
+         "is_public": True},
+        {"id": "ph3", "filename": "/images/card-seascape.jpg", "service_id": "s1",
+         "is_public": True},
+        {"id": "ph4", "filename": "/images/studio-alpika-interior.jpg",
+         "location_id": "alpika", "is_public": True},
+        {"id": "ph5", "filename": "/images/tag-pair.jpg", "is_public": True},
+        # ev_1 and ev_4 both run at location 'alpika' (L1) — see
+        # _ACTIVITIES_RAW indices 1 and 4.
+        {"id": "ph6", "filename": "/images/guest-1.jpg", "activity_id": "ev_1",
+         "is_public": True},
+        {"id": "ph7", "filename": "/images/guest-2.jpg", "activity_id": "ev_4",
+         "is_public": True},
     ]
     for p in photos:
         session.add(Photo(**p))
     # Flush photo rows so the photo_tags FK insert below sees them (#207 §11.3).
     await session.flush()
 
-    # Tag ph6, ph7 as "гость" via photo_tags
-    for photo_id in ["ph6", "ph7"]:
+    # Tag links: guest ×2 activity photos, T1+T2 pair, T1 single (AND demo).
+    tag_links = [
+        ("ph5", "tag1"),  # T1
+        ("ph5", "tag2"),  # T2 — ph5 carries BOTH → tags AND filter demo
+        ("ph6", "tag7"),  # гость
+        ("ph6", "tag1"),  # + T1 only → excluded when T1+T2 AND-filtered
+        ("ph7", "tag7"),  # гость
+    ]
+    for photo_id, tag_id in tag_links:
         result = await session.execute(
             select(photo_tags).where(
                 photo_tags.c.photo_id == photo_id,
-                photo_tags.c.tag_id == "tag7",
+                photo_tags.c.tag_id == tag_id,
             )
         )
         if not result.first():
             await session.execute(
-                photo_tags.insert().values(photo_id=photo_id, tag_id="tag7")
+                photo_tags.insert().values(photo_id=photo_id, tag_id=tag_id)
             )
 
 

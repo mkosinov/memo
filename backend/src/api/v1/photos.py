@@ -10,7 +10,13 @@ from sqlalchemy.orm import selectinload
 from src.db import SessionDep
 from src.errors import ErrorCode, ErrorDetail
 from src.models.photo import Photo
-from src.schemas.photo import PhotoCreate, PhotoPatch, PhotoResponse, PhotoUpdate
+from src.schemas.photo import (
+    PhotoCreate,
+    PhotoListParams,
+    PhotoPatch,
+    PhotoResponse,
+    PhotoUpdate,
+)
 from src.services.generic import GenericService
 from src.services.photo import get_photo_service
 
@@ -47,8 +53,14 @@ async def list_public_photos(
 async def list_photos(
     service: _ServiceDep,
     session: SessionDep,
+    params: Annotated[PhotoListParams, Query()],
 ) -> list[PhotoResponse]:
-    """Return all photos (admin view)."""
+    """Return all photos (admin view).
+
+    ``params`` (page/per_page/q/filters/sort) is validated at the router
+    level; server-side filtering/sorting/pagination lands with the service
+    rewrite (GH #211 Task 3).
+    """
     return await service.list(db_session=session)
 
 

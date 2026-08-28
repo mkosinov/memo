@@ -96,6 +96,39 @@ class TestPhotosWebEndpoint:
         assert photo.filename == "schema_test.jpg"
 
 
+# Owner IDs for the two-owners 422 test — the multiple-owner validator
+# fires before any DB access, so arbitrary UUIDs are sufficient.
+C1 = "11111111-1111-1111-1111-111111111111"
+S1 = "22222222-2222-2222-2222-222222222222"
+
+
+class TestPhotosListParams:
+    """GET /api/v1/photos — query param validation (#211 Task 2)."""
+
+    @pytest.mark.parametrize("bad", [
+        {"page": 0},
+        {"per_page": 0},
+        {"per_page": 101},
+        {"q": "a"},
+        {"q": "x" * 101},
+        {"sort_by": "client_id"},
+        {"sort_order": "up"},
+    ])
+    def test_photos_list_params_422(self, api_client, bad) -> None:
+        """Invalid page/per_page/q/sort values return 422."""
+        response = api_client.get("/api/v1/photos", params=bad)
+        assert response.status_code == 422
+
+    def test_photo_create_two_owners_422(self, api_client) -> None:
+        """POST with two owner IDs (client_id + service_id) returns 422."""
+        response = api_client.post("/api/v1/photos", json={
+            "filename": "a.jpg",
+            "client_id": C1,
+            "service_id": S1,
+        })
+        assert response.status_code == 422
+
+
 class TestPhotosCRUD:
     """Full CRUD tests for photo endpoints."""
 

@@ -11,23 +11,29 @@ class TestPhotoResponse:
     """PhotoResponse schema creation and validation."""
 
     def test_photo_response_construct(self):
-        """PhotoResponse can be constructed with all required fields."""
+        """PhotoResponse can be constructed with all required fields
+        (4-owner model + denormalized client_name, GH #211)."""
         from src.schemas.photo import PhotoResponse
 
         now = datetime.utcnow()
         schema = PhotoResponse(
             id="123e4567-e89b-12d3-a456-426614174000",
             filename="photo_001.jpg",
-            visitor_id=None,
-            service_id=None,
+            client_id=None,
+            service_id="22222222-2222-2222-2222-222222222222",
             activity_id=None,
+            location_id=None,
             is_public=True,
+            client_name="Anna Karenina",
             created_at=now,
             updated_at=now,
         )
         assert schema.id == "123e4567-e89b-12d3-a456-426614174000"
         assert schema.filename == "photo_001.jpg"
         assert schema.is_public is True
+        assert schema.client_name == "Anna Karenina"
+        assert schema.client_id is None
+        assert schema.location_id is None
 
     def test_photo_response_default_is_public(self):
         """PhotoResponse defaults is_public to False."""

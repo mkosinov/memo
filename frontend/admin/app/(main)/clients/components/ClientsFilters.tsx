@@ -1,10 +1,13 @@
 'use client';
 
-import { useCallback, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useClients } from '@/contexts/ClientsContext';
 import type { ClientFilters } from '@/contexts/ClientsContext';
 
-function useDebouncedCallback(callback: (value: string) => void, delay: number): (value: string) => void {
+function useDebouncedCallback(
+  callback: (value: string) => void,
+  delay: number,
+): { debounced: (value: string) => void; cancel: () => void } {
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const debounced = useCallback(
@@ -17,14 +20,53 @@ function useDebouncedCallback(callback: (value: string) => void, delay: number):
     [callback, delay],
   );
 
-  return debounced;
+  const cancel = useCallback(() => {
+    if (timeoutRef.current !== null) {
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
+  }, []);
+
+  // GH #216: no setState-after-unmount from an armed timer
+  useEffect(() => cancel, [cancel]);
+
+  return { debounced, cancel };
 }
 
 export function ClientsFilters() {
   const { filters, setFilters, resetFilters } = useClients();
-  const debouncedSearch = useDebouncedCallback((value: string) => {
-    setFilters({ search: value });
-  }, 300);
+  // dirtyRef is declared BEFORE the debounce hook that closes over it
+  const dirtyRef = useRef(false);
+  const { debounced: debouncedSearch, cancel: cancelSearch } = useDebouncedCallback(
+    (value: string) => {
+      dirtyRef.current = false; // our send fired — the landing commit is expected
+      setFilters({ search: value });
+    },
+    300,
+  );
+
+  // GH #216: controlled search input. Render-adjust pattern (react.dev
+  // "adjust state during render", no effect): when the committed search
+  // changes externally (deep-link ?clientId= pre-fill, reset) and the user
+  // has NOT typed since our last send, sync the draft and cancel any armed
+  // timer. If the user typed ahead (dirty), the armed send is authoritative.
+  const [prevCommitted, setPrevCommitted] = useState(filters.search);
+  const [draft, setDraft] = useState(filters.search);
+
+  if (filters.search !== prevCommitted) {
+    setPrevCommitted(filters.search);
+    if (!dirtyRef.current) {
+      setDraft(filters.search);
+      cancelSearch();
+    }
+  }
+
+  const handleReset = useCallback(() => {
+    cancelSearch();
+    dirtyRef.current = false;
+    setDraft('');
+    resetFilters();
+  }, [cancelSearch, resetFilters]);
 
   const inputClass = 'rounded-lg border px-2 py-1.5 text-xs';
   const inputStyle = { borderColor: 'var(--line)' };
@@ -36,7 +78,13 @@ export function ClientsFilters() {
         placeholder="🔍 Поиск по имени или телефону"
         className={`w-full ${inputClass}`}
         style={inputStyle}
-        onChange={(e) => debouncedSearch(e.target.value)}
+        value={draft}
+        onChange={(e) => {
+          const value = e.target.value;
+          setDraft(value);
+          dirtyRef.current = true;
+          debouncedSearch(value);
+        }}
       />
       <div className="flex flex-wrap gap-4">
         <div>
@@ -89,7 +137,7 @@ export function ClientsFilters() {
           </div>
         </div>
       </div>
-      <button onClick={resetFilters} className="text-xs text-brand hover:underline">
+      <button onClick={handleReset} className="text-xs text-brand hover:underline">
         Сбросить фильтры
       </button>
     </div>

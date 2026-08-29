@@ -400,4 +400,34 @@ describe('ClientsPage — ?clientId= deep-link (GH #216)', () => {
       expect(mockRouter.replace).toHaveBeenCalledWith('/clients', { scroll: false }),
     );
   });
+
+  it('closing the deep-link modal does not re-open it while the param is still in the URL', async () => {
+    mockSearchParams = new URLSearchParams([['clientId', 'c-deep-1']]);
+    const target = { id: 'c-deep-1', name: 'Deep Target', archived: false } as ClientWithStats;
+    mockUseClients.mockReturnValue(
+      createMockClientsContext({ items: [target], clients: [target] }),
+    );
+
+    const ClientsPage = (await import('../app/(main)/clients/page')).default;
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <ClientsPage />
+      </QueryClientProvider>,
+    );
+
+    // Deep-link opens the modal via the find-effect.
+    await waitFor(() => {
+      expect(screen.getByTestId('client-card-modal')).toBeInTheDocument();
+    });
+
+    // User closes the modal. In the unit env `mockRouter.replace` is a vi.fn()
+    // that does NOT mutate mockSearchParams, so the param REMAINS in the URL —
+    // exactly the race window where the bug bites: selectedClient=null +
+    // param present → find-effect re-runs and re-opens the modal.
+    fireEvent.click(screen.getByTestId('modal-close'));
+
+    await waitFor(() =>
+      expect(screen.queryByTestId('client-card-modal')).not.toBeInTheDocument(),
+    );
+  });
 });

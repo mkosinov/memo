@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — 2026-08-29
+
+### Added
+- **GH #216 — Clients `?clientId=` deep-link opens ClientCardModal from any list position (fixes the US-6 e2e flake)** — branch `feat/clients-deeplink-216` (7 commits: 30e460e..0d036f8):
+  - **Frontend:** `/clients?clientId={id}` (producer: ActivityDetailsModal `window.open` → fresh mount) now opens ClientCardModal for ANY existing client — the new deep-link effect programmatically narrows the table via `setFilters({ search: id, status: 'all' })` → server `q=` full-UUID exact-id match (#212 prerequisite) → ≤1 row on page 1 → the existing find-effect opens the modal with server-computed stats. Status is force-set to `all` so archived clients are reachable (display default stays `active`). On modal close the search box is NOT auto-cleared (the user sees why the table is narrowed); dead links (client deleted) strip the param once the narrowed fetch settles empty — no refresh re-narrowing loop.
+  - **Controlled search input (ClientsFilters):** search box became controlled (render-adjust pattern + cancellable debounce — no sync-effect footgun): external commits (deep-link / reset) render in the box, commit echo never clobbers newer keystrokes, stale debounce timers cancelled; bonus fix: «Сбросить фильтры» now clears the visible box (previously left a stale string and an armed timer could re-apply the cleared search).
+  - **Backend:** ZERO production change — the exact-id `q` match already landed uniformly in #212; T1 contract tests (`test_client_stats.py`) pin the deep-link combo: `status=all` + full-UUID `q` → archived client (1 row, `total 1`) and uppercase-UUID normalization at the clients API level. Premise guard: T1 red would escalate the phase to BLOCKED instead of shipping a silently-broken frontend fix.
+  - **Tests:** backend pytest 1433p/0f/8s (baseline 1431 +2); api-client 226p/4f (4 = pre-existing #188, unchanged); admin vitest 1550p/0f (baseline 1526 +24), `tsc` clean, lint 0 errors (37 warnings pre-existing); e2e — clients.spec 19/19 (incl. new deterministic page-2+ regression: 20 filler clients + premise self-check guard asserting the target is NOT on unfiltered page 1 + post-close contract), test-19 flake-check 3/3, **unify-caches 7/7 with US-6 GREEN (unedited — the origin anchor)**, admin-opens-profile 1/1; full rest-shard 216p/12f → 12 = 11 known pre-existing visual overrides (#229 ×8, #226 ×3) + 1 the-close-race (then FIXED via Two-Gate, re-verified green); visual gate G4.5 6/6 on desktop+mobile (Playwright evidence, screenshots `/tmp/visual-compliance-216/manual/`).
+  - **Deviations for the record:** post-verification bug fix via the Two-Gate Protocol — the close-race (modal briefly re-opened in the window between `setSelectedClient(null)` and the param-strip `router.replace`) killed by a **consumed-latch** added to the find-effect (RED unit test first, spec-review ✅) — sanctioned deviation from the plan's "find-effect verbatim".
+  - **Docs:** domain-rules `clients.md` synced (deep-link contract, commit `d872cf7`).
+  - **Closes:** #216. Follow-ups filed by DESIGN (spec §10): #231 (derive deep-link search from the URL at initial render to kill the wasted default-key round trip), #232 (if deep-linking scales, revisit a dedicated `?id=` + page-resolution endpoint instead of the UUID-in-search-box compromise).
+  - Design spec: `docs/specs/2026-08-29-clients-deeplink-clientid-design.md` (on main)
+  - Plan: `docs/plans/2026-08-29-clients-deeplink-clientid-plan.md` (on main)
+
 ## [Unreleased] — 2026-08-28
 
 ### Added

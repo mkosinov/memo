@@ -33,7 +33,7 @@ How this feature behaves for the user, mapped to spec acceptance criteria:
 |---|---|---|
 | `backend/tests/test_client_stats.py` | modify (append 2 tests) | Premise-guard contract tests: `status=all`+UUID→archived row; uppercase UUID |
 | `frontend/admin/app/(main)/clients/components/ClientsFilters.tsx` | modify | Controlled search input: render-adjust sync, cancellable debounce, dirty-tracking |
-| `frontend/admin/__tests__/ClientsFilters.test.tsx` | create | Unit tests for the controlled input (fake timers) |
+| `frontend/admin/__tests__/ClientsFilters.test.tsx` | modify (append describe block) | Unit tests for the controlled input (fake timers) |
 | `frontend/admin/app/(main)/clients/page.tsx` | modify | Deep-link effect + dead-link param cleanup |
 | `frontend/admin/__tests__/ClientsPage.test.tsx` | modify | Unit tests for the deep-link effect (parameterized searchParams mock) |
 | `frontend/admin/e2e/clients.spec.ts` | modify (append describe) | Deterministic page-2+ regression e2e incl. post-close contract |
@@ -119,7 +119,7 @@ Convert the uncontrolled debounced search input into a controlled input that (a)
 
 Steps:
 
-- [ ] RED: create `frontend/admin/__tests__/ClientsFilters.test.tsx`:
+- [ ] RED: `frontend/admin/__tests__/ClientsFilters.test.tsx` **already exists** (26 tests — status select, range inputs, debounce regressions; do NOT touch or replace them). Append the new describe block below to the END of the file, adapting its `useClients` mock to the file's existing mock conventions if they differ from the sketch:
 
 ```tsx
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -153,7 +153,7 @@ describe('ClientsFilters — controlled search input (GH #216)', () => {
     vi.restoreAllMocks();
   });
 
-  const searchInput = () => screen.getByPlaceholderText('Поиск по имени или телефону');
+  const searchInput = () => screen.getByPlaceholderText(/Поиск по имени или телефону/);
 
   it('displays an externally committed search value (deep-link UUID pre-fill)', () => {
     mockContext({ search: '11111111-2222-3333-4444-555555555555' });
@@ -419,7 +419,7 @@ describe('ClientsPage — ?clientId= deep-link (GH #216)', () => {
 
   it('find-effect opens the modal when the narrowed row arrives', async () => {
     mockSearchParams = new URLSearchParams([['clientId', 'c-deep-1']]);
-    const target = { id: 'c-deep-1', name: 'Deep Target', archived: false };
+    const target = { id: 'c-deep-1', name: 'Deep Target', archived: false } as ClientWithStats;
     mockUseClients.mockReturnValue(
       createMockClientsContext({ items: [target], clients: [target] }),
     );
@@ -439,7 +439,7 @@ describe('ClientsPage — ?clientId= deep-link (GH #216)', () => {
 
   it('row not in items: modal stays closed (negative find branch)', async () => {
     mockSearchParams = new URLSearchParams([['clientId', 'c-missing']]);
-    const other = { id: 'c-other', name: 'Other', archived: false };
+    const other = { id: 'c-other', name: 'Other', archived: false } as ClientWithStats;
     mockUseClients.mockReturnValue(
       createMockClientsContext({ items: [other], clients: [other] }),
     );
@@ -605,9 +605,8 @@ test.describe('Deep-link ?clientId= — #216', () => {
 });
 ```
 
-  - `BACKEND` is not currently imported in the spec file — import it from the same module `fixtures/factories.ts` imports it from (check the import block at the top of `factories.ts`; likely `../config` or a constant exported by factories itself). Add it to the existing import statement from that module.
-  - `uid`, `createTestClient`, `cleanup`, `closeByBackdrop` are already in scope (factories import + local helper).
-  - If the status-select locator `div:has(> label:text-is("Статус")) > select` does not match the rendered DOM (verify in the first run's trace), adjust to the actual structure — the assertion itself (select shows `all`) is the contract, the locator is mechanical.
+  - `uid`, `createTestClient`, `cleanup`, `closeByBackdrop` are already in scope; **`BACKEND` is already declared in `clients.spec.ts` (~line 11) — no import change needed.**
+  - If the status-select locator `div:has(> label:text-is("Статус")) > select` does not match the rendered DOM, debug the live DOM (`page.pause()` or a temporary screenshot — traces are `on-first-retry` only) and adjust the locator; the assertion itself (select shows `all`) is the contract, the locator is mechanical.
 
 - [ ] Ensure the dev stack is up per dev-workflow (backend :8000 + frontend :3000).
 - [ ] Run just this test: `cd frontend/admin && npx playwright test e2e/clients.spec.ts --grep "19."` 
@@ -646,6 +645,7 @@ test.describe('Deep-link ?clientId= — #216', () => {
 - [ ] Type-check + lint: clean
 - [ ] E2E: `cd frontend/admin && npx playwright test` (full suite, dev stack up; serial mode if the suite config requires it) → only pre-existing classified failures allowed (none expected to touch clients)
 - [ ] api-client untouched: `git diff --stat main -- packages/api-client` → empty
+- [ ] G4.5 visual gate (spec §8), dev stack on :3000: `./scripts/visual-compliance-check.sh http://localhost:3000 docs/specs/2026-08-29-clients-deeplink-clientid-design.md /tmp/visual-compliance-216 desktop` and the same with `mobile` → all checks pass (run by the architect at IMPL Step 4.5; listed here so the gate is not lost)
 
 ## Self-Review (architect, recorded)
 

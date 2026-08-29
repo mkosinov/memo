@@ -119,7 +119,7 @@ Convert the uncontrolled debounced search input into a controlled input that (a)
 
 Steps:
 
-- [ ] RED: `frontend/admin/__tests__/ClientsFilters.test.tsx` **already exists** (26 tests — status select, range inputs, debounce regressions; do NOT touch or replace them). Append ONLY the new `describe` block below to the END of the file, with these mandatory adaptations: **(a)** STRIP the sketch's header — its `import` lines, `vi.mock('@/contexts/ClientsContext')`, and `mockUseClients` are already declared at the top of the existing file (duplicate declarations = SyntaxError); keep only imports the existing file lacks (e.g. `act`); **(b)** the sketch's local `mockFiltersContext` helper stays local to the describe (renamed on purpose to avoid colliding with the file's existing helpers) — adapt its return shape if the file's `useClients` mock typing requires the full context shape:
+- [ ] RED: `frontend/admin/__tests__/ClientsFilters.test.tsx` **already exists** (25 tests — status select, range inputs, debounce regressions; do NOT touch or replace them). Append ONLY the new `describe` block below to the END of the file, with these mandatory adaptations: **(a)** STRIP the sketch's header — its `import` lines, `vi.mock('@/contexts/ClientsContext')`, and `mockUseClients` are already declared at the top of the existing file (duplicate declarations = SyntaxError); keep ONLY imports the existing file verifiably lacks (check its import block first — none are expected); **(b)** the sketch's local `mockFiltersContext` helper stays local to the describe (renamed on purpose to avoid colliding with the file's existing helpers) — adapt its return shape if the file's `useClients` mock typing requires the full context shape:
 
 ```tsx
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -365,6 +365,12 @@ vi.mock('next/navigation', () => ({
   useSearchParams: () => mockSearchParams,
   useRouter: () => mockRouter,
 }));
+```
+
+  and extend the RTL import at the top of the file — the current file imports only `{ render, screen, fireEvent }`; the new tests use `waitFor`:
+
+```tsx
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 ```
 
   and in the existing `beforeEach` add resets:

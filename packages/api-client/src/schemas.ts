@@ -62,11 +62,13 @@ export type LocationResponse = z.infer<typeof LocationResponseSchema>;
 export const PhotoResponseSchema = z.object({
   id: z.string(),
   filename: z.string(),
-  visitor_id: z.string().nullable(),
+  client_id: z.string().nullable(), // GH #211: replaces visitor_id
   service_id: z.string().nullable(),
   activity_id: z.string().nullable(),
+  location_id: z.string().nullable(),
   is_public: z.boolean(),
   tags: z.array(z.object({ id: z.string(), tag: z.string() })).default([]),
+  client_name: z.string().nullable(), // denormalized for list display
   created_at: z.string(),
   updated_at: z.string(),
 });
@@ -74,12 +76,14 @@ export const PhotoResponseSchema = z.object({
 export type PhotoResponse = z.infer<typeof PhotoResponseSchema>;
 
 // ─── PhotoCreate (request body) ──────────────────────────────────────────
-
+// GH #211: 4-owner model — at most ONE of client_id/service_id/activity_id/
+// location_id may be non-null (server 422s on ≥2; visitor_id is gone).
 export const PhotoCreateSchema = z.object({
   filename: z.string().min(1),
-  visitor_id: z.string().optional().default(''),
-  service_id: z.string().optional().default(''),
-  activity_id: z.string().optional().default(''),
+  client_id: z.string().nullable().optional(),
+  service_id: z.string().nullable().optional(),
+  activity_id: z.string().nullable().optional(),
+  location_id: z.string().nullable().optional(),
   is_public: z.boolean().default(false),
   tag_ids: z.array(z.string()).default([]),
 });
@@ -527,6 +531,8 @@ export const PaymentListResponseSchema = paginatedSchema(PaymentResponseSchema);
 export const RecordListResponseSchema = paginatedSchema(RecordResponseSchema);
 export const VisitorListResponseSchema = paginatedSchema(VisitorResponseSchema);
 export const ClientListResponseSchema = paginatedSchema(ClientWithStatsSchema);
+export const PhotoListResponseSchema = paginatedSchema(PhotoResponseSchema);
+export type PhotoListResponse = z.infer<typeof PhotoListResponseSchema>;
 
 // ─── Bare-array /all dictionary responses (GH #205) ─────────────────────────
 

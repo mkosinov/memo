@@ -73,6 +73,8 @@ import {
   RecordListResponseSchema,
   VisitorListResponseSchema,
   ClientListResponseSchema,
+  PhotoListResponseSchema,
+  type PhotoListResponse,
   type PaginatedResponse,
 } from './schemas';
 
@@ -177,11 +179,35 @@ export async function getWebPhotos(params?: { activity_id?: string }): Promise<P
   return api(`/api/v1/photos/web${qs ? `?${qs}` : ''}`, z.array(PhotoResponseSchema));
 }
 
-// ─── Photos CRUD ────────────────────────────────────────────────────────
+// ─── Photos list (GH #211: paginated with filters/sort) ────────────────────
 
-export async function getPhotos(): Promise<PhotoResponse[]> {
-  return api('/api/v1/photos', z.array(PhotoResponseSchema));
+export interface PhotoListParams {
+  page?: number;
+  per_page?: number;
+  q?: string;
+  client_id?: string;
+  location_id?: string;
+  activity_id?: string;
+  service_id?: string;
+  tag_id?: string[];
+  sort_by?: 'filename' | 'is_public' | 'created_at';
+  sort_order?: 'asc' | 'desc';
 }
+
+export async function getPhotos(params?: PhotoListParams): Promise<PhotoListResponse> {
+  const search = new URLSearchParams();
+  if (params) {
+    for (const [k, v] of Object.entries(params)) {
+      if (v === undefined || v === null) continue;
+      if (k === 'tag_id') (v as string[]).forEach((t) => search.append('tag_id', t));
+      else search.set(k, String(v));
+    }
+  }
+  const qs = search.toString();
+  return api(`/api/v1/photos${qs ? `?${qs}` : ''}`, PhotoListResponseSchema);
+}
+
+// ─── Photos CRUD ────────────────────────────────────────────────────────
 
 export async function createPhoto(data: PhotoCreate): Promise<PhotoResponse> {
   return api('/api/v1/photos', PhotoResponseSchema, {
@@ -320,6 +346,27 @@ export async function getClientsWithStats(
         search.append(key, String(value));
       }
     });
+  }
+  const qs = search.toString();
+  return api(`/api/v1/clients${qs ? `?${qs}` : ''}`, ClientListResponseSchema);
+}
+
+// GH #211: light paginated client list for photo pickers/typeaheads.
+// Photo pickers always request status: "active" — archived clients must not
+// surface (spec §7.3).
+export interface ClientListParams {
+  q?: string;
+  per_page?: number;
+  page?: number;
+  status?: 'active' | 'archived';
+}
+
+export async function getClientsPaged(
+  params: ClientListParams,
+): Promise<PaginatedResponse<ClientWithStats>> {
+  const search = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== null) search.set(k, String(v));
   }
   const qs = search.toString();
   return api(`/api/v1/clients${qs ? `?${qs}` : ''}`, ClientListResponseSchema);

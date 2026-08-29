@@ -1,36 +1,109 @@
-"""Business logic for photo CRUD operations."""
+"""Business logic for photo CRUD operations (GH #211 4-owner model)."""
 
 from __future__ import annotations
 
 from functools import lru_cache
 
-from sqlalchemy import delete, select
+from fastapi import HTTPException
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from src.models.activity import Activity
+from src.models.client import Client
 from src.models.photo import Photo, photo_tags
+from src.models.tag import Tag
 from src.repositories.generic import get_base_repository
-from src.schemas.photo import PhotoCreate, PhotoPatch, PhotoResponse, PhotoUpdate
-from src.services.generic import GenericService
+from src.repositories.search import SearchField, search_predicate
+from src.schemas.photo import (
+    OWNER_FIELDS,
+    PhotoCreate,
+    PhotoListParams,
+    PhotoPatch,
+    PhotoResponse,
+    PhotoUpdate,
+)
 from src.services.decorators import transactional
+from src.services.generic import GenericService
+
+# Sort whitelist (GH #211 §6.8): filename | is_public | created_at.
+# FK columns and the denormalized client_name are NOT sortable.
+_SORT_COLUMNS = {
+    "filename": Photo.filename,
+    "is_public": Photo.is_public,
+    "created_at": Photo.created_at,
+}
+
+
+def _merged_owner_conflict(existing: Photo, changes: dict) -> str | None:
+    """Merged-set owner guard (GH #211 §6.2).
+
+    Combines the stored row with the applied payload fields (unset fields
+    keep their stored value — the ``exclude_unset`` hole) across all 4
+    owner FKs. Returns the active-owner list when the merged set has more
+    than one owner, else ``None``. Used by BOTH ``update`` and ``patch``;
+    ``create`` is covered by the payload validator on ``PhotoCreate``.
+    """
+    owners = {f: changes.get(f, getattr(existing, f)) for f in OWNER_FIELDS}
+    active = [k for k, v in owners.items() if v is not None]
+    return ", ".join(active) if len(active) > 1 else None
 
 
 class PhotoService(GenericService[PhotoCreate, PhotoUpdate, PhotoResponse]):
-    """Extended photo service with tag handling."""
+    """Extended photo service with tag handling + paginated list."""
 
     NOT_NULL_FIELDS = {"filename", "is_public"}
 
     async def list(
-        self, db_session: AsyncSession, **filters
-    ) -> list[PhotoResponse]:
-        """Return all photos with tags eagerly loaded."""
-        stmt = (
-            select(Photo)
-            .options(selectinload(Photo.tags))
-        )
-        result = await db_session.execute(stmt)
-        orm_list = result.scalars().all()
-        return [self._response_schema.model_validate(o) for o in orm_list]
+        self, db_session: AsyncSession, params: PhotoListParams
+    ) -> tuple[list[PhotoResponse], int]:
+        """Accepted exception to repo-owned list (GH #206, spec #211 §6.5):
+        service-owned dual query — filters, q, sort, denormalized
+        ``client_name`` (a correlated scalar subquery, NOT
+        ``BaseRepository.list_custom``, which drops the extra column).
+
+        Returns ``(items, total)``; the router assembles the
+        ``PaginatedResponse`` envelope echoing the client's page/per_page.
+        """
+        client_name = select(Client.name).where(Client.id == Photo.client_id).scalar_subquery()
+        stmt = select(Photo, client_name.label("client_name")).options(selectinload(Photo.tags))
+
+        conds = []
+        if params.q is not None:
+            conds.append(search_predicate(params.q, [SearchField(column=Photo.filename, kind="substring")]))
+        if params.client_id is not None:
+            conds.append(Photo.client_id == params.client_id)
+        if params.location_id is not None:
+            conds.append(Photo.location_id == params.location_id)
+        if params.activity_id is not None:
+            conds.append(Photo.activity_id == params.activity_id)
+        if params.service_id is not None:
+            # variant A: direct OR via activity — LEFT OUTER JOIN required
+            # (an INNER JOIN would drop direct-service photos; 1:0..1, so
+            # the count stays honest — spec #211 §6.7).
+            stmt = stmt.outerjoin(Activity, Activity.id == Photo.activity_id)
+            conds.append(or_(Photo.service_id == params.service_id,
+                             Activity.service_id == params.service_id))
+        if params.tag_id:
+            for t in dict.fromkeys(params.tag_id):          # dedupe, keep order
+                conds.append(Photo.tags.any(Tag.id == t))   # per-tag EXISTS, AND-chained
+        if conds:
+            stmt = stmt.where(*conds)
+
+        col = _SORT_COLUMNS[params.sort_by]
+        stmt = stmt.order_by(col.desc() if params.sort_order == "desc" else col.asc(), Photo.id.asc())
+
+        total = (await db_session.execute(select(func.count()).select_from(stmt.subquery()))).scalar() or 0
+        rows = (await db_session.execute(
+            stmt.limit(params.per_page).offset((params.page - 1) * params.per_page)
+        )).all()
+
+        items = []
+        for photo, name in rows:
+            resp = PhotoResponse.model_validate(photo)
+            resp.client_name = name
+            items.append(resp)
+        return items, total
 
     async def get(
         self, db_session: AsyncSession, id: str
@@ -53,20 +126,25 @@ class PhotoService(GenericService[PhotoCreate, PhotoUpdate, PhotoResponse]):
     ) -> PhotoResponse:
         """Create a new photo with tag links.
 
+        Owner fields (client/service/activity/location) come straight from
+        the payload — the ``PhotoCreate`` validator already guarantees at
+        most one owner (GH #211 §6.2), matching the DB CHECK constraint.
+
         tag_ids: link via the photo_tags join table directly (NOT the ORM
         relationship), because ``orm.tags = list(tags)`` triggers a lazy load
         on AsyncSession and crashes with MissingGreenlet.
         """
         # Extract tag_ids before creating photo
-        tag_ids = data.tag_ids if hasattr(data, 'tag_ids') else []
+        tag_ids = data.tag_ids
 
         # Create ORM instance directly (GenericRepository.create expects BaseModel
         # but PhotoCreate includes tag_ids which Photo doesn't have)
         orm = Photo(
             filename=data.filename,
-            visitor_id=data.visitor_id,
+            client_id=data.client_id,
             service_id=data.service_id,
             activity_id=data.activity_id,
+            location_id=data.location_id,
             is_public=data.is_public,
         )
         db_session.add(orm)
@@ -89,6 +167,10 @@ class PhotoService(GenericService[PhotoCreate, PhotoUpdate, PhotoResponse]):
     ) -> PhotoResponse | None:
         """Full-update: replace scalar fields and tag links.
 
+        Merged-set owner check runs BEFORE any field is applied: a payload
+        carrying a single owner can still collide with owners already on
+        the row (the ``exclude_unset`` hole — GH #211 §6.2).
+
         tag_ids: handled via the photo_tags join table (not the ORM
         relationship) to avoid the async lazy-load bug.
         """
@@ -98,6 +180,14 @@ class PhotoService(GenericService[PhotoCreate, PhotoUpdate, PhotoResponse]):
 
         # Update scalar fields (exclude tag_ids)
         update_data = data.model_dump(exclude={'tag_ids'}, exclude_unset=True)
+
+        conflict = _merged_owner_conflict(orm, update_data)
+        if conflict:
+            raise HTTPException(
+                status_code=422,
+                detail=f"photo may have at most one owner; got: {conflict}",
+            )
+
         for key, value in update_data.items():
             setattr(orm, key, value)
 
@@ -124,6 +214,10 @@ class PhotoService(GenericService[PhotoCreate, PhotoUpdate, PhotoResponse]):
         Scalar fields: applied via exclude_unset. NOT NULL fields
         with null values are silently stripped.
 
+        Merged-set owner check runs BEFORE any field is applied
+        (GH #211 §6.2): ``PhotoPatch`` has no payload validator because
+        PATCH semantics need the merged field set (payload + stored row).
+
         tag_ids: if sent → hard-replace all tag links via the photo_tags
         join table. If not sent → existing tag links are preserved.
         """
@@ -140,6 +234,13 @@ class PhotoService(GenericService[PhotoCreate, PhotoUpdate, PhotoResponse]):
         for field in self.NOT_NULL_FIELDS:
             if field in data_dict and data_dict[field] is None:
                 del data_dict[field]
+
+        conflict = _merged_owner_conflict(orm, data_dict)
+        if conflict:
+            raise HTTPException(
+                status_code=422,
+                detail=f"photo may have at most one owner; got: {conflict}",
+            )
 
         # Apply scalar fields
         for key, value in data_dict.items():

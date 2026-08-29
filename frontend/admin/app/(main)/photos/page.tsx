@@ -2,9 +2,10 @@
 
 import React from 'react';
 import { PhotosTable } from './components/PhotosTable';
+import { PhotosFilters } from './components/PhotosFilters';
 import { PhotosProvider } from '@/contexts/PhotosContext';
 
-export default function PhotosPage() {
+function PhotosPageContent() {
   return (
     <div className="p-4 space-y-4">
       <h1
@@ -14,14 +15,28 @@ export default function PhotosPage() {
         Управление фото
       </h1>
 
+      {/* Filters (GH #211 Task 8; records/page.tsx card pattern) */}
+      <div
+        className="rounded-xl border p-4"
+        style={{ borderColor: 'var(--line)', backgroundColor: 'var(--white)' }}
+      >
+        <PhotosFilters />
+      </div>
+
       <div
         className="rounded-xl border overflow-hidden"
         style={{ borderColor: 'var(--line)', backgroundColor: 'var(--white)' }}
       >
-        <PhotosProvider>
-          <PhotosTable />
-        </PhotosProvider>
+        <PhotosTable />
       </div>
     </div>
+  );
+}
+
+export default function PhotosPage() {
+  return (
+    <PhotosProvider>
+      <PhotosPageContent />
+    </PhotosProvider>
   );
 }

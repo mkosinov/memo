@@ -10,19 +10,25 @@ from sqlalchemy.orm import selectinload
 from src.db import SessionDep
 from src.errors import ErrorCode, ErrorDetail
 from src.models.photo import Photo
-from src.schemas.photo import PhotoCreate, PhotoPatch, PhotoResponse, PhotoUpdate
-from src.services.generic import GenericService
-from src.services.photo import get_photo_service
+from src.schemas.common import PaginatedResponse
+from src.schemas.photo import (
+    PhotoCreate,
+    PhotoListParams,
+    PhotoPatch,
+    PhotoResponse,
+    PhotoUpdate,
+)
+from src.services.photo import PhotoService, get_photo_service
 
 router = APIRouter(tags=["photos"])
 
 
 @lru_cache
-def _get_photo_service() -> GenericService[PhotoCreate, PhotoUpdate, PhotoResponse]:
+def _get_photo_service() -> PhotoService:
     return get_photo_service()
 
 
-_ServiceDep = Annotated[GenericService[PhotoCreate, PhotoUpdate, PhotoResponse], Depends(_get_photo_service)]
+_ServiceDep = Annotated[PhotoService, Depends(_get_photo_service)]
 
 
 @router.get("/web", response_model=list[PhotoResponse])
@@ -43,13 +49,23 @@ async def list_public_photos(
     return [PhotoResponse.model_validate(p) for p in photos]
 
 
-@router.get("", response_model=list[PhotoResponse])
+@router.get("", response_model=PaginatedResponse[PhotoResponse])
 async def list_photos(
     service: _ServiceDep,
     session: SessionDep,
-) -> list[PhotoResponse]:
-    """Return all photos (admin view)."""
-    return await service.list(db_session=session)
+    params: Annotated[PhotoListParams, Query()],
+) -> PaginatedResponse[PhotoResponse]:
+    """Return a paginated page of photos (admin view, GH #211).
+
+    ``params`` (page/per_page/q/filters/sort) is validated at the router
+    level; filtering/sorting/pagination and the denormalized
+    ``client_name`` live in ``PhotoService.list`` (accepted exception to
+    repo-owned list, GH #206 — spec #211 §6.5).
+    """
+    items, total = await service.list(db_session=session, params=params)
+    return PaginatedResponse(
+        items=items, total=total, page=params.page, per_page=params.per_page
+    )
 
 
 @router.get("/{photo_id}", response_model=PhotoResponse)

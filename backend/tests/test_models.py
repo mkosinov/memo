@@ -379,7 +379,8 @@ class TestModelCrud:
         session.flush()
         fetched = session.get(Photo, p.id)
         assert fetched.filename == "photo_001.jpg"
-        assert fetched.visitor_id is None
+        assert fetched.client_id is None
+        assert fetched.location_id is None
         assert fetched.is_public is False  # default
 
     def test_photo_is_public(self, session: Session):

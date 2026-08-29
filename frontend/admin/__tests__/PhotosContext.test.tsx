@@ -1,21 +1,45 @@
+/**
+ * Tests for PhotosContext — server-driven list (GH #211 Task 6).
+ *
+ * The provider is a hand-rolled server context modeled on RecordsContext:
+ *   queryKey: ['photos', { page, perPage, sortBy, sortOrder, q, ...filters }]
+ *   queryFn:  getPhotos({ page, per_page, sort_by, sort_order, q, ...filters })
+ * plus the /all dictionary maps (servicesMap, locationsMap).
+ *
+ * Server semantics under test: query key composition, page reset on
+ * setFilters/setSearch, the ≥2-char q clamp (server 422s below 2), the
+ * per_page=10 default, sort param mapping, the §6.7 page clamp, and the
+ * dictionary map loads.
+ */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, act, waitFor } from '@testing-library/react';
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { getPhotos } from '@memo/api-client';
-import type { PhotoResponse } from '@memo/api-client';
-import { PhotosProvider, usePhotosTable } from '../contexts/PhotosContext';
 
-// ─── Mock @memo/api-client — spy on getPhotos (preserve other exports) ─────
-// The adapter fetcher wraps the UNPAGINATED getPhotos(); the tests assert the
-// client-side pagination envelope (slicing, total, sort) built around it.
+// ─── Mock @memo/api-client — spy on the three endpoints (keep the rest) ───
 
 vi.mock('@memo/api-client', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@memo/api-client')>();
-  return { ...actual, getPhotos: vi.fn() };
+  return {
+    ...actual,
+    getPhotos: vi.fn(),
+    getAllServices: vi.fn(),
+    getAllLocations: vi.fn(),
+  };
 });
 
+import { getPhotos, getAllServices, getAllLocations } from '@memo/api-client';
+import type {
+  PhotoResponse,
+  PhotoListResponse,
+  ServiceResponse,
+  LocationResponse,
+} from '@memo/api-client';
+import { PhotosProvider, usePhotosTable } from '../contexts/PhotosContext';
+
 const mockGetPhotos = vi.mocked(getPhotos);
+const mockGetAllServices = vi.mocked(getAllServices);
+const mockGetAllLocations = vi.mocked(getAllLocations);
 
 // ─── Fixtures ──────────────────────────────────────────────────────────────
 
@@ -23,20 +47,67 @@ function makePhoto(i: number, overrides: Partial<PhotoResponse> = {}): PhotoResp
   return {
     id: `p-${i}`,
     filename: `photo-${String(i).padStart(3, '0')}.jpg`,
-    visitor_id: null,
+    client_id: null,
     service_id: null,
     activity_id: null,
+    location_id: null,
     is_public: i % 2 === 0,
     tags: [],
+    client_name: null,
     created_at: '2026-01-01T00:00:00Z',
     updated_at: '2026-01-01T00:00:00Z',
     ...overrides,
   };
 }
 
-/** Real QueryClient (retry: false) + real PhotosProvider; data via mocked getPhotos. */
-function setup(photos: PhotoResponse[]) {
-  mockGetPhotos.mockResolvedValue(photos);
+function makeService(id: string, overrides: Partial<ServiceResponse> = {}): ServiceResponse {
+  return {
+    id,
+    title: `Service ${id}`,
+    description: '',
+    image_url: '',
+    specialty: '',
+    min_age: 0,
+    max_age: null,
+    duration: 60,
+    record_info: '',
+    tariffs: [],
+    tags: [],
+    archived: false,
+    created_at: '2026-01-01T00:00:00Z',
+    updated_at: '2026-01-01T00:00:00Z',
+    ...overrides,
+  };
+}
+
+function makeLocation(id: string, overrides: Partial<LocationResponse> = {}): LocationResponse {
+  return {
+    id,
+    name: `Location ${id}`,
+    address: null,
+    description: null,
+    capacity: 10,
+    yandex_map_url: null,
+    review_url: null,
+    record_info: null,
+    image_url: null,
+    archived: false,
+    created_at: '2026-01-01T00:00:00Z',
+    updated_at: '2026-01-01T00:00:00Z',
+    ...overrides,
+  };
+}
+
+/** Server envelope the paginated GET /api/v1/photos returns. */
+function envelope(
+  items: PhotoResponse[],
+  overrides: Partial<PhotoListResponse> = {},
+): PhotoListResponse {
+  return { items, total: items.length, page: 1, per_page: 10, ...overrides };
+}
+
+/** Real QueryClient (retry: false) + real PhotosProvider; data via mocked api-client. */
+function setup() {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -51,43 +122,70 @@ function setup(photos: PhotoResponse[]) {
   return { ...hook, queryClient };
 }
 
-// ─── T7 client-adapter tests (Part A) ──────────────────────────────────────
+// ─── Tests ─────────────────────────────────────────────────────────────────
 
-describe('PhotosContext client adapter', () => {
+describe('PhotosContext — server-driven list (GH #211 Task 6)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockGetPhotos.mockResolvedValue(envelope([]));
+    mockGetAllServices.mockResolvedValue([]);
+    mockGetAllLocations.mockResolvedValue([]);
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  it('slices page 1 of the full array and exposes total (no sort → API order kept)', async () => {
-    const photos = Array.from({ length: 25 }, (_, i) => makePhoto(i + 1));
-    const { result } = setup(photos);
+  it('composes the query key from page/perPage/sort/q/filters and maps fetch params to snake_case', async () => {
+    const { result, queryClient } = setup();
 
     await waitFor(() => {
       expect(result.current.isPending).toBe(false);
     });
 
-    // Adapter calls the unpaginated endpoint with no params (interim — #211
-    // swaps internals for server pagination).
-    expect(mockGetPhotos).toHaveBeenCalledWith();
-
-    expect(result.current.items.map((p) => p.id)).toEqual([
-      'p-1', 'p-2', 'p-3', 'p-4', 'p-5', 'p-6', 'p-7', 'p-8', 'p-9', 'p-10',
+    // findAll prefix-matches ('photos', ...); find() is exact-only in v5.
+    const photosQuery = queryClient.getQueryCache().findAll({ queryKey: ['photos'] })[0];
+    expect(photosQuery?.queryKey).toEqual([
+      'photos',
+      {
+        page: 1,
+        perPage: 10,
+        sortBy: 'created_at',
+        sortOrder: 'desc',
+        q: undefined,
+        tag_id: [],
+      },
     ]);
-    expect(result.current.total).toBe(25);
-    expect(result.current.page).toBe(1);
-    expect(result.current.perPage).toBe(10);
-    expect(result.current.sortBy).toBeNull();
-    expect(result.current.search).toBe('');
-    expect(result.current.visibleItems).toBeUndefined();
+
+    // Fetcher receives the server-shaped snake_case params (q/tag_id unset →
+    // undefined so the api-client omits them from the query string).
+    expect(mockGetPhotos).toHaveBeenCalledWith(
+      expect.objectContaining({
+        page: 1,
+        per_page: 10,
+        sort_by: 'created_at',
+        sort_order: 'desc',
+        q: undefined,
+        tag_id: undefined,
+      }),
+    );
   });
 
-  it('setPage slices (page-1)*per_page windows, including a partial last page', async () => {
-    const photos = Array.from({ length: 25 }, (_, i) => makePhoto(i + 1));
-    const { result } = setup(photos);
+  it('defaults to per_page=10', async () => {
+    const { result } = setup();
+
+    await waitFor(() => {
+      expect(result.current.isPending).toBe(false);
+    });
+
+    expect(result.current.perPage).toBe(10);
+    expect(mockGetPhotos).toHaveBeenCalledWith(
+      expect.objectContaining({ per_page: 10 }),
+    );
+  });
+
+  it('setFilters resets page to 1 and sends the filters to the server', async () => {
+    const { result } = setup();
 
     await waitFor(() => {
       expect(result.current.isPending).toBe(false);
@@ -97,142 +195,200 @@ describe('PhotosContext client adapter', () => {
       result.current.setPage(2);
     });
     await waitFor(() => {
-      expect(result.current.items[0]?.id).toBe('p-11');
+      expect(mockGetPhotos).toHaveBeenCalledWith(
+        expect.objectContaining({ page: 2 }),
+      );
     });
-    expect(result.current.items).toHaveLength(10);
-    expect(result.current.items[9]?.id).toBe('p-20');
-    expect(result.current.total).toBe(25);
+
+    act(() => {
+      result.current.setFilters({ service_id: 's-1', tag_id: ['t-1', 't-2'] });
+    });
+
+    await waitFor(() => {
+      expect(mockGetPhotos).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          page: 1,
+          service_id: 's-1',
+          tag_id: ['t-1', 't-2'],
+        }),
+      );
+    });
+    expect(result.current.page).toBe(1);
+    expect(result.current.filters).toEqual({ service_id: 's-1', tag_id: ['t-1', 't-2'] });
+  });
+
+  it('setSearch resets page to 1 and sends q for a ≥2-char search', async () => {
+    const { result } = setup();
+
+    await waitFor(() => {
+      expect(result.current.isPending).toBe(false);
+    });
+
+    act(() => {
+      result.current.setPage(2);
+    });
+    await waitFor(() => {
+      expect(mockGetPhotos).toHaveBeenCalledWith(
+        expect.objectContaining({ page: 2 }),
+      );
+    });
+
+    act(() => {
+      result.current.setSearch('море');
+    });
+
+    await waitFor(() => {
+      expect(mockGetPhotos).toHaveBeenLastCalledWith(
+        expect.objectContaining({ page: 1, q: 'море' }),
+      );
+    });
+    expect(result.current.page).toBe(1);
+    expect(result.current.search).toBe('море');
+  });
+
+  it('does NOT fetch with q for a 1-char search (≥2-char clamp — server min_length=2)', async () => {
+    const { result } = setup();
+
+    await waitFor(() => {
+      expect(result.current.isPending).toBe(false);
+    });
+
+    const callsBefore = mockGetPhotos.mock.calls.length;
+
+    act(() => {
+      result.current.setSearch('м');
+    });
+
+    // The search state lands…
+    await waitFor(() => {
+      expect(result.current.search).toBe('м');
+    });
+    // …but the clamped q keeps the query key unchanged → no new fetch fires.
+    expect(mockGetPhotos.mock.calls.length).toBe(callsBefore);
+    // And nothing ever carried a sub-2-char q.
+    expect(
+      mockGetPhotos.mock.calls.every(([params]) => params?.q === undefined),
+    ).toBe(true);
+  });
+
+  it('setSort maps field+order to sort_by/sort_order and resets page to 1', async () => {
+    const { result } = setup();
+
+    await waitFor(() => {
+      expect(result.current.isPending).toBe(false);
+    });
 
     act(() => {
       result.current.setPage(3);
     });
     await waitFor(() => {
-      expect(result.current.items[0]?.id).toBe('p-21');
+      expect(mockGetPhotos).toHaveBeenCalledWith(
+        expect.objectContaining({ page: 3 }),
+      );
     });
-    // Partial last page: 25 - 20 = 5 rows
-    expect(result.current.items.map((p) => p.id)).toEqual([
-      'p-21', 'p-22', 'p-23', 'p-24', 'p-25',
-    ]);
-    expect(result.current.total).toBe(25);
-  });
-
-  it('setPerPage(20) re-slices from the start and resets page to 1', async () => {
-    const photos = Array.from({ length: 25 }, (_, i) => makePhoto(i + 1));
-    const { result } = setup(photos);
-
-    await waitFor(() => {
-      expect(result.current.isPending).toBe(false);
-    });
-
-    act(() => {
-      result.current.setPerPage(20);
-    });
-
-    await waitFor(() => {
-      expect(result.current.items).toHaveLength(20);
-    });
-    expect(result.current.items[0]?.id).toBe('p-1');
-    expect(result.current.items[19]?.id).toBe('p-20');
-    expect(result.current.page).toBe(1);
-    expect(result.current.perPage).toBe(20);
-  });
-
-  it('setSort(filename) applies the pre-#139 client comparator — asc then desc', async () => {
-    // Order chosen so API order ≠ sorted order for BOTH directions.
-    const photos = [
-      makePhoto(1, { filename: 'ягода.jpg' }),
-      makePhoto(2, { filename: 'арбуз.jpg' }),
-      makePhoto(3, { filename: 'банан.jpg' }),
-    ];
-    const { result } = setup(photos);
-
-    await waitFor(() => {
-      expect(result.current.isPending).toBe(false);
-    });
-    // No sort picked yet → API order preserved verbatim.
-    expect(result.current.items.map((p) => p.id)).toEqual(['p-1', 'p-2', 'p-3']);
 
     act(() => {
       result.current.setSort('filename', 'asc');
     });
-    await waitFor(() => {
-      expect(result.current.items.map((p) => p.filename)).toEqual([
-        'арбуз.jpg', 'банан.jpg', 'ягода.jpg',
-      ]);
-    });
-    expect(result.current.page).toBe(1); // setSort resets page (§6.10.2)
 
-    act(() => {
-      result.current.setSort('filename', 'desc');
-    });
+    expect(result.current.sortBy).toBe('filename');
+    expect(result.current.sortOrder).toBe('asc');
     await waitFor(() => {
-      expect(result.current.items.map((p) => p.filename)).toEqual([
-        'ягода.jpg', 'банан.jpg', 'арбуз.jpg',
-      ]);
+      expect(mockGetPhotos).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          page: 1,
+          sort_by: 'filename',
+          sort_order: 'asc',
+        }),
+      );
     });
   });
 
-  it('setSort(is_public) sorts booleans false-before-true on asc (verbatim old comparator)', async () => {
-    const photos = [
-      makePhoto(1, { is_public: true }),
-      makePhoto(2, { is_public: false }),
-      makePhoto(3, { is_public: true }),
-    ];
-    const { result } = setup(photos);
+  it('page clamp: a settled empty non-first page steps back (§6.7)', async () => {
+    // Page 1 has one row; every later page is empty (list shrunk — the
+    // last-row-deleted case).
+    mockGetPhotos.mockImplementation((params) =>
+      Promise.resolve(envelope(params?.page && params.page > 1 ? [] : [makePhoto(1)])),
+    );
+
+    const { result } = setup();
+
+    await waitFor(() => {
+      expect(result.current.isPending).toBe(false);
+      expect(result.current.items).toHaveLength(1);
+    });
+
+    act(() => {
+      result.current.setPage(2);
+    });
+
+    // Page-2 fetch settles empty → the clamp effect steps back to page 1.
+    await waitFor(() => {
+      expect(result.current.page).toBe(1);
+    });
+    await waitFor(() => {
+      expect(result.current.items).toHaveLength(1);
+    });
+  });
+
+  it('loads /all services + locations once into servicesMap/locationsMap', async () => {
+    mockGetAllServices.mockResolvedValue([makeService('s-1')]);
+    mockGetAllLocations.mockResolvedValue([makeLocation('l-1')]);
+
+    const { result } = setup();
+
+    await waitFor(() => {
+      expect(result.current.servicesMap.get('s-1')?.title).toBe('Service s-1');
+      expect(result.current.locationsMap.get('l-1')?.name).toBe('Location l-1');
+    });
+    expect(mockGetAllServices).toHaveBeenCalledTimes(1);
+    expect(mockGetAllLocations).toHaveBeenCalledTimes(1);
+  });
+
+  it('resetFilters clears filters + search and resets page to 1', async () => {
+    const { result } = setup();
 
     await waitFor(() => {
       expect(result.current.isPending).toBe(false);
     });
 
     act(() => {
-      result.current.setSort('is_public', 'asc');
+      result.current.setFilters({ service_id: 's-1' });
     });
-    // Old comparator: true ? 1 : -1 → false sorts FIRST; stable sort keeps the
-    // API order among equal values (p-2 false; then p-1, p-3 true).
+    act(() => {
+      result.current.setSearch('море');
+    });
     await waitFor(() => {
-      expect(result.current.items.map((p) => p.id)).toEqual(['p-2', 'p-1', 'p-3']);
+      expect(mockGetPhotos).toHaveBeenLastCalledWith(
+        expect.objectContaining({ q: 'море', service_id: 's-1' }),
+      );
     });
 
     act(() => {
-      result.current.setSort('is_public', 'desc');
+      result.current.setPage(2);
     });
     await waitFor(() => {
-      expect(result.current.items.map((p) => p.id)).toEqual(['p-1', 'p-3', 'p-2']);
-    });
-  });
-
-  it('setSearch filters the loaded page into visibleItems via the filename predicate', async () => {
-    const photos = [
-      makePhoto(1, { filename: 'море.jpg' }),
-      makePhoto(2, { filename: 'горы.png' }),
-    ];
-    const { result } = setup(photos);
-
-    await waitFor(() => {
-      expect(result.current.isPending).toBe(false);
+      expect(mockGetPhotos).toHaveBeenCalledWith(
+        expect.objectContaining({ page: 2 }),
+      );
     });
 
-    // Empty search → no derived view.
-    expect(result.current.visibleItems).toBeUndefined();
-
-    // Case-insensitive filename match (predicate-only; no refetch, key stays
-    // search-free — spec §6.7 dict search contract).
     act(() => {
-      result.current.setSearch('ГОРЫ');
+      result.current.resetFilters();
     });
-    await waitFor(() => {
-      expect(result.current.visibleItems).toEqual([
-        expect.objectContaining({ id: 'p-2' }),
-      ]);
-    });
-    expect(result.current.items).toHaveLength(2); // items keeps its page contract
 
-    // Clearing restores the unfiltered view.
-    act(() => {
-      result.current.setSearch('');
+    expect(result.current.filters).toEqual({ tag_id: [] });
+    expect(result.current.search).toBe('');
+    await waitFor(() => {
+      expect(result.current.page).toBe(1);
     });
     await waitFor(() => {
-      expect(result.current.visibleItems).toBeUndefined();
+      expect(mockGetPhotos).toHaveBeenLastCalledWith(
+        expect.objectContaining({ page: 1, q: undefined, tag_id: undefined }),
+      );
     });
+    // The reset fetch carries no leftover filter params.
+    const lastParams = mockGetPhotos.mock.calls.at(-1)?.[0] ?? {};
+    expect(lastParams.service_id).toBeUndefined();
   });
 });

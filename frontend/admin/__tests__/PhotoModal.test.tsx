@@ -1,20 +1,32 @@
+/**
+ * Tests for PhotoModal (GH #211 Task 9):
+ *   - «Посетитель» field GONE; «Клиент» searchable picker (active clients)
+ *   - «Локация» plain select over getAllLocations()
+ *   - mutually-exclusive owners: picking Активность clears Услуга and vice versa
+ *   - canonical activity label (spec §7.7) in BOTH dropdown options and the
+ *     selected value («dd.mm.yyyy HH:mm — Локация — Услуга»)
+ *   - server 422 (≥2 owners) surfaces via the existing onSubmit catch
+ */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import React from 'react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { PhotoModal } from '@/app/(main)/photos/components/PhotoModal';
-import { formatActivityStart } from '@/lib/utils';
+import { mockClientWithStats } from './helpers/mockData';
 
-// Mock list getters (GH #212 T13 — typeaheads consume list ?q= endpoints)
-const mockGetVisitors = vi.fn();
+// Mock list getters — the modal consumes the SAME endpoints as PhotosFilters.
+const mockGetClientsPaged = vi.fn();
 const mockGetServices = vi.fn();
 const mockGetActivities = vi.fn();
 const mockGetTags = vi.fn();
+const mockGetAllLocations = vi.fn();
 
 vi.mock('@memo/api-client', () => ({
-  getVisitors: (...args: unknown[]) => mockGetVisitors(...args),
+  getClientsPaged: (...args: unknown[]) => mockGetClientsPaged(...args),
   getServices: (...args: unknown[]) => mockGetServices(...args),
   getActivities: (...args: unknown[]) => mockGetActivities(...args),
   getTags: (...args: unknown[]) => mockGetTags(...args),
+  getAllLocations: (...args: unknown[]) => mockGetAllLocations(...args),
 }));
 
 /** PaginatedResponse envelope wrapper (list endpoints return envelopes). */
@@ -22,16 +34,7 @@ function envelope<T>(items: T[]) {
   return { items, total: items.length, page: 1, per_page: 10 };
 }
 
-/* Full list-response item shapes (extra fields beyond the old search results) */
-
-const VISITOR_FIXTURE = {
-  id: 'v1',
-  client_id: 'c1',
-  name: 'Анна Иванова',
-  age: 7,
-  created_at: '2026-01-01T00:00:00',
-  updated_at: '2026-01-01T00:00:00',
-};
+/* ─── Fixtures ─────────────────────────────────────────────────────── */
 
 const SERVICE_FIXTURE = {
   id: 's1',
@@ -50,11 +53,13 @@ const SERVICE_FIXTURE = {
   updated_at: '2026-01-01T00:00:00',
 };
 
+// Canonical-label fixture: start without a timezone suffix → local-time
+// semantics (PhotosFilters.test precedent). location_id matches LOCATION's id.
 const ACTIVITY_FIXTURE = {
   id: 'a1',
   master_id: 'm1',
   service_id: 's1',
-  location_id: 'l1',
+  location_id: 'loc-1',
   start: '2026-06-07T14:05:00',
   duration: 90,
   capacity: 10,
@@ -67,22 +72,41 @@ const ACTIVITY_FIXTURE = {
   service_title: 'Картина маслом',
 };
 
+const LOCATION_FIXTURE = {
+  id: 'loc-1',
+  name: 'Студия на Невском',
+  address: 'Невский пр. 28',
+  description: null,
+  capacity: 10,
+  yandex_map_url: null,
+  review_url: null,
+  record_info: null,
+  image_url: null,
+  archived: false,
+  created_at: '2026-01-01T00:00:00',
+  updated_at: '2026-01-01T00:00:00',
+};
+
 const TAG_FIXTURE = { id: 'tag1', tag: 'Гуашь' };
 
+/** «dd.mm.yyyy HH:mm — Локация — Услуга» (date-first, spec §7.7). */
+const CANONICAL_LABEL = '07.06.2026 14:05 — Студия на Невском — Картина маслом';
+
 beforeEach(() => {
-  mockGetVisitors.mockReset();
+  mockGetClientsPaged.mockReset();
   mockGetServices.mockReset();
   mockGetActivities.mockReset();
   mockGetTags.mockReset();
-  mockGetVisitors.mockResolvedValue(envelope([VISITOR_FIXTURE]));
+  mockGetAllLocations.mockReset();
+  mockGetClientsPaged.mockResolvedValue(envelope([mockClientWithStats]));
   mockGetServices.mockResolvedValue(envelope([SERVICE_FIXTURE]));
   mockGetActivities.mockResolvedValue(envelope([ACTIVITY_FIXTURE]));
   mockGetTags.mockResolvedValue(envelope([TAG_FIXTURE]));
-  vi.useFakeTimers({ shouldAdvanceTime: true });
+  mockGetAllLocations.mockResolvedValue([LOCATION_FIXTURE]);
 });
 
 afterEach(() => {
-  vi.runOnlyPendingTimers();
+  // typeAndDebounce scopes fake timers per-debounce; restore defensively.
   vi.useRealTimers();
   vi.restoreAllMocks();
 });
@@ -96,150 +120,239 @@ const defaultProps = {
 };
 
 function renderPhotoModal(overrides: Record<string, unknown> = {}) {
-  return render(<PhotoModal {...defaultProps} {...overrides} />);
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <PhotoModal {...defaultProps} {...overrides} />
+    </QueryClientProvider>,
+  );
 }
 
-/** Type into a SearchableSelect input and let the debounce fire. */
-async function typeAndWait(input: HTMLElement, value: string) {
-  act(() => {
+/** Debounce-driven flow: fake timers only around the 300ms debounce. */
+function typeAndDebounce(input: HTMLElement, value: string) {
+  vi.useFakeTimers();
+  try {
     fireEvent.change(input, { target: { value } });
-  });
-  act(() => {
-    vi.advanceTimersByTime(300);
-  });
-  // Flush the async onSearch promise chain
-  await act(async () => {});
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+  } finally {
+    vi.useRealTimers();
+  }
 }
 
-describe('PhotoModal', () => {
-  it('renders all fields from PHOTO_FIELDS', () => {
+/**
+ * Wait until the locations dictionary has loaded AND propagated — the
+ * canonical activity label and the location <select> options both derive
+ * from it. The «Студия на Невском» <option> appearing in the Локация select
+ * is the DOM-level proof the map reached the component.
+ */
+async function waitForLocationsLoaded() {
+  await screen.findByRole('option', { name: 'Студия на Невском' });
+}
+
+describe('PhotoModal — field set (GH #211 Task 9)', () => {
+  it('renders Клиент/Локация pickers and NOT Посетитель', () => {
+    renderPhotoModal();
+    expect(screen.getByText('Клиент')).toBeInTheDocument();
+    expect(screen.getByText('Локация')).toBeInTheDocument();
+    expect(screen.queryByText('Посетитель')).not.toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: /Посетитель/ })).not.toBeInTheDocument();
+  });
+
+  it('renders the remaining PHOTO_FIELDS', () => {
     renderPhotoModal();
     expect(screen.getByText('Имя файла')).toBeInTheDocument();
-    expect(screen.getByText('Посетитель')).toBeInTheDocument();
     expect(screen.getByText('Услуга')).toBeInTheDocument();
     expect(screen.getByText('Активность')).toBeInTheDocument();
+    // filename stays a plain text input
+    expect(screen.getByPlaceholderText('photo-001.jpg').tagName).toBe('INPUT');
   });
 
-  it('renders SearchableSelect for visitor_id field', () => {
+  it('only filename is required (1 star)', () => {
     renderPhotoModal();
-    // SearchableSelect renders an input with aria-label matching the label
-    const visitorInput = screen.getByRole('textbox', { name: /Посетитель/ });
-    expect(visitorInput).toBeInTheDocument();
-    expect(visitorInput.tagName).toBe('INPUT');
+    expect(screen.getAllByText('*')).toHaveLength(1);
   });
+});
 
-  it('renders SearchableSelect for service_id field', () => {
-    renderPhotoModal();
-    const serviceInput = screen.getByRole('textbox', { name: /Услуга/ });
-    expect(serviceInput).toBeInTheDocument();
-    expect(serviceInput.tagName).toBe('INPUT');
-  });
-
-  it('renders SearchableSelect for activity_id field', () => {
-    renderPhotoModal();
-    const activityInput = screen.getByRole('textbox', { name: /Активность/ });
-    expect(activityInput).toBeInTheDocument();
-    expect(activityInput.tagName).toBe('INPUT');
-  });
-
-  it('renders text input for filename field', () => {
-    renderPhotoModal();
-    // filename is a text field, should have a regular text input
-    const filenameInput = screen.getByPlaceholderText('photo-001.jpg');
-    expect(filenameInput).toBeInTheDocument();
-    expect(filenameInput.tagName).toBe('INPUT');
-  });
-
-  it('SearchableSelect fields are not required', () => {
-    renderPhotoModal();
-    // visitor_id, service_id, activity_id should not have required indicators
-    // The only required field is filename
-    const requiredStars = screen.getAllByText('*');
-    // Only 1 required field (filename) → 1 star
-    expect(requiredStars).toHaveLength(1);
-  });
-
-  it('searches visitors via getVisitors with q and per_page', async () => {
-    renderPhotoModal();
-    const visitorInput = screen.getByLabelText(/Посетитель/);
-
-    await typeAndWait(visitorInput, 'Ан');
-
-    expect(mockGetVisitors).toHaveBeenCalledWith({ q: 'Ан', per_page: 10 });
-  });
-
-  it('renders visitor name with age subtitle', async () => {
-    renderPhotoModal();
-    const visitorInput = screen.getByRole('textbox', { name: /Посетитель/ });
-
-    await typeAndWait(visitorInput, 'Ан');
-
-    await waitFor(() => {
-      expect(screen.getByText(/Анна Иванова/)).toBeInTheDocument();
-      expect(screen.getByText(/7/)).toBeInTheDocument();
-    });
-  });
-
-  it('passes selected visitor UUID to onSubmit', async () => {
+describe('PhotoModal — Клиент picker', () => {
+  it('searches active clients via getClientsPaged and selects client_id', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     renderPhotoModal({ onSubmit });
 
-    // Fill required field
-    const filenameInput = screen.getByPlaceholderText('photo-001.jpg');
-    act(() => {
-      fireEvent.change(filenameInput, { target: { value: 'test.jpg' } });
-    });
-
-    // Submit the form
-    const saveButton = screen.getByText('Сохранить');
-    fireEvent.click(saveButton);
+    typeAndDebounce(screen.getByRole('textbox', { name: 'Клиент' }), 'Ан');
 
     await waitFor(() => {
-      expect(onSubmit).toHaveBeenCalled();
+      expect(mockGetClientsPaged).toHaveBeenCalledWith({ q: 'Ан', per_page: 10, status: 'active' });
     });
+    const option = await screen.findByText('Анна Иванова');
+    fireEvent.click(option);
 
-    // Verify the submitted data has filename
-    const submittedData = onSubmit.mock.calls[0][0];
-    expect(submittedData).toHaveProperty('filename', 'test.jpg');
-    // visitor_id, service_id, activity_id only present if user selected a value
-    expect(submittedData).not.toHaveProperty('visitor_id');
-    expect(submittedData).not.toHaveProperty('service_id');
-    expect(submittedData).not.toHaveProperty('activity_id');
-  });
-
-  it('searches tags via getTags with q and per_page', async () => {
-    renderPhotoModal();
-    const tagInput = screen.getByPlaceholderText('Введите название тега...');
-
-    await typeAndWait(tagInput, 'Гу');
-
-    expect(mockGetTags).toHaveBeenCalledWith({ q: 'Гу', per_page: 10 });
-    await waitFor(() => {
-      expect(screen.getByText('Гуашь')).toBeInTheDocument();
+    // Fill the required filename, submit → client_id travels in the payload.
+    fireEvent.change(screen.getByPlaceholderText('photo-001.jpg'), {
+      target: { value: 'test.jpg' },
     });
-  });
+    fireEvent.click(screen.getByText('Сохранить'));
 
-  it('activity search passes service_id from formData and formats start', async () => {
-    renderPhotoModal();
-    const activityInput = screen.getByRole('textbox', { name: /Активность/ });
-
-    // No service selected yet — service_id omitted (undefined)
-    await typeAndWait(activityInput, 'Ма');
-    expect(mockGetActivities).toHaveBeenCalledWith({ q: 'Ма', service_id: undefined, per_page: 10 });
-
-    await waitFor(() => {
-      // service_title shown; start formatted ISO → "HH:mm dd.mm.yyyy"
-      expect(screen.getByText(/Картина маслом/)).toBeInTheDocument();
-      expect(screen.getByText(new RegExp(formatActivityStart(ACTIVITY_FIXTURE.start)))).toBeInTheDocument();
-    });
-
-    // Select the activity — service_id auto-fills from the item
-    fireEvent.click(screen.getByText(/Картина маслом/));
-
-    // Search again — now service_id from formData is passed
-    await typeAndWait(activityInput, 'Ма');
-    expect(mockGetActivities).toHaveBeenLastCalledWith(
-      expect.objectContaining({ q: 'Ма', service_id: ACTIVITY_FIXTURE.service_id, per_page: 10 }),
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+    expect(onSubmit.mock.calls[0][0]).toEqual(
+      expect.objectContaining({ filename: 'test.jpg', client_id: 'c1' }),
     );
+    // visitor_id is gone from the payload entirely (GH #211).
+    expect(onSubmit.mock.calls[0][0]).not.toHaveProperty('visitor_id');
+  });
+});
+
+describe('PhotoModal — Локация picker', () => {
+  it('loads options via getAllLocations and submits location_id', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    renderPhotoModal({ onSubmit });
+
+    // Wait for the locations dictionary to populate the <select> options.
+    await screen.findByText('Студия на Невском');
+    expect(screen.getByText('Без локации')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole('combobox', { name: 'Локация' }), {
+      target: { value: 'loc-1' },
+    });
+
+    fireEvent.change(screen.getByPlaceholderText('photo-001.jpg'), {
+      target: { value: 'test.jpg' },
+    });
+    fireEvent.click(screen.getByText('Сохранить'));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+    expect(onSubmit.mock.calls[0][0]).toEqual(
+      expect.objectContaining({ location_id: 'loc-1' }),
+    );
+    expect(mockGetAllLocations).toHaveBeenCalled();
+  });
+});
+
+describe('PhotoModal — mutually-exclusive owners (service ↔ activity)', () => {
+  it('selecting an activity clears the previously selected service', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    renderPhotoModal({ onSubmit });
+    await waitForLocationsLoaded();
+
+    // 1. Select a service first
+    typeAndDebounce(screen.getByRole('textbox', { name: 'Услуга' }), 'Ка');
+    fireEvent.click(await screen.findByText('Картина маслом'));
+
+    // 2. Then select an activity → service must be cleared
+    typeAndDebounce(screen.getByRole('textbox', { name: 'Активность' }), 'Ма');
+    fireEvent.click(await screen.findByText(CANONICAL_LABEL));
+
+    fireEvent.change(screen.getByPlaceholderText('photo-001.jpg'), {
+      target: { value: 'test.jpg' },
+    });
+    fireEvent.click(screen.getByText('Сохранить'));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+    const payload = onSubmit.mock.calls[0][0];
+    expect(payload.activity_id).toBe('a1');
+    expect(payload.service_id ?? null).toBeNull();
+  });
+
+  it('selecting a service clears the previously selected activity', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    renderPhotoModal({ onSubmit });
+    await waitForLocationsLoaded();
+
+    // 1. Select an activity first
+    typeAndDebounce(screen.getByRole('textbox', { name: 'Активность' }), 'Ма');
+    fireEvent.click(await screen.findByText(CANONICAL_LABEL));
+
+    // 2. Then select a service → activity must be cleared
+    typeAndDebounce(screen.getByRole('textbox', { name: 'Услуга' }), 'Ка');
+    fireEvent.click(await screen.findByText('Картина маслом'));
+
+    fireEvent.change(screen.getByPlaceholderText('photo-001.jpg'), {
+      target: { value: 'test.jpg' },
+    });
+    fireEvent.click(screen.getByText('Сохранить'));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+    const payload = onSubmit.mock.calls[0][0];
+    expect(payload.service_id).toBe('s1');
+    expect(payload.activity_id ?? null).toBeNull();
+  });
+
+  it('does NOT auto-fill service_id when an activity is selected', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    renderPhotoModal({ onSubmit });
+    await waitForLocationsLoaded();
+
+    typeAndDebounce(screen.getByRole('textbox', { name: 'Активность' }), 'Ма');
+    fireEvent.click(await screen.findByText(CANONICAL_LABEL));
+
+    fireEvent.change(screen.getByPlaceholderText('photo-001.jpg'), {
+      target: { value: 'test.jpg' },
+    });
+    fireEvent.click(screen.getByText('Сохранить'));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+    const payload = onSubmit.mock.calls[0][0];
+    expect(payload.activity_id).toBe('a1');
+    // Auto-fill removed — service stays null (owners are mutually exclusive).
+    expect(payload.service_id ?? null).toBeNull();
+  });
+});
+
+describe('PhotoModal — canonical activity label (spec §7.7)', () => {
+  it('renders options AND the selected value via formatActivityLabel', async () => {
+    renderPhotoModal();
+    await waitForLocationsLoaded();
+
+    typeAndDebounce(screen.getByRole('textbox', { name: 'Активность' }), 'Ма');
+
+    // Dropdown option: date-first canonical label (location resolved from the
+    // modal's getAllLocations map).
+    const option = await screen.findByText(CANONICAL_LABEL);
+    fireEvent.click(option);
+
+    // Selected value keeps the SAME canonical label in the input.
+    expect(screen.getByRole('textbox', { name: 'Активность' })).toHaveValue(CANONICAL_LABEL);
+  });
+});
+
+describe('PhotoModal — tag submission (GH #211 Task 9)', () => {
+  it('submits selected tags under tag_ids', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    renderPhotoModal({ onSubmit });
+
+    // Add a tag chip via the tags typeahead
+    typeAndDebounce(screen.getByPlaceholderText('Введите название тега...'), 'Гу');
+    fireEvent.click(await screen.findByText('Гуашь'));
+
+    fireEvent.change(screen.getByPlaceholderText('photo-001.jpg'), {
+      target: { value: 'test.jpg' },
+    });
+    fireEvent.click(screen.getByText('Сохранить'));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+    const payload = onSubmit.mock.calls[0][0];
+    expect(payload.tag_ids).toEqual([{ id: 'tag1', tag: 'Гуашь' }]);
+  });
+});
+
+describe('PhotoModal — server 422 surfaces (GH #211 §6.2)', () => {
+  it('keeps the modal open when onSubmit rejects (422 ≥2 owners)', async () => {
+    // Simulate the server rejecting a ≥2-owner payload — the modal surfaces it
+    // through the existing catch (toast handled by the caller) and stays open.
+    const onSubmit = vi.fn().mockRejectedValue(new Error('422'));
+    const onClose = vi.fn();
+    renderPhotoModal({ onSubmit, onClose });
+
+    fireEvent.change(screen.getByPlaceholderText('photo-001.jpg'), {
+      target: { value: 'test.jpg' },
+    });
+    fireEvent.click(screen.getByText('Сохранить'));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
   });
 });

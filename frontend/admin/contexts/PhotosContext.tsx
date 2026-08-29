@@ -1,53 +1,215 @@
 'use client';
 
-import { createPagedListContext } from './createPagedListContext';
-import { getPhotos } from '@memo/api-client';
-import type { PaginatedResponse, PhotoResponse } from '@memo/api-client';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
+import { getPhotos, getAllServices, getAllLocations } from '@memo/api-client';
+import type {
+  PhotoResponse,
+  PhotoListResponse,
+  PhotoListParams,
+  ServiceResponse,
+  LocationResponse,
+} from '@memo/api-client';
+import type { PagedListState } from '@/app/components/shared/tableTypes';
+import type { SortOrder } from './createPagedListContext';
 
-// INTERIM CLIENT ADAPTER (#139 T7 → #211): the photos endpoint is UNPAGINATED
-// (getPhotos(): Promise<PhotoResponse[]>), so this adapter builds the
-// PaginatedResponse envelope client-side — fetch all, optionally sort
-// (verbatim pre-#139 comparator), slice the requested page. The
-// PagedListState contract seen by <DataTable> is server-shaped from day one,
-// so #211 can swap the internals to true server pagination without touching
-// the table layer.
+// ─── Server-driven photos list (GH #211 Task 6) ────────────────────────────
+// Replaces the #139 client adapter: GET /api/v1/photos is now paginated, so
+// page/perPage/sort/q/filters travel to the server verbatim (RecordsContext
+// model). The PagedListState contract seen by <DataTable> is unchanged.
 
-const { Provider, usePagedList } = createPagedListContext<PhotoResponse>({
-  queryKeyPrefix: 'photos',
-  fetcher: async ({ page, per_page, sort_by, sort_order }): Promise<PaginatedResponse<PhotoResponse>> => {
-    const all = await getPhotos();
+export interface PhotoFilters {
+  client_id?: string;
+  activity_id?: string;
+  service_id?: string;
+  location_id?: string;
+  tag_id: string[];
+}
 
-    // Preserve today's client sort exactly (pre-#139 PhotosTable): strings
-    // via localeCompare 'ru', booleans false-before-true on asc, other/null
-    // values compare equal (stable → API order); asc only when picked.
-    let rows = all;
-    if (sort_by) {
-      rows = [...all];
-      rows.sort((a, b) => {
-        const aVal = a[sort_by as keyof PhotoResponse];
-        const bVal = b[sort_by as keyof PhotoResponse];
-        let cmp = 0;
-        if (typeof aVal === 'string' && typeof bVal === 'string') {
-          cmp = aVal.localeCompare(bVal, 'ru');
-        } else if (typeof aVal === 'boolean' && typeof bVal === 'boolean') {
-          cmp = aVal === bVal ? 0 : aVal ? 1 : -1;
-        }
-        return sort_order === 'asc' ? cmp : -cmp;
-      });
+const EMPTY_FILTERS: PhotoFilters = { tag_id: [] };
+
+/** Server sort whitelist (domain-rules/photos.md); default order created_at desc. */
+export type PhotoSortField = 'filename' | 'is_public' | 'created_at';
+
+export interface PhotosContextType {
+  /** Server-page items — PagedListState.items contract (spec §6.4, #139 T8). */
+  items: PhotoResponse[];
+  /** Server search owns the filter — the predicate view is bypassed (#212 precedent). */
+  visibleItems: PhotoResponse[];
+  total: number;
+  page: number;
+  perPage: number;
+  sortBy: string | null;
+  sortOrder: SortOrder;
+  /** Contract name; mapped to `q` at the fetcher (spec §7.2). */
+  search: string;
+  filters: PhotoFilters;
+  isPending: boolean;
+  isLoading: boolean;
+  isFetching: boolean;
+  error: Error | null;
+  /** /all dictionaries (once, staleTime: Infinity) — service/location titles resolve client-side. */
+  servicesMap: Map<string, ServiceResponse>;
+  locationsMap: Map<string, LocationResponse>;
+  setPage: (page: number) => void;
+  setPerPage: (perPage: number) => void;
+  setSort: (field: string, order: SortOrder) => void;
+  setSearch: (s: string) => void;
+  setFilters: (newFilters: Partial<PhotoFilters>) => void;
+  /** Clears filters + search, resets page to 1. */
+  resetFilters: () => void;
+  refetch: () => void;
+}
+
+const PhotosContext = createContext<PhotosContextType | null>(null);
+
+export function PhotosProvider({ children }: { children: React.ReactNode }) {
+  const queryClient = useQueryClient();
+
+  const [page, setPage] = useState(1);
+  const [perPage, setPerPageState] = useState(10);
+  const [sortBy, setSortBy] = useState<string | null>('created_at');
+  const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
+  const [search, setSearchState] = useState('');
+  const [filters, setFiltersState] = useState<PhotoFilters>(EMPTY_FILTERS);
+
+  // Server 422s on q < 2 chars — clamp: treated as unset until ≥2 (RecordsContext
+  // precedent, GH #212). Lives in ONE place: covers the key AND the fetcher, so a
+  // 1-char search neither fires a request nor changes the cache key.
+  const q = search.length >= 2 ? search : undefined;
+
+  const refetch = useCallback(() => {
+    void queryClient.refetchQueries({ queryKey: ['photos'] });
+  }, [queryClient]);
+
+  const { data, isLoading, isPending, isFetching, error } = useQuery<PhotoListResponse>({
+    queryKey: ['photos', { page, perPage, sortBy, sortOrder, q, ...filters }],
+    queryFn: () => getPhotos({
+      page,
+      per_page: perPage,
+      sort_by: sortBy ? (sortBy as PhotoSortField) : undefined,
+      sort_order: sortOrder,
+      q,
+      client_id: filters.client_id || undefined,
+      activity_id: filters.activity_id || undefined,
+      service_id: filters.service_id || undefined,
+      location_id: filters.location_id || undefined,
+      tag_id: filters.tag_id.length ? filters.tag_id : undefined,
+    } satisfies PhotoListParams),
+    placeholderData: keepPreviousData,
+  });
+  const items = useMemo(() => data?.items ?? [], [data]);
+  const total = data?.total ?? 0;
+
+  // A new filter/search means a new result set → restart at page 1
+  // (RecordsContext precedent).
+  const setFilters = useCallback((newFilters: Partial<PhotoFilters>) => {
+    setFiltersState((prev) => ({ ...prev, ...newFilters }));
+    setPage(1);
+  }, []);
+
+  const setSearch = useCallback((s: string) => {
+    setSearchState(s);
+    setPage(1);
+  }, []);
+
+  const resetFilters = useCallback(() => {
+    setFiltersState(EMPTY_FILTERS);
+    setSearchState('');
+    setPage(1);
+  }, []);
+
+  const setPerPage = useCallback((pp: number) => {
+    setPerPageState(pp);
+    setPage(1);
+  }, []);
+
+  // PagedListState.setSort contract (spec §6.4): field+order applied verbatim
+  // + page reset (§6.10.2). `field` is `string` per the contract; the server
+  // whitelist validates it upstream.
+  const setSort = useCallback((field: string, order: SortOrder) => {
+    setSortBy(field);
+    setSortOrder(order);
+    setPage(1);
+  }, []);
+
+  // Spec §6.7 page clamp — after a SETTLED fetch returns an empty non-first
+  // page (e.g. last row of page N deleted), step back. `!isFetching` guards
+  // against mid-refetch races with keepPreviousData.
+  useEffect(() => {
+    if (!isPending && !isFetching && items.length === 0 && page > 1) {
+      setPage(page - 1);
     }
+  }, [isPending, isFetching, items.length, page]);
 
-    const start = (page - 1) * per_page;
-    const items = rows.slice(start, start + per_page);
-    return { items, total: all.length, page, per_page };
-  },
-  withStatus: false,
-  // #139 T7 — dict search is predicate-only (spec §6.7): filters the loaded
-  // page into `visibleItems`; `search` stays out of the query key/fetcher.
-  // Filename-only match, per the pre-#139 table filter (PhotoResponse has no
-  // title field — filename is the search field; case-insensitive includes).
-  searchPredicate: (p, q) => p.filename.toLowerCase().includes(q.toLowerCase()),
-});
+  // Always-cached reference data (bare /all lists — #205); same keys as
+  // RecordsContext so the dictionaries load once across contexts.
+  const { data: servicesRaw = [] } = useQuery<ServiceResponse[]>({
+    queryKey: ['services'],
+    queryFn: () => getAllServices(),
+    staleTime: Infinity,
+  });
 
-export const PhotosProvider = Provider;
-/** Table list state (client-paginated until #211). */
-export const usePhotosTable = usePagedList;
+  const { data: locationsRaw = [] } = useQuery<LocationResponse[]>({
+    queryKey: ['locations'],
+    queryFn: () => getAllLocations(),
+    staleTime: Infinity,
+  });
+
+  const servicesMap = useMemo(() => {
+    const map = new Map<string, ServiceResponse>();
+    servicesRaw.forEach((s) => map.set(s.id, s));
+    return map;
+  }, [servicesRaw]);
+
+  const locationsMap = useMemo(() => {
+    const map = new Map<string, LocationResponse>();
+    locationsRaw.forEach((l) => map.set(l.id, l));
+    return map;
+  }, [locationsRaw]);
+
+  const contextValue = useMemo<PhotosContextType>(
+    () => ({
+      items,
+      visibleItems: items,
+      total,
+      page,
+      perPage,
+      sortBy,
+      sortOrder,
+      search,
+      filters,
+      isPending,
+      isLoading,
+      isFetching,
+      error: error ?? null,
+      servicesMap,
+      locationsMap,
+      setPage,
+      setPerPage,
+      setSort,
+      setSearch,
+      setFilters,
+      resetFilters,
+      refetch,
+    }),
+    [items, total, page, perPage, sortBy, sortOrder, search, filters, isPending, isLoading, isFetching, error, servicesMap, locationsMap, setPerPage, setSort, setSearch, setFilters, resetFilters, refetch],
+  );
+
+  return (
+    <PhotosContext.Provider value={contextValue}>
+      {children}
+    </PhotosContext.Provider>
+  );
+}
+
+export function usePhotosTable(): PhotosContextType {
+  const context = useContext(PhotosContext);
+  if (!context) throw new Error('usePhotosTable must be used within PhotosProvider');
+  return context;
+}
+
+// Compile-time drift guard (#139 T1): the context value must always satisfy the
+// DataTable-facing PagedListState contract. Type-only — no runtime cycle.
+const _assertAssignable: (v: PhotosContextType) => PagedListState<PhotoResponse> = (v) => v;
+void _assertAssignable;

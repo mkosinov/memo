@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — 2026-08-28
+
+### Added
+- **GH #211 — Photos: server pagination + filters + 4-owner model expansion** — branch `photos-server-list-211` (11 commits: 0aeae4e..a6a1024; absorbs #222, #224 closed not-planned):
+  - **Model:** Photo 4-owner model — `client_id` / `service_id` / `activity_id` / `location_id` (≤1 owner enforced by DB CHECK `ck_photos_single_owner`; ≥2 owners → 422; owner-less photos OK; no backfill); `visitor_id` removed everywhere; `client_name` denormalized on the list response (resolves archived clients); Client/Location hard-delete → photos auto-nullify (Visitor→photos relationship removed); `GET /photos/web` unchanged.
+  - **Backend:** `GET /api/v1/photos` → `PaginatedResponse` with `q` (filename substring, 2–100 chars), `client_id`, `location_id` (DIRECT-only), `activity_id` / `service_id` (variant A — direct OR via activity), `tag_id[]` (repeatable, AND), `sort_by` (`filename` | `is_public` | `created_at`, default created_at desc + id tiebreak); unknown filter ids → empty page; `PhotoService.list` rewrite + merged-set owner validation.
+  - **api-client:** paginated photos endpoint + typed filter/sort params (T5).
+  - **Admin:** `/photos` server-paginated 10/page + filters bar (Клиент/Активность typeaheads — active-only clients, Услуга/Локация selects, Теги chips AND, Сбросить); 8 columns (Клиент replaces Посетитель, Активность hidden by default, new Дата); PhotoModal Клиент+Локация pickers, activity↔service mutually exclusive (no auto-fill), 422 surfaced; canonical activity label «dd.mm.yyyy HH:mm — Локация — Услуга» project-wide via `formatActivityLabel` (`formatActivityStart` deleted).
+  - **Tests:** backend pytest 1431p/0f/8s; api-client 226p/4f (4 = pre-existing #188, unchanged); admin vitest 1526p/0f, tsc clean, lint 0; honest e2e — 8 photos scenarios + clients-delete-cascade extension + 7 regenerated baselines (photos+clients-delete 22/22); full serial e2e 300p/11f (11 = pre-existing records/wave6 visuals — font drift, A/B-proven on base, CI-side snapshot refresh needed); visual compliance gate 9/9 PASS.
+  - **Docs:** domain-rules synced (T11, commit `a6a1024`).
+  - **Known follow-ups (out of scope):** CI-side baseline refresh for the 11 pre-existing visual e2e failures; api-client #188 datetime failures pre-existing.
+  - **Closes:** #211 (absorbs #222 — closed as absorbed; #224 closed not-planned — no group-photo mechanism).
+  - Design spec: `docs/specs/2026-08-22-photos-pagination-filters-model-design.md` (on main)
+  - Plan: `docs/plans/2026-08-27-photos-pagination-filters-model-plan.md` (on main)
+
 ## [Unreleased] — 2026-08-26
 
 ### Added

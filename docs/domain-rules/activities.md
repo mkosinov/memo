@@ -45,6 +45,16 @@ An Activity is a scheduled instance of a Service. It ties together a Master, Ser
 - **Optimistic updates:** Snapshot → apply → rollback on error → invalidate on settle
 - **Race protection:** API call races against 5-second timeout
 
+## Display label convention (project-wide, GH #211 §7.7)
+
+THE canonical string representation of an activity in the admin frontend — used everywhere an activity renders as an option/label (photo modal typeaheads, filters, dropdowns; future #213 «Активность» column):
+
+- **Format:** `«{dd.mm.yyyy HH:mm} — {location title} — {service_title}»` — DATE FIRST (e.g. «21.08.2026 14:00 — Студия Север — День рождения»), local time.
+- **ONE shared formatter:** `formatActivityLabel(activity, locationsMap)` in `frontend/admin/lib/utils.ts` (built on `formatActivityDateTime`); all consumers call it, nobody composes the string inline. `formatActivityStart` was DELETED (was the last non-canonical consumer — GH #211 Task 10).
+- **Segment omission:** a segment is dropped when its data is absent — no dangling « — » separators. Location title resolves client-side via the `/locations/all` map (**ACTIVE-only**) — an activity at an ARCHIVED location omits the location segment (id not in map).
+- **Separator:** « — » (project convention).
+- **#213 cross-pin:** the display-lookup composite (#213) will centralize activity display data further — it must reuse this label, no third format gets invented there.
+
 ## API Endpoints
 | Method | Path | Description |
 |--------|------|-------------|

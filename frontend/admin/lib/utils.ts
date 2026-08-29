@@ -113,11 +113,39 @@ export function formatRecordLabel(activityStart: string | null | undefined): str
   return `${d.getDate()} ${MONTHS_GENITIVE[d.getMonth()]} · ${time}`;
 }
 
-/** Format ISO activity start for display: "HH:mm dd.mm.yyyy" (local time, GH #212). */
-export function formatActivityStart(iso: string): string {
+/**
+ * Date-first activity datetime — THE canonical project-wide representation
+ * (spec §7.7, user-ruled 2026-08-27). "dd.mm.yyyy HH:mm", local time
+ * (GH #212 semantics). formatActivityLabel builds on this (spec §7.7:
+ * formatActivityLabel is THE canonical label — formatActivityStart was
+ * removed with its last consumer, GH #211 Task 10).
+ */
+export function formatActivityDateTime(iso: string): string {
   const d = new Date(iso);
   const p = (n: number) => String(n).padStart(2, '0');
-  return `${p(d.getHours())}:${p(d.getMinutes())} ${p(d.getDate())}.${p(d.getMonth() + 1)}.${d.getFullYear()}`;
+  return `${p(d.getDate())}.${p(d.getMonth() + 1)}.${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+/** Minimal activity shape for the canonical label. */
+export interface ActivityLike {
+  start: string;
+  location_id?: string | null;
+  service_title?: string | null;
+}
+
+/**
+ * Canonical activity label (spec §7.7, user-ruled 2026-08-27):
+ * «dd.mm.yyyy HH:mm — location title — service title». Absent segments are
+ * dropped — the location only appears when locationsMap resolves the id
+ * (archived locations are not in the active-only /locations/all map → the
+ * segment is silently omitted), so no dangling «—» ever appears.
+ */
+export function formatActivityLabel(a: ActivityLike, locationsMap: Map<string, { title: string }>): string {
+  const parts: string[] = [formatActivityDateTime(a.start)];
+  const location = a.location_id ? locationsMap.get(a.location_id) : undefined;
+  if (location) parts.push(location.title);
+  if (a.service_title) parts.push(a.service_title);
+  return parts.join(' — ');
 }
 
 // ─── Time / Date Utilities ────────────────────────────────────────────────

@@ -13,6 +13,7 @@ import { vi } from 'vitest';
 import type { ScheduleContextType } from '@/contexts/ScheduleContext';
 import type { RecordsContextType } from '@/contexts/RecordsContext';
 import type { ClientsContextType } from '@/contexts/ClientsContext';
+import type { PhotosContextType } from '@/contexts/PhotosContext';
 import { mockMasters, mockServices, mockLocations } from './mockData';
 
 // ─── ScheduleContext ──────────────────────────────────────────────────────
@@ -202,4 +203,38 @@ export function createMockClientsContext(
   if (overrides?.clients !== undefined) merged.items = overrides.clients;
   else if (overrides?.items !== undefined) merged.clients = overrides.items;
   return merged;
+}
+
+// ─── PhotosContext (GH #211 — server-driven photos list) ──────────────────
+
+type PhotosOverrides = Partial<PhotosContextType>;
+
+export function createMockPhotosContext(
+  overrides?: PhotosOverrides,
+): PhotosContextType {
+  return {
+    items: [],
+    visibleItems: [],
+    total: 0,
+    page: 1,
+    perPage: 10,
+    sortBy: 'created_at',
+    sortOrder: 'desc',
+    search: '',
+    filters: { tag_id: [] },
+    isPending: false,
+    isLoading: false,
+    isFetching: false,
+    error: null,
+    servicesMap: new Map(),
+    locationsMap: new Map(),
+    setPage: vi.fn(),
+    setPerPage: vi.fn(),
+    setSort: vi.fn(),
+    setSearch: vi.fn(),
+    setFilters: vi.fn(),
+    resetFilters: vi.fn(),
+    refetch: vi.fn(),
+    ...overrides,
+  };
 }

@@ -19,8 +19,9 @@ import { parseApiError } from '@/app/lib/api/parseApiError';
  * entity dialogs and mutations stay here.
  */
 export function PhotosTable() {
-  // Client-paginated list state (PhotosContext adapter, #139 T7)
+  // Server-driven list state (PhotosContext, GH #211 Task 6)
   const photosTable = usePhotosTable();
+  const { servicesMap, locationsMap } = photosTable;
 
   const updateMutation = useUpdatePhoto();
   const createMutation = useCreatePhoto();
@@ -39,20 +40,17 @@ export function PhotosTable() {
     if (data.filename !== null && data.filename !== undefined) {
       payload.filename = String(data.filename);
     }
-    if (data.visitor_id !== null && data.visitor_id !== undefined) {
-      payload.visitor_id = String(data.visitor_id) || null;
-    }
-    if (data.service_id !== null && data.service_id !== undefined) {
-      payload.service_id = String(data.service_id) || null;
-    }
-    if (data.activity_id !== null && data.activity_id !== undefined) {
-      payload.activity_id = String(data.activity_id) || null;
+    // GH #211 4-owner model — each slot travels explicitly (null clears the
+    // stored owner); the mutually-exclusive pair guarantee comes from the
+    // modal (a selection clears its counterpart).
+    for (const key of ['client_id', 'service_id', 'activity_id', 'location_id']) {
+      payload[key] = typeof data[key] === 'string' && data[key] !== '' ? data[key] : null;
     }
     if (data.is_public !== null && data.is_public !== undefined) {
       payload.is_public = Boolean(data.is_public);
     }
-    if (data.tags !== null && data.tags !== undefined) {
-      const tags = (data.tags as Array<{ id: string; tag: string }>) || [];
+    if (data.tag_ids !== null && data.tag_ids !== undefined) {
+      const tags = (data.tag_ids as Array<{ id: string; tag: string }>) || [];
       payload.tag_ids = tags.map(t => t.id);
     }
     try {
@@ -68,13 +66,14 @@ export function PhotosTable() {
   };
 
   const handleCreateSubmit = async (data: Record<string, unknown>) => {
-    const tags = (data.tags as Array<{ id: string; tag: string }>) || [];
+    const tags = (data.tag_ids as Array<{ id: string; tag: string }>) || [];
     try {
       await createMutation.mutateAsync({
         filename: String(data.filename ?? ''),
-        visitor_id: String(data.visitor_id ?? ''),
-        service_id: String(data.service_id ?? ''),
-        activity_id: String(data.activity_id ?? ''),
+        client_id: typeof data.client_id === 'string' ? data.client_id : null,
+        service_id: typeof data.service_id === 'string' ? data.service_id : null,
+        activity_id: typeof data.activity_id === 'string' ? data.activity_id : null,
+        location_id: typeof data.location_id === 'string' ? data.location_id : null,
         is_public: Boolean(data.is_public),
         tag_ids: tags.map(t => t.id),
       });
@@ -95,8 +94,11 @@ export function PhotosTable() {
     }
   };
 
-  // §6.15 — memoize the factory outputs
-  const columns = useMemo(() => photoColumns(), []);
+  // §6.15 — memoize the factory outputs (recomputes when the /all maps change)
+  const columns = useMemo(
+    () => photoColumns({ servicesMap, locationsMap }),
+    [servicesMap, locationsMap],
+  );
   const actions = useMemo(
     () =>
       photoActions({

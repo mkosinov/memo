@@ -94,7 +94,7 @@ class VisitorAdmin(ModelView, model=Visitor):
 
 
 class PhotoAdmin(ModelView, model=Photo):
-    column_list: ClassVar[list[Column]] = [Photo.id, Photo.filename, Photo.visitor_id, Photo.service_id, Photo.activity_id]
+    column_list: ClassVar[list[Column]] = [Photo.id, Photo.filename, Photo.client_id, Photo.service_id, Photo.activity_id, Photo.location_id]
     name = "Photo"
     name_plural = "Photos"
     icon = "fa-solid fa-image"

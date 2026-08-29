@@ -265,10 +265,13 @@ const TABLE_CONFIGS: PageTableConfig[] = [
     path: '/photos',
     h1Text: 'Управление фото',
     navigate: waitForPhotosReady,
-    // Photos fetches a plain array (no pagination envelope) — see EMPTY_ARRAY.
+    // #211: photos fetches the PAGINATED envelope (EMPTY_PAGED) — the empty
+    // intercept shares the generic body. Превью is sortable:false since #211
+    // (server sort whitelist: filename/is_public/created_at) — click «Файл»,
+    // the default-sort DESC column, for the deterministic ↑ active state.
     apiUrl: '/api/v1/photos',
-    sortHeader: (page) => thExact(page, 'Превью'),
-    glyphSelector: 'th:has-text("Превью ↑")',
+    sortHeader: (page) => thExact(page, 'Файл'),
+    glyphSelector: 'th:has-text("Файл ↑")',
     row: (page) => page.locator('[data-testid^="photo-row-"]').first(),
   },
   {
@@ -408,13 +411,13 @@ function pickerOpenTest(config: PageTableConfig) {
  */
 function emptyTest(config: PageTableConfig) {
   test(`${config.name}-table-empty`, async ({ page }) => {
-    const body = config.name === 'photos' ? [] : EMPTY_PAGED;
+    // All 8 tables now fetch the paginated envelope (#211: photos joined).
     await page.route(`**${config.apiUrl}*`, (route) =>
       route.fulfill({
         status: 200,
         contentType: 'application/json',
         headers: { 'Access-Control-Allow-Origin': '*' },
-        body: JSON.stringify(body),
+        body: JSON.stringify(EMPTY_PAGED),
       }),
     );
     await navigateDirect(page, config);
@@ -511,6 +514,26 @@ for (const config of TABLE_CONFIGS) {
       // always show seed rows only (tags/locations/masters/services/clients/
       // photos seed IDs are short; cleanTestData's length filters keep them).
       cleanTestData();
+      // The mocked clock (below) guarantees a sidebar «Сегодня» hydration
+      // mismatch (SSR renders the real date); Next's dev overlay surfaces it
+      // as a "1 error" toast that intermittently lands in the screenshot.
+      // Photos-only: hide it the same way hideToasts() scrubs the
+      // error-scenario toast (a dev-tool artifact, never production UI) so
+      // the regenerated #211 baselines stay deterministic. The other tables'
+      // committed baselines KEEP the overlay state they were recorded with
+      // (CI-recorded; re-recording them is out of #211 scope).
+      if (config.name === 'photos') {
+        await page.addInitScript(() => {
+          const hideOverlay = () => {
+            document.querySelectorAll('nextjs-portal').forEach((el) => {
+              (el as HTMLElement).style.display = 'none';
+            });
+          };
+          hideOverlay();
+          const interval = setInterval(hideOverlay, 200);
+          setTimeout(() => clearInterval(interval), 10_000);
+        });
+      }
       // Mock browser time to the fixed reference week (matches seed WEEK_FIXED_START).
       // Date-stable baselines: the Records page filters by the *browser current
       // week* and seed records r1..r6 live in the week of 2026-06-15, so without

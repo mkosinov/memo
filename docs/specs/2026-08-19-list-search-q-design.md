@@ -29,12 +29,13 @@ The standard paginated list endpoint (#182 envelope) cannot search by content. T
 ## 3. Non-Goals (out of scope)
 
 - **#211** — photos server pagination/search. The photos list endpoint gets **no** `q` param; PhotosTable search stays client-side.
+  - **Amended by #211 (2026-08-27):** photos list now has server `q` (filename substring, min 2 / max 100 chars). Contract: `docs/specs/2026-08-22-photos-pagination-filters-model-design.md` + `docs/domain-rules/photos.md`.
 - **#214** — dictionary form dropdowns (combobox over `/all`, client-side filter). Untouched.
 - **#216** — `?clientId=N` deep-link implementation (compat note §6.8 only).
 - **#213** — display-lookup composite endpoint.
 - **No NEW clients form typeahead is built** (B3 resolution — see §8 flag). Clients gain server `?q=` on the list endpoint (used by the clients table; available to any future typeahead with zero backend work), but no new UI component.
 - Record `comment` and activity `comment` fields are NOT searched (explicit user decisions).
-- Photos / payments / visits / users entities get no `q`.
+- Photos / payments / visits / users entities get no `q` — **photos superseded by #211 (2026-08-27):** photos now have server `q`, see the #211 non-goal bullet above. Payments / visits / users remain without `q`.
 
 ## 4. Current State (verified 2026-08-19)
 

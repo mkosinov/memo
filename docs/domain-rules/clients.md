@@ -81,7 +81,7 @@ The Response schema exposes `archived: bool` instead of `is_active` (inversion: 
 - [ ] All fields nullable
 - [ ] Phone search returns exact match
 - [ ] Stats computed correctly
-- [ ] `DELETE /{id}` with resolutions: records `nullify` (survive, become anonymous — `client_id=null`), visitors `cascade` (deleted), `client_tags` auto-cascade (deleted). Payments are record-scoped and survive with the nullified records (NOT deleted by the visitors cascade).
+- [ ] `DELETE /{id}` with resolutions: records `nullify` (survive, become anonymous — `client_id=null`), visitors `cascade` (deleted), `client_tags` auto-cascade (deleted), `photos` auto-nullified (survive, become owner-less — GH #211). Payments are record-scoped and survive with the nullified records (NOT deleted by the visitors cascade).
 
 ## Parity Notes
 | Backend (Pydantic) | Frontend (Zod) | Match |
@@ -100,8 +100,9 @@ Client is one of the 5 archive-aware entities. PUT/PATCH no longer accept `is_ac
 | Relation | Nullable? | Action | User choice? |
 |---|---|---|---|
 | **records** (client_id) | nullable | **nullify** | **choice: `["nullify"]`** — non-auto; user must include `{"records": "nullify"}` in the resolutions body (missing → 422). Record survives, becomes anonymous (`client_id=null`). |
-| **visitors** (client_id) | NOT NULL | **cascade** | **choice: `["cascade"]`** — non-auto; user must include `{"visitors": "cascade"}` (missing → 422). Cascade follows `VisitorService._delete_cascade` (visits → photos SET NULL → visitor_tags → visitor). Payments are NOT part of this cascade (record-scoped, survive with the nullified records — see `cascade_preview` below). |
+| **visitors** (client_id) | NOT NULL | **cascade** | **choice: `["cascade"]`** — non-auto; user must include `{"visitors": "cascade"}` (missing → 422). Cascade follows `VisitorService._delete_cascade` (visits → visitor_tags → visitor; photo `visitor_id` dropped in GH #211 — photos not part of this cascade). Payments are NOT part of this cascade (record-scoped, survive with the nullified records — see `cascade_preview` below). |
 | **client_tags** (join) | NOT NULL PK | **cascade** (auto) | auto — join table rows deleted automatically; omitted from resolutions body. |
+| **photos** (client_id) | nullable | **nullify** (auto) | auto — photo survives, becomes owner-less (GH #211). |
 
 - **`cascade_preview` for the visitors cascade: `{"visits": <count>}` only.** `Payment` is **record-scoped** (`payments.record_id → records.id`); Client→records is *nullify* (records survive, become anonymous), so their payments are NOT part of the visitors cascade and survive with the nullified records. Absent for nullify actions (nothing downstream is hard-deleted). (Spec §5.)
 - **DELETE `/{id}` (no body):** zero deps → 204 hard delete (row gone). Any dep → 409 + dependency tree (counters + sums only, no rows modified). For a Client with 47 records, 12 visitors (across 45 visits), and 5 client_tags:
@@ -116,8 +117,8 @@ Client is one of the 5 archive-aware entities. PUT/PATCH no longer accept `is_ac
     ]
   }
   ```
-- **DELETE `/{id}` (with body):** `{"resolutions": {"records": "nullify", "visitors": "cascade"}}` (tags auto — omitted from body). Invalid action → 422 (e.g. `{"records": "cascade"}` — records only allows nullify; `{"activities": "cascade"}` — activities is blocked). Missing a non-auto dep → 422 ("resolution required for entity records/visitors"). Auto deps sent in body are ignored. On success → 204, executed in ONE `@transactional` method: **nullify** records (set `client_id=null`) → **cascade** visitors via the extracted `VisitorService._delete_cascade` core on the shared session (NOT a per-visitor `@transactional` loop — atomicity, §8) → **cascade** client_tags → **hard delete** the client row. (Spec §6.)
-- **Result of a successful delete:** records survive with `client_id=null` (anonymous); **payments survive** with their nullified records (record-scoped, NOT deleted by the visitors cascade); visitors + their visits + visitor_tags + client_tags + the client row are physically gone.
+- **DELETE `/{id}` (with body):** `{"resolutions": {"records": "nullify", "visitors": "cascade"}}` (tags + photos auto — omitted from body). Invalid action → 422 (e.g. `{"records": "cascade"}` — records only allows nullify; `{"activities": "cascade"}` — activities is blocked). Missing a non-auto dep → 422 ("resolution required for entity records/visitors"). Auto deps sent in body are ignored. On success → 204, executed in ONE `@transactional` method: **nullify** records (set `client_id=null`) → **cascade** visitors via the extracted `VisitorService._delete_cascade` core on the shared session (NOT a per-visitor `@transactional` loop — atomicity, §8) → **cascade** client_tags → **nullify** photos (set `client_id=null`, auto) → **hard delete** the client row. (Spec §6.)
+- **Result of a successful delete:** records survive with `client_id=null` (anonymous); **payments survive** with their nullified records (record-scoped, NOT deleted by the visitors cascade); photos survive with `client_id=null` (owner-less); visitors + their visits + visitor_tags + client_tags + the client row are physically gone.
 
 ### Master-only contrast (NOT applicable to Client)
 

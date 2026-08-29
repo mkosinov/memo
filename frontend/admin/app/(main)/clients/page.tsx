@@ -14,10 +14,21 @@ function ClientsPageContent() {
   const [isCreateMode, setIsCreateMode] = useState(false);
   // #139 T6 — legacy page-level pager removed; the unified <DataTable> pager
   // owns pagination for the page (spec §6.10, dict-table unification).
-  const { clients } = useClients();
+  const { clients, setFilters, isPending, isFetching } = useClients();
   const searchParams = useSearchParams();
   const router = useRouter();
   const clientIdFromQuery = searchParams.get('clientId');
+
+  // GH #216: deep-link ?clientId=N → narrow the table to that client.
+  // Server q= matches a full UUID by exact id equality (GH #212) → ≤1 row →
+  // always page 1 → the find-effect below sees the row regardless of its
+  // position in the unfiltered list. status forced to 'all' so archived
+  // clients are reachable (display default stays 'active').
+  useEffect(() => {
+    if (clientIdFromQuery) {
+      setFilters({ search: clientIdFromQuery, status: 'all' });
+    }
+  }, [clientIdFromQuery, setFilters]);
 
   // Open ClientCardModal when navigated with ?clientId=
   useEffect(() => {
@@ -28,6 +39,21 @@ function ClientsPageContent() {
       }
     }
   }, [clientIdFromQuery, clients, selectedClient]);
+
+  // GH #216: dead link — narrowed fetch settled with zero rows and the modal
+  // never opened → strip the param so a manual search-clear + refresh cannot
+  // re-trigger the narrowing (spec §5.5 E1).
+  useEffect(() => {
+    if (
+      clientIdFromQuery &&
+      !selectedClient &&
+      !isPending &&
+      !isFetching &&
+      clients.length === 0
+    ) {
+      router.replace('/clients', { scroll: false });
+    }
+  }, [clientIdFromQuery, selectedClient, isPending, isFetching, clients, router]);
 
   return (
     <div className="p-4 space-y-4">

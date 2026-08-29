@@ -686,3 +686,58 @@ test.describe('UUID search — #216 pre-flight', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// Tests — deep-link ?clientId= (GH #216)
+// ---------------------------------------------------------------------------
+
+test.describe('Deep-link ?clientId= — #216', () => {
+  test('19. deep-link opens the client card for a client beyond page 1; close keeps the narrowed view', async ({
+    page,
+    request,
+  }) => {
+    // GH #216: 20 fillers (names sorting before the target) push the target
+    // («ЯЯ-…» sorts last under SQLite BINARY collation — Cyrillic Я > А and
+    // all Cyrillic > Latin) beyond page 1 of the default name-asc list.
+    // The fix narrows via q=<uuid> exact-id → modal opens from the row.
+    const ts = uid();
+    const fillers: Awaited<ReturnType<typeof createTestClient>>[] = [];
+    const target = await createTestClient(request, { name: `ЯЯ-deeplink-${ts}` });
+    try {
+      for (let i = 0; i < 20; i++) {
+        fillers.push(await createTestClient(request, { name: `АА-filler-${i}-${ts}` }));
+      }
+
+      // Premise self-check (spec §7 T4): the target must NOT be on unfiltered
+      // page 1 — otherwise this test silently degrades to the page-1 path.
+      const resp = await request.get(
+        `${BACKEND}/api/v1/clients?sort_by=name&sort_order=asc&per_page=20`,
+      );
+      expect(resp.ok()).toBeTruthy();
+      const page1 = await resp.json();
+      expect(page1.total).toBeGreaterThanOrEqual(21);
+      expect(page1.items.some((c: { id: string }) => c.id === target.id)).toBe(false);
+
+      // Deep-link: modal opens over the narrowed table.
+      await page.goto(`/clients?clientId=${target.id}`);
+      await expect(page).toHaveURL(new RegExp(`clientId=${target.id}`));
+      const modal = page.locator('[data-testid="client-card-modal"]');
+      await expect(modal).toBeVisible({ timeout: 10_000 });
+      await expect(page.locator('table tbody tr')).toHaveCount(1);
+      await expect(page.locator('input[placeholder*="Поиск"]')).toHaveValue(target.id);
+      const statusSelect = page.locator('div:has(> label:text-is("Статус")) > select');
+      await expect(statusSelect).toHaveValue('all');
+
+      // Concept point 4: close → param stripped, NO auto-clear of the search.
+      await closeByBackdrop(page);
+      await expect(page).not.toHaveURL(/clientId=/);
+      await expect(page.locator('table tbody tr')).toHaveCount(1);
+      await expect(page.locator('input[placeholder*="Поиск"]')).toHaveValue(target.id);
+    } finally {
+      await cleanup(request, `/api/v1/clients/${target.id}`);
+      for (const f of fillers) {
+        await cleanup(request, `/api/v1/clients/${f.id}`);
+      }
+    }
+  });
+});

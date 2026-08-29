@@ -444,6 +444,35 @@ class TestClientListQContract:
             "LegacyParam Match", "LegacyParam Other",
         }
 
+    def test_status_all_uuid_q_returns_archived_client_single_row(
+        self, api_client, create_client
+    ) -> None:
+        """GH #216 deep-link combo: status=all + full UUID q → the archived
+        target is the single row (id exact-match narrows; status floor lifted)."""
+        target = create_client(name="DeeplinkArch Probe", phone="+79992100031")
+        create_client(name="DeeplinkArch Decoy", phone="+79992100032")
+        archive_resp = api_client.post(f"/api/v1/clients/{target['id']}/archive")
+        assert archive_resp.status_code == 200
+
+        resp = api_client.get(
+            "/api/v1/clients", params={"q": target["id"], "status": "all"}
+        )
+        body = resp.json()
+        assert [c["id"] for c in body["items"]] == [target["id"]]
+        assert body["total"] == 1
+
+    def test_uppercase_uuid_q_normalized_api_match(
+        self, api_client, create_client
+    ) -> None:
+        """GH #216: pasted uppercase UUID still matches at the clients API
+        level (lowercase normalization — mirrors unit/repo-level tests)."""
+        probe = create_client(name="UuidUpperProbe", phone="+79992100033")
+
+        resp = api_client.get("/api/v1/clients", params={"q": probe["id"].upper()})
+        body = resp.json()
+        assert [c["id"] for c in body["items"]] == [probe["id"]]
+        assert body["total"] == 1
+
 
 # ─── GET /clients/get phone lookup contract (GH #212 Task 6) ─────────────────
 

@@ -8,6 +8,7 @@ vi.mock('@/contexts/ClientsContext', () => ({
 }));
 
 import { useClients } from '@/contexts/ClientsContext';
+import type { ClientFilters } from '@/contexts/ClientsContext';
 import { ClientsFilters } from '../app/(main)/clients/components/ClientsFilters';
 
 const mockUseClients = vi.mocked(useClients);
@@ -276,5 +277,99 @@ describe('ClientsFilters', () => {
     fireEvent.change(minPaid, { target: { value: '5000' } });
     fireEvent.change(minPaid, { target: { value: '' } });
     expect(setFilters).toHaveBeenLastCalledWith({ min_paid: null });
+  });
+});
+
+describe('ClientsFilters — controlled search input (GH #216)', () => {
+  function mockFiltersContext(overrides: Partial<Pick<ClientFilters, 'search' | 'status'>> = {}) {
+    const ctx = createMockClientsContext({
+      filters: {
+        ...createMockClientsContext().filters,
+        search: overrides.search ?? '',
+        status: overrides.status ?? 'active',
+      },
+    });
+    mockUseClients.mockReturnValue(ctx);
+    return ctx;
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  const searchInput = () => screen.getByPlaceholderText(/Поиск по имени или телефону/);
+
+  it('displays an externally committed search value (deep-link UUID pre-fill)', () => {
+    mockFiltersContext({ search: '11111111-2222-3333-4444-555555555555' });
+    render(<ClientsFilters />);
+    expect(searchInput()).toHaveValue('11111111-2222-3333-4444-555555555555');
+  });
+
+  it('typing updates the draft immediately and commits once after 300ms', () => {
+    const ctx = mockFiltersContext();
+    render(<ClientsFilters />);
+    fireEvent.change(searchInput(), { target: { value: 'иван' } });
+    expect(searchInput()).toHaveValue('иван');
+    expect(ctx.setFilters).not.toHaveBeenCalled();
+    act(() => { vi.advanceTimersByTime(300); });
+    expect(ctx.setFilters).toHaveBeenCalledWith({ search: 'иван' });
+  });
+
+  it('each keystroke restarts the timer (debounce), single commit with final value', () => {
+    const ctx = mockFiltersContext();
+    render(<ClientsFilters />);
+    fireEvent.change(searchInput(), { target: { value: 'ив' } });
+    act(() => { vi.advanceTimersByTime(250); });
+    fireEvent.change(searchInput(), { target: { value: 'иван' } });
+    act(() => { vi.advanceTimersByTime(100); });
+    expect(ctx.setFilters).not.toHaveBeenCalled();
+    act(() => { vi.advanceTimersByTime(250); });
+    expect(ctx.setFilters).toHaveBeenCalledTimes(1);
+    expect(ctx.setFilters).toHaveBeenCalledWith({ search: 'иван' });
+  });
+
+  it('type → «Сбросить фильтры» within 300ms: reset wins, timer cancelled, box cleared', () => {
+    const ctx = mockFiltersContext();
+    render(<ClientsFilters />);
+    fireEvent.change(searchInput(), { target: { value: 'а' } });
+    fireEvent.click(screen.getByText('Сбросить фильтры'));
+    expect(ctx.resetFilters).toHaveBeenCalled();
+    expect(searchInput()).toHaveValue('');
+    act(() => { vi.advanceTimersByTime(400); });
+    expect(ctx.setFilters).not.toHaveBeenCalledWith({ search: 'а' });
+  });
+
+  it('mid-life external commit syncs the box when not dirty, nothing resurrects', () => {
+    const ctx = mockFiltersContext();
+    const { rerender } = render(<ClientsFilters />);
+    // no typing → not dirty; an external commit lands post-mount (e.g. deep-link effect)
+    mockFiltersContext({ search: '11111111-2222-3333-4444-555555555555' });
+    rerender(<ClientsFilters />);
+    expect(searchInput()).toHaveValue('11111111-2222-3333-4444-555555555555');
+    // the sync branch cancelled any armed timer — nothing may resurrect the old value
+    act(() => { vi.advanceTimersByTime(400); });
+    expect(ctx.setFilters).not.toHaveBeenCalled();
+  });
+
+  it('external commit while user typed ahead keeps the draft (no clobber)', () => {
+    const ctx = mockFiltersContext();
+    const { rerender } = render(<ClientsFilters />);
+    fireEvent.change(searchInput(), { target: { value: 'ив' } });
+    // an older commit lands (e.g. previous debounce fired) — draft must survive
+    mockFiltersContext({ search: 'чужое' });
+    rerender(<ClientsFilters />);
+    expect(searchInput()).toHaveValue('ив');
+    act(() => { vi.advanceTimersByTime(300); });
+    expect(ctx.setFilters).toHaveBeenCalledWith({ search: 'ив' });
+  });
+
+  it('status select is controlled by filters.status', () => {
+    mockFiltersContext({ status: 'all' });
+    render(<ClientsFilters />);
+    expect(screen.getByDisplayValue('Все')).toBeInTheDocument();
   });
 });

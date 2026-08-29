@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ClientWithStats } from '@memo/api-client';
@@ -18,9 +18,12 @@ vi.mock('@/contexts/ClientsContext', () => ({
   ClientsProvider: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));
 
+const mockRouter = { push: vi.fn(), replace: vi.fn() };
+let mockSearchParams = new URLSearchParams();
+
 vi.mock('next/navigation', () => ({
-  useSearchParams: () => new URLSearchParams(),
-  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  useSearchParams: () => mockSearchParams,
+  useRouter: () => mockRouter,
 }));
 
 const mockUseClients = vi.mocked(useClients);
@@ -98,6 +101,9 @@ function createQueryClient() {
 
 describe('ClientsPage', () => {
   beforeEach(() => {
+    mockSearchParams = new URLSearchParams();
+    mockRouter.push.mockClear();
+    mockRouter.replace.mockClear();
     mockUseClients.mockReturnValue(createMockClientsContext({ total: 25, page: 1, perPage: 20 }));
   });
 
@@ -293,5 +299,135 @@ describe('ClientsPage', () => {
       );
       expect(screen.getByText('0 всего')).toBeInTheDocument();
     });
+  });
+});
+
+describe('ClientsPage — ?clientId= deep-link (GH #216)', () => {
+  beforeEach(() => {
+    mockSearchParams = new URLSearchParams();
+    mockRouter.push.mockClear();
+    mockRouter.replace.mockClear();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('deep-link param narrows the table: setFilters({search: id, status: all})', async () => {
+    mockSearchParams = new URLSearchParams([['clientId', 'uuid-target-1']]);
+    const ctx = createMockClientsContext({ items: [], clients: [] });
+    mockUseClients.mockReturnValue(ctx);
+
+    const ClientsPage = (await import('../app/(main)/clients/page')).default;
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <ClientsPage />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() =>
+      expect(ctx.setFilters).toHaveBeenCalledWith({ search: 'uuid-target-1', status: 'all' }),
+    );
+  });
+
+  it('no param: deep-link setFilters not called', async () => {
+    const ctx = createMockClientsContext({ total: 25, page: 1, perPage: 20 });
+    mockUseClients.mockReturnValue(ctx);
+
+    const ClientsPage = (await import('../app/(main)/clients/page')).default;
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <ClientsPage />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByText('Клиенты')).toBeInTheDocument());
+    expect(ctx.setFilters).not.toHaveBeenCalled();
+  });
+
+  it('find-effect opens the modal when the narrowed row arrives', async () => {
+    mockSearchParams = new URLSearchParams([['clientId', 'c-deep-1']]);
+    const target = { id: 'c-deep-1', name: 'Deep Target', archived: false } as ClientWithStats;
+    mockUseClients.mockReturnValue(
+      createMockClientsContext({ items: [target], clients: [target] }),
+    );
+
+    const ClientsPage = (await import('../app/(main)/clients/page')).default;
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <ClientsPage />
+      </QueryClientProvider>,
+    );
+
+    // Reuse the assertion idiom the existing create-mode modal tests use.
+    await waitFor(() => {
+      expect(screen.getByTestId('client-card-modal')).toBeInTheDocument();
+    });
+  });
+
+  it('row not in items: modal stays closed (negative find branch)', async () => {
+    mockSearchParams = new URLSearchParams([['clientId', 'c-missing']]);
+    const other = { id: 'c-other', name: 'Other', archived: false } as ClientWithStats;
+    mockUseClients.mockReturnValue(
+      createMockClientsContext({ items: [other], clients: [other] }),
+    );
+
+    const ClientsPage = (await import('../app/(main)/clients/page')).default;
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <ClientsPage />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByText('Клиенты')).toBeInTheDocument());
+    expect(screen.queryByTestId('client-card-modal')).not.toBeInTheDocument();
+  });
+
+  it('dead link: settled empty list strips the param from the URL', async () => {
+    mockSearchParams = new URLSearchParams([['clientId', 'c-gone']]);
+    mockUseClients.mockReturnValue(
+      createMockClientsContext({ items: [], clients: [], isPending: false, isFetching: false }),
+    );
+
+    const ClientsPage = (await import('../app/(main)/clients/page')).default;
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <ClientsPage />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() =>
+      expect(mockRouter.replace).toHaveBeenCalledWith('/clients', { scroll: false }),
+    );
+  });
+
+  it('closing the deep-link modal does not re-open it while the param is still in the URL', async () => {
+    mockSearchParams = new URLSearchParams([['clientId', 'c-deep-1']]);
+    const target = { id: 'c-deep-1', name: 'Deep Target', archived: false } as ClientWithStats;
+    mockUseClients.mockReturnValue(
+      createMockClientsContext({ items: [target], clients: [target] }),
+    );
+
+    const ClientsPage = (await import('../app/(main)/clients/page')).default;
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <ClientsPage />
+      </QueryClientProvider>,
+    );
+
+    // Deep-link opens the modal via the find-effect.
+    await waitFor(() => {
+      expect(screen.getByTestId('client-card-modal')).toBeInTheDocument();
+    });
+
+    // User closes the modal. In the unit env `mockRouter.replace` is a vi.fn()
+    // that does NOT mutate mockSearchParams, so the param REMAINS in the URL —
+    // exactly the race window where the bug bites: selectedClient=null +
+    // param present → find-effect re-runs and re-opens the modal.
+    fireEvent.click(screen.getByTestId('modal-close'));
+
+    await waitFor(() =>
+      expect(screen.queryByTestId('client-card-modal')).not.toBeInTheDocument(),
+    );
   });
 });

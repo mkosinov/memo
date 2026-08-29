@@ -15,7 +15,10 @@ function useDebouncedCallback(
       if (timeoutRef.current !== null) {
         clearTimeout(timeoutRef.current);
       }
-      timeoutRef.current = setTimeout(() => callback(value), delay);
+      timeoutRef.current = setTimeout(() => {
+        callback(value);
+        timeoutRef.current = null; // fired id must not linger
+      }, delay);
     },
     [callback, delay],
   );
@@ -50,6 +53,9 @@ export function ClientsFilters() {
   // changes externally (deep-link ?clientId= pre-fill, reset) and the user
   // has NOT typed since our last send, sync the draft and cancel any armed
   // timer. If the user typed ahead (dirty), the armed send is authoritative.
+  // Purity caveat: cancelSearch() during render is safe ONLY under the
+  // "timer armed ⟺ dirty" invariant (keep the invariant if touching
+  // onChange ordering).
   const [prevCommitted, setPrevCommitted] = useState(filters.search);
   const [draft, setDraft] = useState(filters.search);
 

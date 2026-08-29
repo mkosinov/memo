@@ -8,6 +8,7 @@ vi.mock('@/contexts/ClientsContext', () => ({
 }));
 
 import { useClients } from '@/contexts/ClientsContext';
+import type { ClientFilters } from '@/contexts/ClientsContext';
 import { ClientsFilters } from '../app/(main)/clients/components/ClientsFilters';
 
 const mockUseClients = vi.mocked(useClients);
@@ -280,12 +281,12 @@ describe('ClientsFilters', () => {
 });
 
 describe('ClientsFilters — controlled search input (GH #216)', () => {
-  function mockFiltersContext(overrides: Partial<{ search: string; status: string }> = {}) {
+  function mockFiltersContext(overrides: Partial<Pick<ClientFilters, 'search' | 'status'>> = {}) {
     const ctx = createMockClientsContext({
       filters: {
         ...createMockClientsContext().filters,
         search: overrides.search ?? '',
-        status: (overrides.status ?? 'active') as 'active' | 'all' | 'archived',
+        status: overrides.status ?? 'active',
       },
     });
     mockUseClients.mockReturnValue(ctx);
@@ -340,6 +341,18 @@ describe('ClientsFilters — controlled search input (GH #216)', () => {
     expect(searchInput()).toHaveValue('');
     act(() => { vi.advanceTimersByTime(400); });
     expect(ctx.setFilters).not.toHaveBeenCalledWith({ search: 'а' });
+  });
+
+  it('mid-life external commit syncs the box when not dirty, nothing resurrects', () => {
+    const ctx = mockFiltersContext();
+    const { rerender } = render(<ClientsFilters />);
+    // no typing → not dirty; an external commit lands post-mount (e.g. deep-link effect)
+    mockFiltersContext({ search: '11111111-2222-3333-4444-555555555555' });
+    rerender(<ClientsFilters />);
+    expect(searchInput()).toHaveValue('11111111-2222-3333-4444-555555555555');
+    // the sync branch cancelled any armed timer — nothing may resurrect the old value
+    act(() => { vi.advanceTimersByTime(400); });
+    expect(ctx.setFilters).not.toHaveBeenCalled();
   });
 
   it('external commit while user typed ahead keeps the draft (no clobber)', () => {

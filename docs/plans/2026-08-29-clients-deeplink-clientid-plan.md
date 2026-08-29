@@ -39,7 +39,7 @@ How this feature behaves for the user, mapped to spec acceptance criteria:
 | `frontend/admin/e2e/clients.spec.ts` | modify (append describe) | Deterministic page-2+ regression e2e incl. post-close contract |
 | `docs/domain-rules/clients.md` | modify (1 bullet) | Deep-link contract documentation |
 
-No new files beyond one test file. No backend production code. No api-client changes.
+No new files at all — every touched file is modified in place. No backend production code. No api-client changes.
 
 ---
 
@@ -60,7 +60,7 @@ These tests pin ALREADY-SHIPPED behavior (#212). They are a premise guard: they 
 
 Steps:
 
-- [ ] In `backend/tests/test_client_stats.py`, inside class `TestClientListQContract` (its block ends after `test_archived_client_hidden_under_default_status`, ~line 414), append these two tests verbatim:
+- [ ] In `backend/tests/test_client_stats.py`, inside class `TestClientListQContract` (starts ~line 338; NOTE it does NOT end at the archived test — it continues with `test_q_with_stats_filter_combined` (~:416) and `test_old_search_param_is_ignored` (~:432), ending ~line 445). Append these two tests at the END of the class, verbatim:
 
 ```python
     def test_status_all_uuid_q_returns_archived_client_single_row(
@@ -119,7 +119,7 @@ Convert the uncontrolled debounced search input into a controlled input that (a)
 
 Steps:
 
-- [ ] RED: `frontend/admin/__tests__/ClientsFilters.test.tsx` **already exists** (26 tests — status select, range inputs, debounce regressions; do NOT touch or replace them). Append the new describe block below to the END of the file, adapting its `useClients` mock to the file's existing mock conventions if they differ from the sketch:
+- [ ] RED: `frontend/admin/__tests__/ClientsFilters.test.tsx` **already exists** (26 tests — status select, range inputs, debounce regressions; do NOT touch or replace them). Append ONLY the new `describe` block below to the END of the file, with these mandatory adaptations: **(a)** STRIP the sketch's header — its `import` lines, `vi.mock('@/contexts/ClientsContext')`, and `mockUseClients` are already declared at the top of the existing file (duplicate declarations = SyntaxError); keep only imports the existing file lacks (e.g. `act`); **(b)** the sketch's local `mockFiltersContext` helper stays local to the describe (renamed on purpose to avoid colliding with the file's existing helpers) — adapt its return shape if the file's `useClients` mock typing requires the full context shape:
 
 ```tsx
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -134,7 +134,7 @@ vi.mock('@/contexts/ClientsContext', () => ({
 
 const mockUseClients = vi.mocked(useClients);
 
-function mockContext(overrides: Partial<{ search: string; status: string }> = {}) {
+function mockFiltersContext(overrides: Partial<{ search: string; status: string }> = {}) {
   const ctx = {
     filters: { search: overrides.search ?? '', status: overrides.status ?? 'active' },
     setFilters: vi.fn(),
@@ -156,13 +156,13 @@ describe('ClientsFilters — controlled search input (GH #216)', () => {
   const searchInput = () => screen.getByPlaceholderText(/Поиск по имени или телефону/);
 
   it('displays an externally committed search value (deep-link UUID pre-fill)', () => {
-    mockContext({ search: '11111111-2222-3333-4444-555555555555' });
+    mockFiltersContext({ search: '11111111-2222-3333-4444-555555555555' });
     render(<ClientsFilters />);
     expect(searchInput()).toHaveValue('11111111-2222-3333-4444-555555555555');
   });
 
   it('typing updates the draft immediately and commits once after 300ms', () => {
-    const ctx = mockContext();
+    const ctx = mockFiltersContext();
     render(<ClientsFilters />);
     fireEvent.change(searchInput(), { target: { value: 'иван' } });
     expect(searchInput()).toHaveValue('иван');
@@ -172,7 +172,7 @@ describe('ClientsFilters — controlled search input (GH #216)', () => {
   });
 
   it('each keystroke restarts the timer (debounce), single commit with final value', () => {
-    const ctx = mockContext();
+    const ctx = mockFiltersContext();
     render(<ClientsFilters />);
     fireEvent.change(searchInput(), { target: { value: 'ив' } });
     act(() => { vi.advanceTimersByTime(250); });
@@ -185,7 +185,7 @@ describe('ClientsFilters — controlled search input (GH #216)', () => {
   });
 
   it('type → «Сбросить фильтры» within 300ms: reset wins, timer cancelled, box cleared', () => {
-    const ctx = mockContext();
+    const ctx = mockFiltersContext();
     render(<ClientsFilters />);
     fireEvent.change(searchInput(), { target: { value: 'а' } });
     fireEvent.click(screen.getByText('Сбросить фильтры'));
@@ -196,11 +196,11 @@ describe('ClientsFilters — controlled search input (GH #216)', () => {
   });
 
   it('external commit while user typed ahead keeps the draft (no clobber)', () => {
-    const ctx = mockContext();
+    const ctx = mockFiltersContext();
     const { rerender } = render(<ClientsFilters />);
     fireEvent.change(searchInput(), { target: { value: 'ив' } });
     // an older commit lands (e.g. previous debounce fired) — draft must survive
-    mockContext({ search: 'чужое' });
+    mockFiltersContext({ search: 'чужое' });
     rerender(<ClientsFilters />);
     expect(searchInput()).toHaveValue('ив');
     act(() => { vi.advanceTimersByTime(300); });
@@ -208,7 +208,7 @@ describe('ClientsFilters — controlled search input (GH #216)', () => {
   });
 
   it('status select is controlled by filters.status', () => {
-    mockContext({ status: 'all' });
+    mockFiltersContext({ status: 'all' });
     render(<ClientsFilters />);
     expect(screen.getByDisplayValue('Все')).toBeInTheDocument();
   });
@@ -257,8 +257,13 @@ function useDebouncedCallback(
 
 export function ClientsFilters() {
   const { filters, setFilters, resetFilters } = useClients();
+  // dirtyRef is declared BEFORE the debounce hook that closes over it
+  const dirtyRef = useRef(false);
   const { debounced: debouncedSearch, cancel: cancelSearch } = useDebouncedCallback(
-    (value: string) => setFilters({ search: value }),
+    (value: string) => {
+      dirtyRef.current = false; // our send fired — the landing commit is expected
+      setFilters({ search: value });
+    },
     300,
   );
 
@@ -269,7 +274,6 @@ export function ClientsFilters() {
   // timer. If the user typed ahead (dirty), the armed send is authoritative.
   const [prevCommitted, setPrevCommitted] = useState(filters.search);
   const [draft, setDraft] = useState(filters.search);
-  const dirtyRef = useRef(false);
 
   if (filters.search !== prevCommitted) {
     setPrevCommitted(filters.search);
@@ -320,17 +324,7 @@ export function ClientsFilters() {
         Сбросить фильтры
       </button>
 ```
-  - The debounced send must clear the dirty flag when it fires (our commit landed conceptually). Wrap the callback:
-```tsx
-  const { debounced: debouncedSearch, cancel: cancelSearch } = useDebouncedCallback(
-    (value: string) => {
-      dirtyRef.current = false;
-      setFilters({ search: value });
-    },
-    300,
-  );
-```
-  (Declare `dirtyRef` BEFORE this hook call — reorder: `dirtyRef` first, then the debounce hook, then `prevCommitted`/`draft` state.)
+  - (The debounce callback and `dirtyRef` ordering in the block above are FINAL — no further edits to them.)
 
 - [ ] Run: `cd frontend/admin && npx vitest run __tests__/ClientsFilters.test.tsx` → all 6 pass.
 - [ ] Regression: `cd frontend/admin && npx vitest run __tests__/ClientsPage.test.tsx` → still green (ClientsFilters is mocked there; unaffected).

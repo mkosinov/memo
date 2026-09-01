@@ -69,6 +69,30 @@ fi
 rm -f "$ABS_DB_PATH"
 echo "[shard-$SHARD_ID] Wiped shard DB: $ABS_DB_PATH"
 
+# ── Remove stale Next.js build dir (port-guarded) ─────────────────────────
+# NEXT_PUBLIC_API_URL is baked into the client bundle at compile time. A
+# stale frontend/admin/.next from an earlier stack (e.g. dev on :8000, or a
+# shard on another port) keeps serving the OLD baked URL → the browser
+# talks to the wrong/dead backend → mass bogus e2e failures (wave #216: 57
+# phantom failures; all gone after `rm -rf frontend/admin/.next`).
+# Port guard: never wipe while another `next dev` is live from this dir —
+# shards share frontend/admin/.next and dev.sh admin serves :3001 from it.
+# Deleting .next under a running server corrupts it (pkill must be
+# port-guarded, same lesson as test-all.sh).
+NEXT_DIR_IN_USE=false
+for port in 3001 3002 3003 "$SHARD_PORT"; do
+  if lsof -ti :"$port" >/dev/null 2>&1; then
+    NEXT_DIR_IN_USE=true
+    break
+  fi
+done
+if [ "$NEXT_DIR_IN_USE" = false ]; then
+  echo "[shard-$SHARD_ID] Removing stale $ADMIN_DIR/.next (prevents baked NEXT_PUBLIC_API_URL poisoning)..."
+  rm -rf "$ADMIN_DIR/.next"
+else
+  echo "[shard-$SHARD_ID] Skipping .next wipe — a Next.js dev server is live on :3001/:3002/:3003 (shared build dir)"
+fi
+
 # ── Start FastAPI backend ──────────────────────────────────────────────────
 # Backend starts first so Alembic can create/migrate tables.
 cd "$BACKEND_DIR"

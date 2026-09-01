@@ -83,6 +83,30 @@ for pid in $(pgrep -f "next dev -p 300[2-3]" 2>/dev/null || true); do
 done
 sleep 1
 
+# ── Remove stale Next.js build dir (port-guarded) ─────────────────────────
+# NEXT_PUBLIC_API_URL is baked into the Next.js client bundle at compile
+# time. A stale frontend/admin/.next from an earlier stack (e.g. dev stack
+# pointed at :8000) keeps serving the OLD baked URL → shard frontends talk
+# to the wrong/dead backend → mass bogus e2e failures (wave #216: 57
+# phantom failures; all gone after `rm -rf frontend/admin/.next`).
+# Port guard: only wipe when NO Next.js dev server is live from
+# frontend/admin. dev.sh admin mode serves :3001 from the SAME .next dir;
+# deleting it under a running server corrupts that stack (same lesson as
+# the port-guarded pkill above — never touch what a live stack owns).
+NEXT_DIR_IN_USE=false
+for port in 3001 3002 3003; do
+  if lsof -ti :"$port" >/dev/null 2>&1; then
+    NEXT_DIR_IN_USE=true
+    break
+  fi
+done
+if [ "$NEXT_DIR_IN_USE" = false ]; then
+  echo "  → removing stale frontend/admin/.next (prevents baked NEXT_PUBLIC_API_URL poisoning)..."
+  rm -rf frontend/admin/.next
+else
+  echo "  → skipping .next wipe — a Next.js dev server is live on :3001/:3002/:3003 (shared build dir)"
+fi
+
 # Track all background PIDs for waiting
 ALL_PIDS=()
 

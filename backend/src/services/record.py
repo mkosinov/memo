@@ -66,7 +66,7 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
 
         Filter → Sort → Paginate, fully server-side (#191).
         Business filters are hand-written here (G1a principle); pagination/date
-        mechanics are shared helpers (BaseRepository.list_custom, day_range).
+        mechanics are shared helpers (BaseRepository.list_entity, day_range).
         """
         stmt = (
             select(Record)
@@ -101,7 +101,7 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
                     .where(search_predicate(params.q, self.search_fields))
             )
         # --- Sort (whitelist map) + Paginate (COUNT before ORDER BY) ---
-        items, total = await self._repository.list_custom(
+        items, total = await self._repository.list_entity(
             db_session,
             stmt,
             order_by=self._sort_columns(params),

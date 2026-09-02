@@ -78,7 +78,7 @@ class ActivityService(GenericService[ActivityCreate, ActivityUpdate, ActivityRes
             stmt = stmt.join(Service, Activity.service_id == Service.id).where(
                 search_predicate(q, self.search_fields)
             )
-        items_orm, total = await self._repository.list_custom(
+        items_orm, total = await self._repository.list_entity(
             db_session, stmt, limit=per_page, offset=(page - 1) * per_page
         )
         items = [ActivityResponse.model_validate(a) for a in items_orm]

@@ -3,7 +3,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  getRecords,
+  getRecordsView,
   getClients,
   getPaymentTotals,
   getActivities,
@@ -13,7 +13,7 @@ import {
 } from '@memo/api-client';
 import type {
   PaginatedResponse,
-  RecordResponse,
+  RecordView,
   ClientWithStats,
   ActivityResponse,
   MasterResponse,
@@ -29,7 +29,7 @@ export interface RecordFilters {
   serviceId: string;
   masterId: string;
   status: string;
-  /** Server-side search (GH #212 Task 12) — sent to getRecords as `q`. */
+  /** Server-side search (GH #212 Task 12) — sent to getRecordsView as `q`. */
   search: string;
 }
 
@@ -42,9 +42,9 @@ const DEFAULT_FILTERS: RecordFilters = { locationId: '', serviceId: '', masterId
 
 export interface RecordsContextType {
   /** Server-page items — PagedListState.items contract (spec §6.4, #139 T8). */
-  items: RecordResponse[];
+  items: RecordView[];
   /** Kept alongside `items` for backwards compat with non-table consumers. */
-  records: RecordResponse[];
+  records: RecordView[];
   total: number;
   page: number;
   perPage: number;
@@ -95,10 +95,12 @@ export function RecordsProvider({ children }: { children: React.ReactNode }) {
     void queryClient.refetchQueries({ queryKey: ['records'] });
   }, [queryClient]);
 
-  // Server-driven records list (#191) — queryKey carries every server param
-  const { data, isLoading: recordsLoading, isPending, isFetching, error: recordsError } = useQuery<PaginatedResponse<RecordResponse>>({
+  // Server-driven records list (#191) — queryKey carries every server param.
+  // GH #213 Task 6: fetcher swapped to the composite view endpoint
+  // (records + display fields in one request); key + options unchanged.
+  const { data, isLoading: recordsLoading, isPending, isFetching, error: recordsError } = useQuery<PaginatedResponse<RecordView>>({
     queryKey: ['records', page, perPage, dateFrom, dateTo, filters, sortBy, sortOrder],
-    queryFn: () => getRecords({
+    queryFn: () => getRecordsView({
       page,
       per_page: perPage,
       date_from: dateFrom || undefined,

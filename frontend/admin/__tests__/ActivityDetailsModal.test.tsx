@@ -55,6 +55,7 @@ import {
   updateVisitStatus,
   getRecords,
 } from '@memo/api-client';
+import type { RecordView } from '@memo/api-client';
 
 // ─── Context Mocks ──────────────────────────────────────────────────────────
 
@@ -431,7 +432,20 @@ describe('ActivityDetailsModal', () => {
 // ─── ActivityDetailsModal: API Call Tests ────────────────────────────────────
 
 describe('ActivityDetailsModal — API integration', () => {
-  const mockRecords = [mockRecord];
+  // GH #213 Task 6: context records are RecordView rows — widen the shared
+  // mock for the context override (display fields unused by this modal).
+  const mockRecordView: RecordView = {
+    ...mockRecord,
+    client_name: 'Анна Иванова',
+    activity_start: '2026-05-10T10:00:00',
+    service_title: 'Йога',
+    master_name: 'Иванова Мария',
+    location_name: 'Студия 1',
+    master_color: null,
+    is_private: false,
+    paid: 0,
+  };
+  const mockRecords = [mockRecordView];
 
   const mockClientMap = new Map([
     ['c1', mockClientWithStats],

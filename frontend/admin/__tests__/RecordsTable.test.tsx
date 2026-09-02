@@ -3,7 +3,7 @@ import { render, screen, fireEvent, waitFor, within } from '@testing-library/rea
 import React from 'react';
 import type { RecordsContextType } from '../contexts/RecordsContext';
 import type {
-  RecordResponse,
+  RecordView,
   ClientWithStats,
   ActivityResponse,
   ServiceResponse,
@@ -93,7 +93,9 @@ const mockLocation: LocationResponse = {
   updated_at: '2024-01-01T00:00:00Z',
 };
 
-const mockRecord: RecordResponse = {
+// GH #213 Task 6: context records are RecordView rows. Display fields are
+// carried but still unused — columns/panel render from the lookup maps (T7).
+const mockRecord: RecordView = {
   id: 'rec-1',
   activity_id: 'act-1',
   client_id: 'client-1',
@@ -116,6 +118,14 @@ const mockRecord: RecordResponse = {
       updated_at: '2024-06-15T10:00:00Z',
     },
   ],
+  client_name: 'Анна Смирнова',
+  activity_start: '2024-06-15T10:00:00Z',
+  service_title: 'Йога',
+  master_name: 'Смирнова Мария',
+  location_name: 'Студия на Арбате',
+  master_color: null,
+  is_private: false,
+  paid: 0,
 };
 
 // ─── Records delete dry-run dependency tree (mirrors backend FK_MATRIX
@@ -264,7 +274,7 @@ describe('RecordsTable', () => {
 
   it('shows dash when record has no client_id', () => {
     // Record without client_id should show '—' as fallback
-    const recordNoClient: RecordResponse = {
+    const recordNoClient: RecordView = {
       ...mockRecord,
       id: 'rec-no-client',
       client_id: null,
@@ -277,7 +287,7 @@ describe('RecordsTable', () => {
 
   it('shows dash when client_id not found in clients map', () => {
     // Record with client_id that doesn't exist in the clients map
-    const recordUnknownClient: RecordResponse = {
+    const recordUnknownClient: RecordView = {
       ...mockRecord,
       id: 'rec-unknown-client',
       client_id: 'nonexistent-client',
@@ -289,7 +299,7 @@ describe('RecordsTable', () => {
   });
 
   it('renders multiple records with mixed client_id presence', () => {
-    const recordNoClient: RecordResponse = {
+    const recordNoClient: RecordView = {
       ...mockRecord,
       id: 'rec-no-client',
       client_id: null,

@@ -257,6 +257,25 @@ export const RecordResponseSchema = z.object({
 
 export type RecordResponse = z.infer<typeof RecordResponseSchema>;
 
+// ─── RecordViewResponse (GH #213: composite read endpoint /records/view) ───
+// Inherits all RecordResponse fields + denormalized display fields from the
+// backend joins (§4 of the records-view design spec). Display fields are
+// nullable except is_private (INNER-joined Activity) and paid (COALESCE sum,
+// 0 when no payments). activity_start is byte-compatible with
+// ActivityResponseSchema.start.
+
+export const RecordViewResponseSchema = RecordResponseSchema.extend({
+  client_name: z.string().nullable(),
+  activity_start: z.string().nullable(),
+  service_title: z.string().nullable(),
+  master_name: z.string().nullable(),
+  location_name: z.string().nullable(),
+  master_color: z.string().nullable(),
+  is_private: z.boolean(),
+  paid: z.number().int(),
+});
+export type RecordView = z.infer<typeof RecordViewResponseSchema>;
+
 // ─── ClientResponse ────────────────────────────────────────────────────────
 
 export const ClientResponseSchema = z.object({
@@ -529,6 +548,7 @@ export const ServiceListResponseSchema = paginatedSchema(ServiceResponseSchema);
 export const ActivityListResponseSchema = paginatedSchema(ActivityResponseSchema);
 export const PaymentListResponseSchema = paginatedSchema(PaymentResponseSchema);
 export const RecordListResponseSchema = paginatedSchema(RecordResponseSchema);
+export const RecordViewListResponseSchema = paginatedSchema(RecordViewResponseSchema);
 export const VisitorListResponseSchema = paginatedSchema(VisitorResponseSchema);
 export const ClientListResponseSchema = paginatedSchema(ClientWithStatsSchema);
 export const PhotoListResponseSchema = paginatedSchema(PhotoResponseSchema);

@@ -38,6 +38,8 @@ import {
   LocationUpdateSchema,
   type LocationUpdate,
   ClientWithStatsSchema,
+  RecordViewResponseSchema,
+  type RecordView,
 } from './schemas';
 import backendFixtures from './__fixtures__/backend-responses.json';
 
@@ -496,6 +498,101 @@ describe('RecordResponseSchema', () => {
   it('rejects missing required field', () => {
     const { id, ...without } = validRecord;
     expect(() => RecordResponseSchema.parse(without)).toThrow();
+  });
+});
+
+// ─── RecordViewResponse (GH #213: composite read endpoint display fields) ───
+
+// Complete visit fixture — includes custom_price (required by
+// VisitResponseSchema); the shared validVisit above predates that field (#188).
+const recordViewVisit = {
+  id: 'visit-1',
+  record_id: 'record-1',
+  visitor_id: 'visitor-1',
+  price: 2500,
+  custom_price: null,
+  status: 'waiting',
+  created_at: '2024-06-01T12:00:00Z',
+  updated_at: '2024-06-01T12:00:00Z',
+};
+
+const validRecordView = {
+  id: 'record-1',
+  activity_id: 'activity-1',
+  client_id: 'client-1',
+  status: 'confirmed',
+  seats: 2,
+  anonym_visits: 0,
+  comment: 'VIP guests',
+  custom_price: null,
+  created_at: '2024-06-01T12:00:00Z',
+  updated_at: '2024-06-01T12:00:00Z',
+  visits: [recordViewVisit],
+  client_name: 'Иван Петров',
+  activity_start: '2024-12-25T14:00:00',
+  service_title: 'Мастер-класс по живописи',
+  master_name: 'Иванова Анна',
+  location_name: 'Студия на Невском',
+  master_color: '#FF6B6B',
+  is_private: false,
+  paid: 5000,
+};
+
+describe('RecordViewResponseSchema', () => {
+  it('parses a valid record view response with all display fields', () => {
+    const result = RecordViewResponseSchema.parse(validRecordView);
+    expect(result.id).toBe('record-1');
+    expect(result.visits).toHaveLength(1);
+    expect(result.client_name).toBe('Иван Петров');
+    expect(result.activity_start).toBe('2024-12-25T14:00:00');
+    expect(result.service_title).toBe('Мастер-класс по живописи');
+    expect(result.master_name).toBe('Иванова Анна');
+    expect(result.location_name).toBe('Студия на Невском');
+    expect(result.master_color).toBe('#FF6B6B');
+    expect(result.is_private).toBe(false);
+    expect(result.paid).toBe(5000);
+  });
+
+  it('parses record view with null display fields and paid 0', () => {
+    const data = {
+      ...validRecordView,
+      client_id: null,
+      client_name: null,
+      activity_start: null,
+      service_title: null,
+      master_name: null,
+      location_name: null,
+      master_color: null,
+      paid: 0,
+    };
+    const result = RecordViewResponseSchema.parse(data);
+    expect(result.client_name).toBeNull();
+    expect(result.activity_start).toBeNull();
+    expect(result.service_title).toBeNull();
+    expect(result.master_name).toBeNull();
+    expect(result.location_name).toBeNull();
+    expect(result.master_color).toBeNull();
+    expect(result.paid).toBe(0);
+  });
+
+  it('rejects record view missing a display field', () => {
+    const { is_private: _, ...without } = validRecordView;
+    expect(() => RecordViewResponseSchema.parse(without)).toThrow();
+  });
+
+  it('rejects record view missing base RecordResponse fields', () => {
+    const { id: _, ...without } = validRecordView;
+    expect(() => RecordViewResponseSchema.parse(without)).toThrow();
+  });
+
+  it('rejects non-integer paid', () => {
+    const data = { ...validRecordView, paid: 100.5 };
+    expect(() => RecordViewResponseSchema.parse(data)).toThrow();
+  });
+
+  it('RecordView is a valid type', () => {
+    const r: RecordView = validRecordView;
+    expect(r.paid).toBe(5000);
   });
 });
 

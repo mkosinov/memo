@@ -204,22 +204,45 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
         populates them regardless of extra select columns) + named-label
         unpacking for the display fields.
         """
-        client_name = select(Client.name).where(Record.client_id == Client.id).scalar_subquery()
+        # Explicit correlate() pins each subquery to correlate ONLY against
+        # its outer table (Record / Activity): auto-correlation would also
+        # strip the dictionary table (clients/services/...) from the FROM
+        # whenever the ``q`` outerjoins add it to the enclosing query —
+        # leaving the subquery with no FROM → InvalidRequestError (GH #213).
+        client_name = (
+            select(Client.name)
+            .where(Record.client_id == Client.id)
+            .correlate(Record)
+            .scalar_subquery()
+        )
         service_title = (
-            select(Service.title).where(Activity.service_id == Service.id).scalar_subquery()
+            select(Service.title)
+            .where(Activity.service_id == Service.id)
+            .correlate(Activity)
+            .scalar_subquery()
         )
         master_name = (
             select(Master.last_name + " " + Master.first_name)
             .where(Activity.master_id == Master.id)
+            .correlate(Activity)
             .scalar_subquery()
         )
         location_name = (
-            select(Location.name).where(Activity.location_id == Location.id).scalar_subquery()
+            select(Location.name)
+            .where(Activity.location_id == Location.id)
+            .correlate(Activity)
+            .scalar_subquery()
         )
-        master_color = select(Master.color).where(Activity.master_id == Master.id).scalar_subquery()
+        master_color = (
+            select(Master.color)
+            .where(Activity.master_id == Master.id)
+            .correlate(Activity)
+            .scalar_subquery()
+        )
         paid = (
             select(func.coalesce(func.sum(Payment.amount), 0))
             .where(Payment.record_id == Record.id)
+            .correlate(Record)
             .scalar_subquery()
         )
         stmt = self._build_list_stmt(params).add_columns(

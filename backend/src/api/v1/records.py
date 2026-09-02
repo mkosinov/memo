@@ -17,6 +17,7 @@ from src.schemas.record import (
     RecordPatch,
     RecordResponse,
     RecordUpdate,
+    RecordViewResponse,
 )
 from src.services.record import RecordService, get_record_service, map_record
 
@@ -46,6 +47,25 @@ async def list_records(
         page=result.page,
         per_page=result.per_page,
     )
+
+
+@router.get("/view", response_model=PaginatedResponse[RecordViewResponse])
+async def list_records_view(
+    service: _ServiceDep,
+    session: SessionDep,
+    params: Annotated[RecordListParams, Query()],
+) -> PaginatedResponse[RecordViewResponse]:
+    """Composite read for the records table — records page enriched with
+    denormalized display fields from joins (GH #213 §4).
+
+    Same params/sort/pagination as ``GET /records`` (single
+    ``RecordListParams`` class — no contract drift); display resolution
+    carries NO ``is_active`` filters, so archived entities resolve their
+    names (US-3). MUST stay declared BEFORE ``GET /{record_id}``: FastAPI
+    matches routes in declaration order and ``/view`` would otherwise be
+    captured by the id path param (404 instead of a page).
+    """
+    return await service.list_view(db_session=session, params=params)
 
 
 @router.get("/{record_id}", response_model=RecordResponse)

@@ -72,6 +72,12 @@ function renderFilters(overrides: Partial<BookingFiltersProps> = {}) {
   );
 }
 
+// findBy wait window: the default 1s findByRole timeout is too tight for the
+// query-resolve → re-render cycle under parallel-suite CPU contention — the
+// fetchers DO fire but the option render lands after the window (load-flake).
+// 10s headroom mirrors the vitest.config testTimeout rationale.
+const OPTION_WAIT = { timeout: 10_000 };
+
 // Raw ServiceResponse fixtures — the bar consumes the RAW /all shapes
 // (PhotoModal.test precedent: inline service fixture).
 const ACTIVE_SERVICE: ServiceResponse = {
@@ -232,17 +238,17 @@ describe('BookingFilters — selection data via canonical-key queries (GH #213 T
     expect(getAllMasters).toHaveBeenCalled();
 
     // Raw-shape labels: l.name / s.title / m.first_name — verbatim.
-    await screen.findByRole('option', { name: 'Студия на Невском' });
-    await screen.findByRole('option', { name: 'Картина маслом' });
-    await screen.findByRole('option', { name: 'Ольга' });
+    await screen.findByRole('option', { name: 'Студия на Невском' }, OPTION_WAIT);
+    await screen.findByRole('option', { name: 'Картина маслом' }, OPTION_WAIT);
+    await screen.findByRole('option', { name: 'Ольга' }, OPTION_WAIT);
   });
 
   it('keeps active-only filtering — archived entities stay out of the dropdowns', async () => {
     renderFilters();
 
-    await screen.findByRole('option', { name: 'Студия на Невском' });
-    await screen.findByRole('option', { name: 'Картина маслом' });
-    await screen.findByRole('option', { name: 'Ольга' });
+    await screen.findByRole('option', { name: 'Студия на Невском' }, OPTION_WAIT);
+    await screen.findByRole('option', { name: 'Картина маслом' }, OPTION_WAIT);
+    await screen.findByRole('option', { name: 'Ольга' }, OPTION_WAIT);
 
     expect(screen.queryByRole('option', { name: 'Гранд Отель Поляна' })).not.toBeInTheDocument();
     expect(screen.queryByRole('option', { name: 'Акварель' })).not.toBeInTheDocument();
@@ -254,7 +260,7 @@ describe('BookingFilters — selection data via canonical-key queries (GH #213 T
     // dropdowns populate purely from the component's own canonical-key
     // queries. The «Все локации» placeholder + one active location remain.
     renderFilters();
-    await screen.findByRole('option', { name: 'Студия на Невском' });
+    await screen.findByRole('option', { name: 'Студия на Невском' }, OPTION_WAIT);
     expect(
       within(screen.getByRole('combobox', { name: 'Фильтр по локации' })).getAllByRole('option'),
     ).toHaveLength(2); // «Все локации» + the one active location

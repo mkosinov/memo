@@ -134,7 +134,7 @@ G1a explore (ses_f9e6948e2 + ses_f9e654a6a, 2026-09-02) pinned the exact consume
 
 ### 6.3 RecordsTable detail panel
 
-`selectedClient`/`selectedActivity` map lookups (L84-85, L133, L164, L177) → read the selected `RecordView` row: client name `row.client_name ?? '—'`; service `row.service_title` (+ `<DiamondIcon/>` when `row.is_private`, RecordsTable.tsx:133); master `row.master_name` (server composes «Фамилия Имя»); location `row.location_name`. Payments block stays on `useRecordData` (`['payments', recordId]`).
+`selectedClient`/`selectedActivity` map lookups (L84-85, L164, L177) → read the selected `RecordView` row: client name `row.client_name ?? '—'`; service `row.service_title` + `<DiamondIcon/>` when `row.is_private` (ADDED to the panel — spec §11 mandates "table + detail panel" diamond coverage; today only the table cell recordsColumns.tsx:123 and ClientQuickCard.tsx:134 have it); master `row.master_name` (server composes «Фамилия Имя»); location `row.location_name`. Payments block stays on `useRecordData` (`['payments', recordId]`).
 
 **Delete-dialog label (distinct call site, NOT the detail panel):** RecordsTable.tsx:240 `formatRecordLabel(activities.get(deleteTarget.record.activity_id)?.start)` → `formatRecordLabel(deleteTarget.record.activity_start)` — crashes today's map access once `activities` dies if missed.
 

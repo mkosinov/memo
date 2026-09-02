@@ -73,7 +73,7 @@ async def list_entity(self, stmt: Select[tuple[ModelT]]) -> tuple[list[ModelT], 
 
 ### Task Description
 `backend/src/services/photo.py`:
-1. Replace the hand-rolled count+slice (~L93-99, the block the docstring at L60-67 documents as bypassing `BaseRepository.list_custom` because it "drops the extra column") with `rows, total = await self.repo.list_custom(stmt)` from Task 1. Keep: stmt construction (ilike / tag-EXISTS / service-OR predicates), the `client_name` labeled column, Row→`PhotoResponse` mapping (~L102-105), pagination envelope assembly.
+1. Replace the hand-rolled count+slice (~L93-99, the block the docstring at L60-67 documents as bypassing `BaseRepository.list_custom` because it "drops the extra column") with `rows, total = await self.repo.list_custom(stmt, order_by=order_exprs)` from Task 1. **Preserve ordering explicitly:** the ~L93-99 block includes the `_SORT_COLUMNS[params.sort_by]` lookup + `stmt.order_by(...)` — the core's contract takes sort expressions via its `order_by=` parameter on an UNordered stmt (same convention `RecordService.list` uses); build the order expressions exactly as today and pass them through. Keep: stmt construction (ilike / tag-EXISTS / service-OR predicates), the `client_name` labeled column, Row→`PhotoResponse` mapping (~L102-105), pagination envelope assembly.
 2. Effect (assert in tests): count now computed on the UNordered stmt via the core — photos' count-order deviation fixed by construction.
 3. Update the docstring (L60-67) — exception retired, photos rides the core.
 4. `docs/domain-rules/photos.md`: update the exception paragraph (the wording describing PhotoService bypassing the repo list; explore-pinned at :17/:49-50 area — locate "list_custom"/"bypass" mentions) to state photos now uses the shared row-core.
@@ -118,7 +118,7 @@ master_color = select(Master.color).where(Activity.master_id == Master.id).scala
 paid = select(func.coalesce(func.sum(Payment.amount), 0)).where(Payment.record_id == Record.id).scalar_subquery().label("paid")
 ```
 NO `is_active` filters anywhere (archived resolves — US-3).
-- Execute via `list_custom` (row-tuple core); map Row → `RecordViewResponse`: base fields via existing `_map_record(row[0])` (visits included via selectinload), display fields by named-label unpacking (`row.client_name` etc.); `activity_start` serialized through the SAME helper/format `ActivityResponse.start` uses (find the activity mapping — byte-parity is load-bearing for `parseActivityStart`).
+- Execute via `list_custom` (row-tuple core); map Row → `RecordViewResponse`: **MOVE the router-owned `_map_record` (`backend/src/api/v1/records.py:37-72`) into `services/record.py`** (service-owned mapping, photos precedent; router then imports it from the service — kills the would-be circular import; `GET /records` router behavior unchanged), reuse it for base fields on `row[0]` (visits included via selectinload), display fields by named-label unpacking (`row.client_name` etc.); `activity_start` serialized through the SAME helper/format `ActivityResponse.start` uses (find the activity mapping — byte-parity is load-bearing for `parseActivityStart`).
 - Returns `PaginatedResponse[RecordViewResponse]` (page↔offset conversion same as `list()`).
 3. TDD (service-level, `backend/tests/test_service_record_view.py` or repo convention):
 - [ ] RED: display-field correctness — archived client/master/service/location resolve names (seed archived entities + a record); anonymous record → `client_name None`; `master_name` == «Фамилия Имя»; `paid` none/partial/full → 0/sum/total; `is_private` passthrough; `activity_start` string equals the activity endpoint's serialization for the same row.
@@ -203,7 +203,7 @@ export type RecordView = z.infer<typeof RecordViewResponseSchema>;
 - master: dot `backgroundColor: row.master_color ?? '#999'}` + `title` tooltip `row.master_name`; no tooltip when null.
 - location: `row.location_name` ?? `'—'`.
 - payment: badges `✓ Оплачено` / `Частично (N₽)` / `Не оплачено` — logic unchanged, source `row.paid` (was `payments.get(id) ?? 0`).
-2. `RecordsTable.tsx`: stop destructuring `clients/activities/masters/services/locations/payments` and passing them to the factory; detail panel reads the selected `RecordView` row (`row.client_name ?? '—'`, `row.service_title` + DiamondIcon at :133, `row.master_name`, `row.location_name`); delete dialog `formatRecordLabel(deleteTarget.record.activity_start)` (:240 — crash if missed).
+2. `RecordsTable.tsx`: stop destructuring `clients/activities/masters/services/locations/payments` and passing them to the factory; detail panel reads the selected `RecordView` row (`row.client_name ?? '—'`, `row.service_title` + **ADD `<DiamondIcon/>` next to the service title when `row.is_private`** — the panel has NO diamond today (grep-verified: only recordsColumns.tsx:123 + ClientQuickCard.tsx:134); adding it here is spec §11-mandated "table + detail panel" coverage; service-title anchor in the panel is :164), `row.master_name`, `row.location_name`); delete dialog `formatRecordLabel(deleteTarget.record.activity_start)` (:240 — crash if missed).
 3. TDD:
 - [ ] RED→GREEN: update recordsColumns/RecordsTable tests — row-field rendering, all fallbacks, dot color, DiamondIcon, badges; detail panel; delete dialog label.
 - [ ] `npm run test -- records` green; type-check + lint clean.
@@ -268,7 +268,7 @@ Canonical keys = TanStack dedupe with all other consumers. Dropdown behavior byt
 
 ### Task Description
 1. Delete from `RecordsContext.tsx`: all 6 lookup queries + map construction (L169-245: activities per_page:100, masters, services, locations, clients getClients, payments totals incl. `recordIds` memo), map-loading flags, `payments` field, now-unused imports (`getActivities`, `getClients`, `getPaymentTotals`, `getAllMasters`, `getAllServices`, `getAllLocations`).
-2. Context value: `records: RecordView[]` + filters/sort/pagination state + setters + `refetch` (+ records-loading flags). Nothing else.
+2. Context value: `records: RecordView[]` + filters/sort/pagination state + setters + `refetch` (+ records-loading flags) + **KEEP the `items` alias and the `PagedListState` fields `DataTable` consumes** (RecordsTable passes the whole context as `tableState`; `visibleItems ?? items` contract — tableTypes.ts:27-28, DataTable.tsx:171). Nothing else — no entity maps, no payments.
 3. Sanity: `grep -rn "useRecords(" frontend/admin/src frontend/admin/app` — remaining consumers destructure ONLY state/records/refetch (page.tsx, RecordsTable).
 4. TDD:
 - [ ] RED→GREEN: RecordsContext tests — no map fields in context value; no `getClients`/`getActivities`/`getPaymentTotals` mocks needed.

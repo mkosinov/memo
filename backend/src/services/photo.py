@@ -5,7 +5,7 @@ from __future__ import annotations
 from functools import lru_cache
 
 from fastapi import HTTPException
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -57,10 +57,16 @@ class PhotoService(GenericService[PhotoCreate, PhotoUpdate, PhotoResponse]):
     async def list(
         self, db_session: AsyncSession, params: PhotoListParams
     ) -> tuple[list[PhotoResponse], int]:
-        """Accepted exception to repo-owned list (GH #206, spec #211 §6.5):
-        service-owned dual query — filters, q, sort, denormalized
-        ``client_name`` (a correlated scalar subquery, NOT
-        ``BaseRepository.list_custom``, which drops the extra column).
+        """Paginated photo list riding the repo row core (GH #213 §5.2).
+
+        Service owns stmt construction (q / filters / sort whitelist) and
+        the Row→``PhotoResponse`` mapping — the denormalized
+        ``client_name`` labeled column flows through the multi-column
+        select unchanged. The repo core (``BaseRepository.list_custom``)
+        owns count (computed on the UNordered stmt — the count-order
+        deviation is fixed by construction), order, and the limit/offset
+        slice; ordering arrives via its ``order_by=`` parameter (the
+        ``RecordService.list`` convention).
 
         Returns ``(items, total)``; the router assembles the
         ``PaginatedResponse`` envelope echoing the client's page/per_page.
@@ -91,12 +97,17 @@ class PhotoService(GenericService[PhotoCreate, PhotoUpdate, PhotoResponse]):
             stmt = stmt.where(*conds)
 
         col = _SORT_COLUMNS[params.sort_by]
-        stmt = stmt.order_by(col.desc() if params.sort_order == "desc" else col.asc(), Photo.id.asc())
-
-        total = (await db_session.execute(select(func.count()).select_from(stmt.subquery()))).scalar() or 0
-        rows = (await db_session.execute(
-            stmt.limit(params.per_page).offset((params.page - 1) * params.per_page)
-        )).all()
+        order_exprs = [
+            col.desc() if params.sort_order == "desc" else col.asc(),
+            Photo.id.asc(),
+        ]
+        rows, total = await self._repository.list_custom(
+            db_session,
+            stmt,
+            order_by=order_exprs,
+            limit=params.per_page,
+            offset=(params.page - 1) * params.per_page,
+        )
 
         items = []
         for photo, name in rows:

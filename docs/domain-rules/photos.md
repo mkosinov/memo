@@ -40,6 +40,7 @@ Response-only field: `client_name` (nullable, denormalized on GET /api/v1/photos
   - `tag_id` — repeatable (`?tag_id=a&tag_id=b`), AND semantics (photo must have ALL selected tags); duplicates deduped
   - All filters AND-combine with each other and with q; unknown filter ids → silent empty page (NOT 404)
   - `sort_by` whitelist: `filename | is_public | created_at` (422 on unknown); default `created_at desc` + `id asc` tiebreak
+  - Pagination mechanics: repo-owned — photos rides the shared row-core (`BaseRepository.list_custom`, `backend/src/repositories/generic.py`), the former service-owned count+slice exception is retired (GH #213). The service builds the stmt (multi-column select with the labeled `client_name` + `selectinload(Photo.tags)` + filter predicates) and maps Row→`PhotoResponse`; the core computes COUNT on the UNordered stmt and applies ORDER + LIMIT/OFFSET, with ordering passed via its `order_by=` parameter (the `RecordService.list` convention).
 - File storage is external (S3-compatible); this entity stores metadata only
 
 ### Frontend

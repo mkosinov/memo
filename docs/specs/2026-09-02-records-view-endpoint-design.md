@@ -80,7 +80,7 @@ G1a explore (ses_f9e6948e2 + ses_f9e654a6a, 2026-09-02) pinned the exact consume
   - Sort: SAME `_sort_columns` whitelist — sorting order is shared, guaranteeing US-6 parity with `/records`.
   - Row mapping: service-owned manual map Row → `RecordViewResponse` (photos precedent: services/photo.py:102-105), reusing `_map_record` for the base fields. Repo stays generic (no records-specific logic in `repositories/generic.py`); if `list_custom` needs a minimal extension to return multi-column rows, it stays entity-agnostic.
 
-**Router** (api/v1/records.py): new endpoint above `GET ""`... declared before `/{record_id}`, `response_model=PaginatedResponse[RecordViewResponse]`, thin: `service.list_view(params)`.
+**Router** (api/v1/records.py): new endpoint declared BEFORE `GET /{record_id}` (route order, §4); `response_model=PaginatedResponse[RecordViewResponse]`; thin — `service.list_view(params)`.
 
 **What does NOT change:** `GET /records` contract, all write paths, sort whitelist contents, `q` semantics, date-range semantics, pagination mechanics.
 
@@ -117,7 +117,7 @@ G1a explore (ses_f9e6948e2 + ses_f9e654a6a, 2026-09-02) pinned the exact consume
 
 ### 6.5 ClientQuickCard — context entity by id (R3)
 
-- Header: replace `clients.get(clientId)` with its own query `['client', clientId]` → `getClientById` (GET /clients/{id}; name + phone). Fetched once per card open, react-query-cached.
+- Header: replace `clients.get(clientId)` with its own query `['client', clientId]` → GET /api/v1/clients/{id} (name + phone). Fetched once per card open, react-query-cached. api-client method: reuse the existing get-client-by-id method if present, else add `getClientById` (§7).
 - Its records-list display: `services`/`locations` maps → shared hooks `useServices()` / `useLocations()` (same canonical keys — no extra requests beyond cached page state).
 - Own queries (records/activities/payments-totals for the client) unchanged (out of scope: modal caps).
 
@@ -135,6 +135,7 @@ G1a explore (ses_f9e6948e2 + ses_f9e654a6a, 2026-09-02) pinned the exact consume
 - `RecordViewResponseSchema` = `RecordResponseSchema.extend({ client_name: z.string().nullable(), activity_start: z.string().nullable(), service_title: z.string().nullable(), master_name: z.string().nullable(), location_name: z.string().nullable(), master_color: z.string().nullable(), paid: z.number().int() })` — datetime as ISO string, matching existing schema conventions.
 - `RecordView` exported type; `getRecordsView(params)` → `GET /api/v1/records/view` → `paginatedSchema(RecordViewResponseSchema)` — param typing mirrors `getRecords` (endpoints.ts:300-331).
 - `getRecords` and all existing methods unchanged.
+- If no get-client-by-id method exists yet (§6.5/§6.6 need one): add `getClientById(id)` → `GET /api/v1/clients/{id}` → `ClientResponseSchema` (or the existing canonical client schema).
 
 ## 8. User Scenarios (each → E2E test)
 

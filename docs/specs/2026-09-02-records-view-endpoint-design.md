@@ -31,16 +31,18 @@ The records table renders related-entity names (client, activity date, service, 
 6. **Frontend:** RecordsContext records query → `getRecordsView()`; ALL 6 display lookup maps + the `getPaymentTotals` query DELETED from RecordsContext. `recordsColumns.tsx` and the detail panel read row display fields instead of Map lookups. Filter dropdowns untouched (dicts /all, selection purpose; combobox = #214). api-client: `RecordViewResponseSchema` (zod extend of `RecordResponseSchema`) + `getRecordsView()`.
 7. **Out of scope:** #214 (searchable combobox), modal per_page=100 caps (ClientQuickCard own queries), write paths, records sort contract changes, migrating modals to the view endpoint.
 
+> Note: the field list in decision 3 is the G1a baseline. §3 R1 adds `master_color` and `is_private` (forced by shipped UI — see R1). **§4 is the single normative field table**; all other sections reference it.
+
 ## 3. Design refinements required by the locked decisions
 
 G1a explore (ses_f9e6948e2 + ses_f9e654a6a, 2026-09-02) pinned the exact consumer graph. Deleting ALL maps from RecordsContext has three forced consequences + two additions, all within the locked scope:
 
 | # | Refinement | Why it is forced / justified |
 |---|---|---|
-| R1 | `master_color` added as a 7th display field | master cell renders a color dot `backgroundColor: master?.color || '#999'` (recordsColumns.tsx:140). Without the field the dot cannot render from row data. Nullable. |
-| R2 | BookingFilters re-homes dict data to the existing shared hooks `useLocations()` / `useServices()` / `useMasters()` | BookingFilters.tsx:47 consumes `{locations, services, masters}` from `useRecords()` — selection dropdowns, NOT display. Maps die → the filter bar must own its data. Hooks already exist (hooks/useLocations.ts etc.) with the SAME canonical query keys `['locations']`/`['services']`/`['masters']` and 5-min staleTime — react-query dedupe makes this a pure ownership move. |
+| R1 | `master_color` + `is_private` added as display fields | master cell renders a color dot `backgroundColor: master?.color || '#999'` (recordsColumns.tsx:140) and the service column + detail panel render `<DiamondIcon/>` for private activities (recordsColumns.tsx:123, RecordsTable.tsx:133). Without these fields neither can render from row data. `master_color` nullable; `is_private` bool from the already-INNER-joined Activity (direct column, no subquery). |
+| R2 | BookingFilters re-homes dict data to DIRECT queries on the canonical keys with RAW `getAll*` fetchers | BookingFilters.tsx:47 consumes `{locations, services, masters}` from `useRecords()` — selection dropdowns, NOT display. Maps die → the filter bar must own its data. Rationale for raw-shape (not the shared hooks): RecordsContext fed BookingFilters RAW `getAll*` responses, so `!archived` filter (L49-51) and `m.first_name` labels (L173) work verbatim; the shared hooks' transformers strip `archived` and rename `first_name`→`shortName` (transformers.ts:43-52; domain types lack both) — using them would break the dropdowns and force cross-package type changes. Direct `useQuery(['locations'/'services'/'masters'], getAll*)` keeps the exact fetcher + shape + canonical keys (react-query dedupe intact), `staleTime: 5 min` per repo dict convention (was `Infinity` in RecordsContext — disclosed in §10). No transformer/domain-type changes in this feature. |
 | R3 | ClientQuickCard + ActivityDetailsModal re-homed off `useRecords()` | ClientQuickCard.tsx:35 destructures `{clients, services, locations}` (header name/phone L55/L84-100; its records list display L131/L139). ActivityDetailsModal.tsx:29 `{clients}` (L80 fallback, L201 direct) — the ONLY non-records-page consumer; schedule/page.tsx:33-37 wraps RecordsProvider solely to feed it. Re-homing lets the schedule page DROP the RecordsProvider wrapper (kills 7 spurious queries on the schedule page). |
-| R4 | Payment mutations invalidate `['records']` | Today `addPayment`/`deletePayment`/`patchPayment` (useRecordMutations.ts:202-336) only do optimistic writes + `['record', id]` invalidation. With `paid` moving into the view row, the list must refresh → add `invalidateQueries({queryKey: ['records']})` to payment add/delete/patch (+ deferred-delete commit). Required by US-4. |
+| R4 | Payment mutations invalidate `['records']` | Today `addPayment`/`deletePayment`/`patchPayment`/`deletePaymentDeferred` (useRecordMutations.ts:202-411, deferred commit at L406) only do optimistic writes + `['record', id]` invalidation. With `paid` moving into the view row, the list must refresh → add `invalidateQueries({queryKey: ['records']})` to all four payment paths. Required by US-4. |
 | R5 | Records query key unchanged | `['records', page, perPage, dateFrom, dateTo, filters, sortBy, sortOrder]` (RecordsContext.tsx:100) — the `'records'` prefix is the app-wide freshness contract (12 invalidation call sites). The view fetcher swaps in under the SAME key. |
 
 ## 4. API contract — `GET /api/v1/records/view`
@@ -56,7 +58,8 @@ G1a explore (ses_f9e6948e2 + ses_f9e654a6a, 2026-09-02) pinned the exact consume
 | Field | Type | Source | Null when |
 |---|---|---|---|
 | `client_name` | `str \| None` | `Client.name` via `Record.client_id` | anonymous record (client_id null) |
-| `activity_start` | `datetime \| None` | `Activity.start` (already INNER-joined) | never in practice (FK enforced); nullable for safety |
+| `activity_start` | `str \| None` (ISO datetime — serialized EXACTLY as `ActivityResponse.start`; `parseActivityStart`/`formatDateRu` do `slice(0,10)` + `new Date(...)` on the string, so byte-parity is load-bearing) | `Activity.start` (already INNER-joined) | never in practice (FK enforced); nullable for safety |
+| `is_private` | `bool` | `Activity.is_private` (direct column — already INNER-joined, no subquery) | never (INNER join) |
 | `service_title` | `str \| None` | `Service.title` via `Activity.service_id` | service deleted/missing |
 | `master_name` | `str \| None` | `Master.last_name \|\| ' ' \|\| Master.first_name` — **«Фамилия Имя»**, byte-identical to `displayMasterName` (lib/utils.ts:4-6) | activity has no master |
 | `location_name` | `str \| None` | `Location.name` via `Activity.location_id` | activity has no location |
@@ -78,7 +81,9 @@ G1a explore (ses_f9e6948e2 + ses_f9e654a6a, 2026-09-02) pinned the exact consume
   - `client_name`, `service_title`, `master_name`, `location_name`, `master_color` → **correlated scalar subqueries** (the `_sort_columns` pattern, record.py:119-148) — no join-topology changes, orthogonal to the `q` outerjoins; page-sized sets (≤100 rows) keep this cheap in SQLite;
   - `paid` → correlated scalar subquery `SELECT COALESCE(SUM(amount), 0) FROM payments WHERE payments.record_id = records.id`.
   - Sort: SAME `_sort_columns` whitelist — sorting order is shared, guaranteeing US-6 parity with `/records`.
-  - Row mapping: service-owned manual map Row → `RecordViewResponse` (photos precedent: services/photo.py:102-105), reusing `_map_record` for the base fields. Repo stays generic (no records-specific logic in `repositories/generic.py`); if `list_custom` needs a minimal extension to return multi-column rows, it stays entity-agnostic.
+  - Row mapping: service-owned manual map Row → `RecordViewResponse` (photos precedent: services/photo.py:102-105), reusing `_map_record` for the base fields; `visits` come from the ORM entity inside each Row (`selectinload` populates it regardless of extra select columns).
+
+**Repo mechanism (MANDATED — panel B1):** `BaseRepository.list_custom` ends in `result.scalars().all()` (repositories/generic.py:100), which **drops extra select columns** (the photos service explicitly bypasses it for exactly this reason — photo.py:63 comment). Therefore: add an entity-agnostic sibling `BaseRepository.list_custom_rows()` with the SAME mechanics (count on the loader-stripped unordered subquery, apply ORDER + LIMIT/OFFSET) but returning `result.all()` Row tuples. `list_view()` uses it; `list_custom` itself is untouched; no records-specific logic enters the repo layer. (Photos can migrate to it later — out of scope.)
 
 **Router** (api/v1/records.py): new endpoint declared BEFORE `GET /{record_id}` (route order, §4); `response_model=PaginatedResponse[RecordViewResponse]`; thin — `service.list_view(params)`.
 
@@ -100,7 +105,7 @@ G1a explore (ses_f9e6948e2 + ses_f9e654a6a, 2026-09-02) pinned the exact consume
 |---|---|---|
 | date | `formatDateRu`/`formatTime` over `parseActivityStart(row.activity_start)` | `'—'` when null |
 | client | `row.client_name` (button opening ClientQuickCard by `row.client_id` — unchanged) | `'—'` |
-| service | `row.service_title` | `'—'` |
+| service | `row.service_title` + `<DiamondIcon/>` when `row.is_private` (rendering unchanged) | `'—'` |
 | master | color dot `backgroundColor: row.master_color ?? '#999'}` + `title` tooltip `row.master_name` | gray `#999` dot, no tooltip |
 | location | `row.location_name` | `'—'` |
 | payment | `row.paid` vs visits-total: `✓ Оплачено` (--success) / `Частично (N₽)` (--warning) / `Не оплачено` (--danger) — logic unchanged, source swaps `payments.get(id) ?? 0` → `row.paid` | — |
@@ -109,16 +114,18 @@ G1a explore (ses_f9e6948e2 + ses_f9e654a6a, 2026-09-02) pinned the exact consume
 
 ### 6.3 RecordsTable detail panel
 
-`selectedClient`/`selectedActivity` map lookups (L84-85, L164, L177, L240) → read the selected `RecordView` row: client name `row.client_name ?? '—'`; service `row.service_title`; master `displayMasterName`-equivalent = `row.master_name` (server already composes «Фамилия Имя»); location `row.location_name`. Payments block stays on `useRecordData` (`['payments', recordId]`).
+`selectedClient`/`selectedActivity` map lookups (L84-85, L133, L164, L177) → read the selected `RecordView` row: client name `row.client_name ?? '—'`; service `row.service_title` (+ `<DiamondIcon/>` when `row.is_private`, RecordsTable.tsx:133); master `row.master_name` (server composes «Фамилия Имя»); location `row.location_name`. Payments block stays on `useRecordData` (`['payments', recordId]`).
+
+**Delete-dialog label (distinct call site, NOT the detail panel):** RecordsTable.tsx:240 `formatRecordLabel(activities.get(deleteTarget.record.activity_id)?.start)` → `formatRecordLabel(deleteTarget.record.activity_start)` — crashes today's map access once `activities` dies if missed.
 
 ### 6.4 BookingFilters — selection data re-homed (R2)
 
-`useRecords()` → shared hooks `useLocations()` / `useServices()` / `useMasters()` (hooks/*: canonical keys `['locations']`/`['services']`/`['masters']`, 5-min staleTime, select-transformed domain objects). Keep active-only dropdown options exactly as today (client-side `!archived` filter retained unless the hook's transformed type already excludes archived — implementer verifies the transformed shape carries `archived`; if not, extend the transform or query the canonical key directly with `getAll*`). Dropdown labels/order untouched. If the transformed hook output lacks a field the dropdown needs (e.g. `first_name` for masters), extend the transformer — do NOT fork the query key.
+`useRecords()` → three direct `useQuery` calls on the CANONICAL keys — `['locations']` / `['services']` / `['masters']` — with the RAW fetchers `getAllLocations()` / `getAllServices()` / `getAllMasters()` (identical fetchers + shapes to what RecordsContext fed the dropdowns today; react-query dedupe with other canonical-key consumers intact). `staleTime: 5 min`. Dropdown behavior byte-identical: active-only via the existing client-side `!archived` filter (raw responses carry `archived`), labels `l.name` / `s.title` / `m.first_name` verbatim. The shared hooks `useLocations()`/`useServices()`/`useMasters()` are NOT used here (their transforms drop `archived` and rename `first_name`→`shortName`) and are NOT modified.
 
 ### 6.5 ClientQuickCard — context entity by id (R3)
 
-- Header: replace `clients.get(clientId)` with its own query `['client', clientId]` → GET /api/v1/clients/{id} (name + phone). Fetched once per card open, react-query-cached. api-client method: reuse the existing get-client-by-id method if present, else add `getClientById` (§7).
-- Its records-list display: `services`/`locations` maps → shared hooks `useServices()` / `useLocations()` (same canonical keys — no extra requests beyond cached page state).
+- Header: replace `clients.get(clientId)` with its own query `['client', clientId]` → `getClientById(clientId)` (§7 — method is ADDED, none exists today). Name + phone; fetched once per card open, react-query-cached.
+- Its records-list display: `services`/`locations` maps → shared hooks `useServices()` / `useLocations()` — the transformed domain objects carry `title`/`name` (primary labels; unlike §6.4 no `archived`/`first_name` needed here). Same canonical keys — no extra requests beyond cached page state. Guard: if a needed field turns out missing from the transform, fall back to the §6.4 pattern (direct raw query on the canonical key) — do NOT modify the transformer.
 - Own queries (records/activities/payments-totals for the client) unchanged (out of scope: modal caps).
 
 ### 6.6 ActivityDetailsModal + schedule page (R3)
@@ -132,15 +139,15 @@ G1a explore (ses_f9e6948e2 + ses_f9e654a6a, 2026-09-02) pinned the exact consume
 
 ## 7. api-client (packages/api-client)
 
-- `RecordViewResponseSchema` = `RecordResponseSchema.extend({ client_name: z.string().nullable(), activity_start: z.string().nullable(), service_title: z.string().nullable(), master_name: z.string().nullable(), location_name: z.string().nullable(), master_color: z.string().nullable(), paid: z.number().int() })` — datetime as ISO string, matching existing schema conventions.
+- `RecordViewResponseSchema` = `RecordResponseSchema.extend({...})` with the **§4 display fields** (single source: `client_name`, `activity_start`, `service_title`, `master_name`, `location_name`, `master_color` — `.nullable()`; `is_private: z.boolean()`; `paid: z.number().int()`). `activity_start` as ISO string, byte-compatible with `ActivityResponseSchema.start` (§4 parity pin).
 - `RecordView` exported type; `getRecordsView(params)` → `GET /api/v1/records/view` → `paginatedSchema(RecordViewResponseSchema)` — param typing mirrors `getRecords` (endpoints.ts:300-331).
 - `getRecords` and all existing methods unchanged.
-- If no get-client-by-id method exists yet (§6.5/§6.6 need one): add `getClientById(id)` → `GET /api/v1/clients/{id}` → `ClientResponseSchema` (or the existing canonical client schema).
+- **ADD `getClientById(id)`** → `GET /api/v1/clients/{id}` → canonical client schema (backend route exists: clients.py:73-89; api-client method verified MISSING — endpoints.ts has only getClients/getClientsWithStats/getClientsPaged/getClientByPhone). Consumers: ClientQuickCard (§6.5), ActivityDetailsModal (§6.6).
 
 ## 8. User Scenarios (each → E2E test)
 
 - **US-1 beyond-cap client:** seed ≥101 clients, a record for client #101 → table shows that client's name (today: empty).
-- **US-2 one display request:** records page load issues exactly ONE display-data request (`/records/view`); NO `/clients?per_page=100`, NO `/activities?...per_page=100`, NO `/payments/totals` from the records page; filter dropdowns still populate and filter.
+- **US-2 one display request:** records page display path issues exactly ONE API call — `GET /records/view`; ZERO calls to `/clients?per_page=100`, `/activities?...&per_page=100`, `/payments/totals` from the records page. The three dict `/all` selection queries (owned by BookingFilters, canonical keys, 5-min cache) are the only other records-page requests. Filter dropdowns still populate and filter.
 - **US-3 archived entities:** record referencing an ARCHIVED client and an ARCHIVED master → table shows real name (not `'—'`), master dot uses the master's own color; record whose activity has a deleted service → `'—'`.
 - **US-4 paid freshness:** payment column filled from the view row; add a payment in the detail panel → row payment badge updates without manual reload (R4 invalidation).
 - **US-5 filter parity:** every current filter (client/activity/date range/location/service/master/status) + `?q=` search produce identical results on `/records/view` as on `/records` (same fixture, same totals).
@@ -148,7 +155,7 @@ G1a explore (ses_f9e6948e2 + ses_f9e654a6a, 2026-09-02) pinned the exact consume
 
 ## 9. Testing strategy
 
-- **Backend (pytest):** `/records/view` — params parity (422 matrix shared with `/records`), display-field correctness (client_name resolution incl. archived; `master_name` = «Фамилия Имя»; nulls for anonymous/dangling), `paid` sums (none/partial/full), pagination envelope, route-order (GET /view is not captured by /{record_id}), sort parity loop (per sort_by: id sequence == /records sequence on shared fixture), `q` + filters on view.
+- **Backend (pytest):** `/records/view` — params parity (422 matrix shared with `/records`), display-field correctness (client_name resolution incl. archived; `master_name` = «Фамилия Имя»; `is_private` passthrough; nulls for anonymous/dangling), `paid` sums (none/partial/full), pagination envelope, route-order (GET /view is not captured by /{record_id}), sort parity loop (per sort_by: id sequence == /records sequence on shared fixture), `q` + filters on view, `activity_start` serialization byte-parity with `ActivityResponse.start`, `list_custom_rows` returns all extra columns (repo unit test).
 - **api-client:** schema parse (RecordViewResponseSchema), `getRecordsView` URL/params.
 - **Frontend unit (vitest):** RecordsContext (view query, no maps), recordsColumns (row rendering + fallbacks + dot + payment badges), BookingFilters (hook-fed options), ClientQuickCard / ActivityDetailsModal re-home, payment-mutation invalidation (R4). Existing tests referencing maps → rewritten.
 - **E2E (Playwright):** US-1…US-6 per §8.
@@ -164,13 +171,14 @@ G1a explore (ses_f9e6948e2 + ses_f9e654a6a, 2026-09-02) pinned the exact consume
 | Paid column | `getPaymentTotals` round-trip | `row.paid`; payment mutations invalidate the list (small extra refetch on pay ops) |
 | RecordsContext API | records + 6 maps + loading flags | view list + filters/sort/pagination only |
 | Schedule page | wraps RecordsProvider → fires 7 records-context queries | provider removed, 0 |
-| BookingFilters | fed by RecordsContext maps | own shared hooks (same data, same keys) |
+| BookingFilters | fed by RecordsContext maps (`staleTime: Infinity`) | own direct canonical-key queries, raw `getAll*` shape, `staleTime: 5 min` (refetch window after TTL — selection dropdowns only) |
 | ClientQuickCard header | context clients map (100-capped) | per-id GET (always correct) |
 | `GET /records` | canonical list | unchanged (modals + future consumers) |
 
 ## 11. Visual Compliance Checks
 
 - [ ] Records table shows all columns with names/dates/prices (no `'—'` regressions on healthy data)
+- [ ] Private activity shows the diamond indicator in the service column (table + detail panel)
 - [ ] Client name renders as a button; click opens ClientQuickCard with correct name + phone
 - [ ] Master cell shows color dot + name tooltip; archived master shows own color
 - [ ] Payment badges render: `✓ Оплачено` / `Частично (N₽)` / `Не оплачено` with correct colors
@@ -185,11 +193,10 @@ G1a explore (ses_f9e6948e2 + ses_f9e654a6a, 2026-09-02) pinned the exact consume
 
 - [ ] `GET /api/v1/records/view` implemented per §4; declared before `/{record_id}`
 - [ ] `RecordListParams` single class, no duplication; `_sort_columns` shared (US-5/US-6 parity)
-- [ ] `list_view()` shares the query-builder with `list()`; `/records` behavior byte-identical
+- [ ] `list_view()` shares the query-builder with `list()`; `/records` behavior byte-identical; `BaseRepository.list_custom_rows()` added (entity-agnostic, `list_custom` untouched)
 - [ ] All 6 maps + payments query deleted from RecordsContext; no `getClients()`/`getActivities(per_page:100)`/`getPaymentTotals` calls remain in records page path
 - [ ] BookingFilters/ClientQuickCard/ActivityDetailsModal re-homed (R2/R3); schedule RecordsProvider removed
-- [ ] Payment mutations invalidate `['records']` (R4/US-4)
-- [ ] api-client: `RecordViewResponseSchema` + `getRecordsView()`
+- [ ] api-client: `RecordViewResponseSchema` + `getRecordsView()` + `getClientById()` added
 - [ ] Backend/api-client/vitest/e2e suites green; US-1…US-6 e2e specs land
 - [ ] docs/domain-rules/records.md updated: endpoint table row + view-contract subsection (final IMPL task)
 

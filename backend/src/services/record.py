@@ -192,7 +192,7 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
 
     async def list_view(
         self, db_session: AsyncSession, params: RecordListParams
-    ) -> PaginatedResponse:  # items are RecordViewResponse instances
+    ) -> PaginatedResponse[RecordViewResponse]:
         """Return a records page enriched with display fields (GH #213 §5).
 
         Same query as ``list()`` — shared ``_build_list_stmt`` + shared

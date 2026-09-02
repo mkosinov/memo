@@ -1,10 +1,12 @@
 'use client';
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { useNavigation } from '@/contexts/NavigationContext';
-import { useRecords } from '@/contexts/RecordsContext';
 import { getMonday, formatDateISO } from '@/lib/utils';
 import { StatusFiltersPicker } from '@/app/components/shared/StatusFiltersPicker';
+import { getAllLocations, getAllServices, getAllMasters } from '@memo/api-client';
+import type { LocationResponse, ServiceResponse, MasterResponse } from '@memo/api-client';
 import type { VisitStatus } from '@memo/domain';
 
 interface BookingFiltersProps {
@@ -44,11 +46,31 @@ export function BookingFilters({
   onReset,
 }: BookingFiltersProps) {
   const { dateFrom, dateTo, selectDateRange } = useNavigation();
-  const { locations, services, masters } = useRecords();
 
-  const locationList = Array.from(locations.values()).filter(l => !l.archived);
-  const serviceList = Array.from(services.values()).filter(s => !s.archived);
-  const masterList = Array.from(masters.values()).filter(m => !m.archived);
+  // Selection data owned by this component (GH #213 §6.4, R2): direct queries
+  // on the CANONICAL keys with the RAW getAll* fetchers — TanStack dedupes
+  // with every other ['locations']/['services']/['masters'] consumer. Raw
+  // shapes keep the `!archived` filter and name/title/first_name labels
+  // verbatim (the shared hooks' transforms would drop `archived`).
+  const { data: locations = [] } = useQuery<LocationResponse[]>({
+    queryKey: ['locations'],
+    queryFn: () => getAllLocations(),
+    staleTime: 5 * 60 * 1000,
+  });
+  const { data: services = [] } = useQuery<ServiceResponse[]>({
+    queryKey: ['services'],
+    queryFn: () => getAllServices(),
+    staleTime: 5 * 60 * 1000,
+  });
+  const { data: masters = [] } = useQuery<MasterResponse[]>({
+    queryKey: ['masters'],
+    queryFn: () => getAllMasters(),
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const locationList = locations.filter(l => !l.archived);
+  const serviceList = services.filter(s => !s.archived);
+  const masterList = masters.filter(m => !m.archived);
 
   // GH #212 Task 12 — search input: local draft echoes keystrokes instantly
   // while typing is debounced 300ms before reaching onSearchChange →

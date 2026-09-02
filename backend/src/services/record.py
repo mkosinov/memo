@@ -281,12 +281,25 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
     @staticmethod
     def _sort_columns(params: RecordListParams) -> list:
         """Whitelist sort map → ORDER BY expressions (#191, mirrors the deleted
-        client-side comparator; collation note: SQLite BINARY ≠ localeCompare)."""
+        client-side comparator; collation note: SQLite BINARY ≠ localeCompare).
+
+        The Client/Service name subqueries carry explicit ``correlate()``:
+        when ``q`` outerjoins those tables into the enclosing query,
+        auto-correlation would strip them from the subquery FROM → no FROM
+        left → InvalidRequestError (500) on ``q`` + client/service sorts
+        (GH #213 regression pin — same treatment as the list_view display
+        columns)."""
         client_name = (
-            select(Client.name).where(Client.id == Record.client_id).scalar_subquery()
+            select(Client.name)
+            .where(Client.id == Record.client_id)
+            .correlate(Record)
+            .scalar_subquery()
         )
         service_title = (
-            select(Service.title).where(Service.id == Activity.service_id).scalar_subquery()
+            select(Service.title)
+            .where(Service.id == Activity.service_id)
+            .correlate(Activity)
+            .scalar_subquery()
         )
         master_last = (
             select(Master.last_name).where(Master.id == Activity.master_id).scalar_subquery()

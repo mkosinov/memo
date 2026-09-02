@@ -387,6 +387,39 @@ class TestViewSortParity:
             f"sort_by={sort_by} sort_order={sort_order}: view={view_ids} != records={list_ids}"
         )
 
+    @pytest.mark.parametrize("sort_by", SORT_KEYS)
+    def test_q_plus_sort_parity(
+        self,
+        api_client,
+        create_master,
+        create_service,
+        create_location,
+        create_client,
+        create_record,
+        sort_by,
+    ) -> None:
+        """Search combined with EVERY sort key: 200 page + sequence parity.
+
+        The ``q`` outerjoins (Client/Service) collide with the name sort
+        subqueries in the shared ``_sort_columns`` whitelist — without
+        explicit ``correlate()`` SQLAlchemy strips the dictionary table
+        from the ORDER BY subquery FROM → InvalidRequestError → 500 on
+        BOTH endpoints (regression pin, GH #213).
+        """
+        _seed_view_world(
+            api_client,
+            create_master,
+            create_service,
+            create_location,
+            create_client,
+            create_record,
+        )
+        params = {"q": "нн", "sort_by": sort_by, "per_page": 100}  # → Анна's record
+        view_ids = _ids(api_client.get(VIEW_URL, params=params))
+        list_ids = _ids(api_client.get(LIST_URL, params=params))
+        assert view_ids == list_ids, f"q + sort_by={sort_by}: view={view_ids} != records={list_ids}"
+        assert view_ids, f"q + sort_by={sort_by}: expected a non-empty page"
+
 
 # ─── display fields (US-3 API-level) ─────────────────────────────────────────
 

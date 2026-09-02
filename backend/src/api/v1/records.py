@@ -1,6 +1,5 @@
 """FastAPI router for record CRUD endpoints with nested visits."""
 
-from datetime import datetime
 from functools import lru_cache
 from typing import Annotated
 
@@ -18,9 +17,8 @@ from src.schemas.record import (
     RecordPatch,
     RecordResponse,
     RecordUpdate,
-    VisitResponse,
 )
-from src.services.record import RecordService, get_record_service
+from src.services.record import RecordService, get_record_service, map_record
 
 router = APIRouter(tags=["records"])
 
@@ -34,44 +32,6 @@ def _get_record_service() -> RecordService:
 _ServiceDep = Annotated[RecordService, Depends(_get_record_service)]
 
 
-def _map_record(record) -> RecordResponse:
-    """Map a Record ORM object to RecordResponse with nested visits."""
-
-    def _dt_to_str(dt: datetime | None) -> str:
-        if dt is None:
-            return ""
-        return dt.isoformat()
-
-    visits = [
-        VisitResponse(
-            id=v.id,
-            record_id=v.record_id,
-            visitor_id=v.visitor_id,
-            tariff_id=v.tariff_id,
-            price=v.price,
-            custom_price=v.custom_price,
-            status=v.status,
-            created_at=_dt_to_str(v.created_at),
-            updated_at=_dt_to_str(v.updated_at),
-        )
-        for v in record.visits
-    ]
-
-    return RecordResponse(
-        id=record.id,
-        activity_id=record.activity_id,
-        client_id=record.client_id,
-        status=record.status,
-        seats=record.seats,
-        anonym_visits=record.anonym_visits,
-        comment=record.comment,
-        custom_price=record.custom_price,
-        created_at=_dt_to_str(record.created_at),
-        updated_at=_dt_to_str(record.updated_at),
-        visits=visits,
-    )
-
-
 @router.get("", response_model=PaginatedResponse[RecordResponse])
 async def list_records(
     service: _ServiceDep,
@@ -81,7 +41,7 @@ async def list_records(
     """Return records with nested visits — server-side filter, sort, paginate (#191)."""
     result = await service.list(db_session=session, params=params)
     return PaginatedResponse(
-        items=[_map_record(r) for r in result.items],
+        items=[map_record(r) for r in result.items],
         total=result.total,
         page=result.page,
         per_page=result.per_page,
@@ -104,7 +64,7 @@ async def get_record(
                 message="Record not found",
             ).model_dump(),
         )
-    return _map_record(record)
+    return map_record(record)
 
 
 @router.post("", response_model=RecordResponse, status_code=201)
@@ -115,7 +75,7 @@ async def create_record(
 ) -> RecordResponse:
     """Create a new record with visits. Seats auto-calculated from len(visits)."""
     record = await service.create(db_session=session, data=data)
-    return _map_record(record)
+    return map_record(record)
 
 
 @router.put("/{record_id}", response_model=RecordResponse)
@@ -135,7 +95,7 @@ async def update_record(
                 message="Record not found",
             ).model_dump(),
         )
-    return _map_record(record)
+    return map_record(record)
 
 
 @router.patch("/{record_id}", response_model=RecordResponse)
@@ -155,7 +115,7 @@ async def patch_record(
                 message="Record not found",
             ).model_dump(),
         )
-    return _map_record(record)
+    return map_record(record)
 
 
 @router.delete("/{record_id}", status_code=204)

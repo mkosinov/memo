@@ -112,6 +112,29 @@ class RecordResponse(RecordBase):
     visits: list[VisitResponse] = []
 
 
+class RecordViewResponse(RecordResponse):
+    """RecordResponse + denormalized display fields for the records table (GH #213).
+
+    Sourced from correlated scalar subqueries with NO ``is_active`` filter —
+    archived clients/masters/services/locations resolve their names (US-3,
+    photos ``client_name`` precedent); FK-dangling rows yield ``None``.
+    ``activity_start`` / ``is_private`` come from the already INNER-joined
+    Activity (direct columns). ``paid`` is ``COALESCE(SUM(Payment.amount), 0)``
+    — payments are hard-deleted, no inactive filter (payments.md).
+    """
+
+    client_name: str | None = None
+    # ISO string, byte-identical to ActivityResponse.start serialization —
+    # the frontend parseActivityStart slices the raw string (§4 parity pin).
+    activity_start: str | None = None
+    service_title: str | None = None
+    master_name: str | None = None  # «Фамилия Имя» — displayMasterName parity
+    location_name: str | None = None
+    master_color: str | None = None
+    is_private: bool = False
+    paid: int = 0
+
+
 RecordSortBy = Literal[
     "date", "client", "service", "master", "location",
     "guests", "status", "total", "payment",

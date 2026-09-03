@@ -138,6 +138,7 @@ A Record is a booking for an Activity. It links a Client to an Activity and cont
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | /api/v1/records | List — server-side filter/sort/paginate + `?q=` substring search (GH #212, client.name/phone/email + service.title + id) — see [list contract](#records-list-endpoint-get-apiv1records) below |
+| GET | /api/v1/records/view | Records-table view lookup (GH #213) — same params/sort as list + 8 display columns — see [view contract](#records-view-endpoint-get-apiv1recordsview) below |
 | GET | /api/v1/records/{id} | Get with visits |
 | POST | /api/v1/records | Create (capacity check) |
 | PUT | /api/v1/records/{id} | Full update (visits replaced) |
@@ -198,7 +199,32 @@ A partial id fragment (e.g. first 8 chars) NEVER matches by id. The `q` predicat
 
 **Null ordering + tiebreak:** `asc` → `NULLS FIRST`, `desc` → `NULLS LAST` (matters for `client` — anonymous records have no Client row); a deterministic `Record.id asc()` tiebreak guarantees cross-page stability.
 
-**Pagination mechanics:** repo-owned — `BaseRepository.list_custom` (`backend/src/repositories/generic.py`) wraps the record stmt built by `RecordService.list` (JOIN `Activity` + `selectinload(Record.visits)`). Count runs on the unordered stmt via `select(func.count()).select_from(stmt.subquery())` — loader options are stripped by the subquery and the correlated sort-key subqueries are never evaluated inside the count; ORDER + LIMIT/OFFSET slice is then applied by the repo. The sort whitelist stays in `RecordService._sort_columns` (service-owned, G1a principle), which returns the ORDER BY expressions; the repo owns order/limit/offset, the service owns page↔offset conversion (`(page - 1) * per_page`) and the `PaginatedResponse` envelope. Pipeline order: Filter → Sort → Paginate; business filters are hand-written in `RecordService.list`, pagination mechanics are owned by the repo.
+**Pagination mechanics:** repo-owned — `BaseRepository` (`backend/src/repositories/generic.py`) exposes a three-method read family (GH #213 §5.1): `list` (generic path, unchanged), `list_custom` — **the row-tuple core** — and `list_entity` (the entity-only wrapper). `list_custom` accepts ANY service-built `stmt` and returns `(rows: list[Row], total)`: declared row shape, `result.all()`, NO projection; the count runs on the loader-stripped UNordered subquery (`select(func.count()).select_from(stmt.subquery())` — loader options are stripped and correlated sort-key subqueries are never evaluated inside the count), then ORDER + LIMIT/OFFSET are applied by the repo via `order_by=` / `limit=` / `offset=` parameters. `list_entity` (TypeVar `ModelT`) accepts ONLY `Select[tuple[ModelT]]` and takes over the old `list_custom` entity role — a thin wrapper (`rows, total = await list_custom(...); return [row[0] for row in rows], total`); the TypeVar is mypy honesty, so a multi-column select (e.g. the `/view` display columns) must NOT typecheck against it. Consumers: `RecordService.list` and `ActivityService.list` ride `list_entity`; `RecordService.list_view` and `PhotoService.list` ride the `list_custom` row core (see [photos.md](photos.md)). The sort whitelist stays in `RecordService._sort_columns` (service-owned, G1a principle), which returns the ORDER BY expressions; the repo owns order/limit/offset, the service owns page↔offset conversion (`(page - 1) * per_page`) and the `PaginatedResponse` envelope. Pipeline order: Filter → Sort → Paginate; business filters are hand-written in `RecordService._build_list_stmt`, pagination mechanics are owned by the repo.
+
+### Records view endpoint (GET /api/v1/records/view)
+
+**Purpose:** one request returning everything the records TABLE renders (GH #213 display-lookup composite).
+
+**Query params:** IDENTICAL to `GET /api/v1/records` — the same `RecordListParams` class (single class, single injection idiom `Annotated[RecordListParams, Query()]` → no param drift possible). Same validation → same 422 VALIDATION_ERROR matrix. Same `_sort_columns` whitelist — sorting order is shared, guaranteeing sort parity with `/records`.
+
+**Response:** `PaginatedResponse[RecordViewResponse]` — `{items, total, page, per_page}`. `RecordViewResponse` inherits `RecordResponse` (id, activity_id, client_id, status, seats, anonym_visits, comment, custom_price, created_at, updated_at, visits[]) and adds 8 display fields:
+
+| Field | Type | Source | Null when |
+|-------|------|--------|-----------|
+| `client_name` | `str \| None` | `Client.name` via `Record.client_id` (correlated scalar subquery) | anonymous record (client_id null) |
+| `activity_start` | `str \| None` | `Activity.start` direct column (already INNER-joined). ISO datetime serialized EXACTLY as `ActivityResponse.start` — byte-parity is load-bearing for `parseActivityStart`/`formatDateRu` | never in practice (FK enforced); nullable for safety |
+| `is_private` | `bool` | `Activity.is_private` direct column (no subquery) | never (INNER join) |
+| `service_title` | `str \| None` | `Service.title` via `Activity.service_id` (correlated scalar subquery) | service deleted/missing |
+| `master_name` | `str \| None` | `Master.last_name \|\| ' ' \|\| Master.first_name` — «Фамилия Имя», byte-identical to `displayMasterName` | activity has no master |
+| `location_name` | `str \| None` | `Location.name` via `Activity.location_id` (correlated scalar subquery) | activity has no location |
+| `master_color` | `str \| None` | `Master.color` (correlated scalar subquery) | no master |
+| `paid` | `int` (NOT nullable, default 0) | `COALESCE(SUM(Payment.amount), 0)` over the record's stored Payment rows — hard-deleted payments are physically gone and contribute 0 (`get_payment_totals` semantics) | never — 0 when no payments |
+
+**Archived resolution:** the display subqueries carry NO `is_active` filter — archived clients/masters/services/locations still resolve their names. Deleted entities (FK-dangling) → `null` → the client renders `'—'` / gray dot `#999`.
+
+**Route order:** `/view` MUST be declared BEFORE `/{record_id}` in records.py — FastAPI matches in declaration order, otherwise `/view` is captured by the id path param and returns 422.
+
+**Implementation:** `RecordService.list_view()` shares `_build_list_stmt` with `list()` (same filters, `q` predicates, `selectinload(Record.visits)`) and adds the display fields as 8 labeled select columns; the row-tuple result rides `BaseRepository.list_custom` (see Pagination mechanics above). Base fields map via `_map_record` on the ORM entity in `row[0]`; `visits` come from that entity (`selectinload` populates it regardless of extra select columns).
 
 ## Relationships
 - Record → belongs to Activity

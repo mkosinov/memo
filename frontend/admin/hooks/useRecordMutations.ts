@@ -212,6 +212,9 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
       upsertPayment(queryClient, recordId, payment);
       // Targeted invalidation for the record's visit/visit-cell UI.
       invalidateRecord();
+      // R4 (US-4): RecordsTable reads `paid` from the view row — prefix
+      // ['records'] invalidation catches all pages/filters so the badge refreshes.
+      queryClient.invalidateQueries({ queryKey: ['records'] });
       return payment;
     },
     [recordId, queryClient, invalidateRecord],
@@ -224,6 +227,9 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
       await apiDeletePayment(paymentId);
       // Targeted invalidation: the record's payment tab uses ['payments', recordId].
       invalidateRecord();
+      // R4 (US-4): RecordsTable reads `paid` from the view row — prefix
+      // ['records'] invalidation catches all pages/filters so the badge refreshes.
+      queryClient.invalidateQueries({ queryKey: ['records'] });
     },
     [recordId, queryClient, invalidateRecord],
   );
@@ -330,6 +336,9 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
       // Optimistic cache update via helper — writes BOTH per-record and global ['payments'].
       // Reader: RecordModal (['payments', recordId]) + future global payments reader
       upsertPayment(queryClient, recordId, payment);
+      // R4 (US-4): RecordsTable reads `paid` from the view row — prefix
+      // ['records'] invalidation catches all pages/filters so the badge refreshes.
+      queryClient.invalidateQueries({ queryKey: ['records'] });
       return payment;
     },
     [recordId, queryClient],
@@ -404,6 +413,9 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
           // Targeted reconcile: ensure both caches reflect the deletion even if
           // an external mutation or a stale optimistic state drifted.
           removePayment(queryClient, recordId, paymentId);
+          // R4 (US-4): RecordsTable reads `paid` from the view row — invalidate on
+          // COMMIT (not on defer) so the badge refreshes once the delete is final.
+          queryClient.invalidateQueries({ queryKey: ['records'] });
         },
       });
     },

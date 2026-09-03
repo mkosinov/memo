@@ -2,24 +2,8 @@
 
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
-import {
-  getRecords,
-  getClients,
-  getPaymentTotals,
-  getActivities,
-  getAllMasters,
-  getAllServices,
-  getAllLocations,
-} from '@memo/api-client';
-import type {
-  PaginatedResponse,
-  RecordResponse,
-  ClientWithStats,
-  ActivityResponse,
-  MasterResponse,
-  ServiceResponse,
-  LocationResponse,
-} from '@memo/api-client';
+import { getRecordsView } from '@memo/api-client';
+import type { PaginatedResponse, RecordView } from '@memo/api-client';
 import type { SortOrder } from './createPagedListContext';
 import { useNavigation } from '@/contexts/NavigationContext';
 import { seedRecordFromList } from '@/lib/cache/recordCacheSync';
@@ -29,7 +13,7 @@ export interface RecordFilters {
   serviceId: string;
   masterId: string;
   status: string;
-  /** Server-side search (GH #212 Task 12) — sent to getRecords as `q`. */
+  /** Server-side search (GH #212 Task 12) — sent to getRecordsView as `q`. */
   search: string;
 }
 
@@ -42,9 +26,9 @@ const DEFAULT_FILTERS: RecordFilters = { locationId: '', serviceId: '', masterId
 
 export interface RecordsContextType {
   /** Server-page items — PagedListState.items contract (spec §6.4, #139 T8). */
-  items: RecordResponse[];
+  items: RecordView[];
   /** Kept alongside `items` for backwards compat with non-table consumers. */
-  records: RecordResponse[];
+  records: RecordView[];
   total: number;
   page: number;
   perPage: number;
@@ -62,12 +46,6 @@ export interface RecordsContextType {
    */
   setSort: (field: string, order: SortOrder) => void;
   resetFilters: () => void;
-  clients: Map<string, ClientWithStats>;
-  payments: Map<string, number>; // record_id → total paid amount
-  activities: Map<string, ActivityResponse>;
-  masters: Map<string, MasterResponse>;
-  services: Map<string, ServiceResponse>;
-  locations: Map<string, LocationResponse>;
   isLoading: boolean;
   /** Kept alongside `isLoading` for backwards compat with non-table consumers. */
   loading: boolean;
@@ -95,10 +73,12 @@ export function RecordsProvider({ children }: { children: React.ReactNode }) {
     void queryClient.refetchQueries({ queryKey: ['records'] });
   }, [queryClient]);
 
-  // Server-driven records list (#191) — queryKey carries every server param
-  const { data, isLoading: recordsLoading, isPending, isFetching, error: recordsError } = useQuery<PaginatedResponse<RecordResponse>>({
+  // Server-driven records list (#191) — queryKey carries every server param.
+  // GH #213 Task 6: fetcher swapped to the composite view endpoint
+  // (records + display fields in one request); key + options unchanged.
+  const { data, isLoading: recordsLoading, isPending, isFetching, error: recordsError } = useQuery<PaginatedResponse<RecordView>>({
     queryKey: ['records', page, perPage, dateFrom, dateTo, filters, sortBy, sortOrder],
-    queryFn: () => getRecords({
+    queryFn: () => getRecordsView({
       page,
       per_page: perPage,
       date_from: dateFrom || undefined,
@@ -166,84 +146,6 @@ export function RecordsProvider({ children }: { children: React.ReactNode }) {
     records.forEach((r) => seedRecordFromList(queryClient, r));
   }, [records, queryClient]);
 
-  const { data: activitiesRaw = [] } = useQuery<ActivityResponse[]>({
-    queryKey: ['activities', dateFrom, dateTo],
-    queryFn: () => getActivities({ date_from: dateFrom, date_to: dateTo, per_page: 100 }).then(r => r.items),
-  });
-
-  // Always-cached reference data (bare /all lists — #205)
-  const { data: mastersRaw = [] } = useQuery<MasterResponse[]>({
-    queryKey: ['masters'],
-    queryFn: () => getAllMasters(),
-    staleTime: Infinity,
-  });
-
-  const { data: servicesRaw = [] } = useQuery<ServiceResponse[]>({
-    queryKey: ['services'],
-    queryFn: () => getAllServices(),
-    staleTime: Infinity,
-  });
-
-  const { data: locationsRaw = [] } = useQuery<LocationResponse[]>({
-    queryKey: ['locations'],
-    queryFn: () => getAllLocations(),
-    staleTime: Infinity,
-  });
-
-  // Clients (all active clients — not period-based)
-  const { data: clientsRaw = [] } = useQuery<ClientWithStats[]>({
-    queryKey: ['clients'],
-    queryFn: () => getClients(),
-    staleTime: Infinity,
-  });
-
-  // Payment totals for the currently loaded records (batch aggregate — replaces unfiltered getPayments, #186)
-  const recordIds = useMemo(() => records.map((r) => r.id).sort(), [records]);
-  const { data: paymentTotals } = useQuery({
-    queryKey: ['payments', 'totals', recordIds],
-    queryFn: () => getPaymentTotals(recordIds),
-    enabled: recordIds.length > 0,
-  });
-
-  // Build maps for O(1) lookup
-  const activities = useMemo(() => {
-    const map = new Map<string, ActivityResponse>();
-    activitiesRaw.forEach(a => map.set(a.id, a));
-    return map;
-  }, [activitiesRaw]);
-
-  const masters = useMemo(() => {
-    const map = new Map<string, MasterResponse>();
-    mastersRaw.forEach(m => map.set(m.id, m));
-    return map;
-  }, [mastersRaw]);
-
-  const services = useMemo(() => {
-    const map = new Map<string, ServiceResponse>();
-    servicesRaw.forEach(s => map.set(s.id, s));
-    return map;
-  }, [servicesRaw]);
-
-  const locations = useMemo(() => {
-    const map = new Map<string, LocationResponse>();
-    locationsRaw.forEach(l => map.set(l.id, l));
-    return map;
-  }, [locationsRaw]);
-
-  const clients = useMemo(() => {
-    const map = new Map<string, ClientWithStats>();
-    clientsRaw.forEach(c => map.set(c.id, c));
-    return map;
-  }, [clientsRaw]);
-
-  const payments = useMemo(() => {
-    const map = new Map<string, number>();
-    if (paymentTotals) {
-      Object.entries(paymentTotals).forEach(([recordId, paidTotal]) => map.set(recordId, paidTotal));
-    }
-    return map;
-  }, [paymentTotals]);
-
   const contextValue = useMemo(
     () => ({
       items: records,
@@ -259,12 +161,6 @@ export function RecordsProvider({ children }: { children: React.ReactNode }) {
       setFilters,
       setSort,
       resetFilters,
-      clients,
-      payments,
-      activities,
-      masters,
-      services,
-      locations,
       isLoading: recordsLoading,
       loading: recordsLoading,
       isPending,
@@ -272,7 +168,7 @@ export function RecordsProvider({ children }: { children: React.ReactNode }) {
       error: recordsError ?? null,
       refetch,
     }),
-    [records, total, page, perPage, filters, sortBy, sortOrder, setPerPage, setFilters, setSort, resetFilters, clients, payments, activities, masters, services, locations, recordsLoading, isPending, isFetching, recordsError, refetch],
+    [records, total, page, perPage, filters, sortBy, sortOrder, setPerPage, setFilters, setSort, resetFilters, recordsLoading, isPending, isFetching, recordsError, refetch],
   );
 
   return (

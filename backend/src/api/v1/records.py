@@ -1,6 +1,5 @@
 """FastAPI router for record CRUD endpoints with nested visits."""
 
-from datetime import datetime
 from functools import lru_cache
 from typing import Annotated
 
@@ -18,9 +17,9 @@ from src.schemas.record import (
     RecordPatch,
     RecordResponse,
     RecordUpdate,
-    VisitResponse,
+    RecordViewResponse,
 )
-from src.services.record import RecordService, get_record_service
+from src.services.record import RecordService, get_record_service, map_record
 
 router = APIRouter(tags=["records"])
 
@@ -34,44 +33,6 @@ def _get_record_service() -> RecordService:
 _ServiceDep = Annotated[RecordService, Depends(_get_record_service)]
 
 
-def _map_record(record) -> RecordResponse:
-    """Map a Record ORM object to RecordResponse with nested visits."""
-
-    def _dt_to_str(dt: datetime | None) -> str:
-        if dt is None:
-            return ""
-        return dt.isoformat()
-
-    visits = [
-        VisitResponse(
-            id=v.id,
-            record_id=v.record_id,
-            visitor_id=v.visitor_id,
-            tariff_id=v.tariff_id,
-            price=v.price,
-            custom_price=v.custom_price,
-            status=v.status,
-            created_at=_dt_to_str(v.created_at),
-            updated_at=_dt_to_str(v.updated_at),
-        )
-        for v in record.visits
-    ]
-
-    return RecordResponse(
-        id=record.id,
-        activity_id=record.activity_id,
-        client_id=record.client_id,
-        status=record.status,
-        seats=record.seats,
-        anonym_visits=record.anonym_visits,
-        comment=record.comment,
-        custom_price=record.custom_price,
-        created_at=_dt_to_str(record.created_at),
-        updated_at=_dt_to_str(record.updated_at),
-        visits=visits,
-    )
-
-
 @router.get("", response_model=PaginatedResponse[RecordResponse])
 async def list_records(
     service: _ServiceDep,
@@ -81,11 +42,30 @@ async def list_records(
     """Return records with nested visits — server-side filter, sort, paginate (#191)."""
     result = await service.list(db_session=session, params=params)
     return PaginatedResponse(
-        items=[_map_record(r) for r in result.items],
+        items=[map_record(r) for r in result.items],
         total=result.total,
         page=result.page,
         per_page=result.per_page,
     )
+
+
+@router.get("/view", response_model=PaginatedResponse[RecordViewResponse])
+async def list_records_view(
+    service: _ServiceDep,
+    session: SessionDep,
+    params: Annotated[RecordListParams, Query()],
+) -> PaginatedResponse[RecordViewResponse]:
+    """Composite read for the records table — records page enriched with
+    denormalized display fields from joins (GH #213 §4).
+
+    Same params/sort/pagination as ``GET /records`` (single
+    ``RecordListParams`` class — no contract drift); display resolution
+    carries NO ``is_active`` filters, so archived entities resolve their
+    names (US-3). MUST stay declared BEFORE ``GET /{record_id}``: FastAPI
+    matches routes in declaration order and ``/view`` would otherwise be
+    captured by the id path param (404 instead of a page).
+    """
+    return await service.list_view(db_session=session, params=params)
 
 
 @router.get("/{record_id}", response_model=RecordResponse)
@@ -104,7 +84,7 @@ async def get_record(
                 message="Record not found",
             ).model_dump(),
         )
-    return _map_record(record)
+    return map_record(record)
 
 
 @router.post("", response_model=RecordResponse, status_code=201)
@@ -115,7 +95,7 @@ async def create_record(
 ) -> RecordResponse:
     """Create a new record with visits. Seats auto-calculated from len(visits)."""
     record = await service.create(db_session=session, data=data)
-    return _map_record(record)
+    return map_record(record)
 
 
 @router.put("/{record_id}", response_model=RecordResponse)
@@ -135,7 +115,7 @@ async def update_record(
                 message="Record not found",
             ).model_dump(),
         )
-    return _map_record(record)
+    return map_record(record)
 
 
 @router.patch("/{record_id}", response_model=RecordResponse)
@@ -155,7 +135,7 @@ async def patch_record(
                 message="Record not found",
             ).model_dump(),
         )
-    return _map_record(record)
+    return map_record(record)
 
 
 @router.delete("/{record_id}", status_code=204)

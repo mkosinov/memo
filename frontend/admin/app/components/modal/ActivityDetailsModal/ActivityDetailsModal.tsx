@@ -2,9 +2,8 @@
 
 import React, { useState, useMemo, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { getRecords, type RecordResponse } from '@memo/api-client';
+import { getRecords, getClientById, type RecordResponse } from '@memo/api-client';
 import { useSchedule } from '@/contexts/ScheduleContext';
-import { useRecords } from '@/contexts/RecordsContext';
 import { useClients } from '@/contexts/ClientsContext';
 import { useUI } from '@/contexts/UIContext';
 import type { Activity } from '@memo/domain';
@@ -26,7 +25,6 @@ interface ActivityDetailsModalProps {
 
 export function ActivityDetailsModal({ isOpen, onClose, activity, mode }: ActivityDetailsModalProps) {
   const { services, servicesRaw, updateActivity, deleteActivity } = useSchedule();
-  const { clients } = useRecords();
   const { clients: clientsList } = useClients();
   const { showToast } = useUI();
 
@@ -73,11 +71,31 @@ export function ActivityDetailsModal({ isOpen, onClose, activity, mode }: Activi
     return map;
   }, [clientsList]);
 
+  // GH #213 §6.6 (R3): client resolution for the ACTIVE record, re-homed off
+  // RecordsContext. Precedence preserved: useClients() paged map FIRST, then
+  // per-id fallback (key shared with ClientQuickCard — TanStack dedupes).
+  const activeRecord = useMemo(
+    () => (activeRecordId ? activityRecords.find((r) => r.id === activeRecordId) : undefined),
+    [activityRecords, activeRecordId],
+  );
+  const { data: fallbackClient = null } = useQuery({
+    queryKey: ['client', activeRecord?.client_id ?? ''],
+    queryFn: () => getClientById(activeRecord!.client_id!),
+    enabled: !!activeRecord?.client_id,
+  });
+  const activeClient =
+    (activeRecord ? clientsWithStats.get(activeRecord.client_id ?? '') : undefined) ??
+    fallbackClient;
+
   // Build tabs: settings + client tabs
   const tabs: Tab[] = useMemo(() => {
     const settingsTab: Tab = { id: 'settings', label: 'Настройка' };
     const clientTabs: Tab[] = activityRecords.map((record) => {
-    const client = clientsWithStats.get(record.client_id ?? '') ?? clients.get(record.client_id ?? '');
+      const client =
+        clientsWithStats.get(record.client_id ?? '') ??
+        (record.client_id && record.client_id === activeRecord?.client_id
+          ? fallbackClient ?? undefined
+          : undefined);
       const name = client?.name?.trim();
       const phone = client?.phone?.trim();
       const totalSeats = record.visits.length + (record.anonym_visits ?? 0);
@@ -124,7 +142,7 @@ export function ActivityDetailsModal({ isOpen, onClose, activity, mode }: Activi
       };
     });
     return [settingsTab, ...clientTabs];
-  }, [activityRecords, clients]);
+  }, [activityRecords, clientsWithStats, activeRecord?.client_id, fallbackClient]);
 
   // Delete activity handler
   const handleDeleteActivity = useCallback(() => {
@@ -198,7 +216,9 @@ export function ActivityDetailsModal({ isOpen, onClose, activity, mode }: Activi
     const record = activityRecords.find((r) => r.id === recordId);
     if (!record) return null;
 
-    const client = clients.get(record.client_id ?? '');
+    // GH #213 §6.6: same precedence chain as the tab labels — paged map
+    // first, per-id fallback second (activeRecord === record here).
+    const client = activeClient ?? undefined;
 
     return (
       <ClientTab

@@ -3,12 +3,7 @@ import { render, screen, fireEvent, waitFor, within } from '@testing-library/rea
 import React from 'react';
 import type { RecordsContextType } from '../contexts/RecordsContext';
 import type {
-  RecordResponse,
-  ClientWithStats,
-  ActivityResponse,
-  ServiceResponse,
-  MasterResponse,
-  LocationResponse,
+  RecordView,
   PaymentResponse,
   DependencyNode,
 } from '@memo/api-client';
@@ -17,83 +12,10 @@ import { createMockRecordsContext } from './helpers/mockContexts';
 
 // ─── Mock data ──────────────────────────────────────────────────────────────
 
-const mockClient: ClientWithStats = {
-  id: 'client-1',
-  name: 'Анна Смирнова',
-  phone: '+7 900 111-22-33',
-  email: null,
-  channel: 'phone',
-  created_at: '2024-01-01T00:00:00Z',
-  updated_at: '2024-01-01T00:00:00Z',
-  archived: false,
-  records_count: 5,
-  last_record: '2024-06-15',
-  total_paid: 2500,
-  missed_records: 0,
-};
-
-const mockActivity: ActivityResponse = {
-  id: 'act-1',
-  master_id: 'master-1',
-  service_id: 'svc-1',
-  location_id: 'loc-1',
-  start: '2024-06-15T10:00:00Z',
-  duration: 120,
-  capacity: 8,
-  is_private: false,
-  comment: null,
-  record_info: null,
-  created_at: '2024-06-15T10:00:00Z',
-  updated_at: '2024-06-15T10:00:00Z',
-  occupied: 2,
-};
-
-const mockService: ServiceResponse = {
-  id: 'svc-1',
-  title: 'Рисование акварелью',
-  description: 'Мастер-класс',
-  image_url: '',
-  specialty: 'art',
-  min_age: 6,
-  max_age: 99,
-  duration: 120,
-  record_info: '',
-  tariffs: [{ id: 't-1', service_id: 'svc-1', title: 'Стандарт', description: null, price: 2500 }],
-  tags: [],
-  archived: false,
-  created_at: '2024-01-01T00:00:00Z',
-  updated_at: '2024-01-01T00:00:00Z',
-};
-
-const mockMaster: MasterResponse = {
-  id: 'master-1',
-  first_name: 'Мария',
-  last_name: 'Иванова',
-  color: '#E74C3C',
-  position: 'artist',
-  specialty: 'art',
-  avatar_url: null,
-  archived: false,
-  created_at: '2024-01-01T00:00:00Z',
-  updated_at: '2024-01-01T00:00:00Z',
-};
-
-const mockLocation: LocationResponse = {
-  id: 'loc-1',
-  name: 'Студия на Арбате',
-  address: null,
-  description: null,
-  capacity: 12,
-  yandex_map_url: null,
-  review_url: null,
-  record_info: null,
-  image_url: null,
-  archived: false,
-  created_at: '2024-01-01T00:00:00Z',
-  updated_at: '2024-01-01T00:00:00Z',
-};
-
-const mockRecord: RecordResponse = {
+// GH #213 Task 7: the table + detail panel read ONLY the denormalized row
+// fields (RecordView). The lookup maps stay EMPTY on purpose — any accidental
+// map read would render «—» and fail these tests.
+const mockRecord: RecordView = {
   id: 'rec-1',
   activity_id: 'act-1',
   client_id: 'client-1',
@@ -116,6 +38,14 @@ const mockRecord: RecordResponse = {
       updated_at: '2024-06-15T10:00:00Z',
     },
   ],
+  client_name: 'Анна Смирнова',
+  activity_start: '2024-06-15T10:00:00Z',
+  service_title: 'Рисование акварелью',
+  master_name: 'Иванова Мария',
+  location_name: 'Студия на Арбате',
+  master_color: '#E74C3C',
+  is_private: false,
+  paid: 2500,
 };
 
 // ─── Records delete dry-run dependency tree (mirrors backend FK_MATRIX
@@ -132,12 +62,6 @@ const DEPS_RECORD: DependencyNode[] = [
 
 const baseOverrides: Partial<RecordsContextType> = {
   records: [mockRecord],
-  clients: new Map([['client-1', mockClient]]),
-  payments: new Map([['rec-1', 2500]]),
-  activities: new Map([['act-1', mockActivity]]),
-  masters: new Map([['master-1', mockMaster]]),
-  services: new Map([['svc-1', mockService]]),
-  locations: new Map([['loc-1', mockLocation]]),
 };
 
 let mockContextValue: RecordsContextType;
@@ -214,23 +138,26 @@ describe('RecordsTable', () => {
     vi.restoreAllMocks();
   });
 
-  it('renders client name from context', () => {
+  // ─── Row-field cell rendering (GH #213 Task 7 — no lookup maps) ─────────
+
+  it('renders client name from the row client_name', () => {
     renderTable();
     expect(screen.getByText('Анна Смирнова')).toBeTruthy();
   });
 
-  it('renders service title from context', () => {
+  it('renders service title from the row service_title', () => {
     renderTable();
     expect(screen.getByText('Рисование акварелью')).toBeTruthy();
   });
 
-  it('renders master color dot', () => {
+  it('renders master color dot with the row master_name tooltip', () => {
     const { container } = renderTable();
-    const dot = container.querySelector('[title="Иванова Мария"]');
+    const dot = container.querySelector('[title="Иванова Мария"]') as HTMLElement;
     expect(dot).toBeTruthy();
+    expect(dot.style.backgroundColor).toBe('rgb(231, 76, 60)');
   });
 
-  it('renders location name from context', () => {
+  it('renders location name from the row location_name', () => {
     renderTable();
     expect(screen.getByText('Студия на Арбате')).toBeTruthy();
   });
@@ -240,14 +167,19 @@ describe('RecordsTable', () => {
     expect(screen.getByText('2 500₽')).toBeTruthy();
   });
 
-  it('shows payment status when fully paid', () => {
+  it('shows «✓ Оплачено» when row.paid covers the visits total', () => {
     renderTable();
     expect(screen.getByText('✓ Оплачено')).toBeTruthy();
   });
 
-  it('record with no entry in totals map renders Не оплачено', () => {
-    renderTable({ payments: new Map() });
+  it('shows «Не оплачено» when row.paid is 0', () => {
+    renderTable({ records: [{ ...mockRecord, paid: 0 }] });
     expect(screen.getByText('Не оплачено')).toBeTruthy();
+  });
+
+  it('shows «Частично (N₽)» when 0 < row.paid < total', () => {
+    renderTable({ records: [{ ...mockRecord, paid: 1000 }] });
+    expect(screen.getByText('Частично (1 000₽)')).toBeTruthy();
   });
 
   it('shows the unified «Нет записей» empty state (Addendum 12)', () => {
@@ -256,48 +188,30 @@ describe('RecordsTable', () => {
     expect(screen.queryByText('Записи не найдены')).not.toBeInTheDocument();
   });
 
-  it('renders client name from client_id lookup', () => {
-    // Record with known client_id should show client name
-    renderTable();
-    expect(screen.getByText('Анна Смирнова')).toBeTruthy();
-  });
-
-  it('shows dash when record has no client_id', () => {
-    // Record without client_id should show '—' as fallback
-    const recordNoClient: RecordResponse = {
+  it('shows dash when the row client_name is null (anonymous record)', () => {
+    const recordNoClient: RecordView = {
       ...mockRecord,
       id: 'rec-no-client',
       client_id: null,
+      client_name: null,
     };
     renderTable({ records: [recordNoClient] });
-    // The client column should show '—' (em dash) when client_id is null
+    // The client column renders '—' from row.client_name ?? '—'
     const clientCells = screen.getAllByText('—');
     expect(clientCells.length).toBeGreaterThanOrEqual(1);
   });
 
-  it('shows dash when client_id not found in clients map', () => {
-    // Record with client_id that doesn't exist in the clients map
-    const recordUnknownClient: RecordResponse = {
-      ...mockRecord,
-      id: 'rec-unknown-client',
-      client_id: 'nonexistent-client',
-    };
-    renderTable({ records: [recordUnknownClient] });
-    // Should show '—' when client is not in the map
-    const clientCells = screen.getAllByText('—');
-    expect(clientCells.length).toBeGreaterThanOrEqual(1);
-  });
-
-  it('renders multiple records with mixed client_id presence', () => {
-    const recordNoClient: RecordResponse = {
+  it('renders multiple records with mixed client_name presence', () => {
+    const recordNoClient: RecordView = {
       ...mockRecord,
       id: 'rec-no-client',
       client_id: null,
+      client_name: null,
     };
     renderTable({ records: [mockRecord, recordNoClient] });
     // Should show the known client name
     expect(screen.getByText('Анна Смирнова')).toBeTruthy();
-    // Should show dash for the record without client_id
+    // Should show dash for the record without client_name
     const clientCells = screen.getAllByText('—');
     expect(clientCells.length).toBeGreaterThanOrEqual(1);
   });
@@ -337,7 +251,26 @@ describe('RecordsTable', () => {
     expect(setPerPage).toHaveBeenCalledWith(50);
   });
 
-  // ─── Detail panel payments (per-payment list via useRecordData) ──────────
+  // ─── Detail panel (reads the selected RecordView row — spec §6.3) ────────
+
+  it('detail panel shows client/service/master/location from the row fields', () => {
+    renderTable();
+    fireEvent.click(screen.getByText('Анна Смирнова').closest('tr')!);
+    expect(screen.getByText('Детали записи')).toBeInTheDocument();
+    // Client name + service title also live in the table cells → getAllByText.
+    expect(screen.getAllByText('Анна Смирнова').length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText('Рисование акварелью').length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText('Иванова Мария')).toBeInTheDocument();
+    expect(screen.getAllByText('Студия на Арбате').length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('detail panel service title carries the DiamondIcon for private rows', () => {
+    renderTable({ records: [{ ...mockRecord, is_private: true }] });
+    fireEvent.click(screen.getByText('Анна Смирнова').closest('tr')!);
+    expect(screen.getByText('Детали записи')).toBeInTheDocument();
+    // Table service cell + detail panel (spec §11: table + detail coverage).
+    expect(screen.getAllByLabelText('Индивидуальное занятие')).toHaveLength(2);
+  });
 
   it('detail panel lists payments with amount and method', () => {
     renderTable();
@@ -424,15 +357,17 @@ describe('RecordsTable', () => {
     expect(mockDeleteMutation.mutateAsync).toHaveBeenCalledWith('rec-1');
   });
 
-  it('409 dry-run conflict opens DeleteDialog with the dependency tree', async () => {
+  it('409 dry-run conflict opens DeleteDialog labelled from row.activity_start', async () => {
     setupDeleteConflict();
     renderTable();
     fireEvent.click(screen.getByLabelText(/Действия/));
     fireEvent.click(screen.getByRole('menuitem', { name: 'Удалить' }));
 
     await waitFor(() => expect(screen.getByTestId('delete-dialog')).toBeInTheDocument());
-    // Title words the entity: "Удаление «записи …»".
-    expect(screen.getByTestId('delete-dialog-title').textContent).toContain('записи');
+    // Title words the entity from formatRecordLabel(deleteTarget.record.activity_start):
+    // activity_start 2024-06-15T10:00Z → «15 июня · 10:00».
+    const title = screen.getByTestId('delete-dialog-title').textContent ?? '';
+    expect(title).toContain('записи 15 июня · 10:00');
     // User-visible dependents (visits/payments) render as choice rows; the
     // auto join-table dep renders as an auto row — both carry dep-<entity>.
     expect(screen.getByTestId('dep-visits')).toBeInTheDocument();

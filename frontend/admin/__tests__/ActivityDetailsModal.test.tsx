@@ -1,11 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act, within } from '@testing-library/react';
 import React from 'react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ActivityDetailsModal } from '../app/components/modal/ActivityDetailsModal/ActivityDetailsModal';
 import { TabNav } from '../app/components/modal/ActivityDetailsModal/TabNav';
 import { SettingsTab } from '../app/components/modal/ActivityDetailsModal/SettingsTab';
 import { ClientTab } from '../app/components/modal/ActivityDetailsModal/ClientTab';
 import { NewBookingTab } from '../app/components/modal/ActivityDetailsModal/NewBookingTab';
+import { ClientsProvider } from '../contexts/ClientsContext';
 
 // ─── Shared mock data & context factories ────────────────────────────────
 
@@ -18,13 +20,11 @@ import {
   mockClientWithStats,
   mockRecord,
   mockVisitor,
-  mockPayment,
   mockTariffs,
 } from './helpers/mockData';
 
 import {
   createMockScheduleContext,
-  createMockRecordsContext,
   createMockUIContext,
   createMockClientsContext,
 } from './helpers/mockContexts';
@@ -42,6 +42,8 @@ vi.mock('@memo/api-client', () => ({
   deletePayment: vi.fn(),
   updateVisitStatus: vi.fn(),
   getRecords: vi.fn(),
+  getClients: vi.fn(),
+  getClientById: vi.fn(),
 }));
 
 import {
@@ -54,16 +56,19 @@ import {
   deletePayment,
   updateVisitStatus,
   getRecords,
+  getClients,
+  getClientById,
 } from '@memo/api-client';
+import type { RecordView } from '@memo/api-client';
 
 // ─── Context Mocks ──────────────────────────────────────────────────────────
 
+// GH #213 §6.6 (R3): NO RecordsContext mock — the modal renders without any
+// RecordsProvider. `useRecords()` throws outside its provider, so a stray
+// dependency on it fails every test here.
+
 vi.mock('@/contexts/ScheduleContext', () => ({
   useSchedule: vi.fn(),
-}));
-
-vi.mock('@/contexts/RecordsContext', () => ({
-  useRecords: vi.fn(),
 }));
 
 vi.mock('@/contexts/UIContext', () => ({
@@ -72,6 +77,7 @@ vi.mock('@/contexts/UIContext', () => ({
 
 vi.mock('@/contexts/ClientsContext', () => ({
   useClients: vi.fn(),
+  ClientsProvider: ({ children }: { children: React.ReactNode }) => children,
 }));
 
 vi.mock('@/contexts/PendingActionsContext', () => ({
@@ -112,6 +118,7 @@ vi.mock('@tanstack/react-query', () => ({
     data: undefined,
     isLoading: false,
   })),
+  QueryClientProvider: ({ children }: { children: React.ReactNode }) => children,
 }));
 
 vi.mock('next/navigation', () => ({
@@ -125,14 +132,12 @@ vi.mock('next/navigation', () => ({
 }));
 
 import { useSchedule } from '@/contexts/ScheduleContext';
-import { useRecords } from '@/contexts/RecordsContext';
 import { useUI } from '@/contexts/UIContext';
 import { useClients } from '@/contexts/ClientsContext';
 import { useRecordData } from '@/hooks/useRecordData';
 import { useQuery } from '@tanstack/react-query';
 
 const mockUseSchedule = vi.mocked(useSchedule);
-const mockUseRecords = vi.mocked(useRecords);
 const mockUseUI = vi.mocked(useUI);
 const mockUseClients = vi.mocked(useClients);
 const mockUseQuery = vi.mocked(useQuery);
@@ -140,11 +145,20 @@ const mockUseQuery = vi.mocked(useQuery);
 // Helper: make the mocked useQuery serve the per-activity records query (#191).
 // Context `records` is now one server page, so the modal must get the activity's
 // bookings from its own ['records', 'activity', activityId] query instead.
-function stubActivityRecordsQuery(records: unknown[]) {
+// GH #213 §6.6: the same stub also serves the per-id client fallback query
+// ['client', clientId] (paged-map hit wins BEFORE the fallback resolves).
+function stubActivityRecordsQuery(
+  records: unknown[],
+  clientsById?: Map<string, unknown>,
+) {
   mockUseQuery.mockImplementation((opts: unknown) => {
     const key = (opts as { queryKey: unknown }).queryKey;
     if (Array.isArray(key) && key[0] === 'records' && key[1] === 'activity') {
       return { data: records, isLoading: false } as never;
+    }
+    if (Array.isArray(key) && key[0] === 'client') {
+      const resolved = clientsById?.get(String(key[1]));
+      return { data: resolved, isLoading: false, isPending: false } as never;
     }
     return { data: undefined, isLoading: false } as never;
   });
@@ -156,7 +170,6 @@ function resetActivityRecordsQuery() {
 
 beforeEach(() => {
   mockUseSchedule.mockReturnValue(createMockScheduleContext());
-  mockUseRecords.mockReturnValue(createMockRecordsContext());
   mockUseUI.mockReturnValue(createMockUIContext());
   mockUseClients.mockReturnValue(createMockClientsContext());
 });
@@ -431,15 +444,20 @@ describe('ActivityDetailsModal', () => {
 // ─── ActivityDetailsModal: API Call Tests ────────────────────────────────────
 
 describe('ActivityDetailsModal — API integration', () => {
-  const mockRecords = [mockRecord];
-
-  const mockClientMap = new Map([
-    ['c1', mockClientWithStats],
-  ]);
-
-  const mockVisitorsMap = new Map([
-    ['r1', [mockVisitor]],
-  ]);
+  // GH #213 Task 6: context records are RecordView rows — widen the shared
+  // mock for the context override (display fields unused by this modal).
+  const mockRecordView: RecordView = {
+    ...mockRecord,
+    client_name: 'Анна Иванова',
+    activity_start: '2026-05-10T10:00:00',
+    service_title: 'Йога',
+    master_name: 'Иванова Мария',
+    location_name: 'Студия 1',
+    master_color: null,
+    is_private: false,
+    paid: 0,
+  };
+  const mockRecords = [mockRecordView];
 
   beforeEach(() => {
     vi.mocked(createRecord).mockResolvedValue({ id: 'r_new', activity_id: 'ev_1', client_id: 'c1', status: 'pending', seats: 1, anonym_visits: 0, comment: null, custom_price: null, created_at: '', updated_at: '', visits: [] });
@@ -448,7 +466,11 @@ describe('ActivityDetailsModal — API integration', () => {
     vi.mocked(deleteRecord).mockResolvedValue(undefined);
     vi.mocked(createPayment).mockResolvedValue({ id: 'p1', record_id: 'r1', amount: 1000, method: 'card', created_at: '', updated_at: '' });
     vi.mocked(getClientByPhone).mockRejectedValue(new Error('Not found'));
-    // #191: booking tabs come from the activity-records query, not context records
+    // #191: booking tabs come from the activity-records query, not context records.
+    // GH #213 §6.6: client c1 resolves via the useClients() paged map.
+    mockUseClients.mockReturnValue(
+      createMockClientsContext({ clients: [mockClientWithStats] }),
+    );
     stubActivityRecordsQuery(mockRecords);
   });
 
@@ -458,13 +480,6 @@ describe('ActivityDetailsModal — API integration', () => {
   });
 
   it('passes actual visitors to ClientTab (not empty array)', () => {
-    mockUseRecords.mockReturnValue({
-      ...createMockRecordsContext(),
-      records: mockRecords,
-      clients: mockClientMap,
-      payments: new Map([['r1', 0]]),
-    });
-
     render(
       <ActivityDetailsModal isOpen={true} onClose={vi.fn()} activity={mockActivity} mode="edit" />,
     );
@@ -479,13 +494,6 @@ describe('ActivityDetailsModal — API integration', () => {
   });
 
   it('passes visitors from records context to ClientTab', () => {
-    mockUseRecords.mockReturnValue({
-      ...createMockRecordsContext(),
-      records: mockRecords,
-      clients: mockClientMap,
-      payments: new Map([['r1', 0]]),
-    });
-
     render(
       <ActivityDetailsModal isOpen={true} onClose={vi.fn()} activity={mockActivity} mode="edit" />,
     );
@@ -499,13 +507,131 @@ describe('ActivityDetailsModal — API integration', () => {
   });
 });
 
+// ─── GH #213 §6.6: client resolution re-homed off RecordsContext ────────────
+// Precedence preserved: useClients() paged map FIRST, per-id getClientById
+// query as fallback (key shared with ClientQuickCard — TanStack dedupes).
+// The fallback hook tracks the ACTIVE tab's record, so fallback-path tests
+// click the booking tab first.
+
+describe('ActivityDetailsModal — client resolution without RecordsContext (#213)', () => {
+  afterEach(() => {
+    resetActivityRecordsQuery();
+    vi.clearAllMocks();
+  });
+
+  it('resolves the tab label from the useClients() paged map (first source)', () => {
+    mockUseClients.mockReturnValue(
+      createMockClientsContext({ clients: [mockClientWithStats] }),
+    );
+    stubActivityRecordsQuery([mockRecord]);
+
+    render(
+      <ActivityDetailsModal isOpen={true} onClose={vi.fn()} activity={mockActivity} mode="edit" />,
+    );
+
+    // Paged map carries c1 → tab label renders the client name without
+    // any fallback data being resolved
+    expect(screen.getByText('Анна Иванова')).toBeInTheDocument();
+  });
+
+  it('falls back to the per-id client query when the paged map misses', () => {
+    mockUseClients.mockReturnValue(createMockClientsContext()); // paged map empty
+    // Fallback resolves the by-id client (same precedence as the old map chain)
+    stubActivityRecordsQuery([mockRecord], new Map([['c1', mockClient]]));
+
+    render(
+      <ActivityDetailsModal isOpen={true} onClose={vi.fn()} activity={mockActivity} mode="edit" />,
+    );
+
+    // No paged-map hit and no active record yet → placeholder label
+    expect(screen.getByText('Без контакта')).toBeInTheDocument();
+
+    // Activate the booking tab → per-id fallback resolves → name appears
+    fireEvent.click(screen.getByText('Без контакта'));
+    expect(screen.getByText('Анна Иванова')).toBeInTheDocument();
+    expect(screen.getByTestId('client-tab')).toBeInTheDocument();
+  });
+
+  it('registers the by-id fallback query with the canonical key and gate', async () => {
+    mockUseClients.mockReturnValue(createMockClientsContext());
+    stubActivityRecordsQuery([mockRecord], new Map([['c1', mockClient]]));
+
+    render(
+      <ActivityDetailsModal isOpen={true} onClose={vi.fn()} activity={mockActivity} mode="edit" />,
+    );
+    fireEvent.click(screen.getByText('Без контакта'));
+
+    // After activation the fallback tracks the active record (the initial
+    // settings-tab render registers ['client', ''] — find the c1 call)
+    const clientQuery = mockUseQuery.mock.calls
+      .map(([opts]) => opts as { queryKey: unknown; enabled?: boolean; queryFn?: () => Promise<unknown> })
+      .find((o) => Array.isArray(o.queryKey) && (o.queryKey as unknown[])[1] === 'c1');
+
+    expect(clientQuery).toBeDefined();
+    expect(clientQuery!.queryKey).toEqual(['client', 'c1']);
+    expect(clientQuery!.enabled).toBe(true);
+    await clientQuery!.queryFn!();
+    expect(getClientById).toHaveBeenCalledWith('c1');
+  });
+
+  it('keeps the fallback disabled for anonymous records (no client_id)', () => {
+    mockUseClients.mockReturnValue(createMockClientsContext());
+    const anonymousRecord = { ...mockRecord, id: 'r2', client_id: null };
+    stubActivityRecordsQuery([anonymousRecord]);
+
+    render(
+      <ActivityDetailsModal isOpen={true} onClose={vi.fn()} activity={mockActivity} mode="edit" />,
+    );
+
+    // Anonymous booking renders the "no contact" placeholder label
+    expect(screen.getByText('Без контакта')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('Без контакта'));
+
+    // No enabled ['client', id] query — client_id is null
+    const clientQueries = mockUseQuery.mock.calls
+      .map(([opts]) => opts as { queryKey: unknown; enabled?: boolean })
+      .filter((o) => Array.isArray(o.queryKey) && (o.queryKey as unknown[])[0] === 'client');
+    for (const q of clientQueries) {
+      expect(q.enabled).toBe(false);
+    }
+    expect(screen.getByText('Без контакта')).toBeInTheDocument();
+  });
+
+  it('passes the resolved client to ClientTab — stats populated on a paged-map hit', () => {
+    // Paged-map hit: ClientWithStats carries records_count → stats cells populated
+    mockUseClients.mockReturnValue(
+      createMockClientsContext({ clients: [mockClientWithStats] }),
+    );
+    stubActivityRecordsQuery([mockRecord]);
+
+    render(
+      <ActivityDetailsModal isOpen={true} onClose={vi.fn()} activity={mockActivity} mode="edit" />,
+    );
+    fireEvent.click(screen.getByText('Анна Иванова'));
+    expect(screen.getByTestId('client-tab')).toBeInTheDocument();
+    const stats = screen.getByTestId('client-statistics');
+    expect(within(stats).getByText('5')).toBeInTheDocument(); // records_count
+  });
+
+  it('renders ClientTab with empty stats when the client comes from the by-id fallback', () => {
+    // Fallback path: getClientById returns a plain ClientResponse (no stats)
+    mockUseClients.mockReturnValue(createMockClientsContext());
+    stubActivityRecordsQuery([mockRecord], new Map([['c1', mockClient]]));
+
+    render(
+      <ActivityDetailsModal isOpen={true} onClose={vi.fn()} activity={mockActivity} mode="edit" />,
+    );
+    fireEvent.click(screen.getByText('Без контакта'));
+    expect(screen.getByTestId('client-tab')).toBeInTheDocument();
+    const stats = screen.getByTestId('client-statistics');
+    expect(within(stats).queryByText('5')).not.toBeInTheDocument();
+    expect(within(stats).getAllByText('—').length).toBeGreaterThan(0);
+  });
+});
+
 // ─── ActivityDetailsModal: dedicated activity-records query (#191) ───────────
 
 describe('ActivityDetailsModal — dedicated activity-records query (#191)', () => {
-  const mockClientMap = new Map([
-    ['c1', mockClientWithStats],
-  ]);
-
   beforeEach(() => {
     vi.mocked(getRecords).mockResolvedValue({
       items: [mockRecord],
@@ -515,12 +641,11 @@ describe('ActivityDetailsModal — dedicated activity-records query (#191)', () 
       pages: 1,
     } as never);
     // Context records is ONE server page — deliberately EMPTY to prove the modal
-    // no longer builds booking tabs from it
-    mockUseRecords.mockReturnValue({
-      ...createMockRecordsContext(),
-      records: [],
-      clients: mockClientMap,
-    });
+    // no longer builds booking tabs from it. GH #213 §6.6: the client for c1
+    // now comes from the useClients() paged map, not RecordsContext.
+    mockUseClients.mockReturnValue(
+      createMockClientsContext({ clients: [mockClientWithStats] }),
+    );
     stubActivityRecordsQuery([mockRecord]);
   });
 

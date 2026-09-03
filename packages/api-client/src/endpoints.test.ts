@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { z } from 'zod';
-import { getMasters, getMaster, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, deleteActivity, getWebPhotos, getPhotos, getClientsPaged, getRecords, getClients, getPayments, getPaymentTotals, createRecord, updateRecord, deleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, getClientByPhone, updateVisitStatus, getTags, createService, updateService, deleteService, createLocation, updateLocation, deleteLocation, getClientsWithStats, updateClient, patchClient, reorderMasters, reorderLocations, patchMaster, patchLocation, patchMaterial, patchService, patchUserSettings, getMaterials, getTag, getVisitors, deleteMaster, deleteMaterial, deleteClient, archiveMaster, restoreMaster, resolveDeleteMaster, archiveLocation, restoreLocation, resolveDeleteLocation, archiveService, restoreService, resolveDeleteService, archiveMaterial, restoreMaterial, resolveDeleteMaterial, archiveClient, restoreClient, resolveDeleteClient, resolveDeleteRecord, getAllMasters, getAllLocations, getAllServices, getAllMaterials, getAllTags } from './endpoints';
-import { ServiceCreateSchema, LocationCreateSchema, ActivityResponseSchema, PhotoListResponseSchema, ClientListResponseSchema, type ServiceUpdate, type LocationUpdate, type ClientUpdate } from './schemas';
+import { getMasters, getMaster, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, deleteActivity, getWebPhotos, getPhotos, getClientsPaged, getRecords, getRecordsView, getClients, getClientById, getPayments, getPaymentTotals, createRecord, updateRecord, deleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, getClientByPhone, updateVisitStatus, getTags, createService, updateService, deleteService, createLocation, updateLocation, deleteLocation, getClientsWithStats, updateClient, patchClient, reorderMasters, reorderLocations, patchMaster, patchLocation, patchMaterial, patchService, patchUserSettings, getMaterials, getTag, getVisitors, deleteMaster, deleteMaterial, deleteClient, archiveMaster, restoreMaster, resolveDeleteMaster, archiveLocation, restoreLocation, resolveDeleteLocation, archiveService, restoreService, resolveDeleteService, archiveMaterial, restoreMaterial, resolveDeleteMaterial, archiveClient, restoreClient, resolveDeleteClient, resolveDeleteRecord, getAllMasters, getAllLocations, getAllServices, getAllMaterials, getAllTags } from './endpoints';
+import { ServiceCreateSchema, LocationCreateSchema, ActivityResponseSchema, PhotoListResponseSchema, ClientListResponseSchema, ClientResponseSchema, RecordViewListResponseSchema, type ServiceUpdate, type LocationUpdate, type ClientUpdate } from './schemas';
 
 // Mock the api function from client
 vi.mock('./client', () => ({
@@ -400,6 +400,60 @@ describe('getRecords', () => {
   });
 });
 
+// ─── Records view (GH #213: composite read endpoint for the records table) ──
+
+describe('getRecordsView', () => {
+  it('calls /api/v1/records/view without params', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
+    await getRecordsView();
+    expect(api).toHaveBeenCalledWith('/api/v1/records/view', expect.anything());
+  });
+
+  it('calls /api/v1/records/view with date_from and date_to params', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
+    await getRecordsView({ date_from: '2024-01-01', date_to: '2024-01-07' });
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/records/view?date_from=2024-01-01&date_to=2024-01-07',
+      expect.anything(),
+    );
+  });
+
+  it('sends all filter, sort and pagination params (parity with getRecords)', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
+    await getRecordsView({
+      date_from: '2026-08-03',
+      date_to: '2026-08-09',
+      client_id: 'c-1',
+      activity_id: 'a-1',
+      location_id: 'l-1',
+      service_id: 's-1',
+      master_id: 'm-1',
+      status: 'waiting',
+      q: 'иван',
+      sort_by: 'payment',
+      sort_order: 'desc',
+      page: 2,
+      per_page: 50,
+    });
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/records/view?date_from=2026-08-03&date_to=2026-08-09&client_id=c-1&activity_id=a-1&location_id=l-1&service_id=s-1&master_id=m-1&status=waiting&q=%D0%B8%D0%B2%D0%B0%D0%BD&sort_by=payment&sort_order=desc&page=2&per_page=50',
+      expect.anything(),
+    );
+  });
+
+  it('omits empty/undefined params from the URL', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
+    await getRecordsView({ page: 1, per_page: 10, status: undefined, location_id: undefined });
+    expect(api).toHaveBeenCalledWith('/api/v1/records/view?page=1&per_page=10', expect.anything());
+  });
+
+  it('parses the response with the paginated RecordView schema', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
+    await getRecordsView();
+    expect(api).toHaveBeenCalledWith('/api/v1/records/view', RecordViewListResponseSchema);
+  });
+});
+
 // ─── Clients ────────────────────────────────────────────────────────────────
 
 describe('getClients', () => {
@@ -780,6 +834,31 @@ describe('getClientByPhone', () => {
     expect(err.status).toBe(404);
     expect(err.code).toBe('CLIENT_NOT_FOUND');
     expect(err.message).toBe('Client not found');
+  });
+});
+
+// ─── Client By ID (GH #213: per-id fetch for ClientQuickCard/modals) ────────
+
+describe('getClientById', () => {
+  it('calls GET /api/v1/clients/:id with the canonical client schema', async () => {
+    vi.mocked(api).mockResolvedValue({ id: 'c-1', name: 'Иван Петров' });
+    const result = await getClientById('c-1');
+    expect(api).toHaveBeenCalledWith('/api/v1/clients/c-1', ClientResponseSchema);
+    expect(result).toEqual({ id: 'c-1', name: 'Иван Петров' });
+  });
+
+  it('propagates 404 as ApiError (CLIENT_NOT_FOUND)', async () => {
+    vi.mocked(api).mockRejectedValue(
+      new ApiError(404, 'Client not found', 'CLIENT_NOT_FOUND'),
+    );
+    let caught: unknown;
+    try {
+      await getClientById('missing-id');
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(ApiError);
+    expect((caught as ApiError).status).toBe(404);
   });
 });
 

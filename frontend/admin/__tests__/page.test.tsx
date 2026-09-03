@@ -16,8 +16,16 @@ vi.mock('@memo/api-client', () => {
   createActivity: vi.fn(),
   updateActivity: vi.fn(),
   deleteActivity: vi.fn(),
+  // GH #213 §6.6: schedule-page spies — the RecordsProvider removal means the
+  // records-context queries must never fire on /schedule (api-client is NOT
+  // mocked for RecordsContext, so a stray provider would hit the network).
+  getRecordsView: vi.fn(),
+  getClients: vi.fn(),
+  getPaymentTotals: vi.fn(),
   });
 });
+
+import { getRecordsView, getClients, getPaymentTotals } from '@memo/api-client';
 
 // usePathname is used by Sidebar (not by page itself, but shared context may trigger it)
 vi.mock('next/navigation', () => ({
@@ -42,9 +50,23 @@ function renderPage() {
 }
 
 describe('Schedule Page', () => {
+  beforeEach(() => {
+    vi.mocked(getRecordsView).mockClear();
+    vi.mocked(getClients).mockClear();
+    vi.mocked(getPaymentTotals).mockClear();
+  });
+
   it('shows loading state initially, then empty state when no activities for the week', async () => {
     renderPage();
     // Initially loading, then transitions to empty state when query resolves
     expect(await screen.findByText('Нет занятий на эту неделю')).toBeInTheDocument();
+  });
+
+  it('does not mount RecordsProvider — zero records-context queries fire (GH #213 §6.6)', async () => {
+    renderPage();
+    expect(await screen.findByText('Нет занятий на эту неделю')).toBeInTheDocument();
+    expect(getRecordsView).not.toHaveBeenCalled();
+    expect(getClients).not.toHaveBeenCalled();
+    expect(getPaymentTotals).not.toHaveBeenCalled();
   });
 });

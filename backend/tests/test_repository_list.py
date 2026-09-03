@@ -5,7 +5,10 @@ Covers the repo-owned paginated list API:
   - BaseRepository.list / ArchiveRepository.list: q + search_fields (GH #212) —
     substring narrowing, AND with filters/status, uuid-by-id match, ValueError
     guard, q-absent no-op
-  - BaseRepository.list_custom: caller-built stmt + count/slice wrapper
+  - BaseRepository.list_custom: row-tuple core — multi-column selects return
+    Row tuples carrying every declared column (GH #213)
+  - BaseRepository.list_entity: entity-only wrapper — TypeVar-enforced, returns
+    ORM instances (GH #213); a multi-column select is a mypy [arg-type] error
   - selectinload options don't break the count subquery
   - correlated scalar-subquery order key doesn't break the count
 
@@ -14,10 +17,14 @@ No HTTP layer — drives repositories directly via the ``db_session`` fixture.
 
 from __future__ import annotations
 
+import subprocess
+import sys
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 from sqlalchemy import func, select
+from sqlalchemy.engine import Row
 from sqlalchemy.orm import selectinload
 
 from src.models.activity import Activity
@@ -144,7 +151,7 @@ async def test_list_custom_count_excludes_order_by(db_session) -> None:
     repo = get_base_repository()
 
     # Case A: simple order_by + limit slice.
-    rows, total = await repo.list_custom(
+    rows, total = await repo.list_entity(
         db_session, select(Master), order_by=[Master.first_name], limit=2, offset=0
     )
     assert total == 3
@@ -181,7 +188,7 @@ async def test_list_custom_count_excludes_order_by(db_session) -> None:
         .correlate(Master)
         .scalar_subquery()
     )
-    rows2, total2 = await repo.list_custom(
+    rows2, total2 = await repo.list_entity(
         db_session, select(Master), order_by=[sub.desc()], limit=100
     )
     assert total2 == 3
@@ -196,11 +203,78 @@ async def test_list_custom_limit_offset(db_session) -> None:
         db_session.add(_master(first_name=f"X{i}"))
     await db_session.flush()
     repo = get_base_repository()
-    rows, total = await repo.list_custom(
+    rows, total = await repo.list_entity(
         db_session, select(Master), limit=1, offset=3
     )
     assert total == 4
     assert len(rows) == 1
+
+
+# ─── list_custom row-tuple core + list_entity wrapper (GH #213) ─────────────────
+
+
+async def test_list_custom_multi_column_returns_rows_with_both_columns(
+    db_session,
+) -> None:
+    """list_custom (row core) returns Row tuples carrying ALL declared columns."""
+    db_session.add(_master(first_name="Rowan", last_name="Smith"))
+    await db_session.flush()
+    repo = get_base_repository()
+    stmt = select(Master, Master.first_name.label("name"))
+    rows, total = await repo.list_custom(db_session, stmt)
+    assert total == 1
+    assert len(rows) == 1
+    row = rows[0]
+    assert isinstance(row, Row), f"expected Row tuple, got {type(row).__name__}"
+    assert isinstance(row[0], Master)
+    assert row[0].first_name == "Rowan"
+    assert row[1] == "Rowan"  # second declared column rides on the Row
+
+
+async def test_list_entity_returns_model_instances_and_total(db_session) -> None:
+    """list_entity takes an entity select and returns ORM instances + total."""
+    for name in ("E1", "E2"):
+        db_session.add(_master(first_name=name))
+    await db_session.flush()
+    repo = get_base_repository()
+    items, total = await repo.list_entity(
+        db_session, select(Master), order_by=[Master.first_name], limit=1
+    )
+    assert total == 2
+    assert len(items) == 1
+    assert isinstance(items[0], Master)
+    assert items[0].first_name == "E1"
+
+
+async def test_list_entity_rejects_multi_column_select_under_mypy() -> None:
+    """A Select[tuple[A, B]] passed to list_entity is a mypy [arg-type] error.
+
+    Runs mypy (repo config) over ``tests/_mypy_negative_list_entity.py`` —
+    a non-collected negative-case snippet with one valid and one invalid
+    ``list_entity`` call. Exactly one error is expected: the multi-column
+    call, code [arg-type] (TypeVar honesty, spec §5.1).
+    """
+    backend_root = Path(__file__).resolve().parents[1]
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "mypy",
+            # silent: followed src imports are checked but their (pre-existing)
+            # errors are suppressed — only the snippet's OWN errors count.
+            "--follow-imports=silent",
+            "tests/_mypy_negative_list_entity.py",
+        ],
+        cwd=backend_root,
+        capture_output=True,
+        text=True,
+    )
+    errors = [
+        line for line in proc.stdout.splitlines() if " error: " in line
+    ]
+    assert len(errors) == 1, f"expected exactly 1 error, got:\n{proc.stdout}"
+    assert "[arg-type]" in errors[0], errors[0]
+    assert "list_entity" in errors[0], errors[0]
 
 
 # ─── q / search_fields on list() (GH #212) ──────────────────────────────────────

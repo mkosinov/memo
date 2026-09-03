@@ -279,7 +279,10 @@ const TABLE_CONFIGS: PageTableConfig[] = [
     path: '/records',
     h1Text: 'Управление записями',
     navigate: waitForRecordsReady,
-    apiUrl: '/api/v1/records',
+    // GH #213: the records page fetches the composite view endpoint
+    // (PaginatedResponse[RecordViewResponse]) — empty/error/skeleton
+    // intercepts must target /records/view or the forced states never render.
+    apiUrl: '/api/v1/records/view',
     // Post-migration (T8-FE2b): records render via the shared DataTable —
     // uniform ↕/↑/↓ glyphs like the other migrated tables; initial sort is
     // `date` (B2 cat 15), so clicking `Гостей` deterministically captures

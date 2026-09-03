@@ -2,13 +2,20 @@
  * Tests for RecordsContext — server-driven page/perPage/filters/sort state
  * plus the seedRecordFromList wiring.
  *
- * The provider fetches a server-driven envelope:
+ * GH #213 Task 6: the records list is served by the composite view fetcher
+ * `getRecordsView` (records + display fields in one request) under the SAME
+ * server-driven envelope key:
  *   ['records', page, perPage, dateFrom, dateTo, filters, sortBy, sortOrder]
  * When the list resolves, each record must be seeded into the canonical
  * `['record', id]` cache (only if absent — fresher entries are preserved).
  *
  * This avoids a redundant `getRecord(recordId)` call the first time a
  * record is opened from the schedule/records list (spec §2.1).
+ *
+ * GH #213 Task 11 (spec §6.1): RecordsContext is a PURE view-list context —
+ * the 6 lookup maps + payment totals query are DELETED. The records page
+ * display path issues exactly ONE list query (`getRecordsView`, US-2); the
+ * context value exposes only records/filters/sort/pagination state.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { act, renderHook, waitFor } from '@testing-library/react';
@@ -18,35 +25,13 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 // ─── Mock api-client ──────────────────────────────────────────────────────
 
 vi.mock('@memo/api-client', () => ({
-  getRecords: vi.fn(),
-  getClients: vi.fn(),
-  getPaymentTotals: vi.fn(),
-  getPayments: vi.fn(),
-  getActivities: vi.fn(),
-  getMasters: vi.fn(),
-  getServices: vi.fn(),
-  getLocations: vi.fn(),
-  getAllMasters: vi.fn(),
-  getAllServices: vi.fn(),
-  getAllLocations: vi.fn(),
+  getRecordsView: vi.fn(),
 }));
 
-import {
-  getRecords,
-  getClients,
-  getPaymentTotals,
-  getPayments,
-  getActivities,
-  getMasters,
-  getServices,
-  getLocations,
-  getAllMasters,
-  getAllServices,
-  getAllLocations,
-} from '@memo/api-client';
+import { getRecordsView } from '@memo/api-client';
 import type {
   PaginatedResponse,
-  RecordResponse,
+  RecordView,
   VisitResponse,
 } from '@memo/api-client';
 
@@ -85,8 +70,8 @@ function makeVisit(id: string, overrides: Partial<VisitResponse> = {}): VisitRes
 
 function makeRecord(
   id: string,
-  overrides: Partial<RecordResponse> = {},
-): RecordResponse {
+  overrides: Partial<RecordView> = {},
+): RecordView {
   return {
     id,
     activity_id: 'ev_1',
@@ -99,6 +84,16 @@ function makeRecord(
     created_at: '2026-01-15T10:00:00',
     updated_at: '2026-01-15T10:00:00',
     visits: [makeVisit('v1', { record_id: id })],
+    // View display fields (GH #213 §4) — the maps' consumers still rely on
+    // these rows carrying real lookup ids (activity_id, client_id, …).
+    client_name: 'Анна Иванова',
+    activity_start: '2026-01-15T10:00:00',
+    service_title: 'Йога',
+    master_name: 'Иванова Мария',
+    location_name: 'Студия 1',
+    master_color: '#ff0000',
+    is_private: false,
+    paid: 3500,
     ...overrides,
   };
 }
@@ -136,6 +131,58 @@ function createWrapper() {
 
 // ─── Tests ────────────────────────────────────────────────────────────────
 
+describe('RecordsContext — no display lookup maps (GH #213 Task 11)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+
+    mockUseNavigation.mockReturnValue({
+      dateFrom: '2026-01-01',
+      dateTo: '2026-01-31',
+      selectDateRange: vi.fn(),
+    } as unknown as ReturnType<typeof useNavigation>);
+
+    vi.mocked(getRecordsView).mockResolvedValue(envelope([]));
+  });
+
+  it('exposes no entity map fields in the context value', async () => {
+    const rec1 = makeRecord('r1');
+    vi.mocked(getRecordsView).mockResolvedValue(envelope([rec1]));
+
+    const { Wrapper } = createWrapper();
+    const { result } = renderHook(() => useRecords(), { wrapper: Wrapper });
+
+    await waitFor(() => {
+      expect(result.current.records).toHaveLength(1);
+    });
+
+    for (const field of ['clients', 'payments', 'activities', 'masters', 'services', 'locations'] as const) {
+      expect(result.current, `unexpected field "${field}"`).not.toHaveProperty(field);
+    }
+  });
+
+  it('does not fire any lookup / payment-totals queries', async () => {
+    const rec1 = makeRecord('r1');
+    vi.mocked(getRecordsView).mockResolvedValue(envelope([rec1]));
+
+    const { Wrapper, queryClient } = createWrapper();
+    renderHook(() => useRecords(), { wrapper: Wrapper });
+
+    // Wait until the records list query has resolved (maps fired eagerly
+    // before T11 would have resolved by then too).
+    await waitFor(() => {
+      expect(
+        queryClient.getQueryData<PaginatedResponse<RecordView>>(DEFAULT_RECORDS_KEY),
+      ).toBeDefined();
+    });
+
+    // No lookup / payment-totals query keys may exist in the cache.
+    const keys = queryClient.getQueryCache().getAll().map((q) => q.queryKey[0]);
+    for (const key of ['clients', 'payments', 'activities', 'masters', 'services', 'locations']) {
+      expect(keys, `unexpected query key "${key}"`).not.toContain(key);
+    }
+  });
+});
+
 describe('RecordsContext — canonical cache seeding', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -146,18 +193,12 @@ describe('RecordsContext — canonical cache seeding', () => {
       selectDateRange: vi.fn(),
     } as unknown as ReturnType<typeof useNavigation>);
 
-    vi.mocked(getRecords).mockResolvedValue(envelope([]));
-    vi.mocked(getClients).mockResolvedValue([]);
-    vi.mocked(getPaymentTotals).mockResolvedValue({});
-    vi.mocked(getActivities).mockResolvedValue(envelope([]));
-    vi.mocked(getAllMasters).mockResolvedValue([]);
-    vi.mocked(getAllServices).mockResolvedValue([]);
-    vi.mocked(getAllLocations).mockResolvedValue([]);
+    vi.mocked(getRecordsView).mockResolvedValue(envelope([]));
   });
 
   it('seeds canonical ["record", id] from list response after query resolves', async () => {
     const rec1 = makeRecord('r1');
-    vi.mocked(getRecords).mockResolvedValue(envelope([rec1]));
+    vi.mocked(getRecordsView).mockResolvedValue(envelope([rec1]));
 
     const { Wrapper, queryClient } = createWrapper();
 
@@ -166,17 +207,17 @@ describe('RecordsContext — canonical cache seeding', () => {
     // Wait until the records list query has resolved
     await waitFor(() => {
       expect(
-        queryClient.getQueryData<PaginatedResponse<RecordResponse>>(DEFAULT_RECORDS_KEY),
+        queryClient.getQueryData<PaginatedResponse<RecordView>>(DEFAULT_RECORDS_KEY),
       ).toBeDefined();
     });
 
     // Canonical key must be populated by the seed effect
-    expect(queryClient.getQueryData<RecordResponse>(['record', 'r1'])).toEqual(rec1);
+    expect(queryClient.getQueryData<RecordView>(['record', 'r1'])).toEqual(rec1);
   });
 
   it('does NOT overwrite an already-present ["record", id] entry (fresher data wins)', async () => {
     const rec1 = makeRecord('r1', { status: 'confirmed' });
-    vi.mocked(getRecords).mockResolvedValue(envelope([rec1]));
+    vi.mocked(getRecordsView).mockResolvedValue(envelope([rec1]));
 
     const { Wrapper, queryClient } = createWrapper();
 
@@ -188,44 +229,20 @@ describe('RecordsContext — canonical cache seeding', () => {
 
     await waitFor(() => {
       expect(
-        queryClient.getQueryData<PaginatedResponse<RecordResponse>>(DEFAULT_RECORDS_KEY),
+        queryClient.getQueryData<PaginatedResponse<RecordView>>(DEFAULT_RECORDS_KEY),
       ).toBeDefined();
     });
 
     // Fresher canonical entry must be preserved
-    expect(queryClient.getQueryData<RecordResponse>(['record', 'r1'])?.status).toBe(
+    expect(queryClient.getQueryData<RecordView>(['record', 'r1'])?.status).toBe(
       'visited',
     );
-  });
-
-  it('fetches masters/services/locations lookups via getAllX, not paginated get (#205 T12)', async () => {
-    const { Wrapper, queryClient } = createWrapper();
-
-    renderHook(() => useRecords(), { wrapper: Wrapper });
-
-    await waitFor(() => {
-      expect(vi.mocked(getAllMasters)).toHaveBeenCalled();
-      expect(vi.mocked(getAllServices)).toHaveBeenCalled();
-      expect(vi.mocked(getAllLocations)).toHaveBeenCalled();
-    });
-
-    // Lookup cache keys must be unchanged
-    await waitFor(() => {
-      expect(queryClient.getQueryData(['masters'])).toBeDefined();
-      expect(queryClient.getQueryData(['services'])).toBeDefined();
-      expect(queryClient.getQueryData(['locations'])).toBeDefined();
-    });
-
-    // Paginated dictionary lookups must not be used
-    expect(vi.mocked(getMasters)).not.toHaveBeenCalled();
-    expect(vi.mocked(getServices)).not.toHaveBeenCalled();
-    expect(vi.mocked(getLocations)).not.toHaveBeenCalled();
   });
 
   it('seeds multiple records from a multi-item list response', async () => {
     const rec1 = makeRecord('r1');
     const rec2 = makeRecord('r2');
-    vi.mocked(getRecords).mockResolvedValue(envelope([rec1, rec2]));
+    vi.mocked(getRecordsView).mockResolvedValue(envelope([rec1, rec2]));
 
     const { Wrapper, queryClient } = createWrapper();
 
@@ -233,94 +250,12 @@ describe('RecordsContext — canonical cache seeding', () => {
 
     await waitFor(() => {
       expect(
-        queryClient.getQueryData<PaginatedResponse<RecordResponse>>(DEFAULT_RECORDS_KEY),
+        queryClient.getQueryData<PaginatedResponse<RecordView>>(DEFAULT_RECORDS_KEY),
       ).toBeDefined();
     });
 
-    expect(queryClient.getQueryData<RecordResponse>(['record', 'r1'])).toEqual(rec1);
-    expect(queryClient.getQueryData<RecordResponse>(['record', 'r2'])).toEqual(rec2);
-  });
-});
-
-describe('RecordsContext — payment totals aggregate', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-
-    mockUseNavigation.mockReturnValue({
-      dateFrom: '2026-01-01',
-      dateTo: '2026-01-31',
-      selectDateRange: vi.fn(),
-    } as unknown as ReturnType<typeof useNavigation>);
-
-    vi.mocked(getRecords).mockResolvedValue(envelope([]));
-    vi.mocked(getClients).mockResolvedValue([]);
-    vi.mocked(getPaymentTotals).mockResolvedValue({ 'rec-1': 3000 });
-    vi.mocked(getActivities).mockResolvedValue(envelope([]));
-    vi.mocked(getAllMasters).mockResolvedValue([]);
-    vi.mocked(getAllServices).mockResolvedValue([]);
-    vi.mocked(getAllLocations).mockResolvedValue([]);
-  });
-
-  it('fetches payment totals for loaded record IDs', async () => {
-    const rec1 = makeRecord('rec-1');
-    const rec2 = makeRecord('rec-2');
-    vi.mocked(getRecords).mockResolvedValue(envelope([rec2, rec1]));
-
-    const { Wrapper } = createWrapper();
-    const { result } = renderHook(() => useRecords(), { wrapper: Wrapper });
-
-    await waitFor(() => {
-      expect(vi.mocked(getPaymentTotals)).toHaveBeenCalled();
-    });
-
-    // IDs must be sorted
-    expect(vi.mocked(getPaymentTotals)).toHaveBeenCalledWith(['rec-1', 'rec-2']);
-
-    await waitFor(() => {
-      expect(result.current.payments.get('rec-1')).toBe(3000);
-    });
-  });
-
-  it('does not fetch totals when no records loaded', async () => {
-    const { Wrapper } = createWrapper();
-    renderHook(() => useRecords(), { wrapper: Wrapper });
-
-    // Give queries a chance to settle
-    await waitFor(() => {
-      expect(vi.mocked(getRecords)).toHaveBeenCalled();
-    });
-
-    expect(vi.mocked(getPaymentTotals)).not.toHaveBeenCalled();
-  });
-
-  it('record without payments has no entry in the map', async () => {
-    const rec1 = makeRecord('rec-1');
-    const recWithout = makeRecord('rec-without');
-    vi.mocked(getRecords).mockResolvedValue(envelope([rec1, recWithout]));
-
-    const { Wrapper } = createWrapper();
-    const { result } = renderHook(() => useRecords(), { wrapper: Wrapper });
-
-    await waitFor(() => {
-      expect(result.current.payments.get('rec-1')).toBe(3000);
-    });
-
-    expect(result.current.payments.get('rec-without')).toBeUndefined();
-  });
-
-  it('never calls unfiltered getPayments for payment status (uses getPaymentTotals only)', async () => {
-    const rec1 = makeRecord('rec-1');
-    vi.mocked(getRecords).mockResolvedValue(envelope([rec1]));
-
-    const { Wrapper } = createWrapper();
-    renderHook(() => useRecords(), { wrapper: Wrapper });
-
-    await waitFor(() => {
-      expect(vi.mocked(getPaymentTotals)).toHaveBeenCalled();
-    });
-
-    // Regression #186: context must use the aggregate endpoint, not the per_page-capped list
-    expect(vi.mocked(getPayments)).not.toHaveBeenCalled();
+    expect(queryClient.getQueryData<RecordView>(['record', 'r1'])).toEqual(rec1);
+    expect(queryClient.getQueryData<RecordView>(['record', 'r2'])).toEqual(rec2);
   });
 });
 
@@ -334,13 +269,7 @@ describe('RecordsContext — server-driven page/filters/sort state (#191)', () =
       selectDateRange: vi.fn(),
     } as unknown as ReturnType<typeof useNavigation>);
 
-    vi.mocked(getRecords).mockResolvedValue(envelope([]));
-    vi.mocked(getClients).mockResolvedValue([]);
-    vi.mocked(getPaymentTotals).mockResolvedValue({});
-    vi.mocked(getActivities).mockResolvedValue(envelope([]));
-    vi.mocked(getAllMasters).mockResolvedValue([]);
-    vi.mocked(getAllServices).mockResolvedValue([]);
-    vi.mocked(getAllLocations).mockResolvedValue([]);
+    vi.mocked(getRecordsView).mockResolvedValue(envelope([]));
   });
 
   it('passes all server params with snake_case mapping', async () => {
@@ -348,7 +277,7 @@ describe('RecordsContext — server-driven page/filters/sort state (#191)', () =
     const { result } = renderHook(() => useRecords(), { wrapper: Wrapper });
 
     await waitFor(() => {
-      expect(vi.mocked(getRecords)).toHaveBeenCalled();
+      expect(vi.mocked(getRecordsView)).toHaveBeenCalled();
     });
 
     act(() => {
@@ -356,7 +285,7 @@ describe('RecordsContext — server-driven page/filters/sort state (#191)', () =
     });
 
     await waitFor(() => {
-      expect(vi.mocked(getRecords)).toHaveBeenCalledWith(
+      expect(vi.mocked(getRecordsView)).toHaveBeenCalledWith(
         expect.objectContaining({
           page: 1,
           per_page: 10,
@@ -375,7 +304,7 @@ describe('RecordsContext — server-driven page/filters/sort state (#191)', () =
     const { result } = renderHook(() => useRecords(), { wrapper: Wrapper });
 
     await waitFor(() => {
-      expect(vi.mocked(getRecords)).toHaveBeenCalled();
+      expect(vi.mocked(getRecordsView)).toHaveBeenCalled();
     });
 
     act(() => {
@@ -383,7 +312,7 @@ describe('RecordsContext — server-driven page/filters/sort state (#191)', () =
     });
 
     await waitFor(() => {
-      expect(vi.mocked(getRecords)).toHaveBeenCalledWith(
+      expect(vi.mocked(getRecordsView)).toHaveBeenCalledWith(
         expect.objectContaining({ page: 3 }),
       );
     });
@@ -393,7 +322,7 @@ describe('RecordsContext — server-driven page/filters/sort state (#191)', () =
     });
 
     await waitFor(() => {
-      expect(vi.mocked(getRecords)).toHaveBeenLastCalledWith(
+      expect(vi.mocked(getRecordsView)).toHaveBeenLastCalledWith(
         expect.objectContaining({ page: 1, status: 'waiting' }),
       );
     });
@@ -405,7 +334,7 @@ describe('RecordsContext — server-driven page/filters/sort state (#191)', () =
     const { result, rerender } = renderHook(() => useRecords(), { wrapper: Wrapper });
 
     await waitFor(() => {
-      expect(vi.mocked(getRecords)).toHaveBeenCalled();
+      expect(vi.mocked(getRecordsView)).toHaveBeenCalled();
     });
 
     act(() => {
@@ -434,7 +363,7 @@ describe('RecordsContext — server-driven page/filters/sort state (#191)', () =
     const { result } = renderHook(() => useRecords(), { wrapper: Wrapper });
 
     await waitFor(() => {
-      expect(vi.mocked(getRecords)).toHaveBeenCalled();
+      expect(vi.mocked(getRecordsView)).toHaveBeenCalled();
     });
 
     act(() => {
@@ -458,7 +387,7 @@ describe('RecordsContext — server-driven page/filters/sort state (#191)', () =
     const { result } = renderHook(() => useRecords(), { wrapper: Wrapper });
 
     await waitFor(() => {
-      expect(vi.mocked(getRecords)).toHaveBeenCalled();
+      expect(vi.mocked(getRecordsView)).toHaveBeenCalled();
     });
 
     act(() => {
@@ -476,7 +405,7 @@ describe('RecordsContext — server-driven page/filters/sort state (#191)', () =
 
     // Fetcher receives the two-arg state.
     await waitFor(() => {
-      expect(vi.mocked(getRecords)).toHaveBeenCalledWith(
+      expect(vi.mocked(getRecordsView)).toHaveBeenCalledWith(
         expect.objectContaining({ sort_by: 'total', sort_order: 'asc' }),
       );
     });
@@ -487,7 +416,7 @@ describe('RecordsContext — server-driven page/filters/sort state (#191)', () =
     const { result } = renderHook(() => useRecords(), { wrapper: Wrapper });
 
     await waitFor(() => {
-      expect(vi.mocked(getRecords)).toHaveBeenCalled();
+      expect(vi.mocked(getRecordsView)).toHaveBeenCalled();
     });
 
     act(() => {
@@ -509,7 +438,7 @@ describe('RecordsContext — server-driven page/filters/sort state (#191)', () =
     const { result } = renderHook(() => useRecords(), { wrapper: Wrapper });
 
     await waitFor(() => {
-      expect(vi.mocked(getRecords)).toHaveBeenCalled();
+      expect(vi.mocked(getRecordsView)).toHaveBeenCalled();
     });
 
     act(() => {
@@ -525,7 +454,7 @@ describe('RecordsContext — server-driven page/filters/sort state (#191)', () =
 
   it('exposes server total', async () => {
     const rec1 = makeRecord('r1');
-    vi.mocked(getRecords).mockResolvedValue({
+    vi.mocked(getRecordsView).mockResolvedValue({
       items: [rec1],
       total: 42,
       page: 1,
@@ -551,13 +480,7 @@ describe('RecordsContext — server-side search q (GH #212 Task 12)', () => {
       selectDateRange: vi.fn(),
     } as unknown as ReturnType<typeof useNavigation>);
 
-    vi.mocked(getRecords).mockResolvedValue(envelope([]));
-    vi.mocked(getClients).mockResolvedValue([]);
-    vi.mocked(getPaymentTotals).mockResolvedValue({});
-    vi.mocked(getActivities).mockResolvedValue(envelope([]));
-    vi.mocked(getAllMasters).mockResolvedValue([]);
-    vi.mocked(getAllServices).mockResolvedValue([]);
-    vi.mocked(getAllLocations).mockResolvedValue([]);
+    vi.mocked(getRecordsView).mockResolvedValue(envelope([]));
   });
 
   it('exposes search in filters with an empty default', async () => {
@@ -565,18 +488,18 @@ describe('RecordsContext — server-side search q (GH #212 Task 12)', () => {
     const { result } = renderHook(() => useRecords(), { wrapper: Wrapper });
 
     await waitFor(() => {
-      expect(vi.mocked(getRecords)).toHaveBeenCalled();
+      expect(vi.mocked(getRecordsView)).toHaveBeenCalled();
     });
 
     expect(result.current.filters.search).toBe('');
   });
 
-  it('search of ≥2 chars sends q to getRecords', async () => {
+  it('search of ≥2 chars sends q to getRecordsView', async () => {
     const { Wrapper } = createWrapper();
     const { result } = renderHook(() => useRecords(), { wrapper: Wrapper });
 
     await waitFor(() => {
-      expect(vi.mocked(getRecords)).toHaveBeenCalled();
+      expect(vi.mocked(getRecordsView)).toHaveBeenCalled();
     });
 
     act(() => {
@@ -584,7 +507,7 @@ describe('RecordsContext — server-side search q (GH #212 Task 12)', () => {
     });
 
     await waitFor(() => {
-      expect(vi.mocked(getRecords)).toHaveBeenCalledWith(
+      expect(vi.mocked(getRecordsView)).toHaveBeenCalledWith(
         expect.objectContaining({ q: 'анна' }),
       );
     });
@@ -595,10 +518,10 @@ describe('RecordsContext — server-side search q (GH #212 Task 12)', () => {
     const { result } = renderHook(() => useRecords(), { wrapper: Wrapper });
 
     await waitFor(() => {
-      expect(vi.mocked(getRecords)).toHaveBeenCalled();
+      expect(vi.mocked(getRecordsView)).toHaveBeenCalled();
     });
 
-    const callsBefore = vi.mocked(getRecords).mock.calls.length;
+    const callsBefore = vi.mocked(getRecordsView).mock.calls.length;
 
     act(() => {
       result.current.setFilters({ search: 'а' });
@@ -606,11 +529,11 @@ describe('RecordsContext — server-side search q (GH #212 Task 12)', () => {
 
     // The 1-char search lands a new query key → one more fetch must fire.
     await waitFor(() => {
-      expect(vi.mocked(getRecords).mock.calls.length).toBeGreaterThan(callsBefore);
+      expect(vi.mocked(getRecordsView).mock.calls.length).toBeGreaterThan(callsBefore);
     });
 
     // …and that fetch carries no q (server rejects <2 chars with 422).
-    const lastParams = vi.mocked(getRecords).mock.calls.at(-1)![0] ?? {};
+    const lastParams = vi.mocked(getRecordsView).mock.calls.at(-1)![0] ?? {};
     expect(lastParams.q).toBeUndefined();
   });
 
@@ -619,7 +542,7 @@ describe('RecordsContext — server-side search q (GH #212 Task 12)', () => {
     const { result } = renderHook(() => useRecords(), { wrapper: Wrapper });
 
     await waitFor(() => {
-      expect(vi.mocked(getRecords)).toHaveBeenCalled();
+      expect(vi.mocked(getRecordsView)).toHaveBeenCalled();
     });
 
     act(() => {
@@ -627,7 +550,7 @@ describe('RecordsContext — server-side search q (GH #212 Task 12)', () => {
     });
 
     await waitFor(() => {
-      expect(vi.mocked(getRecords)).toHaveBeenCalledWith(
+      expect(vi.mocked(getRecordsView)).toHaveBeenCalledWith(
         expect.objectContaining({ location_id: 'loc-1', q: 'иванов' }),
       );
     });
@@ -638,7 +561,7 @@ describe('RecordsContext — server-side search q (GH #212 Task 12)', () => {
     const { result } = renderHook(() => useRecords(), { wrapper: Wrapper });
 
     await waitFor(() => {
-      expect(vi.mocked(getRecords)).toHaveBeenCalled();
+      expect(vi.mocked(getRecordsView)).toHaveBeenCalled();
     });
 
     act(() => {
@@ -655,7 +578,7 @@ describe('RecordsContext — server-side search q (GH #212 Task 12)', () => {
 
     expect(result.current.page).toBe(1);
     await waitFor(() => {
-      expect(vi.mocked(getRecords)).toHaveBeenLastCalledWith(
+      expect(vi.mocked(getRecordsView)).toHaveBeenLastCalledWith(
         expect.objectContaining({ page: 1, q: 'тест' }),
       );
     });
@@ -666,7 +589,7 @@ describe('RecordsContext — server-side search q (GH #212 Task 12)', () => {
     const { result } = renderHook(() => useRecords(), { wrapper: Wrapper });
 
     await waitFor(() => {
-      expect(vi.mocked(getRecords)).toHaveBeenCalled();
+      expect(vi.mocked(getRecordsView)).toHaveBeenCalled();
     });
 
     act(() => {
@@ -695,18 +618,12 @@ describe('RecordsContext — PagedListState alignment (§6.4, #139 T8 Part A)', 
       selectDateRange: vi.fn(),
     } as unknown as ReturnType<typeof useNavigation>);
 
-    vi.mocked(getRecords).mockResolvedValue(envelope([]));
-    vi.mocked(getClients).mockResolvedValue([]);
-    vi.mocked(getPaymentTotals).mockResolvedValue({});
-    vi.mocked(getActivities).mockResolvedValue(envelope([]));
-    vi.mocked(getAllMasters).mockResolvedValue([]);
-    vi.mocked(getAllServices).mockResolvedValue([]);
-    vi.mocked(getAllLocations).mockResolvedValue([]);
+    vi.mocked(getRecordsView).mockResolvedValue(envelope([]));
   });
 
   it('exposes items as an alias of records (§6.4)', async () => {
     const rec1 = makeRecord('r1');
-    vi.mocked(getRecords).mockResolvedValue(envelope([rec1]));
+    vi.mocked(getRecordsView).mockResolvedValue(envelope([rec1]));
 
     const { Wrapper } = createWrapper();
     const { result } = renderHook(() => useRecords(), { wrapper: Wrapper });
@@ -746,7 +663,7 @@ describe('RecordsContext — PagedListState alignment (§6.4, #139 T8 Part A)', 
 
   it('page clamp: settled empty non-first page decrements page (§6.7)', async () => {
     // Page 1 has one row; every later page is empty (list shrunk).
-    vi.mocked(getRecords).mockImplementation((p) =>
+    vi.mocked(getRecordsView).mockImplementation((p) =>
       Promise.resolve(envelope(p?.page && p.page > 1 ? [] : [makeRecord('r1')])),
     );
 

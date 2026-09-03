@@ -2,9 +2,10 @@
 
 import React, { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { getRecords, getActivity, getPaymentTotals } from '@memo/api-client';
+import { getRecords, getActivity, getPaymentTotals, getClientById } from '@memo/api-client';
 import type { RecordResponse, ActivityResponse } from '@memo/api-client';
-import { useRecords } from '@/contexts/RecordsContext';
+import { useServices } from '@/hooks/useServices';
+import { useLocations } from '@/hooks/useLocations';
 import { DiamondIcon } from '@/app/components/shared/DiamondIcon';
 import { StatusBadge } from '@/app/components/shared/StatusBadge';
 import { Modal } from '@/app/components/shared/modal/Modal';
@@ -32,7 +33,18 @@ interface ClientQuickCardProps {
 // Spec §6.13 rename (#139 T8): the records-side read-only viewer is
 // `ClientQuickCard` — disambiguated from the clients-side record-tab modal.
 export function ClientQuickCard({ clientId, onClose }: ClientQuickCardProps) {
-  const { clients, services, locations } = useRecords(); // reference-data maps stay
+  // GH #213 §6.5 (R3): no RecordsContext dependency. Header — own per-id
+  // client query (key shared with ActivityDetailsModal; TanStack dedupes).
+  // Labels — shared useServices()/useLocations() hooks on the canonical keys
+  // (transformed domain objects carry `name`) — no extra requests beyond the
+  // cached page state.
+  const { data: client = null, isPending: clientPending } = useQuery({
+    queryKey: ['client', clientId],
+    queryFn: () => getClientById(clientId),
+    enabled: !!clientId,
+  });
+  const { data: services = [] } = useServices();
+  const { data: locations = [] } = useLocations();
 
   // Own data — the context records list is now one server page (#191)
   const { data: clientRecords = [] } = useQuery<RecordResponse[]>({
@@ -52,14 +64,14 @@ export function ClientQuickCard({ clientId, onClose }: ClientQuickCardProps) {
     enabled: recordIds.length > 0,
   });
 
-  const client = clients.get(clientId) ?? null;
-
   const recordDetails = useMemo(() => {
     const activityById = new Map(recordActivities.map((a) => [a.id, a]));
+    const serviceById = new Map(services.map((s) => [s.id, s]));
+    const locationById = new Map(locations.map((l) => [l.id, l]));
     return clientRecords.map((record) => {
       const activity = activityById.get(record.activity_id);
-      const service = activity ? services.get(activity.service_id) : null;
-      const location = activity ? locations.get(activity.location_id) : null;
+      const service = activity ? serviceById.get(activity.service_id) : null;
+      const location = activity ? locationById.get(activity.location_id) : null;
       const totalPrice = record.visits.reduce((s, v) => s + v.price, 0);
       const paidAmount = paymentTotals?.[record.id] ?? 0;
       return { record, activity, service, location, totalPrice, paidAmount };
@@ -80,8 +92,12 @@ export function ClientQuickCard({ clientId, onClose }: ClientQuickCardProps) {
     >
       <div onClick={(e) => e.stopPropagation()}>
         <Modal onClose={onClose}>
-          {/* Client not found */}
-          {!client ? (
+          {/* Client query pending / not found (GH #213 §6.5: by-id fetch) */}
+          {clientPending ? (
+            <div className="flex-1 overflow-y-auto p-12 text-center">
+              <div className="text-sm" style={{ color: 'var(--ink-light)' }}>Загрузка...</div>
+            </div>
+          ) : !client ? (
             <div className="flex-1 overflow-y-auto p-12 text-center">
               <div className="text-4xl mb-4">👤</div>
               <h2 className="text-lg font-semibold mb-2" style={{ color: 'var(--ink)' }}>
@@ -128,7 +144,7 @@ export function ClientQuickCard({ clientId, onClose }: ClientQuickCardProps) {
                         <div className="flex justify-between items-start">
                           <div className="flex-1">
                             <div className="flex items-center gap-3">
-                              <span className="text-sm font-medium" style={{ color: 'var(--ink)' }}>{service?.title ?? '—'}</span>
+                              <span className="text-sm font-medium" style={{ color: 'var(--ink)' }}>{service?.name ?? '—'}</span>
                                <StatusBadge status={safeStatus(record.status)} />
                               {activity?.is_private && (
                                 <DiamondIcon className="text-[10px]" />

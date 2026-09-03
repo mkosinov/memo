@@ -1,19 +1,12 @@
 'use client';
 
 import React from 'react';
-import type {
-  ActivityResponse,
-  ClientWithStats,
-  LocationResponse,
-  MasterResponse,
-  RecordResponse,
-  ServiceResponse,
-} from '@memo/api-client';
+import type { RecordView } from '@memo/api-client';
 import type { ColumnDef, RowAction } from '@/app/components/shared/tableTypes';
 import { DiamondIcon } from '@/app/components/shared/DiamondIcon';
 import { StatusBadge } from '@/app/components/shared/StatusBadge';
 import { safeStatus } from '@/app/lib/status-utils';
-import { displayMasterName, formatTime } from '@/lib/utils';
+import { formatTime } from '@/lib/utils';
 
 // ─── Helpers (verbatim from the pre-#139 RecordsTable) ──────────────────────
 // formatTime lives in @/lib/utils (identical HH:MM zero-pad helper — dedup).
@@ -36,43 +29,34 @@ export function parseActivityStart(start: string): { date: string; day: number; 
   return { date, day, startTime };
 }
 
-// ─── Column lookup seam (§6.15) ─────────────────────────────────────────────
+// ─── Columns config (GH #213 §6.2 — row-field rendering) ───────────────────
 
 /**
- * Reference maps the cells need. The wrapper memoizes the factory output
- * keyed on these maps. `onClientClick` replaces the pre-#139 inline
- * `stopPropagation` — DataTable's row-click `closest` guard scopes the
- * click away from the inner button (§6.3).
+ * Columns config for the Records table (#139 T8 FE2b; GH #213 Task 7). Nine
+ * entries — keys are exactly the RecordSortField union members (all
+ * server-sortable; backend whitelist domain-rules/records.md §Sort semantics;
+ * initial fetch preserved at sort_by=date&sort_order=asc — B2 cat 15).
+ *
+ * The RecordColumnLookup seam is gone: cells read the denormalized RecordView
+ * row fields delivered by GET /records/view (spec §6.2/§6.3 — display fields
+ * are byte-compatible with the old map lookups; archived entities resolve
+ * their names, deleted/dangling ones → null → '—' / gray dot). `onClientClick`
+ * replaces the pre-#139 inline `stopPropagation` — DataTable's row-click
+ * `closest` guard scopes the click away from the inner button (§6.3).
  */
-export interface RecordColumnLookup {
-  activities: Map<string, ActivityResponse>;
-  clients: Map<string, ClientWithStats>;
-  masters: Map<string, MasterResponse>;
-  services: Map<string, ServiceResponse>;
-  locations: Map<string, LocationResponse>;
-  payments: Map<string, number>; // record_id → total paid amount
-  onClientClick: (record: RecordResponse) => void;
-}
-
-/**
- * Columns config for the Records table (#139 T8 FE2b). Nine entries — keys
- * are exactly the RecordSortField union members (all server-sortable; backend
- * whitelist domain-rules/records.md §Sort semantics; initial fetch preserved
- * at sort_by=date&sort_order=asc — B2 cat 15). Cell JSX extracted verbatim
- * from the pre-#139 RecordsTable.
- */
-export const recordColumns = (lookup: RecordColumnLookup): ColumnDef<RecordResponse>[] => {
-  const { activities, clients, masters, services, locations, payments, onClientClick } = lookup;
+export const recordColumns = (cbs: {
+  onClientClick: (record: RecordView) => void;
+}): ColumnDef<RecordView>[] => {
+  const { onClientClick } = cbs;
 
   return [
     {
       key: 'date',
       label: 'Дата / Время',
       defaultVisible: true,
-      render: (record) => {
-        const activity = activities.get(record.activity_id);
-        if (!activity) return '—';
-        const parsed = parseActivityStart(activity.start);
+      render: (row) => {
+        if (!row.activity_start) return '—';
+        const parsed = parseActivityStart(row.activity_start);
         return (
           <div className="whitespace-nowrap">
             <div className="font-medium" style={{ color: 'var(--ink)' }}>
@@ -89,83 +73,69 @@ export const recordColumns = (lookup: RecordColumnLookup): ColumnDef<RecordRespo
       key: 'client',
       label: 'Клиент',
       defaultVisible: true,
-      render: (record) => {
-        const client = record.client_id ? clients.get(record.client_id) : null;
-        return (
-          <button
-            onClick={() => onClientClick(record)}
-            className="text-sm font-medium transition-colors text-left"
-            style={{ color: 'var(--brand)' }}
-          >
-            {client?.name ?? '—'}
-          </button>
-        );
-      },
+      render: (row) => (
+        <button
+          onClick={() => onClientClick(row)}
+          className="text-sm font-medium transition-colors text-left"
+          style={{ color: 'var(--brand)' }}
+        >
+          {row.client_name ?? '—'}
+        </button>
+      ),
     },
     {
       key: 'guests',
       label: 'Гостей',
       align: 'center',
       defaultVisible: true,
-      render: (record) => (
-        <span style={{ color: 'var(--ink-mid)' }}>{Math.max(1, record.visits.length)}</span>
+      render: (row) => (
+        <span style={{ color: 'var(--ink-mid)' }}>{Math.max(1, row.visits.length)}</span>
       ),
     },
     {
       key: 'service',
       label: 'Услуга',
       defaultVisible: true,
-      render: (record) => {
-        const activity = activities.get(record.activity_id);
-        const service = activity ? services.get(activity.service_id) : null;
-        return (
-          <div className="flex items-center gap-2">
-            {activity?.is_private ? <DiamondIcon className="mr-1" /> : null}
-            {service?.title ?? '—'}
-          </div>
-        );
-      },
+      render: (row) => (
+        <div className="flex items-center gap-2">
+          {row.is_private ? <DiamondIcon className="mr-1" /> : null}
+          {row.service_title ?? '—'}
+        </div>
+      ),
     },
     {
       key: 'master',
       label: 'Мастер',
       defaultVisible: true,
-      render: (record) => {
-        const activity = activities.get(record.activity_id);
-        if (!activity) return '—';
-        const master = masters.get(activity.master_id);
-        return (
-          <div
-            className="w-5 h-5 rounded-full"
-            style={{ backgroundColor: master?.color || '#999' }}
-            title={master ? displayMasterName(master) : undefined}
-          />
-        );
-      },
+      render: (row) => (
+        <div
+          className="w-5 h-5 rounded-full"
+          style={{ backgroundColor: row.master_color ?? '#999' }}
+          title={row.master_name ?? undefined}
+        />
+      ),
     },
     {
       key: 'location',
       label: 'Локация',
       defaultVisible: true,
-      render: (record) => {
-        const activity = activities.get(record.activity_id);
-        const location = activity ? locations.get(activity.location_id) : null;
-        return <span style={{ color: 'var(--ink-mid)' }}>{location?.name ?? '—'}</span>;
-      },
+      render: (row) => (
+        <span style={{ color: 'var(--ink-mid)' }}>{row.location_name ?? '—'}</span>
+      ),
     },
     {
       key: 'status',
       label: 'Статус',
       defaultVisible: true,
-      render: (record) => <StatusBadge status={safeStatus(record.status)} />,
+      render: (row) => <StatusBadge status={safeStatus(row.status)} />,
     },
     {
       key: 'total',
       label: 'Сумма',
       align: 'right',
       defaultVisible: true,
-      render: (record) => {
-        const recordTotal = record.visits.reduce((s, v) => s + v.price, 0);
+      render: (row) => {
+        const recordTotal = row.visits.reduce((s, v) => s + v.price, 0);
         return <span className="font-medium">{formatPrice(recordTotal)}</span>;
       },
     },
@@ -174,9 +144,9 @@ export const recordColumns = (lookup: RecordColumnLookup): ColumnDef<RecordRespo
       label: 'Оплата',
       align: 'center',
       defaultVisible: true,
-      render: (record) => {
-        const recordTotal = record.visits.reduce((s, v) => s + v.price, 0);
-        const recordPaid = payments.get(record.id) ?? 0;
+      render: (row) => {
+        const recordTotal = row.visits.reduce((s, v) => s + v.price, 0);
+        const recordPaid = row.paid;
         if (recordPaid >= recordTotal) {
           return (
             <span className="inline-flex items-center gap-1 text-xs font-medium" style={{ color: 'var(--success)' }}>
@@ -211,8 +181,8 @@ export const recordColumns = (lookup: RecordColumnLookup): ColumnDef<RecordRespo
  * DeleteDialog flow via useDeleteRecord (§6.9).
  */
 export const recordsActions = (cbs: {
-  onDelete: (record: RecordResponse) => void;
-}): ((row: RecordResponse) => RowAction<RecordResponse>[]) => {
+  onDelete: (record: RecordView) => void;
+}): ((row: RecordView) => RowAction<RecordView>[]) => {
   return (row) => [
     { label: 'Удалить', danger: true, onClick: () => cbs.onDelete(row) },
   ];

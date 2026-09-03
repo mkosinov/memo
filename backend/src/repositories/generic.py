@@ -9,10 +9,11 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from functools import lru_cache
-from typing import TypeVar
+from typing import Any, TypeAlias, TypeVar
 
 from pydantic import BaseModel
-from sqlalchemy import func, not_, select
+from sqlalchemy import Select, func, not_, select
+from sqlalchemy.engine import Row
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.base import Base
@@ -20,6 +21,16 @@ from src.models.enums import ArchiveStatus
 from src.repositories.search import SearchField, search_predicate
 
 ModelType = TypeVar("ModelType", bound=Base)
+
+# Alias for the BUILTIN list, used in method annotations below. Inside the
+# class body the name ``list`` resolves to the ``list`` METHOD (name
+# shadowing — the source of the pre-existing [valid-type] mypy errors on
+# ``list``/``ArchiveRepository.list``); subscripting this alias instead
+# keeps the read family (``list_custom``/``list_entity``) quirk-free.
+# Ruff UP040 (``type ModelList = list``) is intentionally NOT used — mypy 2.1
+# rejects subscripting the ``type``-statement alias form ("Bad number of
+# arguments for type alias"), while this TypeAlias form works.
+ModelList: TypeAlias = list
 
 
 class BaseRepository:
@@ -74,14 +85,19 @@ class BaseRepository:
     async def list_custom(
         self,
         session: AsyncSession,
-        stmt,
+        stmt: Select[tuple[Any, ...]],
         *,
-        order_by=None,
+        order_by: Sequence[Any] | None = None,
         limit: int | None = None,
         offset: int = 0,
-    ) -> tuple[list, int]:
-        """Wrap a caller-built statement with count + slice.
+    ) -> tuple[ModelList[Row[tuple[Any, ...]]], int]:
+        """Row-tuple core: wrap a caller-built statement with count + slice.
 
+        Accepts ANY service-built ``Select`` — entity, multi-column, or
+        labeled-expression selects — and returns raw ``Row`` tuples carrying
+        EVERY declared column (``result.all()``, no scalars projection).
+        Entity-only callers wanting ORM instances back must use
+        ``list_entity`` instead.
         Precondition: ``stmt`` must carry NO pre-baked order_by/limit/offset —
         ordering and slicing are owned by this method. Count runs on the
         unordered statement so correlated sort-key subqueries are never
@@ -97,7 +113,29 @@ class BaseRepository:
         if offset:
             stmt = stmt.offset(offset)
         result = await session.execute(stmt)
-        return list(result.scalars().all()), total
+        return list(result.all()), total
+
+    async def list_entity(
+        self,
+        session: AsyncSession,
+        stmt: Select[tuple[ModelType]],
+        *,
+        order_by: Sequence[Any] | None = None,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> tuple[ModelList[ModelType], int]:
+        """Entity-only wrapper over the ``list_custom`` row core.
+
+        Accepts ONLY a single-entity select (``Select[tuple[ModelType]]``) —
+        the TypeVar makes a multi-column select a typecheck error, routing
+        such callers to ``list_custom`` (mypy honesty, spec §5.1). Projects
+        ``row[0]`` out of each Row tuple (the old ``list_custom`` scalars
+        role); count/order/limit/offset mechanics are the core's.
+        """
+        rows, total = await self.list_custom(
+            session, stmt, order_by=order_by, limit=limit, offset=offset
+        )
+        return [row[0] for row in rows], total
 
     async def get(
         self, session: AsyncSession, table: type[ModelType], id: str

@@ -87,12 +87,19 @@ export default defineConfig({
   projects: [
     {
       name: 'shard-schedule',
-      testMatch: /(services-crud|schedule.*|records|activity-details-modal)\.spec\.ts/,
+      // records.* — records page specs (records.spec.ts, records-view.spec.ts, …).
+      // Filename-anchored ((^|\/)…$ + [^/]*) so the patterns match the spec
+      // FILE name, not an arbitrary path segment — Playwright tests these
+      // regexes against the absolute path, and a worktree directory named
+      // e.g. records-view-213 would otherwise sweep every spec in here.
+      testMatch: /(^|\/)(services-crud|schedule[^/]*|records[^/]*|activity-details-modal)\.spec\.ts$/,
       use: { ...devices['Desktop Chrome'] },
     },
     {
       name: 'shard-rest',
-      testMatch: /^((?!services-crud|schedule|records|activity-details-modal).)*\.spec\.ts$/,
+      // Everything whose FILE NAME does not belong to the schedule shard
+      // (same filename-anchoring rationale as above).
+      testMatch: /^(?!.*(\/|^)(services-crud|schedule|records|activity-details-modal)[^/]*\.spec\.ts$).*\.spec\.ts$/,
       use: { ...devices['Desktop Chrome'] },
     },
   ],

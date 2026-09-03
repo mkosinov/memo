@@ -2,8 +2,10 @@
 
 from datetime import UTC, datetime
 from functools import lru_cache
+from typing import cast
 
-from sqlalchemy import case, delete, func, select, update
+from pydantic import TypeAdapter
+from sqlalchemy import Select, case, delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -33,9 +35,73 @@ from src.models.tag import record_tags
 from src.models.visit import Visit
 from src.models.visitor import Visitor
 from src.schemas.common import PaginatedResponse
-from src.schemas.record import RecordCreate, RecordListParams, RecordPatch, RecordResponse, RecordUpdate
+from src.schemas.record import (
+    RecordCreate,
+    RecordListParams,
+    RecordPatch,
+    RecordResponse,
+    RecordUpdate,
+    RecordViewResponse,
+    VisitResponse,
+)
 from src.services.generic import GenericService
 from src.services.decorators import transactional
+
+# Serializes a datetime EXACTLY as a Pydantic ``datetime`` model field does
+# (pydantic emits ``Z`` for UTC-aware values where bare ``isoformat()``
+# would emit ``+00:00``) — used for ``activity_start`` byte-parity with
+# ``ActivityResponse.start`` (GH #213 §4).
+_DT_JSON = TypeAdapter(datetime)
+
+
+def _dt_json(value: datetime | None) -> str | None:
+    """Pydantic-faithful datetime → ISO string (None → None)."""
+    if value is None:
+        return None
+    return cast("str", _DT_JSON.dump_python(value, mode="json"))
+
+
+def map_record(record: Record) -> RecordResponse:
+    """Map a Record ORM object to RecordResponse with nested visits.
+
+    Service-owned mapping (photos precedent, GH #213): the records router
+    imports this, and ``RecordService.list_view`` reuses it for the base
+    fields of each view row (``visits`` already loaded via selectinload).
+    """
+
+    def _dt_to_str(dt: datetime | None) -> str:
+        if dt is None:
+            return ""
+        return dt.isoformat()
+
+    visits = [
+        VisitResponse(
+            id=v.id,
+            record_id=v.record_id,
+            visitor_id=v.visitor_id,
+            tariff_id=v.tariff_id,
+            price=v.price,
+            custom_price=v.custom_price,
+            status=v.status,
+            created_at=_dt_to_str(v.created_at),
+            updated_at=_dt_to_str(v.updated_at),
+        )
+        for v in record.visits
+    ]
+
+    return RecordResponse(
+        id=record.id,
+        activity_id=record.activity_id,
+        client_id=record.client_id,
+        status=record.status,
+        seats=record.seats,
+        anonym_visits=record.anonym_visits,
+        comment=record.comment,
+        custom_price=record.custom_price,
+        created_at=_dt_to_str(record.created_at),
+        updated_at=_dt_to_str(record.updated_at),
+        visits=visits,
+    )
 
 
 class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
@@ -59,14 +125,13 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
     ) -> None:
         super().__init__(repository, model, response_schema=RecordResponse)
 
-    async def list(
-        self, db_session: AsyncSession, params: RecordListParams
-    ) -> PaginatedResponse:  # items are ORM Record instances
-        """Return a paginated page of records (ORM items, visits eagerly loaded).
+    def _build_list_stmt(self, params: RecordListParams) -> Select[tuple[Record]]:
+        """Assemble the shared records-list query (GH #213 DRY-glue).
 
-        Filter → Sort → Paginate, fully server-side (#191).
-        Business filters are hand-written here (G1a principle); pagination/date
-        mechanics are shared helpers (BaseRepository.list_custom, day_range).
+        Activity INNER join + business filters + ``q`` predicates (Client /
+        Service LEFT OUTER joins ONLY when ``q`` is present) + eager visits.
+        ``list()`` and ``list_view()`` share this builder — the view is the
+        same query plus extra labeled display columns (§5).
         """
         stmt = (
             select(Record)
@@ -100,8 +165,21 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
                     .outerjoin(Service, Activity.service_id == Service.id)
                     .where(search_predicate(params.q, self.search_fields))
             )
+        return stmt
+
+    async def list(
+        self, db_session: AsyncSession, params: RecordListParams
+    ) -> PaginatedResponse:  # items are ORM Record instances
+        """Return a paginated page of records (ORM items, visits eagerly loaded).
+
+        Filter → Sort → Paginate, fully server-side (#191).
+        Business filters are hand-written in ``_build_list_stmt`` (G1a
+        principle); pagination/date mechanics are shared helpers
+        (BaseRepository.list_entity, day_range).
+        """
+        stmt = self._build_list_stmt(params)
         # --- Sort (whitelist map) + Paginate (COUNT before ORDER BY) ---
-        items, total = await self._repository.list_custom(
+        items, total = await self._repository.list_entity(
             db_session,
             stmt,
             order_by=self._sort_columns(params),
@@ -112,15 +190,116 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
             items=items, total=total, page=params.page, per_page=params.per_page
         )
 
+    async def list_view(
+        self, db_session: AsyncSession, params: RecordListParams
+    ) -> PaginatedResponse[RecordViewResponse]:
+        """Return a records page enriched with display fields (GH #213 §5).
+
+        Same query as ``list()`` — shared ``_build_list_stmt`` + shared
+        ``_sort_columns`` whitelist (US-5/US-6 parity) — plus 8 labeled
+        display columns, riding the repo ``list_custom`` row-tuple core.
+        Display resolution carries NO ``is_active`` filters: archived
+        entities resolve their names (US-3). Rows map via ``map_record``
+        on the ORM entity in ``row[0]`` (visits included — selectinload
+        populates them regardless of extra select columns) + named-label
+        unpacking for the display fields.
+        """
+        # Explicit correlate() pins each subquery to correlate ONLY against
+        # its outer table (Record / Activity): auto-correlation would also
+        # strip the dictionary table (clients/services/...) from the FROM
+        # whenever the ``q`` outerjoins add it to the enclosing query —
+        # leaving the subquery with no FROM → InvalidRequestError (GH #213).
+        client_name = (
+            select(Client.name)
+            .where(Record.client_id == Client.id)
+            .correlate(Record)
+            .scalar_subquery()
+        )
+        service_title = (
+            select(Service.title)
+            .where(Activity.service_id == Service.id)
+            .correlate(Activity)
+            .scalar_subquery()
+        )
+        master_name = (
+            select(Master.last_name + " " + Master.first_name)
+            .where(Activity.master_id == Master.id)
+            .correlate(Activity)
+            .scalar_subquery()
+        )
+        location_name = (
+            select(Location.name)
+            .where(Activity.location_id == Location.id)
+            .correlate(Activity)
+            .scalar_subquery()
+        )
+        master_color = (
+            select(Master.color)
+            .where(Activity.master_id == Master.id)
+            .correlate(Activity)
+            .scalar_subquery()
+        )
+        paid = (
+            select(func.coalesce(func.sum(Payment.amount), 0))
+            .where(Payment.record_id == Record.id)
+            .correlate(Record)
+            .scalar_subquery()
+        )
+        stmt = self._build_list_stmt(params).add_columns(
+            client_name.label("client_name"),
+            Activity.start.label("activity_start"),
+            Activity.is_private.label("is_private"),
+            service_title.label("service_title"),
+            master_name.label("master_name"),
+            location_name.label("location_name"),
+            master_color.label("master_color"),
+            paid.label("paid"),
+        )
+        rows, total = await self._repository.list_custom(
+            db_session,
+            stmt,
+            order_by=self._sort_columns(params),
+            limit=params.per_page,
+            offset=(params.page - 1) * params.per_page,
+        )
+        items: list[RecordViewResponse] = []
+        for row in rows:
+            view = RecordViewResponse.model_validate(map_record(row[0]))
+            view.client_name = row.client_name
+            view.activity_start = _dt_json(row.activity_start)
+            view.service_title = row.service_title
+            view.master_name = row.master_name
+            view.location_name = row.location_name
+            view.master_color = row.master_color
+            view.is_private = bool(row.is_private)
+            view.paid = row.paid
+            items.append(view)
+        return PaginatedResponse.model_construct(
+            items=items, total=total, page=params.page, per_page=params.per_page
+        )
+
     @staticmethod
     def _sort_columns(params: RecordListParams) -> list:
         """Whitelist sort map → ORDER BY expressions (#191, mirrors the deleted
-        client-side comparator; collation note: SQLite BINARY ≠ localeCompare)."""
+        client-side comparator; collation note: SQLite BINARY ≠ localeCompare).
+
+        The Client/Service name subqueries carry explicit ``correlate()``:
+        when ``q`` outerjoins those tables into the enclosing query,
+        auto-correlation would strip them from the subquery FROM → no FROM
+        left → InvalidRequestError (500) on ``q`` + client/service sorts
+        (GH #213 regression pin — same treatment as the list_view display
+        columns)."""
         client_name = (
-            select(Client.name).where(Client.id == Record.client_id).scalar_subquery()
+            select(Client.name)
+            .where(Client.id == Record.client_id)
+            .correlate(Record)
+            .scalar_subquery()
         )
         service_title = (
-            select(Service.title).where(Service.id == Activity.service_id).scalar_subquery()
+            select(Service.title)
+            .where(Service.id == Activity.service_id)
+            .correlate(Activity)
+            .scalar_subquery()
         )
         master_last = (
             select(Master.last_name).where(Master.id == Activity.master_id).scalar_subquery()

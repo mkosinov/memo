@@ -2,14 +2,15 @@
 
 import React, { useCallback, useMemo, useState } from 'react';
 import { useRecords } from '@/contexts/RecordsContext';
-import type { RecordResponse, DependencyNode } from '@memo/api-client';
+import type { RecordView, DependencyNode } from '@memo/api-client';
 import { ApiError } from '@memo/api-client';
 import { useRecordData } from '@/hooks/useRecordData';
 import { useDeleteRecord } from '@/hooks/useDeleteRecord';
 import { useUI } from '@/contexts/UIContext';
-import { displayMasterName, formatRecordLabel, formatTime } from '@/lib/utils';
+import { formatRecordLabel, formatTime } from '@/lib/utils';
 import { DataTable } from '@/app/components/shared/DataTable';
 import { DeleteDialog } from '@/app/components/DeleteDialog';
+import { DiamondIcon } from '@/app/components/shared/DiamondIcon';
 import { ClientQuickCard } from './ClientQuickCard';
 import { recordColumns, recordsActions, formatPrice, formatDateRu, parseActivityStart } from './recordsColumns';
 import { StatusBadge } from '@/app/components/shared/StatusBadge';
@@ -17,12 +18,10 @@ import { safeStatus } from '@/app/lib/status-utils';
 
 export function RecordsTable() {
   const recordsCtx = useRecords();
-  const {
-    records, clients, activities, masters, services, locations,
-  } = recordsCtx;
+  const { records } = recordsCtx;
   const { showToast } = useUI();
 
-  const [selectedRecord, setSelectedRecord] = useState<RecordResponse | null>(null);
+  const [selectedRecord, setSelectedRecord] = useState<RecordView | null>(null);
   const [clientModalId, setClientModalId] = useState<string | null>(null);
 
   // Delete — Addendum 13 / GH #139 T8: shared dry-run hook + dialog. Mirrors
@@ -31,11 +30,11 @@ export function RecordsTable() {
   // dialog confirms via resolveDelete.
   const deleteMutation = useDeleteRecord();
   const [deleteTarget, setDeleteTarget] = useState<{
-    record: RecordResponse;
+    record: RecordView;
     deps: DependencyNode[];
   } | null>(null);
 
-  const handleDelete = useCallback(async (record: RecordResponse) => {
+  const handleDelete = useCallback(async (record: RecordView) => {
     try {
       await deleteMutation.mutateAsync(record.id);
     } catch (err) {
@@ -53,26 +52,21 @@ export function RecordsTable() {
     }
   }, [deleteMutation, showToast]);
 
-  // §6.15 — memoize the factory outputs. The columns closure captures the
-  // current reference maps (recomputes when they change). The actions memo is
-  // NOT referentially stable: useDeleteRecord returns a fresh mutation object
+  // GH #213 Task 7 (§6.2) — the columns factory is lookup-free; cells read the
+  // denormalized RecordView row fields. Only the ClientQuickCard opener stays
+  // wired here (row.client_id → setClientModalId). The actions memo is NOT
+  // referentially stable: useDeleteRecord returns a fresh mutation object
   // identity every render, so handleDelete — and with it this useMemo —
   // recomputes on every render. Harmless: DataTable does not depend on the
   // referential stability of `actions`.
   const columns = useMemo(
     () =>
       recordColumns({
-        activities,
-        clients,
-        masters,
-        services,
-        locations,
-        payments: recordsCtx.payments,
         onClientClick: (r) => {
           if (r.client_id) setClientModalId(r.client_id);
         },
       }),
-    [activities, clients, masters, services, locations, recordsCtx.payments],
+    [],
   );
   const actions = useMemo(
     () => recordsActions({ onDelete: (r) => void handleDelete(r) }),
@@ -81,9 +75,6 @@ export function RecordsTable() {
 
   // ─── Detail panel helpers ───────────────────────────────────────────────
 
-  const selectedActivity = selectedRecord ? activities.get(selectedRecord.activity_id) ?? null : null;
-  const selectedClient = selectedRecord?.client_id ? clients.get(selectedRecord.client_id) ?? null : null;
-  const selectedVisits = selectedRecord?.visits ?? [];
   // Per-record payments for the detail panel come from useRecordData
   // (hook is called unconditionally; ids are empty strings when nothing is
   // selected, which disables the underlying queries).
@@ -105,7 +96,7 @@ export function RecordsTable() {
           the table's min-content and pushes the 360px detail panel past the
           page card's overflow-hidden right edge on wide rows. */}
       <div className="flex-1 overflow-x-auto">
-        <DataTable<RecordResponse>
+        <DataTable<RecordView>
           storageKey="records-columns"
           columns={columns}
           tableState={recordsCtx}
@@ -124,8 +115,12 @@ export function RecordsTable() {
         />
       </div>
 
-      {/* Detail Panel */}
-      {selectedRecord && selectedActivity && (
+      {/* Detail Panel — GH #213 Task 7 (§6.3): every display field reads the
+          selected RecordView row (client_name/service_title/master_name/
+          location_name); the DiamondIcon is ADDED here for the §11-mandated
+          "table + detail panel" diamond coverage. Payments stay on
+          useRecordData. */}
+      {selectedRecord && (
         <div className="w-[360px] border-l overflow-auto p-4 space-y-4" style={{ borderColor: 'var(--line)', backgroundColor: 'var(--surface)' }}>
           <div className="flex justify-between items-start">
             <h3 className="text-sm font-semibold" style={{ color: 'var(--ink)' }}>Детали записи</h3>
@@ -150,31 +145,29 @@ export function RecordsTable() {
               className="text-sm font-medium transition-colors"
               style={{ color: 'var(--brand)' }}
             >
-              {selectedClient?.name ?? '—'}
+              {selectedRecord.client_name ?? '—'}
             </button>
-            {selectedClient && (
-              <div className="text-xs mt-1" style={{ color: 'var(--ink-light)' }}>{selectedClient.phone}</div>
-            )}
           </div>
 
           {/* Activity Card */}
           <div className="rounded-lg border p-3" style={{ borderColor: 'var(--line)', backgroundColor: 'var(--white)' }}>
             <div className="text-xs mb-1" style={{ color: 'var(--ink-light)' }}>Занятие</div>
-            <div className="text-sm font-medium" style={{ color: 'var(--ink)' }}>
-              {services.get(selectedActivity.service_id)?.title}
+            <div className="text-sm font-medium flex items-center gap-2" style={{ color: 'var(--ink)' }}>
+              {selectedRecord.is_private ? <DiamondIcon className="shrink-0" /> : null}
+              <span>{selectedRecord.service_title ?? '—'}</span>
             </div>
-            <div className="text-xs mt-1" style={{ color: 'var(--ink-light)' }}>
-              {(() => {
-                const parsed = parseActivityStart(selectedActivity.start);
-                return (
-                  <>
-                    {formatDateRu(parsed.date)} · {formatTime(parsed.startTime)}
-                  </>
-                );
-              })()}
-            </div>
+            {selectedRecord.activity_start && (() => {
+              const parsed = parseActivityStart(selectedRecord.activity_start);
+              return (
+                <div className="text-xs mt-1" style={{ color: 'var(--ink-light)' }}>
+                  {formatDateRu(parsed.date)} · {formatTime(parsed.startTime)}
+                </div>
+              );
+            })()}
             <div className="text-xs" style={{ color: 'var(--ink-light)' }}>
-              {locations.get(selectedActivity.location_id)?.name} · {masters.get(selectedActivity.master_id) ? displayMasterName(masters.get(selectedActivity.master_id)!) : '—'}
+              <span>{selectedRecord.location_name ?? '—'}</span>
+              {' · '}
+              <span>{selectedRecord.master_name ?? '—'}</span>
             </div>
             <div className="mt-2">
               <StatusBadge status={safeStatus(selectedRecord.status)} />
@@ -185,7 +178,7 @@ export function RecordsTable() {
           <div className="rounded-lg border p-3" style={{ borderColor: 'var(--line)', backgroundColor: 'var(--white)' }}>
             <div className="text-xs mb-2" style={{ color: 'var(--ink-light)' }}>Посетители и цены</div>
             <div className="space-y-2">
-              {selectedVisits.map((visit) => (
+              {selectedRecord.visits.map((visit) => (
                 <div key={visit.id} className="flex justify-between items-center text-sm">
                   <div className="flex items-center gap-2">
                     <span style={{ color: 'var(--ink)' }}>Посетитель</span>
@@ -234,10 +227,11 @@ export function RecordsTable() {
       )}
 
       {/* Delete dialog — Addendum 13: opened on dry-run 409, closed on
-          done/cancel. Mirrors ClientRecordTab exactly (FE2a). */}
+          done/cancel. Mirrors ClientRecordTab exactly (FE2a). GH #213 Task 7:
+          label reads row.activity_start (formatRecordLabel — no maps). */}
       {deleteTarget && (
         <DeleteDialog
-          entityName={formatRecordLabel(activities.get(deleteTarget.record.activity_id)?.start)}
+          entityName={formatRecordLabel(deleteTarget.record.activity_start)}
           entityType="record"
           entityId={deleteTarget.record.id}
           dependencies={deleteTarget.deps}

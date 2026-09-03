@@ -9,16 +9,13 @@ import type {
   ServiceResponse,
   VisitResponse,
 } from '@memo/api-client';
-import { createMockRecordsContext } from './helpers/mockContexts';
-import { mockClientWithStats, mockLocationResponse } from './helpers/mockData';
+import { mockClient, mockLocationResponse } from './helpers/mockData';
 
-// ─── Mock RecordsContext (reference-data maps only) ────────────────────────
+// GH #213 §6.5: NO RecordsContext mock — the card renders without any
+// RecordsProvider. `useRecords()` throws outside its provider, so a stray
+// dependency on it fails every test here.
 
-vi.mock('@/contexts/RecordsContext', () => ({
-  useRecords: vi.fn(),
-}));
-
-// ─── Mock api-client (modal fetches its own data, #191) ────────────────────
+// ─── Mock api-client (modal fetches all of its own data, #191/#213) ────────
 
 vi.mock('@memo/api-client', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@memo/api-client')>();
@@ -27,14 +24,21 @@ vi.mock('@memo/api-client', async (importOriginal) => {
     getRecords: vi.fn(),
     getActivity: vi.fn(),
     getPaymentTotals: vi.fn(),
+    getClientById: vi.fn(),
+    getAllServices: vi.fn(),
+    getAllLocations: vi.fn(),
   };
 });
 
-import { useRecords } from '@/contexts/RecordsContext';
-import { getRecords, getActivity, getPaymentTotals } from '@memo/api-client';
+import {
+  getRecords,
+  getActivity,
+  getPaymentTotals,
+  getClientById,
+  getAllServices,
+  getAllLocations,
+} from '@memo/api-client';
 import { ClientQuickCard } from '../app/(main)/records/components/ClientQuickCard';
-
-const mockUseRecords = vi.mocked(useRecords);
 
 // ─── Fixtures ──────────────────────────────────────────────────────────────
 
@@ -157,24 +161,15 @@ function renderModal() {
 
 // ─── Tests ─────────────────────────────────────────────────────────────────
 
-describe('records-folder ClientQuickCard — dedicated queries (#191)', () => {
+describe('records-folder ClientQuickCard — re-homed off RecordsContext (#213)', () => {
   beforeEach(() => {
-    // Context now holds only ONE server page — the modal must not rely on it
-    // for records/activities/payments; reference-data maps stay.
-    mockUseRecords.mockReturnValue(
-      createMockRecordsContext({
-        records: [],
-        activities: new Map(),
-        payments: new Map(),
-        clients: new Map([['c1', mockClientWithStats]]),
-        services: new Map([
-          ['s1', service1],
-          ['s2', service2],
-        ]),
-        locations: new Map([['loc-1', location1]]),
-      }),
-    );
-
+    // Header — per-id client query (key shared with ActivityDetailsModal,
+    // TanStack dedupes).
+    vi.mocked(getClientById).mockResolvedValue(mockClient);
+    // Records-list labels — shared useServices()/useLocations() canonical keys.
+    vi.mocked(getAllServices).mockResolvedValue([service1, service2]);
+    vi.mocked(getAllLocations).mockResolvedValue([location1]);
+    // Own queries (unchanged from #191).
     vi.mocked(getRecords).mockResolvedValue({
       items: clientRecords,
       total: clientRecords.length,
@@ -188,13 +183,50 @@ describe('records-folder ClientQuickCard — dedicated queries (#191)', () => {
     vi.mocked(getPaymentTotals).mockResolvedValue({ r1: 6000, r2: 1000, r3: 500 });
   });
 
-  it('fetches the client records via its own query (not the context page)', async () => {
+  it('renders the client header from its own by-id query', async () => {
+    renderModal();
+
+    await waitFor(() => {
+      expect(screen.getByText(/Анна Иванова/)).toBeInTheDocument();
+    });
+    expect(screen.getByText('+7 (900) 123-45-67')).toBeInTheDocument();
+
+    expect(vi.mocked(getClientById)).toHaveBeenCalledWith('c1');
+  });
+
+  it('shows a loading state while the client query is pending', () => {
+    vi.mocked(getClientById).mockImplementation(() => new Promise(() => {}));
+    renderModal();
+
+    expect(screen.getByText('Загрузка...')).toBeInTheDocument();
+    expect(screen.queryByText('Клиент не найден')).not.toBeInTheDocument();
+  });
+
+  it('shows "Клиент не найден" when the by-id query fails', async () => {
+    vi.mocked(getClientById).mockRejectedValue(new Error('404'));
+    renderModal();
+
+    await waitFor(() => {
+      expect(screen.getByText('Клиент не найден')).toBeInTheDocument();
+    });
+  });
+
+  it('renders service/location labels from the shared hooks', async () => {
     renderModal();
 
     await waitFor(() => {
       expect(screen.getAllByText('Картина маслом')).toHaveLength(2);
     });
     expect(screen.getAllByText('Картина акрилом')).toHaveLength(2);
+    expect(screen.getAllByText(/· Альпика/).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('fetches the client records via its own query (not the context page)', async () => {
+    renderModal();
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Картина маслом')).toHaveLength(2);
+    });
 
     expect(vi.mocked(getRecords)).toHaveBeenCalledWith({ client_id: 'c1', per_page: 100 });
   });

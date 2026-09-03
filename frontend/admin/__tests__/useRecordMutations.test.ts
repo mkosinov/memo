@@ -343,6 +343,21 @@ describe('useRecordMutations', () => {
       expect(returned).toEqual(mockPaymentResponse);
     });
 
+    it('invalidates [records] so RecordsTable paid badge refreshes (R4/US-4)', async () => {
+      const { queryClient, wrapper } = createQueryClientWrapper();
+      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+
+      await act(async () => {
+        await result.current.addPayment(3500, 'card');
+      });
+
+      // Reader: RecordsTable reads `paid` from the view row — prefix ['records']
+      // catches all pages/filters. Existing ['record', id] invalidation stays.
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['records'] });
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['record', recordId] });
+    });
+
     it('writes the new payment into BOTH [payments, recordId] and global [payments] via helper', async () => {
       const { queryClient, wrapper } = createQueryClientWrapper();
       // Seed both caches with a sentinel payment so we can verify the new one is appended
@@ -634,6 +649,20 @@ describe('useRecordMutations', () => {
       const global = queryClient.getQueryData<PaymentResponse[]>(['payments']);
       expect(global?.[0].amount).toBe(4000);
     });
+
+    it('invalidates [records] so RecordsTable paid badge refreshes (R4/US-4)', async () => {
+      const { queryClient, wrapper } = createQueryClientWrapper();
+      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+
+      await act(async () => {
+        await result.current.patchPayment('pay1', { amount: 4000 });
+      });
+
+      // Reader: RecordsTable reads `paid` from the view row — prefix ['records']
+      // catches all pages/filters.
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['records'] });
+    });
   });
 
   describe('deletePayment', () => {
@@ -665,6 +694,21 @@ describe('useRecordMutations', () => {
       expect(perRecord?.map((p) => p.id)).toEqual(['pay-other']);
       const global = queryClient.getQueryData<PaymentResponse[]>(['payments']);
       expect(global?.map((p) => p.id)).toEqual(['pay-other']);
+    });
+
+    it('invalidates [records] so RecordsTable paid badge refreshes (R4/US-4)', async () => {
+      const { queryClient, wrapper } = createQueryClientWrapper();
+      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+
+      await act(async () => {
+        await result.current.deletePayment('pay1');
+      });
+
+      // Reader: RecordsTable reads `paid` from the view row — prefix ['records']
+      // catches all pages/filters. Existing ['record', id] invalidation stays.
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['records'] });
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['record', recordId] });
     });
   });
 
@@ -1024,6 +1068,33 @@ describe('useRecordMutations', () => {
       expect(perRecord).toHaveLength(0);
       const global = queryClient.getQueryData<PaymentResponse[]>(['payments']);
       expect(global?.find((p) => p.id === 'pay-existing')).toBeUndefined();
+    });
+
+    it('deletePaymentDeferred invalidates [records] on COMMIT, not on defer (R4/US-4)', async () => {
+      const { queryClient, wrapper } = createQueryClientWrapper();
+      seedPaymentsCache(queryClient);
+      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+
+      await act(async () => {
+        await result.current.deletePaymentDeferred('pay-existing');
+      });
+
+      // Defer phase: optimistic cache write only — no ['records'] invalidation yet
+      // (the payment row is still undoable at this point).
+      expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: ['records'] });
+
+      // Simulate the provider firing commit after 5s
+      const action = mockEnqueuePendingAction.mock.calls[0][0] as {
+        commit: () => Promise<void>;
+      };
+      await act(async () => {
+        await action.commit();
+      });
+
+      // Commit path: ['records'] invalidated so RecordsTable paid badge refreshes
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['records'] });
     });
 
     it('undo restores payment and cancels the commit', async () => {

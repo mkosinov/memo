@@ -363,26 +363,24 @@ export async function clickModalTab(page: Page, tabTestId: string) {
 /**
  * Wait for records page to load with table.
  * Navigates to /records, waits for the heading and table to render,
- * then waits for the records AND activities API responses to arrive —
- * both are needed for the table to render rows (records are filtered
- * by activity_id lookup). Also waits for a short time for React to
- * re-render with the fetched data.
+ * then waits for the records view API response to arrive. GH #213: the
+ * records page issues ONE composite request GET /api/v1/records/view
+ * (records + denormalized display fields in one shot); the separate
+ * /api/v1/activities lookup maps no longer exist. The three dict
+ * selection queries (/locations/all, /services/all, /masters/all) are
+ * owned by BookingFilters and are not needed for table rows to render.
  */
 export async function waitForRecordsReady(page: Page) {
-  // Set up response listeners BEFORE navigation so we don't miss API calls.
-  const recordsResponse = page.waitForResponse(
-    (resp) => resp.url().includes('/api/v1/records') && resp.status() === 200,
-    { timeout: 60_000 },
-  );
-  const activitiesResponse = page.waitForResponse(
-    (resp) => resp.url().includes('/api/v1/activities') && resp.status() === 200,
+  // Set up the response listener BEFORE navigation so we don't miss the call.
+  const viewResponse = page.waitForResponse(
+    (resp) => resp.url().includes('/api/v1/records/view') && resp.status() === 200,
     { timeout: 60_000 },
   );
   await page.goto('/records');
   await page.waitForSelector('h1:has-text("Управление записями")', { timeout: 60_000 });
   await page.waitForSelector('table', { timeout: 60_000 });
-  // Wait for both records and activities to arrive.
-  await Promise.all([recordsResponse, activitiesResponse]);
+  // Wait for the composite view response to arrive.
+  await viewResponse;
   // Give React a moment to re-render the table with data.
   // The table needs to show either data rows or the empty state AFTER data load.
   await page

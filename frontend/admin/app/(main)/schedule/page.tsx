@@ -8,7 +8,6 @@ import { DayView } from '../../components/schedule/DayView';
 import { useUI } from '@/contexts/UIContext';
 import { useSchedule } from '@/contexts/ScheduleContext';
 import { ScheduleProvider } from '@/contexts/ScheduleContext';
-import { RecordsProvider } from '@/contexts/RecordsContext';
 
 function ScheduleView() {
   const { rightPanelCollapsed } = useUI();
@@ -29,11 +28,12 @@ function ScheduleView() {
 }
 
 export default function SchedulePage() {
+  // GH #213 §6.6 (R3): RecordsProvider removed — ActivityDetailsModal (the
+  // only consumer here) re-homed to useClients() + per-id getClientById, so
+  // /schedule no longer fires the 7 records-context queries.
   return (
-    <RecordsProvider>
     <ScheduleProvider>
       <ScheduleView />
     </ScheduleProvider>
-    </RecordsProvider>
   );
 }

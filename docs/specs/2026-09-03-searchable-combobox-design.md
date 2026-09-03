@@ -169,7 +169,7 @@ Today three formats coexist: MasterPicker raw «Имя Фамилия», domain 
 | Entity | Source | label | searchText |
 |---|---|---|---|
 | Master (raw `MasterResponse`) | MasterPicker, BookingFilters | `displayMasterName(m)` | `` `${first_name} ${last_name}` `` |
-| Master (domain `Master`) | MasterPicker (SettingsTab, StampPanel), | `m.name` | `` m.shortName ? `${m.name} ${m.shortName}` : m.name `` |
+| Master (domain `Master`) | MasterPicker (SettingsTab, StampPanel) | `m.name` | `` m.shortName ? `${m.name} ${m.shortName}` : m.name `` |
 | Service (raw `ServiceResponse`) | ClientRecordTab, BookingFilters | `s.title` | default (label) |
 | Service (domain `Service`) | SettingsTab, StampPanel | `s.name` | default (label) |
 | Location (raw `LocationResponse`) | ClientRecordTab, PhotoModal, BookingFilters | `l.name` | `` `${l.name} ${l.short_title ?? ''}`.trim() `` |

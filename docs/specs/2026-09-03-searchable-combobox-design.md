@@ -73,28 +73,24 @@ export interface ComboboxOption {
   value: string;              // entity id
   label: string;              // display label
   searchText?: string;        // filter haystack; default: label
-  icon?: React.ReactNode;     // rendered colored via `color` (CustomSelect parity)
   color?: string;             // renders the 3×3 swatch (see §5.3)
 }
 
 export interface ComboboxProps {
-  value: string | null;                 // null = nothing selected
+  value: string;                        // '' = cleared (codebase sentinel convention)
   options: ComboboxOption[];
-  onChange: (value: string | null) => void;  // null emitted only via the clear option
-  allowClear?: boolean;                 // renders the clear option pinned first
-  clearLabel?: string;                  // default: 'Не выбран'
-  emptyText?: string;                   // default: 'Ничего не найдено'
-  placeholder?: string;                 // search input placeholder, default: 'Поиск...'
-  disabled?: boolean;
+  onChange: (value: string) => void;    // '' emitted only via the clear option
+  clearLabel: string;                   // required — the pinned clear option's label («Не выбран»/«Все …»/…)
   className?: string;                   // applied to the trigger (CustomSelect parity)
 }
 ```
 
 Contract notes:
 
-- `value: string | null` / `onChange(string | null)` per the locked G1a concept. Consumers whose form state uses the `''` sentinel adapt at the call site: `value={id || null}` / `onChange={(v) => setId(v ?? '')}`. `MasterPicker` does the same mapping internally so its external API stays `value: string; onChange: (value: string) => void` with `''` = «Не выбран» — **byte-compatible with today**.
-- The clear option is a **synthetic pinned option** (testid `combobox-option-clear`), always visible at the top of the dropdown regardless of the active query, emitting `onChange(null)`. It is not filtered. After typing, the auto-reset highlight lands on the first **filtered** match (clear option excluded); explicit ArrowDown/Up navigation cycles clear + filtered options in visual order. This pinned-row pattern (vs. a library-style × affordance on the trigger) is a deliberate G1a choice: it preserves the current «Не выбран»-as-option UX of every surface and the CustomSelect trigger look.
-- **Degenerate inputs:** `value` pointing at an id absent from `options` (e.g. archived entity) → trigger shows `—` (CustomSelect parity), no crash. `options: []` → trigger stays interactive; open dropdown shows only the clear option (if `allowClear`) and `emptyText`. Options are assumed **unique by `value`** (caller contract); duplicate values render both rows but behavior is unspecified — surfaces build options from keyed maps/lists, so this cannot occur in practice. If `options` changes while open (refetch), filtering re-runs over the new array and the highlight re-clamps to the first visible option if its target disappeared; an already-selected value is untouched.
+- **`''`-based value contract** (simplification-panel finding, adopted): every in-scope consumer's state already uses the `''` sentinel (ClientRecordTab, SettingsTab, BookingFilters, MasterPicker's public API), PhotosFilters uses `undefined` (one trivial `?? ''`), PhotoModal already maps `'' ↔ null` at its boundary today. The G1a sketch wrote `onChange(value|null)` — the intent (a first-class clear action) is fully preserved by emitting `''` from the pinned clear option, while `value: string` makes `MasterPicker` a pure pass-through (zero adapters at 6 of 7 consumer groups, no null/'' duality to maintain). If the user prefers the literal null contract, it is a mechanical swap — flagged at G1b.
+- The clear option is a **synthetic pinned option** (`value: ''`, testid `combobox-option-clear`), always rendered at the top of the dropdown regardless of the active query, emitting `onChange('')`. It is not filtered. After typing, the auto-reset highlight lands on the first **filtered** match (clear option excluded); explicit ArrowDown/Up navigation cycles clear + filtered options in visual order. This pinned-row pattern (vs. a library-style × affordance on the trigger) is a deliberate G1a choice: it preserves the current «Не выбран»-as-option UX of every surface and the CustomSelect trigger look. `clearLabel` is required because every one of the 14 migration rows carries site-specific empty copy (§6).
+- **Degenerate inputs:** `value` pointing at an id absent from `options` (e.g. archived entity) → trigger shows `—` (CustomSelect parity), no crash. `options: []` → trigger stays interactive; open dropdown shows only the clear option and the empty state. Options are assumed **unique by `value`** (caller contract); duplicate values render both rows but behavior is unspecified — surfaces build options from keyed maps/lists, so this cannot occur in practice. If `options` changes while open (refetch), filtering re-runs over the new array and the highlight re-clamps to the first visible option if its target disappeared; an already-selected value is untouched.
+- **Dropped as dead weight** (simplicity review — zero consumers among all 14 rows, same call as `iconOnly`): `icon` on options, `placeholder` (hardcode «Поиск...»), `emptyText` (hardcode «Ничего не найдено»), `disabled`, `allowClear` (subsumed by required `clearLabel`). Re-add on first real consumer.
 - `CustomSelect`'s `iconOnly` prop has **zero consumers** (verified) and is dropped with the deletion.
 
 ### 5.1 Filtering semantics (locked at G1a)
@@ -103,26 +99,26 @@ Contract notes:
 - **Match rule:** case-insensitive **substring anywhere in the haystack**. Query is trimmed + lowercased; haystack = `(option.searchText ?? option.label).toLowerCase()`. This makes either word of a multi-word haystack findable regardless of order (typing «иванова» or «анна» both find «Анна Иванова»).
 - Empty or whitespace-only query (trimmed to `''`) → all options. The `searchText` override lets consumers pack extra fields (e.g. `short_title`, `shortName`) into the haystack without touching the label.
 - **Search input is always visible** at the top of the open dropdown. Query resets to `''` when the dropdown closes (reopening starts from the full list).
-- Zero visible options (excluding the pinned clear option) → non-interactive `emptyText` row (testid `combobox-empty`).
+- Zero visible options (excluding the pinned clear option) → non-interactive «Ничего не найдено» row (testid `combobox-empty`).
 
 ### 5.2 Dropdown behavior
 
-- Trigger = `<button type="button">` (CustomSelect visual parity: selected `icon` colored via `style={{color}}`, color swatch, label, chevron SVG). Trigger shows `clearLabel` when `value === null && allowClear`, otherwise `selected?.label ?? '—'`.
+- Trigger = `<button type="button">` (CustomSelect visual parity: selected color swatch, label, chevron SVG). Trigger shows `clearLabel` when `value === ''`, otherwise `selected?.label ?? '—'`.
 - Open/close: trigger click toggles; outside-`mousedown` closes (CustomSelect pattern); selecting an option closes.
 - **Close semantics:** closing (outside click, Esc, or option select) **discards the pending query** — the selected value changes ONLY via an explicit selection (Enter / click / Tab-commit). No custom values can be committed by typing.
-- Opening moves focus into the search input; `Esc` closes and **returns focus to the trigger**; value unchanged on Esc.
+- Opening moves focus into the search input; `Esc` closes and **returns focus to the trigger**; value unchanged on Esc. While the dropdown is open, Combobox **stops propagation** of the keydown events it consumes (Esc/Enter/Tab/Arrows) — host modals listen for Esc at `window` level (e.g. `PhotoModal.tsx:348-354` closes the whole modal) and must not receive it (feasibility-panel finding).
 
 ### 5.3 Rendering parity requirements (absorbed from CustomSelect)
 
-- Color swatch: `<span data-color={color} className="inline-block w-3 h-3 rounded-sm shrink-0" style={{ backgroundColor: color }} />` — in trigger (selected option) and in every matching option row. **`data-color` must survive** — `ActivityDetailsModal.test.tsx:753` asserts swatch rendering for MasterPicker options.
-- Icon: `<span style={{ color: option.color }}>{option.icon}</span>` before the label when present.
+- Color swatch: `<span data-color={color} className="inline-block w-3 h-3 rounded-sm shrink-0" style={{ backgroundColor: color }} />` — in trigger (selected option) and in every matching option row. **`data-color` must survive** — `ActivityDetailsModal.test.tsx` swatch block (`:754`) asserts it for MasterPicker options.
 - Selected option row highlighted (`bg-gray-100`), hover `hover:bg-gray-50`, same paddings/typography as CustomSelect rows.
-- Dropdown panel: `absolute z-10 mt-1 w-full bg-white border rounded-lg shadow-lg` with `borderColor: var(--line, #e5e7eb)` (CustomSelect styling) + search input row on top (`px-3 py-2 border-b`, `text-sm`, full width, `type="text"`). Trigger and option labels truncate (`truncate`) — long «Фамилия Имя» + swatch never break the layout.
+- Dropdown panel: `absolute z-10 mt-1 w-full bg-white border rounded-lg shadow-lg` with `borderColor: var(--line, #e5e7eb)` (CustomSelect styling) + search input row on top (`px-3 py-2 border-b`, `text-sm`, full width, `type="text"`). **Options list is height-bounded: `max-h-60 overflow-y-auto`** (240px, internal scroll) — 90 masters must not produce a 3000px dropdown. Trigger and option labels truncate (`truncate`) — long «Фамилия Имя» + swatch never break the layout.
+- **Overflow-ancestor contexts (feasibility review):** the absolute-dropdown pattern is retained deliberately — CustomSelect/StatusPicker already render absolute dropdowns inside these exact containers today (Modal body `overflow-hidden` `Modal.tsx:70`, PhotoModal scroll body `:387`, ClientCardModal right panel) and work, because triggers sit in the upper form area and the list is now bounded (search row ~40px + list ≤240px ≈ 280px total). Tightest container is StampPanel's accordion (`max-h-96` = 384px in `Toolbar.tsx`) — still fits. Fallback if any surface clips in practice (caught at visual gate): portal the dropdown to `document.body` with rect-based positioning — noted, NOT built (YAGNI).
 
-### 5.4 Accessibility (interaction bar set by #139 ColumnPicker; role placement corrected per ARIA APG — best-practices panel review)
+### 5.4 Accessibility (baseline = existing repo pattern `aria-haspopup`/`aria-expanded` + listbox/option in StatusPicker/FilterDropdown; role placement and additions per ARIA APG — best-practices panel review. Note: the G1a sketch cited "#139 ColumnPicker bar", but ColumnPicker as shipped carries no ARIA/keyboard handling — this spec sets the actual bar.)
 
-- **Trigger (any state):** `<button type="button" aria-haspopup="listbox" aria-expanded={isOpen}>` — the menu-button → listbox-popup pattern (exactly ColumnPicker's). The trigger is **not** `role="combobox"`: ARIA 1.2/APG assign `role="combobox"` to the element the user types into, and a button-combobox is by definition select-only (no filter input) — not our shape.
-- **Search input (open):** carries the combobox role for the open session — `role="combobox"` + `aria-autocomplete="list"` + `aria-expanded="true"` + `aria-controls={listboxId}` + `aria-activedescendant={highlightedId}` + `aria-label="Поиск"` (APG editable-combobox-with-open-popup mapping; HeadlessUI `Combobox.Input` equivalent). DOM focus stays here while open; the listbox itself is never focused.
+- **Trigger (any state):** `<button type="button" aria-haspopup="listbox" aria-expanded={isOpen} aria-label={…}>` — the menu-button → listbox-popup pattern. The trigger is **not** `role="combobox"`: ARIA 1.2/APG assign `role="combobox"` to the element the user types into, and a button-combobox is by definition select-only (no filter input) — not our shape. Consumers pass the field label as the trigger `aria-label` (BookingFilters/PhotosFilters reuse «Фильтр по …» so `getByLabelText` keeps working; StampPanel uses «Мастер»/«Услуга»).
+- **Search input (open):** carries the combobox role for the open session — `role="combobox"` + `aria-autocomplete="list"` + `aria-expanded="true"` + `aria-controls={listboxId}` + `aria-activedescendant={highlightedId}` + `aria-label="Поиск"` (APG editable-combobox-with-open-popup mapping; HeadlessUI `Combobox.Input` equivalent). DOM focus stays here while open; the listbox itself is never focused. `listboxId` comes from React `useId()` — multiple Comboboxes coexist on one page (BookingFilters has 3, PhotosFilters 4+).
 - **Listbox:** `role="listbox"` `id={listboxId}`; every visible row (incl. the clear option) `role="option"` + `aria-selected` + `id` (`combobox-option-{value}` / `combobox-option-clear`) so `aria-activedescendant` resolves.
 - **Empty state:** the `combobox-empty` row carries `role="status"` (polite live-region semantics, WCAG 4.1.3) so «Ничего не найдено» is announced without moving focus.
 - Keyboard (handled on the search input): `ArrowDown`/`ArrowUp` move highlight among clear + filtered options, **wrapping** (deliberate G1a choice — matches ColumnPicker; differs from APG select-only which clamps); `Home`/`End` first/last; `Enter` selects the highlighted option (closes, emits) — **no-op during IME composition** (`event.nativeEvent.isComposing`); `Escape` closes without change, focus → trigger; `Tab` commits the highlighted option if one is active, then continues normal tab flow (HeadlessUI/react-select consensus); click selects. Typing in the search input resets highlight to the first filtered match.
@@ -175,7 +171,7 @@ Today three formats coexist: MasterPicker raw «Имя Фамилия», domain 
 
 | Entity | Source | label | searchText |
 |---|---|---|---|
-| Master (raw `MasterResponse`) | MasterPicker, BookingFilters | `displayMasterName(m)` | `` `${first_name} ${last_name}` `` |
+| Master (raw `MasterResponse`) | MasterPicker, BookingFilters | `displayMasterName(m)` | default (label «Фамилия Имя» already contains both names — substring-anywhere finds either) |
 | Master (domain `Master`) | MasterPicker (SettingsTab, StampPanel) | `m.name` | `` m.shortName ? `${m.name} ${m.shortName}` : m.name `` |
 | Service (raw `ServiceResponse`) | ClientRecordTab, BookingFilters | `s.title` | default (label) |
 | Service (domain `Service`) | SettingsTab, StampPanel | `s.name` | default (label) |
@@ -186,13 +182,13 @@ Substring-anywhere matching (§5.1) + these haystacks deliver the G1a requiremen
 
 ## 7. What each consumer change looks like
 
-- **ClientRecordTab:** `locationOptions`/`serviceOptions` drop the manual `{value:'',label:'Не выбрана'}` head and become plain maps → `<Combobox allowClear clearLabel="Не выбрана" value={locationId || null} onChange={(v) => { setLocationId(v ?? ''); markChanged(); }} … />` (same for service). MasterPicker call unchanged.
-- **SettingsTab:** two native selects → Combobox with `clearLabel="Выберите"`; `value`/`onChange` adapter as above (`setId(v ?? '')` + existing `onUpdate` side-effect preserved).
+- **ClientRecordTab:** `locationOptions`/`serviceOptions` drop the manual `{value:'',label:'Не выбрана'}` head and become plain maps → `<Combobox clearLabel="Не выбрана" value={locationId} onChange={(v) => { setLocationId(v); markChanged(); }} … />` (same for service). MasterPicker call unchanged.
+- **SettingsTab:** two native selects → Combobox with `clearLabel="Выберите"`; `value`/state wiring is a drop-in (`setServiceId(v)` + existing `onUpdate` side-effect preserved).
 - **StampPanel:** master native select → `<MasterPicker masters={masters} value={stamp.masterId} onChange={handleMasterChange} className={…}/>`; service native select → Combobox `clearLabel="Выберите услугу"`. Labels `htmlFor` wiring: the label currently points at `select#stamp-master`; after migration the `htmlFor` points at nothing native — acceptable (Combobox trigger gets `aria-label="Мастер"`/`"Услуга"`; same pattern ClientRecordTab already uses for its unlabeled wrappers).
-- **PhotoModal:** inside the `field.type === 'select'` renderer, replace `<select>` with `<Combobox allowClear clearLabel={field.emptyLabel} placeholder="Поиск..." options={selectOptions} value={(value as string) ?? null} onChange={(v) => onChange(field.key, v ?? '')} />` — the existing `onChange(field.key, e.target.value || null)` already maps `'' → null`, so the null-contract is native here. Tags/client/activity typeaheads untouched apart from the rename (§4.2).
-- **BookingFilters:** three native selects → Combobox; `locationList/serviceList/masterList` (`!archived`) become option arrays per §6.2; `onLocationChange(v ?? '')` etc. adapters. Query keys/`staleTime`/`!archived` untouched.
-- **PhotosFilters (rows 13-14, if approved):** two native selects → Combobox exactly like BookingFilters; `filters.service_id`/`filters.location_id` use `undefined`-sentinel state → adapter `value={filters.service_id ?? null}` / `setFilters({ service_id: v ?? undefined })`; data stays the `servicesMap`/`locationsMap` values (raw shapes, §6.2 haystacks).
-- **MasterPicker:** swap `CustomSelect` for `Combobox` internally: options lose the manual «Не выбран» head; `<Combobox allowClear value={value || null} onChange={(v) => onChange(v ?? '')} options={masters.map(…)} className={className}/>`.
+- **PhotoModal:** inside the `field.type === 'select'` renderer, replace `<select>` with `<Combobox clearLabel={field.emptyLabel} options={selectOptions} value={(value as string) ?? ''} onChange={(v) => onChange(field.key, v || null)} />` — keeps today's exact `'' → null` boundary mapping (`e.target.value || null`). Tags/client/activity typeaheads untouched apart from the rename (§4.2).
+- **BookingFilters:** three native selects → Combobox; `locationList/serviceList/masterList` (`!archived`) become option arrays per §6.2; `onLocationChange`/`onServiceChange`/`onMasterChange` receive the Combobox value directly (`''` = «Все …», same sentinel as today). Query keys/`staleTime`/`!archived` untouched.
+- **PhotosFilters (rows 13-14, if approved):** two native selects → Combobox exactly like BookingFilters; `undefined`-sentinel state keeps its existing mapping shape: `value={filters.service_id ?? ''}` / `setFilters({ service_id: v || undefined })`; data stays the `servicesMap`/`locationsMap` values (raw shapes, §6.2 haystacks).
+- **MasterPicker:** swap `CustomSelect` for `Combobox` internally: options lose the manual «Не выбран» head; `<Combobox clearLabel="Не выбран" value={value} onChange={onChange} options={masters.map(…)} className={className}/>` — a pure pass-through, props and types byte-identical to today.
 
 ## 8. Testing
 
@@ -200,15 +196,14 @@ Substring-anywhere matching (§5.1) + these haystacks deliver the G1a requiremen
 
 Mirrors `SearchableSelect.test.tsx` structure (render helper + overrides) but with **NO fake timers** (no debounce to advance). Cases:
 
-1. Renders trigger with selected label; `—` when `value={null}` without allowClear; `clearLabel` when null with allowClear.
-2. Color swatch + `data-color` on trigger and option rows; icon rendered with color.
-3. Opens on click; search input visible + focused; all options listed; closes on outside mousedown; closes on option select.
-4. Typing filters instantly (case-insensitive substring, e.g. «ИВА» finds «Анна Иванова»); `searchText` override wins over label; query reset after close+reopen.
-5. Empty result → `combobox-empty` with default/custom `emptyText`; clear option still visible.
-6. `allowClear`: clear option pinned first (`combobox-option-clear`); selecting it emits `onChange(null)` and closes.
-7. Keyboard: ArrowDown/Up move highlight (wrap, clear option first); Home/End; Enter selects highlighted; Tab commits highlighted option and closes; Esc closes + focus on trigger + value unchanged.
-8. `disabled` — no open, trigger `disabled`.
-9. Works as plain dropdown with no typing (click-only path).
+1. Renders trigger with selected label; `clearLabel` when `value=''`; `—` when value is set but absent from options.
+2. Color swatch + `data-color` on trigger and option rows.
+3. Opens on click; search input visible + focused; all options listed (incl. pinned clear option first); closes on outside mousedown; closes on option select; options list scrolls internally beyond `max-h-60`.
+4. Typing filters instantly (case-insensitive substring, e.g. «ИВА» finds «Анна Иванова»); `searchText` override wins over label; whitespace-only query = no filter; query reset after close+reopen.
+5. Empty result → `combobox-empty` with «Ничего не найдено»; clear option still visible.
+6. Clear option: pinned first (`combobox-option-clear`); selecting it emits `onChange('')` and closes.
+7. Keyboard: ArrowDown/Up move highlight (wrap, clear option first); Home/End; Enter selects highlighted; Tab commits highlighted option and closes; Esc closes + focus on trigger + value unchanged; Esc/Enter keydown does not propagate (host modal stays open).
+8. Works as plain dropdown with no typing (click-only path).
 
 ### 8.2 Updated unit suites
 
@@ -217,7 +212,7 @@ Mirrors `SearchableSelect.test.tsx` structure (render helper + overrides) but wi
 - `ClientsIntegration.test.tsx` — trigger testid only.
 - `ActivityDetailsModal.test.tsx` — MasterPicker testids; existing swatch assertions keep passing via `data-color`.
 - `BookingFilters.test.tsx` — select interactions → open/type/click Combobox flow; master options now «Фамилия Имя»; keep raw-fetcher mocks + archived-excluded assertions (find by role option, 10s window — existing pattern).
-- PhotoModal suite — location field now Combobox: open/type/select + `field.emptyLabel` as clear label; the existing `getByText('Без локации')` assertion migrates from the removed `<option>` to the **trigger text** (shown when `value === null && allowClear`); owner typeaheads untouched (rename only).
+- PhotoModal suite — location field now Combobox: open/type/select + `field.emptyLabel` as clear label; the existing `getByText('Без локации')` assertion migrates from the removed `<option>` to the **trigger text** (shown when `value === ''`); owner typeaheads untouched (rename only).
 - PhotosFilters suite (rows 13-14, if approved) — `getByLabelText('Фильтр по услуге')`/`('Фильтр по локации')` interactions move from native select to Combobox open/type/select flow (trigger keeps the `aria-label`).
 - StampPanel suite — master via MasterPicker testids, service Combobox, label `shortName`→`name` expectations updated; `getByLabelText(/мастер/i)` still resolves — via the Combobox trigger's `aria-label` (label `htmlFor` association is replaced by it, §7).
 - DELETE `CustomSelect.test.tsx`.
@@ -226,10 +221,11 @@ Mirrors `SearchableSelect.test.tsx` structure (render helper + overrides) but wi
 
 New spec `e2e/combobox-dictionaries.spec.ts` — the six User Scenarios (§10). Updated existing specs:
 
-- `records.spec.ts` tests 4–5: native `select[aria-label="Фильтр по …"]` locators → Combobox flow (trigger `aria-label` assertions + open + count `combobox-option-*`); master option labels «Фамилия Имя».
+- `records.spec.ts` — all native `select[aria-label="Фильтр по …"]` interactions (not just tests 4–5; also `:91-93, 106-108, 118, 123, 128, 215-217, 598, 648, 707, 961`): → Combobox flow (trigger `aria-label` assertions + open + `combobox-option-*`); master option labels «Фамилия Имя».
+- `records-view.spec.ts:198-216, 517` — native filter-select option counts and `.selectOption()` calls → Combobox flow.
 - `photos-crud.spec.ts:246,275` (rows 13-14, if approved): native «Фильтр по услуге/локации» select interactions → Combobox flow.
 - `clients.spec.ts:472-484` — `custom-select-trigger` → `combobox-trigger` inside the same wrappers.
-- `activity-details-modal.spec.ts:339-341` — master trigger testid.
+- `activity-details-modal.spec.ts` — `:258-260` native `.selectOption()` on `select-service` → Combobox flow; `:339-341` master trigger testid.
 - Visual baselines: trigger markup stays visually identical to CustomSelect (closed footprints — records/photos filter bars, clients record tab, settings tab — unchanged); dropdown-open states gain the search row. Sweep the visual suite; any baseline whose capture includes a swapped control or an open dropdown regenerates via the CI `update-snapshots` workflow (project standard, `docs/tests_workflow.md`).
 
 ## 9. Mechanism boundary (restated from #205 G1b matrix)
@@ -271,13 +267,14 @@ New spec `e2e/combobox-dictionaries.spec.ts` — the six User Scenarios (§10). 
 3. `CustomSelect.tsx` + `CustomSelect.test.tsx` deleted; no references to `custom-select` testids or the import path remain in app code or tests (except the self-contained `wave6-status-snapshots.spec.ts` inline HTML).
 4. `SearchableSelect` renamed to `RemoteSearchSelect` everywhere (component, props, file, test file, imports, comments); zero behavior diff (its suite passes unedited apart from names).
 5. Master labels unified to «Фамилия Имя» (`displayMasterName`) in MasterPicker (raw shape), BookingFilters, StampPanel (via MasterPicker); `docs/domain-rules/masters.md` addendum landed.
-6. E2E `combobox-dictionaries.spec.ts` covers US-1…US-6 green; `records.spec.ts` 4–5, `clients.spec.ts`, `activity-details-modal.spec.ts` updated and green; full vitest suite + tsc + lint green.
+6. E2E `combobox-dictionaries.spec.ts` covers US-1…US-6 green; `records.spec.ts`, `records-view.spec.ts`, `clients.spec.ts`, `activity-details-modal.spec.ts` (+ `photos-crud.spec.ts` if rows 13-14 approved) updated and green; full vitest suite + tsc + lint green.
 7. No new API endpoints, no api-client changes, no LS keys touched.
 
 ## 13. Risks & Decisions
 
 - **Trigger visual parity** keeps visual baselines stable; dropdown-open baselines (if any cover these surfaces) regenerate via CI workflow — known, cheap.
-- **`null` vs `''`**: contract is null-based (G1a); every consumer keeps its `''`-sentinel state via a one-line adapter (§7). Pre-production: no compat layer warranted.
+- **`''` vs `null` contract:** `''`-based (G1a's `onChange(value|null)` sketch refined — the clear *action* is preserved, the sentinel matches the codebase's existing convention at 6 of 7 consumer groups; MasterPicker stays a pure pass-through). Flagged at G1b; mechanical swap if the user prefers literal null.
+- **Overflow clipping:** absolute dropdown + `max-h-60` bounded list fits all surfaces incl. StampPanel's 384px accordion; CustomSelect precedent proves the pattern in modal bodies. Portal fallback documented (§5.3), built only if the visual gate catches a real clip.
 - **StampPanel copy/label change** (rows 7) is the only user-visible copy change — intended unification, flagged in §6.
 - **Typing Cyrillic**: `toLowerCase()` is Unicode-aware and unambiguous for Russian Cyrillic and ASCII Latin (the only scripts in these labels) — sufficient here; no NFKD/locale machinery warranted.
 - **Option count growth**: 90 masters filter instantly in memory; Combobox renders all matches (no virtualization — YAGNI). Threshold caveat: revisit sooner (~200) only if option rows ever grow a second line of text; simple swatch+label rows are fine into the hundreds.

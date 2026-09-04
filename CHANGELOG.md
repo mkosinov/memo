@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — 2026-09-04
+
+### Added
+- **GH #214 — Searchable Combobox for dictionary dropdowns (client-side instant filter over `/all` arrays)** — branch `feat/searchable-combobox-214` (15 commits: 2ad79ae..06f62aa):
+  - **Component:** new shared `app/components/shared/Combobox.tsx` (presentational; absorbs CustomSelect's option shape, color swatch and chevron-trigger visual language). Contract (spec §5): `ComboboxOption { value; label; searchText?; color? }` + `ComboboxProps { value; options; onChange; clearLabel; className?; ariaLabel? }` with the `''`-sentinel value contract — clear (`''`) is emitted only via the pinned first row, whose copy stays per-surface («Не выбран» / «Не выбрана» / «Выберите» / «Выберите услугу» / «Все локации/услуги/мастера»). Search input always visible at the top of the open dropdown; filter = case-insensitive substring anywhere in label/searchText (surname or first name both match); «Ничего не найдено» empty state (announced to screen readers, testid `combobox-empty`); internal scroll past ~240px; full keyboard support (arrows/Home/End, Enter selects, Tab commits the highlighted row, Esc closes + returns focus to the trigger and `stopPropagation` — Esc inside a dropdown no longer closes the surrounding modal); ARIA APG listbox semantics (`aria-selected` tracks the committed value, scroll-into-view on keyboard nav, trigger `aria-label`). Testids `combobox-*`. Unit suite `__tests__/Combobox.test.tsx`, no fake timers.
+  - **Surfaces migrated (all 14 spec §6 rows incl. G1b amendment rows 13–14):** ClientRecordTab location+service, MasterPicker (external API unchanged — internals → Combobox), ActivityDetailsModal SettingsTab service+location (was native `<select>`), StampPanel master (was native — now routed through MasterPicker) + service, PhotoModal location (generic `select` renderer), BookingFilters (records filter bar) location+service+master, PhotosFilters service+location (G1b). Data fetching / archived semantics per surface unchanged; wrapper testids (`select-service`/`select-master`/`select-location`/`settings-tab`/`stamp-master`) and «Фильтр по …» aria-labels preserved.
+  - **Master label unification (spec §6.1):** masters display uniformly as «Фамилия Имя» (`displayMasterName`) in every dropdown — MasterPicker raw-shape labels (was «Имя Фамилия»), BookingFilters master (was first-name-only), StampPanel via MasterPicker (was `shortName`; empty copy «Выберите мастера» → «Не выбран»). Color swatch preserved.
+  - **Rename:** `SearchableSelect` → `RemoteSearchSelect` (file, props, export, test file, imports, comments) — zero behavior diff; keeps its distinguishing server-coupled typeahead semantics (300 ms debounce + min-2 clamp) vs Combobox's instant local filter.
+  - **Delete:** `CustomSelect.tsx` + `CustomSelect.test.tsx` hard-deleted after its last consumer (MasterPicker) left; no `custom-select-*` references remain in app code or tests (except the self-contained inline HTML in `wave6-status-snapshots.spec.ts`).
+  - **Tests:** admin vitest 1580p/0f (102 files; baseline 1571 − 13 deleted CustomSelect suite + 8 Combobox + new per-surface cases), `tsc` clean; e2e migrated to the `combobox-*` flow across 5 specs (`clients`, `activity-details-modal`, `records`, `wave6-record-status-derived`, `photos-crud`) + new `e2e/helpers/combobox.ts`; new e2e user scenarios US-1..US-6 (`combobox-dictionaries.spec.ts`); locally green — records 20/20, records-view 7/7, clients 19/19, activity-details-modal 13/13, photos-crud 19/19, combobox-dictionaries 6/6. Lint + backend/api-client suites = final gate at finishing (after this docs commit).
+  - **Acceptance criteria (spec §12 AC1–7) all met** — shared Combobox + suite (AC1), all §6 rows incl. 13–14 (AC2), CustomSelect deleted reference-free (AC3), rename zero-diff (AC4), «Фамилия Имя» + masters.md addendum (AC5), «Ничего не найдено» + Esc-keyboard behavior (AC6–7). Visual gate passed autonomously (behavioral assertions + screenshots `/tmp/visual-compliance-214/`).
+  - **Deviations for the record:** US-6 e2e runs on the records filter bar instead of the client record tab (ClientCardModal capture-phase Esc listener — `stopPropagation` can't block it; spec §10 allows any surface; follow-up filed to evaluate `stopImmediatePropagation`). Combobox `aria-selected` tracks the committed value + scroll-into-view polish (spec-conform upgrades from quality review).
+  - **Docs:** domain-rules `masters.md` synced (combobox display convention, commit `06f62aa`).
+  - **30 files changed, +1524 / −646.**
+  - **Closes:** #214.
+  - Design spec: `docs/specs/2026-09-03-searchable-combobox-design.md` (on main)
+  - Plan: `docs/plans/2026-09-03-searchable-combobox-plan.md` (on main)
+
 ## [Unreleased] — 2026-09-03
 
 ### Added

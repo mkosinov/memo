@@ -5,6 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import { getClientsPaged, getActivities, getAllTags } from '@memo/api-client';
 import type { TagResponse } from '@memo/api-client';
 import RemoteSearchSelect from '@/app/components/shared/RemoteSearchSelect';
+import { Combobox, type ComboboxOption } from '@/app/components/shared/Combobox';
 import { usePhotosTable } from '@/contexts/PhotosContext';
 import { formatActivityLabel } from '@/lib/utils';
 
@@ -17,8 +18,8 @@ import { formatActivityLabel } from '@/lib/utils';
  *   Клиент     — RemoteSearchSelect over getClientsPaged (active clients only, §7.3)
  *   Активность — RemoteSearchSelect over getActivities; options render THE canonical
  *                label (spec §7.7) via formatActivityLabel + the context locationsMap
- *   Услуга     — plain <select> over servicesMap («Все услуги» empty option)
- *   Локация    — plain <select> over locationsMap («Все локации»)
+ *   Услуга     — Combobox over servicesMap («Все услуги» pinned clear option)
+ *   Локация    — Combobox over locationsMap («Все локации»)
  *   Теги       — chips + add-typeahead over getAllTags() (PhotoModal multi pattern)
  */
 export function PhotosFilters() {
@@ -26,7 +27,7 @@ export function PhotosFilters() {
 
   // RemoteSearchSelect keeps its selected label in LOCAL state — a context reset
   // cannot reach it, so the reset button bumps this key to remount the two
-  // typeaheads clean (chips/selects are context-derived and clear on their own).
+  // typeaheads clean (chips/comboboxes are context-derived and clear on their own).
   const [resetKey, setResetKey] = useState(0);
 
   // Tags dictionary — /all once (same staleTime: Infinity pattern as the
@@ -51,6 +52,20 @@ export function PhotosFilters() {
     return map;
   }, [locationsMap]);
 
+  // GH #214 Task 9 (§6 rows 13-14): the two dictionary selects become
+  // Combobox — data stays the context maps' values (raw shapes, §6.2
+  // haystacks). The filter state keeps its `undefined` sentinel, adapted at
+  // this boundary (`?? ''` in, `v || undefined` out — spec §5 contract note).
+  const serviceOptions: ComboboxOption[] = Array.from(servicesMap.values()).map((s) => ({
+    value: s.id,
+    label: s.title,
+  }));
+  const locationOptions: ComboboxOption[] = Array.from(locationsMap.values()).map((l) => ({
+    value: l.id,
+    label: l.name,
+    searchText: `${l.name} ${l.short_title ?? ''}`.trim(),
+  }));
+
   const handleReset = () => {
     resetFilters();
     setResetKey((k) => k + 1);
@@ -66,7 +81,6 @@ export function PhotosFilters() {
   };
 
   const selectClass = 'rounded-lg border px-2 py-1.5 text-xs';
-  const selectStyle = { borderColor: 'var(--line)', color: 'var(--ink-mid)', backgroundColor: 'var(--white)' };
   const labelStyle = { color: 'var(--ink-light)' };
 
   return (
@@ -105,38 +119,30 @@ export function PhotosFilters() {
         />
       </div>
 
-      {/* Услуга — plain select over the /services/all map */}
+      {/* Услуга — Combobox over the /services/all map (§6 row 13) */}
       <div className="flex flex-col gap-1">
         <label className="text-xs font-medium" style={labelStyle}>Услуга</label>
-        <select
+        <Combobox
+          clearLabel="Все услуги"
           value={filters.service_id ?? ''}
-          onChange={(e) => setFilters({ service_id: e.target.value || undefined })}
+          options={serviceOptions}
+          onChange={(v) => setFilters({ service_id: v || undefined })}
           className={selectClass}
-          style={selectStyle}
-          aria-label="Фильтр по услуге"
-        >
-          <option value="">Все услуги</option>
-          {Array.from(servicesMap.values()).map((s) => (
-            <option key={s.id} value={s.id}>{s.title}</option>
-          ))}
-        </select>
+          ariaLabel="Фильтр по услуге"
+        />
       </div>
 
-      {/* Локация — plain select over the /locations/all map */}
+      {/* Локация — Combobox over the /locations/all map (§6 row 14) */}
       <div className="flex flex-col gap-1">
         <label className="text-xs font-medium" style={labelStyle}>Локация</label>
-        <select
+        <Combobox
+          clearLabel="Все локации"
           value={filters.location_id ?? ''}
-          onChange={(e) => setFilters({ location_id: e.target.value || undefined })}
+          options={locationOptions}
+          onChange={(v) => setFilters({ location_id: v || undefined })}
           className={selectClass}
-          style={selectStyle}
-          aria-label="Фильтр по локации"
-        >
-          <option value="">Все локации</option>
-          {Array.from(locationsMap.values()).map((l) => (
-            <option key={l.id} value={l.id}>{l.name}</option>
-          ))}
-        </select>
+          ariaLabel="Фильтр по локации"
+        />
       </div>
 
       {/* Теги — chips + add-typeahead (PhotoModal.tsx multi-emulation pattern) */}

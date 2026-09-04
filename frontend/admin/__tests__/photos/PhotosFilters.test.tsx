@@ -6,8 +6,8 @@
  *   Клиент     — RemoteSearchSelect over getClientsPaged({ q, per_page, status: 'active' })
  *   Активность — RemoteSearchSelect over getActivities({ q, per_page }); options render
  *                the canonical label (spec §7.7) via formatActivityLabel + locationsMap
- *   Услуга     — plain <select> over servicesMap («Все услуги» empty option)
- *   Локация    — plain <select> over locationsMap («Все локации»)
+ *   Услуга     — Combobox over servicesMap («Все услуги» pinned clear option)
+ *   Локация    — Combobox over locationsMap («Все локации»)
  *   Теги       — chips + add-typeahead over getAllTags() (PhotoModal multi pattern)
  *   Сбросить   — resetFilters() + visually clears the typeaheads
  *
@@ -185,32 +185,45 @@ describe('PhotosFilters — controls render (GH #211 Task 8)', () => {
 });
 
 describe('PhotosFilters — change → setFilters payloads', () => {
-  it('selecting a service calls setFilters({ service_id })', () => {
+  // GH #214 Task 9 (§6 rows 13-14): the two native selects are Combobox —
+  // options exist in the DOM only while their dropdown is open, so each flow
+  // is open-trigger (aria-label carries getByLabelText) → option interaction.
+
+  it('selecting a service calls setFilters({ service_id })', async () => {
     const setFilters = vi.fn();
     setup({ setFilters, servicesMap: new Map([['s-1', makeService('s-1', { title: 'Гончарный МК' })]]) });
     renderFilters();
 
-    fireEvent.change(screen.getByLabelText('Фильтр по услуге'), { target: { value: 's-1' } });
+    fireEvent.click(screen.getByLabelText('Фильтр по услуге'));
+    await screen.findByRole('option', { name: 'Гончарный МК' });
+    fireEvent.click(screen.getByTestId('combobox-option-s-1'));
 
     expect(setFilters).toHaveBeenCalledWith({ service_id: 's-1' });
   });
 
-  it('selecting «Все услуги» clears service_id', () => {
+  it('selecting «Все услуги» clears service_id', async () => {
     const setFilters = vi.fn();
     setup({ setFilters, servicesMap: new Map([['s-1', makeService('s-1')]]) });
     renderFilters();
 
-    fireEvent.change(screen.getByLabelText('Фильтр по услуге'), { target: { value: '' } });
+    fireEvent.click(screen.getByLabelText('Фильтр по услуге'));
+    expect(screen.getByTestId('combobox-option-clear')).toHaveTextContent('Все услуги');
+    fireEvent.click(screen.getByTestId('combobox-option-clear'));
 
     expect(setFilters).toHaveBeenCalledWith({ service_id: undefined });
   });
 
-  it('selecting a location calls setFilters({ location_id })', () => {
+  it('selecting a location calls setFilters({ location_id })', async () => {
     const setFilters = vi.fn();
     setup({ setFilters, locationsMap: new Map([['loc-1', createMockLocationResponse()]]) });
     renderFilters();
 
-    fireEvent.change(screen.getByLabelText('Фильтр по локации'), { target: { value: 'loc-1' } });
+    fireEvent.click(screen.getByLabelText('Фильтр по локации'));
+    await screen.findByRole('option', { name: 'Студия на Невском' });
+    // Type filters the options — haystack is `${l.name} ${l.short_title ?? ''}` (§6.2).
+    fireEvent.change(screen.getByTestId('combobox-search'), { target: { value: 'невск' } });
+    expect(screen.getByRole('option', { name: 'Студия на Невском' })).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('combobox-option-loc-1'));
 
     expect(setFilters).toHaveBeenCalledWith({ location_id: 'loc-1' });
   });

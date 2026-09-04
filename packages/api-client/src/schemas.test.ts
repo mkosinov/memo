@@ -433,6 +433,7 @@ const validVisit = {
   record_id: 'record-1',
   visitor_id: 'visitor-1',
   price: 2500,
+  custom_price: null,
   status: 'waiting',
   created_at: '2024-06-01T12:00:00Z',
   updated_at: '2024-06-01T12:00:00Z',
@@ -462,6 +463,7 @@ const validRecord = {
   client_id: 'client-1',
   status: 'confirmed',
   seats: 2,
+  anonym_visits: 0,
   comment: 'VIP guests',
   custom_price: null,
   created_at: '2024-06-01T12:00:00Z',
@@ -503,8 +505,6 @@ describe('RecordResponseSchema', () => {
 
 // ─── RecordViewResponse (GH #213: composite read endpoint display fields) ───
 
-// Complete visit fixture — includes custom_price (required by
-// VisitResponseSchema); the shared validVisit above predates that field (#188).
 const recordViewVisit = {
   id: 'visit-1',
   record_id: 'record-1',

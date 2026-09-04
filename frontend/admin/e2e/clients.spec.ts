@@ -469,19 +469,19 @@ test.describe('Record tab', () => {
       // Time field visible
       await expect(tab.locator('#record-time')).toBeVisible();
 
-      // Service dropdown visible (CustomSelect)
+      // Service dropdown visible (Combobox)
       await expect(
-        tab.locator('[data-testid="select-service"] [data-testid="custom-select-trigger"]'),
+        tab.locator('[data-testid="select-service"] [data-testid="combobox-trigger"]'),
       ).toBeVisible();
 
-      // Master dropdown visible (CustomSelect)
+      // Master dropdown visible (MasterPicker → Combobox)
       await expect(
-        tab.locator('[data-testid="select-master"] [data-testid="custom-select-trigger"]'),
+        tab.locator('[data-testid="select-master"] [data-testid="combobox-trigger"]'),
       ).toBeVisible();
 
-      // Location dropdown visible (CustomSelect)
+      // Location dropdown visible (Combobox)
       await expect(
-        tab.locator('[data-testid="select-location"] [data-testid="custom-select-trigger"]'),
+        tab.locator('[data-testid="select-location"] [data-testid="combobox-trigger"]'),
       ).toBeVisible();
 
       // Status dropdown visible (StatusPicker icon variant in RecordVisitRow)

@@ -10,6 +10,7 @@ import {
   selectClientFilterOption,
   waitForPhotosReady,
 } from './fixtures/helpers';
+import { searchAndSelect } from './helpers/combobox';
 
 /**
  * E2E tests for the Photos page (GH #211 Task 10 — honest server-driven list):
@@ -243,7 +244,12 @@ test.describe('Photos — Service filter (variant A)', () => {
     try {
       await waitForPhotosReady(page);
       const settled = nextPhotosList(page);
-      await page.getByLabel('Фильтр по услуге').selectOption({ label: service.title });
+      await searchAndSelect(
+        page,
+        page.getByLabel('Фильтр по услуге'),
+        service.title,
+        service.id,
+      );
       await settled;
       await settle(page);
 
@@ -266,13 +272,19 @@ test.describe('Photos — Service filter (variant A)', () => {
 // ---------------------------------------------------------------------------
 
 test.describe('Photos — Location filter', () => {
-  test('location-OWNED photo visible; activity-owned photos at L1 are NOT', async ({ page }) => {
+  test('location-OWNED photo visible; activity-owned photos at L1 are NOT', async ({ page, request }) => {
     // Seed pins (backend/src/seed/seed.py _seed_photos): ph4 is location-owned
     // at alpika; ph6/ph7 are activity-owned whose activities (ev_1/ev_4) also
     // sit at alpika — the direct-only filter must NOT surface them.
+    const locsResp = await request.get(`${BACKEND}/api/v1/locations/all`);
+    const alpika = ((await locsResp.json()) as Array<{ id: string; name: string }>).find(
+      (l) => l.name === 'Альпика',
+    );
+    expect(alpika).toBeTruthy();
+
     await waitForPhotosReady(page);
     const settled = nextPhotosList(page);
-    await page.getByLabel('Фильтр по локации').selectOption({ label: 'Альпика' });
+    await searchAndSelect(page, page.getByLabel('Фильтр по локации'), 'Альпика', alpika!.id);
     await settled;
     await settle(page);
 
@@ -396,7 +408,15 @@ test.describe('Photos — Create Modal', () => {
       await dialog.getByPlaceholder('photo-001.jpg').fill(filename);
       await dialog.getByRole('textbox', { name: 'Клиент' }).fill(client.name);
       await dialog.getByRole('option', { name: client.name }).click();
-      await dialog.getByLabel('Локация').selectOption({ label: 'Альпика' });
+
+      // Location field is a Combobox (GH #214 row 9) — open trigger, pick
+      // «Альпика» by its option value (clear label is «Без локации»).
+      const locsResp = await request.get(`${BACKEND}/api/v1/locations/all`);
+      const alpika = ((await locsResp.json()) as Array<{ id: string; name: string }>).find(
+        (l) => l.name === 'Альпика',
+      );
+      expect(alpika).toBeTruthy();
+      await searchAndSelect(page, dialog.getByLabel('Локация'), 'Альпика', alpika!.id);
 
       await dialog.getByText('Сохранить').click();
 

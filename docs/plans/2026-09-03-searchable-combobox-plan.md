@@ -116,7 +116,10 @@ export function Combobox({ value, options, onChange, clearLabel, className = '',
   const openDropdown = () => {
     setIsOpen(true);
     setQuery('');
-    setHighlightedIndex(0);
+    // Open lands on the FIRST REAL option (index 1; clear option is index 0) —
+    // same policy as the post-typing reset (spec §5: clear excluded from
+    // auto-highlight; explicit ArrowUp/Home reach it).
+    setHighlightedIndex(visible.length > 1 ? 1 : 0);
   };
 
   const closeDropdown = (focusTrigger = true) => {
@@ -280,13 +283,15 @@ function renderCombobox(props = {}) {
 }
 
 describe('Combobox', () => {
-  it('1. renders trigger with selected label; clearLabel when value=""; — when value not in options', () => {
+  it('1. renders trigger with selected label; clearLabel when value=""; — when value not in options; ariaLabel names the trigger', () => {
     renderCombobox();
     expect(screen.getByTestId('combobox-trigger')).toHaveTextContent('Иванова Анна');
     renderCombobox({ value: '' });
     expect(screen.getAllByTestId('combobox-trigger')[1]).toHaveTextContent('Не выбран');
     renderCombobox({ value: 'ghost' });
     expect(screen.getAllByTestId('combobox-trigger')[2]).toHaveTextContent('—');
+    renderCombobox({ value: '', ariaLabel: 'Мастер' });
+    expect(screen.getByLabelText('Мастер')).toBe(screen.getAllByTestId('combobox-trigger')[3]);
   });
 
   it('2. renders color swatch with data-color on trigger and options', () => {
@@ -313,6 +318,10 @@ describe('Combobox', () => {
     fireEvent.click(screen.getByTestId('combobox-option-m2'));
     expect(onChange).toHaveBeenCalledWith('m2');
     expect(screen.queryByTestId('combobox-dropdown')).not.toBeInTheDocument();
+    // options list is height-bounded (spec §5.3) — internal scroll, not unbounded growth
+    fireEvent.click(screen.getByTestId('combobox-trigger'));
+    expect(screen.getByRole('listbox').className).toContain('max-h-60');
+    expect(screen.getByRole('listbox').className).toContain('overflow-y-auto');
   });
 
   it('4. filters instantly case-insensitive substring; searchText wins; whitespace-only = no filter; query resets on close+reopen', () => {
@@ -350,41 +359,46 @@ describe('Combobox', () => {
     expect(screen.queryByTestId('combobox-dropdown')).not.toBeInTheDocument();
   });
 
-  it('7. keyboard: arrows wrap incl. clear first; Home/End; Enter selects; Tab commits; Esc closes, focuses trigger, value unchanged, no propagation', () => {
+  it('7. keyboard: arrows wrap incl. clear; Home/End; Enter selects; Tab commits; Esc closes, focuses trigger, value unchanged, no propagation', () => {
     const onChange = vi.fn();
     renderCombobox({ onChange });
     const trigger = screen.getByTestId('combobox-trigger');
+
+    // Open lands on the first real option (m1); ArrowDown → m2; Enter selects it
     fireEvent.click(trigger);
-    const search = screen.getByTestId('combobox-search');
-    // ArrowDown from reset position (first filtered = m1) → m2
-    fireEvent.keyDown(search, { key: 'ArrowDown' });
-    fireEvent.keyDown(search, { key: 'Enter' });
+    fireEvent.keyDown(screen.getByTestId('combobox-search'), { key: 'ArrowDown' });
+    fireEvent.keyDown(screen.getByTestId('combobox-search'), { key: 'Enter' });
     expect(onChange).toHaveBeenCalledWith('m2');
-    // reopen: Home → clear option; Enter on clear emits ''
+
+    // Reopen: Home → pinned clear option (index 0); Enter emits ''
     fireEvent.click(trigger);
-    fireEvent.keyDown(search, { key: 'Home' });
-    fireEvent.keyDown(search, { key: 'Enter' });
+    fireEvent.keyDown(screen.getByTestId('combobox-search'), { key: 'Home' });
+    fireEvent.keyDown(screen.getByTestId('combobox-search'), { key: 'Enter' });
     expect(onChange).toHaveBeenCalledWith('');
-    // reopen: type to narrow, ArrowUp wraps to last match, Tab commits it
+
+    // Reopen: ArrowUp participates clear + wraps; End = last option
     fireEvent.click(trigger);
-    fireEvent.change(search, { target: { value: 'пет' } });
-    fireEvent.keyDown(search, { key: 'ArrowUp' }); // only m2 visible (+clear): wraps to last = m2
-    fireEvent.keyDown(search, { key: 'Tab' });
+    fireEvent.keyDown(screen.getByTestId('combobox-search'), { key: 'ArrowUp' }); // m1 → clear (0)
+    fireEvent.keyDown(screen.getByTestId('combobox-search'), { key: 'ArrowUp' }); // clear → wraps to last (m3)
+    fireEvent.keyDown(screen.getByTestId('combobox-search'), { key: 'End' }); // End also = m3
+    fireEvent.keyDown(screen.getByTestId('combobox-search'), { key: 'Enter' });
+    expect(onChange).toHaveBeenCalledWith('m3');
+
+    // Reopen: type narrows the list; Tab commits the highlighted only match
+    fireEvent.click(trigger);
+    fireEvent.change(screen.getByTestId('combobox-search'), { target: { value: 'пет' } });
+    fireEvent.keyDown(screen.getByTestId('combobox-search'), { key: 'Tab' });
     expect(onChange).toHaveBeenCalledWith('m2');
-    // Esc: no onChange, dropdown closed, focus back on trigger
+
+    // Esc: no selection change, dropdown closed, focus returns to trigger, keydown NOT propagated
+    const escSpy = vi.fn();
+    window.addEventListener('keydown', escSpy);
     fireEvent.click(trigger);
-    const propagated: string[] = [];
-    window.addEventListener('keydown', (e) => propagated.push(e.key));
-    fireEvent.keyDown(search, { key: 'Escape' });
-    expect(onChange).not.toHaveBeenCalledWith(expect.anything());
-    expect(propagated).not.toContain('Escape');
+    fireEvent.keyDown(screen.getByTestId('combobox-search'), { key: 'Escape' });
+    expect(escSpy).not.toHaveBeenCalled();
+    expect(onChange).toHaveBeenLastCalledWith('m2'); // unchanged since the Tab commit
     expect(screen.queryByTestId('combobox-dropdown')).not.toBeInTheDocument();
     expect(trigger).toHaveFocus();
-    // End → last option
-    fireEvent.click(trigger);
-    fireEvent.keyDown(search, { key: 'End' });
-    fireEvent.keyDown(search, { key: 'Enter' });
-    expect(onChange).toHaveBeenLastCalledWith(expect.any(String));
   });
 
   it('8. works as a plain dropdown without typing (click-only path)', () => {
@@ -418,7 +432,26 @@ describe('Combobox', () => {
 ### Task Description
 Swap `CustomSelect` for `Combobox` inside `MasterPicker`; public API byte-identical; raw-shape label becomes `displayMasterName`.
 
-**Exact new body** (replace lines 28-46; imports: drop CustomSelect, add Combobox + `displayMasterName` from `@/lib/utils`):
+**Exact new body** (edits span the WHOLE file — `MasterBase` gains `shortName?: string` for the haystack, `MasterPickerProps` gains `ariaLabel?: string`, `getMasterLabel` switches to `displayMasterName`, the component body is replaced; imports: drop CustomSelect, add `Combobox` + `ComboboxOption` from `./Combobox` and `displayMasterName` from `@/lib/utils`):
+
+```tsx
+/** Accepts both raw API MasterResponse ({ first_name, last_name }) and domain Master ({ name, shortName }). */
+interface MasterBase {
+  id: string;
+  color: string;
+  name?: string;
+  first_name?: string;
+  last_name?: string;
+  shortName?: string;
+}
+
+interface MasterPickerProps {
+  masters: MasterBase[];
+  value: string;
+  onChange: (value: string) => void;
+  className?: string;
+  ariaLabel?: string;
+}
 
 ```tsx
 export function MasterPicker({ masters, value, onChange, className, ariaLabel }: MasterPickerProps) {
@@ -455,7 +488,7 @@ function getMasterLabel(m: MasterBase): string {
 }
 ```
 
-Note: `displayMasterName` in `lib/utils.ts` takes `{ first_name, last_name }` — for domain-shape masters `m.name` already IS «Фамилия Имя» (transformers). The `searchText` line covers domain `shortName` (first name) so either word finds the master (spec §6.2 row 2); raw shape needs no searchText («Фамилия Имя» contains both).
+(`searchText` in the component body reads `m.shortName` — hence the `MasterBase` field added above; domain Masters carry it, raw shapes leave it `undefined`.) Note: `displayMasterName` in `lib/utils.ts` takes `{ first_name, last_name }` — for domain-shape masters `m.name` already IS «Фамилия Имя» (transformers). The `searchText` line covers domain `shortName` (first name) so either word finds the master (spec §6.2 row 2); raw shape needs no searchText («Фамилия Имя» contains both).
 
 **Update `__tests__/MasterPicker.test.tsx`:** replace every `custom-select-` testid with `combobox-`; raw-fixture label expectations «Имя Фамилия» → «Фамилия Имя»; the «Не выбран» selection test now targets `combobox-option-clear` and asserts `onChange('')`; ADD one search test (raw shape): open, type the LAST name fragment, assert only the matching option visible, select it. Keep both raw and domain fixture cases.
 
@@ -531,8 +564,8 @@ Pure rename, zero behavior diff:
 - [ ] `git mv frontend/admin/app/components/shared/SearchableSelect.tsx frontend/admin/app/components/shared/RemoteSearchSelect.tsx`
 - [ ] In the moved file: `SearchableSelectProps` → `RemoteSearchSelectProps`; default export function `SearchableSelect` → `RemoteSearchSelect`. Header comment: add one line "Server-coupled typeahead (debounce 300ms + min-2 clamp) — the remote counterpart of Combobox (GH #214)."
 - [ ] `git mv frontend/admin/__tests__/SearchableSelect.test.tsx frontend/admin/__tests__/RemoteSearchSelect.test.tsx`; update the import path + component name inside
-- [ ] `frontend/admin/app/(main)/photos/components/PhotoModal.tsx`: import + 2 JSX tags (`:104` tags typeahead, `:151` searchable-field typeahead)
-- [ ] `frontend/admin/app/(main)/photos/components/PhotosFilters.tsx`: import + 3 JSX tags (`:76`, `:93`, `:168`)
+- [ ] `frontend/admin/app/(main)/photos/components/PhotoModal.tsx`: import + 2 JSX tags (`:104` tags typeahead, `:151` searchable-field typeahead) + inline comment at `:124` mentioning "SearchableSelect's SearchItem shape"
+- [ ] `frontend/admin/app/(main)/photos/components/PhotosFilters.tsx`: import + 3 JSX tags (`:76`, `:93`, `:168`) + header-comment mentions (`:17-18`) + the `:27` comment about "SearchableSelect keeps its selected label in LOCAL state"
 - [ ] `frontend/admin/__tests__/photos/PhotosFilters.test.tsx`: header comment references (`:6-7`, `:122`, `:165`)
 - [ ] Verify nothing else references the old name: `grep -rn "SearchableSelect" frontend/admin --include="*.ts" --include="*.tsx"` → only `RemoteSearchSelect` hits remain
 - [ ] `npx vitest run && npm run type-check` → green (RemoteSearchSelect suite passes unedited apart from names)
@@ -587,7 +620,7 @@ Location JSX (replaces `:266-283`):
 />
 ```
 
-Keep the wrapper `<div data-testid=...>`/labels as-is. Check `handleServiceChange('')` behaves like today's empty `<option value="">` (it already receives `''` from the native select — no change needed; verify in code and adjust only if the current handler skips `''`).
+**IMPORTANT — wrapper testids:** `select-service`/`select-location` testids currently sit ON the native `<select>` elements (`SettingsTab.tsx:190`, `:275`) being deleted. Move each `data-testid` onto the surrounding wrapper `<div>` (the one already holding the `<label>`) so the chain `[data-testid="select-service"] [data-testid="combobox-trigger"]` keeps resolving for Task 11/12 e2e and the unit suite. Keep labels and the MasterPicker block as-is. Check `handleServiceChange('')` behaves like today's empty `<option value="">` (it already receives `''` from the native select — no change needed; verify in code and adjust only if the current handler skips `''`).
 
 **Update `__tests__/ActivityDetailsModal.test.tsx`:** MasterPicker-related locators `custom-select-*` → `combobox-*` (`:250`, `:257`, `:723-757` block); swatch assertions via `[data-color]` keep passing unchanged; service/location select interactions (`getByTestId('select-service')` + `selectOption`-style or change-event patterns) → Combobox open/type/click flow. Master labels in expectations: «Фамилия Имя» where raw fixtures were «Имя Фамилия».
 
@@ -612,7 +645,7 @@ Master select (`:87-101`) → MasterPicker; service select (`:113-127`) → Comb
 ```tsx
 <MasterPicker
   masters={masters}
-  value={stamp.masterId}
+  value={stamp.masterId ?? ''}
   onChange={handleMasterChange}
   className="mt-1 w-full rounded-lg border px-2 py-1.5 text-sm"
   ariaLabel="Мастер"
@@ -624,7 +657,7 @@ Master select (`:87-101`) → MasterPicker; service select (`:113-127`) → Comb
 ```tsx
 <Combobox
   clearLabel="Выберите услугу"
-  value={stamp.serviceId}
+  value={stamp.serviceId ?? ''}
   options={services.map((s) => ({ value: s.id, label: s.name }))}
   onChange={handleServiceChange}
   className="mt-1 w-full rounded-lg border px-2 py-1.5 text-sm"
@@ -632,7 +665,22 @@ Master select (`:87-101`) → MasterPicker; service select (`:113-127`) → Comb
 />
 ```
 
-Imports: `MasterPicker` from `@/app/components/shared/MasterPicker`, `Combobox` from `@/app/components/shared/Combobox`. Remove the two native `<select>`s. Keep the surrounding labels (visible text); drop their `htmlFor`/`id` pairing (`htmlFor="stamp-master"` etc. has no native target anymore — the triggers' `aria-label`s provide the accessible names). Add `data-testid="stamp-master-picker"` on the master wrapper div (stable hook for US-5). The summary line `:164` (`selectedMaster?.shortName`) keeps working unchanged. Verify `handleMasterChange`/`handleServiceChange` accept `''` (they already do — native selects emitted `''`).
+Imports: `MasterPicker` from `@/app/components/shared/MasterPicker`, `Combobox` from `@/app/components/shared/Combobox`. Remove the two native `<select>`s. Keep the surrounding labels (visible text); drop their `htmlFor`/`id` pairing (`htmlFor="stamp-master"` etc. has no native target anymore — the triggers' `aria-label`s provide the accessible names). Add `data-testid="stamp-master-picker"` on the master wrapper div (stable hook for US-5). The summary line `:164` (`selectedMaster?.shortName`) keeps working unchanged.
+
+**Handler rewrite (required — current handlers take `React.ChangeEvent<HTMLSelectElement>`, and `stamp.masterId/serviceId` are `string | null` in ScheduleContext):** rewrite both to plain string callbacks before wiring:
+
+```tsx
+const handleMasterChange = (v: string) => {
+  const ready = v !== '';
+  setStamp((s) => ({ ...s, masterId: ready ? v : null }));
+};
+const handleServiceChange = (v: string) => {
+  const ready = v !== '';
+  setStamp((s) => ({ ...s, serviceId: ready ? v : null }));
+};
+```
+
+(Match the CURRENT handlers' side effects exactly — read `StampPanel.tsx:19-37` first and port any additional logic beyond the id assignment verbatim; the shapes above show the sentinel mapping `'' → null` that the state requires.)
 
 **Update `__tests__/StampPanel.test.tsx`:** the two `getByLabelText(/мастер/i)` interactions (`:70`, `:95`) keep working via the trigger `ariaLabel="Мастер"` — the interaction becomes open trigger → (type) → click `combobox-option-*`. Master option labels in expectations: `shortName` («Анна») → «Фамилия Имя». Service flow: open/type/select via `combobox-*` testids; empty-option copy «Выберите мастера» → «Не выбран».
 
@@ -800,7 +848,8 @@ const locationOptions = Array.from(locationsMap.values()).map((l) => ({
 
 ### Task Description
 - [ ] `git rm frontend/admin/app/components/shared/CustomSelect.tsx frontend/admin/__tests__/CustomSelect.test.tsx`
-- [ ] Sweep: `grep -rn "CustomSelect\|custom-select" frontend/admin --include="*.ts" --include="*.tsx"` → the ONLY permitted remaining hit is `e2e/wave6-status-snapshots.spec.ts:75` (self-contained inline HTML). Fix every other hit (comments included: `e2e/wave6-record-status-derived.spec.ts:33`, `e2e/clients.spec.ts:472-484` testids — the latter is updated in Task 11; if Task 11 runs after, update the comment lines now and leave locator rewrites to Task 11 — NO: task order is fixed, Task 11 follows; here only ensure no SOURCE imports remain and comments in non-e2e files are clean).
+- [ ] Sweep (source only — e2e locators are Task 11's scope): `grep -rn "CustomSelect" frontend/admin/app frontend/admin/__tests__ frontend/admin/lib frontend/admin/contexts --include="*.ts" --include="*.tsx"` → ZERO hits expected after Task 10 (Tasks 2/3 migrated the last source imports in app code; the deleted `CustomSelect.test.tsx` took its suite with it)
+- [ ] Full-repo audit (informational, gate for Task 11's completion — not Task 10's): `grep -rn "CustomSelect\|custom-select" frontend/admin --include="*.ts" --include="*.tsx"` → remaining hits are EXACTLY: `e2e/clients.spec.ts`, `e2e/activity-details-modal.spec.ts`, `e2e/wave6-record-status-derived.spec.ts:33` (comment), `e2e/wave6-status-snapshots.spec.ts:75` (self-contained inline HTML — PERMANENT exception, spec §4.3). Anything else → fix here.
 - [ ] `npx vitest run && npm run type-check` → green (proves no import survives)
 - [ ] Commit: `chore(#214): delete CustomSelect (absorbed by Combobox)`
 
@@ -845,10 +894,9 @@ export async function searchAndSelect(
 
 Per-spec rewrites ( locator-by-locator; every native select/option locators in these files for the migrated fields):
 
-- **records.spec.ts** — `:91-93`, `:106-108` (`.toHaveValue('')` → trigger text «Все …»), `:118-130` (option counts → open trigger + count `[data-testid^="combobox-option-"]` minus clear), `:215-217`, `:598`, `:648`, `:707`, `:961` (`.selectOption(...)` → `searchAndSelect(page, page.getByLabel('Фильтр по мастеру'), surnameFragment, masterId)`; empty reset clicks `combobox-option-clear`). Master option labels «Фамилия Имя» where options text is asserted.
-- **records-view.spec.ts** — `:198-216` (option-count assertions via opened dropdown), `:517` (`.selectOption(masterA.id)` → `searchAndSelect`).
+- **records.spec.ts** — `:91-93`, `:106-108` (`.toHaveValue('')` → trigger text «Все …»), `:118-130` (option counts → open trigger + count `[data-testid^="combobox-option-"]` minus clear), `:215-217`, `:598`, `:648`, `:707`, `:961` (`.selectOption(...)` → `searchAndSelect(page, page.getByLabel('Фильтр по мастеру'), surnameFragment, masterId)`; empty reset clicks `combobox-option-clear`). Master option labels «Фамилия Имя» where options text is asserted.- **records-view.spec.ts** — `:198-216` (option-count assertions via opened dropdown), `:517` (`.selectOption(masterA.id)` → `searchAndSelect`).
 - **clients.spec.ts** — `:472-484`: `[data-testid="select-service"] [data-testid="custom-select-trigger"]` → `[data-testid="select-service"] [data-testid="combobox-trigger"]` (same for master/location wrappers).
-- **activity-details-modal.spec.ts** — `:258-260` (`.selectOption()` on `select-service` → searchAndSelect with the settings-tab-scoped trigger), `:339-341` (`custom-select-trigger` → `combobox-trigger` in `settings-tab`).
+- **activity-details-modal.spec.ts** — `:258-260` (`.selectOption()` on `select-service` → searchAndSelect with the settings-tab-scoped trigger) and the neighboring `:335-337` service `inputValue()` assertion in scenario 7 (→ trigger text assertion); `:339-341` (`custom-select-trigger` → `combobox-trigger` in `settings-tab`).
 - **photos-crud.spec.ts** — `:246`, `:275` (native filter selects → searchAndSelect via `getByLabel('Фильтр по услуге'/'Фильтр по локации')`).
 - **wave6-record-status-derived.spec.ts:33** — comment only.
 
@@ -891,7 +939,10 @@ test('US-2: activity settings service found by title fragment', async ({ page })
   // open an activity's Settings tab per activity-details-modal.spec.ts conventions
   const trigger = page.locator('[data-testid="settings-tab"] [data-testid="select-service"] [data-testid="combobox-trigger"]');
   await searchAndSelect(page, trigger, <title fragment>, <serviceId>);
-  // age/capacity recalculation still renders (existing assertions in that spec)
+  // capacity/age recalc still works (spec §10 US-2 verification): assert the
+  // age display renders the selected service's age range (copy the assertion
+  // pattern from activity-details-modal.spec.ts's settings tests)
+  await expect(page.locator('[data-testid="age-display"]')).toContainText(<expected age range of that service>);
 });
 
 // US-3: records filter bar → location then master (with swatch), reset restores «Все …»
@@ -913,6 +964,11 @@ test('US-3: BookingFilters location+master search', async ({ page }) => {
 test('US-4: photo modal location searchable', async ({ page }) => {
   // open photo modal per photos-crud.spec.ts conventions
   await searchAndSelect(page, page.locator('[data-testid="combobox-trigger"]').filter({ hasText: /локаци/i }).first(), <fragment>, <locationId>);
+  // saved photo carries the location (spec §10 US-4 verification): save the
+  // modal (copy the save-and-reopen flow from photos-crud.spec.ts) and assert
+  // the persisted photo's location — table cell or reopened modal trigger text
+  await <save flow per photos-crud.spec.ts>;
+  await expect(<photo location cell / reopened trigger>).toContainText(<location name>);
 });
 
 // US-5: stamps master (now MasterPicker)

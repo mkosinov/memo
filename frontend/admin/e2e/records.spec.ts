@@ -229,7 +229,9 @@ test.describe('Records Page — Table and Filters', () => {
       expect(await staleStatusRequest).toBe('none');
 
       // All filter controls back to defaults — Combobox triggers show the
-      // «Все …» clear labels again
+      // «Все …» clear labels again. NOTE: the «Все локации» assertion is the
+      // direct counterpart of the pre-reset dictionary-filter step above
+      // (spec US-3: reset restores «Все …» on every dictionary filter).
       await expect(page.getByLabel('Фильтр по локации')).toHaveText(/Все локации/);
       await expect(page.getByLabel('Фильтр по услуге')).toHaveText(/Все услуги/);
       await expect(page.getByLabel('Фильтр по мастеру')).toHaveText(/Все мастера/);

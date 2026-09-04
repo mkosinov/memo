@@ -2,7 +2,7 @@ import { expect, type Locator, type Page } from '@playwright/test';
 
 /**
  * Combobox flow helpers (GH #214) — dictionary dropdowns migrated from native
- * selects / CustomSelect to the shared Combobox component.
+ * selects to the shared Combobox component.
  *
  * Trigger testids/ARIA (Combobox.tsx §5.5):
  *   - trigger:  [data-testid="combobox-trigger"], carries the surface's

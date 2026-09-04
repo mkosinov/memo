@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useSchedule } from '@/contexts/ScheduleContext';
 import { MasterPicker } from '@/app/components/shared/MasterPicker';
+import { Combobox, type ComboboxOption } from '@/app/components/shared/Combobox';
 import type { Activity, Service } from '@memo/domain';
 import { decimalToHHMM, hhmmToDecimal } from '@/lib/utils';
 
@@ -38,6 +39,13 @@ export function SettingsTab({ activity, onUpdate }: SettingsTabProps) {
   const [startDateTime, setStartDateTime] = useState(() => {
     return buildDateTimeLocal(activity.date || '', activity.startTime, gridFrequency);
   });
+
+  const serviceOptions: ComboboxOption[] = services.map((s) => ({ value: s.id, label: s.name }));
+  const locationOptions: ComboboxOption[] = locations.map((l) => ({
+    value: l.id,
+    label: l.name,
+    searchText: l.shortTitle ? `${l.name} ${l.shortTitle}` : l.name,
+  }));
 
   // Selected service for display
   const selectedService = services.find((s) => s.id === serviceId) as (Service & { tariffs?: Array<{ id: string; title: string; price: number; description?: string | null }> }) | undefined;
@@ -177,25 +185,18 @@ export function SettingsTab({ activity, onUpdate }: SettingsTabProps) {
 
       {/* Row 2: Service + Age (read-only) + Capacity */}
       <div className="flex gap-3" data-testid="settings-row-service-age-capacity">
-        <div className="flex-1">
-          <label className="text-xs font-medium text-ink-mid block mb-1" htmlFor="settings-service">
+        <div className="flex-1" data-testid="select-service">
+          <label className="text-xs font-medium text-ink-mid block mb-1">
             Услуга
           </label>
-          <select
-            id="settings-service"
-            className={inputClass}
-            style={inputStyle}
+          <Combobox
+            clearLabel="Выберите"
             value={serviceId}
-            onChange={(e) => handleServiceChange(e.target.value)}
-            data-testid="select-service"
-          >
-            <option value="">Выберите</option>
-            {services.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
-              </option>
-            ))}
-          </select>
+            options={serviceOptions}
+            onChange={(v) => handleServiceChange(v)}
+            className={inputClass}
+            ariaLabel="Услуга"
+          />
         </div>
         <div className="w-20">
           <label className="text-xs font-medium text-ink-mid block mb-1">
@@ -259,28 +260,21 @@ export function SettingsTab({ activity, onUpdate }: SettingsTabProps) {
             className={`${inputClass} appearance-none`}
           />
         </div>
-        <div className="flex-1">
-          <label className="text-xs font-medium text-ink-mid block mb-1" htmlFor="settings-location">
+        <div className="flex-1" data-testid="select-location">
+          <label className="text-xs font-medium text-ink-mid block mb-1">
             Локация
           </label>
-          <select
-            id="settings-location"
-            className={inputClass}
-            style={inputStyle}
+          <Combobox
+            clearLabel="Выберите"
             value={locationId}
-            onChange={(e) => {
-              setLocationId(e.target.value);
-              onUpdate({ locationId: e.target.value });
+            options={locationOptions}
+            onChange={(v) => {
+              setLocationId(v);
+              onUpdate({ locationId: v });
             }}
-            data-testid="select-location"
-          >
-            <option value="">Выберите</option>
-            {locations.map((l) => (
-              <option key={l.id} value={l.id}>
-                {l.name}
-              </option>
-            ))}
-          </select>
+            className={inputClass}
+            ariaLabel="Локация"
+          />
         </div>
       </div>
     </div>

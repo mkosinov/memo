@@ -244,17 +244,17 @@ describe('SettingsTab', () => {
 
   it('renders master select with master names', () => {
     render(<SettingsTab {...defaultProps} />);
-    // MasterPicker uses CustomSelect — a button trigger instead of native <select>
+    // MasterPicker renders via Combobox — a button trigger instead of native <select>
     const masterRow = screen.getByTestId('settings-row-master-location');
     const masterTrigger = masterRow.querySelector(
-      '[data-testid="custom-select-trigger"]',
+      '[data-testid="combobox-trigger"]',
     ) as HTMLButtonElement;
     expect(masterTrigger).toBeInTheDocument();
     // The selected master (m1 = Ольга Середа) should show in the trigger label
     expect(masterTrigger.textContent).toContain('Ольга Середа');
     // Open the dropdown to verify all master names are available
     fireEvent.click(masterTrigger);
-    const dropdown = screen.getByTestId('custom-select-dropdown');
+    const dropdown = screen.getByTestId('combobox-dropdown');
     expect(within(dropdown).getByText('Ольга Середа')).toBeInTheDocument();
     expect(within(dropdown).getByText('Юлия Большакова')).toBeInTheDocument();
   });
@@ -712,7 +712,10 @@ describe('SettingsTab — row layout', () => {
     const { container } = render(<SettingsTab {...defaultProps} />);
     const row2 = container.querySelector('[data-testid="settings-row-service-age-capacity"]');
     expect(row2).toBeInTheDocument();
-    expect(row2!.querySelector('[data-testid="select-service"]')).toBeInTheDocument();
+    // select-service testid sits on the wrapper div; the Combobox trigger lives inside it
+    const serviceWrapper = row2!.querySelector('[data-testid="select-service"]');
+    expect(serviceWrapper).toBeInTheDocument();
+    expect(serviceWrapper!.querySelector('[data-testid="combobox-trigger"]')).toBeInTheDocument();
     expect(row2!.querySelector('[data-testid="input-capacity"]')).toBeInTheDocument();
   });
 
@@ -720,8 +723,9 @@ describe('SettingsTab — row layout', () => {
     const { container } = render(<SettingsTab {...defaultProps} />);
     const row3 = container.querySelector('[data-testid="settings-row-master-location"]');
     expect(row3).toBeInTheDocument();
-    // MasterPicker uses CustomSelect which renders a button trigger
-    expect(row3!.querySelector('[data-testid="custom-select-trigger"]')).toBeInTheDocument();
+    // MasterPicker renders via Combobox — a button trigger
+    expect(row3!.querySelector('[data-testid="combobox-trigger"]')).toBeInTheDocument();
+    // select-location testid moved onto the wrapper div (native select is gone)
     expect(row3!.querySelector('[data-testid="select-location"]')).toBeInTheDocument();
   });
 
@@ -741,16 +745,16 @@ describe('SettingsTab — row layout', () => {
 
   it('shows color dot next to master names in select', () => {
     const { container } = render(<SettingsTab {...defaultProps} />);
-    // MasterPicker uses CustomSelect — open the dropdown to inspect options
+    // MasterPicker renders via Combobox — open the dropdown to inspect options
     const masterRow = container.querySelector(
       '[data-testid="settings-row-master-location"]',
     )!;
     const trigger = masterRow.querySelector(
-      '[data-testid="custom-select-trigger"]',
+      '[data-testid="combobox-trigger"]',
     ) as HTMLButtonElement;
     expect(trigger).toBeInTheDocument();
     fireEvent.click(trigger);
-    // CustomSelect renders colored square indicators (span with backgroundColor) for each option
+    // Combobox renders colored square indicators (span with backgroundColor) for each option
     const colorSquares = container.querySelectorAll('[data-color]');
     expect(colorSquares.length).toBeGreaterThanOrEqual(1);
     // Verify the first color square has an inline background-color style
@@ -771,6 +775,61 @@ describe('SettingsTab — row layout', () => {
     const datetimeInput = screen.getByTestId('input-datetime') as HTMLInputElement;
     // Native datetime-local value is "YYYY-MM-DDTHH:MM" — snapped to 14:00
     expect(datetimeInput.value).toBe('2026-06-15T14:00');
+  });
+});
+
+// ─── SettingsTab — Combobox interactions (GH #214 rows 4-5) ─────────────────
+
+describe('SettingsTab — service/location combobox flow', () => {
+  it('selects a service via combobox and emits the service side effects', () => {
+    const onUpdate = vi.fn();
+    render(<SettingsTab activity={mockActivity} onUpdate={onUpdate} />);
+    fireEvent.click(
+      within(screen.getByTestId('select-service')).getByTestId('combobox-trigger'),
+    );
+    fireEvent.click(screen.getByTestId('combobox-option-s2'));
+    expect(onUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        serviceId: 's2',
+        serviceName: 'Картина акрилом',
+        minAge: '6',
+        duration: 2,
+      }),
+    );
+  });
+
+  it('filters service options via combobox search', () => {
+    render(<SettingsTab activity={mockActivity} onUpdate={vi.fn()} />);
+    fireEvent.click(
+      within(screen.getByTestId('select-service')).getByTestId('combobox-trigger'),
+    );
+    fireEvent.change(screen.getByTestId('combobox-search'), { target: { value: 'акрилом' } });
+    expect(screen.getByTestId('combobox-option-s2')).toBeInTheDocument();
+    expect(screen.queryByTestId('combobox-option-s1')).not.toBeInTheDocument();
+  });
+
+  it('clear option empties the service like the old empty <option value="">', () => {
+    const onUpdate = vi.fn();
+    render(<SettingsTab activity={mockActivity} onUpdate={onUpdate} />);
+    fireEvent.click(
+      within(screen.getByTestId('select-service')).getByTestId('combobox-trigger'),
+    );
+    fireEvent.click(screen.getByTestId('combobox-option-clear'));
+    // handleServiceChange('') sets state but finds no service → no onUpdate payload,
+    // exactly as with the native select's empty option
+    expect(onUpdate).not.toHaveBeenCalled();
+    const trigger = within(screen.getByTestId('select-service')).getByTestId('combobox-trigger');
+    expect(trigger.textContent).toContain('Выберите');
+  });
+
+  it('selects a location via combobox and emits locationId', () => {
+    const onUpdate = vi.fn();
+    render(<SettingsTab activity={mockActivity} onUpdate={onUpdate} />);
+    fireEvent.click(
+      within(screen.getByTestId('select-location')).getByTestId('combobox-trigger'),
+    );
+    fireEvent.click(screen.getByTestId('combobox-option-alpika'));
+    expect(onUpdate).toHaveBeenCalledWith({ locationId: 'alpika' });
   });
 });
 

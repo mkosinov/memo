@@ -9,8 +9,13 @@
  * GH #213 Task 8 (spec §6.4): selection dropdowns own their data — three
  * DIRECT useQuery calls on the CANONICAL keys (['locations']/['services']/
  * ['masters']) with the RAW getAll* fetchers (TanStack dedupe with all other
- * consumers). Active-only via the client-side `!archived` filter; labels
- * l.name / s.title / m.first_name verbatim (NOT the transformed hooks).
+ * consumers). Active-only via the client-side `!archived` filter (NOT the
+ * transformed hooks).
+ *
+ * GH #214 Task 8 (§6 rows 10-12): the three native selects become Combobox —
+ * queries/keys/`!archived` untouched; labels l.name / s.title stay verbatim,
+ * master label unifies to «Фамилия Имя» (displayMasterName, §6.1); «Все …»
+ * empty options become the pinned combobox-option-clear rows.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, act, within } from '@testing-library/react';
@@ -230,39 +235,104 @@ describe('BookingFilters — selection data via canonical-key queries (GH #213 T
     ]);
   });
 
+  // GH #214 Task 8: Combobox options only exist in the DOM while their
+  // dropdown is open — open-trigger + findByRole('option') is the proof the
+  // query resolved and reached the component (PhotoModal.test precedent).
+  // Each block closes its dropdown again (clear-option click doubles as the
+  // «Все …» → '' assertion) before the next trigger is opened.
+
   it('populates dropdowns from its own raw getAll* queries', async () => {
-    renderFilters();
+    const onLocationChange = vi.fn();
+    const onServiceChange = vi.fn();
+    const onMasterChange = vi.fn();
+    renderFilters({ onLocationChange, onServiceChange, onMasterChange });
 
     expect(getAllLocations).toHaveBeenCalled();
     expect(getAllServices).toHaveBeenCalled();
     expect(getAllMasters).toHaveBeenCalled();
 
-    // Raw-shape labels: l.name / s.title / m.first_name — verbatim.
+    // Location — l.name verbatim; «Все локации» pinned clear emits ''.
+    fireEvent.click(screen.getByLabelText('Фильтр по локации'));
     await screen.findByRole('option', { name: 'Студия на Невском' }, OPTION_WAIT);
+    expect(screen.getByTestId('combobox-option-clear')).toHaveTextContent('Все локации');
+    fireEvent.click(screen.getByTestId('combobox-option-clear'));
+    expect(onLocationChange).toHaveBeenCalledWith('');
+
+    // Service — s.title verbatim.
+    fireEvent.click(screen.getByLabelText('Фильтр по услуге'));
     await screen.findByRole('option', { name: 'Картина маслом' }, OPTION_WAIT);
-    await screen.findByRole('option', { name: 'Ольга' }, OPTION_WAIT);
+    expect(screen.getByTestId('combobox-option-clear')).toHaveTextContent('Все услуги');
+    fireEvent.click(screen.getByTestId('combobox-option-clear'));
+    expect(onServiceChange).toHaveBeenCalledWith('');
+
+    // Master — «Фамилия Имя» via displayMasterName (GH #214 §6.1).
+    fireEvent.click(screen.getByLabelText('Фильтр по мастеру'));
+    await screen.findByRole('option', { name: 'Середа Ольга' }, OPTION_WAIT);
+    expect(screen.getByTestId('combobox-option-clear')).toHaveTextContent('Все мастера');
+    fireEvent.click(screen.getByTestId('combobox-option-clear'));
+    expect(onMasterChange).toHaveBeenCalledWith('');
   });
 
   it('keeps active-only filtering — archived entities stay out of the dropdowns', async () => {
     renderFilters();
 
+    fireEvent.click(screen.getByLabelText('Фильтр по локации'));
     await screen.findByRole('option', { name: 'Студия на Невском' }, OPTION_WAIT);
-    await screen.findByRole('option', { name: 'Картина маслом' }, OPTION_WAIT);
-    await screen.findByRole('option', { name: 'Ольга' }, OPTION_WAIT);
-
     expect(screen.queryByRole('option', { name: 'Гранд Отель Поляна' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('combobox-option-clear'));
+
+    fireEvent.click(screen.getByLabelText('Фильтр по услуге'));
+    await screen.findByRole('option', { name: 'Картина маслом' }, OPTION_WAIT);
     expect(screen.queryByRole('option', { name: 'Акварель' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('option', { name: 'Юлия' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('combobox-option-clear'));
+
+    // Master labels are «Фамилия Имя» — archived Юлия Большакова stays out.
+    fireEvent.click(screen.getByLabelText('Фильтр по мастеру'));
+    await screen.findByRole('option', { name: 'Середа Ольга' }, OPTION_WAIT);
+    expect(screen.queryByRole('option', { name: 'Большакова Юлия' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('combobox-option-clear'));
   });
 
   it('does not read selection maps from RecordsContext anymore', async () => {
     // BookingFilters imports no RecordsContext at all (GH #213 Task 8) — the
     // dropdowns populate purely from the component's own canonical-key
-    // queries. The «Все локации» placeholder + one active location remain.
+    // queries. The pinned «Все локации» clear + one active location remain.
     renderFilters();
+    fireEvent.click(screen.getByLabelText('Фильтр по локации'));
     await screen.findByRole('option', { name: 'Студия на Невском' }, OPTION_WAIT);
     expect(
-      within(screen.getByRole('combobox', { name: 'Фильтр по локации' })).getAllByRole('option'),
+      within(screen.getByRole('listbox', { name: 'Фильтр по локации' })).getAllByRole('option'),
     ).toHaveLength(2); // «Все локации» + the one active location
+  });
+
+  it('typing filters options; clicking one emits the id (GH #214 §6.2 haystack)', async () => {
+    const onLocationChange = vi.fn();
+    renderFilters({ onLocationChange });
+
+    fireEvent.click(screen.getByLabelText('Фильтр по локации'));
+    await screen.findByRole('option', { name: 'Студия на Невском' }, OPTION_WAIT);
+
+    // Name substring — haystack is `${l.name} ${l.short_title ?? ''}` (§6.2).
+    fireEvent.change(screen.getByTestId('combobox-search'), { target: { value: 'невск' } });
+    expect(screen.getByRole('option', { name: 'Студия на Невском' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('option', { name: 'Студия на Невском' }));
+    expect(onLocationChange).toHaveBeenCalledWith('loc-1');
+  });
+
+  it('master: «Фамилия Имя» label + color swatch survive in options and trigger', async () => {
+    renderFilters({ masterId: 'm1' });
+
+    fireEvent.click(screen.getByLabelText('Фильтр по мастеру'));
+    await screen.findByRole('option', { name: 'Середа Ольга' }, OPTION_WAIT);
+
+    // Swatch on the option row (data-color, §5.3).
+    expect(
+      screen.getByTestId('combobox-option-m1').querySelector('[data-color="#5B8C7A"]'),
+    ).toBeInTheDocument();
+
+    // Select the master → dropdown closes; trigger shows «Фамилия Имя».
+    fireEvent.click(screen.getByTestId('combobox-option-m1'));
+    expect(screen.getByLabelText('Фильтр по мастеру')).toHaveTextContent('Середа Ольга');
   });
 });

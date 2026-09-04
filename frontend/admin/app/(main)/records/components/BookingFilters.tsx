@@ -3,8 +3,9 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigation } from '@/contexts/NavigationContext';
-import { getMonday, formatDateISO } from '@/lib/utils';
+import { getMonday, formatDateISO, displayMasterName } from '@/lib/utils';
 import { StatusFiltersPicker } from '@/app/components/shared/StatusFiltersPicker';
+import { Combobox, type ComboboxOption } from '@/app/components/shared/Combobox';
 import { getAllLocations, getAllServices, getAllMasters } from '@memo/api-client';
 import type { LocationResponse, ServiceResponse, MasterResponse } from '@memo/api-client';
 import type { VisitStatus } from '@memo/domain';
@@ -71,6 +72,24 @@ export function BookingFilters({
   const locationList = locations.filter(l => !l.archived);
   const serviceList = services.filter(s => !s.archived);
   const masterList = masters.filter(m => !m.archived);
+
+  // GH #214 Task 8 (§6 rows 10-12): option arrays per spec §6.2 — queries,
+  // keys and the `!archived` filters above are unchanged; only the control
+  // swaps. Master label unifies to «Фамилия Имя» (§6.1) + swatch from color.
+  const locationOptions: ComboboxOption[] = locationList.map((l) => ({
+    value: l.id,
+    label: l.name,
+    searchText: `${l.name} ${l.short_title ?? ''}`.trim(),
+  }));
+  const serviceOptions: ComboboxOption[] = serviceList.map((s) => ({
+    value: s.id,
+    label: s.title,
+  }));
+  const masterOptions: ComboboxOption[] = masterList.map((m) => ({
+    value: m.id,
+    label: displayMasterName(m),
+    color: m.color,
+  }));
 
   // GH #212 Task 12 — search input: local draft echoes keystrokes instantly
   // while typing is debounced 300ms before reaching onSearchChange →
@@ -151,50 +170,38 @@ export function BookingFilters({
 
       <div className="flex flex-col gap-1">
         <label className="text-xs font-medium" style={{ color: 'var(--ink-light)' }}>Локация</label>
-        <select
+        <Combobox
+          clearLabel="Все локации"
           value={locationId}
-          onChange={(e) => onLocationChange(e.target.value)}
+          options={locationOptions}
+          onChange={(v) => onLocationChange(v)}
           className="rounded-lg border px-2 py-1.5 text-xs"
-          style={{ borderColor: 'var(--line)', color: 'var(--ink-mid)', backgroundColor: 'var(--white)' }}
-          aria-label="Фильтр по локации"
-        >
-          <option value="">Все локации</option>
-          {locationList.map((l) => (
-            <option key={l.id} value={l.id}>{l.name}</option>
-          ))}
-        </select>
+          ariaLabel="Фильтр по локации"
+        />
       </div>
 
       <div className="flex flex-col gap-1">
         <label className="text-xs font-medium" style={{ color: 'var(--ink-light)' }}>Услуга</label>
-        <select
+        <Combobox
+          clearLabel="Все услуги"
           value={serviceId}
-          onChange={(e) => onServiceChange(e.target.value)}
+          options={serviceOptions}
+          onChange={(v) => onServiceChange(v)}
           className="rounded-lg border px-2 py-1.5 text-xs"
-          style={{ borderColor: 'var(--line)', color: 'var(--ink-mid)', backgroundColor: 'var(--white)' }}
-          aria-label="Фильтр по услуге"
-        >
-          <option value="">Все услуги</option>
-          {serviceList.map((s) => (
-            <option key={s.id} value={s.id}>{s.title}</option>
-          ))}
-        </select>
+          ariaLabel="Фильтр по услуге"
+        />
       </div>
 
       <div className="flex flex-col gap-1">
         <label className="text-xs font-medium" style={{ color: 'var(--ink-light)' }}>Мастер</label>
-        <select
+        <Combobox
+          clearLabel="Все мастера"
           value={masterId}
-          onChange={(e) => onMasterChange(e.target.value)}
+          options={masterOptions}
+          onChange={(v) => onMasterChange(v)}
           className="rounded-lg border px-2 py-1.5 text-xs"
-          style={{ borderColor: 'var(--line)', color: 'var(--ink-mid)', backgroundColor: 'var(--white)' }}
-          aria-label="Фильтр по мастеру"
-        >
-          <option value="">Все мастера</option>
-          {masterList.map((m) => (
-            <option key={m.id} value={m.id}>{m.first_name}</option>
-          ))}
-        </select>
+          ariaLabel="Фильтр по мастеру"
+        />
       </div>
 
       <div className="flex flex-col gap-1">

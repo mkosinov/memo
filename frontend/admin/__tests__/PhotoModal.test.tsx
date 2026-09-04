@@ -1,7 +1,7 @@
 /**
  * Tests for PhotoModal (GH #211 Task 9):
  *   - «Посетитель» field GONE; «Клиент» searchable picker (active clients)
- *   - «Локация» plain select over getAllLocations()
+ *   - «Локация» Combobox over getAllLocations() (GH #214 row 9)
  *   - mutually-exclusive owners: picking Активность clears Услуга and vice versa
  *   - canonical activity label (spec §7.7) in BOTH dropdown options and the
  *     selected value («dd.mm.yyyy HH:mm — Локация — Услуга»)
@@ -75,9 +75,27 @@ const ACTIVITY_FIXTURE = {
 const LOCATION_FIXTURE = {
   id: 'loc-1',
   name: 'Студия на Невском',
+  short_title: 'Невский',
   address: 'Невский пр. 28',
   description: null,
   capacity: 10,
+  yandex_map_url: null,
+  review_url: null,
+  record_info: null,
+  image_url: null,
+  archived: false,
+  created_at: '2026-01-01T00:00:00',
+  updated_at: '2026-01-01T00:00:00',
+};
+
+/** Second location — search-filtering needs ≥2 options to prove hiding. */
+const LOCATION_FIXTURE_2 = {
+  id: 'loc-2',
+  name: 'Мастерская на Литейном',
+  short_title: 'Литейный',
+  address: 'Литейный пр. 17',
+  description: null,
+  capacity: 8,
   yandex_map_url: null,
   review_url: null,
   record_info: null,
@@ -102,7 +120,7 @@ beforeEach(() => {
   mockGetServices.mockResolvedValue(envelope([SERVICE_FIXTURE]));
   mockGetActivities.mockResolvedValue(envelope([ACTIVITY_FIXTURE]));
   mockGetTags.mockResolvedValue(envelope([TAG_FIXTURE]));
-  mockGetAllLocations.mockResolvedValue([LOCATION_FIXTURE]);
+  mockGetAllLocations.mockResolvedValue([LOCATION_FIXTURE, LOCATION_FIXTURE_2]);
 });
 
 afterEach(() => {
@@ -145,12 +163,16 @@ function typeAndDebounce(input: HTMLElement, value: string) {
 
 /**
  * Wait until the locations dictionary has loaded AND propagated — the
- * canonical activity label and the location <select> options both derive
- * from it. The «Студия на Невском» <option> appearing in the Локация select
- * is the DOM-level proof the map reached the component.
+ * canonical activity label and the location Combobox options both derive
+ * from it. Combobox options only exist in the DOM while the dropdown is
+ * open, so open it first; `combobox-option-loc-1` appearing is the
+ * DOM-level proof the map reached the component. Closes the dropdown again
+ * so callers start from a clean state.
  */
 async function waitForLocationsLoaded() {
-  await screen.findByRole('option', { name: 'Студия на Невском' });
+  fireEvent.click(screen.getByTestId('combobox-trigger'));
+  await screen.findByTestId('combobox-option-loc-1');
+  fireEvent.click(screen.getByTestId('combobox-trigger'));
 }
 
 describe('PhotoModal — field set (GH #211 Task 9)', () => {
@@ -205,18 +227,22 @@ describe('PhotoModal — Клиент picker', () => {
   });
 });
 
-describe('PhotoModal — Локация picker', () => {
-  it('loads options via getAllLocations and submits location_id', async () => {
+describe('PhotoModal — Локация Combobox (GH #214 row 9)', () => {
+  it('shows the «Без локации» clear label in the trigger when empty', async () => {
+    renderPhotoModal();
+    expect(await screen.findByTestId('combobox-trigger')).toHaveTextContent('Без локации');
+  });
+
+  it('loads options via getAllLocations, selects one and submits location_id', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     renderPhotoModal({ onSubmit });
 
-    // Wait for the locations dictionary to populate the <select> options.
-    await screen.findByText('Студия на Невском');
-    expect(screen.getByText('Без локации')).toBeInTheDocument();
+    // Open the Combobox — options populate once the locations dictionary loads.
+    fireEvent.click(await screen.findByTestId('combobox-trigger'));
+    fireEvent.click(await screen.findByTestId('combobox-option-loc-1'));
 
-    fireEvent.change(screen.getByRole('combobox', { name: 'Локация' }), {
-      target: { value: 'loc-1' },
-    });
+    // Selection reflects in the trigger label.
+    expect(screen.getByTestId('combobox-trigger')).toHaveTextContent('Студия на Невском');
 
     fireEvent.change(screen.getByPlaceholderText('photo-001.jpg'), {
       target: { value: 'test.jpg' },
@@ -228,6 +254,17 @@ describe('PhotoModal — Локация picker', () => {
       expect.objectContaining({ location_id: 'loc-1' }),
     );
     expect(mockGetAllLocations).toHaveBeenCalled();
+  });
+
+  it('filters location options by a name fragment (non-matching hidden)', async () => {
+    renderPhotoModal();
+    fireEvent.click(await screen.findByTestId('combobox-trigger'));
+    await screen.findByTestId('combobox-option-loc-1');
+
+    // Fragment of «Студия на Невском» — haystack includes short_title (§6.2).
+    fireEvent.change(screen.getByTestId('combobox-search'), { target: { value: 'невск' } });
+    expect(screen.getByTestId('combobox-option-loc-1')).toBeInTheDocument();
+    expect(screen.queryByTestId('combobox-option-loc-2')).not.toBeInTheDocument();
   });
 });
 

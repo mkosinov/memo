@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { CustomSelect, type CustomSelectOption } from '@/app/components/shared/CustomSelect';
+import { Combobox, type ComboboxOption } from '@/app/components/shared/Combobox';
 import { MasterPicker } from '@/app/components/shared/MasterPicker';
 import { TimePicker } from '@/app/components/shared/TimePicker';
 import { RecordHeader } from '@/app/components/shared/records/RecordHeader';
@@ -193,15 +193,16 @@ export function ClientRecordTab({ recordId, clientId, client }: ClientRecordTabP
   const inputClass = 'rounded-lg border px-3 py-2 text-sm bg-white';
   const inputStyle = { borderColor: 'var(--line)' };
 
-  const locationOptions: CustomSelectOption[] = [
-    { value: '', label: 'Не выбрана' },
-    ...(Array.isArray(locations) ? locations.map(l => ({ value: l.id, label: l.name })) : []),
-  ];
+  const locationOptions: ComboboxOption[] = (Array.isArray(locations) ? locations : []).map((l) => ({
+    value: l.id,
+    label: l.name,
+    searchText: `${l.name} ${l.short_title ?? ''}`.trim(),
+  }));
 
-  const serviceOptions: CustomSelectOption[] = [
-    { value: '', label: 'Не выбрана' },
-    ...(Array.isArray(services) ? services.map(s => ({ value: s.id, label: s.title })) : []),
-  ];
+  const serviceOptions: ComboboxOption[] = (Array.isArray(services) ? services : []).map((s) => ({
+    value: s.id,
+    label: s.title,
+  }));
 
   // Build RecordWithDerived for RecordHeader
   const headerData = recordData ? { ...recordData, client: client ?? null } : null;
@@ -244,7 +245,7 @@ export function ClientRecordTab({ recordId, clientId, client }: ClientRecordTabP
         </div>
         <div data-testid="select-location">
           <label className="text-xs font-medium text-ink-mid block mb-1">Локация</label>
-          <CustomSelect value={locationId} options={locationOptions}
+          <Combobox clearLabel="Не выбрана" value={locationId} options={locationOptions}
             onChange={(v) => { setLocationId(v); markChanged(); }} className={`${inputClass} appearance-none`} />
         </div>
       </div>
@@ -253,7 +254,7 @@ export function ClientRecordTab({ recordId, clientId, client }: ClientRecordTabP
       <div className="flex flex-wrap gap-3">
         <div data-testid="select-service">
           <label className="text-xs font-medium text-ink-mid block mb-1">Услуга</label>
-          <CustomSelect value={serviceId} options={serviceOptions}
+          <Combobox clearLabel="Не выбрана" value={serviceId} options={serviceOptions}
             onChange={(v) => { setServiceId(v); markChanged(); }} className={`${inputClass} appearance-none`} />
         </div>
         <div data-testid="select-master">

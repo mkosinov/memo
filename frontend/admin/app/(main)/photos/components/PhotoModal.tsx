@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useId } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { PHOTO_FIELDS, type PhotoFieldConfig } from './photoFields';
-import SearchableSelect from '@/app/components/shared/SearchableSelect';
+import RemoteSearchSelect from '@/app/components/shared/RemoteSearchSelect';
 import { Modal } from '@/app/components/shared/modal/Modal';
 import {
   getClientsPaged,
@@ -101,7 +101,7 @@ function FieldRenderer({
             </span>
           ))}
         </div>
-        <SearchableSelect
+        <RemoteSearchSelect
           value={null}
           onChange={() => {}}
           onSelectItem={(item) => {
@@ -121,7 +121,7 @@ function FieldRenderer({
   if (field.type === 'searchable') {
     // Map field keys to search functions (GH #211: client/service/activity —
     // visitor_id is gone; owners are mutually exclusive, no auto-fill).
-    // SearchableSelect's SearchItem shape: { id: string; [key: string]: unknown }.
+    // RemoteSearchSelect's SearchItem shape: { id: string; [key: string]: unknown }.
     let searchFn: (q: string) => Promise<Array<{ id: string; [key: string]: unknown }>>;
 
     if (field.key === 'client_id') {
@@ -148,7 +148,7 @@ function FieldRenderer({
 
     return (
       <div className="flex flex-col gap-1">
-        <SearchableSelect
+        <RemoteSearchSelect
           key={remountKey ?? 0}
           value={(value as string) ?? null}
           onChange={(uuid) => onChange(field.key, uuid)}

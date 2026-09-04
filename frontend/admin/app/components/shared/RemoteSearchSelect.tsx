@@ -2,9 +2,12 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 
+// Server-coupled typeahead (debounce 300ms + min-2 clamp) — the remote
+// counterpart of Combobox (GH #214).
+
 /* ── Types ───────────────────────────────────────────────────────── */
 
-export interface SearchableSelectProps {
+export interface RemoteSearchSelectProps {
   value: string | null;
   onChange: (uuid: string | null) => void;
   onSelectItem?: (item: SearchItem) => void;
@@ -60,7 +63,7 @@ function getDisplayText(
 
 /* ── Component ───────────────────────────────────────────────────── */
 
-export default function SearchableSelect({
+export default function RemoteSearchSelect({
   value,
   onChange,
   onSelectItem,
@@ -70,7 +73,7 @@ export default function SearchableSelect({
   required = false,
   displayField,
   subtitleField,
-}: SearchableSelectProps) {
+}: RemoteSearchSelectProps) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchItem[]>([]);
   const [isOpen, setIsOpen] = useState(false);

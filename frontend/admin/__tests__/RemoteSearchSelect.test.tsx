@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
-import SearchableSelect from '@/app/components/shared/SearchableSelect';
+import RemoteSearchSelect from '@/app/components/shared/RemoteSearchSelect';
 
 // Mock search function
 const mockSearch = vi.fn();
@@ -25,31 +25,31 @@ const defaultProps = {
   displayField: 'name',
 };
 
-function renderSearchableSelect(overrides: Record<string, unknown> = {}) {
-  return render(<SearchableSelect {...defaultProps} {...overrides} />);
+function renderRemoteSearchSelect(overrides: Record<string, unknown> = {}) {
+  return render(<RemoteSearchSelect {...defaultProps} {...overrides} />);
 }
 
-describe('SearchableSelect', () => {
+describe('RemoteSearchSelect', () => {
   it('renders label and input', () => {
-    renderSearchableSelect();
+    renderRemoteSearchSelect();
     expect(screen.getByLabelText(/Посетитель/)).toBeInTheDocument();
     expect(screen.getByRole('textbox')).toBeInTheDocument();
   });
 
   it('shows placeholder text', () => {
-    renderSearchableSelect({ placeholder: 'Поиск...' });
+    renderRemoteSearchSelect({ placeholder: 'Поиск...' });
     expect(screen.getByPlaceholderText('Поиск...')).toBeInTheDocument();
   });
 
   it('shows required indicator when required prop is true', () => {
-    renderSearchableSelect({ required: true });
+    renderRemoteSearchSelect({ required: true });
     expect(screen.getByText('*')).toBeInTheDocument();
   });
 
   it('does not call onSearch for queries shorter than 2 characters', async () => {
     mockSearch.mockResolvedValue([]);
 
-    renderSearchableSelect();
+    renderRemoteSearchSelect();
     const input = screen.getByRole('textbox');
 
     // Type a single character
@@ -69,7 +69,7 @@ describe('SearchableSelect', () => {
   it('calls onSearch on input change (debounced)', async () => {
     mockSearch.mockResolvedValue([]);
 
-    renderSearchableSelect();
+    renderRemoteSearchSelect();
     const input = screen.getByRole('textbox');
 
     // Type two characters (≥2 threshold)
@@ -96,7 +96,7 @@ describe('SearchableSelect', () => {
       { id: 'v2', name: 'Алексей Петров' },
     ]);
 
-    renderSearchableSelect();
+    renderRemoteSearchSelect();
     const input = screen.getByRole('textbox');
 
     act(() => {
@@ -120,7 +120,7 @@ describe('SearchableSelect', () => {
       { id: 'v2', name: 'Алексей Петров' },
     ]);
 
-    renderSearchableSelect({ onChange });
+    renderRemoteSearchSelect({ onChange });
     const input = screen.getByRole('textbox');
 
     act(() => {
@@ -147,7 +147,7 @@ describe('SearchableSelect', () => {
   it('shows selected value after selection', async () => {
     mockSearch.mockResolvedValue([{ id: 'v1', name: 'Анна Иванова' }]);
 
-    renderSearchableSelect();
+    renderRemoteSearchSelect();
     const input = screen.getByRole('textbox');
 
     act(() => {
@@ -177,7 +177,7 @@ describe('SearchableSelect', () => {
     const onChange = vi.fn();
     mockSearch.mockResolvedValue([{ id: 'v1', name: 'Анна Иванова' }]);
 
-    renderSearchableSelect({ onChange });
+    renderRemoteSearchSelect({ onChange });
     const input = screen.getByRole('textbox');
 
     // Select an item
@@ -210,7 +210,7 @@ describe('SearchableSelect', () => {
   it('shows "Ничего не найдено" for empty results', async () => {
     mockSearch.mockResolvedValue([]);
 
-    renderSearchableSelect();
+    renderRemoteSearchSelect();
     const input = screen.getByRole('textbox');
 
     act(() => {
@@ -231,7 +231,7 @@ describe('SearchableSelect', () => {
       { id: 's1', name: 'Картина маслом', price: '3500' },
     ]);
 
-    renderSearchableSelect({ subtitleField: 'price' });
+    renderRemoteSearchSelect({ subtitleField: 'price' });
     const input = screen.getByRole('textbox');
 
     act(() => {
@@ -253,7 +253,7 @@ describe('SearchableSelect', () => {
 
     render(
       <div>
-        <SearchableSelect {...defaultProps} />
+        <RemoteSearchSelect {...defaultProps} />
         <div data-testid="outside">Outside</div>
       </div>,
     );
@@ -279,7 +279,7 @@ describe('SearchableSelect', () => {
   });
 
   it('does not show dropdown when query is empty', () => {
-    renderSearchableSelect();
+    renderRemoteSearchSelect();
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
   });
 });

@@ -3,8 +3,8 @@
  *
  * Five controls + reset, consuming the server-driven PhotosContext via
  * usePhotosTable (mocked — ClientsFilters.test precedent):
- *   Клиент     — SearchableSelect over getClientsPaged({ q, per_page, status: 'active' })
- *   Активность — SearchableSelect over getActivities({ q, per_page }); options render
+ *   Клиент     — RemoteSearchSelect over getClientsPaged({ q, per_page, status: 'active' })
+ *   Активность — RemoteSearchSelect over getActivities({ q, per_page }); options render
  *                the canonical label (spec §7.7) via formatActivityLabel + locationsMap
  *   Услуга     — plain <select> over servicesMap («Все услуги» empty option)
  *   Локация    — plain <select> over locationsMap («Все локации»)
@@ -119,7 +119,7 @@ function renderFilters() {
 }
 
 /**
- * Type into a SearchableSelect input and let its 300ms debounce fire
+ * Type into a RemoteSearchSelect input and let its 300ms debounce fire
  * (PhotosTable.test timer-switch pattern: fake timers only around the
  * debounce, real timers for the async assertions that follow).
  */
@@ -162,7 +162,7 @@ describe('PhotosFilters — controls render (GH #211 Task 8)', () => {
     setup();
     renderFilters();
 
-    // Two typeaheads (SearchableSelect renders its label text)…
+    // Two typeaheads (RemoteSearchSelect renders its label text)…
     expect(screen.getByText('Клиент')).toBeInTheDocument();
     expect(screen.getByText('Активность')).toBeInTheDocument();
     // …two plain selects with labels + «Все …» empty options…

@@ -4,7 +4,7 @@ import React, { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getClientsPaged, getActivities, getAllTags } from '@memo/api-client';
 import type { TagResponse } from '@memo/api-client';
-import SearchableSelect from '@/app/components/shared/SearchableSelect';
+import RemoteSearchSelect from '@/app/components/shared/RemoteSearchSelect';
 import { usePhotosTable } from '@/contexts/PhotosContext';
 import { formatActivityLabel } from '@/lib/utils';
 
@@ -14,8 +14,8 @@ import { formatActivityLabel } from '@/lib/utils';
  * change → context setFilters (page resets to 1 there); Сбросить → resetFilters.
  *
  * Controls (spec §7.3):
- *   Клиент     — SearchableSelect over getClientsPaged (active clients only, §7.3)
- *   Активность — SearchableSelect over getActivities; options render THE canonical
+ *   Клиент     — RemoteSearchSelect over getClientsPaged (active clients only, §7.3)
+ *   Активность — RemoteSearchSelect over getActivities; options render THE canonical
  *                label (spec §7.7) via formatActivityLabel + the context locationsMap
  *   Услуга     — plain <select> over servicesMap («Все услуги» empty option)
  *   Локация    — plain <select> over locationsMap («Все локации»)
@@ -24,7 +24,7 @@ import { formatActivityLabel } from '@/lib/utils';
 export function PhotosFilters() {
   const { filters, setFilters, resetFilters, servicesMap, locationsMap } = usePhotosTable();
 
-  // SearchableSelect keeps its selected label in LOCAL state — a context reset
+  // RemoteSearchSelect keeps its selected label in LOCAL state — a context reset
   // cannot reach it, so the reset button bumps this key to remount the two
   // typeaheads clean (chips/selects are context-derived and clear on their own).
   const [resetKey, setResetKey] = useState(0);
@@ -73,7 +73,7 @@ export function PhotosFilters() {
     <div className="flex flex-wrap items-end gap-3">
       {/* Клиент — server search, active clients only (spec §7.3) */}
       <div className="w-56">
-        <SearchableSelect
+        <RemoteSearchSelect
           key={`client-${resetKey}`}
           value={filters.client_id ?? null}
           onChange={(uuid) => setFilters({ client_id: uuid ?? undefined })}
@@ -90,7 +90,7 @@ export function PhotosFilters() {
 
       {/* Активность — options via the canonical label (spec §7.7) */}
       <div className="w-56">
-        <SearchableSelect
+        <RemoteSearchSelect
           key={`activity-${resetKey}`}
           value={filters.activity_id ?? null}
           onChange={(uuid) => setFilters({ activity_id: uuid ?? undefined })}
@@ -165,7 +165,7 @@ export function PhotosFilters() {
             })}
           </div>
         )}
-        <SearchableSelect
+        <RemoteSearchSelect
           value={null}
           onChange={() => {}}
           onSelectItem={(item) => addTag(item.id)}

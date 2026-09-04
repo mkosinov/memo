@@ -414,8 +414,8 @@ describe('ClientCardModal ↔ ClientRecordTab integration (real components)', ()
       expect(screen.getByTestId('client-record-tab')).toBeInTheDocument();
     });
 
-    // Verify the record data is displayed (CustomSelect triggers exist in record tab)
-    expect(screen.getAllByTestId('custom-select-trigger').length).toBeGreaterThan(0);
+    // Verify the record data is displayed (Combobox triggers exist in record tab)
+    expect(screen.getAllByTestId('combobox-trigger').length).toBeGreaterThan(0);
   });
 
   it('record tab payment form calls createPayment', async () => {

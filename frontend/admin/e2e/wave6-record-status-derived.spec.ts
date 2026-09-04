@@ -30,7 +30,8 @@ test.describe('Wave 6 — Record status derived from visits', () => {
     const statusPicker = page.locator('[data-testid="client-tab"] [data-testid="record-status"]');
     await expect(statusPicker).toBeVisible();
 
-    // The status picker is either a native <select> or CustomSelect
+    // The status picker is either a native <select> or a StatusPicker trigger
+    // (status enums stay on static pickers — NOT part of the Combobox migration, GH #214 §9)
     // Try to find a select element or a button trigger
     const nativeSelect = statusPicker.locator('select');
     const hasNativeSelect = (await nativeSelect.count()) > 0;

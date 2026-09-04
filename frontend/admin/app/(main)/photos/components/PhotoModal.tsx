@@ -3,7 +3,8 @@
 import React, { useState, useEffect, useCallback, useMemo, useId } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { PHOTO_FIELDS, type PhotoFieldConfig } from './photoFields';
-import SearchableSelect from '@/app/components/shared/SearchableSelect';
+import RemoteSearchSelect from '@/app/components/shared/RemoteSearchSelect';
+import { Combobox, type ComboboxOption } from '@/app/components/shared/Combobox';
 import { Modal } from '@/app/components/shared/modal/Modal';
 import {
   getClientsPaged,
@@ -34,8 +35,8 @@ interface FieldRendererProps {
   value: unknown;
   onChange: (key: string, value: unknown) => void;
   error?: string;
-  /** <select> options — supplied by the modal (dictionary-backed). */
-  selectOptions?: { value: string; label: string }[];
+  /** Combobox options — supplied by the modal (dictionary-backed). */
+  selectOptions?: ComboboxOption[];
   /** Locations map feeding the canonical activity label (spec §7.7). */
   locationTitleMap?: Map<string, { title: string }>;
   /** Remount key for searchable fields — bumped when the owner is cleared
@@ -101,7 +102,7 @@ function FieldRenderer({
             </span>
           ))}
         </div>
-        <SearchableSelect
+        <RemoteSearchSelect
           value={null}
           onChange={() => {}}
           onSelectItem={(item) => {
@@ -121,7 +122,7 @@ function FieldRenderer({
   if (field.type === 'searchable') {
     // Map field keys to search functions (GH #211: client/service/activity —
     // visitor_id is gone; owners are mutually exclusive, no auto-fill).
-    // SearchableSelect's SearchItem shape: { id: string; [key: string]: unknown }.
+    // RemoteSearchSelect's SearchItem shape: { id: string; [key: string]: unknown }.
     let searchFn: (q: string) => Promise<Array<{ id: string; [key: string]: unknown }>>;
 
     if (field.key === 'client_id') {
@@ -148,7 +149,7 @@ function FieldRenderer({
 
     return (
       <div className="flex flex-col gap-1">
-        <SearchableSelect
+        <RemoteSearchSelect
           key={remountKey ?? 0}
           value={(value as string) ?? null}
           onChange={(uuid) => onChange(field.key, uuid)}
@@ -164,31 +165,22 @@ function FieldRenderer({
   }
 
   if (field.type === 'select') {
+    // GH #214 row 9: native <select> → Combobox. Keeps today's exact
+    // '' → null boundary mapping (`e.target.value || null` → `v || null`).
     return (
       <div className="flex flex-col gap-1">
-        <label
-          htmlFor={inputId}
-          className="text-xs font-medium"
-          style={{ color: 'var(--ink-light)' }}
-        >
+        <label className="text-xs font-medium" style={{ color: 'var(--ink-light)' }}>
           {field.label}
           {field.required && <span className="text-red-500 ml-0.5">*</span>}
         </label>
-        <select
-          id={inputId}
-          value={String(value ?? '')}
-          onChange={(e) => onChange(field.key, e.target.value || null)}
+        <Combobox
+          clearLabel={field.emptyLabel}
+          value={(value as string) ?? ''}
+          options={selectOptions ?? []}
+          onChange={(v) => onChange(field.key, v || null)}
           className={baseInputClasses}
-          style={baseStyle}
-          aria-describedby={ariaDescribedBy}
-        >
-          <option value="">{field.emptyLabel}</option>
-          {(selectOptions ?? []).map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label}
-            </option>
-          ))}
-        </select>
+          ariaLabel={field.label}
+        />
         {errorEl}
       </div>
     );
@@ -264,7 +256,12 @@ export function PhotoModal({
   });
 
   const locationOptions = useMemo(
-    () => locations.map((l) => ({ value: l.id, label: l.name })),
+    () =>
+      locations.map((l) => ({
+        value: l.id,
+        label: l.name,
+        searchText: `${l.name} ${l.short_title ?? ''}`.trim(),
+      })),
     [locations],
   );
 

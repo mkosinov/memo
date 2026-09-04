@@ -1,10 +1,10 @@
 import React from 'react';
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { StampPanel } from '../app/components/stamp/StampPanel';
-import { ScheduleProvider, useSchedule } from '../contexts/ScheduleContext';
+import { ScheduleProvider } from '../contexts/ScheduleContext';
 import { NavigationProvider } from '../contexts/NavigationContext';
-import { UIProvider, useUI } from '../contexts/UIContext';
+import { UIProvider } from '../contexts/UIContext';
 
 // Mock api-client so React Query hooks don't make real network calls
 vi.mock('@memo/api-client', () => {
@@ -59,17 +59,58 @@ function Wrapper({ children }: { children: React.ReactNode }) {
   );
 }
 
+/** Opens the master combobox (trigger aria-label «Мастер»), waits for options, clicks one. */
+async function selectMasterOption(optionTestId: string) {
+  fireEvent.click(screen.getByLabelText(/мастер/i));
+  const option = await waitFor(() => screen.getByTestId(optionTestId));
+  fireEvent.click(option);
+}
+
+/** Opens the service combobox (trigger aria-label «Услуга»), waits for options, clicks one. */
+async function selectServiceOption(optionTestId: string) {
+  fireEvent.click(screen.getByLabelText(/услуга/i));
+  const option = await waitFor(() => screen.getByTestId(optionTestId));
+  fireEvent.click(option);
+}
+
 describe('StampPanel', () => {
-  it('renders master, service dropdowns and location checkboxes', () => {
+  it('renders master, service comboboxes and location checkboxes', () => {
     render(
       <Wrapper>
         <StampPanel />
       </Wrapper>,
     );
 
+    // getByLabelText resolves via the combobox triggers' aria-labels
     expect(screen.getByLabelText(/мастер/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/услуга/i)).toBeInTheDocument();
     expect(screen.getByText('Локации')).toBeInTheDocument();
+    // Stable e2e hook on the master wrapper (US-5)
+    expect(screen.getByTestId('stamp-master-picker')).toBeInTheDocument();
+  });
+
+  it('shows «Не выбран» / «Выберите услугу» as the empty-state trigger labels', () => {
+    render(
+      <Wrapper>
+        <StampPanel />
+      </Wrapper>,
+    );
+
+    expect(screen.getByLabelText(/мастер/i)).toHaveTextContent('Не выбран');
+    expect(screen.getByLabelText(/услуга/i)).toHaveTextContent('Выберите услугу');
+  });
+
+  it('shows master options as «Фамилия Имя» full labels', async () => {
+    render(
+      <Wrapper>
+        <StampPanel />
+      </Wrapper>,
+    );
+
+    fireEvent.click(screen.getByLabelText(/мастер/i));
+    const option = await waitFor(() => screen.getByTestId('combobox-option-m1'));
+    expect(option).toHaveTextContent('Середа Ольга');
+    expect(screen.getByTestId('combobox-option-clear')).toHaveTextContent('Не выбран');
   });
 
   it('shows ready indicator as not ready initially', () => {
@@ -90,21 +131,11 @@ describe('StampPanel', () => {
       </Wrapper>,
     );
 
-    // Wait for master options to load (from React Query)
-    const masterSelect = await waitFor(() => {
-      const select = screen.getByLabelText(/мастер/i) as HTMLSelectElement;
-      expect(select.options.length).toBeGreaterThan(1);
-      return select;
-    });
-    fireEvent.change(masterSelect, { target: { value: 'm1' } });
+    // Wait for master options to load (from React Query), then select one
+    await selectMasterOption('combobox-option-m1');
 
-    // Wait for service options to load
-    const serviceSelect = await waitFor(() => {
-      const select = screen.getByLabelText(/услуга/i) as HTMLSelectElement;
-      expect(select.options.length).toBeGreaterThan(1);
-      return select;
-    });
-    fireEvent.change(serviceSelect, { target: { value: 's1' } });
+    // Wait for service options to load, then select one
+    await selectServiceOption('combobox-option-s1');
 
     // Wait for location data to load and select one
     const locationCheckbox = await waitFor(() =>
@@ -126,21 +157,14 @@ describe('StampPanel', () => {
       </Wrapper>,
     );
 
-    // Wait for master options to load
-    const masterSelect = await waitFor(() => {
-      const select = screen.getByLabelText(/мастер/i) as HTMLSelectElement;
-      expect(select.options.length).toBeGreaterThan(1);
-      return select;
-    });
-    fireEvent.change(masterSelect, { target: { value: 'm1' } });
+    // Select master via combobox
+    await selectMasterOption('combobox-option-m1');
 
-    // Wait for service options to load
-    const serviceSelect = await waitFor(() => {
-      const select = screen.getByLabelText(/услуга/i) as HTMLSelectElement;
-      expect(select.options.length).toBeGreaterThan(1);
-      return select;
-    });
-    fireEvent.change(serviceSelect, { target: { value: 's1' } });
+    // Select service via combobox, filtering by typing first
+    fireEvent.click(screen.getByLabelText(/услуга/i));
+    await waitFor(() => screen.getByTestId('combobox-search'));
+    fireEvent.change(screen.getByTestId('combobox-search'), { target: { value: 'маслом' } });
+    fireEvent.click(await waitFor(() => screen.getByTestId('combobox-option-s1')));
 
     // Wait for location data to load
     const locationCheckbox = await waitFor(() =>
@@ -149,6 +173,7 @@ describe('StampPanel', () => {
     fireEvent.click(locationCheckbox);
 
     // Summary should contain master short name, service name, and location name
+    // (summary reads from the masters array, not from the picker)
     await waitFor(() => {
       const summary = screen.getByTestId('stamp-summary');
       expect(summary).toHaveTextContent('Ольга');
@@ -188,21 +213,9 @@ describe('StampPanel', () => {
       </Wrapper>,
     );
 
-    // Wait for master options to load
-    const masterSelect = await waitFor(() => {
-      const select = screen.getByLabelText(/мастер/i) as HTMLSelectElement;
-      expect(select.options.length).toBeGreaterThan(1);
-      return select;
-    });
-    fireEvent.change(masterSelect, { target: { value: 'm1' } });
-
-    // Wait for service options to load
-    const serviceSelect = await waitFor(() => {
-      const select = screen.getByLabelText(/услуга/i) as HTMLSelectElement;
-      expect(select.options.length).toBeGreaterThan(1);
-      return select;
-    });
-    fireEvent.change(serviceSelect, { target: { value: 's1' } });
+    // Select master and service via comboboxes
+    await selectMasterOption('combobox-option-m1');
+    await selectServiceOption('combobox-option-s1');
 
     // Wait for location data to load
     const locationCheckbox = await waitFor(() =>

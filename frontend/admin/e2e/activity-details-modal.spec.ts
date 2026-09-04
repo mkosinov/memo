@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test';
 import { queryDBRow, queryDBRows } from './fixtures/db-query';
 import { createTestClient, createTestRecord, createTestPayment, cleanup, cleanupRecord } from './fixtures/factories';
 import { waitForScheduleReady, openModal, openAddTab, getFirstActivity, confirmDeleteDialog } from './fixtures/helpers';
+import { searchAndSelect } from './helpers/combobox';
 
 /**
  * E2E tests for ActivityDetailsModal — full user scenarios with DB verification.
@@ -254,14 +255,14 @@ test.describe('ActivityDetailsModal — Real User Scenarios', () => {
     );
 
     if (differentService) {
-      // 2. ACTION — change service in the select (onChange triggers auto-save via onUpdate)
-      const serviceSelect = page.locator('[data-testid="select-service"]');
-      await expect(serviceSelect).toBeVisible();
-      await serviceSelect.selectOption(differentService.id);
-
-      // Force blur to ensure any pending events fire
-      await page.click('body');
-      await page.waitForTimeout(200);
+      // 2. ACTION — change service via the Combobox inside the select-service
+      // wrapper (onChange triggers auto-save via onUpdate). The Combobox search
+      // filters by the full service title.
+      const serviceTrigger = page.locator(
+        '[data-testid="select-service"] [data-testid="combobox-trigger"]',
+      );
+      await expect(serviceTrigger).toBeVisible();
+      await searchAndSelect(page, serviceTrigger, differentService.title, differentService.id);
 
       // 3. VERIFY DB — service_id was updated (retry until API commit lands)
       await expect.poll(async () => {
@@ -271,10 +272,9 @@ test.describe('ActivityDetailsModal — Real User Scenarios', () => {
         return afterRow?.service_id;
       }, { timeout: 30_000, intervals: [200, 500, 1000] }).toBe(differentService.id);
 
-      // Restore original service
-      await serviceSelect.selectOption(originalServiceId);
-      await page.click('body');
-      await page.waitForTimeout(200);
+      // Restore original service — search by the original title
+      const origSvc = services.find((s: any) => s.id === originalServiceId);
+      await searchAndSelect(page, serviceTrigger, origSvc?.title ?? '', originalServiceId);
     }
   });
 
@@ -331,14 +331,22 @@ test.describe('ActivityDetailsModal — Real User Scenarios', () => {
   test('7. Settings tab shows real values from activity', async ({ page }) => {
     await openModal(page);
 
-    // Service select has a selected value (not empty)
-    const serviceSelect = page.locator('[data-testid="select-service"]');
-    const serviceValue = await serviceSelect.inputValue();
-    expect(serviceValue).toBeTruthy();
+    // Service Combobox trigger shows the selected service title (not empty)
+    const serviceTrigger = page.locator(
+      '[data-testid="select-service"] [data-testid="combobox-trigger"]',
+    );
+    await expect(serviceTrigger).toBeVisible();
+    const serviceText = (await serviceTrigger.textContent())?.trim();
+    expect(serviceText).toBeTruthy();
+    expect(serviceText).not.toBe('Выберите');
 
-    // Master picker (CustomSelect rendered as button, not native select)
-    // Scoped to settings-tab to avoid matching other CustomSelects on the page
-    const masterPicker = page.locator('[data-testid="settings-tab"] [data-testid="custom-select-trigger"]');
+    // Master picker (MasterPicker → Combobox trigger). Scoped to the
+    // master-location row; the row renders master BEFORE location, and the
+    // location trigger lives in the select-location wrapper — first() is the
+    // master trigger.
+    const masterPicker = page
+      .locator('[data-testid="settings-row-master-location"] [data-testid="combobox-trigger"]')
+      .first();
     const masterText = await masterPicker.textContent();
     // The trigger shows the selected master name (not placeholder "—")
     expect(masterText).toBeTruthy();

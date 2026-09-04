@@ -176,10 +176,10 @@ describe('ClientRecordTab — layout', () => {
 
   it('renders all service options in dropdown', () => {
     render(<ClientRecordTab recordId="r1" clientId="c1" />);
-    const triggers = screen.getAllByTestId('custom-select-trigger');
-    // Triggers: [0]=location, [1]=service
+    const triggers = screen.getAllByTestId('combobox-trigger');
+    // Triggers: [0]=location, [1]=service, [2]=master
     fireEvent.click(triggers[1]);
-    const dropdown = screen.getByTestId('custom-select-dropdown');
+    const dropdown = screen.getByTestId('combobox-dropdown');
     expect(dropdown).toHaveTextContent('Не выбрана');
   });
 
@@ -187,7 +187,7 @@ describe('ClientRecordTab — layout', () => {
 
   it('renders master dropdown with current master', () => {
     render(<ClientRecordTab recordId="r1" clientId="c1" />);
-    expect(screen.getByText('Ольга Середа')).toBeInTheDocument();
+    expect(screen.getByText('Середа Ольга')).toBeInTheDocument();
   });
 
   it('renders location dropdown with current location', () => {
@@ -279,9 +279,26 @@ describe('ClientRecordTab — layout', () => {
     expect(screen.getByTestId('btn-add-visitor')).toBeInTheDocument();
   });
 
-  it('displays activity service name in CustomSelect', () => {
+  it('displays activity service name in Combobox', () => {
     render(<ClientRecordTab recordId="r1" clientId="c1" />);
     expect(screen.getByText('Картина маслом')).toBeInTheDocument();
+  });
+
+  it('filters service options by search input', () => {
+    // Add a second service so a non-matching option exists in the dropdown
+    const secondService = { ...mockServiceResponse, id: 's2', title: 'Лепка из глины' };
+    buildDefaultQueryImpl(mockUseQuery, {
+      services: { data: [mockServiceResponse, secondService], isLoading: false, error: null },
+    });
+
+    render(<ClientRecordTab recordId="r1" clientId="c1" />);
+    const triggers = screen.getAllByTestId('combobox-trigger');
+    // Triggers: [0]=location, [1]=service, [2]=master
+    fireEvent.click(triggers[1]);
+    // Fragment of the fixture service title ('Картина маслом', id 's1')
+    fireEvent.change(screen.getByTestId('combobox-search'), { target: { value: 'картина' } });
+    expect(screen.getByTestId('combobox-option-s1')).toBeInTheDocument();
+    expect(screen.queryByTestId('combobox-option-s2')).not.toBeInTheDocument();
   });
 
   // ─── T8: source file does not import useOptimisticVisitMutation ──────

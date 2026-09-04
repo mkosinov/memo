@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { waitForRecordsReady } from './fixtures/helpers';
+import { closeCombobox, openCombobox, searchAndSelect } from './helpers/combobox';
 import {
   createTestClient,
   createTestActivity,
@@ -87,10 +88,10 @@ test.describe('Records Page — Table and Filters', () => {
     await expect(page.locator('input[aria-label="Фильтр по дате от"]')).toBeVisible();
     await expect(page.locator('input[aria-label="Фильтр по дате до"]')).toBeVisible();
 
-    // Select filters
-    await expect(page.locator('select[aria-label="Фильтр по локации"]')).toBeVisible();
-    await expect(page.locator('select[aria-label="Фильтр по услуге"]')).toBeVisible();
-    await expect(page.locator('select[aria-label="Фильтр по мастеру"]')).toBeVisible();
+    // Select filters — Combobox triggers carry the «Фильтр по …» aria-labels
+    await expect(page.getByLabel('Фильтр по локации')).toBeVisible();
+    await expect(page.getByLabel('Фильтр по услуге')).toBeVisible();
+    await expect(page.getByLabel('Фильтр по мастеру')).toBeVisible();
     await expect(page.locator('[data-testid="booking-filters-status"]')).toBeVisible();
 
     // Reset button
@@ -102,10 +103,11 @@ test.describe('Records Page — Table and Filters', () => {
   test('4. Filter selects have default "all" options selected', async ({ page }) => {
     await waitForRecordsReady(page);
 
-    // All selects should default to empty value ("Все ...")
-    await expect(page.locator('select[aria-label="Фильтр по локации"]')).toHaveValue('');
-    await expect(page.locator('select[aria-label="Фильтр по услуге"]')).toHaveValue('');
-    await expect(page.locator('select[aria-label="Фильтр по мастеру"]')).toHaveValue('');
+    // All Combobox filters default to the cleared state — the trigger shows
+    // the clear label («Все …»)
+    await expect(page.getByLabel('Фильтр по локации')).toHaveText(/Все локации/);
+    await expect(page.getByLabel('Фильтр по услуге')).toHaveText(/Все услуги/);
+    await expect(page.getByLabel('Фильтр по мастеру')).toHaveText(/Все мастера/);
     await expect(page.locator('[data-testid="booking-filters-status-trigger"]')).toContainText('Все статусы');
   });
 
@@ -114,20 +116,26 @@ test.describe('Records Page — Table and Filters', () => {
   test('5. Filter selects have populated options', async ({ page }) => {
     await waitForRecordsReady(page);
 
-    // Location select should have at least the default + some location options
-    const locationOptions = page.locator('select[aria-label="Фильтр по локации"] option');
-    const locationCount = await locationOptions.count();
-    expect(locationCount).toBeGreaterThan(1); // At least "Все локации" + one real location
+    // Combobox flow: open each trigger, count [data-testid^="combobox-option-"]
+    // minus the pinned clear option — dictionaries populate with ≥1 real option.
+    const countRealOptions = async (triggerLabel: string) => {
+      await openCombobox(page, page.getByLabel(triggerLabel));
+      const optionCount = await page.locator('[data-testid^="combobox-option-"]').count();
+      // Close the dropdown again before the next trigger opens its own —
+      // via getByRole 'button' (while open, getByLabel matches BOTH the
+      // trigger button and the aria-labelled listbox → strict violation).
+      await closeCombobox(page, triggerLabel);
+      return optionCount - 1; // minus the pinned «Все …» clear option
+    };
 
-    // Service select should have options
-    const serviceOptions = page.locator('select[aria-label="Фильтр по услуге"] option');
-    const serviceCount = await serviceOptions.count();
-    expect(serviceCount).toBeGreaterThan(1);
+    // Location Combobox should have at least one real location
+    expect(await countRealOptions('Фильтр по локации')).toBeGreaterThan(0);
 
-    // Master select should have options
-    const masterOptions = page.locator('select[aria-label="Фильтр по мастеру"] option');
-    const masterCount = await masterOptions.count();
-    expect(masterCount).toBeGreaterThan(1);
+    // Service Combobox should have options
+    expect(await countRealOptions('Фильтр по услуге')).toBeGreaterThan(0);
+
+    // Master Combobox should have options
+    expect(await countRealOptions('Фильтр по мастеру')).toBeGreaterThan(0);
 
     // Status filter is a StatusFiltersPicker dropdown — open it to count options
     await page.locator('[data-testid="booking-filters-status-trigger"]').click();
@@ -196,6 +204,15 @@ test.describe('Records Page — Table and Filters', () => {
       await page.locator('[data-testid="booking-filters-status-option-waiting"]').click();
       await filterResponse;
 
+      // Also apply a dictionary filter — Combobox flow, first real option
+      const dictFilterWait = page.waitForResponse(
+        (r) => r.url().includes('/api/v1/records') && r.url().includes('location_id='),
+        { timeout: 10_000 },
+      );
+      await openCombobox(page, page.getByLabel('Фильтр по локации'));
+      await page.locator('[data-testid^="combobox-option-"]').nth(1).click();
+      await dictFilterWait;
+
       const filteredCount = await page.locator('tbody tr').count();
       const filteredTotal = await readServerTotal(page);
 
@@ -211,10 +228,13 @@ test.describe('Records Page — Table and Filters', () => {
       await page.locator('button:has-text("Сбросить")').click();
       expect(await staleStatusRequest).toBe('none');
 
-      // All filter controls back to defaults
-      await expect(page.locator('select[aria-label="Фильтр по локации"]')).toHaveValue('');
-      await expect(page.locator('select[aria-label="Фильтр по услуге"]')).toHaveValue('');
-      await expect(page.locator('select[aria-label="Фильтр по мастеру"]')).toHaveValue('');
+      // All filter controls back to defaults — Combobox triggers show the
+      // «Все …» clear labels again. NOTE: the «Все локации» assertion is the
+      // direct counterpart of the pre-reset dictionary-filter step above
+      // (spec US-3: reset restores «Все …» on every dictionary filter).
+      await expect(page.getByLabel('Фильтр по локации')).toHaveText(/Все локации/);
+      await expect(page.getByLabel('Фильтр по услуге')).toHaveText(/Все услуги/);
+      await expect(page.getByLabel('Фильтр по мастеру')).toHaveText(/Все мастера/);
       await expect(page.locator('[data-testid="booking-filters-status-trigger"]')).toContainText('Все статусы');
 
       // Row count and server total grew or stayed equal after reset
@@ -594,9 +614,12 @@ test.describe('Records Page — Table and Filters', () => {
           r.url().includes(`location_id=${activity.location_id}`),
         { timeout: 10_000 },
       );
-      await page
-        .locator('select[aria-label="Фильтр по локации"]')
-        .selectOption(activity.location_id);
+      await searchAndSelect(
+        page,
+        page.getByLabel('Фильтр по локации'),
+        locationName,
+        activity.location_id,
+      );
       await filterResponse;
 
       // Post-state: our seeded record's row shows the selected location
@@ -644,9 +667,12 @@ test.describe('Records Page — Table and Filters', () => {
           r.url().includes(`service_id=${activity.service_id}`),
         { timeout: 10_000 },
       );
-      await page
-        .locator('select[aria-label="Фильтр по услуге"]')
-        .selectOption(activity.service_id);
+      await searchAndSelect(
+        page,
+        page.getByLabel('Фильтр по услуге'),
+        serviceTitle,
+        activity.service_id,
+      );
       await filterResponse;
 
       // Post-state: our seeded record's row shows the selected service
@@ -684,6 +710,13 @@ test.describe('Records Page — Table and Filters', () => {
       expect(actResp.ok()).toBeTruthy();
       const activity = await actResp.json();
 
+      // Learn the master's surname fragment for the Combobox search
+      // («Фамилия Имя» option labels)
+      const mastersResp = await request.get(`${BACKEND}/api/v1/masters`);
+      const mastersList = (await mastersResp.json()).items ?? [];
+      const masterSurname = mastersList.find((m: any) => m.id === activity.master_id)?.last_name;
+      expect(masterSurname).toBeTruthy();
+
       await waitForRecordsReady(page);
 
       // First filter: status=waiting
@@ -703,9 +736,12 @@ test.describe('Records Page — Table and Filters', () => {
           r.url().includes(`master_id=${activity.master_id}`),
         { timeout: 10_000 },
       );
-      await page
-        .locator('select[aria-label="Фильтр по мастеру"]')
-        .selectOption(activity.master_id);
+      await searchAndSelect(
+        page,
+        page.getByLabel('Фильтр по мастеру'),
+        masterSurname,
+        activity.master_id,
+      );
       const masterResponse = await masterWait;
 
       expect(masterResponse.url()).toContain('status=waiting');
@@ -948,6 +984,12 @@ test.describe('Records Page — Table and Filters', () => {
     const recordB = await createTestRecord(request, activity.id, clientB.id);
 
     try {
+      // Learn the location name for the Combobox search
+      const locResp = await request.get(`${BACKEND}/api/v1/locations`);
+      const locations = (await locResp.json()).items ?? [];
+      const locationName = locations.find((l: any) => l.id === activity.location_id)?.name;
+      expect(locationName).toBeTruthy();
+
       await waitForRecordsReady(page);
 
       // Location filter → server request carries location_id= (both rows match)
@@ -957,9 +999,12 @@ test.describe('Records Page — Table and Filters', () => {
           r.url().includes(`location_id=${activity.location_id}`),
         { timeout: 10_000 },
       );
-      await page
-        .locator('select[aria-label="Фильтр по локации"]')
-        .selectOption(activity.location_id);
+      await searchAndSelect(
+        page,
+        page.getByLabel('Фильтр по локации'),
+        locationName,
+        activity.location_id,
+      );
       await locationWait;
 
       // Type client A's unique name fragment into the search input —

@@ -3,6 +3,8 @@
 import React from 'react';
 import { useSchedule } from '@/contexts/ScheduleContext';
 import { useUI } from '@/contexts/UIContext';
+import { MasterPicker } from '@/app/components/shared/MasterPicker';
+import { Combobox } from '@/app/components/shared/Combobox';
 
 export function StampPanel() {
   const { masters, services, locations: studios, stamp, setStamp } = useSchedule();
@@ -16,8 +18,8 @@ export function StampPanel() {
     : null;
   const selectedLocations = studios.filter((s) => stamp.locations.has(s.id));
 
-  const handleMasterChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const masterId = e.target.value || null;
+  const handleMasterChange = (v: string) => {
+    const masterId = v !== '' ? v : null;
     setStamp((prev) => ({
       ...prev,
       masterId,
@@ -26,8 +28,8 @@ export function StampPanel() {
     }));
   };
 
-  const handleServiceChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const serviceId = e.target.value || null;
+  const handleServiceChange = (v: string) => {
+    const serviceId = v !== '' ? v : null;
     setStamp((prev) => ({
       ...prev,
       serviceId,
@@ -75,56 +77,39 @@ export function StampPanel() {
         </span>
       </div>
 
-      {/* Master dropdown */}
-      <div>
+      {/* Master picker */}
+      <div data-testid="stamp-master-picker">
         <label
-          htmlFor="stamp-master"
           className="mb-1 block text-xs font-medium"
           style={{ color: 'var(--ink-mid)' }}
         >
           Мастер
         </label>
-        <select
-          id="stamp-master"
-          aria-label="Мастер"
-          className="mt-1 w-full rounded-lg border px-2 py-1.5 text-sm"
-          style={{ borderColor: 'var(--line)', color: 'var(--ink)' }}
-          value={stamp.masterId || ''}
+        <MasterPicker
+          masters={masters}
+          value={stamp.masterId ?? ''}
           onChange={handleMasterChange}
-        >
-          <option value="">Выберите мастера</option>
-          {masters.map((a) => (
-            <option key={a.id} value={a.id}>
-              {a.shortName}
-            </option>
-          ))}
-        </select>
+          className="mt-1 w-full rounded-lg border px-2 py-1.5 text-sm"
+          ariaLabel="Мастер"
+        />
       </div>
 
-      {/* Service dropdown */}
+      {/* Service picker */}
       <div>
         <label
-          htmlFor="stamp-service"
           className="mb-1 block text-xs font-medium"
           style={{ color: 'var(--ink-mid)' }}
         >
           Услуга
         </label>
-        <select
-          id="stamp-service"
-          aria-label="Услуга"
-          className="mt-1 w-full rounded-lg border px-2 py-1.5 text-sm"
-          style={{ borderColor: 'var(--line)', color: 'var(--ink)' }}
-          value={stamp.serviceId || ''}
+        <Combobox
+          clearLabel="Выберите услугу"
+          value={stamp.serviceId ?? ''}
+          options={services.map((s) => ({ value: s.id, label: s.name }))}
           onChange={handleServiceChange}
-        >
-          <option value="">Выберите услугу</option>
-          {services.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.name}
-            </option>
-          ))}
-        </select>
+          className="mt-1 w-full rounded-lg border px-2 py-1.5 text-sm"
+          ariaLabel="Услуга"
+        />
       </div>
 
       {/* Location checkboxes */}

@@ -1,5 +1,6 @@
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
 import { waitForRecordsReady, openModal } from './fixtures/helpers';
+import { closeCombobox, openCombobox, searchAndSelect } from './helpers/combobox';
 import { switchToRecordsTab } from './fixtures/scenarios';
 import {
   createTestClient,
@@ -194,10 +195,17 @@ test.describe('Records View Endpoint — GH #213 US-1..US-6', () => {
       expect(count('/api/v1/services/all')).toBe(1);
       expect(count('/api/v1/masters/all')).toBe(1);
 
-      // Dropdowns populate from the dict responses.
+      // Dropdowns populate from the dict responses — Combobox flow: open each
+      // trigger, count [data-testid^="combobox-option-"] minus the pinned
+      // «Все …» clear option, close it again before the next trigger.
       for (const label of ['Фильтр по локации', 'Фильтр по услуге', 'Фильтр по мастеру']) {
-        const optionCount = await page.locator(`select[aria-label="${label}"] option`).count();
-        expect(optionCount).toBeGreaterThan(1);
+        await openCombobox(page, page.getByLabel(label));
+        const optionCount = await page.locator('[data-testid^="combobox-option-"]').count();
+        expect(optionCount - 1).toBeGreaterThan(0);
+        // Close via getByRole 'button' — while the dropdown is open,
+        // getByLabel matches BOTH the trigger and the aria-labelled listbox
+        // → strict mode violation.
+        await closeCombobox(page, label);
       }
 
       // Dropdowns work: picking our record's service fires a filtered
@@ -211,9 +219,16 @@ test.describe('Records View Endpoint — GH #213 US-1..US-6', () => {
           r.url().includes(`service_id=${activity.service_id}`),
         { timeout: 10_000 },
       );
-      await page
-        .locator('select[aria-label="Фильтр по услуге"]')
-        .selectOption(activity.service_id);
+      const svcResp = await request.get(`${BACKEND}/api/v1/services`);
+      const servicesList = (await svcResp.json()).items ?? [];
+      const serviceTitle = servicesList.find((s: any) => s.id === activity.service_id)?.title;
+      expect(serviceTitle).toBeTruthy();
+      await searchAndSelect(
+        page,
+        page.getByLabel('Фильтр по услуге'),
+        serviceTitle,
+        activity.service_id,
+      );
       await filterWait;
       await expect(
         page.locator('tbody tr').filter({ hasText: clientName }).first(),
@@ -514,7 +529,12 @@ test.describe('Records View Endpoint — GH #213 US-1..US-6', () => {
           r.url().includes('/api/v1/records/view') && r.url().includes(`master_id=${masterA.id}`),
         { timeout: 10_000 },
       );
-      await page.locator('select[aria-label="Фильтр по мастеру"]').selectOption(masterA.id);
+      await searchAndSelect(
+        page,
+        page.getByLabel('Фильтр по мастеру'),
+        masterA.last_name,
+        masterA.id,
+      );
       await masterWait;
       await expect(
         page.locator('tbody tr').filter({ hasText: nameA }).first(),

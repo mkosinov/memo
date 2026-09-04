@@ -68,6 +68,15 @@ export function Combobox({ value, options, onChange, clearLabel, className = '',
     setHighlightedIndex(prev => (prev < visible.length ? prev : 0));
   }, [visible.length]);
 
+  // Keep the highlighted option in the scroll viewport (aria-activedescendant
+  // pattern moves no DOM focus — keyboard users would lose the highlight
+  // off-screen in max-h-60 lists). Optional call: jsdom lacks scrollIntoView.
+  useEffect(() => {
+    if (!isOpen) return;
+    const el = document.getElementById(optionDomId(visible[highlightedIndex]?.value ?? ''));
+    el?.scrollIntoView?.({ block: 'nearest' });
+  }, [highlightedIndex, isOpen]);
+
   const openDropdown = () => {
     setIsOpen(true);
     setQuery('');
@@ -183,14 +192,14 @@ export function Combobox({ value, options, onChange, clearLabel, className = '',
               className="w-full text-sm outline-none bg-transparent"
             />
           </div>
-          <div className="max-h-60 overflow-y-auto" role="listbox" id={listboxId} aria-label={clearLabel}>
+          <div className="max-h-60 overflow-y-auto" role="listbox" id={listboxId} aria-label={ariaLabel ?? clearLabel}>
             {visible.map((o, i) => (
               <button
                 key={o.value || 'clear'}
                 type="button"
                 role="option"
                 id={optionDomId(o.value)}
-                aria-selected={i === highlightedIndex}
+                aria-selected={o.value === value}
                 data-testid={`combobox-option-${o.value || 'clear'}`}
                 onClick={() => select(o.value)}
                 className={`w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-gray-50 text-left ${

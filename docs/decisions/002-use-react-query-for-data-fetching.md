@@ -50,3 +50,13 @@ Use **React Query (TanStack Query v5)** for server state management.
 
 - Frontend architecture: `docs/ARCHITECTURE.md`
 - API integration: `docs/specs/2026-05-30-api-integration-design.md`
+
+## Related (GH #140, 2026-09-05)
+
+How React Query usage is **organized** is governed separately: thin entity hooks in
+`frontend/admin/hooks/` over a single central key registry (`lib/queryKeys.ts`), with
+components barred from direct `useQuery` calls and inline key literals. Full hook
+taxonomy, the 1h dictionary `staleTime` / no-external-invalidation rationale, and the
+thin-hooks-vs-`queryOptions` framing are documented in `docs/ARCHITECTURE.md`
+(«Data Access Patterns», added by #140) — that section is the reference, not duplicated
+here.

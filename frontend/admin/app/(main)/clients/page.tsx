@@ -2,7 +2,7 @@
 
 import { Suspense, useState, useEffect, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useClients } from '@/contexts/ClientsContext';
+import { ClientsProvider, useClientsTable } from '@/contexts/ClientsContext';
 import { ScheduleProvider } from '@/contexts/ScheduleContext';
 import { ClientsTable } from './components/ClientsTable';
 import { ClientsFilters } from './components/ClientsFilters';
@@ -14,7 +14,8 @@ function ClientsPageContent() {
   const [isCreateMode, setIsCreateMode] = useState(false);
   // #139 T6 — legacy page-level pager removed; the unified <DataTable> pager
   // owns pagination for the page (spec §6.10, dict-table unification).
-  const { clients, setFilters, isPending, isFetching } = useClients();
+  // GH #140 — page-scoped factory state; lookups by id go through useClient.
+  const { items, setFilters, isPending, isFetching } = useClientsTable();
   const searchParams = useSearchParams();
   const router = useRouter();
   const clientIdFromQuery = searchParams.get('clientId');
@@ -51,13 +52,13 @@ function ClientsPageContent() {
       clientIdFromQuery !== consumedClientIdRef.current &&
       !selectedClient
     ) {
-      const found = clients.find(c => c.id === clientIdFromQuery);
+      const found = items.find(c => c.id === clientIdFromQuery);
       if (found) {
         consumedClientIdRef.current = clientIdFromQuery;
         setSelectedClient(found);
       }
     }
-  }, [clientIdFromQuery, clients, selectedClient]);
+  }, [clientIdFromQuery, items, selectedClient]);
 
   // GH #216: dead link — narrowed fetch settled with zero rows and the modal
   // never opened → strip the param so a manual search-clear + refresh cannot
@@ -68,11 +69,11 @@ function ClientsPageContent() {
       !selectedClient &&
       !isPending &&
       !isFetching &&
-      clients.length === 0
+      items.length === 0
     ) {
       router.replace('/clients', { scroll: false });
     }
-  }, [clientIdFromQuery, selectedClient, isPending, isFetching, clients, router]);
+  }, [clientIdFromQuery, selectedClient, isPending, isFetching, items, router]);
 
   return (
     <div className="p-4 space-y-4">
@@ -130,10 +131,12 @@ function ClientsPageContent() {
 
 export default function ClientsPage() {
   return (
-    <ScheduleProvider>
-      <Suspense fallback={<div className="p-4">Загрузка...</div>}>
-        <ClientsPageContent />
-      </Suspense>
-    </ScheduleProvider>
+    <ClientsProvider>
+      <ScheduleProvider>
+        <Suspense fallback={<div className="p-4">Загрузка...</div>}>
+          <ClientsPageContent />
+        </Suspense>
+      </ScheduleProvider>
+    </ClientsProvider>
   );
 }

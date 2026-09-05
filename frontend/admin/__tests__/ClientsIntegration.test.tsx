@@ -4,7 +4,6 @@ import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ClientWithStats, RecordResponse } from '@memo/api-client';
 import { UIProvider } from '../contexts/UIContext';
-import { createMockClientsContext } from './helpers/mockContexts';
 
 // ─── Mock api-client ──────────────────────────────────────────────────────
 
@@ -61,20 +60,30 @@ vi.mock('@/contexts/ScheduleContext', () => ({
   ScheduleProvider: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));
 
-// ─── Mock ClientsContext ──────────────────────────────────────────────────
+// ─── Mock mutation hooks (GH #140 — ClientCardModal owns hook instances) ───
 
-vi.mock('@/contexts/ClientsContext', () => ({
-  useClients: vi.fn(),
-  ClientsProvider: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+const createHook = { mutateAsync: vi.fn() };
+const updateHook = { mutateAsync: vi.fn() };
+const patchHook = { mutateAsync: vi.fn() };
+const deleteHook = { mutateAsync: vi.fn(), dependencies: null };
+const archiveHook = { mutateAsync: vi.fn() };
+const restoreHook = { mutateAsync: vi.fn() };
+const resolveDeleteHook = { mutateAsync: vi.fn() };
+
+vi.mock('@/hooks/useClientsMutations', () => ({
+  useCreateClient: () => createHook,
+  useUpdateClient: () => updateHook,
+  usePatchClient: () => patchHook,
+  useDeleteClient: () => deleteHook,
+  useArchiveClient: () => archiveHook,
+  useRestoreClient: () => restoreHook,
+  useResolveDeleteClient: () => resolveDeleteHook,
 }));
 
 vi.mock('@/contexts/PendingActionsContext', () => ({
   usePendingActions: () => ({ enqueuePendingAction: vi.fn() }),
   PendingActionsProvider: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));
-
-import { useClients } from '@/contexts/ClientsContext';
-const mockUseClients = vi.mocked(useClients);
 
 // ─── Mock react-query ──────────────────────────────────────────────────────
 
@@ -176,9 +185,15 @@ describe('ClientCardModal ↔ ClientInfoTab integration (real components)', () =
   const mockDeleteClient = vi.fn().mockResolvedValue(undefined);
 
   beforeEach(() => {
-    mockUseClients.mockReturnValue(
-      createMockClientsContext({ updateClient: mockUpdateClient, deleteClient: mockDeleteClient }),
-    );
+    // GH #140: ClientCardModal mutations come from local hooks — park the
+    // spies on the mocked hook instances.
+    updateHook.mutateAsync = mockUpdateClient;
+    deleteHook.mutateAsync = mockDeleteClient;
+    deleteHook.dependencies = null;
+    createHook.mutateAsync = vi.fn().mockResolvedValue(mockClient);
+    archiveHook.mutateAsync = vi.fn().mockResolvedValue(mockClient);
+    restoreHook.mutateAsync = vi.fn().mockResolvedValue(mockClient);
+    resolveDeleteHook.mutateAsync = vi.fn().mockResolvedValue(undefined);
 
     vi.mocked(apiUpdateClient).mockResolvedValue(mockClient);
     vi.mocked(apiDeleteClient).mockResolvedValue(undefined);
@@ -284,7 +299,7 @@ describe('ClientCardModal ↔ ClientInfoTab integration (real components)', () =
     expect(saveBtn).toBeEnabled();
   });
 
-  it('delete button calls context deleteClient (dry-run; 204 closes the modal)', async () => {
+  it('delete button calls the delete hook (dry-run; 204 closes the modal)', async () => {
     const { ClientCardModal } = await import('@/app/(main)/clients/components/ClientCardModal');
     const onClose = vi.fn();
     render(
@@ -309,7 +324,7 @@ describe('ClientCardModal ↔ ClientInfoTab integration (real components)', () =
     expect(screen.queryByTestId('delete-dialog')).not.toBeInTheDocument();
   });
 
-  it('save button sends correct data to context updateClient', async () => {
+  it('save button sends correct data to the update hook', async () => {
     await renderModal(mockClient);
 
     fireEvent.change(screen.getByLabelText('Имя'), { target: { value: 'Новое Имя' } });
@@ -318,11 +333,14 @@ describe('ClientCardModal ↔ ClientInfoTab integration (real components)', () =
     fireEvent.click(screen.getByRole('button', { name: /Сохранить/i }));
 
     await waitFor(() => {
-      expect(mockUpdateClient).toHaveBeenCalledWith('c1', {
-        name: 'Новое Имя',
-        phone: '+7 (000) 000-00-00',
-        email: null,
-        channel: 'telegram',
+      expect(mockUpdateClient).toHaveBeenCalledWith({
+        id: 'c1',
+        data: {
+          name: 'Новое Имя',
+          phone: '+7 (000) 000-00-00',
+          email: null,
+          channel: 'telegram',
+        },
       });
     });
   });
@@ -333,9 +351,10 @@ describe('ClientCardModal ↔ ClientRecordTab integration (real components)', ()
   const mockUpdateClient = vi.fn().mockResolvedValue(undefined);
 
   beforeEach(() => {
-    mockUseClients.mockReturnValue(
-      createMockClientsContext({ updateClient: mockUpdateClient }),
-    );
+    updateHook.mutateAsync = mockUpdateClient;
+    deleteHook.mutateAsync = vi.fn().mockResolvedValue(undefined);
+    deleteHook.dependencies = null;
+    createHook.mutateAsync = vi.fn().mockResolvedValue(mockClient);
 
     vi.mocked(getRecord).mockResolvedValue(mockRecord);
     vi.mocked(patchRecord).mockResolvedValue(mockRecord);
@@ -565,12 +584,10 @@ describe('Cross-page integration: create client → view → edit → save', () 
   const mockInvalidateQueries = vi.fn();
 
   beforeEach(() => {
-    mockUseClients.mockReturnValue(
-      createMockClientsContext({
-        createClient: vi.fn().mockResolvedValue(mockClient),
-        updateClient: vi.fn().mockResolvedValue(undefined),
-      }),
-    );
+    createHook.mutateAsync = vi.fn().mockResolvedValue(mockClient);
+    updateHook.mutateAsync = vi.fn().mockResolvedValue(undefined);
+    deleteHook.mutateAsync = vi.fn().mockResolvedValue(undefined);
+    deleteHook.dependencies = null;
 
     vi.mocked(getRecord).mockResolvedValue(mockRecord);
     vi.mocked(patchRecord).mockResolvedValue(mockRecord);
@@ -752,9 +769,7 @@ describe('Error scenarios: create client fails', () => {
     const suppressRejection = (e: any) => { e.preventDefault?.(); };
     process.on('unhandledRejection', suppressRejection);
 
-    mockUseClients.mockReturnValue(
-      createMockClientsContext({ updateClient: failingUpdateClient }),
-    );
+    updateHook.mutateAsync = failingUpdateClient;
 
     const { ClientCardModal } = await import('@/app/(main)/clients/components/ClientCardModal');
     render(
@@ -791,9 +806,7 @@ describe('Error scenarios: create client fails', () => {
     const suppressRejection = (e: any) => { e.preventDefault?.(); };
     process.on('unhandledRejection', suppressRejection);
 
-    mockUseClients.mockReturnValue(
-      createMockClientsContext({ updateClient: failingUpdateClient }),
-    );
+    updateHook.mutateAsync = failingUpdateClient;
 
     const { ClientCardModal } = await import('@/app/(main)/clients/components/ClientCardModal');
     render(
@@ -822,9 +835,7 @@ describe('Error scenarios: create client fails', () => {
     const duplicateError = new ApiError(409, 'Client with this phone already exists', 'CLIENT_DUPLICATE_PHONE');
     const createClientFn = vi.fn().mockRejectedValue(duplicateError);
     const onClose = vi.fn();
-    mockUseClients.mockReturnValue(
-      createMockClientsContext({ createClient: createClientFn }),
-    );
+    createHook.mutateAsync = createClientFn;
 
     const { ClientCardModal } = await import('@/app/(main)/clients/components/ClientCardModal');
     const onClientCreated = vi.fn();

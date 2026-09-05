@@ -17,6 +17,12 @@ export interface PagedListFetcherParams {
   status?: ArchiveFilter;
   /** Server-side search (#212 §5.1) — present only when serverSearch is on and search is ≥2 chars. */
   q?: string;
+  /**
+   * Structured server filters (#140 §5.2) — present only when the factory is
+   * configured with `filters`. The with-filters config types this as the
+   * concrete F; the base contract keeps it opaque.
+   */
+  filters?: unknown;
 }
 
 export interface PagedListContextValue<T> {
@@ -42,7 +48,7 @@ export interface PagedListContextValue<T> {
   refetch: () => void;
 }
 
-interface PagedListConfig<T> {
+export interface PagedListConfig<T> {
   queryKeyPrefix: string;
   fetcher: (params: PagedListFetcherParams) => Promise<PaginatedResponse<T>>;
   withStatus?: boolean;
@@ -63,13 +69,65 @@ interface PagedListConfig<T> {
 }
 
 /**
+ * With-filters config (#140 §5.2) — the structured `filters` object joins the
+ * query key wholesale (slot AFTER perPage, BEFORE status) and is passed to the
+ * fetcher as-is. `defaultSort` seeds the initial sort state (sent on the first
+ * fetch); absent → sortBy stays null = server default order (§4.4).
+ * Fetcher is re-declared (not narrowed via extends) so params carry the
+ * concrete F — plan-review finding 6b.
+ */
+export type WithFiltersConfig<T, F extends object> = Omit<PagedListConfig<T>, 'fetcher'> & {
+  filters: { defaults: F };
+  defaultSort?: { sortBy: string; sortOrder: SortOrder };
+  fetcher: (params: PagedListFetcherParams & { filters: F }) => Promise<PaginatedResponse<T>>;
+};
+
+/** Extra context members exposed only by the with-filters overload (#140 T3). */
+export interface PagedListFiltersState<F> {
+  filters: F;
+  setFilters: (patch: Partial<F>) => void;
+  resetFilters: () => void;
+}
+
+/**
+ * Internal implementation config (#140 T3, plan-review finding 6b adjustment —
+ * types only). The plan's literal `PagedListConfig<T> & Partial<WithFiltersConfig<T, any>>`
+ * does not typecheck (TS2394): under strictFunctionTypes the narrowed
+ * with-filters fetcher (property syntax) is contravariantly incompatible with
+ * the base property-syntax fetcher inside the intersection. Method syntax
+ * keeps parameter matching bivariant so BOTH public overloads satisfy the
+ * implementation, while the overloads' own fetcher contracts stay strict.
+ */
+type PagedListImplConfig<T, F extends object> = Omit<PagedListConfig<T>, 'fetcher'> & {
+  fetcher(params: PagedListFetcherParams): Promise<PaginatedResponse<T>>;
+  filters?: { defaults: F };
+  defaultSort?: { sortBy: string; sortOrder: SortOrder };
+};
+
+/**
  * Shared server-pagination context factory for dictionary tables (#205).
  * Shape mirrors ClientsContext; setSort/setPerPage/setStatus reset page to 1
  * (deliberate upgrade over the Clients/Records precedent, spec §5.2).
  * sortBy starts null → initial fetch omits sort params → server default order
  * (spec §4.4), preserving today's unsorted-initial-render behavior.
+ *
+ * Two overloads (#140 T3): the with-filters one exposes `filters`/`setFilters`/
+ * `resetFilters` and seeds sort from `defaultSort`; the classic one is
+ * bit-identical to the pre-#140 behavior (no filters slot in the key, sortBy
+ * null). ONE runtime implementation — `config.filters?.defaults` drives the
+ * difference.
  */
-export function createPagedListContext<T>(config: PagedListConfig<T>) {
+export function createPagedListContext<T, F extends object>(config: WithFiltersConfig<T, F>): {
+  Provider: React.ComponentType<{ children: React.ReactNode }>;
+  usePagedList: () => PagedListContextValue<T> & PagedListFiltersState<F>;
+};
+export function createPagedListContext<T>(config: PagedListConfig<T>): {
+  Provider: React.ComponentType<{ children: React.ReactNode }>;
+  usePagedList: () => PagedListContextValue<T>;
+};
+export function createPagedListContext<T, F extends object>(
+  config: PagedListImplConfig<T, F>,
+) {
   const {
     queryKeyPrefix,
     fetcher,
@@ -78,24 +136,31 @@ export function createPagedListContext<T>(config: PagedListConfig<T>) {
     searchPredicate,
     serverSearch = false,
   } = config;
-  const Context = createContext<PagedListContextValue<T> | null>(null);
+  const filtersDefaults = config.filters?.defaults;
+  const defaultSort = config.defaultSort;
+  const Context = createContext<(PagedListContextValue<T> & Partial<PagedListFiltersState<F>>) | null>(null);
 
   function Provider({ children }: { children: React.ReactNode }) {
     const [page, setPage] = useState(1);
     const [perPage, setPerPageState] = useState(defaultPerPage);
-    const [sortBy, setSortBy] = useState<string | null>(null);
-    const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
+    const [sortBy, setSortBy] = useState<string | null>(defaultSort?.sortBy ?? null);
+    const [sortOrder, setSortOrder] = useState<SortOrder>(defaultSort?.sortOrder ?? 'asc');
     const [status, setStatusState] = useState<ArchiveFilter>('active');
     const [search, setSearch] = useState('');
+    const [filters, setFiltersState] = useState<F | undefined>(filtersDefaults);
 
     // #212 §5.5 pt 2 — serverSearch: the ≥2-char clamp lives here (one place,
     // covers DataTable withSearch inputs AND *Filters bars). Shorter values are
     // treated as unset: no q in key/fetch, unfiltered page shown, no 422 noise.
     const q = serverSearch && search.length >= 2 ? search : undefined;
 
-    const queryKey = withStatus
-      ? [queryKeyPrefix, page, perPage, status, sortBy, sortOrder]
-      : [queryKeyPrefix, page, perPage, sortBy, sortOrder];
+    // Key slot order (#140 §5.2): prefix, page, perPage, [filters], [status],
+    // sortBy, sortOrder, [q]. Classic consumers get arrays identical to the
+    // pre-#140 ternary — pinned by the factory test suite.
+    const queryKey: unknown[] = [queryKeyPrefix, page, perPage];
+    if (filters !== undefined) queryKey.push(filters);
+    if (withStatus) queryKey.push(status);
+    queryKey.push(sortBy, sortOrder);
     // q (or its absence) distinguishes cache entries → pages never collide
     // between searches. Slot present only when serverSearch is on.
     if (serverSearch) queryKey.push(q ?? '');
@@ -109,6 +174,7 @@ export function createPagedListContext<T>(config: PagedListConfig<T>) {
           ...(sortBy ? { sort_by: sortBy, sort_order: sortOrder } : {}),
           ...(withStatus ? { status } : {}),
           ...(q ? { q } : {}),
+          ...(filters !== undefined ? { filters } : {}),
         }),
       placeholderData: keepPreviousData,
     });
@@ -126,6 +192,19 @@ export function createPagedListContext<T>(config: PagedListConfig<T>) {
 
     const setStatus = useCallback((s: ArchiveFilter) => {
       setStatusState(s);
+      setPage(1);
+    }, []);
+
+    // #140 T3 — with-filters only: merge-patch semantics mirroring the
+    // hand-rolled ClientsContext precedent; a new filter set means a new
+    // result set → restart at page 1.
+    const setFilters = useCallback((patch: Partial<F>) => {
+      setFiltersState((prev) => (prev !== undefined ? { ...prev, ...patch } : prev));
+      setPage(1);
+    }, []);
+
+    const resetFilters = useCallback(() => {
+      setFiltersState(filtersDefaults);
       setPage(1);
     }, []);
 
@@ -155,7 +234,11 @@ export function createPagedListContext<T>(config: PagedListConfig<T>) {
       if (!isPending && !isFetching && items.length === 0 && page > 1) setPage(page - 1);
     }, [isPending, isFetching, items.length, page]);
 
-    const value: PagedListContextValue<T> = {
+    // #140 T3 — value built exactly as the classic shape PLUS a conditional
+    // filters spread: classic consumers see no new members (bit-identical),
+    // with-filters consumers get the typed PagedListFiltersState<F> trio via
+    // the overload signature.
+    const value: PagedListContextValue<T> & Partial<PagedListFiltersState<F>> = {
       items,
       visibleItems,
       total: data?.total ?? 0,
@@ -175,14 +258,17 @@ export function createPagedListContext<T>(config: PagedListConfig<T>) {
       setStatus,
       setSearch: setSearchWithReset,
       refetch,
+      ...(filters !== undefined ? { filters, setFilters, resetFilters } : {}),
     };
     return <Context.Provider value={value}>{children}</Context.Provider>;
   }
 
-  function usePagedList(): PagedListContextValue<T> {
+  function usePagedList(): PagedListContextValue<T> & PagedListFiltersState<F> {
     const ctx = useContext(Context);
     if (!ctx) throw new Error(`usePagedList(${queryKeyPrefix}) must be used within its Provider`);
-    return ctx;
+    // With-filters consumers get the full trio (value spread above guarantees
+    // it); classic consumers are typed by their overload to never see it.
+    return ctx as PagedListContextValue<T> & PagedListFiltersState<F>;
   }
 
   return { Provider, usePagedList };

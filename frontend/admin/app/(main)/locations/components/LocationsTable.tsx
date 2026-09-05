@@ -14,6 +14,7 @@ import { DataTable } from '@/app/components/shared/DataTable';
 import { DeleteDialog } from '@/app/components/DeleteDialog';
 import { locationColumns, locationActions } from './locationColumns';
 import { parseApiError } from '@/app/lib/api/parseApiError';
+import { qk } from '@/lib/queryKeys';
 
 // ─── Component ───────────────────────────────────────────────────────────
 
@@ -231,8 +232,8 @@ export function LocationsTable() {
             await resolveDeleteLocation(id, resolutions);
             // The resolve call bypasses the hook's onSuccess, so refresh
             // here — incl. cross-key ['records'] (useRecordData consumers).
-            queryClient.invalidateQueries({ queryKey: ['locations'] });
-            queryClient.invalidateQueries({ queryKey: ['records'] });
+            queryClient.invalidateQueries({ queryKey: qk.locations });
+            queryClient.invalidateQueries({ queryKey: qk.records });
             showToast('Локация удалена');
           }}
           onArchive={(id) => archiveLocation.mutateAsync(id)}

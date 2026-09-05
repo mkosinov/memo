@@ -29,8 +29,10 @@ function ScheduleView() {
 
 export default function SchedulePage() {
   // GH #213 §6.6 (R3): RecordsProvider removed — ActivityDetailsModal (the
-  // only consumer here) re-homed to useClients() + per-id getClientById, so
-  // /schedule no longer fires the 7 records-context queries.
+  // only consumer here) resolves clients per record tab via useClient
+  // (GH #140 US-2: each tab fetches its own ['client', id], deduped — no
+  // clients-list dependency), so /schedule no longer fires the 7
+  // records-context queries.
   return (
     <ScheduleProvider>
       <ScheduleView />

@@ -1,7 +1,13 @@
 'use client';
 
 import React, { useMemo, useState } from 'react';
-import { useClients } from '@/contexts/ClientsContext';
+import { useClientsTable } from '@/contexts/ClientsContext';
+import {
+  useDeleteClient,
+  useArchiveClient,
+  useRestoreClient,
+  useResolveDeleteClient,
+} from '@/hooks/useClientsMutations';
 import { useUI } from '@/contexts/UIContext';
 import { DataTable } from '@/app/components/shared/DataTable';
 import { DeleteDialog } from '@/app/components/DeleteDialog';
@@ -15,14 +21,18 @@ interface ClientsTableProps {
 }
 
 export function ClientsTable({ onClientClick }: ClientsTableProps) {
-  // Spec §6.4 — `items` is the new alias; `clients` retained for backwards
-  // compat with non-table consumers until they migrate. `error` is now
-  // `Error | null` (was `string | null` — stringified error.message).
+  // GH #140 — table state from the factory context (server-paginated,
+  // page-scoped); mutations are local hook instances (LocationsTable
+  // precedent) — the parked 409 tree lives on this component's delete hook.
   const {
     items, total, page, perPage, sortBy, sortOrder, isLoading, isPending,
-    isFetching, error, refetch, setPage, setPerPage, setSort, deleteClient,
-    archiveClient, restoreClient, resolveDeleteClient, dependencies,
-  } = useClients();
+    isFetching, error, refetch, setPage, setPerPage, setSort,
+  } = useClientsTable();
+  const deleteMutation = useDeleteClient();
+  const archiveMutation = useArchiveClient();
+  const restoreMutation = useRestoreClient();
+  const resolveDeleteMutation = useResolveDeleteClient();
+  const { dependencies } = deleteMutation;
   const { showToast } = useUI();
 
   // ─── Delete dialog state (§7.3: parent owns dry-run + open/close) ────
@@ -35,10 +45,10 @@ export function ClientsTable({ onClientClick }: ClientsTableProps) {
   const handleArchiveToggle = async (client: ClientWithStats) => {
     try {
       if (client.archived) {
-        await restoreClient(client.id);
+        await restoreMutation.mutateAsync(client.id);
         showToast('Клиент восстановлен');
       } else {
-        await archiveClient(client.id);
+        await archiveMutation.mutateAsync(client.id);
         showToast('Клиент в архиве');
       }
     } catch (err) {
@@ -49,7 +59,7 @@ export function ClientsTable({ onClientClick }: ClientsTableProps) {
   // ─── Delete — §7.3 dry-run flow ───────────────────────────────────────
   const handleDelete = async (client: ClientWithStats) => {
     try {
-      await deleteClient(client.id);
+      await deleteMutation.mutateAsync(client.id);
       showToast('Клиент удалён');
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
@@ -114,10 +124,10 @@ export function ClientsTable({ onClientClick }: ClientsTableProps) {
           entityId={deleteTarget.client.id}
           dependencies={deleteTarget.dependencies}
           onResolve={async (id, resolutions) => {
-            await resolveDeleteClient(id, resolutions);
+            await resolveDeleteMutation.mutateAsync({ id, resolutions });
             showToast('Клиент удалён');
           }}
-          onArchive={(id) => archiveClient(id)}
+          onArchive={(id) => archiveMutation.mutateAsync(id)}
           onDone={() => setDeleteTarget(null)}
           onCancel={() => setDeleteTarget(null)}
         />

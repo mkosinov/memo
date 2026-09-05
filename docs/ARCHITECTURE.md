@@ -77,6 +77,63 @@ memo/
 
 ---
 
+## Data Access Patterns
+
+Server state in the admin app (Next.js) is read through TanStack Query. To keep
+query keys consistent and dedupe correct, access is standardized on thin hooks
+in `frontend/admin/hooks/` over a single central key registry.
+
+### The rule
+
+Components **never** call `useQuery` directly and **never** write query-key
+literals. They consume hooks from `frontend/admin/hooks/`; every entity key
+lives only in `frontend/admin/lib/queryKeys.ts` (`qk`). Direct `useQuery` and
+inline keys are allowed **only** inside `hooks/` and `contexts/`. This keeps
+dedupe/invalidation semantics intact — one key shape, one source.
+
+### Hook taxonomy
+
+| Hook shape | Returns | Example |
+|------------|---------|---------|
+| `use<Entity>` | domain-selected lookup (archived dropped, domain types) | `useMasters()`, `useServices()` |
+| `use<Entity>Raw` | raw API response **including archived** | `useMastersRaw()`, `useTagsRaw()` |
+| point hooks | single-entity / scoped reads | `useClient(id)`, `useActivity(id)`, `useClientRecords(id)` |
+| `use<Entity>Table` | factory paged-list state (`createPagedListContext`) | `useClientsTable()`, `useTagsTable()` (factory tables: clients/tags/masters/locations/services/materials; photos and records still use hand-rolled contexts) |
+| `use<Entity>Mutations` | mutation family for one entity | `useRecordMutations()`; clients mutations are per-action hooks (`useCreateClient`, `useDeleteClient`, … in `hooks/useClientsMutations.ts`) |
+
+A lookup and its `Raw` sibling share the **same** query key (e.g. `qk.masters`)
+so they dedupe. `useClients` is permanently reserved-vacant — the clients list
+is `useClientsTable`.
+
+### `DICT_STALE_TIME` and the no-external-invalidation assumption
+
+Dictionary data (`DICT_STALE_TIME = 1h`, `queryKeys.ts`) is cached for an hour
+because admin pages stay open indefinitely. Correctness does **not** rely on
+time-based refresh: there is no WebSocket, SSE, or polling channel. Cache
+freshness rests **entirely on invalidation from the client's own mutations** —
+each mutation invalidates the keys it affects (e.g. record creation that makes
+a new client invalidates `qk.clients` so it appears immediately). The accepted
+tradeoff: an edit made by a *second* admin/tab propagates with up to 1h delay
+unless that tab performs its own mutation. `#239` tracks evaluating a server-push
+channel.
+
+### Shared-key `staleTime` alignment
+
+When two hooks share a query key (the lookup/`Raw` pairs), they **must** use the
+same `staleTime`: shared-key observers take the most pessimistic value, so a
+mismatch silently overrides intent. One aligned value per key is the only sound
+end-state.
+
+### Framing note
+
+As of 2026, TanStack guidance leans toward `queryOptions` factories. This
+codebase deliberately standardizes instead on **thin hooks + a central `qk`
+registry** — an explicit team-governance choice (GH #140), not an oversight.
+The hook surface gives call sites a stable, typed API while `qk` keeps every
+key in one inspectable file.
+
+---
+
 ## Package Dependencies
 
 ```

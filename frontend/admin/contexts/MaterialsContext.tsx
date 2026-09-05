@@ -3,9 +3,10 @@
 import { createPagedListContext } from './createPagedListContext';
 import { getMaterials } from '@memo/api-client';
 import type { MaterialResponse } from '@memo/api-client';
+import { qk } from '@/lib/queryKeys';
 
 const { Provider, usePagedList } = createPagedListContext<MaterialResponse>({
-  queryKeyPrefix: 'materials',
+  queryKeyPrefix: qk.materials[0],
   fetcher: (p) =>
     getMaterials({
       page: p.page,

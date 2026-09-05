@@ -15,6 +15,7 @@ import { DataTable } from '@/app/components/shared/DataTable';
 import { DeleteDialog } from '@/app/components/DeleteDialog';
 import { masterColumns, masterActions } from './masterColumns';
 import { parseApiError } from '@/app/lib/api/parseApiError';
+import { qk } from '@/lib/queryKeys';
 
 // ─── Component ───────────────────────────────────────────────────────────
 
@@ -209,8 +210,8 @@ export function MastersTable() {
             await resolveDeleteMaster(id, resolutions);
             // The resolve call bypasses the hook's onSuccess, so refresh
             // here — incl. cross-key ['records'] (useRecordData consumers).
-            queryClient.invalidateQueries({ queryKey: ['masters'] });
-            queryClient.invalidateQueries({ queryKey: ['records'] });
+            queryClient.invalidateQueries({ queryKey: qk.masters });
+            queryClient.invalidateQueries({ queryKey: qk.records });
             showToast('Мастер удалён');
           }}
           onArchive={(id) => archiveMaster.mutateAsync(id)}

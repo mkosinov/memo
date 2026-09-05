@@ -4,6 +4,11 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { createElement, type ReactNode } from 'react';
 
 vi.mock('@memo/api-client', () => ({
+  createRecord: vi.fn(),
+  createClient: vi.fn(),
+  getClientByPhone: vi.fn(),
+  getRecord: vi.fn(),
+  updateVisitStatus: vi.fn(),
   patchRecord: vi.fn(),
   patchActivity: vi.fn(),
   createPayment: vi.fn(),
@@ -23,6 +28,9 @@ vi.mock('@/contexts/PendingActionsContext', () => ({
 }));
 
 import {
+  createRecord,
+  createClient,
+  getClientByPhone,
   patchRecord,
   patchActivity,
   createPayment,
@@ -37,6 +45,9 @@ import {
 import { useRecordMutations } from '../hooks/useRecordMutations';
 import type { PaginatedResponse, RecordResponse, PaymentResponse } from '@memo/api-client';
 
+const mockCreateRecord = vi.mocked(createRecord);
+const mockCreateClient = vi.mocked(createClient);
+const mockGetClientByPhone = vi.mocked(getClientByPhone);
 const mockPatchRecord = vi.mocked(patchRecord);
 const mockPatchActivity = vi.mocked(patchActivity);
 const mockCreatePayment = vi.mocked(createPayment);
@@ -105,10 +116,32 @@ const mockVisitResponse = {
   updated_at: '',
 };
 
+const mockClientResponse = {
+  id: 'c-new',
+  name: 'Новый клиент',
+  phone: '+79990001122',
+  channel: 'whatsapp',
+  comment: null,
+  created_at: '',
+  updated_at: '',
+};
+
+const baseCreateRecordInput = {
+  phone: '+79990001122',
+  name: 'Новый клиент',
+  channel: 'whatsapp',
+  seats: 0,
+  visitors: [],
+};
+
+const serviceTariffs = [{ id: 't1', price: 3500 }];
+
 describe('useRecordMutations', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockEnqueuePendingAction.mockReset();
+    mockCreateRecord.mockResolvedValue(mockRecordResponse as never);
+    mockCreateClient.mockResolvedValue(mockClientResponse as never);
     mockPatchRecord.mockResolvedValue(mockRecordResponse as never);
     mockPatchActivity.mockResolvedValue({ id: 'ev_1' } as never);
     mockCreatePayment.mockResolvedValue(mockPaymentResponse as never);
@@ -122,6 +155,62 @@ describe('useRecordMutations', () => {
   });
 
   afterEach(() => vi.restoreAllMocks());
+
+  describe('createRecord — clients-list staleness (#140)', () => {
+    it('invalidates [clients] when a NEW client is created via the phone-collision/409 catch branch', async () => {
+      // getClientByPhone rejects (phone collision / 409) → falls into catch → createClient
+      mockGetClientByPhone.mockRejectedValue(new Error('409 conflict') as never);
+
+      const { queryClient, wrapper } = createQueryClientWrapper();
+      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+
+      await act(async () => {
+        await result.current.createRecord(baseCreateRecordInput, serviceTariffs);
+      });
+
+      expect(mockCreateClient).toHaveBeenCalled();
+      // Bug fix: the freshly created client must become visible in /clients
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['clients'] });
+    });
+
+    it('invalidates [clients] when a NEW client is created via the phone-less quick-add else branch', async () => {
+      const { queryClient, wrapper } = createQueryClientWrapper();
+      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+
+      await act(async () => {
+        await result.current.createRecord(
+          { ...baseCreateRecordInput, phone: '' },
+          serviceTariffs,
+        );
+      });
+
+      expect(mockGetClientByPhone).not.toHaveBeenCalled();
+      expect(mockCreateClient).toHaveBeenCalledWith({
+        name: 'Новый клиент',
+        phone: '',
+        channel: 'whatsapp',
+      });
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['clients'] });
+    });
+
+    it('does NOT invalidate [clients] when an EXISTING client is reused via getClientByPhone', async () => {
+      // Existing-client path: lookup succeeds → createClient never runs → no new client
+      mockGetClientByPhone.mockResolvedValue({ ...mockClientResponse, id: 'c-existing' } as never);
+
+      const { queryClient, wrapper } = createQueryClientWrapper();
+      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+
+      await act(async () => {
+        await result.current.createRecord(baseCreateRecordInput, serviceTariffs);
+      });
+
+      expect(mockCreateClient).not.toHaveBeenCalled();
+      expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: ['clients'] });
+    });
+  });
 
   describe('saveRecord', () => {
     it('calls patchRecord with the provided data', async () => {

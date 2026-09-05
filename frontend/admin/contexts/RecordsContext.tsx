@@ -7,6 +7,7 @@ import type { PaginatedResponse, RecordView } from '@memo/api-client';
 import type { SortOrder } from './createPagedListContext';
 import { useNavigation } from '@/contexts/NavigationContext';
 import { seedRecordFromList } from '@/lib/cache/recordCacheSync';
+import { qk } from '@/lib/queryKeys';
 
 export interface RecordFilters {
   locationId: string;
@@ -70,14 +71,14 @@ export function RecordsProvider({ children }: { children: React.ReactNode }) {
   const [sortOrder, setSortOrder] = useState<RecordSortOrder>('asc');
 
   const refetch = useCallback(() => {
-    void queryClient.refetchQueries({ queryKey: ['records'] });
+    void queryClient.refetchQueries({ queryKey: qk.records });
   }, [queryClient]);
 
   // Server-driven records list (#191) — queryKey carries every server param.
   // GH #213 Task 6: fetcher swapped to the composite view endpoint
   // (records + display fields in one request); key + options unchanged.
   const { data, isLoading: recordsLoading, isPending, isFetching, error: recordsError } = useQuery<PaginatedResponse<RecordView>>({
-    queryKey: ['records', page, perPage, dateFrom, dateTo, filters, sortBy, sortOrder],
+    queryKey: [qk.records[0], page, perPage, dateFrom, dateTo, filters, sortBy, sortOrder],
     queryFn: () => getRecordsView({
       page,
       per_page: perPage,

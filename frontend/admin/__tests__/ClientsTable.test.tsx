@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import React from 'react';
-import type { ClientsContextType } from '../contexts/ClientsContext';
+import { createMockClientsTableState } from './helpers/mockContexts';
 import type { ClientWithStats, DependencyNode } from '@memo/api-client';
 import { ApiError } from '@memo/api-client';
 
@@ -66,52 +66,38 @@ const mockClientsWithStats: ClientWithStats[] = [
   },
 ];
 
-// ─── Mutable mock context ───────────────────────────────────────────────────
+// ─── Mutable mock table state (GH #140: useClientsTable) ────────────────────
 
-let mockContextValue: ClientsContextType = {
+let mockTableState = createMockClientsTableState({
   items: mockClientsWithStats,
-  clients: mockClientsWithStats,
   total: 2,
-  page: 1,
   perPage: 20,
-  filters: {
-    search: '',
-    status: 'active',
-    created_from: '',
-    created_to: '',
-        updated_from: '',
-        updated_to: '',
-        min_records: null,
-        max_records: null,
-        min_paid: null,
-        max_paid: null,
-        missed_from: null,
-        missed_to: null,
-      },
-      sortBy: 'name',
-      sortOrder: 'asc',
-      isLoading: false,
-      isPending: false,
-      isFetching: false,
-      error: null,
-      refetch: vi.fn(),
-      setPage: vi.fn(),
-      setPerPage: vi.fn(),
-      setFilters: vi.fn(),
-      setSort: vi.fn(),
-      resetFilters: vi.fn(),
-      createClient: vi.fn(),
-      updateClient: vi.fn(),
-      patchClient: vi.fn(),
-      deleteClient: vi.fn(),
-      archiveClient: vi.fn(),
-      restoreClient: vi.fn(),
-      resolveDeleteClient: vi.fn(),
-      dependencies: null,
-};
+  sortBy: 'name',
+  sortOrder: 'asc',
+});
 
-vi.mock('@/contexts/ClientsContext', () => ({
-  useClients: () => mockContextValue,
+// importOriginal keeps the real `defaultFilters` export available — the
+// shared mockContexts fixture imports it for createMockClientsTableState.
+vi.mock('@/contexts/ClientsContext', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/contexts/ClientsContext')>();
+  return {
+    ...actual,
+    useClientsTable: () => mockTableState,
+  };
+});
+
+// ─── Mutable mutation hook mocks (GH #140: hooks/useClientsMutations) ───────
+
+const deleteHook = { mutateAsync: vi.fn(), dependencies: null as DependencyNode[] | null };
+const archiveHook = { mutateAsync: vi.fn() };
+const restoreHook = { mutateAsync: vi.fn() };
+const resolveDeleteHook = { mutateAsync: vi.fn() };
+
+vi.mock('@/hooks/useClientsMutations', () => ({
+  useDeleteClient: () => deleteHook,
+  useArchiveClient: () => archiveHook,
+  useRestoreClient: () => restoreHook,
+  useResolveDeleteClient: () => resolveDeleteHook,
 }));
 
 vi.mock('@/contexts/UIContext', () => ({
@@ -123,47 +109,19 @@ import { ClientsTable } from '../app/(main)/clients/components/ClientsTable';
 describe('ClientsTable', () => {
   beforeEach(() => {
     localStorage.clear();
-    mockContextValue = {
+    vi.clearAllMocks();
+    deleteHook.dependencies = null;
+    deleteHook.mutateAsync.mockResolvedValue(undefined);
+    archiveHook.mutateAsync.mockResolvedValue({});
+    restoreHook.mutateAsync.mockResolvedValue({});
+    resolveDeleteHook.mutateAsync.mockResolvedValue(undefined);
+    mockTableState = createMockClientsTableState({
       items: mockClientsWithStats,
-      clients: mockClientsWithStats,
       total: 2,
-      page: 1,
       perPage: 20,
-      filters: {
-        search: '',
-        status: 'active',
-        created_from: '',
-        created_to: '',
-        updated_from: '',
-        updated_to: '',
-        min_records: null,
-        max_records: null,
-        min_paid: null,
-        max_paid: null,
-        missed_from: null,
-        missed_to: null,
-      },
       sortBy: 'name',
       sortOrder: 'asc',
-      isLoading: false,
-      isPending: false,
-      isFetching: false,
-      error: null,
-      refetch: vi.fn(),
-      setPage: vi.fn(),
-      setPerPage: vi.fn(),
-      setFilters: vi.fn(),
-      setSort: vi.fn(),
-      resetFilters: vi.fn(),
-      createClient: vi.fn(),
-      updateClient: vi.fn(),
-      patchClient: vi.fn(),
-      deleteClient: vi.fn(),
-      archiveClient: vi.fn(),
-      restoreClient: vi.fn(),
-      resolveDeleteClient: vi.fn(),
-      dependencies: null,
-    };
+    });
   });
 
   it('renders client names', () => {
@@ -206,7 +164,7 @@ describe('ClientsTable', () => {
   });
 
   it('shows loading skeleton when isPending is true', () => {
-    mockContextValue = { ...mockContextValue, isPending: true };
+    mockTableState = { ...mockTableState, isPending: true };
     render(<ClientsTable onClientClick={vi.fn()} />);
     // Loading state: animated skeleton placeholders
     const skeletons = document.querySelectorAll('.animate-pulse');
@@ -214,7 +172,7 @@ describe('ClientsTable', () => {
   });
 
   it('shows empty state when no clients (#12 unified copy)', () => {
-    mockContextValue = { ...mockContextValue, clients: [], items: [] };
+    mockTableState = { ...mockTableState, items: [] };
     render(<ClientsTable onClientClick={vi.fn()} />);
     // Addendum #12 (user ruling): empty state = "Нет записей" for ALL 8
     // tables; the dual variant (Ничего не найдено + reset link + SVG) is
@@ -223,11 +181,10 @@ describe('ClientsTable', () => {
   });
 
   it('empty state is unified even when filters active (#12)', () => {
-    mockContextValue = {
-      ...mockContextValue,
-      clients: [],
+    mockTableState = {
+      ...mockTableState,
       items: [],
-      filters: { ...mockContextValue.filters, search: 'test' },
+      filters: { ...mockTableState.filters, search: 'test' },
     };
     render(<ClientsTable onClientClick={vi.fn()} />);
     // No "Ничего не найдено" + reset link inside the table — both dropped.
@@ -236,45 +193,38 @@ describe('ClientsTable', () => {
   });
 
   it('does not render reset link in the empty table — reset lives in the filters bar (#12)', () => {
-    mockContextValue = {
-      ...mockContextValue,
-      clients: [],
+    mockTableState = {
+      ...mockTableState,
       items: [],
-      filters: { ...mockContextValue.filters, search: 'test' },
+      filters: { ...mockTableState.filters, search: 'test' },
     };
     render(<ClientsTable onClientClick={vi.fn()} />);
     // The legacy "Сбросить фильтры" inside the table is gone.
     expect(screen.queryByText('Сбросить фильтры')).not.toBeInTheDocument();
   });
 
-  it('clicking "Удалить" calls deleteClient (dry-run); 409 opens the DeleteDialog', async () => {
-    const deleteClient = vi.fn().mockRejectedValue(
+  it('clicking "Удалить" runs the delete dry-run; 409 opens the DeleteDialog', async () => {
+    deleteHook.mutateAsync.mockRejectedValue(
       new ApiError(409, 'Удаление невозможно', 'CONFLICT', DEPS_CHOICE),
     );
-    mockContextValue = { ...mockContextValue, deleteClient, dependencies: DEPS_CHOICE };
+    deleteHook.dependencies = DEPS_CHOICE;
     render(<ClientsTable onClientClick={vi.fn()} />);
 
     // Open the row-1 actions dropdown and click "Удалить"
     fireEvent.click(screen.getAllByLabelText(/Действия/)[0]);
     fireEvent.click(screen.getByText('Удалить'));
 
-    await waitFor(() => expect(deleteClient).toHaveBeenCalledWith('c1'));
+    await waitFor(() => expect(deleteHook.mutateAsync).toHaveBeenCalledWith('c1'));
     // window.confirm is gone — the dialog takes over (§7.3 fetch flow)
     await waitFor(() => expect(screen.getByTestId('delete-dialog')).toBeInTheDocument());
     expect(screen.getByTestId('delete-dialog-title').textContent).toContain('Анна Иванова');
   });
 
-  it('Mode A confirm sends resolveDeleteClient with the picked resolutions', async () => {
-    const deleteClient = vi.fn().mockRejectedValue(
+  it('Mode A confirm sends resolveDelete with the picked resolutions', async () => {
+    deleteHook.mutateAsync.mockRejectedValue(
       new ApiError(409, 'Удаление невозможно', 'CONFLICT', DEPS_CHOICE),
     );
-    const resolveDeleteClient = vi.fn().mockResolvedValue(undefined);
-    mockContextValue = {
-      ...mockContextValue,
-      deleteClient,
-      resolveDeleteClient,
-      dependencies: DEPS_CHOICE,
-    };
+    deleteHook.dependencies = DEPS_CHOICE;
     render(<ClientsTable onClientClick={vi.fn()} />);
 
     fireEvent.click(screen.getAllByLabelText(/Действия/)[0]);
@@ -290,25 +240,20 @@ describe('ClientsTable', () => {
     fireEvent.click(screen.getByTestId('delete-dialog-confirm-btn'));
 
     await waitFor(() =>
-      expect(resolveDeleteClient).toHaveBeenCalledWith('c1', {
-        records: 'nullify',
-        visitors: 'cascade',
+      expect(resolveDeleteHook.mutateAsync).toHaveBeenCalledWith({
+        id: 'c1',
+        resolutions: { records: 'nullify', visitors: 'cascade' },
       }),
     );
     await waitFor(() => expect(screen.queryByTestId('delete-dialog')).not.toBeInTheDocument());
   });
 
-  it('Mode B (activities present) offers "Архивировать" via archiveClient', async () => {
-    const deleteClient = vi.fn().mockRejectedValue(
+  it('Mode B (activities present) offers "Архивировать" via the archive hook', async () => {
+    deleteHook.mutateAsync.mockRejectedValue(
       new ApiError(409, 'Удаление невозможно', 'CONFLICT', DEPS_BLOCKED),
     );
-    const archiveClient = vi.fn().mockResolvedValue({ ...mockClientsWithStats[0], archived: true });
-    mockContextValue = {
-      ...mockContextValue,
-      deleteClient,
-      archiveClient,
-      dependencies: DEPS_BLOCKED,
-    };
+    deleteHook.dependencies = DEPS_BLOCKED;
+    archiveHook.mutateAsync.mockResolvedValue({ ...mockClientsWithStats[0], archived: true });
     render(<ClientsTable onClientClick={vi.fn()} />);
 
     fireEvent.click(screen.getAllByLabelText(/Действия/)[0]);
@@ -318,72 +263,62 @@ describe('ClientsTable', () => {
     expect(screen.queryByTestId('delete-dialog-confirm-btn')).not.toBeInTheDocument();
     fireEvent.click(screen.getByTestId('delete-dialog-archive-btn'));
 
-    await waitFor(() => expect(archiveClient).toHaveBeenCalledWith('c1'));
+    await waitFor(() => expect(archiveHook.mutateAsync).toHaveBeenCalledWith('c1'));
     await waitFor(() => expect(screen.queryByTestId('delete-dialog')).not.toBeInTheDocument());
   });
 
   it('204 dry-run success → instant delete, no dialog opens', async () => {
-    const deleteClient = vi.fn().mockResolvedValue(undefined);
-    mockContextValue = { ...mockContextValue, deleteClient };
+    deleteHook.mutateAsync.mockResolvedValue(undefined);
     render(<ClientsTable onClientClick={vi.fn()} />);
 
     fireEvent.click(screen.getAllByLabelText(/Действия/)[0]);
     fireEvent.click(screen.getByText('Удалить'));
 
-    await waitFor(() => expect(deleteClient).toHaveBeenCalledWith('c1'));
+    await waitFor(() => expect(deleteHook.mutateAsync).toHaveBeenCalledWith('c1'));
     expect(screen.queryByTestId('delete-dialog')).not.toBeInTheDocument();
   });
 
-  it('calls archiveClient when "В архив" clicked on an active client (#198 parity)', async () => {
-    const archiveClient = vi.fn().mockResolvedValue({ ...mockClientsWithStats[0], archived: true });
-    mockContextValue = { ...mockContextValue, archiveClient };
+  it('calls the archive hook when "В архив" clicked on an active client (#198 parity)', async () => {
+    archiveHook.mutateAsync.mockResolvedValue({ ...mockClientsWithStats[0], archived: true });
     render(<ClientsTable onClientClick={vi.fn()} />);
 
     fireEvent.click(screen.getAllByLabelText(/Действия/)[0]);
     fireEvent.click(screen.getByText('В архив'));
 
-    await waitFor(() => expect(archiveClient).toHaveBeenCalledWith('c1'));
+    await waitFor(() => expect(archiveHook.mutateAsync).toHaveBeenCalledWith('c1'));
   });
 
-  it('calls restoreClient when "Восстановить" clicked on an archived client (#198 parity)', async () => {
-    const restoreClient = vi.fn().mockResolvedValue({ ...mockClientsWithStats[0], archived: false });
-    mockContextValue = {
-      ...mockContextValue,
+  it('calls the restore hook when "Восстановить" clicked on an archived client (#198 parity)', async () => {
+    restoreHook.mutateAsync.mockResolvedValue({ ...mockClientsWithStats[0], archived: false });
+    mockTableState = {
+      ...mockTableState,
       items: [{ ...mockClientsWithStats[0], archived: true }],
-      clients: [{ ...mockClientsWithStats[0], archived: true }],
-      restoreClient,
     };
     render(<ClientsTable onClientClick={vi.fn()} />);
 
     fireEvent.click(screen.getAllByLabelText(/Действия/)[0]);
     fireEvent.click(screen.getByText('Восстановить'));
 
-    await waitFor(() => expect(restoreClient).toHaveBeenCalledWith('c1'));
+    await waitFor(() => expect(restoreHook.mutateAsync).toHaveBeenCalledWith('c1'));
   });
 
   it('calls setSort when a sortable column header is clicked', () => {
     render(<ClientsTable onClientClick={vi.fn()} />);
     fireEvent.click(screen.getByRole('button', { name: /Имя/ }));
-    expect(mockContextValue.setSort).toHaveBeenCalledWith('name', expect.any(String));
+    expect(mockTableState.setSort).toHaveBeenCalledWith('name', expect.any(String));
   });
 
   it('toggles sort direction when clicking the same column', () => {
-    mockContextValue = { ...mockContextValue, sortBy: 'name', sortOrder: 'asc' };
+    mockTableState = { ...mockTableState, sortBy: 'name', sortOrder: 'asc' };
     render(<ClientsTable onClientClick={vi.fn()} />);
     fireEvent.click(screen.getByRole('button', { name: /Имя/ }));
-    expect(mockContextValue.setSort).toHaveBeenCalledWith('name', 'desc');
+    expect(mockTableState.setSort).toHaveBeenCalledWith('name', 'desc');
   });
 
   it('shows "Дорогой гость" for client with null name', () => {
-    mockContextValue = {
-      ...mockContextValue,
+    mockTableState = {
+      ...mockTableState,
       items: [
-        {
-          ...mockClientsWithStats[0],
-          name: '',
-        },
-      ],
-      clients: [
         {
           ...mockClientsWithStats[0],
           name: '',
@@ -395,15 +330,9 @@ describe('ClientsTable', () => {
   });
 
   it('shows "Не указан" for client with empty phone', () => {
-    mockContextValue = {
-      ...mockContextValue,
+    mockTableState = {
+      ...mockTableState,
       items: [
-        {
-          ...mockClientsWithStats[0],
-          phone: '',
-        },
-      ],
-      clients: [
         {
           ...mockClientsWithStats[0],
           phone: '',
@@ -415,15 +344,9 @@ describe('ClientsTable', () => {
   });
 
   it('shows "—" for client with null last_record', () => {
-    mockContextValue = {
-      ...mockContextValue,
+    mockTableState = {
+      ...mockTableState,
       items: [
-        {
-          ...mockClientsWithStats[0],
-          last_record: null,
-        },
-      ],
-      clients: [
         {
           ...mockClientsWithStats[0],
           last_record: null,
@@ -435,7 +358,7 @@ describe('ClientsTable', () => {
   });
 
   it('shows sort indicator for active sort column', () => {
-    mockContextValue = { ...mockContextValue, sortBy: 'records_count', sortOrder: 'desc' };
+    mockTableState = { ...mockTableState, sortBy: 'records_count', sortOrder: 'desc' };
     render(<ClientsTable onClientClick={vi.fn()} />);
     // The column header (a <th>) should contain the active arrow indicator.
     const header = screen.getByRole('columnheader', { name: /Всего записей/ });
@@ -445,14 +368,14 @@ describe('ClientsTable', () => {
   // ─── Additional edge cases ─────────────────────────────────────────────
 
   it('sort indicator shows ↑ for ascending order', () => {
-    mockContextValue = { ...mockContextValue, sortBy: 'name', sortOrder: 'asc' };
+    mockTableState = { ...mockTableState, sortBy: 'name', sortOrder: 'asc' };
     render(<ClientsTable onClientClick={vi.fn()} />);
     const header = screen.getByRole('columnheader', { name: /Имя/ });
     expect(header.textContent).toContain('↑');
   });
 
   it('inactive sortable header shows ↕ (B2 cat 3 — post-migration)', () => {
-    mockContextValue = { ...mockContextValue, sortBy: 'name', sortOrder: 'asc' };
+    mockTableState = { ...mockTableState, sortBy: 'name', sortOrder: 'asc' };
     render(<ClientsTable onClientClick={vi.fn()} />);
     // Телефон is NOT the active sort column — it should show the neutral ↕.
     const header = screen.getByRole('columnheader', { name: /Телефон/ });
@@ -460,11 +383,11 @@ describe('ClientsTable', () => {
   });
 
   it('calls setSort with field and reversed direction on column click', () => {
-    mockContextValue = { ...mockContextValue, sortBy: 'records_count', sortOrder: 'desc' };
+    mockTableState = { ...mockTableState, sortBy: 'records_count', sortOrder: 'desc' };
     render(<ClientsTable onClientClick={vi.fn()} />);
     // DataTable renders a <button> inside the <th>; click that to fire setSort.
     fireEvent.click(screen.getByRole('button', { name: /Имя/ }));
-    expect(mockContextValue.setSort).toHaveBeenCalledWith('name', 'asc');
+    expect(mockTableState.setSort).toHaveBeenCalledWith('name', 'asc');
   });
 
   it('calls onClientClick with correct client object for second client', () => {
@@ -477,20 +400,18 @@ describe('ClientsTable', () => {
   });
 
   it('renders zero visits count correctly', () => {
-    mockContextValue = {
-      ...mockContextValue,
+    mockTableState = {
+      ...mockTableState,
       items: [{ ...mockClientsWithStats[0], records_count: 0 }],
-      clients: [{ ...mockClientsWithStats[0], records_count: 0 }],
     };
     render(<ClientsTable onClientClick={vi.fn()} />);
     expect(screen.getByText('0')).toBeTruthy();
   });
 
   it('renders zero total_paid correctly', () => {
-    mockContextValue = {
-      ...mockContextValue,
+    mockTableState = {
+      ...mockTableState,
       items: [{ ...mockClientsWithStats[0], total_paid: 0 }],
-      clients: [{ ...mockClientsWithStats[0], total_paid: 0 }],
     };
     render(<ClientsTable onClientClick={vi.fn()} />);
     expect(screen.getByText('0 ₽')).toBeTruthy();
@@ -517,10 +438,9 @@ describe('ClientsTable', () => {
   });
 
   it('handles single client in list', () => {
-    mockContextValue = {
-      ...mockContextValue,
+    mockTableState = {
+      ...mockTableState,
       items: [mockClientsWithStats[0]],
-      clients: [mockClientsWithStats[0]],
     };
     render(<ClientsTable onClientClick={vi.fn()} />);
     expect(screen.getByText('Анна Иванова')).toBeTruthy();
@@ -528,7 +448,7 @@ describe('ClientsTable', () => {
   });
 
   it('renders loading skeleton with correct number of placeholders', () => {
-    mockContextValue = { ...mockContextValue, isPending: true };
+    mockTableState = { ...mockTableState, isPending: true };
     render(<ClientsTable onClientClick={vi.fn()} />);
     // Spec §6.8 — DataTable skeleton: 10 rows × visible columns only.
     // Each row contributes N .animate-pulse elements (1 per visible column).

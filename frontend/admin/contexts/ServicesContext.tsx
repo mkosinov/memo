@@ -3,9 +3,10 @@
 import { createPagedListContext } from './createPagedListContext';
 import { getServices } from '@memo/api-client';
 import type { ServiceResponse } from '@memo/api-client';
+import { qk } from '@/lib/queryKeys';
 
 const { Provider, usePagedList } = createPagedListContext<ServiceResponse>({
-  queryKeyPrefix: 'services',
+  queryKeyPrefix: qk.services[0],
   fetcher: (p) =>
     getServices({
       page: p.page,

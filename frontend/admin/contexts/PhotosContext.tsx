@@ -2,7 +2,7 @@
 
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
-import { getPhotos, getAllServices, getAllLocations } from '@memo/api-client';
+import { getPhotos } from '@memo/api-client';
 import type {
   PhotoResponse,
   PhotoListResponse,
@@ -10,6 +10,9 @@ import type {
   ServiceResponse,
   LocationResponse,
 } from '@memo/api-client';
+import { useServicesRaw } from '@/hooks/useServices';
+import { useLocationsRaw } from '@/hooks/useLocations';
+import { qk } from '@/lib/queryKeys';
 import type { PagedListState } from '@/app/components/shared/tableTypes';
 import type { SortOrder } from './createPagedListContext';
 
@@ -48,7 +51,7 @@ export interface PhotosContextType {
   isLoading: boolean;
   isFetching: boolean;
   error: Error | null;
-  /** /all dictionaries (once, staleTime: Infinity) — service/location titles resolve client-side. */
+  /** /all dictionaries (shared raw hooks, 1h dict staleTime) — service/location titles resolve client-side. */
   servicesMap: Map<string, ServiceResponse>;
   locationsMap: Map<string, LocationResponse>;
   setPage: (page: number) => void;
@@ -79,11 +82,11 @@ export function PhotosProvider({ children }: { children: React.ReactNode }) {
   const q = search.length >= 2 ? search : undefined;
 
   const refetch = useCallback(() => {
-    void queryClient.refetchQueries({ queryKey: ['photos'] });
+    void queryClient.refetchQueries({ queryKey: qk.photos });
   }, [queryClient]);
 
   const { data, isLoading, isPending, isFetching, error } = useQuery<PhotoListResponse>({
-    queryKey: ['photos', { page, perPage, sortBy, sortOrder, q, ...filters }],
+    queryKey: [qk.photos[0], { page, perPage, sortBy, sortOrder, q, ...filters }],
     queryFn: () => getPhotos({
       page,
       per_page: perPage,
@@ -142,19 +145,12 @@ export function PhotosProvider({ children }: { children: React.ReactNode }) {
     }
   }, [isPending, isFetching, items.length, page]);
 
-  // Always-cached reference data (bare /all lists — #205); same keys as
-  // RecordsContext so the dictionaries load once across contexts.
-  const { data: servicesRaw = [] } = useQuery<ServiceResponse[]>({
-    queryKey: ['services'],
-    queryFn: () => getAllServices(),
-    staleTime: Infinity,
-  });
+  // Always-cached reference data (bare /all lists — #205) via the shared raw
+  // hooks (#140); same keys as RecordsContext so the dictionaries load once
+  // across contexts. Dict staleTime = 1h (queryKeys.ts) — was Infinity here.
+  const { data: servicesRaw = [] } = useServicesRaw();
 
-  const { data: locationsRaw = [] } = useQuery<LocationResponse[]>({
-    queryKey: ['locations'],
-    queryFn: () => getAllLocations(),
-    staleTime: Infinity,
-  });
+  const { data: locationsRaw = [] } = useLocationsRaw();
 
   const servicesMap = useMemo(() => {
     const map = new Map<string, ServiceResponse>();

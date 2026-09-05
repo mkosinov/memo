@@ -1,13 +1,13 @@
 'use client';
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
 import { useNavigation } from '@/contexts/NavigationContext';
 import { getMonday, formatDateISO, displayMasterName } from '@/lib/utils';
 import { StatusFiltersPicker } from '@/app/components/shared/StatusFiltersPicker';
 import { Combobox, type ComboboxOption } from '@/app/components/shared/Combobox';
-import { getAllLocations, getAllServices, getAllMasters } from '@memo/api-client';
-import type { LocationResponse, ServiceResponse, MasterResponse } from '@memo/api-client';
+import { useLocationsRaw } from '@/hooks/useLocations';
+import { useServicesRaw } from '@/hooks/useServices';
+import { useMastersRaw } from '@/hooks/useMasters';
 import type { VisitStatus } from '@memo/domain';
 
 interface BookingFiltersProps {
@@ -48,26 +48,14 @@ export function BookingFilters({
 }: BookingFiltersProps) {
   const { dateFrom, dateTo, selectDateRange } = useNavigation();
 
-  // Selection data owned by this component (GH #213 §6.4, R2): direct queries
-  // on the CANONICAL keys with the RAW getAll* fetchers — TanStack dedupes
-  // with every other ['locations']/['services']/['masters'] consumer. Raw
-  // shapes keep the `!archived` filter and name/title/first_name labels
-  // verbatim (the shared hooks' transforms would drop `archived`).
-  const { data: locations = [] } = useQuery<LocationResponse[]>({
-    queryKey: ['locations'],
-    queryFn: () => getAllLocations(),
-    staleTime: 5 * 60 * 1000,
-  });
-  const { data: services = [] } = useQuery<ServiceResponse[]>({
-    queryKey: ['services'],
-    queryFn: () => getAllServices(),
-    staleTime: 5 * 60 * 1000,
-  });
-  const { data: masters = [] } = useQuery<MasterResponse[]>({
-    queryKey: ['masters'],
-    queryFn: () => getAllMasters(),
-    staleTime: 5 * 60 * 1000,
-  });
+  // Selection data owned by this component (GH #213 §6.4, R2): the shared RAW
+  // hooks (#140) on the CANONICAL keys — TanStack dedupes with every other
+  // ['locations']/['services']/['masters'] consumer. Raw shapes keep the
+  // `!archived` filter and name/title/first_name labels verbatim (the domain
+  // hooks' transforms would drop `archived`).
+  const { data: locations = [] } = useLocationsRaw();
+  const { data: services = [] } = useServicesRaw();
+  const { data: masters = [] } = useMastersRaw();
 
   const locationList = locations.filter(l => !l.archived);
   const serviceList = services.filter(s => !s.archived);

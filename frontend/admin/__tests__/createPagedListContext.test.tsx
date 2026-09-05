@@ -57,6 +57,56 @@ function setup(
   return { fetcher, usePagedList, Wrapper, queryClient };
 }
 
+// ─── #140 T3: filters + defaultSort fixtures ────────────────────────────
+
+interface TestFilters {
+  search: string;
+  minPaid: number | null;
+}
+
+const testFilterDefaults: TestFilters = { search: '', minPaid: null };
+
+type FiltersFetcher = (
+  params: PagedListFetcherParams & { filters: TestFilters },
+) => Promise<PaginatedResponse<TestItem>>;
+
+/**
+ * Same idiom as setup() but for the with-filters factory overload — mirrors
+ * the Task 4 ClientsContext config (perPage 20, sort name/asc, structured
+ * filters object in the query key, spec §5.2).
+ */
+function setupFilters(
+  config: {
+    withStatus?: boolean;
+    queryKeyPrefix?: string;
+    defaultSort?: { sortBy: string; sortOrder: 'asc' | 'desc' };
+    defaultPerPage?: number;
+  } = {},
+) {
+  const fetcher = vi.fn((params: PagedListFetcherParams & { filters: TestFilters }) =>
+    Promise.resolve(envelope(params.page, params.per_page, 0)),
+  );
+  const { Provider, usePagedList } = createPagedListContext<TestItem, TestFilters>({
+    queryKeyPrefix: config.queryKeyPrefix ?? 'items',
+    fetcher: fetcher as FiltersFetcher,
+    withStatus: config.withStatus,
+    defaultPerPage: config.defaultPerPage,
+    filters: { defaults: testFilterDefaults },
+    defaultSort: config.defaultSort,
+  });
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  function Wrapper({ children }: { children: React.ReactNode }) {
+    return (
+      <QueryClientProvider client={queryClient}>
+        <Provider>{children}</Provider>
+      </QueryClientProvider>
+    );
+  }
+  return { fetcher, usePagedList, Wrapper, queryClient };
+}
+
 afterEach(() => {
   vi.restoreAllMocks();
 });
@@ -532,6 +582,260 @@ describe('createPagedListContext', () => {
       // no server round-trip — predicate path only
       expect(fetcher).toHaveBeenCalledTimes(1);
       expect(fetcher.mock.calls[0][0]).not.toHaveProperty('q');
+    });
+  });
+
+  // ─── #140 T3: filters + defaultSort options (with-filters overload) ───
+
+  describe('filters + defaultSort', () => {
+    it('initial state: filters equal defaults, sortBy/sortOrder equal defaultSort', async () => {
+      const { fetcher, usePagedList, Wrapper } = setupFilters({
+        defaultSort: { sortBy: 'name', sortOrder: 'asc' },
+        defaultPerPage: 20,
+      });
+
+      const { result } = renderHook(() => usePagedList(), { wrapper: Wrapper });
+
+      await waitFor(() => {
+        expect(result.current.isLoading).toBe(false);
+      });
+
+      expect(result.current.filters).toEqual({ search: '', minPaid: null });
+      expect(result.current.sortBy).toBe('name');
+      expect(result.current.sortOrder).toBe('asc');
+      expect(result.current.perPage).toBe(20);
+      // defaultSort IS sent on the very first fetch (spec §5.1)
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      expect(fetcher).toHaveBeenCalledWith({
+        page: 1,
+        per_page: 20,
+        sort_by: 'name',
+        sort_order: 'asc',
+        filters: { search: '', minPaid: null },
+      });
+    });
+
+    it('setFilters(patch) merges into filters and resets page to 1', async () => {
+      const { fetcher, usePagedList, Wrapper } = setupFilters({
+        defaultSort: { sortBy: 'name', sortOrder: 'asc' },
+      });
+      // Non-empty pages → the clamp never interferes
+      fetcher.mockImplementation((p) =>
+        Promise.resolve(envelope(p.page, p.per_page, 30, [{ id: 't-1', name: 'Анна' }])),
+      );
+
+      const { result } = renderHook(() => usePagedList(), { wrapper: Wrapper });
+
+      await waitFor(() => {
+        expect(result.current.isLoading).toBe(false);
+      });
+
+      act(() => {
+        result.current.setPage(3);
+      });
+      await waitFor(() => {
+        expect(result.current.page).toBe(3);
+      });
+
+      act(() => {
+        result.current.setFilters({ minPaid: 1500 });
+      });
+
+      await waitFor(() => {
+        expect(fetcher).toHaveBeenLastCalledWith({
+          page: 1,
+          per_page: 10,
+          sort_by: 'name',
+          sort_order: 'asc',
+          filters: { search: '', minPaid: 1500 },
+        });
+      });
+      // merge, not replace: untouched keys keep their value
+      expect(result.current.filters).toEqual({ search: '', minPaid: 1500 });
+      expect(result.current.page).toBe(1);
+    });
+
+    it('resetFilters() restores defaults and resets page to 1', async () => {
+      const { fetcher, usePagedList, Wrapper } = setupFilters({
+        defaultSort: { sortBy: 'name', sortOrder: 'asc' },
+      });
+      fetcher.mockImplementation((p) =>
+        Promise.resolve(envelope(p.page, p.per_page, 30, [{ id: 't-1', name: 'Анна' }])),
+      );
+
+      const { result } = renderHook(() => usePagedList(), { wrapper: Wrapper });
+
+      await waitFor(() => {
+        expect(result.current.isLoading).toBe(false);
+      });
+
+      act(() => {
+        result.current.setFilters({ search: 'анна', minPaid: 900 });
+      });
+      await waitFor(() => {
+        expect(result.current.filters).toEqual({ search: 'анна', minPaid: 900 });
+      });
+
+      act(() => {
+        result.current.setPage(2);
+      });
+      await waitFor(() => {
+        expect(result.current.page).toBe(2);
+      });
+
+      act(() => {
+        result.current.resetFilters();
+      });
+
+      await waitFor(() => {
+        expect(fetcher).toHaveBeenLastCalledWith({
+          page: 1,
+          per_page: 10,
+          sort_by: 'name',
+          sort_order: 'asc',
+          filters: { search: '', minPaid: null },
+        });
+      });
+      expect(result.current.filters).toEqual({ search: '', minPaid: null });
+      expect(result.current.page).toBe(1);
+    });
+
+    it('queryKey is [prefix, page, perPage, filters, sortBy, sortOrder] — filters slot AFTER perPage', async () => {
+      const { usePagedList, Wrapper, queryClient } = setupFilters({
+        queryKeyPrefix: 'items',
+        defaultSort: { sortBy: 'name', sortOrder: 'asc' },
+        defaultPerPage: 20,
+      });
+
+      const { result } = renderHook(() => usePagedList(), { wrapper: Wrapper });
+
+      await waitFor(() => {
+        expect(result.current.isLoading).toBe(false);
+      });
+
+      const keys = queryClient.getQueryCache().getAll().map((q) => q.queryKey);
+      expect(keys).toEqual([
+        ['items', 1, 20, { search: '', minPaid: null }, 'name', 'asc'],
+      ]);
+    });
+
+    it('withStatus: false + filters → no status slot in the key', async () => {
+      const { usePagedList, Wrapper, queryClient } = setupFilters({
+        queryKeyPrefix: 'items-nostatus',
+        withStatus: false,
+        defaultSort: { sortBy: 'name', sortOrder: 'asc' },
+      });
+
+      const { result } = renderHook(() => usePagedList(), { wrapper: Wrapper });
+
+      await waitFor(() => {
+        expect(result.current.isLoading).toBe(false);
+      });
+
+      const keys = queryClient.getQueryCache().getAll().map((q) => q.queryKey);
+      expect(keys).toEqual([
+        ['items-nostatus', 1, 10, { search: '', minPaid: null }, 'name', 'asc'],
+      ]);
+    });
+
+    it('withStatus: true + filters → status slot BETWEEN filters and sort', async () => {
+      const { fetcher, usePagedList, Wrapper, queryClient } = setupFilters({
+        queryKeyPrefix: 'items-status',
+        withStatus: true,
+        defaultSort: { sortBy: 'name', sortOrder: 'asc' },
+      });
+
+      const { result } = renderHook(() => usePagedList(), { wrapper: Wrapper });
+
+      await waitFor(() => {
+        expect(result.current.isLoading).toBe(false);
+      });
+
+      const keys = queryClient.getQueryCache().getAll().map((q) => q.queryKey);
+      expect(keys).toEqual([
+        ['items-status', 1, 10, { search: '', minPaid: null }, 'active', 'name', 'asc'],
+      ]);
+      expect(fetcher).toHaveBeenCalledWith({
+        page: 1,
+        per_page: 10,
+        sort_by: 'name',
+        sort_order: 'asc',
+        status: 'active',
+        filters: { search: '', minPaid: null },
+      });
+    });
+
+    it('NON-filters context key is UNCHANGED: [prefix, page, perPage, null, asc] (bit-identical pin)', async () => {
+      const { usePagedList, Wrapper, queryClient } = setup({ queryKeyPrefix: 'items' });
+
+      const { result } = renderHook(() => usePagedList(), { wrapper: Wrapper });
+
+      await waitFor(() => {
+        expect(result.current.isLoading).toBe(false);
+      });
+
+      const keys = queryClient.getQueryCache().getAll().map((q) => q.queryKey);
+      // No filters slot, sortBy null — exactly today's shape
+      expect(keys).toEqual([['items', 1, 10, null, 'asc']]);
+    });
+
+    it('defaultSort absent → sortBy starts null, defaultPerPage still honored', async () => {
+      const { fetcher, usePagedList, Wrapper, queryClient } = setupFilters({
+        queryKeyPrefix: 'items-nosort',
+        defaultPerPage: 20,
+        // no defaultSort
+      });
+
+      const { result } = renderHook(() => usePagedList(), { wrapper: Wrapper });
+
+      await waitFor(() => {
+        expect(result.current.isLoading).toBe(false);
+      });
+
+      expect(result.current.sortBy).toBeNull();
+      expect(result.current.sortOrder).toBe('asc');
+      expect(result.current.perPage).toBe(20);
+      // No sort params on the wire (server §4.4 default order) — same as classic
+      expect(fetcher).toHaveBeenCalledWith({
+        page: 1,
+        per_page: 20,
+        filters: { search: '', minPaid: null },
+      });
+      expect(fetcher.mock.calls[0][0]).not.toHaveProperty('sort_by');
+      const keys = queryClient.getQueryCache().getAll().map((q) => q.queryKey);
+      expect(keys).toEqual([['items-nosort', 1, 20, { search: '', minPaid: null }, null, 'asc']]);
+    });
+
+    it('page-clamp parity: settled empty page 2 steps back to page 1', async () => {
+      const { fetcher, usePagedList, Wrapper } = setupFilters({
+        queryKeyPrefix: 'items-clamp',
+        defaultSort: { sortBy: 'name', sortOrder: 'asc' },
+      });
+      // Page 2 of a shrunk list → empty (spec §5.2 clamp parity with hand-rolled Clients)
+      fetcher.mockImplementation((p) =>
+        Promise.resolve(envelope(p.page, p.per_page, p.page === 1 ? 11 : 0)),
+      );
+
+      const { result } = renderHook(() => usePagedList(), { wrapper: Wrapper });
+
+      await waitFor(() => {
+        expect(result.current.isLoading).toBe(false);
+      });
+
+      act(() => {
+        result.current.setPage(2);
+      });
+
+      await waitFor(() => {
+        expect(result.current.page).toBe(1);
+      });
+      expect(fetcher).toHaveBeenCalledWith({
+        page: 2,
+        per_page: 10,
+        sort_by: 'name',
+        sort_order: 'asc',
+        filters: { search: '', minPaid: null },
+      });
     });
   });
 });

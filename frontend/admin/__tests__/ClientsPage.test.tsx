@@ -3,8 +3,8 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ClientWithStats } from '@memo/api-client';
-import { useClients } from '@/contexts/ClientsContext';
-import { createMockClientsContext } from './helpers/mockContexts';
+import { useClientsTable } from '@/contexts/ClientsContext';
+import { createMockClientsTableState } from './helpers/mockContexts';
 
 // ─── Mock contexts ───────────────────────────────────────────────────────
 
@@ -13,10 +13,16 @@ vi.mock('@/contexts/ScheduleContext', () => ({
   ScheduleProvider: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));
 
-vi.mock('@/contexts/ClientsContext', () => ({
-  useClients: vi.fn(),
-  ClientsProvider: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-}));
+// importOriginal keeps the real `defaultFilters` export available — the
+// shared mockContexts fixture imports it for createMockClientsTableState.
+vi.mock('@/contexts/ClientsContext', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/contexts/ClientsContext')>();
+  return {
+    ...actual,
+    useClientsTable: vi.fn(),
+    ClientsProvider: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  };
+});
 
 const mockRouter = { push: vi.fn(), replace: vi.fn() };
 let mockSearchParams = new URLSearchParams();
@@ -26,7 +32,7 @@ vi.mock('next/navigation', () => ({
   useRouter: () => mockRouter,
 }));
 
-const mockUseClients = vi.mocked(useClients);
+const mockUseClients = vi.mocked(useClientsTable);
 
 // ─── Mock components ─────────────────────────────────────────────────────
 
@@ -36,11 +42,11 @@ vi.mock('../app/(main)/clients/components/ClientsFilters', () => ({
 
 vi.mock('../app/(main)/clients/components/ClientsTable', () => ({
   // #139 T6 — ClientsTable renders the unified <DataTable> which owns the pager.
-  // Mock reads `useClients` from the module scope (mocked above) and exposes
+  // Mock reads `useClientsTable` from the module scope (mocked above) and exposes
   // the pager controls so page-level tests can assert on them.
   ClientsTable: ({ onClientClick }: any) => {
-    // useClients is already imported at the top of this file from the mocked module.
-    const ctx = useClients();
+    // useClientsTable is already imported at the top of this file from the mocked module.
+    const ctx = useClientsTable();
     return (
       <div data-testid="clients-table">
         <button onClick={() => onClientClick({ id: 'c1', name: 'Test Client' })}>
@@ -104,7 +110,7 @@ describe('ClientsPage', () => {
     mockSearchParams = new URLSearchParams();
     mockRouter.push.mockClear();
     mockRouter.replace.mockClear();
-    mockUseClients.mockReturnValue(createMockClientsContext({ total: 25, page: 1, perPage: 20 }));
+    mockUseClients.mockReturnValue(createMockClientsTableState({ total: 25, page: 1, perPage: 20 }));
   });
 
   afterEach(() => {
@@ -152,7 +158,7 @@ describe('ClientsPage', () => {
   });
 
   it('renders pagination with total count', async () => {
-    mockUseClients.mockReturnValue(createMockClientsContext({ total: 45, page: 1, perPage: 20 }));
+    mockUseClients.mockReturnValue(createMockClientsTableState({ total: 45, page: 1, perPage: 20 }));
     const ClientsPage = (await import('../app/(main)/clients/page')).default;
     render(
       <QueryClientProvider client={createQueryClient()}>
@@ -188,7 +194,7 @@ describe('ClientsPage', () => {
   });
 
   it('disables previous button on first page', async () => {
-    mockUseClients.mockReturnValue(createMockClientsContext({ total: 45, page: 1, perPage: 20 }));
+    mockUseClients.mockReturnValue(createMockClientsTableState({ total: 45, page: 1, perPage: 20 }));
     const ClientsPage = (await import('../app/(main)/clients/page')).default;
     render(
       <QueryClientProvider client={createQueryClient()}>
@@ -200,7 +206,7 @@ describe('ClientsPage', () => {
   });
 
   it('enables next button when there are more pages', async () => {
-    mockUseClients.mockReturnValue(createMockClientsContext({ total: 45, page: 1, perPage: 20 }));
+    mockUseClients.mockReturnValue(createMockClientsTableState({ total: 45, page: 1, perPage: 20 }));
     const ClientsPage = (await import('../app/(main)/clients/page')).default;
     render(
       <QueryClientProvider client={createQueryClient()}>
@@ -252,7 +258,7 @@ describe('ClientsPage', () => {
 
   describe('pagination edge cases', () => {
     it('disables next button on last page', async () => {
-      mockUseClients.mockReturnValue(createMockClientsContext({ total: 25, page: 2, perPage: 20 }));
+      mockUseClients.mockReturnValue(createMockClientsTableState({ total: 25, page: 2, perPage: 20 }));
       const ClientsPage = (await import('../app/(main)/clients/page')).default;
       render(
         <QueryClientProvider client={createQueryClient()}>
@@ -264,7 +270,7 @@ describe('ClientsPage', () => {
     });
 
     it('enables both prev and next buttons on middle page', async () => {
-      mockUseClients.mockReturnValue(createMockClientsContext({ total: 60, page: 2, perPage: 20 }));
+      mockUseClients.mockReturnValue(createMockClientsTableState({ total: 60, page: 2, perPage: 20 }));
       const ClientsPage = (await import('../app/(main)/clients/page')).default;
       render(
         <QueryClientProvider client={createQueryClient()}>
@@ -278,7 +284,7 @@ describe('ClientsPage', () => {
     });
 
     it('shows correct client count for single client', async () => {
-      mockUseClients.mockReturnValue(createMockClientsContext({ total: 1, page: 1, perPage: 20 }));
+      mockUseClients.mockReturnValue(createMockClientsTableState({ total: 1, page: 1, perPage: 20 }));
       const ClientsPage = (await import('../app/(main)/clients/page')).default;
       render(
         <QueryClientProvider client={createQueryClient()}>
@@ -290,7 +296,7 @@ describe('ClientsPage', () => {
     });
 
     it('shows zero clients count', async () => {
-      mockUseClients.mockReturnValue(createMockClientsContext({ total: 0, page: 1, perPage: 20 }));
+      mockUseClients.mockReturnValue(createMockClientsTableState({ total: 0, page: 1, perPage: 20 }));
       const ClientsPage = (await import('../app/(main)/clients/page')).default;
       render(
         <QueryClientProvider client={createQueryClient()}>
@@ -315,7 +321,7 @@ describe('ClientsPage — ?clientId= deep-link (GH #216)', () => {
 
   it('deep-link param narrows the table: setFilters({search: id, status: all})', async () => {
     mockSearchParams = new URLSearchParams([['clientId', 'uuid-target-1']]);
-    const ctx = createMockClientsContext({ items: [], clients: [] });
+    const ctx = createMockClientsTableState({ items: [] });
     mockUseClients.mockReturnValue(ctx);
 
     const ClientsPage = (await import('../app/(main)/clients/page')).default;
@@ -331,7 +337,7 @@ describe('ClientsPage — ?clientId= deep-link (GH #216)', () => {
   });
 
   it('no param: deep-link setFilters not called', async () => {
-    const ctx = createMockClientsContext({ total: 25, page: 1, perPage: 20 });
+    const ctx = createMockClientsTableState({ total: 25, page: 1, perPage: 20 });
     mockUseClients.mockReturnValue(ctx);
 
     const ClientsPage = (await import('../app/(main)/clients/page')).default;
@@ -349,7 +355,7 @@ describe('ClientsPage — ?clientId= deep-link (GH #216)', () => {
     mockSearchParams = new URLSearchParams([['clientId', 'c-deep-1']]);
     const target = { id: 'c-deep-1', name: 'Deep Target', archived: false } as ClientWithStats;
     mockUseClients.mockReturnValue(
-      createMockClientsContext({ items: [target], clients: [target] }),
+      createMockClientsTableState({ items: [target] }),
     );
 
     const ClientsPage = (await import('../app/(main)/clients/page')).default;
@@ -369,7 +375,7 @@ describe('ClientsPage — ?clientId= deep-link (GH #216)', () => {
     mockSearchParams = new URLSearchParams([['clientId', 'c-missing']]);
     const other = { id: 'c-other', name: 'Other', archived: false } as ClientWithStats;
     mockUseClients.mockReturnValue(
-      createMockClientsContext({ items: [other], clients: [other] }),
+      createMockClientsTableState({ items: [other] }),
     );
 
     const ClientsPage = (await import('../app/(main)/clients/page')).default;
@@ -386,7 +392,7 @@ describe('ClientsPage — ?clientId= deep-link (GH #216)', () => {
   it('dead link: settled empty list strips the param from the URL', async () => {
     mockSearchParams = new URLSearchParams([['clientId', 'c-gone']]);
     mockUseClients.mockReturnValue(
-      createMockClientsContext({ items: [], clients: [], isPending: false, isFetching: false }),
+      createMockClientsTableState({ items: [], isPending: false, isFetching: false }),
     );
 
     const ClientsPage = (await import('../app/(main)/clients/page')).default;
@@ -405,7 +411,7 @@ describe('ClientsPage — ?clientId= deep-link (GH #216)', () => {
     mockSearchParams = new URLSearchParams([['clientId', 'c-deep-1']]);
     const target = { id: 'c-deep-1', name: 'Deep Target', archived: false } as ClientWithStats;
     mockUseClients.mockReturnValue(
-      createMockClientsContext({ items: [target], clients: [target] }),
+      createMockClientsTableState({ items: [target] }),
     );
 
     const ClientsPage = (await import('../app/(main)/clients/page')).default;

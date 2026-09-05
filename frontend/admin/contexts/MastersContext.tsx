@@ -3,9 +3,10 @@
 import { createPagedListContext } from './createPagedListContext';
 import { getMasters } from '@memo/api-client';
 import type { MasterResponse } from '@memo/api-client';
+import { qk } from '@/lib/queryKeys';
 
 const { Provider, usePagedList } = createPagedListContext<MasterResponse>({
-  queryKeyPrefix: 'masters',
+  queryKeyPrefix: qk.masters[0],
   fetcher: (p) =>
     getMasters({
       page: p.page,

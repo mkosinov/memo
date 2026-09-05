@@ -13,6 +13,7 @@ import { DataTable } from '@/app/components/shared/DataTable';
 import { DeleteDialog } from '@/app/components/DeleteDialog';
 import { serviceColumns, serviceActions } from './serviceColumns';
 import { parseApiError } from '@/app/lib/api/parseApiError';
+import { qk } from '@/lib/queryKeys';
 
 // ─── Component ────────────────────────────────────────────────────────────
 
@@ -199,8 +200,8 @@ export function ServicesTable() {
             await resolveDeleteService(id, resolutions);
             // The resolve call bypasses the hook's onSuccess, so refresh
             // here — incl. cross-key ['records'] (useRecordData consumers).
-            queryClient.invalidateQueries({ queryKey: ['services'] });
-            queryClient.invalidateQueries({ queryKey: ['records'] });
+            queryClient.invalidateQueries({ queryKey: qk.services });
+            queryClient.invalidateQueries({ queryKey: qk.records });
             showToast('Услуга удалена');
           }}
           onArchive={(id) => archiveService.mutateAsync(id)}

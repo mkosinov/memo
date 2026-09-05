@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
-import { waitForClientsReady } from './fixtures/helpers';
+import { waitForClientsReady, openAddTab } from './fixtures/helpers';
+import { queryDBRow } from './fixtures/db-query';
 import {
   createTestClient,
   createTestActivity,
@@ -738,6 +739,114 @@ test.describe('Deep-link ?clientId= — #216', () => {
       for (const f of fillers) {
         await cleanup(request, `/api/v1/clients/${f.id}`);
       }
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests — GH #140 entity hooks: clients-list fetch isolation + cache invalidation
+// ---------------------------------------------------------------------------
+
+test.describe('GH #140 — clients-list isolation & staleness', () => {
+  // ── US-1: /schedule fires ZERO /api/v1/clients requests ──────────────────
+  //
+  // Pre-refactor the global ClientsProvider mounted app-wide and fetched the
+  // clients list (getClientsWithStats) on EVERY page, /schedule included. The
+  // refactor dissolved that provider — only /clients reads the list (via
+  // useClientsTable); every other surface resolves clients by point id
+  // (useClient). This is a direct navigation (not /clients→/schedule, which
+  // legitimately carries list traffic) and is list-agnostic: ANY
+  // /api/v1/clients* hit fails it. Supersedes the per_page=100-only guard in
+  // records-view.spec.
+
+  test('US-1: /schedule fires zero clients requests', async ({ page }) => {
+    const clientsRequests: string[] = [];
+    page.on('request', (req) => {
+      if (req.url().includes('/api/v1/clients')) clientsRequests.push(req.url());
+    });
+    await page.goto('/schedule');
+    await page.waitForLoadState('networkidle');
+    await page.waitForTimeout(500);
+    expect(clientsRequests).toHaveLength(0);
+  });
+
+  // ── US-6: a client created via schedule quick-add is visible in /clients
+  //         WITHOUT a reload (own-mutation invalidation of the primed list).
+  //
+  // Discrimination: the first /clients visit PRIMES ['clients',1,20,…,'name','asc']
+  // (staleTime 30s, refetchOnWindowFocus off). Leaving + remounting /clients
+  // within 30s would normally serve the stale page (no new client). The
+  // quick-add createRecordMutation sets createdClientId and invalidates
+  // qk.clients, so on remount the stale cache refetches and the new active
+  // client appears under the default name/asc, status=active view — no reload.
+  // WITHOUT that invalidation the primed page lacks the client → fail.
+
+  test('US-6: quick-add client appears in /clients without reload', async ({
+    page,
+    request,
+  }) => {
+    const ts = Date.now();
+    const newClientName = `us6-${ts}`;
+    const newPhone = `+7966${String(ts).slice(-7)}`;
+    let clientId: string | null = null;
+    let recordId: string | null = null;
+
+    try {
+      // 1. Full load of /schedule, then SPA-navigate to /clients via the
+      //    sidebar link (NOT page.goto) — this primes the list cache.
+      await page.goto('/schedule');
+      await page.waitForSelector('[data-testid^="activity-"]', { timeout: 15_000 });
+      await page.locator('a[aria-label="Клиенты"]').click();
+      await page.waitForSelector('h1:has-text("Клиенты")', { timeout: 15_000 });
+      await expect(page.locator('table tbody')).toBeVisible({ timeout: 10_000 });
+
+      // 2. SPA-navigate back to /schedule (no reload — primed cache persists).
+      await page.locator('a[aria-label="Расписание"]').click();
+      await page.waitForSelector('[data-testid^="activity-"]', { timeout: 15_000 });
+
+      // 3. Quick-add a booking with a NEW client (unknown phone → createClient).
+      await openAddTab(page);
+      await page.locator('[data-testid="input-phone"]').fill(newPhone);
+      await page.locator('[data-testid="input-phone"]').blur();
+      await page.locator('[data-testid="input-client-name"]').fill(newClientName);
+      await page.locator('[data-testid="btn-create-record"]').click();
+      await expect(page.locator('text=Запись создана')).toBeVisible({ timeout: 10_000 });
+
+      // Close the modal so the sidebar is clickable (modal is fixed inset-0).
+      await page.locator('[data-testid="modal-close-btn"]').click();
+      await expect(page.locator('[data-testid="activity-details-modal"]')).toHaveCount(0);
+
+      // Resolve the created ids from the DB (cleanup targets).
+      await expect
+        .poll(
+          () => {
+            const row = queryDBRow(`SELECT id FROM clients WHERE phone='${newPhone}'`);
+            clientId = row?.id ?? null;
+            return clientId !== null;
+          },
+          { timeout: 15_000, intervals: [200, 500, 1000] },
+        )
+        .toBe(true);
+      const recRow = queryDBRow(`SELECT id FROM records WHERE client_id='${clientId}'`);
+      recordId = recRow?.id ?? null;
+
+      // 4. SPA-navigate back to /clients — WITHOUT reload. The invalidated
+      //    cache refetches on remount. Then narrow via the search box (same
+      //    convention as test 10) so the assertion doesn't depend on page-1
+      //    ordering under fullyParallel seeds.
+      await page.locator('a[aria-label="Клиенты"]').click();
+      await page.waitForSelector('h1:has-text("Клиенты")', { timeout: 15_000 });
+      const searchInput = page.locator('input[placeholder*="Поиск"]');
+      await expect(searchInput).toBeVisible({ timeout: 10_000 });
+      await searchInput.fill(newClientName);
+      // Wait for debounced search to kick in (300ms debounce + network)
+      await page.waitForTimeout(1500);
+      await expect(
+        page.locator('table tbody tr').filter({ hasText: newClientName }),
+      ).toBeVisible({ timeout: 10_000 });
+    } finally {
+      if (recordId) await cleanupRecord(request, recordId);
+      if (clientId) await cleanup(request, `/api/v1/clients/${clientId}`);
     }
   });
 });

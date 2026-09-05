@@ -20,12 +20,11 @@ vi.mock('@memo/api-client', () => {
   // records-context queries must never fire on /schedule (api-client is NOT
   // mocked for RecordsContext, so a stray provider would hit the network).
   getRecordsView: vi.fn(),
-  getClients: vi.fn(),
   getPaymentTotals: vi.fn(),
   });
 });
 
-import { getRecordsView, getClients, getPaymentTotals } from '@memo/api-client';
+import { getRecordsView, getPaymentTotals } from '@memo/api-client';
 
 // usePathname is used by Sidebar (not by page itself, but shared context may trigger it)
 vi.mock('next/navigation', () => ({
@@ -52,7 +51,6 @@ function renderPage() {
 describe('Schedule Page', () => {
   beforeEach(() => {
     vi.mocked(getRecordsView).mockClear();
-    vi.mocked(getClients).mockClear();
     vi.mocked(getPaymentTotals).mockClear();
   });
 
@@ -66,7 +64,6 @@ describe('Schedule Page', () => {
     renderPage();
     expect(await screen.findByText('Нет занятий на эту неделю')).toBeInTheDocument();
     expect(getRecordsView).not.toHaveBeenCalled();
-    expect(getClients).not.toHaveBeenCalled();
     expect(getPaymentTotals).not.toHaveBeenCalled();
   });
 });

@@ -17,6 +17,7 @@ import { useRecordMutations } from '@/hooks/useRecordMutations';
 import { useDeleteRecord } from '@/hooks/useDeleteRecord';
 import { useUI } from '@/contexts/UIContext';
 import { useSchedule } from '@/contexts/ScheduleContext';
+import { qk } from '@/lib/queryKeys';
 import { parseApiError } from '@/app/lib/api/parseApiError';
 import { formatRecordLabel } from '@/lib/utils';
 import { patchVisitor, patchActivity, ApiError } from '@memo/api-client';
@@ -169,7 +170,7 @@ export function ClientRecordTab({ recordId, clientId, client }: ClientRecordTabP
       patchVisitor(visitorId, apiData)
         .then(() => {
           // Reader: ['visitors', clientId] in useRecordData
-          queryClient.invalidateQueries({ queryKey: ['visitors', clientId] });
+          queryClient.invalidateQueries({ queryKey: qk.visitors(clientId) });
         })
         .catch((err) => {
           showToast(parseApiError(err).message, 'error');

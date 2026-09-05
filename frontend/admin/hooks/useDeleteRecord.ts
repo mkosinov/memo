@@ -6,6 +6,7 @@ import { deleteRecord, resolveDeleteRecord, ApiError } from '@memo/api-client';
 import type { DependencyNode } from '@memo/api-client';
 import { mapRecordsListCache, type RecordsListCache } from '@/lib/cache/recordCacheSync';
 import { useUI } from '@/contexts/UIContext';
+import { qk } from '@/lib/queryKeys';
 
 /**
  * Shared unbound record delete (Addendum 13 / GH #139 T8-FE2a) — mirrors
@@ -35,15 +36,15 @@ export function useDeleteRecord() {
    *  (shape-agnostic: envelope lists + per-client/per-activity arrays). */
   const removeRecordFromCaches = (id: string): void => {
     queryClient.setQueriesData<RecordsListCache | undefined>(
-      { queryKey: ['records'] },
+      { queryKey: qk.records },
       (old) => mapRecordsListCache(old, (items) => items.filter((r) => r.id !== id)),
     );
   };
 
   const invalidateAfterDelete = (id: string): void => {
-    queryClient.invalidateQueries({ queryKey: ['records'] });
-    queryClient.invalidateQueries({ queryKey: ['record', id] });
-    queryClient.invalidateQueries({ queryKey: ['visitors'] });
+    queryClient.invalidateQueries({ queryKey: qk.records });
+    queryClient.invalidateQueries({ queryKey: qk.record(id) });
+    queryClient.invalidateQueries({ queryKey: qk.visitorsList });
   };
 
   const mutation = useMutation({

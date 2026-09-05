@@ -3,49 +3,43 @@
 import { useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';
 import {
-  getRecord, getClientVisitors, getActivity, getAllServices,
-  getAllMasters, getAllLocations, getPayments,
+  getRecord, getClientVisitors, getActivity, getPayments,
 } from '@memo/api-client';
 import type { VisitStatus } from '@memo/domain';
 import { computeRecordStatus } from '@memo/domain';
 import type { RecordWithDerived } from '@/app/components/shared/records/types';
+import { qk } from '@/lib/queryKeys';
+import { useServicesRaw } from '@/hooks/useServices';
+import { useMastersRaw } from '@/hooks/useMasters';
+import { useLocationsRaw } from '@/hooks/useLocations';
 
 export function useRecordData(recordId: string, clientId: string) {
   const { data: record, isLoading } = useQuery({
-    queryKey: ['record', recordId],
+    queryKey: qk.record(recordId),
     queryFn: () => getRecord(recordId),
     enabled: !!recordId,
   });
 
   const { data: visitors = [] } = useQuery({
-    queryKey: ['visitors', clientId],
+    queryKey: qk.visitors(clientId),
     queryFn: () => getClientVisitors(clientId),
     enabled: !!clientId,
   });
 
   const { data: activity } = useQuery({
-    queryKey: ['activity', record?.activity_id],
+    queryKey: qk.activity(record?.activity_id ?? ''),
     queryFn: () => getActivity(record!.activity_id),
     enabled: !!record?.activity_id,
   });
 
-  const { data: services = [] } = useQuery({
-    queryKey: ['services'],
-    queryFn: () => getAllServices(),
-  });
+  const { data: services = [] } = useServicesRaw();
 
-  const { data: masters = [] } = useQuery({
-    queryKey: ['masters'],
-    queryFn: () => getAllMasters(),
-  });
+  const { data: masters = [] } = useMastersRaw();
 
-  const { data: locations = [] } = useQuery({
-    queryKey: ['locations'],
-    queryFn: () => getAllLocations(),
-  });
+  const { data: locations = [] } = useLocationsRaw();
 
   const { data: payments = [] } = useQuery({
-    queryKey: ['payments', recordId],
+    queryKey: qk.recordPayments(recordId),
     queryFn: () => getPayments({ record_id: recordId, per_page: 100 }).then(r => r.items),
     enabled: !!recordId,
   });

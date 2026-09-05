@@ -18,6 +18,7 @@
  * never throw or write into a deleted record).
  */
 import type { QueryClient } from '@tanstack/react-query';
+import { qk } from '@/lib/queryKeys';
 import type {
   PaginatedResponse,
   PaymentResponse,
@@ -58,7 +59,7 @@ export function patchRecordEverywhere(
     (old) => (old == null ? old : updater(old)),
   );
   qc.setQueriesData<RecordsListCache | undefined>(
-    { queryKey: ['records'] },
+    { queryKey: qk.records },
     (old) =>
       mapRecordsListCache(old, (items) =>
         items.map((r) => (r.id === recordId ? updater(r) : r)),

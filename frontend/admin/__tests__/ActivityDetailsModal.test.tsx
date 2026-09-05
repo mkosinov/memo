@@ -42,7 +42,6 @@ vi.mock('@memo/api-client', () => ({
   deletePayment: vi.fn(),
   updateVisitStatus: vi.fn(),
   getRecords: vi.fn(),
-  getClients: vi.fn(),
   getClientById: vi.fn(),
 }));
 
@@ -56,7 +55,6 @@ import {
   deletePayment,
   updateVisitStatus,
   getRecords,
-  getClients,
   getClientById,
 } from '@memo/api-client';
 import type { RecordView } from '@memo/api-client';

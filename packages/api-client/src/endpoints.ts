@@ -371,10 +371,6 @@ export async function getRecordsView(params?: {
 
 // ─── Clients ────────────────────────────────────────────────────────────────
 
-export async function getClients(): Promise<ClientWithStats[]> {
-  return api('/api/v1/clients?per_page=100', ClientListResponseSchema).then(r => r.items);
-}
-
 export async function getClientsWithStats(
   params?: Record<string, string | number | boolean | null | undefined>,
 ): Promise<PaginatedResponse<ClientWithStats>> {

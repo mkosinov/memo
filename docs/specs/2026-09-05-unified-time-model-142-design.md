@@ -179,7 +179,7 @@ generateTimeSlots(gridFrequency: number, startMinutes: number, endMinutes: numbe
 calculateGridTimeRange(acts: {startMinutes, durationMinutes}[], whStartH: number, whEndH: number): { startMinutes, endMinutes }  // minute bounds
 ```
 
-Naming: `dateToLocalISO`/`composeLocalISO` (NOT a `toLocalISO` overload — same-return-type overloads are an anti-pattern, and the `to*ISO` name collides with `toISOString()`'s UTC semantics, the exact bug class this refactor kills). All functions hand-rolled on native `Date` by design (single-TZ floating-time app, no date-fns/Temporal dependency); when `Temporal.PlainDateTime` reaches baseline browser support, this module is the single migration seam.
+Naming: `dateToLocalISO`/`composeLocalISO` (NOT a `toLocalISO` overload — same-return-type overloads are an anti-pattern, and the `to*ISO` name collides with `toISOString()`'s UTC semantics, the exact bug class this refactor kills). All functions hand-rolled on native `Date` by design (single-TZ floating-time app, no date-fns/Temporal dependency); when `Temporal.PlainDateTime` reaches baseline browser support, this module is the single migration seam — and a future per-location/multi-TZ feature (§11) would land here too: this module is the only parser/composer, so TZ-aware conversion has exactly one place to hook in.
 
 **Import policy (cut hard, no compatibility layer):** every importer in `frontend/admin` switches to `@/lib/datetime` (or keeps display helpers in `lib/utils`) **in this PR**; `lib/utils.ts` keeps NO re-exports of moved helpers at merge. Verified importer list to migrate: `recordsColumns.tsx:9`, `RecordsTable.tsx:10`, `Menubar.tsx:10`, `Topbar.tsx:5`, `BookingFilters.tsx:6`, `ActivityDetailsModal.tsx:10`, `DayColumn.tsx:5`, `TimeColumn.tsx:4`, `OverlapPopover.tsx:5`, `DayView.tsx:19`, `WeekView.tsx:15`, `useDnD.ts`, `ScheduleContext.tsx:24-25`, `SettingsTab.tsx:8`.
 
@@ -239,6 +239,7 @@ Note: `ScheduleContext.tsx:7` currently imports `useActivities` — the file's a
 - `buildAdminSchedule` input re-sourcing (raw → domain Service/Master/Location) — identical-data refactor, separate concern. Master name-order divergence (`first last` in buildAdminSchedule :148 vs `last first` in `displayMasterName`) is PRE-EXISTING display drift — explicitly not changed here (frozen to keep zero visual delta).
 - #140 territory: ClientsContext dissolution, per-tab `useClient`, queryKeys factory — #142 IMPL runs strictly after #140 merges (shared file: ActivityDetailsModal). This spec's file inventory assumes post-#140 main at IMPL time; mechanical rebase only.
 - Service legacy price twins removal (§4.1), screen-reader/visual polish, `ScheduleDTO` (web) shape, backend (any changes), records view model (#213 already shipped).
+- Per-location time zones / multi-TZ support (per-location wall clock, TZ-aware display conversion) — out of scope; the app is deliberately single-TZ floating local time (studio wall clock). When needed, it is a separate feature; `lib/datetime.ts` is the single integration seam (§7).
 - Copy/localStorage keys; LS `grid-frequency`/`cell-height` values (already minute/px semantics).
 
 ## 12. Risks & Mitigations

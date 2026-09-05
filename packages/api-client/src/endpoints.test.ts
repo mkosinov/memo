@@ -1074,13 +1074,13 @@ describe('patchService', () => {
 describe('patchUserSettings', () => {
   it('calls PATCH /api/v1/user-settings?user_id= with partial body', async () => {
     vi.mocked(api).mockResolvedValue({ user_id: 'u-1' });
-    await patchUserSettings('u-1', { locale: 'en' });
+    await patchUserSettings('u-1', { language: 'en' });
     expect(api).toHaveBeenCalledWith(
       '/api/v1/user-settings?user_id=u-1',
       expect.anything(),
       expect.objectContaining({
         method: 'PATCH',
-        body: JSON.stringify({ locale: 'en' }),
+        body: JSON.stringify({ language: 'en' }),
       }),
     );
   });

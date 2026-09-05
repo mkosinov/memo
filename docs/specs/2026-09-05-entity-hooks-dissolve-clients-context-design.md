@@ -47,7 +47,7 @@ The consequences:
 | `useMastersRaw`/`useServicesRaw`/`useLocationsRaw` | raw-lookup hooks | `['masters']`/`['services']`/`['locations']` | **Same keys** as `useMasters`/`useServices`/`useLocations` (dedupe preserved), NO select — returns raw responses incl. `archived`. Co-located in the existing `use*.ts` files |
 | `useTagsRaw` | raw-lookup hook | `['tags']` | PhotosFilters tags chips (§4 map) |
 
-**Naming rules (canonical location: `lib/queryKeys.ts` header; ARCHITECTURE.md §Data Access cross-references it — no duplicate copy):** `use<Entity>` = domain-selected lookup; `use<Entity>Raw` = raw response (archived included); `use<Entity>Table` = factory paged-list state; `use<Entity>Mutations` = mutation family. `useClients` is permanently reserved-vacant. Co-located raw/lookup hook pairs MUST keep identical staleTime (shared-key observers take the most pessimistic staleTime — divergence silently slows the other observer).
+**Naming rules (canonical location: `lib/queryKeys.ts` header; ARCHITECTURE.md §Data Access cross-references it — no duplicate copy):** `use<Entity>` = domain-selected lookup; `use<Entity>Raw` = raw response (archived included); `use<Entity>Table` = factory paged-list state; `use<Entity>Mutations` = mutation family. `useClients` is permanently reserved-vacant. Co-located raw/lookup hook pairs MUST keep identical staleTime (shared-key observers take the most pessimistic staleTime — divergence silently slows the other observer). **Dictionary staleTime = 1 hour** (G1b Amendment 1) for both raw and lookup dict hooks — admin pages stay open indefinitely; 5-min refetch cycles are excessive; correctness relies on own-mutation invalidation.
 
 **Tags typeaheads / photos client-picker NOT converted** (YAGNI): PhotoModal :131 and PhotosFilters :95 call `getClientsPaged` directly inside RemoteSearchSelect callbacks (not useQuery) — out of scope.
 
@@ -218,13 +218,17 @@ The createClient path inside `createRecordMutation` (:78-105; new-client branch 
 
 #141 ScheduleContext split; ClientInfoTab bare promises; RemoteSearchSelect typeahead + `getClientsPaged` pickers (PhotoModal :131, PhotosFilters :95); Photos/Records contexts migration onto the factory; any composite display-lookup endpoint (#213 already shipped for records view); backend changes.
 
+### 6.3 Infrastructure assumptions (G1b Amendment 2)
+
+No external-event cache invalidation exists today — no WebSocket, no SSE, no polling. Cache correctness rests **entirely on invalidations from the client's own mutations**. This is the standing assumption behind all staleTime choices (incl. the 1h dictionary staleTime, §7.5) and behind prefix-invalidation breadth (e.g. client mutations invalidating the whole `['records']` prefix because records rows are composite view rows carrying denormalized client name/phone). Follow-up #239 (server push channel evaluation) filed for the backlog.
+
 ## 7. Behavioral delta
 
 1. /clients filters/pagination now reset on leaving the page (§6.1) — approved.
 2. No page except /clients fetches the clients list (§6.1) — approved; new e2e guard.
 3. ActivityDetailsModal record tabs resolve clients per-record with progressive render — name/phone may appear a tick after tab render instead of synchronously from the paged map; beyond-first-20 clients now always resolve (bug fix, US-2).
 4. Schedule quick-add-created clients appear immediately in /clients (staleness fix, US-6).
-5. Dictionary raw consumers' staleTime unifies to 5min: today PhotosContext uses `staleTime: Infinity` on `['services']`/`['locations']` while BookingFilters/ScheduleContext/useRecordData use 5min on the same keys. Raw hooks standardize on 5min (= lookup hooks): worst case a photos-page dictionary refetch at most 5min stale instead of never — invisible to users (mutations still invalidate). Shared-key observers take the most pessimistic staleTime anyway, so one value per key is the only sound end-state.
+5. Dictionary staleTime unifies to **1 hour** for all dict hooks (raw AND lookup — they share keys, must stay aligned): today lookup hooks (`useMasters`/`useServices`/`useLocations`) and BookingFilters/ScheduleContext/useRecordData raw queries use 5min while PhotosContext uses `Infinity` on the same keys. Post-migration all observe 1h. Accepted tradeoff (G1b Amendment 1): edits by a second admin/tab propagate with up to 1h delay unless an own mutation/invalidation refreshes the cache (mutations still invalidate — own edits are always immediate). Invisible in single-admin flows; shared-key observers take the most pessimistic staleTime anyway, so one aligned value per key is the only sound end-state.
 6. No UI/markup/copy changes to any table, filter bar, or modal — visual baselines unchanged.
 
 ## 8. Testing strategy

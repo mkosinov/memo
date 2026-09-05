@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { queryDBRow, queryDBRows } from './fixtures/db-query';
-import { createTestClient, createTestRecord, createTestPayment, cleanup, cleanupRecord } from './fixtures/factories';
+import { createTestClient, createTestActivity, createTestRecord, createTestPayment, cleanup, cleanupRecord } from './fixtures/factories';
 import { waitForScheduleReady, openModal, openAddTab, getFirstActivity, confirmDeleteDialog } from './fixtures/helpers';
 import { searchAndSelect } from './helpers/combobox';
 
@@ -482,5 +482,85 @@ test.describe('ActivityDetailsModal — Real User Scenarios', () => {
     const value = await duration.inputValue();
     expect(value).toMatch(/^\d{2}:\d{2}$/);
     expect(value).not.toContain('.');
+  });
+
+  // ── Scenario 14 (GH #140 US-2): a record's client beyond the first 20 of
+  //    the clients list still resolves to name+phone on the tab. Pre-refactor
+  //    the modal looked clients up in a paged map (first 20 active only) →
+  //    beyond-page-1 clients rendered «Без контакта». Now every tab mounts its
+  //    own useClient(record.client_id) point observer, so the client resolves
+  //    regardless of list position. Asserted in BOTH the tab-strip label
+  //    (ClientLabelById) and the client-tab-header (ClientTab) — two elements
+  //    legitimately carry the name, so each is scoped by its testid.
+
+  test('14. US-2: record tab resolves a client beyond the first 20 (name+phone on tab strip + header)', async ({
+    page,
+    request,
+  }) => {
+    const ts = Date.now();
+    const seeded: Awaited<ReturnType<typeof createTestClient>>[] = [];
+    let activity: any = null;
+    let record: any = null;
+    let target: any = null;
+
+    try {
+      // Seed 22 active clients. Latin "us2-client-NN" sorts BEFORE the
+      // Cyrillic seed names (c1-c5) under SQLite BINARY collation, so the 22nd
+      // (the target) has ≥21 predecessors → list position ≥22 under the
+      // default name/asc sort, i.e. beyond page 1 (per_page=20).
+      for (let i = 1; i <= 22; i++) {
+        const n = String(i).padStart(2, '0');
+        const c = await createTestClient(request, {
+          name: `us2-client-${n}`,
+          phone: `+7900${String(ts).slice(-6)}${n}`,
+        });
+        seeded.push(c);
+        if (i === 22) target = c;
+      }
+
+      // Premise self-check: the target must NOT be on unfiltered page 1 —
+      // otherwise this test silently degrades to the page-1 path.
+      const resp = await request.get(
+        `${BACKEND}/api/v1/clients?sort_by=name&sort_order=asc&per_page=20`,
+      );
+      expect(resp.ok()).toBeTruthy();
+      const page1 = await resp.json();
+      expect(page1.items.some((c: { id: string }) => c.id === target.id)).toBe(false);
+
+      // One activity + one record whose client is the LAST seeded one.
+      activity = await createTestActivity(request);
+      record = await createTestRecord(request, activity.id, target.id);
+
+      // Reload /schedule so the freshly created activity is fetched into the
+      // current week (beforeEach already primed a now-stale activityRange
+      // cache). Mirrors scenarios 2/3/8.
+      await page.goto('/schedule');
+      await page.waitForSelector('[data-testid^="activity-"]', { timeout: 15_000 });
+
+      // Open that activity's modal, scoped to the record (navigates to the
+      // record's week + selects the activity card by id).
+      await openModal(page, { recordId: record.id });
+
+      // Tab-strip label resolves name+phone (NOT «Без контакта»).
+      const tabLabel = page.locator(`[data-testid="tab-client-${record.id}"]`);
+      await expect(tabLabel).toBeVisible({ timeout: 15_000 });
+      await expect(tabLabel).toContainText(target.name);
+      await expect(tabLabel).toContainText(target.phone);
+      await expect(tabLabel).not.toContainText('Без контакта');
+
+      // Select the record tab, then assert the client-tab-header content.
+      await tabLabel.click();
+      await expect(page.locator('[data-testid="client-tab"]')).toBeVisible();
+      const header = page.locator('[data-testid="client-tab-header"]');
+      await expect(header).toContainText(target.name, { timeout: 10_000 });
+      await expect(header).toContainText(target.phone);
+      await expect(header).not.toContainText('Без контакта');
+    } finally {
+      if (record) await cleanupRecord(request, record.id);
+      if (activity) await cleanup(request, `/api/v1/activities/${activity.id}`);
+      for (const c of seeded) {
+        await cleanup(request, `/api/v1/clients/${c.id}`);
+      }
+    }
   });
 });

@@ -98,8 +98,8 @@ dedupe/invalidation semantics intact — one key shape, one source.
 | `use<Entity>` | domain-selected lookup (archived dropped, domain types) | `useMasters()`, `useServices()` |
 | `use<Entity>Raw` | raw API response **including archived** | `useMastersRaw()`, `useTagsRaw()` |
 | point hooks | single-entity / scoped reads | `useClient(id)`, `useActivity(id)`, `useClientRecords(id)` |
-| `use<Entity>Table` | factory paged-list state (`createPagedListContext`) | `useClientsTable()`, `usePhotosTable()` |
-| `use<Entity>Mutations` | mutation family for one entity | `useClientsMutations()`, `useRecordMutations()` |
+| `use<Entity>Table` | factory paged-list state (`createPagedListContext`) | `useClientsTable()`, `useTagsTable()` (factory tables: clients/tags/masters/locations/services/materials; photos and records still use hand-rolled contexts) |
+| `use<Entity>Mutations` | mutation family for one entity | `useRecordMutations()`; clients mutations are per-action hooks (`useCreateClient`, `useDeleteClient`, … in `hooks/useClientsMutations.ts`) |
 
 A lookup and its `Raw` sibling share the **same** query key (e.g. `qk.masters`)
 so they dedupe. `useClients` is permanently reserved-vacant — the clients list

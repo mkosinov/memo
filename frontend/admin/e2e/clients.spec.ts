@@ -831,9 +831,16 @@ test.describe('GH #140 — clients-list isolation & staleness', () => {
       recordId = recRow?.id ?? null;
 
       // 4. SPA-navigate back to /clients — WITHOUT reload. The invalidated
-      //    cache refetches on remount and the new client is in the default view.
+      //    cache refetches on remount. Then narrow via the search box (same
+      //    convention as test 10) so the assertion doesn't depend on page-1
+      //    ordering under fullyParallel seeds.
       await page.locator('a[aria-label="Клиенты"]').click();
       await page.waitForSelector('h1:has-text("Клиенты")', { timeout: 15_000 });
+      const searchInput = page.locator('input[placeholder*="Поиск"]');
+      await expect(searchInput).toBeVisible({ timeout: 10_000 });
+      await searchInput.fill(newClientName);
+      // Wait for debounced search to kick in (300ms debounce + network)
+      await page.waitForTimeout(1500);
       await expect(
         page.locator('table tbody tr').filter({ hasText: newClientName }),
       ).toBeVisible({ timeout: 10_000 });

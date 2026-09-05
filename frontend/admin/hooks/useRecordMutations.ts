@@ -83,6 +83,7 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
     ) => {
       // 1. Resolve or create client
       let clientId: string;
+      let createdClientId: string | null = null;
       if (input.phone) {
         try {
           const existing = await getClientByPhone(input.phone);
@@ -94,6 +95,7 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
             channel: input.channel,
           });
           clientId = created.id;
+          createdClientId = created.id;
         }
       } else {
         const created = await createClient({
@@ -102,6 +104,7 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
           channel: input.channel,
         });
         clientId = created.id;
+        createdClientId = created.id;
       }
 
       // 2. Create visitors (skip empty names)
@@ -141,8 +144,18 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
       // 5. Invalidate readers of the new record
       // Reader: ScheduleActivityCard (['records',df,dt]) + RecordModal (['record',id])
       invalidateRecordAndLists();
+
+      // 6. Staleness fix (#140): if this quick-add CREATED a new client, the
+      //    ['clients'] list is now stale — the new client would be invisible in
+      //    /clients until the next refetch (≤30s). Invalidate so it appears
+      //    immediately. Awaited: the mutation stays pending until the refetch
+      //    lands. Skipped on the existing-client reuse path (no new client).
+      //    Reader: ClientsPage (['clients'])
+      if (createdClientId !== null) {
+        await queryClient.invalidateQueries({ queryKey: qk.clients });
+      }
     },
-    [activityId, invalidateRecordAndLists],
+    [activityId, invalidateRecordAndLists, queryClient],
   );
 
   const saveRecord = useCallback(

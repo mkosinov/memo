@@ -76,9 +76,15 @@ let mockTableState = createMockClientsTableState({
   sortOrder: 'asc',
 });
 
-vi.mock('@/contexts/ClientsContext', () => ({
-  useClientsTable: () => mockTableState,
-}));
+// importOriginal keeps the real `defaultFilters` export available — the
+// shared mockContexts fixture imports it for createMockClientsTableState.
+vi.mock('@/contexts/ClientsContext', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/contexts/ClientsContext')>();
+  return {
+    ...actual,
+    useClientsTable: () => mockTableState,
+  };
+});
 
 // ─── Mutable mutation hook mocks (GH #140: hooks/useClientsMutations) ───────
 

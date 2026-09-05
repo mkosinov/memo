@@ -13,10 +13,16 @@ vi.mock('@/contexts/ScheduleContext', () => ({
   ScheduleProvider: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));
 
-vi.mock('@/contexts/ClientsContext', () => ({
-  useClientsTable: vi.fn(),
-  ClientsProvider: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-}));
+// importOriginal keeps the real `defaultFilters` export available — the
+// shared mockContexts fixture imports it for createMockClientsTableState.
+vi.mock('@/contexts/ClientsContext', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/contexts/ClientsContext')>();
+  return {
+    ...actual,
+    useClientsTable: vi.fn(),
+    ClientsProvider: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  };
+});
 
 const mockRouter = { push: vi.fn(), replace: vi.fn() };
 let mockSearchParams = new URLSearchParams();

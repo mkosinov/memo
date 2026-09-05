@@ -3,9 +3,15 @@ import { render, screen, fireEvent, act } from '@testing-library/react';
 import React from 'react';
 import { createMockClientsTableState } from './helpers/mockContexts';
 
-vi.mock('@/contexts/ClientsContext', () => ({
-  useClientsTable: vi.fn(),
-}));
+// importOriginal keeps the real `defaultFilters` export available — the
+// shared mockContexts fixture imports it for createMockClientsTableState.
+vi.mock('@/contexts/ClientsContext', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/contexts/ClientsContext')>();
+  return {
+    ...actual,
+    useClientsTable: vi.fn(),
+  };
+});
 
 import { useClientsTable } from '@/contexts/ClientsContext';
 import type { ClientFilters } from '@/contexts/ClientsContext';

@@ -13,6 +13,7 @@ import { vi } from 'vitest';
 import type { ScheduleContextType } from '@/contexts/ScheduleContext';
 import type { RecordsContextType } from '@/contexts/RecordsContext';
 import type { ClientFilters } from '@/contexts/ClientsContext';
+import { defaultFilters as defaultClientFilters } from '@/contexts/ClientsContext';
 import type {
   PagedListContextValue,
   PagedListFiltersState,
@@ -149,22 +150,6 @@ export function createMockUIContext(overrides?: UIOverrides): UIContextMock {
 }
 
 // ─── ClientsTable state (GH #140 — factory paged-list value) ──────────────
-
-/** Inline copy of ClientsContext's non-exported `defaultFilters` (12 fields). */
-const defaultClientFilters: ClientFilters = {
-  search: '',
-  status: 'active',
-  created_from: '',
-  created_to: '',
-  updated_from: '',
-  updated_to: '',
-  min_records: null,
-  max_records: null,
-  min_paid: null,
-  max_paid: null,
-  missed_from: null,
-  missed_to: null,
-};
 
 type ClientsTableState = PagedListContextValue<ClientWithStats> &
   PagedListFiltersState<ClientFilters>;

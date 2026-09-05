@@ -382,8 +382,13 @@ test.describe('ActivityDetailsModal — Real User Scenarios', () => {
       await clientTab.click();
       await expect(page.locator('[data-testid="client-tab"]')).toBeVisible();
 
-      // Verify client name is displayed (shown in the tab label in WIP structure)
-      await expect(page.getByText(client.name)).toBeVisible({ timeout: 10_000 });
+      // Verify client name is displayed in the tab content (GH #140 US-2:
+      // name+phone render in the client-tab-header). Scoped to the header
+      // testid — an unscoped getByText(name) strict-mode-collides with the
+      // tab-strip label (ClientLabelById shows the same name).
+      await expect(
+        page.locator('[data-testid="client-tab-header"]'),
+      ).toContainText(client.name, { timeout: 10_000 });
 
       await page.locator('[data-testid="btn-delete-record"]').click();
 

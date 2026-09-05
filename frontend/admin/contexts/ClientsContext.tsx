@@ -20,7 +20,8 @@ export interface ClientFilters {
   missed_to: number | null;
 }
 
-const defaultFilters: ClientFilters = {
+/** Exported for the test fixture (createMockClientsTableState) — single source. */
+export const defaultFilters: ClientFilters = {
   search: '',
   status: 'active',
   created_from: '',

@@ -23,6 +23,7 @@ How this behaves for the user, mapped to spec acceptance criteria:
 - **/clients looks and behaves identically** (load, 12 filters, sort, pagination, status, deep-link `?clientId=`, CRUD, 409-delete dialogs) — except filters/pagination now reset when you leave the page and come back (was: global, survived navigation).
 - **A client created via schedule quick-add appears in /clients immediately** (was: up to 30s stale).
 - **Dictionaries refresh at most once per hour** (was 5 min; photos page: was never). Your own edits always appear instantly (mutation invalidation); another admin's edits may take up to 1h to reach you (accepted, #239 tracks server-push eval).
+- **Activity modal — statistics row becomes uniform for all clients** (disclosed plan-review delta, refines spec §7 "no UI changes"): the «Статистика» block in record tabs previously showed server stats ONLY for first-20 clients (paged map) and «—» for everyone else; now it derives real aggregates (records count / last record / missed / paid) over the same 100-record window the tab already lists — same numbers for first-20 clients in practice, real numbers instead of «—» for the rest. No markup/copy changes.
 - **No visual changes** — zero markup/copy/style edits; all existing visual baselines stay.
 
 ---
@@ -263,7 +264,7 @@ export function useActivitiesForRecords(recordActivityIds: string[]) {
 
 ### Task Description
 **2.1** `packages/api-client/src/endpoints.ts`: delete `export async function getClients(...)` (:374-376, hardcodes per_page=100).
-**2.2** `packages/api-client/src/index.ts`: remove `getClients` from re-exports (check with `grep -n "getClients\b" packages/api-client/src/index.ts`; keep `getClientsPaged`/`getClientsWithStats`).
+**2.2** `packages/api-client/src/index.ts`: uses `export * from './endpoints'` — no literal `getClients` re-export exists; nothing to edit here (verify with `grep -n "getClients\b" packages/api-client/src/index.ts`; skip if only the star-export).
 **2.3** `packages/api-client/src/endpoints.test.ts`: remove `getClients` from the import list (:3) and delete `describe('getClients', ...)` (:459-466).
 **2.4** Run: `cd packages/api-client && npx vitest run` → all green (was 243 passing, now 242 tests). `npx tsc --noEmit` → 0.
 **2.5** Frontend test-tree cleanup (plan-review finding 3 — `getClients` IS imported by two test files):
@@ -474,7 +475,7 @@ Note: `defaultPerPage: 20` preserves the current page size (factory default is 1
 **4.3** `frontend/admin/app/providers.tsx`: remove the `ClientsProvider` import + wrapper (:42 area). Tree becomes ErrorBoundary > UIProvider > QueryClientWithErrorReporting > PendingActionsProvider > UserSettingsProvider.
 **4.4** `frontend/admin/__tests__/Providers.test.tsx` (:36-73): remove the ClientsProvider line from the hardcoded order assertion.
 **4.5** `frontend/admin/app/(main)/clients/page.tsx`: `ClientsPage` wrapper becomes `<ClientsProvider><ScheduleProvider><Suspense>…` (ClientsProvider OUTERMOST — it feeds ClientsTable/Filters below); in `ClientsPageContent` replace `useClients()` with `useClientsTable()`; destructured `{ clients, setFilters, isPending, isFetching }` → `{ items, setFilters, isPending, isFetching }`; `clients.find(...)` (:54) → `items.find(...)`; `clients.length === 0` (:71) → `items.length === 0`. All deep-link effects (:31-75) stay verbatim.
-**4.6** This task leaves ClientsTable/ClientsFilters/ClientCardModal/ActivityDetailsModal compiling? NO — they still call `useClients()`. To keep the suite green per-commit, this task ONLY lands 4.1-4.5 plus a TEMPORARY compatibility export is NOT allowed (clean cut, pre-production). INSTEAD: land Tasks 4+5 as ONE commit — execute Task 5's component migration in the same working session and commit together: `refactor(#140): /clients onto factory + useClientsMutations, unmount global ClientsProvider`. (Tasks separated in the plan for review clarity; single atomic commit for suite greenness.)
+**4.6** This task leaves ClientsTable/ClientsFilters/ClientCardModal compiling? NO — and ActivityDetailsModal.tsx :7 is a FOURTH consumer (plan-review r2 blocker: it only migrates in Task 6, breaking tsc + runtime at the 4+5 commit boundary). Clean cut, pre-production: land Tasks 4+5+6 as ONE atomic commit — execute all three in the same working session, commit together: `refactor(#140): /clients onto factory + useClientsMutations, per-tab modal resolution, unmount global ClientsProvider`. (Tasks separated in the plan for review clarity; Task 6's unit-test rewrite lands in the same commit.)
 **4.7** Run after Task 5 lands: `npx vitest run __tests__/ClientsPage.test.tsx __tests__/Providers.test.tsx` (these two will have been re-based in Task 5), full `npm run test`, `npx tsc --noEmit`.
 
 ### DoD
@@ -520,10 +521,10 @@ export function createMockClientsTableState(overrides: Partial<Record<string, un
 - DELETE `__tests__/ClientsContext.test.tsx` (427 ln) — coverage moves to factory tests (Task 3) + useClientsMutations suite + page integration.
 **5.6** ADD `__tests__/useClientsMutations.test.tsx`: for each of the 7 hooks — success path invalidates BOTH `['clients']` and `['records']` (spy on `queryClient.invalidateQueries`); `useDeleteClient` 409 parks `dependencies` (`ApiError` mock with `status: 409, dependencies: [...]`) and `onMutate` clears a prior tree. Follow `useLocationsMutations` test patterns if a suite exists; else useReactQueryHooks patterns.
 **5.7** Run: `npm run test` (full) → green; `npx tsc --noEmit`; `npm run lint`.
-**5.8** Commit (TOGETHER with Task 4): `refactor(#140): /clients onto factory + useClientsMutations, unmount global ClientsProvider`.
+**5.8** Commit (TOGETHER with Tasks 4 and 6 — single atomic commit, see 4.6): `refactor(#140): /clients onto factory + useClientsMutations, per-tab modal resolution, unmount global ClientsProvider`.
 
 ### DoD
-- Zero `useClients(` references remain (`grep -rn "useClients(" frontend/admin` → empty; `useClientsTable` only). ClientsContext.test.tsx deleted. Suites green.
+- Zero `useClients(` references remain (`grep -rn "useClients(" frontend/admin` → empty; `useClientsTable` only). ClientsContext.test.tsx deleted. At the atomic commit point: full suite + tsc green (ActivityDetailsModal migrated in the same commit per 4.6).
 
 ---
 
@@ -555,14 +556,14 @@ export function ClientLabelById({ clientId }: { clientId: string | undefined }) 
 ```
   Tab label uses `<ClientLabelById clientId={record.client_id} />` (check the current label builder — preserve any phone formatting the tab strip already shows; if the current strip shows only the name, keep only the name).
 - `ClientTab.tsx`: resolve its client via `useClient(record.client_id)` (progressive: «…»/«Без контакта» states, same as ClientLabelById incl. the `!client_id` → «Без контакта» rule); its activity query (:72-76) → `useActivity(record?.activity_id)`. The `client` PROP from the modal's map is removed — ClientTab owns resolution.
-  **Stats re-source (plan-review finding 2):** `useClient` returns `ClientResponse` (no `records_count/missed_records/last_record/total_paid`). ClientTab ALREADY computes `totalCost`/`totalPaid` locally from visits+payments (:179-181) — replace the `'records_count' in client` stats block (:184-193) with locally-computed stats: `recordsCount: visits-derived count of client's records available in this tab's data (use `record` context / clientRecords if loaded; if a value is genuinely unavailable client-side, drop that stats row rather than showing wrong data)`. Concretely: pass `{ recordsCount, missedRecords, lastRecord, totalPaid }` computed from the tab's own `visits`/`payments`/`record` data where each is derivable; fields not derivable → omit (ClientStatistics must render `undefined` fields as hidden rows — verify its props are all optional; if some are required, make them optional in this task). This also fixes a pre-existing inconsistency: stats previously appeared only for first-20 clients (paged map had stats) and never for fallback clients — now uniform for ALL tabs.
+  **Stats re-source (plan-review r1-f2 + r2-f3 decision):** `useClient` returns `ClientResponse` (no `records_count/missed_records/last_record/total_paid`), and ClientStatistics renders an all-«—» grid when `stats` is undefined — a visible regression for first-20 clients, and per-record fabrication is forbidden. DECISION: ClientTab derives REAL client aggregates from data it can load via the new hooks: `useClientRecords(clientId)` (already created in Task 1) → `recordsCount = clientRecords.length`, `lastRecord = max(record.start_time)` (check the field the modal already displays dates from), `missedRecords`/`totalPaid` from the visits/payments the tab already loads aggregated over those records (same 100-record window the records list uses — consistent with current data horizon). NEVER fabricate a per-record value as a client aggregate. If a field is genuinely underivable, omit it («—») — uniform for ALL clients, fixing today's inconsistency (stats previously only for first-20 clients).
   **Anonymous-record rule (plan-review finding 4):** records with `client_id == null` → label and tab show «Без контакта» immediately (no query, no «…»). Apply in BOTH `ClientLabelById` and ClientTab: `if (!clientId) return <>Без контакта</>`.
 - Keep `window.open('/clients?clientId=' + id)` (:119) and all settings-tab logic untouched.
 **6.3** Run: `npx vitest run __tests__/ActivityDetailsModal.test.tsx` → green; then full `npm run test`; `npx tsc --noEmit`.
-**6.4** Commit: `refactor(#140): ActivityDetailsModal per-tab useClient (fixes beyond-first-20 «Без контакта»)`.
+**6.4** Commit: TOGETHER with Tasks 4+5 (single atomic commit, see 4.6).
 
 ### DoD
-- Modal has zero clients-list dependency; per-tab resolution unit-pinned; suite green. E2E for US-2 is Task 11.
+- Modal has zero clients-list dependency (`useClients`/`useClientsTable` absent from the module); per-tab resolution unit-pinned (incl. anonymous-record «Без контакта»); suite + tsc green at the atomic commit. E2E for US-2 is Task 11.
 
 ---
 
@@ -640,8 +641,8 @@ if (createdClientId !== null) {
 - Spec §8, §10 (acceptance gates 3-4)
 
 ### Task Description
-**10.1** Grep gates (all must be EMPTY; patterns account for generic-annotated calls `useQuery<T>(`):
-- `grep -rn "useQuery" frontend/admin/app | grep -v __tests__ | grep -v "// "` → zero (components never call useQuery).
+**10.1** Grep gates (all must be EMPTY; patterns account for generic-annotated calls `useQuery<T>(` and must NOT match `useQueryClient`):
+- `grep -rnE "useQuery[<(]" frontend/admin/app | grep -v __tests__` → zero (components never call useQuery; the `[<(]` excludes useQueryClient).
 - `grep -rnE "queryKey: ?\['(clients|records|masters|services|locations|materials|tags|photos|client|record|activity|activities|visitors|payments)'" frontend/admin/hooks frontend/admin/contexts frontend/admin/app frontend/admin/lib | grep -v __tests__ | grep -v queryKeys.ts` → zero (all entity key literals live in lib/queryKeys.ts).
 **10.2** Extend `useReactQueryHooks.test.tsx` if any Task-1 pin is missing for pairs migrated later (PhotosContext raw usage is covered by 7-task suites; hooks-only pins suffice).
 **10.3** Full local gates: `npm run test` (full vitest), `npx tsc --noEmit`, `npm run lint`, `cd packages/api-client && npx vitest run && npx tsc --noEmit`. All green.
@@ -673,7 +674,7 @@ test('US-1: /schedule fires zero clients requests', async ({ page }) => {
 ```
 (Follow the file's existing auth/baseURL setup helpers; adapt to its fixture conventions.)
 **11.2** RED-GREEN e2e **US-2** (add to `activity-details-modal.spec.ts`): seed 21+ active clients via API (`request.post('/api/v1/clients', ...)` — follow existing factory helpers in clients.spec.ts; unique names `us2-client-XX` so default name-sort puts the target beyond position 20); create one activity + one record whose client is the LAST seeded one (follow this spec's existing activity/record seeding); open the activity modal from /schedule (existing pattern); assert the record tab shows the client's name and phone (not «Без контакта»), and the tab label resolves.
-**11.3** RED-GREEN e2e **US-6** (add to `clients.spec.ts`): on `/schedule`, use the quick-add flow to create a booking with a NEW client (name+phone; follow the quick-add/new-booking pattern used in existing specs — see records.spec.ts / schedule creation tests); then `page.goto('/clients')`; assert the new client's name is visible in the table WITHOUT reload (default status filter = active; new client is active; default sort name/asc).
+**11.3** RED-GREEN e2e **US-6** (add to `clients.spec.ts`): on `/schedule`, use the quick-add flow to create a booking with a NEW client (name+phone; follow the quick-add/new-booking pattern used in existing specs — see records.spec.ts / schedule creation tests); then navigate to /clients via **SPA navigation** (`page.click` on the sidebar/nav link to /clients — NOT `page.goto`, which full-reloads and recreates the QueryClient, making the invalidation path vacuous); assert the new client's name is visible in the table WITHOUT reload (default status filter = active; new client is active; default sort name/asc). The 9.1 unit pin is the primary invalidation gate; this e2e guards the user-visible flow.
 **11.4** Run the three (serially if the repo convention: `npx playwright test e2e/clients.spec.ts -g "US-" e2e/activity-details-modal.spec.ts` per local conventions; e2e env per `dev-workflow` / tester). Then the full affected specs: clients.spec.ts (now 20+ tests — all 19 originals green UNEDITED), clients-delete-cascade, clients-delete-invalid-resolution, admin-opens-profile, unify-caches, records-view (US-2 per_page=100 guard stays green), archive-restore-parity, wave6-status-shared.
 **11.5** ADD `## Data Access Patterns` section to `docs/ARCHITECTURE.md` (~40 lines, after `## Separation Principles` block): hook taxonomy table (lookup `use<Entity>` / raw `use<Entity>Raw` / point hooks / `use<Entity>Table` / `use<Entity>Mutations`), the rule «components never call `useQuery` or write query-key literals — they use hooks; keys live only in `frontend/admin/lib/queryKeys.ts`», `DICT_STALE_TIME = 1h` rationale + own-mutation-invalidation assumption (no WebSocket/SSE — #239), shared-key staleTime-alignment caveat, framing note (2026 TanStack guidance leans `queryOptions`; this codebase standardizes on thin hooks + central qk — explicit team-governance choice).
 **11.6** Commit: `test(#140): e2e US-1/US-2/US-6 + docs: data-access patterns section` (two commits if cleaner: `test(#140): …` and `docs(#140): …`).

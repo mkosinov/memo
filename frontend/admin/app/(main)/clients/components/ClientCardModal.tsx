@@ -1,15 +1,23 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { getRecords, getActivity, ApiError } from '@memo/api-client';
-import { useClients } from '@/contexts/ClientsContext';
+import { ApiError } from '@memo/api-client';
+import {
+  useCreateClient,
+  useUpdateClient,
+  useDeleteClient,
+  useArchiveClient,
+  useRestoreClient,
+  useResolveDeleteClient,
+} from '@/hooks/useClientsMutations';
+import { useClientRecords } from '@/hooks/useClient';
+import { useActivitiesForRecords } from '@/hooks/useActivities';
 import { useUI } from '@/contexts/UIContext';
 import { ClientInfoTab, type ClientInfoTabHandle } from './ClientInfoTab';
 import { ClientRecordTab } from './ClientRecordTab';
 import { Modal } from '@/app/components/shared/modal/Modal';
 import { DeleteDialog } from '@/app/components/DeleteDialog';
-import type { ClientWithStats, ActivityResponse, DependencyNode } from '@memo/api-client';
+import type { ClientWithStats, DependencyNode } from '@memo/api-client';
 import { parseApiError } from '@/app/lib/api/parseApiError';
 
 interface ClientCardModalProps {
@@ -24,7 +32,14 @@ export function ClientCardModal({ client, isOpen, onClose, onClientCreated, mode
   const [activeTab, setActiveTab] = useState('client');
   const [hasChanges, setHasChanges] = useState(false);
   const clientInfoRef = useRef<ClientInfoTabHandle>(null);
-  const { createClient, updateClient, deleteClient, archiveClient, restoreClient, resolveDeleteClient, dependencies } = useClients();
+  // GH #140 — mutations are local hook instances (no global ClientsContext).
+  const createMutation = useCreateClient();
+  const updateMutation = useUpdateClient();
+  const deleteMutation = useDeleteClient();
+  const archiveMutation = useArchiveClient();
+  const restoreMutation = useRestoreClient();
+  const resolveDeleteMutation = useResolveDeleteClient();
+  const { dependencies } = deleteMutation;
   const { showToast } = useUI();
 
   // ─── Delete dialog state (§7.3: parent owns dry-run + open/close) ────
@@ -52,14 +67,14 @@ export function ClientCardModal({ client, isOpen, onClose, onClientCreated, mode
   const handleDelete = useCallback(async () => {
     if (!client) return;
     try {
-      await deleteClient(client.id);
+      await deleteMutation.mutateAsync(client.id);
       // 204 — already deleted (zero deps): close the modal.
       showToast('Клиент удалён');
       onClose();
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
         // Prefer the tree on the failing 409 response itself (always fresh);
-        // the context-parked `dependencies` is only a fallback.
+        // the hook-parked `dependencies` is only a fallback.
         const deps = err.dependencies ?? dependencies ?? [];
         if (deps.length > 0) {
           setDeleteTarget({ client, dependencies: deps });
@@ -68,41 +83,31 @@ export function ClientCardModal({ client, isOpen, onClose, onClientCreated, mode
       }
       showToast(parseApiError(err).message, 'error');
     }
-  }, [client, deleteClient, dependencies, onClose, showToast]);
+  }, [client, deleteMutation, dependencies, onClose, showToast]);
 
   // ─── Archive / Restore (#198 parity) ─────────────────────────────────
   const handleArchiveToggle = useCallback(async () => {
     if (!client) return;
     try {
       if (client.archived) {
-        await restoreClient(client.id);
+        await restoreMutation.mutateAsync(client.id);
         showToast('Клиент восстановлен');
       } else {
-        await archiveClient(client.id);
+        await archiveMutation.mutateAsync(client.id);
         showToast('Клиент в архиве');
       }
       onClose();
     } catch (err) {
       showToast(parseApiError(err).message, 'error');
     }
-  }, [client, archiveClient, restoreClient, onClose, showToast]);
+  }, [client, archiveMutation, restoreMutation, onClose, showToast]);
 
-  // Fetch records for this client (only in view mode)
-  const { data: records } = useQuery({
-    queryKey: ['records', 'client', client?.id],
-    queryFn: () => getRecords({ client_id: client?.id!, per_page: 100 }).then(r => r.items),
-    enabled: isOpen && mode === 'view' && !!client?.id,
-  });
-
-  // Fetch activities for each record to get date/time
-  const { data: recordActivities = [] } = useQuery<ActivityResponse[]>({
-    queryKey: ['activities', 'for-records', records?.map(r => r.activity_id) ?? []],
-    queryFn: () =>
-      Promise.all(
-        (records ?? []).map(r => getActivity(r.activity_id)),
-      ),
-    enabled: !!records && records.length > 0,
-  });
+  // GH #140 — records + their activities via point hooks (shared keys; the
+  // activity dates come from ActivityResponse.start, not the record).
+  const { data: records } = useClientRecords(client?.id, isOpen && mode === 'view');
+  const { data: recordActivities } = useActivitiesForRecords(
+    records?.map((r) => r.activity_id) ?? [],
+  );
 
   // Reset tab to 'client' whenever the modal opens; drop any pending delete
   // dialog when it closes (so reopening doesn't resurrect a stale dialog).
@@ -200,7 +205,7 @@ export function ClientCardModal({ client, isOpen, onClose, onClientCreated, mode
             </button>
 
             {records?.map((record, i) => {
-              const activity = recordActivities[i];
+              const activity = recordActivities?.[i];
               const startDate = activity?.start ? new Date(activity.start) : null;
               return (
                 <button
@@ -235,7 +240,7 @@ export function ClientCardModal({ client, isOpen, onClose, onClientCreated, mode
               onSave={mode === 'create'
                 ? async (data) => {
                     try {
-                      const newClient = await createClient({
+                      const newClient = await createMutation.mutateAsync({
                         name: data.name ?? '',
                         phone: data.phone ?? undefined,
                         email: data.email ?? undefined,
@@ -248,7 +253,7 @@ export function ClientCardModal({ client, isOpen, onClose, onClientCreated, mode
                   }
                 : async (data) => {
                     try {
-                      await updateClient(client!.id, data);
+                      await updateMutation.mutateAsync({ id: client!.id, data });
                     } catch (err) {
                       showToast(parseApiError(err).message, 'error');
                     }
@@ -270,10 +275,10 @@ export function ClientCardModal({ client, isOpen, onClose, onClientCreated, mode
           entityId={deleteTarget.client.id}
           dependencies={deleteTarget.dependencies}
           onResolve={async (id, resolutions) => {
-            await resolveDeleteClient(id, resolutions);
+            await resolveDeleteMutation.mutateAsync({ id, resolutions });
             showToast('Клиент удалён');
           }}
-          onArchive={(id) => archiveClient(id)}
+          onArchive={(id) => archiveMutation.mutateAsync(id)}
           onDone={() => {
             setDeleteTarget(null);
             onClose();

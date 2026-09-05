@@ -1,19 +1,18 @@
 'use client';
 
 import React, { useState, useMemo, useCallback } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { getRecords, getClientById, type RecordResponse } from '@memo/api-client';
 import { useSchedule } from '@/contexts/ScheduleContext';
-import { useClients } from '@/contexts/ClientsContext';
 import { useUI } from '@/contexts/UIContext';
 import type { Activity } from '@memo/domain';
 import { formatActivityContext, formatTime } from '@/lib/utils';
 import { TabNav, type Tab } from './TabNav';
 import { SettingsTab } from './SettingsTab';
 import { ClientTab } from './ClientTab';
+import { ClientLabelById } from './ClientLabelById';
 import { NewBookingTab } from './NewBookingTab';
 import { Modal } from '@/app/components/shared/modal/Modal';
 import { useRecordMutations } from '@/hooks/useRecordMutations';
+import { useActivityRecords } from '@/hooks/useActivities';
 import { parseApiError } from '@/app/lib/api/parseApiError';
 
 interface ActivityDetailsModalProps {
@@ -25,7 +24,6 @@ interface ActivityDetailsModalProps {
 
 export function ActivityDetailsModal({ isOpen, onClose, activity, mode }: ActivityDetailsModalProps) {
   const { services, servicesRaw, updateActivity, deleteActivity } = useSchedule();
-  const { clients: clientsList } = useClients();
   const { showToast } = useUI();
 
   const [activeTab, setActiveTab] = useState(mode === 'quickAdd' ? 'new-booking' : 'settings');
@@ -54,75 +52,39 @@ export function ActivityDetailsModal({ isOpen, onClose, activity, mode }: Activi
     [currentRawService],
   );
 
-  // Own data — context records is now one server page; activity bookings need the full set (#191)
-  const { data: activityRecords = [] } = useQuery<RecordResponse[]>({
-    queryKey: ['records', 'activity', activity.id],
-    queryFn: () => getRecords({ activity_id: activity.id, per_page: 100 }).then((r) => r.items),
-    enabled: isOpen && !!activity?.id,
-  });
+  // Own data — context records is now one server page; activity bookings need
+  // the full set (#191). GH #140: point hook on ['records','activity',id].
+  const { data: activityRecords = [] } = useActivityRecords(activity.id, isOpen);
 
-  // Build a visitors map from records' visits (visitors are embedded in visits via visitor_id)
-  // We need to look up visitor details from RecordsContext or we pass visits directly
-  // (#127 Task 7: removed — ClientTab now reads visitors from useRecordData, not from props)
-
-  // Build a map from useClients() (has stats) for O(1) lookup
-  const clientsWithStats = useMemo(() => {
-    const map = new Map(clientsList.map(c => [c.id, c]));
-    return map;
-  }, [clientsList]);
-
-  // GH #213 §6.6 (R3): client resolution for the ACTIVE record, re-homed off
-  // RecordsContext. Precedence preserved: useClients() paged map FIRST, then
-  // per-id fallback (key shared with ClientQuickCard — TanStack dedupes).
-  const activeRecord = useMemo(
-    () => (activeRecordId ? activityRecords.find((r) => r.id === activeRecordId) : undefined),
-    [activityRecords, activeRecordId],
-  );
-  const { data: fallbackClient = null } = useQuery({
-    queryKey: ['client', activeRecord?.client_id ?? ''],
-    queryFn: () => getClientById(activeRecord!.client_id!),
-    enabled: !!activeRecord?.client_id,
-  });
-  const activeClient =
-    (activeRecord ? clientsWithStats.get(activeRecord.client_id ?? '') : undefined) ??
-    fallbackClient;
-
-  // Build tabs: settings + client tabs
+  // GH #140 US-2: each record tab resolves its OWN client via useClient (inside
+  // ClientLabelById) — no clients-list dependency. Every tab (not just the
+  // active one) shows the resolved name+phone; shared ['client', id] dedupes
+  // across tabs of the same client and with ClientQuickCard.
   const tabs: Tab[] = useMemo(() => {
     const settingsTab: Tab = { id: 'settings', label: 'Настройка' };
     const clientTabs: Tab[] = activityRecords.map((record) => {
-      const client =
-        clientsWithStats.get(record.client_id ?? '') ??
-        (record.client_id && record.client_id === activeRecord?.client_id
-          ? fallbackClient ?? undefined
-          : undefined);
-      const name = client?.name?.trim();
-      const phone = client?.phone?.trim();
       const totalSeats = record.visits.length + (record.anonym_visits ?? 0);
       return {
         id: `client-${record.id}`,
         label: (
           <div className="flex items-start justify-between w-full min-w-0">
-            <div className="flex flex-col min-w-0">
-              <span className="truncate">{name || phone || 'Без контакта'}</span>
-              {phone && <span className="text-xs text-ink-light truncate">{phone}</span>}
-            </div>
+            <ClientLabelById clientId={record.client_id ?? undefined} />
             <div className="flex flex-col items-end shrink-0 ml-1">
               <span className="text-[10px] opacity-70">x{totalSeats}</span>
-              {client && (
+              {record.client_id && (
                 <span
                   role="button"
                   tabIndex={0}
                   onClick={(e) => {
                     e.stopPropagation();
                     onClose();
-                    window.open(`/clients?clientId=${client.id}`, '_blank', 'noopener,noreferrer');
+                    window.open(`/clients?clientId=${record.client_id}`, '_blank', 'noopener,noreferrer');
                   }}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {
                       e.stopPropagation();
                       onClose();
-                      window.open(`/clients?clientId=${client.id}`, '_blank', 'noopener,noreferrer');
+                      window.open(`/clients?clientId=${record.client_id}`, '_blank', 'noopener,noreferrer');
                     }
                   }}
                   className="cursor-pointer hover:opacity-100 inline-flex"
@@ -142,7 +104,7 @@ export function ActivityDetailsModal({ isOpen, onClose, activity, mode }: Activi
       };
     });
     return [settingsTab, ...clientTabs];
-  }, [activityRecords, clientsWithStats, activeRecord?.client_id, fallbackClient]);
+  }, [activityRecords, onClose]);
 
   // Delete activity handler
   const handleDeleteActivity = useCallback(() => {
@@ -216,16 +178,13 @@ export function ActivityDetailsModal({ isOpen, onClose, activity, mode }: Activi
     const record = activityRecords.find((r) => r.id === recordId);
     if (!record) return null;
 
-    // GH #213 §6.6: same precedence chain as the tab labels — paged map
-    // first, per-id fallback second (activeRecord === record here).
-    const client = activeClient ?? undefined;
-
+    // GH #140 US-2: ClientTab owns its client resolution via useClient —
+    // no client prop from a clients-list map.
     return (
       <ClientTab
         recordId={recordId}
         activityId={activity.id}
         clientId={record.client_id ?? ''}
-        client={client}
         onDeleteRecord={handleDeleteRecord}
         onClose={onClose}
       />

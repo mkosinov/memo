@@ -33,7 +33,7 @@ describe('Providers architecture (SSR fix)', () => {
     expect(content).toMatch(/<\/Providers>/);
   });
 
-  it('providers.tsx mounts PendingActionsProvider inside QueryClient + UIProvider, between ClientsProvider and UserSettingsProvider', () => {
+  it('providers.tsx mounts PendingActionsProvider inside QueryClient + UIProvider, above UserSettingsProvider', () => {
     const filePath = path.join(appDir, 'providers.tsx');
     const content = fs.readFileSync(filePath, 'utf-8');
 
@@ -55,12 +55,13 @@ describe('Providers architecture (SSR fix)', () => {
 
     // Required provider order (outermost inwards):
     //   ErrorBoundary > UIProvider > QueryClientWithErrorReporting
-    //   > ClientsProvider > PendingActionsProvider > UserSettingsProvider > {children}
+    //   > PendingActionsProvider > UserSettingsProvider > {children}
+    // (GH #140 — ClientsProvider unmounted from the global tree; the /clients
+    // page mounts it locally.)
     const order = [
       'ErrorBoundary',
       'UIProvider',
       'QueryClientWithErrorReporting',
-      'ClientsProvider',
       'PendingActionsProvider',
       'UserSettingsProvider',
     ];

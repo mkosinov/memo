@@ -1,23 +1,19 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, act, within } from '@testing-library/react';
+import { render, screen, fireEvent, within } from '@testing-library/react';
 import React from 'react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import fs from 'fs';
+import path from 'path';
 import { ActivityDetailsModal } from '../app/components/modal/ActivityDetailsModal/ActivityDetailsModal';
 import { TabNav } from '../app/components/modal/ActivityDetailsModal/TabNav';
 import { SettingsTab } from '../app/components/modal/ActivityDetailsModal/SettingsTab';
 import { ClientTab } from '../app/components/modal/ActivityDetailsModal/ClientTab';
 import { NewBookingTab } from '../app/components/modal/ActivityDetailsModal/NewBookingTab';
-import { ClientsProvider } from '../contexts/ClientsContext';
 
 // ─── Shared mock data & context factories ────────────────────────────────
 
 import {
-  mockMasters,
-  mockServices,
-  mockLocations,
   mockActivity,
   mockClient,
-  mockClientWithStats,
   mockRecord,
   mockVisitor,
   mockTariffs,
@@ -26,7 +22,6 @@ import {
 import {
   createMockScheduleContext,
   createMockUIContext,
-  createMockClientsContext,
 } from './helpers/mockContexts';
 
 // ─── API Client Mock ───────────────────────────────────────────────────────
@@ -52,18 +47,15 @@ import {
   createRecord,
   deleteRecord,
   createPayment,
-  deletePayment,
-  updateVisitStatus,
-  getRecords,
-  getClientById,
 } from '@memo/api-client';
-import type { RecordView } from '@memo/api-client';
 
 // ─── Context Mocks ──────────────────────────────────────────────────────────
 
 // GH #213 §6.6 (R3): NO RecordsContext mock — the modal renders without any
 // RecordsProvider. `useRecords()` throws outside its provider, so a stray
 // dependency on it fails every test here.
+// GH #140 US-2: NO ClientsContext mock either — the modal has ZERO
+// clients-list dependency; per-tab resolution goes through useClient.
 
 vi.mock('@/contexts/ScheduleContext', () => ({
   useSchedule: vi.fn(),
@@ -71,11 +63,6 @@ vi.mock('@/contexts/ScheduleContext', () => ({
 
 vi.mock('@/contexts/UIContext', () => ({
   useUI: vi.fn(),
-}));
-
-vi.mock('@/contexts/ClientsContext', () => ({
-  useClients: vi.fn(),
-  ClientsProvider: ({ children }: { children: React.ReactNode }) => children,
 }));
 
 vi.mock('@/contexts/PendingActionsContext', () => ({
@@ -99,6 +86,25 @@ vi.mock('@/hooks/useRecordData', () => ({
     isLoading: false,
     status: 'waiting',
   })),
+}));
+
+// ─── Point-hook mocks (GH #140 Task 6) ──────────────────────────────────────
+// useClient is configurable per id so the tests can pin the progressive
+// «…» → name+phone render and the «Без контакта» error/anonymous branches.
+
+vi.mock('@/hooks/useClient', () => ({
+  useClient: vi.fn(),
+  useClientRecords: vi.fn(),
+}));
+
+vi.mock('@/hooks/useActivities', () => ({
+  useActivityRecords: vi.fn(),
+  useActivity: vi.fn(),
+  useActivitiesForRecords: vi.fn(),
+}));
+
+vi.mock('@/hooks/usePayments', () => ({
+  usePaymentTotals: vi.fn(),
 }));
 
 vi.mock('@tanstack/react-query', () => ({
@@ -131,49 +137,71 @@ vi.mock('next/navigation', () => ({
 
 import { useSchedule } from '@/contexts/ScheduleContext';
 import { useUI } from '@/contexts/UIContext';
-import { useClients } from '@/contexts/ClientsContext';
 import { useRecordData } from '@/hooks/useRecordData';
-import { useQuery } from '@tanstack/react-query';
+import { useClient, useClientRecords } from '@/hooks/useClient';
+import {
+  useActivityRecords,
+  useActivity,
+  useActivitiesForRecords,
+} from '@/hooks/useActivities';
+import { usePaymentTotals } from '@/hooks/usePayments';
 
 const mockUseSchedule = vi.mocked(useSchedule);
 const mockUseUI = vi.mocked(useUI);
-const mockUseClients = vi.mocked(useClients);
-const mockUseQuery = vi.mocked(useQuery);
+const mockUseClient = vi.mocked(useClient);
+const mockUseClientRecords = vi.mocked(useClientRecords);
+const mockUseActivityRecords = vi.mocked(useActivityRecords);
+const mockUseActivity = vi.mocked(useActivity);
+const mockUseActivitiesForRecords = vi.mocked(useActivitiesForRecords);
+const mockUsePaymentTotals = vi.mocked(usePaymentTotals);
 
-// Helper: make the mocked useQuery serve the per-activity records query (#191).
-// Context `records` is now one server page, so the modal must get the activity's
-// bookings from its own ['records', 'activity', activityId] query instead.
-// GH #213 §6.6: the same stub also serves the per-id client fallback query
-// ['client', clientId] (paged-map hit wins BEFORE the fallback resolves).
-function stubActivityRecordsQuery(
-  records: unknown[],
-  clientsById?: Map<string, unknown>,
-) {
-  mockUseQuery.mockImplementation((opts: unknown) => {
-    const key = (opts as { queryKey: unknown }).queryKey;
-    if (Array.isArray(key) && key[0] === 'records' && key[1] === 'activity') {
-      return { data: records, isLoading: false } as never;
-    }
-    if (Array.isArray(key) && key[0] === 'client') {
-      const resolved = clientsById?.get(String(key[1]));
-      return { data: resolved, isLoading: false, isPending: false } as never;
-    }
-    return { data: undefined, isLoading: false } as never;
-  });
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
+/** Serve the activity's booking records (tab strip source). */
+function stubActivityRecords(records: unknown[]) {
+  mockUseActivityRecords.mockReturnValue({ data: records } as never);
 }
 
-function resetActivityRecordsQuery() {
-  mockUseQuery.mockImplementation(() => ({ data: undefined, isLoading: false } as never));
+type ClientState = {
+  data?: unknown;
+  isPending?: boolean;
+  isError?: boolean;
+};
+
+/**
+ * Configure useClient per id (GH #140 US-2). Ids absent from the map resolve
+ * as settled-with-no-data («…» branch); pass an explicit entry to pin
+ * pending/error states.
+ */
+function stubClientsById(states: Record<string, ClientState>) {
+  mockUseClient.mockImplementation(((id: string | undefined) => {
+    const state = id ? states[id] : undefined;
+    return {
+      data: state?.data,
+      isPending: state?.isPending ?? false,
+      isError: state?.isError ?? false,
+    };
+  }) as never);
 }
 
 beforeEach(() => {
   mockUseSchedule.mockReturnValue(createMockScheduleContext());
   mockUseUI.mockReturnValue(createMockUIContext());
-  mockUseClients.mockReturnValue(createMockClientsContext());
+  mockUseActivityRecords.mockReturnValue({ data: [] } as never);
+  mockUseClient.mockReturnValue({
+    data: undefined,
+    isPending: false,
+    isError: false,
+  } as never);
+  mockUseClientRecords.mockReturnValue({ data: undefined } as never);
+  mockUseActivity.mockReturnValue({ data: undefined } as never);
+  mockUseActivitiesForRecords.mockReturnValue({ data: [] } as never);
+  mockUsePaymentTotals.mockReturnValue({ data: undefined } as never);
 });
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.clearAllMocks();
 });
 
 // ─── TabNav Tests ───────────────────────────────────────────────────────────
@@ -290,32 +318,34 @@ describe('SettingsTab', () => {
   });
 });
 
-  // ─── ClientTab Tests ────────────────────────────────────────────────────────
+// ─── ClientTab Tests ────────────────────────────────────────────────────────
 
 describe('ClientTab', () => {
-  // New hook-driven prop signature (#127 Task 7).
+  // Hook-driven prop signature (#127 Task 7; GH #140 — no `client` prop,
+  // ClientTab resolves its client via useClient(clientId)).
   const defaultProps = {
     recordId: 'r1',
     activityId: 'ev_1',
     clientId: 'c1',
-    client: mockClient,
     onDeleteRecord: vi.fn(),
     onClose: vi.fn(),
   };
 
   it('renders client name', () => {
+    stubClientsById({ c1: { data: mockClient } });
     render(<ClientTab {...defaultProps} />);
-    // ClientTab now shows client name via RecordVisitsTable visitor rows,
-    // not as an editable input. Verify the component renders with record summary.
+    // GH #140 US-2: the resolved client shows in the tab content header.
+    const header = screen.getByTestId('client-tab-header');
+    expect(header.textContent).toContain('Анна Иванова');
     expect(screen.getByTestId('record-summary')).toBeInTheDocument();
   });
 
   it('renders client phone as read-only', () => {
+    stubClientsById({ c1: { data: mockClient } });
     render(<ClientTab {...defaultProps} />);
-    // Phone is now displayed in ActivityDetailsModal tab labels, not in ClientTab.
-    // ClientTab renders the record summary with financial data.
-    const summary = screen.getByTestId('record-summary');
-    expect(summary).toBeInTheDocument();
+    // GH #140 US-2: phone renders next to the name in the tab content.
+    const header = screen.getByTestId('client-tab-header');
+    expect(header.textContent).toContain('+7 (900) 123-45-67');
   });
 
   it('renders client link', () => {
@@ -340,6 +370,25 @@ describe('ClientTab', () => {
   it('renders payment summary', () => {
     render(<ClientTab {...defaultProps} />);
     expect(screen.getByText(/Оплачено/)).toBeInTheDocument();
+  });
+
+  it('shows «…» while the client query is pending', () => {
+    stubClientsById({ c1: { isPending: true } });
+    render(<ClientTab {...defaultProps} />);
+    expect(screen.getByTestId('client-tab-header').textContent).toBe('…');
+  });
+
+  it('shows «Без контакта» when the client query errors', () => {
+    stubClientsById({ c1: { isError: true } });
+    render(<ClientTab {...defaultProps} />);
+    expect(screen.getByTestId('client-tab-header').textContent).toBe('Без контакта');
+  });
+
+  it('shows «Без контакта» immediately for an anonymous record (no client_id)', () => {
+    // clientId '' → useClient(undefined): no query fires, no «…» phase.
+    render(<ClientTab {...defaultProps} clientId="" />);
+    expect(screen.getByTestId('client-tab-header').textContent).toBe('Без контакта');
+    expect(mockUseClient).toHaveBeenCalledWith(undefined);
   });
 });
 
@@ -442,21 +491,6 @@ describe('ActivityDetailsModal', () => {
 // ─── ActivityDetailsModal: API Call Tests ────────────────────────────────────
 
 describe('ActivityDetailsModal — API integration', () => {
-  // GH #213 Task 6: context records are RecordView rows — widen the shared
-  // mock for the context override (display fields unused by this modal).
-  const mockRecordView: RecordView = {
-    ...mockRecord,
-    client_name: 'Анна Иванова',
-    activity_start: '2026-05-10T10:00:00',
-    service_title: 'Йога',
-    master_name: 'Иванова Мария',
-    location_name: 'Студия 1',
-    master_color: null,
-    is_private: false,
-    paid: 0,
-  };
-  const mockRecords = [mockRecordView];
-
   beforeEach(() => {
     vi.mocked(createRecord).mockResolvedValue({ id: 'r_new', activity_id: 'ev_1', client_id: 'c1', status: 'pending', seats: 1, anonym_visits: 0, comment: null, custom_price: null, created_at: '', updated_at: '', visits: [] });
     vi.mocked(createClient).mockResolvedValue({ id: 'c_new', name: 'New', phone: '+7', email: null, channel: 'telegram', created_at: '', updated_at: '', archived: false });
@@ -464,17 +498,10 @@ describe('ActivityDetailsModal — API integration', () => {
     vi.mocked(deleteRecord).mockResolvedValue(undefined);
     vi.mocked(createPayment).mockResolvedValue({ id: 'p1', record_id: 'r1', amount: 1000, method: 'card', created_at: '', updated_at: '' });
     vi.mocked(getClientByPhone).mockRejectedValue(new Error('Not found'));
-    // #191: booking tabs come from the activity-records query, not context records.
-    // GH #213 §6.6: client c1 resolves via the useClients() paged map.
-    mockUseClients.mockReturnValue(
-      createMockClientsContext({ clients: [mockClientWithStats] }),
-    );
-    stubActivityRecordsQuery(mockRecords);
-  });
-
-  afterEach(() => {
-    resetActivityRecordsQuery();
-    vi.clearAllMocks();
+    // #191/#140: booking tabs come from useActivityRecords; client c1 resolves
+    // per-tab via useClient (no clients list anywhere).
+    stubClientsById({ c1: { data: mockClient } });
+    stubActivityRecords([mockRecord]);
   });
 
   it('passes actual visitors to ClientTab (not empty array)', () => {
@@ -505,188 +532,201 @@ describe('ActivityDetailsModal — API integration', () => {
   });
 });
 
-// ─── GH #213 §6.6: client resolution re-homed off RecordsContext ────────────
-// Precedence preserved: useClients() paged map FIRST, per-id getClientById
-// query as fallback (key shared with ClientQuickCard — TanStack dedupes).
-// The fallback hook tracks the ACTIVE tab's record, so fallback-path tests
-// click the booking tab first.
+// ─── GH #140 US-2: per-tab client resolution (no clients-list source) ───────
+// Every record tab mounts its own useClient observer: names+phones resolve on
+// ALL tabs (including non-active ones), progressively («…» → resolved), with
+// «Без контакта» ONLY on error or an anonymous record.
 
-describe('ActivityDetailsModal — client resolution without RecordsContext (#213)', () => {
-  afterEach(() => {
-    resetActivityRecordsQuery();
-    vi.clearAllMocks();
-  });
+describe('ActivityDetailsModal — per-tab client resolution (#140 US-2)', () => {
+  const mockClient2 = {
+    ...mockClient,
+    id: 'c2',
+    name: 'Борис Петров',
+    phone: '+7 (900) 987-65-43',
+  };
+  const record2 = { ...mockRecord, id: 'r2', client_id: 'c2' };
 
-  it('resolves the tab label from the useClients() paged map (first source)', () => {
-    mockUseClients.mockReturnValue(
-      createMockClientsContext({ clients: [mockClientWithStats] }),
-    );
-    stubActivityRecordsQuery([mockRecord]);
-
-    render(
-      <ActivityDetailsModal isOpen={true} onClose={vi.fn()} activity={mockActivity} mode="edit" />,
-    );
-
-    // Paged map carries c1 → tab label renders the client name without
-    // any fallback data being resolved
-    expect(screen.getByText('Анна Иванова')).toBeInTheDocument();
-  });
-
-  it('falls back to the per-id client query when the paged map misses', () => {
-    mockUseClients.mockReturnValue(createMockClientsContext()); // paged map empty
-    // Fallback resolves the by-id client (same precedence as the old map chain)
-    stubActivityRecordsQuery([mockRecord], new Map([['c1', mockClient]]));
+  it('renders ALL record tabs immediately with «…» while clients are pending', () => {
+    // Both clients pending → both tabs still render (placeholder labels).
+    stubClientsById({ c1: { isPending: true }, c2: { isPending: true } });
+    stubActivityRecords([mockRecord, record2]);
 
     render(
       <ActivityDetailsModal isOpen={true} onClose={vi.fn()} activity={mockActivity} mode="edit" />,
     );
 
-    // No paged-map hit and no active record yet → placeholder label
+    expect(screen.getByTestId('tab-client-r1')).toBeInTheDocument();
+    expect(screen.getByTestId('tab-client-r2')).toBeInTheDocument();
+    expect(screen.getAllByText('…').length).toBe(2);
+    // «Без контакта» must NOT appear while pending — only on error/anonymous.
+    expect(screen.queryByText('Без контакта')).not.toBeInTheDocument();
+  });
+
+  it('shows resolved name+phone on EVERY tab, including non-active ones', () => {
+    stubClientsById({ c1: { data: mockClient }, c2: { data: mockClient2 } });
+    stubActivityRecords([mockRecord, record2]);
+
+    render(
+      <ActivityDetailsModal isOpen={true} onClose={vi.fn()} activity={mockActivity} mode="edit" />,
+    );
+
+    // Default active tab is 'settings' — no record tab activated, yet both
+    // clients resolve (US-2 core: beyond-first-20 clients always render).
+    const tab1 = screen.getByTestId('tab-client-r1');
+    const tab2 = screen.getByTestId('tab-client-r2');
+    expect(tab1.textContent).toContain('Анна Иванова');
+    expect(tab1.textContent).toContain('+7 (900) 123-45-67');
+    expect(tab2.textContent).toContain('Борис Петров');
+    expect(tab2.textContent).toContain('+7 (900) 987-65-43');
+  });
+
+  it('resolves each tab client via useClient on the shared per-id key', () => {
+    stubClientsById({ c1: { data: mockClient }, c2: { data: mockClient2 } });
+    stubActivityRecords([mockRecord, record2]);
+
+    render(
+      <ActivityDetailsModal isOpen={true} onClose={vi.fn()} activity={mockActivity} mode="edit" />,
+    );
+
+    expect(mockUseClient).toHaveBeenCalledWith('c1');
+    expect(mockUseClient).toHaveBeenCalledWith('c2');
+  });
+
+  it('shows «Без контакта» when a tab client query errors', () => {
+    stubClientsById({ c1: { isError: true } });
+    stubActivityRecords([mockRecord]);
+
+    render(
+      <ActivityDetailsModal isOpen={true} onClose={vi.fn()} activity={mockActivity} mode="edit" />,
+    );
+
     expect(screen.getByText('Без контакта')).toBeInTheDocument();
-
-    // Activate the booking tab → per-id fallback resolves → name appears
-    fireEvent.click(screen.getByText('Без контакта'));
-    expect(screen.getByText('Анна Иванова')).toBeInTheDocument();
-    expect(screen.getByTestId('client-tab')).toBeInTheDocument();
+    expect(screen.queryByText('Анна Иванова')).not.toBeInTheDocument();
   });
 
-  it('registers the by-id fallback query with the canonical key and gate', async () => {
-    mockUseClients.mockReturnValue(createMockClientsContext());
-    stubActivityRecordsQuery([mockRecord], new Map([['c1', mockClient]]));
-
-    render(
-      <ActivityDetailsModal isOpen={true} onClose={vi.fn()} activity={mockActivity} mode="edit" />,
-    );
-    fireEvent.click(screen.getByText('Без контакта'));
-
-    // After activation the fallback tracks the active record (the initial
-    // settings-tab render registers ['client', ''] — find the c1 call)
-    const clientQuery = mockUseQuery.mock.calls
-      .map(([opts]) => opts as { queryKey: unknown; enabled?: boolean; queryFn?: () => Promise<unknown> })
-      .find((o) => Array.isArray(o.queryKey) && (o.queryKey as unknown[])[1] === 'c1');
-
-    expect(clientQuery).toBeDefined();
-    expect(clientQuery!.queryKey).toEqual(['client', 'c1']);
-    expect(clientQuery!.enabled).toBe(true);
-    await clientQuery!.queryFn!();
-    expect(getClientById).toHaveBeenCalledWith('c1');
-  });
-
-  it('keeps the fallback disabled for anonymous records (no client_id)', () => {
-    mockUseClients.mockReturnValue(createMockClientsContext());
+  it('shows «Без контакта» immediately for an anonymous record (client_id null)', () => {
     const anonymousRecord = { ...mockRecord, id: 'r2', client_id: null };
-    stubActivityRecordsQuery([anonymousRecord]);
+    stubClientsById({}); // nothing resolves — anonymous must NOT show «…»
+    stubActivityRecords([anonymousRecord]);
 
     render(
       <ActivityDetailsModal isOpen={true} onClose={vi.fn()} activity={mockActivity} mode="edit" />,
     );
 
-    // Anonymous booking renders the "no contact" placeholder label
+    // No client_id → immediate «Без контакта», no pending placeholder.
     expect(screen.getByText('Без контакта')).toBeInTheDocument();
-    fireEvent.click(screen.getByText('Без контакта'));
-
-    // No enabled ['client', id] query — client_id is null
-    const clientQueries = mockUseQuery.mock.calls
-      .map(([opts]) => opts as { queryKey: unknown; enabled?: boolean })
-      .filter((o) => Array.isArray(o.queryKey) && (o.queryKey as unknown[])[0] === 'client');
-    for (const q of clientQueries) {
-      expect(q.enabled).toBe(false);
-    }
-    expect(screen.getByText('Без контакта')).toBeInTheDocument();
+    expect(screen.queryByText('…')).not.toBeInTheDocument();
   });
 
-  it('passes the resolved client to ClientTab — stats populated on a paged-map hit', () => {
-    // Paged-map hit: ClientWithStats carries records_count → stats cells populated
-    mockUseClients.mockReturnValue(
-      createMockClientsContext({ clients: [mockClientWithStats] }),
-    );
-    stubActivityRecordsQuery([mockRecord]);
+  it('opens the client profile via window.open from the tab label', () => {
+    const windowOpen = vi.spyOn(window, 'open').mockImplementation(() => null);
+    const onClose = vi.fn();
+    stubClientsById({ c1: { data: mockClient } });
+    stubActivityRecords([mockRecord]);
 
     render(
-      <ActivityDetailsModal isOpen={true} onClose={vi.fn()} activity={mockActivity} mode="edit" />,
+      <ActivityDetailsModal isOpen={true} onClose={onClose} activity={mockActivity} mode="edit" />,
     );
-    fireEvent.click(screen.getByText('Анна Иванова'));
-    expect(screen.getByTestId('client-tab')).toBeInTheDocument();
-    const stats = screen.getByTestId('client-statistics');
-    expect(within(stats).getByText('5')).toBeInTheDocument(); // records_count
+
+    fireEvent.click(screen.getByTestId('open-profile-r1'));
+    expect(windowOpen).toHaveBeenCalledWith(
+      '/clients?clientId=c1',
+      '_blank',
+      'noopener,noreferrer',
+    );
+    expect(onClose).toHaveBeenCalled();
+    windowOpen.mockRestore();
   });
 
-  it('renders ClientTab with empty stats when the client comes from the by-id fallback', () => {
-    // Fallback path: getClientById returns a plain ClientResponse (no stats)
-    mockUseClients.mockReturnValue(createMockClientsContext());
-    stubActivityRecordsQuery([mockRecord], new Map([['c1', mockClient]]));
-
-    render(
-      <ActivityDetailsModal isOpen={true} onClose={vi.fn()} activity={mockActivity} mode="edit" />,
+  it('has zero clients-list dependency (source-level pin)', () => {
+    // GH #140 DoD: the module must not import/use any clients-list source.
+    const filePath = path.resolve(
+      __dirname,
+      '../app/components/modal/ActivityDetailsModal/ActivityDetailsModal.tsx',
     );
-    fireEvent.click(screen.getByText('Без контакта'));
-    expect(screen.getByTestId('client-tab')).toBeInTheDocument();
-    const stats = screen.getByTestId('client-statistics');
-    expect(within(stats).queryByText('5')).not.toBeInTheDocument();
-    expect(within(stats).getAllByText('—').length).toBeGreaterThan(0);
+    const src = fs.readFileSync(filePath, 'utf-8');
+    expect(src).not.toMatch(/useClients\s*\(/);
+    expect(src).not.toMatch(/useClientsTable/);
+    expect(src).not.toMatch(/ClientsContext/);
   });
 });
 
-// ─── ActivityDetailsModal: dedicated activity-records query (#191) ───────────
+// ─── ActivityDetailsModal: activity-records hook (#191 → #140 point hook) ───
 
-describe('ActivityDetailsModal — dedicated activity-records query (#191)', () => {
-  beforeEach(() => {
-    vi.mocked(getRecords).mockResolvedValue({
-      items: [mockRecord],
-      total: 1,
-      page: 1,
-      per_page: 100,
-      pages: 1,
-    } as never);
-    // Context records is ONE server page — deliberately EMPTY to prove the modal
-    // no longer builds booking tabs from it. GH #213 §6.6: the client for c1
-    // now comes from the useClients() paged map, not RecordsContext.
-    mockUseClients.mockReturnValue(
-      createMockClientsContext({ clients: [mockClientWithStats] }),
-    );
-    stubActivityRecordsQuery([mockRecord]);
-  });
+describe('ActivityDetailsModal — activity records via useActivityRecords (#140)', () => {
+  it('renders booking tabs from the activity-records hook', () => {
+    stubClientsById({ c1: { data: mockClient } });
+    stubActivityRecords([mockRecord]);
 
-  afterEach(() => {
-    resetActivityRecordsQuery();
-    vi.clearAllMocks();
-  });
-
-  it('renders booking tabs from the activity-records query, not context records', () => {
     render(
       <ActivityDetailsModal isOpen={true} onClose={vi.fn()} activity={mockActivity} mode="edit" />,
     );
     expect(screen.getByText('Анна Иванова')).toBeInTheDocument();
   });
 
-  it('queries records with activity_id and per_page=100 when open', async () => {
+  it('requests records gated on isOpen', () => {
     render(
       <ActivityDetailsModal isOpen={true} onClose={vi.fn()} activity={mockActivity} mode="edit" />,
     );
-
-    const activityQuery = mockUseQuery.mock.calls
-      .map(([opts]) => opts as { queryKey: unknown; enabled?: boolean; queryFn: () => Promise<unknown> })
-      .find((o) => Array.isArray(o.queryKey) && (o.queryKey as unknown[])[0] === 'records' && (o.queryKey as unknown[])[1] === 'activity');
-
-    expect(activityQuery).toBeDefined();
-    expect(activityQuery!.queryKey).toEqual(['records', 'activity', mockActivity.id]);
-    expect(activityQuery!.enabled).toBe(true);
-
-    await activityQuery!.queryFn();
-    expect(getRecords).toHaveBeenCalledWith({ activity_id: mockActivity.id, per_page: 100 });
+    expect(mockUseActivityRecords).toHaveBeenCalledWith(mockActivity.id, true);
   });
 
-  it('disables the query when the modal is closed', () => {
+  it('disables the records fetch when the modal is closed', () => {
     render(
       <ActivityDetailsModal isOpen={false} onClose={vi.fn()} activity={mockActivity} mode="edit" />,
     );
+    expect(mockUseActivityRecords).toHaveBeenCalledWith(mockActivity.id, false);
+  });
+});
 
-    const activityQuery = mockUseQuery.mock.calls
-      .map(([opts]) => opts as { queryKey: unknown; enabled?: boolean })
-      .find((o) => Array.isArray(o.queryKey) && (o.queryKey as unknown[])[0] === 'records' && (o.queryKey as unknown[])[1] === 'activity');
+// ─── ClientTab — stats re-source (GH #140, ClientQuickCard recipe) ──────────
+// useClient returns ClientResponse (no stats fields): ClientStatistics is fed
+// from useClientRecords + useActivitiesForRecords + usePaymentTotals over the
+// same 100-record window ClientQuickCard shows.
 
-    expect(activityQuery).toBeDefined();
-    expect(activityQuery!.enabled).toBe(false);
+describe('ClientTab — derived client statistics (#140)', () => {
+  const defaultProps = {
+    recordId: 'r1',
+    activityId: 'ev_1',
+    clientId: 'c1',
+    onDeleteRecord: vi.fn(),
+    onClose: vi.fn(),
+  };
+
+  const clientRecordA = { ...mockRecord, id: 'cr1', activity_id: 'ev_a', status: 'missed' };
+  const clientRecordB = { ...mockRecord, id: 'cr2', activity_id: 'ev_b', status: 'visited' };
+  const activityA = { id: 'ev_a', start: '2026-05-10T14:00:00' };
+  const activityB = { id: 'ev_b', start: '2026-04-20T18:00:00' };
+
+  it('derives recordsCount / missedRecords / lastRecord / totalPaid from the record window', () => {
+    stubClientsById({ c1: { data: mockClient } });
+    mockUseClientRecords.mockReturnValue({ data: [clientRecordA, clientRecordB] } as never);
+    mockUseActivitiesForRecords.mockReturnValue({ data: [activityB, activityA] } as never);
+    mockUsePaymentTotals.mockReturnValue({ data: { cr1: 1000, cr2: 2500 } } as never);
+
+    render(<ClientTab {...defaultProps} />);
+
+    const stats = screen.getByTestId('client-statistics');
+    expect(within(stats).getByText('2')).toBeInTheDocument(); // recordsCount
+    expect(within(stats).getByText('1')).toBeInTheDocument(); // missedRecords
+    expect(within(stats).getByText('10.05.2026')).toBeInTheDocument(); // lastRecord = max activity start
+    expect(within(stats).getByText('3 500 ₽')).toBeInTheDocument(); // totalPaid = 1000 + 2500
+  });
+
+  it('requests totals over the sorted record-id window (ClientQuickCard key parity)', () => {
+    stubClientsById({ c1: { data: mockClient } });
+    mockUseClientRecords.mockReturnValue({ data: [clientRecordB, clientRecordA] } as never);
+
+    render(<ClientTab {...defaultProps} />);
+
+    expect(mockUsePaymentTotals).toHaveBeenCalledWith(['cr1', 'cr2']);
+  });
+
+  it('renders all-«—» stats for an anonymous record (nothing derivable)', () => {
+    render(<ClientTab {...defaultProps} clientId="" />);
+
+    const stats = screen.getByTestId('client-statistics');
+    expect(within(stats).getAllByText('—').length).toBe(4);
   });
 });
 
@@ -838,12 +878,11 @@ describe('ClientTab — layout & features', () => {
     { id: 'p1', record_id: 'r1', amount: 3500, method: 'card', created_at: '', updated_at: '' },
   ];
 
-  // New hook-driven prop signature (#127 Task 7).
+  // Hook-driven prop signature (#127 Task 7; GH #140 — no `client` prop).
   const defaultProps = {
     recordId: 'r1',
     activityId: 'ev_1',
     clientId: 'c1',
-    client: mockClient,
     onDeleteRecord: vi.fn(),
     onClose: vi.fn(),
   };
@@ -912,7 +951,7 @@ describe('ClientTab — layout & features', () => {
 
     // Addendum 13: the legacy 5-second setTimeout + undo toast is gone —
     // a successful dry-run (204) navigates immediately via onDeleteRecord.
-    await waitFor(() => {
+    await vi.waitFor(() => {
       expect(defaultProps.onDeleteRecord).toHaveBeenCalledWith('r1');
     });
   });

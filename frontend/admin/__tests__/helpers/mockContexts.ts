@@ -12,8 +12,13 @@
 import { vi } from 'vitest';
 import type { ScheduleContextType } from '@/contexts/ScheduleContext';
 import type { RecordsContextType } from '@/contexts/RecordsContext';
-import type { ClientsContextType } from '@/contexts/ClientsContext';
+import type { ClientFilters } from '@/contexts/ClientsContext';
+import type {
+  PagedListContextValue,
+  PagedListFiltersState,
+} from '@/contexts/createPagedListContext';
 import type { PhotosContextType } from '@/contexts/PhotosContext';
+import type { ClientWithStats } from '@memo/api-client';
 import { mockMasters, mockServices, mockLocations } from './mockData';
 
 // ─── ScheduleContext ──────────────────────────────────────────────────────
@@ -143,60 +148,61 @@ export function createMockUIContext(overrides?: UIOverrides): UIContextMock {
   };
 }
 
-// ─── ClientsContext ─────────────────────────────────────────────────────
+// ─── ClientsTable state (GH #140 — factory paged-list value) ──────────────
 
-type ClientsOverrides = Partial<ClientsContextType>;
+/** Inline copy of ClientsContext's non-exported `defaultFilters` (12 fields). */
+const defaultClientFilters: ClientFilters = {
+  search: '',
+  status: 'active',
+  created_from: '',
+  created_to: '',
+  updated_from: '',
+  updated_to: '',
+  min_records: null,
+  max_records: null,
+  min_paid: null,
+  max_paid: null,
+  missed_from: null,
+  missed_to: null,
+};
 
-export function createMockClientsContext(
-  overrides?: ClientsOverrides,
-): ClientsContextType {
-  const base: ClientsContextType = {
+type ClientsTableState = PagedListContextValue<ClientWithStats> &
+  PagedListFiltersState<ClientFilters>;
+type ClientsTableOverrides = Partial<ClientsTableState>;
+
+/**
+ * Fixture for `useClientsTable()` consumers (GH #140). Returns the full
+ * factory `PagedListContextValue<ClientWithStats> & PagedListFiltersState<ClientFilters>`
+ * with `vi.fn()` setters/refetch; pass any field via `overrides`.
+ */
+export function createMockClientsTableState(
+  overrides: ClientsTableOverrides = {},
+): ClientsTableState {
+  return {
     items: [],
-    clients: [],
+    visibleItems: undefined,
     total: 0,
     page: 1,
     perPage: 20,
-    filters: {
-      search: '',
-      status: 'active',
-      created_from: '',
-      created_to: '',
-      updated_from: '',
-      updated_to: '',
-      min_records: null,
-      max_records: null,
-      min_paid: null,
-      max_paid: null,
-      missed_from: null,
-      missed_to: null,
-    },
     sortBy: 'name',
     sortOrder: 'asc',
-    isLoading: false,
+    status: 'active',
     isPending: false,
+    isLoading: false,
     isFetching: false,
     error: null,
-    refetch: vi.fn(),
+    search: '',
+    filters: { ...defaultClientFilters },
     setPage: vi.fn(),
     setPerPage: vi.fn(),
-    setFilters: vi.fn(),
     setSort: vi.fn(),
+    setStatus: vi.fn(),
+    setSearch: vi.fn(),
+    setFilters: vi.fn(),
     resetFilters: vi.fn(),
-    createClient: vi.fn(),
-    updateClient: vi.fn(),
-    patchClient: vi.fn(),
-    deleteClient: vi.fn(),
-    archiveClient: vi.fn(),
-    restoreClient: vi.fn(),
-    resolveDeleteClient: vi.fn(),
-    dependencies: null,
+    refetch: vi.fn(),
+    ...overrides,
   };
-  // If the test passes a `clients` override (or `items`), mirror it into the
-  // other alias so the migrated DataTable and pre-#139 consumers both see it.
-  const merged = { ...base, ...overrides };
-  if (overrides?.clients !== undefined) merged.items = overrides.clients;
-  else if (overrides?.items !== undefined) merged.clients = overrides.items;
-  return merged;
 }
 
 // ─── PhotosContext (GH #211 — server-driven photos list) ──────────────────

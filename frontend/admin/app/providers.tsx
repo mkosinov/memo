@@ -4,7 +4,6 @@ import { QueryCache, QueryClient, QueryClientProvider } from '@tanstack/react-qu
 import { useState } from 'react';
 import { UIProvider, useUI } from '../contexts/UIContext';
 import { UserSettingsProvider } from '../contexts/UserSettingsContext';
-import { ClientsProvider } from '../contexts/ClientsContext';
 import { PendingActionsProvider } from '../contexts/PendingActionsContext';
 import { ErrorBoundary } from './components/error';
 import { ToastContainer } from './components/toast/ToastContainer';
@@ -39,13 +38,11 @@ export function Providers({ children }: { children: React.ReactNode }) {
     <ErrorBoundary>
       <UIProvider>
         <QueryClientWithErrorReporting>
-          <ClientsProvider>
-            <PendingActionsProvider>
-              <UserSettingsProvider>
-                {children}
-              </UserSettingsProvider>
-            </PendingActionsProvider>
-          </ClientsProvider>
+          <PendingActionsProvider>
+            <UserSettingsProvider>
+              {children}
+            </UserSettingsProvider>
+          </PendingActionsProvider>
         </QueryClientWithErrorReporting>
         <ToastContainer />
       </UIProvider>

@@ -110,23 +110,39 @@ vi.mock('@memo/api-client', async (importOriginal) => {
   };
 });
 
-// ─── Context Mock ─────────────────────────────────────────────────────────
+// ─── Mutation hook mocks (GH #140 — ClientCardModal owns hook instances) ──
 
-vi.mock('@/contexts/ClientsContext', () => ({
-  useClients: vi.fn(),
+const createHook = { mutateAsync: vi.fn() };
+const updateHook = { mutateAsync: vi.fn() };
+const patchHook = { mutateAsync: vi.fn() };
+const deleteHook = { mutateAsync: vi.fn(), dependencies: null as DependencyNode[] | null };
+const archiveHook = { mutateAsync: vi.fn() };
+const restoreHook = { mutateAsync: vi.fn() };
+const resolveDeleteHook = { mutateAsync: vi.fn() };
+
+vi.mock('@/hooks/useClientsMutations', () => ({
+  useCreateClient: () => createHook,
+  useUpdateClient: () => updateHook,
+  usePatchClient: () => patchHook,
+  useDeleteClient: () => deleteHook,
+  useArchiveClient: () => archiveHook,
+  useRestoreClient: () => restoreHook,
+  useResolveDeleteClient: () => resolveDeleteHook,
 }));
 
 vi.mock('@/contexts/UIContext', () => ({
   useUI: vi.fn(() => ({ showToast: vi.fn() })),
 }));
 
-import { useClients } from '@/contexts/ClientsContext';
-import { createMockClientsContext } from './helpers/mockContexts';
-
-const mockUseClients = vi.mocked(useClients);
-
 beforeEach(() => {
-  mockUseClients.mockReturnValue(createMockClientsContext());
+  createHook.mutateAsync = vi.fn().mockResolvedValue({});
+  updateHook.mutateAsync = vi.fn().mockResolvedValue(undefined);
+  patchHook.mutateAsync = vi.fn().mockResolvedValue(undefined);
+  deleteHook.mutateAsync = vi.fn().mockResolvedValue(undefined);
+  deleteHook.dependencies = null;
+  archiveHook.mutateAsync = vi.fn().mockResolvedValue({});
+  restoreHook.mutateAsync = vi.fn().mockResolvedValue({});
+  resolveDeleteHook.mutateAsync = vi.fn().mockResolvedValue(undefined);
   mockUseQuery.mockReturnValue({ data: [], isLoading: false });
 });
 
@@ -296,86 +312,76 @@ describe('ClientCardModal', () => {
     expect(modal.querySelector('[data-testid="client-card-right-panel"]')).toBeInTheDocument();
   });
 
-  it('ClientInfoTab onSave calls context updateClient', () => {
-    const updateClient = vi.fn();
-    mockUseClients.mockReturnValue(createMockClientsContext({ updateClient }));
+  it('ClientInfoTab onSave calls the update hook', () => {
     render(<ClientCardModal {...defaultProps} />);
     fireEvent.click(screen.getByTestId('info-save'));
-    expect(updateClient).toHaveBeenCalledWith('c1', { name: 'updated', phone: null, email: null, channel: null });
+    expect(updateHook.mutateAsync).toHaveBeenCalledWith({
+      id: 'c1',
+      data: { name: 'updated', phone: null, email: null, channel: null },
+    });
   });
 
   it('ClientInfoTab onDelete triggers the DeleteDialog flow (no window.confirm)', async () => {
-    const deleteClient = vi.fn().mockRejectedValue(
+    deleteHook.mutateAsync = vi.fn().mockRejectedValue(
       new ApiError(409, 'Удаление невозможно', 'CONFLICT', DEPS_CHOICE),
     );
+    deleteHook.dependencies = DEPS_CHOICE;
     const onClose = vi.fn();
-    mockUseClients.mockReturnValue(
-      createMockClientsContext({ deleteClient, dependencies: DEPS_CHOICE }),
-    );
     render(<ClientCardModal {...defaultProps} onClose={onClose} />);
     fireEvent.click(screen.getByTestId('info-delete'));
 
-    await waitFor(() => expect(deleteClient).toHaveBeenCalledWith('c1'));
+    await waitFor(() => expect(deleteHook.mutateAsync).toHaveBeenCalledWith('c1'));
     // 409 + dependencies → DeleteDialog opens
     await waitFor(() => expect(screen.getByTestId('delete-dialog')).toBeInTheDocument());
     expect(screen.getByTestId('delete-dialog-title').textContent).toContain('Анна Иванова');
   });
 
   it('footer "Удалить" with 204 dry-run success closes the modal immediately', async () => {
-    const deleteClient = vi.fn().mockResolvedValue(undefined);
+    deleteHook.mutateAsync = vi.fn().mockResolvedValue(undefined);
     const onClose = vi.fn();
-    mockUseClients.mockReturnValue(createMockClientsContext({ deleteClient }));
     render(<ClientCardModal {...defaultProps} onClose={onClose} />);
     fireEvent.click(screen.getByText('Удалить'));
 
-    await waitFor(() => expect(deleteClient).toHaveBeenCalledWith('c1'));
+    await waitFor(() => expect(deleteHook.mutateAsync).toHaveBeenCalledWith('c1'));
     await waitFor(() => expect(onClose).toHaveBeenCalled());
     expect(screen.queryByTestId('delete-dialog')).not.toBeInTheDocument();
   });
 
-  it('Mode B "Архивировать" calls archiveClient and closes the modal', async () => {
+  it('Mode B "Архивировать" calls the archive hook and closes the modal', async () => {
     const blocked: DependencyNode[] = [
       { entity: 'activities', relation: 'Активность', count: 1, allowed_actions: [], message: null },
     ];
-    const deleteClient = vi.fn().mockRejectedValue(
+    deleteHook.mutateAsync = vi.fn().mockRejectedValue(
       new ApiError(409, 'Удаление невозможно', 'CONFLICT', blocked),
     );
-    const archiveClient = vi.fn().mockResolvedValue({ ...mockClientWithStats, archived: true });
+    deleteHook.dependencies = blocked;
+    archiveHook.mutateAsync = vi.fn().mockResolvedValue({ ...mockClientWithStats, archived: true });
     const onClose = vi.fn();
-    mockUseClients.mockReturnValue(
-      createMockClientsContext({ deleteClient, archiveClient, dependencies: blocked }),
-    );
     render(<ClientCardModal {...defaultProps} onClose={onClose} />);
     fireEvent.click(screen.getByText('Удалить'));
 
     await waitFor(() => expect(screen.getByTestId('delete-dialog-archive-btn')).toBeInTheDocument());
     fireEvent.click(screen.getByTestId('delete-dialog-archive-btn'));
 
-    await waitFor(() => expect(archiveClient).toHaveBeenCalledWith('c1'));
+    await waitFor(() => expect(archiveHook.mutateAsync).toHaveBeenCalledWith('c1'));
     await waitFor(() => expect(onClose).toHaveBeenCalled());
   });
 
   it('shows "В архив" button for an active client and "Восстановить" for an archived one (#198)', async () => {
-    const archiveClient = vi.fn().mockResolvedValue({ ...mockClientWithStats, archived: true });
-    const restoreClient = vi.fn().mockResolvedValue({ ...mockClientWithStats, archived: false });
+    archiveHook.mutateAsync = vi.fn().mockResolvedValue({ ...mockClientWithStats, archived: true });
+    restoreHook.mutateAsync = vi.fn().mockResolvedValue({ ...mockClientWithStats, archived: false });
     const onClose = vi.fn();
 
-    mockUseClients.mockReturnValue(
-      createMockClientsContext({ archiveClient, restoreClient }),
-    );
     const { unmount } = render(<ClientCardModal {...defaultProps} onClose={onClose} />);
     fireEvent.click(screen.getByText('В архив'));
-    await waitFor(() => expect(archiveClient).toHaveBeenCalledWith('c1'));
+    await waitFor(() => expect(archiveHook.mutateAsync).toHaveBeenCalledWith('c1'));
     await waitFor(() => expect(onClose).toHaveBeenCalled());
     unmount();
 
     const archivedClient = { ...mockClientWithStats, archived: true };
-    mockUseClients.mockReturnValue(
-      createMockClientsContext({ archiveClient, restoreClient }),
-    );
     render(<ClientCardModal {...defaultProps} client={archivedClient} onClose={onClose} />);
     fireEvent.click(screen.getByText('Восстановить'));
-    await waitFor(() => expect(restoreClient).toHaveBeenCalledWith('c1'));
+    await waitFor(() => expect(restoreHook.mutateAsync).toHaveBeenCalledWith('c1'));
   });
 
   // ─── Tab switching edge cases ───────────────────────────────────────────
@@ -492,8 +498,7 @@ describe('ClientCardModal', () => {
     it('calls onClientCreated instead of onClose after successful create', async () => {
       const onClientCreated = vi.fn();
       const newClient = { ...mockClientWithStats, id: 'new-c1', name: 'Новый' };
-      const createClient = vi.fn().mockResolvedValue(newClient);
-      mockUseClients.mockReturnValue(createMockClientsContext({ createClient }));
+      createHook.mutateAsync = vi.fn().mockResolvedValue(newClient);
 
       render(
         <ClientCardModal
@@ -506,10 +511,10 @@ describe('ClientCardModal', () => {
 
       fireEvent.click(screen.getByTestId('info-save'));
 
-      // Wait for async createClient
+      // Wait for async create
       const { waitFor } = await import('@testing-library/react');
       await waitFor(() => {
-        expect(createClient).toHaveBeenCalled();
+        expect(createHook.mutateAsync).toHaveBeenCalled();
       });
       expect(onClientCreated).toHaveBeenCalledWith(newClient);
     });
@@ -527,7 +532,6 @@ describe('ClientCardModal — Record tab integration', () => {
   };
 
   beforeEach(() => {
-    mockUseClients.mockReturnValue(createMockClientsContext());
     mockUseQuery.mockReturnValue({ data: [], isLoading: false });
     // Reset payment summary mock state
     getMockRecordTabState.reset({ total: 7000, paid: 3500, remaining: 3500 });

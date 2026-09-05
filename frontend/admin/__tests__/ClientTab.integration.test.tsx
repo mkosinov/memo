@@ -7,7 +7,6 @@ import path from 'path';
 // ─── Shared mock data ──────────────────────────────────────────────────────
 
 import {
-  mockClient,
   mockRecord,
   mockVisitor,
   mockTariffs,
@@ -141,11 +140,12 @@ describe('ClientTab — fully hook-driven (#127 Task 7)', () => {
 
   // Minimal props for the new hook-driven API.
   // NO visits/payments/visitors/serviceTariffs/onUpdateRecord/onAddVisitor/showToast.
+  // GH #140: the `client` prop is gone — ClientTab resolves its client via
+  // useClient(clientId) internally.
   const newProps = {
     recordId: 'r1',
     activityId: 'ev_1',
     clientId: 'c1',
-    client: mockClient,
     onDeleteRecord: vi.fn(),
     onClose: vi.fn(),
   };

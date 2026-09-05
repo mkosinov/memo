@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useClients } from '@/contexts/ClientsContext';
+import { useClientsTable } from '@/contexts/ClientsContext';
 import type { ClientFilters } from '@/contexts/ClientsContext';
 
 function useDebouncedCallback(
@@ -37,7 +37,7 @@ function useDebouncedCallback(
 }
 
 export function ClientsFilters() {
-  const { filters, setFilters, resetFilters } = useClients();
+  const { filters, setFilters, resetFilters } = useClientsTable();
   // dirtyRef is declared BEFORE the debounce hook that closes over it
   const dirtyRef = useRef(false);
   const { debounced: debouncedSearch, cancel: cancelSearch } = useDebouncedCallback(

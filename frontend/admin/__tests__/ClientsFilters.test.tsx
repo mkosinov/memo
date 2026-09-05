@@ -1,20 +1,20 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, act } from '@testing-library/react';
 import React from 'react';
-import { createMockClientsContext } from './helpers/mockContexts';
+import { createMockClientsTableState } from './helpers/mockContexts';
 
 vi.mock('@/contexts/ClientsContext', () => ({
-  useClients: vi.fn(),
+  useClientsTable: vi.fn(),
 }));
 
-import { useClients } from '@/contexts/ClientsContext';
+import { useClientsTable } from '@/contexts/ClientsContext';
 import type { ClientFilters } from '@/contexts/ClientsContext';
 import { ClientsFilters } from '../app/(main)/clients/components/ClientsFilters';
 
-const mockUseClients = vi.mocked(useClients);
+const mockUseClientsTable = vi.mocked(useClientsTable);
 
 beforeEach(() => {
-  mockUseClients.mockReturnValue(createMockClientsContext());
+  mockUseClientsTable.mockReturnValue(createMockClientsTableState());
 });
 
 afterEach(() => {
@@ -65,7 +65,7 @@ describe('ClientsFilters', () => {
 
   it('calls resetFilters when reset button clicked', () => {
     const resetFilters = vi.fn();
-    mockUseClients.mockReturnValue(createMockClientsContext({ resetFilters }));
+    mockUseClientsTable.mockReturnValue(createMockClientsTableState({ resetFilters }));
     render(<ClientsFilters />);
     fireEvent.click(screen.getByText('Сбросить фильтры'));
     expect(resetFilters).toHaveBeenCalledTimes(1);
@@ -73,7 +73,7 @@ describe('ClientsFilters', () => {
 
   it('selecting «Неактивные» sets status to archived', () => {
     const setFilters = vi.fn();
-    mockUseClients.mockReturnValue(createMockClientsContext({ setFilters }));
+    mockUseClientsTable.mockReturnValue(createMockClientsTableState({ setFilters }));
     render(<ClientsFilters />);
     const select = screen.getByDisplayValue('Активные');
     fireEvent.change(select, { target: { value: 'archived' } });
@@ -82,7 +82,7 @@ describe('ClientsFilters', () => {
 
   it('selecting «Все» sets status to all', () => {
     const setFilters = vi.fn();
-    mockUseClients.mockReturnValue(createMockClientsContext({ setFilters }));
+    mockUseClientsTable.mockReturnValue(createMockClientsTableState({ setFilters }));
     render(<ClientsFilters />);
     const select = screen.getByDisplayValue('Активные');
     // Switch away from default first, then back to «Все»
@@ -93,7 +93,7 @@ describe('ClientsFilters', () => {
 
   it('selecting «Активные» sets status to active', () => {
     const setFilters = vi.fn();
-    mockUseClients.mockReturnValue(createMockClientsContext({ setFilters }));
+    mockUseClientsTable.mockReturnValue(createMockClientsTableState({ setFilters }));
     render(<ClientsFilters />);
     const select = screen.getByDisplayValue('Активные');
     // Switch to another option then back to «Активные»
@@ -104,7 +104,7 @@ describe('ClientsFilters', () => {
 
   it('calls setFilters when min visits input changes', () => {
     const setFilters = vi.fn();
-    mockUseClients.mockReturnValue(createMockClientsContext({ setFilters }));
+    mockUseClientsTable.mockReturnValue(createMockClientsTableState({ setFilters }));
     render(<ClientsFilters />);
     const minVisitsInputs = screen.getAllByPlaceholderText('от');
     fireEvent.change(minVisitsInputs[0], { target: { value: '3' } });
@@ -113,7 +113,7 @@ describe('ClientsFilters', () => {
 
   it('calls setFilters with null when min visits is zero', () => {
     const setFilters = vi.fn();
-    mockUseClients.mockReturnValue(createMockClientsContext({ setFilters }));
+    mockUseClientsTable.mockReturnValue(createMockClientsTableState({ setFilters }));
     render(<ClientsFilters />);
     const minVisitsInputs = screen.getAllByPlaceholderText('от');
     fireEvent.change(minVisitsInputs[0], { target: { value: '0' } });
@@ -122,7 +122,7 @@ describe('ClientsFilters', () => {
 
   it('calls setFilters when created_from date changes', () => {
     const setFilters = vi.fn();
-    mockUseClients.mockReturnValue(createMockClientsContext({ setFilters }));
+    mockUseClientsTable.mockReturnValue(createMockClientsTableState({ setFilters }));
     render(<ClientsFilters />);
     const dateInputs = screen.getAllByDisplayValue('');
     const dateFromInputs = dateInputs.filter(i => i.getAttribute('type') === 'date');
@@ -143,7 +143,7 @@ describe('ClientsFilters', () => {
 
     it('does not call setFilters immediately on search input', () => {
       const setFilters = vi.fn();
-      mockUseClients.mockReturnValue(createMockClientsContext({ setFilters }));
+      mockUseClientsTable.mockReturnValue(createMockClientsTableState({ setFilters }));
       render(<ClientsFilters />);
 
       fireEvent.change(screen.getByPlaceholderText(/Поиск по имени или телефону/), {
@@ -156,7 +156,7 @@ describe('ClientsFilters', () => {
 
     it('calls setFilters after debounce delay (300ms)', () => {
       const setFilters = vi.fn();
-      mockUseClients.mockReturnValue(createMockClientsContext({ setFilters }));
+      mockUseClientsTable.mockReturnValue(createMockClientsTableState({ setFilters }));
       render(<ClientsFilters />);
 
       fireEvent.change(screen.getByPlaceholderText(/Поиск по имени или телефону/), {
@@ -173,7 +173,7 @@ describe('ClientsFilters', () => {
 
     it('debounce resets on rapid typing — only last value is sent', () => {
       const setFilters = vi.fn();
-      mockUseClients.mockReturnValue(createMockClientsContext({ setFilters }));
+      mockUseClientsTable.mockReturnValue(createMockClientsTableState({ setFilters }));
       render(<ClientsFilters />);
 
       const searchInput = screen.getByPlaceholderText(/Поиск по имени или телефону/);
@@ -198,7 +198,7 @@ describe('ClientsFilters', () => {
 
   it('calls setFilters when max visits input changes', () => {
     const setFilters = vi.fn();
-    mockUseClients.mockReturnValue(createMockClientsContext({ setFilters }));
+    mockUseClientsTable.mockReturnValue(createMockClientsTableState({ setFilters }));
     render(<ClientsFilters />);
     const maxVisitsInputs = screen.getAllByPlaceholderText('до');
     fireEvent.change(maxVisitsInputs[0], { target: { value: '10' } });
@@ -207,7 +207,7 @@ describe('ClientsFilters', () => {
 
   it('calls setFilters with null when max visits is cleared', () => {
     const setFilters = vi.fn();
-    mockUseClients.mockReturnValue(createMockClientsContext({ setFilters }));
+    mockUseClientsTable.mockReturnValue(createMockClientsTableState({ setFilters }));
     render(<ClientsFilters />);
     const maxVisitsInputs = screen.getAllByPlaceholderText('до');
     // Set a value first, then clear it
@@ -218,7 +218,7 @@ describe('ClientsFilters', () => {
 
   it('calls setFilters when missed_from changes', () => {
     const setFilters = vi.fn();
-    mockUseClients.mockReturnValue(createMockClientsContext({ setFilters }));
+    mockUseClientsTable.mockReturnValue(createMockClientsTableState({ setFilters }));
     render(<ClientsFilters />);
     // The "Пропущенные" section has its own от/до pair
     const missedSection = screen.getByText('Пропущенные').closest('div')!;
@@ -229,7 +229,7 @@ describe('ClientsFilters', () => {
 
   it('calls setFilters when missed_to changes', () => {
     const setFilters = vi.fn();
-    mockUseClients.mockReturnValue(createMockClientsContext({ setFilters }));
+    mockUseClientsTable.mockReturnValue(createMockClientsTableState({ setFilters }));
     render(<ClientsFilters />);
     const missedSection = screen.getByText('Пропущенные').closest('div')!;
     const missedTo = missedSection.querySelector('input[placeholder="до"]')!;
@@ -239,7 +239,7 @@ describe('ClientsFilters', () => {
 
   it('calls setFilters when created_to date changes', () => {
     const setFilters = vi.fn();
-    mockUseClients.mockReturnValue(createMockClientsContext({ setFilters }));
+    mockUseClientsTable.mockReturnValue(createMockClientsTableState({ setFilters }));
     render(<ClientsFilters />);
     const dateInputs = screen.getAllByDisplayValue('');
     const dateInputsAll = dateInputs.filter(i => i.getAttribute('type') === 'date');
@@ -249,7 +249,7 @@ describe('ClientsFilters', () => {
 
   it('calls setFilters when min_paid changes', () => {
     const setFilters = vi.fn();
-    mockUseClients.mockReturnValue(createMockClientsContext({ setFilters }));
+    mockUseClientsTable.mockReturnValue(createMockClientsTableState({ setFilters }));
     render(<ClientsFilters />);
     const paidSection = screen.getByText('Оплата').closest('div')!;
     const minPaid = paidSection.querySelector('input[placeholder="от"]')!;
@@ -259,7 +259,7 @@ describe('ClientsFilters', () => {
 
   it('calls setFilters when max_paid changes', () => {
     const setFilters = vi.fn();
-    mockUseClients.mockReturnValue(createMockClientsContext({ setFilters }));
+    mockUseClientsTable.mockReturnValue(createMockClientsTableState({ setFilters }));
     render(<ClientsFilters />);
     const paidSection = screen.getByText('Оплата').closest('div')!;
     const maxPaid = paidSection.querySelector('input[placeholder="до"]')!;
@@ -269,7 +269,7 @@ describe('ClientsFilters', () => {
 
   it('calls setFilters with null when min_paid cleared', () => {
     const setFilters = vi.fn();
-    mockUseClients.mockReturnValue(createMockClientsContext({ setFilters }));
+    mockUseClientsTable.mockReturnValue(createMockClientsTableState({ setFilters }));
     render(<ClientsFilters />);
     const paidSection = screen.getByText('Оплата').closest('div')!;
     const minPaid = paidSection.querySelector('input[placeholder="от"]')!;
@@ -282,14 +282,14 @@ describe('ClientsFilters', () => {
 
 describe('ClientsFilters — controlled search input (GH #216)', () => {
   function mockFiltersContext(overrides: Partial<Pick<ClientFilters, 'search' | 'status'>> = {}) {
-    const ctx = createMockClientsContext({
+    const ctx = createMockClientsTableState({
       filters: {
-        ...createMockClientsContext().filters,
+        ...createMockClientsTableState().filters,
         search: overrides.search ?? '',
         status: overrides.status ?? 'active',
       },
     });
-    mockUseClients.mockReturnValue(ctx);
+    mockUseClientsTable.mockReturnValue(ctx);
     return ctx;
   }
 

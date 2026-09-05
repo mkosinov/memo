@@ -3,9 +3,10 @@
 import { createPagedListContext } from './createPagedListContext';
 import { getTags } from '@memo/api-client';
 import type { TagResponse } from '@memo/api-client';
+import { qk } from '@/lib/queryKeys';
 
 const { Provider, usePagedList } = createPagedListContext<TagResponse>({
-  queryKeyPrefix: 'tags',
+  queryKeyPrefix: qk.tags[0],
   fetcher: (p) =>
     getTags({
       page: p.page,

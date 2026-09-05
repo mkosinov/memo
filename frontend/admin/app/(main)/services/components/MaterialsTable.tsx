@@ -13,6 +13,7 @@ import { DataTable } from '@/app/components/shared/DataTable';
 import { DeleteDialog } from '@/app/components/DeleteDialog';
 import { materialColumns, materialActions } from './materialsColumns';
 import { parseApiError } from '@/app/lib/api/parseApiError';
+import { qk } from '@/lib/queryKeys';
 
 // ─── Component ────────────────────────────────────────────────────────────
 
@@ -188,7 +189,7 @@ export function MaterialsTable() {
           dependencies={deleteTarget.dependencies}
           onResolve={async (id, resolutions) => {
             await resolveDeleteMaterial(id, resolutions);
-            queryClient.invalidateQueries({ queryKey: ['materials'] });
+            queryClient.invalidateQueries({ queryKey: qk.materials });
             showToast('Материал удалён');
           }}
           onArchive={(id) => archiveMaterial.mutateAsync(id)}

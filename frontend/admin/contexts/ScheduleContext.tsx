@@ -4,19 +4,19 @@ import React, { createContext, useContext, useState, useCallback, useMemo } from
 import type { Activity, Master, Service, Location, StampState, ScheduleAdminDTO, ScheduleIndex as DomainScheduleIndex } from '@memo/domain';
 import { buildSchedule } from '@memo/domain';
 import { buildAdminSchedule } from '@/lib/buildSchedule';
-import { useActivities } from '@/hooks/useActivities';
-import { useMasters } from '@/hooks/useMasters';
-import { useServices } from '@/hooks/useServices';
-import { useLocations } from '@/hooks/useLocations';
+import { useMasters, useMastersRaw } from '@/hooks/useMasters';
+import { useServices, useServicesRaw } from '@/hooks/useServices';
+import { useLocations, useLocationsRaw } from '@/hooks/useLocations';
 import { useQuery } from '@tanstack/react-query';
 import {
-  getActivities, getAllMasters, getAllServices, getAllLocations,
+  getActivities,
   createActivity as apiCreateActivity,
   patchActivity as apiPatchActivity,
   deleteActivity as apiDeleteActivity,
 } from '@memo/api-client';
-import type { ActivityResponse, MasterResponse, ServiceResponse, LocationResponse } from '@memo/api-client';
+import type { ActivityResponse, ServiceResponse } from '@memo/api-client';
 import { useQueryClient, useMutation } from '@tanstack/react-query';
+import { qk } from '@/lib/queryKeys';
 import { getMonday, formatDateISO } from '@/lib/utils';
 import { CELL_HEIGHT_MIN, CELL_HEIGHT_OPTIONS, GRID_FREQUENCY_DEFAULT, GRID_FREQUENCY_OPTIONS } from '@/lib/utils';
 import { useNavigation } from '@/contexts/NavigationContext';
@@ -267,24 +267,12 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
 
   // Raw API data (shared cache keys with domain hooks — same fetch, different select)
   const { data: activitiesRaw = [], isLoading: activitiesLoading, error: activitiesError } = useQuery<ActivityResponse[]>({
-    queryKey: ['activities', weekStart, weekEnd],
+    queryKey: qk.activityRange(weekStart, weekEnd),
     queryFn: () => getActivities({ date_from: weekStart, date_to: weekEnd, per_page: 100 }).then(r => r.items),
   });
-  const { data: mastersRaw = [] } = useQuery<MasterResponse[]>({
-    queryKey: ['masters'],
-    queryFn: () => getAllMasters(),
-    staleTime: 5 * 60 * 1000,
-  });
-  const { data: servicesRaw = [] } = useQuery<ServiceResponse[]>({
-    queryKey: ['services'],
-    queryFn: () => getAllServices(),
-    staleTime: 5 * 60 * 1000,
-  });
-  const { data: locationsRaw = [] } = useQuery<LocationResponse[]>({
-    queryKey: ['locations'],
-    queryFn: () => getAllLocations(),
-    staleTime: 5 * 60 * 1000,
-  });
+  const { data: mastersRaw = [] } = useMastersRaw();
+  const { data: servicesRaw = [] } = useServicesRaw();
+  const { data: locationsRaw = [] } = useLocationsRaw();
 
   // Domain types for context consumers (select transforms use same cache as raw queries)
   const { data: masters = [] } = useMasters();
@@ -301,8 +289,9 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
     }
   }, [masters, locations, filtersInitialized]);
 
-  // Query key for cache invalidation
-  const activityQueryKey = ['activities', weekStart, weekEnd] as const;
+  // Query key for cache invalidation — same shape as the query above (qk), so
+  // optimistic setQueryData/cancelQueries/invalidateQueries keep hitting it.
+  const activityQueryKey = qk.activityRange(weekStart, weekEnd);
 
   // Mutations
   const createMutation = useMutation({

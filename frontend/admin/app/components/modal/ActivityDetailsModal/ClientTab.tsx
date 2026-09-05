@@ -5,6 +5,7 @@ import type { DependencyNode } from '@memo/api-client';
 import type { VisitStatus } from '@memo/domain';
 import { useQueryClient } from '@tanstack/react-query';
 import { patchVisitor, ApiError } from '@memo/api-client';
+import { qk } from '@/lib/queryKeys';
 import { RecordSummary } from '@/app/components/shared/record/blocks/RecordSummary';
 import { RecordVisitsTable } from '@/app/components/shared/record/blocks/RecordVisitsTable';
 import { RecordPaymentsTable } from '@/app/components/shared/record/blocks/RecordPaymentsTable';
@@ -157,7 +158,7 @@ export function ClientTab({
       patchVisitor(visitorId, apiData)
         .then(() => {
           // Reader: ['visitors', clientId] in useRecordData
-          queryClient.invalidateQueries({ queryKey: ['visitors', clientId] });
+          queryClient.invalidateQueries({ queryKey: qk.visitors(clientId) });
         })
         .catch((err) => {
           showToast(parseApiError(err).message, 'error');

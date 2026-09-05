@@ -1,11 +1,11 @@
 'use client';
 
 import React, { useMemo } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { getRecords, getActivity, getPaymentTotals, getClientById } from '@memo/api-client';
-import type { RecordResponse, ActivityResponse } from '@memo/api-client';
 import { useServices } from '@/hooks/useServices';
 import { useLocations } from '@/hooks/useLocations';
+import { useClient, useClientRecords } from '@/hooks/useClient';
+import { useActivitiesForRecords } from '@/hooks/useActivities';
+import { usePaymentTotals } from '@/hooks/usePayments';
 import { DiamondIcon } from '@/app/components/shared/DiamondIcon';
 import { StatusBadge } from '@/app/components/shared/StatusBadge';
 import { Modal } from '@/app/components/shared/modal/Modal';
@@ -38,31 +38,17 @@ export function ClientQuickCard({ clientId, onClose }: ClientQuickCardProps) {
   // Labels — shared useServices()/useLocations() hooks on the canonical keys
   // (transformed domain objects carry `name`) — no extra requests beyond the
   // cached page state.
-  const { data: client = null, isPending: clientPending } = useQuery({
-    queryKey: ['client', clientId],
-    queryFn: () => getClientById(clientId),
-    enabled: !!clientId,
-  });
+  const { data: client = null, isPending: clientPending } = useClient(clientId);
   const { data: services = [] } = useServices();
   const { data: locations = [] } = useLocations();
 
   // Own data — the context records list is now one server page (#191)
-  const { data: clientRecords = [] } = useQuery<RecordResponse[]>({
-    queryKey: ['records', 'client', clientId],
-    queryFn: () => getRecords({ client_id: clientId, per_page: 100 }).then((r) => r.items),
-    enabled: !!clientId,
-  });
-  const { data: recordActivities = [] } = useQuery<ActivityResponse[]>({
-    queryKey: ['activities', 'for-records', clientRecords.map((r) => r.activity_id)],
-    queryFn: () => Promise.all(clientRecords.map((r) => getActivity(r.activity_id))),
-    enabled: clientRecords.length > 0,
-  });
+  const { data: clientRecords = [] } = useClientRecords(clientId);
+  const { data: recordActivities = [] } = useActivitiesForRecords(
+    clientRecords.map((r) => r.activity_id),
+  );
   const recordIds = useMemo(() => clientRecords.map((r) => r.id).sort(), [clientRecords]);
-  const { data: paymentTotals } = useQuery({
-    queryKey: ['payments', 'totals', recordIds],
-    queryFn: () => getPaymentTotals(recordIds),
-    enabled: recordIds.length > 0,
-  });
+  const { data: paymentTotals } = usePaymentTotals(recordIds);
 
   const recordDetails = useMemo(() => {
     const activityById = new Map(recordActivities.map((a) => [a.id, a]));

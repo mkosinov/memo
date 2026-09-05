@@ -476,7 +476,7 @@ class TestVisitorServiceListByClient:
 
 
 class TestRepositoryListFilters:
-    """Test GenericRepository.list with various filter parameters."""
+    """Test repository list with various filter parameters."""
 
     def test_list_masters(self, api_client):
         """GET /api/v1/masters returns active masters."""
@@ -516,7 +516,7 @@ class TestRepositoryListFilters:
 
 
 class TestRepositoryPatch:
-    """Test GenericRepository.patch (partial update)."""
+    """Test repository patch (partial update)."""
 
 
 # ─── Additional API endpoint coverage ────────────────────────────────────────

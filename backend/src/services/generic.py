@@ -1,4 +1,4 @@
-"""Generic service layer using GenericRepository and Pydantic schema validation.
+"""Generic service layer using the shared repository and Pydantic schema validation.
 
 Returns validated Pydantic ``ResponseSchemaT`` objects from all CRUD
 operations instead of raw ORM model instances.

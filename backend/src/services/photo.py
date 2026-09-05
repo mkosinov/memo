@@ -148,8 +148,8 @@ class PhotoService(GenericService[PhotoCreate, PhotoUpdate, PhotoResponse]):
         # Extract tag_ids before creating photo
         tag_ids = data.tag_ids
 
-        # Create ORM instance directly (GenericRepository.create expects BaseModel
-        # but PhotoCreate includes tag_ids which Photo doesn't have)
+        # Create ORM instance directly (the generic repository create expects
+        # BaseModel but PhotoCreate includes tag_ids which Photo doesn't have)
         orm = Photo(
             filename=data.filename,
             client_id=data.client_id,

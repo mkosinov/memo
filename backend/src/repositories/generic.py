@@ -290,10 +290,6 @@ class ArchiveRepository(BaseRepository):
         return updated
 
 
-# Backward-compat alias — old code referencing GenericRepository still works
-GenericRepository = ArchiveRepository
-
-
 @lru_cache
 def get_base_repository() -> BaseRepository:
     """Return a singleton BaseRepository (hard delete)."""
@@ -304,9 +300,3 @@ def get_base_repository() -> BaseRepository:
 def get_archive_repository() -> ArchiveRepository:
     """Return a singleton ArchiveRepository (hard delete + archive-status list filter)."""
     return ArchiveRepository()
-
-
-@lru_cache
-def get_generic_repository() -> ArchiveRepository:
-    """Backward-compat alias. Prefer get_archive_repository()."""
-    return get_archive_repository()

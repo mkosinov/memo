@@ -123,12 +123,12 @@ export const qk = {
 'use client';
 import { useQuery } from '@tanstack/react-query';
 import { getClientById, getRecords } from '@memo/api-client';
-import type { ClientWithStats, RecordResponse } from '@memo/api-client';
+import type { ClientResponse, RecordResponse } from '@memo/api-client';
 import { qk } from '@/lib/queryKeys';
 
 /** Single client by id — key shared with ClientQuickCard/ActivityDetailsModal (dedupe). */
 export function useClient(id: string | undefined) {
-  return useQuery<ClientWithStats>({
+  return useQuery<ClientResponse>({
     queryKey: qk.client(id ?? ''),
     queryFn: () => getClientById(id!),
     enabled: !!id,
@@ -144,6 +144,8 @@ export function useClientRecords(id: string | undefined, enabled = true) {
   });
 }
 ```
+
+(Type note: `getClientById` returns `ClientResponse` — NOT ClientWithStats. Plan-review finding 2 resolved in Task 6: ClientTab stats re-source.)
 
 **1.3** CREATE `frontend/admin/hooks/usePayments.ts`:
 
@@ -264,11 +266,14 @@ export function useActivitiesForRecords(recordActivityIds: string[]) {
 **2.2** `packages/api-client/src/index.ts`: remove `getClients` from re-exports (check with `grep -n "getClients\b" packages/api-client/src/index.ts`; keep `getClientsPaged`/`getClientsWithStats`).
 **2.3** `packages/api-client/src/endpoints.test.ts`: remove `getClients` from the import list (:3) and delete `describe('getClients', ...)` (:459-466).
 **2.4** Run: `cd packages/api-client && npx vitest run` → all green (was 243 passing, now 242 tests). `npx tsc --noEmit` → 0.
-**2.5** Verify zero frontend consumers: `grep -rn "getClients\b" frontend apps 2>/dev/null` → only `getClientsPaged`/`getClientsWithStats` matches (word-boundary: use `grep -rnE "getClients\(" ).
-**2.6** Commit (from repo root): `chore(#140): delete dead getClients (per_page=100) from api-client`.
+**2.5** Frontend test-tree cleanup (plan-review finding 3 — `getClients` IS imported by two test files):
+- `frontend/admin/__tests__/page.test.tsx` (:23,28,55,69): its "zero clients on /schedule" guard is superseded by e2e US-1 (Task 11) — trim the getClients-specific assertions (keep the rest of the page smoke test intact).
+- `frontend/admin/__tests__/ActivityDetailsModal.test.tsx` (:45,59): remove `getClients` from the api-client mock — Task 6 rewrites these describes anyway; land this edit in Task 2 to keep tsc green from here on.
+- Verify: `grep -rnE "getClients\(" frontend apps 2>/dev/null` → zero matches (word-boundary distinguishes from `getClientsPaged`/`getClientsWithStats`).
 
 ### DoD
-- Export gone, tests green, no consumer breaks.
+- Export gone (incl. test-tree imports), api-client suite green, frontend tsc green.
+**2.6** Commit (from repo root): `chore(#140): delete dead getClients (per_page=100) from api-client`.
 
 ---
 
@@ -289,6 +294,7 @@ Extend `createPagedListContext` — existing 5 consumers must be BIT-IDENTICAL (
 - query key shape: `['items', 1, 20, filtersObj, 'name', 'asc']` — assert via `queryClient.getQueryCache().find({ queryKey: ['items'] })` key inspection or fetch-mock call args.
 - a NON-filters context (existing style) key is UNCHANGED: `['items', 1, 10, null, 'asc']` (no filters slot, sortBy null) — the bit-identical pin.
 - `defaultSort` absent → `sortBy` starts `null` (existing behavior pin).
+- page-clamp parity (spec §5.2): delete last row of the only page-2 entry → page steps back to 1 (factory `:154-156` already implements the hand-rolled `:302-307` semantics — this test PINS it).
 
 **3.2** GREEN — modify `createPagedListContext.tsx`:
 
@@ -338,6 +344,8 @@ if (serverSearch) queryKey.push(q ?? '');
 - The `setSort`/`setPerPage`/`setStatus`/clamp logic: UNCHANGED. `defaultSort` note: `setSort` still works; the only delta is initial state.
 
 **3.3** Run: `npx vitest run __tests__/createPagedListContext.test.tsx` → green (new + all existing). `npx tsc --noEmit` → 0 (the 5 existing factory files must compile untouched — if their inference breaks, fix the overload signatures, not the consumers).
+
+**Typing note (plan-review finding 6b):** `PagedListConfig` is currently NOT exported and its `fetcher` takes base params — the sketch above must be adjusted at implementation time: export `PagedListConfig` (or inline its members), and instead of narrowing `fetcher` inside the interface extension, declare the with-filters overload's config as `Omit<PagedListConfig<T>, 'fetcher'> & { fetcher: (params: PagedListFetcherParams & { filters: F }) => Promise<PaginatedResponse<T>>; filters: { defaults: F }; defaultSort?: ... }`. The runtime implementation stays ONE function consuming `config.filters?.defaults`. Keep the public result types named (`PagedListFiltersState<F>` above) so Task 4's ClientsContext gets typed `filters: ClientFilters` without casts.
 
 **3.4** Commit: `feat(#140): createPagedListContext filters + defaultSort options (overload-typed)`.
 
@@ -537,16 +545,18 @@ export function createMockClientsTableState(overrides: Partial<Record<string, un
 ```tsx
 'use client';
 import { useClient } from '@/hooks/useClient';
-/** Progressive client label for a record tab (spec §5.4): «…» → name, «Без контакта» on error. */
+/** Progressive client label for a record tab (spec §5.4): «…» → name; «Без контакта» on error OR no client_id. */
 export function ClientLabelById({ clientId }: { clientId: string | undefined }) {
   const { data, isPending, isError } = useClient(clientId);
-  if (isError) return <>Без контакта</>;
+  if (!clientId || isError) return <>Без контакта</>;
   if (isPending || !data) return <>…</>;
   return <>{data.name || 'Дорогой гость'}</>;
 }
 ```
   Tab label uses `<ClientLabelById clientId={record.client_id} />` (check the current label builder — preserve any phone formatting the tab strip already shows; if the current strip shows only the name, keep only the name).
-- `ClientTab.tsx`: resolve its client via `useClient(record.client_id)` (progressive: reuse the same «…»/«Без контакта» states); its activity query (:72-76) → `useActivity(record?.activity_id)`. The `client` PROP from the modal's map is removed — ClientTab owns resolution.
+- `ClientTab.tsx`: resolve its client via `useClient(record.client_id)` (progressive: «…»/«Без контакта» states, same as ClientLabelById incl. the `!client_id` → «Без контакта» rule); its activity query (:72-76) → `useActivity(record?.activity_id)`. The `client` PROP from the modal's map is removed — ClientTab owns resolution.
+  **Stats re-source (plan-review finding 2):** `useClient` returns `ClientResponse` (no `records_count/missed_records/last_record/total_paid`). ClientTab ALREADY computes `totalCost`/`totalPaid` locally from visits+payments (:179-181) — replace the `'records_count' in client` stats block (:184-193) with locally-computed stats: `recordsCount: visits-derived count of client's records available in this tab's data (use `record` context / clientRecords if loaded; if a value is genuinely unavailable client-side, drop that stats row rather than showing wrong data)`. Concretely: pass `{ recordsCount, missedRecords, lastRecord, totalPaid }` computed from the tab's own `visits`/`payments`/`record` data where each is derivable; fields not derivable → omit (ClientStatistics must render `undefined` fields as hidden rows — verify its props are all optional; if some are required, make them optional in this task). This also fixes a pre-existing inconsistency: stats previously appeared only for first-20 clients (paged map had stats) and never for fallback clients — now uniform for ALL tabs.
+  **Anonymous-record rule (plan-review finding 4):** records with `client_id == null` → label and tab show «Без контакта» immediately (no query, no «…»). Apply in BOTH `ClientLabelById` and ClientTab: `if (!clientId) return <>Без контакта</>`.
 - Keep `window.open('/clients?clientId=' + id)` (:119) and all settings-tab logic untouched.
 **6.3** Run: `npx vitest run __tests__/ActivityDetailsModal.test.tsx` → green; then full `npm run test`; `npx tsc --noEmit`.
 **6.4** Commit: `refactor(#140): ActivityDetailsModal per-tab useClient (fixes beyond-first-20 «Без контакта»)`.
@@ -563,7 +573,10 @@ export function ClientLabelById({ clientId }: { clientId: string | undefined }) 
 - `frontend/admin/contexts/ScheduleContext.tsx` :265-300 (dict query region), `frontend/admin/contexts/PhotosContext.tsx` :140-160
 
 ### Task Description
-**7.1** `ClientQuickCard.tsx` (:41-64): replace the four `useQuery` blocks with `useClient(clientId)`, `useClientRecords(clientId)`, `useActivitiesForRecords(clientRecords.map(r => r.activity_id))`, `usePaymentTotals(recordIds)` — preserve local variable names/destructuring (`client`, `clientRecords`, `recordActivities`, paymentTotals) so the rest of the file is untouched. Delete now-unused api-client imports. The `['visitors', clientId]` invalidation (:172) → `qk.visitors(clientId)`.
+**7.1** `ClientQuickCard.tsx` (:41-64): replace the four `useQuery` blocks with `useClient(clientId)`, `useClientRecords(clientId)`, `useActivitiesForRecords(clientRecords.map(r => r.activity_id))`, `usePaymentTotals(recordIds)` — preserve local variable names/destructuring (`client`, `clientRecords`, `recordActivities`, paymentTotals) so the rest of the file is untouched. Delete now-unused api-client imports.
+**7.1b** Visitors-prefix invalidations (plan-review finding 1 — two surfaces, NOT in ClientQuickCard):
+- `app/components/modal/ActivityDetailsModal/ClientTab.tsx:118` `invalidateQueries({ queryKey: ['visitors', clientId] })` → `qk.visitors(clientId)` (land with Task 6's ClientTab edit if Task 6 runs first; this line is the ownership anchor either way).
+- `app/(main)/clients/components/ClientRecordTab.tsx:172` `invalidateQueries({ queryKey: ['visitors', clientId] })` → `qk.visitors(clientId)` + migrate any other inline entity keys in that file (grep it).
 **7.2** `BookingFilters.tsx` (:56-70): the three raw `useQuery` blocks → `const { data: locations = [] } = useLocationsRaw();` etc. Keep the downstream `!archived` filters + label transforms verbatim (:71+). staleTime note: 5min → 1h via the hook (accepted §7.5).
 **7.3** `ScheduleContext.tsx` (NO restructure — #141 owns it):
 - `:270-272` activities `useQuery` key → `qk.activityRange(weekStart, weekEnd)` (keep the local `activityQueryKey` variable — used at :310-367 — just build it via qk).
@@ -605,12 +618,14 @@ export function ClientLabelById({ clientId }: { clientId: string | undefined }) 
 - Spec §5.6; `frontend/admin/hooks/useRecordMutations.ts` :78-145 (createRecord flow)
 
 ### Task Description
-**9.1** RED — in the `useRecordMutations` suite (find it: `grep -rln "useRecordMutations" frontend/admin/__tests__`): add a test — record creation via the NEW-CLIENT branch (client created by phone/name) triggers `invalidateQueries` with `['clients']`; the EXISTING-client branch (getClientByPhone hits) does NOT.
-**9.2** GREEN — in `createRecordMutation`, inside the client-created branch (where `createClient(...)` is awaited, :90-94 area), after the record succeeds add:
+**9.1** RED — in the `useRecordMutations` suite (find it: `grep -rln "useRecordMutations" frontend/admin/__tests__`): add tests — record creation via the NEW-CLIENT path invalidates `['clients']` for BOTH branches: (a) phone-409 catch branch (:90-95) and (b) phone-less quick-add `else` branch (:97-104); the EXISTING-client branch (getClientByPhone hits, :87-88) does NOT.
+**9.2** GREEN — in `createRecordMutation`, set a `let createdClientId: string | null = null` in BOTH client-created branches (assign the created client's id); after the record succeeds:
 ```ts
-await queryClient.invalidateQueries({ queryKey: qk.clients });
+if (createdClientId !== null) {
+  await queryClient.invalidateQueries({ queryKey: qk.clients });
+}
 ```
-(awaited — mutation stays pending until refetch lands, US-6 "immediately visible").
+(awaited — mutation stays pending until refetch lands, US-6 "immediately visible"; covers both create branches, skips the existing-client reuse path).
 **9.3** Run the suite → green; `npx tsc --noEmit`.
 **9.4** Commit: `fix(#140): schedule quick-add client creation invalidates clients list (staleness fix)`.
 
@@ -625,9 +640,9 @@ await queryClient.invalidateQueries({ queryKey: qk.clients });
 - Spec §8, §10 (acceptance gates 3-4)
 
 ### Task Description
-**10.1** Grep gates (all must be EMPTY):
-- `grep -rn "useQuery(" frontend/admin/app | grep -v __tests__` → zero (components never call useQuery).
-- `grep -rnE "queryKey: \['(clients|records|masters|services|locations|materials|tags|photos|client|record|activity|activities|visitors|payments)'" frontend/admin/hooks frontend/admin/contexts frontend/admin/app frontend/admin/lib | grep -v __tests__ | grep -v queryKeys.ts` → zero (all entity key literals live in lib/queryKeys.ts).
+**10.1** Grep gates (all must be EMPTY; patterns account for generic-annotated calls `useQuery<T>(`):
+- `grep -rn "useQuery" frontend/admin/app | grep -v __tests__ | grep -v "// "` → zero (components never call useQuery).
+- `grep -rnE "queryKey: ?\['(clients|records|masters|services|locations|materials|tags|photos|client|record|activity|activities|visitors|payments)'" frontend/admin/hooks frontend/admin/contexts frontend/admin/app frontend/admin/lib | grep -v __tests__ | grep -v queryKeys.ts` → zero (all entity key literals live in lib/queryKeys.ts).
 **10.2** Extend `useReactQueryHooks.test.tsx` if any Task-1 pin is missing for pairs migrated later (PhotosContext raw usage is covered by 7-task suites; hooks-only pins suffice).
 **10.3** Full local gates: `npm run test` (full vitest), `npx tsc --noEmit`, `npm run lint`, `cd packages/api-client && npx vitest run && npx tsc --noEmit`. All green.
 **10.4** Commit (if anything needed adjusting): `test(#140): sweep gates + key-equality pins`.

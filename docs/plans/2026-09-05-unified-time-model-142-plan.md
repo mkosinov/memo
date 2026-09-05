@@ -150,7 +150,7 @@ Files: `frontend/admin/lib/transformers.ts`, `frontend/admin/lib/buildSchedule.t
 - `frontend/admin/__tests__/ScheduleContext.test.tsx`, `__tests__/helpers/mockContexts.ts`
 
 ### Task Description
-Files: `frontend/admin/contexts/ScheduleContext.tsx`, `__tests__/ScheduleContext.test.tsx`, `__tests__/helpers/mockContexts.ts`, `__tests__/scheduleIntegration.test.tsx`.
+Files: `frontend/admin/contexts/ScheduleContext.tsx`, `frontend/admin/contexts/NavigationContext.tsx`, `__tests__/ScheduleContext.test.tsx`, `__tests__/helpers/mockContexts.ts`, `__tests__/scheduleIntegration.test.tsx`.
 
 1. Contract (`ScheduleContextType`):
    - Remove `servicesRaw: ServiceResponse[]` (:92, :494).
@@ -319,4 +319,4 @@ Files: none (verification only; fixes route back to owning tasks' files).
 - **Classification:** T5/T8 large (contract rippling + 5 test files), T1/T3/T4/T6/T7/T10/T11 standard, T2/T9/T13 small, T12 trivial. Matches complexity table (multi-file + state + contract = standard/large).
 - **Type consistency:** `startMinutes`/`durationMinutes`/`dayIndex` used identically T1→T13; `ActivityPatch` defined T2, consumed T5; `composeLocalISO`/`parseLocalISO` defined T3, consumed T4-T9.
 - **Required Docs:** every task lists docs; testing tasks reference skill docs via IMPL dispatch (architect adds `vitest-playwright-patterns` to coder prompts for T7/T8/T11).
-- **No placeholders:** all steps carry exact signatures/commands; two deferred-decision points (T3 step-4 migration order, T4 step-5 tsc residue) carry explicit decision rules instead of TBDs.
+- **No placeholders:** all steps carry exact signatures/commands; intermediate-state rules are explicit ownership rules, not deferrals (T3 step 4 = "module + tests only, utils deletion owned by Task 10"; T4 step 6 = residue confined to later tasks' files; T4 step 5 = dead-hook removal).

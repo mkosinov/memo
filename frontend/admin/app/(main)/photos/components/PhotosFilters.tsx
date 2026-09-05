@@ -1,9 +1,8 @@
 'use client';
 
 import React, { useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { getClientsPaged, getActivities, getAllTags } from '@memo/api-client';
-import type { TagResponse } from '@memo/api-client';
+import { getClientsPaged, getActivities } from '@memo/api-client';
+import { useTagsRaw } from '@/hooks/useTags';
 import RemoteSearchSelect from '@/app/components/shared/RemoteSearchSelect';
 import { Combobox, type ComboboxOption } from '@/app/components/shared/Combobox';
 import { usePhotosTable } from '@/contexts/PhotosContext';
@@ -20,7 +19,7 @@ import { formatActivityLabel } from '@/lib/utils';
  *                label (spec §7.7) via formatActivityLabel + the context locationsMap
  *   Услуга     — Combobox over servicesMap («Все услуги» pinned clear option)
  *   Локация    — Combobox over locationsMap («Все локации»)
- *   Теги       — chips + add-typeahead over getAllTags() (PhotoModal multi pattern)
+ *   Теги       — chips + add-typeahead over useTagsRaw() (PhotoModal multi pattern)
  */
 export function PhotosFilters() {
   const { filters, setFilters, resetFilters, servicesMap, locationsMap } = usePhotosTable();
@@ -30,13 +29,9 @@ export function PhotosFilters() {
   // typeaheads clean (chips/comboboxes are context-derived and clear on their own).
   const [resetKey, setResetKey] = useState(0);
 
-  // Tags dictionary — /all once (same staleTime: Infinity pattern as the
-  // context's services/locations dictionaries); client-side typeahead below.
-  const { data: tags = [] } = useQuery<TagResponse[]>({
-    queryKey: ['tags'],
-    queryFn: () => getAllTags(),
-    staleTime: Infinity,
-  });
+  // Tags dictionary — /all once via useTagsRaw (#140: shared ['tags'] key,
+  // 1h staleTime); client-side typeahead below.
+  const { data: tags = [] } = useTagsRaw();
 
   const tagTitleById = useMemo(() => {
     const map = new Map<string, string>();

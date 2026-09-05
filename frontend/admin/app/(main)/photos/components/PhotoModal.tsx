@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, useMemo, useId } from 'react';
-import { useQuery } from '@tanstack/react-query';
 import { PHOTO_FIELDS, type PhotoFieldConfig } from './photoFields';
 import RemoteSearchSelect from '@/app/components/shared/RemoteSearchSelect';
 import { Combobox, type ComboboxOption } from '@/app/components/shared/Combobox';
@@ -11,9 +10,9 @@ import {
   getServices,
   getActivities,
   getTags,
-  getAllLocations,
 } from '@memo/api-client';
-import type { LocationResponse, PhotoResponse } from '@memo/api-client';
+import type { PhotoResponse } from '@memo/api-client';
+import { useLocationsRaw } from '@/hooks/useLocations';
 import { formatActivityLabel } from '@/lib/utils';
 
 export interface PhotoModalProps {
@@ -137,7 +136,7 @@ function FieldRenderer({
     } else {
       // activity_id — options carry THE canonical label (spec §7.7):
       // «dd.mm.yyyy HH:mm — Локация — Услуга» via formatActivityLabel; the
-      // modal's getAllLocations() map feeds it (no extra fetch). No subtitle,
+      // modal's useLocationsRaw() map feeds it (no extra fetch). No subtitle,
       // no datetime-only special case — options AND the selected value render
       // the same label.
       const titleMap = locationTitleMap ?? new Map<string, { title: string }>();
@@ -246,14 +245,10 @@ export function PhotoModal({
   // without its stale selectedLabel (PhotosFilters resetKey precedent).
   const [fieldRemount, setFieldRemount] = useState<Record<string, number>>({});
 
-  // Locations dictionary — same ['locations'] cache key as PhotosContext, so
-  // inside the provider this is a cache hit (no extra fetch). Feeds BOTH the
-  // «Локация» select options and the canonical activity label (§7.7).
-  const { data: locations = [] } = useQuery<LocationResponse[]>({
-    queryKey: ['locations'],
-    queryFn: () => getAllLocations(),
-    staleTime: Infinity,
-  });
+  // Locations dictionary — useLocationsRaw (#140: shared ['locations'] key,
+  // so inside PhotosContext this is a cache hit, no extra fetch). Feeds BOTH
+  // the «Локация» select options and the canonical activity label (§7.7).
+  const { data: locations = [] } = useLocationsRaw();
 
   const locationOptions = useMemo(
     () =>

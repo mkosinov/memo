@@ -299,7 +299,7 @@ describe('ActivityResponseSchema', () => {
     const result = ActivityResponseSchema.parse(validActivityResponse);
     expect(result.id).toBe('activity-1');
     expect(result.occupied).toBe(3);
-    expect(result.is_active).toBeUndefined();
+    expect(result).not.toHaveProperty('is_active');
   });
 
   it('rejects activity without occupied', () => {
@@ -388,7 +388,7 @@ describe('PhotoCreateSchema / PhotoUpdateSchema (GH #211 4-owner model)', () => 
   });
 
   it('rejects visitor_id on the PhotoCreate type', () => {
-    const data: PhotoCreate = { filename: 'a.jpg' };
+    const data: PhotoCreate = { filename: 'a.jpg', is_public: true, tag_ids: [] };
     // @ts-expect-error visitor_id no longer exists on PhotoCreate
     expect(data.visitor_id).toBeUndefined();
   });

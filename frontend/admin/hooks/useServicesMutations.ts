@@ -12,12 +12,13 @@ import {
   ApiError,
 } from '@memo/api-client';
 import type { ServiceCreate, ServiceUpdate, DependencyNode } from '@memo/api-client';
+import { qk } from '@/lib/queryKeys';
 
 export function useCreateService() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (data: ServiceCreate) => createService(data),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['services'] }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: qk.services }),
   });
 }
 
@@ -25,7 +26,7 @@ export function useUpdateService() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: ServiceUpdate }) => updateService(id, data),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['services'] }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: qk.services }),
   });
 }
 
@@ -34,7 +35,7 @@ export function usePatchService() {
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: Partial<ServiceUpdate> }) =>
       patchService(id, data),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['services'] }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: qk.services }),
   });
 }
 
@@ -52,11 +53,11 @@ export function useDeleteService() {
     mutationFn: (id: string) => deleteService(id),
     onMutate: () => setDependencies(null), // clear stale tree from a prior attempt
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['services'] });
+      queryClient.invalidateQueries({ queryKey: qk.services });
       // Cross-invalidation (cache hygiene): a hard-deleted service may have
       // been referenced by records-derived views that key on ['services']
       // (useRecordData.ts) and by records lists themselves.
-      queryClient.invalidateQueries({ queryKey: ['records'] });
+      queryClient.invalidateQueries({ queryKey: qk.records });
     },
     onError: (err) => {
       if (err instanceof ApiError && err.status === 409 && err.dependencies) {
@@ -73,7 +74,7 @@ export function useArchiveService() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => archiveService(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['services'] }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: qk.services }),
   });
 }
 
@@ -82,6 +83,6 @@ export function useRestoreService() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => restoreService(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['services'] }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: qk.services }),
   });
 }

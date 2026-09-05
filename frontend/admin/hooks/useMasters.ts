@@ -4,12 +4,22 @@ import { getAllMasters } from '@memo/api-client';
 import { transformMaster } from '@/lib/transformers';
 import type { MasterResponse } from '@memo/api-client';
 import type { Master } from '@memo/domain';
+import { qk, DICT_STALE_TIME } from '@/lib/queryKeys';
 
 export function useMasters() {
   return useQuery<MasterResponse[], Error, Master[]>({
-    queryKey: ['masters'],
+    queryKey: qk.masters,
     queryFn: () => getAllMasters(),
     select: (raw) => raw.map(transformMaster),
-    staleTime: 5 * 60 * 1000,
+    staleTime: DICT_STALE_TIME,
+  });
+}
+
+/** Raw masters incl. `archived` — SAME key as useMasters (dedupe); keep staleTimes aligned. */
+export function useMastersRaw() {
+  return useQuery<MasterResponse[]>({
+    queryKey: qk.masters,
+    queryFn: () => getAllMasters(),
+    staleTime: DICT_STALE_TIME,
   });
 }

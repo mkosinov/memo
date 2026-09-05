@@ -26,6 +26,7 @@ import {
   upsertVisit,
 } from '@/lib/cache/recordCacheSync';
 import { usePendingActions } from '@/contexts/PendingActionsContext';
+import { qk } from '@/lib/queryKeys';
 
 interface VisitData {
   visitor_id?: string | null;
@@ -61,15 +62,15 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
   /** Reader: RecordModal (['record', id]) + ScheduleActivityCard (['records', df, dt]). */
   const invalidateRecordAndLists = useCallback(() => {
     if (recordId) {
-      queryClient.invalidateQueries({ queryKey: ['record', recordId] });
+      queryClient.invalidateQueries({ queryKey: qk.record(recordId) });
     }
-    queryClient.invalidateQueries({ queryKey: ['records'] });
+    queryClient.invalidateQueries({ queryKey: qk.records });
   }, [queryClient, recordId]);
 
   /** Lighter invalidation for ops that only change a single record's canonical store. */
   const invalidateRecord = useCallback(() => {
     if (recordId) {
-      queryClient.invalidateQueries({ queryKey: ['record', recordId] });
+      queryClient.invalidateQueries({ queryKey: qk.record(recordId) });
     }
   }, [queryClient, recordId]);
 
@@ -214,7 +215,7 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
       invalidateRecord();
       // R4 (US-4): RecordsTable reads `paid` from the view row — prefix
       // ['records'] invalidation catches all pages/filters so the badge refreshes.
-      queryClient.invalidateQueries({ queryKey: ['records'] });
+      queryClient.invalidateQueries({ queryKey: qk.records });
       return payment;
     },
     [recordId, queryClient, invalidateRecord],
@@ -229,7 +230,7 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
       invalidateRecord();
       // R4 (US-4): RecordsTable reads `paid` from the view row — prefix
       // ['records'] invalidation catches all pages/filters so the badge refreshes.
-      queryClient.invalidateQueries({ queryKey: ['records'] });
+      queryClient.invalidateQueries({ queryKey: qk.records });
     },
     [recordId, queryClient, invalidateRecord],
   );
@@ -239,7 +240,7 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
   const addVisitorToRecord = useCallback(
     async (data: { name: string; age?: number; price: number }) => {
       const record = await queryClient.fetchQuery({
-        queryKey: ['record', recordId],
+        queryKey: qk.record(recordId),
         queryFn: () => import('@memo/api-client').then((m) => m.getRecord(recordId)),
       });
       const clientId = record.client_id;
@@ -303,7 +304,7 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
       upsertVisit(queryClient, recordId, visit);
       // Regression fix: invalidate visitors cache using direct client_id
       // Reader: ClientInfoTab visitors list (['visitors', clientId])
-      queryClient.invalidateQueries({ queryKey: ['visitors', data.client_id] });
+      queryClient.invalidateQueries({ queryKey: qk.visitors(data.client_id) });
       return visit;
     },
     [recordId, queryClient],
@@ -338,7 +339,7 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
       upsertPayment(queryClient, recordId, payment);
       // R4 (US-4): RecordsTable reads `paid` from the view row — prefix
       // ['records'] invalidation catches all pages/filters so the badge refreshes.
-      queryClient.invalidateQueries({ queryKey: ['records'] });
+      queryClient.invalidateQueries({ queryKey: qk.records });
       return payment;
     },
     [recordId, queryClient],
@@ -350,7 +351,7 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
     async (visitId: string) => {
       // 1. Snapshot the visit from the canonical cache BEFORE removing.
       //    The helper guards `old == null` so we still pass through safely.
-      const record = queryClient.getQueryData<RecordResponse>(['record', recordId]);
+      const record = queryClient.getQueryData<RecordResponse>(qk.record(recordId));
       const savedVisit = record?.visits.find((v) => v.id === visitId);
 
       // 2. Optimistically remove from canonical + list caches via helper.
@@ -391,7 +392,7 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
   const deletePaymentDeferred = useCallback(
     async (paymentId: string) => {
       // 1. Snapshot the payment from the per-record cache BEFORE removing.
-      const savedPayments = queryClient.getQueryData<PaymentResponse[]>(['payments', recordId]);
+      const savedPayments = queryClient.getQueryData<PaymentResponse[]>(qk.recordPayments(recordId));
       const savedPayment = savedPayments?.find((p) => p.id === paymentId);
 
       // 2. Optimistically remove from BOTH per-record and global ['payments'] via helper.
@@ -415,7 +416,7 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
           removePayment(queryClient, recordId, paymentId);
           // R4 (US-4): RecordsTable reads `paid` from the view row — invalidate on
           // COMMIT (not on defer) so the badge refreshes once the delete is final.
-          queryClient.invalidateQueries({ queryKey: ['records'] });
+          queryClient.invalidateQueries({ queryKey: qk.records });
         },
       });
     },

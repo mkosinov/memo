@@ -2,14 +2,16 @@
 """gh_board.py — GH Project #3 (Memo Project) board management.
 
 Usage (from repo root):
-  python3 scripts/gh_board.py next-up                     — show the trajectory (Next Up 1→3)
-  python3 scripts/gh_board.py set-next-up N 1|2|3|none    — set/clear queue position
-  python3 scripts/gh_board.py shift                       — after Next Up 1 completes: clear it, shift 2→1, 3→2
-  python3 scripts/gh_board.py status N "In IMPL"          — move a card's status
+  python3 .zcode/scripts/gh_board.py next-up                     — show the trajectory (Next Up 1→3)
+  python3 .zcode/scripts/gh_board.py set-next-up N 1|2|3|none    — set/clear queue position
+  python3 .zcode/scripts/gh_board.py shift                       — after Next Up 1 completes: clear it, shift 2→1, 3→2
+  python3 .zcode/scripts/gh_board.py status N "In IMPL"          — move a card's status
 
 Project constants are hardcoded (IDs are stable for Project #3).
 The script lives in the memo repo on purpose: the board is part of the
 host/container seam, and the seam carries things via git only.
+Harness files live in .zcode (host) / .opencode (container); the
+container-side copy is .opencode/scripts/gh_board.py.
 """
 import json
 import subprocess

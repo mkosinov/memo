@@ -63,12 +63,12 @@ DESIGN (гейты G1a/G1b/G2) — эта интерактивная хост-с
 ## 7. Борда (скрипт живёт в memo, локальный запуск)
 
 ```bash
-python3 scripts/gh_board.py next-up
-python3 scripts/gh_board.py status 176 "Spec OK (G1b)"
-python3 scripts/gh_board.py set-next-up 176 1   # только по слову юзера
+python3 .zcode/scripts/gh_board.py next-up
+python3 .zcode/scripts/gh_board.py status 176 "Spec OK (G1b)"
+python3 .zcode/scripts/gh_board.py set-next-up 176 1   # только по слову юзера
 ```
 
-- Golden source скрипта — **сам репозиторий memo** (`scripts/gh_board.py`, константы Project #3 вшиты). Скрипт — часть шва: он в git, поэтому доступен и хосту, и контейнеру после pull; отдельных копий (в superagents или где-либо ещё) не плодить.
+- Golden source скрипта — **сам репозиторий memo** (`.zcode/scripts/gh_board.py`, константы Project #3 вшиты). Скрипт — часть шва: он в git, поэтому доступен и хосту, и контейнеру после pull; контейнерная копия — `.opencode/scripts/gh_board.py`. Отдельных копий вне harness-папок не плодить.
 - Fallback: `gh` CLI напрямую (projectsV2).
 - Один писатель на issue: DESIGN-флипы (`In Design (G1a)` → `Spec OK (G1b)` → `Ready to IMPL (G2)`) — эта сессия; IMPL-флипы — контейнер-менеджер. Скрипт сам добавляет issue на борд при первом обращении.
 

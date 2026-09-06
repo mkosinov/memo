@@ -193,8 +193,8 @@ const mockRecords = [
 ];
 
 const mockActivities = [
-  { id: 'ev_1', start: '2026-05-10T14:00:00', duration: 2.5 },
-  { id: 'ev_2', start: '2026-04-20T18:00:00', duration: 2 },
+  { id: 'ev_1', start: '2026-05-10T14:00:00', duration: 150 }, // integer minutes (GH #142 canon)
+  { id: 'ev_2', start: '2026-04-20T18:00:00', duration: 120 },
 ];
 
 // ─── Tests ────────────────────────────────────────────────────────────────
@@ -293,8 +293,8 @@ describe('ClientCardModal', () => {
   it('shows activity date and time in record tab buttons', () => {
     // Uses custom activities with different times
     mockQueriesForRecordsAndActivities(mockRecords, [
-      { id: 'ev_1', start: '2026-05-10T14:00:00', duration: 2.5 },
-      { id: 'ev_2', start: '2026-04-20T18:00:00', duration: 2 },
+      { id: 'ev_1', start: '2026-05-10T14:00:00', duration: 150 }, // integer minutes (GH #142 canon)
+      { id: 'ev_2', start: '2026-04-20T18:00:00', duration: 120 },
     ]);
     render(<ClientCardModal {...defaultProps} />);
     // Should show activity start dates, not record created_at

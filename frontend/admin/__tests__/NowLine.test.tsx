@@ -42,4 +42,34 @@ describe('NowLine', () => {
     expect(line).toHaveClass('left-0');
     expect(line).toHaveClass('right-0');
   });
+
+  describe('minute-based position (GH #142)', () => {
+    it('positions at (nowMinutes - gridStartMinutes) * cellHeight / 30 with defaults', () => {
+      // System time 12:00 → nowMinutes = 720; default gridStartMinutes = 540, cellHeight = 60
+      // pos = (720 - 540) * 60 / 30 = 360px
+      render(<NowLine date={today} />);
+      const line = screen.getByTestId('now-line');
+      expect(line.style.top).toBe('360px');
+    });
+
+    it('honors a custom gridStartMinutes prop', () => {
+      // gridStartMinutes = 480 (08:00) → pos = (720 - 480) * 60 / 30 = 480px
+      render(<NowLine date={today} gridStartMinutes={480} />);
+      const line = screen.getByTestId('now-line');
+      expect(line.style.top).toBe('480px');
+    });
+
+    it('scales with cellHeight', () => {
+      // cellHeight = 30 → pos = (720 - 540) * 30 / 30 = 180px
+      render(<NowLine date={today} cellHeight={30} />);
+      const line = screen.getByTestId('now-line');
+      expect(line.style.top).toBe('180px');
+    });
+
+    it('does not render when now is before gridStartMinutes', () => {
+      // gridStartMinutes = 780 (13:00) > nowMinutes 720 → pos < 0 → hidden
+      const { container } = render(<NowLine date={today} gridStartMinutes={780} />);
+      expect(container.firstChild).toBeNull();
+    });
+  });
 });

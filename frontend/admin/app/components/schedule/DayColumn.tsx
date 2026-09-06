@@ -2,35 +2,37 @@
 
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useDroppable } from '@dnd-kit/core';
-import { hexToRgb, mixWithWhite, formatTime, generateTimeSlots, HOURS_START, HOURS_END } from '@/lib/utils';
-import type { Activity, Master, Location, StampState, Service } from '@memo/domain';
+import { hexToRgb, mixWithWhite } from '@/lib/utils';
+import { formatTime, generateTimeSlots } from '@/lib/datetime';
+import type { ScheduleAdminDTO, Master, Location, StampState, Service } from '@memo/domain';
 import { ActivityCard } from './ActivityCard';
 import { OverlapPopover } from './OverlapPopover';
 
 // ─── Time-Groups Carousel Model ──────────────────────────────────────
-// Activities are grouped by their START time into fixed time windows.
-// Each group has its own carousel that cycles independently.
+// Activities are grouped by their START time (minutes from midnight, GH #142)
+// into fixed time windows. Each group has its own carousel that cycles
+// independently.
 
 type TimeGroup = {
   id: 'G1' | 'G2' | 'G3';
-  start: number;
-  end: number;
+  start: number; // minutes from midnight (inclusive)
+  end: number;   // minutes from midnight (exclusive)
 };
 
 const TIME_GROUPS: TimeGroup[] = [
-  { id: 'G1', start: 9, end: 13 },    // 09:00–12:59
-  { id: 'G2', start: 13, end: 16 },   // 13:00–15:59
-  { id: 'G3', start: 16, end: 24 },   // 16:00–23:59
+  { id: 'G1', start: 540, end: 780 },   // 09:00–12:59
+  { id: 'G2', start: 780, end: 960 },   // 13:00–15:59
+  { id: 'G3', start: 960, end: 1440 },  // 16:00–23:59
 ];
 
-function getGroupForActivity(activity: Activity): TimeGroup | undefined {
-  return TIME_GROUPS.find(g => activity.startTime >= g.start && activity.startTime < g.end);
+function getGroupForActivity(activity: ScheduleAdminDTO): TimeGroup | undefined {
+  return TIME_GROUPS.find(g => activity.startMinutes >= g.start && activity.startMinutes < g.end);
 }
 
 interface DayColumnProps {
   dayIndex: number;
   date: Date;
-  activities: Activity[];
+  activities: ScheduleAdminDTO[];
   masters: Master[];
   locations?: Location[];
   services?: Service[];
@@ -40,16 +42,17 @@ interface DayColumnProps {
   ghostDayIndex?: number | null;
   ghostSlotIndex?: number | null;
   ghostColumnId?: string | null;
-  onCreateActivity?: (dayIndex: number, startTime: number) => void;
-  onOpenCreateModal?: (dayIndex: number, startTime: number) => void;
-  onOpenEditModal?: (activity: Activity) => void;
-  onQuickAdd?: (activity: Activity) => void;
+  onCreateActivity?: (dayIndex: number, startMinutes: number) => void;
+  onOpenCreateModal?: (dayIndex: number, startMinutes: number) => void;
+  onOpenEditModal?: (activity: ScheduleAdminDTO) => void;
+  onQuickAdd?: (activity: ScheduleAdminDTO) => void;
   stampReady?: boolean;
   stamp?: StampState;
   cellHeight?: number;
   gridFrequency?: number;
-  gridStart?: number;
-  gridEnd?: number;
+  /** Grid bounds in minutes from midnight (GH #142). */
+  gridStartMinutes?: number;
+  gridEndMinutes?: number;
   /** Column identity (master or location ID) — included in droppable slot data for cross-column DnD. */
   columnId?: string;
 }
@@ -57,12 +60,12 @@ interface DayColumnProps {
 interface DroppableSlotProps {
   dayIndex: number;
   slotIndex: number;
-  startTime: number;
+  slotMinutes: number;
   isHour: boolean;
   isHalfHour?: boolean;
   dragCopy?: boolean;
-  onClick?: (dayIndex: number, startTime: number) => void;
-  onOpenModal?: (dayIndex: number, startTime: number) => void;
+  onClick?: (dayIndex: number, startMinutes: number) => void;
+  onOpenModal?: (dayIndex: number, startMinutes: number) => void;
   stampReady?: boolean;
   stamp?: StampState;
   masters?: Master[];
@@ -78,7 +81,7 @@ interface DroppableSlotProps {
 
 // ─── DroppableSlot ────────────────────────────────────────────────────────
 
-function DroppableSlot({ dayIndex, slotIndex, startTime, isHour, isHalfHour, dragCopy, onClick, onOpenModal, stampReady, stamp, masters, services, cellHeight = 60, columnId, suppressIsOverGhost, occupied, children }: DroppableSlotProps) {
+function DroppableSlot({ dayIndex, slotIndex, slotMinutes, isHour, isHalfHour, dragCopy, onClick, onOpenModal, stampReady, stamp, masters, services, cellHeight = 60, columnId, suppressIsOverGhost, occupied, children }: DroppableSlotProps) {
   const { isOver, setNodeRef } = useDroppable({
     id: `slot-${columnId ?? dayIndex}-${slotIndex}`,
     data: { type: 'slot', dayIndex, slotIndex, columnId },
@@ -93,8 +96,8 @@ function DroppableSlot({ dayIndex, slotIndex, startTime, isHour, isHalfHour, dra
         const service = services?.find(s => s.id === stamp.serviceId);
         if (!master || !service) return null;
         const rgb = hexToRgb(master.color);
-        const endTime = startTime + service.duration;
-        return { master, service, rgb, endTime };
+        const endTimeMinutes = slotMinutes + service.durationMinutes;
+        return { master, service, rgb, endTimeMinutes };
       })()
     : null;
 
@@ -139,9 +142,9 @@ function DroppableSlot({ dayIndex, slotIndex, startTime, isHour, isHalfHour, dra
   const handleClick = (e: React.MouseEvent<HTMLDivElement>) => {
     if (e.target === e.currentTarget) {
       if (!stampReady && onOpenModal) {
-        onOpenModal(dayIndex, startTime);
+        onOpenModal(dayIndex, slotMinutes);
       } else if (onClick) {
-        onClick(dayIndex, startTime);
+        onClick(dayIndex, slotMinutes);
       }
     }
   };
@@ -176,7 +179,7 @@ function DroppableSlot({ dayIndex, slotIndex, startTime, isHour, isHalfHour, dra
               className="inline-block px-1.5 py-0.5 rounded-full text-[9px] font-semibold text-white opacity-60"
               style={{ backgroundColor: stampGhostPreview.master.color }}
             >
-              {formatTime(startTime)}–{formatTime(stampGhostPreview.endTime)}
+              {formatTime(slotMinutes)}–{formatTime(stampGhostPreview.endTimeMinutes)}
             </span>
           </div>
           <div className="px-2 opacity-50">
@@ -192,9 +195,9 @@ function DroppableSlot({ dayIndex, slotIndex, startTime, isHour, isHalfHour, dra
 
 // ─── DayColumn ────────────────────────────────────────────────────────────
 
-export function DayColumn({ dayIndex, activities, masters, locations = [], services = [], dragCopy, dragId, ghostHeight, ghostDayIndex, ghostSlotIndex, ghostColumnId, onCreateActivity, onOpenCreateModal, onOpenEditModal, onQuickAdd, stampReady, stamp, cellHeight = 60, gridFrequency = 30, gridStart = HOURS_START, gridEnd = HOURS_END, columnId }: DayColumnProps) {
+export function DayColumn({ dayIndex, activities, masters, locations = [], services = [], dragCopy, dragId, ghostHeight, ghostDayIndex, ghostSlotIndex, ghostColumnId, onCreateActivity, onOpenCreateModal, onOpenEditModal, onQuickAdd, stampReady, stamp, cellHeight = 60, gridFrequency = 30, gridStartMinutes = 540, gridEndMinutes = 1260, columnId }: DayColumnProps) {
   const [popoverData, setPopoverData] = useState<{
-    activities: Activity[];
+    activities: ScheduleAdminDTO[];
     anchorRect: DOMRect;
   } | null>(null);
   const columnRef = useRef<HTMLDivElement>(null);
@@ -216,9 +219,9 @@ export function DayColumn({ dayIndex, activities, masters, locations = [], servi
     }, 1000);
   }, []);
 
-  // Generate slots at gridFrequency intervals. Slot height is scaled to keep total grid height constant.
+  // Generate slots at gridFrequency intervals (minutes). Slot height is scaled to keep total grid height constant.
   const slotHeight = useMemo(() => cellHeight * (gridFrequency / 30), [cellHeight, gridFrequency]);
-  const slots = useMemo(() => generateTimeSlots(gridFrequency, gridStart, gridEnd), [gridFrequency, gridStart, gridEnd]);
+  const slots = useMemo(() => generateTimeSlots(gridFrequency, gridStartMinutes, gridEndMinutes), [gridFrequency, gridStartMinutes, gridEndMinutes]);
 
   const masterMap = useMemo(() => new Map(masters.map(a => [a.id, a])), [masters]);
 
@@ -226,7 +229,7 @@ export function DayColumn({ dayIndex, activities, masters, locations = [], servi
   const hasColumnGhost = ghostColumnId === columnId && ghostSlotIndex != null && ghostHeight != null;
 
   // Per-card z-index: each activity has ONE z-index (0 = frontmost) used everywhere.
-  // Each activity's z is its position within its time group (sorted by startTime).
+  // Each activity's z is its position within its time group (sorted by startMinutes).
   // Re-initialize when activities change (e.g., navigating to a new date).
   const [zIndices, setZIndices] = useState<Record<string, number>>({});
   const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
@@ -242,7 +245,7 @@ export function DayColumn({ dayIndex, activities, masters, locations = [], servi
         continue;
       }
       const activitiesInGroup = activities.filter(a => getGroupForActivity(a)?.id === group.id);
-      const sorted = [...activitiesInGroup].sort((a, b) => a.startTime - b.startTime || a.id.localeCompare(b.id));
+      const sorted = [...activitiesInGroup].sort((a, b) => a.startMinutes - b.startMinutes || a.id.localeCompare(b.id));
       const indexInGroup = sorted.findIndex(a => a.id === act.id);
       initial[act.id] = indexInGroup >= 0 ? indexInGroup : 0;
     }
@@ -284,9 +287,8 @@ export function DayColumn({ dayIndex, activities, masters, locations = [], servi
 
       // Check if cursor overlaps with any activity card
       const cursorOverlapping = activities.filter(a => {
-        const topPx = (a.startTime - gridStart) * cellHeight * 2;
-        const durMinutes = a.durationMinutes ?? a.duration * 60;
-        const heightPx = Math.max((durMinutes / 60) * cellHeight * 2, 60);
+        const topPx = (a.startMinutes - gridStartMinutes) * cellHeight / 30;
+        const heightPx = Math.max(a.durationMinutes * cellHeight / 30, 60);
         return y >= topPx && y <= topPx + heightPx;
       });
 
@@ -304,7 +306,7 @@ export function DayColumn({ dayIndex, activities, masters, locations = [], servi
     };
     el.addEventListener('mousemove', handleMouseMove);
     return () => el.removeEventListener('mousemove', handleMouseMove);
-  }, [activities, cellHeight, gridStart]);
+  }, [activities, cellHeight, gridStartMinutes]);
 
   // Non-passive wheel handler for scroll carousel
   useEffect(() => {
@@ -322,9 +324,8 @@ export function DayColumn({ dayIndex, activities, masters, locations = [], servi
 
       // Find ALL activities that visually overlap with the cursor's Y position
       const cursorOverlapping = activities.filter(a => {
-        const topPx = (a.startTime - gridStart) * cellHeight * 2;
-        const durMinutes = a.durationMinutes ?? a.duration * 60;
-        const heightPx = Math.max((durMinutes / 60) * cellHeight * 2, 52);
+        const topPx = (a.startMinutes - gridStartMinutes) * cellHeight / 30;
+        const heightPx = Math.max(a.durationMinutes * cellHeight / 30, 52);
         return y >= topPx && y <= topPx + heightPx;
       });
 
@@ -332,9 +333,9 @@ export function DayColumn({ dayIndex, activities, masters, locations = [], servi
 
       // Determine primary group by CURSOR TIME position (not by which activities overlap).
       // This ensures that at 13:00-13:30 we cycle G2, even if a G1 activity spans into G2.
-      const cursorTime = gridStart + y / (cellHeight * 2);
+      const cursorMinutes = gridStartMinutes + y / (cellHeight / 30);
       const primaryGroup = TIME_GROUPS.find(g =>
-        cursorTime >= g.start && cursorTime < g.end
+        cursorMinutes >= g.start && cursorMinutes < g.end
       );
 
       if (!primaryGroup) return;
@@ -392,7 +393,7 @@ export function DayColumn({ dayIndex, activities, masters, locations = [], servi
       setCycledGroupIds(effectiveGroupIds);
 
       const direction = e.deltaY > 0 ? 1 : -1;  // 1 = scroll down, -1 = scroll up
-      const sorted = [...cycleActivities].sort((a, b) => a.startTime - b.startTime || a.id.localeCompare(b.id));
+      const sorted = [...cycleActivities].sort((a, b) => a.startMinutes - b.startMinutes || a.id.localeCompare(b.id));
 
       setZIndices(prev => {
         const newZ = { ...prev };
@@ -407,7 +408,7 @@ export function DayColumn({ dayIndex, activities, masters, locations = [], servi
     };
     el.addEventListener('wheel', handler, { passive: false });
     return () => el.removeEventListener('wheel', handler);
-  }, [dayIndex, slots, activities, cellHeight, gridStart, zIndices, slotHeight]);
+  }, [dayIndex, slots, activities, cellHeight, gridStartMinutes, zIndices, slotHeight]);
 
   return (
     <div
@@ -416,25 +417,24 @@ export function DayColumn({ dayIndex, activities, masters, locations = [], servi
       data-day-column={dayIndex}
       className="relative flex-1 border-l border-line"
     >
-      {slots.map((hour, i) => {
-        const isHour = hour % 1 === 0;
-        const isHalfHour = !isHour && Math.abs(hour % 0.5) < 0.01;
+      {slots.map((slotMinutes, i) => {
+        const isHour = slotMinutes % 60 === 0;
+        const isHalfHour = !isHour && slotMinutes % 30 === 0;
         // A slot is "occupied" if any activity card visually overlaps its vertical range.
         // Activity cards are absolutely positioned, but DroppableSlot divs in normal flow
         // intercept pointer events unless explicitly disabled.
-        const slotDuration = gridFrequency / 60;
-        const slotEnd = hour + slotDuration;
+        const slotEndMinutes = slotMinutes + gridFrequency;
         const isOccupied = activities.some(a => {
-          const aStart = a.startTime;
-          const aEnd = a.startTime + a.duration;
-          return aStart < slotEnd && aEnd > hour;
+          const aStart = a.startMinutes;
+          const aEnd = a.startMinutes + a.durationMinutes;
+          return aStart < slotEndMinutes && aEnd > slotMinutes;
         });
         return (
           <DroppableSlot
             key={i}
             dayIndex={dayIndex}
             slotIndex={i}
-            startTime={hour}
+            slotMinutes={slotMinutes}
             isHour={isHour}
             isHalfHour={isHalfHour}
             dragCopy={dragCopy}
@@ -484,8 +484,8 @@ export function DayColumn({ dayIndex, activities, masters, locations = [], servi
           // Only show as background if activity visually overlaps with the active group's time range
           const activeGroup = TIME_GROUPS.find(g => g.id === activeGroupId);
           if (!activeGroup) return false;
-          const actStart = activity.startTime;
-          const actEnd = activity.startTime + activity.duration;
+          const actStart = activity.startMinutes;
+          const actEnd = activity.startMinutes + activity.durationMinutes;
           return actStart < activeGroup.end && actEnd > activeGroup.start;
         })();
 
@@ -528,7 +528,7 @@ export function DayColumn({ dayIndex, activities, masters, locations = [], servi
               onQuickAdd={onQuickAdd}
               isDragging={isThisDragging}
               isDragCopy={dragCopy}
-              gridStart={gridStart}
+              gridStart={gridStartMinutes}
               style={{
                 transform: `translate(${ox}px, ${oy}px) scale(${cardScale})`,
                 zIndex: cardZIndex,
@@ -549,7 +549,7 @@ export function DayColumn({ dayIndex, activities, masters, locations = [], servi
                   // Toggle popover for this group
                   const groupActivities = activities
                     .filter(a => getGroupForActivity(a)?.id === activityGroup?.id)
-                    .sort((a, b) => a.startTime - b.startTime);
+                    .sort((a, b) => a.startMinutes - b.startMinutes);
                   // Use stable comparison via activity IDs (array reference changes every render)
                   const isSameGroup = popoverData?.activities &&
                     popoverData.activities.length === groupActivities.length &&
@@ -566,7 +566,7 @@ export function DayColumn({ dayIndex, activities, masters, locations = [], servi
                 className="absolute right-1 z-[110] px-1.5 py-0.5 rounded-full bg-white/90 border border-gray-300 text-[10px] font-semibold text-gray-500 shadow-sm hover:bg-white hover:text-gray-700 transition-colors cursor-pointer"
                 data-popover-toggle
                 style={{
-                  top: (activity.startTime - gridStart) * cellHeight * 2 + 2,
+                  top: (activity.startMinutes - gridStartMinutes) * cellHeight / 30 + 2,
                 }}
                 title="View all overlapping cards"
               >
@@ -583,7 +583,7 @@ export function DayColumn({ dayIndex, activities, masters, locations = [], servi
           key={`boundary-${group.id}`}
           className="absolute left-0 right-0 border-t-2 border-brand/30 pointer-events-none"
           style={{
-            top: (group.start - gridStart) * cellHeight * 2,
+            top: (group.start - gridStartMinutes) * cellHeight / 30,
             zIndex: 15,
           }}
           data-testid={`group-boundary-${group.id}`}
@@ -598,7 +598,7 @@ export function DayColumn({ dayIndex, activities, masters, locations = [], servi
           locations={locations}
           anchorRect={popoverData.anchorRect}
           cellHeight={cellHeight}
-          gridStart={gridStart}
+          gridStart={gridStartMinutes}
           onClose={() => setPopoverData(null)}
           onSelectActivity={(act) => {
             setPopoverData(null);

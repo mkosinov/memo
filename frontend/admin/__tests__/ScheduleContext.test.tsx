@@ -4,7 +4,7 @@ import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ScheduleProvider, useSchedule } from '../contexts/ScheduleContext';
 import { NavigationProvider, useNavigation } from '../contexts/NavigationContext';
-import { getMonday, formatDateISO } from '../lib/utils';
+import { getMonday, toISODate } from '@/lib/datetime';
 import { transformService } from '../lib/transformers';
 
 // ─── Mock api-client ─────────────────────────────────────────────────────────
@@ -21,6 +21,24 @@ vi.mock('@memo/api-client', () => ({
   patchActivity: vi.fn(),
   deleteActivity: vi.fn(),
 }));
+
+// ─── Date helpers (floating-local, GH #142) ─────────────────────────────────
+
+/** Monday (local midnight) of the current week. */
+function mondayOfCurrentWeek(): Date {
+  const d = new Date();
+  const diff = d.getDay() === 0 ? -6 : 1 - d.getDay();
+  d.setDate(d.getDate() + diff);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+/** Local 'YYYY-MM-DD' date key of the current week's Monday + dayOffset (Mon=0). */
+function currentWeekDate(dayOffset: number): string {
+  const monday = mondayOfCurrentWeek();
+  monday.setDate(monday.getDate() + dayOffset);
+  return toISODate(monday);
+}
 
 import {
   getMasters,
@@ -48,8 +66,8 @@ const mockLocations = [
 ];
 
 const mockServices = [
-  { id: 's1', name: 'Картина маслом', duration: 2.5, minAge: '12', defaultAdultPrice: 3500 },
-  { id: 's2', name: 'Картина акрилом', duration: 2, minAge: '6', defaultAdultPrice: 2800 },
+  { id: 's1', name: 'Картина маслом', durationMinutes: 150, minAge: '12', defaultAdultPrice: 3500 },
+  { id: 's2', name: 'Картина акрилом', durationMinutes: 120, minAge: '6', defaultAdultPrice: 2800 },
 ];
 
 const mockActivities = [
@@ -99,6 +117,8 @@ function ScheduleConsumer() {
     setViewMode,
     selectedDay,
     setSelectedDay,
+    gridStartMinutes,
+    gridEndMinutes,
   } = useSchedule();
 
   return (
@@ -113,20 +133,19 @@ function ScheduleConsumer() {
       <span data-testid="error">{error ? error.message : 'null'}</span>
       <span data-testid="view-mode">{viewMode}</span>
       <span data-testid="selected-day">{selectedDay.toISOString()}</span>
+      <span data-testid="grid-start">{gridStartMinutes}</span>
+      <span data-testid="grid-end">{gridEndMinutes}</span>
 
       <button
         data-testid="add-activity"
         onClick={() =>
           addActivity({
-            day: 2,
+            dayIndex: 2,
             masterId: 'm1',
-            startTime: 10,
-            duration: 2,
             serviceId: 's1',
-            serviceName: 'Test',
-            minAge: '6',
             locationId: 'alpika',
-            occupied: 0,
+            startMinutes: 630, // 10:30
+            durationMinutes: 120,
             capacity: 8,
             isPrivate: false,
           })
@@ -140,6 +159,10 @@ function ScheduleConsumer() {
       >
         Update
       </button>
+      <button
+        data-testid="update-activity-time"
+        onClick={() => updateActivity('a1', { dayIndex: 1, startMinutes: 720, durationMinutes: 150 })}
+      />
       <button
         data-testid="update-activity-null-capacity"
         onClick={() => updateActivity('a1', { serviceId: 's5', durationMinutes: 120, capacity: null } as any)}
@@ -334,13 +357,50 @@ describe('ScheduleProvider', () => {
     await waitFor(() => {
       expect(createActivity).toHaveBeenCalled();
     });
+    // GH #142: floating-local start string (no zone suffix) + integer minute duration
     expect(createActivity).toHaveBeenCalledWith(
       expect.objectContaining({
         master_id: 'm1',
         service_id: 's1',
         location_id: 'alpika',
+        start: `${currentWeekDate(2)}T10:30:00`,
+        duration: 120,
+        capacity: 8,
+        is_private: false,
       }),
     );
+  });
+
+  it('maps dayIndex/startMinutes to a floating-local start string and integer duration on PATCH (GH #142)', async () => {
+    vi.mocked(getAllMasters).mockResolvedValue([
+      { id: 'm1', first_name: 'Ольга', last_name: 'Середа', color: '#5B8C7A', position: 'мастер', specialty: 'живопись', avatar_url: null, archived: false, sort_order: 0, created_at: '2024-01-01', updated_at: '2024-01-01' },
+    ]);
+    vi.mocked(getAllServices).mockResolvedValue([
+      { id: 's1', title: 'Картина маслом', description: '', image_url: '', specialty: '', min_age: 12, max_age: 99, duration: 120, record_info: '', tariffs: [], tags: [], archived: false, created_at: '', updated_at: '' },
+    ]);
+    vi.mocked(getAllLocations).mockResolvedValue([
+      { id: 'alpika', name: 'Альпика', address: 'Альпика, 1 этаж', description: null, capacity: 10, yandex_map_url: null, review_url: null, record_info: null, image_url: null, location_hint: null, archived: false, created_at: '', updated_at: '' },
+    ]);
+    vi.mocked(getActivities).mockResolvedValue(wrap([
+      { id: 'a1', master_id: 'm1', service_id: 's1', location_id: 'alpika', start: `${currentWeekDate(0)}T10:00:00`, duration: 120, capacity: 8, is_private: false, comment: null, record_info: null, created_at: '', updated_at: '', occupied: 3 },
+    ]));
+    vi.mocked(patchActivity).mockResolvedValue({
+      id: 'a1', master_id: 'm1', service_id: 's1', location_id: 'alpika',
+      start: `${currentWeekDate(1)}T12:00:00`, duration: 150, capacity: 8, is_private: false,
+      comment: null, record_info: null, created_at: '', updated_at: '', occupied: 3,
+    });
+
+    renderWithContext();
+    await waitFor(() => { expect(screen.getByTestId('activity-count').textContent).toBe('1'); });
+
+    // dayIndex: 1 (Tuesday), startMinutes: 720 (12:00), durationMinutes: 150
+    act(() => { screen.getByTestId('update-activity-time').click(); });
+
+    await waitFor(() => { expect(patchActivity).toHaveBeenCalled(); });
+    expect(patchActivity).toHaveBeenCalledWith('a1', expect.objectContaining({
+      start: `${currentWeekDate(1)}T12:00:00`,
+      duration: 150,
+    }));
   });
 
   it('calls patchActivity mutation when updateActivity is called', async () => {
@@ -549,6 +609,44 @@ describe('ScheduleProvider', () => {
     expect(selectedDay.getFullYear()).toBe(2026);
     expect(selectedDay.getMonth()).toBe(5); // June
     expect(selectedDay.getDate()).toBe(15);
+  });
+
+  // ─── gridStartMinutes / gridEndMinutes tests (GH #142) ────────────────────
+
+  it('defaults grid bounds to working hours (9:00–21:00) when no activities', async () => {
+    vi.mocked(getActivities).mockResolvedValue(wrap([]));
+    renderWithContext();
+    await waitFor(() => {
+      expect(screen.getByTestId('loading').textContent).toBe('false');
+    });
+    expect(screen.getByTestId('grid-start').textContent).toBe('540');
+    expect(screen.getByTestId('grid-end').textContent).toBe('1260');
+  });
+
+  it('extends grid bounds to fit activities outside working hours', async () => {
+    vi.mocked(getAllMasters).mockResolvedValue([
+      { id: 'm1', first_name: 'Ольга', last_name: 'Середа', color: '#5B8C7A', position: 'мастер', specialty: 'живопись', avatar_url: null, archived: false, sort_order: 0, created_at: '2024-01-01', updated_at: '2024-01-01' },
+    ]);
+    vi.mocked(getAllServices).mockResolvedValue([
+      { id: 's1', title: 'Картина маслом', description: '', image_url: '', specialty: '', min_age: 12, max_age: 99, duration: 150, record_info: '', tariffs: [], tags: [], archived: false, created_at: '', updated_at: '' },
+    ]);
+    vi.mocked(getAllLocations).mockResolvedValue([
+      { id: 'alpika', name: 'Альпика', address: 'Альпика, 1 этаж', description: null, capacity: 10, yandex_map_url: null, review_url: null, record_info: null, image_url: null, location_hint: null, archived: false, created_at: '', updated_at: '' },
+    ]);
+    // Early morning (07:00 → 420) and midnight-ending (22:00 + 120 = 1440) activities
+    vi.mocked(getActivities).mockResolvedValue(wrap([
+      { id: 'a1', master_id: 'm1', service_id: 's1', location_id: 'alpika', start: `${currentWeekDate(0)}T07:00:00`, duration: 60, capacity: 8, is_private: false, comment: null, record_info: null, created_at: '', updated_at: '', occupied: 0 },
+      { id: 'a2', master_id: 'm1', service_id: 's1', location_id: 'alpika', start: `${currentWeekDate(1)}T22:00:00`, duration: 120, capacity: 8, is_private: false, comment: null, record_info: null, created_at: '', updated_at: '', occupied: 0 },
+    ]));
+
+    renderWithContext();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('activity-count').textContent).toBe('2');
+    });
+    // adaptive start: floor(420/60)*60 - 60 = 360; adaptive end: ceil(1440/60)*60 + 60 = 1500 clamped to 1440
+    expect(screen.getByTestId('grid-start').textContent).toBe('360');
+    expect(screen.getByTestId('grid-end').textContent).toBe('1440');
   });
 
   // ─── __memo-switch-to-day-view event tests ─────────────────────────────────

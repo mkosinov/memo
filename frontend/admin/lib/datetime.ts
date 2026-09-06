@@ -112,12 +112,6 @@ export function generateTimeSlots(
   return slots;
 }
 
-/** Grid bound for the adaptive range calculation (minute space). */
-export interface GridTimeRange {
-  startMinutes: number;
-  endMinutes: number;
-}
-
 /**
  * Adaptive grid time range in MINUTE space — port of the legacy
  * `utils.calculateGridTimeRange` (decimal hours → integer minutes).
@@ -133,7 +127,7 @@ export function calculateGridTimeRange(
   acts: Array<{ startMinutes: number; durationMinutes: number }>,
   workingHoursStartH: number,
   workingHoursEndH: number,
-): GridTimeRange {
+): { startMinutes: number; endMinutes: number } {
   const workingStart = workingHoursStartH * 60;
   const workingEnd = workingHoursEndH * 60;
 

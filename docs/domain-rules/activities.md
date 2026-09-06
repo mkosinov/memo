@@ -40,8 +40,8 @@ An Activity is a scheduled instance of a Service. It ties together a Master, Ser
 
 ### Frontend
 - **Auto-fill from Service:** When service selected → duration, capacity, minAge auto-filled
-- **DateTime parsing:** datetime-local → startTime (decimal hours) + day (Mon=0) + date (ISO)
-- **Duration conversion:** HH:MM string ↔ decimal hours ↔ durationMinutes
+- **DateTime canon (GH #142):** datetime-local → `startMinutes` (minutes from midnight) + `dayIndex` (Mon=0..Sun=6) → `composeLocalISO(date, startMinutes)` for API payloads. Duration is integer minutes (`durationMinutes`); display via `formatTime(startMinutes)`.
+- **Single parser:** `frontend/admin/lib/datetime.ts` (`parseLocalISO` et al.) is the ONLY datetime parser — treats input as floating local time (no UTC shifts). Records list and Schedule grid both consume it, guaranteeing parity (same parser, same minutes).
 - **Optimistic updates:** Snapshot → apply → rollback on error → invalidate on settle
 - **Race protection:** API call races against 5-second timeout
 

@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useCallback, useMemo } from 'react';
-import type { Activity } from '@memo/domain';
+import type { ScheduleAdminDTO } from '@memo/domain';
+import type { ScheduleContextType } from '@/contexts/ScheduleContext';
 import { HOURS_START } from '@/lib/utils';
 
 // Re-export types from @dnd-kit/core for reference.
@@ -9,10 +10,13 @@ import { HOURS_START } from '@/lib/utils';
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 import type { DragStartEvent as _DragStartEvent, DragEndEvent as _DragEndEvent, DragOverEvent as _DragOverEvent } from '@dnd-kit/core';
 
+/** Update payload accepted by ScheduleContext.updateActivity (GH #142 minutes contract). */
+type UpdateActivityInput = Parameters<ScheduleContextType['updateActivity']>[1];
+
 interface UseDnDOptions {
-  activities: Activity[];
-  addActivity: (activity: Omit<Activity, 'id'>) => void;
-  updateActivity: (id: string, updates: Partial<Activity>) => void;
+  activities: ScheduleAdminDTO[];
+  addActivity: ScheduleContextType['addActivity'];
+  updateActivity: ScheduleContextType['updateActivity'];
   showToast: (message: string, undo?: () => void) => void;
   /** Grid frequency in minutes (5, 15, or 30). DnD snaps dropped times to the nearest multiple. */
   gridFrequency?: number;
@@ -26,7 +30,7 @@ interface UseDnDOptions {
  * so these interfaces avoid requiring the full library types (rect, disabled, etc.).
  */
 interface DragStartEvent {
-  active: { id: string | number; data: { current?: { activity?: Activity } } };
+  active: { id: string | number; data: { current?: { activity?: ScheduleAdminDTO } } };
 }
 
 interface DragEndEvent {
@@ -72,40 +76,44 @@ export function parseSlotId(id: string): { dayIndex: number; slotIndex: number; 
 }
 
 /**
- * Calculate startTime from slotIndex. Each slot represents `gridFrequency` minutes.
+ * Calculate startMinutes (integer minutes from midnight) from slotIndex.
+ * Each slot represents `gridFrequency` minutes; the grid begins at `gridStartMinutes`.
  *
- * slotIndexToTime(0, 30) = 9:00, slotIndexToTime(1, 30) = 9:30 (30-min grid)
- * slotIndexToTime(0, 15) = 9:00, slotIndexToTime(1, 15) = 9:15 (15-min grid)
- * slotIndexToTime(0, 5)  = 9:00, slotIndexToTime(1, 5)  = 9:05 (5-min grid)
+ * slotIndexToMinutes(0, 30) = 540 (9:00), slotIndexToMinutes(1, 30) = 570 (9:30)
+ * slotIndexToMinutes(0, 15) = 540 (9:00), slotIndexToMinutes(1, 15) = 555 (9:15)
+ * slotIndexToMinutes(0, 5)  = 540 (9:00), slotIndexToMinutes(1, 5)  = 545 (9:05)
  */
-export function slotIndexToTime(slotIndex: number, gridFrequency: number = 30): number {
-  return HOURS_START + slotIndex * (gridFrequency / 60);
+export function slotIndexToMinutes(
+  slotIndex: number,
+  gridFrequency: number = 30,
+  gridStartMinutes: number = HOURS_START * 60,
+): number {
+  return gridStartMinutes + slotIndex * gridFrequency;
 }
 
 /**
- * Snap a time value (in hours) to the nearest gridFrequency multiple.
+ * Snap a minutes-from-midnight value to the nearest gridFrequency multiple.
+ * Integer minutes — no float drift, no rounding hack.
  *
- * Example: snapToGrid(10.2, 15) → 10.25 (rounds 10:12 → 10:15)
- *          snapToGrid(9.0, 30)  → 9.0   (already aligned)
- *          snapToGrid(9.1, 5)   → 9.083… (rounds 9:06 → 9:05)
+ * Example: snapToGrid(612, 15) → 615 (rounds 10:12 → 10:15)
+ *          snapToGrid(540, 30) → 540 (already aligned)
+ *          snapToGrid(546, 5)  → 545 (rounds 9:06 → 9:05)
  */
-export function snapToGrid(time: number, gridFrequency: number): number {
-  if (gridFrequency <= 0 || gridFrequency > 60) return time;
-  const minutes = time * 60;
-  const snapped = Math.round(minutes / gridFrequency) * gridFrequency;
-  return Math.round(snapped * 100) / 100 / 60; // avoid float drift
+export function snapToGrid(minutes: number, gridFrequency: number): number {
+  if (gridFrequency <= 0 || gridFrequency > 60) return minutes;
+  return Math.round(minutes / gridFrequency) * gridFrequency;
 }
 
 export function useDnD({ activities, addActivity, updateActivity, showToast, gridFrequency = 30, columnField }: UseDnDOptions) {
   const [dragId, setDragId] = useState<string | null>(null);
   const [dragCopy, setDragCopy] = useState(false);
   const [ghostPosition, setGhostPosition] = useState<GhostPosition | null>(null);
-  const [activeDragActivity, setActiveDragActivity] = useState<Activity | null>(null);
+  const [activeDragActivity, setActiveDragActivity] = useState<ScheduleAdminDTO | null>(null);
 
-  /** The snapped time during drag (derived from ghostPosition). Shows as preview on the card. */
+  /** The snapped start (integer minutes from midnight) during drag. Shows as preview on the card. */
   const draggedSnappedTime = useMemo(() => {
     if (!ghostPosition || !activeDragActivity) return null;
-    return snapToGrid(slotIndexToTime(ghostPosition.slotIndex, gridFrequency), gridFrequency);
+    return snapToGrid(slotIndexToMinutes(ghostPosition.slotIndex, gridFrequency), gridFrequency);
   }, [ghostPosition, activeDragActivity, gridFrequency]);
 
   const onDragStart = useCallback(
@@ -153,24 +161,20 @@ export function useDnD({ activities, addActivity, updateActivity, showToast, gri
       }
 
       const { dayIndex, slotIndex, columnId: parsedColumnId } = parsed;
-      const newStartTime = snapToGrid(slotIndexToTime(slotIndex, gridFrequency), gridFrequency);
-      
+      const newStartMinutes = snapToGrid(slotIndexToMinutes(slotIndex, gridFrequency), gridFrequency);
+
       // Use over.columnId if provided, otherwise fall back to parsed columnId
       const targetColumnId = over.columnId ?? parsedColumnId;
 
       if (dragCopy && activeDragActivity) {
         // Create a copy at the new position (optionally in a different column)
         addActivity({
-          day: dayIndex,
+          dayIndex,
           masterId: columnField === 'masterId' && targetColumnId ? targetColumnId : activeDragActivity.masterId,
-          startTime: newStartTime,
-          duration: activeDragActivity.duration,
-          durationMinutes: activeDragActivity.durationMinutes ?? activeDragActivity.duration * 60,
           serviceId: activeDragActivity.serviceId,
-          serviceName: activeDragActivity.serviceName,
-          minAge: activeDragActivity.minAge,
           locationId: columnField === 'locationId' && targetColumnId ? targetColumnId : activeDragActivity.locationId,
-          occupied: activeDragActivity.occupied,
+          startMinutes: newStartMinutes,
+          durationMinutes: activeDragActivity.durationMinutes,
           capacity: activeDragActivity.capacity,
           isPrivate: activeDragActivity.isPrivate,
         });
@@ -179,9 +183,9 @@ export function useDnD({ activities, addActivity, updateActivity, showToast, gri
         // Move existing activity
         const original = activities.find((a) => a.id === dragId);
         if (original) {
-          const updates: Partial<Activity> = {
-            day: dayIndex,
-            startTime: newStartTime,
+          const updates: UpdateActivityInput = {
+            dayIndex,
+            startMinutes: newStartMinutes,
           };
 
           // Cross-column update: change masterId or locationId when dropped on a different column
@@ -191,11 +195,11 @@ export function useDnD({ activities, addActivity, updateActivity, showToast, gri
 
           updateActivity(dragId, updates);
 
-          // Undo callback
+          // Undo callback — restore the original DTO position (day/startMinutes)
           const undo = () => {
-            const undoUpdates: Partial<Activity> = {
-              day: original.day,
-              startTime: original.startTime,
+            const undoUpdates: UpdateActivityInput = {
+              dayIndex: original.day,
+              startMinutes: original.startMinutes,
             };
             if (columnField && targetColumnId && original[columnField] !== targetColumnId) {
               undoUpdates[columnField] = original[columnField];

@@ -4,7 +4,7 @@
  * Import these constants instead of defining per-file mocks.
  * All data is minimal but realistic — enough to test most UI paths.
  */
-import type { Master, Service, Activity, Location } from '@memo/domain';
+import type { Master, Service, Location, ScheduleAdminDTO } from '@memo/domain';
 import type {
   RecordResponse,
   ClientResponse,
@@ -16,18 +16,6 @@ import type {
   MasterResponse,
 } from '@memo/api-client';
 
-// Tariff shape (mirrors API TariffResponse, used by SettingsTab via type cast)
-interface Tariff {
-  id: string;
-  service_id: string;
-  title: string;
-  price: number;
-  description: string | null;
-}
-
-// Service with tariffs — SettingsTab casts Service to this shape
-type ServiceWithTariffs = Service & { tariffs: Tariff[] };
-
 // ─── Domain types ─────────────────────────────────────────────────────────
 
 export const mockMasters: Master[] = [
@@ -35,32 +23,32 @@ export const mockMasters: Master[] = [
   { id: 'm2', name: 'Юлия Большакова', shortName: 'Юлия', color: '#6B7E9C' },
 ];
 
-export const mockServices: ServiceWithTariffs[] = [
+export const mockServices: Service[] = [
   {
     id: 's1',
     name: 'Картина маслом',
-    duration: 2.5,
+    durationMinutes: 150,
     minAge: '12',
     maxAge: '99',
     defaultAdultPrice: 3500,
     defaultChildPrice: 2500,
     defaultIndividualPrice: 5000,
     tariffs: [
-      { id: 't1', service_id: 's1', title: 'Взрослый', price: 3500, description: null },
-      { id: 't2', service_id: 's1', title: 'Детский', price: 2500, description: null },
+      { id: 't1', title: 'Взрослый', price: 3500, description: null },
+      { id: 't2', title: 'Детский', price: 2500, description: null },
     ],
   },
   {
     id: 's2',
     name: 'Картина акрилом',
-    duration: 2,
+    durationMinutes: 120,
     minAge: '6',
     maxAge: '99',
     defaultAdultPrice: 2800,
     defaultChildPrice: 2000,
     defaultIndividualPrice: 4000,
     tariffs: [
-      { id: 't3', service_id: 's2', title: 'Взрослый', price: 2800, description: null },
+      { id: 't3', title: 'Взрослый', price: 2800, description: null },
     ],
   },
 ];
@@ -70,20 +58,48 @@ export const mockLocations: Location[] = [
   { id: 'grand', name: 'Гранд Отель Поляна', address: 'Гранд Отель, лобби' },
 ];
 
-export const mockActivity: Activity = {
+/**
+ * Factory for ScheduleAdminDTO fixtures (GH #142 — integer minutes from
+ * midnight, no decimal-hour fields). Pass any field via `overrides`.
+ */
+export function createMockScheduleItem(
+  overrides: Partial<ScheduleAdminDTO> & { id: string } = { id: 'ev_1' },
+): ScheduleAdminDTO {
+  return {
+    day: 0,
+    masterId: 'm1',
+    serviceId: 's1',
+    locationId: 'alpika',
+    masterName: 'Ольга Середа',
+    masterColor: '#5B8C7A',
+    serviceTitle: 'Картина маслом',
+    date: '2026-06-15',
+    time: '10:00',
+    startMinutes: 600,
+    durationMinutes: 120,
+    locationName: 'Альпика',
+    minAge: '12',
+    occupied: 3,
+    capacity: 8,
+    isPrivate: false,
+    comment: '',
+    priceMin: 0,
+    priceMax: 0,
+    ...overrides,
+  };
+}
+
+export const mockActivity: ScheduleAdminDTO = createMockScheduleItem({
   id: 'ev_1',
   day: 5,
-  masterId: 'm1',
-  startTime: 14,
-  duration: 2.5,
-  serviceId: 's1',
-  serviceName: 'Картина маслом',
-  minAge: '12',
+  date: '2026-06-13', // Saturday — matches day index 5 (Mon=0)
+  time: '14:00',
+  startMinutes: 840,
+  durationMinutes: 150,
   locationId: 'grand',
-  occupied: 3,
-  capacity: 8,
-  isPrivate: false,
-};
+  locationName: 'Гранд Отель Поляна',
+  maxAge: '99',
+});
 
 // ─── API response types ───────────────────────────────────────────────────
 

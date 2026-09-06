@@ -1,18 +1,19 @@
 'use client';
 
 import React, { useEffect, useRef, useMemo, useCallback } from 'react';
-import type { Activity, Master, Location } from '@memo/domain';
-import { formatTime, HOURS_START } from '@/lib/utils';
+import type { ScheduleAdminDTO, Master, Location } from '@memo/domain';
+import { formatTime } from '@/lib/datetime';
 import { ActivityCard } from './ActivityCard';
 
 interface OverlapPopoverProps {
-  activities: Activity[];
+  activities: ScheduleAdminDTO[];
   masterMap: Map<string, Master>;
   locations?: Location[];
   onClose: () => void;
-  onSelectActivity: (activity: Activity) => void;
+  onSelectActivity: (activity: ScheduleAdminDTO) => void;
   anchorRect: DOMRect;
   cellHeight?: number;
+  /** Grid start in minutes from midnight (GH #142). */
   gridStart?: number;
 }
 
@@ -20,15 +21,15 @@ interface OverlapPopoverProps {
  * Assigns activities to minimal columns without time intersections.
  * Greedy algorithm: each activity goes to first available column.
  */
-function assignColumns(activities: Activity[]): Activity[][] {
-  const sorted = [...activities].sort((a, b) => a.startTime - b.startTime);
-  const columns: Activity[][] = [];
+function assignColumns(activities: ScheduleAdminDTO[]): ScheduleAdminDTO[][] {
+  const sorted = [...activities].sort((a, b) => a.startMinutes - b.startMinutes);
+  const columns: ScheduleAdminDTO[][] = [];
 
   for (const act of sorted) {
     let placed = false;
     for (const col of columns) {
       const lastInCol = col[col.length - 1];
-      if (act.startTime >= lastInCol.startTime + lastInCol.duration) {
+      if (act.startMinutes >= lastInCol.startMinutes + lastInCol.durationMinutes) {
         col.push(act);
         placed = true;
         break;
@@ -55,7 +56,6 @@ export function OverlapPopover({
   onSelectActivity,
   anchorRect,
   cellHeight = 60,
-  gridStart = HOURS_START,
 }: OverlapPopoverProps) {
   const popoverRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -105,12 +105,13 @@ export function OverlapPopover({
     return () => document.removeEventListener('mousedown', handler);
   }, [onClose]);
 
-  // Calculate timeline bounds (same scale as main schedule)
-  const allStarts = activities.map(a => a.startTime);
-  const allEnds = activities.map(a => a.startTime + a.duration);
-  const timelineStart = Math.floor(Math.min(...allStarts));
-  const timelineEnd = Math.ceil(Math.max(...allEnds));
-  const hours = Array.from({ length: timelineEnd - timelineStart + 1 }, (_, i) => timelineStart + i);
+  // Calculate timeline bounds (same scale as main schedule), in integer minutes
+  const allStarts = activities.map(a => a.startMinutes);
+  const allEnds = activities.map(a => a.startMinutes + a.durationMinutes);
+  // Snap to whole hours (60-min multiples) — the legacy Math.floor/Math.ceil hour rounding
+  const timelineStart = Math.floor(Math.min(...allStarts) / 60) * 60;
+  const timelineEnd = Math.ceil(Math.max(...allEnds) / 60) * 60;
+  const hours = Array.from({ length: (timelineEnd - timelineStart) / 60 + 1 }, (_, i) => timelineStart + i * 60);
 
   // Position with smart screen edge alignment
   const popoverStyle: React.CSSProperties = useMemo(() => {
@@ -234,9 +235,9 @@ export function OverlapPopover({
               {col.map(act => {
                 const master = masterMap.get(act.masterId) || { id: '', name: 'Unknown', shortName: '?', color: '#666' };
                 // Use timelineStart (popover's own start) instead of gridStart (main schedule start)
-                const topPx = (act.startTime - timelineStart) * cellHeight * 2;
-                const durMinutes = act.durationMinutes ?? act.duration * 60;
-                const heightPx = Math.max((durMinutes / 60) * cellHeight * 2 - 10, 52);
+                const topPx = (act.startMinutes - timelineStart) * cellHeight / 30;
+                const durMinutes = act.durationMinutes;
+                const heightPx = Math.max(durMinutes * cellHeight / 30 - 10, 52);
 
                 return (
                   <div

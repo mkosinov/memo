@@ -4,12 +4,15 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useSchedule } from '@/contexts/ScheduleContext';
 import { MasterPicker } from '@/app/components/shared/MasterPicker';
 import { Combobox, type ComboboxOption } from '@/app/components/shared/Combobox';
-import type { Activity, Service } from '@memo/domain';
-import { decimalToHHMM, hhmmToDecimal } from '@/lib/utils';
+import type { ScheduleAdminDTO } from '@memo/domain';
+import { formatTime, hhmmToMinutes, composeLocalISO } from '@/lib/datetime';
+
+/** Update payload accepted by ScheduleContext.updateActivity (GH #142 minutes contract). */
+type ActivityUpdates = Parameters<ReturnType<typeof useSchedule>['updateActivity']>[1];
 
 interface SettingsTabProps {
-  activity: Activity;
-  onUpdate: (updates: Partial<Activity>) => void;
+  activity: ScheduleAdminDTO;
+  onUpdate: (updates: ActivityUpdates) => void;
 }
 
 /** Snap minutes to the nearest grid slot. */
@@ -17,14 +20,12 @@ function snapMinutes(minutes: number, gridFrequency: number): number {
   return Math.round(minutes / gridFrequency) * gridFrequency;
 }
 
-/** Build a datetime-local string "YYYY-MM-DDTHH:MM" from date and decimal time, snapped to grid. */
-function buildDateTimeLocal(dateStr: string, decimalTime: number, gridFrequency: number): string {
+/** Build a datetime-local string "YYYY-MM-DDTHH:MM" from a date key + integer minutes, snapped to grid. */
+function buildDateTimeLocal(dateStr: string, startMinutes: number, gridFrequency: number): string {
   if (!dateStr) return '';
-  const hours = Math.floor(decimalTime);
-  const rawMinutes = Math.round((decimalTime - hours) * 60);
-  const minutes = snapMinutes(rawMinutes, gridFrequency);
-  const mm = String(minutes).padStart(2, '0');
-  return `${dateStr}T${String(hours).padStart(2, '0')}:${mm}`;
+  const snapped = snapMinutes(startMinutes, gridFrequency);
+  // composeLocalISO yields "YYYY-MM-DDTHH:MM:00" — slice off the ":00" seconds for datetime-local.
+  return composeLocalISO(dateStr, snapped).slice(0, 16);
 }
 
 export function SettingsTab({ activity, onUpdate }: SettingsTabProps) {
@@ -34,10 +35,10 @@ export function SettingsTab({ activity, onUpdate }: SettingsTabProps) {
   const [masterId, setMasterId] = useState(activity.masterId);
   const [locationId, setLocationId] = useState(activity.locationId);
   const [capacity, setCapacity] = useState(activity.capacity);
-  const [durationStr, setDurationStr] = useState(decimalToHHMM(activity.duration));
+  const [durationStr, setDurationStr] = useState(formatTime(activity.durationMinutes));
   const [isPrivate, setIsPrivate] = useState(activity.isPrivate);
   const [startDateTime, setStartDateTime] = useState(() => {
-    return buildDateTimeLocal(activity.date || '', activity.startTime, gridFrequency);
+    return buildDateTimeLocal(activity.date || '', activity.startMinutes, gridFrequency);
   });
 
   const serviceOptions: ComboboxOption[] = services.map((s) => ({ value: s.id, label: s.name }));
@@ -47,8 +48,8 @@ export function SettingsTab({ activity, onUpdate }: SettingsTabProps) {
     searchText: l.shortTitle ? `${l.name} ${l.shortTitle}` : l.name,
   }));
 
-  // Selected service for display
-  const selectedService = services.find((s) => s.id === serviceId) as (Service & { tariffs?: Array<{ id: string; title: string; price: number; description?: string | null }> }) | undefined;
+  // Selected service for display (domain Service carries tariffs, GH #142)
+  const selectedService = services.find((s) => s.id === serviceId);
 
   // Age display: if maxAge > 0 → "{minAge}–{maxAge}", else → "{minAge}+"
   const ageDisplay = selectedService
@@ -63,13 +64,10 @@ export function SettingsTab({ activity, onUpdate }: SettingsTabProps) {
       setServiceId(newServiceId);
       const svc = services.find((s) => s.id === newServiceId);
       if (svc) {
-        setDurationStr(decimalToHHMM(svc.duration));
+        setDurationStr(formatTime(svc.durationMinutes));
         onUpdate({
           serviceId: newServiceId,
-          serviceName: svc.name,
-          minAge: svc.minAge,
-          duration: svc.duration,
-          durationMinutes: svc.durationMinutes || svc.duration * 60,
+          durationMinutes: svc.durationMinutes,
         });
       }
     },
@@ -81,16 +79,14 @@ export function SettingsTab({ activity, onUpdate }: SettingsTabProps) {
     (value: string) => {
       if (value) {
         const [datePart, timePart] = value.split('T');
-        const [h, m] = timePart.split(':').map(Number);
-        const snappedMinutes = snapMinutes(m, gridFrequency);
-        const startTimeDecimal = h + snappedMinutes / 60;
+        const rawMinutes = hhmmToMinutes(timePart);
+        const snappedMinutes = snapMinutes(rawMinutes, gridFrequency);
         // Rebuild snapped datetime-local value for display
-        const snappedTime = `${String(h).padStart(2, '0')}:${String(snappedMinutes % 60).padStart(2, '0')}`;
-        setStartDateTime(`${datePart}T${snappedTime}`);
+        setStartDateTime(composeLocalISO(datePart, snappedMinutes).slice(0, 16));
         // Calculate day from date
         const date = new Date(datePart + 'T12:00:00');
         const dayOfWeek = (date.getDay() + 6) % 7; // Mon=0
-        onUpdate({ startTime: startTimeDecimal, day: dayOfWeek, date: datePart });
+        onUpdate({ startMinutes: snappedMinutes, dayIndex: dayOfWeek });
       }
     },
     [onUpdate, gridFrequency],
@@ -100,9 +96,9 @@ export function SettingsTab({ activity, onUpdate }: SettingsTabProps) {
   const handleDurationChange = useCallback(
     (value: string) => {
       setDurationStr(value);
-      const decimal = hhmmToDecimal(value);
-      if (!isNaN(decimal) && decimal > 0) {
-        onUpdate({ duration: decimal, durationMinutes: Math.round(decimal * 60) });
+      const minutes = hhmmToMinutes(value);
+      if (!isNaN(minutes) && minutes > 0) {
+        onUpdate({ durationMinutes: minutes });
       }
     },
     [onUpdate],
@@ -114,11 +110,11 @@ export function SettingsTab({ activity, onUpdate }: SettingsTabProps) {
     setMasterId(activity.masterId);
     setLocationId(activity.locationId);
     setCapacity(activity.capacity);
-    setDurationStr(decimalToHHMM(activity.duration));
+    setDurationStr(formatTime(activity.durationMinutes));
     setIsPrivate(activity.isPrivate);
 
     setStartDateTime(
-      buildDateTimeLocal(activity.date || '', activity.startTime, gridFrequency),
+      buildDateTimeLocal(activity.date || '', activity.startMinutes, gridFrequency),
     );
   }, [activity]);
 

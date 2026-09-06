@@ -32,8 +32,6 @@ export function createMockScheduleContext(
   return {
     masters: mockMasters,
     services: mockServices,
-    // @ts-expect-error TEMP #142 T8: modal still reads servicesRaw; delete this line in Task 8 (services.find().tariffs migration)
-    servicesRaw: [],
     locations: mockLocations,
     activities: [],
     scheduleIndex: {

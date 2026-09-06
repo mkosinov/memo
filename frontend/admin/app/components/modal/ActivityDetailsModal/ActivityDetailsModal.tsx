@@ -3,8 +3,8 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import { useSchedule } from '@/contexts/ScheduleContext';
 import { useUI } from '@/contexts/UIContext';
-import type { Activity } from '@memo/domain';
-import { formatActivityContext, formatTime } from '@/lib/utils';
+import type { ScheduleAdminDTO } from '@memo/domain';
+import { formatActivityContext } from '@/lib/utils';
 import { TabNav, type Tab } from './TabNav';
 import { SettingsTab } from './SettingsTab';
 import { ClientTab } from './ClientTab';
@@ -18,12 +18,12 @@ import { parseApiError } from '@/app/lib/api/parseApiError';
 interface ActivityDetailsModalProps {
   isOpen: boolean;
   onClose: () => void;
-  activity: Activity;
+  activity: ScheduleAdminDTO;
   mode: 'edit' | 'quickAdd';
 }
 
 export function ActivityDetailsModal({ isOpen, onClose, activity, mode }: ActivityDetailsModalProps) {
-  const { services, servicesRaw, updateActivity, deleteActivity } = useSchedule();
+  const { services, updateActivity, deleteActivity } = useSchedule();
   const { showToast } = useUI();
 
   const [activeTab, setActiveTab] = useState(mode === 'quickAdd' ? 'new-booking' : 'settings');
@@ -38,18 +38,10 @@ export function ActivityDetailsModal({ isOpen, onClose, activity, mode }: Activi
   // useDeleteRecord hook + DeleteDialog and reports back via onDeleteRecord.
   const { createRecord } = useRecordMutations(activity.id, activeRecordId || '');
 
-  // Current service and its tariffs (used by all tab contents)
-  const currentService = useMemo(
-    () => services.find((s) => s.id === activity.serviceId),
-    [services, activity.serviceId],
-  );
-  const currentRawService = useMemo(
-    () => servicesRaw.find((s) => s.id === activity.serviceId),
-    [servicesRaw, activity.serviceId],
-  );
+  // Tariffs of the activity's service — domain Service carries them (GH #142).
   const serviceTariffs = useMemo(
-    () => currentRawService?.tariffs ?? [],
-    [currentRawService],
+    () => services.find((s) => s.id === activity.serviceId)?.tariffs ?? [],
+    [services, activity.serviceId],
   );
 
   // Own data — context records is now one server page; activity bookings need
@@ -113,9 +105,10 @@ export function ActivityDetailsModal({ isOpen, onClose, activity, mode }: Activi
     onClose();
   }, [activity.id, deleteActivity, showToast, onClose]);
 
-  // Activity update callback for settings
+  // Activity update callback for settings — payload is the context's
+  // minutes-based update shape (GH #142).
   const handleActivityUpdate = useCallback(
-    (updates: Partial<Activity>) => {
+    (updates: Parameters<typeof updateActivity>[1]) => {
       updateActivity(activity.id, updates);
     },
     [activity.id, updateActivity],
@@ -193,9 +186,9 @@ export function ActivityDetailsModal({ isOpen, onClose, activity, mode }: Activi
 
   if (!isOpen) return null;
 
-  // Activity context header label
+  // Activity context header label — DTO carries date + time display caches.
   const contextLabel = activity.date
-    ? formatActivityContext(new Date(activity.date + 'T' + formatTime(activity.startTime) + ':00'))
+    ? formatActivityContext(new Date(activity.date + 'T' + activity.time + ':00'))
     : '';
 
   return (
@@ -209,7 +202,7 @@ export function ActivityDetailsModal({ isOpen, onClose, activity, mode }: Activi
 
       {/* Modal */}
       <Modal
-        title={activity.serviceName || 'Мероприятие'}
+        title={activity.serviceTitle || 'Мероприятие'}
         context={contextLabel}
         onClose={onClose}
         footer={

@@ -87,11 +87,11 @@ describe('WeekView', () => {
       loading: false,
       error: null,
       activities: [{
-        id: '1', day: 0, masterId: 'm1', startTime: 10, duration: 1,
-        serviceId: 's1', serviceName: 'Test', minAge: '6', locationId: 'l1', occupied: 0,
+        id: '1', day: 0, masterId: 'm1', startMinutes: 600, durationMinutes: 60,
+        serviceId: 's1', minAge: '6', locationId: 'l1', occupied: 0,
         capacity: 10, isPrivate: false,
         masterName: 'Test Master', serviceTitle: 'Test', date: '2025-04-07',
-        time: '10:00', durationMinutes: 60, locationName: 'Loc',
+        time: '10:00', locationName: 'Loc',
         priceMin: 0, priceMax: 0, masterColor: '#FF0000', maxAge: '99', comment: '',
       }],
     };
@@ -121,11 +121,11 @@ describe('WeekView', () => {
       loading: false,
       error: null,
       activities: [{
-        id: '1', day: 0, masterId: 'm1', startTime: 10, duration: 1,
-        serviceId: 's1', serviceName: 'Test', minAge: '6', locationId: 'l1', occupied: 0,
+        id: '1', day: 0, masterId: 'm1', startMinutes: 600, durationMinutes: 60,
+        serviceId: 's1', minAge: '6', locationId: 'l1', occupied: 0,
         capacity: 10, isPrivate: false,
         masterName: 'Test Master', serviceTitle: 'Test', date: '2025-04-07',
-        time: '10:00', durationMinutes: 60, locationName: 'Loc',
+        time: '10:00', locationName: 'Loc',
         priceMin: 0, priceMax: 0, masterColor: '#FF0000', maxAge: '99', comment: '',
       }],
     };

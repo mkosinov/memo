@@ -65,7 +65,7 @@ function createMockActivity(overrides: Partial<ScheduleAdminDTO> = {}): Schedule
     id: 'ev_1',
     day: 0,
     masterId: 'm1',
-    startTime: 10,
+    startMinutes: 600,
     durationMinutes: 150,
     serviceId: 's1',
     serviceTitle: 'Картина маслом',

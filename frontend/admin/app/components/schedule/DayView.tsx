@@ -10,13 +10,14 @@ import { useUserSettings } from '@/contexts/UserSettingsContext';
 import { useDnD } from '@/hooks/useDnD';
 import { useColumnReorder } from '@/hooks/useColumnReorder';
 import { resolveById } from '@memo/domain';
-import type { Activity } from '@memo/domain';
+import type { ScheduleAdminDTO } from '@memo/domain';
 import { TimeColumn } from './TimeColumn';
 import { DayColumn } from './DayColumn';
 import { ActivityCard } from './ActivityCard';
 import { ScheduleColumnHeader, SortableColumnHeader } from './ScheduleColumnHeader';
 import { ActivityDetailsModal } from '../modal/ActivityDetailsModal';
-import { TIME_COL_WIDTH, isSameDay, formatTime, calculateGridTimeRange } from '@/lib/utils';
+import { TIME_COL_WIDTH, isSameDay } from '@/lib/utils';
+import { formatTime, toISODate } from '@/lib/datetime';
 
 /**
  * Custom collision detection that separates column drags from activity drags.
@@ -64,8 +65,8 @@ export function DayView() {
     columnMode,
     cellHeight = 60,
     gridFrequency = 30,
-    workingHoursStart = 9,
-    workingHoursEnd = 21,
+    gridStartMinutes,
+    gridEndMinutes,
   } = useSchedule();
   const { showToast } = useUI();
   const { getColumnOrder, settings, setColumnOrder: saveColumnOrder } = useUserSettings();
@@ -75,22 +76,22 @@ export function DayView() {
 
   // Modal state
   const [modalOpen, setModalOpen] = useState(false);
-  const [modalActivity, setModalActivity] = useState<Activity | null>(null);
+  const [modalActivity, setModalActivity] = useState<ScheduleAdminDTO | null>(null);
   const [modalMode, setModalMode] = useState<'edit' | 'quickAdd'>('edit');
 
-  const openCreateModal = useCallback((_dayIndex: number, _startTime: number) => {
+  const openCreateModal = useCallback((_dayIndex: number, _startMinutes: number) => {
     setModalActivity(null);
     setModalMode('edit');
     setModalOpen(true);
   }, []);
 
-  const openEditModal = useCallback((activity: Activity) => {
+  const openEditModal = useCallback((activity: ScheduleAdminDTO) => {
     setModalActivity(activity);
     setModalMode('edit');
     setModalOpen(true);
   }, []);
 
-  const openQuickAdd = useCallback((activity: Activity) => {
+  const openQuickAdd = useCallback((activity: ScheduleAdminDTO) => {
     setModalActivity(activity);
     setModalMode('quickAdd');
     setModalOpen(true);
@@ -134,7 +135,7 @@ export function DayView() {
   }, [openEditModal, openQuickAdd, closeModal]);
 
   const handleCreateActivity = React.useCallback(
-    (dayIndex: number, startTime: number) => {
+    (dayIndex: number, startMinutes: number) => {
       if (!stamp.ready || !stamp.masterId || !stamp.serviceId || stamp.locations.size === 0) return;
       const service = services.find((s) => s.id === stamp.serviceId);
       if (!service) return;
@@ -142,49 +143,28 @@ export function DayView() {
       const location = locations.find((l) => l.id === firstLocation);
 
       addActivity({
-        day: dayIndex,
+        dayIndex,
         masterId: stamp.masterId,
-        startTime,
-        duration: service.duration,
-        durationMinutes: service.durationMinutes,
         serviceId: stamp.serviceId,
-        serviceName: service.name,
-        minAge: service.minAge,
         locationId: firstLocation,
-        occupied: 0,
+        startMinutes,
+        durationMinutes: service.durationMinutes,
         capacity: location?.defaultCapacity ?? 0,
         isPrivate: false,
       });
 
-      showToast(`Создано: ${service.name} — ${formatTime(startTime)}`);
+      showToast(`Создано: ${service.name} — ${formatTime(startMinutes)}`);
     },
-    [stamp, services, addActivity, showToast],
+    [stamp, services, locations, addActivity, showToast],
   );
 
   // Resolve activities for the selected day
-  const selectedDayISO = useMemo(() => {
-    const y = selectedDay.getFullYear();
-    const m = String(selectedDay.getMonth() + 1).padStart(2, '0');
-    const d = String(selectedDay.getDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
-  }, [selectedDay]);
+  const selectedDayISO = useMemo(() => toISODate(selectedDay), [selectedDay]);
 
   const dayActivities = useMemo(() => {
     const ids = scheduleIndex.byDate.get(selectedDayISO) ?? [];
     return resolveById(ids, scheduleIndex.byId);
   }, [scheduleIndex, selectedDayISO]);
-
-  // Resolve ScheduleAdminDTO[] → Activity[] with duration in hours + serviceName
-  const resolvedActivities = useMemo(
-    () => dayActivities.map(a => ({ ...a, duration: a.durationMinutes / 60, serviceName: a.serviceTitle })),
-    [dayActivities],
-  );
-
-  // Adaptive grid time range — extends beyond working hours if activities go outside
-  const gridRange = useMemo(
-    () => calculateGridTimeRange(resolvedActivities, workingHoursStart, workingHoursEnd),
-    [resolvedActivities, workingHoursStart, workingHoursEnd],
-  );
 
   // DnD — must be before `columns` so dragId/activeDragActivity are available
   const columnField = columnMode === 'locations' ? 'locationId' as const : 'masterId' as const;
@@ -200,7 +180,7 @@ export function DayView() {
     onDragEnd,
     handleDragCancel,
   } = useDnD({
-    activities: resolvedActivities,
+    activities: dayActivities,
     addActivity,
     updateActivity,
     showToast,
@@ -300,18 +280,18 @@ export function DayView() {
 
   // Group activities by column
   const activitiesByColumn = useMemo(() => {
-    const map = new Map<string, typeof resolvedActivities>();
-    for (const activity of resolvedActivities) {
+    const map = new Map<string, ScheduleAdminDTO[]>();
+    for (const activity of dayActivities) {
       const colKey = columnMode === 'locations' ? activity.locationId : activity.masterId;
       const arr = map.get(colKey) ?? [];
       arr.push(activity);
       map.set(colKey, arr);
     }
     return map;
-  }, [resolvedActivities, columnMode]);
+  }, [dayActivities, columnMode]);
 
   // Dynamic column ghost height based on actual grid range
-  const columnGhostHeight = (gridRange.end - gridRange.start) * cellHeight * 2;
+  const columnGhostHeight = (gridEndMinutes - gridStartMinutes) * cellHeight / 30;
 
   const today = new Date();
 
@@ -319,21 +299,20 @@ export function DayView() {
     ? masters.find((a) => a.id === activeDragActivity.masterId) || masters[0]
     : null;
 
-  const durMinutes = activeDragActivity?.durationMinutes ?? (activeDragActivity?.duration ?? 0) * 60;
-  const ghostHeight = activeDragActivity ? Math.ceil(durMinutes / gridFrequency) : null;
+  const ghostHeight = activeDragActivity ? Math.ceil(activeDragActivity.durationMinutes / gridFrequency) : null;
 
   // NowLine
   const [nowPos, setNowPos] = useState(0);
   React.useEffect(() => {
     const update = () => {
       const now = new Date();
-      const hours = now.getHours() + now.getMinutes() / 60;
-      setNowPos((hours - gridRange.start) * cellHeight * 2);
+      const nowMinutes = now.getHours() * 60 + now.getMinutes();
+      setNowPos((nowMinutes - gridStartMinutes) * cellHeight / 30);
     };
     update();
     const iv = setInterval(update, 30000);
     return () => clearInterval(iv);
-  }, [cellHeight, gridRange.start]);
+  }, [cellHeight, gridStartMinutes]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -379,7 +358,7 @@ export function DayView() {
         // Activity card drag
         const nativeEvent = event.activatorEvent as MouseEvent | undefined;
         onDragStart(
-          { active: { id: event.active.id, data: { current: { activity: activeData?.activity as Activity | undefined } } } },
+          { active: { id: event.active.id, data: { current: { activity: activeData?.activity as ScheduleAdminDTO | undefined } } } },
           { altKey: nativeEvent?.altKey },
         );
       }}
@@ -460,7 +439,7 @@ export function DayView() {
       <div className="min-w-[600px] h-full flex flex-col">
         {/* Grid row — scrollable */}
         <div className="flex-1 flex overflow-auto relative">
-          <TimeColumn cellHeight={cellHeight} gridFrequency={gridFrequency} gridStart={gridRange.start} gridEnd={gridRange.end} />
+          <TimeColumn cellHeight={cellHeight} gridFrequency={gridFrequency} gridStartMinutes={gridStartMinutes} gridEndMinutes={gridEndMinutes} />
           {orderedColumns.map((col) => {
             const colActivities = activitiesByColumn.get(col.id) ?? [];
             return (
@@ -468,7 +447,7 @@ export function DayView() {
                 key={col.id}
                 dayIndex={0}
                 date={selectedDay}
-                activities={colActivities.map(a => ({ ...a, duration: a.durationMinutes / 60, serviceName: a.serviceTitle }))}
+                activities={colActivities}
                 masters={masters}
                 locations={locations}
                 services={services}
@@ -486,8 +465,8 @@ export function DayView() {
                 stamp={stamp}
                 cellHeight={cellHeight}
                 gridFrequency={gridFrequency}
-                gridStart={gridRange.start}
-                gridEnd={gridRange.end}
+                gridStartMinutes={gridStartMinutes}
+                gridEndMinutes={gridEndMinutes}
                 columnId={col.id}
               />
             );
@@ -554,7 +533,7 @@ export function DayView() {
             <ActivityCard
               activity={
                 draggedSnappedTime != null
-                  ? { ...activeDragActivity, startTime: draggedSnappedTime }
+                  ? { ...activeDragActivity, startMinutes: draggedSnappedTime }
                   : activeDragActivity
               }
               master={dragMaster}

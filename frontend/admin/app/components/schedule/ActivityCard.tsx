@@ -4,29 +4,30 @@ import React, { useState, useRef } from 'react';
 import { useDraggable } from '@dnd-kit/core';
 import { useUI } from '@/contexts/UIContext';
 import { useSchedule } from '@/contexts/ScheduleContext';
-import type { Activity, Master, Location } from '@memo/domain';
-import { HOURS_START, formatTime } from '@/lib/utils';
+import type { ScheduleAdminDTO, Master, Location } from '@memo/domain';
+import { formatTime } from '@/lib/datetime';
 
 interface ActivityCardProps {
-  activity: Activity;
+  activity: ScheduleAdminDTO;
   master: Master;
   locations?: Location[];
   style?: React.CSSProperties;
-  onEdit?: (activity: Activity) => void;
-  onQuickAdd?: (activity: Activity) => void;
+  onEdit?: (activity: ScheduleAdminDTO) => void;
+  onQuickAdd?: (activity: ScheduleAdminDTO) => void;
   isDragging?: boolean;
   isDragCopy?: boolean;
+  /** Grid start in minutes from midnight (GH #142). */
   gridStart?: number;
 }
 
-export function ActivityCard({ activity, master, locations = [], style, onEdit, onQuickAdd, isDragging, isDragCopy, gridStart = HOURS_START }: ActivityCardProps) {
+export function ActivityCard({ activity, master, locations = [], style, onEdit, onQuickAdd, isDragging, isDragCopy, gridStart = 540 }: ActivityCardProps) {
   const { deleteMode, showToast } = useUI();
   const { deleteActivity, addActivity, cellHeight = 60 } = useSchedule();
   const [deleting, setDeleting] = useState(false);
   const deletingRef = useRef(false);
-  const topPx = (activity.startTime - gridStart) * cellHeight * 2 + 4;          // +4 top margin
-  const durMinutes = activity.durationMinutes ?? activity.duration * 60;
-  const heightPx = Math.max((durMinutes / 60) * cellHeight * 2 - 8, 60);        // -8 bottom, min 60
+  const topPx = (activity.startMinutes - gridStart) * cellHeight / 30 + 4;        // +4 top margin
+  const durMinutes = activity.durationMinutes;
+  const heightPx = Math.max(durMinutes * cellHeight / 30 - 8, 60);                // -8 bottom, min 60
   const fillPct = activity.capacity > 0 ? Math.min(activity.occupied / activity.capacity, 1) : 0;
 
   // Tier selection (replaces old showExtra/showOnlyPill)
@@ -70,9 +71,18 @@ export function ActivityCard({ activity, master, locations = [], style, onEdit, 
       deletingRef.current = true;
       setDeleting(true);
       setTimeout(() => {
-        const { id: _id, ...rest } = activity;
         deleteActivity(activity.id);
-        showToast(`«${activity.serviceName}» удалено`, () => addActivity(rest));
+        showToast(`«${activity.serviceTitle}» удалено`, () => addActivity({
+          dayIndex: activity.day,
+          masterId: activity.masterId,
+          serviceId: activity.serviceId,
+          locationId: activity.locationId,
+          startMinutes: activity.startMinutes,
+          durationMinutes: activity.durationMinutes,
+          capacity: activity.capacity,
+          isPrivate: activity.isPrivate,
+          comment: activity.comment,
+        }));
       }, 150);
     } else if (onEdit) {
       onEdit(activity);
@@ -113,7 +123,7 @@ export function ActivityCard({ activity, master, locations = [], style, onEdit, 
           className="inline-block px-2 py-1 rounded-br-lg text-[12px] font-semibold text-white"
           style={{ backgroundColor: 'rgba(0,0,0,0.25)' }}
         >
-          {formatTime(activity.startTime)}–{formatTime(activity.startTime + activity.duration)}
+          {formatTime(activity.startMinutes)}–{formatTime(activity.startMinutes + activity.durationMinutes)}
         </span>
         {activity.isPrivate && (
           <svg className="w-5 h-5 flex-shrink-0 drop-shadow-sm mt-1 mr-1" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.5">
@@ -130,9 +140,9 @@ export function ActivityCard({ activity, master, locations = [], style, onEdit, 
         <div className="flex items-start gap-1">
           <div
             className={`text-sm font-semibold leading-tight text-black flex-1 min-w-0 ${titleLines === 2 ? 'line-clamp-2' : 'truncate'}`}
-            title={activity.serviceName}
+            title={activity.serviceTitle}
           >
-            {activity.serviceName}
+            {activity.serviceTitle}
           </div>
           <span className="flex-shrink-0 text-[12px] text-black/70 font-normal">
             {activity.minAge}{activity.maxAge ? `–${activity.maxAge}` : '+'}

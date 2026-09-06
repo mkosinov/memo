@@ -1,42 +1,43 @@
 'use client';
 
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback } from 'react';
 import { DndContext, DragOverlay, closestCenter, useSensor, useSensors, PointerSensor, TouchSensor } from '@dnd-kit/core';
 import { useSchedule } from '@/contexts/ScheduleContext';
 import { useUI } from '@/contexts/UIContext';
 import { useDnD } from '@/hooks/useDnD';
 import { resolveById } from '@memo/domain';
-import type { Activity } from '@memo/domain';
+import type { ScheduleAdminDTO } from '@memo/domain';
 import { TimeColumn } from './TimeColumn';
 import { DayColumn } from './DayColumn';
 import { ActivityCard } from './ActivityCard';
 import { ScheduleColumnHeader } from './ScheduleColumnHeader';
 import { ActivityDetailsModal } from '../modal/ActivityDetailsModal';
-import { DAYS, getMonday, TIME_COL_WIDTH, isSameDay, formatTime, calculateGridTimeRange } from '@/lib/utils';
+import { DAYS, TIME_COL_WIDTH, isSameDay } from '@/lib/utils';
+import { formatTime, getMonday, toISODate } from '@/lib/datetime';
 
 export function WeekView() {
-  const { currentWeek, activities, scheduleIndex, masters, services, locations, stamp, addActivity, updateActivity, loading, error, filterMasterIds, filterLocationIds, cellHeight = 60, gridFrequency = 30, workingHoursStart = 9, workingHoursEnd = 21 } = useSchedule();
+  const { currentWeek, activities, scheduleIndex, masters, services, locations, stamp, addActivity, updateActivity, loading, error, filterMasterIds, filterLocationIds, cellHeight = 60, gridFrequency = 30, gridStartMinutes, gridEndMinutes } = useSchedule();
   const { showToast } = useUI();
   const monday = getMonday(currentWeek);
 
   // Modal state
   const [modalOpen, setModalOpen] = useState(false);
-  const [modalActivity, setModalActivity] = useState<Activity | null>(null);
+  const [modalActivity, setModalActivity] = useState<ScheduleAdminDTO | null>(null);
   const [modalMode, setModalMode] = useState<'edit' | 'quickAdd'>('edit');
 
-  const openCreateModal = useCallback((dayIndex: number, startTime: number) => {
+  const openCreateModal = useCallback((dayIndex: number, startMinutes: number) => {
     setModalActivity(null);
     setModalMode('edit');
     setModalOpen(true);
   }, []);
 
-  const openEditModal = useCallback((activity: Activity) => {
+  const openEditModal = useCallback((activity: ScheduleAdminDTO) => {
     setModalActivity(activity);
     setModalMode('edit');
     setModalOpen(true);
   }, []);
 
-  const openQuickAdd = useCallback((activity: Activity) => {
+  const openQuickAdd = useCallback((activity: ScheduleAdminDTO) => {
     setModalActivity(activity);
     setModalMode('quickAdd');
     setModalOpen(true);
@@ -81,7 +82,7 @@ export function WeekView() {
   }, [openEditModal, openQuickAdd, closeModal]);
 
   const handleCreateActivity = React.useCallback(
-    (dayIndex: number, startTime: number) => {
+    (dayIndex: number, startMinutes: number) => {
       if (!stamp.ready || !stamp.masterId || !stamp.serviceId || stamp.locations.size === 0) return;
       const service = services.find((s) => s.id === stamp.serviceId);
       if (!service) return;
@@ -89,35 +90,19 @@ export function WeekView() {
       const location = locations.find((l) => l.id === firstLocation);
 
       addActivity({
-        day: dayIndex,
+        dayIndex,
         masterId: stamp.masterId,
-        startTime,
-        duration: service.duration,
-        durationMinutes: service.durationMinutes,
         serviceId: stamp.serviceId,
-        serviceName: service.name,
-        minAge: service.minAge,
         locationId: firstLocation,
-        occupied: 0,
+        startMinutes,
+        durationMinutes: service.durationMinutes,
         capacity: location?.defaultCapacity ?? 0,
         isPrivate: false,
       });
 
-      showToast(`Создано: ${service.name} — ${DAYS[dayIndex]} ${formatTime(startTime)}`);
+      showToast(`Создано: ${service.name} — ${DAYS[dayIndex]} ${formatTime(startMinutes)}`);
     },
-    [stamp, services, addActivity, showToast],
-  );
-
-  // Resolve ScheduleAdminDTO[] → Activity[] with duration in hours + serviceName for DayColumn/DnD compat
-  const resolvedActivities = useMemo(
-    () => activities.map(a => ({ ...a, duration: a.durationMinutes / 60, serviceName: a.serviceTitle })),
-    [activities],
-  );
-
-  // Adaptive grid time range — extends beyond working hours if activities go outside
-  const gridRange = useMemo(
-    () => calculateGridTimeRange(resolvedActivities, workingHoursStart, workingHoursEnd),
-    [resolvedActivities, workingHoursStart, workingHoursEnd],
+    [stamp, services, locations, addActivity, showToast],
   );
 
   const {
@@ -131,7 +116,7 @@ export function WeekView() {
     onDragEnd,
     handleDragCancel,
   } = useDnD({
-    activities: resolvedActivities,
+    activities,
     addActivity,
     updateActivity,
     showToast,
@@ -147,13 +132,6 @@ export function WeekView() {
     return d;
   });
 
-  const dateToISO = (date: Date): string => {
-    const y = date.getFullYear();
-    const m = String(date.getMonth() + 1).padStart(2, '0');
-    const d = String(date.getDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
-  };
-
   const today = new Date();
 
   const dragMaster = activeDragActivity
@@ -161,21 +139,20 @@ export function WeekView() {
     : null;
 
   // Calculate ghost span for drag overlay (how many slots the dragged card occupies)
-  const durMinutes = activeDragActivity?.durationMinutes ?? (activeDragActivity?.duration ?? 0) * 60;
-  const ghostHeight = activeDragActivity ? Math.ceil(durMinutes / gridFrequency) : null;
+  const ghostHeight = activeDragActivity ? Math.ceil(activeDragActivity.durationMinutes / gridFrequency) : null;
 
   // NowLine
   const [nowPos, setNowPos] = useState(0);
   React.useEffect(() => {
     const update = () => {
       const now = new Date();
-      const hours = now.getHours() + now.getMinutes() / 60;
-      setNowPos((hours - gridRange.start) * cellHeight * 2);
+      const nowMinutes = now.getHours() * 60 + now.getMinutes();
+      setNowPos((nowMinutes - gridStartMinutes) * cellHeight / 30);
     };
     update();
     const iv = setInterval(update, 30000);
     return () => clearInterval(iv);
-  }, [cellHeight, gridRange.start]);
+  }, [cellHeight, gridStartMinutes]);
 
   const showNowLine = days.some(d => isSameDay(d, today)) && nowPos >= 0;
 
@@ -223,7 +200,7 @@ export function WeekView() {
         const nativeEvent = event.activatorEvent as MouseEvent | undefined;
         const dragData = event.active.data?.current as Record<string, unknown> | undefined;
         onDragStart(
-          { active: { id: event.active.id, data: { current: { activity: dragData?.activity as Activity | undefined } } } },
+          { active: { id: event.active.id, data: { current: { activity: dragData?.activity as ScheduleAdminDTO | undefined } } } },
           { altKey: nativeEvent?.altKey },
         );
       }}
@@ -263,13 +240,13 @@ export function WeekView() {
 
         {/* Grid row — scrollable */}
         <div className="flex-1 flex overflow-auto relative">
-          <TimeColumn cellHeight={cellHeight} gridFrequency={gridFrequency} gridStart={gridRange.start} gridEnd={gridRange.end} />
+          <TimeColumn cellHeight={cellHeight} gridFrequency={gridFrequency} gridStartMinutes={gridStartMinutes} gridEndMinutes={gridEndMinutes} />
           {days.map((day, i) => (
             <DayColumn
               key={i}
               dayIndex={i}
               date={day}
-              activities={resolveById(activitiesByDate.get(dateToISO(day)) ?? [], scheduleIndex.byId).map(a => ({ ...a, duration: a.durationMinutes / 60, serviceName: a.serviceTitle }))}
+              activities={resolveById(activitiesByDate.get(toISODate(day)) ?? [], scheduleIndex.byId)}
               masters={masters}
               locations={locations}
               services={services}
@@ -286,8 +263,8 @@ export function WeekView() {
               stamp={stamp}
               cellHeight={cellHeight}
               gridFrequency={gridFrequency}
-              gridStart={gridRange.start}
-              gridEnd={gridRange.end}
+              gridStartMinutes={gridStartMinutes}
+              gridEndMinutes={gridEndMinutes}
             />
           ))}
 
@@ -322,7 +299,7 @@ export function WeekView() {
             <ActivityCard
               activity={
                 draggedSnappedTime != null
-                  ? { ...activeDragActivity, startTime: draggedSnappedTime }
+                  ? { ...activeDragActivity, startMinutes: draggedSnappedTime }
                   : activeDragActivity
               }
               master={dragMaster}

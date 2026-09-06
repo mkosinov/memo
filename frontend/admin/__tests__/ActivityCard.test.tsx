@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import React from 'react';
 import { ActivityCard } from '../app/components/schedule/ActivityCard';
-import type { Activity, Master, Location } from '@memo/domain';
+import type { ScheduleAdminDTO, Master, Location } from '@memo/domain';
 import { createMockUIContext, createMockScheduleContext } from './helpers/mockContexts';
 
 const mockMaster: Master = {
@@ -18,19 +18,27 @@ const mockLocation: Location = {
   shortTitle: 'Гранд',
 };
 
-const mockActivity: Activity = {
+const mockActivity: ScheduleAdminDTO = {
   id: 'ev_1',
   day: 0,
   masterId: 'art_1',
-  startTime: 10,
-  duration: 2,
   serviceId: 'svc_1',
-  serviceName: 'Картина маслом',
-  minAge: '6',
   locationId: 'loc_1',
+  masterName: 'Ольга Петрова',
+  masterColor: '#5B8C7A',
+  serviceTitle: 'Картина маслом',
+  date: '2026-06-15',
+  time: '10:00',
+  startMinutes: 600,
+  durationMinutes: 120,
+  locationName: 'Гранд Отель Поляна',
+  minAge: '6',
   occupied: 3,
   capacity: 8,
   isPrivate: false,
+  comment: '',
+  priceMin: 0,
+  priceMax: 0,
 };
 
 describe('ActivityCard', () => {
@@ -51,7 +59,7 @@ describe('ActivityCard', () => {
   });
 
   it('tiny mode (< 60 min) shows only header + title', () => {
-    const shortActivity = { ...mockActivity, duration: 0.25 }; // 15 min
+    const shortActivity = { ...mockActivity, durationMinutes: 15 }; // 15 min
     render(
       <ActivityCard
         activity={shortActivity}
@@ -110,14 +118,14 @@ describe('ActivityCard', () => {
   });
 
   it('shows location when height >= 90px (Standard mode)', () => {
-    const tallActivity = { ...mockActivity, duration: 2 };
+    const tallActivity = { ...mockActivity, durationMinutes: 120 };
     render(<ActivityCard activity={tallActivity} master={mockMaster} locations={[mockLocation]} />);
     expect(screen.getByText('Гранд')).toBeInTheDocument();
   });
 
   it('hides master, location, footer when duration < 60 min (Tiny)', () => {
-    // duration=0.7 → 42 min → Tiny mode
-    const mediumActivity = { ...mockActivity, duration: 0.7 };
+    // 42 min → Tiny mode
+    const mediumActivity = { ...mockActivity, durationMinutes: 42 };
     render(<ActivityCard activity={mediumActivity} master={mockMaster} locations={[mockLocation]} />);
     // Title IS still visible
     expect(screen.getByText('Картина маслом')).toBeInTheDocument();
@@ -136,7 +144,7 @@ describe('ActivityCard', () => {
   });
 
   it('enforces minimum height of 60px when duration is 0', () => {
-    const zeroDuration = { ...mockActivity, duration: 0 };
+    const zeroDuration = { ...mockActivity, durationMinutes: 0 };
     const { container } = render(
       <ActivityCard activity={zeroDuration} master={mockMaster} />
     );
@@ -212,7 +220,7 @@ describe('ActivityCard', () => {
       [90, 'standard'],  // 90 min → height 142, isStandard
       [120, 'standard'], // 120 min → height 192, isStandard
     ])('duration %i min → %s tier', (minutes, expectedTier) => {
-      const activity = { ...mockActivity, duration: minutes / 60 };
+      const activity = { ...mockActivity, durationMinutes: minutes };
       const { container } = render(
         <ActivityCard
           activity={activity}
@@ -266,8 +274,8 @@ describe('ActivityCard', () => {
       (minutes, titleType, expectedShowMaster) => {
         const activity = {
           ...mockActivity,
-          duration: minutes / 60,
-          serviceName: titleType === 'long' ? 'Мини-картина акрилом' : 'МК',
+          durationMinutes: minutes,
+          serviceTitle: titleType === 'long' ? 'Мини-картина акрилом' : 'МК',
         };
         render(
           <ActivityCard
@@ -289,7 +297,7 @@ describe('ActivityCard', () => {
 
   describe('compact capacity', () => {
     it('renders capacity in location row, not in footer (compact 1:00)', () => {
-      const activity = { ...mockActivity, duration: 1 }; // 1:00 → compact
+      const activity = { ...mockActivity, durationMinutes: 60 }; // 1:00 → compact
       render(
         <ActivityCard
           activity={activity}
@@ -305,7 +313,7 @@ describe('ActivityCard', () => {
     });
 
     it('renders capacity in footer for standard (2:00)', () => {
-      const activity = { ...mockActivity, duration: 2 }; // 2:00 → standard
+      const activity = { ...mockActivity, durationMinutes: 120 }; // 2:00 → standard
       render(
         <ActivityCard
           activity={activity}

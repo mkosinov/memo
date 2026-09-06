@@ -801,10 +801,10 @@ describe('SettingsTab — row layout', () => {
   });
 
   it('snaps non-grid time to nearest grid slot', () => {
-    // Activity with startTime=14.0667 (14:04) — NOT aligned to 30-min grid
+    // Activity with startMinutes=845 (14:05) — NOT aligned to 30-min grid
     const activityWithArbitraryMinutes = {
       ...mockActivity,
-      startTime: 14 + 4 / 60, // 14:04
+      startMinutes: 845,
       date: '2026-06-15',
     };
     render(
@@ -829,9 +829,7 @@ describe('SettingsTab — service/location combobox flow', () => {
     expect(onUpdate).toHaveBeenCalledWith(
       expect.objectContaining({
         serviceId: 's2',
-        serviceName: 'Картина акрилом',
-        minAge: '6',
-        duration: 2,
+        durationMinutes: 120,
       }),
     );
   });

@@ -304,6 +304,17 @@ describe('DataTable column visibility', () => {
     expect(within(document.querySelector('thead')!).queryByText('Секрет')).toBeNull();
     expect(screen.getByRole('button', { name: /Число/ })).toBeInTheDocument();
   });
+
+  it('after corrupted-LS fallback, toggling persists the DEFAULT-based set (GH #141)', () => {
+    localStorage.setItem('test-columns', '{not-json');
+    renderTable();
+
+    // Corrupted value → defaults (tag + count); hiding «Число» must persist
+    // the default-derived set, i.e. the toggle writes through the fallback.
+    fireEvent.click(screen.getByLabelText('Настроить колонки'));
+    fireEvent.click(screen.getByText('Число'));
+    expect(JSON.parse(localStorage.getItem('test-columns')!)).toEqual(['tag']);
+  });
 });
 
 // ─── Search (debounce / Enter / clear) ───────────────────────────────────

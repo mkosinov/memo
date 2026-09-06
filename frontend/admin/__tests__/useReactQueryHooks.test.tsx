@@ -19,19 +19,23 @@ vi.mock('@memo/api-client', () => ({
   getAllTags: vi.fn(),
 }));
 
-// Mock transformers
+// Mock transformers — shapes mirror the real transformers' domain output
+// (transformService now emits durationMinutes + tariffs per #142 spec §6/§9.8).
 vi.mock('@/lib/transformers', () => ({
   transformMaster: vi.fn((raw: any) => ({ ...raw, name: raw.first_name + ' ' + raw.last_name })),
   transformLocation: vi.fn((raw: any) => ({ ...raw, name: raw.name })),
-  transformService: vi.fn((raw: any) => ({ ...raw, name: raw.title })),
-  transformActivity: vi.fn((raw: any) => ({ ...raw, id: raw.id })),
+  transformService: vi.fn((raw: any) => ({
+    ...raw,
+    name: raw.title,
+    durationMinutes: raw.duration,
+    tariffs: raw.tariffs ?? [],
+  })),
 }));
 
 import {
   getMasters,
   getLocations,
   getServices,
-  getActivities,
   getAllMasters,
   getAllLocations,
   getAllServices,
@@ -45,7 +49,6 @@ import {
   transformMaster,
   transformLocation,
   transformService,
-  transformActivity,
 } from '@/lib/transformers';
 import type {
   MasterResponse,
@@ -277,53 +280,26 @@ describe('useServices', () => {
     );
     expect(result.current.data).toHaveLength(1);
   });
-});
 
-// ─── useActivities ──────────────────────────────────────────────────────────
+  // #142 spec §9.8 — domain Service carries tariffs + integer-minute durationMinutes.
+  it('select output carries tariffs and integer durationMinutes', async () => {
+    const twoTariffService: ServiceResponse = {
+      ...servicesFixture[0],
+      duration: 180,
+      tariffs: [
+        { id: 't1', service_id: 's1', title: 'Взрослый', description: null, price: 2500 },
+        { id: 't2', service_id: 's1', title: 'Детский', description: null, price: 1500 },
+      ],
+    };
+    vi.mocked(getAllServices).mockResolvedValue([twoTariffService]);
 
-describe('useActivities', () => {
-  const weekStart = '2024-12-23';
-  const weekEnd = '2024-12-29';
-
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  it('calls getActivities with date range and transforms results', async () => {
-    vi.mocked(getActivities).mockResolvedValue(envelope(activitiesFixture));
-
-    const { useActivities } = await import('@/hooks/useActivities');
-    const { result } = renderHook(
-      () => useActivities(weekStart, weekEnd),
-      { wrapper: createWrapper() },
-    );
+    const { useServices } = await import('@/hooks/useServices');
+    const { result } = renderHook(() => useServices(), { wrapper: createWrapper() });
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
-    expect(getActivities).toHaveBeenCalledWith({
-      date_from: weekStart,
-      date_to: weekEnd,
-      per_page: 100,
-    });
-    expect(transformActivity).toHaveBeenCalledWith(
-      activitiesFixture[0],
-      expect.any(Number),
-      expect.any(Array),
-    );
-    expect(result.current.data).toHaveLength(1);
-  });
-
-  it('uses queryKey ["activities", weekStart, weekEnd]', async () => {
-    vi.mocked(getActivities).mockResolvedValue(envelope(activitiesFixture));
-
-    const { useActivities } = await import('@/hooks/useActivities');
-    const { result } = renderHook(
-      () => useActivities(weekStart, weekEnd),
-      { wrapper: createWrapper() },
-    );
-
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(result.current.data).toBeDefined();
+    expect(result.current.data![0].tariffs).toHaveLength(2);
+    expect(result.current.data![0].durationMinutes).toBe(180);
   });
 });
 

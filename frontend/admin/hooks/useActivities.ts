@@ -1,18 +1,8 @@
 'use client';
 import { useQuery } from '@tanstack/react-query';
-import { getActivities, getActivity, getRecords } from '@memo/api-client';
-import { transformActivity } from '@/lib/transformers';
+import { getActivity, getRecords } from '@memo/api-client';
 import type { ActivityResponse, RecordResponse } from '@memo/api-client';
-import type { Activity } from '@memo/domain';
 import { qk } from '@/lib/queryKeys';
-
-export function useActivities(weekStart: string, weekEnd: string) {
-  return useQuery<ActivityResponse[], Error, Activity[]>({
-    queryKey: qk.activityRange(weekStart, weekEnd),
-    queryFn: () => getActivities({ date_from: weekStart, date_to: weekEnd, per_page: 100 }).then(r => r.items),
-    select: (raw) => raw.map(transformActivity),
-  });
-}
 
 /** Single activity by id. */
 export function useActivity(id: string | undefined) {

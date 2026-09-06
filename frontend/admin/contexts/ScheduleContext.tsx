@@ -1,7 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useState, useCallback, useMemo } from 'react';
-import type { Activity, Master, Service, Location, StampState, ScheduleAdminDTO, ScheduleIndex as DomainScheduleIndex } from '@memo/domain';
+import type { Master, Service, Location, StampState, ScheduleAdminDTO, ScheduleIndex as DomainScheduleIndex } from '@memo/domain';
 import { buildSchedule } from '@memo/domain';
 import { buildAdminSchedule } from '@/lib/buildSchedule';
 import { useMasters, useMastersRaw } from '@/hooks/useMasters';

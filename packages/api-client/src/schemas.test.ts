@@ -10,6 +10,8 @@ import {
   type ServiceResponse,
   ActivityCreateSchema,
   type ActivityCreate,
+  ActivityPatchSchema,
+  type ActivityPatch,
   ActivityResponseSchema,
   type ActivityResponse,
   PhotoResponseSchema,
@@ -281,6 +283,29 @@ describe('ActivityCreateSchema', () => {
   it('rejects missing required fields', () => {
     const { master_id, ...without } = validActivityCreate;
     expect(() => ActivityCreateSchema.parse(without)).toThrow();
+  });
+});
+
+// ─── ActivityPatch (GH #142) ────────────────────────────────────────────────
+
+describe('ActivityPatchSchema', () => {
+  it('parses a minimal partial payload (only start)', () => {
+    const result = ActivityPatchSchema.parse({ start: '2026-09-03T10:30:00' });
+    expect(result.start).toBe('2026-09-03T10:30:00');
+    expect(result.master_id).toBeUndefined();
+  });
+
+  it('accepts occupied (wire anomaly — ignored by backend on PATCH)', () => {
+    const result = ActivityPatchSchema.parse({ start: '2026-09-03T10:30:00', occupied: 3 });
+    expect(result.occupied).toBe(3);
+  });
+
+  it('accepts any partial subset of ActivityCreate fields', () => {
+    const patch: ActivityPatch = { duration: 120, capacity: 8, comment: 'новый' };
+    const result = ActivityPatchSchema.parse(patch);
+    expect(result.duration).toBe(120);
+    expect(result.capacity).toBe(8);
+    expect(result.comment).toBe('новый');
   });
 });
 

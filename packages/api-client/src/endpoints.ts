@@ -17,6 +17,7 @@ import {
   type LocationUpdate,
   ActivityCreateSchema,
   type ActivityCreate,
+  type ActivityPatch,
   ActivityResponseSchema,
   type ActivityResponse,
   PhotoResponseSchema,
@@ -281,7 +282,7 @@ export async function updateActivity(
 // PATCH for partial updates — only send the changed fields.
 export async function patchActivity(
   id: string,
-  data: Record<string, unknown>,
+  data: ActivityPatch,
 ): Promise<ActivityResponse> {
   return api(`/api/v1/activities/${id}`, ActivityResponseSchema, {
     method: 'PATCH',

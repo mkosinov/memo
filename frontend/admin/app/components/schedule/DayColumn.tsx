@@ -598,7 +598,6 @@ export function DayColumn({ dayIndex, activities, masters, locations = [], servi
           locations={locations}
           anchorRect={popoverData.anchorRect}
           cellHeight={cellHeight}
-          gridStart={gridStartMinutes}
           onClose={() => setPopoverData(null)}
           onSelectActivity={(act) => {
             setPopoverData(null);

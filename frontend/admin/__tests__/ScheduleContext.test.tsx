@@ -70,17 +70,6 @@ const mockServices = [
   { id: 's2', name: 'Картина акрилом', durationMinutes: 120, minAge: '6', defaultAdultPrice: 2800 },
 ];
 
-const mockActivities = [
-  {
-    id: 'a1', day: 0, masterId: 'm1', startTime: 10, duration: 2,
-    serviceId: 's1', locationId: 'alpika', occupied: 3, capacity: 8, isPrivate: false,
-  },
-  {
-    id: 'a2', day: 1, masterId: 'm2', startTime: 14, duration: 1.5,
-    serviceId: 's2', locationId: 'grand', occupied: 4, capacity: 6, isPrivate: false,
-  },
-];
-
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function wrap<T>(items: T[]) {

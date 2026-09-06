@@ -2,7 +2,8 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigation } from '@/contexts/NavigationContext';
-import { getMonday, formatDateISO, displayMasterName } from '@/lib/utils';
+import { displayMasterName } from '@/lib/utils';
+import { getMonday, toISODate } from '@/lib/datetime';
 import { StatusFiltersPicker } from '@/app/components/shared/StatusFiltersPicker';
 import { Combobox, type ComboboxOption } from '@/app/components/shared/Combobox';
 import { useLocationsRaw } from '@/hooks/useLocations';
@@ -28,8 +29,8 @@ function getCurrentWeekRange(): { dateFrom: string; dateTo: string } {
   const monday = getMonday(new Date());
   const sunday = new Date(monday.getTime() + 6 * 24 * 60 * 60 * 1000);
   return {
-    dateFrom: formatDateISO(monday),
-    dateTo: formatDateISO(sunday),
+    dateFrom: toISODate(monday),
+    dateTo: toISODate(sunday),
   };
 }
 

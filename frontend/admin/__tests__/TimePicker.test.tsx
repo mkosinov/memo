@@ -164,7 +164,7 @@ describe('TimePicker', () => {
   // ─── Edge cases ─────────────────────────────────────────────────────────
 
   it('snaps to nearest grid time when current time is not on grid', () => {
-    // startTime 14:04 is not on 15-min grid, closest is 14:00
+    // value time 14:04 is not on 15-min grid, closest is 14:00
     render(<TimePicker {...defaultProps} value="2026-06-11T14:04:00" />);
     const select = screen.getByLabelText('Время начала') as HTMLSelectElement;
     // Should snap to nearest grid time (14:00)

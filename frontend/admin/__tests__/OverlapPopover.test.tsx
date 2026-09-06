@@ -415,7 +415,6 @@ describe('OverlapPopover', () => {
         onClose={vi.fn()}
         onSelectActivity={vi.fn()}
         cellHeight={60}
-        gridStart={540}
       />,
     );
 

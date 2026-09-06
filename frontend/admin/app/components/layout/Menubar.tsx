@@ -7,7 +7,8 @@ import { useNavigation } from '@/contexts/NavigationContext';
 import { useUI } from '@/contexts/UIContext';
 import type { ViewModeType } from '@/contexts/ScheduleContext';
 import { useMasters } from '@/hooks/useMasters';
-import { DAYS, DAYS_FULL, MONTHS, MONTHS_GENITIVE, getMonday, formatDate, formatDateISO, isSameDay } from '@/lib/utils';
+import { DAYS, DAYS_FULL, MONTHS, MONTHS_GENITIVE, formatDate, isSameDay } from '@/lib/utils';
+import { getMonday, toISODate } from '@/lib/datetime';
 import { MonthYearPicker } from '../shared/MonthYearPicker';
 import type { Master } from '@memo/domain';
 
@@ -493,7 +494,7 @@ export function Menubar() {
   const handleWeekSelect = useCallback((date: Date) => {
     const monday = getMonday(date);
     const sunday = new Date(monday.getTime() + 6 * 24 * 60 * 60 * 1000);
-    selectDateRange(formatDateISO(monday), formatDateISO(sunday));
+    selectDateRange(toISODate(monday), toISODate(sunday));
   }, [selectDateRange]);
 
   const toggleMenu = useCallback((menu: string) => {

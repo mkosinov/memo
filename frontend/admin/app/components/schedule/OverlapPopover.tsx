@@ -13,8 +13,6 @@ interface OverlapPopoverProps {
   onSelectActivity: (activity: ScheduleAdminDTO) => void;
   anchorRect: DOMRect;
   cellHeight?: number;
-  /** Grid start in minutes from midnight (GH #142). */
-  gridStart?: number;
 }
 
 /**
@@ -234,7 +232,7 @@ export function OverlapPopover({
             <div key={colIdx} className="relative" style={{ minWidth: '120px' }}>
               {col.map(act => {
                 const master = masterMap.get(act.masterId) || { id: '', name: 'Unknown', shortName: '?', color: '#666' };
-                // Use timelineStart (popover's own start) instead of gridStart (main schedule start)
+                // Position relative to timelineStart (popover's own snapped start), not the main grid's start
                 const topPx = (act.startMinutes - timelineStart) * cellHeight / 30;
                 const durMinutes = act.durationMinutes;
                 const heightPx = Math.max(durMinutes * cellHeight / 30 - 10, 52);

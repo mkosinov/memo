@@ -4,7 +4,7 @@ import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { NavigationProvider } from '../contexts/NavigationContext';
 import { ScheduleProvider, useSchedule } from '../contexts/ScheduleContext';
-import { getMonday, formatDateISO } from '@/lib/utils';
+import { getMonday, toISODate } from '@/lib/datetime';
 
 // ─── Mock api-client ─────────────────────────────────────────────────────
 vi.mock('@memo/api-client', () => {
@@ -66,8 +66,8 @@ function renderWithContext() {
 function getActivityQueryKey(): string[] {
   const today = new Date();
   const monday = getMonday(today);
-  const weekStart = formatDateISO(monday);
-  const weekEnd = formatDateISO(
+  const weekStart = toISODate(monday);
+  const weekEnd = toISODate(
     new Date(monday.getTime() + 7 * 24 * 60 * 60 * 1000 - 1),
   );
   return ['activities', weekStart, weekEnd];

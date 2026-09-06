@@ -3,7 +3,6 @@
 import { useState, useCallback, useMemo } from 'react';
 import type { ScheduleAdminDTO } from '@memo/domain';
 import type { ScheduleContextType } from '@/contexts/ScheduleContext';
-import { HOURS_START } from '@/lib/utils';
 
 // Re-export types from @dnd-kit/core for reference.
 // The hook uses simplified event shapes below since it only consumes a subset of fields.
@@ -86,7 +85,7 @@ export function parseSlotId(id: string): { dayIndex: number; slotIndex: number; 
 export function slotIndexToMinutes(
   slotIndex: number,
   gridFrequency: number = 30,
-  gridStartMinutes: number = HOURS_START * 60,
+  gridStartMinutes: number = 540,
 ): number {
   return gridStartMinutes + slotIndex * gridFrequency;
 }

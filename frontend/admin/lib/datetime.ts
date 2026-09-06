@@ -77,7 +77,7 @@ export function formatTime(startMinutes: number): string {
   return `${pad2(h)}:${pad2(m)}`;
 }
 
-/** Parse 'HH:MM' to integer minutes (replaces `hhmmToDecimal`). Invalid input → NaN; callers guard as today. */
+/** Parse 'HH:MM' to integer minutes (replaces the legacy decimal-hours parser in utils). Invalid input → NaN; callers guard as today. */
 export function hhmmToMinutes(hhmm: string): number {
   const [h, m] = hhmm.split(':').map(Number);
   return h * 60 + m;

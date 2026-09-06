@@ -8,10 +8,10 @@ Usage (from repo root):
   python3 .zcode/scripts/gh_board.py status N "In IMPL"          — move a card's status
 
 Project constants are hardcoded (IDs are stable for Project #3).
-The script lives in the memo repo on purpose: the board is part of the
-host/container seam, and the seam carries things via git only.
-Harness files live in .zcode (host) / .opencode (container); the
-container-side copy is .opencode/scripts/gh_board.py.
+The script is part of the host/container seam and travels via git.
+Identical copies ship in BOTH harness folders — .zcode/scripts/ (host)
+and .opencode/scripts/ (container); when editing, change both (or edit
+one and copy over).
 """
 import json
 import subprocess

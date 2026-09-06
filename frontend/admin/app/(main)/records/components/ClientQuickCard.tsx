@@ -10,17 +10,12 @@ import { DiamondIcon } from '@/app/components/shared/DiamondIcon';
 import { StatusBadge } from '@/app/components/shared/StatusBadge';
 import { Modal } from '@/app/components/shared/modal/Modal';
 import { safeStatus } from '@/app/lib/status-utils';
+import { parseLocalISO, formatTime } from '@/lib/datetime';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
 function formatPrice(n: number): string {
   return `${n.toLocaleString('ru-RU')}₽`;
-}
-
-function formatTime(time: number): string {
-  const h = Math.floor(time);
-  const m = Math.round((time - h) * 60);
-  return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────
@@ -138,7 +133,7 @@ export function ClientQuickCard({ clientId, onClose }: ClientQuickCardProps) {
                             </div>
                             <div className="text-xs mt-1.5" style={{ color: 'var(--ink-light)' }}>
                               {activity
-                                ? `${formatTime(new Date(activity.start).getUTCHours() + new Date(activity.start).getUTCMinutes() / 60)} · ${location?.name ?? '—'}`
+                                ? `${formatTime(parseLocalISO(activity.start).startMinutes)} · ${location?.name ?? '—'}`
                                 : '—'}
                             </div>
                             {record.comment && (

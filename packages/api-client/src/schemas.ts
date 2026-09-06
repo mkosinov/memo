@@ -152,7 +152,7 @@ export const ActivityCreateSchema = z.object({
   master_id: z.string(),
   service_id: z.string(),
   location_id: z.string(),
-  start: z.string(), // ISO datetime string
+  start: z.string(), // floating local time (RFC 5545), NOT an instant — no zone suffix
   duration: z.number(),
   capacity: z.number(),
   is_private: z.boolean().optional(),
@@ -162,6 +162,15 @@ export const ActivityCreateSchema = z.object({
 
 export type ActivityCreate = z.infer<typeof ActivityCreateSchema>;
 
+// ─── ActivityPatch (GH #142) ────────────────────────────────────────────────
+// occupied is a documented wire anomaly: server-computed on read, backend
+// Pydantic silently ignores it on PATCH; the frontend sends it for optimistic
+// parity. Derived from the create schema so drift is a compile error.
+export const ActivityPatchSchema = ActivityCreateSchema.partial().extend({
+  occupied: z.number().optional(),
+});
+export type ActivityPatch = z.infer<typeof ActivityPatchSchema>;
+
 // ─── ActivityResponse ──────────────────────────────────────────────────────
 // Defined independently (not via extend) to keep output types clean.
 
@@ -170,7 +179,7 @@ export const ActivityResponseSchema = z.object({
   master_id: z.string(),
   service_id: z.string(),
   location_id: z.string(),
-  start: z.string(), // ISO datetime string
+  start: z.string(), // floating local time (RFC 5545), NOT an instant — no zone suffix
   duration: z.number(),
   capacity: z.number(),
   is_private: z.boolean(),

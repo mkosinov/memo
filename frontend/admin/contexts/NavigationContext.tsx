@@ -1,7 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useState, useCallback } from 'react';
-import { getMonday, formatDateISO } from '@/lib/utils';
+import { getMonday, toISODate } from '@/lib/datetime';
 
 interface NavigationContextType {
   dateFrom: string;
@@ -15,8 +15,8 @@ function getCurrentWeekRange(): { dateFrom: string; dateTo: string } {
   const monday = getMonday(new Date());
   const sunday = new Date(monday.getTime() + 6 * 24 * 60 * 60 * 1000);
   return {
-    dateFrom: formatDateISO(monday),
-    dateTo: formatDateISO(sunday),
+    dateFrom: toISODate(monday),
+    dateTo: toISODate(sunday),
   };
 }
 

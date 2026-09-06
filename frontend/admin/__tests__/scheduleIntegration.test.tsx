@@ -143,10 +143,11 @@ describe('Schedule pipeline integration: enrichment from API to ActivityCard', (
     ]);
 
     // ═══ CRITICAL: Mock activities WITHOUT service_name or min_age ═══
-    // This simulates what the real backend returns — ActivityResponse
+    // This simulates what the real backend returns — raw ActivityResponse
     // does NOT include service_name or min_age fields.
-    // transformActivity() in transformers.ts does NOT set them either.
-    // The enrichment MUST come from toScheduleItems() in buildSchedule.ts.
+    // The enrichment MUST come from buildAdminSchedule() in lib/buildSchedule.ts,
+    // which joins raw ActivityResponse with master/service/location reference data
+    // into ScheduleAdminDTO.
     vi.mocked(getActivities).mockResolvedValue(wrap([
       {
         id: 'a1',
@@ -185,11 +186,10 @@ describe('Schedule pipeline integration: enrichment from API to ActivityCard', (
 
     // ASSERT — wait for loading to finish and the activity card to appear
     // The enrichment pipeline should:
-    //   1. Fetch ActivityResponse (no serviceName/minAge) via useActivities
-    //   2. Transform via transformActivity() → Activity (still no serviceName/minAge)
-    //   3. Enrich via toScheduleItems() → ScheduleItem (serviceName from matching Service)
-    //   4. Pass through ScheduleProvider → WeekView → DayColumn → ActivityCard
-    //   5. Render {activity.serviceName} inside the card
+    //   1. Fetch raw ActivityResponse (no serviceName/minAge) via qk.activityRange useQuery
+    //   2. Join with master/service/location raw responses via buildAdminSchedule() → ScheduleAdminDTO
+    //   3. Pass through ScheduleProvider → WeekView → DayColumn → ActivityCard
+    //   4. Render {activity.serviceName} inside the card
     await waitFor(() => {
       expect(screen.getByText('Картина маслом')).toBeInTheDocument();
     });
@@ -364,7 +364,7 @@ describe('Schedule pipeline: nullable visitor_id impact', () => {
 });
 
 // THIS TEST IS RED — REPRODUCES BUG #service-name-missing
-// If the test PASSES (GREEN), the enrichment pipeline (ScheduleProvider → toScheduleItems)
+// If the test PASSES (GREEN), the enrichment pipeline (ScheduleProvider → buildAdminSchedule)
 // is working correctly. The bug must be elsewhere (CSS/build/deployment/context wiring issue).
 // If the test FAILS (RED), the enrichment pipeline is broken — activities reach
 // ActivityCard without serviceName/minAge populated.

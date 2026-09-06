@@ -28,7 +28,7 @@ export interface ScheduleDTO {
 
 export interface ScheduleAdminDTO extends ScheduleDTO {
   day: number; // day index (Mon=0..Sun=6), for grid positioning
-  startTime: number; // hours from midnight as float (e.g. 14.5 = 14:30), for grid positioning
+  startMinutes: number; // minutes from midnight, for grid positioning
   isPrivate: boolean;
   masterColor: string; // resolved from masters reference
   minAge: string; // resolved from services reference

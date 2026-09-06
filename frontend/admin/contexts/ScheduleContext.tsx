@@ -1,7 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useState, useCallback, useMemo } from 'react';
-import type { Activity, Master, Service, Location, StampState, ScheduleAdminDTO, ScheduleIndex as DomainScheduleIndex } from '@memo/domain';
+import type { Master, Service, Location, StampState, ScheduleAdminDTO, ScheduleIndex as DomainScheduleIndex } from '@memo/domain';
 import { buildSchedule } from '@memo/domain';
 import { buildAdminSchedule } from '@/lib/buildSchedule';
 import { useMasters, useMastersRaw } from '@/hooks/useMasters';
@@ -14,10 +14,11 @@ import {
   patchActivity as apiPatchActivity,
   deleteActivity as apiDeleteActivity,
 } from '@memo/api-client';
-import type { ActivityResponse, ServiceResponse } from '@memo/api-client';
+import type { ActivityResponse } from '@memo/api-client';
+import type { ActivityPatch } from '@memo/api-client';
 import { useQueryClient, useMutation } from '@tanstack/react-query';
 import { qk } from '@/lib/queryKeys';
-import { getMonday, formatDateISO } from '@/lib/utils';
+import { getMonday, toISODate, composeLocalISO, dayIndexToDate, calculateGridTimeRange } from '@/lib/datetime';
 import { CELL_HEIGHT_MIN, CELL_HEIGHT_OPTIONS, GRID_FREQUENCY_DEFAULT, GRID_FREQUENCY_OPTIONS } from '@/lib/utils';
 import { useNavigation } from '@/contexts/NavigationContext';
 
@@ -89,13 +90,33 @@ export interface ScheduleContextType {
   scheduleIndex: DomainScheduleIndex<ScheduleAdminDTO>;
   masters: Master[];
   services: Service[];
-  servicesRaw: ServiceResponse[];
   locations: Location[];
   currentWeek: Date;
   stamp: StampState;
   setCurrentWeek: (date: Date) => void;
-  addActivity: (activity: Omit<Activity, 'id'>) => void;
-  updateActivity: (id: string, updates: Partial<Activity>) => void;
+  addActivity: (activity: {
+    dayIndex: number;
+    masterId: string;
+    serviceId: string;
+    locationId: string;
+    startMinutes: number;
+    durationMinutes: number;
+    capacity: number;
+    isPrivate?: boolean;
+    comment?: string;
+  }) => void;
+  updateActivity: (id: string, updates: {
+    dayIndex?: number;
+    startMinutes?: number;
+    durationMinutes?: number;
+    masterId?: string;
+    serviceId?: string;
+    locationId?: string;
+    capacity?: number;
+    isPrivate?: boolean;
+    comment?: string;
+    occupied?: number;
+  }) => void;
   deleteActivity: (id: string) => void;
   setStamp: React.Dispatch<React.SetStateAction<StampState>>;
   copyLastWeek: () => void;
@@ -119,6 +140,8 @@ export interface ScheduleContextType {
   setWorkingHoursStart: (h: number) => void;
   workingHoursEnd: number;
   setWorkingHoursEnd: (h: number) => void;
+  gridStartMinutes: number;
+  gridEndMinutes: number;
   prevPeriod: () => void;
   nextPeriod: () => void;
 }
@@ -131,7 +154,7 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
   const setCurrentWeek = useCallback((date: Date) => {
     const monday = getMonday(date);
     const sunday = new Date(monday.getTime() + 6 * 24 * 60 * 60 * 1000);
-    selectDateRange(formatDateISO(monday), formatDateISO(sunday));
+    selectDateRange(toISODate(monday), toISODate(sunday));
   }, [selectDateRange]);
   const [stamp, setStamp] = useState<StampState>({
     masterId: null,
@@ -213,7 +236,7 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
         // Also navigate the week range to contain this day
         const monday = getMonday(new Date(detail.date));
         const sunday = new Date(monday.getTime() + 6 * 24 * 60 * 60 * 1000);
-        selectDateRange(formatDateISO(monday), formatDateISO(sunday));
+        selectDateRange(toISODate(monday), toISODate(sunday));
       }
     };
     document.addEventListener('__memo-select-day', handleSelectDay);
@@ -230,7 +253,7 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
         // Also navigate the week range to contain this day
         const monday = getMonday(new Date(detail.date));
         const sunday = new Date(monday.getTime() + 6 * 24 * 60 * 60 * 1000);
-        selectDateRange(formatDateISO(monday), formatDateISO(sunday));
+        selectDateRange(toISODate(monday), toISODate(sunday));
       }
     };
     document.addEventListener('__memo-switch-to-day-view', handleSwitchToDayView);
@@ -245,7 +268,7 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
         setViewMode('week');
         const monday = getMonday(new Date(detail.date));
         const sunday = new Date(monday.getTime() + 6 * 24 * 60 * 60 * 1000);
-        selectDateRange(formatDateISO(monday), formatDateISO(sunday));
+        selectDateRange(toISODate(monday), toISODate(sunday));
       }
     };
     document.addEventListener('__memo-switch-to-week-view', handleSwitchToWeekView);
@@ -299,41 +322,41 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: activityQueryKey }),
   });
 
+  // Typed mutationFn: race the PATCH against a 5s timeout (GH #142 — ActivityPatch)
+  const updateActivityMutationFn = async ({ id, data }: { id: string; data: ActivityPatch }) => {
+    return Promise.race([
+      apiPatchActivity(id, data),
+      new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error('Update timed out after 5s')), 5000);
+      }),
+    ]);
+  };
+
   const updateMutation = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: Record<string, unknown> }) => {
-      // Race: API call vs 5s timeout
-      return Promise.race([
-        apiPatchActivity(id, data),
-        new Promise<never>((_, reject) => {
-          setTimeout(() => reject(new Error('Update timed out after 5s')), 5000);
-        }),
-      ]);
-    },
+    mutationFn: updateActivityMutationFn,
     onMutate: async ({ id, data }) => {
       // Cancel in-flight queries so they don't overwrite our optimistic update
       await queryClient.cancelQueries({ queryKey: activityQueryKey });
 
       // Snapshot current data
-      const previousActivities = queryClient.getQueryData(activityQueryKey);
+      const previousActivities = queryClient.getQueryData<ActivityResponse[]>(activityQueryKey);
 
       // Optimistic update: apply API-level fields to cache (ActivityResponse shape)
-      queryClient.setQueryData(activityQueryKey, (old: unknown) => {
+      queryClient.setQueryData<ActivityResponse[]>(activityQueryKey, (old) => {
         if (!Array.isArray(old)) return old;
-        return old.map((activity: Record<string, unknown>) => {
-          if (activity.id === id) {
-            const updated = { ...activity };
-            if (data.start !== undefined) updated.start = data.start;
-            if (data.master_id !== undefined) updated.master_id = data.master_id;
-            if (data.service_id !== undefined) updated.service_id = data.service_id;
-            if (data.location_id !== undefined) updated.location_id = data.location_id;
-            if (data.duration !== undefined) updated.duration = data.duration;
-            if (data.capacity !== undefined) updated.capacity = data.capacity;
-            if (data.is_private !== undefined) updated.is_private = data.is_private;
-            if (data.comment !== undefined) updated.comment = data.comment;
-            if (data.occupied !== undefined) updated.occupied = data.occupied;
-            return updated;
-          }
-          return activity;
+        return old.map((activity) => {
+          if (activity.id !== id) return activity;
+          const patch: Partial<ActivityResponse> = {};
+          if (data.start !== undefined) patch.start = data.start;
+          if (data.master_id !== undefined) patch.master_id = data.master_id;
+          if (data.service_id !== undefined) patch.service_id = data.service_id;
+          if (data.location_id !== undefined) patch.location_id = data.location_id;
+          if (data.duration !== undefined) patch.duration = data.duration;
+          if (data.capacity !== undefined) patch.capacity = data.capacity;
+          if (data.is_private !== undefined) patch.is_private = data.is_private;
+          if (data.comment !== undefined) patch.comment = data.comment;
+          if (data.occupied !== undefined) patch.occupied = data.occupied;
+          return { ...activity, ...patch };
         });
       });
 
@@ -342,7 +365,7 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
     onError: (_err, _variables, context) => {
       // Restore snapshot on error — return a new array for immutability/re-render
       if (context?.previousActivities) {
-        queryClient.setQueryData(activityQueryKey, [...(context.previousActivities as unknown[])]);
+        queryClient.setQueryData(activityQueryKey, [...(context.previousActivities as ActivityResponse[])]);
       }
     },
     onSettled: () => {
@@ -357,24 +380,25 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
   });
 
   // Actions
-  const addActivity = useCallback((activity: Omit<Activity, 'id'>) => {
-    const startDate = new Date(currentWeek);
-    startDate.setDate(startDate.getDate() + activity.day);
-    startDate.setHours(Math.floor(activity.startTime), Math.round((activity.startTime % 1) * 60), 0, 0);
-
-    const sy = startDate.getFullYear();
-    const sm = String(startDate.getMonth() + 1).padStart(2, '0');
-    const sd = String(startDate.getDate()).padStart(2, '0');
-    const sh = String(startDate.getHours()).padStart(2, '0');
-    const smin = String(startDate.getMinutes()).padStart(2, '0');
-    const localStart = `${sy}-${sm}-${sd}T${sh}:${smin}:00`;
+  const addActivity = useCallback((activity: {
+    dayIndex: number;
+    masterId: string;
+    serviceId: string;
+    locationId: string;
+    startMinutes: number;
+    durationMinutes: number;
+    capacity: number;
+    isPrivate?: boolean;
+    comment?: string;
+  }) => {
+    const start = composeLocalISO(dayIndexToDate(currentWeek, activity.dayIndex), activity.startMinutes);
 
     createMutation.mutate({
       master_id: activity.masterId,
       service_id: activity.serviceId,
       location_id: activity.locationId,
-      start: localStart,
-      duration: activity.durationMinutes ?? Math.round(activity.duration * 60),  // prefer minutes, fallback hours→min
+      start,
+      duration: activity.durationMinutes,
       capacity: activity.capacity,
       is_private: activity.isPrivate ?? false,
       comment: activity.comment ?? null,
@@ -382,28 +406,30 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
     });
   }, [currentWeek, createMutation]);
 
-  const updateActivityFn = useCallback((id: string, updates: Partial<Activity>) => {
-    const payload: Record<string, unknown> = {};
+  const updateActivityFn = useCallback((id: string, updates: {
+    dayIndex?: number;
+    startMinutes?: number;
+    durationMinutes?: number;
+    masterId?: string;
+    serviceId?: string;
+    locationId?: string;
+    capacity?: number;
+    isPrivate?: boolean;
+    comment?: string;
+    occupied?: number;
+  }) => {
+    const payload: ActivityPatch = {};
     if (updates.masterId !== undefined) payload.master_id = updates.masterId;
     if (updates.serviceId !== undefined) payload.service_id = updates.serviceId;
     if (updates.locationId !== undefined) payload.location_id = updates.locationId;
-    if (updates.duration !== undefined) payload.duration = Math.round(updates.duration * 60); // hours→min
-    if (updates.durationMinutes !== undefined) payload.duration = updates.durationMinutes; // takes precedence
+    if (updates.durationMinutes !== undefined) payload.duration = updates.durationMinutes;
     if (updates.capacity !== undefined && updates.capacity !== null) payload.capacity = updates.capacity;
     if (updates.isPrivate !== undefined) payload.is_private = updates.isPrivate;
     if (updates.comment !== undefined) payload.comment = updates.comment;
     if (updates.occupied !== undefined) payload.occupied = updates.occupied;
-    // Handle time changes (e.g., drag & drop)
-    if (updates.startTime !== undefined && updates.day !== undefined) {
-      const startDate = new Date(currentWeek);
-      startDate.setDate(startDate.getDate() + updates.day);
-      startDate.setHours(Math.floor(updates.startTime), Math.round((updates.startTime % 1) * 60), 0, 0);
-      const y = startDate.getFullYear();
-      const m = String(startDate.getMonth() + 1).padStart(2, '0');
-      const d = String(startDate.getDate()).padStart(2, '0');
-      const h = String(startDate.getHours()).padStart(2, '0');
-      const min = String(startDate.getMinutes()).padStart(2, '0');
-      payload.start = `${y}-${m}-${d}T${h}:${min}:00`;
+    // Handle time changes (e.g., drag & drop) — dayIndex + startMinutes → floating-local start
+    if (updates.dayIndex !== undefined && updates.startMinutes !== undefined) {
+      payload.start = composeLocalISO(dayIndexToDate(currentWeek, updates.dayIndex), updates.startMinutes);
     }
     updateMutation.mutate({ id, data: payload });
   }, [currentWeek, updateMutation]);
@@ -421,14 +447,14 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
       const prev = new Date(currentWeek);
       prev.setDate(prev.getDate() - 7);
       const sunday = new Date(prev.getTime() + 6 * 24 * 60 * 60 * 1000);
-      selectDateRange(formatDateISO(prev), formatDateISO(sunday));
+      selectDateRange(toISODate(prev), toISODate(sunday));
     } else {
       const prev = new Date(selectedDay);
       prev.setDate(prev.getDate() - 1);
       setSelectedDay(prev);
       const monday = getMonday(prev);
       const sunday = new Date(monday.getTime() + 6 * 24 * 60 * 60 * 1000);
-      selectDateRange(formatDateISO(monday), formatDateISO(sunday));
+      selectDateRange(toISODate(monday), toISODate(sunday));
     }
   }, [viewMode, currentWeek, selectedDay, selectDateRange, setSelectedDay]);
 
@@ -437,14 +463,14 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
       const next = new Date(currentWeek);
       next.setDate(next.getDate() + 7);
       const sunday = new Date(next.getTime() + 6 * 24 * 60 * 60 * 1000);
-      selectDateRange(formatDateISO(next), formatDateISO(sunday));
+      selectDateRange(toISODate(next), toISODate(sunday));
     } else {
       const next = new Date(selectedDay);
       next.setDate(next.getDate() + 1);
       setSelectedDay(next);
       const monday = getMonday(next);
       const sunday = new Date(monday.getTime() + 6 * 24 * 60 * 60 * 1000);
-      selectDateRange(formatDateISO(monday), formatDateISO(sunday));
+      selectDateRange(toISODate(monday), toISODate(sunday));
     }
   }, [viewMode, currentWeek, selectedDay, selectDateRange, setSelectedDay]);
 
@@ -468,6 +494,14 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
     return result;
   }, [enrichedData.items, filterMasterIds, filterLocationIds]);
 
+  // Adaptive grid bounds in integer minutes — SINGLE derivation site (GH #142).
+  // Views read gridStartMinutes/gridEndMinutes instead of calling
+  // calculateGridTimeRange per-view.
+  const { gridStartMinutes, gridEndMinutes } = useMemo(() => {
+    const range = calculateGridTimeRange(filteredItems, workingHoursStart, workingHoursEnd);
+    return { gridStartMinutes: range.startMinutes, gridEndMinutes: range.endMinutes };
+  }, [filteredItems, workingHoursStart, workingHoursEnd]);
+
   // Build index from filtered items
   const scheduleIndex = useMemo(
     () => buildSchedule(filteredItems, { getDateKey: a => a.date }),
@@ -480,7 +514,6 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
     scheduleIndex,
     masters,
     services,
-    servicesRaw,
     locations,
     currentWeek,
     stamp,
@@ -510,10 +543,12 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
     setWorkingHoursStart,
     workingHoursEnd,
     setWorkingHoursEnd,
+    gridStartMinutes,
+    gridEndMinutes,
     prevPeriod,
     nextPeriod,
   }), [
-    filteredItems, scheduleIndex, masters, services, servicesRaw, locations,
+    filteredItems, scheduleIndex, masters, services, locations,
     currentWeek, stamp, filterMasterIds, filterLocationIds,
     viewMode, selectedDay, columnMode,
     setCurrentWeek, addActivity, updateActivityFn, deleteActivityById, setStamp, copyLastWeek,
@@ -524,6 +559,7 @@ export function ScheduleProvider({ children }: { children: React.ReactNode }) {
     gridFrequency, setGridFrequency,
     workingHoursStart, setWorkingHoursStart,
     workingHoursEnd, setWorkingHoursEnd,
+    gridStartMinutes, gridEndMinutes,
     prevPeriod, nextPeriod,
   ]);
 

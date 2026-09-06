@@ -23,15 +23,12 @@ export const MONTHS_GENITIVE = [
   'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря',
 ] as const;
 
-export const HOURS_START = 9;
-export const HOURS_END = 21;
 export const CELL_HEIGHT_MIN = 40;
 export const CELL_HEIGHT_OPTIONS = [
   { value: 40, label: 'Мелкий' },
   { value: 50, label: 'Стандартный' },
   { value: 60, label: 'Крупный' },
 ] as const;
-export const SLOT_COUNT = (HOURS_END - HOURS_START) * 2;
 export const TIME_COL_WIDTH = 64;
 
 // Grid frequency (minutes per slot)
@@ -70,20 +67,7 @@ export function mixWithWhite(
   };
 }
 
-// ─── Duration Utilities ──────────────────────────────────────────────────
-
-/** Convert decimal hours (1.5) to HH:MM string ("01:30"). */
-export function decimalToHHMM(hours: number): string {
-  const h = Math.floor(hours);
-  const m = Math.round((hours - h) * 60);
-  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
-}
-
-/** Convert HH:MM string ("01:30") to decimal hours (1.5). */
-export function hhmmToDecimal(hhmm: string): number {
-  const [h, m] = hhmm.split(':').map(Number);
-  return h + m / 60;
-}
+// ─── Display Formatters ───────────────────────────────────────────────────
 
 /** Format datetime for display: "Сб, 7 июня · 14:00". */
 export function formatActivityContext(date: Date): string {
@@ -148,26 +132,9 @@ export function formatActivityLabel(a: ActivityLike, locationsMap: Map<string, {
   return parts.join(' — ');
 }
 
-// ─── Time / Date Utilities ────────────────────────────────────────────────
-
-/** Format hours to "HH:MM" string. 10 → "10:00", 10.5 → "10:30", 9.25 → "09:15". */
-export function formatTime(hours: number): string {
-  const h = Math.floor(hours);
-  const m = Math.round((hours - h) * 60);
-  return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
-}
-
-/** Get the Monday of the week containing the given date. */
-export function getMonday(date: Date): Date {
-  const d = new Date(date);
-  const day = d.getDay();
-  // getDay(): 0=Sun, 1=Mon, ... 6=Sat
-  // Convert to Mon=0 ... Sun=6, then subtract to get Monday
-  const diff = day === 0 ? -6 : 1 - day;
-  d.setDate(d.getDate() + diff);
-  d.setHours(0, 0, 0, 0);
-  return d;
-}
+// ─── Date Display Utilities ───────────────────────────────────────────────
+// Time math (HH:MM, minutes, ISO dates, week Monday, grid slots) lives in
+// lib/datetime.ts (GH #142). Only Date→string display formatters remain here.
 
 /** Format date as "13 мая" (day + genitive month). */
 export function formatDate(date: Date): string {
@@ -193,14 +160,6 @@ export function formatDayLabel(date: Date): string {
   return `${date.getDate()} ${MONTHS_GENITIVE[date.getMonth()]}`;
 }
 
-/** Format date as YYYY-MM-DD ISO string for API calls. */
-export function formatDateISO(date: Date): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
-
 /** Check if two dates fall on the same calendar day. */
 export function isSameDay(a: Date, b: Date): boolean {
   return (
@@ -208,69 +167,4 @@ export function isSameDay(a: Date, b: Date): boolean {
     a.getMonth() === b.getMonth() &&
     a.getDate() === b.getDate()
   );
-}
-
-/** Generate time slots from start to end (exclusive) at given frequency (minutes). */
-export function generateTimeSlots(frequencyMinutes: number = 30, start: number = HOURS_START, end: number = HOURS_END): number[] {
-  const slots: number[] = [];
-  const step = frequencyMinutes / 60; // convert to hours
-  for (let t = start; t < end; t += step) {
-    // Round to avoid floating point issues
-    slots.push(Math.round(t * 100) / 100);
-  }
-  return slots;
-}
-
-/** Activity shape for adaptive grid calculation (subset of fields needed). */
-interface GridActivity {
-  startTime: number;
-  duration: number; // in hours
-}
-
-/** Grid time range result. */
-export interface GridTimeRange {
-  start: number;
-  end: number;
-}
-
-/**
- * Calculate adaptive grid time range based on actual activities.
- * Extends the working hours range to fit activities outside the default range.
- * Never shrinks below working hours range. Adds at least 1 hour padding.
- *
- * @param activities - visible activities for the period
- * @param workingHoursStart - default grid start hour (e.g. 9)
- * @param workingHoursEnd - default grid end hour (e.g. 21)
- * @returns { start, end } in decimal hours
- */
-export function calculateGridTimeRange(
-  activities: GridActivity[],
-  workingHoursStart: number = HOURS_START,
-  workingHoursEnd: number = HOURS_END,
-): GridTimeRange {
-  if (activities.length === 0) {
-    return { start: workingHoursStart, end: workingHoursEnd };
-  }
-
-  let earliestStart = Infinity;
-  let latestEnd = -Infinity;
-
-  for (const a of activities) {
-    if (a.startTime < earliestStart) earliestStart = a.startTime;
-    const endTime = a.startTime + a.duration;
-    if (endTime > latestEnd) latestEnd = endTime;
-  }
-
-  // Extend start only if activity starts before working hours (at least 1 hour padding)
-  // Clamp to [0, 24] — hours represent a single day (0:00–24:00)
-  const adaptiveStart = earliestStart < workingHoursStart
-    ? Math.max(0, Math.floor(earliestStart) - 1)
-    : workingHoursStart;
-
-  // Extend end only if activity ends after working hours (at least 1 hour padding)
-  const adaptiveEnd = Math.min(24, latestEnd > workingHoursEnd
-    ? Math.ceil(latestEnd) + 1
-    : workingHoursEnd);
-
-  return { start: adaptiveStart, end: adaptiveEnd };
 }

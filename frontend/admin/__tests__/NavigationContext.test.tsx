@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import React from 'react';
 import { NavigationProvider, useNavigation } from '../contexts/NavigationContext';
-import { getMonday, formatDateISO } from '@/lib/utils';
+import { getMonday, toISODate } from '@/lib/datetime';
 
 describe('NavigationContext', () => {
   describe('useNavigation', () => {
@@ -20,7 +20,7 @@ describe('NavigationContext', () => {
       const { result } = renderHook(() => useNavigation(), {
         wrapper: NavigationProvider,
       });
-      const expectedMonday = formatDateISO(getMonday(new Date()));
+      const expectedMonday = toISODate(getMonday(new Date()));
       expect(result.current.dateFrom).toBe(expectedMonday);
     });
 
@@ -30,7 +30,7 @@ describe('NavigationContext', () => {
       });
       const monday = getMonday(new Date());
       const expectedSunday = new Date(monday.getTime() + 6 * 24 * 60 * 60 * 1000);
-      expect(result.current.dateTo).toBe(formatDateISO(expectedSunday));
+      expect(result.current.dateTo).toBe(toISODate(expectedSunday));
     });
 
     it('selectDateRange updates dateFrom and dateTo', () => {

@@ -79,9 +79,10 @@ describe('buildAdminSchedule', () => {
     );
     expect(items).toHaveLength(1);
     expect(items[0].id).toBe('a1');
+    expect(items[0].startMinutes).toBe(600); // 10:00 = 600 minutes from midnight
   });
 
-  it('computes day and startTime correctly', () => {
+  it('computes day and startMinutes correctly', () => {
     const { items } = buildAdminSchedule(
       [makeActivity({ start: '2026-06-03T14:30:00' })], // Wednesday
       [mockMaster],
@@ -90,7 +91,41 @@ describe('buildAdminSchedule', () => {
       MONDAY,
     );
     expect(items[0].day).toBe(2);  // Wednesday = day 2
-    expect(items[0].startTime).toBe(14.5); // 14:30 = 14.5h
+    expect(items[0].startMinutes).toBe(870); // 14:30 = 14*60+30
+  });
+
+  it('flows service tariffs into price fields (2 tariffs → priceMin/priceMax/priceHint)', () => {
+    const twoTariffService: ServiceResponse = {
+      ...mockService,
+      tariffs: [
+        { id: 't1', service_id: 's1', title: 'Взрослый', description: null, price: 2500 },
+        { id: 't2', service_id: 's1', title: 'Детский', description: null, price: 1500 },
+      ],
+    };
+    expect(twoTariffService.tariffs).toHaveLength(2);
+    const { items } = buildAdminSchedule(
+      [makeActivity()],
+      [mockMaster],
+      [twoTariffService],
+      [mockLocation],
+      MONDAY,
+    );
+    expect(items[0].priceMin).toBe(1500);
+    expect(items[0].priceMax).toBe(2500);
+    expect(items[0].priceHint).toBe('Взрослый: 2500₽, Детский: 1500₽');
+  });
+
+  it('keeps single-tariff price parity (priceMin = priceMax = tariff price)', () => {
+    const { items } = buildAdminSchedule(
+      [makeActivity()],
+      [mockMaster],
+      [mockService],
+      [mockLocation],
+      MONDAY,
+    );
+    expect(items[0].priceMin).toBe(2500);
+    expect(items[0].priceMax).toBe(2500);
+    expect(items[0].priceHint).toBe('Взрослый: 2500₽');
   });
 
   it('skips activities with missing reference data', () => {

@@ -1,38 +1,57 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
-import { useDnD, snapToGrid, slotIndexToTime, parseSlotId } from '../hooks/useDnD';
-import type { Activity } from '@memo/domain';
-import { HOURS_START } from '../lib/utils';
+import { useDnD, snapToGrid, slotIndexToMinutes, parseSlotId } from '../hooks/useDnD';
+import type { ScheduleAdminDTO } from '@memo/domain';
 
-const mockActivities: Activity[] = [
-  {
+// ─── Fixtures (ScheduleAdminDTO — integer minutes, GH #142) ─────────────────
+
+function createActivity(overrides: Partial<ScheduleAdminDTO> = {}): ScheduleAdminDTO {
+  return {
     id: 'ev_1',
     day: 0,
     masterId: 'm1',
-    startTime: 10,
-    duration: 2,
     serviceId: 's1',
-    serviceName: 'Картина маслом',
-    minAge: '12',
+    serviceTitle: 'Картина маслом',
     locationId: 'alpika',
+    locationName: 'Альпика',
+    masterName: 'Ольга Середа',
+    masterColor: '#5B8C7A',
+    date: '2026-06-15',
+    time: '10:00',
+    startMinutes: 600, // 10:00
+    durationMinutes: 120, // 2 hours
+    minAge: '12',
+    maxAge: '99',
     occupied: 3,
     capacity: 8,
     isPrivate: false,
-  },
-  {
+    comment: '',
+    priceMin: 2500,
+    priceMax: 5000,
+    ...overrides,
+  };
+}
+
+const mockActivities: ScheduleAdminDTO[] = [
+  createActivity(),
+  createActivity({
     id: 'ev_2',
     day: 2,
     masterId: 'm2',
-    startTime: 14.5,
-    duration: 1.5,
     serviceId: 's2',
-    serviceName: 'Картина акрилом',
-    minAge: '6',
+    serviceTitle: 'Картина акрилом',
     locationId: 'grand',
+    locationName: 'Гранд Отель Поляна',
+    masterName: 'Юлия Большакова',
+    masterColor: '#6B7E9C',
+    date: '2026-06-17',
+    time: '14:30',
+    startMinutes: 870, // 14:30
+    durationMinutes: 90,
+    minAge: '6',
     occupied: 4,
     capacity: 6,
-    isPrivate: false,
-  },
+  }),
 ];
 
 function createMocks() {
@@ -134,7 +153,7 @@ describe('useDnD', () => {
   });
 
   describe('onDragEnd', () => {
-    it('updates activity day and startTime when dropped on different slot', () => {
+    it('updates activity dayIndex and startMinutes when dropped on different slot', () => {
       const { result } = renderDnD();
       // Start drag
       act(() => {
@@ -142,7 +161,7 @@ describe('useDnD', () => {
           active: { id: 'ev_1', data: { current: { activity: mockActivities[0] } } },
         } as any);
       });
-      // Drop on slot-3-4 (day 3, slot 4 → 9:00 + 4*0.5 = 11:00)
+      // Drop on slot-3-4 (day 3, slot 4 → 540 + 4*30 = 660 = 11:00)
       act(() => {
         result.current.onDragEnd({
           active: { id: 'ev_1' },
@@ -150,8 +169,8 @@ describe('useDnD', () => {
         } as any);
       });
       expect(mocks.updateActivity).toHaveBeenCalledWith('ev_1', {
-        day: 3,
-        startTime: HOURS_START + 4 * 0.5,
+        dayIndex: 3,
+        startMinutes: 660,
       });
     });
 
@@ -163,7 +182,7 @@ describe('useDnD', () => {
           active: { id: 'ev_1', data: { current: { activity: mockActivities[0] } } },
         } as any, { altKey: true });
       });
-      // Drop
+      // Drop on slot-2-6 (day 2, 540 + 6*30 = 720 = 12:00)
       act(() => {
         result.current.onDragEnd({
           active: { id: 'ev_1' },
@@ -172,10 +191,10 @@ describe('useDnD', () => {
       });
       expect(mocks.addActivity).toHaveBeenCalled();
       const added = mocks.addActivity.mock.calls[0][0];
-      expect(added.day).toBe(2);
-      expect(added.startTime).toBe(HOURS_START + 6 * 0.5);
+      expect(added.dayIndex).toBe(2);
+      expect(added.startMinutes).toBe(720);
       expect(added.masterId).toBe('m1');
-      expect(added.duration).toBe(2);
+      expect(added.durationMinutes).toBe(120);
     });
 
     it('shows toast on successful drop', () => {
@@ -265,6 +284,23 @@ describe('useDnD', () => {
       expect(result.current.ghostPosition).toEqual({ dayIndex: 2, slotIndex: 5 });
     });
 
+    it('exposes draggedSnappedTime in minutes while hovering a slot', () => {
+      const { result } = renderDnD();
+      act(() => {
+        result.current.onDragStart({
+          active: { id: 'ev_1', data: { current: { activity: mockActivities[0] } } },
+        } as any);
+      });
+      expect(result.current.draggedSnappedTime).toBeNull();
+      act(() => {
+        result.current.onDragOver({
+          over: { id: 'slot-2-5', data: { current: { dayIndex: 2, slotIndex: 5 } } },
+        } as any);
+      });
+      // slot 5 on the default 30-min grid → 540 + 5*30 = 690 (11:30)
+      expect(result.current.draggedSnappedTime).toBe(690);
+    });
+
     it('clears ghostPosition on drag end', () => {
       const { result } = renderDnD();
       act(() => {
@@ -289,7 +325,7 @@ describe('useDnD', () => {
   });
 
   describe('snap calculation', () => {
-    it('calculates startTime correctly for slot 0 (9:00)', () => {
+    it('calculates startMinutes correctly for slot 0 (9:00)', () => {
       const { result } = renderDnD();
       act(() => {
         result.current.onDragStart({
@@ -303,12 +339,12 @@ describe('useDnD', () => {
         } as any);
       });
       expect(mocks.updateActivity).toHaveBeenCalledWith('ev_1', {
-        day: 0,
-        startTime: 9,
+        dayIndex: 0,
+        startMinutes: 540,
       });
     });
 
-    it('calculates startTime correctly for slot 1 (9:30)', () => {
+    it('calculates startMinutes correctly for slot 1 (9:30)', () => {
       const { result } = renderDnD();
       act(() => {
         result.current.onDragStart({
@@ -322,12 +358,12 @@ describe('useDnD', () => {
         } as any);
       });
       expect(mocks.updateActivity).toHaveBeenCalledWith('ev_1', {
-        day: 0,
-        startTime: 9.5,
+        dayIndex: 0,
+        startMinutes: 570,
       });
     });
 
-    it('calculates startTime correctly for slot 24 (21:00)', () => {
+    it('calculates startMinutes correctly for slot 24 (21:00)', () => {
       const { result } = renderDnD();
       act(() => {
         result.current.onDragStart({
@@ -341,15 +377,15 @@ describe('useDnD', () => {
         } as any);
       });
       expect(mocks.updateActivity).toHaveBeenCalledWith('ev_1', {
-        day: 5,
-        startTime: 21,
+        dayIndex: 5,
+        startMinutes: 1260,
       });
     });
   });
 
   describe('gridFrequency snapping', () => {
     it('snaps to 15-min grid when gridFrequency=15', () => {
-      // With gridFrequency=15, slot-0-1 = 9 + 1*(15/60) = 9.25 (9:15)
+      // With gridFrequency=15, slot-0-1 = 540 + 1*15 = 555 (9:15)
       const { result } = renderDnDWithFrequency(15);
       act(() => {
         result.current.onDragStart({
@@ -363,13 +399,13 @@ describe('useDnD', () => {
         } as any);
       });
       expect(mocks.updateActivity).toHaveBeenCalledWith('ev_1', {
-        day: 0,
-        startTime: 9.25, // 9:15 — grid now has 15-min slots
+        dayIndex: 0,
+        startMinutes: 555, // 9:15 — grid now has 15-min slots
       });
     });
 
     it('snaps to 5-min grid when gridFrequency=5', () => {
-      // With gridFrequency=5, slot-0-1 = 9 + 1*(5/60) = 9.083… (9:05)
+      // With gridFrequency=5, slot-0-1 = 540 + 1*5 = 545 (9:05) — exact integer
       const { result } = renderDnDWithFrequency(5);
       act(() => {
         result.current.onDragStart({
@@ -383,8 +419,8 @@ describe('useDnD', () => {
         } as any);
       });
       expect(mocks.updateActivity).toHaveBeenCalledWith('ev_1', {
-        day: 0,
-        startTime: expect.closeTo(9 + 5 / 60, 10), // 9:05
+        dayIndex: 0,
+        startMinutes: 545, // 9:05
       });
     });
 
@@ -403,13 +439,33 @@ describe('useDnD', () => {
       });
       // 9:30 is already a 30-min multiple
       expect(mocks.updateActivity).toHaveBeenCalledWith('ev_1', {
-        day: 0,
-        startTime: 9.5,
+        dayIndex: 0,
+        startMinutes: 570,
+      });
+    });
+
+    it('snaps to 60-min grid when gridFrequency=60', () => {
+      // With gridFrequency=60, slot-0-1 = 540 + 1*60 = 600 (10:00)
+      const { result } = renderDnDWithFrequency(60);
+      act(() => {
+        result.current.onDragStart({
+          active: { id: 'ev_1', data: { current: { activity: mockActivities[0] } } },
+        } as any);
+      });
+      act(() => {
+        result.current.onDragEnd({
+          active: { id: 'ev_1' },
+          over: { id: 'slot-0-1' },
+        } as any);
+      });
+      expect(mocks.updateActivity).toHaveBeenCalledWith('ev_1', {
+        dayIndex: 0,
+        startMinutes: 600, // 10:00 — hourly grid
       });
     });
 
     it('snaps copied activity to gridFrequency on copy-drag', () => {
-      // With gridFrequency=15, slot-2-6 = 9 + 6*(15/60) = 9 + 1.5 = 10.5 (10:30)
+      // With gridFrequency=15, slot-2-6 = 540 + 6*15 = 630 (10:30)
       const { result } = renderDnDWithFrequency(15);
       act(() => {
         result.current.onDragStart({
@@ -424,7 +480,7 @@ describe('useDnD', () => {
       });
       expect(mocks.addActivity).toHaveBeenCalled();
       const added = mocks.addActivity.mock.calls[0][0];
-      expect(added.startTime).toBe(10.5); // 10:30
+      expect(added.startMinutes).toBe(630); // 10:30
     });
 
     it('defaults gridFrequency to 30 when not provided', () => {
@@ -441,8 +497,8 @@ describe('useDnD', () => {
         } as any);
       });
       expect(mocks.updateActivity).toHaveBeenCalledWith('ev_1', {
-        day: 0,
-        startTime: 9.5,
+        dayIndex: 0,
+        startMinutes: 570,
       });
     });
   });
@@ -475,8 +531,8 @@ describe('useDnD', () => {
         } as any);
       });
       expect(mocks.updateActivity).toHaveBeenCalledWith('ev_1', {
-        day: 0,
-        startTime: 10,
+        dayIndex: 0,
+        startMinutes: 600,
         masterId: 'm2',
       });
     });
@@ -496,8 +552,8 @@ describe('useDnD', () => {
         } as any);
       });
       expect(mocks.updateActivity).toHaveBeenCalledWith('ev_1', {
-        day: 0,
-        startTime: 10,
+        dayIndex: 0,
+        startMinutes: 600,
       });
     });
 
@@ -516,13 +572,13 @@ describe('useDnD', () => {
         } as any);
       });
       expect(mocks.updateActivity).toHaveBeenCalledWith('ev_1', {
-        day: 0,
-        startTime: 10,
+        dayIndex: 0,
+        startMinutes: 600,
         locationId: 'grand',
       });
     });
 
-    it('updates masterId and startTime together', () => {
+    it('updates masterId and startMinutes together', () => {
       const { result } = renderDnDWithColumnField('masterId');
       act(() => {
         result.current.onDragStart({
@@ -537,8 +593,8 @@ describe('useDnD', () => {
         } as any);
       });
       expect(mocks.updateActivity).toHaveBeenCalledWith('ev_1', {
-        day: 3,
-        startTime: 13, // slot 8 → 9 + 8*0.5 = 13
+        dayIndex: 3,
+        startMinutes: 780, // slot 8 → 540 + 8*30 = 780 (13:00)
         masterId: 'm2',
       });
     });
@@ -562,11 +618,11 @@ describe('useDnD', () => {
       );
       expect(toastCall).toBeTruthy();
       const undoFn = toastCall![1] as () => void;
-      // Call undo
+      // Call undo — restores the original DTO position (day=0, startMinutes=600)
       undoFn();
       expect(mocks.updateActivity).toHaveBeenCalledWith('ev_1', {
-        day: 0,
-        startTime: 10,
+        dayIndex: 0,
+        startMinutes: 600,
         masterId: 'm1',
       });
     });
@@ -586,8 +642,8 @@ describe('useDnD', () => {
       });
       // Should NOT include masterId since columnField is not set
       expect(mocks.updateActivity).toHaveBeenCalledWith('ev_1', {
-        day: 0,
-        startTime: 10,
+        dayIndex: 0,
+        startMinutes: 600,
       });
     });
 
@@ -619,76 +675,91 @@ describe('useDnD', () => {
     });
   });
 
-  describe('slotIndexToTime (exported)', () => {
+  describe('slotIndexToMinutes (exported)', () => {
     it('returns 30-min intervals by default', () => {
-      expect(slotIndexToTime(0)).toBe(9);
-      expect(slotIndexToTime(1)).toBe(9.5);
-      expect(slotIndexToTime(2)).toBe(10);
+      expect(slotIndexToMinutes(0)).toBe(540);
+      expect(slotIndexToMinutes(1)).toBe(570);
+      expect(slotIndexToMinutes(2)).toBe(600);
     });
 
     it('returns 15-min intervals when gridFrequency=15', () => {
-      expect(slotIndexToTime(0, 15)).toBe(9);
-      expect(slotIndexToTime(1, 15)).toBe(9.25);
-      expect(slotIndexToTime(2, 15)).toBe(9.5);
-      expect(slotIndexToTime(4, 15)).toBe(10);
+      expect(slotIndexToMinutes(0, 15)).toBe(540);
+      expect(slotIndexToMinutes(1, 15)).toBe(555);
+      expect(slotIndexToMinutes(2, 15)).toBe(570);
+      expect(slotIndexToMinutes(4, 15)).toBe(600);
     });
 
     it('returns 5-min intervals when gridFrequency=5', () => {
-      expect(slotIndexToTime(0, 5)).toBe(9);
-      expect(slotIndexToTime(1, 5)).toBeCloseTo(9 + 5 / 60, 10);
-      expect(slotIndexToTime(6, 5)).toBeCloseTo(9.5, 10);
+      expect(slotIndexToMinutes(0, 5)).toBe(540);
+      expect(slotIndexToMinutes(1, 5)).toBe(545);
+      expect(slotIndexToMinutes(6, 5)).toBe(570);
+    });
+
+    it('returns 60-min intervals when gridFrequency=60', () => {
+      expect(slotIndexToMinutes(0, 60)).toBe(540);
+      expect(slotIndexToMinutes(1, 60)).toBe(600);
+      expect(slotIndexToMinutes(2, 60)).toBe(660);
+    });
+
+    it('honors a custom gridStartMinutes', () => {
+      expect(slotIndexToMinutes(0, 30, 480)).toBe(480); // 8:00 grid start
+      expect(slotIndexToMinutes(2, 30, 480)).toBe(540); // 8:00 + 2*30 = 9:00
+      expect(slotIndexToMinutes(1, 15, 600)).toBe(615); // 10:00 + 15 = 10:15
     });
   });
 
-  describe('snapToGrid (exported)', () => {
-    it('returns same time when already aligned to gridFrequency=30', () => {
-      expect(snapToGrid(9.0, 30)).toBe(9.0);
-      expect(snapToGrid(9.5, 30)).toBe(9.5);
-      expect(snapToGrid(10.0, 30)).toBe(10.0);
+  describe('snapToGrid (exported, minute space)', () => {
+    it('returns same minutes when already aligned to gridFrequency=30', () => {
+      expect(snapToGrid(540, 30)).toBe(540);
+      expect(snapToGrid(570, 30)).toBe(570);
+      expect(snapToGrid(600, 30)).toBe(600);
     });
 
-    it('returns same time when already aligned to gridFrequency=15', () => {
-      expect(snapToGrid(9.0, 15)).toBe(9.0);
-      expect(snapToGrid(9.25, 15)).toBe(9.25);  // 9:15
-      expect(snapToGrid(9.5, 15)).toBe(9.5);     // 9:30
-      expect(snapToGrid(9.75, 15)).toBe(9.75);   // 9:45
+    it('returns same minutes when already aligned to gridFrequency=15', () => {
+      expect(snapToGrid(540, 15)).toBe(540);
+      expect(snapToGrid(555, 15)).toBe(555); // 9:15
+      expect(snapToGrid(570, 15)).toBe(570); // 9:30
+      expect(snapToGrid(585, 15)).toBe(585); // 9:45
     });
 
-    it('returns same time when already aligned to gridFrequency=5', () => {
-      expect(snapToGrid(9.0, 5)).toBe(9.0);
-      expect(snapToGrid(9 + 5/60, 5)).toBeCloseTo(9 + 5/60, 10);   // 9:05
-      expect(snapToGrid(9 + 10/60, 5)).toBeCloseTo(9 + 10/60, 10);  // 9:10
-      expect(snapToGrid(9 + 15/60, 5)).toBeCloseTo(9 + 15/60, 10);  // 9:15
+    it('returns same minutes when already aligned to gridFrequency=5', () => {
+      expect(snapToGrid(540, 5)).toBe(540);
+      expect(snapToGrid(545, 5)).toBe(545); // 9:05
+      expect(snapToGrid(550, 5)).toBe(550); // 9:10
+      expect(snapToGrid(555, 5)).toBe(555); // 9:15
+    });
+
+    it('returns same minutes when already aligned to gridFrequency=60', () => {
+      expect(snapToGrid(540, 60)).toBe(540); // 9:00
+      expect(snapToGrid(600, 60)).toBe(600); // 10:00
     });
 
     it('rounds 10:12 to 10:15 when gridFrequency=15', () => {
-      // 10:12 = 10 + 12/60 = 10.2
-      const result = snapToGrid(10.2, 15);
-      expect(result).toBeCloseTo(10.25, 10); // 10:15
+      expect(snapToGrid(612, 15)).toBe(615); // 10:15
     });
 
     it('rounds 10:21 to 10:15 when gridFrequency=15 (rounds down)', () => {
-      // 10:21 = 10 + 21/60 = 10.35
-      const result = snapToGrid(10.35, 15);
-      expect(result).toBeCloseTo(10.25, 10); // 10:15 (closer than 10:30)
+      expect(snapToGrid(621, 15)).toBe(615); // 10:15 (closer than 10:30)
     });
 
     it('rounds 10:20 to 10:20 when gridFrequency=5', () => {
-      // 10:20 = 10 + 20/60 = 10.333...
-      const result = snapToGrid(10 + 20/60, 5);
-      expect(result).toBeCloseTo(10 + 20/60, 10);
+      expect(snapToGrid(620, 5)).toBe(620);
     });
 
     it('rounds 10:22 to 10:20 when gridFrequency=5', () => {
-      // 10:22 = 10 + 22/60 = 10.366...
-      const result = snapToGrid(10 + 22/60, 5);
-      expect(result).toBeCloseTo(10 + 20/60, 10); // 10:20
+      expect(snapToGrid(622, 5)).toBe(620); // 10:20
     });
 
-    it('does not change time for invalid gridFrequency', () => {
-      expect(snapToGrid(10.2, 0)).toBe(10.2);
-      expect(snapToGrid(10.2, -5)).toBe(10.2);
-      expect(snapToGrid(10.2, 90)).toBe(10.2);
+    it('rounds to the nearest hour when gridFrequency=60', () => {
+      expect(snapToGrid(612, 60)).toBe(600); // 10:12 → 10:00
+      expect(snapToGrid(630, 60)).toBe(660); // 10:30 → 11:00 (half rounds up)
+      expect(snapToGrid(640, 60)).toBe(660); // 10:40 → 11:00
+    });
+
+    it('does not change minutes for invalid gridFrequency', () => {
+      expect(snapToGrid(612, 0)).toBe(612);
+      expect(snapToGrid(612, -5)).toBe(612);
+      expect(snapToGrid(612, 90)).toBe(612);
     });
   });
 

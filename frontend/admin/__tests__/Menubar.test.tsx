@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Menubar } from '../app/components/layout/Menubar';
 import { NavigationProvider } from '../contexts/NavigationContext';
 import { UIProvider } from '../contexts/UIContext';
-import { getMonday, DAYS_FULL, MONTHS_GENITIVE } from '../lib/utils';
+import { DAYS_FULL, MONTHS_GENITIVE } from '../lib/utils';
 
 vi.mock('@memo/api-client', () => {
   const wrap = (items: any[]) => ({ items, total: items.length, page: 1, per_page: 100 });

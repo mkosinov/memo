@@ -1,22 +1,22 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { HOURS_START } from '@/lib/utils';
 
 interface NowLineProps {
   date: Date;
   cellHeight?: number;
-  gridStart?: number;
+  /** Grid start in minutes from midnight (GH #142). */
+  gridStartMinutes?: number;
 }
 
-export function NowLine({ date, cellHeight = 60, gridStart = HOURS_START }: NowLineProps) {
+export function NowLine({ date, cellHeight = 60, gridStartMinutes = 540 }: NowLineProps) {
   const [position, setPosition] = useState(0);
 
   useEffect(() => {
     const updatePosition = () => {
       const now = new Date();
-      const hours = now.getHours() + now.getMinutes() / 60;
-      const pos = (hours - gridStart) * cellHeight * 2;
+      const nowMinutes = now.getHours() * 60 + now.getMinutes();
+      const pos = (nowMinutes - gridStartMinutes) * cellHeight / 30;
       setPosition(pos);
     };
 
@@ -24,7 +24,7 @@ export function NowLine({ date, cellHeight = 60, gridStart = HOURS_START }: NowL
     const interval = setInterval(updatePosition, 30000);
 
     return () => clearInterval(interval);
-  }, [cellHeight, gridStart]);
+  }, [cellHeight, gridStartMinutes]);
 
   const today = new Date();
   if (

@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   RecordSchema,
   RecordStatusSchema,
-  Record,
+  Record as DomainRecord,
   RecordStatus,
 } from './index';
 
@@ -55,7 +55,7 @@ describe('Record (renamed from BookingRecord)', () => {
   });
 
   it('Record type is assignable from a valid object', () => {
-    const r: Record = {
+    const r: DomainRecord = {
       id: 'rec1',
       activityId: 'act1',
       clientId: null,

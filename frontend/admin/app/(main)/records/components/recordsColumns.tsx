@@ -6,10 +6,13 @@ import type { ColumnDef, RowAction } from '@/app/components/shared/tableTypes';
 import { DiamondIcon } from '@/app/components/shared/DiamondIcon';
 import { StatusBadge } from '@/app/components/shared/StatusBadge';
 import { safeStatus } from '@/app/lib/status-utils';
-import { formatTime } from '@/lib/utils';
+import { parseLocalISO, formatTime } from '@/lib/datetime';
 
-// ─── Helpers (verbatim from the pre-#139 RecordsTable) ──────────────────────
-// formatTime lives in @/lib/utils (identical HH:MM zero-pad helper — dedup).
+// ─── Helpers ────────────────────────────────────────────────────────────────
+// Time parsing/formatting lives in @/lib/datetime (GH #142 floating-local):
+// naive activity_start strings are studio wall clock, read via parseLocalISO
+// + integer-minute formatTime — the same parser the schedule grid uses, so
+// records never shift by the browser TZ offset (spec US-5).
 
 export function formatPrice(n: number): string {
   return `${n.toLocaleString('ru-RU')}₽`;
@@ -18,15 +21,6 @@ export function formatPrice(n: number): string {
 export function formatDateRu(dateStr: string): string {
   const d = new Date(dateStr + 'T00:00:00');
   return d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' }).replace(' ', ' ');
-}
-
-/** Normalize JS getDay() (0=Sun..6=Sat) to Mon=0..Sun=6, extract date and startTime. */
-export function parseActivityStart(start: string): { date: string; day: number; startTime: number } {
-  const d = new Date(start);
-  const day = (d.getUTCDay() + 6) % 7;
-  const startTime = d.getUTCHours() + d.getUTCMinutes() / 60;
-  const date = start.slice(0, 10);
-  return { date, day, startTime };
 }
 
 // ─── Columns config (GH #213 §6.2 — row-field rendering) ───────────────────
@@ -56,14 +50,14 @@ export const recordColumns = (cbs: {
       defaultVisible: true,
       render: (row) => {
         if (!row.activity_start) return '—';
-        const parsed = parseActivityStart(row.activity_start);
+        const parsed = parseLocalISO(row.activity_start);
         return (
           <div className="whitespace-nowrap">
             <div className="font-medium" style={{ color: 'var(--ink)' }}>
               {formatDateRu(parsed.date)}
             </div>
             <div className="text-xs" style={{ color: 'var(--ink-light)' }}>
-              {formatTime(parsed.startTime)}
+              {formatTime(parsed.startMinutes)}
             </div>
           </div>
         );

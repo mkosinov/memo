@@ -2,7 +2,8 @@
 
 import React, { useCallback, useState, useRef, useEffect } from 'react';
 import { useSchedule } from '@/contexts/ScheduleContext';
-import { CELL_HEIGHT_OPTIONS, GRID_FREQUENCY_OPTIONS, getMonday, formatDateISO, formatWeekRange, formatDayLabel } from '@/lib/utils';
+import { CELL_HEIGHT_OPTIONS, GRID_FREQUENCY_OPTIONS, formatWeekRange, formatDayLabel } from '@/lib/utils';
+import { getMonday, toISODate } from '@/lib/datetime';
 import { useNavigation } from '@/contexts/NavigationContext';
 import { MultiSelect } from '../shared/MultiSelect';
 import { CalendarPopover } from '../shared/CalendarPopover';
@@ -87,7 +88,7 @@ export function Topbar() {
       // DayView → WeekView: Show week containing selectedDay
       const monday = getMonday(selectedDay);
       const sunday = new Date(monday.getTime() + 6 * 24 * 60 * 60 * 1000);
-      selectDateRange(formatDateISO(monday), formatDateISO(sunday));
+      selectDateRange(toISODate(monday), toISODate(sunday));
     } else {
       // WeekView → DayView: Show today if in current week, else first day of week
       const today = new Date();
@@ -131,14 +132,14 @@ export function Topbar() {
       // In week mode: select the week containing the clicked date
       const monday = getMonday(date);
       const sunday = new Date(monday.getTime() + 6 * 24 * 60 * 60 * 1000);
-      selectDateRange(formatDateISO(monday), formatDateISO(sunday));
+      selectDateRange(toISODate(monday), toISODate(sunday));
     } else {
       // In day mode: select the single day
       setSelectedDay(date);
       // Also navigate the week range to contain this day
       const monday = getMonday(date);
       const sunday = new Date(monday.getTime() + 6 * 24 * 60 * 60 * 1000);
-      selectDateRange(formatDateISO(monday), formatDateISO(sunday));
+      selectDateRange(toISODate(monday), toISODate(sunday));
     }
     setCalendarOpen(false);
   }, [viewMode, selectDateRange, setSelectedDay]);

@@ -7,12 +7,13 @@ import { ApiError } from '@memo/api-client';
 import { useRecordData } from '@/hooks/useRecordData';
 import { useDeleteRecord } from '@/hooks/useDeleteRecord';
 import { useUI } from '@/contexts/UIContext';
-import { formatRecordLabel, formatTime } from '@/lib/utils';
+import { formatRecordLabel } from '@/lib/utils';
+import { parseLocalISO, formatTime } from '@/lib/datetime';
 import { DataTable } from '@/app/components/shared/DataTable';
 import { DeleteDialog } from '@/app/components/DeleteDialog';
 import { DiamondIcon } from '@/app/components/shared/DiamondIcon';
 import { ClientQuickCard } from './ClientQuickCard';
-import { recordColumns, recordsActions, formatPrice, formatDateRu, parseActivityStart } from './recordsColumns';
+import { recordColumns, recordsActions, formatPrice, formatDateRu } from './recordsColumns';
 import { StatusBadge } from '@/app/components/shared/StatusBadge';
 import { safeStatus } from '@/app/lib/status-utils';
 
@@ -157,10 +158,10 @@ export function RecordsTable() {
               <span>{selectedRecord.service_title ?? '—'}</span>
             </div>
             {selectedRecord.activity_start && (() => {
-              const parsed = parseActivityStart(selectedRecord.activity_start);
+              const parsed = parseLocalISO(selectedRecord.activity_start);
               return (
                 <div className="text-xs mt-1" style={{ color: 'var(--ink-light)' }}>
-                  {formatDateRu(parsed.date)} · {formatTime(parsed.startTime)}
+                  {formatDateRu(parsed.date)} · {formatTime(parsed.startMinutes)}
                 </div>
               );
             })()}

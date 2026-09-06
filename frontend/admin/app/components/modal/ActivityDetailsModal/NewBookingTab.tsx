@@ -2,8 +2,8 @@
 
 import React, { useState, useCallback } from 'react';
 import { getClientByPhone } from '@memo/api-client';
-import type { TariffResponse } from '@memo/api-client';
-import type { Activity } from '@memo/domain';
+import type { Tariff } from '@memo/domain';
+import type { ScheduleAdminDTO } from '@memo/domain';
 
 interface NewVisitor {
   tempId: string;
@@ -13,8 +13,8 @@ interface NewVisitor {
 }
 
 interface NewBookingTabProps {
-  activity: Activity;
-  serviceTariffs: TariffResponse[];
+  activity: ScheduleAdminDTO;
+  serviceTariffs: Tariff[];
   onSubmit: (data: {
     phone: string;
     name: string;

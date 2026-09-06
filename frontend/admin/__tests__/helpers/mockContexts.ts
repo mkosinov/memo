@@ -32,7 +32,6 @@ export function createMockScheduleContext(
   return {
     masters: mockMasters,
     services: mockServices,
-    servicesRaw: [],
     locations: mockLocations,
     activities: [],
     scheduleIndex: {
@@ -69,6 +68,8 @@ export function createMockScheduleContext(
     setWorkingHoursStart: vi.fn(),
     workingHoursEnd: 21,
     setWorkingHoursEnd: vi.fn(),
+    gridStartMinutes: 540,
+    gridEndMinutes: 1260,
     prevPeriod: vi.fn(),
     nextPeriod: vi.fn(),
     ...overrides,

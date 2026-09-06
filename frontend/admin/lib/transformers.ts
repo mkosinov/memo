@@ -1,44 +1,8 @@
-import type { Activity, Master, Service, Location } from '@memo/domain';
-import type { ActivityResponse, MasterResponse, ServiceResponse, LocationResponse } from '@memo/api-client';
+import type { Master, Service, Location } from '@memo/domain';
+import type { MasterResponse, ServiceResponse, LocationResponse } from '@memo/api-client';
 import { displayMasterName } from '@/lib/utils';
 
-/**
- * Normalize JavaScript getDay() (0=Sun..6=Sat) to Mon=0..Sun=6.
- */
-function normalizeDay(jsDay: number): number {
-  return (jsDay + 6) % 7;
-}
-
-/**
- * Extract day (Mon=0..Sun=6) and startTime (float hours) from an ISO datetime string.
- */
-function parseStart(start: string): { day: number; startTime: number } {
-  const d = new Date(start);
-  return {
-    day: normalizeDay(d.getDay()),
-    startTime: d.getHours() + d.getMinutes() / 60,
-  };
-}
-
 // ─── Transformers ───────────────────────────────────────────────────────────
-
-export function transformActivity(raw: ActivityResponse): Activity {
-  const { day, startTime } = parseStart(raw.start);
-  return {
-    id: raw.id,
-    day,
-    masterId: raw.master_id,
-    startTime,
-    duration: raw.duration / 60,
-    durationMinutes: raw.duration,
-    serviceId: raw.service_id,
-    locationId: raw.location_id,
-    occupied: raw.occupied,
-    capacity: raw.capacity,
-    isPrivate: raw.is_private,
-    comment: raw.comment ?? undefined,
-  };
-}
 
 export function transformMaster(raw: MasterResponse): Master {
   return {
@@ -55,10 +19,10 @@ export function transformService(raw: ServiceResponse): Service {
   return {
     id: raw.id,
     name: raw.title,
-    duration: raw.duration / 60,
     durationMinutes: raw.duration,
     minAge: `${raw.min_age}`,
     maxAge: raw.max_age != null ? `${raw.max_age}` : undefined,
+    tariffs: raw.tariffs ?? [],
     defaultAdultPrice: raw.tariffs?.[0]?.price ?? 0,
     description: raw.description,
   };

@@ -2,8 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import React from 'react';
 import { OverlapPopover } from '../app/components/schedule/OverlapPopover';
-import type { Activity, Master } from '@memo/domain';
-import { formatTime } from '@/lib/utils';
+import type { ScheduleAdminDTO, Master } from '@memo/domain';
 import { createMockUIContext, createMockScheduleContext } from './helpers/mockContexts';
 
 vi.mock('@/contexts/UIContext', () => ({
@@ -35,55 +34,72 @@ const MOCK_MASTERS: Master[] = [
 
 const masterMap = new Map(MOCK_MASTERS.map(m => [m.id, m]));
 
-// Two overlapping activities at same time
-const overlappingActivities: Activity[] = [
-  {
-    id: 'ov1',
+/** ScheduleAdminDTO fixture factory (GH #142 — integer minutes). */
+function makeAct(overrides: Partial<ScheduleAdminDTO> & { id: string }): ScheduleAdminDTO {
+  return {
     day: 0,
     masterId: 'm1',
-    startTime: 10,
-    duration: 2,
     serviceId: 's1',
-    serviceName: 'Картина маслом',
-    minAge: '12',
     locationId: 'alpika',
-    occupied: 3,
+    masterName: 'Анна Иванова',
+    masterColor: '#FF6B6B',
+    serviceTitle: 'Картина маслом',
+    date: '2026-06-15',
+    time: '10:00',
+    startMinutes: 600,
+    durationMinutes: 120,
+    locationName: 'Альпика',
+    minAge: '12',
+    occupied: 0,
     capacity: 8,
     isPrivate: false,
-  },
-  {
+    comment: '',
+    priceMin: 0,
+    priceMax: 0,
+    ...overrides,
+  };
+}
+
+// Two overlapping activities at same time
+const overlappingActivities: ScheduleAdminDTO[] = [
+  makeAct({
+    id: 'ov1',
+    masterId: 'm1',
+    startMinutes: 600,
+    durationMinutes: 120,
+    serviceId: 's1',
+    serviceTitle: 'Картина маслом',
+    minAge: '12',
+    occupied: 3,
+    capacity: 8,
+  }),
+  makeAct({
     id: 'ov2',
-    day: 0,
     masterId: 'm2',
-    startTime: 10,
-    duration: 1.5,
+    startMinutes: 600,
+    durationMinutes: 90,
     serviceId: 's2',
-    serviceName: 'Картина акрилом',
+    serviceTitle: 'Картина акрилом',
     minAge: '6',
-    locationId: 'alpika',
     occupied: 4,
     capacity: 6,
-    isPrivate: false,
-  },
+  }),
 ];
 
 // Three activities: two overlap, one starts after the first ends
-const threeActivities: Activity[] = [
+const threeActivities: ScheduleAdminDTO[] = [
   ...overlappingActivities,
-  {
+  makeAct({
     id: 'ov3',
-    day: 0,
     masterId: 'm3',
-    startTime: 12,
-    duration: 2,
+    startMinutes: 720,
+    durationMinutes: 120,
     serviceId: 's3',
-    serviceName: 'Мини-картина',
+    serviceTitle: 'Мини-картина',
     minAge: '6',
-    locationId: 'alpika',
     occupied: 1,
     capacity: 10,
-    isPrivate: false,
-  },
+  }),
 ];
 
 const anchorRect: DOMRect = {
@@ -302,21 +318,18 @@ describe('OverlapPopover', () => {
   });
 
   it('uses fallback color when master not found', () => {
-    const activitiesUnknownMaster: Activity[] = [
-      {
+    const activitiesUnknownMaster: ScheduleAdminDTO[] = [
+      makeAct({
         id: 'unk1',
-        day: 0,
         masterId: 'unknown',
-        startTime: 10,
-        duration: 2,
+        startMinutes: 600,
+        durationMinutes: 120,
         serviceId: 's1',
-        serviceName: 'Неизвестный мастер',
+        serviceTitle: 'Неизвестный мастер',
         minAge: '12',
-        locationId: 'alpika',
         occupied: 0,
         capacity: 8,
-        isPrivate: false,
-      },
+      }),
     ];
 
     render(
@@ -370,34 +383,28 @@ describe('OverlapPopover', () => {
   // ─── Time alignment bug ────────────────────────────────────────
 
   it('positions activities relative to popover timeline, not gridStart', () => {
-    // Activities at 13:00 and 14:00 — timeline starts at 13 (not gridStart=9)
-    const g2Activities: Activity[] = [
-      {
+    // Activities at 13:00 and 14:00 — timeline starts at 780 min (not gridStart=540)
+    const g2Activities: ScheduleAdminDTO[] = [
+      makeAct({
         id: 'g2a1',
-        day: 0,
         masterId: 'm1',
-        startTime: 13,
-        duration: 2.5,
+        startMinutes: 780,
+        durationMinutes: 150,
         serviceId: 's1',
-        serviceName: 'G2 Activity A',
-        locationId: 'alpika',
+        serviceTitle: 'G2 Activity A',
         occupied: 3,
         capacity: 8,
-        isPrivate: false,
-      },
-      {
+      }),
+      makeAct({
         id: 'g2a2',
-        day: 0,
         masterId: 'm2',
-        startTime: 14,
-        duration: 2,
+        startMinutes: 840,
+        durationMinutes: 120,
         serviceId: 's2',
-        serviceName: 'G2 Activity B',
-        locationId: 'alpika',
+        serviceTitle: 'G2 Activity B',
         occupied: 4,
         capacity: 6,
-        isPrivate: false,
-      },
+      }),
     ];
 
     const { container } = render(
@@ -408,18 +415,17 @@ describe('OverlapPopover', () => {
         onClose={vi.fn()}
         onSelectActivity={vi.fn()}
         cellHeight={60}
-        gridStart={9}
       />,
     );
 
     const popover = container.firstChild as HTMLElement;
-    // Activity at 13:00 should be at top=0 (13 - timelineStart=13 = 0 hours)
-    // NOT at top=(13-9)*60*2 = 480px (old bug with gridStart)
+    // Activity at 13:00 should be at top=0 (780 - timelineStart=780 = 0 min)
+    // NOT at top=(780-540)*60/30 = 480px (old bug with gridStart)
     const card1 = popover.querySelector('[data-testid="popover-slot-g2a1"]') as HTMLElement;
     expect(card1).toBeTruthy();
     expect(card1.style.top).toBe('0px');
 
-    // Activity at 14:00 should be at top=(14-13)*60*2 = 120px
+    // Activity at 14:00 should be at top=(840-780)*60/30 = 120px
     const card2 = popover.querySelector('[data-testid="popover-slot-g2a2"]') as HTMLElement;
     expect(card2).toBeTruthy();
     expect(card2.style.top).toBe('120px');

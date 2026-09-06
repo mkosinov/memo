@@ -41,6 +41,7 @@ A Service represents a type of master class (painting, sculpture, etc.). It defi
 
 ### Frontend
 - **Auto-fill:** When Service selected in Activity → fills duration, capacity, minAge
+- **Domain `Service` (frontend, `@memo/domain`):** carries `tariffs: Tariff[]` (`id`/`title`/`price`/`description`) populated by `transformService` in `frontend/admin/lib/transformers.ts`; `durationMinutes` is the canonical duration field — no decimal-hours twin (GH #142).
 - **Tariff display:** Read-only list below service select (title + price ₽)
 - **EntityModal validation:** title required, duration required min(15) max(480), min_age/max_age min(0) max(18), cross-field min_age <= max_age
 

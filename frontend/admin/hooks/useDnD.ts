@@ -18,7 +18,7 @@ interface UseDnDOptions {
   addActivity: ScheduleContextType['addActivity'];
   updateActivity: ScheduleContextType['updateActivity'];
   showToast: (message: string, undo?: () => void) => void;
-  /** Grid frequency in minutes (5, 15, or 30). DnD snaps dropped times to the nearest multiple. */
+  /** Grid frequency in minutes (5, 15, 30, or 60). DnD snaps dropped times to the nearest multiple. */
   gridFrequency?: number;
   /** When set, cross-column drops update this Activity field (e.g. 'masterId' or 'locationId'). */
   columnField?: 'masterId' | 'locationId';

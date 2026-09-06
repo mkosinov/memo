@@ -27,15 +27,25 @@ export const LocationSchema = z.object({
 
 export type Location = z.infer<typeof LocationSchema>;
 
+// ─── Tariff ───────────────────────────────────────────────────────────────
+// Subset of api-client TariffResponse items (service_id FK dropped deliberately).
+export const TariffSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  price: z.number(),
+  description: z.string().nullable(),
+});
+export type Tariff = z.infer<typeof TariffSchema>;
+
 // ─── Service ──────────────────────────────────────────────────────────────
 
 export const ServiceSchema = z.object({
   id: z.string(),
   name: z.string(),
-  duration: z.number(), // hours
-  durationMinutes: z.number().optional(),
+  durationMinutes: z.number().int().min(0),
   minAge: z.string(),
   maxAge: z.string().optional(),
+  tariffs: z.array(TariffSchema),
   defaultAdultPrice: z.number().optional(),
   defaultChildPrice: z.number().optional(),
   defaultIndividualPrice: z.number().optional(),
@@ -46,37 +56,6 @@ export const ServiceSchema = z.object({
 });
 
 export type Service = z.infer<typeof ServiceSchema>;
-
-// ─── Activity ─────────────────────────────────────────────────────────────
-
-export const ActivitySchema = z.object({
-  id: z.string(),
-  day: z.number(), // 0=ПН ... 6=ВС
-  masterId: z.string(),
-  startTime: z.number(), // e.g. 10.5 = 10:30
-  duration: z.number(),
-  durationMinutes: z.number().optional(),
-  serviceId: z.string(),
-  serviceName: z.string().optional(),
-  minAge: z.string().optional(),
-  maxAge: z.string().optional(),
-  locationId: z.string(),
-  occupied: z.number(),
-  capacity: z.number(),
-  isPrivate: z.boolean(),
-  // v1 fields
-  isPublic: z.boolean().optional(),
-  date: z.string().optional(), // YYYY-MM-DD
-  endTime: z.string().optional(), // HH:MM
-  priceAdult: z.number().optional(),
-  priceChild: z.number().optional(),
-  priceIndividual: z.number().optional(),
-  hasRecords: z.boolean().optional(),
-  comment: z.string().optional(),
-  clientName: z.string().optional(),
-});
-
-export type Activity = z.infer<typeof ActivitySchema>;
 
 // ─── Client ───────────────────────────────────────────────────────────────
 

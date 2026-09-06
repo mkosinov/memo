@@ -84,7 +84,7 @@ describe('recordColumns — shape (GH #213 Task 7, spec §6.2)', () => {
 // ─── Date cell ─────────────────────────────────────────────────────────────
 
 describe('recordColumns — date cell (spec §6.3)', () => {
-  it('renders row.activity_start via parseActivityStart/formatDateRu/formatTime', () => {
+  it('renders row.activity_start via parseLocalISO/formatDateRu/formatTime (GH #142)', () => {
     renderCell('date', makeRecord({ activity_start: '2026-06-15T10:00:00Z' }));
     expect(screen.getByText('15 июня')).toBeInTheDocument();
     expect(screen.getByText('10:00')).toBeInTheDocument();

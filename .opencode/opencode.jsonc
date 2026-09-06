@@ -1,0 +1,6 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "permission": "allow",
+  // Manager → architect → coder → explore chain requires depth 3.
+  "subagent_depth": 3
+}

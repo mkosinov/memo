@@ -63,7 +63,15 @@ docker-compose.override.yml
 .worktrees/
 
 # Local workspace files
-.opencode/
+.opencode/*
+!.opencode/agents/
+!.opencode/skills/
+!.opencode/scripts/
+!.opencode/tools/
+!.opencode/plugins/
+!.opencode/opencode.jsonc
+.opencode/agents/*.bak-*
+.opencode/**/__pycache__/
 .claude/
 local-images/
 token-usage-output.txt

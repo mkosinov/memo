@@ -43,7 +43,7 @@ An Activity is a scheduled instance of a Service. It ties together a Master, Ser
 - **DateTime canon (GH #142):** datetime-local → `startMinutes` (minutes from midnight) + `dayIndex` (Mon=0..Sun=6) → `composeLocalISO(date, startMinutes)` for API payloads. Duration is integer minutes (`durationMinutes`); display via `formatTime(startMinutes)`.
 - **Single parser:** `frontend/admin/lib/datetime.ts` (`parseLocalISO` et al.) is the ONLY datetime parser — treats input as floating local time (no UTC shifts). Records list and Schedule grid both consume it, guaranteeing parity (same parser, same minutes).
 - **Optimistic updates:** Snapshot → apply → rollback on error → invalidate on settle
-- **Race protection:** API call races against 5-second timeout
+- **Race protection (GH #141):** no artificial timeout — the PATCH settles naturally (success or real network error). The former 5-second `Promise.race` rollback was removed: it raced the server-side write (UI rolled back while the request kept flying and could still be applied → screen/server desync). In-flight saves surface via a «сохраняем…» indicator + `beforeunload` guard.
 
 ## Display label convention (project-wide, GH #211 §7.7)
 

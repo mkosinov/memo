@@ -19,6 +19,9 @@ import type {
   PagedListFiltersState,
 } from '@/contexts/createPagedListContext';
 import type { PhotosContextType } from '@/contexts/PhotosContext';
+import type { ScheduleDataContextType } from '@/contexts/schedule/ScheduleDataContext';
+import type { ScheduleViewContextType } from '@/contexts/schedule/ScheduleViewContext';
+import type { GridSettingsContextType } from '@/contexts/schedule/GridSettingsContext';
 import type { ClientWithStats } from '@memo/api-client';
 import { mockMasters, mockServices, mockLocations } from './mockData';
 
@@ -72,6 +75,74 @@ export function createMockScheduleContext(
     gridEndMinutes: 1260,
     prevPeriod: vi.fn(),
     nextPeriod: vi.fn(),
+    ...overrides,
+  };
+}
+
+// ─── Schedule split contexts (GH #141) ────────────────────────────────────
+
+export function createMockScheduleData(
+  overrides?: Partial<ScheduleDataContextType>,
+): ScheduleDataContextType {
+  return {
+    masters: mockMasters,
+    services: mockServices,
+    locations: mockLocations,
+    activities: [],
+    scheduleIndex: {
+      byId: new Map(),
+      byDate: new Map(),
+      byMasterId: new Map(),
+      byLocation: { all: { byDate: new Map(), byServiceId: new Map() } },
+    },
+    loading: false,
+    error: null,
+    addActivity: vi.fn(),
+    updateActivity: vi.fn(),
+    deleteActivity: vi.fn(),
+    copyLastWeek: vi.fn(),
+    gridStartMinutes: 540,
+    gridEndMinutes: 1260,
+    ...overrides,
+  };
+}
+
+export function createMockScheduleView(
+  overrides?: Partial<ScheduleViewContextType>,
+): ScheduleViewContextType {
+  return {
+    viewMode: 'week',
+    setViewMode: vi.fn(),
+    selectedDay: new Date(),
+    setSelectedDay: vi.fn(),
+    columnMode: 'masters',
+    setColumnMode: vi.fn(),
+    filterMasterIds: [],
+    filterLocationIds: [],
+    setFilterMasterIds: vi.fn(),
+    setFilterLocationIds: vi.fn(),
+    stamp: { masterId: null, serviceId: null, locations: new Set(), ready: false },
+    setStamp: vi.fn(),
+    currentWeek: new Date('2026-06-01'),
+    setCurrentWeek: vi.fn(),
+    prevPeriod: vi.fn(),
+    nextPeriod: vi.fn(),
+    ...overrides,
+  };
+}
+
+export function createMockGridSettings(
+  overrides?: Partial<GridSettingsContextType>,
+): GridSettingsContextType {
+  return {
+    cellHeight: 50,
+    setCellHeight: vi.fn(),
+    gridFrequency: 30,
+    setGridFrequency: vi.fn(),
+    workingHoursStart: 9,
+    setWorkingHoursStart: vi.fn(),
+    workingHoursEnd: 21,
+    setWorkingHoursEnd: vi.fn(),
     ...overrides,
   };
 }

@@ -48,10 +48,10 @@ export function ServicesTable() {
     // Canonical PUT (GH #178): full typed ServiceUpdate — every field listed.
     // #207: the Update schema carries no archive flag — archive/restore goes
     // through POST /services/{id}/archive|restore, so PUT never flips it.
-    // #223 T2: `materials` is required on the ServiceUpdate TYPE (Zod output of
-    // `.default([])`), but the backend write path lands in T4 (`extra="forbid"`
-    // would 422 today) — the cast keeps the wire body unchanged until the form
-    // sends `materials` in T5.
+    // #223 T5: the form now sends `materials` (checkbox multi-list state →
+    // {material_id, note?}[] in ServiceModal's handleSubmit) — PUT hard-replaces
+    // the links. `material_hint` is gone from the FORM but the wire keeps ''
+    // (api-client default) until Task 13 drops the field everywhere.
     const payload = {
       title: data.title as string,
       description: (data.description as string | null | undefined) ?? '',
@@ -61,9 +61,10 @@ export function ServicesTable() {
       max_age: (data.max_age as number | null | undefined) ?? 18,
       duration: data.duration as number,
       record_info: (data.record_info as string | null | undefined) ?? '',
-      material_hint: (data.material_hint as string | null | undefined) ?? '',
+      material_hint: '',
       tariffs: (data.tariffs as ServiceUpdate['tariffs'] | undefined) ?? [],
       tag_ids: (data.tag_ids as string[] | undefined) ?? [],
+      materials: (data.materials as ServiceUpdate['materials'] | undefined) ?? [],
     } as ServiceUpdate;
     try {
       await updateService.mutateAsync({ id: editingService.id, data: payload });

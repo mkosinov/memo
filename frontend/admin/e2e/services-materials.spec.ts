@@ -264,12 +264,36 @@ test.describe('Services — material filter (#223 S2)', () => {
 
       // The already-selected filter keeps working: refetch (status change
       // composes with material_id) still returns the two linked services.
+      // The raw API archive bypasses the app's react-query cache, so the
+      // in-page selection + options are untouched at this point — exactly the
+      // «already-selected filter» state §5 requires to survive.
       await page.getByLabel('Фильтр по статусу').selectOption('all');
       await expect(page.getByText('2 всего', { exact: true })).toBeVisible({ timeout: 10_000 });
       await expect(serviceRow(page, svcA1.title)).toBeVisible();
       await expect(serviceRow(page, svcA2.title)).toBeVisible();
       // The selection itself survived the archive.
       await expect(materialFilter).toHaveValue(akv.id);
+
+      // The PICKER no longer offers the archived material for new links: a
+      // reload drops the react-query cache, useMaterialsRaw refetches
+      // /all?status=active, and «Акварель <uid>» must be gone from the options.
+      await page.reload();
+      await page.waitForSelector('table', { timeout: 60_000 });
+      const reloadedFilter = page.getByLabel('Фильтр по материалу');
+      await expect(reloadedFilter).toBeVisible({ timeout: 10_000 });
+      // Anchor: the seed's «Акварель» (exact — ours has the uid suffix) proves
+      // the materials list landed after the reload.
+      await expect(
+        reloadedFilter.getByRole('option', { name: 'Акварель', exact: true }),
+      ).toHaveCount(1, { timeout: 10_000 });
+      // The archived unique «Акварель <uid>» is no longer offered…
+      await expect(
+        reloadedFilter.getByRole('option', { name: akv.title }),
+      ).toHaveCount(0);
+      // …while the still-active «Керамика <uid>» is.
+      await expect(
+        reloadedFilter.getByRole('option', { name: ker.title }),
+      ).toHaveCount(1);
     } finally {
       await cleanup(request, `/api/v1/services/${svcA1.id}`);
       await cleanup(request, `/api/v1/services/${svcA2.id}`);

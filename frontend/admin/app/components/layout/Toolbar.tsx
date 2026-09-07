@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { useUI } from '@/contexts/UIContext';
-import { useSchedule } from '@/contexts/ScheduleContext';
+import { useScheduleData } from '@/contexts/schedule/ScheduleDataContext';
 import { StampPanel } from '@/app/components/stamp/StampPanel';
 
 // ─── Accordion Section ────────────────────────────────────────────────────
@@ -49,7 +49,7 @@ function AccordionSection({ title, children, contentTestId }: AccordionSectionPr
 
 export function Toolbar() {
   const { rightPanelCollapsed, toggleRightPanel, showToast } = useUI();
-  const { copyLastWeek } = useSchedule();
+  const { copyLastWeek } = useScheduleData();
 
   const handleCopyLastWeek = () => {
     copyLastWeek();

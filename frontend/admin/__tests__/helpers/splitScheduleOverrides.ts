@@ -16,7 +16,10 @@ export type ScheduleOverrides = Partial<ScheduleDataContextType> &
   Partial<ScheduleViewContextType> &
   Partial<GridSettingsContextType>;
 
-const DATA_KEYS: readonly string[] = [
+// Each array is pinned to the context interface that owns it: `satisfies` makes
+// a stale/typo'd key a COMPILE error (T9 quality review), while a context field
+// added later and not routed here surfaces as the runtime throw below.
+const DATA_KEYS = [
   'activities',
   'scheduleIndex',
   'masters',
@@ -30,9 +33,9 @@ const DATA_KEYS: readonly string[] = [
   'copyLastWeek',
   'gridStartMinutes',
   'gridEndMinutes',
-];
+] as const satisfies readonly (keyof ScheduleDataContextType)[];
 
-const VIEW_KEYS: readonly string[] = [
+const VIEW_KEYS = [
   'viewMode',
   'setViewMode',
   'selectedDay',
@@ -49,9 +52,9 @@ const VIEW_KEYS: readonly string[] = [
   'setCurrentWeek',
   'prevPeriod',
   'nextPeriod',
-];
+] as const satisfies readonly (keyof ScheduleViewContextType)[];
 
-const SETTINGS_KEYS: readonly string[] = [
+const SETTINGS_KEYS = [
   'cellHeight',
   'setCellHeight',
   'gridFrequency',
@@ -60,7 +63,12 @@ const SETTINGS_KEYS: readonly string[] = [
   'setWorkingHoursStart',
   'workingHoursEnd',
   'setWorkingHoursEnd',
-];
+] as const satisfies readonly (keyof GridSettingsContextType)[];
+
+/** Widen the literal tuples for the runtime lookup so unknown keys reach the throw. */
+function routesKey(keys: readonly string[], key: string): boolean {
+  return keys.includes(key);
+}
 
 export function splitScheduleOverrides(overrides: ScheduleOverrides = {}): {
   data: Partial<ScheduleDataContextType>;
@@ -72,9 +80,9 @@ export function splitScheduleOverrides(overrides: ScheduleOverrides = {}): {
   const settings: Record<string, unknown> = {};
 
   for (const [key, value] of Object.entries(overrides)) {
-    if (DATA_KEYS.includes(key)) data[key] = value;
-    else if (VIEW_KEYS.includes(key)) view[key] = value;
-    else if (SETTINGS_KEYS.includes(key)) settings[key] = value;
+    if (routesKey(DATA_KEYS, key)) data[key] = value;
+    else if (routesKey(VIEW_KEYS, key)) view[key] = value;
+    else if (routesKey(SETTINGS_KEYS, key)) settings[key] = value;
     else throw new Error(`splitScheduleOverrides: unknown schedule override key "${key}"`);
   }
 

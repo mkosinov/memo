@@ -3,7 +3,7 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import React from 'react';
 import { ActivityCard } from '../app/components/schedule/ActivityCard';
 import type { ScheduleAdminDTO, Master, Location } from '@memo/domain';
-import { createMockUIContext, createMockScheduleContext } from './helpers/mockContexts';
+import { createMockUIContext, createMockScheduleData, createMockGridSettings } from './helpers/mockContexts';
 
 const mockMaster: Master = {
   id: 'art_1',
@@ -335,20 +335,29 @@ vi.mock('@/contexts/UIContext', () => ({
   useUI: vi.fn(),
 }));
 
-vi.mock('@/contexts/ScheduleContext', () => ({
-  useSchedule: vi.fn(),
+// GH #141 Task 10: ActivityCard reads the split contexts — data for the
+// mutations, grid settings for cellHeight.
+vi.mock('@/contexts/schedule/ScheduleDataContext', () => ({
+  useScheduleData: vi.fn(),
+}));
+
+vi.mock('@/contexts/schedule/GridSettingsContext', () => ({
+  useGridSettings: vi.fn(),
 }));
 
 import { useUI } from '@/contexts/UIContext';
-import { useSchedule } from '@/contexts/ScheduleContext';
+import { useScheduleData } from '@/contexts/schedule/ScheduleDataContext';
+import { useGridSettings } from '@/contexts/schedule/GridSettingsContext';
 
 const mockUseUI = vi.mocked(useUI);
-const mockUseSchedule = vi.mocked(useSchedule);
+const mockUseScheduleData = vi.mocked(useScheduleData);
+const mockUseGridSettings = vi.mocked(useGridSettings);
 
 beforeEach(() => {
   vi.useFakeTimers();
   mockUseUI.mockReturnValue(createMockUIContext());
-  mockUseSchedule.mockReturnValue(createMockScheduleContext());
+  mockUseScheduleData.mockReturnValue(createMockScheduleData());
+  mockUseGridSettings.mockReturnValue(createMockGridSettings());
 });
 
 afterEach(() => {
@@ -359,10 +368,7 @@ afterEach(() => {
 describe('ActivityCard delete mode', () => {
   it('does not trigger delete when deleteMode is false', () => {
     const deleteActivity = vi.fn();
-    mockUseSchedule.mockReturnValue({
-      ...mockUseSchedule(),
-      deleteActivity,
-    } as ReturnType<typeof useSchedule>);
+    mockUseScheduleData.mockReturnValue(createMockScheduleData({ deleteActivity }));
 
     render(<ActivityCard activity={mockActivity} master={mockMaster} />);
     const card = screen.getByTestId('activity-ev_1');
@@ -374,15 +380,11 @@ describe('ActivityCard delete mode', () => {
   it('triggers delete with fade-out animation when deleteMode is true', () => {
     const deleteActivity = vi.fn();
     const showToast = vi.fn();
-    mockUseUI.mockReturnValue({
-      ...mockUseUI(),
+    mockUseUI.mockReturnValue(createMockUIContext({
       deleteMode: true,
       showToast,
-    } as ReturnType<typeof useUI>);
-    mockUseSchedule.mockReturnValue({
-      ...mockUseSchedule(),
-      deleteActivity,
-    } as ReturnType<typeof useSchedule>);
+    }));
+    mockUseScheduleData.mockReturnValue(createMockScheduleData({ deleteActivity }));
 
     const { container } = render(<ActivityCard activity={mockActivity} master={mockMaster} />);
     const card = screen.getByTestId('activity-ev_1');

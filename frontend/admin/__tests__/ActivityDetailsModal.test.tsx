@@ -20,7 +20,8 @@ import {
 } from './helpers/mockData';
 
 import {
-  createMockScheduleContext,
+  createMockScheduleData,
+  createMockGridSettings,
   createMockUIContext,
 } from './helpers/mockContexts';
 
@@ -57,8 +58,14 @@ import {
 // GH #140 US-2: NO ClientsContext mock either — the modal has ZERO
 // clients-list dependency; per-tab resolution goes through useClient.
 
-vi.mock('@/contexts/ScheduleContext', () => ({
-  useSchedule: vi.fn(),
+// GH #141 Task 10: the modal + SettingsTab read the split contexts — data for
+// services/masters/locations + mutations, grid settings for gridFrequency.
+vi.mock('@/contexts/schedule/ScheduleDataContext', () => ({
+  useScheduleData: vi.fn(),
+}));
+
+vi.mock('@/contexts/schedule/GridSettingsContext', () => ({
+  useGridSettings: vi.fn(),
 }));
 
 vi.mock('@/contexts/UIContext', () => ({
@@ -135,7 +142,8 @@ vi.mock('next/navigation', () => ({
   })),
 }));
 
-import { useSchedule } from '@/contexts/ScheduleContext';
+import { useScheduleData } from '@/contexts/schedule/ScheduleDataContext';
+import { useGridSettings } from '@/contexts/schedule/GridSettingsContext';
 import { useUI } from '@/contexts/UIContext';
 import { useRecordData } from '@/hooks/useRecordData';
 import { useClient, useClientRecords } from '@/hooks/useClient';
@@ -146,7 +154,8 @@ import {
 } from '@/hooks/useActivities';
 import { usePaymentTotals } from '@/hooks/usePayments';
 
-const mockUseSchedule = vi.mocked(useSchedule);
+const mockUseScheduleData = vi.mocked(useScheduleData);
+const mockUseGridSettings = vi.mocked(useGridSettings);
 const mockUseUI = vi.mocked(useUI);
 const mockUseClient = vi.mocked(useClient);
 const mockUseClientRecords = vi.mocked(useClientRecords);
@@ -185,7 +194,8 @@ function stubClientsById(states: Record<string, ClientState>) {
 }
 
 beforeEach(() => {
-  mockUseSchedule.mockReturnValue(createMockScheduleContext());
+  mockUseScheduleData.mockReturnValue(createMockScheduleData());
+  mockUseGridSettings.mockReturnValue(createMockGridSettings());
   mockUseUI.mockReturnValue(createMockUIContext());
   mockUseActivityRecords.mockReturnValue({ data: [] } as never);
   mockUseClient.mockReturnValue({

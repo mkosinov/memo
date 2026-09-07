@@ -3,18 +3,21 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import React from 'react';
 import { OverlapPopover } from '../app/components/schedule/OverlapPopover';
 import type { ScheduleAdminDTO, Master } from '@memo/domain';
-import { createMockUIContext, createMockScheduleContext } from './helpers/mockContexts';
+import { createMockUIContext, createMockScheduleData, createMockGridSettings } from './helpers/mockContexts';
 
 vi.mock('@/contexts/UIContext', () => ({
   useUI: vi.fn(() => createMockUIContext()),
 }));
 
-// GH #141 Task 9: OverlapPopover itself is props-driven (no schedule context), so
-// this file has NO new-context mocks to switch to. This registration stays ONLY
-// because the real ActivityCard child still reads the old useSchedule() — ActivityCard
-// migrates in Task 10, and this mock is removed then (Task 12 grep gate).
-vi.mock('@/contexts/ScheduleContext', () => ({
-  useSchedule: vi.fn(() => createMockScheduleContext()),
+// GH #141 Task 10: OverlapPopover itself is props-driven (no schedule context). These
+// registrations exist ONLY for the real ActivityCard child, which now reads the
+// split contexts — data for the mutations, grid settings for cellHeight.
+vi.mock('@/contexts/schedule/ScheduleDataContext', () => ({
+  useScheduleData: vi.fn(() => createMockScheduleData()),
+}));
+
+vi.mock('@/contexts/schedule/GridSettingsContext', () => ({
+  useGridSettings: vi.fn(() => createMockGridSettings()),
 }));
 
 const mockUseDroppable = vi.fn(() => ({

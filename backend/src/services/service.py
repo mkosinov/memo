@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import cast
 
 from fastapi import HTTPException
 from sqlalchemy import delete, not_, select
@@ -19,7 +18,7 @@ from src.models.service_material import ServiceMaterial
 from src.models.tag import service_tags
 from src.models.tariff import Tariff
 from src.repositories.generic import ArchiveRepository, get_archive_repository
-from src.repositories.search import SearchField
+from src.repositories.search import SearchField, search_predicate
 from src.schemas.common import PaginatedResponse
 from src.schemas.service import (
     ServiceCreate,
@@ -35,13 +34,13 @@ from src.services.generic import ArchiveService, BARE_LIST_MAX_ROWS
 class ServiceService(ArchiveService[ServiceCreate, ServiceUpdate, ServiceResponse]):
     """Service service with eager-loaded tariffs/tags and nested create/update.
 
-    ``list`` delegates to ``ArchiveRepository.list`` passing ``selectinload``
-    options for ``tariffs``/``tags`` so ``ServiceResponse`` validation doesn't
-    hit ``MissingGreenlet`` under async SQLAlchemy (spec §4.1). The repository
-    owns the select/status/filter/count/slice pipeline; the service only adds
-    the eager-load options. ``list_all`` keeps its inline eager-load probe
-    (spec non-goal — the unpaginated /all path doesn't route through the
-    repo ``list``).
+    ``list`` builds its statement inline (status + ``q`` + ``material_id``
+    predicates + eager-load ``selectinload`` options for ``tariffs``/``tags``
+    /``service_materials``) and rides the repo ``list_entity`` row core, so
+    ``ServiceResponse`` validation doesn't hit ``MissingGreenlet`` under
+    async SQLAlchemy (spec §4.1) and every predicate lands BEFORE the
+    COUNT. ``list_all`` keeps its inline eager-load probe (spec non-goal —
+    the unpaginated /all path doesn't route through the repo either).
     """
 
     NOT_NULL_FIELDS = {"title", "description", "image_url", "specialty", "min_age", "duration", "record_info"}
@@ -68,38 +67,56 @@ class ServiceService(ArchiveService[ServiceCreate, ServiceUpdate, ServiceRespons
         status: ArchiveStatus = ArchiveStatus.ACTIVE,
         order_by=None,
         q: str | None = None,
+        material_id: str | None = None,
         **filters,
     ) -> PaginatedResponse[ServiceResponse]:
         """Return services filtered by archive status, with tariffs and tags.
 
-        Delegates to ``ArchiveRepository.list`` passing ``selectinload``
-        options for ``tariffs``/``tags`` so ``ServiceResponse`` validation
-        doesn't hit ``MissingGreenlet`` under async SQLAlchemy (spec §4.1).
-        Materials links are eager-loaded too (GH #223 spec §3.1:
-        ``selectinload(service_materials).joinedload(material)``).
-        ``q`` (GH #212) narrows rows via the repo's ``search_predicate`` over
-        ``self.search_fields`` before the COUNT (honest ``total``).
-        ``self._repository`` is typed ``BaseRepository`` (inherited from
-        ``GenericService.__init__``), but ``get_service_service()`` injects
-        ``get_archive_repository()`` — an ``ArchiveRepository`` whose
-        ``list()`` accepts ``status=``. The cast documents that runtime
-        invariant without touching the factory (#206 Task 3).
+        Builds the statement inline (mirroring ``list_all``) and rides the
+        repo ``list_entity`` row core: the eager-load ``selectinload``
+        options for ``tariffs``/``tags``/``service_materials`` keep
+        ``ServiceResponse`` validation off lazy loads under async SQLAlchemy
+        (spec §4.1), and the COUNT runs on the predicate-bearing subquery so
+        ``total`` always reflects every filter.
+
+        ``q`` (GH #212) narrows rows via ``search_predicate`` over
+        ``self.search_fields``.
+
+        ``material_id`` (GH #223 spec §5) adds a join predicate —
+        ``Service.id.in_(SELECT service_id FROM service_materials WHERE
+        material_id = :material_id)`` — which CANNOT ride the generic repo
+        ``filters`` dict (column-equality via ``getattr(table, key)``
+        only, ``repositories/generic.py``); hence the inline statement.
+        Unknown-but-valid id simply matches no rows (filter semantics).
         """
-        items_orm, total = await cast(ArchiveRepository, self._repository).list(
+        stmt = select(Service).options(
+            selectinload(Service.tariffs),
+            selectinload(Service.tags),
+            selectinload(Service.service_materials).joinedload(ServiceMaterial.material),
+        )
+        if status == ArchiveStatus.ACTIVE:
+            stmt = stmt.where(Service.is_active)
+        elif status == ArchiveStatus.ARCHIVED:
+            stmt = stmt.where(not_(Service.is_active))
+        if q is not None:
+            stmt = stmt.where(search_predicate(q, self.search_fields))
+        for key, value in filters.items():
+            if value is not None:
+                stmt = stmt.where(getattr(Service, key) == value)
+        if material_id is not None:
+            stmt = stmt.where(
+                Service.id.in_(
+                    select(ServiceMaterial.service_id).where(
+                        ServiceMaterial.material_id == material_id
+                    )
+                )
+            )
+        items_orm, total = await self._repository.list_entity(
             db_session,
-            Service,
-            status=status,
-            filters=filters,
-            q=q,
-            search_fields=self.search_fields,
+            stmt,
             order_by=order_by,
             limit=per_page,
             offset=(page - 1) * per_page,
-            options=[
-                selectinload(Service.tariffs),
-                selectinload(Service.tags),
-                selectinload(Service.service_materials).joinedload(ServiceMaterial.material),
-            ],
         )
         items = [ServiceResponse.model_validate(s) for s in items_orm]
         return PaginatedResponse(items=items, total=total, page=page, per_page=per_page)

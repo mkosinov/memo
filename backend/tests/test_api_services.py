@@ -1,5 +1,7 @@
 """Tests for the Services CRUD API endpoints with nested Tariffs and Tags."""
 
+from uuid import uuid4
+
 import pytest
 
 from tests.conftest import query_db
@@ -1056,6 +1058,146 @@ class TestServiceMaterialsWrite:
         assert resp.status_code == 200, f"PUT failed: {resp.text}"
         assert [m["id"] for m in resp.json()["materials"]] == [mat["id"]]
         assert self._materials_of(api_client, service["id"])[0]["id"] == mat["id"]
+
+
+class TestServiceListMaterialFilter:
+    """``?material_id=`` filter on GET /api/v1/services (GH #223 Task 6, spec §5).
+
+    Filter semantics (not error semantics): linked services only; ``total``
+    reflects the filtered count (predicate lands BEFORE the COUNT); composable
+    with ``q``/``status``/pagination. Invalid UUID → 422 (param type
+    validation); valid-but-unknown id → 200 with an EMPTY page (the client
+    cannot distinguish "no such material" from "no services use it").
+    Archived material ids still filter — links survive archive (spec §7).
+    """
+
+    def _create_material(self, api_client, title: str = "Акварель") -> dict:
+        resp = api_client.post(
+            "/api/v1/materials", json={"title": title, "description": "Описание"}
+        )
+        assert resp.status_code == 201, f"create material failed: {resp.text}"
+        return resp.json()
+
+    def _ids(self, resp) -> list[str]:
+        assert resp.status_code == 200, f"list failed: {resp.text}"
+        return [s["id"] for s in resp.json()["items"]]
+
+    def test_material_id_filters_linked_service_in(
+        self, api_client, create_service
+    ) -> None:
+        """Linked service listed; unlinked service excluded (spec §5)."""
+        mat = self._create_material(api_client)
+        linked = create_service(title="A-linked", materials=[{"material_id": mat["id"]}])
+        unlinked = create_service(title="B-unlinked")
+
+        ids = self._ids(api_client.get(f"/api/v1/services?material_id={mat['id']}"))
+
+        assert ids == [linked["id"]]
+        assert unlinked["id"] not in ids
+
+    def test_total_reflects_filtered_count(
+        self, api_client, create_service
+    ) -> None:
+        """``total`` counts only linked services, not the whole table."""
+        mat = self._create_material(api_client)
+        create_service(materials=[{"material_id": mat["id"]}])
+        create_service(materials=[{"material_id": mat["id"]}])
+        create_service()  # unlinked — must not count
+
+        body = api_client.get(f"/api/v1/services?material_id={mat['id']}").json()
+
+        assert body["total"] == 2
+        assert len(body["items"]) == 2
+
+    def test_composable_with_q(self, api_client, create_service) -> None:
+        """``q`` ANDs with the material filter (spec §5 composability)."""
+        mat = self._create_material(api_client)
+        a = create_service(
+            title="Alpha Watercolor", materials=[{"material_id": mat["id"]}]
+        )
+        create_service(title="Beta Sculpture", materials=[{"material_id": mat["id"]}])
+        create_service(title="Gamma Watercolor")  # matches q, not the filter
+
+        ids = self._ids(
+            api_client.get(f"/api/v1/services?material_id={mat['id']}&q=watercolor")
+        )
+
+        assert ids == [a["id"]]
+
+    def test_composable_with_status(self, api_client, create_service) -> None:
+        """``status`` ANDs with the material filter — all three modes."""
+        mat = self._create_material(api_client)
+        active = create_service(
+            title="A-active", materials=[{"material_id": mat["id"]}]
+        )
+        archived = create_service(
+            title="B-archived", materials=[{"material_id": mat["id"]}]
+        )
+        _archive_service(archived["id"])
+        create_service(title="0-unlinked")  # active but unlinked — must not surface
+
+        assert self._ids(
+            api_client.get(f"/api/v1/services?material_id={mat['id']}")
+        ) == [active["id"]]
+        assert self._ids(
+            api_client.get(f"/api/v1/services?material_id={mat['id']}&status=archived")
+        ) == [archived["id"]]
+        assert self._ids(
+            api_client.get(f"/api/v1/services?material_id={mat['id']}&status=all")
+        ) == [active["id"], archived["id"]]
+
+    def test_composable_with_pagination(
+        self, api_client, create_service
+    ) -> None:
+        """limit/offset slice the filtered set; ``total`` stays un-sliced."""
+        mat = self._create_material(api_client)
+        create_service(title="A", materials=[{"material_id": mat["id"]}])
+        create_service(title="B", materials=[{"material_id": mat["id"]}])
+        create_service(title="C", materials=[{"material_id": mat["id"]}])
+        create_service(title="0-unlinked")  # must never surface in any page
+
+        page1 = api_client.get(
+            f"/api/v1/services?material_id={mat['id']}&per_page=2&page=1"
+        ).json()
+        page2 = api_client.get(
+            f"/api/v1/services?material_id={mat['id']}&per_page=2&page=2"
+        ).json()
+
+        assert [s["title"] for s in page1["items"]] == ["A", "B"]
+        assert page1["total"] == 3
+        assert [s["title"] for s in page2["items"]] == ["C"]
+        assert page2["total"] == 3
+
+    def test_invalid_uuid_returns_422(self, api_client) -> None:
+        """``?material_id=not-a-uuid`` → 422 VALIDATION_ERROR (spec §5)."""
+        resp = api_client.get("/api/v1/services?material_id=not-a-uuid")
+
+        assert resp.status_code == 422
+
+    def test_unknown_material_id_returns_empty_page(
+        self, api_client, create_service
+    ) -> None:
+        """Valid-but-unknown id → 200 ``{"items": [], "total": 0}`` (spec §5)."""
+        create_service()  # exists — must still not surface
+
+        resp = api_client.get(f"/api/v1/services?material_id={uuid4()}")
+
+        assert resp.status_code == 200
+        assert resp.json() == {"items": [], "total": 0, "page": 1, "per_page": 20}
+
+    def test_archived_material_id_still_filters(
+        self, api_client, create_service
+    ) -> None:
+        """Archiving a material keeps its links → filter still matches (spec §7)."""
+        mat = self._create_material(api_client)
+        linked = create_service(materials=[{"material_id": mat["id"]}])
+        create_service(title="0-unlinked")  # counterexample: must not surface
+        arch = api_client.post(f"/api/v1/materials/{mat['id']}/archive")
+        assert arch.status_code == 200, f"archive failed: {arch.text}"
+
+        ids = self._ids(api_client.get(f"/api/v1/services?material_id={mat['id']}"))
+
+        assert ids == [linked["id"]]
 
 
 class TestServiceListSorting:

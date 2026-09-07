@@ -2,6 +2,7 @@
 
 from functools import lru_cache
 from typing import Annotated
+from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
@@ -77,6 +78,7 @@ async def list_services(
     sort_by: ServiceSortBy | None = Query(None),
     sort_order: SortOrder = Query("asc"),
     q: str | None = Query(None, min_length=2, max_length=100),
+    material_id: UUID | None = Query(None),
 ) -> PaginatedResponse[ServiceResponse]:
     """Return services filtered by archive status with tariffs and tags.
 
@@ -92,6 +94,11 @@ async def list_services(
     ``q`` (GH #212): case-insensitive substring on ``title`` OR
     ``description`` OR exact id equality for a full UUID; ``total``
     reflects the filtered count. len<2 / len>100 → 422 VALIDATION_ERROR.
+
+    ``material_id`` (GH #223 spec §5): filter to services linked to the
+    material via ``service_materials``. Invalid UUID → 422 (param type
+    validation); valid-but-unknown → 200 with an empty page (filter
+    semantics — the same shape as a ``q`` no-match).
     """
     return await service.list(
         db_session=session,
@@ -100,6 +107,7 @@ async def list_services(
         status=status,
         order_by=_service_order_by(sort_by, sort_order),
         q=q,
+        material_id=str(material_id) if material_id is not None else None,
     )
 
 

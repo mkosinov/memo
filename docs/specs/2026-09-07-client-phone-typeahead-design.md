@@ -50,6 +50,7 @@ The front desk identifies clients by phone every day, but the record form finds 
 8. **Mask caret: accepted limitation, no promised clean swap.** `AsYouType` does not manage caret position (known upstream issue); the named "fallback" library (`react-phone-number-input`) has its own open caret bugs, so swapping it is **not** a guaranteed fix. v1 acceptance: end-of-string typing is flawless; mid-string edits may jump the caret to the end. The `PhoneInput` wrapper is the isolation seam — any future caret fix lands inside it.
 9. **One shared typeahead component, parameterized.** `RemoteSearchSelect` is generalized: threshold and query-building become consumer settings. Photos consumers keep their today behavior exactly (min **2 characters**, `?q=`); the phone consumer uses min **4 digits** and `?phone=`. Rationale: one implementation of debounce/keyboard/a11y to maintain; thresholds stay independent per consumer.
 10. **Name field is honest about what it is.** Client picked (phone fixed) → the name field displays the stored client name **read-only**; editing a client's name belongs to the client card only. No client picked (new number) → the name field is editable; its value names the future new client.
+11. **An incomplete phone cannot be saved** (G2 user amendment 2026-09-07). On the unpicked/new-client path the visible value must parse as a complete valid number for its detected country (`parsePhoneNumberFromString(value, 'RU')?.isValid()` — same library, same `RU` default as the mask; the web app already uses this validator on its contact form). Incomplete → save blocked with «Проверьте номер телефона — возможно, он введён не полностью». The picked path is never validated (stored data is out of scope; read-path-only decision intact).
 
 ## 3. Matching semantics — one rule, one place
 
@@ -99,17 +100,19 @@ Explicit touch-point list (the filter is **not** free — each point must change
 
 The mask changes what gets typed (`+7 (999) 123-45-67`) versus what may be stored historically (`+79991234567`), so an exact-string resolve would miss and duplicate. The resolution basis is a **fresh server query at save time** — never the suggestion snapshot (which can be absent, truncated by `per_page=10`, or stale from further typing):
 
-1. A client was picked from suggestions → save binds that client id. Done (no extra fetch).
-2. No pick: reduce the typed field value to national digits (§3) and **fetch** `GET /api/v1/clients?phone=<full national digits>` synchronously in the save path.
+1. A client was picked from suggestions → save binds that client id. Done (no extra fetch, no phone validation — the number comes from the database).
+2. No pick: first guard — the visible value must be a **complete valid number** for its detected country (decision 11); incomplete → save blocked, nothing fetched, nothing created.
+3. No pick, number complete: reduce the typed field value to national digits (§3) and **fetch** `GET /api/v1/clients?phone=<full national digits>` synchronously in the save path.
    - Fetch succeeded → among the results, find those whose national digits **equal** the typed national digits; bind the first — parity with today's `first-or-404` semantics (`phone` is not unique in the data). None equal → create a new client with the **visible formatted string** as `phone` (WYSIWYG, decision 5). A full-length digits query returning >10 substring rows is not realistic (it would require 10+ clients sharing the complete number); the equality row, if it exists, is within the page.
    - Fetch **failed** (network/5xx) → the save is **blocked** with a retryable error («не удалось проверить клиента — попробуйте ещё раз»). Parity with today: the save path always did a server round-trip (exact lookup) and failed closed on network errors; silently creating a client we could not check is the duplicate bug this section exists to prevent.
-3. The backend exact route `GET /clients/get?phone=` is not modified and is no longer called by this flow. It stays documented in domain rules; other consumers (if any) are unaffected.
+4. The backend exact route `GET /clients/get?phone=` is not modified and is no longer called by this flow. It stays documented in domain rules; other consumers (if any) are unaffected.
 
 Known unchanged pre-existing behavior (recorded, not fixed here): an **archived** client's full number typed without a pick creates a new active client — the exact route has always excluded archived (see `test_api_clients.py` coverage of `get?phone=`), and suggestions are active-only by the same decision 3.
 
 ## 7. Edge cases & error handling
 
 - **Pasted numbers** (`+7 999 123-45-67`, `89991234567`) — §3 reduction handles all variants; paste formats on the next input event.
+- **Incomplete number at save** — blocked with a retryable-input message (decision 11); the message covers both "not finished typing" and the rare full-length-but-invalid case — the admin is asked to re-check the number, never to bypass the guard.
 - **Backspace/editing mid-string** — caret may jump to end (decision 8); accepted for v1; the wrapper component is the seam for any future fix.
 - **`phone` param malformed** (empty after strip, <4 or >15 digits) — 422, consistent with `q` bounds.
 - **Suggestion request failure** — suggestions silently absent; typing continues (the save-time fetch of §6 is the correctness guard, and it fails closed).
@@ -128,7 +131,7 @@ Known unchanged pre-existing behavior (recorded, not fixed here): an **archived*
 - **Frontend/admin:**
   - Parameterized typeahead: Photos consumers regression (threshold 2 chars, `?q=` — behavior identical to before).
   - Phone wrapper: mask formatting cases, 4-**digit** threshold (mask chars don't count), debounce, suggestion rows incl. «Без имени», selection → read-only phone+name, clear (×) restores typing, empty/loading states.
-  - `useRecordMutations`: bind-by-id path; save-time fresh-fetch digits-equality path (bind existing — no duplicate); fetch-failure blocks save; create path stores the visible formatted string.
+  - `useRecordMutations`/form: bind-by-id path; incomplete-number guard (blocks save before any fetch); save-time fresh-fetch digits-equality path (bind existing — no duplicate); fetch-failure blocks save; create path stores the visible formatted string.
   - `@memo/api-client`: `phone` param typed and sent.
 - **E2E:** one test per User Scenario (§User Scenarios), RED-GREEN-REFACTOR.
 
@@ -161,7 +164,7 @@ Each scenario maps to one E2E test (anchors the plan's E2E-in-DoD rule).
 
 1. **Find a regular by a fragment.** The admin types `999123` in the record form; a suggestion `Иванова · +79991234567` appears; the admin picks it; the record is saved bound to Иванова by id. → E2E: type fragment → pick → assert record's client.
 2. **Different stored format still matches.** A client is stored as `8 999 123-45-67`; the admin types `+7999…`; the same client appears in suggestions. → E2E: seed old-format client → type → assert suggestion.
-3. **Unknown number creates a client.** The admin types a full number that matches nobody and saves without picking; a new client is created with the phone exactly as visible in the field. → E2E: type new number → save → assert new client's phone string.
+3. **Unknown number creates a client; incomplete does not save.** The admin types a full number that matches nobody and saves without picking; a new client is created with the phone exactly as visible in the field. If the number is typed only partially, saving is blocked with «Проверьте номер телефона — возможно, он введён не полностью». → E2E: type new number → save → assert new client's phone string; type a partial number → save → assert blocked, no client created.
 4. **Ignored suggestions never duplicate.** A client is stored as `+79991234567`; the admin types the masked `+7 (999) 123-45-67`, ignores the suggestion, and saves; the record binds the existing client; no new client appears. → E2E: seed client → type masked full number → save → assert client count unchanged and record bound to the seeded client.
 5. **Archived stay invisible.** An archived client whose number matches the fragment does not appear in suggestions. → E2E: seed archived client → type fragment → assert absence.
 6. **Editing keeps the client.** Opening an existing record for edit shows the bound client; the phone field does not offer re-binding. → E2E: open edit → assert client unchanged after save.

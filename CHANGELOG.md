@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — 2026-09-06
+
+### Added
+- **GH #141 — Split `ScheduleContext` (577-line god-context) into `GridSettingsContext` / `ScheduleViewContext` / `ScheduleDataContext` + `ScheduleProvider` composition** — branch `feat/schedule-context-split-141` (13 commits: 8bf7aef..bc5f6b2):
+  - **Refactor:** `frontend/admin/contexts/ScheduleContext.tsx` deleted; three focused contexts under `contexts/schedule/` — `GridSettingsContext` (grid settings), `ScheduleViewContext` (view state, verbatim `__memo-*` event-bus listeners), `ScheduleDataContext` (data + mutations + per-directory filter init, С4) — composed by `ScheduleProvider`. New generic `usePersistedState` localStorage hook (DataTable column storage and grid settings both ride it); new `useUnsavedChangesGuard` (beforeunload while dirty). Schedule-page mutations drop the 5s `Promise.race` timeout race; Topbar gains a «Сохраняем…» saving indicator via `useMutationState` + a beforeunload guard. No behavior change (visual-identical refactor, spec §10 scopes С1–С5 as unit-level).
+  - **Tests:** admin vitest 1639/1639 (109 files); `tsc` clean; lint 0 errors / 33 pre-existing warnings; backend + api-client untouched (baseline 1489p/0f/8s and 245p/0f — no backend/api-client file in the diff). DoD greps green (`useSchedule\b` empty; `localStorage` confined to `usePersistedState` + UserSettingsContext; no `Promise.race` in `contexts/`). Acceptance criteria (spec §9) all met — zoom-isolation render-counter test, localStorage/Promise.race/useSchedule grep gates, indicator+guard unit tests, filter-init empty-locations test, garbage-storage fallback tests, `activities.md` domain rule verified matching shipped behavior, TS strict + suites green. Visual gate skipped by spec design (no `## Visual Compliance Checks` section); e2e regression deferred to CI per policy.
+  - **Deviations for the record:** plan's `useMutationState` `select` snippet was broken in TanStack v5 (select receives the Mutation instance) — shipped `mutation.state.status === 'pending'`; SSR test asserts the exported pure `readPersisted` (react-dom can't mount with `window` undefined); callbacks depend on the stable `mutation.mutate` instead of the whole mutation object (required for zoom isolation, behavior-identical); plan typos fixed (test value 60 not 70, 37.6→50 not 38, `timezone-dnd-bug.test.ts` extension).
+  - **55 files changed, +2944 / −1918.**
+  - **Closes:** #141.
+  - Design spec: `docs/specs/2026-09-06-schedule-context-split-design.md` (on main)
+  - Plan: `docs/plans/2026-09-06-schedule-context-split-141-plan.md` (on main)
+
 ## [Unreleased] — 2026-09-04
 
 ### Added

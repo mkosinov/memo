@@ -28,7 +28,9 @@ function tariffLabel(count: number): string {
  * title, duration, age, material_hint, tariffs, specialty, archived,
  * created_at); `age` and `tariffs` pass through AS-IS — the backend maps
  * age→min_age and tariffs→count subquery — so NO `sortField` anywhere.
- * `tags` has no whitelist mapping → `sortable: false` (§6.2).
+ * `tags` and `materials` (GH #223 badges column) have no whitelist mapping →
+ * `sortable: false` (§6.2). The `material_hint` column stays until GH #223
+ * Task 13 retires it.
  */
 export const serviceColumns = (): ColumnDef<ServiceResponse>[] => [
   {
@@ -66,6 +68,32 @@ export const serviceColumns = (): ColumnDef<ServiceResponse>[] => [
     render: (s) => (
       <span style={{ color: 'var(--ink-mid)' }}>{s.material_hint ?? '—'}</span>
     ),
+  },
+  {
+    key: 'materials',
+    label: 'Материалы',
+    defaultVisible: true,
+    sortable: false, // no server sort key — backend whitelist has no materials mapping (GH #223)
+    // Compact chips with material TITLES only — the note ?? description
+    // fallback governs the web materials text block, NOT badges (GH #223
+    // spec §8). Empty → em dash, same idiom as material_hint above.
+    render: (s) =>
+      s.materials.length > 0 ? (
+        <span className="inline-flex flex-wrap gap-1">
+          {s.materials.map((m) => (
+            <span
+              key={m.id}
+              data-testid="material-badge"
+              className="inline-flex px-2 py-0.5 rounded-full text-xs font-medium"
+              style={{ backgroundColor: 'var(--surface)', color: 'var(--ink-mid)' }}
+            >
+              {m.title}
+            </span>
+          ))}
+        </span>
+      ) : (
+        <span style={{ color: 'var(--ink-mid)' }}>—</span>
+      ),
   },
   {
     key: 'tariffs',

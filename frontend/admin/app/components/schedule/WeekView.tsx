@@ -2,7 +2,9 @@
 
 import React, { useState, useCallback } from 'react';
 import { DndContext, DragOverlay, closestCenter, useSensor, useSensors, PointerSensor, TouchSensor } from '@dnd-kit/core';
-import { useSchedule } from '@/contexts/ScheduleContext';
+import { useScheduleData } from '@/contexts/schedule/ScheduleDataContext';
+import { useScheduleView } from '@/contexts/schedule/ScheduleViewContext';
+import { useGridSettings } from '@/contexts/schedule/GridSettingsContext';
 import { useUI } from '@/contexts/UIContext';
 import { useDnD } from '@/hooks/useDnD';
 import { resolveById } from '@memo/domain';
@@ -16,7 +18,21 @@ import { DAYS, TIME_COL_WIDTH, isSameDay } from '@/lib/utils';
 import { formatTime, getMonday, toISODate } from '@/lib/datetime';
 
 export function WeekView() {
-  const { currentWeek, activities, scheduleIndex, masters, services, locations, stamp, addActivity, updateActivity, loading, error, filterMasterIds, filterLocationIds, cellHeight = 60, gridFrequency = 30, gridStartMinutes, gridEndMinutes } = useSchedule();
+  const {
+    activities,
+    scheduleIndex,
+    masters,
+    services,
+    locations,
+    loading,
+    error,
+    addActivity,
+    updateActivity,
+    gridStartMinutes,
+    gridEndMinutes,
+  } = useScheduleData();
+  const { currentWeek, stamp, filterMasterIds, filterLocationIds } = useScheduleView();
+  const { cellHeight, gridFrequency } = useGridSettings();
   const { showToast } = useUI();
   const monday = getMonday(currentWeek);
 

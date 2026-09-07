@@ -3,7 +3,8 @@ import { render, screen, act, waitFor } from '@testing-library/react';
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { NavigationProvider } from '../contexts/NavigationContext';
-import { ScheduleProvider, useSchedule } from '../contexts/ScheduleContext';
+import { ScheduleProvider } from '../contexts/schedule/ScheduleProvider';
+import { useScheduleData } from '../contexts/schedule/ScheduleDataContext';
 import { getMonday, toISODate } from '@/lib/datetime';
 
 // ─── Mock api-client ─────────────────────────────────────────────────────
@@ -22,9 +23,35 @@ vi.mock('@memo/api-client', () => {
   };
 });
 
-import { updateActivity as apiUpdateActivity } from '@memo/api-client';
+import { updateActivity as apiUpdateActivity, getActivities as apiGetActivities } from '@memo/api-client';
+import type { ActivityResponse } from '@memo/api-client';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────
+
+function wrap(items: ActivityResponse[]) {
+  return { items, total: items.length, page: 1, per_page: 100 };
+}
+
+/** Raw ActivityResponse for the CURRENT week's Monday, 10:00 local. */
+function activityA1(overrides: Partial<ActivityResponse> = {}): ActivityResponse {
+  const monday = getMonday(new Date());
+  return {
+    id: 'a1',
+    master_id: 'm1',
+    service_id: 's1',
+    location_id: 'alpika',
+    start: `${toISODate(monday)}T10:00:00`,
+    duration: 120,
+    occupied: 3,
+    capacity: 8,
+    is_private: false,
+    comment: null,
+    record_info: null,
+    created_at: '',
+    updated_at: '',
+    ...overrides,
+  };
+}
 
 function createTestQueryClient() {
   return new QueryClient({
@@ -37,7 +64,7 @@ function createTestQueryClient() {
 
 /** Minimal consumer exposing an update button. */
 function TestUpdater() {
-  const { updateActivity } = useSchedule();
+  const { updateActivity } = useScheduleData();
   return (
     <button
       data-testid="update-btn"
@@ -134,9 +161,12 @@ describe('updateMutation — optimistic update features', () => {
     setQueryDataSpy.mockRestore();
   });
 
-  // ── Test 2: Timeout protection ───────────────────────────────────────
-  it('has timeout protection — calls invalidateQueries after 5s timeout', { timeout: 15000 }, async () => {
-    // Make apiUpdateActivity hang forever — never resolves or rejects
+  // ── Test 2: NO artificial timeout (spec §2.3/§5 — С2) ──────────────────
+  it('holds the optimistic state past 5s — no timeout rolls it back (С2)', { timeout: 15000 }, async () => {
+    // Seed one activity so the optimistic write is observable in the cache.
+    vi.mocked(apiGetActivities).mockResolvedValue(wrap([activityA1({ occupied: 3 })]));
+
+    // Make apiUpdateActivity hang forever — never resolves or rejects.
     vi.mocked(apiUpdateActivity).mockReturnValue(
       new Promise(() => {
         /* never settles */
@@ -149,6 +179,10 @@ describe('updateMutation — optimistic update features', () => {
     await waitFor(() => {
       expect(screen.getByTestId('update-btn')).toBeInTheDocument();
     });
+    const queryKey = getActivityQueryKey();
+    await waitFor(() => {
+      expect(queryClient.getQueryData(queryKey)).toEqual([activityA1({ occupied: 3 })]);
+    });
 
     const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
 
@@ -157,19 +191,27 @@ describe('updateMutation — optimistic update features', () => {
       screen.getByTestId('update-btn').click();
     });
 
-    // Verify the mutation was initiated
+    // Verify the mutation was initiated and the optimistic write landed
     await waitFor(() => {
       expect(apiUpdateActivity).toHaveBeenCalledTimes(1);
     });
+    await waitFor(() => {
+      const cache = queryClient.getQueryData<ActivityResponse[]>(queryKey);
+      expect(cache?.[0].occupied).toBe(5);
+    });
 
-    // Wait 6+ seconds in real time — MORE than the proposed 5-second timeout.
-    // If a timeout mechanism existed, the mutation would have been
-    // cancelled/rolled back within 5 seconds, triggering onSettled
-    // which calls invalidateQueries.
+    // Wait 6+ seconds in real time — MORE than the removed 5-second timeout.
+    // Old code: Promise.race rejected at 5s → onError rolled the cache back to
+    // occupied 3 AND onSettled called invalidateQueries. New code: the PATCH
+    // settles naturally, so neither happens while the request is still flying.
     await new Promise((resolve) => setTimeout(resolve, 6200));
 
-    // After timeout + rollback, onSettled should have called invalidateQueries
-    expect(invalidateSpy).toHaveBeenCalled();
+    // Optimistic state HELD — no premature rollback race (spec §5).
+    const cacheAfter = queryClient.getQueryData<ActivityResponse[]>(queryKey);
+    expect(cacheAfter?.[0].occupied).toBe(5);
+
+    // No timeout-driven settle: invalidateQueries was never called.
+    expect(invalidateSpy).not.toHaveBeenCalled();
 
     invalidateSpy.mockRestore();
   });

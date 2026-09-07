@@ -9,6 +9,10 @@ vi.mock('@/contexts/UIContext', () => ({
   useUI: vi.fn(() => createMockUIContext()),
 }));
 
+// GH #141 Task 9: OverlapPopover itself is props-driven (no schedule context), so
+// this file has NO new-context mocks to switch to. This registration stays ONLY
+// because the real ActivityCard child still reads the old useSchedule() — ActivityCard
+// migrates in Task 10, and this mock is removed then (Task 12 grep gate).
 vi.mock('@/contexts/ScheduleContext', () => ({
   useSchedule: vi.fn(() => createMockScheduleContext()),
 }));

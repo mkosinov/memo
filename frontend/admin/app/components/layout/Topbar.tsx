@@ -338,7 +338,7 @@ export function Topbar() {
       {/* ── Saving indicator (spec §5) ── */}
       {isSaving && (
         <span
-          className="topbar-saving-chip flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-medium whitespace-nowrap"
+          className="flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-medium whitespace-nowrap"
           role="status"
           aria-live="polite"
           style={{

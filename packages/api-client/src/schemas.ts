@@ -123,6 +123,28 @@ export type TagCreate = z.infer<typeof TagCreateSchema>;
 export const TagUpdateSchema = TagCreateSchema.partial();
 export type TagUpdate = z.infer<typeof TagUpdateSchema>;
 
+// ─── ServiceMaterial link payloads (GH #223) ────────────────────────────────
+// Read shape (nested on ServiceResponse): the material's `description` travels
+// with the link so clients render the `note ?? description` fallback without
+// extra fetches (spec §4/§5). Write shape (Create/Update): { material_id, note? }
+// mirrors backend `ServiceMaterialLinkIn`.
+
+/** Nested material on ServiceResponse (read shape). */
+export const ServiceMaterialItemSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  description: z.string(),
+  note: z.string().nullable(),
+});
+export type ServiceMaterialItem = z.infer<typeof ServiceMaterialItemSchema>;
+
+/** Material link sent on service create/update (write shape, spec §4). */
+export const ServiceMaterialLinkSchema = z.object({
+  material_id: z.string(),
+  note: z.string().nullable().optional(),
+});
+export type ServiceMaterialLink = z.infer<typeof ServiceMaterialLinkSchema>;
+
 // ─── ServiceResponse ───────────────────────────────────────────────────────
 
 export const ServiceResponseSchema = z.object({
@@ -138,6 +160,7 @@ export const ServiceResponseSchema = z.object({
   material_hint: z.string().nullable().optional(),
   tariffs: z.array(TariffResponseSchema),
   tags: z.array(TagResponseSchema),
+  materials: z.array(ServiceMaterialItemSchema).default([]),
   archived: z.boolean(), // inverted: archived = true means the service is in the archive (#207)
   created_at: z.string(), // ISO datetime string
   updated_at: z.string(), // ISO datetime string
@@ -433,6 +456,7 @@ export const ServiceCreateSchema = z.object({
   material_hint: z.string().optional().default(''),
   tariffs: z.array(TariffCreateSchema).default([]),
   tag_ids: z.array(z.string()).default([]),
+  materials: z.array(ServiceMaterialLinkSchema).default([]),
 });
 
 export type ServiceCreate = z.infer<typeof ServiceCreateSchema>;

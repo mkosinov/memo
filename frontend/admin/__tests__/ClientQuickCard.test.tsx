@@ -54,6 +54,7 @@ const service1: ServiceResponse = {
   record_info: '',
   tariffs: [],
   tags: [],
+  materials: [],
   archived: false,
   created_at: '',
   updated_at: '',

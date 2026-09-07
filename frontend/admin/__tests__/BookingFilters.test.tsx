@@ -97,6 +97,7 @@ const ACTIVE_SERVICE: ServiceResponse = {
   record_info: '',
   tariffs: [],
   tags: [],
+  materials: [],
   archived: false,
   created_at: '2026-01-01T00:00:00',
   updated_at: '2026-01-01T00:00:00',

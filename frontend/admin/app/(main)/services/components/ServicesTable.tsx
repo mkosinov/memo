@@ -48,7 +48,11 @@ export function ServicesTable() {
     // Canonical PUT (GH #178): full typed ServiceUpdate — every field listed.
     // #207: the Update schema carries no archive flag — archive/restore goes
     // through POST /services/{id}/archive|restore, so PUT never flips it.
-    const payload: ServiceUpdate = {
+    // #223 T2: `materials` is required on the ServiceUpdate TYPE (Zod output of
+    // `.default([])`), but the backend write path lands in T4 (`extra="forbid"`
+    // would 422 today) — the cast keeps the wire body unchanged until the form
+    // sends `materials` in T5.
+    const payload = {
       title: data.title as string,
       description: (data.description as string | null | undefined) ?? '',
       image_url: (data.image_url as string | null | undefined) ?? '',
@@ -60,7 +64,7 @@ export function ServicesTable() {
       material_hint: (data.material_hint as string | null | undefined) ?? '',
       tariffs: (data.tariffs as ServiceUpdate['tariffs'] | undefined) ?? [],
       tag_ids: (data.tag_ids as string[] | undefined) ?? [],
-    };
+    } as ServiceUpdate;
     try {
       await updateService.mutateAsync({ id: editingService.id, data: payload });
       showToast('Услуга обновлена');

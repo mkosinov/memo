@@ -52,6 +52,7 @@ const serviceFixture: ServiceResponse = {
   record_info: 'Запись за 24 часа',
   tariffs: [{ id: 'tariff-1', service_id: 'service-1', title: 'Взрослый', description: 'Билет для взрослого', price: 2500 }],
   tags: [{ id: 'tag-1', tag: 'масло' }],
+  materials: [],
   archived: false,
   created_at: '2024-01-15T10:00:00Z',
   updated_at: '2024-06-01T12:00:00Z',

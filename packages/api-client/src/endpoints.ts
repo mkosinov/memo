@@ -94,6 +94,9 @@ export interface ListParams {
   sort_order?: 'asc' | 'desc';
   /** Server-side search (GH #212); min 2 chars server-enforced. */
   q?: string;
+  /** Services only (GH #223): filter services linked to this material.
+   *  Ignored by endpoints that don't declare it. */
+  material_id?: string;
 }
 
 function listQuery(params?: ListParams): string {
@@ -104,6 +107,7 @@ function listQuery(params?: ListParams): string {
   if (params?.sort_by) search.set('sort_by', params.sort_by);
   if (params?.sort_order) search.set('sort_order', params.sort_order);
   if (params?.q) search.set('q', params.q);
+  if (params?.material_id) search.set('material_id', params.material_id);
   const qs = search.toString();
   return qs ? `?${qs}` : '';
 }

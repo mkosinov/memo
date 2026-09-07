@@ -7,13 +7,14 @@ from typing import cast
 
 from sqlalchemy import delete, not_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import joinedload, selectinload
 
 from src.domain.errors import BareListLimitExceededError
 from src.models.enums import ArchiveStatus
 from src.repositories.generic import ArchiveRepository, get_archive_repository
 from src.repositories.search import SearchField
 from src.models.service import Service
+from src.models.service_material import ServiceMaterial
 from src.models.tag import service_tags
 from src.models.tariff import Tariff
 from src.schemas.common import PaginatedResponse
@@ -65,6 +66,8 @@ class ServiceService(ArchiveService[ServiceCreate, ServiceUpdate, ServiceRespons
         Delegates to ``ArchiveRepository.list`` passing ``selectinload``
         options for ``tariffs``/``tags`` so ``ServiceResponse`` validation
         doesn't hit ``MissingGreenlet`` under async SQLAlchemy (spec §4.1).
+        Materials links are eager-loaded too (GH #223 spec §3.1:
+        ``selectinload(service_materials).joinedload(material)``).
         ``q`` (GH #212) narrows rows via the repo's ``search_predicate`` over
         ``self.search_fields`` before the COUNT (honest ``total``).
         ``self._repository`` is typed ``BaseRepository`` (inherited from
@@ -83,7 +86,11 @@ class ServiceService(ArchiveService[ServiceCreate, ServiceUpdate, ServiceRespons
             order_by=order_by,
             limit=per_page,
             offset=(page - 1) * per_page,
-            options=[selectinload(Service.tariffs), selectinload(Service.tags)],
+            options=[
+                selectinload(Service.tariffs),
+                selectinload(Service.tags),
+                selectinload(Service.service_materials).joinedload(ServiceMaterial.material),
+            ],
         )
         items = [ServiceResponse.model_validate(s) for s in items_orm]
         return PaginatedResponse(items=items, total=total, page=page, per_page=per_page)
@@ -103,10 +110,13 @@ class ServiceService(ArchiveService[ServiceCreate, ServiceUpdate, ServiceRespons
         crashes with ``MissingGreenlet`` (spec §4.1). The base
         ``_list_stmt`` has no ``.options(...)``, so the override builds the
         select inline with the same archive-status + equality-filter clauses.
-        Enforces ``BARE_LIST_MAX_ROWS`` via the LIMIT+1 probe.
+        Enforces ``BARE_LIST_MAX_ROWS`` via the LIMIT+1 probe. Materials
+        links are eager-loaded too (GH #223 spec §3.1).
         """
         stmt = select(Service).options(
-            selectinload(Service.tariffs), selectinload(Service.tags)
+            selectinload(Service.tariffs),
+            selectinload(Service.tags),
+            selectinload(Service.service_materials).joinedload(ServiceMaterial.material),
         )
         if status == ArchiveStatus.ACTIVE:
             stmt = stmt.where(Service.is_active)
@@ -126,11 +136,15 @@ class ServiceService(ArchiveService[ServiceCreate, ServiceUpdate, ServiceRespons
     async def get(
         self, db_session: AsyncSession, id: str
     ) -> Service | None:
-        """Return a service by ID with tariffs and tags, or None."""
+        """Return a service by ID with tariffs, tags, and materials, or None."""
         result = await db_session.execute(
             select(Service)
             .where(Service.id == id)
-            .options(selectinload(Service.tariffs), selectinload(Service.tags))
+            .options(
+                selectinload(Service.tariffs),
+                selectinload(Service.tags),
+                selectinload(Service.service_materials).joinedload(ServiceMaterial.material),
+            )
         )
         return result.scalar_one_or_none()
 

@@ -774,6 +774,92 @@ class TestServiceAllEndpoint:
         assert any(item["id"] == created["id"] for item in body)
 
 
+class TestServiceMaterialsNestedRead:
+    """Nested ``materials`` on service reads (GH #223 Task 1, spec §3.1/§3.3/§5).
+
+    Link rows are inserted directly via SQL (the write path lands in Task 4).
+    Insertion order deliberately differs from title order: «Акрил» is
+    inserted FIRST, but «Акварель» sorts before it («в» < «р»), so the
+    expected order is [«Акварель», «Акрил»] — a loader-order passthrough
+    would fail the title-ASC assertion.
+    """
+
+    def _create_material(self, api_client, title: str, description: str) -> dict:
+        resp = api_client.post(
+            "/api/v1/materials", json={"title": title, "description": description}
+        )
+        assert resp.status_code == 201, f"create material failed: {resp.text}"
+        return resp.json()
+
+    def _link(self, service_id: str, material_id: str, note: str | None) -> None:
+        note_sql = "NULL" if note is None else f"'{note}'"
+        query_db(
+            "INSERT INTO service_materials (service_id, material_id, note) "
+            f"VALUES ('{service_id}', '{material_id}', {note_sql})"
+        )
+
+    def test_get_returns_materials_ordered_by_title_with_notes(
+        self, api_client, create_service
+    ) -> None:
+        """GET /{id}: materials ordered title ASC, note carried, description included."""
+        service = create_service()
+        watercolor = self._create_material(api_client, "Акварель", "Краски на воде")
+        acrylic = self._create_material(api_client, "Акрил", "Быстросохнущие краски")
+        # Insert acrylic FIRST — title ASC must still put watercolor first.
+        self._link(service["id"], acrylic["id"], None)
+        self._link(service["id"], watercolor["id"], "Бумага 300 г/м²")
+
+        resp = api_client.get(f"/api/v1/services/{service['id']}")
+
+        assert resp.status_code == 200, f"GET failed: {resp.text}"
+        materials = resp.json()["materials"]
+        assert [m["id"] for m in materials] == [watercolor["id"], acrylic["id"]]
+        assert materials[0]["title"] == "Акварель"
+        assert materials[0]["description"] == "Краски на воде"
+        assert materials[0]["note"] == "Бумага 300 г/м²"
+        assert materials[1]["title"] == "Акрил"
+        assert materials[1]["note"] is None
+
+    def test_get_service_without_links_returns_empty_materials(
+        self, api_client, create_service
+    ) -> None:
+        """GET /{id} for a service with zero links → ``materials: []``."""
+        service = create_service()
+
+        resp = api_client.get(f"/api/v1/services/{service['id']}")
+
+        assert resp.status_code == 200
+        assert resp.json()["materials"] == []
+
+    def test_list_and_all_include_nested_materials(
+        self, api_client, create_service
+    ) -> None:
+        """Paginated list and bare /all both carry the nested materials payload."""
+        service = create_service(title="A-linked")
+        unlinked = create_service(title="B-unlinked")
+        acrylic = self._create_material(api_client, "Акрил", "Быстросохнущие краски")
+        self._link(service["id"], acrylic["id"], None)
+
+        list_resp = api_client.get("/api/v1/services")
+        assert list_resp.status_code == 200
+        by_id = {s["id"]: s for s in list_resp.json()["items"]}
+        assert by_id[service["id"]]["materials"] == [
+            {
+                "id": acrylic["id"],
+                "title": "Акрил",
+                "description": "Быстросохнущие краски",
+                "note": None,
+            }
+        ]
+        assert by_id[unlinked["id"]]["materials"] == []
+
+        all_resp = api_client.get("/api/v1/services/all")
+        assert all_resp.status_code == 200
+        all_by_id = {s["id"]: s for s in all_resp.json()}
+        assert all_by_id[service["id"]]["materials"][0]["id"] == acrylic["id"]
+        assert all_by_id[unlinked["id"]]["materials"] == []
+
+
 class TestServiceListSorting:
     """Server-side sorting on GET /api/v1/services (#205 Task 3).
 

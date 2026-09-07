@@ -18,6 +18,21 @@ class TagResponse(BaseModel):
     tag: str
 
 
+class ServiceMaterialItem(BaseModel):
+    """Nested material payload on ``ServiceResponse`` (GH #223 spec §4/§5).
+
+    Built from association rows: the material's ``description`` travels with
+    the link so clients render the ``note ?? description`` fallback without
+    extra fetches. Ordered ``title ASC, id ASC`` (spec §3.3).
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    title: str
+    description: str
+    note: str | None
+
+
 class TariffBase(BaseModel):
     title: str
     description: str | None = None
@@ -112,6 +127,7 @@ class ServiceResponse(ServiceBase):
     is_active: bool = Field(..., exclude=True)
     tariffs: list[TariffResponse] = []
     tags: list[TagResponse] = []
+    materials: list[ServiceMaterialItem] = []
 
     @computed_field
     @property

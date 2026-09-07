@@ -8,6 +8,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from src.models.abstract import AbstractModelSoftDelete
 
 if TYPE_CHECKING:
+    from src.models.service_material import ServiceMaterial
     from src.models.tag import Tag
     from src.models.tariff import Tariff
 
@@ -31,3 +32,27 @@ class Service(AbstractModelSoftDelete):
     tags: Mapped[list["Tag"]] = relationship(
         "Tag", secondary="service_tags", back_populates="services"
     )
+    service_materials: Mapped[list["ServiceMaterial"]] = relationship(
+        "ServiceMaterial", back_populates="service", cascade="all, delete-orphan"
+    )
+
+    @property
+    def materials(self) -> list[dict]:
+        """Nested materials payload for ``ServiceResponse`` (spec §3.1/§3.3).
+
+        Pydantic ``from_attributes`` reads this property. Python-side sort by
+        ``(material.title, material.id)`` guarantees the deterministic order
+        ``title ASC, id ASC`` regardless of loader order.
+        """
+        return [
+            {
+                "id": sm.material.id,
+                "title": sm.material.title,
+                "description": sm.material.description,
+                "note": sm.note,
+            }
+            for sm in sorted(
+                self.service_materials,
+                key=lambda sm: (sm.material.title, sm.material.id),
+            )
+        ]

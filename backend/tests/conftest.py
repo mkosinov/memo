@@ -94,6 +94,20 @@ def db_engine(app):
     cfg.set_main_option("script_location", str(BACKEND_DIR / "alembic"))
     command.upgrade(cfg, "head")
 
+    # GH #223 tasks 1-12 are additive WITHOUT migrations (the single revision
+    # lands in Task 13). Model-registered tables that migrations don't cover
+    # yet (e.g. service_materials) are created here — checkfirst=True keeps
+    # this a no-op for alembic-managed tables and after Task 13 realigns
+    # model ↔ migrations.
+    async def _create_missing() -> None:
+        from src.db.base import Base
+        from src.models import ServiceMaterial  # noqa: F401 — register with metadata
+
+        async with db_manager.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+    asyncio.run(_create_missing())
+
     yield db_manager.engine
 
 
@@ -127,6 +141,7 @@ async def _truncate_all_tables(engine):
         Photo,
         Record,
         Service,
+        ServiceMaterial,
         Tag,
         Tariff,
         User,

@@ -3,14 +3,13 @@
  *
  * Usage in a test file:
  * ```ts
- * import { createMockScheduleContext } from './helpers/mockContexts';
- * vi.mock('@/contexts/ScheduleContext', () => ({
- *   useSchedule: vi.fn(() => createMockScheduleContext({ masters: myMasters })),
+ * import { createMockScheduleData } from './helpers/mockContexts';
+ * vi.mock('@/contexts/schedule/ScheduleDataContext', () => ({
+ *   useScheduleData: vi.fn(() => createMockScheduleData({ masters: myMasters })),
  * }));
  * ```
  */
 import { vi } from 'vitest';
-import type { ScheduleContextType } from '@/contexts/ScheduleContext';
 import type { RecordsContextType } from '@/contexts/RecordsContext';
 import type { ClientFilters } from '@/contexts/ClientsContext';
 import { defaultFilters as defaultClientFilters } from '@/contexts/ClientsContext';
@@ -24,60 +23,6 @@ import type { ScheduleViewContextType } from '@/contexts/schedule/ScheduleViewCo
 import type { GridSettingsContextType } from '@/contexts/schedule/GridSettingsContext';
 import type { ClientWithStats } from '@memo/api-client';
 import { mockMasters, mockServices, mockLocations } from './mockData';
-
-// ─── ScheduleContext ──────────────────────────────────────────────────────
-
-type ScheduleOverrides = Partial<ScheduleContextType>;
-
-export function createMockScheduleContext(
-  overrides?: ScheduleOverrides,
-): ScheduleContextType {
-  return {
-    masters: mockMasters,
-    services: mockServices,
-    locations: mockLocations,
-    activities: [],
-    scheduleIndex: {
-      byId: new Map(),
-      byDate: new Map(),
-      byMasterId: new Map(),
-      byLocation: { all: { byDate: new Map(), byServiceId: new Map() } },
-    },
-    currentWeek: new Date('2026-06-01'),
-    stamp: { masterId: null, serviceId: null, locations: new Set(), ready: false },
-    setCurrentWeek: vi.fn(),
-    addActivity: vi.fn(),
-    updateActivity: vi.fn(),
-    deleteActivity: vi.fn(),
-    setStamp: vi.fn(),
-    copyLastWeek: vi.fn(),
-    loading: false,
-    error: null,
-    filterMasterIds: [],
-    filterLocationIds: [],
-    setFilterMasterIds: vi.fn(),
-    setFilterLocationIds: vi.fn(),
-    viewMode: 'week',
-    setViewMode: vi.fn(),
-    selectedDay: new Date(),
-    setSelectedDay: vi.fn(),
-    columnMode: 'masters',
-    setColumnMode: vi.fn(),
-    cellHeight: 50,
-    setCellHeight: vi.fn(),
-    gridFrequency: 30,
-    setGridFrequency: vi.fn(),
-    workingHoursStart: 9,
-    setWorkingHoursStart: vi.fn(),
-    workingHoursEnd: 21,
-    setWorkingHoursEnd: vi.fn(),
-    gridStartMinutes: 540,
-    gridEndMinutes: 1260,
-    prevPeriod: vi.fn(),
-    nextPeriod: vi.fn(),
-    ...overrides,
-  };
-}
 
 // ─── Schedule split contexts (GH #141) ────────────────────────────────────
 

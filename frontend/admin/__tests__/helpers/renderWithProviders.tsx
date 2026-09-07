@@ -4,16 +4,14 @@
  * Usage:
  * ```tsx
  * import { renderWithProviders } from './helpers/renderWithProviders';
- * renderWithProviders(<MyComponent />, { useSchedule: { masters: myMasters } });
+ * renderWithProviders(<MyComponent />);
  * ```
  */
 import React, { type ReactElement } from 'react';
 import { render, type RenderOptions } from '@testing-library/react';
 import { vi } from 'vitest';
-import type { ScheduleContextType } from '@/contexts/ScheduleContext';
 import type { RecordsContextType } from '@/contexts/RecordsContext';
 import {
-  createMockScheduleContext,
   createMockRecordsContext,
   createMockUIContext,
   createMockScheduleData,
@@ -23,11 +21,7 @@ import {
 
 // ─── Setup mock modules ──────────────────────────────────────────────────
 // These mocks are registered once; individual tests can override values
-// by calling vi.mocked(useSchedule).mockReturnValue(...) in beforeEach.
-
-vi.mock('@/contexts/ScheduleContext', () => ({
-  useSchedule: vi.fn(() => createMockScheduleContext()),
-}));
+// by calling vi.mocked(useScheduleData).mockReturnValue(...) in beforeEach.
 
 vi.mock('@/contexts/RecordsContext', () => ({
   useRecords: vi.fn(() => createMockRecordsContext()),
@@ -37,7 +31,7 @@ vi.mock('@/contexts/UIContext', () => ({
   useUI: vi.fn(() => createMockUIContext()),
 }));
 
-// Schedule split contexts (GH #141) — Tasks 8-11 migrate consumers to these.
+// Schedule split contexts (GH #141)
 vi.mock('@/contexts/schedule/ScheduleDataContext', () => ({
   useScheduleData: vi.fn(() => createMockScheduleData()),
 }));
@@ -65,7 +59,6 @@ vi.mock('@tanstack/react-query', () => ({
 }));
 
 // Re-import mocked hooks so tests can override via mockReturnValue
-import { useSchedule } from '@/contexts/ScheduleContext';
 import { useRecords } from '@/contexts/RecordsContext';
 import { useUI } from '@/contexts/UIContext';
 import { useScheduleData } from '@/contexts/schedule/ScheduleDataContext';
@@ -73,7 +66,6 @@ import { useScheduleView } from '@/contexts/schedule/ScheduleViewContext';
 import { useGridSettings } from '@/contexts/schedule/GridSettingsContext';
 
 export {
-  useSchedule,
   useRecords,
   useUI,
   useScheduleData,
@@ -93,9 +85,7 @@ function AllProviders({ children }: AllProvidersProps): ReactElement {
 
 // ─── Custom render ───────────────────────────────────────────────────────
 
-interface CustomRenderOptions extends Omit<RenderOptions, 'wrapper'> {
-  providers?: Partial<ScheduleContextType>;
-}
+interface CustomRenderOptions extends Omit<RenderOptions, 'wrapper'> {}
 
 export function renderWithProviders(
   ui: ReactElement,

@@ -1,7 +1,11 @@
 'use client';
 
 import React, { useCallback, useState, useRef, useEffect } from 'react';
-import { useSchedule } from '@/contexts/ScheduleContext';
+import { useMutationState } from '@tanstack/react-query';
+import { useScheduleData, SCHEDULE_ACTIVITY_MUTATION_KEY } from '@/contexts/schedule/ScheduleDataContext';
+import { useScheduleView } from '@/contexts/schedule/ScheduleViewContext';
+import { useGridSettings } from '@/contexts/schedule/GridSettingsContext';
+import { useUnsavedChangesGuard } from '@/hooks/useUnsavedChangesGuard';
 import { CELL_HEIGHT_OPTIONS, GRID_FREQUENCY_OPTIONS, formatWeekRange, formatDayLabel } from '@/lib/utils';
 import { getMonday, toISODate } from '@/lib/datetime';
 import { useNavigation } from '@/contexts/NavigationContext';
@@ -18,9 +22,8 @@ function groupMastersBySpecialty(master: Master): string {
 // ─── Topbar ───────────────────────────────────────────────────────────────
 
 export function Topbar() {
+  const { masters, locations } = useScheduleData();
   const {
-    masters,
-    locations,
     filterMasterIds,
     filterLocationIds,
     setFilterMasterIds,
@@ -32,6 +35,10 @@ export function Topbar() {
     currentWeek,
     columnMode,
     setColumnMode,
+    prevPeriod,
+    nextPeriod,
+  } = useScheduleView();
+  const {
     cellHeight,
     setCellHeight,
     gridFrequency,
@@ -40,10 +47,16 @@ export function Topbar() {
     setWorkingHoursStart,
     workingHoursEnd,
     setWorkingHoursEnd,
-    prevPeriod,
-    nextPeriod,
-  } = useSchedule();
+  } = useGridSettings();
   const { selectDateRange } = useNavigation();
+
+  // «Сохраняем…» while any schedule mutation is in flight (spec §5). Driven by
+  // the shared mutationKey — no isSaving field on any context.
+  const isSaving = useMutationState({
+    filters: { mutationKey: SCHEDULE_ACTIVITY_MUTATION_KEY },
+    select: (mutation) => mutation.state.status === 'pending',
+  }).some(Boolean);
+  useUnsavedChangesGuard(isSaving);
 
   // Dropdown state
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -321,6 +334,33 @@ export function Topbar() {
           Неделя
         </button>
       </div>
+
+      {/* ── Saving indicator (spec §5) ── */}
+      {isSaving && (
+        <span
+          className="topbar-saving-chip flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-medium whitespace-nowrap"
+          role="status"
+          aria-live="polite"
+          style={{
+            color: 'var(--brand)',
+            backgroundColor: 'var(--surface)',
+            border: '1px solid var(--line)',
+          }}
+        >
+          <svg
+            className="animate-spin"
+            width="10"
+            height="10"
+            viewBox="0 0 12 12"
+            fill="none"
+            aria-hidden="true"
+          >
+            <circle cx="6" cy="6" r="4.5" stroke="currentColor" strokeWidth="1.5" opacity="0.25" />
+            <path d="M10.5 6A4.5 4.5 0 006 1.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+          </svg>
+          Сохраняем…
+        </span>
+      )}
 
       {/* ── Zoom icon + popup ── */}
       <div className="relative" ref={zoomRef}>

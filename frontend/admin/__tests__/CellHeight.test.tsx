@@ -1,35 +1,15 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, act } from '@testing-library/react';
+import { render, screen, act } from '@testing-library/react';
 import React from 'react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { ScheduleProvider, useSchedule } from '../contexts/ScheduleContext';
-import { NavigationProvider } from '../contexts/NavigationContext';
+import { GridSettingsProvider, useGridSettings } from '../contexts/schedule/GridSettingsContext';
 
-// ─── Mock api-client ─────────────────────────────────────────────────────────
-vi.mock('@memo/api-client', () => {
-  const wrap = (items: any[]) => ({ items, total: items.length, page: 1, per_page: 100 });
-  return ({
-  getAllMasters: vi.fn().mockResolvedValue([]),
-  getAllLocations: vi.fn().mockResolvedValue([]),
-  getAllServices: vi.fn().mockResolvedValue([]),
-  getActivities: vi.fn().mockResolvedValue(wrap([])),
-  createActivity: vi.fn(),
-  updateActivity: vi.fn(),
-  patchActivity: vi.fn(),
-  deleteActivity: vi.fn(),
-  });
-});
-
-function createTestQueryClient() {
-  return new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-  });
-}
+// GH #141: cellHeight moved out of ScheduleContext into GridSettingsContext
+// (Task 3) — this suite follows it to the real provider/hook pair.
 
 // ─── Consumer component ──────────────────────────────────────────────────────
 
 function CellHeightConsumer() {
-  const { cellHeight, setCellHeight } = useSchedule();
+  const { cellHeight, setCellHeight } = useGridSettings();
   return (
     <div>
       <span data-testid="cell-height">{cellHeight}</span>
@@ -53,21 +33,16 @@ function CellHeightConsumer() {
 }
 
 function renderWithContext() {
-  const queryClient = createTestQueryClient();
   return render(
-    <QueryClientProvider client={queryClient}>
-      <NavigationProvider>
-        <ScheduleProvider>
-          <CellHeightConsumer />
-        </ScheduleProvider>
-      </NavigationProvider>
-    </QueryClientProvider>,
+    <GridSettingsProvider>
+      <CellHeightConsumer />
+    </GridSettingsProvider>,
   );
 }
 
-// ─── ScheduleContext cellHeight tests ────────────────────────────────────────
+// ─── GridSettingsContext cellHeight tests ────────────────────────────────────
 
-describe('ScheduleContext — cellHeight', () => {
+describe('GridSettingsContext — cellHeight', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();

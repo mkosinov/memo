@@ -1,10 +1,18 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import React from 'react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider, useMutationState } from '@tanstack/react-query';
 import { Topbar } from '../app/components/layout/Topbar';
 import { NavigationProvider } from '../contexts/NavigationContext';
 import { UIProvider } from '../contexts/UIContext';
+import {
+  createMockScheduleData,
+  createMockScheduleView,
+  createMockGridSettings,
+} from './helpers/mockContexts';
+import type { ScheduleDataContextType } from '@/contexts/schedule/ScheduleDataContext';
+import type { ScheduleViewContextType } from '@/contexts/schedule/ScheduleViewContext';
+import type { GridSettingsContextType } from '@/contexts/schedule/GridSettingsContext';
 
 vi.mock('@memo/api-client', () => {
   const wrap = (items: any[]) => ({ items, total: items.length, page: 1, per_page: 100 });
@@ -19,29 +27,47 @@ vi.mock('@memo/api-client', () => {
   });
 });
 
-const defaultScheduleMock = {
-  masters: [],
-  locations: [],
-  filterMasterIds: [],
-  filterLocationIds: [],
-  setFilterMasterIds: vi.fn(),
-  setFilterLocationIds: vi.fn(),
-  viewMode: 'week',
-  setViewMode: vi.fn(),
-  selectedDay: new Date(),
-  setSelectedDay: vi.fn(),
-  currentWeek: new Date(),
-  columnMode: 'masters',
-  setColumnMode: vi.fn(),
-  cellHeight: 50,
-  setCellHeight: vi.fn(),
-};
+// Partial mock — real QueryClient/QueryClientProvider stay intact; only
+// useMutationState (the saving-indicator source, spec §5) is faked.
+vi.mock('@tanstack/react-query', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@tanstack/react-query')>();
+  return {
+    ...actual,
+    useMutationState: vi.fn(() => [] as boolean[]),
+  };
+});
 
-vi.mock('@/contexts/ScheduleContext', () => ({
-  useSchedule: vi.fn(() => defaultScheduleMock),
+// Partial mock — SCHEDULE_ACTIVITY_MUTATION_KEY stays the real export.
+vi.mock('@/contexts/schedule/ScheduleDataContext', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/contexts/schedule/ScheduleDataContext')>();
+  return {
+    ...actual,
+    useScheduleData: vi.fn(() => createMockScheduleData()),
+  };
+});
+
+vi.mock('@/contexts/schedule/ScheduleViewContext', () => ({
+  useScheduleView: vi.fn(() => createMockScheduleView()),
 }));
 
-function renderWithProviders() {
+vi.mock('@/contexts/schedule/GridSettingsContext', () => ({
+  useGridSettings: vi.fn(() => createMockGridSettings()),
+}));
+
+import { useScheduleData } from '@/contexts/schedule/ScheduleDataContext';
+import { useScheduleView } from '@/contexts/schedule/ScheduleViewContext';
+import { useGridSettings } from '@/contexts/schedule/GridSettingsContext';
+
+interface TopbarMockOverrides {
+  data?: Partial<ScheduleDataContextType>;
+  view?: Partial<ScheduleViewContextType>;
+  grid?: Partial<GridSettingsContextType>;
+}
+
+function renderTopbar(overrides: TopbarMockOverrides = {}) {
+  vi.mocked(useScheduleData).mockReturnValue(createMockScheduleData(overrides.data));
+  vi.mocked(useScheduleView).mockReturnValue(createMockScheduleView(overrides.view));
+  vi.mocked(useGridSettings).mockReturnValue(createMockGridSettings(overrides.grid));
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
@@ -56,57 +82,51 @@ function renderWithProviders() {
   );
 }
 
-async function renderWithMockContext(scheduleOverrides: Record<string, unknown>) {
-  const { useSchedule: mockHook } = await import('@/contexts/ScheduleContext');
-  vi.mocked(mockHook).mockReturnValue({
-    ...defaultScheduleMock,
-    ...scheduleOverrides,
-  } as any);
-
-  const { unmount } = renderWithProviders();
-  return { unmount };
-}
-
 describe('Topbar — Cell Height Zoom Control', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(useMutationState).mockReturnValue([]);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it('does NOT render the old +/- height control', () => {
-    renderWithProviders();
+    renderTopbar();
     expect(screen.queryByTestId('cell-height-control')).not.toBeInTheDocument();
     expect(screen.queryByText('Высота')).not.toBeInTheDocument();
   });
 
   it('renders the zoom icon button', () => {
-    renderWithProviders();
+    renderTopbar();
     expect(screen.getByTestId('zoom-button')).toBeInTheDocument();
   });
 
   it('opens zoom popup when zoom button is clicked', () => {
-    renderWithProviders();
+    renderTopbar();
     fireEvent.click(screen.getByTestId('zoom-button'));
     expect(screen.getByTestId('zoom-popup')).toBeInTheDocument();
   });
 
   it('renders 3 options in the popup', () => {
-    renderWithProviders();
+    renderTopbar();
     fireEvent.click(screen.getByTestId('zoom-button'));
     expect(screen.getByTestId('zoom-option-40')).toBeInTheDocument();
     expect(screen.getByTestId('zoom-option-50')).toBeInTheDocument();
     expect(screen.getByTestId('zoom-option-60')).toBeInTheDocument();
   });
 
-  it('highlights the currently active option', async () => {
-    await renderWithMockContext({ cellHeight: 50 });
+  it('highlights the currently active option', () => {
+    renderTopbar({ grid: { cellHeight: 50 } });
     fireEvent.click(screen.getByTestId('zoom-button'));
     const activeOption = screen.getByTestId('zoom-option-50');
     expect(activeOption).toHaveAttribute('data-active', 'true');
   });
 
-  it('calls setCellHeight and closes popup when option is selected', async () => {
+  it('calls setCellHeight and closes popup when option is selected', () => {
     const setCellHeight = vi.fn();
-    await renderWithMockContext({ cellHeight: 50, setCellHeight });
+    renderTopbar({ grid: { cellHeight: 50, setCellHeight } });
 
     fireEvent.click(screen.getByTestId('zoom-button'));
     fireEvent.click(screen.getByTestId('zoom-option-60'));
@@ -116,7 +136,7 @@ describe('Topbar — Cell Height Zoom Control', () => {
   });
 
   it('closes popup on outside click', () => {
-    renderWithProviders();
+    renderTopbar();
     fireEvent.click(screen.getByTestId('zoom-button'));
     expect(screen.getByTestId('zoom-popup')).toBeInTheDocument();
 
@@ -125,7 +145,7 @@ describe('Topbar — Cell Height Zoom Control', () => {
   });
 
   it('displays option labels in Russian', () => {
-    renderWithProviders();
+    renderTopbar();
     fireEvent.click(screen.getByTestId('zoom-button'));
     expect(screen.getByText('Мелкий')).toBeInTheDocument();
     expect(screen.getByText('Стандартный')).toBeInTheDocument();

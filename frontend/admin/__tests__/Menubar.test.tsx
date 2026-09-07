@@ -31,15 +31,6 @@ vi.mock('next/navigation', () => ({
   usePathname: () => '/schedule',
 }));
 
-vi.mock('@/contexts/ScheduleContext', () => ({
-  useSchedule: vi.fn(() => ({
-    viewMode: 'week',
-    selectedDay: new Date(),
-    setViewMode: vi.fn(),
-    setSelectedDay: vi.fn(),
-  })),
-}));
-
 function renderWithProviders() {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },

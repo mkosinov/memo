@@ -4,7 +4,9 @@ import React, { useState, useCallback, useMemo } from 'react';
 import { DndContext, DragOverlay, closestCorners, rectIntersection, useSensor, useSensors, PointerSensor, TouchSensor } from '@dnd-kit/core';
 import type { CollisionDetection } from '@dnd-kit/core';
 import { SortableContext, horizontalListSortingStrategy } from '@dnd-kit/sortable';
-import { useSchedule } from '@/contexts/ScheduleContext';
+import { useScheduleData } from '@/contexts/schedule/ScheduleDataContext';
+import { useScheduleView } from '@/contexts/schedule/ScheduleViewContext';
+import { useGridSettings } from '@/contexts/schedule/GridSettingsContext';
 import { useUI } from '@/contexts/UIContext';
 import { useUserSettings } from '@/contexts/UserSettingsContext';
 import { useDnD } from '@/hooks/useDnD';
@@ -54,20 +56,21 @@ export function DayView() {
     masters,
     services,
     locations,
-    stamp,
     addActivity,
     updateActivity,
     loading,
     error,
+    gridStartMinutes,
+    gridEndMinutes,
+  } = useScheduleData();
+  const {
+    stamp,
     filterMasterIds,
     filterLocationIds,
     selectedDay,
     columnMode,
-    cellHeight = 60,
-    gridFrequency = 30,
-    gridStartMinutes,
-    gridEndMinutes,
-  } = useSchedule();
+  } = useScheduleView();
+  const { cellHeight, gridFrequency } = useGridSettings();
   const { showToast } = useUI();
   const { getColumnOrder, settings, setColumnOrder: saveColumnOrder } = useUserSettings();
 

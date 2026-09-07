@@ -1,13 +1,15 @@
 'use client';
 
 import React from 'react';
-import { useSchedule } from '@/contexts/ScheduleContext';
+import { useScheduleData } from '@/contexts/schedule/ScheduleDataContext';
+import { useScheduleView } from '@/contexts/schedule/ScheduleViewContext';
 import { useUI } from '@/contexts/UIContext';
 import { MasterPicker } from '@/app/components/shared/MasterPicker';
 import { Combobox } from '@/app/components/shared/Combobox';
 
 export function StampPanel() {
-  const { masters, services, locations: studios, stamp, setStamp } = useSchedule();
+  const { masters, services, locations: studios } = useScheduleData();
+  const { stamp, setStamp } = useScheduleView();
   const { deleteMode, toggleDeleteMode } = useUI();
 
   const selectedMaster = stamp.masterId

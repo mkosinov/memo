@@ -1,10 +1,22 @@
 import { render, screen } from '@testing-library/react';
-import type { ScheduleContextType } from '../contexts/ScheduleContext';
 import { DAYS } from '../lib/utils';
-import { createMockScheduleContext } from './helpers/mockContexts';
+import {
+  createMockScheduleData,
+  createMockScheduleView,
+  createMockGridSettings,
+} from './helpers/mockContexts';
+import { splitScheduleOverrides, type ScheduleOverrides } from './helpers/splitScheduleOverrides';
 
-vi.mock('@/contexts/ScheduleContext', () => ({
-  useSchedule: vi.fn(),
+vi.mock('@/contexts/schedule/ScheduleDataContext', () => ({
+  useScheduleData: vi.fn(),
+}));
+
+vi.mock('@/contexts/schedule/ScheduleViewContext', () => ({
+  useScheduleView: vi.fn(),
+}));
+
+vi.mock('@/contexts/schedule/GridSettingsContext', () => ({
+  useGridSettings: vi.fn(),
 }));
 
 vi.mock('@/contexts/UIContext', () => ({
@@ -41,14 +53,18 @@ vi.mock('@/app/components/modal/ActivityDetailsModal/ActivityDetailsModal', () =
     props.isOpen ? <div data-testid="activity-details-modal" data-mode={props.mode} /> : null,
 }));
 
-import { useSchedule } from '@/contexts/ScheduleContext';
+import { useScheduleData } from '@/contexts/schedule/ScheduleDataContext';
+import { useScheduleView } from '@/contexts/schedule/ScheduleViewContext';
+import { useGridSettings } from '@/contexts/schedule/GridSettingsContext';
 import { WeekView } from '../app/components/schedule/WeekView';
 
-// Use shared context factory for default context shape
+// Use shared context factories for default context shapes
 
-function renderWeekView(contextOverrides?: Partial<ScheduleContextType>) {
-  const mockUseSchedule = useSchedule as ReturnType<typeof vi.fn>;
-  mockUseSchedule.mockReturnValue(createMockScheduleContext(contextOverrides));
+function renderWeekView(contextOverrides?: ScheduleOverrides) {
+  const { data, view, settings } = splitScheduleOverrides(contextOverrides);
+  vi.mocked(useScheduleData).mockReturnValue(createMockScheduleData(data));
+  vi.mocked(useScheduleView).mockReturnValue(createMockScheduleView(view));
+  vi.mocked(useGridSettings).mockReturnValue(createMockGridSettings(settings));
   return render(<WeekView />);
 }
 

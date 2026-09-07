@@ -4,6 +4,7 @@ import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ClientWithStats, RecordResponse } from '@memo/api-client';
 import { UIProvider } from '../contexts/UIContext';
+import { createMockGridSettings } from './helpers/mockContexts';
 
 // ─── Mock api-client ──────────────────────────────────────────────────────
 
@@ -53,11 +54,12 @@ import {
   ApiError,
 } from '@memo/api-client';
 
-// ─── Mock ScheduleContext ─────────────────────────────────────────────────
+// ─── Mock schedule split contexts (GH #141) ───────────────────────────────
+// ClientRecordTab (inside the real ClientCardModal) reads gridFrequency from
+// the grid-settings context only.
 
-vi.mock('@/contexts/ScheduleContext', () => ({
-  useSchedule: vi.fn(() => ({ gridFrequency: 30 })),
-  ScheduleProvider: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+vi.mock('@/contexts/schedule/GridSettingsContext', () => ({
+  useGridSettings: vi.fn(() => createMockGridSettings()),
 }));
 
 // ─── Mock mutation hooks (GH #140 — ClientCardModal owns hook instances) ───

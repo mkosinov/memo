@@ -3,7 +3,7 @@
 import { Suspense, useState, useEffect, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { ClientsProvider, useClientsTable } from '@/contexts/ClientsContext';
-import { ScheduleProvider } from '@/contexts/ScheduleContext';
+import { ScheduleProvider } from '@/contexts/schedule/ScheduleProvider';
 import { ClientsTable } from './components/ClientsTable';
 import { ClientsFilters } from './components/ClientsFilters';
 import { ClientCardModal } from './components/ClientCardModal';

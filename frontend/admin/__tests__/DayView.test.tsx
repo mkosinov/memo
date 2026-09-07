@@ -2,10 +2,23 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import React from 'react';
 import type { ScheduleAdminDTO } from '@memo/domain';
-import { createMockScheduleContext } from './helpers/mockContexts';
+import {
+  createMockScheduleData,
+  createMockScheduleView,
+  createMockGridSettings,
+} from './helpers/mockContexts';
+import { splitScheduleOverrides, type ScheduleOverrides } from './helpers/splitScheduleOverrides';
 
-vi.mock('@/contexts/ScheduleContext', () => ({
-  useSchedule: vi.fn(),
+vi.mock('@/contexts/schedule/ScheduleDataContext', () => ({
+  useScheduleData: vi.fn(),
+}));
+
+vi.mock('@/contexts/schedule/ScheduleViewContext', () => ({
+  useScheduleView: vi.fn(),
+}));
+
+vi.mock('@/contexts/schedule/GridSettingsContext', () => ({
+  useGridSettings: vi.fn(),
 }));
 
 vi.mock('@/contexts/UIContext', () => ({
@@ -54,7 +67,9 @@ vi.mock('@/app/components/modal/ActivityDetailsModal/ActivityDetailsModal', () =
     props.isOpen ? <div data-testid="activity-details-modal" data-mode={props.mode} /> : null,
 }));
 
-import { useSchedule } from '@/contexts/ScheduleContext';
+import { useScheduleData } from '@/contexts/schedule/ScheduleDataContext';
+import { useScheduleView } from '@/contexts/schedule/ScheduleViewContext';
+import { useGridSettings } from '@/contexts/schedule/GridSettingsContext';
 import { useUserSettings } from '@/contexts/UserSettingsContext';
 import { DayView } from '../app/components/schedule/DayView';
 import { buildSchedule } from '@memo/domain';
@@ -88,9 +103,15 @@ function createMockActivity(overrides: Partial<ScheduleAdminDTO> = {}): Schedule
 }
 
 function renderDayView(contextOverrides?: Record<string, unknown>) {
-  const mockUseSchedule = useSchedule as ReturnType<typeof vi.fn>;
   const mockUseUserSettings = useUserSettings as ReturnType<typeof vi.fn>;
-  const overrides = { ...contextOverrides };
+  const overrides: Record<string, unknown> = { ...contextOverrides };
+
+  // Test-private keys: they feed the useUserSettings mock below, not a context
+  // field — pull them out before routing the rest to the three factories.
+  const columnOrderMasters = (overrides._columnOrderMasters as string[] | undefined) ?? [];
+  const columnOrderLocations = (overrides._columnOrderLocations as string[] | undefined) ?? [];
+  delete overrides._columnOrderMasters;
+  delete overrides._columnOrderLocations;
 
   // Build scheduleIndex from activities if not provided
   if (overrides.activities && Array.isArray(overrides.activities) && !overrides.scheduleIndex) {
@@ -98,13 +119,16 @@ function renderDayView(contextOverrides?: Record<string, unknown>) {
     overrides.scheduleIndex = buildSchedule(activities, { getDateKey: (a: ScheduleAdminDTO) => a.date });
   }
 
-  mockUseSchedule.mockReturnValue(createMockScheduleContext(overrides as Record<string, unknown>));
+  const { data, view, settings } = splitScheduleOverrides(overrides as ScheduleOverrides);
+  vi.mocked(useScheduleData).mockReturnValue(createMockScheduleData(data));
+  vi.mocked(useScheduleView).mockReturnValue(createMockScheduleView(view));
+  vi.mocked(useGridSettings).mockReturnValue(createMockGridSettings(settings));
   mockUseUserSettings.mockReturnValue({
-    settings: { theme: 'light', language: 'ru', columnOrderMasters: overrides._columnOrderMasters ?? [], columnOrderLocations: overrides._columnOrderLocations ?? [] },
+    settings: { theme: 'light', language: 'ru', columnOrderMasters, columnOrderLocations },
     updateSettings: vi.fn(),
     setColumnOrder: vi.fn(),
     getColumnOrder: vi.fn((mode: 'masters' | 'locations') => {
-      return mode === 'masters' ? (overrides._columnOrderMasters as string[] ?? []) : (overrides._columnOrderLocations as string[] ?? []);
+      return mode === 'masters' ? columnOrderMasters : columnOrderLocations;
     }),
     ready: true,
   });

@@ -1,39 +1,27 @@
 'use client';
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ArchiveFilter } from '../../../contexts/createPagedListContext';
 import type { ColumnDef, DataTableProps, RowAction } from './tableTypes';
 import { ColumnPicker } from './ColumnPicker';
 import { ErrorState } from '@/app/components/error';
+import { usePersistedState } from '@/hooks/usePersistedState';
 
 // ─── Column visibility (LS-backed, spec §6.11) ───────────────────────────
 
 const SKELETON_ROWS = 10;
 
-/**
- * Reads the persisted visible-column keys for `storageKey`. Validation per
- * §6.11: the stored value must parse to a NON-empty array whose keys are a
- * subset of the current column keys — anything else (missing, unparseable,
- * empty, unknown keys) falls back to the `defaultVisible` set.
- */
-function readVisibleKeys<R>(storageKey: string, columns: readonly ColumnDef<R>[]): string[] {
-  const defaults = columns.filter((c) => c.defaultVisible).map((c) => c.key);
+// decode: storage validity only (JSON array of strings); column-subset
+// filtering stays in the component (runtime `columns` dependency — GH #141).
+const decodeIdArray = (raw: string): string[] | null => {
   try {
-    const raw = localStorage.getItem(storageKey);
-    if (raw) {
-      const parsed: unknown = JSON.parse(raw);
-      if (Array.isArray(parsed)) {
-        const known = new Set(columns.map((c) => c.key));
-        const allKnown =
-          parsed.length > 0 && parsed.every((k) => typeof k === 'string' && known.has(k));
-        if (allKnown) return parsed as string[];
-      }
-    }
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed) || !parsed.every((x) => typeof x === 'string')) return null;
+    return parsed as string[];
   } catch {
-    // corrupted value → defaults below
+    return null;
   }
-  return defaults;
-}
+};
 
 // ─── Component ───────────────────────────────────────────────────────────
 
@@ -55,19 +43,25 @@ export function DataTable<T>({
   actionCellExtra,
 }: DataTableProps<T>) {
   // ─── Column visibility (owned here; ColumnPicker is controlled) ────────
-  const [visibleKeys, setVisibleKeys] = useState<string[]>(() =>
-    readVisibleKeys(storageKey, columns),
-  );
+  const [storedIds, setStoredIds] = usePersistedState<string[]>(storageKey, [], decodeIdArray);
+
+  // §6.11 runtime validation (depends on the `columns` prop, so it stays in
+  // the component — GH #141): a NON-empty stored set whose keys are all known
+  // wins; anything else (missing, empty, unknown keys) → `defaultVisible`.
+  const visibleKeys = useMemo(() => {
+    const known = new Set(columns.map((c) => c.key));
+    const valid = storedIds.length > 0 && storedIds.every((k) => known.has(k));
+    return valid ? storedIds : columns.filter((c) => c.defaultVisible).map((c) => c.key);
+  }, [storedIds, columns]);
 
   const toggleVisibility = useCallback(
     (key: string) => {
-      setVisibleKeys((prev) => {
-        const next = prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key];
-        localStorage.setItem(storageKey, JSON.stringify(next));
-        return next;
-      });
+      const next = visibleKeys.includes(key)
+        ? visibleKeys.filter((k) => k !== key)
+        : [...visibleKeys, key];
+      setStoredIds(next);
     },
-    [storageKey],
+    [visibleKeys, setStoredIds],
   );
 
   const visibleColumns = columns.filter((c) => visibleKeys.includes(c.key));

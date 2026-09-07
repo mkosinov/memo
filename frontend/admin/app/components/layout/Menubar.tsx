@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useNavigation } from '@/contexts/NavigationContext';
 import { useUI } from '@/contexts/UIContext';
-import type { ViewModeType } from '@/contexts/ScheduleContext';
+import type { ViewModeType } from '@/contexts/schedule/ScheduleViewContext';
 import { useMasters } from '@/hooks/useMasters';
 import { DAYS, DAYS_FULL, MONTHS, MONTHS_GENITIVE, formatDate, isSameDay } from '@/lib/utils';
 import { getMonday, toISODate } from '@/lib/datetime';

@@ -6,12 +6,12 @@ import { StampFab } from '../../components/layout/StampFab';
 import { WeekView } from '../../components/schedule/WeekView';
 import { DayView } from '../../components/schedule/DayView';
 import { useUI } from '@/contexts/UIContext';
-import { useSchedule } from '@/contexts/ScheduleContext';
-import { ScheduleProvider } from '@/contexts/ScheduleContext';
+import { useScheduleView } from '@/contexts/schedule/ScheduleViewContext';
+import { ScheduleProvider } from '@/contexts/schedule/ScheduleProvider';
 
 function ScheduleView() {
   const { rightPanelCollapsed } = useUI();
-  const { viewMode } = useSchedule();
+  const { viewMode } = useScheduleView();
 
   return (
     <>

@@ -1,14 +1,15 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { useSchedule } from '@/contexts/ScheduleContext';
+import { useScheduleData } from '@/contexts/schedule/ScheduleDataContext';
+import { useGridSettings } from '@/contexts/schedule/GridSettingsContext';
 import { MasterPicker } from '@/app/components/shared/MasterPicker';
 import { Combobox, type ComboboxOption } from '@/app/components/shared/Combobox';
 import type { ScheduleAdminDTO } from '@memo/domain';
 import { formatTime, hhmmToMinutes, composeLocalISO } from '@/lib/datetime';
 
-/** Update payload accepted by ScheduleContext.updateActivity (GH #142 minutes contract). */
-type ActivityUpdates = Parameters<ReturnType<typeof useSchedule>['updateActivity']>[1];
+/** Update payload accepted by ScheduleDataContext.updateActivity (GH #142 minutes contract). */
+type ActivityUpdates = Parameters<ReturnType<typeof useScheduleData>['updateActivity']>[1];
 
 interface SettingsTabProps {
   activity: ScheduleAdminDTO;
@@ -29,7 +30,8 @@ function buildDateTimeLocal(dateStr: string, startMinutes: number, gridFrequency
 }
 
 export function SettingsTab({ activity, onUpdate }: SettingsTabProps) {
-  const { masters, services, locations, gridFrequency } = useSchedule();
+  const { masters, services, locations } = useScheduleData();
+  const { gridFrequency } = useGridSettings();
 
   const [serviceId, setServiceId] = useState(activity.serviceId);
   const [masterId, setMasterId] = useState(activity.masterId);

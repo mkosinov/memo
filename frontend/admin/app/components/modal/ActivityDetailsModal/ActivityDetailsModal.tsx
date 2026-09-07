@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useMemo, useCallback } from 'react';
-import { useSchedule } from '@/contexts/ScheduleContext';
+import { useScheduleData } from '@/contexts/schedule/ScheduleDataContext';
 import { useUI } from '@/contexts/UIContext';
 import type { ScheduleAdminDTO } from '@memo/domain';
 import { formatActivityContext } from '@/lib/utils';
@@ -23,7 +23,7 @@ interface ActivityDetailsModalProps {
 }
 
 export function ActivityDetailsModal({ isOpen, onClose, activity, mode }: ActivityDetailsModalProps) {
-  const { services, updateActivity, deleteActivity } = useSchedule();
+  const { services, updateActivity, deleteActivity } = useScheduleData();
   const { showToast } = useUI();
 
   const [activeTab, setActiveTab] = useState(mode === 'quickAdd' ? 'new-booking' : 'settings');

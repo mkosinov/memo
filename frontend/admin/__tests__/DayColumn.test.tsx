@@ -4,7 +4,7 @@ import React from 'react';
 import { DayColumn } from '../app/components/schedule/DayColumn';
 import type { ScheduleAdminDTO, Master, Service } from '@memo/domain';
 import { formatTime } from '@/lib/datetime';
-import { createMockUIContext, createMockScheduleContext } from './helpers/mockContexts';
+import { createMockUIContext, createMockScheduleData, createMockGridSettings } from './helpers/mockContexts';
 const MOCK_MASTERS: Master[] = [
   { id: 'm1', name: 'Анна Иванова', shortName: 'Анна', color: '#FF6B6B' },
   { id: 'm2', name: 'Петр Петров', shortName: 'Петр', color: '#4ECDC4' },
@@ -83,8 +83,15 @@ vi.mock('@/contexts/UIContext', () => ({
   useUI: vi.fn(() => createMockUIContext()),
 }));
 
-vi.mock('@/contexts/ScheduleContext', () => ({
-  useSchedule: vi.fn(() => createMockScheduleContext()),
+// GH #141 Task 10: DayColumn itself is props-driven (no schedule context). These
+// registrations exist ONLY for the real ActivityCard child, which now reads the
+// split contexts — data for the mutations, grid settings for cellHeight.
+vi.mock('@/contexts/schedule/ScheduleDataContext', () => ({
+  useScheduleData: vi.fn(() => createMockScheduleData()),
+}));
+
+vi.mock('@/contexts/schedule/GridSettingsContext', () => ({
+  useGridSettings: vi.fn(() => createMockGridSettings()),
 }));
 
 // Mock useDroppable to control isOver state

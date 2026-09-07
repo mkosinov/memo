@@ -3,14 +3,13 @@
  *
  * Usage in a test file:
  * ```ts
- * import { createMockScheduleContext } from './helpers/mockContexts';
- * vi.mock('@/contexts/ScheduleContext', () => ({
- *   useSchedule: vi.fn(() => createMockScheduleContext({ masters: myMasters })),
+ * import { createMockScheduleData } from './helpers/mockContexts';
+ * vi.mock('@/contexts/schedule/ScheduleDataContext', () => ({
+ *   useScheduleData: vi.fn(() => createMockScheduleData({ masters: myMasters })),
  * }));
  * ```
  */
 import { vi } from 'vitest';
-import type { ScheduleContextType } from '@/contexts/ScheduleContext';
 import type { RecordsContextType } from '@/contexts/RecordsContext';
 import type { ClientFilters } from '@/contexts/ClientsContext';
 import { defaultFilters as defaultClientFilters } from '@/contexts/ClientsContext';
@@ -19,16 +18,17 @@ import type {
   PagedListFiltersState,
 } from '@/contexts/createPagedListContext';
 import type { PhotosContextType } from '@/contexts/PhotosContext';
+import type { ScheduleDataContextType } from '@/contexts/schedule/ScheduleDataContext';
+import type { ScheduleViewContextType } from '@/contexts/schedule/ScheduleViewContext';
+import type { GridSettingsContextType } from '@/contexts/schedule/GridSettingsContext';
 import type { ClientWithStats } from '@memo/api-client';
 import { mockMasters, mockServices, mockLocations } from './mockData';
 
-// ─── ScheduleContext ──────────────────────────────────────────────────────
+// ─── Schedule split contexts (GH #141) ────────────────────────────────────
 
-type ScheduleOverrides = Partial<ScheduleContextType>;
-
-export function createMockScheduleContext(
-  overrides?: ScheduleOverrides,
-): ScheduleContextType {
+export function createMockScheduleData(
+  overrides?: Partial<ScheduleDataContextType>,
+): ScheduleDataContextType {
   return {
     masters: mockMasters,
     services: mockServices,
@@ -40,26 +40,46 @@ export function createMockScheduleContext(
       byMasterId: new Map(),
       byLocation: { all: { byDate: new Map(), byServiceId: new Map() } },
     },
-    currentWeek: new Date('2026-06-01'),
-    stamp: { masterId: null, serviceId: null, locations: new Set(), ready: false },
-    setCurrentWeek: vi.fn(),
+    loading: false,
+    error: null,
     addActivity: vi.fn(),
     updateActivity: vi.fn(),
     deleteActivity: vi.fn(),
-    setStamp: vi.fn(),
     copyLastWeek: vi.fn(),
-    loading: false,
-    error: null,
-    filterMasterIds: [],
-    filterLocationIds: [],
-    setFilterMasterIds: vi.fn(),
-    setFilterLocationIds: vi.fn(),
+    gridStartMinutes: 540,
+    gridEndMinutes: 1260,
+    ...overrides,
+  };
+}
+
+export function createMockScheduleView(
+  overrides?: Partial<ScheduleViewContextType>,
+): ScheduleViewContextType {
+  return {
     viewMode: 'week',
     setViewMode: vi.fn(),
     selectedDay: new Date(),
     setSelectedDay: vi.fn(),
     columnMode: 'masters',
     setColumnMode: vi.fn(),
+    filterMasterIds: [],
+    filterLocationIds: [],
+    setFilterMasterIds: vi.fn(),
+    setFilterLocationIds: vi.fn(),
+    stamp: { masterId: null, serviceId: null, locations: new Set(), ready: false },
+    setStamp: vi.fn(),
+    currentWeek: new Date('2026-06-01'),
+    setCurrentWeek: vi.fn(),
+    prevPeriod: vi.fn(),
+    nextPeriod: vi.fn(),
+    ...overrides,
+  };
+}
+
+export function createMockGridSettings(
+  overrides?: Partial<GridSettingsContextType>,
+): GridSettingsContextType {
+  return {
     cellHeight: 50,
     setCellHeight: vi.fn(),
     gridFrequency: 30,
@@ -68,10 +88,6 @@ export function createMockScheduleContext(
     setWorkingHoursStart: vi.fn(),
     workingHoursEnd: 21,
     setWorkingHoursEnd: vi.fn(),
-    gridStartMinutes: 540,
-    gridEndMinutes: 1260,
-    prevPeriod: vi.fn(),
-    nextPeriod: vi.fn(),
     ...overrides,
   };
 }

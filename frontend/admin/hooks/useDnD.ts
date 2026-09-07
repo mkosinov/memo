@@ -2,20 +2,20 @@
 
 import { useState, useCallback, useMemo } from 'react';
 import type { ScheduleAdminDTO } from '@memo/domain';
-import type { ScheduleContextType } from '@/contexts/ScheduleContext';
+import type { ScheduleDataContextType } from '@/contexts/schedule/ScheduleDataContext';
 
 // Re-export types from @dnd-kit/core for reference.
 // The hook uses simplified event shapes below since it only consumes a subset of fields.
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 import type { DragStartEvent as _DragStartEvent, DragEndEvent as _DragEndEvent, DragOverEvent as _DragOverEvent } from '@dnd-kit/core';
 
-/** Update payload accepted by ScheduleContext.updateActivity (GH #142 minutes contract). */
-type UpdateActivityInput = Parameters<ScheduleContextType['updateActivity']>[1];
+/** Update payload accepted by ScheduleDataContext.updateActivity (GH #142 minutes contract). */
+type UpdateActivityInput = Parameters<ScheduleDataContextType['updateActivity']>[1];
 
 interface UseDnDOptions {
   activities: ScheduleAdminDTO[];
-  addActivity: ScheduleContextType['addActivity'];
-  updateActivity: ScheduleContextType['updateActivity'];
+  addActivity: ScheduleDataContextType['addActivity'];
+  updateActivity: ScheduleDataContextType['updateActivity'];
   showToast: (message: string, undo?: () => void) => void;
   /** Grid frequency in minutes (5, 15, 30, or 60). DnD snaps dropped times to the nearest multiple. */
   gridFrequency?: number;

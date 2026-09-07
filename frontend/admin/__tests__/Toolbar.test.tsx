@@ -3,7 +3,7 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Toolbar } from '../app/components/layout/Toolbar';
-import { ScheduleProvider } from '../contexts/ScheduleContext';
+import { ScheduleProvider } from '../contexts/schedule/ScheduleProvider';
 import { NavigationProvider } from '../contexts/NavigationContext';
 import { UIProvider, useUI } from '../contexts/UIContext';
 

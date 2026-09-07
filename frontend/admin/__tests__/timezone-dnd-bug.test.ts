@@ -13,7 +13,7 @@
  *          `new Date()` parses it as LOCAL per the ES spec, so local getters
  *          return exactly the embedded wall time under any browser TZ.
  *   WRITE  composeLocalISO(dayIndexToDate(monday, dayIndex), startMinutes)
- *          — the DnD/mutation path (ScheduleContext.updateActivity) composes
+ *          — the DnD/mutation path (ScheduleDataContext.updateActivity) composes
  *          the same naive string back. Integer minutes end-to-end, no Date
  *          round-trip through UTC.
  *
@@ -105,7 +105,7 @@ describe('Timezone DnD bug — buildAdminSchedule local extraction', () => {
 
 describe('Timezone DnD bug — DnD round-trip via composeLocalISO/parseLocalISO', () => {
   it('drops Tuesday 09:30 and reads back exactly 570 min / dayIndex 1', () => {
-    // Write path (ScheduleContext.updateActivity after a drop): dayIndex +
+    // Write path (ScheduleDataContext.updateActivity after a drop): dayIndex +
     // integer minutes → naive floating-local string, never through UTC.
     const composed = composeLocalISO(dayIndexToDate(MONDAY, 1), 570);
     expect(composed).toBe('2026-06-02T09:30:00'); // no 'Z', no offset

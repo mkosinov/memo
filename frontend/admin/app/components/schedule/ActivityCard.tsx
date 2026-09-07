@@ -3,7 +3,8 @@
 import React, { useState, useRef } from 'react';
 import { useDraggable } from '@dnd-kit/core';
 import { useUI } from '@/contexts/UIContext';
-import { useSchedule } from '@/contexts/ScheduleContext';
+import { useScheduleData } from '@/contexts/schedule/ScheduleDataContext';
+import { useGridSettings } from '@/contexts/schedule/GridSettingsContext';
 import type { ScheduleAdminDTO, Master, Location } from '@memo/domain';
 import { formatTime } from '@/lib/datetime';
 
@@ -22,7 +23,8 @@ interface ActivityCardProps {
 
 export function ActivityCard({ activity, master, locations = [], style, onEdit, onQuickAdd, isDragging, isDragCopy, gridStart = 540 }: ActivityCardProps) {
   const { deleteMode, showToast } = useUI();
-  const { deleteActivity, addActivity, cellHeight = 60 } = useSchedule();
+  const { deleteActivity, addActivity } = useScheduleData();
+  const { cellHeight = 60 } = useGridSettings();
   const [deleting, setDeleting] = useState(false);
   const deletingRef = useRef(false);
   const topPx = (activity.startMinutes - gridStart) * cellHeight / 30 + 4;        // +4 top margin

@@ -8,8 +8,9 @@ import { createMockClientsTableState } from './helpers/mockContexts';
 
 // ─── Mock contexts ───────────────────────────────────────────────────────
 
-vi.mock('@/contexts/ScheduleContext', () => ({
-  useSchedule: vi.fn(),
+// GH #141 Task 11: the page mounts the split-context ScheduleProvider
+// composition; stub it — page-level tests assert layout/pager behavior only.
+vi.mock('@/contexts/schedule/ScheduleProvider', () => ({
   ScheduleProvider: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));
 

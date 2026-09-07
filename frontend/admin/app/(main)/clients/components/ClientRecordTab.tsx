@@ -16,7 +16,7 @@ import { useRecordData } from '@/hooks/useRecordData';
 import { useRecordMutations } from '@/hooks/useRecordMutations';
 import { useDeleteRecord } from '@/hooks/useDeleteRecord';
 import { useUI } from '@/contexts/UIContext';
-import { useSchedule } from '@/contexts/ScheduleContext';
+import { useGridSettings } from '@/contexts/schedule/GridSettingsContext';
 import { qk } from '@/lib/queryKeys';
 import { parseApiError } from '@/app/lib/api/parseApiError';
 import { formatRecordLabel } from '@/lib/utils';
@@ -32,7 +32,7 @@ interface ClientRecordTabProps {
 
 export function ClientRecordTab({ recordId, clientId, client }: ClientRecordTabProps) {
   const queryClient = useQueryClient();
-  const { gridFrequency } = useSchedule();
+  const { gridFrequency } = useGridSettings();
   const { showToast } = useUI();
 
   const { record, activity, services, masters, locations, payments, visitorsMap, tariffs, isLoading, recordData, status } =

@@ -31,8 +31,11 @@ vi.mock('next/navigation', () => ({
   usePathname: () => '/schedule',
 }));
 
-vi.mock('@/contexts/ScheduleContext', () => ({
-  useSchedule: vi.fn(() => ({
+// GH #141 Task 11: Menubar imports ONLY the ViewModeType type from the split
+// view context (erased at runtime); Menubar tracks viewMode/selectedDay via
+// the __memo-* event bus. Defensive mock kept at the new module path.
+vi.mock('@/contexts/schedule/ScheduleViewContext', () => ({
+  useScheduleView: vi.fn(() => ({
     viewMode: 'week',
     selectedDay: new Date(),
     setViewMode: vi.fn(),

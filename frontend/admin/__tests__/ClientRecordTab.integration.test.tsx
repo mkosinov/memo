@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import React from 'react';
+import { createMockGridSettings } from './helpers/mockContexts';
 
 // ─── Mock UIContext ────────────────────────────────────────────────────────
 vi.mock('@/contexts/UIContext', () => ({
@@ -46,13 +47,9 @@ vi.mock('@memo/api-client', () => ({
   ApiError: class ApiError extends Error { code: string; constructor(msg: string, code: string) { super(msg); this.code = code; } },
 }));
 
-vi.mock('@/contexts/ScheduleContext', () => ({
-  useSchedule: vi.fn(() => ({
-    gridFrequency: 30,
-    masters: [],
-    services: [],
-    locations: [],
-  })),
+// GH #141 Task 11: gridFrequency now comes from the split grid-settings context.
+vi.mock('@/contexts/schedule/GridSettingsContext', () => ({
+  useGridSettings: vi.fn(() => createMockGridSettings()),
 }));
 
 vi.mock('@/contexts/PendingActionsContext', () => ({

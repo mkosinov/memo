@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { NavigationProvider } from '../contexts/NavigationContext';
-import { ScheduleProvider } from '../contexts/ScheduleContext';
+import { ScheduleProvider } from '../contexts/schedule/ScheduleProvider';
 import { UIProvider } from '../contexts/UIContext';
 import SchedulePage from '../app/(main)/schedule/page';
 import React from 'react';

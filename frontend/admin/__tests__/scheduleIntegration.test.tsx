@@ -4,7 +4,7 @@ import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { UIProvider } from '../contexts/UIContext';
 import { NavigationProvider } from '../contexts/NavigationContext';
-import { ScheduleProvider } from '../contexts/ScheduleContext';
+import { ScheduleProvider } from '../contexts/schedule/ScheduleProvider';
 import { WeekView } from '../app/components/schedule/WeekView';
 
 // ─── Helper: compute a date in the current week ──────────────────────────────

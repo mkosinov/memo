@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import React from 'react';
+import { createMockGridSettings } from './helpers/mockContexts';
 import fs from 'fs';
 import path from 'path';
 
@@ -59,22 +60,16 @@ vi.mock('@memo/api-client', () => ({
   },
 }));
 
-// ─── Mock ScheduleContext ────────────────────────────────────────────────
+// ─── Mock schedule grid settings (GH #141) ────────────────────────────────
+// ClientRecordTab reads gridFrequency from the grid-settings context only.
 
-vi.mock('@/contexts/ScheduleContext', () => ({
-  useSchedule: vi.fn(() => ({
-    gridFrequency: 30,
-    masters: [],
-    services: [],
-    locations: [],
-  })),
+vi.mock('@/contexts/schedule/GridSettingsContext', () => ({
+  useGridSettings: vi.fn(() => createMockGridSettings()),
 }));
 
 vi.mock('@/contexts/PendingActionsContext', () => ({
   usePendingActions: () => ({ enqueuePendingAction: mockEnqueuePendingAction }),
 }));
-
-import { useSchedule } from '@/contexts/ScheduleContext';
 
 // ─── PendingActions mock (captures enqueuePendingAction calls) ─────────────
 

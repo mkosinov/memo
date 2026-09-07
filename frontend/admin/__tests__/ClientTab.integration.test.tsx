@@ -13,7 +13,6 @@ import {
 } from './helpers/mockData';
 
 import {
-  createMockScheduleContext,
   createMockRecordsContext,
   createMockUIContext,
 } from './helpers/mockContexts';
@@ -52,7 +51,6 @@ vi.mock('@memo/api-client', () => ({
 
 const mockEnqueuePendingAction = vi.fn();
 
-vi.mock('@/contexts/ScheduleContext', () => ({ useSchedule: vi.fn() }));
 vi.mock('@/contexts/RecordsContext', () => ({ useRecords: vi.fn() }));
 vi.mock('@/contexts/UIContext', () => ({ useUI: vi.fn() }));
 vi.mock('@/contexts/PendingActionsContext', () => ({
@@ -112,12 +110,10 @@ vi.mock('@tanstack/react-query', () => ({
   })),
 }));
 
-import { useSchedule } from '@/contexts/ScheduleContext';
 import { useRecords } from '@/contexts/RecordsContext';
 import { useUI } from '@/contexts/UIContext';
 import { useRecordData } from '@/hooks/useRecordData';
 
-const mockUseSchedule = vi.mocked(useSchedule);
 const mockUseRecords = vi.mocked(useRecords);
 const mockUseUI = vi.mocked(useUI);
 const mockUseRecordData = vi.mocked(useRecordData);
@@ -128,7 +124,6 @@ import { ClientTab } from '../app/components/modal/ActivityDetailsModal/ClientTa
 
 describe('ClientTab — fully hook-driven (#127 Task 7)', () => {
   beforeEach(() => {
-    mockUseSchedule.mockReturnValue(createMockScheduleContext());
     mockUseRecords.mockReturnValue(createMockRecordsContext());
     mockUseUI.mockReturnValue(createMockUIContext());
     vi.clearAllMocks();

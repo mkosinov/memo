@@ -50,6 +50,13 @@ class MaterialResponse(MaterialBase):
     ``is_active`` stays as the DB/ORM column but is ``exclude=True`` so it never
     serializes to JSON. The API exposes ``archived`` (inverted: ``archived = not
     is_active``, ``archived = true`` = in archive) via a computed field (#207 §3.1).
+
+    ``used_in_services_count`` (GH #223 §6): number of NON-ARCHIVED services
+    linked to the material — one canonical definition regardless of the
+    request's ``status`` slice. Carries a Pydantic default (``= 0``) so
+    generic ``GenericService``/``ArchiveService`` paths that don't run the
+    ``MaterialService._attach_counts`` helper still validate (e.g. ``create``,
+    which returns 0 by definition).
     """
 
     model_config = ConfigDict(from_attributes=True)
@@ -57,6 +64,7 @@ class MaterialResponse(MaterialBase):
     created_at: datetime
     updated_at: datetime
     is_active: bool = Field(..., exclude=True)
+    used_in_services_count: int = 0
 
     @computed_field
     @property

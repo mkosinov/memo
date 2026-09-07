@@ -7,6 +7,7 @@ import { resolveDeleteService, ApiError } from '@memo/api-client';
 import { useUpdateService, useCreateService, useDeleteService, useArchiveService, useRestoreService } from '@/hooks/useServicesMutations';
 import { useUI } from '@/contexts/UIContext';
 import { useServicesTable } from '@/contexts/ServicesContext';
+import { useMaterialsRaw } from '@/hooks/useMaterials';
 import { ServiceModal } from './ServiceModal';
 import { ServiceFilters } from './ServiceFilters';
 import { DataTable } from '@/app/components/shared/DataTable';
@@ -20,6 +21,10 @@ import { qk } from '@/lib/queryKeys';
 export function ServicesTable() {
   // Server pagination/sort/search state (ServicesContext, #205 §5.2 + #139 §6.7)
   const servicesTable = useServicesTable();
+  // GH #223 T7 — ACTIVE materials feed the «Материал» filter select
+  // (spec §8; source: getAllMaterials /all?status=active, same as the
+  // ServiceModal picker — REUSE the Task 5 hook).
+  const { data: materials = [] } = useMaterialsRaw();
 
   const updateService = useUpdateService();
   const createService = useCreateService();
@@ -157,7 +162,10 @@ export function ServicesTable() {
             status={servicesTable.status}
             onSearchChange={servicesTable.setSearch}
             onStatusChange={(v) => servicesTable.setStatus(v as 'active' | 'all' | 'archived')}
-            onReset={() => { servicesTable.setSearch(''); servicesTable.setStatus('active'); }}
+            onReset={() => { servicesTable.setSearch(''); servicesTable.setStatus('active'); servicesTable.resetFilters(); }}
+            materials={materials}
+            materialFilter={servicesTable.filters.material_id}
+            onMaterialFilterChange={(v) => servicesTable.setFilters({ material_id: v })}
           />
         }
         toolbarExtras={

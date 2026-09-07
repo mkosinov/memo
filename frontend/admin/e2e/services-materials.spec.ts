@@ -1,15 +1,21 @@
 /**
- * GH #223 T5 — ServiceModal materials multi-select with notes.
+ * GH #223 T5/T7 — ServiceModal materials multi-select with notes + the
+ * services-page material filter.
  *
  * S1: open ServiceModal for an existing service → check «Акварель»
  *     (+ note «бумага 300 г») and «Керамика» → save → the table row shows
  *     badges «Акварель», «Керамика».
  * S3: reopen → uncheck «Керамика», save → only «Акварель» badge remains;
  *     a second edit saved WITHOUT touching materials keeps «Акварель».
+ * S2 (T7): the filter select «Материал» narrows the server-paginated list
+ *     to the linked services (honest total); «все» restores; an archived
+ *     material's already-selected filter keeps working (spec §5).
  *
  * Self-contained per test (fullyParallel-safe): each test creates its own
  * service; «Керамика» is created via API (the seed ships Масло/Акрил/
  * Акварель/Гуашь only) and cleaned up in finally. «Акварель» is seed mat3.
+ * S2 creates BOTH of its materials via API (unique titles) — it archives
+ * one mid-test, which must never touch the shared seed rows.
  */
 import { test, expect } from '@playwright/test';
 import type { APIRequestContext, Page } from '@playwright/test';
@@ -74,6 +80,10 @@ test.describe('Services — materials multi-select with notes (#223 S1/S3)', () 
     const service = await createTestService(request, { max_age: 18 });
     try {
       await waitForServicesReady(page);
+      // Single page for everything — with S2 running in parallel (3 extra
+      // services) the default per_page 10 can push our row (title-sorted
+      // last: «Услуга e2e_…») onto page 2.
+      await page.getByTestId('page-size-select').selectOption('100');
       const row = serviceRow(page, service.title);
       await expect(row).toBeVisible({ timeout: 10_000 });
 
@@ -126,6 +136,8 @@ test.describe('Services — materials multi-select with notes (#223 S1/S3)', () 
     });
     try {
       await waitForServicesReady(page);
+      // Single page for everything — see the S1 comment (parallel-S2 collision).
+      await page.getByTestId('page-size-select').selectOption('100');
       const row = serviceRow(page, service.title);
       await expect(row).toBeVisible({ timeout: 10_000 });
       const badges = row.locator('[data-testid="material-badge"]');
@@ -167,6 +179,105 @@ test.describe('Services — materials multi-select with notes (#223 S1/S3)', () 
     } finally {
       await cleanup(request, `/api/v1/services/${service.id}`);
       await cleanup(request, `/api/v1/materials/${keramika.id}`);
+    }
+  });
+});
+
+test.describe('Services — material filter (#223 S2)', () => {
+  /**
+   * S2: two services linked to a unique «Акварель» material + one linked to a
+   * unique «Керамика». Picking «Акварель» in the «Фильтр по материалу» select
+   * narrows the server-paginated list to exactly the two linked rows with the
+   * total counter showing 2; «все» brings all rows back. Then the «Акварель»
+   * material is ARCHIVED via API (spec §5): the already-selected filter keeps
+   * returning its linked services (links survive archive).
+   *
+   * Both materials are created via API with unique titles — the test archives
+   * one mid-run, which must never touch the shared seed rows. per_page is
+   * bumped to 100 first so fullyParallel-created services can't push our rows
+   * onto page 2.
+   */
+  test('S2: filter by material → only linked rows + honest total; «все» restores; archived filter keeps working', async ({
+    page,
+    request,
+  }) => {
+    const akv = await createMaterial(request, `Акварель ${uid()}`);
+    const ker = await createMaterial(request, `Керамика ${uid()}`);
+    // max_age explicit — see the S1 comment (form number-prefill quirk is
+    // irrelevant here but the factory default null is kept away for parity).
+    const svcA1 = await createTestService(request, {
+      max_age: 18,
+      materials: [{ material_id: akv.id }],
+    });
+    const svcA2 = await createTestService(request, {
+      max_age: 18,
+      materials: [{ material_id: akv.id, note: 'бумага 300 г' }],
+    });
+    const svcK = await createTestService(request, {
+      max_age: 18,
+      materials: [{ material_id: ker.id }],
+    });
+    try {
+      await waitForServicesReady(page);
+      // Single page for everything: seed services + ours + parallel-test noise.
+      await page.getByTestId('page-size-select').selectOption('100');
+
+      const materialFilter = page.getByLabel('Фильтр по материалу');
+      await expect(materialFilter).toBeVisible({ timeout: 10_000 });
+      // The picker offers the fresh active materials (source: /all?status=active).
+      await expect(
+        materialFilter.locator('option', { hasText: akv.title }),
+      ).toHaveCount(1, { timeout: 10_000 });
+
+      // All three rows visible before filtering.
+      await expect(serviceRow(page, svcA1.title)).toBeVisible({ timeout: 10_000 });
+      await expect(serviceRow(page, svcA2.title)).toBeVisible();
+      await expect(serviceRow(page, svcK.title)).toBeVisible();
+
+      // ACTION — pick «Акварель <uid>».
+      await materialFilter.selectOption(akv.id);
+
+      // VERIFY — only the two linked rows, honest total counter = 2.
+      await expect(page.getByText('2 всего', { exact: true })).toBeVisible({ timeout: 10_000 });
+      await expect(serviceRow(page, svcA1.title)).toBeVisible();
+      await expect(serviceRow(page, svcA2.title)).toBeVisible();
+      await expect(serviceRow(page, svcK.title)).toHaveCount(0);
+
+      // ACTION — back to «все».
+      await materialFilter.selectOption('');
+
+      // VERIFY — all three rows back (the unfiltered server list).
+      await expect(serviceRow(page, svcK.title)).toBeVisible({ timeout: 10_000 });
+      await expect(serviceRow(page, svcA1.title)).toBeVisible();
+      await expect(serviceRow(page, svcA2.title)).toBeVisible();
+
+      // ── Archived-material check (spec §5) ──
+      // Re-select the material, archive it via API, then force a refetch with
+      // the filter still selected (status «Все» → new query key): the backend
+      // accepts an archived material_id and the links survive the archive.
+      await materialFilter.selectOption(akv.id);
+      await expect(page.getByText('2 всего', { exact: true })).toBeVisible({ timeout: 10_000 });
+
+      const archResp = await request.post(`${BACKEND}/api/v1/materials/${akv.id}/archive`);
+      expect(archResp.ok()).toBeTruthy();
+      expect(((await archResp.json()) as { archived: boolean }).archived).toBe(true);
+
+      // The already-selected filter keeps working: refetch (status change
+      // composes with material_id) still returns the two linked services.
+      await page.getByLabel('Фильтр по статусу').selectOption('all');
+      await expect(page.getByText('2 всего', { exact: true })).toBeVisible({ timeout: 10_000 });
+      await expect(serviceRow(page, svcA1.title)).toBeVisible();
+      await expect(serviceRow(page, svcA2.title)).toBeVisible();
+      // The selection itself survived the archive.
+      await expect(materialFilter).toHaveValue(akv.id);
+    } finally {
+      await cleanup(request, `/api/v1/services/${svcA1.id}`);
+      await cleanup(request, `/api/v1/services/${svcA2.id}`);
+      await cleanup(request, `/api/v1/services/${svcK.id}`);
+      // Restore before delete: the material was archived mid-test.
+      await request.post(`${BACKEND}/api/v1/materials/${akv.id}/restore`).catch(() => {});
+      await cleanup(request, `/api/v1/materials/${akv.id}`);
+      await cleanup(request, `/api/v1/materials/${ker.id}`);
     }
   });
 });

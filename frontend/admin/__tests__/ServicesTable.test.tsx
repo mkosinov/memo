@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ServiceResponse, DependencyNode, PaginatedResponse, MaterialResponse } from '@memo/api-client';
@@ -412,6 +412,126 @@ describe('ServicesTable', () => {
     });
     expect(mockGetServices).toHaveBeenCalledTimes(1);
     expect(mockGetServices.mock.calls[0][0]).not.toHaveProperty('q');
+  });
+
+  // ─── Material filter (GH #223 T7 — S2, spec §8) ─────────────────────────
+  // A select «Материал: все | <title>…» in the *Filters bar (source:
+  // getAllMaterials active list); the pick feeds `material_id` into the
+  // server-paginated query via ServicesContext; «все» = param omitted.
+
+  it('material filter select renders «все» + active material options', async () => {
+    setupEnvelope();
+    await renderLoaded();
+
+    const select = screen.getByLabelText('Фильтр по материалу');
+    await waitFor(() => {
+      expect(within(select).getByRole('option', { name: 'Акварель' })).toBeInTheDocument();
+    });
+    expect(within(select).getByRole('option', { name: 'Керамика' })).toBeInTheDocument();
+    expect(within(select).getByRole('option', { name: 'все' })).toBeInTheDocument();
+    expect(select).toHaveValue('');
+  });
+
+  it('picking a material refetches with material_id and resets page to 1', async () => {
+    setupEnvelope({ total: 42 });
+    await renderLoaded();
+
+    // Go to page 2 first — the filter change must restart at page 1
+    // (same reset contract as status/sort/perPage/q).
+    fireEvent.click(screen.getByRole('button', { name: '2' }));
+    await waitFor(() => {
+      expect(mockGetServices).toHaveBeenLastCalledWith({ page: 2, per_page: 10, status: 'active' });
+    });
+
+    const select = screen.getByLabelText('Фильтр по материалу');
+    await waitFor(() => {
+      expect(within(select).getByRole('option', { name: 'Акварель' })).toBeInTheDocument();
+    });
+    fireEvent.change(select, { target: { value: 'mat-a' } });
+
+    await waitFor(() => {
+      expect(mockGetServices).toHaveBeenLastCalledWith({
+        page: 1,
+        per_page: 10,
+        status: 'active',
+        material_id: 'mat-a',
+      });
+    });
+  });
+
+  it('«все» omits material_id from the fetch (deep equality — no key)', async () => {
+    setupEnvelope();
+    await renderLoaded();
+
+    const select = screen.getByLabelText('Фильтр по материалу');
+    await waitFor(() => {
+      expect(within(select).getByRole('option', { name: 'Акварель' })).toBeInTheDocument();
+    });
+    fireEvent.change(select, { target: { value: 'mat-a' } });
+    await waitFor(() => {
+      expect(mockGetServices).toHaveBeenLastCalledWith({
+        page: 1,
+        per_page: 10,
+        status: 'active',
+        material_id: 'mat-a',
+      });
+    });
+
+    fireEvent.change(select, { target: { value: '' } });
+    await waitFor(() => {
+      expect(mockGetServices).toHaveBeenLastCalledWith({ page: 1, per_page: 10, status: 'active' });
+    });
+    expect(mockGetServices.mock.calls.at(-1)![0]).not.toHaveProperty('material_id');
+  });
+
+  it('material filter composes with the status filter', async () => {
+    setupEnvelope();
+    await renderLoaded();
+
+    fireEvent.change(screen.getByLabelText('Фильтр по статусу'), {
+      target: { value: 'archived' },
+    });
+    await waitFor(() => {
+      expect(mockGetServices).toHaveBeenLastCalledWith({ page: 1, per_page: 10, status: 'archived' });
+    });
+
+    const select = screen.getByLabelText('Фильтр по материалу');
+    await waitFor(() => {
+      expect(within(select).getByRole('option', { name: 'Акварель' })).toBeInTheDocument();
+    });
+    fireEvent.change(select, { target: { value: 'mat-k' } });
+
+    await waitFor(() => {
+      expect(mockGetServices).toHaveBeenLastCalledWith({
+        page: 1,
+        per_page: 10,
+        status: 'archived',
+        material_id: 'mat-k',
+      });
+    });
+  });
+
+  it('reset button clears the material filter too', async () => {
+    setupEnvelope();
+    await renderLoaded();
+
+    const select = screen.getByLabelText('Фильтр по материалу');
+    await waitFor(() => {
+      expect(within(select).getByRole('option', { name: 'Акварель' })).toBeInTheDocument();
+    });
+    fireEvent.change(select, { target: { value: 'mat-k' } });
+    await waitFor(() => {
+      expect(mockGetServices).toHaveBeenLastCalledWith(
+        expect.objectContaining({ material_id: 'mat-k' }),
+      );
+    });
+
+    fireEvent.click(screen.getByText('Сбросить'));
+
+    await waitFor(() => {
+      expect(mockGetServices).toHaveBeenLastCalledWith({ page: 1, per_page: 10, status: 'active' });
+    });
+    expect(screen.getByLabelText('Фильтр по материалу')).toHaveValue('');
   });
 
   // ─── Server-driven pagination wiring ───────────────────────────────────

@@ -3,7 +3,7 @@
  * (GH #141) — data / view / settings.
  *
  * Tests keep calling their render helper with one flat object (the old
- * `createMockScheduleContext({...})` call shape); this router sends each key to
+ * single-context shape); this router sends each key to
  * the factory that now owns it. An unknown key THROWS rather than being
  * silently dropped, so a typo or a newly-added context field cannot quietly
  * weaken a test.

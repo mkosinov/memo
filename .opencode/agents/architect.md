@@ -1,7 +1,7 @@
 ---
 description: Phase executor. Runs DESIGN (spec+plan+review+worktree) or IMPL (dev-loop, docs, finishing) phases dispatched by @manager. Never talks to the user directly.
 mode: all
-model: omniroute/zai/glm-5.3
+model: omniroute/kmc/k3-256k
 variant: max
 temperature: 0.2
 permission:
@@ -250,7 +250,8 @@ Triggered by manager dispatch with the approved brainstorming output (design con
 2. If the task involves entity fields/validation/business logic → invoke `domain-rules` skill, check `docs/domain-rules/{entity}.md`, reference or create it.
 3. Write the design spec to `docs/specs/YYYY-MM-DD-<feature>-design.md`:
    - Preserve ALL requirements from the user's source materials (sketches, specs) — never silently change/remove/reinterpret. Conflicts → flag as questions in the report.
-   - Include `## Visual Compliance Checks` section (UI features): checklist of key UI elements, e.g. `- [ ] "Сегодня" tab is visible and clickable on main page`
+   - Include `## User Scenarios` section — 3-7 user tasks the feature enables, each mapping to an E2E test (anchors the plan's E2E-in-DoD rule; the completeness panelist checks for it).
+   - Include `## Visual Compliance Checks` section (UI features): checklist of key UI elements, e.g. `- [ ] <UI element name> is visible and <expected behavior>`
 4. Commit: `git add docs/specs/... && git commit -m "docs: add design for <feature>"`
    - **DESIGN-phase docs are pushed to main immediately after gate approval (rule).** Do NOT push
      the spec before G1b — the user may request changes at the gate. But NEVER leave the approved
@@ -376,7 +377,7 @@ Triggered by manager dispatch. Two entry variants:
      - If unclear — ask, do not guess
      - NEVER push, create PRs, merge, or delete worktrees/branches. Commit locally only.
      - Need codebase facts or log investigation → dispatch `explore` with a precise question. Never `general`.
-     - UI touches → `npm run test:all`, else → `npm run test`
+     - UI touches → <project UI test command>, else → <project non-UI test command>
      ## Report Format (STRICT)
      [verbatim from Subagent Report Contract]
    ```
@@ -398,7 +399,7 @@ Triggered by manager dispatch. Two entry variants:
 
    - **Trivial:** no reviewers. Architect spot-check via `git diff --stat` (≤5 lines, style only). Suspicious → escalate to small pipeline.
    - **Small:** code-compliance-reviewer only (max 3 iterations).
-   - **Standard / Large:** Stage 1 code-compliance-reviewer (max 3 iter) → only if ✅ Stage 2 code-quality-reviewer (max 3 iter). Include in quality prompt: "UI changes: [yes/no]. If yes → `cd frontend && npm run test:all`, else → `npm run test`."
+   - **Standard / Large:** Stage 1 code-compliance-reviewer (max 3 iter) → only if ✅ Stage 2 code-quality-reviewer (max 3 iter). Include in quality prompt: "UI changes: [yes/no]. If yes → <project UI test command>, else → <project non-UI test command>."
    - Reviewer test runs that need the running env (e2e/full-suite) → the reviewer dispatches `tester` itself (it has permission) instead of fighting the environment.
    - Include the Report Format (STRICT) section in every reviewer dispatch.
 
@@ -415,8 +416,8 @@ Trigger: all tasks done, tests green. Run ONCE per phase. Skip if no user-visibl
 
 **Autonomous by default.** Escalate to the user (NEEDS_APPROVAL, Gate G4.5) ONLY when autonomous verification is impossible: browser tooling (browserMCP / Playwright) unavailable, dev server won't start, or the check requires credentials/state you cannot set up yourself.
 
-1. Dev server up (`npm run dev` background or `npm run build && npx serve out`).
-2. Run: `scripts/visual-compliance-check.sh http://localhost:3000 docs/specs/<feature>-design.md /tmp/visual-compliance mobile` (from repo/worktree root)
+1. Dev server up (<project dev server command>).
+2. Run: <project visual compliance script> <dev server URL> docs/specs/<feature>-design.md /tmp/visual-compliance mobile (from repo/worktree root)
    Fallback: browserMCP → Playwright (navigate + screenshots vs spec), per the pair-visual-debugging skill.
 3. ALL passed → proceed. ANY failed → fix via coder dispatch (max 3 iterations per issue, per Review Loop Limit), then re-run the check. Issues that survive 3 fix iterations → NEEDS_APPROVAL (Gate G4.5) with report path + screenshot paths. User decides: fix / override / abort.
 

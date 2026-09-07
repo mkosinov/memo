@@ -53,6 +53,18 @@ class TariffResponse(TariffBase):
     service_id: str
 
 
+class ServiceMaterialLinkIn(BaseModel):
+    """Write-shape of one service→material link (GH #223 spec §4).
+
+    ``note`` is optional: omitted/null → stored as NULL → display falls back
+    to the material's ``description`` (spec §2 decision 3). Whitespace-only
+    notes normalize to NULL server-side on write (spec §4).
+    """
+
+    material_id: str
+    note: str | None = None
+
+
 class ServiceBase(BaseModel):
     title: str
     description: str
@@ -68,6 +80,7 @@ class ServiceBase(BaseModel):
 class ServiceCreate(ServiceBase):
     tariffs: list[TariffCreate] = []
     tag_ids: list[str] = []
+    materials: list[ServiceMaterialLinkIn] = []
 
 
 class ServiceUpdate(ServiceBase):
@@ -82,6 +95,7 @@ class ServiceUpdate(ServiceBase):
 
     tariffs: list[TariffCreate] = []
     tag_ids: list[str] = []
+    materials: list[ServiceMaterialLinkIn] = []
 
 
 class ServicePatch(BaseModel):
@@ -91,6 +105,9 @@ class ServicePatch(BaseModel):
 
     ``tag_ids``: if sent → hard-replace all tag links. If not sent → preserve existing.
     ``tariffs``: if sent → hard-replace all tariffs. If not sent → preserve existing.
+    ``materials`` (GH #223 spec §4): absent/null → preserve existing links;
+    sent (incl. ``[]``) → hard-replace; ``[]`` clears all — the same
+    exclude_unset idiom as ``tag_ids``.
 
     ``is_active`` is NOT accepted (#178 closed by Task 5): archive/restore is
     via the POST endpoints (Task 11). A stray ``is_active`` is rejected with
@@ -110,6 +127,7 @@ class ServicePatch(BaseModel):
     material_hint: str | None = None
     tag_ids: list[str] | None = None
     tariffs: list[TariffCreate] | None = None
+    materials: list[ServiceMaterialLinkIn] | None = None
 
 
 class ServiceResponse(ServiceBase):

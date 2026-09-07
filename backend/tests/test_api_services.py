@@ -860,6 +860,204 @@ class TestServiceMaterialsNestedRead:
         assert all_by_id[unlinked["id"]]["materials"] == []
 
 
+class TestServiceMaterialsWrite:
+    """Write path for service→material links (GH #223 Task 4, spec §4).
+
+    POST/PUT: ``materials`` creates/hard-replaces links. PATCH: absent/null →
+    preserve; sent (incl. ``[]``) → hard-replace; ``[]`` → clear all. Unknown
+    ``material_id`` → 422 VALIDATION_ERROR naming the offending id; duplicate
+    ids within one list → 422; whitespace-only note normalizes to NULL (spec
+    §4); archived materials are valid link targets (archive = lifecycle flag,
+    not existence — spec §4).
+    """
+
+    def _create_material(self, api_client, title: str, description: str = "Описание") -> dict:
+        resp = api_client.post(
+            "/api/v1/materials", json={"title": title, "description": description}
+        )
+        assert resp.status_code == 201, f"create material failed: {resp.text}"
+        return resp.json()
+
+    def _materials_of(self, api_client, service_id: str) -> list[dict]:
+        resp = api_client.get(f"/api/v1/services/{service_id}")
+        assert resp.status_code == 200, f"GET failed: {resp.text}"
+        return resp.json()["materials"]
+
+    def test_post_with_materials_creates_links(self, api_client) -> None:
+        """POST with materials → 201; response and GET both carry the links."""
+        mat = self._create_material(api_client, "Акварель", "Краски на воде")
+        expected = [{
+            "id": mat["id"], "title": "Акварель",
+            "description": "Краски на воде", "note": "Бумага 300 г/м²",
+        }]
+
+        resp = api_client.post("/api/v1/services", json={
+            **SERVICE_PAYLOAD,
+            "materials": [{"material_id": mat["id"], "note": "Бумага 300 г/м²"}],
+        })
+
+        assert resp.status_code == 201, f"POST failed: {resp.text}"
+        assert resp.json()["materials"] == expected
+        assert self._materials_of(api_client, resp.json()["id"]) == expected
+
+    def test_post_without_materials_creates_unlinked_service(
+        self, api_client, create_service
+    ) -> None:
+        """POST without materials (the default) → unlinked service, no error."""
+        assert create_service()["materials"] == []
+
+    def test_put_empty_list_clears_links(self, api_client, create_service) -> None:
+        """PUT with materials: [] → all links cleared (hard-replace semantics)."""
+        mat = self._create_material(api_client, "Акварель")
+        service = create_service(materials=[{"material_id": mat["id"]}])
+        assert self._materials_of(api_client, service["id"]) != []
+
+        resp = api_client.put(
+            f"/api/v1/services/{service['id']}",
+            json={**SERVICE_PAYLOAD, "materials": []},
+        )
+
+        assert resp.status_code == 200, f"PUT failed: {resp.text}"
+        assert resp.json()["materials"] == []
+        assert self._materials_of(api_client, service["id"]) == []
+
+    def test_put_replaces_link_set(self, api_client, create_service) -> None:
+        """PUT hard-replaces the whole set: dropped id gone, kept id's note cleared."""
+        a = self._create_material(api_client, "Акварель")
+        b = self._create_material(api_client, "Акрил")
+        c = self._create_material(api_client, "Масло")
+        service = create_service(materials=[
+            {"material_id": a["id"]},
+            {"material_id": b["id"], "note": "старая заметка"},
+        ])
+
+        resp = api_client.put(
+            f"/api/v1/services/{service['id']}",
+            json={
+                **SERVICE_PAYLOAD,
+                "materials": [{"material_id": b["id"]}, {"material_id": c["id"], "note": "новая"}],
+            },
+        )
+
+        assert resp.status_code == 200, f"PUT failed: {resp.text}"
+        # Ordered title ASC (spec §3.3): Акрил < Масло; Акварель dropped;
+        # b's old note replaced (re-sent without one → NULL).
+        assert [(m["id"], m["note"]) for m in resp.json()["materials"]] == [
+            (b["id"], None), (c["id"], "новая"),
+        ]
+        assert self._materials_of(api_client, service["id"]) == resp.json()["materials"]
+
+    def test_patch_without_materials_preserves_links(
+        self, api_client, create_service
+    ) -> None:
+        """PATCH without the materials key → links untouched (exclude_unset idiom)."""
+        mat = self._create_material(api_client, "Акварель")
+        service = create_service(materials=[{"material_id": mat["id"], "note": "заметка"}])
+
+        resp = api_client.patch(
+            f"/api/v1/services/{service['id']}", json={"title": "Переименованная"}
+        )
+
+        assert resp.status_code == 200, f"PATCH failed: {resp.text}"
+        assert resp.json()["title"] == "Переименованная"
+        assert [(m["id"], m["note"]) for m in resp.json()["materials"]] == [
+            (mat["id"], "заметка")
+        ]
+        assert self._materials_of(api_client, service["id"]) == [{
+            "id": mat["id"], "title": "Акварель",
+            "description": "Описание", "note": "заметка",
+        }]
+
+    def test_patch_null_materials_preserves_links(
+        self, api_client, create_service
+    ) -> None:
+        """PATCH with materials: null → preserve (spec §4: absent/null → preserve)."""
+        mat = self._create_material(api_client, "Акварель")
+        service = create_service(materials=[{"material_id": mat["id"]}])
+
+        resp = api_client.patch(
+            f"/api/v1/services/{service['id']}", json={"materials": None}
+        )
+
+        assert resp.status_code == 200, f"PATCH failed: {resp.text}"
+        assert [m["id"] for m in resp.json()["materials"]] == [mat["id"]]
+
+    def test_patch_empty_list_clears_links(self, api_client, create_service) -> None:
+        """PATCH with materials: [] → clear all links."""
+        mat = self._create_material(api_client, "Акварель")
+        service = create_service(materials=[{"material_id": mat["id"]}])
+
+        resp = api_client.patch(
+            f"/api/v1/services/{service['id']}", json={"materials": []}
+        )
+
+        assert resp.status_code == 200, f"PATCH failed: {resp.text}"
+        assert resp.json()["materials"] == []
+        assert self._materials_of(api_client, service["id"]) == []
+
+    def test_unknown_material_id_422(self, api_client, create_service) -> None:
+        """Unknown material_id → 422 VALIDATION_ERROR, id named, nothing written."""
+        service = create_service()
+        bogus = "bogus-material-id"
+
+        resp = api_client.put(
+            f"/api/v1/services/{service['id']}",
+            json={**SERVICE_PAYLOAD, "materials": [{"material_id": bogus}]},
+        )
+
+        assert resp.status_code == 422
+        detail = resp.json()["detail"]
+        assert detail["code"] == "VALIDATION_ERROR"
+        assert bogus in detail["message"]
+        assert self._materials_of(api_client, service["id"]) == []
+
+    def test_duplicate_material_id_422(self, api_client) -> None:
+        """Same material_id twice in one list → 422 VALIDATION_ERROR, id named."""
+        mat = self._create_material(api_client, "Акварель")
+
+        resp = api_client.post("/api/v1/services", json={
+            **SERVICE_PAYLOAD,
+            "materials": [{"material_id": mat["id"]}, {"material_id": mat["id"]}],
+        })
+
+        assert resp.status_code == 422
+        detail = resp.json()["detail"]
+        assert detail["code"] == "VALIDATION_ERROR"
+        assert mat["id"] in detail["message"]
+
+    def test_whitespace_note_stored_as_null(
+        self, api_client, create_service
+    ) -> None:
+        """Whitespace-only note → stored as NULL; GET returns note: null (spec §4)."""
+        mat = self._create_material(api_client, "Акварель")
+        service = create_service(materials=[{"material_id": mat["id"], "note": "  "}])
+
+        materials = self._materials_of(api_client, service["id"])
+        assert materials[0]["note"] is None
+        rows = query_db(
+            f"SELECT note FROM service_materials WHERE service_id='{service['id']}'"
+        )
+        assert rows[0]["note"] is None
+
+    def test_archived_material_is_valid_link_target(
+        self, api_client, create_service
+    ) -> None:
+        """Archived material id links successfully (archive ≠ nonexistence, spec §4)."""
+        mat = self._create_material(api_client, "Акварель")
+        arch = api_client.post(f"/api/v1/materials/{mat['id']}/archive")
+        assert arch.status_code == 200, f"archive failed: {arch.text}"
+        service = create_service()
+
+        resp = api_client.put(
+            f"/api/v1/services/{service['id']}",
+            json={**SERVICE_PAYLOAD, "materials": [{"material_id": mat["id"]}]},
+        )
+
+        assert resp.status_code == 200, f"PUT failed: {resp.text}"
+        assert [m["id"] for m in resp.json()["materials"]] == [mat["id"]]
+        assert self._materials_of(api_client, service["id"])[0]["id"] == mat["id"]
+
+
 class TestServiceListSorting:
     """Server-side sorting on GET /api/v1/services (#205 Task 3).
 

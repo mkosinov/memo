@@ -9,7 +9,13 @@ from types import SimpleNamespace
 
 import pytest
 
-from src.schemas.service import ServiceResponse
+from src.schemas.service import (
+    ServiceCreate,
+    ServiceMaterialLinkIn,
+    ServicePatch,
+    ServiceResponse,
+    ServiceUpdate,
+)
 
 
 def _service_orm(**overrides) -> SimpleNamespace:
@@ -92,3 +98,59 @@ class TestServiceResponseArchivedInversion:
         dump = resp.model_dump()
         assert dump["archived"] is True
         assert "is_active" not in dump
+
+
+# Required base fields for ServiceCreate/ServiceUpdate (everything except the
+# optional max_age / material_hint).
+_BASE_REQUIRED = {
+    "title": "Painting 101",
+    "description": "Intro class",
+    "image_url": "https://example.com/i.jpg",
+    "specialty": "живопись",
+    "min_age": 6,
+    "duration": 90,
+    "record_info": "info",
+}
+
+
+class TestServiceMaterialLinkInSchema:
+    """``ServiceMaterialLinkIn`` + ``materials`` field on write schemas (GH #223 Task 4, spec §4)."""
+
+    @pytest.mark.pure_unit
+    def test_link_defaults_note_none(self) -> None:
+        link = ServiceMaterialLinkIn(material_id="m-1")
+        assert link.material_id == "m-1"
+        assert link.note is None
+
+    @pytest.mark.pure_unit
+    def test_link_accepts_note(self) -> None:
+        link = ServiceMaterialLinkIn(material_id="m-1", note="Бумага 300 г/м²")
+        assert link.note == "Бумага 300 г/м²"
+
+    @pytest.mark.pure_unit
+    def test_create_materials_defaults_to_empty_list(self) -> None:
+        assert ServiceCreate(**_BASE_REQUIRED).materials == []
+
+    @pytest.mark.pure_unit
+    def test_update_materials_defaults_to_empty_list(self) -> None:
+        assert ServiceUpdate(**_BASE_REQUIRED).materials == []
+
+    @pytest.mark.pure_unit
+    def test_update_accepts_materials_field(self) -> None:
+        """``ServiceUpdate`` has extra="forbid" — materials must be an accepted key."""
+        upd = ServiceUpdate(
+            **_BASE_REQUIRED, materials=[{"material_id": "m-1", "note": "x"}]
+        )
+        assert upd.materials == [ServiceMaterialLinkIn(material_id="m-1", note="x")]
+
+    @pytest.mark.pure_unit
+    def test_patch_materials_defaults_to_none(self) -> None:
+        """PATCH default None = preserve existing links (exclude_unset idiom)."""
+        assert ServicePatch().materials is None
+
+    @pytest.mark.pure_unit
+    def test_patch_accepts_materials_field(self) -> None:
+        """``ServicePatch`` has extra="forbid" — materials must be an accepted key."""
+        patch = ServicePatch(materials=[])
+        assert patch.materials == []
+        assert "materials" in patch.model_fields_set

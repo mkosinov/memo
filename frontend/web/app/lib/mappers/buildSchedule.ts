@@ -62,6 +62,13 @@ export function buildWebSchedule(
     const priceMin = prices.length > 0 ? Math.min(...prices) : 0;
     const priceMax = prices.length > 0 ? Math.max(...prices) : 0;
 
+    // GH #223 §9: derive materials from service links (display rule: note ?? description).
+    const materials = service.materials ?? [];
+    const materialLines = materials.map(m => m.note ?? m.description);
+    const materialDetails = materialLines.length > 0 ? materialLines.join('\n') : undefined;
+    // Response is ordered by material title ASC (spec §3.3) — first title drives the chip.
+    const material = materials[0]?.title ?? '';
+
     const dto: WebScheduleDTO = {
       // Domain fields
       id: act.id,
@@ -78,7 +85,7 @@ export function buildWebSchedule(
       locationName: location.name,
       locationAddress: location.address ?? undefined,
       locationHint: location.location_hint ?? undefined,
-      materialHint: service.material_hint ?? undefined,
+      materialDetails,
       priceMin,
       priceMax,
       priceHint: computePriceHint(tariffs),
@@ -87,7 +94,7 @@ export function buildWebSchedule(
       masterAvatar: master.avatar_url ?? undefined,
       // Web-only fields
       photos: [],
-      material: service.material_hint?.split(',')[0]?.trim() ?? '',
+      material,
       size: '',
     };
 

@@ -32,7 +32,7 @@ const mockSchedules = [
     tagColors: ["#C49A2E"],
     nextTimes: [{ id: "act-1b", date: "22 мая", time: "14:00" }],
     priceHint: "Включает материалы",
-    materialHint: "Акварель и бумага",
+    materialDetails: "Акварель и бумага",
     locationHint: "5 минут от метро",
   },
   {
@@ -56,7 +56,7 @@ const mockSchedules = [
     tagColors: ["#5B8C7A"],
     nextTimes: [{ id: "act-2b", date: "24 мая", time: "16:00" }],
     priceHint: "Цена за участника",
-    materialHint: "Акриловые краски",
+    materialDetails: "Акриловые краски",
     locationHint: "Вход через главный вход",
   },
   {
@@ -80,7 +80,7 @@ const mockSchedules = [
     tagColors: ["#5B8C7A"],
     nextTimes: [{ id: "act-3b", date: "23 мая", time: "12:00" }],
     priceHint: "Все материалы включены",
-    materialHint: "Глина, краски, глазурь",
+    materialDetails: "Глина, краски, глазурь",
     locationHint: "Цокольный этаж",
   },
 ];
@@ -249,6 +249,27 @@ describe("Home (page.tsx)", () => {
       renderHome();
       tapCardTrigger();
       expect(screen.getByText("Анна Иванова")).toBeInTheDocument();
+    });
+
+    it("renders the materials block when materialDetails is present", () => {
+      renderHome();
+      tapCardTrigger();
+      expect(screen.getByTestId("material-block")).toBeInTheDocument();
+      expect(screen.getByText("Материал", { exact: true })).toBeInTheDocument();
+    });
+
+    it("renders NO materials block for a service without materials (block-omission guard)", () => {
+      mocks.getByDate.mockReturnValue([
+        {
+          ...mockSchedules[0],
+          material: "",
+          materialDetails: undefined,
+        },
+      ]);
+      renderHome();
+      tapCardTrigger();
+      expect(screen.queryByTestId("material-block")).not.toBeInTheDocument();
+      expect(screen.queryByText("Материал", { exact: true })).not.toBeInTheDocument();
     });
 
     it("closes ActivityDetail when close button is clicked", () => {

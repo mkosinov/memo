@@ -42,7 +42,7 @@ export function toScheduleView(raw: WebScheduleDTO): ScheduleView {
     tagColors: getTagColors(raw.tags ?? []),
     nextTimes: (raw as unknown as Record<string, unknown>).nextTimes as { id: string; date: string; time: string }[] | undefined,
     priceHint: raw.priceHint,
-    materialHint: raw.materialHint,
+    materialDetails: raw.materialDetails,
     locationHint: raw.locationHint,
   };
 }

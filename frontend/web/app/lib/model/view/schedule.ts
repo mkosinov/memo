@@ -26,7 +26,8 @@ export interface ScheduleView {
   tagColors: string[];
   nextTimes?: NextTimeOption[];
   priceHint?: string;
-  materialHint?: string;
+  /** Joined per-material display lines (GH #223 §9). Undefined → the materials block is omitted. */
+  materialDetails?: string;
   locationHint?: string;
 }
 

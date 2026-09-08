@@ -17,7 +17,8 @@ export interface ScheduleDTO {
   locationName: string;
   locationAddress?: string;
   locationHint?: string;
-  materialHint?: string;
+  /** Joined per-material display lines (GH #223 §9). Derived from service links in clients. */
+  materialDetails?: string;
   priceMin: number;
   priceMax: number;
   priceHint?: string;

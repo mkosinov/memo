@@ -18,7 +18,7 @@ function makeRawSchedule(overrides?: Partial<WebScheduleDTO>): WebScheduleDTO {
     locationName: 'Альпика',
     locationAddress: 'Альпика, 1 этаж',
     locationHint: undefined,
-    materialHint: undefined,
+    materialDetails: undefined,
     priceMin: 3500,
     priceMax: 5500,
     priceHint: undefined,
@@ -109,12 +109,12 @@ describe('toScheduleView', () => {
     expect(vmWithout.priceHint).toBeUndefined();
   });
 
-  it('handles optional material hint', () => {
-    const vmWith = toScheduleView(makeRawSchedule({ materialHint: 'Все материалы включены' }));
-    expect(vmWith.materialHint).toBe('Все материалы включены');
+  it('handles optional material details', () => {
+    const vmWith = toScheduleView(makeRawSchedule({ materialDetails: 'Все материалы включены' }));
+    expect(vmWith.materialDetails).toBe('Все материалы включены');
 
     const vmWithout = toScheduleView(makeRawSchedule());
-    expect(vmWithout.materialHint).toBeUndefined();
+    expect(vmWithout.materialDetails).toBeUndefined();
   });
 
   it('handles optional location hint', () => {

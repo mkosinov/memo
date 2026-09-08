@@ -119,14 +119,17 @@ export function ActivityDetail({
           </div>
         </div>
 
-        {/* 4. Material + Cost */}
+        {/* 4. Material + Cost — the materials block renders ONLY when details exist (GH #223 §9:
+            a service with zero linked materials renders no materials block at all) */}
         <div className="flex items-start justify-between text-sm">
-          <div>
-            <div className="text-[#888888] text-xs">Материал</div>
-            <div className="relative inline-block mt-0.5">
-              <HintText details={activity.materialDetails}>{activity.material}</HintText>
+          {activity.materialDetails && (
+            <div data-testid="material-block">
+              <div className="text-[#888888] text-xs">Материал</div>
+              <div className="relative inline-block mt-0.5">
+                <HintText details={activity.materialDetails}>{activity.material}</HintText>
+              </div>
             </div>
-          </div>
+          )}
           <div className="text-right">
             <div className="text-[#888888] text-xs">Стоимость</div>
             <div className="relative inline-block mt-0.5">

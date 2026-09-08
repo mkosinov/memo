@@ -33,14 +33,17 @@ function makeService(overrides?: Partial<ServiceResponse>): ServiceResponse {
     max_age: 99,
     duration: 120,
     record_info: 'Запись обязательна',
-    material_hint: 'Масло, холст, кисти',
+    materials: [
+      { id: 'mat-1', title: 'Акварель', description: 'Акварельные краски', note: null },
+      { id: 'mat-2', title: 'Масло', description: 'Масляные краски', note: 'Густые масляные краски' },
+    ],
     tariffs: [{ id: 'tariff-1', service_id: 'service-1', title: 'Взрослый', description: null, price: 3500 }],
     tags: [{ id: 'tag-1', tag: 'масло' }, { id: 'tag-2', tag: 'пейзаж' }],
     is_active: true,
     created_at: '2026-01-01T00:00:00',
     updated_at: '2026-01-01T00:00:00',
     ...overrides,
-  };
+  } as ServiceResponse;
 }
 
 function makeMaster(overrides?: Partial<MasterResponse>): MasterResponse {
@@ -56,7 +59,7 @@ function makeMaster(overrides?: Partial<MasterResponse>): MasterResponse {
     created_at: '2026-01-01T00:00:00',
     updated_at: '2026-01-01T00:00:00',
     ...overrides,
-  };
+  } as MasterResponse;
 }
 
 function makeLocation(overrides?: Partial<LocationResponse>): LocationResponse {
@@ -75,7 +78,7 @@ function makeLocation(overrides?: Partial<LocationResponse>): LocationResponse {
     created_at: '2026-01-01T00:00:00',
     updated_at: '2026-01-01T00:00:00',
     ...overrides,
-  };
+  } as LocationResponse;
 }
 
 describe('buildWebSchedule', () => {
@@ -116,7 +119,6 @@ describe('buildWebSchedule', () => {
     expect(dto.locationName).toBe('Альпика');
     expect(dto.locationAddress).toBe('ул. Тестовая, 1');
     expect(dto.locationHint).toBe('Вход со двора');
-    expect(dto.materialHint).toBe('Масло, холст, кисти');
     expect(dto.priceMin).toBe(3500);
     expect(dto.priceMax).toBe(3500);
     expect(dto.priceHint).toBe('Взрослый: 3500₽');
@@ -124,9 +126,83 @@ describe('buildWebSchedule', () => {
     expect(dto.tags).toEqual(['масло', 'пейзаж']);
     expect(dto.masterAvatar).toBe('https://example.com/avatar.jpg');
     // Web-only fields
-    expect(dto.material).toBe('Масло');
     expect(dto.size).toBe('');
     expect(dto.photos).toEqual([]);
+  });
+
+  describe('materials from links (GH #223 §9)', () => {
+    it('derives materialDetails: link note when present, else material description, joined with newline', () => {
+      const result = buildWebSchedule(
+        [makeActivity()],
+        new Map([['service-1', makeService()]]),
+        new Map([['master-1', makeMaster()]]),
+        new Map([['loc-1', makeLocation()]]),
+      );
+      const dto = result.byId.get('act-1') as WebScheduleDTO;
+
+      expect(dto.materialDetails).toBe('Акварельные краски\nГустые масляные краски');
+    });
+
+    it('uses description for materials without note (note ?? description fallback)', () => {
+      const service = makeService({
+        materials: [
+          { id: 'mat-1', title: 'Масло', description: 'Масляные краски — классика', note: null },
+        ],
+      });
+      const result = buildWebSchedule(
+        [makeActivity()],
+        new Map([['service-1', service]]),
+        new Map([['master-1', makeMaster()]]),
+        new Map([['loc-1', makeLocation()]]),
+      );
+      const dto = result.byId.get('act-1') as WebScheduleDTO;
+
+      expect(dto.materialDetails).toBe('Масляные краски — классика');
+    });
+
+    it('derives material as the first linked material title (materials ordered by title from API)', () => {
+      const result = buildWebSchedule(
+        [makeActivity()],
+        new Map([['service-1', makeService()]]),
+        new Map([['master-1', makeMaster()]]),
+        new Map([['loc-1', makeLocation()]]),
+      );
+      const dto = result.byId.get('act-1') as WebScheduleDTO;
+
+      expect(dto.material).toBe('Акварель');
+    });
+
+    it('no materials: material is empty string and materialDetails is undefined', () => {
+      const service = makeService({ materials: [] });
+      const result = buildWebSchedule(
+        [makeActivity()],
+        new Map([['service-1', service]]),
+        new Map([['master-1', makeMaster()]]),
+        new Map([['loc-1', makeLocation()]]),
+      );
+      const dto = result.byId.get('act-1') as WebScheduleDTO;
+
+      expect(dto.material).toBe('');
+      expect(dto.materialDetails).toBeUndefined();
+    });
+
+    it('treats whitespace-only note as present text (server normalizes notes to NULL; mapper renders as-is)', () => {
+      const service = makeService({
+        materials: [
+          { id: 'mat-1', title: 'Гуашь', description: 'Плотные матовые краски', note: 'Для детей — вся краска на столе' },
+        ],
+      });
+      const result = buildWebSchedule(
+        [makeActivity()],
+        new Map([['service-1', service]]),
+        new Map([['master-1', makeMaster()]]),
+        new Map([['loc-1', makeLocation()]]),
+      );
+      const dto = result.byId.get('act-1') as WebScheduleDTO;
+
+      expect(dto.material).toBe('Гуашь');
+      expect(dto.materialDetails).toBe('Для детей — вся краска на столе');
+    });
   });
 
   it('skips activity when service is missing', () => {
@@ -300,7 +376,7 @@ describe('buildWebSchedule', () => {
   it('handles nullish optional fields gracefully', () => {
     const activities = [makeActivity()];
     const services = new Map([['service-1', makeService({
-      material_hint: null,
+      materials: [],
       tariffs: [],
       tags: [],
     })]]);
@@ -311,11 +387,11 @@ describe('buildWebSchedule', () => {
     const dto = result.byId.get('act-1') as WebScheduleDTO;
 
     expect(dto.material).toBe('');
+    expect(dto.materialDetails).toBeUndefined();
     expect(dto.priceMin).toBe(0);
     expect(dto.priceMax).toBe(0);
     expect(dto.masterAvatar).toBeUndefined();
     expect(dto.locationAddress).toBeUndefined();
-    expect(dto.materialHint).toBeUndefined();
     expect(dto.locationHint).toBeUndefined();
     expect(dto.priceHint).toBe('');
     expect(dto.tags).toEqual([]);

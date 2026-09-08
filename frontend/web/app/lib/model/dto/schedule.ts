@@ -31,6 +31,6 @@ export interface ScheduleDTO {
   date: string;
   next_times?: NextTimeDTO[];
   price_hint?: string;
-  material_hint?: string;
+  material_details?: string;
   location_hint?: string;
 }

@@ -217,11 +217,29 @@ test.describe('Client phone typeahead — record form (GH #221)', () => {
 
       // The phone field offers no re-binding in edit mode: the new-booking
       // typeahead is only on the "+" tab; the record tab shows the frozen
-      // client. Save the record as-is and assert the client is unchanged.
-      const saveResp = await request.get(`${BACKEND}/api/v1/records/${record.id}`);
-      expect(saveResp.ok()).toBeTruthy();
-      const savedRecord = await saveResp.json();
-      expect(savedRecord.client_id).toBe(client.id);
+      // client. EXERCISE the edit-save for real: the modal's ClientTab
+      // persists a comment change immediately via PATCH /records/{id}
+      // (updateRecord on change — the edit path's save action).
+      const comment = `Правка комментарий ${Date.now()}`;
+      await page
+        .locator('[data-testid="input-comment"]')
+        .fill(comment);
+      const patchResp = await page.waitForResponse(
+        (r) =>
+          r.url().includes(`/api/v1/records/${record.id}`) &&
+          r.request().method() === 'PATCH',
+        { timeout: 10_000 },
+      );
+      expect(patchResp.ok()).toBeTruthy();
+
+      // VERIFY DB — the benign change persisted AND the client was NOT
+      // rebound by the save (a save-time rebind regression fails here).
+      await expect.poll(() => {
+        const row = queryDBRow(
+          `SELECT client_id, comment FROM records WHERE id='${record.id}'`,
+        );
+        return row && row.client_id === client.id && row.comment === comment;
+      }, { timeout: 30_000, intervals: [200, 500, 1000] }).toBe(true);
     } finally {
       await cleanupRecord(request, record.id);
       await cleanup(request, `/api/v1/activities/${activity.id}`);

@@ -158,6 +158,23 @@ describe('PhoneInput', () => {
     await advanceDebounce();
     expect(mockSearch).not.toHaveBeenCalled();
   });
+
+  // (h) GH #221 Task 6: the consumer needs the visible formatted string for
+  // the unpicked save payload (WYSIWYG) — PhoneInput lifts it per keystroke.
+  it('lifts the formatted value via onInputValueChange', () => {
+    const onInputValueChange = vi.fn();
+    renderPhoneInput({ onInputValueChange });
+    typeValue('9991234');
+    expect(onInputValueChange).toHaveBeenLastCalledWith('999 123-4');
+  });
+
+  it('lifts an empty string when the input is cleared', () => {
+    const onInputValueChange = vi.fn();
+    renderPhoneInput({ onInputValueChange });
+    typeValue('999');
+    typeValue('');
+    expect(onInputValueChange).toHaveBeenLastCalledWith('');
+  });
 });
 
 // (g) T4 deferred nit: a consumer-supplied canSearch on RemoteSearchSelect

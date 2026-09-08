@@ -119,11 +119,14 @@ export function ActivityDetailsModal({ isOpen, onClose, activity, mode }: Activi
     setActiveTab('new-booking');
   }, []);
 
-  // New booking submit handler — delegates to useRecordMutations hook
+  // New booking submit handler — delegates to useRecordMutations hook.
+  // GH #221: client_id rides through when the admin picked a typeahead
+  // suggestion (bind by id); it is null on the unpicked resolve-or-create path.
   const handleNewBookingSubmit = useCallback(
     async (data: {
       phone: string;
       name: string;
+      client_id?: string | null;
       visitors: Array<{ name: string; age?: string; tariffId: string }>;
       notify: boolean;
       channel: string;

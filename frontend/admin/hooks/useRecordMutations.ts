@@ -49,6 +49,9 @@ interface CreateRecordInput {
   channel: string;
   seats: number;
   visitors: Array<{ name: string; age?: string; tariffId: string }>;
+  /** GH #221: set when the admin picked a typeahead suggestion — the record
+   *  binds that client by id and resolve-or-create is skipped entirely. */
+  client_id?: string | null;
 }
 
 export function useRecordMutations(activityId: string, recordId: string = '') {
@@ -81,10 +84,15 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
       input: CreateRecordInput,
       serviceTariffs: Array<{ id: string; price: number }>,
     ) => {
-      // 1. Resolve or create client
+      // 1. Resolve or create client.
+      //    GH #221: a picked client binds by id — no lookup, no create.
+      //    The unpicked path keeps today's behavior (exact-route lookup →
+      //    create on miss) until Task 7 replaces it with digits resolution.
       let clientId: string;
       let createdClientId: string | null = null;
-      if (input.phone) {
+      if (input.client_id) {
+        clientId = input.client_id;
+      } else if (input.phone) {
         try {
           const existing = await getClientByPhone(input.phone);
           clientId = existing.id;

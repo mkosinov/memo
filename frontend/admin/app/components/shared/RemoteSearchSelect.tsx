@@ -37,6 +37,10 @@ export interface RemoteSearchSelectProps<
   /** Renders a dropdown/selected label for an item; defaults to
    *  `${displayField} — ${subtitleField}`. */
   getDisplayLabel?: (item: SearchItem) => string;
+  /** Lifts the committed input value (post-formatInput) to the consumer on
+   *  every change — e.g. the record form saves the visible masked string
+   *  verbatim (GH #221 WYSIWYG). */
+  onInputValueChange?: (value: string) => void;
   /** data-testid for the input element (consumer E2E anchors). */
   inputTestId?: string;
 }
@@ -102,6 +106,7 @@ export default function RemoteSearchSelect<
   buildParams,
   formatInput,
   getDisplayLabel,
+  onInputValueChange,
   inputTestId,
 }: RemoteSearchSelectProps<Q>) {
   const [query, setQuery] = useState('');
@@ -155,11 +160,12 @@ export default function RemoteSearchSelect<
       const val = formatInput ? formatInput(e.target.value) : e.target.value;
       setQuery(val);
       setSelectedLabel(null);
+      onInputValueChange?.(val);
 
       if (debounceRef.current) clearTimeout(debounceRef.current);
       debounceRef.current = setTimeout(() => search(val), DEBOUNCE_MS);
     },
-    [search, formatInput],
+    [search, formatInput, onInputValueChange],
   );
 
   const handleSelect = useCallback(

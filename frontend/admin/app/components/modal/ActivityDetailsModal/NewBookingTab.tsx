@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useState, useCallback } from 'react';
-import { getClientByPhone } from '@memo/api-client';
+import PhoneInput, { type PickedClient } from '@/app/components/shared/PhoneInput';
+import { getClientsPaged } from '@memo/api-client';
 import type { Tariff } from '@memo/domain';
 import type { ScheduleAdminDTO } from '@memo/domain';
 
@@ -18,6 +19,7 @@ interface NewBookingTabProps {
   onSubmit: (data: {
     phone: string;
     name: string;
+    client_id: string | null;
     visitors: NewVisitor[];
     notify: boolean;
     channel: string;
@@ -27,6 +29,7 @@ interface NewBookingTabProps {
 }
 
 export function NewBookingTab({ activity, serviceTariffs, onSubmit, showToast }: NewBookingTabProps) {
+  const [pickedClient, setPickedClient] = useState<PickedClient | null>(null);
   const [phone, setPhone] = useState('');
   const [name, setName] = useState('');
   const [notify, setNotify] = useState(false);
@@ -34,17 +37,24 @@ export function NewBookingTab({ activity, serviceTariffs, onSubmit, showToast }:
   const [visitors, setVisitors] = useState<NewVisitor[]>([]);
   const [seatsCount, setSeatsCount] = useState(1);
 
-  const handlePhoneBlur = useCallback(async () => {
-    if (phone.length < 10) return;
-    try {
-      const client = await getClientByPhone(phone);
-      if (client) {
-        setName(client.name || '');
-      }
-    } catch {
-      // Client not found — leave name empty for manual entry
-    }
-  }, [phone]);
+  // GH #221: picking a suggestion binds the record to that client by id —
+  // phone + name freeze read-only (decision 10: editing a client's name
+  // belongs to the client card). × detaches the pick and restores typing.
+  const handlePick = useCallback((client: PickedClient) => {
+    setPickedClient(client);
+  }, []);
+
+  const handleClearPick = useCallback(() => {
+    setPickedClient(null);
+    setPhone('');
+    setName('');
+  }, []);
+
+  // Visible formatted string (WYSIWYG): the unpicked save payload sends it
+  // verbatim, exactly as rendered in the field.
+  const handlePhoneInput = useCallback((value: string) => {
+    setPhone(value);
+  }, []);
 
   const addVisitor = useCallback(() => {
     setVisitors((prev) => [
@@ -73,33 +83,49 @@ export function NewBookingTab({ activity, serviceTariffs, onSubmit, showToast }:
       }
     }
 
-    onSubmit({ phone, name, visitors, notify, channel, seats: seatsCount });
-  }, [phone, name, visitors, notify, channel, seatsCount, onSubmit, showToast, serviceTariffs]);
+    // Picked → bind by id; unpicked → the visible formatted string + typed
+    // name name the (possibly new) client (spec §5).
+    if (pickedClient) {
+      onSubmit({
+        phone: '',
+        name: '',
+        client_id: pickedClient.id,
+        visitors,
+        notify,
+        channel,
+        seats: seatsCount,
+      });
+    } else {
+      onSubmit({
+        phone,
+        name,
+        client_id: null,
+        visitors,
+        notify,
+        channel,
+        seats: seatsCount,
+      });
+    }
+  }, [phone, name, pickedClient, visitors, notify, channel, seatsCount, onSubmit, showToast, serviceTariffs]);
 
   const inputClass = 'w-full rounded-lg border px-3 py-2 text-sm bg-white';
   const inputStyle = { borderColor: 'var(--line)' };
 
   return (
     <div className="space-y-4 p-4" data-testid="new-booking-tab">
-      {/* Phone */}
-      <div>
-        <label className="text-xs font-medium text-ink-mid block mb-1" htmlFor="booking-phone">
-          Телефон
-        </label>
-        <input
-          id="booking-phone"
-          type="text"
-          placeholder="+7 (___) ___-__-__"
-          className={inputClass}
-          style={inputStyle}
-          value={phone}
-          onChange={(e) => setPhone(e.target.value)}
-          onBlur={handlePhoneBlur}
-          data-testid="input-phone"
-        />
-      </div>
+      {/* Phone — adaptive-mask typeahead (GH #221) */}
+      <PhoneInput
+        onSearch={({ phone: digits, per_page }) =>
+          getClientsPaged({ phone: digits, per_page }).then((r) => r.items)
+        }
+        onPick={handlePick}
+        onClear={handleClearPick}
+        picked={pickedClient}
+        onInputValueChange={handlePhoneInput}
+      />
 
-      {/* Name */}
+      {/* Name — editable only for an unpicked (new) client; when a client is
+          picked it displays the stored name read-only */}
       <div>
         <label className="text-xs font-medium text-ink-mid block mb-1" htmlFor="booking-name">
           Имя
@@ -109,8 +135,9 @@ export function NewBookingTab({ activity, serviceTariffs, onSubmit, showToast }:
           type="text"
           className={inputClass}
           style={inputStyle}
-          value={name}
+          value={pickedClient ? pickedClient.name || '' : name}
           onChange={(e) => setName(e.target.value)}
+          readOnly={pickedClient !== null}
           data-testid="input-client-name"
         />
       </div>

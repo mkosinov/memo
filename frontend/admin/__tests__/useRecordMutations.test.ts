@@ -212,6 +212,68 @@ describe('useRecordMutations', () => {
     });
   });
 
+  // ─── GH #221 Task 6: picked-client path (bind by id, skip resolve-or-create) ───
+
+  describe('createRecord — picked client (GH #221)', () => {
+    it('creates the record bound to client_id and never calls getClientByPhone/createClient', async () => {
+      const { queryClient, wrapper } = createQueryClientWrapper();
+      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+
+      await act(async () => {
+        await result.current.createRecord(
+          { ...baseCreateRecordInput, client_id: 'c-picked' },
+          serviceTariffs,
+        );
+      });
+
+      // The picked id is used for the record AND for its visitors.
+      expect(mockCreateRecord).toHaveBeenCalledWith(
+        expect.objectContaining({ client_id: 'c-picked' }),
+      );
+      // The exact-route lookup and resolve-or-create are skipped entirely.
+      expect(mockGetClientByPhone).not.toHaveBeenCalled();
+      expect(mockCreateClient).not.toHaveBeenCalled();
+      // No new client created → no [clients] invalidation.
+      expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: ['clients'] });
+    });
+
+    it('binds picked-client visitors to the picked client id', async () => {
+      const { wrapper } = createQueryClientWrapper();
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+
+      await act(async () => {
+        await result.current.createRecord(
+          {
+            ...baseCreateRecordInput,
+            client_id: 'c-picked',
+            visitors: [{ name: 'Гость', tariffId: 't1' }],
+          },
+          serviceTariffs,
+        );
+      });
+
+      expect(mockCreateVisitor).toHaveBeenCalledWith(
+        expect.objectContaining({ client_id: 'c-picked', name: 'Гость' }),
+      );
+    });
+
+    it('still resolves-or-creates when client_id is absent (unpicked path unchanged)', async () => {
+      mockGetClientByPhone.mockResolvedValue({ ...mockClientResponse, id: 'c-existing' } as never);
+      const { wrapper } = createQueryClientWrapper();
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+
+      await act(async () => {
+        await result.current.createRecord(baseCreateRecordInput, serviceTariffs);
+      });
+
+      expect(mockGetClientByPhone).toHaveBeenCalledWith('+79990001122');
+      expect(mockCreateRecord).toHaveBeenCalledWith(
+        expect.objectContaining({ client_id: 'c-existing' }),
+      );
+    });
+  });
+
   describe('saveRecord', () => {
     it('calls patchRecord with the provided data', async () => {
       const { wrapper } = createQueryClientWrapper();

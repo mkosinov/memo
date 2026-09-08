@@ -45,6 +45,9 @@ export interface PhoneInputProps {
   onClear?: () => void;
   /** National-number search digits of the current pick (controls read-only mode). */
   picked?: PickedClient | null;
+  /** Lifts the visible formatted string per keystroke — the consumer's
+   *  unpicked save payload uses it verbatim (WYSIWYG, spec decision 5). */
+  onInputValueChange?: (value: string) => void;
   label?: string;
   placeholder?: string;
 }
@@ -88,6 +91,7 @@ export default function PhoneInput({
   onPick,
   onClear,
   picked = null,
+  onInputValueChange,
   label = 'Телефон',
   placeholder = '+7 (___) ___-__-__',
 }: PhoneInputProps) {
@@ -121,6 +125,7 @@ export default function PhoneInput({
       formatInput={formatPhone}
       getDisplayLabel={optionLabel}
       inputTestId="input-phone"
+      onInputValueChange={onInputValueChange}
     />
   );
 }

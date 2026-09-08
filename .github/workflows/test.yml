@@ -101,6 +101,22 @@ jobs:
         env:
           NODE_OPTIONS: --max-old-space-size=4096
 
+  frontend-checks:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend/admin
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run lint
+      - run: pnpm run type-check
+
   skip-tracker:
     name: Skip-tracker (warning only)
     runs-on: ubuntu-latest

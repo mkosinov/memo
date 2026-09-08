@@ -31,7 +31,7 @@ location = dict(
 service = dict(
     title="Мастер-класс по керамике", description="Лепим кружку", image_url="",
     specialty="керамика", min_age=6, max_age=None, duration=120, record_info="",
-    material_hint=None, created_at=CREATED, updated_at=UPDATED,
+    created_at=CREATED, updated_at=UPDATED,
     tariffs=[{"id": "tariff-1", "service_id": "service-1", "title": "Взрослый",
               "description": "", "price": 2500}],
     tags=[{"id": "tag-1", "tag": "керамика"}],

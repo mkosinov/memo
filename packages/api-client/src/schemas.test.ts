@@ -239,16 +239,18 @@ describe('ServiceResponseSchema', () => {
     expect(result.tags).toHaveLength(0);
   });
 
-  it('parses service with material_hint', () => {
+  it('strips legacy material_hint from service responses (GH #223 Task 13)', () => {
+    // material_hint is retired: a legacy backend response still carrying the
+    // key must parse, and the parsed result must not expose the field.
     const data = { ...validService, material_hint: 'Принести фартук' };
     const result = ServiceResponseSchema.parse(data);
-    expect(result.material_hint).toBe('Принести фартук');
+    expect('material_hint' in result).toBe(false);
   });
 
   it('parses service without material_hint (field absent)', () => {
     // When field is absent and schema uses .optional(), parse should still succeed
     const result = ServiceResponseSchema.parse(validService);
-    expect(result.material_hint).toBeUndefined();
+    expect('material_hint' in result).toBe(false);
   });
 
   // ─── GH #223: nested materials (read shape, spec §4/§5) ───
@@ -885,7 +887,6 @@ describe('Type exports', () => {
       max_age: 18,
       duration: 60,
       record_info: '',
-      material_hint: '',
       tariffs: [],
       tag_ids: [],
       materials: [],
@@ -977,7 +978,6 @@ describe('ServiceCreateSchema', () => {
     expect(result.min_age).toBe(0);
     expect(result.max_age).toBe(18);
     expect(result.record_info).toBe('');
-    expect(result.material_hint).toBe('');
     expect(result.tariffs).toEqual([]);
     expect(result.tag_ids).toEqual([]);
   });
@@ -992,7 +992,6 @@ describe('ServiceCreateSchema', () => {
       max_age: 14,
       duration: 180,
       record_info: 'Запись за сутки',
-      material_hint: 'Фартук обязателен',
       tariffs: [{ title: 'Взрослый', price: 3000 }],
       tag_ids: ['tag-1', 'tag-2'],
     };

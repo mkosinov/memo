@@ -34,11 +34,11 @@ _ServiceDep = Annotated[ServiceService, Depends(_get_service_service)]
 # Sort whitelist map: UI key → list of ORM columns / subqueries (#205 Task 3,
 # spec §4.5). ``age`` → min_age; ``archived`` → is_active; ``tariffs`` →
 # correlated COUNT subquery (records idiom for aggregate sort keys).
+# ``material_hint`` removed by GH #223 Task 13 (spec §10) — retired field.
 _SERVICE_SORT_MAP: dict[str, list] = {
     "title": [Service.title],
     "duration": [Service.duration],
     "age": [Service.min_age],
-    "material_hint": [Service.material_hint],
     "tariffs": [
         select(func.count(Tariff.id))
         .where(Tariff.service_id == Service.id)

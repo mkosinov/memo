@@ -73,7 +73,7 @@ describe('useServicesMutations', () => {
       const payload: ServiceCreate = {
         title: 'Test', duration: 180, description: '', image_url: '',
         specialty: '', min_age: 0, max_age: 18, record_info: '',
-        material_hint: '', tariffs: [], tag_ids: [], materials: [],
+        tariffs: [], tag_ids: [], materials: [],
       };
 
       await act(async () => {
@@ -94,7 +94,7 @@ describe('useServicesMutations', () => {
         await result.current.mutateAsync({
           title: 'Test', duration: 180, description: '', image_url: '',
           specialty: '', min_age: 0, max_age: 18, record_info: '',
-          material_hint: '', tariffs: [], tag_ids: [], materials: [],
+          tariffs: [], tag_ids: [], materials: [],
         });
       });
 
@@ -122,7 +122,6 @@ describe('useServicesMutations', () => {
           max_age: 18,
           duration: 180,
           record_info: '',
-          material_hint: '',
           tariffs: [],
           tag_ids: [],
           materials: [],
@@ -152,7 +151,6 @@ describe('useServicesMutations', () => {
         max_age: 18,
         duration: 180,
         record_info: '',
-        material_hint: '',
         tariffs: [],
         tag_ids: [],
         materials: [],

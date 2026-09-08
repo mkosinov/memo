@@ -26,7 +26,6 @@ function makeService(overrides: Partial<ServiceResponse> = {}): ServiceResponse 
     max_age: 12,
     duration: 90,
     record_info: '',
-    material_hint: 'Акварельные краски',
     tariffs: [],
     tags: [],
     materials: [],
@@ -45,11 +44,12 @@ function renderCell(key: string, service: ServiceResponse) {
 // ─── Shape ─────────────────────────────────────────────────────────────────
 
 describe('serviceColumns — shape (GH #223 Task 3)', () => {
-  it('has the materials column right after material_hint, non-sortable (no server sort key)', () => {
+  it('has the materials column after age, non-sortable (no server sort key); material_hint is retired (Task 13)', () => {
     const keys = serviceColumns().map((c) => c.key);
-    const hintIdx = keys.indexOf('material_hint');
-    expect(hintIdx).toBeGreaterThan(-1); // hint stays until Task 13
-    expect(keys[hintIdx + 1]).toBe('materials');
+    expect(keys).not.toContain('material_hint'); // retired by GH #223 Task 13
+    const ageIdx = keys.indexOf('age');
+    expect(ageIdx).toBeGreaterThan(-1);
+    expect(keys[ageIdx + 1]).toBe('materials');
 
     const col = serviceColumns().find((c) => c.key === 'materials')!;
     expect(col.label).toBe('Материалы');

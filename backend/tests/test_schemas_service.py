@@ -29,7 +29,6 @@ def _service_orm(**overrides) -> SimpleNamespace:
         max_age=99,
         duration=90,
         record_info="info",
-        material_hint=None,
         created_at=datetime(2025, 1, 1, tzinfo=UTC),
         updated_at=datetime(2025, 1, 1, tzinfo=UTC),
         is_active=True,
@@ -101,7 +100,7 @@ class TestServiceResponseArchivedInversion:
 
 
 # Required base fields for ServiceCreate/ServiceUpdate (everything except the
-# optional max_age / material_hint).
+# optional max_age).
 _BASE_REQUIRED = {
     "title": "Painting 101",
     "description": "Intro class",

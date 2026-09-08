@@ -495,30 +495,14 @@ class TestModelCrud:
         assert fetched.amount == 3000
         assert fetched.method == "card"
 
-    def test_service_with_material_hint(self, session: Session):
-        """Service can be created with an optional material_hint field."""
+    def test_service_has_no_material_hint_column(self, session: Session):
+        """GH #223 Task 13: material_hint is retired from the Service model."""
         from src.models import Service
-        svc = Service(
-            title="Portrait Painting",
-            description="Learn to paint portraits",
-            image_url="https://example.com/service.jpg",
-            specialty="живопись",
-            min_age=12,
-            max_age=99,
-            duration=120,
-            record_info="Bring your own brushes",
-            material_hint="Масляные краски, холст на подрамнике 40×50 см",
-        )
-        session.add(svc)
-        session.flush()
-        fetched = session.get(Service, svc.id)
-        assert fetched.material_hint == "Масляные краски, холст на подрамнике 40×50 см"
 
-    def test_service_material_hint_nullable(self, session: Session):
-        """Service can be created without material_hint (nullable)."""
-        from src.models import Service
+        assert not hasattr(Service, "material_hint")
+
         svc = Service(
-            title="No Hint Service",
+            title="Post-retirement Service",
             description="desc",
             image_url="https://example.com/img.jpg",
             specialty="керамика",
@@ -530,7 +514,8 @@ class TestModelCrud:
         session.add(svc)
         session.flush()
         fetched = session.get(Service, svc.id)
-        assert fetched.material_hint is None
+        assert fetched.title == "Post-retirement Service"
+        assert not hasattr(fetched, "material_hint")
 
     def test_location_with_location_hint(self, session: Session):
         """Location can be created with an optional location_hint field."""

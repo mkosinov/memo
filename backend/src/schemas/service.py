@@ -6,8 +6,9 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 # Sort whitelist for GET /api/v1/services (#205 Task 3, spec §4.5).
+# ``material_hint`` removed by GH #223 Task 13 (spec §10) — retired field.
 ServiceSortBy = Literal[
-    "title", "duration", "age", "material_hint", "tariffs",
+    "title", "duration", "age", "tariffs",
     "specialty", "archived", "created_at",
 ]
 
@@ -74,7 +75,6 @@ class ServiceBase(BaseModel):
     max_age: int | None = None
     duration: int
     record_info: str
-    material_hint: str | None = None
 
 
 class ServiceCreate(ServiceBase):
@@ -124,7 +124,6 @@ class ServicePatch(BaseModel):
     max_age: int | None = None
     duration: int | None = None
     record_info: str | None = None
-    material_hint: str | None = None
     tag_ids: list[str] | None = None
     tariffs: list[TariffCreate] | None = None
     materials: list[ServiceMaterialLinkIn] | None = None

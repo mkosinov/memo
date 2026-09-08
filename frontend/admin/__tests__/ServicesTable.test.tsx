@@ -36,7 +36,6 @@ const mockService1: ServiceResponse = {
   max_age: 18,
   duration: 150,
   record_info: '',
-  material_hint: 'Фартук',
   tariffs: [
     { id: 't-1', service_id: 'svc-1', title: 'Взрослый', description: null, price: 3500 },
     { id: 't-2', service_id: 'svc-1', title: 'Детский', description: null, price: 2500 },
@@ -58,7 +57,6 @@ const mockService2: ServiceResponse = {
   max_age: 14,
   duration: 120,
   record_info: '',
-  material_hint: null,
   tariffs: [
     { id: 't-3', service_id: 'svc-2', title: 'Взрослый', description: null, price: 2800 },
   ],
@@ -79,7 +77,6 @@ const mockService3: ServiceResponse = {
   max_age: 12,
   duration: 90,
   record_info: '',
-  material_hint: null,
   tariffs: [],
   tags: [],
   materials: [],
@@ -255,18 +252,12 @@ describe('ServicesTable', () => {
     expect(screen.getByText('1 тариф')).toBeInTheDocument();
   });
 
-  it('renders material hint', async () => {
+  it('renders material badges ("—" for services without materials)', async () => {
     setupEnvelope();
     await renderLoaded();
 
-    expect(screen.getByText('Фартук')).toBeInTheDocument();
-  });
-
-  it('shows "—" for services without material hint', async () => {
-    setupEnvelope();
-    await renderLoaded();
-
-    // Картина акрилом and Ручная лепка have material_hint: null — show "—"
+    // GH #223 Task 13: material_hint column is retired; the badges column
+    // renders "—" for the unlinked services (Картина акрилом, Ручная лепка).
     const cells = screen.getAllByText('—');
     expect(cells.length).toBeGreaterThanOrEqual(1);
   });
@@ -918,8 +909,8 @@ describe('ServicesTable', () => {
     expect(mockGetAllMaterials).toHaveBeenCalledWith({ status: 'active' });
     expect(screen.getByRole('checkbox', { name: 'Акварель' })).toBeInTheDocument();
     expect(screen.getByRole('checkbox', { name: 'Керамика' })).toBeInTheDocument();
-    // material_hint text field is REMOVED from the form (spec §8; the wire
-    // payload keeps the '' default until Task 13 — not asserted here).
+    // material_hint text field is REMOVED from the form (spec §8) and the
+    // field is retired everywhere (Task 13, spec §10).
     expect(screen.queryByPlaceholderText('Что взять с собой')).not.toBeInTheDocument();
   });
 

@@ -45,7 +45,6 @@ const mockService: ServiceResponse = {
   max_age: 99,
   duration: 120,
   record_info: '',
-  material_hint: 'глина',
   tariffs: [{ id: 't1', service_id: 's1', title: 'Взрослый', description: null, price: 2500 }],
   tags: [{ id: 'tag1', tag: 'глина' }],
   materials: [],

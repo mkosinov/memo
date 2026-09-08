@@ -32,6 +32,7 @@ from src.models import (
     Photo,
     Record,
     Service,
+    ServiceMaterial,
     Tag,
     Tariff,
     Visit,
@@ -218,32 +219,25 @@ async def _seed_services(session) -> None:
     services = [
         {"id": "s1", "title": "Картина маслом", "description": "Масляная живопись на холсте",
          "image_url": "/images/card-seascape.jpg", "specialty": "живопись",
-         "min_age": 12, "max_age": None, "duration": 150, "record_info": "",
-         "material_hint": "Масляные краски, холст на подрамнике 40×50 см, набор кистей, мастихин"},
+         "min_age": 12, "max_age": None, "duration": 150, "record_info": "",},
         {"id": "s2", "title": "Картина акрилом", "description": "Акриловая живопись на холсте",
          "image_url": "/images/card-mountain-acrylic.jpg", "specialty": "живопись",
-         "min_age": 6, "max_age": None, "duration": 120, "record_info": "",
-         "material_hint": "Акриловые краски, холст 30×40 см, кисти, палитра"},
+         "min_age": 6, "max_age": None, "duration": 120, "record_info": "",},
         {"id": "s3", "title": "Мини-картина акрилом", "description": "Миниатюра акрилом на маленьком холсте",
          "image_url": "/images/card-watercolor.jpg", "specialty": "живопись",
-         "min_age": 6, "max_age": None, "duration": 90, "record_info": "",
-         "material_hint": "Акриловые краски, холст 20×30 см, кисти"},
+         "min_age": 6, "max_age": None, "duration": 90, "record_info": "",},
         {"id": "s4", "title": "Акварель", "description": "Акварельная живопись",
          "image_url": "/images/card-watercolor.jpg", "specialty": "живопись",
-         "min_age": 6, "max_age": 12, "duration": 150, "record_info": "",
-         "material_hint": "Акварельные краски, бумага A3 300 г/м², кисти"},
+         "min_age": 6, "max_age": 12, "duration": 150, "record_info": "",},
         {"id": "s5", "title": "Ручная лепка", "description": "Лепка из глины",
          "image_url": "/images/card-animals.jpg", "specialty": "керамика",
-         "min_age": 5, "max_age": None, "duration": 90, "record_info": "",
-         "material_hint": "Глина, стек, вода, фартук"},
+         "min_age": 5, "max_age": None, "duration": 90, "record_info": "",},
         {"id": "s6", "title": "Роспись одежды", "description": "Роспись футболки или шоппера",
          "image_url": "/images/card-shopper.jpg", "specialty": "живопись",
-         "min_age": 8, "max_age": None, "duration": 120, "record_info": "",
-         "material_hint": "Текстильные краски, шоппер из хлопка, трафареты, кисти"},
+         "min_age": 8, "max_age": None, "duration": 120, "record_info": "",},
         {"id": "s7", "title": "Морской пейзаж", "description": "Морской пейзаж маслом",
          "image_url": "/images/card-seascape.jpg", "specialty": "живопись",
-         "min_age": 12, "max_age": None, "duration": 180, "record_info": "",
-         "material_hint": "Масляные краски, холст 50×60 см, набор кистей, мастихин"},
+         "min_age": 12, "max_age": None, "duration": 180, "record_info": "",},
     ]
     for s in services:
         session.add(Service(**s))
@@ -426,6 +420,41 @@ async def _seed_service_tags(session) -> None:
             )
 
 
+async def _seed_service_materials(session) -> None:
+    """Link services to materials via service_materials (GH #223 §10).
+
+    Idiom: ``_seed_service_tags``. Dev/demo data must exercise the feature:
+    ≥3 links across ≥3 services, at least one with a per-link ``note``
+    (renders instead of the material description on the client screen).
+    Material ids follow ``_seed_materials``: mat1 масло, mat2 акрил,
+    mat3 акварель, mat4 гуашь.
+    """
+    links = [
+        ("s1", "mat1", None),  # Картина маслом — масло
+        # s2 «Картина акрилом» stays UNLINKED — the web S6 scenario pins a
+        # no-links service (no materials block on the client screen).
+        ("s3", "mat2", None),  # Мини-картина акрилом — акрил
+        ("s4", "mat3", None),  # Акварель — акварель
+        # s7 «Морской пейзаж» — the web S6 scenario data: two links, chip =
+        # first by title ASC (Акварель), note-vs-description fallback demo.
+        ("s7", "mat3", None),  # Акварель, note NULL → falls back to description
+        ("s7", "mat1", "Масляные краски для морского пейзажа"),  # Масло + note
+    ]
+    for service_id, material_id, note in links:
+        result = await session.execute(
+            select(ServiceMaterial).where(
+                ServiceMaterial.service_id == service_id,
+                ServiceMaterial.material_id == material_id,
+            )
+        )
+        if not result.first():
+            session.add(
+                ServiceMaterial(
+                    service_id=service_id, material_id=material_id, note=note
+                )
+            )
+
+
 async def _seed_activity_tags(session) -> None:
     """Link activities to tags via activity_tags join table."""
     links = [
@@ -561,6 +590,7 @@ async def seed_data(manager: DBManager) -> None:
         await _seed_activity_tags(session)
         await _seed_photos(session)
         await _seed_materials(session)
+        await _seed_service_materials(session)
         await session.commit()
 
 

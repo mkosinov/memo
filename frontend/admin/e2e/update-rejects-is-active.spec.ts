@@ -60,7 +60,6 @@ function putPayload(entity: string, seed: Record<string, any>): Record<string, u
         max_age: seed.max_age ?? null,
         duration: seed.duration,
         record_info: seed.record_info,
-        material_hint: seed.material_hint ?? null,
         tariffs: [],
         tag_ids: [],
         is_active: false,

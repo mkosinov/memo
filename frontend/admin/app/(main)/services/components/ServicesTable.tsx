@@ -53,10 +53,9 @@ export function ServicesTable() {
     // Canonical PUT (GH #178): full typed ServiceUpdate — every field listed.
     // #207: the Update schema carries no archive flag — archive/restore goes
     // through POST /services/{id}/archive|restore, so PUT never flips it.
-    // #223 T5: the form now sends `materials` (checkbox multi-list state →
+    // #223 T5/T13: the form sends `materials` (checkbox multi-list state →
     // {material_id, note?}[] in ServiceModal's handleSubmit) — PUT hard-replaces
-    // the links. `material_hint` is gone from the FORM but the wire keeps ''
-    // (api-client default) until Task 13 drops the field everywhere.
+    // the links. `material_hint` is retired everywhere (Task 13, spec §10).
     const payload = {
       title: data.title as string,
       description: (data.description as string | null | undefined) ?? '',
@@ -66,7 +65,6 @@ export function ServicesTable() {
       max_age: (data.max_age as number | null | undefined) ?? 18,
       duration: data.duration as number,
       record_info: (data.record_info as string | null | undefined) ?? '',
-      material_hint: '',
       tariffs: (data.tariffs as ServiceUpdate['tariffs'] | undefined) ?? [],
       tag_ids: (data.tag_ids as string[] | undefined) ?? [],
       materials: (data.materials as ServiceUpdate['materials'] | undefined) ?? [],

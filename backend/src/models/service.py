@@ -24,7 +24,6 @@ class Service(AbstractModelSoftDelete):
     max_age: Mapped[int | None] = mapped_column(Integer, nullable=True)
     duration: Mapped[int] = mapped_column(Integer)
     record_info: Mapped[str] = mapped_column(Text)
-    material_hint: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     tariffs: Mapped[list["Tariff"]] = relationship(
         "Tariff", back_populates="service", cascade="all, delete-orphan"

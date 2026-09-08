@@ -928,7 +928,6 @@ describe('updateService', () => {
       max_age: 18,
       duration: 60,
       record_info: '',
-      material_hint: '',
       tariffs: [],
       tag_ids: [],
       materials: [],

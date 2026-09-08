@@ -222,7 +222,6 @@ export async function createTestService(
       max_age: null,
       duration: 90,
       record_info: 'e2e seed',
-      material_hint: null,
       tariffs: [],
       tag_ids: [],
       ...overrides,

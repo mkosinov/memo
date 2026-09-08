@@ -63,7 +63,9 @@ export function buildAdminSchedule(
       locationName: location.name,
       locationAddress: location.address ?? undefined,
       locationHint: location.location_hint ?? undefined,
-      materialDetails: service.material_hint ?? undefined,
+      // materialDetails source removed by GH #223 Task 13 — the retired
+      // material_hint no longer feeds the admin schedule DTO. The web client
+      // derives materials text from service links (spec §9).
       priceMin,
       priceMax,
       priceHint: computePriceHint(tariffs),

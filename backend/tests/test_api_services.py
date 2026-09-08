@@ -17,7 +17,6 @@ SERVICE_PAYLOAD = {
     "max_age": 99,
     "duration": 90,
     "record_info": "Bring your own apron",
-    "material_hint": "Масляные краски, холст на подрамнике 40×50 см",
 }
 
 TAG_PAYLOAD = {"tag": "beginner"}
@@ -75,15 +74,44 @@ class TestServicesCrud:
         assert body["archived"] is False
         assert body["tariffs"] == []
         assert body["tags"] == []
-        assert body["material_hint"] == "Масляные краски, холст на подрамнике 40×50 см"
+        # GH #223 Task 13: material_hint is retired — never serialized.
+        assert "material_hint" not in body
 
-    def test_create_service_without_material_hint(self, api_client) -> None:
-        """POST /api/services omitting material_hint defaults to None."""
-        payload = {k: v for k, v in SERVICE_PAYLOAD.items() if k != "material_hint"}
-        response = api_client.post("/api/v1/services", json=payload)
+    def test_create_service_with_stray_material_hint_stripped(
+        self, api_client
+    ) -> None:
+        """GH #223 Task 13 regression: POST carrying material_hint → 201.
+
+        ServiceCreate ignores extras (Pydantic default), so a legacy client
+        still sending the retired field gets a 201 — but the field is absent
+        from the response (retired from ServiceResponse).
+        """
+        response = api_client.post(
+            "/api/v1/services",
+            json={**SERVICE_PAYLOAD, "material_hint": "legacy hint"},
+        )
 
         assert response.status_code == 201
-        assert response.json()["material_hint"] is None
+        assert "material_hint" not in response.json()
+
+    def test_update_service_with_stray_material_hint_422(
+        self, api_client
+    ) -> None:
+        """GH #223 Task 13 regression: PUT carrying material_hint → 422.
+
+        ServiceUpdate is extra="forbid" — a legacy admin still sending
+        material_hint gets a 422 (known breaking change, spec §10).
+        """
+        created = api_client.post("/api/v1/services", json=SERVICE_PAYLOAD)
+        assert created.status_code == 201
+        service_id = created.json()["id"]
+
+        response = api_client.put(
+            f"/api/v1/services/{service_id}",
+            json={**SERVICE_PAYLOAD, "material_hint": "legacy hint"},
+        )
+
+        assert response.status_code == 422
 
     def test_create_service_with_tariffs_and_tags(self, api_client) -> None:
         """POST /api/services creates service with nested tariffs and tag links."""
@@ -1270,8 +1298,8 @@ class TestServiceListMaterialFilter:
 class TestServiceListSorting:
     """Server-side sorting on GET /api/v1/services (#205 Task 3).
 
-    sort_by whitelist: title, duration, age, material_hint, tariffs, specialty,
-    archived, created_at. sort_order: asc/desc. Unknown → 422.
+    sort_by whitelist: title, duration, age, tariffs, specialty, archived,
+    created_at. sort_order: asc/desc. Unknown → 422.
     Default (sort_by=None): title ASC, id ASC (spec §4.4 — NEW, was unspecified).
     """
 
@@ -1328,6 +1356,17 @@ class TestServiceListSorting:
     def test_sort_invalid_key_422(self, api_client) -> None:
         """sort_by=bogus → 422 from Literal validation."""
         resp = api_client.get("/api/v1/services?sort_by=bogus")
+        assert resp.status_code == 422
+
+    def test_sort_material_hint_removed_422(self, api_client) -> None:
+        """GH #223 Task 13 regression: `material_hint` left the whitelist.
+
+        The column/sort key is retired (spec §10 — known breaking change;
+        admin stopped sending it in the same release). Old clients that
+        still send `sort_by=material_hint` now get 422 via Literal
+        validation, exactly like any other unknown key.
+        """
+        resp = api_client.get("/api/v1/services?sort_by=material_hint")
         assert resp.status_code == 422
 
     def test_default_order_locked(self, api_client, create_service) -> None:

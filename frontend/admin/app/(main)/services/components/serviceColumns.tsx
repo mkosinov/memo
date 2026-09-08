@@ -25,12 +25,11 @@ function tariffLabel(count: number): string {
  * Columns config for the Services table (#139 T5). Extracted VERBATIM from
  * the pre-#139 ServicesTable ALL_COLUMNS + cell JSX. Keys match the backend
  * services sort whitelist (domain-rules/services.md §"List contract (GH #205)":
- * title, duration, age, material_hint, tariffs, specialty, archived,
- * created_at); `age` and `tariffs` pass through AS-IS — the backend maps
- * age→min_age and tariffs→count subquery — so NO `sortField` anywhere.
- * `tags` and `materials` (GH #223 badges column) have no whitelist mapping →
- * `sortable: false` (§6.2). The `material_hint` column stays until GH #223
- * Task 13 retires it.
+ * title, duration, age, tariffs, specialty, archived, created_at); `age` and
+ * `tariffs` pass through AS-IS — the backend maps age→min_age and tariffs→
+ * count subquery — so NO `sortField` anywhere. `tags` and `materials` (GH
+ * #223 badges column) have no whitelist mapping → `sortable: false` (§6.2).
+ * The `material_hint` column was removed by GH #223 Task 13 (spec §10).
  */
 export const serviceColumns = (): ColumnDef<ServiceResponse>[] => [
   {
@@ -62,21 +61,13 @@ export const serviceColumns = (): ColumnDef<ServiceResponse>[] => [
     ),
   },
   {
-    key: 'material_hint',
-    label: 'Материал',
-    defaultVisible: true,
-    render: (s) => (
-      <span style={{ color: 'var(--ink-mid)' }}>{s.material_hint ?? '—'}</span>
-    ),
-  },
-  {
     key: 'materials',
     label: 'Материалы',
     defaultVisible: true,
     sortable: false, // no server sort key — backend whitelist has no materials mapping (GH #223)
     // Compact chips with material TITLES only — the note ?? description
     // fallback governs the web materials text block, NOT badges (GH #223
-    // spec §8). Empty → em dash, same idiom as material_hint above.
+    // spec §8). Empty → em dash.
     render: (s) =>
       s.materials.length > 0 ? (
         <span className="inline-flex flex-wrap gap-1">

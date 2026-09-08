@@ -4,7 +4,8 @@
  * Covers the GH #223 materials badges column (spec §8): compact chips with
  * material TITLES only (the note ?? description fallback governs the web
  * text block, NOT badges), em dash when a service has no links. Also pins
- * the column shape so the hint column stays untouched until Task 13.
+ * the column shape: materials sits after age, non-sortable; the retired
+ * material_hint column is removed by #223 Task 13.
  */
 import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';

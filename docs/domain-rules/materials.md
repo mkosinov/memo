@@ -13,7 +13,7 @@ A Material is a physical supply or tool used in master classes (e.g., paint, cla
 - None.
 
 ## Invariants
-- ~~Materials can be hard-deleted via `DELETE /{id}` unconditionally~~ **GH #223 (landed — plan `2026-09-08-materials-services-link-223`):** `service_materials` links make Material FK-dependent — unlinked → 204 as before; linked → 409 + dependency tree, body `{"resolutions": {}}` → links auto-cascade + hard delete → 204 (generic GH #207 mechanics). See Archive & delete semantics below.
+- ~~Materials can be hard-deleted via `DELETE /{id}` unconditionally~~ **GH #223 (landed — plan `docs/plans/2026-09-07-materials-services-link-223-plan.md`):** `service_materials` links make Material FK-dependent — unlinked → 204 as before; linked → 409 + dependency tree, body `{"resolutions": {}}` → links auto-cascade + hard delete → 204 (generic GH #207 mechanics). See Archive & delete semantics below.
 - Archived state via `POST /{id}/archive` (sets `archived: true`) and restored via `POST /{id}/restore` (sets `archived: false`). See `_overview.md` → "Hard-delete FK dependency matrix".
 
 ## Business Logic

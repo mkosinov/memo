@@ -16,7 +16,7 @@ A Service represents a type of master class (painting, sculpture, etc.). It defi
 | record_info | string | ✅ | — | — | — | Информация для записи |
 | tariffs | array | ❌ | — | — | [] | Тарифы (nested) |
 | tag_ids | array | ❌ | — | — | [] | IDs тегов |
-| materials | array | ❌ | — | — | [] | `[{material_id, note?}]` — GH #223 (landed, Task 13 / plan `2026-09-08-materials-services-link-223`): create/PUT hard-replace, PATCH absent → preserve; unknown id → 422. Replaces the retired `material_hint` free-text column (dropped by migration `a9b1c3d5e7f2`) |
+| materials | array | ❌ | — | — | [] | `[{material_id, note?}]` — GH #223 (landed, Task 13 / plan `docs/plans/2026-09-07-materials-services-link-223-plan.md`): create/PUT hard-replace, PATCH absent → preserve; unknown id → 422. Replaces the retired `material_hint` free-text column (dropped by migration `a9b1c3d5e7f2`) |
 
 ## Tariff (nested)
 | Field | Type | Required | Min | Description |

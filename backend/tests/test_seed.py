@@ -97,8 +97,8 @@ async def test_seed_services_have_no_material_hint_column(
     await seed_data(db_manager)
 
     async with db_manager.async_session() as session:
-        # PRAGMA table_info fails to compile for a missing table; a plain
-        # SELECT against the dropped column is the assertion.
+        # pragma_table_info lists the live columns of `services`; the
+        # assertion is that the dropped column no longer appears in them.
         result = await session.execute(
             text("SELECT name FROM pragma_table_info('services')")
         )

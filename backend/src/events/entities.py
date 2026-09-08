@@ -78,7 +78,10 @@ def _iter_service_modules() -> Iterator[Any]:
 def _factory_functions(module: Any) -> Iterator[Any]:
     """Yield zero-arg ``get_*_service()`` factories defined or re-exported in a module.
 
-    Duplicate calls are harmless: factories are ``@lru_cache`` singletons.
+    Duplicate calls are harmless: most factories are ``@lru_cache``
+    singletons (``get_user_settings_service`` is uncached), and either way
+    the walk invokes each factory once per process; construction is
+    dependency-free, so even duplicate instances would be harmless.
     """
     for name, obj in vars(module).items():
         if (

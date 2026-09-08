@@ -305,3 +305,78 @@ test.describe('Services — material filter (#223 S2)', () => {
     }
   });
 });
+
+test.describe('Materials — usage counter (#223 S4)', () => {
+  /**
+   * S4: the materials table's «Где используется» column reflects how many
+   * services use each material. Link a material to 2 services via the
+   * ServiceModal → the materials row shows «2»; unlink it from one service
+   * (edit service, uncheck) → the row shows «1».
+   *
+   * Fresh counter values are guaranteed on every visit: the materials list
+   * query has no staleTime (refetch on mount), and the tab switch remounts
+   * MaterialsProvider. The material is created via API (unique title);
+   * both services are created via API and cleaned up in finally.
+   */
+  test('S4: link material to 2 services → «Где используется» shows 2; unlink one → 1', async ({
+    page,
+    request,
+  }) => {
+    const mat = await createMaterial(request, `Гуашь ${uid()}`);
+    const svc1 = await createTestService(request, { max_age: 18 });
+    const svc2 = await createTestService(request, { max_age: 18 });
+    try {
+      await waitForServicesReady(page);
+      await page.getByTestId('page-size-select').selectOption('100');
+
+      // ── Link the material to BOTH services via the form ──
+      for (const svc of [svc1, svc2]) {
+        const dialog = await openServiceModal(page, svc.title);
+        await dialog.getByRole('checkbox', { name: mat.title }).click();
+        await dialog.getByText('Сохранить').click();
+        await waitForToast(page, 'Услуга обновлена');
+        // Confirm the link landed before checking the counter (badge = UI
+        // truth for this service's links; S1 precedent).
+        const badges = serviceRow(page, svc.title).locator('[data-testid="material-badge"]');
+        await expect(badges.filter({ hasText: mat.title })).toHaveCount(1, { timeout: 10_000 });
+      }
+
+      // ── Materials table: the counter shows 2 ──
+      await page.getByRole('button', { name: 'Материалы', exact: true }).click();
+      await page.waitForSelector('h1:has-text("Управление материалами")', { timeout: 60_000 });
+      // Tab switch remounts MaterialsProvider → its per-page state resets to
+      // the default 10; bump to 100 so parallel-test rows can't push our row
+      // onto page 2 (same rationale as the services-tab select below).
+      await page.getByTestId('page-size-select').selectOption('100');
+      await expect(page.getByText('Где используется')).toBeVisible({ timeout: 10_000 });
+      const matRow = page.locator('table tbody tr').filter({ hasText: mat.title });
+      await expect(matRow).toBeVisible({ timeout: 10_000 });
+      const usageCell = matRow.locator('td', { hasText: /^2$/ });
+      await expect(usageCell).toHaveCount(1);
+
+      // ── Unlink from svc1: edit service, uncheck the material, save ──
+      await page.getByRole('button', { name: 'Услуги', exact: true }).click();
+      await page.waitForSelector('h1:has-text("Управление услугами")', { timeout: 60_000 });
+      // Same remount caveat: ServicesProvider is back to per_page 10.
+      await page.getByTestId('page-size-select').selectOption('100');
+      const dialog = await openServiceModal(page, svc1.title);
+      await expect(dialog.getByRole('checkbox', { name: mat.title })).toBeChecked();
+      await dialog.getByRole('checkbox', { name: mat.title }).click();
+      await dialog.getByText('Сохранить').click();
+      await waitForToast(page, 'Услуга обновлена');
+
+      // ── Materials table: the counter dropped to 1 ──
+      await page.getByRole('button', { name: 'Материалы', exact: true }).click();
+      await page.waitForSelector('h1:has-text("Управление материалами")', { timeout: 60_000 });
+      await page.getByTestId('page-size-select').selectOption('100');
+      await expect(matRow).toBeVisible({ timeout: 10_000 });
+      // "0 must not linger either": assert BOTH cells — exactly one «1», no «2».
+      await expect(matRow.locator('td', { hasText: /^1$/ })).toHaveCount(1);
+      await expect(matRow.locator('td', { hasText: /^2$/ })).toHaveCount(0);
+    } finally {
+      await cleanup(request, `/api/v1/services/${svc1.id}`);
+      await cleanup(request, `/api/v1/services/${svc2.id}`);
+      await cleanup(request, `/api/v1/materials/${mat.id}`);
+    }
+  });
+});

@@ -50,6 +50,20 @@ export const materialColumns = (): ColumnDef<MaterialResponse>[] => [
     ),
   },
   {
+    key: 'used_in_services_count',
+    label: 'Где используется',
+    defaultVisible: true,
+    // GH #223 §8/S4: plain number, no drill-down. 0 renders as "0" — it IS
+    // information (the material is unused), not missing data. Non-sortable:
+    // the backend sort whitelist (domain-rules/materials.md) has no such key.
+    sortable: false,
+    render: (m) => (
+      <span className="text-sm" style={{ color: 'var(--ink)' }}>
+        {m.used_in_services_count}
+      </span>
+    ),
+  },
+  {
     key: 'created_at',
     label: 'Создан',
     defaultVisible: false,

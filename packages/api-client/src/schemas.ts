@@ -496,6 +496,11 @@ export const MaterialResponseSchema = z.object({
   title: z.string(),
   description: z.string(),
   archived: z.boolean(), // inverted: archived = true means the material is in the archive (#207)
+  // GH #223 §6: number of NON-ARCHIVED services linked to the material —
+  // one canonical definition regardless of the request's status param.
+  // Backend always sends it (default 0); .default() keeps older cached
+  // payloads and hand-built test fixtures parsing.
+  used_in_services_count: z.number().int().default(0),
   created_at: z.string(),
   updated_at: z.string(),
 });

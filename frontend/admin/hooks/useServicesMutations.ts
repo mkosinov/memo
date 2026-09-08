@@ -18,7 +18,13 @@ export function useCreateService() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (data: ServiceCreate) => createService(data),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: qk.services }),
+    // GH #223 §8: the payload may carry material links → the materials table's
+    // «Где используется» counter changes too (spec S4: count updates after
+    // linking). Cross-entity invalidation mirrors useMaterialsMutations.
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: qk.services });
+      queryClient.invalidateQueries({ queryKey: qk.materials });
+    },
   });
 }
 
@@ -26,7 +32,11 @@ export function useUpdateService() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: ServiceUpdate }) => updateService(id, data),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: qk.services }),
+    // GH #223 §8 — see useCreateService (link changes touch both counters).
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: qk.services });
+      queryClient.invalidateQueries({ queryKey: qk.materials });
+    },
   });
 }
 

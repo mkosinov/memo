@@ -96,8 +96,8 @@ const TEST_SERVICES: ServiceResponse[] = [
 
 // #223 T5: active materials for the ServiceModal picker (/all?status=active).
 const MOCK_MATERIALS: MaterialResponse[] = [
-  { id: 'mat-a', title: 'Акварель', description: 'Акварельные краски', archived: false, created_at: '2024-01-01T00:00:00Z', updated_at: '2024-01-01T00:00:00Z' },
-  { id: 'mat-k', title: 'Керамика', description: 'Глина', archived: false, created_at: '2024-01-01T00:00:00Z', updated_at: '2024-01-01T00:00:00Z' },
+  { id: 'mat-a', title: 'Акварель', description: 'Акварельные краски', archived: false, used_in_services_count: 0, created_at: '2024-01-01T00:00:00Z', updated_at: '2024-01-01T00:00:00Z' },
+  { id: 'mat-k', title: 'Керамика', description: 'Глина', archived: false, used_in_services_count: 0, created_at: '2024-01-01T00:00:00Z', updated_at: '2024-01-01T00:00:00Z' },
 ];
 
 // ─── Mocks ──────────────────────────────────────────────────────────────────

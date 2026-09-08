@@ -144,6 +144,83 @@ class TestDeleteUnifiedRoute:
         assert resp.status_code == 404
 
 
+class TestDeleteLinkedMaterial:
+    """DELETE /api/v1/materials/{id} — linked to services via ``service_materials``.
+
+    Spec: docs/specs/2026-09-07-materials-services-link-design.md §7 + domain
+    rules ``materials.md`` FK table. The join is an auto-cascade dep in BOTH
+    directions (Material side here, Service side in test_api_services.py):
+      * linked + no body → 409 + dependency tree (entity ``service_materials``,
+        count, ``allowed_actions: ["cascade"]``), rows untouched;
+      * linked + body ``{"resolutions": {}}`` → one-transaction auto-cascade
+        of the links + hard delete of the material → 204; the SERVICE survives
+        with its materials list emptied;
+      * unlinked → 204 (no body) exactly as before #223.
+    """
+
+    def test_delete_linked_material_no_body_returns_409_with_tree(
+        self, api_client, create_service
+    ) -> None:
+        """No body + linked → 409; tree carries service_materials count + cascade."""
+        mat = _create_material(api_client, title="Акварель")
+        create_service(materials=[{"material_id": mat["id"]}])
+
+        resp = api_client.delete(f"/api/v1/materials/{mat['id']}")
+
+        assert resp.status_code == 409
+        body = resp.json()
+        assert body["detail"] == "has_dependencies"
+        deps = {d["entity"]: d for d in body["dependencies"]}
+        assert "service_materials" in deps
+        assert deps["service_materials"]["count"] == 1
+        assert deps["service_materials"]["allowed_actions"] == ["cascade"]
+        # Dry-run: material + join rows untouched.
+        assert api_client.get(f"/api/v1/materials/{mat['id']}").status_code == 200
+        rows = query_db(
+            f"SELECT * FROM service_materials WHERE material_id='{mat['id']}'"
+        )
+        assert len(rows) == 1
+
+    def test_delete_linked_material_with_body_cascades_links_204(
+        self, api_client, create_service
+    ) -> None:
+        """Body ``{"resolutions": {}}`` → links cascade + material gone → 204.
+
+        The service SURVIVES with its materials list emptied (the join rows
+        are the only casualty — GH #223 §7).
+        """
+        mat = _create_material(api_client, title="Гуашь")
+        service = create_service(materials=[{"material_id": mat["id"]}])
+
+        resp = api_client.request(
+            "DELETE", f"/api/v1/materials/{mat['id']}", json={"resolutions": {}}
+        )
+
+        assert resp.status_code == 204
+        # Material row hard-deleted.
+        assert api_client.get(f"/api/v1/materials/{mat['id']}").status_code == 404
+        # Join rows gone.
+        assert (
+            query_db(
+                f"SELECT * FROM service_materials WHERE material_id='{mat['id']}'"
+            )
+            == []
+        )
+        # Service survives with materials emptied.
+        svc = api_client.get(f"/api/v1/services/{service['id']}")
+        assert svc.status_code == 200
+        assert svc.json()["materials"] == []
+
+    def test_delete_unlinked_material_no_body_still_204(self, api_client) -> None:
+        """Unlinked material → 204 (no body) — the pre-#223 behavior is unchanged."""
+        mat = _create_material(api_client, title="Несвязанный")
+
+        resp = api_client.delete(f"/api/v1/materials/{mat['id']}")
+
+        assert resp.status_code == 204
+        assert api_client.get(f"/api/v1/materials/{mat['id']}").status_code == 404
+
+
 class TestArchiveRestoreEndpoints:
     """POST /api/v1/materials/{id}/archive + POST /{id}/restore — Task 11 (#207 §2/§14).
 

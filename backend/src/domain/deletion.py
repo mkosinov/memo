@@ -25,8 +25,9 @@ The matrix is hand-verified against the FK shapes in ``src/models/``:
   * ``Record.client_id`` — nullable → Client nullify (user choice).
   * ``Visitor.client_id`` — NOT NULL → Client cascade (user choice).
   * join tables ``master_tags``/``location_tags``/``service_tags``/
-    ``client_tags`` — NOT-NULL PK → cascade (auto).
-  * ``Material`` — no FK dependents → always 204.
+    ``client_tags``/``service_materials`` — NOT-NULL PK → cascade (auto).
+  * ``Material`` — ``service_materials`` join (GH #223 §7) → cascade (auto);
+    unlinked material still deletes 204 as before.
 """
 
 from __future__ import annotations
@@ -49,6 +50,7 @@ from src.models.payment import Payment
 from src.models.photo import Photo
 from src.models.record import Record
 from src.models.service import Service
+from src.models.service_material import ServiceMaterial
 from src.models.tag import (
     client_tags,
     location_tags,
@@ -160,6 +162,10 @@ FK_MATRIX: dict[type[Base], list[FKDependency]] = {
             entity="service_tags", relation="Тег", nullable=False,
             action="cascade", auto=True, allowed_actions=["cascade"],
         ),
+        FKDependency(
+            entity="service_materials", relation="Материал", nullable=False,
+            action="cascade", auto=True, allowed_actions=["cascade"],
+        ),
     ],
     Client: [
         FKDependency(
@@ -193,7 +199,12 @@ FK_MATRIX: dict[type[Base], list[FKDependency]] = {
             action="cascade", auto=True, allowed_actions=["cascade"],
         ),
     ],
-    Material: [],
+    Material: [
+        FKDependency(
+            entity="service_materials", relation="Услуга", nullable=False,
+            action="cascade", auto=True, allowed_actions=["cascade"],
+        ),
+    ],
 }
 
 
@@ -314,6 +325,22 @@ async def _count_s_service_tags(s: AsyncSession, entity_id: str) -> _CountResult
     return r.scalar_one(), None
 
 
+async def _count_s_service_materials(s: AsyncSession, entity_id: str) -> _CountResult:
+    r = await s.execute(
+        select(func.count()).select_from(ServiceMaterial)
+        .where(ServiceMaterial.service_id == entity_id)
+    )
+    return r.scalar_one(), None
+
+
+async def _count_mat_service_materials(s: AsyncSession, entity_id: str) -> _CountResult:
+    r = await s.execute(
+        select(func.count()).select_from(ServiceMaterial)
+        .where(ServiceMaterial.material_id == entity_id)
+    )
+    return r.scalar_one(), None
+
+
 async def _count_c_records(s: AsyncSession, entity_id: str) -> _CountResult:
     r = await s.execute(
         select(func.count()).select_from(Record).where(Record.client_id == entity_id)
@@ -388,6 +415,8 @@ _COUNTERS: dict[tuple[type[Base], str], _CounterFn] = {
     (Service, "tariffs"): _count_s_tariffs,
     (Service, "photos"): _count_s_photos,
     (Service, "service_tags"): _count_s_service_tags,
+    (Service, "service_materials"): _count_s_service_materials,
+    (Material, "service_materials"): _count_mat_service_materials,
     (Client, "records"): _count_c_records,
     (Client, "visitors"): _count_c_visitors,
     (Client, "client_tags"): _count_c_client_tags,
@@ -622,6 +651,28 @@ async def _h_cascade_service_tags(
     )
 
 
+async def _h_cascade_service_materials(
+    _self: ArchiveService, session: AsyncSession, entity_id: str,
+) -> None:
+    """Service → service_materials auto-cascade (join, GH #223 §7): hard-delete
+    link rows where service_id. Materials themselves are untouched — only the
+    links die with the service."""
+    await session.execute(
+        delete(ServiceMaterial).where(ServiceMaterial.service_id == entity_id)
+    )
+
+
+async def _h_cascade_material_service_materials(
+    _self: ArchiveService, session: AsyncSession, entity_id: str,
+) -> None:
+    """Material → service_materials auto-cascade (join, GH #223 §7): hard-delete
+    link rows where material_id. Services themselves are untouched — deleting a
+    material only detaches it from the services that referenced it."""
+    await session.execute(
+        delete(ServiceMaterial).where(ServiceMaterial.material_id == entity_id)
+    )
+
+
 async def _h_cascade_client_tags(
     _self: ArchiveService, session: AsyncSession, entity_id: str,
 ) -> None:
@@ -683,6 +734,8 @@ CASCADE_HANDLERS: dict[tuple[type[Base], str], _FkHandlerFn] = {
     (Location, "location_tags"): _h_cascade_location_tags,
     (Service, "tariffs"): _h_cascade_service_tariffs,
     (Service, "service_tags"): _h_cascade_service_tags,
+    (Service, "service_materials"): _h_cascade_service_materials,
+    (Material, "service_materials"): _h_cascade_material_service_materials,
     (Client, "client_tags"): _h_cascade_client_tags,
     (Client, "visitors"): _h_cascade_client_visitors,  # uses self._visitor_service
 }

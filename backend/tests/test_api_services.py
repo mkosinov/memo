@@ -618,6 +618,73 @@ class TestDeleteUnifiedRoute:
         assert len(photo_rows) == 1
         assert photo_rows[0]["service_id"] is None
 
+    def test_delete_service_with_material_links_no_body_lists_service_materials(
+        self, api_client, create_service
+    ) -> None:
+        """No body + material links → 409 tree now lists ``service_materials`` (GH #223 §7).
+
+        The join is one more auto-cascade dep next to tariffs/photos/
+        service_tags — the existing dry-run flow surfaces it for consent.
+        """
+        material_resp = api_client.post(
+            "/api/v1/materials",
+            json={"title": "Акварель", "description": "водорастворимые краски"},
+        )
+        assert material_resp.status_code == 201
+        material_id = material_resp.json()["id"]
+        service = create_service(materials=[{"material_id": material_id}])
+        service_id = service["id"]
+
+        resp = api_client.delete(f"/api/v1/services/{service_id}")
+
+        assert resp.status_code == 409
+        body = resp.json()
+        assert body["detail"] == "has_dependencies"
+        deps = {d["entity"]: d for d in body["dependencies"]}
+        assert deps["service_materials"]["count"] == 1
+        assert deps["service_materials"]["allowed_actions"] == ["cascade"]
+        # Dry-run: rows untouched.
+        assert api_client.get(f"/api/v1/services/{service_id}").status_code == 200
+        assert (
+            len(
+                query_db(
+                    f"SELECT * FROM service_materials WHERE service_id='{service_id}'"
+                )
+            )
+            == 1
+        )
+
+    def test_delete_service_with_material_links_with_body_cascades_204(
+        self, api_client, create_service
+    ) -> None:
+        """Body ``{}`` + material links → 204; links gone, MATERIAL survives (§7)."""
+        material_resp = api_client.post(
+            "/api/v1/materials",
+            json={"title": "Пастель", "description": "сухие мелки"},
+        )
+        assert material_resp.status_code == 201
+        material_id = material_resp.json()["id"]
+        service = create_service(materials=[{"material_id": material_id}])
+        service_id = service["id"]
+
+        resp = api_client.request(
+            "DELETE", f"/api/v1/services/{service_id}", json={"resolutions": {}}
+        )
+
+        assert resp.status_code == 204
+        # Service row gone; join rows gone.
+        assert api_client.get(f"/api/v1/services/{service_id}").status_code == 404
+        assert (
+            query_db(
+                f"SELECT * FROM service_materials WHERE service_id='{service_id}'"
+            )
+            == []
+        )
+        # Material SURVIVES the service-side cascade.
+        mat = api_client.get(f"/api/v1/materials/{material_id}")
+        assert mat.status_code == 200
+        assert mat.json()["used_in_services_count"] == 0
+
     def test_delete_nonexistent_service_no_body_returns_404(self, api_client) -> None:
         """No body + nonexistent id → 404 (service.delete returns False)."""
         resp = api_client.delete("/api/v1/services/nonexistent-service-id")

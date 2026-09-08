@@ -4,6 +4,7 @@ import {
   openAddTab,
   openModal,
   clickModalTab,
+  phoneMaskDisplay,
 } from './fixtures/helpers';
 import { queryDBRow } from './fixtures/db-query';
 import { createTestClient, createTestActivity, createTestRecord, cleanup, cleanupRecord } from './fixtures/factories';
@@ -27,16 +28,13 @@ const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
  */
 
 /**
- * Mask display for a full 10-digit RU national number, pinned to the actual
- * AsYouType output (libphonenumber-js/min, RU default): `999 123-45-67` —
- * space after the 3rd digit, then dashes (compliance-review finding: the
- * previous space-grouped expectation never matched the real mask).
+ * Mask display for a full 10-digit RU national number: shared helper
+ * (`phoneMaskDisplay`) pins the actual AsYouType output — space after the
+ * 3rd digit, then dashes for national typing (compliance-review finding:
+ * the previous space-grouped expectation never matched the real mask).
  * The unit tests in app/components/shared/__tests__/PhoneInput.test.tsx
- * pin the same grouping ('9991234' → '999 123-4').
+ * pin the same grouping.
  */
-function ruMaskDisplay(digits: string): string {
-  return `${digits.slice(0, 3)} ${digits.slice(3, 6)}-${digits.slice(6, 8)}-${digits.slice(8, 10)}`;
-}
 
 /** Count typeahead-specific list requests: /clients with a `phone` param. */
 async function spyPhoneListRequests(page: Page): Promise<{ count: () => number }> {
@@ -257,7 +255,7 @@ test.describe('Client phone typeahead — record form (GH #221)', () => {
     // XXX XXX XX XX); uniqueness keeps DB cleanup surgical.
     const uid = `${Date.now()}`.slice(-7);
     const digits = `999${uid}`; // 10 digits
-    const expectedDisplay = ruMaskDisplay(digits);
+    const expectedDisplay = phoneMaskDisplay(digits, 'national');
     const clientName = `E2E Mask Client ${uid}`;
 
     const spy = await spyPhoneListRequests(page);

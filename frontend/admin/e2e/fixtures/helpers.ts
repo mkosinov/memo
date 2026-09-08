@@ -587,3 +587,17 @@ export async function selectClientFilterOption(
   await input.fill(queryText);
   await page.getByRole('option', { name: optionText }).click();
 }
+
+/**
+ * Mask display for a 10-digit RU national number, pinned to the actual
+ * AsYouType output (libphonenumber-js/min, RU default — GH #221):
+ *   international fill `+79991234567` → `+7 999 123 45 67` (spaces)
+ *   bare national typing `9991234567`  → `999 123-45-67` (dashes)
+ * Shared by the WYSIWYG e2e expectations so the exact expected string is
+ * defined once (the PhoneInput unit tests pin the same grouping).
+ */
+export function phoneMaskDisplay(digits: string, mode: 'international' | 'national'): string {
+  const grouped = `${digits.slice(0, 3)} ${digits.slice(3, 6)} ${digits.slice(6, 8)} ${digits.slice(8, 10)}`;
+  if (mode === 'international') return `+7 ${grouped}`;
+  return `${digits.slice(0, 3)} ${digits.slice(3, 6)}-${digits.slice(6, 8)}-${digits.slice(8, 10)}`;
+}

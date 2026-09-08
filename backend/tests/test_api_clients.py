@@ -885,3 +885,152 @@ class TestDeleteUnifiedRoute:
         )
         # The 1st-processed visitor survived the rollback (NO mid-loop commit).
         assert call_count["n"] == 2
+
+
+# ─── ?phone= digits-mode filter (GH #221 Task 2, spec §4 / domain rules) ──────
+
+
+class TestClientListPhoneFilter:
+    """``?phone=`` on GET /api/v1/clients — GH #221 §4 digits-mode filter.
+
+    Matching: the query and ``Client.phone`` both reduce to national digits
+    (``memo_phone_national`` UDF; leading 7/8 dropped on 11-digit numbers);
+    the reduced query must be a SUBSTRING of the reduced stored phone.
+    Bounds live on the ``ClientListParams.phone`` FIELD: 4-15 digits after
+    stripping non-digits, else 422 VALIDATION_ERROR (own bounds, independent
+    of ``q``'s 2-100). ``q`` stays a literal substring — regression below.
+    Predicate must hit BOTH the rows and count queries (honest ``total``).
+    """
+
+    def test_phone_matches_ru_and_masked_formats_excludes_by_and_null(
+        self, api_client, create_client
+    ) -> None:
+        """Spec §3: `999123` matches both `+79991234567` and `8 999 123-45-67`
+        (same national digits tail); BY-format and NULL-phone never match."""
+        create_client(name="RuPlain", phone="+79991234567")
+        create_client(name="RuMasked", phone="8 999 123-45-67")
+        create_client(name="ByClient", phone="+375 29 123-45-67")
+        create_client(name="NoPhone", phone=None)
+
+        resp = api_client.get("/api/v1/clients", params={"phone": "999123"})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert sorted(c["name"] for c in body["items"]) == ["RuMasked", "RuPlain"]
+        assert body["total"] == 2
+
+    def test_phone_belarusian_prefix_query(self, api_client, create_client) -> None:
+        """`37529` matches the BY client (12 digits — no 7/8 strip); the RU
+        client does not contain that digit run."""
+        create_client(name="ByClient", phone="+375 29 123-45-67")
+        create_client(name="RuDecoy", phone="+79991230000")
+
+        resp = api_client.get("/api/v1/clients", params={"phone": "37529"})
+        body = resp.json()
+        assert [c["name"] for c in body["items"]] == ["ByClient"]
+        assert body["total"] == 1
+
+    def test_phone_tail_substring_matches_full_number(
+        self, api_client, create_client
+    ) -> None:
+        """Tail-of-number search: `4567` matches `+79991234567`."""
+        create_client(name="TailProbe", phone="+79991234567")
+        create_client(name="TailDecoy", phone="+79991230000")
+
+        resp = api_client.get("/api/v1/clients", params={"phone": "4567"})
+        body = resp.json()
+        assert [c["name"] for c in body["items"]] == ["TailProbe"]
+        assert body["total"] == 1
+
+    def test_phone_query_side_leading_digit_stripped(
+        self, api_client, create_client
+    ) -> None:
+        """Spec §3: an 11-digit query with leading 8 (or +7) reduces on the
+        query side too → matches the stored `+79991234567`."""
+        create_client(name="RuPlain", phone="+79991234567")
+        create_client(name="RuDecoy", phone="+79991230000")
+
+        for query in ("89991234567", "+79991234567"):
+            resp = api_client.get("/api/v1/clients", params={"phone": query})
+            assert resp.status_code == 200, f"phone={query!r}: {resp.text}"
+            body = resp.json()
+            assert [c["name"] for c in body["items"]] == ["RuPlain"], query
+
+    def test_archived_client_hidden_by_default_visible_with_status_all(
+        self, api_client, create_client
+    ) -> None:
+        """Spec §4: `phone` ANDs with `status` — archived matching row is
+        excluded under the default active-only, included with status=all."""
+        create_client(name="ArchActive", phone="+79991234567")
+        gone = create_client(name="ArchGone", phone="+79991234599")
+        assert (
+            api_client.post(f"/api/v1/clients/{gone['id']}/archive").status_code == 200
+        )
+
+        resp = api_client.get("/api/v1/clients", params={"phone": "999123"})
+        assert [c["name"] for c in resp.json()["items"]] == ["ArchActive"]
+
+        resp = api_client.get(
+            "/api/v1/clients", params={"phone": "999123", "status": "all"}
+        )
+        assert sorted(c["name"] for c in resp.json()["items"]) == [
+            "ArchActive",
+            "ArchGone",
+        ]
+
+    @pytest.mark.parametrize("phone", ["12", "9" * 16, "abc"])
+    def test_phone_bounds_return_422(self, api_client, phone) -> None:
+        """Spec §7: <4 digits, >15 digits, or empty-after-strip → 422
+        VALIDATION_ERROR from the ClientListParams FIELD validator."""
+        resp = api_client.get("/api/v1/clients", params={"phone": phone})
+        assert resp.status_code == 422, (
+            f"phone={phone!r} must 422, got {resp.status_code}: {resp.text}"
+        )
+        assert resp.json()["detail"]["code"] == "VALIDATION_ERROR"
+
+    def test_phone_and_q_combine_as_and(self, api_client, create_client) -> None:
+        """Spec §4: `phone` + `q` = AND (framework pass-through): only the
+        client matching BOTH the digits filter and the literal q survives."""
+        create_client(name="Alpha Probe", phone="+79991234567")  # phone ✓ q ✓
+        create_client(name="Beta Probe", phone="+79991234599")  # phone ✓ q ✗
+        create_client(name="Alpha Decoy", phone="+79997770000")  # phone ✗ q ✓
+
+        resp = api_client.get(
+            "/api/v1/clients", params={"phone": "999123", "q": "Alpha"}
+        )
+        body = resp.json()
+        assert [c["name"] for c in body["items"]] == ["Alpha Probe"]
+        assert body["total"] == 1
+
+    def test_q_literal_substring_unchanged_regression(
+        self, api_client, create_client
+    ) -> None:
+        """`q` stays LITERAL (byte-identical #212 behavior): `999123` matches
+        the raw-stored `+79991234567` but NOT the masked `8 999 123-45-67`
+        (spaces/dashes break the literal run) — unlike `?phone=`."""
+        create_client(name="QPlain", phone="+79991234567")
+        create_client(name="QMasked", phone="8 999 123-45-67")
+
+        resp = api_client.get("/api/v1/clients", params={"q": "999123"})
+        body = resp.json()
+        assert [c["name"] for c in body["items"]] == ["QPlain"]
+        assert body["total"] == 1
+
+    def test_phone_filter_reflected_in_pagination_envelope(
+        self, api_client, create_client
+    ) -> None:
+        """Envelope `{items, total, page, per_page}` reflects the phone filter:
+        total = filtered count (count query carries the predicate), not page
+        length and not the unfiltered row count."""
+        for i in range(3):
+            create_client(name=f"PageProbe {i}", phone=f"+7999123001{i}")
+        create_client(name="PageDecoy", phone="+79997770000")
+
+        resp = api_client.get(
+            "/api/v1/clients", params={"phone": "999123", "per_page": 2}
+        )
+        body = resp.json()
+        assert set(body.keys()) == {"items", "total", "page", "per_page"}
+        assert len(body["items"]) == 2
+        assert body["total"] == 3
+        assert body["page"] == 1
+        assert body["per_page"] == 2

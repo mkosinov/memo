@@ -1,9 +1,11 @@
 """Pydantic schemas for the clients domain."""
 
 from datetime import date, datetime
+from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, computed_field
 
+from src.domain.phone_digits import to_national_digits
 from src.models.enums import ArchiveStatus, Channel
 from src.schemas.pagination import PaginationParams
 
@@ -95,6 +97,23 @@ class ClientWithStats(ClientResponse):
     missed_records: int = 0
 
 
+def _phone_param_digits(v: str | None) -> str | None:
+    """GH #221 §4 query-value reduction + bounds: empty/missing → None (no
+    filter); otherwise §3 national-digit reduction, then the 4-15-digit
+    guard (ValueError → 422, mirroring the ``q`` Field bounds)."""
+    if v is None or v == "":
+        return None
+    return _require_4_15_digits(to_national_digits(v))
+
+
+def _require_4_15_digits(digits: str | None) -> str:
+    """GH #221 §4 bounds guard for the ``phone`` param (after §3 reduction):
+    4-15 digits, else ValueError → 422 (mirrors the ``q`` field bounds)."""
+    if digits is None or not (4 <= len(digits) <= 15):
+        raise ValueError("phone must contain 4-15 digits after stripping non-digits")
+    return digits
+
+
 class ClientListParams(PaginationParams):
     """Query parameters for GET /api/v1/clients with filtering, pagination, sorting.
 
@@ -104,6 +123,20 @@ class ClientListParams(PaginationParams):
     """
 
     q: str | None = Field(default=None, min_length=2, max_length=100)
+    # GH #221 §4: digits-mode national-substring filter. Reduction+bounds as
+    # a BeforeValidator (NOT @field_validator): the clients list is a
+    # Depends() params model, and FastAPI 0.136 validates each query field
+    # through its own TypeAdapter — field-level validators run there and map
+    # ValueError → 422 VALIDATION_ERROR (like the `q` Field bounds), while a
+    # model-level @field_validator only fires at model construction inside
+    # solve_dependencies, uncaught → 500. BeforeValidator also reuses the
+    # single §3 rule (to_national_digits) so query-side leading 7/8 of an
+    # 11-digit query is stripped (query `89991234567` → bound `9991234567`),
+    # matching the UDF applied to the stored side. Digits-only bound value →
+    # the service needs no LIKE-wildcard escaping.
+    phone: Annotated[str | None, BeforeValidator(_phone_param_digits)] = Field(
+        default=None, description="GH #221: digits-mode national-substring filter"
+    )
     status: ArchiveStatus = ArchiveStatus.ACTIVE
     created_from: date | None = None
     created_to: date | None = None

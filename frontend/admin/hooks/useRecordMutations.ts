@@ -152,6 +152,11 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
       //    immediately. Awaited: the mutation stays pending until the refetch
       //    lands. Skipped on the existing-client reuse path (no new client).
       //    Reader: ClientsPage (['clients'])
+      //    JUSTIFIED raw-call deviation from the #239 invalidation map (see
+      //    FAMILY RULES header in lib/invalidate.ts): conditional per-hook
+      //    extra + needs await (invalidateEntities is void; the awaitable
+      //    map variant, invalidateEntitiesAsync, would redundantly refetch
+      //    the whole ['records'] family on top of step 5 above).
       if (createdClientId !== null) {
         await queryClient.invalidateQueries({ queryKey: qk.clients });
       }

@@ -50,14 +50,14 @@ export type EntityName =
  *                point key ['record', id] ON TOP
  * - activities:  ScheduleDataContext.tsx (activityRange prefix — covers
  *                activitiesForRecords readers too)
- * - masters:     useMastersMutations.ts:60 + MastersTable.tsx:213
+ * - masters:     useMastersMutations.ts + MastersTable.tsx
  *                (delete/resolve also refresh ['records'] via useRecordData)
  * - services:    useServicesMutations.ts (#223: create/update also touch
  *                ['materials'] — «Где используется» counters; delete also
- *                ['records']) + ServicesTable.tsx:203
- * - locations:   useLocationsMutations.ts + LocationsTable.tsx:235
+ *                ['records']) + ServicesTable.tsx
+ * - locations:   useLocationsMutations.ts + LocationsTable.tsx
  *                (delete/resolve also refresh ['records'])
- * - materials:   useMaterialsMutations.ts + MaterialsTable.tsx:192
+ * - materials:   useMaterialsMutations.ts + MaterialsTable.tsx
  * - tags:        useTagsMutations.ts
  * - photos:      usePhotosMutations.ts
  * - visitors:    ['visitors'] prefix (visitors(clientId) readers)
@@ -90,7 +90,12 @@ export const INVALIDATION_MAP: Record<EntityName, readonly (readonly unknown[])[
  * unknown names (runtime JSON past the TS union — e.g. backend-only
  * `users`) are skipped with a dev-mode warning (spec §5).
  */
-export function invalidateEntities(qc: QueryClient, entities: readonly string[]): void {
+/** Shared walk of the map: dedupes identical families across the union and
+ *  skips unknown names (runtime JSON past the TS union — e.g. backend-only
+ *  `users`) with a dev-mode warning (spec §5). Single source of the
+ *  semantics shared by the sync and awaitable variants. */
+function distinctFamilies(entities: readonly string[]): readonly (readonly unknown[])[] {
+  const result: (readonly unknown[])[] = [];
   const seen = new Set<readonly unknown[]>();
   for (const e of entities) {
     const families = INVALIDATION_MAP[e as EntityName];
@@ -102,8 +107,32 @@ export function invalidateEntities(qc: QueryClient, entities: readonly string[])
     for (const k of families) {
       if (!seen.has(k)) {
         seen.add(k);
-        void qc.invalidateQueries({ queryKey: k });
+        result.push(k);
       }
     }
   }
+  return result;
+}
+
+/**
+ * Invalidate the family prefixes for the given entity names (fire-and-forget;
+ * the SSE provider uses this).
+ */
+export function invalidateEntities(qc: QueryClient, entities: readonly string[]): void {
+  for (const k of distinctFamilies(entities))
+    void qc.invalidateQueries({ queryKey: k });
+}
+
+/**
+ * Awaitable variant (GH #140 contract, #239 quality round): resolves only
+ * after every family's refetch has landed, so `mutateAsync().then()` sees
+ * fresh cache. Same dedup + unknown-entity semantics as invalidateEntities.
+ * Used at own-mutation sites where awaiting was the pre-existing contract.
+ */
+export async function invalidateEntitiesAsync(
+  qc: QueryClient,
+  entities: readonly string[],
+): Promise<void> {
+  for (const k of distinctFamilies(entities))
+    await qc.invalidateQueries({ queryKey: k });
 }

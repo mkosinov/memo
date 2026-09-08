@@ -142,16 +142,117 @@ test.describe('Client phone typeahead — record form (GH #221)', () => {
   });
 
   // ── Scenarios 3 & 4: save-time resolution (Task 7) ────────────────────
-  test.fixme('3. Unknown full number creates a client (WYSIWYG); incomplete blocks save', async () => {
-    // Task 7: unpicked save path — complete-valid-number guard + fresh
-    // digits fetch + create-with-visible-string. Written in Task 6's spec
-    // file as a placeholder; unskipped by Task 7 together with its unit
-    // coverage (useRecordMutations digits resolution).
+  test('3. Unknown full number creates a client (WYSIWYG); incomplete blocks save', async ({
+    page,
+    request,
+  }) => {
+    // Unique 10-digit national number → unique DB cleanup.
+    const uid = `${Date.now()}`.slice(-7);
+    const digits = `999556${uid}`.slice(0, 10); // 999 556 xx xx
+
+    await openAddTab(page);
+
+    // ── Part A: partial number → save blocked, nothing created ────────
+    await page
+      .locator('[data-testid="input-phone"]')
+      .pressSequentially(digits.slice(0, 6)); // 6 of 10 digits — incomplete
+    await page
+      .locator('[data-testid="input-client-name"]')
+      .fill(`Незавершённый E2E-221 ${uid}`);
+    await page.locator('[data-testid="btn-create-record"]').click();
+
+    // The retryable-input guard message, nothing else happens.
+    const infoToast = page.locator('[data-testid="toast-info"]');
+    await expect(infoToast).toContainText(
+      'Проверьте номер телефона — возможно, он введён не полностью',
+      { timeout: 10_000 },
+    );
+    // The success toast never fires and no record-creation request is made.
+    await expect(page.locator('text=Запись создана')).toHaveCount(0);
+
+    // VERIFY DB — no client was created for the incomplete number.
+    const notCreated = queryDBRow(
+      `SELECT id FROM clients WHERE name LIKE 'Незавершённый E2E-221 ${uid}%'`,
+    );
+    expect(notCreated).toBeNull();
+
+    // ── Part B: full unknown number → client created, phone EXACTLY as displayed ──
+    // Clear the partial input and finish typing the full number.
+    const phoneInput = page.locator('[data-testid="input-phone"]');
+    await phoneInput.fill('');
+    await phoneInput.pressSequentially(digits);
+    // The mask keeps rendering progressively (display = WYSIWYG truth).
+    const fullDisplay = await phoneInput.inputValue();
+    await page
+      .locator('[data-testid="input-client-name"]')
+      .fill(`Новый WYSIWYG E2E-221 ${uid}`);
+    await page.locator('[data-testid="btn-create-record"]').click();
+
+    await expect(page.locator('text=Запись создана')).toBeVisible({ timeout: 15_000 });
+
+    // VERIFY DB — the client exists with the phone EXACTLY as displayed.
+    await expect.poll(() => {
+      const row = queryDBRow(
+        `SELECT id, phone FROM clients WHERE name = 'Новый WYSIWYG E2E-221 ${uid}'`,
+      );
+      return row !== null && row.phone === fullDisplay;
+    }, { timeout: 30_000, intervals: [200, 500, 1000] }).toBe(true);
+
+    // Cleanup: the freshly created client.
+    const created = queryDBRow(
+      `SELECT id FROM clients WHERE name = 'Новый WYSIWYG E2E-221 ${uid}'`,
+    );
+    if (created) await cleanup(request, `/api/v1/clients/${created.id}`);
   });
 
-  test.fixme('4. Ignored suggestion never duplicates — save binds the existing client', async () => {
-    // Task 7: unpicked save with the full masked number typed must resolve
-    // the existing client by digits equality (no duplicate create).
+  test('4. Ignored suggestion never duplicates — save binds the existing client', async ({
+    page,
+    request,
+  }) => {
+    // Seed the client with the canonical stored format.
+    const seeded = await createTestClient(request, {
+      name: 'Дубликат-щит E2E-221',
+      phone: '+79991234567',
+    });
+    let recordId: string | null = null;
+
+    try {
+      await openAddTab(page);
+
+      // Type the masked form of the SAME number — the suggestion appears…
+      await typePhoneQuery(page, '+79991234567');
+      await expect(
+        page.getByRole('option', { name: /Дубликат-щит E2E-221/ }),
+      ).toBeVisible({ timeout: 10_000 });
+
+      // …and is deliberately IGNORED (no pick).
+      await page
+        .locator('[data-testid="input-client-name"]')
+        .fill('Дубликат-щит E2E-221');
+      await page.locator('[data-testid="btn-create-record"]').click();
+      await expect(page.locator('text=Запись создана')).toBeVisible({ timeout: 15_000 });
+
+      // VERIFY DB — the record is bound to the SEEDED client…
+      await expect.poll(() => {
+        const row = queryDBRow(
+          `SELECT id FROM records WHERE client_id='${seeded.id}' ORDER BY created_at DESC LIMIT 1`,
+        );
+        recordId = row?.id as string | null;
+        return recordId !== null;
+      }, { timeout: 30_000, intervals: [200, 500, 1000] }).toBe(true);
+
+      // …and NO duplicate client was created for the typed number.
+      await expect.poll(() => {
+        const dup = queryDBRow(
+          `SELECT COUNT(*) AS n FROM clients
+           WHERE name LIKE 'Дубликат-щит E2E-221%' AND id != '${seeded.id}'`,
+        );
+        return dup?.n === 0;
+      }, { timeout: 30_000, intervals: [200, 500, 1000] }).toBe(true);
+    } finally {
+      if (recordId) await cleanupRecord(request, recordId);
+      await cleanup(request, `/api/v1/clients/${seeded.id}`);
+    }
   });
 
   // ── Scenario 5: archived clients are absent from suggestions ──────────
@@ -247,9 +348,10 @@ test.describe('Client phone typeahead — record form (GH #221)', () => {
 
   // ── Scenario 7: mask + threshold + WYSIWYG save (Task 7) ──────────────
   // GH #221: the WYSIWYG create path (unpicked save stores the visible
-  // string) lands in Task 7 — the save assertion below needs it.
-  test.fixme('7. Mask as you type; silence below the threshold; save stores the visible string', async ({
+  // string) is covered by the save assertion below (Task 7 unskipped it).
+  test('7. Mask as you type; silence below the threshold; save stores the visible string', async ({
     page,
+    request,
   }) => {
     // Unique 10-digit national number (999xxx pattern → RU grouping
     // XXX XXX XX XX); uniqueness keeps DB cleanup surgical.
@@ -281,6 +383,19 @@ test.describe('Client phone typeahead — record form (GH #221)', () => {
 
     // Exactly one typeahead request fired in total (zero below threshold).
     expect(spy.count()).toBe(1);
+
+    // ── ACTION 3: save unpicked → the visible string IS the stored phone ──
+    await page.locator('[data-testid="input-client-name"]').fill(clientName);
+    await page.locator('[data-testid="btn-create-record"]').click();
+    await expect(page.locator('text=Запись создана')).toBeVisible({ timeout: 15_000 });
+
+    await expect.poll(() => {
+      const row = queryDBRow(`SELECT id, phone FROM clients WHERE name = '${clientName}'`);
+      return row !== null && row.phone === expectedDisplay;
+    }, { timeout: 30_000, intervals: [200, 500, 1000] }).toBe(true);
+
+    const created = queryDBRow(`SELECT id FROM clients WHERE name = '${clientName}'`);
+    if (created) await cleanup(request, `/api/v1/clients/${created.id}`);
   });
 
   // ── Task 6 nit: no onBlur exact-fetch on the phone field (REMOVED) ────

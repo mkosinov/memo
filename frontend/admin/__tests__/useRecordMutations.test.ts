@@ -7,6 +7,7 @@ vi.mock('@memo/api-client', () => ({
   createRecord: vi.fn(),
   createClient: vi.fn(),
   getClientByPhone: vi.fn(),
+  getClientsPaged: vi.fn(),
   getRecord: vi.fn(),
   updateVisitStatus: vi.fn(),
   patchRecord: vi.fn(),
@@ -31,6 +32,7 @@ import {
   createRecord,
   createClient,
   getClientByPhone,
+  getClientsPaged,
   patchRecord,
   patchActivity,
   createPayment,
@@ -42,12 +44,13 @@ import {
   patchVisit,
   deleteVisit,
 } from '@memo/api-client';
-import { useRecordMutations } from '../hooks/useRecordMutations';
+import { useRecordMutations, toNationalDigits } from '../hooks/useRecordMutations';
 import type { PaginatedResponse, RecordResponse, PaymentResponse } from '@memo/api-client';
 
 const mockCreateRecord = vi.mocked(createRecord);
 const mockCreateClient = vi.mocked(createClient);
 const mockGetClientByPhone = vi.mocked(getClientByPhone);
+const mockGetClientsPaged = vi.mocked(getClientsPaged);
 const mockPatchRecord = vi.mocked(patchRecord);
 const mockPatchActivity = vi.mocked(patchActivity);
 const mockCreatePayment = vi.mocked(createPayment);
@@ -143,6 +146,13 @@ describe('useRecordMutations', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockEnqueuePendingAction.mockReset();
+    // Default: no client matches the typed digits (unknown-number create path).
+    mockGetClientsPaged.mockResolvedValue({
+      items: [],
+      total: 0,
+      page: 1,
+      per_page: 10,
+    } as never);
     mockCreateRecord.mockResolvedValue(mockRecordResponse as never);
     mockCreateClient.mockResolvedValue(mockClientResponse as never);
     mockPatchRecord.mockResolvedValue(mockRecordResponse as never);
@@ -160,10 +170,8 @@ describe('useRecordMutations', () => {
   afterEach(() => vi.restoreAllMocks());
 
   describe('createRecord — clients-list staleness (#140)', () => {
-    it('invalidates [clients] when a NEW client is created via the phone-collision/409 catch branch', async () => {
-      // getClientByPhone rejects (phone collision / 409) → falls into catch → createClient
-      mockGetClientByPhone.mockRejectedValue(new Error('409 conflict') as never);
-
+    it('invalidates [clients] when a NEW client is created via the unknown-number create branch', async () => {
+      // No client matches the typed digits → falls into createClient
       const { queryClient, wrapper } = createQueryClientWrapper();
       const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
       const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
@@ -189,7 +197,7 @@ describe('useRecordMutations', () => {
         );
       });
 
-      expect(mockGetClientByPhone).not.toHaveBeenCalled();
+      expect(mockGetClientsPaged).not.toHaveBeenCalled();
       expect(mockCreateClient).toHaveBeenCalledWith({
         name: 'Новый клиент',
         phone: '',
@@ -198,9 +206,14 @@ describe('useRecordMutations', () => {
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['clients'] });
     });
 
-    it('does NOT invalidate [clients] when an EXISTING client is reused via getClientByPhone', async () => {
-      // Existing-client path: lookup succeeds → createClient never runs → no new client
-      mockGetClientByPhone.mockResolvedValue({ ...mockClientResponse, id: 'c-existing' } as never);
+    it('does NOT invalidate [clients] when an EXISTING client is reused via the digits fetch', async () => {
+      // Existing-client path: digits fetch finds a match → createClient never runs → no new client
+      mockGetClientsPaged.mockResolvedValue({
+        items: [{ ...mockClientResponse, id: 'c-existing', phone: '+79990001122' }],
+        total: 1,
+        page: 1,
+        per_page: 10,
+      } as never);
 
       const { queryClient, wrapper } = createQueryClientWrapper();
       const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
@@ -267,7 +280,12 @@ describe('useRecordMutations', () => {
     });
 
     it('still resolves-or-creates when nothing is picked (unpicked path unchanged)', async () => {
-      mockGetClientByPhone.mockResolvedValue({ ...mockClientResponse, id: 'c-existing' } as never);
+      mockGetClientsPaged.mockResolvedValue({
+        items: [{ ...mockClientResponse, id: 'c-existing', phone: '+79990001122' }],
+        total: 1,
+        page: 1,
+        per_page: 10,
+      } as never);
       const { wrapper } = createQueryClientWrapper();
       const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
 
@@ -275,10 +293,151 @@ describe('useRecordMutations', () => {
         await result.current.createRecord(baseCreateRecordInput, serviceTariffs);
       });
 
-      expect(mockGetClientByPhone).toHaveBeenCalledWith('+79990001122');
+      expect(mockGetClientsPaged).toHaveBeenCalledWith({ phone: '9990001122', per_page: 10 });
+      expect(mockGetClientByPhone).not.toHaveBeenCalled();
       expect(mockCreateRecord).toHaveBeenCalledWith(
         expect.objectContaining({ client_id: 'c-existing' }),
       );
+    });
+  });
+
+  // ─── GH #221 Task 7: save-time digits resolution (no duplicates, fail closed) ───
+
+  describe('toNationalDigits (spec §3 — mirror of Python to_national_digits)', () => {
+    it('strips non-digits from a formatted string', () => {
+      expect(toNationalDigits('+7 (999) 123-45-67')).toBe('9991234567');
+    });
+
+    it('drops the leading 7/8 of an 11-digit RU number', () => {
+      expect(toNationalDigits('89991234567')).toBe('9991234567');
+      expect(toNationalDigits('79991234567')).toBe('9991234567');
+      expect(toNationalDigits('+7 999 123 45 67')).toBe('9991234567');
+    });
+
+    it('keeps 10-digit strings as-is', () => {
+      expect(toNationalDigits('9991234567')).toBe('9991234567');
+    });
+
+    it('tolerates NULL/empty/no-digits → empty string', () => {
+      expect(toNationalDigits(null)).toBe('');
+      expect(toNationalDigits(undefined)).toBe('');
+      expect(toNationalDigits('')).toBe('');
+      expect(toNationalDigits('—')).toBe('');
+    });
+
+    it('does NOT drop leading 7/8 of a shorter-than-11 digit string', () => {
+      // 7 digits starting with 8 — not an 11-digit RU number, keep as-is
+      expect(toNationalDigits('8123456')).toBe('8123456');
+    });
+  });
+
+  describe('createRecord — unpicked save-time resolution (GH #221 Task 7)', () => {
+    /** Input exactly as the mask renders a full RU number (WYSIWYG). */
+    const maskedInput = {
+      ...baseCreateRecordInput,
+      phone: '+7 (999) 123-45-67',
+    };
+
+    it('(a) binds the EXISTING client by digits equality; createClient NOT called', async () => {
+      // Stored format differs from the visible string — only national digits match.
+      mockGetClientsPaged.mockResolvedValue({
+        items: [{ ...mockClientResponse, id: 'c-existing', phone: '+79991234567' }],
+        total: 1,
+        page: 1,
+        per_page: 10,
+      } as never);
+      const { wrapper } = createQueryClientWrapper();
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+
+      await act(async () => {
+        await result.current.createRecord(maskedInput, serviceTariffs);
+      });
+
+      // Fresh full-digits fetch — never the suggestion snapshot, never the exact route.
+      expect(mockGetClientsPaged).toHaveBeenCalledWith({ phone: '9991234567', per_page: 10 });
+      expect(mockGetClientByPhone).not.toHaveBeenCalled();
+      expect(mockCreateClient).not.toHaveBeenCalled();
+      expect(mockCreateRecord).toHaveBeenCalledWith(
+        expect.objectContaining({ client_id: 'c-existing' }),
+      );
+    });
+
+    it('(a2) matches a client stored in an OLD format (8 999 123-45-67)', async () => {
+      mockGetClientsPaged.mockResolvedValue({
+        items: [{ ...mockClientResponse, id: 'c-old-format', phone: '8 999 123-45-67' }],
+        total: 1,
+        page: 1,
+        per_page: 10,
+      } as never);
+      const { wrapper } = createQueryClientWrapper();
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+
+      await act(async () => {
+        await result.current.createRecord(maskedInput, serviceTariffs);
+      });
+
+      expect(mockCreateClient).not.toHaveBeenCalled();
+      expect(mockCreateRecord).toHaveBeenCalledWith(
+        expect.objectContaining({ client_id: 'c-old-format' }),
+      );
+    });
+
+    it('(b) unknown number → createClient called with the VISIBLE formatted string', async () => {
+      const { wrapper } = createQueryClientWrapper();
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+
+      await act(async () => {
+        await result.current.createRecord(maskedInput, serviceTariffs);
+      });
+
+      // WYSIWYG: the visible string is stored verbatim, not the reduced digits.
+      expect(mockCreateClient).toHaveBeenCalledWith({
+        name: 'Новый клиент',
+        phone: '+7 (999) 123-45-67',
+        channel: 'whatsapp',
+      });
+      expect(mockCreateRecord).toHaveBeenCalledWith(
+        expect.objectContaining({ client_id: 'c-new' }),
+      );
+    });
+
+    it('(c) fetch failure propagates — mutation rejects, NO silent create (fail closed)', async () => {
+      mockGetClientsPaged.mockRejectedValue(new Error('network down') as never);
+      const { wrapper } = createQueryClientWrapper();
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+
+      await expect(
+        act(async () => {
+          await result.current.createRecord(maskedInput, serviceTariffs);
+        }),
+      ).rejects.toThrow('network down');
+
+      expect(mockCreateClient).not.toHaveBeenCalled();
+      expect(mockCreateRecord).not.toHaveBeenCalled();
+    });
+
+    it('(d) two clients sharing the national digits → the FIRST returned row binds', async () => {
+      mockGetClientsPaged.mockResolvedValue({
+        items: [
+          { ...mockClientResponse, id: 'c-first', phone: '+79991234567' },
+          { ...mockClientResponse, id: 'c-second', phone: '8 999 123-45-67' },
+        ],
+        total: 2,
+        page: 1,
+        per_page: 10,
+      } as never);
+      const { wrapper } = createQueryClientWrapper();
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+
+      await act(async () => {
+        await result.current.createRecord(maskedInput, serviceTariffs);
+      });
+
+      // First-match parity with the old first-or-404 semantics.
+      expect(mockCreateRecord).toHaveBeenCalledWith(
+        expect.objectContaining({ client_id: 'c-first' }),
+      );
+      expect(mockCreateClient).not.toHaveBeenCalled();
     });
   });
 

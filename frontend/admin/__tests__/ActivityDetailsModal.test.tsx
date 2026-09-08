@@ -999,15 +999,16 @@ describe('NewBookingTab — phone optional, visitor optional, tariff required', 
     expect(screen.getByTestId('select-channel')).toBeInTheDocument();
   });
 
-  it('allows submit with name only (phone optional)', () => {
+  it('blocks submit with name only — GH #221 requires a complete phone (decision 11)', () => {
     render(<NewBookingTab {...defaultProps} />);
-    // Fill only name
+    // Fill only name — the empty phone is not a complete valid number, so the
+    // completeness guard blocks the save (spec §6 step 2).
     fireEvent.change(screen.getByTestId('input-client-name'), { target: { value: 'Test' } });
     fireEvent.click(screen.getByTestId('btn-create-record'));
-    // Should NOT show "Заполните телефон и имя" error
-    expect(defaultProps.showToast).not.toHaveBeenCalledWith('Заполните телефон и имя');
-    // Should call onSubmit
-    expect(defaultProps.onSubmit).toHaveBeenCalled();
+    expect(defaultProps.onSubmit).not.toHaveBeenCalled();
+    expect(defaultProps.showToast).toHaveBeenCalledWith(
+      'Проверьте номер телефона — возможно, он введён не полностью',
+    );
   });
 
   it('validates tariff is selected before submit when visitors exist', () => {
@@ -1131,5 +1132,59 @@ describe('NewBookingTab — picked client (GH #221)', () => {
     fireEvent.change(screen.getByTestId('input-phone'), { target: { value: '+79991234567' } });
     fireEvent.blur(screen.getByTestId('input-phone'));
     expect(getClientByPhone).not.toHaveBeenCalled();
+  });
+
+  // ─── Task 7: completeness guard on the unpicked save (spec §2 decision 11) ───
+
+  it('(0) blocks the save on an INCOMPLETE number with the exact message; nothing submitted', () => {
+    render(<NewBookingTab {...defaultProps2} />);
+    // Half-typed number: mask shows it, but it is not a valid complete number.
+    fireEvent.change(screen.getByTestId('input-phone'), { target: { value: '+7 (999) 123' } });
+    fireEvent.change(screen.getByTestId('input-client-name'), { target: { value: 'Кто-то' } });
+    fireEvent.click(screen.getByTestId('btn-create-record'));
+
+    expect(defaultProps2.onSubmit).not.toHaveBeenCalled();
+    expect(defaultProps2.showToast).toHaveBeenCalledWith(
+      'Проверьте номер телефона — возможно, он введён не полностью',
+    );
+  });
+
+  it('(0b) blocks the save on an EMPTY phone; nothing submitted', () => {
+    render(<NewBookingTab {...defaultProps2} />);
+    fireEvent.change(screen.getByTestId('input-client-name'), { target: { value: 'Кто-то' } });
+    fireEvent.click(screen.getByTestId('btn-create-record'));
+
+    expect(defaultProps2.onSubmit).not.toHaveBeenCalled();
+    expect(defaultProps2.showToast).toHaveBeenCalledWith(
+      'Проверьте номер телефона — возможно, он введён не полностью',
+    );
+  });
+
+  it('(picked) never validates the phone — picked clients come from stored data', async () => {
+    // A pick freezes the field with the client label (not a parseable phone),
+    // yet the save must go through untouched.
+    await typeAndPick();
+    fireEvent.click(screen.getByTestId('btn-create-record'));
+
+    expect(defaultProps2.showToast).not.toHaveBeenCalledWith(
+      'Проверьте номер телефона — возможно, он введён не полностью',
+    );
+    expect(defaultProps2.onSubmit).toHaveBeenCalledTimes(1);
+    expect(defaultProps2.onSubmit.mock.calls[0][0]).toEqual(
+      expect.objectContaining({ kind: 'picked', client_id: 'c1' }),
+    );
+  });
+
+  it('(unpicked, complete) a complete number passes the guard and submits', () => {
+    render(<NewBookingTab {...defaultProps2} />);
+    fireEvent.change(screen.getByTestId('input-phone'), { target: { value: '+79991234567' } });
+    fireEvent.change(screen.getByTestId('input-client-name'), { target: { value: 'Новый' } });
+    fireEvent.click(screen.getByTestId('btn-create-record'));
+
+    expect(defaultProps2.showToast).not.toHaveBeenCalled();
+    expect(defaultProps2.onSubmit).toHaveBeenCalledTimes(1);
+    expect(defaultProps2.onSubmit.mock.calls[0][0]).toEqual(
+      expect.objectContaining({ kind: 'unpicked' }),
+    );
   });
 });

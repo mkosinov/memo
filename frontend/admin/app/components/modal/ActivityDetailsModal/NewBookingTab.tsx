@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useCallback } from 'react';
+import { parsePhoneNumberFromString } from 'libphonenumber-js/min';
 import PhoneInput, { type PickedClient } from '@/app/components/shared/PhoneInput';
 import { getClientsPaged } from '@memo/api-client';
 import type { Tariff } from '@memo/domain';
@@ -101,6 +102,15 @@ export function NewBookingTab({ activity, serviceTariffs, onSubmit, showToast }:
         seats: seatsCount,
       });
     } else {
+      // Completeness guard (GH #221 spec §2 decision 11, §6 step 2): the
+      // visible value must be a complete valid number before anything is
+      // fetched or created. Picked clients are never validated (stored data).
+      // Same library + same RU default as the AsYouType mask.
+      const parsed = parsePhoneNumberFromString(phone, 'RU');
+      if (!parsed?.isValid()) {
+        showToast('Проверьте номер телефона — возможно, он введён не полностью');
+        return; // nothing fetched, nothing created
+      }
       onSubmit({
         kind: 'unpicked',
         phone,

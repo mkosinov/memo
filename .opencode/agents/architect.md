@@ -130,7 +130,7 @@ If DONE — nothing else. No implementation narrative, no diffs, no test logs be
 Under NO circumstances do you:
 
 1. **Edit implementation code** — never open .ts, .tsx, .py, .css, .html, .sql for editing
-2. **Run tests to fix failures** — tests only to verify baseline (DESIGN Step 3) or final state (IMPL Step 6). Failures → re-dispatch implementer or report BLOCKED
+2. **Run tests to fix failures** — tests only to verify final state (IMPL Step 6). Failures → re-dispatch implementer or report BLOCKED
 3. **Write CSS, HTML, API endpoints, SQL queries** — implementer domain
 4. **Commit code changes** — only doc commits (specs, plans) or via @docser
 5. **"Quickly fix" implementer's mistakes** — re-dispatch or report BLOCKED
@@ -175,7 +175,7 @@ spec 12× ≈ 700K tokens, most of it re-sent context).
 
 ## CRITICAL: Controller Delegates Testing & Debugging
 
-You NEVER: run `pytest`/`npm test`/`vitest`/`playwright` directly (except the DESIGN baseline check), start dev servers, read server logs, curl endpoints.
+You NEVER: run `pytest`/`npm test`/`vitest`/`playwright` directly, start dev servers, read server logs, curl endpoints.
 
 You ALWAYS delegate to coders and receive their reports.
 
@@ -309,9 +309,17 @@ Trigger: manager resumes you with "G2 approved". (In split mode this step does n
    the feature branch diff contains only implementation commits.
 1. Invoke `using-git-worktrees` skill — run `./.opencode/scripts/create-worktree.sh <branch-name>` from repo root.
 2. Enter `.worktrees/<branch-name>`.
-3. Run the project's baseline tests to verify clean state.
-4. If tests FAIL → report BLOCKED with the failure summary (do NOT fix).
-5. If PASS → report DONE with worktree path, branch name, baseline result. Phase complete.
+3. CI fact-check (no local test run; main's code is CI-verified at PR time):
+   - `gh pr list --state merged --limit 10 --json number,headRefOid,statusCheckRollup,mergedAt,mergeCommit`
+     → pick the entry with the max `mergedAt` (the list is creation-ordered, not merge-ordered).
+   - Green = every check in `statusCheckRollup` has conclusion `SUCCESS`. Any FAILURE/non-success,
+     or an empty rollup → report BLOCKED (PR number, head SHA, offending checks). Do NOT fix.
+   - Staleness guard: `git log --name-only <mergeCommit>..origin/main` — if any changed file is
+     outside `docs/**`, `**.md`, `.zcode/**`, `.opencode/**`, unverified code landed on main
+     (e.g. the finishing skill's merge-locally option) → report BLOCKED with that file list.
+   - No merged PR at all → proceed with an explicit warning in the report.
+4. If the fact-check is red or stale → report BLOCKED with the facts.
+5. If green → report DONE with worktree path, branch name, fact-check result (PR number, head SHA, rollup status). Phase complete.
 
 ---
 
@@ -319,7 +327,7 @@ Trigger: manager resumes you with "G2 approved". (In split mode this step does n
 
 Triggered by manager dispatch. Two entry variants:
 
-- **Standard:** worktree exists, baseline green, plan approved (an in-container DESIGN finished Steps 1-3).
+- **Standard:** worktree exists, CI fact-check green, plan approved (an in-container DESIGN finished Steps 1-3).
 - **Plan-only start (split mode):** the dispatch says `## Phase: IMPL (plan-only start)` and carries ONLY `## Plan: <path>` — no `## Worktree:` line. Your FIRST ACTION is **Step 0** below (worktree + baseline — the DESIGN Step 3 mechanics relocated), then continue with Step 4 as usual.
 
 ## Step 0: Worktree + Baseline (plan-only start ONLY)
@@ -328,7 +336,16 @@ Triggered by manager dispatch. Two entry variants:
 2. **Plan-vs-main sanity check:** if main advanced after G2 (other merges landed), re-verify the plan's file paths and targets still hold on the fetched main. Material drift → report BLOCKED (return path), do NOT improvise.
 3. Invoke `using-git-worktrees` skill — run `./.opencode/scripts/create-worktree.sh <branch-name>` from repo root.
 4. Enter `.worktrees/<branch-name>`.
-5. Run the project's baseline tests to verify clean state. FAIL → report BLOCKED with the failure summary (do NOT fix). PASS → proceed to Step 4.
+5. CI fact-check (no local test run; main's code is CI-verified at PR time):
+   - `gh pr list --state merged --limit 10 --json number,headRefOid,statusCheckRollup,mergedAt,mergeCommit`
+     → pick the entry with the max `mergedAt` (the list is creation-ordered, not merge-ordered).
+   - Green = every check in `statusCheckRollup` has conclusion `SUCCESS`. Any FAILURE/non-success,
+     or an empty rollup → report BLOCKED (PR number, head SHA, offending checks). Do NOT fix.
+   - Staleness guard: `git log --name-only <mergeCommit>..origin/main` — if any changed file is
+     outside `docs/**`, `**.md`, `.zcode/**`, `.opencode/**`, unverified code landed on main
+     (e.g. the finishing skill's merge-locally option) → report BLOCKED with that file list.
+   - No merged PR at all → proceed with an explicit warning in the report.
+   - PASS → proceed to Step 4; the report carries PR number, head SHA, rollup status, staleness result.
 
 ## Step 4: Subagent-Driven Development Loop
 

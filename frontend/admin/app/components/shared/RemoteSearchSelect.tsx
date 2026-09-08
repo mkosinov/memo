@@ -30,6 +30,15 @@ export interface RemoteSearchSelectProps<
   canSearch?: (input: string) => boolean;
   /** Builds what onSearch receives; defaults to passing the input through. */
   buildParams?: (input: string) => Q;
+  /** Transforms the typed value before it lands in state (input mask — GH #221).
+   *  Runs once per keystroke; the formatted value is what canSearch/buildParams
+   *  and the debounced search see. Defaults to identity. */
+  formatInput?: (raw: string) => string;
+  /** Renders a dropdown/selected label for an item; defaults to
+   *  `${displayField} — ${subtitleField}`. */
+  getDisplayLabel?: (item: SearchItem) => string;
+  /** data-testid for the input element (consumer E2E anchors). */
+  inputTestId?: string;
 }
 
 interface SearchItem {
@@ -91,6 +100,9 @@ export default function RemoteSearchSelect<
   minChars = 2,
   canSearch,
   buildParams,
+  formatInput,
+  getDisplayLabel,
+  inputTestId,
 }: RemoteSearchSelectProps<Q>) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchItem[]>([]);
@@ -140,26 +152,28 @@ export default function RemoteSearchSelect<
 
   const handleInputChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
-      const val = e.target.value;
+      const val = formatInput ? formatInput(e.target.value) : e.target.value;
       setQuery(val);
       setSelectedLabel(null);
 
       if (debounceRef.current) clearTimeout(debounceRef.current);
       debounceRef.current = setTimeout(() => search(val), DEBOUNCE_MS);
     },
-    [search],
+    [search, formatInput],
   );
 
   const handleSelect = useCallback(
     (item: SearchItem) => {
-      const displayLabel = getDisplayText(item, displayField, subtitleField);
+      const displayLabel = getDisplayLabel
+        ? getDisplayLabel(item)
+        : getDisplayText(item, displayField, subtitleField);
       setSelectedLabel(displayLabel);
       setQuery('');
       setIsOpen(false);
       onChange(item.id);
       onSelectItem?.(item);
     },
-    [displayField, subtitleField, onChange, onSelectItem],
+    [displayField, subtitleField, getDisplayLabel, onChange, onSelectItem],
   );
 
   const handleClear = useCallback(() => {
@@ -191,6 +205,7 @@ export default function RemoteSearchSelect<
           style={INPUT_STYLE}
           readOnly={!!selectedLabel}
           aria-label={label}
+          data-testid={inputTestId}
         />
         {selectedLabel && (
           <button
@@ -222,7 +237,9 @@ export default function RemoteSearchSelect<
               role="option"
               aria-selected={false}
             >
-              {getDisplayText(item, displayField, subtitleField)}
+              {getDisplayLabel
+                ? getDisplayLabel(item)
+                : getDisplayText(item, displayField, subtitleField)}
             </li>
           ))}
         </ul>

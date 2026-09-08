@@ -37,7 +37,26 @@ interface NestedListFieldConfig {
   emptyText: string;
 }
 
-export type ServiceFieldConfig = TextFieldConfig | NumberFieldConfig | TextareaFieldConfig | NestedListFieldConfig;
+/**
+ * Materials checkbox multi-list with per-item notes (GH #223 spec §8).
+ * Options are supplied by the modal (dictionary-backed — ACTIVE materials
+ * from `/all?status=active`), NOT stored here: the config stays a pure
+ * description of the form shape (photoFields 'select' precedent).
+ */
+interface MaterialsFieldConfig {
+  type: 'materials';
+  key: string;
+  label: string;
+  notePlaceholder: string;
+  emptyText: string;
+}
+
+export type ServiceFieldConfig =
+  | TextFieldConfig
+  | NumberFieldConfig
+  | TextareaFieldConfig
+  | NestedListFieldConfig
+  | MaterialsFieldConfig;
 
 export const SERVICE_FIELDS: ServiceFieldConfig[] = [
   {
@@ -86,10 +105,14 @@ export const SERVICE_FIELDS: ServiceFieldConfig[] = [
     suffix: 'лет',
   },
   {
-    type: 'text',
-    key: 'material_hint',
-    label: 'Материал',
-    placeholder: 'Что взять с собой',
+    // GH #223 spec §8: replaces the retired `material_hint` text field —
+    // checkbox multi-list of ACTIVE materials + one-line note per checked
+    // item. Form state: {material_id, note?}[] (ServiceMaterialLink).
+    type: 'materials',
+    key: 'materials',
+    label: 'Материалы',
+    notePlaceholder: 'Заметка (что взять, сколько)...',
+    emptyText: 'Нет активных материалов',
   },
   {
     type: 'text',

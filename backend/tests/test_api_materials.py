@@ -144,6 +144,83 @@ class TestDeleteUnifiedRoute:
         assert resp.status_code == 404
 
 
+class TestDeleteLinkedMaterial:
+    """DELETE /api/v1/materials/{id} — linked to services via ``service_materials``.
+
+    Spec: docs/specs/2026-09-07-materials-services-link-design.md §7 + domain
+    rules ``materials.md`` FK table. The join is an auto-cascade dep in BOTH
+    directions (Material side here, Service side in test_api_services.py):
+      * linked + no body → 409 + dependency tree (entity ``service_materials``,
+        count, ``allowed_actions: ["cascade"]``), rows untouched;
+      * linked + body ``{"resolutions": {}}`` → one-transaction auto-cascade
+        of the links + hard delete of the material → 204; the SERVICE survives
+        with its materials list emptied;
+      * unlinked → 204 (no body) exactly as before #223.
+    """
+
+    def test_delete_linked_material_no_body_returns_409_with_tree(
+        self, api_client, create_service
+    ) -> None:
+        """No body + linked → 409; tree carries service_materials count + cascade."""
+        mat = _create_material(api_client, title="Акварель")
+        create_service(materials=[{"material_id": mat["id"]}])
+
+        resp = api_client.delete(f"/api/v1/materials/{mat['id']}")
+
+        assert resp.status_code == 409
+        body = resp.json()
+        assert body["detail"] == "has_dependencies"
+        deps = {d["entity"]: d for d in body["dependencies"]}
+        assert "service_materials" in deps
+        assert deps["service_materials"]["count"] == 1
+        assert deps["service_materials"]["allowed_actions"] == ["cascade"]
+        # Dry-run: material + join rows untouched.
+        assert api_client.get(f"/api/v1/materials/{mat['id']}").status_code == 200
+        rows = query_db(
+            f"SELECT * FROM service_materials WHERE material_id='{mat['id']}'"
+        )
+        assert len(rows) == 1
+
+    def test_delete_linked_material_with_body_cascades_links_204(
+        self, api_client, create_service
+    ) -> None:
+        """Body ``{"resolutions": {}}`` → links cascade + material gone → 204.
+
+        The service SURVIVES with its materials list emptied (the join rows
+        are the only casualty — GH #223 §7).
+        """
+        mat = _create_material(api_client, title="Гуашь")
+        service = create_service(materials=[{"material_id": mat["id"]}])
+
+        resp = api_client.request(
+            "DELETE", f"/api/v1/materials/{mat['id']}", json={"resolutions": {}}
+        )
+
+        assert resp.status_code == 204
+        # Material row hard-deleted.
+        assert api_client.get(f"/api/v1/materials/{mat['id']}").status_code == 404
+        # Join rows gone.
+        assert (
+            query_db(
+                f"SELECT * FROM service_materials WHERE material_id='{mat['id']}'"
+            )
+            == []
+        )
+        # Service survives with materials emptied.
+        svc = api_client.get(f"/api/v1/services/{service['id']}")
+        assert svc.status_code == 200
+        assert svc.json()["materials"] == []
+
+    def test_delete_unlinked_material_no_body_still_204(self, api_client) -> None:
+        """Unlinked material → 204 (no body) — the pre-#223 behavior is unchanged."""
+        mat = _create_material(api_client, title="Несвязанный")
+
+        resp = api_client.delete(f"/api/v1/materials/{mat['id']}")
+
+        assert resp.status_code == 204
+        assert api_client.get(f"/api/v1/materials/{mat['id']}").status_code == 404
+
+
 class TestArchiveRestoreEndpoints:
     """POST /api/v1/materials/{id}/archive + POST /{id}/restore — Task 11 (#207 §2/§14).
 
@@ -337,3 +414,120 @@ class TestMaterialListSorting:
         assert resp.status_code == 200
         titles = [m["title"] for m in resp.json()["items"]]
         assert titles == ["Apple", "Banana"]  # title ASC, not insertion order
+
+
+class TestUsedInServicesCount:
+    """``used_in_services_count`` — canonical usage counter (GH #223 §6).
+
+    One canonical definition: number of **non-archived** services linked to
+    the material, regardless of the request's ``status`` slice (the counter
+    describes the material, not the requested list). Computed on list / all /
+    get / mutation returns via one shared aggregate (no N+1).
+    """
+
+    def test_two_linked_active_services_count_2(self, api_client, create_service) -> None:
+        """Material linked from two active services → count 2 on GET /{id}."""
+        mat = _create_material(api_client, title="Акварель")
+        create_service(materials=[{"material_id": mat["id"]}])
+        create_service(materials=[{"material_id": mat["id"]}])
+
+        resp = api_client.get(f"/api/v1/materials/{mat['id']}")
+
+        assert resp.status_code == 200
+        assert resp.json()["used_in_services_count"] == 2
+
+    def test_count_includes_list_all_and_get(self, api_client, create_service) -> None:
+        """The same counter surfaces on list, /all and get paths."""
+        mat = _create_material(api_client, title="Гуашь")
+        create_service(materials=[{"material_id": mat["id"]}])
+
+        listed = api_client.get("/api/v1/materials").json()
+        assert next(m for m in listed["items"] if m["id"] == mat["id"])[
+            "used_in_services_count"
+        ] == 1
+
+        bare = api_client.get("/api/v1/materials/all").json()
+        assert next(m for m in bare if m["id"] == mat["id"])[
+            "used_in_services_count"
+        ] == 1
+
+        single = api_client.get(f"/api/v1/materials/{mat['id']}").json()
+        assert single["used_in_services_count"] == 1
+
+    def test_archiving_linked_service_decrements_count(
+        self, api_client, create_service
+    ) -> None:
+        """Counter decrements when a linked service is archived (spec §11)."""
+        mat = _create_material(api_client, title="Пастель")
+        s1 = create_service(materials=[{"material_id": mat["id"]}])
+        create_service(materials=[{"material_id": mat["id"]}])
+        assert api_client.get(f"/api/v1/materials/{mat['id']}").json()[
+            "used_in_services_count"
+        ] == 2
+
+        resp = api_client.post(f"/api/v1/services/{s1['id']}/archive")
+
+        assert resp.status_code == 200, f"archive service failed: {resp.text}"
+        assert api_client.get(f"/api/v1/materials/{mat['id']}").json()[
+            "used_in_services_count"
+        ] == 1
+
+    def test_no_links_count_0(self, api_client) -> None:
+        """Material with no links → 0; create response itself returns 0."""
+        created = _create_material(api_client, title="Ничейный")
+        assert created["used_in_services_count"] == 0
+
+        resp = api_client.get(f"/api/v1/materials/{created['id']}")
+        assert resp.json()["used_in_services_count"] == 0
+
+    def test_count_identical_across_status_slices(
+        self, api_client, create_service
+    ) -> None:
+        """Canonical definition: archived material shows the same counter as
+        in the active list (§6 — counter describes the material, not the slice)."""
+        mat = _create_material(api_client, title="Архивный материал")
+        create_service(materials=[{"material_id": mat["id"]}])
+        create_service(materials=[{"material_id": mat["id"]}])
+        _archive_material(mat["id"])
+
+        active = api_client.get("/api/v1/materials?status=active").json()
+        archived = api_client.get("/api/v1/materials?status=archived").json()
+        all_rows = api_client.get("/api/v1/materials?status=all").json()
+
+        def _count(body: dict) -> int | None:
+            return next(
+                (m["used_in_services_count"] for m in body["items"] if m["id"] == mat["id"]),
+                None,
+            )
+
+        assert _count(archived) == 2
+        assert _count(active) is None  # not in the active slice
+        assert _count(all_rows) == 2
+
+    def test_update_patch_and_archive_restore_returns_carry_count(
+        self, api_client, create_service
+    ) -> None:
+        """PUT/PATCH + POST archive|restore responses re-attach the counter."""
+        mat = _create_material(api_client, title="Масло")
+        create_service(materials=[{"material_id": mat["id"]}])
+
+        put = api_client.put(
+            f"/api/v1/materials/{mat['id']}",
+            json={"title": "Масло", "description": "обновлено"},
+        )
+        assert put.status_code == 200, f"PUT failed: {put.text}"
+        assert put.json()["used_in_services_count"] == 1
+
+        patch = api_client.patch(
+            f"/api/v1/materials/{mat['id']}", json={"title": "Масло про"}
+        )
+        assert patch.status_code == 200, f"PATCH failed: {patch.text}"
+        assert patch.json()["used_in_services_count"] == 1
+
+        archive = api_client.post(f"/api/v1/materials/{mat['id']}/archive")
+        assert archive.status_code == 200, f"archive failed: {archive.text}"
+        assert archive.json()["used_in_services_count"] == 1
+
+        restore = api_client.post(f"/api/v1/materials/{mat['id']}/restore")
+        assert restore.status_code == 200, f"restore failed: {restore.text}"
+        assert restore.json()["used_in_services_count"] == 1

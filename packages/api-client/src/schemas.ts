@@ -123,6 +123,28 @@ export type TagCreate = z.infer<typeof TagCreateSchema>;
 export const TagUpdateSchema = TagCreateSchema.partial();
 export type TagUpdate = z.infer<typeof TagUpdateSchema>;
 
+// ─── ServiceMaterial link payloads (GH #223) ────────────────────────────────
+// Read shape (nested on ServiceResponse): the material's `description` travels
+// with the link so clients render the `note ?? description` fallback without
+// extra fetches (spec §4/§5). Write shape (Create/Update): { material_id, note? }
+// mirrors backend `ServiceMaterialLinkIn`.
+
+/** Nested material on ServiceResponse (read shape). */
+export const ServiceMaterialItemSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  description: z.string(),
+  note: z.string().nullable(),
+});
+export type ServiceMaterialItem = z.infer<typeof ServiceMaterialItemSchema>;
+
+/** Material link sent on service create/update (write shape, spec §4). */
+export const ServiceMaterialLinkSchema = z.object({
+  material_id: z.string(),
+  note: z.string().nullable().optional(),
+});
+export type ServiceMaterialLink = z.infer<typeof ServiceMaterialLinkSchema>;
+
 // ─── ServiceResponse ───────────────────────────────────────────────────────
 
 export const ServiceResponseSchema = z.object({
@@ -135,9 +157,9 @@ export const ServiceResponseSchema = z.object({
   max_age: z.number().nullable(),
   duration: z.number(),
   record_info: z.string(),
-  material_hint: z.string().nullable().optional(),
   tariffs: z.array(TariffResponseSchema),
   tags: z.array(TagResponseSchema),
+  materials: z.array(ServiceMaterialItemSchema).default([]),
   archived: z.boolean(), // inverted: archived = true means the service is in the archive (#207)
   created_at: z.string(), // ISO datetime string
   updated_at: z.string(), // ISO datetime string
@@ -430,9 +452,9 @@ export const ServiceCreateSchema = z.object({
   max_age: z.number().min(0).max(18).default(18),
   duration: z.number().min(15).max(480),
   record_info: z.string().optional().default(''),
-  material_hint: z.string().optional().default(''),
   tariffs: z.array(TariffCreateSchema).default([]),
   tag_ids: z.array(z.string()).default([]),
+  materials: z.array(ServiceMaterialLinkSchema).default([]),
 });
 
 export type ServiceCreate = z.infer<typeof ServiceCreateSchema>;
@@ -472,6 +494,11 @@ export const MaterialResponseSchema = z.object({
   title: z.string(),
   description: z.string(),
   archived: z.boolean(), // inverted: archived = true means the material is in the archive (#207)
+  // GH #223 §6: number of NON-ARCHIVED services linked to the material —
+  // one canonical definition regardless of the request's status param.
+  // Backend always sends it (default 0); .default() keeps older cached
+  // payloads and hand-built test fixtures parsing.
+  used_in_services_count: z.number().int().default(0),
   created_at: z.string(),
   updated_at: z.string(),
 });

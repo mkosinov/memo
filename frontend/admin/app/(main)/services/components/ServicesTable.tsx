@@ -7,6 +7,7 @@ import { resolveDeleteService, ApiError } from '@memo/api-client';
 import { useUpdateService, useCreateService, useDeleteService, useArchiveService, useRestoreService } from '@/hooks/useServicesMutations';
 import { useUI } from '@/contexts/UIContext';
 import { useServicesTable } from '@/contexts/ServicesContext';
+import { useMaterialsRaw } from '@/hooks/useMaterials';
 import { ServiceModal } from './ServiceModal';
 import { ServiceFilters } from './ServiceFilters';
 import { DataTable } from '@/app/components/shared/DataTable';
@@ -20,6 +21,10 @@ import { qk } from '@/lib/queryKeys';
 export function ServicesTable() {
   // Server pagination/sort/search state (ServicesContext, #205 §5.2 + #139 §6.7)
   const servicesTable = useServicesTable();
+  // GH #223 T7 — ACTIVE materials feed the «Материал» filter select
+  // (spec §8; source: getAllMaterials /all?status=active, same as the
+  // ServiceModal picker — REUSE the Task 5 hook).
+  const { data: materials = [] } = useMaterialsRaw();
 
   const updateService = useUpdateService();
   const createService = useCreateService();
@@ -48,7 +53,10 @@ export function ServicesTable() {
     // Canonical PUT (GH #178): full typed ServiceUpdate — every field listed.
     // #207: the Update schema carries no archive flag — archive/restore goes
     // through POST /services/{id}/archive|restore, so PUT never flips it.
-    const payload: ServiceUpdate = {
+    // #223 T5/T13: the form sends `materials` (checkbox multi-list state →
+    // {material_id, note?}[] in ServiceModal's handleSubmit) — PUT hard-replaces
+    // the links. `material_hint` is retired everywhere (Task 13, spec §10).
+    const payload = {
       title: data.title as string,
       description: (data.description as string | null | undefined) ?? '',
       image_url: (data.image_url as string | null | undefined) ?? '',
@@ -57,10 +65,10 @@ export function ServicesTable() {
       max_age: (data.max_age as number | null | undefined) ?? 18,
       duration: data.duration as number,
       record_info: (data.record_info as string | null | undefined) ?? '',
-      material_hint: (data.material_hint as string | null | undefined) ?? '',
       tariffs: (data.tariffs as ServiceUpdate['tariffs'] | undefined) ?? [],
       tag_ids: (data.tag_ids as string[] | undefined) ?? [],
-    };
+      materials: (data.materials as ServiceUpdate['materials'] | undefined) ?? [],
+    } as ServiceUpdate;
     try {
       await updateService.mutateAsync({ id: editingService.id, data: payload });
       showToast('Услуга обновлена');
@@ -152,7 +160,10 @@ export function ServicesTable() {
             status={servicesTable.status}
             onSearchChange={servicesTable.setSearch}
             onStatusChange={(v) => servicesTable.setStatus(v as 'active' | 'all' | 'archived')}
-            onReset={() => { servicesTable.setSearch(''); servicesTable.setStatus('active'); }}
+            onReset={() => { servicesTable.setSearch(''); servicesTable.setStatus('active'); servicesTable.resetFilters(); }}
+            materials={materials}
+            materialFilter={servicesTable.filters.material_id}
+            onMaterialFilterChange={(v) => servicesTable.setFilters({ material_id: v })}
           />
         }
         toolbarExtras={

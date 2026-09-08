@@ -157,8 +157,17 @@ async def _add_visit(db_session, *, record, visitor: Visitor | None = None, pric
 
 
 class TestFKMatrixMaterial:
-    def test_material_has_no_deps(self) -> None:
-        assert FK_MATRIX.get(Material, []) == []
+    def test_has_exactly_one_dep(self) -> None:
+        assert {dep.entity for dep in FK_MATRIX[Material]} == {"service_materials"}
+
+    def test_service_materials_cascade_auto(self) -> None:
+        """GH #223 §7: the join is the single auto-cascade dep (relation «Услуга»)."""
+        dep = _deps_map(Material)["service_materials"]
+        assert dep.action == "cascade"
+        assert dep.auto is True
+        assert dep.allowed_actions == ["cascade"]
+        assert dep.nullable is False
+        assert dep.relation == "Услуга"
 
 
 class TestFKMatrixMaster:
@@ -217,9 +226,9 @@ class TestFKMatrixLocation:
 
 
 class TestFKMatrixService:
-    def test_has_exactly_four_deps(self) -> None:
+    def test_has_exactly_five_deps(self) -> None:
         assert {dep.entity for dep in FK_MATRIX[Service]} == {
-            "activities", "tariffs", "photos", "service_tags",
+            "activities", "tariffs", "photos", "service_tags", "service_materials",
         }
 
     def test_activities_blocks(self) -> None:
@@ -247,6 +256,15 @@ class TestFKMatrixService:
         assert dep.action == "cascade"
         assert dep.auto is True
         assert dep.allowed_actions == ["cascade"]
+
+    def test_service_materials_cascade_auto(self) -> None:
+        """GH #223 §7: join dep, shape identical to service_tags (relation «Материал»)."""
+        dep = _deps_map(Service)["service_materials"]
+        assert dep.action == "cascade"
+        assert dep.auto is True
+        assert dep.allowed_actions == ["cascade"]
+        assert dep.nullable is False
+        assert dep.relation == "Материал"
 
 
 class TestFKMatrixClient:

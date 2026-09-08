@@ -38,7 +38,10 @@ const mockServices = [
     max_age: 99,
     duration: 120,
     record_info: 'Запись обязательна',
-    material_hint: 'Масло, холст 30×40',
+    materials: [
+      { id: 'mat-1', title: 'Акварель', description: 'Акварельные краски — бумага 300 г/м²', note: null },
+      { id: 'mat-2', title: 'Масло', description: 'Масляные краски — классика', note: 'Густые, сохнут долго' },
+    ],
     tariffs: [{ id: 't-1', service_id: 'svc-1', title: 'Стандарт', description: null, price: 3500 }],
     tags: [{ id: 'tag-1', tag: 'взрослым' }],
     is_active: true,
@@ -55,7 +58,7 @@ const mockServices = [
     max_age: 99,
     duration: 90,
     record_info: '',
-    material_hint: null,
+    materials: [],
     tariffs: [{ id: 't-2', service_id: 'svc-2', title: 'Стандарт', description: null, price: 2800 }],
     tags: [],
     is_active: true,
@@ -180,10 +183,10 @@ function createWrapper() {
 }
 
 function mockDefaultResolve(): void {
-  mockedGetActivities.mockResolvedValue(mockActivities);
-  mockedGetServices.mockResolvedValue(mockServices);
-  mockedGetMasters.mockResolvedValue(mockMasters);
-  mockedGetLocations.mockResolvedValue(mockLocations);
+  mockedGetActivities.mockResolvedValue({ items: mockActivities, total: mockActivities.length });
+  mockedGetServices.mockResolvedValue({ items: mockServices, total: mockServices.length });
+  mockedGetMasters.mockResolvedValue({ items: mockMasters, total: mockMasters.length });
+  mockedGetLocations.mockResolvedValue({ items: mockLocations, total: mockLocations.length });
 }
 
 // ─── Tests ──────────────────────────────────────────────────────────────────
@@ -255,6 +258,25 @@ describe('useSchedule', () => {
     expect(result.current.schedules[0].priceFormatted).toBeDefined();
     expect(result.current.schedules[0].dateFormatted).toBeDefined();
     expect(result.current.error).toBeNull();
+  });
+
+  it('derives materials from service links: first title + note ?? description details', async () => {
+    mockDefaultResolve();
+    const { result } = renderHook(() => useSchedule(), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    const linked = result.current.schedules.find((s) => s.id === 'act-1');
+    expect(linked?.material).toBe('Акварель');
+    expect(linked?.materialDetails).toBe('Акварельные краски — бумага 300 г/м²\nГустые, сохнут долго');
+
+    const unlinked = result.current.schedules.find((s) => s.id === 'act-2');
+    expect(unlinked?.material).toBe('');
+    expect(unlinked?.materialDetails).toBeUndefined();
   });
 
   it('calls API functions with correct params', async () => {
@@ -332,9 +354,9 @@ describe('useSchedule', () => {
 
   it('returns error when API fails', async () => {
     mockedGetActivities.mockRejectedValue(new Error('Network error'));
-    mockedGetServices.mockResolvedValue(mockServices);
-    mockedGetMasters.mockResolvedValue(mockMasters);
-    mockedGetLocations.mockResolvedValue(mockLocations);
+    mockedGetServices.mockResolvedValue({ items: mockServices, total: mockServices.length });
+    mockedGetMasters.mockResolvedValue({ items: mockMasters, total: mockMasters.length });
+    mockedGetLocations.mockResolvedValue({ items: mockLocations, total: mockLocations.length });
 
     const { result } = renderHook(() => useSchedule(), {
       wrapper: createWrapper(),
@@ -348,10 +370,10 @@ describe('useSchedule', () => {
   });
 
   it('returns empty schedules when data is empty', async () => {
-    mockedGetActivities.mockResolvedValue([]);
-    mockedGetServices.mockResolvedValue(mockServices);
-    mockedGetMasters.mockResolvedValue(mockMasters);
-    mockedGetLocations.mockResolvedValue(mockLocations);
+    mockedGetActivities.mockResolvedValue({ items: [], total: 0 });
+    mockedGetServices.mockResolvedValue({ items: mockServices, total: mockServices.length });
+    mockedGetMasters.mockResolvedValue({ items: mockMasters, total: mockMasters.length });
+    mockedGetLocations.mockResolvedValue({ items: mockLocations, total: mockLocations.length });
 
     const { result } = renderHook(() => useSchedule(), {
       wrapper: createWrapper(),

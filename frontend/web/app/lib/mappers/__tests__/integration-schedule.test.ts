@@ -29,7 +29,10 @@ const mockService = {
   is_active: true,
   created_at: '',
   updated_at: '',
-  material_hint: 'Масло, холст 40×50',
+  materials: [
+    { id: 'mat3', title: 'Акварель', description: 'Акварельные краски — прозрачные, нежные', note: null },
+    { id: 'mat1', title: 'Масло', description: 'Масляные краски — классика живописи', note: 'Густые краски, холст 40×50' },
+  ],
   tariffs: [
     { id: 't1', service_id: 's1', title: 'Взрослый', description: null, price: 3500 },
   ],
@@ -90,9 +93,22 @@ describe('Full pipeline: API responses → ScheduleView', () => {
     expect(view.priceMax).toBe(3500);
     expect(view.duration).toBe('2 ч 30 мин');
     expect(view.priceHint).toBe('Взрослый: 3500₽');
-    expect(view.materialHint).toBe('Масло, холст 40×50');
     expect(view.locationHint).toBe('1 этаж, светлая студия');
     expect(view.tagColors).toEqual(['#D4789A']);
+  });
+
+  it('derives materials from service links: chip = first title, details = note ?? description', () => {
+    const index = buildWebSchedule(
+      [mockActivity],
+      new Map([['s1', mockService]]),
+      new Map([['m1', mockMaster]]),
+      new Map([['alpika', mockLocation]]),
+    );
+
+    const view = toScheduleView(index.byId.get('ev_0')!);
+
+    expect(view.material).toBe('Акварель');
+    expect(view.materialDetails).toBe('Акварельные краски — прозрачные, нежные\nГустые краски, холст 40×50');
   });
 
   it('handles multiple activities with location-based filtering', () => {
@@ -121,18 +137,18 @@ describe('Full pipeline: API responses → ScheduleView', () => {
   });
 
   it('handles nullish optional fields gracefully', () => {
-    const serviceNoHint = { ...mockService, material_hint: null };
+    const serviceNoMaterials = { ...mockService, materials: [] };
     const locationNoHint = { ...mockLocation, location_hint: null };
 
     const index = buildWebSchedule(
       [mockActivity],
-      new Map([['s1', serviceNoHint]]),
+      new Map([['s1', serviceNoMaterials]]),
       new Map([['m1', mockMaster]]),
       new Map([['alpika', locationNoHint]]),
     );
 
     const view = toScheduleView(index.byId.get('ev_0')!);
-    expect(view.materialHint).toBeUndefined();
+    expect(view.materialDetails).toBeUndefined();
     expect(view.locationHint).toBeUndefined();
     expect(view.material).toBe('');
   });

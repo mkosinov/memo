@@ -31,10 +31,14 @@ location = dict(
 service = dict(
     title="Мастер-класс по керамике", description="Лепим кружку", image_url="",
     specialty="керамика", min_age=6, max_age=None, duration=120, record_info="",
-    material_hint=None, created_at=CREATED, updated_at=UPDATED,
+    created_at=CREATED, updated_at=UPDATED,
     tariffs=[{"id": "tariff-1", "service_id": "service-1", "title": "Взрослый",
               "description": "", "price": 2500}],
     tags=[{"id": "tag-1", "tag": "керамика"}],
+    # GH #223: nested ServiceMaterialItem — the linked material's description
+    # travels with the link; note is per-link (NULL when unset).
+    materials=[{"id": "5f8a1c2d-0004-4000-8000-000000000004", "title": "Глина",
+                "description": "Шамотная глина", "note": "Принести фартук"}],
 )
 material = dict(title="Глина", description="Шамотная глина",
                 created_at=CREATED, updated_at=UPDATED)

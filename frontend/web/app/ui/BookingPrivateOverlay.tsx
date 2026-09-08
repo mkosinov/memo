@@ -20,11 +20,13 @@ export interface BookingPrivateOverlayProps {
   onClose: () => void;
   preferredDate?: string;
   preferredLocation?: string;
+  /** Prefill for the editable «Материал» input — first linked material title (GH #223 §9). */
+  defaultMaterial?: string;
 }
 
-export function BookingPrivateOverlay({ isOpen, onClose, preferredDate, preferredLocation }: BookingPrivateOverlayProps) {
+export function BookingPrivateOverlay({ isOpen, onClose, preferredDate, preferredLocation, defaultMaterial }: BookingPrivateOverlayProps) {
   const [booking, setBooking] = useState<PrivateBookingView>(() =>
-    createPrivateBookingView(preferredDate, preferredLocation),
+    createPrivateBookingView(preferredDate, preferredLocation, defaultMaterial),
   );
   const [isFormValid, setIsFormValid] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
@@ -33,14 +35,21 @@ export function BookingPrivateOverlay({ isOpen, onClose, preferredDate, preferre
   // Reset model when overlay opens with new pre-fill
   useEffect(() => {
     if (isOpen) {
-      setBooking(createPrivateBookingView(preferredDate, preferredLocation));
+      setBooking(createPrivateBookingView(preferredDate, preferredLocation, defaultMaterial));
       setIsSuccess(false);
       setSubmitted(false);
     }
-  }, [isOpen, preferredDate, preferredLocation]);
+  }, [isOpen, preferredDate, preferredLocation, defaultMaterial]);
 
   const individualFieldsValid = booking.date !== "" && booking.time !== "";
   const canSubmit = isFormValid && individualFieldsValid;
+
+  // The prefill (first linked material title) must appear among the options even
+  // when it is not part of the standard list; the field stays editable as before.
+  const materialOptions =
+    booking.material && !(MATERIAL_OPTIONS as readonly string[]).includes(booking.material)
+      ? [booking.material, ...MATERIAL_OPTIONS]
+      : MATERIAL_OPTIONS;
 
   const handleValidityChange = useCallback((valid: boolean) => {
     setIsFormValid(valid);
@@ -182,7 +191,7 @@ export function BookingPrivateOverlay({ isOpen, onClose, preferredDate, preferre
             onChange={(e) => updateModel({ material: e.target.value })}
             className="w-full rounded-lg border border-[#E0E0E1] px-3 py-2 text-sm text-[#1a1a1a] transition focus:border-[#004D56] focus:outline-none"
           >
-            {MATERIAL_OPTIONS.map((opt) => (
+            {materialOptions.map((opt) => (
               <option key={opt} value={opt}>
                 {opt}
               </option>

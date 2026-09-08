@@ -108,6 +108,21 @@ describe('getServices', () => {
     await getServices({ per_page: 100 });
     expect(api).toHaveBeenCalledWith('/api/v1/services?per_page=100', expect.anything());
   });
+
+  it('threads material_id into the query string (GH #223)', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
+    await getServices({ material_id: 'm-1' });
+    expect(api).toHaveBeenCalledWith('/api/v1/services?material_id=m-1', expect.anything());
+  });
+
+  it('composes material_id with status and pagination (GH #223)', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 50 });
+    await getServices({ status: 'active', material_id: 'm-1', page: 2, per_page: 50 });
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/services?page=2&per_page=50&status=active&material_id=m-1',
+      expect.anything(),
+    );
+  });
 });
 
 // ─── Materials ──────────────────────────────────────────────────────────────
@@ -913,9 +928,9 @@ describe('updateService', () => {
       max_age: 18,
       duration: 60,
       record_info: '',
-      material_hint: '',
       tariffs: [],
       tag_ids: [],
+      materials: [],
     };
     await updateService('s-1', payload);
     expect(api).toHaveBeenCalledWith(

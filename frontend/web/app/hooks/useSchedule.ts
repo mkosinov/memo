@@ -3,6 +3,7 @@
 import { useMemo, useCallback } from 'react';
 import { useQueries } from '@tanstack/react-query';
 import { getActivities, getMasters, getServices, getLocations } from '@memo/api-client';
+import type { PaginatedResponse } from '@memo/api-client';
 import type { ScheduleIndex } from '@memo/domain';
 import { buildWebSchedule, type WebScheduleDTO } from '@/app/lib/mappers/buildSchedule';
 import { toScheduleView } from '@/app/lib/mappers/to-schedule-vm';
@@ -60,10 +61,11 @@ export function useSchedule(filters: ScheduleFiltersView = {}): UseScheduleResul
   const index: ScheduleIndex<WebScheduleDTO> | null = useMemo(() => {
     if (queries.some((q) => q.isLoading || q.isError)) return null;
     const rawData = queries.map((q) => q.data);
-    const activities = rawData[0] as ActivityResponse[];
-    const services = rawData[1] as ServiceResponse[];
-    const masters = rawData[2] as MasterResponse[];
-    const locations = rawData[3] as LocationResponse[];
+    // List endpoints return the paginated envelope ({items, total}) — consume .items.
+    const activities = (rawData[0] as PaginatedResponse<ActivityResponse> | undefined)?.items ?? [];
+    const services = (rawData[1] as PaginatedResponse<ServiceResponse> | undefined)?.items ?? [];
+    const masters = (rawData[2] as PaginatedResponse<MasterResponse> | undefined)?.items ?? [];
+    const locations = (rawData[3] as PaginatedResponse<LocationResponse> | undefined)?.items ?? [];
     return buildWebSchedule(
       activities,
       new Map(services.map((s) => [s.id, s])),

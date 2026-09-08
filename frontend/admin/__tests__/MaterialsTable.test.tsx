@@ -11,6 +11,7 @@ const mockMaterial1: MaterialResponse = {
   title: 'Фартук',
   description: 'Защитная одежда',
   archived: false,
+  used_in_services_count: 2,
   created_at: '2024-01-01T00:00:00Z',
   updated_at: '2024-01-01T00:00:00Z',
 };
@@ -20,6 +21,7 @@ const mockMaterial2: MaterialResponse = {
   title: 'Кисти',
   description: 'Набор кистей',
   archived: false,
+  used_in_services_count: 0,
   created_at: '2024-02-01T00:00:00Z',
   updated_at: '2024-02-01T00:00:00Z',
 };
@@ -29,6 +31,7 @@ const mockMaterial3: MaterialResponse = {
   title: 'Старые краски',
   description: 'Архивный набор',
   archived: true,
+  used_in_services_count: 1,
   created_at: '2024-03-01T00:00:00Z',
   updated_at: '2024-03-01T00:00:00Z',
 };
@@ -185,6 +188,27 @@ describe('MaterialsTable', () => {
     });
     expect(container.querySelectorAll('.animate-pulse').length).toBeGreaterThan(0);
     expect(screen.queryByText('Загрузка...')).not.toBeInTheDocument();
+  });
+
+  // ─── Usage counter column (GH #223 §8 / S4) ───────────────────────────
+
+  it('renders «Где используется» count as a plain number, 0 included (not dash)', async () => {
+    setupEnvelope();
+    await renderLoaded();
+
+    // Header present.
+    expect(screen.getByText('Где используется')).toBeInTheDocument();
+
+    // mat-1 → 2 services, mat-2 → 0 (zero IS information — must render as
+    // "0", not "—"), mat-3 (archived) → 1 (counter describes the material,
+    // not the requested status slice — spec §6).
+    const rowOf = (title: string) => screen.getByText(title).closest('tr')!;
+    expect(rowOf('Фартук')).toHaveTextContent('2');
+    expect(rowOf('Кисти')).toHaveTextContent('0');
+    expect(rowOf('Старые краски')).toHaveTextContent('1');
+
+    // No dash placeholder in the usage cells — 0 renders literally.
+    expect(rowOf('Кисти').textContent).not.toContain('—');
   });
 
   // ─── Server fetch params (#205 §5.2/§5.3) ──────────────────────────────

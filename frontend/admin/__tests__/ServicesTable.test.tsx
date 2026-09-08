@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import type { ServiceResponse, DependencyNode, PaginatedResponse } from '@memo/api-client';
+import type { ServiceResponse, DependencyNode, PaginatedResponse, MaterialResponse } from '@memo/api-client';
 
 // ─── Dependency tree fixtures (mirror backend src/domain/deletion.py) ─────
 
@@ -36,12 +36,12 @@ const mockService1: ServiceResponse = {
   max_age: 18,
   duration: 150,
   record_info: '',
-  material_hint: 'Фартук',
   tariffs: [
     { id: 't-1', service_id: 'svc-1', title: 'Взрослый', description: null, price: 3500 },
     { id: 't-2', service_id: 'svc-1', title: 'Детский', description: null, price: 2500 },
   ],
   tags: [{ id: 'tag-1', tag: 'масло' }],
+  materials: [],
   archived: false,
   created_at: '2024-01-01T00:00:00Z',
   updated_at: '2024-01-01T00:00:00Z',
@@ -57,11 +57,11 @@ const mockService2: ServiceResponse = {
   max_age: 14,
   duration: 120,
   record_info: '',
-  material_hint: null,
   tariffs: [
     { id: 't-3', service_id: 'svc-2', title: 'Взрослый', description: null, price: 2800 },
   ],
   tags: [{ id: 'tag-2', tag: 'акрил' }],
+  materials: [],
   archived: false,
   created_at: '2024-02-01T00:00:00Z',
   updated_at: '2024-02-01T00:00:00Z',
@@ -77,9 +77,9 @@ const mockService3: ServiceResponse = {
   max_age: 12,
   duration: 90,
   record_info: '',
-  material_hint: null,
   tariffs: [],
   tags: [],
+  materials: [],
   archived: true,
   created_at: '2024-03-01T00:00:00Z',
   updated_at: '2024-03-01T00:00:00Z',
@@ -89,6 +89,12 @@ const TEST_SERVICES: ServiceResponse[] = [
   mockService1,
   mockService2,
   mockService3,
+];
+
+// #223 T5: active materials for the ServiceModal picker (/all?status=active).
+const MOCK_MATERIALS: MaterialResponse[] = [
+  { id: 'mat-a', title: 'Акварель', description: 'Акварельные краски', archived: false, used_in_services_count: 0, created_at: '2024-01-01T00:00:00Z', updated_at: '2024-01-01T00:00:00Z' },
+  { id: 'mat-k', title: 'Керамика', description: 'Глина', archived: false, used_in_services_count: 0, created_at: '2024-01-01T00:00:00Z', updated_at: '2024-01-01T00:00:00Z' },
 ];
 
 // ─── Mocks ──────────────────────────────────────────────────────────────────
@@ -128,7 +134,13 @@ vi.mock('@tanstack/react-query', async (importOriginal) => {
 // Spy on getServices (preserve other api-client exports via importOriginal)
 vi.mock('@memo/api-client', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@memo/api-client')>();
-  return { ...actual, getServices: vi.fn(), resolveDeleteService: vi.fn() };
+  return {
+    ...actual,
+    getServices: vi.fn(),
+    resolveDeleteService: vi.fn(),
+    // #223 T5: ServiceModal's materials picker fetches /all?status=active
+    getAllMaterials: vi.fn(),
+  };
 });
 
 vi.mock('@/hooks/useServicesMutations', () => ({
@@ -152,12 +164,13 @@ vi.mock('@/contexts/UIContext', () => ({
   }),
 }));
 
-import { getServices, resolveDeleteService, ApiError } from '@memo/api-client';
+import { getServices, resolveDeleteService, getAllMaterials, ApiError } from '@memo/api-client';
 import { ServicesTable } from '../app/(main)/services/components/ServicesTable';
 import { ServicesProvider } from '@/contexts/ServicesContext';
 
 const mockGetServices = vi.mocked(getServices);
 const mockResolveDeleteService = vi.mocked(resolveDeleteService);
+const mockGetAllMaterials = vi.mocked(getAllMaterials);
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
@@ -198,6 +211,7 @@ describe('ServicesTable', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
+    mockGetAllMaterials.mockResolvedValue(MOCK_MATERIALS);
   });
 
   afterEach(() => {
@@ -238,18 +252,12 @@ describe('ServicesTable', () => {
     expect(screen.getByText('1 тариф')).toBeInTheDocument();
   });
 
-  it('renders material hint', async () => {
+  it('renders material badges ("—" for services without materials)', async () => {
     setupEnvelope();
     await renderLoaded();
 
-    expect(screen.getByText('Фартук')).toBeInTheDocument();
-  });
-
-  it('shows "—" for services without material hint', async () => {
-    setupEnvelope();
-    await renderLoaded();
-
-    // Картина акрилом and Ручная лепка have material_hint: null — show "—"
+    // GH #223 Task 13: material_hint column is retired; the badges column
+    // renders "—" for the unlinked services (Картина акрилом, Ручная лепка).
     const cells = screen.getAllByText('—');
     expect(cells.length).toBeGreaterThanOrEqual(1);
   });
@@ -395,6 +403,126 @@ describe('ServicesTable', () => {
     });
     expect(mockGetServices).toHaveBeenCalledTimes(1);
     expect(mockGetServices.mock.calls[0][0]).not.toHaveProperty('q');
+  });
+
+  // ─── Material filter (GH #223 T7 — S2, spec §8) ─────────────────────────
+  // A select «Материал: все | <title>…» in the *Filters bar (source:
+  // getAllMaterials active list); the pick feeds `material_id` into the
+  // server-paginated query via ServicesContext; «все» = param omitted.
+
+  it('material filter select renders «все» + active material options', async () => {
+    setupEnvelope();
+    await renderLoaded();
+
+    const select = screen.getByLabelText('Фильтр по материалу');
+    await waitFor(() => {
+      expect(within(select).getByRole('option', { name: 'Акварель' })).toBeInTheDocument();
+    });
+    expect(within(select).getByRole('option', { name: 'Керамика' })).toBeInTheDocument();
+    expect(within(select).getByRole('option', { name: 'все' })).toBeInTheDocument();
+    expect(select).toHaveValue('');
+  });
+
+  it('picking a material refetches with material_id and resets page to 1', async () => {
+    setupEnvelope({ total: 42 });
+    await renderLoaded();
+
+    // Go to page 2 first — the filter change must restart at page 1
+    // (same reset contract as status/sort/perPage/q).
+    fireEvent.click(screen.getByRole('button', { name: '2' }));
+    await waitFor(() => {
+      expect(mockGetServices).toHaveBeenLastCalledWith({ page: 2, per_page: 10, status: 'active' });
+    });
+
+    const select = screen.getByLabelText('Фильтр по материалу');
+    await waitFor(() => {
+      expect(within(select).getByRole('option', { name: 'Акварель' })).toBeInTheDocument();
+    });
+    fireEvent.change(select, { target: { value: 'mat-a' } });
+
+    await waitFor(() => {
+      expect(mockGetServices).toHaveBeenLastCalledWith({
+        page: 1,
+        per_page: 10,
+        status: 'active',
+        material_id: 'mat-a',
+      });
+    });
+  });
+
+  it('«все» omits material_id from the fetch (deep equality — no key)', async () => {
+    setupEnvelope();
+    await renderLoaded();
+
+    const select = screen.getByLabelText('Фильтр по материалу');
+    await waitFor(() => {
+      expect(within(select).getByRole('option', { name: 'Акварель' })).toBeInTheDocument();
+    });
+    fireEvent.change(select, { target: { value: 'mat-a' } });
+    await waitFor(() => {
+      expect(mockGetServices).toHaveBeenLastCalledWith({
+        page: 1,
+        per_page: 10,
+        status: 'active',
+        material_id: 'mat-a',
+      });
+    });
+
+    fireEvent.change(select, { target: { value: '' } });
+    await waitFor(() => {
+      expect(mockGetServices).toHaveBeenLastCalledWith({ page: 1, per_page: 10, status: 'active' });
+    });
+    expect(mockGetServices.mock.calls.at(-1)![0]).not.toHaveProperty('material_id');
+  });
+
+  it('material filter composes with the status filter', async () => {
+    setupEnvelope();
+    await renderLoaded();
+
+    fireEvent.change(screen.getByLabelText('Фильтр по статусу'), {
+      target: { value: 'archived' },
+    });
+    await waitFor(() => {
+      expect(mockGetServices).toHaveBeenLastCalledWith({ page: 1, per_page: 10, status: 'archived' });
+    });
+
+    const select = screen.getByLabelText('Фильтр по материалу');
+    await waitFor(() => {
+      expect(within(select).getByRole('option', { name: 'Акварель' })).toBeInTheDocument();
+    });
+    fireEvent.change(select, { target: { value: 'mat-k' } });
+
+    await waitFor(() => {
+      expect(mockGetServices).toHaveBeenLastCalledWith({
+        page: 1,
+        per_page: 10,
+        status: 'archived',
+        material_id: 'mat-k',
+      });
+    });
+  });
+
+  it('reset button clears the material filter too', async () => {
+    setupEnvelope();
+    await renderLoaded();
+
+    const select = screen.getByLabelText('Фильтр по материалу');
+    await waitFor(() => {
+      expect(within(select).getByRole('option', { name: 'Акварель' })).toBeInTheDocument();
+    });
+    fireEvent.change(select, { target: { value: 'mat-k' } });
+    await waitFor(() => {
+      expect(mockGetServices).toHaveBeenLastCalledWith(
+        expect.objectContaining({ material_id: 'mat-k' }),
+      );
+    });
+
+    fireEvent.click(screen.getByText('Сбросить'));
+
+    await waitFor(() => {
+      expect(mockGetServices).toHaveBeenLastCalledWith({ page: 1, per_page: 10, status: 'active' });
+    });
+    expect(screen.getByLabelText('Фильтр по материалу')).toHaveValue('');
   });
 
   // ─── Server-driven pagination wiring ───────────────────────────────────
@@ -739,5 +867,148 @@ describe('ServicesTable', () => {
     );
     expect(updateCall).toBeDefined();
     expect(updateCall![0].data.is_active).toBeUndefined();
+  });
+
+  // ─── Materials multi-select with notes (GH #223 T5) ────────────────────
+  // The ServiceModal renders a checkbox multi-list of ACTIVE materials
+  // (getAllMaterials → /all?status=active) with a one-line note input under
+  // each checked item. Form state `materials: {material_id, note?}[]` maps
+  // both ways against `service.materials` (read shape {id,title,note}).
+
+  /** Service with prefilled material links (read shape, spec §5). */
+  const svcWithMaterials: ServiceResponse = {
+    ...mockService1,
+    materials: [
+      { id: 'mat-a', title: 'Акварель', description: 'Акварельные краски', note: 'бумага 300 г' },
+      { id: 'mat-k', title: 'Керамика', description: 'Глина', note: null },
+    ],
+  };
+
+  /** Open the edit modal for a service by title (row click). */
+  async function openEditModal(title: string) {
+    fireEvent.click(screen.getByText(title).closest('tr')!);
+    await screen.findByRole('dialog');
+    // Wait for the materials picker options (async dictionary fetch).
+    await screen.findByRole('checkbox', { name: 'Акварель' });
+  }
+
+  /** The PUT payload of the update call for a given service id. */
+  function updatePayloadFor(id: string): Record<string, unknown> {
+    const call = mockUpdateMutateAsync.mock.calls.find(
+      ([arg]) => typeof arg === 'object' && arg !== null && arg.id === id,
+    );
+    expect(call).toBeDefined();
+    return call![0].data as Record<string, unknown>;
+  }
+
+  it('edit modal offers active materials from getAllMaterials({status:"active"}) and has no material_hint field', async () => {
+    setupEnvelope();
+    await renderLoaded();
+    await openEditModal('Картина маслом');
+
+    expect(mockGetAllMaterials).toHaveBeenCalledWith({ status: 'active' });
+    expect(screen.getByRole('checkbox', { name: 'Акварель' })).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: 'Керамика' })).toBeInTheDocument();
+    // material_hint text field is REMOVED from the form (spec §8) and the
+    // field is retired everywhere (Task 13, spec §10).
+    expect(screen.queryByPlaceholderText('Что взять с собой')).not.toBeInTheDocument();
+  });
+
+  it('checking two materials + one note → PUT payload contains materials links', async () => {
+    setupEnvelope();
+    await renderLoaded();
+    await openEditModal('Картина маслом');
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Акварель' }));
+    fireEvent.change(screen.getByLabelText('Заметка: Акварель'), {
+      target: { value: 'бумага 300 г' },
+    });
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Керамика' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+    await waitFor(() => expect(mockUpdateMutateAsync).toHaveBeenCalled());
+    const payload = updatePayloadFor('svc-1');
+    // Empty notes are omitted (note is optional on the link); picker order.
+    expect(payload.materials).toEqual([
+      { material_id: 'mat-a', note: 'бумага 300 г' },
+      { material_id: 'mat-k' },
+    ]);
+  });
+
+  it('edit prefills checked materials and their notes from service.materials', async () => {
+    setupEnvelope({ items: [svcWithMaterials], total: 1 });
+    await renderLoaded();
+    await openEditModal('Картина маслом');
+
+    expect(screen.getByRole('checkbox', { name: 'Акварель' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Керамика' })).toBeChecked();
+    expect(screen.getByLabelText('Заметка: Акварель')).toHaveValue('бумага 300 г');
+    // null note → empty input (still rendered under the checked item)
+    expect(screen.getByLabelText('Заметка: Керамика')).toHaveValue('');
+  });
+
+  it('unchecking a material removes it from the PUT payload', async () => {
+    setupEnvelope({ items: [svcWithMaterials], total: 1 });
+    await renderLoaded();
+    await openEditModal('Картина маслом');
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Керамика' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+    await waitFor(() => expect(mockUpdateMutateAsync).toHaveBeenCalled());
+    expect(updatePayloadFor('svc-1').materials).toEqual([
+      { material_id: 'mat-a', note: 'бумага 300 г' },
+    ]);
+  });
+
+  it('saving without touching materials keeps the prefilled links in the payload', async () => {
+    setupEnvelope({ items: [svcWithMaterials], total: 1 });
+    await renderLoaded();
+    await openEditModal('Картина маслом');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+    await waitFor(() => expect(mockUpdateMutateAsync).toHaveBeenCalled());
+    expect(updatePayloadFor('svc-1').materials).toEqual([
+      { material_id: 'mat-a', note: 'бумага 300 г' },
+      { material_id: 'mat-k' },
+    ]);
+  });
+
+  it('note input keeps raw whitespace (server normalizes; UI does not trim)', async () => {
+    setupEnvelope();
+    await renderLoaded();
+    await openEditModal('Картина маслом');
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Акварель' }));
+    fireEvent.change(screen.getByLabelText('Заметка: Акварель'), {
+      target: { value: '  бумага  ' },
+    });
+    expect(screen.getByLabelText('Заметка: Акварель')).toHaveValue('  бумага  ');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+    await waitFor(() => expect(mockUpdateMutateAsync).toHaveBeenCalled());
+    expect(updatePayloadFor('svc-1').materials).toEqual([
+      { material_id: 'mat-a', note: '  бумага  ' },
+    ]);
+  });
+
+  it('create modal: checked materials land in the create payload', async () => {
+    setupEnvelope();
+    await renderLoaded();
+
+    fireEvent.click(screen.getByText('+ Добавить услугу'));
+    await screen.findByRole('dialog');
+    fireEvent.change(screen.getByPlaceholderText('Мастер-класс по рисованию'), {
+      target: { value: 'Новая услуга' },
+    });
+    fireEvent.change(screen.getByLabelText(/Длительность/), { target: { value: '90' } });
+    await screen.findByRole('checkbox', { name: 'Акварель' });
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Акварель' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+    await waitFor(() => expect(mockCreateMutateAsync).toHaveBeenCalled());
+    const data = mockCreateMutateAsync.mock.calls[0][0] as Record<string, unknown>;
+    expect(data.materials).toEqual([{ material_id: 'mat-a' }]);
   });
 });

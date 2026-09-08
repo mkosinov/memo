@@ -428,3 +428,71 @@ describe('DeleteDialog — Mode B (blocked by activities → archive, §7.2)', (
     expect(onDone).not.toHaveBeenCalled();
   });
 });
+
+// ─── GH #223 S5 — material delete 409: service_materials join is AUTO ─────────
+
+describe('DeleteDialog — Mode A (material 409, GH #223 §7)', () => {
+  // Live 409 tree for a linked material (backend deletion.py: relation
+  // «Услуга», allowed_actions ["cascade"], auto=True).
+  const MATERIAL_LINKED: DependencyNode[] = [
+    { entity: 'service_materials', relation: 'Услуга', count: 1, allowed_actions: ['cascade'], message: null },
+  ];
+
+  it('renders service_materials as an auto "→ Услуги: 1 (удалён)" line, no choice UI', () => {
+    renderDialog({
+      entityName: 'Акварель',
+      entityType: 'material',
+      entityId: 'mat1',
+      dependencies: MATERIAL_LINKED,
+      onDone: vi.fn(),
+      onCancel: vi.fn(),
+    });
+
+    // Plural join label (like service_tags → «Теги»), not the raw singular
+    // relation «Услуга»; rendered as fixed text, not a choice button.
+    const row = screen.getByTestId('dep-service_materials');
+    expect(row).toHaveTextContent('→ Услуги: 1 (удалён)');
+    expect(row.querySelector('button')).toBeNull();
+  });
+
+  it('type-confirm alone unlocks "Удалить"; resolve called with {} (auto dep omitted)', async () => {
+    const onDone = vi.fn();
+    const { onResolve } = renderDialog({
+      entityName: 'Акварель',
+      entityType: 'material',
+      entityId: 'mat1',
+      dependencies: MATERIAL_LINKED,
+      onDone,
+      onCancel: vi.fn(),
+    });
+
+    expect(confirmBtn().disabled).toBe(true);
+    typeConfirmName('Акварель');
+    expect(confirmBtn().disabled).toBe(false);
+    fireEvent.click(confirmBtn());
+
+    await waitFor(() => expect(onResolve).toHaveBeenCalledWith('mat1', {}));
+    expect(onDone).toHaveBeenCalledTimes(1);
+  });
+
+  it('service-side delete renders the same join side-aware: "→ Материалы: 2 (удалены)"', () => {
+    // Backend FK_MATRIX lists service_materials for Service too, shipping
+    // relation «Материал» (vs «Услуга» from the Material side) — the label
+    // must follow the relation, not the entity name.
+    const SERVICE_LINKED: DependencyNode[] = [
+      { entity: 'service_materials', relation: 'Материал', count: 2, allowed_actions: ['cascade'], message: null },
+    ];
+    renderDialog({
+      entityName: 'Гончарное дело',
+      entityType: 'service',
+      entityId: 'svc1',
+      dependencies: SERVICE_LINKED,
+      onDone: vi.fn(),
+      onCancel: vi.fn(),
+    });
+
+    const row = screen.getByTestId('dep-service_materials');
+    expect(row).toHaveTextContent('→ Материалы: 2 (удалены)');
+    expect(row.querySelector('button')).toBeNull();
+  });
+});

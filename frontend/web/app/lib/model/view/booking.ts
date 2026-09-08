@@ -21,11 +21,13 @@ export interface PrivateBookingView {
 export function createPrivateBookingView(
   preferredDate?: string,
   preferredLocation?: string,
+  /** Prefill for the editable «Материал» input — first linked material title (GH #223 §9). */
+  defaultMaterial?: string,
 ): PrivateBookingView {
   return {
     date: preferredDate ?? '',
     time: '12:00',
-    material: 'Не определились',
+    material: defaultMaterial ?? 'Не определились',
     name: '',
     phone: '',
     confirmationMethod: 'telegram',

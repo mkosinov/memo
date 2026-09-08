@@ -89,9 +89,9 @@ export function MaterialsTable() {
   };
 
   // ─── Delete ─────────────────────────────────────────────────────────
-  // #207 §7.3 dry-run flow: Material has ZERO FK deps (§4), so the no-body
-  // DELETE normally returns 204 (instant delete). The 409 branch is
-  // defensive but keeps the uniform DeleteDialog wiring.
+  // #207 §7.3 dry-run flow. GH #223 §7: an UNLINKED material still deletes
+  // with an instant 204, but a LINKED one now returns 409 + dependency tree
+  // (service_materials join, auto-cascade) → DeleteDialog Mode A (live code).
 
   const handleDelete = async (material: MaterialResponse) => {
     try {

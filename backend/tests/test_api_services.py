@@ -1,5 +1,7 @@
 """Tests for the Services CRUD API endpoints with nested Tariffs and Tags."""
 
+from uuid import uuid4
+
 import pytest
 
 from tests.conftest import query_db
@@ -15,7 +17,6 @@ SERVICE_PAYLOAD = {
     "max_age": 99,
     "duration": 90,
     "record_info": "Bring your own apron",
-    "material_hint": "Масляные краски, холст на подрамнике 40×50 см",
 }
 
 TAG_PAYLOAD = {"tag": "beginner"}
@@ -73,15 +74,44 @@ class TestServicesCrud:
         assert body["archived"] is False
         assert body["tariffs"] == []
         assert body["tags"] == []
-        assert body["material_hint"] == "Масляные краски, холст на подрамнике 40×50 см"
+        # GH #223 Task 13: material_hint is retired — never serialized.
+        assert "material_hint" not in body
 
-    def test_create_service_without_material_hint(self, api_client) -> None:
-        """POST /api/services omitting material_hint defaults to None."""
-        payload = {k: v for k, v in SERVICE_PAYLOAD.items() if k != "material_hint"}
-        response = api_client.post("/api/v1/services", json=payload)
+    def test_create_service_with_stray_material_hint_stripped(
+        self, api_client
+    ) -> None:
+        """GH #223 Task 13 regression: POST carrying material_hint → 201.
+
+        ServiceCreate ignores extras (Pydantic default), so a legacy client
+        still sending the retired field gets a 201 — but the field is absent
+        from the response (retired from ServiceResponse).
+        """
+        response = api_client.post(
+            "/api/v1/services",
+            json={**SERVICE_PAYLOAD, "material_hint": "legacy hint"},
+        )
 
         assert response.status_code == 201
-        assert response.json()["material_hint"] is None
+        assert "material_hint" not in response.json()
+
+    def test_update_service_with_stray_material_hint_422(
+        self, api_client
+    ) -> None:
+        """GH #223 Task 13 regression: PUT carrying material_hint → 422.
+
+        ServiceUpdate is extra="forbid" — a legacy admin still sending
+        material_hint gets a 422 (known breaking change, spec §10).
+        """
+        created = api_client.post("/api/v1/services", json=SERVICE_PAYLOAD)
+        assert created.status_code == 201
+        service_id = created.json()["id"]
+
+        response = api_client.put(
+            f"/api/v1/services/{service_id}",
+            json={**SERVICE_PAYLOAD, "material_hint": "legacy hint"},
+        )
+
+        assert response.status_code == 422
 
     def test_create_service_with_tariffs_and_tags(self, api_client) -> None:
         """POST /api/services creates service with nested tariffs and tag links."""
@@ -616,6 +646,73 @@ class TestDeleteUnifiedRoute:
         assert len(photo_rows) == 1
         assert photo_rows[0]["service_id"] is None
 
+    def test_delete_service_with_material_links_no_body_lists_service_materials(
+        self, api_client, create_service
+    ) -> None:
+        """No body + material links → 409 tree now lists ``service_materials`` (GH #223 §7).
+
+        The join is one more auto-cascade dep next to tariffs/photos/
+        service_tags — the existing dry-run flow surfaces it for consent.
+        """
+        material_resp = api_client.post(
+            "/api/v1/materials",
+            json={"title": "Акварель", "description": "водорастворимые краски"},
+        )
+        assert material_resp.status_code == 201
+        material_id = material_resp.json()["id"]
+        service = create_service(materials=[{"material_id": material_id}])
+        service_id = service["id"]
+
+        resp = api_client.delete(f"/api/v1/services/{service_id}")
+
+        assert resp.status_code == 409
+        body = resp.json()
+        assert body["detail"] == "has_dependencies"
+        deps = {d["entity"]: d for d in body["dependencies"]}
+        assert deps["service_materials"]["count"] == 1
+        assert deps["service_materials"]["allowed_actions"] == ["cascade"]
+        # Dry-run: rows untouched.
+        assert api_client.get(f"/api/v1/services/{service_id}").status_code == 200
+        assert (
+            len(
+                query_db(
+                    f"SELECT * FROM service_materials WHERE service_id='{service_id}'"
+                )
+            )
+            == 1
+        )
+
+    def test_delete_service_with_material_links_with_body_cascades_204(
+        self, api_client, create_service
+    ) -> None:
+        """Body ``{}`` + material links → 204; links gone, MATERIAL survives (§7)."""
+        material_resp = api_client.post(
+            "/api/v1/materials",
+            json={"title": "Пастель", "description": "сухие мелки"},
+        )
+        assert material_resp.status_code == 201
+        material_id = material_resp.json()["id"]
+        service = create_service(materials=[{"material_id": material_id}])
+        service_id = service["id"]
+
+        resp = api_client.request(
+            "DELETE", f"/api/v1/services/{service_id}", json={"resolutions": {}}
+        )
+
+        assert resp.status_code == 204
+        # Service row gone; join rows gone.
+        assert api_client.get(f"/api/v1/services/{service_id}").status_code == 404
+        assert (
+            query_db(
+                f"SELECT * FROM service_materials WHERE service_id='{service_id}'"
+            )
+            == []
+        )
+        # Material SURVIVES the service-side cascade.
+        mat = api_client.get(f"/api/v1/materials/{material_id}")
+        assert mat.status_code == 200
+        assert mat.json()["used_in_services_count"] == 0
+
     def test_delete_nonexistent_service_no_body_returns_404(self, api_client) -> None:
         """No body + nonexistent id → 404 (service.delete returns False)."""
         resp = api_client.delete("/api/v1/services/nonexistent-service-id")
@@ -774,11 +871,435 @@ class TestServiceAllEndpoint:
         assert any(item["id"] == created["id"] for item in body)
 
 
+class TestServiceMaterialsNestedRead:
+    """Nested ``materials`` on service reads (GH #223 Task 1, spec §3.1/§3.3/§5).
+
+    Link rows are inserted directly via SQL (the write path lands in Task 4).
+    Insertion order deliberately differs from title order: «Акрил» is
+    inserted FIRST, but «Акварель» sorts before it («в» < «р»), so the
+    expected order is [«Акварель», «Акрил»] — a loader-order passthrough
+    would fail the title-ASC assertion.
+    """
+
+    def _create_material(self, api_client, title: str, description: str) -> dict:
+        resp = api_client.post(
+            "/api/v1/materials", json={"title": title, "description": description}
+        )
+        assert resp.status_code == 201, f"create material failed: {resp.text}"
+        return resp.json()
+
+    def _link(self, service_id: str, material_id: str, note: str | None) -> None:
+        note_sql = "NULL" if note is None else f"'{note}'"
+        query_db(
+            "INSERT INTO service_materials (service_id, material_id, note) "
+            f"VALUES ('{service_id}', '{material_id}', {note_sql})"
+        )
+
+    def test_get_returns_materials_ordered_by_title_with_notes(
+        self, api_client, create_service
+    ) -> None:
+        """GET /{id}: materials ordered title ASC, note carried, description included."""
+        service = create_service()
+        watercolor = self._create_material(api_client, "Акварель", "Краски на воде")
+        acrylic = self._create_material(api_client, "Акрил", "Быстросохнущие краски")
+        # Insert acrylic FIRST — title ASC must still put watercolor first.
+        self._link(service["id"], acrylic["id"], None)
+        self._link(service["id"], watercolor["id"], "Бумага 300 г/м²")
+
+        resp = api_client.get(f"/api/v1/services/{service['id']}")
+
+        assert resp.status_code == 200, f"GET failed: {resp.text}"
+        materials = resp.json()["materials"]
+        assert [m["id"] for m in materials] == [watercolor["id"], acrylic["id"]]
+        assert materials[0]["title"] == "Акварель"
+        assert materials[0]["description"] == "Краски на воде"
+        assert materials[0]["note"] == "Бумага 300 г/м²"
+        assert materials[1]["title"] == "Акрил"
+        assert materials[1]["note"] is None
+
+    def test_get_service_without_links_returns_empty_materials(
+        self, api_client, create_service
+    ) -> None:
+        """GET /{id} for a service with zero links → ``materials: []``."""
+        service = create_service()
+
+        resp = api_client.get(f"/api/v1/services/{service['id']}")
+
+        assert resp.status_code == 200
+        assert resp.json()["materials"] == []
+
+    def test_list_and_all_include_nested_materials(
+        self, api_client, create_service
+    ) -> None:
+        """Paginated list and bare /all both carry the nested materials payload."""
+        service = create_service(title="A-linked")
+        unlinked = create_service(title="B-unlinked")
+        acrylic = self._create_material(api_client, "Акрил", "Быстросохнущие краски")
+        self._link(service["id"], acrylic["id"], None)
+
+        list_resp = api_client.get("/api/v1/services")
+        assert list_resp.status_code == 200
+        by_id = {s["id"]: s for s in list_resp.json()["items"]}
+        assert by_id[service["id"]]["materials"] == [
+            {
+                "id": acrylic["id"],
+                "title": "Акрил",
+                "description": "Быстросохнущие краски",
+                "note": None,
+            }
+        ]
+        assert by_id[unlinked["id"]]["materials"] == []
+
+        all_resp = api_client.get("/api/v1/services/all")
+        assert all_resp.status_code == 200
+        all_by_id = {s["id"]: s for s in all_resp.json()}
+        assert all_by_id[service["id"]]["materials"][0]["id"] == acrylic["id"]
+        assert all_by_id[unlinked["id"]]["materials"] == []
+
+
+class TestServiceMaterialsWrite:
+    """Write path for service→material links (GH #223 Task 4, spec §4).
+
+    POST/PUT: ``materials`` creates/hard-replaces links. PATCH: absent/null →
+    preserve; sent (incl. ``[]``) → hard-replace; ``[]`` → clear all. Unknown
+    ``material_id`` → 422 VALIDATION_ERROR naming the offending id; duplicate
+    ids within one list → 422; whitespace-only note normalizes to NULL (spec
+    §4); archived materials are valid link targets (archive = lifecycle flag,
+    not existence — spec §4).
+    """
+
+    def _create_material(self, api_client, title: str, description: str = "Описание") -> dict:
+        resp = api_client.post(
+            "/api/v1/materials", json={"title": title, "description": description}
+        )
+        assert resp.status_code == 201, f"create material failed: {resp.text}"
+        return resp.json()
+
+    def _materials_of(self, api_client, service_id: str) -> list[dict]:
+        resp = api_client.get(f"/api/v1/services/{service_id}")
+        assert resp.status_code == 200, f"GET failed: {resp.text}"
+        return resp.json()["materials"]
+
+    def test_post_with_materials_creates_links(self, api_client) -> None:
+        """POST with materials → 201; response and GET both carry the links."""
+        mat = self._create_material(api_client, "Акварель", "Краски на воде")
+        expected = [{
+            "id": mat["id"], "title": "Акварель",
+            "description": "Краски на воде", "note": "Бумага 300 г/м²",
+        }]
+
+        resp = api_client.post("/api/v1/services", json={
+            **SERVICE_PAYLOAD,
+            "materials": [{"material_id": mat["id"], "note": "Бумага 300 г/м²"}],
+        })
+
+        assert resp.status_code == 201, f"POST failed: {resp.text}"
+        assert resp.json()["materials"] == expected
+        assert self._materials_of(api_client, resp.json()["id"]) == expected
+
+    def test_post_without_materials_creates_unlinked_service(
+        self, api_client, create_service
+    ) -> None:
+        """POST without materials (the default) → unlinked service, no error."""
+        assert create_service()["materials"] == []
+
+    def test_put_empty_list_clears_links(self, api_client, create_service) -> None:
+        """PUT with materials: [] → all links cleared (hard-replace semantics)."""
+        mat = self._create_material(api_client, "Акварель")
+        service = create_service(materials=[{"material_id": mat["id"]}])
+        assert self._materials_of(api_client, service["id"]) != []
+
+        resp = api_client.put(
+            f"/api/v1/services/{service['id']}",
+            json={**SERVICE_PAYLOAD, "materials": []},
+        )
+
+        assert resp.status_code == 200, f"PUT failed: {resp.text}"
+        assert resp.json()["materials"] == []
+        assert self._materials_of(api_client, service["id"]) == []
+
+    def test_put_replaces_link_set(self, api_client, create_service) -> None:
+        """PUT hard-replaces the whole set: dropped id gone, kept id's note cleared."""
+        a = self._create_material(api_client, "Акварель")
+        b = self._create_material(api_client, "Акрил")
+        c = self._create_material(api_client, "Масло")
+        service = create_service(materials=[
+            {"material_id": a["id"]},
+            {"material_id": b["id"], "note": "старая заметка"},
+        ])
+
+        resp = api_client.put(
+            f"/api/v1/services/{service['id']}",
+            json={
+                **SERVICE_PAYLOAD,
+                "materials": [{"material_id": b["id"]}, {"material_id": c["id"], "note": "новая"}],
+            },
+        )
+
+        assert resp.status_code == 200, f"PUT failed: {resp.text}"
+        # Ordered title ASC (spec §3.3): Акрил < Масло; Акварель dropped;
+        # b's old note replaced (re-sent without one → NULL).
+        assert [(m["id"], m["note"]) for m in resp.json()["materials"]] == [
+            (b["id"], None), (c["id"], "новая"),
+        ]
+        assert self._materials_of(api_client, service["id"]) == resp.json()["materials"]
+
+    def test_patch_without_materials_preserves_links(
+        self, api_client, create_service
+    ) -> None:
+        """PATCH without the materials key → links untouched (exclude_unset idiom)."""
+        mat = self._create_material(api_client, "Акварель")
+        service = create_service(materials=[{"material_id": mat["id"], "note": "заметка"}])
+
+        resp = api_client.patch(
+            f"/api/v1/services/{service['id']}", json={"title": "Переименованная"}
+        )
+
+        assert resp.status_code == 200, f"PATCH failed: {resp.text}"
+        assert resp.json()["title"] == "Переименованная"
+        assert [(m["id"], m["note"]) for m in resp.json()["materials"]] == [
+            (mat["id"], "заметка")
+        ]
+        assert self._materials_of(api_client, service["id"]) == [{
+            "id": mat["id"], "title": "Акварель",
+            "description": "Описание", "note": "заметка",
+        }]
+
+    def test_patch_null_materials_preserves_links(
+        self, api_client, create_service
+    ) -> None:
+        """PATCH with materials: null → preserve (spec §4: absent/null → preserve)."""
+        mat = self._create_material(api_client, "Акварель")
+        service = create_service(materials=[{"material_id": mat["id"]}])
+
+        resp = api_client.patch(
+            f"/api/v1/services/{service['id']}", json={"materials": None}
+        )
+
+        assert resp.status_code == 200, f"PATCH failed: {resp.text}"
+        assert [m["id"] for m in resp.json()["materials"]] == [mat["id"]]
+
+    def test_patch_empty_list_clears_links(self, api_client, create_service) -> None:
+        """PATCH with materials: [] → clear all links."""
+        mat = self._create_material(api_client, "Акварель")
+        service = create_service(materials=[{"material_id": mat["id"]}])
+
+        resp = api_client.patch(
+            f"/api/v1/services/{service['id']}", json={"materials": []}
+        )
+
+        assert resp.status_code == 200, f"PATCH failed: {resp.text}"
+        assert resp.json()["materials"] == []
+        assert self._materials_of(api_client, service["id"]) == []
+
+    def test_unknown_material_id_422(self, api_client, create_service) -> None:
+        """Unknown material_id → 422 VALIDATION_ERROR, id named, nothing written."""
+        service = create_service()
+        bogus = "bogus-material-id"
+
+        resp = api_client.put(
+            f"/api/v1/services/{service['id']}",
+            json={**SERVICE_PAYLOAD, "materials": [{"material_id": bogus}]},
+        )
+
+        assert resp.status_code == 422
+        detail = resp.json()["detail"]
+        assert detail["code"] == "VALIDATION_ERROR"
+        assert bogus in detail["message"]
+        assert self._materials_of(api_client, service["id"]) == []
+
+    def test_duplicate_material_id_422(self, api_client) -> None:
+        """Same material_id twice in one list → 422 VALIDATION_ERROR, id named."""
+        mat = self._create_material(api_client, "Акварель")
+
+        resp = api_client.post("/api/v1/services", json={
+            **SERVICE_PAYLOAD,
+            "materials": [{"material_id": mat["id"]}, {"material_id": mat["id"]}],
+        })
+
+        assert resp.status_code == 422
+        detail = resp.json()["detail"]
+        assert detail["code"] == "VALIDATION_ERROR"
+        assert mat["id"] in detail["message"]
+
+    def test_whitespace_note_stored_as_null(
+        self, api_client, create_service
+    ) -> None:
+        """Whitespace-only note → stored as NULL; GET returns note: null (spec §4)."""
+        mat = self._create_material(api_client, "Акварель")
+        service = create_service(materials=[{"material_id": mat["id"], "note": "  "}])
+
+        materials = self._materials_of(api_client, service["id"])
+        assert materials[0]["note"] is None
+        rows = query_db(
+            f"SELECT note FROM service_materials WHERE service_id='{service['id']}'"
+        )
+        assert rows[0]["note"] is None
+
+    def test_archived_material_is_valid_link_target(
+        self, api_client, create_service
+    ) -> None:
+        """Archived material id links successfully (archive ≠ nonexistence, spec §4)."""
+        mat = self._create_material(api_client, "Акварель")
+        arch = api_client.post(f"/api/v1/materials/{mat['id']}/archive")
+        assert arch.status_code == 200, f"archive failed: {arch.text}"
+        service = create_service()
+
+        resp = api_client.put(
+            f"/api/v1/services/{service['id']}",
+            json={**SERVICE_PAYLOAD, "materials": [{"material_id": mat["id"]}]},
+        )
+
+        assert resp.status_code == 200, f"PUT failed: {resp.text}"
+        assert [m["id"] for m in resp.json()["materials"]] == [mat["id"]]
+        assert self._materials_of(api_client, service["id"])[0]["id"] == mat["id"]
+
+
+class TestServiceListMaterialFilter:
+    """``?material_id=`` filter on GET /api/v1/services (GH #223 Task 6, spec §5).
+
+    Filter semantics (not error semantics): linked services only; ``total``
+    reflects the filtered count (predicate lands BEFORE the COUNT); composable
+    with ``q``/``status``/pagination. Invalid UUID → 422 (param type
+    validation); valid-but-unknown id → 200 with an EMPTY page (the client
+    cannot distinguish "no such material" from "no services use it").
+    Archived material ids still filter — links survive archive (spec §7).
+    """
+
+    def _create_material(self, api_client, title: str = "Акварель") -> dict:
+        resp = api_client.post(
+            "/api/v1/materials", json={"title": title, "description": "Описание"}
+        )
+        assert resp.status_code == 201, f"create material failed: {resp.text}"
+        return resp.json()
+
+    def _ids(self, resp) -> list[str]:
+        assert resp.status_code == 200, f"list failed: {resp.text}"
+        return [s["id"] for s in resp.json()["items"]]
+
+    def test_material_id_filters_linked_service_in(
+        self, api_client, create_service
+    ) -> None:
+        """Linked service listed; unlinked service excluded (spec §5)."""
+        mat = self._create_material(api_client)
+        linked = create_service(title="A-linked", materials=[{"material_id": mat["id"]}])
+        unlinked = create_service(title="B-unlinked")
+
+        ids = self._ids(api_client.get(f"/api/v1/services?material_id={mat['id']}"))
+
+        assert ids == [linked["id"]]
+        assert unlinked["id"] not in ids
+
+    def test_total_reflects_filtered_count(
+        self, api_client, create_service
+    ) -> None:
+        """``total`` counts only linked services, not the whole table."""
+        mat = self._create_material(api_client)
+        create_service(materials=[{"material_id": mat["id"]}])
+        create_service(materials=[{"material_id": mat["id"]}])
+        create_service()  # unlinked — must not count
+
+        body = api_client.get(f"/api/v1/services?material_id={mat['id']}").json()
+
+        assert body["total"] == 2
+        assert len(body["items"]) == 2
+
+    def test_composable_with_q(self, api_client, create_service) -> None:
+        """``q`` ANDs with the material filter (spec §5 composability)."""
+        mat = self._create_material(api_client)
+        a = create_service(
+            title="Alpha Watercolor", materials=[{"material_id": mat["id"]}]
+        )
+        create_service(title="Beta Sculpture", materials=[{"material_id": mat["id"]}])
+        create_service(title="Gamma Watercolor")  # matches q, not the filter
+
+        ids = self._ids(
+            api_client.get(f"/api/v1/services?material_id={mat['id']}&q=watercolor")
+        )
+
+        assert ids == [a["id"]]
+
+    def test_composable_with_status(self, api_client, create_service) -> None:
+        """``status`` ANDs with the material filter — all three modes."""
+        mat = self._create_material(api_client)
+        active = create_service(
+            title="A-active", materials=[{"material_id": mat["id"]}]
+        )
+        archived = create_service(
+            title="B-archived", materials=[{"material_id": mat["id"]}]
+        )
+        _archive_service(archived["id"])
+        create_service(title="0-unlinked")  # active but unlinked — must not surface
+
+        assert self._ids(
+            api_client.get(f"/api/v1/services?material_id={mat['id']}")
+        ) == [active["id"]]
+        assert self._ids(
+            api_client.get(f"/api/v1/services?material_id={mat['id']}&status=archived")
+        ) == [archived["id"]]
+        assert self._ids(
+            api_client.get(f"/api/v1/services?material_id={mat['id']}&status=all")
+        ) == [active["id"], archived["id"]]
+
+    def test_composable_with_pagination(
+        self, api_client, create_service
+    ) -> None:
+        """limit/offset slice the filtered set; ``total`` stays un-sliced."""
+        mat = self._create_material(api_client)
+        create_service(title="A", materials=[{"material_id": mat["id"]}])
+        create_service(title="B", materials=[{"material_id": mat["id"]}])
+        create_service(title="C", materials=[{"material_id": mat["id"]}])
+        create_service(title="0-unlinked")  # must never surface in any page
+
+        page1 = api_client.get(
+            f"/api/v1/services?material_id={mat['id']}&per_page=2&page=1"
+        ).json()
+        page2 = api_client.get(
+            f"/api/v1/services?material_id={mat['id']}&per_page=2&page=2"
+        ).json()
+
+        assert [s["title"] for s in page1["items"]] == ["A", "B"]
+        assert page1["total"] == 3
+        assert [s["title"] for s in page2["items"]] == ["C"]
+        assert page2["total"] == 3
+
+    def test_invalid_uuid_returns_422(self, api_client) -> None:
+        """``?material_id=not-a-uuid`` → 422 VALIDATION_ERROR (spec §5)."""
+        resp = api_client.get("/api/v1/services?material_id=not-a-uuid")
+
+        assert resp.status_code == 422
+
+    def test_unknown_material_id_returns_empty_page(
+        self, api_client, create_service
+    ) -> None:
+        """Valid-but-unknown id → 200 ``{"items": [], "total": 0}`` (spec §5)."""
+        create_service()  # exists — must still not surface
+
+        resp = api_client.get(f"/api/v1/services?material_id={uuid4()}")
+
+        assert resp.status_code == 200
+        assert resp.json() == {"items": [], "total": 0, "page": 1, "per_page": 20}
+
+    def test_archived_material_id_still_filters(
+        self, api_client, create_service
+    ) -> None:
+        """Archiving a material keeps its links → filter still matches (spec §7)."""
+        mat = self._create_material(api_client)
+        linked = create_service(materials=[{"material_id": mat["id"]}])
+        create_service(title="0-unlinked")  # counterexample: must not surface
+        arch = api_client.post(f"/api/v1/materials/{mat['id']}/archive")
+        assert arch.status_code == 200, f"archive failed: {arch.text}"
+
+        ids = self._ids(api_client.get(f"/api/v1/services?material_id={mat['id']}"))
+
+        assert ids == [linked["id"]]
+
+
 class TestServiceListSorting:
     """Server-side sorting on GET /api/v1/services (#205 Task 3).
 
-    sort_by whitelist: title, duration, age, material_hint, tariffs, specialty,
-    archived, created_at. sort_order: asc/desc. Unknown → 422.
+    sort_by whitelist: title, duration, age, tariffs, specialty, archived,
+    created_at. sort_order: asc/desc. Unknown → 422.
     Default (sort_by=None): title ASC, id ASC (spec §4.4 — NEW, was unspecified).
     """
 
@@ -835,6 +1356,17 @@ class TestServiceListSorting:
     def test_sort_invalid_key_422(self, api_client) -> None:
         """sort_by=bogus → 422 from Literal validation."""
         resp = api_client.get("/api/v1/services?sort_by=bogus")
+        assert resp.status_code == 422
+
+    def test_sort_material_hint_removed_422(self, api_client) -> None:
+        """GH #223 Task 13 regression: `material_hint` left the whitelist.
+
+        The column/sort key is retired (spec §10 — known breaking change;
+        admin stopped sending it in the same release). Old clients that
+        still send `sort_by=material_hint` now get 422 via Literal
+        validation, exactly like any other unknown key.
+        """
+        resp = api_client.get("/api/v1/services?sort_by=material_hint")
         assert resp.status_code == 422
 
     def test_default_order_locked(self, api_client, create_service) -> None:

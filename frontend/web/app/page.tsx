@@ -66,7 +66,7 @@ function toActivityView(s: ScheduleView): ActivityView {
     categoryColor: s.tagColors[0] || "#888888",
     nextTimes: s.nextTimes,
     priceDetails: s.priceHint,
-    materialDetails: s.materialHint,
+    materialDetails: s.materialDetails,
     locationDetails: s.locationHint,
   };
 }
@@ -107,6 +107,8 @@ export default function Home() {
   const [selectedActivity, setSelectedActivity] = useState<ScheduleView | null>(null);
   const [bookingActivity, setBookingActivity] = useState<ScheduleView | null>(null);
   const [bookingFromLastCard, setBookingFromLastCard] = useState(false);
+  /** Material of the last-viewed service — prefill source for the private booking form (GH #223 §9). */
+  const [lastViewedMaterial, setLastViewedMaterial] = useState<string | undefined>(undefined);
 
   // ── Build 14-day window for background fetch ──
   const today = new Date();
@@ -234,6 +236,8 @@ export default function Home() {
       const activity = schedules.find((a) => a.id === card.id);
       if (activity) {
         setSelectedActivity(activity);
+        // Remember the first material title for the private-booking prefill
+        setLastViewedMaterial(activity.material || undefined);
       }
     },
     [schedules],
@@ -396,6 +400,7 @@ export default function Home() {
               : undefined
           }
           preferredLocation={selectedLocation ?? undefined}
+          defaultMaterial={lastViewedMaterial}
         />
       )}
     </main>

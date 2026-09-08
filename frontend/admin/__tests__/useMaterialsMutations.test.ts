@@ -44,6 +44,7 @@ const mockRestoreMaterial = vi.mocked(restoreMaterial);
 
 const materialResponse = {
   id: 'mat-1', title: 'Глина', description: '', archived: false,
+  used_in_services_count: 0,
   created_at: '', updated_at: '',
 };
 

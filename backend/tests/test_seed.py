@@ -74,21 +74,80 @@ async def test_seed_populates_tags(db_manager: DBManager) -> None:
         assert result.scalar() == 7
 
 
-async def test_seed_services_have_material_hint_and_image_url(db_manager: DBManager) -> None:
-    """Each seeded service has non-empty material_hint and image_url."""
+async def test_seed_services_have_image_url(db_manager: DBManager) -> None:
+    """Each seeded service has non-empty image_url."""
+    from src.seed.seed import seed_data
+
+    await seed_data(db_manager)
+
+    async with db_manager.async_session() as session:
+        result = await session.execute(text("SELECT id, image_url FROM services"))
+        rows = result.all()
+        assert len(rows) == 7
+        for row in rows:
+            assert row.image_url, f"Service {row.id} missing image_url"
+
+
+async def test_seed_services_have_no_material_hint_column(
+    db_manager: DBManager,
+) -> None:
+    """GH #223 Task 13: services.material_hint is dropped from the schema."""
+    from src.seed.seed import seed_data
+
+    await seed_data(db_manager)
+
+    async with db_manager.async_session() as session:
+        # pragma_table_info lists the live columns of `services`; the
+        # assertion is that the dropped column no longer appears in them.
+        result = await session.execute(
+            text("SELECT name FROM pragma_table_info('services')")
+        )
+        columns = {row.name for row in result}
+        assert "material_hint" not in columns
+
+
+async def test_seed_service_materials_exist(db_manager: DBManager) -> None:
+    """GH #223 Task 13: seed links services to materials (spec §10 seeds).
+
+    At least 3 links exist; at least one carries a note (dev/demo data must
+    exercise the per-link note); services read back with non-empty materials.
+    """
     from src.seed.seed import seed_data
 
     await seed_data(db_manager)
 
     async with db_manager.async_session() as session:
         result = await session.execute(
-            text("SELECT id, material_hint, image_url FROM services")
+            text("SELECT COUNT(*) FROM service_materials")
         )
-        rows = result.all()
-        assert len(rows) == 7
-        for row in rows:
-            assert row.material_hint, f"Service {row.id} missing material_hint"
-            assert row.image_url, f"Service {row.id} missing image_url"
+        total = result.scalar()
+        assert total >= 3, f"expected >=3 service_materials links, got {total}"
+
+        # Services read back with non-empty materials (distinct linked services).
+        result = await session.execute(
+            text("SELECT COUNT(DISTINCT service_id) FROM service_materials")
+        )
+        linked_services = result.scalar()
+        assert linked_services >= 3, (
+            f"expected >=3 distinct services with non-empty materials, "
+            f"got {linked_services}"
+        )
+
+        result = await session.execute(
+            text("SELECT COUNT(*) FROM service_materials WHERE note IS NOT NULL")
+        )
+        with_note = result.scalar()
+        assert with_note >= 1, "expected at least one link with a note"
+
+        # Every link resolves to existing seeded rows (no dangling FKs).
+        result = await session.execute(
+            text(
+                "SELECT COUNT(*) FROM service_materials sm "
+                "WHERE NOT EXISTS (SELECT 1 FROM services s WHERE s.id = sm.service_id) "
+                "OR NOT EXISTS (SELECT 1 FROM materials m WHERE m.id = sm.material_id)"
+            )
+        )
+        assert result.scalar() == 0
 
 
 async def test_seed_locations_have_location_hint(db_manager: DBManager) -> None:

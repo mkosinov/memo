@@ -36,6 +36,8 @@ import {
   ServiceCreateSchema,
   ServiceUpdateSchema,
   type ServiceUpdate,
+  ServiceMaterialItemSchema,
+  ServiceMaterialLinkSchema,
   LocationCreateSchema,
   LocationUpdateSchema,
   type LocationUpdate,
@@ -189,6 +191,14 @@ const validTag = {
   tag: 'масло',
 };
 
+// GH #223: nested material payload on ServiceResponse (read shape, spec §4/§5).
+const validServiceMaterialItem = {
+  id: 'material-1',
+  title: 'Акварель',
+  description: 'Акварельные краски',
+  note: 'бумага 300 г',
+};
+
 const validService = {
   id: 'service-1',
   title: 'Мастер-класс по живописи',
@@ -201,6 +211,7 @@ const validService = {
   record_info: 'Запись за 24 часа',
   tariffs: [validTariff],
   tags: [validTag],
+  materials: [validServiceMaterialItem],
   archived: false,
   created_at: '2024-01-15T10:00:00Z',
   updated_at: '2024-06-01T12:00:00Z',
@@ -228,16 +239,92 @@ describe('ServiceResponseSchema', () => {
     expect(result.tags).toHaveLength(0);
   });
 
-  it('parses service with material_hint', () => {
+  it('strips legacy material_hint from service responses (GH #223 Task 13)', () => {
+    // material_hint is retired: a legacy backend response still carrying the
+    // key must parse, and the parsed result must not expose the field.
     const data = { ...validService, material_hint: 'Принести фартук' };
     const result = ServiceResponseSchema.parse(data);
-    expect(result.material_hint).toBe('Принести фартук');
+    expect('material_hint' in result).toBe(false);
   });
 
   it('parses service without material_hint (field absent)', () => {
     // When field is absent and schema uses .optional(), parse should still succeed
     const result = ServiceResponseSchema.parse(validService);
-    expect(result.material_hint).toBeUndefined();
+    expect('material_hint' in result).toBe(false);
+  });
+
+  // ─── GH #223: nested materials (read shape, spec §4/§5) ───
+
+  it('parses service with materials (GH #223)', () => {
+    const result = ServiceResponseSchema.parse(validService);
+    expect(result.materials).toHaveLength(1);
+    expect(result.materials[0].id).toBe('material-1');
+    expect(result.materials[0].title).toBe('Акварель');
+    expect(result.materials[0].description).toBe('Акварельные краски');
+    expect(result.materials[0].note).toBe('бумага 300 г');
+  });
+
+  it('defaults materials to [] when absent (GH #223)', () => {
+    const { materials: _materials, ...noMaterials } = validService;
+    const result = ServiceResponseSchema.parse(noMaterials);
+    expect(result.materials).toEqual([]);
+  });
+
+  it('parses material item with null note (GH #223)', () => {
+    const data = { ...validService, materials: [{ ...validServiceMaterialItem, note: null }] };
+    const result = ServiceResponseSchema.parse(data);
+    expect(result.materials[0].note).toBeNull();
+  });
+});
+
+// ─── ServiceMaterialItemSchema (GH #223) ───────────────────────────────────
+
+describe('ServiceMaterialItemSchema', () => {
+  it('parses a valid nested material item', () => {
+    const result = ServiceMaterialItemSchema.parse(validServiceMaterialItem);
+    expect(result.id).toBe('material-1');
+    expect(result.title).toBe('Акварель');
+    expect(result.description).toBe('Акварельные краски');
+    expect(result.note).toBe('бумага 300 г');
+  });
+
+  it('accepts null note', () => {
+    const result = ServiceMaterialItemSchema.parse({ ...validServiceMaterialItem, note: null });
+    expect(result.note).toBeNull();
+  });
+
+  it('rejects missing note (backend always serializes it)', () => {
+    const { note: _note, ...noNote } = validServiceMaterialItem;
+    expect(() => ServiceMaterialItemSchema.parse(noNote)).toThrow();
+  });
+
+  it('rejects missing title', () => {
+    const { title: _title, ...noTitle } = validServiceMaterialItem;
+    expect(() => ServiceMaterialItemSchema.parse(noTitle)).toThrow();
+  });
+});
+
+// ─── ServiceMaterialLinkSchema (GH #223, write shape spec §4) ───────────────
+
+describe('ServiceMaterialLinkSchema', () => {
+  it('parses a link with a note', () => {
+    const result = ServiceMaterialLinkSchema.parse({ material_id: 'material-1', note: 'бумага 300 г' });
+    expect(result.material_id).toBe('material-1');
+    expect(result.note).toBe('бумага 300 г');
+  });
+
+  it('parses a link without note (optional)', () => {
+    const result = ServiceMaterialLinkSchema.parse({ material_id: 'material-1' });
+    expect(result.note).toBeUndefined();
+  });
+
+  it('parses a link with null note (clears the note, spec §4)', () => {
+    const result = ServiceMaterialLinkSchema.parse({ material_id: 'material-1', note: null });
+    expect(result.note).toBeNull();
+  });
+
+  it('rejects missing material_id', () => {
+    expect(() => ServiceMaterialLinkSchema.parse({ note: 'без id' })).toThrow();
   });
 });
 
@@ -800,9 +887,9 @@ describe('Type exports', () => {
       max_age: 18,
       duration: 60,
       record_info: '',
-      material_hint: '',
       tariffs: [],
       tag_ids: [],
+      materials: [],
     };
     expect(s.title).toBe('Обновлённое название');
   });
@@ -891,7 +978,6 @@ describe('ServiceCreateSchema', () => {
     expect(result.min_age).toBe(0);
     expect(result.max_age).toBe(18);
     expect(result.record_info).toBe('');
-    expect(result.material_hint).toBe('');
     expect(result.tariffs).toEqual([]);
     expect(result.tag_ids).toEqual([]);
   });
@@ -906,7 +992,6 @@ describe('ServiceCreateSchema', () => {
       max_age: 14,
       duration: 180,
       record_info: 'Запись за сутки',
-      material_hint: 'Фартук обязателен',
       tariffs: [{ title: 'Взрослый', price: 3000 }],
       tag_ids: ['tag-1', 'tag-2'],
     };
@@ -935,6 +1020,29 @@ describe('ServiceCreateSchema', () => {
     const data = { title: 'Длинный', duration: 481 };
     expect(() => ServiceCreateSchema.parse(data)).toThrow();
   });
+
+  // ─── GH #223: materials links on write (spec §4) ───
+
+  it('defaults materials to [] when absent (GH #223)', () => {
+    const result = ServiceCreateSchema.parse(validServiceCreate);
+    expect(result.materials).toEqual([]);
+  });
+
+  it('accepts materials links (GH #223)', () => {
+    const data = {
+      ...validServiceCreate,
+      materials: [{ material_id: 'material-1', note: 'бумага 300 г' }, { material_id: 'material-2' }],
+    };
+    const result = ServiceCreateSchema.parse(data);
+    expect(result.materials).toHaveLength(2);
+    expect(result.materials[0]).toEqual({ material_id: 'material-1', note: 'бумага 300 г' });
+    expect(result.materials[1].material_id).toBe('material-2');
+  });
+
+  it('rejects a materials link without material_id (GH #223)', () => {
+    const data = { ...validServiceCreate, materials: [{ note: 'без id' }] };
+    expect(() => ServiceCreateSchema.parse(data)).toThrow();
+  });
 });
 
 // ─── ServiceUpdateSchema ─────────────────────────────────────────────────
@@ -956,6 +1064,22 @@ describe('ServiceUpdateSchema', () => {
 
   it('rejects update missing required create fields', () => {
     expect(() => ServiceUpdateSchema.parse({})).toThrow();
+  });
+
+  it('inherits materials from ServiceCreate and defaults to [] (GH #223)', () => {
+    const result = ServiceUpdateSchema.parse({ title: 'Новое название', duration: 90 });
+    expect(result.materials).toEqual([]);
+  });
+
+  it('still rejects an unknown key alongside materials (strict, GH #223)', () => {
+    expect(() =>
+      ServiceUpdateSchema.parse({
+        title: 'Новое название',
+        duration: 90,
+        materials: [{ material_id: 'material-1' }],
+        bogus: true,
+      }),
+    ).toThrow();
   });
 });
 

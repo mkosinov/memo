@@ -6,6 +6,8 @@ import {
   type ServiceFieldConfig,
 } from './serviceFields';
 import { Modal } from '@/app/components/shared/modal/Modal';
+import { useMaterialsRaw } from '@/hooks/useMaterials';
+import type { ServiceMaterialLink } from '@memo/api-client';
 
 export interface ServiceModalProps {
   mode: 'create' | 'edit';
@@ -14,6 +16,12 @@ export interface ServiceModalProps {
   onClose: () => void;
   title: string;
   subtitle?: string;
+}
+
+/** UI-state material link: note is always a controlled string ('' = no note). */
+interface MaterialLinkState {
+  material_id: string;
+  note: string;
 }
 
 /* ── Local inline field renderer ─────────────────────────────────── */
@@ -214,7 +222,133 @@ function NestedList({ field, items, onChange }: NestedListProps) {
   );
 }
 
+/* ── Local materials multi-list (GH #223 spec §8) ───────────────── */
+
+interface MaterialsFieldProps {
+  field: Extract<ServiceFieldConfig, { type: 'materials' }>;
+  value: MaterialLinkState[];
+  onChange: (links: MaterialLinkState[]) => void;
+}
+
+/**
+ * Checkbox multi-list of ACTIVE materials with a one-line note input under
+ * each checked item. Options come from `useMaterialsRaw` (picker =
+ * `/all?status=active`, domain-rules/materials.md). Selection order follows
+ * the picker order (server: title ASC, id ASC) — the backend re-orders on
+ * read anyway (spec §3.3), so no client-side sorting is needed.
+ */
+function MaterialsField({ field, value, onChange }: MaterialsFieldProps) {
+  const baseId = useId();
+  const { data: materials = [] } = useMaterialsRaw();
+
+  const toggle = (materialId: string) => {
+    if (value.some((l) => l.material_id === materialId)) {
+      onChange(value.filter((l) => l.material_id !== materialId));
+    } else {
+      onChange([...value, { material_id: materialId, note: '' }]);
+    }
+  };
+
+  const setNote = (materialId: string, note: string) => {
+    onChange(value.map((l) => (l.material_id === materialId ? { ...l, note } : l)));
+  };
+
+  return (
+    <div className="flex flex-col gap-2">
+      <label className="text-xs font-medium" style={{ color: 'var(--ink-light)' }}>
+        {field.label}
+      </label>
+      {materials.length === 0 && (
+        <div className="text-xs py-1" style={{ color: 'var(--ink-light)' }}>
+          {field.emptyText}
+        </div>
+      )}
+      <div className="flex flex-col gap-1">
+        {materials.map((m) => {
+          const link = value.find((l) => l.material_id === m.id);
+          const checked = link !== undefined;
+          const checkboxId = `${baseId}-mat-${m.id}`;
+          const noteId = `${baseId}-mat-${m.id}-note`;
+          return (
+            <div
+              key={m.id}
+              className="rounded-lg border px-3 py-2"
+              style={{ borderColor: 'var(--line)', backgroundColor: 'var(--surface)' }}
+              data-testid={`material-option-${m.id}`}
+            >
+              <div className="flex items-center gap-2">
+                <input
+                  id={checkboxId}
+                  type="checkbox"
+                  checked={checked}
+                  onChange={() => toggle(m.id)}
+                  className="w-4 h-4 rounded border-gray-300 accent-[var(--brand)] cursor-pointer shrink-0"
+                  data-testid={`material-checkbox-${m.id}`}
+                />
+                <label
+                  htmlFor={checkboxId}
+                  className="text-sm cursor-pointer select-none"
+                  style={{ color: 'var(--ink)' }}
+                >
+                  {m.title}
+                </label>
+              </div>
+              {checked && (
+                <div className="mt-2 pl-6">
+                  <input
+                    id={noteId}
+                    type="text"
+                    value={link.note}
+                    onChange={(e) => setNote(m.id, e.target.value)}
+                    placeholder={field.notePlaceholder}
+                    className="w-full rounded-lg border px-3 py-1.5 text-sm transition-colors"
+                    style={{
+                      borderColor: 'var(--line)',
+                      backgroundColor: 'var(--white)',
+                      color: 'var(--ink)',
+                    }}
+                    aria-label={`Заметка: ${m.title}`}
+                    data-testid={`material-note-${m.id}`}
+                  />
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 /* ── ServiceModal ────────────────────────────────────────────────── */
+
+/** Read shape of a linked material on ServiceResponse (spec §5). */
+interface ServiceMaterialRead {
+  id: string;
+  title: string;
+  description: string;
+  note: string | null;
+}
+
+/** Map `service.materials` (read) → checkbox multi-list state (GH #223 T5). */
+function toMaterialLinkState(materials: unknown): MaterialLinkState[] {
+  if (!Array.isArray(materials)) return [];
+  return (materials as ServiceMaterialRead[]).map((m) => ({
+    material_id: m.id,
+    note: m.note ?? '',
+  }));
+}
+
+/**
+ * Map checkbox state → wire links (ServiceMaterialLink[]): empty notes are
+ * omitted (note is optional; the server normalizes whitespace-only → NULL,
+ * so the UI keeps raw input and does NOT trim client-side).
+ */
+function toMaterialLinks(state: MaterialLinkState[]): ServiceMaterialLink[] {
+  return state.map((l) =>
+    l.note === '' ? { material_id: l.material_id } : { material_id: l.material_id, note: l.note },
+  );
+}
 
 export function ServiceModal({
   mode,
@@ -228,6 +362,11 @@ export function ServiceModal({
     if (!service) return {};
     const initial: Record<string, unknown> = {};
     SERVICE_FIELDS.forEach((f) => {
+      if (f.type === 'materials') {
+        // Edit prefill: checked + note restored from service.materials.
+        initial[f.key] = toMaterialLinkState(service[f.key]);
+        return;
+      }
       initial[f.key] =
         service[f.key] ?? (f.type === 'number' ? 0 : f.type === 'nested-list' ? [] : '');
     });
@@ -286,7 +425,12 @@ export function ServiceModal({
     if (!validate()) return;
     setIsSubmitting(true);
     try {
-      await onSubmit(formData);
+      // GH #223 T5: checkbox state → wire links ({material_id, note?}).
+      const payload: Record<string, unknown> = {
+        ...formData,
+        materials: toMaterialLinks((formData['materials'] as MaterialLinkState[]) ?? []),
+      };
+      await onSubmit(payload);
       onClose();
     } catch {
       // Toast handled by caller
@@ -350,6 +494,16 @@ export function ServiceModal({
                   field={field}
                   items={(formData[field.key] as Record<string, unknown>[]) ?? []}
                   onChange={(items) => handleChange(field.key, items)}
+                />
+              );
+            }
+            if (field.type === 'materials') {
+              return (
+                <MaterialsField
+                  key={field.key}
+                  field={field}
+                  value={(formData[field.key] as MaterialLinkState[]) ?? []}
+                  onChange={(links) => handleChange(field.key, links)}
                 />
               );
             }

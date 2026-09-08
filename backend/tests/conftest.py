@@ -127,6 +127,7 @@ async def _truncate_all_tables(engine):
         Photo,
         Record,
         Service,
+        ServiceMaterial,
         Tag,
         Tariff,
         User,

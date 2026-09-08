@@ -55,6 +55,11 @@ class EventHub:
         """Remove a subscriber (client disconnect); missing queues are ignored."""
         self._subscribers.discard(q)
 
+    def drain(self) -> None:
+        """Drop every subscriber (app shutdown) — no queues leak across
+        app instances of the module-singleton hub."""
+        self._subscribers.clear()
+
     def publish(self, entities: Iterable[str], origin: Origin | None) -> None:
         """Fan one event out to every subscriber.
 

@@ -29,6 +29,8 @@ from src.core.config import settings
 from src.db.migrate import run_alembic_upgrade
 from src.errors import ErrorCode, ErrorDetail
 from src.events import emitter
+from src.events.hub import hub
+from src.events.router import router as events_router
 
 
 @asynccontextmanager
@@ -36,7 +38,12 @@ async def lifespan(_app: FastAPI):
     # In test env: conftest handles table creation, skip alembic
     if settings.ENV != "testing":
         await run_alembic_upgrade(str(settings.DATABASE_URL))
-    yield
+    try:
+        yield
+    finally:
+        # GH #239 — drop any SSE queues still alive at shutdown so nothing
+        # leaks across app instances (module-singleton hub; spec §3.1).
+        hub.drain()
 
 
 _MUTATING_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
@@ -80,9 +87,9 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    # Innermost user middleware — wraps ALL routes (added before any
-    # include_router; ordering with CORS is irrelevant: they touch
-    # disjoint concerns).
+    # Outermost user middleware — later add_middleware wraps earlier ones, so
+    # this sees requests BEFORE CORS and the routes see its origin contextvar
+    # (GH #239 emit path). It must stay the LAST add_middleware call.
     app.add_middleware(EventOriginMiddleware)
 
     # ── Global exception handlers ──────────────────────────────────────────
@@ -184,6 +191,7 @@ def create_app() -> FastAPI:
     app.include_router(materials_router, prefix="/api/v1/materials")
     app.include_router(user_settings_router, prefix="/api/v1/user-settings")
     app.include_router(system_router, prefix="/api/v1")
+    app.include_router(events_router, prefix="/api/v1")  # GH #239 — GET /api/v1/events (SSE)
 
     return app
 

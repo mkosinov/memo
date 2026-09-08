@@ -11,15 +11,16 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.domain.record_visits import (
+    check_activity_capacity,
     recompute_record_seats,
     recompute_record_status,
-    check_activity_capacity,
 )
+from src.events.emitter import mark_changed
 from src.models.record import Record
 from src.models.visit import Visit
 from src.repositories.generic import BaseRepository, get_base_repository
 from src.schemas.common import PaginatedResponse
-from src.schemas.visit import VisitCreate, VisitUpdate, VisitPatch, VisitResponse
+from src.schemas.visit import VisitCreate, VisitPatch, VisitResponse, VisitUpdate
 from src.services.decorators import transactional
 
 
@@ -100,6 +101,8 @@ class VisitService:
         await recompute_record_seats(db_session, visit.record_id)
         await db_session.flush()
         await db_session.refresh(visit)
+        # GH #239 §3.3: the parent record is rewritten by the recompute hooks
+        mark_changed("records")
         return visit
 
     @transactional
@@ -118,6 +121,8 @@ class VisitService:
         await recompute_record_status(db_session, visit.record_id)
         await db_session.flush()
         await db_session.refresh(visit)
+        # GH #239 §3.3: the parent record is rewritten by the recompute hook
+        mark_changed("records")
         return visit
 
     @transactional
@@ -140,6 +145,8 @@ class VisitService:
         await recompute_record_status(db_session, visit.record_id)
         await db_session.flush()
         await db_session.refresh(visit)
+        # GH #239 §3.3: the parent record is rewritten by the recompute hook
+        mark_changed("records")
         return visit
 
     @transactional
@@ -155,6 +162,8 @@ class VisitService:
         await recompute_record_status(db_session, record_id)
         await recompute_record_seats(db_session, record_id)
         await db_session.flush()
+        # GH #239 §3.3: the parent record is rewritten by the recompute hooks
+        mark_changed("records")
         return True
 
     @transactional
@@ -171,6 +180,8 @@ class VisitService:
         await recompute_record_status(db_session, visit.record_id)
         await db_session.flush()
         await db_session.refresh(visit)
+        # GH #239 §3.3: the parent record is rewritten by the recompute hook
+        mark_changed("records")
         return visit
 
 

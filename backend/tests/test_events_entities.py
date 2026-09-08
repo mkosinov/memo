@@ -2,11 +2,12 @@
 
 Two guards:
 
-1. **Completeness** — every transactional service (GenericService/ArchiveService
-   subclasses discovered by importing every module in ``src/services/``, PLUS
-   the explicit standalone pair ``VisitService``/``UserSettingsService``)
-   resolves to a non-None entity name. A new transactional service without an
-   entity name fails here loudly.
+1. **Completeness** — every class carrying a ``@transactional`` method
+   (discovered via the ``__memo_transactional__`` marker set by the
+   decorator, OWN or inherited) resolves to a non-None entity name. A new
+   transactional service without an entity name fails here loudly —
+   including the standalone pair (``VisitService`` /
+   ``UserSettingsService``), covered automatically by the marker.
 2. **Drift mirror** — ``MODEL_ENTITY.values()`` equals the canonical set.
    Pairs with the frontend mirror (spec §4.1): adding/removing an entity
    anywhere breaks exactly one of the two mirrors in CI.
@@ -42,41 +43,41 @@ CANONICAL_ENTITIES = {
     "visitors",
 }
 
-# Standalone transactional services — NOT GenericService subclasses and no
-# ``_model`` (spec §1 trap); they declare ``entity_name`` explicitly.
-STANDALONE_SERVICES = ("VisitService", "UserSettingsService")
 
+def _has_transactional_method(cls: type) -> bool:
+    """True when ``cls`` carries any ``@transactional``-decorated method.
 
-def _iter_service_classes():
-    """Import every module in src/services/ and yield all concrete service classes.
-
-    GenericService/ArchiveService subclasses are found via ``__subclasses__``
-    (import side-effect registration); intermediate bases (GenericService,
-    ArchiveService itself) are never instantiated — skipped. The standalone
-    pair is looked up by name (Task 3 will switch this to @transactional-marker
-    introspection).
+    ``dir(cls)`` includes inherited methods — a pure-inheriting subclass
+    of ``GenericService`` counts too (its inherited wrappers resolve
+    ``type(self)`` at call time, so IT must have an entity name).
     """
-    for mod_info in pkgutil.iter_modules(src.services.__path__):
-        importlib.import_module(f"src.services.{mod_info.name}")
-
-    def walk(cls):
-        for child in cls.__subclasses__():
-            if child not in (GenericService, ArchiveService):
-                yield child
-            yield from walk(child)
-
-    yield from walk(GenericService)
-
-    for name in STANDALONE_SERVICES:
-        yield _find_class_by_name(name)
+    return any(
+        getattr(getattr(cls, name, None), "__memo_transactional__", False)
+        for name in dir(cls)
+    )
 
 
-def _find_class_by_name(name: str):
+def _iter_transactional_service_classes():
+    """Import every module in src/services/; yield classes with marked methods.
+
+    The two framework bases (``GenericService``/``ArchiveService``) are
+    skipped — they are abstract infrastructure, never instantiated as a
+    service (their own resolution is intentionally undefined). Everything
+    else with a ``@transactional`` method — GenericService subclass,
+    ArchiveService subclass, or standalone service — is yielded, so a new
+    transactional service is covered AUTOMATICALLY (no explicit list).
+    """
+    seen: set[type] = set()
     for mod_info in pkgutil.iter_modules(src.services.__path__):
         mod = importlib.import_module(f"src.services.{mod_info.name}")
-        if hasattr(mod, name):
-            return getattr(mod, name)
-    raise AssertionError(f"Standalone service {name} not found in src/services/")
+        for obj in vars(mod).values():
+            if not isinstance(obj, type) or obj in seen:
+                continue
+            if obj in (GenericService, ArchiveService):
+                continue
+            if _has_transactional_method(obj):
+                seen.add(obj)
+                yield obj
 
 
 class TestEntityNameResolution:
@@ -111,7 +112,7 @@ class TestCompleteness:
         """Completeness: no transactional service silently never-emit."""
         missing = []
         count = 0
-        for cls in _iter_service_classes():
+        for cls in _iter_transactional_service_classes():
             if resolve_entity_name(cls) is None:
                 missing.append(cls.__qualname__)
             count += 1
@@ -120,6 +121,15 @@ class TestCompleteness:
             "Declare entity_name explicitly or add the model to MODEL_ENTITY."
         )
         assert count >= 12, f"Expected at least 12 transactional services, walked {count}"
+
+    def test_standalone_services_are_covered_by_marker_walk(self) -> None:
+        """The standalone pair (no GenericService base) is discovered by
+        the marker walk — no explicit list to keep in sync."""
+        walked = {
+            cls.__name__
+            for cls in _iter_transactional_service_classes()
+        }
+        assert {"VisitService", "UserSettingsService"} <= walked
 
 
 class TestDriftMirror:

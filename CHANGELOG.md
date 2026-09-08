@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — 2026-09-08
+
+### Changed
+- **GH #245 — CI triggers split + gates redistribution** — branch `chore/ci-triggers-split-245` (9 commits: a8af4cb..136a276, PR #248, CI green 14/14; 2 of the 9 commits are the S7 probe + its revert — net file set is the 7-file T1–T7 changeset):
+  - **Triggers:** Tests workflow now runs on `pull_request` (branches: [main]) + `workflow_dispatch` only — the push trigger is removed; per-branch concurrency with cancel-in-progress added.
+  - **frontend-checks:** new job (lint + type-check, admin scope) replaces smoke.yml's frontend-smoke; vitest matrix switched from hand-maintained per-group file lists to native `--shard=N/5` sharding (fixes the silent drop of new test files, esp. `Client*`-named).
+  - **Harness gates:** G3 = CI fact-check (merged-PR check rollup + staleness guard) replaces the local baseline run; G7 = pinned fast suite (backend pytest + vitest + type-check + lint, no local e2e).
+  - **Docs:** `docs/tests_workflow.md` re-synced (coverage table + trigger scheme); pre-push hook comment refreshed (still no-op).
+  - **Live verification (PR #248):** no Smoke runs on PR events; frontend-checks green 28s; 5 shards green; probe run cancelled mid-flight by the next push (S3); throwaway `ClientZOrderingProbe.test.tsx` ran in shard 2/5 with zero matrix edits (S7), reverted; dispatch non-cancellation + no-push-runs verified post-merge.
+  - **7 files changed, +92 / −83.**
+  - **Closes:** #245.
+  - Design spec: `docs/specs/2026-09-07-ci-triggers-and-gates-split-design.md` (on main)
+  - Plan: `docs/plans/2026-09-07-ci-triggers-and-gates-split-245-plan.md` (on main)
+
+### Removed
+- **GH #245 — `smoke.yml` deleted** — its checks now live in test.yml's `frontend-checks` job + the G7 pinned fast suite.
+
 ## [Unreleased] — 2026-09-06
 
 ### Added

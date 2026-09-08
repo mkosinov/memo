@@ -6,6 +6,7 @@ import { deleteRecord, resolveDeleteRecord, ApiError } from '@memo/api-client';
 import type { DependencyNode } from '@memo/api-client';
 import { mapRecordsListCache, type RecordsListCache } from '@/lib/cache/recordCacheSync';
 import { useUI } from '@/contexts/UIContext';
+import { invalidateEntities } from '@/lib/invalidate';
 import { qk } from '@/lib/queryKeys';
 
 /**
@@ -26,6 +27,8 @@ import { qk } from '@/lib/queryKeys';
  *                  RecordsTable envelope ['records',page,...]
  *   ['record', id] — canonical store (RecordModal / useRecordData)
  *   ['visitors']   — visits cascade shrinks per-client visitor counts
+ * Family rules route through the shared map (#239): invalidateEntities
+ * (['records']) = ['records'] + ['visitors']; the point key stays here.
  */
 export function useDeleteRecord() {
   const queryClient = useQueryClient();
@@ -42,9 +45,10 @@ export function useDeleteRecord() {
   };
 
   const invalidateAfterDelete = (id: string): void => {
-    queryClient.invalidateQueries({ queryKey: qk.records });
+    // Family rules via the shared map (#239): ['records'] + ['visitors'].
+    invalidateEntities(queryClient, ['records']);
+    // Point key — only this hook knows the id (spec §4.1: id → hook).
     queryClient.invalidateQueries({ queryKey: qk.record(id) });
-    queryClient.invalidateQueries({ queryKey: qk.visitorsList });
   };
 
   const mutation = useMutation({

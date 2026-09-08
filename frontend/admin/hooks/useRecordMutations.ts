@@ -26,6 +26,7 @@ import {
   upsertVisit,
 } from '@/lib/cache/recordCacheSync';
 import { usePendingActions } from '@/contexts/PendingActionsContext';
+import { invalidateEntities } from '@/lib/invalidate';
 import { qk } from '@/lib/queryKeys';
 
 interface VisitData {
@@ -64,7 +65,7 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
     if (recordId) {
       queryClient.invalidateQueries({ queryKey: qk.record(recordId) });
     }
-    queryClient.invalidateQueries({ queryKey: qk.records });
+    invalidateEntities(queryClient, ['records']);
   }, [queryClient, recordId]);
 
   /** Lighter invalidation for ops that only change a single record's canonical store. */
@@ -228,7 +229,7 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
       invalidateRecord();
       // R4 (US-4): RecordsTable reads `paid` from the view row — prefix
       // ['records'] invalidation catches all pages/filters so the badge refreshes.
-      queryClient.invalidateQueries({ queryKey: qk.records });
+      invalidateEntities(queryClient, ['records']);
       return payment;
     },
     [recordId, queryClient, invalidateRecord],
@@ -243,7 +244,7 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
       invalidateRecord();
       // R4 (US-4): RecordsTable reads `paid` from the view row — prefix
       // ['records'] invalidation catches all pages/filters so the badge refreshes.
-      queryClient.invalidateQueries({ queryKey: qk.records });
+      invalidateEntities(queryClient, ['records']);
     },
     [recordId, queryClient, invalidateRecord],
   );
@@ -352,7 +353,7 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
       upsertPayment(queryClient, recordId, payment);
       // R4 (US-4): RecordsTable reads `paid` from the view row — prefix
       // ['records'] invalidation catches all pages/filters so the badge refreshes.
-      queryClient.invalidateQueries({ queryKey: qk.records });
+      invalidateEntities(queryClient, ['records']);
       return payment;
     },
     [recordId, queryClient],
@@ -429,7 +430,7 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
           removePayment(queryClient, recordId, paymentId);
           // R4 (US-4): RecordsTable reads `paid` from the view row — invalidate on
           // COMMIT (not on defer) so the badge refreshes once the delete is final.
-          queryClient.invalidateQueries({ queryKey: qk.records });
+          invalidateEntities(queryClient, ['records']);
         },
       });
     },

@@ -12,7 +12,7 @@ import {
   ApiError,
 } from '@memo/api-client';
 import type { ServiceCreate, ServiceUpdate, DependencyNode } from '@memo/api-client';
-import { qk } from '@/lib/queryKeys';
+import { invalidateEntities } from '@/lib/invalidate';
 
 export function useCreateService() {
   const queryClient = useQueryClient();
@@ -22,8 +22,10 @@ export function useCreateService() {
     // «Где используется» counter changes too (spec S4: count updates after
     // linking). Cross-entity invalidation mirrors useMaterialsMutations.
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: qk.services });
-      queryClient.invalidateQueries({ queryKey: qk.materials });
+      // Family rules via the shared map (#239): ['services'] + ['materials']
+      // (#223: link changes touch both «Где используется» counters) — the
+      // delete hook additionally cascades to ['records'] via the same map.
+      invalidateEntities(queryClient, ['services']);
     },
   });
 }
@@ -34,8 +36,10 @@ export function useUpdateService() {
     mutationFn: ({ id, data }: { id: string; data: ServiceUpdate }) => updateService(id, data),
     // GH #223 §8 — see useCreateService (link changes touch both counters).
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: qk.services });
-      queryClient.invalidateQueries({ queryKey: qk.materials });
+      // Family rules via the shared map (#239): ['services'] + ['materials']
+      // (#223: link changes touch both «Где используется» counters) — the
+      // delete hook additionally cascades to ['records'] via the same map.
+      invalidateEntities(queryClient, ['services']);
     },
   });
 }
@@ -45,7 +49,7 @@ export function usePatchService() {
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: Partial<ServiceUpdate> }) =>
       patchService(id, data),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: qk.services }),
+    onSuccess: () => invalidateEntities(queryClient, ['services']),
   });
 }
 
@@ -63,11 +67,10 @@ export function useDeleteService() {
     mutationFn: (id: string) => deleteService(id),
     onMutate: () => setDependencies(null), // clear stale tree from a prior attempt
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: qk.services });
-      // Cross-invalidation (cache hygiene): a hard-deleted service may have
-      // been referenced by records-derived views that key on ['services']
-      // (useRecordData.ts) and by records lists themselves.
-      queryClient.invalidateQueries({ queryKey: qk.records });
+      // Family rules via the shared map (#239): ['services'] + ['materials']
+      // + ['records'] (a hard-deleted service may be referenced by
+      // records-derived views keyed on ['services'] — useRecordData.ts).
+      invalidateEntities(queryClient, ['services']);
     },
     onError: (err) => {
       if (err instanceof ApiError && err.status === 409 && err.dependencies) {
@@ -84,7 +87,7 @@ export function useArchiveService() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => archiveService(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: qk.services }),
+    onSuccess: () => invalidateEntities(queryClient, ['services']),
   });
 }
 
@@ -93,6 +96,6 @@ export function useRestoreService() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => restoreService(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: qk.services }),
+    onSuccess: () => invalidateEntities(queryClient, ['services']),
   });
 }

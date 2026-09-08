@@ -13,18 +13,18 @@ import {
   ApiError,
 } from '@memo/api-client';
 import type { ClientCreate, ClientUpdate, DependencyNode } from '@memo/api-client';
-import { qk } from '@/lib/queryKeys';
+import { invalidateEntities } from '@/lib/invalidate';
 
 /**
  * Shared success handler (GH #140): every client mutation invalidates BOTH
  * lists — the clients table AND the records prefix, because records rows are
  * composite view rows carrying denormalized client name/phone (spec §6.3).
+ * Routed through the shared invalidation map (#239) — same family pair.
  */
 const useInvalidateClients = () => {
   const queryClient = useQueryClient();
   return async () => {
-    await queryClient.invalidateQueries({ queryKey: qk.clients });
-    await queryClient.invalidateQueries({ queryKey: qk.records });
+    invalidateEntities(queryClient, ['clients']);
   };
 };
 

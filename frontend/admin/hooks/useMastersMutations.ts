@@ -12,13 +12,13 @@ import {
   ApiError,
 } from '@memo/api-client';
 import type { MasterCreate, MasterUpdate, DependencyNode } from '@memo/api-client';
-import { qk } from '@/lib/queryKeys';
+import { invalidateEntities } from '@/lib/invalidate';
 
 export function useCreateMaster() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (data: MasterCreate) => createMaster(data),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: qk.masters }),
+    onSuccess: () => invalidateEntities(queryClient, ['masters']),
   });
 }
 
@@ -26,7 +26,7 @@ export function useUpdateMaster() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: MasterUpdate }) => updateMaster(id, data),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: qk.masters }),
+    onSuccess: () => invalidateEntities(queryClient, ['masters']),
   });
 }
 
@@ -35,7 +35,7 @@ export function usePatchMaster() {
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: Partial<MasterUpdate> }) =>
       patchMaster(id, data),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: qk.masters }),
+    onSuccess: () => invalidateEntities(queryClient, ['masters']),
   });
 }
 
@@ -53,11 +53,10 @@ export function useDeleteMaster() {
     mutationFn: (id: string) => deleteMaster(id),
     onMutate: () => setDependencies(null), // clear stale tree from a prior attempt
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: qk.masters });
-      // Cross-invalidation (cache hygiene): a hard-deleted master may have
-      // been referenced by records-derived views that key on ['masters']
-      // (useRecordData.ts) and by records lists themselves.
-      queryClient.invalidateQueries({ queryKey: qk.records });
+      // Family rules via the shared map (#239): ['masters'] + ['records']
+      // (a hard-deleted master may be referenced by records-derived views
+      // keyed on ['masters'] — useRecordData.ts).
+      invalidateEntities(queryClient, ['masters']);
     },
     onError: (err) => {
       if (err instanceof ApiError && err.status === 409 && err.dependencies) {
@@ -75,7 +74,7 @@ export function useArchiveMaster() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => archiveMaster(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: qk.masters }),
+    onSuccess: () => invalidateEntities(queryClient, ['masters']),
   });
 }
 
@@ -84,6 +83,6 @@ export function useRestoreMaster() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => restoreMaster(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: qk.masters }),
+    onSuccess: () => invalidateEntities(queryClient, ['masters']),
   });
 }

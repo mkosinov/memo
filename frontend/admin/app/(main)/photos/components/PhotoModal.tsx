@@ -113,6 +113,7 @@ function FieldRenderer({
           label=""
           displayField="tag"
           placeholder={field.placeholder || 'Добавить тег...'}
+          minChars={2}
         />
       </div>
     );
@@ -157,6 +158,7 @@ function FieldRenderer({
           displayField={field.displayField}
           placeholder={field.placeholder}
           required={field.required}
+          minChars={2}
         />
         {errorEl}
       </div>

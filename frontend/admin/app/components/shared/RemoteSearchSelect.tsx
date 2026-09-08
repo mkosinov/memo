@@ -7,16 +7,28 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 
 /* ── Types ───────────────────────────────────────────────────────── */
 
-export interface RemoteSearchSelectProps {
+/** What onSearch ultimately receives: the raw input (default) or the
+ *  object built by buildParams (e.g. `{ phone, per_page }` — GH #221). */
+type SearchQuery = string | Record<string, string | number>;
+
+export interface RemoteSearchSelectProps<
+  Q extends SearchQuery = string,
+> {
   value: string | null;
   onChange: (uuid: string | null) => void;
   onSelectItem?: (item: SearchItem) => void;
-  onSearch: (query: string) => Promise<SearchItem[]>;
+  onSearch: (query: Q) => Promise<SearchItem[]>;
   label: string;
   placeholder?: string;
   required?: boolean;
   displayField: string;
   subtitleField?: string;
+  /** Min input length before a search fires (default 2 — server `?q=` contract). */
+  minChars?: number;
+  /** Gate for firing a search; defaults to `q.length >= minChars`. */
+  canSearch?: (input: string) => boolean;
+  /** Builds what onSearch receives; defaults to passing the input through. */
+  buildParams?: (input: string) => Q;
 }
 
 interface SearchItem {
@@ -63,7 +75,9 @@ function getDisplayText(
 
 /* ── Component ───────────────────────────────────────────────────── */
 
-export default function RemoteSearchSelect({
+export default function RemoteSearchSelect<
+  Q extends SearchQuery = string,
+>({
   value,
   onChange,
   onSelectItem,
@@ -73,7 +87,10 @@ export default function RemoteSearchSelect({
   required = false,
   displayField,
   subtitleField,
-}: RemoteSearchSelectProps) {
+  minChars = 2,
+  canSearch,
+  buildParams,
+}: RemoteSearchSelectProps<Q>) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchItem[]>([]);
   const [isOpen, setIsOpen] = useState(false);
@@ -96,14 +113,17 @@ export default function RemoteSearchSelect({
   const search = useCallback(
     async (q: string) => {
       // GH #212: server-side ?q= is min-2-char; do not fire below the threshold.
-      if (q.length < 2) {
+      // GH #221: threshold/predicate/params are consumer props (defaults keep
+      // today's behavior — min 2 chars, input passed through as-is).
+      const allowed = canSearch ?? ((input: string) => input.length >= minChars);
+      if (!allowed(q)) {
         setResults([]);
         setIsOpen(false);
         return;
       }
       setIsLoading(true);
       try {
-        const data = await onSearch(q);
+        const data = await onSearch((buildParams ? buildParams(q) : q) as Q);
         setResults(data);
         setIsOpen(true);
       } catch {
@@ -112,7 +132,7 @@ export default function RemoteSearchSelect({
         setIsLoading(false);
       }
     },
-    [onSearch],
+    [onSearch, canSearch, buildParams, minChars],
   );
 
   const handleInputChange = useCallback(

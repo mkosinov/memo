@@ -16,8 +16,13 @@ GitHub issue в формате `GH #NNN` в комментарии/строке 
     pytest.xfail(...) без `GH #NNN` в строке)
   - skip'ы, у которых связанный issue уже CLOSED (тест пора включать)
 
-Условные skip'ы в теле теста (test.skip() без аргументов по условию
-отсутствия seed-данных) — НЕ считаются нарушением.
+Условные skip'ы в теле теста — НЕ считаются нарушением:
+  - Playwright: test.skip() без аргументов / по условию отсутствия seed-данных;
+  - pytest: вызов pytest.skip(...) в теле теста без ссылки на issue
+    (runtime-защита «сущность не поддерживает проверку» / «нет seed-данных»).
+    Декораторы @pytest.mark.skip/xfail — всегда безусловные и требуют ссылку.
+    In-body pytest.skip(...) СО ссылкой на issue остаётся на радаре
+    (для срабатывания правила «issue закрыт — тест пора включать»).
 """
 from __future__ import annotations
 
@@ -55,7 +60,9 @@ PLAYWRIGHT_UNCONDITIONAL_SKIP_RE = re.compile(
 
 PYTEST_UNCONDITIONAL_SKIP_RES = [
     re.compile(r"@pytest\.mark\.(?P<kind>skip|xfail)\s*\((?P<args>[^)]*)\)"),
-    re.compile(r"pytest\.(?P<kind>skip|xfail)\s*\((?P<args>[^)]*)\)"),
+    # In-body вызов: условный (runtime-защита), трекается только со ссылкой
+    # на issue — без неё это seed/capability-гард, а не отключённый тест.
+    re.compile(r"(?<!mark\.)pytest\.(?P<kind>skip|xfail)\s*\((?P<args>[^)]*)\)"),
 ]
 
 # Условные skip'ы (НЕ нарушение) — test.skip() / test.skip(condition, reason)
@@ -166,6 +173,11 @@ def find_pytest_skips(path: Path) -> list[SkipHit]:
             ctx_end = min(len(lines), line + 1)
             context = "\n".join(lines[ctx_start:ctx_end])
             issues = [int(x) for x in ISSUE_REF_RE.findall(context)]
+            # In-body вызов (не декоратор) без ссылки на issue — условный
+            # runtime-гард, не нарушение: не попадает в hits вообще.
+            is_decorator = text[m.start()] == "@"
+            if not is_decorator and not issues:
+                continue
             hits.append(SkipHit(
                 path=str(path),
                 line=line,

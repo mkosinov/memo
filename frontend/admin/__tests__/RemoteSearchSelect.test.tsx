@@ -306,12 +306,13 @@ describe('RemoteSearchSelect', () => {
     });
   });
 
-  it('blocks search below a raised minChars threshold', async () => {
+  it('blocks search below a raised minChars threshold and fires once crossed', async () => {
     mockSearch.mockResolvedValue([]);
 
     renderRemoteSearchSelect({ minChars: 4 });
     const input = screen.getByRole('textbox');
 
+    // 3 chars — below minChars=4: no search
     act(() => {
       fireEvent.change(input, { target: { value: 'Анн' } });
     });
@@ -321,6 +322,19 @@ describe('RemoteSearchSelect', () => {
     });
 
     expect(mockSearch).not.toHaveBeenCalled();
+
+    // 4th char — crosses the threshold: search fires
+    act(() => {
+      fireEvent.change(input, { target: { value: 'Анна' } });
+    });
+
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+
+    await waitFor(() => {
+      expect(mockSearch).toHaveBeenCalledWith('Анна');
+    });
   });
 
   it('builds request params via buildParams and passes them to onSearch', async () => {

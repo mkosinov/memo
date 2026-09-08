@@ -2,8 +2,9 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 
-// Server-coupled typeahead (debounce 300ms + min-2 clamp) — the remote
-// counterpart of Combobox (GH #214).
+// Server-coupled typeahead (debounce 300ms; consumer-tuned search gate via
+// minChars/canSearch, default min-2) — the remote counterpart of Combobox
+// (GH #214).
 
 /* ── Types ───────────────────────────────────────────────────────── */
 
@@ -123,6 +124,8 @@ export default function RemoteSearchSelect<
       }
       setIsLoading(true);
       try {
+        // Invariant: default Q = string (input passed through); a record-shaped
+        // Q is only reachable via buildParams. All current consumers are string.
         const data = await onSearch((buildParams ? buildParams(q) : q) as Q);
         setResults(data);
         setIsOpen(true);

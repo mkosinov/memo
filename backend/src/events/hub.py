@@ -5,6 +5,12 @@ endpoint subscribes identically. Module-level singleton — services are
 ``@lru_cache`` singletons with no app reference, so ``app.state`` is
 unreachable from the ``@transactional`` decorator; lifespan/router/decorator
 all import the SAME ``hub`` object below.
+
+Single-event-loop assumption: ``asyncio.Queue`` binds to the running loop on
+first await, so ``subscribe()``/``publish()`` must be called on the app's ONE
+event loop (FastAPI/uvicorn guarantee this — all handlers share it).
+``publish()`` is sync and ``put_nowait``-only BY DESIGN: it is called from
+``@transactional`` wrappers after commit and must never block or await there.
 """
 
 from __future__ import annotations

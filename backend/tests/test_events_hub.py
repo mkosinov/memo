@@ -37,6 +37,12 @@ async def test_overflow_drops_slow_subscriber():
     for _ in range(5):
         hub.publish(["records"], origin=None)  # no awaiting consumer
     assert q not in hub._subscribers  # dropped, others survive
+    # Pin "hub survives": a fresh subscribe AFTER the drop still receives
+    # the next publish — overflow removed one subscriber, not the hub.
+    q2 = hub.subscribe()
+    hub.publish(["visits"], origin=None)
+    assert await asyncio.wait_for(q2.get(), 1) == ({"visits"}, None)
+    assert q2 in hub._subscribers
 
 
 async def test_unsubscribe_stops_delivery():

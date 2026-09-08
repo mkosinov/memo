@@ -4,8 +4,10 @@ One map ``MODEL_ENTITY: model class → entity name`` (snake-case plural =
 ``__tablename__``). Built by an import-walk over every module in
 ``src/services/``, calling each zero-arg ``get_*_service()`` factory and
 reading the instance's ``_model`` (constructors are dependency-free: stateless
-repos + model/schema classes; factories are ``@lru_cache`` singletons, so the
-walk reuses live instances).
+repos + model/schema classes). Most factories are ``@lru_cache`` singletons,
+so the walk reuses live instances; ``get_user_settings_service`` is NOT
+cached — the walk invokes it once per process and discards the instance,
+which is harmless (constructor is dependency-free).
 
 ``_model`` is an INSTANCE attribute (set in ``GenericService.__init__``), so a
 service CLASS cannot be resolved through it directly — the walk therefore also
@@ -27,6 +29,17 @@ import-walk decides, not a hand-typed list.
 
 Task 3 note: completeness discovery will move to ``@transactional``-marker
 introspection; this map + resolver stay the source of truth.
+
+.. WARNING:: IMPORT CYCLE HAZARD
+    This module imports ``src.services.generic`` (and, via the walk at module
+    import time, EVERY module under ``src/services/``) at top level. If
+    ``src/services/decorators.py`` — or ANY module under ``src/services/`` —
+    imports this module at ITS top level, a hard import cycle forms
+    (``decorators → entities → src.services.generic`` partially initialized)
+    and the app crashes with ``AttributeError``/``ImportError`` at boot.
+    Consumers inside ``src/services/`` MUST import lazily — a function-level
+    ``from src.events.entities import resolve_entity_name`` inside the
+    wrapper, never at module top.
 """
 
 from __future__ import annotations
@@ -98,17 +111,24 @@ def _build_maps() -> tuple[dict[type, str], dict[type, str]]:
                 service_entity[type(instance)] = name
     # Standalone pair: no _model — their models mapped explicitly so the map
     # stays uniformly model-keyed; the services themselves resolve via their
-    # entity_name ClassVar.
-    model_entity[Visit] = "visits"
-    model_entity[UserSettings] = "user_settings"
-    service_entity[VisitService] = "visits"
-    service_entity[UserSettingsService] = "user_settings"
+    # entity_name ClassVar. Names are DERIVED from the canonical sources
+    # (service ``entity_name`` / model ``__tablename__``), not string literals
+    # — the triplication cannot drift.
+    model_entity[Visit] = cast("Any", Visit).__tablename__
+    model_entity[UserSettings] = cast("Any", UserSettings).__tablename__
+    service_entity[VisitService] = VisitService.entity_name
+    service_entity[UserSettingsService] = UserSettingsService.entity_name
     # Cascade-only entities (spec §3.3): written by other services' cascades,
     # no own service — merge last.
     model_entity.update(_CASCADE_ONLY_MODEL_ENTITY)
     return model_entity, service_entity
 
 
+# CAUTION — import-cycle hazard: this walk imports every module in
+# src/services/ at module import time. No module under src/services/ may
+# import src.events.entities at top level (decorators → entities →
+# src.services.generic partially-initialized = hard cycle). See the module
+# docstring WARNING; src/services/ consumers must import lazily.
 MODEL_ENTITY, _SERVICE_ENTITY = _build_maps()
 
 

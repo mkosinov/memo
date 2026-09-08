@@ -80,7 +80,7 @@ export function getNationalDigits(input: string): string {
 }
 
 function optionLabel(item: RemoteSearchItem): string {
-  return `${item.name || 'Без имени'} · ${item.phone}`;
+  return `${item.name || 'Без имени'} · ${item.phone ?? ''}`;
 }
 
 export default function PhoneInput({
@@ -113,7 +113,6 @@ export default function PhoneInput({
       label={label}
       placeholder={placeholder}
       displayField="phone"
-      minChars={MIN_DIGITS}
       canSearch={(input) => getNationalDigits(input).length >= MIN_DIGITS}
       buildParams={(input) => ({
         phone: getNationalDigits(input),

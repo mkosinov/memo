@@ -396,6 +396,7 @@ export async function getClientsWithStats(
 // surface (spec §7.3).
 export interface ClientListParams {
   q?: string;
+  phone?: string; // GH #221: digits-mode national-substring filter, 4-15 digits
   per_page?: number;
   page?: number;
   status?: 'active' | 'archived';

@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — 2026-09-08
+
+### Added
+- **GH #223 — Materials↔Services M2M link (`service_materials` with per-link note); `?material_id=` service filter; `used_in_services_count` on materials; `material_hint` retired everywhere** — branch `feat/materials-services-link-223` (17 commits: df5fb22..9187aaa; 13/13 plan tasks):
+  - **Backend:** new `ServiceMaterial` M2M association — `service_materials` table (composite PK, per-link `note`) + Alembic migration `a9b1c3d5e7f2` (create `service_materials`, drop `services.material_hint`). Service reads (get/list) embed the nested `materials` payload (link note + material snapshot); the create/update write path replaces links via `_replace_service_materials` with 422 pre-validation of unknown `material_id`. `GET /api/v1/services` gains `?material_id=` (join-predicate filter, invalid UUID → 422). Materials list/get gain the canonical `used_in_services_count` aggregate (counts only NON-archived services). Deletion matrix: `service_materials` rows auto-cascade on BOTH sides (service and material hard-delete); material delete surfaces the 409 dependency flow with side-aware relation labels.
+  - **api-client:** service schemas carry the `materials` payload; services list params gain `material_id`; material schemas gain `used_in_services_count`; `qk.materials` invalidation added on service mutations (S4 acceptance required).
+  - **Admin:** services table gains a materials-badges column; ServiceModal gains a materials multi-select with per-link notes (S1, S3); services page gains the material filter dropdown (S2 — archived materials drop out of the picker options, asserted); materials table gains the usage column backed by `used_in_services_count` (S4); DeleteDialog treats `service_materials` as AUTO entities with side-aware `RELATION_PLURAL` labels (S5). T2 absorbed mechanical admin type-fixes (`materials: []` fixture lines, ServicesTable cast).
+  - **Web:** client consumes materials from the service links instead of the retired `material_hint`; booking prefill from the selected material (S6). Bonus repair: pre-existing `useSchedule` envelope bug fixed (`{items, total}` vs bare arrays — the hook predated #182 pagination and web cards were broken at baseline); the `materialDetails` rename was propagated to the admin `buildSchedule` mapper (T13 later removed the read).
+  - **Tests:** backend pytest 1534p/0f/8s (+45 vs baseline 1489); api-client 263p/0f (+18); admin vitest 1657p/0f, `tsc` clean, lint 0 errors; web vitest 347p/0f (+9), web `tsc` 28 pre-existing (−1 net); domain 38/38. E2E: admin services-materials 4/4 (S1–S4), materials-delete 3/3 (S5), web materials.spec 3/3 + web visual 4/4 (S6). Spec §10 checklist fully executed — T13 DoD grep leaves only historical/regression references to `material_hint`.
+  - **Decisions for the record:** (1) conftest additive `create_all` shim during Tasks 1–12, removed in T13 (migration now authoritative); (2) T9 included api-client `used_in_services_count` + `qk.materials` invalidation on service mutations (S4 acceptance); (3) T11 DeleteDialog `service_materials` → AUTO_ENTITIES + side-aware labels; (4) T12 repaired the pre-existing `useSchedule` envelope bug (broken at baseline) and propagated the `materialDetails` rename to admin `buildSchedule`; (5) T13 shipped migration `a9b1c3d5e7f2`, seeds gained `_seed_service_materials` (5 links), visual snapshots regenerated, domain-rules «(in design)» → landed.
+  - **Docs:** domain-rules synced in T13 — materials↔services link contract landed, `material_hint` retirement documented.
+  - **84 files changed, +3292 / −253.**
+  - **Closes:** #223.
+  - Design spec: `docs/specs/2026-09-07-materials-services-link-design.md` (on main)
+  - Plan: `docs/plans/2026-09-07-materials-services-link-223-plan.md` (on main)
+
 ## [Unreleased] — 2026-09-06
 
 ### Added

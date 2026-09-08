@@ -71,7 +71,6 @@ const AUTO_ENTITY_LABEL: Record<string, string> = {
   service_tags: 'Теги',
   client_tags: 'Теги',
   record_tags: 'Теги',
-  service_materials: 'Услуги', // GH #223 §7 — materials delete 409 tree
   tariffs: 'Тарифы',
   photos: 'Фото',
 };
@@ -83,6 +82,13 @@ const RELATION_PLURAL: Record<string, string> = {
   // Record deps (Addendum 13 / GH #139) — backend deletion.py relation labels.
   Посещение: 'Посещения',
   Платёж: 'Платежи',
+  // service_materials join (GH #223 §7) — SIDE-AWARE: the join is listed in
+  // the backend FK_MATRIX for BOTH endpoints, each shipping its own relation
+  // label, so the entity-keyed AUTO_ENTITY_LABEL map (side-blind) must not
+  // own this label. Material delete → relation «Услуга» → «Услуги»;
+  // Service delete → relation «Материал» → «Материалы» (deletion.py:166/:204).
+  Услуга: 'Услуги',
+  Материал: 'Материалы',
 };
 
 /** Genitive entity name — used in the title and the Mode B fallback hint. */

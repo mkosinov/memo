@@ -474,4 +474,25 @@ describe('DeleteDialog — Mode A (material 409, GH #223 §7)', () => {
     await waitFor(() => expect(onResolve).toHaveBeenCalledWith('mat1', {}));
     expect(onDone).toHaveBeenCalledTimes(1);
   });
+
+  it('service-side delete renders the same join side-aware: "→ Материалы: 2 (удалены)"', () => {
+    // Backend FK_MATRIX lists service_materials for Service too, shipping
+    // relation «Материал» (vs «Услуга» from the Material side) — the label
+    // must follow the relation, not the entity name.
+    const SERVICE_LINKED: DependencyNode[] = [
+      { entity: 'service_materials', relation: 'Материал', count: 2, allowed_actions: ['cascade'], message: null },
+    ];
+    renderDialog({
+      entityName: 'Гончарное дело',
+      entityType: 'service',
+      entityId: 'svc1',
+      dependencies: SERVICE_LINKED,
+      onDone: vi.fn(),
+      onCancel: vi.fn(),
+    });
+
+    const row = screen.getByTestId('dep-service_materials');
+    expect(row).toHaveTextContent('→ Материалы: 2 (удалены)');
+    expect(row.querySelector('button')).toBeNull();
+  });
 });

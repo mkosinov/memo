@@ -969,7 +969,7 @@ describe('ClientTab — layout & features', () => {
 
 // ─── NewBookingTab — Feature Tests ──────────────────────────────────────────
 
-describe('NewBookingTab — phone optional, visitor optional, tariff required', () => {
+describe('NewBookingTab — visitor optional, tariff required; phone required (GH #221 decision 11)', () => {
   const defaultProps = {
     activity: mockActivity,
     serviceTariffs: mockTariffs,
@@ -1134,32 +1134,6 @@ describe('NewBookingTab — picked client (GH #221)', () => {
     expect(getClientByPhone).not.toHaveBeenCalled();
   });
 
-  // ─── Task 7: completeness guard on the unpicked save (spec §2 decision 11) ───
-
-  it('(0) blocks the save on an INCOMPLETE number with the exact message; nothing submitted', () => {
-    render(<NewBookingTab {...defaultProps2} />);
-    // Half-typed number: mask shows it, but it is not a valid complete number.
-    fireEvent.change(screen.getByTestId('input-phone'), { target: { value: '+7 (999) 123' } });
-    fireEvent.change(screen.getByTestId('input-client-name'), { target: { value: 'Кто-то' } });
-    fireEvent.click(screen.getByTestId('btn-create-record'));
-
-    expect(defaultProps2.onSubmit).not.toHaveBeenCalled();
-    expect(defaultProps2.showToast).toHaveBeenCalledWith(
-      'Проверьте номер телефона — возможно, он введён не полностью',
-    );
-  });
-
-  it('(0b) blocks the save on an EMPTY phone; nothing submitted', () => {
-    render(<NewBookingTab {...defaultProps2} />);
-    fireEvent.change(screen.getByTestId('input-client-name'), { target: { value: 'Кто-то' } });
-    fireEvent.click(screen.getByTestId('btn-create-record'));
-
-    expect(defaultProps2.onSubmit).not.toHaveBeenCalled();
-    expect(defaultProps2.showToast).toHaveBeenCalledWith(
-      'Проверьте номер телефона — возможно, он введён не полностью',
-    );
-  });
-
   it('(picked) never validates the phone — picked clients come from stored data', async () => {
     // A pick freezes the field with the client label (not a parseable phone),
     // yet the save must go through untouched.
@@ -1174,16 +1148,59 @@ describe('NewBookingTab — picked client (GH #221)', () => {
       expect.objectContaining({ kind: 'picked', client_id: 'c1' }),
     );
   });
+});
+
+// ─── NewBookingTab — unpicked completeness guard (GH #221 Task 7) ───────────
+// Spec §2 decision 11 / §6 step 2: the unpicked save requires a complete
+// valid number (parsePhoneNumberFromString + RU default, same library as the
+// mask). Incomplete → retryable toast, nothing submitted/fetched/created.
+
+describe('NewBookingTab — unpicked completeness guard (GH #221 Task 7)', () => {
+  const guardProps = {
+    activity: mockActivity,
+    serviceTariffs: mockTariffs,
+    onSubmit: vi.fn(),
+    showToast: vi.fn(),
+  };
+
+  beforeEach(() => {
+    guardProps.onSubmit.mockClear();
+    guardProps.showToast.mockClear();
+  });
+
+  it('(0) blocks the save on an INCOMPLETE number with the exact message; nothing submitted', () => {
+    render(<NewBookingTab {...guardProps} />);
+    // Half-typed number: mask shows it, but it is not a valid complete number.
+    fireEvent.change(screen.getByTestId('input-phone'), { target: { value: '+7 (999) 123' } });
+    fireEvent.change(screen.getByTestId('input-client-name'), { target: { value: 'Кто-то' } });
+    fireEvent.click(screen.getByTestId('btn-create-record'));
+
+    expect(guardProps.onSubmit).not.toHaveBeenCalled();
+    expect(guardProps.showToast).toHaveBeenCalledWith(
+      'Проверьте номер телефона — возможно, он введён не полностью',
+    );
+  });
+
+  it('(0b) blocks the save on an EMPTY phone; nothing submitted', () => {
+    render(<NewBookingTab {...guardProps} />);
+    fireEvent.change(screen.getByTestId('input-client-name'), { target: { value: 'Кто-то' } });
+    fireEvent.click(screen.getByTestId('btn-create-record'));
+
+    expect(guardProps.onSubmit).not.toHaveBeenCalled();
+    expect(guardProps.showToast).toHaveBeenCalledWith(
+      'Проверьте номер телефона — возможно, он введён не полностью',
+    );
+  });
 
   it('(unpicked, complete) a complete number passes the guard and submits', () => {
-    render(<NewBookingTab {...defaultProps2} />);
+    render(<NewBookingTab {...guardProps} />);
     fireEvent.change(screen.getByTestId('input-phone'), { target: { value: '+79991234567' } });
     fireEvent.change(screen.getByTestId('input-client-name'), { target: { value: 'Новый' } });
     fireEvent.click(screen.getByTestId('btn-create-record'));
 
-    expect(defaultProps2.showToast).not.toHaveBeenCalled();
-    expect(defaultProps2.onSubmit).toHaveBeenCalledTimes(1);
-    expect(defaultProps2.onSubmit.mock.calls[0][0]).toEqual(
+    expect(guardProps.showToast).not.toHaveBeenCalled();
+    expect(guardProps.onSubmit).toHaveBeenCalledTimes(1);
+    expect(guardProps.onSubmit.mock.calls[0][0]).toEqual(
       expect.objectContaining({ kind: 'unpicked' }),
     );
   });

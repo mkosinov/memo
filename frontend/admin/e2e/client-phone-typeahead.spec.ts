@@ -14,17 +14,14 @@ const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
 /**
  * GH #221 — record-form client typeahead by partial phone match.
  *
- * Scenarios (spec §User Scenarios):
+ * Scenarios (spec §User Scenarios) — all active:
  *   1. Find a regular by a fragment — pick binds the record by id.
  *   2. Different stored formats still match (old `8 999 123-45-67` data).
- *   3. Unknown number creates a client; incomplete does not save.   → Task 7
- *   4. Ignored suggestions never duplicate (save-time resolution).  → Task 7
+ *   3. Unknown number creates a client; incomplete does not save (Task 7).
+ *   4. Ignored suggestions never duplicate (save-time resolution, Task 7).
  *   5. Archived clients stay invisible in suggestions.
  *   6. Editing an existing record keeps the client (no rebind).
- *   7. Mask as you type; silence below the threshold; WYSIWYG save → Task 7.
- *
- * Unpicked save-time resolution (S3/S4/S7 WYSIWYG create path) lands in
- * Task 7 — those stay test.fixme'd until then.
+ *   7. Mask as you type; silence below the threshold; WYSIWYG save (Task 7).
  */
 
 /**

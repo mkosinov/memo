@@ -56,8 +56,10 @@ interface CreateRecordBase {
  * - `kind: 'picked'` — a typeahead suggestion was chosen; `client_id` binds
  *   the record to that client and resolve-or-create is skipped entirely.
  * - `kind: 'unpicked'` — free-typed number; `phone` is the VISIBLE formatted
- *   string (WYSIWYG) and `name` names the possibly-created client. This path
- *   keeps today's resolve-or-create until Task 7 replaces it.
+ *   string (WYSIWYG) and `name` names the possibly-created client. The save
+ *   path resolves by a fresh full-digits fetch (spec §6): digits-equality
+ *   match binds the existing client, no match creates one, fetch failure
+ *   blocks the save (fail closed — never a silent unchecked create).
  */
 export type CreateRecordInput =
   | ({ kind: 'picked'; client_id: string } & CreateRecordBase)

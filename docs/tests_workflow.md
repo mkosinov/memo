@@ -12,7 +12,7 @@
 | Frontend e2e (Playwright) | `cd frontend/admin && pnpm test:e2e` | `frontend/admin/` | Full user flows in browser |
 | Type check | `cd frontend/admin && pnpm type-check` | `frontend/admin/` | TypeScript validation |
 | Lint | `pnpm lint` (from repo root) | repo root | ESLint via Turbo |
-| **Full pre-push suite** | `pnpm test:all` (from repo root) | repo root | All of the above + visual compliance |
+| **Full local suite (on demand)** | `pnpm test:all` (from repo root) | repo root | All of the above + visual compliance |
 | Re-record visual baselines | `cd frontend/admin && pnpm run test:e2e:update` | `frontend/admin/` | Update visual regression baselines |
 
 ## Test environment
@@ -23,7 +23,7 @@
 - Started via `dev.sh`
 
 ### E2E (automated)
-The pre-push hook uses **2 Playwright projects** (per `frontend/admin/playwright.config.ts`):
+The full local suite (`pnpm test:all` via `scripts/test-all.sh`) uses **2 Playwright projects** (per `frontend/admin/playwright.config.ts`):
 - `shard-schedule` (port 3002 / backend 8001) — services, schedule, records, activity-details-modal
 - `shard-rest` (port 3003 / backend 8002) — everything else
 
@@ -65,18 +65,18 @@ Each shard's servers start via `scripts/e2e-shard-start.sh`:
   ```
   This uses `webServer` in config to auto-start Next.js on `:3002` (reads `.env.test` defaults).
 
-### Full (pre-push)
+### Full (on demand)
 - `pnpm test:all` (from repo root) — runs `scripts/test-all.sh` which orchestrates all stages in parallel
 - Typical runtime: ~10-15 minutes
 - Skip visual compliance: `VISUAL_COMPLIANCE=0 pnpm test:all`
 - Sequential mode (debugging): `SEQUENTIAL=1 pnpm test:all`
 
 ### Pre-push hook
-- Source: `scripts/git-hooks/pre-push` → `scripts/test-all.sh`
-- Auto-installed via `pnpm install` (postinstall)
+- Source: `scripts/git-hooks/pre-push`
+- Installed by `pnpm install` (postinstall via `scripts/install-hooks.sh`, which is worktree-aware), but **disabled — a no-op** (`exit 0`)
+- Local pre-push checking is done by the container harness at G7 (fast suite: backend pytest + vitest + type-check + lint — see `finishing-a-development-branch` skill); full local runs are on demand (`pnpm test:all`)
 - Re-install manually: `bash scripts/install-hooks.sh`
-- Worktree-aware: uses `git rev-parse --show-toplevel` to find repo root
-- Skip once (not recommended): `git push --no-verify`
+- Skip once (moot while the hook is a no-op): `git push --no-verify`
 
 ### Parallelism in test-all.sh
 The script runs stages concurrently using background processes and `wait`:
@@ -168,9 +168,34 @@ The flow:
 
 ## CI vs local
 
-The pre-push hook runs the same suite as local. CI on GitHub re-runs the same suite on push.
+**Trigger scheme** (details in [the CI-triggers spec](specs/2026-09-07-ci-triggers-and-gates-split-design.md)):
+- CI (`test.yml`) runs the full suite on `pull_request` + manual `workflow_dispatch` — pushes to main (incl. merges) start **nothing**; docs-only pushes run zero workflows.
+- A newer commit pushed to an open PR cancels that PR's obsolete run (`concurrency` + `cancel-in-progress`); manual dispatches never cancel each other.
+- Local pre-push checking is the G7 fast suite (see [Pre-push hook](#pre-push-hook) above), not the git hook. CI is the authoritative merge gate — especially for e2e.
 
-**Key insight:** Tests should be reproducible locally before pushing. The pre-push hook is designed to catch issues before CI.
+**Key insight:** Tests should be reproducible locally before pushing. The G7 fast suite (backend pytest + vitest + type-check + lint) catches issues before CI; local e2e is an investigation tool, never a gate.
+
+### Coverage map (test type × gate)
+
+| Test type | G6 quality¹ | G4.5 visual² | G7 pre-push³ | CI Tests⁴ |
+|---|---|---|---|---|
+| backend unit | ✅ | — | ✅ | ✅ |
+| backend api | ✅ | — | ✅ | ✅ |
+| backend integration | ✅ | — | ✅ | ✅ |
+| backend misc | ✅ | — | ✅ | ✅ |
+| backend coverage (report) | — | — | — | ✅ |
+| frontend vitest | ✅ | — | ✅ | ✅ (sharded — every file covered, no hand lists) |
+| lint (ESLint, admin scope) | — | — | ✅ | ✅ (`frontend-checks`) |
+| type-check (tsc, admin) | ~⁵ | — | ✅ | ✅ (`frontend-checks`) |
+| e2e Playwright (2 shards) | — | — | forbidden⁶ | ✅ |
+| visual compliance | ✅ (UI) | ✅ | — | ✅ (inside e2e) |
+
+¹ G6: whole pytest / whole vitest by language; UI changes add playwright-visual (`test:all`). Mandatory only for Standard/Large tasks (review budget).
+² G4.5: UI phases only, `visual-compliance-check.sh`, soft block.
+³ G7: fast suite before every branch push. Policy, not mechanism — CI is the deterministic backstop.
+⁴ CI Tests = `test.yml`: `pull_request` + `workflow_dispatch`; concurrency cancels obsolete PR runs, never dispatch runs.
+⁵ Type-check is deliberately **not duplicated at G6**: its deterministic homes are the CI `frontend-checks` job and the G7 fast suite; frontend coders additionally keep `tsc --noEmit` green in their checklist.
+⁶ Harness policy: local e2e is an investigation tool, never a gate; CI owns e2e.
 
 In CI:
 - `retries: 1` (vs 0 locally) — one automatic retry for flaky tests

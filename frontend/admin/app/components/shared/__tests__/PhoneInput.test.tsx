@@ -175,6 +175,33 @@ describe('PhoneInput', () => {
     typeValue('');
     expect(onInputValueChange).toHaveBeenLastCalledWith('');
   });
+
+  // (i) GH #221 followup: contract symmetry — the lifted value mirrors the
+  // input ALWAYS: a pick swaps it to the display label, × clears it to ''.
+  it('lifts the display label on pick and empty string on × clear', async () => {
+    const onInputValueChange = vi.fn();
+    const onPick = vi.fn();
+    mockSearch.mockResolvedValue([
+      { id: 'c1', name: 'Анна Иванова', phone: '+79991234567' },
+    ]);
+    renderPhoneInput({ onPick, onInputValueChange });
+    typeValue('9991');
+    await advanceDebounce();
+
+    await waitFor(() => {
+      expect(screen.getByText('Анна Иванова · +79991234567')).toBeInTheDocument();
+    });
+    const rows = screen.getAllByText('Анна Иванова · +79991234567');
+    const row = rows.find((el) => el.closest('li'));
+    fireEvent.click(row!);
+
+    // Pick → the visible input now shows the display label.
+    expect(onInputValueChange).toHaveBeenLastCalledWith('Анна Иванова · +79991234567');
+
+    // × → the input is empty again.
+    fireEvent.click(screen.getByRole('button', { name: /clear/i }));
+    expect(onInputValueChange).toHaveBeenLastCalledWith('');
+  });
 });
 
 // (g) T4 deferred nit: a consumer-supplied canSearch on RemoteSearchSelect

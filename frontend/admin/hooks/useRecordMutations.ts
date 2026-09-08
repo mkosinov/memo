@@ -43,16 +43,25 @@ export type RecordPatchData = Partial<
   }
 >;
 
-interface CreateRecordInput {
-  phone: string;
-  name: string;
+/** Shared non-client fields of a booking submit (GH #221). */
+interface CreateRecordBase {
+  notify: boolean;
   channel: string;
   seats: number;
   visitors: Array<{ name: string; age?: string; tariffId: string }>;
-  /** GH #221: set when the admin picked a typeahead suggestion — the record
-   *  binds that client by id and resolve-or-create is skipped entirely. */
-  client_id?: string | null;
 }
+
+/**
+ * Booking submit payload (GH #221) — the pick-XOR-phone invariant, encoded:
+ * - `kind: 'picked'` — a typeahead suggestion was chosen; `client_id` binds
+ *   the record to that client and resolve-or-create is skipped entirely.
+ * - `kind: 'unpicked'` — free-typed number; `phone` is the VISIBLE formatted
+ *   string (WYSIWYG) and `name` names the possibly-created client. This path
+ *   keeps today's resolve-or-create until Task 7 replaces it.
+ */
+export type CreateRecordInput =
+  | ({ kind: 'picked'; client_id: string } & CreateRecordBase)
+  | ({ kind: 'unpicked'; phone: string; name: string; client_id: null } & CreateRecordBase);
 
 export function useRecordMutations(activityId: string, recordId: string = '') {
   const queryClient = useQueryClient();
@@ -90,7 +99,7 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
       //    create on miss) until Task 7 replaces it with digits resolution.
       let clientId: string;
       let createdClientId: string | null = null;
-      if (input.client_id) {
+      if (input.kind === 'picked') {
         clientId = input.client_id;
       } else if (input.phone) {
         try {

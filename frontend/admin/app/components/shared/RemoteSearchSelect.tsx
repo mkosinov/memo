@@ -38,8 +38,8 @@ export interface RemoteSearchSelectProps<
    *  `${displayField} — ${subtitleField}`. */
   getDisplayLabel?: (item: SearchItem) => string;
   /** Lifts the committed input value (post-formatInput) to the consumer on
-   *  every change — e.g. the record form saves the visible masked string
-   *  verbatim (GH #221 WYSIWYG). */
+   *  every change, INCLUDING pick (display label) and ×-clear ('') — it
+   *  always mirrors what the input shows (GH #221 WYSIWYG). */
   onInputValueChange?: (value: string) => void;
   /** data-testid for the input element (consumer E2E anchors). */
   inputTestId?: string;
@@ -176,17 +176,19 @@ export default function RemoteSearchSelect<
       setSelectedLabel(displayLabel);
       setQuery('');
       setIsOpen(false);
+      onInputValueChange?.(displayLabel);
       onChange(item.id);
       onSelectItem?.(item);
     },
-    [displayField, subtitleField, getDisplayLabel, onChange, onSelectItem],
+    [displayField, subtitleField, getDisplayLabel, onInputValueChange, onChange, onSelectItem],
   );
 
   const handleClear = useCallback(() => {
     setSelectedLabel(null);
     setQuery('');
+    onInputValueChange?.('');
     onChange(null);
-  }, [onChange]);
+  }, [onChange, onInputValueChange]);
 
   const handleFocus = useCallback(() => {
     if (results.length > 0 && !selectedLabel) setIsOpen(true);

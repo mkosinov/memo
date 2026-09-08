@@ -127,11 +127,14 @@ const mockClientResponse = {
 };
 
 const baseCreateRecordInput = {
+  kind: 'unpicked' as const,
   phone: '+79990001122',
   name: 'Новый клиент',
+  notify: false,
   channel: 'whatsapp',
   seats: 0,
   visitors: [],
+  client_id: null,
 };
 
 const serviceTariffs = [{ id: 't1', price: 3500 }];
@@ -215,16 +218,22 @@ describe('useRecordMutations', () => {
   // ─── GH #221 Task 6: picked-client path (bind by id, skip resolve-or-create) ───
 
   describe('createRecord — picked client (GH #221)', () => {
+    const pickedInput = {
+      kind: 'picked' as const,
+      client_id: 'c-picked',
+      notify: false,
+      channel: 'whatsapp',
+      seats: 0,
+      visitors: [],
+    };
+
     it('creates the record bound to client_id and never calls getClientByPhone/createClient', async () => {
       const { queryClient, wrapper } = createQueryClientWrapper();
       const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
       const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
 
       await act(async () => {
-        await result.current.createRecord(
-          { ...baseCreateRecordInput, client_id: 'c-picked' },
-          serviceTariffs,
-        );
+        await result.current.createRecord(pickedInput, serviceTariffs);
       });
 
       // The picked id is used for the record AND for its visitors.
@@ -245,8 +254,7 @@ describe('useRecordMutations', () => {
       await act(async () => {
         await result.current.createRecord(
           {
-            ...baseCreateRecordInput,
-            client_id: 'c-picked',
+            ...pickedInput,
             visitors: [{ name: 'Гость', tariffId: 't1' }],
           },
           serviceTariffs,
@@ -258,7 +266,7 @@ describe('useRecordMutations', () => {
       );
     });
 
-    it('still resolves-or-creates when client_id is absent (unpicked path unchanged)', async () => {
+    it('still resolves-or-creates when nothing is picked (unpicked path unchanged)', async () => {
       mockGetClientByPhone.mockResolvedValue({ ...mockClientResponse, id: 'c-existing' } as never);
       const { wrapper } = createQueryClientWrapper();
       const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });

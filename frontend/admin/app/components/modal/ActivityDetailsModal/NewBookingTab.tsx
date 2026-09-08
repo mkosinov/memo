@@ -5,6 +5,7 @@ import PhoneInput, { type PickedClient } from '@/app/components/shared/PhoneInpu
 import { getClientsPaged } from '@memo/api-client';
 import type { Tariff } from '@memo/domain';
 import type { ScheduleAdminDTO } from '@memo/domain';
+import type { CreateRecordInput } from '@/hooks/useRecordMutations';
 
 interface NewVisitor {
   tempId: string;
@@ -13,18 +14,14 @@ interface NewVisitor {
   tariffId: string;
 }
 
+/** Booking submit payload — disjoint pick/unpicked union, defined once by
+ *  the mutations hook (single source of truth for the save contract). */
+export type NewBookingSubmitData = CreateRecordInput;
+
 interface NewBookingTabProps {
   activity: ScheduleAdminDTO;
   serviceTariffs: Tariff[];
-  onSubmit: (data: {
-    phone: string;
-    name: string;
-    client_id: string | null;
-    visitors: NewVisitor[];
-    notify: boolean;
-    channel: string;
-    seats: number;
-  }) => void;
+  onSubmit: (data: NewBookingSubmitData) => void;
   showToast: (message: string) => void;
 }
 
@@ -56,6 +53,14 @@ export function NewBookingTab({ activity, serviceTariffs, onSubmit, showToast }:
     setPhone(value);
   }, []);
 
+  // Stable search identity (RemoteSearchSelect memoizes `search` on it) —
+  // an inline lambda here would churn the debounce closure every render.
+  const searchClients = useCallback(
+    ({ phone: digits, per_page }: { phone: string; per_page: number }) =>
+      getClientsPaged({ phone: digits, per_page }).then((r) => r.items),
+    [],
+  );
+
   const addVisitor = useCallback(() => {
     setVisitors((prev) => [
       ...prev,
@@ -84,11 +89,11 @@ export function NewBookingTab({ activity, serviceTariffs, onSubmit, showToast }:
     }
 
     // Picked → bind by id; unpicked → the visible formatted string + typed
-    // name name the (possibly new) client (spec §5).
+    // name name the (possibly new) client (spec §5). The `kind` tag makes
+    // the two branches disjoint payloads, not placeholder empties.
     if (pickedClient) {
       onSubmit({
-        phone: '',
-        name: '',
+        kind: 'picked',
         client_id: pickedClient.id,
         visitors,
         notify,
@@ -97,6 +102,7 @@ export function NewBookingTab({ activity, serviceTariffs, onSubmit, showToast }:
       });
     } else {
       onSubmit({
+        kind: 'unpicked',
         phone,
         name,
         client_id: null,
@@ -115,9 +121,7 @@ export function NewBookingTab({ activity, serviceTariffs, onSubmit, showToast }:
     <div className="space-y-4 p-4" data-testid="new-booking-tab">
       {/* Phone — adaptive-mask typeahead (GH #221) */}
       <PhoneInput
-        onSearch={({ phone: digits, per_page }) =>
-          getClientsPaged({ phone: digits, per_page }).then((r) => r.items)
-        }
+        onSearch={searchClients}
         onPick={handlePick}
         onClear={handleClearPick}
         picked={pickedClient}

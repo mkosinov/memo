@@ -1088,18 +1088,24 @@ describe('NewBookingTab — picked client (GH #221)', () => {
     expect(clearedName.value).toBe('');
   });
 
-  it('submits client_id (no phone/name) after a pick', async () => {
+  it('submits the picked union (kind=picked, client_id only) after a pick', async () => {
     await typeAndPick();
     fireEvent.click(screen.getByTestId('btn-create-record'));
 
     expect(defaultProps2.onSubmit).toHaveBeenCalledTimes(1);
     const payload = defaultProps2.onSubmit.mock.calls[0][0];
-    expect(payload.client_id).toBe('c1');
-    expect(payload.phone).toBe('');
-    expect(payload.name).toBe('');
+    // Disjoint union: the picked branch carries the id, no phone/name keys.
+    expect(payload).toEqual({
+      kind: 'picked',
+      client_id: 'c1',
+      visitors: [],
+      notify: false,
+      channel: 'telegram',
+      seats: 1,
+    });
   });
 
-  it('submits phone + name without client_id when nothing is picked', () => {
+  it('submits the unpicked union (visible phone + name) when nothing is picked', () => {
     render(<NewBookingTab {...defaultProps2} />);
     // The visible string is the AsYouType-formatted value (mask is live even
     // unpicked) — WYSIWYG: it is exactly what reaches the payload.
@@ -1108,9 +1114,16 @@ describe('NewBookingTab — picked client (GH #221)', () => {
     fireEvent.click(screen.getByTestId('btn-create-record'));
 
     const payload = defaultProps2.onSubmit.mock.calls[0][0];
-    expect(payload.client_id).toBeNull();
-    expect(payload.phone).toBe('+7 999 123 45 67');
-    expect(payload.name).toBe('Новый клиент');
+    expect(payload).toEqual({
+      kind: 'unpicked',
+      phone: '+7 999 123 45 67',
+      name: 'Новый клиент',
+      client_id: null,
+      visitors: [],
+      notify: false,
+      channel: 'telegram',
+      seats: 1,
+    });
   });
 
   it('does not call the exact-route getClientByPhone on blur (REMOVED)', () => {

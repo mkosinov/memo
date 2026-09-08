@@ -130,7 +130,7 @@ export function ActivityDetail({
               </div>
             </div>
           )}
-          <div className="text-right">
+          <div className="text-right ml-auto">
             <div className="text-[#888888] text-xs">Стоимость</div>
             <div className="relative inline-block mt-0.5">
               <HintText details={activity.priceDetails} align="right">

@@ -63,7 +63,7 @@ export function buildAdminSchedule(
       locationName: location.name,
       locationAddress: location.address ?? undefined,
       locationHint: location.location_hint ?? undefined,
-      materialHint: service.material_hint ?? undefined,
+      materialDetails: service.material_hint ?? undefined,
       priceMin,
       priceMax,
       priceHint: computePriceHint(tariffs),

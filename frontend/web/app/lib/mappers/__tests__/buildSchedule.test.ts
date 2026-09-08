@@ -186,10 +186,10 @@ describe('buildWebSchedule', () => {
       expect(dto.materialDetails).toBeUndefined();
     });
 
-    it('treats whitespace-only note as present text (server normalizes notes to NULL; mapper renders as-is)', () => {
+    it('keeps a whitespace-only note as display text (note ?? description — whitespace is not null)', () => {
       const service = makeService({
         materials: [
-          { id: 'mat-1', title: 'Гуашь', description: 'Плотные матовые краски', note: 'Для детей — вся краска на столе' },
+          { id: 'mat-1', title: 'Гуашь', description: 'Плотные матовые краски', note: '   ' },
         ],
       });
       const result = buildWebSchedule(
@@ -201,7 +201,7 @@ describe('buildWebSchedule', () => {
       const dto = result.byId.get('act-1') as WebScheduleDTO;
 
       expect(dto.material).toBe('Гуашь');
-      expect(dto.materialDetails).toBe('Для детей — вся краска на столе');
+      expect(dto.materialDetails).toBe('   ');
     });
   });
 

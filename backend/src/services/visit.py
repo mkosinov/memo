@@ -26,6 +26,10 @@ from src.services.decorators import transactional
 class VisitService:
     """Visit service — manual CRUD with record cascade domain hooks."""
 
+    # GH #239: standalone transactional service (no GenericService ``_model``)
+    # — canonical entity name declared explicitly (spec §3.3/§3.4).
+    entity_name: str = "visits"
+
     def __init__(self, repository: BaseRepository) -> None:
         self._repository = repository
 

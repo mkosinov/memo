@@ -37,6 +37,10 @@ def _to_response(model: UserSettings) -> UserSettingsResponse:
 class UserSettingsService:
     """CRUD service for UserSettings with JSON ↔ list conversion."""
 
+    # GH #239: standalone transactional service (no GenericService ``_model``)
+    # — canonical entity name declared explicitly (spec §3.3/§3.4).
+    entity_name: str = "user_settings"
+
     def __init__(self, repo: BaseRepository) -> None:
         self._repo = repo
 

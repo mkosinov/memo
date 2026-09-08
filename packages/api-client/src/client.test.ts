@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { api, ApiError } from './client';
+import { api, ApiError, getTabId, eventsUrl } from './client';
 import { z } from 'zod';
 
 const schema = z.object({ id: z.string() });
@@ -134,6 +134,58 @@ describe('api() error extraction', () => {
       expect((e as ApiError).status).toBe(502);
       expect((e as ApiError).code).toBeUndefined();
     }
+  });
+});
+
+// ─── Tab identity + eventsUrl (GH #239, spec §2.4/§4.2) ──────────────────────
+// The admin compares event.origin against its own tab id to keep its own
+// changes silent. client.ts is the single fetch choke point: every mutating
+// request carries X-Memo-Tab-Id; GETs never do.
+
+describe('tab identity + eventsUrl', () => {
+  it('exports eventsUrl ending with /api/v1/events', () => {
+    expect(eventsUrl.endsWith('/api/v1/events')).toBe(true);
+  });
+
+  it('getTabId() returns the same value across calls', () => {
+    expect(getTabId()).toBe(getTabId());
+    expect(getTabId()).not.toBe('');
+  });
+
+  it('attaches X-Memo-Tab-Id to POST requests', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(mockFetchResponse(200, { id: 'x' }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await api('/test', schema, { method: 'POST', body: '{}' });
+
+    const init = fetchMock.mock.calls[0][1] as RequestInit;
+    expect((init.headers as Record<string, string>)['X-Memo-Tab-Id']).toBe(getTabId());
+  });
+
+  it('attaches X-Memo-Tab-Id to PUT, PATCH and DELETE requests', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(mockFetchResponse(200, { id: 'x' }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    for (const method of ['PUT', 'PATCH', 'DELETE']) {
+      await api('/test', schema, { method, body: '{}' });
+    }
+
+    const methods = fetchMock.mock.calls.map(([, init]) => (init as RequestInit).method);
+    expect(methods).toEqual(['PUT', 'PATCH', 'DELETE']);
+    for (const [, init] of fetchMock.mock.calls) {
+      expect((init.headers as Record<string, string>)['X-Memo-Tab-Id']).toBe(getTabId());
+    }
+  });
+
+  it('does not attach X-Memo-Tab-Id to GET requests', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(mockFetchResponse(200, { id: 'x' }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await api('/test', schema);
+
+    const init = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(init.method).toBeUndefined(); // GET by default
+    expect((init.headers as Record<string, string>)['X-Memo-Tab-Id']).toBeUndefined();
   });
 });
 

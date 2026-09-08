@@ -56,6 +56,7 @@ const AUTO_ENTITIES = new Set([
   'service_tags',
   'client_tags',
   'record_tags', // Record→record_tags auto-cascade (Addendum 13 / GH #139)
+  'service_materials', // Service/Material→service_materials join (GH #223 §7)
   'tariffs',
   'photos',
 ]);
@@ -70,6 +71,7 @@ const AUTO_ENTITY_LABEL: Record<string, string> = {
   service_tags: 'Теги',
   client_tags: 'Теги',
   record_tags: 'Теги',
+  service_materials: 'Услуги', // GH #223 §7 — materials delete 409 tree
   tariffs: 'Тарифы',
   photos: 'Фото',
 };

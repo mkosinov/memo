@@ -4,10 +4,16 @@
  * Material has ZERO FK dependencies (§4 matrix), so the no-body DELETE
  * returns 204 immediately — no dialog appears. Row vanishes, GET → 404,
  * and the DB row is physically gone.
+ *
+ * GH #223 S5 — Delete a LINKED material → 409 + dependency tree
+ * (entity `service_materials`, relation «Услуга», allowed_actions
+ * ["cascade"]) → DeleteDialog Mode A shows the auto-cascade dep
+ * («Услуги: 1 (удалён)») → type-confirm → material gone, service row
+ * alive, its badges updated.
  */
 import { test, expect } from '@playwright/test';
 import type { APIRequestContext } from '@playwright/test';
-import { cleanup } from './fixtures/factories';
+import { cleanup, createTestService } from './fixtures/factories';
 import {
   clickRowDelete,
   confirmDeleteDialog,
@@ -66,9 +72,10 @@ test.describe('S1 — Delete material without dependencies', () => {
   });
 
   test('defensive 409 branch: dialog appears and type-confirm completes the delete', async ({ page, request }) => {
-    // Material can never return 409 per the §4 matrix — this test runs the
-    // same DeleteDialog wiring the table keeps defensively, so a future
-    // dependency addition stays covered end to end.
+    // With zero real deps the no-body DELETE returns 204 — this test runs the
+    // same DeleteDialog wiring via a network-layer intercepted 409, keeping
+    // the Mode A branch covered end to end regardless of the live matrix.
+    // GH #223 makes the branch LIVE for real links — see the S5 test below.
     const material = await createSeedMaterial(request);
 
     try {
@@ -127,6 +134,86 @@ test.describe('S1 — Delete material without dependencies', () => {
       const dbRow = queryDBRow(`SELECT id FROM materials WHERE id='${material.id}'`);
       expect(dbRow).toBeNull();
     } finally {
+      await cleanup(request, `/api/v1/materials/${material.id}`);
+    }
+  });
+});
+
+test.describe('S5 — Delete linked material (#223): 409 dependency flow', () => {
+  /**
+   * Material linked to a service → no-body DELETE returns 409 + dependency
+   * tree (entity `service_materials`, relation «Услуга», count 1,
+   * allowed_actions ["cascade"]). DeleteDialog Mode A must render the dep as
+   * an AUTO-cascade line (plural label «Услуги», like the `service_tags` join
+   * renders «Теги») — no user choice needed, type-confirm alone unlocks
+   * «Удалить». Confirming sends `{resolutions:{}}` → server cascades the
+   * links + hard-deletes → material gone from the table, service row alive
+   * with its badge gone, join rows gone from the DB.
+   */
+  test('linked material → 409 dialog shows «Услуги: 1», confirm → material gone, service alive', async ({
+    page,
+    request,
+  }) => {
+    const material = await createSeedMaterial(request);
+    const service = await createTestService(request, {
+      max_age: 18,
+      materials: [{ material_id: material.id }],
+    });
+
+    try {
+      // Sanity: the link landed (usage counter = 1) before exercising delete.
+      const matResp = await request.get(`${BACKEND}/api/v1/materials/${material.id}`);
+      expect(matResp.ok()).toBeTruthy();
+      expect(((await matResp.json()) as { used_in_services_count: number }).used_in_services_count).toBe(1);
+
+      await waitForMaterialsReady(page);
+      const row = page
+        .locator('table tbody tr')
+        .filter({ hasText: material.title });
+      await expect(row).toBeVisible({ timeout: 10_000 });
+
+      // ACTION — delete the linked material.
+      const dropdown = await openRowActionDropdown(row);
+      await clickRowDelete(dropdown);
+
+      // VERIFY UI — Mode A dialog: auto-cascade dep with the plural join
+      // label («Услуги»), count 1, cascade marker «→ … (удалён)».
+      await expect(page.locator('[data-testid="delete-dialog"]')).toBeVisible();
+      await expect(page.locator('[data-testid="dep-service_materials"]')).toContainText(
+        '→ Услуги: 1 (удалён)',
+      );
+      // Type-to-confirm ALONE unlocks «Удалить» — an auto dep never blocks.
+      await confirmDeleteDialog(page, material.title);
+      await waitForToast(page, 'Материал удалён');
+      await expect(page.locator('[data-testid="delete-dialog"]')).toHaveCount(0);
+      await expect(row).toHaveCount(0, { timeout: 10_000 });
+
+      // VERIFY API/DB — material + its join rows are physically gone.
+      const getResp = await request.get(`${BACKEND}/api/v1/materials/${material.id}`);
+      expect(getResp.status()).toBe(404);
+      const dbRow = queryDBRow(`SELECT id FROM materials WHERE id='${material.id}'`);
+      expect(dbRow).toBeNull();
+      const linkRow = queryDBRow(
+        `SELECT service_id FROM service_materials WHERE material_id='${material.id}'`,
+      );
+      expect(linkRow).toBeNull();
+
+      // VERIFY service side — the service row survives; on the remounted
+      // services tab its badge for the deleted material is gone (usage
+      // counters consistent: the service has no materials left).
+      await page.getByRole('button', { name: 'Услуги', exact: true }).click();
+      await page.waitForSelector('h1:has-text("Управление услугами")', { timeout: 60_000 });
+      await page.getByTestId('page-size-select').selectOption('100');
+      const svcRow = page.locator('table tbody tr').filter({ hasText: service.title });
+      await expect(svcRow).toBeVisible({ timeout: 10_000 });
+      await expect(
+        svcRow.locator('[data-testid="material-badge"]').filter({ hasText: material.title }),
+      ).toHaveCount(0);
+      const svcResp = await request.get(`${BACKEND}/api/v1/services/${service.id}`);
+      expect(svcResp.ok()).toBeTruthy();
+      expect(((await svcResp.json()) as { materials: unknown[] }).materials).toEqual([]);
+    } finally {
+      await cleanup(request, `/api/v1/services/${service.id}`);
       await cleanup(request, `/api/v1/materials/${material.id}`);
     }
   });

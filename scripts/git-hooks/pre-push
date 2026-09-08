@@ -1,12 +1,8 @@
 #!/usr/bin/env bash
-# Pre-push hook: DISABLED.
-# Tests run in GitHub Actions CI (test.yml + smoke.yml) on push and PR.
-# This hook is a no-op (exit 0).
-#
+# Pre-push hook: DISABLED (no-op).
+# CI runs on pull_request + manual dispatch (test.yml); pushes to main start nothing.
+# The local pre-push gate is the finishing-a-development-branch skill (G7 fast suite).
 # To run the full local test suite manually:
 #   VISUAL_COMPLIANCE=0 bash scripts/test-all.sh
-#
-# To re-enable the hook, replace this file with the original test runner:
-#   exec "$REPO_ROOT/scripts/test-all.sh"
 
 exit 0

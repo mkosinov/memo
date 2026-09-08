@@ -73,7 +73,7 @@ bash(command="cd frontend/admin && npm run test:all", timeout=300)
 ```bash
 # Frontend (all)
 cd frontend/admin && npm run test:all        # vitest + playwright visual
-cd frontend/admin && npm run test:unit        # vitest only
+cd frontend/admin && pnpm run test            # vitest only
 
 # Backend
 cd backend && uv run pytest                   # all backend tests
@@ -100,7 +100,7 @@ updated after each run so legitimately long suites are never killed by the cap:
 | Suite | Command | Expected duration | Notes |
 |---|---|---|---|
 | Backend full (pytest) | `cd backend && uv run pytest` | ~2-5 min | last observed: ~141s / 1138 tests |
-| Frontend unit (vitest) | `cd frontend/admin && npm run test:unit` | ~1-3 min | |
+| Frontend unit (vitest) | `cd frontend/admin && pnpm run test` | ~1-3 min | |
 | Frontend all (vitest + visual) | `cd frontend/admin && npm run test:all` | ~5-10 min | |
 | E2E single/few specs (standalone) | `pnpm exec playwright test e2e/<spec>.ts` | ~2-5 min | + first-hit Next.js route compilation |
 | E2E full suite (shard mode) | `bash scripts/test-all.sh` | ~15-30 min | 2 shards, isolated stacks :8001-8002/:3002-3003 |

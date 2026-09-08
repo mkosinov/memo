@@ -38,8 +38,11 @@ unit/integration tests + typecheck/lint. Do NOT run local e2e as a gate (CI owns
 is an investigation tool only). The authoritative merge gate is CI.
 
 ```bash
-# Fast suites only — project's unit/integration + typecheck/lint
-npm test / cargo test / pytest / go test ./...
+# Memo fast suite (unit/integration + typecheck/lint; NO local e2e as a gate):
+cd backend && uv run pytest                 # whole backend suite (unit+api+integration+misc)
+cd frontend/admin && pnpm run test          # vitest
+cd frontend/admin && pnpm run type-check    # tsc --noEmit
+cd frontend/admin && pnpm run lint          # ESLint
 ```
 
 **If tests fail:**

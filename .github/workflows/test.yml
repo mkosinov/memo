@@ -1,10 +1,13 @@
 name: Tests
 
 on:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
 
 jobs:
   backend-tests:
@@ -82,21 +85,26 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Run vitest (group ${{ matrix.group }})
-        run: |
-          if [ "${{ matrix.group }}" = "1" ]; then
-            npx vitest run --reporter=verbose __tests__/ClientCardModal.test.tsx __tests__/ClientInfoTab.test.tsx __tests__/ClientsContext.test.tsx
-          elif [ "${{ matrix.group }}" = "2" ]; then
-            npx vitest run --reporter=verbose __tests__/ClientRecordTab.layout.test.tsx __tests__/ClientRecordTab.interactions.test.tsx
-          elif [ "${{ matrix.group }}" = "3" ]; then
-            npx vitest run --reporter=verbose __tests__/ClientRecordTab.api.test.tsx __tests__/ClientsIntegration.test.tsx
-          elif [ "${{ matrix.group }}" = "4" ]; then
-            npx vitest run --reporter=verbose __tests__/ClientsTable.test.tsx __tests__/ClientsFilters.test.tsx __tests__/ClientsPage.test.tsx __tests__/CustomSelect.test.tsx __tests__/RecordsTable.test.tsx
-          else
-            npx vitest run --reporter=verbose --exclude='**/Client*.test.tsx' --exclude='**/CustomSelect.test.tsx' --exclude='**/RecordsTable.test.tsx' --exclude='**/ClientsIntegration.test.tsx'
-          fi
+      - name: Run vitest (shard ${{ matrix.group }}/5)
+        run: npx vitest run --shard=${{ matrix.group }}/5
         env:
           NODE_OPTIONS: --max-old-space-size=4096
+
+  frontend-checks:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend/admin
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run lint
+      - run: pnpm run type-check
 
   skip-tracker:
     name: Skip-tracker (warning only)

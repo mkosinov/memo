@@ -969,7 +969,7 @@ describe('ClientTab — layout & features', () => {
 
 // ─── NewBookingTab — Feature Tests ──────────────────────────────────────────
 
-describe('NewBookingTab — visitor optional, tariff required; phone required (GH #221 decision 11)', () => {
+describe('NewBookingTab — visitor optional, tariff required; typed phone must be complete (GH #221 decision 11)', () => {
   const defaultProps = {
     activity: mockActivity,
     serviceTariffs: mockTariffs,
@@ -999,15 +999,15 @@ describe('NewBookingTab — visitor optional, tariff required; phone required (G
     expect(screen.getByTestId('select-channel')).toBeInTheDocument();
   });
 
-  it('blocks submit with name only — GH #221 requires a complete phone (decision 11)', () => {
+  it('submits with name only — EMPTY phone is a legitimate pre-existing path (spec §10)', () => {
     render(<NewBookingTab {...defaultProps} />);
-    // Fill only name — the empty phone is not a complete valid number, so the
-    // completeness guard blocks the save (spec §6 step 2).
+    // Name-only quick-add with no phone predates #221 and stays untouched
+    // (§10). Only a TYPED-BUT-INCOMPLETE number hits the completeness guard.
     fireEvent.change(screen.getByTestId('input-client-name'), { target: { value: 'Test' } });
     fireEvent.click(screen.getByTestId('btn-create-record'));
-    expect(defaultProps.onSubmit).not.toHaveBeenCalled();
-    expect(defaultProps.showToast).toHaveBeenCalledWith(
-      'Проверьте номер телефона — возможно, он введён не полностью',
+    expect(defaultProps.onSubmit).toHaveBeenCalledTimes(1);
+    expect(defaultProps.onSubmit.mock.calls[0][0]).toEqual(
+      expect.objectContaining({ kind: 'unpicked', phone: '' }),
     );
   });
 
@@ -1181,14 +1181,19 @@ describe('NewBookingTab — unpicked completeness guard (GH #221 Task 7)', () =>
     );
   });
 
-  it('(0b) blocks the save on an EMPTY phone; nothing submitted', () => {
+  it('(0b) EMPTY phone is a legitimate pre-existing path — proceeds, no toast, no guard', () => {
+    // Semantics ruling (spec §7 + pre-#221 behavior): the guard targets
+    // TYPED-BUT-INCOMPLETE numbers only. An empty phone quick-add (client
+    // with no phone) predates #221 (§10: write paths untouched) and must
+    // submit as before.
     render(<NewBookingTab {...guardProps} />);
     fireEvent.change(screen.getByTestId('input-client-name'), { target: { value: 'Кто-то' } });
     fireEvent.click(screen.getByTestId('btn-create-record'));
 
-    expect(guardProps.onSubmit).not.toHaveBeenCalled();
-    expect(guardProps.showToast).toHaveBeenCalledWith(
-      'Проверьте номер телефона — возможно, он введён не полностью',
+    expect(guardProps.showToast).not.toHaveBeenCalled();
+    expect(guardProps.onSubmit).toHaveBeenCalledTimes(1);
+    expect(guardProps.onSubmit.mock.calls[0][0]).toEqual(
+      expect.objectContaining({ kind: 'unpicked', phone: '' }),
     );
   });
 

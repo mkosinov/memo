@@ -106,8 +106,11 @@ export function NewBookingTab({ activity, serviceTariffs, onSubmit, showToast }:
       // visible value must be a complete valid number before anything is
       // fetched or created. Picked clients are never validated (stored data).
       // Same library + same RU default as the AsYouType mask.
-      const parsed = parsePhoneNumberFromString(phone, 'RU');
-      if (!parsed?.isValid()) {
+      // An EMPTY phone is NOT guarded: the phone-less quick-add predates
+      // #221 (spec §10 — write paths untouched) and must keep working; the
+      // guard targets TYPED-BUT-INCOMPLETE numbers only (its message says
+      // «возможно, он введён не полностью»).
+      if (phone.trim() && !parsePhoneNumberFromString(phone, 'RU')?.isValid()) {
         showToast('Проверьте номер телефона — возможно, он введён не полностью');
         return; // nothing fetched, nothing created
       }

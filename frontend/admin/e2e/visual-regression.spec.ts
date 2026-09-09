@@ -511,32 +511,17 @@ function skeletonTest(config: PageTableConfig) {
 // ---------------------------------------------------------------------------
 
 for (const config of TABLE_CONFIGS) {
-  test.describe(`${config.name} table — #139 pre-migration baselines`, () => {
+  test.describe(`${config.name} table — Visual Regression`, () => {
     test.beforeEach(async ({ page }) => {
       // Mirrors the Records describe above: strip UUID test data so snapshots
       // always show seed rows only (tags/locations/masters/services/clients/
       // photos seed IDs are short; cleanTestData's length filters keep them).
       cleanTestData();
       // The mocked clock (below) guarantees a sidebar «Сегодня» hydration
-      // mismatch (SSR renders the real date); Next's dev overlay surfaces it
-      // as a "1 error" toast that intermittently lands in the screenshot.
-      // Photos-only: hide it the same way hideToasts() scrubs the
-      // error-scenario toast (a dev-tool artifact, never production UI) so
-      // the regenerated #211 baselines stay deterministic. The other tables'
-      // committed baselines KEEP the overlay state they were recorded with
-      // (CI-recorded; re-recording them is out of #211 scope).
-      if (config.name === 'photos') {
-        await page.addInitScript(() => {
-          const hideOverlay = () => {
-            document.querySelectorAll('nextjs-portal').forEach((el) => {
-              (el as HTMLElement).style.display = 'none';
-            });
-          };
-          hideOverlay();
-          const interval = setInterval(hideOverlay, 200);
-          setTimeout(() => clearInterval(interval), 10_000);
-        });
-      }
+      // mismatch (SSR renders the real date); Next's dev overlay would surface
+      // it as a "1 error" toast that can land in screenshots — hidden
+      // declaratively via playwright.config expect.toHaveScreenshot.stylePath
+      // (e2e/fixtures/hide-dev-overlay.css).
       // Mock browser time to the fixed reference week (matches seed WEEK_FIXED_START).
       // Date-stable baselines: the Records page filters by the *browser current
       // week* and seed records r1..r6 live in the week of 2026-06-15, so without

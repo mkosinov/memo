@@ -58,7 +58,14 @@ export default defineConfig({
     navigationTimeout: 60_000,
     actionTimeout: 15_000,
   },
-  expect: { timeout: 10_000 },
+  expect: {
+    timeout: 10_000,
+    toHaveScreenshot: {
+      // Declarative invariant: hide the Next.js dev-overlay (hydration-error
+      // toast) at screenshot time, in every current and future visual shot.
+      stylePath: './e2e/fixtures/hide-dev-overlay.css',
+    },
+  },
 
   // Playwright validates webServer URL before running tests.
   // In per-shard mode: test-all.sh pre-starts the server, so

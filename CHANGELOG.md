@@ -22,6 +22,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Design spec: `docs/specs/2026-09-08-server-push-invalidation-design.md` (on main)
   - Plan: `docs/plans/2026-09-08-server-push-invalidation-239-plan.md` (on main)
 
+### Changed
+- **GH #246 — Visual E2E determinism: dev-overlay hidden via config-level `stylePath`; all visual baselines regenerated overlay-free** — branch `feat/visual-e2e-determinism-246`:
+  - **Test infra:** the Next.js dev-overlay (`nextjs-portal`) is now hidden in ALL `toHaveScreenshot` shots via a single config-level stylesheet — `frontend/admin/e2e/fixtures/hide-dev-overlay.css` (`nextjs-portal { display: none !important; }`) wired through the custom `expect.toHaveScreenshot.stylePath` in `frontend/admin/playwright.config.ts`; the old photos-only JS hider is deleted. Every visual spec (present and future) gets overlay-free capture for free, no per-spec hider code.
+  - **Baselines:** all three snapshot dirs regenerated on the CI runner via `update-snapshots.yml` (workflow_dispatch on the branch ref — same ubuntu-latest image that runs the `e2e-tests` job). 56 PNGs updated: 53 in `visual-regression.spec.ts-snapshots/` (table shots that carried the toast: clients/locations/masters/materials/records/services/tags × 7 states + `modal-new-booking`/`modal-settings`/`records-default`/`records-filtered`) + 3 in `week-view.spec.ts-snapshots/` (`menubar`, `schedule-default`, `schedule-with-activities`). The 22 remaining baselines are byte-identical (photos-table shots were already clean; wave6 status shots are element-cropped with the overlay out of frame; `schedule-next-week` captures post-interaction state) — diff shape confirms the stylePath mechanism applied, not env/font drift.
+
 ## [Unreleased] — 2026-09-08
 
 ### Added

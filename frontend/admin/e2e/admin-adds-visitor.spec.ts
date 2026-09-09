@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures/test';
 import { waitForScheduleReady, openModal } from './fixtures/helpers';
 
 test('US-M03: Admin can add visitor and see it in modal without F5', async ({

@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures/test';
 import { waitForScheduleReady, waitForRecordsReady } from './fixtures/helpers';
 
 test('US-ST01: All status displays use Russian names', async ({ page }) => {

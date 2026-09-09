@@ -8,7 +8,7 @@
  * list. Master additionally cascades the linked user's is_active both ways
  * (DB check) — the other 4 entities never touch users.
  */
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures/test';
 import type { Locator, Page } from '@playwright/test';
 import {
   cleanup,

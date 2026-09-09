@@ -22,7 +22,8 @@
  * #127 (this work) makes these tests pass; if a regression is introduced
  * upstream (T1-T9), the corresponding test goes RED.
  */
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect } from './fixtures/test';
+import type { Page } from '@playwright/test';
 import { waitForScheduleReady } from './fixtures/helpers';
 import { switchToRecordsTab } from './fixtures/scenarios';
 import {

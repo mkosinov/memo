@@ -1,4 +1,5 @@
-import { test, expect, type Page, type APIRequestContext } from '@playwright/test';
+import { test, expect } from './fixtures/test';
+import type { Page, APIRequestContext } from '@playwright/test';
 import {
   waitForRecordsReady,
   waitForClientsReady,

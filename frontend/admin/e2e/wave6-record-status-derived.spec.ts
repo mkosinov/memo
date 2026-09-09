@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures/test';
 import { waitForScheduleReady, openModal } from './fixtures/helpers';
 
 const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8000';

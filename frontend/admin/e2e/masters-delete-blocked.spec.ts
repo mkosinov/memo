@@ -8,7 +8,7 @@
  * 200 with `archived: true`; row leaves the active view and returns via
  * the archived filter. "Восстановить" → restore → `archived: false`.
  */
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures/test';
 import { cleanup, createTestActivity, createTestMaster } from './fixtures/factories';
 import {
   clickRowArchiveAction,

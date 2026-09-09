@@ -1,4 +1,5 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect } from './fixtures/test';
+import type { Page } from '@playwright/test';
 import { waitForRecordsReady } from './fixtures/helpers';
 import { closeCombobox, openCombobox, searchAndSelect } from './helpers/combobox';
 import {

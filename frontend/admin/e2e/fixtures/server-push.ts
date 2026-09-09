@@ -6,7 +6,8 @@
  * separate module-level tab identities (spec §2.4), so B's UI writes carry
  * B's X-Memo-Tab-Id and A must see the external toast.
  */
-import { test, expect, type Page, type BrowserContext, type Browser } from '@playwright/test';
+import { test, expect } from './test';
+import type { Page, BrowserContext, Browser } from '@playwright/test';
 import { waitForScheduleReady, openAddTab } from './helpers';
 
 /** Spec §6 — "within seconds"; deliberately BELOW the app-wide staleTime

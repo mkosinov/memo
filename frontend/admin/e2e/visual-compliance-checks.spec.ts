@@ -20,7 +20,8 @@
  * Screenshots → /tmp/visual-compliance-manual/
  */
 
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect } from './fixtures/test';
+import type { Page } from '@playwright/test';
 import { execSync } from 'child_process';
 import path from 'path';
 import {

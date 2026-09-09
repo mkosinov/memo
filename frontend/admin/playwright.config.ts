@@ -45,7 +45,7 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
-  workers: process.env.CI ? 1 : undefined,
+  workers: 1,
   reporter: 'list',
   // Generous timeouts — 2 Next.js dev servers on 4 cores may still be slow
   // on first compilation. 60s test timeout + 60s navigation gives headroom.

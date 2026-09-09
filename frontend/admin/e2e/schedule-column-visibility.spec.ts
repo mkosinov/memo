@@ -457,9 +457,12 @@ test.describe('DayView Column Visibility — Location Filter', () => {
     // Switch to locations column mode (pure UI state change, no network call)
     await page.locator('[data-testid="column-mode-menu"] button:has-text("По локациям")').click();
 
-    // Verify we're in day view with location columns
+    // Verify we're in day view with location columns. Poll (GH #239: a
+    // background ['locations'] refetch can transiently render zero columns).
+    await expect
+      .poll(async () => (await getColumnHeaderIds(page)).length, { timeout: 5_000 })
+      .toBeGreaterThanOrEqual(1);
     const headersBefore = page.locator('[data-testid^="column-header-"]');
-    await expect(headersBefore.first()).toBeVisible({ timeout: 5000 });
     const countBefore = await headersBefore.count();
     expect(countBefore).toBeGreaterThanOrEqual(1);
 
@@ -513,9 +516,14 @@ test.describe('DayView Column Visibility — Location Filter', () => {
     // Switch to locations column mode (pure UI state change, no network call)
     await page.locator('[data-testid="column-mode-menu"] button:has-text("По локациям")').click();
 
-    // Get initial location column IDs
+    // GH #239 SSE race: a background refetch of ['locations'] (e.g. an
+    // external invalidate frame) can transiently render zero columns; poll
+    // instead of a one-shot count. Intent: locations mode shows ≥2 columns.
+    // 5s timeout matches the server-push refetch window.
+    await expect
+      .poll(async () => (await getColumnHeaderIds(page)).length, { timeout: 5_000 })
+      .toBeGreaterThanOrEqual(2);
     const allIds = await getColumnHeaderIds(page);
-    expect(allIds.length).toBeGreaterThanOrEqual(2);
 
     // Pick a location to re-add later (not the first one)
     const targetId = allIds[allIds.length - 1];

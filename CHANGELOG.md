@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — 2026-09-09
+
+### Added
+- **GH #239 — Server push channel for cache invalidation (SSE `GET /api/v1/events`)** — branch `feat/server-push-invalidation-239` (17 commits: f2f0e94..63740b0; 10/10 plan tasks; spec §8 DoD all met):
+  - **Backend:** FastAPI upgraded 0.136.3 → **0.141.1** (native `fastapi.sse.EventSourceResponse`). New `backend/src/events/` package — transport-agnostic in-memory **EventHub** (module-level singleton, bounded 64-event queues, overflow → drop that subscriber), canonical entity-name map, **SSE endpoint** (routing-native async-generator, native ping + `retry: 5000`, `event="invalidate"` frames carrying `{entities, origin}` JSON). **Post-commit emit:** `@transactional` is now the single emit point — contextvars accumulator + `mark_changed(entity)` for cross-entity cascades (own `entity_name` auto-marked; commit → one batched `hub.publish`, rollback → discarded); a small ASGI middleware lifts `X-Memo-Tab-Id` from mutating requests into the request-scoped origin. Cascade enumeration audited and test-pinned (visits→records hooks, activity/record deletes, nested record-create conditionals, dependency-executor marks, master archive/restore→users).
+  - **api-client:** exported `eventsUrl` (derived from `API_BASE`); every mutating request attaches `X-Memo-Tab-Id` at the single fetch choke point (not on GETs).
+  - **Admin:** new `ServerEventsProvider` (inside the query-client chain) opens `EventSource(eventsUrl)`; `onmessage` → shared **`INVALIDATION_MAP`** family rules (`lib/invalidate.ts` — single source of family cascades, consumed by BOTH the SSE handler and own-mutation sites; ~10 mutation sites mechanically migrated to `invalidateEntities(qc, …)`, hooks keep point-key/conditional invalidations on top); «Данные обновлены» info toast shown ONLY for external origins (own-tab events suppressed by tab-id comparison); SSE reconnect after error → blanket `invalidateQueries()` convergence (no toast); `refetchOnReconnect: false` (SSE owns reconnect).
+  - **Tests:** backend pytest **1573p/8s/0f** (new `test_events_hub/emit/entities/sse.py`); admin vitest **1679p/0f** (112 files) + `tsc` clean + lint clean; api-client 268p/0f; e2e — new server-push specs **6/6 (C1–C6**: external-update invalidation, offline reconnect convergence, own-mutation silence) + affected suites green (records 23, schedule 7, photos-crud 19, tags-crud 11). DoD: channel live, origin suppression, drift mirrors both sides (backend completeness test + frontend map-mirror test), docs re-synced.
+  - **Decisions for the record:** (1) httpx 0.28.1 `ASGITransport` deadlocks on SSE streams → raw-ASGI test harness; (2) executor cascade marks live in `services/generic.py` (where dispatch physically lives), not `deletion.py`; (3) FastAPI 0.141.1 SSE is routing-native (generator + response class) — plan's `EventSourceResponse(gen(), ping=15)` shape adapted, native ping used; (4) `providers.tsx` `refetchOnReconnect: false` (test-integrity + SSE-owns-reconnect); (5) `INVALIDATION_MAP` audited deltas: services→+materials, locations→+records; (6) e2e C6 attributive silence probe (frame-logger + retry) due to cross-test SSE broadcast interference; (7) `users` entity = cascade-only entry (no UserService exists).
+  - **Docs:** `docs/ARCHITECTURE.md` channel section + `queryKeys.ts` header synced (commit `63740b0`, T10).
+  - **48 files changed, +3008 / −134.**
+  - **Closes:** #239.
+  - Design spec: `docs/specs/2026-09-08-server-push-invalidation-design.md` (on main)
+  - Plan: `docs/plans/2026-09-08-server-push-invalidation-239-plan.md` (on main)
+
 ## [Unreleased] — 2026-09-08
 
 ### Added

@@ -8,6 +8,7 @@ import { PendingActionsProvider } from '../contexts/PendingActionsContext';
 import { ErrorBoundary } from './components/error';
 import { ToastContainer } from './components/toast/ToastContainer';
 import { parseApiError } from './lib/api/parseApiError';
+import { ServerEventsProvider } from './ServerEventsProvider';
 
 function QueryClientWithErrorReporting({ children }: { children: React.ReactNode }) {
   const { showToast } = useUI();
@@ -30,7 +31,15 @@ function QueryClientWithErrorReporting({ children }: { children: React.ReactNode
       },
     },
   }));
-  return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
+  return (
+    // GH #239: SSE consumer lives INSIDE the QueryClientProvider subtree
+    // (useQueryClient) and BELOW UIProvider (useUI → showToast).
+    <QueryClientProvider client={queryClient}>
+      <ServerEventsProvider>
+        {children}
+      </ServerEventsProvider>
+    </QueryClientProvider>
+  );
 }
 
 export function Providers({ children }: { children: React.ReactNode }) {

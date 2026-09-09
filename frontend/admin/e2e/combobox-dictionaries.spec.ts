@@ -77,7 +77,9 @@ async function setupRecordTab(page: Page, request: APIRequestContext) {
 
   await waitForClientsReady(page, { waitForName: client.name });
   // Reload to pick up the newly created client (React Query may serve stale cache)
-  await page.reload({ waitUntil: 'networkidle' });
+  // NOTE: default 'load' wait — 'networkidle' never resolves while the
+  // SSE /api/v1/events stream stays open (#239).
+  await page.reload();
   await waitForClientsReady(page, { waitForName: client.name });
 
   const row = page.locator('table tbody tr').filter({ hasText: client.name });

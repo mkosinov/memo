@@ -107,7 +107,9 @@ test.describe('Clients page', () => {
     try {
       await waitForClientsReady(page, { waitForName: testName });
       // Reload to ensure fresh data from API (React Query may cache old list)
-      await page.reload({ waitUntil: 'networkidle' });
+      // NOTE: default 'load' wait — 'networkidle' never resolves while the
+      // SSE /api/v1/events stream stays open (#239).
+      await page.reload();
       await waitForClientsReady(page, { waitForName: testName });
 
       // New client should appear in the table
@@ -208,7 +210,9 @@ test.describe('Clients page', () => {
       await closeByBackdrop(page);
 
       // Reload page to pick up updated data
-      await page.reload({ waitUntil: 'networkidle' });
+      // NOTE: default 'load' wait — 'networkidle' never resolves while the
+      // SSE /api/v1/events stream stays open (#239).
+      await page.reload();
       await waitForClientsReady(page, { waitForName: updatedName });
 
       // Verify updated name appears in table
@@ -250,7 +254,9 @@ test.describe('Clients page', () => {
       await expect(modal).not.toBeVisible({ timeout: 5000 });
 
       // Reload page — hard-deleted client is gone from the list
-      await page.reload({ waitUntil: 'networkidle' });
+      // NOTE: default 'load' wait — 'networkidle' never resolves while the
+      // SSE /api/v1/events stream stays open (#239).
+      await page.reload();
       await waitForClientsReady(page);
 
       // Client should no longer be visible in table
@@ -423,7 +429,9 @@ async function setupRecordTab(
 
   await waitForClientsReady(page, { waitForName: client.name });
   // Reload to pick up newly created client (React Query may serve stale cache)
-  await page.reload({ waitUntil: 'networkidle' });
+  // NOTE: default 'load' wait — 'networkidle' never resolves while the
+  // SSE /api/v1/events stream stays open (#239).
+  await page.reload();
   await waitForClientsReady(page, { waitForName: client.name });
 
   // Open client card
@@ -765,7 +773,14 @@ test.describe('GH #140 — clients-list isolation & staleness', () => {
       if (req.url().includes('/api/v1/clients')) clientsRequests.push(req.url());
     });
     await page.goto('/schedule');
-    await page.waitForLoadState('networkidle');
+    // Wait for the page's own data fetch to settle instead of networkidle —
+    // the SSE /api/v1/events stream never idles the network (#239).
+    await page
+      .waitForResponse(
+        (resp) => resp.url().includes('/api/v1/activities') && resp.status() === 200,
+        { timeout: 60_000 },
+      )
+      .catch(() => {});
     await page.waitForTimeout(500);
     expect(clientsRequests).toHaveLength(0);
   });

@@ -68,7 +68,9 @@ test.describe('Scenario 1 — Activity at capacity', () => {
       // waitForScheduleReady waits for any activity card (seed data)
       // but the newly created activity above may not be in the initial
       // React Query cache. Hard reload bypasses stale cache.
-      await page.reload({ waitUntil: 'networkidle' });
+      // NOTE: default 'load' wait — 'networkidle' never resolves while the
+      // SSE /api/v1/events stream stays open (#239).
+      await page.reload();
       await waitForScheduleReady(page);
 
       // Find the specific activity card

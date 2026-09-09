@@ -24,6 +24,7 @@ from src.domain.deletion import (
     validate_resolutions,
 )
 from src.domain.errors import BareListLimitExceededError
+from src.events.emitter import mark_changed
 from src.models.enums import ArchiveStatus
 from src.repositories.generic import ArchiveRepository, BaseRepository
 from src.repositories.search import SearchField
@@ -255,7 +256,7 @@ class ArchiveService(GenericService[CreateSchemaT, UpdateSchemaT, ResponseSchema
         ``list()`` accepts the ``status=`` kwarg. The cast documents that
         runtime invariant without touching the factories (#206 Task 2).
         """
-        items_orm, total = await cast(ArchiveRepository, self._repository).list(
+        items_orm, total = await cast("ArchiveRepository", self._repository).list(
             db_session,
             self._model,
             status=status,
@@ -375,12 +376,17 @@ class ArchiveService(GenericService[CreateSchemaT, UpdateSchemaT, ResponseSchema
             handler = NULLIFY_HANDLERS.get((self._model, dep.entity))
             if handler is not None:
                 await handler(self, db_session, id)
+                # GH #239 §3.3: mark every dispatched dependency's entity —
+                # ONE place, not per-handler (join-table names like
+                # "client_tags" publish as-is; consumers skip unknowns).
+                mark_changed(dep.entity)
         for dep in matrix_deps:
             if dep.action != "cascade":
                 continue
             handler = CASCADE_HANDLERS.get((self._model, dep.entity))
             if handler is not None:
                 await handler(self, db_session, id)
+                mark_changed(dep.entity)
             # block deps never reach here (step 3 raised BlockingDepsError).
 
         # 6. Hard-delete the entity row.

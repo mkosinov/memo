@@ -16,6 +16,7 @@ import {
 } from '@memo/api-client';
 import type { ActivityResponse, ActivityPatch } from '@memo/api-client';
 import { qk } from '@/lib/queryKeys';
+import { invalidateEntities } from '@/lib/invalidate';
 import { composeLocalISO, dayIndexToDate, calculateGridTimeRange } from '@/lib/datetime';
 import { useNavigation } from '@/contexts/NavigationContext';
 
@@ -132,7 +133,10 @@ export function ScheduleDataProvider({
   const createMutation = useMutation({
     mutationKey: SCHEDULE_ACTIVITY_MUTATION_KEY,
     mutationFn: (data: Parameters<typeof apiCreateActivity>[0]) => apiCreateActivity(data),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: activityQueryKey }),
+    // Family rule via the shared map (#239): the ['activities'] prefix —
+    // strictly wider than this week's activityRange key, also refreshes
+    // activitiesForRecords readers.
+    onSuccess: () => invalidateEntities(queryClient, ['activities']),
   });
 
   // THE race fix (spec §5): no artificial 5s timeout — the PATCH settles
@@ -177,15 +181,19 @@ export function ScheduleDataProvider({
       }
     },
     onSettled: () => {
-      // Always sync with server after mutation completes
-      queryClient.invalidateQueries({ queryKey: activityQueryKey });
+      // Always sync with server after mutation completes — family rule via
+      // the shared map (#239), see createMutation. (The optimistic mechanics
+      // above — cancelQueries/snapshot/setQueryData/restore — keep the exact
+      // activityRange key on purpose; only the sync invalidation widens.)
+      invalidateEntities(queryClient, ['activities']);
     },
   });
 
   const deleteMutation = useMutation({
     mutationKey: SCHEDULE_ACTIVITY_MUTATION_KEY,
     mutationFn: (id: string) => apiDeleteActivity(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: activityQueryKey }),
+    // Family rule via the shared map (#239) — see createMutation.
+    onSuccess: () => invalidateEntities(queryClient, ['activities']),
   });
 
   // Actions

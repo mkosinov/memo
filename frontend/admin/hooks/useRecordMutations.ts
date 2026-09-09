@@ -26,6 +26,7 @@ import {
   upsertVisit,
 } from '@/lib/cache/recordCacheSync';
 import { usePendingActions } from '@/contexts/PendingActionsContext';
+import { invalidateEntities } from '@/lib/invalidate';
 import { qk } from '@/lib/queryKeys';
 
 interface VisitData {
@@ -96,7 +97,7 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
     if (recordId) {
       queryClient.invalidateQueries({ queryKey: qk.record(recordId) });
     }
-    queryClient.invalidateQueries({ queryKey: qk.records });
+    invalidateEntities(queryClient, ['records']);
   }, [queryClient, recordId]);
 
   /** Lighter invalidation for ops that only change a single record's canonical store. */
@@ -191,6 +192,11 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
       //    immediately. Awaited: the mutation stays pending until the refetch
       //    lands. Skipped on the existing-client reuse path (no new client).
       //    Reader: ClientsPage (['clients'])
+      //    JUSTIFIED raw-call deviation from the #239 invalidation map (see
+      //    FAMILY RULES header in lib/invalidate.ts): conditional per-hook
+      //    extra + needs await (invalidateEntities is void; the awaitable
+      //    map variant, invalidateEntitiesAsync, would redundantly refetch
+      //    the whole ['records'] family on top of step 5 above).
       if (createdClientId !== null) {
         await queryClient.invalidateQueries({ queryKey: qk.clients });
       }
@@ -268,7 +274,7 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
       invalidateRecord();
       // R4 (US-4): RecordsTable reads `paid` from the view row — prefix
       // ['records'] invalidation catches all pages/filters so the badge refreshes.
-      queryClient.invalidateQueries({ queryKey: qk.records });
+      invalidateEntities(queryClient, ['records']);
       return payment;
     },
     [recordId, queryClient, invalidateRecord],
@@ -283,7 +289,7 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
       invalidateRecord();
       // R4 (US-4): RecordsTable reads `paid` from the view row — prefix
       // ['records'] invalidation catches all pages/filters so the badge refreshes.
-      queryClient.invalidateQueries({ queryKey: qk.records });
+      invalidateEntities(queryClient, ['records']);
     },
     [recordId, queryClient, invalidateRecord],
   );
@@ -392,7 +398,7 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
       upsertPayment(queryClient, recordId, payment);
       // R4 (US-4): RecordsTable reads `paid` from the view row — prefix
       // ['records'] invalidation catches all pages/filters so the badge refreshes.
-      queryClient.invalidateQueries({ queryKey: qk.records });
+      invalidateEntities(queryClient, ['records']);
       return payment;
     },
     [recordId, queryClient],
@@ -469,7 +475,7 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
           removePayment(queryClient, recordId, paymentId);
           // R4 (US-4): RecordsTable reads `paid` from the view row — invalidate on
           // COMMIT (not on defer) so the badge refreshes once the delete is final.
-          queryClient.invalidateQueries({ queryKey: qk.records });
+          invalidateEntities(queryClient, ['records']);
         },
       });
     },

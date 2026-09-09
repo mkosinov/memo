@@ -432,12 +432,14 @@ export async function waitForClientsReady(
   // This bypasses any stale cache that might be serving the first
   // page load's data. The reload is async; we wait for the second
   // /api/v1/clients response before checking for the row.
+  // NOTE: default 'load' wait — 'networkidle' never resolves while the
+  // SSE /api/v1/events stream stays open (#239).
   if (options?.waitForName) {
     const clientsResponse2 = page.waitForResponse(
       (resp) => resp.url().includes('/api/v1/clients') && resp.status() === 200,
       { timeout: 60_000 },
     );
-    await page.reload({ waitUntil: 'networkidle' });
+    await page.reload();
     await page.waitForFunction(
       () =>
         document.querySelector('table tbody') !== null ||

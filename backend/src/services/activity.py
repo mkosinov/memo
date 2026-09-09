@@ -4,14 +4,14 @@ from __future__ import annotations
 
 from datetime import date
 from functools import lru_cache
-from typing import Any
 
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.repositories.generic import BaseRepository, get_base_repository
-from src.repositories.search import SearchField, search_predicate
 from src.domain.dates import day_range
+from src.domain.record_visits import active_record_filter
+from src.domain.visit_status import ACTIVE_RECORD_STATUSES
+from src.events.emitter import mark_changed
 from src.models.activity import Activity
 from src.models.payment import Payment
 from src.models.photo import Photo
@@ -19,12 +19,12 @@ from src.models.record import Record
 from src.models.service import Service
 from src.models.tag import activity_tags, record_tags
 from src.models.visit import Visit
+from src.repositories.generic import BaseRepository, get_base_repository
+from src.repositories.search import SearchField, search_predicate
 from src.schemas.activity import ActivityCreate, ActivityResponse, ActivityUpdate
 from src.schemas.common import PaginatedResponse
-from src.services.generic import GenericService
 from src.services.decorators import transactional
-from src.domain.record_visits import active_record_filter
-from src.domain.visit_status import ACTIVE_RECORD_STATUSES
+from src.services.generic import GenericService
 
 
 class ActivityService(GenericService[ActivityCreate, ActivityUpdate, ActivityResponse]):
@@ -186,11 +186,20 @@ class ActivityService(GenericService[ActivityCreate, ActivityUpdate, ActivityRes
             await db_session.execute(delete(Payment).where(Payment.record_id.in_(record_ids)))
             await db_session.execute(delete(record_tags).where(record_tags.c.record_id.in_(record_ids)))
             await db_session.execute(delete(Record).where(Record.id.in_(record_ids)))
+            # GH #239 §3.3: these cascades actually ran (guarded by record_ids)
+            mark_changed("records")
+            mark_changed("visits")
+            mark_changed("payments")
+            mark_changed("tags")  # record_tags join rows
         await db_session.execute(
             update(Photo).where(Photo.activity_id == id).values(activity_id=None)
         )
         await db_session.execute(delete(activity_tags).where(activity_tags.c.activity_id == id))
         await db_session.execute(delete(Activity).where(Activity.id == id))
+        # GH #239 §3.3: photos are unlinked (SET NULL) even without records;
+        # activity_tags always die with the activity.
+        mark_changed("photos")
+        mark_changed("tags")
         return True
 
 

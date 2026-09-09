@@ -12,13 +12,13 @@ import {
   ApiError,
 } from '@memo/api-client';
 import type { LocationCreate, LocationUpdate, DependencyNode } from '@memo/api-client';
-import { qk } from '@/lib/queryKeys';
+import { invalidateEntities } from '@/lib/invalidate';
 
 export function useCreateLocation() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (data: LocationCreate) => createLocation(data),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: qk.locations }),
+    onSuccess: () => invalidateEntities(queryClient, ['locations']),
   });
 }
 
@@ -26,7 +26,7 @@ export function useUpdateLocation() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: LocationUpdate }) => updateLocation(id, data),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: qk.locations }),
+    onSuccess: () => invalidateEntities(queryClient, ['locations']),
   });
 }
 
@@ -35,7 +35,7 @@ export function usePatchLocation() {
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: Partial<LocationUpdate> }) =>
       patchLocation(id, data),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: qk.locations }),
+    onSuccess: () => invalidateEntities(queryClient, ['locations']),
   });
 }
 
@@ -53,11 +53,10 @@ export function useDeleteLocation() {
     mutationFn: (id: string) => deleteLocation(id),
     onMutate: () => setDependencies(null), // clear stale tree from a prior attempt
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: qk.locations });
-      // Cross-invalidation (cache hygiene): a hard-deleted location may have
-      // been referenced by records-derived views that key on ['locations']
-      // (useRecordData.ts) and by records lists themselves.
-      queryClient.invalidateQueries({ queryKey: qk.records });
+      // Family rules via the shared map (#239): ['locations'] + ['records']
+      // (a hard-deleted location may be referenced by records-derived views
+      // keyed on ['locations'] — useRecordData.ts).
+      invalidateEntities(queryClient, ['locations']);
     },
     onError: (err) => {
       if (err instanceof ApiError && err.status === 409 && err.dependencies) {
@@ -74,7 +73,7 @@ export function useArchiveLocation() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => archiveLocation(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: qk.locations }),
+    onSuccess: () => invalidateEntities(queryClient, ['locations']),
   });
 }
 
@@ -83,6 +82,6 @@ export function useRestoreLocation() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => restoreLocation(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: qk.locations }),
+    onSuccess: () => invalidateEntities(queryClient, ['locations']),
   });
 }

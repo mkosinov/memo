@@ -1,4 +1,4 @@
-import { expect } from '@playwright/test';
+import { test, expect } from '@playwright/test';
 import {
   waitForRecordsReady,
   waitForScheduleReady,
@@ -7,7 +7,8 @@ import {
 import { cleanupRecord, cleanup } from './fixtures/factories';
 import {
   serverPushPages,
-  expectNoUpdateToast,
+  expectNoOwnEchoToast,
+  openFrameLogger,
   createRecordViaUI,
   uid,
   PUSH_WINDOW,
@@ -34,12 +35,20 @@ import {
  * table updates via A's own invalidation path while the «Данные обновлены»
  * toast must NOT appear (origin.id === A's tab id, spec §2.4 suppression).
  * Silence is probed NON-retrying inside the toast lifetime, immediately
- * after the POST resolves (see expectNoUpdateToast in fixtures/server-push).
+ * after the POST resolves (see expectNoOwnEchoToast in fixtures/server-push).
+ *
+ * SERIAL: С5's reconnect blanket + any sibling file's mutations broadcast to
+ * ALL open contexts under fullyParallel; С5's outage/reconnect churn also
+ * disturbs a concurrently running С6. Isolation-independently green, the two
+ * scenarios interfere when parallel — serialize the file (precedent:
+ * visual-compliance-checks.spec.ts).
  *
  * Requires: per-shard stack (backend :8021 / frontend :3021 in dev runs):
  *   SHARD_ID=9 SHARD_PORT=3021 BACKEND_URL=http://127.0.0.1:8021 \
  *     NEXT_PUBLIC_API_URL=http://127.0.0.1:8021 pnpm test:e2e -- server-push-offline.spec.ts
  */
+
+test.describe.configure({ mode: 'serial' });
 
 serverPushPages.describe('Server push invalidation — offline & own mutations (GH #239 §6)', () => {
   // ── С5: mid-outage write → reconnect → blanket invalidate converges A ────
@@ -92,53 +101,67 @@ serverPushPages.describe('Server push invalidation — offline & own mutations (
 
   serverPushPages('С6: A creates a record via own UI → table updates, NO update toast', async ({
     pageA,
+    browser,
     request,
   }) => {
     const marker = `Push C6 ${uid()}`;
 
-    // A populates the records cache, then SPA-navigates to the schedule
-    // (in-app link click — a full reload would wipe the React Query cache
-    // and let a fresh mount-fetch masquerade as own invalidation).
-    await waitForRecordsReady(pageA);
-    const scheduleCards = pageA.waitForSelector('[data-testid^="activity-"]', {
-      timeout: 15_000,
-    });
-    await pageA.getByRole('link', { name: 'Расписание' }).click();
-    await scheduleCards;
+    // Frame logger: a dedicated context subscribed to the raw SSE stream —
+    // lets the silence probe attribute any toast to own-echo vs foreign
+    // interference (the hub broadcasts every mutation to ALL contexts).
+    // Every probe attempt performs a REAL own write (the retry after
+    // attributed interference creates another marker record — the retry
+    // record becomes the asserted row). Track all writes for cleanup.
+    const frameLog = await openFrameLogger(browser);
+    const created: { id: string; client_id: string }[] = [];
 
-    // OWN write through A's UI — carries A's real tab header, the backend
-    // echoes it as origin {type:'tab', id:<A's tab id>}.
-    const today = new Date().toISOString().slice(0, 10);
-    await openAddTab(pageA, { date: today });
+    const doOwnWrite = async () => {
+      // OWN write through A's UI — carries A's real tab header, the backend
+      // echoes it as origin {type:'tab', id:<A's tab id>}.
+      const today = new Date().toISOString().slice(0, 10);
+      await openAddTab(pageA, { date: today });
 
-    const phone = `+7999${Date.now().toString().slice(-7)}`;
-    await pageA.getByTestId('input-phone').fill(phone);
-    await pageA.getByTestId('input-client-name').fill(marker);
+      const phone = `+7999${Date.now().toString().slice(-7)}`;
+      await pageA.getByTestId('input-phone').fill(phone);
+      await pageA.getByTestId('input-client-name').fill(marker);
 
-    const createResponse = pageA.waitForResponse(
-      (r) => r.url().includes('/api/v1/records') && r.request().method() === 'POST',
-      { timeout: 15_000 },
-    );
-    await pageA.getByTestId('btn-create-record').click();
-    const resp = await createResponse;
-    expect(resp.status()).toBe(201);
-    const created = (await resp.json()) as { id: string; client_id: string };
-
-    // SILENCE ASSERTION — probed IMMEDIATELY after the own mutation
-    // resolves, while the modal is still open: the SSE echo of A's own
-    // write arrives within milliseconds; if origin suppression were broken
-    // the «Данные обновлены» toast would be mid-life (~4.5s) on screen and
-    // the non-retrying probe (2s wait → instant count check) fails it. In
-    // GREEN the probe observes zero «Данные обновлены» toasts.
-    await expectNoUpdateToast(pageA);
-
-    // The modal stays open after creation (switches to the settings tab) —
-    // close it so the sidebar link is clickable.
-    await pageA.evaluate(() => {
-      document.dispatchEvent(new CustomEvent('__memo-close-modal'));
-    });
+      const createResponse = pageA.waitForResponse(
+        (r) => r.url().includes('/api/v1/records') && r.request().method() === 'POST',
+        { timeout: 15_000 },
+      );
+      await pageA.getByTestId('btn-create-record').click();
+      const resp = await createResponse;
+      expect(resp.status()).toBe(201);
+      created.push((await resp.json()) as { id: string; client_id: string });
+    };
 
     try {
+      // A populates the records cache, then SPA-navigates to the schedule
+      // (in-app link click — a full reload would wipe the React Query cache
+      // and let a fresh mount-fetch masquerade as own invalidation).
+      await waitForRecordsReady(pageA);
+      const scheduleCards = pageA.waitForSelector('[data-testid^="activity-"]', {
+        timeout: 15_000,
+      });
+      await pageA.getByRole('link', { name: 'Расписание' }).click();
+      await scheduleCards;
+
+      // SILENCE ASSERTION — probed IMMEDIATELY after the own mutation
+      // resolves, while the modal is still open: the SSE echo of A's own
+      // write arrives within milliseconds; if origin suppression were broken
+      // the «Данные обновлены» toast would be mid-life (~4.5s) on screen and
+      // the non-retrying probe (2s wait → instant count check) fails it —
+      // UNLESS foreign frames (sibling spec's broadcast) attribute the toast
+      // to cross-test interference, in which case the probe retries once.
+      // In GREEN the probe observes zero «Данные обновлены» toasts.
+      await expectNoOwnEchoToast(pageA, frameLog, doOwnWrite);
+
+      // The modal stays open after creation (switches to the settings tab) —
+      // close it so the sidebar link is clickable.
+      await pageA.evaluate(() => {
+        document.dispatchEvent(new CustomEvent('__memo-close-modal'));
+      });
+
       // Back to /records via the sidebar LINK (SPA navigation — cache
       // survives). Own invalidation must have marked ['records'] stale, so
       // the cached list refetches on mount and shows the marker row even
@@ -154,10 +177,15 @@ serverPushPages.describe('Server push invalidation — offline & own mutations (
       const row = pageA.locator('table tbody tr').filter({ hasText: marker });
       await expect(row).toBeVisible({ timeout: PUSH_WINDOW });
     } finally {
+      // Frame logger SSE connection + interval must not leak into the
+      // next test; frames were already consumed by the probe.
+      await frameLog.close().catch(() => {});
       // UI-create is the test subject; clear leftovers via API so parallel
       // runs don't inherit them (already-deleted → swallowed 404).
-      await cleanupRecord(request, created.id);
-      await cleanup(request, `/api/v1/clients/${created.client_id}`);
+      for (const rec of created) {
+        await cleanupRecord(request, rec.id);
+        await cleanup(request, `/api/v1/clients/${rec.client_id}`);
+      }
     }
   });
 });

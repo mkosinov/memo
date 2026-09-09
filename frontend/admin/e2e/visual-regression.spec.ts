@@ -12,7 +12,6 @@ import {
   waitForClientsReady,
   openModal,
   openAddTab,
-  cleanTestData,
 } from './fixtures/helpers';
 
 /**
@@ -30,7 +29,6 @@ import {
 
 test.describe('Records Page — Visual Regression', () => {
   test.beforeEach(async ({ page }) => {
-    cleanTestData();
     // Mock browser time to the fixed reference week (matches seed WEEK_FIXED_START)
     // Combined with openModal/openAddTab DB lookup (Approach B+), this makes
     // visual regression baselines date-stable.
@@ -82,7 +80,6 @@ test.describe('Records Page — Visual Regression', () => {
 
 test.describe('Activity Modal — Visual Regression', () => {
   test.beforeEach(async ({ page }) => {
-    cleanTestData();
     // Mock browser time to the fixed reference week (matches seed WEEK_FIXED_START)
     // Combined with openModal/openAddTab DB lookup (Approach B+), this makes
     // visual regression baselines date-stable.
@@ -515,9 +512,9 @@ for (const config of TABLE_CONFIGS) {
   test.describe(`${config.name} table — Visual Regression`, () => {
     test.beforeEach(async ({ page }) => {
       // Mirrors the Records describe above: strip UUID test data so snapshots
-      // always show seed rows only (tags/locations/masters/services/clients/
-      // photos seed IDs are short; cleanTestData's length filters keep them).
-      cleanTestData();
+      // always show seed rows only. The auto seedReset fixture (e2e/fixtures/
+      // test.ts) resets the DB to canonical seed state before every test;
+      // seed IDs are short (tags/locations/masters/services/clients/photos).
       // The mocked clock (below) guarantees a sidebar «Сегодня» hydration
       // mismatch (SSR renders the real date); Next's dev overlay would surface
       // it as a "1 error" toast that can land in screenshots — hidden

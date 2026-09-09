@@ -4,11 +4,12 @@
  * ONE merged statement (spec §3.1, rev 2) consumed by BOTH:
  *   - `globalSetup.ts` (boot-time safety net, before any test runs)
  *   - the per-test wrapper fixture (Task 2 — reset before EVERY test)
- *   - (until Task 3) `helpers.ts cleanTestData()` callers
  *
  * Merged from the two historical variants:
  *   - `globalSetup.ts` inline DELETEs (children-first)
- *   - `cleanTestData()` — stricter prefix-based activities filter (NOT
+ *   - the former manual per-test cleanup in `helpers.ts` (deleted in
+ *     Task 3 — this reset supersedes it) — stricter prefix-based
+ *     activities filter (NOT
  *     length-based: any `evt_*` id must go, `ev_*`/`ev_fixed_*` seed ids
  *     must stay) + sort_order CASE-restores for masters/locations, which
  *     dayview-column-reorder's permanent reorder writes would otherwise
@@ -31,7 +32,7 @@ import { sqliteExecWithRetry } from './sqlite-exec';
 
 /**
  * The canonical reset statement — copied VERBATIM from spec §3.1
- * (sort_order CASE values are the live `cleanTestData()` ones).
+ * (sort_order CASE values are the former manual-cleanup ones).
  */
 export const RESET_SQL = `
   PRAGMA busy_timeout=5000;

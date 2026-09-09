@@ -3,7 +3,7 @@ import path from 'path';
 
 // ── Per-shard environment variables ────────────────────────────────────────
 // When run via test-all.sh, each shard sets:
-//   SHARD_ID        — 1-2 (used by globalSetup/cleanTestData for DB path)
+//   SHARD_ID        — 1-2 (used by globalSetup for DB path)
 //   SHARD_PORT      — frontend port (3002-3003)
 //   BACKEND_PORT    — backend port (8001-8002)
 //   BACKEND_URL     — backend API URL for E2E factories

@@ -50,9 +50,9 @@ export const RESET_SQL = `
  * are set by the shard script / test runner and may change between
  * import and call). Same rules as `globalSetup.ts`:
  *   SHARD_ID set       → backend/test_memo_shard{id}.db
- *   else TEST_DB_PATH  → as-is (may be relative)
+ *   else TEST_DB_PATH  → as-is, relative resolved against process CWD
+ *                        (pass-through, 1:1 with globalSetup)
  *   else               → backend/test_memo.db
- * Relative paths resolve against the BACKEND dir, exactly like globalSetup.
  */
 export function resolveSeedDbPath(): string {
   const shardId = process.env.SHARD_ID;
@@ -73,16 +73,26 @@ export function resetToSeed(): string {
 }
 
 /**
- * Save a consistent DB snapshot into the given directory (spec D7 / §3.2):
+ * Structural subset of Playwright's `TestInfo` — pass the fixture's
+ * `testInfo` directly (spec §3.2 calls `await snapshotDb(testInfo)`).
+ * Exported so the fixture (and tests) can depend on it.
+ */
+export interface SnapshotDbTestInfo {
+  outputDir: string;
+}
+
+/**
+ * Save a consistent DB snapshot into `testInfo.outputDir` (spec D7 / §3.2):
  * on a retry attempt the fixture snapshots the DB BEFORE resetting, so the
  * pre-reset state survives forensics even though the next reset wipes it.
  * `.backup` is consistent under WAL. Synchronous — the fixture awaits it.
  *
- * @param outputDir Playwright TestInfo.outputDir (created if missing)
+ * @param testInfo Playwright TestInfo-compatible object; its outputDir
+ *                 is created if missing
  */
-export function snapshotDb(outputDir: string): string {
-  fs.mkdirSync(outputDir, { recursive: true });
-  const snapshotPath = path.join(outputDir, 'db-before-reset.sqlite');
+export function snapshotDb(testInfo: SnapshotDbTestInfo): string {
+  fs.mkdirSync(testInfo.outputDir, { recursive: true });
+  const snapshotPath = path.join(testInfo.outputDir, 'db-before-reset.sqlite');
   return sqliteExecWithRetry(
     `sqlite3 "${resolveSeedDbPath()}" ".backup '${snapshotPath}'"`,
   );

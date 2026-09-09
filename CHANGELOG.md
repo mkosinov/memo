@@ -9,43 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] — 2026-09-09
 
-### e2e seed reset (#252) — S4 rewrite list (draft)
-Authoritative RED run with the per-test seed-reset fixture live (Task 4). Full
-coverage: shard-schedule 94 + shard-rest 255 (323 passed / 12 failed / 1 skipped);
-full output `/tmp/s4-red-run.log`.
+### e2e seed reset (#252) — per-test deterministic seed state
+Branch `feat/e2e-seed-reset-252` (9 commits: 3513a94..8d0964a + CHANGELOG). Spec:
+`docs/specs/2026-09-09-e2e-seed-reset-design.md`; plan: `docs/plans/2026-09-09-e2e-seed-reset-plan.md`.
 
-**Result: 0 S4 entries.** No test failed from order-coupling or seed mutation.
-All 5 known unified-rows seed violators (`:235` r2-visit DELETE, `:294/:442/:523/:561`
-seed-r1 visit/payment adds) and the scenario-5 `UPDATE visitors` (`:115-117`) PASSED —
-the per-test reset heals each mutation before any later test reads. The 5
-factory-no-cleanup activities of `wave5-x-cards-blurred.spec.ts` are wiped by the
-reset and proved non-load-bearing (spec passed; its own assertions are z-index
-fallbacks). `schedule-column-visibility.spec.ts` (known flake #255) passed 10/10 —
-no entry. The 12 failures below are pre-existing, NOT S4 — no Task-5 rewrites needed:
+**What changed (test infra only — no product code):**
+- **Per-test seed reset (determinism guarantee):** new shared module `frontend/admin/e2e/fixtures/seed-reset.ts` — ONE canonical `RESET_SQL` (children-first DELETEs of non-seed rows: payments → visits → records → activities (strict `ev_*` filter) → visitors → clients; `sort_order` CASE-restores for masters/locations; `PRAGMA busy_timeout=5000` for the live-backend regime) + `resetToSeed()` (call-time DB-path resolution: `SHARD_ID` → shard DB, else `TEST_DB_PATH`, else master) + `snapshotDb()`. A wrapper `test` (`e2e/fixtures/test.ts`) exposes an auto test-scoped `seedReset` fixture that resets the DB to canonical seed before EVERY test, incl. retries. Guarantee is honest and narrowed (D3): non-seed rows from any earlier test (incl. crashed ones) are invisible and restorable attributes are canonical — but **seed rows themselves are not re-seeded**: tests must not mutate/delete seed rows; `seed.py` stays the single seed source.
+- **globalSetup** now consumes the same `RESET_SQL` (no drift possible) and keeps both #152 seed-contract checks verbatim.
+- **Serial local runs:** `workers: 1` pinned unconditionally in `playwright.config.ts` (CI was already serial — no CI change). The fixture throws a labeled error if `workers > 1` — an accidental parallel override fails loudly instead of silently reintroducing reset races.
+- **Retry-snapshot forensics (D7):** on a retry attempt the fixture first saves a consistent DB snapshot (`sqlite3 .backup`) into `testInfo.outputDir`, attached as a failure artifact — the next test's reset no longer destroys the evidence.
+- **`cleanTestData()` deleted** from `fixtures/helpers.ts`; its 7 manual calls (visual-regression ×3, week-view ×4) removed — the auto fixture supersedes them. All 47 spec files import the wrapper `test`; no Playwright test-hook registration outside it.
+- **S4 outcome — RED run found 0 additional order-coupled tests.** The first full-suite run with the reset live (shard-schedule 94 + shard-rest 255) produced NO failure from order-coupling or seed mutation: the per-test reset heals all sibling leaks. The 12 failures of that run were pre-existing (2 × #255-family render-wait flakes — fixed separately below — and 10 known local visual-drift entries, re-baseline on CI).
+- **6 unified-rows seed-mutators rewritten to factory-owned data** (commit 8d0964a): the r2 seed-visit DELETE, seed-r1 visit/payment adds in scenarios 9a/11/13/14, and the scenario-5 direct `UPDATE visitors` now create their own records/visitors/payments via `e2e/fixtures/factories.ts` and assert on own ids — no test touches seed rows anymore.
 
-| Test | Class | Trace excerpt | Fix sketch |
-|---|---|---|---|
-| `activity-details-modal.spec.ts:370` (shard-1) | pre-existing flake (#255 family) | `waitForSelector('[data-testid^="activity-"]')` Timeout 10000ms in `waitForScheduleReady` | A/B: standalone 14/14 green — load-sensitive card-render wait; #255 fix (Task 4.5) covers it, no test rewrite |
-| `client-phone-typeahead.spec.ts:169` | pre-existing flake (#255 family) | same `waitForScheduleReady` 10s timeout in beforeEach | A/B: standalone 8/8 green — same render-timing wait, no rewrite |
-| `visual-regression.spec.ts:396` services-table-picker-open | pre-existing visual drift | 3557px (ratio 0.01) differ | re-baseline on CI runner (same family as clients-table-picker-open +3026px A/B-proven at base in Task 3) |
-| `visual-regression.spec.ts:396` clients-table-picker-open | pre-existing visual drift | 3026px (0.01) — EXACT Task-3 base-commit delta | re-baseline on CI runner |
-| `visual-regression.spec.ts:396` photos-table-picker-open | pre-existing visual drift | 3107px (0.01) | re-baseline on CI runner |
-| `visual-regression.spec.ts:347` records-table-filled | pre-existing visual drift | 3821px (0.01); drifted 4168→3821px between two clean runs — rendering noise, not data | re-baseline on CI runner |
-| `visual-regression.spec.ts:363` records-table-sort-active | pre-existing visual drift | 17567px (0.02) — sort-indicator shift amplifies container drift | re-baseline on CI runner |
-| `visual-regression.spec.ts:375` records-table-dropdown-open | pre-existing visual drift | 3872px (0.01) | re-baseline on CI runner |
-| `visual-regression.spec.ts:396` records-table-picker-open | pre-existing visual drift | 4452px (0.01) | re-baseline on CI runner |
-| `wave6-status-snapshots.spec.ts:86` StatusPicker closed | pre-existing visual drift (element metrics) | `Expected an image 124px by 32px, received 127px by 31px` — deterministic 3px width/1px height env drift | re-baseline on CI runner |
-| `wave6-status-snapshots.spec.ts:93` StatusPicker open | pre-existing visual drift (element metrics) | same 124×32 → 127×31 size mismatch | re-baseline on CI runner |
-| `wave6-status-snapshots.spec.ts:101` StatusBadge waiting | pre-existing visual drift (element metrics) | `Expected 96px by 19px, received 99px by 19px` — same font-metric drift | re-baseline on CI runner |
+**Verification (Task 6 matrix, this worktree, per-test reset live):**
+- **S1 — unified-rows standalone ×3:** `pnpm exec playwright test e2e/unified-rows.spec.ts --repeat-each=3 --workers=1` — 66/66 passed, three consecutive invocations (12.2m / 11.5m / 11.5m). Post-run DB assertions: seed contract intact (r2 has exactly 2 visits; `vis1` name canonical).
+- **S2+S5 — full shard suite ×3:** both projects green in 3 consecutive runs — shard-schedule **94/94 ×3** (5.4m / 5.3m / 5.2m), shard-rest **244 passed + 11 failed ×3**, and the 11-failure set is **byte-identical across runs, including exact pixel deltas** (e.g. clients-table-picker-open 3026px / 0.01 ratio, wave6 status shots 124×32→127×31). All 11 are the known local visual-baseline-drift family (7 `visual-regression.spec.ts` table/page shots — the 10 known entries plus `records-filtered` with the same 0.01-ratio signature — and the 3 `wave6-status-snapshots` font-metric drifts; A/B-proven env drift, CI runner is authoritative, re-baseline there). Zero order-coupling failures anywhere: seed-reset determinism holds at suite scale.
+- **Test-env note (local-only, pre-existing):** local `test-all.sh` boots both shard `next dev` servers sharing `frontend/admin/.next` — route chunks are served cross-baked (wave-#216 poisoning family; reproduced with direct chunk-level evidence: `records/page.js` on :3002 contained `127.0.0.1:8002`), failing 10–80 tests non-deterministically. CI is immune (each shard is a separate runner job). The ×3 matrix was therefore executed as sequential isolated shard segments (one stack + fresh `.next` at a time = CI's exact isolation; same projects/env/DBs). Script unchanged.
 
-Run-integrity note: the first shard-rest attempt was discarded — the shard-2 Next.js
-dev server served a client bundle baked with `NEXT_PUBLIC_API_URL=:8001` (two parallel
-`next dev` processes sharing `frontend/admin/.next`; shard-1 won the compile race —
-the documented wave-#216 baked-URL poisoning). Playwright trace proved pageA on :3003
-fetched `127.0.0.1:8001`. Stack rebooted with fresh `.next` (`:8002` verified baked);
-shard-rest re-run in 3 seedReset-safe segments. Its ~40 failures (clients ×15,
-unified-rows 15b/16/16b, unify-caches US-1, server-push С3/С4, …) were infra
-artifacts, all green on the clean run.
+**Runtime delta (honest numbers):**
+- **CI (pre-#252 baseline, last green main run 34199566473, 2026-09-08):** e2e shard-schedule 3m51s, e2e shard-rest 11m08s (parallel jobs; ~300 tests, `--workers=1` already).
+- **Post-#252:** CI sees only the reset overhead — ~349 tests × 50–100 ms per CLI-spawned reset ≈ **+15–35 s per full run** (spec §3.1 estimate; no CI run of this branch yet). CI shape unchanged (already serial).
+- **Local (this container, post-#252):** shard-schedule ≈5.3m, shard-rest ≈18.5m playwright time (sequential segments, ~24m + ~2–4m boot). Local comparison to pre-#252 is not apples-to-apples: local runs gave up parallelism by design (D4 — `workers: 1` unconditionally), the accepted price for per-test determinism.
+
+**Also rides this PR — fix(#255 family):** `schedule-column-visibility.spec.ts` waits for the first column header before asserting the column count after a location-mode switch (commit 7074c92). Kills the load-sensitive `waitForScheduleReady` 10s-timeout flake family (activity-details-modal, client-phone-typeahead — both green ×3 in the matrix above).
 
 ### Added
 - **GH #239 — Server push channel for cache invalidation (SSE `GET /api/v1/events`)** — branch `feat/server-push-invalidation-239` (17 commits: f2f0e94..63740b0; 10/10 plan tasks; spec §8 DoD all met):

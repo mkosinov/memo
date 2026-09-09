@@ -5,7 +5,8 @@
  *   1. call-time DB path resolution order: SHARD_ID → TEST_DB_PATH → default
  *   2. resetToSeed() executes the canonical RESET_SQL: non-seed rows removed
  *      (children-first incl. orphaned visitors), ev_* activities survive,
- *      seed sort_order restored for masters/locations.
+ *      seed sort_order restored for masters/locations (row presence and
+ *      value asserted separately).
  *
  * Uses TEST_DB_PATH pointing at a temp file — no backend, no shard stack.
  */
@@ -62,6 +63,14 @@ function seedAndPollute(db: string) {
 function count(db: string, sql: string): number {
   const out = execSync(`sqlite3 "${db}" "${sql}"`, { encoding: 'utf-8' }).trim();
   return parseInt(out, 10) || 0;
+}
+
+/** Read a single numeric value; a missing row (empty output) → NaN, so a
+ *  value of 0 can never masquerade as an absent row. */
+function scalar(db: string, sql: string): number {
+  const out = execSync(`sqlite3 "${db}" "${sql}"`, { encoding: 'utf-8' }).trim();
+  const n = parseInt(out, 10);
+  return Number.isNaN(n) ? NaN : n;
 }
 
 describe('resolveSeedDbPath (call-time resolution)', () => {
@@ -141,19 +150,31 @@ describe('resetToSeed (against a real temp SQLite DB)', () => {
 
     expect(count(dbPath, "SELECT COUNT(*) FROM activities WHERE id='ev_0'")).toBe(1);
     expect(count(dbPath, "SELECT COUNT(*) FROM activities WHERE id='ev_fixed_0'")).toBe(1);
-    // 'evt_something' is length 13 > 5 — the old globalSetup length-filter would
-    // keep it; the canonical prefix filter must delete it.
+    // 'ev_fixed_0' (length 10) survives only because the canonical filter is
+    // prefix-based: a naive length filter (like the other tables use) would
+    // delete it, and 'evt_something' must go in either case.
+    expect(count(dbPath, "SELECT COUNT(*) FROM activities WHERE id='ev_fixed_0'")).toBe(1);
     expect(count(dbPath, "SELECT COUNT(*) FROM activities WHERE id='evt_something'")).toBe(0);
   });
 
   it('restores canonical sort_order for seed masters and locations', () => {
     resetToSeed();
 
-    expect(count(dbPath, "SELECT sort_order FROM masters WHERE id='m1'")).toBe(0);
-    expect(count(dbPath, "SELECT sort_order FROM masters WHERE id='m2'")).toBe(1);
-    expect(count(dbPath, "SELECT sort_order FROM masters WHERE id='m7'")).toBe(5);
-    expect(count(dbPath, "SELECT sort_order FROM locations WHERE id='alpika'")).toBe(0);
-    expect(count(dbPath, "SELECT sort_order FROM locations WHERE id='grand'")).toBe(1);
-    expect(count(dbPath, "SELECT sort_order FROM locations WHERE id='p1389'")).toBe(2);
+    // Existence first: the scalar query below yields 0 for a MISSING row,
+    // so canonical 0 values (m1, alpika) would be indistinguishable from a
+    // deleted row without these checks.
+    expect(count(dbPath, "SELECT COUNT(*) FROM masters WHERE id='m1'")).toBe(1);
+    expect(count(dbPath, "SELECT COUNT(*) FROM masters WHERE id='m2'")).toBe(1);
+    expect(count(dbPath, "SELECT COUNT(*) FROM masters WHERE id='m7'")).toBe(1);
+    expect(count(dbPath, "SELECT COUNT(*) FROM locations WHERE id='alpika'")).toBe(1);
+    expect(count(dbPath, "SELECT COUNT(*) FROM locations WHERE id='grand'")).toBe(1);
+    expect(count(dbPath, "SELECT COUNT(*) FROM locations WHERE id='p1389'")).toBe(1);
+
+    expect(scalar(dbPath, "SELECT sort_order FROM masters WHERE id='m1'")).toBe(0);
+    expect(scalar(dbPath, "SELECT sort_order FROM masters WHERE id='m2'")).toBe(1);
+    expect(scalar(dbPath, "SELECT sort_order FROM masters WHERE id='m7'")).toBe(5);
+    expect(scalar(dbPath, "SELECT sort_order FROM locations WHERE id='alpika'")).toBe(0);
+    expect(scalar(dbPath, "SELECT sort_order FROM locations WHERE id='grand'")).toBe(1);
+    expect(scalar(dbPath, "SELECT sort_order FROM locations WHERE id='p1389'")).toBe(2);
   });
 });

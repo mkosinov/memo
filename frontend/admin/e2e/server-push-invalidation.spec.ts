@@ -30,6 +30,55 @@ import {
 
 const PUSH_WINDOW = 5_000; // spec §6 — "within seconds"; < staleTime thresholds
 
+/** Direct backend base for bare-API cleanup (same default as factories). */
+const API_BASE = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
+
+/**
+ * Assert that a "Данные обновлены" info toast is (or becomes) visible.
+ *
+ * Scoped with a text filter + `.first()`: parallel specs broadcasting their
+ * own pushes land foreign toasts on every open context, so several
+ * toast-info elements can be stacked at once (container shows up to 5) —
+ * an unscoped getByTestId('toast-info') would trip strict mode.
+ */
+function expectUpdateToast(page: Page) {
+  return expect(
+    page.getByTestId('toast-info').filter({ hasText: 'Данные обновлены' }).first(),
+  ).toBeVisible({ timeout: PUSH_WINDOW });
+}
+
+/**
+ * Dismiss/wait out transient toast overlays before a click.
+ *
+ * The toast container (fixed bottom-right, z-[250]) shares the screen corner
+ * with the StampFab (fixed bottom-right, z-50); a toast overlapping the FAB
+ * swallows the click and the panel never opens. Foreign pushes from parallel
+ * specs can pop a toast at ANY moment, so a one-shot wait is not enough —
+ * retry the click until it lands, re-waiting out overlays after each miss.
+ */
+async function clickFabRobust(page: Page, timeoutMs = 15_000) {
+  const fab = page.getByRole('button', { name: 'Открыть панель инструментов' });
+  const toasts = page.locator('[data-testid^="toast-"]');
+  const deadline = Date.now() + timeoutMs;
+
+  for (;;) {
+    await expect(fab).toBeVisible({ timeout: 5_000 });
+    if ((await toasts.count()) > 0) {
+      // Overlay present — let it die (toast life ~4.5s), then re-check.
+      await toasts
+        .first()
+        .waitFor({ state: 'detached', timeout: Math.max(1, deadline - Date.now()) })
+        .catch(() => {});
+    }
+    try {
+      await fab.click({ timeout: 2_000 }); // no force — hit-target check is the guard
+      return;
+    } catch {
+      if (Date.now() > deadline) throw new Error('FAB click never landed (overlay retries exhausted)');
+    }
+  }
+}
+
 /** Unique marker prefix so parallel specs never collide. */
 function uid(): string {
   return `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
@@ -85,10 +134,10 @@ async function createRecordViaUI(pageB: Page, clientName: string) {
  * Delete an activity through B's UI: enable «Режим удаления» in the right
  * panel, then click the activity card. Waits for the DELETE response.
  *
- * The StampFab (fixed bottom-right, z-50) shares the screen corner with the
- * toast container (fixed bottom-right, z-[250]); force-click skips the
- * hit-target re-check against that transient overlay without bypassing the
- * real button handler.
+ * Opening the panel goes through clickFabRobust — the StampFab (fixed
+ * bottom-right, z-50) shares the screen corner with the toast container
+ * (fixed bottom-right, z-[250]) and parallel-spec toasts would otherwise
+ * swallow the click.
  */
 async function deleteActivityViaUI(pageB: Page, activityId: string) {
   // B must be watching the schedule for the delete to be a real UI action.
@@ -96,9 +145,7 @@ async function deleteActivityViaUI(pageB: Page, activityId: string) {
 
   const panel = pageB.locator('[data-testid="right-panel"]');
   if (!(await panel.isVisible().catch(() => false))) {
-    const fab = pageB.getByRole('button', { name: 'Открыть панель инструментов' });
-    await expect(fab).toBeVisible({ timeout: 15_000 });
-    await fab.click({ force: true });
+    await clickFabRobust(pageB);
   }
   await pageB.getByRole('button', { name: 'Режим удаления' }).click();
 
@@ -132,9 +179,7 @@ twoPages.describe('Server push invalidation — external updates (GH #239 §6)',
 
       // PUSH ASSERTIONS — both must hold within the push window.
       await expect(row).toBeVisible({ timeout: PUSH_WINDOW });
-      await expect(pageA.getByTestId('toast-info')).toContainText('Данные обновлены', {
-        timeout: PUSH_WINDOW,
-      });
+      await expectUpdateToast(pageA);
     } finally {
       if (created) {
         await cleanupRecord(request, created.id);
@@ -175,12 +220,18 @@ twoPages.describe('Server push invalidation — external updates (GH #239 §6)',
     try {
       // PUSH ASSERTION — type ≥2 chars (RemoteSearchSelect min-2 clamp +
       // 300ms debounce), the refetched dictionary must offer the new tag.
+      // One cheap retry: if the push lands mid-debounce the first fill may
+      // query the still-stale dictionary — re-firing re-queries the refetched one.
       const tagInput = pageA.getByPlaceholder('Добавить тег...');
+      const prefix = tagName.slice(0, 8);
+      const option = pageA.getByRole('option', { name: tagName });
       await tagInput.click();
-      await tagInput.fill(tagName.slice(0, 8));
-      await expect(
-        pageA.getByRole('option', { name: tagName }),
-      ).toBeVisible({ timeout: PUSH_WINDOW });
+      await tagInput.fill(prefix);
+      if (!(await option.isVisible().catch(() => false))) {
+        await tagInput.fill(prefix.slice(0, -1));
+        await tagInput.fill(prefix);
+      }
+      await expect(option).toBeVisible({ timeout: PUSH_WINDOW });
     } finally {
       if (tagId) await cleanup(request, `/api/v1/tags/${tagId}`);
     }
@@ -231,6 +282,12 @@ twoPages.describe('Server push invalidation — external updates (GH #239 §6)',
       expect(refetch.status()).toBe(200);
       await expect(recordRow).not.toBeVisible({ timeout: PUSH_WINDOW });
     } finally {
+      // UI delete is the test subject, not a prerequisite — if it failed,
+      // remove the setup activity via API so parallel runs don't inherit it.
+      // Ignore 4xx: already-deleted (by a succeeded UI delete) is fine.
+      await request
+        .delete(`${API_BASE}/api/v1/activities/${activity.id}`)
+        .catch(() => undefined); // network-level errors: nothing more to do
       await cleanupRecord(request, record.id);
       await cleanup(request, `/api/v1/clients/${client.id}`);
     }
@@ -254,9 +311,7 @@ twoPages.describe('Server push invalidation — external updates (GH #239 §6)',
       await expect(
         pageA.locator(`[data-testid="activity-${created.id}"]`),
       ).toBeVisible({ timeout: PUSH_WINDOW });
-      await expect(pageA.getByTestId('toast-info')).toContainText('Данные обновлены', {
-        timeout: PUSH_WINDOW,
-      });
+      await expectUpdateToast(pageA);
     } finally {
       await cleanup(request, `/api/v1/activities/${created.id}`);
     }

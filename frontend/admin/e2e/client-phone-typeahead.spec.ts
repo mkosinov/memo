@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
 import {
   waitForScheduleReady,
   openAddTab,
@@ -6,10 +6,36 @@ import {
   clickModalTab,
   phoneMaskDisplay,
 } from './fixtures/helpers';
-import { queryDBRow } from './fixtures/db-query';
+import { queryDBRow, queryDBRows } from './fixtures/db-query';
 import { createTestClient, createTestActivity, createTestRecord, cleanup, cleanupRecord } from './fixtures/factories';
 
 const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
+
+/**
+ * Delete every record bound to the client FIRST, then the client itself.
+ *
+ * A client with records cannot be deleted — the client DELETE answers 409
+ * and its dependency list offers no `cascade` for records, so the generic
+ * `cleanup` retry never fires and rows silently leak onto the shared seed
+ * schedule (breaks other specs' seeded-state assumptions, e.g. the
+ * unified-rows shard). `cleanupRecord` cascades visits/payments per the
+ * project idiom; after each delete the DB is re-checked so a FAILED delete
+ * of an EXISTING record fails the test loudly instead of being swallowed.
+ * 404s (already-deleted) surface as "record gone" — no error.
+ */
+async function cleanupClientAndRecords(request: APIRequestContext, clientId: string) {
+  const recordRows = queryDBRows(`SELECT id FROM records WHERE client_id='${clientId}'`);
+  for (const row of recordRows) {
+    await cleanupRecord(request, row.id as string);
+    const survivor = queryDBRow(`SELECT id FROM records WHERE id='${row.id}'`);
+    if (survivor) {
+      throw new Error(
+        `e2e cleanup leak: record ${row.id} (client ${clientId}) survived DELETE — shared DB would be polluted`,
+      );
+    }
+  }
+  await cleanup(request, `/api/v1/clients/${clientId}`);
+}
 
 /**
  * GH #221 — record-form client typeahead by partial phone match.
@@ -195,11 +221,11 @@ test.describe('Client phone typeahead — record form (GH #221)', () => {
       return row !== null && row.phone === fullDisplay;
     }, { timeout: 30_000, intervals: [200, 500, 1000] }).toBe(true);
 
-    // Cleanup: the freshly created client.
+    // Cleanup: the record(s) created for the client FIRST, then the client.
     const created = queryDBRow(
       `SELECT id FROM clients WHERE name = 'Новый WYSIWYG E2E-221 ${uid}'`,
     );
-    if (created) await cleanup(request, `/api/v1/clients/${created.id}`);
+    if (created) await cleanupClientAndRecords(request, created.id as string);
   });
 
   test('4. Ignored suggestion never duplicates — save binds the existing client', async ({
@@ -392,7 +418,7 @@ test.describe('Client phone typeahead — record form (GH #221)', () => {
     }, { timeout: 30_000, intervals: [200, 500, 1000] }).toBe(true);
 
     const created = queryDBRow(`SELECT id FROM clients WHERE name = '${clientName}'`);
-    if (created) await cleanup(request, `/api/v1/clients/${created.id}`);
+    if (created) await cleanupClientAndRecords(request, created.id as string);
   });
 
   // ── Task 6 nit: no onBlur exact-fetch on the phone field (REMOVED) ────

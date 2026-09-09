@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within, act } from '@testing-library/react';
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ServiceResponse, DependencyNode, PaginatedResponse, MaterialResponse } from '@memo/api-client';
@@ -500,6 +500,51 @@ describe('ServicesTable', () => {
         material_id: 'mat-k',
       });
     });
+  });
+
+  it('keeps the selected material visible when the options refetch without it (SSE archive, GH #239)', async () => {
+    // #239: any mutation echoes an SSE frame that invalidates ['materials'];
+    // useMaterialsRaw refetches the ACTIVE list and the selected material may
+    // drop out (archived externally). The applied filter (context state) must
+    // stay AND the select must keep displaying the selection — not silently
+    // fall back to «все» while the list is still filtered.
+    setupEnvelope();
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ServicesProvider>
+          <ServicesTable />
+        </ServicesProvider>
+      </QueryClientProvider>,
+    );
+    await screen.findByText('Картина маслом');
+
+    const select = screen.getByLabelText('Фильтр по материалу');
+    await waitFor(() => {
+      expect(within(select).getByRole('option', { name: 'Акварель' })).toBeInTheDocument();
+    });
+    fireEvent.change(select, { target: { value: 'mat-a' } });
+    await waitFor(() => {
+      expect(mockGetServices).toHaveBeenLastCalledWith(
+        expect.objectContaining({ material_id: 'mat-a' }),
+      );
+    });
+
+    // The materials dict refetches WITHOUT mat-a (archived elsewhere); the
+    // SSE-driven invalidateQueries on the ['materials'] family triggers it.
+    mockGetAllMaterials.mockResolvedValue([MOCK_MATERIALS[1]]);
+    await act(async () => {
+      await queryClient.invalidateQueries({ queryKey: ['materials'] });
+    });
+
+    // The applied filter is untouched (query keeps material_id) and the select
+    // still DISPLAYS the selection instead of falling back to «все».
+    expect(mockGetServices).toHaveBeenLastCalledWith(
+      expect.objectContaining({ material_id: 'mat-a' }),
+    );
+    expect(select).toHaveValue('mat-a');
   });
 
   it('reset button clears the material filter too', async () => {

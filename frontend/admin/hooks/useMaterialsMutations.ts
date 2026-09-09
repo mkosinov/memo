@@ -12,13 +12,13 @@ import {
   ApiError,
 } from '@memo/api-client';
 import type { MaterialCreate, MaterialUpdate, DependencyNode } from '@memo/api-client';
-import { qk } from '@/lib/queryKeys';
+import { invalidateEntities } from '@/lib/invalidate';
 
 export function useCreateMaterial() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (data: MaterialCreate) => createMaterial(data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: qk.materials }),
+    onSuccess: () => invalidateEntities(qc, ['materials']),
   });
 }
 
@@ -26,7 +26,7 @@ export function useUpdateMaterial() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: MaterialUpdate }) => updateMaterial(id, data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: qk.materials }),
+    onSuccess: () => invalidateEntities(qc, ['materials']),
   });
 }
 
@@ -35,7 +35,7 @@ export function usePatchMaterial() {
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: Partial<MaterialUpdate> }) =>
       patchMaterial(id, data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: qk.materials }),
+    onSuccess: () => invalidateEntities(qc, ['materials']),
   });
 }
 
@@ -51,7 +51,7 @@ export function useDeleteMaterial() {
   const mutation = useMutation({
     mutationFn: (id: string) => deleteMaterial(id),
     onMutate: () => setDependencies(null),
-    onSuccess: () => qc.invalidateQueries({ queryKey: qk.materials }),
+    onSuccess: () => invalidateEntities(qc, ['materials']),
     onError: (err) => {
       if (err instanceof ApiError && err.status === 409 && err.dependencies) {
         setDependencies(err.dependencies);
@@ -67,7 +67,7 @@ export function useArchiveMaterial() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => archiveMaterial(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: qk.materials }),
+    onSuccess: () => invalidateEntities(qc, ['materials']),
   });
 }
 
@@ -76,6 +76,6 @@ export function useRestoreMaterial() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => restoreMaterial(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: qk.materials }),
+    onSuccess: () => invalidateEntities(qc, ['materials']),
   });
 }

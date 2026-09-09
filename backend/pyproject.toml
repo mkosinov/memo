@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Memo art studio management backend — ColourMountains"
 requires-python = ">=3.12"
 dependencies = [
-    "fastapi>=0.115.0",
+    "fastapi>=0.140.0",
     "uvicorn[standard]>=0.32.0",
     "sqlalchemy>=2.0.0",
     "aiosqlite>=0.20.0",

@@ -30,6 +30,15 @@ export function ServiceFilters({
   materialFilter,
   onMaterialFilterChange,
 }: ServiceFiltersProps) {
+  // GH #239 — SSE invalidation can refetch the ACTIVE materials dict at any
+  // moment, dropping an externally-archived material from the options while
+  // its filter is still applied (links survive archive, spec §5). Without a
+  // placeholder the controlled select silently DISPLAYS «все» while the list
+  // stays filtered by the archived id — a lying UI. Keep the selection
+  // visible (marked archived); it disappears naturally once the filter is
+  // cleared (the '' value always matches the «все» option).
+  const selectedMissing =
+    !!materialFilter && !(materials ?? []).some((m) => m.id === materialFilter);
   return (
     <div className="flex flex-wrap items-end gap-3">
       <div className="flex flex-col gap-1">
@@ -73,6 +82,9 @@ export function ServiceFilters({
             aria-label="Фильтр по материалу"
           >
             <option value="">все</option>
+            {selectedMissing && (
+              <option value={materialFilter}>Материал в архиве</option>
+            )}
             {(materials ?? []).map((m) => (
               <option key={m.id} value={m.id}>
                 {m.title}

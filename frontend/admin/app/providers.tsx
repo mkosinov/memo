@@ -8,6 +8,7 @@ import { PendingActionsProvider } from '../contexts/PendingActionsContext';
 import { ErrorBoundary } from './components/error';
 import { ToastContainer } from './components/toast/ToastContainer';
 import { parseApiError } from './lib/api/parseApiError';
+import { ServerEventsProvider } from './ServerEventsProvider';
 
 function QueryClientWithErrorReporting({ children }: { children: React.ReactNode }) {
   const { showToast } = useUI();
@@ -26,11 +27,29 @@ function QueryClientWithErrorReporting({ children }: { children: React.ReactNode
         staleTime: 30_000,
         retry: 2,
         refetchOnWindowFocus: false,
+        // GH #239: reconnect convergence is owned by the SSE channel
+        // (ServerEventsProvider blanket-invalidates on reconnect). TanStack's
+        // own onlineManager refetch would converge data even with a dead
+        // channel and mask channel failures — disabled so the channel is
+        // genuinely the mechanism (spec §4.2/§5). Residual uncovered case: a
+        // network blip while the SSE channel is dead/unrecoverable (REST
+        // works, EventSource never reopens) — no auto-convergence until
+        // remount/manual invalidation; accepted spec trade-off (channel
+        // failure must not be masked).
+        refetchOnReconnect: false,
         throwOnError: false,
       },
     },
   }));
-  return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
+  return (
+    // GH #239: SSE consumer lives INSIDE the QueryClientProvider subtree
+    // (useQueryClient) and BELOW UIProvider (useUI → showToast).
+    <QueryClientProvider client={queryClient}>
+      <ServerEventsProvider>
+        {children}
+      </ServerEventsProvider>
+    </QueryClientProvider>
+  );
 }
 
 export function Providers({ children }: { children: React.ReactNode }) {

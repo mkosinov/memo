@@ -105,17 +105,46 @@ A lookup and its `Raw` sibling share the **same** query key (e.g. `qk.masters`)
 so they dedupe. `useClients` is permanently reserved-vacant — the clients list
 is `useClientsTable`.
 
-### `DICT_STALE_TIME` and the no-external-invalidation assumption
+### `DICT_STALE_TIME` — a load-reduction default, not a correctness mechanism
 
 Dictionary data (`DICT_STALE_TIME = 1h`, `queryKeys.ts`) is cached for an hour
-because admin pages stay open indefinitely. Correctness does **not** rely on
-time-based refresh: there is no WebSocket, SSE, or polling channel. Cache
-freshness rests **entirely on invalidation from the client's own mutations** —
-each mutation invalidates the keys it affects (e.g. record creation that makes
-a new client invalidates `qk.clients` so it appears immediately). The accepted
-tradeoff: an edit made by a *second* admin/tab propagates with up to 1h delay
-unless that tab performs its own mutation. `#239` tracks evaluating a server-push
-channel.
+because admin pages stay open indefinitely and the dictionaries rarely change —
+the long TTL trims refetch traffic, nothing more. Correctness does **not** rest
+on time-based refresh (nor on the client's own mutations alone): external edits
+are picked up in seconds by the **server push invalidation channel** below.
+Time-to-staleness worst case is therefore bounded by channel failure, not by
+the 1h TTL — if the channel is down, the app converges on staleTime expiry,
+own-mutation invalidation, or the reconnect blanket (below).
+
+### Server push invalidation channel (GH #239)
+
+Every committed transaction publishes what went stale; subscribers refetch.
+
+- **Transport:** SSE at `GET /api/v1/events` (`backend/src/events/` — hub,
+  entities, emitter, router; native `fastapi.sse.EventSourceResponse`,
+  15s ping, server-paced `retry: 5000`). Emitted post-commit from the
+  `@transactional` decorator — rolled-back transactions publish nothing.
+- **Payload:** `invalidate` frames carry `{entities, origin}` only — no data,
+  no row ids, no diffs. React Query refetches via normal GETs through the
+  shared family map in `frontend/admin/lib/invalidate.ts`
+  (`INVALIDATION_MAP` — the single source of family-level invalidation rules,
+  consumed by both the SSE provider and the own-mutation sites).
+- **Origin:** mutating requests carry `X-Memo-Tab-Id`; events caused by this
+  tab invalidate silently, others also raise the «Данные обновлены» toast.
+- **No delivery guarantees / replay:** missed events are covered by
+  convergence — on SSE reconnect the client blanket-invalidates all active
+  queries (no toast). The channel is an accelerator, not a critical
+  dependency; if it is unavailable the app behaves as a pure pull app.
+
+**Constraints (deliberate, spec §7):** the hub is a single-process in-memory
+fanout — a multi-process deploy would need Redis pub/sub or PG
+LISTEN/NOTIFY behind the same hub interface (SQLite single-process is the
+current design invariant). Direct DB / sqladmin writes do **not** emit events
+(sqladmin bypasses `@transactional`) — known, accepted gap. The channel ships
+unauthenticated like the whole API; auth arrives with #247, and native
+EventSource cannot set headers — the tab-id origin scheme is headerless by
+that constraint (cookie-session / token-in-query / fetch-SSE are the recorded
+integration paths).
 
 ### Shared-key `staleTime` alignment
 

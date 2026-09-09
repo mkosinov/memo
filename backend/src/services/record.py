@@ -5,12 +5,11 @@ from functools import lru_cache
 from typing import cast
 
 from pydantic import TypeAdapter
-from sqlalchemy import Select, case, delete, func, select, update
+from sqlalchemy import Select, case, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from src.repositories.generic import BaseRepository, get_base_repository
-from src.repositories.search import SearchField, search_predicate
+from src.domain.dates import day_range
 from src.domain.deletion import (
     BlockingDepsError,
     InvalidResolutionError,
@@ -19,11 +18,11 @@ from src.domain.deletion import (
     validate_resolutions,
 )
 from src.domain.record_visits import (
+    check_activity_capacity,
     recompute_record_seats,
     recompute_record_status,
-    check_activity_capacity,
 )
-from src.domain.dates import day_range
+from src.events.emitter import mark_changed
 from src.models.activity import Activity
 from src.models.client import Client
 from src.models.location import Location
@@ -34,6 +33,8 @@ from src.models.service import Service
 from src.models.tag import record_tags
 from src.models.visit import Visit
 from src.models.visitor import Visitor
+from src.repositories.generic import BaseRepository, get_base_repository
+from src.repositories.search import SearchField, search_predicate
 from src.schemas.common import PaginatedResponse
 from src.schemas.record import (
     RecordCreate,
@@ -44,8 +45,8 @@ from src.schemas.record import (
     RecordViewResponse,
     VisitResponse,
 )
-from src.services.generic import GenericService
 from src.services.decorators import transactional
+from src.services.generic import GenericService
 
 # Serializes a datetime EXACTLY as a Pydantic ``datetime`` model field does
 # (pydantic emits ``Z`` for UTC-aware values where bare ``isoformat()``
@@ -375,6 +376,9 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
         await db_session.execute(delete(Payment).where(Payment.record_id == id))
         await db_session.execute(delete(record_tags).where(record_tags.c.record_id == id))
         await db_session.execute(delete(Record).where(Record.id == id))
+        # GH #239 §3.3: cascades above rewrote visits/payments
+        mark_changed("visits")
+        mark_changed("payments")
         return True
 
     async def resolve_delete(
@@ -467,6 +471,10 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
                 # Anonymous visit — no visitor linked
                 visitor_ids.append(None)
 
+        # GH #239 §3.3: conditional cascade marks live in the resolvers
+        # (creation branches only) — see _resolve_client_by_phone /
+        # _resolve_visitor_by_name below.
+
         # ── Create Record (status derived after visits flush) ──────────
         record = Record(
             activity_id=data.activity_id,
@@ -492,6 +500,9 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
             db_session.add(visit)
 
         await db_session.flush()
+
+        # GH #239 §3.3: nested visits are always created by this flow
+        mark_changed("visits")
 
         # ── Recompute seats and status from actual visits ────────────────
         # Route final persisted seats through recompute_record_seats so
@@ -522,6 +533,8 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
             )
             db_session.add(client)
             await db_session.flush()
+            # GH #239 §3.3: conditional mark — only when actually created
+            mark_changed("clients")
         return client
 
     @staticmethod
@@ -547,6 +560,8 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
             )
             db_session.add(visitor)
             await db_session.flush()
+            # GH #239 §3.3: conditional mark — only when actually created
+            mark_changed("visitors")
         return visitor
 
     @transactional

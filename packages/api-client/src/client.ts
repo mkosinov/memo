@@ -3,6 +3,15 @@ import type { DependencyNode } from './schemas';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || (typeof window !== 'undefined' ? `http://${window.location.hostname}:8000` : 'http://localhost:8000');
 
+/** SSE endpoint (GH #239 spec §4.2) — consumed via EventSource by the admin app. */
+export const eventsUrl = `${API_BASE}/api/v1/events`;
+
+// Per-tab identity (GH #239 spec §2.4/§4.2): one uuid per browser tab
+// (regenerated on reload) — the admin compares it against event.origin to
+// keep its own changes silent. Mutating requests carry it as X-Memo-Tab-Id.
+const tabId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : String(Math.random());
+export const getTabId = (): string => tabId;
+
 export class ApiError extends Error {
   constructor(
     public status: number,
@@ -17,12 +26,17 @@ export class ApiError extends Error {
 }
 
 async function api<T>(path: string, schema: z.ZodType<T, z.ZodTypeDef, unknown>, options?: RequestInit): Promise<T> {
+  const method = options?.method;
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(options?.headers as Record<string, string>),
+  };
+  // Mutating requests only (spec §3.3): GETs never announce tab identity.
+  if (method !== undefined && method !== 'GET') headers['X-Memo-Tab-Id'] = tabId;
+
   const res = await fetch(`${API_BASE}${path}`, {
-    headers: {
-      'Content-Type': 'application/json',
-      ...options?.headers,
-    },
     ...options,
+    headers,
   });
 
   if (!res.ok) {

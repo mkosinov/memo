@@ -12,9 +12,10 @@
 //
 // Raw/lookup hook pairs share a key ⇒ they MUST share staleTime
 // (shared-key observers take the most pessimistic value).
-// Dictionary staleTime = 1 hour (G1b Amendment 1): admin pages stay open
-// indefinitely; correctness relies on own-mutation invalidation (spec §6.3 —
-// no WebSocket/SSE/polling exists; #239 tracks server-push eval).
+// Dictionary staleTime = 1 hour: a load-reduction default only —
+// external updates arrive via the SSE invalidation channel (#239),
+// and family invalidation rules live in lib/invalidate.ts
+// (INVALIDATION_MAP — single source for SSE + own mutations).
 
 export const DICT_STALE_TIME = 60 * 60 * 1000;
 

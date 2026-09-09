@@ -10,6 +10,15 @@ Repository layer does flush() only; service layer owns the transaction
 boundary, matching the Unit of Work pattern (Fowler, PoEAA) and
 Spring's @Transactional annotation.
 
+GH #239 — the decorator is also the SINGLE post-commit emit point
+(spec §3.3): before the wrapped call it opens a fresh entity accumulator
+seeded with the service's own canonical entity name; after a successful
+``session.commit()`` it publishes the accumulated set to the event hub
+with the request's origin envelope; on exception/rollback nothing is
+published and the accumulator is discarded. The wrapper also stamps the
+bound method with ``__memo_transactional__ = True`` for test
+introspection (completeness discovery).
+
 Usage:
     from src.services.decorators import transactional
 
@@ -35,7 +44,14 @@ from collections.abc import Awaitable, Callable
 from functools import wraps
 from typing import Any, cast
 
+from src.events import emitter
+from src.events.hub import hub
+
 type _AsyncFunc[**P, R] = Callable[P, Awaitable[R]]
+
+# Marker attribute stamped on wrapped methods: "this method commits via
+# @transactional" — test introspection (entity completeness walk) keys on it.
+_TRANSACTIONAL_MARKER = "__memo_transactional__"
 
 
 def transactional[**P, R](func: _AsyncFunc[P, R]) -> _AsyncFunc[P, R]:
@@ -46,6 +62,14 @@ def transactional[**P, R](func: _AsyncFunc[P, R]) -> _AsyncFunc[P, R]:
     ``session``, etc.). The decorator inspects the function signature to
     find the session parameter, commits it after the method returns, then
     returns the result.
+
+    Post-commit emit (spec §3.3): resolves the service's canonical entity
+    name ONCE per call, opens the accumulator with it (auto-mark), runs
+    the method, commits, then publishes the accumulated entities + origin
+    to the hub. On exception: no commit, no publish, accumulator discarded.
+
+    ``self``-less functions (staticmethod-style): no entity resolution,
+    empty initial accumulation — any marks they make still publish.
 
     On exception: does NOT commit (let the caller / get_db_session rollback).
     Double-commit is safe: SQLAlchemy treats commit() on an already-committed
@@ -76,13 +100,38 @@ def transactional[**P, R](func: _AsyncFunc[P, R]) -> _AsyncFunc[P, R]:
                 f"not found in call to {func.__name__}"
             )
 
-        if has_self:
-            result = await func(self, *args, **kwargs)
-        else:
-            # Staticmethod (or unbound function) — ``self`` is not a real
-            # parameter of ``func``, so don't pass it.
-            result = await func(*args, **kwargs)
-        await session.commit()
-        return result
+        # ── GH #239: open the accumulator (auto-mark the own entity) ──────
+        # LAZY import — a top-level import would create a hard cycle
+        # (decorators → entities → src.services.generic partially
+        # initialized); see the WARNING in src/events/entities.py.
+        from src.events.entities import resolve_entity_name
 
+        if has_self:
+            entity_name = resolve_entity_name(type(self))
+            if entity_name is None:
+                raise RuntimeError(
+                    f"@transactional: cannot resolve the canonical entity "
+                    f"name for {type(self).__qualname__} — declare "
+                    f"``entity_name`` or map its model in "
+                    f"src/events/entities.py (spec §3.3/§3.4)"
+                )
+        else:
+            entity_name = None  # bare function — no service class to resolve
+        token = emitter.start_accumulation({entity_name} if entity_name else set())
+        try:
+            if has_self:
+                result = await func(self, *args, **kwargs)
+            else:
+                # Staticmethod (or unbound function) — ``self`` is not a
+                # real parameter of ``func``, so don't pass it.
+                result = await func(*args, **kwargs)
+            await session.commit()
+            # Emit only on success — after commit, before returning (§3.3).
+            hub.publish(emitter.accumulated() or set(), emitter.get_origin())
+            return result
+        finally:
+            # Rollback path: the accumulator is discarded without publishing.
+            emitter.reset_accumulation(token)
+
+    setattr(wrapper, _TRANSACTIONAL_MARKER, True)
     return cast("_AsyncFunc[P, R]", wrapper)

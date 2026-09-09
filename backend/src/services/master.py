@@ -5,6 +5,7 @@ from functools import lru_cache
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.events.emitter import mark_changed
 from src.models.master import Master
 from src.models.user import User
 from src.repositories.generic import get_archive_repository
@@ -68,6 +69,8 @@ class MasterService(ArchiveService[MasterCreate, MasterUpdate, MasterResponse]):
         await db_session.execute(
             update(User).where(User.master_id == id).values(is_active=False)
         )
+        # GH #239 §3.3: users.is_active was rewritten by this cascade
+        mark_changed("users")
         return True
 
     @transactional
@@ -87,6 +90,8 @@ class MasterService(ArchiveService[MasterCreate, MasterUpdate, MasterResponse]):
         await db_session.execute(
             update(User).where(User.master_id == id).values(is_active=True)
         )
+        # GH #239 §3.3: users.is_active was rewritten by this cascade
+        mark_changed("users")
         return True
 
 

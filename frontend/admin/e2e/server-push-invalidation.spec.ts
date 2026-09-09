@@ -4,7 +4,6 @@ import {
   waitForScheduleReady,
   waitForTagsReady,
   waitForPhotosReady,
-  openAddTab,
 } from './fixtures/helpers';
 import {
   createTestClient,
@@ -13,13 +12,23 @@ import {
   cleanup,
   cleanupRecord,
 } from './fixtures/factories';
+import {
+  serverPushPages as twoPages,
+  expectUpdateToast,
+  clickFabRobust,
+  createRecordViaUI,
+  uid,
+  API_BASE,
+  PUSH_WINDOW,
+} from './fixtures/server-push';
 
 /**
  * E2E — server push invalidation, scenarios 1–4 (GH #239, spec §6).
  *
- * Two browser contexts = two admins (A and B). Writes made through B's UI
- * (or a bare APIRequestContext) must reach A's open views within the push
- * window — all push assertions use { timeout: 5000 }, deliberately BELOW the
+ * Two browser contexts = two admins (A and B) via the shared serverPushPages
+ * fixture (fixtures/server-push.ts): writes made through B's UI (or a bare
+ * APIRequestContext) must reach A's open views within the push window — all
+ * push assertions use { timeout: PUSH_WINDOW = 5s }, deliberately BELOW the
  * app-wide staleTime (30s) and the dictionary staleTime (1h). A test that
  * passes without the SSE channel would be testing staleTime, not the channel.
  *
@@ -27,108 +36,6 @@ import {
  *   SHARD_ID=9 SHARD_PORT=3021 BACKEND_URL=http://127.0.0.1:8021 \
  *     NEXT_PUBLIC_API_URL=http://127.0.0.1:8021 pnpm exec playwright test e2e/server-push-invalidation.spec.ts
  */
-
-const PUSH_WINDOW = 5_000; // spec §6 — "within seconds"; < staleTime thresholds
-
-/** Direct backend base for bare-API cleanup (same default as factories). */
-const API_BASE = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
-
-/**
- * Assert that a "Данные обновлены" info toast is (or becomes) visible.
- *
- * Scoped with a text filter + `.first()`: parallel specs broadcasting their
- * own pushes land foreign toasts on every open context, so several
- * toast-info elements can be stacked at once (container shows up to 5) —
- * an unscoped getByTestId('toast-info') would trip strict mode.
- */
-function expectUpdateToast(page: Page) {
-  return expect(
-    page.getByTestId('toast-info').filter({ hasText: 'Данные обновлены' }).first(),
-  ).toBeVisible({ timeout: PUSH_WINDOW });
-}
-
-/**
- * Dismiss/wait out transient toast overlays before a click.
- *
- * The toast container (fixed bottom-right, z-[250]) shares the screen corner
- * with the StampFab (fixed bottom-right, z-50); a toast overlapping the FAB
- * swallows the click and the panel never opens. Foreign pushes from parallel
- * specs can pop a toast at ANY moment, so a one-shot wait is not enough —
- * retry the click until it lands, re-waiting out overlays after each miss.
- */
-async function clickFabRobust(page: Page, timeoutMs = 15_000) {
-  const fab = page.getByRole('button', { name: 'Открыть панель инструментов' });
-  const toasts = page.locator('[data-testid^="toast-"]');
-  const deadline = Date.now() + timeoutMs;
-
-  for (;;) {
-    await expect(fab).toBeVisible({ timeout: 5_000 });
-    if ((await toasts.count()) > 0) {
-      // Overlay present — let it die (toast life ~4.5s), then re-check.
-      await toasts
-        .first()
-        .waitFor({ state: 'detached', timeout: Math.max(1, deadline - Date.now()) })
-        .catch(() => {});
-    }
-    try {
-      await fab.click({ timeout: 2_000 }); // no force — hit-target check is the guard
-      return;
-    } catch {
-      if (Date.now() > deadline) throw new Error('FAB click never landed (overlay retries exhausted)');
-    }
-  }
-}
-
-/** Unique marker prefix so parallel specs never collide. */
-function uid(): string {
-  return `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-}
-
-/**
- * Two-context fixture: pageA (observer) and pageB (writer) live in separate
- * browser contexts → separate module-level tab identities (spec §2.4), so
- * B's UI writes carry B's X-Memo-Tab-Id and A must see the external toast.
- */
-const twoPages = test.extend<{ pageA: Page; pageB: Page }>({
-  pageA: async ({ browser }, use) => {
-    const ctxA = await browser.newContext();
-    const pageA = await ctxA.newPage();
-    await use(pageA);
-    await ctxA.close();
-  },
-  pageB: async ({ browser }, use) => {
-    const ctxB = await browser.newContext();
-    const pageB = await ctxB.newPage();
-    await use(pageB);
-    await ctxB.close();
-  },
-});
-
-/**
- * Create a record through B's UI (schedule → quick add → new booking tab)
- * so the write carries B's real tab header. The booking lands on an
- * activity of the CURRENT week so the record is inside the records page's
- * default date range. Returns the record payload from the POST /api/v1/records
- * response (for cleanup).
- */
-async function createRecordViaUI(pageB: Page, clientName: string) {
-  await waitForScheduleReady(pageB);
-  const today = new Date().toISOString().slice(0, 10);
-  await openAddTab(pageB, { date: today });
-
-  const phone = `+7999${Date.now().toString().slice(-7)}`;
-  await pageB.getByTestId('input-phone').fill(phone);
-  await pageB.getByTestId('input-client-name').fill(clientName);
-
-  const createResponse = pageB.waitForResponse(
-    (r) => r.url().includes('/api/v1/records') && r.request().method() === 'POST',
-    { timeout: 15_000 },
-  );
-  await pageB.getByTestId('btn-create-record').click();
-  const resp = await createResponse;
-  expect(resp.status()).toBe(201);
-  return (await resp.json()) as { id: string; client_id: string };
-}
 
 /**
  * Delete an activity through B's UI: enable «Режим удаления» in the right

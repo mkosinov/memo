@@ -27,6 +27,12 @@ function QueryClientWithErrorReporting({ children }: { children: React.ReactNode
         staleTime: 30_000,
         retry: 2,
         refetchOnWindowFocus: false,
+        // GH #239: reconnect convergence is owned by the SSE channel
+        // (ServerEventsProvider blanket-invalidates on reconnect). TanStack's
+        // own onlineManager refetch would converge data even with a dead
+        // channel and mask channel failures — disabled so the channel is
+        // genuinely the mechanism (spec §4.2/§5).
+        refetchOnReconnect: false,
         throwOnError: false,
       },
     },

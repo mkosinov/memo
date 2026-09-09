@@ -5,10 +5,11 @@ import {
   createTestClient,
   createTestActivity,
   createTestRecord,
+  createTestVisitor,
+  createTestVisit,
   cleanup,
   cleanupRecord,
 } from './fixtures/factories';
-import { queryDB, queryDBRow } from './fixtures/db-query';
 
 const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
 
@@ -95,53 +96,48 @@ test.describe('Unified inline-editable rows', () => {
 
   // ── Scenario 5: Edit existing visitor name → PATCH ────────────────────
 
-  test('visits: edit existing visitor name triggers API call', async ({ page }) => {
-    // Use seed record r1 (already visible on the schedule page)
-    const visitRow = queryDBRow(
-      `SELECT v.id, v.visitor_id FROM visits v
-       JOIN records r ON v.record_id = r.id
-        WHERE r.id = 'r1' AND v.visitor_id IS NOT NULL
-       LIMIT 1`,
-    );
-    // Conditional skip: seed DB must have a visit with a linked visitor on r1
-    if (!visitRow?.visitor_id) {
-      test.skip();
-      return;
+  test('visits: edit existing visitor name triggers API call', async ({ page, request }) => {
+    // Own factory data (GH #252): seed rows must never be mutated. A prior
+    // run's 'Edited Name' would make the fill a no-op and no PATCH would fire.
+    const client = await createTestClient(request);
+    const visitor = await createTestVisitor(request, client.id, { name: 'Анна Иванова' });
+    const activity = await createTestActivity(request);
+    const record = await createTestRecord(request, activity.id, client.id, { visits: [] });
+    const visit = await createTestVisit(request, record.id, visitor.id);
+
+    try {
+      await page.goto('/schedule');
+      await waitForScheduleReady(page);
+      await openClientRecordTab(page, { recordId: record.id });
+
+      // Find the saved visit row
+      const savedRow = page.locator(`[data-testid="visit-row-${visit.id}"]`);
+      await expect(savedRow).toBeVisible({ timeout: 5_000 });
+
+      // Edit the name — the name InlineEditCell is the first <input> in the row
+      const nameInput = savedRow.locator('input').first();
+      await expect(nameInput).toBeVisible({ timeout: 3_000 });
+      await expect(nameInput).toHaveValue(/\S/, { timeout: 5_000 });
+
+      // Register the request waiter BEFORE triggering the commit — the PATCH
+      // fires on blur (Enter → blur), so waiting after would race and miss it.
+      const patchRequest = page.waitForRequest(
+        (req) =>
+          req.method() === 'PATCH' &&
+          req.url().includes(`/api/v1/visitors/${visitor.id}`),
+        { timeout: 5_000 },
+      );
+
+      await nameInput.fill('Edited Name');
+      // Enter commits the InlineEditCell via blur → PATCH /visitors/{id}
+      await nameInput.press('Enter');
+
+      // Verify PATCH /visitors/{id} was called
+      await patchRequest;
+    } finally {
+      await cleanupRecord(request, record.id);
+      await cleanup(request, `/api/v1/clients/${client.id}`);
     }
-
-    // Reset the visitor name to the seed value — globalSetup only deletes
-    // non-seed rows, so a previous run of this test would leave the edited
-    // name in place and the fill below would be a no-op (no PATCH fired).
-    queryDB(
-      `UPDATE visitors SET name = 'Анна Иванова' WHERE id = '${visitRow.visitor_id}'`,
-    );
-
-    await openClientRecordTab(page, { recordId: 'r1' });
-
-    // Find the saved visit row
-    const savedRow = page.locator(`[data-testid="visit-row-${visitRow.id}"]`);
-    await expect(savedRow).toBeVisible({ timeout: 5_000 });
-
-    // Edit the name — the name InlineEditCell is the first <input> in the row
-    const nameInput = savedRow.locator('input').first();
-    await expect(nameInput).toBeVisible({ timeout: 3_000 });
-    await expect(nameInput).toHaveValue(/\S/, { timeout: 5_000 });
-
-    // Register the request waiter BEFORE triggering the commit — the PATCH
-    // fires on blur (Enter → blur), so waiting after would race and miss it.
-    const patchRequest = page.waitForRequest(
-      (req) =>
-        req.method() === 'PATCH' &&
-        req.url().includes(`/api/v1/visitors/${visitRow.visitor_id}`),
-      { timeout: 5_000 },
-    );
-
-    await nameInput.fill('Edited Name');
-    // Enter commits the InlineEditCell via blur → PATCH /visitors/{id}
-    await nameInput.press('Enter');
-
-    // Verify PATCH /visitors/{id} was called
-    await patchRequest;
   });
 
   // ── Scenario 6: Select tariff → price auto-fills ──────────────────────
@@ -212,38 +208,40 @@ test.describe('Unified inline-editable rows', () => {
 
   // ── Scenario 7: × on existing row → DELETE ────────────────────────────
 
-  test('visits: × on existing row calls DELETE API', async ({ page }) => {
-    // Use seed record r2 (already visible on the schedule page)
-    const visitRow = queryDBRow(
-      `SELECT v.id FROM visits v
-       JOIN records r ON v.record_id = r.id
-        WHERE r.id = 'r2'
-       LIMIT 1`,
-    );
-    // Conditional skip: seed DB must have a visit on r2
-    if (!visitRow) {
-      test.skip();
-      return;
+  test('visits: × on existing row calls DELETE API', async ({ page, request }) => {
+    // Own factory data (GH #252): deleting a seed visit would permanently
+    // consume seed data — r2 has 2 seed visits, so run N deletes one and
+    // run N+1 silently skips, and the row never comes back without a reseed.
+    const client = await createTestClient(request);
+    const activity = await createTestActivity(request);
+    const record = await createTestRecord(request, activity.id, client.id, { visits: [] });
+    const visit = await createTestVisit(request, record.id);
+
+    try {
+      await page.goto('/schedule');
+      await waitForScheduleReady(page);
+      await openClientRecordTab(page, { recordId: record.id });
+
+      const savedRow = page.locator(`[data-testid="visit-row-${visit.id}"]`);
+      await expect(savedRow).toBeVisible({ timeout: 5_000 });
+
+      // Click × on the saved row
+      await savedRow.locator(`[data-testid="visit-row-${visit.id}-delete"]`).click();
+
+      // Verify DELETE /visits/{id} was called
+      await page.waitForRequest(
+        (req) =>
+          req.method() === 'DELETE' &&
+          req.url().includes(`/api/v1/visits/${visit.id}`),
+        { timeout: 5_000 },
+      );
+
+      // Row should disappear after successful delete
+      await expect(savedRow).not.toBeVisible({ timeout: 5_000 });
+    } finally {
+      await cleanupRecord(request, record.id);
+      await cleanup(request, `/api/v1/clients/${client.id}`);
     }
-
-    await openClientRecordTab(page, { recordId: 'r2' });
-
-    const savedRow = page.locator(`[data-testid="visit-row-${visitRow.id}"]`);
-    await expect(savedRow).toBeVisible({ timeout: 5_000 });
-
-    // Click × on the saved row
-    await savedRow.locator(`[data-testid="visit-row-${visitRow.id}-delete"]`).click();
-
-    // Verify DELETE /visits/{id} was called
-    await page.waitForRequest(
-      (req) =>
-        req.method() === 'DELETE' &&
-        req.url().includes(`/api/v1/visits/${visitRow.id}`),
-      { timeout: 5_000 },
-    );
-
-    // Row should disappear after successful delete
-    await expect(savedRow).not.toBeVisible({ timeout: 5_000 });
   });
 
   // ── Scenario 8: Visitor count "0" and + Добавить still works ────────────
@@ -291,30 +289,43 @@ test.describe('Unified inline-editable rows', () => {
   test.describe('payments parity', () => {
     // ── 9a: Add new payment (blur-to-commit) ────────────────────────────
 
-    test('add new payment via blur-to-commit', async ({ page }) => {
-      await openClientRecordTab(page);
+    test('add new payment via blur-to-commit', async ({ page, request }) => {
+      // Own factory data (GH #252): adding a payment to a seed record would
+      // permanently grow the seed's payment totals across repeat runs.
+      const client = await createTestClient(request);
+      const activity = await createTestActivity(request);
+      const record = await createTestRecord(request, activity.id, client.id, { visits: [] });
 
-      const addBtn = page.locator('[data-testid="btn-add-payment"]');
-      await addBtn.click();
+      try {
+        await page.goto('/schedule');
+        await waitForScheduleReady(page);
+        await openClientRecordTab(page, { recordId: record.id });
 
-      // New payment row appears
-      const newRow = page.locator('[data-testid="payment-new"]');
-      await expect(newRow).toBeVisible();
+        const addBtn = page.locator('[data-testid="btn-add-payment"]');
+        await addBtn.click();
 
-      // Amount input is visible and auto-focused
-      const amountInput = page.locator('[data-testid="add-payment-amount"]');
-      await expect(amountInput).toBeVisible();
+        // New payment row appears
+        const newRow = page.locator('[data-testid="payment-new"]');
+        await expect(newRow).toBeVisible();
 
-      // Fill amount and commit via Enter
-      await amountInput.fill('2000');
-      await amountInput.press('Enter');
+        // Amount input is visible and auto-focused
+        const amountInput = page.locator('[data-testid="add-payment-amount"]');
+        await expect(amountInput).toBeVisible();
 
-      // After save, the new-row input disappears (row gets an id)
-      await expect(amountInput).not.toBeVisible({ timeout: 5_000 });
+        // Fill amount and commit via Enter
+        await amountInput.fill('2000');
+        await amountInput.press('Enter');
 
-      // The TotalsRow should show updated total (≥ 2000 ₽)
-      const totalsRow = page.locator('[data-testid="payments-total"]');
-      await expect(totalsRow).toBeVisible();
+        // After save, the new-row input disappears (row gets an id)
+        await expect(amountInput).not.toBeVisible({ timeout: 5_000 });
+
+        // The TotalsRow should show updated total (≥ 2000 ₽)
+        const totalsRow = page.locator('[data-testid="payments-total"]');
+        await expect(totalsRow).toBeVisible();
+      } finally {
+        await cleanupRecord(request, record.id);
+        await cleanup(request, `/api/v1/clients/${client.id}`);
+      }
     });
 
     // ── 9b: × on unsaved payment → no API call ─────────────────────────
@@ -439,38 +450,51 @@ test.describe('Unified inline-editable rows', () => {
 
   // ── Scenario 11: Save anonymous visit ───────────────────────────────────
 
-  test('scenario 11: anonymous visit saves with blank name', async ({ page }) => {
-    await openClientRecordTab(page);
+  test('scenario 11: anonymous visit saves with blank name', async ({ page, request }) => {
+    // Own factory data (GH #252): the added anonymous visit would be a
+    // permanent addition to a seed record.
+    const client = await createTestClient(request);
+    const activity = await createTestActivity(request);
+    const record = await createTestRecord(request, activity.id, client.id, { visits: [] });
 
-    // Click "+ Добавить" to add a new visit row
-    await page.locator('[data-testid="btn-add-visitor"]').click();
-    const newRow = page.locator('[data-testid="visit-row-new"]');
-    await expect(newRow).toBeVisible();
+    try {
+      await page.goto('/schedule');
+      await waitForScheduleReady(page);
+      await openClientRecordTab(page, { recordId: record.id });
 
-    // Leave name blank (anonymous visit), but pick a tariff
-    const tariffSelect = page.locator('[data-testid="add-visitor-tariff"]');
-    await expect(tariffSelect).toBeVisible();
+      // Click "+ Добавить" to add a new visit row
+      await page.locator('[data-testid="btn-add-visitor"]').click();
+      const newRow = page.locator('[data-testid="visit-row-new"]');
+      await expect(newRow).toBeVisible();
 
-    // Select the first non-empty tariff option
-    const options = await tariffSelect.locator('option:not([value=""])').all();
-    if (options.length > 0) {
-      const firstValue = await options[0].getAttribute('value');
-      if (firstValue) {
-        await tariffSelect.selectOption(firstValue);
+      // Leave name blank (anonymous visit), but pick a tariff
+      const tariffSelect = page.locator('[data-testid="add-visitor-tariff"]');
+      await expect(tariffSelect).toBeVisible();
+
+      // Select the first non-empty tariff option
+      const options = await tariffSelect.locator('option:not([value=""])').all();
+      if (options.length > 0) {
+        const firstValue = await options[0].getAttribute('value');
+        if (firstValue) {
+          await tariffSelect.selectOption(firstValue);
+        }
       }
+
+      // Press Enter to save (name is blank → anonymous visit)
+      const nameInput = page.locator('[data-testid="add-visitor-name"]');
+      await nameInput.press('Enter');
+
+      // After save, the new-row input disappears (row gets an id)
+      await expect(nameInput).not.toBeVisible({ timeout: 5_000 });
+
+      // A saved visit row should appear (with a real id, not "new")
+      // The row should show "Аноним" placeholder for the blank name
+      const savedRows = page.locator('[data-testid^="visit-row-"]:not([data-testid="visit-row-new"])');
+      await expect(savedRows.first()).toBeVisible({ timeout: 5_000 });
+    } finally {
+      await cleanupRecord(request, record.id);
+      await cleanup(request, `/api/v1/clients/${client.id}`);
     }
-
-    // Press Enter to save (name is blank → anonymous visit)
-    const nameInput = page.locator('[data-testid="add-visitor-name"]');
-    await nameInput.press('Enter');
-
-    // After save, the new-row input disappears (row gets an id)
-    await expect(nameInput).not.toBeVisible({ timeout: 5_000 });
-
-    // A saved visit row should appear (with a real id, not "new")
-    // The row should show "Аноним" placeholder for the blank name
-    const savedRows = page.locator('[data-testid^="visit-row-"]:not([data-testid="visit-row-new"])');
-    await expect(savedRows.first()).toBeVisible({ timeout: 5_000 });
   });
 
   // ── Scenario 12: Amount 0 → toast, no request ──────────────────────────
@@ -520,69 +544,95 @@ test.describe('Unified inline-editable rows', () => {
 
   // ── Scenario 13: Editable payment date persists ─────────────────────────
 
-  test('scenario 13: editable payment date persists after save', async ({ page }) => {
-    await openClientRecordTab(page);
+  test('scenario 13: editable payment date persists after save', async ({ page, request }) => {
+    // Own factory data (GH #252): the added payment would be a permanent
+    // addition to a seed record.
+    const client = await createTestClient(request);
+    const activity = await createTestActivity(request);
+    const record = await createTestRecord(request, activity.id, client.id, { visits: [] });
 
-    // Click "+ Добавить" to add a new payment row
-    await page.locator('[data-testid="btn-add-payment"]').click();
-    const newRow = page.locator('[data-testid="payment-new"]');
-    await expect(newRow).toBeVisible();
+    try {
+      await page.goto('/schedule');
+      await waitForScheduleReady(page);
+      await openClientRecordTab(page, { recordId: record.id });
 
-    // The datetime-local input should be present and prefilled
-    const dateInput = page.locator('[data-testid="add-payment-date"]');
-    await expect(dateInput).toBeVisible();
-    const prefilledDate = await dateInput.inputValue();
-    expect(prefilledDate).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/);
+      // Click "+ Добавить" to add a new payment row
+      await page.locator('[data-testid="btn-add-payment"]').click();
+      const newRow = page.locator('[data-testid="payment-new"]');
+      await expect(newRow).toBeVisible();
 
-    // Set a specific date
-    const customDate = '2026-07-05T15:30';
-    await dateInput.fill(customDate);
+      // The datetime-local input should be present and prefilled
+      const dateInput = page.locator('[data-testid="add-payment-date"]');
+      await expect(dateInput).toBeVisible();
+      const prefilledDate = await dateInput.inputValue();
+      expect(prefilledDate).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/);
 
-    // Fill amount (must be > 0)
-    const amountInput = page.locator('[data-testid="add-payment-amount"]');
-    await amountInput.fill('1500');
+      // Set a specific date
+      const customDate = '2026-07-05T15:30';
+      await dateInput.fill(customDate);
 
-    // Press Enter to save
-    await amountInput.press('Enter');
+      // Fill amount (must be > 0)
+      const amountInput = page.locator('[data-testid="add-payment-amount"]');
+      await amountInput.fill('1500');
 
-    // After save, the new-row input disappears
-    await expect(dateInput).not.toBeVisible({ timeout: 5_000 });
+      // Press Enter to save
+      await amountInput.press('Enter');
 
-    // The saved row should display the chosen date (formatted)
-    // Look for a payment row that contains "05.07.2026" (Russian locale format)
-    const savedPaymentRow = page.locator('[data-testid^="payment-"]:not([data-testid="payment-new"])').filter({
-      hasText: '05.07.2026',
-    });
-    await expect(savedPaymentRow.first()).toBeVisible({ timeout: 5_000 });
+      // After save, the new-row input disappears
+      await expect(dateInput).not.toBeVisible({ timeout: 5_000 });
+
+      // The saved row should display the chosen date (formatted)
+      // Look for a payment row that contains "05.07.2026" (Russian locale format)
+      const savedPaymentRow = page.locator('[data-testid^="payment-"]:not([data-testid="payment-new"])').filter({
+        hasText: '05.07.2026',
+      });
+      await expect(savedPaymentRow.first()).toBeVisible({ timeout: 5_000 });
+    } finally {
+      await cleanupRecord(request, record.id);
+      await cleanup(request, `/api/v1/clients/${client.id}`);
+    }
   });
 
   // ── Scenario 14: Name stays visible after save ──────────────────────────
 
-  test('scenario 14: name stays visible immediately after save (no blank)', async ({ page }) => {
-    await openClientRecordTab(page);
+  test('scenario 14: name stays visible immediately after save (no blank)', async ({ page, request }) => {
+    // Own factory data (GH #252): the added visit would be a permanent
+    // addition to a seed record.
+    const client = await createTestClient(request);
+    const activity = await createTestActivity(request);
+    const record = await createTestRecord(request, activity.id, client.id, { visits: [] });
 
-    // Click "+ Добавить" to add a new visit row
-    await page.locator('[data-testid="btn-add-visitor"]').click();
-    const newRow = page.locator('[data-testid="visit-row-new"]');
-    await expect(newRow).toBeVisible();
+    try {
+      await page.goto('/schedule');
+      await waitForScheduleReady(page);
+      await openClientRecordTab(page, { recordId: record.id });
 
-    // Type a name
-    const nameInput = page.locator('[data-testid="add-visitor-name"]');
-    await nameInput.fill('Анна');
+      // Click "+ Добавить" to add a new visit row
+      await page.locator('[data-testid="btn-add-visitor"]').click();
+      const newRow = page.locator('[data-testid="visit-row-new"]');
+      await expect(newRow).toBeVisible();
 
-    // Press Enter to save
-    await nameInput.press('Enter');
+      // Type a name
+      const nameInput = page.locator('[data-testid="add-visitor-name"]');
+      await nameInput.fill('Анна');
 
-    // After save, the new-row input disappears (row gets an id)
-    await expect(nameInput).not.toBeVisible({ timeout: 5_000 });
+      // Press Enter to save
+      await nameInput.press('Enter');
 
-    // The name "Анна" should be visible in the saved row immediately
-    // (no blank, no "Аноним" placeholder, no need to reload).
-    // The name is rendered inside an <input value="Анна">, not as text content,
-    // so we must match on the input value, not hasText.
-    const savedRow = page.locator('[data-testid^="visit-row-"]:not([data-testid="visit-row-new"])')
-      .filter({ has: page.locator('input[value="Анна"]') });
-    await expect(savedRow.first()).toBeVisible({ timeout: 5_000 });
+      // After save, the new-row input disappears (row gets an id)
+      await expect(nameInput).not.toBeVisible({ timeout: 5_000 });
+
+      // The name "Анна" should be visible in the saved row immediately
+      // (no blank, no "Аноним" placeholder, no need to reload).
+      // The name is rendered inside an <input value="Анна">, not as text content,
+      // so we must match on the input value, not hasText.
+      const savedRow = page.locator('[data-testid^="visit-row-"]:not([data-testid="visit-row-new"])')
+        .filter({ has: page.locator('input[value="Анна"]') });
+      await expect(savedRow.first()).toBeVisible({ timeout: 5_000 });
+    } finally {
+      await cleanupRecord(request, record.id);
+      await cleanup(request, `/api/v1/clients/${client.id}`);
+    }
   });
 });
 

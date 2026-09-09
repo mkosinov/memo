@@ -45,11 +45,11 @@ Two independent lines: (1) JSON-only API + CORS with credentials restricted to l
 - Logout deletes the row → instant revocation. Admin force-logout = delete `sessions` rows via sqladmin or archive the user.
 - Multiple sessions per user allowed; archived (soft-deleted) users cannot log in and are not resolved.
 - Unknown phone and wrong password give the same error and the same timing profile (dummy-hash verify when the user is missing — no user enumeration).
-- Login throttle: per-phone 5 failures / 15 min (primary, the account); per-IP 20 / 15 min (secondary, anti-spray); in-memory (single-process runtime).
+- Login throttle — escalation ladder per phone (user decision): **3 failures → 15-min lock; after expiry 3 more → 1-hour lock; 3 more → hard lock until an administrator resets it** (sqladmin: clear `failed_login_attempts` / `lock_level` / `locked_until` on the user). Ladder state lives on the `users` row (survives restarts). Locked accounts get 429 even with the correct password; a successful login resets the ladder (the hard lock only the admin). Secondary: per-IP 20 failures / 15 min (in-memory, anti-spray across accounts).
 
 ## User lifecycle
 - First admin: CLI `python -m src.cli create-user` (no default passwords in the public repo). Production bootstrap: deploy → migrate → CLI → login.
-- Further staff: created in sqladmin (admin-only login; password field hashes on save, blank on edit = unchanged).
+- Further staff: created in sqladmin (admin-only login; password field hashes on save, blank on edit = unchanged). The lockout reset also lives there: clear the lock fields on the user.
 - Dev seed: demo admin + demo master, dev-only.
 - `SECRET_KEY` (env): signs the sqladmin session cookie; production fails fast when unset, dev defaults to a fixed dev constant.
 

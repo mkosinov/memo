@@ -23,14 +23,16 @@ const hoisted = vi.hoisted(() => ({
     fn?: (...args: unknown[]) => unknown;
     options?: Record<string, unknown>;
   },
+  recordedKeys: [] as string[],
   calls: [] as string[],
 }));
-const recordedName = 'seedReset';
 const recordedDefinition = hoisted.recordedDefinition;
+const recordedKeys = hoisted.recordedKeys;
 
 vi.mock('@playwright/test', () => ({
   test: {
     extend: (fixtures: Record<string, unknown>) => {
+      hoisted.recordedKeys.push(...Object.keys(fixtures));
       const [definition, options] = Object.values(fixtures)[0] as [
         (...args: unknown[]) => unknown,
         Record<string, unknown>,
@@ -77,8 +79,10 @@ async function runFixture(testInfo: ReturnType<typeof makeTestInfo>): Promise<{ 
   return { useCalled };
 }
 
-// Import AFTER mocks are registered (vi.mock is hoisted anyway).
-import { test as wrapperTest, expect as wrapperExpect } from '../e2e/fixtures/test';
+// Import AFTER mocks are registered (vi.mock is hoisted anyway). Only the
+// `expect` re-export is referenced here; importing the module still fires
+// the base.extend call at load time, which is what the fixture-shape tests pin.
+import { expect as wrapperExpect } from '../e2e/fixtures/test';
 
 // The mocked @playwright/test expect object — identity check for the re-export.
 // vi.mock factories are hoisted; the mocked module registry hands us the same
@@ -95,8 +99,9 @@ describe('e2e/fixtures/test wrapper module', () => {
   });
 
   it('extends the base test with exactly one fixture named seedReset', () => {
-    // extend was called during module load; recordedDefinition holds the entry.
-    expect(recordedName).toBe('seedReset');
+    // extend was called during module load; the captured keys prove there is
+    // exactly one fixture and it is named seedReset (catches renames/extras).
+    expect(recordedKeys).toEqual(['seedReset']);
     expect(recordedDefinition.fn).toBeTypeOf('function');
   });
 

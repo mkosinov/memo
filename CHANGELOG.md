@@ -9,6 +9,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] — 2026-09-09
 
+### e2e seed reset (#252) — S4 rewrite list (draft)
+Authoritative RED run with the per-test seed-reset fixture live (Task 4). Full
+coverage: shard-schedule 94 + shard-rest 255 (323 passed / 12 failed / 1 skipped);
+full output `/tmp/s4-red-run.log`.
+
+**Result: 0 S4 entries.** No test failed from order-coupling or seed mutation.
+All 5 known unified-rows seed violators (`:235` r2-visit DELETE, `:294/:442/:523/:561`
+seed-r1 visit/payment adds) and the scenario-5 `UPDATE visitors` (`:115-117`) PASSED —
+the per-test reset heals each mutation before any later test reads. The 5
+factory-no-cleanup activities of `wave5-x-cards-blurred.spec.ts` are wiped by the
+reset and proved non-load-bearing (spec passed; its own assertions are z-index
+fallbacks). `schedule-column-visibility.spec.ts` (known flake #255) passed 10/10 —
+no entry. The 12 failures below are pre-existing, NOT S4 — no Task-5 rewrites needed:
+
+| Test | Class | Trace excerpt | Fix sketch |
+|---|---|---|---|
+| `activity-details-modal.spec.ts:370` (shard-1) | pre-existing flake (#255 family) | `waitForSelector('[data-testid^="activity-"]')` Timeout 10000ms in `waitForScheduleReady` | A/B: standalone 14/14 green — load-sensitive card-render wait; #255 fix (Task 4.5) covers it, no test rewrite |
+| `client-phone-typeahead.spec.ts:169` | pre-existing flake (#255 family) | same `waitForScheduleReady` 10s timeout in beforeEach | A/B: standalone 8/8 green — same render-timing wait, no rewrite |
+| `visual-regression.spec.ts:396` services-table-picker-open | pre-existing visual drift | 3557px (ratio 0.01) differ | re-baseline on CI runner (same family as clients-table-picker-open +3026px A/B-proven at base in Task 3) |
+| `visual-regression.spec.ts:396` clients-table-picker-open | pre-existing visual drift | 3026px (0.01) — EXACT Task-3 base-commit delta | re-baseline on CI runner |
+| `visual-regression.spec.ts:396` photos-table-picker-open | pre-existing visual drift | 3107px (0.01) | re-baseline on CI runner |
+| `visual-regression.spec.ts:347` records-table-filled | pre-existing visual drift | 3821px (0.01); drifted 4168→3821px between two clean runs — rendering noise, not data | re-baseline on CI runner |
+| `visual-regression.spec.ts:363` records-table-sort-active | pre-existing visual drift | 17567px (0.02) — sort-indicator shift amplifies container drift | re-baseline on CI runner |
+| `visual-regression.spec.ts:375` records-table-dropdown-open | pre-existing visual drift | 3872px (0.01) | re-baseline on CI runner |
+| `visual-regression.spec.ts:396` records-table-picker-open | pre-existing visual drift | 4452px (0.01) | re-baseline on CI runner |
+| `wave6-status-snapshots.spec.ts:86` StatusPicker closed | pre-existing visual drift (element metrics) | `Expected an image 124px by 32px, received 127px by 31px` — deterministic 3px width/1px height env drift | re-baseline on CI runner |
+| `wave6-status-snapshots.spec.ts:93` StatusPicker open | pre-existing visual drift (element metrics) | same 124×32 → 127×31 size mismatch | re-baseline on CI runner |
+| `wave6-status-snapshots.spec.ts:101` StatusBadge waiting | pre-existing visual drift (element metrics) | `Expected 96px by 19px, received 99px by 19px` — same font-metric drift | re-baseline on CI runner |
+
+Run-integrity note: the first shard-rest attempt was discarded — the shard-2 Next.js
+dev server served a client bundle baked with `NEXT_PUBLIC_API_URL=:8001` (two parallel
+`next dev` processes sharing `frontend/admin/.next`; shard-1 won the compile race —
+the documented wave-#216 baked-URL poisoning). Playwright trace proved pageA on :3003
+fetched `127.0.0.1:8001`. Stack rebooted with fresh `.next` (`:8002` verified baked);
+shard-rest re-run in 3 seedReset-safe segments. Its ~40 failures (clients ×15,
+unified-rows 15b/16/16b, unify-caches US-1, server-push С3/С4, …) were infra
+artifacts, all green on the clean run.
+
 ### Added
 - **GH #239 — Server push channel for cache invalidation (SSE `GET /api/v1/events`)** — branch `feat/server-push-invalidation-239` (17 commits: f2f0e94..63740b0; 10/10 plan tasks; spec §8 DoD all met):
   - **Backend:** FastAPI upgraded 0.136.3 → **0.141.1** (native `fastapi.sse.EventSourceResponse`). New `backend/src/events/` package — transport-agnostic in-memory **EventHub** (module-level singleton, bounded 64-event queues, overflow → drop that subscriber), canonical entity-name map, **SSE endpoint** (routing-native async-generator, native ping + `retry: 5000`, `event="invalidate"` frames carrying `{entities, origin}` JSON). **Post-commit emit:** `@transactional` is now the single emit point — contextvars accumulator + `mark_changed(entity)` for cross-entity cascades (own `entity_name` auto-marked; commit → one batched `hub.publish`, rollback → discarded); a small ASGI middleware lifts `X-Memo-Tab-Id` from mutating requests into the request-scoped origin. Cascade enumeration audited and test-pinned (visits→records hooks, activity/record deletes, nested record-create conditionals, dependency-executor marks, master archive/restore→users).

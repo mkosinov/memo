@@ -1,6 +1,9 @@
-// Visual-regression invariant: the Next.js dev-overlay portal must NEVER land
-// in a screenshot (its «Сегодня» hydration-error toast is a dev-tool artifact,
-// not production UI). Applied at screenshot time via playwright.config.ts
-// `expect.toHaveScreenshot.stylePath`, so every toHaveScreenshot — current and
-// future — inherits this regardless of when or how often the portal mounts.
+/* Visual-regression invariant: the Next.js dev-overlay portal must NEVER land
+   in a screenshot (its «Сегодня» hydration-error toast is a dev-tool artifact,
+   not production UI). */
+
+/* Applied at screenshot time via playwright.config.ts
+   `expect.toHaveScreenshot.stylePath`, so every toHaveScreenshot — current and
+   future — inherits this regardless of when or how often the portal mounts. */
+
 nextjs-portal { display: none !important; }

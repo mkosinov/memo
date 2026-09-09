@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { queryDBRow, queryDBRows } from './fixtures/db-query';
 import { createTestClient, createTestActivity, createTestRecord, createTestPayment, cleanup, cleanupRecord } from './fixtures/factories';
-import { waitForScheduleReady, openModal, openAddTab, getFirstActivity, confirmDeleteDialog } from './fixtures/helpers';
+import { waitForScheduleReady, openModal, openAddTab, getFirstActivity, confirmDeleteDialog, phoneMaskDisplay } from './fixtures/helpers';
 import { searchAndSelect } from './helpers/combobox';
 
 /**
@@ -33,7 +33,13 @@ test.describe('ActivityDetailsModal — Real User Scenarios', () => {
   test('1. Create new record — data persists in DB (records, clients, visits)', async ({ page, request }) => {
     // Use unique suffix based on timestamp + random to avoid collisions in parallel runs
     const uid = `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-    const testPhone = `+7999${uid.slice(-7)}`;
+    // Phone: 10 DIGITS only — the AsYouType mask strips letters, so the
+    // stored value derives from the digits the field ends up holding.
+    const nationalDigits = `999${String(Date.now()).slice(-7)}`;
+    const testPhone = `+7${nationalDigits}`;
+    // GH #221 WYSIWYG: the form saves the VISIBLE AsYouType-formatted
+    // string, not the raw typed text — expect the masked form in the DB.
+    const expectedStoredPhone = phoneMaskDisplay(nationalDigits, 'international');
     const testClientName = `E2E Client ${uid}`;
     const testVisitorName = `E2E Visitor ${uid}`;
 
@@ -67,9 +73,10 @@ test.describe('ActivityDetailsModal — Real User Scenarios', () => {
       // 2. VERIFY UI — success toast "Запись создана" appears (not just any toast)
       await expect(page.locator('text=Запись создана')).toBeVisible({ timeout: 10_000 });
 
-      // 3. VERIFY DB — client was created (retry until DB commit lands)
+      // 3. VERIFY DB — client was created (retry until DB commit lands).
+      //    GH #221: the stored phone is the masked visible string (WYSIWYG).
       await expect.poll(async () => {
-        clientRow = queryDBRow(`SELECT * FROM clients WHERE phone='${testPhone}' AND is_active=1`);
+        clientRow = queryDBRow(`SELECT * FROM clients WHERE phone='${expectedStoredPhone}' AND is_active=1`);
         return clientRow !== null;
       }, { timeout: 30_000, intervals: [200, 500, 1000] }).toBe(true);
       expect(clientRow!.name).toBe(testClientName);

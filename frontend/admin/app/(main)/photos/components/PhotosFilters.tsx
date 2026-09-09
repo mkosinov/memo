@@ -94,6 +94,7 @@ export function PhotosFilters() {
           label="Клиент"
           displayField="name"
           placeholder="Введите имя клиента..."
+          minChars={2}
         />
       </div>
 
@@ -111,6 +112,7 @@ export function PhotosFilters() {
           label="Активность"
           displayField="label"
           placeholder="Введите для поиска..."
+          minChars={2}
         />
       </div>
 
@@ -177,6 +179,7 @@ export function PhotosFilters() {
           label=""
           displayField="tag"
           placeholder="Добавить тег..."
+          minChars={2}
         />
       </div>
 

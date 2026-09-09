@@ -12,6 +12,13 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+from src.domain.phone_digits import to_national_digits
+
+
+def _memo_phone_national(value: str | None) -> str | None:
+    """SQL UDF body for ``memo_phone_national`` — spec #221 §3 via one helper."""
+    return to_national_digits(value)
+
 
 @event.listens_for(Engine, "connect")
 def _set_sqlite_pragmas(dbapi_connection: Any, connection_record: Any) -> None:
@@ -42,6 +49,14 @@ def _set_sqlite_pragmas(dbapi_connection: Any, connection_record: Any) -> None:
     # so pre-existing ASCII queries are unaffected.
     dbapi_connection.create_function(
         "lower", 1, lambda s: s.lower() if s is not None else None
+    )
+    # GH #221 §3: national-digit phone reduction as a SQL UDF, so the stored
+    # value can be reduced inside a SQL expression. NULL in -> NULL out —
+    # a LIKE over NULL yields NULL (falsy), which is the spec's "NULL never
+    # matches". Registered here (next to lower()) to cover every SQLite
+    # engine in the process, like the pragma listener above.
+    dbapi_connection.create_function(
+        "memo_phone_national", 1, _memo_phone_national
     )
     cursor = dbapi_connection.cursor()
     cursor.execute("PRAGMA busy_timeout=5000")

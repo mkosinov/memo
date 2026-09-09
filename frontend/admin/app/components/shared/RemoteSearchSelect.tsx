@@ -2,21 +2,47 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 
-// Server-coupled typeahead (debounce 300ms + min-2 clamp) — the remote
-// counterpart of Combobox (GH #214).
+// Server-coupled typeahead (debounce 300ms; consumer-tuned search gate via
+// minChars/canSearch, default min-2) — the remote counterpart of Combobox
+// (GH #214).
 
 /* ── Types ───────────────────────────────────────────────────────── */
 
-export interface RemoteSearchSelectProps {
+/** What onSearch ultimately receives: the raw input (default) or the
+ *  object built by buildParams (e.g. `{ phone, per_page }` — GH #221). */
+type SearchQuery = string | Record<string, string | number>;
+
+export interface RemoteSearchSelectProps<
+  Q extends SearchQuery = string,
+> {
   value: string | null;
   onChange: (uuid: string | null) => void;
   onSelectItem?: (item: SearchItem) => void;
-  onSearch: (query: string) => Promise<SearchItem[]>;
+  onSearch: (query: Q) => Promise<SearchItem[]>;
   label: string;
   placeholder?: string;
   required?: boolean;
   displayField: string;
   subtitleField?: string;
+  /** Min input length before a search fires (default 2 — server `?q=` contract). */
+  minChars?: number;
+  /** Gate for firing a search; defaults to `q.length >= minChars`. */
+  canSearch?: (input: string) => boolean;
+  /** Builds what onSearch receives; defaults to passing the input through. */
+  buildParams?: (input: string) => Q;
+  /** Transforms the typed value before it lands in state (input mask — GH #221).
+   *  Runs once per keystroke; the formatted value is what canSearch/buildParams
+   *  and the debounced search see. Defaults to identity. */
+  formatInput?: (raw: string) => string;
+  /** Renders a dropdown/selected label for an item; defaults to
+   *  `${displayField} — ${subtitleField}`. */
+  getDisplayLabel?: (item: SearchItem) => string;
+  /** Lifts the committed input value (post-formatInput) to the consumer on
+   *  every change, INCLUDING pick (display label) and ×-clear ('') — it
+   *  always mirrors what the input shows (GH #221 WYSIWYG). */
+  onInputValueChange?: (value: string) => void;
+  /** data-testid for the input element (consumer E2E anchors). */
+  inputTestId?: string;
 }
 
 interface SearchItem {
@@ -63,7 +89,9 @@ function getDisplayText(
 
 /* ── Component ───────────────────────────────────────────────────── */
 
-export default function RemoteSearchSelect({
+export default function RemoteSearchSelect<
+  Q extends SearchQuery = string,
+>({
   value,
   onChange,
   onSelectItem,
@@ -73,7 +101,14 @@ export default function RemoteSearchSelect({
   required = false,
   displayField,
   subtitleField,
-}: RemoteSearchSelectProps) {
+  minChars = 2,
+  canSearch,
+  buildParams,
+  formatInput,
+  getDisplayLabel,
+  onInputValueChange,
+  inputTestId,
+}: RemoteSearchSelectProps<Q>) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchItem[]>([]);
   const [isOpen, setIsOpen] = useState(false);
@@ -96,14 +131,19 @@ export default function RemoteSearchSelect({
   const search = useCallback(
     async (q: string) => {
       // GH #212: server-side ?q= is min-2-char; do not fire below the threshold.
-      if (q.length < 2) {
+      // GH #221: threshold/predicate/params are consumer props (defaults keep
+      // today's behavior — min 2 chars, input passed through as-is).
+      const allowed = canSearch ?? ((input: string) => input.length >= minChars);
+      if (!allowed(q)) {
         setResults([]);
         setIsOpen(false);
         return;
       }
       setIsLoading(true);
       try {
-        const data = await onSearch(q);
+        // Invariant: default Q = string (input passed through); a record-shaped
+        // Q is only reachable via buildParams. All current consumers are string.
+        const data = await onSearch((buildParams ? buildParams(q) : q) as Q);
         setResults(data);
         setIsOpen(true);
       } catch {
@@ -112,38 +152,43 @@ export default function RemoteSearchSelect({
         setIsLoading(false);
       }
     },
-    [onSearch],
+    [onSearch, canSearch, buildParams, minChars],
   );
 
   const handleInputChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
-      const val = e.target.value;
+      const val = formatInput ? formatInput(e.target.value) : e.target.value;
       setQuery(val);
       setSelectedLabel(null);
+      onInputValueChange?.(val);
 
       if (debounceRef.current) clearTimeout(debounceRef.current);
       debounceRef.current = setTimeout(() => search(val), DEBOUNCE_MS);
     },
-    [search],
+    [search, formatInput, onInputValueChange],
   );
 
   const handleSelect = useCallback(
     (item: SearchItem) => {
-      const displayLabel = getDisplayText(item, displayField, subtitleField);
+      const displayLabel = getDisplayLabel
+        ? getDisplayLabel(item)
+        : getDisplayText(item, displayField, subtitleField);
       setSelectedLabel(displayLabel);
       setQuery('');
       setIsOpen(false);
+      onInputValueChange?.(displayLabel);
       onChange(item.id);
       onSelectItem?.(item);
     },
-    [displayField, subtitleField, onChange, onSelectItem],
+    [displayField, subtitleField, getDisplayLabel, onInputValueChange, onChange, onSelectItem],
   );
 
   const handleClear = useCallback(() => {
     setSelectedLabel(null);
     setQuery('');
+    onInputValueChange?.('');
     onChange(null);
-  }, [onChange]);
+  }, [onChange, onInputValueChange]);
 
   const handleFocus = useCallback(() => {
     if (results.length > 0 && !selectedLabel) setIsOpen(true);
@@ -168,6 +213,7 @@ export default function RemoteSearchSelect({
           style={INPUT_STYLE}
           readOnly={!!selectedLabel}
           aria-label={label}
+          data-testid={inputTestId}
         />
         {selectedLabel && (
           <button
@@ -199,7 +245,9 @@ export default function RemoteSearchSelect({
               role="option"
               aria-selected={false}
             >
-              {getDisplayText(item, displayField, subtitleField)}
+              {getDisplayLabel
+                ? getDisplayLabel(item)
+                : getDisplayText(item, displayField, subtitleField)}
             </li>
           ))}
         </ul>

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, within } from '@testing-library/react';
+import { render, screen, fireEvent, within, act } from '@testing-library/react';
 import React from 'react';
 import fs from 'fs';
 import path from 'path';
@@ -29,6 +29,7 @@ import {
 
 vi.mock('@memo/api-client', () => ({
   getClientByPhone: vi.fn(),
+  getClientsPaged: vi.fn(),
   createClient: vi.fn(),
   createVisitor: vi.fn(),
   createRecord: vi.fn(),
@@ -43,6 +44,7 @@ vi.mock('@memo/api-client', () => ({
 
 import {
   getClientByPhone,
+  getClientsPaged,
   createClient,
   createVisitor,
   createRecord,
@@ -967,7 +969,7 @@ describe('ClientTab — layout & features', () => {
 
 // ─── NewBookingTab — Feature Tests ──────────────────────────────────────────
 
-describe('NewBookingTab — phone optional, visitor optional, tariff required', () => {
+describe('NewBookingTab — visitor optional, tariff required; typed phone must be complete (GH #221 decision 11)', () => {
   const defaultProps = {
     activity: mockActivity,
     serviceTariffs: mockTariffs,
@@ -997,15 +999,16 @@ describe('NewBookingTab — phone optional, visitor optional, tariff required', 
     expect(screen.getByTestId('select-channel')).toBeInTheDocument();
   });
 
-  it('allows submit with name only (phone optional)', () => {
+  it('submits with name only — EMPTY phone is a legitimate pre-existing path (spec §10)', () => {
     render(<NewBookingTab {...defaultProps} />);
-    // Fill only name
+    // Name-only quick-add with no phone predates #221 and stays untouched
+    // (§10). Only a TYPED-BUT-INCOMPLETE number hits the completeness guard.
     fireEvent.change(screen.getByTestId('input-client-name'), { target: { value: 'Test' } });
     fireEvent.click(screen.getByTestId('btn-create-record'));
-    // Should NOT show "Заполните телефон и имя" error
-    expect(defaultProps.showToast).not.toHaveBeenCalledWith('Заполните телефон и имя');
-    // Should call onSubmit
-    expect(defaultProps.onSubmit).toHaveBeenCalled();
+    expect(defaultProps.onSubmit).toHaveBeenCalledTimes(1);
+    expect(defaultProps.onSubmit.mock.calls[0][0]).toEqual(
+      expect.objectContaining({ kind: 'unpicked', phone: '' }),
+    );
   });
 
   it('validates tariff is selected before submit when visitors exist', () => {
@@ -1013,5 +1016,197 @@ describe('NewBookingTab — phone optional, visitor optional, tariff required', 
     fireEvent.change(screen.getByTestId('input-client-name'), { target: { value: 'Test' } });
     fireEvent.click(screen.getByTestId('btn-create-record'));
     // With no tariffs and adding a visitor, should handle gracefully
+  });
+});
+
+// ─── NewBookingTab — PhoneInput typeahead (GH #221 Task 6) ──────────────────
+// Pick = client id: phone+name freeze read-only, × restores typing, and the
+// submit payload switches between { client_id } and { phone, name }.
+// The old onBlur exact-fetch handler is REMOVED (spec §5 Removed).
+
+describe('NewBookingTab — picked client (GH #221)', () => {
+  // PhoneInput's onSearch is getClientsPaged (mocked at module level above).
+  const defaultProps2 = {
+    activity: mockActivity,
+    serviceTariffs: mockTariffs,
+    onSubmit: vi.fn(),
+    showToast: vi.fn(),
+  };
+
+  function mockSearchHit() {
+    vi.mocked(getClientsPaged).mockResolvedValue({
+      items: [{ ...mockClient, name: 'Анна Иванова', phone: '+7 (900) 123-45-67' }],
+      total: 1,
+      page: 1,
+      per_page: 10,
+    } as never);
+  }
+
+  async function typeAndPick() {
+    mockSearchHit();
+    render(<NewBookingTab {...defaultProps2} />);
+    // 4 digits → past the threshold; debounced search fires (fake timers below).
+    fireEvent.change(screen.getByTestId('input-phone'), { target: { value: '9991' } });
+    await act(async () => {
+      vi.advanceTimersByTime(300);
+    });
+    const row = await screen.findByRole('option', { name: /Анна Иванова/ });
+    fireEvent.click(row);
+  }
+
+  beforeEach(() => {
+    defaultProps2.onSubmit.mockClear();
+    defaultProps2.showToast.mockClear();
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+  });
+
+  afterEach(() => {
+    vi.runOnlyPendingTimers();
+    vi.useRealTimers();
+  });
+
+  it('freezes phone + name read-only after pick; × restores both fields', async () => {
+    await typeAndPick();
+
+    // Phone field shows the picked client and is read-only with a clear ×.
+    const phoneInput = screen.getByTestId('input-phone') as HTMLInputElement;
+    expect(phoneInput).toHaveAttribute('readonly');
+    expect(phoneInput.value).toContain('Анна Иванова');
+    expect(screen.getByRole('button', { name: /clear/i })).toBeInTheDocument();
+
+    // Name field shows the stored client name and is read-only (decision 10:
+    // editing a client's name belongs to the client card).
+    const nameInput = screen.getByTestId('input-client-name') as HTMLInputElement;
+    expect(nameInput).toHaveAttribute('readonly');
+    expect(nameInput.value).toBe('Анна Иванова');
+
+    // × clears the pick: both fields return to typing mode, name is emptied.
+    fireEvent.click(screen.getByRole('button', { name: /clear/i }));
+    const clearedPhone = screen.getByTestId('input-phone') as HTMLInputElement;
+    const clearedName = screen.getByTestId('input-client-name') as HTMLInputElement;
+    expect(clearedPhone).not.toHaveAttribute('readonly');
+    expect(clearedName).not.toHaveAttribute('readonly');
+    expect(clearedName.value).toBe('');
+  });
+
+  it('submits the picked union (kind=picked, client_id only) after a pick', async () => {
+    await typeAndPick();
+    fireEvent.click(screen.getByTestId('btn-create-record'));
+
+    expect(defaultProps2.onSubmit).toHaveBeenCalledTimes(1);
+    const payload = defaultProps2.onSubmit.mock.calls[0][0];
+    // Disjoint union: the picked branch carries the id, no phone/name keys.
+    expect(payload).toEqual({
+      kind: 'picked',
+      client_id: 'c1',
+      visitors: [],
+      notify: false,
+      channel: 'telegram',
+      seats: 1,
+    });
+  });
+
+  it('submits the unpicked union (visible phone + name) when nothing is picked', () => {
+    render(<NewBookingTab {...defaultProps2} />);
+    // The visible string is the AsYouType-formatted value (mask is live even
+    // unpicked) — WYSIWYG: it is exactly what reaches the payload.
+    fireEvent.change(screen.getByTestId('input-phone'), { target: { value: '+79991234567' } });
+    fireEvent.change(screen.getByTestId('input-client-name'), { target: { value: 'Новый клиент' } });
+    fireEvent.click(screen.getByTestId('btn-create-record'));
+
+    const payload = defaultProps2.onSubmit.mock.calls[0][0];
+    expect(payload).toEqual({
+      kind: 'unpicked',
+      phone: '+7 999 123 45 67',
+      name: 'Новый клиент',
+      client_id: null,
+      visitors: [],
+      notify: false,
+      channel: 'telegram',
+      seats: 1,
+    });
+  });
+
+  it('does not call the exact-route getClientByPhone on blur (REMOVED)', () => {
+    render(<NewBookingTab {...defaultProps2} />);
+    fireEvent.change(screen.getByTestId('input-phone'), { target: { value: '+79991234567' } });
+    fireEvent.blur(screen.getByTestId('input-phone'));
+    expect(getClientByPhone).not.toHaveBeenCalled();
+  });
+
+  it('(picked) never validates the phone — picked clients come from stored data', async () => {
+    // A pick freezes the field with the client label (not a parseable phone),
+    // yet the save must go through untouched.
+    await typeAndPick();
+    fireEvent.click(screen.getByTestId('btn-create-record'));
+
+    expect(defaultProps2.showToast).not.toHaveBeenCalledWith(
+      'Проверьте номер телефона — возможно, он введён не полностью',
+    );
+    expect(defaultProps2.onSubmit).toHaveBeenCalledTimes(1);
+    expect(defaultProps2.onSubmit.mock.calls[0][0]).toEqual(
+      expect.objectContaining({ kind: 'picked', client_id: 'c1' }),
+    );
+  });
+});
+
+// ─── NewBookingTab — unpicked completeness guard (GH #221 Task 7) ───────────
+// Spec §2 decision 11 / §6 step 2: the unpicked save requires a complete
+// valid number (parsePhoneNumberFromString + RU default, same library as the
+// mask). Incomplete → retryable toast, nothing submitted/fetched/created.
+
+describe('NewBookingTab — unpicked completeness guard (GH #221 Task 7)', () => {
+  const guardProps = {
+    activity: mockActivity,
+    serviceTariffs: mockTariffs,
+    onSubmit: vi.fn(),
+    showToast: vi.fn(),
+  };
+
+  beforeEach(() => {
+    guardProps.onSubmit.mockClear();
+    guardProps.showToast.mockClear();
+  });
+
+  it('(0) blocks the save on an INCOMPLETE number with the exact message; nothing submitted', () => {
+    render(<NewBookingTab {...guardProps} />);
+    // Half-typed number: mask shows it, but it is not a valid complete number.
+    fireEvent.change(screen.getByTestId('input-phone'), { target: { value: '+7 (999) 123' } });
+    fireEvent.change(screen.getByTestId('input-client-name'), { target: { value: 'Кто-то' } });
+    fireEvent.click(screen.getByTestId('btn-create-record'));
+
+    expect(guardProps.onSubmit).not.toHaveBeenCalled();
+    expect(guardProps.showToast).toHaveBeenCalledWith(
+      'Проверьте номер телефона — возможно, он введён не полностью',
+    );
+  });
+
+  it('(0b) EMPTY phone is a legitimate pre-existing path — proceeds, no toast, no guard', () => {
+    // Semantics ruling (spec §7 + pre-#221 behavior): the guard targets
+    // TYPED-BUT-INCOMPLETE numbers only. An empty phone quick-add (client
+    // with no phone) predates #221 (§10: write paths untouched) and must
+    // submit as before.
+    render(<NewBookingTab {...guardProps} />);
+    fireEvent.change(screen.getByTestId('input-client-name'), { target: { value: 'Кто-то' } });
+    fireEvent.click(screen.getByTestId('btn-create-record'));
+
+    expect(guardProps.showToast).not.toHaveBeenCalled();
+    expect(guardProps.onSubmit).toHaveBeenCalledTimes(1);
+    expect(guardProps.onSubmit.mock.calls[0][0]).toEqual(
+      expect.objectContaining({ kind: 'unpicked', phone: '' }),
+    );
+  });
+
+  it('(unpicked, complete) a complete number passes the guard and submits', () => {
+    render(<NewBookingTab {...guardProps} />);
+    fireEvent.change(screen.getByTestId('input-phone'), { target: { value: '+79991234567' } });
+    fireEvent.change(screen.getByTestId('input-client-name'), { target: { value: 'Новый' } });
+    fireEvent.click(screen.getByTestId('btn-create-record'));
+
+    expect(guardProps.showToast).not.toHaveBeenCalled();
+    expect(guardProps.onSubmit).toHaveBeenCalledTimes(1);
+    expect(guardProps.onSubmit.mock.calls[0][0]).toEqual(
+      expect.objectContaining({ kind: 'unpicked' }),
+    );
   });
 });

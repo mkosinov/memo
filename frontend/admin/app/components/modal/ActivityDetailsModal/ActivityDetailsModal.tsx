@@ -9,7 +9,7 @@ import { TabNav, type Tab } from './TabNav';
 import { SettingsTab } from './SettingsTab';
 import { ClientTab } from './ClientTab';
 import { ClientLabelById } from './ClientLabelById';
-import { NewBookingTab } from './NewBookingTab';
+import { NewBookingTab, type NewBookingSubmitData } from './NewBookingTab';
 import { Modal } from '@/app/components/shared/modal/Modal';
 import { useRecordMutations } from '@/hooks/useRecordMutations';
 import { useActivityRecords } from '@/hooks/useActivities';
@@ -119,16 +119,13 @@ export function ActivityDetailsModal({ isOpen, onClose, activity, mode }: Activi
     setActiveTab('new-booking');
   }, []);
 
-  // New booking submit handler — delegates to useRecordMutations hook
+  // New booking submit handler — delegates to useRecordMutations hook.
+  // GH #221: the submit payload is a disjoint union — `picked` carries the
+  // picked client_id (bind by id, resolve-or-create skipped); `unpicked`
+  // carries the visible formatted phone + name (resolve-or-create path,
+  // Task 7 replaces it with digits resolution).
   const handleNewBookingSubmit = useCallback(
-    async (data: {
-      phone: string;
-      name: string;
-      visitors: Array<{ name: string; age?: string; tariffId: string }>;
-      notify: boolean;
-      channel: string;
-      seats: number;
-    }) => {
+    async (data: NewBookingSubmitData) => {
       try {
         await createRecord(data, serviceTariffs);
         showToast('Запись создана');

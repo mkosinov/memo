@@ -518,6 +518,12 @@ describe('getClientsPaged', () => {
     );
   });
 
+  it('serializes phone param (GH #221)', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 10 });
+    await getClientsPaged({ phone: '999123' });
+    expect(api).toHaveBeenCalledWith('/api/v1/clients?phone=999123', expect.anything());
+  });
+
   it('omits undefined and null params', async () => {
     vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
     await getClientsPaged({ q: undefined, status: undefined, page: undefined });

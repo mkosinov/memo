@@ -1,9 +1,12 @@
 'use client';
 
 import React, { useState, useCallback } from 'react';
-import { getClientByPhone } from '@memo/api-client';
+import { parsePhoneNumberFromString } from 'libphonenumber-js/min';
+import PhoneInput, { type PickedClient } from '@/app/components/shared/PhoneInput';
+import { getClientsPaged } from '@memo/api-client';
 import type { Tariff } from '@memo/domain';
 import type { ScheduleAdminDTO } from '@memo/domain';
+import type { CreateRecordInput } from '@/hooks/useRecordMutations';
 
 interface NewVisitor {
   tempId: string;
@@ -12,21 +15,19 @@ interface NewVisitor {
   tariffId: string;
 }
 
+/** Booking submit payload — disjoint pick/unpicked union, defined once by
+ *  the mutations hook (single source of truth for the save contract). */
+export type NewBookingSubmitData = CreateRecordInput;
+
 interface NewBookingTabProps {
   activity: ScheduleAdminDTO;
   serviceTariffs: Tariff[];
-  onSubmit: (data: {
-    phone: string;
-    name: string;
-    visitors: NewVisitor[];
-    notify: boolean;
-    channel: string;
-    seats: number;
-  }) => void;
+  onSubmit: (data: NewBookingSubmitData) => void;
   showToast: (message: string) => void;
 }
 
 export function NewBookingTab({ activity, serviceTariffs, onSubmit, showToast }: NewBookingTabProps) {
+  const [pickedClient, setPickedClient] = useState<PickedClient | null>(null);
   const [phone, setPhone] = useState('');
   const [name, setName] = useState('');
   const [notify, setNotify] = useState(false);
@@ -34,17 +35,32 @@ export function NewBookingTab({ activity, serviceTariffs, onSubmit, showToast }:
   const [visitors, setVisitors] = useState<NewVisitor[]>([]);
   const [seatsCount, setSeatsCount] = useState(1);
 
-  const handlePhoneBlur = useCallback(async () => {
-    if (phone.length < 10) return;
-    try {
-      const client = await getClientByPhone(phone);
-      if (client) {
-        setName(client.name || '');
-      }
-    } catch {
-      // Client not found — leave name empty for manual entry
-    }
-  }, [phone]);
+  // GH #221: picking a suggestion binds the record to that client by id —
+  // phone + name freeze read-only (decision 10: editing a client's name
+  // belongs to the client card). × detaches the pick and restores typing.
+  const handlePick = useCallback((client: PickedClient) => {
+    setPickedClient(client);
+  }, []);
+
+  const handleClearPick = useCallback(() => {
+    setPickedClient(null);
+    setPhone('');
+    setName('');
+  }, []);
+
+  // Visible formatted string (WYSIWYG): the unpicked save payload sends it
+  // verbatim, exactly as rendered in the field.
+  const handlePhoneInput = useCallback((value: string) => {
+    setPhone(value);
+  }, []);
+
+  // Stable search identity (RemoteSearchSelect memoizes `search` on it) —
+  // an inline lambda here would churn the debounce closure every render.
+  const searchClients = useCallback(
+    ({ phone: digits, per_page }: { phone: string; per_page: number }) =>
+      getClientsPaged({ phone: digits, per_page }).then((r) => r.items),
+    [],
+  );
 
   const addVisitor = useCallback(() => {
     setVisitors((prev) => [
@@ -73,33 +89,60 @@ export function NewBookingTab({ activity, serviceTariffs, onSubmit, showToast }:
       }
     }
 
-    onSubmit({ phone, name, visitors, notify, channel, seats: seatsCount });
-  }, [phone, name, visitors, notify, channel, seatsCount, onSubmit, showToast, serviceTariffs]);
+    // Picked → bind by id; unpicked → the visible formatted string + typed
+    // name name the (possibly new) client (spec §5). The `kind` tag makes
+    // the two branches disjoint payloads, not placeholder empties.
+    if (pickedClient) {
+      onSubmit({
+        kind: 'picked',
+        client_id: pickedClient.id,
+        visitors,
+        notify,
+        channel,
+        seats: seatsCount,
+      });
+    } else {
+      // Completeness guard (GH #221 spec §2 decision 11, §6 step 2): the
+      // visible value must be a complete valid number before anything is
+      // fetched or created. Picked clients are never validated (stored data).
+      // Same library + same RU default as the AsYouType mask.
+      // An EMPTY phone is NOT guarded: the phone-less quick-add predates
+      // #221 (spec §10 — write paths untouched) and must keep working; the
+      // guard targets TYPED-BUT-INCOMPLETE numbers only (its message says
+      // «возможно, он введён не полностью»).
+      if (phone.trim() && !parsePhoneNumberFromString(phone, 'RU')?.isValid()) {
+        showToast('Проверьте номер телефона — возможно, он введён не полностью');
+        return; // nothing fetched, nothing created
+      }
+      onSubmit({
+        kind: 'unpicked',
+        phone,
+        name,
+        client_id: null,
+        visitors,
+        notify,
+        channel,
+        seats: seatsCount,
+      });
+    }
+  }, [phone, name, pickedClient, visitors, notify, channel, seatsCount, onSubmit, showToast, serviceTariffs]);
 
   const inputClass = 'w-full rounded-lg border px-3 py-2 text-sm bg-white';
   const inputStyle = { borderColor: 'var(--line)' };
 
   return (
     <div className="space-y-4 p-4" data-testid="new-booking-tab">
-      {/* Phone */}
-      <div>
-        <label className="text-xs font-medium text-ink-mid block mb-1" htmlFor="booking-phone">
-          Телефон
-        </label>
-        <input
-          id="booking-phone"
-          type="text"
-          placeholder="+7 (___) ___-__-__"
-          className={inputClass}
-          style={inputStyle}
-          value={phone}
-          onChange={(e) => setPhone(e.target.value)}
-          onBlur={handlePhoneBlur}
-          data-testid="input-phone"
-        />
-      </div>
+      {/* Phone — adaptive-mask typeahead (GH #221) */}
+      <PhoneInput
+        onSearch={searchClients}
+        onPick={handlePick}
+        onClear={handleClearPick}
+        picked={pickedClient}
+        onInputValueChange={handlePhoneInput}
+      />
 
-      {/* Name */}
+      {/* Name — editable only for an unpicked (new) client; when a client is
+          picked it displays the stored name read-only */}
       <div>
         <label className="text-xs font-medium text-ink-mid block mb-1" htmlFor="booking-name">
           Имя
@@ -109,8 +152,9 @@ export function NewBookingTab({ activity, serviceTariffs, onSubmit, showToast }:
           type="text"
           className={inputClass}
           style={inputStyle}
-          value={name}
+          value={pickedClient ? pickedClient.name || '' : name}
           onChange={(e) => setName(e.target.value)}
+          readOnly={pickedClient !== null}
           data-testid="input-client-name"
         />
       </div>

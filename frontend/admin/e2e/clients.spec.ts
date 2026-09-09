@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { waitForClientsReady, openAddTab } from './fixtures/helpers';
+import { waitForClientsReady, openAddTab, phoneMaskDisplay } from './fixtures/helpers';
 import { queryDBRow } from './fixtures/db-query';
 import {
   createTestClient,
@@ -787,7 +787,12 @@ test.describe('GH #140 — clients-list isolation & staleness', () => {
   }) => {
     const ts = Date.now();
     const newClientName = `us6-${ts}`;
-    const newPhone = `+7966${String(ts).slice(-7)}`;
+    // 10 national digits: 966 + 7 unique tail digits → typed as +7 966….
+    const nationalDigits = `966${String(ts).slice(-7)}`;
+    const newPhone = `+7${nationalDigits}`;
+    // GH #221 WYSIWYG: the form saves the VISIBLE AsYouType-formatted
+    // string, not the raw typed text — expect the masked form in the DB.
+    const expectedStoredPhone = phoneMaskDisplay(nationalDigits, 'international');
     let clientId: string | null = null;
     let recordId: string | null = null;
 
@@ -817,10 +822,11 @@ test.describe('GH #140 — clients-list isolation & staleness', () => {
       await expect(page.locator('[data-testid="activity-details-modal"]')).toHaveCount(0);
 
       // Resolve the created ids from the DB (cleanup targets).
+      // GH #221: the stored phone is the masked visible string (WYSIWYG).
       await expect
         .poll(
           () => {
-            const row = queryDBRow(`SELECT id FROM clients WHERE phone='${newPhone}'`);
+            const row = queryDBRow(`SELECT id FROM clients WHERE phone='${expectedStoredPhone}'`);
             clientId = row?.id ?? null;
             return clientId !== null;
           },

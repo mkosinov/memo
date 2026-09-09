@@ -6,7 +6,7 @@ import {
   createRecord,
   createClient,
   createVisitor,
-  getClientByPhone,
+  getClientsPaged,
   patchRecord,
   patchActivity,
   createPayment,
@@ -43,12 +43,44 @@ export type RecordPatchData = Partial<
   }
 >;
 
-interface CreateRecordInput {
-  phone: string;
-  name: string;
+/** Shared non-client fields of a booking submit (GH #221). */
+interface CreateRecordBase {
+  notify: boolean;
   channel: string;
   seats: number;
   visitors: Array<{ name: string; age?: string; tariffId: string }>;
+}
+
+/**
+ * Booking submit payload (GH #221) — the pick-XOR-phone invariant, encoded:
+ * - `kind: 'picked'` — a typeahead suggestion was chosen; `client_id` binds
+ *   the record to that client and resolve-or-create is skipped entirely.
+ * - `kind: 'unpicked'` — free-typed number; `phone` is the VISIBLE formatted
+ *   string (WYSIWYG) and `name` names the possibly-created client. The save
+ *   path resolves by a fresh full-digits fetch (spec §6): digits-equality
+ *   match binds the existing client, no match creates one, fetch failure
+ *   blocks the save (fail closed — never a silent unchecked create).
+ */
+export type CreateRecordInput =
+  | ({ kind: 'picked'; client_id: string } & CreateRecordBase)
+  | ({ kind: 'unpicked'; phone: string; name: string; client_id: null } & CreateRecordBase);
+
+/**
+ * Spec #221 §3 — national-digit phone reduction, TS mirror of the backend's
+ * `to_national_digits` (backend/src/domain/phone_digits.py): strip non-digits;
+ * drop the leading 7/8 of an 11-digit RU number. Tolerant by design — never
+ * parses, never raises; NULL/empty/no-digits → empty string. The equality
+ * check at save time (§6) compares BOTH sides through this same reduction, so
+ * any stored format (`+79991234567`, `8 999 123-45-67`) matches the typed one.
+ */
+export function toNationalDigits(value: string | null | undefined): string {
+  if (!value) return '';
+  const digits = value.replace(/\D+/g, '');
+  if (!digits) return '';
+  if (digits.length === 11 && (digits[0] === '7' || digits[0] === '8')) {
+    return digits.slice(1);
+  }
+  return digits;
 }
 
 export function useRecordMutations(activityId: string, recordId: string = '') {
@@ -81,14 +113,30 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
       input: CreateRecordInput,
       serviceTariffs: Array<{ id: string; price: number }>,
     ) => {
-      // 1. Resolve or create client
+      // 1. Resolve or create client.
+      //    GH #221: a picked client binds by id — no lookup, no create.
+      //    The unpicked path resolves by a FRESH full-digits fetch (spec §6):
+      //    national digits of the visible string are queried with ?phone=,
+      //    the first row whose national digits equal the typed digits binds
+      //    (first-match parity with the old first-or-404); no match → the
+      //    client is created with the VISIBLE formatted string (WYSIWYG).
+      //    A fetch failure propagates — the save is blocked (fail closed),
+      //    never a silent create of an unchecked client.
       let clientId: string;
       let createdClientId: string | null = null;
-      if (input.phone) {
-        try {
-          const existing = await getClientByPhone(input.phone);
-          clientId = existing.id;
-        } catch {
+      if (input.kind === 'picked') {
+        clientId = input.client_id;
+      } else {
+        const national = toNationalDigits(input.phone);
+        let clientIdResolved: string | null = null;
+        if (national) {
+          const { items } = await getClientsPaged({ phone: national, per_page: 10 });
+          const exact = items.find((c) => toNationalDigits(c.phone) === national);
+          if (exact) clientIdResolved = exact.id;
+        }
+        if (clientIdResolved !== null) {
+          clientId = clientIdResolved;
+        } else {
           const created = await createClient({
             name: input.name,
             phone: input.phone,
@@ -97,14 +145,6 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
           clientId = created.id;
           createdClientId = created.id;
         }
-      } else {
-        const created = await createClient({
-          name: input.name,
-          phone: '',
-          channel: input.channel,
-        });
-        clientId = created.id;
-        createdClientId = created.id;
       }
 
       // 2. Create visitors (skip empty names)

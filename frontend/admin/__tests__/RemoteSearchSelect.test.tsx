@@ -282,4 +282,79 @@ describe('RemoteSearchSelect', () => {
     renderRemoteSearchSelect();
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
   });
+
+  // GH #221 Task 4: parameterize the threshold + query building so consumers
+  // (e.g. the phone typeahead) can pick a different min-char count and
+  // request-param shape without forking the component.
+  it('fires below 2 chars when minChars is lowered', async () => {
+    mockSearch.mockResolvedValue([]);
+
+    renderRemoteSearchSelect({ minChars: 1 });
+    const input = screen.getByRole('textbox');
+
+    // 1 char — above the lowered minChars=1 threshold
+    act(() => {
+      fireEvent.change(input, { target: { value: 'А' } });
+    });
+
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+
+    await waitFor(() => {
+      expect(mockSearch).toHaveBeenCalledWith('А');
+    });
+  });
+
+  it('blocks search below a raised minChars threshold and fires once crossed', async () => {
+    mockSearch.mockResolvedValue([]);
+
+    renderRemoteSearchSelect({ minChars: 4 });
+    const input = screen.getByRole('textbox');
+
+    // 3 chars — below minChars=4: no search
+    act(() => {
+      fireEvent.change(input, { target: { value: 'Анн' } });
+    });
+
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+
+    expect(mockSearch).not.toHaveBeenCalled();
+
+    // 4th char — crosses the threshold: search fires
+    act(() => {
+      fireEvent.change(input, { target: { value: 'Анна' } });
+    });
+
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+
+    await waitFor(() => {
+      expect(mockSearch).toHaveBeenCalledWith('Анна');
+    });
+  });
+
+  it('builds request params via buildParams and passes them to onSearch', async () => {
+    mockSearch.mockResolvedValue([{ id: 'c1', name: 'Анна' }]);
+    const buildParams = vi.fn((input: string) => ({ phone: input }));
+
+    renderRemoteSearchSelect({ buildParams });
+    const input = screen.getByRole('textbox');
+
+    act(() => {
+      fireEvent.change(input, { target: { value: '7996' } });
+    });
+
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+
+    expect(buildParams).toHaveBeenCalledWith('7996');
+    await waitFor(() => {
+      expect(mockSearch).toHaveBeenCalledWith({ phone: '7996' });
+    });
+  });
 });

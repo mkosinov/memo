@@ -171,6 +171,16 @@ async def list_clients_with_stats(
         query = query.where(pred)
         count_query = count_query.where(pred)
 
+    # GH #221 §4: digits-mode phone filter — national-digit substring via the
+    # memo_phone_national SQLite UDF (T1). Validator guarantees digits-only,
+    # so no LIKE-wildcard escaping (deliberately NOT search_predicate — the
+    # literal `q` seam stays separate). Must hit BOTH queries so `total`
+    # reflects the filtered set, same invariant as `q`.
+    if params.phone:
+        phone_cond = func.memo_phone_national(Client.phone).like(f"%{params.phone}%")
+        query = query.where(phone_cond)
+        count_query = count_query.where(phone_cond)
+
     if params.created_from:
         cond = Client.created_at >= datetime.combine(params.created_from, datetime.min.time())
         query = query.where(cond)

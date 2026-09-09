@@ -31,7 +31,11 @@ function QueryClientWithErrorReporting({ children }: { children: React.ReactNode
         // (ServerEventsProvider blanket-invalidates on reconnect). TanStack's
         // own onlineManager refetch would converge data even with a dead
         // channel and mask channel failures — disabled so the channel is
-        // genuinely the mechanism (spec §4.2/§5).
+        // genuinely the mechanism (spec §4.2/§5). Residual uncovered case: a
+        // network blip while the SSE channel is dead/unrecoverable (REST
+        // works, EventSource never reopens) — no auto-convergence until
+        // remount/manual invalidation; accepted spec trade-off (channel
+        // failure must not be masked).
         refetchOnReconnect: false,
         throwOnError: false,
       },

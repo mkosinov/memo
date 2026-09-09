@@ -104,20 +104,22 @@ serverPushPages.describe('Server push invalidation — offline & own mutations (
     browser,
     request,
   }) => {
-    const marker = `Push C6 ${uid()}`;
-
     // Frame logger: a dedicated context subscribed to the raw SSE stream —
     // lets the silence probe attribute any toast to own-echo vs foreign
     // interference (the hub broadcasts every mutation to ALL contexts).
-    // Every probe attempt performs a REAL own write (the retry after
-    // attributed interference creates another marker record — the retry
-    // record becomes the asserted row). Track all writes for cleanup.
+    // Every probe attempt performs a REAL own write with a UNIQUE marker
+    // (attempt suffix — never reuse a marker across attempts: after an
+    // interference-retry two rows would match and the final row assertion
+    // would trip Playwright strict mode). The LAST attempt's marker is the
+    // asserted row; all writes are tracked for cleanup.
     const frameLog = await openFrameLogger(browser);
     const created: { id: string; client_id: string }[] = [];
+    const baseMarker = `Push C6 ${uid()}`;
 
-    const doOwnWrite = async () => {
+    const doOwnWrite = async (markerSuffix: string) => {
       // OWN write through A's UI — carries A's real tab header, the backend
       // echoes it as origin {type:'tab', id:<A's tab id>}.
+      const marker = `${baseMarker}${markerSuffix}`;
       const today = new Date().toISOString().slice(0, 10);
       await openAddTab(pageA, { date: today });
 
@@ -133,6 +135,15 @@ serverPushPages.describe('Server push invalidation — offline & own mutations (
       const resp = await createResponse;
       expect(resp.status()).toBe(201);
       created.push((await resp.json()) as { id: string; client_id: string });
+    };
+
+    // Between probe attempts: close the modal left open by the previous
+    // attempt's write (it switches to the settings tab after creation) so
+    // the retry write starts from a clean surface.
+    const resetSurface = async () => {
+      await pageA.evaluate(() => {
+        document.dispatchEvent(new CustomEvent('__memo-close-modal'));
+      });
     };
 
     try {
@@ -154,7 +165,7 @@ serverPushPages.describe('Server push invalidation — offline & own mutations (
       // UNLESS foreign frames (sibling spec's broadcast) attribute the toast
       // to cross-test interference, in which case the probe retries once.
       // In GREEN the probe observes zero «Данные обновлены» toasts.
-      await expectNoOwnEchoToast(pageA, frameLog, doOwnWrite);
+      await expectNoOwnEchoToast(pageA, frameLog, doOwnWrite, resetSurface);
 
       // The modal stays open after creation (switches to the settings tab) —
       // close it so the sidebar link is clickable.
@@ -164,8 +175,10 @@ serverPushPages.describe('Server push invalidation — offline & own mutations (
 
       // Back to /records via the sidebar LINK (SPA navigation — cache
       // survives). Own invalidation must have marked ['records'] stale, so
-      // the cached list refetches on mount and shows the marker row even
-      // inside the 30s staleTime.
+      // the cached list refetches on mount and shows the LAST attempt's
+      // marker row even inside the 30s staleTime. (Unique per-attempt
+      // markers: the last attempt's write is the one this row asserts.)
+      const lastMarker = `${baseMarker}#a${created.length}`;
       const viewResponse = pageA.waitForResponse(
         (r) => r.url().includes('/api/v1/records/view') && r.request().method() === 'GET',
         { timeout: PUSH_WINDOW },
@@ -174,7 +187,7 @@ serverPushPages.describe('Server push invalidation — offline & own mutations (
       const refetch = await viewResponse; // own invalidation refetches NOW
       expect(refetch.status()).toBe(200);
 
-      const row = pageA.locator('table tbody tr').filter({ hasText: marker });
+      const row = pageA.locator('table tbody tr').filter({ hasText: lastMarker });
       await expect(row).toBeVisible({ timeout: PUSH_WINDOW });
     } finally {
       // Frame logger SSE connection + interval must not leak into the

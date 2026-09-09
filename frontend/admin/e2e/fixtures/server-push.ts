@@ -57,7 +57,11 @@ export function expectUpdateToast(page: Page) {
  *   POST completion AND its `entities` include `records`;
  *   every other frame in the probe window counts as FOREIGN interference.
  * A toast with only suspect-own-echo frames (or none) around it proves the
- * broken origin suppression → FAIL; foreign frames → interference, retry.
+ * broken origin suppression → FAIL; with ≥1 foreign frame in the window the
+ * own-echo/foreign attribution of that toast is ambiguous → the probe
+ * retries instead of failing; two consecutive interference-attributed
+ * attempts end green iff the drained toast deck is clean (the drain-assert
+ * in expectNoOwnEchoToast is the terminal check, not a "retry budget").
  */
 export type InvalidateFrame = {
   entities: string[];
@@ -155,22 +159,46 @@ function classifyFrames(
  * a retrying anti-assertion (`toHaveCount(0, {timeout})`) would poll until
  * the transient toast dies on its own and pass vacuously.
  *
- * ATTRIBUTION: with fullyParallel sweeps a sibling spec's write broadcasts
- * to ALL contexts and can legitimately pop «Данные обновлены» on pageA
- * inside this window. If any toast is found:
- *   - only suspect-own-echo frames (±300ms of POST, `records`) or no frames
- *     → the toast proves broken suppression → FAIL with attribution detail;
- *   - foreign frames present → cross-test interference → wait out the toast
- *     deck (≤6s) and RETRY ONCE with a fresh write/probe cycle.
+ * RETRY SEMANTICS (the real guarantee): with fullyParallel sweeps a sibling
+ * spec's write broadcasts to ALL contexts and can legitimately pop «Данные
+ * обновлены» on pageA inside this window — with ≥1 foreign frame in the
+ * window, own-echo vs foreign attribution of that toast is AMBIGUOUS, so the
+ * helper cannot fail on it and instead retries ONCE with a fresh write/probe
+ * cycle. Consequences:
+ *   - each attempt gets a UNIQUE marker (attempt suffix — `doOwnWrite`
+ *     receives it) so the retry's row assertion cannot collide with attempt
+ *     1's row, and the final asserted row is the LAST attempt's record;
+ *   - the helper closes/resets the modal surface between attempts (via
+ *     `resetSurface`) so the retry write starts clean;
+ *   - two consecutive interference-attributed attempts end GREEN iff the
+ *     drained toast deck is clean — the drain-assert below is the real
+ *     terminal check (under toast stacking the post-attempt deck may need
+ *     the full wait-out, and a deck that never drains fails here);
+ *   - the exhaustion branch below is effectively unreachable: attempt 2's
+ *     attribution either FAILS (own-echo-only frames → broken suppression)
+ *     or PASSES (foreign frames → interference, deck drains green). It is
+ *     kept as a belt-and-braces guard with per-attempt anchors so attempt-1
+ *     frames are never misclassified as "foreign".
  */
-export async function expectNoOwnEchoToast(page: Page, log: FrameLog, doOwnWrite: () => Promise<void>): Promise<void> {
+export async function expectNoOwnEchoToast(
+  page: Page,
+  log: FrameLog,
+  doOwnWrite: (markerSuffix: string) => Promise<void>,
+  resetSurface?: () => Promise<void>,
+): Promise<void> {
   const toastLocator = page.getByTestId('toast-info').filter({ hasText: 'Данные обновлены' });
+  // Per-attempt attribution anchors: POST timestamps + the frame index each
+  // attempt started at, so the final diagnostic never labels attempt-1
+  // own-echo frames as "foreign" (a single shared postDoneAt would smear).
+  const attemptAnchors: { framesStart: number; postDoneAt: number }[] = [];
 
   // Up to 2 attempts: attempt 2 is the interference-retry (fresh write+probe).
   for (let attempt = 1; attempt <= 2; attempt++) {
+    if (attempt > 1 && resetSurface) await resetSurface();
     const framesStart = log.frames.length; // per-attempt window — no stale frames
 
-    await doOwnWrite();
+    await doOwnWrite(`#a${attempt}`);
+    attemptAnchors.push({ framesStart, postDoneAt: Date.now() });
     markPostDone(log); // POST resolution = attribution anchor
 
     await page.waitForTimeout(2_000); // echo latency (ms) << 2s << toast lifetime (~4.5s)
@@ -203,13 +231,20 @@ export async function expectNoOwnEchoToast(page: Page, log: FrameLog, doOwnWrite
       .then((c) => expect(c, 'toast deck must clear before the silence retry').toBe(0));
   }
 
-  // Second attempt ALSO raised a toast — even if foreign frames explain it,
-  // the retry budget is exhausted; fail with the full attribution evidence.
-  const { ownEcho, foreign } = classifyFrames(log.frames, log.postDoneAt);
+  // Belt-and-braces: attempt 2 also raised a toast and drained clean only via
+  // the loop's terminal checks — reaching here means neither the drain-assert
+  // nor the attribution FAIL fired, which should be impossible. Re-classify
+  // EACH attempt against its own anchor (own-echo frames stay own-echo, never
+  // "foreign") and fail with the full evidence.
+  const evidence = attemptAnchors.map((a, i) => {
+    const windowFrames = log.frames.slice(a.framesStart);
+    const { ownEcho, foreign } = classifyFrames(windowFrames, a.postDoneAt);
+    return { attempt: i + 1, ownEcho, foreign };
+  });
   expect(
     await toastLocator.count(),
-    `silence retry still saw a «Данные обновлены» toast ` +
-      `(ownEcho: ${JSON.stringify(ownEcho)}, foreign: ${JSON.stringify(foreign)})`,
+    `silence retry still saw a «Данные обновлены» toast after both attempts ` +
+      `(per-attempt attribution: ${JSON.stringify(evidence)})`,
   ).toBe(0);
 }
 

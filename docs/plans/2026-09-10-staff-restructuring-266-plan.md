@@ -34,7 +34,7 @@
 
 Как это выглядит для пользователя, по User Scenarios спеки:
 
-- **Меню и экран (S1, S7)** — пункт «Мастера» становится «Сотрудники»; на экране — все люди студии, в карточке — чекбоксы должностей, секция «Мастер» (специальность + цвет) и чекбокс создания учётки; один сценарий заводит человека сразу с логином и мастером.
+- **Вход и экран (S1, S7)** — в «Справочниках» сайдбара появляется строка «Сотрудники» (решение юзера 10.09; сегодня у экрана мастеров входа из меню нет вообще — «Мастера» в сайдбаре это легенда расписания, она не меняется); на экране — все люди студии, в карточке — чекбоксы должностей, секция «Мастер» (специальность + цвет) и чекбокс создания учётки; один сценарий заводит человека сразу с логином и мастером.
 - **Сотрудник без мастер-секции невидим в расписании (S1)** — СММ не появляется в фильтре мастеров и в `/api/v1/masters`.
 - **Мастера приходят и уходят (S2)** — добавил секцию «Мастер» → человек в фильтрах и `/masters`; заархивировал мастера → исчез из списков, но все его прежние записи показывают его имя и цвет.
 - **Миграция ничего не ломает (S3)** — после обновления все прежние мастера, занятия и записи на месте: имена, цвета, ID; у сид-мастеров — должность «мастер».
@@ -60,6 +60,7 @@
 | `backend/src/services/record.py` | MODIFY (T2) | scalar-subqueries: источник — join новой masters; ключи `master_name`/`master_color` НЕ менять |
 | `backend/src/admin/setup.py` | MODIFY (T2) | `StaffAdmin` (+ мастер-секция), `PositionAdmin`; ActivityAdmin.master_id жив |
 | `backend/src/errors.py`, `domain/errors.py` | MODIFY (T2) | `STAFF_NOT_FOUND`, `MASTER_NOT_ACTIVE`, `POSITION_NOT_FOUND`, `POSITION_IS_SYSTEM`, `SPECIALTY_REQUIRED`, `COLOR_REQUIRED` |
+| `backend/src/auth/*` | MODIFY (T2) | механический перенос на новый словарь (после гейта T0, #247 в main): `AuthedUser.master_id` → `staff_id`, снапшот `/auth/me` — из карточки сотрудника + мастер-полей, форма ответа не меняется |
 | `backend/src/schemas/staff.py`, `position.py` | CREATE (T3) | Staff CRUD (master-блок `master: {specialty, color} \| null`, position_ids, create_user-флаг), Position schemas; `master.py` — read-only view |
 | `backend/src/services/staff.py` | CREATE (T3) | `StaffService`: композитные create/update (одна транзакция: staff + masters + staff_positions + user), archive(body-чекбоксы)/restore, deletion-resolutions |
 | `backend/src/services/position.py` | CREATE (T3) | CRUD + блок удаления is_system |
@@ -70,11 +71,11 @@
 | `backend/tests/*` | MODIFY (T1–T4) | conftest-фикстуры (`_user` INSERT staff_id), `test_api_masters.py` → `test_api_staff.py`, contract-тесты |
 | `backend/src/events/*` | MODIFY (T5) | walk сервисов подберёт `staff`; cascade-only записи join-таблиц |
 | `frontend/admin/lib/invalidate.ts`, `queryKeys.ts`, `types.ts` | MODIFY (T5–T6) | SSE-карта: `staff` + `masters`; ключи/типы |
-| `packages/api-client/src/endpoints.ts`, `schemas.ts` | MODIFY (T6) | staff CRUD + archive-body + create_user; masters read-only (getMaster/{id}, мутации, reorder — удалить); fixtures regen (`scripts/gen_backend_fixtures.py`) |
+| `packages/api-client/src/endpoints.ts`, `schemas.ts` | MODIFY (T6) | staff CRUD + archive-body + create_user; masters read-only (getMaster/{id}, мутации, reorder — удалить); fixtures regen (`packages/api-client/scripts/gen_backend_fixtures.py`) |
 | `frontend/admin/app/(main)/masters/` → `staff/` | MOVE+REWRITE (T8) | page, StaffTable, StaffModal (должности-чекбоксы, мастер-секция, create_user), ArchiveStaffDialog (чекбоксы D6) |
 | `frontend/admin/hooks/`, `contexts/` | MODIFY (T8) | `useStaff`/`useStaffMutations`/`StaffContext`; `MastersContext` остаётся read-only потребителем `/masters` |
-| `frontend/admin/app/(main)/dictionaries/` (+ позиции) | MODIFY (T9) | справочник должностей (паттерн тегов; встроенные без удаления) |
-| `frontend/admin/components/Menubar.tsx` | MODIFY (T8) | пункт «Сотрудники» |
+| `frontend/admin/app/(main)/positions/` | CREATE (T9) | справочник должностей — новая плоская страница по образцу tags/locations (каталога dictionaries в проекте нет) |
+| `frontend/admin/components/Menubar.tsx` | MODIFY (T8–T9) | строка «Сотрудники» в DIRECTORY_ITEMS (легенда «Мастера»-точки не меняется); строка «Должности» (T9) |
 | `frontend/admin/e2e/fixtures/factories.ts`, `seed-reset.ts`, `helpers.ts` | MODIFY (T7) | createTestStaff(+мастер-секция); RESET_SQL под 4 таблицы; waitForStaffReady; data-testid `master-row-*` сохранить где про мастеров |
 | `frontend/admin/e2e/staff-*.spec.ts` | CREATE (T8–T10) | S1–S7 |
 | `docs/specs/2026-09-08-auth-design.md`, `docs/plans/2026-09-08-auth-247-plan.md`, `docs/specs/2026-09-09-user-cabinet-design.md` | MODIFY (T12) | master-словарь → staff (после мержа #247); перепись #262 под staff |
@@ -123,8 +124,9 @@
 - [ ] `services/record.py`: scalar-subqueries через join новой masters; выходные ключи `master_name`/`master_color` без изменений.
 - [ ] `admin/setup.py`: StaffAdmin (карточка + мастер-поля), PositionAdmin; UserAdmin колонка staff_id.
 - [ ] `errors.py`/`domain/errors.py`: 6 новых кодов (таблица «Контракты ошибок» спеки).
+- [ ] `backend/src/auth/*` (гейт T0 пройден — #247 в main): механический перенос на новый словарь — `AuthedUser.master_id` → `staff_id`, снапшот `/auth/me` собирается из карточки сотрудника + мастер-полей, **форма ответа не меняется** (D10).
 
-**DoD:** точечные pytest в зоне deletion/record-механик зелёные; остальной backend — всё ещё в красном окне (закрывается в T4).
+**DoD:** точечные pytest в зоне deletion/record/auth-механик зелёные; остальной backend — всё ещё в красном окне (закрывается в T4).
 
 ---
 
@@ -185,7 +187,7 @@
 
 - [ ] `endpoints.ts`: getStaff/getAllStaff/createStaff (master-блок, position_ids, create_user)/updateStaff/archiveStaff(body-чекбоксы)/restoreStaff; masters — только getMasters/getAllMasters (getMaster/{id}, мутации, reorderMasters — удалить).
 - [ ] `schemas.ts`: zod-схемы Staff/Position/MasterView; паритет Pydantic↔Zod.
-- [ ] Regen fixtures: `scripts/gen_backend_fixtures.py` → `__fixtures__/backend-responses.json`.
+- [ ] Regen fixtures: `packages/api-client/scripts/gen_backend_fixtures.py` → `__fixtures__/backend-responses.json`.
 
 **DoD:** `packages/api-client && pnpm test` зелёный. Фронт type-check — объявленное красное окно в зоне экрана мастеров (закрывается в T8).
 
@@ -216,7 +218,8 @@
 - [ ] Перенос `app/(main)/masters/` → `staff/`: page, StaffTable (колонки: имя, должности, специальность, цвет, архив; сортировка всех колонок кроме должностей), StaffModal (основные данные + чекбоксы должностей + мастер-секция «Добавить/архивировать» + чекбокс учётки с телефоном/паролем), StaffFilters.
 - [ ] ArchiveStaffDialog: чекбоксы «Архивировать мастера (расписание)» (виден при активной masters-строке) и «Архивировать учётку (вход)» (при наличии учётки), оба предвыбраны.
 - [ ] Hooks/контексты: `useStaff`, `useStaffMutations`, `StaffContext`; `MastersContext` остаётся (читает /masters — фильтры расписания не трогаем).
-- [ ] Menubar: пункт «Сотрудники»; терминология «Архивировать/Вернуть из архива».
+- [ ] Menubar: строка «Сотрудники» в DIRECTORY_ITEMS (collapsible «Справочники» — решение юзера 10.09; легенда «Мастера» не меняется); терминология «Архивировать/Вернуть из архива».
+- [ ] Re-capture визуальных базлайнов: `masters-table-*` (7 шт.) + `menubar-*` (меню меняется) — обновить снапшоты visual-regression (иначе полный прогон T11 упадёт).
 - [ ] Vitest: переименовать/переписать тесты экрана (MastersTable.test → StaffTable.test и пр.).
 
 **DoD:** `pnpm test && pnpm type-check` зелёные. **E2E test for scenario S2 passes (RED-GREEN-REFACTOR)** (мастер пришёл/ушёл, история жива); **E2E test for scenario S6 passes (RED-GREEN-REFACTOR)** (чекбоксы увольнения); **E2E test for scenario S7 passes (RED-GREEN-REFACTOR)** (создание с учёткой и мастером одним сценарием).
@@ -230,7 +233,7 @@
 - `docs/design-system.md`; паттерн справочников (теги).
 - Спека #266 — D4 (встроенные master/admin: удаление запрещено, title свободен).
 
-- [ ] Раздел справочников: позиции — создать/переименовать/удалить; встроенные — без удаления, с объяснением блокировки (тост из `POSITION_IS_SYSTEM`).
+- [ ] Новая плоская страница `app/(main)/positions/` (по образцу `tags/`, `locations/` — каталога dictionaries в проекте нет): позиции — создать/переименовать/удалить; встроенные — без удаления, с объяснением блокировки (тост из `POSITION_IS_SYSTEM`). Строка «Должности» в DIRECTORY_ITEMS.
 - [ ] Vitest справочника.
 
 **DoD:** юнит зелёный. **E2E test for scenario S5 passes (RED-GREEN-REFACTOR)** (новая создаётся/удаляется; «мастер» не удаляется, переименовывается; должности не влияют на фильтры).
@@ -270,7 +273,7 @@
 ### Required Docs
 - Спеки `2026-09-08-auth-design.md`, план `2026-09-08-auth-247-plan.md`, спека `2026-09-09-user-cabinet-design.md`.
 
-- [ ] #247 спека+план: master-словарь → staff (снапшот /auth/me — «master snapshot» становится снапшом карточки сотрудника + мастер-полей; `AuthedUser.master_id` → staff_id) — только тексты, код уже ушёл в T1–T4.
+- [ ] #247 спека+план: master-словарь → staff (снапшот /auth/me — «master snapshot» становится снапшом карточки сотрудника + мастер-полей; `AuthedUser.master_id` → staff_id) — только тексты; сам код перенесён раньше (auth — T2).
 - [ ] Спека #262: полная перепись под staff-словарь (ссылки на Master-модель, specialty, /my, инвалидации, сценарии) — согласно «Границы» спеки #266.
 - [ ] `docs/domain-rules/_overview.md`/`staff.md`: сверка с реализацией (остаточные мастера-упоминания, naming-таблица).
 

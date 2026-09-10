@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures/test';
 import { waitForScheduleReady } from './fixtures/helpers';
 
 /**
@@ -515,6 +515,8 @@ test.describe('DayView Column Visibility — Location Filter', () => {
 
     // Switch to locations column mode (pure UI state change, no network call)
     await page.locator('[data-testid="column-mode-menu"] button:has-text("По локациям")').click();
+
+    await expect(page.locator('[data-testid^="column-header-"]').first()).toBeVisible();
 
     // GH #239 SSE race: a background refetch of ['locations'] (e.g. an
     // external invalidate frame) can transiently render zero columns; poll

@@ -11,7 +11,7 @@
  * («Услуги: 1 (удалён)») → type-confirm → material gone, service row
  * alive, its badges updated.
  */
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures/test';
 import type { APIRequestContext } from '@playwright/test';
 import { cleanup, createTestService } from './fixtures/factories';
 import {

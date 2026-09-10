@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures/test';
 import { waitForScheduleReady } from './fixtures/helpers';
 
 test('US-S01: Admin can click empty slot to create activity', async ({

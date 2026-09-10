@@ -17,7 +17,7 @@
  * S2 creates BOTH of its materials via API (unique titles) — it archives
  * one mid-test, which must never touch the shared seed rows.
  */
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures/test';
 import type { APIRequestContext, Page } from '@playwright/test';
 import { cleanup, createTestService } from './fixtures/factories';
 import { waitForServicesReady, waitForToast } from './fixtures/helpers';

@@ -8,7 +8,7 @@
  * Type-confirm → DELETE with body `{resolutions:{}}` → 204; master, the
  * linked user row AND the join rows are physically gone (§4.1).
  */
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures/test';
 import {
   cleanup,
   createTestMaster,

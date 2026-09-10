@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures/test';
 import { waitForScheduleReady, openModal } from './fixtures/helpers';
 import {
   VISIT_STATUS_CONFIG,

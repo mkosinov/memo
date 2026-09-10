@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures/test';
 import { waitForScheduleReady, openModal } from './fixtures/helpers';
 
 test('US-M05: Admin can change record status via icon picker', async ({

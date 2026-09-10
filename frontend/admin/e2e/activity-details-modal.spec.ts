@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures/test';
 import { queryDBRow, queryDBRows } from './fixtures/db-query';
 import { createTestClient, createTestActivity, createTestRecord, createTestPayment, cleanup, cleanupRecord } from './fixtures/factories';
 import { waitForScheduleReady, openModal, openAddTab, getFirstActivity, confirmDeleteDialog, phoneMaskDisplay } from './fixtures/helpers';

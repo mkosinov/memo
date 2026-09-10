@@ -3,7 +3,7 @@ import path from 'path';
 
 // ── Per-shard environment variables ────────────────────────────────────────
 // When run via test-all.sh, each shard sets:
-//   SHARD_ID        — 1-2 (used by globalSetup/cleanTestData for DB path)
+//   SHARD_ID        — 1-2 (used by globalSetup for DB path)
 //   SHARD_PORT      — frontend port (3002-3003)
 //   BACKEND_PORT    — backend port (8001-8002)
 //   BACKEND_URL     — backend API URL for E2E factories
@@ -45,7 +45,7 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
-  workers: process.env.CI ? 1 : undefined,
+  workers: 1,
   reporter: 'list',
   // Generous timeouts — 2 Next.js dev servers on 4 cores may still be slow
   // on first compilation. 60s test timeout + 60s navigation gives headroom.

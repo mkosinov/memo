@@ -6,59 +6,7 @@
  */
 
 import { type Locator, type Page, expect } from '@playwright/test';
-import path from 'path';
 import { queryDBRow } from './db-query';
-import { sqliteExecWithRetry } from './sqlite-exec';
-
-/**
- * Resolve the DB path: per-shard (test_memo_shard{id}.db) or fallback.
- * SHARD_ID is set by test-all.sh; falls back to TEST_DB_PATH or default.
- */
-function resolveDBPath(): string {
-  const shardId = process.env.SHARD_ID;
-  if (shardId) {
-    return path.resolve(__dirname, `../../../../backend/test_memo_shard${shardId}.db`);
-  }
-  return process.env.TEST_DB_PATH
-    || path.resolve(__dirname, '../../../../backend/test_memo.db');
-}
-
-const DB_PATH = resolveDBPath();
-
-/**
- * Clean non-seed test data from the test DB so visual regression snapshots
- * aren't affected by records/activities created by earlier tests in the
- * same shard. Mirrors the cleanup in e2e/globalSetup.ts — seed IDs are
- * short (clients: c1..c5, records: r1..r6, visits: v1..v10, activities:
- * ev_0..ev_44, ev_fixed_0..ev_fixed_9) so we exclude known seed prefixes
- * rather than relying on length. UUID test data is never prefixed with these.
- */
-export function cleanTestData() {
-  try {
-    // dayview-column-reorder.spec.ts reorders seed masters/locations via
-    // PUT /masters/reorder (permanent sort_order writes) — that permutes the
-    // sidebar MasterLegend and corrupts every full-page baseline. Reset the
-    // seed order (seed.py _seed_masters/_seed_locations) alongside the row
-    // cleanup so visual baselines are deterministic.
-    sqliteExecWithRetry(`sqlite3 "${DB_PATH}" "
-      DELETE FROM payments WHERE length(id) > 3;
-      DELETE FROM visits WHERE length(id) > 3;
-      DELETE FROM records WHERE length(id) > 3;
-      DELETE FROM activities WHERE id NOT LIKE 'ev\\_%' ESCAPE '\\' AND id NOT LIKE 'ev_fixed_%';
-      DELETE FROM clients WHERE length(id) > 3;
-      UPDATE masters SET sort_order = CASE id WHEN 'm1' THEN 0 WHEN 'm2' THEN 1 WHEN 'm3' THEN 2 WHEN 'm4' THEN 3 WHEN 'm5' THEN 4 WHEN 'm7' THEN 5 ELSE sort_order END WHERE id IN ('m1','m2','m3','m4','m5','m7');
-      UPDATE locations SET sort_order = CASE id WHEN 'alpika' THEN 0 WHEN 'grand' THEN 1 WHEN 'p1389' THEN 2 ELSE sort_order END WHERE id IN ('alpika','grand','p1389');
-    "`);
-  } catch (err: any) {
-    const msg = String(err?.stderr || err?.message || '');
-    if (msg.includes('no such table') || msg.includes('no such file') || msg.includes('unable to open database')) {
-      return; // DB not ready yet — ok
-    }
-    // Real errors (including a lock that survived retries) should propagate —
-    // silent no-op here would leave stale UUID data poisoning later tests.
-    throw err;
-  }
-}
 
 /**
  * Resolve a record's activity.start as ISO date (YYYY-MM-DD).

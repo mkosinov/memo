@@ -7,13 +7,16 @@
  * Standalone mode (manual playwright test):
  *   SHARD_ID not set → uses TEST_DB_PATH or default test_memo.db
  *
- * Removes all non-seed data (clients, records, payments, visits, activities)
+ * Removes all non-seed data (clients, records, payments, visits, activities,
+ * visitors) and restores seed attributes (masters/locations sort_order) via
+ * the shared canonical RESET_SQL (fixtures/seed-reset.ts, GH #252)
  * so each test run starts with a clean state.
  *
  * Seed IDs are short (c1..c5, r1..r6, v1..v10, p1..p6, ev_0..ev_44)
  * so length checks distinguish them from UUID test data.
  */
 import path from 'path';
+import { RESET_SQL } from './fixtures/seed-reset';
 import { sqliteExecWithRetry } from './fixtures/sqlite-exec';
 import { WARMUP_ROUTES } from './fixtures/warmup-routes';
 
@@ -28,16 +31,12 @@ export default async function globalSetup() {
 
   console.log(`[globalSetup] Cleaning DB: ${dbPath}${shardId ? ` (shard ${shardId})` : ''}`);
 
-  // Delete all non-seed data (children first to respect FK constraints).
-  // Order: payments → visits → records → activities → clients.
+  // Delete all non-seed data + restore seed attributes via the shared
+  // canonical RESET_SQL (GH #252 — children first to respect FK constraints;
+  // the exact statement lives in fixtures/seed-reset.ts and is also consumed
+  // by the per-test reset fixture).
   try {
-    sqliteExecWithRetry(`sqlite3 "${dbPath}" "
-      DELETE FROM payments WHERE length(id) > 3;
-      DELETE FROM visits WHERE length(id) > 3;
-      DELETE FROM records WHERE length(id) > 3;
-      DELETE FROM activities WHERE length(id) > 5 AND id NOT LIKE 'ev_fixed_%';
-      DELETE FROM clients WHERE length(id) > 3;
-    "`);
+    sqliteExecWithRetry(`sqlite3 "${dbPath}" "${RESET_SQL}"`);
   } catch (err: any) {
     // Only swallow "no such table" (DB not yet created) or "no such file"
     const msg = String(err?.stderr || err?.message || '');

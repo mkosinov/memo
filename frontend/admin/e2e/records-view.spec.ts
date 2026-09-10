@@ -1,4 +1,5 @@
-import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
+import { test, expect } from './fixtures/test';
+import type { APIRequestContext, Page } from '@playwright/test';
 import { waitForRecordsReady, openModal } from './fixtures/helpers';
 import { closeCombobox, openCombobox, searchAndSelect } from './helpers/combobox';
 import { switchToRecordsTab } from './fixtures/scenarios';

@@ -162,9 +162,25 @@ The flow:
 - Known issue: some tests poll for DB writes after API success, and the writes aren't always visible to the `sqlite3` CLI (WAL mode race). These are tracked separately as flaky tests.
 
 ### Global setup / cleanup
-- `frontend/admin/e2e/globalSetup.ts` runs before any Playwright test
-- In shard mode (`SHARD_ID` set), it validates env vars and cleans stale test data
-- `frontend/admin/e2e/fixtures/cleanTestData.ts` removes records created during tests to keep shard DBs idempotent across reruns
+- `frontend/admin/e2e/globalSetup.ts` runs once per Playwright run: it resets the DB via the same canonical `RESET_SQL` as the per-test reset (single source of truth — `e2e/fixtures/seed-reset.ts`), then runs the #152 seed-contract checks (seed rows present, current-week activities non-empty) and the standalone route warmup.
+- The old manual `cleanTestData()` helper is deleted (GH #252) — per-test cleaning is now automatic, see below.
+
+### Per-test seed reset (GH #252)
+
+Every e2e test now starts from canonical seed state: the wrapper `test` (`e2e/fixtures/test.ts`) registers an auto test-scoped fixture that resets the DB **before every test, incl. retries** — nothing an earlier test (incl. a crashed one) left behind can leak into yours. This kills the shared-shard order-dependence flake class.
+
+What a spec author must know:
+
+- **Import `test` from `./fixtures/test` in every spec** (standing rule — grep check rides reviews; the wrapper re-exports `expect`). Importing from `@playwright/test` silently drops the reset. The reset runs `resetToSeed()` from `e2e/fixtures/seed-reset.ts` — ONE canonical `RESET_SQL`, shared verbatim with `globalSetup` (children-first DELETEs incl. visitors, prefix-filtered activities, `sort_order` CASE-restores, `PRAGMA busy_timeout`), so no drift is possible.
+- **Never mutate or delete seed rows.** The reset deletes non-seed rows only — it does NOT restore seed rows (`seed.py` stays the single seed source). Untouchable: clients `c1–c5`, visitors `vis1–vis10`, records `r1–r6`, visits `v1–v10`, payments `p1–p6`, activities `ev_*`/`ev_fixed_*`, and the canonical `sort_order` of masters `m1–m5`/`m7` + locations `alpika`/`grand`/`p1389`. Build your own rows via `e2e/fixtures/factories.ts` (`createTestClient`, `createTestRecord`, `createTestVisit`, …); clean them up records-before-clients.
+- **Reset does NOT heal corrupted seed rows.** Crashed/leaked non-seed data self-heals on the next reset, but a mutated/deleted seed row needs a reseed. From the repo root:
+  ```bash
+  rm backend/test_memo.db
+  cd backend && DATABASE_URL="sqlite+aiosqlite:///$(pwd)/test_memo.db" PYTHONPATH=src uv run python -m seed.seed
+  ```
+  The next `test-all.sh` run re-copies the reseeded master to both shard DBs.
+- **Local runs are serial.** `workers: 1` is pinned in `playwright.config.ts` (CI was already serial) and the fixture throws a labeled error when `workers > 1` — an accidental parallel override fails loudly instead of silently reintroducing reset races.
+- **Retries snapshot the DB first.** When a test is retried (`testInfo.retry > 0`; CI sets `retries: 1`), the fixture saves a consistent pre-reset copy (`db-before-reset.sqlite`) into the test's output dir — the crashed state survives the reset as failure evidence.
 
 ## CI vs local
 
@@ -198,8 +214,8 @@ The flow:
 ⁶ Harness policy: local e2e is an investigation tool, never a gate; CI owns e2e.
 
 In CI:
-- `retries: 1` (vs 0 locally) — one automatic retry for flaky tests
-- `workers: 1` (vs undefined locally) — sequential shard execution inside each project
+- `retries: 1` (vs 0 locally) — one automatic retry for flaky tests; a retry first snapshots the DB (see [Per-test seed reset](#per-test-seed-reset-gh-252))
+- `workers: 1` everywhere (config-pinned since GH #252, not just CI) — per-test DB resets cannot race across workers; the fixture throws on `workers > 1`
 - `forbidOnly: true` — `test.only` blocks CI from passing
 
 ## Known caveats

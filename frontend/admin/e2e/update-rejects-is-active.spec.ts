@@ -10,7 +10,7 @@
  * typed MasterUpdate — tsc fails on stray fields), so this is an
  * API-level scenario with DB verification.
  */
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures/test';
 import {
   cleanup,
   createTestClient,

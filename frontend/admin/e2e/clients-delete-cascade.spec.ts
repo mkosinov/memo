@@ -11,7 +11,7 @@
  *   · visitors + their visits + tag join rows are gone
  *   · the client row is physically deleted
  */
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures/test';
 import {
   cleanup,
   cleanupRecord,

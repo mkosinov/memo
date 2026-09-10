@@ -1,4 +1,5 @@
-import { test, expect, type Page, type Response } from '@playwright/test';
+import { test, expect } from './fixtures/test';
+import type { Page, Response } from '@playwright/test';
 import {
   cleanup,
   createTestActivity,

@@ -1,4 +1,5 @@
-import { expect, type Page } from '@playwright/test';
+import { expect } from './fixtures/test';
+import type { Page } from '@playwright/test';
 import {
   waitForRecordsReady,
   waitForScheduleReady,

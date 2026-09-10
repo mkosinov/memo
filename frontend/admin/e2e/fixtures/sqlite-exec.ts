@@ -1,7 +1,7 @@
 /**
  * sqlite-exec.ts — Shared busy-wait retry helper for `sqlite3` CLI invocations.
  *
- * Extracted from `db-query.ts` so `globalSetup.ts` and `cleanTestData()`
+ * Extracted from `db-query.ts` so `globalSetup.ts` and `seed-reset.ts`
  * can reuse the SAME lock-retry semantics instead of each having their
  * own (inconsistent) handling of "database is locked".
  */

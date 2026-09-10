@@ -6,7 +6,7 @@
  * 422; correct body → 204 one-transaction delete. No rows must change on
  * the failed attempts.
  */
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures/test';
 import {
   cleanup,
   cleanupRecord,

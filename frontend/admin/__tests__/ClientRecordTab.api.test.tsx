@@ -223,13 +223,8 @@ describe('ClientRecordTab — API interactions', () => {
     expect(screen.getByTestId('dep-visits')).toBeInTheDocument();
     expect(screen.getByTestId('dep-payments')).toBeInTheDocument();
 
-    // Type-to-confirm — record label derives from the activity start
-    fireEvent.change(screen.getByTestId('delete-dialog-confirm-input'), {
-      target: { value: '15 мая · 14:00' },
-    });
-    // Select the two cascade choice deps (record_tags is auto — no click)
-    fireEvent.click(screen.getByText(/Посещения: 2/));
-    fireEvent.click(screen.getByText(/Платежи: 1/));
+    // The confirm checkbox unlocks "Удалить" (visits+payments resolve cascade)
+    fireEvent.click(screen.getByTestId('delete-dialog-confirm-checkbox'));
     fireEvent.click(screen.getByTestId('delete-dialog-confirm-btn'));
 
     await waitFor(() => {

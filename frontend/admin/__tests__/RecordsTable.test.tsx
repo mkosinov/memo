@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import React from 'react';
 import type { RecordsContextType } from '../contexts/RecordsContext';
 import type {
@@ -397,19 +397,11 @@ describe('RecordsTable', () => {
     fireEvent.click(screen.getByRole('menuitem', { name: 'Удалить' }));
 
     await waitFor(() =>
-      expect(screen.getByTestId('delete-dialog-confirm-input')).toBeInTheDocument(),
+      expect(screen.getByTestId('delete-dialog')).toBeInTheDocument(),
     );
 
-    // Pick both user-visible deps (visits, payments) — auto picks `cascade`.
-    fireEvent.click(within(screen.getByTestId('dep-visits')).getByRole('button'));
-    fireEvent.click(within(screen.getByTestId('dep-payments')).getByRole('button'));
-
-    // Type-to-confirm unlocks the button (entityName = formatRecordLabel).
-    const titleText = screen.getByTestId('delete-dialog-title').textContent ?? '';
-    const label = titleText.replace(/^Удаление «записи /, '').replace(/»$/, '');
-    fireEvent.change(screen.getByTestId('delete-dialog-confirm-input'), {
-      target: { value: label },
-    });
+    // The confirm checkbox unlocks "Удалить" (visits+payments resolve cascade)
+    fireEvent.click(screen.getByTestId('delete-dialog-confirm-checkbox'));
     fireEvent.click(screen.getByTestId('delete-dialog-confirm-btn'));
 
     await waitFor(() =>

@@ -145,16 +145,9 @@ test.describe('ActivityDetailsModal — Real User Scenarios', () => {
       await expect(page.locator('[data-testid="dep-visits"]')).toContainText('Посещения: 1 (удалён)');
       await expect(page.locator('[data-testid="dep-payments"]')).toContainText('Платежи: 1 (удалён)');
 
-      // Confirm: pick the cascade deps, type the record label (records have
-      // no name — label derives from the activity start; extract it from
-      // the dialog title instead of recomputing timezones here).
+      // Confirm is gated on the single "Подтверждаю удаление зависимостей" checkbox.
       await expect(page.locator('[data-testid="delete-dialog-confirm-btn"]')).toBeDisabled();
-      await page.locator('[data-testid="dep-visits"]').click();
-      await page.locator('[data-testid="dep-payments"]').click();
-      const title = await page.locator('[data-testid="delete-dialog-title"]').textContent();
-      const label = title?.match(/Удаление «записи (.+)»/)?.[1] ?? '';
-      expect(label).not.toBe('');
-      await confirmDeleteDialog(page, label);
+      await confirmDeleteDialog(page);
 
       // Success toast + dialog closes (text= locator — scenario 1 style:
       // the generic [role="status"] also matches dnd-kit's empty live region).

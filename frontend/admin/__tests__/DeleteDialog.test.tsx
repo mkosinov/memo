@@ -41,14 +41,13 @@ function renderDialog(props: {
   return { result, onResolve, onArchive };
 }
 
-function typeConfirmName(name: string): void {
-  fireEvent.change(screen.getByPlaceholderText('Введите название для подтверждения'), {
-    target: { value: name },
-  });
+/** Toggle the single "Подтверждаю удаление зависимостей" checkbox (only rendered when choice deps exist). */
+function toggleConfirm(): void {
+  fireEvent.click(screen.getByTestId('delete-dialog-confirm-checkbox'));
 }
 
 const confirmBtn = (): HTMLButtonElement => {
-  const el = screen.getByText('Удалить').closest('button');
+  const el = screen.getByText(/^Удалить/).closest('button');
   expect(el).not.toBeNull();
   return el as HTMLButtonElement;
 };
@@ -89,7 +88,7 @@ const MASTER_BLOCKED: DependencyNode[] = [
   { entity: 'master_tags', relation: 'Тег', count: 2, allowed_actions: ['cascade'], message: null },
 ];
 
-// ─── Tests ─────────────────────────────────────────────────────────────────────
+// ─── Tests ────
 
 beforeEach(() => vi.resetAllMocks());
 afterEach(() => vi.restoreAllMocks());
@@ -108,15 +107,14 @@ describe('DeleteDialog — Mode A (resolvable deps, §7.1)', () => {
     expect(screen.getByText(/Удаление «мастера Анна»/)).toBeInTheDocument();
     expect(screen.getByText(/→ Пользователь: 1 \(удалён\)/)).toBeInTheDocument();
     expect(screen.getByText(/→ Теги: 2 \(удалены\)/)).toBeInTheDocument();
-    // auto deps never offer a choice
-    expect(screen.queryByRole('radio')).not.toBeInTheDocument();
+    // auto deps never offer a choice — no checkbox anywhere in the dialog
     expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
     // only the auto lines render in the deps list
     expect(screen.getAllByTestId(/^dep-/)).toHaveLength(2);
     expect(screen.getByText('Отмена')).toBeInTheDocument();
   });
 
-  it('disables "Удалить" until the typed name matches (case/trim-insensitive)', () => {
+  it('all-auto: no confirm checkbox, "Удалить" enabled immediately with no counter', () => {
     renderDialog({
       entityName: 'Анна',
       entityType: 'master',
@@ -127,16 +125,8 @@ describe('DeleteDialog — Mode A (resolvable deps, §7.1)', () => {
     });
 
     const confirm = confirmBtn();
-    expect(confirm).toBeDisabled();
-
-    typeConfirmName('Wrong');
-    expect(confirm).toBeDisabled();
-
-    typeConfirmName('Анна');
     expect(confirm).toBeEnabled();
-
-    typeConfirmName('  анна  ');
-    expect(confirm).toBeEnabled();
+    expect(confirm.textContent).toBe('Удалить');
   });
 
   it('confirm calls onResolve(id, {}) when all deps are auto, then onDone', async () => {
@@ -150,7 +140,6 @@ describe('DeleteDialog — Mode A (resolvable deps, §7.1)', () => {
       onCancel: vi.fn(),
     });
 
-    typeConfirmName('Анна');
     fireEvent.click(confirmBtn());
 
     await waitFor(() => expect(onResolve).toHaveBeenCalledWith('m1', {}));
@@ -185,7 +174,6 @@ describe('DeleteDialog — Mode A (resolvable deps, §7.1)', () => {
       onResolve,
     });
 
-    typeConfirmName('Анна');
     fireEvent.click(confirmBtn());
 
     await waitFor(() => expect(screen.getByText(/boom/)).toBeInTheDocument());
@@ -194,7 +182,7 @@ describe('DeleteDialog — Mode A (resolvable deps, §7.1)', () => {
 });
 
 describe('DeleteDialog — Mode A (client with user-choice deps)', () => {
-  it('renders ○ nullify / → cascade lines with counts and cascade_preview; auto tags not selectable', () => {
+  it('renders ○ nullify / → cascade lines with counts and cascade_preview; exactly one confirm checkbox', () => {
     renderDialog({
       entityName: 'Иван',
       entityType: 'client',
@@ -207,8 +195,12 @@ describe('DeleteDialog — Mode A (client with user-choice deps)', () => {
     expect(screen.getByText(/○ Записи: 47 \(отвязаны от клиента\)/)).toBeInTheDocument();
     expect(screen.getByText(/→ Посетители: 12 \(удалены; визиты: 45\)/)).toBeInTheDocument();
     expect(screen.getByText(/→ Теги: 5 \(удалены\)/)).toBeInTheDocument();
-    // the auto tags row is not a selectable control
-    expect(screen.getByTestId('dep-client_tags').querySelector('button')).toBeNull();
+    // the dep rows are plain informational lines — no per-row selection
+    expect(screen.getByTestId('dep-records').querySelector('input')).toBeNull();
+    expect(screen.getByTestId('dep-visitors').querySelector('input')).toBeNull();
+    // the single confirm checkbox carries the label text
+    expect(screen.getAllByRole('checkbox')).toHaveLength(1);
+    expect(screen.getByLabelText('Подтверждаю удаление зависимостей')).toBeInTheDocument();
   });
 
   it('Service photos nullify renders the spec §7.1 exact string "(отвязаны от услуги)"', () => {
@@ -226,7 +218,7 @@ describe('DeleteDialog — Mode A (client with user-choice deps)', () => {
     expect(screen.getByText('○ Фото: 12 (отвязаны от услуги)')).toBeInTheDocument();
   });
 
-  it('confirm sends only non-auto resolutions (auto client_tags omitted), then onDone', async () => {
+  it('confirm is gated on the checkbox; sends all choice resolutions (auto client_tags omitted)', async () => {
     const onDone = vi.fn();
     const { onResolve } = renderDialog({
       entityName: 'Иван',
@@ -237,14 +229,10 @@ describe('DeleteDialog — Mode A (client with user-choice deps)', () => {
       onCancel: vi.fn(),
     });
 
-    // nothing selected yet — button stays disabled even with the name typed
-    typeConfirmName('Иван');
+    // unchecked — button stays disabled
     expect(confirmBtn()).toBeDisabled();
 
-    fireEvent.click(screen.getByText(/Записи: 47/)); // select nullify
-    expect(confirmBtn()).toBeDisabled(); // visitors still unresolved
-
-    fireEvent.click(screen.getByText(/Посетители: 12/)); // select cascade
+    toggleConfirm();
     expect(confirmBtn()).toBeEnabled();
 
     fireEvent.click(confirmBtn());
@@ -254,6 +242,26 @@ describe('DeleteDialog — Mode A (client with user-choice deps)', () => {
       expect(onResolve).toHaveBeenCalledWith('c1', { records: 'nullify', visitors: 'cascade' }),
     );
     await waitFor(() => expect(onDone).toHaveBeenCalledTimes(1));
+  });
+
+  it('unchecking re-locks "Удалить"; clicking the disabled button sends nothing', async () => {
+    const { onResolve } = renderDialog({
+      entityName: 'Иван',
+      entityType: 'client',
+      entityId: 'c1',
+      dependencies: CLIENT_MIXED,
+      onDone: vi.fn(),
+      onCancel: vi.fn(),
+    });
+
+    toggleConfirm();
+    expect(confirmBtn()).toBeEnabled();
+
+    toggleConfirm(); // uncheck
+    expect(confirmBtn()).toBeDisabled();
+
+    fireEvent.click(confirmBtn()); // disabled — no call goes through
+    expect(onResolve).not.toHaveBeenCalled();
   });
 
   it('shows an inline error when resolve rejects; onDone is not called', async () => {
@@ -269,9 +277,7 @@ describe('DeleteDialog — Mode A (client with user-choice deps)', () => {
       onResolve,
     });
 
-    fireEvent.click(screen.getByText(/Записи: 47/));
-    fireEvent.click(screen.getByText(/Посетители: 12/));
-    typeConfirmName('Иван');
+    toggleConfirm();
     fireEvent.click(confirmBtn());
 
     await waitFor(() => expect(screen.getByText(/client boom/)).toBeInTheDocument());
@@ -301,10 +307,10 @@ describe('DeleteDialog — Mode A (record with cascade deps, Addendum 13)', () =
     expect(screen.getByText(/Удаление «записи 15 мая · 14:00»/)).toBeInTheDocument();
     expect(screen.getByText(/→ Посещения: 2 \(удалены\)/)).toBeInTheDocument();
     expect(screen.getByText(/→ Платежи: 1 \(удалён\)/)).toBeInTheDocument();
-    // record_tags is AUTO — fixed "Теги" line, not a choice button
+    // record_tags is AUTO — fixed "Теги" line, all rows non-interactive
     const tagsRow = screen.getByTestId('dep-record_tags');
     expect(tagsRow).toHaveTextContent('→ Теги: 3 (удалены)');
-    expect(tagsRow.querySelector('button')).toBeNull();
+    expect(tagsRow.querySelector('input')).toBeNull();
   });
 
   it('confirm sends cascade resolutions for visits+payments; auto record_tags omitted', async () => {
@@ -318,11 +324,10 @@ describe('DeleteDialog — Mode A (record with cascade deps, Addendum 13)', () =
       onCancel: vi.fn(),
     });
 
-    typeConfirmName('15 мая · 14:00');
-    expect(confirmBtn()).toBeDisabled(); // visits/payments unresolved
+    expect(confirmBtn()).toBeDisabled(); // checkbox unchecked
 
-    fireEvent.click(screen.getByText(/Посещения: 2/)); // select cascade
-    fireEvent.click(screen.getByText(/Платежи: 1/)); // select cascade
+    toggleConfirm();
+    expect(confirmBtn()).toBeEnabled();
     fireEvent.click(confirmBtn());
 
     await waitFor(() =>
@@ -449,13 +454,15 @@ describe('DeleteDialog — Mode A (material 409, GH #223 §7)', () => {
     });
 
     // Plural join label (like service_tags → «Теги»), not the raw singular
-    // relation «Услуга»; rendered as fixed text, not a choice button.
+    // relation «Услуга»; rendered as fixed text, not a choice control.
     const row = screen.getByTestId('dep-service_materials');
     expect(row).toHaveTextContent('→ Услуги: 1 (удалён)');
-    expect(row.querySelector('button')).toBeNull();
+    expect(row.querySelector('input')).toBeNull();
+    // all-auto tree — no confirm checkbox anywhere
+    expect(screen.queryByTestId('delete-dialog-confirm-checkbox')).not.toBeInTheDocument();
   });
 
-  it('type-confirm alone unlocks "Удалить"; resolve called with {} (auto dep omitted)', async () => {
+  it('all-auto: button enabled immediately; resolve called with {} (auto dep omitted)', async () => {
     const onDone = vi.fn();
     const { onResolve } = renderDialog({
       entityName: 'Акварель',
@@ -466,9 +473,7 @@ describe('DeleteDialog — Mode A (material 409, GH #223 §7)', () => {
       onCancel: vi.fn(),
     });
 
-    expect(confirmBtn().disabled).toBe(true);
-    typeConfirmName('Акварель');
-    expect(confirmBtn().disabled).toBe(false);
+    expect(confirmBtn()).toBeEnabled();
     fireEvent.click(confirmBtn());
 
     await waitFor(() => expect(onResolve).toHaveBeenCalledWith('mat1', {}));
@@ -493,6 +498,6 @@ describe('DeleteDialog — Mode A (material 409, GH #223 §7)', () => {
 
     const row = screen.getByTestId('dep-service_materials');
     expect(row).toHaveTextContent('→ Материалы: 2 (удалены)');
-    expect(row.querySelector('button')).toBeNull();
+    expect(row.querySelector('input')).toBeNull();
   });
 });

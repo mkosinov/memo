@@ -55,7 +55,6 @@ test.describe('S3 — Master delete blocked by activities → archive instead', 
         .toHaveText('Нельзя удалить: есть 3 активности.');
       await expect(page.locator('[data-testid="delete-dialog-archive-btn"]')).toBeVisible();
       await expect(page.locator('[data-testid="delete-dialog-confirm-btn"]')).toHaveCount(0);
-      await expect(page.locator('[data-testid="delete-dialog-confirm-input"]')).toHaveCount(0);
 
       // 4. ACTION — archive. Capture the POST /archive call.
       const archivePromise = page.waitForResponse((resp) =>

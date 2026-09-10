@@ -91,17 +91,14 @@ test.describe('S4 — Client delete with nullify + cascade resolutions', () => {
       await expect(page.locator('[data-testid="dep-visitors"]')).toContainText('визиты: 2');
       await expect(page.locator('[data-testid="dep-client_tags"]')).toContainText('Теги');
 
-      // Choice deps unlock the confirm only after being picked. Clicking
-      // auto-dep rows is harmless (no onClick wired) — click the two choices.
+      // Confirm is gated on the single "Подтверждаю удаление зависимостей" checkbox.
       await expect(page.locator('[data-testid="delete-dialog-confirm-btn"]')).toBeDisabled();
-      await page.locator('[data-testid="dep-records"]').click();
-      await page.locator('[data-testid="dep-visitors"]').click();
 
-      // 4. ACTION — capture the resolve call; type the name; confirm.
+      // 4. ACTION — capture the resolve call; confirm.
       const resolvePromise = page.waitForResponse((resp) =>
         resp.url().includes(`/api/v1/clients/${client.id}`) && resp.request().method() === 'DELETE'
       );
-      await confirmDeleteDialog(page, client.name);
+      await confirmDeleteDialog(page);
       const resolve = await resolvePromise;
       expect(resolve.status()).toBe(204);
       const postBody = () => {
@@ -213,7 +210,7 @@ test.describe('S4 — Client delete with nullify + cascade resolutions', () => {
       const resolvePromise = page.waitForResponse((resp) =>
         resp.url().includes(`/api/v1/clients/${client.id}`) && resp.request().method() === 'DELETE'
       );
-      await confirmDeleteDialog(page, client.name);
+      await confirmDeleteDialog(page);
       const resolve = await resolvePromise;
       expect(resolve.status()).toBe(204);
       const postBody = () => {

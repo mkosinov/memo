@@ -23,7 +23,6 @@ import {
   waitForToast,
 } from './fixtures/helpers';
 import { queryDB, queryDBRow, queryDBRows } from './fixtures/db-query';
-import { displayMasterName } from '@/lib/utils';
 
 let userCounter = 0;
 function uniquePhone(): string {
@@ -44,7 +43,6 @@ test.describe('S2 — Master delete with no activities (auto cascades)', () => {
 
     try {
       await waitForMastersReady(page);
-      const displayName = displayMasterName(master);
       const row = page.locator(`[data-testid="master-row-${master.id}"]`);
       await expect(row).toBeVisible({ timeout: 10_000 });
 
@@ -72,17 +70,16 @@ test.describe('S2 — Master delete with no activities (auto cascades)', () => {
       await expect(page.locator('[data-testid="dep-master_tags"]')).toContainText('Теги');
       await expect(page.locator('[data-testid="dep-master_tags"]')).toContainText('2');
       await expect(page.locator('[data-testid="dep-master_tags"]')).toContainText('удалены');
-      // Auto deps are plain <li>s — no choice buttons inside them.
-      await expect(page.locator('[data-testid="dep-users"] button')).toHaveCount(0);
-      await expect(page.locator('[data-testid="dep-master_tags"] button')).toHaveCount(0);
-      // Confirm gated on the typed name.
-      await expect(page.locator('[data-testid="delete-dialog-confirm-btn"]')).toBeDisabled();
+      // Auto deps are plain <li>s — no choice checkboxes inside them.
+      await expect(page.locator('[data-testid="dep-users"] label')).toHaveCount(0);
+      await expect(page.locator('[data-testid="dep-master_tags"] label')).toHaveCount(0);
+      // All deps auto — confirm is enabled immediately (no choice, no checkbox).
 
-      // ACTION — capture the resolve call; type the name; confirm.
+      // ACTION — capture the resolve call; confirm.
       const resolvePromise = page.waitForResponse((resp) =>
         resp.url().includes(`/api/v1/masters/${master.id}`) && resp.request().method() === 'DELETE'
       );
-      await confirmDeleteDialog(page, displayName);
+      await confirmDeleteDialog(page);
       const resolve = await resolvePromise;
       const postBody = () => {
         try { return JSON.parse(resolve.request().postData() ?? ''); }

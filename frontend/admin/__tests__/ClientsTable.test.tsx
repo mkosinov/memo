@@ -230,13 +230,9 @@ describe('ClientsTable', () => {
     fireEvent.click(screen.getAllByLabelText(/Действия/)[0]);
     fireEvent.click(screen.getByText('Удалить'));
 
-    await waitFor(() => expect(screen.getByTestId('delete-dialog-confirm-input')).toBeInTheDocument());
-    // Pick the choice deps (nullify records, cascade visitors) + type-to-confirm
-    fireEvent.click(screen.getByText(/Записи: 47/));
-    fireEvent.click(screen.getByText(/Посетители: 12/));
-    fireEvent.change(screen.getByTestId('delete-dialog-confirm-input'), {
-      target: { value: 'Анна Иванова' },
-    });
+    await waitFor(() => expect(screen.getByTestId('delete-dialog')).toBeInTheDocument());
+    // The confirm checkbox unlocks "Удалить" (resolutions cover both choice deps)
+    fireEvent.click(screen.getByTestId('delete-dialog-confirm-checkbox'));
     fireEvent.click(screen.getByTestId('delete-dialog-confirm-btn'));
 
     await waitFor(() =>

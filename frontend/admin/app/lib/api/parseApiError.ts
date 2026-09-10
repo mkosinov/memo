@@ -29,6 +29,11 @@ const CODE_DEFAULTS: Record<string, string> = {
   VALIDATION_ERROR: 'Проверьте правильность заполнения полей',
   INTEGRITY_VIOLATION: 'Нарушение целостности данных',
   INTERNAL_ERROR: 'Ошибка сервера',
+  // GH #247: auth errors (§3.6). LOGIN tests assert the credentials message.
+  AUTH_INVALID_CREDENTIALS: 'Неверный телефон или пароль',
+  AUTH_LOCKED_OUT: 'Слишком много попыток входа — аккаунт временно заблокирован',
+  AUTH_UNAUTHORIZED: 'Требуется вход',
+  AUTH_FORBIDDEN: 'Недостаточно прав для этого действия',
 };
 
 /**

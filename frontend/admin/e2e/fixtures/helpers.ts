@@ -497,12 +497,16 @@ export async function clickRowArchiveAction(
 }
 
 /**
- * Type the entity name into the DeleteDialog confirm field and click confirm.
- * The confirm button enables only when the typed name matches (Mode A).
+ * Confirm the DeleteDialog (Mode A): check the "Подтверждаю удаление зависимостей"
+ * checkbox (rendered only when choice deps exist) and click "Удалить".
+ * All-auto trees have no checkbox — the button is enabled immediately.
  */
-export async function confirmDeleteDialog(page: Page, entityName: string) {
+export async function confirmDeleteDialog(page: Page) {
   await expect(page.locator('[data-testid="delete-dialog"]')).toBeVisible({ timeout: 10_000 });
-  await page.locator('[data-testid="delete-dialog-confirm-input"]').fill(entityName);
+  const checkbox = page.locator('[data-testid="delete-dialog-confirm-checkbox"]');
+  if (await checkbox.count()) {
+    await checkbox.check();
+  }
   await expect(page.locator('[data-testid="delete-dialog-confirm-btn"]')).toBeEnabled();
   await page.locator('[data-testid="delete-dialog-confirm-btn"]').click();
 }

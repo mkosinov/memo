@@ -542,11 +542,8 @@ describe('MastersTable', () => {
     fireEvent.click(screen.getAllByLabelText(/Действия/)[0]);
     fireEvent.click(screen.getByText('Удалить'));
 
-    await waitFor(() => expect(screen.getByTestId('delete-dialog-confirm-input')).toBeInTheDocument());
-    // Type-to-confirm unlocks the button
-    fireEvent.change(screen.getByTestId('delete-dialog-confirm-input'), {
-      target: { value: 'Середа Ольга' },
-    });
+    await waitFor(() => expect(screen.getByTestId('delete-dialog')).toBeInTheDocument());
+    // All deps auto — no choice checkboxes, button enabled immediately
     fireEvent.click(screen.getByTestId('delete-dialog-confirm-btn'));
 
     await waitFor(() => expect(mockResolveDeleteMaster).toHaveBeenCalledWith('m1', {}));

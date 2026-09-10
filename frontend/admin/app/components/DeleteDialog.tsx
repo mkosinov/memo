@@ -7,9 +7,11 @@ import type { DependencyNode } from '@memo/api-client';
 // ─── DeleteDialog — shared destructive-action dialog (GH #207 §7) ─────────────
 //
 // Two modes (§7.1/§7.2):
-//  * Mode A — resolvable + auto deps: type-to-confirm input unlocks "Удалить";
-//    confirming calls resolveDelete (DELETE /{id} WITH resolutions body;
-//    auto deps omitted → server resolves them per §6 rule 3).
+//  * Mode A — resolvable + auto deps: the dep list is informational; a single
+//    "Подтверждаю удаление зависимостей" checkbox gates "Удалить" (all-auto trees have no
+//    checkbox and confirm immediately); confirming calls resolveDelete
+//    (DELETE /{id} WITH resolutions body — every choice dep resolved with its
+//    only allowed action; auto deps omitted → server resolves them per §6 rule 3).
 //  * Mode B — blocked by activities (`allowed_actions: []`): delete is not
 //    offered, primary action is "Архивировать" (POST /{id}/archive).
 //
@@ -24,7 +26,7 @@ import type { DependencyNode } from '@memo/api-client';
 export type DeleteDialogEntityType = 'master' | 'location' | 'service' | 'material' | 'client' | 'record';
 
 export interface DeleteDialogProps {
-  /** Human-readable entity name — shown in the title and matched by the type-to-confirm field. */
+  /** Human-readable entity name — shown in the dialog title. */
   entityName: string;
   /** Entity kind — used for the dialog title wording ("«мастера Анна»" etc.). */
   entityType: DeleteDialogEntityType;
@@ -150,8 +152,7 @@ export function DeleteDialog({
   onDone,
   onCancel,
 }: DeleteDialogProps) {
-  const [confirmName, setConfirmName] = useState('');
-  const [selected, setSelected] = useState<Record<string, string>>({});
+  const [confirmed, setConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -168,8 +169,7 @@ export function DeleteDialog({
     [dependencies],
   );
 
-  const nameMatches = confirmName.trim().toLowerCase() === entityName.trim().toLowerCase();
-  const allChoiceSelected = choiceDeps.every((d) => selected[d.entity] !== undefined);
+  const needsConfirm = choiceDeps.length > 0;
 
   useEffect(() => {
     const handler = (e: KeyboardEvent): void => {
@@ -183,10 +183,13 @@ export function DeleteDialog({
     setBusy(true);
     setError(null);
     try {
-      // Only non-auto resolutions go into the body (§6 rule 3) — auto deps
-      // (join tables, Master→users per §4.1, tariffs, photos) are resolved
-      // server-side and omitted from the payload.
-      await onResolve(entityId, selected);
+      // Every choice dep resolves with its only allowed action (the §4 matrix
+      // gives each exactly one today). Auto deps stay OUT of the body (§6
+      // rule 3) — the server resolves them.
+      const resolutions = Object.fromEntries(
+        choiceDeps.map((d) => [d.entity, d.allowed_actions[0]!]),
+      );
+      await onResolve(entityId, resolutions);
       onDone();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Не удалось удалить. Попробуйте ещё раз.');
@@ -284,7 +287,7 @@ export function DeleteDialog({
     );
   }
 
-  // ── Mode A — resolvable + auto deps (§7.1): type-to-confirm, delete primary. ──
+  // ── Mode A — resolvable + auto deps (§7.1): confirm-checkbox, delete primary. ──
   return overlay(
     <>
       <h2 className="text-sm font-semibold truncate" style={{ color: 'var(--ink)' }} data-testid="delete-dialog-title">
@@ -300,44 +303,37 @@ export function DeleteDialog({
           </li>
         ))}
         {choiceDeps.map((dep) => {
-          const picked = selected[dep.entity] !== undefined;
           const preview = dep.cascade_preview ? `; визиты: ${dep.cascade_preview.visits ?? '?'}` : '';
-          const line = `${actionMarker(dep)} ${depLabel(dep)}: ${dep.count} (${actionSuffix(dep)}${preview})`;
           return (
-            <li key={dep.entity} className="text-sm" data-testid={`dep-${dep.entity}`}>
-              <button
-                type="button"
-                onClick={() =>
-                  setSelected((s) => ({ ...s, [dep.entity]: dep.allowed_actions[0] ?? s[dep.entity]! }))
-                }
-                disabled={busy}
-                className="w-full text-left rounded px-1 py-0.5 hover:bg-[var(--surface)] transition-colors"
-                style={{ color: picked ? 'var(--danger)' : 'var(--ink)', fontWeight: picked ? 600 : 400 }}
-              >
-                {line}
-              </button>
+            <li key={dep.entity} className="text-sm" style={{ color: 'var(--ink-mid)' }} data-testid={`dep-${dep.entity}`}>
+              {`${actionMarker(dep)} ${depLabel(dep)}: ${dep.count} (${actionSuffix(dep)}${preview})`}
             </li>
           );
         })}
       </ul>
-      <input
-        data-testid="delete-dialog-confirm-input"
-        type="text"
-        placeholder="Введите название для подтверждения"
-        value={confirmName}
-        onChange={(e) => setConfirmName(e.target.value)}
-        autoComplete="off"
-        disabled={busy}
-        className="w-full px-3 py-2 text-sm rounded-lg border outline-none"
-        style={{ borderColor: 'var(--line)', backgroundColor: 'var(--white)', color: 'var(--ink)' }}
-      />
+      {needsConfirm && (
+        <label
+          className="flex items-center gap-2 mt-1 cursor-pointer"
+          style={{ color: 'var(--ink)' }}
+        >
+          <input
+            type="checkbox"
+            data-testid="delete-dialog-confirm-checkbox"
+            checked={confirmed}
+            disabled={busy}
+            onChange={() => setConfirmed((c) => !c)}
+            className="shrink-0 rounded accent-[var(--danger)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--danger)] focus-visible:ring-offset-2"
+          />
+          <span className="text-sm font-medium">Подтверждаю удаление зависимостей</span>
+        </label>
+      )}
       {errorBlock}
       <div className="flex justify-end gap-2 mt-3">
         {cancelButton}
         <button
           data-testid="delete-dialog-confirm-btn"
           onClick={handleConfirm}
-          disabled={busy || !nameMatches || !allChoiceSelected}
+          disabled={busy || (needsConfirm && !confirmed)}
           className="px-4 py-2 text-sm rounded-lg text-white transition-colors disabled:opacity-50"
           style={{ backgroundColor: 'var(--danger)' }}
         >

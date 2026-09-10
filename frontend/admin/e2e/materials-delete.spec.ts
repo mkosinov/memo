@@ -117,13 +117,13 @@ test.describe('S1 — Delete material without dependencies', () => {
       const dropdown = await openRowActionDropdown(row);
       await clickRowDelete(dropdown);
 
-      // VERIFY UI — Mode A dialog with the cascaded dep + confirm field.
+      // VERIFY UI — Mode A dialog with the auto-cascaded dep.
       await expect(page.locator('[data-testid="delete-dialog"]')).toBeVisible();
       await expect(page.locator('[data-testid="dep-photos"]')).toContainText('→ Фото: 1 (удалён)');
-      await expect(page.locator('[data-testid="delete-dialog-confirm-btn"]')).toBeDisabled();
 
-      // ACTION — type the title, confirm (real DELETE, body `{resolutions:{}}`).
-      await confirmDeleteDialog(page, material.title);
+      // ACTION — confirm (all deps auto → enabled immediately, real DELETE,
+      // body `{resolutions:{}}`).
+      await confirmDeleteDialog(page);
       await waitForToast(page, 'Материал удалён');
       await expect(page.locator('[data-testid="delete-dialog"]')).toHaveCount(0);
       await expect(row).toHaveCount(0, { timeout: 10_000 });
@@ -182,8 +182,8 @@ test.describe('S5 — Delete linked material (#223): 409 dependency flow', () =>
       await expect(page.locator('[data-testid="dep-service_materials"]')).toContainText(
         '→ Услуги: 1 (удалён)',
       );
-      // Type-to-confirm ALONE unlocks «Удалить» — an auto dep never blocks.
-      await confirmDeleteDialog(page, material.title);
+      // All-auto tree — no confirm checkbox, «Удалить» enabled immediately.
+      await confirmDeleteDialog(page);
       await waitForToast(page, 'Материал удалён');
       await expect(page.locator('[data-testid="delete-dialog"]')).toHaveCount(0);
       await expect(row).toHaveCount(0, { timeout: 10_000 });

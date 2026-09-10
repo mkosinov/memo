@@ -181,18 +181,29 @@ Triggered when the user clicks "Удалить" on an entity row.
 
 ### 7.1 Mode A — No blocking deps (only resolvable + auto)
 
+> **Addendum (2026-09-08, user feedback — iterated the same day):** the type-to-confirm field was REMOVED.
+> The dep list is informational (choice + auto rows share the same line format). When choice deps exist,
+> a single checkbox `☐ Подтверждаю удаление зависимостей` under the list gates the plain `Удалить` button (no counter —
+> a `(N)` counter was tried and removed: the number confused). Every choice dep resolves with its only
+> allowed action (the §4 matrix gives exactly one today); auto deps are omitted from the body as before.
+> All-auto trees like the pictured Service show NO checkbox and confirm immediately.
+> Evolution note: per-row dep checkboxes were tried first and replaced — N checkboxes looked like a
+> per-dep selection, but the matrix offers no choice, so a single confirm checkbox tells the truth.
+> Example (Client): `○ Записи: 47 (отвязаны от клиента)` + `→ Посетители: 12 (удалены; визиты: 45)`
+> as plain lines, then `☐ Подтверждаю удаление зависимостей` + `[Удалить]` (disabled until checked).
+
 ```
 Удаление «услуги Маникюр»
 Будет выполнено:
   → Тарифы: 3 (удалены)
   ○ Фото: 12 (отвязаны от услуги)
   → Теги: 5 (удалены)
-[Введите название для подтверждения] [Удалить] [Отмена]
+[Удалить] [Отмена]
 ```
 
 - `→` = will be deleted (cascade), `○` = will be unlinked (nullify).
-- Auto deps shown (tariffs, tags, photos) but not asked — they execute automatically regardless of user input.
-- Type-to-confirm enabled (matches existing Memo destructive-action pattern — the user types the entity name to unlock "Удалить"). Required whenever anything will be hard-deleted (cascade), even all-auto.
+- Auto deps shown (tariffs, tags) but not asked — they execute automatically regardless of user input; no checkbox.
+- Choice and auto deps render as plain informational lines. With choice deps present, the single «Подтверждаю удаление зависимостей» checkbox gates the button (unchecking re-locks it); all-auto trees show no checkbox and confirm immediately. No counter in the button (see the addendum above).
 - On confirm → `DELETE /{id}` with body `{resolutions: {...}}` for the non-auto deps. If all deps are auto (the pictured Service has zero activities), the `resolutions` body is `{}`. **Auto deps (incl. Master→users per §4.1) are omitted from the body** — they execute automatically.
 
 ### 7.2 Mode B — Blocking deps (activities present)
@@ -314,7 +325,7 @@ Each scenario maps 1:1 to an E2E test (Playwright, `frontend/admin/e2e/`).
 ## 13. Visual Compliance Checks
 
 - [ ] Materials table: "Удалить" on a material succeeds instantly (S1) — no broken dialog state.
-- [ ] Master delete dialog Mode A (S2): shows "→ Пользователь: 1 (удалён)" + "→ Теги: N (удалены)" (both auto-cascade — **no choice**), type-to-confirm field, "Удалить" disabled until name typed.
+- [ ] Master delete dialog Mode A (S2): shows "→ Пользователь: 1 (удалён)" + "→ Теги: N (удалены)" (both auto-cascade — **no choice**), "Удалить" enabled immediately (superseded by the §7.1 addendum: no type-to-confirm, no confirm checkbox for all-auto).
 - [ ] Master delete dialog Mode B (S3): shows "Нельзя удалить: есть 3 активности.", primary button is "[Архивировать]", "Удалить" not shown.
 - [ ] Client delete dialog (S4): shows records nullify + visitors cascade with `cascade_preview` visits count + tags cascade.
 - [ ] "В архив" / "Восстановить" buttons present and working for all 5 entities including Client (S5). **Master archive deactivates the linked user (cascade 3); Master restore reactivates the user.**
@@ -339,7 +350,7 @@ Each scenario maps 1:1 to an E2E test (Playwright, `frontend/admin/e2e/`).
 - [ ] `?status=active|archived|all` filter unchanged (`ArchiveStatus` enum reused); archived rows hidden from default active list.
 - [ ] Client → visitors cascade follows `VisitorService.delete` precedent (visits → payments → visitor_tags → visitor) via an **extracted non-decorated shared core** run inside the single outer `ClientService.resolve_delete` transaction (NOT a per-visitor `@transactional` loop — see §8 atomicity requirement); Client → records nullify (records survive, `client_id=null`; their payments survive).
 - [ ] 409 response contains counters + sums only (`cascade_preview` for Client visitors cascade: `visits` count only — payments excluded as record-scoped, see §5); no individual row data.
-- [ ] Frontend: delete dialog Mode A (resolvable, type-to-confirm) + Mode B (blocked → archive); "В архив"/"Восстановить" for all 5 incl. Client (#198 closed); `PATCH {is_active}` replaced by `POST /archive` + `POST /restore`; delete confirm sends `DELETE /{id}` with body (not a separate POST endpoint).
+- [ ] Frontend: delete dialog Mode A (informational dep list + single «Подтверждаю удаление зависимостей» checkbox — §7.1 addendum) + Mode B (blocked → archive); "В архив"/"Восстановить" for all 5 incl. Client (#198 closed); `PATCH {is_active}` replaced by `POST /archive` + `POST /restore`; delete confirm sends `DELETE /{id}` with body (not a separate POST endpoint).
 - [ ] `PRAGMA foreign_keys=ON` added to the SQLite connect listener in `database.py` (~3 lines, no migration); prod connections enforce FK constraints as a backstop to the service-level transaction. Verify the existing test suite (which already runs FK-on via `conftest.py`) still green — proves the FK-ON world is correct. If any existing raw write path raises on FK-ON, it MUST be fixed in this PR (none expected given the entity set is unchanged).
 - [ ] #184/#185 GenericService contract tests updated: delete = hard, archive/restore contract added; `ServiceService` per-entity delete (conditional on activities) covered.
 - [ ] Backend test suite green; api-client tests green; admin vitest + e2e green (incl. the scenarios S1–S7).

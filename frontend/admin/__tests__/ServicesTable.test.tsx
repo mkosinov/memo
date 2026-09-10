@@ -832,10 +832,8 @@ describe('ServicesTable', () => {
     fireEvent.click(screen.getAllByLabelText(/Действия/)[0]);
     fireEvent.click(screen.getByText('Удалить'));
 
-    await waitFor(() => expect(screen.getByTestId('delete-dialog-confirm-input')).toBeInTheDocument());
-    fireEvent.change(screen.getByTestId('delete-dialog-confirm-input'), {
-      target: { value: 'Картина маслом' },
-    });
+    await waitFor(() => expect(screen.getByTestId('delete-dialog')).toBeInTheDocument());
+    // All deps auto — no confirm checkbox, button enabled immediately
     fireEvent.click(screen.getByTestId('delete-dialog-confirm-btn'));
 
     await waitFor(() => expect(mockResolveDeleteService).toHaveBeenCalledWith('svc-1', {}));

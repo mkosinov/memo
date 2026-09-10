@@ -5,6 +5,15 @@
 - **Sibling:** #263 (master role v1 — data scoping, phone masking, payments, photos, role-gated nav) — separate issue, later design; nothing from #263 is built here.
 - **Seam amendments to #247 (committed together with this spec, before its IMPL):** (1) `master` snapshot in `GET /auth/me` gets `avatar_url`; (2) the user block shows avatar + name only — fallback «Аноним», no phone, no role label; (3) the T13 logout control is pinned to a text button «Выйти» — the popup menu defined here replaces it.
 
+## 0. Поправки после staff-реструктуризации #266 (решения юзера, 2026-09-10)
+
+Этим разделом уточняются пункты ниже; полная перепись спеки под staff-словарь — задачей T12 плана #266.
+
+- **Специализация — только чтение** (решение юзера 10.09; отменяет чекбоксы §5.2 и поле `specialties` в PUT §4). Источник — вложенная master-запись карточки сотрудника (`master: {specialty, …} | null`, мир #266): в «Моих данных» специализация отображается read-строкой, только при наличии мастер-секции. Управляет — админ в карточке сотрудника (#266 D5); сотрудник специализации не пишет.
+- **Источники полей:** имя/фамилия/аватар — карточка сотрудника (staff; есть у всех, включая СММ), специализация — только у ведущих (master-секция). Флаг `has_master` §4 заменяется на пару «карточка существует» + «master-секция существует»; «Аноним» (D9) = учётка **без карточки сотрудника**.
+- **Строка роли в форме** остаётся «Роль (read-only)». Решение юзера (10.09): «уровень доступа стандартно выдаётся через должности, `user.roles` — для особых случаев» — это отдельная ролевая модель, проектируется в #263 и позже поправит эту строку; кабинет её не строит.
+- **Зависимости:** строго после #247 IMPL **и после #266**.
+
 ## 1. Context (live tree, 2026-09-10)
 
 - Theme toggle lives in the Menubar bottom row (`frontend/admin/app/components/layout/Menubar.tsx:685-697`); state in `UIContext` (`theme`, `toggleTheme`, sets `data-theme`, `frontend/admin/contexts/UIContext.tsx:35,90-98`). **No persistence** — resets to light on reload. `UserSettings.theme` column exists and stays unwired (NOT-build).
@@ -165,5 +174,5 @@ All columns optional. No `passport_photo` column in v1 (placeholder decision); i
 
 ## 10. Sequencing
 
-- Strictly after #247 IMPL (incl. the three seam amendments above).
+- Strictly after #247 IMPL **and after #266** (staff restructuring; its plan task T12 rewrites this spec's vocabulary per §0 above; incl. the three seam amendments to #247).
 - #263 stays strictly after #262.

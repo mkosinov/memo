@@ -33,6 +33,10 @@ A Payment is a financial transaction for a Record. Payments track how much a cli
 - **Delete payment:** Direct API call
 - **Financial summary:** totalPaid = sum(payment.amounts), remaining = displayTotal - totalPaid
 
+## Master role (#263)
+
+Для роли `master` (спека `docs/specs/2026-09-10-master-role-design.md`): **полный CUD оплат своих записей** (мастер принимает оплату на месте) — дельта к #247, где мастер имел только read. Скоуп — через `payment → record → activity.master_id = master_key` (своей колонки master_id у оплаты нет): чужие оплаты list не отдаёт, точечные операции → 404; `GET /totals` молча исключает чужие record_id из выдачи (контракт ответа не меняется).
+
 ## API Endpoints
 | Method | Path | Description |
 |--------|------|-------------|

@@ -8,10 +8,11 @@ Two roles exist (`UserRole`, `backend/src/models/enums.py`): `admin`, `master`.
 
 | Entity | admin | master |
 |---|---|---|
-| records, visits, visitors | full | full |
-| masters, locations, services, tags, activities, photos | full | read-only |
-| clients | full | read-only |
-| payments | full | read-only (мастер видит, что оплачено) |
+| records, visits, visitors | full | full (скоуп своих — #263) |
+| masters, locations, services, tags, activities | full | read-only |
+| photos | full | read (#247) + write **своих фото активностей** (#263) |
+| clients | full | read (#247) + **create** (#263: POST для флоу записи; мутации существующих — 403) |
+| payments | full | read (#247) + write **оплат своих записей** (#263) |
 | materials | full | no access |
 | user-settings | own only | own only |
 
@@ -42,6 +43,17 @@ Two independent lines: (1) JSON-only API + CORS with credentials restricted to l
 - `POST /api/v1/auth/change-password` `{current_password, new_password}` — session required; `current_password` verified first (wrong → 401 `AUTH_INVALID_CREDENTIALS`, timing parity as in login); the new password follows the rules above (422 `PASSWORD_POLICY`).
 - On success (204): the **current session stays**, **all other sessions of the user are deleted** (other devices must re-login).
 - Does not feed the login lockout ladder (an authenticated user changing their own password; the ladder guards anonymous login brute-force).
+
+## Per-master data scoping (#263)
+
+Поверх матрицы роль `master` получает **серверный скоуп «только своё»** (спека `docs/specs/2026-09-10-master-role-design.md`). Якорь — `master_key`: masters-строка учётки (`users.staff_id` → `masters.staff_id`, post-#266). Правила:
+
+- **Всё через записи**: активность — своя по `activity.master_id`; запись/визит/посетитель/оплата — через свою активность записи; фото — привязано к своей активности; клиент — есть запись клиента к своей активности. **Исключение**: поиск по номеру телефона (`?phone=`, `/get?phone=`) — по всем активным клиентам, ответ маскирован.
+- **Пустой скоуп ≠ нет скоупа**: мастер без masters-строки видит заведомо пустое множество — никогда «всё студии».
+- Скоуп не зависит от `masters.is_active` — история видна и при снятом распределении.
+- **Чужое → 404** кодом сущности (не раскрывает существование); мутации клиентов мастером → 403 `AUTH_FORBIDDEN`.
+- **Маска контактов** в каждом клиент-содержащем ответе для роли master: `phone` → последние 4 цифры (`+7 909 •••-••-1234`), `email` → `null`; имя и канал видны. Полный номер — только ключ поиска, не данные ответа.
+- Фронт-скрытие меню/кнопок — косметика; защита — сервер (D9 спеки).
 
 ## Sessions
 - Server-side row `sessions(token, user_id, created_at, last_extended_at, idle_deadline, absolute_deadline)`; cookie `memo_session` carries only the random token: `HttpOnly`, `SameSite=Lax`, `Secure` in production, `Path=/`.

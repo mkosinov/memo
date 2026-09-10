@@ -117,6 +117,7 @@ async def _truncate_all_tables(engine):
     deletion.  ~10x faster than drop+create: ~10-20ms vs 180-330ms per test.
     """
     from src.db.base import Base
+    from src.auth.session import Session  # noqa: F401 — registers sessions with Base.metadata
     from src.models import (  # noqa: F401 — register models with Base.metadata
         Activity,
         Client,

@@ -33,9 +33,18 @@ def _get_record_service() -> RecordService:
 
 _ServiceDep = Annotated[RecordService, Depends(_get_record_service)]
 
+# GH #247 (spec §3.7): every mutating route carries records:write plus the
+# CSRF fetch-metadata secondary line (verify_fetch_metadata).
+_WRITE_GUARD = [
+    Depends(require_permission("records:write")),
+    Depends(verify_fetch_metadata),
+]
+# Guarded reads — POST "" stays public (anonymous booking until #8).
+_READ_GUARD = [Depends(require_permission("records:read"))]
+
 
 @router.get("", response_model=PaginatedResponse[RecordResponse],
-             dependencies=[Depends(require_permission("records:read"))])
+             dependencies=_READ_GUARD)
 async def list_records(
     service: _ServiceDep,
     session: SessionDep,
@@ -52,7 +61,7 @@ async def list_records(
 
 
 @router.get("/view", response_model=PaginatedResponse[RecordViewResponse],
-             dependencies=[Depends(require_permission("records:read"))])
+             dependencies=_READ_GUARD)
 async def list_records_view(
     service: _ServiceDep,
     session: SessionDep,
@@ -71,7 +80,7 @@ async def list_records_view(
     return await service.list_view(db_session=session, params=params)
 
 
-@router.get("/{record_id}", response_model=RecordResponse, dependencies=[Depends(require_permission("records:read"))])
+@router.get("/{record_id}", response_model=RecordResponse, dependencies=_READ_GUARD)
 async def get_record(
     record_id: str,
     service: _ServiceDep,
@@ -101,7 +110,7 @@ async def create_record(
     return map_record(record)
 
 
-@router.put("/{record_id}", response_model=RecordResponse, dependencies=[Depends(require_permission("records:write")), Depends(verify_fetch_metadata)])
+@router.put("/{record_id}", response_model=RecordResponse, dependencies=_WRITE_GUARD)
 async def update_record(
     record_id: str,
     data: RecordUpdate,
@@ -121,7 +130,7 @@ async def update_record(
     return map_record(record)
 
 
-@router.patch("/{record_id}", response_model=RecordResponse, dependencies=[Depends(require_permission("records:write")), Depends(verify_fetch_metadata)])
+@router.patch("/{record_id}", response_model=RecordResponse, dependencies=_WRITE_GUARD)
 async def patch_record(
     record_id: str,
     data: RecordPatch,
@@ -141,7 +150,7 @@ async def patch_record(
     return map_record(record)
 
 
-@router.delete("/{record_id}", status_code=204, dependencies=[Depends(require_permission("records:write")), Depends(verify_fetch_metadata)])
+@router.delete("/{record_id}", status_code=204, dependencies=_WRITE_GUARD)
 async def delete_record(
     record_id: str,
     service: _ServiceDep,

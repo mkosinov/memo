@@ -35,6 +35,13 @@ def _get_visit_service() -> VisitService:
 
 _ServiceDep = Annotated[VisitService, Depends(_get_visit_service)]
 
+# GH #247 (spec §3.7): every mutating route carries visits:write plus the
+# CSRF fetch-metadata secondary line (verify_fetch_metadata).
+_WRITE_GUARD = [
+    Depends(require_permission("visits:write")),
+    Depends(verify_fetch_metadata),
+]
+
 
 def _map_visit(visit) -> VisitResponse:
     """Map a Visit ORM object to VisitResponse."""
@@ -91,7 +98,7 @@ async def get_visit(
 
 
 @router.post("", response_model=VisitResponse, status_code=201,
-             dependencies=[Depends(require_permission("visits:write")), Depends(verify_fetch_metadata)])
+             dependencies=_WRITE_GUARD)
 async def create_visit(
     data: VisitCreate,
     service: _ServiceDep,
@@ -110,7 +117,7 @@ async def create_visit(
     return _map_visit(visit)
 
 
-@router.put("/{visit_id}", response_model=VisitResponse, dependencies=[Depends(require_permission("visits:write")), Depends(verify_fetch_metadata)])
+@router.put("/{visit_id}", response_model=VisitResponse, dependencies=_WRITE_GUARD)
 async def update_visit(
     visit_id: str,
     data: VisitUpdate,
@@ -130,7 +137,7 @@ async def update_visit(
     return _map_visit(visit)
 
 
-@router.patch("/{visit_id}", response_model=VisitResponse, dependencies=[Depends(require_permission("visits:write")), Depends(verify_fetch_metadata)])
+@router.patch("/{visit_id}", response_model=VisitResponse, dependencies=_WRITE_GUARD)
 async def patch_visit(
     visit_id: str,
     data: VisitPatch,
@@ -150,7 +157,7 @@ async def patch_visit(
     return _map_visit(visit)
 
 
-@router.delete("/{visit_id}", status_code=204, dependencies=[Depends(require_permission("visits:write")), Depends(verify_fetch_metadata)])
+@router.delete("/{visit_id}", status_code=204, dependencies=_WRITE_GUARD)
 async def delete_visit(
     visit_id: str,
     service: _ServiceDep,
@@ -168,7 +175,7 @@ async def delete_visit(
         )
 
 
-@router.put("/{visit_id}/status", response_model=VisitResponse, dependencies=[Depends(require_permission("visits:write")), Depends(verify_fetch_metadata)])
+@router.put("/{visit_id}/status", response_model=VisitResponse, dependencies=_WRITE_GUARD)
 async def update_visit_status(
     visit_id: str,
     data: VisitStatusUpdate,

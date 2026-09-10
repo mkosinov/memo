@@ -27,6 +27,14 @@ def _get_tag_service() -> TagService:
 
 _ServiceDep = Annotated[TagService, Depends(_get_tag_service)]
 
+# GH #247 (spec §3.7): every mutating route carries tags:write plus the
+# CSRF fetch-metadata secondary line (verify_fetch_metadata).
+_WRITE_GUARD = [
+    Depends(require_permission("tags:write")),
+    Depends(verify_fetch_metadata),
+]
+_READ_GUARD = [Depends(require_permission("tags:read"))]
+
 # Sort whitelist map: UI key → list of ORM columns (#205 Task 3, spec §4.5).
 # Tags have a single sortable column: ``tag``.
 _TAG_SORT_MAP: dict[str, list] = {
@@ -81,11 +89,7 @@ async def list_tags(
     )
 
 
-@router.get(
-    "/all",
-    response_model=list[TagResponse],
-    dependencies=[Depends(require_permission("tags:read"))],
-)
+@router.get("/all", response_model=list[TagResponse], dependencies=_READ_GUARD)
 async def list_all_tags(
     service: _ServiceDep,
     session: SessionDep,
@@ -125,7 +129,7 @@ async def get_tag(
 
 
 @router.post("", response_model=TagResponse, status_code=201,
-             dependencies=[Depends(require_permission("tags:write")), Depends(verify_fetch_metadata)])
+             dependencies=_WRITE_GUARD)
 async def create_tag(
     data: TagCreate,
     service: _ServiceDep,
@@ -135,7 +139,7 @@ async def create_tag(
     return await service.create(db_session=session, data=data)
 
 
-@router.put("/{tag_id}", response_model=TagResponse, dependencies=[Depends(require_permission("tags:write")), Depends(verify_fetch_metadata)])
+@router.put("/{tag_id}", response_model=TagResponse, dependencies=_WRITE_GUARD)
 async def update_tag(
     tag_id: str,
     data: TagCreate,
@@ -155,7 +159,7 @@ async def update_tag(
     return tag
 
 
-@router.patch("/{tag_id}", response_model=TagResponse, dependencies=[Depends(require_permission("tags:write")), Depends(verify_fetch_metadata)])
+@router.patch("/{tag_id}", response_model=TagResponse, dependencies=_WRITE_GUARD)
 async def patch_tag(
     tag_id: str,
     data: TagPatch,
@@ -175,7 +179,7 @@ async def patch_tag(
     return tag
 
 
-@router.delete("/{tag_id}", status_code=204, dependencies=[Depends(require_permission("tags:write")), Depends(verify_fetch_metadata)])
+@router.delete("/{tag_id}", status_code=204, dependencies=_WRITE_GUARD)
 async def delete_tag(
     tag_id: str,
     service: _ServiceDep,

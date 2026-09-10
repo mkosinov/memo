@@ -37,6 +37,14 @@ def _get_location_service() -> LocationService:
 
 _ServiceDep = Annotated[LocationService, Depends(_get_location_service)]
 
+# GH #247 (spec §3.7): every mutating route carries locations:write plus the
+# CSRF fetch-metadata secondary line (verify_fetch_metadata).
+_WRITE_GUARD = [
+    Depends(require_permission("locations:write")),
+    Depends(verify_fetch_metadata),
+]
+_READ_GUARD = [Depends(require_permission("locations:read"))]
+
 # Sort whitelist map: UI key → list of ORM columns (#205 Task 3, spec §4.5).
 # ``archived`` → is_active (asc = is_active ASC = archived-first).
 _LOCATION_SORT_MAP: dict[str, list] = {
@@ -107,11 +115,7 @@ async def list_locations(
     )
 
 
-@router.get(
-    "/all",
-    response_model=list[LocationResponse],
-    dependencies=[Depends(require_permission("locations:read"))],
-)
+@router.get("/all", response_model=list[LocationResponse], dependencies=_READ_GUARD)
 async def list_all_locations(
     service: _ServiceDep,
     session: SessionDep,
@@ -134,7 +138,7 @@ async def list_all_locations(
 
 
 @router.put("/reorder", response_model=list[LocationResponse],
-            dependencies=[Depends(require_permission("locations:write")), Depends(verify_fetch_metadata)])
+            dependencies=_WRITE_GUARD)
 async def reorder_locations(
     data: ReorderRequest,
     service: _ServiceDep,
@@ -164,7 +168,7 @@ async def get_location(
 
 
 @router.post("", response_model=LocationResponse, status_code=201,
-             dependencies=[Depends(require_permission("locations:write")), Depends(verify_fetch_metadata)])
+             dependencies=_WRITE_GUARD)
 async def create_location(
     data: LocationCreate,
     service: _ServiceDep,
@@ -174,7 +178,7 @@ async def create_location(
     return await service.create(db_session=session, data=data)
 
 
-@router.put("/{location_id}", response_model=LocationResponse, dependencies=[Depends(require_permission("locations:write")), Depends(verify_fetch_metadata)])
+@router.put("/{location_id}", response_model=LocationResponse, dependencies=_WRITE_GUARD)
 async def update_location(
     location_id: str,
     data: LocationUpdate,
@@ -194,7 +198,7 @@ async def update_location(
     return location
 
 
-@router.patch("/{location_id}", response_model=LocationResponse, dependencies=[Depends(require_permission("locations:write")), Depends(verify_fetch_metadata)])
+@router.patch("/{location_id}", response_model=LocationResponse, dependencies=_WRITE_GUARD)
 async def patch_location(
     location_id: str,
     data: LocationPatch,
@@ -214,7 +218,7 @@ async def patch_location(
     return location
 
 
-@router.delete("/{location_id}", status_code=204, dependencies=[Depends(require_permission("locations:write")), Depends(verify_fetch_metadata)])
+@router.delete("/{location_id}", status_code=204, dependencies=_WRITE_GUARD)
 async def delete_location(
     location_id: str,
     service: _ServiceDep,
@@ -269,7 +273,7 @@ async def delete_location(
         )
 
 
-@router.post("/{location_id}/archive", response_model=LocationResponse, dependencies=[Depends(require_permission("locations:write")), Depends(verify_fetch_metadata)])
+@router.post("/{location_id}/archive", response_model=LocationResponse, dependencies=_WRITE_GUARD)
 async def archive_location(
     location_id: str,
     service: _ServiceDep,
@@ -294,7 +298,7 @@ async def archive_location(
     return await _refetch_or_404(service, session, location_id)
 
 
-@router.post("/{location_id}/restore", response_model=LocationResponse, dependencies=[Depends(require_permission("locations:write")), Depends(verify_fetch_metadata)])
+@router.post("/{location_id}/restore", response_model=LocationResponse, dependencies=_WRITE_GUARD)
 async def restore_location(
     location_id: str,
     service: _ServiceDep,

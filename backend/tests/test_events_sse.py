@@ -27,7 +27,6 @@ and are awaited through the app as usual.
 import asyncio
 import contextlib
 import json
-import sqlite3
 import uuid
 from pathlib import Path
 from typing import Any
@@ -38,6 +37,7 @@ from fastapi.testclient import TestClient
 
 from src.auth.passwords import hash_password
 from src.events.hub import hub
+from tests.conftest import insert_user
 
 pytestmark = pytest.mark.integration
 
@@ -59,20 +59,8 @@ def _admin_hash() -> str:
 @pytest.fixture
 def _sse_cookie(app, db_engine, _admin_hash) -> str:
     """``memo_session=<token>`` header value for a fresh admin login."""
-    user_id = str(uuid.uuid4())
     phone = f"+7999{uuid.uuid4().hex[:7]}"
-    from tests.conftest import _TEST_DB_URL
-
-    db_path = _TEST_DB_URL.replace("sqlite+aiosqlite:///", "")
-    conn = sqlite3.connect(db_path)
-    conn.execute(
-        "INSERT INTO users (id, phone, password_hash, role, "
-        "email_is_confirmed, phone_is_confirmed, is_active, created_at, updated_at) "
-        "VALUES (?, ?, ?, 'admin', 0, 0, 1, datetime('now'), datetime('now'))",
-        (user_id, phone, _admin_hash),
-    )
-    conn.commit()
-    conn.close()
+    insert_user(phone, _admin_hash, role="admin")
 
     client = TestClient(app)
     resp = client.post(

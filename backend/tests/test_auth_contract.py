@@ -36,7 +36,8 @@ Spec: docs/specs/2026-09-08-auth-design.md §2.6, §2.7, §3.5, §3.7, §7
 from __future__ import annotations
 
 import re
-from typing import Any, Iterator
+from collections.abc import Iterator
+from typing import Any
 
 import pytest
 from fastapi.routing import APIRoute
@@ -97,18 +98,23 @@ def _api_v1_routes(app: Any) -> Iterator[Any]:
     dependencies. Older FastAPI: plain ``APIRoute`` objects already carry
     the same attributes (``path``, ``methods``, ``dependencies``,
     ``dependant``).
+
+    Candidates without a ``path`` (e.g. a candidate wrapping a nested
+    ``_IncludedRouter`` rather than a concrete path operation) are skipped
+    — they are containers, not walkable endpoints; every real endpoint
+    still surfaces here exactly once via its own mount.
     """
     for route in app.routes:
         candidates = getattr(route, "effective_candidates", None)
         if candidates is not None:
             for candidate in candidates():
-                if candidate.path.startswith("/api/v1"):
+                if getattr(candidate, "path", None) and candidate.path.startswith("/api/v1"):
                     yield candidate
         elif isinstance(route, APIRoute) and route.path.startswith("/api/v1"):
             yield route
 
 
-def _route_methods(route: APIRoute) -> set[str]:
+def _route_methods(route: Any) -> set[str]:
     """Declared methods minus HEAD (Starlette adds HEAD for GET routes)."""
     methods = set(route.methods)
     if "GET" in methods:
@@ -144,5 +150,5 @@ class TestDefaultDenyContract:
         )
 
     def test_api_v1_surface_is_nonempty(self, app) -> None:
-        """Sanity: the walk actually sees routes (guards against app changes."""
+        """Sanity: the walk actually sees routes (guards against app changes)."""
         assert sum(1 for _ in _api_v1_routes(app)) > 10

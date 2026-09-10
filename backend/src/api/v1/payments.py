@@ -29,6 +29,13 @@ def _get_payment_service() -> GenericService[PaymentCreate, PaymentUpdate, Payme
 
 _ServiceDep = Annotated[GenericService[PaymentCreate, PaymentUpdate, PaymentResponse], Depends(_get_payment_service)]
 
+# GH #247 (spec §3.7): every mutating route carries payments:write plus the
+# CSRF fetch-metadata secondary line (verify_fetch_metadata).
+_WRITE_GUARD = [
+    Depends(require_permission("payments:write")),
+    Depends(verify_fetch_metadata),
+]
+
 
 @router.get("", response_model=PaginatedResponse[PaymentResponse])
 async def list_payments(
@@ -74,7 +81,7 @@ async def get_payment(
 
 
 @router.post("", response_model=PaymentResponse, status_code=201,
-             dependencies=[Depends(require_permission("payments:write")), Depends(verify_fetch_metadata)])
+             dependencies=_WRITE_GUARD)
 async def create_payment(
     data: PaymentCreate,
     service: _ServiceDep,
@@ -84,7 +91,7 @@ async def create_payment(
     return await service.create(db_session=session, data=data)
 
 
-@router.put("/{payment_id}", response_model=PaymentResponse, dependencies=[Depends(require_permission("payments:write")), Depends(verify_fetch_metadata)])
+@router.put("/{payment_id}", response_model=PaymentResponse, dependencies=_WRITE_GUARD)
 async def update_payment(
     payment_id: str,
     data: PaymentUpdate,
@@ -104,7 +111,7 @@ async def update_payment(
     return payment
 
 
-@router.patch("/{payment_id}", response_model=PaymentResponse, dependencies=[Depends(require_permission("payments:write")), Depends(verify_fetch_metadata)])
+@router.patch("/{payment_id}", response_model=PaymentResponse, dependencies=_WRITE_GUARD)
 async def patch_payment(
     payment_id: str,
     data: PaymentPatch,
@@ -124,7 +131,7 @@ async def patch_payment(
     return payment
 
 
-@router.delete("/{payment_id}", status_code=204, dependencies=[Depends(require_permission("payments:write")), Depends(verify_fetch_metadata)])
+@router.delete("/{payment_id}", status_code=204, dependencies=_WRITE_GUARD)
 async def delete_payment(
     payment_id: str,
     service: _ServiceDep,

@@ -20,19 +20,21 @@ Spec §3.7's access matrix exercised end-to-end through the real app:
 The route-level walk (every route guarded or allowlisted) lives in
 ``test_auth_contract.py``; this file pins the RUNTIME behavior.
 
-Spec: docs/specs/2026-09-08-auth-design.md §2.5–2.7, §2.14, §3.7, §7
+Spec: docs/specs/2026-09-08-auth-design.md §2.5-2.7, §2.14, §3.7, §7
 Domain rules: docs/domain-rules/auth.md
 """
 
 from __future__ import annotations
 
-import sqlite3
 import uuid
 
 import pytest
+from fastapi.testclient import TestClient
 
 from src.auth.passwords import hash_password
 from src.errors import ErrorCode
+from tests.conftest import insert_user
+from tests.test_events_sse import SSEStream
 
 pytestmark = pytest.mark.api
 
@@ -67,6 +69,14 @@ _GUARDED_ENDPOINTS: list[tuple[str, str, str, dict | None]] = [
     ("events-stream", "GET", "/api/v1/events", None),
 ]
 
+#: Shared parametrize args for the anonymous/admin matrix classes (same
+#: endpoint set, opposite expectations).
+_ENDPOINT_PARAMS = pytest.mark.parametrize(
+    "label,method,path,body",
+    _GUARDED_ENDPOINTS,
+    ids=[label for label, _, _, _ in _GUARDED_ENDPOINTS],
+)
+
 _PUBLIC_GETS = [
     "/api/v1/masters",
     "/api/v1/locations",
@@ -77,16 +87,6 @@ _PUBLIC_GETS = [
     "/api/v1/photos/web",
     "/api/v1/health",
 ]
-
-
-def _query_db(sql: str, params: dict | None = None) -> None:
-    from tests.conftest import _TEST_DB_URL
-
-    db_path = _TEST_DB_URL.replace("sqlite+aiosqlite:///", "")
-    conn = sqlite3.connect(db_path)
-    conn.execute(sql, params or {})
-    conn.commit()
-    conn.close()
 
 
 @pytest.fixture
@@ -114,18 +114,12 @@ def _master_hash() -> str:
 def master_client(api_client, _master_hash, login_as):
     """A client logged in as a master-role user (fresh row per test).
 
-    Phone/ids are unique per test (users.phone UNIQUE; the conftest
-    truncate wipes rows between tests but module-scoped sessions may
-    outlive single rows — fresh rows keep it robust).
+    Phone is unique per test (users.phone UNIQUE; the conftest truncate
+    wipes rows between tests but module-scoped sessions may outlive single
+    rows — fresh rows keep it robust).
     """
     phone = f"+7999{uuid.uuid4().hex[:7]}"
-    user_id = str(uuid.uuid4())
-    _query_db(
-        "INSERT INTO users (id, phone, password_hash, role, "
-        "email_is_confirmed, phone_is_confirmed, is_active, created_at, updated_at) "
-        "VALUES (:id, :phone, :hash, 'master', 0, 0, 1, datetime('now'), datetime('now'))",
-        {"id": user_id, "phone": phone, "hash": _master_hash},
-    )
+    insert_user(phone, _master_hash, role="master")
     client = login_as(phone, MASTER_PASSWORD)
     yield client
     client.cookies.clear()
@@ -137,75 +131,20 @@ def _request(client, method: str, path: str, json_body=None):
     return client.request(method, path, json=json_body)
 
 
-async def _sse_probe(cookie: str | None) -> tuple[int, bytes]:
-    """Raw-ASGI bounded probe of ``GET /api/v1/events`` (GH #239 harness).
-
-    TestClient/httpx transports deadlock on infinite SSE bodies (they
-    await app completion — tests/test_events_sse.py §docstring), so the
-    authenticated 200-with-ready-frame case drives the ASGI interface
-    directly: read the status + FIRST body chunk, then disconnect.
-    """
-    import asyncio
-
-    headers = [(b"host", b"test")]
-    if cookie is not None:
-        headers.append((b"cookie", cookie.encode()))
-    scope = {
-        "type": "http", "asgi": {"version": "3.0", "spec_version": "2.3"},
-        "http_version": "1.1", "method": "GET", "path": "/api/v1/events",
-        "raw_path": b"/api/v1/events", "root_path": "", "scheme": "http",
-        "query_string": b"", "headers": headers,
-        "client": ("127.0.0.1", 123), "server": ("test", 80),
-    }
-    status: int | None = None
-    chunks: list[bytes] = []
-    started = asyncio.Event()
-    got_body = asyncio.Event()
-    request_done = False
-
-    async def receive():
-        nonlocal request_done
-        if request_done:
-            await got_body.wait()
-            return {"type": "http.disconnect"}
-        request_done = True
-        return {"type": "http.request", "body": b"", "more_body": False}
-
-    async def send(message):
-        nonlocal status
-        if message["type"] == "http.response.start":
-            status = message["status"]
-            started.set()
-        elif message["type"] == "http.response.body":
-            if message.get("body"):
-                chunks.append(message["body"])
-            if not message.get("more_body", False):
-                got_body.set()  # bounded (e.g. 401 JSON) — completes alone
-            elif chunks:
-                got_body.set()  # first stream chunk seen — caller disconnects
-
-    from src.main import app as _app  # same app object as the `app` fixture
-
-    task = asyncio.create_task(_app(scope, receive, send))
-    await asyncio.wait_for(started.wait(), timeout=5)
-    await asyncio.wait_for(got_body.wait(), timeout=5)
-    task.cancel()
-    assert status is not None
-    return status, b"".join(chunks)
-
-
 def _cookie_header(client) -> str | None:
     """``memo_session=<token>`` from a TestClient's cookie jar, or None."""
     token = client.cookies.get("memo_session")
     return f"memo_session={token}" if token else None
 
 
-def _fill_activity_body(api_client, body: dict | None) -> dict | None:
-    """POST /activities needs real FK ids — create master/service/location."""
-    if body is not None:
+def _fill_activity_body(api_client, label: str, body: dict | None) -> dict | None:
+    """Resolve the request body for ``label``; POST /activities needs real
+    FK ids (its table entry carries ``None``) — create master/service/
+    location via the authenticated client and build the payload."""
+    if label != "activities-write":
         return body
     master = api_client.post("/api/v1/masters", json={
-        "first_name": "Гв", "last_name": "М", "color": "#5B8C7A",
+        "first_name": "Гв", "last_name": "Masterov", "color": "#5B8C7A",
         "position": "мастер", "specialty": "живопись",
     }).json()
     service = api_client.post("/api/v1/services", json={
@@ -229,19 +168,17 @@ def _fill_activity_body(api_client, body: dict | None) -> dict | None:
 
 
 class TestAnonymousGetsUnauthorized:
-    @pytest.mark.parametrize(
-        "label,method,path,body",
-        [(l, m, p, b) for l, m, p, b in _GUARDED_ENDPOINTS],
-        ids=[l for l, _, _, _ in _GUARDED_ENDPOINTS],
-    )
+    @_ENDPOINT_PARAMS
     async def test_guarded_endpoint_rejects_anonymous(
-        self, anon_client, api_client, label, method, path, body,
+        self, app, anon_client, api_client, label, method, path, body,
     ) -> None:
-        body = _fill_activity_body(api_client, body) if label == "activities-write" else body
+        body = _fill_activity_body(api_client, label, body)
         if label == "events-stream":
-            status, raw = await _sse_probe(None)
-            assert status == 401
-            assert b"AUTH_UNAUTHORIZED" in raw
+            # SSEStream (shared with test_events_sse): raw-ASGI, bounded —
+            # TestClient deadlocks on infinite SSE bodies.
+            async with SSEStream(app) as stream:
+                await stream.wait_frame("AUTH_UNAUTHORIZED")
+                assert stream.status == 401
             return
         resp = _request(anon_client, method, path, body)
         assert resp.status_code == 401, f"{method} {path}: {resp.text}"
@@ -252,15 +189,11 @@ class TestAnonymousGetsUnauthorized:
 
 
 class TestAdminPasses:
-    @pytest.mark.parametrize(
-        "label,method,path,body",
-        [(l, m, p, b) for l, m, p, b in _GUARDED_ENDPOINTS],
-        ids=[l for l, _, _, _ in _GUARDED_ENDPOINTS],
-    )
+    @_ENDPOINT_PARAMS
     async def test_guarded_endpoint_accepts_admin(
-        self, api_client, label, method, path, body,
+        self, app, api_client, label, method, path, body,
     ) -> None:
-        body = _fill_activity_body(api_client, body) if label == "activities-write" else body
+        body = _fill_activity_body(api_client, label, body)
         if label == "user-settings-read":
             # GET still takes ?user_id= until T8 removes it (spec §3.8) —
             # the session user's own id is the valid target here.
@@ -269,8 +202,9 @@ class TestAdminPasses:
             assert resp.status_code in (200, 404), resp.text  # 404: no row yet
             return
         if label == "events-stream":
-            status, raw = await _sse_probe(_cookie_header(api_client))
-            assert status == 200 and b"event: ready" in raw, (status, raw)
+            async with SSEStream(app, _cookie_header(api_client)) as stream:
+                await stream.wait_frame("event: ready")
+                assert stream.status == 200
             return
         resp = _request(api_client, method, path, body)
         assert resp.status_code < 400, f"{method} {path}: {resp.text}"
@@ -295,7 +229,7 @@ class TestMasterMatrix:
         resp = master_client.get(path)
         assert resp.status_code == 200, f"GET {path}: {resp.text}"
 
-    def test_master_records_write_allowed(self, master_client, api_client, create_activity) -> None:
+    def test_master_records_write_allowed(self, master_client, create_activity) -> None:
         """records:write — master books a record (booking UI flow)."""
         activity = create_activity()
         resp = master_client.post("/api/v1/records", json={
@@ -313,7 +247,7 @@ class TestMasterMatrix:
         assert resp.status_code == 403
         assert resp.json()["detail"]["code"] == ErrorCode.AUTH_FORBIDDEN.value
 
-    def test_master_materials_forbidden(self, master_client, api_client) -> None:
+    def test_master_materials_forbidden(self, master_client) -> None:
         """materials — master holds NO tokens at all: read 403, write 403."""
         resp = master_client.get("/api/v1/materials")
         assert resp.status_code == 403

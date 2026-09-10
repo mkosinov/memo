@@ -870,3 +870,32 @@ def query_db(sql: str) -> list[dict]:
     conn.commit()  # required: Python 3.12+ no longer auto-commits on close()
     conn.close()
     return [dict(r) for r in rows]
+
+
+def insert_user(
+    phone: str, password_hash: str, role: str = "admin", master_id: str | None = None
+) -> dict:
+    """Insert a users row directly (no user-creation API exists).
+
+    Shared by the GH #247 auth suites (test_auth_api, test_auth_guards,
+    test_events_sse) — the ``_user`` fixture pattern as a plain helper so
+    each suite controls uniqueness/role itself. Returns {id, phone}.
+
+    Usage::
+
+        from tests.conftest import insert_user
+        user = insert_user("+7999...", hash_password("pw"), "master")
+    """
+    import uuid as _uuid
+
+    user_id = str(_uuid.uuid4())
+    conn = sqlite3.connect(_db_file.name)
+    conn.execute(
+        "INSERT INTO users (id, phone, password_hash, role, master_id, "
+        "email_is_confirmed, phone_is_confirmed, is_active, created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, 0, 0, 1, datetime('now'), datetime('now'))",
+        (user_id, phone, password_hash, role, master_id),
+    )
+    conn.commit()
+    conn.close()
+    return {"id": user_id, "phone": phone}

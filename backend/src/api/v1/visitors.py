@@ -28,6 +28,13 @@ def _get_visitor_service() -> VisitorService:
 
 _ServiceDep = Annotated[VisitorService, Depends(_get_visitor_service)]
 
+# GH #247 (spec §3.7): every mutating route carries visitors:write plus the
+# CSRF fetch-metadata secondary line (verify_fetch_metadata).
+_WRITE_GUARD = [
+    Depends(require_permission("visitors:write")),
+    Depends(verify_fetch_metadata),
+]
+
 
 @router.get("", response_model=PaginatedResponse[VisitorResponse])
 async def list_visitors(
@@ -70,7 +77,7 @@ async def get_visitor(
 
 
 @router.post("", response_model=VisitorResponse, status_code=201,
-             dependencies=[Depends(require_permission("visitors:write")), Depends(verify_fetch_metadata)])
+             dependencies=_WRITE_GUARD)
 async def create_visitor(
     data: VisitorCreate,
     service: _ServiceDep,
@@ -80,7 +87,7 @@ async def create_visitor(
     return await service.create(db_session=session, data=data)
 
 
-@router.put("/{visitor_id}", response_model=VisitorResponse, dependencies=[Depends(require_permission("visitors:write")), Depends(verify_fetch_metadata)])
+@router.put("/{visitor_id}", response_model=VisitorResponse, dependencies=_WRITE_GUARD)
 async def update_visitor(
     visitor_id: str,
     data: VisitorUpdate,
@@ -100,7 +107,7 @@ async def update_visitor(
     return visitor
 
 
-@router.patch("/{visitor_id}", response_model=VisitorResponse, dependencies=[Depends(require_permission("visitors:write")), Depends(verify_fetch_metadata)])
+@router.patch("/{visitor_id}", response_model=VisitorResponse, dependencies=_WRITE_GUARD)
 async def patch_visitor(
     visitor_id: str,
     data: VisitorPatch,
@@ -120,7 +127,7 @@ async def patch_visitor(
     return visitor
 
 
-@router.delete("/{visitor_id}", status_code=204, dependencies=[Depends(require_permission("visitors:write")), Depends(verify_fetch_metadata)])
+@router.delete("/{visitor_id}", status_code=204, dependencies=_WRITE_GUARD)
 async def delete_visitor(
     visitor_id: str,
     service: _ServiceDep,

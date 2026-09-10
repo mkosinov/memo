@@ -105,11 +105,18 @@ async def list_masters(
     )
 
 
-@router.get(
-    "/all",
-    response_model=list[MasterResponse],
-    dependencies=[Depends(require_permission("masters:read"))],
-)
+# GH #247 (spec §3.7): public GET list/detail (PUBLIC_ROUTES) stay bare;
+# everything else is guarded — decorator-level ``masters:read`` for the
+# private bare-list GET, ``masters:write`` + ``verify_fetch_metadata`` for
+# every mutating route.
+_WRITE_GUARD = [
+    Depends(require_permission("masters:write")),
+    Depends(verify_fetch_metadata),
+]
+_READ_GUARD = [Depends(require_permission("masters:read"))]
+
+
+@router.get("/all", response_model=list[MasterResponse], dependencies=_READ_GUARD)
 async def list_all_masters(
     service: _ServiceDep,
     session: SessionDep,
@@ -129,16 +136,6 @@ async def list_all_masters(
         )
     except BareListLimitExceededError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-
-
-# GH #247 (spec §3.7): public GET list/detail (PUBLIC_ROUTES) stay bare;
-# everything else is guarded — decorator-level ``masters:read`` for the
-# private bare-list GET, ``masters:write`` + ``verify_fetch_metadata`` for
-# every mutating route.
-_WRITE_GUARD = [
-    Depends(require_permission("masters:write")),
-    Depends(verify_fetch_metadata),
-]
 
 
 @router.put(

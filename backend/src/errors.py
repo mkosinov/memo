@@ -33,6 +33,9 @@ class ErrorCode(str, Enum):
     PAYMENT_NOT_FOUND = "PAYMENT_NOT_FOUND"
     SETTINGS_NOT_FOUND = "SETTINGS_NOT_FOUND"
 
+    # 403 — forbidden (GH #247 auth)
+    AUTH_FORBIDDEN = "AUTH_FORBIDDEN"
+
     # 422 — validation / integrity
     VALIDATION_ERROR = "VALIDATION_ERROR"
     INTEGRITY_VIOLATION = "INTEGRITY_VIOLATION"
@@ -71,6 +74,7 @@ ERROR_MESSAGES: dict[ErrorCode, str] = {
     ErrorCode.VISIT_NOT_FOUND: "Визит не найден",
     ErrorCode.PAYMENT_NOT_FOUND: "Платёж не найден",
     ErrorCode.SETTINGS_NOT_FOUND: "Настройки не найдены",
+    ErrorCode.AUTH_FORBIDDEN: "Недостаточно прав",
     ErrorCode.VALIDATION_ERROR: "Проверьте правильность заполнения полей",
     ErrorCode.INTEGRITY_VIOLATION: "Нарушение целостности данных",
     ErrorCode.INTERNAL_ERROR: "Ошибка сервера",

@@ -66,20 +66,21 @@ Dispatch `plan-reviewer` (verifies the plan faithfully and completely expands th
 ## 6. DESIGN session DoD (the seam contract)
 
 - Only **git and the board** cross the seam. The session does NOT end holding local commits: every passed gate = commit + push to origin/main.
-- **All decisions are folded into the artifact texts**: review amendments, constraints like "#NNN strictly after #NNN — shared file" go into the spec/plan, not the chat. Git and the board carry no session context across the seam.
+- **All decisions are folded into the artifact texts**: review amendments, constraints like "#NNN strictly after #NNN — shared file" go into the spec/plan, not the chat. Git and the board carry no session context across the seam. This is the DESIGN DoD under Scratchpad Discipline v2: DESIGN writes zero scratchpad state, so the pushed spec/plan are the ONLY carrier — fold every decision and dependency in **before the phase closes**.
 - After G2 tell the user: «скажи менеджеру в opencode: продолжаем траекторию #NNN». The container needs nothing else.
-- Does NOT cross the seam: `.opencode/scratchpad.md` (the container seeds its own section), worktrees, env. The host **never writes or reads** the scratchpad — there are no container operations during the DESIGN phase at all.
+- Does NOT cross the seam: `.opencode/scratchpad.md` (the container seeds its section at IMPL start — DESIGN itself writes nothing, v2), worktrees, env. The host **never writes or reads** the scratchpad — there are no container operations during the DESIGN phase at all.
 
 ## 7. Board (the script lives in memo, run locally)
 
 ```bash
 python3 .zcode/scripts/gh_board.py next-up
+python3 .zcode/scripts/gh_board.py show 247                # read one card; `show all` = whole board
 python3 .zcode/scripts/gh_board.py status 176 "Spec OK (G1b)"
 python3 .zcode/scripts/gh_board.py set-next-up 176 1   # only on the user's word
 ```
 
 - The script's golden source is **the memo repo itself** (`.zcode/scripts/gh_board.py`, Project #3 constants baked in). The script is part of the seam: it lives in git, so both the host and the container have it after a pull; the container copy is `.opencode/scripts/gh_board.py`. No extra copies outside the harness folders.
-- Fallback: `gh` CLI directly (projectsV2).
+- **No raw-GraphQL fallback.** ALL board interaction — reads and writes — goes through the script; never hand-write `gh api graphql` against the project. Field-definition mutations (`updateProjectV2Field`: adding/renaming status options) are forbidden for agents: the mutation replaces the whole option list and detaches every card's value (2026-09-09: 65/69 cards lost Status this way). A new status is added by the user in the GitHub web UI, which appends safely.
 - One writer per issue: DESIGN flips (`In Design (G1a)` → `Spec OK (G1b)` → `Ready to IMPL (G2)`) — this session; IMPL flips — the container manager. The script adds an issue to the board on first contact.
 
 ## 8. Rules

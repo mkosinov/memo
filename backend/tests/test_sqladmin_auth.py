@@ -133,10 +133,17 @@ class TestSqlAdminLogin:
         assert resp.status_code == 302, f"Admin login failed: {resp.status_code}"
         assert "/admin/login" not in resp.headers["location"]
 
-        # The session cookie now authorizes an admin page (follow the
-        # trailing-slash redirect onto the list view)
-        page = TestClient(admin_app).get("/admin/user/list/")
-        assert page.status_code == 200, f"Authorized page failed: {page.status_code}"
+        # SAME client (holds the sqladmin session cookie) — an admin page
+        # must render, not redirect back to the login
+        page = client.get("/admin/user/list/")
+        assert page.status_code in (200, 307), (
+            f"Authorized page failed: {page.status_code}"
+        )
+        if page.status_code == 307:
+            assert "/admin/login" not in page.headers["location"]
+        followed = TestClient(admin_app, cookies=client.cookies)
+        final = followed.get("/admin/user/list/")
+        assert final.status_code == 200, f"List view failed: {final.status_code}"
 
     def test_master_role_login_rejected(self, admin_app) -> None:
         phone = _unique_phone()
@@ -180,6 +187,53 @@ class TestUserAdminForm:
     def test_password_help_text_is_policy_hint(self, user_admin_view) -> None:
         form_cls = asyncio.run(user_admin_view.scaffold_form())
         assert form_cls().password_hash.description == PASSWORD_POLICY_HINT_RU
+
+    def test_blank_password_passes_form_validation(self, user_admin_view) -> None:
+        """Regression (review blocker): a blank password must NOT trip the
+        sqladmin auto-added InputRequired — otherwise the spec's "edit:
+        blank = unchanged" path is unreachable (the lockout-reset flow
+        edits a user and saves without a new password). Required-ness on
+        CREATE is enforced in on_model_change instead."""
+        class _FormDict(dict):
+            """Minimal multidict shim wtforms needs (``getlist``)."""
+
+            def getlist(self, key: str) -> list[str]:
+                return [self[key]] if key in self else []
+
+        form_cls = asyncio.run(user_admin_view.scaffold_form())
+        form = form_cls(
+            formdata=_FormDict(
+                {"phone": _unique_phone(), "role": "admin", "password_hash": ""}
+            )
+        )
+        assert form.validate(), f"Blank password must validate on edit: {form.errors}"
+
+    def test_blank_password_edit_route_preserves_hash(self, admin_app) -> None:
+        """Regression: full POST to the UserAdmin edit route with a blank
+        password — 302 redirect (save) and password_hash unchanged in DB."""
+        phone = _unique_phone()
+        user = insert_user(phone, hash_password("old-password-123"), role="admin")
+        old_hash = query_db(
+            f"SELECT password_hash FROM users WHERE id = '{user['id']}'"
+        )[0]["password_hash"]
+
+        client = TestClient(admin_app, follow_redirects=False)
+        resp = client.post("/admin/login", data={"username": phone, "password": "old-password-123"})
+        assert resp.status_code == 302
+
+        resp = client.post(
+            f"/admin/user/edit/{user['id']}",
+            data={"phone": phone, "role": "admin", "password_hash": ""},
+            follow_redirects=False,
+        )
+        assert resp.status_code == 302, (
+            f"Blank-password edit must save, got {resp.status_code}: {resp.text[:300]}"
+        )
+
+        new_hash = query_db(
+            f"SELECT password_hash FROM users WHERE id = '{user['id']}'"
+        )[0]["password_hash"]
+        assert new_hash == old_hash, "Blank edit must leave password_hash unchanged"
 
 
 class TestUserAdminOnModelChange:

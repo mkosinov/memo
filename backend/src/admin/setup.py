@@ -22,6 +22,7 @@ from sqladmin.authentication import AuthenticationBackend
 from sqlalchemy import Column, create_engine
 from starlette.requests import Request
 from wtforms import PasswordField
+from wtforms.validators import Optional
 
 from src.auth.passwords import (
     PASSWORD_POLICY_HINT_RU,
@@ -31,8 +32,6 @@ from src.auth.passwords import (
 )
 from src.auth.service import get_auth_service
 from src.core.config import settings
-from src.db import db_manager
-
 from src.db import db_manager
 from src.models.activity import Activity
 from src.models.client import Client
@@ -108,8 +107,18 @@ class UserAdmin(ModelView, model=User):
     # rendered back). NOTE: sqladmin looks form_overrides up by STRING prop
     # name — a Column-object key would silently no-op.
     form_overrides: ClassVar[dict[str, type]] = {"password_hash": PasswordField}
+    # ``Optional()`` FIRST relaxes the InputRequired sqladmin auto-adds for
+    # the non-nullable column (review blocker): wtforms runs validators in
+    # order and ``Optional`` raises StopValidation on blank input, so a
+    # blank EDIT submits instead of failing form validation with a 400 —
+    # without it, "edit: blank = unchanged" (and the lockout-reset flow)
+    # is unreachable. Required-ness on CREATE is enforced in
+    # ``on_model_change`` (is_created and blank → PasswordPolicyError).
     form_args: ClassVar[dict[str, dict[str, Any]]] = {
-        "password_hash": {"description": PASSWORD_POLICY_HINT_RU},
+        "password_hash": {
+            "description": PASSWORD_POLICY_HINT_RU,
+            "validators": [Optional()],
+        },
     }
     name = "User"
     name_plural = "Users"

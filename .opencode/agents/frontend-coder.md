@@ -32,6 +32,9 @@ You build UI components and pages in Next.js 14 (App Router) + TypeScript + Tail
 ## Rules
 
 - ALWAYS read `docs/memo-full-spec.md`, `docs/v4-design-system.md`, `docs/schedule-ui.md`, `docs/mock-data.md` first
+- **Read each spec/plan doc ONCE.** To revisit a detail, locate the section by anchor
+  (`grep -n '^## ' <file>`) and read only that region (`--offset/--limit`) — a second full read
+  of the same doc is forbidden (also after a context compaction: restore by anchor, not wholesale)
 - **ALWAYS read `docs/domain-rules/{entity}.md`** when working with entity validation or business logic
 - Follow v4 design strictly — colours, typography, spacing from spec
 - Use Tailwind CSS utility classes. Custom CSS only for advanced cases (clip-path, animations)

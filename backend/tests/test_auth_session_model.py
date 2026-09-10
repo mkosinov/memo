@@ -10,6 +10,8 @@ create_all, round-trip). Covers:
 """
 
 from datetime import datetime, timedelta
+import os
+from pathlib import Path
 
 import pytest
 from sqlalchemy import create_engine, event, inspect
@@ -134,6 +136,59 @@ class TestSessionPersistence:
             orm.flush()
             assert orm.get(Session, s1.token) is not None
             assert orm.get(Session, s2.token) is not None
+
+
+class TestSessionRegisteredInModelsMetadata:
+    """Importing src.models registers Session with Base.metadata.
+
+    seed.py creates dev/E2E schema via ``Base.metadata.create_all``
+    (on a wiped DB ``run_alembic_upgrade`` only stamps head —
+    src/db/migrate.py:57-62), so a missing registration silently
+    omits the ``sessions`` table in dev and e2e (review blocker).
+    """
+
+    def test_import_src_models_registers_sessions(self):
+        import subprocess
+        import sys
+
+        probe = (
+            "import src.models\n"
+            "from src.db.base import Base\n"
+            "assert 'sessions' in Base.metadata.tables, Base.metadata.tables.keys()\n"
+            "print('OK')\n"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", probe],
+            capture_output=True, text=True, cwd=Path(__file__).resolve().parents[1],
+        )
+        assert result.returncode == 0, result.stderr
+        assert "OK" in result.stdout
+
+    def test_create_all_after_importing_src_models_creates_sessions(self):
+        import subprocess
+        import sys
+        import tempfile
+
+        db = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+        db.close()
+        probe = (
+            "import src.models\n"
+            "from sqlalchemy import create_engine, inspect\n"
+            "from src.db.base import Base\n"
+            f"e = create_engine('sqlite:///{db.name}')\n"
+            "Base.metadata.create_all(e)\n"
+            "assert 'sessions' in inspect(e).get_table_names()\n"
+            "print('OK')\n"
+        )
+        try:
+            result = subprocess.run(
+                [sys.executable, "-c", probe],
+                capture_output=True, text=True, cwd=Path(__file__).resolve().parents[1],
+            )
+            assert result.returncode == 0, result.stderr
+            assert "OK" in result.stdout
+        finally:
+            os.unlink(db.name)
 
 
 class TestUserLockColumns:

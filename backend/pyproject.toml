@@ -9,6 +9,7 @@ dependencies = [
     "sqlalchemy>=2.0.0",
     "aiosqlite>=0.20.0",
     "sqladmin>=0.20.0",
+    "itsdangerous>=2.2.0",
     "pydantic-settings>=2.6.0",
     "alembic>=1.18.4",
     "pwdlib[argon2]>=0.3.1",

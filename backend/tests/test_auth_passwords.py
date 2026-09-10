@@ -94,5 +94,5 @@ class TestPolicyError:
 
     def test_hint_text_matches_spec(self) -> None:
         assert PASSWORD_POLICY_HINT_RU == (
-            "Пароль: от 8 до 64 символов, пробелы по краям обрезается"
+            "Пароль: от 8 до 64 символов, пробелы по краям обрезаются"
         )

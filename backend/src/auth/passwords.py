@@ -12,7 +12,7 @@ Policy (NIST 800-63B spirit — length over composition, no composition rules):
 from pwdlib import PasswordHash
 from pwdlib.hashers.argon2 import Argon2Hasher
 
-PASSWORD_POLICY_HINT_RU = "Пароль: от 8 до 64 символов, пробелы по краям обрезается"
+PASSWORD_POLICY_HINT_RU = "Пароль: от 8 до 64 символов, пробелы по краям обрезаются"
 
 _password_hash = PasswordHash(
     (Argon2Hasher(time_cost=3, memory_cost=65536, parallelism=4),),

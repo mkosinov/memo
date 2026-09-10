@@ -38,6 +38,11 @@ Two independent lines: (1) JSON-only API + CORS with credentials restricted to l
 - The same human-readable hint is shown at every password-creation site (sqladmin form, CLI); the login page shows none.
 - No default/committed passwords in production paths; dev seed uses obviously-fake demo passwords (`ENV != production` guard; staging must not run a dev ENV).
 
+### Change password (#262)
+- `POST /api/v1/auth/change-password` `{current_password, new_password}` — session required; `current_password` verified first (wrong → 401 `AUTH_INVALID_CREDENTIALS`, timing parity as in login); the new password follows the rules above (422 `PASSWORD_POLICY`).
+- On success (204): the **current session stays**, **all other sessions of the user are deleted** (other devices must re-login).
+- Does not feed the login lockout ladder (an authenticated user changing their own password; the ladder guards anonymous login brute-force).
+
 ## Sessions
 - Server-side row `sessions(token, user_id, created_at, last_extended_at, idle_deadline, absolute_deadline)`; cookie `memo_session` carries only the random token: `HttpOnly`, `SameSite=Lax`, `Secure` in production, `Path=/`.
 - Lifetime: **sliding** — idle window 7 days (any authenticated request extends it; written at most once per hour) + **absolute cap 30 days** from creation, then a fresh login. Cookie Max-Age = the cap; the row governs validity.

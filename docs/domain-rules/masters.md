@@ -24,8 +24,11 @@
 | last_name | string(100) | ✅ | Фамилия |
 | color | string(7) | ✅ | HEX color for schedule (e.g. #FF5733) |
 | position | enum | ✅ | "мастер" or "администратор" |
-| specialty | enum | ✅ | "живопись" or "керамика" |
-| avatar_url | string | ❌ | URL to avatar image |
+| specialty | string (CSV) | ✅ | One or more of "живопись", "керамика" — comma-separated in the existing column (#262, user decision: no migration, no new column — SQLite ignores VARCHAR length). `/my` returns an array; the public masters API returns the raw string |
+| avatar_url | string | ❌ | Avatar image: served path `/api/v1/files/avatar/<uuid>.<ext>` (self-upload via #262) or legacy external URL |
+
+## Self-edit via /my (#262)
+The linked user edits first/last name, specialty, avatar via `PUT /api/v1/my` — the same fields the admin edits on the Masters page; two writers, last write wins. A portrait upload deletes the previous served avatar file (external URLs untouched).
 
 ## API Endpoints
 | Method | Path | Description |

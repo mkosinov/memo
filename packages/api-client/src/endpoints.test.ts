@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { z } from 'zod';
-import { getMasters, getMaster, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, deleteActivity, getWebPhotos, getPhotos, getClientsPaged, getRecords, getRecordsView, getClientById, getPayments, getPaymentTotals, createRecord, updateRecord, deleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, getClientByPhone, updateVisitStatus, getTags, createService, updateService, deleteService, createLocation, updateLocation, deleteLocation, getClientsWithStats, updateClient, patchClient, reorderMasters, reorderLocations, patchMaster, patchLocation, patchMaterial, patchService, patchUserSettings, getMaterials, getTag, getVisitors, deleteMaster, deleteMaterial, deleteClient, archiveMaster, restoreMaster, resolveDeleteMaster, archiveLocation, restoreLocation, resolveDeleteLocation, archiveService, restoreService, resolveDeleteService, archiveMaterial, restoreMaterial, resolveDeleteMaterial, archiveClient, restoreClient, resolveDeleteClient, resolveDeleteRecord, getAllMasters, getAllLocations, getAllServices, getAllMaterials, getAllTags } from './endpoints';
+import { getMasters, getMaster, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, deleteActivity, getWebPhotos, getPhotos, getClientsPaged, getRecords, getRecordsView, getClientById, getPayments, getPaymentTotals, createRecord, updateRecord, deleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, getClientByPhone, updateVisitStatus, getTags, createService, updateService, deleteService, createLocation, updateLocation, deleteLocation, getClientsWithStats, updateClient, patchClient, reorderMasters, reorderLocations, patchMaster, patchLocation, patchMaterial, patchService, patchUserSettings, getUserSettings, createUserSettings, updateUserSettings, getMaterials, getTag, getVisitors, deleteMaster, deleteMaterial, deleteClient, archiveMaster, restoreMaster, resolveDeleteMaster, archiveLocation, restoreLocation, resolveDeleteLocation, archiveService, restoreService, resolveDeleteService, archiveMaterial, restoreMaterial, resolveDeleteMaterial, archiveClient, restoreClient, resolveDeleteClient, resolveDeleteRecord, getAllMasters, getAllLocations, getAllServices, getAllMaterials, getAllTags, login, logout, getMe } from './endpoints';
 import { ServiceCreateSchema, LocationCreateSchema, ActivityResponseSchema, PhotoListResponseSchema, ClientListResponseSchema, ClientResponseSchema, RecordViewListResponseSchema, type ServiceUpdate, type LocationUpdate, type ClientUpdate } from './schemas';
 
 // Mock the api function from client
@@ -1081,17 +1081,109 @@ describe('patchService', () => {
 });
 
 describe('patchUserSettings', () => {
-  it('calls PATCH /api/v1/user-settings?user_id= with partial body', async () => {
+  it('calls PATCH /api/v1/user-settings without user_id (session-derived, GH #247 §3.8)', async () => {
     vi.mocked(api).mockResolvedValue({ user_id: 'u-1' });
-    await patchUserSettings('u-1', { language: 'en' });
+    await patchUserSettings({ language: 'en' });
     expect(api).toHaveBeenCalledWith(
-      '/api/v1/user-settings?user_id=u-1',
+      '/api/v1/user-settings',
       expect.anything(),
       expect.objectContaining({
         method: 'PATCH',
         body: JSON.stringify({ language: 'en' }),
       }),
     );
+  });
+});
+
+describe('getUserSettings', () => {
+  it('calls GET /api/v1/user-settings without user_id (session-derived, GH #247 §3.8)', async () => {
+    vi.mocked(api).mockResolvedValue({ user_id: 'u-1' });
+    await getUserSettings();
+    expect(api).toHaveBeenCalledWith('/api/v1/user-settings', expect.anything());
+  });
+});
+
+describe('updateUserSettings', () => {
+  it('calls PUT /api/v1/user-settings without user_id (session-derived, GH #247 §3.8)', async () => {
+    vi.mocked(api).mockResolvedValue({ user_id: 'u-1' });
+    await updateUserSettings({ theme: 'dark' });
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/user-settings',
+      expect.anything(),
+      expect.objectContaining({
+        method: 'PUT',
+        body: JSON.stringify({ theme: 'dark' }),
+      }),
+    );
+  });
+});
+
+describe('createUserSettings', () => {
+  it('calls POST /api/v1/user-settings with body', async () => {
+    vi.mocked(api).mockResolvedValue({ user_id: 'u-1' });
+    await createUserSettings({ theme: 'light' });
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/user-settings',
+      expect.anything(),
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ theme: 'light' }),
+      }),
+    );
+  });
+});
+
+// ─── Auth (GH #247 spec §3.6/§4.1) ───────────────────────────────────────────
+
+describe('login', () => {
+  it('calls POST /api/v1/auth/login with phone and password', async () => {
+    vi.mocked(api).mockResolvedValue({
+      user: { id: 'u-1', phone: '+79990000001', role: 'admin', master_id: null, email: null },
+      permissions: ['*'],
+    });
+    await login('+79990000001', 'secret123');
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/auth/login',
+      expect.anything(),
+      {
+        method: 'POST',
+        body: JSON.stringify({ phone: '+79990000001', password: 'secret123' }),
+      },
+    );
+  });
+});
+
+describe('logout', () => {
+  it('calls POST /api/v1/auth/logout', async () => {
+    vi.mocked(api).mockResolvedValue(undefined);
+    await logout();
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/auth/logout',
+      expect.anything(),
+      { method: 'POST' },
+    );
+  });
+});
+
+describe('getMe', () => {
+  it('calls GET /api/v1/auth/me and returns parsed body', async () => {
+    const me = {
+      user: { id: 'u-1', phone: '+79990000001', role: 'admin', master_id: null, email: null },
+      permissions: ['*'],
+    };
+    vi.mocked(api).mockResolvedValue(me);
+    await expect(getMe()).resolves.toEqual(me);
+    expect(api).toHaveBeenCalledWith('/api/v1/auth/me', expect.anything());
+  });
+
+  it('resolves a 401 to null (guest bootstrap contract, spec §4.1)', async () => {
+    vi.mocked(api).mockRejectedValue(new ApiError(401, 'No session', 'AUTH_UNAUTHORIZED'));
+    await expect(getMe()).resolves.toBeNull();
+  });
+
+  it('rethrows non-401 ApiErrors', async () => {
+    vi.mocked(api).mockRejectedValue(new ApiError(500, 'Server error'));
+    await expect(getMe()).rejects.toThrow(ApiError);
   });
 });
 

@@ -26,8 +26,9 @@ const DEFAULT_SETTINGS: UserSettings = {
   columnOrderLocations: [],
 };
 
-// TODO: Replace with real user ID from auth context
-const DEV_USER_ID = 'dev-user-001';
+// GH #247 §3.8: user-settings are session-scoped — the server derives the
+// user, so no user id is sent from the client (DEV_USER_ID removed). Loading
+// is auth-gated in T13.
 
 function loadFromStorage(): UserSettings | null {
   if (typeof window === 'undefined') return null;
@@ -68,7 +69,7 @@ export function UserSettingsProvider({ children }: { children: React.ReactNode }
       try {
         const { getUserSettings, createUserSettings } = await import('@memo/api-client');
         try {
-          const remote = await getUserSettings(DEV_USER_ID);
+          const remote = await getUserSettings();
           const remoteSettings: UserSettings = {
             theme: remote.theme as 'light' | 'dark',
             language: remote.language as 'ru' | 'en',
@@ -85,7 +86,6 @@ export function UserSettingsProvider({ children }: { children: React.ReactNode }
           if (!cached && mountedRef.current) {
             try {
               const created = await createUserSettings({
-                user_id: DEV_USER_ID,
                 theme: DEFAULT_SETTINGS.theme,
                 language: DEFAULT_SETTINGS.language,
                 column_order_masters: DEFAULT_SETTINGS.columnOrderMasters,
@@ -128,7 +128,7 @@ export function UserSettingsProvider({ children }: { children: React.ReactNode }
         if (partial.language !== undefined) apiPartial.language = partial.language;
         if (partial.columnOrderMasters !== undefined) apiPartial.column_order_masters = partial.columnOrderMasters;
         if (partial.columnOrderLocations !== undefined) apiPartial.column_order_locations = partial.columnOrderLocations;
-        patchUserSettings(DEV_USER_ID, apiPartial).catch(() => {});
+        patchUserSettings(apiPartial).catch(() => {});
       }).catch(() => {});
       return next;
     });

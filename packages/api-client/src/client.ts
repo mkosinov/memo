@@ -97,9 +97,14 @@ async function api<T>(path: string, schema: z.ZodType<T, z.ZodTypeDef, unknown>,
 
     // Session expiry mid-work (GH #247 spec §4.1): hand the registered handler
     // a chance to react (the admin redirects to /login) — /auth/* 401s are
-    // part of normal flow and never trigger it.
+    // part of normal flow and never trigger it. Handler failures are ignored:
+    // the original 401 ApiError must always be the one the caller sees.
     if (res.status === 401 && unauthorizedHandler !== null && !isAuthPath(path)) {
-      unauthorizedHandler();
+      try {
+        unauthorizedHandler();
+      } catch {
+        // Handler (e.g. login redirect) failed — fall through to the ApiError
+      }
     }
 
     throw new ApiError(res.status, message, code, dependencies);

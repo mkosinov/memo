@@ -274,6 +274,29 @@ describe('401 unauthorized handler', () => {
 
     expect(handler).not.toHaveBeenCalled();
   });
+
+  it('still throws the 401 ApiError when the handler itself throws', async () => {
+    setUnauthorizedHandler(() => {
+      throw new Error('handler blew up');
+    });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      mockFetchResponse(401, { detail: { code: 'AUTH_UNAUTHORIZED', message: 'No session' } })
+    ));
+
+    let caught: unknown;
+    try {
+      await api('/api/v1/records', schema);
+    } catch (e) {
+      caught = e;
+    }
+
+    // The original ApiError must win — the caller's instanceof branching
+    // (parseApiError etc.) must never see the handler's failure instead.
+    expect(caught).toBeInstanceOf(ApiError);
+    expect((caught as ApiError).status).toBe(401);
+    expect((caught as ApiError).code).toBe('AUTH_UNAUTHORIZED');
+    expect((caught as Error).message).toBe('No session');
+  });
 });
 
 // ─── 409 dependency-tree exposure (GH #207 §5) ────────────────────────────────

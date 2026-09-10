@@ -195,11 +195,13 @@ class TestAdminPasses:
     ) -> None:
         body = _fill_activity_body(api_client, label, body)
         if label == "user-settings-read":
-            # GET still takes ?user_id= until T8 removes it (spec §3.8) —
-            # the session user's own id is the valid target here.
+            # Own-only (spec §3.8): no ?user_id= param — create the
+            # session user's row, then a plain GET must return 200.
             me = api_client.get("/api/v1/auth/me").json()["user"]["id"]
-            resp = api_client.get(f"{path}?user_id={me}")
-            assert resp.status_code in (200, 404), resp.text  # 404: no row yet
+            created = api_client.post("/api/v1/user-settings", json={"user_id": me})
+            assert created.status_code == 201, created.text
+            resp = api_client.get(path)
+            assert resp.status_code == 200, resp.text
             return
         if label == "events-stream":
             async with SSEStream(app, _cookie_header(api_client)) as stream:

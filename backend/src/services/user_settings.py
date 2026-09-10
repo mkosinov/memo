@@ -55,6 +55,16 @@ class UserSettingsService:
             return None
         return _to_response(orm)
 
+    async def get_by_id(
+        self, session: AsyncSession, id: str
+    ) -> UserSettings | None:
+        """Find a settings row by primary key. Returns the ORM row (GH #247
+        §3.8: DELETE resolves the row's ``user_id`` for the ownership check)
+        or None if not found."""
+        stmt = select(UserSettings).where(UserSettings.id == id)
+        result = await session.execute(stmt)
+        return result.scalar_one_or_none()
+
     @transactional
     async def create(
         self, session: AsyncSession, data: UserSettingsCreate

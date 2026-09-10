@@ -23,7 +23,7 @@ UserSettings stores per-user UI preferences: theme, language, and column orderin
 
 ### Backend
 - **Identified by user_id, not by primary key**, for all non-DELETE operations
-- GET / PUT / PATCH / DELETE-by-id all take `?user_id=` query param (except DELETE which uses {settings_id})
+- **Own-only (GH #247 spec §3.8, breaking):** all endpoints require a session; GET/PUT/PATCH take **no** `user_id` query param — the session user is the only addressable user (a stale `?user_id=` from an old client is ignored). POST takes `user_id` in the body (create schema). DELETE by `/{settings_id}` resolves the row's `user_id` and rejects non-owned rows with 403 `AUTH_FORBIDDEN`
 
 ### Frontend
 - SettingsPanel reads on mount, writes on change
@@ -32,11 +32,11 @@ UserSettings stores per-user UI preferences: theme, language, and column orderin
 ## API Endpoints
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | /api/v1/user-settings?user_id={id} | Get by user_id |
-| POST | /api/v1/user-settings | Create |
-| PUT | /api/v1/user-settings?user_id={id} | Partial update (by user_id) |
-| PATCH | /api/v1/user-settings?user_id={id} | Partial update (by user_id) |
-| DELETE | /api/v1/user-settings/{settings_id} | Hard delete by primary key |
+| GET | /api/v1/user-settings | Get the session user's settings (own-only) |
+| POST | /api/v1/user-settings | Create (body takes user_id) |
+| PUT | /api/v1/user-settings | Partial update (session user's row, own-only) |
+| PATCH | /api/v1/user-settings | Partial update (session user's row, own-only) |
+| DELETE | /api/v1/user-settings/{settings_id} | Hard delete by primary key (own row only, else 403) |
 
 ## Relationships
 - UserSettings → belongs to User (logical, not enforced FK)

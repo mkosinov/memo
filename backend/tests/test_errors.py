@@ -13,11 +13,11 @@ pytestmark = pytest.mark.pure_unit
 # ─── ErrorCode Enum ───────────────────────────────────────────────────────────
 
 class TestErrorCodeEnum:
-    """Verify ErrorCode has all 19 codes (18 from spec §5 + GH #247 auth codes)."""
+    """Verify ErrorCode has all 21 codes (18 from spec §5 + GH #247 auth codes)."""
 
-    def test_has_all_19_codes(self):
-        """All 19 error codes are present (18 base + AUTH_FORBIDDEN, GH #247)."""
-        assert len(ErrorCode) == 19
+    def test_has_all_21_codes(self):
+        """All 21 error codes are present (18 base + 3 GH #247 auth)."""
+        assert len(ErrorCode) == 21
 
     def test_expected_codes_exist(self):
         """Every code from spec §5 (plus GH #247 auth additions) exists."""
@@ -27,6 +27,9 @@ class TestErrorCodeEnum:
             "CLIENT_DUPLICATE_PHONE",
             # 403 — GH #247 auth
             "AUTH_FORBIDDEN",
+            # 401/429 — GH #247 auth
+            "AUTH_INVALID_CREDENTIALS",
+            "AUTH_LOCKED_OUT",
             # 404
             "ACTIVITY_NOT_FOUND",
             "RECORD_NOT_FOUND",
@@ -108,8 +111,8 @@ class TestErrorMessages:
             assert code in ERROR_MESSAGES, f"Missing ERROR_MESSAGES entry for {code.value}"
 
     def test_total_count_matches(self):
-        """ERROR_MESSAGES has exactly 19 entries (one per ErrorCode)."""
-        assert len(ERROR_MESSAGES) == 19
+        """ERROR_MESSAGES has exactly 21 entries (one per ErrorCode)."""
+        assert len(ERROR_MESSAGES) == 21
 
     def test_all_values_are_strings(self):
         """Every message is a non-empty string."""

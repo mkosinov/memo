@@ -36,6 +36,12 @@ class ErrorCode(str, Enum):
     # 403 — forbidden (GH #247 auth)
     AUTH_FORBIDDEN = "AUTH_FORBIDDEN"
 
+    # 401 — authentication (GH #247 auth)
+    AUTH_INVALID_CREDENTIALS = "AUTH_INVALID_CREDENTIALS"
+
+    # 429 — brute-force throttle (GH #247 auth)
+    AUTH_LOCKED_OUT = "AUTH_LOCKED_OUT"
+
     # 422 — validation / integrity
     VALIDATION_ERROR = "VALIDATION_ERROR"
     INTEGRITY_VIOLATION = "INTEGRITY_VIOLATION"
@@ -75,6 +81,8 @@ ERROR_MESSAGES: dict[ErrorCode, str] = {
     ErrorCode.PAYMENT_NOT_FOUND: "Платёж не найден",
     ErrorCode.SETTINGS_NOT_FOUND: "Настройки не найдены",
     ErrorCode.AUTH_FORBIDDEN: "Недостаточно прав",
+    ErrorCode.AUTH_INVALID_CREDENTIALS: "Неверный телефон или пароль",
+    ErrorCode.AUTH_LOCKED_OUT: "Слишком много неудачных попыток входа",
     ErrorCode.VALIDATION_ERROR: "Проверьте правильность заполнения полей",
     ErrorCode.INTEGRITY_VIOLATION: "Нарушение целостности данных",
     ErrorCode.INTERNAL_ERROR: "Ошибка сервера",

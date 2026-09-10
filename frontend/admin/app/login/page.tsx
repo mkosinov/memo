@@ -2,8 +2,9 @@
 
 import React, { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { getMe, login } from '@memo/api-client';
+import { getMe } from '@memo/api-client';
 import { useUI } from '@/contexts/UIContext';
+import { useAuth } from '@/contexts/AuthContext';
 import { parseApiError } from '../lib/api/parseApiError';
 
 /**
@@ -28,6 +29,10 @@ function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { showToast } = useUI();
+  // Submit goes through the context (not the api-client directly): login must
+  // flip AuthContext state to authenticated, or the (main) AuthGate would
+  // bounce the freshly logged-in user right back to /login.
+  const { login } = useAuth();
 
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');

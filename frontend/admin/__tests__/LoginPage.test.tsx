@@ -9,6 +9,7 @@ vi.mock('@memo/api-client', async (importOriginal) => {
     ...actual,
     getMe: vi.fn(),
     login: vi.fn(),
+    setUnauthorizedHandler: vi.fn(),
   };
 });
 
@@ -20,12 +21,14 @@ vi.mock('next/navigation', () => ({
   usePathname: () => window.location.pathname,
 }));
 
-import { getMe, login } from '@memo/api-client';
+import { getMe, login, setUnauthorizedHandler } from '@memo/api-client';
 import LoginPage from '../app/login/page';
 import { UIProvider } from '../contexts/UIContext';
+import { AuthProvider, useAuth } from '../contexts/AuthContext';
 
 const mockGetMe = vi.mocked(getMe);
 const mockLogin = vi.mocked(login);
+const mockSetUnauthorizedHandler = vi.mocked(setUnauthorizedHandler);
 
 const mockAuthMe = {
   user: {
@@ -56,10 +59,27 @@ function fireEventChange(el: HTMLElement, value: string) {
   });
 }
 
+/** Auth-state probe: reflects the SHARED AuthContext state the page mutates. */
+function AuthStateProbe() {
+  const { status, user } = useAuth();
+  return (
+    <span data-testid="auth-probe">
+      {status}
+      {status === 'authenticated' ? `:${user?.id}` : ''}
+    </span>
+  );
+}
+
 function renderLogin() {
   return render(
     <UIProvider>
-      <LoginPage />
+      {/* Real AuthProvider: the page's submit must drive THIS context's state.
+          Regression guard (GH #247 review): if the page called the api-client
+          directly, the probe would stay "guest" after a successful login. */}
+      <AuthProvider>
+        <AuthStateProbe />
+        <LoginPage />
+      </AuthProvider>
     </UIProvider>,
   );
 }
@@ -90,16 +110,23 @@ describe('LoginPage', () => {
     });
   });
 
-  it('submits credentials and routes to returnTo on success', async () => {
+  it('submits via AuthContext login: context flips to authenticated and routes to returnTo', async () => {
     window.history.replaceState(null, '', '/login?returnTo=%2Fclients');
     mockLogin.mockResolvedValue(mockAuthMe);
     renderLogin();
+    await waitFor(() => {
+      expect(screen.getByTestId('auth-probe')).toHaveTextContent('guest');
+    });
     fillForm('+79990000001', 'secret123');
     act(() => {
       screen.getByRole('button', { name: 'Войти' }).click();
     });
     await waitFor(() => {
       expect(mockLogin).toHaveBeenCalledWith('+79990000001', 'secret123');
+      // THE regression assertion: the AuthContext instance shared with the
+      // probe is authenticated — the page updated context state, not just
+      // fired an API call.
+      expect(screen.getByTestId('auth-probe')).toHaveTextContent('authenticated:user-uuid-1');
       expect(replaceMock).toHaveBeenCalledWith('/clients');
     });
   });
@@ -131,6 +158,8 @@ describe('LoginPage', () => {
     await waitFor(() => {
       expect(screen.getAllByText('Неверный телефон или пароль').length).toBeGreaterThanOrEqual(1);
     });
+    // Context stayed guest — failed login must not flip state
+    expect(screen.getByTestId('auth-probe')).toHaveTextContent('guest');
     expect(replaceMock).not.toHaveBeenCalled();
   });
 
@@ -144,6 +173,7 @@ describe('LoginPage', () => {
     await waitFor(() => {
       expect(screen.getByText('Ошибка сети')).toBeInTheDocument();
     });
+    expect(screen.getByTestId('auth-probe')).toHaveTextContent('guest');
     expect(replaceMock).not.toHaveBeenCalled();
   });
 });

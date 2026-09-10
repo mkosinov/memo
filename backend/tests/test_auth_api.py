@@ -64,8 +64,8 @@ def _clear_failure_counters():
 def anon_client(api_client):
     """The shared TestClient with a wiped cookie jar (anonymous view).
 
-    The session-scoped ``api_client`` accumulates ``Set-Cookie`` state
-    across tests; auth behavior demands a known-empty jar.
+    Since GH #247 T6 ``api_client`` arrives pre-authenticated as the
+    fixture admin; auth behavior demands a known-empty jar.
     """
     api_client.cookies.clear()
     yield api_client
@@ -80,9 +80,14 @@ def _password_hashes():
 
 @pytest.fixture
 def _admin_user(_password_hashes):
-    """Insert an admin user directly (no user API) — returns {id, phone}."""
+    """Insert an admin user directly (no user API) — returns {id, phone}.
+
+    Phone deliberately differs from the conftest fixture admin
+    (+79990000001, GH #247 T6): users.phone is UNIQUE and both rows must
+    coexist within one test.
+    """
     return _insert_user(
-        phone="+79990000001", role="admin",
+        phone="+79990000011", role="admin",
         password_hash=_password_hashes["password"],
     )
 

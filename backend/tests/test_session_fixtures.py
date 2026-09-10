@@ -1,13 +1,20 @@
-"""Tests for session-scoped fixtures (app, db_engine, api_client).
+"""Tests for session-scoped fixtures (app, db_engine) + the authenticated
+api_client / login_as fixtures (GH #247 T6).
 
 These verify that the test infrastructure uses session-scoped fixtures
-to avoid recreating the app, engine, and TestClient per test.
+(app, db_engine) to avoid recreating the app and engine per test, while
+``api_client`` is function-scoped and pre-authenticated as the fixture
+admin (the autouse truncate wipes the sessions table per test, so a
+session-scoped login would die at the first truncate).
 """
 
 import asyncio
+import uuid as _uuid
 
 import pytest
 from sqlalchemy import text
+
+from src.auth.passwords import hash_password
 
 
 def test_app_fixture_is_session_scoped(app):
@@ -122,3 +129,60 @@ def test_truncate_respects_fk_order(db_engine):
             assert result.scalar() == 0
 
     asyncio.run(scenario())
+
+
+# ─── GH #247 T6: authenticated api_client + login_as ──────────────────────────
+
+
+class TestAuthenticatedApiClient:
+    def test_api_client_is_authenticated_admin(self, api_client) -> None:
+        """api_client arrives with a valid admin memo_session cookie jar.
+
+        The fixture INSERTs the admin after the per-test truncate and logs
+        in via POST /api/v1/auth/login (spec §7) — /me must answer 200
+        with the admin principal.
+        """
+        resp = api_client.get("/api/v1/auth/me")
+        assert resp.status_code == 200, f"api_client not authenticated: {resp.text}"
+        body = resp.json()
+        assert body["user"]["phone"] == "+79990000001"
+        assert body["user"]["role"] == "admin"
+
+    def test_api_client_admin_row_exists_in_db(self, api_client) -> None:
+        """The fixture admin is a real users row (role=admin, is_active)."""
+        from tests.conftest import query_db
+
+        rows = query_db("SELECT role, is_active FROM users WHERE phone='+79990000001'")
+        assert len(rows) == 1
+        assert rows[0]["role"] == "admin"
+        assert rows[0]["is_active"] == 1
+
+
+class TestLoginAs:
+    def test_login_as_yields_fresh_client_for_role_user(self, login_as) -> None:
+        """login_as(phone, password) → separate authenticated TestClient.
+
+        Inserts a master-role user directly (the ``_user`` pattern, no
+        user API) with a real hash_password hash, then logs in as them.
+        """
+        import uuid as _uuid
+
+        from src.auth.passwords import hash_password
+
+        from tests.conftest import query_db
+
+        phone = "+79990000002"
+        query_db(
+            "INSERT INTO users (id, phone, password_hash, role, "
+            "email_is_confirmed, phone_is_confirmed, is_active, created_at, updated_at) "
+            f"VALUES ('{_uuid.uuid4()}', '{phone}', '{hash_password('master-pass-1')}', "
+            "'master', 0, 0, 1, datetime('now'), datetime('now'))"
+        )
+
+        other = login_as(phone, "master-pass-1")
+
+        resp = other.get("/api/v1/auth/me")
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["user"]["phone"] == phone
+        assert body["user"]["role"] == "master"

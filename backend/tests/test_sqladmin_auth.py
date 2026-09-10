@@ -133,17 +133,21 @@ class TestSqlAdminLogin:
         assert resp.status_code == 302, f"Admin login failed: {resp.status_code}"
         assert "/admin/login" not in resp.headers["location"]
 
-        # SAME client (holds the sqladmin session cookie) — an admin page
-        # must render, not redirect back to the login
-        page = client.get("/admin/user/list/")
-        assert page.status_code in (200, 307), (
-            f"Authorized page failed: {page.status_code}"
+        # With the sqladmin session cookie, the exact list path (no trailing
+        # slash, no redirect-following) must render directly — a 302/307 here
+        # would mean the session was not accepted.
+        authed = TestClient(admin_app, cookies=client.cookies, follow_redirects=False)
+        page = authed.get("/admin/user/list")
+        assert page.status_code == 200, f"Authorized page failed: {page.status_code}"
+
+        # Negative control: the SAME path without the cookie redirects to
+        # the login (guards against a vacuous 200 from an open route).
+        anon = TestClient(admin_app, follow_redirects=False)
+        anon_resp = anon.get("/admin/user/list")
+        assert anon_resp.status_code in (302, 307), (
+            f"Anonymous must be redirected, got {anon_resp.status_code}"
         )
-        if page.status_code == 307:
-            assert "/admin/login" not in page.headers["location"]
-        followed = TestClient(admin_app, cookies=client.cookies)
-        final = followed.get("/admin/user/list/")
-        assert final.status_code == 200, f"List view failed: {final.status_code}"
+        assert "/admin/login" in anon_resp.headers["location"]
 
     def test_master_role_login_rejected(self, admin_app) -> None:
         phone = _unique_phone()

@@ -6,6 +6,7 @@ from typing import Annotated
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 
+from src.auth.permissions import require_permission, verify_fetch_metadata
 from src.db import SessionDep
 from src.domain.deletion import ResolutionError, collect_dependencies
 from src.errors import ErrorCode, ErrorDetail
@@ -33,7 +34,8 @@ def _get_record_service() -> RecordService:
 _ServiceDep = Annotated[RecordService, Depends(_get_record_service)]
 
 
-@router.get("", response_model=PaginatedResponse[RecordResponse])
+@router.get("", response_model=PaginatedResponse[RecordResponse],
+             dependencies=[Depends(require_permission("records:read"))])
 async def list_records(
     service: _ServiceDep,
     session: SessionDep,
@@ -49,7 +51,8 @@ async def list_records(
     )
 
 
-@router.get("/view", response_model=PaginatedResponse[RecordViewResponse])
+@router.get("/view", response_model=PaginatedResponse[RecordViewResponse],
+             dependencies=[Depends(require_permission("records:read"))])
 async def list_records_view(
     service: _ServiceDep,
     session: SessionDep,
@@ -68,7 +71,7 @@ async def list_records_view(
     return await service.list_view(db_session=session, params=params)
 
 
-@router.get("/{record_id}", response_model=RecordResponse)
+@router.get("/{record_id}", response_model=RecordResponse, dependencies=[Depends(require_permission("records:read"))])
 async def get_record(
     record_id: str,
     service: _ServiceDep,
@@ -98,7 +101,7 @@ async def create_record(
     return map_record(record)
 
 
-@router.put("/{record_id}", response_model=RecordResponse)
+@router.put("/{record_id}", response_model=RecordResponse, dependencies=[Depends(require_permission("records:write")), Depends(verify_fetch_metadata)])
 async def update_record(
     record_id: str,
     data: RecordUpdate,
@@ -118,7 +121,7 @@ async def update_record(
     return map_record(record)
 
 
-@router.patch("/{record_id}", response_model=RecordResponse)
+@router.patch("/{record_id}", response_model=RecordResponse, dependencies=[Depends(require_permission("records:write")), Depends(verify_fetch_metadata)])
 async def patch_record(
     record_id: str,
     data: RecordPatch,
@@ -138,7 +141,7 @@ async def patch_record(
     return map_record(record)
 
 
-@router.delete("/{record_id}", status_code=204)
+@router.delete("/{record_id}", status_code=204, dependencies=[Depends(require_permission("records:write")), Depends(verify_fetch_metadata)])
 async def delete_record(
     record_id: str,
     service: _ServiceDep,

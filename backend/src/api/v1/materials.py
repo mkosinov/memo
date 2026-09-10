@@ -7,6 +7,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 from sqlalchemy import asc
 
+from src.auth.permissions import require_permission, verify_fetch_metadata
 from src.db import SessionDep
 from src.domain.deletion import ResolutionError, collect_dependencies
 from src.domain.errors import BareListLimitExceededError
@@ -24,7 +25,11 @@ from src.schemas.material import (
 from src.schemas.pagination import PaginationParams
 from src.services.material import MaterialService, get_material_service
 
-router = APIRouter(tags=["materials"])
+router = APIRouter(
+    tags=["materials"],
+    # GH #247 spec §3.7: wholly-private router — read guard at router level.
+    dependencies=[Depends(require_permission("materials:read"))],
+)
 
 
 @lru_cache
@@ -139,7 +144,8 @@ async def get_material(
     return material
 
 
-@router.post("", response_model=MaterialResponse, status_code=201)
+@router.post("", response_model=MaterialResponse, status_code=201,
+             dependencies=[Depends(require_permission("materials:write")), Depends(verify_fetch_metadata)])
 async def create_material(
     data: MaterialCreate,
     service: _ServiceDep,
@@ -149,7 +155,7 @@ async def create_material(
     return await service.create(db_session=session, data=data)
 
 
-@router.put("/{material_id}", response_model=MaterialResponse)
+@router.put("/{material_id}", response_model=MaterialResponse, dependencies=[Depends(require_permission("materials:write")), Depends(verify_fetch_metadata)])
 async def update_material(
     material_id: str,
     data: MaterialUpdate,
@@ -169,7 +175,7 @@ async def update_material(
     return material
 
 
-@router.patch("/{material_id}", response_model=MaterialResponse)
+@router.patch("/{material_id}", response_model=MaterialResponse, dependencies=[Depends(require_permission("materials:write")), Depends(verify_fetch_metadata)])
 async def patch_material(
     material_id: str,
     data: MaterialPatch,
@@ -189,7 +195,7 @@ async def patch_material(
     return material
 
 
-@router.delete("/{material_id}", status_code=204)
+@router.delete("/{material_id}", status_code=204, dependencies=[Depends(require_permission("materials:write")), Depends(verify_fetch_metadata)])
 async def delete_material(
     material_id: str,
     service: _ServiceDep,
@@ -241,7 +247,7 @@ async def delete_material(
         )
 
 
-@router.post("/{material_id}/archive", response_model=MaterialResponse)
+@router.post("/{material_id}/archive", response_model=MaterialResponse, dependencies=[Depends(require_permission("materials:write")), Depends(verify_fetch_metadata)])
 async def archive_material(
     material_id: str,
     service: _ServiceDep,
@@ -266,7 +272,7 @@ async def archive_material(
     return await _refetch_or_404(service, session, material_id)
 
 
-@router.post("/{material_id}/restore", response_model=MaterialResponse)
+@router.post("/{material_id}/restore", response_model=MaterialResponse, dependencies=[Depends(require_permission("materials:write")), Depends(verify_fetch_metadata)])
 async def restore_material(
     material_id: str,
     service: _ServiceDep,

@@ -27,13 +27,16 @@ and are awaited through the app as usual.
 import asyncio
 import contextlib
 import json
+import sqlite3
 import uuid
 from pathlib import Path
 from typing import Any
 
 import pytest
 from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
+from src.auth.passwords import hash_password
 from src.events.hub import hub
 
 pytestmark = pytest.mark.integration
@@ -41,8 +44,54 @@ pytestmark = pytest.mark.integration
 _SSE_TIMEOUT = 5.0  # seconds — generous ceiling for frame delivery
 _QUIET_WINDOW = 0.3  # seconds — no-frame observation window
 
+# GH #247 T7: the SSE endpoint and the tag mutations it observes are now
+# session-guarded — the raw-ASGI harness carries an admin cookie. Reported
+# adaptation: fresh admin row + login per test (reset_db truncates users/
+# sessions), Argon2 hash amortized at module scope.
+_PASSWORD = "sse-admin-pass-1"
 
-def _http_scope(method: str, path: str, headers: list[tuple[bytes, bytes]]) -> dict[str, Any]:
+
+@pytest.fixture(scope="module")
+def _admin_hash() -> str:
+    return hash_password(_PASSWORD)
+
+
+@pytest.fixture
+def _sse_cookie(app, db_engine, _admin_hash) -> str:
+    """``memo_session=<token>`` header value for a fresh admin login."""
+    user_id = str(uuid.uuid4())
+    phone = f"+7999{uuid.uuid4().hex[:7]}"
+    from tests.conftest import _TEST_DB_URL
+
+    db_path = _TEST_DB_URL.replace("sqlite+aiosqlite:///", "")
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "INSERT INTO users (id, phone, password_hash, role, "
+        "email_is_confirmed, phone_is_confirmed, is_active, created_at, updated_at) "
+        "VALUES (?, ?, ?, 'admin', 0, 0, 1, datetime('now'), datetime('now'))",
+        (user_id, phone, _admin_hash),
+    )
+    conn.commit()
+    conn.close()
+
+    client = TestClient(app)
+    resp = client.post(
+        "/api/v1/auth/login", json={"phone": phone, "password": _PASSWORD}
+    )
+    assert resp.status_code == 200, resp.text
+    token = client.cookies.get("memo_session")
+    assert token, "no memo_session cookie after login"
+    client.close()
+    return f"memo_session={token}"
+
+
+def _http_scope(
+    method: str,
+    path: str,
+    headers: list[tuple[bytes, bytes]],
+    cookie: str | None = None,
+) -> dict[str, Any]:
+    extra = [(b"cookie", cookie.encode())] if cookie else []
     return {
         "type": "http",
         "asgi": {"version": "3.0", "spec_version": "2.3"},
@@ -53,7 +102,7 @@ def _http_scope(method: str, path: str, headers: list[tuple[bytes, bytes]]) -> d
         "root_path": "",
         "scheme": "http",
         "query_string": b"",
-        "headers": [(b"host", b"test"), *headers],
+        "headers": [(b"host", b"test"), *extra, *headers],
         "client": ("127.0.0.1", 123),
         "server": ("test", 80),
     }
@@ -66,6 +115,7 @@ async def _asgi_request(
     *,
     json_body: dict[str, Any] | None = None,
     headers: list[tuple[bytes, bytes]] | None = None,
+    cookie: str | None = None,
 ) -> tuple[int, dict[bytes, bytes], bytes]:
     """Run ONE bounded request through the app (raw ASGI, httpx-transport style).
 
@@ -101,7 +151,7 @@ async def _asgi_request(
             if not message.get("more_body", False):
                 response_complete.set()
 
-    await app(_http_scope(method, path, headers), receive, send)
+    await app(_http_scope(method, path, headers, cookie), receive, send)
     assert status is not None
     return status, dict(raw_headers), b"".join(body_parts)
 
@@ -114,8 +164,9 @@ class SSEStream:
     disconnect (``http.disconnect``) and cancels the app task.
     """
 
-    def __init__(self, app: FastAPI) -> None:
+    def __init__(self, app: FastAPI, cookie: str | None = None) -> None:
         self._app = app
+        self._cookie = cookie
         self.bodies: list[bytes] = []
         self.status: int | None = None
         self.headers: dict[bytes, bytes] = {}
@@ -148,7 +199,9 @@ class SSEStream:
                 if message.get("body"):
                     self.bodies.append(message["body"])
 
-        await self._app(_http_scope("GET", "/api/v1/events", []), receive, send)
+        await self._app(
+            _http_scope("GET", "/api/v1/events", [], self._cookie), receive, send
+        )
 
     def text(self) -> str:
         return b"".join(self.bodies).decode()
@@ -193,16 +246,16 @@ async def _wait_subscribers_drop(baseline: int, timeout: float = _SSE_TIMEOUT) -
 
 
 class TestReadyFrame:
-    async def test_ready_frame_wire_format(self, app) -> None:
+    async def test_ready_frame_wire_format(self, app, _sse_cookie) -> None:
         """First frame: event ready, empty JSON object data, retry 5000."""
-        async with SSEStream(app) as stream:
+        async with SSEStream(app, _sse_cookie) as stream:
             await stream.wait_frame("event: ready")
             await stream.wait_frame("data: {}")
             await stream.wait_frame("retry: 5000")
 
-    async def test_sse_response_headers(self, app) -> None:
+    async def test_sse_response_headers(self, app, _sse_cookie) -> None:
         """Routing-native SSE headers on the wire."""
-        async with SSEStream(app) as stream:
+        async with SSEStream(app, _sse_cookie) as stream:
             await stream.wait_frame("event: ready")
             assert stream.status == 200
             content_type = stream.headers.get(b"content-type", b"").decode()
@@ -215,9 +268,9 @@ class TestReadyFrame:
 
 
 class TestInvalidateFrames:
-    async def test_mutation_emits_frame_with_origin(self, app) -> None:
+    async def test_mutation_emits_frame_with_origin(self, app, _sse_cookie) -> None:
         """POST with X-Memo-Tab-Id → invalidate frame with entities + origin."""
-        async with SSEStream(app) as stream:
+        async with SSEStream(app, _sse_cookie) as stream:
             await stream.wait_frame("event: ready")
             status, _, _ = await _asgi_request(
                 app,
@@ -225,36 +278,39 @@ class TestInvalidateFrames:
                 "/api/v1/tags",
                 json_body={"tag": f"sse-{uuid.uuid4().hex[:8]}"},
                 headers=[(b"x-memo-tab-id", b"tab-1")],
+                cookie=_sse_cookie,
             )
             assert status == 201
             await stream.wait_frame("event: invalidate")
             await stream.wait_frame('"entities": ["tags"]')
             await stream.wait_frame('"origin": {"type": "tab", "id": "tab-1"}')
 
-    async def test_mutation_without_header_emits_null_origin(self, app) -> None:
+    async def test_mutation_without_header_emits_null_origin(self, app, _sse_cookie) -> None:
         """POST without the tab header → external writer → origin null."""
-        async with SSEStream(app) as stream:
+        async with SSEStream(app, _sse_cookie) as stream:
             await stream.wait_frame("event: ready")
             status, _, _ = await _asgi_request(
                 app,
                 "POST",
                 "/api/v1/tags",
                 json_body={"tag": f"sse-{uuid.uuid4().hex[:8]}"},
+                cookie=_sse_cookie,
             )
             assert status == 201
             await stream.wait_frame("event: invalidate")
             await stream.wait_frame('"entities": ["tags"]')
             await stream.wait_frame('"origin": null')
 
-    async def test_no_event_id_no_replay_field(self, app) -> None:
+    async def test_no_event_id_no_replay_field(self, app, _sse_cookie) -> None:
         """Deliberately no event ids (spec §2.3): frames carry no ``id:`` line."""
-        async with SSEStream(app) as stream:
+        async with SSEStream(app, _sse_cookie) as stream:
             await stream.wait_frame("event: ready")
             status, _, _ = await _asgi_request(
                 app,
                 "POST",
                 "/api/v1/tags",
                 json_body={"tag": f"sse-{uuid.uuid4().hex[:8]}"},
+                cookie=_sse_cookie,
             )
             assert status == 201
             await stream.wait_frame("event: invalidate")
@@ -262,17 +318,18 @@ class TestInvalidateFrames:
 
 
 class TestReadsEmitNothing:
-    async def test_get_requests_emit_no_invalidate_frame(self, app) -> None:
+    async def test_get_requests_emit_no_invalidate_frame(self, app, _sse_cookie) -> None:
         """GETs never write — no invalidate frame, even with a tab header."""
-        async with SSEStream(app) as stream:
+        async with SSEStream(app, _sse_cookie) as stream:
             await stream.wait_frame("event: ready")
-            status, _, _ = await _asgi_request(app, "GET", "/api/v1/tags")
+            status, _, _ = await _asgi_request(app, "GET", "/api/v1/tags", cookie=_sse_cookie)
             assert status == 200
             status, _, _ = await _asgi_request(
                 app,
                 "GET",
                 "/api/v1/tags",
                 headers=[(b"x-memo-tab-id", b"tab-9")],
+                cookie=_sse_cookie,
             )
             assert status == 200
             await stream.assert_no_frame("event: invalidate")
@@ -282,10 +339,10 @@ class TestReadsEmitNothing:
 
 
 class TestDisconnectUnsubscribes:
-    async def test_disconnect_removes_hub_subscriber(self, app) -> None:
+    async def test_disconnect_removes_hub_subscriber(self, app, _sse_cookie) -> None:
         """Client disconnect → generator finally → hub.unsubscribe."""
         baseline = len(hub._subscribers)
-        async with SSEStream(app) as stream:
+        async with SSEStream(app, _sse_cookie) as stream:
             await stream.wait_frame("event: ready")
             assert len(hub._subscribers) == baseline + 1
         await _wait_subscribers_drop(baseline)

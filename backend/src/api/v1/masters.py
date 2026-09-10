@@ -7,6 +7,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 from sqlalchemy import asc
 
+from src.auth.permissions import require_permission, verify_fetch_metadata
 from src.db import SessionDep
 from src.domain.deletion import ResolutionError, collect_dependencies
 from src.domain.errors import BareListLimitExceededError
@@ -104,7 +105,11 @@ async def list_masters(
     )
 
 
-@router.get("/all", response_model=list[MasterResponse])
+@router.get(
+    "/all",
+    response_model=list[MasterResponse],
+    dependencies=[Depends(require_permission("masters:read"))],
+)
 async def list_all_masters(
     service: _ServiceDep,
     session: SessionDep,
@@ -126,7 +131,21 @@ async def list_all_masters(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.put("/reorder", response_model=list[MasterResponse])
+# GH #247 (spec §3.7): public GET list/detail (PUBLIC_ROUTES) stay bare;
+# everything else is guarded — decorator-level ``masters:read`` for the
+# private bare-list GET, ``masters:write`` + ``verify_fetch_metadata`` for
+# every mutating route.
+_WRITE_GUARD = [
+    Depends(require_permission("masters:write")),
+    Depends(verify_fetch_metadata),
+]
+
+
+@router.put(
+    "/reorder",
+    response_model=list[MasterResponse],
+    dependencies=_WRITE_GUARD,
+)
 async def reorder_masters(
     data: ReorderRequest,
     service: _ServiceDep,
@@ -155,7 +174,7 @@ async def get_master(
     return master
 
 
-@router.post("", response_model=MasterResponse, status_code=201)
+@router.post("", response_model=MasterResponse, status_code=201, dependencies=_WRITE_GUARD)
 async def create_master(
     data: MasterCreate,
     service: _ServiceDep,
@@ -165,7 +184,7 @@ async def create_master(
     return await service.create(db_session=session, data=data)
 
 
-@router.put("/{master_id}", response_model=MasterResponse)
+@router.put("/{master_id}", response_model=MasterResponse, dependencies=_WRITE_GUARD)
 async def update_master(
     master_id: str,
     data: MasterUpdate,
@@ -185,7 +204,7 @@ async def update_master(
     return master
 
 
-@router.patch("/{master_id}", response_model=MasterResponse)
+@router.patch("/{master_id}", response_model=MasterResponse, dependencies=_WRITE_GUARD)
 async def patch_master(
     master_id: str,
     data: MasterPatch,
@@ -205,7 +224,7 @@ async def patch_master(
     return master
 
 
-@router.delete("/{master_id}", status_code=204)
+@router.delete("/{master_id}", status_code=204, dependencies=_WRITE_GUARD)
 async def delete_master(
     master_id: str,
     service: _ServiceDep,
@@ -260,7 +279,7 @@ async def delete_master(
         )
 
 
-@router.post("/{master_id}/archive", response_model=MasterResponse)
+@router.post("/{master_id}/archive", response_model=MasterResponse, dependencies=_WRITE_GUARD)
 async def archive_master(
     master_id: str,
     service: _ServiceDep,
@@ -288,7 +307,7 @@ async def archive_master(
     return await _refetch_or_404(service, session, master_id)
 
 
-@router.post("/{master_id}/restore", response_model=MasterResponse)
+@router.post("/{master_id}/restore", response_model=MasterResponse, dependencies=_WRITE_GUARD)
 async def restore_master(
     master_id: str,
     service: _ServiceDep,

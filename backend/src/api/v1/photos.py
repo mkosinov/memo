@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
+from src.auth.permissions import require_permission, verify_fetch_metadata
 from src.db import SessionDep
 from src.errors import ErrorCode, ErrorDetail
 from src.models.photo import Photo
@@ -87,7 +88,8 @@ async def get_photo(
     return photo
 
 
-@router.post("", response_model=PhotoResponse, status_code=201)
+@router.post("", response_model=PhotoResponse, status_code=201,
+             dependencies=[Depends(require_permission("photos:write")), Depends(verify_fetch_metadata)])
 async def create_photo(
     data: PhotoCreate,
     service: _ServiceDep,
@@ -97,7 +99,7 @@ async def create_photo(
     return await service.create(db_session=session, data=data)
 
 
-@router.put("/{photo_id}", response_model=PhotoResponse)
+@router.put("/{photo_id}", response_model=PhotoResponse, dependencies=[Depends(require_permission("photos:write")), Depends(verify_fetch_metadata)])
 async def update_photo(
     photo_id: str,
     data: PhotoUpdate,
@@ -117,7 +119,7 @@ async def update_photo(
     return photo
 
 
-@router.patch("/{photo_id}", response_model=PhotoResponse)
+@router.patch("/{photo_id}", response_model=PhotoResponse, dependencies=[Depends(require_permission("photos:write")), Depends(verify_fetch_metadata)])
 async def patch_photo(
     photo_id: str,
     data: PhotoPatch,
@@ -137,7 +139,7 @@ async def patch_photo(
     return photo
 
 
-@router.delete("/{photo_id}", status_code=204)
+@router.delete("/{photo_id}", status_code=204, dependencies=[Depends(require_permission("photos:write")), Depends(verify_fetch_metadata)])
 async def delete_photo(
     photo_id: str,
     service: _ServiceDep,

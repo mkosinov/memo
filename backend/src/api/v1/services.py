@@ -8,6 +8,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 from sqlalchemy import asc, func, select
 
+from src.auth.permissions import require_permission, verify_fetch_metadata
 from src.db import SessionDep
 from src.domain.deletion import ResolutionError, collect_dependencies
 from src.domain.errors import BareListLimitExceededError
@@ -111,7 +112,11 @@ async def list_services(
     )
 
 
-@router.get("/all", response_model=list[ServiceResponse])
+@router.get(
+    "/all",
+    response_model=list[ServiceResponse],
+    dependencies=[Depends(require_permission("services:read"))],
+)
 async def list_all_services(
     service: _ServiceDep,
     session: SessionDep,
@@ -153,7 +158,8 @@ async def get_service(
     return ServiceResponse.model_validate(svc)
 
 
-@router.post("", response_model=ServiceResponse, status_code=201)
+@router.post("", response_model=ServiceResponse, status_code=201,
+             dependencies=[Depends(require_permission("services:write")), Depends(verify_fetch_metadata)])
 async def create_service(
     data: ServiceCreate,
     service: _ServiceDep,
@@ -164,7 +170,7 @@ async def create_service(
     return ServiceResponse.model_validate(svc)
 
 
-@router.put("/{service_id}", response_model=ServiceResponse)
+@router.put("/{service_id}", response_model=ServiceResponse, dependencies=[Depends(require_permission("services:write")), Depends(verify_fetch_metadata)])
 async def update_service(
     service_id: str,
     data: ServiceUpdate,
@@ -184,7 +190,7 @@ async def update_service(
     return ServiceResponse.model_validate(svc)
 
 
-@router.patch("/{service_id}", response_model=ServiceResponse)
+@router.patch("/{service_id}", response_model=ServiceResponse, dependencies=[Depends(require_permission("services:write")), Depends(verify_fetch_metadata)])
 async def patch_service(
     service_id: str,
     data: ServicePatch,
@@ -204,7 +210,7 @@ async def patch_service(
     return ServiceResponse.model_validate(svc)
 
 
-@router.delete("/{service_id}", status_code=204)
+@router.delete("/{service_id}", status_code=204, dependencies=[Depends(require_permission("services:write")), Depends(verify_fetch_metadata)])
 async def delete_service(
     service_id: str,
     service: _ServiceDep,
@@ -259,7 +265,7 @@ async def delete_service(
         )
 
 
-@router.post("/{service_id}/archive", response_model=ServiceResponse)
+@router.post("/{service_id}/archive", response_model=ServiceResponse, dependencies=[Depends(require_permission("services:write")), Depends(verify_fetch_metadata)])
 async def archive_service(
     service_id: str,
     service: _ServiceDep,
@@ -284,7 +290,7 @@ async def archive_service(
     return await _refetch_or_404(service, session, service_id)
 
 
-@router.post("/{service_id}/restore", response_model=ServiceResponse)
+@router.post("/{service_id}/restore", response_model=ServiceResponse, dependencies=[Depends(require_permission("services:write")), Depends(verify_fetch_metadata)])
 async def restore_service(
     service_id: str,
     service: _ServiceDep,

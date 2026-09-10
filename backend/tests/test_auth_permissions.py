@@ -179,6 +179,10 @@ class TestPublicRoutes:
     """PUBLIC_ROUTES — the whole anonymous allowlist (spec §2.7), exactly."""
 
     def test_equals_spec_allowlist_exactly(self) -> None:
+        # T7 addition: ``GET /api/v1/photos/web`` — the public gallery the
+        # spec §1 "live consumer" list keeps working (frontend/web
+        # ``useGallery`` → anonymous ``GET /photos/web``); spec §2.7 wording
+        # "(site + gallery)" names exactly this surface.
         assert PUBLIC_ROUTES == frozenset({
             ("GET", "/api/v1/health"),
             ("GET", "/api/v1/masters"),
@@ -193,6 +197,7 @@ class TestPublicRoutes:
             ("GET", "/api/v1/activities/{id}"),
             ("GET", "/api/v1/photos"),
             ("GET", "/api/v1/photos/{id}"),
+            ("GET", "/api/v1/photos/web"),
             ("POST", "/api/v1/records"),
             ("POST", "/api/v1/auth/login"),
             ("POST", "/api/v1/auth/logout"),

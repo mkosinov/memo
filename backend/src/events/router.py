@@ -26,9 +26,15 @@ Contract on the wire:
 
 from collections.abc import AsyncIterator
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 
+# GH #247 (spec §3.7 + architect ruling): the SSE stream is a transport,
+# not an entity — require_session (not require_permission). FastAPI
+# resolves dependencies before the stream starts, so a sync guard on an
+# async-generator endpoint is fine. Native EventSource sends the cookie
+# via withCredentials (#239 option a — cookie session).
+from src.auth.permissions import require_session
 from src.events.hub import hub
 
 router = APIRouter(tags=["events"])
@@ -37,7 +43,11 @@ router = APIRouter(tags=["events"])
 _RETRY_MS = 5000
 
 
-@router.get("/events", response_class=EventSourceResponse)
+@router.get(
+    "/events",
+    response_class=EventSourceResponse,
+    dependencies=[Depends(require_session)],
+)
 async def events() -> AsyncIterator[ServerSentEvent]:
     """Stream cache-invalidation hints (GH #239, spec §3.2)."""
     queue = hub.subscribe()

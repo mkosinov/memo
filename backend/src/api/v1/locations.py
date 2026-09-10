@@ -7,6 +7,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 from sqlalchemy import asc
 
+from src.auth.permissions import require_permission, verify_fetch_metadata
 from src.db import SessionDep
 from src.domain.deletion import ResolutionError, collect_dependencies
 from src.domain.errors import BareListLimitExceededError
@@ -106,7 +107,11 @@ async def list_locations(
     )
 
 
-@router.get("/all", response_model=list[LocationResponse])
+@router.get(
+    "/all",
+    response_model=list[LocationResponse],
+    dependencies=[Depends(require_permission("locations:read"))],
+)
 async def list_all_locations(
     service: _ServiceDep,
     session: SessionDep,
@@ -128,7 +133,8 @@ async def list_all_locations(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.put("/reorder", response_model=list[LocationResponse])
+@router.put("/reorder", response_model=list[LocationResponse],
+            dependencies=[Depends(require_permission("locations:write")), Depends(verify_fetch_metadata)])
 async def reorder_locations(
     data: ReorderRequest,
     service: _ServiceDep,
@@ -157,7 +163,8 @@ async def get_location(
     return location
 
 
-@router.post("", response_model=LocationResponse, status_code=201)
+@router.post("", response_model=LocationResponse, status_code=201,
+             dependencies=[Depends(require_permission("locations:write")), Depends(verify_fetch_metadata)])
 async def create_location(
     data: LocationCreate,
     service: _ServiceDep,
@@ -167,7 +174,7 @@ async def create_location(
     return await service.create(db_session=session, data=data)
 
 
-@router.put("/{location_id}", response_model=LocationResponse)
+@router.put("/{location_id}", response_model=LocationResponse, dependencies=[Depends(require_permission("locations:write")), Depends(verify_fetch_metadata)])
 async def update_location(
     location_id: str,
     data: LocationUpdate,
@@ -187,7 +194,7 @@ async def update_location(
     return location
 
 
-@router.patch("/{location_id}", response_model=LocationResponse)
+@router.patch("/{location_id}", response_model=LocationResponse, dependencies=[Depends(require_permission("locations:write")), Depends(verify_fetch_metadata)])
 async def patch_location(
     location_id: str,
     data: LocationPatch,
@@ -207,7 +214,7 @@ async def patch_location(
     return location
 
 
-@router.delete("/{location_id}", status_code=204)
+@router.delete("/{location_id}", status_code=204, dependencies=[Depends(require_permission("locations:write")), Depends(verify_fetch_metadata)])
 async def delete_location(
     location_id: str,
     service: _ServiceDep,
@@ -262,7 +269,7 @@ async def delete_location(
         )
 
 
-@router.post("/{location_id}/archive", response_model=LocationResponse)
+@router.post("/{location_id}/archive", response_model=LocationResponse, dependencies=[Depends(require_permission("locations:write")), Depends(verify_fetch_metadata)])
 async def archive_location(
     location_id: str,
     service: _ServiceDep,
@@ -287,7 +294,7 @@ async def archive_location(
     return await _refetch_or_404(service, session, location_id)
 
 
-@router.post("/{location_id}/restore", response_model=LocationResponse)
+@router.post("/{location_id}/restore", response_model=LocationResponse, dependencies=[Depends(require_permission("locations:write")), Depends(verify_fetch_metadata)])
 async def restore_location(
     location_id: str,
     service: _ServiceDep,

@@ -5,6 +5,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
 
+from src.auth.permissions import require_session, verify_fetch_metadata
 from src.db import SessionDep
 from src.errors import ErrorCode, ErrorDetail
 from src.schemas.user_settings import (
@@ -15,7 +16,14 @@ from src.schemas.user_settings import (
 )
 from src.services.user_settings import UserSettingsService, get_user_settings_service
 
-router = APIRouter(tags=["user-settings"])
+router = APIRouter(
+    tags=["user-settings"],
+    # GH #247 spec §3.8: session required on every user-settings route
+    # (own-only scoping arrives in T8 — this task only closes the open API).
+    dependencies=[Depends(require_session)],
+)
+
+_WRITE_GUARD = [Depends(require_session), Depends(verify_fetch_metadata)]
 
 
 @lru_cache
@@ -46,7 +54,7 @@ async def get_settings(
     return result
 
 
-@router.post("", response_model=UserSettingsResponse, status_code=201)
+@router.post("", response_model=UserSettingsResponse, status_code=201, dependencies=_WRITE_GUARD)
 async def create_settings(
     data: UserSettingsCreate,
     service: _ServiceDep,
@@ -56,7 +64,7 @@ async def create_settings(
     return await service.create(session, data)
 
 
-@router.put("", response_model=UserSettingsResponse)
+@router.put("", response_model=UserSettingsResponse, dependencies=_WRITE_GUARD)
 async def update_settings(
     user_id: str,
     data: UserSettingsUpdate,
@@ -82,7 +90,7 @@ async def update_settings(
     return result
 
 
-@router.patch("", response_model=UserSettingsResponse)
+@router.patch("", response_model=UserSettingsResponse, dependencies=_WRITE_GUARD)
 async def patch_settings(
     user_id: str,
     data: UserSettingsPatch,
@@ -106,7 +114,7 @@ async def patch_settings(
     return result
 
 
-@router.delete("/{settings_id}", status_code=204)
+@router.delete("/{settings_id}", status_code=204, dependencies=_WRITE_GUARD)
 async def delete_settings(
     settings_id: str,
     service: _ServiceDep,

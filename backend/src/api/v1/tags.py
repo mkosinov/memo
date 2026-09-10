@@ -6,6 +6,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import asc
 
+from src.auth.permissions import require_permission, verify_fetch_metadata
 from src.db import SessionDep
 from src.domain.errors import BareListLimitExceededError
 from src.errors import ErrorCode, ErrorDetail
@@ -80,7 +81,11 @@ async def list_tags(
     )
 
 
-@router.get("/all", response_model=list[TagResponse])
+@router.get(
+    "/all",
+    response_model=list[TagResponse],
+    dependencies=[Depends(require_permission("tags:read"))],
+)
 async def list_all_tags(
     service: _ServiceDep,
     session: SessionDep,
@@ -119,7 +124,8 @@ async def get_tag(
     return tag
 
 
-@router.post("", response_model=TagResponse, status_code=201)
+@router.post("", response_model=TagResponse, status_code=201,
+             dependencies=[Depends(require_permission("tags:write")), Depends(verify_fetch_metadata)])
 async def create_tag(
     data: TagCreate,
     service: _ServiceDep,
@@ -129,7 +135,7 @@ async def create_tag(
     return await service.create(db_session=session, data=data)
 
 
-@router.put("/{tag_id}", response_model=TagResponse)
+@router.put("/{tag_id}", response_model=TagResponse, dependencies=[Depends(require_permission("tags:write")), Depends(verify_fetch_metadata)])
 async def update_tag(
     tag_id: str,
     data: TagCreate,
@@ -149,7 +155,7 @@ async def update_tag(
     return tag
 
 
-@router.patch("/{tag_id}", response_model=TagResponse)
+@router.patch("/{tag_id}", response_model=TagResponse, dependencies=[Depends(require_permission("tags:write")), Depends(verify_fetch_metadata)])
 async def patch_tag(
     tag_id: str,
     data: TagPatch,
@@ -169,7 +175,7 @@ async def patch_tag(
     return tag
 
 
-@router.delete("/{tag_id}", status_code=204)
+@router.delete("/{tag_id}", status_code=204, dependencies=[Depends(require_permission("tags:write")), Depends(verify_fetch_metadata)])
 async def delete_tag(
     tag_id: str,
     service: _ServiceDep,

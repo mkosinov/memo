@@ -67,6 +67,7 @@ Two independent lines: (1) JSON-only API + CORS with credentials restricted to l
 ## User lifecycle
 - First admin: CLI `python -m src.cli create-user` (no default passwords in the public repo). Production bootstrap: deploy → migrate → CLI → login.
 - Further staff: created in sqladmin (admin-only login; password field hashes on save, blank on edit = unchanged). The lockout reset also lives there: clear the lock fields on the user.
+- Роль при создании учётки из карточки сотрудника и при смене должностей **авто-подставляется должностью** (шаблоны #263, D10): должность «мастер» → `role=master`, «админ» → `role=admin`; несколько должностей — старшая (admin > master); прочие должности роль не трогают; ручная правка остаётся. Подстановка — UX-удобство: доступ по-прежнему один `users.role` + матрица выше.
 - Dev seed: demo admin + demo master, dev-only.
 - `SECRET_KEY` (env): signs the sqladmin session cookie; production fails fast when unset, dev defaults to a fixed dev constant.
 

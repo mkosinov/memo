@@ -26,6 +26,7 @@ Domain rules: docs/domain-rules/auth.md (Sessions, Password Rules)
 
 from __future__ import annotations
 
+import asyncio
 import secrets
 from datetime import datetime, timedelta
 
@@ -462,6 +463,7 @@ class TestLockoutLadder:
 
         assert user.lock_level == 2
         _assert_close(user.locked_until, before + timedelta(hours=1), tol_seconds=30)
+        assert 3595 <= int(ei.value.headers["Retry-After"]) <= 3600  # ~1 h
 
     async def test_rung3_hard_lock_until_admin_reset(self, db_session) -> None:
         user = await _make_user(db_session)
@@ -484,6 +486,48 @@ class TestLockoutLadder:
         with pytest.raises(HTTPException) as ei:
             await svc.login(db_session, user.phone, PASSWORD, "203.0.113.14")
         _assert_locked_out(ei.value, retry_after=False)
+
+    async def test_concurrent_failures_never_undercount(self, db_session) -> None:
+        """BLOCKER regression: the ladder increment must be atomic.
+
+        Read-modify-write on the ORM instance loses updates under
+        concurrency (a reviewer probe: 30 gathered logins left the row at
+        failed_login_attempts=2, lock_level=1). The ladder arithmetic
+        (3/6/9) must stay reliable: after N concurrent wrong-password
+        logins on one phone the persisted state reflects ALL N failures —
+        either still counting (attempts == N mod rung) or rung-tripped.
+        """
+        from sqlalchemy.ext.asyncio import async_sessionmaker
+
+        from src.db import db_manager
+
+        user = await _make_user(db_session)
+        await db_session.commit()
+
+        session_factory = async_sessionmaker(db_manager.engine, expire_on_commit=False)
+        ip = "203.0.113.21"
+
+        async def _one_failed_login() -> None:
+            async with session_factory() as s:
+                with pytest.raises(HTTPException):
+                    await get_auth_service().login(
+                        s, user.phone, "wrong-password", ip,
+                    )
+
+        # 4 concurrent failures: sequential outcome = rung 1 trips on the
+        # 3rd (attempts reset to 0), 4th lands → attempts == 1, level == 1.
+        # Any interleaving must land on an equivalent-or-stricter state
+        # (never fewer total failures persisted than sequential order).
+        await asyncio.gather(*[_one_failed_login() for _ in range(4)])
+
+        async with session_factory() as s:
+            row = (
+                await s.execute(select(User).where(User.id == user.id))
+            ).scalar_one()
+            # 4 ≥ 3 failures were persisted in total, no matter the
+            # interleaving — rung 1 must have tripped, never clobbered to
+            # a pre-trip state (the review probe saw lock_level=0).
+            assert row.lock_level >= 1
 
     async def test_success_resets_ladder(self, db_session) -> None:
         user = await _make_user(db_session)
@@ -570,6 +614,47 @@ class TestInMemoryCounters:
                 db_session, "+79990006666", "wrong-password", ip,
             )
         assert ei.value.status_code == 401  # expired window → not blocked
+
+    async def test_expired_entries_pruned_on_access(self, db_session) -> None:
+        """The counter store is pruned on access — expired entries don't
+        accumulate forever (unbounded ip:/phone: keys otherwise leak)."""
+        from src.auth import service as service_module
+
+        stale_start = datetime.utcnow() - FAILURE_WINDOW - timedelta(minutes=5)
+        fresh = datetime.utcnow()
+        service_module._FAILURE_COUNTERS.update({
+            f"ip:198.51.100.{i}": (1, stale_start) for i in range(1, 11)
+        })
+        service_module._FAILURE_COUNTERS["ip:203.0.113.19"] = (1, fresh)
+
+        with pytest.raises(HTTPException):
+            await get_auth_service().login(
+                db_session, "+79990006667", "wrong-password", "203.0.113.19",
+            )
+        stale_keys = [k for k in service_module._FAILURE_COUNTERS if "198.51.100." in k]
+        assert stale_keys == []  # expired entries dropped by the prune sweep
+        assert "ip:203.0.113.19" in service_module._FAILURE_COUNTERS  # live kept
+
+    async def test_success_clears_phone_counter_not_ip(self, db_session) -> None:
+        """Success clears only that phone's counter — the IP counter is
+        never cleared by a success (one valid account must not reset an
+        in-progress spray from the same IP)."""
+        from src.auth import service as service_module
+
+        user = await _make_user(db_session)
+        ip = "203.0.113.20"
+        # two failures from the same phone+IP, then a successful login
+        for _ in range(2):
+            with pytest.raises(HTTPException):
+                await get_auth_service().login(
+                    db_session, user.phone, "wrong-password", ip,
+                )
+        await get_auth_service().login(db_session, user.phone, PASSWORD, ip)
+
+        assert f"phone:{user.phone}" not in service_module._FAILURE_COUNTERS
+        count, started = service_module._FAILURE_COUNTERS[f"ip:{ip}"]
+        assert count == 2
+        assert datetime.utcnow() - started < FAILURE_WINDOW
 
 
 # ─── singleton factory ──────────────────────────────────────────────────────────

@@ -12,16 +12,19 @@ Two-tier brute-force throttle (spec §2.11 + §3.4):
   clears it). A successful login resets the ladder (the hard lock is the
   only state nothing but the admin clears).
 * **In-memory secondary counters** (§3.4) — module-level
-  ``dict[key, (count, window_start)]`` with a 15-minute window:
-  ``"phone:<phone>"`` threshold 5 (covers unknown phones, which have no
-  users row to carry the ladder) and ``"ip:<ip>"`` threshold 20 (slows
-  credential stuffing across many accounts). Single-process runtime by
-  design (#239-verified). Every failed attempt bumps BOTH counters — an
-  attempt rejected because one counter tripped still feeds the other
-  (that is what makes the IP trip wire work across sprayed phones).
-  A successful login clears only that phone's counter; the IP counter is
-  never cleared by a success (one valid account must not reset an
-  in-progress spray from the same IP).
+  ``dict[key, (count, window_start)]`` with a fixed 15-minute window
+  anchored at the first failure of the run: ``"phone:<phone>"`` threshold
+  5 (covers unknown phones, which have no users row to carry the ladder)
+  and ``"ip:<ip>"`` threshold 20 (slows credential stuffing across many
+  accounts). Single-process runtime by design (#239-verified). Requests
+  rejected early — a locked account (ladder) or a tripped IP gate —
+  raise BEFORE any counter is bumped; every attempt that reaches the
+  verify and fails bumps BOTH counters (a phone-counter rejection still
+  feeds the IP trip wire — that is what makes it work across sprayed
+  phones). A successful login clears only that phone's counter; the IP
+  counter is never cleared by a success (one valid account must not
+  reset an in-progress spray from the same IP). Expired entries are
+  pruned on every login, so the store cannot grow without bound.
 
 Login rotates the session: any token presented in the request is deleted
 before the new session row is created (OWASP session-id rotation on
@@ -51,6 +54,7 @@ from typing import TYPE_CHECKING
 from fastapi import HTTPException
 from sqlalchemy import delete as sa_delete
 from sqlalchemy import select
+from sqlalchemy import update as sa_update
 
 from src.auth.passwords import DUMMY_HASH, verify_password
 from src.auth.permissions import ROLE_PERMISSIONS, AuthedUser
@@ -74,7 +78,8 @@ IP_FAILURE_THRESHOLD = 20
 
 # Module-level counter store: key → (failure count, window start). The
 # count resets whenever a failure arrives after the previous window
-# expired (sliding 15-minute window, no background job).
+# expired (a fixed 15-minute window anchored at the first failure of the
+# run, no background job).
 _FAILURE_COUNTERS: dict[str, tuple[int, datetime]] = {}
 
 # §2.11 ladder: failures per rung, and the lock each rung imposes.
@@ -84,6 +89,20 @@ _LADDER_LOCKS: dict[int, timedelta | None] = {
     2: timedelta(hours=1),     # timed 1 h
     3: None,                   # hard — locked_until NULL, admin reset only
 }
+
+
+def _prune_counters(now: datetime) -> None:
+    """Drop entries whose window expired (called on each login access).
+
+    Without pruning the store grows without bound — every sprayed IP
+    address would leave a permanent ``ip:`` key. Expired entries are
+    semantically dead anyway (they never trip, and the next failure for
+    the key restarts the window), so dropping them changes nothing.
+    """
+    expired = [k for k, (_, started) in _FAILURE_COUNTERS.items()
+               if now - started >= FAILURE_WINDOW]
+    for key in expired:
+        del _FAILURE_COUNTERS[key]
 
 
 def _bump_counter(key: str, now: datetime) -> None:
@@ -178,6 +197,10 @@ class AuthService:
         phone_key = f"phone:{normalized}"
         ip_key = f"ip:{client_ip}"
 
+        # Prune expired in-memory counters on every access — unbounded
+        # growth otherwise (every sprayed IP would leave a permanent key).
+        _prune_counters(now)
+
         user = (
             await db_session.execute(
                 select(User).where(
@@ -213,20 +236,16 @@ class AuthService:
             )
 
         if not verify_password(password, user.password_hash):
-            user.failed_login_attempts += 1
+            await self._register_failure(db_session, user, now)
             _bump_counter(phone_key, now)
             _bump_counter(ip_key, now)
-            if user.failed_login_attempts >= _LADDER_RUNG_FAILURES:
-                user.lock_level = min(user.lock_level + 1, 3)
-                duration = _LADDER_LOCKS[user.lock_level]
-                user.locked_until = now + duration if duration is not None else None
-                user.failed_login_attempts = 0
             # COMMIT the ladder mutation before raising — the request
             # dependency rolls back on exception, and losing the increment
             # would reset the ladder on every locking attempt.
             await db_session.commit()
+            await db_session.refresh(user)
             raise (
-                self._ladder_check(user, now)
+                self._ladder_check(user, datetime.utcnow())
                 or _counter_exception(phone_key, now)
                 or _counter_exception(ip_key, now)
                 or self._invalid_credentials()
@@ -334,6 +353,56 @@ class AuthService:
             retry_after = max(1, int((user.locked_until - now).total_seconds()))
             return AuthService._locked_out(retry_after=retry_after)
         return None
+
+    @staticmethod
+    async def _register_failure(
+        db_session: AsyncSession, user: User, now: datetime
+    ) -> None:
+        """Atomically count a wrong-password failure on the §2.11 ladder.
+
+        Concurrency-critical (review BLOCKER): a plain ORM
+        ``user.failed_login_attempts += 1`` is read-modify-write on a
+        detached snapshot — concurrent requests read the same value and
+        clobber each other (probe: 30 gathered logins persisted 2). The
+        increment is therefore a server-side
+        ``SET failed_login_attempts = failed_login_attempts + 1 ... RETURNING``
+        (atomic under SQLite's per-connection transaction), and the rung
+        climb is a second UPDATE guarded by the counter value it read —
+        exactly one request climbs per rung trip, and a stale request
+        whose ``seen`` snapshot no longer matches does not double-climb.
+        """
+        # 1) Atomic increment; RETURNING yields the fresh post-increment
+        #    value so the rung arithmetic runs on committed truth.
+        result = await db_session.execute(
+            sa_update(User)
+            .where(User.id == user.id)
+            .values(failed_login_attempts=User.failed_login_attempts + 1)
+            .returning(User.failed_login_attempts)
+        )
+        seen: int = result.scalar_one()
+
+        # 2) Rung trip: only the request whose read-back still matches the
+        #    row climbs (guard `AND failed_login_attempts = :seen AND
+        #    lock_level = :level`) — a racing sibling that already tripped
+        #    the rung (resetting the counter to 0) makes this a no-op.
+        if seen >= _LADDER_RUNG_FAILURES:
+            level = user.lock_level  # snapshot from this request's fetch
+            next_level = min(level + 1, 3)
+            duration = _LADDER_LOCKS[next_level]
+            locked_until = now + duration if duration is not None else None
+            await db_session.execute(
+                sa_update(User)
+                .where(
+                    User.id == user.id,
+                    User.failed_login_attempts == seen,
+                    User.lock_level == level,
+                )
+                .values(
+                    lock_level=next_level,
+                    locked_until=locked_until,
+                    failed_login_attempts=0,
+                )
+            )
 
 
 @lru_cache

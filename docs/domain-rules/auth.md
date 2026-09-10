@@ -69,6 +69,6 @@ Two independent lines: (1) JSON-only API + CORS with credentials restricted to l
 | GET | /api/v1/auth/me | public (401 when no session) | current user + permissions |
 
 ## Relationships
-- User → optional 1:1 Master (`master_id` FK).
+- User → optional 1:1 Staff (`staff_id` FK; бывш. `master_id` — реструктуризация #266: учётка привязывается к карточке сотрудника любой роли).
 - Session → belongs to User (hard-deleted rows).
 - UserSettings → addressed by the **session** user only: the `user_id` query parameter is removed (own-only since #247, breaking change).

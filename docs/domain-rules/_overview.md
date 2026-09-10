@@ -6,7 +6,9 @@
 |--------|-------------|-------------------|------------|
 | Service | Master class type | has many Tariffs | Medium |
 | Tariff | Pricing tier | belongs to Service | Low |
-| Master | Мастер (ведёт мастер-класс) | has color, specialties | Low |
+| Staff | Сотрудник (карточка каждого) | 0..1 Master, 0..1 User, M2M Positions | Medium |
+| Master | Мастер (расписание ведущего) | belongs to Staff; specialty, color | Low |
+| Position | Должность (зарплата) | M2M Staff | Low |
 | Location | Studio space | has capacity | Low |
 | Activity | Scheduled instance | belongs to Service, Master, Location | Medium |
 | Client | Customer | has contacts, stats | Medium |
@@ -51,7 +53,9 @@
 
 | Business term | Code name | Forbidden | Notes |
 |---------------|-----------|-----------|-------|
-| Мастер | `Master` | ~~Artist~~, ~~artist~~ | Типы, переменные, компоненты, API — везде Master |
+| Сотрудник | `Staff` | ~~Employee~~, ~~Worker~~ | Карточка каждого сотрудника (#266) |
+| Мастер (расписание) | `Master` | ~~Artist~~ | Только ведущие: master-строка, master_id, /api/v1/masters, masterName |
+| Должность | `Position` | ~~Role~~, ~~JobTitle~~ | Словарь зарплаты; роль доступа — отдельно (`users.role`) |
 | Мастер-класс | `Activity` | ~~Class~~, ~~Workshop~~ | Запланированное занятие |
 | Запись | `Record` | ~~Booking~~ | Бронирование клиентом |
 | Посещение | `Visit` | ~~Attendance~~ | Факт прихода конкретного гостя |
@@ -66,7 +70,7 @@
 
 | Delete semantics | Entities |
 |---|---|
-| **Hard-delete with resolutions** + archive endpoints (`POST /archive`, `POST /restore`) | Master, Location, Service, Material, Client |
+| **Hard-delete with resolutions** + archive endpoints (`POST /archive`, `POST /restore`) | Staff, Location, Service, Material, Client |
 | **Hard-delete** (row physically removed) | Tag, Photo, Visitor, Activity, Record, UserSettings |
 | Already hard-delete (untouched) | Payment, Visit |
 | Stays as-is (implicit soft-delete, out of scope) | User, Tariff (carry `is_active`, used e.g. in `admin/setup.py:35`) |
@@ -75,7 +79,7 @@
 
 ## Archive terminology boundary (is_active at API = archived)
 
-Applies to the **5 archive-aware entities** (Master, Location, Service, Material, Client). Implementation: `ArchiveService` + `ArchiveRepository` (renamed from `SoftDeleteService`/`SoftDeleteRepository` per spec GH #207 §3.3-3.4). The DB column `is_active` is **UNCHANGED** (no migration, no rename) — only the API vocabulary moves.
+Applies to the **5 archive-aware entities** (Staff — бывш. Master, Location, Service, Material, Client). Implementation: `ArchiveService` + `ArchiveRepository` (renamed from `SoftDeleteService`/`SoftDeleteRepository` per spec GH #207 §3.3-3.4). The DB column `is_active` is **UNCHANGED** (no migration, no rename) — only the API vocabulary moves.
 
 One layer = one vocabulary. The `is_active` ↔ `archived` translation happens in exactly **ONE layer: Service**.
 
@@ -94,7 +98,7 @@ Model/DB → is_active: bool column (UNCHANGED — no migration, no rename)
 5. **`POST /{id}/restore`** → `repo.patch(id, {is_active: True})`; response body `{..., "archived": false}`, HTTP **200 with body**.
 6. **`DELETE /{id}` = real hard delete** with the dependency-resolution mechanism (see "Hard-delete FK dependency matrix" below).
 
-- **Master-only cascade (Change 3, §4.2):** `MasterService.archive()`/`restore()` write the linked `users.is_active` in the **same transaction** as the master's `is_active` patch. Archive = user can no longer log in; restore = user can log in again. Master-only special case — see the FK matrix below and `masters.md`.
+- **Staff archive cascade — чекбоксы (#266):** архив карточки сотрудника принимает `{archive_master, archive_user}` (default true) и применяет их одной транзакцией. Заменяет прежний авто-каскад GH #207 §4.2 («архив мастера гасит учётку») явным выбором администратора. Архив master-строки из секции «Мастер» не каскадит ничего. См. `staff.md`.
 - **`create` always yields `archived=false`** (`is_active=True`) — Create schemas do not expose the field; adding it there would bypass archive semantics (trap, do not do).
 - **`list` hides archived rows** by default (`?status=active`); `?status=archived` shows them, `?status=all` shows both. `?status=` maps to the `is_active` filter in the repo (unchanged — `ArchiveStatus` enum reused).
 - **`reorder` silently skips archived rows** (`repositories/generic.py:169`) — a restored row becomes reorder-eligible again.
@@ -106,9 +110,11 @@ Model/DB → is_active: bool column (UNCHANGED — no migration, no rename)
 | Entity → Relation | Nullable? | Action | User choice? |
 |---|---|---|---|
 | **Material** | (no FK deps) | — | — | Zero DB deps; `DELETE /materials/{id}` always 204 |
-| Master → **activities** (master_id) | NOT NULL | **block** | N/A — `allowed_actions: []` |
-| Master → **users** (master_id) | nullable | **cascade** (auto) | auto — no choice (§4.1, Change 2) |
-| Master → **master_tags** (join) | NOT NULL PK | **cascade** (auto) | auto |
+| Staff → **activities** (через master-строку) | NOT NULL | **block** | N/A — `allowed_actions: []` |
+| Staff → **masters** (1:0..1) | — | **cascade** (auto, ON DELETE CASCADE) | auto — при отсутствии занятий |
+| Staff → **users** (staff_id) | nullable | **cascade** (auto) | auto — no choice (§4.1, Change 2) |
+| Staff → **master_tags** (join via masters) | NOT NULL PK | **cascade** (auto) | auto |
+| Staff → **staff_positions** (join) | NOT NULL PK | **cascade** (auto) | auto |
 | Location → **activities** (location_id) | NOT NULL | **block** | N/A — `allowed_actions: []` |
 | Location → **location_tags** (join) | NOT NULL PK | **cascade** (auto) | auto |
 | Location → **photos** (location_id) | nullable | **nullify** (auto) | auto — photo survives, becomes owner-less (GH #211) |
@@ -124,9 +130,9 @@ Model/DB → is_active: bool column (UNCHANGED — no migration, no rename)
 **Key rules:**
 
 - **`activities = always block`** (`allowed_actions: []`). `activities.{master,location,service}_id` are NOT NULL, and `Activity` has no `is_active` (extends `AbstractModel`, not `AbstractModelSoftDelete` per #194) so it cannot be archived. DELETE is impossible while activities exist — the only option is archive.
-- **Auto deps** (join tables `*_tags`, unambiguous relations tariffs / **photos** (client/location/service auto-nullify), **Master→users** per §4.1) resolve automatically — no user choice. Server ignores any resolution the user sends for an auto dep; auto wins.
-- **Master→users delete cascade (§4.1, Change 2):** `DELETE /masters/{id}` with a linked `users` row hard-deletes the user row automatically (auto-cascade, no user choice). Rationale: User is the login account, Master is the profile; deleting the profile but keeping the account = orphan. The ONLY non-join auto-cascade besides Service→tariffs.
-- **Master→users archive/restore cascade (§4.2, Change 3):** `MasterService.archive()`/`restore()` write the linked `users.is_active` in the same transaction. Master-only — the other 4 entities do NOT cascade to any user on archive/restore. This is an archive-cascade (sets `is_active`), not a delete cascade.
+- **Auto deps** (join tables `*_tags`, unambiguous relations tariffs / **photos** (client/location/service auto-nullify), **Staff→users** per §4.1) resolve automatically — no user choice. Server ignores any resolution the user sends for an auto dep; auto wins.
+- **Staff→users delete cascade (§4.1, Change 2; бывш. Master→users):** `DELETE /staff/{id}` with a linked `users` row hard-deletes the user row automatically (auto-cascade, no user choice). Rationale: User is the login account, Staff is the profile card; deleting the card but keeping the account = orphan.
+- **Staff archive cascade — чекбоксы (#266, замена §4.2):** `POST /staff/{id}/archive` применяет `{archive_master, archive_user}` (default true) одной транзакцией — явный выбор вместо прежнего авто-каскада. Архив master-строки (секция «Мастер») не каскадит ничего.
 - **Client→visitors cascade** runs via an **extracted non-decorated core** (`VisitorService._delete_cascade`) inside the single outer `ClientService.resolve_delete` `@transactional` transaction — NOT a per-visitor `@transactional` loop (atomicity requirement, §8): each `@transactional` commits its own session, so a mid-loop failure would leave prior work committed. Cascade order: visits → visitor_tags → visitor. Photo `visitor_id` was dropped in GH #211 — photos are not part of this cascade (client-owned photos are auto-nullified by the client delete itself, see the matrix row above). Payments are **not** part of this cascade (record-scoped, survive with the nullified records — see the `cascade_preview` rule below).
 - **`cascade_preview` reports visits count only** for the Client → visitors cascade. `Payment` is **record-scoped** (`payments.record_id → records.id`); Client→records is *nullify* (records survive, become anonymous), so their payments are NOT part of the visitors cascade and survive with the nullified records. Absent for nullify actions (nothing downstream is hard-deleted).
 
@@ -173,7 +179,7 @@ Model/DB → is_active: bool column (UNCHANGED — no migration, no rename)
       |--------|------------------|---------------------|-------|
       | Clients | `name`, `phone`, `email` | `id` (uuid) | Plus `?q=` was renamed from `?search=`; email added to the searchable fields. |
       | Records | `client.name`, `client.phone`, `client.email`, `service.title` (LEFT OUTER joins) | `id` (uuid) | Search joins added ONLY when `q` is present (default query plan unchanged). |
-      | Masters | `first_name`, `last_name` | `id` (uuid) | Each field ilike'd separately — no cross-field concat. |
+      | Staff | `first_name`, `last_name` | `id` (uuid) | Each field ilike'd separately — no cross-field concat (бывш. Masters, #266). |
       | Materials | `title`, `description` | `id` (uuid) | Each field ilike'd separately. |
       | Services | `title`, `description` | `id` (uuid) | Each field ilike'd separately. |
       | Tags | `tag` | `id` (uuid) | Single substring field. |

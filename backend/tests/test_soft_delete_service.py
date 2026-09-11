@@ -24,7 +24,7 @@ import pytest
 
 from src.models.enums import ArchiveStatus
 from src.models.staff import Staff
-from src.services.master import get_master_service
+from src.services.staff import get_staff_service
 
 pytestmark = pytest.mark.asyncio
 
@@ -36,7 +36,7 @@ async def _seed_masters(db_session, n_active: int, n_archived: int) -> None:
     """Insert ``n_active`` active staff cards and ``n_archived`` archived ones.
 
     GH #266: the people table is ``staff`` (names + person-archive flag);
-    ``MasterService`` lists through the Staff model. The master extension
+    ``StaffService`` lists through the Staff model. The master extension
     row is irrelevant to is_active filtering and is omitted."""
     for i in range(n_active):
         db_session.add(Staff(first_name=f"A{i}", last_name="T"))
@@ -51,7 +51,7 @@ async def _seed_masters(db_session, n_active: int, n_archived: int) -> None:
 async def test_list_default_returns_only_active_masters(db_session) -> None:
     """Default call (no status kwarg) excludes archived rows — backward compatible."""
     await _seed_masters(db_session, n_active=2, n_archived=1)
-    service = get_master_service()
+    service = get_staff_service()
     result = await service.list(db_session, page=1, per_page=20)
     assert result.total == 2
     assert len(result.items) == 2
@@ -61,7 +61,7 @@ async def test_list_default_returns_only_active_masters(db_session) -> None:
 async def test_list_status_active_returns_only_active_masters(db_session) -> None:
     """status=ACTIVE (explicit) excludes archived rows from items AND total."""
     await _seed_masters(db_session, n_active=2, n_archived=1)
-    service = get_master_service()
+    service = get_staff_service()
     result = await service.list(
         db_session, page=1, per_page=20, status=ArchiveStatus.ACTIVE
     )
@@ -73,7 +73,7 @@ async def test_list_status_active_returns_only_active_masters(db_session) -> Non
 async def test_list_status_archived_returns_only_archived_masters(db_session) -> None:
     """status=ARCHIVED returns only is_active=False rows (new capability)."""
     await _seed_masters(db_session, n_active=2, n_archived=3)
-    service = get_master_service()
+    service = get_staff_service()
     result = await service.list(
         db_session, page=1, per_page=20, status=ArchiveStatus.ARCHIVED
     )
@@ -85,7 +85,7 @@ async def test_list_status_archived_returns_only_archived_masters(db_session) ->
 async def test_list_status_all_returns_both_active_and_archived(db_session) -> None:
     """status=ALL returns every row regardless of is_active."""
     await _seed_masters(db_session, n_active=2, n_archived=2)
-    service = get_master_service()
+    service = get_staff_service()
     result = await service.list(
         db_session, page=1, per_page=20, status=ArchiveStatus.ALL
     )
@@ -107,7 +107,7 @@ async def test_list_status_does_not_leak_into_filters(db_session) -> None:
     matching both the archive-status filter and the extra equality filter.
     """
     await _seed_masters(db_session, n_active=2, n_archived=2)
-    service = get_master_service()
+    service = get_staff_service()
     result = await service.list(
         db_session,
         page=1,
@@ -127,7 +127,7 @@ async def test_list_status_archived_with_extra_filter(db_session) -> None:
     # equality filter is AND-combined with the archive-status filter.
     db_session.add(Staff(first_name="X-ker", last_name="Keramika", is_active=False))
     await db_session.flush()
-    service = get_master_service()
+    service = get_staff_service()
     result = await service.list(
         db_session,
         page=1,

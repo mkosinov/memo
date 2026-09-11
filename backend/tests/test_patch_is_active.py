@@ -33,18 +33,17 @@ class TestPatchRejectsIsActive:
     reaches the DB."""
 
     def test_patch_master_is_active_rejected_and_atomic(self, api_client) -> None:
-        master_id = api_client.post("/api/v1/masters", json={
-            "first_name": "Active", "last_name": "Master",
-            "color": "#5B8C7A", "position": "мастер", "specialty": "живопись",
+        master_id = api_client.post("/api/v1/staff", json={
+            "first_name": "Active", "last_name": "Master", "master": {"specialty": "живопись", "color": "#5B8C7A"},
         }).json()["id"]
 
         resp = api_client.patch(
-            f"/api/v1/masters/{master_id}", json={"is_active": False}
+            f"/api/v1/staff/{master_id}", json={"is_active": False}
         )
         assert resp.status_code == 422, f"Expected 422, got {resp.status_code}: {resp.text}"
 
         # Atomicity: master is still active (no partial flip).
-        get = api_client.get(f"/api/v1/masters/{master_id}").json()
+        get = api_client.get(f"/api/v1/staff/{master_id}").json()
         assert get["archived"] is False
 
     def test_patch_location_is_active_rejected_and_atomic(self, api_client) -> None:
@@ -117,26 +116,25 @@ class TestPatchRejectsIsActive:
         life-cycle state, so 422 fires regardless of polarity. Archive then
         restore via the dedicated endpoints to prove the new path.
         """
-        master_id = api_client.post("/api/v1/masters", json={
-            "first_name": "Toggle", "last_name": "Master",
-            "color": "#5B8C7A", "position": "мастер", "specialty": "живопись",
+        master_id = api_client.post("/api/v1/staff", json={
+            "first_name": "Toggle", "last_name": "Master", "master": {"specialty": "живопись", "color": "#5B8C7A"},
         }).json()["id"]
 
         # Archive via the dedicated endpoint (the only valid path now).
-        archive_resp = api_client.post(f"/api/v1/masters/{master_id}/archive")
+        archive_resp = api_client.post(f"/api/v1/staff/{master_id}/archive")
         assert archive_resp.status_code == 200
         assert archive_resp.json()["archived"] is True
 
         # PATCH {is_active: True} must 422 — PATCH no longer restores.
         resp = api_client.patch(
-            f"/api/v1/masters/{master_id}", json={"is_active": True}
+            f"/api/v1/staff/{master_id}", json={"is_active": True}
         )
         assert resp.status_code == 422, f"Expected 422, got {resp.status_code}: {resp.text}"
 
         # Atomicity: master stayed archived (no partial flip).
-        assert api_client.get(f"/api/v1/masters/{master_id}").json()["archived"] is True
+        assert api_client.get(f"/api/v1/staff/{master_id}").json()["archived"] is True
 
         # Restore only via the dedicated endpoint.
-        restore_resp = api_client.post(f"/api/v1/masters/{master_id}/restore")
+        restore_resp = api_client.post(f"/api/v1/staff/{master_id}/restore")
         assert restore_resp.status_code == 200
         assert restore_resp.json()["archived"] is False

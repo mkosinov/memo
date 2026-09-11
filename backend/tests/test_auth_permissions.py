@@ -188,8 +188,9 @@ class TestPublicRoutes:
         # "(site + gallery)" names exactly this surface.
         assert PUBLIC_ROUTES == frozenset({
             ("GET", "/api/v1/health"),
+            # GH #266 D8: /masters is read-only acting masters; GET /{id}
+            # was removed with the mutations (allowlist entry gone too).
             ("GET", "/api/v1/masters"),
-            ("GET", "/api/v1/masters/{id}"),
             ("GET", "/api/v1/locations"),
             ("GET", "/api/v1/locations/{id}"),
             ("GET", "/api/v1/services"),

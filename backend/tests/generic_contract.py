@@ -11,7 +11,6 @@ import pytest
 import src.services.activity  # noqa: F401
 import src.services.client  # noqa: F401
 import src.services.location  # noqa: F401
-import src.services.master  # noqa: F401
 import src.services.material  # noqa: F401
 import src.services.payment  # noqa: F401
 import src.services.photo  # noqa: F401
@@ -28,7 +27,6 @@ from src.services.generic import GenericService, ArchiveService
 from src.services.activity import ActivityService, get_activity_service
 from src.services.client import ClientService, get_client_service
 from src.services.location import LocationService, get_location_service
-from src.services.master import MasterService, get_master_service
 from src.services.material import MaterialService, get_material_service
 from src.services.payment import PaymentService, get_payment_service
 from src.services.photo import PhotoService
@@ -53,7 +51,6 @@ from src.models.visitor import Visitor
 from src.schemas.activity import ActivityCreate
 from src.schemas.client import ClientCreate
 from src.schemas.location import LocationCreate
-from src.schemas.master import MasterCreate
 from src.schemas.material import MaterialCreate
 from src.schemas.payment import PaymentCreate
 from src.schemas.service import ServiceCreate
@@ -64,7 +61,6 @@ from src.schemas.visitor import VisitorCreate
 from src.schemas.activity import ActivityPatch
 from src.schemas.client import ClientPatch
 from src.schemas.location import LocationPatch
-from src.schemas.master import MasterPatch
 from src.schemas.material import MaterialPatch
 from src.schemas.payment import PaymentPatch
 from src.schemas.service import ServicePatch
@@ -75,7 +71,6 @@ from src.schemas.visitor import VisitorPatch
 from src.schemas.activity import ActivityUpdate
 from src.schemas.client import ClientUpdate
 from src.schemas.location import LocationUpdate
-from src.schemas.master import MasterUpdate
 from src.schemas.material import MaterialUpdate
 from src.schemas.payment import PaymentUpdate
 from src.schemas.service import ServiceUpdate
@@ -85,7 +80,6 @@ from src.schemas.visitor import VisitorUpdate
 from src.schemas.activity import ActivityResponse
 from src.schemas.client import ClientResponse
 from src.schemas.location import LocationResponse
-from src.schemas.master import MasterResponse
 from src.schemas.material import MaterialResponse
 from src.schemas.payment import PaymentResponse
 from src.schemas.service import ServiceResponse
@@ -268,46 +262,6 @@ CONTRACT_CONFIG: dict[type, EntityConfig] = {
         },
         search_query="флиг",
     ),
-    MasterService: EntityConfig(
-        service_factory=get_master_service,
-        model=Master,
-        create_schema=MasterCreate,
-        patch_schema=MasterPatch,
-        create_data={
-            "first_name": "A",
-            "last_name": "B",
-            "color": "#ffffff",
-            "position": "p",
-            "specialty": "s",
-            "avatar_url": "http://x",
-        },
-        fk_map={},
-        not_null_field="color",
-        not_null_sentinel="#000000",
-        nullable_field="avatar_url",
-        nullable_sentinel="http://x",
-        delete_semantics="hard",
-        update_schema=MasterUpdate,
-        update_data={
-            "first_name": "A2",
-            "last_name": "B2",
-            "color": "#000000",
-        },
-        router_prefix="/api/v1/masters",
-        not_found_code="MASTER_NOT_FOUND",
-        response_schema=MasterResponse,
-        # §4.4 default order: sort_order ASC, first_name ASC, id ASC. Both rows
-        # share sort_order=0 (column default), so ``first_name`` decides.
-        # "!" (0x21) < "A" (0x41) → sentinel sorts BEFORE the default
-        # ``first_name="A"``.
-        earlier_create_data={"first_name": "!AAA-contract"},
-        # GH #212 search matrix probe (spec §5.2/§5.4 M5): uppercase Cyrillic
-        # stored values found by a lowercase substring query. Both substring
-        # fields (first_name AND last_name) carry the probe; per-field
-        # coverage via the dedicated per-field matrix test.
-        search_override={"first_name": "Живописец", "last_name": "Живописный"},
-        search_query="живопис",
-    ),
     # GH #266 Task 3: StaffService overrides the generic CRUD semantics
     # (composite card) → it stays in GENERIC_CONTRACT_EXCEPTIONS for the CRUD
     # contract; this entry feeds the ArchiveService archive/restore bool
@@ -328,10 +282,19 @@ CONTRACT_CONFIG: dict[type, EntityConfig] = {
         delete_semantics="hard",
         update_schema=StaffUpdate,
         update_data={"first_name": "A2", "last_name": "B2"},
-        # HTTP wiring — routes land in Task 4 (api/v1/staff.py).
         router_prefix="/api/v1/staff",
         not_found_code="STAFF_NOT_FOUND",
         response_schema=StaffResponse,
+        # §4.4 default order: sort_order ASC, first_name ASC, id ASC. Both
+        # rows share sort_order=0 → first_name decides; "!" (0x21) < "A"
+        # (0x41) → sentinel sorts BEFORE the default ``first_name="A"``.
+        earlier_create_data={"first_name": "!AAA-contract"},
+        # GH #212 search matrix probe (former masters contract → staff,
+        # domain-rules/staff.md «List contract»): uppercase Cyrillic values
+        # found by a lowercase substring query; per-field coverage via the
+        # dedicated per-field matrix test.
+        search_override={"first_name": "Живописец", "last_name": "Живописный"},
+        search_query="живопис",
     ),
     MaterialService: EntityConfig(
         service_factory=get_material_service,
@@ -595,7 +558,7 @@ def _archive_params() -> list:
 # what this contract guards — so it joins the ``/all`` set. The parametrizer
 # reads ``CONTRACT_CONFIG`` directly (not ``_contract_params``), so the
 # exceptions list does not filter it out.
-BARE_ALL_ENTITIES: list[type] = [MasterService, LocationService, ServiceService, TagService, MaterialService]
+BARE_ALL_ENTITIES: list[type] = [StaffService, LocationService, ServiceService, TagService, MaterialService]
 
 
 def _all_params() -> list:

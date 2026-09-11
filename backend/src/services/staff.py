@@ -25,7 +25,7 @@ from functools import lru_cache
 from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import delete as sa_delete
-from sqlalchemy import func, select, update
+from sqlalchemy import func, not_, select, update
 
 from src.auth.passwords import hash_password, validate_password
 from src.domain.deletion import BlockingDepsError
@@ -230,6 +230,54 @@ class StaffService(ArchiveService[StaffCreate, StaffUpdate, StaffResponse]):
                 self._model.__tablename__, BARE_LIST_MAX_ROWS
             )
         return await self._assemble(db_session, staff_rows)
+
+    async def list_join_masters(
+        self,
+        db_session: AsyncSession,
+        page: int = 1,
+        per_page: int = 20,
+        order_by=None,
+        status: ArchiveStatus | None = None,
+        q: str | None = None,
+        **filters,
+    ) -> PaginatedResponse[StaffResponse]:
+        """Extension-sort variant of ``list`` — LEFT JOIN on masters.
+
+        ``sort_by=specialty|color`` orders by masters-extension columns
+        (domain-rules/staff.md «List contract»): cards WITHOUT the section
+        (NULL) stay in the result and sort LAST (the router bakes
+        ``nullslast`` into ``order_by``). Same GH #205 envelope + the same
+        GH #212 search matrix as the plain list.
+        """
+        from src.models.enums import ArchiveStatus
+        from src.repositories.search import search_predicate
+
+        if status is None:
+            status = ArchiveStatus.ACTIVE
+        stmt = select(Staff).outerjoin(Master, Master.staff_id == Staff.id)
+        if status == ArchiveStatus.ACTIVE:
+            stmt = stmt.where(Staff.is_active)
+        elif status == ArchiveStatus.ARCHIVED:
+            stmt = stmt.where(not_(Staff.is_active))
+        if q is not None:
+            assert self.search_fields is not None  # class attribute (narrow for mypy)
+            stmt = stmt.where(search_predicate(q, self.search_fields))
+        for key, value in filters.items():
+            if value is not None:
+                stmt = stmt.where(getattr(Staff, key) == value)
+        total = (
+            await db_session.execute(
+                select(func.count()).select_from(stmt.subquery())
+            )
+        ).scalar_one()
+        if order_by is not None:
+            stmt = stmt.order_by(*order_by)
+        stmt = stmt.limit(per_page).offset((page - 1) * per_page)
+        staff_rows = list((await db_session.execute(stmt)).scalars().all())
+        items = await self._assemble(db_session, staff_rows)
+        return PaginatedResponse(
+            items=items, total=total, page=page, per_page=per_page,
+        )
 
     # ─── composite writes — ONE transaction each ─────────────────────────
 

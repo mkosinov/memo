@@ -30,7 +30,7 @@ async def _seed_masters(db_session, n_active: int, n_archived: int) -> None:
     """Insert ``n_active`` active staff cards and ``n_archived`` archived ones.
 
     GH #266: the people table is ``staff`` (names + person-archive flag);
-    ``MasterService`` lists through the Staff model. The master extension
+    ``StaffService`` lists through the Staff model. The master extension
     row is irrelevant to is_active filtering and is omitted."""
     for i in range(n_active):
         db_session.add(Staff(first_name=f"A{i}", last_name="T"))

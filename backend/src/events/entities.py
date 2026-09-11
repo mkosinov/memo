@@ -17,7 +17,7 @@ fallback used by :func:`resolve_entity_name`.
 Two deviations from a pure walk, both spec-mandated (§3.3/§3.4):
 
 * ``users`` has NO service of its own — it is written only by the
-  ``MasterService.archive/restore`` user-cascade — but the canonical
+  ``StaffService.archive`` D6 user-cascade — but the canonical
   vocabulary binds it, so ``User → "users"`` is declared here explicitly
   (cascade-only entry).
 * the standalone pair (``VisitService``/``UserSettingsService``) declares
@@ -62,7 +62,7 @@ from src.services.visit import VisitService
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-# Cascade-only entity (spec §3.3 MasterService.archive/restore → users):
+# Cascade-only entity (spec §3.3 archive user-cascade → users):
 # no UserService exists, the walk cannot derive it.
 _CASCADE_ONLY_MODEL_ENTITY: dict[type, str] = {
     User: "users",

@@ -7,7 +7,7 @@ Asserts the service-layer archive base rename and the new
   * ``ArchiveService`` exposes ``archive`` and ``restore`` methods.
   * ``archive()`` flips ``is_active`` to ``False``; ``restore()`` flips it
     back to ``True`` (round trip via a representative subclass — the
-    transitional ``MasterService`` backed by ``Staff`` since GH #266).
+    composite ``StaffService`` since GH #266 T3).
   * Both methods return ``False`` for a nonexistent id (no row, no exception).
 
 GH #266 Task 2 addition — Staff hard-delete executor contract on the
@@ -33,7 +33,7 @@ from src.models.staff import Staff
 from src.models.tag import Tag, master_tags
 from src.models.user import User
 from src.services.generic import ArchiveService
-from src.services.master import get_master_service
+from src.services.staff import get_staff_service
 
 pytestmark = pytest.mark.asyncio
 
@@ -65,13 +65,13 @@ async def test_archive_then_restore_flips_is_active_round_trip(db_session) -> No
     """archive() sets is_active=False; restore() sets it back to True.
 
     Exercises the methods through a representative subclass (the
-    transitional ``MasterService`` on ``Staff``), so the inheritance
+    composite ``StaffService``), so the inheritance
     wiring is also covered.
     """
     staff = await _add_staff(db_session)
     staff_id = staff.id
 
-    service = get_master_service()
+    service = get_staff_service()
 
     # archive → is_active=False, returns True
     archived_ok = await service.archive(db_session, staff_id)
@@ -100,13 +100,13 @@ async def test_archive_then_restore_flips_is_active_round_trip(db_session) -> No
 
 async def test_archive_nonexistent_returns_false(db_session) -> None:
     """archive(nonexistent-id) → False (no row, no exception)."""
-    service = get_master_service()
+    service = get_staff_service()
     assert await service.archive(db_session, "nonexistent-id") is False
 
 
 async def test_restore_nonexistent_returns_false(db_session) -> None:
     """restore(nonexistent-id) → False (no row, no exception)."""
-    service = get_master_service()
+    service = get_staff_service()
     assert await service.restore(db_session, "nonexistent-id") is False
 
 
@@ -153,7 +153,7 @@ async def test_staff_resolve_delete_cascades_extension_user_tags_positions(
     await db_session.commit()
     staff_id = staff.id
 
-    ok = await get_master_service().resolve_delete(db_session, staff_id, {})
+    ok = await get_staff_service().resolve_delete(db_session, staff_id, {})
 
     assert ok is True
     assert await db_session.get(Staff, staff_id) is None
@@ -200,7 +200,7 @@ async def test_staff_resolve_delete_with_activities_blocks(db_session) -> None:
     staff_id = staff.id
 
     with pytest.raises(BlockingDepsError):
-        await get_master_service().resolve_delete(db_session, staff_id, {})
+        await get_staff_service().resolve_delete(db_session, staff_id, {})
 
     # Nothing modified — the card and its extension survive.
     assert await db_session.get(Staff, staff_id) is not None

@@ -259,8 +259,10 @@ class StaffService(ArchiveService[StaffCreate, StaffUpdate, StaffResponse]):
             )
 
         # 3. Positions replace (fresh card → plain insert, validated set).
+        # Dedupe first: a repeated id is set-semantics noise, not an
+        # IntegrityError on the composite PK (staff_id, position_id).
         await self._validate_position_ids(db_session, data.position_ids)
-        for position_id in data.position_ids:
+        for position_id in dict.fromkeys(data.position_ids):
             await db_session.execute(
                 staff_positions.insert().values(
                     staff_id=staff.id, position_id=position_id
@@ -388,12 +390,16 @@ class StaffService(ArchiveService[StaffCreate, StaffUpdate, StaffResponse]):
     async def _replace_positions(
         self, db_session: AsyncSession, staff_id: str, position_ids: Sequence[str]
     ) -> None:
-        """Full replace of the M2M set (delete-all + insert, same flush)."""
+        """Full replace of the M2M set (delete-all + insert, same flush).
+
+        Duplicates in *position_ids* collapse to one row (set semantics)
+        instead of dying on the composite PK.
+        """
         await self._validate_position_ids(db_session, position_ids)
         await db_session.execute(
             sa_delete(staff_positions).where(staff_positions.c.staff_id == staff_id)
         )
-        for position_id in position_ids:
+        for position_id in dict.fromkeys(position_ids):
             await db_session.execute(
                 staff_positions.insert().values(
                     staff_id=staff_id, position_id=position_id

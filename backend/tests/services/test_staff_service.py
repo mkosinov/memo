@@ -24,13 +24,13 @@ import pytest
 from fastapi import HTTPException
 from sqlalchemy import select
 
+from src.auth.passwords import PasswordPolicyError, verify_password
 from src.domain.deletion import BlockingDepsError
 from src.domain.errors import (
     ColorRequiredError,
     PositionNotFoundError,
     SpecialtyRequiredError,
 )
-from src.auth.passwords import hash_password, verify_password
 from src.models.activity import Activity
 from src.models.location import Location
 from src.models.master import Master
@@ -40,9 +40,7 @@ from src.models.staff import Staff
 from src.models.user import User
 from src.schemas.activity import ActivityCreate
 from src.schemas.staff import StaffCreate, StaffPatch, StaffUpdate
-from src.schemas.position import PositionCreate
 from src.services.activity import get_activity_service
-from src.services.position import get_position_service
 from src.services.staff import get_staff_service
 
 pytestmark = pytest.mark.asyncio
@@ -165,6 +163,23 @@ async def test_create_with_positions_links_staff_positions(db_session) -> None:
     assert sorted(linked) == sorted([p1.id, p2.id])
 
 
+async def test_create_with_duplicate_position_ids_dedupes(db_session) -> None:
+    """Repeating an id in position_ids is a set-semantics no-op, not an
+    IntegrityError on the composite PK (quality review GH #266)."""
+    position = await _add_position(db_session, id="master", title="Мастер", is_system=True)
+
+    created = await get_staff_service().create(db_session, _create_payload(
+        position_ids=[position.id, position.id],
+    ))
+
+    assert created.position_ids == [position.id]
+    linked = (await db_session.execute(
+        select(staff_positions.c.position_id)
+        .where(staff_positions.c.staff_id == created.id)
+    )).scalars().all()
+    assert linked == [position.id]  # exactly ONE link row
+
+
 async def test_create_with_unknown_position_raises(db_session) -> None:
     """position_ids referencing a missing dictionary row → PositionNotFoundError."""
     with pytest.raises(PositionNotFoundError):
@@ -231,7 +246,7 @@ async def test_create_with_user_without_master_gets_admin_role(db_session) -> No
 
 async def test_create_with_user_short_password_raises(db_session) -> None:
     """Password policy (GH #247 §3.2) applies to card-created accounts."""
-    with pytest.raises(Exception):  # PasswordPolicyError
+    with pytest.raises(PasswordPolicyError):
         await get_staff_service().create(db_session, _create_payload(
             create_user={"phone": "+79995556679", "password": "short"},
         ))
@@ -292,6 +307,26 @@ async def test_update_replaces_positions_set(db_session) -> None:
         .where(staff_positions.c.staff_id == staff.id)
     )).scalars().all()
     assert linked == [keep.id]
+
+
+async def test_update_with_duplicate_position_ids_dedupes(db_session) -> None:
+    """Same set-semantics on replace: duplicates collapse to one link row
+    instead of dying on the composite PK (quality review GH #266)."""
+    position = await _add_position(db_session, id="master", title="Мастер", is_system=True)
+    staff = await _add_staff(db_session)
+
+    updated = await get_staff_service().update(
+        db_session, staff.id,
+        StaffUpdate(first_name="А", last_name="Б",
+                    position_ids=[position.id, position.id]),
+    )
+    assert updated is not None
+    assert updated.position_ids == [position.id]
+    linked = (await db_session.execute(
+        select(staff_positions.c.position_id)
+        .where(staff_positions.c.staff_id == staff.id)
+    )).scalars().all()
+    assert linked == [position.id]  # exactly ONE link row
 
 
 async def test_update_master_section_upsert(db_session) -> None:
@@ -411,7 +446,7 @@ async def test_archive_defaults_archive_master_and_user(db_session) -> None:
     master + active user all archive in ONE call."""
     staff = await _add_staff(db_session)
     await _add_master_ext(db_session, staff.id)
-    user = await _add_user(db_session, staff.id)
+    await _add_user(db_session, staff.id)
 
     ok = await get_staff_service().archive(db_session, staff.id)
     assert ok is True
@@ -429,7 +464,7 @@ async def test_archive_unchecked_master_stays_active(db_session) -> None:
     (штатное состояние D3); user checkbox still applies."""
     staff = await _add_staff(db_session)
     await _add_master_ext(db_session, staff.id)
-    user = await _add_user(db_session, staff.id)
+    await _add_user(db_session, staff.id)
 
     ok = await get_staff_service().archive(
         db_session, staff.id, archive_master=False, archive_user=True,
@@ -447,13 +482,13 @@ async def test_archive_unchecked_user_stays_active(db_session) -> None:
     """S6: archive_user=False — login stays allowed; master still archives."""
     staff = await _add_staff(db_session)
     await _add_master_ext(db_session, staff.id)
-    user = await _add_user(db_session, staff.id)
+    await _add_user(db_session, staff.id)
 
     ok = await get_staff_service().archive(
         db_session, staff.id, archive_master=True, archive_user=False,
     )
     assert ok is True
-    staff_active, master_active, user_active = await _staff_flags(
+    _, master_active, user_active = await _staff_flags(
         db_session, staff.id
     )
     assert master_active is False
@@ -487,7 +522,7 @@ async def test_restore_returns_person_only(db_session) -> None:
     (domain-rules: «учётка/мастер возвращаются своими флагами явно»)."""
     staff = await _add_staff(db_session)
     await _add_master_ext(db_session, staff.id)
-    user = await _add_user(db_session, staff.id)
+    await _add_user(db_session, staff.id)
     service = get_staff_service()
     await service.archive(db_session, staff.id)  # everything archived
 

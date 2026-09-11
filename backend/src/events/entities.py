@@ -20,9 +20,27 @@ Two deviations from a pure walk, both spec-mandated (§3.3/§3.4):
   ``StaffService.archive`` D6 user-cascade — but the canonical
   vocabulary binds it, so ``User → "users"`` is declared here explicitly
   (cascade-only entry).
-* the standalone pair (``VisitService``/``UserSettingsService``) declares
+* the standalone pair (``VisitService``/``UserSettingsService``) declare
   ``entity_name`` explicitly (no ``_model`` — spec §1 trap); their models are
   still mapped here so the map stays uniformly model-keyed.
+
+GH #266 additions, same cascade-only pattern as ``User``:
+
+* ``masters`` — the old masters CRUD service collapsed into the read-only
+  ``MasterViewService`` (not a GenericService, not transactional); the
+  extension table is written only by ``StaffService`` cascades, which call
+  ``mark_changed("masters")`` explicitly — so ``Master → "masters"`` is
+  declared here (cascade-only entry, same shape as ``User``).
+
+Join tables are DELIBERATELY non-canonical (GH #266 decision): the M2M
+tables ``staff_positions`` and ``master_tags`` have no Table entry in
+MODEL_ENTITY. They ARE emitted on the wire as-is — ``staff.py`` calls
+``mark_changed("staff_positions")`` for position-link writes, and
+``master_tags`` rides the FK_MATRIX dispatcher in ``generic.py`` — exactly
+like the pre-existing ``client_tags``/``record_tags`` join tables: consumers
+skip unknown entity names at runtime (frontend: ``distinctFamilies`` skip +
+dev log; spec §5). Do NOT add Table objects here: no service owns a join
+table, and canonicalizing them would force fake families into every mirror.
 
 ``tariffs`` etc. join automatically if a service for them ever appears — the
 import-walk decides, not a hand-typed list.
@@ -50,6 +68,7 @@ import pkgutil
 from typing import TYPE_CHECKING, Any, cast
 
 import src.services
+from src.models.master import Master
 from src.models.user import User
 from src.models.user_settings import UserSettings
 from src.models.visit import Visit
@@ -62,10 +81,15 @@ from src.services.visit import VisitService
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-# Cascade-only entity (spec §3.3 archive user-cascade → users):
-# no UserService exists, the walk cannot derive it.
+# Cascade-only entities (spec §3.3 — written by other services' cascades,
+# no own transactional service; the walk cannot derive them):
+# * User  — StaffService.archive D6 user-cascade → users.
+# * Master — GH #266: masters CRUD collapsed into StaffService; the masters
+#   extension table is written only via StaffService cascades that call
+#   mark_changed("masters") explicitly.
 _CASCADE_ONLY_MODEL_ENTITY: dict[type, str] = {
     User: "users",
+    Master: "masters",
 }
 
 

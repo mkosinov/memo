@@ -23,15 +23,19 @@ import type { QueryClient } from '@tanstack/react-query';
 import { qk } from './queryKeys';
 
 /** Mirrors the backend canonical entity names (backend/src/events/entities.py)
- *  MINUS `users` — the backend emits it (MasterService.archive/restore also
- *  flips user.is_active) but the frontend has no users query family; the
- *  runtime skip below handles it (spec §5: unknown entity → skip + dev log).
- *  Kept in sync by the drift-guard test __tests__/invalidate.test.ts. */
+ *  MINUS `users` and `positions` — the backend emits both (StaffService
+ *  archive/restore also flips user.is_active; PositionService is GH #266
+ *  backend-only) but the frontend has no users/positions query family; the
+ *  runtime skip below handles them (spec §5: unknown entity → skip + dev log).
+ *  Kept in sync by the drift-guard test __tests__/invalidate.test.ts.
+ *  GH #266: `staff` mirrors `masters` — the masters view is derived from
+ *  staff (staff ⨝ masters), and records display master_name/master_color. */
 export type EntityName =
   | 'clients'
   | 'records'
   | 'activities'
   | 'masters'
+  | 'staff'
   | 'services'
   | 'locations'
   | 'materials'
@@ -52,6 +56,9 @@ export type EntityName =
  *                activitiesForRecords readers too)
  * - masters:     useMastersMutations.ts + MastersTable.tsx
  *                (delete/resolve also refresh ['records'] via useRecordData)
+ * - staff:       GH #266 — same surface as masters: the masters view is
+ *                staff ⨝ masters (view rows change on staff writes), and
+ *                records render master_name/master_color from the join
  * - services:    useServicesMutations.ts (#223: create/update also touch
  *                ['materials'] — «Где используется» counters; delete also
  *                ['records']) + ServicesTable.tsx
@@ -73,6 +80,7 @@ export const INVALIDATION_MAP: Record<EntityName, readonly (readonly unknown[])[
   records: [qk.records, qk.visitorsList],
   activities: [['activities']],
   masters: [qk.masters, qk.records],
+  staff: [qk.masters, qk.records],
   services: [qk.services, qk.materials, qk.records],
   locations: [qk.locations, qk.records],
   materials: [qk.materials],

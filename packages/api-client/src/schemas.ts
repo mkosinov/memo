@@ -1,39 +1,143 @@
 import { z } from 'zod';
 
-// ─── MasterResponse ────────────────────────────────────────────────────────
+// ─── Staff (GH #266 — composite staff card, full directory CRUD) ───────────
+// The /api/v1/staff card carries an optional master section (the 1:0..1
+// masters extension, D5), a list of position ids (M2M staff_positions), and —
+// create only — an account-creation flag (D6). `archived` = the PERSON flag
+// (staff.is_active inverted, #207); `master.archived` = the schedule flag
+// (masters.is_active inverted) — three independent flags, D3.
 
-export const MasterResponseSchema = z.object({
+export const StaffMasterSectionSchema = z.object({
+  specialty: z.string(),
+  color: z.string(),
+  archived: z.boolean(), // schedule-archive flag (masters.is_active inverted, D3)
+  created_at: z.string(),
+  updated_at: z.string(),
+});
+export type StaffMasterSection = z.infer<typeof StaffMasterSectionSchema>;
+
+export const StaffResponseSchema = z.object({
   id: z.string(),
   first_name: z.string(),
   last_name: z.string(),
-  color: z.string(),
-  position: z.string(),
-  specialty: z.string(),
   avatar_url: z.string().nullable(),
-  archived: z.boolean(), // inverted: archived = true means the master is in the archive (#207)
-  sort_order: z.number().optional(),
+  sort_order: z.number(),
+  master: StaffMasterSectionSchema.nullable(),
+  position_ids: z.array(z.string()),
+  archived: z.boolean(), // person archive (staff.is_active inverted, #207)
   created_at: z.string(), // ISO datetime string
   updated_at: z.string(), // ISO datetime string
 });
+export type StaffResponse = z.infer<typeof StaffResponseSchema>;
 
-export type MasterResponse = z.infer<typeof MasterResponseSchema>;
+// Master-section payload (D5): presence semantics validated at the SERVICE
+// level (SPECIALTY_REQUIRED/COLOR_REQUIRED error codes) — the schema accepts
+// empty strings rather than a generic 422, mirroring backend MasterSection.
+export const MasterSectionInputSchema = z
+  .object({
+    specialty: z.string(),
+    color: z.string(),
+  })
+  .strict();
+export type MasterSectionInput = z.infer<typeof MasterSectionInputSchema>;
 
-// ─── MasterCreate (request body) ──────────────────────────────────────────
+// Account-creation checkbox (D6): a section object or literal false —
+// never bare true.
+export const CreateUserSectionSchema = z
+  .object({
+    phone: z.string().min(1).max(20),
+    password: z.string().min(1).max(64),
+  })
+  .strict();
+export type CreateUserSection = z.infer<typeof CreateUserSectionSchema>;
 
-export const MasterCreateSchema = z.object({
-  first_name: z.string().min(1).max(100),
-  last_name: z.string().min(1).max(100),
-  color: z.string().regex(/^#[0-9A-Fa-f]{6}$/),
-  position: z.enum(['мастер', 'администратор']),
-  specialty: z.enum(['живопись', 'керамика']),
-  avatar_url: z.string().optional().default(''),
-});
-export type MasterCreate = z.infer<typeof MasterCreateSchema>;
+export const StaffCreateSchema = z
+  .object({
+    first_name: z.string().min(1).max(100),
+    last_name: z.string().min(1).max(100),
+    avatar_url: z.string().nullable().optional().default(null),
+    sort_order: z.number().optional().default(0),
+    master: MasterSectionInputSchema.nullable().optional().default(null),
+    position_ids: z.array(z.string()).optional().default([]),
+    create_user: z.union([CreateUserSectionSchema, z.literal(false)]).optional().default(false),
+  })
+  .strict();
+export type StaffCreate = z.input<typeof StaffCreateSchema>;
 
 // is_active is NOT accepted (#207): archive/restore is via POST endpoints.
 // .strict() mirrors backend extra="forbid" — a stray is_active is rejected (422).
-export const MasterUpdateSchema = MasterCreateSchema.strict();
-export type MasterUpdate = z.infer<typeof MasterUpdateSchema>;
+// create_user is CREATE-ONLY (an account is created exactly once).
+export const StaffUpdateSchema = z
+  .object({
+    first_name: z.string().min(1).max(100),
+    last_name: z.string().min(1).max(100),
+    avatar_url: z.string().nullable().optional().default(null),
+    sort_order: z.number().optional().default(0),
+    master: MasterSectionInputSchema.nullable().optional().default(null),
+    position_ids: z.array(z.string()).optional().default([]),
+  })
+  .strict();
+export type StaffUpdate = z.input<typeof StaffUpdateSchema>;
+
+// PATCH three-state master: absent = keep, null = remove, payload = upsert.
+export const StaffPatchSchema = StaffUpdateSchema.partial();
+export type StaffPatch = z.input<typeof StaffPatchSchema>;
+
+// Body of POST /staff/{id}/archive — D6 dismissal checkboxes (both default true).
+export const StaffArchiveRequestSchema = z
+  .object({
+    archive_master: z.boolean().default(true),
+    archive_user: z.boolean().default(true),
+  })
+  .strict();
+export type StaffArchiveRequest = z.infer<typeof StaffArchiveRequestSchema>;
+
+// ─── MasterViewResponse (GH #266 D8 — read-only /masters view) ──────────────
+// /api/v1/masters is a VIEW over staff ⨝ masters serving ACTING masters only
+// (masters.is_active = true): schedule filters + the client site #48. The
+// write-side fields are gone — `id` = staff_id; no `archived` (the list only
+// returns acting masters) and no `position` (positions live on the staff card).
+
+export const MasterViewResponseSchema = z.object({
+  id: z.string(), // = staff_id (master extension PK)
+  first_name: z.string(),
+  last_name: z.string(),
+  specialty: z.string(),
+  color: z.string(),
+  avatar_url: z.string().nullable(),
+  sort_order: z.number(),
+  created_at: z.string(), // ISO datetime string
+  updated_at: z.string(), // ISO datetime string
+});
+export type MasterView = z.infer<typeof MasterViewResponseSchema>;
+
+// ─── PositionResponse (GH #266 D4 — positions dictionary) ───────────────────
+// Built-ins carry fixed string ids (master/admin, is_system=true — title
+// editable, deletion forbidden server-side); user-defined get uuid ids.
+// Not archive-aware — no archived field.
+
+export const PositionResponseSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  is_system: z.boolean(),
+  created_at: z.string(), // ISO datetime string
+  updated_at: z.string(), // ISO datetime string
+});
+export type PositionResponse = z.infer<typeof PositionResponseSchema>;
+
+export const PositionCreateSchema = z
+  .object({
+    title: z.string().min(1).max(100),
+  })
+  .strict();
+export type PositionCreate = z.input<typeof PositionCreateSchema>;
+
+// is_system is NOT accepted: the built-in flag is owned by the dictionary.
+export const PositionUpdateSchema = PositionCreateSchema;
+export type PositionUpdate = z.input<typeof PositionUpdateSchema>;
+
+export const PositionPatchSchema = PositionCreateSchema.partial();
+export type PositionPatch = z.input<typeof PositionPatchSchema>;
 
 // ─── LocationResponse ──────────────────────────────────────────────────────
 
@@ -605,7 +709,9 @@ export function paginatedSchema<T extends z.ZodType>(itemSchema: T) {
   });
 }
 
-export const MasterListResponseSchema = paginatedSchema(MasterResponseSchema);
+export const StaffListResponseSchema = paginatedSchema(StaffResponseSchema);
+export const PositionListResponseSchema = paginatedSchema(PositionResponseSchema);
+export const MasterViewListResponseSchema = paginatedSchema(MasterViewResponseSchema);
 export const LocationListResponseSchema = paginatedSchema(LocationResponseSchema);
 export const TagListResponseSchema = paginatedSchema(TagResponseSchema);
 export const MaterialListResponseSchema = paginatedSchema(MaterialResponseSchema);
@@ -621,7 +727,9 @@ export type PhotoListResponse = z.infer<typeof PhotoListResponseSchema>;
 
 // ─── Bare-array /all dictionary responses (GH #205) ─────────────────────────
 
-export const MasterAllResponseSchema = z.array(MasterResponseSchema);
+export const StaffAllResponseSchema = z.array(StaffResponseSchema);
+export const PositionAllResponseSchema = z.array(PositionResponseSchema);
+export const MasterViewAllResponseSchema = z.array(MasterViewResponseSchema);
 export const LocationAllResponseSchema = z.array(LocationResponseSchema);
 export const ServiceAllResponseSchema = z.array(ServiceResponseSchema);
 export const TagAllResponseSchema = z.array(TagResponseSchema);

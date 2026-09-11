@@ -1,10 +1,17 @@
 import { z } from 'zod';
 import { api } from './client';
 import {
-  MasterResponseSchema,
-  type MasterResponse,
-  type MasterCreate,
-  type MasterUpdate,
+  StaffResponseSchema,
+  type StaffResponse,
+  type StaffCreate,
+  type StaffUpdate,
+  type StaffPatch,
+  StaffArchiveRequestSchema,
+  type StaffArchiveRequest,
+  type MasterView,
+  PositionResponseSchema,
+  type PositionResponse,
+  type PositionCreate,
   LocationResponseSchema,
   type LocationResponse,
   ServiceResponseSchema,
@@ -61,12 +68,16 @@ import {
   UserSettingsCreateSchema,
   type UserSettingsResponse,
   type UserSettingsUpdate,
-  MasterListResponseSchema,
+  StaffListResponseSchema,
+  PositionListResponseSchema,
+  MasterViewListResponseSchema,
   LocationListResponseSchema,
   TagListResponseSchema,
   MaterialListResponseSchema,
   ServiceListResponseSchema,
-  MasterAllResponseSchema,
+  StaffAllResponseSchema,
+  PositionAllResponseSchema,
+  MasterViewAllResponseSchema,
   LocationAllResponseSchema,
   ServiceAllResponseSchema,
   TagAllResponseSchema,
@@ -115,63 +126,120 @@ function listQuery(params?: ListParams): string {
   return qs ? `?${qs}` : '';
 }
 
-// ─── Masters ───────────────────────────────────────────────────────────────
+// ─── Masters (read-only view, GH #266 D8) ─────────────────────────────────
+// /api/v1/masters serves the ACTING masters (masters.is_active = true) for
+// schedule filters and the client site #48. No mutations, no GET /{id}, no
+// reorder — writes live on the staff card. Undeclared query params (status/
+// sort/q) are ignored server-side; ListParams keeps the shared listQuery shape.
 
-export async function getMasters(params?: ListParams): Promise<PaginatedResponse<MasterResponse>> {
-  return api(`/api/v1/masters${listQuery(params)}`, MasterListResponseSchema);
+export async function getMasters(params?: ListParams): Promise<PaginatedResponse<MasterView>> {
+  return api(`/api/v1/masters${listQuery(params)}`, MasterViewListResponseSchema);
 }
 
-export async function getMaster(id: string): Promise<MasterResponse> {
-  return api(`/api/v1/masters/${id}`, MasterResponseSchema);
+// ─── Staff (GH #266 — the full staff directory) ───────────────────────────
+
+/** Staff sort whitelist (#266): position EXCLUDED — M2M makes the sort ambiguous. */
+export type StaffSortBy = 'name' | 'specialty' | 'color' | 'avatar' | 'status';
+
+export async function getStaff(params?: ListParams & { sort_by?: StaffSortBy }): Promise<PaginatedResponse<StaffResponse>> {
+  return api(`/api/v1/staff${listQuery(params)}`, StaffListResponseSchema);
 }
 
-export async function createMaster(data: MasterCreate): Promise<MasterResponse> {
-  return api('/api/v1/masters', MasterResponseSchema, {
+export async function getStaffById(id: string): Promise<StaffResponse> {
+  return api(`/api/v1/staff/${id}`, StaffResponseSchema);
+}
+
+// Create a card — one transaction: person + optional master section (D5),
+// position ids, and the create-only account checkbox (D6).
+export async function createStaff(data: StaffCreate): Promise<StaffResponse> {
+  return api('/api/v1/staff', StaffResponseSchema, {
     method: 'POST',
     body: JSON.stringify(data),
   });
 }
 
-export async function updateMaster(id: string, data: MasterUpdate): Promise<MasterResponse> {
-  return api(`/api/v1/masters/${id}`, MasterResponseSchema, {
+// Full update via PUT — card + sections replace, atomically.
+export async function updateStaff(id: string, data: StaffUpdate): Promise<StaffResponse> {
+  return api(`/api/v1/staff/${id}`, StaffResponseSchema, {
     method: 'PUT',
     body: JSON.stringify(data),
   });
 }
 
-// PATCH for partial updates — only send the changed fields.
-export async function patchMaster(
-  id: string,
-  data: Partial<MasterUpdate>,
-): Promise<MasterResponse> {
-  return api(`/api/v1/masters/${id}`, MasterResponseSchema, {
+// PATCH for partial updates — master is three-state (absent/null/payload).
+export async function patchStaff(id: string, data: StaffPatch): Promise<StaffResponse> {
+  return api(`/api/v1/staff/${id}`, StaffResponseSchema, {
     method: 'PATCH',
     body: JSON.stringify(data),
   });
 }
 
-export async function deleteMaster(id: string): Promise<void> {
-  await api(`/api/v1/masters/${id}`, z.any(), { method: 'DELETE' });
+// D6 dismissal checkboxes: {archive_master, archive_user}, both default true.
+// An archive call without a body = consent to the preselected choice.
+export async function archiveStaff(
+  id: string,
+  checkboxes?: StaffArchiveRequest,
+): Promise<StaffResponse> {
+  return api(`/api/v1/staff/${id}/archive`, StaffResponseSchema, {
+    method: 'POST',
+    ...(checkboxes !== undefined ? { body: JSON.stringify(StaffArchiveRequestSchema.parse(checkboxes)) } : {}),
+  });
 }
 
-export async function archiveMaster(id: string): Promise<MasterResponse> {
-  return api(`/api/v1/masters/${id}/archive`, MasterResponseSchema, { method: 'POST' });
+// Restores the PERSON only (master/user flags are explicit toggles, D3).
+export async function restoreStaff(id: string): Promise<StaffResponse> {
+  return api(`/api/v1/staff/${id}/restore`, StaffResponseSchema, { method: 'POST' });
 }
 
-export async function restoreMaster(id: string): Promise<MasterResponse> {
-  return api(`/api/v1/masters/${id}/restore`, MasterResponseSchema, { method: 'POST' });
+export async function deleteStaff(id: string): Promise<void> {
+  await api(`/api/v1/staff/${id}`, z.any(), { method: 'DELETE' });
 }
 
 // Execute a hard delete with dependency resolutions (GH #207 §6) — DELETE with body.
-export async function resolveDeleteMaster(id: string, resolutions: Record<string, string>): Promise<void> {
-  await api(`/api/v1/masters/${id}`, z.any(), { method: 'DELETE', body: JSON.stringify({ resolutions }) });
+// Activities BLOCK (422); the masters row, account, master_tags and
+// staff_positions auto-cascade (domain-rules/staff.md).
+export async function resolveDeleteStaff(id: string, resolutions: Record<string, string>): Promise<void> {
+  await api(`/api/v1/staff/${id}`, z.any(), { method: 'DELETE', body: JSON.stringify({ resolutions }) });
 }
 
-export async function reorderMasters(ids: string[]): Promise<void> {
-  await api('/api/v1/masters/reorder', z.any(), {
-    method: 'PUT',
-    body: JSON.stringify({ ids }),
+// ─── Positions (GH #266 D4 — salary-side dictionary) ──────────────────────
+
+export async function getPositions(params?: ListParams): Promise<PaginatedResponse<PositionResponse>> {
+  return api(`/api/v1/positions${listQuery(params)}`, PositionListResponseSchema);
+}
+
+export async function getPosition(id: string): Promise<PositionResponse> {
+  return api(`/api/v1/positions/${id}`, PositionResponseSchema);
+}
+
+export async function createPosition(data: PositionCreate): Promise<PositionResponse> {
+  return api('/api/v1/positions', PositionResponseSchema, {
+    method: 'POST',
+    body: JSON.stringify(data),
   });
+}
+
+export async function updatePosition(id: string, data: PositionCreate): Promise<PositionResponse> {
+  return api(`/api/v1/positions/${id}`, PositionResponseSchema, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+// PATCH for partial updates — title only.
+export async function patchPosition(
+  id: string,
+  data: Partial<PositionCreate>,
+): Promise<PositionResponse> {
+  return api(`/api/v1/positions/${id}`, PositionResponseSchema, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+}
+
+// Built-ins (is_system) are rejected server-side with POSITION_IS_SYSTEM.
+export async function deletePosition(id: string): Promise<void> {
+  await api(`/api/v1/positions/${id}`, z.any(), { method: 'DELETE' });
 }
 
 // ─── Locations ─────────────────────────────────────────────────────────────
@@ -810,8 +878,17 @@ function allQuery(params?: AllParams): string {
   return qs ? `?${qs}` : '';
 }
 
-export async function getAllMasters(params?: AllParams): Promise<MasterResponse[]> {
-  return api(`/api/v1/masters/all${allQuery(params)}`, MasterAllResponseSchema);
+export async function getAllMasters(params?: AllParams): Promise<MasterView[]> {
+  return api(`/api/v1/masters/all${allQuery(params)}`, MasterViewAllResponseSchema);
+}
+
+export async function getAllStaff(params?: AllParams): Promise<StaffResponse[]> {
+  return api(`/api/v1/staff/all${allQuery(params)}`, StaffAllResponseSchema);
+}
+
+// Plain dictionary — no archive status, no params (GH #205 bare-array contract).
+export async function getAllPositions(): Promise<PositionResponse[]> {
+  return api('/api/v1/positions/all', PositionAllResponseSchema);
 }
 
 export async function getAllLocations(params?: AllParams): Promise<LocationResponse[]> {

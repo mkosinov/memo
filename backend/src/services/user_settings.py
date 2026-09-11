@@ -27,7 +27,7 @@ def _to_response(model: UserSettings) -> UserSettingsResponse:
         user_id=model.user_id,
         theme=model.theme,
         language=model.language,
-        column_order_masters=json.loads(model.column_order_masters),
+        column_order_staff=json.loads(model.column_order_staff),
         column_order_locations=json.loads(model.column_order_locations),
         created_at=model.created_at,
         updated_at=model.updated_at,
@@ -74,7 +74,7 @@ class UserSettingsService:
             user_id=data.user_id,
             theme=data.theme,
             language=data.language,
-            column_order_masters=json.dumps(data.column_order_masters),
+            column_order_staff=json.dumps(data.column_order_staff),
             column_order_locations=json.dumps(data.column_order_locations),
         )
         session.add(orm)
@@ -97,15 +97,15 @@ class UserSettingsService:
 
         # Strip null values for NOT NULL columns — client intent is "don't change",
         # not "set to null"
-        _not_null_fields = {"theme", "language", "column_order_masters", "column_order_locations"}
+        _not_null_fields = {"theme", "language", "column_order_staff", "column_order_locations"}
         for field in _not_null_fields:
             if field in update_data and update_data[field] is None:
                 del update_data[field]
 
         # Serialize list fields to JSON strings
-        if "column_order_masters" in update_data:
-            update_data["column_order_masters"] = json.dumps(
-                update_data["column_order_masters"]
+        if "column_order_staff" in update_data:
+            update_data["column_order_staff"] = json.dumps(
+                update_data["column_order_staff"]
             )
         if "column_order_locations" in update_data:
             update_data["column_order_locations"] = json.dumps(

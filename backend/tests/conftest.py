@@ -891,7 +891,7 @@ def insert_user(
     user_id = str(_uuid.uuid4())
     conn = sqlite3.connect(_db_file.name)
     conn.execute(
-        "INSERT INTO users (id, phone, password_hash, role, master_id, "
+        "INSERT INTO users (id, phone, password_hash, role, staff_id, "
         "email_is_confirmed, phone_is_confirmed, is_active, created_at, updated_at) "
         "VALUES (?, ?, ?, ?, ?, 0, 0, 1, datetime('now'), datetime('now'))",
         (user_id, phone, password_hash, role, master_id),

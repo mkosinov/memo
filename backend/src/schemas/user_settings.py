@@ -14,7 +14,7 @@ class UserSettingsResponse(BaseModel):
     user_id: str
     theme: str
     language: str
-    column_order_masters: list[str]
+    column_order_staff: list[str]
     column_order_locations: list[str]
     created_at: datetime
     updated_at: datetime
@@ -26,7 +26,7 @@ class UserSettingsCreate(BaseModel):
     user_id: str
     theme: str = "light"
     language: str = "ru"
-    column_order_masters: list[str] = []
+    column_order_staff: list[str] = []
     column_order_locations: list[str] = []
 
 
@@ -40,7 +40,7 @@ class UserSettingsUpdate(BaseModel):
 
     theme: str | None = None
     language: str | None = None
-    column_order_masters: list[str] | None = None
+    column_order_staff: list[str] | None = None
     column_order_locations: list[str] | None = None
 
 
@@ -53,5 +53,5 @@ class UserSettingsPatch(BaseModel):
 
     theme: str | None = None
     language: str | None = None
-    column_order_masters: list[str] | None = None
+    column_order_staff: list[str] | None = None
     column_order_locations: list[str] | None = None

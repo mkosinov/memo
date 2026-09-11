@@ -14,7 +14,9 @@ class UserSettings(AbstractModel):
     )
     theme: Mapped[str] = mapped_column(String(10), default="light")
     language: Mapped[str] = mapped_column(String(5), default="ru")
-    column_order_masters: Mapped[str] = mapped_column(
+    # GH #266: column_order_staff renamed → column_order_staff (order ids
+    # in the data are preserved — staff ids are the former master ids).
+    column_order_staff: Mapped[str] = mapped_column(
         Text, default="[]",
     )
     column_order_locations: Mapped[str] = mapped_column(

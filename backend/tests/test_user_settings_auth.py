@@ -74,7 +74,7 @@ class TestGetOwnOnly:
 
         query_db(
             f"INSERT INTO user_settings (id, user_id, theme, language, "
-            f"column_order_masters, column_order_locations, created_at, updated_at) "
+            f"column_order_staff, column_order_locations, created_at, updated_at) "
             f"VALUES ('stale-{other_user['id'][:8]}', '{other_user['id']}', "
             f"'dark', 'ru', '[]', '[]', datetime('now'), datetime('now'))"
         )
@@ -132,7 +132,7 @@ class TestDeleteOwnership:
         settings_id = f"st-{other_user['id'][:8]}"
         query_db(
             f"INSERT INTO user_settings (id, user_id, theme, language, "
-            f"column_order_masters, column_order_locations, created_at, updated_at) "
+            f"column_order_staff, column_order_locations, created_at, updated_at) "
             f"VALUES ('{settings_id}', '{other_user['id']}', "
             f"'dark', 'ru', '[]', '[]', datetime('now'), datetime('now'))"
         )

@@ -13,7 +13,7 @@ from src.domain.deletion import ResolutionError, collect_dependencies
 from src.domain.errors import BareListLimitExceededError
 from src.errors import ErrorCode, ErrorDetail
 from src.models.enums import ArchiveStatus
-from src.models.master import Master
+from src.models.staff import Staff
 from src.schemas.common import PaginatedResponse, SortOrder
 from src.schemas.master import (
     MasterCreate,
@@ -38,16 +38,16 @@ def _get_master_service() -> MasterService:
 _ServiceDep = Annotated[MasterService, Depends(_get_master_service)]
 
 # Sort whitelist map: UI key → list of ORM columns (#205 Task 3, spec §4.5).
-# Composite UI columns map to multiple DB columns. ``avatar`` → avatar_url;
-# ``status`` → is_active (asc = is_active ASC = archived-first, preserving
-# the old client boolean-sort semantics).
+# GH #266 T1 transitional: people columns live on staff; specialty/color on
+# the masters extension. ``position`` stays a no-op literal (legacy clients
+# may still send it; real positions M2M + staff sort contract land in T3/T4).
 _MASTER_SORT_MAP: dict[str, list] = {
-    "name": [Master.first_name, Master.last_name],
-    "specialty": [Master.specialty],
-    "position": [Master.position],
-    "color": [Master.color],
-    "avatar": [Master.avatar_url],
-    "status": [Master.is_active],
+    "name": [Staff.first_name, Staff.last_name],
+    "specialty": [Staff.id],  # extension sort unsupported in transitional map
+    "position": [Staff.id],
+    "color": [Staff.id],
+    "avatar": [Staff.avatar_url],
+    "status": [Staff.is_active],
 }
 
 
@@ -59,13 +59,13 @@ def _master_order_by(sort_by: MasterSortBy | None, sort_order: SortOrder) -> lis
       then ``id ASC`` tiebreak for cross-page stability (records idiom).
     """
     if sort_by is None:
-        return [asc(Master.sort_order), asc(Master.first_name), asc(Master.id)]
+        return [asc(Staff.sort_order), asc(Staff.first_name), asc(Staff.id)]
     cols = _MASTER_SORT_MAP[sort_by]
     ordered = [
         c.desc().nullslast() if sort_order == "desc" else c.asc().nullsfirst()
         for c in cols
     ]
-    return [*ordered, asc(Master.id)]
+    return [*ordered, asc(Staff.id)]
 
 
 @router.get("", response_model=PaginatedResponse[MasterResponse])
@@ -132,7 +132,7 @@ async def list_all_masters(
         return await service.list_all(
             db_session=session,
             status=status,
-            order_by=[asc(Master.sort_order), asc(Master.first_name), asc(Master.id)],
+            order_by=[asc(Staff.sort_order), asc(Staff.first_name), asc(Staff.id)],
         )
     except BareListLimitExceededError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -256,7 +256,7 @@ async def delete_master(
             )
         return
 
-    deps = await collect_dependencies(session, Master, master_id)
+    deps = await collect_dependencies(session, Staff, master_id)
     if deps:
         return JSONResponse(
             status_code=409,

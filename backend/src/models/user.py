@@ -15,8 +15,10 @@ class User(AbstractModelSoftDelete):
     email: Mapped[str | None] = mapped_column(String(255), unique=True, nullable=True)
     password_hash: Mapped[str] = mapped_column(String(255))
     role: Mapped[str] = mapped_column(String(20))
-    master_id: Mapped[str | None] = mapped_column(
-        String(36), ForeignKey("masters.id"), unique=True, nullable=True,
+    # GH #266: master_id renamed → staff_id; FK → staff directory, one
+    # account per employee card (unique), nullable for pure admins.
+    staff_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("staff.id"), unique=True, nullable=True,
     )
     email_is_confirmed: Mapped[bool] = mapped_column(Boolean, default=False)
     phone_is_confirmed: Mapped[bool] = mapped_column(Boolean, default=False)

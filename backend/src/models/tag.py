@@ -33,7 +33,11 @@ activity_tags = Table(
 
 master_tags = Table(
     "master_tags", Base.metadata,
-    Column("master_id", String(36), ForeignKey("masters.id"), primary_key=True),
+    # GH #266 D9: FK retargeted to masters.staff_id (new extension table).
+    Column(
+        "master_id", String(36),
+        ForeignKey("masters.staff_id", ondelete="CASCADE"), primary_key=True,
+    ),
     Column("tag_id", String(36), ForeignKey("tags.id"), primary_key=True),
 )
 

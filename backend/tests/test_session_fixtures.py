@@ -54,24 +54,24 @@ def test_truncate_all_tables_clears_data_preserves_schema(db_engine):
         # 1. Schema must exist (created by session-scoped alembic upgrade)
         async with db_engine.connect() as conn:
             result = await conn.execute(
-                text("SELECT name FROM sqlite_master WHERE type='table' AND name='masters'")
+                text("SELECT name FROM sqlite_master WHERE type='table' AND name='staff'")
             )
             assert result.scalar() is not None, "Schema must exist before test"
 
         # 2. Insert a test row
         async with db_engine.begin() as conn:
             await conn.execute(text(
-                "INSERT INTO masters "
-                "(id, first_name, last_name, color, position, specialty, "
-                "sort_order, is_active, created_at, updated_at) "
-                "VALUES (99999, 'Test', 'Truncate', '#000', 'мастер', 'тест', "
+                "INSERT INTO staff "
+                "(id, first_name, last_name, sort_order, "
+                "is_active, created_at, updated_at) "
+                "VALUES (99999, 'Test', 'Truncate', "
                 "0, 1, datetime('now'), datetime('now'))"
             ))
 
         # 3. Verify row exists
         async with db_engine.connect() as conn:
             result = await conn.execute(
-                text("SELECT COUNT(*) FROM masters WHERE id=99999")
+                text("SELECT COUNT(*) FROM staff WHERE id=99999")
             )
             assert result.scalar() == 1
 
@@ -80,18 +80,18 @@ def test_truncate_all_tables_clears_data_preserves_schema(db_engine):
 
         # 5. Verify row is gone
         async with db_engine.connect() as conn:
-            result = await conn.execute(text("SELECT COUNT(*) FROM masters"))
+            result = await conn.execute(text("SELECT COUNT(*) FROM staff"))
             count = result.scalar()
             assert count == 0, f"All rows should be deleted, got {count}"
 
         # 6. Verify schema is still intact
         async with db_engine.connect() as conn:
             result = await conn.execute(text(
-                "SELECT sql FROM sqlite_master WHERE type='table' AND name='masters'"
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='staff'"
             ))
             schema = result.scalar()
             assert schema is not None, "Schema must be preserved after truncate"
-            assert "first_name" in schema, "masters table columns must exist"
+            assert "first_name" in schema, "staff table columns must exist"
 
     asyncio.run(scenario())
 
@@ -105,19 +105,19 @@ def test_truncate_respects_fk_order(db_engine):
     from tests.conftest import _truncate_all_tables
 
     async def scenario():
-        # Insert into masters (activity references master via FK)
+        # Insert into staff (masters extension references staff via FK)
         async with db_engine.begin() as conn:
             await conn.execute(text(
-                "INSERT INTO masters "
-                "(id, first_name, last_name, color, position, specialty, "
-                "sort_order, is_active, created_at, updated_at) "
-                "VALUES (88888, 'FK', 'Test', '#000', 'мастер', 'тест', "
+                "INSERT INTO staff "
+                "(id, first_name, last_name, sort_order, "
+                "is_active, created_at, updated_at) "
+                "VALUES (88888, 'FK', 'Test', "
                 "0, 1, datetime('now'), datetime('now'))"
             ))
 
         # Verify rows exist
         async with db_engine.connect() as conn:
-            result = await conn.execute(text("SELECT COUNT(*) FROM masters"))
+            result = await conn.execute(text("SELECT COUNT(*) FROM staff"))
             assert result.scalar() >= 1
 
         # Truncate — must not raise FK errors
@@ -125,7 +125,7 @@ def test_truncate_respects_fk_order(db_engine):
 
         # Verify all rows gone
         async with db_engine.connect() as conn:
-            result = await conn.execute(text("SELECT COUNT(*) FROM masters"))
+            result = await conn.execute(text("SELECT COUNT(*) FROM staff"))
             assert result.scalar() == 0
 
     asyncio.run(scenario())

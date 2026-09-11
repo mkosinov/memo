@@ -22,7 +22,7 @@ from __future__ import annotations
 import os
 from datetime import datetime, timedelta
 
-# ruff: noqa: RUF001, RUF003  -- Cyrillic text is intentional (Russian language app)
+# ruff: noqa: RUF001, RUF002, RUF003  -- Cyrillic text is intentional (Russian language app)
 from sqlalchemy import select
 
 from src.auth.passwords import hash_password
@@ -36,9 +36,11 @@ from src.models import (
     Material,
     Payment,
     Photo,
+    Position,
     Record,
     Service,
     ServiceMaterial,
+    Staff,
     Tag,
     Tariff,
     User,
@@ -46,6 +48,7 @@ from src.models import (
     Visitor,
 )
 from src.models.photo import photo_tags
+from src.models.position import staff_positions
 from src.models.tag import activity_tags, service_tags
 
 # ---------------------------------------------------------------------------
@@ -208,13 +211,13 @@ async def seed_staff_users(session) -> None:
     """Seed the demo staff users (GH #247 §3.11) — dev/demo only.
 
     Admin ``+79990000001/admin12345``; master ``+79990000002/master12345``
-    linked to the first seeded master (by ``sort_order`` — m1). Guarded by
-    ``ENV != production`` at the call site in :func:`seed_data`; the
+    linked to the first seeded staff card (by ``sort_order`` — m1). Guarded
+    by ``ENV != production`` at the call site in :func:`seed_data`; the
     obviously-fake passwords are deliberate (public repo).
     """
-    first_master = (
+    first_staff = (
         await session.execute(
-            select(Master).order_by(Master.sort_order, Master.id).limit(1)
+            select(Staff).order_by(Staff.sort_order, Staff.id).limit(1)
         )
     ).scalar_one()
     session.add(
@@ -223,22 +226,54 @@ async def seed_staff_users(session) -> None:
     )
     session.add(
         User(phone="+79990000002", role="master",
-             master_id=first_master.id,
+             staff_id=first_staff.id,
              password_hash=_STAFF_PASSWORDS_HASHED["master12345"])
     )
 
 
+# GH #266: former single masters seed is split into staff cards (people) +
+# masters extension rows (schedule) + positions dictionary + links.
+# IDs are unchanged (m1–m5, m7; m6 never existed in the seed).
+_STAFF_RAW: list[dict] = [
+    {"id": "m1", "first_name": "Ольга", "last_name": "Середа", "sort_order": 0},
+    {"id": "m2", "first_name": "Юлия", "last_name": "Большакова", "sort_order": 1},
+    {"id": "m3", "first_name": "Анастасия", "last_name": "П.", "sort_order": 2},
+    {"id": "m4", "first_name": "Дарья", "last_name": "Тюльпина", "sort_order": 3},
+    {"id": "m5", "first_name": "Александра", "last_name": "В.", "sort_order": 4},
+    {"id": "m7", "first_name": "Ирина", "last_name": "Горох", "sort_order": 5},
+]
+
+_MASTER_EXTENSIONS: list[dict] = [
+    {"staff_id": "m1", "specialty": "живопись", "color": "#5B8C7A"},
+    {"staff_id": "m2", "specialty": "керамика", "color": "#6B7E9C"},
+    {"staff_id": "m3", "specialty": "живопись", "color": "#A07060"},
+    {"staff_id": "m4", "specialty": "керамика", "color": "#7A6E9C"},
+    {"staff_id": "m5", "specialty": "живопись", "color": "#8A7840"},
+    {"staff_id": "m7", "specialty": "керамика", "color": "#9A5870"},
+]
+
+
 async def _seed_masters(session) -> None:
-    masters = [
-        {"id": "m1", "first_name": "Ольга", "last_name": "Середа", "color": "#5B8C7A", "specialty": "живопись", "position": "мастер", "sort_order": 0},
-        {"id": "m2", "first_name": "Юлия", "last_name": "Большакова", "color": "#6B7E9C", "specialty": "керамика", "position": "мастер", "sort_order": 1},
-        {"id": "m3", "first_name": "Анастасия", "last_name": "П.", "color": "#A07060", "specialty": "живопись", "position": "мастер", "sort_order": 2},
-        {"id": "m4", "first_name": "Дарья", "last_name": "Тюльпина", "color": "#7A6E9C", "specialty": "керамика", "position": "мастер", "sort_order": 3},
-        {"id": "m5", "first_name": "Александра", "last_name": "В.", "color": "#8A7840", "specialty": "живопись", "position": "мастер", "sort_order": 4},
-        {"id": "m7", "first_name": "Ирина", "last_name": "Горох", "color": "#9A5870", "specialty": "керамика", "position": "мастер", "sort_order": 5},
-    ]
-    for m in masters:
+    """Seed staff cards, positions, master extensions and links (#266)."""
+    for s in _STAFF_RAW:
+        session.add(Staff(**s))
+    # positions dictionary: built-ins + user-defined «СММ» (unassigned)
+    session.add(Position(id="master", title="Мастер", is_system=True))
+    session.add(Position(id="admin", title="Администратор", is_system=True))
+    session.add(Position(id="smm", title="СММ", is_system=False))
+    # master extension rows: values = former master ids
+    for m in _MASTER_EXTENSIONS:
         session.add(Master(**m))
+    # FK=ON (#207 §11.3 idiom): flush parents before the literal-id link
+    # inserts below — the Core inserts bypass the unit-of-work ordering.
+    await session.flush()
+    # every seeded staff member holds the «мастер» position
+    for s in _STAFF_RAW:
+        await session.execute(
+            staff_positions.insert().values(
+                staff_id=s["id"], position_id="master",
+            )
+        )
 
 
 async def _seed_locations(session) -> None:

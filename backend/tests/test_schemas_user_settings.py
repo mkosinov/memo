@@ -20,7 +20,7 @@ class TestUserSettingsResponse:
             user_id="user-uuid-456",
             theme="dark",
             language="en",
-            column_order_masters=["first_name", "last_name", "color"],
+            column_order_staff=["first_name", "last_name", "color"],
             column_order_locations=["name", "address", "capacity"],
             created_at=now,
             updated_at=now,
@@ -29,7 +29,7 @@ class TestUserSettingsResponse:
         assert schema.user_id == "user-uuid-456"
         assert schema.theme == "dark"
         assert schema.language == "en"
-        assert schema.column_order_masters == ["first_name", "last_name", "color"]
+        assert schema.column_order_staff == ["first_name", "last_name", "color"]
         assert schema.column_order_locations == ["name", "address", "capacity"]
 
     def test_response_from_attributes(self):
@@ -41,7 +41,7 @@ class TestUserSettingsResponse:
             user_id = "orm-user"
             theme = "light"
             language = "ru"
-            column_order_masters = ["first_name", "color"]
+            column_order_staff = ["first_name", "color"]
             column_order_locations = ["name", "address"]
             created_at = datetime.utcnow()
             updated_at = datetime.utcnow()
@@ -49,7 +49,7 @@ class TestUserSettingsResponse:
         schema = UserSettingsResponse.model_validate(FakeUserSettings())
         assert schema.id == "orm-id"
         assert schema.theme == "light"
-        assert schema.column_order_masters == ["first_name", "color"]
+        assert schema.column_order_staff == ["first_name", "color"]
 
 
 class TestUserSettingsCreate:
@@ -63,7 +63,7 @@ class TestUserSettingsCreate:
         assert schema.user_id == "user-123"
         assert schema.theme == "light"
         assert schema.language == "ru"
-        assert schema.column_order_masters == []
+        assert schema.column_order_staff == []
         assert schema.column_order_locations == []
 
     def test_create_all_fields(self):
@@ -74,7 +74,7 @@ class TestUserSettingsCreate:
             user_id="user-456",
             theme="dark",
             language="en",
-            column_order_masters=["color", "position"],
+            column_order_staff=["color", "position"],
             column_order_locations=["name", "capacity"],
         )
         assert schema.user_id == "user-456"
@@ -100,7 +100,7 @@ class TestUserSettingsUpdate:
         schema = UserSettingsUpdate()
         assert schema.theme is None
         assert schema.language is None
-        assert schema.column_order_masters is None
+        assert schema.column_order_staff is None
         assert schema.column_order_locations is None
 
     def test_update_theme_only(self):
@@ -110,17 +110,17 @@ class TestUserSettingsUpdate:
         schema = UserSettingsUpdate(theme="dark")
         assert schema.theme == "dark"
         assert schema.language is None
-        assert schema.column_order_masters is None
+        assert schema.column_order_staff is None
 
     def test_update_columns_only(self):
         """Update with only column orders."""
         from src.schemas.user_settings import UserSettingsUpdate
 
         schema = UserSettingsUpdate(
-            column_order_masters=["last_name", "first_name"],
+            column_order_staff=["last_name", "first_name"],
             column_order_locations=["address"],
         )
-        assert schema.column_order_masters == ["last_name", "first_name"]
+        assert schema.column_order_staff == ["last_name", "first_name"]
         assert schema.column_order_locations == ["address"]
         assert schema.theme is None
         assert schema.language is None
@@ -132,7 +132,7 @@ class TestUserSettingsUpdate:
         schema = UserSettingsUpdate(
             theme="dark",
             language="en",
-            column_order_masters=["color"],
+            column_order_staff=["color"],
             column_order_locations=["name"],
         )
         assert schema.theme == "dark"

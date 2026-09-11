@@ -94,43 +94,44 @@ def _admin_user(_password_hashes):
 
 @pytest.fixture
 def _master_profile():
-    """Insert a master profile row directly — returns its id."""
+    """Insert a staff card row directly — returns its id (#266: people live
+    in staff; /auth/me wire shape keeps the ``master_id`` key per D10)."""
     import uuid as _uuid
 
-    master_id = str(_uuid.uuid4())
+    staff_id = str(_uuid.uuid4())
     _query_db(
-        "INSERT INTO masters (id, first_name, last_name, color, position, "
-        "specialty, sort_order, is_active, created_at, updated_at) "
-        "VALUES (:id, 'Ольга', 'Иванова', '#5B8C7A', 'мастер', 'живопись', 0, 1, "
+        "INSERT INTO staff (id, first_name, last_name, sort_order, "
+        "is_active, created_at, updated_at) "
+        "VALUES (:id, 'Ольга', 'Иванова', 0, 1, "
         "datetime('now'), datetime('now'))",
-        {"id": master_id},
+        {"id": staff_id},
     )
-    return master_id
+    return staff_id
 
 
 @pytest.fixture
 def _master_user(_password_hashes, _master_profile):
-    """Insert a master user linked to the master profile."""
+    """Insert a master user linked to the staff card."""
     return _insert_user(
         phone="+79990000002", role="master",
         password_hash=_password_hashes["password"],
-        master_id=_master_profile,
+        staff_id=_master_profile,
     )
 
 
-def _insert_user(phone: str, role: str, password_hash: str, master_id: str | None = None) -> dict:
+def _insert_user(phone: str, role: str, password_hash: str, staff_id: str | None = None) -> dict:
     """Direct-SQL user insert (conftest ``_user`` fixture pattern)."""
     import uuid as _uuid
 
     user_id = str(_uuid.uuid4())
     _query_db(
-        "INSERT INTO users (id, phone, password_hash, role, master_id, "
+        "INSERT INTO users (id, phone, password_hash, role, staff_id, "
         "email_is_confirmed, phone_is_confirmed, is_active, created_at, updated_at) "
-        "VALUES (:id, :phone, :hash, :role, :master_id, 0, 0, 1, "
+        "VALUES (:id, :phone, :hash, :role, :staff_id, 0, 0, 1, "
         "datetime('now'), datetime('now'))",
         {
             "id": user_id, "phone": phone, "hash": password_hash,
-            "role": role, "master_id": master_id,
+            "role": role, "staff_id": staff_id,
         },
     )
     return {"id": user_id, "phone": phone}

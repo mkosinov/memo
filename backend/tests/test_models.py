@@ -716,7 +716,7 @@ class TestModelCrud:
             user_id=u.id,
             theme="dark",
             language="ru",
-            column_order_masters='["last_name","color"]',
+            column_order_staff='["last_name","color"]',
             column_order_locations='["name","capacity"]',
         )
         session.add(us)
@@ -726,7 +726,7 @@ class TestModelCrud:
         assert fetched.user_id == u.id
         assert fetched.theme == "dark"
         assert fetched.language == "ru"
-        assert fetched.column_order_masters == '["last_name","color"]'
+        assert fetched.column_order_staff == '["last_name","color"]'
         assert fetched.column_order_locations == '["name","capacity"]'
         # UserSettings switched to hard-delete base (task #194): no is_active column.
         assert not hasattr(fetched, "is_active")
@@ -749,7 +749,7 @@ class TestModelCrud:
         fetched = session.get(UserSettings, us.id)
         assert fetched.theme == "light"
         assert fetched.language == "ru"
-        assert fetched.column_order_masters == "[]"
+        assert fetched.column_order_staff == "[]"
         assert fetched.column_order_locations == "[]"
 
     def test_user_settings_unique_user_id(self, session: Session):

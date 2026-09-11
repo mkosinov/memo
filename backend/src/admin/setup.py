@@ -50,9 +50,12 @@ from src.models.visitor import Visitor
 
 
 class MasterAdmin(ModelView, model=Master):
-    column_list: ClassVar[list[Column]] = [Master.id, Master.first_name, Master.last_name, Master.position, Master.specialty, Master.is_active]
-    column_searchable_list: ClassVar[list[Column]] = [Master.first_name, Master.last_name]
-    column_sortable_list: ClassVar[list[Column]] = [Master.first_name, Master.last_name, Master.position]
+    # GH #266 Task 1 mechanical fix: Master is now the schedule extension
+    # (staff_id PK, specialty, color, is_active). Full StaffAdmin with the
+    # staff card + PositionAdmin lands in Task 2 of the plan.
+    column_list: ClassVar[list[Column]] = [Master.staff_id, Master.specialty, Master.color, Master.is_active]
+    column_searchable_list: ClassVar[list[Column]] = [Master.specialty]
+    column_sortable_list: ClassVar[list[Column]] = [Master.specialty, Master.is_active]
     name = "Master"
     name_plural = "Masters"
     icon = "fa-solid fa-user-tie"
@@ -101,7 +104,7 @@ class SqlAdminAuth(AuthenticationBackend):
 
 
 class UserAdmin(ModelView, model=User):
-    column_list: ClassVar[list[Column]] = [User.id, User.phone, User.email, User.role, User.master_id, User.is_active]
+    column_list: ClassVar[list[Column]] = [User.id, User.phone, User.email, User.role, User.staff_id, User.is_active]
     column_searchable_list: ClassVar[list[Column]] = [User.phone, User.email]
     # Write-only password field (never populated from the model, never
     # rendered back). NOTE: sqladmin looks form_overrides up by STRING prop

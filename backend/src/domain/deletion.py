@@ -44,13 +44,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.models.activity import Activity
 from src.models.client import Client
 from src.models.location import Location
-from src.models.master import Master
 from src.models.material import Material
 from src.models.payment import Payment
 from src.models.photo import Photo
 from src.models.record import Record
 from src.models.service import Service
 from src.models.service_material import ServiceMaterial
+from src.models.staff import Staff
 from src.models.tag import (
     client_tags,
     location_tags,
@@ -117,7 +117,7 @@ class FKDependency:
 _BLOCK_MESSAGE = "Удалите активности вручную или архивируйте"
 
 FK_MATRIX: dict[type[Base], list[FKDependency]] = {
-    Master: [
+    Staff: [
         FKDependency(
             entity="activities", relation="Активность", nullable=False,
             action="block", auto=False, allowed_actions=[], message=_BLOCK_MESSAGE,
@@ -261,7 +261,7 @@ async def _count_m_activities(s: AsyncSession, entity_id: str) -> _CountResult:
 
 async def _count_m_users(s: AsyncSession, entity_id: str) -> _CountResult:
     r = await s.execute(
-        select(func.count()).select_from(User).where(User.master_id == entity_id)
+        select(func.count()).select_from(User).where(User.staff_id == entity_id)
     )
     return r.scalar_one(), None
 
@@ -405,9 +405,9 @@ async def _count_r_record_tags(s: AsyncSession, entity_id: str) -> _CountResult:
 
 
 _COUNTERS: dict[tuple[type[Base], str], _CounterFn] = {
-    (Master, "activities"): _count_m_activities,
-    (Master, "users"): _count_m_users,
-    (Master, "master_tags"): _count_m_master_tags,
+    (Staff, "activities"): _count_m_activities,
+    (Staff, "users"): _count_m_users,
+    (Staff, "master_tags"): _count_m_master_tags,
     (Location, "activities"): _count_l_activities,
     (Location, "location_tags"): _count_l_location_tags,
     (Location, "photos"): _count_l_photos,
@@ -614,7 +614,7 @@ async def _h_cascade_master_users(
     A future spec revision would have to extend this handler (e.g., delete
     user_settings first) — out of scope for #207.
     """
-    await session.execute(delete(User).where(User.master_id == entity_id))
+    await session.execute(delete(User).where(User.staff_id == entity_id))
 
 
 async def _h_cascade_master_tags(
@@ -729,8 +729,8 @@ NULLIFY_HANDLERS: dict[tuple[type[Base], str], _FkHandlerFn] = {
 }
 
 CASCADE_HANDLERS: dict[tuple[type[Base], str], _FkHandlerFn] = {
-    (Master, "users"): _h_cascade_master_users,
-    (Master, "master_tags"): _h_cascade_master_tags,
+    (Staff, "users"): _h_cascade_master_users,
+    (Staff, "master_tags"): _h_cascade_master_tags,
     (Location, "location_tags"): _h_cascade_location_tags,
     (Service, "tariffs"): _h_cascade_service_tariffs,
     (Service, "service_tags"): _h_cascade_service_tags,

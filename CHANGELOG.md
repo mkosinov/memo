@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — 2026-09-11
+
+### Added
+- **GH #247 — Полная авторизация API и admin-приложения: сессии, роли `admin`/`master`, default-deny** — branch `feat/auth-247` (25 commits: e8690b8..843f647; 14/14 plan tasks, plan checkboxes closed):
+  - **Backend auth-пакет (`backend/src/auth/`):** `pwdlib[argon2]` с закреплёнными параметрами (`passwords.py` — Argon2id `t=3/m=64MiB/p=4`, политика 8–64 символа с обрезкой краёв и запретом control-символов, единая подсказка `PASSWORD_POLICY_HINT_RU`, `DUMMY_HASH` для timing-parity); `Session` ORM (opaque `secrets.token_urlsafe(32)` токен, **скользящее idle-окно 7 дней** с троттлингом продления 1 ч и **абсолютный кап 30 дней**, session-id rotation при логине, зачистка просроченных строк) + миграция `sessions` и 3 колонки лестницы блокировок на `users`; `AuthService` (login/logout/resolve); матрица `ROLE_PERMISSIONS` (`*` у админа, явный набор у мастера) + `AuthedUser` + `require_session`/`require_permission`.
+  - **Endpoints (`/api/v1/auth`):** `POST /login` (ставит `HttpOnly` cookie `memo_session`, `SameSite=Lax`, `Secure` только в production, `Max-Age` = абсолютный кап), `POST /logout` (204, cookie очищается), `GET /me` (`{user, permissions, master?}`; без сессии → 401 `AUTH_UNAUTHORIZED`, чтобы фронт отличал «нет сессии» от «неверный пароль»).
+  - **Default-deny guards:** все `/api/v1`-роутеры закрыты по матрице §3.7 — публичные GET справочников и анонимный `POST /records` остаются открытыми через `PUBLIC_ROUTES`; `Sec-Fetch-Site: cross-site` на аутентифицированных мутациях → 403 CSRF-проверка. Контрактный тест обходит `app.routes` и сверяет каждый роут с `PUBLIC_ROUTES` в обе стороны (включая staleness), плюс параметризованная guard-матрица (аноним → 401, админ → 2xx, мастер → 403 на `payments:write`/`materials`/`DELETE clients`).
+  - **Lockout ladder (DB-backed, сбрасывается админом):** 3 неудачи → 15 мин, ещё 3 → 1 ч, ещё 3 → жёсткая блокировка до ручного сброса администратором; заблокированный аккаунт отклоняет даже верный пароль. Вторичные in-memory счётчики: **per-phone (5)** и **per-IP (20)** в фиксированном 15-минутном окне (закрывают unknown-phone и credential stuffing). Failure-пути коммитят мутацию лестницы до исключения.
+  - **user-settings own-only (BREAKING):** query-параметр `user_id` убран из GET/PUT/PATCH — пользователь берётся из сессии; DELETE чужой строки → 403 `AUTH_FORBIDDEN`, своей → 204.
+  - **sqladmin:** собственный `AuthenticationBackend` (вход только для роли admin, переиспользует `AuthService`), `UserAdmin` с `PasswordField` и хешированием через `on_model_change` (пустое поле при редактировании = не менять), `SECRET_KEY` в конфиге с fail-fast в production.
+  - **CLI и seed:** `python -m src.cli create-user --phone … --role {admin,master}` (двойной `getpass`, `validate_password`, понятная ошибка на дубликат телефона); dev-only `seed_staff_users()` — `+79990000001/admin12345` (админ) и `+79990000002/master12345` (мастер, привязан к первому сид-мастеру), не выполняется при `ENV=production`.
+  - **api-client:** `credentials: 'include'` на каждом вызове; `setUnauthorizedHandler` (401 вне `/auth/*` → редирект на вход); `login`/`logout`/`getMe` (`getMe` резолвит 401 в `null` — guest-bootstrap); user-settings-функции без `user_id`.
+  - **Admin:** новая страница `/login` (контролируемые поля, inline-ошибка + тост, `returnTo`), `AuthContext` (состояния loading/authenticated/guest, `can()`, регистрация 401-обработчика → `/login?returnTo=…`), клиентский guard в `(main)/layout`, реальный блок пользователя в `Menubar` (имя мастера или телефон, роль «Админ»/«Мастер», выход); `UserSettingsContext` загружается только при аутентификации.
+  - **E2E:** `globalSetup` логинит сид-админа через API и сохраняет **shard-scoped** `storageState`; оба проекта стартуют аутентифицированными, login-спеки отключаются пустым `storageState`. Новые спек-файлы `auth-login`/`auth-roles`/`auth-session` (сценарии 1–4).
+  - **Tests:** новые backend-сьюты `test_auth_passwords/permissions/service/api/contract/guards`, `test_auth_session_model`, `test_sqladmin_auth`, `test_cli`, `test_seed_staff`, `test_user_settings_auth`; admin vitest `AuthContext`/`LoginPage`/`MainLayoutGuard`/`Menubar`/`UserSettingsContext`; api-client auth-тесты.
+  - **Docs:** создан `docs/domain-rules/auth.md`; синхронизирован `docs/domain-rules/user_settings.md` (own-only); обновлён `docs/tests_workflow.md` (storageState + same-site baseURL).
+  - **Closes:** #247.
+  - Design spec: `docs/specs/2026-09-08-auth-design.md` (on main)
+  - Plan: `docs/plans/2026-09-08-auth-247-plan.md` (on main)
+
+### Changed
+- **GH #247:** сигнатуры user-settings в `api-client` стали no-arg (server derives from session); `ServerEventsProvider` открывает `EventSource(eventsUrl, { withCredentials: true })` — SSE-эндпоинт за guard'ом; `InlineEditRow` показывает отклонённое сохранение стандартным error-тостом и оставляет строку редактируемой; e2e `baseURL` зафиксирован на `http://127.0.0.1:{SHARD_PORT}` (same-site для `SameSite=Lax` cookie), route-моки visual-regression эхоят origin + `Access-Control-Allow-Credentials`, visual-базлайны перегенерированы; `.gitignore` игнорирует `frontend/test-results/` (session-токены storageState).
+
 ## [Unreleased] — 2026-09-09
 
 ### e2e seed reset (#252) — per-test deterministic seed state

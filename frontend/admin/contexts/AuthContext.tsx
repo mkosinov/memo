@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { getMe, login as apiLogin, logout as apiLogout, setUnauthorizedHandler } from '@memo/api-client';
 import type { AuthUser, MasterSnapshot } from '@memo/api-client';
 
@@ -23,14 +23,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [permissions, setPermissions] = useState<string[]>([]);
   const [master, setMaster] = useState<MasterSnapshot | null | undefined>(undefined);
   const [status, setStatus] = useState<AuthStatus>('loading');
-  const mountedRef = useRef(true);
-
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
 
   // Bootstrap (spec §4.3): /me on mount — 401 resolves to null (guest), not an
   // error. A failed request (network down, server restarting) also lands as

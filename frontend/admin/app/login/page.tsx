@@ -2,10 +2,19 @@
 
 import React, { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { getMe } from '@memo/api-client';
 import { useUI } from '@/contexts/UIContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { parseApiError } from '../lib/api/parseApiError';
+
+/**
+ * Open-redirect hardening: only same-origin absolute paths are accepted —
+ * must start with "/" and must not start with "//" (protocol-relative URL).
+ * Anything else ("https://evil…", "//evil…", garbage) falls back to "/".
+ */
+function sanitizeReturnTo(raw: string | null): string {
+  if (raw && raw.startsWith('/') && !raw.startsWith('//')) return raw;
+  return '/';
+}
 
 /**
  * Login page (GH #247 spec §4.2).
@@ -31,28 +40,22 @@ function LoginForm() {
   const { showToast } = useUI();
   // Submit goes through the context (not the api-client directly): login must
   // flip AuthContext state to authenticated, or the (main) AuthGate would
-  // bounce the freshly logged-in user right back to /login.
-  const { login } = useAuth();
+  // bounce the freshly logged-in user right back to /login. `status` also
+  // drives the already-authenticated redirect — the AuthProvider bootstraps
+  // /me on mount, so the page needs no second call.
+  const { login, status } = useAuth();
 
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  // Already authenticated → straight to the app (spec §4.2).
+  // Already authenticated → straight to the app (spec §4.2). Fires when the
+  // bootstrap /me resolves authenticated (also right after a successful
+  // login(), before router.replace below — same destination either way).
   useEffect(() => {
-    let cancelled = false;
-    getMe()
-      .then((me) => {
-        if (!cancelled && me) router.replace('/');
-      })
-      .catch(() => {
-        /* guest or network down — stay on the form */
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [router]);
+    if (status === 'authenticated') router.replace('/');
+  }, [status, router]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -61,8 +64,7 @@ function LoginForm() {
     setError(null);
     try {
       await login(phone.trim(), password);
-      const returnTo = searchParams.get('returnTo');
-      router.replace(returnTo ?? '/');
+      router.replace(sanitizeReturnTo(searchParams.get('returnTo')));
     } catch (err) {
       const { message } = parseApiError(err);
       setError(message);

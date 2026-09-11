@@ -9,7 +9,6 @@ vi.mock('@memo/api-client', async (importOriginal) => {
     ...actual,
     getMe: vi.fn(),
     login: vi.fn(),
-    setUnauthorizedHandler: vi.fn(),
   };
 });
 
@@ -21,14 +20,13 @@ vi.mock('next/navigation', () => ({
   usePathname: () => window.location.pathname,
 }));
 
-import { getMe, login, setUnauthorizedHandler } from '@memo/api-client';
+import { getMe, login } from '@memo/api-client';
 import LoginPage from '../app/login/page';
 import { UIProvider } from '../contexts/UIContext';
 import { AuthProvider, useAuth } from '../contexts/AuthContext';
 
 const mockGetMe = vi.mocked(getMe);
 const mockLogin = vi.mocked(login);
-const mockSetUnauthorizedHandler = vi.mocked(setUnauthorizedHandler);
 
 const mockAuthMe = {
   user: {
@@ -107,6 +105,44 @@ describe('LoginPage', () => {
     renderLogin();
     await waitFor(() => {
       expect(replaceMock).toHaveBeenCalledWith('/');
+    });
+  });
+
+  it('derives already-authenticated redirect from AuthContext (no second /me call)', async () => {
+    // The page itself never calls getMe: only the AuthProvider bootstrap does
+    // (review #2 — one /me per load, not two).
+    mockGetMe.mockResolvedValue(mockAuthMe);
+    renderLogin();
+    await waitFor(() => {
+      expect(replaceMock).toHaveBeenCalledWith('/');
+    });
+    expect(mockGetMe).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects an off-site returnTo (open-redirect hardening) and falls back to /', async () => {
+    // Review #3: only same-origin absolute paths pass sanitization.
+    window.history.replaceState(null, '', '/login?returnTo=%2F%2Fevil.example.com%2Fphish');
+    mockLogin.mockResolvedValue(mockAuthMe);
+    renderLogin();
+    fillForm('+79990000001', 'secret123');
+    act(() => {
+      screen.getByRole('button', { name: 'Войти' }).click();
+    });
+    await waitFor(() => {
+      expect(replaceMock).toHaveBeenCalledWith('/');
+    });
+  });
+
+  it('accepts a same-origin returnTo path (positive sanitization case)', async () => {
+    window.history.replaceState(null, '', '/login?returnTo=%2Frecords');
+    mockLogin.mockResolvedValue(mockAuthMe);
+    renderLogin();
+    fillForm('+79990000001', 'secret123');
+    act(() => {
+      screen.getByRole('button', { name: 'Войти' }).click();
+    });
+    await waitFor(() => {
+      expect(replaceMock).toHaveBeenCalledWith('/records');
     });
   });
 

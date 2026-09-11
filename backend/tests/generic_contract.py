@@ -15,8 +15,10 @@ import src.services.master  # noqa: F401
 import src.services.material  # noqa: F401
 import src.services.payment  # noqa: F401
 import src.services.photo  # noqa: F401
+import src.services.position  # noqa: F401 — register for __subclasses__ discovery
 import src.services.record  # noqa: F401
 import src.services.service  # noqa: F401
+import src.services.staff  # noqa: F401 — register for __subclasses__ discovery
 import src.services.tag  # noqa: F401
 import src.services.visitor  # noqa: F401
 
@@ -43,6 +45,7 @@ from src.models.master import Master
 from src.models.material import Material
 from src.models.payment import Payment
 from src.models.service import Service
+from src.models.staff import Staff
 from src.models.tag import Tag
 from src.models.visitor import Visitor
 
@@ -86,6 +89,7 @@ from src.schemas.master import MasterResponse
 from src.schemas.material import MaterialResponse
 from src.schemas.payment import PaymentResponse
 from src.schemas.service import ServiceResponse
+from src.schemas.staff import StaffCreate, StaffPatch, StaffResponse, StaffUpdate
 from src.schemas.tag import TagResponse
 from src.schemas.visitor import VisitorResponse
 
@@ -97,7 +101,19 @@ from src.schemas.visitor import VisitorResponse
 # класс (#195): не привязан к конкретной модели/схеме, не тестируется напрямую;
 # его конкретные подклассы (Master/Location/Material/Client) покрыты через
 # CONTRACT_CONFIG и обнаруживаются рекурсивно через ``_all_subclasses``.
-GENERIC_CONTRACT_EXCEPTIONS: set[type] = {ServiceService, PhotoService, RecordService, ArchiveService}
+#
+# GH #266 Task 3: ``StaffService`` (композитная карточка: staff + masters-
+# расширение + staff_positions + user) и ``PositionService`` (is_system-гард на
+# delete) переопределяют generic-семантику — покрыты собственными наборами
+# ``tests/services/test_staff_service.py`` / ``test_position_service.py``
+# (HTTP-контракт добавит Task 4: api/v1/staff.py + position.py).
+from src.services.position import PositionService
+from src.services.staff import StaffService, get_staff_service
+
+GENERIC_CONTRACT_EXCEPTIONS: set[type] = {
+    ServiceService, PhotoService, RecordService, ArchiveService,
+    StaffService, PositionService,
+}
 
 
 def _all_subclasses(cls: type) -> list[type]:
@@ -291,6 +307,31 @@ CONTRACT_CONFIG: dict[type, EntityConfig] = {
         # coverage via the dedicated per-field matrix test.
         search_override={"first_name": "Живописец", "last_name": "Живописный"},
         search_query="живопис",
+    ),
+    # GH #266 Task 3: StaffService overrides the generic CRUD semantics
+    # (composite card) → it stays in GENERIC_CONTRACT_EXCEPTIONS for the CRUD
+    # contract; this entry feeds the ArchiveService archive/restore bool
+    # round-trip (its bare-card path: no master ext, no user → only the
+    # staff row's is_active flips — D6 checkboxes have their own dedicated
+    # tests in tests/services/test_staff_service.py).
+    StaffService: EntityConfig(
+        service_factory=get_staff_service,
+        model=Staff,
+        create_schema=StaffCreate,
+        patch_schema=StaffPatch,
+        create_data={"first_name": "A", "last_name": "B"},
+        fk_map={},
+        not_null_field="first_name",
+        not_null_sentinel="A2",
+        nullable_field="avatar_url",
+        nullable_sentinel="http://x",
+        delete_semantics="hard",
+        update_schema=StaffUpdate,
+        update_data={"first_name": "A2", "last_name": "B2"},
+        # HTTP wiring — routes land in Task 4 (api/v1/staff.py).
+        router_prefix="/api/v1/staff",
+        not_found_code="STAFF_NOT_FOUND",
+        response_schema=StaffResponse,
     ),
     MaterialService: EntityConfig(
         service_factory=get_material_service,

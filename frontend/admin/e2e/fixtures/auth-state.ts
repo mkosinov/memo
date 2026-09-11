@@ -14,10 +14,13 @@
  * the same shard. Standalone runs (no SHARD_ID) share the `standalone`
  * file — there is only one stack.
  *
- * Call AT USE TIME, never at module load: SHARD_ID is set by the shard
- * script / test runner and the config + globalSetup may be evaluated in
- * different processes (both inherit the shard env — same mechanism the
- * config's webServer conditional relies on).
+ * Call-time vs module-load: both usages are supported. `globalSetup.ts`
+ * calls it inside its function (SHARD_ID is set by the time the run
+ * starts); `playwright.config.ts` calls it at module scope — fine, because
+ * the config is loaded by the playwright process AFTER the shard script
+ * exported its env (same mechanism the config's existing SHARD_PORT /
+ * webServer conditional relies on). Either way the value resolves to the
+ * caller's own process env, so the two consumers always agree.
  */
 import path from 'path';
 

@@ -136,7 +136,10 @@ export default async function globalSetup() {
   const loginUrl = `${backendBase}/api/v1/auth/login`;
   const ctx = await playwrightRequest.newContext({
     baseURL: backendBase,
-    extraHTTPHeaders: { Origin: backendBase.replace(/:\d+$/, ''), 'Sec-Fetch-Site': 'same-origin' },
+    // Full origin incl. port (same as auth-session.spec's API login): CORS
+    // echoes the request Origin and the CSRF line checks Sec-Fetch-Site —
+    // the port is part of the origin and must not be stripped.
+    extraHTTPHeaders: { Origin: backendBase, 'Sec-Fetch-Site': 'same-origin' },
   });
   try {
     const loginResp = await ctx.post(loginUrl, {

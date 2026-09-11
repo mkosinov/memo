@@ -16,8 +16,11 @@ Spec: ``docs/specs/2026-08-15-delete-hard-delete-and-dependency-resolution-desig
 The matrix is hand-verified against the FK shapes in ``src/models/``:
 
   * ``Activity`` — NOT-NULL ``master_id``/``location_id``/``service_id``, no
-    ``is_active`` → always blocks delete on Master/Location/Service.
-  * ``User.master_id`` — nullable+unique → Master cascade (auto, Change 2 §4.1).
+    ``is_active`` → always blocks delete on Staff/Location/Service.
+  * ``Staff`` (GH #266) — activities block via the ``masters`` extension
+    (``activities.master_id → masters.staff_id = staff.id``); ``users``
+    (``staff_id``), the ``masters`` extension row itself, ``master_tags``
+    and ``staff_positions`` joins auto-cascade (§4.1, Change 2 + #266).
   * ``Tariff.service_id`` — NOT NULL → Service cascade (auto).
   * ``Photo.service_id``/``client_id``/``location_id`` — nullable →
     Service/Client/Location nullify (auto) — GH #211 4-owner model; a photo
@@ -44,9 +47,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.models.activity import Activity
 from src.models.client import Client
 from src.models.location import Location
+from src.models.master import Master
 from src.models.material import Material
 from src.models.payment import Payment
 from src.models.photo import Photo
+from src.models.position import staff_positions
 from src.models.record import Record
 from src.models.service import Service
 from src.models.service_material import ServiceMaterial
@@ -118,6 +123,13 @@ _BLOCK_MESSAGE = "Удалите активности вручную или ар
 
 FK_MATRIX: dict[type[Base], list[FKDependency]] = {
     Staff: [
+        # GH #266 deletion matrix (docs/domain-rules/staff.md): the card's
+        # hard-delete blocks on activities (joined via the masters extension
+        # row — activities.master_id → masters.staff_id = staff.id) and
+        # auto-cascades users / the masters extension row itself /
+        # master_tags + staff_positions joins. The masters row ALSO carries
+        # an FK-level ON DELETE CASCADE, but the service-level handler keeps
+        # the executor deterministic regardless of PRAGMA state.
         FKDependency(
             entity="activities", relation="Активность", nullable=False,
             action="block", auto=False, allowed_actions=[], message=_BLOCK_MESSAGE,
@@ -127,7 +139,15 @@ FK_MATRIX: dict[type[Base], list[FKDependency]] = {
             action="cascade", auto=True, allowed_actions=["cascade"],
         ),
         FKDependency(
+            entity="masters", relation="Мастер", nullable=False,
+            action="cascade", auto=True, allowed_actions=["cascade"],
+        ),
+        FKDependency(
             entity="master_tags", relation="Тег", nullable=False,
+            action="cascade", auto=True, allowed_actions=["cascade"],
+        ),
+        FKDependency(
+            entity="staff_positions", relation="Должность", nullable=False,
             action="cascade", auto=True, allowed_actions=["cascade"],
         ),
     ],
@@ -274,6 +294,23 @@ async def _count_m_master_tags(s: AsyncSession, entity_id: str) -> _CountResult:
     return r.scalar_one(), None
 
 
+async def _count_m_masters(s: AsyncSession, entity_id: str) -> _CountResult:
+    """GH #266: the 1:0..1 extension row — 1 when the card is a master."""
+    r = await s.execute(
+        select(func.count()).select_from(Master)
+        .where(Master.staff_id == entity_id)
+    )
+    return r.scalar_one(), None
+
+
+async def _count_m_staff_positions(s: AsyncSession, entity_id: str) -> _CountResult:
+    r = await s.execute(
+        select(func.count()).select_from(staff_positions)
+        .where(staff_positions.c.staff_id == entity_id)
+    )
+    return r.scalar_one(), None
+
+
 async def _count_l_activities(s: AsyncSession, entity_id: str) -> _CountResult:
     r = await s.execute(
         select(func.count()).select_from(Activity).where(Activity.location_id == entity_id)
@@ -407,7 +444,9 @@ async def _count_r_record_tags(s: AsyncSession, entity_id: str) -> _CountResult:
 _COUNTERS: dict[tuple[type[Base], str], _CounterFn] = {
     (Staff, "activities"): _count_m_activities,
     (Staff, "users"): _count_m_users,
+    (Staff, "masters"): _count_m_masters,
     (Staff, "master_tags"): _count_m_master_tags,
+    (Staff, "staff_positions"): _count_m_staff_positions,
     (Location, "activities"): _count_l_activities,
     (Location, "location_tags"): _count_l_location_tags,
     (Location, "photos"): _count_l_photos,
@@ -603,9 +642,10 @@ async def _h_nullify_location_photos(
 async def _h_cascade_master_users(
     _self: ArchiveService, session: AsyncSession, entity_id: str,
 ) -> None:
-    """Master → users auto-cascade (§4.1, Change 2): hard-delete the linked
-    ``User`` row. The User is the master's login account; deleting the profile but
-    keeping the account = orphan, so the account goes with it (no user choice).
+    """Staff → users auto-cascade (§4.1, Change 2): hard-delete the linked
+    ``User`` row. The User is the staff member's login account; deleting the
+    card but keeping the account = orphan, so the account goes with it (no
+    user choice).
 
     NB: ``user_settings.user_id`` (NOT NULL, no ``ondelete``) FK-references
     ``users.id`` — if a settings row exists for the linked user, this DELETE will
@@ -615,6 +655,26 @@ async def _h_cascade_master_users(
     user_settings first) — out of scope for #207.
     """
     await session.execute(delete(User).where(User.staff_id == entity_id))
+
+
+async def _h_cascade_master_extension(
+    _self: ArchiveService, session: AsyncSession, entity_id: str,
+) -> None:
+    """Staff → masters auto-cascade (GH #266): hard-delete the 1:0..1
+    schedule-extension row. The FK also carries ON DELETE CASCADE, but the
+    service-level delete keeps the executor deterministic regardless of
+    the SQLite PRAGMA foreign_keys state."""
+    await session.execute(delete(Master).where(Master.staff_id == entity_id))
+
+
+async def _h_cascade_staff_positions(
+    _self: ArchiveService, session: AsyncSession, entity_id: str,
+) -> None:
+    """Staff → staff_positions auto-cascade (GH #266): hard-delete the M2M
+    join rows. Position dictionary entries themselves survive."""
+    await session.execute(
+        delete(staff_positions).where(staff_positions.c.staff_id == entity_id)
+    )
 
 
 async def _h_cascade_master_tags(
@@ -730,7 +790,9 @@ NULLIFY_HANDLERS: dict[tuple[type[Base], str], _FkHandlerFn] = {
 
 CASCADE_HANDLERS: dict[tuple[type[Base], str], _FkHandlerFn] = {
     (Staff, "users"): _h_cascade_master_users,
+    (Staff, "masters"): _h_cascade_master_extension,
     (Staff, "master_tags"): _h_cascade_master_tags,
+    (Staff, "staff_positions"): _h_cascade_staff_positions,
     (Location, "location_tags"): _h_cascade_location_tags,
     (Service, "tariffs"): _h_cascade_service_tariffs,
     (Service, "service_tags"): _h_cascade_service_tags,

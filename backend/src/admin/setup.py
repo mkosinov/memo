@@ -36,12 +36,13 @@ from src.db import db_manager
 from src.models.activity import Activity
 from src.models.client import Client
 from src.models.location import Location
-from src.models.master import Master
 from src.models.material import Material
 from src.models.payment import Payment
 from src.models.photo import Photo
+from src.models.position import Position
 from src.models.record import Record
 from src.models.service import Service
+from src.models.staff import Staff
 from src.models.tag import Tag
 from src.models.tariff import Tariff
 from src.models.user import User
@@ -49,16 +50,42 @@ from src.models.visit import Visit
 from src.models.visitor import Visitor
 
 
-class MasterAdmin(ModelView, model=Master):
-    # GH #266 Task 1 mechanical fix: Master is now the schedule extension
-    # (staff_id PK, specialty, color, is_active). Full StaffAdmin with the
-    # staff card + PositionAdmin lands in Task 2 of the plan.
-    column_list: ClassVar[list[Column]] = [Master.staff_id, Master.specialty, Master.color, Master.is_active]
-    column_searchable_list: ClassVar[list[Column]] = [Master.specialty]
-    column_sortable_list: ClassVar[list[Column]] = [Master.specialty, Master.is_active]
-    name = "Master"
-    name_plural = "Masters"
+class StaffAdmin(ModelView, model=Staff):
+    """Staff card view (GH #266): the employee directory row + the master
+    schedule-extension (specialty/color/is_active) edited INLINE — the
+    extension is 1:0..1 and never exists without its card."""
+
+    # The extension relationship is declared on Staff.master — inline_models
+    # accepts the relationship attribute for a ModelView on the parent.
+    inline_models: ClassVar[list] = [Staff.master]
+    column_list: ClassVar[list[Column]] = [
+        Staff.id, Staff.first_name, Staff.last_name, Staff.avatar_url,
+        Staff.sort_order, Staff.is_active,
+    ]
+    column_searchable_list: ClassVar[list[Column]] = [
+        Staff.first_name, Staff.last_name,
+    ]
+    column_sortable_list: ClassVar[list[Column]] = [
+        Staff.first_name, Staff.last_name, Staff.sort_order, Staff.is_active,
+    ]
+    name = "Staff"
+    name_plural = "Staff"
     icon = "fa-solid fa-user-tie"
+
+
+class PositionAdmin(ModelView, model=Position):
+    """Position dictionary view (GH #266): salary-side entries; built-ins
+    (``is_system``) are not deletable — enforced at the API layer
+    (``POSITION_IS_SYSTEM``), surfaced here via the flag column."""
+
+    column_list: ClassVar[list[Column]] = [
+        Position.id, Position.title, Position.is_system,
+    ]
+    column_searchable_list: ClassVar[list[Column]] = [Position.title]
+    column_sortable_list: ClassVar[list[Column]] = [Position.title, Position.is_system]
+    name = "Position"
+    name_plural = "Positions"
+    icon = "fa-solid fa-id-badge"
 
 
 class SqlAdminAuth(AuthenticationBackend):
@@ -237,7 +264,8 @@ class MaterialAdmin(ModelView, model=Material):
 
 
 ALL_ADMIN_VIEWS: ClassVar = [
-    MasterAdmin,
+    StaffAdmin,
+    PositionAdmin,
     MaterialAdmin,
     UserAdmin,
     LocationAdmin,

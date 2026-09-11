@@ -27,6 +27,7 @@ from src.models.master import Master
 from src.models.payment import Payment
 from src.models.record import Record
 from src.models.service import Service
+from src.models.staff import Staff
 from src.models.visit import Visit
 from src.schemas.activity import ActivityResponse
 from src.schemas.record import RecordListParams
@@ -43,7 +44,7 @@ START_MICRO = datetime(2026, 9, 4, 16, 30, 45, 123456)
 
 @dataclass
 class _World:
-    """Minimal ORM world: master/service/location/client/activity/record."""
+    """Minimal ORM world: staff/master/service/location/client/activity/record."""
 
     master: Master
     service: Service
@@ -65,19 +66,27 @@ async def _seed_world(
     record_kwargs: dict | None = None,
     payment_amounts: list[int] | None = None,
 ) -> _World:
-    """Create one master/service/location/client/activity/record chain via ORM.
+    """Create one staff+master/service/location/client/activity/record chain
+    via ORM.
 
-    All ``*_kwargs`` override ORM constructor args (e.g. ``is_active=False``
-    to seed archived entities — impossible via the API factories).
+    GH #266: the person is a ``Staff`` card; ``Master`` is the 1:0..1
+    extension (specialty/color) keyed by ``staff_id``. ``master_kwargs``
+    accepts BOTH card fields (``first_name``/``last_name`` — card) and
+    extension fields (``color``/``specialty``/extension ``is_active``) —
+    the split mirrors what a merged "archived master" used to mean (D3:
+    the person-archive flag now lives on the card).
     """
-    master = Master(
+    master_kwargs = dict(master_kwargs or {})
+    ext_kwargs = {
+        k: master_kwargs.pop(k)
+        for k in ("color", "specialty")
+        if k in master_kwargs
+    }
+    staff = Staff(
         **{
             "first_name": "Имя",
             "last_name": "Фамилия",
-            "color": "#5B8C7A",
-            "position": "мастер",
-            "specialty": "живопись",
-            **(master_kwargs or {}),
+            **master_kwargs,  # may carry card is_active=False, names, …
         }
     )
     service = Service(
@@ -109,12 +118,20 @@ async def _seed_world(
             **(client_kwargs or {}),
         }
     )
-    db_session.add_all([master, service, location, client])
+    db_session.add_all([staff, service, location, client])
+    await db_session.flush()
+    master = Master(
+        staff_id=staff.id,
+        specialty=ext_kwargs.get("specialty", "живопись"),
+        color=ext_kwargs.get("color", "#5B8C7A"),
+    )
+    db_session.add(master)
     await db_session.flush()
 
     activity = Activity(
         **{
-            "master_id": master.id,
+            # activities.master_id targets the masters extension PK (= staff id)
+            "master_id": staff.id,
             "service_id": service.id,
             "location_id": location.id,
             "start": START_PLAIN,
@@ -148,7 +165,7 @@ async def _seed_world(
     # Refresh so assertions read DB-roundtripped values (per-object refresh,
     # NOT expire_all — a second _seed_world would cross-expire the first
     # world's objects and trip MissingGreenlet on sync attribute access).
-    for obj in (master, service, location, client, activity, record):
+    for obj in (staff, master, service, location, client, activity, record):
         await db_session.refresh(obj)
     return _World(
         master=master,
@@ -168,10 +185,11 @@ async def _list_view(db_session, **params):
 
 
 async def test_archived_entities_resolve_display_names(db_session) -> None:
-    """Archived client/master/service/location still resolve names + color (US-3).
+    """Archived client/staff/service/location still resolve names + color (US-3).
 
     Display subqueries carry NO is_active filter — names come back real,
-    not '—'. master_name is composed «Фамилия Имя» (displayMasterName).
+    not '—'. master_name is composed «Фамилия Имя» of the CARD (displayMasterName
+    parity — names live on Staff since GH #266), master_color on the extension.
     """
     await _seed_world(
         db_session,

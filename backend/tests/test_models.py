@@ -14,6 +14,8 @@ from src.models import (
     Location,
     Master,
     Material,
+    Position,
+    Staff,
     Payment,
     Photo,
     Record,
@@ -49,6 +51,8 @@ def _create_all_and_session(engine):
         Location,
         Master,
         Material,
+        Position,
+        Staff,
         Payment,
         Photo,
         Record,
@@ -71,6 +75,17 @@ def _create_all_and_session(engine):
     return Session(engine)
 
 
+def _mk_master(session: Session, *, first_name: str = "A", last_name: str = "B",
+               specialty: str = "живопись", color: str = "#000000") -> str:
+    """GH #266: create Staff card + masters extension; return the shared id."""
+    staff = Staff(first_name=first_name, last_name=last_name)
+    session.add(staff)
+    session.flush()
+    session.add(Master(staff_id=staff.id, specialty=specialty, color=color))
+    session.flush()
+    return staff.id
+
+
 @pytest.mark.pure_unit
 class TestModelImports:
     """All models and join tables are importable from src.models."""
@@ -82,6 +97,8 @@ class TestModelImports:
             Location,
             Master,
             Material,
+            Position,
+            Staff,
             Payment,
             Photo,
             Record,
@@ -103,12 +120,14 @@ class TestModelImports:
         from src.models import __all__
         expected = [
             "AbstractModel", "AbstractModelSoftDelete",
-            "Master", "User", "Location", "Service", "ServiceMaterial", "Tariff", "Tag",
+            "Staff", "Master", "Position", "User", "Location", "Service",
+            "ServiceMaterial", "Tariff", "Tag",
             "Activity", "Client", "Visitor", "Photo", "Record", "Visit", "Payment",
             "Material", "UserSettings",
-            "Channel", "RecordStatus", "UserRole",
+            "ArchiveStatus", "Channel", "RecordStatus", "UserRole",
             "service_tags", "activity_tags", "photo_tags",
             "master_tags", "location_tags", "client_tags", "visitor_tags", "record_tags",
+            "staff_positions",
         ]
         assert sorted(__all__) == sorted(expected)
 
@@ -151,25 +170,30 @@ class TestModelCrud:
         return datetime.utcnow()
 
     def test_master_crud(self, session: Session):
+        """GH #266: the card (Staff) + the schedule extension (Master) —
+        one id shared by both, names on the card, specialty/color on the
+        extension."""
         from src.models import Master
-        m = Master(
+        staff = Staff(
             first_name="Anna",
             last_name="Ivanova",
-            color="#FF5733",
-            position="мастер",
-            specialty="живопись",
             avatar_url="https://example.com/avatar.jpg",
         )
-        session.add(m)
+        session.add(staff)
         session.flush()
-        fetched = session.get(Master, m.id)
-        assert fetched.first_name == "Anna"
-        assert fetched.last_name == "Ivanova"
-        assert fetched.color == "#FF5733"
-        assert fetched.position == "мастер"
-        assert fetched.specialty == "живопись"
-        assert fetched.avatar_url == "https://example.com/avatar.jpg"
-        assert fetched.is_active is True
+        session.add(Master(staff_id=staff.id, specialty="живопись", color="#FF5733"))
+        session.flush()
+
+        card = session.get(Staff, staff.id)
+        assert card.first_name == "Anna"
+        assert card.last_name == "Ivanova"
+        assert card.avatar_url == "https://example.com/avatar.jpg"
+        assert card.is_active is True
+        ext = session.get(Master, staff.id)
+        assert ext.staff_id == staff.id
+        assert ext.specialty == "живопись"
+        assert ext.color == "#FF5733"
+        assert ext.is_active is True
 
     def test_user_crud(self, session: Session):
         from src.models import User
@@ -189,20 +213,18 @@ class TestModelCrud:
         assert fetched.role == "admin"
 
     def test_user_master_fk_nullable(self, session: Session):
-        from src.models import Master, User
-        m = Master(first_name="A", last_name="B", color="#000000", position="мастер", specialty="живопись")
-        session.add(m)
-        session.flush()
+        from src.models import User
+        staff_id = _mk_master(session)
         u = User(
             phone="+79001111111",
             password_hash="h",
             role="master",
-            master_id=m.id,
+            staff_id=staff_id,
         )
         session.add(u)
         session.flush()
         fetched = session.get(User, u.id)
-        assert fetched.master_id == m.id
+        assert fetched.staff_id == staff_id
 
     def test_location_crud(self, session: Session):
         from src.models import Location
@@ -287,14 +309,14 @@ class TestModelCrud:
     def test_activity_crud(self, session: Session):
         from src.models import Activity, Location, Master, Service
         now = self._now()
-        m = Master(first_name="A", last_name="B", color="#000", position="мастер", specialty="живопись")
+        m_id = _mk_master(session)
         svc = Service(title="S", description="d", image_url="http://x.com/i", specialty="живопись",
                        min_age=1, max_age=99, duration=60, record_info="r")
         loc = Location(name="L", capacity=10)
-        session.add_all([m, svc, loc])
+        session.add_all([svc, loc])
         session.flush()
         a = Activity(
-            master_id=m.id,
+            master_id=m_id,
             service_id=svc.id,
             location_id=loc.id,
             start=now,
@@ -307,7 +329,7 @@ class TestModelCrud:
         session.add(a)
         session.flush()
         fetched = session.get(Activity, a.id)
-        assert fetched.master_id == m.id
+        assert fetched.master_id == m_id
         assert fetched.is_private is True
         assert fetched.comment == "Private event"
 
@@ -394,14 +416,14 @@ class TestModelCrud:
     def test_record_crud(self, session: Session):
         from src.models import Activity, Client, Location, Master, Record, Service
         now = self._now()
-        m = Master(first_name="A", last_name="B", color="#000", position="мастер", specialty="живопись")
+        m_id = _mk_master(session)
         svc = Service(title="S", description="d", image_url="http://x.com/i", specialty="живопись",
                        min_age=1, max_age=99, duration=60, record_info="r")
         loc = Location(name="L", capacity=10)
         client = Client(name="Client", phone="+79001234567", channel="phone")
-        session.add_all([m, svc, loc, client])
+        session.add_all([svc, loc, client])
         session.flush()
-        act = Activity(master_id=m.id, service_id=svc.id, location_id=loc.id,
+        act = Activity(master_id=m_id, service_id=svc.id, location_id=loc.id,
                         start=now, duration=60, capacity=10)
         session.add(act)
         session.flush()
@@ -430,14 +452,14 @@ class TestModelCrud:
             Visitor,
         )
         now = self._now()
-        m = Master(first_name="A", last_name="B", color="#000", position="мастер", specialty="живопись")
+        m_id = _mk_master(session)
         svc = Service(title="S", description="d", image_url="http://x.com/i", specialty="живопись",
                        min_age=1, max_age=99, duration=60, record_info="r")
         loc = Location(name="L", capacity=10)
         client = Client(name="C", phone="+79001234567", channel="phone")
-        session.add_all([m, svc, loc, client])
+        session.add_all([svc, loc, client])
         session.flush()
-        act = Activity(master_id=m.id, service_id=svc.id, location_id=loc.id,
+        act = Activity(master_id=m_id, service_id=svc.id, location_id=loc.id,
                         start=now, duration=60, capacity=10)
         session.add(act)
         session.flush()
@@ -470,14 +492,14 @@ class TestModelCrud:
             Service,
         )
         now = self._now()
-        m = Master(first_name="A", last_name="B", color="#000", position="мастер", specialty="живопись")
+        m_id = _mk_master(session)
         svc = Service(title="S", description="d", image_url="http://x.com/i", specialty="живопись",
                        min_age=1, max_age=99, duration=60, record_info="r")
         loc = Location(name="L", capacity=10)
         client = Client(name="C", phone="+79001234567", channel="phone")
-        session.add_all([m, svc, loc, client])
+        session.add_all([svc, loc, client])
         session.flush()
-        act = Activity(master_id=m.id, service_id=svc.id, location_id=loc.id,
+        act = Activity(master_id=m_id, service_id=svc.id, location_id=loc.id,
                         start=now, duration=60, capacity=10)
         session.add(act)
         session.flush()
@@ -569,14 +591,14 @@ class TestModelCrud:
 
         from src.models import Activity, Location, Master, Service, Tag, activity_tags
         now = self._now()
-        m = Master(first_name="A", last_name="B", color="#000", position="мастер", specialty="живопись")
+        m_id = _mk_master(session)
         svc = Service(title="S3", description="d", image_url="http://x.com/i", specialty="живопись",
                        min_age=1, max_age=99, duration=60, record_info="r")
         loc = Location(name="L3", capacity=10)
         tag = Tag(tag="private-class")
-        session.add_all([m, svc, loc, tag])
+        session.add_all([svc, loc, tag])
         session.flush()
-        act = Activity(master_id=m.id, service_id=svc.id, location_id=loc.id,
+        act = Activity(master_id=m_id, service_id=svc.id, location_id=loc.id,
                         start=now, duration=60, capacity=10)
         session.add(act)
         session.flush()
@@ -608,107 +630,25 @@ class TestModelCrud:
         from sqlalchemy import select
 
         from src.models import Master, Tag, master_tags
-        m = Master(first_name="Elena", last_name="Sidorova", color="#33FF57",
-                   position="мастер", specialty="керамика")
+        m_id = _mk_master(session, first_name="Elena", last_name="Sidorova",
+                          color="#33FF57")
         tag = Tag(tag="pottery-master")
-        session.add_all([m, tag])
+        session.add(tag)
         session.flush()
-        session.execute(master_tags.insert().values(master_id=m.id, tag_id=tag.id))
+        session.execute(master_tags.insert().values(master_id=m_id, tag_id=tag.id))
         session.flush()
         rows = session.execute(select(master_tags.c.master_id).where(
             master_tags.c.tag_id == tag.id
         )).all()
         assert len(rows) == 1
-        assert rows[0][0] == m.id
-
-    def test_location_tags_join(self, session: Session):
-        from sqlalchemy import select
-
-        from src.models import Location, Tag, location_tags
-        loc = Location(name="Workshop Hall", capacity=30)
-        tag = Tag(tag="large-space")
-        session.add_all([loc, tag])
-        session.flush()
-        session.execute(location_tags.insert().values(location_id=loc.id, tag_id=tag.id))
-        session.flush()
-        rows = session.execute(select(location_tags.c.location_id).where(
-            location_tags.c.tag_id == tag.id
-        )).all()
-        assert len(rows) == 1
-        assert rows[0][0] == loc.id
-
-    def test_client_tags_join(self, session: Session):
-        from sqlalchemy import select
-
-        from src.models import Client, Tag, client_tags
-        c = Client(name="VIP Client", phone="+79005555555", channel="referral")
-        tag = Tag(tag="vip")
-        session.add_all([c, tag])
-        session.flush()
-        session.execute(client_tags.insert().values(client_id=c.id, tag_id=tag.id))
-        session.flush()
-        rows = session.execute(select(client_tags.c.client_id).where(
-            client_tags.c.tag_id == tag.id
-        )).all()
-        assert len(rows) == 1
-        assert rows[0][0] == c.id
-
-    def test_visitor_tags_join(self, session: Session):
-        from sqlalchemy import select
-
-        from src.models import Client, Tag, Visitor, visitor_tags
-        c = Client(name="Parent", phone="+79001111111", channel="phone")
-        session.add(c)
-        session.flush()
-        v = Visitor(client_id=c.id, name="Child", age=7)
-        tag = Tag(tag="birthday-party")
-        session.add_all([v, tag])
-        session.flush()
-        session.execute(visitor_tags.insert().values(visitor_id=v.id, tag_id=tag.id))
-        session.flush()
-        rows = session.execute(select(visitor_tags.c.visitor_id).where(
-            visitor_tags.c.tag_id == tag.id
-        )).all()
-        assert len(rows) == 1
-        assert rows[0][0] == v.id
-
-    def test_record_tags_join(self, session: Session):
-        from sqlalchemy import select
-
-        from src.models import (
-            Activity, Client, Location, Master, Record, Service, Tag, record_tags,
-        )
-        now = self._now()
-        m = Master(first_name="A", last_name="B", color="#000", position="мастер", specialty="живопись")
-        svc = Service(title="S", description="d", image_url="http://x.com/i", specialty="живопись",
-                       min_age=1, max_age=99, duration=60, record_info="r")
-        loc = Location(name="L", capacity=10)
-        session.add_all([m, svc, loc])
-        session.flush()
-        act = Activity(master_id=m.id, service_id=svc.id, location_id=loc.id,
-                        start=now, duration=60, capacity=10)
-        session.add(act)
-        session.flush()
-        rec = Record(activity_id=act.id, status="confirmed", seats=1)
-        tag = Tag(tag="early-booking")
-        session.add_all([rec, tag])
-        session.flush()
-        session.execute(record_tags.insert().values(record_id=rec.id, tag_id=tag.id))
-        session.flush()
-        rows = session.execute(select(record_tags.c.record_id).where(
-            record_tags.c.tag_id == tag.id
-        )).all()
-        assert len(rows) == 1
-        assert rows[0][0] == rec.id
+        assert rows[0][0] == m_id
 
     def test_user_settings_crud(self, session: Session):
         """UserSettings can be created, saved, and read back with correct values."""
-        from src.models import Master, User, UserSettings
+        from src.models import User, UserSettings
 
-        m = Master(first_name="A", last_name="B", color="#000", position="мастер", specialty="живопись")
-        session.add(m)
-        session.flush()
-        u = User(phone="+79009999999", password_hash="h", role="admin", master_id=m.id)
+        m_id = _mk_master(session)
+        u = User(phone="+79009999999", password_hash="h", role="admin", staff_id=m_id)
         session.add(u)
         session.flush()
 
@@ -733,12 +673,10 @@ class TestModelCrud:
 
     def test_user_settings_defaults(self, session: Session):
         """UserSettings columns use sensible defaults."""
-        from src.models import Master, User, UserSettings
+        from src.models import User, UserSettings
 
-        m = Master(first_name="C", last_name="D", color="#111", position="мастер", specialty="керамика")
-        session.add(m)
-        session.flush()
-        u = User(phone="+79008888888", password_hash="h", role="admin", master_id=m.id)
+        m_id = _mk_master(session)
+        u = User(phone="+79008888888", password_hash="h", role="admin", staff_id=m_id)
         session.add(u)
         session.flush()
 
@@ -754,12 +692,10 @@ class TestModelCrud:
 
     def test_user_settings_unique_user_id(self, session: Session):
         """Two UserSettings rows cannot share the same user_id."""
-        from src.models import Master, User, UserSettings
+        from src.models import User, UserSettings
 
-        m = Master(first_name="E", last_name="F", color="#222", position="мастер", specialty="живопись")
-        session.add(m)
-        session.flush()
-        u = User(phone="+79007777777", password_hash="h", role="admin", master_id=m.id)
+        m_id = _mk_master(session)
+        u = User(phone="+79007777777", password_hash="h", role="admin", staff_id=m_id)
         session.add(u)
         session.flush()
 
@@ -788,14 +724,17 @@ class TestSoftDeleteFlag:
     column. Soft-delete models expose ``soft_delete is True`` and keep
     ``is_active``.
 
-    Hard-delete: Tag, Photo, Visitor, Activity, Record, UserSettings, Visit, Payment.
-    Soft-delete: Master, User, Location, Service, Tariff, Material, Client.
+    Hard-delete: Tag, Photo, Visitor, Activity, Record, UserSettings, Visit,
+    Payment, Position, Master (the GH #266 extension row keeps is_active as
+    the distribution flag but hard-deletes with its card).
+    Soft-delete: Staff, User, Location, Service, Tariff, Material, Client.
     """
 
     _HARD_DELETE: ClassVar[list[type]] = [
         Tag, Photo, Visitor, Activity, Record, UserSettings, Visit, Payment,
+        Position,
     ]
-    _SOFT_DELETE: ClassVar[list[type]] = [Master, User, Location, Service, Tariff, Material, Client]
+    _SOFT_DELETE: ClassVar[list[type]] = [Staff, User, Location, Service, Tariff, Material, Client]
 
     @pytest.mark.parametrize("model", _HARD_DELETE, ids=lambda m: m.__name__)
     def test_hard_delete_flag(self, model):

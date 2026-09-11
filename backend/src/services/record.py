@@ -30,6 +30,7 @@ from src.models.master import Master
 from src.models.payment import Payment
 from src.models.record import Record
 from src.models.service import Service
+from src.models.staff import Staff
 from src.models.tag import record_tags
 from src.models.visit import Visit
 from src.models.visitor import Visitor
@@ -222,9 +223,16 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
             .correlate(Activity)
             .scalar_subquery()
         )
+        # GH #266 (D9): master display fields survive the restructuring —
+        # Activity.master_id now targets masters.staff_id (the extension
+        # row), while the person's names moved to the staff card. The
+        # scalar-subquery shape is kept: names resolve via the extension →
+        # staff join, color straight off the extension. No is_active
+        # filters (US-3: archived cards still resolve).
         master_name = (
-            select(Master.last_name + " " + Master.first_name)
-            .where(Activity.master_id == Master.id)
+            select(Staff.last_name + " " + Staff.first_name)
+            .join(Master, Master.staff_id == Staff.id)
+            .where(Activity.master_id == Master.staff_id)
             .correlate(Activity)
             .scalar_subquery()
         )
@@ -236,7 +244,7 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
         )
         master_color = (
             select(Master.color)
-            .where(Activity.master_id == Master.id)
+            .where(Activity.master_id == Master.staff_id)
             .correlate(Activity)
             .scalar_subquery()
         )
@@ -302,11 +310,19 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
             .correlate(Activity)
             .scalar_subquery()
         )
+        # GH #266: master name sorts resolve through the extension → card
+        # join (names live on Staff; Master keeps only staff_id PK).
         master_last = (
-            select(Master.last_name).where(Master.id == Activity.master_id).scalar_subquery()
+            select(Staff.last_name)
+            .join(Master, Master.staff_id == Staff.id)
+            .where(Activity.master_id == Master.staff_id)
+            .scalar_subquery()
         )
         master_first = (
-            select(Master.first_name).where(Master.id == Activity.master_id).scalar_subquery()
+            select(Staff.first_name)
+            .join(Master, Master.staff_id == Staff.id)
+            .where(Activity.master_id == Master.staff_id)
+            .scalar_subquery()
         )
         location_name = (
             select(Location.name).where(Location.id == Activity.location_id).scalar_subquery()

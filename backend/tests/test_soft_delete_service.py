@@ -23,7 +23,7 @@ from __future__ import annotations
 import pytest
 
 from src.models.enums import ArchiveStatus
-from src.models.master import Master
+from src.models.staff import Staff
 from src.services.master import get_master_service
 
 pytestmark = pytest.mark.asyncio
@@ -33,28 +33,15 @@ pytestmark = pytest.mark.asyncio
 
 
 async def _seed_masters(db_session, n_active: int, n_archived: int) -> None:
-    """Insert ``n_active`` active Masters and ``n_archived`` archived Masters."""
+    """Insert ``n_active`` active staff cards and ``n_archived`` archived ones.
+
+    GH #266: the people table is ``staff`` (names + person-archive flag);
+    ``MasterService`` lists through the Staff model. The master extension
+    row is irrelevant to is_active filtering and is omitted."""
     for i in range(n_active):
-        db_session.add(
-            Master(
-                first_name=f"A{i}",
-                last_name="T",
-                color="#000000",
-                position="мастер",
-                specialty="живопись",
-            )
-        )
+        db_session.add(Staff(first_name=f"A{i}", last_name="T"))
     for i in range(n_archived):
-        db_session.add(
-            Master(
-                first_name=f"X{i}",
-                last_name="T",
-                color="#111111",
-                position="мастер",
-                specialty="живопись",
-                is_active=False,
-            )
-        )
+        db_session.add(Staff(first_name=f"X{i}", last_name="T", is_active=False))
     await db_session.flush()
 
 
@@ -114,9 +101,9 @@ async def test_list_status_does_not_leak_into_filters(db_session) -> None:
     """status must be consumed by the list() signature, not reach **filters.
 
     If ``status`` leaked into ``**filters`` the filter loop would call
-    ``getattr(Master, "status") == value`` and raise ``AttributeError``
-    (Master has no ``status`` column). Passing an extra real filter
-    (``specialty``) alongside ``status`` must work and return the rows
+    ``getattr(Staff, "status") == value`` and raise ``AttributeError``
+    (Staff has no ``status`` column). Passing an extra real filter
+    (``last_name``) alongside ``status`` must work and return the rows
     matching both the archive-status filter and the extra equality filter.
     """
     await _seed_masters(db_session, n_active=2, n_archived=2)
@@ -126,9 +113,9 @@ async def test_list_status_does_not_leak_into_filters(db_session) -> None:
         page=1,
         per_page=20,
         status=ArchiveStatus.ALL,
-        specialty="живопись",
+        last_name="T",
     )
-    # All 4 seeded masters have specialty="живопись" → status=ALL returns both.
+    # All 4 seeded staff cards share last_name="T" → status=ALL returns both.
     assert result.total == 4
     assert len(result.items) == 4
 
@@ -136,18 +123,9 @@ async def test_list_status_does_not_leak_into_filters(db_session) -> None:
 async def test_list_status_archived_with_extra_filter(db_session) -> None:
     """Extra equality filter narrows archived set; status still consumed separately."""
     await _seed_masters(db_session, n_active=1, n_archived=2)
-    # Add one more archived master with a different specialty to prove the
+    # Add one more archived card with a different last_name to prove the
     # equality filter is AND-combined with the archive-status filter.
-    db_session.add(
-        Master(
-            first_name="X-ker",
-            last_name="T",
-            color="#222222",
-            position="мастер",
-            specialty="керамика",
-            is_active=False,
-        )
-    )
+    db_session.add(Staff(first_name="X-ker", last_name="Keramika", is_active=False))
     await db_session.flush()
     service = get_master_service()
     result = await service.list(
@@ -155,9 +133,9 @@ async def test_list_status_archived_with_extra_filter(db_session) -> None:
         page=1,
         per_page=20,
         status=ArchiveStatus.ARCHIVED,
-        specialty="живопись",
+        last_name="T",
     )
-    # 2 archived "живопись" masters; the керамика one is excluded by the filter.
+    # 2 archived last_name="T" cards; the Keramika one is excluded by the filter.
     assert result.total == 2
     assert all(not m.is_active for m in result.items)
-    assert all(m.specialty == "живопись" for m in result.items)
+    assert all(m.last_name == "T" for m in result.items)

@@ -42,11 +42,12 @@ from src.models.activity import Activity
 from src.models.client import Client
 from src.models.location import Location
 from src.models.master import Master  # extension row factory (#266)
-from src.models.staff import Staff
 from src.models.material import Material
 from src.models.payment import Payment
+from src.models.position import Position, staff_positions
 from src.models.record import Record
 from src.models.service import Service
+from src.models.staff import Staff
 from src.models.tag import (
     Tag,
     client_tags,
@@ -107,6 +108,24 @@ async def _ensure_extension(db_session, staff_id: str) -> Master:
         db_session.add(ext)
         await db_session.flush()
     return ext
+
+
+async def _add_position(db_session, title: str = "СММ", *, is_system: bool = False) -> Position:
+    """Insert a Position row (user-defined by default — safe to hard-delete)."""
+    position = Position(title=title, is_system=is_system)
+    db_session.add(position)
+    await db_session.flush()
+    return position
+
+
+async def _add_staff_position_link(db_session, staff_id: str) -> str:
+    """Link a staff card to a fresh position via the staff_positions M2M."""
+    position = await _add_position(db_session)
+    await db_session.execute(
+        insert(staff_positions).values(staff_id=staff_id, position_id=position.id)
+    )
+    await db_session.flush()
+    return position.id
 
 
 async def _add_location_tag_links(db_session, location: Location, n: int) -> None:
@@ -186,9 +205,11 @@ class TestFKMatrixMaterial:
 
 
 class TestFKMatrixMaster:
-    def test_has_exactly_three_deps(self) -> None:
+    def test_has_exactly_five_deps(self) -> None:
+        """GH #266: staff deps = activities(block) + users/masters/master_tags/
+        staff_positions (auto-cascades; masters is the 1:0..1 extension row)."""
         assert {dep.entity for dep in FK_MATRIX[Staff]} == {
-            "activities", "users", "master_tags",
+            "activities", "users", "masters", "master_tags", "staff_positions",
         }
 
     def test_activities_blocks(self) -> None:
@@ -205,8 +226,24 @@ class TestFKMatrixMaster:
         assert dep.allowed_actions == ["cascade"]
         assert dep.nullable is True
 
+    def test_masters_extension_cascade_auto(self) -> None:
+        """masters (the 1:0..1 schedule extension) auto-cascades with the card."""
+        dep = _deps_map(Staff)["masters"]
+        assert dep.action == "cascade"
+        assert dep.auto is True
+        assert dep.allowed_actions == ["cascade"]
+        assert dep.nullable is False
+
     def test_master_tags_cascade_auto(self) -> None:
         dep = _deps_map(Staff)["master_tags"]
+        assert dep.action == "cascade"
+        assert dep.auto is True
+        assert dep.allowed_actions == ["cascade"]
+        assert dep.nullable is False
+
+    def test_staff_positions_cascade_auto(self) -> None:
+        """GH #266: the positions M2M join rows die with the card (auto)."""
+        dep = _deps_map(Staff)["staff_positions"]
         assert dep.action == "cascade"
         assert dep.auto is True
         assert dep.allowed_actions == ["cascade"]
@@ -395,7 +432,7 @@ class TestHasBlockingDeps:
 
 
 class TestCollectDependenciesMaster:
-    async def test_counts_activities_users_and_master_tags(self, db_session) -> None:
+    async def test_counts_all_five_deps(self, db_session) -> None:
         master = Staff(first_name="A", last_name="B")
         service = Service(title="S", description="d", image_url="i", specialty="живопись",
                           min_age=6, duration=90, record_info="r")
@@ -407,23 +444,31 @@ class TestCollectDependenciesMaster:
             await _add_activity(db_session, master=master, service=service, location=location, i=i)
         await _add_user(db_session, master.id)
         await _add_master_tag_links(db_session, master, 2)
+        await _add_staff_position_link(db_session, master.id)
         await db_session.commit()
 
         nodes = await collect_dependencies(db_session, Staff, master.id)
         by_entity = {n.entity: n for n in nodes}
-        assert set(by_entity) == {"activities", "users", "master_tags"}
+        assert set(by_entity) == {
+            "activities", "users", "masters", "master_tags", "staff_positions",
+        }
         assert by_entity["activities"].count == 3
         assert by_entity["users"].count == 1
+        assert by_entity["masters"].count == 1
         assert by_entity["master_tags"].count == 2
+        assert by_entity["staff_positions"].count == 1
         # The blocked (activities) node carries the spec §5 message; others carry none.
         assert by_entity["activities"].allowed_actions == []
         assert by_entity["activities"].message is not None
         assert by_entity["users"].allowed_actions == ["cascade"]
         assert by_entity["users"].cascade_preview is None
         assert by_entity["master_tags"].cascade_preview is None
+        assert by_entity["masters"].cascade_preview is None
+        assert by_entity["staff_positions"].cascade_preview is None
 
     async def test_zero_count_deps_are_skipped(self, db_session) -> None:
-        """A master with activities + a user but 0 master_tags → master_tags not in tree."""
+        """A staff card with activities + a user but no tags/positions/extension
+        → only present deps appear in the tree."""
         master = Staff(first_name="A2", last_name="B2")
         service = Service(title="S2", description="d", image_url="i", specialty="живопись",
                           min_age=6, duration=90, record_info="r")
@@ -437,6 +482,11 @@ class TestCollectDependenciesMaster:
         nodes = await collect_dependencies(db_session, Staff, master.id)
         by_entity = {n.entity: n for n in nodes}
         assert "master_tags" not in by_entity
+        assert "staff_positions" not in by_entity
+        # The activity's FK requires the masters extension row → it IS a
+        # dep (count=1); a bare card with no extension returns no masters
+        # node (see test_no_deps_returns_empty).
+        assert by_entity["masters"].count == 1
         assert by_entity["activities"].count == 1
         assert by_entity["users"].count == 1
 

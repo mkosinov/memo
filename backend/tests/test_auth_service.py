@@ -166,7 +166,7 @@ class TestLoginSuccess:
         assert authed.id == user.id
         assert authed.phone == user.phone
         assert authed.role == UserRole.ADMIN.value
-        assert authed.master_id is None
+        assert authed.staff_id is None  # GH #266 D10: principal key renamed
         assert authed.permissions == frozenset({"*"})
 
     async def test_master_role_gets_master_permission_set(self, db_session) -> None:

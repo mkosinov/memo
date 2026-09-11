@@ -16,6 +16,7 @@
  * so length checks distinguish them from UUID test data.
  */
 import path from 'path';
+import { resolveAuthStatePath } from './fixtures/auth-state';
 import { RESET_SQL } from './fixtures/seed-reset';
 import { sqliteExecWithRetry } from './fixtures/sqlite-exec';
 import { WARMUP_ROUTES } from './fixtures/warmup-routes';
@@ -126,9 +127,12 @@ export default async function globalSetup() {
   // touch users/sessions (GH #252 §3.1), so the cookie survives per-test
   // resets. HttpOnly is preserved in the storageState; SameSite=Lax holds
   // because the frontend baseURL is 127.0.0.1 (same site as the API).
+  // The filename is shard-scoped (shared helper — playwright.config.ts
+  // derives the SAME path): parallel shards must not read each other's
+  // foreign-DB tokens.
   const { request: playwrightRequest } = await import('@playwright/test');
-  const authDir = path.resolve(__dirname, '../../test-results/.auth');
-  const storageStatePath = path.join(authDir, 'admin.json');
+  const storageStatePath = resolveAuthStatePath();
+  const authDir = path.dirname(storageStatePath);
   const loginUrl = `${backendBase}/api/v1/auth/login`;
   const ctx = await playwrightRequest.newContext({
     baseURL: backendBase,

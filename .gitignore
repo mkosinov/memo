@@ -88,3 +88,6 @@ token-usage-output.txt
 backend/.coverage
 *.snapshots/
 node_modules
+
+# E2E auth storageState (live session tokens — GH #247)
+frontend/test-results/

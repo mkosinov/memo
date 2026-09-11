@@ -1,5 +1,6 @@
 import { defineConfig, devices } from '@playwright/test';
 import path from 'path';
+import { resolveAuthStatePath } from './e2e/fixtures/auth-state';
 
 // ── Per-shard environment variables ────────────────────────────────────────
 // When run via test-all.sh, each shard sets:
@@ -25,8 +26,11 @@ const SHARD_PORT = process.env.SHARD_PORT || '3002';
 // cookie here; both projects start authenticated. Login-flow specs opt out
 // with `test.use({ storageState: { cookies: [], origins: [] } })` — a bare
 // `undefined` does NOT override a project-level default.
-// Path matches globalSetup (repo-root-relative test-results dir).
-const AUTH_STORAGE_STATE = path.resolve(__dirname, '../test-results/.auth/admin.json');
+// The filename is SHARD-SCOPED via the shared helper (same expression as
+// globalSetup): parallel shards have separate DBs, and each shard's
+// playwright process inherits its own SHARD_ID, so each reads its own
+// token file — never a foreign-DB session.
+const AUTH_STORAGE_STATE = resolveAuthStatePath();
 
 /**
  * Playwright E2E configuration for Memo admin.

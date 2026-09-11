@@ -4,7 +4,9 @@ conftest.py — Memo project conftest with fixture factories.
 Provides:
   - Temporary SQLite database (auto-managed, CI-safe)
   - reset_db fixture (truncate-per-test, ~10x faster than drop+create)
-  - api_client fixture (sync TestClient)
+  - api_client fixture (function-scoped, authenticated as the fixture
+    admin via /api/v1/auth/login — GH #247 T6, spec §7)
+  - login_as(phone, password) factory for role-specific tests
   - Fixture factories: create_master, create_service, create_location,
     create_client, create_activity, create_record
   - query_db helper for direct SQL verification
@@ -98,14 +100,61 @@ def db_engine(app):
 
 
 @pytest.fixture(scope="session")
-def api_client(app, db_engine):
-    """Session-scoped TestClient. One client for the entire test session.
+def _admin_hash():
+    """Hash the fixture admin password once per session (Argon2 is slow).
 
-    Depends on ``db_engine`` to ensure alembic creates schema before the
-    app's lifespan runs (which may also call ``run_alembic_upgrade``).
+    Same creds T10 seeds (docs/specs/2026-09-08-auth-design.md §7):
+    phone +79990000001 / password admin12345.
     """
-    with TestClient(app) as c:
-        yield c
+    from src.auth.passwords import hash_password
+
+    return hash_password(ADMIN_PASSWORD)
+
+
+# Same creds T10 seeds (spec §7): every api_client test runs as this admin.
+ADMIN_PHONE = "+79990000001"
+ADMIN_PASSWORD = "admin12345"
+
+
+@pytest.fixture
+def api_client(app, db_engine, _admin_hash):
+    """Function-scoped TestClient, pre-authenticated as the fixture admin.
+
+    GH #247 T6 (spec §7): the autouse ``reset_db`` truncate wipes the
+    ``sessions`` table per test, so a session-scoped login would die at
+    the first truncate. Instead: truncate runs first (autouse, same
+    scope), then this fixture direct-INSERTs the admin user and logs in
+    via ``POST /api/v1/auth/login`` — the yielded client's cookie jar
+    holds the admin ``memo_session`` for the whole test.
+
+    Routers are still open, so existing tests notice only the extra users
+    row. The ~20–40 ms per-test login cost is reviewer-verified
+    acceptable (Argon2 hash is amortized via the session-scoped
+    ``_admin_hash``; only the verify runs per test).
+
+    Loop-safety: some suites (``asyncio_mode = "auto"``) resolve this
+    fixture lazily from inside a running event loop
+    (``request.getfixturevalue``), so no ``asyncio.run`` here — the
+    INSERT goes through the sync sqlite3 ``query_db`` helper and the
+    client skips the context-manager portal (the testing lifespan is a
+    no-op on startup; ``hub.drain`` on shutdown was session-end-only at
+    baseline too).
+    """
+    import uuid as _uuid
+
+    query_db(
+        "INSERT INTO users (id, phone, password_hash, role, "
+        "email_is_confirmed, phone_is_confirmed, is_active, created_at, updated_at) "
+        f"VALUES ('{_uuid.uuid4()}', '{ADMIN_PHONE}', '{_admin_hash}', 'admin', "
+        "0, 0, 1, datetime('now'), datetime('now'))"
+    )
+    c = TestClient(app)
+    resp = c.post(
+        "/api/v1/auth/login",
+        json={"phone": ADMIN_PHONE, "password": ADMIN_PASSWORD},
+    )
+    assert resp.status_code == 200, f"api_client admin login failed: {resp.text}"
+    yield c
 
 
 # ─── Database Reset ─────────────────────────────────────────────────────────────
@@ -117,6 +166,7 @@ async def _truncate_all_tables(engine):
     deletion.  ~10x faster than drop+create: ~10-20ms vs 180-330ms per test.
     """
     from src.db.base import Base
+    from src.auth.session import Session  # noqa: F401 — registers sessions with Base.metadata
     from src.models import (  # noqa: F401 — register models with Base.metadata
         Activity,
         Client,
@@ -158,7 +208,33 @@ def reset_db(request, db_engine):
 
 
 # ─── HTTP Client ────────────────────────────────────────────────────────────────
-# api_client is now session-scoped — see top of file.
+# api_client (authenticated, function-scoped) lives above, next to _admin_hash.
+
+
+@pytest.fixture
+def login_as(app):
+    """Factory: fresh TestClient logged in as ``(phone, password)``.
+
+    For role-specific tests: create the user row yourself (direct INSERT
+    with ``hash_password`` — the ``_user`` pattern), then::
+
+        other = login_as(phone, password)
+        other.get("/api/v1/auth/me")
+
+    No ``with`` block: the client must outlive the factory call, and the
+    app lifespan is a no-op in testing (hub.drain only), so a plain
+    TestClient serves requests fine.
+    """
+    def factory(phone: str, password: str) -> TestClient:
+        client = TestClient(app)
+        resp = client.post(
+            "/api/v1/auth/login", json={"phone": phone, "password": password}
+        )
+        assert resp.status_code == 200, (
+            f"login_as({phone}) failed: {resp.status_code}: {resp.text}"
+        )
+        return client
+    return factory
 
 
 # ─── Fixture Factories ──────────────────────────────────────────────────────────
@@ -794,3 +870,32 @@ def query_db(sql: str) -> list[dict]:
     conn.commit()  # required: Python 3.12+ no longer auto-commits on close()
     conn.close()
     return [dict(r) for r in rows]
+
+
+def insert_user(
+    phone: str, password_hash: str, role: str = "admin", master_id: str | None = None
+) -> dict:
+    """Insert a users row directly (no user-creation API exists).
+
+    Shared by the GH #247 auth suites (test_auth_api, test_auth_guards,
+    test_events_sse) — the ``_user`` fixture pattern as a plain helper so
+    each suite controls uniqueness/role itself. Returns {id, phone}.
+
+    Usage::
+
+        from tests.conftest import insert_user
+        user = insert_user("+7999...", hash_password("pw"), "master")
+    """
+    import uuid as _uuid
+
+    user_id = str(_uuid.uuid4())
+    conn = sqlite3.connect(_db_file.name)
+    conn.execute(
+        "INSERT INTO users (id, phone, password_hash, role, master_id, "
+        "email_is_confirmed, phone_is_confirmed, is_active, created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, 0, 0, 1, datetime('now'), datetime('now'))",
+        (user_id, phone, password_hash, role, master_id),
+    )
+    conn.commit()
+    conn.close()
+    return {"id": user_id, "phone": phone}

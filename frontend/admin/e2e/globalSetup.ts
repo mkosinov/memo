@@ -16,6 +16,7 @@
  * so length checks distinguish them from UUID test data.
  */
 import path from 'path';
+import { resolveAuthStatePath } from './fixtures/auth-state';
 import { RESET_SQL } from './fixtures/seed-reset';
 import { sqliteExecWithRetry } from './fixtures/sqlite-exec';
 import { WARMUP_ROUTES } from './fixtures/warmup-routes';
@@ -115,6 +116,59 @@ export default async function globalSetup() {
     throw new Error(`[#152] No activities for the current week (${fmt(monday)} to ${fmt(sunday)}) at ${dbPath}. Seed did not populate — likely a stale DB or calendar week rollover without re-seed. Run \`bash scripts/test-all.sh\` or \`SHARD_ID=N ... bash scripts/e2e-shard-start.sh\` to wipe+reseed, then retry.`);
   }
   console.log(`[globalSetup] Seed contract verified: ${leftoverSeedRows} seed rows + ${activitiesList.length} activities for current week.`);
+
+  // GH #247 T14: authenticate as the seeded admin ONCE per run and persist
+  // the session cookie as a Playwright storageState file. Every project
+  // then starts authenticated (cookie attached automatically); login-flow
+  // specs opt out with `test.use({ storageState: { cookies: [], origins: [] } })`.
+  // The login POST goes to the BACKEND origin — the cookie is issued for
+  // that host and only flows on API calls, which is exactly what the specs
+  // need. The session row is created here; RESET_SQL deliberately does NOT
+  // touch users/sessions (GH #252 §3.1), so the cookie survives per-test
+  // resets. HttpOnly is preserved in the storageState; SameSite=Lax holds
+  // because the frontend baseURL is 127.0.0.1 (same site as the API).
+  // The filename is shard-scoped (shared helper — playwright.config.ts
+  // derives the SAME path): parallel shards must not read each other's
+  // foreign-DB tokens.
+  const { request: playwrightRequest } = await import('@playwright/test');
+  const storageStatePath = resolveAuthStatePath();
+  const authDir = path.dirname(storageStatePath);
+  const loginUrl = `${backendBase}/api/v1/auth/login`;
+  const ctx = await playwrightRequest.newContext({
+    baseURL: backendBase,
+    // Full origin incl. port (same as auth-session.spec's API login): CORS
+    // echoes the request Origin and the CSRF line checks Sec-Fetch-Site —
+    // the port is part of the origin and must not be stripped.
+    extraHTTPHeaders: { Origin: backendBase, 'Sec-Fetch-Site': 'same-origin' },
+  });
+  try {
+    const loginResp = await ctx.post(loginUrl, {
+      data: { phone: '+79990000001', password: 'admin12345' },
+      headers: { 'Content-Type': 'application/json' },
+    });
+    if (!loginResp.ok()) {
+      throw new Error(
+        `[globalSetup] Admin login failed at ${loginUrl}: HTTP ${loginResp.status()} ${await loginResp.text()}`,
+      );
+    }
+    const me = await loginResp.json() as { user?: { role?: string } };
+    if (me.user?.role !== 'admin') {
+      throw new Error(`[globalSetup] Login as seeded admin returned unexpected payload: ${JSON.stringify(me).slice(0, 200)}`);
+    }
+    // Persist in the STANDARD domain+path cookie form (ctx.storageState's
+    // own output): browser contexts host-match `domain: 127.0.0.1` on any
+    // port — same-site with both the frontend (127.0.0.1:{SHARD_PORT}) and
+    // the API (BACKEND_URL is 127.0.0.1 too) — and request contexts
+    // (factories via apiRequest.newContext) REQUIRE domain+path. (A
+    // `url`-only cookie breaks request contexts; sameSite=Lax holds because
+    // scheme+host match, ports are exempt from the site definition.)
+    const fs = await import('fs');
+    fs.mkdirSync(authDir, { recursive: true });
+    await ctx.storageState({ path: storageStatePath });
+    console.log(`[globalSetup] Admin storageState saved: ${storageStatePath}`);
+  } finally {
+    await ctx.dispose();
+  }
 
   // #126: standalone mode has no shell warmup — pre-compile routes so the
   // first test doesn't race Next.js dev compilation (404 _next/static).

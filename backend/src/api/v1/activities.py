@@ -7,6 +7,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.auth.permissions import require_permission, verify_fetch_metadata
 from src.db import SessionDep
 from src.errors import ErrorCode, ErrorDetail
 from src.schemas.activity import (
@@ -29,6 +30,13 @@ def _get_activity_service() -> ActivityService:
 
 
 _ServiceDep = Annotated[ActivityService, Depends(_get_activity_service)]
+
+# GH #247 (spec §3.7): every mutating route carries activities:write plus the
+# CSRF fetch-metadata secondary line (verify_fetch_metadata).
+_WRITE_GUARD = [
+    Depends(require_permission("activities:write")),
+    Depends(verify_fetch_metadata),
+]
 
 
 async def _to_response(
@@ -99,7 +107,8 @@ async def get_activity(
     return await _to_response(service, db_session=session, activity=activity)
 
 
-@router.post("", response_model=ActivityResponse, status_code=201)
+@router.post("", response_model=ActivityResponse, status_code=201,
+             dependencies=_WRITE_GUARD)
 async def create_activity(
     data: ActivityCreate,
     service: _ServiceDep,
@@ -110,7 +119,7 @@ async def create_activity(
     return await _to_response(service, db_session=session, activity=activity)
 
 
-@router.put("/{activity_id}", response_model=ActivityResponse)
+@router.put("/{activity_id}", response_model=ActivityResponse, dependencies=_WRITE_GUARD)
 async def update_activity(
     activity_id: str,
     data: ActivityUpdate,
@@ -130,7 +139,7 @@ async def update_activity(
     return await _to_response(service, db_session=session, activity=activity)
 
 
-@router.patch("/{activity_id}", response_model=ActivityResponse)
+@router.patch("/{activity_id}", response_model=ActivityResponse, dependencies=_WRITE_GUARD)
 async def partial_update_activity(
     activity_id: str,
     patch: ActivityPatch,
@@ -150,7 +159,7 @@ async def partial_update_activity(
     return await _to_response(service, db_session=session, activity=activity)
 
 
-@router.delete("/{activity_id}", status_code=204)
+@router.delete("/{activity_id}", status_code=204, dependencies=_WRITE_GUARD)
 async def delete_activity(
     activity_id: str,
     service: _ServiceDep,

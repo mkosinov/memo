@@ -44,6 +44,8 @@ import {
   ClientWithStatsSchema,
   RecordViewResponseSchema,
   type RecordView,
+  AuthMeSchema,
+  UserSettingsCreateSchema,
 } from './schemas';
 import backendFixtures from './__fixtures__/backend-responses.json';
 
@@ -1246,5 +1248,43 @@ describe('archived-inversion parity with backend responses (spec #207 §16)', ()
     expect(ClientWithStatsSchema.parse(active).archived).toBe(false);
     expect(ClientWithStatsSchema.parse(archived).archived).toBe(true);
     expect(backendFixtures.client_with_stats.archived).not.toHaveProperty('is_active');
+  });
+});
+
+// ─── Auth (GH #247 spec §3.6/§4.1) ────────────────────────────────────────
+
+describe('AuthMeSchema', () => {
+  const validMe = {
+    user: { id: 'u-1', phone: '+79990000001', role: 'admin', master_id: null, email: null },
+    permissions: ['*'],
+  };
+
+  it('parses {user, permissions} without master', () => {
+    const parsed = AuthMeSchema.parse(validMe);
+    expect(parsed.user.role).toBe('admin');
+    expect(parsed.permissions).toEqual(['*']);
+    expect(parsed.master).toBeUndefined();
+  });
+
+  it('parses with master snapshot when master_id is set', () => {
+    const withMaster = {
+      ...validMe,
+      user: { ...validMe.user, master_id: 'm-1' },
+      master: { first_name: 'Анна', last_name: 'Петрова' },
+    };
+    const parsed = AuthMeSchema.parse(withMaster);
+    expect(parsed.master?.first_name).toBe('Анна');
+  });
+
+  it('rejects a body without permissions', () => {
+    expect(() => AuthMeSchema.parse({ user: validMe.user })).toThrow();
+  });
+});
+
+describe('UserSettingsCreateSchema (GH #247 §3.8)', () => {
+  it('user_id is optional — session-derived on the server', () => {
+    const parsed = UserSettingsCreateSchema.parse({ theme: 'dark' });
+    expect(parsed.theme).toBe('dark');
+    expect(parsed.user_id).toBeUndefined();
   });
 });

@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from src.db.base import Base  # noqa: E402
 
 # Import ALL models so they register with Base.metadata
+from src.auth.session import Session  # noqa: E402, F401 — sessions table (GH #247)
 from src.models import (  # noqa: E402, F401
     Activity,
     Client,

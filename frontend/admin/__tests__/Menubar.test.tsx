@@ -31,6 +31,46 @@ vi.mock('next/navigation', () => ({
   usePathname: () => '/schedule',
 }));
 
+// GH #247 §4.5: the bottom-left user block reads the session user from
+// AuthContext. Unit tests mock the context module (MainLayoutGuard pattern).
+vi.mock('@/contexts/AuthContext', () => ({
+  useAuth: vi.fn(),
+}));
+
+import { useAuth } from '@/contexts/AuthContext';
+import type { AuthStatus } from '../contexts/AuthContext';
+
+const mockUseAuth = vi.mocked(useAuth);
+
+const authUser = {
+  id: 'user-uuid-1',
+  phone: '+79990000001',
+  role: 'admin' as const,
+  master_id: null,
+  email: null,
+};
+
+/** Matches AuthContextType minus the fields Menubar doesn't read. */
+function mockAuthState(overrides?: {
+  user?: typeof authUser | null;
+  role?: string;
+  master?: { first_name: string; last_name: string } | null | undefined;
+  status?: AuthStatus;
+  logout?: ReturnType<typeof vi.fn>;
+}) {
+  const role = overrides?.role ?? authUser.role;
+  const user = overrides?.user !== undefined ? overrides.user : { ...authUser, role };
+  return {
+    user,
+    permissions: ['*'],
+    master: overrides?.master !== undefined ? overrides.master : null,
+    status: overrides?.status ?? ('authenticated' as AuthStatus),
+    login: vi.fn(),
+    logout: overrides?.logout ?? vi.fn(),
+    can: vi.fn(() => true),
+  } as unknown as ReturnType<typeof useAuth>;
+}
+
 function renderWithProviders() {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -59,6 +99,8 @@ const MOCK_NOW = new Date('2026-06-15T12:00:00');
 describe('Menubar', () => {
   beforeEach(() => {
     vi.setSystemTime(MOCK_NOW);
+    // Default: an authenticated admin (the historical hardcoded state, now real).
+    mockUseAuth.mockReturnValue(mockAuthState());
   });
 
   afterEach(() => {
@@ -205,5 +247,71 @@ describe('Menubar', () => {
     fireEvent.click(toggle);
     const newTheme = html.getAttribute('data-theme');
     expect(newTheme).toBe('dark');
+  });
+});
+
+// ─── GH #247 §4.5: real user block + logout ───────────────────────────────
+
+describe('Menubar user block (GH #247 §4.5)', () => {
+  beforeEach(() => {
+    mockUseAuth.mockReturnValue(mockAuthState());
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('shows the linked master profile name and «Админ» label for an admin user', () => {
+    mockUseAuth.mockReturnValue(
+      mockAuthState({ role: 'admin', master: { first_name: 'Ольга', last_name: 'Середа' } }),
+    );
+    renderWithProviders();
+    expect(screen.getByText('Ольга Середа')).toBeInTheDocument();
+    expect(screen.getByText('Админ')).toBeInTheDocument();
+  });
+
+  it('falls back to the phone when no master profile is linked, with «Админ» label', () => {
+    mockUseAuth.mockReturnValue(mockAuthState({ role: 'admin', master: null }));
+    renderWithProviders();
+    expect(screen.getByText('+79990000001')).toBeInTheDocument();
+    expect(screen.getByText('Админ')).toBeInTheDocument();
+    expect(screen.queryByText('Мастер')).not.toBeInTheDocument();
+  });
+
+  it('shows «Мастер» role label for a master user', () => {
+    mockUseAuth.mockReturnValue(
+      mockAuthState({
+        role: 'master',
+        master: { first_name: 'Юлия', last_name: 'Большакова' },
+      }),
+    );
+    renderWithProviders();
+    expect(screen.getByText('Юлия Большакова')).toBeInTheDocument();
+    expect(screen.getByText('Мастер')).toBeInTheDocument();
+    expect(screen.queryByText('Админ')).not.toBeInTheDocument();
+  });
+
+  it('renders the avatar initial from the first character of the display name', () => {
+    mockUseAuth.mockReturnValue(
+      mockAuthState({ master: { first_name: 'Ольга', last_name: 'Середа' } }),
+    );
+    renderWithProviders();
+    const avatar = screen.getByTestId('user-avatar');
+    expect(avatar).toHaveTextContent('О');
+  });
+
+  it('renders the avatar initial from the phone when no master profile is linked', () => {
+    mockUseAuth.mockReturnValue(mockAuthState({ master: null }));
+    renderWithProviders();
+    const avatar = screen.getByTestId('user-avatar');
+    expect(avatar).toHaveTextContent('+');
+  });
+
+  it('calls logout() when the logout control is clicked', () => {
+    const logout = vi.fn().mockResolvedValue(undefined);
+    mockUseAuth.mockReturnValue(mockAuthState({ logout }));
+    renderWithProviders();
+    fireEvent.click(screen.getByRole('button', { name: /Выйти/i }));
+    expect(logout).toHaveBeenCalledTimes(1);
   });
 });

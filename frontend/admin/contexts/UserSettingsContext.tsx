@@ -1,6 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
+import { useAuth } from './AuthContext';
 
 export interface UserSettings {
   theme: 'light' | 'dark';
@@ -26,8 +27,11 @@ const DEFAULT_SETTINGS: UserSettings = {
   columnOrderLocations: [],
 };
 
-// TODO: Replace with real user ID from auth context
-const DEV_USER_ID = 'dev-user-001';
+// GH #247 §3.8/§4.6: user-settings are session-scoped — the server derives
+// the user, so GET/PUT/PATCH carry no user id. The POST create still requires
+// user_id backend-side (§3.8 left POST untouched), so the create body carries
+// the session user's id. Loading is auth-gated: the API is only touched once
+// AuthContext reports `authenticated`.
 
 function loadFromStorage(): UserSettings | null {
   if (typeof window === 'undefined') return null;
@@ -49,11 +53,16 @@ function saveToStorage(settings: UserSettings) {
 const UserSettingsContext = createContext<UserSettingsContextType | null>(null);
 
 export function UserSettingsProvider({ children }: { children: React.ReactNode }) {
+  const { status, user } = useAuth();
   const [settings, setSettings] = useState<UserSettings>(DEFAULT_SETTINGS);
   const [ready, setReady] = useState(false);
   const mountedRef = useRef(true);
 
   useEffect(() => {
+    // GH #247 §4.6: settings load only after auth resolves to
+    // `authenticated` — the session cookie must exist before the API call,
+    // otherwise every page load fires a doomed 401 for guests.
+    if (status !== 'authenticated') return;
     mountedRef.current = true;
 
     async function load() {
@@ -68,7 +77,7 @@ export function UserSettingsProvider({ children }: { children: React.ReactNode }
       try {
         const { getUserSettings, createUserSettings } = await import('@memo/api-client');
         try {
-          const remote = await getUserSettings(DEV_USER_ID);
+          const remote = await getUserSettings();
           const remoteSettings: UserSettings = {
             theme: remote.theme as 'light' | 'dark',
             language: remote.language as 'ru' | 'en',
@@ -85,7 +94,7 @@ export function UserSettingsProvider({ children }: { children: React.ReactNode }
           if (!cached && mountedRef.current) {
             try {
               const created = await createUserSettings({
-                user_id: DEV_USER_ID,
+                user_id: user?.id,
                 theme: DEFAULT_SETTINGS.theme,
                 language: DEFAULT_SETTINGS.language,
                 column_order_masters: DEFAULT_SETTINGS.columnOrderMasters,
@@ -115,7 +124,7 @@ export function UserSettingsProvider({ children }: { children: React.ReactNode }
 
     load();
     return () => { mountedRef.current = false; };
-  }, []);
+  }, [status, user?.id]);
 
   const updateSettings = useCallback((partial: Partial<UserSettings>) => {
     setSettings((prev) => {
@@ -128,7 +137,7 @@ export function UserSettingsProvider({ children }: { children: React.ReactNode }
         if (partial.language !== undefined) apiPartial.language = partial.language;
         if (partial.columnOrderMasters !== undefined) apiPartial.column_order_masters = partial.columnOrderMasters;
         if (partial.columnOrderLocations !== undefined) apiPartial.column_order_locations = partial.columnOrderLocations;
-        patchUserSettings(DEV_USER_ID, apiPartial).catch(() => {});
+        patchUserSettings(apiPartial).catch(() => {});
       }).catch(() => {});
       return next;
     });

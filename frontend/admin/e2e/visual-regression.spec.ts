@@ -413,11 +413,18 @@ function pickerOpenTest(config: PageTableConfig) {
 function emptyTest(config: PageTableConfig) {
   test(`${config.name}-table-empty`, async ({ page }) => {
     // All 8 tables now fetch the paginated envelope (#211: photos joined).
+    // GH #247: api-client sends credentials:'include' on every call, and a
+    // credentialed CORS response must echo the exact origin + allow-
+    // credentials — `*` is rejected by the browser, so the empty state
+    // never rendered and the snapshot shot the error state instead.
     await page.route(`**${config.apiUrl}*`, (route) =>
       route.fulfill({
         status: 200,
         contentType: 'application/json',
-        headers: { 'Access-Control-Allow-Origin': '*' },
+        headers: {
+          'Access-Control-Allow-Origin': route.request().headers()['origin'] ?? '*',
+          'Access-Control-Allow-Credentials': 'true',
+        },
         body: JSON.stringify(EMPTY_PAGED),
       }),
     );
@@ -456,7 +463,10 @@ function errorTest(config: PageTableConfig) {
       route.fulfill({
         status: 500,
         contentType: 'application/json',
-        headers: { 'Access-Control-Allow-Origin': '*' },
+        headers: {
+          'Access-Control-Allow-Origin': route.request().headers()['origin'] ?? '*',
+          'Access-Control-Allow-Credentials': 'true',
+        },
         body: JSON.stringify({ detail: 'Test 500' }),
       }),
     );

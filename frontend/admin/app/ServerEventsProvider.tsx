@@ -37,7 +37,11 @@ export function ServerEventsProvider({ children }: { children: React.ReactNode }
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    const es = new EventSource(eventsUrl);
+    // GH #247 §4.7: the events endpoint is behind the default-deny guard —
+    // the session cookie must ride along (EventSource sends cookies only
+    // with withCredentials; same-site holds: frontend 127.0.0.1:{port} vs
+    // API 127.0.0.1:{BACKEND_PORT}).
+    const es = new EventSource(eventsUrl, { withCredentials: true });
 
     es.onopen = () => {
       if (hadError.current) {

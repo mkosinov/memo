@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { api, ApiError, getTabId, eventsUrl } from './client';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { api, ApiError, getTabId, eventsUrl, setUnauthorizedHandler } from './client';
 import { z } from 'zod';
 
 const schema = z.object({ id: z.string() });
@@ -186,6 +186,116 @@ describe('tab identity + eventsUrl', () => {
     const init = fetchMock.mock.calls[0][1] as RequestInit;
     expect(init.method).toBeUndefined(); // GET by default
     expect((init.headers as Record<string, string>)['X-Memo-Tab-Id']).toBeUndefined();
+  });
+});
+
+// ─── Auth layer (GH #247 spec §4.1) ──────────────────────────────────────────
+// Cookie sessions: every request sends credentials: "include". A 401 response
+// invokes the module-level registered handler exactly once — except for
+// /auth/* calls, whose 401s are part of normal flow (guest checks, wrong
+// password). No handler registered → behaves as before (plain ApiError).
+
+describe('api() credentials', () => {
+  it('sends credentials: "include" on GET requests', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(mockFetchResponse(200, { id: 'x' }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await api('/test', schema);
+
+    const init = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(init.credentials).toBe('include');
+  });
+
+  it('sends credentials: "include" on POST requests', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(mockFetchResponse(200, { id: 'x' }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await api('/test', schema, { method: 'POST', body: '{}' });
+
+    const init = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(init.credentials).toBe('include');
+  });
+});
+
+describe('401 unauthorized handler', () => {
+  afterEach(() => {
+    setUnauthorizedHandler(null);
+  });
+
+  it('invokes the registered handler exactly once on a 401 outside /auth/', async () => {
+    const handler = vi.fn();
+    setUnauthorizedHandler(handler);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      mockFetchResponse(401, { detail: { code: 'AUTH_UNAUTHORIZED', message: 'No session' } })
+    ));
+
+    await expect(api('/api/v1/records', schema)).rejects.toThrow(ApiError);
+
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not invoke the handler for /auth/ URL 401s', async () => {
+    const handler = vi.fn();
+    setUnauthorizedHandler(handler);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      mockFetchResponse(401, { detail: { code: 'AUTH_UNAUTHORIZED', message: 'No session' } })
+    ));
+
+    await expect(api('/api/v1/auth/me', schema)).rejects.toThrow(ApiError);
+
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('throws ApiError as before when no handler is registered', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      mockFetchResponse(401, { detail: { code: 'AUTH_UNAUTHORIZED', message: 'No session' } })
+    ));
+
+    let caught: unknown;
+    try {
+      await api('/api/v1/records', schema);
+    } catch (e) {
+      caught = e;
+    }
+
+    expect(caught).toBeInstanceOf(ApiError);
+    expect((caught as ApiError).status).toBe(401);
+    expect((caught as ApiError).code).toBe('AUTH_UNAUTHORIZED');
+  });
+
+  it('does not invoke the handler on non-401 errors', async () => {
+    const handler = vi.fn();
+    setUnauthorizedHandler(handler);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      mockFetchResponse(404, { detail: { code: 'NOT_FOUND', message: 'Not found' } })
+    ));
+
+    await expect(api('/test', schema)).rejects.toThrow(ApiError);
+
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('still throws the 401 ApiError when the handler itself throws', async () => {
+    setUnauthorizedHandler(() => {
+      throw new Error('handler blew up');
+    });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      mockFetchResponse(401, { detail: { code: 'AUTH_UNAUTHORIZED', message: 'No session' } })
+    ));
+
+    let caught: unknown;
+    try {
+      await api('/api/v1/records', schema);
+    } catch (e) {
+      caught = e;
+    }
+
+    // The original ApiError must win — the caller's instanceof branching
+    // (parseApiError etc.) must never see the handler's failure instead.
+    expect(caught).toBeInstanceOf(ApiError);
+    expect((caught as ApiError).status).toBe(401);
+    expect((caught as ApiError).code).toBe('AUTH_UNAUTHORIZED');
+    expect((caught as Error).message).toBe('No session');
   });
 });
 

@@ -33,6 +33,19 @@ class ErrorCode(str, Enum):
     PAYMENT_NOT_FOUND = "PAYMENT_NOT_FOUND"
     SETTINGS_NOT_FOUND = "SETTINGS_NOT_FOUND"
 
+    # 403 — forbidden (GH #247 auth)
+    AUTH_FORBIDDEN = "AUTH_FORBIDDEN"
+
+    # 401 — authentication (GH #247 auth)
+    AUTH_INVALID_CREDENTIALS = "AUTH_INVALID_CREDENTIALS"
+    AUTH_UNAUTHORIZED = "AUTH_UNAUTHORIZED"
+
+    # 429 — brute-force throttle (GH #247 auth)
+    AUTH_LOCKED_OUT = "AUTH_LOCKED_OUT"
+
+    # 422 — password policy violation (GH #247 auth, spec §5)
+    PASSWORD_POLICY = "PASSWORD_POLICY"
+
     # 422 — validation / integrity
     VALIDATION_ERROR = "VALIDATION_ERROR"
     INTEGRITY_VIOLATION = "INTEGRITY_VIOLATION"
@@ -71,6 +84,11 @@ ERROR_MESSAGES: dict[ErrorCode, str] = {
     ErrorCode.VISIT_NOT_FOUND: "Визит не найден",
     ErrorCode.PAYMENT_NOT_FOUND: "Платёж не найден",
     ErrorCode.SETTINGS_NOT_FOUND: "Настройки не найдены",
+    ErrorCode.AUTH_FORBIDDEN: "Недостаточно прав",
+    ErrorCode.AUTH_INVALID_CREDENTIALS: "Неверный телефон или пароль",
+    ErrorCode.AUTH_UNAUTHORIZED: "Требуется вход в систему",
+    ErrorCode.AUTH_LOCKED_OUT: "Слишком много неудачных попыток входа",
+    ErrorCode.PASSWORD_POLICY: "Пароль: от 8 до 64 символов, пробелы по краям обрезаются",
     ErrorCode.VALIDATION_ERROR: "Проверьте правильность заполнения полей",
     ErrorCode.INTEGRITY_VIOLATION: "Нарушение целостности данных",
     ErrorCode.INTERNAL_ERROR: "Ошибка сервера",

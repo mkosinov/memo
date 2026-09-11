@@ -3,6 +3,7 @@
 import { QueryCache, QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useState } from 'react';
 import { UIProvider, useUI } from '../contexts/UIContext';
+import { AuthProvider } from '../contexts/AuthContext';
 import { UserSettingsProvider } from '../contexts/UserSettingsContext';
 import { PendingActionsProvider } from '../contexts/PendingActionsContext';
 import { ErrorBoundary } from './components/error';
@@ -56,14 +57,19 @@ export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <ErrorBoundary>
       <UIProvider>
-        <QueryClientWithErrorReporting>
-          <PendingActionsProvider>
-            <UserSettingsProvider>
-              {children}
-            </UserSettingsProvider>
-          </PendingActionsProvider>
-        </QueryClientWithErrorReporting>
-        <ToastContainer />
+        {/* GH #247 §4.3: AuthProvider INSIDE UIProvider (its 401 handler +
+            future consumers may toast) and ABOVE UserSettingsProvider (T13
+            reads the session user from inside UserSettingsContext). */}
+        <AuthProvider>
+          <QueryClientWithErrorReporting>
+            <PendingActionsProvider>
+              <UserSettingsProvider>
+                {children}
+              </UserSettingsProvider>
+            </PendingActionsProvider>
+          </QueryClientWithErrorReporting>
+          <ToastContainer />
+        </AuthProvider>
       </UIProvider>
     </ErrorBoundary>
   );

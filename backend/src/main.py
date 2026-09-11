@@ -25,6 +25,7 @@ from src.api.v1.tags import router as tags_router
 from src.api.v1.user_settings import router as user_settings_router
 from src.api.v1.visitors import router as visitors_router
 from src.api.v1.visits import router as visits_router
+from src.auth.router import router as auth_router
 from src.core.config import settings
 from src.db.migrate import run_alembic_upgrade
 from src.errors import ErrorCode, ErrorDetail
@@ -103,6 +104,9 @@ def create_app() -> FastAPI:
         Supports two detail shapes:
         - If raise site passed a string detail: look up code by status, fallback to INTERNAL_ERROR
         - If raise site passed an ErrorDetail dict (new style): preserve code + message
+
+        Response headers set on the exception (e.g. ``Retry-After`` on the
+        auth 429 lockout, GH #247 §5) are forwarded unchanged.
         """
         detail = exc.detail
         if isinstance(detail, dict) and "code" in detail and "message" in detail:
@@ -110,6 +114,7 @@ def create_app() -> FastAPI:
             return JSONResponse(
                 status_code=exc.status_code,
                 content={"detail": detail},
+                headers=exc.headers,
             )
         # Legacy / string detail: map status → code
         code = _status_to_code(exc.status_code)
@@ -117,6 +122,7 @@ def create_app() -> FastAPI:
         return JSONResponse(
             status_code=exc.status_code,
             content={"detail": ErrorDetail(code=code, message=message).model_dump()},
+            headers=exc.headers,
         )
 
     @app.exception_handler(RequestValidationError)
@@ -192,6 +198,9 @@ def create_app() -> FastAPI:
     app.include_router(user_settings_router, prefix="/api/v1/user-settings")
     app.include_router(system_router, prefix="/api/v1")
     app.include_router(events_router, prefix="/api/v1")  # GH #239 — GET /api/v1/events (SSE)
+    # GH #247 — login / logout / me are PUBLIC_ROUTES by design (spec §3.6);
+    # the router itself carries no blanket guards.
+    app.include_router(auth_router, prefix="/api/v1/auth")
 
     return app
 

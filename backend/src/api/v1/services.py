@@ -8,6 +8,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 from sqlalchemy import asc, func, select
 
+from src.auth.permissions import require_permission, verify_fetch_metadata
 from src.db import SessionDep
 from src.domain.deletion import ResolutionError, collect_dependencies
 from src.domain.errors import BareListLimitExceededError
@@ -30,6 +31,14 @@ def _get_service_service() -> ServiceService:
 
 
 _ServiceDep = Annotated[ServiceService, Depends(_get_service_service)]
+
+# GH #247 (spec §3.7): every mutating route carries services:write plus the
+# CSRF fetch-metadata secondary line (verify_fetch_metadata).
+_WRITE_GUARD = [
+    Depends(require_permission("services:write")),
+    Depends(verify_fetch_metadata),
+]
+_READ_GUARD = [Depends(require_permission("services:read"))]
 
 # Sort whitelist map: UI key → list of ORM columns / subqueries (#205 Task 3,
 # spec §4.5). ``age`` → min_age; ``archived`` → is_active; ``tariffs`` →
@@ -111,7 +120,7 @@ async def list_services(
     )
 
 
-@router.get("/all", response_model=list[ServiceResponse])
+@router.get("/all", response_model=list[ServiceResponse], dependencies=_READ_GUARD)
 async def list_all_services(
     service: _ServiceDep,
     session: SessionDep,
@@ -153,7 +162,8 @@ async def get_service(
     return ServiceResponse.model_validate(svc)
 
 
-@router.post("", response_model=ServiceResponse, status_code=201)
+@router.post("", response_model=ServiceResponse, status_code=201,
+             dependencies=_WRITE_GUARD)
 async def create_service(
     data: ServiceCreate,
     service: _ServiceDep,
@@ -164,7 +174,7 @@ async def create_service(
     return ServiceResponse.model_validate(svc)
 
 
-@router.put("/{service_id}", response_model=ServiceResponse)
+@router.put("/{service_id}", response_model=ServiceResponse, dependencies=_WRITE_GUARD)
 async def update_service(
     service_id: str,
     data: ServiceUpdate,
@@ -184,7 +194,7 @@ async def update_service(
     return ServiceResponse.model_validate(svc)
 
 
-@router.patch("/{service_id}", response_model=ServiceResponse)
+@router.patch("/{service_id}", response_model=ServiceResponse, dependencies=_WRITE_GUARD)
 async def patch_service(
     service_id: str,
     data: ServicePatch,
@@ -204,7 +214,7 @@ async def patch_service(
     return ServiceResponse.model_validate(svc)
 
 
-@router.delete("/{service_id}", status_code=204)
+@router.delete("/{service_id}", status_code=204, dependencies=_WRITE_GUARD)
 async def delete_service(
     service_id: str,
     service: _ServiceDep,
@@ -259,7 +269,7 @@ async def delete_service(
         )
 
 
-@router.post("/{service_id}/archive", response_model=ServiceResponse)
+@router.post("/{service_id}/archive", response_model=ServiceResponse, dependencies=_WRITE_GUARD)
 async def archive_service(
     service_id: str,
     service: _ServiceDep,
@@ -284,7 +294,7 @@ async def archive_service(
     return await _refetch_or_404(service, session, service_id)
 
 
-@router.post("/{service_id}/restore", response_model=ServiceResponse)
+@router.post("/{service_id}/restore", response_model=ServiceResponse, dependencies=_WRITE_GUARD)
 async def restore_service(
     service_id: str,
     service: _ServiceDep,

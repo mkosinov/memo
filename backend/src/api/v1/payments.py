@@ -5,6 +5,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
+from src.auth.permissions import require_permission, verify_fetch_metadata
 from src.db import SessionDep
 from src.errors import ErrorCode, ErrorDetail
 from src.schemas.common import PaginatedResponse
@@ -13,7 +14,11 @@ from src.schemas.payment import PaymentCreate, PaymentPatch, PaymentResponse, Pa
 from src.services.generic import GenericService
 from src.services.payment import get_payment_service, get_payment_totals
 
-router = APIRouter(tags=["payments"])
+router = APIRouter(
+    tags=["payments"],
+    # GH #247 spec §3.7: wholly-private router — read guard at router level.
+    dependencies=[Depends(require_permission("payments:read"))],
+)
 
 
 @lru_cache
@@ -23,6 +28,13 @@ def _get_payment_service() -> GenericService[PaymentCreate, PaymentUpdate, Payme
 
 
 _ServiceDep = Annotated[GenericService[PaymentCreate, PaymentUpdate, PaymentResponse], Depends(_get_payment_service)]
+
+# GH #247 (spec §3.7): every mutating route carries payments:write plus the
+# CSRF fetch-metadata secondary line (verify_fetch_metadata).
+_WRITE_GUARD = [
+    Depends(require_permission("payments:write")),
+    Depends(verify_fetch_metadata),
+]
 
 
 @router.get("", response_model=PaginatedResponse[PaymentResponse])
@@ -68,7 +80,8 @@ async def get_payment(
     return payment
 
 
-@router.post("", response_model=PaymentResponse, status_code=201)
+@router.post("", response_model=PaymentResponse, status_code=201,
+             dependencies=_WRITE_GUARD)
 async def create_payment(
     data: PaymentCreate,
     service: _ServiceDep,
@@ -78,7 +91,7 @@ async def create_payment(
     return await service.create(db_session=session, data=data)
 
 
-@router.put("/{payment_id}", response_model=PaymentResponse)
+@router.put("/{payment_id}", response_model=PaymentResponse, dependencies=_WRITE_GUARD)
 async def update_payment(
     payment_id: str,
     data: PaymentUpdate,
@@ -98,7 +111,7 @@ async def update_payment(
     return payment
 
 
-@router.patch("/{payment_id}", response_model=PaymentResponse)
+@router.patch("/{payment_id}", response_model=PaymentResponse, dependencies=_WRITE_GUARD)
 async def patch_payment(
     payment_id: str,
     data: PaymentPatch,
@@ -118,7 +131,7 @@ async def patch_payment(
     return payment
 
 
-@router.delete("/{payment_id}", status_code=204)
+@router.delete("/{payment_id}", status_code=204, dependencies=_WRITE_GUARD)
 async def delete_payment(
     payment_id: str,
     service: _ServiceDep,

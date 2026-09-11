@@ -22,12 +22,12 @@ Two roles exist (`UserRole`, `backend/src/models/enums.py`): `admin`, `master`.
 
 ## Public Access (no session)
 The API is default-deny; only this allowlist works anonymously (constant `PUBLIC_ROUTES`, `backend/src/auth/public.py`):
-- `GET` dictionaries: masters, locations, services, tags, activities, photos (public site + gallery)
+- `GET` dictionaries: masters, locations, services, tags, activities, photos — incl. `GET /api/v1/photos/web` (the public gallery the site's home page consumes)
 - `POST /api/v1/records` — anonymous booking, **until #8** adds client phone verification
 - `GET /api/v1/health`
 - `/api/v1/auth/*` (login / logout / me)
 
-A contract test enforces: every `/api/v1` route has an auth dependency or is allowlisted.
+A contract test enforces: every `/api/v1` route has an auth dependency or is allowlisted. `GET /api/v1/events` (SSE, #239) requires a session (transport, not entity — no permission token).
 
 ## CSRF Posture
 Two independent lines: (1) JSON-only API + CORS with credentials restricted to listed origins (a foreign page cannot send a JSON mutation past the preflight); (2) `Sec-Fetch-Site: cross-site` is rejected on **authenticated mutating endpoints** (missing header passes). Anonymous routes are exempt — CSRF targets sessions.

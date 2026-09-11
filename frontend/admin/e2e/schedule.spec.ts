@@ -79,8 +79,9 @@ test.describe('Schedule — Week Navigation and UI', () => {
     const restoredText = await dateRange.textContent();
     expect(restoredText).toBe(currentWeekText);
 
-    // Now-line should be visible (only on current week during business hours)
-    // Note: now-line may not render outside business hours, so we don't hard-assert
+    // Now-line renders only on current week AND only after 09:00 local time
+    // (gridStartMinutes=540 → nowPos < 0 before 09:00 → component hides the line),
+    // so we don't hard-assert here.
   });
 
   // ── 3. Activity cards — visible on schedule ────────────────────────────
@@ -131,19 +132,23 @@ test.describe('Schedule — Week Navigation and UI', () => {
     await expect(firstCard).toBeVisible();
   });
 
-  // ── 6. Now-line — visible on current week during business hours ────────
+  // ── 6. Now-line — visible on current week after 09:00 local ────────────
 
-  test('now-line — visible on current week (if within business hours)', async ({ page }) => {
+  test('now-line — visible on current week (after 09:00 grid start)', async ({ page }) => {
     const now = new Date();
     const hours = now.getHours();
 
     const nowLine = page.locator('[data-testid="now-line"]');
 
-    if (hours >= 8 && hours < 22) {
-      // During typical business hours, now-line should be visible on current week
+    // Component dependency: the schedule grid starts at 09:00 local
+    // (gridStartMinutes = 540). Before 09:00 nowPos is negative and the
+    // component legitimately hides the now-line, so only from 09:00 onward
+    // can we hard-assert visibility (GH #247).
+    if (hours >= 9 && hours < 22) {
       await expect(nowLine).toBeVisible({ timeout: 5_000 });
     } else {
-      // Outside business hours, now-line may or may not be visible — just verify no crash
+      // Before 09:00 (or late evening) the line may or may not be visible —
+      // just verify the page renders without crashing.
       await page.waitForTimeout(500);
     }
   });

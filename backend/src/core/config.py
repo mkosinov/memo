@@ -3,7 +3,7 @@
 import os
 from typing import Annotated
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic_settings.sources import NoDecode
 
@@ -25,6 +25,23 @@ class Settings(BaseSettings):
         "http://127.0.0.1:3002",
     ]
     LOG_LEVEL: str = "INFO"
+    # Signs the sqladmin session cookie (GH #247 §2.8). API sessions are
+    # random opaque tokens — no SECRET_KEY involved there.
+    SECRET_KEY: str = ""
+
+    @model_validator(mode="after")
+    def _resolve_secret_key(self) -> "Settings":
+        """Production fails fast on an empty SECRET_KEY; otherwise an empty
+        value resolves to the fixed dev constant (stable across dev
+        restarts — random-per-boot was rejected as a footgun, §2.8)."""
+        if self.ENV == "production" and not self.SECRET_KEY:
+            raise ValueError(
+                "SECRET_KEY must be set when ENV=production "
+                "(it signs the sqladmin session cookie)"
+            )
+        if not self.SECRET_KEY:
+            self.SECRET_KEY = "dev-sqladmin-secret"
+        return self
 
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod

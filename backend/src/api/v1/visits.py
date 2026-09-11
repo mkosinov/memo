@@ -6,6 +6,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
 
+from src.auth.permissions import require_permission, verify_fetch_metadata
 from src.db import SessionDep
 from src.errors import ErrorCode, ErrorDetail
 from src.schemas.common import PaginatedResponse
@@ -19,7 +20,11 @@ from src.schemas.visit import (
 )
 from src.services.visit import VisitService, get_visit_service
 
-router = APIRouter(tags=["visits"])
+router = APIRouter(
+    tags=["visits"],
+    # GH #247 spec §3.7: wholly-private router — read guard at router level.
+    dependencies=[Depends(require_permission("visits:read"))],
+)
 
 
 @lru_cache
@@ -29,6 +34,13 @@ def _get_visit_service() -> VisitService:
 
 
 _ServiceDep = Annotated[VisitService, Depends(_get_visit_service)]
+
+# GH #247 (spec §3.7): every mutating route carries visits:write plus the
+# CSRF fetch-metadata secondary line (verify_fetch_metadata).
+_WRITE_GUARD = [
+    Depends(require_permission("visits:write")),
+    Depends(verify_fetch_metadata),
+]
 
 
 def _map_visit(visit) -> VisitResponse:
@@ -85,7 +97,8 @@ async def get_visit(
     return _map_visit(visit)
 
 
-@router.post("", response_model=VisitResponse, status_code=201)
+@router.post("", response_model=VisitResponse, status_code=201,
+             dependencies=_WRITE_GUARD)
 async def create_visit(
     data: VisitCreate,
     service: _ServiceDep,
@@ -104,7 +117,7 @@ async def create_visit(
     return _map_visit(visit)
 
 
-@router.put("/{visit_id}", response_model=VisitResponse)
+@router.put("/{visit_id}", response_model=VisitResponse, dependencies=_WRITE_GUARD)
 async def update_visit(
     visit_id: str,
     data: VisitUpdate,
@@ -124,7 +137,7 @@ async def update_visit(
     return _map_visit(visit)
 
 
-@router.patch("/{visit_id}", response_model=VisitResponse)
+@router.patch("/{visit_id}", response_model=VisitResponse, dependencies=_WRITE_GUARD)
 async def patch_visit(
     visit_id: str,
     data: VisitPatch,
@@ -144,7 +157,7 @@ async def patch_visit(
     return _map_visit(visit)
 
 
-@router.delete("/{visit_id}", status_code=204)
+@router.delete("/{visit_id}", status_code=204, dependencies=_WRITE_GUARD)
 async def delete_visit(
     visit_id: str,
     service: _ServiceDep,
@@ -162,7 +175,7 @@ async def delete_visit(
         )
 
 
-@router.put("/{visit_id}/status", response_model=VisitResponse)
+@router.put("/{visit_id}/status", response_model=VisitResponse, dependencies=_WRITE_GUARD)
 async def update_visit_status(
     visit_id: str,
     data: VisitStatusUpdate,

@@ -58,8 +58,8 @@ import {
   type MaterialCreate,
   type MaterialUpdate,
   UserSettingsResponseSchema,
+  UserSettingsCreateSchema,
   type UserSettingsResponse,
-  type UserSettingsCreate,
   type UserSettingsUpdate,
   MasterListResponseSchema,
   LocationListResponseSchema,
@@ -79,7 +79,10 @@ import {
   PhotoListResponseSchema,
   type PhotoListResponse,
   type PaginatedResponse,
+  AuthMeSchema,
+  type AuthMe,
 } from './schemas';
+import { ApiError } from './client';
 
 // ─── List pagination ─────────────────────────────────────────────────────────
 
@@ -828,28 +831,51 @@ export async function getAllTags(): Promise<TagResponse[]> {
   return api('/api/v1/tags/all', TagAllResponseSchema);
 }
 
-// ─── User Settings ────────────────────────────────────────────────────
+// ─── Auth (GH #247 spec §3.6/§4.1) ────────────────────────────────────────
 
-export async function getUserSettings(userId: string): Promise<UserSettingsResponse> {
-  return api(
-    `/api/v1/user-settings?user_id=${encodeURIComponent(userId)}`,
-    UserSettingsResponseSchema,
-  );
+export async function login(phone: string, password: string): Promise<AuthMe> {
+  return api('/api/v1/auth/login', AuthMeSchema, {
+    method: 'POST',
+    body: JSON.stringify({ phone, password }),
+  });
 }
 
-export async function createUserSettings(data: UserSettingsCreate): Promise<UserSettingsResponse> {
+export async function logout(): Promise<void> {
+  await api('/api/v1/auth/logout', z.any(), { method: 'POST' });
+}
+
+// Guest bootstrap contract (spec §4.1): a 401 here means "no session" —
+// resolved to null, not thrown, so AuthContext can distinguish guest from
+// error. /auth/* 401s also never trigger the unauthorized handler (client.ts).
+export async function getMe(): Promise<AuthMe | null> {
+  try {
+    return await api('/api/v1/auth/me', AuthMeSchema);
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 401) return null;
+    throw e;
+  }
+}
+
+// ─── User Settings ────────────────────────────────────────────────────
+// Own-only since GH #247 §3.8: the server derives the user from the session —
+// no user_id query parameter anywhere.
+
+export async function getUserSettings(): Promise<UserSettingsResponse> {
+  return api('/api/v1/user-settings', UserSettingsResponseSchema);
+}
+
+export async function createUserSettings(
+  data: z.input<typeof UserSettingsCreateSchema>,
+): Promise<UserSettingsResponse> {
   return api('/api/v1/user-settings', UserSettingsResponseSchema, {
     method: 'POST',
     body: JSON.stringify(data),
   });
 }
 
-export async function updateUserSettings(
-  userId: string,
-  data: UserSettingsUpdate,
-): Promise<UserSettingsResponse> {
+export async function updateUserSettings(data: UserSettingsUpdate): Promise<UserSettingsResponse> {
   return api(
-    `/api/v1/user-settings?user_id=${encodeURIComponent(userId)}`,
+    '/api/v1/user-settings',
     UserSettingsResponseSchema,
     {
       method: 'PUT',
@@ -860,11 +886,10 @@ export async function updateUserSettings(
 
 // PATCH for partial updates — only send the changed fields.
 export async function patchUserSettings(
-  userId: string,
   data: Partial<UserSettingsUpdate>,
 ): Promise<UserSettingsResponse> {
   return api(
-    `/api/v1/user-settings?user_id=${encodeURIComponent(userId)}`,
+    '/api/v1/user-settings',
     UserSettingsResponseSchema,
     {
       method: 'PATCH',

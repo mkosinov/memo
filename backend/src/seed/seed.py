@@ -10,6 +10,11 @@ Usage:
     uv run python -m seed.seed          # direct module
     uv run python -m seed               # via __main__
     DATABASE_URL=sqlite+aiosqlite:///./memo.db uv run python -m seed
+
+Staff demo users (GH #247 §3.11): in non-production ENV the seed also
+creates admin ``+79990000001/admin12345`` and master
+``+79990000002/master12345`` (linked to the first seeded master). Skipped
+when ``ENV=production`` — staging must set it too (spec deployment note).
 """
 
 from __future__ import annotations
@@ -20,6 +25,7 @@ from datetime import datetime, timedelta
 # ruff: noqa: RUF001, RUF003  -- Cyrillic text is intentional (Russian language app)
 from sqlalchemy import select
 
+from src.auth.passwords import hash_password
 from src.db.base import Base
 from src.db.database import DBManager
 from src.models import (
@@ -35,6 +41,7 @@ from src.models import (
     ServiceMaterial,
     Tag,
     Tariff,
+    User,
     Visit,
     Visitor,
 )
@@ -188,6 +195,38 @@ _ACTIVITIES_RAW_FIXED: list[tuple] = [
 # ---------------------------------------------------------------------------
 # Seed functions
 # ---------------------------------------------------------------------------
+
+# Demo staff passwords (GH #247 §3.11) — obviously-fake, dev/demo only,
+# never seeded when ENV=production. Satisfy the policy (8–64 chars).
+_STAFF_PASSWORDS_HASHED = {
+    "admin12345": hash_password("admin12345"),
+    "master12345": hash_password("master12345"),
+}
+
+
+async def seed_staff_users(session) -> None:
+    """Seed the demo staff users (GH #247 §3.11) — dev/demo only.
+
+    Admin ``+79990000001/admin12345``; master ``+79990000002/master12345``
+    linked to the first seeded master (by ``sort_order`` — m1). Guarded by
+    ``ENV != production`` at the call site in :func:`seed_data`; the
+    obviously-fake passwords are deliberate (public repo).
+    """
+    first_master = (
+        await session.execute(
+            select(Master).order_by(Master.sort_order, Master.id).limit(1)
+        )
+    ).scalar_one()
+    session.add(
+        User(phone="+79990000001", role="admin",
+             password_hash=_STAFF_PASSWORDS_HASHED["admin12345"])
+    )
+    session.add(
+        User(phone="+79990000002", role="master",
+             master_id=first_master.id,
+             password_hash=_STAFF_PASSWORDS_HASHED["master12345"])
+    )
+
 
 async def _seed_masters(session) -> None:
     masters = [
@@ -591,6 +630,9 @@ async def seed_data(manager: DBManager) -> None:
         await _seed_photos(session)
         await _seed_materials(session)
         await _seed_service_materials(session)
+        # GH #247 §3.11 — demo staff accounts, never in production ENV.
+        if os.environ.get("ENV", "development") != "production":
+            await seed_staff_users(session)
         await session.commit()
 
 

@@ -6,6 +6,7 @@ from typing import Annotated
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 
+from src.auth.permissions import require_permission, verify_fetch_metadata
 from src.db import SessionDep
 from src.domain.deletion import ResolutionError, collect_dependencies
 from src.errors import ErrorCode, ErrorDetail
@@ -23,7 +24,11 @@ from src.schemas.visitor import VisitorResponse
 from src.services.client import ClientService, get_client_service, list_clients_with_stats
 from src.services.visitor import get_visitor_service
 
-router = APIRouter(tags=["clients"])
+router = APIRouter(
+    tags=["clients"],
+    # GH #247 spec §3.7: wholly-private router — read guard at router level.
+    dependencies=[Depends(require_permission("clients:read"))],
+)
 
 
 @lru_cache
@@ -39,6 +44,13 @@ def _get_visitor_service():
 
 
 _ServiceDep = Annotated[ClientService, Depends(_get_client_service)]
+
+# GH #247 (spec §3.7): every mutating route carries clients:write plus the
+# CSRF fetch-metadata secondary line (verify_fetch_metadata).
+_WRITE_GUARD = [
+    Depends(require_permission("clients:write")),
+    Depends(verify_fetch_metadata),
+]
 _VisitorServiceDep = Annotated[any, Depends(_get_visitor_service)]
 
 
@@ -89,7 +101,8 @@ async def get_client(
     return client
 
 
-@router.post("", response_model=ClientResponse, status_code=201)
+@router.post("", response_model=ClientResponse, status_code=201,
+             dependencies=_WRITE_GUARD)
 async def create_client(
     data: ClientCreate,
     service: _ServiceDep,
@@ -99,7 +112,7 @@ async def create_client(
     return await service.create(db_session=session, data=data)
 
 
-@router.put("/{client_id}", response_model=ClientResponse)
+@router.put("/{client_id}", response_model=ClientResponse, dependencies=_WRITE_GUARD)
 async def update_client(
     client_id: str,
     data: ClientUpdate,
@@ -119,7 +132,7 @@ async def update_client(
     return client
 
 
-@router.patch("/{client_id}", response_model=ClientResponse)
+@router.patch("/{client_id}", response_model=ClientResponse, dependencies=_WRITE_GUARD)
 async def patch_client(
     client_id: str,
     data: ClientPatch,
@@ -139,7 +152,7 @@ async def patch_client(
     return client
 
 
-@router.delete("/{client_id}", status_code=204)
+@router.delete("/{client_id}", status_code=204, dependencies=_WRITE_GUARD)
 async def delete_client(
     client_id: str,
     service: _ServiceDep,
@@ -205,7 +218,7 @@ async def list_client_visitors(
     return [VisitorResponse.model_validate(v) for v in visitors]
 
 
-@router.post("/{client_id}/archive", response_model=ClientResponse)
+@router.post("/{client_id}/archive", response_model=ClientResponse, dependencies=_WRITE_GUARD)
 async def archive_client(
     client_id: str,
     service: _ServiceDep,
@@ -230,7 +243,7 @@ async def archive_client(
     return await _refetch_or_404(service, session, client_id)
 
 
-@router.post("/{client_id}/restore", response_model=ClientResponse)
+@router.post("/{client_id}/restore", response_model=ClientResponse, dependencies=_WRITE_GUARD)
 async def restore_client(
     client_id: str,
     service: _ServiceDep,

@@ -1,10 +1,37 @@
-"""SQLAdmin model views and setup."""
+"""SQLAdmin model views and setup — GH #247 §3.9.
 
-from typing import ClassVar
+``SqlAdminAuth`` wires the stock sqladmin login screen to ``AuthService``
+(phone + password form fields ``username``/``password``; ``is_active``
+filter and the §2.11 lockout ladder live inside the service) and admits
+``role == "admin"`` only. The backend mounts its own SessionMiddleware
+with ``settings.SECRET_KEY`` — the app does NOT add one manually.
 
+``UserAdmin`` renders ``password_hash`` as a write-only ``PasswordField``
+(never populated from the model, never rendered back) with the policy hint
+as help text; ``on_model_change`` applies the semantics — create: required →
+``validate_password`` → hash; edit: blank leaves ``password_hash``
+unchanged (the key is dropped so sqladmin skips the column), filled →
+validate + hash.
+"""
+
+from typing import Any, ClassVar
+
+from fastapi import HTTPException
 from sqladmin import Admin, ModelView
+from sqladmin.authentication import AuthenticationBackend
 from sqlalchemy import Column, create_engine
+from starlette.requests import Request
+from wtforms import PasswordField
+from wtforms.validators import Optional
 
+from src.auth.passwords import (
+    PASSWORD_POLICY_HINT_RU,
+    PasswordPolicyError,
+    hash_password,
+    validate_password,
+)
+from src.auth.service import get_auth_service
+from src.core.config import settings
 from src.db import db_manager
 from src.models.activity import Activity
 from src.models.client import Client
@@ -31,12 +58,89 @@ class MasterAdmin(ModelView, model=Master):
     icon = "fa-solid fa-user-tie"
 
 
+class SqlAdminAuth(AuthenticationBackend):
+    """GH #247 §3.9 — sqladmin login via AuthService, role=admin only.
+
+    The constructor takes ONLY ``secret_key`` (sqladmin 0.20+ API — there is
+    no ``secret_url``; the login URL is the stock ``admin:login`` route) and
+    mounts its own SessionMiddleware with that key. ``login`` reads the
+    standard form (phone in the ``username`` field + password), verifies via
+    ``AuthService`` (which enforces ``is_active`` and the §2.11 lockout
+    ladder) and requires ``role == "admin"``; the sqladmin session stores
+    only ``{"user_id": ...}``.
+    """
+
+    def __init__(self, secret_key: str) -> None:
+        super().__init__(secret_key=secret_key)
+
+    async def login(self, request: Request) -> bool:
+        form = await request.form()
+        phone = str(form.get("username", "")).strip()
+        password = str(form.get("password", ""))
+        client_ip = request.client.host if request.client else "unknown"
+        try:
+            async with db_manager.async_session() as session:
+                user, _token = await get_auth_service().login(
+                    session, phone, password, client_ip
+                )
+        except HTTPException:
+            # 401 invalid credentials / 429 locked out — either way the
+            # stock login screen re-renders with its error message.
+            return False
+        if user.role != "admin":
+            return False
+        request.session.update({"user_id": user.id})
+        return True
+
+    async def logout(self, request: Request) -> bool:
+        request.session.clear()
+        return True
+
+    async def authenticate(self, request: Request) -> bool:
+        return bool(request.session.get("user_id"))
+
+
 class UserAdmin(ModelView, model=User):
     column_list: ClassVar[list[Column]] = [User.id, User.phone, User.email, User.role, User.master_id, User.is_active]
     column_searchable_list: ClassVar[list[Column]] = [User.phone, User.email]
+    # Write-only password field (never populated from the model, never
+    # rendered back). NOTE: sqladmin looks form_overrides up by STRING prop
+    # name — a Column-object key would silently no-op.
+    form_overrides: ClassVar[dict[str, type]] = {"password_hash": PasswordField}
+    # ``Optional()`` FIRST relaxes the InputRequired sqladmin auto-adds for
+    # the non-nullable column (review blocker): wtforms runs validators in
+    # order and ``Optional`` raises StopValidation on blank input, so a
+    # blank EDIT submits instead of failing form validation with a 400 —
+    # without it, "edit: blank = unchanged" (and the lockout-reset flow)
+    # is unreachable. Required-ness on CREATE is enforced in
+    # ``on_model_change`` (is_created and blank → PasswordPolicyError).
+    form_args: ClassVar[dict[str, dict[str, Any]]] = {
+        "password_hash": {
+            "description": PASSWORD_POLICY_HINT_RU,
+            "validators": [Optional()],
+        },
+    }
     name = "User"
     name_plural = "Users"
     icon = "fa-solid fa-user"
+
+    async def on_model_change(
+        self, data: dict, model: Any, is_created: bool, request: Request
+    ) -> None:
+        """Password semantics (spec §3.9): create — required, validate, hash;
+        edit — blank leaves ``password_hash`` unchanged (key dropped so the
+        column is not written), filled — validate + hash.
+        """
+        password = data.get("password_hash")
+        if is_created:
+            if not password or not password.strip():
+                raise PasswordPolicyError()
+            data["password_hash"] = hash_password(validate_password(password))
+            return
+        if password is None or not password.strip():
+            data.pop("password_hash", None)
+            return
+        data["password_hash"] = hash_password(validate_password(password))
 
 
 class LocationAdmin(ModelView, model=Location):
@@ -155,7 +259,7 @@ def setup_admin(app) -> Admin:
     """
     sync_url = str(db_manager.engine.url).replace("sqlite+aiosqlite://", "sqlite://")
     sync_engine = create_engine(sync_url)
-    admin = Admin(app, engine=sync_engine)
+    admin = Admin(app, engine=sync_engine, authentication_backend=SqlAdminAuth(settings.SECRET_KEY))
     for view_cls in ALL_ADMIN_VIEWS:
         admin.add_view(view_cls)
     return admin

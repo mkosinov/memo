@@ -25,6 +25,21 @@ export class ApiError extends Error {
   }
 }
 
+// Unauthorized handler (GH #247 spec §4.1): module-level registration so the
+// shared client stays framework-neutral — the admin registers a login
+// redirect; frontend/web registers nothing. Invoked once per 401 response,
+// except for /auth/* calls (guest checks / wrong password are normal flow).
+type UnauthorizedHandler = () => void;
+let unauthorizedHandler: UnauthorizedHandler | null = null;
+
+export function setUnauthorizedHandler(fn: UnauthorizedHandler | null): void {
+  unauthorizedHandler = fn;
+}
+
+function isAuthPath(path: string): boolean {
+  return path.startsWith('/api/v1/auth/');
+}
+
 async function api<T>(path: string, schema: z.ZodType<T, z.ZodTypeDef, unknown>, options?: RequestInit): Promise<T> {
   const method = options?.method;
   const headers: Record<string, string> = {
@@ -37,6 +52,9 @@ async function api<T>(path: string, schema: z.ZodType<T, z.ZodTypeDef, unknown>,
   const res = await fetch(`${API_BASE}${path}`, {
     ...options,
     headers,
+    // Cookie sessions (GH #247 spec §4.1): the memo_session cookie rides along
+    // on every request so the backend can resolve the session user.
+    credentials: 'include',
   });
 
   if (!res.ok) {
@@ -75,6 +93,18 @@ async function api<T>(path: string, schema: z.ZodType<T, z.ZodTypeDef, unknown>,
       }
     } catch {
       // Body not JSON or empty; use default message
+    }
+
+    // Session expiry mid-work (GH #247 spec §4.1): hand the registered handler
+    // a chance to react (the admin redirects to /login) — /auth/* 401s are
+    // part of normal flow and never trigger it. Handler failures are ignored:
+    // the original 401 ApiError must always be the one the caller sees.
+    if (res.status === 401 && unauthorizedHandler !== null && !isAuthPath(path)) {
+      try {
+        unauthorizedHandler();
+      } catch {
+        // Handler (e.g. login redirect) failed — fall through to the ApiError
+      }
     }
 
     throw new ApiError(res.status, message, code, dependencies);

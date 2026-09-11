@@ -532,8 +532,10 @@ export const UserSettingsResponseSchema = z.object({
 
 export type UserSettingsResponse = z.infer<typeof UserSettingsResponseSchema>;
 
+// user_id is optional (GH #247 §3.8): the server derives the session user —
+// the client no longer fabricates one. Still accepted when known.
 export const UserSettingsCreateSchema = z.object({
-  user_id: z.string(),
+  user_id: z.string().optional(),
   theme: z.string().optional().default('light'),
   language: z.string().optional().default('ru'),
   column_order_masters: z.array(z.string()).optional().default([]),
@@ -544,6 +546,33 @@ export type UserSettingsCreate = z.infer<typeof UserSettingsCreateSchema>;
 
 export const UserSettingsUpdateSchema = UserSettingsCreateSchema.partial().omit({ user_id: true });
 export type UserSettingsUpdate = z.infer<typeof UserSettingsUpdateSchema>;
+
+// ─── Auth (GH #247 spec §3.6) ─────────────────────────────────────────────
+// Mirrors backend src/schemas/auth.py. `user.id` is the users.id UUID string
+// (feeds user-settings); `master` is the linked master profile snapshot when
+// master_id is set, else absent/null — the sidebar falls back to the phone.
+
+export const AuthUserSchema = z.object({
+  id: z.string(),
+  phone: z.string(),
+  role: z.string(),
+  master_id: z.string().nullable(),
+  email: z.string().nullable(),
+});
+export type AuthUser = z.infer<typeof AuthUserSchema>;
+
+export const MasterSnapshotSchema = z.object({
+  first_name: z.string(),
+  last_name: z.string(),
+});
+export type MasterSnapshot = z.infer<typeof MasterSnapshotSchema>;
+
+export const AuthMeSchema = z.object({
+  user: AuthUserSchema,
+  permissions: z.array(z.string()),
+  master: MasterSnapshotSchema.nullable().optional(),
+});
+export type AuthMe = z.infer<typeof AuthMeSchema>;
 
 // ─── Delete dry-run dependency tree (§5 — GH #207) ───────────────────────────
 // 409 Conflict body of the unified DELETE (no-body dry-run). Counters + sums only,

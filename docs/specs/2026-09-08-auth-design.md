@@ -117,7 +117,7 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {   # keys are UserRole values
 | `POST /api/v1/auth/logout` | — | `204` + cookie cleared | always (idempotent, works without session) |
 | `GET /api/v1/auth/me` | — | `200 {user, permissions, master?}` | 401 `AUTH_UNAUTHORIZED` |
 
-`user` = `{id, phone, role, master_id, email}` (id is the users.id UUID string — feeds user-settings); `master` = the linked master profile snapshot (`{first_name, last_name}`) when `master_id` is set, else `null` — the sidebar user block (§4.5) falls back to the phone when `master` is null (a master user without a linked profile is valid and must not break the UI). Registered in `main.py` (`prefix="/api/v1/auth"`); all three are in `PUBLIC_ROUTES` (`me` returns 401 rather than requiring the dependency — the frontend must distinguish "no session" from "wrong password"; `getMe()` therefore resolves 401 to `null`, not an exception — §4.1).
+`user` = `{id, phone, role, master_id, email}` (id is the users.id UUID string — feeds user-settings); `master` = the linked master profile snapshot (`{first_name, last_name, avatar_url}` — `avatar_url` added by #262 amendment, 2026-09-10) when `master_id` is set, else `null` — the sidebar user block (§4.5) shows «Аноним» when master is null (a master user without a linked profile is valid and must not break the UI). Registered in `main.py` (`prefix="/api/v1/auth"`); all three are in `PUBLIC_ROUTES` (`me` returns 401 rather than requiring the dependency — the frontend must distinguish "no session" from "wrong password"; `getMe()` therefore resolves 401 to `null`, not an exception — §4.1).
 
 ### 3.7 Router guards — binding access matrix
 
@@ -199,7 +199,7 @@ State `{user, permissions, master?, status: "loading" | "authenticated" | "guest
 ### 4.5 User block, logout, and the deferred role display
 
 - **The interface is identical for both roles in v1** (user decision, G2): no nav filtering, no hidden write affordances, no new role-specific sections. Per-role display tuning is a recorded future task (§8); until then the backend 403 is the enforcing layer and a forbidden write surfaces as the standard API error toast.
-- The existing bottom-left user block (`Menubar.tsx` «User Avatar», currently hardcoded «А»/«Админ») shows the real logged-in user: avatar initial + master profile name when linked, else phone; role label («Админ»/«Мастер»). It hosts the logout control (a small menu or icon button beside the block — implementer's choice within the existing component's styling).
+- The existing bottom-left user block (`Menubar.tsx` «User Avatar», currently hardcoded «А»/«Админ») shows the real logged-in user: avatar (photo from the master snapshot `avatar_url` when set, else the initial of the displayed name) + master profile name when linked, **else «Аноним»** (#262 amendment 2026-09-10, user decision: no phone, no role label on the block). It hosts the logout control: a **text button «Выйти»** beside the block (#262 pin 2026-09-10: text button only, do not build a menu — the user popup menu arrives in #262 and replaces it).
 - `AuthContext.can(permission)` ships and is unit-tested, but nothing consumes it for display in v1 — it is the seam for the future tuning.
 
 ### 4.6 UserSettings integration

@@ -65,6 +65,7 @@ docker-compose.override.yml
 # Local workspace files
 .opencode/*
 !.opencode/agents/
+!.opencode/command/
 !.opencode/skills/
 !.opencode/scripts/
 !.opencode/tools/

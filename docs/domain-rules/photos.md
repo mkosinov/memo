@@ -50,6 +50,10 @@ Response-only field: `client_name` (nullable, denormalized on GET /api/v1/photos
 - Service/location titles resolve client-side via `/all` maps; `client_name` is the only denormalized response field
 - Activity display labels use the canonical `formatActivityLabel` convention — see `activities.md` → "Display label convention". #213 (display-lookup composite) will centralize activity display data further — the canonical label is cross-pinned there.
 
+## Master role (#263)
+
+Для роли `master` (спека `docs/specs/2026-09-10-master-role-design.md`): **«своё фото» = фото, привязанное к активности мастера** (`photo.activity_id → activity.master_id = master_key`). Фото клиентов/услуг/локаций и без владельца мастеру не видны (категория «фото своего клиента» отклонена — юзер 10.09). Полный CUD своих фото (filename строкой — загрузки файлов в v1 нет); список `/photos` — только свои; чужие get/мутации → 404. Публичная галерея `/photos/web` не трогается.
+
 ## API Endpoints
 | Method | Path | Params | Description |
 |--------|------|--------|-------------|

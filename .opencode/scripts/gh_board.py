@@ -8,6 +8,8 @@ Usage (from repo root):
   python3 .zcode/scripts/gh_board.py set-next-up N 1|2|3|none    — set/clear queue position
   python3 .zcode/scripts/gh_board.py shift                       — after Next Up 1 completes: clear it, shift 2→1, 3→2
   python3 .zcode/scripts/gh_board.py status N "In IMPL"          — move a card's status
+  python3 .zcode/scripts/gh_board.py merged N PR ["short title"] — append the "Recently merged" line (scratchpad v2)
+  python3 .zcode/scripts/gh_board.py issue N                      — standard issue view: state, labels, body
 
 Project constants are hardcoded (IDs are stable for Project #3).
 The script is part of the host/container seam and travels via git.
@@ -18,6 +20,12 @@ one and copy over).
 import json
 import subprocess
 import sys
+from datetime import date
+from pathlib import Path
+
+SCRATCHPAD = Path(__file__).resolve().parents[2] / ".opencode" / "scratchpad.md"
+MERGED_BLOCK = "## Recently merged"
+MERGED_MAX = 5
 
 # Configure per project. Get IDs via:
 #   gh api graphql -f query='query { user(login: "<owner>") { projectV2(number: <N>) { id fields(first: 30) { nodes { ... on ProjectV2SingleSelectField { name id options { id name } } } } } } }'
@@ -184,6 +192,73 @@ def cmd_status(number: int, status: str):
     print(f"#{number}: Status → {status}")
 
 
+def cmd_issue(number: int):
+    """Standard `gh issue view` with fixed output — replaces ad-hoc `--json … -q …` compositions
+    (audit 2026-09-09: 33 hand-rolled calls in 3 weeks). Body is capped at 120 lines."""
+    r = subprocess.run(
+        ["gh", "issue", "view", str(number), "--repo", f"{OWNER}/{REPO}",
+         "--json", "number,title,state,labels,body,url"],
+        capture_output=True, text=True,
+    )
+    if r.returncode != 0:
+        sys.exit(f"gh issue view error: {r.stderr.strip()}")
+    d = json.loads(r.stdout)
+    labels = ", ".join(l["name"] for l in d.get("labels") or [])
+    print(f"#{d['number']} [{d['state']}] {d['title']}")
+    if labels:
+        print(f"  Labels: {labels}")
+    print(f"  {d['url']}")
+    body = (d.get("body") or "").rstrip("\n")
+    lines = body.split("\n")
+    print()
+    print("\n".join(lines[:120]))
+    if len(lines) > 120:
+        print(f"... [body truncated, {len(lines) - 120} more lines]")
+
+
+def cmd_merged(number: int, pr: int, title: str = ""):
+    """Append "- YYYY-MM-DD #issue [title] → PR #n" to "## Recently merged" (newest first, max 5).
+
+    Scratchpad Discipline v2: the manager runs this at the In-main board flip;
+    the session section is then removed. Creates the block (right under the
+    file title) when missing.
+    """
+    if not SCRATCHPAD.exists():
+        sys.exit(f"scratchpad not found at {SCRATCHPAD}")
+    lines = SCRATCHPAD.read_text(encoding="utf-8").rstrip("\n").split("\n")
+    stamp = subprocess.run(["date", "+%F"], capture_output=True, text=True).stdout.strip() \
+        or date.today().isoformat()
+    entry = f"- {stamp} #{number}" + (f" {title}" if title else "") + f" → PR #{pr}"
+
+    if MERGED_BLOCK in lines:
+        head = lines.index(MERGED_BLOCK)
+        hard_end = len(lines)
+        for i in range(head + 1, len(lines)):
+            if lines[i].strip() and not lines[i].startswith("- "):
+                hard_end = i
+                break
+        entries = [ln for ln in lines[head + 1:hard_end] if ln.startswith("- ")]
+        if any(f"#{number}" in e and f"PR #{pr}" in e for e in entries):
+            print(f"Already recorded: #{number} → PR #{pr}")
+            return
+        entries = ([entry] + entries)[:MERGED_MAX]
+        n_entries = len(entries)
+        new = lines[:head] + [MERGED_BLOCK] + entries
+        if hard_end < len(lines) and lines[hard_end].strip():
+            new.append("")
+        new += lines[hard_end:]
+    else:
+        insert_at = 1 if lines and lines[0].startswith("# ") else 0
+        while insert_at < len(lines) and not lines[insert_at].strip():
+            insert_at += 1
+        new = lines[:insert_at] + [MERGED_BLOCK, entry, ""] + lines[insert_at:]
+        n_entries = 1
+
+    SCRATCHPAD.write_text("\n".join(new) + "\n", encoding="utf-8")
+    print(f"Recently merged: {entry}")
+    print(f"block now holds {n_entries}/{MERGED_MAX} entries")
+
+
 if __name__ == "__main__":
     args = sys.argv[1:]
     if not args:
@@ -200,6 +275,10 @@ if __name__ == "__main__":
         cmd_shift()
     elif cmd == "status" and len(args) == 3:
         cmd_status(int(args[1]), args[2])
+    elif cmd == "merged" and len(args) >= 3:
+        cmd_merged(int(args[1]), int(args[2]), " ".join(args[3:]).strip())
+    elif cmd == "issue" and len(args) == 2:
+        cmd_issue(int(args[1]))
     else:
         print(__doc__)
         sys.exit(1)

@@ -48,9 +48,9 @@ Your dispatch prompt specifies exactly one phase: `DESIGN` or `IMPL`. Run only t
 
 ### Scratchpad: READ-ONLY
 
-- Read `.opencode/scratchpad.md` at phase start for state.
+- Read `.opencode/scratchpad.md` at phase start for state (IMPL: the active worktree path).
 - You NEVER write to it. The manager is the sole owner.
-- Instead, your final report contains a `## Scratchpad Delta` section — the manager applies it.
+- Instead, your final report contains a `## Scratchpad Delta` section — the manager applies it. **IMPL only** (v2: DESIGN writes zero scratchpad state — DESIGN reports carry no delta). On the final IMPL report the delta MUST be the ready-to-paste `## Recently merged` entry: `- YYYY-MM-DD #<issue> <short title> → PR #<n>` — the manager runs `gh_board.py merged <issue> <pr> "<title>"` (the script stamps the date).
 
 ### Human gates → NEEDS_APPROVAL
 
@@ -65,7 +65,7 @@ Gate: G1b | G2 | G4.5 | G7
 Question: <exactly what the user must decide, one paragraph>
 Artifacts: <paths: spec file, plan file, report, screenshots>
 Recommendation: <your recommendation, 1-2 lines>
-## Scratchpad Delta
+## Scratchpad Delta (IMPL gates G4.5/G7 only — omit for DESIGN gates G1b/G2)
 <state to record>
 ```
 
@@ -109,7 +109,7 @@ Every report ends with:
 ## Artifacts
 <paths created/modified: spec, plan, worktree, branch, PR url>
 ## Scratchpad Delta
-<exact lines the manager should write to the scratchpad>
+<IMPL only — exact lines the manager should write. Final IMPL report: the ready-to-paste Recently merged entry (issue, short title, PR). DESIGN: omit (v2 — zero scratchpad writes).>
 ```
 
 If DONE — nothing else. No implementation narrative, no diffs, no test logs beyond pass/fail counts.
@@ -159,8 +159,9 @@ Specs and plans are large (a plan can be 20K+ tokens). Re-reading them wholesale
 session is a top token waster (real case: one DESIGN session re-read a 78 KB plan 30× and its
 spec 12× ≈ 700K tokens, most of it re-sent context).
 
-1. **Read any doc fully at most ONCE per session.** You wrote it (with edits) — its content is
-   already in your context.
+1. **Read any doc fully at most ONCE per session** — yours (spec/plan) or inherited (a previous
+   session's spec, domain-rules, user materials). The rule is about the file's SIZE, not
+   ownership: you wrote it (with edits) — its content is already in your context.
 2. **Locate by anchor, not by read.** Get the section map once: `grep '^## ' <file>` (for plans
    `grep '^## Task' <file>` returns the task headers with line numbers). Then read ONLY the
    needed region: `read <file> --offset <line> --limit <60>`.
@@ -171,6 +172,11 @@ spec 12× ≈ 700K tokens, most of it re-sent context).
    loop read ⇒ fix ⇒ re-read ⇒ next fix.
 5. **Never paste whole docs into reports or dispatch prompts.** Reference by path + section.
    Only the current task's text goes to an implementer (IMPL Step 5a) — never the entire
+6. **Compaction is not a license to re-read everything.** After a context clear the docs are
+   gone — restore the ONE document the current step needs via the anchor procedure (rule 2),
+   never a wholesale re-read "to be safe". A full post-compaction re-read is a last resort and
+   covers one document at a time. (Audit 2026-09-09: spec/plan re-reads of 30–100K, 4–7× per
+   session happened despite this discipline — compaction recovery was the driver.)
    plan/spec.
 
 ## CRITICAL: Controller Delegates Testing & Debugging
@@ -246,7 +252,7 @@ Triggered by manager dispatch with the approved brainstorming output (design con
 
 ## Step 1: Design Spec
 
-1. Read scratchpad for context left by the manager.
+1. The dispatch prompt carries the full approved concept. v2: DESIGN reads no scratchpad state — none is written for it.
 2. If the task involves entity fields/validation/business logic → invoke `domain-rules` skill, check `docs/domain-rules/{entity}.md`, reference or create it.
 3. Write the design spec to `docs/specs/YYYY-MM-DD-<feature>-design.md`:
    - Preserve ALL requirements from the user's source materials (sketches, specs) — never silently change/remove/reinterpret. Conflicts → flag as questions in the report.
@@ -456,6 +462,7 @@ Trigger: all tasks done, tests green. Run ONCE per phase. Skip if no user-visibl
 4. **Error escalation (Gate G7):** push fails / PR errors / red CI / merge errors → STOP, preserve worktree, report NEEDS_APPROVAL with PR URL and error summary.
 5. Explicit fallbacks (merge locally / keep branch / discard) — only if the manager relays an explicit user request.
 6. Report DONE: merged PR url, branch/worktree cleanup status.
+7. **Scratchpad Delta (v2):** the final delta is the ready-to-paste `## Recently merged` entry (issue, short title, PR) — nothing else. List follow-up candidates in the report: the manager files them as GH issues or drops them — they never go into the scratchpad.
 
 ---
 

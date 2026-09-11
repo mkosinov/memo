@@ -3,6 +3,8 @@
 import { useState, useCallback, useRef } from 'react';
 import { RecordTable, type Column } from './RecordTable';
 import { useInlineEditRow } from './useInlineEditRow';
+import { useUI } from '@/contexts/UIContext';
+import { parseApiError } from '@/app/lib/api/parseApiError';
 
 export interface InlineEditRowProps<T extends { id: string | null }, F> {
   row: T;
@@ -98,6 +100,10 @@ export function InlineEditRow<T extends { id: string | null }, F>({
   // ── Row-level save trigger (new rows only) ──────────────────────────────
   // Double-save guard: prevent Enter+blur from double-POSTing.
   const savingRef = useRef(false);
+  // GH #247 §6-2: a rejected write (e.g. 403 for a master) surfaces as the
+  // standard error toast — same channel as the amount-guard in
+  // RecordPaymentsTable.handleAdd — and the row stays editable.
+  const { showToast } = useUI();
 
   const triggerSave = useCallback(async () => {
     if (!isNew || savingRef.current) return;
@@ -107,10 +113,13 @@ export function InlineEditRow<T extends { id: string | null }, F>({
       if (saved) {
         onSaved?.(row, saved);
       }
+    } catch (err) {
+      const { message } = parseApiError(err);
+      showToast(message, 'error');
     } finally {
       savingRef.current = false;
     }
-  }, [isNew, handleSave, row, onSaved]);
+  }, [isNew, handleSave, row, onSaved, showToast]);
 
   /** Blur handler: fires save when focus leaves the entire row. */
   const handleRowBlur = useCallback(

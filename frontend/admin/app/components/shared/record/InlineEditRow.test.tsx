@@ -1,5 +1,15 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, act, fireEvent } from '@testing-library/react';
+// GH #247 §6-2: triggerSave toasts on save failure — mock the UI context
+// (repo pattern: context mocks at module level, before component import).
+vi.mock('@/contexts/UIContext', () => ({
+  useUI: () => ({ showToast: vi.fn() }),
+}));
+vi.mock('@/app/lib/api/parseApiError', () => ({
+  parseApiError: (err: unknown) => ({
+    message: err instanceof Error ? err.message : 'Неизвестная ошибка',
+  }),
+}));
 import { InlineEditRow, type InlineEditRowProps } from './InlineEditRow';
 import type { Column } from './RecordTable';
 

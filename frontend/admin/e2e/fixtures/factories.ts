@@ -343,7 +343,12 @@ function sqlValue(v: string | number | null | undefined): string {
 }
 
 function executeSQL(sql: string): void {
-  sqliteExecWithRetry(`sqlite3 "${resolveDBPath()}" "${sql.replace(/"/g, '\\"')}"`);
+  // The SQL rides inside a DOUBLE-QUOTED shell command — escape shell
+  // metacharacters: `"` ends the command, `$` would be variable-expanded
+  // (the Argon2 hash `$argon2id$v=19$m=65536…` lost its `$` markers that
+  // way and the backend 500'd verifying the mangled hash — T14).
+  const shellSafe = sql.replace(/"/g, '\\"').replace(/\$/g, '\\$');
+  sqliteExecWithRetry(`sqlite3 "${resolveDBPath()}" "${shellSafe}"`);
 }
 
 /** Link an entity to a tag via the join table (backend tests do the same via raw SQL). */
@@ -375,20 +380,54 @@ export function linkUserToMaster(phone: string, masterId: string): void {
 }
 
 /**
+ * Fixed e2e plaintext password + its precomputed Argon2id hash (GH #247
+ * §4.8, T14). The hash was generated once with the pinned parameters from
+ * backend/src/auth/passwords.py (Argon2id v=19 m=65536 t=3 p=4 — the salt
+ * lives inside the hash string, so the fixed constant verifies fine) via:
+ *   cd backend && uv run python -c \
+ *     "from src.auth.passwords import hash_password; print(hash_password('e2e-pass-91d8ac5e'))"
+ * Obviously-fake demo password, same spirit as the seeded admin12345
+ * (public repo, dev/test only).
+ */
+export const E2E_PASSWORD = 'e2e-pass-91d8ac5e';
+export const E2E_PASSWORD_HASH =
+  '$argon2id$v=19$m=65536,t=3,p=4$/CDip4z1urPp5KFuifw3sA$Df8mLeKc4FqU12J2R34WMkhm9nhH2blGceK5G9yfHXQ';
+
+/**
  * Create a staff user row directly (no API writer exists; mirrors the raw
  * INSERT used by backend tests). Defaults: is_active=1, role='master',
- * email/password/confirmation flags NULL/false.
+ * email/password/confirmation flags NULL/false. `password_hash` is the
+ * precomputed Argon2 constant (GH #247 §4.8) — NOT a literal — so the row
+ * can actually authenticate with `E2E_PASSWORD` (T14 login-flow specs);
+ * the hash is deterministic to verify because the salt is embedded.
  */
 export function seedUser(overview: {
   phone: string;
+  role?: 'admin' | 'master';
   masterId?: string;
   isActive?: number;
 }): string {
   const id = crypto.randomUUID();
   executeSQL(
-    `INSERT INTO users (id, phone, email, password_hash, role, master_id, email_is_confirmed, phone_is_confirmed, is_active, created_at, updated_at) VALUES (${sqlValue(id)}, ${sqlValue(overview.phone)}, NULL, 'seeded', 'master', ${sqlValue(overview.masterId ?? null)}, 0, 0, ${overview.isActive ?? 1}, datetime('now'), datetime('now'))`,
+    // GH #247 T1 added the lockout-ladder columns (failed_login_attempts,
+    // lock_level, locked_until) — NOT NULL, so the INSERT must set them.
+    `INSERT INTO users (id, phone, email, password_hash, role, master_id, email_is_confirmed, phone_is_confirmed, failed_login_attempts, lock_level, locked_until, is_active, created_at, updated_at) VALUES (${sqlValue(id)}, ${sqlValue(overview.phone)}, NULL, ${sqlValue(E2E_PASSWORD_HASH)}, ${sqlValue(overview.role ?? 'master')}, ${sqlValue(overview.masterId ?? null)}, 0, 0, 0, 0, NULL, ${overview.isActive ?? 1}, datetime('now'), datetime('now'))`,
   );
   return id;
+}
+
+/**
+ * Create a staff user that can LOG IN with `E2E_PASSWORD` (T14). Alias of
+ * seedUser with an explicit name at call sites that care about login flows
+ * (the hash is the precomputed Argon2 constant — no hashing at test time).
+ */
+export function seedStaffUser(overview: {
+  phone: string;
+  role?: 'admin' | 'master';
+  masterId?: string;
+  isActive?: number;
+}): string {
+  return seedUser(overview);
 }
 
 /**

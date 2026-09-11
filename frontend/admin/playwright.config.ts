@@ -21,6 +21,13 @@ try {
 
 const SHARD_PORT = process.env.SHARD_PORT || '3002';
 
+// GH #247 T14: globalSetup logs the seeded admin in and saves the session
+// cookie here; both projects start authenticated. Login-flow specs opt out
+// with `test.use({ storageState: { cookies: [], origins: [] } })` — a bare
+// `undefined` does NOT override a project-level default.
+// Path matches globalSetup (repo-root-relative test-results dir).
+const AUTH_STORAGE_STATE = path.resolve(__dirname, '../test-results/.auth/admin.json');
+
 /**
  * Playwright E2E configuration for Memo admin.
  *
@@ -52,7 +59,12 @@ export default defineConfig({
   timeout: 60_000,
 
   use: {
-    baseURL: `http://localhost:${SHARD_PORT}`,
+    // GH #247 T14: pages and the API must be SAME-SITE for the HttpOnly
+    // SameSite=Lax memo_session cookie to flow (site = scheme+host, ports
+    // ignored). BACKEND_URL is 127.0.0.1, so the frontend base must be
+    // 127.0.0.1 too — localhost would make every API fetch cross-site
+    // (cookie silently dropped) and trip the backend CSRF line.
+    baseURL: `http://127.0.0.1:${SHARD_PORT}`,
     trace: 'on-first-retry',
     viewport: { width: 1280, height: 720 },
     navigationTimeout: 60_000,
@@ -100,14 +112,14 @@ export default defineConfig({
       // regexes against the absolute path, and a worktree directory named
       // e.g. records-view-213 would otherwise sweep every spec in here.
       testMatch: /(^|\/)(services-crud|schedule[^/]*|records[^/]*|activity-details-modal)\.spec\.ts$/,
-      use: { ...devices['Desktop Chrome'] },
+      use: { ...devices['Desktop Chrome'], storageState: AUTH_STORAGE_STATE },
     },
     {
       name: 'shard-rest',
       // Everything whose FILE NAME does not belong to the schedule shard
       // (same filename-anchoring rationale as above).
       testMatch: /^(?!.*(\/|^)(services-crud|schedule|records|activity-details-modal)[^/]*\.spec\.ts$).*\.spec\.ts$/,
-      use: { ...devices['Desktop Chrome'] },
+      use: { ...devices['Desktop Chrome'], storageState: AUTH_STORAGE_STATE },
     },
   ],
 });

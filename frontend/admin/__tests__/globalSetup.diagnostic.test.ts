@@ -5,6 +5,21 @@ vi.mock('../e2e/fixtures/sqlite-exec', () => ({
   sqliteExecWithRetry: vi.fn(),
 }));
 vi.mock('../e2e/fixtures/warmup-routes', () => ({ WARMUP_ROUTES: [] }));
+// GH #247 T14: globalSetup now logs the seeded admin in via Playwright's
+// request API after the diagnostics. Stub the request context so the
+// happy-path tests can complete without a live backend.
+vi.mock('@playwright/test', () => ({
+  request: {
+    newContext: vi.fn(async () => ({
+      post: vi.fn(async () => ({
+        ok: () => true,
+        json: async () => ({ user: { role: 'admin' } }),
+      })),
+      storageState: vi.fn(async () => ({ cookies: [], origins: [] })),
+      dispose: vi.fn(async () => undefined),
+    })),
+  },
+}));
 
 import { sqliteExecWithRetry } from '../e2e/fixtures/sqlite-exec';
 import globalSetupFunc from '../e2e/globalSetup';

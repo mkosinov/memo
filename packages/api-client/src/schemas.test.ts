@@ -7,8 +7,11 @@ import {
   StaffUpdateSchema,
   StaffPatchSchema,
   PositionResponseSchema,
+  PositionCreateSchema,
+  PositionUpdateSchema,
+  PositionPatchSchema,
   MasterViewResponseSchema,
-  type MasterView,
+  type MasterViewResponse,
   LocationResponseSchema,
   type LocationResponse,
   TagResponseSchema,
@@ -268,7 +271,7 @@ const validMasterView = {
 
 describe('MasterViewResponseSchema', () => {
   it('parses a valid acting-master view row', () => {
-    const result: MasterView = MasterViewResponseSchema.parse(validMasterView);
+    const result: MasterViewResponse = MasterViewResponseSchema.parse(validMasterView);
     expect(result.id).toBe(validMasterView.id);
     expect(result.specialty).toBe('живопись');
     expect(result.sort_order).toBe(0);
@@ -335,6 +338,80 @@ describe('PositionResponseSchema', () => {
     // the CONTRACT is that the backend never emits archived for positions.
     const result = PositionResponseSchema.parse({ ...validPosition, archived: false });
     expect(result).not.toHaveProperty('archived');
+  });
+});
+
+// ─── PositionCreate / PositionUpdate / PositionPatch (D4 write contract) ────
+
+describe('PositionCreateSchema', () => {
+  it('parses a canonical title payload', () => {
+    const result = PositionCreateSchema.parse({ title: 'СММ-менеджер' });
+    expect(result.title).toBe('СММ-менеджер');
+  });
+
+  it('rejects an empty title (bounds: 1–100)', () => {
+    expect(() => PositionCreateSchema.parse({ title: '' })).toThrow();
+  });
+
+  it('rejects a title longer than 100 chars (bounds: 1–100)', () => {
+    expect(() => PositionCreateSchema.parse({ title: 'д'.repeat(101) })).toThrow();
+  });
+
+  it('accepts exactly 100 chars (upper bound inclusive)', () => {
+    expect(PositionCreateSchema.parse({ title: 'д'.repeat(100) }).title).toHaveLength(100);
+  });
+
+  it('rejects a missing title', () => {
+    expect(() => PositionCreateSchema.parse({})).toThrow();
+  });
+
+  it('rejects a non-string title', () => {
+    expect(() => PositionCreateSchema.parse({ title: 42 })).toThrow();
+  });
+
+  it('rejects unknown fields (strict — backend extra="forbid")', () => {
+    expect(() => PositionCreateSchema.parse({ title: 'СММ', is_system: false })).toThrow();
+  });
+});
+
+describe('PositionUpdateSchema', () => {
+  it('accepts a full canonical update payload (title)', () => {
+    const result = PositionUpdateSchema.parse({ title: 'Ведущий мастер' });
+    expect(result.title).toBe('Ведущий мастер');
+  });
+
+  it('enforces the same title bounds 1–100 as create', () => {
+    expect(() => PositionUpdateSchema.parse({ title: '' })).toThrow();
+    expect(() => PositionUpdateSchema.parse({ title: 'д'.repeat(101) })).toThrow();
+  });
+
+  it('rejects a stray is_active (backend 422 parity, extra="forbid")', () => {
+    expect(() => PositionUpdateSchema.parse({ title: 'СММ', is_active: true })).toThrow();
+  });
+
+  it('rejects update missing required title (PUT = full replace)', () => {
+    expect(() => PositionUpdateSchema.parse({})).toThrow();
+  });
+});
+
+describe('PositionPatchSchema', () => {
+  it('accepts a partial payload (only title)', () => {
+    const result = PositionPatchSchema.parse({ title: 'SMM-менеджер' });
+    expect(result.title).toBe('SMM-менеджер');
+  });
+
+  it('accepts an empty object (change nothing)', () => {
+    const result = PositionPatchSchema.parse({});
+    expect(result.title).toBeUndefined();
+  });
+
+  it('still enforces title bounds on a partial payload', () => {
+    expect(() => PositionPatchSchema.parse({ title: '' })).toThrow();
+    expect(() => PositionPatchSchema.parse({ title: 'д'.repeat(101) })).toThrow();
+  });
+
+  it('keeps strictness on partial (unknown fields still rejected)', () => {
+    expect(() => PositionPatchSchema.parse({ is_system: true })).toThrow();
   });
 });
 
@@ -1061,8 +1138,8 @@ describe('Type exports', () => {
     expect(s.first_name).toBe('Анна');
   });
 
-  it('MasterView is a valid type', () => {
-    const m: MasterView = validMasterView;
+  it('MasterViewResponse is a valid type', () => {
+    const m: MasterViewResponse = validMasterView;
     expect(m.specialty).toBe('живопись');
   });
 

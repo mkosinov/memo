@@ -8,10 +8,12 @@ import {
   type StaffPatch,
   StaffArchiveRequestSchema,
   type StaffArchiveRequest,
-  type MasterView,
+  type MasterViewResponse,
   PositionResponseSchema,
   type PositionResponse,
   type PositionCreate,
+  type PositionUpdate,
+  type PositionPatch,
   LocationResponseSchema,
   type LocationResponse,
   ServiceResponseSchema,
@@ -132,7 +134,7 @@ function listQuery(params?: ListParams): string {
 // reorder — writes live on the staff card. Undeclared query params (status/
 // sort/q) are ignored server-side; ListParams keeps the shared listQuery shape.
 
-export async function getMasters(params?: ListParams): Promise<PaginatedResponse<MasterView>> {
+export async function getMasters(params?: ListParams): Promise<PaginatedResponse<MasterViewResponse>> {
   return api(`/api/v1/masters${listQuery(params)}`, MasterViewListResponseSchema);
 }
 
@@ -219,7 +221,7 @@ export async function createPosition(data: PositionCreate): Promise<PositionResp
   });
 }
 
-export async function updatePosition(id: string, data: PositionCreate): Promise<PositionResponse> {
+export async function updatePosition(id: string, data: PositionUpdate): Promise<PositionResponse> {
   return api(`/api/v1/positions/${id}`, PositionResponseSchema, {
     method: 'PUT',
     body: JSON.stringify(data),
@@ -229,7 +231,7 @@ export async function updatePosition(id: string, data: PositionCreate): Promise<
 // PATCH for partial updates — title only.
 export async function patchPosition(
   id: string,
-  data: Partial<PositionCreate>,
+  data: PositionPatch,
 ): Promise<PositionResponse> {
   return api(`/api/v1/positions/${id}`, PositionResponseSchema, {
     method: 'PATCH',
@@ -569,7 +571,7 @@ export async function deleteRecord(id: string): Promise<void> {
 }
 
 // Execute a hard delete with dependency resolutions (Addendum 13 / GH #139
-// T8-FE2a) — mirrors resolveDeleteClient/resolveDeleteMaster: DELETE with body.
+// T8-FE2a) — mirrors resolveDeleteClient/resolveDeleteStaff: DELETE with body.
 export async function resolveDeleteRecord(id: string, resolutions: Record<string, string>): Promise<void> {
   await api(`/api/v1/records/${id}`, z.any(), { method: 'DELETE', body: JSON.stringify({ resolutions }) });
 }
@@ -878,7 +880,7 @@ function allQuery(params?: AllParams): string {
   return qs ? `?${qs}` : '';
 }
 
-export async function getAllMasters(params?: AllParams): Promise<MasterView[]> {
+export async function getAllMasters(params?: AllParams): Promise<MasterViewResponse[]> {
   return api(`/api/v1/masters/all${allQuery(params)}`, MasterViewAllResponseSchema);
 }
 

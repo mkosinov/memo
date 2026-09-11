@@ -149,6 +149,16 @@ describe('archiveStaff', () => {
     });
     expect(result.id).toBe('st-1');
   });
+
+  it('NO-BODY call: checkboxes omitted = consent to preselected defaults (D6)', async () => {
+    vi.mocked(api).mockResolvedValue({ id: 'st-1', archived: true });
+    await archiveStaff('st-1');
+    // No checkboxes passed → no body key at all: the request init carries ONLY
+    // the method, letting the backend apply both defaults (true/true).
+    expect(api).toHaveBeenCalledWith('/api/v1/staff/st-1/archive', expect.anything(), {
+      method: 'POST',
+    });
+  });
 });
 
 describe('restoreStaff', () => {

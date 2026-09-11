@@ -51,7 +51,10 @@ export const CreateUserSectionSchema = z
   .strict();
 export type CreateUserSection = z.infer<typeof CreateUserSectionSchema>;
 
-export const StaffCreateSchema = z
+// Shared card shape: Create and Update differ ONLY by the create-only
+// account flag (D6) — everything else is the same wire contract. `.strict()`
+// on the base is inherited by extend() (zod keeps unknownKeys).
+const StaffCardSchema = z
   .object({
     first_name: z.string().min(1).max(100),
     last_name: z.string().min(1).max(100),
@@ -59,24 +62,18 @@ export const StaffCreateSchema = z
     sort_order: z.number().optional().default(0),
     master: MasterSectionInputSchema.nullable().optional().default(null),
     position_ids: z.array(z.string()).optional().default([]),
-    create_user: z.union([CreateUserSectionSchema, z.literal(false)]).optional().default(false),
   })
   .strict();
+
+export const StaffCreateSchema = StaffCardSchema.extend({
+  create_user: z.union([CreateUserSectionSchema, z.literal(false)]).optional().default(false),
+});
 export type StaffCreate = z.input<typeof StaffCreateSchema>;
 
 // is_active is NOT accepted (#207): archive/restore is via POST endpoints.
 // .strict() mirrors backend extra="forbid" — a stray is_active is rejected (422).
 // create_user is CREATE-ONLY (an account is created exactly once).
-export const StaffUpdateSchema = z
-  .object({
-    first_name: z.string().min(1).max(100),
-    last_name: z.string().min(1).max(100),
-    avatar_url: z.string().nullable().optional().default(null),
-    sort_order: z.number().optional().default(0),
-    master: MasterSectionInputSchema.nullable().optional().default(null),
-    position_ids: z.array(z.string()).optional().default([]),
-  })
-  .strict();
+export const StaffUpdateSchema = StaffCardSchema;
 export type StaffUpdate = z.input<typeof StaffUpdateSchema>;
 
 // PATCH three-state master: absent = keep, null = remove, payload = upsert.
@@ -109,7 +106,7 @@ export const MasterViewResponseSchema = z.object({
   created_at: z.string(), // ISO datetime string
   updated_at: z.string(), // ISO datetime string
 });
-export type MasterView = z.infer<typeof MasterViewResponseSchema>;
+export type MasterViewResponse = z.infer<typeof MasterViewResponseSchema>;
 
 // ─── PositionResponse (GH #266 D4 — positions dictionary) ───────────────────
 // Built-ins carry fixed string ids (master/admin, is_system=true — title

@@ -5,8 +5,9 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useNavigation } from '@/contexts/NavigationContext';
 import { useUI } from '@/contexts/UIContext';
-import type { ViewModeType } from '@/contexts/schedule/ScheduleViewContext';
 import { useMasters } from '@/hooks/useMasters';
+import { useAuth } from '@/contexts/AuthContext';
+import type { ViewModeType } from '@/contexts/schedule/ScheduleViewContext';
 import { DAYS, DAYS_FULL, MONTHS, MONTHS_GENITIVE, formatDate, isSameDay } from '@/lib/utils';
 import { getMonday, toISODate } from '@/lib/datetime';
 import { MonthYearPicker } from '../shared/MonthYearPicker';
@@ -464,8 +465,18 @@ export function Menubar() {
   const { dateFrom, selectDateRange } = useNavigation();
   const { data: masters = [] } = useMasters();
   const { sidebarCollapsed, toggleSidebar, theme, toggleTheme } = useUI();
+  const { user, master, status, logout } = useAuth();
   const pathname = usePathname();
   const [openMenu, setOpenMenu] = useState<string | null>(null);
+
+  // GH #247 §4.5: real user identity in the bottom-left block — master
+  // profile name when linked, else the login phone; role label Админ/Мастер.
+  const displayName = useMemo(() => {
+    if (master) return `${master.first_name} ${master.last_name}`;
+    return user?.phone ?? '';
+  }, [master, user]);
+  const avatarInitial = displayName ? displayName.charAt(0).toUpperCase() : '—';
+  const roleLabel = user?.role === 'master' ? 'Мастер' : 'Админ';
 
   // Track viewMode & selectedDay via custom events from ScheduleContext
   // (Menubar lives outside ScheduleProvider in the component tree)
@@ -667,15 +678,40 @@ export function Menubar() {
 
       {/* ── Bottom Section ── */}
       <div className="border-t border-white/10">
-        {/* User Avatar */}
-        {!sidebarCollapsed && (
+        {/* User Avatar — real session user (GH #247 §4.5) */}
+        {!sidebarCollapsed && status === 'authenticated' && (
           <div className="flex items-center gap-2 px-3 pt-3 pb-2">
-            <div className="w-7 h-7 rounded-full bg-brand-light flex items-center justify-center text-xs text-white font-medium">
-              А
+            <div
+              data-testid="user-avatar"
+              className="w-7 h-7 rounded-full bg-brand-light flex items-center justify-center text-xs text-white font-medium flex-shrink-0"
+            >
+              {avatarInitial}
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-xs text-white/70 truncate">Админ</div>
+              <div className="text-xs text-white/90 truncate">{displayName}</div>
+              <div className="text-[10px] text-white/50 truncate">{roleLabel}</div>
             </div>
+            <button
+              onClick={() => void logout()}
+              className="flex items-center justify-center w-7 h-7 rounded-lg text-white/50 hover:bg-white/10 hover:text-white transition-colors flex-shrink-0"
+              aria-label="Выйти"
+              title="Выйти"
+            >
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4" />
+                <polyline points="16 17 21 12 16 7" />
+                <line x1="21" y1="12" x2="9" y2="12" />
+              </svg>
+            </button>
           </div>
         )}
 

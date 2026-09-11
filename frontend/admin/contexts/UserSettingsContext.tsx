@@ -1,6 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
+import { useAuth } from './AuthContext';
 
 export interface UserSettings {
   theme: 'light' | 'dark';
@@ -26,9 +27,11 @@ const DEFAULT_SETTINGS: UserSettings = {
   columnOrderLocations: [],
 };
 
-// GH #247 §3.8: user-settings are session-scoped — the server derives the
-// user, so no user id is sent from the client (DEV_USER_ID removed). Loading
-// is auth-gated in T13.
+// GH #247 §3.8/§4.6: user-settings are session-scoped — the server derives
+// the user, so GET/PUT/PATCH carry no user id. The POST create still requires
+// user_id backend-side (§3.8 left POST untouched), so the create body carries
+// the session user's id. Loading is auth-gated: the API is only touched once
+// AuthContext reports `authenticated`.
 
 function loadFromStorage(): UserSettings | null {
   if (typeof window === 'undefined') return null;
@@ -50,11 +53,16 @@ function saveToStorage(settings: UserSettings) {
 const UserSettingsContext = createContext<UserSettingsContextType | null>(null);
 
 export function UserSettingsProvider({ children }: { children: React.ReactNode }) {
+  const { status, user } = useAuth();
   const [settings, setSettings] = useState<UserSettings>(DEFAULT_SETTINGS);
   const [ready, setReady] = useState(false);
   const mountedRef = useRef(true);
 
   useEffect(() => {
+    // GH #247 §4.6: settings load only after auth resolves to
+    // `authenticated` — the session cookie must exist before the API call,
+    // otherwise every page load fires a doomed 401 for guests.
+    if (status !== 'authenticated') return;
     mountedRef.current = true;
 
     async function load() {
@@ -86,6 +94,7 @@ export function UserSettingsProvider({ children }: { children: React.ReactNode }
           if (!cached && mountedRef.current) {
             try {
               const created = await createUserSettings({
+                user_id: user?.id,
                 theme: DEFAULT_SETTINGS.theme,
                 language: DEFAULT_SETTINGS.language,
                 column_order_masters: DEFAULT_SETTINGS.columnOrderMasters,
@@ -115,7 +124,7 @@ export function UserSettingsProvider({ children }: { children: React.ReactNode }
 
     load();
     return () => { mountedRef.current = false; };
-  }, []);
+  }, [status, user?.id]);
 
   const updateSettings = useCallback((partial: Partial<UserSettings>) => {
     setSettings((prev) => {

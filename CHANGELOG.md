@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — 2026-09-12
+
+### Added
+- **GH #266 — Staff-реструктуризация: `masters` → `staff` rename, мастер-расширение, `positions` M2M, экран «Сотрудники», справочник должностей** — branch `feat/staff-restructuring-266` (15 commits: b98e991..e3fb28d, base 81d9006 (#247); план T0–T13, 14/14 задач):
+  - **Backend — миграция и модели (`b98e991`):** одна alembic-цепочка (шаги 0–8) переименовывает `masters` → `staff` (id m1–m5, m7 сохранены), создаёт новую `masters`-расширение (`staff_id` PK+FK → `staff.id` ON DELETE CASCADE, `specialty` Text CSV, `color`, `is_active`), `positions` (встроенные id `master`/`admin`; seed «СММ») + M2M `staff_positions`; `users.master_id` → `staff_id` через `batch_alter_table` (именованный unique + FK); FK-retarget `activities.master_id` / `master_tags.master_id`; `user_settings.column_order_masters` → `column_order_staff`; мёртвые enum `Position`/`Specialty` удалены; seed переписан под 4 таблицы.
+  - **Backend — домен (`6772adf`):** матрица удалений на `Staff` (activities через masters-строку = block; `masters`/`users`/`master_tags`/`staff_positions` = auto-cascade); record-scalar-subqueries переехали на join новой `masters` (ключи `master_name`/`master_color` без изменений); `StaffAdmin`/`PositionAdmin`; 6 новых кодов ошибок (`STAFF_NOT_FOUND`, `MASTER_NOT_ACTIVE`, `POSITION_NOT_FOUND`, `POSITION_IS_SYSTEM`, `SPECIALTY_REQUIRED`, `COLOR_REQUIRED`); auth перенесён механически — `AuthedUser.master_id` → `staff_id`, снапшот `/auth/me` собирается из карточки сотрудника + мастер-полей (**форма ответа не меняется**, D10).
+  - **Backend — композитный `StaffService` + роуты (`99a08f2`, `2edeb38`, `06b8a57`):** CRUD карточки (POST/PUT = одна транзакция: staff + master-секция + staff_positions + опциональная учётка; archive с телом `{archive_master, archive_user}`; restore; сортировка без `position`; `specialty`/`color` через LEFT JOIN), CRUD `positions` с блоком `POSITION_IS_SYSTEM`; `/api/v1/masters` свёрнут в read-only view (GET + GET /all; все мутации и GET /{id} удалены — потребителей нет); роуты зарегистрированы; backend pytest полностью зелёный с T4.
+  - **SSE (`5581492`):** сущности `staff` + `masters` (positions/staff_positions — cascade-only), карта инвалидаций фронта обновлена; новых семейств нет.
+  - **api-client (`7cbda05`, `9634e62`, `472d393`):** схемы/эндпоинты staff/position/master-view (`getStaff`/`createStaff` с master-блоком, `position_ids`, `create_user`; archive с телом), masters только чтение, `column_order_staff`, `has_user` в ответе staff, `MasterSection.archived`.
+  - **E2E-инфраструктура (`758a0dc`):** фабрики `createTestStaff` (+ master-секция), RESET_SQL переписан под 4 таблицы (восстановление id/порядка сида), `waitForStaffReady`.
+  - **Админка — «Сотрудники» (`472d393`, `88fdf8b`, `00eecf1`):** экран `app/(main)/staff/` — StaffTable (имя, должности, специальность, цвет, архив; сортировка всех кроме должностей), StaffModal (чекбоксы должностей, секция «Мастер», чекбокс создания учётки), ArchiveStaffDialog (чекбоксы D6), staff hooks/context; `MastersContext` остаётся read-only потребителем `/masters`; строка «Сотрудники» в «Справочниках»; vitest.
+  - **Админка — справочник должностей (`fbaf108`):** плоская страница `app/(main)/positions/` (создать/переименовать/удалить; встроенные не удаляются, тост-объяснение) + строка «Должности» + тесты.
+  - **E2E-сценарии (`88fdf8b`, `fbaf108`, `3fc392c`, `e3fb28d`):** staff-спеки S1–S7 (СММ невидим, приход/архив мастера с живой историей, миграционный смоук, только действующие в выборе, справочник должностей, чекбоксы увольнения, карточка одним сценарием с учёткой и мастером); s7 login-probe изолирован (`3fc392c`).
+  - **Тесты (полный прогон T11):** backend pytest **1871 passed / 0 failed / 8 skipped**; api-client **349 / 0**; admin vitest **1790 / 0**; `tsc` 0; e2e shards — schedule **94/94**, rest **269/279** (9 ожидаемых visual font-drift + 1 pre-existing server-push C3 flake; авторитетен CI).
+  - **Красные окна плана закрыты:** T1–T3 backend pytest красный (masters-тесты переписываются) → закрыто к T4 (полный зелёный); T6–T8 фронт type-check красный в зоне экрана мастеров → закрыто к T8. E2E полностью зелёный после T10.
+  - **Доки:** domain-rules `staff.md` (из `masters.md`), `_overview.md` (сущности, naming, матрица удалений, поисковая матрица), `auth.md`, `profile.md`; соседние доки под staff-словарь — `auth-design.md`/`auth-247-plan.md` (только тексты #247; код перенесён в T2), полная перепись `user-cabinet-design.md` (#262, ревизия 3); impl-заметки `docs/notes/2026-09-12-staff-restructuring-266-impl.md`.
+  - **190 files changed, +11 800 / −4 350** (диапазон `6dcf87a..docs-commit`).
+  - **Closes:** #266.
+  - Design spec: `docs/specs/2026-09-10-staff-restructuring-design.md` (on branch)
+  - Plan: `docs/plans/2026-09-10-staff-restructuring-266-plan.md` (on branch)
+
 ## [Unreleased] — 2026-09-11
 
 ### Added

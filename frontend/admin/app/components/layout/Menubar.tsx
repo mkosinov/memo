@@ -167,6 +167,8 @@ const DIRECTORY_ITEMS = [
   { label: 'Услуги', href: '/services' },
   { label: 'Локации', href: '/locations' },
   { label: 'Теги', href: '/tags' },
+  // GH #266 T9: the positions dictionary (salary-side; D4).
+  { label: 'Должности', href: '/positions' },
 ] as const;
 
 const PHOTO_ITEM = { label: 'Фото', icon: 'image', href: '/photos' } as const;

@@ -15,6 +15,7 @@ import type {
   LocationResponse,
   MasterViewResponse,
   StaffResponse,
+  PositionResponse,
 } from '@memo/api-client';
 
 // ─── Domain types ─────────────────────────────────────────────────────────
@@ -326,6 +327,56 @@ export function createMockStaffResponse(
 ): StaffResponse {
   return {
     ...mockStaffResponse,
+    ...overrides,
+  };
+}
+
+// ─── PositionResponse (positions dictionary, GH #266 D4) ──────────────────
+// The seed dictionary: built-ins «master»/«admin» carry FIXED string ids and
+// is_system (title editable, deletion forbidden server-side), the
+// user-defined «СММ» is a plain deletable row. Consumers: StaffTable (id →
+// title cells), StaffModal (checkboxes), and the /positions directory screen.
+
+/** Built-in «master» — fixed id, is_system, title freely editable (D4). */
+export const mockPositionMaster: PositionResponse = {
+  id: 'master',
+  title: 'Мастер',
+  is_system: true,
+  created_at: '2024-01-01T10:00:00Z',
+  updated_at: '2024-01-01T10:00:00Z',
+};
+
+/** Built-in «admin» — the second fixed anchor (D4). */
+export const mockPositionAdmin: PositionResponse = {
+  id: 'admin',
+  title: 'Администратор',
+  is_system: true,
+  created_at: '2024-01-01T10:00:00Z',
+  updated_at: '2024-01-01T10:00:00Z',
+};
+
+/** User-defined «СММ» — seed row with a free lifecycle (uuid ids in real data). */
+export const mockPositionSmm: PositionResponse = {
+  id: 'smm',
+  title: 'СММ',
+  is_system: false,
+  created_at: '2024-01-01T10:00:00Z',
+  updated_at: '2024-01-01T10:00:00Z',
+};
+
+/** The whole seed dictionary — the shape /positions/all returns. */
+export const mockPositions: PositionResponse[] = [
+  mockPositionMaster,
+  mockPositionAdmin,
+  mockPositionSmm,
+];
+
+/** Factory for creating PositionResponse objects with overrides. */
+export function createMockPositionResponse(
+  overrides: Partial<PositionResponse> = {},
+): PositionResponse {
+  return {
+    ...mockPositionSmm,
     ...overrides,
   };
 }

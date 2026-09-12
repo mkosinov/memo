@@ -20,5 +20,7 @@ export const WARMUP_ROUTES = [
   '/staff',
   '/locations',
   '/tags',
+  // GH #266 T9: the positions dictionary screen.
+  '/positions',
   '/photos',
 ] as const;

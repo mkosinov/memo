@@ -444,6 +444,23 @@ export async function waitForTagsReady(page: Page) {
 }
 
 /**
+ * Wait for the positions dictionary screen to load with table (GH #266 T9).
+ * Navigates to /positions, waits for the heading + table and the paged
+ * GET /api/v1/positions response. Seed rows: master/admin (built-ins) + smm.
+ */
+export async function waitForPositionsReady(page: Page) {
+  const positionsResponse = page.waitForResponse(
+    (resp) => resp.url().includes('/api/v1/positions') && resp.status() === 200,
+    { timeout: 60_000 },
+  );
+  await page.goto('/positions');
+  await page.waitForSelector('h1:has-text("Управление должностями")', { timeout: 60_000 });
+  await page.waitForSelector('table', { timeout: 60_000 });
+  await positionsResponse.catch(() => {});
+  await page.waitForTimeout(500);
+}
+
+/**
  * Wait for the materials view to load with table.
  * Navigates to /services, switches to the "Материалы" tab view (the h1
  * heading flips to "Управление материалами" — assert THAT so a stale tab

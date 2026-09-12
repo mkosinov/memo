@@ -165,6 +165,9 @@ describe('Menubar', () => {
       expect(screen.getByRole('link', { name: 'Услуги' })).toHaveAttribute('href', '/services');
       expect(screen.getByRole('link', { name: 'Локации' })).toHaveAttribute('href', '/locations');
       expect(screen.getByRole('link', { name: 'Теги' })).toHaveAttribute('href', '/tags');
+      // GH #266 T9: the positions dictionary joins the directories.
+      expect(screen.getByRole('link', { name: 'Должности' })).toBeInTheDocument();
+      expect(screen.getByRole('link', { name: 'Должности' })).toHaveAttribute('href', '/positions');
     });
   });
 

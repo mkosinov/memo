@@ -39,9 +39,12 @@ export const qk = {
   // queryKeyPrefix 'staff'). Distinct from `masters` (the read-only acting-master
   // view the schedule filters consume). A staff write invalidates BOTH.
   staff: ['staff'] as const,
-  // GH #266: positions dictionary lookup (StaffModal checkboxes; T9 owns the
-  // directory screen). NOT in the SSE invalidate map (spec «SSE-сущности»:
-  // positions/staff_positions omitted until a screen consumer needs push).
+  // GH #266: positions dictionary prefix — shared by the /all lookup
+  // (hooks/usePositions.ts: StaffModal checkboxes, StaffTable cells) and the
+  // paged dictionary screen (contexts/PositionsContext.tsx, T9). NOT in the SSE
+  // invalidate map (spec «SSE-сущности»: positions/staff_positions omitted —
+  // the frontend mirror has no positions family); own mutations invalidate the
+  // prefix directly (hooks/usePositionsMutations.ts).
   positions: ['positions'] as const,
   services: ['services'] as const,
   locations: ['locations'] as const,

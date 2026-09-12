@@ -159,9 +159,14 @@ const NAV_ITEMS = [
 ] as const;
 
 const DIRECTORY_ITEMS = [
-  { label: 'Услуги', icon: 'package', href: '/services' },
-  { label: 'Локации', icon: 'mapPin', href: '/locations' },
-  { label: 'Теги', icon: 'tag', href: '/tags' },
+  // GH #266: «Сотрудники» — the staff directory screen (/staff). Placed in
+  // «Справочники» per the user's 2026-09-10 decision. NOTE: this is NOT the
+  // «Мастера» legend below — that one (colored dots, non-link) is the schedule
+  // legend and is unchanged (D2).
+  { label: 'Сотрудники', href: '/staff' },
+  { label: 'Услуги', href: '/services' },
+  { label: 'Локации', href: '/locations' },
+  { label: 'Теги', href: '/tags' },
 ] as const;
 
 const PHOTO_ITEM = { label: 'Фото', icon: 'image', href: '/photos' } as const;

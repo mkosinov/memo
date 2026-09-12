@@ -57,7 +57,7 @@ const remoteSettings = {
   user_id: authUser.id,
   theme: 'light' as const,
   language: 'ru' as const,
-  column_order_masters: ['m1', 'm2'],
+  column_order_staff: ['m1', 'm2'],
   column_order_locations: ['l1'],
   created_at: '2026-09-08T00:00:00Z',
   updated_at: '2026-09-08T00:00:00Z',
@@ -131,7 +131,7 @@ describe('UserSettingsContext auth gating (GH #247 §4.6)', () => {
     mockGetUserSettings.mockRejectedValue(new Error('404'));
     mockCreateUserSettings.mockResolvedValue({
       ...remoteSettings,
-      column_order_masters: [],
+      column_order_staff: [],
       column_order_locations: [],
     });    renderConsumer();
     await waitFor(() => {

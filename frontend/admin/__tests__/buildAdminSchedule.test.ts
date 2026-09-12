@@ -1,18 +1,17 @@
 import { describe, it, expect } from 'vitest';
 import { buildAdminSchedule } from '@/lib/buildSchedule';
-import type { ActivityResponse, MasterResponse, ServiceResponse, LocationResponse } from '@memo/api-client';
+import type { ActivityResponse, MasterViewResponse, ServiceResponse, LocationResponse } from '@memo/api-client';
 
 const MONDAY = new Date('2026-06-01T00:00:00'); // Monday
 
-const mockMaster: MasterResponse = {
+const mockMaster: MasterViewResponse = {
   id: 'm1',
   first_name: 'Анна',
   last_name: 'Иванова',
   color: '#FF5733',
   avatar_url: null,
-  position: 'master',
   specialty: 'ceramics',
-  archived: false,
+  sort_order: 0,
   created_at: '2025-01-01T00:00:00Z',
   updated_at: '2025-01-01T00:00:00Z',
 };

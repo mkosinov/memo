@@ -56,7 +56,8 @@ export type EntityName =
  *                activitiesForRecords readers too)
  * - masters:     useMastersMutations.ts + MastersTable.tsx
  *                (delete/resolve also refresh ['records'] via useRecordData)
- * - staff:       GH #266 — same surface as masters: the masters view is
+ * - staff:       GH #266 — own paged-list family ['staff'] (StaffContext),
+ *                PLUS the same surface as masters: the masters view is
  *                staff ⨝ masters (view rows change on staff writes), and
  *                records render master_name/master_color from the join
  * - services:    useServicesMutations.ts (#223: create/update also touch
@@ -80,7 +81,7 @@ export const INVALIDATION_MAP: Record<EntityName, readonly (readonly unknown[])[
   records: [qk.records, qk.visitorsList],
   activities: [['activities']],
   masters: [qk.masters, qk.records],
-  staff: [qk.masters, qk.records],
+  staff: [qk.staff, qk.masters, qk.records],
   services: [qk.services, qk.materials, qk.records],
   locations: [qk.locations, qk.records],
   materials: [qk.materials],

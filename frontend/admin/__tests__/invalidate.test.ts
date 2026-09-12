@@ -63,7 +63,7 @@ describe('INVALIDATION_MAP', () => {
       records: [qk.records, qk.visitorsList],
       activities: [['activities']],
       masters: [qk.masters, qk.records],
-      staff: [qk.masters, qk.records],
+      staff: [qk.staff, qk.masters, qk.records],
       services: [qk.services, qk.materials, qk.records],
       locations: [qk.locations, qk.records],
       materials: [qk.materials],

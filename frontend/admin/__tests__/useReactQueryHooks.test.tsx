@@ -51,7 +51,7 @@ import {
   transformService,
 } from '@/lib/transformers';
 import type {
-  MasterResponse,
+  MasterViewResponse,
   LocationResponse,
   ServiceResponse,
   ActivityResponse,
@@ -91,16 +91,15 @@ function createWrapperWithClient(queryClient: QueryClient) {
 
 // ─── Fixtures ───────────────────────────────────────────────────────────────
 
-const mastersFixture: MasterResponse[] = [
+const mastersFixture: MasterViewResponse[] = [
   {
     id: 'm1',
     first_name: 'Анна',
     last_name: 'Иванова',
     color: '#FF6B6B',
-    position: 'мастер',
     specialty: 'живопись',
     avatar_url: null,
-    archived: false,
+    sort_order: 0,
     created_at: '2024-01-15T10:00:00Z',
     updated_at: '2024-06-01T12:00:00Z',
   },

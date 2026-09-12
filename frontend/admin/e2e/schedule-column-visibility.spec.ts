@@ -38,7 +38,7 @@ async function clearUserSettingsStorage(page: import('@playwright/test').Page) {
 async function resetUserSettings(request: import('@playwright/test').APIRequestContext) {
   await request.put(`${BACKEND}/api/v1/user-settings?user_id=${DEV_USER_ID}`, {
     data: {
-      column_order_masters: [],
+      column_order_staff: [],
       column_order_locations: [],
     },
   });

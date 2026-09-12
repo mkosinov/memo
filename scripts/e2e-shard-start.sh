@@ -176,7 +176,7 @@ WARMUP_ROUTES=(
   "/clients"
   "/records"
   "/services"
-  "/masters"
+  "/staff"
   "/locations"
   "/tags"
   "/photos"

@@ -1,7 +1,7 @@
 import type { ScheduleAdminDTO } from '@memo/domain';
 import type { ScheduleIndex as DomainScheduleIndex } from '@memo/domain';
 import { buildSchedule } from '@memo/domain';
-import type { ActivityResponse, MasterResponse, ServiceResponse, LocationResponse } from '@memo/api-client';
+import type { ActivityResponse, MasterViewResponse, ServiceResponse, LocationResponse } from '@memo/api-client';
 import { parseLocalISO } from '@/lib/datetime';
 
 // ─── buildAdminSchedule ──────────────────────────────────────────────────────
@@ -21,7 +21,7 @@ function computePriceHint(tariffs: { title: string; price: number }[]): string {
 
 export function buildAdminSchedule(
   activities: ActivityResponse[],
-  masters: MasterResponse[],
+  masters: MasterViewResponse[],
   services: ServiceResponse[],
   locations: LocationResponse[],
   weekMonday: Date,

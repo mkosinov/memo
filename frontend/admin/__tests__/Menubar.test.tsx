@@ -156,6 +156,9 @@ describe('Menubar', () => {
     renderWithProviders();
     fireEvent.click(screen.getByRole('button', { name: 'Справочники' }));
     await waitFor(() => {
+      // GH #266: «Сотрудники» joins the directories (user decision 2026-09-10).
+      expect(screen.getByRole('link', { name: 'Сотрудники' })).toBeInTheDocument();
+      expect(screen.getByRole('link', { name: 'Сотрудники' })).toHaveAttribute('href', '/staff');
       expect(screen.getByRole('link', { name: 'Услуги' })).toBeInTheDocument();
       expect(screen.getByRole('link', { name: 'Локации' })).toBeInTheDocument();
       expect(screen.getByRole('link', { name: 'Теги' })).toBeInTheDocument();

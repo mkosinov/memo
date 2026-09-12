@@ -408,33 +408,12 @@ export async function waitForClientsReady(
 }
 
 /**
- * Wait for the masters page to load with table.
- * Navigates to /masters, waits for heading and table to render.
- *
- * #266: `/api/v1/masters` is now a READ-ONLY view (acting masters only —
- * `masters.is_active = true`); the paginated GET still returns 200, so this
- * readiness signal is unchanged. Writes moved to `/api/v1/staff`.
- */
-export async function waitForMastersReady(page: Page) {
-  const mastersResponse = page.waitForResponse(
-    (resp) => resp.url().includes('/api/v1/masters') && resp.status() === 200,
-    { timeout: 60_000 },
-  );
-  await page.goto('/masters');
-  await page.waitForSelector('h1:has-text("Управление мастерами")', { timeout: 60_000 });
-  await page.waitForSelector('table', { timeout: 60_000 });
-  await mastersResponse.catch(() => {});
-  await page.waitForTimeout(500);
-}
-
-/**
  * Wait for the staff directory screen to load with table (GH #266 — the
- * /masters screen becomes /staff in T8).
+ * pre-#266 /masters management screen is now /staff «Сотрудники»).
  *
- * Readiness is anchored on the STABLE contract — the `/api/v1/staff` list
- * response + a rendered `table` — NOT on a hardcoded heading string, because
- * the screen's exact copy/testids land in T8. This keeps the helper correct
- * across the T8 rewrite without pinning UI internals that don't exist yet.
+ * Readiness anchors on the `/api/v1/staff` list response + the rendered table
+ * + the stable heading. Rows keep the `master-row-*` testid (DoD: preserved
+ * across the move; staff.id == master.id for sectioned cards, seed m1–m5,m7).
  */
 export async function waitForStaffReady(page: Page) {
   const staffResponse = page.waitForResponse(
@@ -442,6 +421,7 @@ export async function waitForStaffReady(page: Page) {
     { timeout: 60_000 },
   );
   await page.goto('/staff');
+  await page.waitForSelector('h1:has-text("Управление сотрудниками")', { timeout: 60_000 });
   await page.waitForSelector('table', { timeout: 60_000 });
   await staffResponse.catch(() => {});
   await page.waitForTimeout(500);
@@ -516,6 +496,19 @@ export async function clickRowDelete(dropdownOrRow: Locator): Promise<void> {
 export async function clickRowArchiveAction(
   dropdownOrRow: Locator,
   action: 'В архив' | 'Восстановить',
+): Promise<void> {
+  await menuItem(dropdownOrRow, action).click();
+}
+
+/**
+ * Click the staff-card archive/restore item (GH #266 terminology D2/D11:
+ * «Архивировать» / «Вернуть из архива» — distinct from the other entities'
+ * «В архив»/«Восстановить»). NOTE: «Архивировать» opens the D6 dismissal
+ * dialog (checkboxes), it does NOT fire the mutation directly.
+ */
+export async function clickRowStaffArchiveAction(
+  dropdownOrRow: Locator,
+  action: 'Архивировать' | 'Вернуть из архива',
 ): Promise<void> {
   await menuItem(dropdownOrRow, action).click();
 }

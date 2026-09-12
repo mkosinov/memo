@@ -15,7 +15,9 @@ export const WARMUP_ROUTES = [
   '/clients',
   '/records',
   '/services',
-  '/masters',
+  // GH #266: the masters management screen moved to /staff («Сотрудники»).
+  // /masters is now a read-only API view with no page; warm /staff instead.
+  '/staff',
   '/locations',
   '/tags',
   '/photos',

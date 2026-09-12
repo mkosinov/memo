@@ -35,6 +35,14 @@ export const qk = {
   clients: ['clients'] as const,
   records: ['records'] as const,
   masters: ['masters'] as const,
+  // GH #266: the staff directory has its OWN paged-list family (StaffContext,
+  // queryKeyPrefix 'staff'). Distinct from `masters` (the read-only acting-master
+  // view the schedule filters consume). A staff write invalidates BOTH.
+  staff: ['staff'] as const,
+  // GH #266: positions dictionary lookup (StaffModal checkboxes; T9 owns the
+  // directory screen). NOT in the SSE invalidate map (spec «SSE-сущности»:
+  // positions/staff_positions omitted until a screen consumer needs push).
+  positions: ['positions'] as const,
   services: ['services'] as const,
   locations: ['locations'] as const,
   materials: ['materials'] as const,

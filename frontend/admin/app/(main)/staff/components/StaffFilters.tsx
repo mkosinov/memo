@@ -2,7 +2,13 @@
 
 import React from 'react';
 
-interface MasterFiltersProps {
+/**
+ * Staff directory filter bar (GH #266) — server-side search (?q=, GH #212) +
+ * the archive status select. Markup mirrors the pre-#266 MasterFilters
+ * verbatim (the dict *Filters bar rides in the DataTable toolbar's left
+ * group; the search input keeps its aria-label for e2e/test anchoring).
+ */
+interface StaffFiltersProps {
   search: string;
   status: string;
   onSearchChange: (v: string) => void;
@@ -10,13 +16,13 @@ interface MasterFiltersProps {
   onReset: () => void;
 }
 
-export function MasterFilters({
+export function StaffFilters({
   search,
   status,
   onSearchChange,
   onStatusChange,
   onReset,
-}: MasterFiltersProps) {
+}: StaffFiltersProps) {
   return (
     <div className="flex flex-wrap items-end gap-3">
       <div className="flex flex-col gap-1">

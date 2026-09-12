@@ -33,6 +33,48 @@ const DEPS_AUTO: DependencyNode[] = [
   { entity: 'staff_positions', relation: 'Должность', count: 1, allowed_actions: ['cascade'], message: null },
 ];
 
+// ─── D6 dialog checkbox-visibility matrix (GH #266) ──────────────────────────
+// Each case is an ACTIVE person (the dialog only opens for those), varying the
+// two independent switches: an ACTIVE master section and a linked account.
+interface D6Case {
+  label: string;
+  staff: StaffResponse;
+  master: boolean;
+  user: boolean;
+}
+
+const D6_CASES: D6Case[] = [
+  {
+    label: 'active master + has_user → both checkboxes visible and preselected',
+    staff: createMockStaffResponse({ has_user: true }),
+    master: true,
+    user: true,
+  },
+  {
+    label: 'no master section (СММ) → master checkbox absent',
+    staff: mockStaffResponseNoMaster,
+    master: false,
+    user: false,
+  },
+  {
+    label: 'active master without an account → account checkbox absent',
+    staff: mockStaffResponse, // has_user: false
+    master: true,
+    user: false,
+  },
+  {
+    label: 'archived master section → master checkbox absent (nothing to flip)',
+    staff: createMockStaffResponse({
+      id: 'm3',
+      first_name: 'Ирина',
+      last_name: 'Гончарова',
+      master: { ...mockStaffResponse.master!, archived: true },
+    }),
+    master: false,
+    user: false,
+  },
+];
+
 // ─── Mocks ───────────────────────────────────────────────────────────────────
 
 const mockInvalidateQueries = vi.fn().mockResolvedValue(undefined);
@@ -317,14 +359,34 @@ describe('StaffTable', () => {
     expect(within(dialog).queryByTestId('archive-user-checkbox')).not.toBeInTheDocument();
   });
 
-  it('account checkbox shows only when has_user, master checkbox only for an active section', async () => {
-    setupEnvelope();
-    await renderLoaded();
-    // m2 (row 2): archived person + archived master + has_user → master
-    // checkbox hidden (section already archived), account checkbox shown.
-    fireEvent.click(screen.getAllByLabelText(/Действия/)[1]);
-    // m2 is archived → its action is "Вернуть из архива", not "Архивировать".
-    expect(screen.getByText('Вернуть из архива')).toBeInTheDocument();
+  // D6 checkbox visibility matrix. The dialog only opens for an ACTIVE person
+  // (an archived row exposes «Вернуть из архива»), so every case is its own
+  // single-row envelope:
+  //   master box  ← an ACTIVE master section exists (master && !master.archived)
+  //   account box ← has_user (a linked account row, any is_active — Gap B)
+  it.each(D6_CASES)('D6 dialog — $label', async ({ staff, master, user }) => {
+    mockGetStaff.mockResolvedValue({ items: [staff], total: 1, page: 1, per_page: 10 });
+    renderTable();
+    await screen.findByText(`${staff.last_name} ${staff.first_name}`);
+
+    fireEvent.click(screen.getAllByLabelText(/Действия/)[0]);
+    fireEvent.click(screen.getByText('Архивировать'));
+
+    const dialog = await screen.findByTestId('archive-staff-dialog');
+    const masterBox = within(dialog).queryByTestId('archive-master-checkbox');
+    const userBox = within(dialog).queryByTestId('archive-user-checkbox');
+
+    expect(masterBox !== null).toBe(master);
+    expect(userBox !== null).toBe(user);
+    // Every rendered checkbox is preselected (D6 «предвыбраны», mirrors the
+    // backend defaults); unchecking is covered by the body-payload tests below.
+    if (masterBox) expect((masterBox as HTMLInputElement).checked).toBe(true);
+    if (userBox) expect((userBox as HTMLInputElement).checked).toBe(true);
+    if (!master && !user) {
+      expect(
+        within(dialog).getByText(/будет архивирован только сотрудник/),
+      ).toBeInTheDocument();
+    }
   });
 
   it('confirm calls archiveStaff with the D6 checkbox body', async () => {

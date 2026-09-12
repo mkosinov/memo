@@ -27,8 +27,11 @@ from __future__ import annotations
 
 PUBLIC_ROUTES: frozenset[tuple[str, str]] = frozenset({
     ("GET", "/api/v1/health"),
+    # GH #266 D8: the masters view is read-only acting masters — the public
+    # paginated list stays (schedule + client site #48); GET /{id} was
+    # REMOVED with the mutations, so its allowlist entry is gone too.
+    # ``GET /masters/all`` carries the masters:read guard (NOT public).
     ("GET", "/api/v1/masters"),
-    ("GET", "/api/v1/masters/{id}"),
     ("GET", "/api/v1/locations"),
     ("GET", "/api/v1/locations/{id}"),
     ("GET", "/api/v1/services"),

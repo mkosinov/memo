@@ -32,7 +32,7 @@ class TestGetUserSettings:
             "user_id": me["id"],
             "theme": "dark",
             "language": "en",
-            "column_order_masters": ["first_name", "color"],
+            "column_order_staff": ["first_name", "color"],
             "column_order_locations": ["name"],
         })
         assert create_resp.status_code == 201, f"Create failed: {create_resp.text}"
@@ -44,7 +44,7 @@ class TestGetUserSettings:
         assert body["user_id"] == me["id"]
         assert body["theme"] == "dark"
         assert body["language"] == "en"
-        assert body["column_order_masters"] == ["first_name", "color"]
+        assert body["column_order_staff"] == ["first_name", "color"]
         assert body["column_order_locations"] == ["name"]
         assert "id" in body
         assert "created_at" in body
@@ -89,7 +89,7 @@ class TestCreateUserSettings:
         assert body["user_id"] == me["id"]
         assert body["theme"] == "light"
         assert body["language"] == "ru"
-        assert body["column_order_masters"] == []
+        assert body["column_order_staff"] == []
         assert body["column_order_locations"] == []
         assert "id" in body
         assert "created_at" in body
@@ -100,14 +100,14 @@ class TestCreateUserSettings:
             "user_id": me["id"],
             "theme": "dark",
             "language": "en",
-            "column_order_masters": ["color", "position"],
+            "column_order_staff": ["color", "position"],
             "column_order_locations": ["name", "capacity"],
         })
         assert resp.status_code == 201, f"Create failed: {resp.text}"
         body = resp.json()
         assert body["theme"] == "dark"
         assert body["language"] == "en"
-        assert body["column_order_masters"] == ["color", "position"]
+        assert body["column_order_staff"] == ["color", "position"]
         assert body["column_order_locations"] == ["name", "capacity"]
 
     def test_create_requires_user_id(self, api_client) -> None:
@@ -150,12 +150,12 @@ class TestUpdateUserSettings:
         api_client.post("/api/v1/user-settings", json={"user_id": me["id"]})
 
         resp = api_client.put("/api/v1/user-settings", json={
-            "column_order_masters": ["last_name", "first_name"],
+            "column_order_staff": ["last_name", "first_name"],
             "column_order_locations": ["address"],
         })
         assert resp.status_code == 200
         body = resp.json()
-        assert body["column_order_masters"] == ["last_name", "first_name"]
+        assert body["column_order_staff"] == ["last_name", "first_name"]
         assert body["column_order_locations"] == ["address"]
 
     def test_update_all_fields(self, api_client, me) -> None:
@@ -164,14 +164,14 @@ class TestUpdateUserSettings:
         resp = api_client.put("/api/v1/user-settings", json={
             "theme": "dark",
             "language": "en",
-            "column_order_masters": ["color"],
+            "column_order_staff": ["color"],
             "column_order_locations": ["name"],
         })
         assert resp.status_code == 200
         body = resp.json()
         assert body["theme"] == "dark"
         assert body["language"] == "en"
-        assert body["column_order_masters"] == ["color"]
+        assert body["column_order_staff"] == ["color"]
         assert body["column_order_locations"] == ["name"]
 
     def test_update_empty_body_noop(self, api_client, me) -> None:

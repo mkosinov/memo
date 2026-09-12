@@ -8,9 +8,7 @@ pytestmark = pytest.mark.api
 MASTER_PAYLOAD = {
     "first_name": "Anna",
     "last_name": "Ivanova",
-    "color": "#5B8C7A",
-    "position": "senior",
-    "specialty": "oil",
+    "master": {"specialty": "oil", "color": "#5B8C7A"},
 }
 
 SERVICE_PAYLOAD = {
@@ -50,7 +48,7 @@ def _create_record(api_client) -> str:
     """Create all prerequisites and return a record_id."""
     from datetime import UTC, datetime, timedelta
 
-    master = api_client.post("/api/v1/masters", json=MASTER_PAYLOAD).json()
+    master = api_client.post("/api/v1/staff", json=MASTER_PAYLOAD).json()
     service = api_client.post("/api/v1/services", json=SERVICE_PAYLOAD).json()
     location = api_client.post("/api/v1/locations", json=LOCATION_PAYLOAD).json()
     created_client = api_client.post("/api/v1/clients", json=CLIENT_PAYLOAD).json()

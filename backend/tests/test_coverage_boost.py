@@ -479,10 +479,10 @@ class TestRepositoryListFilters:
     """Test repository list with various filter parameters."""
 
     def test_list_masters(self, api_client):
-        """GET /api/v1/masters returns active masters."""
-        api_client.post("/api/v1/masters", json={
-            "first_name": "Test", "last_name": "Master", "color": "#FF0000",
-            "position": "мастер", "specialty": "живопись",
+        """GET /api/v1/masters returns acting masters."""
+        api_client.post("/api/v1/staff", json={
+            "first_name": "Test", "last_name": "Master",
+            "master": {"specialty": "живопись", "color": "#FF0000"},
         })
         resp = api_client.get("/api/v1/masters")
         assert resp.status_code == 200
@@ -634,9 +634,9 @@ class TestPhotoEndpoints:
 
 def _create_prereqs(api_client) -> dict:
     """Create master, service, location and return IDs."""
-    master = api_client.post("/api/v1/masters", json={
-        "first_name": "Test", "last_name": "Artist", "color": "#00FF00",
-        "position": "мастер", "specialty": "живопись",
+    master = api_client.post("/api/v1/staff", json={
+        "first_name": "Test", "last_name": "Artist",
+        "master": {"specialty": "живопись", "color": "#00FF00"},
     }).json()
     service = api_client.post("/api/v1/services", json={
         "title": "Test Svc", "description": "Test", "image_url": "https://example.com/t.jpg",

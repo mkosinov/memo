@@ -1,14 +1,22 @@
 {
-  "master": {
+  "staff": {
     "active": {
       "first_name": "Анна",
       "last_name": "Иванова",
-      "color": "#5B8C7A",
-      "position": "мастер",
-      "specialty": "живопись",
       "avatar_url": null,
       "sort_order": 0,
       "id": "5f8a1c2d-0001-4000-8000-000000000001",
+      "master": {
+        "specialty": "живопись, керамика",
+        "color": "#5B8C7A",
+        "created_at": "2024-01-15T10:00:00",
+        "updated_at": "2024-06-01T12:00:00",
+        "archived": false
+      },
+      "position_ids": [
+        "master"
+      ],
+      "has_user": true,
       "created_at": "2024-01-15T10:00:00",
       "updated_at": "2024-06-01T12:00:00",
       "archived": false
@@ -16,12 +24,20 @@
     "archived": {
       "first_name": "Анна",
       "last_name": "Иванова",
-      "color": "#5B8C7A",
-      "position": "мастер",
-      "specialty": "живопись",
       "avatar_url": null,
       "sort_order": 0,
       "id": "5f8a1c2d-0001-4000-8000-000000000001",
+      "master": {
+        "specialty": "живопись, керамика",
+        "color": "#5B8C7A",
+        "created_at": "2024-01-15T10:00:00",
+        "updated_at": "2024-06-01T12:00:00",
+        "archived": true
+      },
+      "position_ids": [
+        "master"
+      ],
+      "has_user": true,
       "created_at": "2024-01-15T10:00:00",
       "updated_at": "2024-06-01T12:00:00",
       "archived": true

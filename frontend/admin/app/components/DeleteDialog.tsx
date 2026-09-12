@@ -23,7 +23,7 @@ import type { DependencyNode } from '@memo/api-client';
 // This keeps the dialog table-agnostic and avoids a hook-per-entityType map.
 // Parents also own open/close state (the hooks' `dependencies` has no reset).
 
-export type DeleteDialogEntityType = 'master' | 'location' | 'service' | 'material' | 'client' | 'record';
+export type DeleteDialogEntityType = 'staff' | 'master' | 'location' | 'service' | 'material' | 'client' | 'record';
 
 export interface DeleteDialogProps {
   /** Human-readable entity name — shown in the dialog title. */
@@ -52,8 +52,10 @@ export interface DeleteDialogProps {
 
 /** FK-relation names whose deps are auto-resolved server-side — never user choice. */
 const AUTO_ENTITIES = new Set([
-  'users', // Master→users auto-cascade (§4.1)
+  'users', // Staff/Master→users auto-cascade (§4.1)
+  'masters', // GH #266: the staff card's masters extension row auto-cascades
   'master_tags',
+  'staff_positions', // GH #266: position links auto-cascade with the card
   'location_tags',
   'service_tags',
   'client_tags',
@@ -68,7 +70,9 @@ const AUTO_ENTITIES = new Set([
 // single source of truth — extend one of these maps when the matrix grows.
 const AUTO_ENTITY_LABEL: Record<string, string> = {
   users: 'Пользователь',
+  masters: 'Мастер', // GH #266: the schedule extension row (relation «Мастер»)
   master_tags: 'Теги',
+  staff_positions: 'Должности', // GH #266: M2M position links (relation «Должность»)
   location_tags: 'Теги',
   service_tags: 'Теги',
   client_tags: 'Теги',
@@ -95,6 +99,7 @@ const RELATION_PLURAL: Record<string, string> = {
 
 /** Genitive entity name — used in the title and the Mode B fallback hint. */
 const TITLE_BY_TYPE: Record<DeleteDialogEntityType, string> = {
+  staff: 'сотрудника', // GH #266: the «Сотрудники» directory card
   master: 'мастера',
   location: 'локации',
   service: 'услуги',

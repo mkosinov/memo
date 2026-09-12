@@ -58,6 +58,12 @@ ignore = [
 [tool.ruff.lint.isort]
 known-first-party = ["src"]
 
+# Cyrillic string literals in tests are domain data (names, specialties,
+# titles), not ambiguous-charset bugs — RUF001/002/003 are false positives
+# for a Russian-language domain model.
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["RUF001", "RUF002", "RUF003"]
+
 # ── Mypy ─────────────────────────────────────────────────────────────
 [tool.mypy]
 python_version = "3.12"

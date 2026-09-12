@@ -36,6 +36,7 @@ from src.models.payment import Payment
 from src.models.photo import Photo
 from src.models.record import Record
 from src.models.service import Service
+from src.models.staff import Staff
 from src.models.tag import Tag, activity_tags, record_tags, visitor_tags
 from src.models.visit import Visit
 from src.models.visitor import Visitor
@@ -49,16 +50,21 @@ pytestmark = pytest.mark.asyncio
 # ─── Direct-ORM setup helpers (bypass broken response schemas) ──────────────────
 
 async def _insert_activity(db_session) -> Activity:
-    """Insert Master + Service + Location + Activity (committed)."""
-    master = Master(first_name="M", last_name="L", color="#000000",
-                    position="p", specialty="s")
+    """Insert Staff + master extension + Service + Location + Activity (committed).
+
+    GH #266: the person is a Staff card; activities.master_id targets the
+    masters extension PK (= staff id).
+    """
+    staff = Staff(first_name="M", last_name="L")
     service = Service(title="S", description="d", image_url="http://x",
                      specialty="s", min_age=5, duration=60, record_info="r")
     location = Location(name="L", capacity=20)
-    db_session.add_all([master, service, location])
+    db_session.add_all([staff, service, location])
+    await db_session.flush()
+    db_session.add(Master(staff_id=staff.id, specialty="s", color="#000000"))
     await db_session.flush()
     activity = Activity(
-        master_id=master.id, service_id=service.id, location_id=location.id,
+        master_id=staff.id, service_id=service.id, location_id=location.id,
         start=datetime(2030, 1, 1, 12, 0), duration=90, capacity=10,
         is_private=False,
     )

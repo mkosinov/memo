@@ -1,15 +1,16 @@
 /**
  * S5 — Archive and restore parity for all 5 entities (#207 §12, incl.
- * Client #198 parity + Master→users cascade #4.2).
+ * Client #198 parity). GH #266: the former "master" entity is now the STAFF
+ * card — its archive runs through the D6 dismissal dialog (preselected
+ * checkboxes) instead of the old auto-cascade, and restore returns the PERSON
+ * only (master/user flags are explicit toggles, D3 — no cascade back).
  *
- * Per entity: "В архив" → POST /{id}/archive → 200 with body `archived: true`;
- * row leaves the active list and appears in the archived view; "Восстановить"
- * → POST /{id}/restore → 200 `archived: false`; row returns to the active
- * list. Master additionally cascades the linked user's is_active both ways
- * (DB check) — the other 4 entities never touch users.
+ * Per entity: archive → POST /{id}/archive → 200 with body `archived: true`;
+ * row leaves the active list and appears in the archived view; restore →
+ * POST /{id}/restore → 200 `archived: false`; row returns to the active list.
  */
 import { test, expect } from './fixtures/test';
-import type { Locator, Page } from '@playwright/test';
+import type { Page } from '@playwright/test';
 import {
   cleanup,
   createTestClient,
@@ -20,9 +21,10 @@ import {
 } from './fixtures/factories';
 import {
   clickRowArchiveAction,
+  clickRowStaffArchiveAction,
   openRowActionDropdown,
   waitForLocationsReady,
-  waitForMastersReady,
+  waitForStaffReady,
   waitForServicesReady,
   waitForMaterialsReady,
   waitForClientsReady,
@@ -32,7 +34,7 @@ import { queryDBRow } from './fixtures/db-query';
 
 const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
 
-/** Filter by archive status on the entity page (masters/locations/services/materials). */
+/** Filter by archive status on the entity page (staff/locations/services/materials). */
 async function setStatusFilter(page: Page, status: 'active' | 'archived'): Promise<void> {
   // Register the response listener BEFORE the select — avoid a race where the
   // filtered-list response arrives before the wait is registered.
@@ -57,46 +59,60 @@ async function setClientsStatusFilter(page: Page, status: 'active' | 'archived')
 }
 
 test.describe('S5 — Archive/restore parity (all 5 entities)', () => {
-  test('Master archiving cascades the linked user is_active both ways', async ({ page, request }) => {
+  test('Staff archive (D6 dialog) archives person+master+account; restore returns the person only', async ({ page, request }) => {
     const master = await createTestMaster(request);
     const phone = `+7999${String(Date.now()).slice(-7)}${Math.floor(Math.random() * 900) + 100}`;
     const userId = seedUser({ phone, masterId: master.id });
     try {
-      // Baseline — seeded user active.
+      // Baseline — seeded user active, master section active.
       expect(queryDBRow(`SELECT is_active FROM users WHERE id='${userId}'`)!.is_active).toBe(1);
 
-      await waitForMastersReady(page);
+      await waitForStaffReady(page);
       const row = page.locator(`[data-testid="master-row-${master.id}"]`);
       await expect(row).toBeVisible({ timeout: 10_000 });
 
+      // Archive runs through the D6 dialog (GH #266) — both checkboxes are
+      // preselected, so confirming sends {archive_master:true, archive_user:true}.
       const opened = await openRowActionDropdown(row);
+      await clickRowStaffArchiveAction(opened, 'Архивировать');
+      const dialog = page.locator('[data-testid="archive-staff-dialog"]');
+      await expect(dialog).toBeVisible({ timeout: 5_000 });
       const archivePromise = page.waitForResponse((resp) =>
-        resp.url().includes(`/api/v1/masters/${master.id}/archive`) && resp.request().method() === 'POST'
+        resp.url().includes(`/api/v1/staff/${master.id}/archive`) && resp.request().method() === 'POST'
       );
-      await clickRowArchiveAction(opened, 'В архив');
+      await dialog.locator('[data-testid="archive-staff-confirm-btn"]').click();
       const archive = await archivePromise;
       expect(archive.status()).toBe(200);
       expect((await archive.json()).archived).toBe(true);
-      await waitForToast(page, 'Мастер архивирован');
-      expect(queryDBRow(`SELECT is_active FROM masters WHERE id='${master.id}'`)!.is_active).toBe(0);
-      // CASCADE — the linked user is deactivated with the master.
+      await waitForToast(page, 'Сотрудник архивирован');
+      // Person archived; the preselected checkboxes archived master + user too.
+      expect(queryDBRow(`SELECT is_active FROM staff WHERE id='${master.id}'`)!.is_active).toBe(0);
+      expect(queryDBRow(`SELECT is_active FROM masters WHERE staff_id='${master.id}'`)!.is_active).toBe(0);
       expect(queryDBRow(`SELECT is_active FROM users WHERE id='${userId}'`)!.is_active).toBe(0);
 
-      // Restore via the archived view.
+      // Restore via the archived view — returns the PERSON only (D3: the
+      // master section + account stay archived; their flags are explicit).
       await setStatusFilter(page, 'archived');
       await expect(row).toBeVisible({ timeout: 10_000 });
       const archivedOpened = await openRowActionDropdown(row);
-      await clickRowArchiveAction(archivedOpened, 'Восстановить');
-      await waitForToast(page, 'Мастер восстановлен');
-      expect(queryDBRow(`SELECT is_active FROM masters WHERE id='${master.id}'`)!.is_active).toBe(1);
-      // CASCADE back — the user reactivates with the master.
-      expect(queryDBRow(`SELECT is_active FROM users WHERE id='${userId}'`)!.is_active).toBe(1);
+      const restorePromise = page.waitForResponse((resp) =>
+        resp.url().includes(`/api/v1/staff/${master.id}/restore`) && resp.request().method() === 'POST'
+      );
+      await clickRowStaffArchiveAction(archivedOpened, 'Вернуть из архива');
+      const restore = await restorePromise;
+      expect(restore.status()).toBe(200);
+      expect((await restore.json()).archived).toBe(false);
+      await waitForToast(page, 'Сотрудник возвращён из архива');
+      // Person restored; master + user flags UNCHANGED (no cascade back, D3).
+      expect(queryDBRow(`SELECT is_active FROM staff WHERE id='${master.id}'`)!.is_active).toBe(1);
+      expect(queryDBRow(`SELECT is_active FROM masters WHERE staff_id='${master.id}'`)!.is_active).toBe(0);
+      expect(queryDBRow(`SELECT is_active FROM users WHERE id='${userId}'`)!.is_active).toBe(0);
 
       await setStatusFilter(page, 'active');
       await expect(row).toBeVisible({ timeout: 10_000 });
     } finally {
       try { queryDBRow(`DELETE FROM users WHERE id='${userId}'`); } catch { /* best-effort */ }
-      await cleanup(request, `/api/v1/masters/${master.id}`);
+      await cleanup(request, `/api/v1/staff/${master.id}`);
     }
   });
 

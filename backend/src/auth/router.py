@@ -37,7 +37,7 @@ from src.auth.service import get_auth_service
 from src.auth.session import ABSOLUTE_CAP
 from src.core.config import settings
 from src.db import SessionDep
-from src.models.master import Master
+from src.models.staff import Staff
 from src.models.user import User
 from src.schemas.auth import AuthMeResponse, AuthUser, LoginRequest, MasterSnapshot
 
@@ -59,10 +59,10 @@ async def _build_me_response(
     """
     row = (
         await db_session.execute(
-            select(User.email, Master.first_name, Master.last_name)
+            select(User.email, Staff.first_name, Staff.last_name)
             .outerjoin(
-                Master,
-                and_(User.master_id == Master.id, Master.is_active == True),  # noqa: E712
+                Staff,
+                and_(User.staff_id == Staff.id, Staff.is_active == True),  # noqa: E712
             )
             .where(User.id == authed.id)
         )
@@ -80,7 +80,7 @@ async def _build_me_response(
             id=authed.id,
             phone=authed.phone,
             role=authed.role,
-            master_id=authed.master_id,
+            master_id=authed.staff_id,
             email=email,
         ),
         permissions=sorted(authed.permissions),

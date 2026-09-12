@@ -11,9 +11,7 @@ pytestmark = pytest.mark.api
 MASTER_PAYLOAD = {
     "first_name": "Anna",
     "last_name": "Ivanova",
-    "color": "#5B8C7A",
-    "position": "senior",
-    "specialty": "oil",
+    "master": {"specialty": "oil", "color": "#5B8C7A"},
 }
 
 SERVICE_PAYLOAD = {
@@ -36,7 +34,7 @@ LOCATION_PAYLOAD = {
 
 def _create_prerequisites(api_client) -> dict:
     """Create master, service, location and return their IDs."""
-    master = api_client.post("/api/v1/masters", json=MASTER_PAYLOAD).json()
+    master = api_client.post("/api/v1/staff", json=MASTER_PAYLOAD).json()
     service = api_client.post("/api/v1/services", json=SERVICE_PAYLOAD).json()
     location = api_client.post("/api/v1/locations", json=LOCATION_PAYLOAD).json()
     return {

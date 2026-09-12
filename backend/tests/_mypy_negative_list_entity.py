@@ -16,16 +16,16 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.models.master import Master
+from src.models.staff import Staff
 from src.repositories.generic import get_base_repository
 
 
 async def check_list_entity_contract(session: AsyncSession) -> None:
     """One valid call, one invalid call — only the invalid one may error."""
     repo = get_base_repository()
-    entity_stmt = select(Master)  # Select[tuple[Master]] — valid for list_entity
+    entity_stmt = select(Staff)  # Select[tuple[Staff]] — valid for list_entity
     await repo.list_entity(session, entity_stmt)
     two_col_stmt = select(
-        Master, Master.first_name.label("name")
+        Staff, Staff.first_name.label("name")
     )  # Select[tuple[Master, str]] — multi-column
     await repo.list_entity(session, two_col_stmt)  # MUST be an [arg-type] error

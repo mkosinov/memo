@@ -2,7 +2,9 @@
 
 Serializes via the real Pydantic response schemas (the exact objects FastAPI
 emits). Each entity has an active pair (DB is_active=true -> archived=false)
-and an archived pair (DB is_active=false -> archived=true). #207 Task 15.
+and an archived pair (DB is_active=false -> archived=true). #207 Task 15;
+#266: the staff card replaces the old master entity (the /masters list became
+a read-only acting-masters VIEW — not archive-aware, so no pair for it).
 """
 
 import json
@@ -10,18 +12,28 @@ from pathlib import Path
 
 from src.schemas.client import ClientResponse, ClientWithStats
 from src.schemas.location import LocationResponse
-from src.schemas.master import MasterResponse
 from src.schemas.material import MaterialResponse
 from src.schemas.service import ServiceResponse
+from src.schemas.staff import StaffResponse
 
 CREATED = "2024-01-15T10:00:00"
 UPDATED = "2024-06-01T12:00:00"
 
-master = dict(
-    first_name="Анна", last_name="Иванова", color="#5B8C7A", position="мастер",
-    specialty="живопись", avatar_url=None, sort_order=0,
+# Master-section row of the card (D3): the section keeps its own is_active —
+# archived pair mirrors the dismissal dialog defaults (both checkboxes on).
+master_section_active = dict(
+    specialty="живопись, керамика", color="#5B8C7A", is_active=True,
     created_at=CREATED, updated_at=UPDATED,
 )
+master_section_archived = dict(master_section_active, is_active=False)
+
+staff_active = dict(
+    first_name="Анна", last_name="Иванова", avatar_url=None, sort_order=0,
+    master=master_section_active, position_ids=["master"], has_user=True,
+    created_at=CREATED, updated_at=UPDATED,
+)
+staff_archived = dict(staff_active, master=master_section_archived)
+
 location = dict(
     name="Студия на Невском", short_title=None, address="Невский пр. 28",
     description="Уютная студия", capacity=10, yandex_map_url=None, review_url=None,
@@ -54,7 +66,14 @@ def pair(cls, base: dict, entity_id: str) -> dict:
 
 
 fixtures = {
-    "master": pair(MasterResponse, master, "5f8a1c2d-0001-4000-8000-000000000001"),
+    "staff": pair(StaffResponse, staff_active, "5f8a1c2d-0001-4000-8000-000000000001"),
+    # staff_archived needs the archived master section too — rebuild by hand
+    # (pair() flips only the person flag; D3 keeps the section flag independent).
+}
+fixtures["staff"]["archived"] = StaffResponse(
+    id="5f8a1c2d-0001-4000-8000-000000000001", **staff_archived, is_active=False
+).model_dump(mode="json")
+fixtures.update({
     "location": pair(LocationResponse, location, "5f8a1c2d-0002-4000-8000-000000000002"),
     "service": pair(ServiceResponse, service, "5f8a1c2d-0003-4000-8000-000000000003"),
     "material": pair(MaterialResponse, material, "5f8a1c2d-0004-4000-8000-000000000004"),
@@ -69,7 +88,7 @@ fixtures = {
                                     last_record=None, total_paid=0,
                                     missed_records=0).model_dump(mode="json"),
     },
-}
+})
 
 out = Path("packages/api-client/src/__fixtures__/backend-responses.json")
 out.parent.mkdir(parents=True, exist_ok=True)

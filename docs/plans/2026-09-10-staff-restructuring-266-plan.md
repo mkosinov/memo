@@ -260,8 +260,8 @@
 ### Required Docs
 - CLAUDE.md — engineering rules (UI diffs → test:all).
 
-- [ ] Полный прогон: backend pytest, vitest, type-check, весь e2e (`scripts/test-all.sh`) — зелёные.
-- [ ] CHANGELOG.md: строка #266.
+- [x] Полный прогон: backend pytest, vitest, type-check, весь e2e (`scripts/test-all.sh`) — зелёные.
+- [x] CHANGELOG.md: строка #266.
 
 **DoD:** выводы прогонов в отчёт; никаких красных.
 
@@ -273,9 +273,9 @@
 ### Required Docs
 - Спеки `2026-09-08-auth-design.md`, план `2026-09-08-auth-247-plan.md`, спека `2026-09-09-user-cabinet-design.md`.
 
-- [ ] #247 спека+план: master-словарь → staff (снапшот /auth/me — «master snapshot» становится снапшом карточки сотрудника + мастер-полей; `AuthedUser.master_id` → staff_id) — только тексты; сам код перенесён раньше (auth — T2).
-- [ ] Спека #262: полная перепись под staff-словарь (ссылки на Master-модель, specialty, /my, инвалидации, сценарии) — согласно «Границы» спеки #266.
-- [ ] `docs/domain-rules/_overview.md`/`staff.md`: сверка с реализацией (остаточные мастера-упоминания, naming-таблица).
+- [x] #247 спека+план: master-словарь → staff (снапшот /auth/me — «master snapshot» становится снапшом карточки сотрудника + мастер-полей; `AuthedUser.master_id` → staff_id) — только тексты; сам код перенесён раньше (auth — T2).
+- [x] Спека #262: полная перепись под staff-словарь (ссылки на Master-модель, specialty, /my, инвалидации, сценарии) — согласно «Границы» спеки #266.
+- [x] `docs/domain-rules/_overview.md`/`staff.md`: сверка с реализацией (остаточные мастера-упоминания, naming-таблица).
 
 **DoD:** grep по docs/ не находит устаревших мастеровых ссылок вне исторических (спеки закрытых задач не переписываем).
 

@@ -2,11 +2,14 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { useColumnReorder } from './useColumnReorder';
 
-const mockReorderMasters = vi.fn().mockResolvedValue(undefined);
+const mockPatchUserSettings = vi.fn().mockResolvedValue(undefined);
 const mockReorderLocations = vi.fn().mockResolvedValue(undefined);
 
+// GH #266 Gap C: `reorderMasters` was deleted from api-client (D8 — master
+// column order is no longer a `/masters/reorder` write). Master-column order
+// now persists as a user setting (`column_order_staff`, migration step 7).
 vi.mock('@memo/api-client', () => ({
-  reorderMasters: (...args: unknown[]) => mockReorderMasters(...args),
+  patchUserSettings: (...args: unknown[]) => mockPatchUserSettings(...args),
   reorderLocations: (...args: unknown[]) => mockReorderLocations(...args),
 }));
 
@@ -68,7 +71,7 @@ describe('useColumnReorder', () => {
     expect(result.current.orderedColumns.map((c) => c.id)).toEqual(['m2', 'm3', 'm1']);
   });
 
-  it('calls reorderMasters API on drop in masters mode', async () => {
+  it('persists column_order_staff via patchUserSettings on drop in masters mode', async () => {
     const { result } = renderHook(() =>
       useColumnReorder({ columns, columnMode: 'masters' }),
     );
@@ -80,7 +83,11 @@ describe('useColumnReorder', () => {
     await act(async () => {
       await new Promise((r) => setTimeout(r, 10));
     });
-    expect(mockReorderMasters).toHaveBeenCalledWith(['m2', 'm1', 'm3']);
+    // GH #266 Gap C: master-column order is a user setting now, not a
+    // `/masters/reorder` write (deleted in D8).
+    expect(mockPatchUserSettings).toHaveBeenCalledWith({
+      column_order_staff: ['m2', 'm1', 'm3'],
+    });
   });
 
   it('calls reorderLocations API on drop in locations mode', async () => {
@@ -114,7 +121,7 @@ describe('useColumnReorder', () => {
     });
 
     expect(result.current.columnOrder).toEqual(['m1', 'm2', 'm3']);
-    expect(mockReorderMasters).not.toHaveBeenCalled();
+    expect(mockPatchUserSettings).not.toHaveBeenCalled();
   });
 
   // --- initialOrder / onOrderChange tests ---

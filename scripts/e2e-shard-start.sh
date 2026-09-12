@@ -176,9 +176,10 @@ WARMUP_ROUTES=(
   "/clients"
   "/records"
   "/services"
-  "/masters"
+  "/staff"
   "/locations"
   "/tags"
+  "/positions"
   "/photos"
 )
 for route in "${WARMUP_ROUTES[@]}"; do

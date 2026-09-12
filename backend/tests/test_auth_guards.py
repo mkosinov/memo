@@ -42,11 +42,14 @@ MASTER_PASSWORD = "master-pass-1"
 
 # (label, method, path-template, minimal valid JSON body or None).
 # One representative guarded endpoint per router (spec §3.7 matrix rows).
+# GH #266: /masters is read-only — its write row moved to /staff (the
+# composite card); positions dictionary rows are new.
 _GUARDED_ENDPOINTS: list[tuple[str, str, str, dict | None]] = [
-    ("masters-write", "POST", "/api/v1/masters", {
-        "first_name": "Гвард", "last_name": "Мастеров",
-        "color": "#5B8C7A", "position": "мастер", "specialty": "живопись",
+    ("staff-write", "POST", "/api/v1/staff", {
+        "first_name": "Гвард", "last_name": "Сотрудников",
     }),
+    ("staff-read", "GET", "/api/v1/staff", None),
+    ("positions-write", "POST", "/api/v1/positions", {"title": "Гвард Должность"}),
     ("masters-all-read", "GET", "/api/v1/masters/all", None),
     ("locations-write", "POST", "/api/v1/locations", {
         "name": "Гвард Студия", "address": "Гвард Адрес", "capacity": 20,
@@ -143,9 +146,9 @@ def _fill_activity_body(api_client, label: str, body: dict | None) -> dict | Non
     location via the authenticated client and build the payload."""
     if label != "activities-write":
         return body
-    master = api_client.post("/api/v1/masters", json={
-        "first_name": "Гв", "last_name": "Masterov", "color": "#5B8C7A",
-        "position": "мастер", "specialty": "живопись",
+    master = api_client.post("/api/v1/staff", json={
+        "first_name": "Гв", "last_name": "Masterov",
+        "master": {"specialty": "живопись", "color": "#5B8C7A"},
     }).json()
     service = api_client.post("/api/v1/services", json={
         "title": "Гв Сервис", "description": "t",
@@ -266,10 +269,9 @@ class TestMasterMatrix:
         assert resp.json()["detail"]["code"] == ErrorCode.AUTH_FORBIDDEN.value
 
     def test_master_dictionary_write_forbidden(self, master_client) -> None:
-        """masters:write — read-only dictionaries for the master role."""
-        resp = master_client.post("/api/v1/masters", json={
-            "first_name": "Нет", "last_name": "Прав", "color": "#5B8C7A",
-            "position": "мастер", "specialty": "живопись",
+        """staff:write — the staff directory is admin-only."""
+        resp = master_client.post("/api/v1/staff", json={
+            "first_name": "Нет", "last_name": "Прав",
         })
         assert resp.status_code == 403
 

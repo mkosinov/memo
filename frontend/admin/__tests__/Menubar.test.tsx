@@ -156,12 +156,18 @@ describe('Menubar', () => {
     renderWithProviders();
     fireEvent.click(screen.getByRole('button', { name: 'Справочники' }));
     await waitFor(() => {
+      // GH #266: «Сотрудники» joins the directories (user decision 2026-09-10).
+      expect(screen.getByRole('link', { name: 'Сотрудники' })).toBeInTheDocument();
+      expect(screen.getByRole('link', { name: 'Сотрудники' })).toHaveAttribute('href', '/staff');
       expect(screen.getByRole('link', { name: 'Услуги' })).toBeInTheDocument();
       expect(screen.getByRole('link', { name: 'Локации' })).toBeInTheDocument();
       expect(screen.getByRole('link', { name: 'Теги' })).toBeInTheDocument();
       expect(screen.getByRole('link', { name: 'Услуги' })).toHaveAttribute('href', '/services');
       expect(screen.getByRole('link', { name: 'Локации' })).toHaveAttribute('href', '/locations');
       expect(screen.getByRole('link', { name: 'Теги' })).toHaveAttribute('href', '/tags');
+      // GH #266 T9: the positions dictionary joins the directories.
+      expect(screen.getByRole('link', { name: 'Должности' })).toBeInTheDocument();
+      expect(screen.getByRole('link', { name: 'Должности' })).toHaveAttribute('href', '/positions');
     });
   });
 

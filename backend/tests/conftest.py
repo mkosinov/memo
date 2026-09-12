@@ -241,7 +241,12 @@ def login_as(app):
 
 @pytest.fixture
 def create_master(api_client):
-    """Factory: creates a master via API.
+    """Factory: creates an ACTING MASTER via the staff card API (GH #266).
+
+    Composes the person card + master section in ONE POST /api/v1/staff
+    call and returns a ``/masters``-view-shaped dict (``id`` = staff_id,
+    ``color``/``specialty`` lifted from the master section) — consumers
+    (activity/record factories, guards) keep reading ``id``/``color``.
 
     Usage::
 
@@ -253,17 +258,29 @@ def create_master(api_client):
     def factory(**overrides):
         nonlocal _counter
         _counter += 1
-        payload = {
+        section = {
+            "specialty": overrides.pop("specialty", "живопись"),
+            "color": overrides.pop("color", "#5B8C7A"),
+        }
+        card = {
             "first_name": f"Test_{_counter}",
             "last_name": "Master",
-            "color": "#5B8C7A",
-            "position": "мастер",
-            "specialty": "живопись",
             **overrides,
         }
-        resp = api_client.post("/api/v1/masters", json=payload)
+        resp = api_client.post(
+            "/api/v1/staff", json={**card, "master": section}
+        )
         assert resp.status_code == 201, f"create_master failed: {resp.status_code}: {resp.text}"
-        return resp.json()
+        body = resp.json()
+        return {
+            "id": body["id"],
+            "first_name": body["first_name"],
+            "last_name": body["last_name"],
+            "specialty": section["specialty"],
+            "color": section["color"],
+            "avatar_url": body["avatar_url"],
+            "sort_order": body["sort_order"],
+        }
     return factory
 
 
@@ -584,9 +601,9 @@ async def sample_record(api_client, db_session):
     from datetime import UTC, datetime, timedelta
     from src.models.record import Record
 
-    master = api_client.post("/api/v1/masters", json={
-        "first_name": "Rec", "last_name": "Master", "color": "#5B8C7A",
-        "position": "мастер", "specialty": "живопись",
+    master = api_client.post("/api/v1/staff", json={
+        "first_name": "Rec", "last_name": "Master",
+        "master": {"specialty": "живопись", "color": "#5B8C7A"},
     }).json()
     service = api_client.post("/api/v1/services", json={
         "title": "Rec Service", "description": "Test", "image_url": "https://example.com/t.jpg",
@@ -642,9 +659,9 @@ async def sample_record_with_visits(api_client, db_session):
     from datetime import UTC, datetime, timedelta
     from src.models.record import Record
 
-    master = api_client.post("/api/v1/masters", json={
-        "first_name": "St", "last_name": "Master", "color": "#5B8C7A",
-        "position": "мастер", "specialty": "живопись",
+    master = api_client.post("/api/v1/staff", json={
+        "first_name": "St", "last_name": "Master",
+        "master": {"specialty": "живопись", "color": "#5B8C7A"},
     }).json()
     service = api_client.post("/api/v1/services", json={
         "title": "St Service", "description": "Test", "image_url": "https://example.com/t.jpg",
@@ -686,9 +703,9 @@ async def sample_activity_with_capacity(api_client, db_session):
     from datetime import UTC, datetime, timedelta
     from src.models.activity import Activity
 
-    master = api_client.post("/api/v1/masters", json={
-        "first_name": "Cap", "last_name": "Master", "color": "#5B8C7A",
-        "position": "мастер", "specialty": "живопись",
+    master = api_client.post("/api/v1/staff", json={
+        "first_name": "Cap", "last_name": "Master",
+        "master": {"specialty": "живопись", "color": "#5B8C7A"},
     }).json()
     service = api_client.post("/api/v1/services", json={
         "title": "Cap Service", "description": "Test", "image_url": "https://example.com/t.jpg",
@@ -720,9 +737,9 @@ async def sample_activity_at_capacity(api_client, db_session):
     from datetime import UTC, datetime, timedelta
     from src.models.activity import Activity
 
-    master = api_client.post("/api/v1/masters", json={
-        "first_name": "Full", "last_name": "Master", "color": "#FF0000",
-        "position": "мастер", "specialty": "живопись",
+    master = api_client.post("/api/v1/staff", json={
+        "first_name": "Full", "last_name": "Master",
+        "master": {"specialty": "живопись", "color": "#FF0000"},
     }).json()
     service = api_client.post("/api/v1/services", json={
         "title": "Full Service", "description": "Test", "image_url": "https://example.com/t.jpg",
@@ -767,9 +784,9 @@ async def sample_visit(api_client, db_session):
     from datetime import UTC, datetime, timedelta
     from src.models.visit import Visit
 
-    master = api_client.post("/api/v1/masters", json={
-        "first_name": "V", "last_name": "Master", "color": "#5B8C7A",
-        "position": "мастер", "specialty": "живопись",
+    master = api_client.post("/api/v1/staff", json={
+        "first_name": "V", "last_name": "Master",
+        "master": {"specialty": "живопись", "color": "#5B8C7A"},
     }).json()
     service = api_client.post("/api/v1/services", json={
         "title": "V Service", "description": "Test", "image_url": "https://example.com/t.jpg",
@@ -811,9 +828,9 @@ async def sample_visits(api_client, db_session):
     from datetime import UTC, datetime, timedelta
     from src.models.visit import Visit
 
-    master = api_client.post("/api/v1/masters", json={
-        "first_name": "Vs", "last_name": "Master", "color": "#5B8C7A",
-        "position": "мастер", "specialty": "живопись",
+    master = api_client.post("/api/v1/staff", json={
+        "first_name": "Vs", "last_name": "Master",
+        "master": {"specialty": "живопись", "color": "#5B8C7A"},
     }).json()
     service = api_client.post("/api/v1/services", json={
         "title": "Vs Service", "description": "Test", "image_url": "https://example.com/t.jpg",
@@ -891,7 +908,7 @@ def insert_user(
     user_id = str(_uuid.uuid4())
     conn = sqlite3.connect(_db_file.name)
     conn.execute(
-        "INSERT INTO users (id, phone, password_hash, role, master_id, "
+        "INSERT INTO users (id, phone, password_hash, role, staff_id, "
         "email_is_confirmed, phone_is_confirmed, is_active, created_at, updated_at) "
         "VALUES (?, ?, ?, ?, ?, 0, 0, 1, datetime('now'), datetime('now'))",
         (user_id, phone, password_hash, role, master_id),

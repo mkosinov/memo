@@ -3,16 +3,6 @@
 import enum
 
 
-class Specialty(str, enum.Enum):
-    PAINTING = "живопись"
-    CERAMICS = "керамика"
-
-
-class Position(str, enum.Enum):
-    MASTER = "мастер"
-    ADMIN = "администратор"
-
-
 class UserRole(str, enum.Enum):
     ADMIN = "admin"
     MASTER = "master"

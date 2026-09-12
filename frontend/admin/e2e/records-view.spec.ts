@@ -261,10 +261,14 @@ test.describe('Records View Endpoint — GH #213 US-1..US-6', () => {
 
     try {
       // Archive both entities — display resolution carries NO is_active
-      // filter (spec §4, photos precedent).
+      // filter (spec §4, photos precedent). GH #266: master writes moved to
+      // the staff card (the D6 archive defaults archive the master section
+      // along with the person).
       const archClient = await request.post(`${BACKEND}/api/v1/clients/${client.id}/archive`);
       expect(archClient.ok()).toBeTruthy();
-      const archMaster = await request.post(`${BACKEND}/api/v1/masters/${master.id}/archive`);
+      const archMaster = await request.post(`${BACKEND}/api/v1/staff/${master.id}/archive`, {
+        data: { archive_master: true, archive_user: true },
+      });
       expect(archMaster.ok()).toBeTruthy();
 
       await waitForRecordsReady(page);
@@ -281,10 +285,10 @@ test.describe('Records View Endpoint — GH #213 US-1..US-6', () => {
     } finally {
       await cleanupRecord(request, record.id);
       await request.post(`${BACKEND}/api/v1/clients/${client.id}/restore`).catch(() => {});
-      await request.post(`${BACKEND}/api/v1/masters/${master.id}/restore`).catch(() => {});
+      await request.post(`${BACKEND}/api/v1/staff/${master.id}/restore`).catch(() => {});
       await cleanup(request, `/api/v1/activities/${activity.id}`);
       await cleanup(request, `/api/v1/clients/${client.id}`);
-      await cleanup(request, `/api/v1/masters/${master.id}`);
+      await cleanup(request, `/api/v1/staff/${master.id}`);
     }
   });
 
@@ -549,7 +553,7 @@ test.describe('Records View Endpoint — GH #213 US-1..US-6', () => {
       await cleanupRecord(request, recordB.id);
       await cleanup(request, `/api/v1/activities/${activityA.id}`);
       await cleanup(request, `/api/v1/activities/${activityB.id}`);
-      for (const id of [masterA.id, masterB.id]) await cleanup(request, `/api/v1/masters/${id}`);
+      for (const id of [masterA.id, masterB.id]) await cleanup(request, `/api/v1/staff/${id}`);
       for (const id of [serviceA.id, serviceB.id]) await cleanup(request, `/api/v1/services/${id}`);
       for (const id of [locationA.id, locationB.id]) await cleanup(request, `/api/v1/locations/${id}`);
       await cleanup(request, `/api/v1/clients/${clientA.id}`);
@@ -641,7 +645,7 @@ test.describe('Records View Endpoint — GH #213 US-1..US-6', () => {
       for (const f of [A, B, C]) {
         await cleanupRecord(request, f.record.id);
         await cleanup(request, `/api/v1/activities/${f.activity.id}`);
-        await cleanup(request, `/api/v1/masters/${f.master.id}`);
+        await cleanup(request, `/api/v1/staff/${f.master.id}`);
         await cleanup(request, `/api/v1/services/${f.service.id}`);
         await cleanup(request, `/api/v1/locations/${f.location.id}`);
         await cleanup(request, `/api/v1/clients/${f.client.id}`);

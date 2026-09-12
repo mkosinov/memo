@@ -5,14 +5,17 @@ from __future__ import annotations
 from datetime import date
 from functools import lru_cache
 
+from fastapi import HTTPException
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.domain.dates import day_range
 from src.domain.record_visits import active_record_filter
 from src.domain.visit_status import ACTIVE_RECORD_STATUSES
+from src.errors import ErrorCode, ErrorDetail
 from src.events.emitter import mark_changed
 from src.models.activity import Activity
+from src.models.master import Master
 from src.models.payment import Payment
 from src.models.photo import Photo
 from src.models.record import Record
@@ -25,6 +28,28 @@ from src.schemas.activity import ActivityCreate, ActivityResponse, ActivityUpdat
 from src.schemas.common import PaginatedResponse
 from src.services.decorators import transactional
 from src.services.generic import GenericService
+
+
+async def check_master_active(
+    db_session: AsyncSession, master_id: str
+) -> None:
+    """GH #266 «Валидация и правила»: a new/moved activity may target only
+    a master with ``masters.is_active = true``.
+
+    The picker list may be stale (TOCTOU) — this server-side check is the
+    authority. Raises ``HTTPException`` 422 ``MASTER_NOT_ACTIVE`` when the
+    extension row is missing OR archived (same contract: the id is not a
+    schedulable master).
+    """
+    ext = await db_session.get(Master, master_id)
+    if ext is None or not ext.is_active:
+        raise HTTPException(
+            status_code=422,
+            detail=ErrorDetail(
+                code=ErrorCode.MASTER_NOT_ACTIVE,
+                message="Мастер недоступен для расписания",
+            ).model_dump(),
+        )
 
 
 class ActivityService(GenericService[ActivityCreate, ActivityUpdate, ActivityResponse]):
@@ -107,6 +132,36 @@ class ActivityService(GenericService[ActivityCreate, ActivityUpdate, ActivityRes
         titles = {row[0]: row[1] for row in rows.all()}
         for item in items:
             item.service_title = titles.get(item.id)
+
+    @transactional
+    async def create(
+        self, db_session: AsyncSession, data: ActivityCreate
+    ) -> ActivityResponse:
+        """Create a new activity.
+
+        GH #266 TOCTOU guard: the target master must be schedulable
+        (``masters.is_active = true``) — ``MASTER_NOT_ACTIVE`` otherwise.
+        """
+        await check_master_active(db_session, data.master_id)
+        return await super().create(db_session, data)
+
+    @transactional
+    async def update(
+        self, db_session: AsyncSession, id: str, data: ActivityUpdate
+    ) -> ActivityResponse | None:
+        """Full-update an activity — перенесённое занятие тоже проходит
+        мастер-проверку (MASTER_NOT_ACTIVE на перенос)."""
+        await check_master_active(db_session, data.master_id)
+        return await super().update(db_session, id, data)
+
+    async def patch(
+        self, db_session: AsyncSession, id: str, data
+    ) -> ActivityResponse | None:
+        """Partial-update — master_id revalidated when sent (перенос)."""
+        new_master = getattr(data, "master_id", None)
+        if new_master is not None:
+            await check_master_active(db_session, new_master)
+        return await super().patch(db_session, id, data)
 
     async def sum_active_seats(
         self, db_session: AsyncSession, activity_id: str

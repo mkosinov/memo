@@ -27,6 +27,19 @@ describe('parseApiError', () => {
     expect(parseApiError(err).message).toBe('Не найдено');
   });
 
+  // GH #266 — positions dictionary codes.
+  it('returns "Не найдено" for POSITION_NOT_FOUND (generic 404)', () => {
+    const err = new ApiError(404, 'Position not found', 'POSITION_NOT_FOUND');
+    expect(parseApiError(err).message).toBe('Не найдено');
+  });
+
+  it('explains POSITION_IS_SYSTEM (built-in delete refusal, D4)', () => {
+    // The explanation is a UI contract: the mapped default wins even when the
+    // backend message is raw/untranslated.
+    const err = new ApiError(422, 'Position is system', 'POSITION_IS_SYSTEM');
+    expect(parseApiError(err).message).toBe('Встроенная должность не удаляется');
+  });
+
   it('returns specific message for CLIENT_DUPLICATE_PHONE', () => {
     const err = new ApiError(409, 'Phone exists', 'CLIENT_DUPLICATE_PHONE');
     expect(parseApiError(err).message).toBe('Клиент с таким телефоном уже существует');

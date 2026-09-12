@@ -26,6 +26,11 @@ const CODE_DEFAULTS: Record<string, string> = {
   VISIT_NOT_FOUND: 'Не найдено',
   PAYMENT_NOT_FOUND: 'Не найдено',
   SETTINGS_NOT_FOUND: 'Не найдено',
+  // GH #266 T9 — positions dictionary (D4).
+  POSITION_NOT_FOUND: 'Не найдено',
+  // The explanation of the block: a built-in («мастер»/«админ») never deletes;
+  // its title stays editable. Surfaced as an error toast.
+  POSITION_IS_SYSTEM: 'Встроенная должность не удаляется',
   VALIDATION_ERROR: 'Проверьте правильность заполнения полей',
   INTEGRITY_VIOLATION: 'Нарушение целостности данных',
   INTERNAL_ERROR: 'Ошибка сервера',

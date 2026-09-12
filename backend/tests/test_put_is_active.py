@@ -27,12 +27,9 @@ pytestmark = pytest.mark.api
 # Each is a complete body for the entity's Update schema; archived/restore via
 # POST endpoints, never via PUT.
 
-MASTER_PUT = {
+STAFF_PUT = {
     "first_name": "Active",
     "last_name": "Master",
-    "color": "#5B8C7A",
-    "position": "мастер",
-    "specialty": "живопись",
 }
 
 LOCATION_PUT = {
@@ -71,25 +68,25 @@ class TestMasterPutRejectsIsActive:
 
     def test_put_master_with_is_active_false_rejected(self, api_client) -> None:
         """A stray is_active=False (old archive direction) → 422; master stays active."""
-        master_id = api_client.post("/api/v1/masters", json=MASTER_PUT).json()["id"]
+        master_id = api_client.post("/api/v1/staff", json=STAFF_PUT).json()["id"]
 
         resp = api_client.put(
-            f"/api/v1/masters/{master_id}",
-            json={**MASTER_PUT, "is_active": False},
+            f"/api/v1/staff/{master_id}",
+            json={**STAFF_PUT, "is_active": False},
         )
         assert resp.status_code == 422, f"Expected 422, got {resp.status_code}: {resp.text}"
 
         # Rejection is atomic — no partial write; master is still active.
-        after = api_client.get(f"/api/v1/masters/{master_id}").json()
+        after = api_client.get(f"/api/v1/staff/{master_id}").json()
         assert after["archived"] is False
 
     def test_put_master_with_is_active_true_rejected(self, api_client) -> None:
         """A stray is_active=True (old restore direction) → 422 too (both polarities)."""
-        master_id = api_client.post("/api/v1/masters", json=MASTER_PUT).json()["id"]
+        master_id = api_client.post("/api/v1/staff", json=STAFF_PUT).json()["id"]
 
         resp = api_client.put(
-            f"/api/v1/masters/{master_id}",
-            json={**MASTER_PUT, "is_active": True},
+            f"/api/v1/staff/{master_id}",
+            json={**STAFF_PUT, "is_active": True},
         )
         assert resp.status_code == 422, f"Expected 422, got {resp.status_code}: {resp.text}"
 

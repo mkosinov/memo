@@ -816,3 +816,217 @@ class TestMastersReadOnly:
         query_db(f"UPDATE staff SET is_active=0 WHERE id='{created['id']}'")
         resp = api_client.get("/api/v1/masters")
         assert resp.json()["total"] == 1
+
+
+def _seed_user(staff_id: str, *, is_active: int = 1, phone: str | None = None) -> str:
+    """Insert a linked users row directly; return its id."""
+    user_id = f"{_uuid.uuid4()}"
+    phone = phone or f"+7999{_uuid.uuid4().hex[:7]}"
+    query_db(
+        f"INSERT INTO users (id, phone, password_hash, role, staff_id, "
+        f"email_is_confirmed, phone_is_confirmed, is_active, created_at, updated_at) "
+        f"VALUES ('{user_id}', '{phone}', 'x', 'admin', "
+        f"'{staff_id}', 0, 0, {is_active}, datetime('now'), datetime('now'))"
+    )
+    return user_id
+
+
+class TestMasterSectionArchiveFlag:
+    """GH #266 T8 Gap A — ``archived`` on the master-section payload.
+
+    PUT/PATCH with ``master: {…, archived: true}`` flips the SCHEDULE flag
+    (``masters.is_active = false``): the row is KEPT (D7 — history keeps
+    name/color), /masters stops listing it. ``archived: false`` restores
+    the acting state; absent (null) = don't touch the flag (upsert keeps
+    an active section active, an archived one archived).
+    """
+
+    def test_put_archive_section_hides_from_masters_keeps_row(
+        self, api_client
+    ) -> None:
+        created = api_client.post(
+            "/api/v1/staff", json=_create_payload(master=MASTER_SECTION)
+        ).json()
+
+        resp = api_client.put(
+            f"/api/v1/staff/{created['id']}",
+            json=_create_payload(
+                master={**MASTER_SECTION, "archived": True}
+            ),
+        )
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["master"]["archived"] is True
+        # row KEPT with specialty/color (D7) — only the flag flipped
+        rows = query_db(
+            f"SELECT specialty, color, is_active FROM masters "
+            f"WHERE staff_id='{created['id']}'"
+        )
+        assert len(rows) == 1
+        assert rows[0]["is_active"] == 0
+        assert rows[0]["specialty"] == "живопись"
+        assert rows[0]["color"] == "#5B8C7A"
+        # /masters no longer lists the archived section
+        assert api_client.get("/api/v1/masters").json()["total"] == 0
+
+    def test_patch_archive_section(self, api_client) -> None:
+        created = api_client.post(
+            "/api/v1/staff", json=_create_payload(master=MASTER_SECTION)
+        ).json()
+
+        resp = api_client.patch(
+            f"/api/v1/staff/{created['id']}",
+            json={"master": {**MASTER_SECTION, "archived": True}},
+        )
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["master"]["archived"] is True
+        assert _staff_flags(created["id"])[1] == 0
+
+    def test_put_archived_false_restores_schedule_flag(self, api_client) -> None:
+        created = api_client.post(
+            "/api/v1/staff", json=_create_payload(master=MASTER_SECTION)
+        ).json()
+        query_db(
+            f"UPDATE masters SET is_active=0 WHERE staff_id='{created['id']}'"
+        )
+
+        resp = api_client.put(
+            f"/api/v1/staff/{created['id']}",
+            json=_create_payload(
+                master={**MASTER_SECTION, "archived": False}
+            ),
+        )
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["master"]["archived"] is False
+        assert api_client.get("/api/v1/masters").json()["total"] == 1
+
+    def test_upsert_without_archived_keeps_existing_flag(
+        self, api_client
+    ) -> None:
+        """absent archived = don't touch: an archived row stays archived."""
+        created = api_client.post(
+            "/api/v1/staff", json=_create_payload(master=MASTER_SECTION)
+        ).json()
+        query_db(
+            f"UPDATE masters SET is_active=0 WHERE staff_id='{created['id']}'"
+        )
+
+        resp = api_client.put(
+            f"/api/v1/staff/{created['id']}",
+            json=_create_payload(
+                master={"specialty": "керамика", "color": "#123456"}
+            ),
+        )
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["master"]["specialty"] == "керамика"
+        assert resp.json()["master"]["archived"] is True  # flag untouched
+
+    def test_create_with_archived_true_creates_inactive_section(
+        self, api_client
+    ) -> None:
+        """Create + archived: the section is born archived (D5 payload)."""
+        resp = api_client.post(
+            "/api/v1/staff",
+            json=_create_payload(
+                master={**MASTER_SECTION, "archived": True}
+            ),
+        )
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["master"]["archived"] is True
+        assert api_client.get("/api/v1/masters").json()["total"] == 0
+
+    def test_archived_section_upsert_recreates_row_as_archived(
+        self, api_client
+    ) -> None:
+        """No section yet + archived:true → the new row is born archived
+        (upsert semantics; presence and the flag are independent)."""
+        created = api_client.post(
+            "/api/v1/staff", json=_create_payload()
+        ).json()
+
+        resp = api_client.put(
+            f"/api/v1/staff/{created['id']}",
+            json=_create_payload(
+                master={**MASTER_SECTION, "archived": True}
+            ),
+        )
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["master"]["archived"] is True
+        assert _staff_flags(created["id"])[1] == 0
+
+
+class TestStaffHasUser:
+    """GH #266 T8 Gap B — ``has_user`` on StaffResponse (D6).
+
+    «Наличие учётки» = a users ROW linked to the card exists (ANY
+    is_active): the dismissal dialog's «Архивировать учётку» checkbox is
+    only shown when an account exists at all — an already-archived
+    account still counts (D6: the checkbox applies to the ACTIVE link).
+    """
+
+    def test_get_without_account_has_user_false(self, api_client) -> None:
+        created = api_client.post(
+            "/api/v1/staff", json=_create_payload()
+        ).json()
+        resp = api_client.get(f"/api/v1/staff/{created['id']}")
+        assert resp.status_code == 200
+        assert resp.json()["has_user"] is False
+
+    def test_get_with_account_has_user_true(self, api_client) -> None:
+        created = api_client.post(
+            "/api/v1/staff",
+            json=_create_payload(
+                create_user={"phone": "+79995551100", "password": "pw-acc-1"}
+            ),
+        ).json()
+        resp = api_client.get(f"/api/v1/staff/{created['id']}")
+        assert resp.status_code == 200
+        assert resp.json()["has_user"] is True
+
+    def test_archived_account_still_counts_has_user_true(
+        self, api_client
+    ) -> None:
+        created = api_client.post(
+            "/api/v1/staff", json=_create_payload()
+        ).json()
+        _seed_user(created["id"], is_active=0)
+
+        resp = api_client.get(f"/api/v1/staff/{created['id']}")
+
+        assert resp.status_code == 200
+        assert resp.json()["has_user"] is True
+
+    def test_create_response_reports_has_user(self, api_client) -> None:
+        resp = api_client.post(
+            "/api/v1/staff",
+            json=_create_payload(
+                create_user={"phone": "+79995551101", "password": "pw-acc-2"}
+            ),
+        )
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["has_user"] is True
+
+    def test_list_items_carry_has_user(self, api_client) -> None:
+        with_acc = api_client.post(
+            "/api/v1/staff",
+            json=_create_payload(
+                first_name="С",
+                last_name="Сучёткой",
+                create_user={"phone": "+79995551102", "password": "pw-acc-3"},
+            ),
+        ).json()
+        api_client.post(
+            "/api/v1/staff",
+            json=_create_payload(first_name="Б", last_name="Безучётки"),
+        )
+
+        items = api_client.get("/api/v1/staff").json()["items"]
+
+        by_name = {i["last_name"]: i for i in items}
+        assert by_name["Сучёткой"]["has_user"] is True
+        assert by_name["Безучётки"]["has_user"] is False
+        assert with_acc["has_user"] is True

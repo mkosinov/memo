@@ -82,6 +82,17 @@ Staff — карточка каждого сотрудника студии (м�
 ## Response field: `archived` (inverted)
 Response-схемы staff и master exposing `archived: bool` вместо `is_active` (инверсия в сервисе) — прежний паттерн всех archive-aware сущностей. См. `_overview.md` → «Archive terminology boundary».
 
+## Мастер-секция: `archived` в payload (T8)
+`MasterSection` в POST/PUT/PATCH принимает опциональное `archived: bool | None`:
+- `null`/отсутствует — флаг `masters.is_active` не трогается (upsert существующей строки сохраняет её текущее состояние; новая строка создаётся активной);
+- `true` — секция архивируется: `masters.is_active = false`, строка НЕ удаляется (D7 — история хранит имя/цвет), из `/api/v1/masters` пропадает;
+- `false` — возврат в действующие (восстанавливает прежние специальность/цвет из payload).
+
+Удаление секции остаётся только явным `master: null` (заблокировано занятиями, D7).
+
+## Response field: `has_user` (T8)
+`StaffResponse.has_user: bool` — наличие учётки: существует ЛЮБАЯ строка `users` со `staff_id` (без учёта `is_active`). Заархивированная учётка тоже считается наличием — чекбокс D6 «Архивировать учётку» показывается «при наличии учётки», а применяется только к активной связи (логика карточки фронта).
+
 ## Archive & delete semantics (GH #207 + #266)
 
 Staff — archive-aware сущность (одна из 5). PUT/PATCH не принимают `is_active`; архив только через POST /archive + POST /restore.

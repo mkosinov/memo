@@ -55,6 +55,7 @@ import {
   type RecordView,
   AuthMeSchema,
   UserSettingsCreateSchema,
+  UserSettingsResponseSchema,
 } from './schemas';
 import backendFixtures from './__fixtures__/backend-responses.json';
 
@@ -76,6 +77,7 @@ const validStaff = {
   sort_order: 0,
   master: validStaffMasterSection,
   position_ids: ['master', '5f8a1c2d-0007-4000-8000-000000000007'],
+  has_user: false, // T8 Gap B: no linked account row (backend always emits it)
   archived: false,
   created_at: '2024-01-15T10:00:00Z',
   updated_at: '2024-06-01T12:00:00Z',
@@ -133,6 +135,21 @@ describe('StaffResponseSchema', () => {
     const result = StaffResponseSchema.parse({ ...validStaff, is_active: true });
     expect(result).not.toHaveProperty('is_active');
     expect(result.archived).toBe(false);
+  });
+
+  it('requires has_user (T8 Gap B: «Архивировать учётку» checkbox visibility)', () => {
+    const result = StaffResponseSchema.parse({ ...validStaff, has_user: true });
+    expect(result.has_user).toBe(true);
+  });
+
+  it('has_user false for a card without account', () => {
+    const result = StaffResponseSchema.parse({ ...validStaff, has_user: false });
+    expect(result.has_user).toBe(false);
+  });
+
+  it('has_user is required — missing field throws (backend always emits it)', () => {
+    const { has_user: _h, ...without } = { ...validStaff, has_user: true };
+    expect(() => StaffResponseSchema.parse(without)).toThrow();
   });
 });
 
@@ -193,9 +210,27 @@ describe('StaffCreateSchema', () => {
       StaffCreateSchema.parse({
         first_name: 'И',
         last_name: 'П',
-        master: { specialty: 'живопись', color: '#5B8C7A', archived: false },
+        master: { specialty: 'живопись', color: '#5B8C7A', no_such: true },
       }),
     ).toThrow();
+  });
+
+  it('master section accepts optional archived (T8 Gap A: archive via upsert)', () => {
+    const result = StaffCreateSchema.parse({
+      first_name: 'И',
+      last_name: 'П',
+      master: { specialty: 'живопись', color: '#5B8C7A', archived: true },
+    });
+    expect(result.master?.archived).toBe(true);
+  });
+
+  it('master section archived defaults to undefined (None = don\'t touch the flag)', () => {
+    const result = StaffCreateSchema.parse({
+      first_name: 'И',
+      last_name: 'П',
+      master: { specialty: 'живопись', color: '#5B8C7A' },
+    });
+    expect(result.master?.archived).toBeUndefined();
   });
 });
 
@@ -1598,5 +1633,43 @@ describe('UserSettingsCreateSchema (GH #247 §3.8)', () => {
     const parsed = UserSettingsCreateSchema.parse({ theme: 'dark' });
     expect(parsed.theme).toBe('dark');
     expect(parsed.user_id).toBeUndefined();
+  });
+});
+
+// ─── UserSettings rename parity (GH #266 T8 Gap C) ──────────────────────────
+// Backend already serializes column_order_staff (masters → staff, #266);
+// the client schema must follow. Required-ness is unchanged: response
+// requires the field, create defaults to [].
+
+describe('UserSettings column rename (GH #266: column_order_masters → column_order_staff)', () => {
+  const validSettings = {
+    id: '5f8a1c2d-0008-4000-8000-000000000008',
+    user_id: '5f8a1c2d-0009-4000-8000-000000000009',
+    theme: 'light',
+    language: 'ru',
+    column_order_staff: ['5f8a1c2d-0001-4000-8000-000000000001'],
+    column_order_locations: ['5f8a1c2d-0002-4000-8000-000000000002'],
+    created_at: '2024-01-15T10:00:00Z',
+    updated_at: '2024-06-01T12:00:00Z',
+  };
+
+  it('UserSettingsResponseSchema parses column_order_staff (required)', () => {
+    const parsed = UserSettingsResponseSchema.parse(validSettings);
+    expect(parsed.column_order_staff).toEqual(['5f8a1c2d-0001-4000-8000-000000000001']);
+  });
+
+  it('UserSettingsResponseSchema rejects the old column_order_masters key (missing required field)', () => {
+    const { column_order_staff: _c, ...withOld } = validSettings;
+    (withOld as Record<string, unknown>).column_order_masters = [];
+    expect(() => UserSettingsResponseSchema.parse(withOld)).toThrow();
+  });
+
+  it('UserSettingsCreateSchema accepts column_order_staff, defaults to []', () => {
+    const parsed = UserSettingsCreateSchema.parse({ theme: 'dark' });
+    expect(parsed.column_order_staff).toEqual([]);
+    const withCols = UserSettingsCreateSchema.parse({
+      column_order_staff: ['id-1'],
+    });
+    expect(withCols.column_order_staff).toEqual(['id-1']);
   });
 });

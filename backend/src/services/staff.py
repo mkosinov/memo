@@ -91,6 +91,23 @@ async def _position_ids(
     return result
 
 
+async def _user_presence(
+    db_session: AsyncSession, staff_ids: Sequence[str]
+) -> dict[str, bool]:
+    """Fetch {staff_id: has_user} — ANY linked users row counts (D6).
+
+    ``is_active`` is deliberately ignored: «наличие учётки» for the D6
+    dismissal checkbox means the row exists; applying the checkbox to an
+    active link is the dialog's own logic.
+    """
+    if not staff_ids:
+        return {}
+    rows = await db_session.execute(
+        select(User.staff_id).where(User.staff_id.in_(list(staff_ids)))
+    )
+    return {staff_id: True for (staff_id,) in rows.all()}
+
+
 def _require_section_fields(section: MasterSection | None) -> None:
     """D5: a present master section must carry a non-blank specialty + color.
 
@@ -126,6 +143,7 @@ class StaffService(ArchiveService[StaffCreate, StaffUpdate, StaffResponse]):
         staff: Staff,
         ext: Master | None,
         position_ids: list[str],
+        has_user: bool = False,
     ) -> StaffResponse:
         from src.schemas.staff import MasterSectionView
 
@@ -141,6 +159,7 @@ class StaffService(ArchiveService[StaffCreate, StaffUpdate, StaffResponse]):
             avatar_url=staff.avatar_url,
             sort_order=staff.sort_order,
             is_active=staff.is_active,
+            has_user=has_user,
             created_at=staff.created_at,
             updated_at=staff.updated_at,
         )
@@ -153,12 +172,15 @@ class StaffService(ArchiveService[StaffCreate, StaffUpdate, StaffResponse]):
     async def _assemble(
         self, db_session: AsyncSession, staff_rows: Sequence[Staff]
     ) -> list[StaffResponse]:
-        """Bulk-fill master sections + position ids for a page of cards."""
+        """Bulk-fill master sections + position ids + has_user for a page."""
         ids = [s.id for s in staff_rows]
         exts = await _master_extensions(db_session, ids)
         links = await _position_ids(db_session, ids)
+        users = await _user_presence(db_session, ids)
         return [
-            self._to_response(s, exts.get(s.id), links.get(s.id, []))
+            self._to_response(
+                s, exts.get(s.id), links.get(s.id, []), users.get(s.id, False)
+            )
             for s in staff_rows
         ]
 
@@ -172,7 +194,8 @@ class StaffService(ArchiveService[StaffCreate, StaffUpdate, StaffResponse]):
             return None
         ext = (await _master_extensions(db_session, [id])).get(id)
         links = await _position_ids(db_session, [id])
-        return self._to_response(staff, ext, links.get(id, []))
+        has_user = (await _user_presence(db_session, [id])).get(id, False)
+        return self._to_response(staff, ext, links.get(id, []), has_user)
 
     async def list(
         self,
@@ -295,7 +318,8 @@ class StaffService(ArchiveService[StaffCreate, StaffUpdate, StaffResponse]):
         db_session.add(staff)
         await db_session.flush()
 
-        # 2. Master section (optional).
+        # 2. Master section (optional). ``archived`` (Gap A): set → the
+        # section is born with is_active = not archived; None → default True.
         _require_section_fields(data.master)
         if data.master is not None:
             db_session.add(
@@ -303,6 +327,11 @@ class StaffService(ArchiveService[StaffCreate, StaffUpdate, StaffResponse]):
                     staff_id=staff.id,
                     specialty=data.master.specialty.strip(),
                     color=data.master.color.strip(),
+                    **(
+                        {"is_active": not data.master.archived}
+                        if data.master.archived is not None
+                        else {}
+                    ),
                 )
             )
 
@@ -349,7 +378,12 @@ class StaffService(ArchiveService[StaffCreate, StaffUpdate, StaffResponse]):
             else None
         )
         links = await _position_ids(db_session, [staff.id])
-        return self._to_response(staff, ext, links.get(staff.id, []))
+        has_user = (await _user_presence(db_session, [staff.id])).get(
+            staff.id, False
+        )
+        return self._to_response(
+            staff, ext, links.get(staff.id, []), has_user
+        )
 
     @transactional
     async def update(
@@ -380,13 +414,16 @@ class StaffService(ArchiveService[StaffCreate, StaffUpdate, StaffResponse]):
         """PATCH — only sent keys apply (three-state ``master``)."""
         payload = self._patch_payload(data)
         master_sent = "master" in payload
-        master_section = payload.pop("master", None)
+        # The ORIGINAL model object, not the payload dump: the dict form
+        # loses attribute access in ``_apply_master_section``.
+        master_section = data.master if master_sent else None
         positions_sent = "position_ids" in payload
         position_ids = payload.pop("position_ids", None)
+        payload.pop("master", None)
         return await self._patch_composite(
             db_session, id, payload,
             master_sent=master_sent,
-            master_section=cast("MasterSection | None", master_section),
+            master_section=master_section,
             positions_sent=positions_sent,
             position_ids=cast("list[str] | None", position_ids),
         )
@@ -458,7 +495,13 @@ class StaffService(ArchiveService[StaffCreate, StaffUpdate, StaffResponse]):
     async def _apply_master_section(
         self, db_session: AsyncSession, staff_id: str, section: MasterSection | None
     ) -> None:
-        """Upsert (payload) / remove (None) the masters extension row."""
+        """Upsert (payload) / remove (None) the masters extension row.
+
+        ``section.archived`` (T8 Gap A): ``None`` = don't touch the
+        schedule flag; set → ``masters.is_active = not archived`` on the
+        upserted row. Archiving NEVER deletes the row (D7 — history keeps
+        specialty/color; removal stays the explicit ``master: null`` path).
+        """
         _require_section_fields(section)
         ext = (await _master_extensions(db_session, [staff_id])).get(staff_id)
         if section is None:
@@ -477,11 +520,18 @@ class StaffService(ArchiveService[StaffCreate, StaffUpdate, StaffResponse]):
                     staff_id=staff_id,
                     specialty=section.specialty.strip(),
                     color=section.color.strip(),
+                    **(
+                        {"is_active": not section.archived}
+                        if section.archived is not None
+                        else {}
+                    ),
                 )
             )
         else:
             ext.specialty = section.specialty.strip()
             ext.color = section.color.strip()
+            if section.archived is not None:
+                ext.is_active = not section.archived
         mark_changed("masters")
 
     async def _assert_section_removable(

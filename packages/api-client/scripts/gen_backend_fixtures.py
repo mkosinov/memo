@@ -29,7 +29,7 @@ master_section_archived = dict(master_section_active, is_active=False)
 
 staff_active = dict(
     first_name="Анна", last_name="Иванова", avatar_url=None, sort_order=0,
-    master=master_section_active, position_ids=["master"],
+    master=master_section_active, position_ids=["master"], has_user=True,
     created_at=CREATED, updated_at=UPDATED,
 )
 staff_archived = dict(staff_active, master=master_section_archived)

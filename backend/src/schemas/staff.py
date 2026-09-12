@@ -30,12 +30,17 @@ class MasterSection(BaseModel):
     ошибок») — so the schema deliberately accepts absent/blank values and
     defaults them to ``""`` instead of rejecting here with a generic
     VALIDATION_ERROR.
+
+    ``archived`` (T8 Gap A): optional schedule-archive request — ``None``
+    (absent) = don't touch ``masters.is_active``; ``True`` = archive the
+    section (row kept, D7); ``False`` = restore the acting schedule state.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     specialty: str = ""
     color: str = ""
+    archived: bool | None = None
 
 
 class MasterSectionView(BaseModel):
@@ -126,6 +131,9 @@ class StaffResponse(StaffBase):
 
     ``archived`` = person archive (``staff.is_active`` inverted, #207 §3.1
     pattern); ``master.archived`` = schedule flag (D3) — independent.
+    ``has_user`` (T8 Gap B): a users row is linked to the card — ANY
+    ``is_active`` (an archived account still counts: the D6 dismissal
+    checkbox «Архивировать учётку» is shown when an account exists at all).
     """
 
     model_config = ConfigDict(from_attributes=True)
@@ -133,6 +141,7 @@ class StaffResponse(StaffBase):
     id: str
     master: MasterSectionView | None = None
     position_ids: list[str] = []
+    has_user: bool = False
     created_at: datetime
     updated_at: datetime
     is_active: bool = Field(exclude=True)

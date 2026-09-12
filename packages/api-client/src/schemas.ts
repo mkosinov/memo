@@ -24,6 +24,9 @@ export const StaffResponseSchema = z.object({
   sort_order: z.number(),
   master: StaffMasterSectionSchema.nullable(),
   position_ids: z.array(z.string()),
+  // T8 Gap B (D6): a linked users row exists — ANY is_active. Drives the
+  // visibility of the «Архивировать учётку» dismissal checkbox.
+  has_user: z.boolean(),
   archived: z.boolean(), // person archive (staff.is_active inverted, #207)
   created_at: z.string(), // ISO datetime string
   updated_at: z.string(), // ISO datetime string
@@ -33,10 +36,13 @@ export type StaffResponse = z.infer<typeof StaffResponseSchema>;
 // Master-section payload (D5): presence semantics validated at the SERVICE
 // level (SPECIALTY_REQUIRED/COLOR_REQUIRED error codes) — the schema accepts
 // empty strings rather than a generic 422, mirroring backend MasterSection.
+// `archived` (T8 Gap A): optional — undefined = don't touch the schedule
+// flag; true = archive the section (row kept, D7); false = restore acting.
 export const MasterSectionInputSchema = z
   .object({
     specialty: z.string(),
     color: z.string(),
+    archived: z.boolean().optional(),
   })
   .strict();
 export type MasterSectionInput = z.infer<typeof MasterSectionInputSchema>;
@@ -625,7 +631,9 @@ export const UserSettingsResponseSchema = z.object({
   user_id: z.string(),
   theme: z.string(),
   language: z.string(),
-  column_order_masters: z.array(z.string()),
+  // GH #266 T8 Gap C: renamed column_order_masters → column_order_staff
+  // (backend src/schemas/user_settings.py already serializes the new key).
+  column_order_staff: z.array(z.string()),
   column_order_locations: z.array(z.string()),
   created_at: z.string(),
   updated_at: z.string(),
@@ -639,7 +647,7 @@ export const UserSettingsCreateSchema = z.object({
   user_id: z.string().optional(),
   theme: z.string().optional().default('light'),
   language: z.string().optional().default('ru'),
-  column_order_masters: z.array(z.string()).optional().default([]),
+  column_order_staff: z.array(z.string()).optional().default([]),
   column_order_locations: z.array(z.string()).optional().default([]),
 });
 

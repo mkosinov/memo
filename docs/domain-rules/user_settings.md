@@ -1,7 +1,7 @@
 # UserSettings — Domain Rules
 
 ## Description
-UserSettings stores per-user UI preferences: theme, language, and column ordering for schedule views (masters, locations). One record per user.
+UserSettings stores per-user UI preferences: theme, language, and column ordering for schedule views (staff, locations). One record per user.
 
 ## Fields
 | Field | Type | Required | Min | Max | Default | Description |
@@ -9,7 +9,7 @@ UserSettings stores per-user UI preferences: theme, language, and column orderin
 | user_id | string | ✅ | — | — | — | FK to user (unique) |
 | theme | string | ❌ | — | — | "light" | UI theme |
 | language | string | ❌ | — | — | "ru" | UI language |
-| column_order_masters | array | ❌ | — | — | [] | Порядок столбцов мастеров |
+| column_order_staff | array | ❌ | — | — | [] | Порядок столбцов сотрудников (GH #266: переименован из `column_order_masters`) |
 | column_order_locations | array | ❌ | — | — | [] | Порядок столбцов локаций |
 
 ## Cross-field Rules

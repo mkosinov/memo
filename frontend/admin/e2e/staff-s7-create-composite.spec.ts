@@ -8,6 +8,7 @@
  * person is created, can log in, and leads (appears in /masters) at once.
  */
 import { test, expect } from './fixtures/test';
+import { request as apiRequest } from '@playwright/test';
 import { cleanup, E2E_PASSWORD } from './fixtures/factories';
 import { waitForStaffReady, waitForToast } from './fixtures/helpers';
 import { queryDBRow } from './fixtures/db-query';
@@ -83,11 +84,34 @@ test.describe('S7 — create card with account + master in one scenario', () => 
       // The person is now an acting master (in /api/v1/masters) AND can log in.
       expect((await (await request.get(`${BACKEND}/api/v1/masters/all`)).json())
         .map((m: { id: string }) => m.id)).toContain(createdId);
-      const login = await request.post(`${BACKEND}/api/v1/auth/login`, {
-        data: { phone, password: E2E_PASSWORD },
-        headers: { Origin: BACKEND, 'Sec-Fetch-Site': 'same-origin' },
+
+      // Login probe on an ISOLATED, cookie-less request context — NOT the
+      // shared `request` fixture. AuthService.login performs OWASP session-id
+      // rotation: any `memo_session` cookie PRESENTED on a login is DELETED
+      // before the new session is created (backend/src/auth/service.py). The
+      // shared fixture carries globalSetup's admin cookie, so logging the new
+      // account in through it would destroy the admin session row and 401
+      // every later spec in the worker (auth-login/auth-session opt out for
+      // the same reason). A fresh context presents no cookie → admin session
+      // survives.
+      const loginCtx = await apiRequest.newContext({
+        baseURL: BACKEND,
+        // Explicit empty storageState — guarantees this context presents NO
+        // cookie regardless of any project-level storageState inheritance, so
+        // the login cannot rotate (delete) the shared admin session.
+        storageState: { cookies: [], origins: [] },
+        extraHTTPHeaders: { Origin: BACKEND, 'Sec-Fetch-Site': 'same-origin' },
       });
-      expect(login.ok(), 'the freshly created account can log in').toBeTruthy();
+      let loginOk = false;
+      try {
+        const login = await loginCtx.post(`${BACKEND}/api/v1/auth/login`, {
+          data: { phone, password: E2E_PASSWORD },
+        });
+        loginOk = login.ok();
+      } finally {
+        await loginCtx.dispose();
+      }
+      expect(loginOk, 'the freshly created account can log in').toBeTruthy();
     } finally {
       try { queryDBRow(`DELETE FROM users WHERE phone='${phone}'`); } catch { /* best-effort */ }
       if (createdId) await cleanup(request, `/api/v1/staff/${createdId}`);

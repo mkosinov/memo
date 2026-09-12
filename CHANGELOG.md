@@ -23,7 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Тесты (полный прогон T11):** backend pytest **1871 passed / 0 failed / 8 skipped**; api-client **349 / 0**; admin vitest **1790 / 0**; `tsc` 0; e2e shards — schedule **94/94**, rest **269/279** (9 ожидаемых visual font-drift + 1 pre-existing server-push C3 flake; авторитетен CI).
   - **Красные окна плана закрыты:** T1–T3 backend pytest красный (masters-тесты переписываются) → закрыто к T4 (полный зелёный); T6–T8 фронт type-check красный в зоне экрана мастеров → закрыто к T8. E2E полностью зелёный после T10.
   - **Доки:** domain-rules `staff.md` (из `masters.md`), `_overview.md` (сущности, naming, матрица удалений, поисковая матрица), `auth.md`, `profile.md`; соседние доки под staff-словарь — `auth-design.md`/`auth-247-plan.md` (только тексты #247; код перенесён в T2), полная перепись `user-cabinet-design.md` (#262, ревизия 3); impl-заметки `docs/notes/2026-09-12-staff-restructuring-266-impl.md`.
-  - **190 files changed, +11 800 / −4 350** (диапазон `6dcf87a..docs-commit`).
+  - **190 files changed, +11 801 / −4 350** (диапазон `b98e991^..docs-commit` — чистые #266-коммиты без harness-коммитов ветки).
   - **Closes:** #266.
   - Design spec: `docs/specs/2026-09-10-staff-restructuring-design.md` (on branch)
   - Plan: `docs/plans/2026-09-10-staff-restructuring-266-plan.md` (on branch)

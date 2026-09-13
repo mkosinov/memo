@@ -1,4 +1,5 @@
-"""AuthService — login / logout / resolve + login throttling — GH #247 §3.4.
+"""AuthService — login / logout / resolve / change-password + login
+throttling — GH #247 §3.4 (+ #262 change-password).
 
 Two-tier brute-force throttle (spec §2.11 + §3.4):
 
@@ -56,7 +57,13 @@ from sqlalchemy import delete as sa_delete
 from sqlalchemy import select
 from sqlalchemy import update as sa_update
 
-from src.auth.passwords import DUMMY_HASH, verify_password
+from src.auth.passwords import (
+    DUMMY_HASH,
+    PasswordPolicyError,
+    hash_password,
+    validate_password,
+    verify_password,
+)
 from src.auth.permissions import ROLE_PERMISSIONS, AuthedUser
 from src.auth.session import (
     EXTENSION_THROTTLE,
@@ -283,6 +290,64 @@ class AuthService:
     async def logout(self, db_session: AsyncSession, token: str) -> None:
         """Delete the session row — instant revocation. Idempotent."""
         await db_session.execute(sa_delete(Session).where(Session.token == token))
+        await db_session.commit()
+
+    # ─── change password (#262, spec §4 + D6) ─────────────────────────────
+
+    async def change_password(
+        self,
+        db_session: AsyncSession,
+        user: AuthedUser,
+        current_password: str,
+        new_password: str,
+        current_token: str,
+    ) -> None:
+        """Verify the current password; rotate it; keep only this session.
+
+        Check order (domain rules «Change password (#262)»):
+        1. ``current_password`` against the stored hash — wrong → 401
+           ``AUTH_INVALID_CREDENTIALS``. The failing branch still runs a
+           verify against ``DUMMY_HASH`` (the login timing-parity pattern,
+           §3.4): both branches spend the same Argon2 work, so a wrong
+           current password is not distinguishable by response timing.
+        2. The new password against the shared policy — invalid → 422
+           ``PASSWORD_POLICY`` (raised as ``PasswordPolicyError`` for the
+           router to map).
+        3. Success: the hash is replaced and every OTHER session row of
+           the user is deleted (other devices re-login; the current one
+           stays — D6). Does NOT touch the login lockout ladder (the
+           ladder guards anonymous login brute-force, not an
+           authenticated user changing their own password).
+        """
+        row = (
+            await db_session.execute(select(User).where(User.id == user.id))
+        ).scalar_one_or_none()
+        if row is None:
+            # The session outlived its user row (deleted server-side) —
+            # the uniform 401 the session guard emits for dead sessions.
+            raise HTTPException(
+                status_code=401,
+                detail=ErrorDetail(
+                    code=ErrorCode.AUTH_UNAUTHORIZED,
+                    message="Требуется вход в систему",
+                ).model_dump(),
+            )
+
+        if not verify_password(current_password, row.password_hash):
+            # Timing parity: spend the same Argon2 work as the success
+            # branch before rejecting (no cheap 401).
+            verify_password(current_password, DUMMY_HASH)
+            raise self._invalid_credentials()
+
+        new_hash = hash_password(validate_password(new_password))
+
+        row.password_hash = new_hash
+        await db_session.execute(
+            sa_delete(Session).where(
+                Session.user_id == user.id,
+                Session.token != current_token,
+            )
+        )
         await db_session.commit()
 
     async def resolve(

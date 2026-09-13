@@ -200,7 +200,13 @@ class TestLogin:
         body = resp.json()
         assert body["user"]["role"] == "master"
         assert body["user"]["master_id"] == _master_profile
-        assert body["master"] == {"first_name": "Ольга", "last_name": "Иванова"}
+        # GH #262: the snapshot gained ``avatar_url`` (None — the fixture
+        # card has no portrait); name+avatar come from the card itself.
+        assert body["master"] == {
+            "first_name": "Ольга",
+            "last_name": "Иванова",
+            "avatar_url": None,
+        }
         assert "records:read" in body["permissions"]
         assert "payments:write" not in body["permissions"]
 

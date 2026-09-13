@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, act } from '@testing-library/react';
 import React from 'react';
 import { UIProvider, useUI } from '../contexts/UIContext';
@@ -15,6 +15,8 @@ function UIConsumer() {
     toggleSidebar,
     rightPanelCollapsed,
     toggleRightPanel,
+    theme,
+    toggleTheme,
   } = useUI();
 
   return (
@@ -25,6 +27,7 @@ function UIConsumer() {
       <span data-testid="right-panel-collapsed">
         {rightPanelCollapsed.toString()}
       </span>
+      <span data-testid="theme">{theme}</span>
       <button data-testid="toggle-delete" onClick={toggleDeleteMode}>
         Toggle Delete
       </button>
@@ -51,6 +54,9 @@ function UIConsumer() {
       </button>
       <button data-testid="toggle-right-panel" onClick={toggleRightPanel}>
         Toggle Right Panel
+      </button>
+      <button data-testid="toggle-theme" onClick={toggleTheme}>
+        Toggle Theme
       </button>
     </div>
   );
@@ -169,5 +175,51 @@ describe('UIProvider', () => {
     });
     expect(screen.getByTestId('toast-count').textContent).toBe('0');
     vi.useRealTimers();
+  });
+});
+
+describe('UIProvider theme persistence (#262 §5.4)', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    delete document.documentElement.dataset.theme;
+  });
+
+  afterEach(() => {
+    localStorage.clear();
+    delete document.documentElement.dataset.theme;
+  });
+
+  it('reads theme from localStorage["memo-theme"] on mount', () => {
+    localStorage.setItem('memo-theme', 'dark');
+    renderWithContext();
+    expect(screen.getByTestId('theme').textContent).toBe('dark');
+  });
+
+  it('falls back to light when localStorage is empty', () => {
+    renderWithContext();
+    expect(screen.getByTestId('theme').textContent).toBe('light');
+  });
+
+  it('applies data-theme attribute from localStorage on mount', () => {
+    localStorage.setItem('memo-theme', 'dark');
+    renderWithContext();
+    expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
+  });
+
+  it('toggleTheme writes localStorage and flips data-theme', () => {
+    renderWithContext();
+    expect(screen.getByTestId('theme').textContent).toBe('light');
+    act(() => {
+      screen.getByTestId('toggle-theme').click();
+    });
+    expect(screen.getByTestId('theme').textContent).toBe('dark');
+    expect(localStorage.getItem('memo-theme')).toBe('dark');
+    expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
+    act(() => {
+      screen.getByTestId('toggle-theme').click();
+    });
+    expect(screen.getByTestId('theme').textContent).toBe('light');
+    expect(localStorage.getItem('memo-theme')).toBe('light');
+    expect(document.documentElement.getAttribute('data-theme')).toBe('light');
   });
 });

@@ -618,6 +618,7 @@ class TestStaffDelete:
     def test_delete_nonexistent_404(self, api_client) -> None:
         resp = api_client.delete("/api/v1/staff/nonexistent-id")
         assert resp.status_code == 404
+        assert resp.json()["detail"]["code"] == "STAFF_NOT_FOUND"
 
     def test_delete_cascades_user_profiles(
         self, api_client

@@ -59,7 +59,6 @@ from sqlalchemy import update as sa_update
 
 from src.auth.passwords import (
     DUMMY_HASH,
-    PasswordPolicyError,
     hash_password,
     validate_password,
     verify_password,
@@ -322,16 +321,6 @@ class AuthService:
         row = (
             await db_session.execute(select(User).where(User.id == user.id))
         ).scalar_one_or_none()
-        if row is None:
-            # The session outlived its user row (deleted server-side) —
-            # the uniform 401 the session guard emits for dead sessions.
-            raise HTTPException(
-                status_code=401,
-                detail=ErrorDetail(
-                    code=ErrorCode.AUTH_UNAUTHORIZED,
-                    message="Требуется вход в систему",
-                ).model_dump(),
-            )
 
         if not verify_password(current_password, row.password_hash):
             # Timing parity: spend the same Argon2 work as the success

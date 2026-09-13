@@ -3,7 +3,7 @@
 - **Date / status:** 2026-09-09 → revision 2 on 2026-09-10 (panel folded + user amendments); **revision 3 on 2026-09-12 — rewritten under the staff vocabulary after #266** (task T12 of the #266 plan). G1b.
 - **Depends on:** #247 (auth) — **strictly after** its IMPL: this spec assumes `require_session`, `verify_fetch_metadata`, auth router (login/logout/me), login page, `AuthContext`, the bottom-left user block (T13), pwdlib Argon2, `PASSWORD_POLICY`, CLI create-user. And **after #266** (staff restructuring) — the vocabulary below (`Staff` card, `masters` extension, positions) assumes it.
 - **Sibling:** #263 (master role v1 — data scoping, phone masking, payments, photos, role-gated nav) — separate issue, later design; nothing from #263 is built here.
-- **Seam amendments to #247 (committed together with this spec, before its IMPL):** (1) the `master` snapshot in `GET /auth/me` is assembled from the linked staff card (`first_name`, `last_name`, `avatar_url`) + master fields; (2) the user block shows staff-card avatar + name only — fallback «Аноним», no phone, no role label; (3) the T13 logout control is pinned to a text button «Выйти» — the popup menu defined here replaces it.
+- **Seam amendments to #247 (committed together with this spec, before its IMPL):** (1) the `master` snapshot in `GET /auth/me` is assembled from the linked staff card (`first_name`, `last_name`, `avatar_url`) + master fields; (2) the user block shows staff-card avatar + first/last name only (shown even if the card is archived) — fallback «Аноним» when the card has no name; no phone, no role label; (3) the T13 logout control is pinned to a text button «Выйти» — the popup menu defined here replaces it.
 
 ## 0. Терминология (#266)
 
@@ -11,7 +11,7 @@
 
 - **Карточка сотрудника (`Staff`)** — `first_name`, `last_name`, `avatar_url`, `is_active`; есть у **каждого** (мастера, администраторы, СММ, …).
 - **Master-секция (`Master`)** — 1:0..1 к карточке: `specialty` (CSV), `color`, `is_active` (распределение / расписание). Создаётся, архивируется и редактируется админом в карточке сотрудника (#266 D5/D6); на расписании ведущий = активная master-строка.
-- **«Аноним»** — учётка **без карточки сотрудника** (не «без мастера»).
+- **«Аноним»** — у связанной карточки **нет имени и фамилии** (на практике — карточки нет; имя и фамилия **архивированной** карточки показываются — решение юзера 2026-09-11: своё имя не «пропадает»).
 - Специализация доступна только у сотрудников с master-секцией; управляет ею админ (#266 D5) — в «Моих данных» она **read-only** (решение юзера 10.09).
 
 Новой ролевой модели нет: доступ — по-прежнему единственное поле `users.role` (`admin|master`, матрица #247); должность лишь **авто-подставляет** роль по шаблону #263 D10. `user.roles` (мн. ч.) не существует.
@@ -107,7 +107,7 @@ All columns optional. No `passport_photo` column in v1 (placeholder decision); i
 }
 ```
 
-- `has_staff` = a linked staff card exists **and is not archived**; `has_master` = that card has a master-section row that is not archived. When `has_staff` is false, name/avatar/specialties are `null` (and name writes are ignored); when `has_master` is false, `specialties` is `null` (the modal hides the row). «Аноним» = `has_staff: false` (#266 vocabulary; a user without a card is valid).
+- `has_staff` = a linked staff card exists **and is not archived**; `has_master` = that card has a master-section row that is not archived. When `has_staff` is false, name/avatar/specialties are `null` (and name writes are ignored); when `has_master` is false, `specialties` is `null` (the modal hides the row). **Display rule (user, 2026-09-11):** the user block and the `/auth/me` snapshot show the linked card's name+avatar whenever the card has them — **including an archived card** (one's own name never blanks); `has_staff` gates only `/my` editing. «Аноним» = the card has no first/last name (in practice: no card).
 - **PUT semantics:** an omitted key keeps its current value; an explicit `null` clears it (nullable columns only). `first_name`/`last_name` are required when present and must be non-empty; they write the **staff card**. `specialties` is **read-only** in this endpoint (present in the response, ignored on write — the admin owns it, #266 D5). Private fields write the lazily created `user_profiles` row.
 - One `@transactional` service method writes the staff-card fields and the private fields (lazy profile create) **in a single transaction**, then emits the existing **`staff`-updated SSE event** (other tabs' staff tables refresh; the `me` query is invalidated locally by the calling client — no new SSE entity, no new invalidation family). No master-section fields are written here (specialty/color are admin-owned); the frontend still refreshes the `masters` family because its read-only view joins the card (name/avatar).
 - `/auth/me` stays the auth snapshot (session boot: `{user, permissions, master}` — `master` snapshot assembled from the staff card + master fields); `/my` is the editable profile (modal). No overlap in purpose.

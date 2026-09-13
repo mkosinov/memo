@@ -39,7 +39,13 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 
 # Revision right BEFORE the #266 restructuring (staff chain parent).
 LEGACY_REVISION = "91069ac9acba"
-HEAD_REVISION = "e5f7a9c3b1d8"
+# Head moves with every new migration (e.g. GH #262 user_profiles) — resolve
+# it from the script directory instead of pinning a literal.
+from alembic.script import ScriptDirectory  # noqa: E402
+
+HEAD_REVISION = ScriptDirectory(
+    str(BACKEND_DIR / "alembic")
+).get_current_head()
 
 pytestmark = pytest.mark.pure_unit  # own tmp-file DB; the session DB is untouched
 

@@ -181,6 +181,7 @@ async def _truncate_all_tables(engine):
         Tag,
         Tariff,
         User,
+        UserProfile,
         UserSettings,
         Visit,
         Visitor,

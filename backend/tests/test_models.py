@@ -120,8 +120,8 @@ class TestModelImports:
         from src.models import __all__
         expected = [
             "AbstractModel", "AbstractModelSoftDelete",
-            "Staff", "Master", "Position", "User", "Location", "Service",
-            "ServiceMaterial", "Tariff", "Tag",
+            "Staff", "Master", "Position", "User", "UserProfile", "Location",
+            "Service", "ServiceMaterial", "Tariff", "Tag",
             "Activity", "Client", "Visitor", "Photo", "Record", "Visit", "Payment",
             "Material", "UserSettings",
             "ArchiveStatus", "Channel", "RecordStatus", "UserRole",
@@ -225,6 +225,34 @@ class TestModelCrud:
         session.flush()
         fetched = session.get(User, u.id)
         assert fetched.staff_id == staff_id
+
+    def test_user_profile_all_columns_optional(self, session: Session):
+        """GH #262 §3.1: every column is optional — a bare user_id row is
+        valid (lazy creation starts from an empty profile)."""
+        from datetime import date
+
+        from src.models import User, UserProfile
+        u = User(phone="+79002222222", password_hash="h", role="admin")
+        session.add(u)
+        session.flush()
+
+        profile = UserProfile(user_id=u.id)
+        session.add(profile)
+        session.flush()
+        fetched = session.get(UserProfile, profile.id)
+        assert fetched.user_id == u.id
+        assert fetched.patronymic is None
+        assert fetched.birth_date is None
+        assert fetched.passport_series_number is None
+
+        # Round-trip a fully populated row.
+        fetched.patronymic = "Петровна"
+        fetched.birth_date = date(1990, 5, 1)
+        fetched.passport_series_number = "4510 123456"
+        session.flush()
+        again = session.get(UserProfile, profile.id)
+        assert again.patronymic == "Петровна"
+        assert again.birth_date == date(1990, 5, 1)
 
     def test_location_crud(self, session: Session):
         from src.models import Location

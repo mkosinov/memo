@@ -29,6 +29,7 @@ from src.models import (  # noqa: E402, F401
     Tag,
     Tariff,
     User,
+    UserProfile,
     UserSettings,
     Visit,
     Visitor,

@@ -23,7 +23,10 @@ class UserProfile(AbstractModel):
     __tablename__ = "user_profiles"
 
     user_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("users.id"), unique=True, nullable=False,
+        String(36),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        unique=True,
+        nullable=False,
     )
     patronymic: Mapped[str | None] = mapped_column(String(100), nullable=True)
     birth_date: Mapped[date | None] = mapped_column(Date, nullable=True)

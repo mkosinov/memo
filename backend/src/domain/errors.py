@@ -59,3 +59,14 @@ class ColorRequiredError(Exception):
 
     The router maps this to 422 ``COLOR_REQUIRED``.
     """
+
+
+class ProfileOwnerNotFoundError(Exception):
+    """The /my owner user row no longer resolves (GH #262).
+
+    A session can outlive its user (row deleted server-side); the
+    ProfileService raises this instead of a runtime ``assert`` (stripped
+    under ``python -O``). The /my router maps it to 401
+    ``AUTH_UNAUTHORIZED`` — the same envelope the session guard emits for
+    a dead session, so the frontend's 401 → /login redirect covers it.
+    """

@@ -37,7 +37,8 @@ def upgrade() -> None:
         sa.Column("id", sa.String(36), primary_key=True, nullable=False),
         sa.Column(
             "user_id", sa.String(36),
-            sa.ForeignKey("users.id"), unique=True, nullable=False,
+            sa.ForeignKey("users.id", ondelete="CASCADE"),
+            unique=True, nullable=False,
         ),
         sa.Column("patronymic", sa.String(100), nullable=True),
         sa.Column("birth_date", sa.Date(), nullable=True),

@@ -22,10 +22,12 @@ session user, never written here. ``specialties`` is never written here
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
+from src.domain.errors import ProfileOwnerNotFoundError
 from src.models.master import Master
 from src.models.staff import Staff
 from src.models.user import User
@@ -84,8 +86,7 @@ class ProfileService:
         the own-name display rule for the user block lives in /auth/me,
         spec §4 Display rule).
         """
-        user = await db_session.get(User, user_id)
-        assert user is not None  # require_session resolved a live user
+        user = await self._get_user(db_session, user_id)
 
         staff: Staff | None = None
         if user.staff_id is not None:
@@ -106,10 +107,56 @@ class ProfileService:
             )
             master = master_row.scalar_one_or_none()
 
-        profile_row = await db_session.execute(
+        profile = await self._get_profile(db_session, user_id)
+        return user, staff, master, profile
+
+    async def _get_user(
+        self, db_session: AsyncSession, user_id: str
+    ) -> User:
+        """Resolve the /my owner row.
+
+        A session can outlive its user (row deleted server-side) — raise
+        the domain error the router maps to 401 ``AUTH_UNAUTHORIZED``
+        (explicit check: a runtime ``assert`` would vanish under
+        ``python -O``).
+        """
+        user = await db_session.get(User, user_id)
+        if user is None:
+            raise ProfileOwnerNotFoundError(user_id)
+        return user
+
+    async def _get_profile(
+        self, db_session: AsyncSession, user_id: str
+    ) -> UserProfile | None:
+        """The lazily created private row, or ``None`` before the first
+        meaningful PUT (lazy-create seam — see ``_upsert_profile``)."""
+        row = await db_session.execute(
             select(UserProfile).where(UserProfile.user_id == user_id)
         )
-        return user, staff, master, profile_row.scalar_one_or_none()
+        return row.scalar_one_or_none()
+
+    async def _upsert_profile(
+        self,
+        db_session: AsyncSession,
+        user_id: str,
+        profile: UserProfile | None,
+        profile_payload: dict[str, object],
+    ) -> UserProfile:
+        """Stage *profile_payload* on the owner's row, creating it lazily
+        (the caller's flush detects the lost-insert race).
+
+        The new row is only added to the session here — no flush: the
+        single flush in ``_apply_update`` surfaces the UNIQUE violation
+        to ``update``'s rollback-retry recovery (see its docstring).
+        """
+        if profile is None:
+            profile = UserProfile(user_id=user_id)
+            db_session.add(profile)
+        for field, value in profile_payload.items():
+            if field == "passport_series_number" and value is not None:
+                value = _normalize_series_number(cast("str", value))
+            setattr(profile, field, value)
+        return profile
 
     async def get(
         self, db_session: AsyncSession, user_id: str
@@ -120,15 +167,18 @@ class ProfileService:
         )
         return self._to_response(user, staff, master, profile)
 
-    @transactional
-    async def update(
-        self, db_session: AsyncSession, user_id: str, data: MyProfileUpdate
-    ) -> MyProfileResponse:
-        """Apply the sent subset — card half + private half, ONE commit."""
+    async def _apply_update(
+        self, db_session: AsyncSession, user_id: str, payload: dict[str, object]
+    ) -> tuple[User, Staff | None, Master | None, UserProfile | None]:
+        """Apply the sent payload to both halves; flush (no commit).
+
+        Raises IntegrityError to the caller when the lazy-create INSERT
+        loses the concurrent-writer race (``user_profiles.user_id``
+        UNIQUE) — ``update`` handles the recovery.
+        """
         user, staff, master, profile = await self._context(
             db_session, user_id
         )
-        payload = data.model_dump(exclude_unset=True)
 
         # 1. Card half — only while has_staff; ignored otherwise (D7).
         if staff is not None:
@@ -142,17 +192,40 @@ class ProfileService:
             if field in payload
         }
         if profile_payload:
-            if profile is None:
-                profile = UserProfile(user_id=user_id)
-                db_session.add(profile)
-            for field, value in profile_payload.items():
-                if field == "passport_series_number" and value is not None:
-                    value = _normalize_series_number(value)
-                setattr(profile, field, value)
+            profile = await self._upsert_profile(
+                db_session, user_id, profile, profile_payload
+            )
 
         # ``specialties`` is accepted-but-ignored (read-only, #266 D5);
         # role/has_staff/has_master are view fields, never written.
         await db_session.flush()
+        return user, staff, master, profile
+
+    @transactional
+    async def update(
+        self, db_session: AsyncSession, user_id: str, data: MyProfileUpdate
+    ) -> MyProfileResponse:
+        """Apply the sent subset — card half + private half, ONE commit.
+
+        Lazy-create race (review finding): two concurrent PUT /my can both
+        SELECT-miss then INSERT; the loser's flush violates the
+        ``user_profiles.user_id`` UNIQUE constraint. Recovery: roll the
+        whole transaction back (discarding the doomed INSERT), re-run the
+        update — the fresh SELECT now sees the winner's row and the write
+        lands on it (field-level last-write-wins, exactly one row per
+        user). Everything stays inside this one @transactional method, so
+        the commit/emit contract is preserved on both paths.
+        """
+        payload = data.model_dump(exclude_unset=True)
+        try:
+            user, staff, master, profile = await self._apply_update(
+                db_session, user_id, payload
+            )
+        except IntegrityError:
+            await db_session.rollback()
+            user, staff, master, profile = await self._apply_update(
+                db_session, user_id, payload
+            )
 
         # Re-read the freshly written halves for the response (the ORM
         # objects are in the identity map — plain attribute reads suffice).

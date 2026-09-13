@@ -252,6 +252,19 @@ class TestGetMyProfile:
         rows = query_db("SELECT COUNT(*) AS n FROM user_profiles")
         assert rows[0]["n"] == 0
 
+    def test_user_deleted_after_login_gets_401_not_500(
+        self, api_client, login_as, _my_hash
+    ) -> None:
+        """A session outliving its user row (deleted server-side) gets the
+        auth-guard 401 envelope on /my — never an assert crash or 500."""
+        client, _sid = _make_staff_user(api_client, login_as, _my_hash)
+        user_id = _user_id(client)
+        query_db(f"DELETE FROM users WHERE id = '{user_id}'")
+
+        resp = client.get("/api/v1/my")
+        assert resp.status_code == 401
+        assert resp.json()["detail"]["code"] == "AUTH_UNAUTHORIZED"
+
 
 # ─── PUT /api/v1/my ────────────────────────────────────────────────────────────
 

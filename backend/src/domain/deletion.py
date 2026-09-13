@@ -65,6 +65,7 @@ from src.models.tag import (
 )
 from src.models.tariff import Tariff
 from src.models.user import User
+from src.models.user_profile import UserProfile
 from src.models.visit import Visit
 from src.models.visitor import Visitor
 
@@ -647,6 +648,12 @@ async def _h_cascade_master_users(
     card but keeping the account = orphan, so the account goes with it (no
     user choice).
 
+    GH #262: the linked users' ``user_profiles`` rows (private half of
+    «Мои данные») die with their accounts — deleted FIRST, in the same
+    executor flush (the FK also carries ON DELETE CASCADE, but the
+    service-level delete keeps the executor deterministic regardless of
+    PRAGMA state — same belt-and-suspenders as the masters extension).
+
     NB: ``user_settings.user_id`` (NOT NULL, no ``ondelete``) FK-references
     ``users.id`` — if a settings row exists for the linked user, this DELETE will
     FK-violate. Spec §4.1 scopes this to a User with NO downstream rows; the
@@ -654,6 +661,13 @@ async def _h_cascade_master_users(
     A future spec revision would have to extend this handler (e.g., delete
     user_settings first) — out of scope for #207.
     """
+    await session.execute(
+        delete(UserProfile).where(
+            UserProfile.user_id.in_(
+                select(User.id).where(User.staff_id == entity_id)
+            )
+        )
+    )
     await session.execute(delete(User).where(User.staff_id == entity_id))
 
 

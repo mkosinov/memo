@@ -11,10 +11,12 @@ portrait upload of Task 2).
 from functools import lru_cache
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 
 from src.auth.permissions import AuthedUser, require_session, verify_fetch_metadata
 from src.db import SessionDep
+from src.domain.errors import ProfileOwnerNotFoundError
+from src.errors import ErrorCode, ErrorDetail
 from src.schemas.my import MyProfileResponse, MyProfileUpdate
 from src.services.profile import ProfileService, get_profile_service
 
@@ -27,6 +29,21 @@ router = APIRouter(
 _WRITE_GUARD = [Depends(require_session), Depends(verify_fetch_metadata)]
 
 _SessionUser = Annotated[AuthedUser, Depends(require_session)]
+
+
+def _owner_gone(exc: ProfileOwnerNotFoundError) -> HTTPException:
+    """401 — the session outlived its user row (deleted server-side).
+
+    Same envelope the session guard emits for a dead session: the
+    frontend's uniform 401 → /login redirect covers it.
+    """
+    return HTTPException(
+        status_code=401,
+        detail=ErrorDetail(
+            code=ErrorCode.AUTH_UNAUTHORIZED,
+            message="Требуется вход в систему",
+        ).model_dump(),
+    )
 
 
 @lru_cache
@@ -45,7 +62,10 @@ async def get_my_profile(
     session: SessionDep,
 ) -> MyProfileResponse:
     """Flat profile per spec §4 — read-only, never creates rows."""
-    return await service.get(session, authed.id)
+    try:
+        return await service.get(session, authed.id)
+    except ProfileOwnerNotFoundError as exc:
+        raise _owner_gone(exc) from exc
 
 
 @router.put("", response_model=MyProfileResponse, dependencies=_WRITE_GUARD)
@@ -60,4 +80,7 @@ async def update_my_profile(
     One transaction writes the staff-card half and the lazily created
     private half; on commit the existing ``staff`` SSE entity is emitted.
     """
-    return await service.update(session, authed.id, data)
+    try:
+        return await service.update(session, authed.id, data)
+    except ProfileOwnerNotFoundError as exc:
+        raise _owner_gone(exc) from exc

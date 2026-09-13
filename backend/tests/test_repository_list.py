@@ -29,7 +29,7 @@ from sqlalchemy.orm import selectinload
 
 from src.models.activity import Activity
 from src.models.location import Location
-from src.models.master import Master
+from src.models.staff import Staff  # GH #266: people entity
 from src.models.service import Service
 from src.repositories.generic import get_archive_repository, get_base_repository
 from src.repositories.search import SearchField
@@ -40,16 +40,14 @@ pytestmark = pytest.mark.asyncio
 # ─── Helpers ────────────────────────────────────────────────────────────────────
 
 
-def _master(**overrides) -> Master:
-    """Build a Master with sensible defaults, overridable per-test."""
+def _master(**overrides) -> Staff:
+    """Build a Staff row with sensible defaults, overridable per-test."""
     defaults: dict = dict(
         last_name="T",
-        color="#000000",
-        position="мастер",
-        specialty="живопись",
+        sort_order=0,
     )
     defaults.update(overrides)
-    return Master(**defaults)
+    return Staff(**defaults)
 
 
 def _service(**overrides) -> Service:
@@ -72,20 +70,20 @@ def _service(**overrides) -> Service:
 
 async def test_list_filters_and_none_skip(db_session) -> None:
     """Filters match; None-valued filters are skipped (not applied as IS NULL)."""
-    db_session.add(_master(first_name="A1", position="мастер"))
-    db_session.add(_master(first_name="A2", position="мастер"))
-    db_session.add(_master(first_name="A3", position="senior"))
+    db_session.add(_master(first_name="A1", sort_order=1))
+    db_session.add(_master(first_name="A2", sort_order=1))
+    db_session.add(_master(first_name="A3", sort_order=7))
     await db_session.flush()
     repo = get_base_repository()
     rows, total = await repo.list(
         db_session,
-        Master,
-        filters={"position": "мастер", "last_name": None},
+        Staff,
+        filters={"sort_order": 1, "last_name": None},
         limit=100,
     )
     assert total == 2
     assert len(rows) == 2
-    assert all(r.position == "мастер" for r in rows)
+    assert all(r.sort_order == 1 for r in rows)
 
 
 async def test_list_limit_offset_slice_and_total(db_session) -> None:
@@ -94,10 +92,10 @@ async def test_list_limit_offset_slice_and_total(db_session) -> None:
         db_session.add(_master(first_name=f"M{i}"))
     await db_session.flush()
     repo = get_base_repository()
-    rows, total = await repo.list(db_session, Master, limit=2, offset=2)
+    rows, total = await repo.list(db_session, Staff, limit=2, offset=2)
     assert total == 5
     assert len(rows) == 2
-    rows, total = await repo.list(db_session, Master, limit=2, offset=4)
+    rows, total = await repo.list(db_session, Staff, limit=2, offset=4)
     assert total == 5
     assert len(rows) == 1
 
@@ -111,8 +109,8 @@ async def test_list_order_by_applied(db_session) -> None:
     repo = get_base_repository()
     rows, total = await repo.list(
         db_session,
-        Master,
-        order_by=[Master.first_name.desc()],
+        Staff,
+        order_by=[Staff.first_name.desc()],
         limit=100,
     )
     assert total == 3
@@ -152,7 +150,7 @@ async def test_list_custom_count_excludes_order_by(db_session) -> None:
 
     # Case A: simple order_by + limit slice.
     rows, total = await repo.list_entity(
-        db_session, select(Master), order_by=[Master.first_name], limit=2, offset=0
+        db_session, select(Staff), order_by=[Staff.first_name], limit=2, offset=0
     )
     assert total == 3
     assert len(rows) == 2
@@ -167,7 +165,12 @@ async def test_list_custom_count_excludes_order_by(db_session) -> None:
     await db_session.flush()
     b_master = next(r for r in rows if r.first_name == "B")  # rows from Case A
     # Re-fetch the "B" master from this session to wire the activity FK.
-    b_master = await db_session.get(Master, b_master.id)
+    b_master = await db_session.get(Staff, b_master.id)
+    # GH #266: activities.master_id now targets masters.staff_id — the
+    # extension row must exist for the FK to hold.
+    from src.models.master import Master
+    db_session.add(Master(staff_id=b_master.id, specialty="живопись", color="#000000"))
+    await db_session.flush()
     db_session.add(
         Activity(
             master_id=b_master.id,
@@ -184,12 +187,12 @@ async def test_list_custom_count_excludes_order_by(db_session) -> None:
 
     sub = (
         select(func.count(Activity.id))
-        .where(Activity.master_id == Master.id)
+        .where(Activity.master_id == Master.staff_id)
         .correlate(Master)
         .scalar_subquery()
     )
     rows2, total2 = await repo.list_entity(
-        db_session, select(Master), order_by=[sub.desc()], limit=100
+        db_session, select(Staff).outerjoin(Master, Master.staff_id == Staff.id), order_by=[sub.desc()], limit=100
     )
     assert total2 == 3
     assert len(rows2) == 3
@@ -204,7 +207,7 @@ async def test_list_custom_limit_offset(db_session) -> None:
     await db_session.flush()
     repo = get_base_repository()
     rows, total = await repo.list_entity(
-        db_session, select(Master), limit=1, offset=3
+        db_session, select(Staff), limit=1, offset=3
     )
     assert total == 4
     assert len(rows) == 1
@@ -220,13 +223,13 @@ async def test_list_custom_multi_column_returns_rows_with_both_columns(
     db_session.add(_master(first_name="Rowan", last_name="Smith"))
     await db_session.flush()
     repo = get_base_repository()
-    stmt = select(Master, Master.first_name.label("name"))
+    stmt = select(Staff, Staff.first_name.label("name"))
     rows, total = await repo.list_custom(db_session, stmt)
     assert total == 1
     assert len(rows) == 1
     row = rows[0]
     assert isinstance(row, Row), f"expected Row tuple, got {type(row).__name__}"
-    assert isinstance(row[0], Master)
+    assert isinstance(row[0], Staff)
     assert row[0].first_name == "Rowan"
     assert row[1] == "Rowan"  # second declared column rides on the Row
 
@@ -238,11 +241,11 @@ async def test_list_entity_returns_model_instances_and_total(db_session) -> None
     await db_session.flush()
     repo = get_base_repository()
     items, total = await repo.list_entity(
-        db_session, select(Master), order_by=[Master.first_name], limit=1
+        db_session, select(Staff), order_by=[Staff.first_name], limit=1
     )
     assert total == 2
     assert len(items) == 1
-    assert isinstance(items[0], Master)
+    assert isinstance(items[0], Staff)
     assert items[0].first_name == "E1"
 
 
@@ -280,8 +283,8 @@ async def test_list_entity_rejects_multi_column_select_under_mypy() -> None:
 # ─── q / search_fields on list() (GH #212) ──────────────────────────────────────
 
 _master_search_fields = [
-    SearchField(Master.first_name),
-    SearchField(Master.last_name),
+    SearchField(Staff.first_name),
+    SearchField(Staff.last_name),
 ]
 
 
@@ -294,7 +297,7 @@ async def test_list_q_substring_narrows_rows_and_total(db_session) -> None:
     repo = get_base_repository()
     rows, total = await repo.list(
         db_session,
-        Master,
+        Staff,
         q="анн",
         search_fields=_master_search_fields,
         limit=100,
@@ -305,22 +308,22 @@ async def test_list_q_substring_narrows_rows_and_total(db_session) -> None:
 
 async def test_list_q_combines_with_filters_and(db_session) -> None:
     """q ANDs with filters= — intersection, not union."""
-    db_session.add(_master(first_name="Анна", position="мастер"))
-    db_session.add(_master(first_name="Анна", position="senior"))
-    db_session.add(_master(first_name="Борис", position="мастер"))
+    db_session.add(_master(first_name="Анна", sort_order=1))
+    db_session.add(_master(first_name="Анна", sort_order=7))
+    db_session.add(_master(first_name="Борис", sort_order=1))
     await db_session.flush()
     repo = get_base_repository()
     rows, total = await repo.list(
         db_session,
-        Master,
-        filters={"position": "мастер"},
+        Staff,
+        filters={"sort_order": 7},
         q="анн",
         search_fields=_master_search_fields,
         limit=100,
     )
     assert total == 1
     assert rows[0].first_name == "Анна"
-    assert rows[0].position == "мастер"
+    assert rows[0].sort_order == 7
 
 
 async def test_list_q_without_search_fields_raises(db_session) -> None:
@@ -329,9 +332,9 @@ async def test_list_q_without_search_fields_raises(db_session) -> None:
     await db_session.flush()
     repo = get_base_repository()
     with pytest.raises(ValueError, match="search_fields"):
-        await repo.list(db_session, Master, q="A")
+        await repo.list(db_session, Staff, q="A")
     with pytest.raises(ValueError, match="search_fields"):
-        await repo.list(db_session, Master, q="A", search_fields=[])
+        await repo.list(db_session, Staff, q="A", search_fields=[])
 
 
 async def test_list_q_full_uuid_matches_by_id(db_session) -> None:
@@ -341,9 +344,9 @@ async def test_list_q_full_uuid_matches_by_id(db_session) -> None:
     db_session.add(_master(first_name="Other"))
     await db_session.flush()
     repo = get_base_repository()
-    fields = _master_search_fields + [SearchField(Master.id, kind="uuid")]
+    fields = _master_search_fields + [SearchField(Staff.id, kind="uuid")]
     rows, total = await repo.list(
-        db_session, Master, q=target.id.upper(), search_fields=fields, limit=100
+        db_session, Staff, q=target.id.upper(), search_fields=fields, limit=100
     )
     assert total == 1
     assert rows[0].id == target.id
@@ -356,7 +359,7 @@ async def test_list_q_absent_behavior_unchanged(db_session) -> None:
     await db_session.flush()
     repo = get_base_repository()
     rows, total = await repo.list(
-        db_session, Master, search_fields=_master_search_fields, limit=100
+        db_session, Staff, search_fields=_master_search_fields, limit=100
     )
     assert total == 3
     assert len(rows) == 3
@@ -374,7 +377,7 @@ async def test_archive_list_q_narrows_within_status(db_session) -> None:
     repo = get_archive_repository()
     rows, total = await repo.list(
         db_session,
-        Master,
+        Staff,
         q="анн",
         search_fields=_master_search_fields,
         limit=100,
@@ -390,4 +393,4 @@ async def test_archive_list_q_without_search_fields_raises(db_session) -> None:
     await db_session.flush()
     repo = get_archive_repository()
     with pytest.raises(ValueError, match="search_fields"):
-        await repo.list(db_session, Master, q="A")
+        await repo.list(db_session, Staff, q="A")

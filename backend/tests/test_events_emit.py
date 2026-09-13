@@ -203,17 +203,30 @@ class TestResolveDeleteExecutor:
         assert events == [({"clients", "records", "visitors", "client_tags", "photos"}, None)]
 
 
-class TestMasterArchiveCascade:
-    def test_archive_master_marks_users(self, api_client, create_master, subscriber) -> None:
-        """MasterService.archive also writes users.is_active → mark users."""
-        master = create_master()
+class TestStaffArchiveCascade:
+    def test_archive_staff_marks_users_and_masters(
+        self, api_client, create_master, subscriber
+    ) -> None:
+        """StaffService.archive (D6 default checkboxes) also flips the
+        masters extension + linked users → marks both entities."""
+        master = create_master()  # card + master section (both active)
+        import uuid as _uuid
+
+        from tests.conftest import query_db
+
+        query_db(
+            f"INSERT INTO users (id, phone, password_hash, role, staff_id, "
+            f"email_is_confirmed, phone_is_confirmed, is_active, created_at, updated_at) "
+            f"VALUES ('{_uuid.uuid4()}', '+79990009999', 'x', 'master', "
+            f"'{master['id']}', 0, 0, 1, datetime('now'), datetime('now'))"
+        )
         _drain(subscriber)
 
-        resp = api_client.post(f"/api/v1/masters/{master['id']}/archive")
+        resp = api_client.post(f"/api/v1/staff/{master['id']}/archive", json={})
         assert resp.status_code == 200, resp.text
 
         events = _drain(subscriber)
-        assert events == [({"masters", "users"}, None)]
+        assert events == [({"staff", "masters", "users"}, None)]
 
 
 # ─── origin propagation (spec §2.4/§4.2) ─────────────────────────────────────
@@ -278,8 +291,8 @@ class TestCascadeSourceAudit:
         src = self._source("src/services/generic.py")
         assert "mark_changed(dep.entity)" in src
 
-    def test_master_marks_users(self) -> None:
-        src = self._source("src/services/master.py")
+    def test_staff_archive_marks_users(self) -> None:
+        src = self._source("src/services/staff.py")
         assert 'mark_changed("users")' in src
 
     def test_emitter_accumulator_semantics(self) -> None:

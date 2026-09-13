@@ -2,10 +2,14 @@
 
 import { createPagedListContext } from './createPagedListContext';
 import { getMasters } from '@memo/api-client';
-import type { MasterResponse } from '@memo/api-client';
+// GH #266: /masters is a READ-ONLY view (acting masters, masters.is_active =
+// true) — MasterViewResponse carries no `archived`/`position` (the view only
+// returns acting rows; positions live on the staff card). Writes moved to
+// /api/v1/staff (the «Сотрудники» screen owns them via StaffContext).
+import type { MasterViewResponse } from '@memo/api-client';
 import { qk } from '@/lib/queryKeys';
 
-const { Provider, usePagedList } = createPagedListContext<MasterResponse>({
+const { Provider, usePagedList } = createPagedListContext<MasterViewResponse>({
   queryKeyPrefix: qk.masters[0],
   fetcher: (p) =>
     getMasters({
@@ -25,5 +29,7 @@ const { Provider, usePagedList } = createPagedListContext<MasterResponse>({
 });
 
 export const MastersProvider = Provider;
-/** Table list state (server-paginated). NOT the lookup hook — that's hooks/useMasters.ts. */
+/** Table list state (server-paginated). NOT the lookup hook — that's hooks/useMasters.ts.
+ *  GH #266: retained as the read-only /masters paged-list state; the staff
+ *  directory screen uses StaffContext (/api/v1/staff) instead. */
 export const useMastersTable = usePagedList;

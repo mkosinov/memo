@@ -5,8 +5,10 @@
  *   1. call-time DB path resolution order: SHARD_ID → TEST_DB_PATH → default
  *   2. resetToSeed() executes the canonical RESET_SQL: non-seed rows removed
  *      (children-first incl. orphaned visitors), ev_* activities survive,
- *      seed sort_order restored for masters/locations (row presence and
- *      value asserted separately).
+ *      seed sort_order restored for staff/locations (row presence and
+ *      value asserted separately), staff_positions/positions rebuilt to
+ *      seed, non-seed master_tags dropped and users.staff_id detached
+ *      (GH #266 four-table staff domain).
  *
  * Uses TEST_DB_PATH pointing at a temp file — no backend, no shard stack.
  */
@@ -21,7 +23,13 @@ import { RESET_SQL, resolveSeedDbPath, resetToSeed } from '../e2e/fixtures/seed-
 let tmpDir: string;
 let dbPath: string;
 
-/** Create a minimal DB shaped like the real schema (only columns under test). */
+/** Create a minimal DB shaped like the real schema (only columns under test).
+ *
+ *  GH #266: the staff domain is now FOUR tables — `staff` (the person, owns
+ *  `sort_order`), `masters` (the schedule extension, keyed by `staff_id`),
+ *  `positions` (dictionary), `staff_positions` (M2M) — plus `master_tags` and
+ *  `users.staff_id`. RESET_SQL was rewritten to that shape in T7, so this
+ *  fixture mirrors it (the pre-#266 single-`masters` table no longer exists). */
 function createSchema(db: string) {
   execSync(`sqlite3 "${db}" "
     CREATE TABLE clients (id TEXT PRIMARY KEY, name TEXT);
@@ -30,12 +38,19 @@ function createSchema(db: string) {
     CREATE TABLE records (id TEXT PRIMARY KEY, activity_id TEXT, client_id TEXT);
     CREATE TABLE visits (id TEXT PRIMARY KEY, record_id TEXT);
     CREATE TABLE payments (id TEXT PRIMARY KEY, record_id TEXT);
-    CREATE TABLE masters (id TEXT PRIMARY KEY, sort_order INTEGER);
+    CREATE TABLE staff (id TEXT PRIMARY KEY, sort_order INTEGER);
+    CREATE TABLE masters (staff_id TEXT PRIMARY KEY, specialty TEXT, color TEXT, is_active INTEGER);
+    CREATE TABLE positions (id TEXT PRIMARY KEY, title TEXT, is_system INTEGER);
+    CREATE TABLE staff_positions (staff_id TEXT, position_id TEXT, PRIMARY KEY (staff_id, position_id));
+    CREATE TABLE master_tags (master_id TEXT, tag_id TEXT, PRIMARY KEY (master_id, tag_id));
+    CREATE TABLE users (id TEXT PRIMARY KEY, phone TEXT, staff_id TEXT);
     CREATE TABLE locations (id TEXT PRIMARY KEY, sort_order INTEGER);
   "`);
 }
 
-/** Insert seed rows (short ids / ev_* prefix / canonical sort_order) + garbage. */
+/** Insert seed rows (short ids / ev_* prefix / canonical sort_order) + garbage.
+ *  GH #266: seed sort_order lives on `staff` (m1…m7); `masters` is keyed by
+ *  staff_id; the seed positions dictionary is master/admin/smm. */
 function seedAndPollute(db: string) {
   execSync(`sqlite3 "${db}" "
     INSERT INTO clients (id, name) VALUES ('c1', 'Seed Client');
@@ -51,9 +66,15 @@ function seedAndPollute(db: string) {
     INSERT INTO visits (id, record_id) VALUES ('${'z'.repeat(36)}', 'r1');
     INSERT INTO payments (id, record_id) VALUES ('p1', 'r1');
     INSERT INTO payments (id, record_id) VALUES ('${'q'.repeat(36)}', 'r1');
-    INSERT INTO masters (id, sort_order) VALUES ('m1', 7);
-    INSERT INTO masters (id, sort_order) VALUES ('m2', 3);
-    INSERT INTO masters (id, sort_order) VALUES ('m7', 99);
+    INSERT INTO staff (id, sort_order) VALUES ('m1', 7);
+    INSERT INTO staff (id, sort_order) VALUES ('m2', 3);
+    INSERT INTO staff (id, sort_order) VALUES ('m7', 99);
+    INSERT INTO masters (staff_id, specialty, color, is_active) VALUES ('m1', 'живопись', '#5B8C7A', 1);
+    INSERT INTO positions (id, title, is_system) VALUES ('master', 'Master-renamed', 0);
+    INSERT INTO positions (id, title, is_system) VALUES ('admin', 'Администратор', 1);
+    INSERT INTO positions (id, title, is_system) VALUES ('smm', 'СММ', 0);
+    INSERT INTO master_tags (master_id, tag_id) VALUES ('m1', 't1');
+    INSERT INTO users (id, phone, staff_id) VALUES ('u1', '+79990000001', 'm1');
     INSERT INTO locations (id, sort_order) VALUES ('alpika', 5);
     INSERT INTO locations (id, sort_order) VALUES ('grand', 0);
     INSERT INTO locations (id, sort_order) VALUES ('p1389', 4);
@@ -157,24 +178,53 @@ describe('resetToSeed (against a real temp SQLite DB)', () => {
     expect(count(dbPath, "SELECT COUNT(*) FROM activities WHERE id='evt_something'")).toBe(0);
   });
 
-  it('restores canonical sort_order for seed masters and locations', () => {
+  it('restores canonical sort_order for seed staff and locations', () => {
     resetToSeed();
 
     // Existence first: the scalar query below yields 0 for a MISSING row,
     // so canonical 0 values (m1, alpika) would be indistinguishable from a
     // deleted row without these checks.
-    expect(count(dbPath, "SELECT COUNT(*) FROM masters WHERE id='m1'")).toBe(1);
-    expect(count(dbPath, "SELECT COUNT(*) FROM masters WHERE id='m2'")).toBe(1);
-    expect(count(dbPath, "SELECT COUNT(*) FROM masters WHERE id='m7'")).toBe(1);
+    expect(count(dbPath, "SELECT COUNT(*) FROM staff WHERE id='m1'")).toBe(1);
+    expect(count(dbPath, "SELECT COUNT(*) FROM staff WHERE id='m2'")).toBe(1);
+    expect(count(dbPath, "SELECT COUNT(*) FROM staff WHERE id='m7'")).toBe(1);
     expect(count(dbPath, "SELECT COUNT(*) FROM locations WHERE id='alpika'")).toBe(1);
     expect(count(dbPath, "SELECT COUNT(*) FROM locations WHERE id='grand'")).toBe(1);
     expect(count(dbPath, "SELECT COUNT(*) FROM locations WHERE id='p1389'")).toBe(1);
 
-    expect(scalar(dbPath, "SELECT sort_order FROM masters WHERE id='m1'")).toBe(0);
-    expect(scalar(dbPath, "SELECT sort_order FROM masters WHERE id='m2'")).toBe(1);
-    expect(scalar(dbPath, "SELECT sort_order FROM masters WHERE id='m7'")).toBe(5);
+    expect(scalar(dbPath, "SELECT sort_order FROM staff WHERE id='m1'")).toBe(0);
+    expect(scalar(dbPath, "SELECT sort_order FROM staff WHERE id='m2'")).toBe(1);
+    expect(scalar(dbPath, "SELECT sort_order FROM staff WHERE id='m7'")).toBe(5);
     expect(scalar(dbPath, "SELECT sort_order FROM locations WHERE id='alpika'")).toBe(0);
     expect(scalar(dbPath, "SELECT sort_order FROM locations WHERE id='grand'")).toBe(1);
     expect(scalar(dbPath, "SELECT sort_order FROM locations WHERE id='p1389'")).toBe(2);
+  });
+
+  it('rebuilds the seed staff_positions and restores seed positions title/is_system', () => {
+    // A spec may rename «master» or flip is_system (T9 positions CRUD); the
+    // reset restores the canonical dictionary and the 6 seed card links.
+    resetToSeed();
+
+    expect(scalar(dbPath, "SELECT COUNT(*) FROM staff_positions WHERE staff_id='m1' AND position_id='master'")).toBe(1);
+    expect(scalar(dbPath, "SELECT COUNT(*) FROM staff_positions")).toBe(6); // m1–m5, m7
+    expect(scalar(dbPath, "SELECT is_system FROM positions WHERE id='master'")).toBe(1);
+    expect(execSync(`sqlite3 "${dbPath}" "SELECT title FROM positions WHERE id='master'"`, { encoding: 'utf-8' }).trim()).toBe('Мастер');
+    expect(scalar(dbPath, "SELECT is_system FROM positions WHERE id='smm'")).toBe(0);
+  });
+
+  it('removes non-seed master_tags and detaches non-seed users.staff_id', () => {
+    // master_tags of non-seed masters go (child of masters, no CLI cascade);
+    // users rows are KEPT but their staff_id detached (auth cookie survives).
+    execSync(`sqlite3 "${dbPath}" "
+      INSERT INTO staff (id, sort_order) VALUES ('${'u'.repeat(36)}', 100);
+      INSERT INTO master_tags (master_id, tag_id) VALUES ('${'u'.repeat(36)}', 'tX');
+      INSERT INTO users (id, phone, staff_id) VALUES ('u2', '+79990000099', '${'u'.repeat(36)}');
+    "`);
+    resetToSeed();
+
+    expect(count(dbPath, "SELECT COUNT(*) FROM master_tags WHERE master_id='m1'")).toBe(1);
+    expect(count(dbPath, `SELECT COUNT(*) FROM master_tags WHERE master_id='${'u'.repeat(36)}'`)).toBe(0);
+    expect(count(dbPath, "SELECT COUNT(*) FROM users WHERE id='u2'")).toBe(1); // row kept
+    expect(execSync(`sqlite3 "${dbPath}" "SELECT staff_id FROM users WHERE id='u2'"`, { encoding: 'utf-8' }).trim()).toBe('');
+    expect(count(dbPath, `SELECT COUNT(*) FROM staff WHERE id='${'u'.repeat(36)}'`)).toBe(0);
   });
 });

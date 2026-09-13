@@ -41,11 +41,13 @@ from src.domain.deletion import (
 from src.models.activity import Activity
 from src.models.client import Client
 from src.models.location import Location
-from src.models.master import Master
+from src.models.master import Master  # extension row factory (#266)
 from src.models.material import Material
 from src.models.payment import Payment
+from src.models.position import Position, staff_positions
 from src.models.record import Record
 from src.models.service import Service
+from src.models.staff import Staff
 from src.models.tag import (
     Tag,
     client_tags,
@@ -64,9 +66,9 @@ def _deps_map(model: type) -> dict[str, FKDependency]:
     return {dep.entity: dep for dep in FK_MATRIX.get(model, [])}
 
 
-async def _add_user(db_session, master_id: str) -> str:
+async def _add_user(db_session, staff_id: str) -> str:
     user = User(phone=f"+7999{_uuid.uuid4().hex[:7]}", password_hash="x", role="admin",
-                master_id=master_id)
+                staff_id=staff_id)
     db_session.add(user)
     await db_session.flush()
     return user.id
@@ -93,8 +95,37 @@ async def _link_tags(
     await db_session.flush()
 
 
-async def _add_master_tag_links(db_session, master: Master, n: int) -> None:
+async def _add_master_tag_links(db_session, master: Staff, n: int) -> None:
+    # GH #266: master_tags rows hang off the masters extension — create it
+    await _ensure_extension(db_session, master.id)
     await _link_tags(db_session, master_tags, "master_id", master.id, n, prefix="mtag")
+
+
+async def _ensure_extension(db_session, staff_id: str) -> Master:
+    ext = await db_session.get(Master, staff_id)
+    if ext is None:
+        ext = Master(staff_id=staff_id, specialty="живопись", color="#000000")
+        db_session.add(ext)
+        await db_session.flush()
+    return ext
+
+
+async def _add_position(db_session, title: str = "СММ", *, is_system: bool = False) -> Position:
+    """Insert a Position row (user-defined by default — safe to hard-delete)."""
+    position = Position(title=title, is_system=is_system)
+    db_session.add(position)
+    await db_session.flush()
+    return position
+
+
+async def _add_staff_position_link(db_session, staff_id: str) -> str:
+    """Link a staff card to a fresh position via the staff_positions M2M."""
+    position = await _add_position(db_session)
+    await db_session.execute(
+        insert(staff_positions).values(staff_id=staff_id, position_id=position.id)
+    )
+    await db_session.flush()
+    return position.id
 
 
 async def _add_location_tag_links(db_session, location: Location, n: int) -> None:
@@ -119,8 +150,11 @@ async def _add_payment(db_session, record: Record, amount: int = 500) -> None:
 
 
 async def _add_activity(
-    db_session, *, master: Master, service: Service, location: Location, i: int = 0,
+    db_session, *, master: Staff, service: Service, location: Location, i: int = 0,
 ) -> Activity:
+    # GH #266: activities.master_id targets masters.staff_id — ensure the
+    # extension row exists before wiring the activity FK.
+    await _ensure_extension(db_session, master.id)
     activity = Activity(
         master_id=master.id, service_id=service.id, location_id=location.id,
         start=datetime.now(UTC) + timedelta(days=1, hours=i),
@@ -171,27 +205,45 @@ class TestFKMatrixMaterial:
 
 
 class TestFKMatrixMaster:
-    def test_has_exactly_three_deps(self) -> None:
-        assert {dep.entity for dep in FK_MATRIX[Master]} == {
-            "activities", "users", "master_tags",
+    def test_has_exactly_five_deps(self) -> None:
+        """GH #266: staff deps = activities(block) + users/masters/master_tags/
+        staff_positions (auto-cascades; masters is the 1:0..1 extension row)."""
+        assert {dep.entity for dep in FK_MATRIX[Staff]} == {
+            "activities", "users", "masters", "master_tags", "staff_positions",
         }
 
     def test_activities_blocks(self) -> None:
-        dep = _deps_map(Master)["activities"]
+        dep = _deps_map(Staff)["activities"]
         assert dep.action == "block"
         assert dep.allowed_actions == []
         assert dep.auto is False
         assert dep.nullable is False
 
     def test_users_cascade_auto(self) -> None:
-        dep = _deps_map(Master)["users"]
+        dep = _deps_map(Staff)["users"]
         assert dep.action == "cascade"
         assert dep.auto is True
         assert dep.allowed_actions == ["cascade"]
         assert dep.nullable is True
 
+    def test_masters_extension_cascade_auto(self) -> None:
+        """masters (the 1:0..1 schedule extension) auto-cascades with the card."""
+        dep = _deps_map(Staff)["masters"]
+        assert dep.action == "cascade"
+        assert dep.auto is True
+        assert dep.allowed_actions == ["cascade"]
+        assert dep.nullable is False
+
     def test_master_tags_cascade_auto(self) -> None:
-        dep = _deps_map(Master)["master_tags"]
+        dep = _deps_map(Staff)["master_tags"]
+        assert dep.action == "cascade"
+        assert dep.auto is True
+        assert dep.allowed_actions == ["cascade"]
+        assert dep.nullable is False
+
+    def test_staff_positions_cascade_auto(self) -> None:
+        """GH #266: the positions M2M join rows die with the card (auto)."""
+        dep = _deps_map(Staff)["staff_positions"]
         assert dep.action == "cascade"
         assert dep.auto is True
         assert dep.allowed_actions == ["cascade"]
@@ -380,9 +432,8 @@ class TestHasBlockingDeps:
 
 
 class TestCollectDependenciesMaster:
-    async def test_counts_activities_users_and_master_tags(self, db_session) -> None:
-        master = Master(first_name="A", last_name="B", color="#000000",
-                        position="мастер", specialty="живопись")
+    async def test_counts_all_five_deps(self, db_session) -> None:
+        master = Staff(first_name="A", last_name="B")
         service = Service(title="S", description="d", image_url="i", specialty="живопись",
                           min_age=6, duration=90, record_info="r")
         location = Location(name="L", capacity=10)
@@ -393,25 +444,32 @@ class TestCollectDependenciesMaster:
             await _add_activity(db_session, master=master, service=service, location=location, i=i)
         await _add_user(db_session, master.id)
         await _add_master_tag_links(db_session, master, 2)
+        await _add_staff_position_link(db_session, master.id)
         await db_session.commit()
 
-        nodes = await collect_dependencies(db_session, Master, master.id)
+        nodes = await collect_dependencies(db_session, Staff, master.id)
         by_entity = {n.entity: n for n in nodes}
-        assert set(by_entity) == {"activities", "users", "master_tags"}
+        assert set(by_entity) == {
+            "activities", "users", "masters", "master_tags", "staff_positions",
+        }
         assert by_entity["activities"].count == 3
         assert by_entity["users"].count == 1
+        assert by_entity["masters"].count == 1
         assert by_entity["master_tags"].count == 2
+        assert by_entity["staff_positions"].count == 1
         # The blocked (activities) node carries the spec §5 message; others carry none.
         assert by_entity["activities"].allowed_actions == []
         assert by_entity["activities"].message is not None
         assert by_entity["users"].allowed_actions == ["cascade"]
         assert by_entity["users"].cascade_preview is None
         assert by_entity["master_tags"].cascade_preview is None
+        assert by_entity["masters"].cascade_preview is None
+        assert by_entity["staff_positions"].cascade_preview is None
 
     async def test_zero_count_deps_are_skipped(self, db_session) -> None:
-        """A master with activities + a user but 0 master_tags → master_tags not in tree."""
-        master = Master(first_name="A2", last_name="B2", color="#111111",
-                        position="мастер", specialty="живопись")
+        """A staff card with activities + a user but no tags/positions/extension
+        → only present deps appear in the tree."""
+        master = Staff(first_name="A2", last_name="B2")
         service = Service(title="S2", description="d", image_url="i", specialty="живопись",
                           min_age=6, duration=90, record_info="r")
         location = Location(name="L2", capacity=10)
@@ -421,25 +479,28 @@ class TestCollectDependenciesMaster:
         await _add_user(db_session, master.id)
         await db_session.commit()
 
-        nodes = await collect_dependencies(db_session, Master, master.id)
+        nodes = await collect_dependencies(db_session, Staff, master.id)
         by_entity = {n.entity: n for n in nodes}
         assert "master_tags" not in by_entity
+        assert "staff_positions" not in by_entity
+        # The activity's FK requires the masters extension row → it IS a
+        # dep (count=1); a bare card with no extension returns no masters
+        # node (see test_no_deps_returns_empty).
+        assert by_entity["masters"].count == 1
         assert by_entity["activities"].count == 1
         assert by_entity["users"].count == 1
 
     async def test_no_deps_returns_empty(self, db_session) -> None:
-        master = Master(first_name="Empty", last_name="M", color="#222222",
-                        position="мастер", specialty="живопись")
+        master = Staff(first_name="Empty", last_name="M")
         db_session.add(master)
         await db_session.commit()
 
-        assert await collect_dependencies(db_session, Master, master.id) == []
+        assert await collect_dependencies(db_session, Staff, master.id) == []
 
 
 class TestCollectDependenciesLocation:
     async def test_counts_activities_and_location_tags(self, db_session) -> None:
-        master = Master(first_name="L1", last_name="m", color="#333333",
-                        position="мастер", specialty="живопись")
+        master = Staff(first_name="L1", last_name="m")
         service = Service(title="LS", description="d", image_url="i", specialty="живопись",
                           min_age=6, duration=90, record_info="r")
         location = Location(name="LL", capacity=10)
@@ -459,8 +520,7 @@ class TestCollectDependenciesLocation:
 
 class TestCollectDependenciesService:
     async def test_counts_all_four_deps(self, db_session) -> None:
-        master = Master(first_name="sv", last_name="m", color="#444444",
-                        position="мастер", specialty="живопись")
+        master = Staff(first_name="sv", last_name="m")
         service = Service(title="SvS", description="d", image_url="i", specialty="живопись",
                           min_age=6, duration=90, record_info="r")
         location = Location(name="SvL", capacity=10)
@@ -491,8 +551,7 @@ class TestCollectDependenciesClient:
         self, db_session,
     ) -> None:
         """Client→visitors cascade_preview = {"visits": N} — visits count, NO payments key."""
-        master = Master(first_name="c1", last_name="m", color="#555555",
-                        position="мастер", specialty="живопись")
+        master = Staff(first_name="c1", last_name="m")
         service = Service(title="cS", description="d", image_url="i", specialty="живопись",
                           min_age=6, duration=90, record_info="r")
         location = Location(name="cL", capacity=50)
@@ -535,8 +594,7 @@ class TestCollectDependenciesClient:
         assert visitors_node.cascade_preview["visits"] == 5
 
     async def test_no_visitors_no_cascade_preview(self, db_session) -> None:
-        master = Master(first_name="c2", last_name="m", color="#666666",
-                        position="мастер", specialty="живопись")
+        master = Staff(first_name="c2", last_name="m")
         service = Service(title="c2S", description="d", image_url="i", specialty="живопись",
                           min_age=6, duration=90, record_info="r")
         location = Location(name="c2L", capacity=50)
@@ -554,8 +612,7 @@ class TestCollectDependenciesClient:
 class TestCollectDependenciesRecord:
     async def test_counts_visits_payments_and_record_tags(self, db_session) -> None:
         """Record→visits(cascade user), payments(cascade user), record_tags(auto)."""
-        master = Master(first_name="r1", last_name="m", color="#777777",
-                        position="мастер", specialty="живопись")
+        master = Staff(first_name="r1", last_name="m")
         service = Service(title="rS", description="d", image_url="i", specialty="живопись",
                           min_age=6, duration=90, record_info="r")
         location = Location(name="rL", capacity=50)
@@ -589,8 +646,7 @@ class TestCollectDependenciesRecord:
 
     async def test_zero_count_deps_are_skipped(self, db_session) -> None:
         """Record with visits but 0 payments + 0 record_tags → only visits in tree."""
-        master = Master(first_name="r2", last_name="m", color="#888888",
-                        position="мастер", specialty="живопись")
+        master = Staff(first_name="r2", last_name="m")
         service = Service(title="r2S", description="d", image_url="i", specialty="живопись",
                           min_age=6, duration=90, record_info="r")
         location = Location(name="r2L", capacity=50)
@@ -614,8 +670,7 @@ class TestCollectDependenciesRecord:
 
     async def test_no_deps_returns_empty(self, db_session) -> None:
         """Bare record (no visits/payments/tags) → empty dependency tree."""
-        master = Master(first_name="r3", last_name="m", color="#999999",
-                        position="мастер", specialty="живопись")
+        master = Staff(first_name="r3", last_name="m")
         service = Service(title="r3S", description="d", image_url="i", specialty="живопись",
                           min_age=6, duration=90, record_info="r")
         location = Location(name="r3L", capacity=50)
@@ -697,30 +752,30 @@ class TestValidateResolutions:
 
     def test_auto_dep_ignored_even_when_sent_with_wrong_action(self) -> None:
         # Master → users/master_tags are auto: user sending wrong action is IGNORED.
-        errors = validate_resolutions(Master, _master_auto_nodes(),
+        errors = validate_resolutions(Staff, _master_auto_nodes(),
                                        {"users": "cascade", "master_tags": "nullify"})
         assert errors == []
 
     def test_auto_dep_ignored_when_body_empty(self) -> None:
-        errors = validate_resolutions(Master, _master_auto_nodes(), {})
+        errors = validate_resolutions(Staff, _master_auto_nodes(), {})
         assert errors == []
 
     def test_blocked_dep_invalid_regardless_of_body(self) -> None:
         # activities is blocked; even an empty body → error (blocked → 422 always).
-        errors = validate_resolutions(Master, _master_blocked_nodes(), {})
+        errors = validate_resolutions(Staff, _master_blocked_nodes(), {})
         assert len(errors) == 1
         assert errors[0].relation == "Активность"
 
     def test_blocked_dep_still_invalid_when_body_attempts_action(self) -> None:
         # Sending a (wrong) action for a blocked dep does not satisfy it — stays invalid.
-        errors = validate_resolutions(Master, _master_blocked_nodes(),
+        errors = validate_resolutions(Staff, _master_blocked_nodes(),
                                        {"activities": "cascade"})
         assert len(errors) == 1
         assert errors[0].relation == "Активность"
 
     def test_blocked_dep_does_not_mask_other_dep_errors(self) -> None:
         # Mixed: activities (block) + users (auto); body empty → only the block error.
-        errors = validate_resolutions(Master, _master_blocked_nodes(), {})
+        errors = validate_resolutions(Staff, _master_blocked_nodes(), {})
         assert len(errors) == 1
         assert all(e.relation == "Активность" for e in errors)
 

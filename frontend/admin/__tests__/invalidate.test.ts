@@ -9,17 +9,19 @@ import { QueryClient } from '@tanstack/react-query';
 
 /**
  * Drift guard (spec §4.1): the backend canonical entity list —
- * backend/src/events/entities.py. Backend emits 14 names incl. `users`
- * (MasterService.archive/restore also flips user.is_active); `users` has NO
- * frontend query family (no users query exists in the admin cache), so the
- * map covers the other 13 and unknown names are skipped at runtime by
- * invalidateEntities (dev-mode log).
+ * backend/src/events/entities.py. Backend emits 16 names (GH #266: +staff,
+ * +positions) incl. `users` (StaffService.archive/restore also flips
+ * user.is_active) and `positions` (PositionService — admin has no positions
+ * query family); they have NO frontend query family, so the map covers the
+ * other 14 and unknown names are skipped at runtime by invalidateEntities
+ * (dev-mode log).
  */
 const BACKEND_ENTITIES = [
   'clients', 'records', 'activities', 'masters', 'services', 'locations',
   'materials', 'tags', 'photos', 'visitors', 'visits', 'payments', 'user_settings',
+  'staff',
 ];
-const BACKEND_ONLY_NO_FRONTEND_CACHE = ['users'];
+const BACKEND_ONLY_NO_FRONTEND_CACHE = ['users', 'positions'];
 
 describe('INVALIDATION_MAP', () => {
   it('targets are real qk exports or real query-family prefixes', () => {
@@ -61,6 +63,7 @@ describe('INVALIDATION_MAP', () => {
       records: [qk.records, qk.visitorsList],
       activities: [['activities']],
       masters: [qk.masters, qk.records],
+      staff: [qk.staff, qk.masters, qk.records],
       services: [qk.services, qk.materials, qk.records],
       locations: [qk.locations, qk.records],
       materials: [qk.materials],

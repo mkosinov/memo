@@ -4,19 +4,18 @@ import {
   transformService,
   transformLocation,
 } from '@/lib/transformers';
-import type { MasterResponse, ServiceResponse, LocationResponse } from '@memo/api-client';
+import type { MasterViewResponse, ServiceResponse, LocationResponse } from '@memo/api-client';
 
-// ─── MasterResponse fixtures ────────────────────────────────────────────────
+// ─── MasterViewResponse fixtures (GH #266 read-only /masters view) ──────────
 
-const masterFixture: MasterResponse = {
+const masterFixture: MasterViewResponse = {
   id: 'master-1',
   first_name: 'Анна',
   last_name: 'Иванова',
   color: '#FF6B6B',
-  position: 'мастер',
   specialty: 'живопись',
   avatar_url: 'https://example.com/avatar.jpg',
-  archived: false,
+  sort_order: 0,
   created_at: '2024-01-15T10:00:00Z',
   updated_at: '2024-06-01T12:00:00Z',
 };

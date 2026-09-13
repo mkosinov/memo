@@ -537,17 +537,22 @@ class TestViewDisplayFields:
         assert client_resp.status_code == 200
         client_name = client_resp.json()["name"]
         activity = api_client.get(f"/api/v1/activities/{record['activity_id']}").json()
-        master = api_client.get(f"/api/v1/masters/{activity['master_id']}").json()
+        staff_id = activity["master_id"]
+        card = api_client.get(f"/api/v1/staff/{staff_id}").json()
+        master_name = f"{card['last_name']} {card['first_name']}"
+        master_color = card["master"]["color"]
 
         arch_c = api_client.post(f"/api/v1/clients/{record['client_id']}/archive")
-        arch_m = api_client.post(f"/api/v1/masters/{activity['master_id']}/archive")
+        # GH #266: the master extension is archived via the staff card
+        # (D6 default checkboxes) — /masters mutations are gone.
+        arch_m = api_client.post(f"/api/v1/staff/{staff_id}/archive", json={})
         assert arch_c.status_code == 200, f"{arch_c.status_code}: {arch_c.text}"
         assert arch_m.status_code == 200, f"{arch_m.status_code}: {arch_m.text}"
 
         item = _item_for(api_client, VIEW_URL, record["id"])
         assert item["client_name"] == client_name  # real name, not '—'
-        assert item["master_name"] == f"{master['last_name']} {master['first_name']}"
-        assert item["master_color"] == master["color"]
+        assert item["master_name"] == master_name
+        assert item["master_color"] == master_color
 
     def test_anonymous_record_null_display_fields(
         self,

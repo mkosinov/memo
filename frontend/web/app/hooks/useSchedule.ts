@@ -8,7 +8,7 @@ import type { ScheduleIndex } from '@memo/domain';
 import { buildWebSchedule, type WebScheduleDTO } from '@/app/lib/mappers/buildSchedule';
 import { toScheduleView } from '@/app/lib/mappers/to-schedule-vm';
 import type { ScheduleView, ScheduleFiltersView } from '@/app/lib/model/view/schedule';
-import type { ActivityResponse, ServiceResponse, MasterResponse, LocationResponse } from '@memo/api-client';
+import type { ActivityResponse, ServiceResponse, MasterViewResponse, LocationResponse } from '@memo/api-client';
 
 export interface UseScheduleResult {
   schedules: ScheduleView[];
@@ -64,7 +64,7 @@ export function useSchedule(filters: ScheduleFiltersView = {}): UseScheduleResul
     // List endpoints return the paginated envelope ({items, total}) — consume .items.
     const activities = (rawData[0] as PaginatedResponse<ActivityResponse> | undefined)?.items ?? [];
     const services = (rawData[1] as PaginatedResponse<ServiceResponse> | undefined)?.items ?? [];
-    const masters = (rawData[2] as PaginatedResponse<MasterResponse> | undefined)?.items ?? [];
+    const masters = (rawData[2] as PaginatedResponse<MasterViewResponse> | undefined)?.items ?? [];
     const locations = (rawData[3] as PaginatedResponse<LocationResponse> | undefined)?.items ?? [];
     return buildWebSchedule(
       activities,

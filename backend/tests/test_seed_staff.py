@@ -33,7 +33,7 @@ async def db_manager():
 async def _users(manager: DBManager) -> list[tuple]:
     async with manager.async_session() as session:
         result = await session.execute(
-            text("SELECT phone, role, master_id, is_active FROM users ORDER BY phone")
+            text("SELECT phone, role, staff_id, is_active FROM users ORDER BY phone")
         )
         return result.all()
 

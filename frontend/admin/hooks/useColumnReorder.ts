@@ -1,7 +1,10 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { reorderMasters, reorderLocations } from '@memo/api-client';
+// GH #266 Gap C (D8): `reorderMasters` is gone — `/masters` is read-only and
+// `/staff/reorder` was deliberately NOT carried over. Master-column order
+// persists as a user setting (`column_order_staff`, migration step 7).
+import { patchUserSettings, reorderLocations } from '@memo/api-client';
 
 interface UseColumnReorderOptions {
   columns: ReadonlyArray<{ id: string; name: string; sortOrder?: number }>;
@@ -120,9 +123,15 @@ export function useColumnReorder({ columns, columnMode, initialOrder, onOrderCha
         const insertIdx = direction === 'after' ? newTargetIdx + 1 : newTargetIdx;
         newOrder.splice(insertIdx, 0, draggedId);
 
-        // Persist to backend
-        const reorderFn = columnMode === 'masters' ? reorderMasters : reorderLocations;
-        reorderFn(newOrder).catch(console.error);
+        // Persist to backend. Locations still own a server-side sort_order
+        // (`reorderLocations`). Masters no longer do — `/masters/reorder` was
+        // deleted in #266 (D8), so the master-column order is a per-user
+        // setting persisted as `column_order_staff` (migration step 7).
+        if (columnMode === 'masters') {
+          patchUserSettings({ column_order_staff: newOrder }).catch(console.error);
+        } else {
+          reorderLocations(newOrder).catch(console.error);
+        }
 
         return newOrder;
       });

@@ -72,7 +72,10 @@ class AuthedUser:
     id: str
     phone: str
     role: str
-    master_id: str | None
+    # GH #266 D10: internal principal renamed master_id → staff_id (the
+    # card FK); the /auth/me response shape is UNCHANGED (wire keeps
+    # master_id until the frontend migrates).
+    staff_id: str | None
     permissions: frozenset[str]
 
 

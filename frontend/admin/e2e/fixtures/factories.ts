@@ -167,28 +167,81 @@ export async function createTestRecordWithPayment(
 // `uid()` makes names globally unique across shards, so a leaked row from a
 // previous run can never collide with the current test's search/seed name.
 
+/** Options for {@link createTestStaff} (mirrors the StaffCreate schema, #266). */
+export interface StaffOverrides {
+  first_name?: string;
+  last_name?: string;
+  avatar_url?: string | null;
+  sort_order?: number;
+  /** Master section (D5): present → the card is an acting schedule master. */
+  master?: { specialty: string; color: string } | null;
+  /** Position ids (M2M staff_positions); seed dictionary: master/admin/smm. */
+  positions?: string[];
+  /** Account checkbox (D6, create-only): phone + password, or `false`. */
+  user?: { phone: string; password: string } | false;
+}
+
 /**
- * Create a test master via backend API.
- * position/specialty are backend enum values (Специальность/Position enums).
+ * Create a test staff card via the composite POST /api/v1/staff (GH #266).
+ *
+ * One transaction writes the person (staff) + optional master section
+ * (masters extension) + position links (staff_positions) + optional account
+ * (users). Defaults: no master section, no positions, no account — a plain
+ * person. Pass `master` to make it an acting schedule master, `positions`
+ * to attach dictionary entries, `user` to create a login.
  */
-export async function createTestMaster(
+export async function createTestStaff(
   api: APIRequestContext,
-  overrides?: Record<string, unknown>,
+  overrides: StaffOverrides = {},
 ) {
-  const resp = await api.post(`${BACKEND}/api/v1/masters`, {
+  const {
+    first_name = 'Тест',
+    last_name = `Сотрудников ${uid()}`,
+    avatar_url = '',
+    sort_order = 999,
+    master = null,
+    positions = [],
+    user = false,
+  } = overrides;
+  const resp = await api.post(`${BACKEND}/api/v1/staff`, {
     data: {
-      first_name: 'Тест',
-      last_name: `Мастеров ${uid()}`,
-      color: '#5B8C7A',
-      position: 'мастер',
-      specialty: 'керамика',
-      avatar_url: '',
-      sort_order: 999,
-      ...overrides,
+      first_name,
+      last_name,
+      avatar_url,
+      sort_order,
+      master,
+      position_ids: positions,
+      create_user: user,
     },
   });
   expect(resp.ok()).toBeTruthy();
   return await resp.json();
+}
+
+/**
+ * Create a test master via the staff directory (GH #266).
+ *
+ * A «master» is no longer its own table — it is a staff card WITH a master
+ * section, and `/api/v1/masters` is read-only (D8). This wrapper preserves
+ * the legacy call shape (`createTestMaster(api, { color, specialty, … })`)
+ * by folding the top-level `color`/`specialty` overrides into the master
+ * block and creating through `/api/v1/staff`.
+ */
+export async function createTestMaster(
+  api: APIRequestContext,
+  overrides: Record<string, unknown> = {},
+) {
+  return createTestStaff(api, {
+    first_name: (overrides.first_name as string) ?? 'Тест',
+    last_name: (overrides.last_name as string) ?? `Мастеров ${uid()}`,
+    avatar_url: (overrides.avatar_url as string | undefined) ?? '',
+    sort_order: (overrides.sort_order as number | undefined) ?? 999,
+    master: {
+      specialty: (overrides.specialty as string) ?? 'керамика',
+      color: (overrides.color as string) ?? '#5B8C7A',
+    },
+    positions: ['master'],
+  });
 }
 
 /** Create a test location via backend API (capacity is the only required field). */
@@ -372,11 +425,12 @@ export function linkPhotoTag(photoId: string, tagId: string): void {
 }
 
 /**
- * Link an already-seeded user to a master by phone (users have no create
- * endpoint; backend tests link via UPDATE users SET master_id=…).
+ * Link an already-seeded user to a staff card by phone (users have no create
+ * endpoint; backend tests link via UPDATE users SET staff_id=…). Renamed from
+ * `linkUserToMaster` (#266: users.master_id → users.staff_id).
  */
-export function linkUserToMaster(phone: string, masterId: string): void {
-  executeSQL(`UPDATE users SET master_id=${sqlValue(masterId)} WHERE phone=${sqlValue(phone)}`);
+export function linkUserToStaff(phone: string, staffId: string): void {
+  executeSQL(`UPDATE users SET staff_id=${sqlValue(staffId)} WHERE phone=${sqlValue(phone)}`);
 }
 
 /**
@@ -400,6 +454,9 @@ export const E2E_PASSWORD_HASH =
  * precomputed Argon2 constant (GH #247 §4.8) — NOT a literal — so the row
  * can actually authenticate with `E2E_PASSWORD` (T14 login-flow specs);
  * the hash is deterministic to verify because the salt is embedded.
+ *
+ * #266: the link column is `staff_id` (renamed from `master_id`). The
+ * `masterId` param is kept as the legacy alias for the linked staff card id.
  */
 export function seedUser(overview: {
   phone: string;
@@ -411,7 +468,7 @@ export function seedUser(overview: {
   executeSQL(
     // GH #247 T1 added the lockout-ladder columns (failed_login_attempts,
     // lock_level, locked_until) — NOT NULL, so the INSERT must set them.
-    `INSERT INTO users (id, phone, email, password_hash, role, master_id, email_is_confirmed, phone_is_confirmed, failed_login_attempts, lock_level, locked_until, is_active, created_at, updated_at) VALUES (${sqlValue(id)}, ${sqlValue(overview.phone)}, NULL, ${sqlValue(E2E_PASSWORD_HASH)}, ${sqlValue(overview.role ?? 'master')}, ${sqlValue(overview.masterId ?? null)}, 0, 0, 0, 0, NULL, ${overview.isActive ?? 1}, datetime('now'), datetime('now'))`,
+    `INSERT INTO users (id, phone, email, password_hash, role, staff_id, email_is_confirmed, phone_is_confirmed, failed_login_attempts, lock_level, locked_until, is_active, created_at, updated_at) VALUES (${sqlValue(id)}, ${sqlValue(overview.phone)}, NULL, ${sqlValue(E2E_PASSWORD_HASH)}, ${sqlValue(overview.role ?? 'master')}, ${sqlValue(overview.masterId ?? null)}, 0, 0, 0, 0, NULL, ${overview.isActive ?? 1}, datetime('now'), datetime('now'))`,
   );
   return id;
 }

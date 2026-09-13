@@ -408,18 +408,22 @@ export async function waitForClientsReady(
 }
 
 /**
- * Wait for masters page to load with table.
- * Navigates to /masters, waits for heading and table to render.
+ * Wait for the staff directory screen to load with table (GH #266 — the
+ * pre-#266 /masters management screen is now /staff «Сотрудники»).
+ *
+ * Readiness anchors on the `/api/v1/staff` list response + the rendered table
+ * + the stable heading. Rows keep the `master-row-*` testid (DoD: preserved
+ * across the move; staff.id == master.id for sectioned cards, seed m1–m5,m7).
  */
-export async function waitForMastersReady(page: Page) {
-  const mastersResponse = page.waitForResponse(
-    (resp) => resp.url().includes('/api/v1/masters') && resp.status() === 200,
+export async function waitForStaffReady(page: Page) {
+  const staffResponse = page.waitForResponse(
+    (resp) => resp.url().includes('/api/v1/staff') && resp.status() === 200,
     { timeout: 60_000 },
   );
-  await page.goto('/masters');
-  await page.waitForSelector('h1:has-text("Управление мастерами")', { timeout: 60_000 });
+  await page.goto('/staff');
+  await page.waitForSelector('h1:has-text("Управление сотрудниками")', { timeout: 60_000 });
   await page.waitForSelector('table', { timeout: 60_000 });
-  await mastersResponse.catch(() => {});
+  await staffResponse.catch(() => {});
   await page.waitForTimeout(500);
 }
 
@@ -436,6 +440,23 @@ export async function waitForTagsReady(page: Page) {
   await page.waitForSelector('h1:has-text("Управление тегами")', { timeout: 60_000 });
   await page.waitForSelector('table', { timeout: 60_000 });
   await tagsResponse.catch(() => {});
+  await page.waitForTimeout(500);
+}
+
+/**
+ * Wait for the positions dictionary screen to load with table (GH #266 T9).
+ * Navigates to /positions, waits for the heading + table and the paged
+ * GET /api/v1/positions response. Seed rows: master/admin (built-ins) + smm.
+ */
+export async function waitForPositionsReady(page: Page) {
+  const positionsResponse = page.waitForResponse(
+    (resp) => resp.url().includes('/api/v1/positions') && resp.status() === 200,
+    { timeout: 60_000 },
+  );
+  await page.goto('/positions');
+  await page.waitForSelector('h1:has-text("Управление должностями")', { timeout: 60_000 });
+  await page.waitForSelector('table', { timeout: 60_000 });
+  await positionsResponse.catch(() => {});
   await page.waitForTimeout(500);
 }
 
@@ -492,6 +513,19 @@ export async function clickRowDelete(dropdownOrRow: Locator): Promise<void> {
 export async function clickRowArchiveAction(
   dropdownOrRow: Locator,
   action: 'В архив' | 'Восстановить',
+): Promise<void> {
+  await menuItem(dropdownOrRow, action).click();
+}
+
+/**
+ * Click the staff-card archive/restore item (GH #266 terminology D2/D11:
+ * «Архивировать» / «Вернуть из архива» — distinct from the other entities'
+ * «В архив»/«Восстановить»). NOTE: «Архивировать» opens the D6 dismissal
+ * dialog (checkboxes), it does NOT fire the mutation directly.
+ */
+export async function clickRowStaffArchiveAction(
+  dropdownOrRow: Locator,
+  action: 'Архивировать' | 'Вернуть из архива',
 ): Promise<void> {
   await menuItem(dropdownOrRow, action).click();
 }

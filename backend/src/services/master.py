@@ -1,100 +1,133 @@
-"""Business logic for master CRUD operations."""
+"""Read-only masters view service (GH #266 T4, D8).
 
+Thin view module over ``staff`` ⨝ ``masters`` (plan File Structure:
+``services/master.py`` collapses into this read-only view — the old
+masters CRUD service is gone, the composite :class:`StaffService` owns
+all writes). Serves ACTING masters only (``masters.is_active = true``)
+with the D8 wire shape: ``id`` = staff_id, names, specialty, color,
+``avatar_url``, ``sort_order``.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
 from functools import lru_cache
+from typing import TYPE_CHECKING
 
-from sqlalchemy import update
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import func, select
 
-from src.events.emitter import mark_changed
+if TYPE_CHECKING:
+    from datetime import datetime
+
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.domain.errors import BareListLimitExceededError
 from src.models.master import Master
-from src.models.user import User
-from src.repositories.generic import get_archive_repository
-from src.repositories.search import SearchField
-from src.schemas.master import MasterCreate, MasterResponse, MasterUpdate
-from src.services.decorators import transactional
-from src.services.generic import ArchiveService
+from src.models.staff import Staff
+from src.schemas.common import PaginatedResponse
+from src.schemas.master import MasterViewResponse
+from src.services.generic import BARE_LIST_MAX_ROWS
 
 
-class MasterService(ArchiveService[MasterCreate, MasterUpdate, MasterResponse]):
-    """Master service with NOT NULL field protection on PATCH.
+@dataclass
+class _MasterViewRow:
+    """Attribute glue: staff row + master extension → view wire shape."""
 
-    Master-only cascade (spec §4.2, Change 3): ``archive`` and ``restore``
-    OVERRIDE the generic ``ArchiveService`` methods to additionally write the
-    linked ``users.is_active`` (where ``users.master_id == master.id``) in the
-    SAME transaction as the master's ``is_active`` patch. A Master is a staff
-    profile, the linked User is its login account — archiving a master without
-    disabling the account leaves an orphan login; restoring reactivates both.
+    id: str
+    first_name: str
+    last_name: str
+    specialty: str
+    color: str
+    avatar_url: str | None
+    sort_order: int
+    created_at: datetime
+    updated_at: datetime
 
-    Implementation note (approach (a), per Task 11 plan): the overrides do
-    NOT call ``super().archive()``/``super().restore()`` — that would mean TWO
-    ``@transactional`` commits (master first via super, then user via this
-    method's own ``@transactional``) and break the atomicity requirement
-    (spec §4.2: "ONE transaction"). Instead, the master ``repo.patch`` AND the
-    user-cascade ``UPDATE`` are inlined in ONE ``@transactional`` method so the
-    decorator commits them together (or rolls back together on error). The
-    other 4 entities (Location/Service/Material/Client) do NOT cascade — they
-    inherit the generic ``ArchiveService.archive/restore`` unchanged.
-    """
-
-    NOT_NULL_FIELDS = {"first_name", "last_name", "color", "position", "specialty", "sort_order"}
-
-    # GH #212 search matrix (spec §5.2): substring on first_name/last_name
-    # (each field ilike'd separately — no cross-field concatenation, spec
-    # §5.2 note), exact id equality when q parses as a full UUID
-    # (deep-link prerequisite #216).
-    search_fields = [
-        SearchField(Master.first_name),
-        SearchField(Master.last_name),
-        SearchField(Master.id, kind="uuid"),
-    ]
-
-    @transactional
-    async def archive(self, db_session: AsyncSession, id: str) -> bool:
-        """Archive the master AND cascade-write the linked user's is_active=False.
-
-        Returns ``True`` if the master row was archived, ``False`` if not found.
-        The linked user (if any) is unconditionally set to ``is_active=False``
-        after the master patch succeeds — atomic via the single outer
-        ``@transactional`` boundary (spec §4.2: ONE transaction). When no user
-        is linked (master has no login account), the ``UPDATE`` matches zero
-        rows and is a no-op.
-        """
-        orm = await self._repository.patch(
-            db_session, self._model, id, {"is_active": False}
+    @classmethod
+    def build(cls, staff: Staff, ext: Master) -> _MasterViewRow:
+        return cls(
+            id=staff.id,
+            first_name=staff.first_name,
+            last_name=staff.last_name,
+            specialty=ext.specialty,
+            color=ext.color,
+            avatar_url=staff.avatar_url,
+            sort_order=staff.sort_order,
+            created_at=staff.created_at,
+            updated_at=staff.updated_at,
         )
-        if orm is None:
-            return False
-        # Master→User cascade (spec §4.2): linked login account is disabled
-        # in the SAME transaction as the master's is_active flip.
-        await db_session.execute(
-            update(User).where(User.master_id == id).values(is_active=False)
-        )
-        # GH #239 §3.3: users.is_active was rewritten by this cascade
-        mark_changed("users")
-        return True
 
-    @transactional
-    async def restore(self, db_session: AsyncSession, id: str) -> bool:
-        """Restore the master AND cascade-write the linked user's is_active=True.
 
-        Returns ``True`` if the master row was restored, ``False`` if not found.
-        Mirrors :meth:`archive` with the opposite polarity.
-        """
-        orm = await self._repository.patch(
-            db_session, self._model, id, {"is_active": True}
+class MasterViewService:
+    """Read-only list services for the acting-masters view."""
+
+    _model = Staff  # walk-compatible _model (events entity resolution)
+
+    async def _fetch(
+        self, db_session: AsyncSession, order_by=None, limit: int | None = None,
+        offset: int = 0,
+    ) -> list[tuple[Staff, Master]]:
+        """Acting masters: staff INNER JOIN masters ON is_active — one query."""
+        stmt = (
+            select(Staff, Master)
+            .join(Master, Master.staff_id == Staff.id)
+            .where(Master.is_active)
         )
-        if orm is None:
-            return False
-        # Master→User cascade (spec §4.2): linked login account is re-enabled
-        # in the SAME transaction as the master's is_active flip.
-        await db_session.execute(
-            update(User).where(User.master_id == id).values(is_active=True)
+        if order_by is not None:
+            stmt = stmt.order_by(*order_by)
+        if limit is not None:
+            stmt = stmt.limit(limit)
+        if offset:
+            stmt = stmt.offset(offset)
+        rows = await db_session.execute(stmt)
+        return [tuple(r) for r in rows.all()]
+
+    async def list(
+        self,
+        db_session: AsyncSession,
+        page: int = 1,
+        per_page: int = 20,
+        order_by=None,
+    ) -> PaginatedResponse[MasterViewResponse]:
+        """Paginated view (GH #205 envelope)."""
+        total = (
+            await db_session.execute(
+                select(func.count())
+                .select_from(Staff)
+                .join(Master, Master.staff_id == Staff.id)
+                .where(Master.is_active)
+            )
+        ).scalar_one()
+        pairs = await self._fetch(
+            db_session, order_by=order_by, limit=per_page,
+            offset=(page - 1) * per_page,
         )
-        # GH #239 §3.3: users.is_active was rewritten by this cascade
-        mark_changed("users")
-        return True
+        items = [
+            MasterViewResponse.model_validate(_MasterViewRow.build(s, m))
+            for s, m in pairs
+        ]
+        return PaginatedResponse(
+            items=items, total=total, page=page, per_page=per_page,
+        )
+
+    async def list_all(
+        self, db_session: AsyncSession, order_by=None
+    ) -> list[MasterViewResponse]:
+        """Bare /all array with the BARE_LIST_MAX_ROWS guard (GH #205)."""
+        pairs = await self._fetch(
+            db_session, order_by=order_by, limit=BARE_LIST_MAX_ROWS + 1
+        )
+        if len(pairs) > BARE_LIST_MAX_ROWS:
+            # Reuse the guard's canonical message via the shared error.
+            raise BareListLimitExceededError(
+                Staff.__tablename__, BARE_LIST_MAX_ROWS
+            )
+        return [
+            MasterViewResponse.model_validate(_MasterViewRow.build(s, m))
+            for s, m in pairs
+        ]
 
 
 @lru_cache
-def get_master_service() -> MasterService:
-    return MasterService(get_archive_repository(), Master, MasterResponse)
+def get_master_view_service() -> MasterViewService:
+    return MasterViewService()

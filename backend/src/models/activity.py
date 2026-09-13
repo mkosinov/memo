@@ -17,7 +17,11 @@ if TYPE_CHECKING:
 class Activity(AbstractModel):
     __tablename__ = "activities"
 
-    master_id: Mapped[str] = mapped_column(String(36), ForeignKey("masters.id"))
+    # GH #266 D9: column name kept (master_id), FK retargeted to the new
+    # masters extension table (masters.staff_id = former master id).
+    master_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("masters.staff_id")
+    )
     service_id: Mapped[str] = mapped_column(String(36), ForeignKey("services.id"))
     location_id: Mapped[str] = mapped_column(String(36), ForeignKey("locations.id"))
     start: Mapped[datetime] = mapped_column(DateTime)

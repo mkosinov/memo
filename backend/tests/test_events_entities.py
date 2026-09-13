@@ -25,7 +25,11 @@ from src.services.generic import ArchiveService, GenericService
 pytestmark = pytest.mark.pure_unit
 
 # Canonical entity names (backend side of the mirror; frontend pairs in
-# frontend/admin — spec §4.1 drift guard).
+# frontend/admin — spec §4.1 drift guard). GH #266: `staff` (StaffService is
+# transactional over the staff table) + `positions` (PositionService) join
+# the canonical set; `masters` stays via the cascade-only Master entry.
+# Join tables (staff_positions/master_tags) are deliberately NOT canonical —
+# they are emitted as-is and skipped by consumers (see entities.py docstring).
 CANONICAL_ENTITIES = {
     "activities",
     "clients",
@@ -34,8 +38,10 @@ CANONICAL_ENTITIES = {
     "materials",
     "payments",
     "photos",
+    "positions",
     "records",
     "services",
+    "staff",
     "tags",
     "user_settings",
     "users",
@@ -136,6 +142,23 @@ class TestDriftMirror:
     def test_model_entity_values_match_canonical_set(self) -> None:
         """Backend-side drift mirror — pairs with the frontend mirror (§4.1)."""
         assert set(MODEL_ENTITY.values()) == CANONICAL_ENTITIES
+
+    def test_master_is_cascade_only_entry(self) -> None:
+        """GH #266: masters has NO service of its own (MasterViewService is
+        read-only, not GenericService) — the walk cannot derive it; the
+        explicit cascade-only entry must map Master → "masters" so
+        StaffService's mark_changed("masters") stays mirror-guarded."""
+        from src.models.master import Master
+
+        assert MODEL_ENTITY[Master] == "masters"
+
+    def test_join_tables_are_not_canonical(self) -> None:
+        """GH #266: staff_positions/master_tags are join tables — emitted
+        as-is (mark_changed / FK_MATRIX dispatch), skipped by consumers;
+        they must NOT appear in the canonical mirror (like client_tags)."""
+        names = set(MODEL_ENTITY.values())
+        assert "staff_positions" not in names
+        assert "master_tags" not in names
 
     def test_activities_present_in_map(self) -> None:
         """DoD: activities is present in the entity map."""

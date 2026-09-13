@@ -74,21 +74,22 @@ test.describe('S7 — Client delete resolution validation', () => {
     }
   });
 
-  test('blocked master with body still rejected → 422 (activities can never resolve)', async ({ request }) => {
+  test('blocked staff card with body still rejected → 422 (activities can never resolve)', async ({ request }) => {
     // Complement of §14: "activities always blocks — DELETE with body →
-    // 422 communicates archive instead".
+    // 422 communicates archive instead". GH #266: the master write moved to
+    // the staff card; activities block via the masters extension row.
     const master = await createTestMaster(request);
     const activity = await createTestActivity(request, { master_id: master.id });
     try {
-      const resp = await request.delete(`${BACKEND}/api/v1/masters/${master.id}`, {
+      const resp = await request.delete(`${BACKEND}/api/v1/staff/${master.id}`, {
         data: { resolutions: { activities: 'cascade' } },
       });
       expect(resp.status()).toBe(422);
-      // Master row intact — cannot be deleted while activities exist.
-      expect(queryDBRow(`SELECT id FROM masters WHERE id='${master.id}'`)).not.toBeNull();
+      // Card intact — cannot be deleted while activities exist.
+      expect(queryDBRow(`SELECT id FROM staff WHERE id='${master.id}'`)).not.toBeNull();
     } finally {
       await cleanup(request, `/api/v1/activities/${activity.id}`);
-      await cleanup(request, `/api/v1/masters/${master.id}`);
+      await cleanup(request, `/api/v1/staff/${master.id}`);
     }
   });
 });

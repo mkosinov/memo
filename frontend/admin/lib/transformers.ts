@@ -1,10 +1,10 @@
 import type { Master, Service, Location } from '@memo/domain';
-import type { MasterResponse, ServiceResponse, LocationResponse } from '@memo/api-client';
+import type { MasterViewResponse, ServiceResponse, LocationResponse } from '@memo/api-client';
 import { displayMasterName } from '@/lib/utils';
 
 // ─── Transformers ───────────────────────────────────────────────────────────
 
-export function transformMaster(raw: MasterResponse): Master {
+export function transformMaster(raw: MasterViewResponse): Master {
   return {
     id: raw.id,
     name: displayMasterName(raw),

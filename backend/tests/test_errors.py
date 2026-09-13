@@ -13,14 +13,14 @@ pytestmark = pytest.mark.pure_unit
 # ─── ErrorCode Enum ───────────────────────────────────────────────────────────
 
 class TestErrorCodeEnum:
-    """Verify ErrorCode has all 23 codes (18 from spec §5 + GH #247 auth codes)."""
+    """Verify ErrorCode has all 29 codes (18 base + 5 GH #247 auth + 6 GH #266 staff)."""
 
-    def test_has_all_23_codes(self):
-        """All 23 error codes are present (18 base + 5 GH #247 auth)."""
-        assert len(ErrorCode) == 23
+    def test_has_all_29_codes(self):
+        """All 29 error codes are present (18 base + 5 auth + 6 staff #266)."""
+        assert len(ErrorCode) == 29
 
     def test_expected_codes_exist(self):
-        """Every code from spec §5 (plus GH #247 auth additions) exists."""
+        """Every code from spec §5 (plus auth/staff additions) exists."""
         expected = {
             # 409
             "ACTIVITY_AT_CAPACITY",
@@ -52,6 +52,13 @@ class TestErrorCodeEnum:
             "INTEGRITY_VIOLATION",
             # 500
             "INTERNAL_ERROR",
+            # GH #266 staff restructuring («Контракты ошибок»)
+            "STAFF_NOT_FOUND",       # 404 — /staff/{id} отсутствует
+            "MASTER_NOT_ACTIVE",     # 422 — занятие на неактивного мастера (TOCTOU)
+            "POSITION_NOT_FOUND",    # 404 — /positions/{id} отсутствует
+            "POSITION_IS_SYSTEM",    # 422 — удаление встроенной должности
+            "SPECIALTY_REQUIRED",    # 422 — мастер-секция без специальности
+            "COLOR_REQUIRED",        # 422 — мастер-секция без цвета
         }
         actual = {code.value for code in ErrorCode}
         assert actual == expected
@@ -114,8 +121,8 @@ class TestErrorMessages:
             assert code in ERROR_MESSAGES, f"Missing ERROR_MESSAGES entry for {code.value}"
 
     def test_total_count_matches(self):
-        """ERROR_MESSAGES has exactly 23 entries (one per ErrorCode)."""
-        assert len(ERROR_MESSAGES) == 23
+        """ERROR_MESSAGES has exactly 29 entries (one per ErrorCode)."""
+        assert len(ERROR_MESSAGES) == 29
 
     def test_all_values_are_strings(self):
         """Every message is a non-empty string."""

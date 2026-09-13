@@ -5,7 +5,7 @@ import {
   waitForRecordsReady,
   waitForTagsReady,
   waitForLocationsReady,
-  waitForMastersReady,
+  waitForStaffReady,
   waitForServicesReady,
   waitForMaterialsReady,
   waitForPhotosReady,
@@ -206,11 +206,16 @@ const TABLE_CONFIGS: PageTableConfig[] = [
     row: (page) => page.locator('[data-testid^="location-row-"]').first(),
   },
   {
-    name: 'masters',
-    path: '/masters',
-    h1Text: 'Управление мастерами',
-    navigate: waitForMastersReady,
-    apiUrl: '/api/v1/masters',
+    // GH #266: the masters management screen moved to /staff («Сотрудники»).
+    // Snapshot baselines re-captured as staff-table-* (the column set changed:
+    // имя, должности, специальность, цвет, архив). The apiUrl is /staff (the
+    // table reads the directory, not the read-only /masters view). Row testids
+    // stay master-row-* (DoD).
+    name: 'staff',
+    path: '/staff',
+    h1Text: 'Управление сотрудниками',
+    navigate: waitForStaffReady,
+    apiUrl: '/api/v1/staff',
     sortHeader: (page) => thExact(page, 'Имя'),
     glyphSelector: 'th:has-text("Имя ↑")',
     row: (page) => page.locator('[data-testid^="master-row-"]').first(),
@@ -435,7 +440,7 @@ function emptyTest(config: PageTableConfig) {
     const emptyText: Record<string, string> = {
       tags: 'Нет записей',
       locations: 'Нет записей',
-      masters: 'Нет записей',
+      staff: 'Нет записей',
       services: 'Нет записей',
       materials: 'Нет записей',
       // #139 T6 + Addendum #12 — clients' pre-#139 empty copy
@@ -490,7 +495,7 @@ function skeletonTest(config: PageTableConfig) {
     await page.route(`**${config.apiUrl}*`, () => new Promise<void>(() => {}));
     // Clock is already installed in beforeEach (date-stable baselines).
     await navigateDirect(page, config);
-    if (config.name === 'clients' || config.name === 'tags' || config.name === 'locations' || config.name === 'masters' || config.name === 'materials' || config.name === 'services' || config.name === 'photos' || config.name === 'records') {
+    if (config.name === 'clients' || config.name === 'tags' || config.name === 'locations' || config.name === 'staff' || config.name === 'materials' || config.name === 'services' || config.name === 'photos' || config.name === 'records') {
       // Clients renders 10 skeleton bars (.animate-pulse) while loading;
       // Tags renders them via the shared DataTable since #139 T1 (locked
       // delta §6.8/plan: skeleton rows replace the old "Загрузка..." div);

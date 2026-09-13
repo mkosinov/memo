@@ -1,6 +1,6 @@
 import { ScheduleDTO, buildSchedule, resolveById } from '@memo/domain';
 import type { ScheduleIndex } from '@memo/domain';
-import type { ActivityResponse, ServiceResponse, MasterResponse, LocationResponse } from '@memo/api-client';
+import type { ActivityResponse, ServiceResponse, MasterViewResponse, LocationResponse } from '@memo/api-client';
 import type { PhotoDTO } from '@/app/lib/model/dto/schedule';
 
 // ─── Re-export for backward compatibility ──────────────────────────────────
@@ -44,7 +44,7 @@ function buildTagSet(serviceTags: { tag: string }[]): string[] {
 export function buildWebSchedule(
   activities: ActivityResponse[],
   services: Map<string, ServiceResponse>,
-  masters: Map<string, MasterResponse>,
+  masters: Map<string, MasterViewResponse>,
   locations: Map<string, LocationResponse>,
 ) {
   // Phase 1: Build all WebScheduleDTOs

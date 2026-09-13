@@ -13,7 +13,9 @@ import type {
   VisitResponse,
   PaymentResponse,
   LocationResponse,
-  MasterResponse,
+  MasterViewResponse,
+  StaffResponse,
+  PositionResponse,
 } from '@memo/api-client';
 
 // ─── Domain types ─────────────────────────────────────────────────────────
@@ -218,42 +220,163 @@ export function createMockLocationResponse(
   };
 }
 
-// ─── MasterResponse (API shape) ─────────────────────────────────────────
+// ─── MasterViewResponse (read-only /masters view, GH #266) ────────────────
+// The view returns ACTING masters only (masters.is_active = true), so there is
+// no `archived` and no `position` field — positions live on the staff card
+// (StaffResponse). Consumers no longer client-filter by archived (S2: an
+// archived master simply leaves the list server-side).
 
-export const mockMasterResponse: MasterResponse = {
+export const mockMasterResponse: MasterViewResponse = {
   id: 'm1',
   first_name: 'Ольга',
   last_name: 'Середа',
   color: '#5B8C7A',
-  position: 'мастер',
   specialty: 'живопись',
   avatar_url: 'https://example.com/avatar.jpg',
-  archived: false,
   sort_order: 0,
   created_at: '2024-01-15T10:00:00Z',
   updated_at: '2024-06-01T12:00:00Z',
 };
 
-export const mockMasterResponseArchived: MasterResponse = {
+/** A second acting master (distinct color) — for multi-row view assertions. */
+export const mockMasterResponse2: MasterViewResponse = {
   id: 'm2',
   first_name: 'Юлия',
   last_name: 'Большакова',
   color: '#6B7E9C',
-  position: 'мастер',
   specialty: 'керамика',
   avatar_url: null,
-  archived: true,
   sort_order: 1,
   created_at: '2024-01-10T10:00:00Z',
   updated_at: '2024-05-01T12:00:00Z',
 };
 
-/** Factory for creating MasterResponse objects with overrides. */
+/** Factory for creating MasterViewResponse objects with overrides. */
 export function createMockMasterResponse(
-  overrides: Partial<MasterResponse> = {},
-): MasterResponse {
+  overrides: Partial<MasterViewResponse> = {},
+): MasterViewResponse {
   return {
     ...mockMasterResponse,
+    ...overrides,
+  };
+}
+
+// ─── StaffResponse (composite staff card, GH #266 «Сотрудники» screen) ────
+// `archived` = the PERSON flag (staff.is_active inverted); `master.archived` =
+// the schedule flag (masters.is_active inverted) — three independent flags D3.
+// `has_user` drives the «Архивировать учётку» dismissal-checkbox visibility (D6).
+
+export const mockStaffResponse: StaffResponse = {
+  id: 'm1',
+  first_name: 'Ольга',
+  last_name: 'Середа',
+  avatar_url: 'https://example.com/avatar.jpg',
+  sort_order: 0,
+  master: {
+    specialty: 'живопись',
+    color: '#5B8C7A',
+    archived: false,
+    created_at: '2024-01-15T10:00:00Z',
+    updated_at: '2024-06-01T12:00:00Z',
+  },
+  position_ids: ['master'],
+  has_user: false,
+  archived: false,
+  created_at: '2024-01-15T10:00:00Z',
+  updated_at: '2024-06-01T12:00:00Z',
+};
+
+export const mockStaffResponseArchived: StaffResponse = {
+  id: 'm2',
+  first_name: 'Юлия',
+  last_name: 'Большакова',
+  avatar_url: null,
+  sort_order: 1,
+  master: {
+    specialty: 'керамика',
+    color: '#6B7E9C',
+    archived: true,
+    created_at: '2024-01-10T10:00:00Z',
+    updated_at: '2024-05-01T12:00:00Z',
+  },
+  position_ids: ['master'],
+  has_user: true,
+  archived: true,
+  created_at: '2024-01-10T10:00:00Z',
+  updated_at: '2024-05-01T12:00:00Z',
+};
+
+/** A staff card WITHOUT a master section (e.g. СММ) — S1: invisible in /masters. */
+export const mockStaffResponseNoMaster: StaffResponse = {
+  id: 's-smm',
+  first_name: 'Светлана',
+  last_name: 'СММова',
+  avatar_url: null,
+  sort_order: 9,
+  master: null,
+  position_ids: ['smm'],
+  has_user: false,
+  archived: false,
+  created_at: '2024-02-01T10:00:00Z',
+  updated_at: '2024-02-01T10:00:00Z',
+};
+
+/** Factory for creating StaffResponse objects with overrides. */
+export function createMockStaffResponse(
+  overrides: Partial<StaffResponse> = {},
+): StaffResponse {
+  return {
+    ...mockStaffResponse,
+    ...overrides,
+  };
+}
+
+// ─── PositionResponse (positions dictionary, GH #266 D4) ──────────────────
+// The seed dictionary: built-ins «master»/«admin» carry FIXED string ids and
+// is_system (title editable, deletion forbidden server-side), the
+// user-defined «СММ» is a plain deletable row. Consumers: StaffTable (id →
+// title cells), StaffModal (checkboxes), and the /positions directory screen.
+
+/** Built-in «master» — fixed id, is_system, title freely editable (D4). */
+export const mockPositionMaster: PositionResponse = {
+  id: 'master',
+  title: 'Мастер',
+  is_system: true,
+  created_at: '2024-01-01T10:00:00Z',
+  updated_at: '2024-01-01T10:00:00Z',
+};
+
+/** Built-in «admin» — the second fixed anchor (D4). */
+export const mockPositionAdmin: PositionResponse = {
+  id: 'admin',
+  title: 'Администратор',
+  is_system: true,
+  created_at: '2024-01-01T10:00:00Z',
+  updated_at: '2024-01-01T10:00:00Z',
+};
+
+/** User-defined «СММ» — seed row with a free lifecycle (uuid ids in real data). */
+export const mockPositionSmm: PositionResponse = {
+  id: 'smm',
+  title: 'СММ',
+  is_system: false,
+  created_at: '2024-01-01T10:00:00Z',
+  updated_at: '2024-01-01T10:00:00Z',
+};
+
+/** The whole seed dictionary — the shape /positions/all returns. */
+export const mockPositions: PositionResponse[] = [
+  mockPositionMaster,
+  mockPositionAdmin,
+  mockPositionSmm,
+];
+
+/** Factory for creating PositionResponse objects with overrides. */
+export function createMockPositionResponse(
+  overrides: Partial<PositionResponse> = {},
+): PositionResponse {
+  return {
+    ...mockPositionSmm,
     ...overrides,
   };
 }

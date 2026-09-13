@@ -26,9 +26,8 @@ class TestBookingFlow:
         assert resp.status_code == 404, f"Expected 404, got {resp.status_code}"
 
         # Step 2: Create prerequisites + record with phone (client auto-created)
-        master = api_client.post("/api/v1/masters", json={
-            "first_name": "Анна", "last_name": "Иванова",
-            "color": "#5B8C7A", "position": "мастер", "specialty": "живопись",
+        master = api_client.post("/api/v1/staff", json={
+            "first_name": "Анна", "last_name": "Иванова", "master": {"specialty": "живопись", "color": "#5B8C7A"},
         }).json()
         service = api_client.post("/api/v1/services", json={
             "title": "Картина маслом", "description": "Мастер-класс",
@@ -287,9 +286,8 @@ class TestCapacityFlow:
         client = create_client()
 
         # Create activity with capacity=2
-        master = api_client.post("/api/v1/masters", json={
-            "first_name": "Мастер", "last_name": "Тест",
-            "color": "#5B8C7A", "position": "стажёр", "specialty": "акварель",
+        master = api_client.post("/api/v1/staff", json={
+            "first_name": "Мастер", "last_name": "Тест", "master": {"specialty": "акварель", "color": "#5B8C7A"},
         }).json()
         service = api_client.post("/api/v1/services", json={
             "title": "Акварель", "description": "Тест",

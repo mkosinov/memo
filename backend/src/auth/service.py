@@ -336,7 +336,7 @@ class AuthService:
             id=user.id,
             phone=user.phone,
             role=user.role,
-            master_id=user.master_id,
+            staff_id=user.staff_id,
             permissions=ROLE_PERMISSIONS.get(user.role, frozenset()),
         )
 

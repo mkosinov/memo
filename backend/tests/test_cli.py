@@ -42,7 +42,7 @@ async def db_manager():
 class TestCreateUser:
     async def test_inserts_user_with_hashed_trimmed_password(self, db_manager: DBManager) -> None:
         """create_user stores the trimmed phone and a hash of the trimmed
-        password; master linking stays None (sqladmin's job, §2.9)."""
+        password; staff-card linking stays None (sqladmin's job, §2.9)."""
         from src.cli import create_user
 
         async with db_manager.async_session() as session:
@@ -51,7 +51,7 @@ class TestCreateUser:
 
         assert user.phone == "+79990000099"
         assert user.role == "admin"
-        assert user.master_id is None
+        assert user.staff_id is None
 
         async with db_manager.async_session() as session:
             stored = (await session.execute(select(User))).scalar_one()
@@ -153,7 +153,7 @@ class TestMain:
         assert "+79990000077" in capsys.readouterr().out
         conn = sqlite3.connect(db_path)
         try:
-            rows = conn.execute("SELECT phone, role, master_id, is_active FROM users").fetchall()
+            rows = conn.execute("SELECT phone, role, staff_id, is_active FROM users").fetchall()
         finally:
             conn.close()
         assert rows == [("+79990000077", "master", None, 1)]

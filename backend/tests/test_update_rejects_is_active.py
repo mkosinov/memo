@@ -18,12 +18,9 @@ import pytest
 pytestmark = pytest.mark.api
 
 # ─── Creation payloads (the non-is_active personal/scalar fields) ─────────────
-MASTER_CREATE = {
+STAFF_CREATE = {
     "first_name": "Active",
     "last_name": "Master",
-    "color": "#5B8C7A",
-    "position": "мастер",
-    "specialty": "живопись",
 }
 
 LOCATION_CREATE = {
@@ -65,10 +62,10 @@ class TestPutRejectsIsActive:
     """PUT {entity}/{id} with ``is_active`` in the body → 422 (#178)."""
 
     def test_put_master_rejects_is_active(self, api_client) -> None:
-        master_id = api_client.post("/api/v1/masters", json=MASTER_CREATE).json()["id"]
+        master_id = api_client.post("/api/v1/staff", json=STAFF_CREATE).json()["id"]
         resp = api_client.put(
-            f"/api/v1/masters/{master_id}",
-            json={**MASTER_CREATE, "is_active": True},
+            f"/api/v1/staff/{master_id}",
+            json={**STAFF_CREATE, "is_active": True},
         )
         assert resp.status_code == 422, f"Expected 422, got {resp.status_code}: {resp.text}"
 
@@ -114,9 +111,9 @@ class TestPatchRejectsIsActive:
     """PATCH {entity}/{id} with ``is_active`` in the body → 422 (#178)."""
 
     def test_patch_master_rejects_is_active(self, api_client) -> None:
-        master_id = api_client.post("/api/v1/masters", json=MASTER_CREATE).json()["id"]
+        master_id = api_client.post("/api/v1/staff", json=STAFF_CREATE).json()["id"]
         resp = api_client.patch(
-            f"/api/v1/masters/{master_id}", json={"is_active": True}
+            f"/api/v1/staff/{master_id}", json={"is_active": True}
         )
         assert resp.status_code == 422, f"Expected 422, got {resp.status_code}: {resp.text}"
 

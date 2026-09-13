@@ -1,8 +1,17 @@
 import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
 import {
-  MasterResponseSchema,
-  type MasterResponse,
+  StaffResponseSchema,
+  type StaffResponse,
+  StaffCreateSchema,
+  StaffUpdateSchema,
+  StaffPatchSchema,
+  PositionResponseSchema,
+  PositionCreateSchema,
+  PositionUpdateSchema,
+  PositionPatchSchema,
+  MasterViewResponseSchema,
+  type MasterViewResponse,
   LocationResponseSchema,
   type LocationResponse,
   TagResponseSchema,
@@ -30,7 +39,7 @@ import {
   PaymentResponseSchema,
   type PaymentResponse,
   TariffCreateSchema,
-  MasterUpdateSchema,
+  StaffArchiveRequestSchema,
   MaterialResponseSchema,
   MaterialUpdateSchema,
   ServiceCreateSchema,
@@ -46,57 +55,398 @@ import {
   type RecordView,
   AuthMeSchema,
   UserSettingsCreateSchema,
+  UserSettingsResponseSchema,
 } from './schemas';
 import backendFixtures from './__fixtures__/backend-responses.json';
 
-// ─── MasterResponse ────────────────────────────────────────────────────────
+// ─── StaffResponse (GH #266 — composite staff card) ─────────────────────────
 
-const validMaster = {
-  id: 'master-1',
-  first_name: 'Анна',
-  last_name: 'Иванова',
-  color: '#FF6B6B',
-  position: 'мастер',
-  specialty: 'живопись',
-  avatar_url: 'https://example.com/avatar.jpg',
+const validStaffMasterSection = {
+  specialty: 'живопись, керамика',
+  color: '#5B8C7A',
   archived: false,
   created_at: '2024-01-15T10:00:00Z',
   updated_at: '2024-06-01T12:00:00Z',
 };
 
-describe('MasterResponseSchema', () => {
-  it('parses a valid master response', () => {
-    const result = MasterResponseSchema.parse(validMaster);
-    expect(result.id).toBe('master-1');
+const validStaff = {
+  id: '5f8a1c2d-0001-4000-8000-000000000001',
+  first_name: 'Анна',
+  last_name: 'Иванова',
+  avatar_url: 'https://example.com/avatar.jpg',
+  sort_order: 0,
+  master: validStaffMasterSection,
+  position_ids: ['master', '5f8a1c2d-0007-4000-8000-000000000007'],
+  has_user: false, // T8 Gap B: no linked account row (backend always emits it)
+  archived: false,
+  created_at: '2024-01-15T10:00:00Z',
+  updated_at: '2024-06-01T12:00:00Z',
+};
+
+describe('StaffResponseSchema', () => {
+  it('parses a valid staff card with master section and positions', () => {
+    const result = StaffResponseSchema.parse(validStaff);
+    expect(result.id).toBe(validStaff.id);
     expect(result.first_name).toBe('Анна');
-    expect(result.last_name).toBe('Иванова');
-    expect(result.color).toBe('#FF6B6B');
-    expect(result.position).toBe('мастер');
-    expect(result.specialty).toBe('живопись');
-    expect(result.avatar_url).toBe('https://example.com/avatar.jpg');
+    expect(result.master?.specialty).toBe('живопись, керамика');
+    expect(result.master?.color).toBe('#5B8C7A');
+    expect(result.master?.archived).toBe(false);
+    expect(result.position_ids).toEqual(['master', '5f8a1c2d-0007-4000-8000-000000000007']);
     expect(result.archived).toBe(false);
   });
 
-  it('parses master with nullable avatar_url', () => {
-    const data = { ...validMaster, avatar_url: null };
-    const result = MasterResponseSchema.parse(data);
+  it('parses a card WITHOUT master section (master: null — SMM person, S1)', () => {
+    const result = StaffResponseSchema.parse({ ...validStaff, master: null });
+    expect(result.master).toBeNull();
+    expect(result.position_ids).toEqual(['master', '5f8a1c2d-0007-4000-8000-000000000007']);
+    expect(result.archived).toBe(false);
+  });
+
+  it('parses nullable avatar_url', () => {
+    const result = StaffResponseSchema.parse({ ...validStaff, avatar_url: null });
+    expect(result.avatar_url).toBeNull();
+  });
+
+  it('person archive and master archive are independent (D3)', () => {
+    // Person archived, master still acting — the штатное «уволен, досиживает» case.
+    const result = StaffResponseSchema.parse({
+      ...validStaff,
+      archived: true,
+      master: { ...validStaffMasterSection, archived: false },
+    });
+    expect(result.archived).toBe(true);
+    expect(result.master?.archived).toBe(false);
+  });
+
+  it('rejects missing required field', () => {
+    const { first_name, ...without } = validStaff;
+    expect(() => StaffResponseSchema.parse(without)).toThrow();
+  });
+
+  it('requires sort_order (backend always serializes it)', () => {
+    const { sort_order: _sort, ...without } = validStaff;
+    expect(() => StaffResponseSchema.parse(without)).toThrow();
+  });
+
+  it('serializes archived, never is_active (backend excludes the column, #207)', () => {
+    // Response schemas are non-strict by convention (stray keys are dropped);
+    // the CONTRACT is that the backend never emits is_active — pinned by the
+    // fixtures parity test below.
+    const result = StaffResponseSchema.parse({ ...validStaff, is_active: true });
+    expect(result).not.toHaveProperty('is_active');
+    expect(result.archived).toBe(false);
+  });
+
+  it('requires has_user (T8 Gap B: «Архивировать учётку» checkbox visibility)', () => {
+    const result = StaffResponseSchema.parse({ ...validStaff, has_user: true });
+    expect(result.has_user).toBe(true);
+  });
+
+  it('has_user false for a card without account', () => {
+    const result = StaffResponseSchema.parse({ ...validStaff, has_user: false });
+    expect(result.has_user).toBe(false);
+  });
+
+  it('has_user is required — missing field throws (backend always emits it)', () => {
+    const { has_user: _h, ...without } = { ...validStaff, has_user: true };
+    expect(() => StaffResponseSchema.parse(without)).toThrow();
+  });
+});
+
+// ─── StaffCreate (GH #266 D5/D6 — master block, positions, account flag) ────
+
+describe('StaffCreateSchema', () => {
+  it('parses a full canonical create payload (master section + positions + account)', () => {
+    const result = StaffCreateSchema.parse({
+      first_name: 'Анна',
+      last_name: 'Иванова',
+      avatar_url: null,
+      sort_order: 0,
+      master: { specialty: 'живопись', color: '#5B8C7A' },
+      position_ids: ['master'],
+      create_user: { phone: '+79991234567', password: 'secret123' },
+    });
+    expect(result.master?.specialty).toBe('живопись');
+    expect(result.create_user).toEqual({ phone: '+79991234567', password: 'secret123' });
+  });
+
+  it('defaults: no master, no positions, no account (plain SMM person)', () => {
+    const result = StaffCreateSchema.parse({ first_name: 'Иван', last_name: 'Петров' });
+    expect(result.master).toBeNull();
+    expect(result.position_ids).toEqual([]);
+    expect(result.create_user).toBe(false);
+    expect(result.avatar_url).toBeNull();
+    expect(result.sort_order).toBe(0);
+  });
+
+  it('accepts create_user: false explicitly', () => {
+    const result = StaffCreateSchema.parse({ first_name: 'И', last_name: 'П', create_user: false });
+    expect(result.create_user).toBe(false);
+  });
+
+  it('rejects create_user: true (backend expects a section object or false, never bare true)', () => {
+    expect(() =>
+      StaffCreateSchema.parse({ first_name: 'И', last_name: 'П', create_user: true }),
+    ).toThrow();
+  });
+
+  it('master section deliberately accepts empty strings (service-level SPECIALTY_REQUIRED/COLOR_REQUIRED)', () => {
+    const result = StaffCreateSchema.parse({
+      first_name: 'И',
+      last_name: 'П',
+      master: { specialty: '', color: '' },
+    });
+    expect(result.master?.specialty).toBe('');
+  });
+
+  it('rejects a stray is_active (backend extra="forbid")', () => {
+    expect(() =>
+      StaffCreateSchema.parse({ first_name: 'И', last_name: 'П', is_active: true }),
+    ).toThrow();
+  });
+
+  it('rejects unknown fields in master section (extra="forbid")', () => {
+    expect(() =>
+      StaffCreateSchema.parse({
+        first_name: 'И',
+        last_name: 'П',
+        master: { specialty: 'живопись', color: '#5B8C7A', no_such: true },
+      }),
+    ).toThrow();
+  });
+
+  it('master section accepts optional archived (T8 Gap A: archive via upsert)', () => {
+    const result = StaffCreateSchema.parse({
+      first_name: 'И',
+      last_name: 'П',
+      master: { specialty: 'живопись', color: '#5B8C7A', archived: true },
+    });
+    expect(result.master?.archived).toBe(true);
+  });
+
+  it('master section archived defaults to undefined (None = don\'t touch the flag)', () => {
+    const result = StaffCreateSchema.parse({
+      first_name: 'И',
+      last_name: 'П',
+      master: { specialty: 'живопись', color: '#5B8C7A' },
+    });
+    expect(result.master?.archived).toBeUndefined();
+  });
+});
+
+// ─── StaffUpdate / StaffPatch (PUT full / PATCH three-state master) ─────────
+
+describe('StaffUpdateSchema', () => {
+  it('accepts a full canonical update payload (card + sections replace)', () => {
+    const result = StaffUpdateSchema.parse({
+      first_name: 'Пётр',
+      last_name: 'Иванов',
+      avatar_url: null,
+      sort_order: 2,
+      master: { specialty: 'керамика', color: '#AABBCC' },
+      position_ids: ['admin'],
+    });
+    expect(result.master?.specialty).toBe('керамика');
+    expect(result.position_ids).toEqual(['admin']);
+  });
+
+  it('master: null removes the section (D7 — blocked by activities server-side)', () => {
+    const result = StaffUpdateSchema.parse({ first_name: 'П', last_name: 'И', master: null });
+    expect(result.master).toBeNull();
+  });
+
+  it('has NO create_user (create-only flag, backend StaffUpdate)', () => {
+    expect(() =>
+      StaffUpdateSchema.parse({
+        first_name: 'П',
+        last_name: 'И',
+        create_user: { phone: '+79991234567', password: 'x' },
+      }),
+    ).toThrow();
+  });
+
+  it('rejects a stray is_active (backend extra="forbid")', () => {
+    expect(() =>
+      StaffUpdateSchema.parse({ first_name: 'П', last_name: 'И', is_active: true }),
+    ).toThrow();
+  });
+});
+
+describe('StaffPatchSchema', () => {
+  it('accepts a partial payload (only sent keys)', () => {
+    const result = StaffPatchSchema.parse({ first_name: 'Пётр' });
+    expect(result.first_name).toBe('Пётр');
+    expect(result.last_name).toBeUndefined();
+    expect(result.master).toBeUndefined();
+    expect(result.position_ids).toBeUndefined();
+  });
+
+  it('master is three-state: absent = keep, null = remove, payload = upsert', () => {
+    expect(StaffPatchSchema.parse({}).master).toBeUndefined();
+    expect(StaffPatchSchema.parse({ master: null }).master).toBeNull();
+    expect(
+      StaffPatchSchema.parse({ master: { specialty: 'с', color: '#111111' } }).master,
+    ).toEqual({ specialty: 'с', color: '#111111' });
+  });
+});
+
+// ─── MasterViewResponse (GH #266 D8 — read-only /masters view) ──────────────
+
+const validMasterView = {
+  id: '5f8a1c2d-0001-4000-8000-000000000001', // = staff_id
+  first_name: 'Анна',
+  last_name: 'Иванова',
+  specialty: 'живопись',
+  color: '#FF6B6B',
+  avatar_url: 'https://example.com/avatar.jpg',
+  sort_order: 0,
+  created_at: '2024-01-15T10:00:00Z',
+  updated_at: '2024-06-01T12:00:00Z',
+};
+
+describe('MasterViewResponseSchema', () => {
+  it('parses a valid acting-master view row', () => {
+    const result: MasterViewResponse = MasterViewResponseSchema.parse(validMasterView);
+    expect(result.id).toBe(validMasterView.id);
+    expect(result.specialty).toBe('живопись');
+    expect(result.sort_order).toBe(0);
+  });
+
+  it('parses nullable avatar_url', () => {
+    const result = MasterViewResponseSchema.parse({ ...validMasterView, avatar_url: null });
     expect(result.avatar_url).toBeNull();
   });
 
   it('rejects missing required field', () => {
-    const { first_name, ...without } = validMaster;
-    expect(() => MasterResponseSchema.parse(without)).toThrow();
+    const { specialty: _specialty, ...without } = validMasterView;
+    expect(() => MasterViewResponseSchema.parse(without)).toThrow();
   });
 
-  it('parses master with sort_order', () => {
-    const data = { ...validMaster, sort_order: 3 };
-    const result = MasterResponseSchema.parse(data);
-    expect(result.sort_order).toBe(3);
+  it('view carries NO archived and NO position (acting masters only, D8)', () => {
+    // Response schemas are non-strict by convention (stray keys are dropped);
+    // the CONTRACT is that the backend never emits these fields.
+    const result = MasterViewResponseSchema.parse({
+      ...validMasterView,
+      archived: false,
+      position: 'мастер',
+    });
+    expect(result).not.toHaveProperty('archived');
+    expect(result).not.toHaveProperty('position');
+  });
+});
+
+// ─── PositionResponse (GH #266 D4 — positions dictionary) ───────────────────
+
+const validPosition = {
+  id: 'master', // built-ins carry fixed string ids; user-defined get uuids
+  title: 'Мастер',
+  is_system: true,
+  created_at: '2024-01-15T10:00:00Z',
+  updated_at: '2024-06-01T12:00:00Z',
+};
+
+describe('PositionResponseSchema', () => {
+  it('parses a built-in system position (fixed string id)', () => {
+    const result = PositionResponseSchema.parse(validPosition);
+    expect(result.id).toBe('master');
+    expect(result.title).toBe('Мастер');
+    expect(result.is_system).toBe(true);
   });
 
-  it('defaults sort_order to undefined when absent', () => {
-    const result = MasterResponseSchema.parse(validMaster);
-    expect(result.sort_order).toBeUndefined();
+  it('parses a user-defined position (uuid id, is_system false)', () => {
+    const result = PositionResponseSchema.parse({
+      ...validPosition,
+      id: '5f8a1c2d-0009-4000-8000-000000000009',
+      title: 'СММ',
+      is_system: false,
+    });
+    expect(result.is_system).toBe(false);
+  });
+
+  it('rejects missing required field', () => {
+    const { title: _title, ...without } = validPosition;
+    expect(() => PositionResponseSchema.parse(without)).toThrow();
+  });
+
+  it('dictionary has NO archived field (not archive-aware)', () => {
+    // Response schemas are non-strict by convention (stray keys are dropped);
+    // the CONTRACT is that the backend never emits archived for positions.
+    const result = PositionResponseSchema.parse({ ...validPosition, archived: false });
+    expect(result).not.toHaveProperty('archived');
+  });
+});
+
+// ─── PositionCreate / PositionUpdate / PositionPatch (D4 write contract) ────
+
+describe('PositionCreateSchema', () => {
+  it('parses a canonical title payload', () => {
+    const result = PositionCreateSchema.parse({ title: 'СММ-менеджер' });
+    expect(result.title).toBe('СММ-менеджер');
+  });
+
+  it('rejects an empty title (bounds: 1–100)', () => {
+    expect(() => PositionCreateSchema.parse({ title: '' })).toThrow();
+  });
+
+  it('rejects a title longer than 100 chars (bounds: 1–100)', () => {
+    expect(() => PositionCreateSchema.parse({ title: 'д'.repeat(101) })).toThrow();
+  });
+
+  it('accepts exactly 100 chars (upper bound inclusive)', () => {
+    expect(PositionCreateSchema.parse({ title: 'д'.repeat(100) }).title).toHaveLength(100);
+  });
+
+  it('rejects a missing title', () => {
+    expect(() => PositionCreateSchema.parse({})).toThrow();
+  });
+
+  it('rejects a non-string title', () => {
+    expect(() => PositionCreateSchema.parse({ title: 42 })).toThrow();
+  });
+
+  it('rejects unknown fields (strict — backend extra="forbid")', () => {
+    expect(() => PositionCreateSchema.parse({ title: 'СММ', is_system: false })).toThrow();
+  });
+});
+
+describe('PositionUpdateSchema', () => {
+  it('accepts a full canonical update payload (title)', () => {
+    const result = PositionUpdateSchema.parse({ title: 'Ведущий мастер' });
+    expect(result.title).toBe('Ведущий мастер');
+  });
+
+  it('enforces the same title bounds 1–100 as create', () => {
+    expect(() => PositionUpdateSchema.parse({ title: '' })).toThrow();
+    expect(() => PositionUpdateSchema.parse({ title: 'д'.repeat(101) })).toThrow();
+  });
+
+  it('rejects a stray is_active (backend 422 parity, extra="forbid")', () => {
+    expect(() => PositionUpdateSchema.parse({ title: 'СММ', is_active: true })).toThrow();
+  });
+
+  it('rejects update missing required title (PUT = full replace)', () => {
+    expect(() => PositionUpdateSchema.parse({})).toThrow();
+  });
+});
+
+describe('PositionPatchSchema', () => {
+  it('accepts a partial payload (only title)', () => {
+    const result = PositionPatchSchema.parse({ title: 'SMM-менеджер' });
+    expect(result.title).toBe('SMM-менеджер');
+  });
+
+  it('accepts an empty object (change nothing)', () => {
+    const result = PositionPatchSchema.parse({});
+    expect(result.title).toBeUndefined();
+  });
+
+  it('still enforces title bounds on a partial payload', () => {
+    expect(() => PositionPatchSchema.parse({ title: '' })).toThrow();
+    expect(() => PositionPatchSchema.parse({ title: 'д'.repeat(101) })).toThrow();
+  });
+
+  it('keeps strictness on partial (unknown fields still rejected)', () => {
+    expect(() => PositionPatchSchema.parse({ is_system: true })).toThrow();
   });
 });
 
@@ -818,9 +1168,14 @@ describe('PaymentResponseSchema', () => {
 // ─── Type exports compile check ────────────────────────────────────────────
 
 describe('Type exports', () => {
-  it('MasterResponse is a valid type', () => {
-    const m: MasterResponse = validMaster;
-    expect(m.first_name).toBe('Анна');
+  it('StaffResponse is a valid type', () => {
+    const s: StaffResponse = validStaff;
+    expect(s.first_name).toBe('Анна');
+  });
+
+  it('MasterViewResponse is a valid type', () => {
+    const m: MasterViewResponse = validMasterView;
+    expect(m.specialty).toBe('живопись');
   });
 
   it('LocationResponse is a valid type', () => {
@@ -1164,31 +1519,23 @@ describe('LocationUpdateSchema', () => {
   });
 });
 
-// ─── MasterUpdateSchema ────────────────────────────────────────────────────
+// ─── StaffUpdateSchema — stray is_active (kept alongside the block above) ───
 
-describe('MasterUpdateSchema', () => {
-  it('accepts a full canonical update payload', () => {
-    const result = MasterUpdateSchema.parse({
-      first_name: 'Пётр',
-      last_name: 'Иванов',
-      color: '#AABBCC',
-      position: 'мастер',
-      specialty: 'живопись',
-    });
-    expect(result.first_name).toBe('Пётр');
+describe('StaffArchiveRequestSchema', () => {
+  it('accepts the D6 checkbox body', () => {
+    const result = StaffArchiveRequestSchema.parse({ archive_master: false, archive_user: true });
+    expect(result.archive_master).toBe(false);
+    expect(result.archive_user).toBe(true);
   });
 
-  it('rejects a stray is_active (backend 422 parity, extra="forbid")', () => {
-    expect(() =>
-      MasterUpdateSchema.parse({
-        first_name: 'Пётр',
-        last_name: 'Иванов',
-        color: '#AABBCC',
-        position: 'мастер',
-        specialty: 'живопись',
-        is_active: true,
-      }),
-    ).toThrow();
+  it('both checkboxes default to true (preselected dialog, D6)', () => {
+    const result = StaffArchiveRequestSchema.parse({});
+    expect(result.archive_master).toBe(true);
+    expect(result.archive_user).toBe(true);
+  });
+
+  it('rejects unknown fields (backend extra="forbid")', () => {
+    expect(() => StaffArchiveRequestSchema.parse({ archive_master: true, x: 1 })).toThrow();
   });
 });
 
@@ -1216,7 +1563,7 @@ describe('MaterialUpdateSchema', () => {
 
 describe('archived-inversion parity with backend responses (spec #207 §16)', () => {
   it.each([
-    ['master', MasterResponseSchema],
+    ['staff', StaffResponseSchema],
     ['location', LocationResponseSchema],
     ['service', ServiceResponseSchema],
     ['material', MaterialResponseSchema],
@@ -1231,7 +1578,7 @@ describe('archived-inversion parity with backend responses (spec #207 §16)', ()
   });
 
   it.each([
-    ['master', MasterResponseSchema],
+    ['staff', StaffResponseSchema],
     ['location', LocationResponseSchema],
     ['service', ServiceResponseSchema],
     ['material', MaterialResponseSchema],
@@ -1286,5 +1633,43 @@ describe('UserSettingsCreateSchema (GH #247 §3.8)', () => {
     const parsed = UserSettingsCreateSchema.parse({ theme: 'dark' });
     expect(parsed.theme).toBe('dark');
     expect(parsed.user_id).toBeUndefined();
+  });
+});
+
+// ─── UserSettings rename parity (GH #266 T8 Gap C) ──────────────────────────
+// Backend already serializes column_order_staff (masters → staff, #266);
+// the client schema must follow. Required-ness is unchanged: response
+// requires the field, create defaults to [].
+
+describe('UserSettings column rename (GH #266: column_order_masters → column_order_staff)', () => {
+  const validSettings = {
+    id: '5f8a1c2d-0008-4000-8000-000000000008',
+    user_id: '5f8a1c2d-0009-4000-8000-000000000009',
+    theme: 'light',
+    language: 'ru',
+    column_order_staff: ['5f8a1c2d-0001-4000-8000-000000000001'],
+    column_order_locations: ['5f8a1c2d-0002-4000-8000-000000000002'],
+    created_at: '2024-01-15T10:00:00Z',
+    updated_at: '2024-06-01T12:00:00Z',
+  };
+
+  it('UserSettingsResponseSchema parses column_order_staff (required)', () => {
+    const parsed = UserSettingsResponseSchema.parse(validSettings);
+    expect(parsed.column_order_staff).toEqual(['5f8a1c2d-0001-4000-8000-000000000001']);
+  });
+
+  it('UserSettingsResponseSchema rejects the old column_order_masters key (missing required field)', () => {
+    const { column_order_staff: _c, ...withOld } = validSettings;
+    (withOld as Record<string, unknown>).column_order_masters = [];
+    expect(() => UserSettingsResponseSchema.parse(withOld)).toThrow();
+  });
+
+  it('UserSettingsCreateSchema accepts column_order_staff, defaults to []', () => {
+    const parsed = UserSettingsCreateSchema.parse({ theme: 'dark' });
+    expect(parsed.column_order_staff).toEqual([]);
+    const withCols = UserSettingsCreateSchema.parse({
+      column_order_staff: ['id-1'],
+    });
+    expect(withCols.column_order_staff).toEqual(['id-1']);
   });
 });

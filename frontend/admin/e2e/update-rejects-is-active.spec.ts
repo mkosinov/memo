@@ -1,13 +1,15 @@
 /**
- * S6 — PUT/PUT rejects `is_active` across all 5 entities (#207 §12,
- * auto-closes #178).
+ * PUT/PATCH rejects `is_active` across all 5 entities (#207 §12,
+ * auto-closes #178). GH #266: the master entity case moved to the STAFF card
+ * (/masters is read-only — its PUT now 405s); the staff composite PUT/PATCH
+ * carry the same extra="forbid" guarantee.
  *
  * The Update schemas carry `extra="forbid"` and no is_active field, so a
  * PUT with is_active must fail with 422 — archive/restore is ONLY via the
  * dedicated POST endpoints. Per entity: seed → PUT with is_active → 422 →
  * row unchanged (API + DB) → POST /archive still works (200 archived:true)
- * → cleanup. The UI never sends is_active (MasterModal's PUT payload is a
- * typed MasterUpdate — tsc fails on stray fields), so this is an
+ * → cleanup. The UI never sends is_active (StaffModal's PUT payload is a
+ * typed StaffUpdate — tsc fails on stray fields), so this is an
  * API-level scenario with DB verification.
  */
 import { test, expect } from './fixtures/test';
@@ -25,15 +27,21 @@ const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
 /** Full PUT for each entity (every non-is_active field the schema accepts). */
 function putPayload(entity: string, seed: Record<string, any>): Record<string, unknown> {
   switch (entity) {
-    case 'masters':
+    case 'staff':
+      // GH #266: the staff card PUT is the composite shape (person + master
+      // section + position_ids). is_active is still rejected (extra="forbid").
+      // The master section is reduced to its INPUT shape {specialty, color} —
+      // the response shape's archived/timestamps would trip .strict() and mask
+      // the is_active violation under test.
       return {
         first_name: seed.first_name,
         last_name: seed.last_name,
-        color: seed.color,
-        position: seed.position,
-        specialty: seed.specialty,
         avatar_url: seed.avatar_url ?? '',
         sort_order: seed.sort_order ?? 0,
+        master: seed.master
+          ? { specialty: seed.master.specialty, color: seed.master.color }
+          : null,
+        position_ids: seed.position_ids ?? [],
         is_active: false,
       };
     case 'locations':
@@ -90,10 +98,11 @@ interface EntityCase {
 
 const ENTITY_CASES: EntityCase[] = [
   {
-    entity: 'masters',
-    table: 'masters',
+    // GH #266: master mutations moved to the staff card; /masters is read-only.
+    entity: 'staff',
+    table: 'staff',
     seed: (request) => createTestMaster(request),
-    cleanup: (request, id) => cleanup(request, `/api/v1/masters/${id}`),
+    cleanup: (request, id) => cleanup(request, `/api/v1/staff/${id}`),
   },
   {
     entity: 'locations',

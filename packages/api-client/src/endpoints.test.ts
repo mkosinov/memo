@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { z } from 'zod';
-import { getMasters, getMaster, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, deleteActivity, getWebPhotos, getPhotos, getClientsPaged, getRecords, getRecordsView, getClientById, getPayments, getPaymentTotals, createRecord, updateRecord, deleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, getClientByPhone, updateVisitStatus, getTags, createService, updateService, deleteService, createLocation, updateLocation, deleteLocation, getClientsWithStats, updateClient, patchClient, reorderMasters, reorderLocations, patchMaster, patchLocation, patchMaterial, patchService, patchUserSettings, getUserSettings, createUserSettings, updateUserSettings, getMaterials, getTag, getVisitors, deleteMaster, deleteMaterial, deleteClient, archiveMaster, restoreMaster, resolveDeleteMaster, archiveLocation, restoreLocation, resolveDeleteLocation, archiveService, restoreService, resolveDeleteService, archiveMaterial, restoreMaterial, resolveDeleteMaterial, archiveClient, restoreClient, resolveDeleteClient, resolveDeleteRecord, getAllMasters, getAllLocations, getAllServices, getAllMaterials, getAllTags, login, logout, getMe } from './endpoints';
+import { getMasters, getAllMasters, getStaff, getStaffById, getAllStaff, createStaff, updateStaff, patchStaff, archiveStaff, restoreStaff, deleteStaff, resolveDeleteStaff, getPositions, getAllPositions, getPosition, createPosition, updatePosition, patchPosition, deletePosition, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, deleteActivity, getWebPhotos, getPhotos, getClientsPaged, getRecords, getRecordsView, getClientById, getPayments, getPaymentTotals, createRecord, updateRecord, deleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, getClientByPhone, updateVisitStatus, getTags, createService, updateService, deleteService, createLocation, updateLocation, deleteLocation, getClientsWithStats, updateClient, patchClient, reorderLocations, patchLocation, patchMaterial, patchService, patchUserSettings, getUserSettings, createUserSettings, updateUserSettings, getMaterials, getTag, getVisitors, deleteMaterial, deleteClient, archiveLocation, restoreLocation, resolveDeleteLocation, archiveService, restoreService, resolveDeleteService, archiveMaterial, restoreMaterial, resolveDeleteMaterial, archiveClient, restoreClient, resolveDeleteClient, resolveDeleteRecord, getAllLocations, getAllServices, getAllMaterials, getAllTags, login, logout, getMe } from './endpoints';
 import { ServiceCreateSchema, LocationCreateSchema, ActivityResponseSchema, PhotoListResponseSchema, ClientListResponseSchema, ClientResponseSchema, RecordViewListResponseSchema, type ServiceUpdate, type LocationUpdate, type ClientUpdate } from './schemas';
 
 // Mock the api function from client
@@ -24,7 +24,7 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
-// ─── Masters ────────────────────────────────────────────────────────────────
+// ─── Masters (read-only view, GH #266 D8) ──────────────────────────────────
 
 describe('getMasters', () => {
   it('calls /api/v1/masters without params', async () => {
@@ -40,26 +40,202 @@ describe('getMasters', () => {
   });
 });
 
-describe('getMaster', () => {
-  it('calls /api/v1/masters/:id with master schema', async () => {
-    vi.mocked(api).mockResolvedValue({ id: 'm-1' });
-    await getMaster('m-1');
-    expect(api).toHaveBeenCalledWith('/api/v1/masters/m-1', expect.anything());
+// ─── Staff (GH #266 — full directory CRUD) ─────────────────────────────────
+
+describe('getStaff', () => {
+  it('calls /api/v1/staff without params', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
+    await getStaff();
+    expect(api).toHaveBeenCalledWith('/api/v1/staff', expect.anything());
+  });
+
+  it('calls /api/v1/staff with pagination + status + q params', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 2, per_page: 50 });
+    await getStaff({ page: 2, per_page: 50, status: 'archived', q: 'ив' });
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/staff?page=2&per_page=50&status=archived&q=%D0%B8%D0%B2',
+      expect.anything(),
+    );
+  });
+
+  it('calls /api/v1/staff with sort params (whitelist: name/specialty/color/avatar/status)', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
+    await getStaff({ sort_by: 'specialty', sort_order: 'desc' });
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/staff?sort_by=specialty&sort_order=desc',
+      expect.anything(),
+    );
   });
 });
 
-describe('reorderMasters', () => {
-  it('calls PUT /api/v1/masters/reorder with ids', async () => {
+describe('getAllStaff', () => {
+  it('calls /api/v1/staff/all with status param', async () => {
     vi.mocked(api).mockResolvedValue([]);
-    await reorderMasters(['m2', 'm1', 'm3']);
-    expect(api).toHaveBeenCalledWith(
-      '/api/v1/masters/reorder',
-      expect.anything(),
-      {
-        method: 'PUT',
-        body: JSON.stringify({ ids: ['m2', 'm1', 'm3'] }),
-      },
-    );
+    await getAllStaff({ status: 'all' });
+    expect(api).toHaveBeenCalledWith('/api/v1/staff/all?status=all', expect.anything());
+  });
+});
+
+describe('getStaffById', () => {
+  it('calls /api/v1/staff/:id (including archived people)', async () => {
+    vi.mocked(api).mockResolvedValue({ id: 'st-1' });
+    await getStaffById('st-1');
+    expect(api).toHaveBeenCalledWith('/api/v1/staff/st-1', expect.anything());
+  });
+});
+
+describe('createStaff', () => {
+  it('calls POST /api/v1/staff with master block, position_ids and create_user', async () => {
+    vi.mocked(api).mockResolvedValue({ id: 'st-1' });
+    await createStaff({
+      first_name: 'Анна',
+      last_name: 'Иванова',
+      master: { specialty: 'живопись', color: '#5B8C7A' },
+      position_ids: ['master'],
+      create_user: { phone: '+79991234567', password: 'secret123' },
+    });
+    expect(api).toHaveBeenCalledWith('/api/v1/staff', expect.anything(), {
+      method: 'POST',
+      body: JSON.stringify({
+        first_name: 'Анна',
+        last_name: 'Иванова',
+        master: { specialty: 'живопись', color: '#5B8C7A' },
+        position_ids: ['master'],
+        create_user: { phone: '+79991234567', password: 'secret123' },
+      }),
+    });
+  });
+});
+
+describe('updateStaff', () => {
+  it('calls PUT /api/v1/staff/:id with full card body', async () => {
+    vi.mocked(api).mockResolvedValue({ id: 'st-1' });
+    await updateStaff('st-1', {
+      first_name: 'Анна',
+      last_name: 'Петрова',
+      master: { specialty: 'керамика', color: '#AABBCC' },
+      position_ids: [],
+    });
+    expect(api).toHaveBeenCalledWith('/api/v1/staff/st-1', expect.anything(), {
+      method: 'PUT',
+      body: JSON.stringify({
+        first_name: 'Анна',
+        last_name: 'Петрова',
+        master: { specialty: 'керамика', color: '#AABBCC' },
+        position_ids: [],
+      }),
+    });
+  });
+});
+
+describe('patchStaff', () => {
+  it('calls PATCH /api/v1/staff/:id with partial body', async () => {
+    vi.mocked(api).mockResolvedValue({ id: 'st-1' });
+    await patchStaff('st-1', { first_name: 'Пётр' });
+    expect(api).toHaveBeenCalledWith('/api/v1/staff/st-1', expect.anything(), {
+      method: 'PATCH',
+      body: JSON.stringify({ first_name: 'Пётр' }),
+    });
+  });
+});
+
+describe('archiveStaff', () => {
+  it('calls POST /api/v1/staff/:id/archive with D6 checkbox body', async () => {
+    vi.mocked(api).mockResolvedValue({ id: 'st-1', archived: true });
+    const result = await archiveStaff('st-1', { archive_master: false, archive_user: true });
+    expect(api).toHaveBeenCalledWith('/api/v1/staff/st-1/archive', expect.anything(), {
+      method: 'POST',
+      body: JSON.stringify({ archive_master: false, archive_user: true }),
+    });
+    expect(result.id).toBe('st-1');
+  });
+
+  it('NO-BODY call: checkboxes omitted = consent to preselected defaults (D6)', async () => {
+    vi.mocked(api).mockResolvedValue({ id: 'st-1', archived: true });
+    await archiveStaff('st-1');
+    // No checkboxes passed → no body key at all: the request init carries ONLY
+    // the method, letting the backend apply both defaults (true/true).
+    expect(api).toHaveBeenCalledWith('/api/v1/staff/st-1/archive', expect.anything(), {
+      method: 'POST',
+    });
+  });
+});
+
+describe('restoreStaff', () => {
+  it('calls POST /api/v1/staff/:id/restore with no body', async () => {
+    vi.mocked(api).mockResolvedValue({ id: 'st-1', archived: false });
+    await restoreStaff('st-1');
+    expect(api).toHaveBeenCalledWith('/api/v1/staff/st-1/restore', expect.anything(), {
+      method: 'POST',
+    });
+  });
+});
+
+// ─── Positions (GH #266 D4 — dictionary CRUD) ──────────────────────────────
+
+describe('getPositions', () => {
+  it('calls /api/v1/positions without params', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
+    await getPositions();
+    expect(api).toHaveBeenCalledWith('/api/v1/positions', expect.anything());
+  });
+});
+
+describe('getAllPositions', () => {
+  it('calls /api/v1/positions/all (no params — plain dictionary)', async () => {
+    vi.mocked(api).mockResolvedValue([]);
+    await getAllPositions();
+    expect(api).toHaveBeenCalledWith('/api/v1/positions/all', expect.anything());
+  });
+});
+
+describe('getPosition', () => {
+  it('calls /api/v1/positions/:id', async () => {
+    vi.mocked(api).mockResolvedValue({ id: 'master' });
+    await getPosition('master');
+    expect(api).toHaveBeenCalledWith('/api/v1/positions/master', expect.anything());
+  });
+});
+
+describe('createPosition', () => {
+  it('calls POST /api/v1/positions with title', async () => {
+    vi.mocked(api).mockResolvedValue({ id: 'p-1' });
+    await createPosition({ title: 'СММ' });
+    expect(api).toHaveBeenCalledWith('/api/v1/positions', expect.anything(), {
+      method: 'POST',
+      body: JSON.stringify({ title: 'СММ' }),
+    });
+  });
+});
+
+describe('updatePosition', () => {
+  it('calls PUT /api/v1/positions/:id with title', async () => {
+    vi.mocked(api).mockResolvedValue({ id: 'master' });
+    await updatePosition('master', { title: 'Ведущий мастер' });
+    expect(api).toHaveBeenCalledWith('/api/v1/positions/master', expect.anything(), {
+      method: 'PUT',
+      body: JSON.stringify({ title: 'Ведущий мастер' }),
+    });
+  });
+});
+
+describe('patchPosition', () => {
+  it('calls PATCH /api/v1/positions/:id with partial body', async () => {
+    vi.mocked(api).mockResolvedValue({ id: 'p-1' });
+    await patchPosition('p-1', { title: 'SMM-менеджер' });
+    expect(api).toHaveBeenCalledWith('/api/v1/positions/p-1', expect.anything(), {
+      method: 'PATCH',
+      body: JSON.stringify({ title: 'SMM-менеджер' }),
+    });
+  });
+});
+
+describe('deletePosition', () => {
+  it('calls DELETE /api/v1/positions/:id with no body (system ones 422 server-side)', async () => {
+    await deletePosition('p-1');
+    expect(api).toHaveBeenCalledWith('/api/v1/positions/p-1', expect.anything(), {
+      method: 'DELETE',
+    });
   });
 });
 
@@ -1020,21 +1196,6 @@ describe('deleteLocation', () => {
   });
 });
 
-describe('patchMaster', () => {
-  it('calls PATCH /api/v1/masters/:id with partial body', async () => {
-    vi.mocked(api).mockResolvedValue({ id: 'm-1' });
-    await patchMaster('m-1', { first_name: 'Анна' });
-    expect(api).toHaveBeenCalledWith(
-      '/api/v1/masters/m-1',
-      expect.anything(),
-      expect.objectContaining({
-        method: 'PATCH',
-        body: JSON.stringify({ first_name: 'Анна' }),
-      }),
-    );
-  });
-});
-
 describe('patchLocation', () => {
   it('calls PATCH /api/v1/locations/:id with partial body', async () => {
     vi.mocked(api).mockResolvedValue({ id: 'l-1' });
@@ -1209,13 +1370,13 @@ describe('getVisitors', () => {
   });
 });
 
-// ─── Deletes — masters / materials / clients (GH #207) ──────────────────────
+// ─── Deletes — staff / materials / clients (GH #207; staff replaces masters, #266) ──
 
-describe('deleteMaster', () => {
-  it('calls DELETE /api/v1/masters/:id with no body (dry-run / instant path)', async () => {
+describe('deleteStaff', () => {
+  it('calls DELETE /api/v1/staff/:id with no body (dry-run / instant path)', async () => {
     vi.mocked(api).mockResolvedValue(undefined);
-    await deleteMaster('m-1');
-    expect(api).toHaveBeenCalledWith('/api/v1/masters/m-1', expect.anything(), {
+    await deleteStaff('st-1');
+    expect(api).toHaveBeenCalledWith('/api/v1/staff/st-1', expect.anything(), {
       method: 'DELETE',
     });
   });
@@ -1243,33 +1404,11 @@ describe('deleteClient', () => {
 
 // ─── Archive / restore / resolveDelete (GH #207) ────────────────────────────
 
-describe('archiveMaster', () => {
-  it('calls POST /api/v1/masters/:id/archive and returns the parsed entity', async () => {
-    vi.mocked(api).mockResolvedValue({ id: 'm-1', archived: true });
-    const result = await archiveMaster('m-1');
-    expect(api).toHaveBeenCalledWith('/api/v1/masters/m-1/archive', expect.anything(), {
-      method: 'POST',
-    });
-    expect(result).toEqual({ id: 'm-1', archived: true });
-  });
-});
-
-describe('restoreMaster', () => {
-  it('calls POST /api/v1/masters/:id/restore and returns the parsed entity', async () => {
-    vi.mocked(api).mockResolvedValue({ id: 'm-1', archived: false });
-    const result = await restoreMaster('m-1');
-    expect(api).toHaveBeenCalledWith('/api/v1/masters/m-1/restore', expect.anything(), {
-      method: 'POST',
-    });
-    expect(result).toEqual({ id: 'm-1', archived: false });
-  });
-});
-
-describe('resolveDeleteMaster', () => {
-  it('calls DELETE /api/v1/masters/:id with resolutions body (execute path)', async () => {
+describe('resolveDeleteStaff', () => {
+  it('calls DELETE /api/v1/staff/:id with resolutions body (execute path)', async () => {
     vi.mocked(api).mockResolvedValue(undefined);
-    await resolveDeleteMaster('m-1', {});
-    expect(api).toHaveBeenCalledWith('/api/v1/masters/m-1', expect.anything(), {
+    await resolveDeleteStaff('st-1', {});
+    expect(api).toHaveBeenCalledWith('/api/v1/staff/st-1', expect.anything(), {
       method: 'DELETE',
       body: JSON.stringify({ resolutions: {} }),
     });

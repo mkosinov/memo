@@ -86,17 +86,16 @@ describe('Schedule pipeline integration: enrichment from API to ActivityCard', (
   beforeEach(() => {
     vi.clearAllMocks();
 
-    // Mock masters API (raw MasterResponse, not transformed Master)
+    // Mock masters API (raw MasterViewResponse — acting-only view, GH #266)
     vi.mocked(getAllMasters).mockResolvedValue([
       {
         id: 'm1',
         first_name: 'Ольга',
         last_name: 'Середа',
         color: '#5B8C7A',
-        position: 'мастер',
         specialty: 'живопись',
         avatar_url: null,
-        archived: false,
+        sort_order: 0,
         created_at: '2024-01-01T00:00:00Z',
         updated_at: '2024-01-01T00:00:00Z',
       },
@@ -233,10 +232,9 @@ describe('Schedule pipeline: nullable visitor_id impact', () => {
         first_name: 'Ольга',
         last_name: 'Середа',
         color: '#5B8C7A',
-        position: 'мастер',
         specialty: 'живопись',
         avatar_url: null,
-        archived: false,
+        sort_order: 0,
         created_at: '2024-01-01T00:00:00Z',
         updated_at: '2024-01-01T00:00:00Z',
       },

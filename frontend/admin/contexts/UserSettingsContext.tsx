@@ -81,7 +81,11 @@ export function UserSettingsProvider({ children }: { children: React.ReactNode }
           const remoteSettings: UserSettings = {
             theme: remote.theme as 'light' | 'dark',
             language: remote.language as 'ru' | 'en',
-            columnOrderMasters: remote.column_order_masters,
+            // GH #266 Gap C: wire field renamed column_order_masters →
+            // column_order_staff (migration step 7). Internal name stays
+            // `columnOrderMasters` — the schedule UI «Мастер» column term
+            // is unchanged (D2); only the persisted key moved.
+            columnOrderMasters: remote.column_order_staff,
             columnOrderLocations: remote.column_order_locations,
           };
           if (mountedRef.current) {
@@ -97,13 +101,14 @@ export function UserSettingsProvider({ children }: { children: React.ReactNode }
                 user_id: user?.id,
                 theme: DEFAULT_SETTINGS.theme,
                 language: DEFAULT_SETTINGS.language,
-                column_order_masters: DEFAULT_SETTINGS.columnOrderMasters,
+                // GH #266 Gap C: renamed wire key (column_order_staff).
+                column_order_staff: DEFAULT_SETTINGS.columnOrderMasters,
                 column_order_locations: DEFAULT_SETTINGS.columnOrderLocations,
               });
               const createdSettings: UserSettings = {
                 theme: created.theme as 'light' | 'dark',
                 language: created.language as 'ru' | 'en',
-                columnOrderMasters: created.column_order_masters,
+                columnOrderMasters: created.column_order_staff,
                 columnOrderLocations: created.column_order_locations,
               };
               if (mountedRef.current) {
@@ -135,7 +140,7 @@ export function UserSettingsProvider({ children }: { children: React.ReactNode }
         const apiPartial: Record<string, unknown> = {};
         if (partial.theme !== undefined) apiPartial.theme = partial.theme;
         if (partial.language !== undefined) apiPartial.language = partial.language;
-        if (partial.columnOrderMasters !== undefined) apiPartial.column_order_masters = partial.columnOrderMasters;
+        if (partial.columnOrderMasters !== undefined) apiPartial.column_order_staff = partial.columnOrderMasters;
         if (partial.columnOrderLocations !== undefined) apiPartial.column_order_locations = partial.columnOrderLocations;
         patchUserSettings(apiPartial).catch(() => {});
       }).catch(() => {});

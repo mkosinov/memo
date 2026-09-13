@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { buildWebSchedule, type WebScheduleDTO } from '../buildSchedule';
-import type { ActivityResponse, ServiceResponse, MasterResponse, LocationResponse } from '@memo/api-client';
+import type { ActivityResponse, ServiceResponse, MasterViewResponse, LocationResponse } from '@memo/api-client';
 
 function makeActivity(overrides?: Partial<ActivityResponse>): ActivityResponse {
   return {
@@ -46,7 +46,7 @@ function makeService(overrides?: Partial<ServiceResponse>): ServiceResponse {
   } as ServiceResponse;
 }
 
-function makeMaster(overrides?: Partial<MasterResponse>): MasterResponse {
+function makeMaster(overrides?: Partial<MasterViewResponse>): MasterViewResponse {
   return {
     id: 'master-1',
     first_name: 'Ольга',
@@ -59,7 +59,7 @@ function makeMaster(overrides?: Partial<MasterResponse>): MasterResponse {
     created_at: '2026-01-01T00:00:00',
     updated_at: '2026-01-01T00:00:00',
     ...overrides,
-  } as MasterResponse;
+  } as MasterViewResponse;
 }
 
 function makeLocation(overrides?: Partial<LocationResponse>): LocationResponse {
@@ -219,7 +219,7 @@ describe('buildWebSchedule', () => {
   it('skips activity when master is missing', () => {
     const activities = [makeActivity()];
     const services = new Map([['service-1', makeService()]]);
-    const masters = new Map<string, MasterResponse>();
+    const masters = new Map<string, MasterViewResponse>();
     const locations = new Map([['loc-1', makeLocation()]]);
 
     const result = buildWebSchedule(activities, services, masters, locations);

@@ -32,8 +32,8 @@ describe('WARMUP_ROUTES', () => {
     expect(shellRoutes).toEqual([...WARMUP_ROUTES]);
   });
 
-  it('has exactly 9 routes, all starting with "/"', () => {
-    expect(WARMUP_ROUTES).toHaveLength(9);
+  it('has exactly 10 routes, all starting with "/"', () => {
+    expect(WARMUP_ROUTES).toHaveLength(10);
     for (const route of WARMUP_ROUTES) {
       expect(route.startsWith('/')).toBe(true);
     }

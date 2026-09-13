@@ -83,6 +83,20 @@ test.describe('Sidebar Navigation', () => {
     await expect(page.locator('table')).toBeVisible();
   });
 
+  test('navigates to Positions page via Справочники submenu', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForSelector('[data-testid="menubar"]', { timeout: 10_000 });
+
+    await page.locator('button[aria-label="Справочники"]').click();
+    await page.waitForTimeout(300);
+
+    // GH #266 T9: the positions dictionary joined the directories.
+    await page.locator('a:has-text("Должности")').first().click();
+
+    await page.waitForSelector('h1:has-text("Управление должностями")', { timeout: 15_000 });
+    await expect(page.locator('table')).toBeVisible();
+  });
+
   test('navigates to Photos page via sidebar', async ({ page }) => {
     await page.goto('/');
     await page.waitForSelector('[data-testid="menubar"]', { timeout: 10_000 });

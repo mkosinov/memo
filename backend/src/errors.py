@@ -46,6 +46,14 @@ class ErrorCode(str, Enum):
     # 422 — password policy violation (GH #247 auth, spec §5)
     PASSWORD_POLICY = "PASSWORD_POLICY"
 
+    # 404 / 422 — staff restructuring (GH #266 «Контракты ошибок»)
+    STAFF_NOT_FOUND = "STAFF_NOT_FOUND"          # 404 — /staff/{id} отсутствует
+    MASTER_NOT_ACTIVE = "MASTER_NOT_ACTIVE"      # 422 — занятие на неактивного мастера (TOCTOU-защита)
+    POSITION_NOT_FOUND = "POSITION_NOT_FOUND"    # 404 — /positions/{id} отсутствует
+    POSITION_IS_SYSTEM = "POSITION_IS_SYSTEM"    # 422 — удаление/системное изменение встроенной должности
+    SPECIALTY_REQUIRED = "SPECIALTY_REQUIRED"    # 422 — мастер-секция без специальности
+    COLOR_REQUIRED = "COLOR_REQUIRED"            # 422 — мастер-секция без цвета
+
     # 422 — validation / integrity
     VALIDATION_ERROR = "VALIDATION_ERROR"
     INTEGRITY_VIOLATION = "INTEGRITY_VIOLATION"
@@ -89,6 +97,12 @@ ERROR_MESSAGES: dict[ErrorCode, str] = {
     ErrorCode.AUTH_UNAUTHORIZED: "Требуется вход в систему",
     ErrorCode.AUTH_LOCKED_OUT: "Слишком много неудачных попыток входа",
     ErrorCode.PASSWORD_POLICY: "Пароль: от 8 до 64 символов, пробелы по краям обрезаются",
+    ErrorCode.STAFF_NOT_FOUND: "Сотрудник не найден",
+    ErrorCode.MASTER_NOT_ACTIVE: "Мастер недоступен для расписания",
+    ErrorCode.POSITION_NOT_FOUND: "Должность не найдена",
+    ErrorCode.POSITION_IS_SYSTEM: "Встроенная должность не удаляется",
+    ErrorCode.SPECIALTY_REQUIRED: "Укажите специальность мастера",
+    ErrorCode.COLOR_REQUIRED: "Укажите цвет мастера",
     ErrorCode.VALIDATION_ERROR: "Проверьте правильность заполнения полей",
     ErrorCode.INTEGRITY_VIOLATION: "Нарушение целостности данных",
     ErrorCode.INTERNAL_ERROR: "Ошибка сервера",

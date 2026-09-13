@@ -36,7 +36,7 @@ import {
   mockLocationResponse,
   mockLocationResponseArchived,
   mockMasterResponse,
-  mockMasterResponseArchived,
+  mockMasterResponse2,
 } from './helpers/mockData';
 import type { ServiceResponse } from '@memo/api-client';
 
@@ -232,7 +232,7 @@ describe('BookingFilters — selection data via canonical-key queries (GH #213 T
     vi.mocked(getAllServices).mockResolvedValue([ACTIVE_SERVICE, ARCHIVED_SERVICE]);
     vi.mocked(getAllMasters).mockResolvedValue([
       mockMasterResponse,
-      mockMasterResponseArchived,
+      mockMasterResponse2,
     ]);
   });
 
@@ -287,10 +287,13 @@ describe('BookingFilters — selection data via canonical-key queries (GH #213 T
     expect(screen.queryByRole('option', { name: 'Акварель' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByTestId('combobox-option-clear'));
 
-    // Master labels are «Фамилия Имя» — archived Юлия Большакова stays out.
+    // Master labels are «Фамилия Имя». GH #266: the /masters view is
+    // acting-only SERVER-side (no client `!archived` filter — the view shape
+    // has no `archived`; S2 archived masters simply leave the list), so both
+    // masters the server returned are present.
     fireEvent.click(screen.getByLabelText('Фильтр по мастеру'));
     await screen.findByRole('option', { name: 'Середа Ольга' }, OPTION_WAIT);
-    expect(screen.queryByRole('option', { name: 'Большакова Юлия' })).not.toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Большакова Юлия' })).toBeInTheDocument();
     fireEvent.click(screen.getByTestId('combobox-option-clear'));
   });
 

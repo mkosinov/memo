@@ -116,24 +116,27 @@ class TestAuthedUser:
             id="user-1",
             phone="+79990000001",
             role=UserRole.ADMIN.value,
-            master_id=None,
+            staff_id=None,
             permissions=frozenset({"*"}),
         )
         assert user.id == "user-1"
         assert user.phone == "+79990000001"
         assert user.role == "admin"
-        assert user.master_id is None
+        assert user.staff_id is None
         assert user.permissions == frozenset({"*"})
+        # D10: no master_id attr remains on the principal — the wire key
+        # survives only in the /auth/me response builder.
+        assert not hasattr(user, "master_id")
 
     def test_master_user_with_linked_profile(self) -> None:
         user = AuthedUser(
             id="user-2",
             phone="+79990000002",
             role=UserRole.MASTER.value,
-            master_id="master-9",
+            staff_id="staff-9",
             permissions=frozenset(SPEC_MASTER_PERMISSIONS),
         )
-        assert user.master_id == "master-9"
+        assert user.staff_id == "staff-9"
         assert has_permission(user.permissions, "visits:write") is True
 
 
@@ -185,8 +188,9 @@ class TestPublicRoutes:
         # "(site + gallery)" names exactly this surface.
         assert PUBLIC_ROUTES == frozenset({
             ("GET", "/api/v1/health"),
+            # GH #266 D8: /masters is read-only acting masters; GET /{id}
+            # was removed with the mutations (allowlist entry gone too).
             ("GET", "/api/v1/masters"),
-            ("GET", "/api/v1/masters/{id}"),
             ("GET", "/api/v1/locations"),
             ("GET", "/api/v1/locations/{id}"),
             ("GET", "/api/v1/services"),

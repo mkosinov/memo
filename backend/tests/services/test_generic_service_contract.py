@@ -821,7 +821,7 @@ class TestGenericServiceUpdateContract:
 # Client — via ``_archive_params``. MasterService overrides archive/restore to
 # additionally cascade the linked ``users.is_active`` (spec §4.2, Change 3);
 # this contract only locks the master row's ``is_active`` flip — the user
-# cascade has its own dedicated tests at the API route level (test_api_masters).
+# cascade has its own dedicated tests at the API route level (test_api_staff).
 class TestArchiveServiceArchiveRestore:
     @pytest.mark.parametrize("service_cls,cfg", _archive_params())
     async def test_archive_flips_is_active_false(

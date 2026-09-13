@@ -60,7 +60,10 @@ export function BookingFilters({
 
   const locationList = locations.filter(l => !l.archived);
   const serviceList = services.filter(s => !s.archived);
-  const masterList = masters.filter(m => !m.archived);
+  // GH #266: the /masters view is acting-only server-side (masters.is_active
+  // = true) — no client `!archived` filter (the view shape carries no
+  // `archived`; an archived master simply leaves the list, S2).
+  const masterList = masters;
 
   // GH #214 Task 8 (§6 rows 10-12): option arrays per spec §6.2 — queries,
   // keys and the `!archived` filters above are unchanged; only the control

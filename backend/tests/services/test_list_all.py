@@ -18,10 +18,10 @@ from sqlalchemy import asc, insert
 
 from src.domain.errors import BareListLimitExceededError
 from src.models.enums import ArchiveStatus
-from src.models.master import Master
+from src.models.staff import Staff
 from src.models.tag import Tag
 from src.services.generic import BARE_LIST_MAX_ROWS
-from src.services.master import get_master_service
+from src.services.staff import get_staff_service
 from src.services.service import get_service_service
 from src.services.tag import get_tag_service
 
@@ -31,7 +31,7 @@ pytestmark = pytest.mark.asyncio
 # 1. returns full list, no envelope
 async def test_list_all_returns_all_rows(db_session, create_master):
     created = create_master()
-    result = await get_master_service().list_all(db_session)
+    result = await get_staff_service().list_all(db_session)
     assert isinstance(result, list)
     assert [m.id for m in result] == [created["id"]]
 
@@ -39,7 +39,7 @@ async def test_list_all_returns_all_rows(db_session, create_master):
 # 2. ArchiveService status filter parity
 async def test_list_all_status_filter(db_session, create_master):
     m = create_master()
-    svc = get_master_service()
+    svc = get_staff_service()
     await svc.archive(db_session, m["id"])  # ArchiveService.archive — generic.py:227
     assert await svc.list_all(db_session) == []
     assert len(await svc.list_all(db_session, status=ArchiveStatus.ALL)) == 1
@@ -50,8 +50,8 @@ async def test_list_all_status_filter(db_session, create_master):
 async def test_list_all_order_by(db_session, create_master):
     b = create_master(first_name="Boris")
     a = create_master(first_name="Anna")
-    result = await get_master_service().list_all(
-        db_session, order_by=[asc(Master.first_name)]
+    result = await get_staff_service().list_all(
+        db_session, order_by=[asc(Staff.first_name)]
     )
     ids = [m.id for m in result]
     assert ids.index(a["id"]) < ids.index(b["id"])

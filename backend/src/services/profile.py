@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING, cast
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
-from src.domain.errors import ProfileOwnerNotFoundError
+from src.domain.errors import ProfileNoStaffCardError, ProfileOwnerNotFoundError
 from src.models.master import Master
 from src.models.staff import Staff
 from src.models.user import User
@@ -230,6 +230,30 @@ class ProfileService:
         # Re-read the freshly written halves for the response (the ORM
         # objects are in the identity map — plain attribute reads suffice).
         return self._to_response(user, staff, master, profile)
+
+    @transactional
+    async def set_avatar(
+        self, db_session: AsyncSession, user_id: str, avatar_url: str
+    ) -> str | None:
+        """Write ``avatar_url`` onto the session user's staff card (T2).
+
+        Returns the card's PREVIOUS ``avatar_url`` so the router can
+        delete the replaced served file AFTER the commit (the DB write
+        and the disk cleanup never interleave mid-transaction). Raises
+        :class:`ProfileNoStaffCardError` (→ 422) when the user has no
+        live card — the portrait is card-bound, there is nothing to
+        attach it to. The decorator emits the existing ``staff`` SSE
+        entity on commit, exactly like ``update``.
+        """
+        _user, staff, _master, _profile = await self._context(
+            db_session, user_id
+        )
+        if staff is None:
+            raise ProfileNoStaffCardError(user_id)
+        old_url = staff.avatar_url
+        staff.avatar_url = avatar_url
+        await db_session.flush()
+        return old_url
 
     def _to_response(
         self,

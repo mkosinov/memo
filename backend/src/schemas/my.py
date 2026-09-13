@@ -46,6 +46,12 @@ class MyProfileResponse(BaseModel):
     registration_address: str | None = None
 
 
+class PortraitResponse(BaseModel):
+    """POST /my/portrait success body (GH #262 Task 2, spec §4)."""
+
+    avatar_url: str
+
+
 class MyProfileUpdate(BaseModel):
     """PUT body — only sent keys apply; ``null`` clears a nullable field.
 

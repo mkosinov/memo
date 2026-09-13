@@ -1,1 +1,3 @@
 memo.db
+# GH #262 — runtime avatar storage (FILES_DIR default ./files)
+files/

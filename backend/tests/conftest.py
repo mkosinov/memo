@@ -53,6 +53,13 @@ _TEST_DB_URL = f"sqlite+aiosqlite:///{_db_file.name}"
 os.environ["DATABASE_URL"] = _TEST_DB_URL
 os.environ["ENV_FILE"] = ".env.test"
 
+# GH #262 Task 2 — avatar files: a per-session temp FILES_DIR, set BEFORE
+# any src import (the session-scoped app fixture mounts StaticFiles from
+# settings once; FilesService itself re-reads settings.FILES_DIR at call
+# time, so unit tests may still monkeypatch it per test).
+_FILES_DIR = tempfile.mkdtemp(prefix="memo-files-")
+os.environ["FILES_DIR"] = _FILES_DIR
+
 # Path to backend root (where alembic.ini lives)
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 

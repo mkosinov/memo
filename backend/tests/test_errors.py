@@ -13,11 +13,11 @@ pytestmark = pytest.mark.pure_unit
 # ─── ErrorCode Enum ───────────────────────────────────────────────────────────
 
 class TestErrorCodeEnum:
-    """Verify ErrorCode has all 29 codes (18 base + 5 GH #247 auth + 6 GH #266 staff)."""
+    """Verify ErrorCode has all 31 codes (18 base + 5 GH #247 auth + 6 GH #266 staff + 2 GH #262 files)."""
 
     def test_has_all_29_codes(self):
-        """All 29 error codes are present (18 base + 5 auth + 6 staff #266)."""
-        assert len(ErrorCode) == 29
+        """All 31 error codes are present (base + auth + staff #266 + files #262)."""
+        assert len(ErrorCode) == 31
 
     def test_expected_codes_exist(self):
         """Every code from spec §5 (plus auth/staff additions) exists."""
@@ -59,6 +59,9 @@ class TestErrorCodeEnum:
             "POSITION_IS_SYSTEM",    # 422 — удаление встроенной должности
             "SPECIALTY_REQUIRED",    # 422 — мастер-секция без специальности
             "COLOR_REQUIRED",        # 422 — мастер-секция без цвета
+            # GH #262 Task 2 — avatar uploads (spec §3.4/§4)
+            "FILE_TOO_LARGE",        # 413 — over the 5 MB limit
+            "FILE_INVALID_TYPE",     # 415 — not JPEG/PNG/WebP
         }
         actual = {code.value for code in ErrorCode}
         assert actual == expected
@@ -121,8 +124,8 @@ class TestErrorMessages:
             assert code in ERROR_MESSAGES, f"Missing ERROR_MESSAGES entry for {code.value}"
 
     def test_total_count_matches(self):
-        """ERROR_MESSAGES has exactly 29 entries (one per ErrorCode)."""
-        assert len(ERROR_MESSAGES) == 29
+        """ERROR_MESSAGES has exactly 31 entries (one per ErrorCode)."""
+        assert len(ERROR_MESSAGES) == 31
 
     def test_all_values_are_strings(self):
         """Every message is a non-empty string."""

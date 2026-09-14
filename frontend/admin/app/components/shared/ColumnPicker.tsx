@@ -53,7 +53,7 @@ export function ColumnPicker({
       </button>
       {open && (
         <div
-          className="absolute right-0 top-full mt-1 z-10 rounded-lg border shadow-lg p-2 min-w-[180px]"
+          className="absolute right-0 top-full mt-1 z-[var(--z-base)] rounded-lg border shadow-lg p-2 min-w-[180px]"
           style={{
             borderColor: 'var(--line)',
             backgroundColor: 'var(--white)',

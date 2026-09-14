@@ -527,7 +527,7 @@ export function Menubar() {
   return (
     <aside
       data-testid="menubar"
-      className={`fixed left-0 top-0 h-full bg-sidebar z-30 transition-all duration-200 flex flex-col`}
+      className={`fixed left-0 top-0 h-full bg-sidebar z-[var(--z-sidebar)] transition-all duration-200 flex flex-col`}
       style={{
         width: sidebarCollapsed ? 'var(--sidebar-collapsed-w)' : 'var(--sidebar-w)',
         backgroundColor: 'var(--sidebar-bg)',

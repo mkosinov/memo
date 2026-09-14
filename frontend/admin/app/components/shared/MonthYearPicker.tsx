@@ -40,7 +40,7 @@ export function MonthYearPicker({ selectedMonth, selectedYear, onSelect, onClose
   return (
     <div
       ref={ref}
-      className="fixed z-50 bg-white border rounded-lg shadow-lg p-3 min-w-[200px]"
+      className="fixed z-[var(--z-popover)] bg-white border rounded-lg shadow-lg p-3 min-w-[200px]"
       style={{ borderColor: 'var(--line, #e5e7eb)', left: '12px', ...style }}
       data-testid="month-year-picker"
     >

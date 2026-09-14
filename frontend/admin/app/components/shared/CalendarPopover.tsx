@@ -122,7 +122,7 @@ export function CalendarPopover({
       role="dialog"
       aria-label="Календарь"
       data-testid="calendar-popover"
-      className="absolute top-full left-0 mt-1 rounded-lg border z-50 p-3"
+      className="absolute top-full left-0 mt-1 rounded-lg border z-[var(--z-popover)] p-3"
       style={{
         backgroundColor: 'var(--white)',
         borderColor: 'var(--line)',

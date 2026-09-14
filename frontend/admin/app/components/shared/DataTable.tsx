@@ -407,7 +407,7 @@ export function DataTable<T>({
                             role="menu"
                             data-testid={`dropdown-${keyValue}`}
                             onKeyDown={(e) => handleMenuKeyDown(e, keyValue)}
-                            className="absolute right-0 top-full mt-1 z-10 border rounded-lg shadow-lg py-1 min-w-[160px]"
+                            className="absolute right-0 top-full mt-1 z-[var(--z-base)] border rounded-lg shadow-lg py-1 min-w-[160px]"
                             style={{
                               borderColor: 'var(--line)',
                               backgroundColor: 'var(--white)',

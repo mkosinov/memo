@@ -120,7 +120,7 @@ export function OverlapPopover({
 
     const s: React.CSSProperties = {
       position: 'fixed',
-      zIndex: 120,
+      zIndex: 'var(--z-popover-stack)',
     };
 
     // Vertical: prefer below, flip above if no space
@@ -205,7 +205,7 @@ export function OverlapPopover({
         <button
           data-testid="overlap-popover-close"
           onClick={onClose}
-          className="absolute top-1 right-1 z-10 w-6 h-6 flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-500 hover:text-gray-700 transition-colors"
+          className="absolute top-1 right-1 z-[var(--z-base)] w-6 h-6 flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-500 hover:text-gray-700 transition-colors"
           aria-label="Close popover"
         >
           <svg width="12" height="12" viewBox="0 0 12 12" fill="none">

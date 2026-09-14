@@ -171,7 +171,7 @@ function DroppableSlot({ dayIndex, slotIndex, slotMinutes, isHour, isHalfHour, d
             border: '2px dashed rgba(0,77,86,0.3)',
             backgroundColor: `rgba(${stampGhostPreview.rgb.r}, ${stampGhostPreview.rgb.g}, ${stampGhostPreview.rgb.b}, 0.08)`,
             borderLeft: `3px solid ${stampGhostPreview.master.color}`,
-            zIndex: 25,
+            zIndex: 'var(--z-header)',
           }}
         >
           <div className="px-2 pt-1.5 pb-1">

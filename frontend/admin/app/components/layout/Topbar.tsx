@@ -162,7 +162,7 @@ export function Topbar() {
   return (
     <div
       data-testid="topbar"
-      className="sticky top-0 z-40 flex h-12 items-center gap-2 border-b px-3 justify-end"
+      className="sticky top-0 z-[var(--z-topbar)] flex h-12 items-center gap-2 border-b px-3 justify-end"
       style={{
         backgroundColor: 'var(--white)',
         borderColor: 'var(--line)',
@@ -272,7 +272,7 @@ export function Topbar() {
           {/* Dropdown menu */}
           {dropdownOpen && (
             <div
-              className="absolute top-full right-0 mt-1 min-w-[160px] rounded-lg border py-1 z-50"
+              className="absolute top-full right-0 mt-1 min-w-[160px] rounded-lg border py-1 z-[var(--z-popover)]"
               style={{
                 backgroundColor: 'var(--white)',
                 borderColor: 'var(--line)',
@@ -380,7 +380,7 @@ export function Topbar() {
 
         {zoomOpen && (
           <div
-            className="absolute top-full right-0 mt-1 min-w-[140px] rounded-lg border py-1 z-50"
+            className="absolute top-full right-0 mt-1 min-w-[140px] rounded-lg border py-1 z-[var(--z-popover)]"
             style={{
               backgroundColor: 'var(--white)',
               borderColor: 'var(--line)',

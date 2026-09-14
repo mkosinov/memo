@@ -140,7 +140,7 @@ export function FilterDropdown({
 
       {isOpen && (
         <div
-          className="absolute z-50 mt-1 min-w-[240px] bg-white border rounded-lg shadow-lg"
+          className="absolute z-[var(--z-popover)] mt-1 min-w-[240px] bg-white border rounded-lg shadow-lg"
           style={{ borderColor: 'var(--line, #e5e7eb)' }}
           data-testid="filter-dropdown"
         >

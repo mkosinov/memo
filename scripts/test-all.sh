@@ -68,6 +68,13 @@ source "$ROOT/scripts/lib/shard-helpers.sh"
 echo "  → cleaning up orphan processes on shard ports..."
 kill_port_orphans
 
+# ── Remove stale shard build dirs (unconditional) ─────────────────────────
+# Wipe BEFORE anything starts (spec §3.2: сироты → вайп → запуск) — every run
+# compiles shards from scratch, no chunks inherited across runs. Each shard
+# owns its .next-shard-N dir exclusively, so no port guard needed here
+# (unlike the default-.next wipe below, which is shared with the dev stack).
+wipe_shard_dirs
+
 # ── Remove stale Next.js build dir (port-guarded) ─────────────────────────
 # NEXT_PUBLIC_API_URL is baked into the Next.js client bundle at compile
 # time. A stale frontend/admin/.next from an earlier stack (e.g. dev stack
@@ -179,7 +186,7 @@ for i in $(seq 0 1); do
     SHARD_ID="$SHARD_NUM" \
     SHARD_PORT="$FRONTEND_PORT" \
     BACKEND_PORT="$BACKEND_PORT" \
-    TEST_DB_PATH="$SHARD_DB" \
+    TEST_DB_PATH="$ROOT/$SHARD_DB" \
     BACKEND_URL="$BACKEND_URL" \
     NEXT_PUBLIC_API_URL="$BACKEND_URL" \
       bash scripts/e2e-shard-start.sh

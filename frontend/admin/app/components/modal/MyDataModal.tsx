@@ -299,7 +299,7 @@ function MyDataForm({ profile, onClose }: { profile: MyProfile; onClose: () => v
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center" role="dialog" aria-modal="true">
+    <div className="fixed inset-0 z-[var(--z-popover)] flex items-center justify-center" role="dialog" aria-modal="true">
       <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={handleClose} />
       <Modal
         title="Мои данные"
@@ -498,7 +498,7 @@ function StatusCard({
   }, [onClose]);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center" role="dialog" aria-modal="true">
+    <div className="fixed inset-0 z-[var(--z-popover)] flex items-center justify-center" role="dialog" aria-modal="true">
       <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" />
       <div
         data-testid={testId}

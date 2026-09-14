@@ -214,7 +214,7 @@ export function UserMenu({ collapsed }: UserMenuProps) {
           aria-label="Меню пользователя"
           onKeyDown={handleMenuKeyDown}
           data-testid="user-menu-popup"
-          className="absolute bottom-full left-0 mb-2 z-50 w-56 rounded-xl shadow-lg border border-white/10 bg-sidebar p-1.5 space-y-0.5"
+          className="absolute bottom-full left-0 mb-2 z-[var(--z-popover)] w-56 rounded-xl shadow-lg border border-white/10 bg-sidebar p-1.5 space-y-0.5"
         >
           {/* 1. Theme slider (moved from the Menubar bottom row, §5.1).
               Stays open on toggle so the user sees the palette switch.

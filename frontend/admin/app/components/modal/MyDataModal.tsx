@@ -93,7 +93,14 @@ function FieldLabel({ htmlFor, label, required }: { htmlFor: string; label: stri
 function FieldError({ testId, error }: { testId: string; error?: string }) {
   if (!error) return null;
   return (
-    <span className="text-xs" style={{ color: 'var(--danger)' }} data-testid={testId}>
+    <span
+      className="text-xs"
+      style={{ color: 'var(--danger)' }}
+      // id = the input's aria-describedby target (PhotoModal/PasswordModal
+      // pattern) — fix-round issue 2.
+      id={testId}
+      data-testid={testId}
+    >
       {error}
     </span>
   );
@@ -218,6 +225,10 @@ function MyDataForm({ profile, onClose }: { profile: MyProfile; onClose: () => v
   }, [updateProfile, refresh, showToast]);
 
   const busy = updateProfile.isPending;
+  // Fix-round issue 4: BOTH portrait buttons disable while ANY portrait
+  // mutation is in flight — the upload (uploadPortrait) and the delete
+  // (updateProfile with avatar_url:null) share one busy flag.
+  const portraitBusy = busy || uploadPortrait.isPending;
 
   const renderField = (field: MyDataFieldConfig) => {
     const testId = `mydata-${field.key}`;
@@ -239,6 +250,7 @@ function MyDataForm({ profile, onClose }: { profile: MyProfile; onClose: () => v
               placeholder="гггг-мм-дд"
               className={inputClasses}
               style={inputStyle(error)}
+              aria-invalid={!!error}
               aria-describedby={error ? `${testId}-error` : undefined}
             />
             <button
@@ -338,7 +350,7 @@ function MyDataForm({ profile, onClose }: { profile: MyProfile; onClose: () => v
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  disabled={uploadPortrait.isPending}
+                  disabled={portraitBusy}
                   className="px-3 py-1.5 text-xs rounded-lg border transition-colors disabled:opacity-50"
                   style={{ borderColor: 'var(--line)', color: 'var(--ink)' }}
                 >
@@ -349,7 +361,8 @@ function MyDataForm({ profile, onClose }: { profile: MyProfile; onClose: () => v
                     type="button"
                     data-testid="mydata-portrait-delete"
                     onClick={() => void handleDeleteAvatar()}
-                    className="px-3 py-1.5 text-xs rounded-lg border transition-colors"
+                    disabled={portraitBusy}
+                    className="px-3 py-1.5 text-xs rounded-lg border transition-colors disabled:opacity-50"
                     style={{ borderColor: 'var(--danger)', color: 'var(--danger)' }}
                   >
                     Удалить
@@ -463,21 +476,75 @@ function MyDataForm({ profile, onClose }: { profile: MyProfile; onClose: () => v
 
 /* ── Modal shell — owns the profile query ─────────────────────────── */
 
+/** A small centred status card (loading / error) with the shared backdrop.
+ *  Both states are dismissible (fix-round issue 1): «Закрыть» → onClose and
+ *  Escape closes, so a failed GET never leaves a stuck «Загрузка...». */
+function StatusCard({
+  testId,
+  children,
+  onClose,
+}: {
+  testId: string;
+  children: React.ReactNode;
+  onClose?: () => void;
+}) {
+  useEffect(() => {
+    if (!onClose) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [onClose]);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center" role="dialog" aria-modal="true">
+      <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" />
+      <div
+        data-testid={testId}
+        className="relative bg-white rounded-xl shadow-2xl px-6 py-5 text-sm max-w-sm w-full mx-4 space-y-3"
+        style={{ backgroundColor: 'var(--white)', color: 'var(--ink-mid)' }}
+      >
+        {children}
+        {onClose && (
+          <div className="flex justify-end">
+            <button
+              type="button"
+              data-testid={`${testId}-close`}
+              onClick={onClose}
+              className="px-4 py-2 text-sm rounded-lg border transition-colors"
+              style={{ borderColor: 'var(--line)', color: 'var(--ink)' }}
+            >
+              Закрыть
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function MyDataModal({ onClose }: MyDataModalProps) {
-  const { data: profile } = useMyProfile();
+  const { data: profile, isError } = useMyProfile();
+
+  // Fix-round issue 1 (BLOCKER): a failed GET /my (401/500/network) used to
+  // fall through to a permanent, non-dismissible «Загрузка...». Render a
+  // dismissible error state instead.
+  if (isError) {
+    return (
+      <StatusCard testId="mydata-error" onClose={onClose}>
+        <p style={{ color: 'var(--ink)' }}>Не удалось загрузить данные. Попробуйте позже.</p>
+      </StatusCard>
+    );
+  }
 
   if (!profile) {
+    // Loading is transient (the query either resolves or errors), but it is
+    // still dismissible so a hung request can never trap the user.
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center" role="dialog" aria-modal="true">
-        <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" />
-        <div
-          data-testid="mydata-loading"
-          className="relative bg-white rounded-xl shadow-2xl px-6 py-4 text-sm"
-          style={{ backgroundColor: 'var(--white)', color: 'var(--ink-mid)' }}
-        >
-          Загрузка...
-        </div>
-      </div>
+      <StatusCard testId="mydata-loading" onClose={onClose}>
+        <p>Загрузка...</p>
+      </StatusCard>
     );
   }
 

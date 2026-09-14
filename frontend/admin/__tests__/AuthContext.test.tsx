@@ -278,5 +278,55 @@ describe('AuthProvider', () => {
       expect(screen.getByTestId('status')).toHaveTextContent('authenticated');
       expect(screen.getByTestId('user-id')).toHaveTextContent('user-uuid-1');
     });
+
+    // GH #262 T7 fix-round issue 3: two overlapping refresh() calls resolving
+    // OUT OF ORDER must not let the older snapshot overwrite the newer one.
+    it('an older refresh cannot overwrite a newer snapshot (out-of-order resolution)', async () => {
+      mockGetMe.mockResolvedValue(mockAuthMe);
+      renderAuth();
+      await waitFor(() => {
+        expect(screen.getByTestId('status')).toHaveTextContent('authenticated');
+      });
+
+      // Two controllable getMe responses: call #1 (older) and call #2 (newer).
+      let resolveFirst!: (v: unknown) => void;
+      let resolveSecond!: (v: unknown) => void;
+      const first = new Promise((r) => {
+        resolveFirst = r;
+      });
+      const second = new Promise((r) => {
+        resolveSecond = r;
+      });
+      mockGetMe
+        .mockReset()
+        .mockImplementationOnce(() => first as never)
+        .mockImplementationOnce(() => second as never);
+
+      // Fire two overlapping refreshes (both call getMe synchronously).
+      act(() => {
+        screen.getByTestId('do-refresh').click();
+        screen.getByTestId('do-refresh').click();
+      });
+
+      // The NEWER call resolves first → state becomes «Новая».
+      await act(async () => {
+        resolveSecond({
+          ...mockAuthMe,
+          master: { first_name: 'Новая', last_name: 'Ф', avatar_url: null },
+        });
+      });
+      // Then the OLDER (stale) call resolves → it must be ignored.
+      await act(async () => {
+        resolveFirst({
+          ...mockAuthMe,
+          master: { first_name: 'Старая', last_name: 'Ф', avatar_url: null },
+        });
+      });
+
+      // Final state = the LATER call's snapshot, not the stale earlier one.
+      await waitFor(() => {
+        expect(screen.getByTestId('master')).toHaveTextContent('Новая Ф');
+      });
+    });
   });
 });

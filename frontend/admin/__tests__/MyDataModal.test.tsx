@@ -10,7 +10,7 @@
  * row «Фото первой страницы паспорта — появится позже».
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
@@ -54,11 +54,20 @@ import {
 
 const PASSPORT_PHOTO_PLACEHOLDER = 'Фото первой страницы паспорта — появится позже';
 
-function renderModal(profile: MyProfile = mockMyProfileMaster, overrides: Partial<React.ComponentProps<typeof MyDataModal>> = {}) {
+function renderModal(
+  profile: MyProfile | 'error' = mockMyProfileMaster,
+  overrides: Partial<React.ComponentProps<typeof MyDataModal>> = {},
+) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
-  mockGetMyProfile.mockResolvedValue(profile);
+  if (profile === 'error') {
+    // Fix-round issue 1: a failed GET /my must render a dismissible error
+    // state, not a stuck «Загрузка...».
+    mockGetMyProfile.mockRejectedValue(new Error('server down'));
+  } else {
+    mockGetMyProfile.mockResolvedValue(profile);
+  }
   const onClose = overrides.onClose ?? vi.fn();
   return render(
     <QueryClientProvider client={queryClient}>
@@ -345,5 +354,170 @@ describe('MyDataModal — no-card mode (S6)', () => {
     );
     // Card names never travel in no-card mode.
     expect(mockUpdateMyProfile.mock.calls[0][0]).not.toHaveProperty('first_name');
+  });
+});
+
+// GH #262 T7 fix-round issue 1 (BLOCKER): a failed GET /my used to leave a
+// permanent, non-dismissible «Загрузка...». The modal must render an error
+// state with a «Закрыть» button wired to onClose; Escape closes too.
+describe('MyDataModal — GET error state (issue 1)', () => {
+  it('shows an error state when GET /my rejects (no dead-end «Загрузка...»)', async () => {
+    const onClose = vi.fn();
+    renderModal('error', { onClose });
+
+    expect(await screen.findByTestId('mydata-error')).toBeInTheDocument();
+    expect(screen.queryByTestId('mydata-loading')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('mydata-form')).not.toBeInTheDocument();
+  });
+
+  it('the error-state «Закрыть» button calls onClose', async () => {
+    const onClose = vi.fn();
+    renderModal('error', { onClose });
+
+    await screen.findByTestId('mydata-error');
+    fireEvent.click(screen.getByTestId('mydata-error-close'));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('Escape closes the error state', async () => {
+    const onClose = vi.fn();
+    renderModal('error', { onClose });
+
+    await screen.findByTestId('mydata-error');
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('the loading state is dismissible too (a hung GET cannot trap the user)', async () => {
+    const onClose = vi.fn();
+    // GET /my never resolves → the modal stays on the loading card.
+    mockGetMyProfile.mockReturnValue(new Promise(() => {}));
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MyDataModal onClose={onClose} />
+      </QueryClientProvider>,
+    );
+
+    await screen.findByTestId('mydata-loading');
+    fireEvent.click(screen.getByTestId('mydata-loading-close'));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});
+
+// GH #262 T7 fix-round issue 2: every FieldError must carry an `id` that the
+// input's aria-describedby points to (PhotoModal/PasswordModal pattern); the
+// calendar input gets aria-invalid like the other fields.
+describe('MyDataModal — field error a11y ids (issue 2)', () => {
+  it('the inline name error span has an id matching the input aria-describedby', async () => {
+    renderModal(createMockMyProfile({ first_name: '', last_name: 'Середа' }));
+    await waitForForm();
+    fireEvent.change(screen.getByTestId('mydata-patronymic'), {
+      target: { value: 'X' },
+    });
+    fireEvent.click(screen.getByTestId('mydata-submit'));
+
+    const errEl = await screen.findByTestId('mydata-first_name-error');
+    expect(errEl).toHaveAttribute('id', 'mydata-first_name-error');
+    expect(screen.getByTestId('mydata-first_name')).toHaveAttribute(
+      'aria-describedby',
+      'mydata-first_name-error',
+    );
+  });
+
+  it('the calendar input carries aria-invalid like the other fields', async () => {
+    // birth_date has no validation rule of its own, so the default is the
+    // wired-but-false attribute — before the fix the attribute was absent.
+    renderModal();
+    await waitForForm();
+    const cal = screen.getByTestId('mydata-birth_date');
+    expect(cal).toHaveAttribute('aria-invalid', 'false');
+  });
+});
+
+// GH #262 T7 fix-round issue 4: «Загрузить фото» and «Удалить» must BOTH be
+// disabled while ANY portrait mutation is in flight (shared busy state).
+describe('MyDataModal — unified portrait busy state (issue 4)', () => {
+  it('disables BOTH portrait buttons while an upload is in flight', async () => {
+    let resolveUpload: (v: { avatar_url: string }) => void = () => {};
+    mockUploadPortrait.mockReturnValue(
+      new Promise<{ avatar_url: string }>((res) => {
+        resolveUpload = res;
+      }),
+    );
+    renderModal();
+    await waitForForm();
+
+    const file = new File(['x'], 'a.png', { type: 'image/png' });
+    fireEvent.change(screen.getByTestId('mydata-portrait-file'), {
+      target: { files: [file] },
+    });
+
+    await waitFor(() => expect(screen.getByTestId('mydata-portrait-delete')).toBeDisabled());
+    // The upload button is disabled too (label flips to «Загрузка...»).
+    expect(screen.getByRole('button', { name: 'Загрузка...' })).toBeDisabled();
+
+    resolveUpload({ avatar_url: '/api/v1/files/avatar/n.png' });
+    await waitFor(() =>
+      expect(screen.getByTestId('mydata-portrait-delete')).not.toBeDisabled(),
+    );
+  });
+});
+
+// GH #262 T7 fix-round issue 6: CalendarPopover date-select feeds the form,
+// trips the dirty guard, and the chosen date travels in the PUT payload.
+describe('MyDataModal — calendar date select (issue 6)', () => {
+  it('selecting a date in the CalendarPopover updates the field and the PUT payload', async () => {
+    renderModal();
+    await waitForForm();
+
+    fireEvent.click(screen.getByTestId('mydata-birth_date-toggle'));
+    const popover = await screen.findByTestId('calendar-popover');
+    // Pick a day cell (the popover renders day buttons 1..31).
+    fireEvent.click(within(popover).getByRole('button', { name: '15' }));
+
+    // The field reflects an ISO date and the form is now dirty.
+    await waitFor(() =>
+      expect((screen.getByTestId('mydata-birth_date') as HTMLInputElement).value).toMatch(
+        /^\d{4}-\d{2}-\d{2}$/,
+      ),
+    );
+
+    fireEvent.click(screen.getByTestId('mydata-submit'));
+    await waitFor(() => expect(mockUpdateMyProfile).toHaveBeenCalled());
+    const payload = mockUpdateMyProfile.mock.calls[0][0];
+    expect(payload).toHaveProperty('birth_date');
+    expect(payload.birth_date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  it('selecting a date makes close dirty-guarded (confirm shown)', async () => {
+    const onClose = vi.fn();
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    renderModal(mockMyProfileMaster, { onClose });
+    await waitForForm();
+
+    fireEvent.click(screen.getByTestId('mydata-birth_date-toggle'));
+    await screen.findByTestId('calendar-popover');
+    fireEvent.click(screen.getByRole('button', { name: '20' }));
+
+    fireEvent.click(screen.getByTestId('modal-close-btn'));
+    expect(confirmSpy).toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalled(); // confirm returned true
+  });
+
+  it('Escape with a dirty form runs the confirm guard', async () => {
+    const onClose = vi.fn();
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    renderModal(mockMyProfileMaster, { onClose });
+    await waitForForm();
+
+    fireEvent.change(screen.getByTestId('mydata-patronymic'), {
+      target: { value: 'Dirty' },
+    });
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(confirmSpy).toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled(); // confirm returned false
   });
 });

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { getMe, login as apiLogin, logout as apiLogout, setUnauthorizedHandler } from '@memo/api-client';
 import type { AuthUser, MasterSnapshot } from '@memo/api-client';
 
@@ -29,6 +29,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [permissions, setPermissions] = useState<string[]>([]);
   const [master, setMaster] = useState<MasterSnapshot | null | undefined>(undefined);
   const [status, setStatus] = useState<AuthStatus>('loading');
+  // GH #262 T7 fix-round (issue 3): monotonic counter for refresh() — only
+  // the LATEST call may write the snapshot, so overlapping refreshes
+  // resolving out of order can never apply a stale /auth/me response.
+  const refreshSeq = useRef(0);
 
   // Bootstrap (spec §4.3): /me on mount — 401 resolves to null (guest), not an
   // error. A failed request (network down, server restarting) also lands as
@@ -95,10 +99,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // the mount bootstrap, a FAILED refresh keeps the current snapshot — a
   // network blip must never demote an authenticated user to guest. A null
   // response (session vanished server-side) is treated like the bootstrap:
-  // drop to guest.
+  // drop to guest. Ordering guard (fix-round issue 3): each call takes a
+  // sequence number; a response applies ONLY while it is still the latest —
+  // overlapping refreshes resolving out of order can't apply stale data.
   const refresh = useCallback(async (): Promise<void> => {
+    const seq = ++refreshSeq.current;
     try {
       const me = await getMe();
+      if (seq !== refreshSeq.current) return; // a newer refresh is in flight
       if (me) {
         setUser(me.user);
         setPermissions(me.permissions);

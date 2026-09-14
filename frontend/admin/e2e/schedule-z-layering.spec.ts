@@ -33,11 +33,10 @@ test.describe('Schedule z-layering (#260)', () => {
   const badge = (page: Page): Locator =>
     page.locator('button[data-popover-toggle]').filter({ hasText: /cards/ }).first();
 
-  // ADAPTATION vs the plan: the app has NO <header> element — the Topbar root is
-  // <div class="sticky top-0 z-40"> (Topbar.tsx:163-164), the only `sticky top-0`
-  // node in the tree. page.locator('header') would match zero nodes and time out
-  // instead of failing on a z-assertion, so we target the real Topbar root.
-  const topbar = (page: Page): Locator => page.locator('div.sticky.top-0.z-40').first();
+  // The Topbar root carries a stable data-testid="topbar" (added with this
+  // spec) so the selector survives Task 4's z-class → z-token migration. There
+  // is no <header> element in the app — the Topbar root is a plain <div>.
+  const topbar = (page: Page): Locator => page.locator('[data-testid="topbar"]').first();
 
   const zOf = (loc: Locator): Promise<number> =>
     loc.evaluate((el) => parseInt(getComputedStyle(el).zIndex, 10));

@@ -161,6 +161,7 @@ export function Topbar() {
 
   return (
     <div
+      data-testid="topbar"
       className="sticky top-0 z-40 flex h-12 items-center gap-2 border-b px-3 justify-end"
       style={{
         backgroundColor: 'var(--white)',

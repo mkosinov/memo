@@ -5,7 +5,11 @@ model: omniroute/zai/glm-5.3-flash
 variant: max
 temperature: 0.3
 permission:
-  read: allow
+  read:
+    "*": allow
+    "*.env": deny
+    "*.env.*": deny
+    "*.env.example": allow
   grep: allow
   glob: allow
   webfetch: allow

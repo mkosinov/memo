@@ -1,0 +1,278 @@
+'use client';
+
+// GH #262 §5.1: UserMenu — the sidebar user plate is the trigger of an
+// upward-opening popup with exactly 4 items: theme slider, «Мои данные»,
+// «Сменить пароль», «Выйти». Keyboard contract follows the WAI-ARIA Menu
+// Button pattern used by the DataTable action menu (roving tabindex,
+// arrows/Home/End navigate, Escape closes and returns focus to the trigger,
+// Tab moves out AND closes, outside mousedown closes). D1: no header — the
+// plate already shows avatar + name. D9: «Аноним» fallback, never the phone.
+
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useAuth } from '@/contexts/AuthContext';
+import { useUI } from '@/contexts/UIContext';
+
+function SunIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="5" />
+      <line x1="12" y1="1" x2="12" y2="3" />
+      <line x1="12" y1="21" x2="12" y2="23" />
+      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" />
+      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
+      <line x1="1" y1="12" x2="3" y2="12" />
+      <line x1="21" y1="12" x2="23" y2="12" />
+      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" />
+      <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
+    </svg>
+  );
+}
+
+function MoonIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" />
+    </svg>
+  );
+}
+
+function LogoutIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4" />
+      <polyline points="16 17 21 12 16 7" />
+      <line x1="21" y1="12" x2="9" y2="12" />
+    </svg>
+  );
+}
+
+interface UserMenuProps {
+  /** Collapsed sidebar: avatar-only circular trigger (spec §5.1). */
+  collapsed: boolean;
+}
+
+export function UserMenu({ collapsed }: UserMenuProps) {
+  const { master, logout } = useAuth();
+  const { theme, toggleTheme } = useUI();
+
+  const [open, setOpen] = useState(false);
+  const [focusedIdx, setFocusedIdx] = useState(0);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
+  // Plate content per spec rev 3 (D9): first + last name from the /auth/me
+  // snapshot (T3 supplies archived-card names too); «Аноним» only when the
+  // card carries no name — in practice, when there is no card at all.
+  const fullName = master ? `${master.first_name} ${master.last_name}`.trim() : '';
+  const displayName = fullName || 'Аноним';
+  const avatarUrl = master?.avatar_url ?? null;
+
+  // Outside mousedown closes the popup (DataTable action-menu pattern).
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (containerRef.current?.contains(e.target as Node)) return;
+      setOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  // Focus the first item right after the popup opens.
+  useEffect(() => {
+    if (!open) return;
+    setFocusedIdx(0);
+    menuRef.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+  }, [open]);
+
+  const closeAndFocusTrigger = useCallback(() => {
+    setOpen(false);
+    triggerRef.current?.focus();
+  }, []);
+
+  const handleTriggerKeyDown = (e: React.KeyboardEvent<HTMLButtonElement>) => {
+    // jsdom (and some AT) deliver Enter/Space as keydown without a click —
+    // open explicitly. preventDefault stops Space's native click from
+    // toggling the freshly opened menu shut again.
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      setOpen((prev) => !prev);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setOpen(true);
+    }
+  };
+
+  const handleMenuKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    const menu = menuRef.current;
+    if (!menu) return;
+    const items = Array.from(menu.querySelectorAll<HTMLElement>('[role="menuitem"]'));
+    if (items.length === 0) return;
+    const idx = items.indexOf(document.activeElement as HTMLElement);
+    const moveTo = (i: number) => {
+      setFocusedIdx(i);
+      items[i]?.focus();
+    };
+    switch (e.key) {
+      case 'Escape':
+        e.preventDefault();
+        closeAndFocusTrigger();
+        break;
+      case 'Tab':
+        // Spec §5.1: Tab moves focus away AND closes. No preventDefault —
+        // the browser moves focus to the next focusable naturally.
+        setOpen(false);
+        break;
+      case 'ArrowDown':
+        e.preventDefault();
+        moveTo((idx + 1) % items.length);
+        break;
+      case 'ArrowUp':
+        e.preventDefault();
+        moveTo(idx <= 0 ? items.length - 1 : idx - 1);
+        break;
+      case 'Home':
+        e.preventDefault();
+        moveTo(0);
+        break;
+      case 'End':
+        e.preventDefault();
+        moveTo(items.length - 1);
+        break;
+    }
+  };
+
+  const itemClass =
+    'w-full flex items-center gap-2 text-left px-3 py-2 rounded-lg text-xs text-white/70 ' +
+    'hover:bg-white/10 hover:text-white transition-colors';
+
+  const avatar = avatarUrl ? (
+    <img
+      data-testid="user-avatar"
+      src={avatarUrl}
+      alt=""
+      className="w-7 h-7 rounded-full object-cover flex-shrink-0"
+    />
+  ) : (
+    <div
+      data-testid="user-avatar"
+      className="w-7 h-7 rounded-full bg-brand-light flex items-center justify-center text-xs text-white font-medium flex-shrink-0"
+    >
+      {displayName.charAt(0).toUpperCase()}
+    </div>
+  );
+
+  return (
+    <div
+      ref={containerRef}
+      className={`relative ${collapsed ? 'flex justify-center py-3' : 'px-3 pt-3 pb-2'}`}
+    >
+      {/* Trigger — the user plate (expanded) / avatar circle (collapsed) */}
+      <button
+        ref={triggerRef}
+        type="button"
+        onClick={() => setOpen((prev) => !prev)}
+        onKeyDown={handleTriggerKeyDown}
+        aria-label="Меню пользователя"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-controls={open ? 'user-menu-popup' : undefined}
+        className={
+          collapsed
+            ? 'flex items-center justify-center rounded-full hover:ring-2 hover:ring-white/20 transition-all'
+            : 'w-full flex items-center gap-2 rounded-lg p-1 -m-1 hover:bg-white/5 transition-colors'
+        }
+      >
+        {avatar}
+        {!collapsed && (
+          <span className="flex-1 min-w-0 text-xs text-white/90 truncate text-left">
+            {displayName}
+          </span>
+        )}
+      </button>
+
+      {/* Popup — opens UPWARD (bottom-full), compact rounded card (D1) */}
+      {open && (
+        <div
+          ref={menuRef}
+          id="user-menu-popup"
+          role="menu"
+          aria-label="Меню пользователя"
+          onKeyDown={handleMenuKeyDown}
+          data-testid="user-menu-popup"
+          className="absolute bottom-full left-0 mb-2 z-50 w-56 rounded-xl shadow-lg border border-white/10 bg-sidebar p-1.5 space-y-0.5"
+        >
+          {/* 1. Theme slider (moved from the Menubar bottom row, §5.1).
+              Stays open on toggle so the user sees the palette switch. */}
+          <div
+            role="menuitem"
+            tabIndex={focusedIdx === 0 ? 0 : -1}
+            aria-label="Переключить тему"
+            onClick={toggleTheme}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                e.stopPropagation();
+                toggleTheme();
+              }
+            }}
+            className="w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg cursor-pointer text-white/70 hover:bg-white/10 transition-colors focus:outline-none"
+          >
+            <span className="text-xs">Тема</span>
+            <span className="flex items-center gap-1 bg-white/10 rounded-full p-0.5">
+              <span
+                className={`w-6 h-6 flex items-center justify-center rounded-full transition-colors ${theme === 'light' ? 'bg-white/20 text-white' : 'text-white/40'}`}
+              >
+                <SunIcon />
+              </span>
+              <span
+                className={`w-6 h-6 flex items-center justify-center rounded-full transition-colors ${theme === 'dark' ? 'bg-white/20 text-white' : 'text-white/40'}`}
+              >
+                <MoonIcon />
+              </span>
+            </span>
+          </div>
+
+          {/* 2. «Мои данные» — inert until T7 wires MyDataModal. */}
+          <button
+            type="button"
+            role="menuitem"
+            tabIndex={focusedIdx === 1 ? 0 : -1}
+            onClick={() => setOpen(false)}
+            className={itemClass}
+          >
+            Мои данные
+          </button>
+
+          {/* 3. «Сменить пароль» — inert until T7 wires PasswordModal. */}
+          <button
+            type="button"
+            role="menuitem"
+            tabIndex={focusedIdx === 2 ? 0 : -1}
+            onClick={() => setOpen(false)}
+            className={itemClass}
+          >
+            Сменить пароль
+          </button>
+
+          {/* 4. «Выйти» — the AuthContext logout helper (#247 flow → /login
+              via the AuthGate guard); no duplicate API call. */}
+          <button
+            type="button"
+            role="menuitem"
+            tabIndex={focusedIdx === 3 ? 0 : -1}
+            onClick={() => {
+              setOpen(false);
+              void logout();
+            }}
+            className={`${itemClass} text-[var(--danger,#C8503C)] hover:text-white`}
+          >
+            <LogoutIcon />
+            Выйти
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}

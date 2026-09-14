@@ -54,7 +54,7 @@ const authUser = {
 function mockAuthState(overrides?: {
   user?: typeof authUser | null;
   role?: string;
-  master?: { first_name: string; last_name: string } | null | undefined;
+  master?: { first_name: string; last_name: string; avatar_url?: string | null } | null | undefined;
   status?: AuthStatus;
   logout?: ReturnType<typeof vi.fn>;
 }) {
@@ -183,13 +183,11 @@ describe('Menubar', () => {
     expect(activeLink).toHaveClass('bg-brand');
   });
 
-  it('renders theme toggle as a slider switch', () => {
+  // GH #262 §5.1: the theme slider moved from the sidebar bottom row into the
+  // UserMenu popup — the old row must be gone from the panel.
+  it('does NOT render the old theme slider row', () => {
     renderWithProviders();
-    // The slider container should be clickable
-    const slider = screen.getByRole('button', { name: /Переключить/i });
-    expect(slider).toBeInTheDocument();
-    // Should contain sun and moon indicators
-    expect(slider.querySelector('svg')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Переключить тему/i })).not.toBeInTheDocument();
   });
 
   it('renders collapse/expand button', () => {
@@ -245,20 +243,22 @@ describe('Menubar', () => {
     expect(sidebar).toHaveStyle({ width: 'var(--sidebar-collapsed-w)' });
   });
 
-  it('toggles theme when theme button is clicked', () => {
+  it('renders the UserMenu trigger (popup owns the theme toggle now)', () => {
     renderWithProviders();
-    const toggle = screen.getByRole('button', { name: /Переключить/i });
-    const html = document.documentElement;
-    const initialTheme = html.getAttribute('data-theme');
-    fireEvent.click(toggle);
-    const newTheme = html.getAttribute('data-theme');
-    expect(newTheme).toBe('dark');
+    const trigger = screen.getByRole('button', { name: 'Меню пользователя' });
+    expect(trigger).toHaveAttribute('aria-haspopup', 'menu');
+    fireEvent.click(trigger);
+    expect(screen.getByRole('menu')).toBeInTheDocument();
   });
 });
 
-// ─── GH #247 §4.5: real user block + logout ───────────────────────────────
+// ─── GH #262 §5.1: the user plate is the UserMenu trigger ─────────────────
+// Plate content rules (spec rev 3, D1/D9): avatar + first/last name from the
+// snapshot (archived cards included), NO role label, NO phone fallback —
+// «Аноним» only when the card has no first/last name. The detailed popup
+// behaviour (keyboard, focus, item set) lives in UserMenu.test.tsx.
 
-describe('Menubar user block (GH #247 §4.5)', () => {
+describe('Menubar user block (GH #262 §5.1)', () => {
   beforeEach(() => {
     mockUseAuth.mockReturnValue(mockAuthState());
   });
@@ -267,57 +267,59 @@ describe('Menubar user block (GH #247 §4.5)', () => {
     vi.clearAllMocks();
   });
 
-  it('shows the linked master profile name and «Админ» label for an admin user', () => {
-    mockUseAuth.mockReturnValue(
-      mockAuthState({ role: 'admin', master: { first_name: 'Ольга', last_name: 'Середа' } }),
-    );
-    renderWithProviders();
-    expect(screen.getByText('Ольга Середа')).toBeInTheDocument();
-    expect(screen.getByText('Админ')).toBeInTheDocument();
-  });
-
-  it('falls back to the phone when no master profile is linked, with «Админ» label', () => {
-    mockUseAuth.mockReturnValue(mockAuthState({ role: 'admin', master: null }));
-    renderWithProviders();
-    expect(screen.getByText('+79990000001')).toBeInTheDocument();
-    expect(screen.getByText('Админ')).toBeInTheDocument();
-    expect(screen.queryByText('Мастер')).not.toBeInTheDocument();
-  });
-
-  it('shows «Мастер» role label for a master user', () => {
-    mockUseAuth.mockReturnValue(
-      mockAuthState({
-        role: 'master',
-        master: { first_name: 'Юлия', last_name: 'Большакова' },
-      }),
-    );
-    renderWithProviders();
-    expect(screen.getByText('Юлия Большакова')).toBeInTheDocument();
-    expect(screen.getByText('Мастер')).toBeInTheDocument();
-    expect(screen.queryByText('Админ')).not.toBeInTheDocument();
-  });
-
-  it('renders the avatar initial from the first character of the display name', () => {
+  it('shows the snapshot first + last name and NO role label', () => {
     mockUseAuth.mockReturnValue(
       mockAuthState({ master: { first_name: 'Ольга', last_name: 'Середа' } }),
     );
     renderWithProviders();
-    const avatar = screen.getByTestId('user-avatar');
-    expect(avatar).toHaveTextContent('О');
+    expect(screen.getByText('Ольга Середа')).toBeInTheDocument();
+    expect(screen.queryByText('Админ')).not.toBeInTheDocument();
+    expect(screen.queryByText('Мастер')).not.toBeInTheDocument();
   });
 
-  it('renders the avatar initial from the phone when no master profile is linked', () => {
+  it('shows «Аноним» (never the phone) when no card is linked', () => {
     mockUseAuth.mockReturnValue(mockAuthState({ master: null }));
     renderWithProviders();
-    const avatar = screen.getByTestId('user-avatar');
-    expect(avatar).toHaveTextContent('+');
+    expect(screen.getByText('Аноним')).toBeInTheDocument();
+    expect(screen.queryByText('+79990000001')).not.toBeInTheDocument();
   });
 
-  it('calls logout() when the logout control is clicked', () => {
-    const logout = vi.fn().mockResolvedValue(undefined);
-    mockUseAuth.mockReturnValue(mockAuthState({ logout }));
+  it('renders the avatar initial from the display name', () => {
+    mockUseAuth.mockReturnValue(
+      mockAuthState({ master: { first_name: 'Ольга', last_name: 'Середа' } }),
+    );
     renderWithProviders();
-    fireEvent.click(screen.getByRole('button', { name: /Выйти/i }));
-    expect(logout).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId('user-avatar')).toHaveTextContent('О');
+  });
+
+  it('renders <img> when the snapshot carries avatar_url', () => {
+    mockUseAuth.mockReturnValue(
+      mockAuthState({
+        master: {
+          first_name: 'Ольга',
+          last_name: 'Середа',
+          avatar_url: '/api/v1/files/avatar/portrait.png',
+        },
+      }),
+    );
+    renderWithProviders();
+    const avatar = screen.getByTestId('user-avatar');
+    expect(avatar.tagName).toBe('IMG');
+    expect(avatar).toHaveAttribute('src', '/api/v1/files/avatar/portrait.png');
+  });
+
+  it('does NOT render a standalone «Выйти» button (it lives in the popup)', () => {
+    renderWithProviders();
+    expect(screen.queryByRole('button', { name: 'Выйти' })).not.toBeInTheDocument();
+  });
+
+  it('keeps the avatar trigger visible when the sidebar is collapsed', () => {
+    renderWithProviders();
+    fireEvent.click(screen.getByRole('button', { name: /Свернуть/i }));
+    const trigger = screen.getByRole('button', { name: 'Меню пользователя' });
+    expect(trigger).toBeInTheDocument();
+    expect(trigger.querySelector('[data-testid="user-avatar"]')).toBeInTheDocument();
+    // Collapsed: avatar-only circle, no name text.
+    expect(screen.queryByText('Ольга Середа')).not.toBeInTheDocument();
   });
 });

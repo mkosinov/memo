@@ -45,8 +45,10 @@ test.describe('User Scenario 4 — logout', () => {
     await page.goto('/schedule');
     await expect(page.locator('[data-testid="menubar"]')).toBeVisible({ timeout: 30_000 });
 
-    // Logout via the user-block control.
-    await page.locator('button[aria-label="Выйти"]').click();
+    // Logout via the UserMenu popup (GH #262 §5.1): open the user plate,
+    // then click «Выйти» (a menuitem now, no longer a standalone button).
+    await page.getByRole('button', { name: 'Меню пользователя' }).click();
+    await page.getByRole('menuitem', { name: 'Выйти' }).click();
 
     // Guarded page now bounces to /login (guard keeps the returnTo).
     await expect(page).toHaveURL(/\/login/, { timeout: 15_000 });

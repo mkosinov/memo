@@ -57,31 +57,16 @@ fi
 
 echo "🔍 Running local test suite (PARALLEL mode)..."
 
-# ── Kill orphan processes from previous runs ───────────────────────────────
-# Previous pre-push runs may have left Next.js/uvicorn processes on shard
-# ports. Kill them to avoid EADDRINUSE and corrupted state.
-echo "  → cleaning up orphan processes on shard ports..."
-for port in 3002 3003 8001 8002; do
-  # Find PIDs listening on this port and kill them
-  PIDS=$(lsof -ti :"$port" 2>/dev/null || true)
-  if [ -n "$PIDS" ]; then
-    echo "    killing orphan processes on port $port: $PIDS"
-    kill -9 $PIDS 2>/dev/null || true
-  fi
-done
-sleep 2
+# ── Shard ports + sourced helpers library ──────────────────────────────────
+# Functions in the library read these globals (no arguments) — declared
+# before the source and before any call into the library.
+SHARD_PROJECTS=("shard-schedule" "shard-rest")
+SHARD_BACKEND_PORTS=(8001 8002)
+SHARD_FRONTEND_PORTS=(3002 3003)
+source "$ROOT/scripts/lib/shard-helpers.sh"
 
-# Also kill any orphan shard-stack processes from previous runs (worktrees
-# etc.). Shard frontends run `next dev -p 3002/3003`; the forked next-server
-# child loses the port from its cmdline (process title overwrites it with
-# "next-server (vX)"), so match the parent chain and kill its children.
-# NEVER `pkill -f "next-server"` — it matches EVERY Next.js dev server,
-# including the dev stack on :3000/:3001 and unrelated host instances.
-for pid in $(pgrep -f "next dev -p 300[2-3]" 2>/dev/null || true); do
-  pkill -9 -P "$pid" 2>/dev/null || true   # forked next-server child
-  kill -9 "$pid" 2>/dev/null || true       # pnpm wrapper / next dev parent
-done
-sleep 1
+echo "  → cleaning up orphan processes on shard ports..."
+kill_port_orphans
 
 # ── Remove stale Next.js build dir (port-guarded) ─────────────────────────
 # NEXT_PUBLIC_API_URL is baked into the Next.js client bundle at compile
@@ -149,10 +134,6 @@ ALL_PIDS+=($!)
 #
 # Playwright connects via reuseExistingServer: true.
 
-SHARD_PROJECTS=("shard-schedule" "shard-rest")
-SHARD_BACKEND_PORTS=(8001 8002)
-SHARD_FRONTEND_PORTS=(3002 3003)
-
 echo "  → preparing per-shard databases..."
 # Ensure sqlite3 is available
 if ! command -v sqlite3 &>/dev/null; then
@@ -178,18 +159,9 @@ for i in $(seq 1 2); do
 done
 echo "  → per-shard DBs ready (2 copies of $MASTER_DB)"
 
-# Cleanup function for shard stacks
+# Cleanup function lives in scripts/lib/shard-helpers.sh (bounded ladder:
+# TERM wrappers → budgeted wait → kill -9 survivors → port+cmdline sweep).
 SHARD_BACKEND_PIDS=()
-cleanup_shards() {
-  echo ""
-  echo "Cleaning up shard stacks..."
-  for pid in "${SHARD_BACKEND_PIDS[@]}"; do
-    kill "$pid" 2>/dev/null || true
-    wait "$pid" 2>/dev/null || true
-  done
-  # Remove per-shard DB copies (master DB is kept)
-  rm -f backend/test_memo_shard*.db
-}
 trap cleanup_shards EXIT
 
 # Start 2 shard stacks in parallel

@@ -14,12 +14,17 @@
 # Выкл.:  docker exec opencode rm -f /root/.local/state/opencode/auto-impl.enabled
 #
 # Метка хоста: /root/.local/state/opencode/auto-impl-host ("imac"/"laptop").
+# Ёмкость машины (сколько сессий opencode всего допускается):
+#   1) env AUTO_IMPL_MAX_SESSIONS (compose, применяется при recreate контейнера);
+#   2) файл /root/.local/state/opencode/auto-impl-max (перекрывает env, читается
+#      каждый цикл — можно менять на живую без recreate).
+# По умолчанию 1. Считаются ВСЕ процессы opencode, кроме сервера opencode web.
 # Выбор карточки: gh_board.py pick-next (Next Up → первая Ready to IMPL;
 # пропуск карточек со свежими замками и с незакрытыми depends-on из тела issue).
 # Захваченная карточка имеет префикс комментария "auto-impl claim:",
 # менеджер при неготовом гейте возвращает её в Ready to IMPL с комментарием
-# "auto-impl blocked: ..." — оба префикса дают карточке отдых 12ч (TTL в
-# gh_board.py CLAIM_TTL_HOURS), чтобы конвейер не долбил её впустую.
+# "auto-impl blocked: ..." — оба префикса дают карточке отдых CLAIM_TTL_HOURS
+# (1ч, константа в gh_board.py), чтобы конвейер не долбил её впустую.
 
 set -uo pipefail
 
@@ -49,21 +54,19 @@ while true; do
 
     [ -f "$STATE/auto-impl.enabled" ] || continue
 
-    # локальная ёмкость: одна сессия менеджера на машину.
-    # Считаем ВСЕ живые процессы opencode: и TUI-сессии (голый `opencode`),
-    # и CLI-прогоны (`opencode run`). Постоянный сервер `opencode web` —
-    # не занятость, он работает всегда. TUI-сессии юзера невидимы для
-    # pgrep -f "opencode run" (грабли 14.09: iMac с двумя TUI IMPL
-    # считался свободным).
-    MACHINE_BUSY=0
+    # локальная ёмкость: считаем ВСЕ живые процессы opencode (TUI-сессии и
+    # CLI-прогоны; постоянный сервер `opencode web` не считаем). Если их
+    # уже MAX_SESSIONS — машина заполнена, наблюдатель ждёт.
+    MAX=$(cat "$STATE/auto-impl-max" 2>/dev/null || echo "${AUTO_IMPL_MAX_SESSIONS:-1}")
+    COUNT=0
     for p in $(pgrep -x opencode 2>/dev/null); do
         CMD=$(tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null)
         case "$CMD" in
             *"opencode web"*) : ;;
-            opencode*) MACHINE_BUSY=1; break ;;
+            opencode*) COUNT=$((COUNT+1)) ;;
         esac
     done
-    if [ "$MACHINE_BUSY" = 1 ]; then
+    if [ "$COUNT" -ge "$MAX" ]; then
         continue
     fi
 

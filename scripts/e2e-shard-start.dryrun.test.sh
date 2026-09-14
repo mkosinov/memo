@@ -9,12 +9,11 @@
 #     → Case 3 (S1): SHARD_ID=1 run exports NEXT_DIST_DIR=".next-shard-1"
 #       visible to the `pnpm exec next dev` call site.
 #     → Case 4 (S1): SHARD_ID=2 run exports NEXT_DIST_DIR=".next-shard-2".
-#     → Case 5 (S5): with the old "ports busy" scenario reproduced
-#       (listeners on 3001/3002/3003), the script performs NO rm of the
-#       default `.next` (any `.next` path that is not `.next-shard-*`),
-#       and the default build dir fixture is left untouched. The wipe of
-#       the default `.next` was removed entirely in #264 — the script must
-#       not wipe it regardless of port state.
+#     → Case 5 (S5): the script performs NO rm of the default `.next`
+#       (any `.next` path that is not `.next-shard-*`) and the default
+#       build dir fixture is left untouched. The wipe of the default
+#       `.next` was removed entirely in #264 — the script must not wipe
+#       it regardless of port state.
 #
 # Mechanics: we stub `uv`, `pnpm`, `curl`, `rm`, `lsof` on PATH so the
 # script runs to completion without real backend/frontend/ports:
@@ -27,12 +26,21 @@
 #   - `curl`  answers 200 instantly → ready-waits break on iteration 1,
 #             warmup completes, `wait` on the backgrounded stubbed pnpm
 #             returns → the run finishes in well under a second.
-#   - `lsof`  reports every port free (the script under test never sees a
-#             listener; Case 5 occupies real ports only to reproduce the
-#             legacy "wipe skipped" precondition).
+#   - `lsof`  reports every port free. Port state is therefore UNOBSERVABLE
+#             to the script under test — Case 5's "no wipe regardless of
+#             port state" invariant is carried by this stub plus the
+#             journal assertion (the pre-#264 script, which consulted lsof
+#             before wiping, fails exactly this setup; the #264 script
+#             never wipes at all).
 #
-# Each case gets its own tempdir, DB file and journal (SHARD_DRYRUN_JOURNAL
-# env routes stub output to the right journal).
+# Staging: each run copies the script under test into a run-scoped tree
+#   $WORK/tree/scripts/e2e-shard-start.sh   (the copy)
+#   $WORK/tree/backend/                     (empty; uv is stubbed)
+#   $WORK/tree/frontend/admin/.next/marker.txt  (S5 fixture)
+# The script resolves frontend/admin relative to ITSELF, so its "default
+# .next" is the staged one — no dependency on the shared real tree, safe
+# under parallel harness runs and real builds. Cleanup removes the whole
+# stage; nothing outside $WORK/$STUBS is ever written.
 #
 # Case 0 is a meta-test of the journal assertion helper itself: a poisoned
 # journal (fake `rm .next` line) must be detected, a clean journal must
@@ -41,18 +49,46 @@
 #
 # RED/GREEN: SHARD_SCRIPT_UNDER_TEST may point at another copy of the
 # shard script (used to demonstrate the new cases failing against the
-# pre-#264 script, which still contained the default-.next wipe).
+# pre-#264 script, which still contained the default-.next wipe). The
+# override must live inside the current repo root — it gets staged into
+# $WORK/tree, so an outside path would leave the fixture checks inspecting
+# the wrong tree.
 
 set -euo pipefail
 
 # Resolve script directory regardless of caller's cwd
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-# Script under test: overridable (RED demonstration against pre-#264 copy)
-SHARD_SCRIPT="${SHARD_SCRIPT_UNDER_TEST:-$REPO_ROOT/scripts/e2e-shard-start.sh}"
 
-if [ ! -f "$SHARD_SCRIPT" ]; then
-  echo "FATAL: shard script not found at $SHARD_SCRIPT" >&2
+# ── Startup guards ─────────────────────────────────────────────────────────
+
+# Guard: the script under test prepends /root/.npm-global/bin to PATH,
+# AHEAD of our stub dir. If a real pnpm lives there, it would silently
+# shadow the stub and every journal assertion would pass vacuously.
+# Hard-fail with instructions instead of silently testing nothing.
+if [ -x "/root/.npm-global/bin/pnpm" ]; then
+  echo "FATAL: /root/.npm-global/bin/pnpm exists and would shadow the pnpm stub" >&2
+  echo "       (e2e-shard-start.sh puts /root/.npm-global/bin first on PATH)." >&2
+  echo "       Remove/rename it or run this harness on a host without it:" >&2
+  echo "         mv /root/.npm-global/bin/pnpm /root/.npm-global/bin/pnpm.bak" >&2
+  exit 1
+fi
+
+# Script under test: overridable (RED demonstration against pre-#264 copy)
+SHARD_SCRIPT_SRC="${SHARD_SCRIPT_UNDER_TEST:-$REPO_ROOT/scripts/e2e-shard-start.sh}"
+# The override must resolve INSIDE the repo root: the source is staged into
+# $WORK/tree, and an outside file would make ROOT_DIR/fixture reasoning (and
+# this guard's own failure mode) inspect the wrong tree.
+case "$SHARD_SCRIPT_SRC" in
+  "$REPO_ROOT"/*) ;;  # ok
+  *)
+    echo "FATAL: SHARD_SCRIPT_UNDER_TEST must be inside the repo root ($REPO_ROOT)" >&2
+    echo "       got: $SHARD_SCRIPT_SRC" >&2
+    exit 1
+    ;;
+esac
+if [ ! -f "$SHARD_SCRIPT_SRC" ]; then
+  echo "FATAL: shard script not found at $SHARD_SCRIPT_SRC" >&2
   exit 1
 fi
 
@@ -60,32 +96,19 @@ fi
 WORK="$(mktemp -d -t shard-dryrun-XXXXXX)"
 STUBS="$(mktemp -d -t shard-stub-XXXXXX)"
 
-# ── Default build dir fixture ──────────────────────────────────────────────
-# The script under test resolves frontend/admin relative to ITSELF, so the
-# "default .next folder" it must not touch lives in the real tree. We drop
-# a marker into it (`.next/` is gitignored), assert it survives every run,
-# and restore the previous state on exit.
-NEXT_DIR="$REPO_ROOT/frontend/admin/.next"
-NEXT_MARKER="$NEXT_DIR/marker.txt"
-NEXT_DIR_PREEXISTED=0
-if [ -d "$NEXT_DIR" ]; then
-  NEXT_DIR_PREEXISTED=1
-else
-  mkdir -p "$NEXT_DIR"
-fi
+# ── Run-scoped staged tree + S5 fixture ───────────────────────────────────
+# Minimal tree the script under test expects relative to itself. The
+# `.next` fixture marker is created per run inside the stage, so it can
+# never race with parallel runs or a real build in the shared checkout.
+STAGE="$WORK/tree"
+SCRIPT_UNDER_TEST="$STAGE/scripts/e2e-shard-start.sh"
+NEXT_MARKER="$STAGE/frontend/admin/.next/marker.txt"
+mkdir -p "$STAGE/scripts" "$STAGE/backend" "$STAGE/frontend/admin/.next"
+cp "$SHARD_SCRIPT_SRC" "$SCRIPT_UNDER_TEST"
+chmod +x "$SCRIPT_UNDER_TEST"
 printf 'dryrun-fixture-do-not-touch\n' > "$NEXT_MARKER"
 
 cleanup() {
-  # Kill any leftover port listeners from Case 5
-  local pid
-  for pid in "${CASE5_PIDS[@]:-}"; do
-    [ -n "$pid" ] && kill "$pid" 2>/dev/null || true
-  done
-  # Restore fixture state
-  rm -f "$NEXT_MARKER"
-  if [ "$NEXT_DIR_PREEXISTED" -eq 0 ]; then
-    rmdir "$NEXT_DIR" 2>/dev/null || true
-  fi
   rm -rf "$WORK" "$STUBS"
 }
 trap cleanup EXIT
@@ -156,7 +179,7 @@ run_shard() {
     NEXT_PUBLIC_API_URL="http://127.0.0.1:$bport" \
     SHARD_DRYRUN_JOURNAL="$journal" \
     PATH="$STUBS:$PATH" \
-    timeout 15 bash "$SHARD_SCRIPT" > "$log" 2>&1 || true
+    timeout 15 bash "$SCRIPT_UNDER_TEST" > "$log" 2>&1 || true
   set -e
 }
 
@@ -190,7 +213,19 @@ assert_no_default_next_rm() {
   return 0
 }
 
-# assert_fixture_intact <label> — default build dir marker untouched
+# assert_reached_next_dev <journal> <label> — positive control: the shard
+# actually got to `pnpm exec next dev`. Without it, the negative journal
+# assertions could pass vacuously on an early-exited run (empty journal).
+assert_reached_next_dev() {
+  local journal="$1" label="$2"
+  if grep -q '^PNPM_EXEC_NEXT_DEV ' "$journal" 2>/dev/null; then
+    return 0
+  fi
+  echo "FAIL $label: shard never reached 'pnpm exec next dev' (empty/incomplete journal — negative assertions would be vacuous)"
+  return 1
+}
+
+# assert_fixture_intact <label> — staged default build dir marker untouched
 assert_fixture_intact() {
   local label="$1"
   if [ ! -f "$NEXT_MARKER" ] || ! grep -q 'dryrun-fixture-do-not-touch' "$NEXT_MARKER"; then
@@ -248,7 +283,7 @@ SHARD_ID=1 SHARD_PORT=3002 BACKEND_PORT=8001 \
   NEXT_PUBLIC_API_URL=http://127.0.0.1:8001 \
   SHARD_DRYRUN_JOURNAL="$CASE2_DIR/journal" \
   PATH="$STUBS:$PATH" \
-  timeout 5 bash "$SHARD_SCRIPT" > "$CASE2_DIR/guard.log" 2>&1
+  timeout 5 bash "$SCRIPT_UNDER_TEST" > "$CASE2_DIR/guard.log" 2>&1
 GUARD_EXIT=$?
 set -e
 
@@ -306,38 +341,19 @@ fi
 assert_no_default_next_rm "$CASE4_DIR/journal" "Case 4 (S5)" || FAIL=1
 assert_fixture_intact "Case 4 (S5)" || FAIL=1
 
-# ── Case 5 (S5): legacy "ports busy" scenario → still NO wipe of .next ───
-# Reproduces the precondition under which the pre-#264 script skipped its
-# default-.next wipe: listeners on 3001/3002/3003 + SHARD_PORT. The #264
-# script contains no wipe at all, so the journal must stay free of ANY rm
-# against a default `.next` path — port state is irrelevant.
+# ── Case 5 (S5): NO wipe of default .next, regardless of port state ──────
+# No real listeners here on purpose: lsof is stubbed to "all free", so the
+# script under test cannot observe port state either way — spawning
+# listeners would be inert surface (and a port-collision risk). The
+# pre-#264 script, whose wipe was gated on lsof, wipes in this exact
+# setup (journal catches it); the #264 script contains no wipe at all.
+# Positive control (reached next dev) keeps the negative assertions
+# non-vacuous.
 CASE5_DIR="$WORK/case5"; mkdir -p "$CASE5_DIR"
 CASE5_DB="$CASE5_DIR/test_memo_shard1.db"
 printf 'seed' > "$CASE5_DB"
 
-CASE5_PIDS=()
-for port in 3001 3002 3003; do
-  python3 - "$port" <<'PYEOF' &
-import socket, sys, time
-s = socket.socket()
-s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-try:
-    s.bind(("127.0.0.1", int(sys.argv[1])))
-    s.listen(1)
-    time.sleep(120)
-except OSError:
-    pass  # port already busy by something real — busy is what we want
-PYEOF
-  CASE5_PIDS+=("$!")
-done
-sleep 0.3  # let the listeners take their ports
-
 run_shard "$CASE5_DIR/run.log" "$CASE5_DIR/journal" "$CASE5_DB" 1 3002 8001
-
-for pid in "${CASE5_PIDS[@]}"; do
-  kill "$pid" 2>/dev/null || true
-done
-CASE5_PIDS=()
 
 echo "── Case 5 log ──"
 cat "$CASE5_DIR/run.log"
@@ -345,11 +361,12 @@ echo "── Case 5 journal ──"
 cat "$CASE5_DIR/journal" 2>/dev/null || echo "(empty)"
 echo "─────────────────"
 
-if assert_no_default_next_rm "$CASE5_DIR/journal" "Case 5 (S5: port busy)" \
+if assert_reached_next_dev "$CASE5_DIR/journal" "Case 5 (S5: positive control)" \
+    && assert_no_default_next_rm "$CASE5_DIR/journal" "Case 5 (S5: port busy)" \
     && assert_fixture_intact "Case 5 (S5: port busy)"; then
-  echo "PASS Case 5 (S5): no rm of default .next even with 3001/3002/3003 occupied; fixture untouched"
+  echo "PASS Case 5 (S5): reached next dev; no rm of default .next regardless of port state; fixture untouched"
 else
-  echo "FAIL Case 5 (S5): default .next was wiped (or fixture modified) — the #264 removal regressed"
+  echo "FAIL Case 5 (S5): default .next was wiped (or fixture modified), or the run never reached next dev"
   FAIL=1
 fi
 

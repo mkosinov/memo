@@ -16,6 +16,7 @@ import type {
   MasterViewResponse,
   StaffResponse,
   PositionResponse,
+  MyProfile,
 } from '@memo/api-client';
 
 // ─── Domain types ─────────────────────────────────────────────────────────
@@ -377,6 +378,60 @@ export function createMockPositionResponse(
 ): PositionResponse {
   return {
     ...mockPositionSmm,
+    ...overrides,
+  };
+}
+
+// ─── MyProfile (GH #262 «Мои данные» — GET/PUT /api/v1/my flat shape) ────────
+// Public half from the staff card / master section; private half from the
+// lazily created user_profiles row. `has_staff`/`has_master` drive the field
+// visibility rules (D2/D4/D7). All fields mirror MyProfileSchema.
+
+/** A master with a linked staff card — the full «Мои данные» form (S3/S4). */
+export const mockMyProfileMaster: MyProfile = {
+  role: 'master',
+  has_staff: true,
+  has_master: true,
+  first_name: 'Ольга',
+  last_name: 'Середа',
+  avatar_url: '/api/v1/files/avatar/o.png',
+  specialties: ['живопись', 'графика'],
+  patronymic: 'Ивановна',
+  birth_date: '1990-05-13',
+  residence_address: 'Невский пр. 28',
+  birth_place: 'Ленинград',
+  passport_series_number: '40 123456',
+  passport_issued_date: '2010-06-01',
+  passport_issued_by: 'УФМС по СПб',
+  registration_address: 'ул. Рубинштейна 1',
+};
+
+/** A staff member WITHOUT a master section (e.g. СММ) — has_master: false. */
+export const mockMyProfileStaffNoMaster: MyProfile = {
+  ...mockMyProfileMaster,
+  role: 'admin',
+  has_master: false,
+  specialties: null,
+};
+
+/** A user with no staff card (D7/S6) — names/specialties/portrait hidden. */
+export const mockMyProfileNoCard: MyProfile = {
+  ...mockMyProfileMaster,
+  role: 'admin',
+  has_staff: false,
+  has_master: false,
+  first_name: null,
+  last_name: null,
+  avatar_url: null,
+  specialties: null,
+};
+
+/** Factory for creating MyProfile objects with overrides. */
+export function createMockMyProfile(
+  overrides: Partial<MyProfile> = {},
+): MyProfile {
+  return {
+    ...mockMyProfileMaster,
     ...overrides,
   };
 }

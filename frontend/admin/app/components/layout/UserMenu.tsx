@@ -11,6 +11,8 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useUI } from '@/contexts/UIContext';
+import { MyDataModal } from '@/app/components/modal/MyDataModal';
+import { PasswordModal } from '@/app/components/modal/PasswordModal';
 
 function SunIcon() {
   return (
@@ -57,6 +59,9 @@ export function UserMenu({ collapsed }: UserMenuProps) {
 
   const [open, setOpen] = useState(false);
   const [focusedIdx, setFocusedIdx] = useState(0);
+  // GH #262 T7: the two cabinet modals, opened from the menu items.
+  const [myDataOpen, setMyDataOpen] = useState(false);
+  const [passwordOpen, setPasswordOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -246,23 +251,29 @@ export function UserMenu({ collapsed }: UserMenuProps) {
             </span>
           </div>
 
-          {/* 2. «Мои данные» — inert until T7 wires MyDataModal. */}
+          {/* 2. «Мои данные» — opens MyDataModal (GH #262 T7). */}
           <button
             type="button"
             role="menuitem"
             tabIndex={focusedIdx === 1 ? 0 : -1}
-            onClick={() => setOpen(false)}
+            onClick={() => {
+              setOpen(false);
+              setMyDataOpen(true);
+            }}
             className={itemClass}
           >
             Мои данные
           </button>
 
-          {/* 3. «Сменить пароль» — inert until T7 wires PasswordModal. */}
+          {/* 3. «Сменить пароль» — opens PasswordModal (GH #262 T7). */}
           <button
             type="button"
             role="menuitem"
             tabIndex={focusedIdx === 2 ? 0 : -1}
-            onClick={() => setOpen(false)}
+            onClick={() => {
+              setOpen(false);
+              setPasswordOpen(true);
+            }}
             className={itemClass}
           >
             Сменить пароль
@@ -285,6 +296,10 @@ export function UserMenu({ collapsed }: UserMenuProps) {
           </button>
         </div>
       )}
+
+      {/* Cabinet modals (GH #262 T7) — fixed overlays, rendered on demand. */}
+      {myDataOpen && <MyDataModal onClose={() => setMyDataOpen(false)} />}
+      {passwordOpen && <PasswordModal onClose={() => setPasswordOpen(false)} />}
     </div>
   );
 }

@@ -40,7 +40,7 @@ const mockAuthMe = {
 
 /** Consumer exposing the context for assertions (UIContext.test.tsx pattern). */
 function AuthConsumer() {
-  const { user, permissions, master, status, login: doLogin, logout: doLogout, can } = useAuth();
+  const { user, permissions, master, status, login: doLogin, logout: doLogout, can, refresh } = useAuth();
   return (
     <div>
       <span data-testid="status">{status}</span>
@@ -48,6 +48,7 @@ function AuthConsumer() {
       <span data-testid="user-phone">{user?.phone ?? 'none'}</span>
       <span data-testid="permissions">{permissions.join(',')}</span>
       <span data-testid="master">{master ? `${master.first_name} ${master.last_name}` : 'none'}</span>
+      <span data-testid="master-avatar">{master?.avatar_url ?? 'none'}</span>
       <span data-testid="can-payments">{can('payments:read').toString()}</span>
       <span data-testid="can-materials">{can('materials:read').toString()}</span>
       <button data-testid="do-login" onClick={() => void doLogin('+79990000001', 'secret123')} />
@@ -65,6 +66,7 @@ function AuthConsumer() {
         }
       />
       <button data-testid="do-logout" onClick={() => void doLogout()} />
+      <button data-testid="do-refresh" onClick={() => void refresh()} />
     </div>
   );
 }
@@ -226,6 +228,55 @@ describe('AuthProvider', () => {
       });
       expect(mockLogout).toHaveBeenCalledTimes(1);
       expect(screen.getByTestId('user-id')).toHaveTextContent('none');
+    });
+  });
+
+  // GH #262 T7 pinned decision: the plate reads avatar/name from the master
+  // snapshot (useState, fetched once on mount). MyDataModal must be able to
+  // refresh it after a portrait upload / profile save — query invalidation
+  // alone would not touch the snapshot state.
+  describe('refresh()', () => {
+    it('re-calls getMe and updates the master snapshot', async () => {
+      mockGetMe.mockResolvedValue({
+        ...mockAuthMe,
+        master: { first_name: 'Ольга', last_name: 'Середа', avatar_url: null },
+      });
+      renderAuth();
+      await waitFor(() => {
+        expect(screen.getByTestId('status')).toHaveTextContent('authenticated');
+      });
+      expect(screen.getByTestId('master-avatar')).toHaveTextContent('none');
+
+      // Server now returns an uploaded portrait + a new name.
+      mockGetMe.mockResolvedValue({
+        ...mockAuthMe,
+        master: { first_name: 'Ольга', last_name: 'Новая', avatar_url: '/api/v1/files/avatar/n.png' },
+      });
+      mockGetMe.mockClear();
+      await act(async () => {
+        screen.getByTestId('do-refresh').click();
+      });
+
+      expect(mockGetMe).toHaveBeenCalledTimes(1);
+      await waitFor(() => {
+        expect(screen.getByTestId('master-avatar')).toHaveTextContent('/api/v1/files/avatar/n.png');
+        expect(screen.getByTestId('master')).toHaveTextContent('Ольга Новая');
+      });
+    });
+
+    it('stays authenticated when a refresh fetch fails (network blip)', async () => {
+      mockGetMe.mockResolvedValue(mockAuthMe);
+      renderAuth();
+      await waitFor(() => {
+        expect(screen.getByTestId('status')).toHaveTextContent('authenticated');
+      });
+      mockGetMe.mockRejectedValue(new TypeError('Failed to fetch'));
+      await act(async () => {
+        screen.getByTestId('do-refresh').click();
+      });
+      // The snapshot is kept — a failed refresh never logs the user out.
+      expect(screen.getByTestId('status')).toHaveTextContent('authenticated');
+      expect(screen.getByTestId('user-id')).toHaveTextContent('user-uuid-1');
     });
   });
 });

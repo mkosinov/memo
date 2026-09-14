@@ -14,6 +14,12 @@ interface AuthContextType {
   login: (phone: string, password: string) => Promise<AuthUser>;
   logout: () => Promise<void>;
   can: (permission: string) => boolean;
+  /** GH #262 T7 (pinned decision): re-fetch the /auth/me snapshot. The user
+   *  plate reads avatar/name from this snapshot STATE (not react-query), so
+   *  MyDataModal calls refresh() after a portrait upload and after a
+   *  successful save to keep the plate current. A failed refresh keeps the
+   *  existing snapshot (a network blip never logs the user out). */
+  refresh: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -84,6 +90,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  // GH #262 T7 (pinned decision): re-fetch the master snapshot so the user
+  // plate (avatar + name) reflects a portrait upload / profile save. Unlike
+  // the mount bootstrap, a FAILED refresh keeps the current snapshot — a
+  // network blip must never demote an authenticated user to guest. A null
+  // response (session vanished server-side) is treated like the bootstrap:
+  // drop to guest.
+  const refresh = useCallback(async (): Promise<void> => {
+    try {
+      const me = await getMe();
+      if (me) {
+        setUser(me.user);
+        setPermissions(me.permissions);
+        setMaster(me.master);
+        setStatus('authenticated');
+      } else {
+        setStatus('guest');
+      }
+    } catch {
+      // Keep the existing snapshot on error.
+    }
+  }, []);
+
   const can = useCallback(
     (permission: string): boolean => {
       // Spec §2.4: the matcher is exactly "*" in perms or perm in perms.
@@ -93,7 +121,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   return (
-    <AuthContext.Provider value={{ user, permissions, master, status, login, logout, can }}>
+    <AuthContext.Provider value={{ user, permissions, master, status, login, logout, can, refresh }}>
       {children}
     </AuthContext.Provider>
   );

@@ -16,6 +16,20 @@ vi.mock('@/contexts/AuthContext', () => ({
 vi.mock('@/contexts/UIContext', () => ({
   useUI: vi.fn(),
 }));
+// GH #262 T7: the two cabinet modals are wired from the UserMenu items.
+// Mocked to lightweight markers — the modals' own behaviour is covered by
+// MyDataModal.test.tsx / PasswordModal.test.tsx; here we only assert that
+// clicking an item opens the right modal and that it closes again.
+vi.mock('@/app/components/modal/MyDataModal', () => ({
+  MyDataModal: ({ onClose }: { onClose: () => void }) => (
+    <div data-testid="mydata-modal-stub" onClick={onClose} />
+  ),
+}));
+vi.mock('@/app/components/modal/PasswordModal', () => ({
+  PasswordModal: ({ onClose }: { onClose: () => void }) => (
+    <div data-testid="password-modal-stub" onClick={onClose} />
+  ),
+}));
 
 import { useAuth } from '@/contexts/AuthContext';
 import { useUI } from '@/contexts/UIContext';
@@ -268,6 +282,64 @@ describe('UserMenu popup', () => {
     expect(items.map((el) => el.getAttribute('aria-label') ?? el.textContent)).toEqual(
       ITEM_NAMES_LIGHT,
     );
+  });
+});
+
+// GH #262 T7: «Мои данные» / «Сменить пароль» were inert placeholders until
+// now — clicking each opens its modal and closes the popup.
+describe('UserMenu cabinet modals (GH #262 T7)', () => {
+  beforeEach(() => {
+    mockUseAuth.mockReturnValue(mockAuthState());
+    mockUseUI.mockReturnValue(createMockUIContext() as unknown as ReturnType<typeof useUI>);
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('neither modal is mounted before an item is clicked', () => {
+    renderMenu();
+    expect(screen.queryByTestId('mydata-modal-stub')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('password-modal-stub')).not.toBeInTheDocument();
+  });
+
+  it('«Мои данные» opens MyDataModal and closes the popup', () => {
+    renderMenu();
+    openMenu();
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Мои данные' }));
+    expect(screen.getByTestId('mydata-modal-stub')).toBeInTheDocument();
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+  });
+
+  it('closing MyDataModal unmounts it', () => {
+    renderMenu();
+    openMenu();
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Мои данные' }));
+    fireEvent.click(screen.getByTestId('mydata-modal-stub'));
+    expect(screen.queryByTestId('mydata-modal-stub')).not.toBeInTheDocument();
+  });
+
+  it('«Сменить пароль» opens PasswordModal and closes the popup', () => {
+    renderMenu();
+    openMenu();
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Сменить пароль' }));
+    expect(screen.getByTestId('password-modal-stub')).toBeInTheDocument();
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+  });
+
+  it('closing PasswordModal unmounts it', () => {
+    renderMenu();
+    openMenu();
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Сменить пароль' }));
+    fireEvent.click(screen.getByTestId('password-modal-stub'));
+    expect(screen.queryByTestId('password-modal-stub')).not.toBeInTheDocument();
+  });
+
+  it('opening one modal does not mount the other', () => {
+    renderMenu();
+    openMenu();
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Мои данные' }));
+    expect(screen.queryByTestId('password-modal-stub')).not.toBeInTheDocument();
   });
 });
 

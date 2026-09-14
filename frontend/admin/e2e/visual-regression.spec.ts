@@ -117,6 +117,33 @@ test.describe('Activity Modal — Visual Regression', () => {
       maxDiffPixels: 2000,
     });
   });
+
+  // GH #258/#259: create mode — click an empty slot on the seed week (grid
+  // always has free slots there) → the «Новое занятие» dialog opens with the
+  // slot prefilled. Same shell (activity-details-modal-container), single
+  // «Создание занятия» tab, no client tabs and no delete footer.
+  test('activity modal — create mode (empty slot click)', async ({ page }) => {
+    const emptySlot = page.locator('[data-testid="empty-slot"]').first();
+    await expect(emptySlot).toBeVisible();
+    await emptySlot.click();
+
+    const dialog = page.getByRole('dialog', { name: 'Новое занятие' });
+    await expect(dialog).toBeVisible();
+    await expect(
+      page.locator('[data-testid="activity-details-modal-container"]'),
+    ).toBeVisible();
+
+    // Hide the NowLine to avoid time-dependent screenshot differences
+    await page.evaluate(() => {
+      const nowLine = document.querySelector('[data-testid="now-line"]');
+      if (nowLine) (nowLine as HTMLElement).style.display = 'none';
+    });
+
+    await expect(page).toHaveScreenshot('modal-create-mode.png', {
+      fullPage: false,
+      maxDiffPixels: 2000,
+    });
+  });
 });
 
 // ===========================================================================

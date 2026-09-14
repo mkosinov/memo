@@ -49,8 +49,21 @@ while true; do
 
     [ -f "$STATE/auto-impl.enabled" ] || continue
 
-    # локальная ёмкость: одна сессия менеджера на машину
-    if pgrep -f "opencode run" >/dev/null 2>&1; then
+    # локальная ёмкость: одна сессия менеджера на машину.
+    # Считаем ВСЕ живые процессы opencode: и TUI-сессии (голый `opencode`),
+    # и CLI-прогоны (`opencode run`). Постоянный сервер `opencode web` —
+    # не занятость, он работает всегда. TUI-сессии юзера невидимы для
+    # pgrep -f "opencode run" (грабли 14.09: iMac с двумя TUI IMPL
+    # считался свободным).
+    MACHINE_BUSY=0
+    for p in $(pgrep -x opencode 2>/dev/null); do
+        CMD=$(tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null)
+        case "$CMD" in
+            *"opencode web"*) : ;;
+            opencode*) MACHINE_BUSY=1; break ;;
+        esac
+    done
+    if [ "$MACHINE_BUSY" = 1 ]; then
         continue
     fi
 

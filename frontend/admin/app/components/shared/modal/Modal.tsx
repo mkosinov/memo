@@ -6,6 +6,11 @@ import { MODAL_CONTAINER_CLASS, MODAL_MAX_WIDTH, MODAL_SMALL_CLASS, MODAL_SMALL_
 export interface ModalProps {
   /** Modal title shown in header. Pass null/empty for a blank header (still has border + height). */
   title?: ReactNode;
+  /**
+   * DOM id for the title h2 — pass it to wire aria-labelledby on the dialog.
+   * When provided, the h2 renders even with an empty title (GH #258/#259).
+   */
+  titleId?: string;
   /** Optional subtitle/context line shown next to title in smaller text. */
   context?: ReactNode;
   /** Body content. Required. */
@@ -26,6 +31,7 @@ export interface ModalProps {
 
 export function Modal({
   title,
+  titleId,
   context,
   children,
   footer,
@@ -49,8 +55,8 @@ export function Modal({
         style={{ borderColor: 'var(--line)', backgroundColor: 'var(--white)' }}
       >
         <div className="flex items-center gap-3 min-w-0">
-          {title !== null && title !== undefined && title !== false && (
-            <h2 className="text-sm font-semibold text-ink truncate">{title}</h2>
+          {(titleId !== undefined || (title !== null && title !== undefined && title !== false)) && (
+            <h2 id={titleId} className="text-sm font-semibold text-ink truncate">{title}</h2>
           )}
           {context && <span className="text-xs text-ink-light shrink-0">{context}</span>}
         </div>

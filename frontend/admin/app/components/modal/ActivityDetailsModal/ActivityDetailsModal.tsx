@@ -10,6 +10,7 @@ import { SettingsTab } from './SettingsTab';
 import { ClientTab } from './ClientTab';
 import { ClientLabelById } from './ClientLabelById';
 import { NewBookingTab, type NewBookingSubmitData } from './NewBookingTab';
+import { CreateActivityTab, type CreateDefaults } from './CreateActivityTab';
 import { Modal } from '@/app/components/shared/modal/Modal';
 import { useRecordMutations } from '@/hooks/useRecordMutations';
 import { useActivityRecords } from '@/hooks/useActivities';
@@ -18,11 +19,112 @@ import { parseApiError } from '@/app/lib/api/parseApiError';
 interface ActivityDetailsModalProps {
   isOpen: boolean;
   onClose: () => void;
-  activity: ScheduleAdminDTO;
-  mode: 'edit' | 'quickAdd';
+  /** Existing activity for edit/quickAdd; null in create mode (GH #258/#259). */
+  activity?: ScheduleAdminDTO | null;
+  mode: 'edit' | 'quickAdd' | 'create';
+  /** Slot prefill for create mode (day index + start minutes). */
+  createDefaults?: CreateDefaults;
 }
 
-export function ActivityDetailsModal({ isOpen, onClose, activity, mode }: ActivityDetailsModalProps) {
+/**
+ * Mode dispatcher (GH #258/#259, spec §2.1.2). The parent owns only the
+ * dialog shell — backdrop, saving lock, mode switch. Record hooks live in
+ * {@link ExistingActivityContent}, so create mode never runs them (Rules of
+ * Hooks — branches are components, not conditionals around hook calls).
+ */
+export function ActivityDetailsModal({ isOpen, onClose, activity, mode, createDefaults }: ActivityDetailsModalProps) {
+  const [saving, setSaving] = useState(false);
+
+  if (!isOpen) return null;
+
+  return (
+    <div
+      className="fixed inset-0 z-[200] flex items-center justify-center"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="activity-modal-title"
+      data-testid="activity-details-modal"
+    >
+      {/* Backdrop — inert while a save is in flight (spec §2.1.7). */}
+      <div
+        data-testid="details-modal-backdrop"
+        className="absolute inset-0 bg-black/30 backdrop-blur-sm"
+        onClick={() => {
+          if (!saving) onClose();
+        }}
+      />
+
+      {mode === 'create' ? (
+        <CreateActivityPanel
+          defaults={createDefaults!}
+          saving={saving}
+          onSavingChange={setSaving}
+          onClose={onClose}
+        />
+      ) : (
+        <ExistingActivityContent
+          activity={activity!}
+          mode={mode}
+          isOpen={isOpen}
+          onClose={onClose}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Create mode — single tab with the slot-prefilled creation form. No record
+ * hooks, no delete footer; close cross is hidden while saving (Modal hides
+ * the button when onClose is undefined).
+ */
+function CreateActivityPanel({
+  defaults,
+  saving,
+  onSavingChange,
+  onClose,
+}: {
+  defaults: CreateDefaults;
+  saving: boolean;
+  onSavingChange: (saving: boolean) => void;
+  onClose: () => void;
+}) {
+  return (
+    <Modal
+      title="Новое занятие"
+      titleId="activity-modal-title"
+      onClose={saving ? undefined : onClose}
+      footer={null}
+      testId="activity-details-modal-container"
+    >
+      <TabNav
+        tabs={[{ id: 'create', label: 'Создание занятия' }]}
+        activeTab="create"
+        onTabChange={() => {}}
+      />
+      <div className="flex-1 flex flex-col overflow-y-auto" style={{ backgroundColor: 'var(--white)' }}>
+        <CreateActivityTab defaults={defaults} onSavingChange={onSavingChange} onSaved={onClose} />
+      </div>
+    </Modal>
+  );
+}
+
+/**
+ * Edit/quickAdd mode — the previous modal body verbatim (hooks, tabs memo,
+ * handlers, delete footer). Extracted so its hooks are conditional at the
+ * COMPONENT level, which satisfies the Rules of Hooks.
+ */
+function ExistingActivityContent({
+  activity,
+  mode,
+  isOpen,
+  onClose,
+}: {
+  activity: ScheduleAdminDTO;
+  mode: 'edit' | 'quickAdd';
+  isOpen: boolean;
+  onClose: () => void;
+}) {
   const { services, updateActivity, deleteActivity } = useScheduleData();
   const { showToast } = useUI();
 
@@ -145,7 +247,6 @@ export function ActivityDetailsModal({ isOpen, onClose, activity, mode }: Activi
     setActiveTab('settings');
   }, []);
 
-
   // Content renderer per active tab
   const renderContent = () => {
     if (activeTab === 'new-booking') {
@@ -181,50 +282,38 @@ export function ActivityDetailsModal({ isOpen, onClose, activity, mode }: Activi
     );
   };
 
-  if (!isOpen) return null;
-
   // Activity context header label — DTO carries date + time display caches.
   const contextLabel = activity.date
     ? formatActivityContext(new Date(activity.date + 'T' + activity.time + ':00'))
     : '';
 
   return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center" role="dialog" aria-modal="true" data-testid="activity-details-modal">
-      {/* Backdrop */}
-      <div
-        data-testid="details-modal-backdrop"
-        className="absolute inset-0 bg-black/30 backdrop-blur-sm"
-        onClick={onClose}
-      />
-
-      {/* Modal */}
-      <Modal
-        title={activity.serviceTitle || 'Мероприятие'}
-        context={contextLabel}
-        onClose={onClose}
-        footer={
-          <div data-testid="modal-footer">
-            <button
-              onClick={handleDeleteActivity}
-              className="text-red-500 hover:text-red-600 transition-colors text-sm"
-              data-testid="btn-delete-activity"
-            >
-              Удалить активность
-            </button>
-          </div>
-        }
-        testId="activity-details-modal-container"
-      >
-        <TabNav
-          tabs={tabs}
-          activeTab={activeTab}
-          onTabChange={setActiveTab}
-          onAddClick={handleAddClick}
-        />
-        <div className="flex-1 flex flex-col overflow-y-auto" style={{ backgroundColor: 'var(--white)' }}>
-          {renderContent()}
+    <Modal
+      title={activity.serviceTitle || 'Мероприятие'}
+      context={contextLabel}
+      onClose={onClose}
+      footer={
+        <div data-testid="modal-footer">
+          <button
+            onClick={handleDeleteActivity}
+            className="text-red-500 hover:text-red-600 transition-colors text-sm"
+            data-testid="btn-delete-activity"
+          >
+            Удалить активность
+          </button>
         </div>
-      </Modal>
-    </div>
+      }
+      testId="activity-details-modal-container"
+    >
+      <TabNav
+        tabs={tabs}
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
+        onAddClick={handleAddClick}
+      />
+      <div className="flex-1 flex flex-col overflow-y-auto" style={{ backgroundColor: 'var(--white)' }}>
+        {renderContent()}
+      </div>
+    </Modal>
   );
 }

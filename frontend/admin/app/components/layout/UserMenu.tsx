@@ -79,11 +79,15 @@ export function UserMenu({ collapsed }: UserMenuProps) {
     return () => document.removeEventListener('mousedown', handler);
   }, [open]);
 
+  // Popup entries for roving focus: menuitem + menuitemcheckbox (the theme
+  // row is a checkbox item — fix-round #262 finding 1).
+  const ITEM_SELECTOR = '[role="menuitem"], [role="menuitemcheckbox"]';
+
   // Focus the first item right after the popup opens.
   useEffect(() => {
     if (!open) return;
     setFocusedIdx(0);
-    menuRef.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+    menuRef.current?.querySelector<HTMLElement>(ITEM_SELECTOR)?.focus();
   }, [open]);
 
   const closeAndFocusTrigger = useCallback(() => {
@@ -107,7 +111,7 @@ export function UserMenu({ collapsed }: UserMenuProps) {
   const handleMenuKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     const menu = menuRef.current;
     if (!menu) return;
-    const items = Array.from(menu.querySelectorAll<HTMLElement>('[role="menuitem"]'));
+    const items = Array.from(menu.querySelectorAll<HTMLElement>(ITEM_SELECTOR));
     if (items.length === 0) return;
     const idx = items.indexOf(document.activeElement as HTMLElement);
     const moveTo = (i: number) => {
@@ -120,8 +124,12 @@ export function UserMenu({ collapsed }: UserMenuProps) {
         closeAndFocusTrigger();
         break;
       case 'Tab':
-        // Spec §5.1: Tab moves focus away AND closes. No preventDefault —
-        // the browser moves focus to the next focusable naturally.
+        // Spec §5.1: Tab moves focus away AND closes. Fix-round finding 2:
+        // focus the trigger FIRST so it survives the popup unmount, then
+        // close — the browser's default Tab traversal proceeds from the
+        // trigger to the next focusable instead of collapsing to <body>.
+        // No preventDefault: it would cancel that default traversal.
+        triggerRef.current?.focus();
         setOpen(false);
         break;
       case 'ArrowDown':
@@ -204,11 +212,15 @@ export function UserMenu({ collapsed }: UserMenuProps) {
           className="absolute bottom-full left-0 mb-2 z-50 w-56 rounded-xl shadow-lg border border-white/10 bg-sidebar p-1.5 space-y-0.5"
         >
           {/* 1. Theme slider (moved from the Menubar bottom row, §5.1).
-              Stays open on toggle so the user sees the palette switch. */}
+              Stays open on toggle so the user sees the palette switch.
+              Fix-round finding 1: menuitemcheckbox + aria-checked (dark?) and
+              a Label-in-Name accessible name that starts with the visible
+              «Тема» text (WCAG 2.5.3). */}
           <div
-            role="menuitem"
+            role="menuitemcheckbox"
             tabIndex={focusedIdx === 0 ? 0 : -1}
-            aria-label="Переключить тему"
+            aria-checked={theme === 'dark'}
+            aria-label={`Тема: ${theme === 'dark' ? 'тёмная' : 'светлая'}`}
             onClick={toggleTheme}
             onKeyDown={(e) => {
               if (e.key === 'Enter' || e.key === ' ') {

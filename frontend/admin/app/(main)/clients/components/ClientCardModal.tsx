@@ -125,7 +125,7 @@ export function ClientCardModal({ client, isOpen, onClose, onClientCreated, mode
   const clientPhone = client?.phone || 'Не указан';
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center" data-testid="client-card-modal">
+    <div className="fixed inset-0 z-[var(--z-popover)] flex items-center justify-center" data-testid="client-card-modal">
       {/* Backdrop */}
       <div
         data-testid="client-card-backdrop"

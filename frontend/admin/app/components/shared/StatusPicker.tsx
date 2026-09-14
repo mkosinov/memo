@@ -107,7 +107,7 @@ export function StatusPicker({
 
       {open && (
         <div
-          className="absolute z-50 mt-1 right-0 bg-white border rounded-lg shadow-lg py-1 min-w-[160px]"
+          className="absolute z-[var(--z-popover)] mt-1 right-0 bg-white border rounded-lg shadow-lg py-1 min-w-[160px]"
           style={{ borderColor: 'var(--line)' }}
           role="listbox"
           data-testid={`${testIdPrefix}-popover`}

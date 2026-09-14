@@ -111,7 +111,7 @@ function DroppableSlot({ dayIndex, slotIndex, slotMinutes, isHour, isHalfHour, d
           border: `2px dashed ${dragCopy ? '#22c55e' : 'var(--brand, #004D56)'}`,
           backgroundColor: dragCopy ? 'rgba(34,197,94,0.06)' : `rgba(${mixed.r}, ${mixed.g}, ${mixed.b}, 0.15)`,
           pointerEvents: 'none',
-          zIndex: 30,
+          zIndex: 'var(--z-drag-ghost)',
           position: 'relative' as const,
         };
       })()
@@ -121,7 +121,7 @@ function DroppableSlot({ dayIndex, slotIndex, slotMinutes, isHour, isHalfHour, d
           backgroundColor: dragCopy ? 'rgba(34,197,94,0.06)' : 'rgba(0,77,86,0.085)',
           borderRadius: '12px',
           pointerEvents: 'none',
-          zIndex: 30,
+          zIndex: 'var(--z-drag-ghost)',
           position: 'relative' as const,
           margin: '1px 6px',
         }
@@ -171,7 +171,7 @@ function DroppableSlot({ dayIndex, slotIndex, slotMinutes, isHour, isHalfHour, d
             border: '2px dashed rgba(0,77,86,0.3)',
             backgroundColor: `rgba(${stampGhostPreview.rgb.r}, ${stampGhostPreview.rgb.g}, ${stampGhostPreview.rgb.b}, 0.08)`,
             borderLeft: `3px solid ${stampGhostPreview.master.color}`,
-            zIndex: 25,
+            zIndex: 'var(--z-header)',
           }}
         >
           <div className="px-2 pt-1.5 pb-1">
@@ -455,7 +455,7 @@ export function DayColumn({ dayIndex, activities, masters, locations = [], servi
       {/* Drag ghost — single continuous dashed outline spanning all target slots */}
       {(ghostColumnId != null ? ghostColumnId === columnId : ghostDayIndex === dayIndex) && ghostSlotIndex != null && ghostHeight != null && (
         <div
-          className="absolute inset-x-1 rounded-xl pointer-events-none z-[30]"
+          className="absolute inset-x-1 rounded-xl pointer-events-none z-[var(--z-drag-ghost)]"
           style={{
             top: ghostSlotIndex * slotHeight,
             height: ghostHeight * slotHeight,
@@ -563,7 +563,7 @@ export function DayColumn({ dayIndex, activities, masters, locations = [], servi
                     });
                   }
                 }}
-                className="absolute right-1 z-[110] px-1.5 py-0.5 rounded-full bg-white/90 border border-gray-300 text-[10px] font-semibold text-gray-500 shadow-sm hover:bg-white hover:text-gray-700 transition-colors cursor-pointer"
+                className="absolute right-1 z-[var(--z-badge)] px-1.5 py-0.5 rounded-full bg-white/90 border border-gray-300 text-[10px] font-semibold text-gray-500 shadow-sm hover:bg-white hover:text-gray-700 transition-colors cursor-pointer"
                 data-popover-toggle
                 style={{
                   top: (activity.startMinutes - gridStartMinutes) * cellHeight / 30 + 2,
@@ -584,7 +584,7 @@ export function DayColumn({ dayIndex, activities, masters, locations = [], servi
           className="absolute left-0 right-0 border-t-2 border-brand/30 pointer-events-none"
           style={{
             top: (group.start - gridStartMinutes) * cellHeight / 30,
-            zIndex: 15,
+            zIndex: 'var(--z-grid)',
           }}
           data-testid={`group-boundary-${group.id}`}
         />

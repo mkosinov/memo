@@ -40,7 +40,7 @@ export function NowLine({ date, cellHeight = 60, gridStartMinutes = 540 }: NowLi
   return (
     <div
       data-testid="now-line"
-      className="absolute left-0 right-0 z-[15] pointer-events-none"
+      className="absolute left-0 right-0 z-[var(--z-grid)] pointer-events-none"
       style={{ top: position }}
     >
       <div className="flex items-center">

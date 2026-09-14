@@ -192,7 +192,7 @@ export function MultiSelect<T>({
 
       {isOpen && (
         <div
-          className={`absolute z-50 right-0 min-w-[200px] max-w-[calc(100vw-16px)] bg-white border rounded-lg shadow-lg ${
+          className={`absolute z-[var(--z-popover)] right-0 min-w-[200px] max-w-[calc(100vw-16px)] bg-white border rounded-lg shadow-lg ${
             opensUpward ? 'bottom-full mb-1' : 'mt-1 top-full'
           }`}
           style={{ borderColor: 'var(--line, #e5e7eb)' }}

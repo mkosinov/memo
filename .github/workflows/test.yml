@@ -105,6 +105,9 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm run lint
       - run: pnpm run type-check
+      - name: z-token guard
+        run: python3 scripts/check_z_tokens.py
+        working-directory: .
 
   skip-tracker:
     name: Skip-tracker (warning only)

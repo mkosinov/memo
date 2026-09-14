@@ -206,7 +206,8 @@ def cmd_pick_next():
     tiebreak (earliest claim comment wins)."""
     load_status_field()
     items = [it for it in items_with_fields() if it["state"] == "OPEN"]
-    ready = [it for it in items if (it["status"] or "") == "Ready to IMPL"]
+    # статус на борде — "Ready to IMPL (G2)": матч по префиксу, не по точной строке
+    ready = [it for it in items if (it["status"] or "").startswith("Ready to IMPL")]
     ready.sort(key=lambda it: int(it["next_up"]) if it["next_up"] else 99)
     for it in ready:
         if _recent_markers(it["number"], ("auto-impl claim:", "auto-impl blocked:")):

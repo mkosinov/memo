@@ -67,6 +67,16 @@ export async function waitForScheduleReady(page: Page) {
 }
 
 /**
+ * Wait for the schedule grid to render (day columns present).
+ * Works on empty weeks too (GH #258/#259: after T4 the grid renders on
+ * empty weeks with a status hint instead of activity cards), and with
+ * cards as-is.
+ */
+export async function waitForScheduleGrid(page: Page) {
+  await page.waitForSelector('[data-testid="day-column-0"]', { timeout: 10_000 });
+}
+
+/**
  * Wait for services page to load with table.
  * Navigates to /services, waits for API response, then waits for heading and table.
  */

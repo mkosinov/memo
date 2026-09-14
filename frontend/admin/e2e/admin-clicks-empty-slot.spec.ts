@@ -1,27 +1,50 @@
 import { test, expect } from './fixtures/test';
 import { waitForScheduleReady } from './fixtures/helpers';
 
+/**
+ * US-S01 (GH #258/#259, spec §5): Admin clicks an empty slot on a regular
+ * week → the create-activity dialog «Новое занятие» opens with the slot
+ * prefill → picks master/service/location → «Создать» → dialog closes and
+ * the activity card count grows by 1.
+ */
 test('US-S01: Admin can click empty slot to create activity', async ({
   page,
 }) => {
-  // ARRANGE: on /schedule
-  await page.goto('/schedule');
+  // ARRANGE: on /schedule with the seeded week rendered
   await waitForScheduleReady(page);
 
-  // ACT: click an empty time slot
+  const cardsBefore = await page.locator('[data-testid^="activity-"]').count();
+
+  // ACT: click an empty time slot.
+  // Slots live in DndContext (@dnd-kit) — prefer a real click, but fall
+  // back to dispatchEvent if the drag sensor intercepts the pointer.
   const emptySlot = page.locator('[data-testid="empty-slot"]').first();
   await expect(emptySlot).toBeVisible();
-  await emptySlot.click();
+  await test.step('click empty slot', async () => {
+    try {
+      await emptySlot.click({ timeout: 5_000 });
+    } catch {
+      await emptySlot.dispatchEvent('click');
+    }
+  });
 
-  // ASSERT: when stamp mode is not active, clicking an empty slot opens the
-  // create-activity modal (ActivityDetailsModal in edit mode). The dialog
-  // may appear if the slot handler fires openCreateModal.
-  // NOTE: If no stamp is selected, the slot fires onOpenModal which opens the
-  // ActivityDetailsModal. We check for either a dialog or that no error occurred.
-  const dialog = page.locator('[role="dialog"]');
-  // The modal opens with the Settings tab when clicking an empty slot
-  await expect(dialog).toBeVisible({ timeout: 5_000 }).catch(() => {
-    // If dialog doesn't open (no activity selected), the click was still handled
-    // without error — this is acceptable behavior for empty slots.
+  // ASSERT: the create-activity dialog is open (semantic, web-first —
+  // no .catch per spec §6).
+  const dialog = page.getByRole('dialog', { name: 'Новое занятие' });
+  await expect(dialog).toBeVisible();
+
+  // Fill master/service/location with the first real option each.
+  await test.step('fill create form and submit', async () => {
+    await dialog.getByTestId('create-master').selectOption({ index: 1 });
+    await dialog.getByTestId('create-service').selectOption({ index: 1 });
+    await dialog.getByTestId('create-location').selectOption({ index: 1 });
+
+    await dialog.getByTestId('btn-create-activity').click();
+    await expect(dialog).toBeHidden();
+
+    // Card appeared in the grid.
+    await expect(page.locator('[data-testid^="activity-"]')).toHaveCount(
+      cardsBefore + 1,
+    );
   });
 });

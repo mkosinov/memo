@@ -15,10 +15,12 @@
 #   → Case 1 (S2, безусловность): wipe_shard_dirs removes existing
 #     .next-shard-1/.next-shard-2 dirs, exit 0; second call on a clean
 #     tree → exit 0 (zero matches is SUCCESS, spec §3.3).
-#   → Case 2 (S2, fail-fast): PATH-stub `rm` that fails for .next-shard-*
-#     paths → wipe_shard_dirs exits non-zero with a message naming the
-#     path. (The only deterministic way to fail the removal; chmod tricks
-#     are non-deterministic on darwin.)
+#   → Case 2 (S2, fail-fast): SILENT PATH-stub `rm` that fails (no stderr
+#     echo) for .next-shard-* paths → wipe_shard_dirs exits non-zero with
+#     its OWN message naming the path. (The only deterministic way to fail
+#     the removal; chmod tricks are non-deterministic on darwin. The stub
+#     stays silent so the path in the captured output can only come from
+#     the library's error message — non-vacuous assert.)
 #   → Case 3 (S3, конечность): a `sleep 60` wrapper in SHARD_BACKEND_PIDS;
 #     cleanup_shards returns in ≤ 15 s and the process is dead.
 #   → Case 4 (S4, TERM-stubborn holder): python3 holder that ignores SIGTERM,
@@ -31,10 +33,11 @@
 #     must be able to FAIL on a deliberately injected violation — a harness
 #     that passes vacuously is a bug in the harness.
 #
-# Port hygiene (6.5): every process this test spawns binds a TEST port from
-# the isolated 38002+/48001+ ranges, verified free via lsof before binding.
-# The test tracks its own background PIDs and kill -9 + waits them in the
-# EXIT trap — no holder outlives the test.
+# Port hygiene (6.5): every process this test spawns binds a TEST port —
+# unique per run (PID-derived base inside the 38000-38199 window), verified
+# free via lsof before binding, far from production/dev/shard ranges
+# (3000-3003, 8000-8002). The test tracks its own background PIDs and
+# kill -9 + waits them in the EXIT trap — no holder outlives the test.
 #
 # RED/GREEN: the library already implements the behaviour (Task 3/T3 fix);
 # the RED side of TDD lives in the meta self-checks (Case 0, Case 4 control)
@@ -46,23 +49,32 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-# ── Test-port isolation range ──────────────────────────────────────────────
-# High ephemeral-ish ranges away from production (3000/3001/8000),
-# dev.sh (3001/8000) and shard ports (3002/3003/8001/8002).
-TEST_FRONTEND_PORT=38002
-TEST_BACKEND_PORT_A=48001
-TEST_BACKEND_PORT_B=48002
+# ── Test-port isolation: per-run unique, verified free ─────────────────────
+# High ephemeral-ish window away from production (3000/3001/8000), dev.sh
+# (3001/8000) and shard ports (3002/3003/8001/8002). Base is $RANDOM per
+# run; the THREE consecutive ports (front, backend-A, backend-B) are all
+# verified free via lsof before use, with retries. NB: $$-модуло нельзя —
+# у почти одновременных запусков PIDs соседние, окна пересекаются, и чужой
+# sweep убивает нашего держателя «на своём» порту; RANDOM делает коллизию
+# (~1/7900) практически невозможной.
+allocate_port_triplet() {
+  local front tries=0
+  while :; do
+    tries=$((tries + 1))
+    [ "$tries" -gt 20 ] && {
+      echo "FATAL: no free test-port triplet in 38200-46099 after $tries tries" >&2
+      exit 1
+    }
+    front=$((38200 + RANDOM % 7900))
+    if ! lsof -ti :"$front" $((front + 1)) $((front + 2)) >/dev/null 2>&1; then
+      printf '%s %s %s' "$front" "$((front + 1))" "$((front + 2))"
+      return 0
+    fi
+  done
+}
 
-# Guard: test ports must be free BEFORE we bind anything. A busy test port
-# would make the lsof-based assertions race with a foreign process.
-for p in "$TEST_FRONTEND_PORT" "$TEST_BACKEND_PORT_A" "$TEST_BACKEND_PORT_B"; do
-  if lsof -ti :"$p" >/dev/null 2>&1; then
-    echo "FATAL: test port $p is already in use — pick another isolation range" >&2
-    exit 1
-  fi
-done
-
-TEST_PORT="$TEST_BACKEND_PORT_A"
+read -r TEST_FRONTEND_PORT TEST_BACKEND_PORT_A TEST_BACKEND_PORT_B \
+  <<< "$(allocate_port_triplet)"
 
 # Library under test: overridable (RED demonstration against a deliberately
 # broken copy — run:
@@ -149,6 +161,8 @@ port_free() {
 # no nc/perl. It ignores SIGTERM and holds the port. argv becomes
 # `uvicorn <code> <port> <argv_tail>` — matches BOTH mask stages
 # (pgrep -f uvicorn + port hold). Echos the holder PID on stdout.
+# NB: returns immediately — bind-waiting is the PARENT's job (register_pid
+# below), so the PID is in the kill registry even if binding never happens.
 spawn_term_ignoring_uvicorn_holder() {
   local port="$1" tail="$2"
   (
@@ -159,9 +173,15 @@ s = socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 s.bind(("127.0.0.1", int(sys.argv[1]))); s.listen(1); time.sleep(60)
 ' "$port" "$tail"
   ) >/dev/null 2>&1 </dev/null &
-  local pid=$!
-  # Wait until the socket is actually bound (lsof sees it) — otherwise the
-  # sweep's port-hold check could run before the holder owns the port.
+  printf '%s' "$!"
+}
+
+# wait_holder_bound <pid> <port> — parent-side bind wait: poll lsof until
+# the holder owns the port (otherwise the sweep's port-hold check could run
+# before the holder binds). Call AFTER register_pid so any failure/timeout
+# path still leaves the PID reaped by the EXIT trap.
+wait_holder_bound() {
+  local pid="$1" port="$2"
   local deadline=$((SECONDS + 5))
   until lsof -ti :"$port" 2>/dev/null | grep -qx "$pid"; do
     if ! kill -0 "$pid" 2>/dev/null; then
@@ -174,7 +194,6 @@ s.bind(("127.0.0.1", int(sys.argv[1]))); s.listen(1); time.sleep(60)
     }
     sleep 0.1
   done
-  printf '%s' "$pid"
 }
 
 # ── Spawn helpers: два правила (оба найдены отладкой, нарушать нельзя) ─────
@@ -207,9 +226,9 @@ register_pid() {
 # (no uvicorn in argv, no shard port) must survive the same call.
 echo "── Case 0 (meta): sweep detector self-check ──"
 fresh_root "case0"
-TEST_PORT="$TEST_BACKEND_PORT_A"
 HOLDER_OK="$(spawn_term_ignoring_uvicorn_holder "$TEST_BACKEND_PORT_A" test_memo_shardX)"
-register_pid "$HOLDER_OK"
+register_pid "$HOLDER_OK"          # в реестре ДО bind-ожидания — EXIT-trap приберёт при любом исходе
+wait_holder_bound "$HOLDER_OK" "$TEST_BACKEND_PORT_A"
 # Guard: after the capture the holder must still be a live child — if the
 # bg process inherited the pipe, capture blocks until its self-exit and the
 # assertions below would pass vacuously.
@@ -258,9 +277,11 @@ fresh_root "case1"
 mkdir -p "$ROOT/frontend/admin/.next-shard-1" "$ROOT/frontend/admin/.next-shard-2"
 printf 'chunk' > "$ROOT/frontend/admin/.next-shard-1/x.js"
 printf 'chunk' > "$ROOT/frontend/admin/.next-shard-2/y.js"
-# A lookalike that must NOT be touched (prefix match trap) and must not
-# affect the exit code either way.
+# A stale lookalike from an OLDER shard layout — glob `.next-shard-*` has
+# no suffix constraint, so it IS matched and wiped too. That's the contract:
+# dirs left by a previous shard count must not survive into a new run.
 mkdir -p "$ROOT/frontend/admin/.next-shard-stale"
+printf 'old' > "$ROOT/frontend/admin/.next-shard-stale/z.js"
 
 source_lib
 set +e
@@ -271,6 +292,7 @@ CASE1_OK=true
 [ "$WIPE_RC" -eq 0 ] || CASE1_OK=false
 [ ! -e "$ROOT/frontend/admin/.next-shard-1" ] || CASE1_OK=false
 [ ! -e "$ROOT/frontend/admin/.next-shard-2" ] || CASE1_OK=false
+[ ! -e "$ROOT/frontend/admin/.next-shard-stale" ] || CASE1_OK=false
 
 set +e
 WIPE2_OUT=$(wipe_shard_dirs 2>&1); WIPE2_RC=$?
@@ -284,7 +306,7 @@ rm -rf "$ROOT/frontend/admin/.next-shard-1"
 [ ! -e "$ROOT/frontend/admin/.next-shard-1" ] || CASE1_OK=false
 
 if $CASE1_OK; then
-  echo "PASS Case 1 (S2): existing dirs wiped (rc=0), clean second pass (rc=0)"
+  echo "PASS Case 1 (S2): existing dirs + stale-lookalike wiped (rc=0), clean second pass (rc=0)"
 else
   echo "FAIL Case 1 (S2): wipe_rc=$WIPE_RC second_rc=$WIPE2_RC"
   echo "── Case 1 wipe output ──"
@@ -301,7 +323,8 @@ cat > "$STUBS/rm" <<'EOF'
 #!/bin/sh
 case "$*" in
   *.next-shard-*)
-    echo "rm: stub refusal for $*" >&2
+    # ТИХИЙ отказ: никакого stderr-эха с путём — иначе ассерт «сообщение
+    # библиотеки называет путь» матчил бы ЗГЛУШКУ, а не библиотеку.
     exit 1
     ;;
 esac
@@ -319,7 +342,13 @@ set -e
 
 CASE2_OK=true
 [ "$CASE2_RC" -ne 0 ] || CASE2_OK=false
-printf '%s' "$CASE2_OUT" | grep -q ".next-shard-" || CASE2_OK=false
+# Non-vacuity: the ONLY source of the path in the captured output is the
+# LIBRARY's fail-fast message (stub is silent) — anchor to its exact prefix
+# («❌ Failed to remove stale shard build dir:») AND require the path on
+# the SAME line, so neither a bare prefix nor a foreign mention can pass.
+printf '%s\n' "$CASE2_OUT" \
+  | grep -E '^❌ Failed to remove stale shard build dir: .*\.next-shard-' >/dev/null \
+  || CASE2_OK=false
 
 # Negative control for THIS case: with the real rm the same fixture wipes
 # fine — proves the stub (not the fixture) is what drives the failure.
@@ -377,9 +406,9 @@ SHARD_BACKEND_PIDS=()
 # ── Case 4 (S4): TERM-stubborn uvicorn-masked holder → killed, port free ──
 echo "── Case 4 (S4): TERM-ignoring holder (uvicorn argv + shard port) ──"
 fresh_root "case4"
-TEST_PORT="$TEST_BACKEND_PORT_B"
 H4="$(spawn_term_ignoring_uvicorn_holder "$TEST_BACKEND_PORT_B" test_memo_shardY)"
-register_pid "$H4"
+register_pid "$H4"                 # в реестре ДО bind-ожидания — EXIT-trap приберёт при любом исходе
+wait_holder_bound "$H4" "$TEST_BACKEND_PORT_B"
 kill -0 "$H4" 2>/dev/null || {
   echo "FATAL: holder not alive after capture (stdio leak in spawn helper)" >&2
   exit 1

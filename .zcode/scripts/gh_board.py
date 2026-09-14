@@ -71,27 +71,34 @@ def load_status_field():
 
 
 def items_with_fields() -> list[dict]:
-    d = gql(f'''query {{ node(id: "{PROJECT_ID}") {{ ... on ProjectV2 {{ items(first: 100) {{ nodes {{
-        id
-        content {{ ... on Issue {{ number title state }} }}
-        fieldValues(first: 20) {{ nodes {{
-            ... on ProjectV2ItemFieldSingleSelectValue {{ name field {{ ... on ProjectV2FieldCommon {{ name }} }} }}
-        }} }}
-    }} }} }} }} }}''')
     out = []
-    for it in d["node"]["items"]["nodes"]:
-        c = it.get("content")
-        if not c or "number" not in c:
-            continue
-        vals = {v["field"]["name"]: v["name"] for v in it["fieldValues"]["nodes"] if v}
-        out.append({
-            "item_id": it["id"],
-            "number": c["number"],
-            "title": c["title"],
-            "state": c["state"],
-            "status": vals.get("Status"),
-            "next_up": vals.get("Next Up"),
-        })
+    cursor = ""
+    while True:
+        after = f', after: "{cursor}"' if cursor else ""
+        d = gql(f'''query {{ node(id: "{PROJECT_ID}") {{ ... on ProjectV2 {{ items(first: 50{after}) {{ pageInfo {{ hasNextPage endCursor }} nodes {{
+            id
+            content {{ ... on Issue {{ number title state }} }}
+            fieldValues(first: 20) {{ nodes {{
+                ... on ProjectV2ItemFieldSingleSelectValue {{ name field {{ ... on ProjectV2FieldCommon {{ name }} }} }}
+            }} }}
+        }} }} }} }} }}''')
+        page = d["node"]["items"]
+        for it in page["nodes"]:
+            c = it.get("content")
+            if not c or "number" not in c:
+                continue
+            vals = {v["field"]["name"]: v["name"] for v in it["fieldValues"]["nodes"] if v}
+            out.append({
+                "item_id": it["id"],
+                "number": c["number"],
+                "title": c["title"],
+                "state": c["state"],
+                "status": vals.get("Status"),
+                "next_up": vals.get("Next Up"),
+            })
+        if not page["pageInfo"]["hasNextPage"]:
+            break
+        cursor = page["pageInfo"]["endCursor"]
     return out
 
 

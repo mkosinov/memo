@@ -51,7 +51,7 @@ An issue is automatically added to the board on the first set/status call if it 
 | **Card status check (pre-flight, triage, "can X run in parallel?")** | `gh_board.py show N` (or `show all`) | manager |
 | **User picked a task** | `status N "In Design (G1a)"` | whoever runs DESIGN — manager in-container; host DESIGN session after the split |
 | **Design gate passed (G1a/G1b/G2)** | flip status per the gate table above | whoever runs DESIGN |
-| **New issue created (gh issue create)** | ask the user whether to put it in Next Up (and where) | manager |
+| **New issue created (gh issue create)** | add the card in the same breath: `status N "Backlog"` — the user tracks work in the project board and does not see card-less issues; discuss Next Up only when it is upcoming work | manager |
 | **User changes the trajectory** | `set-next-up` per their words | manager |
 | **Plan-only IMPL entry (split): user says «продолжаем траекторию #N», card at `Ready to IMPL (G2)`** | verify card + plan on fetched main → `status N "In IMPL"` → dispatch IMPL (plan-only start, no worktree yet — architect's first action). Flip BEFORE the dispatch: the dispatch blocks for the whole marathon (2026-09-13: #262 sat on `Ready to IMPL` through a 15-hour run) | manager, container |
 | **IMPL blocked: spec/plan invalid (return path)** | architect reports BLOCKED → user decides → issue comment + `status N` back to `In Design (G1a)` / `Spec OK (G1b)`; scratchpad (v2): section removed if the worktree is discarded, kept while a kept worktree lives — the durable record is the issue comment; worktree keep-vs-discard — user decides | manager, after user decision |
@@ -63,5 +63,6 @@ An issue is automatically added to the board on the first set/status call if it 
 - ALL board interaction — reads AND writes — goes through this script only. NEVER hand-write `gh api graphql` against the project: reads waste calls and have historically gone wrong (wrong owner type, nonexistent fields), and field-definition mutations destroy data.
 - Changing the status option list (adding/renaming statuses) is **user-only, via the GitHub web UI**. The agent never runs `updateProjectV2Field`: the mutation replaces the whole option list and detaches every card's value (2026-09-09: 65/69 cards lost Status this way). Need a new status → ask the user to add it in the web UI.
 - Next Up — max 3 positions, no duplicates (the script frees an occupied position automatically).
+- Every new issue gets its board card (Status=Backlog) immediately at creation — the board mirrors ALL open issues; an off-board issue is invisible to the user (2026-09-14: 28 open issues had silently accumulated off-board this way).
 - Don't move Status on every micro-task — only when the whole task's stage changes.
 - FasTP fixes without an issue: don't touch the board. FasTP on an issue: Status In IMPL → In-main as usual.

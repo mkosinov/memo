@@ -70,6 +70,7 @@ export function ClientQuickCard({ clientId, onClose }: ClientQuickCardProps) {
       className="fixed inset-0 z-[var(--z-popover)] flex items-center justify-center"
       style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}
       onClick={onClose}
+      data-testid="client-quick-card"
     >
       <div onClick={(e) => e.stopPropagation()}>
         <Modal onClose={onClose}>

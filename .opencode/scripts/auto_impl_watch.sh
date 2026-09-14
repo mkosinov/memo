@@ -83,7 +83,14 @@ while true; do
     # свежий харнесс перед стартом
     git pull --ff-only >/dev/null 2>&1 || echo "$(date -Is) WARN: git pull failed, starting on current tree"
 
+    # шаблон названия сессии: "#issue IMPL. 1-5 ключевых слова" (из заголовка issue)
+    ITITLE=$(gh issue view "$N" --json title --jq .title 2>/dev/null || echo "")
+    KEYWORDS=$(printf '%s' "$ITITLE" | awk '{out=""; for(i=1;i<=5&&i<=NF;i++) out=out (i>1?" ":"") $i; print out; exit}')
+    TITLE="#${N} IMPL. ${KEYWORDS:-интерактив}"
+
     HANDOFF="Авто-IMPL: карточка #$N взята из Ready to IMPL (статус уже In IMPL). Организуй IMPL по её спеке и плану из репо. ПЕРЕД СТАРТОМ проверь гейты плана (T0): если зависимость не смержена или в плане открытое юзер-решение — верни карточку на борде в статус Ready to IMPL, оставь на issue комментарий, начинающийся с «auto-impl blocked: <причина>», и остановись, ничего не начиная. Блокеры по ходу работы — тоже комментарий «auto-impl blocked: …» на issue; карточку при этом в Ready to IMPL не возвращать. По завершении — штатный finishing: PR, борд In-main, сдвиг очереди."
-    nohup opencode run "$HANDOFF" > "$STATE/auto-impl-$N.log" 2>&1 &
-    echo "$(date -Is) #$N launched (pid $!), session log: $STATE/auto-impl-$N.log"
+    # --attach: сессия создаётся на работающем сервере (:4096) — сразу видна в вебе
+    nohup opencode run --attach "http://localhost:${OPENCODE_PORT:-4096}" --dir "$REPO" \
+        --title "$TITLE" "$HANDOFF" > "$STATE/auto-impl-$N.log" 2>&1 &
+    echo "$(date -Is) #$N launched (pid $!), title: $TITLE, session log: $STATE/auto-impl-$N.log"
 done

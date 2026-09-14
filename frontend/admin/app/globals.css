@@ -122,15 +122,25 @@ body.delete-mode [data-testid^="activity-"]:hover {
   box-shadow: 0 0 0 2px rgba(200, 80, 60, 0.5) !important;
 }
 
-/* ===== Z-Index Stacking Order =====
- *
- * z-[10]  — Schedule grid container
- * z-[20]  — DayColumn header
- * z-[50]  — Overlap popover (x-cards badge)
- * z-[100] — StatusPicker dropdown (inside modal)
- * z-[200] — ActivityDetailsModal overlay (backdrop + content)
- * z-[250] — Toast notifications (above modal so toasts are never hidden)
- *
- * Rule: toasts (z-[250]) must exceed modal (z-[200]) so the user
- * always sees confirmation/error messages.
- */
+/* ===== Z-Index Tokens — единственное место с голыми z-числами =====
+   Спека: docs/specs/2026-09-14-z-tokens-design.md §3.1.
+   Использование: классы z-[var(--z-имя)], inline zIndex: 'var(--z-имя)'.
+   Guard: scripts/check_z_tokens.py. Значения не перенумеровывать (кроме --z-badge 110→26, спека §3.1). */
+:root {
+  --z-base: 10;           /* дропдауны, фоновые карточки */
+  --z-grid: 15;           /* now-line, границы групп */
+  --z-grid-panel: 20;     /* sticky TimeColumn, правая панель Toolbar */
+  --z-slot-hover: 22;     /* подсветка слота */
+  --z-header: 25;         /* шапки колонок, карточки (верх модели 25−z в DayColumn) */
+  --z-badge: 26;          /* плашка «N cards»: выше карточек (25), ниже сайдбара (30) и панелей (50) */
+  --z-sidebar: 30;        /* Menubar */
+  --z-drag-ghost: 30;     /* drag/stamp-призраки в колонке */
+  --z-topbar: 40;         /* Topbar */
+  --z-popover: 50;        /* кластер поповеров и дропдаунов */
+  --z-drag-active: 50;    /* активный drag (ActivityCard) */
+  --z-drag-chip: 60;      /* чип/метка при drag */
+  --z-popover-stack: 120; /* OverlapPopover */
+  --z-modal: 150;         /* DeleteDialog, ArchiveStaffDialog */
+  --z-modal-details: 200; /* ActivityDetailsModal */
+  --z-toast: 250;         /* ToastContainer */
+}

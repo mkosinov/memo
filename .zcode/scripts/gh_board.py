@@ -141,7 +141,7 @@ def cmd_next_up():
         print(f"  {it['next_up']}. #{it['number']} [{it['status'] or 'no status'}] {it['title']}")
 
 
-CLAIM_TTL_HOURS = 12  # auto-impl: свежесть замков-комментариев
+CLAIM_TTL_HOURS = 1  # auto-impl: свежесть замков-комментариев (claim и blocked отдыхают одинаково)
 _DEP_RE = re.compile(r"(?im)^\s*depends-on:\s*(.+)$")
 _NUM_RE = re.compile(r"#?(\d+)")
 

@@ -186,6 +186,8 @@ cleanup_shards() {
 
   # Remove per-shard DB copies (master DB is kept)
   rm -f "$ROOT"/backend/test_memo_shard*.db
+  # GH #262 — remove per-shard avatar dirs (FILES_DIR), same lifecycle as the DB
+  rm -rf "$ROOT"/backend/test_files_shard*
 
   return 0
 }

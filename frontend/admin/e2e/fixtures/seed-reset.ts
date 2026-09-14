@@ -105,6 +105,43 @@ export function resolveSeedDbPath(): string {
 }
 
 /**
+ * GH #262 §6 (E2E infra) — resolve the TEST-SCOPED `FILES_DIR` root at call
+ * time, mirroring {@link resolveSeedDbPath}'s shard/env/default rules so the
+ * Playwright process and the shard backend agree on the SAME avatars dir:
+ *   SHARD_ID set          → backend/test_files_shard{id}
+ *   else TEST_FILES_DIR    → as-is, relative resolved against process CWD
+ *   else FILES_DIR         → as-is (the env the backend reads, config.py)
+ *   else                  → backend/files (backend default `./files` from the
+ *                            backend cwd, where uvicorn runs)
+ *
+ * `scripts/e2e-shard-start.sh` exports FILES_DIR to the shard-scoped path so
+ * the backend serves uploads from there; this resolver reproduces that path
+ * for the wipe below WITHOUT importing the backend settings.
+ */
+export function resolveTestFilesDir(): string {
+  const shardId = process.env.SHARD_ID;
+  if (shardId) {
+    return path.resolve(__dirname, `../../../../backend/test_files_shard${shardId}`);
+  }
+  const fromEnv = process.env.TEST_FILES_DIR || process.env.FILES_DIR;
+  if (fromEnv) return path.resolve(fromEnv);
+  return path.resolve(__dirname, '../../../../backend/files');
+}
+
+/**
+ * GH #262 §6 — wipe the avatars storage dir TOGETHER with the DB reset so a
+ * portrait uploaded by one test never leaks into the next (seed users carry
+ * NO avatars, spec §6, so the canonical post-reset state is an empty dir).
+ * Removes `FILES_DIR/avatars` entirely; the backend re-creates it on the next
+ * upload (services/files.py mkdir) and on boot (main.py lifespan). Best-effort:
+ * a missing dir is not an error.
+ */
+export function wipeAvatarsDir(): void {
+  const avatars = path.join(resolveTestFilesDir(), 'avatars');
+  fs.rmSync(avatars, { recursive: true, force: true });
+}
+
+/**
  * Reset the test DB to canonical seed state by executing RESET_SQL through
  * the shared busy-wait retry wrapper (same lock-retry semantics as every
  * other sqlite3 CLI call in the suite). Exported for the per-test wrapper

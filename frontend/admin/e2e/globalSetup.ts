@@ -17,7 +17,7 @@
  */
 import path from 'path';
 import { resolveAuthStatePath } from './fixtures/auth-state';
-import { RESET_SQL } from './fixtures/seed-reset';
+import { RESET_SQL, wipeAvatarsDir } from './fixtures/seed-reset';
 import { sqliteExecWithRetry } from './fixtures/sqlite-exec';
 import { WARMUP_ROUTES } from './fixtures/warmup-routes';
 
@@ -51,6 +51,17 @@ export default async function globalSetup() {
       console.error(`[globalSetup] ERROR cleaning DB: ${msg}`);
       throw err;
     }
+  }
+
+  // GH #262 §6 — wipe the test-scoped avatars dir together with the DB so a
+  // portrait uploaded by an earlier run never leaks into this one (seed users
+  // carry no avatars; the canonical post-reset state is an empty dir). The
+  // backend re-creates it on the next upload/boot. Best-effort: a missing dir
+  // is not an error (rmSync force:true).
+  try {
+    wipeAvatarsDir();
+  } catch (err: any) {
+    console.warn(`[globalSetup] Could not wipe avatars dir (non-fatal): ${String(err?.message || '').trim()}`);
   }
 
   // #152: diagnostic — assert seed contract before tests run. Two checks:

@@ -1,3 +1,5 @@
 memo.db
 # GH #262 — runtime avatar storage (FILES_DIR default ./files)
 files/
+# GH #262 T8 — per-shard e2e FILES_DIR (scripts/e2e-shard-start.sh)
+test_files_shard*/

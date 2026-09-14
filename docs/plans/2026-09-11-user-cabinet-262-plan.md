@@ -74,8 +74,8 @@
 ### Required Docs
 - Спека §10 (sequencing), шапка плана (Precondition).
 
-- [ ] Убедиться: #247 и #266 в main, CI main зелёный (`gh run list --branch main`).
-- [ ] `git checkout main && git pull --ff-only`; baseline: `uv run --extra dev pytest -q`, `pnpm test`, `pnpm type-check` — зелёные; выводы в отчёт задачи.
+- [x] Убедиться: #247 и #266 в main, CI main зелёный (`gh run list --branch main`).
+- [x] `git checkout main && git pull --ff-only`; baseline: `uv run --extra dev pytest -q`, `pnpm test`, `pnpm type-check` — зелёные; выводы в отчёт задачи.
 
 **DoD:** гейт пройден, baseline зафиксирован.
 
@@ -85,9 +85,9 @@
 ### Required Docs
 - Спека §3.1, §4 (форма ответа, PUT-семантика), D3/D7; `docs/domain-rules/profile.md` (граница, ленивое создание).
 
-- [ ] RED (pytest): GET — flat-профиль точь-в-точь §4 (role, has_staff, has_master, имена/avatar_url/specialties из карточки и master-секции, приватные поля); `has_staff=false` при отсутствии карточки **или её архиве** (имена null, запись имён игнорируется); `has_master=false` при отсутствии/архиве master-секции (specialties null); PUT: omitted=keep, null=clear; `first/last_name` обязательны когда есть и пишутся в карточку staff; `specialties` в теле игнорируется (read-only); ленивое создание `user_profiles`; одна транзакция (staff-поля + профиль); эмит существующей SSE-сущности `staff`; публичный GET `/api/v1/masters` (и `/staff`) — в key set нет ни одного приватного поля.
-- [ ] GREEN: модель/миграция/schemas/сервис/роутер по File Structure; `require_session` на обоих, `verify_fetch_metadata` на PUT.
-- [ ] `uv run --extra dev pytest -q` — зелёный. Commit `feat(#262): user_profiles + GET/PUT /my`.
+- [x] RED (pytest): GET — flat-профиль точь-в-точь §4 (role, has_staff, has_master, имена/avatar_url/specialties из карточки и master-секции, приватные поля); `has_staff=false` при отсутствии карточки **или её архиве** (имена null, запись имён игнорируется); `has_master=false` при отсутствии/архиве master-секции (specialties null); PUT: omitted=keep, null=clear; `first/last_name` обязательны когда есть и пишутся в карточку staff; `specialties` в теле игнорируется (read-only); ленивое создание `user_profiles`; одна транзакция (staff-поля + профиль); эмит существующей SSE-сущности `staff`; публичный GET `/api/v1/masters` (и `/staff`) — в key set нет ни одного приватного поля.
+- [x] GREEN: модель/миграция/schemas/сервис/роутер по File Structure; `require_session` на обоих, `verify_fetch_metadata` на PUT.
+- [x] `uv run --extra dev pytest -q` — зелёный. Commit `feat(#262): user_profiles + GET/PUT /my`.
 
 ## Task 2: Backend — аватар: загрузка + публичная статика
 
@@ -95,9 +95,9 @@
 ### Required Docs
 - Спека §3.4, D5/D8; `docs/domain-rules/profile.md` (Avatar files).
 
-- [ ] RED (pytest): `Content-Length` > 5MB → 413 `FILE_TOO_LARGE` ДО чтения тела; кап при стриминге; магические байты принимают JPEG/PNG/WebP, отклоняют переименованные/чужие → 415 `FILE_INVALID_TYPE`, temp-файл удалён на каждой ошибке; имя = UUIDv4 + расширение из белого списка; успех → `Staff.avatar_url` карточки сессионного юзера = `/api/v1/files/avatar/<uuid>.<ext>`, предыдущий СОБСТВЕННЫЙ (served) файл удалён, внешний URL не тронут; без сессии → 401; `GET /api/v1/files/avatar/<uuid>.jpg` — публично 200 (`X-Content-Type-Options: nosniff`, Content-Type по расширению); имя с разделителями путей не выходит из каталога (StaticFiles-конфайнмент → 404).
-- [ ] GREEN: FILES_DIR, file_type, services/files, POST /my/portrait, StaticFiles-mount, `python-multipart` в pyproject. Новых зависимостей кроме него нет.
-- [ ] pytest зелёный. Commit `feat(#262): avatar upload + static serving`.
+- [x] RED (pytest): `Content-Length` > 5MB → 413 `FILE_TOO_LARGE` ДО чтения тела; кап при стриминге; магические байты принимают JPEG/PNG/WebP, отклоняют переименованные/чужие → 415 `FILE_INVALID_TYPE`, temp-файл удалён на каждой ошибке; имя = UUIDv4 + расширение из белого списка; успех → `Staff.avatar_url` карточки сессионного юзера = `/api/v1/files/avatar/<uuid>.<ext>`, предыдущий СОБСТВЕННЫЙ (served) файл удалён, внешний URL не тронут; без сессии → 401; `GET /api/v1/files/avatar/<uuid>.jpg` — публично 200 (`X-Content-Type-Options: nosniff`, Content-Type по расширению); имя с разделителями путей не выходит из каталога (StaticFiles-конфайнмент → 404).
+- [x] GREEN: FILES_DIR, file_type, services/files, POST /my/portrait, StaticFiles-mount, `python-multipart` в pyproject. Новых зависимостей кроме него нет.
+- [x] pytest зелёный. Commit `feat(#262): avatar upload + static serving`.
 
 ## Task 3: Backend — `change-password` + avatar в `/auth/me`-снапшоте
 
@@ -105,9 +105,9 @@
 ### Required Docs
 - Спека §4 (строка change-password), D6; `docs/domain-rules/auth.md:42-45` (Change password).
 
-- [ ] RED (pytest): неверный текущий → 401 `AUTH_INVALID_CREDENTIALS` с timing-parity (DUMMY_HASH); нарушение политики → 422 `PASSWORD_POLICY`; успех → 204, **текущая сессия жива, остальные строки юзера удалены** (`token != текущей`); поля лестницы блокировок не тронуты; `/auth/me` — `master.avatar_url` присутствует (null, когда карточки нет); имя снапшота — из карточки **независимо от её архива** (Display rule спеки §4).
-- [ ] GREEN: `AuthService.change_password` (паттерн удаления сессий `service.py:271-276`), роут `router.py` после `/me` (require_session + verify_fetch_metadata; в `PUBLIC_ROUTES` НЕ вносить), `MasterSnapshot` += avatar_url (`schemas/auth.py:32-35`) + `_build_me_response` (`router.py:52-88`): читает `staff.avatar_url`, outerjoin карточки **без** фильтра `Staff.is_active == True` (`router.py:56-63`) — имя/аватар показываются и у архивированной карточки.
-- [ ] pytest зелёный. Commit `feat(#262): change-password + avatar in me snapshot`.
+- [x] RED (pytest): неверный текущий → 401 `AUTH_INVALID_CREDENTIALS` с timing-parity (DUMMY_HASH); нарушение политики → 422 `PASSWORD_POLICY`; успех → 204, **текущая сессия жива, остальные строки юзера удалены** (`token != текущей`); поля лестницы блокировок не тронуты; `/auth/me` — `master.avatar_url` присутствует (null, когда карточки нет); имя снапшота — из карточки **независимо от её архива** (Display rule спеки §4).
+- [x] GREEN: `AuthService.change_password` (паттерн удаления сессий `service.py:271-276`), роут `router.py` после `/me` (require_session + verify_fetch_metadata; в `PUBLIC_ROUTES` НЕ вносить), `MasterSnapshot` += avatar_url (`schemas/auth.py:32-35`) + `_build_me_response` (`router.py:52-88`): читает `staff.avatar_url`, outerjoin карточки **без** фильтра `Staff.is_active == True` (`router.py:56-63`) — имя/аватар показываются и у архивированной карточки.
+- [x] pytest зелёный. Commit `feat(#262): change-password + avatar in me snapshot`.
 
 ## Task 4: api-client
 
@@ -115,10 +115,10 @@
 ### Required Docs
 - Спека §4; конвенции `packages/api-client` (endpoints.ts `:915-929` — зона auth; schemas.ts `:664-679`).
 
-- [ ] `endpoints.ts`: `getMyProfile`, `updateMyProfile(data)`, `uploadPortrait(file)` (multipart), `changePassword({current_password, new_password})`.
-- [ ] `schemas.ts`: `MyProfileSchema`/`MyProfileUpdateSchema` (паритет Pydantic), `ChangePasswordSchema`, `MasterSnapshotSchema` += `avatar_url` (nullable).
-- [ ] Regen fixtures: `packages/api-client/scripts/gen_backend_fixtures.py`.
-- [ ] `pnpm test` (api-client) зелёный; фронт `pnpm type-check` — зелёный (поле nullable, аддитивно). Commit `feat(#262): api-client my/password endpoints`.
+- [x] `endpoints.ts`: `getMyProfile`, `updateMyProfile(data)`, `uploadPortrait(file)` (multipart), `changePassword({current_password, new_password})`.
+- [x] `schemas.ts`: `MyProfileSchema`/`MyProfileUpdateSchema` (паритет Pydantic), `ChangePasswordSchema`, `MasterSnapshotSchema` += `avatar_url` (nullable).
+- [x] Regen fixtures: `packages/api-client/scripts/gen_backend_fixtures.py`.
+- [x] `pnpm test` (api-client) зелёный; фронт `pnpm type-check` — зелёный (поле nullable, аддитивно). Commit `feat(#262): api-client my/password endpoints`.
 
 ## Task 5: Фронт — персист темы + bootstrap до гидрации
 
@@ -126,8 +126,8 @@
 ### Required Docs
 - Спека §5.4; сценарий S1.
 
-- [ ] RED (vitest): маунт UIContext читает `localStorage["memo-theme"]` (fallback light); `toggleTheme` пишет localStorage + `data-theme`; inline-скрипт в `app/layout.tsx` стоит в `<head>` и читает тот же ключ.
-- [ ] GREEN: `UIContext.tsx` (`:24,35,90-94`), `app/layout.tsx`. Commit `feat(#262): theme persistence`.
+- [x] RED (vitest): маунт UIContext читает `localStorage["memo-theme"]` (fallback light); `toggleTheme` пишет localStorage + `data-theme`; inline-скрипт в `app/layout.tsx` стоит в `<head>` и читает тот же ключ.
+- [x] GREEN: `UIContext.tsx` (`:24,35,90-94`), `app/layout.tsx`. Commit `feat(#262): theme persistence`.
 
 ## Task 6: Фронт — UserMenu popup + приведение плашки к спеке
 
@@ -135,9 +135,9 @@
 ### Required Docs
 - Спека §5.1, §6 (гэп-поправка: снапшот/плашка), D1/D9; сценарии S1/S5; `docs/design-system.md`.
 
-- [ ] RED (vitest): клик/Enter по плашке открывает popup **вверх** с ровно 4 пунктами; вне-клик/Escape закрывают; стрелки навигируют; **Tab уходит и закрывает**; фокус возвращается на триггер; `aria-haspopup="menu"`+`aria-expanded` на триггере; в свёрнутом сайдбаре — круглый аватар-триггер (сегодня блок скрыт целиком); «Выйти» зовёт AuthContext-logout (`AuthContext.tsx:74`, тот же хелпер — без дублирующего API-вызова) → `/login`; плашка: аватар + имя и фамилия (в т.ч. архивированной карточки), ярлыка роли НЕТ, «Аноним» — только когда в карточке нет имени-фамилии (на практике карточки нет), при `master.avatar_url` — `<img>`, иначе инициал.
-- [ ] GREEN: `UserMenu.tsx` NEW (паттерн action-menu `frontend/admin/app/components/shared/DataTable.tsx`); `Menubar.tsx` MODIFY: убрать кнопку «Выйти» (`:701-705`) и ряд-слайдер (`:727-740` — переезжает в popup), ярлык роли — и константу (`:486`), и JSX-рендер (`:699`), телефон-fallback в displayName (`:479-484` → «Аноним»); обновить юнит-тесты Menubar в этой же задаче.
-- [ ] `pnpm test && pnpm type-check` зелёные. Commit `feat(#262): user menu popup`.
+- [x] RED (vitest): клик/Enter по плашке открывает popup **вверх** с ровно 4 пунктами; вне-клик/Escape закрывают; стрелки навигируют; **Tab уходит и закрывает**; фокус возвращается на триггер; `aria-haspopup="menu"`+`aria-expanded` на триггере; в свёрнутом сайдбаре — круглый аватар-триггер (сегодня блок скрыт целиком); «Выйти» зовёт AuthContext-logout (`AuthContext.tsx:74`, тот же хелпер — без дублирующего API-вызова) → `/login`; плашка: аватар + имя и фамилия (в т.ч. архивированной карточки), ярлыка роли НЕТ, «Аноним» — только когда в карточке нет имени-фамилии (на практике карточки нет), при `master.avatar_url` — `<img>`, иначе инициал.
+- [x] GREEN: `UserMenu.tsx` NEW (паттерн action-menu `frontend/admin/app/components/shared/DataTable.tsx`); `Menubar.tsx` MODIFY: убрать кнопку «Выйти» (`:701-705`) и ряд-слайдер (`:727-740` — переезжает в popup), ярлык роли — и константу (`:486`), и JSX-рендер (`:699`), телефон-fallback в displayName (`:479-484` → «Аноним»); обновить юнит-тесты Menubar в этой же задаче.
+- [x] `pnpm test && pnpm type-check` зелёные. Commit `feat(#262): user menu popup`.
 
 ## Task 7: Фронт — MyDataModal + PasswordModal
 
@@ -145,9 +145,9 @@
 ### Required Docs
 - Спека §5.2, §5.3, §5.5, D2/D4/D7/D12; `docs/domain-rules/profile.md`; паттерны `PhotoModal.tsx`, `PositionModal.tsx`, `CalendarPopover`, `DeleteDialog.tsx`.
 
-- [ ] RED (vitest) MyDataModal: Роль read-only; Имя*/Фамилия* (скрыты целиком при `has_staff=false`); Специализация — read-only строка (массив через запятую; строка видна только при `has_master=true`; PUT её не отправляет); Отчество/Дата рождения (CalendarPopover)/Адрес проживания; секция «Паспорт»: место рождения, серия и номер, когда выдан, кем выдан, адрес регистрации + disabled-строка «Фото первой страницы паспорта — появится позже» (точная строка, без интерактива); портрет-блок: превью + «Загрузить фото» → `uploadPortrait` (аватар плашки обновляется сразу) + «Удалить» → `avatar_url: null`; dirty-guard на закрытии; submit → `updateMyProfile` → инвалидация `['me']` + семьи `staff` и `masters` (`lib/invalidate.ts`, БЕЗ новых EntityName/SSE-сущностей); режимы no-card (S6).
-- [ ] RED (vitest) PasswordModal: 3 поля, хинт `PASSWORD_POLICY_HINT_RU`, неверный текущий → inline «Неверный пароль», успех → тост «Пароль изменён», без редиректа; открытие обеих модалок из UserMenu.
-- [ ] GREEN: `useMyProfile.ts` (`['me','profile']` — дитя префикса `['me']`, одна инвалидация `invalidateQueries(['me'])` покрывает), модалки по File Structure. Commit `feat(#262): my-data + password modals`.
+- [x] RED (vitest) MyDataModal: Роль read-only; Имя*/Фамилия* (скрыты целиком при `has_staff=false`); Специализация — read-only строка (массив через запятую; строка видна только при `has_master=true`; PUT её не отправляет); Отчество/Дата рождения (CalendarPopover)/Адрес проживания; секция «Паспорт»: место рождения, серия и номер, когда выдан, кем выдан, адрес регистрации + disabled-строка «Фото первой страницы паспорта — появится позже» (точная строка, без интерактива); портрет-блок: превью + «Загрузить фото» → `uploadPortrait` (аватар плашки обновляется сразу) + «Удалить» → `avatar_url: null`; dirty-guard на закрытии; submit → `updateMyProfile` → инвалидация `['me']` + семьи `staff` и `masters` (`lib/invalidate.ts`, БЕЗ новых EntityName/SSE-сущностей); режимы no-card (S6).
+- [x] RED (vitest) PasswordModal: 3 поля, хинт `PASSWORD_POLICY_HINT_RU`, неверный текущий → inline «Неверный пароль», успех → тост «Пароль изменён», без редиректа; открытие обеих модалок из UserMenu.
+- [x] GREEN: `useMyProfile.ts` (`['me','profile']` — дитя префикса `['me']`, одна инвалидация `invalidateQueries(['me'])` покрывает), модалки по File Structure. Commit `feat(#262): my-data + password modals`.
 
 ## Task 8: E2E, файловая гигиена тестов, базлайны, CHANGELOG
 
@@ -155,10 +155,10 @@
 ### Required Docs
 - Спека §6 (Testing), §7 (S1–S6); e2e-инфра: `e2e/fixtures/factories.ts` (`seedUser :461`, `linkUserToStaff :432`), `globalSetup.ts:134-158` (storageState админа), `seed-reset.ts` (RESET_SQL), #247-паттерн логина мастера (API POST /auth/login).
 
-- [ ] RED: `cabinet.spec.ts` — S1 (popup 4 пункта, тема живёт после reload, старый слайдер исчез), S2 (смена пароля: ошибка → тост → сессия жива → старый пароль отвергнут на `/login`, новый принят), S3 (имя+портрет → плашка и таблица «Сотрудники»; специализация read-only), S4 (приватные поля персистятся; `/my` без сессии 401; key set `/masters` без приватных полей), S5 («Выйти» → `/login`, `/schedule` редиректит), S6 (`seedUser` без карточки: «Аноним», форма без имени/специализации, приватные поля работают — расширить фабрику опцией «без staff_id»).
-- [ ] Инфра: test-scoped `FILES_DIR` (env e2e-стека) + очистка каталога вместе с БД в globalSetup; visual-regression `beforeEach` ставит `localStorage["memo-theme"]="light"`; сид-юзеры без аватаров.
-- [ ] Re-capture базлайнов: `menubar-*` (слайдер убран, плашка изменена) + любые полные страницы с нижним блоком.
-- [ ] GREEN: полный стек (`scripts/test-all.sh`) зелёный. CHANGELOG.md строка #262. Commit `test(#262): cabinet e2e + baselines + changelog`.
+- [x] RED: `cabinet.spec.ts` — S1 (popup 4 пункта, тема живёт после reload, старый слайдер исчез), S2 (смена пароля: ошибка → тост → сессия жива → старый пароль отвергнут на `/login`, новый принят), S3 (имя+портрет → плашка и таблица «Сотрудники»; специализация read-only), S4 (приватные поля персистятся; `/my` без сессии 401; key set `/masters` без приватных полей), S5 («Выйти» → `/login`, `/schedule` редиректит), S6 (`seedUser` без карточки: «Аноним», форма без имени/специализации, приватные поля работают — расширить фабрику опцией «без staff_id»).
+- [x] Инфра: test-scoped `FILES_DIR` (env e2e-стека) + очистка каталога вместе с БД в globalSetup; visual-regression `beforeEach` ставит `localStorage["memo-theme"]="light"`; сид-юзеры без аватаров.
+- [x] Re-capture базлайнов: `menubar-*` (слайдер убран, плашка изменена) + любые полные страницы с нижним блоком.
+- [x] GREEN: полный стек (`scripts/test-all.sh`) зелёный. CHANGELOG.md строка #262. Commit `test(#262): cabinet e2e + baselines + changelog`.
 
 ---
 

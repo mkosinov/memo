@@ -1,23 +1,25 @@
 #!/usr/bin/env bash
 # auto_impl_watch.sh — контейнерный наблюдатель IMPL-конвейера memo.
 #
-# Инвариант (раз в INTERVAL): если на борде есть карточка Ready to IMPL,
-# нет ни одной In IMPL и на этой машине нет живой сессии менеджера —
-# захватить карточку (статус In IMPL + комментарий-замок с меткой хоста)
+# Инвариант (раз в INTERVAL): если есть карточка Ready to IMPL, доступная
+# этому наблюдателю, — захватить её (комментарий-замок + статус In IMPL)
 # и запустить фоном `opencode run` (дефолтный агент memo = manager).
-# Сессия попадает в общее хранилище и видна в вебе (:4096).
+# ГЛОБАЛЬНОГО мьютекса нет: две машины могут вести разные карточки
+# параллельно; гонку за одну карточку ломает тайбрейк по комментариям
+# (пост-замок, пауза, выигрывает самый ранний claim).
 #
 # Старт:  docker exec -d opencode bash /root/workspace/memo/.opencode/scripts/auto_impl_watch.sh
 # Стоп:   docker exec opencode pkill -f auto_impl_watch
 # Вкл.:   docker exec opencode touch /root/.local/state/opencode/auto-impl.enabled
 # Выкл.:  docker exec opencode rm -f /root/.local/state/opencode/auto-impl.enabled
 #
-# Метка хоста для комментариев-замков: /root/.local/state/opencode/auto-impl-host
-# (например "imac" или "laptop"; иначе используется hostname контейнера).
-# Выбор карточки: gh_board.py pick-next (Next Up 1 → первая Ready to IMPL).
-# Замок: комментарий на issue "auto-impl claim: host=..." — если свежий клейм
-# (12ч) уже есть, карточка пропускается. Кандидат с этим префиксом пишется
-# ТОЛЬКО наблюдателем.
+# Метка хоста: /root/.local/state/opencode/auto-impl-host ("imac"/"laptop").
+# Выбор карточки: gh_board.py pick-next (Next Up → первая Ready to IMPL;
+# пропуск карточек со свежими замками и с незакрытыми depends-on из тела issue).
+# Захваченная карточка имеет префикс комментария "auto-impl claim:",
+# менеджер при неготовом гейте возвращает её в Ready to IMPL с комментарием
+# "auto-impl blocked: ..." — оба префикса дают карточке отдых 12ч (TTL в
+# gh_board.py CLAIM_TTL_HOURS), чтобы конвейер не долбил её впустую.
 
 set -uo pipefail
 
@@ -26,7 +28,7 @@ STATE=/root/.local/state/opencode
 LOG="$STATE/auto-impl-watch.log"
 LOCK=/tmp/auto-impl-watch.lock
 INTERVAL="${AUTO_IMPL_INTERVAL:-180}"
-CLAIM_TTL=43200   # 12ч: свежесть комментария-замка
+TIEBREAK_WAIT=6   # сек: окно, в котором второй наблюдатель успевает поставить свой claim
 
 cd "$REPO" || exit 1
 mkdir -p "$STATE"
@@ -47,32 +49,30 @@ while true; do
 
     [ -f "$STATE/auto-impl.enabled" ] || continue
 
-    # локально: не запускаем вторую сессию
+    # локальная ёмкость: одна сессия менеджера на машину
     if pgrep -f "opencode run" >/dev/null 2>&1; then
         continue
     fi
 
     PICK=$(python3 .opencode/scripts/gh_board.py pick-next 2>/dev/null) || { echo "$(date -Is) board query failed"; continue; }
     case "$PICK" in
-        BUSY|NONE|"") continue ;;
+        NONE|"") continue ;;
         *[!0-9]*) echo "$(date -Is) unexpected pick output: $PICK"; continue ;;
     esac
     N="$PICK"
 
-    # распределённый замок: свежий чужой клейм → пропуск
-    CLAIMED_AT=$(gh issue view "$N" --json comments \
-        --jq '[.comments[] | select(.body | startswith("auto-impl claim:"))] | sort_by(.createdAt) | last | .createdAt // empty' 2>/dev/null) || CLAIMED_AT=""
-    if [ -n "$CLAIMED_AT" ]; then
-        AGE=$(( $(date +%s) - $(date -d "$CLAIMED_AT" +%s 2>/dev/null || echo 0) ))
-        if [ "$AGE" -ge 0 ] && [ "$AGE" -lt "$CLAIM_TTL" ]; then
-            echo "$(date -Is) #$N claimed ${AGE}s ago by another run — skip"
-            continue
-        fi
-    fi
-
     echo "$(date -Is) claiming #$N on $HOST_LABEL"
     gh issue comment "$N" --body "auto-impl claim: host=$HOST_LABEL at $(date -Is)" >/dev/null 2>&1 \
         || { echo "$(date -Is) claim comment failed — skip"; continue; }
+
+    # тайбрейк гонки: через TIEBREAK_WAIT самый ранний claim должен быть нашим
+    sleep "$TIEBREAK_WAIT"
+    FIRST=$(gh issue view "$N" --json comments \
+        --jq '[.comments[] | select(.body | startswith("auto-impl claim:"))] | sort_by(.createdAt) | first | .body // empty' 2>/dev/null) || FIRST=""
+    case "$FIRST" in
+        *"host=$HOST_LABEL "*) : ;;
+        *) echo "$(date -Is) #$N lost claim race — back off"; continue ;;
+    esac
 
     # захват статуса ДО запуска сессии
     if ! python3 .opencode/scripts/gh_board.py status "$N" "In IMPL"; then
@@ -83,7 +83,7 @@ while true; do
     # свежий харнесс перед стартом
     git pull --ff-only >/dev/null 2>&1 || echo "$(date -Is) WARN: git pull failed, starting on current tree"
 
-    HANDOFF="Авто-IMPL: карточка #$N взята из Ready to IMPL (статус уже In IMPL). Организуй IMPL по её спеке и плану из репо. Перед стартом проверь гейты плана: если зависимость не смержена или в плане открытое юзер-решение — остановись и оставь комментарий на issue, ничего не начинай. Блокеры по ходу — стоп и комментарий на issue, решений не изобретать. По завершении — штатный finishing: PR, борд In-main, сдвиг очереди."
+    HANDOFF="Авто-IMPL: карточка #$N взята из Ready to IMPL (статус уже In IMPL). Организуй IMPL по её спеке и плану из репо. ПЕРЕД СТАРТОМ проверь гейты плана (T0): если зависимость не смержена или в плане открытое юзер-решение — верни карточку на борде в статус Ready to IMPL, оставь на issue комментарий, начинающийся с «auto-impl blocked: <причина>», и остановись, ничего не начиная. Блокеры по ходу работы — тоже комментарий «auto-impl blocked: …» на issue; карточку при этом в Ready to IMPL не возвращать. По завершении — штатный finishing: PR, борд In-main, сдвиг очереди."
     nohup opencode run "$HANDOFF" > "$STATE/auto-impl-$N.log" 2>&1 &
     echo "$(date -Is) #$N launched (pid $!), session log: $STATE/auto-impl-$N.log"
 done

@@ -3,7 +3,7 @@
 
 Usage (from repo root):
   python3 .zcode/scripts/gh_board.py next-up                     — show the trajectory (Next Up 1→3)
-  python3 .zcode/scripts/gh_board.py pick-next                   — token for auto-impl watcher: BUSY | NONE | <issue>
+  python3 .zcode/scripts/gh_board.py pick-next                   — token for auto-impl watcher: NONE | <issue>
   python3 .zcode/scripts/gh_board.py show N                      — read one card: status + queue position
   python3 .zcode/scripts/gh_board.py show all                    — the whole board as a table
   python3 .zcode/scripts/gh_board.py set-next-up N 1|2|3|none    — set/clear queue position
@@ -19,9 +19,10 @@ and .opencode/scripts/ (container); when editing, change both (or edit
 one and copy over).
 """
 import json
+import re
 import subprocess
 import sys
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 SCRATCHPAD = Path(__file__).resolve().parents[2] / ".opencode" / "scratchpad.md"
@@ -140,24 +141,81 @@ def cmd_next_up():
         print(f"  {it['next_up']}. #{it['number']} [{it['status'] or 'no status'}] {it['title']}")
 
 
+CLAIM_TTL_HOURS = 12  # auto-impl: свежесть замков-комментариев
+_DEP_RE = re.compile(r"(?im)^\s*depends-on:\s*(.+)$")
+_NUM_RE = re.compile(r"#?(\d+)")
+
+
+def _recent_markers(number: int, prefixes: tuple[str, ...]) -> list[dict]:
+    """Issue comments whose body starts with one of prefixes, posted within
+    CLAIM_TTL_HOURS, oldest first. Network errors → empty list (fail-open)."""
+    r = subprocess.run(
+        ["gh", "issue", "view", str(number), "--json", "comments",
+         "--repo", f"{OWNER}/{REPO}"],
+        capture_output=True, text=True,
+    )
+    if r.returncode != 0:
+        return []
+    now = datetime.now(timezone.utc)
+    out = []
+    for c in json.loads(r.stdout or "{}").get("comments", []):
+        body = c.get("body", "")
+        if not any(body.startswith(p) for p in prefixes):
+            continue
+        try:
+            created = datetime.fromisoformat(c["createdAt"].replace("Z", "+00:00"))
+        except (KeyError, ValueError):
+            continue
+        if (now - created).total_seconds() <= CLAIM_TTL_HOURS * 3600:
+            out.append({"created": created, "body": body})
+    return sorted(out, key=lambda c: c["created"])
+
+
+def _open_deps(number: int) -> list[int]:
+    """Issue numbers from body lines `depends-on: #12, #34` that are still OPEN.
+    Convention for the auto-impl pipeline: declare hard dependencies in the
+    issue body so the watcher can skip not-yet-mergeable cards cheaply."""
+    r = subprocess.run(
+        ["gh", "issue", "view", str(number), "--json", "body",
+         "--repo", f"{OWNER}/{REPO}"],
+        capture_output=True, text=True,
+    )
+    if r.returncode != 0:
+        return []
+    body = json.loads(r.stdout or "{}").get("body") or ""
+    nums: list[int] = []
+    for m in _DEP_RE.finditer(body):
+        nums += [int(n) for n in _NUM_RE.findall(m.group(1))]
+    open_deps = []
+    for n in dict.fromkeys(nums):
+        d = gql(f'query {{ repository(owner: "{OWNER}", name: "{REPO}") {{ issue(number: {n}) {{ state }} }} }}')
+        issue = d["repository"]["issue"]
+        if issue and issue["state"] == "OPEN":
+            open_deps.append(n)
+    return open_deps
+
+
 def cmd_pick_next():
-    """Token protocol for .opencode/scripts/auto_impl_watch.sh (one line):
-    BUSY  — an open issue is already In IMPL, the pipeline is busy;
-    NONE  — no candidate (no Ready to IMPL card, and Next Up 1 is not Ready);
-    <number> — the issue the watcher should claim and run.
-    Order: Next Up 1 (if its status is Ready to IMPL) → else the first
-    Ready to IMPL card in board order."""
+    """Token protocol for .opencode/scripts/auto_impl_watch.sh: NONE | <number>.
+    Candidates: OPEN issues with board status "Ready to IMPL".
+    Order: Next Up position ascending (99 = unset), then board order.
+    Skipped: cards with a fresh (12h) "auto-impl claim:"/"auto-impl blocked:"
+    comment, and cards whose body declares `depends-on: #N` with N still OPEN.
+    Deliberately NO global busy check — two machines may hold different cards
+    in parallel; the race on one card is broken by the watcher's claim
+    tiebreak (earliest claim comment wins)."""
     load_status_field()
     items = [it for it in items_with_fields() if it["state"] == "OPEN"]
-    if any((it["status"] or "").lower() == "in impl" for it in items):
-        print("BUSY")
-        return
     ready = [it for it in items if (it["status"] or "") == "Ready to IMPL"]
-    if not ready:
-        print("NONE")
+    ready.sort(key=lambda it: int(it["next_up"]) if it["next_up"] else 99)
+    for it in ready:
+        if _recent_markers(it["number"], ("auto-impl claim:", "auto-impl blocked:")):
+            continue
+        if _open_deps(it["number"]):
+            continue
+        print(it["number"])
         return
-    nu1 = next((it for it in ready if it["next_up"] == "1"), None)
-    print(nu1["number"] if nu1 else ready[0]["number"])
+    print("NONE")
 
 
 def cmd_show(arg: str):

@@ -3,6 +3,7 @@
 
 Usage (from repo root):
   python3 .zcode/scripts/gh_board.py next-up                     — show the trajectory (Next Up 1→3)
+  python3 .zcode/scripts/gh_board.py pick-next                   — token for auto-impl watcher: BUSY | NONE | <issue>
   python3 .zcode/scripts/gh_board.py show N                      — read one card: status + queue position
   python3 .zcode/scripts/gh_board.py show all                    — the whole board as a table
   python3 .zcode/scripts/gh_board.py set-next-up N 1|2|3|none    — set/clear queue position
@@ -137,6 +138,26 @@ def cmd_next_up():
     print("Trajectory (Next Up):")
     for it in items:
         print(f"  {it['next_up']}. #{it['number']} [{it['status'] or 'no status'}] {it['title']}")
+
+
+def cmd_pick_next():
+    """Token protocol for .opencode/scripts/auto_impl_watch.sh (one line):
+    BUSY  — an open issue is already In IMPL, the pipeline is busy;
+    NONE  — no candidate (no Ready to IMPL card, and Next Up 1 is not Ready);
+    <number> — the issue the watcher should claim and run.
+    Order: Next Up 1 (if its status is Ready to IMPL) → else the first
+    Ready to IMPL card in board order."""
+    load_status_field()
+    items = [it for it in items_with_fields() if it["state"] == "OPEN"]
+    if any((it["status"] or "").lower() == "in impl" for it in items):
+        print("BUSY")
+        return
+    ready = [it for it in items if (it["status"] or "") == "Ready to IMPL"]
+    if not ready:
+        print("NONE")
+        return
+    nu1 = next((it for it in ready if it["next_up"] == "1"), None)
+    print(nu1["number"] if nu1 else ready[0]["number"])
 
 
 def cmd_show(arg: str):
@@ -274,6 +295,8 @@ if __name__ == "__main__":
     cmd = args[0]
     if cmd == "next-up":
         cmd_next_up()
+    elif cmd == "pick-next":
+        cmd_pick_next()
     elif cmd == "show" and len(args) == 2:
         cmd_show(args[1])
     elif cmd == "set-next-up" and len(args) == 3:

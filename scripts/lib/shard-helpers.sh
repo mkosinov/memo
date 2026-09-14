@@ -14,6 +14,37 @@
 
 CLEANUP_BUDGET_S=10
 
+# ── Внутренний хелпер: свип «порт + маска команды» ─────────────────────────
+# Использование: _sweep_masked PORTS_VAR PGPATTERN GATE1 [GATE2 ...]
+#   PORTS_VAR — имя глобала-массива портов (SHARD_FRONTEND_PORTS/...);
+#   PGPATTERN — pgrep -f шаблон кандидатов (номинация, не приговор);
+#   GATE*     — подстроки, хотя бы одна из которых должна быть в ps args.
+# Убийство только при конъюнкции: args содержит маску И pid держит порт из
+# списка. Голый lsof-килл без маски в уборщике запрещён (гонка с невиновным
+# займётом порта); держатели без порта и порты без маски не трогаются.
+# bash 3.2-совместимо: имя массива читается через eval-косвенность.
+_sweep_masked() {
+  local ports_var="$1" pgpat="$2"; shift 2
+  local pid args port
+  for pid in $(pgrep -f "$pgpat" 2>/dev/null || true); do
+    args="$(ps -p "$pid" -o args= 2>/dev/null || true)"
+    local matched=false gate
+    for gate in "$@"; do
+      case "$args" in
+        *"$gate"*) matched=true; break ;;
+      esac
+    done
+    [ "$matched" = true ] || continue
+    # Индирекция по имени: ports_var указывает на массив портов вызывающего.
+    for port in $(eval "printf '%s\n' \"\${${ports_var}[@]}\""); do
+      if lsof -ti :"$port" 2>/dev/null | grep -qx "$pid"; then
+        kill -9 "$pid" 2>/dev/null || true
+        break
+      fi
+    done
+  done
+}
+
 # ── Kill orphan processes from previous runs ───────────────────────────────
 # Previous pre-push runs may have left Next.js/uvicorn processes on shard
 # ports. Kill them to avoid EADDRINUSE and corrupted state.
@@ -35,10 +66,18 @@ kill_port_orphans() {
   # "next-server (vX)"), so match the parent chain and kill its children.
   # NEVER `pkill -f "next-server"` — it matches EVERY Next.js dev server,
   # including the dev stack on :3000/:3001 and unrelated host instances.
-  local pid
+  # ps-args gate: pkill -P fires only for PIDs whose args really contain the
+  # shard mask, so a stray pgrep match (e.g. an editor grep buffer) never
+  # gets its children murdered here.
+  local pid args
   for pid in $(pgrep -f "next dev -p 300[2-3]" 2>/dev/null || true); do
-    pkill -9 -P "$pid" 2>/dev/null || true   # forked next-server child
-    kill -9 "$pid" 2>/dev/null || true       # pnpm wrapper / next dev parent
+    args="$(ps -p "$pid" -o args= 2>/dev/null || true)"
+    case "$args" in
+      *"next dev -p 300"[2-3]*)
+        pkill -9 -P "$pid" 2>/dev/null || true   # forked next-server child
+        kill -9 "$pid" 2>/dev/null || true       # pnpm wrapper / next dev parent
+        ;;
+    esac
   done
   sleep 1
 }
@@ -118,42 +157,32 @@ cleanup_shards() {
 
   # Control sweep: port + command mask, never a bare port kill — if an
   # innocent process grabbed a shard port between our kills and the sweep,
-  # a bare `lsof`-kill would murder it. `pgrep -f` cannot AND patterns, so
-  # filtering by arguments is the second step (ps args check).
+  # a bare `lsof`-kill would murder it. Two-step match (pgrep -f cannot AND):
+  # pgrep only *nominates* candidates; the ps-args gate + port-hold check is
+  # the kill decision.
   #
-  # Frontends: candidates `next dev -p 300[2-3]` — catches the next-server
-  # grandchild holding the listening socket if its parent chain died on TERM.
-  # NEVER `pkill -f "next-server"` — it matches EVERY Next.js dev server,
-  # including the dev stack on :3000/:3001 and unrelated host instances.
-  for pid in $(pgrep -f "next dev -p 300[2-3]" 2>/dev/null || true); do
-    args="$(ps -p "$pid" -o args= 2>/dev/null || true)"
-    case "$args" in
-      *"next dev"*)
-        for port in "${SHARD_FRONTEND_PORTS[@]}"; do
-          if lsof -ti :"$port" 2>/dev/null | grep -qx "$pid"; then
-            kill -9 "$pid" 2>/dev/null || true
-            break
-          fi
-        done
-        ;;
-    esac
+  # Frontends: the socket-holding orphan grandchild rewrites its process
+  # title (`process.title = "next-server (vX)"`) BEFORE server.listen(), so
+  # its args contain NO "next dev" — the mask must also accept the title
+  # form. Candidates come from both pgrep patterns; the gate for the dev-form
+  # is derived from the port list (ps args contain `next dev -p <port>`),
+  # so it matches real argv and honours test-override ports. The port hold
+  # (lsof on a shard port) is the discriminator — a next-server holding NO
+  # shard port is never touched. NEVER `pkill -f "next-server"` — a blanket
+  # kill would take down every Next.js dev server, incl. :3000/:3001.
+  local fgate=()
+  for port in "${SHARD_FRONTEND_PORTS[@]}"; do
+    fgate+=("next dev -p $port")
   done
+  fgate+=("next-server (v")
+  _sweep_masked SHARD_FRONTEND_PORTS "next dev -p 300[2-3]" "${fgate[@]}"
+  _sweep_masked SHARD_FRONTEND_PORTS "next-server" "${fgate[@]}"
 
-  # Backends: candidates `uvicorn`, keep only shard ones (test DB name in
-  # args) that hold a shard backend port.
-  for pid in $(pgrep -f "uvicorn" 2>/dev/null || true); do
-    args="$(ps -p "$pid" -o args= 2>/dev/null || true)"
-    case "$args" in
-      *test_memo_shard*)
-        for port in "${SHARD_BACKEND_PORTS[@]}"; do
-          if lsof -ti :"$port" 2>/dev/null | grep -qx "$pid"; then
-            kill -9 "$pid" 2>/dev/null || true
-            break
-          fi
-        done
-        ;;
-    esac
-  done
+  # Backends: real shard backends run as `uv run uvicorn src.main:app ...`;
+  # the test DB name lives in DATABASE_URL env, not in argv — so argv cannot
+  # discriminate shard uvicorns from any other, and the port hold is the
+  # discriminator (shard backends listen on SHARD_BACKEND_PORTS only).
+  _sweep_masked SHARD_BACKEND_PORTS "uvicorn" "uvicorn"
 
   # Remove per-shard DB copies (master DB is kept)
   rm -f "$ROOT"/backend/test_memo_shard*.db

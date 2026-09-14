@@ -217,7 +217,7 @@ export function WeekView() {
           {hasFilters ? 'Нет занятий по выбранным фильтрам' : 'Нет занятий на эту неделю'}
         </div>
       )}
-        <DndContext
+      <DndContext
         sensors={sensors}
         collisionDetection={closestCenter}
         onDragStart={(event) => {

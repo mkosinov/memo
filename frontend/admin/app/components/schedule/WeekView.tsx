@@ -39,11 +39,15 @@ export function WeekView() {
   // Modal state
   const [modalOpen, setModalOpen] = useState(false);
   const [modalActivity, setModalActivity] = useState<ScheduleAdminDTO | null>(null);
-  const [modalMode, setModalMode] = useState<'edit' | 'quickAdd'>('edit');
+  const [modalMode, setModalMode] = useState<'edit' | 'quickAdd' | 'create'>('edit');
+  const [modalDayIndex, setModalDayIndex] = useState(0);
+  const [modalStartMinutes, setModalStartMinutes] = useState(0);
 
   const openCreateModal = useCallback((dayIndex: number, startMinutes: number) => {
+    setModalDayIndex(dayIndex);
+    setModalStartMinutes(startMinutes);
     setModalActivity(null);
-    setModalMode('edit');
+    setModalMode('create');
     setModalOpen(true);
   }, []);
 
@@ -326,12 +330,13 @@ export function WeekView() {
         ) : null}
       </DragOverlay>
 
-      {modalActivity && (
+      {modalOpen && (
         <ActivityDetailsModal
-          isOpen={modalOpen}
+          isOpen
           onClose={closeModal}
           activity={modalActivity}
           mode={modalMode}
+          createDefaults={{ dayIndex: modalDayIndex, startMinutes: modalStartMinutes }}
         />
       )}
     </DndContext>

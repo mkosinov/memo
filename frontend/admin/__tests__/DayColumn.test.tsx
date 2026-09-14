@@ -264,6 +264,27 @@ describe('DayColumn', () => {
     expect(onCreateActivity).toHaveBeenCalledWith(2, 540);
   });
 
+  it('calls onOpenCreateModal when stamp is not ready and an empty slot is clicked', () => {
+    const onOpenCreateModal = vi.fn();
+    render(
+      <DayColumn
+        dayIndex={2}
+        date={new Date()}
+        activities={[]}
+        masters={MOCK_MASTERS}
+        onOpenCreateModal={onOpenCreateModal}
+        stampReady={false}
+      />,
+    );
+
+    // Click on the first slot (9:00 → slotIndex 0 → slotMinutes 540)
+    const column = screen.getByTestId('day-column-2');
+    const slots = column.querySelectorAll('[data-slot-index]');
+    fireEvent.click(slots[0]);
+
+    expect(onOpenCreateModal).toHaveBeenCalledWith(2, 540);
+  });
+
   it('does not call onCreateActivity when clicking on a card', () => {
     const onCreateActivity = vi.fn();
     render(

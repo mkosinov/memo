@@ -107,11 +107,18 @@ describe('WeekView', () => {
     });
   });
 
-  describe('empty state', () => {
-    it('shows empty message when there are no activities', () => {
+  describe('empty week', () => {
+    it('renders grid with empty hint when there are no activities', () => {
       renderWeekView({ activities: [], loading: false, error: null });
-      expect(screen.getByText('Нет занятий на эту неделю')).toBeInTheDocument();
-      expect(screen.queryByTestId(/day-column/)).not.toBeInTheDocument();
+      expect(screen.getByTestId('schedule-empty-hint')).toHaveTextContent('Нет занятий на эту неделю');
+      for (let i = 0; i < 7; i++) {
+        expect(screen.getByTestId(`day-column-${i}`)).toBeInTheDocument();
+      }
+    });
+
+    it('shows filters hint when filters are active and there are no activities', () => {
+      renderWeekView({ activities: [], loading: false, error: null, filterMasterIds: ['x'] });
+      expect(screen.getByTestId('schedule-empty-hint')).toHaveTextContent('Нет занятий по выбранным фильтрам');
     });
   });
 

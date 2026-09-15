@@ -10,10 +10,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased] — 2026-09-15
 
 ### Changed
-- **GH #261 — «Сохраняем…»: индикатор сохранения в общем стеке тостов** — branch `feature/saving-toast-261`:
-  - Индикатор «Сохраняем…» перенесён из плашки в Topbar в общий стек тостов: новый вид тоста
-    `loading` (спиннер, без автоскрытия и кнопки закрытия, вне лимита «видимо 5»), один тост
-    на пачку мутаций расписания, снимается по завершении (успех и ошибка).
+- **GH #261 — «Сохраняем…»: индикатор сохранения в общем стеке тостов** — branch `feature/saving-toast-261` (9 commits: `ac7883ad..125f1df1`, base `6a337bba`; план T0–T5, 6/6 задач):
+  - **Вид `loading` (`ac7883ad`):** `UIContext` — `'loading'` в `ToastKind`: спиннер, без автоскрытия
+    (таймер заводится только для не-loading видов) и кнопки закрытия, вне лимита «видимо 5» (новое
+    D5a — loading-тосты всегда видимы и сохраняют хронологическое место, обычный стек не изменился);
+    `showToast` начинает возвращать id (раньше `void`; обратно совместимо — 40+ вызовов игнорируют
+    возврат, хуку нужен id для `hideToast`).
+  - **Рендер (`a0ed3deb`):** `ToastContainer` — явная `loading`-запись в `BORDER_BY_KIND` (как у
+    `info`), SVG-спиннер (перенесён из чипа Topbar) с `aria-hidden="true"` перед сообщением.
+  - **Хук (`253c4ee6`):** новый `hooks/useSavingToast.ts` — `useMutationState` по
+    `SCHEDULE_ACTIVITY_MUTATION_KEY`, один тост «Сохраняем…» на пачку мутаций расписания (id в ref,
+    снимается, когда in-flight счётчик вернулся к 0 — успех и ошибка), unmount-cleanup — единственная
+    страховка от «вечного» тоста (kill-таймер отклонён решением юзера); чип в Topbar удалён,
+    `isSaving` + `useUnsavedChangesGuard(isSaving)` сохранены — beforeunload-guard жив;
+    результатные тосты и локальная блокировка кнопки модалки создания (#258/#259) не тронуты.
+  - **TDD:** e2e RED до хука — `schedule-saving-toast.spec.ts` S1–S5 (попадает в shard-schedule через
+    `schedule*` testMatch) + хелпер `delayActivityMutations` (route-задержка мутаций `**/api/v1/activities*`,
+    GET пропускаются); все пять RED → GREEN.
+  - **Tests:** admin vitest **1815 passed / 0 failed** (121 файлов; `Topbar.saving-indicator.test.tsx`
+    удалён, юнит-сьют `useSavingToast` добавлен); `tsc` 0; e2e shard-schedule **104/104** (2 timing-флейка
+    зелёные на повторе, оба спека не относятся к путям #261), saving-toast **5/5**, visual week-view
+    **4/4** pixel-identical (17 прочих локальных расхождений — известное семейство env drift, CI
+    авторитетен).
+  - **Closes:** #261.
+  - Design spec: `docs/specs/2026-09-14-saving-toast-design.md` (on main)
+  - Plan: `docs/plans/2026-09-14-saving-toast-plan.md` (on main)
+  - Status: `docs/status/2026-09-15-saving-toast-261.md`
 
 ## [Unreleased] — 2026-09-14
 
